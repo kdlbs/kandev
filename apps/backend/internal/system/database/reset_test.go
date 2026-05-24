@@ -36,8 +36,6 @@ func TestFactoryReset_WrongConfirm_ReturnsError(t *testing.T) {
 func TestFactoryReset_Confirmed_RunsFullSequence(t *testing.T) {
 	svc, tracker, _, dataDir := newTestService(t)
 
-	var restartCalls atomic.Int32
-	svc.Restart = func() { restartCalls.Add(1) }
 	var shutdownCalls atomic.Int32
 	svc.OrchestratorShutdown = func() { shutdownCalls.Add(1) }
 
@@ -107,8 +105,10 @@ func TestFactoryReset_Confirmed_RunsFullSequence(t *testing.T) {
 		}
 	}
 
-	if restartCalls.Load() != 1 {
-		t.Errorf("Restart called %d times, want 1", restartCalls.Load())
+	// restart_required must be set so the frontend dialog prompts the user
+	// to quit and relaunch Kandev (no auto re-exec).
+	if got, _ := job.Result["restart_required"].(bool); !got {
+		t.Errorf("restart_required missing or false in job result: %+v", job.Result)
 	}
 	if shutdownCalls.Load() != 1 {
 		t.Errorf("OrchestratorShutdown called %d times, want 1", shutdownCalls.Load())
@@ -129,8 +129,8 @@ func TestHandleReset_WrongConfirm_Returns400(t *testing.T) {
 
 func TestHandleReset_Confirmed_Returns202WithJobID(t *testing.T) {
 	svc, tracker, _, _ := newTestService(t)
-	// Avoid the test process actually re-execing - install observable callbacks.
-	svc.Restart = func() {}
+	// FactoryReset no longer re-execs; just install a no-op shutdown so the
+	// orchestrator hook fires without side effects.
 	svc.OrchestratorShutdown = func() {}
 
 	gin.SetMode(gin.TestMode)

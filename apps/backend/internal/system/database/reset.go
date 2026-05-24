@@ -33,9 +33,10 @@ var ErrResetNotConfirmed = errors.New("factory reset requires confirm=\"RESET\""
 //  2. Snapshots the live DB to <dataDir>/backups/kandev-pre-reset-<unix>.db.
 //  3. Drops every user table from the SQLite schema (kandev_meta is kept).
 //  4. os.RemoveAll on worktrees/repos/sessions/tasks/quick-chat subdirs.
-//  5. Calls s.Restart (if set) to re-exec the process.
 //
-// The result map exposes {"snapshot_path", "tables_dropped"} on success.
+// On success the result map exposes {"snapshot_path", "tables_dropped",
+// "restart_required": true}. The frontend dialog uses restart_required to
+// prompt the user to quit and relaunch Kandev — no auto re-exec.
 func (s *Service) FactoryReset(ctx context.Context, confirm string) (string, error) {
 	if confirm != resetConfirmToken {
 		return "", ErrResetNotConfirmed
@@ -64,15 +65,13 @@ func (s *Service) runFactoryReset(_ context.Context) (map[string]interface{}, er
 		return nil, fmt.Errorf("wipe subdirs: %w", err)
 	}
 
-	if s.Restart != nil {
-		// Restart hands control to the new process; in tests the callback
-		// just records the invocation.
-		s.Restart()
-	}
-
+	// Intentionally no auto-restart. The frontend dialog reads
+	// restart_required from the job result and asks the user to quit and
+	// relaunch the app.
 	return map[string]interface{}{
-		"snapshot_path":  snapshotPath,
-		"tables_dropped": dropped,
+		"snapshot_path":    snapshotPath,
+		"tables_dropped":   dropped,
+		"restart_required": true,
 	}, nil
 }
 

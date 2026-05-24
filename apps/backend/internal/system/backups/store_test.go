@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -202,19 +201,14 @@ func TestCreate_ManualSurvivesPruneBackups(t *testing.T) {
 
 func TestRestore_WrongConfirmReturnsError(t *testing.T) {
 	svc, _ := newTestService(t)
-	var restartCalls atomic.Int32
-	svc.Restart = func() { restartCalls.Add(1) }
 
 	_, err := svc.Restore(context.Background(), "manual-1.db", "WRONG")
 	if err == nil {
 		t.Fatal("expected error for wrong confirm token")
 	}
-	if restartCalls.Load() != 0 {
-		t.Errorf("Restart should not have been called, got %d", restartCalls.Load())
-	}
 }
 
-func TestRestore_SuccessWritesThenCallsRestart(t *testing.T) {
+func TestRestore_SuccessStagesFileAndFlagsRestartRequired(t *testing.T) {
 	svc, dataDir := newTestService(t)
 	backupsDir := filepath.Join(dataDir, "backups")
 	if err := os.MkdirAll(backupsDir, 0o755); err != nil {
@@ -235,31 +229,25 @@ func TestRestore_SuccessWritesThenCallsRestart(t *testing.T) {
 		t.Fatal("no manual snapshot to restore")
 	}
 
-	var restartCalled atomic.Int32
-	var newDBExisted atomic.Int32
-	svc.Restart = func() {
-		// The new DB file should already be in place when Restart fires.
-		if _, err := os.Stat(filepath.Join(dataDir, "kandev.db.new")); err == nil {
-			newDBExisted.Add(1)
-		} else if _, err := os.Stat(filepath.Join(dataDir, "kandev.db")); err == nil {
-			// Some implementations swap before calling Restart; either is fine
-			// as long as Restart fires after the staged file write.
-			newDBExisted.Add(1)
-		}
-		restartCalled.Add(1)
-	}
-
 	jobID, err := svc.Restore(context.Background(), snapName, "RESTORE")
 	if err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 	waitForJob(t, svc.jobs, jobID, jobs.StateSucceeded)
 
-	if restartCalled.Load() != 1 {
-		t.Errorf("Restart called %d times, want 1", restartCalled.Load())
+	// The DB must be in place at the canonical path post-restore.
+	if _, err := os.Stat(filepath.Join(dataDir, "kandev.db")); err != nil {
+		t.Errorf("expected kandev.db at canonical path: %v", err)
 	}
-	if newDBExisted.Load() != 1 {
-		t.Errorf("snapshot copy not staged before Restart")
+
+	// The job result must flag restart_required=true so the frontend dialog
+	// knows to prompt the user to quit and relaunch.
+	job := svc.jobs.Get(jobID)
+	if job == nil {
+		t.Fatalf("job not found")
+	}
+	if got, _ := job.Result["restart_required"].(bool); !got {
+		t.Errorf("restart_required missing or false in job result: %+v", job.Result)
 	}
 }
 
@@ -291,18 +279,12 @@ func TestRestore_WriteFailurePreservesOriginal(t *testing.T) {
 	// Inject a failure in the staged-write step.
 	svc.failWritesForTest = true
 
-	var restartCalls atomic.Int32
-	svc.Restart = func() { restartCalls.Add(1) }
-
 	jobID, err := svc.Restore(context.Background(), snapName, "RESTORE")
 	if err != nil {
 		t.Fatalf("Restore submission: %v", err)
 	}
 	waitForJob(t, svc.jobs, jobID, jobs.StateFailed)
 
-	if restartCalls.Load() != 0 {
-		t.Errorf("Restart should NOT be called on failure, got %d", restartCalls.Load())
-	}
 	got, err := os.ReadFile(originalPath)
 	if err != nil {
 		t.Fatalf("read after fail: %v", err)

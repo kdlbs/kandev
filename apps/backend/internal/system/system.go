@@ -37,13 +37,12 @@ type BuildInfo struct {
 }
 
 // Wiring holds the runtime hooks the destructive endpoints need —
-// stopping the orchestrator before factory reset, requesting a
-// process re-exec after reset/restore. cmd/kandev fills these in
-// after constructing the orchestrator. nil hooks are tolerated and
-// simply skipped (useful in tests).
+// currently only OrchestratorShutdown, which stops in-flight agent
+// executions before factory reset wipes their backing data. The frontend
+// dialog prompts the user to relaunch after a successful reset/restore;
+// no in-process re-exec is performed.
 type Wiring struct {
 	OrchestratorShutdown func()
-	Restart              func()
 }
 
 // Service exposes the composed system sub-services. Each field is
@@ -77,10 +76,8 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 	}
 	dbSvc := database.NewService(pool, dataDir, resetDirs, tracker, log)
 	dbSvc.OrchestratorShutdown = wiring.OrchestratorShutdown
-	dbSvc.Restart = wiring.Restart
 
 	backupsSvc := backups.NewService(dataDir, pool, tracker, log)
-	backupsSvc.Restart = wiring.Restart
 
 	logDir := log.LogDirectory()
 	logFile := log.LogFilename()

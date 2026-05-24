@@ -49,9 +49,10 @@ type ResetDirs struct {
 
 // Service is the maintenance + stats facade for the System -> Database page.
 //
-// OrchestratorShutdown and Restart are wired by cmd/kandev; tests pass
-// no-op / observable callbacks. A nil callback is treated as a no-op so
-// individual handlers remain testable in isolation.
+// FactoryReset does not auto-restart the backend. The job result includes
+// restart_required=true; the frontend dialog reads it and asks the user to
+// quit and relaunch Kandev. The previous syscall.Exec approach was brittle
+// under desktop launchers and `make dev` watchers.
 type Service struct {
 	pool    *db.Pool
 	dataDir string
@@ -63,10 +64,6 @@ type Service struct {
 	// OrchestratorShutdown stops the orchestrator and active executions before
 	// the factory-reset job runs. Wired by cmd/kandev. Tests pass a no-op.
 	OrchestratorShutdown func()
-
-	// Restart re-execs the backend process after a factory reset. Wired by
-	// cmd/kandev (syscall.Exec); tests pass a callback that records the call.
-	Restart func()
 }
 
 // NewService constructs a Service. dataDir is the resolved kandev data

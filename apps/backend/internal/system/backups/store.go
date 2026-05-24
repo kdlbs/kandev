@@ -39,16 +39,17 @@ var ErrInvalidName = errors.New("invalid backup name")
 
 // Service owns access to the <data-dir>/backups directory and exposes the
 // list/create/restore/delete/download API.
+//
+// Restore intentionally does not attempt to re-exec the backend: the staged
+// DB file is written in place and the user is told (via the frontend dialog)
+// to quit and relaunch Kandev to load the restored data. The previous
+// syscall.Exec approach was brittle under desktop launchers and `make dev`
+// watchers, and left the web UI disconnected from a fresh backend.
 type Service struct {
 	dataDir string
 	pool    *db.Pool
 	jobs    *jobs.Tracker
 	log     *logger.Logger
-
-	// Restart is invoked after a successful Restore once the snapshot has
-	// been staged over kandev.db. cmd/kandev injects a callback that closes
-	// the active pool and re-execs the process.
-	Restart func()
 
 	// failWritesForTest, when true, causes Restore's staged-write step to
 	// fail before kandev.db is touched. Only set by tests.
@@ -171,10 +172,13 @@ func (s *Service) runRestore(_ context.Context, snapshotPath string) (map[string
 		_ = os.Remove(stagedPath)
 		return nil, fmt.Errorf("atomic rename failed: %w", err)
 	}
-	if s.Restart != nil {
-		s.Restart()
-	}
-	return map[string]interface{}{"restored_from": filepath.Base(snapshotPath)}, nil
+	// Intentionally no auto-restart. The frontend dialog reads
+	// restart_required from the job result and prompts the user to quit and
+	// relaunch the app so the new DB file is loaded fresh.
+	return map[string]interface{}{
+		"restored_from":    filepath.Base(snapshotPath),
+		"restart_required": true,
+	}, nil
 }
 
 // writeStagedRestore copies snapshotPath to stagedPath. Honors

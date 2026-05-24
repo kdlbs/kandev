@@ -611,7 +611,6 @@ func startGatewayAndServe(
 		BuildTime: BuildTime,
 	}, systemsvc.Wiring{
 		OrchestratorShutdown: func() { _ = orchestratorSvc.Stop() },
-		Restart:              func() { triggerProcessRestart(log) },
 	})
 	systemSvc.StartBackground(ctx)
 	gateways.RegisterSystemNotifications(ctx, eventBus, gateway.Hub, log)
@@ -1519,23 +1518,6 @@ func buildHTTPServer(
 		Handler:      router,
 		ReadTimeout:  cfg.Server.ReadTimeoutDuration(),
 		WriteTimeout: cfg.Server.WriteTimeoutDuration(),
-	}
-}
-
-// triggerProcessRestart re-execs the current process so all in-memory caches
-// are cleared after destructive operations (factory reset, snapshot restore).
-// Logs and best-effort exits non-zero if exec fails; under a supervisor the
-// process will be restarted regardless.
-func triggerProcessRestart(log *logger.Logger) {
-	log.Info("System restart requested - re-execing process")
-	exe, err := os.Executable()
-	if err != nil {
-		log.Error("failed to resolve executable for restart", zap.Error(err))
-		os.Exit(1)
-	}
-	if err := syscall.Exec(exe, os.Args, os.Environ()); err != nil {
-		log.Error("syscall.Exec failed during restart", zap.Error(err))
-		os.Exit(1)
 	}
 }
 
