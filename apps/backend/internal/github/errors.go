@@ -7,7 +7,7 @@ import "errors"
 // into a 400 instead of a generic 500.
 var ErrInvalidPRURL = errors.New("invalid PR URL")
 
-// ErrTaskNotFound is the sentinel cleanup paths check for to distinguish
+// ErrTaskNotFound is the sentinel that cleanup paths check to distinguish
 // "the task is already gone — fine, mop up the dedup row" from a real
 // upstream failure. Adapter implementations of TaskDeleter wrap this when
 // the task domain reports a missing row so the github layer can recognize

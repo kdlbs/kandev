@@ -473,7 +473,10 @@ func (h *MessageHandlers) createPromptErrorMessage(ctx context.Context, taskID, 
 		zap.Error(promptErr))
 
 	errorMsg := "Failed to send message to agent"
-	if errors.Is(promptErr, context.DeadlineExceeded) || isTimeoutError(promptErr) {
+	if isTimeoutError(promptErr) {
+		// isTimeoutError already covers context.DeadlineExceeded (which
+		// implements Timeout()==true) and the substring fallback for plain
+		// "timeout …" producers — no separate errors.Is needed here.
 		errorMsg = "Request timed out. The agent may be processing a complex task. Please try again."
 	} else if errors.Is(promptErr, executor.ErrExecutionNotFound) {
 		errorMsg = "Agent is not running. Please restart the session."
