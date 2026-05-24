@@ -49,67 +49,21 @@ export function TerminalReopenMenuItems({
   const removeUserShellStore = useAppStore((s) => s.removeUserShell);
   const api = useDockviewStore((s) => s.api);
   const addTerminalPanel = useDockviewStore((s) => s.addTerminalPanel);
-
-  const handleDestroyRow = useCallback(
-    async (event: React.MouseEvent, terminalId: string, seq: number | undefined) => {
-      // Stop the parent DropdownMenuItem from firing its "reopen" onClick
-      // and from closing the menu. preventDefault also blocks Radix's
-      // default item-select behavior.
-      event.preventDefault();
-      event.stopPropagation();
-      if (!environmentId) return;
-      const label = seq != null ? `terminal #${seq}` : "this terminal";
-      if (!window.confirm(`Terminate ${label}? This kills the running PTY.`)) return;
-      // Optimistically close + drop the row so the onDidRemovePanel
-      // cleanup sees no shell and skips trying to park the terminal we
-      // just asked to hard-destroy.
-      removeUserShellStore(environmentId, terminalId);
-      if (api) findExistingTerminalPanel(api, terminalId)?.api.close();
-      try {
-        await destroyUserShell(environmentId, terminalId, taskID ?? undefined);
-      } catch (error) {
-        console.error("terminate terminal from reopen menu:", error);
-      }
-    },
-    [api, environmentId, taskID, removeUserShellStore],
-  );
-
   const ordinary = shells.filter((s) => s.kind === "ordinary");
-
-  const handleClick = useCallback(
-    async (terminalId: string, state: string | undefined, displayName: string | undefined) => {
-      if (!api) return;
-      // The default panel keeps its registry id `terminal-default` even
-      // after migration to a `shell-<uuid>` PTY, so a direct id lookup
-      // misses it. Fall back to scanning `params.terminalId` so we focus
-      // the existing tab instead of duplicating it.
-      const existing = findExistingTerminalPanel(api, terminalId);
-      if (existing) {
-        existing.api.setActive();
-        return;
-      }
-      // Parked → resume to bring the row back to "open" before mounting
-      // the dockview panel. The PTY survives parking, so this just
-      // toggles the metadata flag and re-attaches the UI.
-      if (state === "parked" && environmentId) {
-        try {
-          await resumeUserShell(terminalId, taskID ?? undefined);
-          updateUserShell(environmentId, terminalId, { state: "open" });
-        } catch (error) {
-          console.error("resume terminal:", error);
-          return;
-        }
-      }
-      addTerminalPanel(
-        terminalId,
-        groupId,
-        environmentId ?? undefined,
-        taskID ?? undefined,
-        displayName,
-      );
-    },
-    [api, addTerminalPanel, environmentId, taskID, updateUserShell, groupId],
-  );
+  const handleDestroyRow = useDestroyTerminalRow({
+    api,
+    environmentId,
+    taskID,
+    removeUserShellStore,
+  });
+  const handleClick = useOpenTerminalPanel({
+    api,
+    addTerminalPanel,
+    environmentId,
+    taskID,
+    groupId,
+    updateUserShell,
+  });
 
   // Show the section header + the New Terminal row whenever onNewTerminal
   // is supplied, even if no ordinary terminals exist yet. This puts the
@@ -142,6 +96,95 @@ export function TerminalReopenMenuItems({
         ))}
       <DropdownMenuSeparator />
     </>
+  );
+}
+
+type DestroyTerminalRowOptions = {
+  api: DockviewApi | null;
+  environmentId: string | null;
+  taskID: string | null;
+  removeUserShellStore: (environmentId: string, terminalId: string) => void;
+};
+
+function useDestroyTerminalRow({
+  api,
+  environmentId,
+  taskID,
+  removeUserShellStore,
+}: DestroyTerminalRowOptions) {
+  return useCallback(
+    async (event: React.MouseEvent, terminalId: string, seq: number | undefined) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!environmentId) return;
+      const label = seq != null ? `terminal #${seq}` : "this terminal";
+      if (!window.confirm(`Terminate ${label}? This kills the running PTY.`)) return;
+
+      const existing = api ? findExistingTerminalPanel(api, terminalId) : null;
+      removeUserShellStore(environmentId, terminalId);
+      if (existing) {
+        existing.api.close();
+        return;
+      }
+      try {
+        await destroyUserShell(environmentId, terminalId, taskID ?? undefined);
+      } catch (error) {
+        console.error("terminate terminal from reopen menu:", error);
+      }
+    },
+    [api, environmentId, taskID, removeUserShellStore],
+  );
+}
+
+type OpenTerminalPanelOptions = {
+  api: DockviewApi | null;
+  addTerminalPanel: (
+    terminalId?: string,
+    groupId?: string,
+    environmentId?: string,
+    taskID?: string,
+    title?: string,
+  ) => void;
+  environmentId: string | null;
+  taskID: string | null;
+  groupId: string;
+  updateUserShell: (environmentId: string, terminalId: string, patch: { state: "open" }) => void;
+};
+
+function useOpenTerminalPanel({
+  api,
+  addTerminalPanel,
+  environmentId,
+  taskID,
+  groupId,
+  updateUserShell,
+}: OpenTerminalPanelOptions) {
+  return useCallback(
+    async (terminalId: string, state: string | undefined, displayName: string | undefined) => {
+      if (!api) return;
+      const existing = findExistingTerminalPanel(api, terminalId);
+      if (existing) {
+        existing.api.setActive();
+        return;
+      }
+      if (state === "parked" && environmentId) {
+        try {
+          await resumeUserShell(terminalId, taskID ?? undefined);
+          updateUserShell(environmentId, terminalId, { state: "open" });
+        } catch (error) {
+          console.error("resume terminal:", error);
+          return;
+        }
+      }
+      addTerminalPanel(
+        terminalId,
+        groupId,
+        environmentId ?? undefined,
+        taskID ?? undefined,
+        displayName,
+      );
+    },
+    [api, addTerminalPanel, environmentId, taskID, updateUserShell, groupId],
   );
 }
 

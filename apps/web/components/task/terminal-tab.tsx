@@ -10,7 +10,7 @@ import {
   ContextMenuTrigger,
 } from "@kandev/ui/context-menu";
 import { useAppStore } from "@/components/state-provider";
-import { destroyUserShell, renameUserShell } from "@/lib/api/domains/user-shell-api";
+import { renameUserShell } from "@/lib/api/domains/user-shell-api";
 
 /**
  * Custom dockview tab for terminal panels.
@@ -124,7 +124,6 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
       </ContextMenuTrigger>
       <TerminalTabMenu
         terminalId={terminalId}
-        taskID={taskID}
         environmentId={stampedEnv ?? null}
         canMutate={isOrdinary}
         onStartRename={() => setIsRenaming(true)}
@@ -252,14 +251,12 @@ function TerminalTabRenameInput({
 
 function TerminalTabMenu({
   terminalId,
-  taskID,
   environmentId,
   canMutate,
   onStartRename,
   onClosePanel,
 }: {
   terminalId: string;
-  taskID: string | null;
   environmentId: string | null;
   canMutate: boolean;
   onStartRename: () => void;
@@ -267,20 +264,13 @@ function TerminalTabMenu({
 }) {
   const removeUserShellStore = useAppStore((s) => s.removeUserShell);
 
-  const handleTerminate = useCallback(async () => {
+  const handleTerminate = useCallback(() => {
     if (!environmentId) return;
     // Remove from store FIRST so the dockview onDidRemovePanel cleanup
-    // sees no shell record and skips the park-on-close path — we want a
-    // hard destroy, not a park. Then close the panel synchronously, then
-    // fire-and-forget the WS destroy.
+    // sees no shell record and chooses the legacy destroy path, not park.
     removeUserShellStore(environmentId, terminalId);
     onClosePanel();
-    try {
-      await destroyUserShell(environmentId, terminalId, taskID ?? undefined);
-    } catch (error) {
-      console.error("terminate terminal:", error);
-    }
-  }, [environmentId, terminalId, taskID, removeUserShellStore, onClosePanel]);
+  }, [environmentId, terminalId, removeUserShellStore, onClosePanel]);
 
   return (
     <ContextMenuContent>

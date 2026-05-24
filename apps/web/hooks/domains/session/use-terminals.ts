@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useState, useCallback, useRef, useMemo } from "react";
+import { useEffect, useLayoutEffect, useState, useCallback, useRef } from "react";
 import { getSessionStorage } from "@/lib/local-storage";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { stopProcess } from "@/lib/api";
@@ -13,9 +13,9 @@ import {
 } from "@/lib/api/domains/user-shell-api";
 import { useUserShells } from "./use-user-shells";
 import {
+  buildParkedTerminals,
   buildTerminalsFromShells,
   computeTerminalTabValue,
-  shellToTerminal,
   syncDevTerminal,
 } from "./use-terminals-build";
 import type { Terminal, TerminalType } from "./use-terminals-types";
@@ -567,10 +567,7 @@ export function useTerminals({
     setPreviewStage,
   });
 
-  const parkedTerminals = useMemo<Terminal[]>(() => {
-    if (!userShellsLoaded) return [];
-    return userShells.filter((s) => s.state === "parked").map(shellToTerminal);
-  }, [userShells, userShellsLoaded]);
+  const parkedTerminals = buildParkedTerminals(userShells, userShellsLoaded);
 
   const savedTabFromStorage = sessionId
     ? getSessionStorage<string | null>(`rightPanel-tab-${sessionId}`, null)

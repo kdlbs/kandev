@@ -93,6 +93,14 @@ export function buildTerminalsFromShells(
   return result;
 }
 
+export function buildParkedTerminals(
+  userShells: UserShellInfo[],
+  userShellsLoaded: boolean,
+): Terminal[] {
+  if (!userShellsLoaded) return [];
+  return userShells.filter((s) => s.state === "parked").map(shellToTerminal);
+}
+
 /** Sync the dev-server terminal with preview open state. */
 export function syncDevTerminal(prev: Terminal[], previewOpen: boolean): Terminal[] {
   const hasDevTerminal = prev.some((t) => t.type === TERMINAL_TYPE_DEV_SERVER);
