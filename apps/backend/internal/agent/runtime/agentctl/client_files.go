@@ -9,6 +9,7 @@ import (
 	"net/url"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/worktree/copyfiles"
 	"go.uber.org/zap"
 )
 
@@ -327,4 +328,57 @@ func (c *Client) RenameFile(ctx context.Context, oldPath, newPath, repo string) 
 type FileSearchResponse struct {
 	Files []string `json:"files"`
 	Error string   `json:"error,omitempty"`
+}
+
+// CopyFilesRequest is the body for POST /workspace/copy-files. Mirrors the
+// agentctl-side api.CopyFilesRequest shape — kept local rather than imported
+// to keep the client free of the api package dependency.
+type CopyFilesRequest struct {
+	Repo    string            `json:"repo,omitempty"`
+	Entries []copyfiles.Entry `json:"entries"`
+}
+
+// CopyFilesResponse mirrors api.CopyFilesResponse.
+type CopyFilesResponse struct {
+	Copied   []string `json:"copied,omitempty"`
+	Warnings []string `json:"warnings,omitempty"`
+	Error    string   `json:"error,omitempty"`
+}
+
+// CopyFiles ships a batch of pre-planned files (from copyfiles.Plan on the
+// host) to agentctl's POST /workspace/copy-files endpoint, which writes
+// them into the workspace under the optional repo subpath. Idempotent —
+// existing destinations are skipped. Used by remote executors (Docker,
+// Sprites) to seed gitignored files after the in-container clone.
+func (c *Client) CopyFiles(ctx context.Context, repo string, entries []copyfiles.Entry) (*CopyFilesResponse, error) {
+	bodyBytes, err := json.Marshal(CopyFilesRequest{Repo: repo, Entries: entries})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	reqURL := fmt.Sprintf("%s/api/v1/workspace/copy-files", c.baseURL)
+	req, err := http.NewRequestWithContext(ctx, "POST", reqURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to copy files: %w", err)
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			c.logger.Debug("failed to close copy-files response body", zap.Error(err))
+		}
+	}()
+
+	var response CopyFilesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+	if response.Error != "" {
+		return &response, fmt.Errorf("copy-files error: %s", response.Error)
+	}
+	return &response, nil
 }

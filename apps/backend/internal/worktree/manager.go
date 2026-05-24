@@ -397,7 +397,7 @@ func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRe
 		return nil, err
 	}
 
-	m.copyConfiguredFiles(ctx, req, worktreePath)
+	m.copyConfiguredFiles(ctx, req, wt)
 
 	if err := m.runWorktreeSetupScript(ctx, wt, req.RepositoryPath); err != nil {
 		return nil, err
@@ -1132,9 +1132,11 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 }
 
 // copyConfiguredFiles copies user-specified files from the source repo into
-// the freshly created worktree. Failures are logged but never propagated —
-// worktree creation must succeed even if file seeding partially fails.
-func (m *Manager) copyConfiguredFiles(ctx context.Context, req CreateRequest, worktreePath string) {
+// the freshly created worktree, recording the resulting file list and
+// warnings on wt for the env preparer to surface. Failures are logged but
+// never propagated — worktree creation must succeed even if file seeding
+// partially fails.
+func (m *Manager) copyConfiguredFiles(ctx context.Context, req CreateRequest, wt *Worktree) {
 	if m.repoProvider == nil || req.RepositoryID == "" {
 		return
 	}
@@ -1152,7 +1154,7 @@ func (m *Manager) copyConfiguredFiles(ctx context.Context, req CreateRequest, wo
 	if len(patterns) == 0 {
 		return
 	}
-	warnings, err := copyfiles.Copy(ctx, req.RepositoryPath, worktreePath, patterns, m.logger.Zap())
+	copied, warnings, err := copyfiles.Copy(ctx, req.RepositoryPath, wt.Path, patterns, m.logger.Zap())
 	if err != nil {
 		m.logger.Warn("worktree copy-files failed",
 			zap.String("session_id", req.SessionID),
@@ -1162,9 +1164,11 @@ func (m *Manager) copyConfiguredFiles(ctx context.Context, req CreateRequest, wo
 	for _, w := range warnings {
 		m.logger.Warn("worktree copy-files warning",
 			zap.String("repo_id", req.RepositoryID),
-			zap.String("path", worktreePath),
+			zap.String("path", wt.Path),
 			zap.String("warning", w))
 	}
+	wt.CopiedFiles = copied
+	wt.CopyFilesWarnings = warnings
 }
 
 func (m *Manager) runWorktreeSetupScript(ctx context.Context, wt *Worktree, repositoryPath string) error {

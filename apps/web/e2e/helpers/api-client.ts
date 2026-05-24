@@ -427,7 +427,12 @@ export class ApiClient {
 
   async updateRepository(
     repositoryId: string,
-    updates: { dev_script?: string; setup_script?: string; cleanup_script?: string },
+    updates: {
+      dev_script?: string;
+      setup_script?: string;
+      cleanup_script?: string;
+      copy_files?: string;
+    },
   ): Promise<void> {
     await this.request("PATCH", `/api/v1/repositories/${repositoryId}`, updates);
   }

@@ -83,6 +83,18 @@ type Worktree struct {
 	// describing why the original branch was not used. Surfaced as collapsible
 	// detail alongside BaseBranchFallbackWarning.
 	BaseBranchFallbackDetail string `json:"base_branch_fallback_detail,omitempty"`
+
+	// CopiedFiles lists the relative paths of files copied from the source
+	// repo into this worktree per the repository's CopyFiles spec. Populated
+	// only on the in-memory record returned by Create — not persisted, since
+	// it describes a one-shot launch action rather than worktree state. The
+	// env preparer reads it to surface a "Copy ignored files" prepare step.
+	CopiedFiles []string `json:"-"`
+
+	// CopyFilesWarnings lists non-fatal warnings emitted while copying files
+	// (e.g. missing patterns, traversal-rejected paths). Like CopiedFiles,
+	// this is in-memory only and read by the env preparer.
+	CopyFilesWarnings []string `json:"-"`
 }
 
 // CreateRequest contains the parameters for creating a new worktree.

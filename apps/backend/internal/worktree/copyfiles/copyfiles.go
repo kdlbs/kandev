@@ -3,6 +3,16 @@
 // preserving relative paths. It is designed for the worktree feature that
 // seeds a new worktree with environment / config files that are normally
 // gitignored.
+//
+// Two entry points:
+//
+//   - Copy: host-side, streams files directly to disk. Used by the worktree
+//     preparer when source and target both live on the host filesystem.
+//   - Plan + WriteEntries: split for remote executors. Plan reads source
+//     bytes into memory (with a per-file size cap); WriteEntries writes a
+//     pre-loaded batch into a target directory. The agentctl HTTP path
+//     ships Plan output across the wire and calls WriteEntries on the
+//     receiving side.
 package copyfiles
 
 import (
@@ -16,6 +26,22 @@ import (
 
 	"go.uber.org/zap"
 )
+
+// MaxEntryBytes caps the in-memory payload for a single planned entry. A
+// stray pattern like `node_modules` would otherwise pull gigabytes into RAM
+// and across the agentctl wire. Tuned to comfortably hold reasonable
+// .env / config / certificate files while rejecting an accidental
+// directory-of-binaries.
+const MaxEntryBytes int64 = 5 * 1024 * 1024
+
+// Entry is a single file ready to be written into a target directory.
+// RelPath uses forward slashes regardless of host OS — agentctl converts
+// per-platform on write.
+type Entry struct {
+	RelPath string      `json:"rel_path"`
+	Mode    os.FileMode `json:"mode"`
+	Content []byte      `json:"content"`
+}
 
 // Parse splits a comma-separated user spec into trimmed, deduplicated,
 // non-empty patterns. Order is preserved (first occurrence wins on dedupe).
@@ -44,20 +70,21 @@ func Parse(spec string) []string {
 }
 
 // Copy resolves each pattern relative to sourceDir and copies matches into
-// targetDir, preserving relative paths. It returns one warning per problematic
-// pattern or rejected match, and an error only for IO failures that would
-// corrupt the target.
-func Copy(ctx context.Context, sourceDir, targetDir string, patterns []string, log *zap.Logger) ([]string, error) {
+// targetDir, preserving relative paths. It returns the relative paths of
+// files newly written into targetDir (skip-if-exists matches are NOT
+// included), one warning per problematic pattern or rejected match, and an
+// error only for IO failures that would corrupt the target.
+func Copy(ctx context.Context, sourceDir, targetDir string, patterns []string, log *zap.Logger) ([]string, []string, error) {
 	if len(patterns) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("copyfiles: %w", err)
+		return nil, nil, fmt.Errorf("copyfiles: %w", err)
 	}
 
 	canonRoot, err := filepath.EvalSymlinks(sourceDir)
 	if err != nil {
-		return nil, fmt.Errorf("copyfiles: resolve source: %w", err)
+		return nil, nil, fmt.Errorf("copyfiles: resolve source: %w", err)
 	}
 
 	state := &copyState{
@@ -70,13 +97,13 @@ func Copy(ctx context.Context, sourceDir, targetDir string, patterns []string, l
 
 	for _, pattern := range patterns {
 		if err := ctx.Err(); err != nil {
-			return state.warnings, fmt.Errorf("copyfiles: %w", err)
+			return state.copiedRel, state.warnings, fmt.Errorf("copyfiles: %w", err)
 		}
 		if err := state.expandPattern(pattern); err != nil {
-			return state.warnings, err
+			return state.copiedRel, state.warnings, err
 		}
 	}
-	return state.warnings, nil
+	return state.copiedRel, state.warnings, nil
 }
 
 type copyState struct {
@@ -85,7 +112,142 @@ type copyState struct {
 	canonRoot string
 	log       *zap.Logger
 	copied    map[string]struct{}
+	copiedRel []string
 	warnings  []string
+
+	// planMode collects file payloads into entries instead of writing to
+	// targetDir. Set by Plan(). When true, copyFile reads bytes into memory
+	// (respecting MaxEntryBytes) and appends to entries rather than touching
+	// the filesystem.
+	planMode bool
+	entries  []Entry
+}
+
+// Plan resolves each pattern relative to sourceDir and reads every match
+// into memory as an Entry — without touching any target filesystem. It is
+// the read half of a remote copy: the agentctl HTTP client ships the
+// returned entries across the wire, and WriteEntries writes them on the
+// receiving side. Files larger than MaxEntryBytes emit a warning and are
+// skipped to keep launch payloads bounded.
+//
+// Returned entries preserve forward-slash relative paths; consumers must
+// not assume host-native separators.
+func Plan(ctx context.Context, sourceDir string, patterns []string, log *zap.Logger) ([]Entry, []string, error) {
+	if len(patterns) == 0 {
+		return nil, nil, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, nil, fmt.Errorf("copyfiles: %w", err)
+	}
+
+	canonRoot, err := filepath.EvalSymlinks(sourceDir)
+	if err != nil {
+		return nil, nil, fmt.Errorf("copyfiles: resolve source: %w", err)
+	}
+
+	state := &copyState{
+		ctx:       ctx,
+		canonRoot: canonRoot,
+		log:       log,
+		copied:    make(map[string]struct{}),
+		planMode:  true,
+	}
+
+	for _, pattern := range patterns {
+		if err := ctx.Err(); err != nil {
+			return state.entries, state.warnings, fmt.Errorf("copyfiles: %w", err)
+		}
+		if err := state.expandPattern(pattern); err != nil {
+			return state.entries, state.warnings, err
+		}
+	}
+	return state.entries, state.warnings, nil
+}
+
+// WriteEntries writes a pre-planned batch into targetDir, preserving
+// relative paths and file modes. Idempotent: entries whose destination
+// already exists are silently skipped (matches Copy's resume semantics).
+// Returns the list of newly-written relative paths plus per-entry
+// warnings; an error only for IO failures that would corrupt the target.
+//
+// Per-entry RelPath is treated as user-controlled — each is rejected
+// unless it canonicalizes to a path strictly inside targetDir. This is
+// the agentctl-side guard: the planner already validates against the
+// source root, but a compromised sender could craft paths that escape
+// the target.
+func WriteEntries(ctx context.Context, targetDir string, entries []Entry, log *zap.Logger) ([]string, []string, error) {
+	if len(entries) == 0 {
+		return nil, nil, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, nil, fmt.Errorf("copyfiles: %w", err)
+	}
+	absTarget, err := filepath.Abs(targetDir)
+	if err != nil {
+		return nil, nil, fmt.Errorf("copyfiles: resolve target: %w", err)
+	}
+	if info, statErr := os.Stat(absTarget); statErr != nil || !info.IsDir() {
+		return nil, nil, fmt.Errorf("copyfiles: target %q is not a directory", absTarget)
+	}
+
+	var copied, warnings []string
+	for _, e := range entries {
+		if err := ctx.Err(); err != nil {
+			return copied, warnings, fmt.Errorf("copyfiles: %w", err)
+		}
+		written, warn, err := writeOneEntry(absTarget, e, log)
+		if warn != "" {
+			warnings = append(warnings, warn)
+		}
+		if err != nil {
+			return copied, warnings, err
+		}
+		if written {
+			copied = append(copied, filepath.ToSlash(e.RelPath))
+		}
+	}
+	return copied, warnings, nil
+}
+
+// writeOneEntry validates a single Entry, refusing paths that escape
+// targetDir, then writes it (skip-if-exists for idempotency).
+func writeOneEntry(absTarget string, e Entry, log *zap.Logger) (written bool, warning string, err error) {
+	rel := filepath.FromSlash(e.RelPath)
+	if rel == "" {
+		return false, "rejected empty path", nil
+	}
+	if filepath.IsAbs(rel) {
+		return false, fmt.Sprintf("rejected absolute path %q", e.RelPath), nil
+	}
+	dst := filepath.Join(absTarget, rel)
+	cleanDst, err := filepath.Abs(dst)
+	if err != nil {
+		return false, fmt.Sprintf("rejected %q: %v", e.RelPath, err), nil
+	}
+	relCheck, err := filepath.Rel(absTarget, cleanDst)
+	if err != nil || relCheck == ".." || strings.HasPrefix(relCheck, ".."+string(filepath.Separator)) {
+		return false, fmt.Sprintf("rejected %q: escapes target", e.RelPath), nil
+	}
+	if _, err := os.Lstat(cleanDst); err == nil {
+		if log != nil {
+			log.Debug("copyfiles: skip existing", zap.String("rel", e.RelPath))
+		}
+		return false, "", nil
+	}
+	if err := os.MkdirAll(filepath.Dir(cleanDst), 0o755); err != nil {
+		return false, "", fmt.Errorf("copyfiles: mkdir %s: %w", filepath.Dir(cleanDst), err)
+	}
+	mode := e.Mode.Perm()
+	if mode == 0 {
+		mode = 0o644
+	}
+	if err := os.WriteFile(cleanDst, e.Content, mode); err != nil {
+		return false, "", fmt.Errorf("copyfiles: write %s: %w", cleanDst, err)
+	}
+	if log != nil {
+		log.Debug("copyfiles: wrote entry", zap.String("rel", e.RelPath))
+	}
+	return true, "", nil
 }
 
 func (s *copyState) warn(format string, args ...any) {
@@ -229,6 +391,8 @@ func (s *copyState) copyDir(src, relRoot string) error {
 }
 
 // copyFile copies a single regular file to targetDir/rel, creating parents.
+// In planMode it instead reads the file's bytes into an Entry (subject to
+// MaxEntryBytes), used by Plan() for the remote-executor path.
 func (s *copyState) copyFile(src, rel string, info os.FileInfo) error {
 	if err := s.ctx.Err(); err != nil {
 		return fmt.Errorf("copyfiles: %w", err)
@@ -236,6 +400,9 @@ func (s *copyState) copyFile(src, rel string, info os.FileInfo) error {
 	if !info.Mode().IsRegular() {
 		s.warn("skipping non-regular file %q (mode %s)", rel, info.Mode())
 		return nil
+	}
+	if s.planMode {
+		return s.planFile(src, rel, info)
 	}
 	dst := filepath.Join(s.targetDir, rel)
 	if _, dup := s.copied[dst]; dup {
@@ -278,7 +445,49 @@ func (s *copyState) copyFile(src, rel string, info os.FileInfo) error {
 	}
 
 	s.copied[dst] = struct{}{}
+	s.copiedRel = append(s.copiedRel, filepath.ToSlash(rel))
 	s.debug("copied", zap.String("rel", rel))
+	return nil
+}
+
+// planFile reads a source file into an in-memory Entry instead of writing
+// it. Files larger than MaxEntryBytes are skipped with a warning; users
+// who hit this are typically pattern-matching too broadly (e.g. catching
+// node_modules) and want feedback, not a silent partial copy.
+func (s *copyState) planFile(src, rel string, info os.FileInfo) error {
+	dedup := filepath.ToSlash(rel)
+	if _, dup := s.copied[dedup]; dup {
+		return nil
+	}
+	if info.Size() > MaxEntryBytes {
+		s.warn("skipping %q: %d bytes exceeds %d-byte plan cap", rel, info.Size(), MaxEntryBytes)
+		return nil
+	}
+	f, err := os.Open(src)
+	if err != nil {
+		s.warn("open %q: %v", src, err)
+		return nil
+	}
+	defer func() { _ = f.Close() }()
+	// LimitReader as belt-and-suspenders against TOCTOU growth between Stat
+	// and Read — a file appended-to mid-walk shouldn't bypass MaxEntryBytes.
+	content, err := io.ReadAll(io.LimitReader(f, MaxEntryBytes+1))
+	if err != nil {
+		s.warn("read %q: %v", src, err)
+		return nil
+	}
+	if int64(len(content)) > MaxEntryBytes {
+		s.warn("skipping %q: read exceeded %d-byte plan cap", rel, MaxEntryBytes)
+		return nil
+	}
+	s.copied[dedup] = struct{}{}
+	s.entries = append(s.entries, Entry{
+		RelPath: filepath.ToSlash(rel),
+		Mode:    info.Mode().Perm(),
+		Content: content,
+	})
+	s.copiedRel = append(s.copiedRel, filepath.ToSlash(rel))
+	s.debug("planned", zap.String("rel", rel))
 	return nil
 }
 

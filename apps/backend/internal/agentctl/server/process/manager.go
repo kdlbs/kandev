@@ -464,6 +464,22 @@ func (m *Manager) resolveSubpath(subpath string) (string, string, error) {
 	return cleaned, full, nil
 }
 
+// WorkDir returns the absolute workspace root for this agentctl instance.
+// Handlers that bypass WorkspaceTracker (e.g. the batched copy-files endpoint
+// that writes into a per-repo subdir directly) need the resolved root.
+func (m *Manager) WorkDir() string {
+	return m.cfg.WorkDir
+}
+
+// ResolveRepoSubdir returns the absolute filesystem directory for an
+// optional repo subpath under the workspace. Same validation as the
+// internal resolveSubpath helper (rejects traversal, requires existence).
+// Empty subpath returns the workspace root.
+func (m *Manager) ResolveRepoSubdir(subpath string) (string, error) {
+	_, full, err := m.resolveSubpath(subpath)
+	return full, err
+}
+
 // JoinRepoPath validates a repo subpath and returns the workspace-relative
 // path obtained by joining `subpath` and `path`. Empty `subpath` returns
 // `path` unchanged (single-repo workspaces). Used by file content / update

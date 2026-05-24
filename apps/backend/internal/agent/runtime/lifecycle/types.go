@@ -307,6 +307,7 @@ type RepoLaunchSpec struct {
 	PullBeforeWorktree   bool
 	RepoSetupScript      string // Repository-level setup script (optional)
 	RepoCleanupScript    string // Repository-level cleanup script (optional)
+	CopyFiles            string // Comma-separated paths/globs to copy from the source repo (gitignored .env / config files)
 }
 
 // RouteOverride carries a fully resolved provider profile for one
@@ -361,6 +362,13 @@ type LaunchRequest struct {
 	// Environment preparation
 	SetupScript string // Setup script to run before agent starts
 
+	// CopyFiles is the per-repository copy_files spec resolved from
+	// Repository.CopyFiles by the orchestrator. For worktree executors the
+	// worktree.Manager applies it host-side during Create. For remote
+	// executors (Docker, Sprites) the launch path ships the bytes via
+	// agentctl after CreateInstance. Empty disables the feature.
+	CopyFiles string
+
 	// Worktree configuration
 	UseWorktree          bool   // Whether to use a Git worktree for isolation
 	WorktreeID           string // Existing worktree ID to reuse (skip creation if set)
@@ -406,6 +414,7 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 		WorktreeID:           r.WorktreeID,
 		WorktreeBranchPrefix: r.WorktreeBranchPrefix,
 		PullBeforeWorktree:   r.PullBeforeWorktree,
+		CopyFiles:            r.CopyFiles,
 	}}
 }
 

@@ -144,6 +144,34 @@ func TestManagerCreate_RepoProviderError_NoOp(t *testing.T) {
 	}
 }
 
+func TestManagerCreate_CopiedFiles_RecordedOnWorktree(t *testing.T) {
+	repoPath := initGitRepoForWorktreeTest(t)
+	writeSourceFile(t, repoPath, ".env", "X=1\n")
+	writeSourceFile(t, repoPath, "config/local.yml", "y\n")
+
+	provider := &fakeRepoProvider{
+		repo: &Repository{ID: "repo-list", CopyFiles: ".env, config/local.yml"},
+	}
+	mgr := newManagerForCopyTest(t, provider)
+
+	wt, err := mgr.Create(context.Background(), createReqForCopyTest(repoPath, "list"))
+	if err != nil {
+		t.Fatalf("Create() unexpected error: %v", err)
+	}
+	got := map[string]bool{}
+	for _, p := range wt.CopiedFiles {
+		got[p] = true
+	}
+	for _, want := range []string{".env", "config/local.yml"} {
+		if !got[want] {
+			t.Errorf("wt.CopiedFiles missing %q, got %v", want, wt.CopiedFiles)
+		}
+	}
+	if len(wt.CopyFilesWarnings) != 0 {
+		t.Errorf("unexpected warnings: %v", wt.CopyFilesWarnings)
+	}
+}
+
 func TestManagerCreate_MissingSourceFile_StillSucceeds(t *testing.T) {
 	repoPath := initGitRepoForWorktreeTest(t)
 	// .env intentionally not created in source repo.

@@ -174,8 +174,7 @@ function RepositoryScriptFields({
           rows={2}
         />
         <p className="text-xs text-muted-foreground">
-          Comma-separated paths or globs copied from the source repo into each new worktree at task
-          creation. Existing tasks aren&apos;t updated. These paths should be gitignored.
+          Paths or globs copied into new worktrees at task creation. These should be gitignored.
         </p>
       </div>
     </>
@@ -292,15 +291,13 @@ function RepositoryEditView({
                 {isDirty && <UnsavedChangesBadge />}
               </Label>
             </div>
-            <div className="flex items-center gap-2">
-              <UnsavedSaveButton
-                isDirty={isDirty}
-                isLoading={saveRequest.isLoading}
-                status={saveRequest.status}
-                cleanLabel="Close"
-                onClick={isDirty ? () => onSave(close) : close}
-              />
-            </div>
+            <UnsavedSaveButton
+              isDirty={isDirty}
+              isLoading={saveRequest.isLoading}
+              status={saveRequest.status}
+              cleanLabel="Close"
+              onClick={isDirty ? () => onSave(close) : close}
+            />
           </div>
 
           <RepositoryBasicFields
