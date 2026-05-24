@@ -55,6 +55,12 @@ func (s *Service) handleNewJiraIssue(_ context.Context, event *bus.Event) error 
 		return nil
 	}
 	if s.watcherCoordinator == nil {
+		// Defensive: coordinator is wired by SetIssueTaskCreator. If we got
+		// here without the creator we already returned above; this is just
+		// a belt-and-braces guard for tests that wire pieces individually.
+		s.logger.Warn("watcher coordinator not configured, skipping jira task dispatch",
+			zap.String("issue_watch_id", evt.IssueWatchID),
+			zap.String("issue_key", evt.Issue.Key))
 		return nil
 	}
 

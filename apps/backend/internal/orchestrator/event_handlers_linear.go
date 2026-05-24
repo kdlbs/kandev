@@ -58,6 +58,9 @@ func (s *Service) handleNewLinearIssue(_ context.Context, event *bus.Event) erro
 		// Defensive: coordinator is wired by SetIssueTaskCreator. If we got
 		// here without the creator we already returned above; this is just
 		// a belt-and-braces guard for tests that wire pieces individually.
+		s.logger.Warn("watcher coordinator not configured, skipping linear task dispatch",
+			zap.String("issue_watch_id", evt.IssueWatchID),
+			zap.String("identifier", evt.Issue.Identifier))
 		return nil
 	}
 

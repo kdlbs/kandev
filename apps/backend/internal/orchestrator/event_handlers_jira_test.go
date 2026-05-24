@@ -138,6 +138,31 @@ func TestCreateJiraIssueTask_ReleasesWhenCreateFails(t *testing.T) {
 	}
 }
 
+// TestSetIssueTaskCreator_RefreshesCoordinatorTaskCreator pins the wiring
+// contract that calling SetIssueTaskCreator again must update the coordinator.
+// Regression guard: an earlier version of initWatcherCoordinator returned
+// early on the second call and silently kept the original creator.
+func TestSetIssueTaskCreator_RefreshesCoordinatorTaskCreator(t *testing.T) {
+	svc := setupJiraTaskTest(t)
+	jiraSvc := &mockJiraService{reserveReturn: true}
+	svc.SetJiraService(jiraSvc)
+
+	first := &countingIssueTaskCreator{taskID: "task-first"}
+	svc.SetIssueTaskCreator(first)
+
+	second := &countingIssueTaskCreator{taskID: "task-second"}
+	svc.SetIssueTaskCreator(second)
+
+	dispatchJiraEvent(svc, newJiraIssueEvent())
+
+	if first.calls != 0 {
+		t.Errorf("first creator must not be invoked after being replaced, got %d calls", first.calls)
+	}
+	if second.calls != 1 {
+		t.Errorf("expected the latest creator to be used, got %d calls", second.calls)
+	}
+}
+
 func TestInterpolateJiraPrompt(t *testing.T) {
 	ticket := &jira.JiraTicket{
 		Key:          "PROJ-7",

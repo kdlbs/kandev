@@ -16,19 +16,21 @@ func (s serviceTaskStarter) Start(ctx context.Context, taskID, workflowStepID st
 	return err
 }
 
-// initWatcherCoordinator builds the coordinator using Service's existing
-// dependencies. Called once from the existing service constructor; idempotent
-// so tests that rebuild parts of Service don't double-wire.
+// initWatcherCoordinator builds the coordinator (once) and (always) refreshes
+// the mutable taskCreator dependency. Called from SetIssueTaskCreator, which
+// can be invoked multiple times — tests in particular may swap creators
+// between scenarios. Re-running the setter MUST update the coordinator,
+// otherwise Dispatch silently keeps the original creator.
 func (s *Service) initWatcherCoordinator() {
-	if s.watcherCoordinator != nil {
-		return
+	if s.watcherCoordinator == nil {
+		s.watcherCoordinator = &WatcherDispatchCoordinator{
+			startTask: serviceTaskStarter{svc: s},
+			shouldAutoStart: func(ctx context.Context, stepID string) bool {
+				return s.shouldAutoStartStep(ctx, stepID)
+			},
+			logger: s.logger,
+		}
 	}
-	s.watcherCoordinator = &WatcherDispatchCoordinator{
-		taskCreator: s.issueTaskCreator,
-		startTask:   serviceTaskStarter{svc: s},
-		shouldAutoStart: func(ctx context.Context, stepID string) bool {
-			return s.shouldAutoStartStep(ctx, stepID)
-		},
-		logger: s.logger,
-	}
+	// Always refresh: SetIssueTaskCreator may be called more than once.
+	s.watcherCoordinator.taskCreator = s.issueTaskCreator
 }
