@@ -82,7 +82,15 @@ function useReadinessState({
   }, [executorId]);
 
   useEffect(() => {
+    // Switching to a different executor should reset the displayed
+    // probe state — otherwise the previous executor's rows / error /
+    // hasProbed sit in the UI until the next manual refresh, which
+    // reads like "still loading" while actually showing stale data.
     seqRef.current = 0;
+    setRows([]);
+    setError(null);
+    setHasProbed(false);
+    setLoading(false);
     void probeShells();
     return () => {
       seqRef.current = -1;
