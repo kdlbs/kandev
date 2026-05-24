@@ -1,26 +1,16 @@
 package utility
 
 import (
+	"maps"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
-func TestResolveProbeCommand_AllowsNativeACPBinaries(t *testing.T) {
+func TestResolveProbeCommand_AllowsEveryListedBinary(t *testing.T) {
 	t.Parallel()
 
-	allowed := []string{
-		"auggie",
-		"cursor-agent",
-		"kimi",
-		"kiro-cli-chat",
-		"mock-agent",
-		"npx",
-		"omp",
-		"opencode",
-		"qodercli",
-		"traecli",
-	}
-	for _, name := range allowed {
+	for _, name := range slices.Sorted(maps.Keys(allowedProbeCommands)) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			if got := resolveProbeCommand(name); got != name {
