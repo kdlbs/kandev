@@ -10,9 +10,11 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { useAppStore } from "@/components/state-provider";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import type { UserShellInfo } from "@/lib/state/slices";
 import { destroyUserShell, resumeUserShell } from "@/lib/api/domains/user-shell-api";
 import { useEnvironmentId } from "@/hooks/use-environment-session-id";
-import { useUserShells } from "@/hooks/domains/session/use-user-shells";
+
+const EMPTY_SHELLS: UserShellInfo[] = [];
 
 /**
  * Lists ordinary user terminals (open and parked alike) inside the
@@ -39,7 +41,10 @@ export function TerminalReopenMenuItems({
 }) {
   const environmentId = useEnvironmentId();
   const taskID = useAppStore((s) => s.tasks?.activeTaskId ?? null);
-  const { shells } = useUserShells(environmentId, taskID);
+  const shells = useAppStore((s) => {
+    if (!environmentId) return EMPTY_SHELLS;
+    return s.userShells.byEnvironmentId[environmentId] ?? EMPTY_SHELLS;
+  });
   const updateUserShell = useAppStore((s) => s.updateUserShell);
   const removeUserShellStore = useAppStore((s) => s.removeUserShell);
   const api = useDockviewStore((s) => s.api);
@@ -92,6 +97,7 @@ export function TerminalReopenMenuItems({
           updateUserShell(environmentId, terminalId, { state: "open" });
         } catch (error) {
           console.error("resume terminal:", error);
+          return;
         }
       }
       addTerminalPanel(

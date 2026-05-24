@@ -36,7 +36,7 @@ function autoCreateScope(environmentId: string, taskID: string | null): string |
  */
 export function releaseAutoCreatedEnvironment(environmentId: string): void {
   for (const scope of Array.from(autoCreatedScopes)) {
-    if (scope === environmentId || scope.startsWith(`${environmentId}:`)) {
+    if (scope.startsWith(`${environmentId}:`)) {
       autoCreatedScopes.delete(scope);
     }
   }

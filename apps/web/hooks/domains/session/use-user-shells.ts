@@ -94,7 +94,9 @@ export function useUserShells(
     // Skip when this exact scope has already been fetched. A different
     // env+task pair re-runs the effect because the ref no longer matches.
     if (lastFetchedScopeRef.current === fetchScope) return;
-    void isLoaded; // dependency only — invalidation is by scope, not env.
+    // `isLoaded` stays in deps so external store invalidation can
+    // re-run this effect; fetchScope + lastFetchedScopeRef still guard
+    // duplicate requests for the same env+task.
 
     const fetchShells = async () => {
       const client = getWebSocketClient();

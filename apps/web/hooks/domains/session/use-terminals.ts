@@ -337,6 +337,7 @@ type ManagedTerminalActionsOpts = {
     patch: { customName?: string | null; state?: "open" | "parked" },
   ) => void;
   removeUserShellStore: (environmentId: string, terminalId: string) => void;
+  removeTerminal: (id: string) => void;
 };
 
 function useManagedTerminalActions({
@@ -344,6 +345,7 @@ function useManagedTerminalActions({
   taskID,
   updateUserShell,
   removeUserShellStore,
+  removeTerminal,
 }: ManagedTerminalActionsOpts) {
   const renameTerminal = useCallback(
     async (id: string, name: string | null) => {
@@ -379,11 +381,12 @@ function useManagedTerminalActions({
       try {
         await destroyUserShell(environmentId, id, taskID ?? undefined);
         removeUserShellStore(environmentId, id);
+        removeTerminal(id);
       } catch (error) {
         console.error("Failed to destroy terminal:", error);
       }
     },
-    [environmentId, taskID, removeUserShellStore],
+    [environmentId, taskID, removeUserShellStore, removeTerminal],
   );
 
   return { renameTerminal, resumeTerminal, destroyTerminal };
@@ -486,6 +489,7 @@ function useTerminalActions({
     taskID,
     updateUserShell,
     removeUserShellStore,
+    removeTerminal,
   });
 
   return {

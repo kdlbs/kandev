@@ -14,6 +14,8 @@
 # Run:
 #   docker run -p 38429:38429 -v kandev-data:/data ghcr.io/kdlbs/kandev:latest
 
+ARG PNPM_VERSION=9.15.9
+
 FROM node:24-bookworm-slim
 
 # Install runtime dependencies. gh is included because the GitHub integration
