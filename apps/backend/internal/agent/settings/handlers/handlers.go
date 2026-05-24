@@ -386,6 +386,10 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 		EnvVars:        body.EnvVars,
 	})
 	if err != nil {
+		if errors.Is(err, controller.ErrInvalidProfileEnvVars) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		h.logger.Error("failed to create profile", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create profile"})
 		return
@@ -432,6 +436,10 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 	if err != nil {
 		if err == controller.ErrAgentProfileNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"error": "agent profile not found"})
+			return
+		}
+		if errors.Is(err, controller.ErrInvalidProfileEnvVars) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 		h.logger.Error("failed to update profile", zap.Error(err))

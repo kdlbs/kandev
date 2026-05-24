@@ -116,8 +116,8 @@ export function EnvVarsCard({ rows, secrets, onAdd, onUpdate, onRemove }: EnvVar
           <div>
             <CardTitle>Environment Variables</CardTitle>
             <CardDescription>
-              Injected into the execution environment. Variables can reference secrets for sensitive
-              values.
+              Injected into the execution environment. Use Secret mode for tokens and API keys;
+              literal values are stored in the profile JSON.
             </CardDescription>
           </div>
           <Button

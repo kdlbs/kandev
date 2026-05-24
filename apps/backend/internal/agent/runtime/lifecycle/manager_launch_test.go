@@ -14,6 +14,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -130,6 +131,33 @@ func TestBuildAgentCommand_CLIFlagsAppended(t *testing.T) {
 		cmds := mgr.buildAgentCommand(&LaunchRequest{}, nil, ag)
 		require.Equal(t, "copilot --acp", cmds.initial)
 	})
+}
+
+func TestBuildEnvForExecution_ResolvesSecretBackedProfileEnv(t *testing.T) {
+	store := newInMemorySecretStore()
+	if err := store.Create(context.Background(), &secrets.SecretWithValue{
+		Secret: secrets.Secret{ID: "sec-1", Name: "token"},
+		Value:  "revealed",
+	}); err != nil {
+		t.Fatalf("seed secret: %v", err)
+	}
+
+	mgr := newTestManager()
+	mgr.secretStore = store
+	profileInfo := &AgentProfileInfo{
+		EnvVars: []settingsmodels.ProfileEnvVar{{Key: "FROM_SECRET", SecretID: "sec-1"}},
+	}
+
+	env := mgr.buildEnvForExecution(
+		context.Background(),
+		"exec-1",
+		&LaunchRequest{AgentProfileID: "profile-1"},
+		nil,
+		profileInfo,
+	)
+	if env["FROM_SECRET"] != "revealed" {
+		t.Fatalf("FROM_SECRET: got %q want revealed", env["FROM_SECRET"])
+	}
 }
 
 func TestSetExecutionEnv_DoesNotSnapshotProfileEnvVars(t *testing.T) {

@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -107,6 +108,16 @@ func TestValidateProfileEnvVarDTOs(t *testing.T) {
 		{name: "null key rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "BAD\x00KEY", Value: "x"}}, wantErr: true},
 		{name: "duplicate key rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "FOO", Value: "one"}, {Key: " FOO ", Value: "two"}}, wantErr: true},
 		{name: "value and secret rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "FOO", Value: "bar", SecretID: "sec-1"}}, wantErr: true},
+		{name: "null value rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "FOO", Value: "bad\x00val"}}, wantErr: true},
+		{name: "KANDEV prefix rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "KANDEV_TASK_ID", Value: "x"}}, wantErr: true},
+		{name: "TASK_DESCRIPTION rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "TASK_DESCRIPTION", Value: "x"}}, wantErr: true},
+		{name: "too many entries rejected", envVars: func() []dto.ProfileEnvVarDTO {
+			out := make([]dto.ProfileEnvVarDTO, maxProfileEnvVars+1)
+			for i := range out {
+				out[i] = dto.ProfileEnvVarDTO{Key: fmt.Sprintf("K%d", i), Value: "v"}
+			}
+			return out
+		}(), wantErr: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

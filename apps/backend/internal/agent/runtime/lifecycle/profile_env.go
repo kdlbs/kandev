@@ -8,6 +8,10 @@ import (
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 )
 
+// metadataKeyProfileEnvResolved caches resolved profile env vars on an execution
+// so configureAndStartAgent does not re-resolve secrets on the same launch.
+const metadataKeyProfileEnvResolved = "profile_env_resolved"
+
 // mergeAgentProfileEnv fills missing keys in env from the agent profile's
 // env_vars. Existing keys in env (office tokens, executor profile env, etc.)
 // are never overwritten.
@@ -28,6 +32,29 @@ func (m *Manager) mergeAgentProfileEnvFromInfo(ctx context.Context, info *AgentP
 	}
 	resolved := m.resolveAgentProfileEnvVars(ctx, info.EnvVars)
 	mergeEnvFillMissing(env, resolved)
+}
+
+func (m *Manager) cacheResolvedProfileEnv(execution *AgentExecution, resolved map[string]string) {
+	if execution == nil || len(resolved) == 0 {
+		return
+	}
+	if execution.Metadata == nil {
+		execution.Metadata = make(map[string]interface{})
+	}
+	execution.Metadata[metadataKeyProfileEnvResolved] = cloneStringMap(resolved)
+}
+
+func (m *Manager) mergeAgentProfileEnvForExecution(ctx context.Context, execution *AgentExecution, env map[string]string) {
+	if execution != nil {
+		if cached, ok := execution.Metadata[metadataKeyProfileEnvResolved].(map[string]string); ok && len(cached) > 0 {
+			mergeEnvFillMissing(env, cached)
+			return
+		}
+	}
+	if execution == nil {
+		return
+	}
+	m.mergeAgentProfileEnv(ctx, execution.AgentProfileID, env)
 }
 
 func mergeEnvFillMissing(dst, src map[string]string) {

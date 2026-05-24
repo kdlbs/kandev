@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { IconTrash } from "@tabler/icons-react";
@@ -20,8 +20,9 @@ import {
 } from "@/components/settings/agent-profile-delete-dialog";
 import {
   EnvVarsCard,
+  envVarsToRows,
   rowsToEnvVars,
-  useEnvVarRows,
+  type EnvVarRow,
 } from "@/components/settings/profile-edit/env-vars-card";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import type {
@@ -185,43 +186,50 @@ type ProfileEnvVarsEditorProps = {
 };
 
 export function ProfileEnvVarsEditor({ envVars, secrets, onChange }: ProfileEnvVarsEditorProps) {
-  const { envVarRows, addEnvVar, removeEnvVar, updateEnvVar } = useEnvVarRows(envVars);
-  const nextEnvVars = useMemo(() => rowsToEnvVars(envVarRows), [envVarRows]);
+  const rows = useMemo(() => envVarsToRows(envVars), [envVars]);
 
-  useEffect(() => {
-    if (!areEnvVarsEqual(nextEnvVars, envVars)) {
-      onChange(nextEnvVars);
-    }
-  }, [envVars, nextEnvVars, onChange]);
+  const handleAdd = useCallback(() => {
+    onChange(rowsToEnvVars([...rows, { key: "", mode: "value", value: "", secretId: "" }]));
+  }, [onChange, rows]);
+
+  const handleUpdate = useCallback(
+    (index: number, field: keyof EnvVarRow, val: string) => {
+      onChange(rowsToEnvVars(rows.map((row, i) => (i === index ? { ...row, [field]: val } : row))));
+    },
+    [onChange, rows],
+  );
+
+  const handleRemove = useCallback(
+    (index: number) => {
+      onChange(rowsToEnvVars(rows.filter((_, i) => i !== index)));
+    },
+    [onChange, rows],
+  );
 
   return (
     <EnvVarsCard
-      rows={envVarRows}
+      rows={rows}
       secrets={secrets}
-      onAdd={addEnvVar}
-      onUpdate={updateEnvVar}
-      onRemove={removeEnvVar}
+      onAdd={handleAdd}
+      onUpdate={handleUpdate}
+      onRemove={handleRemove}
     />
   );
 }
 
 type ProfileEnvVarsSectionProps = {
-  savedProfile: AgentProfile;
+  envVars?: ProfileEnvVar[];
   onChange: (patch: Partial<AgentProfile>) => void;
 };
 
-function ProfileEnvVarsSection({ savedProfile, onChange }: ProfileEnvVarsSectionProps) {
+function ProfileEnvVarsSection({ envVars, onChange }: ProfileEnvVarsSectionProps) {
   const { items: secrets } = useSecrets();
-  const handleChange = useCallback((envVars: ProfileEnvVar[]) => onChange({ envVars }), [onChange]);
-
-  return (
-    <ProfileEnvVarsEditor
-      key={savedProfile.updatedAt}
-      envVars={savedProfile.envVars}
-      secrets={secrets}
-      onChange={handleChange}
-    />
+  const handleChange = useCallback(
+    (next: ProfileEnvVar[]) => onChange({ envVars: next }),
+    [onChange],
   );
+
+  return <ProfileEnvVarsEditor envVars={envVars} secrets={secrets} onChange={handleChange} />;
 }
 
 function toAgentProfilePatch(patch: Partial<ProfileFormData>): Partial<AgentProfile> {
@@ -513,7 +521,7 @@ function ProfileEditor({
         passthroughConfig={passthroughConfig}
       />
 
-      <ProfileEnvVarsSection savedProfile={savedProfile} onChange={updateDraft} />
+      <ProfileEnvVarsSection envVars={draft.envVars} onChange={updateDraft} />
 
       <CommandPreviewCard
         agentName={agent.name}

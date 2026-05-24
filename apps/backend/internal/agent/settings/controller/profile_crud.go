@@ -341,22 +341,47 @@ func envVarsFromDTO(in []dto.ProfileEnvVarDTO) []models.ProfileEnvVar {
 	return out
 }
 
+const (
+	maxProfileEnvVars           = 100
+	maxProfileEnvVarKeyLen      = 256
+	maxProfileEnvVarValueLen    = 8 * 1024
+	reservedProfileEnvVarKey    = "TASK_DESCRIPTION"
+	reservedProfileEnvVarPrefix = "KANDEV_"
+)
+
 func validateProfileEnvVarDTOs(in []dto.ProfileEnvVarDTO) error {
+	if len(in) > maxProfileEnvVars {
+		return fmt.Errorf("%w: at most %d entries allowed", ErrInvalidProfileEnvVars, maxProfileEnvVars)
+	}
 	seen := make(map[string]int, len(in))
 	for i, ev := range in {
 		key := strings.TrimSpace(ev.Key)
 		if key == "" {
-			return fmt.Errorf("env_vars[%d].key is required", i)
+			return fmt.Errorf("%w: env_vars[%d].key is required", ErrInvalidProfileEnvVars, i)
+		}
+		if len(key) > maxProfileEnvVarKeyLen {
+			return fmt.Errorf("%w: env_vars[%d].key exceeds %d characters", ErrInvalidProfileEnvVars, i, maxProfileEnvVarKeyLen)
 		}
 		if strings.ContainsAny(key, "=\x00") {
-			return fmt.Errorf("env_vars[%d].key must not contain '=' or null bytes", i)
+			return fmt.Errorf("%w: env_vars[%d].key must not contain '=' or null bytes", ErrInvalidProfileEnvVars, i)
+		}
+		if strings.HasPrefix(key, reservedProfileEnvVarPrefix) || key == reservedProfileEnvVarKey {
+			return fmt.Errorf("%w: env_vars[%d].key %q is reserved", ErrInvalidProfileEnvVars, i, key)
 		}
 		if first, exists := seen[key]; exists {
-			return fmt.Errorf("env_vars[%d].key duplicates env_vars[%d].key", i, first)
+			return fmt.Errorf("%w: env_vars[%d].key duplicates env_vars[%d].key", ErrInvalidProfileEnvVars, i, first)
 		}
 		seen[key] = i
 		if ev.SecretID != "" && ev.Value != "" {
-			return fmt.Errorf("env_vars[%d]: set value or secret_id, not both", i)
+			return fmt.Errorf("%w: env_vars[%d]: set value or secret_id, not both", ErrInvalidProfileEnvVars, i)
+		}
+		if ev.Value != "" {
+			if len(ev.Value) > maxProfileEnvVarValueLen {
+				return fmt.Errorf("%w: env_vars[%d].value exceeds %d characters", ErrInvalidProfileEnvVars, i, maxProfileEnvVarValueLen)
+			}
+			if strings.Contains(ev.Value, "\x00") {
+				return fmt.Errorf("%w: env_vars[%d].value must not contain null bytes", ErrInvalidProfileEnvVars, i)
+			}
 		}
 	}
 	return nil

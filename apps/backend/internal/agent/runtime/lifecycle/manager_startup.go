@@ -224,7 +224,7 @@ func (m *Manager) finalizeBootMessage(execution *AgentExecution, msg *models.Mes
 
 // buildEnvForExecution builds environment variables for any runtime.
 // This is the unified method used by the runtime interface.
-func (m *Manager) buildEnvForExecution(ctx context.Context, executionID string, req *LaunchRequest, agentConfig agents.Agent) map[string]string {
+func (m *Manager) buildEnvForExecution(ctx context.Context, executionID string, req *LaunchRequest, agentConfig agents.Agent, profileInfo *AgentProfileInfo) map[string]string {
 	env := make(map[string]string)
 
 	// Copy request environment
@@ -232,7 +232,11 @@ func (m *Manager) buildEnvForExecution(ctx context.Context, executionID string, 
 		env[k] = v
 	}
 
-	m.mergeAgentProfileEnv(ctx, req.AgentProfileID, env)
+	if profileInfo != nil {
+		m.mergeAgentProfileEnvFromInfo(ctx, profileInfo, env)
+	} else {
+		m.mergeAgentProfileEnv(ctx, req.AgentProfileID, env)
+	}
 
 	// Add standard variables for recovery after backend restart
 	env["KANDEV_INSTANCE_ID"] = executionID
