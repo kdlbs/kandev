@@ -6,8 +6,8 @@ const SYSTEM_ENTRIES: Array<{ href: string; label: string; title: string }> = [
   { href: "/settings/system/backups", label: "Backups", title: "Backups" },
   { href: "/settings/system/logs", label: "Logs", title: "Logs" },
   { href: "/settings/system/updates", label: "Updates", title: "Updates" },
-  { href: "/settings/system/licenses", label: "Licenses", title: "Licenses" },
   { href: "/settings/system/about", label: "About", title: "About" },
+  { href: "/settings/system/licenses", label: "Licenses", title: "Licenses" },
 ];
 
 test.describe("System sidebar navigation", () => {

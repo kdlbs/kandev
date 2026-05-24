@@ -168,8 +168,8 @@ function SystemSidebarSection({ pathname }: { pathname: string }) {
     { href: "/settings/system/backups", label: "Backups", Icon: IconArchive },
     { href: "/settings/system/logs", label: "Logs", Icon: IconFileText },
     { href: "/settings/system/updates", label: "Updates", Icon: IconRefresh },
-    { href: "/settings/system/licenses", label: "Licenses", Icon: IconScale },
     { href: "/settings/system/about", label: "About", Icon: IconInfoCircle },
+    { href: "/settings/system/licenses", label: "Licenses", Icon: IconScale },
   ];
   const isSystem = pathname.startsWith("/settings/system");
   // Sum of non-info health issues + 1 when an update is available. Surfaced
