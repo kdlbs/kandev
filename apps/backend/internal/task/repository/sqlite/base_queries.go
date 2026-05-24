@@ -30,8 +30,14 @@ func buildInPlaceholders(ids []string) (string, []interface{}) {
 }
 
 // chunkIDs splits ids into sub-slices of at most size entries. Useful when
-// callers want to keep IN-clause queries below sqliteMaxHostParams.
+// callers want to keep IN-clause queries below sqliteMaxHostParams. An empty
+// input returns an empty outer slice (NOT a single nil chunk) so callers can
+// range over the result safely — a single-nil-chunk would produce an empty
+// `IN ()` clause and a SQL syntax error when fed to buildInPlaceholders.
 func chunkIDs(ids []string, size int) [][]string {
+	if len(ids) == 0 {
+		return nil
+	}
 	if size <= 0 || len(ids) <= size {
 		return [][]string{ids}
 	}
