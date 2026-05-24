@@ -290,7 +290,7 @@ func (c *Controller) httpSearchUserIssues(ctx *gin.Context) {
 // prevent.
 func (c *Controller) translateMRFilter(ctx *gin.Context, filter string) (string, error) {
 	var username string
-	if filter == "review_requested" {
+	if filter == filterTokenReviewRequested {
 		u, err := c.service.Client().GetAuthenticatedUser(ctx.Request.Context())
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: err.Error()})
