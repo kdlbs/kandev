@@ -66,6 +66,15 @@ func setupJiraTaskTest(t *testing.T) *Service {
 	return createTestService(repo, stepGetter, newMockTaskRepo())
 }
 
+// dispatchJiraEvent drives an event through the watcher coordinator
+// synchronously using a JiraWatcherSource — mirrors what handleNewJiraIssue
+// does, but without the goroutine, so tests can assert on observable side
+// effects deterministically.
+func dispatchJiraEvent(svc *Service, evt *jira.NewJiraIssueEvent) {
+	src := NewJiraWatcherSource(svc.jiraService, svc.logger)
+	svc.watcherCoordinator.Dispatch(context.Background(), src, evt)
+}
+
 func TestCreateJiraIssueTask_HappyPath(t *testing.T) {
 	svc := setupJiraTaskTest(t)
 	jiraSvc := &mockJiraService{reserveReturn: true}
@@ -73,7 +82,7 @@ func TestCreateJiraIssueTask_HappyPath(t *testing.T) {
 	creator := &countingIssueTaskCreator{taskID: "task-jira-1"}
 	svc.SetIssueTaskCreator(creator)
 
-	svc.createJiraIssueTask(context.Background(), newJiraIssueEvent())
+	dispatchJiraEvent(svc, newJiraIssueEvent())
 
 	if jiraSvc.reserveCalls != 1 {
 		t.Errorf("expected 1 Reserve call, got %d", jiraSvc.reserveCalls)
@@ -102,7 +111,7 @@ func TestCreateJiraIssueTask_SkipsWhenAlreadyReserved(t *testing.T) {
 	creator := &countingIssueTaskCreator{}
 	svc.SetIssueTaskCreator(creator)
 
-	svc.createJiraIssueTask(context.Background(), newJiraIssueEvent())
+	dispatchJiraEvent(svc, newJiraIssueEvent())
 
 	if creator.calls != 0 {
 		t.Errorf("expected CreateIssueTask NOT to be called when reservation is lost, got %d", creator.calls)
@@ -119,7 +128,7 @@ func TestCreateJiraIssueTask_ReleasesWhenCreateFails(t *testing.T) {
 	creator := &countingIssueTaskCreator{err: errors.New("task creation failed")}
 	svc.SetIssueTaskCreator(creator)
 
-	svc.createJiraIssueTask(context.Background(), newJiraIssueEvent())
+	dispatchJiraEvent(svc, newJiraIssueEvent())
 
 	if jiraSvc.assignCalls != 0 {
 		t.Errorf("expected no Assign when task creation failed, got %d", jiraSvc.assignCalls)

@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"go.uber.org/zap"
@@ -11,7 +10,6 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/linear"
-	"github.com/kandev/kandev/internal/task/models"
 )
 
 // LinearService is the subset of linear.Service the orchestrator needs to
@@ -38,13 +36,14 @@ func (s *Service) subscribeLinearEvents() {
 	}
 }
 
-// handleNewLinearIssue creates a Kandev task for a freshly-observed Linear issue.
+// handleNewLinearIssue translates a LinearNewIssue bus event into a
+// WatcherDispatchCoordinator.Dispatch call. The integration-specific work
+// (reserve, build, attach, release, auto-start params) lives in
+// LinearWatcherSource. The pipeline (create, auto-start, error/release
+// handling) lives in the coordinator.
 func (s *Service) handleNewLinearIssue(_ context.Context, event *bus.Event) error {
 	evt, ok := event.Data.(*linear.NewLinearIssueEvent)
-	if !ok {
-		return nil
-	}
-	if evt.Issue == nil {
+	if !ok || evt == nil || evt.Issue == nil {
 		return nil
 	}
 	s.logger.Info("new linear issue detected from watch",
@@ -55,113 +54,18 @@ func (s *Service) handleNewLinearIssue(_ context.Context, event *bus.Event) erro
 		s.logger.Warn("issue task creator not configured, skipping linear task creation")
 		return nil
 	}
+	if s.watcherCoordinator == nil {
+		// Defensive: coordinator is wired by SetIssueTaskCreator. If we got
+		// here without the creator we already returned above; this is just
+		// a belt-and-braces guard for tests that wire pieces individually.
+		return nil
+	}
 
+	src := NewLinearWatcherSource(s.linearService, s.logger)
 	// Background context: the bus delivery context may be cancelled before
 	// task creation finishes. The work is independent of the publisher.
-	go s.createLinearIssueTask(context.Background(), evt)
+	go s.watcherCoordinator.Dispatch(context.Background(), src, evt)
 	return nil
-}
-
-// createLinearIssueTask mirrors createJiraIssueTask intentionally: the dedup-
-// reserve → create → assign-or-release lifecycle is the same shape across
-// both integrations. Refactoring out the symmetry would couple two
-// integration packages we'd rather keep independent (their event payloads,
-// metadata keys, and prompt placeholders all differ).
-//
-//nolint:dupl // intentional symmetry with createJiraIssueTask; see comment above
-func (s *Service) createLinearIssueTask(ctx context.Context, evt *linear.NewLinearIssueEvent) {
-	issue := evt.Issue
-	if !s.reserveLinearIssue(ctx, evt) {
-		return
-	}
-
-	req := &IssueTaskRequest{
-		WorkspaceID:    evt.WorkspaceID,
-		WorkflowID:     evt.WorkflowID,
-		WorkflowStepID: evt.WorkflowStepID,
-		Title:          fmt.Sprintf("[%s] %s", issue.Identifier, issue.Title),
-		Description:    interpolateLinearPrompt(evt.Prompt, issue),
-		Metadata: map[string]interface{}{
-			"linear_issue_watch_id":         evt.IssueWatchID,
-			"linear_issue_identifier":       issue.Identifier,
-			"linear_issue_url":              issue.URL,
-			"linear_state":                  issue.StateName,
-			"linear_assignee":               issue.AssigneeName,
-			models.MetaKeyAgentProfileID:    evt.AgentProfileID,
-			models.MetaKeyExecutorProfileID: evt.ExecutorProfileID,
-		},
-	}
-
-	task, err := s.issueTaskCreator.CreateIssueTask(ctx, req)
-	if err != nil {
-		s.logger.Error("failed to create linear issue task",
-			zap.String("issue_watch_id", evt.IssueWatchID),
-			zap.String("identifier", issue.Identifier),
-			zap.Error(err))
-		s.releaseLinearIssue(ctx, evt)
-		return
-	}
-
-	s.attachLinearIssueTaskID(ctx, evt, task.ID)
-	s.logger.Info("created linear issue task",
-		zap.String("task_id", task.ID),
-		zap.String("identifier", issue.Identifier))
-
-	if !s.shouldAutoStartStep(ctx, evt.WorkflowStepID) {
-		return
-	}
-	if _, err := s.StartTask(
-		ctx, task.ID, evt.AgentProfileID, "", evt.ExecutorProfileID,
-		"", task.Description, evt.WorkflowStepID, false, true, nil,
-	); err != nil {
-		s.logger.Error("failed to auto-start linear issue task",
-			zap.String("task_id", task.ID), zap.Error(err))
-		return
-	}
-	s.logger.Info("auto-started linear issue task",
-		zap.String("task_id", task.ID),
-		zap.String("identifier", issue.Identifier))
-}
-
-// reserveLinearIssue claims the dedup slot before task creation. When the
-// linear service isn't wired (boot order corner case), proceed anyway —
-// better to risk a duplicate task than silently drop the event.
-func (s *Service) reserveLinearIssue(ctx context.Context, evt *linear.NewLinearIssueEvent) bool {
-	if s.linearService == nil {
-		return true
-	}
-	reserved, err := s.linearService.ReserveIssueWatchTask(ctx, evt.IssueWatchID, evt.Issue.Identifier, evt.Issue.URL)
-	if err != nil {
-		s.logger.Error("failed to reserve linear issue slot",
-			zap.String("identifier", evt.Issue.Identifier), zap.Error(err))
-		return false
-	}
-	if !reserved {
-		s.logger.Debug("linear issue already reserved by concurrent handler, skipping",
-			zap.String("identifier", evt.Issue.Identifier))
-	}
-	return reserved
-}
-
-func (s *Service) releaseLinearIssue(ctx context.Context, evt *linear.NewLinearIssueEvent) {
-	if s.linearService == nil {
-		return
-	}
-	if err := s.linearService.ReleaseIssueWatchTask(ctx, evt.IssueWatchID, evt.Issue.Identifier); err != nil {
-		s.logger.Warn("failed to release linear issue reservation after task-create failure",
-			zap.String("identifier", evt.Issue.Identifier), zap.Error(err))
-	}
-}
-
-func (s *Service) attachLinearIssueTaskID(ctx context.Context, evt *linear.NewLinearIssueEvent, taskID string) {
-	if s.linearService == nil {
-		return
-	}
-	if err := s.linearService.AssignIssueWatchTaskID(ctx, evt.IssueWatchID, evt.Issue.Identifier, taskID); err != nil {
-		s.logger.Error("failed to assign task ID to linear issue reservation",
-			zap.String("task_id", taskID),
-			zap.String("identifier", evt.Issue.Identifier), zap.Error(err))
-	}
 }
 
 // interpolateLinearPrompt replaces {{issue.*}} placeholders with issue fields.

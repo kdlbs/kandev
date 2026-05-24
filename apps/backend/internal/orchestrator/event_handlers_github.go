@@ -126,6 +126,7 @@ func (s *Service) SetRepositoryResolver(rr RepositoryResolver) {
 // SetIssueTaskCreator sets the task creator for issue watch auto-task creation.
 func (s *Service) SetIssueTaskCreator(tc IssueTaskCreator) {
 	s.issueTaskCreator = tc
+	s.initWatcherCoordinator()
 }
 
 // handlePRFeedback logs PR feedback events. WS broadcasting is handled in main.go.

@@ -259,6 +259,10 @@ type Service struct {
 	// Issue task creator for auto-creating tasks from issue watch events
 	issueTaskCreator IssueTaskCreator
 
+	// Watcher dispatch coordinator: single seam for the watcher→task pipeline.
+	// Constructed lazily once issueTaskCreator is wired (see SetIssueTaskCreator).
+	watcherCoordinator *WatcherDispatchCoordinator
+
 	// Jira service for issue watch dedup operations
 	jiraService JiraService
 

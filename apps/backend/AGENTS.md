@@ -116,6 +116,8 @@ apps/backend/
 - Handles event-driven state transitions via workflow engine
 - Located in `internal/orchestrator/`
 
+**Watcher Dispatch Coordinator** (`internal/orchestrator/watcher_dispatch.go`) is the single pipeline that turns a freshly-observed external issue (Linear, Jira, future) into a Kandev task. Bus subscribers for each integration forward the event to `WatcherDispatchCoordinator.Dispatch` with a per-integration `WatcherSource` implementation (`source_linear.go`, `source_jira.go`). Source methods carry the integration-specific bits (reserve dedup, build task request, attach task ID, release, auto-start params); the coordinator owns the cross-cutting pipeline (create task, decide auto-start, error/release handling). Add a new watcher = implement `WatcherSource` + register a one-line bus subscriber. Do NOT add another `createXIssueTask` mirror.
+
 **Workflow Engine** (`internal/workflow/engine/`) provides typed state-machine evaluation:
 - `Engine.HandleTrigger()` evaluates step actions for triggers (on_enter, on_turn_start, on_turn_complete, on_exit)
 - `TransitionStore` interface abstracts persistence (implemented by `orchestrator.workflowStore`)
