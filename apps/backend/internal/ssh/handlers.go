@@ -5,6 +5,7 @@ package ssh
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -381,7 +382,14 @@ func (h *Handler) probeShells(ctx context.Context, executorID string) (*ProbeShe
 func (h *Handler) resolveSSHTarget(ctx context.Context, executorID string) (*lifecycle.SSHTarget, int, error) {
 	executor, err := h.executorFetcher.GetExecutor(ctx, executorID)
 	if err != nil {
-		return nil, http.StatusNotFound, fmt.Errorf("executor %q not found: %w", executorID, err)
+		// Genuine "row doesn't exist" → 404. Transport-level failures
+		// (storage outage, context cancel, …) keep their server-error
+		// shape so the UI can distinguish "executor was deleted" from
+		// "the lookup itself just broke".
+		if errors.Is(err, models.ErrExecutorNotFound) {
+			return nil, http.StatusNotFound, fmt.Errorf("executor %q not found: %w", executorID, err)
+		}
+		return nil, http.StatusInternalServerError, fmt.Errorf("look up executor %q: %w", executorID, err)
 	}
 	if executor == nil || executor.Type != models.ExecutorTypeSSH {
 		return nil, http.StatusBadRequest, fmt.Errorf("executor %q is not an SSH executor", executorID)

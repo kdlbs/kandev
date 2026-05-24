@@ -13,6 +13,13 @@ import (
 // ErrExecutorRunningNotFound is returned when no executor running record exists for a session.
 var ErrExecutorRunningNotFound = errors.New("executor running not found")
 
+// ErrExecutorNotFound is returned by the executor repository when no
+// executor row exists for the given ID. Callers should use errors.Is to
+// distinguish "row doesn't exist" (404 semantically) from transport-level
+// failures (storage outage, timeout, ctx cancel) that happen to also
+// surface from the same lookup.
+var ErrExecutorNotFound = errors.New("executor not found")
+
 // ErrExecutionRotated is returned by CAS-style updates on executors_running when the
 // row's agent_execution_id has rotated since the caller observed it. Indicates the
 // caller's write target a now-defunct execution and should be discarded — typically

@@ -49,7 +49,7 @@ func (r *Repository) GetExecutor(ctx context.Context, id string) (*models.Execut
 		&isSystem, &resumable, &configJSON, &executor.CreatedAt, &executor.UpdatedAt, &executor.DeletedAt,
 	)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("executor not found: %s", id)
+		return nil, fmt.Errorf("%w: %s", models.ErrExecutorNotFound, id)
 	}
 	if err != nil {
 		return nil, err
