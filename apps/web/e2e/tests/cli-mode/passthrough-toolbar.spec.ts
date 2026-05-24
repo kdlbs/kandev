@@ -12,8 +12,8 @@ import type { ApiClient } from "../../helpers/api-client";
  *  1. The toolbar renders for passthrough sessions.
  *  2. The Chat toggle + send path forwards the typed message to the agent's
  *     stdin (mock-agent echoes it as "Processed: <text>").
- *  3. Stop sends Ctrl-C, causing the TUI process to exit and the session to
- *     leave the RUNNING / STARTING state.
+ *  3. No dedicated Stop button — users cancel via Ctrl-C in the xterm terminal
+ *     (the toolbar intentionally omits a duplicate control).
  */
 test.describe("CLI mode: passthrough toolbar", () => {
   /** Create a passthrough agent profile and return its ID. */
@@ -110,16 +110,15 @@ test.describe("CLI mode: passthrough toolbar", () => {
     await session.expectPassthroughHasText("hello from e2e", 15_000);
   });
 
-  test("Stop button sends Ctrl-C and the session transitions out of RUNNING", async ({
+  test("toolbar omits a Stop button; cancel is via Ctrl-C in the terminal", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
-    const profileId = await createPassthroughProfile(apiClient, "CLI Toolbar Stop");
+    const profileId = await createPassthroughProfile(apiClient, "CLI Toolbar No Stop");
 
-    await apiClient.createTaskWithAgent(seedData.workspaceId, "Toolbar Stop Task", profileId, {
-      // Use /sleep to keep the agent busy long enough for Stop to fire
-      description: "/sleep 60",
+    await apiClient.createTaskWithAgent(seedData.workspaceId, "Toolbar No Stop Task", profileId, {
+      description: "initial prompt",
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
       repository_ids: [seedData.repositoryId],
@@ -129,16 +128,15 @@ test.describe("CLI mode: passthrough toolbar", () => {
     await kanban.goto();
 
     const session = new SessionPage(testPage);
-    await openTaskAndWaitForTerminal(testPage, kanban, session, "Toolbar Stop Task");
+    await openTaskAndWaitForTerminal(testPage, kanban, session, "Toolbar No Stop Task");
 
-    // Wait for the agent to reach a running state (Stop button becomes enabled)
-    const stopBtn = testPage.getByTestId("passthrough-stop");
-    await expect(stopBtn).toBeEnabled({ timeout: 20_000 });
+    await expect(testPage.getByTestId("passthrough-toolbar")).toBeVisible({ timeout: 10_000 });
+    // PassthroughToolbar deliberately has no Stop affordance — Ctrl-C in xterm is the path.
+    await expect(testPage.getByTestId("passthrough-stop")).toHaveCount(0);
 
-    // Click Stop — sends \x03 to PTY stdin via agent.cancel WS handler
-    await stopBtn.click();
-
-    // The session should leave RUNNING/STARTING; the Stop button goes disabled
-    await expect(stopBtn).toBeDisabled({ timeout: 20_000 });
+    await session.passthroughTerminal.locator(".xterm").click();
+    await testPage.keyboard.press("Control+c");
+    // Terminal stays mounted; we only assert the UI never offered a misleading Stop button.
+    await expect(testPage.getByTestId("passthrough-terminal")).toBeVisible({ timeout: 5_000 });
   });
 });

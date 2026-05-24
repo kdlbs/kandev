@@ -186,7 +186,7 @@ func TestExecutor_Prompt_PassthroughPreservesUnicodeAndMultiline(t *testing.T) {
 	if got := len(agentManager.writePassthroughStdinCalls); got != 1 {
 		t.Fatalf("expected 1 WritePassthroughStdin call, got %d", got)
 	}
-	want := prompt + "\r"
+	want := buildPassthroughPayload(prompt, "\r")
 	if agentManager.writePassthroughStdinCalls[0].Data != want {
 		t.Errorf("PTY payload = %q, want %q", agentManager.writePassthroughStdinCalls[0].Data, want)
 	}
