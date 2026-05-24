@@ -52,6 +52,16 @@ test.describe("Copy ignored files prepare step", () => {
       copy_files: ".env, config/local.yml",
     });
 
+    // Slow `git fetch` (worktree sync step) so the prepare panel is
+    // still streaming when the page mounts + WS subscribes. Without
+    // this shim prepare can complete before the client connects, the
+    // events broadcast into the void, and the panel renders with an
+    // empty steps list — making the "Copy 2 ignored files" assertion
+    // below race against the fallback completed-with-no-steps path.
+    // Same pattern as `setup-script-progress.spec.ts`.
+    const delayFile = path.join(backend.tmpDir, "git-delay-ms");
+    fs.writeFileSync(delayFile, "5000");
+
     try {
       const task = await apiClient.createTaskWithAgent(
         seedData.workspaceId,
@@ -84,6 +94,7 @@ test.describe("Copy ignored files prepare step", () => {
       // the step entirely.
       await expect(panel).toContainText("Copy 2 ignored files", { timeout: 5_000 });
     } finally {
+      if (fs.existsSync(delayFile)) fs.unlinkSync(delayFile);
       await apiClient.updateRepository(seedData.repositoryId, { copy_files: "" }).catch(() => {
         // Test teardown is best-effort — a 404 here just means the repo
         // was already cleaned up by a parallel teardown.
@@ -110,6 +121,7 @@ test.describe("Copy ignored files prepare step", () => {
     testPage,
     apiClient,
     seedData,
+    backend,
   }) => {
     test.setTimeout(60_000);
 
@@ -120,6 +132,13 @@ test.describe("Copy ignored files prepare step", () => {
     await apiClient.updateRepository(seedData.repositoryId, {
       copy_files: "definitely-does-not-exist.never",
     });
+
+    // Same git-fetch delay shim as the happy-path test above — gives the
+    // page time to mount + subscribe before the prepare-completed event
+    // broadcasts. Otherwise the panel falls back to the empty-steps
+    // completed state and the data-status / step-text assertions race.
+    const delayFile = path.join(backend.tmpDir, "git-delay-ms");
+    fs.writeFileSync(delayFile, "5000");
 
     try {
       const task = await apiClient.createTaskWithAgent(
@@ -150,6 +169,7 @@ test.describe("Copy ignored files prepare step", () => {
       await expect(panel).toContainText("Copy ignored files");
       await expect(panel).toContainText("definitely-does-not-exist.never");
     } finally {
+      if (fs.existsSync(delayFile)) fs.unlinkSync(delayFile);
       await apiClient.updateRepository(seedData.repositoryId, { copy_files: "" }).catch(() => {});
     }
   });

@@ -51,7 +51,18 @@ func (s *Server) handleWorkspaceCopyFiles(c *gin.Context) {
 		return
 	}
 
-	copied, warnings, err := copyfiles.WriteEntries(c.Request.Context(), targetDir, req.Entries, s.logger.Zap())
+	// Pass the agentctl WorkDir as the containment root — this is the
+	// trusted workspace bound that WriteEntries verifies targetDir lies
+	// under before any filesystem access. Both come from the same source
+	// (procMgr) but the explicit two-argument shape is what CodeQL needs
+	// to recognise the path-injection sanitizer.
+	copied, warnings, err := copyfiles.WriteEntries(
+		c.Request.Context(),
+		s.procMgr.WorkDir(),
+		targetDir,
+		req.Entries,
+		s.logger.Zap(),
+	)
 	if err != nil {
 		s.logger.Warn("workspace/copy-files: write failed",
 			zap.String("target", targetDir),

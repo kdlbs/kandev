@@ -520,7 +520,7 @@ func TestWriteEntries_HappyPath(t *testing.T) {
 		{RelPath: "config/local.yml", Mode: 0o644, Content: []byte("y")},
 	}
 
-	copied, warnings, err := WriteEntries(context.Background(), dst, entries, nil)
+	copied, warnings, err := WriteEntries(context.Background(), dst, dst, entries, nil)
 	if err != nil {
 		t.Fatalf("WriteEntries err: %v", err)
 	}
@@ -547,7 +547,7 @@ func TestWriteEntries_SkipIfExists(t *testing.T) {
 	dst := t.TempDir()
 	writeFile(t, filepath.Join(dst, ".env"), "PREEXISTING", 0o644)
 
-	copied, _, err := WriteEntries(context.Background(), dst,
+	copied, _, err := WriteEntries(context.Background(), dst, dst,
 		[]Entry{{RelPath: ".env", Mode: 0o600, Content: []byte("NEW")}}, nil)
 	if err != nil {
 		t.Fatalf("WriteEntries err: %v", err)
@@ -557,6 +557,21 @@ func TestWriteEntries_SkipIfExists(t *testing.T) {
 	}
 	if got := readFile(t, filepath.Join(dst, ".env")); got != "PREEXISTING" {
 		t.Errorf("existing file overwritten: %q", got)
+	}
+}
+
+func TestWriteEntries_RejectsTargetOutsideContainmentRoot(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	outside := t.TempDir() // sibling tmpdir, NOT under root
+
+	_, _, err := WriteEntries(context.Background(), root, outside,
+		[]Entry{{RelPath: ".env", Mode: 0o600, Content: []byte("X")}}, nil)
+	if err == nil {
+		t.Fatal("expected error when target lies outside containment root")
+	}
+	if !strings.Contains(err.Error(), "outside containment root") {
+		t.Errorf("err = %v, want containment-root rejection", err)
 	}
 }
 
@@ -583,7 +598,7 @@ func TestWriteEntries_RejectsSymlinkedParentEscape(t *testing.T) {
 		t.Skipf("symlink unsupported: %v", err)
 	}
 
-	copied, warnings, err := WriteEntries(context.Background(), dst,
+	copied, warnings, err := WriteEntries(context.Background(), dst, dst,
 		[]Entry{{RelPath: "config/sneaky.txt", Mode: 0o644, Content: []byte("PWN")}}, nil)
 	if err != nil {
 		t.Fatalf("WriteEntries err: %v", err)
@@ -612,7 +627,7 @@ func TestWriteEntries_RejectsTraversalEntries(t *testing.T) {
 		{RelPath: "/etc/passwd", Mode: 0o644, Content: []byte("leak")},
 		{RelPath: "", Mode: 0o644, Content: []byte("x")},
 	}
-	copied, warnings, err := WriteEntries(context.Background(), dst, bad, nil)
+	copied, warnings, err := WriteEntries(context.Background(), dst, dst, bad, nil)
 	if err != nil {
 		t.Fatalf("WriteEntries err: %v", err)
 	}

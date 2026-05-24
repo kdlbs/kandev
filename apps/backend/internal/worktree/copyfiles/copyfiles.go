@@ -175,27 +175,38 @@ func Plan(ctx context.Context, sourceDir string, patterns []string, log *zap.Log
 // the agentctl-side guard: the planner already validates against the
 // source root, but a compromised sender could craft paths that escape
 // the target.
-func WriteEntries(ctx context.Context, targetDir string, entries []Entry, log *zap.Logger) ([]string, []string, error) {
+func WriteEntries(ctx context.Context, containmentRoot, targetDir string, entries []Entry, log *zap.Logger) ([]string, []string, error) {
 	if len(entries) == 0 {
 		return nil, nil, nil
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, nil, fmt.Errorf("copyfiles: %w", err)
 	}
-	// Resolve symlinks AND require the target to exist as a directory before
-	// any per-entry write. EvalSymlinks both canonicalizes and validates —
-	// it errors on non-existent paths and breaks the taint chain CodeQL
-	// would otherwise trace from caller-supplied targetDir into os.Stat /
-	// os.WriteFile sinks. Per-entry RelPaths are then re-checked against
-	// this canonical root in writeOneEntry.
-	absTarget, err := filepath.EvalSymlinks(targetDir)
+	// Explicit containment check: targetDir must lie inside containmentRoot
+	// after both are canonicalized via EvalSymlinks. This is the standard
+	// path-injection sanitizer CodeQL recognises (`strings.HasPrefix` on
+	// canonicalized paths), and it gives the WriteEntries surface a
+	// machine-checkable trust boundary: callers pass the workspace root
+	// they control + a candidate subdir, and we refuse anything that
+	// escapes. Without this check CodeQL flagged the downstream
+	// os.Stat / os.WriteFile sinks as path-injection on any flow that
+	// originated from a JSON body.
+	canonRoot, err := filepath.EvalSymlinks(containmentRoot)
+	if err != nil {
+		return nil, nil, fmt.Errorf("copyfiles: resolve containment root: %w", err)
+	}
+	canonTarget, err := filepath.EvalSymlinks(targetDir)
 	if err != nil {
 		return nil, nil, fmt.Errorf("copyfiles: resolve target: %w", err)
 	}
-	info, err := os.Stat(absTarget)
-	if err != nil || !info.IsDir() {
-		return nil, nil, fmt.Errorf("copyfiles: target %q is not a directory", absTarget)
+	if !pathInsideRoot(canonTarget, canonRoot) {
+		return nil, nil, fmt.Errorf("copyfiles: target %q outside containment root %q", canonTarget, canonRoot)
 	}
+	info, err := os.Stat(canonTarget)
+	if err != nil || !info.IsDir() {
+		return nil, nil, fmt.Errorf("copyfiles: target %q is not a directory", canonTarget)
+	}
+	absTarget := canonTarget
 
 	var copied, warnings []string
 	for _, e := range entries {
@@ -257,6 +268,27 @@ func writeOneEntry(absTarget string, e Entry, log *zap.Logger) (written bool, wa
 		log.Debug("copyfiles: wrote entry", zap.String("rel", e.RelPath))
 	}
 	return true, "", nil
+}
+
+// pathInsideRoot reports whether candidate (already cleaned via
+// EvalSymlinks) sits at or below root. Used as the CodeQL-recognized
+// path-injection sanitizer at the WriteEntries entry point: both
+// arguments must already be canonical (no symlinks, no "..").
+func pathInsideRoot(candidate, root string) bool {
+	if candidate == root {
+		return true
+	}
+	rel, err := filepath.Rel(root, candidate)
+	if err != nil {
+		return false
+	}
+	if rel == "." {
+		return true
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false
+	}
+	return true
 }
 
 // secureDestination resolves the destination path for a relative entry,
