@@ -404,6 +404,43 @@ func buildIssueSearchQuery(filter, customQuery string) string {
 	return values.Encode()
 }
 
+// userSearchScopeTokens is the set of frontend filter tokens that map
+// directly to GitLab's `scope` query param value on /merge_requests and
+// /issues. "review_requested" is intentionally absent — GitLab has no
+// scope=review_requested; that case routes through reviewer_username=<me>
+// instead and is handled in translateUserSearchFilter.
+var userSearchScopeTokens = map[string]bool{
+	"assigned_to_me": true,
+	"created_by_me":  true,
+}
+
+// translateUserSearchFilter converts the /gitlab page's filter-tab tokens
+// into a GitLab API filter string that buildMRSearchQuery /
+// buildIssueSearchQuery can splice in via appendFilter. Returns "" when the
+// caller should pass the raw filter through unchanged (already in key=value
+// form, unknown token, or empty input). The "review_requested" branch needs
+// a resolved username because GitLab has no equivalent scope value — the
+// controller is responsible for looking the username up and surfacing any
+// error before calling here.
+func translateUserSearchFilter(token, username string) string {
+	if token == "" {
+		return ""
+	}
+	if strings.ContainsAny(token, "=&") {
+		return ""
+	}
+	if userSearchScopeTokens[token] {
+		return "scope=" + token
+	}
+	if token == "review_requested" {
+		if username == "" {
+			return ""
+		}
+		return "reviewer_username=" + url.QueryEscape(username) + "&scope=all"
+	}
+	return ""
+}
+
 // appendFilter parses a `key=value&key2=value2` filter and merges it into
 // values. User-supplied keys override defaults set by the caller (so passing
 // "state=closed" actually swaps the default "opened" rather than appending

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"testing"
@@ -271,6 +272,80 @@ func TestPATClient_SearchMRsPaged_HonoursTotalHeader(t *testing.T) {
 	}
 	if len(page.MRs) != 1 {
 		t.Errorf("mrs = %d, want 1", len(page.MRs))
+	}
+}
+
+// The /gitlab page's "Assigned" tab translates through
+// translateUserSearchFilter into a `scope=assigned_to_me` filter that
+// SearchMRsPaged must place on the wire as-is — previously a bare
+// "assigned_to_me" filter ended up as an empty-value key and the page
+// served the global, unscoped listing.
+func TestPATClient_SearchMRsPaged_ScopeAssignedToMe(t *testing.T) {
+	var receivedQuery url.Values
+	host, stop := newTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedQuery = r.URL.Query()
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer stop()
+
+	c := NewPATClient(host, "tok")
+	if _, err := c.SearchMRsPaged(context.Background(), "scope=assigned_to_me", "", 1, 25); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if got := receivedQuery.Get("scope"); got != "assigned_to_me" {
+		t.Errorf("scope = %q, want assigned_to_me", got)
+	}
+	if got := receivedQuery.Get("state"); got != "opened" {
+		t.Errorf("state = %q, want opened (default seeded by buildMRSearchQuery)", got)
+	}
+}
+
+// The "Review requested" tab needs the resolved username because GitLab
+// has no scope=review_requested — translateUserSearchFilter emits
+// reviewer_username=<me>&scope=all and both keys must land on the wire.
+func TestPATClient_SearchMRsPaged_ReviewerUsername(t *testing.T) {
+	var receivedQuery url.Values
+	host, stop := newTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedQuery = r.URL.Query()
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer stop()
+
+	c := NewPATClient(host, "tok")
+	if _, err := c.SearchMRsPaged(context.Background(), "reviewer_username=alice&scope=all", "", 1, 25); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if got := receivedQuery.Get("reviewer_username"); got != "alice" {
+		t.Errorf("reviewer_username = %q, want alice", got)
+	}
+	if got := receivedQuery.Get("scope"); got != "all" {
+		t.Errorf("scope = %q, want all (user-supplied value overrides default)", got)
+	}
+}
+
+// Issues counterpart — same regression coverage on the /issues endpoint.
+func TestPATClient_ListIssuesPaged_ScopeAssignedToMe(t *testing.T) {
+	var receivedPath string
+	var receivedQuery url.Values
+	host, stop := newTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		receivedQuery = r.URL.Query()
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer stop()
+
+	c := NewPATClient(host, "tok")
+	if _, err := c.ListIssuesPaged(context.Background(), "scope=assigned_to_me", "", 1, 25); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if receivedPath != "/issues" {
+		t.Errorf("path = %q, want /issues", receivedPath)
+	}
+	if got := receivedQuery.Get("scope"); got != "assigned_to_me" {
+		t.Errorf("scope = %q, want assigned_to_me", got)
+	}
+	if got := receivedQuery.Get("state"); got != "opened" {
+		t.Errorf("state = %q, want opened", got)
 	}
 }
 
