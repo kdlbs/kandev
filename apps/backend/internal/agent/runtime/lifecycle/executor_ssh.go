@@ -434,6 +434,20 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 		return nil // not a resume — proceed with normal create
 	}
 
+	// Idempotency: if a previous resume attempt for this InstanceID already
+	// produced live client+forwarder state, return success without dialing
+	// again. Without this, a retry orphans the existing client+forwarder
+	// (the new ones overwrite the map entry and the old ones leak until
+	// the GC reclaims them, well after the SSH connection has timed out).
+	// CreateInstance has the same guard; mirror it here so the two entry
+	// points to r.sessions[InstanceID] agree.
+	r.mu.Lock()
+	if _, ok := r.sessions[req.InstanceID]; ok {
+		r.mu.Unlock()
+		return nil
+	}
+	r.mu.Unlock()
+
 	target, err := r.targetFromMetadata(req.Metadata)
 	if err != nil {
 		return err
