@@ -79,7 +79,6 @@ export function AddPanelMenuItems({
       <DropdownMenuItem
         onClick={() => addBrowserPanel(undefined, groupId)}
         className={MENU_ITEM_CLASS}
-        data-testid="add-browser-panel"
       >
         <IconDeviceDesktop className={MENU_ICON_CLASS} />
         Browser

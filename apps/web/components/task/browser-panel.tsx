@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { memo, useState, useEffect, useMemo, useRef } from "react";
 import { IconRefresh, IconExternalLink } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
@@ -11,20 +11,6 @@ import { InspectButton } from "./inspector/inspect-button";
 import { AnnotationsPanel } from "./inspector/annotations-panel";
 import { useInspectMode } from "@/hooks/use-inspect-mode";
 import { usePreviewConsoleForwarder } from "@/hooks/use-preview-console-forwarder";
-import { PortForwardButton } from "./port-forward-dialog";
-
-// The Browser iframe loads dev-server URLs like `http://localhost:3000`, which
-// only resolves to the workspace when the user is on the same host as kandev.
-// When kandev is accessed remotely (e.g. via Tailscale), `localhost` in the
-// iframe points at the *user's* machine and the preview fails — port-forwarding
-// (proxy or tunnel) is what makes the workspace's dev server reachable.
-const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1", "0.0.0.0"]);
-const NO_SUBSCRIBE = () => () => {};
-const GET_FRONTEND_REMOTE = () => !LOCAL_HOSTNAMES.has(window.location.hostname);
-const GET_FRONTEND_REMOTE_SSR = () => false;
-function useIsFrontendRemote(): boolean {
-  return useSyncExternalStore(NO_SUBSCRIBE, GET_FRONTEND_REMOTE, GET_FRONTEND_REMOTE_SSR);
-}
 
 function BrowserPanelContent({
   showIframeDelayed,
@@ -157,26 +143,6 @@ export const BrowserPanel = memo(function BrowserPanel({ params }: BrowserPanelP
   const url = useBrowserPanelUrl((params.url as string) || "", inspect.isInspectMode);
   const showInspect = url.canProxy;
 
-  const isFrontendRemote = useIsFrontendRemote();
-  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  // Show Port Forwarding when EITHER the kandev frontend is being accessed
-  // remotely (Tailscale, LAN — `localhost` in the iframe can't reach the
-  // workspace) OR the workspace executor is itself a remote one (Docker /
-  // Sprites / remote VM — the workspace runs off-host even if the user is
-  // local). Either case means the iframe's `localhost:port` won't resolve
-  // and the user needs the proxy / tunnel to reach their dev server.
-  const isRemoteExecutor = useAppStore((state) => {
-    const id = state.tasks.activeTaskId;
-    if (!id) return false;
-    return state.kanban.tasks.find((t) => t.id === id)?.isRemoteExecutor ?? false;
-  });
-  const isAgentctlReady = useAppStore((state) =>
-    activeSessionId
-      ? state.sessionAgentctl.itemsBySessionId[activeSessionId]?.status === "ready"
-      : false,
-  );
-  const showPortForward = isFrontendRemote || isRemoteExecutor;
-
   return (
     <PanelRoot>
       <PanelHeaderBar>
@@ -218,9 +184,6 @@ export const BrowserPanel = memo(function BrowserPanel({ params }: BrowserPanelP
             count={inspect.annotations.length}
             onToggle={inspect.toggleInspect}
           />
-        )}
-        {showPortForward && (
-          <PortForwardButton sessionId={activeSessionId} isAgentctlReady={isAgentctlReady} />
         )}
       </PanelHeaderBar>
 

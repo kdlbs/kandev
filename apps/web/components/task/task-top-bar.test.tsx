@@ -18,6 +18,10 @@ vi.mock("@/components/task/executor-settings-button", () => ({
   ExecutorSettingsButton: () => <button data-testid="executor-settings-button">executor</button>,
 }));
 
+vi.mock("@/components/task/port-forward-dialog", () => ({
+  PortForwardButton: () => <button>ports</button>,
+}));
+
 vi.mock("@/components/task/document/document-controls", () => ({
   DocumentControls: () => null,
 }));
@@ -28,6 +32,10 @@ vi.mock("@/components/vcs-split-button", () => ({
 
 vi.mock("@/components/github/pr-topbar-button", () => ({
   PRTopbarButton: () => null,
+}));
+
+vi.mock("@/components/gitlab/mr-topbar-button", () => ({
+  MRTopbarButton: () => null,
 }));
 
 vi.mock("@/components/jira/jira-ticket-button", () => ({

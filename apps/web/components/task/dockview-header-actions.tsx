@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 import { type IDockviewHeaderActionsProps } from "dockview-react";
 import {
   IconPlus,
+  IconDeviceDesktop,
   IconTerminal2,
   IconPlayerPlay,
   IconLayoutSidebarRightCollapse,
@@ -20,10 +21,12 @@ import { useDockviewStore, performLayoutSwitch } from "@/lib/state/dockview-stor
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useEnvironmentId } from "@/hooks/use-environment-session-id";
 import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
+import { startProcess } from "@/lib/api";
 import { createUserShell } from "@/lib/api/domains/user-shell-api";
 import { useRepositoryScripts } from "@/hooks/domains/workspace/use-repository-scripts";
 import { replaceTaskUrl } from "@/lib/links";
-import type { Task } from "@/lib/types/http";
+import type { Task, ProcessInfo } from "@/lib/types/http";
+import type { ProcessStatusEntry } from "@/lib/state/slices";
 import { AddPanelMenuItems, MENU_ITEM_CLASS } from "./dockview-add-panel-items";
 import { NewSessionDialog } from "./new-session-dialog";
 import { NewTaskDropdown } from "./new-task-dropdown";
@@ -35,6 +38,22 @@ const HEADER_ACTION_BUTTON_CLASS =
 const RAW_HEADER_ACTION_BUTTON_CLASS =
   "inline-flex h-6 w-6 items-center justify-center rounded-[5px] text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer";
 const HEADER_ICON_CLASS = "h-3.5 w-3.5";
+
+/** Map a ProcessInfo response to a ProcessStatusEntry for the store. */
+function mapProcessToStatus(process: ProcessInfo): ProcessStatusEntry {
+  return {
+    processId: process.id,
+    sessionId: process.session_id,
+    kind: process.kind,
+    scriptName: process.script_name,
+    status: process.status,
+    command: process.command,
+    workingDir: process.working_dir,
+    exitCode: process.exit_code ?? null,
+    startedAt: process.started_at,
+    updatedAt: process.updated_at,
+  };
+}
 
 function useLeftHeaderState(
   groupId: string,
@@ -208,6 +227,7 @@ function GroupSplitCloseActions({ group, containerApi }: IDockviewHeaderActionsP
 
 export function RightHeaderActions(props: IDockviewHeaderActionsProps) {
   const { group } = props;
+  const centerGroupId = useDockviewStore((s) => s.centerGroupId);
   const sidebarGroupId = useDockviewStore((s) => s.sidebarGroupId);
   const rightTopGroupId = useDockviewStore((s) => s.rightTopGroupId);
   const rightBottomGroupId = useDockviewStore((s) => s.rightBottomGroupId);
@@ -215,11 +235,13 @@ export function RightHeaderActions(props: IDockviewHeaderActionsProps) {
   const isSidebarGroup = group.id === sidebarGroupId;
   if (isSidebarGroup) return <SidebarRightActions />;
 
+  const isCenterGroup = group.id === centerGroupId;
   const isRightTopGroup = group.id === rightTopGroupId;
   const isTerminalGroup = group.id === rightBottomGroupId;
 
   return (
     <div className="flex items-center gap-0.5 pr-0.5">
+      {isCenterGroup && <CenterRightActions />}
       {isRightTopGroup && <RightTopGroupActions />}
       {isTerminalGroup && <TerminalGroupRightActions />}
       <GroupSplitCloseActions {...props} />
@@ -307,6 +329,57 @@ function RightTopGroupActions() {
   );
 }
 
+function CenterRightActions() {
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const repository = useAppStore((state) => {
+    if (!activeSessionId) return null;
+    const session = state.taskSessions.items[activeSessionId];
+    if (!session) return null;
+    const repoId = session.repository_id;
+    if (!repoId) return null;
+    const allRepos = Object.values(state.repositories.itemsByWorkspaceId).flat();
+    return allRepos.find((r) => r.id === repoId) ?? null;
+  });
+  const hasDevScript = Boolean(repository?.dev_script?.trim());
+
+  const addBrowserPanel = useDockviewStore((s) => s.addBrowserPanel);
+  const upsertProcessStatus = useAppStore((state) => state.upsertProcessStatus);
+  const setActiveProcess = useAppStore((state) => state.setActiveProcess);
+
+  const handleStartBrowser = useCallback(async () => {
+    addBrowserPanel();
+    if (hasDevScript && activeSessionId) {
+      try {
+        const resp = await startProcess(activeSessionId, { kind: "dev" });
+        if (resp?.process) {
+          upsertProcessStatus(mapProcessToStatus(resp.process));
+          setActiveProcess(resp.process.session_id, resp.process.id);
+        }
+      } catch {
+        // Process may already be running
+      }
+    }
+  }, [addBrowserPanel, hasDevScript, activeSessionId, upsertProcessStatus, setActiveProcess]);
+
+  return (
+    <div className="flex items-center gap-1">
+      {/* Mode is shown in the chat input ModeSelector instead */}
+      {hasDevScript && (
+        <Button
+          size="sm"
+          variant="ghost"
+          className={HEADER_ACTION_BUTTON_CLASS}
+          onClick={handleStartBrowser}
+          aria-label="Open browser preview"
+          title="Open browser preview"
+        >
+          <IconDeviceDesktop className={HEADER_ICON_CLASS} />
+        </Button>
+      )}
+    </div>
+  );
+}
+
 function TerminalGroupRightActions() {
   const environmentId = useEnvironmentId();
   const repositoryId = useAppStore((state) => {
@@ -314,17 +387,25 @@ function TerminalGroupRightActions() {
     if (!sessionId) return null;
     return state.taskSessions.items[sessionId]?.repository_id ?? null;
   });
+  const hasDevScript = Boolean(useActiveSessionDevScript());
   const { scripts } = useRepositoryScripts(repositoryId);
   const rightBottomGroupId = useDockviewStore((s) => s.rightBottomGroupId);
 
-  if (scripts.length === 0) return null;
+  if (scripts.length === 0 && !hasDevScript) return null;
 
   return (
-    <TerminalScriptsDropdown
-      scripts={scripts}
-      environmentId={environmentId}
-      rightBottomGroupId={rightBottomGroupId}
-    />
+    <>
+      <TerminalScriptsDropdown
+        scripts={scripts}
+        environmentId={environmentId}
+        rightBottomGroupId={rightBottomGroupId}
+      />
+      <TerminalDevPreviewButton
+        environmentId={environmentId}
+        rightBottomGroupId={rightBottomGroupId}
+        visible={hasDevScript}
+      />
+    </>
   );
 }
 
@@ -353,6 +434,8 @@ function TerminalScriptsDropdown({
     },
     [environmentId, addTerminalPanel, rightBottomGroupId],
   );
+
+  if (scripts.length === 0) return null;
 
   return (
     <DropdownMenu>
@@ -390,5 +473,66 @@ function TerminalScriptsDropdown({
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+type TerminalDevPreviewButtonProps = {
+  environmentId: string | null;
+  rightBottomGroupId: string | null;
+  visible: boolean;
+};
+
+function TerminalDevPreviewButton({
+  environmentId,
+  rightBottomGroupId,
+  visible,
+}: TerminalDevPreviewButtonProps) {
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const addBrowserPanel = useDockviewStore((s) => s.addBrowserPanel);
+  const addTerminalPanel = useDockviewStore((s) => s.addTerminalPanel);
+  const upsertProcessStatus = useAppStore((state) => state.upsertProcessStatus);
+  const setActiveProcess = useAppStore((state) => state.setActiveProcess);
+
+  const handleStartPreview = useCallback(async () => {
+    if (!activeSessionId || !environmentId) return;
+    addBrowserPanel();
+    try {
+      const resp = await startProcess(activeSessionId, { kind: "dev" });
+      if (resp?.process) {
+        upsertProcessStatus(mapProcessToStatus(resp.process));
+        setActiveProcess(resp.process.session_id, resp.process.id);
+      }
+    } catch {
+      // Process may already be running
+    }
+    try {
+      const shell = await createUserShell(environmentId);
+      addTerminalPanel(shell.terminalId, rightBottomGroupId ?? undefined, environmentId);
+    } catch {
+      // Terminal creation is best-effort
+    }
+  }, [
+    activeSessionId,
+    environmentId,
+    addBrowserPanel,
+    upsertProcessStatus,
+    setActiveProcess,
+    addTerminalPanel,
+    rightBottomGroupId,
+  ]);
+
+  if (!visible) return null;
+
+  return (
+    <Button
+      size="sm"
+      variant="ghost"
+      className={HEADER_ACTION_BUTTON_CLASS}
+      onClick={handleStartPreview}
+      aria-label="Start dev server preview"
+      title="Start dev server preview"
+    >
+      <IconDeviceDesktop className={HEADER_ICON_CLASS} />
+    </Button>
   );
 }

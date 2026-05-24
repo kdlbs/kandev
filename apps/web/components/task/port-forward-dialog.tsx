@@ -294,15 +294,7 @@ function PortListSection({
   onTunnelStart: (port: number, requestedPort?: number) => void;
   onTunnelStop: (port: number) => void;
 }) {
-  // Hide ports owned by the kandev runtime itself — agentctl spawns one HTTP
-  // server per active agent instance plus its own control port, and surfacing
-  // them in the user-facing list is just noise.
-  // Exception: keep any agentctl port that the user has actively tunnelled so
-  // they can still stop it via the UI (avoids phantom badge-count / no stop control).
-  const visibleDetectedPorts = detectedPorts.filter(
-    (p) => p.process !== "agentctl" || activeTunnels.has(p.port),
-  );
-  const detectedPortNumbers = new Set(visibleDetectedPorts.map((p) => p.port));
+  const detectedPortNumbers = new Set(detectedPorts.map((p) => p.port));
   const uniqueManualPorts = manualPorts.filter((p) => !detectedPortNumbers.has(p));
 
   return (
@@ -333,12 +325,12 @@ function PortListSection({
         <p className="text-xs text-muted-foreground">Click refresh to detect listening ports.</p>
       )}
 
-      {loaded && visibleDetectedPorts.length === 0 && !loading && (
+      {loaded && detectedPorts.length === 0 && !loading && (
         <p className="text-xs text-muted-foreground">No listening ports detected.</p>
       )}
 
       <div className="space-y-1">
-        {visibleDetectedPorts.map((p) => (
+        {detectedPorts.map((p) => (
           <PortRow
             key={`d-${p.port}`}
             port={p.port}
@@ -503,9 +495,11 @@ function PortForwardDialogContent({
 }
 
 export function PortForwardButton({
+  isRemoteExecutor,
   sessionId,
   isAgentctlReady,
 }: {
+  isRemoteExecutor?: boolean;
   sessionId?: string | null;
   isAgentctlReady?: boolean;
 }) {
@@ -526,7 +520,7 @@ export function PortForwardButton({
     });
   }, [sessionId, isAgentctlReady]);
 
-  if (!sessionId || !isAgentctlReady) return null;
+  if (!isRemoteExecutor || !sessionId || !isAgentctlReady) return null;
 
   return (
     <Dialog>
