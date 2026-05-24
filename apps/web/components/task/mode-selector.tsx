@@ -85,7 +85,7 @@ function buildModeState(
   }
   return {
     currentModeId,
-    availableModes: [{ id: currentModeId, name: currentModeId }, ...availableModes],
+    availableModes: [{ id: currentModeId, name: formatModeName(currentModeId) }, ...availableModes],
   };
 }
 
