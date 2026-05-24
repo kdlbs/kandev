@@ -367,14 +367,18 @@ export function useDefaultSelectionsEffect(
 export function useBranchAutoSelectEffect(fs: DialogFormState) {
   const { githubBranch, githubBranches, useGitHubUrl, setGitHubBranch, githubPrHeadBranch } = fs;
   useEffect(() => {
-    if (!useGitHubUrl || githubBranches.length === 0 || githubBranch) return;
+    if (!useGitHubUrl || githubBranch) return;
+    // PR head wins regardless of whether it appears in the base repo's branch
+    // list. Fork PRs (head lives only on the contributor's fork) won't match
+    // anything in githubBranches, but we still want the pill to surface the
+    // PR's branch name — the worktree will materialize it from the PR refspec
+    // on the backend, and falling through to "main" would visually contradict
+    // the URL the user just pasted.
     if (githubPrHeadBranch) {
-      const prBranch = githubBranches.find((b) => b.name === githubPrHeadBranch);
-      if (prBranch) {
-        setGitHubBranch(prBranch.name);
-        return;
-      }
+      setGitHubBranch(githubPrHeadBranch);
+      return;
     }
+    if (githubBranches.length === 0) return;
     // GitHub URL branches are referenced by name only (no remote prefix);
     // selectPreferredBranch expects origin-prefixed remotes, so pick directly.
     const preferred =
@@ -404,6 +408,39 @@ function parseGitHubUrl(url: string): { owner: string; repo: string; prNumber?: 
   return { owner: match[1], repo: match[2] };
 }
 
+/**
+ * Returns a callback that auto-fills the task name with `PR #N: <title>` when
+ * a PR URL is pasted, leaving anything the user typed themselves alone. The
+ * callback reads the latest taskName via a ref so the fetch effect doesn't
+ * need to list taskName as a dep (which would re-fire the branches/PR fetch on
+ * every keystroke in the title input).
+ *
+ * NOTE: Callers must omit the returned callback from `useEffect` dependency
+ * arrays — including it causes the fetch to re-fire on every keystroke,
+ * defeating the purpose of the ref. The call site uses
+ * `eslint-disable react-hooks/exhaustive-deps` intentionally.
+ */
+export function useAutoFillTaskNameFromPR(fs: DialogFormState) {
+  const { taskName, setTaskName, setHasTitle } = fs;
+  const lastAutoFilledTitleRef = useRef("");
+  const taskNameRef = useRef(taskName);
+  useEffect(() => {
+    taskNameRef.current = taskName;
+    if (!taskName.trim()) {
+      lastAutoFilledTitleRef.current = "";
+    }
+  }, [taskName]);
+  return (prNumber: number, prTitle: string) => {
+    const next = `PR #${prNumber}: ${prTitle}`;
+    const current = taskNameRef.current;
+    if (!current.trim() || current === lastAutoFilledTitleRef.current) {
+      lastAutoFilledTitleRef.current = next;
+      setTaskName(next);
+      setHasTitle(true);
+    }
+  };
+}
+
 export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
   const {
     useGitHubUrl,
@@ -412,7 +449,9 @@ export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
     setGitHubBranchesLoading,
     setGitHubUrlError,
     setGitHubPrHeadBranch,
+    setGitHubPrBaseBranch,
   } = fs;
+  const autoFillTitle = useAutoFillTaskNameFromPR(fs);
   useEffect(() => {
     if (!open || !useGitHubUrl) {
       setGitHubBranchesLoading(false);
@@ -429,6 +468,7 @@ export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
     if (!parsed) {
       setGitHubBranches([]);
       setGitHubPrHeadBranch(null);
+      setGitHubPrBaseBranch(null);
       setGitHubBranchesLoading(false);
       setGitHubUrlError("Invalid GitHub URL — expected github.com/owner/repo or .../pull/123");
       return;
@@ -437,6 +477,7 @@ export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
     setGitHubUrlError(null);
     setGitHubBranchesLoading(true);
     setGitHubPrHeadBranch(null);
+    setGitHubPrBaseBranch(null);
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15_000);
@@ -456,6 +497,8 @@ export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
         setGitHubUrlError(null);
         if (prInfo) {
           setGitHubPrHeadBranch(prInfo.head_branch);
+          setGitHubPrBaseBranch(prInfo.base_branch);
+          autoFillTitle(prInfo.number, prInfo.title);
         }
       })
       .catch((err) => {
@@ -480,6 +523,10 @@ export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
       clearTimeout(timeoutId);
       controller.abort();
     };
+    // autoFillTitle is intentionally omitted: it's a fresh closure each render
+    // but reads the latest taskName via ref, so excluding it keeps the fetch
+    // from re-firing on every keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     open,
     useGitHubUrl,
@@ -488,6 +535,7 @@ export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
     setGitHubBranchesLoading,
     setGitHubUrlError,
     setGitHubPrHeadBranch,
+    setGitHubPrBaseBranch,
   ]);
 }
 

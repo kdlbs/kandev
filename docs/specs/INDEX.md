@@ -28,6 +28,7 @@ The office umbrella covers kandev's autonomous-agent product surface: workspaces
 | [inbox](office/inbox.md) | draft |
 | [assistant](office/assistant.md) | draft |
 | [plugins](office/plugins.md) | draft |
+| [automations-settings](office/automations-settings.md) | draft |
 | [testing](office/testing.md) | shipped |
 
 ## tasks/ — task & workflow model
@@ -63,6 +64,7 @@ Per-workspace credentials and triage triggers for external services.
 |---|---|
 | [slack](integrations/slack.md) | shipped |
 | [external-mcp](integrations/external-mcp.md) | draft |
+| [gitlab-integration](gitlab-integration/spec.md) | shipped |
 
 ## workspaces/ — workspace lifecycle
 

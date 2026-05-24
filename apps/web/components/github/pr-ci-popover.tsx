@@ -42,23 +42,38 @@ function countForBucket(counts: CountsView, kind: CheckBucket): number {
   return counts.failed;
 }
 
-function deriveAggregateCounts(pr: TaskPR): CountsView {
-  // Pre-load: if checks_total is populated, derive a coarse split using
-  // checks_state to attribute the "non-passing" remainder. This is good
-  // enough for the instant render — the lazy PRFeedback fetch refines.
-  const total = pr.checks_total;
-  const passing = pr.checks_passing;
+export function deriveAggregateCounts(pr: TaskPR): CountsView {
+  // Pre-load coarse split from aggregate fields; lazy PRFeedback fetch replaces it.
+  const total = Math.max(0, pr.checks_total);
+  const passing = Math.min(Math.max(0, pr.checks_passing), total);
   const remaining = Math.max(0, total - passing);
   if (pr.checks_state === "failure") {
-    return { passed: passing, failed: remaining, inProgress: 0 };
+    const failed = remaining > 0 ? remaining : 1;
+    const passed = total > 0 ? Math.max(0, total - failed) : 0;
+    return { passed, failed, inProgress: 0 };
   }
   if (pr.checks_state === "pending") {
-    return { passed: passing, failed: 0, inProgress: remaining };
+    const inProgress = remaining > 0 ? remaining : 1;
+    const passed = total > 0 ? Math.max(0, total - inProgress) : 0;
+    return { passed, failed: 0, inProgress };
   }
   if (pr.checks_state === "success") {
     return { passed: total, failed: 0, inProgress: 0 };
   }
   return { passed: passing, failed: 0, inProgress: remaining };
+}
+
+export function hasNoChecksAtAll(
+  pr: TaskPR,
+  feedback: { checks?: CheckRun[] } | null,
+  isFetching: boolean,
+): boolean {
+  return (
+    !isFetching &&
+    pr.checks_state === "" &&
+    pr.checks_total === 0 &&
+    (!feedback || (feedback.checks?.length ?? 0) === 0)
+  );
 }
 
 function PRCIPopoverHeader({ pr }: { pr: TaskPR }) {
@@ -328,9 +343,7 @@ function PRChecksSection({
   const counts = precise ?? aggregateCounts;
   // "No checks at all": the lazy fetch has settled (not isFetching) and there
   // are no checks anywhere — neither in PRFeedback nor in the aggregate.
-  const noChecksAtAll =
-    !isFetching && pr.checks_total === 0 && (!feedback || (feedback.checks?.length ?? 0) === 0);
-  if (noChecksAtAll) {
+  if (hasNoChecksAtAll(pr, feedback, isFetching)) {
     return (
       <div data-testid="pr-checks-section" className="flex flex-col">
         <div data-testid="pr-checks-empty" className="px-1 py-2 text-xs text-muted-foreground">

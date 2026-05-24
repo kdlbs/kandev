@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook } from "@testing-library/react";
-import { useWorkflowAgentProfileEffect } from "./task-create-dialog-effects";
+import {
+  useAutoFillTaskNameFromPR,
+  useBranchAutoSelectEffect,
+  useWorkflowAgentProfileEffect,
+} from "./task-create-dialog-effects";
 import type { DialogFormState } from "@/components/task-create-dialog-types";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
@@ -104,5 +108,212 @@ describe("useWorkflowAgentProfileEffect", () => {
     // Empty string lets useDefaultSelectionsEffect take over the fallback
     // chain (workspace default → first profile).
     expect(fs.setAgentProfileId).toHaveBeenCalledWith("");
+  });
+});
+
+type BranchFake = Pick<
+  DialogFormState,
+  "githubBranch" | "githubBranches" | "useGitHubUrl" | "setGitHubBranch" | "githubPrHeadBranch"
+>;
+function makeBranchFs(overrides: Partial<BranchFake> = {}): DialogFormState {
+  return {
+    githubBranch: "",
+    githubBranches: [],
+    useGitHubUrl: true,
+    setGitHubBranch: vi.fn(),
+    githubPrHeadBranch: null,
+    ...overrides,
+  } as unknown as DialogFormState;
+}
+
+describe("useBranchAutoSelectEffect", () => {
+  it("selects the PR head branch when it is present in the base repo's branch list", () => {
+    const fs = makeBranchFs({
+      githubBranches: [
+        { name: "main", type: "remote" },
+        { name: "feature/x", type: "remote" },
+      ],
+      githubPrHeadBranch: "feature/x",
+    });
+    renderHook(() => useBranchAutoSelectEffect(fs));
+    expect(fs.setGitHubBranch).toHaveBeenCalledWith("feature/x");
+  });
+
+  it("still surfaces the PR head branch for fork PRs whose head is NOT in the base repo's branch list", () => {
+    // Regression guard for the fork-PR display bug: previously the effect
+    // fell through to "main" when the PR head was missing from the base
+    // repo's branches, visually contradicting the URL the user just pasted.
+    const fs = makeBranchFs({
+      githubBranches: [
+        { name: "main", type: "remote" },
+        { name: "develop", type: "remote" },
+      ],
+      githubPrHeadBranch: "jira-hosted-path-auth",
+    });
+    renderHook(() => useBranchAutoSelectEffect(fs));
+    expect(fs.setGitHubBranch).toHaveBeenCalledWith("jira-hosted-path-auth");
+  });
+
+  it("falls back to main when there is no PR head branch", () => {
+    const fs = makeBranchFs({
+      githubBranches: [
+        { name: "feature/y", type: "remote" },
+        { name: "main", type: "remote" },
+      ],
+    });
+    renderHook(() => useBranchAutoSelectEffect(fs));
+    expect(fs.setGitHubBranch).toHaveBeenCalledWith("main");
+  });
+
+  it("does nothing when useGitHubUrl is false", () => {
+    const fs = makeBranchFs({
+      useGitHubUrl: false,
+      githubBranches: [{ name: "main", type: "remote" }],
+      githubPrHeadBranch: "feature/x",
+    });
+    renderHook(() => useBranchAutoSelectEffect(fs));
+    expect(fs.setGitHubBranch).not.toHaveBeenCalled();
+  });
+
+  it("does nothing once a branch has already been selected (manual override)", () => {
+    const fs = makeBranchFs({
+      githubBranch: "develop",
+      githubBranches: [
+        { name: "main", type: "remote" },
+        { name: "develop", type: "remote" },
+      ],
+      githubPrHeadBranch: "feature/x",
+    });
+    renderHook(() => useBranchAutoSelectEffect(fs));
+    expect(fs.setGitHubBranch).not.toHaveBeenCalled();
+  });
+});
+
+const PR_1_TITLE = "PR #1: first";
+
+type AutoFillFake = Pick<DialogFormState, "taskName" | "setTaskName" | "setHasTitle">;
+function makeAutoFillFs(overrides: Partial<AutoFillFake> = {}): DialogFormState {
+  return {
+    taskName: "",
+    setTaskName: vi.fn(),
+    setHasTitle: vi.fn(),
+    ...overrides,
+  } as unknown as DialogFormState;
+}
+
+describe("useAutoFillTaskNameFromPR", () => {
+  it("fills the task name with 'PR #N: <title>' when the title is empty", () => {
+    const fs = makeAutoFillFs({ taskName: "" });
+    const { result } = renderHook(() => useAutoFillTaskNameFromPR(fs));
+    result.current(971, "feat/omp-acp-agent");
+    expect(fs.setTaskName).toHaveBeenCalledWith("PR #971: feat/omp-acp-agent");
+    expect(fs.setHasTitle).toHaveBeenCalledWith(true);
+  });
+
+  it("fills when the title contains only whitespace", () => {
+    // Regression guard: hasTitle treats whitespace-only as empty, so the
+    // auto-fill check must too — otherwise pasting a PR URL after typing a
+    // stray space would silently keep the spaces.
+    const fs = makeAutoFillFs({ taskName: "   " });
+    const { result } = renderHook(() => useAutoFillTaskNameFromPR(fs));
+    result.current(7, "fix");
+    expect(fs.setTaskName).toHaveBeenCalledWith("PR #7: fix");
+  });
+
+  it("does NOT overwrite a title the user typed themselves", () => {
+    const fs = makeAutoFillFs({ taskName: "my custom title" });
+    const { result } = renderHook(() => useAutoFillTaskNameFromPR(fs));
+    result.current(42, "something");
+    expect(fs.setTaskName).not.toHaveBeenCalled();
+    expect(fs.setHasTitle).not.toHaveBeenCalled();
+  });
+
+  it("replaces a previously auto-filled title when a different PR URL is pasted", () => {
+    // Re-paste flow: the user pastes PR #1 (autofills "PR #1: foo"), then
+    // realizes wrong URL and pastes PR #2. Without the lastAutoFilled-ref
+    // tracking, the second paste would see a non-empty title and bail.
+    let currentName = "";
+    const fs = makeAutoFillFs({
+      taskName: currentName,
+      setTaskName: vi.fn((v: string) => {
+        currentName = v;
+      }),
+    });
+    const { result, rerender } = renderHook(() => {
+      // Re-read taskName from the closure on every render so the ref-mirror
+      // effect sees the latest value.
+      fs.taskName = currentName;
+      return useAutoFillTaskNameFromPR(fs);
+    });
+    result.current(1, "first");
+    expect(currentName).toBe(PR_1_TITLE);
+
+    rerender();
+    result.current(2, "second");
+    expect(currentName).toBe("PR #2: second");
+    expect(fs.setTaskName).toHaveBeenCalledTimes(2);
+  });
+
+  it("does NOT replace once the user edits the auto-filled title", () => {
+    let currentName = "";
+    const fs = makeAutoFillFs({
+      taskName: currentName,
+      setTaskName: vi.fn((v: string) => {
+        currentName = v;
+      }),
+    });
+    const { result, rerender } = renderHook(() => {
+      fs.taskName = currentName;
+      return useAutoFillTaskNameFromPR(fs);
+    });
+    result.current(1, "first");
+    expect(currentName).toBe(PR_1_TITLE);
+
+    // User edits the title manually.
+    currentName = "my edits";
+    rerender();
+
+    result.current(2, "second");
+    // Setter is still only called once (the initial auto-fill); the manual
+    // edit is preserved.
+    expect(fs.setTaskName).toHaveBeenCalledTimes(1);
+    expect(currentName).toBe("my edits");
+  });
+
+  it("clears the sentinel when taskName resets to empty, preventing a re-typed auto-fill from being overwritten", () => {
+    // Regression guard for the mounted-across-open/close edge case:
+    // after a dialog reset clears taskName, the user manually types the same
+    // text that was previously auto-filled. A second PR paste must NOT
+    // overwrite it because the sentinel was cleared on the empty transition.
+    let currentName = "";
+    const fs = makeAutoFillFs({
+      taskName: currentName,
+      setTaskName: vi.fn((v: string) => {
+        currentName = v;
+      }),
+    });
+    const { result, rerender } = renderHook(() => {
+      fs.taskName = currentName;
+      return useAutoFillTaskNameFromPR(fs);
+    });
+    result.current(1, "first");
+    expect(currentName).toBe(PR_1_TITLE);
+
+    // Simulate React flushing the setTaskName state update back into the hook
+    // so the ref-mirror effect sees taskName = PR_1_TITLE.
+    rerender();
+
+    // Dialog resets taskName to empty (sentinel should clear).
+    currentName = "";
+    rerender();
+
+    // User re-types the exact previously auto-filled value.
+    currentName = PR_1_TITLE;
+    rerender();
+
+    // A second paste with a different PR should NOT overwrite.
+    result.current(2, "second");
+    expect(fs.setTaskName).toHaveBeenCalledTimes(1); // only the first auto-fill
+    expect(currentName).toBe(PR_1_TITLE);
   });
 });

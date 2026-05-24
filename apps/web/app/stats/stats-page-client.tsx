@@ -5,10 +5,11 @@ import { Button } from "@kandev/ui/button";
 import { PageTopbar } from "@/components/page-topbar";
 import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
 import type { StatsResponse } from "@/lib/types/http";
-import { useMemo } from "react";
+import { useCallback, useEffect, useMemo, useReducer } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { IconChartBar } from "@tabler/icons-react";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
+import { fetchStats } from "@/lib/api/domains/stats-api";
 import {
   OverviewCards,
   WorkloadSection,
@@ -22,61 +23,34 @@ import {
   CompletedTasksChart,
   MostProductiveSummary,
 } from "./stats-charts";
+import {
+  ActivitySkeleton,
+  ChartsSkeleton,
+  OverviewCardsSkeleton,
+  RepoLeadersSkeleton,
+  RepositoriesSkeleton,
+  TopRepositoriesSkeleton,
+  WorkloadSkeleton,
+} from "./stats-skeletons";
 import { PRStatsPanel } from "@/components/github/pr-stats";
+import {
+  buildStatsSummary,
+  DEFAULT_RANGE,
+  getRangeLabel,
+  getSubtitle,
+  isRangeKey,
+  type PanelState,
+  RANGE_KEYS,
+  type RangeKey,
+  type StatsState,
+  statsReducer,
+  toPanelState,
+} from "./stats-utils";
 
 interface StatsPageClientProps {
-  stats: StatsResponse | null;
-  error: string | null;
   workspaceId?: string;
   activeRange?: RangeKey;
-}
-
-const EMPTY_STATS: StatsResponse = {
-  global: {
-    total_tasks: 0,
-    completed_tasks: 0,
-    in_progress_tasks: 0,
-    total_sessions: 0,
-    total_turns: 0,
-    total_messages: 0,
-    total_user_messages: 0,
-    total_tool_calls: 0,
-    total_duration_ms: 0,
-    avg_turns_per_task: 0,
-    avg_messages_per_task: 0,
-    avg_duration_ms_per_task: 0,
-  },
-  task_stats: [],
-  daily_activity: [],
-  completed_activity: [],
-  agent_usage: [],
-  repository_stats: [],
-  git_stats: { total_commits: 0, total_files_changed: 0, total_insertions: 0, total_deletions: 0 },
-};
-
-function formatDuration(ms: number): string {
-  if (ms === 0) return "—";
-  const seconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  if (hours > 0) return `${hours}h ${minutes % 60}m`;
-  if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
-  return `${seconds}s`;
-}
-
-type RangeKey = "week" | "month" | "all";
-
-function getRangeLabel(range: RangeKey): string {
-  switch (range) {
-    case "week":
-      return "Last Week";
-    case "month":
-      return "Last Month";
-    case "all":
-      return "All Time";
-    default:
-      return "Last Month";
-  }
+  initialError?: string | null;
 }
 
 function StatsEmptyState({ message }: { message: string }) {
@@ -91,19 +65,29 @@ function StatsEmptyState({ message }: { message: string }) {
 }
 
 type StatsHeaderProps = {
-  global: StatsResponse["global"];
+  global: StatsResponse["global"] | null;
   range: RangeKey;
   copied: boolean;
+  copyDisabled: boolean;
+  hasError: boolean;
   onRangeChange: (r: RangeKey) => void;
   onCopy: () => void;
 };
 
-function StatsHeader({ global, range, copied, onRangeChange, onCopy }: StatsHeaderProps) {
+function StatsHeader({
+  global,
+  range,
+  copied,
+  copyDisabled,
+  hasError,
+  onRangeChange,
+  onCopy,
+}: StatsHeaderProps) {
   return (
     <PageTopbar
       title="Statistics"
       icon={<IconChartBar className="h-4 w-4" />}
-      subtitle={`${global.total_tasks} tasks · ${global.total_sessions} sessions · ${formatDuration(global.total_duration_ms)}`}
+      subtitle={getSubtitle(global, hasError)}
       actions={
         <>
           <ToggleGroup
@@ -115,7 +99,7 @@ function StatsHeader({ global, range, copied, onRangeChange, onCopy }: StatsHead
             variant="outline"
             className="h-7"
           >
-            {(["week", "month", "all"] as RangeKey[]).map((key) => (
+            {RANGE_KEYS.map((key) => (
               <ToggleGroupItem
                 key={key}
                 value={key}
@@ -131,6 +115,7 @@ function StatsHeader({ global, range, copied, onRangeChange, onCopy }: StatsHead
             size="sm"
             className="h-7 px-2 text-xs cursor-pointer"
             onClick={onCopy}
+            disabled={copyDisabled}
           >
             {copied ? "Copied" : "Copy Stats"}
           </Button>
@@ -139,8 +124,6 @@ function StatsHeader({ global, range, copied, onRangeChange, onCopy }: StatsHead
     />
   );
 }
-
-type StatsContentProps = { resolvedStats: StatsResponse; rangeLabel: string; workspaceId?: string };
 
 function SectionDivider({ id, label }: { id: string; label: string }) {
   return (
@@ -151,17 +134,45 @@ function SectionDivider({ id, label }: { id: string; label: string }) {
   );
 }
 
-function TelemetrySection({
-  completedActivity,
-  dailyActivity,
-  agentUsage,
-  rangeLabel,
-}: {
-  completedActivity: StatsResponse["completed_activity"];
-  dailyActivity: StatsResponse["daily_activity"];
-  agentUsage: StatsResponse["agent_usage"];
-  rangeLabel: string;
-}) {
+function ErrorPanel({ title, message }: { title: string; message: string }) {
+  return (
+    <Card className="rounded-sm">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-medium text-muted-foreground">{title}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="text-sm text-muted-foreground">{message}</p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function TelemetryPanels({ state, rangeLabel }: { state: PanelState; rangeLabel: string }) {
+  if (state.kind === "loading") {
+    return (
+      <>
+        <div id="completed" className="scroll-mt-24">
+          <ChartsSkeleton />
+        </div>
+        <div id="activity" className="scroll-mt-24">
+          <ActivitySkeleton />
+        </div>
+      </>
+    );
+  }
+  if (state.kind === "error") {
+    return (
+      <>
+        <div id="completed" className="scroll-mt-24">
+          <ErrorPanel title="Completed Tasks Over Time" message={state.message} />
+        </div>
+        <div id="activity" className="scroll-mt-24">
+          <ErrorPanel title="Activity" message={state.message} />
+        </div>
+      </>
+    );
+  }
+  const { stats } = state;
   return (
     <>
       <div id="completed" className="scroll-mt-24">
@@ -173,7 +184,7 @@ function TelemetrySection({
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <CompletedTasksChart completedActivity={completedActivity} />
+              <CompletedTasksChart completedActivity={stats.completed_activity} />
             </CardContent>
           </Card>
           <Card className="rounded-sm">
@@ -183,7 +194,7 @@ function TelemetrySection({
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <MostProductiveSummary completedActivity={completedActivity} />
+              <MostProductiveSummary completedActivity={stats.completed_activity} />
             </CardContent>
           </Card>
         </div>
@@ -196,7 +207,7 @@ function TelemetrySection({
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ActivityHeatmap dailyActivity={dailyActivity} />
+            <ActivityHeatmap dailyActivity={stats.daily_activity} />
           </CardContent>
         </Card>
         <Card className="rounded-sm">
@@ -204,7 +215,7 @@ function TelemetrySection({
             <CardTitle className="text-sm font-medium text-muted-foreground">Top Agents</CardTitle>
           </CardHeader>
           <CardContent>
-            <AgentUsageList agentUsage={agentUsage} />
+            <AgentUsageList agentUsage={stats.agent_usage} />
           </CardContent>
         </Card>
       </div>
@@ -212,151 +223,179 @@ function TelemetrySection({
   );
 }
 
-function StatsContent({ resolvedStats, rangeLabel, workspaceId }: StatsContentProps) {
-  const {
-    global,
-    task_stats,
-    completed_activity,
-    daily_activity,
-    agent_usage,
-    repository_stats,
-    git_stats,
-  } = resolvedStats;
+function renderOverviewPanel(state: PanelState) {
+  if (state.kind === "loading") return <OverviewCardsSkeleton />;
+  if (state.kind === "error") return <ErrorPanel title="Overview" message={state.message} />;
+  return <OverviewCards global={state.stats.global} git_stats={state.stats.git_stats} />;
+}
+
+function renderRepositoryActivityPanel(state: PanelState) {
+  if (state.kind === "loading") return <RepositoriesSkeleton />;
+  if (state.kind === "error")
+    return <ErrorPanel title="Repository Activity" message={state.message} />;
+  return (
+    <Card id="repositories" className="rounded-sm scroll-mt-24">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-medium text-muted-foreground">
+          Repository Activity
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <RepositoryStatsGrid repositoryStats={state.stats.repository_stats} />
+      </CardContent>
+    </Card>
+  );
+}
+
+function renderTopRepositoriesPanel(state: PanelState) {
+  if (state.kind === "loading") return <TopRepositoriesSkeleton />;
+  if (state.kind === "error")
+    return <ErrorPanel title="Top Repositories" message={state.message} />;
+  return (
+    <Card className="rounded-sm">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-medium text-muted-foreground">
+          Top Repositories
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <TopRepositories repositoryStats={state.stats.repository_stats} />
+      </CardContent>
+    </Card>
+  );
+}
+
+function renderRepoLeadersPanel(state: PanelState) {
+  if (state.kind === "loading") return <RepoLeadersSkeleton />;
+  if (state.kind === "error") return <ErrorPanel title="Repo Leaders" message={state.message} />;
+  return (
+    <Card className="rounded-sm">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-medium text-muted-foreground">Repo Leaders</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <RepoLeaders repositoryStats={state.stats.repository_stats} />
+      </CardContent>
+    </Card>
+  );
+}
+
+function renderWorkloadPanel(state: PanelState) {
+  if (state.kind === "loading") return <WorkloadSkeleton />;
+  if (state.kind === "error") return <ErrorPanel title="Workload" message={state.message} />;
+  return <WorkloadSection task_stats={state.stats.task_stats} />;
+}
+
+function StatsContent({
+  state,
+  rangeLabel,
+  workspaceId,
+}: {
+  state: PanelState;
+  rangeLabel: string;
+  workspaceId?: string;
+}) {
   return (
     <div className="flex-1 overflow-auto">
       <div className="max-w-7xl mx-auto p-6">
         <div className="space-y-5">
-          <OverviewCards global={global} git_stats={git_stats} />
+          {renderOverviewPanel(state)}
           <SectionDivider id="telemetry" label="Telemetry" />
-          <TelemetrySection
-            completedActivity={completed_activity}
-            dailyActivity={daily_activity}
-            agentUsage={agent_usage}
-            rangeLabel={rangeLabel}
-          />
-          <Card id="repositories" className="rounded-sm scroll-mt-24">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Repository Activity
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <RepositoryStatsGrid repositoryStats={repository_stats} />
-            </CardContent>
-          </Card>
-          <Card className="rounded-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Top Repositories
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <TopRepositories repositoryStats={repository_stats} />
-            </CardContent>
-          </Card>
-          <Card className="rounded-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Repo Leaders
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <RepoLeaders repositoryStats={repository_stats} />
-            </CardContent>
-          </Card>
+          <TelemetryPanels state={state} rangeLabel={rangeLabel} />
+          {renderRepositoryActivityPanel(state)}
+          {renderTopRepositoriesPanel(state)}
+          {renderRepoLeadersPanel(state)}
           <SectionDivider id="github" label="GitHub" />
           <PRStatsPanel workspaceId={workspaceId ?? null} />
           <SectionDivider id="workload" label="Workload" />
-          <WorkloadSection task_stats={task_stats} />
+          {renderWorkloadPanel(state)}
         </div>
       </div>
     </div>
   );
 }
 
-function buildStatsSummary(
-  resolvedStats: StatsResponse,
-  rangeLabel: string,
-  completedInRange: number,
-): string {
-  const { global, repository_stats, git_stats } = resolvedStats;
-  const completion =
-    global.total_tasks > 0
-      ? `${Math.round((global.completed_tasks / global.total_tasks) * 100)}%`
-      : "—";
-  const topRepo = repository_stats
-    .filter((r) => r.total_tasks > 0)
-    .sort((a, b) => b.total_tasks - a.total_tasks)[0];
-  const topRepoLabel = topRepo ? `${topRepo.repository_name} (${topRepo.total_tasks} tasks)` : "—";
-  const hasGitStats =
-    git_stats && (git_stats.total_commits > 0 || git_stats.total_files_changed > 0);
-  const gitLine = hasGitStats
-    ? `${git_stats.total_commits} commits, +${git_stats.total_insertions.toLocaleString()}/-${git_stats.total_deletions.toLocaleString()}`
-    : "no git activity";
-  return [
-    `*Kandev Stats — ${rangeLabel}*`,
-    `- Tasks: ${global.total_tasks} total (${global.completed_tasks} done, ${global.in_progress_tasks} in progress) · ${completion} completion`,
-    `- Completed (${rangeLabel}): ${completedInRange}`,
-    `- Time: ${formatDuration(global.total_duration_ms)} total · ${formatDuration(global.avg_duration_ms_per_task)} avg/task`,
-    `- Repos: ${repository_stats.length} tracked · Top repo: ${topRepoLabel}`,
-    `- Git: ${gitLine}`,
-  ].join("\n");
+function useStatsData(workspaceId: string | undefined, range: RangeKey): StatsState {
+  const [state, dispatch] = useReducer(statsReducer, { stats: null, error: null });
+
+  useEffect(() => {
+    if (!workspaceId) return;
+    const controller = new AbortController();
+    dispatch({ type: "fetch" });
+    fetchStats(workspaceId, { cache: "no-store", init: { signal: controller.signal } }, range)
+      .then((data) => {
+        if (!controller.signal.aborted) dispatch({ type: "success", stats: data });
+      })
+      .catch((e: unknown) => {
+        if (controller.signal.aborted) return;
+        const message = e instanceof Error ? e.message : "Failed to fetch stats";
+        dispatch({ type: "failure", error: message });
+      });
+    return () => {
+      controller.abort();
+    };
+  }, [workspaceId, range]);
+
+  return state;
 }
 
-export function StatsPageClient({ stats, error, workspaceId, activeRange }: StatsPageClientProps) {
+export function StatsPageClient({ workspaceId, activeRange, initialError }: StatsPageClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { copied, copy } = useCopyToClipboard();
-  const range = (activeRange ?? "month") as RangeKey;
+
+  const rawRange = searchParams?.get("range") ?? activeRange;
+  const range: RangeKey = isRangeKey(rawRange) ? rawRange : DEFAULT_RANGE;
   const rangeLabel = getRangeLabel(range);
-  const resolvedStats = stats ?? EMPTY_STATS;
+
+  const { stats, error: fetchError } = useStatsData(workspaceId, range);
+  const panelState = toPanelState(stats, fetchError);
 
   const completedInRange = useMemo(
-    () =>
-      (resolvedStats.completed_activity ?? []).reduce((sum, item) => sum + item.completed_tasks, 0),
-    [resolvedStats.completed_activity],
+    () => (stats?.completed_activity ?? []).reduce((sum, item) => sum + item.completed_tasks, 0),
+    [stats?.completed_activity],
   );
   const statsSummary = useMemo(
-    () => buildStatsSummary(resolvedStats, rangeLabel, completedInRange),
-    [resolvedStats, rangeLabel, completedInRange],
+    () => (stats ? buildStatsSummary(stats, rangeLabel, completedInRange) : ""),
+    [stats, rangeLabel, completedInRange],
   );
 
-  if (!workspaceId) return <StatsEmptyState message="Select a workspace to view statistics." />;
-  if (error)
+  const handleCopyStats = useCallback(() => {
+    if (statsSummary) void copy(statsSummary);
+  }, [copy, statsSummary]);
+
+  const handleRangeChange = useCallback(
+    (nextRange: RangeKey) => {
+      const params = new URLSearchParams(searchParams?.toString() ?? "");
+      params.set("range", nextRange);
+      router.replace(`/stats?${params.toString()}`, { scroll: false });
+    },
+    [router, searchParams],
+  );
+
+  if (initialError)
     return (
       <div className="h-screen w-full flex flex-col bg-background">
         <PageTopbar title="Statistics" icon={<IconChartBar className="h-4 w-4" />} />
         <div className="flex-1 flex items-center justify-center">
-          <p className="text-destructive">Error loading stats: {error}</p>
+          <p className="text-destructive">Error loading stats: {initialError}</p>
         </div>
       </div>
     );
-  if (!stats) return <StatsEmptyState message="No stats available." />;
-
-  const handleCopyStats = () => {
-    void copy(statsSummary);
-  };
-
-  const handleRangeChange = (nextRange: RangeKey) => {
-    const params = new URLSearchParams(searchParams?.toString() ?? "");
-    params.set("range", nextRange);
-    router.push(`/stats?${params.toString()}`);
-  };
+  if (!workspaceId) return <StatsEmptyState message="Select a workspace to view statistics." />;
 
   return (
     <div className="h-screen w-full flex flex-col bg-background">
       <StatsHeader
-        global={resolvedStats.global}
+        global={stats?.global ?? null}
         range={range}
         copied={copied}
+        copyDisabled={!stats}
+        hasError={Boolean(fetchError)}
         onRangeChange={handleRangeChange}
         onCopy={handleCopyStats}
       />
-      <StatsContent
-        resolvedStats={resolvedStats}
-        rangeLabel={rangeLabel}
-        workspaceId={workspaceId}
-      />
+      <StatsContent state={panelState} rangeLabel={rangeLabel} workspaceId={workspaceId} />
     </div>
   );
 }

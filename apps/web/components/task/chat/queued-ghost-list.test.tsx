@@ -165,4 +165,25 @@ describe("QueueAffordance", () => {
     fireEvent.click(screen.getByTestId("queue-clear-all"));
     expect(state.clearAll).toHaveBeenCalledTimes(1);
   });
+
+  it("workflow queued entries are read-only", () => {
+    useQueueMock.mockReturnValue(
+      queueState([
+        entry({
+          queued_by: "workflow",
+          metadata: {
+            workflow_message: true,
+            workflow_step_name: "Review",
+          },
+        }),
+      ]),
+    );
+    render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+
+    fireEvent.click(screen.getByTestId(CHIP_ID));
+
+    expect(screen.getByTestId("workflow-message-badge").textContent).toContain("Review");
+    expect(screen.queryByTitle("Edit queued message")).toBeNull();
+    expect(screen.queryByTitle("Remove queued message")).toBeNull();
+  });
 });

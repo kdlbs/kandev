@@ -109,6 +109,7 @@ apps/backend/
 │   ├── events/           # Event bus for internal pub/sub
 │   ├── gateway/          # WebSocket gateway
 │   ├── github/           # GitHub API integration (PRs, reviews, webhooks)
+│   ├── gitlab/           # GitLab API integration (MRs, discussions, pipelines)
 │   ├── common/           # Shared utilities, config, logger
 │   ├── integration/      # External integrations
 │   ├── integrations/     # Shared shapes for third-party integrations

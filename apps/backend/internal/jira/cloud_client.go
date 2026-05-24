@@ -15,32 +15,58 @@ import (
 	"time"
 )
 
-// CloudClient is an Atlassian Cloud REST v3 client. It supports two auth modes:
+// CloudClient is a Jira REST client. Despite the name, it supports both
+// Atlassian Cloud and self-hosted Server / Data Center instances:
 //
-//   - api_token: Basic auth with {email}:{token} (the standard, recommended path).
-//   - session_cookie: the secret is the JWT value of `cloud.session.token`
-//     (password accounts) or `tenant.session.token` (SSO), copied from DevTools
-//     → Application → Cookies. The client wraps it under both cookie names so
-//     a single paste works for both account types.
+//   - Cloud uses REST v3 (`/rest/api/3/...`) and the token-paginated
+//     `/search/jql` endpoint.
+//   - Server/DC exposes only REST v2 (`/rest/api/2/...`) and the legacy
+//     `startAt`-paginated `/search`.
+//
+// Auth modes:
+//
+//   - api_token (Cloud-only): Basic auth with {email}:{token} minted at
+//     id.atlassian.com.
+//   - pat (Server-only): Personal Access Token sent as `Authorization: Bearer`.
+//   - session_cookie (Cloud-only): the secret is the JWT value of
+//     `cloud.session.token` (password accounts) or `tenant.session.token`
+//     (SSO), copied from DevTools → Application → Cookies.
+//     buildSessionCookieHeader emits those two Atlassian-specific cookie
+//     names, and validateAuthInstance rejects the combo on Server/DC where
+//     the equivalent cookie is JSESSIONID — Server/DC users authenticate
+//     via PAT until a Server-aware session-cookie path is added.
 //
 // The client holds no state beyond credentials so it can be recreated cheaply
-// per workspace if config changes.
+// when config changes.
 type CloudClient struct {
-	http        *http.Client
-	siteURL     string
-	email       string
-	secret      string
-	authMethod  string
-	maxBodySize int64
+	http         *http.Client
+	siteURL      string
+	email        string
+	secret       string
+	authMethod   string
+	instanceType string
+	apiBase      string // "/rest/api/3" for cloud, "/rest/api/2" for server.
+	maxBodySize  int64
 }
 
 // NewCloudClient builds a client from a JiraConfig + secret. siteURL is
 // normalized: trailing slash stripped, https:// prepended when the user saved
-// only a hostname (legacy rows; new rows are normalized on save).
+// only a hostname (legacy rows; new rows are normalized on save). An empty
+// InstanceType is treated as cloud — that's how every config row written by
+// pre-Server-support releases looks, and we can't pick differently without
+// breaking those installs.
 func NewCloudClient(cfg *JiraConfig, secret string) *CloudClient {
 	site := strings.TrimRight(cfg.SiteURL, "/")
 	if site != "" && !strings.Contains(site, "://") {
 		site = "https://" + site
+	}
+	instance := cfg.InstanceType
+	if instance == "" {
+		instance = InstanceTypeCloud
+	}
+	apiBase := "/rest/api/3"
+	if instance == InstanceTypeServer {
+		apiBase = "/rest/api/2"
 	}
 	return &CloudClient{
 		http: &http.Client{
@@ -55,11 +81,13 @@ func NewCloudClient(cfg *JiraConfig, secret string) *CloudClient {
 				return http.ErrUseLastResponse
 			},
 		},
-		siteURL:     site,
-		email:       cfg.Email,
-		secret:      secret,
-		authMethod:  cfg.AuthMethod,
-		maxBodySize: 4 << 20, // 4 MB — Jira payloads are small by design.
+		siteURL:      site,
+		email:        cfg.Email,
+		secret:       secret,
+		authMethod:   cfg.AuthMethod,
+		instanceType: instance,
+		apiBase:      apiBase,
+		maxBodySize:  4 << 20, // 4 MB — Jira payloads are small by design.
 	}
 }
 
@@ -73,6 +101,8 @@ func (c *CloudClient) authorize(req *http.Request) {
 	case AuthMethodAPIToken:
 		basic := base64.StdEncoding.EncodeToString([]byte(c.email + ":" + c.secret))
 		req.Header.Set("Authorization", "Basic "+basic)
+	case AuthMethodPAT:
+		req.Header.Set("Authorization", "Bearer "+c.secret)
 	case AuthMethodSessionCookie:
 		req.Header.Set("Cookie", buildSessionCookieHeader(c.secret))
 	}
@@ -115,13 +145,13 @@ func (c *CloudClient) do(ctx context.Context, method, path string, body interfac
 		return err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &APIError{StatusCode: resp.StatusCode, Message: summarizeBody(resp, raw)}
+		return &APIError{StatusCode: resp.StatusCode, Message: c.summarizeBody(resp, raw, false)}
 	}
 	// Guardrail: some misconfigured Atlassian flows return a 200 HTML login
 	// page instead of JSON. If we accidentally get HTML, surface an auth error
 	// rather than letting json.Unmarshal fail with "invalid character '<'".
 	if isHTMLResponse(resp, raw) {
-		return &APIError{StatusCode: resp.StatusCode, Message: "Atlassian returned an HTML page — the session likely requires step-up auth or has expired. Refresh your Jira tab and copy the cookie again."}
+		return &APIError{StatusCode: resp.StatusCode, Message: c.summarizeBody(resp, raw, true)}
 	}
 	if out == nil || len(raw) == 0 {
 		return nil
@@ -141,20 +171,51 @@ func isHTMLResponse(resp *http.Response, raw []byte) bool {
 	return bytes.HasPrefix(trimmed, []byte("<"))
 }
 
-// summarizeBody returns a short, useful error message from a non-2xx response.
-// For HTML bodies it skips the page content in favor of a step-up hint; for
-// plain text or JSON it returns the body verbatim (capped, so we don't spam
-// logs with multi-KB pages).
-func summarizeBody(resp *http.Response, raw []byte) string {
-	if isHTMLResponse(resp, raw) {
-		return "Atlassian returned an HTML page (status " + strconv.Itoa(resp.StatusCode) +
-			"). This usually means step-up authentication is required; sign in again in your Jira tab and re-copy the cookie."
+// summarizeBody returns a short, useful error message from a Jira response.
+// For HTML bodies it skips the page content in favor of an auth-method-aware
+// hint; for plain text or JSON it returns the body verbatim (capped, so we
+// don't spam logs with multi-KB pages). htmlOn2xx flags the "successful status
+// but HTML body" case — that means the response went through an auth-filter
+// login page instead of the REST API, so the hint adds "instead of JSON" to
+// distinguish it from the more common error-status HTML case.
+func (c *CloudClient) summarizeBody(resp *http.Response, raw []byte, htmlOn2xx bool) string {
+	if htmlOn2xx || isHTMLResponse(resp, raw) {
+		suffix := ". "
+		if htmlOn2xx {
+			suffix = " instead of JSON. "
+		}
+		return "Jira returned an HTML page (status " + strconv.Itoa(resp.StatusCode) +
+			")" + suffix + c.authHint()
 	}
 	const maxMsg = 500
 	if len(raw) > maxMsg {
 		return string(raw[:maxMsg]) + "…"
 	}
 	return string(raw)
+}
+
+// authHint picks an actionable explanation for an HTML-from-API response,
+// based on auth method and instance type. The wording differs because the
+// failure mode is different in each combo: a Cloud API token rejection looks
+// the same on the wire as a Server PAT rejection, but the user's next step
+// (check id.atlassian.com vs. check the instance's PAT page) is different.
+func (c *CloudClient) authHint() string {
+	switch c.authMethod {
+	case AuthMethodAPIToken:
+		if c.instanceType == InstanceTypeServer {
+			// Mismatched config: API-token auth is Cloud-only. Server/DC will
+			// reject `Basic email:token` and redirect to /login.jsp, which the
+			// JSON decoder sees as HTML.
+			return "API token auth is Cloud-only — this site looks like Jira Server/DC. Switch the auth method to PAT (Personal Access Token)."
+		}
+		return "Check the email and API token; create a new one at id.atlassian.com/manage-profile/security/api-tokens if needed."
+	case AuthMethodPAT:
+		return "The Personal Access Token is rejected. Recreate it from your Jira profile → Personal Access Tokens and update the saved value."
+	case AuthMethodSessionCookie:
+		return "The session cookie likely expired or requires step-up auth. Sign in again in your Jira tab and re-copy the cookie."
+	default:
+		return "Check the saved credentials."
+	}
 }
 
 // TestAuth hits /rest/api/3/myself which is the cheapest authenticated
@@ -165,7 +226,7 @@ func (c *CloudClient) TestAuth(ctx context.Context) (*TestConnectionResult, erro
 		DisplayName  string `json:"displayName"`
 		EmailAddress string `json:"emailAddress"`
 	}
-	if err := c.do(ctx, http.MethodGet, "/rest/api/3/myself", nil, &body); err != nil {
+	if err := c.do(ctx, http.MethodGet, c.apiBase+"/myself", nil, &body); err != nil {
 		var apiErr *APIError
 		if errors.As(err, &apiErr) {
 			return &TestConnectionResult{OK: false, Error: apiErr.Error()}, nil
@@ -253,7 +314,7 @@ type transitionsResponse struct {
 // ticket with an empty transitions menu.
 func (c *CloudClient) GetTicket(ctx context.Context, ticketKey string) (*JiraTicket, error) {
 	var issue issueResponse
-	path := "/rest/api/3/issue/" + url.PathEscape(ticketKey) + "?expand=renderedFields"
+	path := c.apiBase + "/issue/" + url.PathEscape(ticketKey) + "?expand=renderedFields"
 	if err := c.do(ctx, http.MethodGet, path, nil, &issue); err != nil {
 		return nil, err
 	}
@@ -275,7 +336,7 @@ func (c *CloudClient) GetTicket(ctx context.Context, ticketKey string) (*JiraTic
 // ListTransitions returns the transitions currently available for ticketKey.
 func (c *CloudClient) ListTransitions(ctx context.Context, ticketKey string) ([]JiraTransition, error) {
 	var resp transitionsResponse
-	path := "/rest/api/3/issue/" + url.PathEscape(ticketKey) + "/transitions"
+	path := c.apiBase + "/issue/" + url.PathEscape(ticketKey) + "/transitions"
 	if err := c.do(ctx, http.MethodGet, path, nil, &resp); err != nil {
 		return nil, err
 	}
@@ -297,7 +358,7 @@ func (c *CloudClient) DoTransition(ctx context.Context, ticketKey, transitionID 
 	body := map[string]interface{}{
 		"transition": map[string]string{"id": transitionID},
 	}
-	path := "/rest/api/3/issue/" + url.PathEscape(ticketKey) + "/transitions"
+	path := c.apiBase + "/issue/" + url.PathEscape(ticketKey) + "/transitions"
 	return c.do(ctx, http.MethodPost, path, body, nil)
 }
 
@@ -312,7 +373,11 @@ func (c *CloudClient) ListProjects(ctx context.Context) ([]JiraProject, error) {
 			Name string `json:"name"`
 		} `json:"values"`
 	}
-	if err := c.do(ctx, http.MethodGet, "/rest/api/3/project/search?maxResults=200", nil, &body); err != nil {
+	// Server/DC exposes /project/search starting with Jira 8.0 (2019). For
+	// older instances the call returns 404, which surfaces as an API error the
+	// user can read. The legacy GET /project endpoint isn't paginated and we
+	// don't need to keep two code paths just for ancient deployments.
+	if err := c.do(ctx, http.MethodGet, c.apiBase+"/project/search?maxResults=200", nil, &body); err != nil {
 		return nil, err
 	}
 	out := make([]JiraProject, 0, len(body.Values))
@@ -322,20 +387,47 @@ func (c *CloudClient) ListProjects(ctx context.Context) ([]JiraProject, error) {
 	return out, nil
 }
 
-// searchResponse mirrors the subset of /rest/api/3/search/jql we consume. The
-// new endpoint is token-paginated: there's no total count and pagination uses
-// nextPageToken rather than startAt. Transitions are intentionally omitted from
-// search results (fetched lazily when the user opens a ticket).
-type searchResponse struct {
+// cloudSearchResponse mirrors the subset of /rest/api/3/search/jql we consume.
+// The token-paginated endpoint exposes no total count; pagination is driven by
+// `nextPageToken`. Transitions are intentionally omitted from search results
+// (fetched lazily when the user opens a ticket).
+type cloudSearchResponse struct {
 	Issues        []issueResponse `json:"issues"`
 	NextPageToken string          `json:"nextPageToken"`
 	IsLast        bool            `json:"isLast"`
 }
 
-// SearchTickets runs a JQL search and returns a page of tickets. Uses the
-// /rest/api/3/search/jql endpoint (the legacy /search was removed by Atlassian
-// in 2025). pageToken is the cursor returned in the previous page's
-// NextPageToken; pass "" for the first page. maxResults is capped at 100.
+// serverSearchResponse mirrors the legacy `startAt`-paginated `/search`
+// endpoint that Jira Server / Data Center exposes. We synthesize a string
+// page token from `startAt + maxResults` so the public SearchResult shape stays
+// identical regardless of upstream pagination style.
+type serverSearchResponse struct {
+	Issues     []issueResponse `json:"issues"`
+	StartAt    int             `json:"startAt"`
+	MaxResults int             `json:"maxResults"`
+	Total      int             `json:"total"`
+}
+
+// searchFields is the list of issue fields we ask Jira to return. Kept short
+// because tickets are listed in dense table rows; the rest is fetched lazily
+// on click.
+var searchFields = []string{
+	"summary", "status", "project", "issuetype",
+	"priority", "assignee", "reporter", "updated",
+}
+
+// SearchTickets runs a JQL search and returns a page of tickets. The transport
+// branches on instance type because Cloud and Server/DC expose different
+// search endpoints with incompatible pagination shapes:
+//
+//   - Cloud: POST /rest/api/3/search/jql — token-paginated, no total count.
+//     The legacy /search was removed by Atlassian in 2025.
+//   - Server/DC: POST /rest/api/2/search — startAt/total style; we encode the
+//     next startAt offset into the SearchResult.NextPageToken string so the
+//     caller can opaquely round-trip it.
+//
+// pageToken is the cursor returned in the previous page's NextPageToken;
+// pass "" for the first page. maxResults is capped at 100.
 func (c *CloudClient) SearchTickets(ctx context.Context, jql, pageToken string, maxResults int) (*SearchResult, error) {
 	if maxResults <= 0 {
 		maxResults = 25
@@ -343,25 +435,66 @@ func (c *CloudClient) SearchTickets(ctx context.Context, jql, pageToken string, 
 	if maxResults > 100 {
 		maxResults = 100
 	}
+	if c.instanceType == InstanceTypeServer {
+		return c.searchTicketsServer(ctx, jql, pageToken, maxResults)
+	}
+	return c.searchTicketsCloud(ctx, jql, pageToken, maxResults)
+}
+
+func (c *CloudClient) searchTicketsCloud(ctx context.Context, jql, pageToken string, maxResults int) (*SearchResult, error) {
 	body := map[string]interface{}{
 		"jql":        jql,
 		"maxResults": maxResults,
-		"fields": []string{
-			"summary", "status", "project", "issuetype",
-			"priority", "assignee", "reporter", "updated",
-		},
+		"fields":     searchFields,
 	}
 	if pageToken != "" {
 		body["nextPageToken"] = pageToken
 	}
-	var resp searchResponse
-	if err := c.do(ctx, http.MethodPost, "/rest/api/3/search/jql", body, &resp); err != nil {
+	var resp cloudSearchResponse
+	if err := c.do(ctx, http.MethodPost, c.apiBase+"/search/jql", body, &resp); err != nil {
 		return nil, err
 	}
 	out := &SearchResult{
 		MaxResults:    maxResults,
 		IsLast:        resp.IsLast,
 		NextPageToken: resp.NextPageToken,
+		Tickets:       make([]JiraTicket, 0, len(resp.Issues)),
+	}
+	for i := range resp.Issues {
+		out.Tickets = append(out.Tickets, issueToTicket(&resp.Issues[i], c.siteURL))
+	}
+	return out, nil
+}
+
+func (c *CloudClient) searchTicketsServer(ctx context.Context, jql, pageToken string, maxResults int) (*SearchResult, error) {
+	startAt := 0
+	if pageToken != "" {
+		// A malformed token is fixed by starting over from the first page —
+		// safer than 500-ing on what is ultimately UI-driven state.
+		if n, err := strconv.Atoi(pageToken); err == nil && n > 0 {
+			startAt = n
+		}
+	}
+	body := map[string]interface{}{
+		"jql":        jql,
+		"startAt":    startAt,
+		"maxResults": maxResults,
+		"fields":     searchFields,
+	}
+	var resp serverSearchResponse
+	if err := c.do(ctx, http.MethodPost, c.apiBase+"/search", body, &resp); err != nil {
+		return nil, err
+	}
+	nextStart := resp.StartAt + len(resp.Issues)
+	isLast := nextStart >= resp.Total || len(resp.Issues) == 0
+	nextToken := ""
+	if !isLast {
+		nextToken = strconv.Itoa(nextStart)
+	}
+	out := &SearchResult{
+		MaxResults:    maxResults,
+		IsLast:        isLast,
+		NextPageToken: nextToken,
 		Tickets:       make([]JiraTicket, 0, len(resp.Issues)),
 	}
 	for i := range resp.Issues {

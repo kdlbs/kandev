@@ -74,3 +74,43 @@ describe("createDebugLogger", () => {
     expect(console.debug).toHaveBeenCalledWith("[ns] prefix a=1 suffix");
   });
 });
+
+describe("IS_DEBUG", () => {
+  // Module re-imports are required because IS_DEBUG is a module-level constant
+  // evaluated at import time. resetModules forces re-evaluation with the
+  // current env / globals each time.
+
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("is true in a production build when window.__KANDEV_DEBUG is set", async () => {
+    // Simulates `make start-debug`: production bundle, runtime window flag.
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("NEXT_PUBLIC_KANDEV_DEBUG", "");
+    vi.stubGlobal("window", { __KANDEV_DEBUG: true });
+    const { IS_DEBUG } = await import("./log");
+    expect(IS_DEBUG).toBe(true);
+  });
+
+  it("is false in a production build with no flag set", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("NEXT_PUBLIC_KANDEV_DEBUG", "");
+    vi.stubGlobal("window", {});
+    const { IS_DEBUG } = await import("./log");
+    expect(IS_DEBUG).toBe(false);
+  });
+
+  it("is true when NEXT_PUBLIC_KANDEV_DEBUG=true at build time", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("NEXT_PUBLIC_KANDEV_DEBUG", "true");
+    vi.stubGlobal("window", {});
+    const { IS_DEBUG } = await import("./log");
+    expect(IS_DEBUG).toBe(true);
+  });
+});

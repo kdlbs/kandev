@@ -11,6 +11,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -488,5 +489,46 @@ func TestAgentStreamWS_MalformedMessage(t *testing.T) {
 	resp := sendWSRequest(t, conn, "agent.stderr", nil)
 	if resp.Type != ws.MessageTypeResponse {
 		t.Errorf("expected response after malformed message, got %q", resp.Type)
+	}
+}
+
+// --- injectKandevMcpServers ordering ---
+
+// TestInjectKandevMcpServers_HttpFirst ensures the kandev MCP HTTP entry is injected
+// before the SSE entry so that the capability-filter dedup (first surviving entry per
+// name wins) prefers the HTTP transport whenever an agent advertises both
+// mcpCapabilities.http and mcpCapabilities.sse. SSE-only agents still pick up the SSE
+// fallback.
+func TestInjectKandevMcpServers_HttpFirst(t *testing.T) {
+	srv := newTestServer(t)
+
+	got := srv.injectKandevMcpServers(nil)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 kandev entries, got %d: %+v", len(got), got)
+	}
+	if got[0].Name != kandevMcpServerName || got[0].Type != mcpTransportHTTP {
+		t.Errorf("expected first entry name=%q type=%q, got name=%q type=%q",
+			kandevMcpServerName, mcpTransportHTTP, got[0].Name, got[0].Type)
+	}
+	if got[1].Name != kandevMcpServerName || got[1].Type != mcpTransportSSE {
+		t.Errorf("expected second entry name=%q type=%q, got name=%q type=%q",
+			kandevMcpServerName, mcpTransportSSE, got[1].Name, got[1].Type)
+	}
+
+	// Upstream non-kandev entries must be preserved and appended after the injected pair;
+	// any upstream "kandev" must be filtered out.
+	upstream := []types.McpServer{
+		{Name: "other", Type: "stdio", Command: "x"},
+		{Name: kandevMcpServerName, Type: mcpTransportSSE, URL: "http://stale/sse"},
+	}
+	got = srv.injectKandevMcpServers(upstream)
+	if len(got) != 3 {
+		t.Fatalf("expected 3 entries (http+sse+other), got %d: %+v", len(got), got)
+	}
+	if got[0].Type != mcpTransportHTTP || got[1].Type != mcpTransportSSE {
+		t.Errorf("expected injected order http,sse; got %q,%q", got[0].Type, got[1].Type)
+	}
+	if got[2].Name != "other" || got[2].Command != "x" {
+		t.Errorf("expected upstream 'other' entry last, got %+v", got[2])
 	}
 }

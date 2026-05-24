@@ -71,6 +71,7 @@ function MobileChatPanelContent({
             key={effectiveSessionId}
             sessionId={effectiveSessionId}
             mode="agent"
+            enableTouchScroll
           />
         </div>
       ) : (

@@ -25,6 +25,7 @@ import { EditorsMenu } from "@/components/task/editors-menu";
 import { LayoutPresetSelector } from "@/components/task/layout-preset-selector";
 import { DocumentControls } from "@/components/task/document/document-controls";
 import { PRTopbarButton } from "@/components/github/pr-topbar-button";
+import { MRTopbarButton } from "@/components/gitlab/mr-topbar-button";
 import { JiraTicketButton, extractJiraKey } from "@/components/jira/jira-ticket-button";
 import { JiraLinkButton } from "@/components/jira/jira-link-button";
 import { LinearIssueButton, extractLinearKey } from "@/components/linear/linear-issue-button";
@@ -317,7 +318,11 @@ function AttentionStatusGroup({
             sessionId={activeSessionId}
             isAgentctlReady={isAgentctlReady}
           />
+          {/* PR (GitHub) and MR (GitLab) buttons each render nothing when no
+              rows match, so showing both covers GitHub-only, GitLab-only, and
+              multi-repo tasks without needing an explicit provider switch. */}
           <PRTopbarButton />
+          <MRTopbarButton />
           <IssueTrackerButtons taskId={taskId} workspaceId={workspaceId} taskTitle={taskTitle} />
         </>
       )}

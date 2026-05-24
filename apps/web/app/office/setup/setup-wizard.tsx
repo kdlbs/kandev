@@ -16,7 +16,6 @@ import { StepReview } from "./step-review";
 import { WizardFooter } from "./wizard-footer";
 import { CloseButton } from "./close-button";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
-import { updateUserSettings } from "@/lib/api/domains/settings-api";
 import type { Tier } from "@/lib/state/slices/office/types";
 
 type SetupWizardProps = {
@@ -78,7 +77,7 @@ function dotColor(index: number, current: number): string {
   return "bg-muted";
 }
 
-async function submitOnboarding(data: WizardData) {
+export async function submitOnboarding(data: WizardData) {
   const result = await completeOnboarding({
     workspaceName: data.workspaceName.trim() || "default",
     taskPrefix: data.taskPrefix.trim() || "KAN",
@@ -89,7 +88,6 @@ async function submitOnboarding(data: WizardData) {
     taskDescription: data.taskDescription.trim() || undefined,
     default_tier: data.defaultTier,
   });
-  await updateUserSettings({ workspace_id: result.workspaceId });
   return result;
 }
 
@@ -174,9 +172,10 @@ export function SetupWizard({
   const handleSubmit = useCallback(async () => {
     setSubmitting(true);
     try {
-      await submitOnboarding(data);
+      const result = await submitOnboarding(data);
       toast.success("Workspace created successfully");
-      router.push("/office");
+      document.cookie = `office-active-workspace=${result.workspaceId}; path=/; max-age=86400; samesite=strict; secure`;
+      router.push(`/office?workspaceId=${result.workspaceId}`);
       router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to complete setup");

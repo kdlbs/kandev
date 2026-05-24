@@ -31,10 +31,10 @@ export function useTaskCRUD() {
   }, []);
 
   const handleDelete = useCallback(
-    async (task: Task) => {
+    async (task: Task, opts?: { cascade?: boolean }) => {
       setDeletingTaskId(task.id);
       try {
-        await deleteTaskById(task.id);
+        await deleteTaskById(task.id, opts);
 
         // Update UI AFTER successful delete
         store.getState().hydrate({
@@ -53,10 +53,10 @@ export function useTaskCRUD() {
   );
 
   const handleArchive = useCallback(
-    async (task: Task) => {
+    async (task: Task, opts?: { cascade?: boolean }) => {
       setArchivingTaskId(task.id);
       try {
-        await archiveTaskById(task.id);
+        await archiveTaskById(task.id, opts);
 
         // Update UI AFTER successful archive - remove from kanban view
         store.getState().hydrate({

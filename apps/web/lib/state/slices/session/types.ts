@@ -83,6 +83,17 @@ export type TaskPlansState = {
   lastSeenUpdatedAtByTaskId: Record<string, string>;
 };
 
+export type QueuedMessageMetadata = Record<string, unknown> & {
+  workflow_message?: boolean;
+  workflow_auto_start?: boolean;
+  workflow_step_id?: string;
+  workflow_step_name?: string;
+  workflow_step_color?: string;
+  sender_task_id?: string;
+  sender_task_title?: string;
+  sender_session_id?: string;
+};
+
 export type QueuedMessage = {
   id: string;
   session_id: string;
@@ -92,7 +103,7 @@ export type QueuedMessage = {
   model?: string;
   plan_mode: boolean;
   attachments?: Array<{ type: string; data: string; mime_type: string }>;
-  metadata?: Record<string, unknown>;
+  metadata?: QueuedMessageMetadata;
   queued_at: string;
   queued_by?: string;
 };

@@ -103,6 +103,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		BaseBranch:           req.BaseBranch,
 		DefaultBranch:        req.DefaultBranch,
 		CheckoutBranch:       req.CheckoutBranch,
+		PRNumber:             req.PRNumber,
 		WorktreeBranchPrefix: req.WorktreeBranchPrefix,
 		PullBeforeWorktree:   req.PullBeforeWorktree,
 		// Task directory mode
@@ -133,6 +134,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 				BaseBranch:           r.BaseBranch,
 				DefaultBranch:        r.DefaultBranch,
 				CheckoutBranch:       r.CheckoutBranch,
+				PRNumber:             r.PRNumber,
 				WorktreeID:           r.WorktreeID,
 				WorktreeBranchPrefix: r.WorktreeBranchPrefix,
 				PullBeforeWorktree:   r.PullBeforeWorktree,

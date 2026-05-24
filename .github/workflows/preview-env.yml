@@ -15,7 +15,7 @@ on:
     types: [opened, synchronize, reopened, closed, labeled]
 
 concurrency:
-  group: preview-env-${{ github.event.pull_request.number || github.ref }}
+  group: preview-env-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   # Don't cancel cleanup on close — let it finish destroying the sprite.
   cancel-in-progress: ${{ github.event.action != 'closed' }}
 
@@ -68,8 +68,7 @@ jobs:
   # -----------------------------------------------------------------------
   # Deploy / update preview (fork PRs, gated by allowlist)
   # Uses pull_request_target so secrets are available.
-  # Three approval paths:
-  #   - OWNER/MEMBER/COLLABORATOR author_association (trusted user, all events)
+  # Two approval paths:
   #   - PREVIEW_ENV_ALLOWLIST repo variable (trusted login list, all events;
   #     JSON array of logins)
   #   - `safe-to-test` label (maintainer opt-in, per-commit). Explicitly
@@ -87,8 +86,7 @@ jobs:
       github.event.action != 'closed' &&
       github.event_name == 'pull_request_target' &&
       github.event.pull_request.head.repo.full_name != github.repository &&
-      (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) ||
-       (github.event.action != 'synchronize' && contains(github.event.pull_request.labels.*.name, 'safe-to-test')) ||
+      ((github.event.action != 'synchronize' && contains(github.event.pull_request.labels.*.name, 'safe-to-test')) ||
        (vars.PREVIEW_ENV_ALLOWLIST != '' && contains(fromJSON(vars.PREVIEW_ENV_ALLOWLIST), github.event.pull_request.user.login)))
     runs-on: ubuntu-latest
     permissions:
@@ -100,7 +98,7 @@ jobs:
         with:
           # pull_request_target checks out base by default; explicitly use PR head.
           # Safe: the preview CLI only reads files to build artifacts and posts comments.
-          # NOTE: The allowlist gate (OWNER/MEMBER/COLLABORATOR, safe-to-test, PREVIEW_ENV_ALLOWLIST)
+          # NOTE: The allowlist gate (safe-to-test, PREVIEW_ENV_ALLOWLIST)
           # authorizes running the fork's cmd/preview code with SPRITES_API_TOKEN and GH_TOKEN.
           # The safe-to-test label must be re-applied after each new push (see strip-safe-to-test job).
           repository: ${{ github.event.pull_request.head.repo.full_name }}

@@ -4,7 +4,9 @@ import { getActiveWorkspaceId } from "./lib/get-active-workspace";
 import { OfficePageClient } from "./page-client";
 import type { DashboardData } from "@/lib/state/slices/office/types";
 
-export default async function OfficePage() {
+type SearchParams = Promise<{ workspaceId?: string }>;
+
+export default async function OfficePage({ searchParams }: { searchParams?: SearchParams }) {
   const onboarding = await getOnboardingState({ cache: "no-store" }).catch(() => ({
     completed: true,
   }));
@@ -12,7 +14,8 @@ export default async function OfficePage() {
     redirect("/office/setup");
   }
 
-  const workspaceId = await getActiveWorkspaceId();
+  const params = searchParams ? await searchParams : {};
+  const workspaceId = await getActiveWorkspaceId(params.workspaceId);
 
   let dashboard: DashboardData | null = null;
   if (workspaceId) {

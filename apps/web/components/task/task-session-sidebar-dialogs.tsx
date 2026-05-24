@@ -13,11 +13,11 @@ export type SidebarDialogsActions = {
   archivingTask: Target;
   setArchivingTask: (next: Target) => void;
   isArchiving: boolean;
-  handleArchiveConfirm: () => Promise<void> | void;
+  handleArchiveConfirm: (opts: { cascade: boolean }) => Promise<void> | void;
   deletingTask: Target;
   setDeletingTask: (next: Target) => void;
   isDeleting: boolean;
-  handleDeleteConfirm: () => Promise<void> | void;
+  handleDeleteConfirm: (opts: { cascade: boolean }) => Promise<void> | void;
 };
 
 export function SidebarDialogs({ actions }: { actions: SidebarDialogsActions }) {
@@ -50,6 +50,7 @@ export function SidebarDialogs({ actions }: { actions: SidebarDialogsActions }) 
           if (!open) setArchivingTask(null);
         }}
         taskTitle={archivingTask?.title ?? ""}
+        taskId={archivingTask?.id}
         isArchiving={isArchiving}
         onConfirm={handleArchiveConfirm}
       />
@@ -59,6 +60,7 @@ export function SidebarDialogs({ actions }: { actions: SidebarDialogsActions }) 
           if (!open) setDeletingTask(null);
         }}
         taskTitle={deletingTask?.title ?? ""}
+        taskId={deletingTask?.id}
         isDeleting={isDeleting}
         onConfirm={handleDeleteConfirm}
       />

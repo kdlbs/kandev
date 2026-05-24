@@ -417,6 +417,58 @@ func (s *Service) handlePermissionRequest(ctx context.Context, data watcher.Perm
 				zap.String("pending_id", data.PendingID))
 		}
 	}
+
+	// Run-mode automation tasks are hidden from the kanban, so there is no UI
+	// for the user to answer a permission prompt. Auto-reject and mark the run
+	// failed so the failure shows up in the automation's Recent Runs.
+	s.failAutomationRunOnPermission(ctx, data)
+}
+
+// failAutomationRunOnPermission checks whether the permission request belongs
+// to a run-mode automation task and, if so, rejects the prompt and marks the
+// corresponding automation_run row as failed.
+func (s *Service) failAutomationRunOnPermission(ctx context.Context, data watcher.PermissionRequestData) {
+	if s.automationService == nil || data.TaskID == "" {
+		return
+	}
+	task, err := s.repo.GetTask(ctx, data.TaskID)
+	if err != nil || task == nil {
+		return
+	}
+	if !task.IsEphemeral || task.Origin != models.TaskOriginAutomationRun {
+		return
+	}
+
+	// Always cancel: the session is going to be marked failed anyway, and
+	// passing cancelled=false would let RespondToPermission set the session
+	// back to running ("approved") even though the optionID denotes rejection.
+	optionID := pickRejectOption(data.Options)
+	if err := s.RespondToPermission(ctx, data.TaskSessionID, data.PendingID, optionID, true); err != nil {
+		s.logger.Warn("failed to auto-reject permission for run-mode automation",
+			zap.String("task_id", data.TaskID),
+			zap.String("pending_id", data.PendingID),
+			zap.Error(err))
+	}
+
+	errMsg := fmt.Sprintf("Permission required: %s — run-mode automations cannot answer prompts", data.Title)
+	if err := s.automationService.MarkRunFailedByTaskID(ctx, data.TaskID, errMsg); err != nil {
+		s.logger.Warn("failed to mark automation run failed after permission prompt",
+			zap.String("task_id", data.TaskID), zap.Error(err))
+	}
+}
+
+// pickRejectOption returns the first option_id with a reject-kind, or "" if
+// none was offered.
+func pickRejectOption(options []map[string]interface{}) string {
+	for _, opt := range options {
+		kind, _ := opt["kind"].(string)
+		if strings.HasPrefix(kind, "reject") {
+			if id, ok := opt["option_id"].(string); ok {
+				return id
+			}
+		}
+	}
+	return ""
 }
 
 // handleGitCommitCreated handles git commit events by forwarding them to the frontend.

@@ -8,11 +8,12 @@ import (
 )
 
 // BuildGistREADME renders the README that appears at the top of the gist
-// page on github.com. The primary user-facing rendering is share.html (served
-// via raw.githack.com); the README is mostly a "go to the pretty view"
-// pointer plus a markdown fallback for anyone who lands on the gist directly.
-// renderedURL is the raw.githack.com link to share.html; pass "" if it's not
-// known yet (the README is regenerated post-upload with the real link).
+// page on github.com. The primary user-facing rendering is share.html
+// (served via gist.githack.com); the README is mostly a "go to the pretty
+// view" pointer plus a markdown fallback for anyone who lands on the gist
+// directly. renderedURL is the gist.githack.com link to share.html; pass
+// "" if it's not known yet (the README is regenerated post-upload with
+// the real link).
 func BuildGistREADME(snap *Snapshot, renderedURL string) string {
 	if snap == nil {
 		return "# kandev share\n"

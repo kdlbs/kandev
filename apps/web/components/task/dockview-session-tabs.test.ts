@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import type { DockviewApi } from "dockview-react";
-import { reconcileRemovedSessionPanels } from "./dockview-session-tabs";
+import { findSessionAnchorGroupId, reconcileRemovedSessionPanels } from "./dockview-session-tabs";
 
 type FakePanel = {
   id: string;
@@ -148,5 +148,41 @@ describe("reconcileRemovedSessionPanels", () => {
 
     expect(createdSet.has("already-removed")).toBe(false);
     expect(createdSet.has(KEEP)).toBe(true);
+  });
+});
+
+describe("findSessionAnchorGroupId", () => {
+  function makeApiWithPanels(panels: Array<{ id: string; groupId: string }>): DockviewApi {
+    const enriched = panels.map((p) => ({ id: p.id, group: { id: p.groupId } }));
+    return {
+      panels: enriched,
+      getPanel: (id: string) => enriched.find((p) => p.id === id) ?? null,
+    } as unknown as DockviewApi;
+  }
+
+  it("returns the group id of a pr-detail anchor panel", () => {
+    // Regression: when a saved layout's session was sanitized away (page load)
+    // or replaced (env switch) but pr-detail remained, the new session would
+    // be added as a right-of-sidebar split instead of joining pr-detail's
+    // group — pulling pr-detail out of the user's grouping with the agent.
+    const api = makeApiWithPanels([{ id: "pr-detail", groupId: "saved-center-group" }]);
+
+    expect(findSessionAnchorGroupId(api)).toBe("saved-center-group");
+  });
+
+  it("matches keyed pr-detail panels used by multi-repo PR flows", () => {
+    // Multi-repo tasks open one PR tab per PR with id `pr-detail|owner/repo/N`
+    // (see addPRPanel in dockview-panel-actions.ts). Without prefix matching,
+    // findSessionAnchorGroupId would miss them and the new session would land
+    // as a right-of-sidebar split — losing the user's PR/session grouping.
+    const api = makeApiWithPanels([{ id: "pr-detail|owner/repo/123", groupId: "keyed-pr-group" }]);
+
+    expect(findSessionAnchorGroupId(api)).toBe("keyed-pr-group");
+  });
+
+  it("returns null when no anchor panel exists", () => {
+    const api = makeApiWithPanels([]);
+
+    expect(findSessionAnchorGroupId(api)).toBeNull();
   });
 });

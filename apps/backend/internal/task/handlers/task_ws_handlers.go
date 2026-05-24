@@ -330,7 +330,14 @@ func (h *TaskHandlers) wsMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_step_id is required", nil)
 	}
 
-	result, err := h.service.MoveTask(ctx, req.ID, req.WorkflowID, req.WorkflowStepID, req.Position)
+	result, err := h.service.MoveTaskWithOptions(
+		ctx,
+		req.ID,
+		req.WorkflowID,
+		req.WorkflowStepID,
+		req.Position,
+		service.MoveTaskOptions{AllowActivePrimarySession: true},
+	)
 	if err != nil {
 		h.logger.Error("failed to move task", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to move task", nil)

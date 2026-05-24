@@ -38,6 +38,7 @@ type repoInfo struct {
 	RepositoryPath       string
 	BaseBranch           string
 	CheckoutBranch       string
+	PRNumber             int // GitHub PR number when CheckoutBranch is a PR head; sourced from task_repositories.metadata["pr_number"].
 	WorktreeBranchPrefix string
 	PullBeforeWorktree   bool
 	Repository           *models.Repository
@@ -92,6 +93,7 @@ func (e *Executor) resolveTaskRepoInfo(ctx context.Context, tr *models.TaskRepos
 		RepositoryID:   tr.RepositoryID,
 		BaseBranch:     tr.BaseBranch,
 		CheckoutBranch: tr.CheckoutBranch,
+		PRNumber:       prNumberFromMetadata(tr.Metadata),
 	}
 	if info.RepositoryID == "" {
 		return info, nil
@@ -714,6 +716,7 @@ func (e *Executor) applyResumeRepoConfig(ctx context.Context, task *v1.Task, ses
 		primaryTaskRepo, _ := e.repo.GetPrimaryTaskRepository(ctx, task.ID)
 		if primaryTaskRepo != nil && primaryTaskRepo.CheckoutBranch != "" {
 			req.CheckoutBranch = primaryTaskRepo.CheckoutBranch
+			req.PRNumber = prNumberFromMetadata(primaryTaskRepo.Metadata)
 		}
 		req.WorktreeBranchPrefix = repository.WorktreeBranchPrefix
 		req.PullBeforeWorktree = repository.PullBeforeWorktree
@@ -759,6 +762,35 @@ func (e *Executor) persistResumeState(ctx context.Context, taskID string, sessio
 			zap.String("session_id", session.ID),
 			zap.Error(err))
 	}
+}
+
+// prNumberFromMetadata extracts a GitHub PR number from a task_repository's
+// metadata bag. Stored as JSON, so on retrieval the value can decode as either
+// float64 (default for json.Unmarshal into interface{}) or int. Returns 0 when
+// the key is absent, malformed, or non-positive.
+func prNumberFromMetadata(metadata map[string]interface{}) int {
+	if metadata == nil {
+		return 0
+	}
+	raw, ok := metadata["pr_number"]
+	if !ok {
+		return 0
+	}
+	switch v := raw.(type) {
+	case float64:
+		if v > 0 {
+			return int(v)
+		}
+	case int:
+		if v > 0 {
+			return v
+		}
+	case int64:
+		if v > 0 {
+			return int(v)
+		}
+	}
+	return 0
 }
 
 // startAgentProcessOnResume starts the agent process asynchronously after a session resume.

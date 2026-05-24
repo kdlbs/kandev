@@ -301,6 +301,7 @@ type RepoLaunchSpec struct {
 	BaseBranch           string
 	DefaultBranch        string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch       string
+	PRNumber             int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	WorktreeID           string // Existing worktree ID to reuse (skip creation if set)
 	WorktreeBranchPrefix string
 	PullBeforeWorktree   bool
@@ -368,6 +369,7 @@ type LaunchRequest struct {
 	BaseBranch           string // Base branch for the worktree (e.g., "main")
 	DefaultBranch        string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch       string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
+	PRNumber             int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	WorktreeBranchPrefix string // Branch prefix for worktree branches
 	PullBeforeWorktree   bool   // Whether to pull from remote before creating the worktree
 
@@ -400,6 +402,7 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 		BaseBranch:           r.BaseBranch,
 		DefaultBranch:        r.DefaultBranch,
 		CheckoutBranch:       r.CheckoutBranch,
+		PRNumber:             r.PRNumber,
 		WorktreeID:           r.WorktreeID,
 		WorktreeBranchPrefix: r.WorktreeBranchPrefix,
 		PullBeforeWorktree:   r.PullBeforeWorktree,

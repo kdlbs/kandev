@@ -70,36 +70,44 @@ func toShareResponse(s *Share) shareResponse {
 }
 
 // displayURL returns the URL we want clients to use when opening a share.
-// We always prefer the gistpreview.github.io rendered view (the static
-// renderer pulls the gist's first HTML file via the GitHub API). Three
-// stored formats are normalised on the way out:
+// We always prefer the gist.githack.com rendered view (it proxies the raw
+// gist file directly, avoiding the GitHub gists-API content budget that
+// makes gistpreview.github.io render blank for big snapshots). Stored
+// formats are normalised on the way out:
 //
-//   - bare gist URL (https://gist.github.com/<owner>/<id>) — old rows
+//   - bare gist URL (https://gist.github.com/<owner>/<id>) — older rows
 //     written before share.html landed in the gist
-//   - raw.githack URL (https://gist.githack.com/<owner>/<id>/raw/share.html)
-//     — rows written during the brief raw.githack window
-//   - already a gistpreview URL — passthrough
+//   - already a githack URL — re-pinned to /raw/share.html so rows that
+//     targeted a different file (or no file) land on the styled view
+//   - legacy gistpreview URL — passed through (owner is not recoverable
+//     from gistpreview shape, so we can't upgrade to githack), but
+//     re-pinned with /share.html when stored without a filename so
+//     pre-existing rows still hit the styled HTML rather than the
+//     alphabetically-first README.md
 //
 // Anything we don't recognise is returned unchanged.
 func displayURL(stored string) string {
 	if stored == "" {
 		return ""
 	}
-	// Already a gistpreview URL — if the caller pinned share.html, keep it;
-	// otherwise re-pin it so gistpreview doesn't fall back to README.md.
+	// Already a githack URL — re-pin /raw/share.html.
+	if owner, id := ownerAndIDFromGithackURL(stored); owner != "" && id != "" {
+		return githackURL(owner, id)
+	}
+	// Bare gist URL → convert to githack.
+	if rendered := renderedURLForGist(stored); rendered != "" {
+		return rendered
+	}
+	// Legacy gistpreview URL — pass through, but re-pin /share.html for
+	// rows stored without a filename so they don't silently fall back to
+	// rendering README.md.
 	const previewPrefix = "https://gistpreview.github.io/?"
 	if strings.HasPrefix(stored, previewPrefix) {
 		id := strings.TrimPrefix(stored, previewPrefix)
 		if i := strings.Index(id, "/"); i >= 0 {
 			id = id[:i]
 		}
-		return gistpreviewURL(id)
-	}
-	if rendered := renderedURLForGist(stored); rendered != "" {
-		return rendered
-	}
-	if id := gistIDFromGithackURL(stored); id != "" {
-		return gistpreviewURL(id)
+		return previewPrefix + id + "/share.html"
 	}
 	return stored
 }

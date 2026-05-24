@@ -22,8 +22,7 @@ import { useFileEditors } from "@/hooks/use-file-editors";
 import { useLspFileOpener } from "@/hooks/use-lsp-file-opener";
 import { useEditorKeybinds } from "@/hooks/use-editor-keybinds";
 import { usePlanPanelAutoOpen } from "@/hooks/use-plan-panel-auto-open";
-import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
-import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
+import { useSessionChangesCount } from "@/hooks/domains/session/use-session-changes-count";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import { useActiveTaskHasRepos } from "@/hooks/domains/kanban/use-active-task-has-repos";
 
@@ -315,10 +314,7 @@ function ChangesContent({ panelId }: { panelId: string }) {
   // Dynamic title with file count — use environment-stable sessionId so the
   // tab title doesn't re-fetch on same-environment session tab switches.
   const activeSessionId = useEnvironmentSessionId();
-  const gitStatus = useSessionGitStatus(activeSessionId);
-  const { commits } = useSessionCommits(activeSessionId);
-  const fileCount = gitStatus?.files ? Object.keys(gitStatus.files).length : 0;
-  const totalCount = fileCount + commits.length;
+  const totalCount = useSessionChangesCount(activeSessionId);
 
   // Repo-less tasks have no git changes ever — auto-close the panel so users
   // don't see a permanently empty Changes tab. Gate on a confirmed `false`:

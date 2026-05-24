@@ -875,7 +875,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		// runs in a goroutine and the session is already WAITING_FOR_INPUT, so
 		// autoStartStepPrompt sends the prompt directly via PromptTask.
 		effectivePrompt := s.buildWorkflowPrompt(taskDescription, step, taskID, sessionID)
-		if err := s.autoStartStepPrompt(ctx, taskID, session, step.Name, effectivePrompt, hasPlanMode, true); err != nil {
+		if err := s.autoStartStepPrompt(ctx, taskID, session, step, effectivePrompt, hasPlanMode, true); err != nil {
 			s.logger.Error("failed to auto-start agent for step",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),
@@ -892,18 +892,17 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		if sessionSwitched && step.Prompt != "" {
 			effectivePrompt := s.buildWorkflowPrompt(taskDescription, step, taskID, sessionID)
 			planMode := hasPlanMode
-			stepName := step.Name
 			stepID := step.ID
 			s.logger.Info("auto-launching agent after profile switch (no explicit auto_start)",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),
-				zap.String("step_name", stepName))
+				zap.String("step_name", step.Name))
 			// Launch asynchronously because processOnEnter may also be called
 			// synchronously from finalizeStepEnter (manual task move). In that path,
 			// autoStartStepPrompt would block the caller's goroutine.
 			go func() {
 				asyncCtx := context.WithoutCancel(ctx)
-				err := s.autoStartStepPrompt(asyncCtx, taskID, session, stepName, effectivePrompt, planMode, true)
+				err := s.autoStartStepPrompt(asyncCtx, taskID, session, step, effectivePrompt, planMode, true)
 				if err != nil {
 					s.logger.Error("failed to launch agent after profile switch",
 						zap.String("task_id", taskID),
@@ -1091,13 +1090,45 @@ func (s *Service) autoStartPassthroughPrompt(
 	return nil
 }
 
+type workflowMessageOrigin struct {
+	StepID    string
+	StepName  string
+	StepColor string
+}
+
+func workflowOriginFromStep(step *wfmodels.WorkflowStep) workflowMessageOrigin {
+	if step == nil {
+		return workflowMessageOrigin{}
+	}
+	return workflowMessageOrigin{
+		StepID:    step.ID,
+		StepName:  step.Name,
+		StepColor: step.Color,
+	}
+}
+
+func workflowMessageMetadata(planMode bool, origin workflowMessageOrigin) map[string]interface{} {
+	meta := NewUserMessageMeta().
+		WithPlanMode(planMode).
+		WithAutoStart(true).
+		WithWorkflowStep(origin.StepID, origin.StepName, origin.StepColor).
+		ToMap()
+	if meta == nil {
+		meta = make(map[string]interface{})
+	}
+	meta["workflow_auto_start"] = true
+	return meta
+}
+
 func (s *Service) autoStartStepPrompt(
 	ctx context.Context,
-	taskID string, session *models.TaskSession, stepName, prompt string,
+	taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, prompt string,
 	planMode bool,
 	shouldQueueIfBusy bool,
 ) error {
 	sessionID := session.ID
+	origin := workflowOriginFromStep(step)
+	stepName := origin.StepName
 
 	// Take any queued message (e.g. from move_task_kandev with a hand-off
 	// prompt) and merge it with the step's auto-start prompt — auto-start
@@ -1118,7 +1149,7 @@ func (s *Service) autoStartStepPrompt(
 	}
 
 	if shouldQueueIfBusy {
-		queued, err := s.queueAutoStartPromptIfRunning(ctx, taskID, session, prompt, planMode)
+		queued, err := s.queueAutoStartPromptIfRunning(ctx, taskID, session, prompt, planMode, attachments, origin)
 		if err != nil {
 			requeueTaken()
 			return err
@@ -1140,7 +1171,7 @@ func (s *Service) autoStartStepPrompt(
 	if session.State == models.TaskSessionStateCreated && (prompt != "" || len(attachments) > 0) && !sysprompt.HasKandevContext(prompt) {
 		recordedPrompt = sysprompt.InjectKandevContext(taskID, sessionID, prompt)
 	}
-	s.recordAutoStartMessage(ctx, taskID, sessionID, recordedPrompt, planMode)
+	s.recordAutoStartMessage(ctx, taskID, sessionID, recordedPrompt, planMode, origin)
 
 	// If the session is in CREATED state, the agent was never started (e.g. workspace-only
 	// preparation from a blocked auto-start). PromptTask will reject CREATED sessions,
@@ -1183,7 +1214,7 @@ func (s *Service) autoStartStepPrompt(
 		// an active agent for this session (e.g. session state is CREATED but
 		// the agent was launched by a concurrent path). Queue instead of retrying.
 		if isAgentAlreadyRunningError(err) && shouldQueueIfBusy {
-			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode); queueErr != nil {
+			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode, attachments, origin); queueErr != nil {
 				requeueTaken()
 				return queueErr
 			}
@@ -1196,7 +1227,7 @@ func (s *Service) autoStartStepPrompt(
 		}
 
 		if shouldQueueIfBusy {
-			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode); queueErr != nil {
+			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode, attachments, origin); queueErr != nil {
 				requeueTaken()
 				return queueErr
 			}
@@ -1310,7 +1341,12 @@ func (s *Service) takeAndMergeHandoffMessage(ctx context.Context, sessionID, bas
 // recordAutoStartMessage creates a user message for a workflow auto-start prompt
 // so it appears in the chat history. The prompt content includes system-injected
 // tags which are stripped when displayed to users via ToAPI().
-func (s *Service) recordAutoStartMessage(ctx context.Context, taskID, sessionID, prompt string, planMode bool) {
+func (s *Service) recordAutoStartMessage(
+	ctx context.Context,
+	taskID, sessionID, prompt string,
+	planMode bool,
+	origin workflowMessageOrigin,
+) {
 	if s.messageCreator == nil || prompt == "" {
 		return
 	}
@@ -1326,12 +1362,7 @@ func (s *Service) recordAutoStartMessage(ctx context.Context, taskID, sessionID,
 	// re-creating the exact pileup the cleanup_policy work fixes.
 	// workflow_auto_start is the original tag this function set; preserved
 	// for any consumer reading it directly.
-	meta := NewUserMessageMeta().WithPlanMode(planMode).WithAutoStart(true)
-	metaMap := meta.ToMap()
-	if metaMap == nil {
-		metaMap = make(map[string]interface{})
-	}
-	metaMap["workflow_auto_start"] = true
+	metaMap := workflowMessageMetadata(planMode, origin)
 	if err := s.messageCreator.CreateUserMessage(ctx, taskID, prompt, sessionID, turnID, metaMap); err != nil {
 		s.logger.Error("failed to create auto-start user message",
 			zap.String("task_id", taskID),
@@ -1344,25 +1375,54 @@ func (s *Service) queueAutoStartPromptIfRunning(
 	ctx context.Context,
 	taskID string, session *models.TaskSession, prompt string,
 	planMode bool,
+	attachments []v1.MessageAttachment,
+	origin workflowMessageOrigin,
 ) (bool, error) {
 	if session.State != models.TaskSessionStateRunning && session.State != models.TaskSessionStateStarting {
 		return false, nil
 	}
-	if err := s.queueAutoStartPrompt(ctx, taskID, session.ID, prompt, planMode); err != nil {
+	if err := s.queueAutoStartPrompt(ctx, taskID, session.ID, prompt, planMode, attachments, origin); err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+func toQueuedAttachments(attachments []v1.MessageAttachment) []messagequeue.MessageAttachment {
+	if len(attachments) == 0 {
+		return nil
+	}
+	queued := make([]messagequeue.MessageAttachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		queued = append(queued, messagequeue.MessageAttachment{
+			Type:     attachment.Type,
+			Data:     attachment.Data,
+			MimeType: attachment.MimeType,
+		})
+	}
+	return queued
 }
 
 func (s *Service) queueAutoStartPrompt(
 	ctx context.Context,
 	taskID, sessionID, prompt string,
 	planMode bool,
+	attachments []v1.MessageAttachment,
+	origin workflowMessageOrigin,
 ) error {
 	if s.messageQueue == nil {
 		return fmt.Errorf("message queue is not configured")
 	}
-	_, err := s.messageQueue.QueueMessage(ctx, sessionID, taskID, prompt, "", "workflow-auto-start", planMode, []messagequeue.MessageAttachment{})
+	_, err := s.messageQueue.QueueMessageWithMetadata(
+		ctx,
+		sessionID,
+		taskID,
+		prompt,
+		"",
+		messagequeue.QueuedByWorkflow,
+		planMode,
+		toQueuedAttachments(attachments),
+		workflowMessageMetadata(planMode, origin),
+	)
 	if err != nil {
 		return fmt.Errorf("failed to queue workflow auto-start prompt: %w", err)
 	}

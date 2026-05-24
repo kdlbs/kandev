@@ -11,17 +11,24 @@ import {
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { IconBrandGithub, IconHexagon, IconPlugConnected, IconTicket } from "@tabler/icons-react";
+import {
+  IconBrandGithub,
+  IconBrandGitlab,
+  IconHexagon,
+  IconPlugConnected,
+  IconTicket,
+} from "@tabler/icons-react";
 import { useJiraAvailable } from "@/hooks/domains/jira/use-jira-availability";
 import { useLinearAvailable } from "@/hooks/domains/linear/use-linear-availability";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
+import { useGitLabAvailable } from "@/hooks/domains/gitlab/use-task-mr";
 import type { GitHubStatus } from "@/lib/types/github";
 
 type MobileIntegrationsSectionProps = {
   onNavigate: () => void;
 };
 
-type IntegrationId = "github" | "jira" | "linear";
+type IntegrationId = "github" | "gitlab" | "jira" | "linear";
 
 type IntegrationLink = {
   id: IntegrationId;
@@ -31,18 +38,21 @@ type IntegrationLink = {
 
 type IntegrationAvailability = {
   githubReady: boolean;
+  gitlabReady: boolean;
   jiraAvailable: boolean;
   linearAvailable: boolean;
 };
 
 const INTEGRATION_LINKS: IntegrationLink[] = [
   { id: "github", label: "GitHub", href: "/github" },
+  { id: "gitlab", label: "GitLab", href: "/gitlab" },
   { id: "jira", label: "Jira", href: "/jira" },
   { id: "linear", label: "Linear", href: "/linear" },
 ];
 
 const INTEGRATION_ICONS = {
   github: IconBrandGithub,
+  gitlab: IconBrandGitlab,
   jira: IconTicket,
   linear: IconHexagon,
 } satisfies Record<IntegrationId, typeof IconBrandGithub>;
@@ -51,11 +61,13 @@ const HOVER_CLOSE_DELAY_MS = 180;
 
 export function getAvailableIntegrationLinks({
   githubReady,
+  gitlabReady,
   jiraAvailable,
   linearAvailable,
 }: IntegrationAvailability): IntegrationLink[] {
   return INTEGRATION_LINKS.filter((link) => {
     if (link.id === "github") return githubReady;
+    if (link.id === "gitlab") return gitlabReady;
     if (link.id === "jira") return jiraAvailable;
     return linearAvailable;
   });
@@ -73,12 +85,14 @@ export function getGitHubIntegrationStatus(status: GitHubStatus | null, loading:
 
 function useConfiguredIntegrationLinks(): IntegrationLink[] {
   const { status, loading } = useGitHubStatus();
+  const gitlabAvailable = useGitLabAvailable();
   const jiraAvailable = useJiraAvailable();
   const linearAvailable = useLinearAvailable();
   const githubStatus = getGitHubIntegrationStatus(status, loading);
 
   return getAvailableIntegrationLinks({
     githubReady: githubStatus.ready,
+    gitlabReady: gitlabAvailable,
     jiraAvailable,
     linearAvailable,
   });

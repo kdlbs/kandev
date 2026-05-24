@@ -29,22 +29,6 @@ export function formatBytes(bytes: number): string {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 }
 
-/**
- * Open a base64-encoded image in a new browser window for full-size viewing.
- * MIME type is constrained to PREVIEWABLE_IMAGE_TYPES so a crafted value can't
- * break out of the `src` attribute in document.write. `noopener` keeps the
- * opened window from accessing window.opener.
- */
-export function openImageInWindow(mimeType: string, data: string): void {
-  const safeMime = PREVIEWABLE_IMAGE_TYPES.includes(mimeType) ? mimeType : "image/png";
-  const win = window.open("", "_blank", "noopener,noreferrer");
-  if (win) {
-    win.document.write(
-      `<img src="data:${safeMime};base64,${data}" style="max-width:100%;height:auto;" />`,
-    );
-  }
-}
-
 function isPreviewableImage(mimeType: string): boolean {
   return PREVIEWABLE_IMAGE_TYPES.includes(mimeType);
 }

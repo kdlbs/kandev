@@ -107,53 +107,39 @@ function useBulkOperations({
   applyMoveInStore: (ids: Set<string>, stepId: string) => void;
   getWorkflowIdForTask: (id: string) => string | null;
 }) {
-  const bulkDelete = useCallback(async () => {
-    const ids = selectedIdsRef.current;
-    if (!ids || ids.size === 0) return;
-    setIsDeleting(true);
-    try {
-      const idList = [...ids];
-      const results = await Promise.allSettled(idList.map((id) => deleteTaskById(id)));
-      const succeeded = new Set(idList.filter((_, i) => results[i].status === "fulfilled"));
-      removeTasksFromStore(succeeded);
-      const failed = new Set(idList.filter((_, i) => results[i].status === "rejected"));
-      setSelectedIds(failed);
-      if (failed.size === 0) setIsMultiSelectEnabled(false);
-    } finally {
-      setIsDeleting(false);
-    }
-  }, [
-    deleteTaskById,
-    removeTasksFromStore,
-    selectedIdsRef,
-    setIsDeleting,
-    setIsMultiSelectEnabled,
-    setSelectedIds,
-  ]);
+  const runBulk = useCallback(
+    async (
+      per: (id: string, opts?: { cascade?: boolean }) => Promise<void>,
+      setBusy: (v: boolean) => void,
+      opts?: { cascade?: boolean },
+    ) => {
+      const ids = selectedIdsRef.current;
+      if (!ids || ids.size === 0) return;
+      setBusy(true);
+      try {
+        const idList = [...ids];
+        const results = await Promise.allSettled(idList.map((id) => per(id, opts)));
+        const succeeded = new Set(idList.filter((_, i) => results[i].status === "fulfilled"));
+        removeTasksFromStore(succeeded);
+        const failed = new Set(idList.filter((_, i) => results[i].status === "rejected"));
+        setSelectedIds(failed);
+        if (failed.size === 0) setIsMultiSelectEnabled(false);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [removeTasksFromStore, selectedIdsRef, setIsMultiSelectEnabled, setSelectedIds],
+  );
 
-  const bulkArchive = useCallback(async () => {
-    const ids = selectedIdsRef.current;
-    if (!ids || ids.size === 0) return;
-    setIsArchiving(true);
-    try {
-      const idList = [...ids];
-      const results = await Promise.allSettled(idList.map((id) => archiveTaskById(id)));
-      const succeeded = new Set(idList.filter((_, i) => results[i].status === "fulfilled"));
-      removeTasksFromStore(succeeded);
-      const failed = new Set(idList.filter((_, i) => results[i].status === "rejected"));
-      setSelectedIds(failed);
-      if (failed.size === 0) setIsMultiSelectEnabled(false);
-    } finally {
-      setIsArchiving(false);
-    }
-  }, [
-    archiveTaskById,
-    removeTasksFromStore,
-    selectedIdsRef,
-    setIsArchiving,
-    setIsMultiSelectEnabled,
-    setSelectedIds,
-  ]);
+  const bulkDelete = useCallback(
+    (opts?: { cascade?: boolean }) => runBulk(deleteTaskById, setIsDeleting, opts),
+    [runBulk, deleteTaskById, setIsDeleting],
+  );
+
+  const bulkArchive = useCallback(
+    (opts?: { cascade?: boolean }) => runBulk(archiveTaskById, setIsArchiving, opts),
+    [runBulk, archiveTaskById, setIsArchiving],
+  );
 
   const bulkMove = useCallback(
     async (targetStepId: string) => {

@@ -97,6 +97,9 @@ func (m *mockRepository) ListChildren(_ context.Context, _ string) ([]*models.Ta
 func (m *mockRepository) ListChildrenIncludingArchived(_ context.Context, _ string) ([]*models.Task, error) {
 	return nil, nil
 }
+func (m *mockRepository) ReparentDirectChildren(_ context.Context, _, _ string) error {
+	return nil
+}
 func (m *mockRepository) ListSiblings(_ context.Context, _ string) ([]*models.Task, error) {
 	return nil, nil
 }

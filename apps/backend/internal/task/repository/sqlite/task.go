@@ -320,6 +320,21 @@ func (r *Repository) ListChildrenIncludingArchived(ctx context.Context, parentID
 	return r.scanTasks(rows)
 }
 
+// ReparentDirectChildren swaps the parent_id of every row matching
+// oldParentID (archived or not) to newParentID. Used by no-cascade
+// delete so the soon-to-be-orphaned direct children become roots
+// instead of pointing at a row that's about to vanish.
+func (r *Repository) ReparentDirectChildren(ctx context.Context, oldParentID, newParentID string) error {
+	if oldParentID == "" {
+		return nil
+	}
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks SET parent_id = ?, updated_at = ?
+		WHERE parent_id = ?
+	`), newParentID, time.Now().UTC(), oldParentID)
+	return err
+}
+
 // ListSiblings returns non-archived, non-ephemeral sibling tasks. A task
 // is a sibling when parent_id matches AND the parent_id is non-empty AND
 // the workspace matches. Root tasks (empty parent_id) deliberately return

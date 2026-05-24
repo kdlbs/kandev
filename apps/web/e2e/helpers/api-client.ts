@@ -1194,13 +1194,15 @@ export class ApiClient {
   async setJiraConfig(payload: {
     siteUrl: string;
     email: string;
-    authMethod?: "api_token" | "session_cookie";
+    authMethod?: "api_token" | "pat" | "session_cookie";
+    instanceType?: "cloud" | "server";
     defaultProjectKey?: string;
     secret: string;
   }): Promise<unknown> {
     return this.request("POST", "/api/v1/jira/config", {
       ...payload,
       authMethod: payload.authMethod ?? "api_token",
+      instanceType: payload.instanceType ?? "cloud",
     });
   }
 

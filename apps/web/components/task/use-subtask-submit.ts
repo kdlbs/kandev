@@ -70,6 +70,7 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
               githubUrl: fs.githubUrl,
               githubBranch: fs.githubBranch,
               githubPrHeadBranch: fs.githubPrHeadBranch,
+              githubPrBaseBranch: fs.githubPrBaseBranch,
               repositories: fs.repositories,
               discoveredRepositories: fs.discoveredRepositories,
               workspaceRepositories: availableRepositories,

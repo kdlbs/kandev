@@ -224,4 +224,73 @@ describe("buildRepositoriesPayload — single-row and URL mode", () => {
       { repository_id: "repo-only", base_branch: "main", checkout_branch: undefined },
     ]);
   });
+
+  // Fork PR: the displayed branch equals the PR head (auto-selected for visual
+  // consistency with the pasted URL), but that branch doesn't live on origin.
+  // The payload must anchor base_branch to the PR's actual target (from the
+  // GitHub API) so the backend has a ref it can resolve.
+  it("fork PR auto-selection: base_branch comes from PR's target, not displayed branch", () => {
+    const payload = buildRepositoriesPayload({
+      useGitHubUrl: true,
+      githubUrl: "https://github.com/kdlbs/kandev/pull/977",
+      githubBranch: "jira-hosted-path-auth", // displayed = PR head
+      githubPrHeadBranch: "jira-hosted-path-auth",
+      githubPrBaseBranch: "main",
+      repositories: [],
+      discoveredRepositories: [],
+    });
+    expect(payload).toEqual([
+      {
+        repository_id: "",
+        base_branch: "main",
+        checkout_branch: "jira-hosted-path-auth",
+        github_url: "https://github.com/kdlbs/kandev/pull/977",
+      },
+    ]);
+  });
+
+  // User picked a non-PR-head branch from the dropdown after pasting a PR URL.
+  // We respect their override: send their pick as base, keep PR head as checkout.
+  it("user-overridden base branch beats PR's target when displayed branch differs from PR head", () => {
+    const payload = buildRepositoriesPayload({
+      useGitHubUrl: true,
+      githubUrl: "https://github.com/owner/repo/pull/42",
+      githubBranch: "develop", // user picked something else
+      githubPrHeadBranch: "feature/x",
+      githubPrBaseBranch: "main",
+      repositories: [],
+      discoveredRepositories: [],
+    });
+    expect(payload).toEqual([
+      {
+        repository_id: "",
+        base_branch: "develop",
+        checkout_branch: "feature/x",
+        github_url: "https://github.com/owner/repo/pull/42",
+      },
+    ]);
+  });
+
+  // Same-repo PR: PR head exists on origin, so base_branch = PR head is fine.
+  // PR's base from API is still preferred when available, so the auto-selected
+  // case still anchors to the PR's actual target rather than the head.
+  it("same-repo PR auto-selection: still prefers PR target over PR head", () => {
+    const payload = buildRepositoriesPayload({
+      useGitHubUrl: true,
+      githubUrl: "https://github.com/owner/repo/pull/10",
+      githubBranch: "feature/x",
+      githubPrHeadBranch: "feature/x",
+      githubPrBaseBranch: "main",
+      repositories: [],
+      discoveredRepositories: [],
+    });
+    expect(payload).toEqual([
+      {
+        repository_id: "",
+        base_branch: "main",
+        checkout_branch: "feature/x",
+        github_url: "https://github.com/owner/repo/pull/10",
+      },
+    ]);
+  });
 });

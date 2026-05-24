@@ -33,9 +33,9 @@ func (b *GistBackend) Name() string { return BackendGitHubGist }
 
 // Upload marshals the snapshot to JSON, builds the rendered share.html and
 // a README, then creates a secret gist with all three. The returned URL is
-// the rendered view served via gistpreview.github.io — that's the link
-// users share. The gist itself is preserved in the database via the
-// externalID so we can still delete it on revoke.
+// the rendered view served via gist.githack.com — that's the link users
+// share. The gist itself is preserved in the database via the externalID
+// so we can still delete it on revoke.
 func (b *GistBackend) Upload(ctx context.Context, snap *Snapshot) (string, string, error) {
 	body, err := json.MarshalIndent(snap, "", "  ")
 	if err != nil {
@@ -71,66 +71,74 @@ func (b *GistBackend) Upload(ctx context.Context, snap *Snapshot) (string, strin
 }
 
 // renderedURLForGist returns the public rendering URL we hand to the user
-// for a given gist. We route through gistpreview.github.io, a static
-// GitHub-Pages site that fetches the gist via the public API and renders
-// an HTML file client-side. We use it instead of raw.githack.com so
-// visitors don't hit the "One more step" anti-phishing interstitial.
+// for a given gist. We route through gist.githack.com, a Cloudflare-backed
+// CDN that proxies the gist's raw file content directly.
 //
-// Critically: we append "/share.html" to the URL because gistpreview's
-// file-picker logic picks the first iterated file unless one is named
-// "index.html". Our gists contain README.md, share.html, snapshot.json —
-// without the explicit suffix, gistpreview picks README.md (alphabetical
-// first), renders it raw, and the page appears unstyled. The explicit
-// filename pins it to share.html.
+// Why githack and not gistpreview.github.io: gistpreview fetches gists
+// through the GitHub gists API, which serves `content: ""` for any file
+// past GitHub's per-response content budget (~1 MB combined across all
+// files). For non-trivial sessions, share.html / snapshot.json land past
+// that budget, and gistpreview renders a blank page. githack proxies the
+// raw file directly, so multi-megabyte share.html renders correctly.
 //
-//	https://gist.github.com/<owner>/<id>  →  https://gistpreview.github.io/?<id>/share.html
-//	https://gist.github.com/<id>          →  https://gistpreview.github.io/?<id>/share.html
+// Trade-off: githack shows a one-time anti-phishing interstitial the first
+// time a user visits any githack URL — accepted as the price of fidelity
+// for big tasks.
 //
-// Returns "" if the URL doesn't look like a gist URL — callers fall back
-// to whatever was stored.
+// We append "/raw/share.html" to pin the styled HTML view; without an
+// explicit filename githack can't pick the right file.
+//
+//	https://gist.github.com/<owner>/<id>  →  https://gist.githack.com/<owner>/<id>/raw/share.html
+//
+// Returns "" if the URL is missing the owner segment (anonymous gist) —
+// callers fall back to whatever was stored.
 func renderedURLForGist(gistHTMLURL string) string {
-	id := gistIDFromGistHTMLURL(gistHTMLURL)
-	if id == "" {
+	owner, id := ownerAndIDFromGistHTMLURL(gistHTMLURL)
+	if owner == "" || id == "" {
 		return ""
 	}
-	return gistpreviewURL(id)
+	return githackURL(owner, id)
 }
 
-// gistpreviewURL builds the gistpreview.github.io URL for a gist id,
-// explicitly pinning the file to share.html.
-func gistpreviewURL(gistID string) string {
-	return "https://gistpreview.github.io/?" + gistID + "/share.html"
+// githackURL builds the gist.githack.com raw-render URL for a gist,
+// explicitly pinning the file to share.html so the styled view loads.
+func githackURL(owner, id string) string {
+	return "https://gist.githack.com/" + owner + "/" + id + "/raw/share.html"
 }
 
-// gistIDFromGistHTMLURL extracts the gist ID from a github.com gist URL.
-// Returns "" for anything that doesn't match the expected shape.
-func gistIDFromGistHTMLURL(gistHTMLURL string) string {
+// ownerAndIDFromGistHTMLURL parses a github.com gist URL of the form
+// `https://gist.github.com/<owner>/<id>`. Anonymous gists (no owner
+// segment) return ("", ""); githack needs both to address the file.
+func ownerAndIDFromGistHTMLURL(gistHTMLURL string) (string, string) {
 	const prefix = "https://gist.github.com/"
 	if !strings.HasPrefix(gistHTMLURL, prefix) {
-		return ""
+		return "", ""
 	}
 	rest := strings.Trim(strings.TrimPrefix(gistHTMLURL, prefix), "/")
 	if rest == "" {
-		return ""
+		return "", ""
 	}
-	// "<owner>/<id>" or "<id>" — the ID is always the last segment.
 	parts := strings.Split(rest, "/")
-	return parts[len(parts)-1]
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return "", ""
+	}
+	return parts[0], parts[1]
 }
 
-// gistIDFromGithackURL pulls the gist ID out of a stored raw.githack URL
-// (legacy rows that were written before the gistpreview switchover).
-// Returns "" for anything that doesn't match.
-func gistIDFromGithackURL(url string) string {
+// ownerAndIDFromGithackURL extracts (owner, id) from a stored githack URL
+// of the form `https://gist.githack.com/<owner>/<id>/raw/...`. Used by
+// displayURL to re-pin /raw/share.html on rows whose stored URL targets
+// a different file. Returns ("", "") on anything that doesn't match.
+func ownerAndIDFromGithackURL(url string) (string, string) {
 	const prefix = "https://gist.githack.com/"
 	if !strings.HasPrefix(url, prefix) {
-		return ""
+		return "", ""
 	}
 	parts := strings.Split(strings.TrimPrefix(url, prefix), "/")
-	if len(parts) < 2 || parts[1] == "" {
-		return ""
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return "", ""
 	}
-	return parts[1]
+	return parts[0], parts[1]
 }
 
 // Delete removes the gist. A 404 from GitHub is returned to the caller as-is

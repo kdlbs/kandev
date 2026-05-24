@@ -16,6 +16,9 @@ import { INTENT_PR_REVIEW } from "@/lib/state/layout-manager";
 import { replaceTaskUrl } from "@/lib/links";
 import { launchSession } from "@/lib/services/session-launch-service";
 import { buildPrepareRequest } from "@/lib/services/session-launch-helpers";
+import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+
+const debug = createDebugLogger("dockview:task-select");
 
 export type SwitchToSessionFn = (
   taskId: string,
@@ -65,6 +68,16 @@ export function buildSwitchToSession(
     const state = store.getState();
     const oldEnvId = oldSessionId ? (state.environmentIdBySessionId[oldSessionId] ?? null) : null;
     const newEnvId = state.environmentIdBySessionId[sessionId] ?? null;
+    if (IS_DEBUG) {
+      debug("switchToSession: entry", {
+        taskId,
+        sessionId,
+        oldSessionId: oldSessionId ?? null,
+        oldEnvId,
+        newEnvId,
+        path: newEnvId ? "performLayoutSwitch" : "releaseToDefault",
+      });
+    }
     setActiveSession(taskId, sessionId);
     if (newEnvId) {
       performLayoutSwitch(oldEnvId, newEnvId, sessionId);
@@ -77,6 +90,9 @@ export function buildSwitchToSession(
     // layout to default so the new task starts from a clean slate; when the
     // new env id arrives, useEnvSwitchCleanup will adopt it without rebuild.
     if (oldEnvId || oldSessionId !== sessionId) {
+      if (IS_DEBUG) {
+        debug("switchToSession: releasing outgoing env (no newEnvId yet)", { oldEnvId });
+      }
       releaseLayoutToDefault(oldEnvId);
     }
   };
@@ -137,6 +153,14 @@ export function selectTaskWithLayout(params: {
   const { taskId, task, store, switchToSession, loadTaskSessionsForTask } = params;
   const state = store.getState();
   const oldSessionId = state.tasks.activeSessionId;
+  if (IS_DEBUG) {
+    debug("selectTaskWithLayout: entry", {
+      taskId,
+      primarySessionId: task?.primarySessionId ?? null,
+      oldSessionId: oldSessionId ?? null,
+      prevActiveTaskId: state.tasks.activeTaskId ?? null,
+    });
+  }
   if (task?.primarySessionId) {
     const targetSessionId = resolvePreferredSessionId(
       taskId,

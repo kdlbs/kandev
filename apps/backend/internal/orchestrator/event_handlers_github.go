@@ -91,6 +91,13 @@ type ReviewTaskRequest struct {
 	Description    string
 	Metadata       map[string]interface{}
 	Repositories   []ReviewTaskRepository
+	// IsEphemeral hides the task from the kanban — used by run-mode
+	// automations whose output should surface in the automation's run
+	// history rather than as a tracked task.
+	IsEphemeral bool
+	// Origin tags the task with a provenance label (see task/models.TaskOrigin*).
+	// Defaults to TaskOriginManual when empty.
+	Origin string
 }
 
 // ReviewTaskRepository associates a repository with a review task.
@@ -98,6 +105,7 @@ type ReviewTaskRepository struct {
 	RepositoryID   string
 	BaseBranch     string
 	CheckoutBranch string
+	PRNumber       int // GitHub PR number; carried so worktree creation can use refs/pull/<N>/head for fork PRs.
 }
 
 // SetGitHubService sets the GitHub service for PR auto-detection.
@@ -367,7 +375,7 @@ func (s *Service) resolveReviewRepository(ctx context.Context, workspaceID strin
 		zap.String("base_branch", baseBranch))
 	// BaseBranch = repo default branch (e.g. "main") for worktree creation.
 	// CheckoutBranch = PR head branch to fetch and checkout after worktree is created.
-	return []ReviewTaskRepository{{RepositoryID: repoID, BaseBranch: baseBranch, CheckoutBranch: pr.HeadBranch}}
+	return []ReviewTaskRepository{{RepositoryID: repoID, BaseBranch: baseBranch, CheckoutBranch: pr.HeadBranch, PRNumber: pr.Number}}
 }
 
 // detectPushAndAssociatePR checks if a push happened and looks for a PR on

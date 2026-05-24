@@ -465,7 +465,10 @@ const kandevMcpServerName = "kandev"
 // injectKandevMcpServer prepends the local kandev MCP server to the list of MCP servers.
 // This replaces any existing kandev server to avoid duplicates.
 // The kandev MCP server provides tools like ask_user_question to the agent.
-// Both SSE and HTTP variants are injected - agent capability filtering will select the appropriate one.
+// Both HTTP and SSE variants are injected - agent capability filtering will select the
+// appropriate one. HTTP is listed first so that when an agent advertises both transports
+// the "first surviving entry wins" dedup keeps the HTTP entry (modern streamable MCP);
+// SSE remains as a fallback for SSE-only agents.
 func injectKandevMcpServer(servers []McpServerConfig, port int) []McpServerConfig {
 	portStr := strconv.Itoa(port)
 	kandevMcpSse := McpServerConfig{
@@ -481,7 +484,7 @@ func injectKandevMcpServer(servers []McpServerConfig, port int) []McpServerConfi
 
 	// Filter out any existing kandev server and prepend the local ones
 	result := make([]McpServerConfig, 0, len(servers)+2)
-	result = append(result, kandevMcpSse, kandevMcpHttp)
+	result = append(result, kandevMcpHttp, kandevMcpSse)
 	for _, srv := range servers {
 		if srv.Name != kandevMcpServerName {
 			result = append(result, srv)

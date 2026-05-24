@@ -47,6 +47,17 @@ const (
 // the case without string-matching the underlying error message.
 var ErrTaskNotFound = errors.New("github: task not found for cleanup")
 
+// ErrSelfApprove is returned by SubmitReview when the authenticated user
+// attempts to APPROVE their own PR. GitHub rejects this with a 422; we
+// catch it server-side so the UI sees a clean, typed error rather than a
+// generic upstream failure when the frontend's visibility guard is bypassed.
+var ErrSelfApprove = errors.New("cannot approve your own pull request")
+
+// reviewEventApprove is the GitHub Reviews API event value for a positive
+// review. Extracted because it appears in the controller validator, the
+// service's self-approval guard, and tests.
+const reviewEventApprove = "APPROVE"
+
 // TaskDeleter deletes tasks by ID. Used for cleaning up merged PR tasks.
 // Implementations should return errors wrapping ErrTaskNotFound when the
 // task is already gone.
@@ -425,10 +436,24 @@ func (s *Service) ClearToken(ctx context.Context) error {
 	return nil
 }
 
-// SubmitReview submits a review on a pull request.
+// SubmitReview submits a review on a pull request. For APPROVE events it
+// first checks that the authenticated user is not the PR author, returning
+// ErrSelfApprove instead of letting the request fail at GitHub with an opaque
+// 422. Lookup failures here are non-fatal — we fall through to GitHub so a
+// transient API hiccup doesn't block legitimate approvals.
 func (s *Service) SubmitReview(ctx context.Context, owner, repo string, number int, event, body string) error {
 	if s.client == nil {
 		return fmt.Errorf("github client not configured")
+	}
+	if event == reviewEventApprove {
+		user, userErr := s.client.GetAuthenticatedUser(ctx)
+		if userErr == nil && user != "" {
+			pr, prErr := s.client.GetPR(ctx, owner, repo, number)
+			if prErr == nil && pr != nil &&
+				strings.EqualFold(strings.TrimSpace(pr.AuthorLogin), strings.TrimSpace(user)) {
+				return ErrSelfApprove
+			}
+		}
 	}
 	return s.client.SubmitReview(ctx, owner, repo, number, event, body)
 }

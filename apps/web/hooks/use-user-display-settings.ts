@@ -51,6 +51,7 @@ function carryForwardSettings(current: DisplaySettings) {
     sidebarViews: current.sidebarViews ?? [],
     defaultUtilityAgentId: current.defaultUtilityAgentId ?? null,
     keyboardShortcuts: current.keyboardShortcuts ?? {},
+    changesPanelLayout: current.changesPanelLayout ?? "flat",
     ...carryForwardTerminalSettings(current),
   };
 }

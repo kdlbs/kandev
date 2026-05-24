@@ -22,6 +22,7 @@ import type {
 import type { SystemHealthResponse } from "@/lib/types/health";
 import type { UISliceActions as UIA } from "./slices/ui/types";
 import type * as UISliceTypes from "./slices/ui/types";
+import type { Automation, AutomationRun } from "@/lib/types/automation";
 import { mergeInitialState } from "./default-state";
 import {
   createKanbanSlice,
@@ -31,10 +32,12 @@ import {
   createSessionRuntimeSlice,
   createUISlice,
   createGitHubSlice,
+  createGitLabSlice,
   createJiraSlice,
   createLinearSlice,
   createOfficeSlice,
   createFeaturesSlice,
+  createAutomationsSlice,
   defaultKanbanState,
   defaultWorkspaceState,
   defaultSettingsState,
@@ -42,10 +45,12 @@ import {
   defaultSessionRuntimeState,
   defaultUIState,
   defaultGitHubState,
+  defaultGitLabState,
   defaultJiraState,
   defaultLinearState,
   defaultOfficeState,
   defaultFeaturesState,
+  defaultAutomationsState,
   type WorkspaceState,
   type WorkflowsState,
   type ExecutorsState,
@@ -85,6 +90,7 @@ import type {
 // Re-export all types from slices for backwards compatibility (split out
 // to keep this file under the max-lines limit).
 export type * from "./store-reexports";
+import type { TaskMR } from "@/lib/types/gitlab";
 import type { JiraIssueWatch } from "@/lib/types/jira";
 import type { LinearIssueWatch } from "@/lib/types/linear";
 import type {
@@ -183,6 +189,9 @@ export type AppState = {
   actionPresets: (typeof defaultGitHubState)["actionPresets"];
   prFeedbackCache: (typeof defaultGitHubState)["prFeedbackCache"];
 
+  // GitLab slice
+  taskMRs: (typeof defaultGitLabState)["taskMRs"];
+
   // JIRA slice
   jiraIssueWatches: (typeof defaultJiraState)["jiraIssueWatches"];
 
@@ -195,6 +204,10 @@ export type AppState = {
   // Feature flags slice
   features: (typeof defaultFeaturesState)["features"];
   setFeatures: (features: (typeof defaultFeaturesState)["features"]) => void;
+
+  // Automations slice
+  automations: (typeof defaultAutomationsState)["automations"];
+  automationRuns: (typeof defaultAutomationsState)["automationRuns"];
 
   // UI slice
   previewPanel: (typeof defaultUIState)["previewPanel"];
@@ -239,6 +252,11 @@ export type AppState = {
   setPRFeedbackCacheEntry: (key: string, feedback: PRFeedback) => void;
   removePRFeedbackCacheEntry: (key: string) => void;
 
+  // GitLab actions
+  setTaskMRs: (mrs: Record<string, TaskMR[]>) => void;
+  setTaskMR: (taskId: string, mr: TaskMR) => void;
+  resetTaskMRs: () => void;
+
   // JIRA actions
   setJiraIssueWatches: (watches: JiraIssueWatch[]) => void;
   setJiraIssueWatchesLoading: (loading: boolean) => void;
@@ -254,6 +272,15 @@ export type AppState = {
   updateLinearIssueWatch: (watch: LinearIssueWatch) => void;
   removeLinearIssueWatch: (id: string) => void;
   resetLinearIssueWatches: () => void;
+
+  // Automations actions
+  setAutomations: (items: Automation[]) => void;
+  setAutomationsLoading: (loading: boolean) => void;
+  addAutomation: (automation: Automation) => void;
+  updateAutomation: (automation: Automation) => void;
+  removeAutomation: (id: string) => void;
+  setAutomationRuns: (automationId: string, runs: AutomationRun[]) => void;
+  setAutomationRunsLoading: (automationId: string, loading: boolean) => void;
 
   // Actions from all slices
   hydrate: (state: Partial<AppState>, options?: HydrationOptions) => void;
@@ -530,8 +557,6 @@ export type AppState = {
   setAgentRouting: (agentId: string, data: AgentRouteData | undefined) => void;
 };
 
-export type AppStore = ReturnType<typeof createAppStore>;
-
 export function createAppStore(initialState?: Partial<AppState>) {
   const merged = mergeInitialState(initialState);
 
@@ -552,6 +577,8 @@ export function createAppStore(initialState?: Partial<AppState>) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createGitHubSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...createGitLabSlice(set as any, get as any, api as any),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createJiraSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createLinearSlice(set as any, get as any, api as any),
@@ -561,6 +588,8 @@ export function createAppStore(initialState?: Partial<AppState>) {
       ...createFeaturesSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createUISlice(set as any, get as any, api as any),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...createAutomationsSlice(set as any, get as any, api as any),
       // Override state with merged initial state
       kanban: merged.kanban,
       kanbanMulti: merged.kanbanMulti,
@@ -611,10 +640,13 @@ export function createAppStore(initialState?: Partial<AppState>) {
       reviewWatches: merged.reviewWatches,
       issueWatches: merged.issueWatches,
       actionPresets: merged.actionPresets,
+      taskMRs: merged.taskMRs,
       jiraIssueWatches: merged.jiraIssueWatches,
       linearIssueWatches: merged.linearIssueWatches,
       office: merged.office,
       features: merged.features,
+      automations: merged.automations,
+      automationRuns: merged.automationRuns,
       previewPanel: merged.previewPanel,
       rightPanel: merged.rightPanel,
       diffs: merged.diffs,

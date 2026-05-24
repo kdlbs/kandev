@@ -7,7 +7,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { FileInfo } from "@/lib/state/store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { useAppStore } from "@/components/state-provider";
 import { FileRow, BulkActionBar } from "./changes-panel-file-row";
+import { ChangesTree, RepoTreeGroup } from "./changes-panel-tree";
+import type { ChangedFile } from "./changes-panel-helpers";
 import { type CommitItem } from "./commit-row";
 import { groupByRepositoryName, isSingleRepoGroup } from "@/lib/group-by-repo";
 import {
@@ -20,17 +23,6 @@ import { PRFilesGroupedList } from "./changes-panel-pr-files";
 import type { OpenDiffOptions } from "./changes-diff-target";
 
 // --- Timeline visual components ---
-
-type ChangedFile = {
-  path: string;
-  status: FileInfo["status"];
-  staged: boolean;
-  plus: number | undefined;
-  minus: number | undefined;
-  oldPath: string | undefined;
-  /** Repository this file belongs to in multi-repo workspaces; empty for single-repo. */
-  repositoryName?: string;
-};
 
 // Per-repo grouping is shared with the Review dialog — see @/lib/group-by-repo.
 
@@ -274,11 +266,12 @@ type FileListBodyProps = {
 };
 
 function FileListBody(props: FileListBodyProps) {
-  const { variant, files, pendingStageFiles, multiSelect } = props;
+  const { files, pendingStageFiles, multiSelect } = props;
   // Multi-repo nuance: activeFilePath carries the path but not repo; same path
   // in two repos will light up both rows. Matches existing routing limit noted
   // in FileRowProps comments.
   const activeFilePath = useDockviewStore((s) => s.activeFilePath);
+  const layout = useAppStore((s) => s.userSettings.changesPanelLayout);
   const groups = useMemo(() => groupByRepositoryName(files, (f) => f.repositoryName), [files]);
   // Per-repo collapsed state: keyed by repositoryName. Default expanded;
   // setting an entry to true collapses that group. Persists across re-renders
@@ -313,6 +306,92 @@ function FileListBody(props: FileListBodyProps) {
   // / Commit / Unstage all) move up to the section header — see FileListSection.
   const isSingleRepo = isSingleRepoGroup(groups);
 
+  if (layout === "tree") {
+    return (
+      <TreeFileListBody
+        {...props}
+        groups={groups}
+        isSingleRepo={isSingleRepo}
+        collapsedRepos={collapsedRepos}
+        toggleRepo={toggleRepo}
+      />
+    );
+  }
+
+  return (
+    <FlatFileListBody
+      {...props}
+      groups={groups}
+      isSingleRepo={isSingleRepo}
+      collapsedRepos={collapsedRepos}
+      toggleRepo={toggleRepo}
+      renderRow={renderRow}
+    />
+  );
+}
+
+type FileListBranchProps = FileListBodyProps & {
+  groups: ReturnType<typeof groupByRepositoryName<ChangedFile>>;
+  isSingleRepo: boolean;
+  collapsedRepos: Set<string>;
+  toggleRepo: (name: string) => void;
+};
+function TreeFileListBody(props: FileListBranchProps) {
+  const {
+    variant,
+    groups,
+    isSingleRepo,
+    collapsedRepos,
+    toggleRepo,
+    pendingStageFiles,
+    multiSelect,
+  } = props;
+  return (
+    <div tabIndex={-1} onKeyDown={props.onKeyDown}>
+      {isSingleRepo ? (
+        <ChangesTree
+          files={groups[0].items}
+          pendingStageFiles={pendingStageFiles}
+          onOpenDiff={props.onOpenDiff}
+          onEditFile={props.onEditFile}
+          onStage={props.onStage}
+          onUnstage={props.onUnstage}
+          onDiscard={props.onDiscard}
+          variant={variant}
+          multiSelect={multiSelect}
+        />
+      ) : (
+        groups.map((group) => (
+          <RepoTreeGroup
+            key={group.repositoryName || "__no_repo__"}
+            variant={variant}
+            repositoryName={group.repositoryName}
+            displayName={props.repoDisplayName?.(group.repositoryName)}
+            files={group.items}
+            pendingStageFiles={pendingStageFiles}
+            collapsed={collapsedRepos.has(group.repositoryName)}
+            onToggle={() => toggleRepo(group.repositoryName)}
+            onOpenDiff={props.onOpenDiff}
+            onEditFile={props.onEditFile}
+            onStage={props.onStage}
+            onUnstage={props.onUnstage}
+            onDiscard={props.onDiscard}
+            primaryLabel={props.primaryLabel}
+            secondaryLabel={props.secondaryLabel}
+            onRepoAction={props.onRepoAction}
+            onRepoSecondaryAction={props.onRepoSecondaryAction}
+            multiSelect={multiSelect}
+          />
+        ))
+      )}
+    </div>
+  );
+}
+
+function FlatFileListBody(
+  props: FileListBranchProps & { renderRow: (file: ChangedFile) => React.ReactNode },
+) {
+  const { variant, groups, isSingleRepo, collapsedRepos, toggleRepo, renderRow } = props;
   return (
     <div>
       <ul

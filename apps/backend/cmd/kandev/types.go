@@ -3,9 +3,11 @@ package main
 import (
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	analyticsrepository "github.com/kandev/kandev/internal/analytics/repository"
+	"github.com/kandev/kandev/internal/automation"
 	editorservice "github.com/kandev/kandev/internal/editors/service"
 	editorstore "github.com/kandev/kandev/internal/editors/store"
 	"github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/gitlab"
 	"github.com/kandev/kandev/internal/jira"
 	"github.com/kandev/kandev/internal/linear"
 	notificationservice "github.com/kandev/kandev/internal/notifications/service"
@@ -55,6 +57,7 @@ type Services struct {
 	Utility      *utilityservice.Service
 	Workflow     *workflowservice.Service
 	GitHub       *github.Service
+	GitLab       *gitlab.Service
 	Jira         *jira.Service
 	Linear       *linear.Service
 	Slack        *slack.Service
@@ -72,4 +75,8 @@ type Services struct {
 	// Wired into the gateway once lifecycle.Manager is up so the PTY backend
 	// is available.
 	Terminal *terminalservice.Service
+	// Automation is the trigger-based automation subsystem (cron, GitHub PR
+	// events, webhooks). Independent of Office — has its own scheduler and
+	// creates tasks via the task service.
+	Automation *automation.Components
 }

@@ -5,7 +5,13 @@ description: Commit, push, and create a PR. Default is ready-for-review with aut
 
 # PR
 
-> **GitHub tool selection:** This skill uses `gh` CLI commands by default. If `gh` is unavailable or fails, use any available GitHub tools in the environment (e.g. MCP GitHub tools) to create, edit, and view the PR. The goal is the same — the tool may differ.
+> **Host detection:** This skill works on both GitHub and GitLab repositories. Detect the host before step 4 by inspecting `git remote get-url origin`:
+> - URL contains `github.com` (or any host you have configured for GitHub) → use the **GitHub flow** below.
+> - URL contains `gitlab` (e.g. `gitlab.com`, `gitlab.acme.corp`) → use the **GitLab flow** at the bottom of this file.
+> - For self-managed hosts, the user's repository configuration determines the host.
+>
+> **GitHub tool selection:** The GitHub flow uses `gh` CLI by default. If `gh` is unavailable or fails, use any available GitHub tools in the environment (e.g. MCP GitHub tools).
+> **GitLab tool selection:** The GitLab flow prefers `glab` CLI when available; otherwise it shells `curl` against the REST v4 API using `$GITLAB_TOKEN` (which the agent runtime injects from the user's secrets store).
 
 ## Available skills
 
@@ -65,3 +71,85 @@ description: Commit, push, and create a PR. Default is ready-for-review with aut
    - Tell the user to drag and drop the image files from `.pr-assets/` into the PR description on GitHub for the images to render
 
 7. **Return the PR URL** when done.
+
+## GitLab flow (Merge Requests)
+
+When `git remote get-url origin` points at a GitLab host, the steps are the same up through **Push** (1–3). For step 4, create a Merge Request instead of a PR. **Skip steps 5 and 6** — `/pr-fixup` is wired to GitHub CI / CodeRabbit and `gh pr edit` only works against GitHub. The GitLab equivalent is to manage the MR directly via `glab` or the REST API (see "review comments" note at the bottom). After creating the MR, return the MR URL and stop.
+
+**MR title** still follows Conventional Commits — the squash-merge commit message is built from it the same way.
+
+**MR description** uses the same template as the PR body above (Summary, Validation, etc.).
+
+Prefer the `glab` CLI when it is on the agent's `PATH`:
+
+Don't hardcode `--target-branch`: many projects ship from `master`, `develop`, or a custom default. Omit the flag so `glab` resolves the project's default branch via the API, or pass an explicit value only if the user / spec already specified one.
+
+```bash
+glab mr create [--draft] \
+  --title "type: description" \
+  --description "$(cat <<'EOF'
+<filled template>
+EOF
+)" \
+  --remove-source-branch \
+  --yes
+```
+
+If `glab` is unavailable but `$GITLAB_TOKEN` is set, fall back to the REST API. Derive the host from the git remote — `$CI_SERVER_URL` is only set inside GitLab runners and silently falling back to `gitlab.com` from a developer's machine would target the wrong instance. Construct the JSON body with `jq` so multi-line descriptions and embedded quotes can't break the payload.
+
+```bash
+REMOTE_URL="$(git remote get-url origin)"          # any of: git@host:path.git | ssh://git@host[:port]/path.git | https://host[:port]/path.git
+# Classify by scheme so we can keep an https:// port (real API endpoint)
+# while dropping any ssh:// port (irrelevant to the HTTPS API).
+case "$REMOTE_URL" in
+  ssh://*)        URL="${REMOTE_URL#ssh://}";   FORM=ssh ;;
+  http://*|https://*) URL="${REMOTE_URL#*://}"; FORM=http ;;
+  *)              URL="$REMOTE_URL";            FORM=scp ;;
+esac
+URL="${URL#*@}"                                    # strip optional user@
+case "$FORM" in
+  scp)
+    # scp-style "git@host:path" — no port possible.
+    HOST_ONLY="${URL%%:*}"
+    HOST="https://${HOST_ONLY}"
+    PROJECT_PATH="${URL#*:}"
+    ;;
+  ssh)
+    # ssh:// — port (if any) is the SSH port, not the HTTPS API port.
+    HOST_PORT="${URL%%/*}"
+    HOST="https://${HOST_PORT%%:*}"
+    PROJECT_PATH="${URL#*/}"
+    ;;
+  http)
+    # https://host[:port]/path — preserve the port; it IS the API endpoint.
+    HOST_PORT="${URL%%/*}"
+    HOST="https://${HOST_PORT}"
+    PROJECT_PATH="${URL#*/}"
+    ;;
+esac
+PROJECT="${PROJECT_PATH%.git}"                     # team/repo
+SOURCE_BRANCH="$(git branch --show-current)"
+PROJECT_ENC="$(printf '%s' "$PROJECT" | jq -sRr @uri)"
+# Default branch via the GitLab API itself, not glab (avoids version drift
+# on glab's flag surface). Fall back to "main" only if the lookup fails.
+TARGET_BRANCH="$(curl --fail -s -H "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+  "$HOST/api/v4/projects/$PROJECT_ENC" | jq -r '.default_branch // "main"')"
+
+PAYLOAD="$(jq -n \
+  --arg source "$SOURCE_BRANCH" \
+  --arg target "$TARGET_BRANCH" \
+  --arg title "type: description" \
+  --arg description "$(cat <<'EOF'
+<filled template>
+EOF
+)" \
+  '{source_branch: $source, target_branch: $target, title: $title, description: $description, remove_source_branch: true}')"
+
+curl --fail -X POST \
+  -H "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data "$PAYLOAD" \
+  "$HOST/api/v4/projects/$PROJECT_ENC/merge_requests"
+```
+
+To address review comments on a GitLab MR, use the **discussions** API rather than individual review comments — discussions are GitLab's threading primitive. List with `GET /projects/:id/merge_requests/:iid/discussions`, reply with `POST /projects/:id/merge_requests/:iid/discussions/:discussion_id/notes`, and resolve a thread with `PUT /projects/:id/merge_requests/:iid/discussions/:discussion_id?resolved=true`. The `glab` equivalent for replies is `glab mr note create --reply <discussion_id>` — bare `glab mr note` opens a new thread instead of replying to an existing one.

@@ -14,7 +14,13 @@ import {
   normalizeMarkdown,
   remarkPlugins,
 } from "@/components/shared/markdown-components";
-import { openImageInWindow } from "@/components/task/chat/file-attachment";
+import { ImagePreviewDialog } from "@/components/task/chat/image-preview-dialog";
+import {
+  WorkflowStepMessageBadge,
+  workflowMessageInfoFromMetadata,
+  type WorkflowMessageMetadata,
+  type WorkflowStepMessageInfo,
+} from "./workflow-step-message-badge";
 
 type ChatMessageProps = {
   comment: Message;
@@ -104,7 +110,7 @@ type UserMessageProps = {
   onScrollToMessage?: (messageId: string) => void;
 };
 
-type UserMessageMetadata = {
+type UserMessageMetadata = WorkflowMessageMetadata & {
   attachments?: Array<{ type: string; data: string; mime_type: string; name?: string }>;
   plan_mode?: boolean;
   has_review_comments?: boolean;
@@ -128,6 +134,7 @@ function parseUserMessageMetadata(comment: Message) {
   const senderTask: SenderTaskInfo | null = metadata?.sender_task_id
     ? { id: metadata.sender_task_id, snapshotTitle: metadata.sender_task_title || "" }
     : null;
+  const workflowMessage = workflowMessageInfoFromMetadata(metadata);
   return {
     imageAttachments,
     fileAttachments,
@@ -138,6 +145,7 @@ function parseUserMessageMetadata(comment: Message) {
     hasContent,
     hasAttachments,
     senderTask,
+    workflowMessage,
   };
 }
 
@@ -146,15 +154,25 @@ function UserContextBadges({
   hasReviewComments,
   contextFiles,
   senderTask,
+  workflowMessage,
 }: {
   hasPlanMode: boolean;
   hasReviewComments: boolean;
   contextFiles: Array<{ path: string; name: string }>;
   senderTask: SenderTaskInfo | null;
+  workflowMessage: WorkflowStepMessageInfo | null;
 }) {
-  if (!hasPlanMode && !hasReviewComments && contextFiles.length === 0 && !senderTask) return null;
+  if (
+    !hasPlanMode &&
+    !hasReviewComments &&
+    contextFiles.length === 0 &&
+    !senderTask &&
+    !workflowMessage
+  )
+    return null;
   return (
     <div className="flex justify-end gap-1.5 mb-1 flex-wrap">
+      {workflowMessage && <WorkflowStepMessageBadge workflow={workflowMessage} />}
       {senderTask && <SenderTaskBadge sender={senderTask} />}
       {hasPlanMode && (
         <span className="inline-flex items-center gap-1 rounded-full bg-slate-500/20 px-2 py-0.5 text-[10px] text-slate-400">
@@ -196,6 +214,7 @@ function UserMessageContent({
     hasContent,
     hasAttachments,
     senderTask,
+    workflowMessage,
   } = parseUserMessageMetadata(comment);
 
   return (
@@ -206,18 +225,17 @@ function UserMessageContent({
           hasReviewComments={hasReviewComments}
           contextFiles={contextFiles}
           senderTask={senderTask}
+          workflowMessage={workflowMessage}
         />
         <div className="rounded-2xl bg-primary/30 px-4 py-2.5 overflow-hidden">
           {hasAttachments && (
             <div className={cn("flex flex-wrap gap-2", hasContent && "mb-2")}>
               {imageAttachments.map((att, index) => (
-                /* eslint-disable-next-line @next/next/no-img-element -- base64 data URLs are not compatible with next/image */
-                <img
+                <ImagePreviewDialog
                   key={index}
                   src={`data:${att.mime_type};base64,${att.data}`}
                   alt={`Attachment ${index + 1}`}
-                  className="max-h-48 max-w-full rounded-lg object-contain cursor-pointer hover:opacity-90 transition-opacity"
-                  onClick={() => openImageInWindow(att.mime_type, att.data)}
+                  thumbnailClassName="max-h-48 max-w-full rounded-lg object-contain transition-opacity hover:opacity-90"
                 />
               ))}
               {fileAttachments.map((att, index) => (

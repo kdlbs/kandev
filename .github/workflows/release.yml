@@ -75,12 +75,13 @@ jobs:
 
       - name: Install git-cliff
         env:
-          # Pinned to v2.6.1. To bump, also update the sha512 below — fetch the
+          # Pinned to v2.13.1 to match git-cliff-action@v4's default runtime.
+          # To bump, also update the sha512 below — fetch the
           # new one from:
           # https://github.com/orhun/git-cliff/releases/download/<tag>/<asset>.sha512
-          CLIFF_VERSION: "2.6.1"
-          CLIFF_ASSET: "git-cliff-2.6.1-x86_64-unknown-linux-gnu.tar.gz"
-          CLIFF_SHA512: "b1e7a6b70fc794accdccd9717eff5a8bf8b507f0308da44d837d935be31b18b19db3758d1a9bb4975fbca7d01ddaae251229a753ae2cd2ecc24845cfc50d067f"
+          CLIFF_VERSION: "2.13.1"
+          CLIFF_ASSET: "git-cliff-2.13.1-x86_64-unknown-linux-gnu.tar.gz"
+          CLIFF_SHA512: "e716cce3a07dda41b1e370d6afbd7a59eb3d4739509fb7856aeec8da2be28c0396584e29e106141c1a1c535c1827dbc1f60417524f5cfb1da9e11f700bd00f30"
         run: |
           set -euo pipefail
           curl -sSL "https://github.com/orhun/git-cliff/releases/download/v${CLIFF_VERSION}/${CLIFF_ASSET}" -o /tmp/git-cliff.tar.gz
@@ -164,6 +165,7 @@ jobs:
         env:
           NEXT: ${{ steps.compute.outputs.version }}
           TAG: ${{ steps.compute.outputs.tag }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           # Bump only the main package version. optionalDependencies stay
@@ -235,6 +237,7 @@ jobs:
         env:
           NEXT: ${{ steps.compute.outputs.version }}
           TAG: ${{ steps.compute.outputs.tag }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # In dry-run we still bump + run git-cliff locally so the maintainer
           # can verify the computed version + changelog look right, but nothing
@@ -794,6 +797,7 @@ jobs:
           args: --latest --strip header
         env:
           OUTPUT: RELEASE_NOTES.md
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/download-artifact@v5
         with:

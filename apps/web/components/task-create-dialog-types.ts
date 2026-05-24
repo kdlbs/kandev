@@ -205,6 +205,14 @@ export type DialogFormState = {
   setGitHubUrlError: (v: string | null) => void;
   githubPrHeadBranch: string | null;
   setGitHubPrHeadBranch: (v: string | null) => void;
+  /**
+   * PR's target/base branch from the GitHub API (e.g. "main"). Captured so the
+   * payload can send a base_branch that resolves on origin, even when the PR
+   * head only lives on a fork. Without this, fork PRs would propagate the
+   * head-branch name into base_branch and the worktree would fail to anchor.
+   */
+  githubPrBaseBranch: string | null;
+  setGitHubPrBaseBranch: (v: string | null) => void;
   /** When non-empty, the selected workflow overrides the agent profile */
   workflowAgentProfileId: string;
   setWorkflowAgentProfileId: (v: string) => void;
@@ -245,6 +253,7 @@ export type SubmitHandlersDeps = {
   useGitHubUrl: boolean;
   githubUrl: string;
   githubPrHeadBranch: string | null;
+  githubPrBaseBranch: string | null;
   /** Branch for the GitHub URL flow. Per-row branches live on `repositories[i].branch`. */
   githubBranch: string;
   agentProfileId: string;

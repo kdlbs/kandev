@@ -370,7 +370,7 @@ func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRe
 
 	var fetchResult *FetchBranchResult
 	if req.CheckoutBranch != "" {
-		fetchResult, err = m.fetchBranchToLocal(ctx, req.RepositoryPath, req.CheckoutBranch)
+		fetchResult, err = m.fetchBranchToLocal(ctx, req.RepositoryPath, req.CheckoutBranch, req.PRNumber)
 		if err != nil {
 			return nil, err
 		}
@@ -473,16 +473,26 @@ type FetchBranchResult struct {
 // fails (no remote, auth issue, offline), it falls back to the local branch.
 // Returns a FetchBranchResult with warning info and an error if the branch
 // doesn't exist anywhere.
-func (m *Manager) fetchBranchToLocal(ctx context.Context, repoPath, branch string) (*FetchBranchResult, error) {
+//
+// When prNumber > 0, the fetch uses the refs/pull/<N>/head refspec instead of
+// fetching the branch by name. GitHub mirrors every PR head under that ref on
+// the base repo, so this is the only way to materialize a fork PR's head
+// without adding the fork as a remote.
+func (m *Manager) fetchBranchToLocal(ctx context.Context, repoPath, branch string, prNumber int) (*FetchBranchResult, error) {
 	m.logger.Info("syncing checkout branch",
 		zap.String("branch", branch),
+		zap.Int("pr_number", prNumber),
 		zap.String("repo_path", repoPath))
 
 	// Try to fetch from origin to get the latest version.
 	fetchCtx, cancelFetch := context.WithTimeout(ctx, m.fetchTimeout)
 	defer cancelFetch()
 
-	fetchCmd := m.newNonInteractiveGitCmd(fetchCtx, repoPath, "fetch", gitNoTags, "origin", branch+":"+branch)
+	refspec := branch + ":" + branch
+	if prNumber > 0 {
+		refspec = fmt.Sprintf("pull/%d/head:%s", prNumber, branch)
+	}
+	fetchCmd := m.newNonInteractiveGitCmd(fetchCtx, repoPath, "fetch", gitNoTags, "origin", refspec)
 	if output, err := fetchCmd.CombinedOutput(); err != nil {
 		outputStr := string(output)
 
@@ -490,10 +500,22 @@ func (m *Manager) fetchBranchToLocal(ctx context.Context, repoPath, branch strin
 		// the local ref. Retry by fetching only the remote-tracking ref (origin/branch),
 		// which is always safe regardless of worktree state.
 		if isFetchRefusedCheckedOut(outputStr) {
-			retryCmd := m.newNonInteractiveGitCmd(fetchCtx, repoPath, "fetch", gitNoTags, "origin", branch)
+			retryRef := branch
+			if prNumber > 0 {
+				retryRef = fmt.Sprintf("pull/%d/head", prNumber)
+			}
+			retryCmd := m.newNonInteractiveGitCmd(fetchCtx, repoPath, "fetch", gitNoTags, "origin", retryRef)
 			if _, retryErr := retryCmd.CombinedOutput(); retryErr == nil {
 				m.logger.Info("fetched via remote-tracking ref (branch checked out elsewhere)",
 					zap.String("branch", branch))
+				if prNumber > 0 {
+					// Fork PRs have no origin/<branch> ref — the bare
+					// pull/<N>/head retry only updates FETCH_HEAD, so the local
+					// `branch` (already populated by the prior worktree) is the
+					// only valid start point. Empty StartPoint signals the
+					// caller to fall back to req.CheckoutBranch.
+					return &FetchBranchResult{}, nil
+				}
 				return &FetchBranchResult{StartPoint: "origin/" + branch}, nil
 			}
 		}

@@ -2,23 +2,17 @@
 
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
-import {
-  requestFileTree,
-  requestFileContent,
-  searchWorkspaceFiles,
-} from "@/lib/ws/workspace-files";
-import type { FileTreeNode, FileContentResponse, OpenFileTab } from "@/lib/types/backend";
+import { requestFileTree, searchWorkspaceFiles } from "@/lib/ws/workspace-files";
+import type { FileTreeNode } from "@/lib/types/backend";
 import { useSessionAgentctl } from "@/hooks/domains/session/use-session-agentctl";
-import {
-  getFilesPanelExpandedPaths,
-  setFilesPanelExpandedPaths,
-  getFilesPanelScrollPosition,
-  setFilesPanelScrollPosition,
-} from "@/lib/local-storage";
-import type { useToast } from "@/components/toast-provider";
+import { getFilesPanelExpandedPaths, setFilesPanelExpandedPaths } from "@/lib/local-storage";
 import { useTree, type VisibleRow } from "@/hooks/use-tree";
 import { mergeTreeNodes } from "./file-browser-parts";
 import { compareTreeNodes, sortRootChildren } from "./file-tree-utils";
+import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+
+const debugLoad = createDebugLogger("file-browser:load");
+const debugChanges = createDebugLogger("file-browser:changes");
 
 const FB_GET_PATH = (n: FileTreeNode) => n.path;
 // Children are sorted (dirs first, then files, alphabetically) on every
@@ -146,7 +140,21 @@ export function applyFileChanges(ctx: {
     if (parent === "" || expandedPaths.has(parent)) foldersToRefresh.add(parent);
     if (p === "" || expandedPaths.has(p)) foldersToRefresh.add(p);
   }
-  if (foldersToRefresh.size === 0) return;
+  if (foldersToRefresh.size === 0) {
+    if (IS_DEBUG)
+      debugChanges("no-folders-to-refresh", {
+        sessionId,
+        candidates: changes.length,
+        expandedPaths: expandedPaths.size,
+      });
+    return;
+  }
+  if (IS_DEBUG)
+    debugChanges("refresh", {
+      sessionId,
+      folders: Array.from(foldersToRefresh).slice(0, 5),
+      total: foldersToRefresh.size,
+    });
 
   void (async () => {
     try {
@@ -237,6 +245,11 @@ type TreeLoaderContext = {
   setLoadError: React.Dispatch<React.SetStateAction<string | null>>;
 };
 
+// Thin wrapper so loadTree callers don't each pay a complexity point for IS_DEBUG.
+function logLoad(event: string, data: Record<string, unknown>) {
+  if (IS_DEBUG) debugLoad(event, data);
+}
+
 function useTreeLoader(ctx: TreeLoaderContext) {
   const {
     clearRetryTimer,
@@ -254,7 +267,10 @@ function useTreeLoader(ctx: TreeLoaderContext) {
   const loadInFlightRef = useRef(false);
   const loadTree = useCallback(
     async (options?: { resetRetry?: boolean }) => {
-      if (loadInFlightRef.current) return;
+      if (loadInFlightRef.current) {
+        logLoad("skip-in-flight", { sessionId: sessionIdRef.current });
+        return;
+      }
       loadInFlightRef.current = true;
       setIsLoadingTree(true);
       setLoadState("loading");
@@ -263,6 +279,11 @@ function useTreeLoader(ctx: TreeLoaderContext) {
         retryAttemptRef.current = 0;
         clearRetryTimer();
       }
+      logLoad("start", {
+        sessionId: sessionIdRef.current,
+        resetRetry: options?.resetRetry === true,
+        retryAttempt: retryAttemptRef.current,
+      });
       try {
         const client = getWebSocketClient();
         if (!client) throw new Error("WebSocket client not available");
@@ -271,6 +292,11 @@ function useTreeLoader(ctx: TreeLoaderContext) {
         setLoadState("loaded");
         retryAttemptRef.current = 0;
         clearRetryTimer();
+        logLoad("loaded", {
+          sessionId: sessionIdRef.current,
+          rootPath: response.root?.path ?? null,
+          children: response.root?.children?.length ?? 0,
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Failed to load file tree";
         setLoadError(message);
@@ -280,11 +306,18 @@ function useTreeLoader(ctx: TreeLoaderContext) {
           retryAttemptRef.current += 1;
           setLoadState("waiting");
           clearRetryTimer();
+          logLoad("retry", {
+            sessionId: sessionIdRef.current,
+            attempt: retryAttemptRef.current,
+            delayMs: delay,
+            error: message,
+          });
           retryTimerRef.current = setTimeout(() => {
             void loadTree();
           }, delay);
         } else {
           setLoadState("manual");
+          logLoad("gave-up", { sessionId: sessionIdRef.current, error: message });
         }
       } finally {
         setIsLoadingTree(false);
@@ -302,6 +335,91 @@ function useTreeLoader(ctx: TreeLoaderContext) {
     ],
   );
   return loadTree;
+}
+
+type TreeLoadEffectsContext = {
+  sessionId: string;
+  effectiveResetKey: string;
+  agentctlIsReady: boolean;
+  agentctlIsReadyRef: React.MutableRefObject<boolean>;
+  loadStateRef: React.MutableRefObject<LoadState>;
+  treeRef: React.MutableRefObject<FileTreeNode | null>;
+  retryAttemptRef: React.MutableRefObject<number>;
+  hasInitializedExpandedRef: React.MutableRefObject<string | null>;
+  clearRetryTimer: () => void;
+  loadTree: (options?: { resetRetry?: boolean }) => Promise<void> | void;
+  setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
+  setIsLoadingTree: React.Dispatch<React.SetStateAction<boolean>>;
+  setLoadState: React.Dispatch<React.SetStateAction<LoadState>>;
+  setLoadError: React.Dispatch<React.SetStateAction<string | null>>;
+  setExpandedPaths: (paths: Set<string>) => void;
+};
+
+/** Owns the two effects that drive initial load and the waiting→ready flip. */
+function useTreeLoadEffects(ctx: TreeLoadEffectsContext) {
+  const {
+    sessionId,
+    effectiveResetKey,
+    agentctlIsReady,
+    agentctlIsReadyRef,
+    loadStateRef,
+    treeRef,
+    retryAttemptRef,
+    hasInitializedExpandedRef,
+    clearRetryTimer,
+    loadTree,
+    setTree,
+    setIsLoadingTree,
+    setLoadState,
+    setLoadError,
+    setExpandedPaths,
+  } = ctx;
+
+  useEffect(() => {
+    setTree(null);
+    setIsLoadingTree(true);
+    setLoadState(agentctlIsReadyRef.current ? "loading" : "waiting");
+    setLoadError(null);
+    retryAttemptRef.current = 0;
+    clearRetryTimer();
+    hasInitializedExpandedRef.current = null;
+    const savedPaths = getFilesPanelExpandedPaths(effectiveResetKey);
+    setExpandedPaths(savedPaths.length > 0 ? new Set(savedPaths) : new Set());
+    if (savedPaths.length > 0) hasInitializedExpandedRef.current = effectiveResetKey;
+    logLoad("init-effect", {
+      sessionId,
+      effectiveResetKey,
+      agentctlReady: agentctlIsReadyRef.current,
+      savedPaths: savedPaths.length,
+      willLoad: agentctlIsReadyRef.current,
+    });
+    if (agentctlIsReadyRef.current) void loadTree({ resetRetry: true });
+    else setIsLoadingTree(false);
+    return () => {
+      clearRetryTimer();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refs intentionally omitted
+  }, [clearRetryTimer, loadTree, effectiveResetKey, setExpandedPaths]);
+
+  // Fire the initial load on the waiting → ready transition. `loadState` is
+  // read via a ref so a failed load (which sets state back to "waiting") does
+  // not re-fire this effect and cancel the retry timer via `resetRetry: true`.
+  // The `treeRef.current` check alongside "loaded" is load-bearing:
+  // `applyFileChanges` can flip state to "loaded" while the tree is still
+  // null, and without the tree check this effect would skip the real load.
+  useEffect(() => {
+    let reason: string | null = null;
+    if (!agentctlIsReady) reason = "agentctl-not-ready";
+    else if (loadStateRef.current === "loading") reason = "already-loading";
+    else if (loadStateRef.current === "loaded" && treeRef.current) reason = "already-loaded";
+    if (reason) {
+      logLoad("ready-effect-skip", { sessionId, reason, loadState: loadStateRef.current });
+      return;
+    }
+    logLoad("ready-flip", { sessionId, loadState: loadStateRef.current });
+    void loadTree({ resetRetry: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refs intentionally omitted
+  }, [agentctlIsReady, loadTree, sessionId]);
 }
 
 function useFileChangeSubscription({
@@ -323,7 +441,17 @@ function useFileChangeSubscription({
     if (!client) return;
     return client.on("session.workspace.file.changes", (msg) => {
       const changes = msg.payload?.changes;
-      if (!changes || changes.length === 0) return;
+      if (!changes || changes.length === 0) {
+        if (IS_DEBUG) debugChanges("event-empty", { sessionId: sessionIdRef.current });
+        return;
+      }
+      if (IS_DEBUG)
+        debugChanges("event", {
+          sessionId: sessionIdRef.current,
+          count: changes.length,
+          expandedPaths: expandedPathsRef.current.size,
+          firstPaths: changes.slice(0, 3).map((c: { path: string }) => c.path),
+        });
       applyFileChanges({
         client,
         sessionId: sessionIdRef.current,
@@ -400,37 +528,23 @@ export function useFileBrowserTree(sessionId: string, resetKey?: string) {
   agentctlIsReadyRef.current = agentctlStatus.isReady;
   loadStateRef.current = loadState;
   treeRef.current = tree;
-  useEffect(() => {
-    setTree(null);
-    setIsLoadingTree(true);
-    setLoadState(agentctlIsReadyRef.current ? "loading" : "waiting");
-    setLoadError(null);
-    retryAttemptRef.current = 0;
-    clearRetryTimer();
-    hasInitializedExpandedRef.current = null;
-    const savedPaths = getFilesPanelExpandedPaths(effectiveResetKey);
-    setExpandedPaths(savedPaths.length > 0 ? new Set(savedPaths) : new Set());
-    if (savedPaths.length > 0) hasInitializedExpandedRef.current = effectiveResetKey;
-    // Only load now if agentctl is ready; otherwise the sibling effect fires
-    // on the ready flip. Prevents burning the retry budget during slow prepare.
-    if (agentctlIsReadyRef.current) void loadTree({ resetRetry: true });
-    else setIsLoadingTree(false);
-    return () => {
-      clearRetryTimer();
-    };
-  }, [clearRetryTimer, loadTree, effectiveResetKey, sessionId, setExpandedPaths]);
-
-  // Fire the initial load on the waiting → ready transition. `loadState` is
-  // read via a ref so a failed load (which sets state back to "waiting") does
-  // not re-fire this effect and cancel the retry timer via `resetRetry: true`.
-  // "loaded" only counts when a tree is actually present — `applyFileChanges`
-  // can flip state to "loaded" while the tree is still null.
-  useEffect(() => {
-    if (!agentctlStatus.isReady) return;
-    if (loadStateRef.current === "loading") return;
-    if (loadStateRef.current === "loaded" && treeRef.current) return;
-    void loadTree({ resetRetry: true });
-  }, [agentctlStatus.isReady, loadTree, sessionId]);
+  useTreeLoadEffects({
+    sessionId,
+    effectiveResetKey,
+    agentctlIsReady: agentctlStatus.isReady,
+    agentctlIsReadyRef,
+    loadStateRef,
+    treeRef,
+    retryAttemptRef,
+    hasInitializedExpandedRef,
+    clearRetryTimer,
+    loadTree,
+    setTree,
+    setIsLoadingTree,
+    setLoadState,
+    setLoadError,
+    setExpandedPaths,
+  });
 
   useEffect(() => {
     if (!tree || isLoadingTree || hasInitializedExpandedRef.current === effectiveResetKey) return;
@@ -467,133 +581,13 @@ export function useFileBrowserTree(sessionId: string, resetKey?: string) {
   };
 }
 
-/** Hook for scroll position persistence in the file browser. */
-export function useScrollPersistence(
-  sessionId: string,
-  isTreeLoaded: boolean,
-  scrollAreaRef: React.RefObject<HTMLDivElement | null>,
-  tree: FileTreeNode | null,
-) {
-  const scrollSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const hasRestoredScrollRef = useRef<string | null>(null);
-
-  // Restore scroll position after tree loads
-  useEffect(() => {
-    if (!isTreeLoaded || hasRestoredScrollRef.current === sessionId) return;
-    const savedScroll = getFilesPanelScrollPosition(sessionId);
-    if (savedScroll > 0 && scrollAreaRef.current) {
-      const viewport = scrollAreaRef.current.querySelector("[data-radix-scroll-area-viewport]");
-      if (viewport) {
-        viewport.scrollTop = savedScroll;
-        hasRestoredScrollRef.current = sessionId;
-      }
-    } else {
-      hasRestoredScrollRef.current = sessionId;
-    }
-  }, [isTreeLoaded, sessionId, scrollAreaRef]);
-
-  // Attach scroll listener to ScrollArea viewport
-  useEffect(() => {
-    const el = scrollAreaRef.current;
-    if (!el) return;
-    const viewport = el.querySelector("[data-radix-scroll-area-viewport]");
-    if (!viewport) return;
-    const onScroll = (event: Event) => {
-      const target = event.target as HTMLElement;
-      if (scrollSaveTimeoutRef.current) clearTimeout(scrollSaveTimeoutRef.current);
-      scrollSaveTimeoutRef.current = setTimeout(() => {
-        setFilesPanelScrollPosition(sessionId, target.scrollTop);
-      }, 150);
-    };
-    viewport.addEventListener("scroll", onScroll);
-    return () => {
-      viewport.removeEventListener("scroll", onScroll);
-      if (scrollSaveTimeoutRef.current) clearTimeout(scrollSaveTimeoutRef.current);
-    };
-  }, [sessionId, tree, scrollAreaRef]);
-}
-
-/** Fetch children for a folder node if not already loaded. */
-export async function loadNodeChildren(
-  node: FileTreeNode,
-  sessionId: string,
-  treeState: ReturnType<typeof useFileBrowserTree>,
-) {
-  if (node.children && node.children.length > 0) return;
-  // Dedupe in-flight fetches so rapid double-clicks don't issue two WS round-trips.
-  if (treeState.isLoading(node.path)) return;
-  treeState.showLoading(node.path);
-  try {
-    const client = getWebSocketClient();
-    if (!client) return;
-    const response = await requestFileTree(client, sessionId, node.path, 1);
-    const updateNode = (n: FileTreeNode): FileTreeNode => {
-      if (n.path === node.path) return { ...n, children: response.root.children };
-      return n.children ? { ...n, children: n.children.map(updateNode) } : n;
-    };
-    if (treeState.tree) treeState.setTree(updateNode(treeState.tree));
-  } catch (error) {
-    console.error("Failed to load children:", error);
-  } finally {
-    treeState.hideLoading(node.path);
-  }
-}
-
-export type ToggleFolderExpandDeps = {
-  node: FileTreeNode;
-  sessionId: string;
-  treeState: ReturnType<typeof useFileBrowserTree>;
-  setActiveFolderPath: (path: string) => void;
-  loadChildren?: typeof loadNodeChildren;
-};
-
-// Flip expanded synchronously *then* fetch children so the chevron rotates on the first click.
-export async function toggleFolderExpand({
-  node,
-  sessionId,
-  treeState,
-  setActiveFolderPath,
-  loadChildren = loadNodeChildren,
-}: ToggleFolderExpandDeps): Promise<void> {
-  if (!node.is_dir) return;
-  setActiveFolderPath(node.path);
-  const wasExpanded = treeState.expandedPaths.has(node.path);
-  treeState.setExpandedPaths((prev) => {
-    const next = new Set(prev);
-    if (next.has(node.path)) next.delete(node.path);
-    else next.add(node.path);
-    return next;
-  });
-  if (!wasExpanded) {
-    await loadChildren(node, sessionId, treeState);
-  }
-}
-
-/** Fetch and open a file by path. */
-export async function fetchAndOpenFile(
-  sessionId: string,
-  path: string,
-  onOpenFile: (file: OpenFileTab) => void,
-  toast: ReturnType<typeof useToast>["toast"],
-) {
-  try {
-    const client = getWebSocketClient();
-    if (!client) return;
-    const response: FileContentResponse = await requestFileContent(client, sessionId, path);
-    const { calculateHash } = await import("@/lib/utils/file-diff");
-    const hash = await calculateHash(response.content);
-    const name = path.split("/").pop() || path;
-    onOpenFile({
-      path,
-      name,
-      content: response.content,
-      originalContent: response.content,
-      originalHash: hash,
-      isDirty: false,
-      isBinary: response.is_binary,
-    });
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : "Unknown error";
-    toast({ title: "Failed to open file", description: reason, variant: "error" });
-  }
-}
+// useScrollPersistence, loadNodeChildren, toggleFolderExpand, fetchAndOpenFile,
+// and the ToggleFolderExpandDeps type live in ./file-browser-actions.ts to keep
+// this file within the 600-line lint limit.
+export {
+  useScrollPersistence,
+  loadNodeChildren,
+  toggleFolderExpand,
+  fetchAndOpenFile,
+} from "./file-browser-actions";
+export type { ToggleFolderExpandDeps } from "./file-browser-actions";

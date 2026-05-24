@@ -314,7 +314,8 @@ func (s *Server) registerTools() {
 		// surface for office mode only keeps:
 		//   - ask_user_question — interactive prompt path
 		//   - plan tools        — structured plan capture
-		//   - handoff tools     — workflow handoff between steps
+		//   - related-tasks     — discover parent/child/sibling IDs
+		//   - task-document tools — parent/child coordination docs
 		// delegate_task was removed in favour of
 		// `agentctl kandev tasks create --parent $KANDEV_TASK_ID …`.
 		if !s.disableAskQuestion {
@@ -323,9 +324,14 @@ func (s *Server) registerTools() {
 		}
 		s.registerPlanTools()
 		count += 4
-		s.registerHandoffTools()
-		count += 4
+		s.registerRelatedTasksTool()
+		count++
+		s.registerTaskDocumentTools()
+		count += 3
 	default: // ModeTask
+		// Kanban tasks get list_related_tasks_kandev (useful for finding
+		// a sibling to message_task_kandev) but NOT the task-document
+		// tools — those are office coordination plumbing.
 		s.registerKanbanTools()
 		count += 11
 		if !s.disableAskQuestion {
@@ -334,8 +340,8 @@ func (s *Server) registerTools() {
 		}
 		s.registerPlanTools()
 		count += 4
-		s.registerHandoffTools()
-		count += 4
+		s.registerRelatedTasksTool()
+		count++
 	}
 	s.logger.Info("registered MCP tools",
 		zap.String("mode", s.mode),

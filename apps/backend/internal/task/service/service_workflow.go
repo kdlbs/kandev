@@ -221,14 +221,31 @@ type MoveTaskResult struct {
 	WorkflowStep *wfmodels.WorkflowStep
 }
 
+// MoveTaskOptions controls non-default move behavior for trusted callers.
+type MoveTaskOptions struct {
+	AllowActivePrimarySession bool
+}
+
 // MoveTask moves a task to a different workflow step and position
 func (s *Service) MoveTask(ctx context.Context, id string, workflowID string, workflowStepID string, position int) (*MoveTaskResult, error) {
+	return s.MoveTaskWithOptions(ctx, id, workflowID, workflowStepID, position, MoveTaskOptions{})
+}
+
+// MoveTaskWithOptions moves a task with explicit caller options.
+func (s *Service) MoveTaskWithOptions(
+	ctx context.Context,
+	id string,
+	workflowID string,
+	workflowStepID string,
+	position int,
+	opts MoveTaskOptions,
+) (*MoveTaskResult, error) {
 	task, err := s.tasks.GetTask(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := s.validateTaskMove(ctx, task, workflowID, workflowStepID); err != nil {
+	if err := s.validateTaskMove(ctx, task, workflowID, workflowStepID, opts); err != nil {
 		return nil, err
 	}
 
@@ -283,11 +300,11 @@ func (s *Service) MoveTask(ctx context.Context, id string, workflowID string, wo
 	return result, nil
 }
 
-func (s *Service) validateTaskMove(ctx context.Context, task *models.Task, workflowID, workflowStepID string) error {
+func (s *Service) validateTaskMove(ctx context.Context, task *models.Task, workflowID, workflowStepID string, opts MoveTaskOptions) error {
 	if task.ArchivedAt != nil {
 		return fmt.Errorf("archived tasks cannot be moved")
 	}
-	if err := s.validateMoveSessions(ctx, task.ID); err != nil {
+	if err := s.validateMoveSessions(ctx, task.ID, opts); err != nil {
 		return err
 	}
 	targetWorkflow, err := s.workflows.GetWorkflow(ctx, workflowID)
@@ -310,13 +327,16 @@ func (s *Service) validateTaskMove(ctx context.Context, task *models.Task, workf
 	return nil
 }
 
-func (s *Service) validateMoveSessions(ctx context.Context, taskID string) error {
+func (s *Service) validateMoveSessions(ctx context.Context, taskID string, opts MoveTaskOptions) error {
 	sessions, err := s.sessions.ListTaskSessions(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("failed to list task sessions: %w", err)
 	}
 	for _, session := range sessions {
 		if isSessionMoveBlocked(session.State) {
+			if opts.AllowActivePrimarySession && session.IsPrimary {
+				continue
+			}
 			return fmt.Errorf("task has an active session (%s)", session.State)
 		}
 	}
@@ -423,7 +443,7 @@ func (s *Service) validateSelectedMoveBatch(ctx context.Context, taskIDs []strin
 			return nil, err
 		}
 		if task.WorkflowID != targetWorkflowID || task.WorkflowStepID != targetStepID {
-			if err := s.validateTaskMove(ctx, task, targetWorkflowID, targetStepID); err != nil {
+			if err := s.validateTaskMove(ctx, task, targetWorkflowID, targetStepID, MoveTaskOptions{}); err != nil {
 				return nil, fmt.Errorf("task %s cannot be moved: %w", id, err)
 			}
 		}

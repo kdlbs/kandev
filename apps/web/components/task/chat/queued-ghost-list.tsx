@@ -10,14 +10,14 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { stripSystemTags } from "@/lib/utils/system-tags";
 import { useQueue } from "@/hooks/domains/session/use-queue";
-import { QueuedGhostMessage } from "./queued-ghost-message";
+import { isWorkflowQueuedMessage, QueuedGhostMessage } from "./queued-ghost-message";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
 
 const HEAD_PREVIEW_MAX = 80;
 
 /** Inter-task entries are dispatched with queued_by="agent" and stay read-only. */
 function canUserEditEntry(entry: QueuedMessage): boolean {
-  return entry.queued_by !== "agent";
+  return entry.queued_by !== "agent" && !isWorkflowQueuedMessage(entry);
 }
 
 function headPreviewText(entries: QueuedMessage[]): string {

@@ -1,6 +1,8 @@
 package mcp
 
 import (
+	"encoding/json"
+	"fmt"
 	"regexp"
 	"sort"
 	"strings"
@@ -216,5 +218,123 @@ func TestFindBareToolReferences_DistinguishesSuffixedFromBare(t *testing.T) {
 			got := findBareToolReferences(tc.prompt, bareNames)
 			assert.Equal(t, tc.want, got)
 		})
+	}
+}
+
+// askUserQuestionSchemaFacts pulls the load-bearing structural facts from the
+// registered ask_user_question_kandev tool schema: the top-level array param
+// name, its min/max bounds, and the required sub-fields of each question
+// object. These are the facts the embedded prompt contexts must mirror.
+type askUserQuestionSchemaFacts struct {
+	paramName      string
+	minItems       int
+	maxItems       int
+	requiredFields []string
+}
+
+func extractAskUserQuestionFacts(t *testing.T, s *Server) askUserQuestionSchemaFacts {
+	t.Helper()
+
+	tool, ok := s.mcpServer.ListTools()["ask_user_question_kandev"]
+	require.True(t, ok, "ask_user_question_kandev not registered on this server")
+
+	raw, err := json.Marshal(tool.Tool.InputSchema)
+	require.NoError(t, err)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(raw, &parsed))
+
+	props, ok := parsed["properties"].(map[string]any)
+	require.True(t, ok, "schema must expose 'properties'")
+
+	// Collect all top-level array params and assert exactly one exists.
+	// Using a collect-then-assert pattern (rather than break-on-first) makes
+	// the selection deterministic even if Go's map iteration visits properties
+	// in a different order between runs or Go versions.
+	var arrayParams []string
+	paramSpecs := make(map[string]map[string]any)
+	for name, spec := range props {
+		m, ok := spec.(map[string]any)
+		if !ok {
+			continue
+		}
+		if m["type"] == "array" {
+			arrayParams = append(arrayParams, name)
+			paramSpecs[name] = m
+		}
+	}
+	sort.Strings(arrayParams)
+	require.Len(t, arrayParams, 1,
+		"ask_user_question schema must have exactly one top-level array parameter; got %v", arrayParams)
+
+	arrayParam := arrayParams[0]
+	arraySpec := paramSpecs[arrayParam]
+
+	minF, _ := arraySpec["minItems"].(float64)
+	maxF, _ := arraySpec["maxItems"].(float64)
+	require.NotZero(t, maxF,
+		"ask_user_question schema must declare maxItems on the %q array — if absent, bounds would silently become \"0-0\" and mask schema drift", arrayParam)
+
+	items, ok := arraySpec["items"].(map[string]any)
+	require.True(t, ok, "ask_user_question schema must declare an items schema on the %q array", arrayParam)
+	requiredRaw, ok := items["required"].([]any)
+	require.True(t, ok, "ask_user_question schema items must declare a required field list")
+	required := make([]string, 0, len(requiredRaw))
+	for _, r := range requiredRaw {
+		if field, ok := r.(string); ok {
+			required = append(required, field)
+		}
+	}
+	sort.Strings(required)
+
+	return askUserQuestionSchemaFacts{
+		paramName:      arrayParam,
+		minItems:       int(minF),
+		maxItems:       int(maxF),
+		requiredFields: required,
+	}
+}
+
+// TestAskUserQuestionDocs_MatchSchema binds the embedded prompt documentation
+// for ask_user_question_kandev to the actual MCP tool schema. If the schema
+// changes (param renamed, bounds adjusted, required sub-fields added or
+// removed) the prompt files must change with it — otherwise agents read stale
+// docs and send malformed payloads, which is exactly what cancelled task
+// 399f3f98 in v0.28.
+func TestAskUserQuestionDocs_MatchSchema(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+
+	taskServer := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
+	require.NotNil(t, taskServer)
+	configServer := New(backend, "test-session", "test-task", 10005, log, "", false, ModeConfig)
+	require.NotNil(t, configServer)
+
+	// Both modes register the same tool; assert that and pick one set of facts.
+	taskFacts := extractAskUserQuestionFacts(t, taskServer)
+	configFacts := extractAskUserQuestionFacts(t, configServer)
+	require.Equal(t, taskFacts, configFacts,
+		"ask_user_question_kandev schema differs between task and config modes — pick one source of truth")
+
+	facts := taskFacts
+	bounds := fmt.Sprintf("%d-%d", facts.minItems, facts.maxItems)
+
+	// Each prompt must mention the array param name, the bounds, and every
+	// required sub-field name. We assert phrases (not exact wording) so authors
+	// can rewrite the prose freely as long as the load-bearing facts survive.
+	cases := map[string]string{
+		"KandevContext": sysprompt.KandevContext(),
+		"ConfigContext": sysprompt.ConfigContext(),
+	}
+	for name, prompt := range cases {
+		assert.Contains(t, prompt, facts.paramName,
+			"%s must mention ask_user_question param name %q", name, facts.paramName)
+		assert.Contains(t, prompt, bounds,
+			"%s must mention the question-count bounds %q from the schema", name, bounds)
+		for _, field := range facts.requiredFields {
+			assert.Contains(t, prompt, field,
+				"%s must mention required question sub-field %q", name, field)
+		}
 	}
 }

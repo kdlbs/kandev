@@ -43,10 +43,13 @@ func TestGistBackend_Upload_CreatesSecretGistWithExpectedFiles(t *testing.T) {
 		t.Fatalf("expected non-empty id/url, got %q / %q", id, url)
 	}
 
-	// The returned URL is the rendered gistpreview.github.io viewer URL,
-	// NOT the raw gist URL — that's what the user shares.
-	if !strings.HasPrefix(url, "https://gistpreview.github.io/?") {
-		t.Fatalf("expected gistpreview.github.io URL, got %q", url)
+	// The returned URL is the gist.githack.com raw-render URL, NOT the
+	// raw gist URL — githack proxies the full file content so big shares
+	// render even when GitHub's gists API would have returned an empty
+	// content field.
+	if !strings.HasPrefix(url, "https://gist.githack.com/") ||
+		!strings.HasSuffix(url, "/raw/share.html") {
+		t.Fatalf("expected gist.githack.com /raw/share.html URL, got %q", url)
 	}
 
 	gists := mock.Gists()

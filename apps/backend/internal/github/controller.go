@@ -297,12 +297,16 @@ func (c *Controller) httpSubmitReview(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
-	validEvents := map[string]bool{"APPROVE": true, "COMMENT": true, "REQUEST_CHANGES": true}
+	validEvents := map[string]bool{reviewEventApprove: true, "COMMENT": true, "REQUEST_CHANGES": true}
 	if !validEvents[req.Event] {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "event must be APPROVE, COMMENT, or REQUEST_CHANGES"})
 		return
 	}
 	if err := c.service.SubmitReview(ctx.Request.Context(), owner, repo, number, req.Event, req.Body); err != nil {
+		if errors.Is(err, ErrSelfApprove) {
+			ctx.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+			return
+		}
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

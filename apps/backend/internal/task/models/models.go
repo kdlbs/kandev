@@ -57,10 +57,11 @@ const (
 
 // Task origin values for the Origin field.
 const (
-	TaskOriginManual       = "manual"
-	TaskOriginAgentCreated = "agent_created"
-	TaskOriginRoutine      = "routine"
-	TaskOriginOnboarding   = "onboarding"
+	TaskOriginManual        = "manual"
+	TaskOriginAgentCreated  = "agent_created"
+	TaskOriginRoutine       = "routine"
+	TaskOriginOnboarding    = "onboarding"
+	TaskOriginAutomationRun = "automation_run"
 )
 
 // Task represents a task in the database

@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
-import { IconLoader2 } from "@tabler/icons-react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { IconLoader2, IconSend } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { Textarea } from "@kandev/ui/textarea";
 import { AgentLogo } from "@/components/agent-logo";
 import { GridSpinner } from "@/components/grid-spinner";
 import { SessionTabs, type SessionTab } from "@/components/session-tabs";
@@ -143,6 +144,10 @@ function SessionAgentLogo({ profile }: { profile: AgentProfileOption | null | un
 
 function PreviewSessionBody({ session, taskId }: { session: TaskSession; taskId: string }) {
   const { toast } = useToast();
+  // Used by the non-passthrough TaskChatPanel branch. Swallows errors after
+  // surfacing a toast because the existing chat-input-state.handleSubmit
+  // already optimistically clears the input before this resolves; rethrowing
+  // here would surface as an unhandled rejection further up the chain.
   const handleSendMessage = useCallback(
     async (content: string) => {
       const client = getWebSocketClient();
@@ -161,10 +166,43 @@ function PreviewSessionBody({ session, taskId }: { session: TaskSession; taskId:
     [taskId, session.id, toast],
   );
 
+  // Used by PassthroughComposer. Rethrows after toasting so the composer can
+  // keep the user's typed text intact on failure (Composer.submit's catch
+  // skips the setValue("") clear when onSubmit rejects). Separate from the
+  // ACP handler above to avoid leaking unhandled rejections into the chat-
+  // input-state chain that TaskChatPanel uses.
+  const handleSendPassthroughMessage = useCallback(
+    async (content: string) => {
+      const client = getWebSocketClient();
+      if (!client) {
+        // Surface the disconnect to the user before re-throwing so the
+        // composer's catch (which preserves the typed text) doesn't swallow
+        // the failure silently.
+        toast({ title: "Not connected — please reload to retry", variant: "error" });
+        throw new Error("WebSocket client not available");
+      }
+      try {
+        await client.request(
+          "message.add",
+          { task_id: taskId, session_id: session.id, content },
+          10000,
+        );
+      } catch (error) {
+        console.error("Failed to send passthrough message:", error);
+        toast({ title: "Failed to send message", variant: "error" });
+        throw error;
+      }
+    },
+    [taskId, session.id, toast],
+  );
+
   if (session.is_passthrough) {
     return (
-      <div className="h-full bg-card">
-        <PassthroughTerminal sessionId={session.id} mode="agent" />
+      <div className="flex h-full flex-col bg-card">
+        <div className="flex-1 min-h-0">
+          <PassthroughTerminal sessionId={session.id} mode="agent" />
+        </div>
+        <PassthroughComposer onSubmit={handleSendPassthroughMessage} />
       </div>
     );
   }
@@ -172,6 +210,94 @@ function PreviewSessionBody({ session, taskId }: { session: TaskSession; taskId:
   return (
     <div className="flex h-full flex-col">
       <TaskChatPanel onSend={handleSendMessage} sessionId={session.id} hideSessionsDropdown />
+    </div>
+  );
+}
+
+/**
+ * PassthroughComposer is the kandev-controlled compose box rendered alongside
+ * the PTY in passthrough mode. Submitting forwards the typed text via the
+ * onSubmit prop (which posts `message.add` over WS); the backend's
+ * `Executor.Prompt` routes passthrough sessions to PTY stdin so the CLI agent
+ * actually receives it. Enter submits; Shift+Enter inserts a newline.
+ */
+// Cap matches the `max-h-32` Tailwind class on the textarea below — 128 px.
+const COMPOSER_MAX_HEIGHT_PX = 128;
+
+export function PassthroughComposer({
+  onSubmit,
+}: {
+  onSubmit: (content: string) => Promise<void>;
+}) {
+  const [value, setValue] = useState("");
+  const [isSending, setIsSending] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const trimmed = value.trim();
+  const canSubmit = trimmed.length > 0 && !isSending;
+
+  // Auto-grow the textarea with content (Shift+Enter newlines, long pastes)
+  // up to the max-h-32 cap. Done in JS so it works in browsers without
+  // CSS field-sizing support.
+  useLayoutEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, COMPOSER_MAX_HEIGHT_PX)}px`;
+  }, [value]);
+
+  const submit = useCallback(async () => {
+    if (!canSubmit) return;
+    setIsSending(true);
+    try {
+      await onSubmit(trimmed);
+      setValue(""); // only clear on success — preserve text so user can retry on send failure
+    } catch {
+      // onSubmit (PreviewSessionBody.handleSendPassthroughMessage) already
+      // surfaced the error via toast; the user's typed value stays in the
+      // textarea intentionally so they can retry without retyping.
+    } finally {
+      setIsSending(false);
+    }
+  }, [canSubmit, onSubmit, trimmed]);
+
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        void submit();
+      }
+    },
+    [submit],
+  );
+
+  return (
+    <div
+      className="flex flex-shrink-0 items-end gap-2 border-t bg-card px-2 py-2"
+      data-testid="passthrough-composer"
+    >
+      <Textarea
+        ref={textareaRef}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={handleKeyDown}
+        placeholder="Message the CLI agent (Enter to send, Shift+Enter for newline)"
+        rows={1}
+        disabled={isSending}
+        className="min-h-9 max-h-32 flex-1 resize-none overflow-y-auto"
+        data-testid="passthrough-composer-textarea"
+      />
+      <Button
+        type="button"
+        size="sm"
+        variant="default"
+        onClick={() => void submit()}
+        disabled={!canSubmit}
+        className="cursor-pointer h-9 shrink-0"
+        data-testid="passthrough-composer-submit"
+        aria-label="Send message to CLI agent"
+      >
+        <IconSend className="h-4 w-4" />
+      </Button>
     </div>
   );
 }

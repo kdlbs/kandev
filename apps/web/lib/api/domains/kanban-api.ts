@@ -111,8 +111,13 @@ export async function updateTask(
   });
 }
 
-export async function deleteTask(taskId: string, options?: ApiRequestOptions) {
-  return fetchJson<void>(`/api/v1/tasks/${taskId}`, {
+export async function deleteTask(
+  taskId: string,
+  params?: { cascade?: boolean },
+  options?: ApiRequestOptions,
+) {
+  const query = params?.cascade ? "?cascade=true" : "";
+  return fetchJson<void>(`/api/v1/tasks/${taskId}${query}`, {
     ...options,
     init: { method: "DELETE", ...(options?.init ?? {}) },
   });
@@ -143,11 +148,20 @@ export async function fetchTask(taskId: string, options?: ApiRequestOptions) {
   return fetchJson<Task>(`/api/v1/tasks/${taskId}`, options);
 }
 
-export async function archiveTask(taskId: string, options?: ApiRequestOptions) {
-  return fetchJson<void>(`/api/v1/tasks/${taskId}/archive`, {
+export async function archiveTask(
+  taskId: string,
+  params?: { cascade?: boolean },
+  options?: ApiRequestOptions,
+) {
+  const query = params?.cascade ? "?cascade=true" : "";
+  return fetchJson<void>(`/api/v1/tasks/${taskId}/archive${query}`, {
     ...options,
     init: { method: "POST", ...(options?.init ?? {}) },
   });
+}
+
+export async function getSubtaskCount(taskId: string, options?: ApiRequestOptions) {
+  return fetchJson<{ count: number }>(`/api/v1/tasks/${taskId}/subtask-count`, options);
 }
 
 export async function listTasksByWorkspace(

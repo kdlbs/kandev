@@ -20,6 +20,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useActiveTaskPR, useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { prPanelLabel } from "@/components/github/pr-utils";
 import { usePRFeedback } from "@/hooks/domains/github/use-pr-feedback";
+import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import { useCommentsStore } from "@/lib/state/slices/comments";
 import type { PRFeedbackComment } from "@/lib/state/slices/comments";
 import { useToast } from "@/components/toast-provider";
@@ -174,7 +175,11 @@ function DescriptionSection({ body }: { body: string }) {
 }
 
 // GitHub logins are case-insensitive; normalize before comparing.
-function shouldHideApproveButton(
+// Fails closed when the current user is unknown — without that identity we
+// can't tell whether the viewer is the PR author, and GitHub rejects
+// self-approval, so the button would only ever produce a failed request.
+// Exported for unit testing.
+export function shouldHideApproveButton(
   taskPR: TaskPR,
   feedback: PRFeedback | null,
   currentUser: string | null,
@@ -182,7 +187,7 @@ function shouldHideApproveButton(
   const liveState = feedback?.pr.state ?? taskPR.state;
   if (liveState !== "open") return true;
   const normalizedUser = currentUser?.trim().toLowerCase();
-  if (!normalizedUser) return false;
+  if (!normalizedUser) return true;
   const prAuthor = feedback?.pr.author_login ?? taskPR.author_login;
   if (prAuthor?.trim().toLowerCase() === normalizedUser) return true;
   return (
@@ -203,7 +208,12 @@ function ApproveButton({
 }) {
   const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
-  const currentUser = useAppStore((s) => s.githubStatus.status?.username ?? null);
+  // Ensures status (and thus the authenticated username) is fetched even when
+  // the PR panel is the first GitHub-aware surface the user opens; without
+  // this, currentUser is null on first render and shouldHideApproveButton has
+  // no identity to compare against the PR author.
+  const { status } = useGitHubStatus();
+  const currentUser = status?.username ?? null;
 
   if (shouldHideApproveButton(taskPR, feedback, currentUser)) return null;
 
