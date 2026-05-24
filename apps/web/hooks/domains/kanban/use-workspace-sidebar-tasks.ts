@@ -1,5 +1,9 @@
+"use client";
+
 import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
+import { multiKanbanQueryOptions } from "@/lib/query/query-options/kanban";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 import {
   aggregateSidebarTasks,
@@ -15,41 +19,51 @@ export type WorkspaceSidebarTasksResult = AggregatedSidebarTasks & {
 /**
  * Shared data source for the desktop sidebar and the mobile task-switcher sheet.
  *
- * Fires `useAllWorkflowSnapshots` to populate `kanbanMulti.snapshots` for every
- * workflow in the workspace, then aggregates them (with a fallback to the
- * single active `kanban` slice for tasks that arrived via WS before their
- * snapshot resolved). Snapshots from other workspaces are filtered out so a
- * stale hydration doesn't leak across workspace switches.
+ * Reads from the TanStack Query `qk.kanban.multi()` cache (populated by
+ * `useAllWorkflowSnapshots` and kept fresh by the kanban bridge). Aggregates
+ * snapshots from every workflow in the workspace, scoped so that stale
+ * snapshots from other workspaces never leak in.
+ *
+ * Falls back to the active single-workflow `kanban` Zustand slice (still
+ * populated by the old WS handler) for tasks that arrive via WS before
+ * their snapshot is in the TQ cache — this keeps the sidebar coherent during
+ * the incremental migration period.
  */
 export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceSidebarTasksResult {
+  // Trigger TQ fetch for this workspace's snapshots
   useAllWorkflowSnapshots(workspaceId);
 
-  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
-  const isMultiLoading = useAppStore((state) => state.kanbanMulti.isLoading);
+  // TQ cache — primary source
+  const { data: multiData, isFetching } = useQuery({
+    ...multiKanbanQueryOptions(workspaceId ?? ""),
+    enabled: !!workspaceId,
+  });
+
+  // Zustand — fallback for Zustand-populated single active workflow slice
   const workflows = useAppStore((state) => state.workflows.items);
   const activeKanbanWorkflowId = useAppStore((state) => state.kanban.workflowId);
   const activeKanbanTasks = useAppStore((state) => state.kanban.tasks);
   const activeKanbanSteps = useAppStore((state) => state.kanban.steps);
 
-  // While `workspaceId` is unresolved (initial SSR / pre-hydration), return an
-  // empty scope rather than every workflow in the store — otherwise snapshots
-  // from previously-active workspaces would briefly bleed into the sidebar.
   const filteredWorkflows = useMemo(
     () => (workspaceId ? workflows.filter((w) => w.workspaceId === workspaceId) : []),
     [workflows, workspaceId],
   );
+
   const workspaceWorkflowIds = useMemo(
     () => new Set(filteredWorkflows.map((w) => w.id)),
     [filteredWorkflows],
   );
 
+  // TQ snapshots, scoped to this workspace
   const scopedSnapshots = useMemo(() => {
-    const result: typeof snapshots = {};
-    for (const [wfId, snap] of Object.entries(snapshots)) {
+    if (!multiData) return {};
+    const result: typeof multiData.snapshots = {};
+    for (const [wfId, snap] of Object.entries(multiData.snapshots)) {
       if (workspaceWorkflowIds.has(wfId)) result[wfId] = snap;
     }
     return result;
-  }, [snapshots, workspaceWorkflowIds]);
+  }, [multiData, workspaceWorkflowIds]);
 
   const fallbackWorkflowId =
     activeKanbanWorkflowId && workspaceWorkflowIds.has(activeKanbanWorkflowId)
@@ -72,9 +86,8 @@ export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceS
     [filteredWorkflows],
   );
 
-  // Only flash a skeleton on the very first fetch (no snapshots yet); refreshes
-  // shouldn't blow away the existing list.
-  const isLoading = isMultiLoading && Object.keys(scopedSnapshots).length === 0;
+  // Only flash a skeleton on the very first fetch (no snapshots yet).
+  const isLoading = isFetching && Object.keys(scopedSnapshots).length === 0;
 
   return {
     ...aggregated,

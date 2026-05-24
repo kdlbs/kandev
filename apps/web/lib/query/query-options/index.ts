@@ -24,3 +24,4 @@ export * from "./workspace";
 export * from "./settings";
 export * from "./automations";
 export * from "./integrations";
+export * from "./kanban";

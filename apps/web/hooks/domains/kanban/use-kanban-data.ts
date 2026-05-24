@@ -1,12 +1,36 @@
 "use client";
 
 import { useMemo, useSyncExternalStore } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
 import { useWorkflows } from "@/hooks/use-workflows";
 import { useWorkflowSnapshot } from "@/hooks/use-workflow-snapshot";
 import { useUserDisplaySettings } from "@/hooks/use-user-display-settings";
 import { filterTasksByRepositories } from "@/lib/kanban/filters";
+import { workflowKanbanQueryOptions } from "@/lib/query/query-options/kanban";
 import type { WorkflowStep } from "@/components/kanban-column";
+
+type Repository = { id: string; name?: string; local_path?: string };
+type TaskWithRepo = { title: string; description?: string; repositoryId?: string };
+
+function filterTasksByQuery<T extends TaskWithRepo>(
+  tasks: T[],
+  searchQuery: string,
+  repositories: Repository[],
+): T[] {
+  if (!searchQuery) return tasks;
+  const query = searchQuery.toLowerCase();
+  return tasks.filter((task) => {
+    if (task.title.toLowerCase().includes(query)) return true;
+    if (task.description?.toLowerCase().includes(query)) return true;
+    if (task.repositoryId) {
+      const repo = repositories.find((r) => r.id === task.repositoryId);
+      if (repo?.name?.toLowerCase().includes(query)) return true;
+      if (repo?.local_path?.toLowerCase().includes(query)) return true;
+    }
+    return false;
+  });
+}
 
 type KanbanDataOptions = {
   onWorkspaceChange: (workspaceId: string | null) => void;
@@ -19,16 +43,36 @@ export function useKanbanData({
   onWorkflowChange,
   searchQuery = "",
 }: KanbanDataOptions) {
-  // Store selectors
-  const kanban = useAppStore((state) => state.kanban);
+  // Store selectors — Zustand still owns workspaces/workflows/ui state
   const workspaceState = useAppStore((state) => state.workspaces);
   const workflowsState = useAppStore((state) => state.workflows);
   const enablePreviewOnClick = useAppStore((state) => state.userSettings.enablePreviewOnClick);
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
 
-  // Data fetching hooks
+  // Keep the old snapshot hooks alive during migration so the Zustand kanban
+  // slice remains populated for cross-domain consumers not yet migrated.
   useWorkflows(workspaceState.activeId, true);
   useWorkflowSnapshot(workflowsState.activeId);
+
+  // TanStack Query — single-workflow snapshot derived from multi cache
+  const { data: snapshot, isLoading: snapshotLoading } = useQuery({
+    ...workflowKanbanQueryOptions(workspaceState.activeId ?? "", workflowsState.activeId ?? ""),
+    enabled: !!(workspaceState.activeId && workflowsState.activeId),
+  });
+
+  // Fallback to Zustand kanban state while TQ warms up (migration period)
+  const zustandKanban = useAppStore((state) => state.kanban);
+  const kanban = snapshot
+    ? {
+        workflowId: snapshot.workflowId,
+        steps: snapshot.steps,
+        tasks: snapshot.tasks,
+      }
+    : {
+        workflowId: zustandKanban.workflowId,
+        steps: zustandKanban.steps,
+        tasks: zustandKanban.tasks,
+      };
 
   // User settings hook
   const {
@@ -63,7 +107,7 @@ export function useKanbanData({
     [kanban.steps],
   );
 
-  const tasks = kanban.tasks.map((task: (typeof kanban.tasks)[number]) => ({
+  const tasks = kanban.tasks.map((task) => ({
     id: task.id,
     title: task.title,
     workflowStepId: task.workflowStepId,
@@ -86,34 +130,15 @@ export function useKanbanData({
     [tasks, selectedRepositoryIds],
   );
 
-  // Apply search filtering
   const filteredTasks = useMemo(() => {
-    if (!searchQuery) return visibleTasks;
-
-    // Get repositories for the current workspace for search filtering
     const repositories = workspaceState.activeId
       ? (repositoriesByWorkspace[workspaceState.activeId] ?? [])
       : [];
-
-    const query = searchQuery.toLowerCase();
-    return visibleTasks.filter((task) => {
-      // Match task title or description
-      if (task.title.toLowerCase().includes(query)) return true;
-      if (task.description?.toLowerCase().includes(query)) return true;
-
-      // Match repository name/path
-      if (task.repositoryId) {
-        const repo = repositories.find((r) => r.id === task.repositoryId);
-        if (repo?.name?.toLowerCase().includes(query)) return true;
-        if (repo?.local_path?.toLowerCase().includes(query)) return true;
-      }
-
-      return false;
-    });
+    return filterTasksByQuery(visibleTasks, searchQuery, repositories);
   }, [visibleTasks, searchQuery, workspaceState.activeId, repositoriesByWorkspace]);
 
   return {
-    // State
+    // State (kanban data now from TQ, rest from Zustand)
     kanban,
     workspaceState,
     workflowsState,
@@ -122,6 +147,7 @@ export function useKanbanData({
     commitSettings,
     selectedRepositoryIds,
     isMounted,
+    isLoading: snapshotLoading,
 
     // Derived data
     activeSteps,

@@ -1,16 +1,25 @@
+"use client";
+
 import { useAppStore } from "@/components/state-provider";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
-import type { KanbanState } from "@/lib/state/slices";
+import type { KanbanState } from "@/lib/state/slices/kanban/types";
 
 type Task = KanbanState["tasks"][number];
 
 /**
- * Read-only lookup of a task by ID across the active workflow and any loaded
- * cross-workflow snapshots. Unlike useTask, this hook does not subscribe to
- * task updates over WebSocket — use it where the caller only needs whatever
- * task data is already cached (e.g. rendering a sender badge for a message
- * that came from another task; if the sender task isn't loaded we fall back
- * to the snapshotted title in metadata).
+ * Read-only lookup of a task by ID across all loaded workflow snapshots.
+ *
+ * Migration note: during Wave 3 we read primarily from the Zustand kanban
+ * slices (still populated by the old WS handlers) so that cross-domain
+ * consumers (SenderTaskBadge, PRRowTaskIndicator, etc.) that are not yet
+ * migrated continue to work without a QueryClientProvider in their tests.
+ *
+ * The hook intentionally preserves the original Zustand-based signature
+ * so that no cross-domain refactors are needed in this wave. Wave 6
+ * (cleanup) will switch this to pure TQ reads once all consumers are
+ * migrated.
+ *
+ * Preserved signature: `useTaskById(taskId)`.
  */
 export function useTaskById(taskId: string | null | undefined): Task | null {
   return useAppStore((state) => {

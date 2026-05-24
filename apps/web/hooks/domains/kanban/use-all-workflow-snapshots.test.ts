@@ -1,145 +1,100 @@
+/**
+ * Tests for the TQ-based useAllWorkflowSnapshots hook.
+ *
+ * The hook now:
+ * 1. Calls `useQuery(multiKanbanQueryOptions(workspaceId))` to populate the TQ cache.
+ * 2. Calls `queryClient.invalidateQueries(qk.kanban.multi())` when workspaceId changes.
+ *
+ * We test the invalidation behavior; the fetch itself is handled by TQ and
+ * tested in bridge tests.
+ */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { renderHook, act } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import React from "react";
+import { qk } from "@/lib/query/keys";
 
-const mockClearKanbanMulti = vi.fn();
-const mockSetKanbanMultiLoading = vi.fn();
-const mockSetWorkflowSnapshot = vi.fn();
-const mockFetchWorkflowSnapshot = vi.fn();
+// ---------------------------------------------------------------------------
+// Mocks
+// ---------------------------------------------------------------------------
 
-type Workflow = { id: string; workspaceId: string; name: string };
-type MockState = {
-  connection: { status: string };
-  workflows: { items: Workflow[] };
-  kanbanMulti: { snapshots: Record<string, unknown>; isLoading: boolean };
-  clearKanbanMulti: typeof mockClearKanbanMulti;
-  setKanbanMultiLoading: typeof mockSetKanbanMultiLoading;
-  setWorkflowSnapshot: typeof mockSetWorkflowSnapshot;
-};
-
-let mockState: MockState = {
-  connection: { status: "connected" },
-  workflows: { items: [] },
-  kanbanMulti: { snapshots: {}, isLoading: false },
-  clearKanbanMulti: mockClearKanbanMulti,
-  setKanbanMultiLoading: mockSetKanbanMultiLoading,
-  setWorkflowSnapshot: mockSetWorkflowSnapshot,
-};
-
-vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (s: MockState) => unknown) => selector(mockState),
-  useAppStoreApi: () => ({ getState: () => mockState }),
-}));
-
-vi.mock("@/lib/api", () => ({
-  fetchWorkflowSnapshot: (...args: unknown[]) => mockFetchWorkflowSnapshot(...args),
+vi.mock("@/lib/query/query-options/kanban", () => ({
+  multiKanbanQueryOptions: (workspaceId: string) => ({
+    queryKey: qk.kanban.multi(),
+    queryFn: vi.fn().mockResolvedValue({ snapshots: {} }),
+    enabled: !!workspaceId,
+    staleTime: 30_000,
+  }),
 }));
 
 import { useAllWorkflowSnapshots } from "./use-all-workflow-snapshots";
 
-function resetMocks(workflows: Workflow[] = []) {
-  vi.clearAllMocks();
-  mockFetchWorkflowSnapshot.mockResolvedValue({ steps: [], tasks: [] });
-  mockState = {
-    connection: { status: "connected" },
-    workflows: { items: workflows },
-    kanbanMulti: { snapshots: {}, isLoading: false },
-    clearKanbanMulti: mockClearKanbanMulti,
-    setKanbanMultiLoading: mockSetKanbanMultiLoading,
-    setWorkflowSnapshot: mockSetWorkflowSnapshot,
+function createWrapper(qc: QueryClient) {
+  return function Wrapper({ children }: { children: React.ReactNode }) {
+    return React.createElement(QueryClientProvider, { client: qc }, children);
   };
 }
 
-describe("useAllWorkflowSnapshots — workspace scoping", () => {
+describe("useAllWorkflowSnapshots — TQ-based", () => {
   beforeEach(() => {
-    resetMocks([{ id: "wf-A", workspaceId: "ws-A", name: "A" }]);
+    vi.clearAllMocks();
   });
 
-  it("does not clear snapshots on initial mount (SSR preservation)", async () => {
-    renderHook(
-      ({ workspaceId }: { workspaceId: string | null }) => useAllWorkflowSnapshots(workspaceId),
-      {
-        initialProps: { workspaceId: "ws-A" },
-      },
-    );
-
-    // Allow the effect + Promise.all to settle.
-    await waitFor(() => expect(mockSetKanbanMultiLoading).toHaveBeenCalledWith(true));
-    expect(mockClearKanbanMulti).not.toHaveBeenCalled();
+  it("renders without error when workspaceId is null", () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    expect(() => {
+      renderHook(() => useAllWorkflowSnapshots(null), { wrapper: createWrapper(qc) });
+    }).not.toThrow();
   });
 
-  it("clears snapshots when workspaceId changes", async () => {
-    const { rerender } = renderHook(
-      ({ workspaceId }: { workspaceId: string | null }) => useAllWorkflowSnapshots(workspaceId),
-      { initialProps: { workspaceId: "ws-A" } },
-    );
-    await waitFor(() => expect(mockSetKanbanMultiLoading).toHaveBeenCalledWith(true));
-    expect(mockClearKanbanMulti).not.toHaveBeenCalled();
-
-    // Switch to workspace B — must clear A's snapshots.
-    mockState.workflows = { items: [{ id: "wf-B", workspaceId: "ws-B", name: "B" }] };
-    rerender({ workspaceId: "ws-B" });
-
-    await waitFor(() => expect(mockClearKanbanMulti).toHaveBeenCalledTimes(1));
+  it("renders without error when workspaceId is provided", () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    expect(() => {
+      renderHook(() => useAllWorkflowSnapshots("ws-1"), { wrapper: createWrapper(qc) });
+    }).not.toThrow();
   });
 
-  it("skips refetch when workspace + workflow set is unchanged across renders", async () => {
-    const workflows = [{ id: "wf-A", workspaceId: "ws-A", name: "A" }];
-    const { rerender } = renderHook(
-      ({ workspaceId }: { workspaceId: string | null }) => useAllWorkflowSnapshots(workspaceId),
-      { initialProps: { workspaceId: "ws-A" } },
-    );
-    await waitFor(() => expect(mockFetchWorkflowSnapshot).toHaveBeenCalledTimes(1));
-
-    // Same-workflow rerender — dedup key unchanged, must not refetch.
-    mockState.workflows = { items: [...workflows] };
-    rerender({ workspaceId: "ws-A" });
-
-    // Positive signal: follow up with a DIFFERENT workflow set, which must
-    // trigger a fetch. If dedup worked, the total is 2 (initial + this one).
-    // If dedup failed, the same-key rerender would have fired a fetch before
-    // this one, making the total 3. Waiting for count==2 proves both:
-    // the dedup rerender was skipped AND the next real change still fetches.
-    mockState.workflows = { items: [{ id: "wf-A2", workspaceId: "ws-A", name: "A2" }] };
-    rerender({ workspaceId: "ws-A" });
-    await waitFor(() => expect(mockFetchWorkflowSnapshot).toHaveBeenCalledTimes(2));
-    expect(mockFetchWorkflowSnapshot.mock.calls[1][0]).toBe("wf-A2");
-    expect(mockClearKanbanMulti).not.toHaveBeenCalled();
+  it("returns void (no return value)", () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(() => useAllWorkflowSnapshots("ws-1"), {
+      wrapper: createWrapper(qc),
+    });
+    expect(result.current).toBeUndefined();
   });
 
-  it("discards a stale in-flight fetch when workspace switches mid-fetch", async () => {
-    // Hold the first fetch open so it resolves after the workspace switch.
-    let resolveStale: (v: { steps: []; tasks: [] }) => void = () => {};
-    mockFetchWorkflowSnapshot.mockImplementationOnce(
-      () =>
-        new Promise((res) => {
-          resolveStale = res;
-        }),
-    );
+  it("invalidates the kanban multi cache when workspaceId changes", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
 
     const { rerender } = renderHook(
-      ({ workspaceId }: { workspaceId: string | null }) => useAllWorkflowSnapshots(workspaceId),
-      { initialProps: { workspaceId: "ws-A" } },
-    );
-    await waitFor(() =>
-      expect(mockFetchWorkflowSnapshot).toHaveBeenCalledWith("wf-A", expect.anything()),
+      ({ wsId }: { wsId: string | null }) => useAllWorkflowSnapshots(wsId),
+      { wrapper: createWrapper(qc), initialProps: { wsId: "ws-1" } },
     );
 
-    // Switch to workspace B before A's fetch resolves. Wait for B's fetch
-    // to settle (positive signal) so the new-gen effect is fully in place.
-    mockFetchWorkflowSnapshot.mockResolvedValueOnce({ steps: [], tasks: [] });
-    mockState.workflows = { items: [{ id: "wf-B", workspaceId: "ws-B", name: "B" }] };
-    rerender({ workspaceId: "ws-B" });
-    await waitFor(() =>
-      expect(mockSetWorkflowSnapshot).toHaveBeenCalledWith("wf-B", expect.anything()),
+    // Wait for the effect from initial mount
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const callsBefore = invalidateSpy.mock.calls.length;
+
+    // Change workspace
+    rerender({ wsId: "ws-2" });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // Should have called invalidateQueries again after the workspace change
+    expect(invalidateSpy.mock.calls.length).toBeGreaterThan(callsBefore);
+
+    // Each call should target the kanban multi key
+    const kanbanMultiKey = qk.kanban.multi();
+    const hasKanbanCall = invalidateSpy.mock.calls.some(
+      (call) =>
+        JSON.stringify((call[0] as { queryKey?: unknown })?.queryKey) ===
+        JSON.stringify(kanbanMultiKey),
     );
-
-    // Resolve A's stale fetch and drain the microtask queue so its .then
-    // and .finally callbacks run. Flushing microtasks is deterministic —
-    // unlike setTimeout, it doesn't depend on CI wall-clock speed.
-    resolveStale({ steps: [], tasks: [] });
-    for (let i = 0; i < 5; i++) await Promise.resolve();
-
-    const writtenIds = mockSetWorkflowSnapshot.mock.calls.map((args) => args[0]);
-    expect(writtenIds).not.toContain("wf-A");
+    expect(hasKanbanCall).toBe(true);
   });
 });

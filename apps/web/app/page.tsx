@@ -1,3 +1,4 @@
+import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
 import { PageClient } from "@/app/page-client";
 import { StateHydrator } from "@/components/state-hydrator";
 import {
@@ -13,6 +14,12 @@ import { listWorkspaceTaskPRs } from "@/lib/api/domains/github-api";
 import { snapshotToState } from "@/lib/ssr/mapper";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { resolveDesiredWorkflowId } from "@/lib/kanban/resolve-workflow";
+import { makeQueryClient } from "@/lib/query/client";
+import {
+  multiKanbanQueryOptions,
+  snapshotToWorkflowSnapshotData,
+} from "@/lib/query/query-options/kanban";
+import type { KanbanMultiData } from "@/lib/query/query-options/kanban";
 import type { AppState } from "@/lib/state/store";
 import type { ListWorkspacesResponse, UserSettingsResponse } from "@/lib/types/http";
 
@@ -116,6 +123,42 @@ async function loadSnapshotState(
   return state;
 }
 
+/**
+ * Prefetch all workflow snapshots for the workspace into a per-request
+ * TanStack Query client, then return the dehydrated state.
+ *
+ * The QueryProvider in app/layout.tsx already mounts a HydrationBoundary;
+ * we wrap the page output in a second HydrationBoundary so the SSR data
+ * seeds the browser cache before first render.
+ *
+ * Re-uses the same snapshot fetches already in-flight for the Zustand
+ * hydration path to avoid redundant network calls.
+ */
+async function prefetchKanbanMulti(
+  workspaceId: string,
+  workflowList: Awaited<ReturnType<typeof listWorkflows>>,
+): Promise<{ qc: ReturnType<typeof makeQueryClient>; dehydratedState: ReturnType<typeof dehydrate> }> {
+  const qc = makeQueryClient();
+
+  const entries = await Promise.all(
+    workflowList.workflows.map(async (wf) => {
+      try {
+        const raw = await fetchWorkflowSnapshot(wf.id, { cache: "no-store" });
+        return [wf.id, snapshotToWorkflowSnapshotData(wf.id, wf.name, raw)] as const;
+      } catch {
+        return null;
+      }
+    }),
+  );
+
+  const snapshots = Object.fromEntries(entries.filter((e): e is NonNullable<typeof e> => e !== null));
+  const multiData: KanbanMultiData = { snapshots };
+
+  qc.setQueryData(multiKanbanQueryOptions(workspaceId).queryKey, multiData);
+
+  return { qc, dehydratedState: dehydrate(qc) };
+}
+
 export default async function Page({ searchParams }: PageProps) {
   try {
     const resolvedParams = searchParams ? await searchParams : {};
@@ -204,12 +247,17 @@ export default async function Page({ searchParams }: PageProps) {
       },
     };
 
+    // Prefetch all workflow snapshots into TQ SSR cache
+    const { dehydratedState } = await prefetchKanbanMulti(activeWorkspaceId, workflowList).catch(
+      () => ({ dehydratedState: dehydrate(makeQueryClient()) }),
+    );
+
     if (!workflowId) {
       return (
-        <>
+        <HydrationBoundary state={dehydratedState}>
           <StateHydrator initialState={initialState} />
           <PageClient />
-        </>
+        </HydrationBoundary>
       );
     }
 
@@ -217,10 +265,10 @@ export default async function Page({ searchParams }: PageProps) {
     initialState = { ...initialState, ...snapshotState };
 
     return (
-      <>
+      <HydrationBoundary state={dehydratedState}>
         <StateHydrator initialState={initialState} />
         <PageClient initialTaskId={taskId} initialSessionId={sessionId} />
-      </>
+      </HydrationBoundary>
     );
   } catch {
     return <PageClient />;

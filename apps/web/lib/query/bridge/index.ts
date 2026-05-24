@@ -6,6 +6,7 @@ import { registerWorkspaceBridge } from "./workspace";
 import { registerSettingsBridge } from "./settings";
 import { registerAutomationsBridge } from "./automations";
 import { registerIntegrationsBridge } from "./integrations";
+import { registerKanbanBridge } from "./kanban";
 
 /**
  * Registers the WS → TanStack Query bridge.
@@ -28,6 +29,7 @@ export function registerQueryBridge(
     registerSettingsBridge(ws, queryClient),
     registerAutomationsBridge(ws, queryClient),
     registerIntegrationsBridge(ws, queryClient),
+    registerKanbanBridge(ws, queryClient),
   ];
   return () => {
     for (const fn of cleanups) fn();
