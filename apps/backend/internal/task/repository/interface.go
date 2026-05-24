@@ -139,6 +139,11 @@ type SessionRepository interface {
 	GetPrimarySessionIDsByTaskIDs(ctx context.Context, taskIDs []string) (map[string]string, error)
 	GetSessionCountsByTaskIDs(ctx context.Context, taskIDs []string) (map[string]int, error)
 	GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs []string) (map[string]*models.TaskSession, error)
+	// BatchGetSessionsByTaskIDs returns every session for the given task IDs
+	// grouped by task ID, ordered by started_at DESC within each task. One
+	// query (chunked to stay within SQLite's host-parameter limit) replaces
+	// per-task GetSession loops on the task-list path.
+	BatchGetSessionsByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]*models.TaskSession, error)
 	SetSessionPrimary(ctx context.Context, sessionID string) error
 	UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error
 	UpdateSessionMetadata(ctx context.Context, sessionID string, metadata map[string]interface{}) error

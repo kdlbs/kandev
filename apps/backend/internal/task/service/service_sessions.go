@@ -84,6 +84,14 @@ func (s *Service) GetPrimarySessionInfoForTasks(ctx context.Context, taskIDs []s
 	return s.sessions.GetPrimarySessionInfoByTaskIDs(ctx, taskIDs)
 }
 
+// BatchGetSessionsForTasks returns all sessions for the given task IDs grouped
+// by task ID. Wraps the repository batch loader so callers in the handler
+// layer can derive primary session, session count, and per-task session info
+// from one round trip instead of three.
+func (s *Service) BatchGetSessionsForTasks(ctx context.Context, taskIDs []string) (map[string][]*models.TaskSession, error) {
+	return s.sessions.BatchGetSessionsByTaskIDs(ctx, taskIDs)
+}
+
 // SetPrimarySession sets a session as the primary session for its task.
 // This will unset any existing primary session for the same task.
 func (s *Service) SetPrimarySession(ctx context.Context, sessionID string) error {

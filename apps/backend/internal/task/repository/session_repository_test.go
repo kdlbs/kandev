@@ -572,3 +572,107 @@ func TestGetPrimarySessionInfoByTaskIDs_PopulatesID(t *testing.T) {
 		t.Errorf("expected session ID %q, got %q (ts.id missing from SELECT?)", "session-abc", got.ID)
 	}
 }
+
+// TestBatchGetSessionsByTaskIDs covers the batch loader used by the task-list
+// endpoint: three tasks each with two sessions must come back grouped by task
+// ID, and the empty-input case must short-circuit with an empty map (no
+// query, no error).
+func TestBatchGetSessionsByTaskIDs(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-batch", Name: "WF"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+
+	taskIDs := []string{"task-A", "task-B", "task-C"}
+	for _, tid := range taskIDs {
+		if err := repo.CreateTask(ctx, &models.Task{
+			ID: tid, WorkflowID: "wf-batch", WorkflowStepID: "step-1", Title: "T-" + tid,
+		}); err != nil {
+			t.Fatalf("CreateTask %s: %v", tid, err)
+		}
+		// Two sessions per task; the second one is primary so the handler
+		// derivation of "primary session id" has something to find.
+		s1 := &models.TaskSession{
+			ID: tid + "-s1", TaskID: tid, State: models.TaskSessionStateCompleted,
+		}
+		if err := repo.CreateTaskSession(ctx, s1); err != nil {
+			t.Fatalf("CreateTaskSession %s: %v", s1.ID, err)
+		}
+		s2 := &models.TaskSession{
+			ID: tid + "-s2", TaskID: tid, State: models.TaskSessionStateRunning,
+		}
+		if err := repo.CreateTaskSession(ctx, s2); err != nil {
+			t.Fatalf("CreateTaskSession %s: %v", s2.ID, err)
+		}
+		if err := repo.SetSessionPrimary(ctx, s2.ID); err != nil {
+			t.Fatalf("SetSessionPrimary %s: %v", s2.ID, err)
+		}
+	}
+
+	// Empty input must not query the DB and must return an empty (non-nil) map.
+	empty, err := repo.BatchGetSessionsByTaskIDs(ctx, nil)
+	if err != nil {
+		t.Fatalf("BatchGetSessionsByTaskIDs(nil): %v", err)
+	}
+	if empty == nil {
+		t.Error("expected non-nil empty map, got nil")
+	}
+	if len(empty) != 0 {
+		t.Errorf("expected empty map, got %d entries", len(empty))
+	}
+
+	// Multi-task case.
+	got, err := repo.BatchGetSessionsByTaskIDs(ctx, taskIDs)
+	if err != nil {
+		t.Fatalf("BatchGetSessionsByTaskIDs: %v", err)
+	}
+	if len(got) != len(taskIDs) {
+		t.Errorf("expected %d tasks in result, got %d", len(taskIDs), len(got))
+	}
+	for _, tid := range taskIDs {
+		sessions, ok := got[tid]
+		if !ok {
+			t.Errorf("missing sessions for task %s", tid)
+			continue
+		}
+		if len(sessions) != 2 {
+			t.Errorf("task %s: expected 2 sessions, got %d", tid, len(sessions))
+			continue
+		}
+		// Verify every returned session actually belongs to the right task
+		// (guards against accidental cross-task bleed in the WHERE clause).
+		for _, s := range sessions {
+			if s.TaskID != tid {
+				t.Errorf("task %s: got session with TaskID %q", tid, s.TaskID)
+			}
+		}
+		// Exactly one session per task must be marked primary, and it must
+		// be the one we promoted (s2). The handler relies on this to derive
+		// primary_session_id without a second query.
+		var primaries []string
+		for _, s := range sessions {
+			if s.IsPrimary {
+				primaries = append(primaries, s.ID)
+			}
+		}
+		if len(primaries) != 1 || primaries[0] != tid+"-s2" {
+			t.Errorf("task %s: expected single primary %s-s2, got %v", tid, tid, primaries)
+		}
+	}
+
+	// Tasks the caller asks about but that have no sessions must not appear
+	// in the map (callers treat absence as "0 sessions").
+	withMissing, err := repo.BatchGetSessionsByTaskIDs(ctx, []string{"task-A", "task-missing"})
+	if err != nil {
+		t.Fatalf("BatchGetSessionsByTaskIDs(with missing): %v", err)
+	}
+	if _, exists := withMissing["task-missing"]; exists {
+		t.Error("expected missing task to be absent from result map")
+	}
+	if len(withMissing["task-A"]) != 2 {
+		t.Errorf("expected 2 sessions for task-A, got %d", len(withMissing["task-A"]))
+	}
+}

@@ -680,6 +680,46 @@ func (r *Repository) loadWorktreesBatch(ctx context.Context, sessions []*models.
 	return sessions, nil
 }
 
+// BatchGetSessionsByTaskIDs returns all task_sessions for the given task IDs,
+// grouped by task ID and ordered by started_at DESC within each task. The
+// returned sessions carry their associated worktrees (loaded in one extra
+// query). Used by callers that need primary session, session count, and
+// session info for many tasks in one round trip (e.g. the workspace
+// task-list endpoint) to avoid issuing one GetSession per task.
+//
+// Returns an empty map for an empty input. Chunks input larger than
+// sqliteMaxHostParams to stay well below SQLite's compile-time placeholder
+// limit.
+func (r *Repository) BatchGetSessionsByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]*models.TaskSession, error) {
+	result := make(map[string][]*models.TaskSession, len(taskIDs))
+	if len(taskIDs) == 0 {
+		return result, nil
+	}
+
+	for _, chunk := range chunkIDs(taskIDs, sqliteMaxHostParams) {
+		placeholders, args := buildInPlaceholders(chunk)
+		query := `SELECT ` + taskSessionSelectCols + ` ` + taskSessionFromClause +
+			` WHERE ts.task_id IN (` + placeholders + `) ORDER BY ts.task_id, ts.started_at DESC`
+		rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
+		if err != nil {
+			return nil, err
+		}
+		sessions, scanErr := r.scanTaskSessions(ctx, rows)
+		_ = rows.Close()
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		sessions, err = r.loadWorktreesBatch(ctx, sessions)
+		if err != nil {
+			return nil, err
+		}
+		for _, s := range sessions {
+			result[s.TaskID] = append(result[s.TaskID], s)
+		}
+	}
+	return result, nil
+}
+
 func (r *Repository) HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error) {
 	var exists int
 	// Exclude ephemeral tasks (quick chat, config chat) - they shouldn't block profile deletion
