@@ -186,24 +186,46 @@ type ProfileEnvVarsEditorProps = {
 };
 
 export function ProfileEnvVarsEditor({ envVars, secrets, onChange }: ProfileEnvVarsEditorProps) {
-  const rows = useMemo(() => envVarsToRows(envVars), [envVars]);
+  // `synced` is what we've acknowledged from the parent (either via the prop
+  // or our own last emission). When the prop diverges from it we re-seed
+  // local row state; that's how external prop resets propagate without
+  // wiping in-progress draft rows on every echo.
+  const [synced, setSynced] = useState<ProfileEnvVar[]>(envVars ?? []);
+  const [rows, setRows] = useState<EnvVarRow[]>(() => envVarsToRows(envVars));
+
+  const incoming = envVars ?? [];
+  if (!areEnvVarsEqual(incoming, synced)) {
+    setSynced(incoming);
+    setRows(envVarsToRows(incoming));
+  }
 
   const handleAdd = useCallback(() => {
-    onChange(rowsToEnvVars([...rows, { key: "", mode: "value", value: "", secretId: "" }]));
-  }, [onChange, rows]);
+    setRows((prev) => [...prev, { key: "", mode: "value", value: "", secretId: "" }]);
+  }, []);
+
+  const commit = useCallback(
+    (next: EnvVarRow[]) => {
+      setRows(next);
+      const cleaned = rowsToEnvVars(next);
+      if (areEnvVarsEqual(cleaned, synced)) return;
+      setSynced(cleaned);
+      onChange(cleaned);
+    },
+    [synced, onChange],
+  );
 
   const handleUpdate = useCallback(
     (index: number, field: keyof EnvVarRow, val: string) => {
-      onChange(rowsToEnvVars(rows.map((row, i) => (i === index ? { ...row, [field]: val } : row))));
+      commit(rows.map((row, i) => (i === index ? { ...row, [field]: val } : row)));
     },
-    [onChange, rows],
+    [rows, commit],
   );
 
   const handleRemove = useCallback(
     (index: number) => {
-      onChange(rowsToEnvVars(rows.filter((_, i) => i !== index)));
+      commit(rows.filter((_, i) => i !== index));
     },
-    [onChange, rows],
+    [rows, commit],
   );
 
   return (
@@ -222,7 +244,7 @@ type ProfileEnvVarsSectionProps = {
   onChange: (patch: Partial<AgentProfile>) => void;
 };
 
-function ProfileEnvVarsSection({ envVars, onChange }: ProfileEnvVarsSectionProps) {
+export function ProfileEnvVarsSection({ envVars, onChange }: ProfileEnvVarsSectionProps) {
   const { items: secrets } = useSecrets();
   const handleChange = useCallback(
     (next: ProfileEnvVar[]) => onChange({ envVars: next }),

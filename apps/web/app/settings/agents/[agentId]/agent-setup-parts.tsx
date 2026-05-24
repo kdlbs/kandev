@@ -16,6 +16,7 @@ import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
 import { ProfileFormFields } from "@/components/settings/profile-form-fields";
+import { ProfileEnvVarsSection } from "@/components/settings/agent-profile-page";
 import type { Agent, ModelConfig, PermissionSetting, PassthroughConfig } from "@/lib/types/http";
 import { ProfileMcpConfigCard } from "./profile-mcp-config-card";
 import type { DraftProfile, DraftAgent } from "./agent-save-helpers";
@@ -130,6 +131,10 @@ export function ProfileCardItem({
           onRemove={() => onRemoveProfile(profile.id)}
           canRemove={draftAgent.profiles.length > 1}
           lockPassthrough={Boolean(draftAgent.tui_config)}
+        />
+        <ProfileEnvVarsSection
+          envVars={profile.envVars}
+          onChange={(patch) => onProfileChange(profile.id, patch)}
         />
         <ProfileMcpConfigCard
           profileId={profile.id}
