@@ -89,6 +89,49 @@ The orchestrator's `CancelAgent` handler branches on `IsPassthroughSession(sessi
 - WHEN a task starts
 - THEN no stdin write happens (today's behavior preserved); the user pastes their prompt manually
 
+## Kandev toolbar above the passthrough terminal
+
+### Where it appears
+
+`PassthroughToolbar` (`apps/web/components/task/passthrough-toolbar.tsx`) wraps `PassthroughTerminal` with the same kandev controls that ACP sessions get from `ChatStatusBar` + `ChatInputArea`. It is mounted:
+
+- Full-page task view: `dockview-shared.tsx` (`DockviewSharedContent`) renders it for passthrough sessions in place of the chat input area; the dockview desktop layout in `task-center-panel.tsx` uses the same shared content.
+- Kanban Preview tab: `preview-session-tabs.tsx` renders `PassthroughComposer` directly (compose-only, no terminal wrap) for passthrough sessions in the side-peek surface.
+
+### What it surfaces
+
+The status row at the bottom of `PassthroughToolbar` contains, left to right:
+
+- `PRStatusChip` — PR open/merged/draft indicator for the task.
+- `PRMergedBanner` — banner shown when the PR is merged.
+- `passthrough-proceed-next-step` button — moves the task to the next workflow step. Only shown when `nextStepName` is non-null and the agent is not busy (`sessionState` is not `RUNNING` or `STARTING`).
+- `ChatToggleButton` — toggles the `PassthroughComposer` open and closed. Shows `variant="default"` when the composer is open or when there are pending review comments; shows a numeric chip (`data-testid="passthrough-pending-count"`) when collapsed with pending comments.
+- Stop button (`data-testid="passthrough-stop"`) — disabled when the session is not `RUNNING` or `STARTING`.
+
+### Default focus contract
+
+The terminal (`PassthroughTerminal`) renders above the status row and fills the remaining height. The compose box is collapsed by default so xterm retains keyboard focus for raw PTY interaction. The user opts in to the kandev composer explicitly via the Chat button.
+
+### How the composer formats and sends pending review comments
+
+When `PassthroughComposer` submits:
+
+1. `usePendingDiffCommentsByFile(sessionId)` provides comments grouped by file path.
+2. Non-empty `pendingComments` are formatted via `formatReviewCommentsAsMarkdown` (produces `### Review Comments\n…`) and prepended to the typed text.
+3. The combined string is sent via `client.request("message.add", { task_id, session_id, content }, 10_000)`.
+4. `markCommentsSent(ids)` is called only on WS success — a failed send leaves both the composer open (typed text preserved for retry) and the comments pending.
+5. A `PendingCommentsBanner` (`data-testid="passthrough-pending-comments-banner"`) renders inside the open composer when `pendingCount > 0`.
+
+### How Stop maps to Ctrl-C
+
+Clicking the Stop button calls `client.request("agent.cancel", { session_id }, 10_000)` over WS. The WS handler calls `Service.CancelAgent` → `agentManager.CancelAgentBySessionID` in `apps/backend/internal/agent/runtime/lifecycle/manager_interaction.go`, which branches on `execution.PassthroughProcessID != ""` and writes `\x03` to PTY stdin. DB reconciliation completes regardless of the write outcome so the UI unsticks.
+
+### Not included
+
+- `TodoIndicator` — ACP-only (requires message stream); not rendered in `PassthroughToolbar`.
+- Plan-comments and PR-feedback attachment — same pattern as diff comments if needed in future; deferred.
+- Per-message model/mode picker — ACP-only feature; not applicable to PTY sessions.
+
 ## Out of scope
 
 - Office / autonomous-agent CLI mode — explicitly deferred. Office launches stay on ACP for now.
