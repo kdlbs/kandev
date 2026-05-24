@@ -72,9 +72,13 @@ func SSHCheckAgentctlCached(ctx context.Context, client *ssh.Client, resolver *A
 	if err != nil {
 		return false, err
 	}
-	out, _, err := runSSHCommand(ctx, client, "cat "+shellQuote(remoteShaFile)+" 2>/dev/null")
+	// The `|| true` falls back to empty stdout if the sidecar is missing,
+	// so a successful SSH session with no file is the "not cached" path —
+	// distinct from a transport-level failure which we still want to bubble
+	// up so the test endpoint can show a real error instead of "needs upload".
+	out, _, err := runSSHCommand(ctx, client, "cat "+shellQuote(remoteShaFile)+" 2>/dev/null || true")
 	if err != nil {
-		return false, nil
+		return false, fmt.Errorf("ssh: read remote agentctl sha256: %w", err)
 	}
 	return strings.TrimSpace(out) == localSha, nil
 }
