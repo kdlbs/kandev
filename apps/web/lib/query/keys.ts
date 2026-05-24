@@ -107,6 +107,19 @@ export const qk = {
   linear: {
     prefix: (wsId: string) => ["linear", wsId] as const,
     issues: (wsId: string) => ["linear", wsId, "issues"] as const,
+    /**
+     * Issue watches.
+     *
+     * workspaceId: string  → watches scoped to one workspace.
+     * workspaceId: null    → install-wide listing (all workspaces).
+     *
+     * null is represented as the literal string "__all__" in the cache key
+     * so the key is always a static tuple and TQ can deduplicate reliably.
+     */
+    watches: (workspaceId: string | null) =>
+      workspaceId !== null
+        ? (["linear", "watches", workspaceId] as const)
+        : (["linear", "watches", "__all__"] as const),
   },
 
   // -------------------------------------------------------------------------
