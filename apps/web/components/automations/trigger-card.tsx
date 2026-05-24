@@ -26,6 +26,9 @@ type TriggerCardProps = {
   onUpdate: (config: Record<string, unknown>) => void;
   onToggleEnabled: (enabled: boolean) => void;
   onDelete: () => void;
+  // oneTimeWebhookSecret is the plaintext secret from the create response,
+  // shown unmasked in the webhook config when present.
+  oneTimeWebhookSecret?: string | null;
 };
 
 const TRIGGER_ICON: Record<TriggerType, typeof IconClock> = {
@@ -89,8 +92,13 @@ export function TriggerCard({
   onUpdate,
   onToggleEnabled,
   onDelete,
+  oneTimeWebhookSecret,
 }: TriggerCardProps) {
-  const [expanded, setExpanded] = useState(false);
+  // Webhook configs open by default when there's a fresh secret to show —
+  // otherwise a user who just created an automation has to hunt for it.
+  const [expanded, setExpanded] = useState(
+    trigger.type === "webhook" && !!oneTimeWebhookSecret,
+  );
   const Icon = TRIGGER_ICON[trigger.type];
   const color = TRIGGER_COLOR[trigger.type];
 
@@ -134,7 +142,12 @@ export function TriggerCard({
       </div>
       {expanded && (
         <div className="px-4 pb-4 pt-1 border-t">
-          <TriggerConfigForm trigger={trigger} automationId={automationId} onUpdate={onUpdate} />
+          <TriggerConfigForm
+            trigger={trigger}
+            automationId={automationId}
+            onUpdate={onUpdate}
+            oneTimeWebhookSecret={oneTimeWebhookSecret}
+          />
         </div>
       )}
     </div>
@@ -145,10 +158,12 @@ function TriggerConfigForm({
   trigger,
   automationId,
   onUpdate,
+  oneTimeWebhookSecret,
 }: {
   trigger: AutomationTrigger;
   automationId: string | null;
   onUpdate: (config: Record<string, unknown>) => void;
+  oneTimeWebhookSecret?: string | null;
 }) {
   switch (trigger.type) {
     case "scheduled":
@@ -160,7 +175,12 @@ function TriggerConfigForm({
     case "github_ci":
       return <GitHubCIConfig config={trigger.config} onUpdate={onUpdate} />;
     case "webhook":
-      return <WebhookConfig automationId={automationId} />;
+      return (
+        <WebhookConfig
+          automationId={automationId}
+          initialSecret={oneTimeWebhookSecret ?? null}
+        />
+      );
     default:
       return <p className="text-sm text-muted-foreground">Unknown trigger type</p>;
   }

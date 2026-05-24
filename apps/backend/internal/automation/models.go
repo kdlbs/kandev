@@ -202,6 +202,21 @@ type UpdateTriggerRequest struct {
 	Enabled *bool            `json:"enabled,omitempty"`
 }
 
+// CreateAutomationResponse wraps a newly-created automation and returns the
+// generated webhook secret in plaintext exactly once, so the UI can show the
+// user a value they can paste into an external system. Subsequent GET / list
+// responses keep the secret hidden (WebhookSecret is `json:"-"`) — the
+// dedicated reveal endpoint is the way back to it.
+type CreateAutomationResponse struct {
+	*Automation
+	WebhookSecret string `json:"webhook_secret"`
+}
+
+// RevealWebhookSecretResponse returns the webhook secret for an automation.
+type RevealWebhookSecretResponse struct {
+	WebhookSecret string `json:"webhook_secret"`
+}
+
 // AutomationTriggeredEvent is published when a trigger fires.
 type AutomationTriggeredEvent struct {
 	AutomationID string          `json:"automation_id"`

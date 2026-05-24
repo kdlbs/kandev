@@ -19,6 +19,7 @@ import {
 } from "@/lib/api/domains/automation-api";
 import type {
   Automation,
+  CreateAutomationResponse,
   TriggerType,
   AutomationTrigger,
   TriggerTypeInfo,
@@ -246,11 +247,16 @@ type SaveHandlerOpts = {
   workspaceId: string;
   form: FormState;
   currentId: string | null;
-  create: (payload: ReturnType<typeof buildCreatePayload>) => Promise<Automation>;
+  create: (payload: ReturnType<typeof buildCreatePayload>) => Promise<CreateAutomationResponse>;
   update: (id: string, payload: ReturnType<typeof buildUpdatePayload>) => Promise<unknown>;
   setSaving: React.Dispatch<React.SetStateAction<boolean>>;
   setCurrentId: React.Dispatch<React.SetStateAction<string | null>>;
   setForm: React.Dispatch<React.SetStateAction<FormState>>;
+  // setOneTimeWebhookSecret stashes the plaintext secret returned by the
+  // create response so child trigger configs can show it to the user once.
+  // It's intentionally not persisted to the store; reopening the editor
+  // resets it to null and the user reveals it via the dedicated endpoint.
+  setOneTimeWebhookSecret: React.Dispatch<React.SetStateAction<string | null>>;
   triggerActions: ReturnType<typeof useTriggerActions>;
   router: ReturnType<typeof useRouter>;
 };
@@ -261,7 +267,8 @@ type SaveHandlerOpts = {
 // registers discovered repos before persisting the automation.
 function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
   const { isNew, workspaceId, form, currentId, create, update } = opts;
-  const { setSaving, setCurrentId, setForm, triggerActions, router } = opts;
+  const { setSaving, setCurrentId, setForm, setOneTimeWebhookSecret, triggerActions, router } =
+    opts;
   return async () => {
     setSaving(true);
     try {
@@ -279,6 +286,7 @@ function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
           buildCreatePayload(workspaceId, form, repositoryId, triggerActions.pending),
         );
         setCurrentId(a.id);
+        setOneTimeWebhookSecret(a.webhook_secret || null);
         triggerActions.setTriggers(a.triggers ?? []);
         triggerActions.clearPending();
         promoteSelection();
@@ -355,6 +363,10 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
   const [form, setForm] = useState<FormState>(defaultForm);
   const [saving, setSaving] = useState(false);
   const [currentId, setCurrentId] = useState<string | null>(automationId);
+  // oneTimeWebhookSecret holds the plaintext secret returned by the create
+  // response. The user gets exactly this one chance to copy it; afterwards
+  // they must use the dedicated reveal endpoint. Resets to null on reload.
+  const [oneTimeWebhookSecret, setOneTimeWebhookSecret] = useState<string | null>(null);
   const isNew = currentId === null;
   const triggerActions = useTriggerActions(currentId);
   const triggerTypes = useTriggerTypeMetadata();
@@ -392,6 +404,7 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
     setSaving,
     setCurrentId,
     setForm,
+    setOneTimeWebhookSecret,
     triggerActions,
     router,
   });
@@ -424,6 +437,7 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
         triggerActions={triggerActions}
         triggerTypes={triggerTypes}
         currentId={currentId}
+        oneTimeWebhookSecret={oneTimeWebhookSecret}
       />
       <Separator />
       <ThenSection
@@ -455,10 +469,12 @@ function WhenSection({
   triggerActions,
   triggerTypes,
   currentId,
+  oneTimeWebhookSecret,
 }: {
   triggerActions: TriggerActionsResult;
   triggerTypes: TriggerTypeInfo[];
   currentId: string | null;
+  oneTimeWebhookSecret: string | null;
 }) {
   return (
     <div className="space-y-2">
@@ -475,6 +491,7 @@ function WhenSection({
           onUpdateTrigger={triggerActions.handleUpdate}
           onToggleTrigger={triggerActions.handleToggle}
           onDeleteTrigger={triggerActions.handleDelete}
+          oneTimeWebhookSecret={oneTimeWebhookSecret}
         />
       </div>
     </div>

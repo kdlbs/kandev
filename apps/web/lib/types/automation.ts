@@ -142,6 +142,17 @@ export type UpdateAutomationRequest = {
   max_concurrent_runs?: number;
 };
 
+// CreateAutomationResponse mirrors the backend's one-time webhook secret
+// payload — the server returns the plaintext secret in the create response
+// only, never in list/get. The reveal endpoint is the way back to it.
+export type CreateAutomationResponse = Automation & {
+  webhook_secret: string;
+};
+
+export type RevealWebhookSecretResponse = {
+  webhook_secret: string;
+};
+
 export type AddTriggerRequest = {
   automation_id: string;
   type: TriggerType;

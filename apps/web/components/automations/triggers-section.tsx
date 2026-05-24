@@ -16,6 +16,10 @@ type TriggersSectionProps = {
   onUpdateTrigger: (triggerId: string, config: Record<string, unknown>) => void;
   onToggleTrigger: (triggerId: string, enabled: boolean) => void;
   onDeleteTrigger: (triggerId: string) => void;
+  // oneTimeWebhookSecret is the plaintext webhook secret from the create
+  // response. Forwarded to the webhook trigger card so the user can see
+  // and copy it once. Null after reload — they must reveal it then.
+  oneTimeWebhookSecret?: string | null;
 };
 
 export function TriggersSection({
@@ -26,6 +30,7 @@ export function TriggersSection({
   onUpdateTrigger,
   onToggleTrigger,
   onDeleteTrigger,
+  oneTimeWebhookSecret,
 }: TriggersSectionProps) {
   const webhookTrigger = useMemo(() => triggers.find((t) => t.type === "webhook"), [triggers]);
   const isWebhookMode = !!webhookTrigger;
@@ -66,6 +71,7 @@ export function TriggersSection({
           onUpdate={(config) => onUpdateTrigger(webhookTrigger.id, config)}
           onToggleEnabled={(enabled) => onToggleTrigger(webhookTrigger.id, enabled)}
           onDelete={handleRemoveWebhook}
+          oneTimeWebhookSecret={oneTimeWebhookSecret}
         />
         <SwitchModeButton label="Switch to scheduled" onClick={handleRemoveWebhook} />
       </div>

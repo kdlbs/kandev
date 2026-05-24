@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -30,6 +31,7 @@ func registerWSHandlers(dispatcher *ws.Dispatcher, svc *Service, log *logger.Log
 	dispatcher.RegisterFunc(ws.ActionAutomationTriggerUpdate, wsUpdateTrigger(svc, log))
 	dispatcher.RegisterFunc(ws.ActionAutomationTriggerDelete, wsDeleteTrigger(svc, log))
 	dispatcher.RegisterFunc(ws.ActionAutomationTriggerTypes, wsTriggerTypes())
+	dispatcher.RegisterFunc(ws.ActionAutomationWebhookRevealSecret, wsRevealWebhookSecret(svc, log))
 }
 
 func registerHTTPRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
@@ -90,7 +92,14 @@ func wsCreate(svc *Service, log *logger.Logger) func(ctx context.Context, msg *w
 		if err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
-		return ws.NewResponse(msg.ID, msg.Action, a)
+		// One-time reveal of the webhook secret. The Automation struct hides
+		// it via `json:"-"` so list/get stay safe; the response DTO wraps it
+		// alongside the plaintext value for the client to display once.
+		secret, secretErr := svc.GetWebhookSecret(ctx, a.ID)
+		if secretErr != nil {
+			log.Warn("failed to load webhook secret for create response", zap.String("automation_id", a.ID), zap.Error(secretErr))
+		}
+		return ws.NewResponse(msg.ID, msg.Action, &CreateAutomationResponse{Automation: a, WebhookSecret: secret})
 	}
 }
 
@@ -247,5 +256,26 @@ func wsDeleteTrigger(svc *Service, log *logger.Logger) func(ctx context.Context,
 func wsTriggerTypes() func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return func(_ context.Context, msg *ws.Message) (*ws.Message, error) {
 		return ws.NewResponse(msg.ID, msg.Action, GetTriggerTypes())
+	}
+}
+
+func wsRevealWebhookSecret(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+		payload, _ := parseMap(msg)
+		id, _ := payload["id"].(string)
+		if id == "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "id required", nil)
+		}
+		// GetWebhookSecret returns "automation not found" when the row is
+		// missing, which is distinct from an internal error — map it back
+		// to a NotFound response so the client can surface it cleanly.
+		a, err := svc.GetAutomation(ctx, id)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		}
+		if a == nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "automation not found", nil)
+		}
+		return ws.NewResponse(msg.ID, msg.Action, &RevealWebhookSecretResponse{WebhookSecret: a.WebhookSecret})
 	}
 }

@@ -3,6 +3,8 @@ import type {
   Automation,
   AutomationRun,
   CreateAutomationRequest,
+  CreateAutomationResponse,
+  RevealWebhookSecretResponse,
   UpdateAutomationRequest,
   AddTriggerRequest,
   UpdateTriggerRequest,
@@ -26,8 +28,19 @@ export async function getAutomation(id: string): Promise<Automation> {
   return requireClient().request<Automation>("automation.get", { id });
 }
 
-export async function createAutomation(req: CreateAutomationRequest): Promise<Automation> {
-  return requireClient().request<Automation>("automation.create", req);
+export async function createAutomation(
+  req: CreateAutomationRequest,
+): Promise<CreateAutomationResponse> {
+  return requireClient().request<CreateAutomationResponse>("automation.create", req);
+}
+
+export async function revealWebhookSecret(
+  automationId: string,
+): Promise<RevealWebhookSecretResponse> {
+  return requireClient().request<RevealWebhookSecretResponse>(
+    "automation.webhook.reveal_secret",
+    { id: automationId },
+  );
 }
 
 export async function updateAutomation(

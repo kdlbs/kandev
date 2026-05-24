@@ -463,19 +463,20 @@ const (
 
 // Automation actions
 const (
-	ActionAutomationList          = "automation.list"
-	ActionAutomationGet           = "automation.get"
-	ActionAutomationCreate        = "automation.create"
-	ActionAutomationUpdate        = "automation.update"
-	ActionAutomationDelete        = "automation.delete"
-	ActionAutomationEnable        = "automation.enable"
-	ActionAutomationDisable       = "automation.disable"
-	ActionAutomationTrigger       = "automation.trigger"
-	ActionAutomationRunsList      = "automation.runs.list"
-	ActionAutomationTriggerAdd    = "automation.trigger.add"
-	ActionAutomationTriggerUpdate = "automation.trigger.update"
-	ActionAutomationTriggerDelete = "automation.trigger.delete"
-	ActionAutomationTriggerTypes  = "automation.trigger_types"
+	ActionAutomationList                = "automation.list"
+	ActionAutomationGet                 = "automation.get"
+	ActionAutomationCreate              = "automation.create"
+	ActionAutomationUpdate              = "automation.update"
+	ActionAutomationDelete              = "automation.delete"
+	ActionAutomationEnable              = "automation.enable"
+	ActionAutomationDisable             = "automation.disable"
+	ActionAutomationTrigger             = "automation.trigger"
+	ActionAutomationRunsList            = "automation.runs.list"
+	ActionAutomationTriggerAdd          = "automation.trigger.add"
+	ActionAutomationTriggerUpdate       = "automation.trigger.update"
+	ActionAutomationTriggerDelete       = "automation.trigger.delete"
+	ActionAutomationTriggerTypes        = "automation.trigger_types"
+	ActionAutomationWebhookRevealSecret = "automation.webhook.reveal_secret"
 )
 
 // Error codes

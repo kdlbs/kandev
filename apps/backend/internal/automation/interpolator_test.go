@@ -69,3 +69,58 @@ func TestInterpolatePrompt_NoPlaceholders(t *testing.T) {
 		t.Errorf("expected 'plain text', got %q", result)
 	}
 }
+
+func TestInterpolatePrompt_WebhookNestedPath(t *testing.T) {
+	// Real-world webhook payloads carry nested fields like
+	// pull_request.number, commits[0].message, alert.severity. Authors
+	// should be able to template those directly into the prompt.
+	body := []byte(`{
+		"action": "opened",
+		"pull_request": {
+			"number": 17,
+			"title": "Add webhook support",
+			"user": {"login": "carol"}
+		},
+		"commits": [
+			{"message": "first"},
+			{"message": "second"}
+		]
+	}`)
+
+	cases := []struct {
+		name     string
+		template string
+		want     string
+	}{
+		{"nested object", "PR #{{webhook.pull_request.number}}", "PR #17"},
+		{"deeply nested", "by {{webhook.pull_request.user.login}}", "by carol"},
+		{"array index", "first commit: {{webhook.commits.0.message}}", "first commit: first"},
+		{"second array index", "second: {{webhook.commits.1.message}}", "second: second"},
+		{"data alias", "action={{data.action}}", "action=opened"},
+		{"data nested", "title={{data.pull_request.title}}", "title=Add webhook support"},
+		{"missing path drops", "x={{webhook.missing.field}}", "x="},
+		{"out-of-range index drops", "x={{webhook.commits.99.message}}", "x="},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := InterpolatePrompt(tc.template, TriggerTypeWebhook, body)
+			if got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestInterpolatePrompt_PathPlaceholderCoercion(t *testing.T) {
+	// Non-string leaf values are coerced through toString. Booleans and
+	// integers should round-trip in the obvious way.
+	body := []byte(`{"count": 3, "ok": true, "ratio": 0.5}`)
+	result := InterpolatePrompt(
+		"count={{webhook.count}} ok={{webhook.ok}} ratio={{webhook.ratio}}",
+		TriggerTypeWebhook,
+		body,
+	)
+	if result != "count=3 ok=true ratio=0.5" {
+		t.Errorf("unexpected coercion: %q", result)
+	}
+}

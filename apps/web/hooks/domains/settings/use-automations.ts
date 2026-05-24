@@ -11,7 +11,11 @@ import {
   triggerAutomation,
 } from "@/lib/api/domains/automation-api";
 import { useAppStore } from "@/components/state-provider";
-import type { CreateAutomationRequest, UpdateAutomationRequest } from "@/lib/types/automation";
+import type {
+  CreateAutomationRequest,
+  CreateAutomationResponse,
+  UpdateAutomationRequest,
+} from "@/lib/types/automation";
 
 export function useAutomations(workspaceId: string | null) {
   const items = useAppStore((state) => state.automations.items);
@@ -60,7 +64,7 @@ export function useAutomations(workspaceId: string | null) {
   }, [workspaceId, setAutomations, setLoading]);
 
   const create = useCallback(
-    async (req: CreateAutomationRequest) => {
+    async (req: CreateAutomationRequest): Promise<CreateAutomationResponse> => {
       const automation = await createAutomation(req);
       addToStore(automation);
       return automation;
