@@ -411,12 +411,25 @@ func isAgentReportedError(err error) bool {
 	return errors.Is(err, lifecycle.ErrAgentReported)
 }
 
-// isTimeoutError reports whether err is a net.Error with Timeout() == true.
-// Used to recognize HTTP / transport-level timeouts whose context.DeadlineExceeded
-// has already been absorbed by the http client.
+// isTimeoutError reports whether err looks like a timeout. Used by
+// createPromptErrorMessage to render the "Request timed out…" UX hint.
+//
+// Several upstream producers along the prompt path (waitForSessionReady,
+// agent-stream connect waits, agentctl health waits) return
+// fmt.Errorf("timeout …") rather than wrapping a typed timeout, so a strict
+// errors.As(net.Error) check would silently downgrade their user message to
+// the generic "Failed to send message to agent". The substring fallback
+// preserves the pre-refactor UX for those cases; classifying upstream errors
+// properly is tracked separately.
 func isTimeoutError(err error) bool {
+	if err == nil {
+		return false
+	}
 	var netErr interface{ Timeout() bool }
-	return errors.As(err, &netErr) && netErr.Timeout()
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "timeout")
 }
 
 // handlePromptWithResume attempts to resume a session and retry a prompt when the
