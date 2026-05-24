@@ -39,6 +39,15 @@ func TestDispatcher_UnknownActionReturnsError(t *testing.T) {
 	if resp.Type != MessageTypeError {
 		t.Errorf("expected error message type, got %q", resp.Type)
 	}
+
+	var payload ErrorPayload
+	if err := resp.ParsePayload(&payload); err != nil {
+		t.Fatalf("parse error payload: %v", err)
+	}
+	if payload.Code != ErrorCodeUnknownAction {
+		t.Errorf("expected error code %q, got %q",
+			ErrorCodeUnknownAction, payload.Code)
+	}
 }
 
 // TestDispatcher_ConcurrentRegisterAndDispatch exercises the Dispatcher
@@ -63,7 +72,13 @@ func TestDispatcher_ConcurrentRegisterAndDispatch(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for i := 0; i < ops; i++ {
-				d.RegisterFunc("action", noop)
+				// Alternate between Register and RegisterFunc so both
+				// write paths are exercised under -race.
+				if i%2 == 0 {
+					d.Register("action", noop)
+				} else {
+					d.RegisterFunc("action", noop)
+				}
 			}
 		}()
 		go func() {
