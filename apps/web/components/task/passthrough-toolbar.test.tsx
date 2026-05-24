@@ -9,9 +9,14 @@ const SESSION_ID = "session-1";
 const TID_TOOLBAR = "passthrough-toolbar";
 const TID_COMPOSER = "passthrough-composer";
 const TID_TEXTAREA = "passthrough-composer-textarea";
-const TID_STOP = "passthrough-stop";
 const TID_PROCEED = "passthrough-proceed-next-step";
 const TID_TOGGLE = "passthrough-toggle-composer";
+const TID_TOGGLE_COMMENTS = "passthrough-toggle-comments";
+const TID_COMMENTS_PANEL = "passthrough-comments-panel";
+const TID_COMMENT_CARD = "passthrough-comment-card";
+const TID_COMMENT_TEXTAREA = "passthrough-comment-textarea";
+const TID_COMMENT_REMOVE = "passthrough-comment-remove";
+const TID_COMMENT_FILE_REF = "passthrough-comment-file-ref";
 const TID_PENDING_COUNT = "passthrough-pending-count";
 const TID_PENDING_BANNER = "passthrough-pending-comments-banner";
 
@@ -26,6 +31,9 @@ let mockNextStep: {
 
 const mockToast = vi.fn();
 const mockMarkCommentsSent = vi.fn();
+const mockUpdateComment = vi.fn();
+const mockRemoveComment = vi.fn();
+const mockOpenFile = vi.fn();
 let mockWsRequestFn = vi.fn();
 
 // --- Module mocks (hoisted by Vitest) ---
@@ -54,8 +62,22 @@ vi.mock("@/hooks/domains/comments/use-diff-comments", () => ({
 }));
 
 vi.mock("@/lib/state/slices/comments/comments-store", () => ({
-  useCommentsStore: (selector: (s: { markCommentsSent: typeof mockMarkCommentsSent }) => unknown) =>
-    selector({ markCommentsSent: mockMarkCommentsSent }),
+  useCommentsStore: (
+    selector: (s: {
+      markCommentsSent: typeof mockMarkCommentsSent;
+      updateComment: typeof mockUpdateComment;
+      removeComment: typeof mockRemoveComment;
+    }) => unknown,
+  ) =>
+    selector({
+      markCommentsSent: mockMarkCommentsSent,
+      updateComment: mockUpdateComment,
+      removeComment: mockRemoveComment,
+    }),
+}));
+
+vi.mock("@/hooks/use-file-editors", () => ({
+  useFileEditors: () => ({ openFile: mockOpenFile }),
 }));
 
 vi.mock("@/lib/ws/connection", () => ({
@@ -131,14 +153,21 @@ function resetMocks() {
 describe("PassthroughToolbar – default state", () => {
   afterEach(cleanup);
 
-  it("renders the toolbar, hides the composer, and disables Stop when session is idle", () => {
+  it("renders the toolbar and hides the composer when session is idle", () => {
     mockSessionState = "IDLE";
     renderToolbar();
 
     expect(screen.getByTestId(TID_TOOLBAR)).toBeTruthy();
     expect(screen.queryByTestId(TID_COMPOSER)).toBeNull();
-    expect((screen.getByTestId(TID_STOP) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.queryByTestId(TID_PROCEED)).toBeNull();
+  });
+
+  it("disables the Comments toggle when there are no pending comments", () => {
+    mockSessionState = "IDLE";
+    renderToolbar();
+
+    const toggle = screen.getByTestId(TID_TOGGLE_COMMENTS) as HTMLButtonElement;
+    expect(toggle.disabled).toBe(true);
   });
 });
 
@@ -263,34 +292,61 @@ describe("PassthroughToolbar – pending comment indicators", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Stop button
+// Comments panel
 // ---------------------------------------------------------------------------
 
-describe("PassthroughToolbar – Stop button", () => {
+describe("PassthroughToolbar – Comments panel", () => {
   beforeEach(resetMocks);
   afterEach(cleanup);
 
-  it("Stop is enabled when RUNNING, calls agent.cancel, and disables during the in-flight call", async () => {
-    mockSessionState = "RUNNING";
-
-    let resolveCancel!: () => void;
-    mockWsRequestFn = vi.fn().mockReturnValue(new Promise<void>((res) => (resolveCancel = res)));
+  it("clicking Comments opens a panel with one card per pending comment", async () => {
+    mockPendingByFile = {
+      "src/foo.ts": [makeDiffComment("c1"), makeDiffComment("c2")],
+    };
     renderToolbar();
 
-    const stop = () => screen.getByTestId(TID_STOP) as HTMLButtonElement;
-    expect(stop().disabled).toBe(false);
+    fireEvent.click(screen.getByTestId(TID_TOGGLE_COMMENTS));
 
-    fireEvent.click(stop());
-    await waitFor(() => expect(stop().disabled).toBe(true));
+    await waitFor(() => expect(screen.getByTestId(TID_COMMENTS_PANEL)).toBeTruthy());
+    expect(screen.getAllByTestId(TID_COMMENT_CARD)).toHaveLength(2);
+  });
 
-    expect(mockWsRequestFn).toHaveBeenCalledWith(
-      "agent.cancel",
-      { session_id: SESSION_ID },
-      10_000,
-    );
+  it("editing a comment textarea calls updateComment with the new text", async () => {
+    mockPendingByFile = { "src/foo.ts": [makeDiffComment("c1")] };
+    renderToolbar();
 
-    resolveCancel();
-    await waitFor(() => expect(stop().disabled).toBe(false));
+    fireEvent.click(screen.getByTestId(TID_TOGGLE_COMMENTS));
+    await waitFor(() => expect(screen.getByTestId(TID_COMMENTS_PANEL)).toBeTruthy());
+
+    fireEvent.change(screen.getByTestId(TID_COMMENT_TEXTAREA), {
+      target: { value: "Updated text" },
+    });
+
+    expect(mockUpdateComment).toHaveBeenCalledWith("c1", { text: "Updated text" });
+  });
+
+  it("clicking the file reference opens the file in an editor", async () => {
+    mockPendingByFile = { "src/foo.ts": [makeDiffComment("c1")] };
+    renderToolbar();
+
+    fireEvent.click(screen.getByTestId(TID_TOGGLE_COMMENTS));
+    await waitFor(() => expect(screen.getByTestId(TID_COMMENTS_PANEL)).toBeTruthy());
+
+    fireEvent.click(screen.getByTestId(TID_COMMENT_FILE_REF));
+
+    expect(mockOpenFile).toHaveBeenCalledWith("src/foo.ts");
+  });
+
+  it("clicking the remove button on a comment calls removeComment", async () => {
+    mockPendingByFile = { "src/foo.ts": [makeDiffComment("c1")] };
+    renderToolbar();
+
+    fireEvent.click(screen.getByTestId(TID_TOGGLE_COMMENTS));
+    await waitFor(() => expect(screen.getByTestId(TID_COMMENTS_PANEL)).toBeTruthy());
+
+    fireEvent.click(screen.getByTestId(TID_COMMENT_REMOVE));
+
+    expect(mockRemoveComment).toHaveBeenCalledWith("c1");
   });
 });
 

@@ -5,10 +5,11 @@ import {
   IconArrowRight,
   IconMessageCircle,
   IconMessageDots,
-  IconPlayerStopFilled,
+  IconTrash,
   IconX,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useToast } from "@/components/toast-provider";
 import { PRStatusChip } from "@/components/github/pr-status-chip";
@@ -18,6 +19,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useNextWorkflowStep } from "@/hooks/domains/kanban/use-plan-actions";
 import { usePendingDiffCommentsByFile } from "@/hooks/domains/comments/use-diff-comments";
 import { useCommentsStore } from "@/lib/state/slices/comments/comments-store";
+import { useFileEditors } from "@/hooks/use-file-editors";
 import { formatReviewCommentsAsMarkdown } from "@/lib/state/slices/comments/format";
 import type { DiffComment } from "@/lib/diff/types";
 import { getWebSocketClient } from "@/lib/ws/connection";
@@ -26,13 +28,15 @@ import { PassthroughTerminal } from "./passthrough-terminal";
 /**
  * PassthroughToolbar wraps the PTY terminal with the kandev surface that the
  * full ACP `ChatStatusBar` + `ChatInputArea` provide for chat mode: PR status,
- * merge banner, "Move to next step" workflow advancement, and a collapsible
- * compose box for typing follow-up prompts that get flushed to PTY stdin.
+ * merge banner, "Move to next step" workflow advancement, a collapsible Chat
+ * compose box, and a collapsible Comments panel showing pending review comments
+ * (each editable inline with a clickable file reference).
  *
- * Default focus stays on the xterm terminal — the composer is collapsed behind
- * a "Chat" button so the user can keep raw-terminal interaction front-and-centre
- * and only opt in to the kandev composer when they want multi-line editing or
- * want to attach review comments to a prompt.
+ * Default focus stays on the xterm terminal — both Chat and Comments are
+ * collapsed behind toolbar buttons so the user can keep raw-terminal
+ * interaction front-and-centre and only opt in when they want to compose a
+ * follow-up or review what's about to be attached. Ctrl-C in the xterm
+ * cancels the agent, so no dedicated Stop button is needed.
  */
 export function PassthroughToolbar({
   sessionId,
@@ -42,6 +46,7 @@ export function PassthroughToolbar({
   taskId: string | null;
 }) {
   const [composerOpen, setComposerOpen] = useState(false);
+  const [commentsOpen, setCommentsOpen] = useState(false);
 
   const sessionState = useAppStore((state) =>
     sessionId ? (state.taskSessions.items[sessionId]?.state ?? null) : null,
@@ -56,9 +61,16 @@ export function PassthroughToolbar({
     taskId,
     sessionId,
     pendingComments,
-    onSent: () => setComposerOpen(false),
+    onSent: () => {
+      setComposerOpen(false);
+      setCommentsOpen(false);
+    },
   });
-  const { handleStop, isStopping } = usePassthroughCancel(sessionId);
+
+  // If a panel was open and all its content vanished, auto-close it.
+  if (commentsOpen && pendingCount === 0) {
+    setCommentsOpen(false);
+  }
 
   return (
     <div className="flex h-full flex-col bg-card" data-testid="passthrough-toolbar">
@@ -66,13 +78,15 @@ export function PassthroughToolbar({
         <PassthroughTerminal sessionId={sessionId} mode="agent" />
       </div>
 
+      {commentsOpen && pendingCount > 0 && <CommentsPanel comments={pendingComments} />}
+
       {composerOpen && (
         <PassthroughComposer
           onSubmit={handleSendMessage}
           onCancel={() => setComposerOpen(false)}
           autoFocus
           placeholder="Type a message, Shift+Enter for newline, Esc to close"
-          header={pendingCount > 0 ? <PendingCommentsBanner count={pendingCount} /> : null}
+          header={pendingCount > 0 ? <PendingCommentsHint count={pendingCount} /> : null}
         />
       )}
 
@@ -84,9 +98,8 @@ export function PassthroughToolbar({
         showProceed={showProceed}
         composerOpen={composerOpen}
         onToggleComposer={() => setComposerOpen((open) => !open)}
-        onStop={handleStop}
-        isStopping={isStopping}
-        canStop={isAgentBusy}
+        commentsOpen={commentsOpen}
+        onToggleComments={() => setCommentsOpen((open) => !open)}
         pendingCommentsCount={pendingCount}
       />
     </div>
@@ -161,64 +174,23 @@ function useSendPassthroughMessage({
   );
 }
 
-function usePassthroughCancel(sessionId: string | null | undefined) {
-  const [isStopping, setIsStopping] = useState(false);
-  const { toast } = useToast();
-
-  const handleStop = useCallback(async () => {
-    if (!sessionId || isStopping) return;
-    const client = getWebSocketClient();
-    if (!client) {
-      toast({ title: "Not connected", variant: "error" });
-      return;
-    }
-    setIsStopping(true);
-    try {
-      await client.request("agent.cancel", { session_id: sessionId }, 10_000);
-    } catch (error) {
-      console.error("Failed to stop passthrough session:", error);
-      toast({ title: "Failed to stop agent", variant: "error" });
-    } finally {
-      setIsStopping(false);
-    }
-  }, [sessionId, isStopping, toast]);
-
-  return { handleStop, isStopping };
-}
-
-function chatToggleVariant(
-  composerOpen: boolean,
-  pendingCommentsCount: number,
-): "default" | "outline" {
-  if (composerOpen) return "default";
-  if (pendingCommentsCount > 0) return "default";
-  return "outline";
-}
-
-function chatToggleTooltipLabel(composerOpen: boolean, pendingCommentsCount: number): string {
-  if (composerOpen) return "Close compose box (Esc)";
-  if (pendingCommentsCount > 0) {
-    const plural = pendingCommentsCount === 1 ? "" : "s";
-    return `${pendingCommentsCount} pending review comment${plural} — open to send`;
-  }
-  return "Open compose box to type a follow-up";
+function chatToggleTooltipLabel(composerOpen: boolean): string {
+  return composerOpen ? "Close compose box (Esc)" : "Open compose box to type a follow-up";
 }
 
 function ChatToggleButton({
   composerOpen,
   onToggle,
-  pendingCommentsCount,
 }: {
   composerOpen: boolean;
   onToggle: () => void;
-  pendingCommentsCount: number;
 }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <Button
           type="button"
-          variant={chatToggleVariant(composerOpen, pendingCommentsCount)}
+          variant={composerOpen ? "default" : "outline"}
           size="sm"
           className="h-6 gap-1 px-2.5 text-xs cursor-pointer"
           onClick={onToggle}
@@ -231,7 +203,59 @@ function ChatToggleButton({
             <IconMessageCircle className="h-3.5 w-3.5" />
           )}
           Chat
-          {!composerOpen && pendingCommentsCount > 0 && (
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{chatToggleTooltipLabel(composerOpen)}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function commentsToggleTooltipLabel(commentsOpen: boolean, count: number): string {
+  if (count === 0) return "No pending review comments";
+  if (commentsOpen) return "Hide pending comments";
+  const plural = count === 1 ? "" : "s";
+  return `${count} pending review comment${plural} — open to review or edit`;
+}
+
+function commentsToggleVariant(
+  commentsOpen: boolean,
+  count: number,
+): "default" | "outline" | "ghost" {
+  if (commentsOpen) return "default";
+  if (count > 0) return "outline";
+  return "ghost";
+}
+
+function CommentsToggleButton({
+  commentsOpen,
+  onToggle,
+  pendingCommentsCount,
+}: {
+  commentsOpen: boolean;
+  onToggle: () => void;
+  pendingCommentsCount: number;
+}) {
+  const disabled = pendingCommentsCount === 0;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant={commentsToggleVariant(commentsOpen, pendingCommentsCount)}
+          size="sm"
+          className="h-6 gap-1 px-2.5 text-xs cursor-pointer"
+          onClick={onToggle}
+          disabled={disabled}
+          data-testid="passthrough-toggle-comments"
+          aria-pressed={commentsOpen}
+        >
+          {commentsOpen ? (
+            <IconX className="h-3.5 w-3.5" />
+          ) : (
+            <IconMessageDots className="h-3.5 w-3.5" />
+          )}
+          Comments
+          {pendingCommentsCount > 0 && (
             <span
               data-testid="passthrough-pending-count"
               className="ml-1 rounded-full bg-amber-500/30 px-1.5 py-0 text-[10px] font-semibold"
@@ -241,12 +265,14 @@ function ChatToggleButton({
           )}
         </Button>
       </TooltipTrigger>
-      <TooltipContent>{chatToggleTooltipLabel(composerOpen, pendingCommentsCount)}</TooltipContent>
+      <TooltipContent>
+        {commentsToggleTooltipLabel(commentsOpen, pendingCommentsCount)}
+      </TooltipContent>
     </Tooltip>
   );
 }
 
-function PendingCommentsBanner({ count }: { count: number }) {
+function PendingCommentsHint({ count }: { count: number }) {
   return (
     <div
       data-testid="passthrough-pending-comments-banner"
@@ -260,6 +286,77 @@ function PendingCommentsBanner({ count }: { count: number }) {
   );
 }
 
+function CommentsPanel({ comments }: { comments: DiffComment[] }) {
+  return (
+    <div
+      data-testid="passthrough-comments-panel"
+      className="max-h-64 overflow-y-auto border-t bg-amber-500/5 px-2 py-2 space-y-2"
+    >
+      {comments.map((comment) => (
+        <CommentCard key={comment.id} comment={comment} />
+      ))}
+    </div>
+  );
+}
+
+function formatLineRange(comment: DiffComment): string {
+  return comment.startLine === comment.endLine
+    ? `${comment.startLine}`
+    : `${comment.startLine}-${comment.endLine}`;
+}
+
+function CommentCard({ comment }: { comment: DiffComment }) {
+  const updateComment = useCommentsStore((s) => s.updateComment);
+  const removeComment = useCommentsStore((s) => s.removeComment);
+  const { openFile } = useFileEditors();
+  const lineRange = formatLineRange(comment);
+
+  const handleOpenFile = useCallback(() => {
+    openFile(comment.filePath);
+  }, [openFile, comment.filePath]);
+
+  return (
+    <div
+      data-testid="passthrough-comment-card"
+      className="rounded-md border border-amber-500/30 bg-card px-2 py-1.5 text-xs"
+    >
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={handleOpenFile}
+          className="truncate text-left font-mono text-[11px] text-primary hover:underline cursor-pointer"
+          data-testid="passthrough-comment-file-ref"
+          title={`${comment.filePath}:${lineRange}`}
+        >
+          {comment.filePath}:{lineRange}
+        </button>
+        <button
+          type="button"
+          onClick={() => removeComment(comment.id)}
+          className="rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive cursor-pointer"
+          aria-label="Remove comment"
+          data-testid="passthrough-comment-remove"
+        >
+          <IconTrash className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      {comment.codeContent && (
+        <pre className="mb-1 max-h-16 overflow-y-auto rounded bg-muted/50 px-1.5 py-1 text-[10px] font-mono leading-tight">
+          {comment.codeContent}
+        </pre>
+      )}
+      <Textarea
+        value={comment.text}
+        onChange={(e) => updateComment(comment.id, { text: e.target.value })}
+        className="min-h-[2rem] resize-none text-xs"
+        rows={Math.min(4, Math.max(1, comment.text.split("\n").length))}
+        placeholder="Write a comment…"
+        data-testid="passthrough-comment-textarea"
+      />
+    </div>
+  );
+}
+
 type StatusRowProps = {
   taskId: string | null;
   nextStepName: string | null;
@@ -268,9 +365,8 @@ type StatusRowProps = {
   showProceed: boolean;
   composerOpen: boolean;
   onToggleComposer: () => void;
-  onStop: () => void;
-  isStopping: boolean;
-  canStop: boolean;
+  commentsOpen: boolean;
+  onToggleComments: () => void;
   pendingCommentsCount: number;
 };
 
@@ -282,9 +378,8 @@ function PassthroughStatusRow({
   showProceed,
   composerOpen,
   onToggleComposer,
-  onStop,
-  isStopping,
-  canStop,
+  commentsOpen,
+  onToggleComments,
   pendingCommentsCount,
 }: StatusRowProps) {
   return (
@@ -292,10 +387,16 @@ function PassthroughStatusRow({
       data-testid="passthrough-status-row"
       className="flex flex-shrink-0 items-center gap-1.5 border-t bg-card px-2 py-1 text-xs text-muted-foreground"
     >
-      <PRStatusChip taskId={taskId} />
-      {taskId && <PRMergedBanner key={taskId} taskId={taskId} />}
+      <ChatToggleButton composerOpen={composerOpen} onToggle={onToggleComposer} />
+      <CommentsToggleButton
+        commentsOpen={commentsOpen}
+        onToggle={onToggleComments}
+        pendingCommentsCount={pendingCommentsCount}
+      />
 
       <div className="ml-auto flex items-center gap-1.5">
+        <PRStatusChip taskId={taskId} />
+        {taskId && <PRMergedBanner key={taskId} taskId={taskId} />}
         {showProceed && nextStepName && (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -315,32 +416,6 @@ function PassthroughStatusRow({
             <TooltipContent>Move task to the next workflow step</TooltipContent>
           </Tooltip>
         )}
-
-        <ChatToggleButton
-          composerOpen={composerOpen}
-          onToggle={onToggleComposer}
-          pendingCommentsCount={pendingCommentsCount}
-        />
-
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-6 gap-1 px-2.5 text-xs cursor-pointer text-red-600 dark:text-red-400"
-              onClick={onStop}
-              disabled={!canStop || isStopping}
-              data-testid="passthrough-stop"
-            >
-              <IconPlayerStopFilled className="h-3.5 w-3.5" />
-              Stop
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            {canStop ? "Send Ctrl-C to the agent" : "Agent isn't running"}
-          </TooltipContent>
-        </Tooltip>
       </div>
     </div>
   );

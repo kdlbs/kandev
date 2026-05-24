@@ -14,8 +14,7 @@ import type { UseEnsureTaskSessionResult } from "@/hooks/domains/session/use-ens
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { TaskSession } from "@/lib/types/http";
 import { getWebSocketClient } from "@/lib/ws/connection";
-import { PassthroughComposer } from "./passthrough-composer";
-import { PassthroughTerminal } from "./passthrough-terminal";
+import { PassthroughToolbar } from "./passthrough-toolbar";
 import { TaskChatPanel } from "./task-chat-panel";
 import {
   buildAgentLabelsById,
@@ -144,10 +143,6 @@ function SessionAgentLogo({ profile }: { profile: AgentProfileOption | null | un
 
 function PreviewSessionBody({ session, taskId }: { session: TaskSession; taskId: string }) {
   const { toast } = useToast();
-  // Used by the non-passthrough TaskChatPanel branch. Swallows errors after
-  // surfacing a toast because the existing chat-input-state.handleSubmit
-  // already optimistically clears the input before this resolves; rethrowing
-  // here would surface as an unhandled rejection further up the chain.
   const handleSendMessage = useCallback(
     async (content: string) => {
       const client = getWebSocketClient();
@@ -166,45 +161,8 @@ function PreviewSessionBody({ session, taskId }: { session: TaskSession; taskId:
     [taskId, session.id, toast],
   );
 
-  // Used by PassthroughComposer. Rethrows after toasting so the composer can
-  // keep the user's typed text intact on failure (Composer.submit's catch
-  // skips the setValue("") clear when onSubmit rejects). Separate from the
-  // ACP handler above to avoid leaking unhandled rejections into the chat-
-  // input-state chain that TaskChatPanel uses.
-  const handleSendPassthroughMessage = useCallback(
-    async (content: string) => {
-      const client = getWebSocketClient();
-      if (!client) {
-        // Surface the disconnect to the user before re-throwing so the
-        // composer's catch (which preserves the typed text) doesn't swallow
-        // the failure silently.
-        toast({ title: "Not connected — please reload to retry", variant: "error" });
-        throw new Error("WebSocket client not available");
-      }
-      try {
-        await client.request(
-          "message.add",
-          { task_id: taskId, session_id: session.id, content },
-          10000,
-        );
-      } catch (error) {
-        console.error("Failed to send passthrough message:", error);
-        toast({ title: "Failed to send message", variant: "error" });
-        throw error;
-      }
-    },
-    [taskId, session.id, toast],
-  );
-
   if (session.is_passthrough) {
-    return (
-      <div className="flex h-full flex-col bg-card">
-        <div className="flex-1 min-h-0">
-          <PassthroughTerminal sessionId={session.id} mode="agent" />
-        </div>
-        <PassthroughComposer onSubmit={handleSendPassthroughMessage} />
-      </div>
-    );
+    return <PassthroughToolbar sessionId={session.id} taskId={taskId} />;
   }
 
   return (
