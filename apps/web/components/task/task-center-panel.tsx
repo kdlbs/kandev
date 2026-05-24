@@ -15,7 +15,7 @@ import { SessionPanel } from "@kandev/ui/pannel-session";
 import { TaskChatPanel } from "./task-chat-panel";
 import { TaskChangesPanel } from "./task-changes-panel";
 import { FileTabContent } from "./file-tab-content";
-import { PassthroughTerminal } from "./passthrough-terminal";
+import { PassthroughToolbar } from "./passthrough-toolbar";
 import type { OpenFileTab, FileContentResponse } from "@/lib/types/backend";
 import { useAppStore } from "@/components/state-provider";
 import { SessionTabs, type SessionTab } from "@/components/session-tabs";
@@ -525,7 +525,7 @@ function ChatTabContent({
         style={{ minHeight: "200px" }}
       >
         <div className="flex-1 min-h-0 h-full" style={{ minHeight: "150px" }}>
-          <PassthroughTerminal key={activeTaskId} sessionId={sessionId} mode="agent" />
+          <PassthroughToolbar key={activeTaskId} sessionId={sessionId} taskId={activeTaskId} />
         </div>
       </TabsContent>
     );

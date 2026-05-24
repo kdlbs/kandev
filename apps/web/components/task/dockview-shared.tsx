@@ -21,7 +21,7 @@ import { ChangesPanel } from "./changes-panel";
 import { FilesPanel } from "./files-panel";
 import { TaskPlanPanel } from "./task-plan-panel";
 import { FileEditorPanel } from "./file-editor-panel";
-import { PassthroughTerminal } from "./passthrough-terminal";
+import { PassthroughToolbar } from "./passthrough-toolbar";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { ContextMenuTab } from "./tab-context-menu";
 import { ChangesTab } from "./changes-tab";
@@ -192,6 +192,7 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
   const paramSessionId = params?.sessionId as string | undefined;
   const storeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const sessionId = paramSessionId ?? storeSessionId;
+  const taskId = useAppStore((state) => state.tasks.activeTaskId);
   const { openFile } = useFileEditors();
   const isPassthrough = useAppStore((state) =>
     sessionId ? state.taskSessions.items[sessionId]?.is_passthrough === true : false,
@@ -202,7 +203,7 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
     return (
       <PanelRoot>
         <PanelBody padding={false} scroll={false}>
-          <PassthroughTerminal sessionId={sessionId} mode="agent" />
+          <PassthroughToolbar sessionId={sessionId} taskId={taskId} />
         </PanelBody>
       </PanelRoot>
     );

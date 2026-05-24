@@ -11,7 +11,7 @@ import { MobileChangesPanel } from "./mobile-changes-panel";
 import { ReviewDialog } from "@/components/review/review-dialog";
 import { useReviewDialog } from "../use-review-dialog";
 import { TaskFilesPanel } from "../task-files-panel";
-import { PassthroughTerminal } from "../passthrough-terminal";
+import { PassthroughToolbar } from "../passthrough-toolbar";
 import { MobileTerminalKeybar, KEYBAR_HEIGHT_PX } from "./mobile-terminal-keybar";
 import { MobileTerminalPane } from "./mobile-terminal-pane";
 import { MobileSessionsPicker } from "./mobile-sessions-section";
@@ -67,11 +67,10 @@ function MobileChatPanelContent({
       </div>
       {isPassthroughMode ? (
         <div className="flex-1 min-h-0">
-          <PassthroughTerminal
+          <PassthroughToolbar
             key={effectiveSessionId}
             sessionId={effectiveSessionId}
-            mode="agent"
-            enableTouchScroll
+            taskId={activeTaskId}
           />
         </div>
       ) : (

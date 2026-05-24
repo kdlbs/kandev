@@ -239,7 +239,7 @@ export function useChatPanelHandlers(
   return { handleCancelTurn };
 }
 
-function PRMergedBanner({ taskId }: { taskId: string }) {
+export function PRMergedBanner({ taskId }: { taskId: string }) {
   const taskPRs = useAppStore((state) => state.taskPRs.byTaskId[taskId]);
   const [dismissed, setDismissed] = useState(false);
   const archiveAndSwitch = useArchiveAndSwitchTask();

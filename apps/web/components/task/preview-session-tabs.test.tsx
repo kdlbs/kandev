@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, fireEvent, screen, cleanup, waitFor } from "@testing-library/react";
-import { PassthroughComposer } from "./preview-session-tabs";
+import { PassthroughComposer } from "./passthrough-composer";
 
 const TEXTAREA_TID = "passthrough-composer-textarea";
 const SUBMIT_TID = "passthrough-composer-submit";
