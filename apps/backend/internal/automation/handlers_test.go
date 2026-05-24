@@ -82,7 +82,7 @@ func TestWsRevealWebhookSecret_Roundtrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	req, _ := ws.NewRequest("req-1", ws.ActionAutomationWebhookRevealSecret, map[string]any{"id": a.ID})
+	req, _ := ws.NewRequest("req-1", ws.ActionAutomationWebhookRevealSecret, map[string]any{"id": a.ID, "workspace_id": "ws-1"})
 	resp, err := wsRevealWebhookSecret(svc, log)(ctx, req)
 	if err != nil {
 		t.Fatal(err)
@@ -110,7 +110,7 @@ func TestWsRevealWebhookSecret_NotFound(t *testing.T) {
 	log, _ := logger.NewFromZap(zap.NewNop())
 	ctx := context.Background()
 
-	req, _ := ws.NewRequest("req-1", ws.ActionAutomationWebhookRevealSecret, map[string]any{"id": "does-not-exist"})
+	req, _ := ws.NewRequest("req-1", ws.ActionAutomationWebhookRevealSecret, map[string]any{"id": "does-not-exist", "workspace_id": "ws-1"})
 	resp, err := wsRevealWebhookSecret(svc, log)(ctx, req)
 	if err != nil {
 		t.Fatal(err)
@@ -145,5 +145,42 @@ func TestWsRevealWebhookSecret_RequiresID(t *testing.T) {
 	_ = json.Unmarshal(resp.Payload, &ep)
 	if ep.Code != ws.ErrorCodeBadRequest {
 		t.Errorf("expected BAD_REQUEST, got %q", ep.Code)
+	}
+}
+
+func TestWsRevealWebhookSecret_RejectsCrossWorkspace(t *testing.T) {
+	svc := newTestService(t)
+	log, _ := logger.NewFromZap(zap.NewNop())
+	ctx := context.Background()
+
+	// Create automation in workspace A.
+	a, err := svc.CreateAutomation(ctx, &CreateAutomationRequest{
+		WorkspaceID:       "ws-A",
+		Name:              "workspace A automation",
+		WorkflowID:        "wf-1",
+		WorkflowStepID:    "step-1",
+		AgentProfileID:    "agent-1",
+		ExecutorProfileID: "exec-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Attempt to reveal using workspace B's id — must return NOT_FOUND, not the secret.
+	req, _ := ws.NewRequest("req-1", ws.ActionAutomationWebhookRevealSecret, map[string]any{"id": a.ID, "workspace_id": "ws-B"})
+	resp, err := wsRevealWebhookSecret(svc, log)(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Type != ws.MessageTypeError {
+		t.Fatalf("expected error response for cross-workspace reveal, got %v: %s", resp.Type, string(resp.Payload))
+	}
+
+	var ep ws.ErrorPayload
+	if err := json.Unmarshal(resp.Payload, &ep); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if ep.Code != ws.ErrorCodeNotFound {
+		t.Errorf("expected NOT_FOUND to avoid disclosing existence, got %q", ep.Code)
 	}
 }

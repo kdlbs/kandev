@@ -49,9 +49,11 @@ func InterpolatePrompt(prompt string, triggerType TriggerType, triggerData json.
 }
 
 // pathPlaceholderRe matches {{data.<path>}} or {{webhook.<path>}} tokens.
-// Path segments are dot-separated and may contain letters, digits and
-// underscores — matching the JSON-key shapes external systems actually emit.
-var pathPlaceholderRe = regexp.MustCompile(`\{\{(data|webhook)\.([a-zA-Z0-9_.]+)\}\}`)
+// Path segments are dot-separated and may contain letters, digits,
+// underscores, dots, and hyphens — matching the JSON-key shapes external
+// systems actually emit (e.g. kebab-case headers like x-request-id).
+// The hyphen is placed last in the character class to avoid range interpretation.
+var pathPlaceholderRe = regexp.MustCompile(`\{\{(data|webhook)\.([a-zA-Z0-9_.-]+)\}\}`)
 
 // resolvePathPlaceholders walks every remaining {{data.<path>}} and
 // {{webhook.<path>}} token and substitutes the value at that path in data.
@@ -106,7 +108,9 @@ func lookupPath(data map[string]interface{}, path string) (string, bool) {
 }
 
 // unresolvedRe matches leftover {{placeholder}} tokens that weren't replaced.
-var unresolvedRe = regexp.MustCompile(`\{\{[a-zA-Z0-9_.]+\}\}`)
+// Includes hyphens (placed last to avoid range interpretation) so kebab-case
+// keys like x-request-id are stripped rather than leaking into the prompt.
+var unresolvedRe = regexp.MustCompile(`\{\{[a-zA-Z0-9_.-]+\}\}`)
 
 // stripUnresolved removes any remaining {{...}} placeholders so they don't
 // appear as raw text in the agent prompt.

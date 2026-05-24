@@ -84,7 +84,8 @@ func TestInterpolatePrompt_WebhookNestedPath(t *testing.T) {
 		"commits": [
 			{"message": "first"},
 			{"message": "second"}
-		]
+		],
+		"x-request-id": "abc-123"
 	}`)
 
 	cases := []struct {
@@ -100,6 +101,7 @@ func TestInterpolatePrompt_WebhookNestedPath(t *testing.T) {
 		{"data nested", "title={{data.pull_request.title}}", "title=Add webhook support"},
 		{"missing path drops", "x={{webhook.missing.field}}", "x="},
 		{"out-of-range index drops", "x={{webhook.commits.99.message}}", "x="},
+		{"kebab-case key", "id={{webhook.x-request-id}}", "id=abc-123"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

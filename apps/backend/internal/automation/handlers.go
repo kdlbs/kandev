@@ -91,6 +91,12 @@ func wsCreate(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.
 		if err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
+		// Service.CreateAutomation ends with store.GetAutomation which returns
+		// (nil, nil) if the row vanished between insert and select — guard here
+		// so we don't dereference a nil pointer building the response.
+		if a == nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to load created automation", nil)
+		}
 		// One-time reveal of the webhook secret. Service.CreateAutomation
 		// re-reads the row before returning, so a.WebhookSecret is already
 		// populated — no second DB round-trip needed (and avoiding one keeps
@@ -265,14 +271,20 @@ func wsRevealWebhookSecret(svc *Service, _ *logger.Logger) func(ctx context.Cont
 		if id == "" {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "id required", nil)
 		}
-		// GetWebhookSecret returns "automation not found" when the row is
-		// missing, which is distinct from an internal error — map it back
-		// to a NotFound response so the client can surface it cleanly.
+		workspaceID, _ := payload["workspace_id"].(string)
+		if workspaceID == "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "workspace_id required", nil)
+		}
+		// GetAutomation returns nil (not an error) when the row is missing —
+		// map that to a NotFound response so the client can surface it cleanly.
+		// We also return NotFound (not Forbidden) when the automation belongs
+		// to a different workspace — this avoids disclosing whether the id
+		// exists at all across workspace boundaries.
 		a, err := svc.GetAutomation(ctx, id)
 		if err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
-		if a == nil {
+		if a == nil || a.WorkspaceID != workspaceID {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "automation not found", nil)
 		}
 		return ws.NewResponse(msg.ID, msg.Action, &RevealWebhookSecretResponse{WebhookSecret: a.WebhookSecret})
