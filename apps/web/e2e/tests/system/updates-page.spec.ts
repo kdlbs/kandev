@@ -46,7 +46,11 @@ test.describe("System Updates page", () => {
     await testPage.goto("/settings/system/updates");
     await expect(testPage.getByTestId("system-page-title")).toHaveText("Updates");
 
-    const page2 = testPage.getByRole("link", { name: "2" }).first();
+    // Scope to changelog pagination — settings sidebar workspace links can also
+    // expose accessible names that match single-digit page numbers.
+    const changelogPagination = testPage.getByTestId("changelog-pagination");
+    await expect(changelogPagination).toBeVisible({ timeout: 15_000 });
+    const page2 = changelogPagination.getByTestId("changelog-page-2");
     const hasPagination = (await page2.count()) > 0;
     test.skip(!hasPagination, "Changelog has fewer than 2 pages on this build");
 
@@ -55,7 +59,7 @@ test.describe("System Updates page", () => {
     await testPage.waitForURL(/[?&]page=2(\b|&)/, { timeout: 5_000 });
 
     // Going back to page 1 strips the query param (clean URL convention).
-    const page1 = testPage.getByRole("link", { name: "1" }).first();
+    const page1 = changelogPagination.getByTestId("changelog-page-1");
     await page1.click();
     await testPage.waitForURL((url) => !url.search.includes("page="), { timeout: 5_000 });
   });

@@ -122,7 +122,7 @@ export function ChangelogList() {
         <ChangelogEntryCard key={entry.version} entry={entry} />
       ))}
       {totalPages > 1 && (
-        <Pagination>
+        <Pagination data-testid="changelog-pagination">
           <PaginationContent>
             <PaginationItem>
               <PaginationPrevious
@@ -141,6 +141,7 @@ export function ChangelogList() {
                     isActive={currentPage === page}
                     onClick={() => setPage(page)}
                     className="cursor-pointer"
+                    data-testid={`changelog-page-${page}`}
                   >
                     {page}
                   </PaginationLink>
