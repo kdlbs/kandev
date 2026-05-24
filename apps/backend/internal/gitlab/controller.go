@@ -276,15 +276,22 @@ func (c *Controller) httpSearchUserIssues(ctx *gin.Context) {
 
 // translateMRFilter resolves the authenticated user (only when the
 // review_requested tab needs it) and runs the filter through
-// translateUserSearchFilter. On a username-lookup failure it writes a 500
-// to ctx and returns an error so the caller can short-circuit — silently
-// falling back to an unfiltered listing would re-introduce the very bug
-// this translation layer was added to prevent.
+// translateUserSearchFilter. On a username-lookup failure — including a
+// successful call that returns no username (NoopClient, an unexpected
+// GitLab response) — it writes a 500 to ctx and returns an error so the
+// caller can short-circuit. Silently falling back to an unfiltered listing
+// would re-introduce the very bug this translation layer was added to
+// prevent.
 func (c *Controller) translateMRFilter(ctx *gin.Context, filter string) (string, error) {
 	var username string
 	if filter == "review_requested" {
 		u, err := c.service.Client().GetAuthenticatedUser(ctx.Request.Context())
 		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: err.Error()})
+			return "", err
+		}
+		if u == "" {
+			err := errors.New("cannot resolve authenticated GitLab user")
 			ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: err.Error()})
 			return "", err
 		}

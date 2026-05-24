@@ -190,6 +190,43 @@ func TestHttpSearchUserMRs_CustomQueryBypassesTranslation(t *testing.T) {
 	}
 }
 
+// Defensive backstop: if /user resolves successfully but yields no
+// username (NoopClient, or some GitLab response we didn't model), the
+// controller must NOT silently fall through to the unscoped /merge_requests
+// listing — that would re-expose the original bug. A 500 surfaces the
+// problem so the user knows something is wrong instead of seeing a feed
+// of unrelated MRs.
+func TestHttpSearchUserMRs_ReviewRequestedWithoutUsername_Returns500(t *testing.T) {
+	rec := &requestLog{}
+	mux := http.NewServeMux()
+	// /user succeeds but returns an empty username.
+	mux.HandleFunc("/api/v4/user", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"username":""}`))
+	})
+	mux.HandleFunc("/api/v4/merge_requests", func(w http.ResponseWriter, r *http.Request) {
+		rec.add(r.URL.Path, r.URL.Query())
+		w.Header().Set("X-Total", "0")
+		_, _ = w.Write([]byte(`[]`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	gin.SetMode(gin.TestMode)
+	log := newTestLogger(t)
+	svc := NewService(srv.URL, NewPATClient(srv.URL, "tok"), AuthMethodPAT, nil, log)
+	router := gin.New()
+	NewController(svc, log).RegisterHTTPRoutes(router)
+
+	resp := hit(router, "/api/v1/gitlab/user/mrs?filter=review_requested")
+	if resp.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 (body: %s)", resp.Code, resp.Body.String())
+	}
+	if req := rec.findByPath("/api/v4/merge_requests"); req != nil {
+		t.Errorf("/api/v4/merge_requests was called with query %v — controller should short-circuit instead", req.Query)
+	}
+}
+
 // Issues counterpart — same regression guarantee plus confirmation that
 // review_requested is intentionally not recognized for issues (no
 // equivalent GitLab API concept).
