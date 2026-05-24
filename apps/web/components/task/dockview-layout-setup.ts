@@ -175,7 +175,9 @@ function handleTerminalPanelClosed(
       (err: unknown) => console.error("park terminal on tab close:", err),
     );
   } else {
-    stopUserShell(envForTerminal, terminalId, stampedTaskID);
+    stopUserShell(envForTerminal, terminalId, stampedTaskID).catch((err: unknown) =>
+      console.warn("stop terminal on tab close:", err),
+    );
   }
 }
 
