@@ -375,6 +375,9 @@ func validateProfileEnvVarDTOs(in []dto.ProfileEnvVarDTO) error {
 		if ev.SecretID != "" && ev.Value != "" {
 			return fmt.Errorf("%w: env_vars[%d]: set value or secret_id, not both", ErrInvalidProfileEnvVars, i)
 		}
+		if ev.SecretID == "" && ev.Value == "" {
+			return fmt.Errorf("%w: env_vars[%d]: must set either value or secret_id", ErrInvalidProfileEnvVars, i)
+		}
 		if ev.Value != "" {
 			if len(ev.Value) > maxProfileEnvVarValueLen {
 				return fmt.Errorf("%w: env_vars[%d].value exceeds %d characters", ErrInvalidProfileEnvVars, i, maxProfileEnvVarValueLen)

@@ -55,11 +55,12 @@ test.describe("Agent profile — CLI flags", () => {
       await testPage.getByTestId("cli-flag-new-flag-input").fill(flagText);
       await testPage.getByTestId("cli-flag-add-button").click();
 
-      // The row should appear immediately, enabled by default. The row's
-      // positional index depends on how many curated flags the agent seeded
-      // at profile creation, so locate the new row by its flag text rather
-      // than by position.
-      await expect(testPage.getByTestId("cli-flags-list")).toContainText(flagText);
+      // The row should appear immediately, enabled by default. Flag text lives
+      // in an <input> element; use toHaveValue on the last flag-input because
+      // the newly added flag is always appended last.
+      await expect(testPage.locator('[data-testid^="cli-flag-flag-"]').last()).toHaveValue(
+        flagText,
+      );
 
       // Save via the dirty-state save button; wait for unsaved badge to clear.
       const saveButton = testPage.getByRole("button", { name: /^Save( changes)?$/i }).first();
@@ -70,7 +71,9 @@ test.describe("Agent profile — CLI flags", () => {
       // Reload — the row must still be there.
       await testPage.reload();
       await expect(testPage.getByTestId("custom-cli-flags-card")).toBeVisible({ timeout: 15_000 });
-      await expect(testPage.getByTestId("cli-flags-list")).toContainText(flagText);
+      await expect(testPage.locator('[data-testid^="cli-flag-flag-"]').last()).toHaveValue(
+        flagText,
+      );
 
       // Direct DB-path verification: fetch the profile via the API and assert
       // the cli_flags JSON contains our entry, enabled.

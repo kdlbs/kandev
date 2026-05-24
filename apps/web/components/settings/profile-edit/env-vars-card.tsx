@@ -120,7 +120,55 @@ function EnvVarRowComponent({
   );
 }
 
-function EnvVarAddForm({ onAdd }: { onAdd: (row: EnvVarRow) => void }) {
+function DraftValueInput({
+  draft,
+  valueId,
+  secrets,
+  onEnter,
+  setDraft,
+}: {
+  draft: EnvVarRow;
+  valueId: string;
+  secrets: { id: string; name: string }[];
+  onEnter: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  setDraft: React.Dispatch<React.SetStateAction<EnvVarRow>>;
+}) {
+  if (draft.mode === "value") {
+    return (
+      <Input
+        id={valueId}
+        value={draft.value}
+        onChange={(e) => setDraft((d) => ({ ...d, value: e.target.value }))}
+        placeholder="value"
+        className="font-mono text-xs"
+        data-testid="env-var-new-value-input"
+        onKeyDown={onEnter}
+      />
+    );
+  }
+  return (
+    <Select value={draft.secretId} onValueChange={(v) => setDraft((d) => ({ ...d, secretId: v }))}>
+      <SelectTrigger id={valueId} className="text-xs" data-testid="env-var-new-secret-select">
+        <SelectValue placeholder="Select secret..." />
+      </SelectTrigger>
+      <SelectContent>
+        {secrets.map((s) => (
+          <SelectItem key={s.id} value={s.id}>
+            {s.name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+function EnvVarAddForm({
+  onAdd,
+  secrets,
+}: {
+  onAdd: (row: EnvVarRow) => void;
+  secrets: { id: string; name: string }[];
+}) {
   const uid = useId();
   const keyId = `${uid}-key`;
   const modeId = `${uid}-mode`;
@@ -132,15 +180,17 @@ function EnvVarAddForm({ onAdd }: { onAdd: (row: EnvVarRow) => void }) {
     secretId: "",
   });
 
+  const isAddDisabled =
+    draft.key.trim() === "" || (draft.mode === "secret" && draft.secretId === "");
+
   const commit = useCallback(() => {
-    const trimmedKey = draft.key.trim();
-    if (trimmedKey === "") return;
-    onAdd({ ...draft, key: trimmedKey });
+    if (isAddDisabled) return;
+    onAdd({ ...draft, key: draft.key.trim() });
     setDraft({ key: "", mode: "value", value: "", secretId: "" });
-  }, [draft, onAdd]);
+  }, [draft, isAddDisabled, onAdd]);
 
   const onEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter" && draft.key.trim() !== "") {
+    if (e.key === "Enter" && !isAddDisabled) {
       e.preventDefault();
       commit();
     }
@@ -185,15 +235,12 @@ function EnvVarAddForm({ onAdd }: { onAdd: (row: EnvVarRow) => void }) {
         <Label className="text-xs" htmlFor={valueId}>
           {draft.mode === "value" ? "Value" : "Secret"}
         </Label>
-        <Input
-          id={valueId}
-          value={draft.mode === "value" ? draft.value : ""}
-          onChange={(e) => setDraft((d) => ({ ...d, value: e.target.value }))}
-          placeholder={draft.mode === "value" ? "value" : "Use the trash icon, then re-add"}
-          className="font-mono text-xs"
-          disabled={draft.mode === "secret"}
-          data-testid="env-var-new-value-input"
-          onKeyDown={onEnter}
+        <DraftValueInput
+          draft={draft}
+          valueId={valueId}
+          secrets={secrets}
+          onEnter={onEnter}
+          setDraft={setDraft}
         />
       </div>
       <Button
@@ -201,7 +248,7 @@ function EnvVarAddForm({ onAdd }: { onAdd: (row: EnvVarRow) => void }) {
         variant="outline"
         size="sm"
         onClick={commit}
-        disabled={draft.key.trim() === ""}
+        disabled={isAddDisabled}
         className="cursor-pointer"
         data-testid="env-var-add-button"
       >
@@ -241,7 +288,7 @@ function EnvVarsFieldBody({ rows, secrets, onAdd, onUpdate, onRemove }: EnvVarsF
           ))}
         </ul>
       )}
-      <EnvVarAddForm onAdd={onAdd} />
+      <EnvVarAddForm onAdd={onAdd} secrets={secrets} />
     </div>
   );
 }
