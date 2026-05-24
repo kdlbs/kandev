@@ -8,12 +8,12 @@ import type {
 } from "../../lib/types/http";
 import type { Agent, AgentProfile } from "../../lib/types/http-agents";
 import type {
-  SSHAgentReadinessResponseBody,
-  SSHProbeShellsResponseBody,
-  SSHSessionBody,
-  SSHTestRequestBody,
-  SSHTestResultBody,
-} from "./api-client-ssh";
+  SSHAgentReadinessResponse,
+  SSHProbeShellsResponse,
+  SSHSession,
+  SSHTestRequest,
+  SSHTestResult,
+} from "../../lib/types/http-ssh";
 
 // --- GitHub Mock Types ---
 
@@ -1517,38 +1517,25 @@ export class ApiClient {
     return this.request("GET", `/api/v1/executors/${executorId}`);
   }
 
-  async testSSHConnection(req: SSHTestRequestBody): Promise<SSHTestResultBody> {
+  async testSSHConnection(req: SSHTestRequest): Promise<SSHTestResult> {
     return this.request("POST", "/api/v1/ssh/test", req);
   }
 
-  async listSSHSessions(executorId: string): Promise<SSHSessionBody[]> {
+  async listSSHSessions(executorId: string): Promise<SSHSession[]> {
     return this.request("GET", `/api/v1/ssh/executors/${executorId}/sessions`);
   }
 
   async probeSSHAgents(
     executorId: string,
     body?: { shell?: string },
-  ): Promise<SSHAgentReadinessResponseBody> {
+  ): Promise<SSHAgentReadinessResponse> {
     return this.request("POST", `/api/v1/ssh/executors/${executorId}/probe-agents`, body ?? {});
   }
 
-  async probeSSHShells(executorId: string): Promise<SSHProbeShellsResponseBody> {
+  async probeSSHShells(executorId: string): Promise<SSHProbeShellsResponse> {
     return this.request("POST", `/api/v1/ssh/executors/${executorId}/probe-shells`);
   }
 }
-
-// SSH HTTP shapes live in api-client-ssh.ts; re-exported here so existing
-// callers that imported them from api-client keep working.
-export type {
-  SSHIdentitySourceBody,
-  SSHTestRequestBody,
-  SSHTestStepBody,
-  SSHTestResultBody,
-  SSHSessionBody,
-  SSHAgentReadinessRowBody,
-  SSHAgentReadinessResponseBody,
-  SSHProbeShellsResponseBody,
-} from "./api-client-ssh";
 
 // --- Jira / Linear mock payload types ---
 
