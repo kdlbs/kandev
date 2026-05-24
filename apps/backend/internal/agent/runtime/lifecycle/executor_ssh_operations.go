@@ -609,9 +609,23 @@ func (f *SSHPortForwarder) serve(client *ssh.Client) {
 			case <-f.closed:
 				return
 			default:
-				f.logger.Debug("ssh forwarder accept failed", zap.Error(err))
+			}
+			// Distinguish a permanently-broken listener (closed FD,
+			// underlying socket dead) from transient per-accept errors
+			// like EMFILE / ECONNABORTED that would orphan the
+			// forwarder if we returned. net.ErrClosed is the only
+			// error the listener emits after Close, and we already
+			// matched <-f.closed for the orderly-close path, so
+			// anything else here is a genuine "accept failed once"
+			// that we want to log and try again.
+			if errors.Is(err, net.ErrClosed) {
+				f.logger.Debug("ssh forwarder accept on closed listener", zap.Error(err))
 				return
 			}
+			f.logger.Warn("ssh forwarder accept failed; continuing",
+				zap.Int("remote_port", f.remotePort),
+				zap.Error(err))
+			continue
 		}
 		go f.handleLocal(client, local)
 	}
