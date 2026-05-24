@@ -12,6 +12,64 @@ import (
 	"github.com/kandev/kandev/internal/worktree/copyfiles"
 )
 
+// shipRemoteCopyfilesForLaunch fires runRemoteCopyfiles once for the
+// single-repo top-level spec, or once per RepoLaunchSpec for multi-repo
+// launches. Each invocation gets its own progressRecorder.Callback so
+// the step ends up at the recorder's current tail without the
+// double-offset bug that prompted CodeRabbit's "double-offset in remote
+// copy-files progress indexing" feedback.
+func shipRemoteCopyfilesForLaunch(
+	ctx context.Context,
+	log *logger.Logger,
+	req *LaunchRequest,
+	cli *client.Client,
+	runtimeProgress PrepareProgressCallback,
+	progressRecorder *prepareProgressRecorder,
+) {
+	type repoCopy struct {
+		sourceRepoPath string
+		copyFilesSpec  string
+		repoSubpath    string
+	}
+	var jobs []repoCopy
+	if specs := req.Repositories; len(specs) > 0 {
+		for _, spec := range specs {
+			jobs = append(jobs, repoCopy{
+				sourceRepoPath: spec.RepositoryPath,
+				copyFilesSpec:  spec.CopyFiles,
+				repoSubpath:    spec.RepoName,
+			})
+		}
+	} else if req.RepositoryPath != "" {
+		jobs = append(jobs, repoCopy{
+			sourceRepoPath: req.RepositoryPath,
+			copyFilesSpec:  req.CopyFiles,
+			repoSubpath:    "", // single-repo: write at workspace root
+		})
+	}
+	for _, j := range jobs {
+		if strings.TrimSpace(j.copyFilesSpec) == "" {
+			continue
+		}
+		// Create a fresh recorder callback at the current tail per job so
+		// passing StepIndex=0 / TotalSteps=1 lands at the right absolute
+		// index regardless of how many steps the previous job appended.
+		var jobProgress PrepareProgressCallback
+		if runtimeProgress != nil {
+			jobProgress = progressRecorder.Callback(progressRecorder.Len())
+		}
+		runRemoteCopyfiles(ctx, log, remoteCopyfilesRequest{
+			SourceRepoPath: j.sourceRepoPath,
+			CopyFilesSpec:  j.copyFilesSpec,
+			RepoSubpath:    j.repoSubpath,
+			Client:         cli,
+			OnProgress:     jobProgress,
+			StepIndex:      0,
+			TotalSteps:     1,
+		})
+	}
+}
+
 // remoteCopyfilesRequest carries the inputs runRemoteCopyfiles needs.
 // Bundled so the call site in manager_launch.go stays readable —
 // remote-copy is a side action after CreateInstance, not part of the

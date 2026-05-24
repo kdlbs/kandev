@@ -560,6 +560,45 @@ func TestWriteEntries_SkipIfExists(t *testing.T) {
 	}
 }
 
+func TestWriteEntries_RejectsSymlinkedParentEscape(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation often requires privilege on Windows")
+	}
+
+	parent := t.TempDir()
+	dst := filepath.Join(parent, "dst")
+	if err := os.Mkdir(dst, 0o755); err != nil {
+		t.Fatalf("mkdir dst: %v", err)
+	}
+	outside := filepath.Join(parent, "outside")
+	if err := os.Mkdir(outside, 0o755); err != nil {
+		t.Fatalf("mkdir outside: %v", err)
+	}
+	// A pre-existing symlinked directory inside the target — `dst/config`
+	// points at a directory completely outside the target root. Writing
+	// `config/sneaky.txt` via lexical join lands at `outside/sneaky.txt`
+	// before the EvalSymlinks guard was added.
+	if err := os.Symlink(outside, filepath.Join(dst, "config")); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	copied, warnings, err := WriteEntries(context.Background(), dst,
+		[]Entry{{RelPath: "config/sneaky.txt", Mode: 0o644, Content: []byte("PWN")}}, nil)
+	if err != nil {
+		t.Fatalf("WriteEntries err: %v", err)
+	}
+	if len(copied) != 0 {
+		t.Errorf("copied = %v, want zero (escape rejected)", copied)
+	}
+	if len(warnings) == 0 {
+		t.Error("expected warning for symlinked-parent escape")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "sneaky.txt")); !os.IsNotExist(err) {
+		t.Errorf("sneaky.txt should NOT exist outside dst; stat err = %v", err)
+	}
+}
+
 func TestWriteEntries_RejectsTraversalEntries(t *testing.T) {
 	t.Parallel()
 	parent := t.TempDir()

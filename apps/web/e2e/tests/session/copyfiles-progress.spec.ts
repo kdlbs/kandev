@@ -33,6 +33,17 @@ test.describe("Copy ignored files prepare step", () => {
     const configDir = path.join(repoDir, "config");
     const configPath = path.join(configDir, "local.yml");
 
+    // Snapshot pre-existing state so teardown can restore it. The seed
+    // repo is worker-scoped — a previous test might have left fixtures
+    // in `config/`, and unconditionally rmSync'ing them would silently
+    // poison sibling tests with missing files. Pattern flagged by
+    // CodeRabbit on PR #950.
+    const hadConfigDir = fs.existsSync(configDir);
+    const hadConfigFile = fs.existsSync(configPath);
+    const previousConfig = hadConfigFile ? fs.readFileSync(configPath) : undefined;
+    const hadEnv = fs.existsSync(envPath);
+    const previousEnv = hadEnv ? fs.readFileSync(envPath) : undefined;
+
     fs.mkdirSync(configDir, { recursive: true });
     fs.writeFileSync(envPath, "E2E_SECRET=hunter2\n");
     fs.writeFileSync(configPath, "debug: true\n");
@@ -77,12 +88,25 @@ test.describe("Copy ignored files prepare step", () => {
         // Test teardown is best-effort — a 404 here just means the repo
         // was already cleaned up by a parallel teardown.
       });
-      fs.rmSync(envPath, { force: true });
-      fs.rmSync(configDir, { recursive: true, force: true });
+      // Restore pre-existing state captured above so sibling tests
+      // sharing this worker repo don't lose any fixture files.
+      if (previousEnv !== undefined) {
+        fs.writeFileSync(envPath, previousEnv);
+      } else {
+        fs.rmSync(envPath, { force: true });
+      }
+      if (previousConfig !== undefined) {
+        fs.writeFileSync(configPath, previousConfig);
+      } else {
+        fs.rmSync(configPath, { force: true });
+        if (!hadConfigDir) {
+          fs.rmSync(configDir, { recursive: true, force: true });
+        }
+      }
     }
   });
 
-  test("does not render the step when no files match", async ({
+  test("renders the step with a warning when no files match", async ({
     testPage,
     apiClient,
     seedData,

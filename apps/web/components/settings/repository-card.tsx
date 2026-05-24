@@ -172,10 +172,9 @@ function RepositoryScriptFields({
           onChange={(e) => onUpdate(repositoryId, { copy_files: e.target.value })}
           placeholder=".env, .env.local, config/local.yml"
           rows={2}
+          className="font-mono text-sm"
         />
-        <p className="text-xs text-muted-foreground">
-          Paths or globs copied into new worktrees at task creation. These should be gitignored.
-        </p>
+        <p className="text-xs text-muted-foreground">Gitignored paths copied into new worktrees.</p>
       </div>
     </>
   );

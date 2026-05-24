@@ -182,11 +182,18 @@ func WriteEntries(ctx context.Context, targetDir string, entries []Entry, log *z
 	if err := ctx.Err(); err != nil {
 		return nil, nil, fmt.Errorf("copyfiles: %w", err)
 	}
-	absTarget, err := filepath.Abs(targetDir)
+	// Resolve symlinks AND require the target to exist as a directory before
+	// any per-entry write. EvalSymlinks both canonicalizes and validates —
+	// it errors on non-existent paths and breaks the taint chain CodeQL
+	// would otherwise trace from caller-supplied targetDir into os.Stat /
+	// os.WriteFile sinks. Per-entry RelPaths are then re-checked against
+	// this canonical root in writeOneEntry.
+	absTarget, err := filepath.EvalSymlinks(targetDir)
 	if err != nil {
 		return nil, nil, fmt.Errorf("copyfiles: resolve target: %w", err)
 	}
-	if info, statErr := os.Stat(absTarget); statErr != nil || !info.IsDir() {
+	info, err := os.Stat(absTarget)
+	if err != nil || !info.IsDir() {
 		return nil, nil, fmt.Errorf("copyfiles: target %q is not a directory", absTarget)
 	}
 
@@ -210,7 +217,10 @@ func WriteEntries(ctx context.Context, targetDir string, entries []Entry, log *z
 }
 
 // writeOneEntry validates a single Entry, refusing paths that escape
-// targetDir, then writes it (skip-if-exists for idempotency).
+// targetDir, then writes it (skip-if-exists for idempotency). Resolves
+// symlinks on the destination's parent directory so a pre-existing
+// `config -> /etc` symlink can't smuggle the write outside absTarget
+// (flagged as a Critical by CodeRabbit on PR #950).
 func writeOneEntry(absTarget string, e Entry, log *zap.Logger) (written bool, warning string, err error) {
 	rel := filepath.FromSlash(e.RelPath)
 	if rel == "" {
@@ -219,14 +229,12 @@ func writeOneEntry(absTarget string, e Entry, log *zap.Logger) (written bool, wa
 	if filepath.IsAbs(rel) {
 		return false, fmt.Sprintf("rejected absolute path %q", e.RelPath), nil
 	}
-	dst := filepath.Join(absTarget, rel)
-	cleanDst, err := filepath.Abs(dst)
+	cleanDst, warn, err := secureDestination(absTarget, rel)
 	if err != nil {
-		return false, fmt.Sprintf("rejected %q: %v", e.RelPath, err), nil
+		return false, "", err
 	}
-	relCheck, err := filepath.Rel(absTarget, cleanDst)
-	if err != nil || relCheck == ".." || strings.HasPrefix(relCheck, ".."+string(filepath.Separator)) {
-		return false, fmt.Sprintf("rejected %q: escapes target", e.RelPath), nil
+	if warn != "" {
+		return false, warn, nil
 	}
 	if _, err := os.Lstat(cleanDst); err == nil {
 		if log != nil {
@@ -234,20 +242,62 @@ func writeOneEntry(absTarget string, e Entry, log *zap.Logger) (written bool, wa
 		}
 		return false, "", nil
 	}
-	if err := os.MkdirAll(filepath.Dir(cleanDst), 0o755); err != nil {
-		return false, "", fmt.Errorf("copyfiles: mkdir %s: %w", filepath.Dir(cleanDst), err)
-	}
 	mode := e.Mode.Perm()
 	if mode == 0 {
 		mode = 0o644
 	}
 	if err := os.WriteFile(cleanDst, e.Content, mode); err != nil {
+		// Best-effort cleanup so a half-written file doesn't poison the
+		// next idempotent run's skip-if-exists branch (the streaming
+		// copyFile path does the same). Ignore unlink failure.
+		_ = os.Remove(cleanDst)
 		return false, "", fmt.Errorf("copyfiles: write %s: %w", cleanDst, err)
 	}
 	if log != nil {
 		log.Debug("copyfiles: wrote entry", zap.String("rel", e.RelPath))
 	}
 	return true, "", nil
+}
+
+// secureDestination resolves the destination path for a relative entry,
+// creating parent directories and verifying via EvalSymlinks that the
+// final path still lies inside absTarget after any symlinks in parent
+// components are followed. Returns:
+//
+//   - (cleanDst, "", nil) on success — safe to write.
+//   - ("", warn, nil)     when the path is rejected (warn surfaced to caller).
+//   - ("", "", err)       only on mkdir IO failure — fatal for the batch.
+//
+// Closes the symlink-target-escape hole CodeRabbit flagged on PR #950:
+// without the post-MkdirAll EvalSymlinks, a pre-existing component like
+// `config -> /etc` could allow a write at /etc/passwd via a `config/x`
+// relative path despite the lexical Rel check passing.
+func secureDestination(absTarget, rel string) (cleanDst, warning string, err error) {
+	lexical := filepath.Join(absTarget, rel)
+	cleanDst, absErr := filepath.Abs(lexical)
+	if absErr != nil {
+		return "", fmt.Sprintf("rejected %q: %v", rel, absErr), nil
+	}
+	if relCheck, relErr := filepath.Rel(absTarget, cleanDst); relErr != nil ||
+		relCheck == ".." ||
+		strings.HasPrefix(relCheck, ".."+string(filepath.Separator)) {
+		return "", fmt.Sprintf("rejected %q: escapes target", rel), nil
+	}
+	parent := filepath.Dir(cleanDst)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return "", "", fmt.Errorf("copyfiles: mkdir %s: %w", parent, err)
+	}
+	canonParent, evalErr := filepath.EvalSymlinks(parent)
+	if evalErr != nil {
+		return "", fmt.Sprintf("rejected %q: parent resolve failed: %v", rel, evalErr), nil
+	}
+	final := filepath.Join(canonParent, filepath.Base(cleanDst))
+	if relCheck, relErr := filepath.Rel(absTarget, final); relErr != nil ||
+		relCheck == ".." ||
+		strings.HasPrefix(relCheck, ".."+string(filepath.Separator)) {
+		return "", fmt.Sprintf("rejected %q: symlink in parent escapes target", rel), nil
+	}
+	return final, "", nil
 }
 
 func (s *copyState) warn(format string, args ...any) {
