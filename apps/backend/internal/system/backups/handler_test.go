@@ -99,6 +99,63 @@ func TestHandleDelete_RejectsTraversal(t *testing.T) {
 	}
 }
 
+func TestHandleDelete_PreResetSnapshotReturns403(t *testing.T) {
+	svc, dataDir := newTestService(t)
+	backupsDir := filepath.Join(dataDir, "backups")
+	if err := os.MkdirAll(backupsDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	name := "kandev-pre-reset-20260101T000000Z.db"
+	if err := os.WriteFile(filepath.Join(backupsDir, name), []byte("x"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	r := newRouter(svc)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/system/backups/"+name, nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", w.Code)
+	}
+}
+
+func TestHandleDelete_MissingSnapshotReturns404(t *testing.T) {
+	svc, _ := newTestService(t)
+	r := newRouter(svc)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/system/backups/manual-missing.db", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestHandleDelete_ManualSnapshotReturns204(t *testing.T) {
+	svc, dataDir := newTestService(t)
+	backupsDir := filepath.Join(dataDir, "backups")
+	if err := os.MkdirAll(backupsDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(backupsDir, "manual-9.db"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	r := newRouter(svc)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/system/backups/manual-9.db", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", w.Code)
+	}
+	if _, err := os.Stat(filepath.Join(backupsDir, "manual-9.db")); !os.IsNotExist(err) {
+		t.Errorf("expected file removed, err=%v", err)
+	}
+}
+
 func TestHandleDownload_StreamsFile(t *testing.T) {
 	svc, dataDir := newTestService(t)
 	if err := os.MkdirAll(filepath.Join(dataDir, "backups"), 0o755); err != nil {

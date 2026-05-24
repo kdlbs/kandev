@@ -23,6 +23,7 @@ import {
   buildLogDownloadUrl,
   fetchUpdates,
   checkUpdates,
+  fetchSystemJob,
 } from "./system-api";
 
 const BASE = "http://api.test/api/v1/system";
@@ -207,6 +208,25 @@ describe("logs", () => {
 
   it("buildLogDownloadUrl returns the absolute download URL", () => {
     expect(buildLogDownloadUrl("kandev.log.1")).toBe(`${BASE}/logs/kandev.log.1/download`);
+  });
+});
+
+describe("fetchSystemJob", () => {
+  it("GETs /jobs/:id and returns the job payload", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        id: "job-abc",
+        kind: "vacuum",
+        state: "succeeded",
+        message: "done",
+        started_at: "2026-05-18T00:00:00Z",
+      }),
+    );
+    const job = await fetchSystemJob("job-abc");
+    expect(lastCall().url).toBe(`${BASE}/jobs/job-abc`);
+    expect(method()).toBe("GET");
+    expect(job.id).toBe("job-abc");
+    expect(job.state).toBe("succeeded");
   });
 });
 

@@ -49,10 +49,11 @@ test.describe("System Updates page", () => {
     // Scope to changelog pagination — settings sidebar workspace links can also
     // expose accessible names that match single-digit page numbers.
     const changelogPagination = testPage.getByTestId("changelog-pagination");
-    await expect(changelogPagination).toBeVisible({ timeout: 15_000 });
     const page2 = changelogPagination.getByTestId("changelog-page-2");
     const hasPagination = (await page2.count()) > 0;
     test.skip(!hasPagination, "Changelog has fewer than 2 pages on this build");
+
+    await expect(changelogPagination).toBeVisible({ timeout: 15_000 });
 
     await page2.click();
     // URL replace should land on ?page=2 without a full reload.

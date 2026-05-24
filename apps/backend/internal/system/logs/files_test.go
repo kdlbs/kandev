@@ -6,11 +6,17 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/common/logger/buffer"
 )
 
 func newTestService(t *testing.T, logDir string) *Service {
 	t.Helper()
-	return NewService(logDir, "kandev.log", nil)
+	svc := NewService(logDir, "kandev.log", nil)
+	// Isolate from the process-wide default ring buffer so parallel tests
+	// cannot pollute Tail() fallbacks when the log file is missing.
+	svc.memBuffer = buffer.New(100)
+	return svc
 }
 
 func TestList_EmptyDirReturnsEmptySlice(t *testing.T) {

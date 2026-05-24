@@ -343,6 +343,15 @@ func TestOpenForDownload_RejectsTraversal(t *testing.T) {
 	}
 }
 
+func TestResolveSnapshotPath_RejectsNonSnapshotFile(t *testing.T) {
+	svc, _ := newTestService(t)
+	for _, name := range []string{"config.db", "secrets.db", "kandev.db"} {
+		if _, err := svc.resolveSnapshotPath(name); err == nil {
+			t.Errorf("resolveSnapshotPath(%q) succeeded, want rejection", name)
+		}
+	}
+}
+
 func TestOpenForDownload_ValidName(t *testing.T) {
 	svc, dataDir := newTestService(t)
 	backupsDir := filepath.Join(dataDir, "backups")
