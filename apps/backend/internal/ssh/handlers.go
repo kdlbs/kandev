@@ -563,16 +563,27 @@ func populateSessionMetadata(row *SessionRow, md map[string]interface{}) {
 	row.LocalForwardPort = intFromMetadata(md, lifecycle.MetadataKeySSHLocalForwardPort)
 }
 
+// intFromMetadata reads a numeric metadata value. The SSH executor stores
+// ports/pids as strings (strconv.Itoa) at write time, but a JSON round-trip
+// through ExecutorRunning.Metadata can land them back as float64. Tolerate
+// the obvious shapes rather than silently returning 0 on a real value.
 func intFromMetadata(md map[string]interface{}, key string) int {
-	v, ok := md[key].(string)
-	if !ok {
+	switch v := md[key].(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	case string:
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return 0
+		}
+		return n
+	default:
 		return 0
 	}
-	n, err := strconv.Atoi(v)
-	if err != nil {
-		return 0
-	}
-	return n
 }
 
 func (h *Handler) testAgentctlCache(ctx context.Context, client *ssh.Client, result *TestResult) {
