@@ -123,7 +123,7 @@ func (a *Adapter) convertToolCallUpdate(sessionID string, tc *acp.SessionUpdateT
 
 	status := string(tc.Status)
 	if status == "" {
-		status = "in_progress"
+		status = toolStatusInProgress
 	}
 
 	return &AgentEvent{
@@ -158,7 +158,7 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	// fields are silently dropped and the message stays on the placeholder
 	// "Terminal" title from the initial pending tool_call.
 	if status == "" && (tcu.Title != nil || tcu.RawInput != nil || len(tcu.Content) > 0) {
-		status = "in_progress"
+		status = toolStatusInProgress
 	}
 
 	// Recognize Monitor registration: claude-acp sends `tool_call_update` with
@@ -170,7 +170,7 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	monitorTaskID, isMonitorRegistration := recognizeMonitorRegistration(tcu.Meta, tcu.RawOutput)
 	if isMonitorRegistration && status == toolStatusComplete {
 		a.trackMonitor(sessionID, monitorTaskID, toolCallID)
-		status = "in_progress"
+		status = toolStatusInProgress
 		a.logger.Info("monitor registered",
 			zap.String("session_id", sessionID),
 			zap.String("task_id", monitorTaskID),
@@ -184,7 +184,7 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	// the view as ended instead.
 	isTrackedMonitorTerminal := !isMonitorRegistration && isMonitorMeta(tcu.Meta) && a.isTrackedMonitor(sessionID, toolCallID)
 
-	isTerminal := status == toolStatusComplete || status == toolStatusError || status == "cancelled"
+	isTerminal := status == toolStatusComplete || status == toolStatusError || status == toolStatusCancelled
 
 	a.mu.Lock()
 	payload := a.activeToolCalls[toolCallID]

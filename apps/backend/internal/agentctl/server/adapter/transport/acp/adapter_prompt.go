@@ -318,7 +318,7 @@ func (a *Adapter) cancelActiveToolCalls(sessionID string) {
 			Type:              streams.EventTypeToolUpdate,
 			SessionID:         sessionID,
 			ToolCallID:        toolCallID,
-			ToolStatus:        "cancelled",
+			ToolStatus:        toolStatusCancelled,
 			NormalizedPayload: normalized,
 		})
 	}

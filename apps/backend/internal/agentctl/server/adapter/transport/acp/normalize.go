@@ -23,8 +23,10 @@ const (
 	toolTypeSearch  = "tool_search"
 	toolTypeGeneric = "tool_call"
 
-	toolStatusComplete = "complete"
-	toolStatusError    = "error"
+	toolStatusComplete   = "complete"
+	toolStatusError      = "error"
+	toolStatusInProgress = "in_progress"
+	toolStatusCancelled  = "cancelled"
 )
 
 // DetectToolOperationType determines the specific tool operation type from ACP tool data.
