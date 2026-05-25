@@ -40,36 +40,16 @@ func (s *Service) subscribeJiraEvents() {
 }
 
 // handleNewJiraIssue translates a JiraNewIssue bus event into a
-// WatcherDispatchCoordinator.Dispatch call. Symmetric with handleNewLinearIssue.
+// dispatchWatcherEvent call. Symmetric with handleNewLinearIssue.
 func (s *Service) handleNewJiraIssue(ctx context.Context, event *bus.Event) error {
 	evt, ok := event.Data.(*jira.NewJiraIssueEvent)
 	if !ok || evt == nil || evt.Issue == nil {
 		return nil
 	}
-	s.logger.Info("new jira issue detected from watch",
+	s.dispatchWatcherEvent(ctx, "jira",
+		NewJiraWatcherSource(s.jiraService, s.logger), evt,
 		zap.String("issue_watch_id", evt.IssueWatchID),
 		zap.String("issue_key", evt.Issue.Key))
-
-	if s.issueTaskCreator == nil {
-		s.logger.Warn("issue task creator not configured, skipping jira task creation")
-		return nil
-	}
-	if s.watcherCoordinator == nil {
-		// Defensive: coordinator is wired by SetIssueTaskCreator. If we got
-		// here without the creator we already returned above; this is just
-		// a belt-and-braces guard for tests that wire pieces individually.
-		s.logger.Warn("watcher coordinator not configured, skipping jira task dispatch",
-			zap.String("issue_watch_id", evt.IssueWatchID),
-			zap.String("issue_key", evt.Issue.Key))
-		return nil
-	}
-
-	src := NewJiraWatcherSource(s.jiraService, s.logger)
-	// Detach from cancellation but keep request-scoped values (tracing, etc.):
-	// the bus delivery context may be cancelled before task creation finishes,
-	// but in-memory/non-NATS bus implementations may carry values worth
-	// propagating.
-	go s.watcherCoordinator.Dispatch(context.WithoutCancel(ctx), src, evt)
 	return nil
 }
 
