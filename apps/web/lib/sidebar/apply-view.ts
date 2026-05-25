@@ -44,6 +44,7 @@ function getStateBucket(task: TaskSwitcherItem): TaskBucket {
 
 const dimensionExtractors: Record<FilterDimension, DimensionExtractor> = {
   archived: (t) => t.isArchived === true,
+  // State filters intentionally use the action buckets exposed by the filter UI.
   state: (t) => getStateBucket(t),
   workflow: (t) => t.workflowId,
   workflowStep: (t) => t.workflowStepId,
@@ -183,6 +184,7 @@ const groupExtractors: Record<Exclude<GroupKey, "none">, GroupExtractor> = {
     }
     return { key: "__unassigned__", label: UNASSIGNED_LABEL };
   },
+  // State groups use persisted task states so headings match task status labels.
   state: getTaskStateGroup,
 };
 

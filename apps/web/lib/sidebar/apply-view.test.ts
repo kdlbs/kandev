@@ -274,6 +274,7 @@ describe("applyGroup", () => {
     const tasks = [
       task({ id: "done", state: "COMPLETED", sessionState: "COMPLETED" }),
       task({ id: "review", state: "REVIEW", sessionState: "WAITING_FOR_INPUT" }),
+      task({ id: "not-started", sessionState: "IDLE" }),
     ];
     const groupsByKey = new Map(applyGroup(tasks, "state").groups.map((g) => [g.key, g]));
 
@@ -281,6 +282,8 @@ describe("applyGroup", () => {
     expect(groupsByKey.get("COMPLETED")?.tasks.map((t) => t.id)).toEqual(["done"]);
     expect(groupsByKey.get("REVIEW")?.label).toBe("Review");
     expect(groupsByKey.get("REVIEW")?.tasks.map((t) => t.id)).toEqual(["review"]);
+    expect(groupsByKey.get("__not_started__")?.label).toBe("Not started");
+    expect(groupsByKey.get("__not_started__")?.tasks.map((t) => t.id)).toEqual(["not-started"]);
   });
 
   it("buckets missing group-key value into Unassigned", () => {
