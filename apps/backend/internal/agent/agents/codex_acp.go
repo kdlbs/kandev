@@ -30,18 +30,34 @@ type CodexACP struct {
 	StandardPassthrough
 }
 
+// codexPassthroughPermSettings maps profile toggles to @openai/codex CLI flags.
+// The legacy --full-auto flag was removed; auto_approve uses --ask-for-approval never.
+var codexPassthroughPermSettings = map[string]PermissionSetting{
+	"auto_approve": {
+		Supported:    true,
+		Default:      true,
+		Label:        "Auto approve",
+		Description:  "Skip command approval prompts (--ask-for-approval never)",
+		ApplyMethod:  PermissionApplyMethodCLIFlag,
+		CLIFlag:      "--ask-for-approval",
+		CLIFlagValue: "never",
+	},
+}
+
 func NewCodexACP() *CodexACP {
 	return &CodexACP{
 		StandardPassthrough: StandardPassthrough{
-			PermSettings: emptyPermSettings,
+			PermSettings: codexPassthroughPermSettings,
 			Cfg: PassthroughConfig{
-				Supported:      true,
-				Label:          "CLI Passthrough",
-				Description:    "Show terminal directly instead of chat interface",
-				PassthroughCmd: NewCommand("npx", "-y", "@openai/codex", "--full-auto"),
-				ModelFlag:      NewParam("--model", "{model}"),
-				IdleTimeout:    3 * time.Second,
-				BufferMaxBytes: DefaultBufferMaxBytes,
+				Supported:         true,
+				Label:             "CLI Passthrough",
+				Description:       "Show terminal directly instead of chat interface",
+				PassthroughCmd:    NewCommand("npx", "-y", "@openai/codex"),
+				ModelFlag:         NewParam("--model", "{model}"),
+				IdleTimeout:       3 * time.Second,
+				BufferMaxBytes:    DefaultBufferMaxBytes,
+				AutoInjectPrompt:  true,
+				SubmitSequence:    "\r",
 			},
 		},
 	}
@@ -149,7 +165,7 @@ func (a *CodexACP) InstallScript() string {
 func (a *CodexACP) BillingType() usage.BillingType { return codexBillingType() }
 
 func (a *CodexACP) PermissionSettings() map[string]PermissionSetting {
-	return emptyPermSettings
+	return codexPassthroughPermSettings
 }
 
 // InferenceConfig returns configuration for one-shot inference using ACP.
