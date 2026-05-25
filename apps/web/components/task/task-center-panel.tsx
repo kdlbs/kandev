@@ -53,10 +53,7 @@ function useSessionApprove(activeSessionId: string | null, activeTaskId: string 
   );
   const setTaskSession = useAppStore((state) => state.setTaskSession);
   const isAgentWorking = activeSession?.state === "STARTING" || activeSession?.state === "RUNNING";
-  const isPassthroughMode = useMemo(
-    () => isPassthroughSession(activeSession),
-    [activeSession],
-  );
+  const isPassthroughMode = useMemo(() => isPassthroughSession(activeSession), [activeSession]);
   const showApproveButton =
     !!activeSession?.review_status && activeSession.review_status !== "approved" && !isAgentWorking;
   const handleApprove = useCallback(async () => {

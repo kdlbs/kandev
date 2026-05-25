@@ -63,10 +63,7 @@ export function useSessionLayoutState(options: UseSessionLayoutStateOptions = {}
   // --- Agent state ---
   const isAgentWorking = activeSession?.state === "STARTING" || activeSession?.state === "RUNNING";
 
-  const isPassthroughMode = useMemo(
-    () => isPassthroughSession(activeSession),
-    [activeSession],
-  );
+  const isPassthroughMode = useMemo(() => isPassthroughSession(activeSession), [activeSession]);
 
   const { selectedDiff, handleSelectDiff, handleClearSelectedDiff } = useSelectedDiffState();
   const { openFileRequest, handleOpenFile, handleFileOpenHandled } = useOpenFileRequestState();

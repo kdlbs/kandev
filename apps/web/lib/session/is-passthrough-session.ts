@@ -12,9 +12,7 @@ type PassthroughSessionInput = Pick<TaskSession, "is_passthrough" | "agent_profi
  * `ws/handlers/agent-session.ts`: snapshot writes are truthy-guarded while
  * `is_passthrough` writes use `!== undefined`).
  */
-export function isPassthroughSession(
-  session: PassthroughSessionInput | null | undefined,
-): boolean {
+export function isPassthroughSession(session: PassthroughSessionInput | null | undefined): boolean {
   if (session?.is_passthrough !== undefined) return session.is_passthrough;
   const snapshot = session?.agent_profile_snapshot as { cli_passthrough?: boolean } | undefined;
   return snapshot?.cli_passthrough === true;

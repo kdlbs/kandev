@@ -17,7 +17,6 @@ async function createTUIProfile(apiClient: ApiClient, name: string) {
   }
   return apiClient.createAgentProfile(mockAgent.id, name, {
     model: "mock-fast",
-    auto_approve: true,
     cli_passthrough: true,
   });
 }
