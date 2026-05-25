@@ -9,16 +9,6 @@ import type {
   Turn,
   TaskSession,
 } from "@/lib/types/http";
-import type {
-  GitHubStatus,
-  GitHubRateLimitUpdate,
-  TaskPR,
-  PRWatch,
-  ReviewWatch as GitHubReviewWatch,
-  IssueWatch as GitHubIssueWatch,
-  GitHubActionPresets,
-  PRFeedback,
-} from "@/lib/types/github";
 import type { SystemHealthResponse } from "@/lib/types/health";
 import type { UISliceActions as UIA } from "./slices/ui/types";
 import type * as UISliceTypes from "./slices/ui/types";
@@ -78,6 +68,7 @@ import {
   type SystemSliceActions,
   type AutomationsSliceActions,
   type FeaturesSliceActions,
+  type GitHubSliceActions,
 } from "./slices";
 import type {
   AvailableCommand,
@@ -233,31 +224,6 @@ export type AppState = {
   collapsedSubtaskParents: (typeof defaultUIState)["collapsedSubtaskParents"];
   kanbanPreviewedTaskId: (typeof defaultUIState)["kanbanPreviewedTaskId"];
   sidebarTaskPrefs: (typeof defaultUIState)["sidebarTaskPrefs"];
-
-  // GitHub actions
-  setGitHubStatus: (status: GitHubStatus | null) => void;
-  setGitHubStatusLoading: (loading: boolean) => void;
-  setTaskPRs: (prs: Record<string, TaskPR[]>) => void;
-  setTaskPR: (taskId: string, pr: TaskPR) => void;
-  setPendingPrUrlForTask: (taskId: string, repoKey: string, prUrl: string) => void;
-  setPRWatches: (watches: PRWatch[]) => void;
-  setPRWatchesLoading: (loading: boolean) => void;
-  removePRWatch: (id: string) => void;
-  setReviewWatches: (watches: GitHubReviewWatch[]) => void;
-  setReviewWatchesLoading: (loading: boolean) => void;
-  addReviewWatch: (watch: GitHubReviewWatch) => void;
-  updateReviewWatch: (watch: GitHubReviewWatch) => void;
-  removeReviewWatch: (id: string) => void;
-  setIssueWatches: (watches: GitHubIssueWatch[]) => void;
-  setIssueWatchesLoading: (loading: boolean) => void;
-  addIssueWatch: (watch: GitHubIssueWatch) => void;
-  updateIssueWatch: (watch: GitHubIssueWatch) => void;
-  removeIssueWatch: (id: string) => void;
-  setActionPresets: (workspaceId: string, presets: GitHubActionPresets) => void;
-  setActionPresetsLoading: (workspaceId: string, loading: boolean) => void;
-  applyGitHubRateLimitUpdate: (update: GitHubRateLimitUpdate) => void;
-  setPRFeedbackCacheEntry: (key: string, feedback: PRFeedback) => void;
-  removePRFeedbackCacheEntry: (key: string) => void;
 
   // GitLab actions
   setTaskMRs: (mrs: Record<string, TaskMR[]>) => void;
@@ -553,7 +519,8 @@ export type AppState = {
   setRunAttempts: (runId: string, attempts: RouteAttempt[]) => void;
   appendRunAttempt: (runId: string, attempt: RouteAttempt) => void;
   setAgentRouting: (agentId: string, data: AgentRouteData | undefined) => void;
-} & SystemSliceActions &
+} & GitHubSliceActions &
+  SystemSliceActions &
   FeaturesSliceActions &
   AutomationsSliceActions;
 
