@@ -987,13 +987,14 @@ func (m *Manager) autoInjectInitialPromptWith(runner passthroughRunner, executio
 	if m.IsShuttingDown() {
 		return
 	}
-	payload := description + agents.EffectiveSubmitSequence(pt.SubmitSequence)
-	if err := runner.WriteStdin(processID, payload); err != nil {
-		m.logger.Warn("autoInjectInitialPrompt write failed",
-			zap.String("execution_id", execution.ID),
-			zap.String("process_id", processID),
-			zap.Error(err))
-		return
+	for _, chunk := range agents.PlanPassthroughStdinWrites(description, pt) {
+		if err := runner.WriteStdin(processID, chunk); err != nil {
+			m.logger.Warn("autoInjectInitialPrompt write failed",
+				zap.String("execution_id", execution.ID),
+				zap.String("process_id", processID),
+				zap.Error(err))
+			return
+		}
 	}
 	if err := m.MarkPassthroughRunning(execution.SessionID); err != nil {
 		m.logger.Warn("failed to mark passthrough as running after auto-inject",

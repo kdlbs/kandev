@@ -36,7 +36,7 @@ When a passthrough session starts for a task that has a description:
 
 No per-agent pattern matchers. The existing idle window is the only readiness signal. If an agent's CLI is unusual enough that an idle window misfires (writes a banner, then waits 5 seconds, then prompts), we make the idle window per-agent-configurable in `PassthroughConfig` (already exists as `IdleTimeout`). No new detection machinery.
 
-For the Claude case: `claude_acp.go` sets `AutoInjectPrompt: true`, `SubmitSequence: "\r"`. Other passthrough-capable agents stay default-off and gain auto-inject later.
+For the Claude case: `claude_acp.go` sets `AutoInjectPrompt: true`, `SubmitSequence: "\r"` (single-line), and `SubmitAfterBracketedPaste: "\n"` for multi-line review comments (bracketed paste + separate submit write). Other passthrough-capable agents stay default-off and gain auto-inject later.
 
 ### Follow-up prompts via PTY stdin (backend route landed; UI surface deferred)
 

@@ -259,6 +259,9 @@ type PassthroughConfig struct {
 	// and when routing chat-compose messages to the PTY. "\r" for most TUIs.
 	// Empty inherits DefaultPassthroughSubmitSequence at PTY write sites.
 	SubmitSequence string
+	// SubmitAfterBracketedPaste overrides SubmitSequence when the prompt was
+	// wrapped in bracketed paste (multi-line). Claude Code expects "\n" there.
+	SubmitAfterBracketedPaste string
 }
 
 // DefaultBufferMaxBytes is the default maximum buffer size for passthrough mode (2 MB).
