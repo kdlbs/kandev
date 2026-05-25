@@ -28,8 +28,11 @@ func BuildPassthroughPayload(prompt string, cfg PassthroughConfig) string {
 	return bracketedPasteStart + prompt + bracketedPasteEnd + submit
 }
 
-// PlanPassthroughStdinWrites returns PTY write chunk(s). Today this is always a single
-// atomic write so bracketed-paste sequences are not split across syscalls.
+// PlanPassthroughStdinWrites returns PTY write chunk(s). Bracketed-paste prompts use one
+// atomic write; Claude uses separate writes for the backslash-then-Enter submit workaround.
 func PlanPassthroughStdinWrites(prompt string, cfg PassthroughConfig) []string {
+	if cfg.DisableBracketedPaste && cfg.SubmitViaBackslashEnter {
+		return []string{prompt, "\\", PassthroughSubmitSequence(cfg, false)}
+	}
 	return []string{BuildPassthroughPayload(prompt, cfg)}
 }

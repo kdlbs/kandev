@@ -25,15 +25,17 @@ func TestPlanPassthroughStdinWrites_SingleLine(t *testing.T) {
 func TestPlanPassthroughStdinWrites_ClaudeMultilineRawPaste(t *testing.T) {
 	cfg := NewClaudeACP().PassthroughConfig()
 	got := PlanPassthroughStdinWrites("### Review Comments\n\n> fix", cfg)
-	if len(got) != 1 {
-		t.Fatalf("got %d chunks, want 1: %#v", len(got), got)
+	if len(got) != 3 {
+		t.Fatalf("got %d chunks, want 3 (prompt, backslash, enter): %#v", len(got), got)
 	}
-	want := "### Review Comments\n\n> fix\r"
-	if got[0] != want {
-		t.Errorf("payload = %q, want %q", got[0], want)
+	if got[0] != "### Review Comments\n\n> fix" {
+		t.Errorf("prompt = %q", got[0])
 	}
-	if stringsContains(got[0], "\x1b[200~") {
-		t.Error("Claude must not use bracketed paste delimiters")
+	if got[1] != "\\" {
+		t.Errorf("backslash = %q, want \\\\", got[1])
+	}
+	if got[2] != "\r" {
+		t.Errorf("submit = %q, want \\r", got[2])
 	}
 }
 

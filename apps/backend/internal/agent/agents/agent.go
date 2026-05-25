@@ -266,6 +266,9 @@ type PassthroughConfig struct {
 	// Claude Code enables bracketed-paste *mode* (?2004h) in its Ink TUI; injecting
 	// ESC[200~…ESC[201~ delimiters breaks input (nothing appears in the prompt).
 	DisableBracketedPaste bool
+	// SubmitViaBackslashEnter writes prompt, then "\\", then SubmitSequence as separate
+	// PTY chunks. Claude Code docs: type backslash then Enter to submit programmatic input.
+	SubmitViaBackslashEnter bool
 }
 
 // DefaultBufferMaxBytes is the default maximum buffer size for passthrough mode (2 MB).

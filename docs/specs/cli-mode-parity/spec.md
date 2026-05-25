@@ -36,7 +36,7 @@ When a passthrough session starts for a task that has a description:
 
 No per-agent pattern matchers. The existing idle window is the only readiness signal. If an agent's CLI is unusual enough that an idle window misfires (writes a banner, then waits 5 seconds, then prompts), we make the idle window per-agent-configurable in `PassthroughConfig` (already exists as `IdleTimeout`). No new detection machinery.
 
-For the Claude case: `claude_acp.go` sets `AutoInjectPrompt: true`, `SubmitSequence: "\r"`, and `DisableBracketedPaste: true` (Claude Code already enables bracketed-paste *mode* in its Ink TUI — injecting `ESC[200~`…`ESC[201~` delimiters breaks the prompt). Other passthrough-capable agents use bracketed-paste delimiters for multi-line prompts and stay default-off for auto-inject unless configured.
+For the Claude case: `claude_acp.go` sets `AutoInjectPrompt: true`, `DisableBracketedPaste: true` (Claude Code already enables bracketed-paste *mode* in its Ink TUI — injecting `ESC[200~`…`ESC[201~` delimiters breaks the prompt), and `SubmitViaBackslashEnter: true` (PTY writes: prompt, then `\`, then `\r` per [Claude terminal docs](https://code.claude.com/docs/en/terminal-config)). Ink may still treat programmatic Enter as newline only ([anthropics/claude-code#15553](https://github.com/anthropics/claude-code/issues/15553)) — if auto-submit fails, the user confirms with Enter. Other passthrough-capable agents use bracketed-paste delimiters for multi-line prompts and stay default-off for auto-inject unless configured.
 
 ### Follow-up prompts via PTY stdin (backend route landed; UI surface deferred)
 
