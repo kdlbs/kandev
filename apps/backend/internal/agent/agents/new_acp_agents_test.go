@@ -76,7 +76,16 @@ var newACPAgentSpecs = []struct {
 		inferenceArgv:   []string{"cursor-agent", "acp"},
 		passthroughArgv: []string{"cursor-agent"},
 		installViaNpm:   false,
-		installScript:   "curl https://cursor.com/install -fsS | bash",
+		// Multi-line installer: pulls the script to a tempfile, executes it,
+		// then exports + persists PATH so subsequent prepare-script steps see
+		// cursor-agent. Matches the script in CursorACP.InstallScript().
+		installScript: `set -e
+tmp="$(mktemp)"
+curl -fsS https://cursor.com/install -o "$tmp"
+bash "$tmp"
+rm -f "$tmp"
+export PATH="$HOME/.local/bin:$PATH"
+grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$HOME/.bashrc" 2>/dev/null || echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"`,
 	}},
 	{func() Agent { return NewKimiACP() }, acpAgentSpec{
 		id: "kimi-acp", displayName: "Kimi", detectBinaries: []string{"kimi"},

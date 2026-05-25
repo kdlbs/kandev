@@ -27,10 +27,18 @@ export async function runDev({ repoRoot, backendPort, webPort }: DevOptions): Pr
   const { dbPath, extra } = resolveDevBackendEnv(repoRoot);
 
   if (isProductionDb(dbPath)) {
-    const backupPath = backupProductionDb(dbPath);
-    if (backupPath) {
-      const name = path.basename(backupPath);
-      console.log(`[kandev] backed up production db → ${name}`);
+    try {
+      const backupPath = backupProductionDb(dbPath);
+      if (backupPath) {
+        const name = path.basename(backupPath);
+        console.log(`[kandev] backed up production db → ${name}`);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[kandev] WARNING: failed to back up production db — ${message}`);
+      console.error(
+        `[kandev] continuing without backup; press Ctrl-C if you want to stop and fix this`,
+      );
     }
   }
 

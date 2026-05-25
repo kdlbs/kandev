@@ -113,7 +113,11 @@ func (a *CursorACP) RemoteAuth() *RemoteAuth {
 // ~/.local/bin; make sure that dir is on PATH for the rest of the prepare
 // script and for future shells on the sprite.
 func (a *CursorACP) InstallScript() string {
-	return `curl https://cursor.com/install -fsS | bash
+	return `set -e
+tmp="$(mktemp)"
+curl -fsS https://cursor.com/install -o "$tmp"
+bash "$tmp"
+rm -f "$tmp"
 export PATH="$HOME/.local/bin:$PATH"
 grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$HOME/.bashrc" 2>/dev/null || echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"`
 }

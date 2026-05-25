@@ -16,7 +16,8 @@ const MAX_BACKUPS = 5;
  */
 export function isProductionDb(dbPath: string): boolean {
   const normalized = path.normalize(dbPath);
-  return !normalized.includes(`${path.sep}.kandev-dev${path.sep}`);
+  const segments = normalized.split(path.sep).filter(Boolean);
+  return !segments.includes(".kandev-dev");
 }
 
 /**
@@ -35,6 +36,10 @@ export function backupProductionDb(dbPath: string, homeDir?: string): string | n
   }
 
   const root = homeDir ?? os.homedir();
+  // Backups are always placed under ~/.kandev/data/backups/ (or the
+  // caller-supplied homeDir in tests), even when dbPath points elsewhere.
+  // This matches the dev-prod-db default flow; custom KANDEV_DATABASE_PATH
+  // values are advanced usage where the user is responsible for backup location.
   const dataDir = path.join(root, ".kandev", "data");
   const backupDir = path.join(dataDir, "backups");
   fs.mkdirSync(backupDir, { recursive: true });

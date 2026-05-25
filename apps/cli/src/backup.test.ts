@@ -9,7 +9,7 @@ import { backupProductionDb, isProductionDb } from "./backup";
 describe("isProductionDb", () => {
   it("returns false for dev-isolated paths under .kandev-dev", () => {
     expect(isProductionDb("/repo/.kandev-dev/data/kandev.db")).toBe(false);
-    expect(isProductionDb("/repo/.kandev-dev/data/kandev.db")).toBe(false);
+    expect(isProductionDb("/.kandev-dev/kandev.db")).toBe(false);
   });
 
   it("returns true for production and custom paths", () => {
