@@ -40,7 +40,7 @@ import { useGitOperations } from "@/hooks/use-git-operations";
 import { useSessionGit } from "@/hooks/domains/session/use-session-git";
 import type { FileInfo } from "@/lib/state/slices";
 import { useToast } from "@/components/toast-provider";
-import { useAppStore } from "@/lib/state/store";
+import { useAppStore } from "@/components/state-provider";
 import {
   CommitSummary,
   MobilePRBranchSummary,

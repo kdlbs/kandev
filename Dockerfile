@@ -38,7 +38,6 @@ RUN apt-get update && \
         python3-venv \
         pipx && \
     curl -sL https://aka.ms/InstallAzureCLIDeb | bash && \
-    az extension add --name azure-devops && \
     rm -rf /var/lib/apt/lists/* && \
     PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install apprise
 
@@ -46,6 +45,11 @@ RUN apt-get update && \
 # Home is placed under /data so agent CLI auth state (gh, claude, codex, auggie,
 # copilot, amp, ...) lives on the PV and survives pod restarts and image upgrades.
 RUN userdel -r node && groupadd -r kandev && useradd -r -g kandev -u 1000 -d /data/home -M kandev
+
+# Install azure-devops extension under the runtime user's Azure config dir on /data.
+RUN mkdir -p /data/home/.azure && \
+    AZURE_CONFIG_DIR=/data/home/.azure az extension add --name azure-devops && \
+    chown -R kandev:kandev /data/home/.azure
 
 # Create app directory structure matching what `kandev start` expects:
 #   /app/apps/backend/bin/kandev

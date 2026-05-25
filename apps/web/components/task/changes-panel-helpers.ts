@@ -212,3 +212,46 @@ export function getBaseBranchDisplay(baseBranch: string | undefined): string {
 export function isMultiRepoCommits(commits: { repository_name?: string }[]): boolean {
   return commits.some((c) => !!c.repository_name);
 }
+
+type TaskPRUrlInput = {
+  pr_url?: string;
+  repository_id?: string;
+};
+
+/** Workspace repository id → display name for multi-repo PR/commit grouping. */
+export function buildRepoNameById(
+  reposByWorkspace: Record<string, Array<{ id: string; name: string }>>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const list of Object.values(reposByWorkspace)) {
+    for (const r of list) {
+      out[r.id] = r.name;
+    }
+  }
+  return out;
+}
+
+/** Merge synced TaskPR URLs and client-only pending PR URLs by repo display name. */
+export function buildPrByRepoMap(
+  taskPRs: TaskPRUrlInput[] | undefined,
+  repoNameById: Record<string, string>,
+  pendingByRepo: Record<string, string> | undefined,
+): Record<string, string | undefined> {
+  const map: Record<string, string | undefined> = {};
+  if (taskPRs) {
+    for (const pr of taskPRs) {
+      if (!pr.pr_url) continue;
+      const repoKey = pr.repository_id ? (repoNameById[pr.repository_id] ?? "") : "";
+      map[repoKey] = map[repoKey] ?? pr.pr_url;
+    }
+  }
+  if (pendingByRepo) {
+    for (const [repoKey, url] of Object.entries(pendingByRepo)) {
+      if (url) map[repoKey] = map[repoKey] ?? url;
+    }
+  }
+  if (!map[""] && taskPRs?.[0]?.pr_url) {
+    map[""] = taskPRs[0].pr_url;
+  }
+  return map;
+}

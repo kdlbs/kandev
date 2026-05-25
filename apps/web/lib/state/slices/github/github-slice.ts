@@ -63,7 +63,8 @@ function createTaskPRActions(
         if (idx >= 0) existing[idx] = pr;
         else existing.push(pr);
         draft.taskPRs.byTaskId[taskId] = existing;
-        clearPendingPrUrlForRepo(draft, taskId, repoKey);
+        // Pending URLs are keyed by repo display name; clear all when TaskPR sync lands.
+        delete draft.pendingPrUrlByTaskId.byTaskId[taskId];
       }),
     setPendingPrUrlForTask: (taskId, repoKey, prUrl) =>
       set((draft) => {
