@@ -91,7 +91,6 @@ func (s *LinearWatcherSource) AutoStartParams(evt any) AutoStartParams {
 	return AutoStartParams{
 		AgentProfileID:    e.AgentProfileID,
 		ExecutorProfileID: e.ExecutorProfileID,
-		Prompt:            interpolateLinearPrompt(e.Prompt, e.Issue),
 		WorkflowStepID:    e.WorkflowStepID,
 	}
 }

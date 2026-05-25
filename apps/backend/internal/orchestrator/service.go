@@ -265,9 +265,15 @@ type Service struct {
 
 	// Jira service for issue watch dedup operations
 	jiraService JiraService
+	// jiraSource adapts jiraService onto WatcherSource. Built once in
+	// SetJiraService so handlers don't allocate per bus event.
+	jiraSource *JiraWatcherSource
 
 	// Linear service for issue watch dedup operations
 	linearService LinearService
+	// linearSource adapts linearService onto WatcherSource. Built once in
+	// SetLinearService so handlers don't allocate per bus event.
+	linearSource *LinearWatcherSource
 
 	// Repository resolver for cloning + finding/creating repos for review tasks
 	repositoryResolver RepositoryResolver

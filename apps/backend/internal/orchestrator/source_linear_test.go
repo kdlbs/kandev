@@ -172,7 +172,4 @@ func TestLinearSource_AutoStartParams(t *testing.T) {
 	if p.WorkflowStepID != "step-1" {
 		t.Errorf("step id wrong: %q", p.WorkflowStepID)
 	}
-	if p.Prompt != "Work on ENG-1: Bug" {
-		t.Errorf("prompt should be interpolated, got %q", p.Prompt)
-	}
 }

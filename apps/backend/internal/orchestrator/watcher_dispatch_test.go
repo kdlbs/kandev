@@ -100,16 +100,18 @@ func newTestCoordinator(t *testing.T, tc *fakeTaskCreator, autoStart bool, start
 // taskStarter is the indirection used inside Coordinator so tests can
 // inspect whether StartTask was invoked.
 type fakeTaskStarter struct {
-	called  int
-	gotID   string
-	gotStep string
-	err     error
+	called    int
+	gotID     string
+	gotStep   string
+	gotPrompt string
+	err       error
 }
 
-func (f *fakeTaskStarter) Start(_ context.Context, taskID, stepID string, _ AutoStartParams) error {
+func (f *fakeTaskStarter) Start(_ context.Context, taskID, stepID, prompt string, _ AutoStartParams) error {
 	f.called++
 	f.gotID = taskID
 	f.gotStep = stepID
+	f.gotPrompt = prompt
 	return f.err
 }
 
@@ -127,11 +129,14 @@ func TestCoordinator_Dispatch_HappyPath(t *testing.T) {
 		autoStart: AutoStartParams{
 			AgentProfileID:    "agent-1",
 			ExecutorProfileID: "exec-1",
-			Prompt:            "body",
 			WorkflowStepID:    "step-1",
 		},
 	}
-	tc := &fakeTaskCreator{}
+	// returned.Description must drive auto-start prompt; if the created
+	// task's description ever diverges from the request's (e.g. service-
+	// side normalisation), auto-start MUST use the persisted body — pin
+	// that contract here.
+	tc := &fakeTaskCreator{returned: &models.Task{ID: "task-1", Description: "persisted body"}}
 	starter := &fakeTaskStarter{}
 	c := newTestCoordinator(t, tc, true, starter)
 
@@ -152,6 +157,9 @@ func TestCoordinator_Dispatch_HappyPath(t *testing.T) {
 	}
 	if starter.gotID != "task-1" || starter.gotStep != "step-1" {
 		t.Fatalf("auto-start received wrong args: id=%s step=%s", starter.gotID, starter.gotStep)
+	}
+	if starter.gotPrompt != "persisted body" {
+		t.Fatalf("auto-start prompt must come from created task.Description, got %q", starter.gotPrompt)
 	}
 }
 

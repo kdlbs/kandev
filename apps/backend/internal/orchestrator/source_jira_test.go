@@ -158,7 +158,4 @@ func TestJiraSource_AutoStartParams(t *testing.T) {
 	if p.WorkflowStepID != "step-1" {
 		t.Errorf("step id wrong: %q", p.WorkflowStepID)
 	}
-	if p.Prompt != "Pick up PROJ-1: Bug" {
-		t.Errorf("prompt should be interpolated, got %q", p.Prompt)
-	}
 }

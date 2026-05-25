@@ -2,18 +2,11 @@ package orchestrator
 
 import (
 	"context"
+	"sync"
 
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
-)
-
-// Log field keys repeated across coordinator log calls. Hoisted to file
-// constants so a typo would be a compile error rather than a silent log-
-// search miss.
-const (
-	logFieldSource = "source"
-	logFieldTaskID = "task_id"
 )
 
 // WatcherDispatchCoordinator owns the cross-integration pipeline that turns
@@ -30,24 +23,45 @@ const (
 // On any failure between Reserve and a successful CreateIssueTask, Release
 // is invoked so the dedup row does not strand the issue.
 type WatcherDispatchCoordinator struct {
+	// mu guards taskCreator. SetTaskCreator may be called more than once at
+	// boot (tests in particular swap creators between scenarios), and
+	// Dispatch reads from background goroutines spawned by
+	// dispatchWatcherEvent — so the field needs synchronisation.
+	mu              sync.RWMutex
 	taskCreator     IssueTaskCreator
 	startTask       taskStarter
 	shouldAutoStart func(ctx context.Context, workflowStepID string) bool
 	logger          *logger.Logger
 }
 
+// SetTaskCreator atomically updates the task creator the coordinator
+// dispatches to. Safe to call concurrently with Dispatch.
+func (c *WatcherDispatchCoordinator) SetTaskCreator(tc IssueTaskCreator) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.taskCreator = tc
+}
+
+func (c *WatcherDispatchCoordinator) getTaskCreator() IssueTaskCreator {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.taskCreator
+}
+
 // taskStarter wraps Service.StartTask so the coordinator can be tested
 // without spinning up the full orchestrator service.
 type taskStarter interface {
-	Start(ctx context.Context, taskID, workflowStepID string, params AutoStartParams) error
+	Start(ctx context.Context, taskID, workflowStepID, prompt string, params AutoStartParams) error
 }
 
 // AutoStartParams is the data a source contributes when the resulting task's
-// workflow step has auto-start enabled.
+// workflow step has auto-start enabled. The prompt is intentionally NOT
+// included here — the coordinator passes the created task's Description
+// directly so auto-start always uses the persisted task body, matching the
+// legacy createXIssueTask call sites byte-for-byte.
 type AutoStartParams struct {
 	AgentProfileID    string
 	ExecutorProfileID string
-	Prompt            string
 	WorkflowStepID    string
 }
 
@@ -90,57 +104,57 @@ func (c *WatcherDispatchCoordinator) Dispatch(ctx context.Context, src WatcherSo
 	reserved, err := src.Reserve(ctx, evt)
 	if err != nil {
 		c.logger.Error("watcher dispatch: reserve failed",
-			zap.String(logFieldSource, src.Name()), zap.Error(err))
+			zap.String("source", src.Name()), zap.Error(err))
 		return
 	}
 	if !reserved {
 		c.logger.Debug("watcher dispatch: already reserved by concurrent handler",
-			zap.String(logFieldSource, src.Name()))
+			zap.String("source", src.Name()))
 		return
 	}
 
 	req, err := src.BuildTaskRequest(evt)
 	if err != nil {
 		c.logger.Error("watcher dispatch: build task request failed",
-			zap.String(logFieldSource, src.Name()), zap.Error(err))
+			zap.String("source", src.Name()), zap.Error(err))
 		src.Release(ctx, evt)
 		return
 	}
 
-	task, err := c.taskCreator.CreateIssueTask(ctx, req)
+	task, err := c.getTaskCreator().CreateIssueTask(ctx, req)
 	if err != nil {
 		c.logger.Error("watcher dispatch: create issue task failed",
-			zap.String(logFieldSource, src.Name()), zap.Error(err))
+			zap.String("source", src.Name()), zap.Error(err))
 		src.Release(ctx, evt)
 		return
 	}
 
 	if err := src.AttachTaskID(ctx, evt, task.ID); err != nil {
 		c.logger.Error("watcher dispatch: attach task id failed",
-			zap.String(logFieldSource, src.Name()),
-			zap.String(logFieldTaskID, task.ID),
+			zap.String("source", src.Name()),
+			zap.String("task_id", task.ID),
 			zap.Error(err))
 		// Do NOT release here — matches existing Linear/Jira behaviour:
 		// attach is a best-effort step, the task is already created.
 	}
 
 	c.logger.Info("watcher dispatch: created issue task",
-		zap.String(logFieldSource, src.Name()),
-		zap.String(logFieldTaskID, task.ID))
+		zap.String("source", src.Name()),
+		zap.String("task_id", task.ID))
 
 	if !c.shouldAutoStart(ctx, req.WorkflowStepID) {
 		return
 	}
 
 	params := src.AutoStartParams(evt)
-	if err := c.startTask.Start(ctx, task.ID, req.WorkflowStepID, params); err != nil {
+	if err := c.startTask.Start(ctx, task.ID, req.WorkflowStepID, task.Description, params); err != nil {
 		c.logger.Error("watcher dispatch: auto-start failed",
-			zap.String(logFieldSource, src.Name()),
-			zap.String(logFieldTaskID, task.ID),
+			zap.String("source", src.Name()),
+			zap.String("task_id", task.ID),
 			zap.Error(err))
 		return
 	}
 	c.logger.Info("watcher dispatch: auto-started issue task",
-		zap.String(logFieldSource, src.Name()),
-		zap.String(logFieldTaskID, task.ID))
+		zap.String("source", src.Name()),
+		zap.String("task_id", task.ID))
 }

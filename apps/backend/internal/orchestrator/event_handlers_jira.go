@@ -22,9 +22,12 @@ type JiraService interface {
 }
 
 // SetJiraService wires the JIRA dedup helpers into the orchestrator so
-// jira-watch handlers can claim ticket slots before creating tasks.
+// jira-watch handlers can claim ticket slots before creating tasks. Also
+// (re)builds the cached JiraWatcherSource so handleNewJiraIssue can
+// dispatch without allocating per event.
 func (s *Service) SetJiraService(j JiraService) {
 	s.jiraService = j
+	s.jiraSource = NewJiraWatcherSource(j, s.logger)
 }
 
 // subscribeJiraEvents wires the JIRA event handlers onto the bus. Called from
@@ -46,8 +49,13 @@ func (s *Service) handleNewJiraIssue(ctx context.Context, event *bus.Event) erro
 	if !ok || evt == nil || evt.Issue == nil {
 		return nil
 	}
-	s.dispatchWatcherEvent(ctx, "jira",
-		NewJiraWatcherSource(s.jiraService, s.logger), evt,
+	src := s.jiraSource
+	if src == nil {
+		// SetJiraService was never called; fall back to a fail-open
+		// source so behaviour matches the pre-cache code path.
+		src = NewJiraWatcherSource(nil, s.logger)
+	}
+	s.dispatchWatcherEvent(ctx, "jira", src, evt,
 		zap.String("issue_watch_id", evt.IssueWatchID),
 		zap.String("issue_key", evt.Issue.Key))
 	return nil

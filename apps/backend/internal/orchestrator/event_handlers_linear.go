@@ -21,9 +21,12 @@ type LinearService interface {
 }
 
 // SetLinearService wires the Linear dedup helpers into the orchestrator so
-// linear-watch handlers can claim issue slots before creating tasks.
+// linear-watch handlers can claim issue slots before creating tasks. Also
+// (re)builds the cached LinearWatcherSource so handleNewLinearIssue can
+// dispatch without allocating per event.
 func (s *Service) SetLinearService(l LinearService) {
 	s.linearService = l
+	s.linearSource = NewLinearWatcherSource(l, s.logger)
 }
 
 // subscribeLinearEvents wires the Linear event handlers onto the bus.
@@ -48,8 +51,13 @@ func (s *Service) handleNewLinearIssue(ctx context.Context, event *bus.Event) er
 	if !ok || evt == nil || evt.Issue == nil {
 		return nil
 	}
-	s.dispatchWatcherEvent(ctx, "linear",
-		NewLinearWatcherSource(s.linearService, s.logger), evt,
+	src := s.linearSource
+	if src == nil {
+		// SetLinearService was never called; fall back to a fail-open
+		// source so behaviour matches the pre-cache code path.
+		src = NewLinearWatcherSource(nil, s.logger)
+	}
+	s.dispatchWatcherEvent(ctx, "linear", src, evt,
 		zap.String("issue_watch_id", evt.IssueWatchID),
 		zap.String("identifier", evt.Issue.Identifier))
 	return nil

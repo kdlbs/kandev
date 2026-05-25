@@ -90,7 +90,6 @@ func (s *JiraWatcherSource) AutoStartParams(evt any) AutoStartParams {
 	return AutoStartParams{
 		AgentProfileID:    e.AgentProfileID,
 		ExecutorProfileID: e.ExecutorProfileID,
-		Prompt:            interpolateJiraPrompt(e.Prompt, e.Issue),
 		WorkflowStepID:    e.WorkflowStepID,
 	}
 }
