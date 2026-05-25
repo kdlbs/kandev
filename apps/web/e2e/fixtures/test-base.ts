@@ -244,6 +244,7 @@ async function setupPage(page: Page, backend: BackendContext, seedData: SeedData
       // Set the window global that getBackendConfig() reads for API/WS connections
       // (e2e tests run frontend and backend on separate ports, like dev mode)
       window.__KANDEV_API_PORT = backendPort;
+      window.__KANDEV_E2E_EXPOSE_STORE__ = true;
 
       // Replace native Notification with a capture stub so e2e runs never
       // pop OS-level toasts on the developer's machine. Tests that want to

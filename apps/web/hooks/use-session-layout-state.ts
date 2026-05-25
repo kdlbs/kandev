@@ -7,6 +7,7 @@ import { getPlanLastSeen } from "@/lib/local-storage";
 import { executeApprove } from "@/lib/services/session-approve";
 import type { OpenFileTab } from "@/lib/types/backend";
 import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
+import { isPassthroughSession } from "@/lib/session/is-passthrough-session";
 
 export type SelectedDiff = {
   path: string;
@@ -62,22 +63,10 @@ export function useSessionLayoutState(options: UseSessionLayoutStateOptions = {}
   // --- Agent state ---
   const isAgentWorking = activeSession?.state === "STARTING" || activeSession?.state === "RUNNING";
 
-  // session.is_passthrough is the source of truth — matches StartAgentProcess
-  // routing in manager_startup.go and what dockview-desktop-layout.tsx reads.
-  // Honor any explicit value (including false) over the snapshot fallback.
-  // The snapshot path remains for legacy rows pre-dating the column and for
-  // the brief window when a state_changed WS event updates is_passthrough
-  // before the full session has been hydrated (see ws/handlers/agent-session.ts
-  // where snapshot writes are guarded by a truthy check while is_passthrough
-  // writes are guarded by !== undefined — partial events can land one without
-  // the other).
-  const isPassthroughMode = useMemo(() => {
-    if (activeSession?.is_passthrough !== undefined) return activeSession.is_passthrough;
-    if (!activeSession?.agent_profile_snapshot) return false;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const snapshot = activeSession.agent_profile_snapshot as any;
-    return snapshot?.cli_passthrough === true;
-  }, [activeSession?.is_passthrough, activeSession?.agent_profile_snapshot]);
+  const isPassthroughMode = useMemo(
+    () => isPassthroughSession(activeSession),
+    [activeSession],
+  );
 
   const { selectedDiff, handleSelectDiff, handleClearSelectedDiff } = useSelectedDiffState();
   const { openFileRequest, handleOpenFile, handleFileOpenHandled } = useOpenFileRequestState();

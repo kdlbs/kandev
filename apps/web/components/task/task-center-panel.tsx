@@ -27,6 +27,7 @@ import {
   getActiveTabForSession,
   setActiveTabForSession,
 } from "@/lib/local-storage";
+import { isPassthroughSession } from "@/lib/session/is-passthrough-session";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import { calculateHash } from "@/lib/utils/file-diff";
@@ -52,12 +53,10 @@ function useSessionApprove(activeSessionId: string | null, activeTaskId: string 
   );
   const setTaskSession = useAppStore((state) => state.setTaskSession);
   const isAgentWorking = activeSession?.state === "STARTING" || activeSession?.state === "RUNNING";
-  const isPassthroughMode = useMemo(() => {
-    if (!activeSession?.agent_profile_snapshot) return false;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const snapshot = activeSession.agent_profile_snapshot as any;
-    return snapshot?.cli_passthrough === true;
-  }, [activeSession?.agent_profile_snapshot]);
+  const isPassthroughMode = useMemo(
+    () => isPassthroughSession(activeSession),
+    [activeSession],
+  );
   const showApproveButton =
     !!activeSession?.review_status && activeSession.review_status !== "approved" && !isAgentWorking;
   const handleApprove = useCallback(async () => {

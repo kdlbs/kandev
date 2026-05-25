@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import type { StoreApi } from "zustand";
 import { useStore } from "zustand";
 import type { AppState, StoreProviderProps } from "@/lib/state/store";
@@ -8,8 +8,20 @@ import { createAppStore } from "@/lib/state/store";
 
 const StoreContext = createContext<StoreApi<AppState> | null>(null);
 
+type E2EWindow = Window & {
+  __KANDEV_E2E_EXPOSE_STORE__?: boolean;
+  __KANDEV_E2E_STORE__?: StoreApi<AppState>;
+};
+
 export function StateProvider({ children, initialState }: StoreProviderProps) {
   const [store] = useState(() => createAppStore(initialState));
+
+  useEffect(() => {
+    const win = window as E2EWindow;
+    if (win.__KANDEV_E2E_EXPOSE_STORE__) {
+      win.__KANDEV_E2E_STORE__ = store;
+    }
+  }, [store]);
 
   return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;
 }
