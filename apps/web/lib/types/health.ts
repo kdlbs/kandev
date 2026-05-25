@@ -10,7 +10,14 @@ export type HealthIssue = {
   fix_label: string;
 };
 
+export type HealthCheckSummary = {
+  name: string;
+  category: string;
+  passing: boolean;
+};
+
 export type SystemHealthResponse = {
   healthy: boolean;
   issues: HealthIssue[];
+  checks: HealthCheckSummary[];
 };

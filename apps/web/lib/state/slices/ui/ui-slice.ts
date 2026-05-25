@@ -113,7 +113,7 @@ export const defaultUIState: UISliceState = {
   mobileSession: { activePanelBySessionId: {}, isTaskSwitcherOpen: false },
   chatInput: { planModeBySessionId: {} },
   documentPanel: { activeDocumentBySessionId: {} },
-  systemHealth: { issues: [], healthy: true, loaded: false, loading: false },
+  systemHealth: { issues: [], checks: [], healthy: true, loaded: false, loading: false },
   quickChat: { isOpen: false, sessions: [], activeSessionId: null },
   configChat: { isOpen: false, sessions: [], activeSessionId: null, workspaceId: null },
   sessionFailureNotification: null,
@@ -431,6 +431,7 @@ function buildSystemHealthActions(set: ImmerSet) {
     setSystemHealth: (response: SystemHealthResponse) =>
       set((draft) => {
         draft.systemHealth.issues = response.issues;
+        draft.systemHealth.checks = response.checks ?? [];
         draft.systemHealth.healthy = response.healthy;
         draft.systemHealth.loaded = true;
       }),

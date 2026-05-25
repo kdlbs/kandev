@@ -87,6 +87,14 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 |---|---|
 | [comment-markdown](ui/comment-markdown.md) | shipped |
 
+## system-page/ — operational diagnostics & maintenance UI
+
+System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance, backups, logs, updates, OSS licenses, and about.
+
+| Spec | Status |
+|---|---|
+| [system-page](system-page/spec.md) | draft |
+
 ---
 
 ## Standalone

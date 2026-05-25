@@ -61,6 +61,7 @@ import (
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/slack"
 	spriteshandlers "github.com/kandev/kandev/internal/sprites"
+	systemsvc "github.com/kandev/kandev/internal/system"
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -425,6 +426,7 @@ type routeParams struct {
 	hostUtilityMgr          *hostutility.Manager
 	eventBus                bus.EventBus
 	services                *Services
+	systemSvc               *systemsvc.Service
 	agentSettingsController *agentsettingscontroller.Controller
 	agentSettingsRepo       settingsstore.Repository
 	agentList               taskhandlers.AgentLister
@@ -747,6 +749,7 @@ func registerSecondaryRoutes(
 	p.log.Debug("Registered Docker management handlers (HTTP)")
 
 	registerHealthRoutes(p)
+	registerSystemRoutes(p)
 
 	if p.repoCloner != nil {
 		ikHandler := improvekandev.NewHandler(p.taskSvc, p.repoCloner, p.version, p.log)
@@ -804,6 +807,18 @@ func dockerTaskTitleProvider(taskRepo *sqliterepo.Repository, log *logger.Logger
 		}
 		return task.Title, task.Title != ""
 	}
+}
+
+// registerSystemRoutes mounts the System pages backend onto /api/v1/system/*.
+// The system service is constructed upstream (startGatewayAndServe) so the
+// updates-poller goroutine can be started with the main run context; here we
+// only register HTTP handlers. The systemSvc field is nil during partial
+// builds (tests, CLI subcommands) — registration is then a no-op.
+func registerSystemRoutes(p routeParams) {
+	if p.systemSvc == nil {
+		return
+	}
+	p.systemSvc.RegisterRoutes(p.router, p.log)
 }
 
 // registerHealthRoutes sets up the system health endpoint with all health checkers.

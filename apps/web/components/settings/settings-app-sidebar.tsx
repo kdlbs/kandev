@@ -16,13 +16,20 @@ import {
   IconBrandGitlab,
   IconBrandSlack,
   IconHexagon,
-  IconSparkles,
   IconWand,
   IconGitBranch,
   IconArrowsShuffle,
   IconTicket,
   IconPlugConnected,
   IconBolt,
+  IconActivity,
+  IconDatabase,
+  IconArchive,
+  IconFileText,
+  IconRefresh,
+  IconScale,
+  IconInfoCircle,
+  IconServerCog,
 } from "@tabler/icons-react";
 import {
   Sidebar,
@@ -31,6 +38,7 @@ import {
   SidebarGroupLabel,
   SidebarGroupContent,
   SidebarMenu,
+  SidebarMenuBadge,
   SidebarMenuItem,
   SidebarMenuButton,
   SidebarMenuSub,
@@ -43,6 +51,7 @@ import { ScrollArea } from "@kandev/ui/scroll-area";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import { useAppStore } from "@/components/state-provider";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
+import { useSystemBadgeCount } from "@/hooks/domains/system/use-system-badge-count";
 import { AgentLogo } from "@/components/agent-logo";
 import { getExecutorIcon } from "@/lib/executor-icons";
 import { getCapabilityWarning } from "@/lib/capability-warning";
@@ -149,6 +158,53 @@ function WorkspacesSidebarSection({ pathname, workspaces }: WorkspacesSidebarSec
           })}
         </SidebarMenuSub>
       )}
+    </SidebarMenuItem>
+  );
+}
+
+function SystemSidebarSection({ pathname }: { pathname: string }) {
+  const items: Array<{ href: string; label: string; Icon: typeof IconBrandGithub }> = [
+    { href: "/settings/system/status", label: "Status", Icon: IconActivity },
+    { href: "/settings/system/database", label: "Database", Icon: IconDatabase },
+    { href: "/settings/system/backups", label: "Backups", Icon: IconArchive },
+    { href: "/settings/system/logs", label: "Logs", Icon: IconFileText },
+    { href: "/settings/system/updates", label: "Updates", Icon: IconRefresh },
+    { href: "/settings/system/about", label: "About", Icon: IconInfoCircle },
+    { href: "/settings/system/licenses", label: "Licenses", Icon: IconScale },
+  ];
+  const isSystem = pathname.startsWith("/settings/system");
+  // Sum of non-info health issues + 1 when an update is available. Surfaced
+  // on the group row and the Status child entry so the user gets a hint
+  // without having to open System.
+  const badgeCount = useSystemBadgeCount();
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton asChild tooltip="System" isActive={isSystem}>
+        <Link href="/settings/system/status">
+          <IconServerCog className="h-4 w-4" />
+          <span>System</span>
+        </Link>
+      </SidebarMenuButton>
+      {badgeCount > 0 && (
+        <SidebarMenuBadge data-testid="system-sidebar-badge">{badgeCount}</SidebarMenuBadge>
+      )}
+      <SidebarMenuSub className="ml-3 mt-1">
+        {items.map(({ href, label, Icon }) => (
+          <SidebarMenuSubItem key={href}>
+            <SidebarMenuSubButton asChild size="sm" isActive={pathname === href}>
+              <Link href={href}>
+                <Icon className="h-3.5 w-3.5" />
+                <span>{label}</span>
+              </Link>
+            </SidebarMenuSubButton>
+            {href === "/settings/system/status" && badgeCount > 0 && (
+              <SidebarMenuBadge data-testid="system-sidebar-status-badge">
+                {badgeCount}
+              </SidebarMenuBadge>
+            )}
+          </SidebarMenuSubItem>
+        ))}
+      </SidebarMenuSub>
     </SidebarMenuItem>
   );
 }
@@ -378,15 +434,8 @@ export function SettingsAppSidebar() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
 
-                {/* Changelog */}
-                <SidebarMenuItem>
-                  <SidebarMenuButton asChild isActive={pathname === "/settings/changelog"}>
-                    <Link href="/settings/changelog">
-                      <IconSparkles className="h-4 w-4" />
-                      <span>Changelog</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
+                {/* System */}
+                <SystemSidebarSection pathname={pathname} />
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
