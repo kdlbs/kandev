@@ -39,14 +39,15 @@ export function isAgentConfiguredOnExecutor(
 
   const spec = authSpecs.find((s) => s.id === agent.agent_name);
   if (!spec) return false;
-  if (spec.methods.length === 0) return true;
+  const methods = spec.methods ?? [];
+  if (methods.length === 0) return true;
 
   const credentials = new Set(parseJSON<string[]>(executorProfile.config?.remote_credentials, []));
-  if (spec.methods.some((m) => m.type !== "env" && credentials.has(m.method_id))) return true;
+  if (methods.some((m) => m.type !== "env" && credentials.has(m.method_id))) return true;
 
   const secrets = parseJSON<Record<string, string | null>>(
     executorProfile.config?.remote_auth_secrets,
     {},
   );
-  return spec.methods.some((m) => m.type === "env" && secrets[m.method_id]);
+  return methods.some((m) => m.type === "env" && secrets[m.method_id]);
 }
