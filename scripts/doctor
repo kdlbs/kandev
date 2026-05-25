@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# doctor — idempotently wire up pre-commit framework into git's hook system.
+# (.pre-commit-config.yaml at the repo root drives it.)
+#
+# Silent on success. If pre-commit is missing, prints a one-line note and
+# exits 0 so callers (e.g. `make dev`) don't block on an optional tool.
+# CI still runs the real linters.
+#
+# Quirks handled:
+#   - pre-commit refuses to install when core.hooksPath is set, even when
+#     it's set to the default location (a leftover from a stale setup).
+#     Detect that exact case and unset it before installing.
+#   - core.hooksPath is shared between the main repo and every worktree,
+#     so a single install covers all of them.
+
+set -euo pipefail
+
+if ! command -v pre-commit >/dev/null 2>&1; then
+	echo "⚠  pre-commit not found on PATH — install with 'pip install pre-commit' to enable hook-based format/lint on commit."
+	exit 0
+fi
+
+default_hooks="$(git rev-parse --git-common-dir)/hooks"
+current="$(git config --get core.hooksPath 2>/dev/null || true)"
+
+if [ -n "$current" ] && [ "$current" = "$default_hooks" ]; then
+	git config --unset core.hooksPath 2>/dev/null || true
+fi
+
+pre-commit install -t pre-commit -t commit-msg --overwrite >/dev/null 2>&1 || true
