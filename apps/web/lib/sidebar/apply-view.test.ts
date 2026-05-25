@@ -270,6 +270,19 @@ describe("applyGroup", () => {
     expect(applyGroup(tasks, "executorType").groups).toHaveLength(2);
   });
 
+  it("groups by real task state instead of the action bucket", () => {
+    const tasks = [
+      task({ id: "done", state: "COMPLETED", sessionState: "COMPLETED" }),
+      task({ id: "review", state: "REVIEW", sessionState: "WAITING_FOR_INPUT" }),
+    ];
+    const groupsByKey = new Map(applyGroup(tasks, "state").groups.map((g) => [g.key, g]));
+
+    expect(groupsByKey.get("COMPLETED")?.label).toBe("Completed");
+    expect(groupsByKey.get("COMPLETED")?.tasks.map((t) => t.id)).toEqual(["done"]);
+    expect(groupsByKey.get("REVIEW")?.label).toBe("Review");
+    expect(groupsByKey.get("REVIEW")?.tasks.map((t) => t.id)).toEqual(["review"]);
+  });
+
   it("buckets missing group-key value into Unassigned", () => {
     const tasks = [task({ id: "a", workflowId: "wf1" }), task({ id: "b" })];
     const out = applyGroup(tasks, "workflow");

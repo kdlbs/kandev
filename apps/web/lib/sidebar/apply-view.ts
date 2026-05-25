@@ -1,6 +1,7 @@
 import { classifyTask, type TaskBucket } from "@/components/task/task-classify";
 import type { TaskSwitcherItem } from "@/components/task/task-switcher";
 import { getExecutorLabel } from "@/lib/executor-icons";
+import { formatTaskStateLabel } from "@/lib/ui/state-labels";
 import type {
   FilterClause,
   FilterDimension,
@@ -153,6 +154,11 @@ const MULTI_REPO_LABEL = "Multi-repo";
 
 type GroupExtractor = (task: TaskSwitcherItem) => { key: string; label: string };
 
+function getTaskStateGroup(task: TaskSwitcherItem): { key: string; label: string } {
+  if (!task.state) return { key: "__not_started__", label: formatTaskStateLabel(undefined) };
+  return { key: task.state, label: formatTaskStateLabel(task.state) };
+}
+
 const groupExtractors: Record<Exclude<GroupKey, "none">, GroupExtractor> = {
   repository: (t) => {
     if (t.repositories && t.repositories.length > 1) {
@@ -177,10 +183,7 @@ const groupExtractors: Record<Exclude<GroupKey, "none">, GroupExtractor> = {
     }
     return { key: "__unassigned__", label: UNASSIGNED_LABEL };
   },
-  state: (t) => {
-    const bucket = getStateBucket(t);
-    return { key: bucket, label: bucket };
-  },
+  state: getTaskStateGroup,
 };
 
 function separateSubtasks(tasks: TaskSwitcherItem[]): {
