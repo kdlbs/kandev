@@ -20,13 +20,9 @@ type PassthroughStdinChunk struct {
 	DelayBefore time.Duration
 }
 
-// PassthroughSubmitSequence returns the byte sequence to append after passthrough stdin
-// text. When bracketedPaste is true and SubmitAfterBracketedPaste is set on the config,
-// that override is used (Claude Code often needs "\r\n" after paste end).
-func PassthroughSubmitSequence(cfg PassthroughConfig, bracketedPaste bool) string {
-	if bracketedPaste && cfg.SubmitAfterBracketedPaste != "" {
-		return cfg.SubmitAfterBracketedPaste
-	}
+// PassthroughSubmitSequence returns the byte sequence to append after passthrough
+// stdin text. Empty SubmitSequence inherits DefaultPassthroughSubmitSequence ("\r").
+func PassthroughSubmitSequence(cfg PassthroughConfig) string {
 	return EffectiveSubmitSequence(cfg.SubmitSequence)
 }
 
@@ -34,10 +30,10 @@ func PassthroughSubmitSequence(cfg PassthroughConfig, bracketedPaste bool) strin
 // Multi-line prompts use bracketed paste so embedded newlines are not treated as
 // premature Enter presses, unless DisableBracketedPaste is set (Claude Code).
 func BuildPassthroughPayload(prompt string, cfg PassthroughConfig) string {
+	submit := PassthroughSubmitSequence(cfg)
 	if cfg.DisableBracketedPaste || !strings.Contains(prompt, "\n") {
-		return prompt + PassthroughSubmitSequence(cfg, false)
+		return prompt + submit
 	}
-	submit := PassthroughSubmitSequence(cfg, true)
 	return bracketedPasteStart + prompt + bracketedPasteEnd + submit
 }
 
@@ -49,14 +45,13 @@ func BuildPassthroughPayload(prompt string, cfg PassthroughConfig) string {
 // OpenCode).
 func PlanPassthroughStdinChunks(prompt string, cfg PassthroughConfig) []PassthroughStdinChunk {
 	if cfg.SubmitDelay > 0 {
-		submit := PassthroughSubmitSequence(cfg, false)
 		body := prompt
 		if !cfg.DisableBracketedPaste && strings.Contains(prompt, "\n") {
 			body = bracketedPasteStart + prompt + bracketedPasteEnd
 		}
 		return []PassthroughStdinChunk{
 			{Data: body},
-			{Data: submit, DelayBefore: cfg.SubmitDelay},
+			{Data: PassthroughSubmitSequence(cfg), DelayBefore: cfg.SubmitDelay},
 		}
 	}
 	return []PassthroughStdinChunk{{Data: BuildPassthroughPayload(prompt, cfg)}}

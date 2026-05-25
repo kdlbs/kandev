@@ -259,9 +259,6 @@ type PassthroughConfig struct {
 	// and when routing chat-compose messages to the PTY. "\r" for most TUIs.
 	// Empty inherits DefaultPassthroughSubmitSequence at PTY write sites.
 	SubmitSequence string
-	// SubmitAfterBracketedPaste overrides SubmitSequence when the prompt was
-	// wrapped in bracketed paste (multi-line).
-	SubmitAfterBracketedPaste string
 	// DisableBracketedPaste sends prompt bytes verbatim (plus SubmitSequence).
 	// Claude Code enables bracketed-paste *mode* (?2004h) in its Ink TUI; injecting
 	// ESC[200~…ESC[201~ delimiters breaks input (nothing appears in the prompt).

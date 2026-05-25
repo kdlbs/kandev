@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/task/models"
@@ -217,6 +218,50 @@ func TestExecutor_Prompt_PassthroughHonoursDynamicSubmitSequence(t *testing.T) {
 	want := "hi\n"
 	if agentManager.writePassthroughStdinCalls[0].Data != want {
 		t.Errorf("PTY payload = %q, want %q (dynamic SubmitSequence not applied)", agentManager.writePassthroughStdinCalls[0].Data, want)
+	}
+}
+
+// TestExecutor_Prompt_PassthroughSubmitDelaySplitsWrites verifies the compose-box
+// follow-up path (Executor.Prompt → promptPassthrough) honors SubmitDelay: the
+// body and submit byte must arrive as two separate WritePassthroughStdin calls
+// with the body first and the submit ("\r") second, so Claude's Ink TUI sees the
+// trailing Enter as a discrete keystroke instead of absorbing it into a paste
+// burst. The auto-inject path is covered by manager_passthrough_autoinject_test.go;
+// this guards the executor path against regressing back to a single atomic write.
+func TestExecutor_Prompt_PassthroughSubmitDelaySplitsWrites(t *testing.T) {
+	repo := newMockRepository()
+	agentManager := &mockAgentManager{
+		isPassthroughSessionFunc: func(_ context.Context, _ string) bool { return true },
+		resolvePassthroughConfigFunc: func(_ context.Context, _ string) (agents.PassthroughConfig, error) {
+			return agents.PassthroughConfig{
+				Supported:             true,
+				SubmitSequence:        "\r",
+				DisableBracketedPaste: true,
+				SubmitDelay:           20 * time.Millisecond,
+			}, nil
+		},
+	}
+	seedPassthroughSession(t, repo, agentManager, "task-1", "sess-1", "exec-1")
+	exec := newTestExecutor(t, agentManager, repo)
+
+	if _, err := exec.Prompt(context.Background(), "task-1", "sess-1", "hello agent", nil, false); err != nil {
+		t.Fatalf("Prompt returned error: %v", err)
+	}
+
+	if got := len(agentManager.writePassthroughStdinCalls); got != 2 {
+		t.Fatalf("expected 2 WritePassthroughStdin calls (body, submit), got %d: %#v", got, agentManager.writePassthroughStdinCalls)
+	}
+	if agentManager.writePassthroughStdinCalls[0].Data != "hello agent" {
+		t.Errorf("body write Data = %q, want %q", agentManager.writePassthroughStdinCalls[0].Data, "hello agent")
+	}
+	if agentManager.writePassthroughStdinCalls[1].Data != "\r" {
+		t.Errorf("submit write Data = %q, want %q", agentManager.writePassthroughStdinCalls[1].Data, "\r")
+	}
+	// MarkPassthroughRunning must still fire exactly once after both writes — the
+	// session should flip to RUNNING for the UI even though the two writes were
+	// split. Regressing this would leave the spinner stuck on the composer.
+	if got := len(agentManager.markPassthroughRunningCalls); got != 1 {
+		t.Errorf("expected 1 MarkPassthroughRunning call, got %d", got)
 	}
 }
 

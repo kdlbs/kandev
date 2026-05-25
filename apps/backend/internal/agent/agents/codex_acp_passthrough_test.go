@@ -11,11 +11,6 @@ func TestCodexACP_PassthroughCmd_NoRemovedFullAutoFlag(t *testing.T) {
 	if !slices.Equal(pt, want) {
 		t.Fatalf("PassthroughCmd = %#v, want %#v", pt, want)
 	}
-	for _, arg := range pt {
-		if arg == "--full-auto" {
-			t.Fatal("PassthroughCmd must not pass removed --full-auto flag")
-		}
-	}
 }
 
 func TestCodexACP_BuildPassthroughCommand_AutoApprove(t *testing.T) {
