@@ -97,10 +97,25 @@ func (a *CursorACP) Runtime() *RuntimeConfig {
 	}
 }
 
-func (a *CursorACP) RemoteAuth() *RemoteAuth { return nil }
+func (a *CursorACP) RemoteAuth() *RemoteAuth {
+	return &RemoteAuth{
+		Methods: []RemoteAuthMethod{
+			{
+				Type:      "env",
+				EnvVar:    "CURSOR_API_KEY",
+				SetupHint: "Create an API key at https://cursor.com/dashboard/integrations (Cursor Pro).",
+			},
+		},
+	}
+}
 
+// cursor-agent isn't on npm. The official installer drops the binary into
+// ~/.local/bin; make sure that dir is on PATH for the rest of the prepare
+// script and for future shells on the sprite.
 func (a *CursorACP) InstallScript() string {
-	return "curl https://cursor.com/install -fsS | bash"
+	return `curl https://cursor.com/install -fsS | bash
+export PATH="$HOME/.local/bin:$PATH"
+grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$HOME/.bashrc" 2>/dev/null || echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"`
 }
 
 func (a *CursorACP) PermissionSettings() map[string]PermissionSetting {
