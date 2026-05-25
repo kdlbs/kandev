@@ -22,7 +22,7 @@ export const createSystemSlice: StateCreator<
   [["zustand/immer", never]],
   [],
   SystemSlice
-> = (set: ImmerSet) => ({
+> = (set: ImmerSet, _get, _api) => ({
   ...defaultSystemState,
   setSystemInfo: (info) =>
     set((draft) => {
