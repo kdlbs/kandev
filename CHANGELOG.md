@@ -2,6 +2,67 @@
 
 All notable changes to Kandev.
 
+## 0.52.0 - 2026-05-25
+
+### Features
+
+- auto-inject task prompt + dynamic submit sequence + passthrough UX fixes ([#923](https://github.com/kdlbs/kandev/pull/923))
+- azure Repos PR follow-ups after #1066 ([#1071](https://github.com/kdlbs/kandev/pull/1071))
+- add SSH executor ([#927](https://github.com/kdlbs/kandev/pull/927))
+- system settings pages (status, database, backups, logs, updates, licenses, about) ([#942](https://github.com/kdlbs/kandev/pull/942))
+- add Azure Repos PR creation ([#1066](https://github.com/kdlbs/kandev/pull/1066)) by @Zaybrah
+- add per-agent-profile environment variables ([#1040](https://github.com/kdlbs/kandev/pull/1040)) by @Foprta
+- copy gitignored files from repo into new worktrees ([#946](https://github.com/kdlbs/kandev/pull/946)) ([#950](https://github.com/kdlbs/kandev/pull/950))
+- make webhook trigger usable end-to-end ([#1051](https://github.com/kdlbs/kandev/pull/1051))
+- first-class user terminals — stable seq, rename, park/resume ([#1009](https://github.com/kdlbs/kandev/pull/1009))
+- roomier pane caps + remember user-set widths ([#1005](https://github.com/kdlbs/kandev/pull/1005))
+- inspect mode with pin and area annotations ([#917](https://github.com/kdlbs/kandev/pull/917))
+- add Share to session tab context menu ([#1050](https://github.com/kdlbs/kandev/pull/1050))
+- move automations entry above agents in settings sidebar ([#1049](https://github.com/kdlbs/kandev/pull/1049))
+- add GitLab integration with MR / discussions support ([#861](https://github.com/kdlbs/kandev/pull/861))
+- add tree view for changes panel ([#1026](https://github.com/kdlbs/kandev/pull/1026))
+- scroll mobile passthrough terminal scrollback via touch ([#1046](https://github.com/kdlbs/kandev/pull/1046))
+- queue workflow messages during active moves ([#1036](https://github.com/kdlbs/kandev/pull/1036))
+- forward Preview chat input to PTY in passthrough sessions ([#1042](https://github.com/kdlbs/kandev/pull/1042))
+- mobile-friendly /github page with sidebar drawer ([#1041](https://github.com/kdlbs/kandev/pull/1041))
+- add minimize button to dockview group header ([#1039](https://github.com/kdlbs/kandev/pull/1039))
+- support Jira Server / Data Center ([#977](https://github.com/kdlbs/kandev/pull/977)) by @irium
+- truncate file path in editor toolbar with hover-scroll ([#1029](https://github.com/kdlbs/kandev/pull/1029))
+- auto-fill task name from PR title when pasting a PR URL ([#1027](https://github.com/kdlbs/kandev/pull/1027))
+- don't cascade archive/delete to subtasks by default ([#1020](https://github.com/kdlbs/kandev/pull/1020))
+- add Oh My Pi ACP agent ([#971](https://github.com/kdlbs/kandev/pull/971)) by @azais-corentin
+- add mobile parity skill ([#1024](https://github.com/kdlbs/kandev/pull/1024))
+- /settings/automations with run-mode + per-automation config ([#1016](https://github.com/kdlbs/kandev/pull/1016))
+
+### Bug Fixes
+
+- isPassthroughMode falls back to TaskChatPanel when snapshot is missing (closes #1031) ([#1034](https://github.com/kdlbs/kandev/pull/1034)) by @dbrown99c
+- scope /gitlab page tabs to the authenticated user ([#1068](https://github.com/kdlbs/kandev/pull/1068))
+- stop the backoff timer in channel relay when context is cancelled ([#1064](https://github.com/kdlbs/kandev/pull/1064)) by @vimzh
+- guard Dispatcher's handler map with a RWMutex ([#1065](https://github.com/kdlbs/kandev/pull/1065)) by @vimzh
+- disable track_progress for labeled event in claude-review-fork ([#1067](https://github.com/kdlbs/kandev/pull/1067))
+- bound idle-timeout task lookup with caller's context ([#1063](https://github.com/kdlbs/kandev/pull/1063)) by @vimzh
+- use shared PageTopbar on /gitlab so the page has a header ([#1062](https://github.com/kdlbs/kandev/pull/1062))
+- allow native ACP CLIs in probe allowlist ([#1059](https://github.com/kdlbs/kandev/pull/1059))
+- make PR CI status reachable on mobile via tap-activated drawer ([#1060](https://github.com/kdlbs/kandev/pull/1060))
+- keep toolbar buttons visible when sidebar narrows ([#1047](https://github.com/kdlbs/kandev/pull/1047))
+- preserve session-tab grouping when restoring contaminated layout ([#1028](https://github.com/kdlbs/kandev/pull/1028))
+- reflect stale CI failures in progress bar ([#1045](https://github.com/kdlbs/kandev/pull/1045))
+- preview chat images in modal ([#1030](https://github.com/kdlbs/kandev/pull/1030))
+- show tasks from all workflows in the mobile task-switcher sheet ([#1025](https://github.com/kdlbs/kandev/pull/1025))
+- aggregate changes count across all repos to stop flicker ([#986](https://github.com/kdlbs/kandev/pull/986))
+- isolate kanban and office workspace selection ([#1019](https://github.com/kdlbs/kandev/pull/1019))
+
+### Refactoring
+
+- address watcher dispatch review feedback ([#1074](https://github.com/kdlbs/kandev/pull/1074))
+- extract WatcherDispatchCoordinator + WatcherSource ([#1070](https://github.com/kdlbs/kandev/pull/1070)) by @nlenepveu
+
+### Documentation
+
+- add cloud-VM caveats and Playwright install script ([#1069](https://github.com/kdlbs/kandev/pull/1069))
+- add remote cloud environment instructions ([#1061](https://github.com/kdlbs/kandev/pull/1061))
+
 ## 0.51.0 - 2026-05-22
 
 ### Features
