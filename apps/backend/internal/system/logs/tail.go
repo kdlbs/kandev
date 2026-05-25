@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/kandev/kandev/internal/common/logger/buffer"
@@ -98,8 +99,15 @@ func formatBufferEntry(e buffer.Entry) string {
 	}
 	b.WriteString(" ")
 	b.WriteString(e.Message)
-	for k, v := range e.Fields {
-		fmt.Fprintf(&b, " %s=%s", k, formatFieldValue(v))
+	if len(e.Fields) > 0 {
+		keys := make([]string, 0, len(e.Fields))
+		for k := range e.Fields {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+		for _, k := range keys {
+			fmt.Fprintf(&b, " %s=%s", k, formatFieldValue(e.Fields[k]))
+		}
 	}
 	if e.Stack != "" {
 		b.WriteString(" stack=...")
