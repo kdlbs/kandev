@@ -201,8 +201,11 @@ func (e *Executor) promptPassthrough(ctx context.Context, taskID, sessionID, pro
 	if err != nil {
 		return nil, fmt.Errorf("resolve passthrough config: %w", err)
 	}
-	for _, chunk := range agents.PlanPassthroughStdinWrites(prompt, pt) {
-		if err := e.agentManager.WritePassthroughStdin(ctx, sessionID, chunk); err != nil {
+	for _, chunk := range agents.PlanPassthroughStdinChunks(prompt, pt) {
+		if chunk.DelayBefore > 0 {
+			time.Sleep(chunk.DelayBefore)
+		}
+		if err := e.agentManager.WritePassthroughStdin(ctx, sessionID, chunk.Data); err != nil {
 			return nil, fmt.Errorf("failed to write to passthrough stdin: %w", err)
 		}
 	}

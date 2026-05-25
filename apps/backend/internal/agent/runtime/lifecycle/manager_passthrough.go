@@ -987,8 +987,11 @@ func (m *Manager) autoInjectInitialPromptWith(runner passthroughRunner, executio
 	if m.IsShuttingDown() {
 		return
 	}
-	for _, chunk := range agents.PlanPassthroughStdinWrites(description, pt) {
-		if err := runner.WriteStdin(processID, chunk); err != nil {
+	for _, chunk := range agents.PlanPassthroughStdinChunks(description, pt) {
+		if chunk.DelayBefore > 0 {
+			time.Sleep(chunk.DelayBefore)
+		}
+		if err := runner.WriteStdin(processID, chunk.Data); err != nil {
 			m.logger.Warn("autoInjectInitialPrompt write failed",
 				zap.String("execution_id", execution.ID),
 				zap.String("process_id", processID),

@@ -266,9 +266,14 @@ type PassthroughConfig struct {
 	// Claude Code enables bracketed-paste *mode* (?2004h) in its Ink TUI; injecting
 	// ESC[200~…ESC[201~ delimiters breaks input (nothing appears in the prompt).
 	DisableBracketedPaste bool
-	// SubmitViaBackslashEnter writes prompt, then "\\", then SubmitSequence as separate
-	// PTY chunks. Claude Code docs: type backslash then Enter to submit programmatic input.
-	SubmitViaBackslashEnter bool
+	// SubmitDelay is the wait inserted before each non-first chunk when writing the
+	// prompt+submit sequence to PTY stdin. Ink-based TUIs (Claude Code) detect a
+	// "paste burst" when many stdin bytes arrive in one read and absorb the
+	// trailing \r into the pasted content instead of dispatching it as Enter.
+	// Splitting the prompt body from the submit byte with a small delay forces the
+	// submit to arrive as a discrete keystroke. 0 disables (other TUIs handle one
+	// atomic write fine).
+	SubmitDelay time.Duration
 }
 
 // DefaultBufferMaxBytes is the default maximum buffer size for passthrough mode (2 MB).

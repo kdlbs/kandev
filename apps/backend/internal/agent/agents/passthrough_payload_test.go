@@ -1,6 +1,9 @@
 package agents
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestPlanPassthroughStdinWrites_SingleAtomicWrite(t *testing.T) {
 	cfg := PassthroughConfig{SubmitSequence: "\r"}
@@ -22,32 +25,58 @@ func TestPlanPassthroughStdinWrites_SingleLine(t *testing.T) {
 	}
 }
 
-func TestPlanPassthroughStdinWrites_ClaudeMultilineRawPaste(t *testing.T) {
+// Claude's PassthroughConfig sets SubmitDelay so the submit byte arrives as a
+// discrete keystroke (defeats Ink's paste-burst detection). Single-line and
+// multi-line prompts both emit body+submit as two chunks; the submit chunk
+// carries DelayBefore = SubmitDelay.
+func TestPlanPassthroughStdinChunks_ClaudeSplitsSubmit(t *testing.T) {
 	cfg := NewClaudeACP().PassthroughConfig()
-	got := PlanPassthroughStdinWrites("### Review Comments\n\n> fix", cfg)
-	if len(got) != 3 {
-		t.Fatalf("got %d chunks, want 3 (prompt, backslash, enter): %#v", len(got), got)
+	if cfg.SubmitDelay <= 0 {
+		t.Fatalf("Claude config must set SubmitDelay > 0 for paste-burst workaround, got %v", cfg.SubmitDelay)
 	}
-	if got[0] != "### Review Comments\n\n> fix" {
-		t.Errorf("prompt = %q", got[0])
-	}
-	if got[1] != "\\" {
-		t.Errorf("backslash = %q, want \\\\", got[1])
-	}
-	if got[2] != "\r" {
-		t.Errorf("submit = %q, want \\r", got[2])
-	}
-}
 
-func stringsContains(s, sub string) bool {
-	return len(sub) == 0 || (len(s) >= len(sub) && indexOf(s, sub) >= 0)
-}
-
-func indexOf(s, sub string) int {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return i
+	for _, prompt := range []string{"hello", "### Review Comments\n\n> fix"} {
+		chunks := PlanPassthroughStdinChunks(prompt, cfg)
+		if len(chunks) != 2 {
+			t.Fatalf("prompt %q: got %d chunks, want 2 (body, submit): %#v", prompt, len(chunks), chunks)
+		}
+		if chunks[0].Data != prompt {
+			t.Errorf("prompt %q: body chunk = %q, want verbatim prompt", prompt, chunks[0].Data)
+		}
+		if chunks[0].DelayBefore != 0 {
+			t.Errorf("prompt %q: body chunk DelayBefore = %v, want 0", prompt, chunks[0].DelayBefore)
+		}
+		if chunks[1].Data != "\r" {
+			t.Errorf("prompt %q: submit chunk = %q, want \\r", prompt, chunks[1].Data)
+		}
+		if chunks[1].DelayBefore != cfg.SubmitDelay {
+			t.Errorf("prompt %q: submit DelayBefore = %v, want %v", prompt, chunks[1].DelayBefore, cfg.SubmitDelay)
 		}
 	}
-	return -1
+}
+
+// Non-Claude TUIs (SubmitDelay == 0) keep the single-atomic-write semantics so we
+// don't accidentally regress Cursor/Codex/OpenCode by splitting their submit.
+func TestPlanPassthroughStdinChunks_AtomicWhenNoDelay(t *testing.T) {
+	cfg := PassthroughConfig{SubmitSequence: "\r"}
+	chunks := PlanPassthroughStdinChunks("hello", cfg)
+	if len(chunks) != 1 {
+		t.Fatalf("got %d chunks, want 1 atomic write: %#v", len(chunks), chunks)
+	}
+	if chunks[0].DelayBefore != 0 {
+		t.Errorf("atomic chunk DelayBefore = %v, want 0", chunks[0].DelayBefore)
+	}
+	if chunks[0].Data != "hello\r" {
+		t.Errorf("atomic chunk Data = %q, want \"hello\\r\"", chunks[0].Data)
+	}
+}
+
+// Sanity: a custom config with SubmitDelay set but no Claude-specific flags
+// also splits — the field is the lever, not the Claude struct identity.
+func TestPlanPassthroughStdinChunks_SubmitDelayDrivesSplit(t *testing.T) {
+	cfg := PassthroughConfig{SubmitSequence: "\r", DisableBracketedPaste: true, SubmitDelay: 50 * time.Millisecond}
+	chunks := PlanPassthroughStdinChunks("hi", cfg)
+	if len(chunks) != 2 || chunks[1].DelayBefore != 50*time.Millisecond || chunks[1].Data != "\r" {
+		t.Fatalf("expected split with 50ms delay before \\r, got %#v", chunks)
+	}
 }

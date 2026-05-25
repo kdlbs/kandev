@@ -26,6 +26,15 @@ type fakePassthroughRunner struct {
 	writtenProcessID string
 	writtenData      string
 	writeCalled      bool
+
+	// every chunk passed to WriteStdin, in order. Used by SubmitDelay tests that
+	// need to assert the body/submit split (the single-string captures above only
+	// hold the most recent write).
+	writes []string
+	// writeTimes records the wall-clock time of each WriteStdin call so tests can
+	// assert that SubmitDelay was honored between chunks without coupling to a
+	// specific clock.
+	writeTimes []time.Time
 }
 
 func (f *fakePassthroughRunner) WaitForFirstIdle(ctx context.Context, processID string) error {
@@ -42,6 +51,8 @@ func (f *fakePassthroughRunner) WriteStdin(processID string, data string) error 
 	f.writeCalled = true
 	f.writtenProcessID = processID
 	f.writtenData = data
+	f.writes = append(f.writes, data)
+	f.writeTimes = append(f.writeTimes, time.Now())
 	return f.writeErr
 }
 
@@ -146,6 +157,41 @@ func TestAutoInject_returns_when_wait_errors(t *testing.T) {
 
 	if runner.writeCalled {
 		t.Fatalf("expected no stdin write on wait timeout, got data=%q", runner.writtenData)
+	}
+}
+
+// TestAutoInject_SubmitDelay_splits_writes_with_pause is the Claude regression:
+// when SubmitDelay > 0 the helper must write the body chunk first, then sleep
+// SubmitDelay, then write the submit byte alone, so Ink's paste-burst detector
+// sees the trailing \r as a discrete keystroke instead of absorbing it into the
+// pasted text.
+func TestAutoInject_SubmitDelay_splits_writes_with_pause(t *testing.T) {
+	mgr := newTestManager()
+	runner := &fakePassthroughRunner{}
+
+	const delay = 40 * time.Millisecond
+	mgr.autoInjectInitialPromptWith(runner, newAutoInjectExecution("hello world"), agents.PassthroughConfig{
+		AutoInjectPrompt:      true,
+		SubmitSequence:        "\r",
+		DisableBracketedPaste: true,
+		SubmitDelay:           delay,
+	})
+
+	if got := len(runner.writes); got != 2 {
+		t.Fatalf("expected 2 writes (body, submit), got %d: %#v", got, runner.writes)
+	}
+	if runner.writes[0] != "hello world" {
+		t.Errorf("body write = %q, want %q", runner.writes[0], "hello world")
+	}
+	if runner.writes[1] != "\r" {
+		t.Errorf("submit write = %q, want %q", runner.writes[1], "\r")
+	}
+	// Allow generous slack — CI clocks are noisy but a 40ms gap is still easy
+	// to detect. The submit write must arrive at least ~SubmitDelay after the
+	// body write; if the two were back-to-back this delta would be sub-ms.
+	gap := runner.writeTimes[1].Sub(runner.writeTimes[0])
+	if gap < delay/2 {
+		t.Errorf("submit write came too soon after body: gap=%v, want >= %v", gap, delay/2)
 	}
 }
 

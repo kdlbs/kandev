@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
@@ -1057,11 +1058,28 @@ func (s *Service) drainQueuedMessageAfterTransition(ctx context.Context, session
 }
 
 // deliverPassthroughPrompt writes a prompt to PTY stdin and marks the session as running.
-// Appends \r (carriage return) to simulate pressing Enter — TUI agents in raw terminal mode
-// expect CR, not LF, as the submit key. Returns an error only if writing fails.
+// Uses the per-agent PlanPassthroughStdinChunks so Claude's inter-chunk SubmitDelay is
+// honored here too (queued / workflow-auto-start path); other agents stay on the single
+// atomic write. Falls back to the simple "\r" append if config resolution fails so a
+// transient lookup error never silently swallows the prompt.
 func (s *Service) deliverPassthroughPrompt(ctx context.Context, sessionID, content string) error {
-	if err := s.agentManager.WritePassthroughStdin(ctx, sessionID, content+"\r"); err != nil {
-		return fmt.Errorf("write to passthrough stdin: %w", err)
+	pt, cfgErr := s.agentManager.ResolvePassthroughConfig(ctx, sessionID)
+	if cfgErr != nil {
+		s.logger.Warn("failed to resolve passthrough config, falling back to \\r submit",
+			zap.String("session_id", sessionID),
+			zap.Error(cfgErr))
+		if err := s.agentManager.WritePassthroughStdin(ctx, sessionID, content+"\r"); err != nil {
+			return fmt.Errorf("write to passthrough stdin: %w", err)
+		}
+	} else {
+		for _, chunk := range agents.PlanPassthroughStdinChunks(content, pt) {
+			if chunk.DelayBefore > 0 {
+				time.Sleep(chunk.DelayBefore)
+			}
+			if err := s.agentManager.WritePassthroughStdin(ctx, sessionID, chunk.Data); err != nil {
+				return fmt.Errorf("write to passthrough stdin: %w", err)
+			}
+		}
 	}
 	if err := s.agentManager.MarkPassthroughRunning(sessionID); err != nil {
 		s.logger.Warn("failed to mark passthrough as running",

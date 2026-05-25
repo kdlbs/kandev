@@ -35,19 +35,24 @@ func NewClaudeACP() *ClaudeACP {
 		StandardPassthrough: StandardPassthrough{
 			PermSettings: emptyPermSettings,
 			Cfg: PassthroughConfig{
-				Supported:               true,
-				Label:                   "CLI Passthrough",
-				Description:             "Show terminal directly instead of chat interface",
-				PassthroughCmd:          NewCommand("npx", "-y", "@anthropic-ai/claude-code", "--verbose"),
-				ModelFlag:               NewParam("--model", "{model}"),
-				IdleTimeout:             3 * time.Second,
-				BufferMaxBytes:          DefaultBufferMaxBytes,
-				ResumeFlag:              NewParam("-c"),
-				SessionResumeFlag:       NewParam("--resume"),
-				AutoInjectPrompt:        true,
-				SubmitSequence:          "\r",
-				DisableBracketedPaste:   true,
-				SubmitViaBackslashEnter: true,
+				Supported:             true,
+				Label:                 "CLI Passthrough",
+				Description:           "Show terminal directly instead of chat interface",
+				PassthroughCmd:        NewCommand("npx", "-y", "@anthropic-ai/claude-code", "--verbose"),
+				ModelFlag:             NewParam("--model", "{model}"),
+				IdleTimeout:           3 * time.Second,
+				BufferMaxBytes:        DefaultBufferMaxBytes,
+				ResumeFlag:            NewParam("-c"),
+				SessionResumeFlag:     NewParam("--resume"),
+				AutoInjectPrompt:      true,
+				SubmitSequence:        "\r",
+				DisableBracketedPaste: true,
+				// Claude Code's Ink TUI coalesces multi-byte stdin reads into a
+				// paste burst, absorbing trailing "\r" into the input rather than
+				// dispatching Enter. A short delay before the submit byte forces
+				// it to arrive as a discrete keystroke. 150ms is just over Ink's
+				// paste-detection window and still feels instant to the user.
+				SubmitDelay: 150 * time.Millisecond,
 			},
 		},
 	}
