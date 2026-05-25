@@ -8,7 +8,7 @@ import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
 import { Separator } from "@kandev/ui/separator";
-import { IconArrowLeft, IconTrash } from "@tabler/icons-react";
+import { IconTrash } from "@tabler/icons-react";
 import { useAutomations } from "@/hooks/domains/settings/use-automations";
 import {
   addTrigger,
@@ -352,7 +352,6 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
 
   return (
     <div className="max-w-3xl space-y-6" data-testid="automation-editor">
-      <EditorHeader workspaceId={workspaceId} />
       <div className="space-y-2">
         <Label htmlFor="automation-name">Name</Label>
         <Input
@@ -515,23 +514,6 @@ function ThenSection({
           onExecutionModeChange={(v) => updateField("executionMode", v)}
         />
       </div>
-    </div>
-  );
-}
-
-function EditorHeader({ workspaceId }: { workspaceId: string }) {
-  const router = useRouter();
-  return (
-    <div className="flex items-center gap-3">
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        className="cursor-pointer"
-        onClick={() => router.push(`/settings/workspace/${workspaceId}/automations`)}
-      >
-        <IconArrowLeft className="h-4 w-4" />
-      </Button>
-      <span className="text-sm text-muted-foreground">Automations</span>
     </div>
   );
 }

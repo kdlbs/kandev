@@ -42,18 +42,41 @@ function deriveCurrentPageLabel(pathname: string): string | null {
   return null;
 }
 
+// Build the intermediate breadcrumb crumbs between the back link and the
+// current page title. For workspace-scoped automation pages, inject an
+// "Automations" crumb so the breadcrumb reads e.g.
+// Home > Settings > Automations > New.
+function deriveParents(pathname: string): Array<{ label: string; href: string }> {
+  const segments = pathname.split("/").filter(Boolean);
+  if (segments.length <= 1) return [];
+
+  const parents: Array<{ label: string; href: string }> = [
+    { label: "Settings", href: "/settings" },
+  ];
+
+  const automationsMatch = pathname.match(
+    /^\/settings\/workspace\/([^/]+)\/automations(?:\/(.+))?/,
+  );
+  if (automationsMatch && automationsMatch[2]) {
+    // Only inject the Automations crumb when we're on a sub-page (new or
+    // edit), not on the listing page itself — the listing page title is
+    // already "Automations".
+    parents.push({
+      label: "Automations",
+      href: `/settings/workspace/${automationsMatch[1]}/automations`,
+    });
+  }
+
+  return parents;
+}
+
 export function SettingsLayoutClient({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isAgentDetail = pathname.startsWith("/settings/agents/") && pathname !== "/settings/agents";
 
   if (isAgentDetail) {
     return (
-      <SettingsShell
-        title="Agent"
-        backHref="/settings/agents"
-        backLabel="Agents"
-        parent={undefined}
-      >
+      <SettingsShell title="Agent" backHref="/settings/agents" backLabel="Agents" parents={[]}>
         {children}
       </SettingsShell>
     );
@@ -61,10 +84,10 @@ export function SettingsLayoutClient({ children }: { children: React.ReactNode }
 
   const pageLabel = deriveCurrentPageLabel(pathname);
   const title = pageLabel ?? "Settings";
-  const parent = pageLabel ? { label: "Settings", href: "/settings" } : undefined;
+  const parents = deriveParents(pathname);
 
   return (
-    <SettingsShell title={title} backHref="/" backLabel="Kandev" parent={parent}>
+    <SettingsShell title={title} backHref="/" backLabel="Kandev" parents={parents}>
       {children}
     </SettingsShell>
   );
@@ -74,13 +97,13 @@ function SettingsShell({
   title,
   backHref,
   backLabel,
-  parent,
+  parents,
   children,
 }: {
   title: string;
   backHref: string;
   backLabel: string;
-  parent: { label: string; href: string } | undefined;
+  parents: Array<{ label: string; href: string }>;
   children: React.ReactNode;
 }) {
   return (
@@ -92,7 +115,7 @@ function SettingsShell({
             title={title}
             backHref={backHref}
             backLabel={backLabel}
-            parent={parent}
+            parents={parents}
             className="h-16 border-b-0"
             leading={<SidebarTrigger size="lg" className="md:hidden h-10 w-10 cursor-pointer" />}
           />

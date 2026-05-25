@@ -24,11 +24,11 @@ type PageTopbarProps = {
   /** Label for the parent breadcrumb (default: "Kandev") */
   backLabel?: string;
   /**
-   * Optional middle crumb inserted between the back link and the title — use
-   * for nested sections (e.g. Home > Settings > Prompts). When omitted the
-   * breadcrumb is two segments wide.
+   * Optional middle crumbs inserted between the back link and the title — use
+   * for nested sections (e.g. Home > Settings > Automations > New). When
+   * omitted the breadcrumb is two segments wide.
    */
-  parent?: { label: string; href: string };
+  parents?: Array<{ label: string; href: string }>;
   /** Optional content rendered before the breadcrumb */
   leading?: ReactNode;
   /** Optional content rendered at the visual center of the topbar */
@@ -66,14 +66,14 @@ function BackLink({ href, label }: { href: string; label: string }) {
 function TopbarBreadcrumb({
   backHref,
   backLabel,
-  parent,
+  parents,
   title,
   subtitle,
   icon,
 }: {
   backHref: string;
   backLabel: string;
-  parent: { label: string; href: string } | undefined;
+  parents: Array<{ label: string; href: string }> | undefined;
   title: string;
   subtitle?: string;
   icon?: ReactNode;
@@ -87,21 +87,19 @@ function TopbarBreadcrumb({
           </BreadcrumbLink>
         </BreadcrumbItem>
         <BreadcrumbSeparator className="shrink-0" />
-        {parent && (
-          <>
-            <BreadcrumbItem className="shrink-0">
-              <BreadcrumbLink asChild>
-                <Link
-                  href={parent.href}
-                  className="cursor-pointer text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  {parent.label}
-                </Link>
-              </BreadcrumbLink>
-            </BreadcrumbItem>
-            <BreadcrumbSeparator className="shrink-0" />
-          </>
-        )}
+        {parents?.flatMap((p) => [
+          <BreadcrumbItem key={`${p.href}-item`} className="shrink-0">
+            <BreadcrumbLink asChild>
+              <Link
+                href={p.href}
+                className="cursor-pointer text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {p.label}
+              </Link>
+            </BreadcrumbLink>
+          </BreadcrumbItem>,
+          <BreadcrumbSeparator key={`${p.href}-sep`} className="shrink-0" />,
+        ])}
         <BreadcrumbItem className="min-w-0">
           <BreadcrumbPage className="flex min-w-0 items-center gap-2">
             {icon}
@@ -128,7 +126,7 @@ export const PageTopbar = forwardRef<HTMLElement, PageTopbarProps>(function Page
     icon,
     backHref = "/",
     backLabel = "Kandev",
-    parent,
+    parents,
     leading,
     center,
     leftActions,
@@ -154,7 +152,7 @@ export const PageTopbar = forwardRef<HTMLElement, PageTopbarProps>(function Page
         <TopbarBreadcrumb
           backHref={backHref}
           backLabel={backLabel}
-          parent={parent}
+          parents={parents}
           title={title}
           subtitle={subtitle}
           icon={icon}

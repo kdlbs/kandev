@@ -38,7 +38,6 @@ import {
   SidebarGroupLabel,
   SidebarGroupContent,
   SidebarMenu,
-  SidebarMenuBadge,
   SidebarMenuItem,
   SidebarMenuButton,
   SidebarMenuSub,
@@ -51,7 +50,7 @@ import { ScrollArea } from "@kandev/ui/scroll-area";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import { useAppStore } from "@/components/state-provider";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
-import { useSystemBadgeCount } from "@/hooks/domains/system/use-system-badge-count";
+
 import { AgentLogo } from "@/components/agent-logo";
 import { getExecutorIcon } from "@/lib/executor-icons";
 import { getCapabilityWarning } from "@/lib/capability-warning";
@@ -173,10 +172,6 @@ function SystemSidebarSection({ pathname }: { pathname: string }) {
     { href: "/settings/system/licenses", label: "Licenses", Icon: IconScale },
   ];
   const isSystem = pathname.startsWith("/settings/system");
-  // Sum of non-info health issues + 1 when an update is available. Surfaced
-  // on the group row and the Status child entry so the user gets a hint
-  // without having to open System.
-  const badgeCount = useSystemBadgeCount();
   return (
     <SidebarMenuItem>
       <SidebarMenuButton asChild tooltip="System" isActive={isSystem}>
@@ -185,9 +180,6 @@ function SystemSidebarSection({ pathname }: { pathname: string }) {
           <span>System</span>
         </Link>
       </SidebarMenuButton>
-      {badgeCount > 0 && (
-        <SidebarMenuBadge data-testid="system-sidebar-badge">{badgeCount}</SidebarMenuBadge>
-      )}
       <SidebarMenuSub className="ml-3 mt-1">
         {items.map(({ href, label, Icon }) => (
           <SidebarMenuSubItem key={href}>
@@ -197,11 +189,6 @@ function SystemSidebarSection({ pathname }: { pathname: string }) {
                 <span>{label}</span>
               </Link>
             </SidebarMenuSubButton>
-            {href === "/settings/system/status" && badgeCount > 0 && (
-              <SidebarMenuBadge data-testid="system-sidebar-status-badge">
-                {badgeCount}
-              </SidebarMenuBadge>
-            )}
           </SidebarMenuSubItem>
         ))}
       </SidebarMenuSub>
