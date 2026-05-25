@@ -1063,9 +1063,12 @@ func TestDeliverPassthroughPrompt(t *testing.T) {
 		agentMgr.mu.Lock()
 		defer agentMgr.mu.Unlock()
 
-		// Should not call markPassthroughRunning when stdin write fails
-		if len(agentMgr.markPassthroughCalls) != 0 {
-			t.Errorf("markPassthroughRunning should not be called when stdin fails, got %d calls", len(agentMgr.markPassthroughCalls))
+		// markPassthroughRunning now fires BEFORE any writes so concurrent
+		// PromptTask calls are blocked during the inter-chunk SubmitDelay
+		// window (Greptile P1). Expect exactly one mark call even when the
+		// subsequent write fails.
+		if len(agentMgr.markPassthroughCalls) != 1 {
+			t.Errorf("markPassthroughRunning should fire once before the write; got %d calls", len(agentMgr.markPassthroughCalls))
 		}
 	})
 }

@@ -1068,23 +1068,28 @@ func (s *Service) deliverPassthroughPrompt(ctx context.Context, sessionID, conte
 		s.logger.Warn("failed to resolve passthrough config, falling back to \\r submit",
 			zap.String("session_id", sessionID),
 			zap.Error(cfgErr))
+	}
+	// Mark RUNNING before any writes so concurrent PromptTask / queued-message
+	// delivery is blocked by checkSessionPromptable during the inter-chunk
+	// SubmitDelay window (150ms for Claude). Mark error is non-fatal.
+	if err := s.agentManager.MarkPassthroughRunning(sessionID); err != nil {
+		s.logger.Warn("failed to mark passthrough as running before prompt",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+	if cfgErr != nil {
 		if err := s.agentManager.WritePassthroughStdin(ctx, sessionID, content+"\r"); err != nil {
 			return fmt.Errorf("write to passthrough stdin: %w", err)
 		}
-	} else {
-		for _, chunk := range agents.PlanPassthroughStdinChunks(content, pt) {
-			if chunk.DelayBefore > 0 {
-				time.Sleep(chunk.DelayBefore)
-			}
-			if err := s.agentManager.WritePassthroughStdin(ctx, sessionID, chunk.Data); err != nil {
-				return fmt.Errorf("write to passthrough stdin: %w", err)
-			}
-		}
+		return nil
 	}
-	if err := s.agentManager.MarkPassthroughRunning(sessionID); err != nil {
-		s.logger.Warn("failed to mark passthrough as running",
-			zap.String("session_id", sessionID),
-			zap.Error(err))
+	for _, chunk := range agents.PlanPassthroughStdinChunks(content, pt) {
+		if chunk.DelayBefore > 0 {
+			time.Sleep(chunk.DelayBefore)
+		}
+		if err := s.agentManager.WritePassthroughStdin(ctx, sessionID, chunk.Data); err != nil {
+			return fmt.Errorf("write to passthrough stdin: %w", err)
+		}
 	}
 	return nil
 }

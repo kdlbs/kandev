@@ -987,6 +987,15 @@ func (m *Manager) autoInjectInitialPromptWith(runner passthroughRunner, executio
 	if m.IsShuttingDown() {
 		return
 	}
+	// Mark RUNNING before the chunk loop so a composer/message.add fired during
+	// the inter-chunk SubmitDelay window (150ms for Claude) is blocked by
+	// checkSessionPromptable instead of racing into the same PTY mid-submit.
+	if err := m.MarkPassthroughRunning(execution.SessionID); err != nil {
+		m.logger.Warn("failed to mark passthrough as running before auto-inject",
+			zap.String("execution_id", execution.ID),
+			zap.String("session_id", execution.SessionID),
+			zap.Error(err))
+	}
 	for _, chunk := range agents.PlanPassthroughStdinChunks(description, pt) {
 		if chunk.DelayBefore > 0 {
 			time.Sleep(chunk.DelayBefore)
@@ -998,12 +1007,6 @@ func (m *Manager) autoInjectInitialPromptWith(runner passthroughRunner, executio
 				zap.Error(err))
 			return
 		}
-	}
-	if err := m.MarkPassthroughRunning(execution.SessionID); err != nil {
-		m.logger.Warn("failed to mark passthrough as running after auto-inject",
-			zap.String("execution_id", execution.ID),
-			zap.String("session_id", execution.SessionID),
-			zap.Error(err))
 	}
 	m.logger.Info("autoInjectInitialPrompt wrote task description to PTY",
 		zap.String("execution_id", execution.ID),

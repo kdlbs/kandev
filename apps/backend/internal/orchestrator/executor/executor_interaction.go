@@ -201,6 +201,19 @@ func (e *Executor) promptPassthrough(ctx context.Context, taskID, sessionID, pro
 	if err != nil {
 		return nil, fmt.Errorf("resolve passthrough config: %w", err)
 	}
+	// Mark RUNNING before the chunk loop so concurrent PromptTask calls are
+	// blocked by checkSessionPromptable during the inter-chunk SubmitDelay
+	// window (150ms for Claude). Otherwise a rapid double-send or workflow
+	// event firing in parallel passes the WAITING_FOR_INPUT guard and writes
+	// a second prompt onto the same PTY stdin mid-submit. Mark-error stays
+	// non-fatal — at worst we miss the AgentRunning event but the prompt
+	// still gets through.
+	if err := e.agentManager.MarkPassthroughRunning(sessionID); err != nil {
+		e.logger.Warn("failed to mark passthrough as running before prompt; concurrent send window is open",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
 	for _, chunk := range agents.PlanPassthroughStdinChunks(prompt, pt) {
 		if chunk.DelayBefore > 0 {
 			time.Sleep(chunk.DelayBefore)
@@ -208,12 +221,6 @@ func (e *Executor) promptPassthrough(ctx context.Context, taskID, sessionID, pro
 		if err := e.agentManager.WritePassthroughStdin(ctx, sessionID, chunk.Data); err != nil {
 			return nil, fmt.Errorf("failed to write to passthrough stdin: %w", err)
 		}
-	}
-	if err := e.agentManager.MarkPassthroughRunning(sessionID); err != nil {
-		e.logger.Warn("failed to mark passthrough as running after prompt; data already in PTY",
-			zap.String("task_id", taskID),
-			zap.String("session_id", sessionID),
-			zap.Error(err))
 	}
 	return &PromptResult{StopReason: stopReasonPassthrough}, nil
 }

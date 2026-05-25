@@ -128,12 +128,15 @@ func TestPromptTask_PassthroughWriteFailureRevertsSession(t *testing.T) {
 		t.Errorf("expected session reverted to WAITING_FOR_INPUT, got %q", updated.State)
 	}
 
-	// MarkPassthroughRunning must NOT be called when the write failed — otherwise
-	// the UI would flash "running" for a prompt the agent never received.
+	// MarkPassthroughRunning now fires BEFORE the chunk loop so concurrent
+	// PromptTask calls are blocked during the inter-chunk SubmitDelay window
+	// (Greptile P1). When the subsequent write fails the session is still
+	// reverted to WAITING_FOR_INPUT by handlePromptError above, so the brief
+	// RUNNING flash is bounded and the UI re-enables the composer.
 	agentMgr.mu.Lock()
 	markCount := len(agentMgr.markPassthroughCalls)
 	agentMgr.mu.Unlock()
-	if markCount != 0 {
-		t.Errorf("MarkPassthroughRunning must not fire on PTY write failure; got %d call(s)", markCount)
+	if markCount != 1 {
+		t.Errorf("MarkPassthroughRunning should fire once before the write; got %d call(s)", markCount)
 	}
 }

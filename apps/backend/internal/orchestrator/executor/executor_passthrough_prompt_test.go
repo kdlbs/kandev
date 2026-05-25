@@ -95,10 +95,14 @@ func TestExecutor_Prompt_PassthroughWriteErrorReturnsError(t *testing.T) {
 	if result != nil {
 		t.Errorf("expected nil result on error, got %+v", result)
 	}
-	// MarkPassthroughRunning must not be called when the write fails — otherwise
-	// the UI would flash "running" for a prompt the agent never received.
-	if got := len(agentManager.markPassthroughRunningCalls); got != 0 {
-		t.Errorf("MarkPassthroughRunning must not be called when stdin write fails; got %d call(s)", got)
+	// MarkPassthroughRunning is now called BEFORE the chunk loop so concurrent
+	// PromptTask calls are blocked during the inter-chunk SubmitDelay window
+	// (Greptile P1). The UI may briefly show "running" for a prompt that then
+	// fails to deliver — preferable to a second prompt racing into the PTY
+	// mid-submit. Expect exactly one MarkPassthroughRunning call even when the
+	// subsequent write fails.
+	if got := len(agentManager.markPassthroughRunningCalls); got != 1 {
+		t.Errorf("MarkPassthroughRunning should be called once before the write; got %d call(s)", got)
 	}
 }
 
