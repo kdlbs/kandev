@@ -41,7 +41,7 @@ func (s *Service) subscribeJiraEvents() {
 
 // handleNewJiraIssue translates a JiraNewIssue bus event into a
 // WatcherDispatchCoordinator.Dispatch call. Symmetric with handleNewLinearIssue.
-func (s *Service) handleNewJiraIssue(_ context.Context, event *bus.Event) error {
+func (s *Service) handleNewJiraIssue(ctx context.Context, event *bus.Event) error {
 	evt, ok := event.Data.(*jira.NewJiraIssueEvent)
 	if !ok || evt == nil || evt.Issue == nil {
 		return nil
@@ -65,7 +65,11 @@ func (s *Service) handleNewJiraIssue(_ context.Context, event *bus.Event) error 
 	}
 
 	src := NewJiraWatcherSource(s.jiraService, s.logger)
-	go s.watcherCoordinator.Dispatch(context.Background(), src, evt)
+	// Detach from cancellation but keep request-scoped values (tracing, etc.):
+	// the bus delivery context may be cancelled before task creation finishes,
+	// but in-memory/non-NATS bus implementations may carry values worth
+	// propagating.
+	go s.watcherCoordinator.Dispatch(context.WithoutCancel(ctx), src, evt)
 	return nil
 }
 

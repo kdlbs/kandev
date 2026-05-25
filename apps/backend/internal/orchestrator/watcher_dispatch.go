@@ -8,6 +8,14 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
+// Log field keys repeated across coordinator log calls. Hoisted to file
+// constants so a typo would be a compile error rather than a silent log-
+// search miss.
+const (
+	logFieldSource = "source"
+	logFieldTaskID = "task_id"
+)
+
 // WatcherDispatchCoordinator owns the cross-integration pipeline that turns
 // a freshly-observed external issue (Linear, Jira, future: GitHub issues,
 // webhooks) into a Kandev task. It is the single seam where throttling,
@@ -82,19 +90,19 @@ func (c *WatcherDispatchCoordinator) Dispatch(ctx context.Context, src WatcherSo
 	reserved, err := src.Reserve(ctx, evt)
 	if err != nil {
 		c.logger.Error("watcher dispatch: reserve failed",
-			zap.String("source", src.Name()), zap.Error(err))
+			zap.String(logFieldSource, src.Name()), zap.Error(err))
 		return
 	}
 	if !reserved {
 		c.logger.Debug("watcher dispatch: already reserved by concurrent handler",
-			zap.String("source", src.Name()))
+			zap.String(logFieldSource, src.Name()))
 		return
 	}
 
 	req, err := src.BuildTaskRequest(evt)
 	if err != nil {
 		c.logger.Error("watcher dispatch: build task request failed",
-			zap.String("source", src.Name()), zap.Error(err))
+			zap.String(logFieldSource, src.Name()), zap.Error(err))
 		src.Release(ctx, evt)
 		return
 	}
@@ -102,23 +110,23 @@ func (c *WatcherDispatchCoordinator) Dispatch(ctx context.Context, src WatcherSo
 	task, err := c.taskCreator.CreateIssueTask(ctx, req)
 	if err != nil {
 		c.logger.Error("watcher dispatch: create issue task failed",
-			zap.String("source", src.Name()), zap.Error(err))
+			zap.String(logFieldSource, src.Name()), zap.Error(err))
 		src.Release(ctx, evt)
 		return
 	}
 
 	if err := src.AttachTaskID(ctx, evt, task.ID); err != nil {
 		c.logger.Error("watcher dispatch: attach task id failed",
-			zap.String("source", src.Name()),
-			zap.String("task_id", task.ID),
+			zap.String(logFieldSource, src.Name()),
+			zap.String(logFieldTaskID, task.ID),
 			zap.Error(err))
 		// Do NOT release here — matches existing Linear/Jira behaviour:
 		// attach is a best-effort step, the task is already created.
 	}
 
 	c.logger.Info("watcher dispatch: created issue task",
-		zap.String("source", src.Name()),
-		zap.String("task_id", task.ID))
+		zap.String(logFieldSource, src.Name()),
+		zap.String(logFieldTaskID, task.ID))
 
 	if !c.shouldAutoStart(ctx, req.WorkflowStepID) {
 		return
@@ -127,12 +135,12 @@ func (c *WatcherDispatchCoordinator) Dispatch(ctx context.Context, src WatcherSo
 	params := src.AutoStartParams(evt)
 	if err := c.startTask.Start(ctx, task.ID, req.WorkflowStepID, params); err != nil {
 		c.logger.Error("watcher dispatch: auto-start failed",
-			zap.String("source", src.Name()),
-			zap.String("task_id", task.ID),
+			zap.String(logFieldSource, src.Name()),
+			zap.String(logFieldTaskID, task.ID),
 			zap.Error(err))
 		return
 	}
 	c.logger.Info("watcher dispatch: auto-started issue task",
-		zap.String("source", src.Name()),
-		zap.String("task_id", task.ID))
+		zap.String(logFieldSource, src.Name()),
+		zap.String(logFieldTaskID, task.ID))
 }

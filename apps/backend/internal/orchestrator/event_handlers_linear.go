@@ -41,7 +41,7 @@ func (s *Service) subscribeLinearEvents() {
 // (reserve, build, attach, release, auto-start params) lives in
 // LinearWatcherSource. The pipeline (create, auto-start, error/release
 // handling) lives in the coordinator.
-func (s *Service) handleNewLinearIssue(_ context.Context, event *bus.Event) error {
+func (s *Service) handleNewLinearIssue(ctx context.Context, event *bus.Event) error {
 	evt, ok := event.Data.(*linear.NewLinearIssueEvent)
 	if !ok || evt == nil || evt.Issue == nil {
 		return nil
@@ -65,9 +65,11 @@ func (s *Service) handleNewLinearIssue(_ context.Context, event *bus.Event) erro
 	}
 
 	src := NewLinearWatcherSource(s.linearService, s.logger)
-	// Background context: the bus delivery context may be cancelled before
-	// task creation finishes. The work is independent of the publisher.
-	go s.watcherCoordinator.Dispatch(context.Background(), src, evt)
+	// Detach from cancellation but keep request-scoped values (tracing, etc.):
+	// the bus delivery context may be cancelled before task creation finishes,
+	// but in-memory/non-NATS bus implementations may carry values worth
+	// propagating.
+	go s.watcherCoordinator.Dispatch(context.WithoutCancel(ctx), src, evt)
 	return nil
 }
 
