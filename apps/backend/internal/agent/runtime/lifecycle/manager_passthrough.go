@@ -283,7 +283,7 @@ func (m *Manager) writePassthroughMCPConfig(execution *AgentExecution, pt agents
 	}
 	port := passthroughMCPConfigPort(execution)
 	if port <= 0 {
-		return "", nil
+		return "", fmt.Errorf("standalone port unavailable for passthrough MCP config")
 	}
 	root := m.dataDir
 	if root == "" {

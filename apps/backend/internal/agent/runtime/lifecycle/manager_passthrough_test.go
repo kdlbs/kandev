@@ -409,6 +409,20 @@ func TestResumePassthroughSessionWithoutRunnerDoesNotWriteMCPConfig(t *testing.T
 	}
 }
 
+func TestPassthroughAgentCommandErrorsWhenMCPPortMissing(t *testing.T) {
+	mgr, execution, profile := newClaudePassthroughMCPTestManager(t)
+	execution.standalonePort = 0
+	delete(execution.Metadata, "standalone_port")
+
+	_, _, _, _, err := mgr.passthroughAgentCommand(execution, profile)
+	if err == nil {
+		t.Fatal("passthroughAgentCommand returned nil, want missing MCP port error")
+	}
+	if err.Error() != "standalone port unavailable for passthrough MCP config" {
+		t.Fatalf("error = %q, want missing MCP port error", err.Error())
+	}
+}
+
 func TestRemoveExecutionCleansPassthroughMCPConfig(t *testing.T) {
 	mgr, execution, profile := newClaudePassthroughMCPTestManager(t)
 	if err := mgr.executionStore.Add(execution); err != nil {
