@@ -313,7 +313,7 @@ func (m *Manager) CleanupStaleExecutionBySessionID(ctx context.Context, sessionI
 	}
 
 	// Remove from execution store
-	m.executionStore.Remove(execution.ID)
+	m.RemoveExecution(execution.ID)
 
 	// Delete the persistence row in lockstep with store removal so we never
 	// leave a phantom executors_running row pointing at a non-existent
@@ -343,6 +343,9 @@ func (m *Manager) CleanupStaleExecutionBySessionID(ctx context.Context, sessionI
 // Typical usage: Called by cleanup loops or after successful StopAgent completion.
 // For stale/dead executions, use CleanupStaleExecutionBySessionID instead.
 func (m *Manager) RemoveExecution(executionID string) {
+	if execution, ok := m.executionStore.Get(executionID); ok {
+		m.cleanupPassthroughMCPConfig(execution)
+	}
 	m.executionStore.Remove(executionID)
 	m.logger.Debug("removed execution from tracking",
 		zap.String("execution_id", executionID))

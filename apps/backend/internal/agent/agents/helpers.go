@@ -110,8 +110,15 @@ func (b *CmdBuilder) MCPConfig(flag Param, path string) *CmdBuilder {
 	if flag.IsEmpty() || path == "" {
 		return b
 	}
+	hasPlaceholder := false
 	for _, arg := range flag.args {
+		if strings.Contains(arg, "{mcp_config}") {
+			hasPlaceholder = true
+		}
 		b.args = append(b.args, strings.ReplaceAll(arg, "{mcp_config}", path))
+	}
+	if !hasPlaceholder {
+		b.args = append(b.args, path)
 	}
 	return b
 }

@@ -447,7 +447,7 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// End session trace span
 	execution.EndSessionSpan()
 
-	m.executionStore.Remove(executionID)
+	m.RemoveExecution(executionID)
 	m.clearRemoteStatus(execution.SessionID)
 
 	m.logger.Info("agent stopped and removed from tracking",
