@@ -250,8 +250,9 @@ export function buildPrByRepoMap(
       if (url) map[repoKey] = map[repoKey] ?? url;
     }
   }
-  if (!map[""] && taskPRs?.[0]?.pr_url) {
-    map[""] = taskPRs[0].pr_url;
+  const legacySingleRepo = taskPRs?.find((p) => p.pr_url && !p.repository_id);
+  if (!map[""] && legacySingleRepo?.pr_url) {
+    map[""] = legacySingleRepo.pr_url;
   }
   return map;
 }

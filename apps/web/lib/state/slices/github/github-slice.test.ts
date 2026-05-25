@@ -195,4 +195,17 @@ describe("setPendingPrUrlForTask", () => {
     store.getState().setTaskPR("task-1", makePR());
     expect(store.getState().pendingPrUrlByTaskId.byTaskId["task-1"]).toBeUndefined();
   });
+
+  it("clears only the synced repo pending URL in multi-repo tasks", () => {
+    const store = makeStore();
+    const urlA = "https://dev.azure.com/o/p/_git/a/pullrequest/1";
+    const urlB = "https://dev.azure.com/o/p/_git/b/pullrequest/2";
+
+    store.getState().setPendingPrUrlForTask("task-1", "repo-a", urlA);
+    store.getState().setPendingPrUrlForTask("task-1", "repo-b", urlB);
+    store.getState().setTaskPR("task-1", makePR({ repository_id: "repo-a", pr_url: urlA }));
+
+    expect(store.getState().pendingPrUrlByTaskId.byTaskId["task-1"]?.["repo-b"]).toBe(urlB);
+    expect(store.getState().pendingPrUrlByTaskId.byTaskId["task-1"]?.["repo-a"]).toBeUndefined();
+  });
 });

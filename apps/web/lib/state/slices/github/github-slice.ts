@@ -43,6 +43,21 @@ function clearPendingPrUrlForRepo(draft: GitHubSlice, taskId: string, repoKey: s
   }
 }
 
+/** Clear client-only pending URLs for the repo that just synced (not sibling repos). */
+function clearPendingForTaskPR(
+  draft: GitHubSlice,
+  taskId: string,
+  pr: { repository_id?: string; pr_url?: string },
+) {
+  clearPendingPrUrlForRepo(draft, taskId, pr.repository_id ?? "");
+  clearPendingPrUrlForRepo(draft, taskId, "");
+  const pending = draft.pendingPrUrlByTaskId.byTaskId[taskId];
+  if (!pending || !pr.pr_url) return;
+  for (const key of Object.keys(pending)) {
+    if (pending[key] === pr.pr_url) clearPendingPrUrlForRepo(draft, taskId, key);
+  }
+}
+
 function createTaskPRActions(
   set: ImmerSet,
 ): Pick<GitHubSlice, "setTaskPRs" | "setTaskPR" | "setPendingPrUrlForTask"> {
@@ -63,8 +78,7 @@ function createTaskPRActions(
         if (idx >= 0) existing[idx] = pr;
         else existing.push(pr);
         draft.taskPRs.byTaskId[taskId] = existing;
-        // Pending URLs are keyed by repo display name; clear all when TaskPR sync lands.
-        delete draft.pendingPrUrlByTaskId.byTaskId[taskId];
+        clearPendingForTaskPR(draft, taskId, pr);
       }),
     setPendingPrUrlForTask: (taskId, repoKey, prUrl) =>
       set((draft) => {

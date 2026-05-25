@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mapPRFilesToChangedFiles } from "./changes-panel-helpers";
+import { buildPrByRepoMap, mapPRFilesToChangedFiles } from "./changes-panel-helpers";
 import type { PRDiffFile } from "@/lib/types/github";
 
 function diffFile(overrides: Partial<PRDiffFile>): PRDiffFile {
@@ -66,5 +66,30 @@ describe("mapPRFilesToChangedFiles", () => {
   it("returns an empty array for empty input", () => {
     expect(mapPRFilesToChangedFiles([])).toEqual([]);
     expect(mapPRFilesToChangedFiles([], "frontend")).toEqual([]);
+  });
+});
+
+describe("buildPrByRepoMap", () => {
+  it("does not copy a multi-repo TaskPR URL into the empty-key fallback", () => {
+    const map = buildPrByRepoMap(
+      [
+        { pr_url: "https://github.com/o/r/pull/1", repository_id: "id-b" },
+        { pr_url: "https://github.com/o/r/pull/2", repository_id: "id-a" },
+      ],
+      { "id-a": "repo-a", "id-b": "repo-b" },
+      undefined,
+    );
+    expect(map[""]).toBeUndefined();
+    expect(map["repo-a"]).toBe("https://github.com/o/r/pull/2");
+    expect(map["repo-b"]).toBe("https://github.com/o/r/pull/1");
+  });
+
+  it("uses empty-key fallback only for legacy TaskPR rows without repository_id", () => {
+    const map = buildPrByRepoMap(
+      [{ pr_url: "https://dev.azure.com/o/p/_git/r/pullrequest/9" }],
+      {},
+      undefined,
+    );
+    expect(map[""]).toBe("https://dev.azure.com/o/p/_git/r/pullrequest/9");
   });
 });
