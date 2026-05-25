@@ -2,6 +2,18 @@ package agents
 
 import "testing"
 
+func TestPlanPassthroughStdinWrites_SingleAtomicWrite(t *testing.T) {
+	cfg := PassthroughConfig{SubmitSequence: "\r"}
+	got := PlanPassthroughStdinWrites("line1\nline2", cfg)
+	if len(got) != 1 {
+		t.Fatalf("got %d chunks, want 1 atomic write: %#v", len(got), got)
+	}
+	want := "\x1b[200~line1\nline2\x1b[201~\r"
+	if got[0] != want {
+		t.Errorf("payload = %q, want %q", got[0], want)
+	}
+}
+
 func TestPlanPassthroughStdinWrites_SingleLine(t *testing.T) {
 	cfg := PassthroughConfig{SubmitSequence: "\r"}
 	got := PlanPassthroughStdinWrites("hello", cfg)
@@ -10,37 +22,33 @@ func TestPlanPassthroughStdinWrites_SingleLine(t *testing.T) {
 	}
 }
 
-func TestPlanPassthroughStdinWrites_MultilineDefaultSubmit(t *testing.T) {
-	cfg := PassthroughConfig{SubmitSequence: "\r"}
-	got := PlanPassthroughStdinWrites("line1\nline2", cfg)
-	if len(got) != 2 {
-		t.Fatalf("got %d chunks, want 2: %#v", len(got), got)
-	}
-	wantBody := "\x1b[200~line1\nline2\x1b[201~"
-	if got[0] != wantBody {
-		t.Errorf("body = %q, want %q", got[0], wantBody)
-	}
-	if got[1] != "\r" {
-		t.Errorf("submit = %q, want \\r", got[1])
-	}
-}
-
-func TestPlanPassthroughStdinWrites_ClaudeMultilineUsesNewlineSubmit(t *testing.T) {
+func TestPlanPassthroughStdinWrites_ClaudeMultilineUsesCRLFSubmit(t *testing.T) {
 	cfg := NewClaudeACP().PassthroughConfig()
 	got := PlanPassthroughStdinWrites("### Review Comments\n\n> fix", cfg)
-	if len(got) != 2 {
-		t.Fatalf("got %d chunks, want 2: %#v", len(got), got)
+	if len(got) != 1 {
+		t.Fatalf("got %d chunks, want 1: %#v", len(got), got)
 	}
-	if got[1] != "\n" {
-		t.Errorf("Claude submit after bracketed paste = %q, want \\n", got[1])
+	if !stringsHasSuffix(got[0], "\r\n") {
+		t.Errorf("Claude payload must end with \\r\\n submit, got suffix %q", got[0][len(got[0])-4:])
+	}
+	if !stringsContains(got[0], "\x1b[200~") {
+		t.Error("expected bracketed paste wrapper")
 	}
 }
 
-func TestBuildPassthroughPayload_JoinsChunks(t *testing.T) {
-	cfg := PassthroughConfig{SubmitSequence: "\r"}
-	joined := BuildPassthroughPayload("a\nb", cfg)
-	plan := PlanPassthroughStdinWrites("a\nb", cfg)
-	if joined != plan[0]+plan[1] {
-		t.Errorf("BuildPassthroughPayload = %q, want %q", joined, plan[0]+plan[1])
+func stringsHasSuffix(s, suffix string) bool {
+	return len(s) >= len(suffix) && s[len(s)-len(suffix):] == suffix
+}
+
+func stringsContains(s, sub string) bool {
+	return len(sub) == 0 || (len(s) >= len(sub) && indexOf(s, sub) >= 0)
+}
+
+func indexOf(s, sub string) int {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return i
+		}
 	}
+	return -1
 }

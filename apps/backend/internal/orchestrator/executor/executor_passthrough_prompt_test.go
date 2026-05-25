@@ -185,15 +185,11 @@ func TestExecutor_Prompt_PassthroughPreservesUnicodeAndMultiline(t *testing.T) {
 	}
 	cfg := agents.PassthroughConfig{SubmitSequence: "\r"}
 	want := agents.BuildPassthroughPayload(prompt, cfg)
-	if len(agentManager.writePassthroughStdinCalls) != 2 {
-		t.Fatalf("expected 2 WritePassthroughStdin calls for multiline, got %d", len(agentManager.writePassthroughStdinCalls))
+	if len(agentManager.writePassthroughStdinCalls) != 1 {
+		t.Fatalf("expected 1 atomic WritePassthroughStdin call for multiline, got %d", len(agentManager.writePassthroughStdinCalls))
 	}
-	joined := agentManager.writePassthroughStdinCalls[0].Data + agentManager.writePassthroughStdinCalls[1].Data
-	if joined != want {
-		t.Errorf("PTY payload = %q, want %q", joined, want)
-	}
-	if agentManager.writePassthroughStdinCalls[1].Data != "\r" {
-		t.Errorf("submit chunk = %q, want \\r", agentManager.writePassthroughStdinCalls[1].Data)
+	if agentManager.writePassthroughStdinCalls[0].Data != want {
+		t.Errorf("PTY payload = %q, want %q", agentManager.writePassthroughStdinCalls[0].Data, want)
 	}
 }
 

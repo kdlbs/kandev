@@ -260,7 +260,7 @@ type PassthroughConfig struct {
 	// Empty inherits DefaultPassthroughSubmitSequence at PTY write sites.
 	SubmitSequence string
 	// SubmitAfterBracketedPaste overrides SubmitSequence when the prompt was
-	// wrapped in bracketed paste (multi-line). Claude Code expects "\n" there.
+	// wrapped in bracketed paste (multi-line). Claude Code uses "\r\n" there.
 	SubmitAfterBracketedPaste string
 }
 

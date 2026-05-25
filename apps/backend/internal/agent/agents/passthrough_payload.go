@@ -9,7 +9,7 @@ const (
 
 // PassthroughSubmitSequence returns the byte sequence to append after passthrough stdin
 // text. When bracketedPaste is true and SubmitAfterBracketedPaste is set on the config,
-// that override is used (Claude Code expects "\n" after paste end, not "\r").
+// that override is used (Claude Code often needs "\r\n" after paste end).
 func PassthroughSubmitSequence(cfg PassthroughConfig, bracketedPaste bool) string {
 	if bracketedPaste && cfg.SubmitAfterBracketedPaste != "" {
 		return cfg.SubmitAfterBracketedPaste
@@ -17,22 +17,21 @@ func PassthroughSubmitSequence(cfg PassthroughConfig, bracketedPaste bool) strin
 	return EffectiveSubmitSequence(cfg.SubmitSequence)
 }
 
-// PlanPassthroughStdinWrites returns one or more chunks to write to the PTY.
-// Single-line prompts are one write (text + submit). Multi-line prompts use bracketed
-// paste for the body; the submit key is a separate write so TUIs that mishandle paste+submit
-// in a single read (notably Claude Code) still see Enter as a distinct event.
-func PlanPassthroughStdinWrites(prompt string, cfg PassthroughConfig) []string {
+// BuildPassthroughPayload assembles the bytes for one atomic PTY stdin write.
+// Multi-line prompts use bracketed paste so embedded newlines are not treated as
+// premature Enter presses. The submit sequence is appended in the same write — split
+// writes break Claude Code's bracketed-paste parser (paste end without submit leaves
+// the TUI stuck with no visible input).
+func BuildPassthroughPayload(prompt string, cfg PassthroughConfig) string {
 	if !strings.Contains(prompt, "\n") {
-		return []string{prompt + PassthroughSubmitSequence(cfg, false)}
+		return prompt + PassthroughSubmitSequence(cfg, false)
 	}
 	submit := PassthroughSubmitSequence(cfg, true)
-	body := bracketedPasteStart + prompt + bracketedPasteEnd
-	return []string{body, submit}
+	return bracketedPasteStart + prompt + bracketedPasteEnd + submit
 }
 
-// BuildPassthroughPayload joins PlanPassthroughStdinWrites for callers that need a
-// single string (e.g. tests). Prefer PlanPassthroughStdinWrites for live PTY writes.
-func BuildPassthroughPayload(prompt string, cfg PassthroughConfig) string {
-	chunks := PlanPassthroughStdinWrites(prompt, cfg)
-	return strings.Join(chunks, "")
+// PlanPassthroughStdinWrites returns PTY write chunk(s). Today this is always a single
+// atomic write so bracketed-paste sequences are not split across syscalls.
+func PlanPassthroughStdinWrites(prompt string, cfg PassthroughConfig) []string {
+	return []string{BuildPassthroughPayload(prompt, cfg)}
 }

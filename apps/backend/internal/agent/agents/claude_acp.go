@@ -46,7 +46,7 @@ func NewClaudeACP() *ClaudeACP {
 				SessionResumeFlag:         NewParam("--resume"),
 				AutoInjectPrompt:          true,
 				SubmitSequence:            "\r",
-				SubmitAfterBracketedPaste: "\n",
+				SubmitAfterBracketedPaste: "\r\n",
 			},
 		},
 	}
