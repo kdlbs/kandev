@@ -20,6 +20,7 @@ import {
   setPinnedTarget,
 } from "./layout-manager";
 import type { LayoutState, LayoutGroupIds } from "./layout-manager";
+import { ENV_SCOPED_DOCKVIEW_COMPONENTS } from "./dockview-env-scoped-components";
 import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
 
 const debug = createDebugLogger("dockview:env-switch");
@@ -45,14 +46,7 @@ function snapshotGridShape(node: any, depth = 0): unknown {
   return null;
 }
 
-const EPHEMERAL_COMPONENTS = new Set([
-  "file-editor",
-  "browser",
-  "vscode",
-  "commit-detail",
-  "diff-viewer",
-  "pr-detail",
-]);
+const EPHEMERAL_COMPONENTS = ENV_SCOPED_DOCKVIEW_COMPONENTS;
 
 /** Fetch the saved layout for an env, dropping it if its shape is corrupted. */
 function getHealthyEnvLayout(envId: string): object | null {

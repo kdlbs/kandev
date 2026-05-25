@@ -74,6 +74,7 @@ import type { Terminal } from "@/hooks/domains/session/use-terminals";
 // Portal system
 import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import { PanelPortalHost, usePortalSlot } from "@/lib/layout/panel-portal-host";
+import { ENV_SCOPED_DOCKVIEW_COMPONENTS } from "@/lib/state/dockview-env-scoped-components";
 
 // ---------------------------------------------------------------------------
 // PORTAL SLOT — generic dockview component that adopts a persistent portal
@@ -110,14 +111,7 @@ import { PanelPortalHost, usePortalSlot } from "@/lib/layout/panel-portal-host";
  *  - files    — uses `useEnvironmentSessionId()` for stable file tree
  *  - plan     — reads `activeTaskId` from the store
  */
-const ENV_SCOPED_COMPONENTS = new Set([
-  "file-editor",
-  "browser",
-  "vscode",
-  "commit-detail",
-  "diff-viewer",
-  "pr-detail",
-]);
+const ENV_SCOPED_COMPONENTS = ENV_SCOPED_DOCKVIEW_COMPONENTS;
 
 /**
  * Every entry in the dockview `components` map uses this wrapper.

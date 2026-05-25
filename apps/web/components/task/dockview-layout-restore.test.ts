@@ -5,10 +5,21 @@ import {
   tryRestoreLayout,
 } from "./dockview-layout-restore";
 import * as localStorage from "@/lib/local-storage";
+import { ENV_SCOPED_DOCKVIEW_COMPONENTS } from "@/lib/state/dockview-env-scoped-components";
 
 const VALID_COMPONENTS = new Set<string>(["chat", "files", "shell", "git", "terminal"]);
 const PHANTOM_PANEL_ID = "session:phantom";
 const ALIVE_PANEL_ID = "session:alive-1";
+const PREVIEW_FILE_EDITOR_PANEL_ID = "preview:file-editor";
+const TERMINAL_DEFAULT_PANEL_ID = "terminal-default";
+const ENV_SCOPED_PANEL_ID_BY_COMPONENT: Record<string, string> = {
+  browser: "browser:http://localhost:3000",
+  "commit-detail": "preview:commit-detail",
+  "diff-viewer": "preview:file-diff",
+  "file-editor": PREVIEW_FILE_EDITOR_PANEL_ID,
+  "pr-detail": "pr-detail",
+  vscode: "vscode",
+};
 
 /**
  * Build a minimal valid SerializedDockview-shaped object — matches what
@@ -50,6 +61,34 @@ function buildLayout(opts?: { centerSize?: number; sidebarSize?: number; rightSi
     },
     activeGroup: "g-center",
   };
+}
+
+function makeFakeRestoreApi() {
+  return {
+    fromJSON: vi.fn(),
+    layout: vi.fn(),
+    width: 1600,
+    height: 600,
+    groups: [],
+    panels: [],
+    activeGroup: { id: "g-center" },
+    getPanel: vi.fn(() => null),
+    onDidActiveGroupChange: vi.fn(() => ({ dispose: vi.fn() })),
+    onDidLayoutChange: vi.fn(() => ({ dispose: vi.fn() })),
+  } as unknown as Parameters<typeof tryRestoreLayout>[0];
+}
+
+function restoreGlobalFallbackLayout(
+  layout: ReturnType<typeof buildLayout>,
+  components: Set<string>,
+) {
+  window.localStorage.setItem("dockview-layout-v2", JSON.stringify(layout));
+  const api = makeFakeRestoreApi();
+  const restored = tryRestoreLayout(api, null, components);
+
+  expect(restored).toBe(true);
+  expect(api.fromJSON).toHaveBeenCalledOnce();
+  return (api.fromJSON as ReturnType<typeof vi.fn>).mock.calls[0][0];
 }
 
 describe("sanitizeLayout - size validation", () => {
@@ -274,21 +313,6 @@ describe("tryRestoreLayout - phantom session panel filtering", () => {
     vi.restoreAllMocks();
   });
 
-  function makeFakeApi() {
-    return {
-      fromJSON: vi.fn(),
-      layout: vi.fn(),
-      width: 1600,
-      height: 600,
-      groups: [],
-      panels: [],
-      activeGroup: { id: "g-center" },
-      getPanel: vi.fn(() => null),
-      onDidActiveGroupChange: vi.fn(() => ({ dispose: vi.fn() })),
-      onDidLayoutChange: vi.fn(() => ({ dispose: vi.fn() })),
-    } as unknown as Parameters<typeof tryRestoreLayout>[0];
-  }
-
   it("restores the (stripped) layout when every session in the saved env-layout is a phantom", () => {
     // Saved layout had a single session panel — a phantom from a previously-
     // deleted task. After stripping, no session panels remain. We still
@@ -303,7 +327,7 @@ describe("tryRestoreLayout - phantom session panel filtering", () => {
     vi.spyOn(localStorage, "getEnvLayout").mockReturnValue(layout);
     vi.spyOn(localStorage, "getEnvMaximizeState").mockReturnValue(null);
 
-    const api = makeFakeApi();
+    const api = makeFakeRestoreApi();
     const restored = tryRestoreLayout(api, "env-new", VALID_COMPONENTS, new Set(["phantom"]));
     expect(restored).toBe(true);
     expect(api.fromJSON).toHaveBeenCalledOnce();
@@ -323,7 +347,7 @@ describe("tryRestoreLayout - phantom session panel filtering", () => {
     vi.spyOn(localStorage, "getEnvLayout").mockReturnValue(layout);
     vi.spyOn(localStorage, "getEnvMaximizeState").mockReturnValue(null);
 
-    const api = makeFakeApi();
+    const api = makeFakeRestoreApi();
     const restored = tryRestoreLayout(api, "env-X", VALID_COMPONENTS, new Set(["phantom"]));
     expect(restored).toBe(true);
     expect(api.fromJSON).toHaveBeenCalledOnce();
@@ -336,10 +360,58 @@ describe("tryRestoreLayout - phantom session panel filtering", () => {
     vi.spyOn(localStorage, "getEnvLayout").mockReturnValue(layout);
     vi.spyOn(localStorage, "getEnvMaximizeState").mockReturnValue(null);
 
-    const api = makeFakeApi();
+    const api = makeFakeRestoreApi();
     const restored = tryRestoreLayout(api, "env-X", VALID_COMPONENTS, new Set());
     expect(restored).toBe(true);
     expect(api.fromJSON).toHaveBeenCalledOnce();
+  });
+});
+
+describe("tryRestoreLayout - global fallback env-scoped panel filtering", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    window.localStorage.clear();
+  });
+
+  it.each(
+    [...ENV_SCOPED_DOCKVIEW_COMPONENTS].map((component) => ({
+      component,
+      panelId: ENV_SCOPED_PANEL_ID_BY_COMPONENT[component] ?? `${component}:stale`,
+    })),
+  )("strips $component panels from the no-env global fallback layout", ({ component, panelId }) => {
+    const layout = buildLayout();
+    layout.grid.root.data[1].data.views = [PHANTOM_PANEL_ID, panelId];
+    layout.grid.root.data[1].data.activeView = panelId;
+    const panels = layout.panels as Record<string, { id?: string; contentComponent: string }>;
+    delete panels.chat;
+    Object.assign(panels, {
+      [PHANTOM_PANEL_ID]: { id: PHANTOM_PANEL_ID, contentComponent: "chat" },
+      [panelId]: { id: panelId, contentComponent: component },
+    });
+
+    const restoredLayout = restoreGlobalFallbackLayout(
+      layout,
+      new Set([...VALID_COMPONENTS, component]),
+    );
+    expect(Object.keys(restoredLayout.panels)).not.toContain(PHANTOM_PANEL_ID);
+    expect(Object.keys(restoredLayout.panels)).not.toContain(panelId);
+  });
+
+  it("keeps terminal panels in the no-env global fallback layout", () => {
+    const layout = buildLayout();
+    layout.grid.root.data[1].data.views = [TERMINAL_DEFAULT_PANEL_ID];
+    layout.grid.root.data[1].data.activeView = TERMINAL_DEFAULT_PANEL_ID;
+    const panels = layout.panels as Record<string, { id?: string; contentComponent: string }>;
+    delete panels.chat;
+    Object.assign(panels, {
+      [TERMINAL_DEFAULT_PANEL_ID]: {
+        id: TERMINAL_DEFAULT_PANEL_ID,
+        contentComponent: "terminal",
+      },
+    });
+
+    const restoredLayout = restoreGlobalFallbackLayout(layout, VALID_COMPONENTS);
+    expect(Object.keys(restoredLayout.panels)).toContain(TERMINAL_DEFAULT_PANEL_ID);
   });
 });
 
