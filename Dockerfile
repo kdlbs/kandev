@@ -23,17 +23,22 @@ LABEL org.opencontainers.image.pnpm-version="${PNPM_VERSION}"
 
 # Install runtime dependencies. gh is included because the GitHub integration
 # (PR review, webhooks) shells out to it for auth fallback when GITHUB_TOKEN
-# is not set. apprise is installed via pipx for notification fan-out.
+# is not set. Azure CLI + azure-devops extension support agentctl Azure Repos
+# PR creation (az repos pr create). apprise is installed via pipx for
+# notification fan-out.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         git \
         gh \
         ca-certificates \
+        curl \
         gosu \
         tini \
         python3 \
         python3-venv \
         pipx && \
+    curl -sL https://aka.ms/InstallAzureCLIDeb | bash && \
+    az extension add --name azure-devops && \
     rm -rf /var/lib/apt/lists/* && \
     PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install apprise
 

@@ -17,14 +17,17 @@ import (
 type prProvider string
 
 const (
-	prProviderGitHub          prProvider = "github"
-	prProviderAzureRepos      prProvider = "azure_repos"
-	prCreateSubcommand                   = "create"
-	repositoryFlagTitle                  = "--title"
-	repositoryFlagBody                   = "--body"
-	repositoryFlagDescription            = "--description"
-	repositoryFlagHead                   = "--head"
-	redactedLogValue                     = "[REDACTED]"
+	prProviderGitHub               prProvider = "github"
+	prProviderAzureRepos           prProvider = "azure_repos"
+	prCreateSubcommand                        = "create"
+	repositoryFlagTitle                       = "--title"
+	repositoryFlagBody                        = "--body"
+	repositoryFlagDescription                 = "--description"
+	repositoryFlagHead                        = "--head"
+	redactedLogValue                          = "[REDACTED]"
+	azureDevOpsExtensionName                  = "azure-devops"
+	errAzureCLIMissing                        = "Azure CLI (az) is not on PATH; install it and run: az extension add --name azure-devops"
+	errAzureDevOpsExtensionMissing            = "Azure DevOps CLI extension is not installed; run: az extension add --name azure-devops"
 )
 
 type azureRepoInfo struct {
@@ -391,14 +394,27 @@ func (g *GitOperator) createGitHubPR(
 	return result, nil
 }
 
+func ensureAzureDevOpsCLI(ctx context.Context) error {
+	if _, err := exec.LookPath("az"); err != nil {
+		return fmt.Errorf("%s", errAzureCLIMissing)
+	}
+
+	cmd := exec.CommandContext(ctx, "az", "extension", "show", "--name", azureDevOpsExtensionName)
+	cmd.Env = filterGitEnv(os.Environ())
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s", errAzureDevOpsExtensionMissing)
+	}
+	return nil
+}
+
 func (g *GitOperator) createAzureReposPR(
 	ctx context.Context,
 	result *PRCreateResult,
 	remoteURL, branch, title, body, baseBranch string,
 	draft bool,
 ) (*PRCreateResult, error) {
-	if _, err := exec.LookPath("az"); err != nil {
-		result.Error = "Azure CLI (az) is not on PATH; install it and run: az extension add --name azure-devops"
+	if err := ensureAzureDevOpsCLI(ctx); err != nil {
+		result.Error = err.Error()
 		return result, nil
 	}
 

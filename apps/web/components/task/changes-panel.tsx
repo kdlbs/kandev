@@ -64,7 +64,9 @@ function useChangesPanelStoreData() {
     if (!taskId) return undefined;
     // Single-PR consumer: surface the primary PR's URL. Multi-repo cases get
     // per-repo PR URLs via the timeline's prByRepo map elsewhere.
-    return state.taskPRs.byTaskId[taskId]?.[0]?.pr_url ?? undefined;
+    const fromTaskPR = state.taskPRs.byTaskId[taskId]?.[0]?.pr_url;
+    if (fromTaskPR) return fromTaskPR;
+    return state.pendingPrUrlByTaskId.byTaskId[taskId]?.[""];
   });
   return { activeTaskId, activeSessionId, taskTitle, baseBranch, existingPrUrl };
 }
@@ -502,12 +504,18 @@ function useChangesPanelData() {
   const dialogs = { ...localDialogs, ...vcsDialogs };
   const repoCallbacks = usePerRepoCallbacks(git, vcsDialogs, gitHandlers);
   const repoDisplayName = useRepoDisplayName(activeSessionId);
-  // Existing PR URL is currently workspace-scoped — surface it under the
-  // empty (single-repo) key so per-repo Create PR can show "PR exists".
-  const prByRepo = useMemo<Record<string, string | undefined>>(
-    () => ({ "": existingPrUrl }),
-    [existingPrUrl],
+  const pendingByRepo = useAppStore((state) =>
+    activeTaskId ? state.pendingPrUrlByTaskId.byTaskId[activeTaskId] : undefined,
   );
+  // Merge TaskPR URLs with client-only pending URLs (e.g. Azure Repos before TaskPR sync).
+  const prByRepo = useMemo<Record<string, string | undefined>>(() => {
+    const map: Record<string, string | undefined> = { "": existingPrUrl };
+    if (!pendingByRepo) return map;
+    for (const [repoKey, url] of Object.entries(pendingByRepo)) {
+      if (url) map[repoKey] = url;
+    }
+    return map;
+  }, [existingPrUrl, pendingByRepo]);
   return {
     git,
     baseBranchDisplay,

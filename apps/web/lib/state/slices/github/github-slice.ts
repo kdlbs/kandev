@@ -4,6 +4,7 @@ import type { GitHubSlice, GitHubSliceState } from "./types";
 export const defaultGitHubState: GitHubSliceState = {
   githubStatus: { status: null, loaded: false, loading: false },
   taskPRs: { byTaskId: {} },
+  pendingPrUrlByTaskId: { byTaskId: {} },
   prWatches: { items: [], loaded: false, loading: false },
   reviewWatches: { items: [], loaded: false, loading: false },
   issueWatches: { items: [], loaded: false, loading: false },
@@ -33,7 +34,22 @@ function createGitHubStatusActions(
   };
 }
 
-function createTaskPRActions(set: ImmerSet): Pick<GitHubSlice, "setTaskPRs" | "setTaskPR"> {
+function clearPendingPrUrlForRepo(
+  draft: GitHubSlice,
+  taskId: string,
+  repoKey: string,
+) {
+  const pending = draft.pendingPrUrlByTaskId.byTaskId[taskId];
+  if (!pending) return;
+  delete pending[repoKey];
+  if (Object.keys(pending).length === 0) {
+    delete draft.pendingPrUrlByTaskId.byTaskId[taskId];
+  }
+}
+
+function createTaskPRActions(
+  set: ImmerSet,
+): Pick<GitHubSlice, "setTaskPRs" | "setTaskPR" | "setPendingPrUrlForTask"> {
   return {
     setTaskPRs: (prs) =>
       set((draft) => {
@@ -51,6 +67,19 @@ function createTaskPRActions(set: ImmerSet): Pick<GitHubSlice, "setTaskPRs" | "s
         if (idx >= 0) existing[idx] = pr;
         else existing.push(pr);
         draft.taskPRs.byTaskId[taskId] = existing;
+        clearPendingPrUrlForRepo(draft, taskId, repoKey);
+      }),
+    setPendingPrUrlForTask: (taskId, repoKey, prUrl) =>
+      set((draft) => {
+        const trimmed = prUrl.trim();
+        if (!trimmed) {
+          clearPendingPrUrlForRepo(draft, taskId, repoKey);
+          return;
+        }
+        if (!draft.pendingPrUrlByTaskId.byTaskId[taskId]) {
+          draft.pendingPrUrlByTaskId.byTaskId[taskId] = {};
+        }
+        draft.pendingPrUrlByTaskId.byTaskId[taskId][repoKey] = trimmed;
       }),
   };
 }

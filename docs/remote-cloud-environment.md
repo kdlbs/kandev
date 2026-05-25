@@ -9,11 +9,12 @@ Setup notes and caveats for developing Kandev in ephemeral cloud VMs (Cursor Clo
 - **pnpm 9.15.9** — matches `packageManager` in `apps/package.json`. Install with `npm install -g pnpm@9.15.9`.
 - **golangci-lint v2** — required for `make lint-backend`. Install with `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest`.
 - **gcc** — required for CGO (SQLite FTS5). Pre-installed on most Ubuntu-based cloud VMs.
-- **Azure Repos PR creation (optional)** — only needed when testing `worktree.create_pr` against Azure remotes:
+- **Azure Repos PR creation (optional)** — only needed when testing `worktree.create_pr` against Azure remotes outside the published Docker image:
   - [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli) (`az`) on `PATH`
   - DevOps extension: `az extension add --name azure-devops`
   - Auth: `az login` or `export AZURE_DEVOPS_EXT_PAT=<pat>`
-  - GitHub PR creation still uses `gh` (see host table in `apps/backend/internal/agentctl/AGENTS.md`).
+  - The `ghcr.io/kdlbs/kandev` image ships `gh`, `az`, and the `azure-devops` extension preinstalled (see root `Dockerfile`).
+  - Host routing table: `apps/backend/internal/agentctl/AGENTS.md`.
 
 ## Generated files before typecheck
 

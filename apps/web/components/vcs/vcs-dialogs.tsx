@@ -28,6 +28,7 @@ import {
 import { useSessionGit } from "@/hooks/domains/session/use-session-git";
 import { useRepoDisplayName } from "@/hooks/domains/session/use-repo-display-name";
 import { useGitOperations } from "@/hooks/use-git-operations";
+import { useAppStore } from "@/lib/state/store";
 import { useGitWithFeedback } from "@/hooks/use-git-with-feedback";
 import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
@@ -469,6 +470,8 @@ function useCreatePRHandler(
   createPR: ReturnType<typeof useGitOperations>["createPR"],
   toast: ReturnType<typeof useToast>["toast"],
 ) {
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const setPendingPrUrlForTask = useAppStore((state) => state.setPendingPrUrlForTask);
   return useCallback(async () => {
     if (!ps.title.trim()) return;
     ps.setOpen(false);
@@ -487,7 +490,12 @@ function useCreatePRHandler(
           description: result.pr_url || "PR created successfully",
           variant: "success",
         });
-        if (result.pr_url) window.open(result.pr_url, "_blank");
+        if (result.pr_url) {
+          if (activeTaskId) {
+            setPendingPrUrlForTask(activeTaskId, ps.repo || "", result.pr_url);
+          }
+          window.open(result.pr_url, "_blank");
+        }
       } else {
         toast({
           title: "Create PR failed",
@@ -504,7 +512,7 @@ function useCreatePRHandler(
     }
     ps.setTitle("");
     ps.setBody("");
-  }, [ps, baseBranch, createPR, toast]);
+  }, [ps, baseBranch, createPR, toast, activeTaskId, setPendingPrUrlForTask]);
 }
 
 function useVcsDialogsState(

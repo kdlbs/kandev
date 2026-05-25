@@ -64,6 +64,7 @@ export const defaultState = {
   sessionPollMode: defaultSessionRuntimeState.sessionPollMode,
   githubStatus: defaultGitHubState.githubStatus,
   taskPRs: defaultGitHubState.taskPRs,
+  pendingPrUrlByTaskId: defaultGitHubState.pendingPrUrlByTaskId,
   prWatches: defaultGitHubState.prWatches,
   reviewWatches: defaultGitHubState.reviewWatches,
   issueWatches: defaultGitHubState.issueWatches,

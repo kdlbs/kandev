@@ -180,3 +180,17 @@ describe("setTaskPR", () => {
     expect(store.getState().taskPRs.byTaskId["task-1"]).toEqual([pr]);
   });
 });
+
+describe("setPendingPrUrlForTask", () => {
+  it("stores a pending PR URL until TaskPR sync clears it", () => {
+    const store = makeStore();
+
+    store.getState().setPendingPrUrlForTask("task-1", "", "https://dev.azure.com/o/p/_git/r/pullrequest/1");
+    expect(store.getState().pendingPrUrlByTaskId.byTaskId["task-1"]?.[""]).toBe(
+      "https://dev.azure.com/o/p/_git/r/pullrequest/1",
+    );
+
+    store.getState().setTaskPR("task-1", makePR());
+    expect(store.getState().pendingPrUrlByTaskId.byTaskId["task-1"]).toBeUndefined();
+  });
+});

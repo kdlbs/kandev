@@ -20,6 +20,14 @@ export type TaskPRsState = {
   byTaskId: Record<string, TaskPR[]>;
 };
 
+export type PendingPrUrlsState = {
+  /**
+   * Client-only PR URLs after Create PR succeeds before TaskPR sync (e.g. Azure Repos).
+   * Keyed by task id, then repo name (or "" for single-repo).
+   */
+  byTaskId: Record<string, Record<string, string>>;
+};
+
 export type PRWatchesState = {
   items: PRWatch[];
   loaded: boolean;
@@ -56,6 +64,7 @@ export type PRFeedbackCacheState = {
 export type GitHubSliceState = {
   githubStatus: GitHubStatusState;
   taskPRs: TaskPRsState;
+  pendingPrUrlByTaskId: PendingPrUrlsState;
   prWatches: PRWatchesState;
   reviewWatches: ReviewWatchesState;
   issueWatches: IssueWatchesState;
@@ -68,6 +77,7 @@ export type GitHubSliceActions = {
   setGitHubStatusLoading: (loading: boolean) => void;
   setTaskPRs: (prs: Record<string, TaskPR[]>) => void;
   setTaskPR: (taskId: string, pr: TaskPR) => void;
+  setPendingPrUrlForTask: (taskId: string, repoKey: string, prUrl: string) => void;
   setPRWatches: (watches: PRWatch[]) => void;
   setPRWatchesLoading: (loading: boolean) => void;
   removePRWatch: (id: string) => void;

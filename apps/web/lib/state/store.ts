@@ -183,6 +183,7 @@ export type AppState = {
   // GitHub slice
   githubStatus: (typeof defaultGitHubState)["githubStatus"];
   taskPRs: (typeof defaultGitHubState)["taskPRs"];
+  pendingPrUrlByTaskId: (typeof defaultGitHubState)["pendingPrUrlByTaskId"];
   prWatches: (typeof defaultGitHubState)["prWatches"];
   reviewWatches: (typeof defaultGitHubState)["reviewWatches"];
   issueWatches: (typeof defaultGitHubState)["issueWatches"];
@@ -233,6 +234,7 @@ export type AppState = {
   setGitHubStatusLoading: (loading: boolean) => void;
   setTaskPRs: (prs: Record<string, TaskPR[]>) => void;
   setTaskPR: (taskId: string, pr: TaskPR) => void;
+  setPendingPrUrlForTask: (taskId: string, repoKey: string, prUrl: string) => void;
   setPRWatches: (watches: PRWatch[]) => void;
   setPRWatchesLoading: (loading: boolean) => void;
   removePRWatch: (id: string) => void;
@@ -636,6 +638,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
       sessionPollMode: merged.sessionPollMode,
       githubStatus: merged.githubStatus,
       taskPRs: merged.taskPRs,
+      pendingPrUrlByTaskId: merged.pendingPrUrlByTaskId,
       prWatches: merged.prWatches,
       reviewWatches: merged.reviewWatches,
       issueWatches: merged.issueWatches,

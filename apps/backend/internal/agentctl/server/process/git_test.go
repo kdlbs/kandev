@@ -113,7 +113,17 @@ func TestGitOperatorCreatePR_UsesAzureCLIForAzureRepos(t *testing.T) {
 	scriptDir := t.TempDir()
 	azArgsPath := filepath.Join(scriptDir, "az-args.txt")
 	writeExecutable(t, filepath.Join(scriptDir, "git"), fmt.Sprintf("#!/bin/sh\nif [ \"$1\" = \"remote\" ] && [ \"$2\" = \"get-url\" ] && [ \"$3\" = \"origin\" ]; then\n  printf '%s\\n' 'git@ssh.dev.azure.com:v3/acme/platform/widgets'\n  exit 0\nfi\nexec %q \"$@\"\n", "%s", realGit))
-	writeExecutable(t, filepath.Join(scriptDir, "az"), fmt.Sprintf("#!/bin/sh\nprintf '%s\\n' \"$@\" > %q\nprintf '%s\\n' 'WARNING: preview command group' >&2\nprintf 'Creating pull request...\\n'\ncat <<'EOF'\n{\"pullRequestId\":42,\"repository\":{\"remoteUrl\":\"https://dev.azure.com/acme/platform/_git/widgets\"}}\nEOF\n", "%s", azArgsPath, "%s"))
+	writeExecutable(t, filepath.Join(scriptDir, "az"), fmt.Sprintf(`#!/bin/sh
+if [ "$1" = "extension" ] && [ "$2" = "show" ]; then
+  exit 0
+fi
+printf '%%s\n' "$@" > %q
+printf 'WARNING: preview command group\n' >&2
+printf 'Creating pull request...\n'
+cat <<'EOF'
+{"pullRequestId":42,"repository":{"remoteUrl":"https://dev.azure.com/acme/platform/_git/widgets"}}
+EOF
+`, azArgsPath))
 	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	gitOp := NewGitOperator(repoDir, log, nil)
@@ -162,6 +172,135 @@ func writeExecutable(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
 		t.Fatalf("write executable %s: %v", path, err)
+	}
+}
+
+func writeGitRemoteWrapper(t *testing.T, scriptDir, originURL string) {
+	t.Helper()
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatalf("find git: %v", err)
+	}
+	writeExecutable(
+		t,
+		filepath.Join(scriptDir, "git"),
+		fmt.Sprintf("#!/bin/sh\nif [ \"$1\" = \"remote\" ] && [ \"$2\" = \"get-url\" ] && [ \"$3\" = \"origin\" ]; then\n  printf '%%s\\n' %q\n  exit 0\nfi\nexec %q \"$@\"\n", originURL, realGit),
+	)
+}
+
+func TestGitOperatorCreatePR_UnsupportedGitLabRemote(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell wrapper test is Unix-only")
+	}
+
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	log := newTestLogger(t)
+	runGit(t, repoDir, "checkout", "-b", "feature/gitlab-pr")
+	writeFile(t, repoDir, "gitlab.txt", "gitlab\n")
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "add gitlab change")
+
+	scriptDir := t.TempDir()
+	writeGitRemoteWrapper(t, scriptDir, "git@gitlab.com:acme/widgets.git")
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	gitOp := NewGitOperator(repoDir, log, nil)
+	result, err := gitOp.CreatePR(context.Background(), "Title", "Body", "main", false)
+	if err != nil {
+		t.Fatalf("CreatePR returned error: %v", err)
+	}
+	if result.Success {
+		t.Fatalf("CreatePR should fail for GitLab remote: %+v", result)
+	}
+	if !strings.Contains(result.Error, "unsupported git remote") {
+		t.Fatalf("unexpected error: %q", result.Error)
+	}
+}
+
+func TestGitOperatorCreatePR_AzureMissingCLI(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell wrapper test is Unix-only")
+	}
+
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	log := newTestLogger(t)
+	runGit(t, repoDir, "checkout", "-b", "feature/azure-missing-cli")
+	writeFile(t, repoDir, "azure.txt", "azure\n")
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "add azure change")
+
+	scriptDir := t.TempDir()
+	writeGitRemoteWrapper(t, scriptDir, "git@ssh.dev.azure.com:v3/acme/platform/widgets")
+	// No az on PATH — only git wrapper.
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	gitOp := NewGitOperator(repoDir, log, nil)
+	result, err := gitOp.CreatePR(context.Background(), "Title", "Body", "main", false)
+	if err != nil {
+		t.Fatalf("CreatePR returned error: %v", err)
+	}
+	if result.Success {
+		t.Fatalf("CreatePR should fail without az: %+v", result)
+	}
+	if result.Error != errAzureCLIMissing {
+		t.Fatalf("error = %q, want %q", result.Error, errAzureCLIMissing)
+	}
+}
+
+func TestGitOperatorCreatePR_AzureMissingExtension(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell wrapper test is Unix-only")
+	}
+
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	log := newTestLogger(t)
+	runGit(t, repoDir, "checkout", "-b", "feature/azure-missing-ext")
+	writeFile(t, repoDir, "azure.txt", "azure\n")
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "add azure change")
+
+	scriptDir := t.TempDir()
+	writeGitRemoteWrapper(t, scriptDir, "git@ssh.dev.azure.com:v3/acme/platform/widgets")
+	writeExecutable(t, filepath.Join(scriptDir, "az"), "#!/bin/sh\nif [ \"$1\" = \"extension\" ] && [ \"$2\" = \"show\" ]; then exit 1; fi\nexit 0\n")
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	gitOp := NewGitOperator(repoDir, log, nil)
+	result, err := gitOp.CreatePR(context.Background(), "Title", "Body", "main", false)
+	if err != nil {
+		t.Fatalf("CreatePR returned error: %v", err)
+	}
+	if result.Success {
+		t.Fatalf("CreatePR should fail without azure-devops extension: %+v", result)
+	}
+	if result.Error != errAzureDevOpsExtensionMissing {
+		t.Fatalf("error = %q, want %q", result.Error, errAzureDevOpsExtensionMissing)
+	}
+}
+
+func TestEnsureAzureDevOpsCLI(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell wrapper test is Unix-only")
+	}
+
+	scriptDir := t.TempDir()
+	writeExecutable(t, filepath.Join(scriptDir, "az"), "#!/bin/sh\nif [ \"$1\" = \"extension\" ] && [ \"$2\" = \"show\" ]; then exit 0; fi\nexit 1\n")
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	if err := ensureAzureDevOpsCLI(context.Background()); err != nil {
+		t.Fatalf("ensureAzureDevOpsCLI() error = %v", err)
+	}
+
+	t.Setenv("PATH", "")
+	if err := ensureAzureDevOpsCLI(context.Background()); err == nil {
+		t.Fatal("expected error when az is missing")
+	} else if err.Error() != errAzureCLIMissing {
+		t.Fatalf("error = %q, want %q", err.Error(), errAzureCLIMissing)
 	}
 }
 
