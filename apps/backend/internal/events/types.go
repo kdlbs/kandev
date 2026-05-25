@@ -238,6 +238,11 @@ const (
 	LinearNewIssue = "linear.new_issue" // New issue found matching a Linear issue watch
 )
 
+// Event types for Sentry integration
+const (
+	SentryNewIssue = "sentry.new_issue" // New issue found matching a Sentry issue watch
+)
+
 // BuildShellOutputSubject creates a shell output subject for a specific session
 func BuildShellOutputSubject(sessionID string) string {
 	return ShellOutput + "." + sessionID

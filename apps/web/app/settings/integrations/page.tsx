@@ -3,6 +3,7 @@ import {
   IconBrandGithub,
   IconBrandGitlab,
   IconBrandSlack,
+  IconBug,
   IconHexagon,
   IconTicket,
 } from "@tabler/icons-react";
@@ -32,6 +33,12 @@ const INTEGRATIONS = [
     label: "Linear",
     description: "Personal API key and team defaults.",
     Icon: IconHexagon,
+  },
+  {
+    href: "/settings/integrations/sentry",
+    label: "Sentry",
+    description: "Auth token, org/project defaults, and issue browsing.",
+    Icon: IconBug,
   },
   {
     href: "/settings/integrations/slack",

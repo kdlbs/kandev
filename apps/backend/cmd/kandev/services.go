@@ -24,6 +24,7 @@ import (
 	"github.com/kandev/kandev/internal/linear"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	"github.com/kandev/kandev/internal/secrets"
+	"github.com/kandev/kandev/internal/sentry"
 	"github.com/kandev/kandev/internal/slack"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -95,6 +96,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	gitlabSvc := initGitLabService(dbPool, repos.Secrets, log)
 	jiraSvc := initJiraService(dbPool, eventBus, repos.Secrets, log)
 	linearSvc := initLinearService(dbPool, eventBus, repos.Secrets, log)
+	sentrySvc := initSentryService(dbPool, eventBus, repos.Secrets, log)
 	slackSvc := initSlackService(dbPool, repos.Secrets, log)
 	shareHTTP := initShareHandlers(dbPool, repos.Task, githubSvc, log, version)
 
@@ -123,6 +125,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		GitLab:     gitlabSvc,
 		Jira:       jiraSvc,
 		Linear:     linearSvc,
+		Sentry:     sentrySvc,
 		Slack:      slackSvc,
 		Share:      shareHTTP,
 		Automation: automationComponents,
@@ -343,6 +346,15 @@ func initLinearService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secr
 	svc, _, err := linear.Provide(dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), eventBus, log)
 	if err != nil {
 		log.Warn("Linear service initialization failed (non-fatal)", zap.Error(err))
+	}
+	return svc
+}
+
+// initSentryService wires up the Sentry integration. Failures are non-fatal.
+func initSentryService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secrets.SecretStore, log *logger.Logger) *sentry.Service {
+	svc, _, err := sentry.Provide(dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), eventBus, log)
+	if err != nil {
+		log.Warn("Sentry service initialization failed (non-fatal)", zap.Error(err))
 	}
 	return svc
 }

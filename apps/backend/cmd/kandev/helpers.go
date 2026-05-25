@@ -59,6 +59,7 @@ import (
 	prompthandlers "github.com/kandev/kandev/internal/prompts/handlers"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
+	"github.com/kandev/kandev/internal/sentry"
 	"github.com/kandev/kandev/internal/slack"
 	spriteshandlers "github.com/kandev/kandev/internal/sprites"
 	sshhandlers "github.com/kandev/kandev/internal/ssh"
@@ -748,6 +749,12 @@ func registerSecondaryRoutes(
 		linear.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.Linear, p.log)
 		linear.RegisterMockRoutes(p.router, p.services.Linear, p.log)
 		p.log.Debug("Registered Linear handlers (HTTP + WebSocket)")
+	}
+
+	if p.services.Sentry != nil {
+		sentry.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.Sentry, p.log)
+		sentry.RegisterMockRoutes(p.router, p.services.Sentry, p.log)
+		p.log.Debug("Registered Sentry handlers (HTTP)")
 	}
 
 	if p.services.Slack != nil {

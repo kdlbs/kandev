@@ -24,6 +24,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
+	sentrypkg "github.com/kandev/kandev/internal/sentry"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -321,6 +322,24 @@ func (a *linearServiceAdapter) AssignIssueWatchTaskID(ctx context.Context, watch
 
 func (a *linearServiceAdapter) ReleaseIssueWatchTask(ctx context.Context, watchID, identifier string) error {
 	return a.svc.Store().ReleaseIssueWatchTask(ctx, watchID, identifier)
+}
+
+// sentryServiceAdapter exposes the Sentry service's issue-watch dedup methods
+// to the orchestrator without leaking the rest of the package surface area.
+type sentryServiceAdapter struct {
+	svc *sentrypkg.Service
+}
+
+func (a *sentryServiceAdapter) ReserveIssueWatchTask(ctx context.Context, watchID, shortID, issueURL string) (bool, error) {
+	return a.svc.Store().ReserveIssueWatchTask(ctx, watchID, shortID, issueURL)
+}
+
+func (a *sentryServiceAdapter) AssignIssueWatchTaskID(ctx context.Context, watchID, shortID, taskID string) error {
+	return a.svc.Store().AssignIssueWatchTaskID(ctx, watchID, shortID, taskID)
+}
+
+func (a *sentryServiceAdapter) ReleaseIssueWatchTask(ctx context.Context, watchID, shortID string) error {
+	return a.svc.Store().ReleaseIssueWatchTask(ctx, watchID, shortID)
 }
 
 // repoLocalPathUpdater adapts the task service's UpdateRepository to the executor.RepoUpdater interface.
