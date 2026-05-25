@@ -185,7 +185,9 @@ describe("setPendingPrUrlForTask", () => {
   it("stores a pending PR URL until TaskPR sync clears it", () => {
     const store = makeStore();
 
-    store.getState().setPendingPrUrlForTask("task-1", "", "https://dev.azure.com/o/p/_git/r/pullrequest/1");
+    store
+      .getState()
+      .setPendingPrUrlForTask("task-1", "", "https://dev.azure.com/o/p/_git/r/pullrequest/1");
     expect(store.getState().pendingPrUrlByTaskId.byTaskId["task-1"]?.[""]).toBe(
       "https://dev.azure.com/o/p/_git/r/pullrequest/1",
     );

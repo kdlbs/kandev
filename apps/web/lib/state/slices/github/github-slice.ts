@@ -34,11 +34,7 @@ function createGitHubStatusActions(
   };
 }
 
-function clearPendingPrUrlForRepo(
-  draft: GitHubSlice,
-  taskId: string,
-  repoKey: string,
-) {
+function clearPendingPrUrlForRepo(draft: GitHubSlice, taskId: string, repoKey: string) {
   const pending = draft.pendingPrUrlByTaskId.byTaskId[taskId];
   if (!pending) return;
   delete pending[repoKey];

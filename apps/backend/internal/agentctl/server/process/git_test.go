@@ -235,8 +235,8 @@ func TestGitOperatorCreatePR_AzureMissingCLI(t *testing.T) {
 
 	scriptDir := t.TempDir()
 	writeGitRemoteWrapper(t, scriptDir, "git@ssh.dev.azure.com:v3/acme/platform/widgets")
-	// No az on PATH — only git wrapper.
-	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	// Isolate PATH so CI's preinstalled az is not visible to LookPath.
+	t.Setenv("PATH", scriptDir)
 
 	gitOp := NewGitOperator(repoDir, log, nil)
 	result, err := gitOp.CreatePR(context.Background(), "Title", "Body", "main", false)

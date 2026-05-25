@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -396,13 +397,13 @@ func (g *GitOperator) createGitHubPR(
 
 func ensureAzureDevOpsCLI(ctx context.Context) error {
 	if _, err := exec.LookPath("az"); err != nil {
-		return fmt.Errorf("%s", errAzureCLIMissing)
+		return errors.New(errAzureCLIMissing)
 	}
 
 	cmd := exec.CommandContext(ctx, "az", "extension", "show", "--name", azureDevOpsExtensionName)
 	cmd.Env = filterGitEnv(os.Environ())
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%s", errAzureDevOpsExtensionMissing)
+		return errors.New(errAzureDevOpsExtensionMissing)
 	}
 	return nil
 }
