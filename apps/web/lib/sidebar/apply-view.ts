@@ -152,11 +152,27 @@ export function applySort(
 
 const UNASSIGNED_LABEL = "Unassigned";
 const MULTI_REPO_LABEL = "Multi-repo";
+const NOT_STARTED_STATE_GROUP_KEY = "__not_started__";
+
+const STATE_GROUP_ORDER: Record<string, number> = {
+  [NOT_STARTED_STATE_GROUP_KEY]: 0,
+  CREATED: 1,
+  SCHEDULING: 2,
+  TODO: 3,
+  IN_PROGRESS: 4,
+  WAITING_FOR_INPUT: 5,
+  REVIEW: 6,
+  BLOCKED: 7,
+  FAILED: 8,
+  COMPLETED: 9,
+  CANCELLED: 10,
+};
 
 type GroupExtractor = (task: TaskSwitcherItem) => { key: string; label: string };
 
 function getTaskStateGroup(task: TaskSwitcherItem): { key: string; label: string } {
-  if (!task.state) return { key: "__not_started__", label: formatTaskStateLabel(undefined) };
+  if (!task.state)
+    return { key: NOT_STARTED_STATE_GROUP_KEY, label: formatTaskStateLabel(undefined) };
   return { key: task.state, label: formatTaskStateLabel(task.state) };
 }
 
@@ -234,6 +250,7 @@ export function applyGroup(tasks: TaskSwitcherItem[], groupKey: GroupKey): Group
     mergeSingleRepoUnassigned(groups);
     sortRepoGroups(groups);
   }
+  if (groupKey === "state") sortStateGroups(groups);
   return { groups, subTasksByParentId };
 }
 
@@ -253,6 +270,14 @@ function sortRepoGroups(groups: SidebarGroup[]): void {
     if (b.key === "__multi__") return 1;
     if (a.key === "__unassigned__") return 1;
     if (b.key === "__unassigned__") return -1;
+    return a.label.localeCompare(b.label);
+  });
+}
+
+function sortStateGroups(groups: SidebarGroup[]): void {
+  groups.sort((a, b) => {
+    const order = (STATE_GROUP_ORDER[a.key] ?? 99) - (STATE_GROUP_ORDER[b.key] ?? 99);
+    if (order !== 0) return order;
     return a.label.localeCompare(b.label);
   });
 }

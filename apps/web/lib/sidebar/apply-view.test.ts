@@ -217,6 +217,54 @@ describe("applySort", () => {
   });
 });
 
+describe("applyGroup — state", () => {
+  it("groups by real task state instead of the action bucket", () => {
+    const tasks = [
+      task({ id: "done", state: "COMPLETED", sessionState: "COMPLETED" }),
+      task({ id: "review", state: "REVIEW", sessionState: "WAITING_FOR_INPUT" }),
+      task({ id: "not-started", sessionState: "IDLE" }),
+    ];
+    const groupsByKey = new Map(applyGroup(tasks, "state").groups.map((g) => [g.key, g]));
+
+    expect(groupsByKey.get("COMPLETED")?.label).toBe("Completed");
+    expect(groupsByKey.get("COMPLETED")?.tasks.map((t) => t.id)).toEqual(["done"]);
+    expect(groupsByKey.get("REVIEW")?.label).toBe("Review");
+    expect(groupsByKey.get("REVIEW")?.tasks.map((t) => t.id)).toEqual(["review"]);
+    expect(groupsByKey.get("__not_started__")?.label).toBe("Not started");
+    expect(groupsByKey.get("__not_started__")?.tasks.map((t) => t.id)).toEqual(["not-started"]);
+  });
+
+  it("sorts state groups by canonical status order", () => {
+    const tasks = [
+      task({ id: "cancelled", state: "CANCELLED" }),
+      task({ id: "completed", state: "COMPLETED" }),
+      task({ id: "failed", state: "FAILED" }),
+      task({ id: "blocked", state: "BLOCKED" }),
+      task({ id: "review", state: "REVIEW" }),
+      task({ id: "waiting", state: "WAITING_FOR_INPUT" }),
+      task({ id: "progress", state: "IN_PROGRESS" }),
+      task({ id: "todo", state: "TODO" }),
+      task({ id: "scheduling", state: "SCHEDULING" }),
+      task({ id: "created", state: "CREATED" }),
+      task({ id: "not-started" }),
+    ];
+
+    expect(applyGroup(tasks, "state").groups.map((g) => g.key)).toEqual([
+      "__not_started__",
+      "CREATED",
+      "SCHEDULING",
+      "TODO",
+      "IN_PROGRESS",
+      "WAITING_FOR_INPUT",
+      "REVIEW",
+      "BLOCKED",
+      "FAILED",
+      "COMPLETED",
+      "CANCELLED",
+    ]);
+  });
+});
+
 describe("applyGroup", () => {
   it("wraps all tasks in single pseudo-group when group=none", () => {
     const tasks = [task({ id: "a" }), task({ id: "b" })];
@@ -268,22 +316,6 @@ describe("applyGroup", () => {
     expect(applyGroup(tasks, "workflow").groups).toHaveLength(2);
     expect(applyGroup(tasks, "workflowStep").groups).toHaveLength(2);
     expect(applyGroup(tasks, "executorType").groups).toHaveLength(2);
-  });
-
-  it("groups by real task state instead of the action bucket", () => {
-    const tasks = [
-      task({ id: "done", state: "COMPLETED", sessionState: "COMPLETED" }),
-      task({ id: "review", state: "REVIEW", sessionState: "WAITING_FOR_INPUT" }),
-      task({ id: "not-started", sessionState: "IDLE" }),
-    ];
-    const groupsByKey = new Map(applyGroup(tasks, "state").groups.map((g) => [g.key, g]));
-
-    expect(groupsByKey.get("COMPLETED")?.label).toBe("Completed");
-    expect(groupsByKey.get("COMPLETED")?.tasks.map((t) => t.id)).toEqual(["done"]);
-    expect(groupsByKey.get("REVIEW")?.label).toBe("Review");
-    expect(groupsByKey.get("REVIEW")?.tasks.map((t) => t.id)).toEqual(["review"]);
-    expect(groupsByKey.get("__not_started__")?.label).toBe("Not started");
-    expect(groupsByKey.get("__not_started__")?.tasks.map((t) => t.id)).toEqual(["not-started"]);
   });
 
   it("buckets missing group-key value into Unassigned", () => {
