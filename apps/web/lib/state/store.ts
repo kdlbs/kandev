@@ -22,7 +22,6 @@ import type {
 import type { SystemHealthResponse } from "@/lib/types/health";
 import type { UISliceActions as UIA } from "./slices/ui/types";
 import type * as UISliceTypes from "./slices/ui/types";
-import type { Automation, AutomationRun } from "@/lib/types/automation";
 import { mergeInitialState } from "./default-state";
 import {
   createKanbanSlice,
@@ -38,6 +37,7 @@ import {
   createOfficeSlice,
   createFeaturesSlice,
   createAutomationsSlice,
+  type AutomationsSliceActions,
   defaultKanbanState,
   defaultWorkspaceState,
   defaultSettingsState,
@@ -87,8 +87,7 @@ import type {
   UserShellInfo,
 } from "./slices/session-runtime/types";
 
-// Re-export all types from slices for backwards compatibility (split out
-// to keep this file under the max-lines limit).
+// Re-export all types from slices for backwards compatibility.
 export type * from "./store-reexports";
 import type { TaskMR } from "@/lib/types/gitlab";
 import type { JiraIssueWatch } from "@/lib/types/jira";
@@ -274,15 +273,6 @@ export type AppState = {
   updateLinearIssueWatch: (watch: LinearIssueWatch) => void;
   removeLinearIssueWatch: (id: string) => void;
   resetLinearIssueWatches: () => void;
-
-  // Automations actions
-  setAutomations: (items: Automation[]) => void;
-  setAutomationsLoading: (loading: boolean) => void;
-  addAutomation: (automation: Automation) => void;
-  updateAutomation: (automation: Automation) => void;
-  removeAutomation: (id: string) => void;
-  setAutomationRuns: (automationId: string, runs: AutomationRun[]) => void;
-  setAutomationRunsLoading: (automationId: string, loading: boolean) => void;
 
   // Actions from all slices
   hydrate: (state: Partial<AppState>, options?: HydrationOptions) => void;
@@ -557,7 +547,7 @@ export type AppState = {
   setRunAttempts: (runId: string, attempts: RouteAttempt[]) => void;
   appendRunAttempt: (runId: string, attempt: RouteAttempt) => void;
   setAgentRouting: (agentId: string, data: AgentRouteData | undefined) => void;
-};
+} & AutomationsSliceActions;
 
 export function createAppStore(initialState?: Partial<AppState>) {
   const merged = mergeInitialState(initialState);

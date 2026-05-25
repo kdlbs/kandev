@@ -27,8 +27,8 @@ const (
 	repositoryFlagHead                        = "--head"
 	redactedLogValue                          = "[REDACTED]"
 	azureDevOpsExtensionName                  = "azure-devops"
-	errAzureCLIMissing                        = "Azure CLI (az) is not on PATH; install it and run: az extension add --name azure-devops"
-	errAzureDevOpsExtensionMissing            = "Azure DevOps CLI extension is not installed; run: az extension add --name azure-devops"
+	errAzureCLIMissing                        = "azure CLI (az) is not on PATH; install it and run: az extension add --name azure-devops"
+	errAzureDevOpsExtensionMissing            = "azure DevOps CLI extension is not installed; run: az extension add --name azure-devops"
 )
 
 type azureRepoInfo struct {
