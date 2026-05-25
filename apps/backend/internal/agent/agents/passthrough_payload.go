@@ -19,11 +19,9 @@ func PassthroughSubmitSequence(cfg PassthroughConfig, bracketedPaste bool) strin
 
 // BuildPassthroughPayload assembles the bytes for one atomic PTY stdin write.
 // Multi-line prompts use bracketed paste so embedded newlines are not treated as
-// premature Enter presses. The submit sequence is appended in the same write — split
-// writes break Claude Code's bracketed-paste parser (paste end without submit leaves
-// the TUI stuck with no visible input).
+// premature Enter presses, unless DisableBracketedPaste is set (Claude Code).
 func BuildPassthroughPayload(prompt string, cfg PassthroughConfig) string {
-	if !strings.Contains(prompt, "\n") {
+	if cfg.DisableBracketedPaste || !strings.Contains(prompt, "\n") {
 		return prompt + PassthroughSubmitSequence(cfg, false)
 	}
 	submit := PassthroughSubmitSequence(cfg, true)

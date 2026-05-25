@@ -22,22 +22,19 @@ func TestPlanPassthroughStdinWrites_SingleLine(t *testing.T) {
 	}
 }
 
-func TestPlanPassthroughStdinWrites_ClaudeMultilineUsesCRLFSubmit(t *testing.T) {
+func TestPlanPassthroughStdinWrites_ClaudeMultilineRawPaste(t *testing.T) {
 	cfg := NewClaudeACP().PassthroughConfig()
 	got := PlanPassthroughStdinWrites("### Review Comments\n\n> fix", cfg)
 	if len(got) != 1 {
 		t.Fatalf("got %d chunks, want 1: %#v", len(got), got)
 	}
-	if !stringsHasSuffix(got[0], "\r\n") {
-		t.Errorf("Claude payload must end with \\r\\n submit, got suffix %q", got[0][len(got[0])-4:])
+	want := "### Review Comments\n\n> fix\r"
+	if got[0] != want {
+		t.Errorf("payload = %q, want %q", got[0], want)
 	}
-	if !stringsContains(got[0], "\x1b[200~") {
-		t.Error("expected bracketed paste wrapper")
+	if stringsContains(got[0], "\x1b[200~") {
+		t.Error("Claude must not use bracketed paste delimiters")
 	}
-}
-
-func stringsHasSuffix(s, suffix string) bool {
-	return len(s) >= len(suffix) && s[len(s)-len(suffix):] == suffix
 }
 
 func stringsContains(s, sub string) bool {
