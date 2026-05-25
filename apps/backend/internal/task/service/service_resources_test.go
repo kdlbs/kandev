@@ -127,3 +127,29 @@ func TestService_GetOfficeWorkflowIDs_DBError(t *testing.T) {
 		t.Errorf("expected nil on DB error, got %v", ids)
 	}
 }
+
+// TestApplyRepositoryUpdates_CopyFilesNilLeavesUntouched verifies the
+// pointer-nil convention: a nil CopyFiles field on the request must not
+// clobber an existing repository value.
+func TestApplyRepositoryUpdates_CopyFilesNilLeavesUntouched(t *testing.T) {
+	repo := &models.Repository{CopyFiles: "existing"}
+	if err := applyRepositoryUpdates(repo, &UpdateRepositoryRequest{}); err != nil {
+		t.Fatalf("applyRepositoryUpdates: %v", err)
+	}
+	if repo.CopyFiles != "existing" {
+		t.Errorf("CopyFiles = %q, want %q (nil request field must not overwrite)", repo.CopyFiles, "existing")
+	}
+}
+
+// TestApplyRepositoryUpdates_CopyFilesEmptyStringClears verifies that an
+// explicit empty-string pointer clears the value (distinct from "no update").
+func TestApplyRepositoryUpdates_CopyFilesEmptyStringClears(t *testing.T) {
+	repo := &models.Repository{CopyFiles: "existing"}
+	empty := ""
+	if err := applyRepositoryUpdates(repo, &UpdateRepositoryRequest{CopyFiles: &empty}); err != nil {
+		t.Fatalf("applyRepositoryUpdates: %v", err)
+	}
+	if repo.CopyFiles != "" {
+		t.Errorf("CopyFiles = %q, want empty string", repo.CopyFiles)
+	}
+}

@@ -174,6 +174,7 @@ export type Repository = {
   setup_script: string;
   cleanup_script: string;
   dev_script: string;
+  copy_files: string;
   created_at: string;
   updated_at: string;
 };

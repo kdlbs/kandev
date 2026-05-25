@@ -12,9 +12,22 @@ import type {
   McpServerDef,
   PermissionSetting,
   ModelConfig,
+  ProfileEnvVar,
 } from "@/lib/types/http";
 import { permissionsToProfilePatch, arePermissionsDirty } from "@/lib/agent-permissions";
 import { areCLIFlagsEqual } from "@/lib/cli-flags";
+
+function areEnvVarsEqual(a?: ProfileEnvVar[], b?: ProfileEnvVar[]): boolean {
+  const left = a ?? [];
+  const right = b ?? [];
+  if (left.length !== right.length) return false;
+  return left.every(
+    (ev, i) =>
+      ev.key === right[i]?.key &&
+      (ev.value ?? "") === (right[i]?.value ?? "") &&
+      (ev.secret_id ?? "") === (right[i]?.secret_id ?? ""),
+  );
+}
 
 type DraftMcpConfig = {
   enabled: boolean;
@@ -138,6 +151,7 @@ export async function saveNewAgent(draftAgent: DraftAgent, callbacks: SaveAgentC
       ...permissionsToProfilePatch(profile),
       cli_passthrough: profile.cliPassthrough ?? false,
       cli_flags: profile.cliFlags ?? [],
+      env_vars: profile.envVars ?? [],
     })),
   });
 
@@ -192,6 +206,7 @@ async function saveExistingProfiles(
         ...permissionsToProfilePatch(profile),
         cli_passthrough: profile.cliPassthrough ?? false,
         cli_flags: profile.cliFlags ?? [],
+        env_vars: profile.envVars ?? [],
       });
       await saveMcpForProfile({
         draftProfile: profile,
@@ -209,6 +224,7 @@ async function saveExistingProfiles(
         ...permissionsToProfilePatch(profile),
         cli_passthrough: profile.cliPassthrough ?? false,
         cli_flags: profile.cliFlags ?? [],
+        env_vars: profile.envVars ?? [],
       });
       nextProfiles.push(updatedProfile);
       continue;
@@ -276,6 +292,7 @@ export function isProfileDirty(draft: DraftProfile, saved?: AgentProfile): boole
     (draft.mode ?? "") !== (saved.mode ?? "") ||
     arePermissionsDirty({ allow_indexing: draftAllow }, { allow_indexing: savedAllow }) ||
     draft.cliPassthrough !== saved.cliPassthrough ||
-    !areCLIFlagsEqual(draft.cliFlags ?? [], saved.cliFlags ?? [])
+    !areCLIFlagsEqual(draft.cliFlags ?? [], saved.cliFlags ?? []) ||
+    !areEnvVarsEqual(draft.envVars, saved.envVars)
   );
 }

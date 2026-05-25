@@ -120,6 +120,27 @@ func TestRegisterGitHandlers(t *testing.T) {
 	}
 }
 
+func TestIsGitHubPRURL(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+		want bool
+	}{
+		{name: "github", url: "https://github.com/acme/widgets/pull/42", want: true},
+		{name: "github enterprise", url: "https://github.acme.corp/acme/widgets/pull/42", want: true},
+		{name: "azure repos", url: "https://dev.azure.com/acme/project/_git/widgets/pullrequest/42", want: false},
+		{name: "gitlab", url: "https://gitlab.com/acme/widgets/-/merge_requests/42", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isGitHubPRURL(tt.url); got != tt.want {
+				t.Fatalf("isGitHubPRURL(%q) = %v, want %v", tt.url, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestNotifyGitOperationFailed_NilResult(t *testing.T) {
 	log := newTestLogger()
 	called := false

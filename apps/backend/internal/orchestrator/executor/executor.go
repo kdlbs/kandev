@@ -272,6 +272,12 @@ type LaunchAgentRequest struct {
 	// Setup script from executor profile (runs in execution environment before agent starts)
 	SetupScript string
 
+	// CopyFiles is the per-repository copy_files spec resolved from
+	// Repository.CopyFiles. Used by the worktree path (host-side copy via
+	// worktree.Manager) and by remote-executor paths (Docker, Sprites)
+	// which ship the bytes via agentctl.
+	CopyFiles string
+
 	// Worktree configuration for concurrent agent execution
 	UseWorktree          bool   // Whether to use a Git worktree for isolation
 	WorktreeID           string // Existing worktree ID to reuse (skip creation if set)
@@ -318,6 +324,7 @@ type RepoSpec struct {
 	PullBeforeWorktree   bool
 	RepoSetupScript      string
 	RepoCleanupScript    string
+	CopyFiles            string
 }
 
 // McpModeConfig activates config-mode MCP tools (workflow steps, agents, MCP

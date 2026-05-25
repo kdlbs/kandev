@@ -706,6 +706,7 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 			spec.RepoSetupScript = info.Repository.SetupScript
 			spec.RepoCleanupScript = info.Repository.CleanupScript
 			spec.DefaultBranch = info.Repository.DefaultBranch
+			spec.CopyFiles = info.Repository.CopyFiles
 		}
 		// Containerized executors need a clone URL; reuse the same helper as
 		// the single-repo path (best-effort — skipped if Repository is nil).
@@ -743,6 +744,9 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 				metadata = make(map[string]interface{})
 			}
 			metadata[lifecycle.MetadataKeyRepoSetupScript] = repoInfo.Repository.SetupScript
+		}
+		if repoInfo.Repository != nil {
+			req.CopyFiles = repoInfo.Repository.CopyFiles
 		}
 	}
 

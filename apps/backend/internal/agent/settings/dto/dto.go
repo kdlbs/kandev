@@ -7,16 +7,17 @@ import (
 )
 
 type AgentProfileDTO struct {
-	ID               string       `json:"id"`
-	AgentID          string       `json:"agent_id"`
-	Name             string       `json:"name"`
-	AgentDisplayName string       `json:"agent_display_name"`
-	Model            string       `json:"model"`
-	Mode             string       `json:"mode,omitempty"`
-	AllowIndexing    bool         `json:"allow_indexing"` // Deprecated: use CLIFlags. Retained for legacy clients.
-	CLIFlags         []CLIFlagDTO `json:"cli_flags"`
-	CLIPassthrough   bool         `json:"cli_passthrough"`
-	UserModified     bool         `json:"user_modified"`
+	ID               string             `json:"id"`
+	AgentID          string             `json:"agent_id"`
+	Name             string             `json:"name"`
+	AgentDisplayName string             `json:"agent_display_name"`
+	Model            string             `json:"model"`
+	Mode             string             `json:"mode,omitempty"`
+	AllowIndexing    bool               `json:"allow_indexing"` // Deprecated: use CLIFlags. Retained for legacy clients.
+	CLIFlags         []CLIFlagDTO       `json:"cli_flags"`
+	EnvVars          []ProfileEnvVarDTO `json:"env_vars,omitempty"`
+	CLIPassthrough   bool               `json:"cli_passthrough"`
+	UserModified     bool               `json:"user_modified"`
 	// WorkspaceID scopes the profile to an office workspace. Empty for
 	// shallow kanban-only profiles. Surfaced so consumers (e.g. test
 	// cleanup helpers) can distinguish office-owned profiles from
@@ -36,6 +37,13 @@ type CLIFlagDTO struct {
 	Description string `json:"description"`
 	Flag        string `json:"flag"`
 	Enabled     bool   `json:"enabled"`
+}
+
+// ProfileEnvVarDTO mirrors models.ProfileEnvVar on the wire.
+type ProfileEnvVarDTO struct {
+	Key      string `json:"key"`
+	Value    string `json:"value,omitempty"`
+	SecretID string `json:"secret_id,omitempty"`
 }
 
 type TUIConfigDTO struct {

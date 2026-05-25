@@ -46,6 +46,12 @@ func (c *GitHubChecker) WithRateLimitProvider(p GitHubRateLimitProvider) *GitHub
 	return c
 }
 
+// Name returns the user-facing label for this check.
+func (c *GitHubChecker) Name() string { return "GitHub integration" }
+
+// Category returns the issue category this checker emits issues under.
+func (c *GitHubChecker) Category() string { return "github" }
+
 func (c *GitHubChecker) Check(_ context.Context) []Issue {
 	if c.provider == nil {
 		return []Issue{{
@@ -125,6 +131,12 @@ func NewAgentChecker(provider AgentDiscoveryProvider) *AgentChecker {
 }
 
 const agentCheckTimeout = 10 * time.Second
+
+// Name returns the user-facing label for this check.
+func (c *AgentChecker) Name() string { return "AI agent availability" }
+
+// Category returns the issue category this checker emits issues under.
+func (c *AgentChecker) Category() string { return "agents" }
 
 func (c *AgentChecker) Check(ctx context.Context) []Issue {
 	if c.provider == nil {

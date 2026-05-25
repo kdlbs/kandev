@@ -448,13 +448,13 @@ func (r *prepareProgressRecorder) recordStep(step PrepareStep, index int) {
 
 // launchBuildExecutorRequest resolves MCP servers, builds the ExecutorCreateRequest,
 // and creates the runtime instance.
-func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID string, reqWithWorktree *LaunchRequest, agentConfig agents.Agent, mainRepoGitDir, worktreeID, worktreeBranch string, onProgress PrepareProgressCallback) (*ExecutorCreateRequest, *ExecutorInstance, ExecutorBackend, error) {
+func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID string, reqWithWorktree *LaunchRequest, agentConfig agents.Agent, profileInfo *AgentProfileInfo, mainRepoGitDir, worktreeID, worktreeBranch string, onProgress PrepareProgressCallback) (*ExecutorCreateRequest, *ExecutorInstance, ExecutorBackend, error) {
 	rt, err := m.getExecutorBackend(reqWithWorktree.ExecutorType)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("no runtime configured: %w", err)
 	}
 
-	env := m.buildEnvForExecution(executionID, reqWithWorktree, agentConfig)
+	env := m.buildEnvForExecution(ctx, executionID, reqWithWorktree, agentConfig, profileInfo)
 
 	acpMcpServers, err := m.resolveMcpServersWithParams(ctx, reqWithWorktree.AgentProfileID, reqWithWorktree.Metadata, agentConfig)
 	if err != nil {
@@ -844,11 +844,23 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	if req.ACPSessionID == "" {
 		runtimeProgress = progressRecorder.Callback(progressRecorder.Len())
 	}
-	execReq, execInstance, rt, err := m.launchBuildExecutorRequest(ctx, executionID, &reqWithWorktree, agentConfig, mainRepoGitDir, worktreeID, worktreeBranch, runtimeProgress)
+	execReq, execInstance, rt, err := m.launchBuildExecutorRequest(ctx, executionID, &reqWithWorktree, agentConfig, profileInfo, mainRepoGitDir, worktreeID, worktreeBranch, runtimeProgress)
 	if err != nil {
 		m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, false, err)
 		return nil, err
 	}
+
+	// Remote executors (Docker, Sprites) clone the workspace inside the
+	// container, so the worktree path's host-side copy_files never ran.
+	// Ship the bytes through agentctl now that the instance is up. The
+	// worktree path is already gated by reqWithWorktree.UseWorktree, so
+	// it's safe to skip when that's true. For multi-repo launches, loop
+	// over every per-repo spec — each repo's CopyFiles ships into its
+	// own RepoName subdir under the workspace.
+	if !reqWithWorktree.UseWorktree && execInstance != nil && execInstance.Client != nil {
+		shipRemoteCopyfilesForLaunch(ctx, m.logger, &reqWithWorktree, execInstance.Client, runtimeProgress, progressRecorder)
+	}
+
 	if prepResult != nil {
 		prepResult.Steps = progressRecorder.Steps()
 	}
@@ -857,6 +869,9 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	// Build the in-memory AgentExecution from the runtime instance. Extracted
 	// to keep launchInternal under the cyclomatic-complexity budget.
 	execution := m.buildExecutionFromInstance(req, execReq, execInstance, rt, profileInfo, agentConfig, prepResult)
+	if profileInfo != nil && len(profileInfo.EnvVars) > 0 {
+		m.cacheResolvedProfileEnv(execution, m.resolveAgentProfileEnvVars(ctx, profileInfo.EnvVars))
+	}
 
 	// Track + persist + publish. Returns the rollback error if Add lost a race.
 	if err := m.registerAndPublishExecution(ctx, execution, rt, execInstance, req.SessionID); err != nil {
@@ -1077,6 +1092,7 @@ func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentEx
 	if taskDescription != "" {
 		env["TASK_DESCRIPTION"] = taskDescription
 	}
+	m.mergeAgentProfileEnvForExecution(ctx, execution, env)
 
 	if err := execution.agentctl.ConfigureAgent(ctx, execution.AgentCommand, env, approvalPolicy, execution.ContinueCommand); err != nil {
 		return "", fmt.Errorf("failed to configure agent: %w", err)

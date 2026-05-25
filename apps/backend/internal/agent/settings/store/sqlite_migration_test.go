@@ -189,6 +189,34 @@ func TestMigration_LegacyDB_PreservesAllColumns(t *testing.T) {
 	}
 }
 
+func TestMigration_LegacyDB_PreservesEnvVarsColumn(t *testing.T) {
+	db := newLegacyDB(t)
+	ctx := context.Background()
+
+	if _, err := db.Exec(`ALTER TABLE agent_profiles ADD COLUMN env_vars TEXT NOT NULL DEFAULT '[]'`); err != nil {
+		t.Fatalf("add env_vars to legacy schema: %v", err)
+	}
+	_, _ = db.Exec(`INSERT INTO agents (id, name, created_at, updated_at) VALUES ('a1', 'test-agent', datetime('now'), datetime('now'))`)
+	_, err := db.Exec(`INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, model, env_vars, created_at, updated_at)
+		VALUES ('p1', 'a1', 'Test Profile', 'Test', 'some-model', '[{"key":"FOO","value":"bar"}]', datetime('now'), datetime('now'))`)
+	if err != nil {
+		t.Fatalf("seed profile with env vars: %v", err)
+	}
+
+	repo, err := newSQLiteRepository(db, db, nil, false)
+	if err != nil {
+		t.Fatalf("newSQLiteRepository: %v", err)
+	}
+
+	profile, err := repo.GetAgentProfile(ctx, "p1")
+	if err != nil {
+		t.Fatalf("get profile: %v", err)
+	}
+	if len(profile.EnvVars) != 1 || profile.EnvVars[0].Key != "FOO" || profile.EnvVars[0].Value != "bar" {
+		t.Fatalf("env_vars not preserved: %+v", profile.EnvVars)
+	}
+}
+
 // TestMigration_LegacyDB_MCPConfigSurvives verifies that agent_profile_mcp_configs
 // rows (which FK-reference agent_profiles) survive the table recreation.
 func TestMigration_LegacyDB_MCPConfigSurvives(t *testing.T) {

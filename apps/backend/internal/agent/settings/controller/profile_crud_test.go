@@ -1,10 +1,13 @@
 package controller
 
 import (
+	"context"
+	"fmt"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
+	"github.com/kandev/kandev/internal/agent/settings/models"
 )
 
 // TestSeedCLIFlags_FromCopilot verifies that a fresh Copilot profile gets
@@ -88,5 +91,90 @@ func TestValidateCLIFlagDTOs(t *testing.T) {
 				t.Errorf("unexpected error: %v", err)
 			}
 		})
+	}
+}
+
+func TestValidateProfileEnvVarDTOs(t *testing.T) {
+	cases := []struct {
+		name    string
+		envVars []dto.ProfileEnvVarDTO
+		wantErr bool
+	}{
+		{name: "valid value", envVars: []dto.ProfileEnvVarDTO{{Key: "FOO", Value: "bar"}}},
+		{name: "valid secret", envVars: []dto.ProfileEnvVarDTO{{Key: "TOKEN", SecretID: "sec-1"}}},
+		{name: "empty key rejected", envVars: []dto.ProfileEnvVarDTO{{Key: ""}}, wantErr: true},
+		{name: "whitespace key rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "   "}}, wantErr: true},
+		{name: "equals key rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "BAD=KEY", Value: "x"}}, wantErr: true},
+		{name: "null key rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "BAD\x00KEY", Value: "x"}}, wantErr: true},
+		{name: "duplicate key rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "FOO", Value: "one"}, {Key: " FOO ", Value: "two"}}, wantErr: true},
+		{name: "value and secret rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "FOO", Value: "bar", SecretID: "sec-1"}}, wantErr: true},
+		{name: "null value rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "FOO", Value: "bad\x00val"}}, wantErr: true},
+		{name: "KANDEV prefix rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "KANDEV_TASK_ID", Value: "x"}}, wantErr: true},
+		{name: "TASK_DESCRIPTION rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "TASK_DESCRIPTION", Value: "x"}}, wantErr: true},
+		{name: "too many entries rejected", envVars: func() []dto.ProfileEnvVarDTO {
+			out := make([]dto.ProfileEnvVarDTO, maxProfileEnvVars+1)
+			for i := range out {
+				out[i] = dto.ProfileEnvVarDTO{Key: fmt.Sprintf("K%d", i), Value: "v"}
+			}
+			return out
+		}(), wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateProfileEnvVarDTOs(tc.envVars)
+			if tc.wantErr && err == nil {
+				t.Error("expected error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestCreateProfile_PersistsEnvVars(t *testing.T) {
+	ctrl := newTestController(map[string]agents.Agent{"test-agent": &testAgent{
+		id:          "test-agent",
+		name:        "test-agent",
+		displayName: "Test Agent",
+		enabled:     true,
+	}})
+	st := newFakeStore()
+	agent := &models.Agent{ID: "agent-1", Name: "test-agent"}
+	st.agents[agent.ID] = agent
+	st.byName[agent.Name] = agent
+	ctrl.repo = st
+
+	profile, err := ctrl.CreateProfile(context.Background(), CreateProfileRequest{
+		AgentID: "agent-1",
+		Name:    "With env",
+		EnvVars: []dto.ProfileEnvVarDTO{{Key: "FOO", Value: "bar"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+	if len(profile.EnvVars) != 1 || profile.EnvVars[0].Key != "FOO" || profile.EnvVars[0].Value != "bar" {
+		t.Fatalf("response env vars: %+v", profile.EnvVars)
+	}
+	if len(st.created) != 1 || len(st.created[0].EnvVars) != 1 || st.created[0].EnvVars[0].Key != "FOO" {
+		t.Fatalf("stored env vars: %+v", st.created)
+	}
+}
+
+func TestCreateAgentProfiles_PersistsEnvVars(t *testing.T) {
+	ctrl := newTestController(nil)
+	st := newFakeStore()
+	ctrl.repo = st
+
+	profiles, err := ctrl.createAgentProfiles(context.Background(), "agent-1", "Test Agent", []CreateAgentProfileRequest{{
+		Name:    "With env",
+		Model:   "model-1",
+		EnvVars: []dto.ProfileEnvVarDTO{{Key: "FOO", Value: "bar"}},
+	}}, &testAgent{id: "test-agent", name: "test-agent"})
+	if err != nil {
+		t.Fatalf("createAgentProfiles: %v", err)
+	}
+	if len(profiles) != 1 || len(profiles[0].EnvVars) != 1 || profiles[0].EnvVars[0].Key != "FOO" {
+		t.Fatalf("created env vars: %+v", profiles)
 	}
 }

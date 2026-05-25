@@ -12,6 +12,15 @@ import (
 	"github.com/kandev/kandev/internal/worktree"
 )
 
+// copyFilesStep builds the "Copy N ignored files" prepare step shown after a
+// worktree's CopyFiles spec has been applied. repoLabel is appended for
+// multi-repo prepares; empty for single-repo. Thin adapter — see
+// buildCopyFilesStep for the actual step shape (shared with the
+// remote-executor path in remote_copyfiles.go).
+func copyFilesStep(wt *worktree.Worktree, repoLabel string) PrepareStep {
+	return buildCopyFilesStep(wt.CopiedFiles, wt.CopyFilesWarnings, repoLabel)
+}
+
 // WorktreePreparer prepares a worktree-based execution environment.
 // Steps: validate repository → create worktree → checkout PR branch (if set) → run setup script (if any).
 type WorktreePreparer struct {
@@ -62,6 +71,13 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 	wt, steps, stepIdx, err := p.createWorktreeWithSync(ctx, req, stepIdx, totalSteps, onProgress, steps)
 	if err != nil {
 		return &EnvPrepareResult{Success: false, Steps: steps, ErrorMessage: err.Error(), Duration: time.Since(start)}, nil
+	}
+
+	if len(wt.CopiedFiles) > 0 || len(wt.CopyFilesWarnings) > 0 {
+		totalSteps++
+		steps = append(steps, copyFilesStep(wt, ""))
+		reportProgress(onProgress, steps[len(steps)-1], stepIdx, totalSteps)
+		stepIdx++
 	}
 
 	workspacePath := wt.Path
@@ -403,6 +419,14 @@ func (p *WorktreePreparer) prepareOneRepo(
 			step.WarningDetail = wt.FetchWarningDetail
 		}
 		completeStepSuccess(&step)
+		steps = append(steps, step)
+		reportProgress(onProgress, step, stepIdx, totalSteps)
+		stepIdx++
+	}
+
+	if len(wt.CopiedFiles) > 0 || len(wt.CopyFilesWarnings) > 0 {
+		totalSteps++
+		step := copyFilesStep(wt, repoLabel)
 		steps = append(steps, step)
 		reportProgress(onProgress, step, stepIdx, totalSteps)
 		stepIdx++

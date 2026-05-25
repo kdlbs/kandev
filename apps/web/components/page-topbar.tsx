@@ -13,7 +13,7 @@ import {
 import { cn } from "@kandev/ui/lib/utils";
 
 type PageTopbarProps = {
-  /** Page title shown in the breadcrumb */
+  /** Page title shown as the rightmost (current) breadcrumb */
   title: string;
   /** Optional subtitle shown to the right of the title */
   subtitle?: string;
@@ -23,6 +23,12 @@ type PageTopbarProps = {
   backHref?: string;
   /** Label for the parent breadcrumb (default: "Kandev") */
   backLabel?: string;
+  /**
+   * Optional middle crumb inserted between the back link and the title — use
+   * for nested sections (e.g. Home > Settings > Prompts). When omitted the
+   * breadcrumb is two segments wide.
+   */
+  parent?: { label: string; href: string };
   /** Optional content rendered before the breadcrumb */
   leading?: ReactNode;
   /** Optional content rendered at the visual center of the topbar */
@@ -37,6 +43,84 @@ type PageTopbarProps = {
   actionsClassName?: string;
 };
 
+function BackLink({ href, label }: { href: string; label: string }) {
+  if (href === "/") {
+    return (
+      <Link
+        href={href}
+        aria-label={label}
+        className="cursor-pointer text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <IconHome className="h-4 w-4" />
+      </Link>
+    );
+  }
+  return (
+    <Link href={href} className="flex items-center gap-1.5 cursor-pointer">
+      <IconArrowLeft className="h-3.5 w-3.5" />
+      {label}
+    </Link>
+  );
+}
+
+function TopbarBreadcrumb({
+  backHref,
+  backLabel,
+  parent,
+  title,
+  subtitle,
+  icon,
+}: {
+  backHref: string;
+  backLabel: string;
+  parent: { label: string; href: string } | undefined;
+  title: string;
+  subtitle?: string;
+  icon?: ReactNode;
+}) {
+  return (
+    <Breadcrumb className="relative z-10 min-w-0">
+      <BreadcrumbList className="flex-nowrap text-sm">
+        <BreadcrumbItem className="shrink-0">
+          <BreadcrumbLink asChild>
+            <BackLink href={backHref} label={backLabel} />
+          </BreadcrumbLink>
+        </BreadcrumbItem>
+        <BreadcrumbSeparator className="shrink-0" />
+        {parent && (
+          <>
+            <BreadcrumbItem className="shrink-0">
+              <BreadcrumbLink asChild>
+                <Link
+                  href={parent.href}
+                  className="cursor-pointer text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  {parent.label}
+                </Link>
+              </BreadcrumbLink>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator className="shrink-0" />
+          </>
+        )}
+        <BreadcrumbItem className="min-w-0">
+          <BreadcrumbPage className="flex min-w-0 items-center gap-2">
+            {icon}
+            <span className="truncate text-sm font-medium">{title}</span>
+            {subtitle && (
+              <>
+                <span className="hidden text-muted-foreground/50 sm:inline">·</span>
+                <span className="hidden truncate text-xs text-muted-foreground sm:inline">
+                  {subtitle}
+                </span>
+              </>
+            )}
+          </BreadcrumbPage>
+        </BreadcrumbItem>
+      </BreadcrumbList>
+    </Breadcrumb>
+  );
+}
+
 export const PageTopbar = forwardRef<HTMLElement, PageTopbarProps>(function PageTopbar(
   {
     title,
@@ -44,6 +128,7 @@ export const PageTopbar = forwardRef<HTMLElement, PageTopbarProps>(function Page
     icon,
     backHref = "/",
     backLabel = "Kandev",
+    parent,
     leading,
     center,
     leftActions,
@@ -66,43 +151,14 @@ export const PageTopbar = forwardRef<HTMLElement, PageTopbarProps>(function Page
           <span className="truncate text-[15px] font-semibold leading-none">{backLabel}</span>
         </div>
       ) : (
-        <Breadcrumb className="relative z-10 min-w-0">
-          <BreadcrumbList className="flex-nowrap text-sm">
-            <BreadcrumbItem className="shrink-0">
-              <BreadcrumbLink asChild>
-                {backHref === "/" ? (
-                  <Link
-                    href={backHref}
-                    aria-label={backLabel}
-                    className="cursor-pointer text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    <IconHome className="h-4 w-4" />
-                  </Link>
-                ) : (
-                  <Link href={backHref} className="flex items-center gap-1.5 cursor-pointer">
-                    <IconArrowLeft className="h-3.5 w-3.5" />
-                    {backLabel}
-                  </Link>
-                )}
-              </BreadcrumbLink>
-            </BreadcrumbItem>
-            <BreadcrumbSeparator className="shrink-0" />
-            <BreadcrumbItem className="min-w-0">
-              <BreadcrumbPage className="flex min-w-0 items-center gap-2">
-                {icon}
-                <span className="truncate text-sm font-medium">{title}</span>
-                {subtitle && (
-                  <>
-                    <span className="hidden text-muted-foreground/50 sm:inline">·</span>
-                    <span className="hidden truncate text-xs text-muted-foreground sm:inline">
-                      {subtitle}
-                    </span>
-                  </>
-                )}
-              </BreadcrumbPage>
-            </BreadcrumbItem>
-          </BreadcrumbList>
-        </Breadcrumb>
+        <TopbarBreadcrumb
+          backHref={backHref}
+          backLabel={backLabel}
+          parent={parent}
+          title={title}
+          subtitle={subtitle}
+          icon={icon}
+        />
       )}
       {leftActions && (
         <div className="relative z-10 flex shrink-0 items-center gap-1 [&:empty]:hidden">

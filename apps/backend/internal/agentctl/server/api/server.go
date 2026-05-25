@@ -111,6 +111,11 @@ func (s *Server) setupRoutes() {
 		api.DELETE("/workspace/file", s.handleFileDelete)
 		api.GET("/workspace/search", s.handleFileSearch)
 
+		// Batched copy of files from the host (used by remote executors —
+		// Docker, Sprites — to seed the workspace with gitignored config
+		// after the in-container clone).
+		api.POST("/workspace/copy-files", s.handleWorkspaceCopyFiles)
+
 		// Shell access (HTTP endpoints only - streaming is via /workspace/stream)
 		api.GET("/shell/status", s.handleShellStatus)
 		api.GET("/shell/buffer", s.handleShellBuffer)

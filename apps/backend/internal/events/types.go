@@ -107,6 +107,13 @@ const (
 	UserSettingsUpdated = "user.settings.updated"
 )
 
+// Event types for system maintenance jobs (VACUUM, factory reset, snapshot
+// create/restore, disk walk). Published by internal/system/jobs.Tracker on
+// every state transition and broadcast to all WebSocket clients.
+const (
+	SystemJobUpdate = "system.job.update"
+)
+
 // Event types for environments
 const (
 	EnvironmentCreated = "environment.created"

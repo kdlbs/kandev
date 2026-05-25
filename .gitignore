@@ -40,6 +40,9 @@ Thumbs.db
 # Log files
 *.log
 logs/
+!apps/backend/internal/system/logs/
+!apps/web/app/settings/system/logs/
+!apps/web/e2e/tests/system/logs-page.spec.ts
 
 # Temporary files
 tmp/

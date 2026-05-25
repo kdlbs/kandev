@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { IconTrash } from "@tabler/icons-react";
@@ -18,6 +18,17 @@ import {
   AgentProfileDeleteConfirmDialog,
   AgentProfileDeleteConflictDialog,
 } from "@/components/settings/agent-profile-delete-dialog";
+import {
+  ProfileEnvVarsSection,
+  areEnvVarsEqual,
+} from "@/components/settings/profile-edit/profile-env-vars-section";
+import { CustomCLIFlagsCard } from "@/components/settings/cli-flags-field";
+
+export {
+  ProfileEnvVarsEditor,
+  ProfileEnvVarsSection,
+} from "@/components/settings/profile-edit/profile-env-vars-section";
+import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import type {
   Agent,
   AgentProfile,
@@ -153,6 +164,7 @@ function ProfileSettingsCard({
           passthroughConfig={passthroughConfig}
           agentName={agent.name}
           lockPassthrough={Boolean(agent.tui_config)}
+          hideCustomCLIFlags
         />
       </CardContent>
     </Card>
@@ -201,7 +213,8 @@ function useProfileEditorState(profile: AgentProfile) {
       (draft.mode ?? "") !== (savedProfile.mode ?? "") ||
       draft.allowIndexing !== savedProfile.allowIndexing ||
       draft.cliPassthrough !== savedProfile.cliPassthrough ||
-      !areCLIFlagsEqual(draft.cliFlags ?? [], savedProfile.cliFlags ?? []),
+      !areCLIFlagsEqual(draft.cliFlags ?? [], savedProfile.cliFlags ?? []) ||
+      !areEnvVarsEqual(draft.envVars, savedProfile.envVars),
     [draft, savedProfile],
   );
 
@@ -255,6 +268,7 @@ function useProfileSave({
         allow_indexing: draft.allowIndexing,
         cli_passthrough: draft.cliPassthrough,
         cli_flags: draft.cliFlags,
+        env_vars: draft.envVars ?? [],
       });
       setSavedProfile(updated);
       setDraft(updated);
@@ -341,6 +355,106 @@ function useProfileDelete(
   };
 }
 
+type ProfileDeleteDialogsProps = {
+  showDeleteConfirm: boolean;
+  setShowDeleteConfirm: (open: boolean) => void;
+  handleDeleteProfile: () => void;
+  conflictSessions: ActiveSessionInfo[] | null;
+  setConflictSessions: (sessions: ActiveSessionInfo[] | null) => void;
+  handleForceDelete: () => void;
+};
+
+function ProfileDeleteDialogs({
+  showDeleteConfirm,
+  setShowDeleteConfirm,
+  handleDeleteProfile,
+  conflictSessions,
+  setConflictSessions,
+  handleForceDelete,
+}: ProfileDeleteDialogsProps) {
+  return (
+    <>
+      <AgentProfileDeleteConfirmDialog
+        open={showDeleteConfirm}
+        onOpenChange={(open) => {
+          if (!open) setShowDeleteConfirm(false);
+        }}
+        onConfirm={handleDeleteProfile}
+      />
+
+      <AgentProfileDeleteConflictDialog
+        activeSessions={conflictSessions}
+        onOpenChange={(open) => {
+          if (!open) setConflictSessions(null);
+        }}
+        onConfirm={handleForceDelete}
+      />
+    </>
+  );
+}
+
+type ProfileEditorBodyProps = {
+  agent: Agent;
+  draft: AgentProfile;
+  updateDraft: (patch: Partial<AgentProfile>) => void;
+  modelConfig: ModelConfig;
+  permissionSettings: Record<string, PermissionSetting>;
+  passthroughConfig: PassthroughConfig | null;
+  secrets: { id: string; name: string }[];
+  initialMcpConfig?: AgentProfileMcpConfig | null;
+  onToastError: (error: unknown) => void;
+};
+
+function ProfileEditorBody({
+  agent,
+  draft,
+  updateDraft,
+  modelConfig,
+  permissionSettings,
+  passthroughConfig,
+  secrets,
+  initialMcpConfig,
+  onToastError,
+}: ProfileEditorBodyProps) {
+  return (
+    <>
+      <ProfileSettingsCard
+        agent={agent}
+        draft={draft}
+        onDraftChange={updateDraft}
+        modelConfig={modelConfig}
+        permissionSettings={permissionSettings}
+        passthroughConfig={passthroughConfig}
+      />
+
+      <CustomCLIFlagsCard
+        flags={draft.cliFlags ?? []}
+        onChange={(next) => updateDraft({ cliFlags: next })}
+        permissionSettings={permissionSettings}
+      />
+
+      <ProfileEnvVarsSection envVars={draft.envVars} onChange={updateDraft} />
+
+      <CommandPreviewCard
+        agentName={agent.name}
+        model={draft.model}
+        permissionSettings={{ allow_indexing: draft.allowIndexing }}
+        cliPassthrough={draft.cliPassthrough}
+        cliFlags={draft.cliFlags ?? []}
+        envVars={draft.envVars}
+        secrets={secrets}
+      />
+
+      <ProfileMcpConfigCard
+        profileId={draft.id}
+        supportsMcp={agent.supports_mcp}
+        initialConfig={initialMcpConfig}
+        onToastError={onToastError}
+      />
+    </>
+  );
+}
+
 function ProfileEditor({
   agent,
   profile,
@@ -352,8 +466,23 @@ function ProfileEditor({
   const { toast } = useToast();
   const settingsAgents = useAppStore((state) => state.settingsAgents.items);
   const syncAgentsToStore = useSyncAgentsToStore();
+  const { items: secrets } = useSecrets();
   const { draft, setDraft, savedProfile, setSavedProfile, saveStatus, setSaveStatus, isDirty } =
     useProfileEditorState(profile);
+  const updateDraft = useCallback(
+    (patch: Partial<AgentProfile>) => {
+      setDraft((current) => {
+        if (patch.envVars !== undefined && areEnvVarsEqual(patch.envVars, current.envVars)) {
+          // envVars unchanged — apply the rest of the patch (if any) but skip envVars.
+          const { envVars: _ignored, ...rest } = patch;
+          if (Object.keys(rest).length === 0) return current;
+          return { ...current, ...rest };
+        }
+        return { ...current, ...patch };
+      });
+    },
+    [setDraft],
+  );
   const handleSave = useProfileSave({
     agent,
     draft,
@@ -388,29 +517,15 @@ function ProfileEditor({
 
       <Separator />
 
-      <ProfileSettingsCard
+      <ProfileEditorBody
         agent={agent}
         draft={draft}
-        onDraftChange={(patch) => setDraft((current) => ({ ...current, ...patch }))}
+        updateDraft={updateDraft}
         modelConfig={modelConfig}
         permissionSettings={permissionSettings}
         passthroughConfig={passthroughConfig}
-      />
-
-      <CommandPreviewCard
-        agentName={agent.name}
-        model={draft.model}
-        permissionSettings={{
-          allow_indexing: draft.allowIndexing,
-        }}
-        cliPassthrough={draft.cliPassthrough}
-        cliFlags={draft.cliFlags ?? []}
-      />
-
-      <ProfileMcpConfigCard
-        profileId={profile.id}
-        supportsMcp={agent.supports_mcp}
-        initialConfig={initialMcpConfig}
+        secrets={secrets}
+        initialMcpConfig={initialMcpConfig}
         onToastError={(error) =>
           toast({
             title: "Failed to save MCP config",
@@ -422,20 +537,13 @@ function ProfileEditor({
 
       <DeleteProfileCard onDelete={requestDelete} />
 
-      <AgentProfileDeleteConfirmDialog
-        open={showDeleteConfirm}
-        onOpenChange={(open) => {
-          if (!open) setShowDeleteConfirm(false);
-        }}
-        onConfirm={handleDeleteProfile}
-      />
-
-      <AgentProfileDeleteConflictDialog
-        activeSessions={conflictSessions}
-        onOpenChange={(open) => {
-          if (!open) setConflictSessions(null);
-        }}
-        onConfirm={handleForceDelete}
+      <ProfileDeleteDialogs
+        showDeleteConfirm={showDeleteConfirm}
+        setShowDeleteConfirm={setShowDeleteConfirm}
+        handleDeleteProfile={handleDeleteProfile}
+        conflictSessions={conflictSessions}
+        setConflictSessions={setConflictSessions}
+        handleForceDelete={handleForceDelete}
       />
     </div>
   );

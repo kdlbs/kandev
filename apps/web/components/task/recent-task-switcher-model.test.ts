@@ -69,6 +69,7 @@ function buildContext(): RecentTaskBuildContext {
     setup_script: "",
     cleanup_script: "",
     dev_script: "",
+    copy_files: "",
     created_at: visitedAt,
     updated_at: visitedAt,
   };

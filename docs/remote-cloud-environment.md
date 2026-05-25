@@ -9,6 +9,11 @@ Setup notes and caveats for developing Kandev in ephemeral cloud VMs (Cursor Clo
 - **pnpm 9.15.9** — matches `packageManager` in `apps/package.json`. Install with `npm install -g pnpm@9.15.9`.
 - **golangci-lint v2** — required for `make lint-backend`. Install with `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest`.
 - **gcc** — required for CGO (SQLite FTS5). Pre-installed on most Ubuntu-based cloud VMs.
+- **Azure Repos PR creation (optional)** — only needed when testing `worktree.create_pr` against Azure remotes:
+  - [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli) (`az`) on `PATH`
+  - DevOps extension: `az extension add --name azure-devops`
+  - Auth: `az login` or `export AZURE_DEVOPS_EXT_PAT=<pat>`
+  - GitHub PR creation still uses `gh` (see host table in `apps/backend/internal/agentctl/AGENTS.md`).
 
 ## Generated files before typecheck
 
@@ -33,3 +38,13 @@ All documented in the root `Makefile`:
 - `make lint` — golangci-lint + ESLint
 - `make typecheck` — TypeScript type-checking across all apps
 - `make fmt` — format all code (run before lint to avoid false positives)
+- `make test-e2e` — Playwright E2E tests (requires `make build-backend && make build-web` first). Uses `e2e/playwright.config.ts`. 1000+ specs.
+
+## Firecracker / cloud-VM caveats
+
+These apply to Cursor Cloud, Codex, and similar Firecracker-backed sandboxes:
+
+- **golangci-lint PATH**: `go install` places the binary in `~/go/bin/`. Ensure `PATH` includes it (the update script appends to `~/.bashrc`, but in-session shells may need `export PATH="$PATH:$HOME/go/bin"`).
+- **First page load**: `make dev` compiles pages on first visit via Turbopack — expect ~25 s for the initial load.
+- **CLI test flake**: `src/ports.test.ts > isPortInUse > returns false within the timeout when the host black-holes packets` fails because `192.0.2.1` behaves differently inside Firecracker. This is a known environment-specific flake, not a code issue.
+- **Playwright browser installation**: `playwright install chromium` hangs during zip extraction (Node.js io_uring incompatibility with the Firecracker kernel). Workaround: `scripts/install-playwright-browsers.sh` runs the install with a timeout, then falls back to extracting the already-downloaded zips with `unzip`. The update script calls this automatically. System deps can be installed via `playwright install-deps chromium`.

@@ -5,13 +5,15 @@ description: Commit, push, and create a PR. Default is ready-for-review with aut
 
 # PR
 
-> **Host detection:** This skill works on both GitHub and GitLab repositories. Detect the host before step 4 by inspecting `git remote get-url origin`:
+> **Host detection:** This skill works on GitHub, GitLab, and Azure Repos. Detect the host before step 4 by inspecting `git remote get-url origin`:
+> - URL contains `dev.azure.com`, `visualstudio.com`, or `ssh.dev.azure.com` → use the **Azure Repos flow** below.
 > - URL contains `github.com` (or any host you have configured for GitHub) → use the **GitHub flow** below.
 > - URL contains `gitlab` (e.g. `gitlab.com`, `gitlab.acme.corp`) → use the **GitLab flow** at the bottom of this file.
 > - For self-managed hosts, the user's repository configuration determines the host.
 >
 > **GitHub tool selection:** The GitHub flow uses `gh` CLI by default. If `gh` is unavailable or fails, use any available GitHub tools in the environment (e.g. MCP GitHub tools).
 > **GitLab tool selection:** The GitLab flow prefers `glab` CLI when available; otherwise it shells `curl` against the REST v4 API using `$GITLAB_TOKEN` (which the agent runtime injects from the user's secrets store).
+> **Azure Repos tool selection:** The Azure flow prefers `az repos pr create` with the Azure DevOps extension. Auth can come from an existing `az login` session or `AZURE_DEVOPS_EXT_PAT`.
 
 ## Available skills
 
@@ -71,6 +73,38 @@ description: Commit, push, and create a PR. Default is ready-for-review with aut
    - Tell the user to drag and drop the image files from `.pr-assets/` into the PR description on GitHub for the images to render
 
 7. **Return the PR URL** when done.
+
+## Azure Repos flow
+
+When `git remote get-url origin` points at Azure Repos, the steps are the same up through **Push** (1–3). For step 4, create an Azure Repos pull request instead of a GitHub PR. **Skip steps 5 and 6** — `/pr-fixup` and the PR asset upload flow are GitHub-specific.
+
+Prefer the Azure CLI when it is on `PATH`:
+
+```bash
+# If needed once per machine / shell:
+# az extension add --name azure-devops
+# export AZURE_DEVOPS_EXT_PAT=...   # optional when az login is not already configured
+
+SOURCE_BRANCH="$(git branch --show-current)"
+TARGET_BRANCH="${TARGET_BRANCH:-}"   # leave empty to let Azure use the repo default branch
+DRAFT_FLAG=""
+[ "${DRAFT:-false}" = "true" ] && DRAFT_FLAG="--draft"
+
+az repos pr create \
+  ${TARGET_BRANCH:+--target-branch "$TARGET_BRANCH"} \
+  --source-branch "$SOURCE_BRANCH" \
+  --title "type: description" \
+  --description "$(cat <<'EOF'
+<filled PR template>
+EOF
+)" \
+  ${DRAFT_FLAG:+$DRAFT_FLAG}
+```
+
+Notes:
+- Azure DevOps CLI auto-detects organization / project / repository from the current repo in most cases, so you usually do **not** need to pass `--organization`, `--project`, or `--repository` explicitly.
+- If auto-detect fails (common with unusual remotes or older CLI setups), derive them from the remote and retry with explicit flags.
+- Return the PR URL and stop.
 
 ## GitLab flow (Merge Requests)
 

@@ -95,6 +95,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		IsEphemeral:         req.IsEphemeral,
 		IsPassthrough:       req.IsPassthrough,
 		SetupScript:         req.SetupScript,
+		CopyFiles:           req.CopyFiles,
 		// Worktree configuration for concurrent agent execution
 		UseWorktree:          req.UseWorktree,
 		WorktreeID:           req.WorktreeID,
@@ -140,6 +141,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 				PullBeforeWorktree:   r.PullBeforeWorktree,
 				RepoSetupScript:      r.RepoSetupScript,
 				RepoCleanupScript:    r.RepoCleanupScript,
+				CopyFiles:            r.CopyFiles,
 			})
 		}
 		launchReq.Repositories = specs

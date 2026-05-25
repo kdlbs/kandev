@@ -6,6 +6,7 @@
 // Wired via thin wrappers around the server actions / WS payloads in
 // `app/actions/agents.ts` and `lib/ws/handlers/agents.ts`.
 
+import type { ProfileEnvVar } from "@/lib/types/http";
 import type { AgentProfile, AgentProfilePayload, CLIFlag } from "@/lib/types/agent-profile";
 import { agentProfileId } from "@/lib/types/ids";
 
@@ -26,6 +27,11 @@ function pickFlags(raw: RawProfile): CLIFlag[] {
   return Array.isArray(value) ? (value as CLIFlag[]) : [];
 }
 
+function pickEnvVars(raw: RawProfile): ProfileEnvVar[] {
+  const value = raw.envVars ?? raw.env_vars;
+  return Array.isArray(value) ? (value as ProfileEnvVar[]) : [];
+}
+
 /**
  * Convert a kanban snake_case payload (or a partially-camelCased one) into
  * the canonical `AgentProfile`. Office-orchestration fields are left
@@ -42,6 +48,7 @@ export function normalizeAgentProfile(raw: unknown): AgentProfile {
     mode: (profile.mode as string | undefined) ?? undefined,
     allowIndexing: pickBool(profile, "allowIndexing", "allow_indexing"),
     cliFlags: pickFlags(profile),
+    envVars: pickEnvVars(profile),
     cliPassthrough: pickBool(profile, "cliPassthrough", "cli_passthrough"),
     userModified: (profile.userModified ?? profile.user_modified) as boolean | undefined,
     createdAt: pickString(profile, "createdAt", "created_at"),
@@ -65,6 +72,7 @@ export function toAgentProfilePayload(
   if (profile.mode !== undefined) payload.mode = profile.mode;
   if (profile.allowIndexing !== undefined) payload.allow_indexing = profile.allowIndexing;
   if (profile.cliFlags !== undefined) payload.cli_flags = profile.cliFlags;
+  if (profile.envVars !== undefined) payload.env_vars = profile.envVars;
   if (profile.cliPassthrough !== undefined) payload.cli_passthrough = profile.cliPassthrough;
   if (profile.userModified !== undefined) payload.user_modified = profile.userModified;
   if (profile.createdAt !== undefined) payload.created_at = profile.createdAt;

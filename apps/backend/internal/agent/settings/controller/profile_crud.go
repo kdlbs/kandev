@@ -26,6 +26,7 @@ type CreateProfileRequest struct {
 	// profile opens with the agent's recommended flags (all disabled by
 	// default unless the curated entry specifies Default: true).
 	CLIFlags []dto.CLIFlagDTO
+	EnvVars  []dto.ProfileEnvVarDTO
 }
 
 func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest) (*dto.AgentProfileDTO, error) {
@@ -50,6 +51,9 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 	} else if err := validateCLIFlagDTOs(req.CLIFlags); err != nil {
 		return nil, err
 	}
+	if err := validateProfileEnvVarDTOs(req.EnvVars); err != nil {
+		return nil, err
+	}
 	profile := &models.AgentProfile{
 		AgentID:          req.AgentID,
 		Name:             req.Name,
@@ -59,6 +63,7 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		AllowIndexing:    req.AllowIndexing,
 		CLIPassthrough:   req.CLIPassthrough,
 		CLIFlags:         cliFlags,
+		EnvVars:          envVarsFromDTO(req.EnvVars),
 		UserModified:     true,
 	}
 	if err := c.repo.CreateAgentProfile(ctx, profile); err != nil {
@@ -110,6 +115,8 @@ type UpdateProfileRequest struct {
 	// CLIFlags replaces the entire list when non-nil. Nil means "leave
 	// unchanged" — the UI always sends the full desired list on save.
 	CLIFlags *[]dto.CLIFlagDTO
+	// EnvVars replaces the entire list when non-nil.
+	EnvVars *[]dto.ProfileEnvVarDTO
 }
 
 func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest) (*dto.AgentProfileDTO, error) {
@@ -142,6 +149,12 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 			return nil, err
 		}
 		profile.CLIFlags = cliFlagsFromDTO(*req.CLIFlags)
+	}
+	if req.EnvVars != nil {
+		if err := validateProfileEnvVarDTOs(*req.EnvVars); err != nil {
+			return nil, err
+		}
+		profile.EnvVars = envVarsFromDTO(*req.EnvVars)
 	}
 	profile.UserModified = true
 	if err := c.repo.UpdateAgentProfile(ctx, profile); err != nil {
@@ -277,6 +290,7 @@ func toProfileDTO(profile *models.AgentProfile) dto.AgentProfileDTO {
 		Mode:             profile.Mode,
 		AllowIndexing:    profile.AllowIndexing,
 		CLIFlags:         cliFlagsToDTO(profile.CLIFlags),
+		EnvVars:          envVarsToDTO(profile.EnvVars),
 		CLIPassthrough:   profile.CLIPassthrough,
 		UserModified:     profile.UserModified,
 		WorkspaceID:      profile.WorkspaceID,
@@ -299,6 +313,95 @@ func cliFlagsFromDTO(in []dto.CLIFlagDTO) []models.CLIFlag {
 		out[i] = models.CLIFlag{Description: f.Description, Flag: f.Flag, Enabled: f.Enabled}
 	}
 	return out
+}
+
+func envVarsToDTO(in []models.ProfileEnvVar) []dto.ProfileEnvVarDTO {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]dto.ProfileEnvVarDTO, len(in))
+	for i, ev := range in {
+		out[i] = dto.ProfileEnvVarDTO{Key: ev.Key, Value: ev.Value, SecretID: ev.SecretID}
+	}
+	return out
+}
+
+func envVarsFromDTO(in []dto.ProfileEnvVarDTO) []models.ProfileEnvVar {
+	out := make([]models.ProfileEnvVar, 0, len(in))
+	for _, ev := range in {
+		if strings.TrimSpace(ev.Key) == "" {
+			continue
+		}
+		out = append(out, models.ProfileEnvVar{
+			Key:      strings.TrimSpace(ev.Key),
+			Value:    ev.Value,
+			SecretID: ev.SecretID,
+		})
+	}
+	return out
+}
+
+const (
+	maxProfileEnvVars           = 100
+	maxProfileEnvVarKeyLen      = 256
+	maxProfileEnvVarValueLen    = 8 * 1024
+	reservedProfileEnvVarKey    = "TASK_DESCRIPTION"
+	reservedProfileEnvVarPrefix = "KANDEV_"
+)
+
+func validateProfileEnvVarDTOs(in []dto.ProfileEnvVarDTO) error {
+	if len(in) > maxProfileEnvVars {
+		return fmt.Errorf("%w: at most %d entries allowed", ErrInvalidProfileEnvVars, maxProfileEnvVars)
+	}
+	seen := make(map[string]int, len(in))
+	for i, ev := range in {
+		key := strings.TrimSpace(ev.Key)
+		if err := validateEnvVarKey(key, i, seen); err != nil {
+			return err
+		}
+		seen[key] = i
+		if err := validateEnvVarValue(ev, i); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateEnvVarKey(key string, i int, seen map[string]int) error {
+	if key == "" {
+		return fmt.Errorf("%w: env_vars[%d].key is required", ErrInvalidProfileEnvVars, i)
+	}
+	if len(key) > maxProfileEnvVarKeyLen {
+		return fmt.Errorf("%w: env_vars[%d].key exceeds %d characters", ErrInvalidProfileEnvVars, i, maxProfileEnvVarKeyLen)
+	}
+	if strings.ContainsAny(key, "=\x00") {
+		return fmt.Errorf("%w: env_vars[%d].key must not contain '=' or null bytes", ErrInvalidProfileEnvVars, i)
+	}
+	if strings.HasPrefix(key, reservedProfileEnvVarPrefix) || key == reservedProfileEnvVarKey {
+		return fmt.Errorf("%w: env_vars[%d].key %q is reserved", ErrInvalidProfileEnvVars, i, key)
+	}
+	if first, exists := seen[key]; exists {
+		return fmt.Errorf("%w: env_vars[%d].key duplicates env_vars[%d].key", ErrInvalidProfileEnvVars, i, first)
+	}
+	return nil
+}
+
+func validateEnvVarValue(ev dto.ProfileEnvVarDTO, i int) error {
+	if ev.SecretID != "" && ev.Value != "" {
+		return fmt.Errorf("%w: env_vars[%d]: set value or secret_id, not both", ErrInvalidProfileEnvVars, i)
+	}
+	if ev.SecretID == "" && ev.Value == "" {
+		return fmt.Errorf("%w: env_vars[%d]: must set either value or secret_id", ErrInvalidProfileEnvVars, i)
+	}
+	if ev.Value != "" {
+		if len(ev.Value) > maxProfileEnvVarValueLen {
+			return fmt.Errorf("%w: env_vars[%d].value exceeds %d characters", ErrInvalidProfileEnvVars, i, maxProfileEnvVarValueLen)
+		}
+		if strings.Contains(ev.Value, "\x00") {
+			return fmt.Errorf("%w: env_vars[%d].value must not contain null bytes", ErrInvalidProfileEnvVars, i)
+		}
+	}
+	return nil
 }
 
 // resolveProfileNameForModel looks up the agent by ID, fetches its model list (using cache),

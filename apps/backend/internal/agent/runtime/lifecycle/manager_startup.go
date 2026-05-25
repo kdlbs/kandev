@@ -224,12 +224,18 @@ func (m *Manager) finalizeBootMessage(execution *AgentExecution, msg *models.Mes
 
 // buildEnvForExecution builds environment variables for any runtime.
 // This is the unified method used by the runtime interface.
-func (m *Manager) buildEnvForExecution(executionID string, req *LaunchRequest, agentConfig agents.Agent) map[string]string {
+func (m *Manager) buildEnvForExecution(ctx context.Context, executionID string, req *LaunchRequest, agentConfig agents.Agent, profileInfo *AgentProfileInfo) map[string]string {
 	env := make(map[string]string)
 
 	// Copy request environment
 	for k, v := range req.Env {
 		env[k] = v
+	}
+
+	if profileInfo != nil {
+		m.mergeAgentProfileEnvFromInfo(ctx, profileInfo, env)
+	} else {
+		m.mergeAgentProfileEnv(ctx, req.AgentProfileID, env)
 	}
 
 	// Add standard variables for recovery after backend restart
@@ -252,7 +258,6 @@ func (m *Manager) buildEnvForExecution(executionID string, req *LaunchRequest, a
 
 	// Add required credentials from agent config
 	if m.credsMgr != nil && agentConfig != nil {
-		ctx := context.Background()
 		for _, credKey := range agentConfig.Runtime().RequiredEnv {
 			if value, err := m.credsMgr.GetCredentialValue(ctx, credKey); err == nil && value != "" {
 				env[credKey] = value

@@ -105,9 +105,20 @@ func (r *ChannelRelay) sendWithRetry(
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if attempt > 0 {
 			delay := time.Duration(1<<uint(attempt-1)) * time.Second
+			// Use NewTimer rather than time.After so a context cancellation
+			// during the backoff stops the underlying timer immediately
+			// instead of leaving it pinned in the runtime until it fires.
+			timer := time.NewTimer(delay)
 			select {
-			case <-time.After(delay):
+			case <-timer.C:
 			case <-ctx.Done():
+				// Stop() returns false if the timer already fired between
+				// the select winning and Stop running; drain timer.C in
+				// that case so the buffered value does not strand on the
+				// channel.
+				if !timer.Stop() {
+					<-timer.C
+				}
 				return ctx.Err()
 			}
 		}

@@ -22,7 +22,6 @@ import type {
 import type { SystemHealthResponse } from "@/lib/types/health";
 import type { UISliceActions as UIA } from "./slices/ui/types";
 import type * as UISliceTypes from "./slices/ui/types";
-import type { Automation, AutomationRun } from "@/lib/types/automation";
 import { mergeInitialState } from "./default-state";
 import {
   createKanbanSlice,
@@ -38,6 +37,7 @@ import {
   createOfficeSlice,
   createFeaturesSlice,
   createAutomationsSlice,
+  createSystemSlice,
   defaultKanbanState,
   defaultWorkspaceState,
   defaultSettingsState,
@@ -51,6 +51,7 @@ import {
   defaultOfficeState,
   defaultFeaturesState,
   defaultAutomationsState,
+  defaultSystemState,
   type WorkspaceState,
   type WorkflowsState,
   type ExecutorsState,
@@ -74,6 +75,8 @@ import {
   type PreviewViewMode,
   type PreviewDevicePreset,
   type ConnectionState,
+  type SystemSliceActions,
+  type AutomationsSliceActions,
 } from "./slices";
 import type {
   AvailableCommand,
@@ -209,6 +212,9 @@ export type AppState = {
   automations: (typeof defaultAutomationsState)["automations"];
   automationRuns: (typeof defaultAutomationsState)["automationRuns"];
 
+  // System slice (actions merged via SystemSliceActions intersection on AppState)
+  system: (typeof defaultSystemState)["system"];
+
   // UI slice
   previewPanel: (typeof defaultUIState)["previewPanel"];
   rightPanel: (typeof defaultUIState)["rightPanel"];
@@ -273,14 +279,7 @@ export type AppState = {
   removeLinearIssueWatch: (id: string) => void;
   resetLinearIssueWatches: () => void;
 
-  // Automations actions
-  setAutomations: (items: Automation[]) => void;
-  setAutomationsLoading: (loading: boolean) => void;
-  addAutomation: (automation: Automation) => void;
-  updateAutomation: (automation: Automation) => void;
-  removeAutomation: (id: string) => void;
-  setAutomationRuns: (automationId: string, runs: AutomationRun[]) => void;
-  setAutomationRunsLoading: (automationId: string, loading: boolean) => void;
+  // Automations actions merged via AutomationsSliceActions intersection below.
 
   // Actions from all slices
   hydrate: (state: Partial<AppState>, options?: HydrationOptions) => void;
@@ -555,7 +554,8 @@ export type AppState = {
   setRunAttempts: (runId: string, attempts: RouteAttempt[]) => void;
   appendRunAttempt: (runId: string, attempt: RouteAttempt) => void;
   setAgentRouting: (agentId: string, data: AgentRouteData | undefined) => void;
-};
+} & SystemSliceActions &
+  AutomationsSliceActions;
 
 export function createAppStore(initialState?: Partial<AppState>) {
   const merged = mergeInitialState(initialState);
@@ -586,6 +586,8 @@ export function createAppStore(initialState?: Partial<AppState>) {
       ...createOfficeSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createFeaturesSlice(set as any, get as any, api as any),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...createSystemSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createUISlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -647,6 +649,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
       features: merged.features,
       automations: merged.automations,
       automationRuns: merged.automationRuns,
+      system: merged.system,
       previewPanel: merged.previewPanel,
       rightPanel: merged.rightPanel,
       diffs: merged.diffs,

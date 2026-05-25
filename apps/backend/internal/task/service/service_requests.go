@@ -120,6 +120,7 @@ type CreateRepositoryRequest struct {
 	SetupScript          string `json:"setup_script"`
 	CleanupScript        string `json:"cleanup_script"`
 	DevScript            string `json:"dev_script"`
+	CopyFiles            string `json:"copy_files"`
 }
 
 // UpdateRepositoryRequest contains the data for updating a repository
@@ -137,6 +138,7 @@ type UpdateRepositoryRequest struct {
 	SetupScript          *string `json:"setup_script,omitempty"`
 	CleanupScript        *string `json:"cleanup_script,omitempty"`
 	DevScript            *string `json:"dev_script,omitempty"`
+	CopyFiles            *string `json:"copy_files,omitempty"`
 }
 
 // CreateExecutorRequest contains the data for creating an executor

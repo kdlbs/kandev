@@ -11,6 +11,7 @@ type Repository struct {
 	ID            string
 	SetupScript   string
 	CleanupScript string
+	CopyFiles     string
 }
 
 // RepositoryProvider provides access to repository information.
@@ -46,5 +47,6 @@ func (a *RepositoryAdapter) GetRepository(ctx context.Context, repositoryID stri
 		ID:            repo.ID,
 		SetupScript:   repo.SetupScript,
 		CleanupScript: repo.CleanupScript,
+		CopyFiles:     repo.CopyFiles,
 	}, nil
 }

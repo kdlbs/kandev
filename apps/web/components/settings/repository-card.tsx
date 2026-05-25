@@ -108,6 +108,7 @@ type RepositoryScriptFieldsProps = RepoFieldsBaseProps & {
   setupScript: string;
   cleanupScript: string;
   devScript: string;
+  copyFiles: string;
 };
 
 function RepositoryScriptFields({
@@ -116,6 +117,7 @@ function RepositoryScriptFields({
   setupScript,
   cleanupScript,
   devScript,
+  copyFiles,
 }: RepositoryScriptFieldsProps) {
   return (
     <>
@@ -161,6 +163,18 @@ function RepositoryScriptFields({
           Used to start the preview dev server for this repository. Use{" "}
           <code className="px-1 py-0.5 bg-muted rounded">$PORT</code> for automatic port allocation.
         </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label>Copy Files</Label>
+        <Textarea
+          value={copyFiles}
+          onChange={(e) => onUpdate(repositoryId, { copy_files: e.target.value })}
+          placeholder=".env, .env.local, config/local.yml"
+          rows={2}
+          className="font-mono text-sm"
+        />
+        <p className="text-xs text-muted-foreground">Gitignored paths copied into new worktrees.</p>
       </div>
     </>
   );
@@ -276,15 +290,13 @@ function RepositoryEditView({
                 {isDirty && <UnsavedChangesBadge />}
               </Label>
             </div>
-            <div className="flex items-center gap-2">
-              <UnsavedSaveButton
-                isDirty={isDirty}
-                isLoading={saveRequest.isLoading}
-                status={saveRequest.status}
-                cleanLabel="Close"
-                onClick={isDirty ? () => onSave(close) : close}
-              />
-            </div>
+            <UnsavedSaveButton
+              isDirty={isDirty}
+              isLoading={saveRequest.isLoading}
+              status={saveRequest.status}
+              cleanLabel="Close"
+              onClick={isDirty ? () => onSave(close) : close}
+            />
           </div>
 
           <RepositoryBasicFields
@@ -303,6 +315,7 @@ function RepositoryEditView({
             setupScript={repository.setup_script ?? ""}
             cleanupScript={repository.cleanup_script ?? ""}
             devScript={repository.dev_script ?? ""}
+            copyFiles={repository.copy_files ?? ""}
           />
 
           <RepositoryCustomScripts

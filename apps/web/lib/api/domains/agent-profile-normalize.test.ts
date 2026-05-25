@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import { normalizeAgentProfile, toAgentProfilePayload } from "./agent-profile-normalize";
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 
+const sampleEnvVar = { key: "ANTHROPIC_BASE_URL", value: "https://api.example" };
+
 describe("normalizeAgentProfile", () => {
   it("converts snake_case wire payload to canonical camelCase", () => {
     const wire = {
@@ -13,6 +15,7 @@ describe("normalizeAgentProfile", () => {
       mode: "acp",
       allow_indexing: true,
       cli_flags: [{ flag: "--verbose", description: "v", enabled: true }],
+      env_vars: [sampleEnvVar],
       cli_passthrough: false,
       user_modified: true,
       created_at: "2026-01-01T00:00:00Z",
@@ -28,6 +31,7 @@ describe("normalizeAgentProfile", () => {
       mode: "acp",
       allowIndexing: true,
       cliFlags: [{ flag: "--verbose", description: "v", enabled: true }],
+      envVars: [sampleEnvVar],
       cliPassthrough: false,
       userModified: true,
       createdAt: "2026-01-01T00:00:00Z",
@@ -38,6 +42,7 @@ describe("normalizeAgentProfile", () => {
   it("falls back to safe defaults for missing fields", () => {
     const result = normalizeAgentProfile({ id: "x", name: "y" });
     expect(result.cliFlags).toEqual([]);
+    expect(result.envVars).toEqual([]);
     expect(result.cliPassthrough).toBe(false);
     expect(result.allowIndexing).toBe(false);
     expect(result.agentDisplayName).toBe("");
@@ -63,6 +68,7 @@ describe("toAgentProfilePayload", () => {
       name: "default",
       cliPassthrough: false,
       cliFlags: [],
+      envVars: [sampleEnvVar],
     });
     expect(payload).toEqual({
       id: "p1",
@@ -70,6 +76,7 @@ describe("toAgentProfilePayload", () => {
       name: "default",
       cli_passthrough: false,
       cli_flags: [],
+      env_vars: [sampleEnvVar],
     });
   });
 

@@ -57,6 +57,7 @@ export async function resolveRepositoryId(
     setup_script: "",
     cleanup_script: "",
     dev_script: "",
+    copy_files: "",
   });
   return created.id;
 }

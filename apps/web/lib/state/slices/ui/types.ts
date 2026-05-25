@@ -1,5 +1,5 @@
 import type { ConnectionStatus } from "@/lib/types/connection";
-import type { HealthIssue, SystemHealthResponse } from "@/lib/types/health";
+import type { HealthCheckSummary, HealthIssue, SystemHealthResponse } from "@/lib/types/health";
 import type {
   FilterClause,
   GroupKey,
@@ -61,6 +61,7 @@ export type DocumentPanelState = {
 
 export type SystemHealthState = {
   issues: HealthIssue[];
+  checks: HealthCheckSummary[];
   healthy: boolean;
   loaded: boolean;
   loading: boolean;

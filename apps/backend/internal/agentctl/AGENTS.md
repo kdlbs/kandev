@@ -9,10 +9,21 @@ agentctl exposes these route groups (see `server/api/`):
 - `/instances/*` - Multi-instance management
 - `/processes/*` - Agent subprocess management (start/stop)
 - `/agent/configure`, `/agent/stream` - Agent configuration and event streaming
-- `/git/*` - Git operations (status, commit, push, pull, rebase, stage, etc.)
+- `/git/*` - Git operations (status, commit, push, pull, rebase, stage, create PR, etc.)
 - `/shell/*` - Shell session management
 - `/workspace/*` - File operations, search, tree
 - `/vscode/*` - VS Code integration proxy
+
+## Pull request creation (`server/process/git_pr_providers.go`)
+
+`GitOperator.CreatePR` picks a host CLI from `origin`:
+
+| Remote host | CLI | Notes |
+|-------------|-----|-------|
+| `dev.azure.com`, `ssh.dev.azure.com`, `*.visualstudio.com` | `az repos pr create` | Requires `az` on `PATH` and `azure-devops` extension. Auth: `az login` or `AZURE_DEVOPS_EXT_PAT`. |
+| Everything else (today) | `gh pr create` | GitLab agentctl routing is not implemented yet — use the `/pr` skill `glab` flow. |
+
+Azure PR URLs are returned to the client but do not trigger backend `onPRCreated` / TaskPR linkage (GitHub-only today).
 
 ## Adapter Model
 

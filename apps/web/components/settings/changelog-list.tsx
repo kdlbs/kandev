@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Badge } from "@kandev/ui/badge";
@@ -19,6 +20,15 @@ import { getChangelog, type ChangelogEntry } from "@/lib/changelog";
 import { getReleaseUrl } from "@/lib/release-notes";
 
 const PAGE_SIZE = 10;
+const PAGE_PARAM = "page";
+
+function parsePageParam(raw: string | null, totalPages: number): number {
+  if (!raw) return 1;
+  const parsed = Number.parseInt(raw, 10);
+  if (Number.isNaN(parsed) || parsed < 1) return 1;
+  if (parsed > totalPages) return totalPages;
+  return parsed;
+}
 
 function ChangelogEntryCard({ entry }: { entry: ChangelogEntry }) {
   const releaseUrl = getReleaseUrl(entry.version);
@@ -73,9 +83,28 @@ function buildPageNumbers(currentPage: number, totalPages: number): (number | "e
 
 export function ChangelogList() {
   const changelog = getChangelog();
-  const [currentPage, setCurrentPage] = useState(1);
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
 
-  const totalPages = Math.ceil(changelog.length / PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(changelog.length / PAGE_SIZE));
+  const currentPage = parsePageParam(searchParams.get(PAGE_PARAM), totalPages);
+
+  const setPage = useCallback(
+    (next: number) => {
+      const clamped = Math.min(Math.max(1, next), totalPages);
+      const params = new URLSearchParams(searchParams.toString());
+      if (clamped === 1) {
+        params.delete(PAGE_PARAM);
+      } else {
+        params.set(PAGE_PARAM, String(clamped));
+      }
+      const qs = params.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams, totalPages],
+  );
+
   const pageEntries = useMemo(() => {
     const start = (currentPage - 1) * PAGE_SIZE;
     return changelog.slice(start, start + PAGE_SIZE);
@@ -93,11 +122,11 @@ export function ChangelogList() {
         <ChangelogEntryCard key={entry.version} entry={entry} />
       ))}
       {totalPages > 1 && (
-        <Pagination>
+        <Pagination data-testid="changelog-pagination">
           <PaginationContent>
             <PaginationItem>
               <PaginationPrevious
-                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                onClick={() => setPage(currentPage - 1)}
                 className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
               />
             </PaginationItem>
@@ -110,8 +139,9 @@ export function ChangelogList() {
                 <PaginationItem key={page}>
                   <PaginationLink
                     isActive={currentPage === page}
-                    onClick={() => setCurrentPage(page)}
+                    onClick={() => setPage(page)}
                     className="cursor-pointer"
+                    data-testid={`changelog-page-${page}`}
                   >
                     {page}
                   </PaginationLink>
@@ -120,7 +150,7 @@ export function ChangelogList() {
             )}
             <PaginationItem>
               <PaginationNext
-                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                onClick={() => setPage(currentPage + 1)}
                 className={
                   currentPage === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"
                 }
