@@ -2,6 +2,8 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -16,6 +18,7 @@ type mockPassthroughProfileResolver struct {
 	cliPassthrough bool
 	envVars        []settingsmodels.ProfileEnvVar
 	err            error
+	agentName      string
 }
 
 func (m *mockPassthroughProfileResolver) ResolveProfile(ctx context.Context, profileID string) (*AgentProfileInfo, error) {
@@ -24,9 +27,78 @@ func (m *mockPassthroughProfileResolver) ResolveProfile(ctx context.Context, pro
 	}
 	return &AgentProfileInfo{
 		ProfileID:      profileID,
+		AgentName:      m.agentName,
 		CLIPassthrough: m.cliPassthrough,
 		EnvVars:        m.envVars,
 	}, nil
+}
+
+func assertClaudePassthroughMCPConfig(t *testing.T, cmd agents.Command, wantURL string) {
+	t.Helper()
+
+	args := cmd.Args()
+	for i, arg := range args {
+		if arg != "--mcp-config" {
+			continue
+		}
+		if i+1 >= len(args) {
+			t.Fatalf("--mcp-config missing path in command %v", args)
+		}
+		if i != len(args)-2 {
+			t.Fatalf("--mcp-config must be final flag pair for claude variadic parsing: %v", args)
+		}
+		var payload struct {
+			MCPServers map[string]struct {
+				Type string `json:"type"`
+				URL  string `json:"url"`
+			} `json:"mcpServers"`
+		}
+		data, err := os.ReadFile(args[i+1])
+		if err != nil {
+			t.Fatalf("read generated MCP config: %v", err)
+		}
+		if err := json.Unmarshal(data, &payload); err != nil {
+			t.Fatalf("generated MCP config is not JSON: %v\n%s", err, data)
+		}
+		kandev := payload.MCPServers["kandev"]
+		if kandev.Type != "http" {
+			t.Fatalf("kandev MCP type = %q, want http", kandev.Type)
+		}
+		if kandev.URL != wantURL {
+			t.Fatalf("kandev MCP url = %q, want %q", kandev.URL, wantURL)
+		}
+		return
+	}
+	t.Fatalf("passthrough command missing --mcp-config: %v", args)
+}
+
+func newClaudePassthroughMCPTestManager(t *testing.T) (*Manager, *AgentExecution, *AgentProfileInfo) {
+	t.Helper()
+
+	mgr := newTestManager()
+	mgr.dataDir = t.TempDir()
+	mgr.profileResolver = &mockPassthroughProfileResolver{
+		agentName:      "claude-acp",
+		cliPassthrough: true,
+	}
+	execution := &AgentExecution{
+		ID:             "exec-1",
+		TaskID:         "task-1",
+		SessionID:      "session-1",
+		AgentProfileID: "profile-1",
+		WorkspacePath:  t.TempDir(),
+		Metadata: map[string]interface{}{
+			"standalone_port": 45678,
+		},
+		standalonePort: 45678,
+	}
+	profile := &AgentProfileInfo{
+		ProfileID:      "profile-1",
+		AgentName:      "claude-acp",
+		Model:          "default",
+		CLIPassthrough: true,
+	}
+	return mgr, execution, profile
 }
 
 func TestBuildPassthroughCommand(t *testing.T) {
@@ -228,6 +300,24 @@ func TestBuildPassthroughCommand(t *testing.T) {
 			},
 			wantCmd: []string{"test-cli", "--model", "gpt-4", "--yes", "--debug", "--log-level", "trace", "-c"},
 		},
+		{
+			name: "mcp config flag goes after positional prompt because claude treats it as variadic",
+			agent: &testAgent{
+				id: "test-agent",
+				StandardPassthrough: agents.StandardPassthrough{
+					Cfg: agents.PassthroughConfig{
+						Supported:      true,
+						PassthroughCmd: agents.NewCommand("test-cli"),
+						MCPConfigFlag:  agents.NewParam("--mcp-config", "{mcp_config}"),
+					},
+				},
+			},
+			opts: agents.PassthroughOptions{
+				Prompt:        "fix the bug",
+				MCPConfigPath: "/tmp/kandev-mcp.json",
+			},
+			wantCmd: []string{"test-cli", "fix the bug", "--mcp-config", "/tmp/kandev-mcp.json"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -246,6 +336,28 @@ func TestBuildPassthroughCommand(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPassthroughAgentCommandInjectsKandevMCPConfig(t *testing.T) {
+	mgr, execution, profile := newClaudePassthroughMCPTestManager(t)
+
+	_, _, _, cmd, err := mgr.passthroughAgentCommand(execution, profile)
+	if err != nil {
+		t.Fatalf("passthroughAgentCommand returned error: %v", err)
+	}
+
+	assertClaudePassthroughMCPConfig(t, cmd, "http://localhost:45678/mcp")
+}
+
+func TestFreshPassthroughCommandInjectsKandevMCPConfig(t *testing.T) {
+	mgr, execution, _ := newClaudePassthroughMCPTestManager(t)
+
+	_, _, cmd, err := mgr.freshPassthroughCommand(context.Background(), execution)
+	if err != nil {
+		t.Fatalf("freshPassthroughCommand returned error: %v", err)
+	}
+
+	assertClaudePassthroughMCPConfig(t, cmd, "http://localhost:45678/mcp")
 }
 
 // TestManager_HandlePassthroughExit_SkipsDuringShutdown verifies that the

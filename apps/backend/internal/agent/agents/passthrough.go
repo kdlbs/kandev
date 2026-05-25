@@ -27,6 +27,7 @@ func (p *StandardPassthrough) BuildPassthroughCommand(opts PassthroughOptions) C
 	case opts.Prompt != "":
 		b.Prompt(p.Cfg.PromptFlag, opts.Prompt)
 	}
+	b.MCPConfig(p.Cfg.MCPConfigFlag, opts.MCPConfigPath)
 
 	return b.Build()
 }

@@ -44,6 +44,12 @@ The orchestrator's `PromptTask` handler branches on `IsPassthroughSession(sessio
 
 **UI gap (deferred):** kandev's chat compose box is rendered by `ChatInputArea`, which is replaced entirely by `PassthroughTerminal` when `session.is_passthrough` is true. There is no compose surface in passthrough mode today. Users send follow-ups by typing directly into the terminal (xterm forwards each keystroke to the PTY) — which works perfectly for the Claude CLI use case. A dedicated kandev compose box that drives the PTY (without replacing the terminal) is a follow-up.
 
+### Kandev MCP tools are wired for CLI mode
+
+When a passthrough agent supports an MCP config flag, kandev generates a per-session MCP config file that points at the task's local agentctl MCP endpoint and launches the CLI with that config. The generated config exposes the same kandev tool server used by ACP sessions, scoped by the already-known `KANDEV_TASK_ID` / `KANDEV_SESSION_ID` context.
+
+For the Claude case, the passthrough command includes `--mcp-config <generated-file>` with an `mcpServers.kandev` HTTP entry for the local agentctl `/mcp` endpoint.
+
 ### Stop sends Ctrl-C (backend route landed; UI surface deferred)
 
 The orchestrator's `CancelAgent` handler branches on `IsPassthroughSession(sessionID)` and writes `\x03` to the PTY's stdin instead of sending an ACP cancel. DB reconciliation still runs so the UI unsticks regardless of the write outcome.
@@ -77,6 +83,12 @@ The orchestrator's `CancelAgent` handler branches on `IsPassthroughSession(sessi
 - WHEN any caller invokes `PromptTask` for the session (today: future kandev compose surface, integration tests)
 - THEN the text + `SubmitSequence` is written to the PTY
 - AND no ACP prompt is sent
+
+### Kandev MCP config is present for Claude passthrough
+- GIVEN a Claude profile with `cli_passthrough: true`
+- WHEN kandev starts or fresh-starts its passthrough command
+- THEN the argv includes `--mcp-config <generated-file>`
+- AND the generated file contains `mcpServers.kandev` pointing at the local agentctl `/mcp` endpoint
 
 ### Stop / cancel route is in place (UI surface follow-up)
 - GIVEN a CLI-mode task running

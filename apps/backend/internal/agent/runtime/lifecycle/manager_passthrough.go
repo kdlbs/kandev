@@ -2,7 +2,10 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -214,6 +217,101 @@ func promptForPassthroughCommand(pt agents.PassthroughConfig, taskDescription st
 	return taskDescription
 }
 
+type passthroughMCPServerConfig struct {
+	Type string `json:"type"`
+	URL  string `json:"url"`
+}
+
+type passthroughMCPConfigFile struct {
+	MCPServers map[string]passthroughMCPServerConfig `json:"mcpServers"`
+}
+
+func passthroughMCPConfigPort(execution *AgentExecution) int {
+	if execution == nil {
+		return 0
+	}
+	if execution.standalonePort > 0 {
+		return execution.standalonePort
+	}
+	if execution.Metadata == nil {
+		return 0
+	}
+	switch value := execution.Metadata["standalone_port"].(type) {
+	case int:
+		return value
+	case int64:
+		return int(value)
+	case float64:
+		return int(value)
+	}
+	return 0
+}
+
+func safePassthroughMCPConfigName(value string) string {
+	if value == "" {
+		return "session"
+	}
+	var out strings.Builder
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z':
+			out.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			out.WriteRune(r)
+		case r >= '0' && r <= '9':
+			out.WriteRune(r)
+		case r == '-' || r == '_' || r == '.':
+			out.WriteRune(r)
+		default:
+			out.WriteByte('_')
+		}
+	}
+	return out.String()
+}
+
+func (m *Manager) writePassthroughMCPConfig(execution *AgentExecution, pt agents.PassthroughConfig) (string, error) {
+	if pt.MCPConfigFlag.IsEmpty() {
+		return "", nil
+	}
+	port := passthroughMCPConfigPort(execution)
+	if port <= 0 {
+		return "", nil
+	}
+	root := m.dataDir
+	if root == "" {
+		root = filepath.Join(os.TempDir(), "kandev")
+	}
+	dir := filepath.Join(root, "passthrough-mcp")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("create passthrough MCP config dir: %w", err)
+	}
+	name := safePassthroughMCPConfigName(execution.SessionID)
+	if name == "session" {
+		name = safePassthroughMCPConfigName(execution.ID)
+	}
+	path := filepath.Join(dir, name+".json")
+	cfg := passthroughMCPConfigFile{
+		MCPServers: map[string]passthroughMCPServerConfig{
+			"kandev": {
+				Type: "http",
+				URL:  fmt.Sprintf("http://localhost:%d/mcp", port),
+			},
+		},
+	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("marshal passthrough MCP config: %w", err)
+	}
+	data = append(data, '\n')
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return "", fmt.Errorf("write passthrough MCP config: %w", err)
+	}
+	if execution.Metadata != nil {
+		execution.Metadata["passthrough_mcp_config_path"] = path
+	}
+	return path, nil
+}
+
 // passthroughAgentCommand validates passthrough support and builds the command for a passthrough session.
 // Returns the PassthroughAgent, PassthroughConfig, RuntimeConfig pointer, command, and any error.
 func (m *Manager) passthroughAgentCommand(execution *AgentExecution, profileInfo *AgentProfileInfo) (agents.PassthroughAgent, agents.PassthroughConfig, *agents.RuntimeConfig, agents.Command, error) {
@@ -231,12 +329,17 @@ func (m *Manager) passthroughAgentCommand(execution *AgentExecution, profileInfo
 	rt := agentConfig.Runtime()
 	taskDescription := getTaskDescriptionFromMetadata(execution)
 	promptForCmd := promptForPassthroughCommand(pt, taskDescription)
+	mcpConfigPath, err := m.writePassthroughMCPConfig(execution, pt)
+	if err != nil {
+		return nil, agents.PassthroughConfig{}, nil, agents.Command{}, err
+	}
 
 	cmd := ptAgent.BuildPassthroughCommand(agents.PassthroughOptions{
 		Model:            profileModel(profileInfo),
 		SessionID:        execution.ACPSessionID,
 		Prompt:           promptForCmd,
 		PermissionValues: profilePermissionValues(profileInfo),
+		MCPConfigPath:    mcpConfigPath,
 		CLIFlagTokens:    m.profileCLIFlagTokens(profileInfo),
 	})
 	if cmd.IsEmpty() {
@@ -376,10 +479,15 @@ func (m *Manager) freshPassthroughCommand(ctx context.Context, execution *AgentE
 	if err != nil {
 		return agents.PassthroughConfig{}, nil, agents.Command{}, err
 	}
+	mcpConfigPath, err := m.writePassthroughMCPConfig(execution, resolved.pt)
+	if err != nil {
+		return agents.PassthroughConfig{}, nil, agents.Command{}, err
+	}
 
 	cmd := resolved.agent.BuildPassthroughCommand(agents.PassthroughOptions{
 		Model:            profileModel(resolved.profile),
 		PermissionValues: profilePermissionValues(resolved.profile),
+		MCPConfigPath:    mcpConfigPath,
 		CLIFlagTokens:    m.profileCLIFlagTokens(resolved.profile),
 	})
 	if cmd.IsEmpty() {
@@ -477,10 +585,15 @@ func (m *Manager) ResumePassthroughSession(ctx context.Context, sessionID string
 	// backend restart. Once the sticky flag is set, every subsequent launch
 	// for this execution starts fresh.
 	useResume := !execution.passthroughResumeFailed
+	mcpConfigPath, err := m.writePassthroughMCPConfig(execution, resolved.pt)
+	if err != nil {
+		return err
+	}
 	cmd := resolved.agent.BuildPassthroughCommand(agents.PassthroughOptions{
 		Model:            profileModel(resolved.profile),
 		Resume:           useResume,
 		PermissionValues: profilePermissionValues(resolved.profile),
+		MCPConfigPath:    mcpConfigPath,
 		CLIFlagTokens:    m.profileCLIFlagTokens(resolved.profile),
 	})
 	if cmd.IsEmpty() {
