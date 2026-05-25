@@ -314,9 +314,10 @@ func (m *Manager) writePassthroughMCPConfig(execution *AgentExecution, pt agents
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return "", fmt.Errorf("write passthrough MCP config: %w", err)
 	}
-	if execution.Metadata != nil {
-		execution.Metadata["passthrough_mcp_config_path"] = path
+	if execution.Metadata == nil {
+		execution.Metadata = map[string]interface{}{}
 	}
+	execution.Metadata["passthrough_mcp_config_path"] = path
 	return path, nil
 }
 

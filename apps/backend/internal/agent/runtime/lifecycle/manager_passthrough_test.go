@@ -425,6 +425,7 @@ func TestPassthroughAgentCommandErrorsWhenMCPPortMissing(t *testing.T) {
 
 func TestRemoveExecutionCleansPassthroughMCPConfig(t *testing.T) {
 	mgr, execution, profile := newClaudePassthroughMCPTestManager(t)
+	execution.Metadata = nil
 	if err := mgr.executionStore.Add(execution); err != nil {
 		t.Fatalf("add execution: %v", err)
 	}
