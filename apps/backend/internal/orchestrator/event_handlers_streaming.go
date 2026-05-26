@@ -715,11 +715,8 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 	s.setSessionWaitingForInput(ctx, payload.TaskID, payload.SessionID, session)
 }
 
-// extractStopReason reads the `stop_reason` field from the agent complete event's
-// nested data map. Returns "" when the payload doesn't carry one (older agents,
-// non-ACP paths, or events whose data shape isn't a map). The literal "cancelled"
-// is the ACP-adapter signal for a user-initiated cancel — kept in sync with
-// lifecycle.handleCompleteEventSignal which reads the same field.
+// extractStopReason returns the stop_reason string from the ACP complete event; "" if absent or not a map.
+// Kept in sync with the same read in lifecycle/manager_events.go (handleCompleteEventSignal).
 func extractStopReason(payload *lifecycle.AgentStreamEventPayload) string {
 	if payload == nil || payload.Data == nil {
 		return ""
@@ -732,11 +729,7 @@ func extractStopReason(payload *lifecycle.AgentStreamEventPayload) string {
 	return sr
 }
 
-// stopReasonCancelled is the ACP stop_reason value the adapter emits when the
-// agent acknowledges a user-initiated cancel. Mirrors the literal read at
-// internal/agent/runtime/lifecycle/manager_events.go (handleCompleteEventSignal
-// and handleCompleteEvent). Kept here as a local constant to avoid importing a
-// lifecycle internal just for the string.
+// Mirrors the "cancelled" literal in lifecycle/manager_events.go — not extracted to avoid cross-package coupling.
 const stopReasonCancelled = "cancelled"
 
 // handleOfficeTurnComplete fires the fire-and-forget shutdown flow for office
