@@ -80,9 +80,6 @@ func NewService(pool *db.Pool, dataDir string, dirs ResetDirs, j *jobs.Tracker, 
 	}
 }
 
-// Path returns the absolute SQLite file path the service is bound to.
-func (s *Service) Path() string { return s.dbPath }
-
 // Stats returns the current SQLite stats. The size is computed from
 // PRAGMA page_count * page_size (cheaper than os.Stat on hot writes and
 // more accurate during a VACUUM that creates a sibling file).

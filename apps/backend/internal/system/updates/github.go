@@ -20,9 +20,9 @@ const defaultClientTimeout = 30 * time.Second
 // server at the github client without surgery on Service.
 var DefaultReleaseURL = "https://api.github.com/repos/kdlbs/kandev/releases/latest"
 
-// ErrGitHubRateLimited is returned by FetchLatestRelease when GitHub responds
-// 403 with X-RateLimit-Remaining: 0. Callers should log at info (not warn)
-// and back off without burning further requests.
+// ErrGitHubRateLimited is returned by FetchLatestReleaseFrom when GitHub
+// responds 403 with X-RateLimit-Remaining: 0. Callers should log at info
+// (not warn) and back off without burning further requests.
 var ErrGitHubRateLimited = errors.New("github api rate limited")
 
 type releasePayload struct {
@@ -30,16 +30,10 @@ type releasePayload struct {
 	HTMLURL string `json:"html_url"`
 }
 
-// FetchLatestRelease performs an unauthenticated GET against the GitHub
+// FetchLatestReleaseFrom performs an unauthenticated GET against the GitHub
 // Releases API and returns the tag name + release URL. On non-2xx it returns
 // an error including the HTTP status; on rate-limit responses it returns
 // ErrGitHubRateLimited so callers can branch on it.
-func FetchLatestRelease(ctx context.Context, client *http.Client) (string, string, error) {
-	return FetchLatestReleaseFrom(ctx, client, DefaultReleaseURL)
-}
-
-// FetchLatestReleaseFrom is like FetchLatestRelease but accepts an explicit
-// URL. Used internally and by tests pointing at a stub server.
 func FetchLatestReleaseFrom(ctx context.Context, client *http.Client, url string) (string, string, error) {
 	if client == nil {
 		client = &http.Client{Timeout: defaultClientTimeout}
