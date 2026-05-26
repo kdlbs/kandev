@@ -91,6 +91,27 @@ describe("readStorage (gitlab)", () => {
     set(JSON.stringify([issue]));
     expect(readStorage()).toEqual([issue]);
   });
+
+  it("drops entries missing customQuery", () => {
+    const broken = { ...valid } as Partial<SavedPreset>;
+    delete broken.customQuery;
+    set(JSON.stringify([broken, valid]));
+    expect(readStorage()).toEqual([valid]);
+  });
+
+  it("drops entries missing projectFilter", () => {
+    const broken = { ...valid } as Partial<SavedPreset>;
+    delete broken.projectFilter;
+    set(JSON.stringify([broken, valid]));
+    expect(readStorage()).toEqual([valid]);
+  });
+
+  it("drops entries missing createdAt", () => {
+    const broken = { ...valid } as Partial<SavedPreset>;
+    delete broken.createdAt;
+    set(JSON.stringify([broken, valid]));
+    expect(readStorage()).toEqual([valid]);
+  });
 });
 
 describe("useSavedPresets (gitlab)", () => {

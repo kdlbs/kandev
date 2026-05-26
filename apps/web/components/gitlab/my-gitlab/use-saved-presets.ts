@@ -26,7 +26,10 @@ export function readStorage(): SavedPreset[] {
         p !== null &&
         typeof (p as SavedPreset).id === "string" &&
         ((p as SavedPreset).kind === "mr" || (p as SavedPreset).kind === "issue") &&
-        typeof (p as SavedPreset).label === "string",
+        typeof (p as SavedPreset).label === "string" &&
+        typeof (p as SavedPreset).customQuery === "string" &&
+        typeof (p as SavedPreset).projectFilter === "string" &&
+        typeof (p as SavedPreset).createdAt === "string",
     );
   } catch {
     return [];
@@ -79,18 +82,22 @@ export function __resetSnapshotForTests() {
 export function useSavedPresets() {
   const presets = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
+  // Always merge against the latest localStorage read instead of the in-memory
+  // snapshot. With two tabs open, snapshot in tab A is stale the moment tab B
+  // writes — appending to it would silently drop B's preset. readStorage is
+  // cheap (small JSON, single key) so this is fine on the save/remove paths.
   const save = useCallback((input: Omit<SavedPreset, "id" | "createdAt">) => {
     const preset: SavedPreset = {
       ...input,
       id: `g_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
       createdAt: new Date().toISOString(),
     };
-    publish([...(snapshot ?? readStorage()), preset]);
+    publish([...readStorage(), preset]);
     return preset;
   }, []);
 
   const remove = useCallback((id: string) => {
-    publish((snapshot ?? readStorage()).filter((p) => p.id !== id));
+    publish(readStorage().filter((p) => p.id !== id));
   }, []);
 
   return { presets, save, remove };

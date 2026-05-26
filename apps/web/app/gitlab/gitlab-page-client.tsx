@@ -224,6 +224,11 @@ function useGitLabPageState() {
 
 function AuthenticatedLayout({ state }: { state: GitLabPageState }) {
   const { selection, search, projectOptions, title } = state;
+  // When the user narrows by project, the toolbar badge shows how many of the
+  // current page actually match (so it never reads "47" while three rows
+  // render). Pagination still uses search.total so the user can navigate to
+  // later pages that may contain more matches.
+  const displayedCount = state.projectFilter ? search.items.length : search.total;
   return (
     <div className="flex-1 flex min-h-0">
       <aside
@@ -242,7 +247,7 @@ function AuthenticatedLayout({ state }: { state: GitLabPageState }) {
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <ListToolbar
           title={title}
-          count={search.total}
+          count={displayedCount}
           loading={search.loading}
           lastFetchedAt={search.lastFetchedAt}
           customQuery={state.customQuery}

@@ -179,7 +179,7 @@ describe("useGitLabSearch — state", () => {
     expect(result.current.items).toEqual([]);
   });
 
-  it("filters items by project_path client-side", async () => {
+  it("filters items by project_path client-side, total stays at server total", async () => {
     const a = fakeMR({ project_path: "acme/api" });
     const b = fakeMR({ project_path: "acme/web" });
     searchUserMRsMock.mockResolvedValue({ mrs: [a, b], total_count: 99, page: 1, per_page: 25 });
@@ -189,9 +189,10 @@ describe("useGitLabSearch — state", () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.items.map((m) => m.project_path)).toEqual(["acme/web"]);
     expect(result.current.rawItems.length).toBe(2);
-    // total reflects the filtered view (1), not the server's raw total (99).
-    expect(result.current.total).toBe(1);
-    expect(result.current.rawTotal).toBe(99);
+    // The hook returns the raw server total so pagination can still navigate to
+    // later pages that may contain more matches. Consumers compute a filtered
+    // display count from items.length when they want one.
+    expect(result.current.total).toBe(99);
   });
 });
 

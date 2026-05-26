@@ -121,20 +121,17 @@ export function useGitLabSearch(
     [state.items, projectFilter],
   );
 
-  // When projectFilter narrows results client-side, total and pagination
-  // belong to the *filtered* view — otherwise the toolbar would show e.g. "47"
-  // while only 3 rows render, and pagination would link to pages with zero
-  // matches. The raw server total stays available as rawTotal for debugging.
-  const displayedTotal = projectFilter ? filtered.length : state.total;
-
+  // `total` is the server-side count (used by pagination so the user can still
+  // navigate to later pages that may contain more matches when projectFilter
+  // is active). The consumer decides what to *display* as a count — see the
+  // page client, which shows filtered.length next to the title when narrowing.
   return {
     items: filtered,
     rawItems: state.items,
     loading: state.loading,
     error: state.error,
     lastFetchedAt: state.lastFetchedAt,
-    total: displayedTotal,
-    rawTotal: state.total,
+    total: state.total,
     page,
     setPage,
     pageSize: SEARCH_PAGE_SIZE,

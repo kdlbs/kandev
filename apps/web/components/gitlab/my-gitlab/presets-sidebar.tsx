@@ -80,6 +80,9 @@ function PresetItem({
   trailing?: React.ReactNode;
 }) {
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    // Ignore keys originating from descendants (e.g. the nested delete button),
+    // otherwise Enter/Space on delete would also fire row selection.
+    if (e.currentTarget !== e.target) return;
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       onClick();
@@ -177,6 +180,7 @@ function SavedSection({
               }}
               className="opacity-0 group-hover/item:opacity-100 transition-opacity text-muted-foreground hover:text-foreground cursor-pointer"
               title="Delete saved query"
+              aria-label={`Delete saved query ${s.label}`}
               data-testid={`gitlab-saved-delete-${s.id}`}
             >
               <IconX className="h-3.5 w-3.5" />

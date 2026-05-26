@@ -29,9 +29,13 @@ export function ResultsPagination({ page, pageSize, total, onPageChange }: Resul
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   if (totalPages <= 1) return null;
 
-  const windowPages = pageWindow(page, totalPages);
-  const start = (page - 1) * pageSize + 1;
-  const end = Math.min(page * pageSize, total);
+  // Clamp the incoming page so a stale out-of-range value (e.g. user on page 5,
+  // refresh returns fewer results → totalPages = 2) doesn't render "101–30 of
+  // 30" and doesn't break the prev/next button enabled state.
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const windowPages = pageWindow(safePage, totalPages);
+  const start = (safePage - 1) * pageSize + 1;
+  const end = Math.min(safePage * pageSize, total);
 
   return (
     <div className="flex items-center justify-between px-6 py-3 border-t shrink-0">
@@ -45,10 +49,10 @@ export function ResultsPagination({ page, pageSize, total, onPageChange }: Resul
               href="#"
               onClick={(e) => {
                 e.preventDefault();
-                if (page > 1) onPageChange(page - 1);
+                if (safePage > 1) onPageChange(safePage - 1);
               }}
-              aria-disabled={page <= 1}
-              className={page <= 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+              aria-disabled={safePage <= 1}
+              className={safePage <= 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
             />
           </PaginationItem>
           {windowPages.map((p, i) => {
@@ -64,7 +68,7 @@ export function ResultsPagination({ page, pageSize, total, onPageChange }: Resul
                 <PaginationItem>
                   <PaginationLink
                     href="#"
-                    isActive={p === page}
+                    isActive={p === safePage}
                     onClick={(e) => {
                       e.preventDefault();
                       onPageChange(p);
@@ -82,10 +86,12 @@ export function ResultsPagination({ page, pageSize, total, onPageChange }: Resul
               href="#"
               onClick={(e) => {
                 e.preventDefault();
-                if (page < totalPages) onPageChange(page + 1);
+                if (safePage < totalPages) onPageChange(safePage + 1);
               }}
-              aria-disabled={page >= totalPages}
-              className={page >= totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+              aria-disabled={safePage >= totalPages}
+              className={
+                safePage >= totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"
+              }
             />
           </PaginationItem>
         </PaginationContent>
