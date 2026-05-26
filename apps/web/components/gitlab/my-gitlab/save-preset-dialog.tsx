@@ -43,10 +43,10 @@ function SavePresetForm({
   const canSubmit = trimmed.length > 0;
 
   const handleSubmit = useCallback(() => {
-    if (!canSubmit) return;
+    if (!trimmed) return;
     onSave(trimmed);
     onClose();
-  }, [canSubmit, trimmed, onSave, onClose]);
+  }, [trimmed, onSave, onClose]);
 
   return (
     <>

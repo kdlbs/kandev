@@ -1,11 +1,4 @@
-import {
-  IconInbox,
-  IconUserPlus,
-  IconGitMerge,
-  IconPencil,
-  IconPlus,
-  IconBug,
-} from "@tabler/icons-react";
+import { IconInbox, IconUserPlus, IconGitMerge, IconPlus } from "@tabler/icons-react";
 import type { Icon } from "@tabler/icons-react";
 
 export type PresetGroup = "inbox" | "created";
@@ -63,5 +56,3 @@ export const ISSUE_PRESETS: PresetOption[] = [
     icon: IconPlus,
   },
 ];
-
-export { IconBug, IconPencil };
