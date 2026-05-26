@@ -1081,11 +1081,7 @@ func (s *Server) handleGitStatusMulti(c *gin.Context) {
 		subpaths = []string{""}
 	}
 	fresh := c.Query("fresh") == queryParamTrue
-	// Fan out per-repo queries in parallel. Each repo's git work is independent
-	// and runs sub-100ms on small repos, but `fresh=true` skips the cache so a
-	// serial loop over N repos would scale linearly and risk blowing past the
-	// 2s subscribe-path timeout in tryGetLiveGitStatus. Parallelism keeps the
-	// wall-clock close to the slowest single repo regardless of count.
+	// Parallel fan-out: fresh=true skips the cache, so serial scales linearly and would blow the 2s subscribe timeout for multi-repo workspaces.
 	result := MultiRepoGitStatusResult{Success: true, Repos: make([]PerRepoGitStatus, len(subpaths))}
 	ctx := c.Request.Context()
 	var wg sync.WaitGroup
