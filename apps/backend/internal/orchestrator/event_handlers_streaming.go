@@ -691,7 +691,15 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 	// executor backend. The conversation is preserved via acp_session_id; the
 	// next run recreates everything and reloads. Kanban / quick-chat retains
 	// the warm WAITING_FOR_INPUT model below.
-	if session != nil && s.handleOfficeTurnComplete(ctx, payload.TaskID, payload.SessionID, session) {
+	//
+	// stop_reason "cancelled" is excluded from the office path: a user-initiated
+	// cancel is not the "between scheduled runs" intent IDLE represents. The
+	// cancel handler (Service.CancelAgent) already drives the session to
+	// WAITING_FOR_INPUT and records the cancel message — letting the office
+	// branch overwrite that with IDLE would leave the session unpromptable
+	// (checkSessionPromptable rejects IDLE) until the next scheduler wakeup.
+	stopReason := extractStopReason(payload)
+	if session != nil && s.handleOfficeTurnComplete(ctx, payload.TaskID, payload.SessionID, session, stopReason) {
 		return
 	}
 
@@ -707,19 +715,57 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 	s.setSessionWaitingForInput(ctx, payload.TaskID, payload.SessionID, session)
 }
 
+// extractStopReason reads the `stop_reason` field from the agent complete event's
+// nested data map. Returns "" when the payload doesn't carry one (older agents,
+// non-ACP paths, or events whose data shape isn't a map). The literal "cancelled"
+// is the ACP-adapter signal for a user-initiated cancel — kept in sync with
+// lifecycle.handleCompleteEventSignal which reads the same field.
+func extractStopReason(payload *lifecycle.AgentStreamEventPayload) string {
+	if payload == nil || payload.Data == nil {
+		return ""
+	}
+	data, ok := payload.Data.Data.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	sr, _ := data["stop_reason"].(string)
+	return sr
+}
+
+// stopReasonCancelled is the ACP stop_reason value the adapter emits when the
+// agent acknowledges a user-initiated cancel. Mirrors the literal read at
+// internal/agent/runtime/lifecycle/manager_events.go (handleCompleteEventSignal
+// and handleCompleteEvent). Kept here as a local constant to avoid importing a
+// lifecycle internal just for the string.
+const stopReasonCancelled = "cancelled"
+
 // handleOfficeTurnComplete fires the fire-and-forget shutdown flow for office
 // sessions: state flips to IDLE *before* StopAgent so the workflow handler's
 // terminal-state guard short-circuits (mirrors completeAndStopSession).
 // Returns true when the session was handled as office (caller must not fall
 // through to the kanban WAITING_FOR_INPUT path).
+//
+// stopReason is the agent's reported turn-end reason. When it is "cancelled"
+// (user-initiated turn cancel), this handler returns false so the caller falls
+// through to the kanban setSessionWaitingForInput path — IDLE would leave the
+// session unpromptable for the user's expected follow-up. All other reasons
+// (end_turn, error, empty) keep the original office park-to-IDLE behavior.
 func (s *Service) handleOfficeTurnComplete(
-	ctx context.Context, taskID, sessionID string, session *models.TaskSession,
+	ctx context.Context, taskID, sessionID string, session *models.TaskSession, stopReason string,
 ) bool {
 	if session == nil || session.AgentProfileID == "" {
 		return false
 	}
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil || task == nil || task.AssigneeAgentProfileID == "" {
+		return false
+	}
+
+	if stopReason == stopReasonCancelled {
+		s.logger.Info("office turn cancelled by user — skipping IDLE flip, deferring to cancel handler",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("stop_reason", stopReason))
 		return false
 	}
 

@@ -105,7 +105,7 @@ func TestHandleOfficeTurnComplete_SetsIdleAndStopsAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get session: %v", err)
 	}
-	handled := svc.handleOfficeTurnComplete(ctx, "t-office", "s-office", session)
+	handled := svc.handleOfficeTurnComplete(ctx, "t-office", "s-office", session, "")
 	if !handled {
 		t.Fatal("expected office turn complete to claim the event")
 	}
@@ -136,7 +136,7 @@ func TestHandleOfficeTurnComplete_KanbanFallthrough(t *testing.T) {
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), mgr)
 
 	session, _ := repo.GetTaskSession(ctx, "sess-kanban")
-	handled := svc.handleOfficeTurnComplete(ctx, "task-kanban", "sess-kanban", session)
+	handled := svc.handleOfficeTurnComplete(ctx, "task-kanban", "sess-kanban", session, "")
 	if handled {
 		t.Error("kanban session should not be claimed by office turn-complete")
 	}
@@ -155,7 +155,7 @@ func TestHandleOfficeTurnComplete_StopAgentFailureStillIdle(t *testing.T) {
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), mgr)
 
 	session, _ := repo.GetTaskSession(ctx, "s-stop-fail")
-	if !svc.handleOfficeTurnComplete(ctx, "t-stop-fail", "s-stop-fail", session) {
+	if !svc.handleOfficeTurnComplete(ctx, "t-stop-fail", "s-stop-fail", session, "") {
 		t.Fatal("expected handler to claim the event")
 	}
 
@@ -179,7 +179,7 @@ func TestHandleOfficeTurnComplete_NoExecutionStillIdle(t *testing.T) {
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), mgr)
 
 	session, _ := repo.GetTaskSession(ctx, "s-no-exec")
-	svc.handleOfficeTurnComplete(ctx, "t-no-exec", "s-no-exec", session)
+	svc.handleOfficeTurnComplete(ctx, "t-no-exec", "s-no-exec", session, "")
 
 	got, _ := repo.GetTaskSession(ctx, "s-no-exec")
 	if got.State != models.TaskSessionStateIdle {
@@ -187,5 +187,83 @@ func TestHandleOfficeTurnComplete_NoExecutionStillIdle(t *testing.T) {
 	}
 	if len(mgr.stopAgentArgs) != 0 {
 		t.Errorf("expected no StopAgent (no execution_id), got %d", len(mgr.stopAgentArgs))
+	}
+}
+
+// TestHandleOfficeTurnComplete_CancelStopReasonSkipsIdleAndTeardown pins the
+// fix for "session is in IDLE state" after a user cancel on an office task:
+// the cancel-triggered complete event must not park the session at IDLE
+// (which checkSessionPromptable rejects), and must not tear down the agent
+// process — Service.CancelAgent owns reconciling state to WAITING_FOR_INPUT.
+func TestHandleOfficeTurnComplete_CancelStopReasonSkipsIdleAndTeardown(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedOfficeSession(t, repo, "t-cancel", "s-cancel", "exec-cancel")
+	mgr := &mockAgentManager{}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), mgr)
+
+	session, err := repo.GetTaskSession(ctx, "s-cancel")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+
+	handled := svc.handleOfficeTurnComplete(ctx, "t-cancel", "s-cancel", session, "cancelled")
+	if handled {
+		t.Fatal("cancelled office turn must NOT be claimed; caller has to fall through to setSessionWaitingForInput")
+	}
+
+	got, err := repo.GetTaskSession(ctx, "s-cancel")
+	if err != nil {
+		t.Fatalf("re-read session: %v", err)
+	}
+	if got.State != models.TaskSessionStateRunning {
+		t.Errorf("state must remain as seeded (RUNNING) when handler bails out; got %q", got.State)
+	}
+	if len(mgr.stopAgentArgs) != 0 {
+		t.Errorf("StopAgent must not be called on cancelled office turn; got %d calls", len(mgr.stopAgentArgs))
+	}
+}
+
+// TestHandleOfficeTurnComplete_OtherStopReasonsStillIdle pins that the new
+// cancelled-skip branch only triggers on the literal "cancelled" stop reason.
+// Any other reason (empty, end_turn, error, …) must keep the original
+// park-to-IDLE + StopAgent behavior so the office scheduler keeps working.
+func TestHandleOfficeTurnComplete_OtherStopReasonsStillIdle(t *testing.T) {
+	cases := []struct {
+		name       string
+		stopReason string
+	}{
+		{"empty", ""},
+		{"end_turn", "end_turn"},
+		{"error", "error"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo := setupTestRepo(t)
+			taskID := "t-" + tc.name
+			sessionID := "s-" + tc.name
+			seedOfficeSession(t, repo, taskID, sessionID, "exec-"+tc.name)
+			mgr := &mockAgentManager{}
+			svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), mgr)
+
+			session, err := repo.GetTaskSession(ctx, sessionID)
+			if err != nil {
+				t.Fatalf("get session: %v", err)
+			}
+
+			if !svc.handleOfficeTurnComplete(ctx, taskID, sessionID, session, tc.stopReason) {
+				t.Fatalf("stop_reason %q: handler must still claim non-cancelled office turn", tc.stopReason)
+			}
+
+			got, _ := repo.GetTaskSession(ctx, sessionID)
+			if got.State != models.TaskSessionStateIdle {
+				t.Errorf("stop_reason %q: state got %q, want IDLE", tc.stopReason, got.State)
+			}
+			if len(mgr.stopAgentArgs) != 1 {
+				t.Errorf("stop_reason %q: expected 1 StopAgent call, got %d", tc.stopReason, len(mgr.stopAgentArgs))
+			}
+		})
 	}
 }

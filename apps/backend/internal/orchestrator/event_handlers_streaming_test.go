@@ -284,6 +284,90 @@ func TestSetSessionRunning_WritesOnTransition(t *testing.T) {
 	require.Equal(t, v1.TaskStateInProgress, taskRepo.updatedStates["t1"])
 }
 
+// TestHandleCompleteStreamEvent_CancelledOfficeSessionLandsWaitingForInput
+// pins the call-site wiring for the office cancel-IDLE fix: when the agent
+// complete payload carries stop_reason="cancelled" on an office-style session
+// (task with AssigneeAgentProfileID + session with AgentProfileID), the
+// office IDLE branch must be skipped and the handler must fall through to
+// setSessionWaitingForInput so the user can immediately send a follow-up
+// prompt. Without this wiring the user sees "session is in IDLE state" on
+// the next message (checkSessionPromptable rejects IDLE).
+func TestHandleCompleteStreamEvent_CancelledOfficeSessionLandsWaitingForInput(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedOfficeSession(t, repo, "t-cancel-flow", "s-cancel-flow", "exec-cancel-flow")
+	mgr := &mockAgentManager{}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), mgr)
+
+	// Drive the office session to WAITING_FOR_INPUT first — this mirrors what
+	// Service.CancelAgent does after agentManager.CancelAgent returns; the
+	// office complete-event handler arrives slightly later and must NOT
+	// clobber it back to IDLE just because session.AgentProfileID is set.
+	session, err := repo.GetTaskSession(ctx, "s-cancel-flow")
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateWaitingForInput
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	payload := &lifecycle.AgentStreamEventPayload{
+		TaskID:    "t-cancel-flow",
+		SessionID: "s-cancel-flow",
+		Data: &lifecycle.AgentStreamEventData{
+			Type: agentEventComplete,
+			Data: map[string]interface{}{
+				"stop_reason": "cancelled",
+			},
+		},
+	}
+
+	svc.handleCompleteStreamEvent(ctx, payload)
+
+	got, err := repo.GetTaskSession(ctx, "s-cancel-flow")
+	require.NoError(t, err)
+	require.NotEqual(t, models.TaskSessionStateIdle, got.State,
+		"cancelled office turn must not leave the session IDLE — PromptTask would reject the user's next message")
+	require.Equal(t, models.TaskSessionStateWaitingForInput, got.State,
+		"cancelled office turn must fall through to setSessionWaitingForInput")
+	mgr.mu.Lock()
+	stopCalls := len(mgr.stopAgentArgs)
+	mgr.mu.Unlock()
+	require.Zero(t, stopCalls,
+		"cancelled office turn must not tear down the agent process — Service.CancelAgent owns lifecycle for user cancels")
+}
+
+// TestHandleCompleteStreamEvent_NaturalOfficeCompleteStillIdle is the inverse
+// guard: a natural turn completion (no stop_reason, or "end_turn") on an office
+// session still parks the session in IDLE and tears down the agent process.
+func TestHandleCompleteStreamEvent_NaturalOfficeCompleteStillIdle(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedOfficeSession(t, repo, "t-natural", "s-natural", "exec-natural")
+	mgr := &mockAgentManager{}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), mgr)
+
+	payload := &lifecycle.AgentStreamEventPayload{
+		TaskID:    "t-natural",
+		SessionID: "s-natural",
+		Data: &lifecycle.AgentStreamEventData{
+			Type: agentEventComplete,
+			Data: map[string]interface{}{
+				"stop_reason": "end_turn",
+			},
+		},
+	}
+
+	svc.handleCompleteStreamEvent(ctx, payload)
+
+	got, err := repo.GetTaskSession(ctx, "s-natural")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateIdle, got.State,
+		"natural office turn completion must still park the session in IDLE")
+	mgr.mu.Lock()
+	stopCalls := len(mgr.stopAgentArgs)
+	mgr.mu.Unlock()
+	require.Equal(t, 1, stopCalls,
+		"natural office turn completion must still call StopAgent to tear down the executor")
+}
+
 // TestSetSessionWaitingForInput_WritesOnTransition is the symmetric counterpart
 // to TestSetSessionRunning_WritesOnTransition: when the session is NOT already
 // WAITING_FOR_INPUT, setSessionWaitingForInput MUST still fire the task write.
