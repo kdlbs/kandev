@@ -577,8 +577,24 @@ type MultiRepoGitStatusResult struct {
 // without it, the frontend never sees per-repo grouping until something else
 // (a file change, a poll) pushes a stamped notification.
 func (c *Client) GetGitStatusMulti(ctx context.Context) (*MultiRepoGitStatusResult, error) {
+	return c.getGitStatusMulti(ctx, false)
+}
+
+// GetGitStatusMultiFresh is GetGitStatusMulti with the workspace tracker's
+// cache bypassed — each repo re-runs `git status --porcelain` against the
+// worktree. Used on WS session subscribe so a new observer always sees a
+// validated snapshot rather than a possibly-stale cached one.
+func (c *Client) GetGitStatusMultiFresh(ctx context.Context) (*MultiRepoGitStatusResult, error) {
+	return c.getGitStatusMulti(ctx, true)
+}
+
+func (c *Client) getGitStatusMulti(ctx context.Context, fresh bool) (*MultiRepoGitStatusResult, error) {
+	path := "/api/v1/git/status/multi"
+	if fresh {
+		path += "?fresh=true"
+	}
 	var result MultiRepoGitStatusResult
-	status, err := c.fetchJSONResult(ctx, "/api/v1/git/status/multi", &result)
+	status, err := c.fetchJSONResult(ctx, path, &result)
 	if err != nil {
 		return nil, err
 	}
