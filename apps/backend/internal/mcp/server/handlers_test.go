@@ -252,6 +252,35 @@ func TestCreateTask_WithRepositoryURL(t *testing.T) {
 	assert.Equal(t, "main", repos[0]["base_branch"])
 }
 
+// TestCreateTask_BaseBranchOnly_ForwardsTopLevel pins the bug-fix wiring:
+// when the caller passes only base_branch (no repository_id / local_path /
+// repository_url), the MCP server forwards it at the top level of the WS
+// payload so the backend can apply it as an override on inherited
+// subtask repos. Previously base_branch was silently dropped when no
+// repo identifier was passed.
+func TestCreateTask_BaseBranchOnly_ForwardsTopLevel(t *testing.T) {
+	backend := &testBackend{
+		response: map[string]interface{}{"id": "subtask-1", "parent_id": "task-current"},
+	}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "create_task_kandev", map[string]interface{}{
+		"title":       "Stacked PR child",
+		"parent_id":   "self",
+		"description": "branch off the parent's PR branch",
+		"base_branch": "feature/create-new-page-endp-05z",
+	})
+
+	assert.False(t, result.IsError)
+
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "feature/create-new-page-endp-05z", payload["base_branch"],
+		"base_branch should be forwarded at the top level even when no repo identifier is supplied")
+	_, hasRepos := payload["repositories"]
+	assert.False(t, hasRepos, "no repositories slice should be produced when only base_branch is supplied")
+}
+
 func TestCreateTask_RepositoryURL_AllowedForSubtasks(t *testing.T) {
 	backend := &testBackend{
 		response: map[string]interface{}{"id": "task-new", "title": "Subtask with URL"},

@@ -380,6 +380,94 @@ func TestCreateSubtaskFromParent_DifferentRepoUsesNewRepoDefault(t *testing.T) {
 	assert.Equal(t, "trunk", subtask.Repositories[0].BaseBranch, "cross-repo subtask should anchor to the new repo's default_branch, not parent's pr-metrics")
 }
 
+// TestHandleCreateTask_SubtaskBaseBranchOverride pins the bug-fix path:
+// when an MCP caller passes base_branch at the top level (no per-repo
+// entries) for a same-repo subtask, the override beats the parent's
+// inherited base_branch. Previously the top-level base_branch was
+// silently dropped unless the caller also restated repository_id, so a
+// "give me a child task that branches off feature/X" call quietly
+// landed on the parent's branch instead.
+func TestHandleCreateTask_SubtaskBaseBranchOverride(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	parentID := seedParentWithRepo(t, svc, repo)
+
+	log := testLogger(t)
+	h := &Handlers{taskSvc: svc, logger: log.WithFields()}
+
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"title":       "Child",
+		"description": "do the thing",
+		"parent_id":   parentID,
+		"base_branch": "feature/create-new-page-endp-05z",
+		"start_agent": false,
+	})
+
+	resp, err := h.handleCreateTask(ctx, msg)
+	require.NoError(t, err)
+	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Payload, &created))
+	require.NotEmpty(t, created.ID)
+
+	subtask, err := svc.GetTask(ctx, created.ID)
+	require.NoError(t, err)
+	require.Len(t, subtask.Repositories, 1, "subtask should inherit parent's repository")
+	assert.Equal(t, "repo-parent", subtask.Repositories[0].RepositoryID, "subtask should still bind to parent's repo")
+	assert.Equal(t, "feature/create-new-page-endp-05z", subtask.Repositories[0].BaseBranch,
+		"top-level base_branch must override parent's inherited base_branch when no explicit repos are passed")
+}
+
+// TestHandleCreateTask_SubtaskBaseBranchOverride_ExplicitReposWin asserts
+// the inverse: when the caller provides per-repo entries, those are
+// authoritative — the top-level base_branch must NOT clobber an explicit
+// per-repo BaseBranch. This preserves cross-repo and multi-repo callers
+// that already control branch selection per entry.
+func TestHandleCreateTask_SubtaskBaseBranchOverride_ExplicitReposWin(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	parentID := seedParentWithRepo(t, svc, repo)
+
+	require.NoError(t, repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-sibling", WorkspaceID: "ws-1", Name: "Sibling", DefaultBranch: "trunk",
+	}))
+
+	log := testLogger(t)
+	h := &Handlers{taskSvc: svc, logger: log.WithFields()}
+
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"title":       "Cross-repo child",
+		"description": "do the thing",
+		"parent_id":   parentID,
+		// Explicit per-repo entry with its own base_branch.
+		"repositories": []map[string]interface{}{
+			{"repository_id": "repo-sibling", "base_branch": "develop"},
+		},
+		// Top-level base_branch should be ignored because explicit repos win.
+		"base_branch": "should-not-be-applied",
+		"start_agent": false,
+	})
+
+	resp, err := h.handleCreateTask(ctx, msg)
+	require.NoError(t, err)
+	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Payload, &created))
+
+	subtask, err := svc.GetTask(ctx, created.ID)
+	require.NoError(t, err)
+	require.Len(t, subtask.Repositories, 1)
+	assert.Equal(t, "repo-sibling", subtask.Repositories[0].RepositoryID)
+	assert.Equal(t, "develop", subtask.Repositories[0].BaseBranch,
+		"explicit per-repo base_branch must win over the top-level override")
+}
+
 func TestResolveTaskRepositories_ParentWithExplicitRepos_OverridesRepoButInheritsWorkspace(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	parentID := seedParentWithRepo(t, svc, repo)

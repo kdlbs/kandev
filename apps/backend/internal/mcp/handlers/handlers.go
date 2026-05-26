@@ -366,6 +366,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		ExecutorProfileID      string               `json:"executor_profile_id"`
 		StartAgent             *bool                `json:"start_agent"`               // nil means default to true for backward compatibility
 		Repositories           []mcpRepositoryInput `json:"repositories"`              // explicit repositories for top-level tasks
+		BaseBranch             string               `json:"base_branch"`               // top-level base_branch override applied to every repo in the final list (wins over inheritance and explicit-entry defaults)
 		BlockedBy              []string             `json:"blocked_by"`                // task IDs that must complete before this task
 		AssigneeAgentProfileID string               `json:"assignee_agent_profile_id"` // agent instance to assign the task to
 		// Office task-handoffs phase 4 — workspace policy.
@@ -395,6 +396,17 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 	}
 	repos := resolved.Repos
+	// Top-level base_branch override: when the caller passes base_branch
+	// without any per-repo entries, apply it to every repo in the resolved
+	// list. This is the only path that lets a same-repo subtask override
+	// the parent's inherited base_branch without also restating the
+	// repository identifier. When the caller provided explicit per-repo
+	// entries we leave their BaseBranch alone — those are authoritative.
+	if req.BaseBranch != "" && len(req.Repositories) == 0 {
+		for i := range repos {
+			repos[i].BaseBranch = req.BaseBranch
+		}
+	}
 	if req.WorkspaceID == "" {
 		req.WorkspaceID = resolved.WorkspaceID
 	}
