@@ -366,7 +366,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		ExecutorProfileID      string               `json:"executor_profile_id"`
 		StartAgent             *bool                `json:"start_agent"`               // nil means default to true for backward compatibility
 		Repositories           []mcpRepositoryInput `json:"repositories"`              // explicit repositories for top-level tasks
-		BaseBranch             string               `json:"base_branch"`               // top-level base_branch override applied to every repo in the final list (wins over inheritance and explicit-entry defaults)
+		BaseBranch             string               `json:"base_branch"`               // top-level fallback applied to every resolved repo only when no per-repo entries are supplied; explicit per-repo BaseBranch is authoritative when Repositories is set
 		BlockedBy              []string             `json:"blocked_by"`                // task IDs that must complete before this task
 		AssigneeAgentProfileID string               `json:"assignee_agent_profile_id"` // agent instance to assign the task to
 		// Office task-handoffs phase 4 — workspace policy.
