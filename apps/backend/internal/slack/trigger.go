@@ -38,8 +38,6 @@ type Trigger struct {
 	wg      sync.WaitGroup
 	started bool
 
-	// matchHook fires after each successfully-handled match. Tests use it
-	// to synchronise on processing without sleep-polling.
 	matchHook func(msg SlackMessage, reply string)
 
 	// lastScannedAt tracks when we last ran a scan so the configured

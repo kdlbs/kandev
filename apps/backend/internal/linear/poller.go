@@ -31,7 +31,7 @@ type Poller struct {
 	logger        *logger.Logger
 	auth          *healthpoll.Poller
 	issueInterval time.Duration
-	issueTickHook func() // tests use this to observe each issue-watch tick.
+	issueTickHook func()
 
 	mu              sync.Mutex
 	cancelIssueLoop context.CancelFunc
