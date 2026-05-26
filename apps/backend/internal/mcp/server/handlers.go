@@ -168,13 +168,6 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 		localPath := req.GetString("local_path", "")
 		repositoryURL := req.GetString("repository_url", "")
 		baseBranch := req.GetString("base_branch", "")
-		// Forward base_branch at the top level so a subtask that inherits its
-		// repos from the parent still picks up an explicit base_branch override.
-		// Without this, a caller passing only base_branch (no repo identifier)
-		// silently fell back to the parent's base_branch.
-		if baseBranch != "" {
-			payload["base_branch"] = baseBranch
-		}
 		hasRepo := repositoryID != "" || localPath != "" || repositoryURL != ""
 		if hasRepo {
 			repo := map[string]string{}
@@ -191,6 +184,13 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 				repo["base_branch"] = baseBranch
 			}
 			payload["repositories"] = []map[string]string{repo}
+		} else if baseBranch != "" {
+			// Forward base_branch at the top level only when the caller
+			// supplied no repo identifier — the backend uses it as a fallback
+			// applied to inherited subtask repos. When explicit repo entries
+			// are present, the per-repo base_branch above is authoritative
+			// and a top-level value here would be ignored.
+			payload["base_branch"] = baseBranch
 		}
 
 		var result map[string]interface{}
