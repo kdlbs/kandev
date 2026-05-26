@@ -190,11 +190,7 @@ func TestHandleOfficeTurnComplete_NoExecutionStillIdle(t *testing.T) {
 	}
 }
 
-// TestHandleOfficeTurnComplete_CancelStopReasonSkipsIdleAndTeardown pins the
-// fix for "session is in IDLE state" after a user cancel on an office task:
-// the cancel-triggered complete event must not park the session at IDLE
-// (which checkSessionPromptable rejects), and must not tear down the agent
-// process — Service.CancelAgent owns reconciling state to WAITING_FOR_INPUT.
+// Pins the cancel-on-office fix: handler returns false on stop_reason="cancelled" and skips StopAgent.
 func TestHandleOfficeTurnComplete_CancelStopReasonSkipsIdleAndTeardown(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -224,10 +220,7 @@ func TestHandleOfficeTurnComplete_CancelStopReasonSkipsIdleAndTeardown(t *testin
 	}
 }
 
-// TestHandleOfficeTurnComplete_OtherStopReasonsStillIdle pins that the new
-// cancelled-skip branch only triggers on the literal "cancelled" stop reason.
-// Any other reason (empty, end_turn, error, …) must keep the original
-// park-to-IDLE + StopAgent behavior so the office scheduler keeps working.
+// Only the literal "cancelled" triggers the skip branch; all other stop_reasons still IDLE + StopAgent.
 func TestHandleOfficeTurnComplete_OtherStopReasonsStillIdle(t *testing.T) {
 	cases := []struct {
 		name       string

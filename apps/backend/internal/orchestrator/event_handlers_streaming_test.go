@@ -284,14 +284,7 @@ func TestSetSessionRunning_WritesOnTransition(t *testing.T) {
 	require.Equal(t, v1.TaskStateInProgress, taskRepo.updatedStates["t1"])
 }
 
-// TestHandleCompleteStreamEvent_CancelledOfficeSessionLandsWaitingForInput
-// pins the call-site wiring for the office cancel-IDLE fix: when the agent
-// complete payload carries stop_reason="cancelled" on an office-style session
-// (task with AssigneeAgentProfileID + session with AgentProfileID), the
-// office IDLE branch must be skipped and the handler must fall through to
-// setSessionWaitingForInput so the user can immediately send a follow-up
-// prompt. Without this wiring the user sees "session is in IDLE state" on
-// the next message (checkSessionPromptable rejects IDLE).
+// Pins the call-site wiring: cancelled office turn must NOT leave the session at IDLE.
 func TestHandleCompleteStreamEvent_CancelledOfficeSessionLandsWaitingForInput(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -299,10 +292,7 @@ func TestHandleCompleteStreamEvent_CancelledOfficeSessionLandsWaitingForInput(t 
 	mgr := &mockAgentManager{}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), mgr)
 
-	// Drive the office session to WAITING_FOR_INPUT first — this mirrors what
-	// Service.CancelAgent does after agentManager.CancelAgent returns; the
-	// office complete-event handler arrives slightly later and must NOT
-	// clobber it back to IDLE just because session.AgentProfileID is set.
+	// Mirror Service.CancelAgent's pre-emptive WAITING_FOR_INPUT write.
 	session, err := repo.GetTaskSession(ctx, "s-cancel-flow")
 	require.NoError(t, err)
 	session.State = models.TaskSessionStateWaitingForInput
@@ -334,9 +324,7 @@ func TestHandleCompleteStreamEvent_CancelledOfficeSessionLandsWaitingForInput(t 
 		"cancelled office turn must not tear down the agent process — Service.CancelAgent owns lifecycle for user cancels")
 }
 
-// TestHandleCompleteStreamEvent_NaturalOfficeCompleteStillIdle is the inverse
-// guard: a natural turn completion (no stop_reason, or "end_turn") on an office
-// session still parks the session in IDLE and tears down the agent process.
+// Inverse guard: a natural end_turn completion on an office session still parks IDLE + StopAgent.
 func TestHandleCompleteStreamEvent_NaturalOfficeCompleteStillIdle(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
