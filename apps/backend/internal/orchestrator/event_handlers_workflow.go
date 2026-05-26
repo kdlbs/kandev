@@ -812,6 +812,14 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 	sessionID := session.ID
 	isPassthrough := s.agentManager.IsPassthroughSession(ctx, sessionID)
 
+	// Stale session.State left over from a previous turn (e.g. the agent's
+	// agent.ready fired before this goroutine resumed) would otherwise trick
+	// queueAutoStartPromptIfRunning into queueing the auto-start prompt against
+	// a session that's actually idle — and nothing would drain it because no
+	// future agent.ready is pending. Flip to WAITING_FOR_INPUT when activeTurns
+	// confirms no in-flight turn.
+	s.flipStaleRunningToWaiting(ctx, taskID, session, isPassthrough)
+
 	hasPlanMode := s.resolveStepPlanMode(ctx, session, step, isPassthrough)
 
 	if len(step.Events.OnEnter) == 0 && !sessionSwitched {
@@ -1396,6 +1404,12 @@ func (s *Service) recordAutoStartMessage(
 	}
 }
 
+// queueAutoStartPromptIfRunning queues the workflow auto-start prompt only
+// when the session is currently RUNNING/STARTING, returning queued=true on
+// success. Callers must ensure session.State is fresh — a stale RUNNING flag
+// (no in-flight turn) would queue a prompt that nothing drains. processOnEnter
+// runs flipStaleRunningToWaiting before reaching this path; applyEngineTransition
+// flips the same way inline. New call sites must do the same.
 func (s *Service) queueAutoStartPromptIfRunning(
 	ctx context.Context,
 	taskID string, session *models.TaskSession, prompt string,
@@ -1453,6 +1467,55 @@ func (s *Service) queueAutoStartPrompt(
 	}
 	s.publishQueueStatusEvent(ctx, sessionID)
 	return nil
+}
+
+// flipStaleRunningToWaiting flips the session to WAITING_FOR_INPUT when its
+// state claims RUNNING/STARTING but the orchestrator's authoritative
+// activeTurns map shows no in-flight turn. This catches the manual-move race
+// where processOnEnter runs from the task.moved goroutine with a session
+// pointer loaded *before* the previous turn's agent.ready fired (or after that
+// agent.ready already completed but the DB hadn't propagated yet). Without
+// this flip, queueAutoStartPromptIfRunning would queue the auto-start prompt
+// against a session no longer mid-turn, and no future agent.ready would fire
+// to drain it.
+//
+// Skip when:
+//   - session.State is not RUNNING/STARTING (CREATED routes through
+//     StartCreatedSession; terminal states are immutable);
+//   - the session is passthrough (PTY-driven, manages its own RUNNING/idle
+//     transitions via MarkPassthroughRunning);
+//   - a context reset is in progress (resetAgentContext owns the state
+//     machine until it completes and runs markIdleAfterReset);
+//   - activeTurns has an entry for the session (a turn is genuinely in flight,
+//     queueing is correct and agent.ready will drain).
+//
+// applyEngineTransition (engine-driven on_turn_complete path) already does
+// this flip inline at the call site; that path stays untouched — the check
+// here is idempotent, so even if both fired, the second is a no-op.
+//
+// Returns true when the flip happened (mostly useful for tests and logs).
+func (s *Service) flipStaleRunningToWaiting(ctx context.Context, taskID string, session *models.TaskSession, isPassthrough bool) bool {
+	if session.State != models.TaskSessionStateRunning &&
+		session.State != models.TaskSessionStateStarting {
+		return false
+	}
+	if isPassthrough {
+		return false
+	}
+	if s.isSessionResetInProgress(session.ID) {
+		return false
+	}
+	if _, hasActiveTurn := s.activeTurns.Load(session.ID); hasActiveTurn {
+		return false
+	}
+	priorState := session.State
+	s.updateTaskSessionState(ctx, taskID, session.ID, models.TaskSessionStateWaitingForInput, "", false, session)
+	session.State = models.TaskSessionStateWaitingForInput
+	s.logger.Info("flipped stale RUNNING session to WAITING_FOR_INPUT (no active turn registered)",
+		zap.String("task_id", taskID),
+		zap.String("session_id", session.ID),
+		zap.String("prior_state", string(priorState)))
+	return true
 }
 
 // markIdleAfterReset flips a freshly-reset session to WAITING_FOR_INPUT so a

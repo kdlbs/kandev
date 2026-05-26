@@ -415,6 +415,10 @@ func TestProcessOnEnter(t *testing.T) {
 
 		taskRepo := newMockTaskRepo()
 		svc := createTestService(repo, newMockStepGetter(), taskRepo)
+		// Seed an active-turn entry so flipStaleRunningToWaiting treats the
+		// session as genuinely mid-turn and the auto-start prompt is queued
+		// (the behavior this subtest asserts).
+		svc.activeTurns.Store("s1", "turn-1")
 		attachments := []messagequeue.MessageAttachment{
 			{Type: "image", Data: "base64-data", MimeType: "image/png"},
 		}

@@ -265,6 +265,12 @@ func TestHandleTaskMovedWithSession(t *testing.T) {
 			}
 
 			svc := createTestService(repo, stepGetter, newMockTaskRepo())
+			// Seed an active-turn entry so flipStaleRunningToWaiting treats the
+			// session as genuinely mid-turn and leaves auto-start on the queue
+			// path. Without this, the helper would flip state to WAITING_FOR_INPUT
+			// and autoStartStepPrompt would fall through to PromptTask (which
+			// dereferences the executor that's nil in this minimal test setup).
+			svc.activeTurns.Store("s1", "turn-1")
 			svc.handleTaskMovedWithSession(ctx, watcher.TaskMovedEventData{
 				TaskID:          "t1",
 				SessionID:       "s1",
@@ -301,6 +307,10 @@ func TestHandleTaskMovedWithSession(t *testing.T) {
 		}
 
 		svc := createTestService(repo, stepGetter, newMockTaskRepo())
+		// Seed an active-turn entry so flipStaleRunningToWaiting recognises the
+		// session as genuinely mid-turn and the auto-start prompt is queued
+		// (the behavior this subtest asserts).
+		svc.activeTurns.Store("s1", "turn-1")
 		svc.handleTaskMovedWithSession(ctx, watcher.TaskMovedEventData{
 			TaskID:          "t1",
 			SessionID:       "s1",
@@ -358,6 +368,117 @@ func TestHandleTaskMovedWithSession(t *testing.T) {
 		}
 		if queued {
 			t.Error("expected pre-check NOT to queue when session state is CREATED")
+		}
+	})
+
+	// Regression: an in-memory session pointer can read RUNNING/STARTING even
+	// when the agent's turn is actually done (the manual-move goroutine loaded
+	// the row before agent.ready fired, or the previous turn's bookkeeping
+	// hasn't propagated). Without flipStaleRunningToWaiting, processOnEnter
+	// would queue the auto-start prompt against this stale state and nothing
+	// would drain it — the symptom users observe as "QUEUED 1 of N" stuck in
+	// the chat after a step move.
+	t.Run("flipStaleRunningToWaiting flips RUNNING session with no active turn", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1") // seeds session.State = RUNNING
+
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		// Intentionally do NOT seed svc.activeTurns — this simulates the stale
+		// state where session.State claims RUNNING but no turn is in flight.
+
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		if session.State != models.TaskSessionStateRunning {
+			t.Fatalf("precondition: session should be RUNNING, got %q", session.State)
+		}
+
+		flipped := svc.flipStaleRunningToWaiting(ctx, "t1", session, false)
+		if !flipped {
+			t.Fatal("expected flipStaleRunningToWaiting to flip stale RUNNING session")
+		}
+		if session.State != models.TaskSessionStateWaitingForInput {
+			t.Errorf("in-memory state: want WAITING_FOR_INPUT, got %q", session.State)
+		}
+		updated, _ := repo.GetTaskSession(ctx, "s1")
+		if updated.State != models.TaskSessionStateWaitingForInput {
+			t.Errorf("DB state: want WAITING_FOR_INPUT, got %q", updated.State)
+		}
+	})
+
+	// Regression for #1036: when activeTurns has an entry, the session is
+	// genuinely mid-turn; agent.ready will drain the queue. The helper must
+	// leave state alone so the queue path stays the right answer.
+	t.Run("flipStaleRunningToWaiting leaves session running when active turn registered", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.activeTurns.Store("s1", "turn-active")
+
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		flipped := svc.flipStaleRunningToWaiting(ctx, "t1", session, false)
+		if flipped {
+			t.Fatal("expected flipStaleRunningToWaiting to no-op when an active turn is registered")
+		}
+		if session.State != models.TaskSessionStateRunning {
+			t.Errorf("in-memory state: want RUNNING preserved, got %q", session.State)
+		}
+		updated, _ := repo.GetTaskSession(ctx, "s1")
+		if updated.State != models.TaskSessionStateRunning {
+			t.Errorf("DB state: want RUNNING preserved, got %q", updated.State)
+		}
+	})
+
+	t.Run("flipStaleRunningToWaiting no-ops for passthrough sessions", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		session, _ := repo.GetTaskSession(ctx, "s1")
+
+		flipped := svc.flipStaleRunningToWaiting(ctx, "t1", session, true)
+		if flipped {
+			t.Fatal("expected flipStaleRunningToWaiting to no-op for passthrough sessions")
+		}
+		if session.State != models.TaskSessionStateRunning {
+			t.Errorf("passthrough session state must be left alone, got %q", session.State)
+		}
+	})
+
+	t.Run("flipStaleRunningToWaiting no-ops for CREATED sessions", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		session.State = models.TaskSessionStateCreated
+		_ = repo.UpdateTaskSession(ctx, session)
+
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		flipped := svc.flipStaleRunningToWaiting(ctx, "t1", session, false)
+		if flipped {
+			t.Fatal("expected flipStaleRunningToWaiting to no-op for CREATED sessions")
+		}
+		if session.State != models.TaskSessionStateCreated {
+			t.Errorf("CREATED session state must be left alone, got %q", session.State)
+		}
+	})
+
+	t.Run("flipStaleRunningToWaiting no-ops while session reset is in progress", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		// resetAgentContext owns the state machine during reset; the helper
+		// must not race with it.
+		svc.setSessionResetInProgress("s1", true)
+		t.Cleanup(func() { svc.setSessionResetInProgress("s1", false) })
+
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		flipped := svc.flipStaleRunningToWaiting(ctx, "t1", session, false)
+		if flipped {
+			t.Fatal("expected flipStaleRunningToWaiting to no-op while reset is in progress")
+		}
+		if session.State != models.TaskSessionStateRunning {
+			t.Errorf("session state must be left alone during reset, got %q", session.State)
 		}
 	})
 
