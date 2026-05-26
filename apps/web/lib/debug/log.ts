@@ -46,6 +46,24 @@
  *     [file-browser:load]     tree loader — init / ready-flip / start / retry / gave-up
  *     [file-browser:changes]  session.workspace.file.changes events + folder refresh
  *
+ *   Task-create dialog (bug: "No compatible agent profiles for <executor>")
+ *     [executor-compat:specs]  remote-auth catalog fetch (count + agent ids)
+ *     [executor-compat]        per-agent compat decision: ok + reason
+ *                              (no-spec / no-creds / files-match / env-secret / …)
+ *     [executor-compat:autopick]
+ *                              useDefaultSelectionsEffect decision per fire:
+ *                              skip/defer/pick + reason + which profile was set.
+ *                              Triage path when "No compatible" lingers after
+ *                              specs land — diff the decision sequence against
+ *                              the catalog log to localise the culprit.
+ *     [executor-compat:workflow-autopick]
+ *                              useWorkflowAgentProfileEffect decision per fire:
+ *                              no-workflow / locked / locked-missing /
+ *                              workflow-no-override. The last branch restores
+ *                              localStorage `lastId` against the unfiltered
+ *                              `agentProfiles` — set_to of an executor-incompatible
+ *                              id is the smoking gun for that race.
+ *
  *   Other
  *     [ws:connection]         WS hook mount + status transitions
  *     [dockview:*]            layout restore / save / env-switch / session-tabs / task-select

@@ -599,6 +599,8 @@ export function useDialogComputed({
     effectiveAgentProfileId,
     selectedExecutorProfileName: exec.selectedExecutorProfile?.name ?? null,
     noCompatibleAgent: exec.noCompatibleAgent,
+    compatibleAgentProfiles: exec.compatibleAgentProfiles,
+    authLoaded: exec.authLoaded,
   };
 }
 
@@ -638,6 +640,7 @@ function useExecutorProfileCompat(
   return {
     selectedExecutorProfile,
     compatibleAgentProfiles,
+    authLoaded,
     executorProfileOptions,
     noCompatibleAgent,
   };

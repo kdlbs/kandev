@@ -400,6 +400,8 @@ export function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     repositories,
     repositoriesLoading,
     agentProfiles,
+    compatibleAgentProfiles: computed.compatibleAgentProfiles,
+    authLoaded: computed.authLoaded,
     executors,
     workspaceDefaults: computed.workspaceDefaults,
     toast,

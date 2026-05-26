@@ -13,11 +13,71 @@ import { getLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
 import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
 import { fetchRepoBranches, fetchPRInfo } from "@/lib/api/domains/github-api";
+import { createDebugLogger } from "@/lib/debug/log";
 import type {
   DialogFormState,
   StoreSelections,
   TaskCreateEffectsArgs,
 } from "@/components/task-create-dialog-types";
+
+const autopickDebug = createDebugLogger("executor-compat:autopick");
+const workflowAutopickDebug = createDebugLogger("executor-compat:workflow-autopick");
+
+/**
+ * Pure decision function for the agent-profile autopick. Extracted so the
+ * effect can stay below the 100-line lint cap once the autopick trace logs
+ * are inlined, and so the same decision can be tested without rendering.
+ *
+ * Order: lastId (localStorage) → defId (workspace default) → first
+ * compatible. Every candidate is filtered against `compatibleAgentProfiles`
+ * so a previously-used profile that's not wired for the chosen executor
+ * isn't restored, then immediately fails the executor-compat gate.
+ */
+type AutopickDecision =
+  | { kind: "skip"; reason: string }
+  | { kind: "defer"; reason: string }
+  | { kind: "pick"; source: "lastId" | "defId" | "first"; id: string };
+
+function decideAgentProfileAutopick(input: {
+  open: boolean;
+  agentProfileId: string;
+  workflowAgentProfileId: string;
+  workflowHasAgent: boolean;
+  agentProfiles: AgentProfileOption[];
+  compatibleAgentProfiles: AgentProfileOption[];
+  authLoaded: boolean;
+  executorProfileId: string;
+  hasExecutors: boolean;
+  defaultAgentProfileId: string | null;
+}): AutopickDecision {
+  if (!input.open) return { kind: "skip", reason: "closed" };
+  if (input.agentProfileId) return { kind: "skip", reason: "already-set" };
+  if (input.workflowAgentProfileId) return { kind: "skip", reason: "workflow-locked" };
+  if (input.workflowHasAgent) return { kind: "skip", reason: "workflow-has-agent" };
+  if (input.agentProfiles.length === 0) return { kind: "skip", reason: "no-profiles" };
+  if (!input.authLoaded) return { kind: "defer", reason: "auth-not-loaded" };
+  // Defer until the executor profile is selected too — useExecutorProfileCompat
+  // short-circuits to the unfiltered list when `selectedExecutorProfile` is null,
+  // so without this gate we'd happily restore an incompatible lastId during the
+  // single render where `authLoaded` is already true but the executor
+  // auto-select hasn't queued through yet. Only deferrable if there ARE
+  // executors to pick from — otherwise the executor effect will never fire and
+  // we'd defer forever.
+  if (!input.executorProfileId && input.hasExecutors) {
+    return { kind: "defer", reason: "executor-not-selected" };
+  }
+  if (input.compatibleAgentProfiles.length === 0) return { kind: "skip", reason: "no-compatible" };
+
+  const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, null);
+  if (lastId && input.compatibleAgentProfiles.some((p) => p.id === lastId)) {
+    return { kind: "pick", source: "lastId", id: lastId };
+  }
+  const defId = input.defaultAgentProfileId;
+  if (defId && input.compatibleAgentProfiles.some((p) => p.id === defId)) {
+    return { kind: "pick", source: "defId", id: defId };
+  }
+  return { kind: "pick", source: "first", id: input.compatibleAgentProfiles[0].id };
+}
 
 export function useWorkflowAgentProfileEffect(
   fs: DialogFormState,
@@ -28,6 +88,7 @@ export function useWorkflowAgentProfileEffect(
   useEffect(() => {
     if (!selectedWorkflowId) {
       setWorkflowAgentProfileId("");
+      workflowAutopickDebug("no-workflow", { cleared: "workflowAgentProfileId" });
       return;
     }
     const workflow = workflows.find((w) => w.id === selectedWorkflowId);
@@ -39,6 +100,15 @@ export function useWorkflowAgentProfileEffect(
       const profileExists = agentProfiles.some((p) => p.id === workflow.agent_profile_id);
       if (profileExists) {
         setAgentProfileId(workflow.agent_profile_id);
+        workflowAutopickDebug("locked", {
+          workflow: selectedWorkflowId,
+          set_to: workflow.agent_profile_id,
+        });
+      } else {
+        workflowAutopickDebug("locked-missing", {
+          workflow: selectedWorkflowId,
+          missing: workflow.agent_profile_id,
+        });
       }
     } else {
       setWorkflowAgentProfileId("");
@@ -47,9 +117,22 @@ export function useWorkflowAgentProfileEffect(
       // so the previous run's id never matches and would otherwise poison
       // the dialog into "No compatible agent profiles" because
       // useDefaultSelectionsEffect skips when agentProfileId is truthy.
+      // NB: filtered against `agentProfiles` (all loaded), NOT against
+      // executor-compat. If lastId is incompatible with the chosen executor
+      // this still restores it — useDefaultSelectionsEffect can no longer
+      // correct that since agentProfileId becomes truthy and it early-exits.
+      // If `[executor-compat:workflow-autopick] set_to=<incompatible>` shows
+      // up in production, this is the bug; fix is to plumb
+      // `compatibleAgentProfiles` here too.
       const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, null);
       const isValidLastId = Boolean(lastId && agentProfiles.some((p) => p.id === lastId));
-      setAgentProfileId(isValidLastId && lastId ? lastId : "");
+      const finalId = isValidLastId && lastId ? lastId : "";
+      setAgentProfileId(finalId);
+      workflowAutopickDebug("workflow-no-override", {
+        last_id: lastId ?? "-",
+        valid: isValidLastId,
+        set_to: finalId || "-empty-",
+      });
     }
   }, [selectedWorkflowId, workflows, agentProfiles, setAgentProfileId, setWorkflowAgentProfileId]);
 }
@@ -248,23 +331,22 @@ function pickDefaultExecutorId(
   return local?.id ?? eligible[0].id;
 }
 
-export function useDefaultSelectionsEffect(
+// Extracted so the parent `useDefaultSelectionsEffect` stays under the 100-line
+// lint cap and so the autopick decision is independently traceable via the
+// `[executor-compat:autopick]` debug log.
+function useAgentProfileAutopickEffect(
   fs: DialogFormState,
   open: boolean,
   sel: StoreSelections,
   workflows: Array<{ id: string; agent_profile_id?: string }>,
 ) {
-  const { agentProfiles, executors, workspaceDefaults } = sel;
+  const { agentProfiles, compatibleAgentProfiles, authLoaded, executors, workspaceDefaults } = sel;
   const {
     agentProfileId,
     workflowAgentProfileId,
     selectedWorkflowId,
-    executorId,
     executorProfileId,
     setAgentProfileId,
-    setExecutorId,
-    setExecutorProfileId,
-    noRepository,
   } = fs;
   useEffect(() => {
     // Check synchronously whether the selected workflow has an agent override.
@@ -273,25 +355,32 @@ export function useDefaultSelectionsEffect(
     const workflowHasAgent = selectedWorkflowId
       ? workflows.some((w) => w.id === selectedWorkflowId && w.agent_profile_id)
       : false;
-    if (
-      !open ||
-      agentProfileId ||
-      workflowAgentProfileId ||
-      workflowHasAgent ||
-      agentProfiles.length === 0
-    )
-      return;
-    const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, null);
-    if (lastId && agentProfiles.some((p: AgentProfileOption) => p.id === lastId)) {
-      void Promise.resolve().then(() => setAgentProfileId(lastId));
-      return;
+    const decision = decideAgentProfileAutopick({
+      open,
+      agentProfileId,
+      workflowAgentProfileId,
+      workflowHasAgent,
+      agentProfiles,
+      compatibleAgentProfiles,
+      authLoaded,
+      executorProfileId,
+      hasExecutors: executors.length > 0,
+      defaultAgentProfileId: workspaceDefaults?.default_agent_profile_id ?? null,
+    });
+    autopickDebug(decision.kind, {
+      reason: decision.kind === "pick" ? decision.source : decision.reason,
+      pick: decision.kind === "pick" ? decision.id : "-",
+      current: agentProfileId || "-",
+      workflow_id: selectedWorkflowId ?? "-",
+      executor_profile_id: executorProfileId || "-",
+      agent_count: agentProfiles.length,
+      compat_count: compatibleAgentProfiles.length,
+      auth_loaded: authLoaded,
+    });
+    if (decision.kind === "pick") {
+      const id = decision.id;
+      void Promise.resolve().then(() => setAgentProfileId(id));
     }
-    const defId = workspaceDefaults?.default_agent_profile_id ?? null;
-    if (defId && agentProfiles.some((p: AgentProfileOption) => p.id === defId)) {
-      void Promise.resolve().then(() => setAgentProfileId(defId));
-      return;
-    }
-    void Promise.resolve().then(() => setAgentProfileId(agentProfiles[0].id));
   }, [
     open,
     agentProfileId,
@@ -299,9 +388,24 @@ export function useDefaultSelectionsEffect(
     selectedWorkflowId,
     workflows,
     agentProfiles,
+    compatibleAgentProfiles,
+    authLoaded,
+    executorProfileId,
+    executors,
     workspaceDefaults,
     setAgentProfileId,
   ]);
+}
+
+export function useDefaultSelectionsEffect(
+  fs: DialogFormState,
+  open: boolean,
+  sel: StoreSelections,
+  workflows: Array<{ id: string; agent_profile_id?: string }>,
+) {
+  const { executors, workspaceDefaults } = sel;
+  const { executorId, executorProfileId, setExecutorId, setExecutorProfileId, noRepository } = fs;
+  useAgentProfileAutopickEffect(fs, open, sel, workflows);
 
   useEffect(() => {
     if (!open || executorId || executors.length === 0) return;
@@ -541,7 +645,16 @@ export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
 
 export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreateEffectsArgs) {
   const { open, workspaceId, workflowId, repositories, repositoriesLoading } = args;
-  const { agentProfiles, executors, workspaceDefaults, toast, workflows, isLocalExecutor } = args;
+  const {
+    agentProfiles,
+    compatibleAgentProfiles,
+    authLoaded,
+    executors,
+    workspaceDefaults,
+    toast,
+    workflows,
+    isLocalExecutor,
+  } = args;
   useWorkflowStepsEffect(fs, workflowId);
   useWorkflowAgentProfileEffect(fs, workflows, agentProfiles);
   useRepositoryAutoSelectEffect(fs, open, workspaceId, repositories);
@@ -549,7 +662,12 @@ export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreate
   useBranchAutoSelectEffect(fs);
   useCurrentLocalBranchEffect(fs, open, workspaceId, repositories);
   useResetBranchOnLocalSwitchEffect(fs, isLocalExecutor, args.preserveBranch);
-  useDefaultSelectionsEffect(fs, open, { agentProfiles, executors, workspaceDefaults }, workflows);
+  useDefaultSelectionsEffect(
+    fs,
+    open,
+    { agentProfiles, compatibleAgentProfiles, authLoaded, executors, workspaceDefaults },
+    workflows,
+  );
   useGitHubUrlBranchesEffect(fs, open);
 }
 
