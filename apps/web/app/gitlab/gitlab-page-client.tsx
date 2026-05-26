@@ -1,214 +1,286 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import {
-  IconBrandGitlab,
-  IconBug,
-  IconCheck,
-  IconClock,
-  IconExternalLink,
-  IconGitMerge,
-  IconRefresh,
-  IconX,
-} from "@tabler/icons-react";
-import { Badge } from "@kandev/ui/badge";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { IconBrandGitlab, IconMenu2 } from "@tabler/icons-react";
+import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent } from "@kandev/ui/card";
-import { Input } from "@kandev/ui/input";
-import { Spinner } from "@kandev/ui/spinner";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@kandev/ui/tabs";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
 import { PageTopbar } from "@/components/page-topbar";
 import { fetchGitLabStatus } from "@/lib/api/domains/gitlab-api";
-import { useGitLabUserIssues, useGitLabUserMRs } from "@/hooks/domains/gitlab/use-user-search";
 import type { GitLabStatus, Issue, MR } from "@/lib/types/gitlab";
+import { MRList } from "@/components/gitlab/my-gitlab/mr-list";
+import { IssueList } from "@/components/gitlab/my-gitlab/issue-list";
+import {
+  PresetsSidebar,
+  type SidebarSelection,
+} from "@/components/gitlab/my-gitlab/presets-sidebar";
+import { MR_PRESETS, ISSUE_PRESETS } from "@/components/gitlab/my-gitlab/presets";
+import { useGitLabSearch } from "@/components/gitlab/my-gitlab/use-gitlab-search";
+import { useSavedPresets, type SavedPreset } from "@/components/gitlab/my-gitlab/use-saved-presets";
+import {
+  useKnownProjects,
+  resetKnownProjectsStore,
+} from "@/components/gitlab/my-gitlab/use-known-projects";
+import { useCommittedQuery } from "@/components/gitlab/my-gitlab/use-committed-query";
+import { ListToolbar } from "@/components/gitlab/my-gitlab/list-toolbar";
+import { ResultsPagination } from "@/components/gitlab/my-gitlab/results-pagination";
+import { SavePresetDialog } from "@/components/gitlab/my-gitlab/save-preset-dialog";
 
-// Filter values map to GitLab's "scope" query param semantics.
-const MR_FILTERS = [
-  { value: "assigned_to_me", label: "Assigned" },
-  { value: "created_by_me", label: "Authored" },
-  { value: "review_requested", label: "Review requested" },
-] as const;
-
-const ISSUE_FILTERS = [
-  { value: "assigned_to_me", label: "Assigned" },
-  { value: "created_by_me", label: "Created" },
-] as const;
-
-function MRStateBadge({ mr }: { mr: MR }) {
-  const state = mr.state === "opened" ? "open" : mr.state;
-  if (state === "merged") {
-    return (
-      <Badge variant="secondary" className="gap-1 bg-purple-500/10 text-purple-500">
-        <IconCheck className="h-3 w-3" /> Merged
-      </Badge>
-    );
-  }
-  if (state === "closed") {
-    return (
-      <Badge variant="outline" className="gap-1">
-        <IconX className="h-3 w-3" /> Closed
-      </Badge>
-    );
-  }
-  if (mr.draft) {
-    return (
-      <Badge variant="outline" className="gap-1 text-muted-foreground">
-        <IconClock className="h-3 w-3" /> Draft
-      </Badge>
-    );
-  }
+function PageHeader({
+  host,
+  onOpenMobileSidebar,
+}: {
+  host: string;
+  onOpenMobileSidebar?: () => void;
+}) {
   return (
-    <Badge variant="outline" className="gap-1 text-emerald-500">
-      <IconGitMerge className="h-3 w-3" /> Open
-    </Badge>
-  );
-}
-
-function IssueStateBadge({ issue }: { issue: Issue }) {
-  if (issue.state === "closed") {
-    return (
-      <Badge variant="outline" className="gap-1">
-        <IconCheck className="h-3 w-3" /> Closed
-      </Badge>
-    );
-  }
-  return (
-    <Badge variant="outline" className="gap-1 text-emerald-500">
-      <IconBug className="h-3 w-3" /> Open
-    </Badge>
+    <PageTopbar
+      title="GitLab"
+      subtitle={`${host} · merge requests and issues`}
+      icon={<IconBrandGitlab className="h-4 w-4" />}
+      actions={
+        onOpenMobileSidebar && (
+          <Button
+            variant="outline"
+            size="icon-lg"
+            onClick={onOpenMobileSidebar}
+            className="md:hidden cursor-pointer"
+            data-testid="gitlab-mobile-menu-button"
+            aria-label="Open GitLab filters"
+          >
+            <IconMenu2 className="h-4 w-4" />
+          </Button>
+        )
+      }
+    />
   );
 }
 
 function NotConnectedNotice() {
   return (
-    <Card>
-      <CardContent className="py-10 text-center space-y-2">
-        <IconBrandGitlab className="h-10 w-10 mx-auto text-muted-foreground" />
-        <p className="text-sm font-medium">GitLab not connected</p>
-        <p className="text-xs text-muted-foreground">
-          Connect your GitLab account to browse merge requests and issues from this page.
-        </p>
-        <Button asChild size="sm" variant="outline" className="cursor-pointer mt-2">
-          <Link href="/settings/integrations/gitlab">Open settings</Link>
-        </Button>
-      </CardContent>
-    </Card>
+    <Alert>
+      <AlertDescription>
+        GitLab is not connected. Configure GitLab authentication in{" "}
+        <Link href="/settings/integrations/gitlab" className="underline font-medium cursor-pointer">
+          Settings → GitLab
+        </Link>{" "}
+        to see your merge requests and issues.
+      </AlertDescription>
+    </Alert>
   );
 }
 
-function MRList({ filter, query }: { filter: string; query: string }) {
-  const { items: mrs, loading, error } = useGitLabUserMRs(filter, query);
-
-  if (loading) {
-    return (
-      <div className="flex justify-center py-6">
-        <Spinner className="h-4 w-4" />
-      </div>
-    );
+function resolveTitle(selection: SidebarSelection, saved: SavedPreset[]): string {
+  if (selection.source === "saved") {
+    return saved.find((p) => p.id === selection.id)?.label ?? "Saved query";
   }
-  if (error) {
-    return <p className="text-sm text-destructive py-4">{error}</p>;
-  }
-  if (mrs.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground py-6 text-center">No merge requests found.</p>
-    );
-  }
+  const presets = selection.kind === "mr" ? MR_PRESETS : ISSUE_PRESETS;
   return (
-    <ul className="space-y-1.5">
-      {mrs.map((mr) => (
-        <li key={`${mr.project_path}-${mr.iid}`}>
-          <Link
-            href={mr.web_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="block p-3 rounded-md border hover:border-primary/40 transition-colors cursor-pointer"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2 text-sm font-medium truncate">
-                  <span className="truncate">{mr.title}</span>
-                  <IconExternalLink className="h-3 w-3 shrink-0 text-muted-foreground" />
-                </div>
-                <p className="text-xs text-muted-foreground mt-1 truncate">
-                  {mr.project_path} !{mr.iid} · {mr.head_branch} → {mr.base_branch}
-                </p>
-              </div>
-              <MRStateBadge mr={mr} />
-            </div>
-          </Link>
-        </li>
-      ))}
-    </ul>
+    presets.find((p) => p.value === selection.id)?.label ??
+    (selection.kind === "mr" ? "Merge requests" : "Issues")
   );
 }
 
-function IssueList({ filter, query }: { filter: string; query: string }) {
-  const { items: issues, loading, error } = useGitLabUserIssues(filter, query);
+function ResultsList({
+  selection,
+  items,
+  loading,
+  error,
+}: {
+  selection: SidebarSelection;
+  items: Array<MR | Issue>;
+  loading: boolean;
+  error: string | null;
+}) {
+  if (selection.kind === "mr") {
+    return <MRList items={items as MR[]} loading={loading} error={error} />;
+  }
+  return <IssueList items={items as Issue[]} loading={loading} error={error} />;
+}
 
-  if (loading) {
-    return (
-      <div className="flex justify-center py-6">
-        <Spinner className="h-4 w-4" />
-      </div>
-    );
-  }
-  if (error) {
-    return <p className="text-sm text-destructive py-4">{error}</p>;
-  }
-  if (issues.length === 0) {
-    return <p className="text-sm text-muted-foreground py-6 text-center">No issues found.</p>;
-  }
+type GitLabPageState = ReturnType<typeof useGitLabPageState>;
+
+function useProjectOptions(
+  selection: SidebarSelection,
+  committedQuery: string,
+  items: Array<MR | Issue>,
+  projectFilter: string,
+): string[] {
+  const pageProjects = useMemo(
+    () => items.filter((it) => !!it.project_path).map((it) => it.project_path),
+    [items],
+  );
+  const resetKey = `${selection.kind}:${selection.source}:${selection.id}:${committedQuery.trim()}`;
+  const knownProjects = useKnownProjects(resetKey, pageProjects);
+  return useMemo(() => {
+    const set = new Set(knownProjects);
+    if (projectFilter) set.add(projectFilter);
+    return Array.from(set).sort();
+  }, [knownProjects, projectFilter]);
+}
+
+function useGitLabPageState() {
+  const [selection, setSelection] = useState<SidebarSelection>(() => ({
+    kind: "mr",
+    source: "preset",
+    id: MR_PRESETS[0]?.value ?? "",
+  }));
+  const {
+    draft: customQuery,
+    committed: committedQuery,
+    setDraft: setCustomQuery,
+    setImmediate: setQueryImmediate,
+    commit: commitCustomQuery,
+  } = useCommittedQuery("");
+  const [projectFilter, setProjectFilter] = useState("");
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const {
+    presets: savedPresets,
+    save: saveSavedPreset,
+    remove: removeSavedPreset,
+  } = useSavedPresets();
+
+  const presets = selection.kind === "mr" ? MR_PRESETS : ISSUE_PRESETS;
+  const search = useGitLabSearch<MR | Issue>(
+    selection.kind,
+    presets,
+    selection.source === "preset" ? selection.id : "",
+    committedQuery,
+    projectFilter,
+  );
+  const projectOptions = useProjectOptions(
+    selection,
+    committedQuery,
+    search.rawItems,
+    projectFilter,
+  );
+  const title = useMemo(() => resolveTitle(selection, savedPresets), [selection, savedPresets]);
+
+  const onSelect = useCallback(
+    (s: SidebarSelection) => {
+      setSelection(s);
+      if (s.source === "saved") {
+        const found = savedPresets.find((p) => p.id === s.id);
+        setQueryImmediate(found?.customQuery ?? "");
+        setProjectFilter(found?.projectFilter ?? "");
+        return;
+      }
+      setQueryImmediate("");
+      setProjectFilter("");
+    },
+    [savedPresets, setQueryImmediate],
+  );
+
+  const canSaveCurrent = customQuery.trim().length > 0 || projectFilter.length > 0;
+  const suggestedLabel =
+    customQuery.trim() || (projectFilter ? `In ${projectFilter}` : "Saved query");
+  const onOpenSaveDialog = () => {
+    if (canSaveCurrent) setSaveDialogOpen(true);
+  };
+  const onConfirmSave = (label: string) => {
+    const created = saveSavedPreset({
+      kind: selection.kind,
+      label,
+      customQuery,
+      projectFilter,
+    });
+    setSelection({ kind: selection.kind, source: "saved", id: created.id });
+  };
+  const onDeleteSaved = (id: string) => {
+    removeSavedPreset(id);
+    if (selection.source === "saved" && selection.id === id) {
+      const fallbackPresets = selection.kind === "mr" ? MR_PRESETS : ISSUE_PRESETS;
+      setSelection({ kind: selection.kind, source: "preset", id: fallbackPresets[0]?.value ?? "" });
+      setQueryImmediate("");
+      setProjectFilter("");
+    }
+  };
+
+  return {
+    selection,
+    customQuery,
+    committedQuery,
+    setCustomQuery,
+    commitCustomQuery,
+    projectFilter,
+    setProjectFilter,
+    savedPresets,
+    search,
+    projectOptions,
+    title,
+    onSelect,
+    canSaveCurrent,
+    suggestedLabel,
+    saveDialogOpen,
+    setSaveDialogOpen,
+    onOpenSaveDialog,
+    onConfirmSave,
+    onDeleteSaved,
+  };
+}
+
+function AuthenticatedLayout({ state }: { state: GitLabPageState }) {
+  const { selection, search, projectOptions, title } = state;
   return (
-    <ul className="space-y-1.5">
-      {issues.map((issue) => (
-        <li key={`${issue.project_path}-${issue.iid}`}>
-          <Link
-            href={issue.web_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="block p-3 rounded-md border hover:border-primary/40 transition-colors cursor-pointer"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2 text-sm font-medium truncate">
-                  <span className="truncate">{issue.title}</span>
-                  <IconExternalLink className="h-3 w-3 shrink-0 text-muted-foreground" />
-                </div>
-                <p className="text-xs text-muted-foreground mt-1 truncate">
-                  {issue.project_path} #{issue.iid}
-                  {issue.labels.length > 0 && ` · ${issue.labels.slice(0, 3).join(", ")}`}
-                </p>
-              </div>
-              <IssueStateBadge issue={issue} />
-            </div>
-          </Link>
-        </li>
-      ))}
-    </ul>
+    <div className="flex-1 flex min-h-0">
+      <aside
+        className="hidden md:flex md:flex-col w-60 border-r overflow-y-auto shrink-0"
+        data-testid="gitlab-presets-sidebar-inline"
+      >
+        <PresetsSidebar
+          selected={selection}
+          onSelect={state.onSelect}
+          savedPresets={state.savedPresets}
+          onDeleteSaved={state.onDeleteSaved}
+          canSaveCurrent={state.canSaveCurrent}
+          onSaveCurrent={state.onOpenSaveDialog}
+        />
+      </aside>
+      <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <ListToolbar
+          title={title}
+          count={search.total}
+          loading={search.loading}
+          lastFetchedAt={search.lastFetchedAt}
+          customQuery={state.customQuery}
+          committedQuery={state.committedQuery}
+          onCustomQueryChange={state.setCustomQuery}
+          onCommitCustomQuery={state.commitCustomQuery}
+          projectFilter={state.projectFilter}
+          onProjectFilterChange={state.setProjectFilter}
+          projectOptions={projectOptions}
+          onRefresh={search.refresh}
+        />
+        <div className="flex-1 overflow-auto px-6 py-4">
+          <ResultsList
+            selection={selection}
+            items={search.items}
+            loading={search.loading}
+            error={search.error}
+          />
+        </div>
+        <ResultsPagination
+          page={search.page}
+          pageSize={search.pageSize}
+          total={search.total}
+          onPageChange={search.setPage}
+        />
+      </main>
+    </div>
   );
 }
 
-export function GitLabPageClient({ workspaceId: _workspaceId }: { workspaceId?: string }) {
+function useGitLabStatusFetch() {
   const [status, setStatus] = useState<GitLabStatus | null>(null);
-  const [statusLoading, setStatusLoading] = useState(true);
-  const [mrFilter, setMrFilter] = useState<string>(MR_FILTERS[0].value);
-  const [issueFilter, setIssueFilter] = useState<string>(ISSUE_FILTERS[0].value);
-  const [search, setSearch] = useState("");
-  const [debounced, setDebounced] = useState("");
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(search), 200);
-    return () => clearTimeout(t);
-  }, [search]);
-
-  const reloadStatus = useCallback(() => {
-    setStatusLoading(true);
+  const refresh = useCallback(() => {
+    setLoading(true);
     fetchGitLabStatus({ cache: "no-store" })
       .then(setStatus)
       .catch(() => setStatus(null))
-      .finally(() => setStatusLoading(false));
+      .finally(() => setLoading(false));
   }, []);
 
   useEffect(() => {
@@ -221,145 +293,79 @@ export function GitLabPageClient({ workspaceId: _workspaceId }: { workspaceId?: 
         if (!cancelled) setStatus(null);
       })
       .finally(() => {
-        if (!cancelled) setStatusLoading(false);
+        if (!cancelled) setLoading(false);
       });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  // Pass debounced search through as the custom_query. GitLab understands
-  // free-text search via the `search` URL param; mapping the raw text to it
-  // keeps the surface simple — power users can still type the param-style
-  // string like "labels=bug&author_username=me" and the backend forwards
-  // it as customQuery.
-  const customQuery = useMemo(() => {
-    const q = debounced.trim();
-    if (!q) return "";
-    if (q.includes("=")) return q; // assume raw key=value
-    return `search=${encodeURIComponent(q)}`;
-  }, [debounced]);
+  return { status, loading, refresh };
+}
 
-  const connected = status?.authenticated || status?.token_configured;
+export function GitLabPageClient(_props: { workspaceId?: string } = {}) {
+  const { status, loading: statusLoading } = useGitLabStatusFetch();
+  const state = useGitLabPageState();
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
+  useEffect(() => resetKnownProjectsStore, []);
+
+  const connected = !!(status?.authenticated || status?.token_configured);
+  const host = status?.host ?? "https://gitlab.com";
+
+  const onOpenMobileSidebar = useCallback(() => setMobileSidebarOpen(true), []);
+  const onMobileSidebarSelect = (s: Parameters<typeof state.onSelect>[0]) => {
+    state.onSelect(s);
+    setMobileSidebarOpen(false);
+  };
+  const onMobileSaveCurrent = () => {
+    setMobileSidebarOpen(false);
+    state.onOpenSaveDialog();
+  };
 
   return (
-    <div className="flex flex-col h-full">
-      <PageTopbar
-        title="GitLab"
-        subtitle={`${status?.host ?? "https://gitlab.com"} · merge requests and issues`}
-        icon={<IconBrandGitlab className="h-4 w-4" />}
-        actions={
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={reloadStatus}
-            disabled={statusLoading}
-            className="gap-1 cursor-pointer"
-          >
-            <IconRefresh className="h-3 w-3" />
-            Refresh
-          </Button>
-        }
+    <div className="h-screen w-full flex flex-col bg-background">
+      <PageHeader
+        host={host}
+        onOpenMobileSidebar={!statusLoading && connected ? onOpenMobileSidebar : undefined}
       />
-      <div className="space-y-4 p-4 md:p-6">
-        {!statusLoading && !connected ? (
+      {statusLoading && (
+        <div className="p-6 text-sm text-muted-foreground">Checking GitLab status…</div>
+      )}
+      {!statusLoading && !connected && (
+        <div className="p-6 max-w-2xl">
           <NotConnectedNotice />
-        ) : (
-          <BrowseTabs
-            search={search}
-            setSearch={setSearch}
-            mrFilter={mrFilter}
-            setMrFilter={setMrFilter}
-            issueFilter={issueFilter}
-            setIssueFilter={setIssueFilter}
-            customQuery={customQuery}
-          />
-        )}
-      </div>
-    </div>
-  );
-}
-
-function BrowseTabs({
-  search,
-  setSearch,
-  mrFilter,
-  setMrFilter,
-  issueFilter,
-  setIssueFilter,
-  customQuery,
-}: {
-  search: string;
-  setSearch: (v: string) => void;
-  mrFilter: string;
-  setMrFilter: (v: string) => void;
-  issueFilter: string;
-  setIssueFilter: (v: string) => void;
-  customQuery: string;
-}) {
-  return (
-    <>
-      <Input
-        placeholder="Search (free text, or paste GitLab query like labels=bug&state=opened)"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        className="font-mono text-sm"
-      />
-
-      <Tabs defaultValue="mrs">
-        <TabsList>
-          <TabsTrigger value="mrs" className="gap-1.5">
-            <IconGitMerge className="h-3.5 w-3.5" />
-            Merge requests
-          </TabsTrigger>
-          <TabsTrigger value="issues" className="gap-1.5">
-            <IconBug className="h-3.5 w-3.5" />
-            Issues
-          </TabsTrigger>
-        </TabsList>
-        <TabsContent value="mrs" className="space-y-3">
-          <FilterButtons
-            value={mrFilter}
-            onChange={setMrFilter}
-            options={MR_FILTERS as readonly { value: string; label: string }[]}
-          />
-          <MRList filter={mrFilter} query={customQuery} />
-        </TabsContent>
-        <TabsContent value="issues" className="space-y-3">
-          <FilterButtons
-            value={issueFilter}
-            onChange={setIssueFilter}
-            options={ISSUE_FILTERS as readonly { value: string; label: string }[]}
-          />
-          <IssueList filter={issueFilter} query={customQuery} />
-        </TabsContent>
-      </Tabs>
-    </>
-  );
-}
-
-function FilterButtons({
-  value,
-  onChange,
-  options,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  options: readonly { value: string; label: string }[];
-}) {
-  return (
-    <div className="flex gap-1.5 flex-wrap">
-      {options.map((f) => (
-        <Button
-          key={f.value}
-          size="sm"
-          variant={value === f.value ? "default" : "outline"}
-          onClick={() => onChange(f.value)}
-          className="cursor-pointer"
+        </div>
+      )}
+      {!statusLoading && connected && <AuthenticatedLayout state={state} />}
+      <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
+        <SheetContent
+          side="right"
+          className="w-full sm:max-w-sm overflow-y-auto p-0"
+          data-testid="gitlab-mobile-sidebar"
         >
-          {f.label}
-        </Button>
-      ))}
+          <SheetHeader className="px-4 pt-4 pb-2">
+            <SheetTitle>Filters</SheetTitle>
+          </SheetHeader>
+          <PresetsSidebar
+            selected={state.selection}
+            onSelect={onMobileSidebarSelect}
+            savedPresets={state.savedPresets}
+            onDeleteSaved={state.onDeleteSaved}
+            canSaveCurrent={state.canSaveCurrent}
+            onSaveCurrent={onMobileSaveCurrent}
+          />
+        </SheetContent>
+      </Sheet>
+      <SavePresetDialog
+        open={state.saveDialogOpen}
+        onOpenChange={state.setSaveDialogOpen}
+        kind={state.selection.kind}
+        customQuery={state.customQuery}
+        projectFilter={state.projectFilter}
+        suggestedLabel={state.suggestedLabel}
+        onSave={state.onConfirmSave}
+      />
     </div>
   );
 }
