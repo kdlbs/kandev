@@ -114,7 +114,9 @@ function CommandHeader({ displayCommand }: { displayCommand: string }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className={className}>{displayCommand}</span>
+        <span className={className} tabIndex={0}>
+          {displayCommand}
+        </span>
       </TooltipTrigger>
       <TooltipContent
         side="bottom"
