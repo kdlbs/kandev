@@ -79,8 +79,8 @@ export function useGitLabSearch(
         if (seq !== requestSeq.current) return;
         const items: Item[] =
           kind === "mr"
-            ? ((response as { mrs: MR[] | null }).mrs ?? [])
-            : ((response as { issues: Issue[] | null }).issues ?? []);
+            ? ((response as { mrs: MR[] | null } | null)?.mrs ?? [])
+            : ((response as { issues: Issue[] | null } | null)?.issues ?? []);
         setState({
           items,
           loading: false,
