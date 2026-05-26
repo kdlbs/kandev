@@ -691,13 +691,7 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 	// executor backend. The conversation is preserved via acp_session_id; the
 	// next run recreates everything and reloads. Kanban / quick-chat retains
 	// the warm WAITING_FOR_INPUT model below.
-	//
-	// stop_reason "cancelled" is excluded from the office path: a user-initiated
-	// cancel is not the "between scheduled runs" intent IDLE represents. The
-	// cancel handler (Service.CancelAgent) already drives the session to
-	// WAITING_FOR_INPUT and records the cancel message — letting the office
-	// branch overwrite that with IDLE would leave the session unpromptable
-	// (checkSessionPromptable rejects IDLE) until the next scheduler wakeup.
+	// stop_reason "cancelled" skips the office IDLE path: CancelAgent already wrote WAITING_FOR_INPUT; overwriting with IDLE would make the session unpromptable.
 	stopReason := extractStopReason(payload)
 	if session != nil && s.handleOfficeTurnComplete(ctx, payload.TaskID, payload.SessionID, session, stopReason) {
 		return
@@ -737,12 +731,7 @@ const stopReasonCancelled = "cancelled"
 // terminal-state guard short-circuits (mirrors completeAndStopSession).
 // Returns true when the session was handled as office (caller must not fall
 // through to the kanban WAITING_FOR_INPUT path).
-//
-// stopReason is the agent's reported turn-end reason. When it is "cancelled"
-// (user-initiated turn cancel), this handler returns false so the caller falls
-// through to the kanban setSessionWaitingForInput path — IDLE would leave the
-// session unpromptable for the user's expected follow-up. All other reasons
-// (end_turn, error, empty) keep the original office park-to-IDLE behavior.
+// stopReason "cancelled" returns false (skip IDLE); all other reasons keep the office park-to-IDLE path.
 func (s *Service) handleOfficeTurnComplete(
 	ctx context.Context, taskID, sessionID string, session *models.TaskSession, stopReason string,
 ) bool {
