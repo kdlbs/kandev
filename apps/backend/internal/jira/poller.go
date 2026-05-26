@@ -54,15 +54,6 @@ func NewPoller(svc *Service, log *logger.Logger) *Poller {
 	}
 }
 
-// SetIssueTickHook installs a callback fired at the end of each issue-watch
-// tick. Production code never sets this; tests use it to wait for a tick
-// without sleep-polling.
-func (p *Poller) SetIssueTickHook(fn func()) {
-	p.mu.Lock()
-	p.issueTickHook = fn
-	p.mu.Unlock()
-}
-
 // Start launches both background loops. Calling Start more than once without
 // Stop is a no-op. A nil receiver is also a no-op so callers don't have to
 // nil-check around `NewPoller(nil, log).Start(ctx)` patterns.

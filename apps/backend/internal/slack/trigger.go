@@ -57,21 +57,6 @@ func NewTrigger(svc *Service, log *logger.Logger) *Trigger {
 	return &Trigger{svc: svc, log: log, interval: DefaultBaseInterval}
 }
 
-// SetInterval overrides the base-ticker cadence. Must be called before Start.
-func (t *Trigger) SetInterval(d time.Duration) {
-	t.mu.Lock()
-	t.interval = d
-	t.mu.Unlock()
-}
-
-// SetMatchHook installs a callback fired after each successfully-handled
-// match.
-func (t *Trigger) SetMatchHook(fn func(msg SlackMessage, reply string)) {
-	t.mu.Lock()
-	t.matchHook = fn
-	t.mu.Unlock()
-}
-
 // Start launches the loop.
 func (t *Trigger) Start(ctx context.Context) {
 	if t == nil {
