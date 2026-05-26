@@ -165,8 +165,8 @@ func TestGetGitStatus_FreshBypassesStaleCache(t *testing.T) {
 	runGit(t, repoDir, "add", ".")
 	runGit(t, repoDir, "commit", "-m", "commit v2")
 
-	// The cached read should still report tracked.txt as modified — that's
-	// the stale-cache lie the user sees in the UI.
+	// Precondition: cache must still hold the pre-commit entry — confirms the
+	// stale-cache scenario the fresh path is supposed to bypass.
 	stale, err := wt.GetGitStatus(ctx, false)
 	if err != nil {
 		t.Fatalf("stale GetGitStatus failed: %v", err)
@@ -185,6 +185,18 @@ func TestGetGitStatus_FreshBypassesStaleCache(t *testing.T) {
 	}
 	if len(fresh.Modified) != 0 {
 		t.Errorf("fresh=true should produce empty Modified; got %v", fresh.Modified)
+	}
+
+	// Contract: a fresh read MUST NOT mutate the shared cache. The poll loop
+	// owns currentStatus; subscribe-time fresh reads short-circuit it without
+	// writing back, so already-subscribed observers still see the cached
+	// stream until the poll loop catches up.
+	afterFresh, err := wt.GetGitStatus(ctx, false)
+	if err != nil {
+		t.Fatalf("post-fresh GetGitStatus failed: %v", err)
+	}
+	if _, ok := afterFresh.Files["tracked.txt"]; !ok {
+		t.Errorf("fresh=true must not overwrite the cache; expected stale entry to remain, got Files=%v", mapKeys(afterFresh.Files))
 	}
 }
 

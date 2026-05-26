@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -1080,11 +1081,22 @@ func (s *Server) handleGitStatusMulti(c *gin.Context) {
 		subpaths = []string{""}
 	}
 	fresh := c.Query("fresh") == queryParamTrue
-	result := MultiRepoGitStatusResult{Success: true, Repos: make([]PerRepoGitStatus, 0, len(subpaths))}
-	for _, sub := range subpaths {
-		entry := s.collectStatusForRepo(c, sub, fresh)
-		result.Repos = append(result.Repos, entry)
+	// Fan out per-repo queries in parallel. Each repo's git work is independent
+	// and runs sub-100ms on small repos, but `fresh=true` skips the cache so a
+	// serial loop over N repos would scale linearly and risk blowing past the
+	// 2s subscribe-path timeout in tryGetLiveGitStatus. Parallelism keeps the
+	// wall-clock close to the slowest single repo regardless of count.
+	result := MultiRepoGitStatusResult{Success: true, Repos: make([]PerRepoGitStatus, len(subpaths))}
+	ctx := c.Request.Context()
+	var wg sync.WaitGroup
+	for i, sub := range subpaths {
+		wg.Add(1)
+		go func(i int, sub string) {
+			defer wg.Done()
+			result.Repos[i] = s.collectStatusForRepo(ctx, sub, fresh)
+		}(i, sub)
 	}
+	wg.Wait()
 	c.JSON(http.StatusOK, result)
 }
 
@@ -1094,7 +1106,7 @@ func (s *Server) handleGitStatusMulti(c *gin.Context) {
 // the cached snapshot. Failures land in Status.Error / Status.Success so the
 // caller can render partial results instead of erroring out the whole fan-out
 // when one repo is misconfigured.
-func (s *Server) collectStatusForRepo(c *gin.Context, sub string, fresh bool) PerRepoGitStatus {
+func (s *Server) collectStatusForRepo(ctx context.Context, sub string, fresh bool) PerRepoGitStatus {
 	wt, wtErr := s.procMgr.GetWorkspaceTrackerFor(sub)
 	if wtErr != nil {
 		return PerRepoGitStatus{
@@ -1108,7 +1120,7 @@ func (s *Server) collectStatusForRepo(c *gin.Context, sub string, fresh bool) Pe
 			Status:         GitStatusResult{Success: false, Error: "workspace tracker not available"},
 		}
 	}
-	status, err := wt.GetGitStatus(c.Request.Context(), fresh)
+	status, err := wt.GetGitStatus(ctx, fresh)
 	if err != nil {
 		return PerRepoGitStatus{
 			RepositoryName: sub,

@@ -584,6 +584,12 @@ func (c *Client) GetGitStatusMulti(ctx context.Context) (*MultiRepoGitStatusResu
 // cache bypassed — each repo re-runs `git status --porcelain` against the
 // worktree. Used on WS session subscribe so a new observer always sees a
 // validated snapshot rather than a possibly-stale cached one.
+//
+// The fresh path is read-only with respect to the cache: it returns the live
+// query but does not write the result back into the tracker's currentStatus.
+// That's intentional — the poll loop owns the cache, and writing here would
+// race with concurrent polls. Already-subscribed observers continue to see
+// the cached stream until the poll loop catches up.
 func (c *Client) GetGitStatusMultiFresh(ctx context.Context) (*MultiRepoGitStatusResult, error) {
 	return c.getGitStatusMulti(ctx, true)
 }
