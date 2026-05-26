@@ -818,6 +818,11 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 	// a session that's actually idle — and nothing would drain it because no
 	// future agent.ready is pending. Flip to WAITING_FOR_INPUT when activeTurns
 	// confirms no in-flight turn.
+	//
+	// This must run before the len(step.Events.OnEnter)==0 early-return below.
+	// A stale-RUNNING session on a no-OnEnter step should still transition to
+	// WAITING_FOR_INPUT and drain its queue; without the pre-flip it would
+	// early-return unchanged, leaving session.State==RUNNING with no drain path.
 	s.flipStaleRunningToWaiting(ctx, taskID, session, isPassthrough)
 
 	hasPlanMode := s.resolveStepPlanMode(ctx, session, step, isPassthrough)
@@ -1502,6 +1507,12 @@ func (s *Service) flipStaleRunningToWaiting(ctx context.Context, taskID string, 
 	if isPassthrough {
 		return false
 	}
+	// Guards against a concurrent goroutine running resetAgentContext for the
+	// same session — not the sequential reset_agent_context OnEnter action that
+	// may run later in processOnEnter after this function returns. If both
+	// reset_agent_context and auto_start_agent appear in OnEnter, the flip here
+	// is still correct: resetAgentContext runs after this returns, then
+	// markIdleAfterReset sees WAITING_FOR_INPUT and no-ops (idempotent).
 	if s.isSessionResetInProgress(session.ID) {
 		return false
 	}

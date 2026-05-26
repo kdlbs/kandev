@@ -428,6 +428,29 @@ func TestHandleTaskMovedWithSession(t *testing.T) {
 		}
 	})
 
+	t.Run("flipStaleRunningToWaiting flips STARTING session with no active turn", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		session.State = models.TaskSessionStateStarting
+		_ = repo.UpdateTaskSession(ctx, session)
+
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		// No activeTurns entry — STARTING with no registered turn should flip.
+		flipped := svc.flipStaleRunningToWaiting(ctx, "t1", session, false)
+		if !flipped {
+			t.Fatal("expected STARTING session with no active turn to be flipped to WAITING_FOR_INPUT")
+		}
+		if session.State != models.TaskSessionStateWaitingForInput {
+			t.Errorf("in-memory state: want WAITING_FOR_INPUT, got %q", session.State)
+		}
+		updated, _ := repo.GetTaskSession(ctx, "s1")
+		if updated.State != models.TaskSessionStateWaitingForInput {
+			t.Errorf("DB state: want WAITING_FOR_INPUT, got %q", updated.State)
+		}
+	})
+
 	t.Run("flipStaleRunningToWaiting no-ops for passthrough sessions", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")
