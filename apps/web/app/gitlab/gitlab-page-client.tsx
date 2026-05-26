@@ -142,7 +142,7 @@ function useGitLabPageState() {
   } = useSavedPresets();
 
   const presets = selection.kind === "mr" ? MR_PRESETS : ISSUE_PRESETS;
-  const search = useGitLabSearch<MR | Issue>(
+  const search = useGitLabSearch(
     selection.kind,
     presets,
     selection.source === "preset" ? selection.id : "",
@@ -172,9 +172,11 @@ function useGitLabPageState() {
     [savedPresets, setQueryImmediate],
   );
 
-  const canSaveCurrent = customQuery.trim().length > 0 || projectFilter.length > 0;
+  // Use committedQuery (not the unflushed draft) so the saved preset always
+  // matches what is currently displayed in the list.
+  const canSaveCurrent = committedQuery.trim().length > 0 || projectFilter.length > 0;
   const suggestedLabel =
-    customQuery.trim() || (projectFilter ? `In ${projectFilter}` : "Saved query");
+    committedQuery.trim() || (projectFilter ? `In ${projectFilter}` : "Saved query");
   const onOpenSaveDialog = () => {
     if (canSaveCurrent) setSaveDialogOpen(true);
   };
@@ -182,7 +184,7 @@ function useGitLabPageState() {
     const created = saveSavedPreset({
       kind: selection.kind,
       label,
-      customQuery,
+      customQuery: committedQuery,
       projectFilter,
     });
     setSelection({ kind: selection.kind, source: "saved", id: created.id });
@@ -275,14 +277,6 @@ function useGitLabStatusFetch() {
   const [status, setStatus] = useState<GitLabStatus | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const refresh = useCallback(() => {
-    setLoading(true);
-    fetchGitLabStatus({ cache: "no-store" })
-      .then(setStatus)
-      .catch(() => setStatus(null))
-      .finally(() => setLoading(false));
-  }, []);
-
   useEffect(() => {
     let cancelled = false;
     fetchGitLabStatus({ cache: "no-store" })
@@ -300,7 +294,7 @@ function useGitLabStatusFetch() {
     };
   }, []);
 
-  return { status, loading, refresh };
+  return { status, loading };
 }
 
 export function GitLabPageClient(_props: { workspaceId?: string } = {}) {
@@ -314,14 +308,18 @@ export function GitLabPageClient(_props: { workspaceId?: string } = {}) {
   const host = status?.host ?? "https://gitlab.com";
 
   const onOpenMobileSidebar = useCallback(() => setMobileSidebarOpen(true), []);
-  const onMobileSidebarSelect = (s: Parameters<typeof state.onSelect>[0]) => {
-    state.onSelect(s);
+  const { onSelect, onOpenSaveDialog } = state;
+  const onMobileSidebarSelect = useCallback(
+    (s: Parameters<typeof onSelect>[0]) => {
+      onSelect(s);
+      setMobileSidebarOpen(false);
+    },
+    [onSelect],
+  );
+  const onMobileSaveCurrent = useCallback(() => {
     setMobileSidebarOpen(false);
-  };
-  const onMobileSaveCurrent = () => {
-    setMobileSidebarOpen(false);
-    state.onOpenSaveDialog();
-  };
+    onOpenSaveDialog();
+  }, [onOpenSaveDialog]);
 
   return (
     <div className="h-screen w-full flex flex-col bg-background">
@@ -361,7 +359,7 @@ export function GitLabPageClient(_props: { workspaceId?: string } = {}) {
         open={state.saveDialogOpen}
         onOpenChange={state.setSaveDialogOpen}
         kind={state.selection.kind}
-        customQuery={state.customQuery}
+        customQuery={state.committedQuery}
         projectFilter={state.projectFilter}
         suggestedLabel={state.suggestedLabel}
         onSave={state.onConfirmSave}

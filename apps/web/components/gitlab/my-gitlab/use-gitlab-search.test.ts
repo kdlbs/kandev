@@ -126,7 +126,7 @@ describe("useGitLabSearch — fetch wiring", () => {
 
   it("forwards preset filter to MR API", async () => {
     searchUserMRsMock.mockResolvedValue(EMPTY_PAGE);
-    renderHook(() => useGitLabSearch<MR>("mr", PRESETS, PRESET_REVIEW, ""));
+    renderHook(() => useGitLabSearch("mr", PRESETS, PRESET_REVIEW, ""));
     await waitFor(() => expect(searchUserMRsMock).toHaveBeenCalled());
     const args = searchUserMRsMock.mock.calls[0][0] as Record<string, unknown>;
     expect(args.filter).toBe(PRESET_REVIEW);
@@ -136,7 +136,7 @@ describe("useGitLabSearch — fetch wiring", () => {
 
   it("forwards custom query and drops preset filter", async () => {
     searchUserMRsMock.mockResolvedValue(EMPTY_PAGE);
-    renderHook(() => useGitLabSearch<MR>("mr", PRESETS, PRESET_REVIEW, CUSTOM_QUERY));
+    renderHook(() => useGitLabSearch("mr", PRESETS, PRESET_REVIEW, CUSTOM_QUERY));
     await waitFor(() => expect(searchUserMRsMock).toHaveBeenCalled());
     const args = searchUserMRsMock.mock.calls[0][0] as Record<string, unknown>;
     expect(args.filter).toBe("");
@@ -151,9 +151,7 @@ describe("useGitLabSearch — fetch wiring", () => {
       page: 1,
       per_page: 25,
     });
-    const { result } = renderHook(() =>
-      useGitLabSearch<Issue>("issue", PRESETS, PRESET_ASSIGNED, ""),
-    );
+    const { result } = renderHook(() => useGitLabSearch("issue", PRESETS, PRESET_ASSIGNED, ""));
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.items).toEqual([issue]);
     expect(searchUserMRsMock).not.toHaveBeenCalled();
@@ -166,7 +164,7 @@ describe("useGitLabSearch — state", () => {
   it("populates items and total on success", async () => {
     const mr = fakeMR();
     searchUserMRsMock.mockResolvedValue({ mrs: [mr], total_count: 1, page: 1, per_page: 25 });
-    const { result } = renderHook(() => useGitLabSearch<MR>("mr", PRESETS, PRESET_ASSIGNED, ""));
+    const { result } = renderHook(() => useGitLabSearch("mr", PRESETS, PRESET_ASSIGNED, ""));
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.items).toEqual([mr]);
     expect(result.current.total).toBe(1);
@@ -175,7 +173,7 @@ describe("useGitLabSearch — state", () => {
 
   it("surfaces error message without items", async () => {
     searchUserMRsMock.mockRejectedValue(new Error("boom"));
-    const { result } = renderHook(() => useGitLabSearch<MR>("mr", PRESETS, PRESET_ASSIGNED, ""));
+    const { result } = renderHook(() => useGitLabSearch("mr", PRESETS, PRESET_ASSIGNED, ""));
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.error).toBe("boom");
     expect(result.current.items).toEqual([]);
@@ -184,13 +182,16 @@ describe("useGitLabSearch — state", () => {
   it("filters items by project_path client-side", async () => {
     const a = fakeMR({ project_path: "acme/api" });
     const b = fakeMR({ project_path: "acme/web" });
-    searchUserMRsMock.mockResolvedValue({ mrs: [a, b], total_count: 2, page: 1, per_page: 25 });
+    searchUserMRsMock.mockResolvedValue({ mrs: [a, b], total_count: 99, page: 1, per_page: 25 });
     const { result } = renderHook(() =>
-      useGitLabSearch<MR>("mr", PRESETS, PRESET_ASSIGNED, "", "acme/web"),
+      useGitLabSearch("mr", PRESETS, PRESET_ASSIGNED, "", "acme/web"),
     );
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.items.map((m) => m.project_path)).toEqual(["acme/web"]);
     expect(result.current.rawItems.length).toBe(2);
+    // total reflects the filtered view (1), not the server's raw total (99).
+    expect(result.current.total).toBe(1);
+    expect(result.current.rawTotal).toBe(99);
   });
 });
 
@@ -200,7 +201,7 @@ describe("useGitLabSearch — pagination & sequencing", () => {
   it("resets page to 1 when preset changes", async () => {
     searchUserMRsMock.mockResolvedValue(EMPTY_PAGE);
     const { result, rerender } = renderHook(
-      ({ p }: { p: string }) => useGitLabSearch<MR>("mr", PRESETS, p, ""),
+      ({ p }: { p: string }) => useGitLabSearch("mr", PRESETS, p, ""),
       { initialProps: { p: PRESET_ASSIGNED } },
     );
     await waitFor(() => expect(result.current.loading).toBe(false));
@@ -226,7 +227,7 @@ describe("useGitLabSearch — pagination & sequencing", () => {
     });
 
     const { result, rerender } = renderHook(
-      ({ p }: { p: string }) => useGitLabSearch<MR>("mr", PRESETS, p, ""),
+      ({ p }: { p: string }) => useGitLabSearch("mr", PRESETS, p, ""),
       { initialProps: { p: PRESET_ASSIGNED } },
     );
     rerender({ p: PRESET_REVIEW });

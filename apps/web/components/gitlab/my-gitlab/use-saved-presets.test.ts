@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { readStorage, type SavedPreset } from "./use-saved-presets";
+import { act, renderHook } from "@testing-library/react";
+import {
+  __resetSnapshotForTests,
+  readStorage,
+  useSavedPresets,
+  type SavedPreset,
+} from "./use-saved-presets";
 
 const STORAGE_KEY = "kandev:gitlab-presets:v1";
 
@@ -84,5 +90,62 @@ describe("readStorage (gitlab)", () => {
     const issue: SavedPreset = { ...valid, kind: "issue" };
     set(JSON.stringify([issue]));
     expect(readStorage()).toEqual([issue]);
+  });
+});
+
+describe("useSavedPresets (gitlab)", () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+    __resetSnapshotForTests();
+  });
+
+  it("save appends a preset and assigns id + createdAt", () => {
+    const { result } = renderHook(() => useSavedPresets());
+    act(() => {
+      result.current.save({
+        kind: "mr",
+        label: "My MRs",
+        customQuery: "scope=created_by_me",
+        projectFilter: "",
+      });
+    });
+    expect(result.current.presets).toHaveLength(1);
+    const [p] = result.current.presets;
+    expect(p.label).toBe("My MRs");
+    expect(p.kind).toBe("mr");
+    expect(p.id).toMatch(/^g_/);
+    expect(p.createdAt).toBeTruthy();
+  });
+
+  it("remove deletes the preset", () => {
+    const { result } = renderHook(() => useSavedPresets());
+    let created!: SavedPreset;
+    act(() => {
+      created = result.current.save({
+        kind: "issue",
+        label: "Triage",
+        customQuery: "labels=bug",
+        projectFilter: "",
+      });
+    });
+    expect(result.current.presets).toHaveLength(1);
+    act(() => result.current.remove(created.id));
+    expect(result.current.presets).toHaveLength(0);
+  });
+
+  it("two hook instances stay in sync via the module-level store", () => {
+    const a = renderHook(() => useSavedPresets());
+    const b = renderHook(() => useSavedPresets());
+    act(() => {
+      a.result.current.save({
+        kind: "mr",
+        label: "Shared",
+        customQuery: "q",
+        projectFilter: "",
+      });
+    });
+    expect(a.result.current.presets).toHaveLength(1);
+    expect(b.result.current.presets).toHaveLength(1);
+    expect(b.result.current.presets[0].label).toBe("Shared");
   });
 });

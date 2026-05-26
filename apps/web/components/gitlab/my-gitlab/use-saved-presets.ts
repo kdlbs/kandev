@@ -68,6 +68,14 @@ function publish(next: SavedPreset[]) {
   for (const l of listeners) l();
 }
 
+// Test-only: drop the module-level snapshot so the next read goes through
+// readStorage again. Used by the hook tests so each `it` starts from a known
+// empty state independent of test execution order.
+export function __resetSnapshotForTests() {
+  snapshot = null;
+  for (const l of listeners) l();
+}
+
 export function useSavedPresets() {
   const presets = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 

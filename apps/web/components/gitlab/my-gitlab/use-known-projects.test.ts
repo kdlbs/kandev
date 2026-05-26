@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { __getSnapshotForTests, recordForKey } from "./use-known-projects";
+import { __getSnapshotForTests, recordForKey, resetKnownProjectsStore } from "./use-known-projects";
 
 describe("recordForKey (gitlab)", () => {
   beforeEach(() => {
-    recordForKey(`__reset__${Math.random().toString(36).slice(2)}`, []);
+    resetKnownProjectsStore();
   });
 
   it("accumulates unique projects under the same key", () => {
@@ -32,5 +32,12 @@ describe("recordForKey (gitlab)", () => {
   it("ignores empty strings", () => {
     recordForKey("k5", ["", "acme/api", ""]);
     expect(__getSnapshotForTests()).toEqual(["acme/api"]);
+  });
+
+  it("resetKnownProjectsStore wipes the snapshot", () => {
+    recordForKey("k6", ["acme/api"]);
+    expect(__getSnapshotForTests()).toEqual(["acme/api"]);
+    resetKnownProjectsStore();
+    expect(__getSnapshotForTests()).toEqual([]);
   });
 });

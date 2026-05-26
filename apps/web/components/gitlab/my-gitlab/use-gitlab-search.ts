@@ -6,11 +6,12 @@ import type { Issue, MR } from "@/lib/types/gitlab";
 import type { PresetOption } from "./presets";
 
 type SearchKind = "mr" | "issue";
+type Item = MR | Issue;
 
 export const SEARCH_PAGE_SIZE = 25;
 
-type SearchState<T> = {
-  items: T[];
+type SearchState = {
+  items: Item[];
   loading: boolean;
   error: string | null;
   lastFetchedAt: Date | null;
@@ -41,19 +42,19 @@ export function pickFilter(
 // side would require a project_id lookup. The dropdown is populated from the
 // page's own results (useKnownProjects), so what's offered is always what's
 // already shown — making this a UX narrowing more than a server query.
-function filterByProject<T extends { project_path?: string }>(items: T[], project: string): T[] {
+function filterByProject(items: Item[], project: string): Item[] {
   if (!project) return items;
   return items.filter((it) => it.project_path === project);
 }
 
-export function useGitLabSearch<T extends MR | Issue>(
+export function useGitLabSearch(
   kind: SearchKind,
   presets: PresetOption[],
   preset: string,
   customQuery: string,
   projectFilter: string = "",
 ) {
-  const [state, setState] = useState<SearchState<T>>({
+  const [state, setState] = useState<SearchState>({
     items: [],
     loading: false,
     error: null,
@@ -76,16 +77,16 @@ export function useGitLabSearch<T extends MR | Issue>(
         const response =
           kind === "mr" ? await searchUserMRs(params) : await searchUserIssues(params);
         if (seq !== requestSeq.current) return;
-        const items = (kind === "mr"
-          ? (response as { mrs: MR[] | null }).mrs
-          : (response as { issues: Issue[] | null }).issues) as unknown as T[];
-        const list = items ?? [];
+        const items: Item[] =
+          kind === "mr"
+            ? ((response as { mrs: MR[] | null }).mrs ?? [])
+            : ((response as { issues: Issue[] | null }).issues ?? []);
         setState({
-          items: list,
+          items,
           loading: false,
           error: null,
           lastFetchedAt: new Date(),
-          total: response?.total_count ?? list.length,
+          total: response?.total_count ?? items.length,
         });
       } catch (err) {
         if (seq !== requestSeq.current) return;
@@ -116,9 +117,15 @@ export function useGitLabSearch<T extends MR | Issue>(
   );
 
   const filtered = useMemo(
-    () => filterByProject(state.items as Array<MR | Issue>, projectFilter) as T[],
+    () => filterByProject(state.items, projectFilter),
     [state.items, projectFilter],
   );
+
+  // When projectFilter narrows results client-side, total and pagination
+  // belong to the *filtered* view — otherwise the toolbar would show e.g. "47"
+  // while only 3 rows render, and pagination would link to pages with zero
+  // matches. The raw server total stays available as rawTotal for debugging.
+  const displayedTotal = projectFilter ? filtered.length : state.total;
 
   return {
     items: filtered,
@@ -126,7 +133,8 @@ export function useGitLabSearch<T extends MR | Issue>(
     loading: state.loading,
     error: state.error,
     lastFetchedAt: state.lastFetchedAt,
-    total: state.total,
+    total: displayedTotal,
+    rawTotal: state.total,
     page,
     setPage,
     pageSize: SEARCH_PAGE_SIZE,
