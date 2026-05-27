@@ -28,6 +28,7 @@ type acpAgentSpec struct {
 	inferenceArgv   []string // InferenceConfig.Command
 	passthroughArgv []string // PassthroughCmd (zero-args allowed)
 	installViaNpm   bool     // InstallScript starts with "npm install -g"
+	installScript   string   // expected InstallScript() value (empty = unchecked)
 }
 
 var newACPAgentSpecs = []struct {
@@ -75,6 +76,7 @@ var newACPAgentSpecs = []struct {
 		inferenceArgv:   []string{"cursor-agent", "acp"},
 		passthroughArgv: []string{"cursor-agent"},
 		installViaNpm:   false,
+		installScript:   "curl https://cursor.com/install -fsS | bash",
 	}},
 	{func() Agent { return NewKimiACP() }, acpAgentSpec{
 		id: "kimi-acp", displayName: "Kimi", detectBinaries: []string{"kimi"},
@@ -179,6 +181,9 @@ func TestNewACPAgents_InstallScript(t *testing.T) {
 			}
 			if !tc.spec.installViaNpm && hasNpm {
 				t.Errorf("InstallScript() should NOT use npm for native-binary agent: %q", got)
+			}
+			if tc.spec.installScript != "" && got != tc.spec.installScript {
+				t.Errorf("InstallScript() = %q, want %q", got, tc.spec.installScript)
 			}
 			// The primary detection binary must be referenced somewhere
 			// actionable — either argv (native binaries) or InstallScript
