@@ -28,9 +28,11 @@ export function isProductionDb(dbPath: string): boolean {
  * or no backup was needed.
  *
  * The optional `homeDir` parameter is exposed for tests so they can redirect
- * the backup location without mocking os.homedir().
+ * the backup location without mocking os.homedir(). The optional `now`
+ * parameter lets tests pass an explicit timestamp so back-to-back calls in
+ * the same millisecond produce distinct filenames + mtimes without sleeping.
  */
-export function backupProductionDb(dbPath: string, homeDir?: string): string | null {
+export function backupProductionDb(dbPath: string, homeDir?: string, now?: Date): string | null {
   if (!fs.existsSync(dbPath)) {
     return null;
   }
@@ -44,12 +46,14 @@ export function backupProductionDb(dbPath: string, homeDir?: string): string | n
   const backupDir = path.join(dataDir, "backups");
   fs.mkdirSync(backupDir, { recursive: true });
 
-  const ts = new Date().toISOString().replace(/[:.]/g, "");
+  const stamp = now ?? new Date();
+  const ts = stamp.toISOString().replace(/[:.]/g, "");
   const name = `${BACKUP_PREFIX}${ts}${BACKUP_SUFFIX}`;
   const dest = path.join(backupDir, name);
 
   fs.copyFileSync(dbPath, dest);
-  fs.utimesSync(dest, new Date(), new Date());
+  // Stamp both atime + mtime so pruning (which sorts by mtime) is deterministic.
+  fs.utimesSync(dest, stamp, stamp);
 
   pruneBackups(backupDir, MAX_BACKUPS);
 

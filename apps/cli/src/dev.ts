@@ -35,10 +35,10 @@ export async function runDev({ repoRoot, backendPort, webPort }: DevOptions): Pr
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[kandev] WARNING: failed to back up production db — ${message}`);
-      console.error(
-        `[kandev] continuing without backup; press Ctrl-C if you want to stop and fix this`,
-      );
+      // Abort rather than continue: the backup exists precisely to protect the
+      // production db before dev mode touches it. Proceeding on failure would
+      // remove the safety guarantee that justified introducing this guard.
+      throw new Error(`failed to back up production db (${message}); aborting dev startup`);
     }
   }
 

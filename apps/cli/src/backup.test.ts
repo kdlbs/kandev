@@ -40,16 +40,13 @@ describe("backupProductionDb", () => {
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
     fs.writeFileSync(dbPath, "original-db-content");
 
-    // Create 6 backups, staggering mtimes so they have a clear order.
+    // Create 6 backups with explicit per-iteration timestamps so both the
+    // filename clock and mtime advance deterministically - no spin loop, no
+    // dependence on Date.now() resolution.
     for (let i = 0; i < 6; i++) {
-      const result = backupProductionDb(dbPath, tmpDir);
+      const stamp = new Date(1_700_000_000_000 + i * 1000);
+      const result = backupProductionDb(dbPath, tmpDir, stamp);
       expect(result).not.toBeNull();
-
-      // Small sleep to guarantee different mtimes (Node fs resolution is ms).
-      const now = Date.now();
-      while (Date.now() - now < 2) {
-        // spin
-      }
     }
 
     const backupDir = path.join(tmpDir, ".kandev", "data", "backups");
