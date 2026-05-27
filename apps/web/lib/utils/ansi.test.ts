@@ -32,4 +32,9 @@ describe("stripAnsi", () => {
     const input = "\x1b]0;my-shell\x07ready";
     expect(stripAnsi(input)).toBe("ready");
   });
+
+  it("strips CSI private-prefix sequences (hide cursor, bracketed paste)", () => {
+    expect(stripAnsi("before\x1b[?25lafter")).toBe("beforeafter");
+    expect(stripAnsi("\x1b[?2004hpaste\x1b[?2004l")).toBe("paste");
+  });
 });

@@ -577,7 +577,12 @@ func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *m
 		// 'prepared' so the row doesn't look stuck mid-launch. When the user
 		// later starts the agent (StartCreatedSession), Launch re-runs and
 		// rewrites the row with status='starting' via the usual path.
-		if err := e.repo.UpdateExecutorRunningStatus(ctx, sessionID, models.ExecutorRunningStatusPrepared); err != nil {
+		//
+		// Detach from the caller context so a client disconnect / WS timeout
+		// right after launch returns can't drop this write — that would leave
+		// the row stuck on "starting", which is the exact UX this fix closes.
+		statusCtx := context.WithoutCancel(ctx)
+		if err := e.repo.UpdateExecutorRunningStatus(statusCtx, sessionID, models.ExecutorRunningStatusPrepared); err != nil {
 			e.logger.Warn("failed to mark executors_running as prepared",
 				zap.String("session_id", sessionID),
 				zap.Error(err))
