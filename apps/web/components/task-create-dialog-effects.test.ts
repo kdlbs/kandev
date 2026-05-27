@@ -420,19 +420,26 @@ type BranchFake = {
   githubBranches?: Array<{ name: string; type: "local" | "remote"; remote?: string }>;
   useRemote?: boolean;
   setGitHubBranch?: ReturnType<typeof vi.fn>;
+  updateRemoteRepo?: ReturnType<typeof vi.fn>;
   githubPrHeadBranch?: string | null;
   /** Optional URL on the first remoteRepos row; tests don't need to vary this. */
   remoteRepoUrl?: string;
+  /** When provided, replaces the default [{ key: "remote-0", url, ... }] row list. */
+  remoteRepos?: Array<{ key: string; url: string; branch: string; source: "paste" | "picker" }>;
 };
 function makeBranchFs(overrides: BranchFake = {}): DialogFormState {
   const url = overrides.remoteRepoUrl ?? "github.com/owner/repo";
   const branches = overrides.githubBranches ?? [];
+  const remoteRepos = overrides.remoteRepos ?? [
+    { key: "remote-0", url, branch: "", source: "paste" as const },
+  ];
   return {
     githubBranch: overrides.githubBranch ?? "",
     useRemote: overrides.useRemote ?? true,
     setGitHubBranch: overrides.setGitHubBranch ?? vi.fn(),
+    updateRemoteRepo: overrides.updateRemoteRepo ?? vi.fn(),
     githubPrHeadBranch: overrides.githubPrHeadBranch ?? null,
-    remoteRepos: [{ key: "remote-0", url, branch: "", source: "paste" as const }],
+    remoteRepos,
     branchesByUrl: {
       branches: (u: string) => (u === url ? branches : []),
       loading: () => false,
@@ -501,6 +508,67 @@ describe("useBranchAutoSelectEffect", () => {
     });
     renderHook(() => useBranchAutoSelectEffect(fs));
     expect(fs.setGitHubBranch).not.toHaveBeenCalled();
+  });
+});
+
+const PR_HEAD = "feature/pr-branch";
+
+describe("useBranchAutoSelectEffect — mirror to remoteRepos[0].branch", () => {
+  it("mirrors the resolved PR head branch into remoteRepos[0].branch so the chip pill renders", () => {
+    // Bug fix: writing the PR head to the singleton githubBranch was enough
+    // for submit, but left the per-row branch empty so the chip's branch pill
+    // stayed disabled/empty even though the task was submitted with the right
+    // branch. Verify both writes happen on the same effect tick.
+    const updateRemoteRepo = vi.fn();
+    const fs = makeBranchFs({
+      remoteRepoUrl: "https://github.com/owner/repo/pull/42",
+      githubBranches: [{ name: "main", type: "remote" }],
+      githubPrHeadBranch: PR_HEAD,
+      updateRemoteRepo,
+    });
+    renderHook(() => useBranchAutoSelectEffect(fs));
+    expect(fs.setGitHubBranch).toHaveBeenCalledWith(PR_HEAD);
+    expect(updateRemoteRepo).toHaveBeenCalledWith("remote-0", { branch: PR_HEAD });
+  });
+
+  it("mirrors the fallback 'main' selection into remoteRepos[0].branch when there is no PR head", () => {
+    const updateRemoteRepo = vi.fn();
+    const fs = makeBranchFs({
+      githubBranches: [
+        { name: "feature/y", type: "remote" },
+        { name: "main", type: "remote" },
+      ],
+      updateRemoteRepo,
+    });
+    renderHook(() => useBranchAutoSelectEffect(fs));
+    expect(fs.setGitHubBranch).toHaveBeenCalledWith("main");
+    expect(updateRemoteRepo).toHaveBeenCalledWith("remote-0", { branch: "main" });
+  });
+
+  it("does NOT call updateRemoteRepo when the first row's URL is empty", () => {
+    // Guard: only mirror once the user has a real URL on row 0 — otherwise
+    // we'd be writing a phantom branch to an empty chip slot.
+    const updateRemoteRepo = vi.fn();
+    const fs = makeBranchFs({
+      remoteRepos: [{ key: "remote-0", url: "", branch: "", source: "paste" }],
+      githubPrHeadBranch: PR_HEAD,
+      updateRemoteRepo,
+    });
+    renderHook(() => useBranchAutoSelectEffect(fs));
+    // The singleton still gets set (legacy submit path keeps reading it),
+    // but the per-row write is skipped because the row has no URL yet.
+    expect(updateRemoteRepo).not.toHaveBeenCalled();
+  });
+
+  it("does NOT call updateRemoteRepo when remoteRepos is empty", () => {
+    const updateRemoteRepo = vi.fn();
+    const fs = makeBranchFs({
+      remoteRepos: [],
+      githubPrHeadBranch: PR_HEAD,
+      updateRemoteRepo,
+    });
+    renderHook(() => useBranchAutoSelectEffect(fs));
+    expect(updateRemoteRepo).not.toHaveBeenCalled();
   });
 });
 

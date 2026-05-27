@@ -292,11 +292,23 @@ export function useDefaultSelectionsEffect(
  * first remote-repo row's URL (legacy single-URL flow).
  */
 export function useBranchAutoSelectEffect(fs: DialogFormState) {
-  const { githubBranch, useRemote, setGitHubBranch, githubPrHeadBranch } = fs;
+  const { githubBranch, useRemote, setGitHubBranch, githubPrHeadBranch, updateRemoteRepo } = fs;
   const firstUrl = fs.remoteRepos[0]?.url ?? "";
+  const firstRowKey = fs.remoteRepos[0]?.key ?? "";
   const githubBranches = fs.branchesByUrl.branches(firstUrl);
   useEffect(() => {
     if (!useRemote || githubBranch) return;
+    // Helper: write the resolved branch to both the singleton (legacy submit
+    // path) and the first remote row (so the chip's branch pill renders).
+    // Only mirror when the row exists, has a non-empty URL, and we have an
+    // actual branch to write — never overwrite a user-typed selection with "".
+    const apply = (branch: string) => {
+      if (!branch) return;
+      setGitHubBranch(branch);
+      if (firstRowKey && firstUrl) {
+        updateRemoteRepo(firstRowKey, { branch });
+      }
+    };
     // PR head wins regardless of whether it appears in the base repo's branch
     // list. Fork PRs (head lives only on the contributor's fork) won't match
     // anything in githubBranches, but we still want the pill to surface the
@@ -304,7 +316,7 @@ export function useBranchAutoSelectEffect(fs: DialogFormState) {
     // on the backend, and falling through to "main" would visually contradict
     // the URL the user just pasted.
     if (githubPrHeadBranch) {
-      setGitHubBranch(githubPrHeadBranch);
+      apply(githubPrHeadBranch);
       return;
     }
     if (githubBranches.length === 0) return;
@@ -314,8 +326,17 @@ export function useBranchAutoSelectEffect(fs: DialogFormState) {
       githubBranches.find((b) => b.name === "main") ??
       githubBranches.find((b) => b.name === "master") ??
       githubBranches[0];
-    if (preferred) setGitHubBranch(preferred.name);
-  }, [githubBranch, githubBranches, useRemote, setGitHubBranch, githubPrHeadBranch]);
+    if (preferred) apply(preferred.name);
+  }, [
+    githubBranch,
+    githubBranches,
+    useRemote,
+    setGitHubBranch,
+    githubPrHeadBranch,
+    updateRemoteRepo,
+    firstRowKey,
+    firstUrl,
+  ]);
 }
 
 /** Parse a GitHub URL to extract owner, repo, and optional PR number. Returns null if invalid. */

@@ -309,13 +309,14 @@ test.describe("Task creation from GitHub URL", () => {
     // Switch to Remote tab and paste the PR URL.
     await openRemoteAndPasteURL(testPage, "https://github.com/test-owner/test-repo/pull/42");
 
-    // The submit button becoming enabled is the proxy for "PR URL parsed
-    // + PR-info fetch resolved + branches available". The per-chip branch
-    // pill does not yet propagate the PR head branch into row.branch (see
-    // task-create-dialog-effects.useGitHubUrlAutoSelectBranchEffect), so we
-    // can't assert on the chip pill's text directly. The submit payload
-    // still carries the PR head branch via fs.githubPrHeadBranch — that's
-    // what create-task-from-pr-list.spec.ts covers end-to-end.
+    // The PR head branch should be auto-selected and rendered inside the
+    // per-chip branch pill. `useBranchAutoSelectEffect` mirrors the resolved
+    // PR head into `remoteRepos[0].branch` so the pill's trigger label
+    // reflects the active branch (not just the singleton submit payload).
+    await expect(
+      testPage.locator('[data-testid="remote-branch-chip-trigger"]').first(),
+    ).toContainText("feature/pr-branch", { timeout: 10_000 });
+
     await testPage.getByTestId("task-title-input").fill("PR auto-select test");
     await testPage.getByTestId("task-description-input").fill("test");
     const startBtn = testPage.getByTestId("submit-start-agent");
@@ -756,8 +757,12 @@ test.describe("Task creation from GitHub URL", () => {
     await expect(dialog).toBeVisible();
 
     await openRemoteAndPasteURL(testPage, "https://github.com/shared-owner/shared-repo/pull/50");
-    // PR-info fetch resolves asynchronously; downstream the submit-button
-    // becomes enabled once branches + agent profile are ready.
+    // PR-info fetch resolves asynchronously; the chip's branch pill renders
+    // the resolved PR head once `useBranchAutoSelectEffect` mirrors it into
+    // `remoteRepos[0].branch`, which is also the trigger that enables submit.
+    await expect(
+      testPage.locator('[data-testid="remote-branch-chip-trigger"]').first(),
+    ).toContainText("feature/shared-pr", { timeout: 10_000 });
 
     await testPage.getByTestId("task-title-input").fill("Shared PR Task A");
     await testPage.getByTestId("task-description-input").fill("/e2e:simple-message");
@@ -793,8 +798,12 @@ test.describe("Task creation from GitHub URL", () => {
     await expect(dialog).toBeVisible();
 
     await openRemoteAndPasteURL(testPage, "https://github.com/shared-owner/shared-repo/pull/50");
-    // PR-info fetch resolves asynchronously; downstream the submit-button
-    // becomes enabled once branches + agent profile are ready.
+    // PR-info fetch resolves asynchronously; the chip's branch pill renders
+    // the resolved PR head once `useBranchAutoSelectEffect` mirrors it into
+    // `remoteRepos[0].branch`, which is also the trigger that enables submit.
+    await expect(
+      testPage.locator('[data-testid="remote-branch-chip-trigger"]').first(),
+    ).toContainText("feature/shared-pr", { timeout: 10_000 });
 
     await testPage.getByTestId("task-title-input").fill("Shared PR Task B");
     await testPage.getByTestId("task-description-input").fill("/e2e:simple-message");
