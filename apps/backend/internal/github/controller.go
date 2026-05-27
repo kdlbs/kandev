@@ -64,6 +64,7 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.POST("/cleanup/issue-tasks", c.httpCleanupIssueTasks)
 
 	api.GET("/orgs", c.httpListUserOrgs)
+	api.GET("/repos", c.httpListAccessibleRepos)
 	api.GET("/repos/search", c.httpSearchRepos)
 	api.GET("/repos/:owner/:repo/branches", c.httpListRepoBranches)
 	api.GET("/repos/:owner/:repo/merge-methods", c.httpGetRepoMergeMethods)
@@ -482,6 +483,32 @@ func (c *Controller) httpListUserOrgs(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"orgs": orgs})
+}
+
+// httpListAccessibleRepos returns the merged list of repos the authenticated
+// user can access (own repos + each org they belong to). Accepts:
+//   - q: optional GitHub search qualifier appended to the per-source query
+//   - limit: 1..100, defaults to 50 when missing / non-positive
+//
+// Returns 503 with `{"code":"github_unavailable"}` when GitHub is not
+// configured / not authenticated (mirrors the existing list-repo-branches
+// 503 behaviour but with the dedicated code the picker UI keys off).
+func (c *Controller) httpListAccessibleRepos(ctx *gin.Context) {
+	query := ctx.Query("q")
+	limit, _ := strconv.Atoi(ctx.Query("limit"))
+	repos, err := c.service.ListAccessibleRepos(ctx.Request.Context(), query, limit)
+	if err != nil {
+		if errors.Is(err, ErrNoClient) {
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{"code": "github_unavailable"})
+			return
+		}
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if repos == nil {
+		repos = []GitHubRepo{}
+	}
+	ctx.JSON(http.StatusOK, gin.H{"repos": repos})
 }
 
 func (c *Controller) httpSearchRepos(ctx *gin.Context) {

@@ -395,8 +395,9 @@ func parseGHSearchRepos(data string) ([]GitHubRepo, error) {
 		Owner    struct {
 			Login string `json:"login"`
 		} `json:"owner"`
-		Name    string `json:"name"`
-		Private bool   `json:"private"`
+		Name     string    `json:"name"`
+		Private  bool      `json:"private"`
+		PushedAt time.Time `json:"pushed_at"`
 	}
 	if err := json.Unmarshal([]byte(data), &items); err != nil {
 		return nil, fmt.Errorf("parse search repos: %w", err)
@@ -408,6 +409,7 @@ func parseGHSearchRepos(data string) ([]GitHubRepo, error) {
 			Owner:    item.Owner.Login,
 			Name:     item.Name,
 			Private:  item.Private,
+			PushedAt: item.PushedAt,
 		}
 	}
 	return repos, nil

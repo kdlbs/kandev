@@ -284,11 +284,14 @@ type GitHubOrg struct {
 }
 
 // GitHubRepo represents a GitHub repository (lightweight, for autocomplete).
+// PushedAt is the timestamp of the latest push, used to sort the
+// list-accessible-repos result (most-recently-active first).
 type GitHubRepo struct {
-	FullName string `json:"full_name"`
-	Owner    string `json:"owner"`
-	Name     string `json:"name"`
-	Private  bool   `json:"private"`
+	FullName string    `json:"full_name"`
+	Owner    string    `json:"owner"`
+	Name     string    `json:"name"`
+	Private  bool      `json:"private"`
+	PushedAt time.Time `json:"pushed_at,omitempty"`
 }
 
 // RepoBranch represents a branch in a GitHub repository.

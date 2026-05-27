@@ -51,6 +51,16 @@ func newMergeMethodsCache() *ttlCache {
 	return c
 }
 
+// newAccessibleReposCache backs the list-accessible-repos endpoint and the
+// org-list lookup it composes from. 60s is enough to make repeated picker
+// opens / typeahead bursts cheap without staling out "I just got added to a
+// new org" too long.
+func newAccessibleReposCache() *ttlCache {
+	c := newTTLCache()
+	c.ttl = 60 * time.Second
+	return c
+}
+
 func (c *ttlCache) get(key string) (any, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

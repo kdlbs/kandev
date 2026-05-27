@@ -297,28 +297,10 @@ func (c *PATClient) SearchOrgRepos(ctx context.Context, org, query string, limit
 		q += " " + query
 	}
 	limit = clampRepoSearchLimit(limit)
-	var result struct {
-		Items []struct {
-			FullName string `json:"full_name"`
-			Owner    struct {
-				Login string `json:"login"`
-			} `json:"owner"`
-			Name    string `json:"name"`
-			Private bool   `json:"private"`
-		} `json:"items"`
-	}
 	endpoint := fmt.Sprintf("/search/repositories?q=%s&per_page=%d", url.QueryEscape(q), limit)
-	if err := c.get(ctx, endpoint, &result); err != nil {
+	repos, err := c.fetchRepoSearch(ctx, endpoint)
+	if err != nil {
 		return nil, fmt.Errorf("search org repos: %w", err)
-	}
-	repos := make([]GitHubRepo, len(result.Items))
-	for i, item := range result.Items {
-		repos[i] = GitHubRepo{
-			FullName: item.FullName,
-			Owner:    item.Owner.Login,
-			Name:     item.Name,
-			Private:  item.Private,
-		}
 	}
 	return repos, nil
 }
@@ -333,19 +315,32 @@ func (c *PATClient) ListUserRepos(ctx context.Context, query string, limit int) 
 		q += " " + query
 	}
 	limit = clampRepoSearchLimit(limit)
+	endpoint := fmt.Sprintf("/search/repositories?q=%s&per_page=%d", url.QueryEscape(q), limit)
+	repos, err := c.fetchRepoSearch(ctx, endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("list user repos: %w", err)
+	}
+	return repos, nil
+}
+
+// fetchRepoSearch executes a /search/repositories request and decodes the
+// items into the lightweight GitHubRepo shape used for autocomplete and the
+// list-accessible-repos endpoint. PushedAt is captured so callers can sort
+// merged results by recency.
+func (c *PATClient) fetchRepoSearch(ctx context.Context, endpoint string) ([]GitHubRepo, error) {
 	var result struct {
 		Items []struct {
 			FullName string `json:"full_name"`
 			Owner    struct {
 				Login string `json:"login"`
 			} `json:"owner"`
-			Name    string `json:"name"`
-			Private bool   `json:"private"`
+			Name     string    `json:"name"`
+			Private  bool      `json:"private"`
+			PushedAt time.Time `json:"pushed_at"`
 		} `json:"items"`
 	}
-	endpoint := fmt.Sprintf("/search/repositories?q=%s&per_page=%d", url.QueryEscape(q), limit)
 	if err := c.get(ctx, endpoint, &result); err != nil {
-		return nil, fmt.Errorf("list user repos: %w", err)
+		return nil, err
 	}
 	repos := make([]GitHubRepo, len(result.Items))
 	for i, item := range result.Items {
@@ -354,6 +349,7 @@ func (c *PATClient) ListUserRepos(ctx context.Context, query string, limit int) 
 			Owner:    item.Owner.Login,
 			Name:     item.Name,
 			Private:  item.Private,
+			PushedAt: item.PushedAt,
 		}
 	}
 	return repos, nil

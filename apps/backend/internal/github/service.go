@@ -70,23 +70,25 @@ type SecretManager interface {
 
 // Service coordinates GitHub integration operations.
 type Service struct {
-	mu                 sync.Mutex
-	client             Client
-	authMethod         string
-	secrets            SecretProvider
-	secretManager      SecretManager
-	store              *Store
-	eventBus           bus.EventBus
-	logger             *logger.Logger
-	taskDeleter        TaskDeleter
-	taskSessionChecker TaskSessionChecker
-	syncGroup          singleflight.Group
-	taskEventSubs      []bus.Subscription
-	searchCache        *ttlCache
-	prStatusCache      *ttlCache
-	mergeMethodsCache  *ttlCache
-	protectionCache    *branchProtectionCache
-	rateTracker        *RateTracker
+	mu                   sync.Mutex
+	client               Client
+	authMethod           string
+	secrets              SecretProvider
+	secretManager        SecretManager
+	store                *Store
+	eventBus             bus.EventBus
+	logger               *logger.Logger
+	taskDeleter          TaskDeleter
+	taskSessionChecker   TaskSessionChecker
+	syncGroup            singleflight.Group
+	taskEventSubs        []bus.Subscription
+	searchCache          *ttlCache
+	prStatusCache        *ttlCache
+	mergeMethodsCache    *ttlCache
+	userOrgsCache        *ttlCache
+	accessibleReposCache *ttlCache
+	protectionCache      *branchProtectionCache
+	rateTracker          *RateTracker
 
 	// cleanupFailureMu guards cleanupFailureCounts; the cleanup loop is the
 	// only writer but the global sweep + per-watch sweep can run concurrently
@@ -107,6 +109,8 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 		searchCache:          newTTLCache(),
 		prStatusCache:        newTTLCache(),
 		mergeMethodsCache:    newMergeMethodsCache(),
+		userOrgsCache:        newAccessibleReposCache(),
+		accessibleReposCache: newAccessibleReposCache(),
 		protectionCache:      newBranchProtectionCache(),
 		rateTracker:          NewRateTracker(eventBus, log),
 		cleanupFailureCounts: make(map[string]int),

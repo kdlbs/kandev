@@ -468,6 +468,92 @@ func TestHttpSubmitReview_SelfApproveReturns422(t *testing.T) {
 	}
 }
 
+// listAccessibleReposClient is a per-test client tuned for the
+// /api/v1/github/repos handler tests. Kept separate from the larger
+// stubClient so the existing PR/merge tests above keep their minimal shape.
+type listAccessibleReposClient struct {
+	stubClient
+	orgs      []GitHubOrg
+	userRepos []GitHubRepo
+	orgRepos  map[string][]GitHubRepo
+}
+
+func (c *listAccessibleReposClient) ListUserOrgs(context.Context) ([]GitHubOrg, error) {
+	return c.orgs, nil
+}
+
+func (c *listAccessibleReposClient) ListUserRepos(context.Context, string, int) ([]GitHubRepo, error) {
+	return c.userRepos, nil
+}
+
+func (c *listAccessibleReposClient) SearchOrgRepos(_ context.Context, org string, _ string, _ int) ([]GitHubRepo, error) {
+	return c.orgRepos[org], nil
+}
+
+func TestHandleListAccessibleRepos_OK(t *testing.T) {
+	sc := &listAccessibleReposClient{
+		orgs: []GitHubOrg{{Login: "acme"}},
+		userRepos: []GitHubRepo{
+			{FullName: "alice/personal", Owner: "alice", Name: "personal", PushedAt: time.Unix(200, 0)},
+		},
+		orgRepos: map[string][]GitHubRepo{
+			"acme": {{FullName: "acme/widget", Owner: "acme", Name: "widget", PushedAt: time.Unix(100, 0)}},
+		},
+	}
+	router, _ := setupControllerTest(sc)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/repos?q=&limit=10", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Repos []GitHubRepo `json:"repos"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Repos) != 2 {
+		t.Fatalf("got %d repos, want 2", len(body.Repos))
+	}
+	// Sorted by pushed_at desc → personal (200) first, widget (100) second.
+	if body.Repos[0].FullName != "alice/personal" {
+		t.Errorf("first repo = %q, want alice/personal", body.Repos[0].FullName)
+	}
+	if body.Repos[1].FullName != "acme/widget" {
+		t.Errorf("second repo = %q, want acme/widget", body.Repos[1].FullName)
+	}
+}
+
+func TestHandleListAccessibleRepos_503_WhenUnavailable(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log := newControllerTestLogger()
+	// nil client triggers ErrNoClient via Service.ListAccessibleRepos.
+	svc := NewService(nil, "none", nil, nil, nil, log)
+	ctrl := NewController(svc, log)
+	router := gin.New()
+	ctrl.RegisterHTTPRoutes(router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/repos", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Code != "github_unavailable" {
+		t.Errorf("code = %q, want github_unavailable", body.Code)
+	}
+}
+
 func TestHttpMergePR_Conflict(t *testing.T) {
 	sc := &stubClient{
 		mergePRFn: func(context.Context, string, string, int, string) error {
