@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { TaskRemoteRepoRow, TaskRepoRow } from "@/components/task-create-dialog-types";
 
 /**
@@ -69,4 +69,24 @@ export function useRemoteReposState() {
     updateRemoteRepo,
     newRemoteRepoKey: newKey,
   };
+}
+
+/**
+ * Mirrors `useRepositoryAutoSelectEffect` for the remote-repo list: when the
+ * user flips Remote mode on and the list is empty, seed a single empty paste
+ * row so the URL input has somewhere to land. The list is NOT cleared on
+ * Remote → off (toggle-back is non-destructive).
+ *
+ * Shared between the create-task dialog and the New Subtask form so both
+ * surfaces get the same auto-seed behavior on Remote toggle.
+ */
+export function useRemoteReposSeedEffect(
+  useRemote: boolean,
+  rows: TaskRemoteRepoRow[],
+  setRemoteRepos: React.Dispatch<React.SetStateAction<TaskRemoteRepoRow[]>>,
+) {
+  useEffect(() => {
+    if (!useRemote || rows.length > 0) return;
+    setRemoteRepos([{ key: "remote-0", url: "", branch: "", source: "paste" }]);
+  }, [useRemote, rows.length, setRemoteRepos]);
 }

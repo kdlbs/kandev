@@ -18,6 +18,7 @@ import type {
   TaskRepoRow,
 } from "@/components/task-create-dialog-types";
 import {
+  useRemoteReposSeedEffect,
   useRemoteReposState,
   useRepositoriesState,
 } from "@/components/task-create-dialog-repositories-state";
@@ -431,23 +432,6 @@ export function useDialogFormState(
     branchesByUrl,
     clearDraft,
   };
-}
-
-/**
- * Mirrors `useRepositoryAutoSelectEffect` for the remote-repo list: when the
- * user flips Remote mode on and the list is empty, seed a single empty paste
- * row so the URL input has somewhere to land. The list is NOT cleared on
- * Remote → off (toggle-back is non-destructive).
- */
-function useRemoteReposSeedEffect(
-  useRemote: boolean,
-  rows: TaskRemoteRepoRow[],
-  setRemoteRepos: React.Dispatch<React.SetStateAction<TaskRemoteRepoRow[]>>,
-) {
-  useEffect(() => {
-    if (!useRemote || rows.length > 0) return;
-    setRemoteRepos([{ key: "remote-0", url: "", branch: "", source: "paste" }]);
-  }, [useRemote, rows.length, setRemoteRepos]);
 }
 
 export type { DialogFormState } from "@/components/task-create-dialog-types";

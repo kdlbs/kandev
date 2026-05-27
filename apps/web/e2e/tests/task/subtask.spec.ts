@@ -657,14 +657,12 @@ test.describe("Subtask dialog feature parity", () => {
     const titleInput = testPage.getByTestId("subtask-title-input");
     await expect(titleInput).toBeVisible({ timeout: 5_000 });
 
-    // Switch to Remote tab. The subtask form-state doesn't auto-seed the
-    // first chip row on the initial toggle (unlike the create-task dialog
-    // which runs useRemoteReposSeedEffect), so we click the "+ Add" button
-    // explicitly before reaching for the chip trigger.
+    // Switch to Remote tab. The subtask form-state runs
+    // useRemoteReposSeedEffect (shared with the create-task dialog), which
+    // auto-seeds an empty chip row on the initial toggle.
     const remoteModeBtn = testPage.getByTestId("source-mode-remote");
     await expect(remoteModeBtn).toBeVisible({ timeout: 5_000 });
     await remoteModeBtn.click();
-    await testPage.getByTestId("remote-add-row").click();
     const chipTrigger = testPage.getByTestId("remote-repo-chip-trigger").first();
     await expect(chipTrigger).toBeVisible({ timeout: 5_000 });
     await chipTrigger.click();

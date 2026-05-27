@@ -8,6 +8,7 @@ import type {
   TaskFormInputsHandle,
 } from "@/components/task-create-dialog-types";
 import {
+  useRemoteReposSeedEffect,
   useRemoteReposState,
   useRepositoriesState,
 } from "@/components/task-create-dialog-repositories-state";
@@ -63,6 +64,11 @@ export function useSubtaskFormState(): DialogFormState {
   const [discoverReposLoading, setDiscoverReposLoading] = useState(false);
   const [discoverReposLoaded, setDiscoverReposLoaded] = useState(false);
   const descriptionInputRef = useRef<TaskFormInputsHandle | null>(null);
+
+  // Mirror the create-task dialog: when the user flips Remote mode on and
+  // the chip list is empty, seed a single empty paste row so the URL input
+  // has somewhere to land. Non-destructive on toggle-off.
+  useRemoteReposSeedEffect(useRemote, remoteRepos.remoteRepos, remoteRepos.setRemoteRepos);
 
   return useMemo<DialogFormState>(
     () => ({
