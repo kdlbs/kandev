@@ -16,6 +16,10 @@ import { setEnvLayout } from "@/lib/local-storage";
 import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
 import { stopVscode } from "@/lib/api/domains/vscode-api";
 import { parkUserShell, stopUserShell } from "@/lib/api/domains/user-shell-api";
+import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+import { snapshotColumnWidths, formatWidthsSnapshot } from "@/lib/state/dockview-widths-debug";
+
+const debugWidths = createDebugLogger("dockview:widths");
 
 // v2: bumped alongside DOCKVIEW_ENV_LAYOUT_PREFIX so the no-env fallback
 // also invalidates layouts saved under the previous caps.
@@ -52,6 +56,9 @@ function restoreColumnToTarget(sv: any, idx: number, target: number | undefined)
   if (target === undefined) return;
   const cur = sv.getViewSize(idx);
   if (Math.abs(cur - target) <= 1) return;
+  if (IS_DEBUG) {
+    debugWidths(`enforce-restore idx=${idx} cur=${Math.round(cur)} target=${Math.round(target)}`);
+  }
   try {
     sv.resizeView(idx, target);
   } catch {
@@ -59,17 +66,50 @@ function restoreColumnToTarget(sv: any, idx: number, target: number | undefined)
   }
 }
 
-function enforcePinnedTargets(api: DockviewReadyEvent["api"]): void {
+/** Visibility/maximize state needed by `enforcePinnedTargets`. Passed in by
+ *  callers (instead of read via `useDockviewStore.getState()`) so this module
+ *  has no cyclic import dependency on `dockview-store`. */
+export type EnforcePinnedTargetsCtx = {
+  sidebarVisible: boolean;
+  rightPanelsVisible: boolean;
+  /** When non-null we are in (or restoring) a maximized-group state; skip
+   *  enforcement so we don't fight the 2-column maximize overlay. */
+  maximized: boolean;
+};
+
+/**
+ * Snap the pinned columns back to their recorded targets.
+ *
+ * Two call modes:
+ *   - Reactive: wired in `setupSashDragCapToggle` via `onDidLayoutChange`. The
+ *     subscription pre-checks `isRestoringLayout` and skips during restore so
+ *     this function does not fight an in-progress programmatic layout.
+ *   - Proactive: called synchronously by every programmatic layout path
+ *     (build-default, env-switch, preset/custom-layout apply, sidebar/right
+ *     toggle, maximize/exit) *inside* the post-`api.layout` rAF, before
+ *     `isRestoringLayout` flips false. Dockview's proportional rebalance
+ *     after `api.layout` can grow pinned columns up to their loose
+ *     `setConstraints.maximumWidth`; without this synchronous snap the
+ *     correction would only happen on the next user-triggered layout-change
+ *     event, producing a visible jerk after env prep settles.
+ *
+ * The `enforcing` re-entry guard remains so the sv.resizeView call we emit
+ * does not feed back through the layout-change subscription. `sashDragging`
+ * still gates the whole thing - mid-drag, we want dockview to follow the
+ * user's mouse, not snap to the previous target.
+ */
+export function enforcePinnedTargets(
+  api: DockviewReadyEvent["api"],
+  ctx: EnforcePinnedTargetsCtx,
+): void {
   if (enforcing || sashDragging) return;
-  const store = useDockviewStore.getState();
-  if (store.isRestoringLayout) return;
-  if (api.hasMaximizedGroup() || store.preMaximizeLayout !== null) return;
+  if (api.hasMaximizedGroup() || ctx.maximized) return;
   const sv = getRootSplitview(api);
   if (!sv || sv.length < 2) return;
   enforcing = true;
   try {
-    if (store.sidebarVisible) restoreColumnToTarget(sv, 0, getPinnedTarget("sidebar"));
-    if (store.rightPanelsVisible) {
+    if (ctx.sidebarVisible) restoreColumnToTarget(sv, 0, getPinnedTarget("sidebar"));
+    if (ctx.rightPanelsVisible) {
       restoreColumnToTarget(sv, sv.length - 1, getPinnedTarget("right"));
     }
   } finally {
@@ -117,7 +157,20 @@ export function setupSashDragCapToggle(api: DockviewReadyEvent["api"]): () => vo
   // enforced post-hoc via `enforcePinnedTargets`.
   setLooseConstraints(api);
 
-  const layoutSub = api.onDidLayoutChange(() => enforcePinnedTargets(api));
+  const layoutSub = api.onDidLayoutChange(() => {
+    // Skip the reactive enforcement during a programmatic restore - the
+    // restore path itself calls `enforcePinnedTargets` synchronously inside
+    // its rAF so the user never sees a transient post-rebalance flicker.
+    // Without this gate, the in-flight restore (which fires its own
+    // layout-change events) would be re-entered before its rAF settled.
+    const s = useDockviewStore.getState();
+    if (s.isRestoringLayout) return;
+    enforcePinnedTargets(api, {
+      sidebarVisible: s.sidebarVisible,
+      rightPanelsVisible: s.rightPanelsVisible,
+      maximized: s.preMaximizeLayout !== null,
+    });
+  });
 
   if (typeof document === "undefined") {
     return () => layoutSub.dispose();
@@ -140,6 +193,9 @@ export function setupSashDragCapToggle(api: DockviewReadyEvent["api"]): () => vo
       const store = useDockviewStore.getState();
       if (store.sidebarVisible) setPinnedTarget("sidebar", sv.getViewSize(0));
       if (store.rightPanelsVisible) setPinnedTarget("right", sv.getViewSize(sv.length - 1));
+      if (IS_DEBUG) {
+        debugWidths(`sash-drag-end ${formatWidthsSnapshot(snapshotColumnWidths(api))}`);
+      }
     });
   };
   document.addEventListener("mousedown", onMouseDown, true);
@@ -214,6 +270,12 @@ export function setupContainerResizeSync(api: DockviewReadyEvent["api"]): () => 
     const h = parent.clientHeight;
     if (w <= 0 || h <= 0) return;
     if (w === api.width && h === api.height) return;
+    if (IS_DEBUG) {
+      debugWidths(
+        `container-resize prev=${api.width}x${api.height} next=${w}x${h} ` +
+          `pre=${formatWidthsSnapshot(snapshotColumnWidths(api))}`,
+      );
+    }
     api.layout(w, h);
     // `enforcePinnedTargets` (wired in `setupSashDragCapToggle`) restores
     // sidebar/right to their target widths via `onDidLayoutChange`, so we

@@ -31,6 +31,10 @@ vi.mock("./layout-manager", () => {
     layoutStructuresMatch: vi.fn(() => true),
     getRootSplitview: vi.fn(),
     getPinnedWidth: vi.fn(() => 350),
+    // Used by applyPinnedColumnSizes and (indirectly) by the
+    // formatWidthsSnapshot debug log it now emits.
+    setPinnedTarget: vi.fn(),
+    getPinnedTarget: vi.fn(() => undefined),
   };
 });
 

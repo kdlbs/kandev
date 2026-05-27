@@ -64,6 +64,22 @@
  *                              `agentProfiles` — set_to of an executor-incompatible
  *                              id is the smoking gun for that race.
  *
+ *   Dockview column widths (bug: sidebar/center/right widths wrong during
+ *   env-prepare and on first task switch with cleared localStorage)
+ *     [dockview:widths]       Per-event width-pipeline snapshots:
+ *                              build-default-{entry,done}     first paint / reset
+ *                              env-switch-{resize,resize-col,done}
+ *                                                              cross-task switch
+ *                              container-resize               DOM ResizeObserver fired
+ *                              sash-drag-end                  user-released sash
+ *                              store-sync                     live widths → store pinnedWidths
+ *                              enforce-restore                target rewind via resizeView
+ *                              Snapshot format (formatWidthsSnapshot):
+ *                                L=240 C=842 R=320 cols=3 api=1402x900 tgt=L240/R320
+ *                              `tgt=` is the pinned-targets map (drives the
+ *                              enforcement loop); mismatch with L/R is the
+ *                              smoking gun for a stale-target bug.
+ *
  *   Other
  *     [ws:connection]         WS hook mount + status transitions
  *     [dockview:*]            layout restore / save / env-switch / session-tabs / task-select

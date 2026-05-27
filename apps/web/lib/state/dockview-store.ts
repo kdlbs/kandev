@@ -27,6 +27,7 @@ import {
 } from "./layout-manager";
 import type { BuiltInPreset, LayoutState, LayoutGroupIds } from "./layout-manager";
 import { performEnvSwitch } from "./dockview-env-switch";
+import { enforcePinnedTargets } from "@/components/task/dockview-layout-setup";
 import {
   injectIntentPanels,
   applyActivePanelOverrides,
@@ -43,9 +44,11 @@ import { preserveChatScrollDuringLayout } from "./dockview-scroll-preserve";
 import { measureDockviewContainer } from "./dockview-measure";
 import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
 import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+import { snapshotColumnWidths, formatWidthsSnapshot } from "./dockview-widths-debug";
 
 const debugSwitch = createDebugLogger("dockview:store-switch");
 const debugSave = createDebugLogger("dockview:save");
+const debugWidths = createDebugLogger("dockview:widths");
 
 const RIGHT_PANEL_IDS = new Set(["changes", "files", TERMINAL_DEFAULT_ID]);
 
@@ -232,6 +235,12 @@ function syncPinnedWidthsFromApi(api: DockviewApi, set: StoreSet): void {
       }
     }
     if (updates.size > 0) {
+      if (IS_DEBUG) {
+        const pairs = Array.from(updates.entries())
+          .map(([k, v]) => `${k}=${Math.round(v)}`)
+          .join(",");
+        debugWidths(`store-sync ${pairs} ${formatWidthsSnapshot(snapshotColumnWidths(api))}`);
+      }
       set((prev) => {
         const m = new Map(prev.pinnedWidths);
         for (const [k, v] of updates) m.set(k, v);
@@ -250,6 +259,26 @@ function captureLiveWidths(api: DockviewApi, set: StoreSet): Map<string, number>
   }
   syncPinnedWidthsFromApi(api, set);
   return useDockviewStore.getState().pinnedWidths;
+}
+
+/**
+ * Snap pinned columns to their targets using the current store state.
+ *
+ * Called inside every programmatic layout path's post-`api.layout` rAF
+ * before flipping `isRestoringLayout` false - dockview's proportional
+ * rebalance can grow pinned columns up to their loose `setConstraints` max,
+ * and the reactive enforcement (wired via `onDidLayoutChange`) is gated by
+ * `isRestoringLayout`, so without this synchronous call the correction
+ * would only land on the next user-triggered layout-change event,
+ * producing a visible jerk once env prep settles.
+ */
+function enforceFromStore(api: DockviewApi, get: StoreGet): void {
+  const s = get();
+  enforcePinnedTargets(api, {
+    sidebarVisible: s.sidebarVisible,
+    rightPanelsVisible: s.rightPanelsVisible,
+    maximized: s.preMaximizeLayout !== null,
+  });
 }
 
 function applyLayoutAndSet(
@@ -303,6 +332,7 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
         applyLayoutAndSet(api, withoutSidebar, liveWidths, set);
         requestAnimationFrame(() => {
           api.layout(safeWidth, safeHeight);
+          enforceFromStore(api, get);
           syncPinnedWidthsFromApi(api, set);
           set({ isRestoringLayout: false });
         });
@@ -316,6 +346,7 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
         applyLayoutAndSet(api, withSidebar, liveWidths, set);
         requestAnimationFrame(() => {
           api.layout(safeWidth, safeHeight);
+          enforceFromStore(api, get);
           syncPinnedWidthsFromApi(api, set);
           set({ isRestoringLayout: false });
         });
@@ -340,6 +371,7 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
         applyLayoutAndSet(api, withoutRight, liveWidths, set);
         requestAnimationFrame(() => {
           api.layout(safeWidth, safeHeight);
+          enforceFromStore(api, get);
           syncPinnedWidthsFromApi(api, set);
           set({ isRestoringLayout: false });
         });
@@ -355,6 +387,7 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
         applyLayoutAndSet(api, withRight, liveWidths, set);
         requestAnimationFrame(() => {
           api.layout(safeWidth, safeHeight);
+          enforceFromStore(api, get);
           syncPinnedWidthsFromApi(api, set);
           set({ isRestoringLayout: false });
         });
@@ -402,6 +435,7 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
       });
       requestAnimationFrame(() => {
         api.layout(safeWidth, safeHeight);
+        enforceFromStore(api, get);
         syncPinnedWidthsFromApi(api, set);
         set({ isRestoringLayout: false });
       });
@@ -432,6 +466,7 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
       set({ sidebarVisible: hasSidebar, rightPanelsVisible: hasRight });
       requestAnimationFrame(() => {
         api.layout(safeWidth, safeHeight);
+        enforceFromStore(api, get);
         syncPinnedWidthsFromApi(api, set);
         set({ isRestoringLayout: false });
       });
@@ -593,7 +628,14 @@ function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
         getDefaultLayout: () => get().userDefaultLayout ?? getPresetLayout(get().defaultPreset),
       });
       set(ids);
+      enforceFromStore(api, get);
       set({ isRestoringLayout: false });
+      if (IS_DEBUG) {
+        debugWidths(
+          `env-switch-done old=${effectiveOld ?? "-"} new=${newEnvId} ` +
+            `${formatWidthsSnapshot(snapshotColumnWidths(api))}`,
+        );
+      }
       panelPortalManager.reconcile(new Set(api.panels.map((p) => p.id)));
     } catch {
       set({ isRestoringLayout: false });
@@ -664,6 +706,7 @@ function buildMaximizeActions(set: StoreSet, get: StoreGet) {
       applyLayoutAndSet(api, preMaximizeLayout, liveWidths, set);
       requestAnimationFrame(() => {
         api.layout(safeWidth, safeHeight);
+        enforceFromStore(api, get);
         syncPinnedWidthsFromApi(api, set);
         set({ isRestoringLayout: false });
       });
@@ -683,6 +726,13 @@ function performBuildDefault(
   // Capture dimensions before layout change — api.width can become stale
   // after fromJSON inside applyLayout
   const { width: safeWidth, height: safeHeight } = measureDockviewContainer(api);
+  if (IS_DEBUG) {
+    debugWidths(
+      `build-default-entry intent=${intentName ?? "-"} ` +
+        `measured=${safeWidth}x${safeHeight} ` +
+        `pre=${formatWidthsSnapshot(snapshotColumnWidths(api))}`,
+    );
+  }
   set({ isRestoringLayout: true, pinnedWidths: freshPinned });
 
   const basePreset = intent?.preset as BuiltInPreset | undefined;
@@ -710,7 +760,11 @@ function performBuildDefault(
 
   requestAnimationFrame(() => {
     api.layout(safeWidth, safeHeight);
+    enforceFromStore(api, get);
     syncPinnedWidthsFromApi(api, set);
+    if (IS_DEBUG) {
+      debugWidths(`build-default-done ${formatWidthsSnapshot(snapshotColumnWidths(api))}`);
+    }
     set({ isRestoringLayout: false });
   });
 }

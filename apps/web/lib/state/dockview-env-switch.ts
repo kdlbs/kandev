@@ -22,8 +22,10 @@ import {
 import type { LayoutState, LayoutGroupIds } from "./layout-manager";
 import { ENV_SCOPED_DOCKVIEW_COMPONENTS } from "./dockview-env-scoped-components";
 import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+import { snapshotColumnWidths, formatWidthsSnapshot } from "./dockview-widths-debug";
 
 const debug = createDebugLogger("dockview:env-switch");
+const debugWidths = createDebugLogger("dockview:widths");
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function snapshotGridShape(node: any, depth = 0): unknown {
@@ -372,6 +374,15 @@ function applyPinnedColumnSizes(
 
   const savedSizes = saved ? extractSavedColumnSizes(saved) : null;
   const liveLayout = fromDockviewApi(api);
+  if (IS_DEBUG) {
+    const savedStr = savedSizes
+      ? savedSizes.map((n) => (Number.isFinite(n) ? String(Math.round(n)) : "-")).join(",")
+      : "-";
+    debugWidths(
+      `env-switch-resize totalWidth=${totalWidth} savedSizes=${savedStr} ` +
+        `pre=${formatWidthsSnapshot(snapshotColumnWidths(api))}`,
+    );
+  }
   for (let i = 0; i < liveLayout.columns.length && i < sv.length; i++) {
     const col = liveLayout.columns[i];
     if (col.id !== "sidebar" && col.id !== "right") continue;
@@ -382,6 +393,9 @@ function applyPinnedColumnSizes(
       // Update the pinned-target so enforcement keeps the new env's width
       // through subsequent rebalances.
       setPinnedTarget(col.id, target);
+      if (IS_DEBUG) {
+        debugWidths(`env-switch-resize-col col=${col.id} idx=${i} target=${Math.round(target)}`);
+      }
     } catch {
       /* dockview rejects out-of-range sizes — ignore */
     }
