@@ -218,6 +218,26 @@ func (m *MockClient) SearchOrgRepos(_ context.Context, org, query string, _ int)
 	return filtered, nil
 }
 
+// ListUserRepos returns repos seeded for the authenticated user via AddRepos,
+// keyed by the current user login. The query parameter is matched
+// case-insensitively against the repo full_name; an empty query returns
+// every repo for the user.
+func (m *MockClient) ListUserRepos(_ context.Context, query string, _ int) ([]GitHubRepo, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	repos := m.repos[m.user]
+	if query == "" {
+		return repos, nil
+	}
+	var filtered []GitHubRepo
+	for _, r := range repos {
+		if strings.Contains(strings.ToLower(r.FullName), strings.ToLower(query)) {
+			filtered = append(filtered, r)
+		}
+	}
+	return filtered, nil
+}
+
 func (m *MockClient) ListPRReviews(_ context.Context, owner, repo string, number int) ([]PRReview, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

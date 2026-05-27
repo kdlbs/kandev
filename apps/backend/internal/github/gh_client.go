@@ -351,6 +351,61 @@ func (c *GHClient) SearchOrgRepos(ctx context.Context, org, query string, limit 
 	return parseGHSearchRepos(out)
 }
 
+func (c *GHClient) ListUserRepos(ctx context.Context, query string, limit int) ([]GitHubRepo, error) {
+	limit = clampRepoSearchLimit(limit)
+	out, err := c.run(ctx, "api",
+		fmt.Sprintf("/user/repos?affiliation=owner,collaborator&sort=pushed&per_page=%d", limit))
+	if err != nil {
+		return nil, fmt.Errorf("list user repos: %w", err)
+	}
+	repos, err := parseGHUserRepos(out)
+	if err != nil {
+		return nil, err
+	}
+	return filterReposByQuery(repos, query), nil
+}
+
+// parseGHUserRepos decodes the gh-CLI response from `gh api /user/repos`.
+func parseGHUserRepos(data string) ([]GitHubRepo, error) {
+	var items []struct {
+		FullName string `json:"full_name"`
+		Owner    struct {
+			Login string `json:"login"`
+		} `json:"owner"`
+		Name    string `json:"name"`
+		Private bool   `json:"private"`
+	}
+	if err := json.Unmarshal([]byte(data), &items); err != nil {
+		return nil, fmt.Errorf("parse user repos: %w", err)
+	}
+	repos := make([]GitHubRepo, len(items))
+	for i, item := range items {
+		repos[i] = GitHubRepo{
+			FullName: item.FullName,
+			Owner:    item.Owner.Login,
+			Name:     item.Name,
+			Private:  item.Private,
+		}
+	}
+	return repos, nil
+}
+
+// filterReposByQuery applies a case-insensitive substring match on the
+// repo's full_name. An empty query returns all repos unchanged.
+func filterReposByQuery(repos []GitHubRepo, query string) []GitHubRepo {
+	if query == "" {
+		return repos
+	}
+	needle := strings.ToLower(query)
+	filtered := make([]GitHubRepo, 0, len(repos))
+	for _, r := range repos {
+		if strings.Contains(strings.ToLower(r.FullName), needle) {
+			filtered = append(filtered, r)
+		}
+	}
+	return filtered
+}
+
 func parseGHSearchRepos(data string) ([]GitHubRepo, error) {
 	var items []struct {
 		FullName string `json:"full_name"`

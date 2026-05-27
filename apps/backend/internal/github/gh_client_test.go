@@ -390,6 +390,93 @@ func TestResourceForGHArgs(t *testing.T) {
 	}
 }
 
+func TestParseGHUserRepos(t *testing.T) {
+	cases := []struct {
+		name    string
+		input   string
+		wantLen int
+		wantErr bool
+	}{
+		{
+			name: "happy path",
+			input: `[
+				{"full_name":"alice/app","owner":{"login":"alice"},"name":"app","private":false},
+				{"full_name":"alice/secret","owner":{"login":"alice"},"name":"secret","private":true}
+			]`,
+			wantLen: 2,
+		},
+		{
+			name:    "empty array",
+			input:   `[]`,
+			wantLen: 0,
+		},
+		{
+			name:    "malformed JSON",
+			input:   `not-json`,
+			wantErr: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repos, err := parseGHUserRepos(tc.input)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(repos) != tc.wantLen {
+				t.Errorf("len = %d, want %d", len(repos), tc.wantLen)
+			}
+		})
+	}
+}
+
+func TestParseGHUserRepos_FieldMapping(t *testing.T) {
+	repos, err := parseGHUserRepos(`[
+		{"full_name":"alice/app","owner":{"login":"alice"},"name":"app","private":false},
+		{"full_name":"alice/secret","owner":{"login":"alice"},"name":"secret","private":true}
+	]`)
+	if err != nil {
+		t.Fatalf("parseGHUserRepos: %v", err)
+	}
+	if repos[0].FullName != "alice/app" || repos[0].Owner != "alice" || repos[0].Name != "app" || repos[0].Private {
+		t.Errorf("first repo mismatch: %#v", repos[0])
+	}
+	if !repos[1].Private {
+		t.Errorf("expected second repo private")
+	}
+}
+
+func TestFilterReposByQuery(t *testing.T) {
+	repos := []GitHubRepo{
+		{FullName: "alice/kandev", Owner: "alice", Name: "kandev"},
+		{FullName: "alice/other", Owner: "alice", Name: "other"},
+		{FullName: "alice/Kandev-Web", Owner: "alice", Name: "Kandev-Web"},
+	}
+	cases := []struct {
+		name    string
+		query   string
+		wantLen int
+	}{
+		{"empty returns all", "", 3},
+		{"substring match", "kandev", 2},
+		{"case-insensitive", "KANDEV", 2},
+		{"no match", "missing", 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := filterReposByQuery(repos, tc.query)
+			if len(got) != tc.wantLen {
+				t.Errorf("len = %d, want %d", len(got), tc.wantLen)
+			}
+		})
+	}
+}
+
 // Regression: a 429 on `gh api repos/...` (REST) must mark Core, not GraphQL.
 // Previously this would pause the GraphQL PR monitor incorrectly.
 func TestGHClient_InspectRateStderr_RestEndpointMarksCore(t *testing.T) {

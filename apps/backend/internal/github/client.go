@@ -35,6 +35,11 @@ type Client interface {
 	// SearchOrgRepos searches repositories in an organization, optionally filtered by a query string.
 	SearchOrgRepos(ctx context.Context, org, query string, limit int) ([]GitHubRepo, error)
 
+	// ListUserRepos lists repositories the authenticated user has access to,
+	// optionally filtered by a query string. limit is a per-page upper bound
+	// (clamped to GitHub's 100 max by implementations).
+	ListUserRepos(ctx context.Context, query string, limit int) ([]GitHubRepo, error)
+
 	// ListPRReviews lists reviews on a pull request.
 	ListPRReviews(ctx context.Context, owner, repo string, number int) ([]PRReview, error)
 

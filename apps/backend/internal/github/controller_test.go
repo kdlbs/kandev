@@ -51,6 +51,9 @@ func (s *stubClient) ListUserOrgs(context.Context) ([]GitHubOrg, error) { return
 func (s *stubClient) SearchOrgRepos(context.Context, string, string, int) ([]GitHubRepo, error) {
 	return nil, nil
 }
+func (s *stubClient) ListUserRepos(context.Context, string, int) ([]GitHubRepo, error) {
+	return nil, nil
+}
 func (s *stubClient) ListPRReviews(context.Context, string, string, int) ([]PRReview, error) {
 	return nil, nil
 }

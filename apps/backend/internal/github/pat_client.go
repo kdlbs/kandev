@@ -325,6 +325,53 @@ func (c *PATClient) SearchOrgRepos(ctx context.Context, org, query string, limit
 	return repos, nil
 }
 
+func (c *PATClient) ListUserRepos(ctx context.Context, query string, limit int) ([]GitHubRepo, error) {
+	user, err := c.GetAuthenticatedUser(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list user repos: %w", err)
+	}
+	q := "user:" + user
+	if query != "" {
+		q += " " + query
+	}
+	limit = clampRepoSearchLimit(limit)
+	var result struct {
+		Items []struct {
+			FullName string `json:"full_name"`
+			Owner    struct {
+				Login string `json:"login"`
+			} `json:"owner"`
+			Name    string `json:"name"`
+			Private bool   `json:"private"`
+		} `json:"items"`
+	}
+	endpoint := fmt.Sprintf("/search/repositories?q=%s&per_page=%d", url.QueryEscape(q), limit)
+	if err := c.get(ctx, endpoint, &result); err != nil {
+		return nil, fmt.Errorf("list user repos: %w", err)
+	}
+	repos := make([]GitHubRepo, len(result.Items))
+	for i, item := range result.Items {
+		repos[i] = GitHubRepo{
+			FullName: item.FullName,
+			Owner:    item.Owner.Login,
+			Name:     item.Name,
+			Private:  item.Private,
+		}
+	}
+	return repos, nil
+}
+
+// clampRepoSearchLimit applies the default and GitHub's per_page=100 cap.
+func clampRepoSearchLimit(limit int) int {
+	if limit <= 0 {
+		return 20
+	}
+	if limit > 100 {
+		return 100
+	}
+	return limit
+}
+
 func (c *PATClient) ListPRReviews(ctx context.Context, owner, repo string, number int) ([]PRReview, error) {
 	var raw []struct {
 		ID          int64     `json:"id"`
