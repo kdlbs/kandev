@@ -213,6 +213,57 @@ describe("setSubtaskOrder", () => {
   });
 });
 
+describe("appSidebar actions", () => {
+  const COLLAPSED_KEY = "kandev.appSidebar.collapsed";
+  const SECTION_KEY = "kandev.appSidebar.sectionExpanded";
+
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("hydrates default state when localStorage is empty", () => {
+    const store = makeStore();
+    expect(store.getState().appSidebar.collapsed).toBe(false);
+    expect(store.getState().appSidebar.sectionExpanded.tasks).toBe(true);
+    expect(store.getState().appSidebar.sectionExpanded.projects).toBe(false);
+  });
+
+  it("hydrates collapsed flag from localStorage", () => {
+    window.localStorage.setItem(COLLAPSED_KEY, JSON.stringify(true));
+    const store = makeStore();
+    expect(store.getState().appSidebar.collapsed).toBe(true);
+  });
+
+  it("toggleAppSidebar flips the collapsed flag and persists it", () => {
+    const store = makeStore();
+    store.getState().toggleAppSidebar();
+    expect(store.getState().appSidebar.collapsed).toBe(true);
+    expect(JSON.parse(window.localStorage.getItem(COLLAPSED_KEY) ?? "null")).toBe(true);
+
+    store.getState().toggleAppSidebar();
+    expect(store.getState().appSidebar.collapsed).toBe(false);
+    expect(JSON.parse(window.localStorage.getItem(COLLAPSED_KEY) ?? "null")).toBe(false);
+  });
+
+  it("setAppSidebarCollapsed writes the requested value and persists it", () => {
+    const store = makeStore();
+    store.getState().setAppSidebarCollapsed(true);
+    expect(store.getState().appSidebar.collapsed).toBe(true);
+    expect(JSON.parse(window.localStorage.getItem(COLLAPSED_KEY) ?? "null")).toBe(true);
+  });
+
+  it("toggleAppSidebarSection flips per-section state and persists the map", () => {
+    const store = makeStore();
+    store.getState().toggleAppSidebarSection("projects");
+    expect(store.getState().appSidebar.sectionExpanded.projects).toBe(true);
+    const persisted = JSON.parse(window.localStorage.getItem(SECTION_KEY) ?? "{}");
+    expect(persisted.projects).toBe(true);
+
+    store.getState().toggleAppSidebarSection("projects");
+    expect(store.getState().appSidebar.sectionExpanded.projects).toBe(false);
+  });
+});
+
 describe("reorderSidebarViews", () => {
   beforeEach(() => {
     window.localStorage.clear();

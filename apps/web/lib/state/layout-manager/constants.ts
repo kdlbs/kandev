@@ -23,7 +23,6 @@ export const SIDEBAR_LOCK = "no-drop-target" as const;
 
 /** Fixed panel IDs that can be saved in layout configs. */
 export const KNOWN_PANEL_IDS = new Set([
-  "sidebar",
   "chat",
   "plan",
   TERMINAL_DEFAULT_ID,
@@ -37,7 +36,6 @@ export const KNOWN_PANEL_IDS = new Set([
 /** Components whose panels are structural and should survive filterEphemeral,
  *  even when the panel ID is dynamically generated. */
 export const STRUCTURAL_COMPONENTS = new Set([
-  "sidebar",
   "chat",
   "plan",
   "changes",
@@ -50,7 +48,6 @@ export const STRUCTURAL_COMPONENTS = new Set([
 
 /** Default panel configurations for known panels. */
 export const PANEL_REGISTRY: Record<string, Omit<LayoutPanel, "id">> = {
-  sidebar: { component: "sidebar", title: "Sidebar" },
   chat: { component: "chat", title: "Agent", tabComponent: "permanentTab" },
   plan: { component: "plan", title: "Plan", tabComponent: "planTab" },
   changes: { component: "changes", title: "Changes", tabComponent: "changesTab" },

@@ -84,13 +84,14 @@ function isEditableTarget(e: KeyboardEvent): boolean {
 function handleLayoutToggle(
   e: KeyboardEvent,
   overrides: StoredShortcutOverrides | undefined,
+  appStore: ReturnType<typeof useAppStoreApi>,
 ): boolean {
   if (isEditableTarget(e)) return false;
 
   if (matchesShortcut(e, getShortcut("TOGGLE_SIDEBAR", overrides))) {
     e.preventDefault();
     e.stopPropagation();
-    useDockviewStore.getState().toggleSidebar();
+    appStore.getState().toggleAppSidebar();
     return true;
   }
 
@@ -187,7 +188,7 @@ export function useEditorKeybinds() {
         return;
       }
 
-      if (handleLayoutToggle(e, overrides)) return;
+      if (handleLayoutToggle(e, overrides, appStore)) return;
       handleBottomTerminal(e, appStore, previousFocusRef, overrides);
     };
 

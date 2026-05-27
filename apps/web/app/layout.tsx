@@ -11,6 +11,7 @@ import { CommandPanel } from "@/components/command-panel";
 import { GlobalCommands } from "@/components/global-commands";
 import { RecentTaskSwitcher } from "@/components/task/recent-task-switcher";
 import { DiffWorkerPoolProvider } from "@/components/diff-worker-pool-provider";
+import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
 import { QuickChatProvider } from "@/components/quick-chat/quick-chat-provider";
 import { ConfigChatProvider } from "@/components/config-chat/config-chat-provider";
 import { SessionFailureToastBridge } from "@/components/session-failure-toast-bridge";
@@ -81,7 +82,12 @@ export default async function RootLayout({
                     <CommandPanel />
                     <RecentTaskSwitcher />
                     <ConfigChatProvider>
-                      <QuickChatProvider>{children}</QuickChatProvider>
+                      <QuickChatProvider>
+                        <div className="flex h-screen min-h-0 w-full overflow-hidden">
+                          <AppSidebar />
+                          <div className="flex-1 min-w-0 min-h-0 flex flex-col">{children}</div>
+                        </div>
+                      </QuickChatProvider>
                     </ConfigChatProvider>
                   </CommandRegistryProvider>
                 </ToastProvider>

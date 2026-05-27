@@ -1,18 +1,48 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { IconBoxMultiple, IconPlus } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
+import { Button } from "@kandev/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
-import { SidebarCollapsibleSection } from "./sidebar-collapsible-section";
 import { cn } from "@/lib/utils";
+import { APP_SIDEBAR_SECTION_IDS } from "../app-sidebar-constants";
+import { AppSidebarSection } from "../app-sidebar-section";
 
-export function SidebarProjectsList() {
+type ProjectsSectionProps = {
+  collapsed: boolean;
+};
+
+export function ProjectsSection({ collapsed }: ProjectsSectionProps) {
   const router = useRouter();
   const projects = useAppStore((s) => s.office.projects);
   const activeProjects = projects.filter((p) => p.status !== "archived");
 
+  const headerAction = (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-5 w-5 cursor-pointer"
+          onClick={() => router.push("/office/projects")}
+        >
+          <IconPlus className="h-3 w-3 text-muted-foreground/60" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>Add project</TooltipContent>
+    </Tooltip>
+  );
+
   return (
-    <SidebarCollapsibleSection label="Projects" onAdd={() => router.push("/office/projects")}>
+    <AppSidebarSection
+      id={APP_SIDEBAR_SECTION_IDS.projects}
+      label="Projects"
+      collapsed={collapsed}
+      icon={IconBoxMultiple}
+      headerAction={headerAction}
+    >
       {activeProjects.length === 0 ? (
         <p className="px-3 py-2 text-xs text-muted-foreground">No projects yet</p>
       ) : (
@@ -24,7 +54,7 @@ export function SidebarProjectsList() {
               type="button"
               onClick={() => router.push(`/office/projects/${project.id}`)}
               className={cn(
-                "flex items-center gap-2.5 px-3 py-2 text-[13px] font-medium rounded-md",
+                "flex items-center gap-2.5 px-2.5 py-1.5 text-[13px] font-medium rounded-md",
                 "cursor-pointer w-full text-left",
                 "text-foreground/80 hover:bg-muted/60",
               )}
@@ -46,6 +76,6 @@ export function SidebarProjectsList() {
           );
         })
       )}
-    </SidebarCollapsibleSection>
+    </AppSidebarSection>
   );
 }

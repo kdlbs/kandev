@@ -2,22 +2,14 @@
 
 import { memo, type ReactNode } from "react";
 import Link from "next/link";
-import { IconBug, IconDots, IconHome, IconSettings } from "@tabler/icons-react";
+import { IconBug, IconDots } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "@kandev/ui/breadcrumb";
+import { Breadcrumb, BreadcrumbItem, BreadcrumbList, BreadcrumbPage } from "@kandev/ui/breadcrumb";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -35,12 +27,10 @@ import { useLinearAvailable } from "@/hooks/domains/linear/use-linear-availabili
 import { PortForwardButton } from "@/components/task/port-forward-dialog";
 import { ExecutorSettingsButton } from "@/components/task/executor-settings-button";
 import { WorkflowStepper, type WorkflowStepperStep } from "@/components/task/workflow-stepper";
-import { QuickChatButton } from "@/components/task/quick-chat-button";
 import {
   TopbarActionOverflow,
   type TopbarOverflowItem,
 } from "@/components/task/topbar-action-overflow";
-import { IntegrationsMenu } from "@/components/integrations/integrations-menu";
 import { DEBUG_UI } from "@/lib/config";
 
 type TaskTopBarProps = {
@@ -161,7 +151,8 @@ function IssueTrackerButtons({
   );
 }
 
-/** Left section: home → task name breadcrumb, integrations menu, executor info */
+/** Left section: task name breadcrumb + executor info. Home + integrations
+ *  moved to the unified AppSidebar in the UI overhaul. */
 function TopBarLeft({
   taskId,
   activeSessionId,
@@ -174,18 +165,6 @@ function TopBarLeft({
     <div className="flex items-center gap-2.5 min-w-0 overflow-hidden">
       <Breadcrumb className="min-w-0">
         <BreadcrumbList className="flex-nowrap text-sm min-w-0">
-          <BreadcrumbItem className="shrink-0">
-            <BreadcrumbLink asChild>
-              <Link
-                href="/"
-                className="cursor-pointer text-muted-foreground hover:text-foreground transition-colors"
-                data-testid="task-breadcrumb-home"
-              >
-                <IconHome className="h-4 w-4" />
-              </Link>
-            </BreadcrumbLink>
-          </BreadcrumbItem>
-          <BreadcrumbSeparator className="shrink-0" />
           <BreadcrumbItem className="min-w-0">
             <Tooltip>
               <TooltipTrigger asChild>
@@ -198,8 +177,6 @@ function TopBarLeft({
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
-
-      <IntegrationsMenu />
 
       {!isArchived && showExecutorSettings && (
         <ExecutorSettingsButton taskId={taskId} sessionId={activeSessionId ?? null} />
@@ -234,7 +211,6 @@ function MoreToolsMenu({
   showDebugOverlay?: boolean;
   onToggleDebugOverlay?: () => void;
 }) {
-  const showDebugItem = DEBUG_UI && onToggleDebugOverlay;
   const debugLabel = showDebugOverlay ? "Hide Debug Info" : "Show Debug Info";
 
   return (
@@ -256,38 +232,14 @@ function MoreToolsMenu({
       </Tooltip>
       <DropdownMenuContent align="end" className="w-48">
         <DropdownMenuLabel className="text-xs">More tools</DropdownMenuLabel>
-        {showDebugItem && (
-          <>
-            <DropdownMenuItem className="cursor-pointer gap-2" onClick={onToggleDebugOverlay}>
-              <IconBug className="h-4 w-4 text-muted-foreground" />
-              <span>{debugLabel}</span>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-          </>
+        {onToggleDebugOverlay && (
+          <DropdownMenuItem className="cursor-pointer gap-2" onClick={onToggleDebugOverlay}>
+            <IconBug className="h-4 w-4 text-muted-foreground" />
+            <span>{debugLabel}</span>
+          </DropdownMenuItem>
         )}
-        <DropdownMenuItem asChild className="cursor-pointer gap-2">
-          <Link href="/settings/general">
-            <IconSettings className="h-4 w-4 text-muted-foreground" />
-            <span>Settings</span>
-          </Link>
-        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
-  );
-}
-
-function SettingsButton() {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button asChild size="sm" variant="outline" className="h-8 cursor-pointer px-2">
-          <Link href="/settings/general" aria-label="Settings">
-            <IconSettings className="h-4 w-4" />
-          </Link>
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>Settings</TooltipContent>
-    </Tooltip>
   );
 }
 
@@ -351,13 +303,11 @@ function TopbarToolsGroup({
           <EditorsMenu activeSessionId={activeSessionId ?? null} />
         </>
       )}
-      {showDebugMenu ? (
+      {showDebugMenu && (
         <MoreToolsMenu
           showDebugOverlay={showDebugOverlay}
           onToggleDebugOverlay={onToggleDebugOverlay}
         />
-      ) : (
-        <SettingsButton />
       )}
     </TopbarCluster>
   );
@@ -399,19 +349,6 @@ function TopBarRight({
           <Button asChild size="sm" variant="outline" className="h-8 cursor-pointer px-2">
             <Link href={officeTaskHref}>Open in office view</Link>
           </Button>
-        </TopbarCluster>
-      ),
-    });
-  }
-
-  if (!isArchived && workspaceId) {
-    items.push({
-      id: "quick-chat",
-      label: "Quick chat",
-      priority: 20,
-      content: (
-        <TopbarCluster label="Quick chat" className="[&_button]:h-8 [&_button]:text-xs">
-          <QuickChatButton workspaceId={workspaceId} />
         </TopbarCluster>
       ),
     });

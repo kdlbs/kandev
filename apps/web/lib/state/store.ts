@@ -224,6 +224,7 @@ export type AppState = {
   collapsedSubtaskParents: (typeof defaultUIState)["collapsedSubtaskParents"];
   kanbanPreviewedTaskId: (typeof defaultUIState)["kanbanPreviewedTaskId"];
   sidebarTaskPrefs: (typeof defaultUIState)["sidebarTaskPrefs"];
+  appSidebar: (typeof defaultUIState)["appSidebar"];
 
   // GitLab actions
   setTaskMRs: (mrs: Record<string, TaskMR[]>) => void;
@@ -476,6 +477,9 @@ export type AppState = {
   setSidebarTaskOrder: UIA["setSidebarTaskOrder"];
   setSubtaskOrder: UIA["setSubtaskOrder"];
   removeTaskFromSidebarPrefs: UIA["removeTaskFromSidebarPrefs"];
+  toggleAppSidebar: UIA["toggleAppSidebar"];
+  setAppSidebarCollapsed: UIA["setAppSidebarCollapsed"];
+  toggleAppSidebarSection: UIA["toggleAppSidebarSection"];
   // Office actions
   setOfficeAgentProfiles: (agents: AgentProfile[]) => void;
   addOfficeAgentProfile: (agent: AgentProfile) => void;

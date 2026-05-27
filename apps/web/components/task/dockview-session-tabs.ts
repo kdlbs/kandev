@@ -74,10 +74,7 @@ export function setupChatPanelSafetyNet(
         const hasChatPanel = api.panels.some((p) => p.id === "chat" || p.id.startsWith("session:"));
         if (hasChatPanel) return;
         const activeSessionId = appStore.getState().tasks.activeSessionId;
-        const sb = api.getPanel("sidebar");
-        const position = sb
-          ? { direction: "right" as const, referencePanel: "sidebar" }
-          : undefined;
+        const position = undefined;
         // Only recreate a panel if there's still an active session.
         // If all sessions were deleted, leave the layout empty — the user
         // can create a new session via the "+" menu.
@@ -105,7 +102,7 @@ export function setupChatPanelSafetyNet(
           debug("setupChatPanelSafetyNet: recreating session panel", {
             activeSessionId,
             activeTaskId,
-            anchor: sb ? "rightOfSidebar" : "auto",
+            anchor: "auto",
           });
         }
         api.addPanel({
@@ -264,8 +261,6 @@ function resolveInitialPosition(api: DockviewApi): AddPanelOptions["position"] {
   // to the right of pr-detail, which contradicts the default placement
   // every other code path produces. Pick the consistent default.
   if (anchorGroupId) return { referenceGroup: anchorGroupId, index: 0 };
-  const sb = api.getPanel("sidebar");
-  if (sb) return { direction: "right" as const, referencePanel: "sidebar" };
   return undefined;
 }
 

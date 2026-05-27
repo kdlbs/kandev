@@ -13,8 +13,6 @@ import {
 } from "@/lib/api/domains/office-api";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import type { AppState } from "@/lib/state/store";
-import { WorkspaceRail } from "./components/workspace-rail";
-import { OfficeSidebar } from "./components/office-sidebar";
 import { OfficeTopbar } from "./components/office-topbar";
 
 function resolveActiveOfficeWorkspaceId(
@@ -163,17 +161,9 @@ export default async function OfficeLayout({ children }: { children: React.React
   return (
     <TooltipProvider>
       <StateHydrator initialState={initialState} />
-      <div className="flex h-screen">
-        <WorkspaceRail workspaces={workspaceItems} activeWorkspaceId={activeWorkspaceId} />
-        <OfficeSidebar
-          workspaceName={
-            workspaceItems.find((w) => w.id === activeWorkspaceId)?.name || "Workspace"
-          }
-        />
-        <div className="flex-1 min-w-0 flex flex-col">
-          <OfficeTopbar />
-          <main className="flex-1 min-h-0 overflow-y-auto">{children}</main>
-        </div>
+      <div className="flex h-full min-h-0 flex-col">
+        <OfficeTopbar />
+        <main className="flex-1 min-h-0 overflow-y-auto">{children}</main>
       </div>
     </TooltipProvider>
   );

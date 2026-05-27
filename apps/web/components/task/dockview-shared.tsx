@@ -14,7 +14,6 @@ import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 
 // Panel components (rendered via portals, not directly by dockview)
-import { TaskSessionSidebar } from "./task-session-sidebar";
 import { TaskChatPanel } from "./task-chat-panel";
 import { TaskChangesPanel } from "./task-changes-panel";
 import { ChangesPanel } from "./changes-panel";
@@ -106,7 +105,6 @@ function PortalSlot(props: IDockviewPanelProps) {
 // All panel types use the same PortalSlot wrapper — dockview only manages
 // layout positioning.  Actual rendering happens in PanelPortalHost below.
 export const dockviewComponents: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
-  sidebar: PortalSlot,
   chat: PortalSlot,
   "diff-viewer": PortalSlot,
   "file-editor": PortalSlot,
@@ -151,21 +149,6 @@ export { ContextMenuTab };
 
 // Each content component renders the real panel UI.  They live permanently
 // in the PanelPortalHost and survive dockview layout switches.
-
-function SidebarContent({ panelId }: { panelId: string }) {
-  const workspaceId = useAppStore((state) => state.workspaces.activeId);
-  const workflowId = useAppStore((state) => state.workflows.activeId);
-  const workspaceName = useAppStore((state) => {
-    const ws = state.workspaces.items.find((w: { id: string }) => w.id === workspaceId);
-    return ws?.name ?? "Workspace";
-  });
-
-  useEffect(() => {
-    setPanelTitle(panelId, workspaceName);
-  }, [panelId, workspaceName]);
-
-  return <TaskSessionSidebar workspaceId={workspaceId} workflowId={workflowId} />;
-}
 
 function useChatSessionTitle(panelId: string, sessionId: string | null, isSessionTab: boolean) {
   const agentLabel = useAppStore((state) => {
@@ -335,7 +318,7 @@ export function renderPanel(
 
   switch (resolved) {
     case "sidebar":
-      return <SidebarContent panelId={panelId} />;
+      return null;
     case "chat":
       return <ChatContent panelId={panelId} params={params} />;
     case "diff-viewer":

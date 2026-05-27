@@ -16,7 +16,6 @@ import {
   RIGHT_BOTTOM_GROUP,
   TERMINAL_DEFAULT_ID,
   getPresetLayout,
-  getPresetSidebarColumn,
   applyLayout,
   getRootSplitview,
   fromDockviewApi,
@@ -288,38 +287,11 @@ function removeRightPanelTabs(state: LayoutState): LayoutState {
 
 function buildVisibilityActions(set: StoreSet, get: StoreGet) {
   return {
+    // Legacy dockview-embedded sidebar is gone after the unified AppSidebar
+    // landed; the keybinding redirects to the AppSidebar toggle elsewhere.
+    // We keep these on the store as no-ops so any stragglers compile cleanly.
     toggleSidebar: () => {
-      const { api, sidebarVisible } = get();
-      if (!api) return;
-      const liveWidths = captureLiveWidths(api, set);
-      preserveChatScrollDuringLayout();
-      const { width: safeWidth, height: safeHeight } = measureDockviewContainer(api);
-      if (sidebarVisible) {
-        const current = fromDockviewApi(api);
-        const withoutSidebar: LayoutState = {
-          columns: current.columns.filter((c) => c.id !== "sidebar"),
-        };
-        set({ isRestoringLayout: true, sidebarVisible: false });
-        applyLayoutAndSet(api, withoutSidebar, liveWidths, set);
-        requestAnimationFrame(() => {
-          api.layout(safeWidth, safeHeight);
-          syncPinnedWidthsFromApi(api, set);
-          set({ isRestoringLayout: false });
-        });
-      } else {
-        const current = fromDockviewApi(api);
-        const sidebarCol = getPresetSidebarColumn(get().defaultPreset);
-        const withSidebar: LayoutState = {
-          columns: [sidebarCol, ...current.columns],
-        };
-        set({ isRestoringLayout: true, sidebarVisible: true });
-        applyLayoutAndSet(api, withSidebar, liveWidths, set);
-        requestAnimationFrame(() => {
-          api.layout(safeWidth, safeHeight);
-          syncPinnedWidthsFromApi(api, set);
-          set({ isRestoringLayout: false });
-        });
-      }
+      /* moved to UI slice: toggleAppSidebar */
     },
     toggleRightPanels: () => {
       const { api, rightPanelsVisible, defaultPreset } = get();
@@ -361,10 +333,8 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
       }
     },
 
-    setSidebarVisible: (visible: boolean) => {
-      const { sidebarVisible } = get();
-      if (sidebarVisible === visible) return;
-      get().toggleSidebar();
+    setSidebarVisible: (_visible: boolean) => {
+      /* moved to UI slice: setAppSidebarCollapsed */
     },
     setRightPanelsVisible: (visible: boolean) => {
       const { rightPanelsVisible } = get();
@@ -783,8 +753,11 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
   centerGroupId: CENTER_GROUP,
   rightTopGroupId: RIGHT_TOP_GROUP,
   rightBottomGroupId: RIGHT_BOTTOM_GROUP,
+  // Legacy fields preserved for backwards compatibility with code that still
+  // reads them; the embedded dockview sidebar pane was removed in favour of
+  // the unified AppSidebar. Treated as inert: sidebarVisible is always false.
   sidebarGroupId: SIDEBAR_GROUP,
-  sidebarVisible: true,
+  sidebarVisible: false,
   rightPanelsVisible: true,
   pinnedWidths: new Map(),
   setPinnedWidth: (columnId, width) => {

@@ -16,6 +16,11 @@ import {
   setStoredSidebarDraft,
   setStoredSidebarUserViews,
 } from "@/lib/local-storage";
+import {
+  DEFAULT_SECTION_EXPANDED,
+  buildAppSidebarActions,
+  loadAppSidebarState,
+} from "./app-sidebar-actions";
 import { buildSidebarTaskPrefsActions } from "./sidebar-task-prefs-actions";
 import { DEFAULT_ACTIVE_VIEW_ID, DEFAULT_VIEW } from "./sidebar-view-builtins";
 import type {
@@ -122,6 +127,7 @@ export const defaultUIState: UISliceState = {
   collapsedSubtaskParents: [],
   kanbanPreviewedTaskId: null,
   sidebarTaskPrefs: { pinnedTaskIds: [], orderedTaskIds: [], subtaskOrderByParentId: {} },
+  appSidebar: { collapsed: false, sectionExpanded: { ...DEFAULT_SECTION_EXPANDED } },
 };
 
 type ImmerSet = Parameters<typeof createUISlice>[0];
@@ -528,6 +534,8 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
     orderedTaskIds: getStoredOrderedTaskIds(),
     subtaskOrderByParentId: getStoredSubtaskOrderByParentId(),
   },
+  appSidebar: loadAppSidebarState(),
+  ...buildAppSidebarActions(set),
   ...buildPreviewActions(set),
   ...buildMobileActions(set),
   ...buildBottomTerminalActions(set),

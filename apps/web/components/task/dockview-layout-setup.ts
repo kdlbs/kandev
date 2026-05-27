@@ -4,7 +4,6 @@ import type { AppState } from "@/lib/state/store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { getRootSplitview } from "@/lib/state/dockview-layout-builders";
 import {
-  computeSidebarMaxPx,
   computeRightMaxPx,
   LAYOUT_PINNED_MIN_PX,
   RIGHT_TOP_GROUP,
@@ -68,7 +67,6 @@ function enforcePinnedTargets(api: DockviewReadyEvent["api"]): void {
   if (!sv || sv.length < 2) return;
   enforcing = true;
   try {
-    if (store.sidebarVisible) restoreColumnToTarget(sv, 0, getPinnedTarget("sidebar"));
     if (store.rightPanelsVisible) {
       restoreColumnToTarget(sv, sv.length - 1, getPinnedTarget("right"));
     }
@@ -82,14 +80,6 @@ function setLooseConstraints(api: DockviewReadyEvent["api"]): void {
   const store = useDockviewStore.getState();
   if (store.isRestoringLayout) return;
   if (api.hasMaximizedGroup() || store.preMaximizeLayout !== null) return;
-
-  const sb = api.getPanel("sidebar");
-  if (sb && store.sidebarVisible) {
-    sb.group.api.setConstraints({
-      maximumWidth: computeSidebarMaxPx(),
-      minimumWidth: LAYOUT_PINNED_MIN_PX,
-    });
-  }
 
   if (store.rightPanelsVisible) {
     for (const gid of [RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP]) {
@@ -138,7 +128,6 @@ export function setupSashDragCapToggle(api: DockviewReadyEvent["api"]): () => vo
       const sv = getRootSplitview(api);
       if (!sv) return;
       const store = useDockviewStore.getState();
-      if (store.sidebarVisible) setPinnedTarget("sidebar", sv.getViewSize(0));
       if (store.rightPanelsVisible) setPinnedTarget("right", sv.getViewSize(sv.length - 1));
     });
   };
@@ -163,18 +152,6 @@ function trackPinnedWidths(api: DockviewReadyEvent["api"]): void {
   const sv = getRootSplitview(api);
   if (!sv || sv.length < 2) return;
   try {
-    // Sidebar is grid index 0 *only when sidebar is visible*. Without the
-    // visibility guard, hiding the sidebar makes index 0 the center column,
-    // and we'd persist the center width as the sidebar's preferred width.
-    if (store.sidebarVisible) {
-      const sidebarW = sv.getViewSize(0);
-      if (sidebarW > 50) {
-        const current = store.pinnedWidths.get("sidebar");
-        if (current !== sidebarW) {
-          store.setPinnedWidth("sidebar", sidebarW);
-        }
-      }
-    }
     // Right column is the last grid index when present. Skip when there is
     // no right column (compact preset, rightPanelsVisible=false).
     if (store.rightPanelsVisible) {
@@ -383,10 +360,8 @@ export function setupPortalCleanup(
 ): void {
   api.onDidRemovePanel((panel) => {
     if (useDockviewStore.getState().isRestoringLayout) return;
-    const nonSidebarRemaining = api.panels.filter(
-      (p) => p.id !== panel.id && p.api.component !== "sidebar",
-    ).length;
-    handleMaximizeExitOnLastClose(api, panel.id, nonSidebarRemaining);
+    const remainingPanelCount = api.panels.filter((p) => p.id !== panel.id).length;
+    handleMaximizeExitOnLastClose(api, panel.id, remainingPanelCount);
     const entry = panelPortalManager.get(panel.id);
     const sessionForApi = resolveSessionForEntry(appStore, entry?.envId);
     if (entry?.component === "vscode" && sessionForApi) stopVscode(sessionForApi);
