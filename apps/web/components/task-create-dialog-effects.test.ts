@@ -45,7 +45,9 @@ describe("useWorkflowAgentProfileEffect", () => {
     localStorage.setItem(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, JSON.stringify("stale-id"));
     const fs = makeFs({ selectedWorkflowId: null });
 
-    renderHook(() => useWorkflowAgentProfileEffect(fs, [], [makeProfile("real-id")]));
+    renderHook(() =>
+      useWorkflowAgentProfileEffect(fs, [], [makeProfile("real-id")], [makeProfile("real-id")]),
+    );
 
     expect(fs.setWorkflowAgentProfileId).toHaveBeenCalledWith("");
     // No workflow → effect must early-return before touching agentProfileId,
@@ -57,7 +59,14 @@ describe("useWorkflowAgentProfileEffect", () => {
     const fs = makeFs({ selectedWorkflowId: "wf-1" });
     const workflows = [{ id: "wf-1", agent_profile_id: "real-id" }];
 
-    renderHook(() => useWorkflowAgentProfileEffect(fs, workflows, [makeProfile("real-id")]));
+    renderHook(() =>
+      useWorkflowAgentProfileEffect(
+        fs,
+        workflows,
+        [makeProfile("real-id")],
+        [makeProfile("real-id")],
+      ),
+    );
 
     expect(fs.setWorkflowAgentProfileId).toHaveBeenCalledWith("real-id");
     expect(fs.setAgentProfileId).toHaveBeenCalledWith("real-id");
@@ -67,7 +76,14 @@ describe("useWorkflowAgentProfileEffect", () => {
     const fs = makeFs({ selectedWorkflowId: "wf-1" });
     const workflows = [{ id: "wf-1", agent_profile_id: "missing-id" }];
 
-    renderHook(() => useWorkflowAgentProfileEffect(fs, workflows, [makeProfile("real-id")]));
+    renderHook(() =>
+      useWorkflowAgentProfileEffect(
+        fs,
+        workflows,
+        [makeProfile("real-id")],
+        [makeProfile("real-id")],
+      ),
+    );
 
     // The lock still applies (otherwise the user could pick an alternate
     // profile and submit a workflow-locked task with the wrong agent).
@@ -80,7 +96,14 @@ describe("useWorkflowAgentProfileEffect", () => {
     const fs = makeFs({ selectedWorkflowId: "wf-1" });
     const workflows = [{ id: "wf-1" /* no agent_profile_id */ }];
 
-    renderHook(() => useWorkflowAgentProfileEffect(fs, workflows, [makeProfile("real-id")]));
+    renderHook(() =>
+      useWorkflowAgentProfileEffect(
+        fs,
+        workflows,
+        [makeProfile("real-id")],
+        [makeProfile("real-id")],
+      ),
+    );
 
     expect(fs.setWorkflowAgentProfileId).toHaveBeenCalledWith("");
     expect(fs.setAgentProfileId).toHaveBeenCalledWith("real-id");
@@ -96,16 +119,50 @@ describe("useWorkflowAgentProfileEffect", () => {
     const fs = makeFs({ selectedWorkflowId: "wf-1" });
     const workflows = [{ id: "wf-1" /* no agent_profile_id */ }];
 
-    renderHook(() => useWorkflowAgentProfileEffect(fs, workflows, [makeProfile("real-id")]));
+    renderHook(() =>
+      useWorkflowAgentProfileEffect(
+        fs,
+        workflows,
+        [makeProfile("real-id")],
+        [makeProfile("real-id")],
+      ),
+    );
 
     expect(fs.setAgentProfileId).not.toHaveBeenCalledWith("stale-id");
+  });
+
+  it("does NOT restore a lastId that exists but is incompatible with the current executor", () => {
+    // Regression for #1075 (CodeRabbit): if lastId names a profile present in
+    // `agentProfiles` but absent from `compatibleAgentProfiles` (e.g. user
+    // switched from a local executor to a remote one without the matching
+    // credential), workflow-unlock used to restore it anyway, which made
+    // useDefaultSelectionsEffect early-exit on "already-set" and leave the
+    // dialog stuck on "No compatible agent profiles".
+    localStorage.setItem(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, JSON.stringify("incompat-id"));
+    const fs = makeFs({ selectedWorkflowId: "wf-1" });
+    const workflows = [{ id: "wf-1" /* no agent_profile_id */ }];
+    const all = [makeProfile("incompat-id"), makeProfile("compat-id")];
+    const compatible = [makeProfile("compat-id")];
+
+    renderHook(() => useWorkflowAgentProfileEffect(fs, workflows, all, compatible));
+
+    expect(fs.setAgentProfileId).not.toHaveBeenCalledWith("incompat-id");
+    // Empty hand-off lets useDefaultSelectionsEffect pick a compatible default.
+    expect(fs.setAgentProfileId).toHaveBeenCalledWith("");
   });
 
   it("clears agentProfileId when the workflow has no override and there is no last-used id", () => {
     const fs = makeFs({ selectedWorkflowId: "wf-1" });
     const workflows = [{ id: "wf-1" /* no agent_profile_id */ }];
 
-    renderHook(() => useWorkflowAgentProfileEffect(fs, workflows, [makeProfile("real-id")]));
+    renderHook(() =>
+      useWorkflowAgentProfileEffect(
+        fs,
+        workflows,
+        [makeProfile("real-id")],
+        [makeProfile("real-id")],
+      ),
+    );
 
     // Empty string lets useDefaultSelectionsEffect take over the fallback
     // chain (workspace default → first profile).

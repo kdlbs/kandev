@@ -83,6 +83,7 @@ export function useWorkflowAgentProfileEffect(
   fs: DialogFormState,
   workflows: Array<{ id: string; agent_profile_id?: string }>,
   agentProfiles: AgentProfileOption[],
+  compatibleAgentProfiles: AgentProfileOption[],
 ) {
   const { selectedWorkflowId, setAgentProfileId, setWorkflowAgentProfileId } = fs;
   useEffect(() => {
@@ -112,20 +113,15 @@ export function useWorkflowAgentProfileEffect(
       }
     } else {
       setWorkflowAgentProfileId("");
-      // Restore the user's last-used agent profile when unlocking, but only
-      // if it still exists. A clean DB mints fresh UUIDs for the same agents,
-      // so the previous run's id never matches and would otherwise poison
-      // the dialog into "No compatible agent profiles" because
-      // useDefaultSelectionsEffect skips when agentProfileId is truthy.
-      // NB: filtered against `agentProfiles` (all loaded), NOT against
-      // executor-compat. If lastId is incompatible with the chosen executor
-      // this still restores it — useDefaultSelectionsEffect can no longer
-      // correct that since agentProfileId becomes truthy and it early-exits.
-      // If `[executor-compat:workflow-autopick] set_to=<incompatible>` shows
-      // up in production, this is the bug; fix is to plumb
-      // `compatibleAgentProfiles` here too.
+      // Restore the user's last-used agent profile when unlocking. Filter
+      // against `compatibleAgentProfiles` (not the full `agentProfiles` list)
+      // so an executor-incompatible id from a previous session - including
+      // stale UUIDs from a wiped DB - is dropped rather than restored.
+      // useDefaultSelectionsEffect would otherwise see agentProfileId become
+      // truthy, early-exit on "already-set", and leave the dialog stuck on
+      // "No compatible agent profiles".
       const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, null);
-      const isValidLastId = Boolean(lastId && agentProfiles.some((p) => p.id === lastId));
+      const isValidLastId = Boolean(lastId && compatibleAgentProfiles.some((p) => p.id === lastId));
       const finalId = isValidLastId && lastId ? lastId : "";
       setAgentProfileId(finalId);
       workflowAutopickDebug("workflow-no-override", {
@@ -134,7 +130,14 @@ export function useWorkflowAgentProfileEffect(
         set_to: finalId || "-empty-",
       });
     }
-  }, [selectedWorkflowId, workflows, agentProfiles, setAgentProfileId, setWorkflowAgentProfileId]);
+  }, [
+    selectedWorkflowId,
+    workflows,
+    agentProfiles,
+    compatibleAgentProfiles,
+    setAgentProfileId,
+    setWorkflowAgentProfileId,
+  ]);
 }
 
 export function useWorkflowStepsEffect(fs: DialogFormState, workflowId: string | null) {
@@ -656,7 +659,7 @@ export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreate
     isLocalExecutor,
   } = args;
   useWorkflowStepsEffect(fs, workflowId);
-  useWorkflowAgentProfileEffect(fs, workflows, agentProfiles);
+  useWorkflowAgentProfileEffect(fs, workflows, agentProfiles, compatibleAgentProfiles);
   useRepositoryAutoSelectEffect(fs, open, workspaceId, repositories);
   useDiscoverReposEffect(fs, open, workspaceId, repositoriesLoading, toast);
   useBranchAutoSelectEffect(fs);
