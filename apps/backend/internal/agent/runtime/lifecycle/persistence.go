@@ -55,7 +55,7 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 		SessionID:        execution.SessionID,
 		TaskID:           execution.TaskID,
 		Runtime:          execution.RuntimeName,
-		Status:           "starting",
+		Status:           models.ExecutorRunningStatusStarting,
 		Resumable:        true,
 		AgentExecutionID: execution.ID,
 		ContainerID:      execution.ContainerID,

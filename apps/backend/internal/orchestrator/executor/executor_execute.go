@@ -577,7 +577,7 @@ func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *m
 		// 'prepared' so the row doesn't look stuck mid-launch. When the user
 		// later starts the agent (StartCreatedSession), Launch re-runs and
 		// rewrites the row with status='starting' via the usual path.
-		if err := e.repo.UpdateExecutorRunningStatus(ctx, sessionID, "prepared"); err != nil {
+		if err := e.repo.UpdateExecutorRunningStatus(ctx, sessionID, models.ExecutorRunningStatusPrepared); err != nil {
 			e.logger.Warn("failed to mark executors_running as prepared",
 				zap.String("session_id", sessionID),
 				zap.Error(err))

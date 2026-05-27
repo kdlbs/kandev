@@ -22,4 +22,14 @@ describe("stripAnsi", () => {
   it("handles empty string", () => {
     expect(stripAnsi("")).toBe("");
   });
+
+  it("strips OSC hyperlinks terminated by ST", () => {
+    const input = "click \x1b]8;;https://example.com\x1b\\here\x1b]8;;\x1b\\!";
+    expect(stripAnsi(input)).toBe("click here!");
+  });
+
+  it("strips OSC window-title sequences terminated by BEL", () => {
+    const input = "\x1b]0;my-shell\x07ready";
+    expect(stripAnsi(input)).toBe("ready");
+  });
 });

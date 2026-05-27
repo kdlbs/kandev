@@ -314,10 +314,12 @@ function isVisibleStep(step: PrepareStepInfo): boolean {
   return step.name.trim() !== "" || hasStepDetails(step);
 }
 
+type ScriptStatus = "starting" | "running" | "exited" | "failed";
+
 // Map the script_execution status vocabulary (starting/running/exited/failed)
 // onto the PrepareStep status vocabulary (running/completed/failed).
 function scriptStatusToStepStatus(
-  status: string | undefined,
+  status: ScriptStatus | undefined,
   exitCode: number | undefined,
 ): string {
   if (status === "starting" || status === "running") return "running";
@@ -332,7 +334,7 @@ function scriptStatusToStepStatus(
 type ScriptMetadata = {
   script_type?: string;
   command?: string;
-  status?: string;
+  status?: ScriptStatus;
   exit_code?: number;
   error?: string;
   started_at?: string;

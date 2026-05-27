@@ -28,6 +28,15 @@ var ErrExecutorNotFound = errors.New("executor not found")
 // will produce its own events.
 var ErrExecutionRotated = errors.New("execution rotated; CAS write rejected")
 
+// Status values for executors_running.status. The lifecycle manager defaults
+// rows to "starting" on creation (see runtime/lifecycle/persistence.go); the
+// orchestrator flips a row to "prepared" when a prepare-only launch finishes
+// with the agent process intentionally not started.
+const (
+	ExecutorRunningStatusStarting = "starting"
+	ExecutorRunningStatusPrepared = "prepared"
+)
+
 // ListMessagesOptions defines pagination options for listing messages
 type ListMessagesOptions struct {
 	Limit  int
