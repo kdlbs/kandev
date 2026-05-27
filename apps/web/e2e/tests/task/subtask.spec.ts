@@ -657,16 +657,29 @@ test.describe("Subtask dialog feature parity", () => {
     const titleInput = testPage.getByTestId("subtask-title-input");
     await expect(titleInput).toBeVisible({ timeout: 5_000 });
 
-    await testPage.getByTestId("toggle-github-url").click();
-    const urlInput = testPage.getByTestId("github-url-input");
+    // Switch to Remote tab. The subtask form-state doesn't auto-seed the
+    // first chip row on the initial toggle (unlike the create-task dialog
+    // which runs useRemoteReposSeedEffect), so we click the "+ Add" button
+    // explicitly before reaching for the chip trigger.
+    const remoteModeBtn = testPage.getByTestId("source-mode-remote");
+    await expect(remoteModeBtn).toBeVisible({ timeout: 5_000 });
+    await remoteModeBtn.click();
+    await testPage.getByTestId("remote-add-row").click();
+    const chipTrigger = testPage.getByTestId("remote-repo-chip-trigger").first();
+    await expect(chipTrigger).toBeVisible({ timeout: 5_000 });
+    await chipTrigger.click();
+    const urlInput = testPage.getByTestId("remote-paste-url-input").last();
     await expect(urlInput).toBeVisible({ timeout: 5_000 });
     await urlInput.fill("https://github.com/subtask-owner/subtask-repo");
+    await urlInput.press("Enter");
 
     // Wait for branch list to resolve so the payload carries `base_branch`.
-    // The branch pill is disabled while branches are loading and re-enables
-    // once the resolver returns options, so this is a positive signal that
-    // the URL was parsed and branches were fetched.
-    await expect(testPage.getByTestId("branch-chip-trigger")).toBeEnabled({ timeout: 10_000 });
+    // The per-chip branch pill is disabled while branches are loading and
+    // re-enables once the resolver returns options, so this is a positive
+    // signal that the URL was parsed and branches were fetched.
+    await expect(testPage.getByTestId("remote-branch-chip-trigger").first()).toBeEnabled({
+      timeout: 10_000,
+    });
 
     // 4. Submit.
     const subtaskTitle = `Subtask GH URL ${Date.now()}`;

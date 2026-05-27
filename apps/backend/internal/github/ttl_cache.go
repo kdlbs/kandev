@@ -75,6 +75,15 @@ func (c *ttlCache) get(key string) (any, bool) {
 	return entry.value, true
 }
 
+// clear drops every cached entry. Used by the e2e mock controller to make a
+// "GitHub repos unavailable" toggle visible immediately instead of waiting
+// for the 60s TTL on a prior cached success to expire.
+func (c *ttlCache) clear() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.entries = make(map[string]ttlEntry)
+}
+
 func (c *ttlCache) set(key string, value any) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

@@ -96,6 +96,15 @@ func (s *Service) cachedListUserOrgs(ctx context.Context) ([]GitHubOrg, error) {
 	return orgs, nil
 }
 
+// ClearAccessibleReposCaches drops every cached entry from the accessible-repos
+// and user-orgs caches. Used by the e2e mock controller so flipping the mock's
+// "repos unavailable" toggle takes effect immediately instead of waiting for the
+// 60s TTL on a prior cached success to expire.
+func (s *Service) ClearAccessibleReposCaches() {
+	s.accessibleReposCache.clear()
+	s.userOrgsCache.clear()
+}
+
 // fetchAccessibleRepos fans out a SearchOrgRepos call per org plus a
 // ListUserRepos call for the authenticated user's own repos, then merges,
 // dedupes by full_name, sorts by pushed_at desc, and truncates to limit.

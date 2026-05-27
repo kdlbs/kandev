@@ -57,10 +57,17 @@ type repoKey struct {
 // MockClient implements Client with in-memory configurable data for E2E testing.
 // All data is protected by a sync.RWMutex for thread safety.
 type MockClient struct {
-	mu               sync.RWMutex
-	user             string
-	authenticated    bool
-	authError        string
+	mu            sync.RWMutex
+	user          string
+	authenticated bool
+	authError     string
+	// reposUnavailable, when true, makes the org/user listing methods that
+	// back ListAccessibleRepos return ErrNoClient — driving the
+	// `/api/v1/github/repos` handler to respond with 503
+	// `github_not_configured`. Used by e2e tests that need to verify the
+	// "Connect GitHub" banner in the Remote-tab chip popover without ripping
+	// the whole mock client out of the wiring.
+	reposUnavailable bool
 	prs              map[prKey]*PR
 	prsByBranch      map[branchKey]*PR
 	orgs             []GitHubOrg
@@ -196,6 +203,9 @@ func (m *MockClient) GetIssueState(context.Context, string, string, int) (string
 func (m *MockClient) ListUserOrgs(context.Context) ([]GitHubOrg, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	if m.reposUnavailable {
+		return nil, ErrNoClient
+	}
 	if m.orgs == nil {
 		return []GitHubOrg{}, nil
 	}
@@ -205,6 +215,9 @@ func (m *MockClient) ListUserOrgs(context.Context) ([]GitHubOrg, error) {
 func (m *MockClient) SearchOrgRepos(_ context.Context, org, query string, _ int) ([]GitHubRepo, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	if m.reposUnavailable {
+		return nil, ErrNoClient
+	}
 	repos := m.repos[org]
 	if query == "" {
 		return repos, nil
@@ -225,6 +238,9 @@ func (m *MockClient) SearchOrgRepos(_ context.Context, org, query string, _ int)
 func (m *MockClient) ListUserRepos(_ context.Context, query string, _ int) ([]GitHubRepo, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	if m.reposUnavailable {
+		return nil, ErrNoClient
+	}
 	repos := m.repos[m.user]
 	if query == "" {
 		return repos, nil
@@ -423,6 +439,16 @@ func (m *MockClient) SetAuthHealth(authenticated bool, authError string) {
 	m.authError = authError
 }
 
+// SetReposUnavailable toggles whether the org/user repo-listing methods that
+// back ListAccessibleRepos return ErrNoClient. Used by e2e tests to drive
+// the `/api/v1/github/repos` handler into its 503 `github_not_configured`
+// branch without rewiring the mock client out of the factory.
+func (m *MockClient) SetReposUnavailable(unavailable bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.reposUnavailable = unavailable
+}
+
 // AddPR adds a PR to the mock data store, indexed by owner/repo/number and branch.
 func (m *MockClient) AddPR(pr *PR) {
 	m.mu.Lock()
@@ -533,6 +559,7 @@ func (m *MockClient) Reset() {
 	m.user = mockDefaultUser
 	m.authenticated = true
 	m.authError = ""
+	m.reposUnavailable = false
 	m.prs = make(map[prKey]*PR)
 	m.prsByBranch = make(map[branchKey]*PR)
 	m.orgs = nil

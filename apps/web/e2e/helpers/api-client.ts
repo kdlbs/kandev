@@ -969,6 +969,16 @@ export class ApiClient {
     await this.request("PUT", "/api/v1/github/mock/auth-health", data);
   }
 
+  /**
+   * Toggles the mock client's "list accessible repos unavailable" branch.
+   * When set to true, GET /api/v1/github/repos responds with 503
+   * `github_not_configured` — used by Remote-tab e2e specs that need to
+   * verify the "Connect GitHub" banner in the chip popover.
+   */
+  async mockGitHubSetReposUnavailable(unavailable: boolean): Promise<void> {
+    await this.request("PUT", "/api/v1/github/mock/repos-unavailable", { unavailable });
+  }
+
   async mockGitHubGetStatus(): Promise<{
     authenticated: boolean;
     username: string;

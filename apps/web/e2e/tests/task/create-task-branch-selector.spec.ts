@@ -154,19 +154,21 @@ test.describe("Branch selector behavior with executor types", () => {
       const dialog = testPage.getByTestId("create-task-dialog");
       await expect(dialog).toBeVisible();
 
-      // Toggle to GitHub URL mode
-      await testPage.getByTestId("toggle-github-url").click();
-      await testPage
-        .getByTestId("github-url-input")
-        .fill("https://github.com/branch-test-owner/branch-test-repo");
+      // Switch to Remote tab and paste via the chip popover.
+      await testPage.getByTestId("source-mode-remote").click();
+      await testPage.getByTestId("remote-repo-chip-trigger").first().click();
+      const pasteInput = testPage.getByTestId("remote-paste-url-input");
+      await pasteInput.fill("https://github.com/branch-test-owner/branch-test-repo");
+      await pasteInput.press("Enter");
 
       // Select local executor profile
       const executorSelector = testPage.getByTestId("executor-profile-selector");
       await executorSelector.click();
       await testPage.getByRole("option", { name: /E2E Local GitHub URL/i }).click();
 
-      // Branch selector should NOT be disabled (GitHub URL mode overrides)
-      const branchSelector = testPage.getByTestId("branch-chip-trigger").first();
+      // Branch selector should NOT be disabled (Remote mode overrides).
+      // The per-chip branch pill uses `remote-branch-chip-trigger`.
+      const branchSelector = testPage.getByTestId("remote-branch-chip-trigger").first();
       await expect(branchSelector).toBeEnabled({ timeout: 10_000 });
     } finally {
       await apiClient.deleteExecutorProfile(profile.id).catch(() => {});
@@ -424,14 +426,16 @@ test.describe("Fresh-branch flow", () => {
       await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
       await testPage.getByTestId("task-title-input").fill("Hide toggle");
       await testPage.getByTestId("task-description-input").fill("github url");
-      await testPage.getByTestId("toggle-github-url").click();
-      await testPage
-        .getByTestId("github-url-input")
-        .fill("https://github.com/branch-test-owner/branch-test-repo");
+      // Switch to Remote tab and paste via the chip popover.
+      await testPage.getByTestId("source-mode-remote").click();
+      await testPage.getByTestId("remote-repo-chip-trigger").first().click();
+      const pasteInput = testPage.getByTestId("remote-paste-url-input");
+      await pasteInput.fill("https://github.com/branch-test-owner/branch-test-repo");
+      await pasteInput.press("Enter");
       await testPage.getByTestId("executor-profile-selector").click();
       await testPage.getByRole("option", { name: /E2E Fresh Branch GH/i }).click();
 
-      // Toggle is gated behind isLocalExecutor && !useGitHubUrl, so it must not render.
+      // Toggle is gated behind isLocalExecutor && !useRemote, so it must not render.
       await expect(testPage.getByTestId("fresh-branch-toggle")).toHaveCount(0);
     } finally {
       await apiClient.deleteExecutorProfile(profile.id).catch(() => {});
