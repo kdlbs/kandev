@@ -115,6 +115,10 @@ describe("useExpandableDiff", () => {
     );
     await loadAndSettle(result.current.loadContent);
     expect(result.current.metadata).toBe(PARTIAL);
+    // canExpand must be false: clicking the toolbar button after a rejected
+    // reparse is a silent no-op because the partial metadata can't drive
+    // @pierre/diffs' iterateOverDiff expansion path.
+    expect(result.current.canExpand).toBe(false);
   });
 
   it("preserves the lang override from the partial metadata on a successful reparse", async () => {

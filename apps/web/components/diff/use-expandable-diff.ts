@@ -168,14 +168,17 @@ export function useExpandableDiff({
     }
   }, [sessionId, filePath, baseRef, repo, enableExpansion, loadedContent, isLoading]);
 
-  const metadata = useMemo<FileDiffMetadata | null>(() => {
-    if (!fileDiffMetadata) return null;
-    if (!loadedContent || !diff) return fileDiffMetadata;
+  const { metadata, reparseAccepted } = useMemo<{
+    metadata: FileDiffMetadata | null;
+    reparseAccepted: boolean;
+  }>(() => {
+    if (!fileDiffMetadata) return { metadata: null, reparseAccepted: false };
+    if (!loadedContent || !diff) return { metadata: fileDiffMetadata, reparseAccepted: false };
     const reparsed = processFile(diff, {
       oldFile: { name: filePath, contents: loadedContent.oldContent },
       newFile: { name: filePath, contents: loadedContent.newContent },
     });
-    if (!reparsed) return fileDiffMetadata;
+    if (!reparsed) return { metadata: fileDiffMetadata, reparseAccepted: false };
     // Reject a reparse whose trailing-context lengths don't match: when the
     // fetched contents are out of sync with the patch (stale snapshot, wrong
     // base ref for a committed diff, file edited mid-flight), processFile
@@ -183,11 +186,13 @@ export function useExpandableDiff({
     // will throw "trailing context mismatch" the moment it tries to render.
     // Falling back to the original partial metadata loses expansion controls
     // but renders the patch correctly — same as the dedicated Diff tab.
-    if (!isReparseConsistent(reparsed)) return fileDiffMetadata;
+    if (!isReparseConsistent(reparsed))
+      return { metadata: fileDiffMetadata, reparseAccepted: false };
     // Preserve the lang override that useDiffMetadata sets (e.g. lang:'text'
     // for Go files that hit the Shiki backtracking guard). processFile would
     // otherwise infer "go" from the filename and silently re-enable Shiki.
-    return fileDiffMetadata.lang ? { ...reparsed, lang: fileDiffMetadata.lang } : reparsed;
+    const final = fileDiffMetadata.lang ? { ...reparsed, lang: fileDiffMetadata.lang } : reparsed;
+    return { metadata: final, reparseAccepted: true };
   }, [fileDiffMetadata, loadedContent, diff, filePath]);
 
   const isContentLoaded = loadedContent !== null;
@@ -198,6 +203,9 @@ export function useExpandableDiff({
     isLoading,
     error,
     loadContent,
-    canExpand: enableExpansion && isContentLoaded && !error,
+    // Gate canExpand on a successful reparse so the toolbar button doesn't
+    // appear when we fell back to the partial metadata — clicking it would
+    // be a silent no-op since the metadata can't drive iterateOverDiff.
+    canExpand: enableExpansion && isContentLoaded && !error && reparseAccepted,
   };
 }
