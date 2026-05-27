@@ -80,6 +80,11 @@ const (
 	MetadataKeySpriteCreatedAt  = "sprite_created_at"
 	MetadataKeyLocalPort        = "local_port"
 
+	// MetadataKeyModelOverride holds a user-requested model that overrides the
+	// agent profile's configured model on the next launch. Set by SetSessionModel
+	// for passthrough sessions, which restart the PTY to apply the new --model.
+	MetadataKeyModelOverride = "model_override"
+
 	// Office metadata keys
 	MetadataKeySkillManifestJSON = "skill_manifest_json"
 

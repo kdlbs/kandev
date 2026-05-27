@@ -366,14 +366,14 @@ func TestManager_SetSessionModel_Passthrough_PersistsOverride(t *testing.T) {
 	// must already be persisted by the time the restart fires.
 	_ = mgr.SetSessionModel(context.Background(), exec.ID, "claude-opus-4-7")
 
-	require.Equal(t, "claude-opus-4-7", exec.Metadata["model_override"],
-		"SetSessionModel must persist model_override on passthrough executions")
+	require.Equal(t, "claude-opus-4-7", exec.Metadata[MetadataKeyModelOverride],
+		"SetSessionModel must persist model override on passthrough executions")
 }
 
 func TestEffectivePassthroughModel(t *testing.T) {
 	t.Run("returns override when set", func(t *testing.T) {
 		execution := &AgentExecution{
-			Metadata: map[string]interface{}{"model_override": "claude-opus-4-7"},
+			Metadata: map[string]interface{}{MetadataKeyModelOverride: "claude-opus-4-7"},
 		}
 		profile := &AgentProfileInfo{Model: "claude-sonnet-4-6"}
 		require.Equal(t, "claude-opus-4-7", effectivePassthroughModel(execution, profile))

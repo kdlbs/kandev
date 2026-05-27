@@ -491,7 +491,7 @@ func profileModel(p *AgentProfileInfo) string {
 // to swap it, so the PTY must be relaunched with a new --model.
 func effectivePassthroughModel(execution *AgentExecution, profile *AgentProfileInfo) string {
 	if execution != nil && execution.Metadata != nil {
-		if override, ok := execution.Metadata["model_override"].(string); ok && override != "" {
+		if override, ok := execution.Metadata[MetadataKeyModelOverride].(string); ok && override != "" {
 			return override
 		}
 	}

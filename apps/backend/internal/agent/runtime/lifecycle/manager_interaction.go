@@ -255,12 +255,14 @@ func (m *Manager) SetSessionModel(ctx context.Context, executionID, modelID stri
 	}
 
 	if execution.PassthroughProcessID != "" {
-		_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
+		if err := m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
 			if exec.Metadata == nil {
 				exec.Metadata = make(map[string]interface{})
 			}
-			exec.Metadata["model_override"] = modelID
-		})
+			exec.Metadata[MetadataKeyModelOverride] = modelID
+		}); err != nil {
+			return fmt.Errorf("failed to persist model override for execution %q: %w", executionID, err)
+		}
 		return m.RestartAgentProcess(ctx, executionID)
 	}
 
@@ -1209,7 +1211,7 @@ func (m *Manager) buildFreshAgentCommand(ctx context.Context, execution *AgentEx
 		permissionValues["allow_indexing"] = profileInfo.AllowIndexing
 		permissionValues["dangerously_skip_permissions"] = profileInfo.DangerouslySkipPermissions
 	}
-	if override, ok := execution.Metadata["model_override"].(string); ok && override != "" {
+	if override, ok := execution.Metadata[MetadataKeyModelOverride].(string); ok && override != "" {
 		model = override
 	}
 
