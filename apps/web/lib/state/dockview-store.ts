@@ -27,7 +27,7 @@ import {
 } from "./layout-manager";
 import type { BuiltInPreset, LayoutState, LayoutGroupIds } from "./layout-manager";
 import { performEnvSwitch } from "./dockview-env-switch";
-import { enforcePinnedTargets } from "@/components/task/dockview-layout-setup";
+import { enforcePinnedTargets } from "./dockview-pinned-enforce";
 import {
   injectIntentPanels,
   applyActivePanelOverrides,
