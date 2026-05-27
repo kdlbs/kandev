@@ -153,6 +153,22 @@ describe("useAccessibleRepos — errors, cache & unmount", () => {
     expect(fetchAccessibleReposMock).toHaveBeenCalledTimes(3);
   });
 
+  it("treats whitespace-only queries as empty and reuses the initial cache entry", async () => {
+    fetchAccessibleReposMock.mockResolvedValueOnce([makeRepo("initial")]);
+
+    const { result } = renderHook(() => useAccessibleRepos());
+
+    // Initial empty-query fetch settles.
+    await waitFor(() => expect(result.current.repos).toEqual([makeRepo("initial")]));
+    expect(fetchAccessibleReposMock).toHaveBeenCalledTimes(1);
+
+    act(() => result.current.search("   "));
+
+    // Whitespace collapses to "" — same cache entry, no extra fetch.
+    await waitFor(() => expect(result.current.repos).toEqual([makeRepo("initial")]));
+    expect(fetchAccessibleReposMock).toHaveBeenCalledTimes(1);
+  });
+
   it("aborts the in-flight fetch on unmount", async () => {
     let aborted = false;
     fetchAccessibleReposMock.mockImplementationOnce(

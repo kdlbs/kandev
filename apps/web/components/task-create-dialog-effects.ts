@@ -12,6 +12,7 @@ import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
 import { fetchRepoBranches, fetchPRInfo } from "@/lib/api/domains/github-api";
 import { getLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
+import { parseGitHubRepoUrl } from "@/lib/github/parse-url";
 import type {
   DialogFormState,
   StoreSelections,
@@ -328,12 +329,8 @@ function parseGitHubUrl(url: string): { owner: string; repo: string; prNumber?: 
   if (prMatch) {
     return { owner: prMatch[1], repo: prMatch[2], prNumber: parseInt(prMatch[3], 10) };
   }
-  // Fall back to repo URL: github.com/owner/repo
-  const match = trimmed.match(
-    /(?:https?:\/\/)?(?:www\.)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/,
-  );
-  if (!match) return null;
-  return { owner: match[1], repo: match[2] };
+  // Fall back to plain repo URL: github.com/owner/repo
+  return parseGitHubRepoUrl(trimmed);
 }
 
 /**

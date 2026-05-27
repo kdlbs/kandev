@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchRepoBranches } from "@/lib/api/domains/github-api";
+import { parseGitHubRepoUrl } from "@/lib/github/parse-url";
 import type { Branch } from "@/lib/types/http";
 
 /**
@@ -29,7 +30,6 @@ import type { Branch } from "@/lib/types/http";
 type URLState = {
   branches: Branch[];
   loading: boolean;
-  loaded: boolean;
 };
 
 export type UseBranchesByURLResult = {
@@ -39,16 +39,6 @@ export type UseBranchesByURLResult = {
 };
 
 const EMPTY: Branch[] = [];
-
-function parseGitHubRepoURL(url: string): { owner: string; repo: string } | null {
-  const trimmed = url.trim();
-  if (!trimmed) return null;
-  const match = trimmed.match(
-    /(?:https?:\/\/)?(?:www\.)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/,
-  );
-  if (!match) return null;
-  return { owner: match[1], repo: match[2] };
-}
 
 export function useBranchesByURL(): UseBranchesByURLResult {
   const [state, setState] = useState<Record<string, URLState>>({});
@@ -81,12 +71,12 @@ export function useBranchesByURL(): UseBranchesByURLResult {
   const ensure = useCallback((url: string) => {
     if (!url) return;
     if (inFlightRef.current.has(url) || loadedRef.current.has(url)) return;
-    const parsed = parseGitHubRepoURL(url);
+    const parsed = parseGitHubRepoUrl(url);
     if (!parsed) {
       loadedRef.current.add(url);
       setState((prev) => ({
         ...prev,
-        [url]: { branches: [], loading: false, loaded: true },
+        [url]: { branches: [], loading: false },
       }));
       return;
     }
@@ -95,7 +85,6 @@ export function useBranchesByURL(): UseBranchesByURLResult {
       [url]: {
         branches: prev[url]?.branches ?? [],
         loading: true,
-        loaded: false,
       },
     }));
     inFlightRef.current.add(url);
@@ -114,7 +103,7 @@ export function useBranchesByURL(): UseBranchesByURLResult {
         loadedRef.current.add(url);
         setState((prev) => ({
           ...prev,
-          [url]: { branches, loading: false, loaded: true },
+          [url]: { branches, loading: false },
         }));
       })
       .catch(() => {
@@ -127,7 +116,6 @@ export function useBranchesByURL(): UseBranchesByURLResult {
           [url]: {
             branches: prev[url]?.branches ?? [],
             loading: false,
-            loaded: true,
           },
         }));
       })

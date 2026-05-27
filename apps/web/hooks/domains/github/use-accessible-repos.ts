@@ -59,7 +59,10 @@ export function useAccessibleRepos(initialQuery: string = ""): UseAccessibleRepo
   // otherwise the debounce timer fires off a fresh request and aborts any
   // previous in-flight one.
   useEffect(() => {
-    const cached = cacheRef.current.get(query);
+    // Whitespace-only queries collapse to "" so they share the empty-query
+    // cache entry and don't issue a fetch with `q=%20%20%20`.
+    const normalized = query.trim();
+    const cached = cacheRef.current.get(normalized);
     if (cached) {
       setRepos(cached);
       setLoading(false);
@@ -83,7 +86,7 @@ export function useAccessibleRepos(initialQuery: string = ""): UseAccessibleRepo
     const controller = new AbortController();
     abortRef.current = controller;
     debounceRef.current = setTimeout(() => {
-      runFetch(query, controller);
+      runFetch(normalized, controller);
     }, DEBOUNCE_MS);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
