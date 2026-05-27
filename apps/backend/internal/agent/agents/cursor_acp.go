@@ -100,7 +100,7 @@ func (a *CursorACP) Runtime() *RuntimeConfig {
 func (a *CursorACP) RemoteAuth() *RemoteAuth { return nil }
 
 func (a *CursorACP) InstallScript() string {
-	return "Install Cursor CLI from https://cursor.com/cli"
+	return "curl https://cursor.com/install -fsS | bash"
 }
 
 func (a *CursorACP) PermissionSettings() map[string]PermissionSetting {
