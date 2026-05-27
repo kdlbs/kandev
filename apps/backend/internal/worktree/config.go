@@ -87,10 +87,19 @@ func (c *Config) SemanticBranchName(semanticName, suffix string) string {
 	return c.BranchPrefix + semanticName + "-" + suffix
 }
 
+// isASCIIAlphaNum reports whether r is an ASCII letter or digit. Restricting
+// to ASCII (rather than the broader unicode.IsLetter/IsDigit) keeps branch
+// and worktree-directory names usable across tools and filesystems — Unicode
+// letters such as CJK ideographs or emoji are valid git refs but break many
+// downstream consumers (see issue #1081).
+func isASCIIAlphaNum(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
+}
+
 // SanitizeForBranch converts a task title into a valid git branch name component.
 // It:
 // - Converts to lowercase
-// - Replaces spaces and special characters with hyphens
+// - Replaces spaces and non-ASCII-alphanumeric characters with hyphens
 // - Removes consecutive hyphens
 // - Truncates to maxLen characters
 // - Removes leading/trailing hyphens
@@ -102,12 +111,12 @@ func SanitizeForBranch(title string, maxLen int) string {
 	// Convert to lowercase
 	result := strings.ToLower(title)
 
-	// Replace any character that's not alphanumeric with a hyphen
-	// Git branch names allow: a-z, A-Z, 0-9, /, ., _, -
-	// We'll use only alphanumeric and hyphens for cleaner names
+	// Replace any character that's not ASCII-alphanumeric with a hyphen.
+	// Git branch names allow a broader character set, but we restrict to ASCII
+	// alphanumerics + hyphens for cleaner, portable names.
 	var sb strings.Builder
 	for _, r := range result {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+		if isASCIIAlphaNum(r) {
 			sb.WriteRune(r)
 		} else {
 			sb.WriteRune('-')
@@ -220,7 +229,7 @@ func SanitizeRepoDirName(name string) string {
 	sb.Grow(len(name))
 	for _, r := range name {
 		switch {
-		case unicode.IsLetter(r), unicode.IsDigit(r):
+		case isASCIIAlphaNum(r):
 			sb.WriteRune(r)
 		case r == '_', r == '.', r == '-':
 			sb.WriteRune(r)

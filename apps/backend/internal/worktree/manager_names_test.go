@@ -83,6 +83,41 @@ func TestBuildWorktreeNames(t *testing.T) {
 		}
 	})
 
+	t.Run("non-ASCII title falls back to task ID for branch and suffix-only for dir", func(t *testing.T) {
+		req := CreateRequest{
+			TaskID:               "task-cjk",
+			TaskTitle:            "修复登录问题",
+			WorktreeBranchPrefix: "kandev/",
+		}
+		dirName, branchName := mgr.buildWorktreeNames(req)
+
+		// SemanticWorktreeName returns just the 8-char UUID suffix when the
+		// sanitized title is empty.
+		if len(dirName) != 8 {
+			t.Errorf("dirName should be 8-char suffix only, got %q (len %d)", dirName, len(dirName))
+		}
+		// TaskBranchNameWithSuffix falls back to the sanitized task ID.
+		if !strings.HasPrefix(branchName, "kandev/task-cjk-") {
+			t.Errorf("branchName = %q, want prefix %q", branchName, "kandev/task-cjk-")
+		}
+	})
+
+	t.Run("mixed ASCII and CJK title keeps ASCII parts", func(t *testing.T) {
+		req := CreateRequest{
+			TaskID:               "task-mix",
+			TaskTitle:            "Fix 修复 bug",
+			WorktreeBranchPrefix: "kandev/",
+		}
+		dirName, branchName := mgr.buildWorktreeNames(req)
+
+		if !strings.HasPrefix(dirName, "fix-bug_") {
+			t.Errorf("dirName = %q, want prefix %q", dirName, "fix-bug_")
+		}
+		if !strings.HasPrefix(branchName, "kandev/fix-bug-") {
+			t.Errorf("branchName = %q, want prefix %q", branchName, "kandev/fix-bug-")
+		}
+	})
+
 	t.Run("unique names on successive calls", func(t *testing.T) {
 		req := CreateRequest{
 			TaskID:    "task-1",

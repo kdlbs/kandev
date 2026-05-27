@@ -292,6 +292,54 @@ func TestSanitizeForBranch(t *testing.T) {
 			maxLen:   13,
 			expected: "fix-the-login",
 		},
+		{
+			name:     "CJK-only title strips to empty",
+			title:    "修复登录问题",
+			maxLen:   20,
+			expected: "",
+		},
+		{
+			name:     "Cyrillic-only title strips to empty",
+			title:    "Исправить баг",
+			maxLen:   20,
+			expected: "",
+		},
+		{
+			name:     "Arabic-only title strips to empty",
+			title:    "إصلاح الخطأ",
+			maxLen:   20,
+			expected: "",
+		},
+		{
+			name:     "emoji-only title strips to empty",
+			title:    "🐛🔥",
+			maxLen:   20,
+			expected: "",
+		},
+		{
+			name:     "mixed ASCII and CJK keeps ASCII parts",
+			title:    "Fix 修复 bug",
+			maxLen:   20,
+			expected: "fix-bug",
+		},
+		{
+			name:     "CJK with ASCII number keeps the number",
+			title:    "Bug 42 修复",
+			maxLen:   20,
+			expected: "bug-42",
+		},
+		{
+			name:     "Issue-number prefix survives non-ASCII title body",
+			title:    "Issue #42: 修复登录问题",
+			maxLen:   20,
+			expected: "issue-42",
+		},
+		{
+			name:     "accented Latin characters are stripped",
+			title:    "café résumé",
+			maxLen:   20,
+			expected: "caf-r-sum",
+		},
 	}
 
 	for _, tt := range tests {
@@ -334,6 +382,18 @@ func TestSemanticWorktreeName(t *testing.T) {
 			taskTitle: "!@#$%^&*()",
 			suffix:    "ab12cd34",
 			expected:  "ab12cd34",
+		},
+		{
+			name:      "non-ASCII-only title falls back to suffix",
+			taskTitle: "修复登录问题",
+			suffix:    "ab12cd34",
+			expected:  "ab12cd34",
+		},
+		{
+			name:      "mixed ASCII and CJK keeps ASCII parts",
+			taskTitle: "Fix 修复 bug",
+			suffix:    "ab12cd34",
+			expected:  "fix-bug_ab12cd34",
 		},
 	}
 
