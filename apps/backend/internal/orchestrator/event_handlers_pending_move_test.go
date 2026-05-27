@@ -611,9 +611,10 @@ func TestHandleAgentBootReady_DoesNotTriggerOnTurnComplete(t *testing.T) {
 // only flipped state but never drained.
 //
 // After the fix, handleAgentBootReady takes the queued message and dispatches
-// it (via executeQueuedMessage in a goroutine). The unit test only asserts
-// that the queue is empty after the handler returns; the goroutine's
-// PromptTask is not exercised here (it requires a live executor).
+// it (via executeQueuedMessage in a goroutine). The test wires a full
+// executor + seeded executors_running row so the goroutine's PromptTask
+// call lands on a working code path instead of nil-derefing s.executor
+// under -race.
 func TestHandleAgentBootReady_DrainsOrphanedQueuedMessage(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
@@ -644,14 +645,19 @@ func TestHandleAgentBootReady_DrainsOrphanedQueuedMessage(t *testing.T) {
 			}
 
 			sessionID := "s1"
+			const executionID = "exec-1"
 			if err := repo.CreateTaskSession(ctx, &models.TaskSession{
 				ID: sessionID, TaskID: "task-1", AgentProfileID: "profile-impl",
-				State:     tc.startSt,
-				IsPrimary: true,
-				StartedAt: now, UpdatedAt: now,
+				AgentExecutionID: executionID,
+				State:            tc.startSt,
+				IsPrimary:        true,
+				StartedAt:        now, UpdatedAt: now,
 			}); err != nil {
 				t.Fatalf("create session: %v", err)
 			}
+			// Seed executors_running so PromptTask -> ensureSessionRunning ->
+			// executor.GetExecutionBySession finds the agent and skips resume.
+			seedExecutorRunning(t, repo, sessionID, "task-1", executionID)
 
 			taskRepo := newMockTaskRepo()
 			taskRepo.tasks["task-1"] = &v1.Task{
@@ -659,12 +665,20 @@ func TestHandleAgentBootReady_DrainsOrphanedQueuedMessage(t *testing.T) {
 			}
 
 			log := testLogger()
+			agentMgr := &mockAgentManager{
+				repoForExecutionLookup: repo,
+				isAgentRunning:         true, // satisfy GetExecutionBySession's IsAgentRunningForSession check
+			}
 			svc := &Service{
 				logger:       log,
 				repo:         repo,
 				taskRepo:     taskRepo,
-				agentManager: &mockAgentManager{repoForExecutionLookup: repo},
+				agentManager: agentMgr,
 				messageQueue: messagequeue.NewServiceMemory(log),
+				// Wire a real executor so the executeQueuedMessage goroutine
+				// spawned by drainQueuedMessageAfterTransition can safely call
+				// PromptTask -> executor.GetExecutionBySession without nil-derefing.
+				executor: executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}),
 			}
 
 			// Seed an orphaned workflow auto-start prompt — what the production
