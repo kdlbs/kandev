@@ -32,7 +32,6 @@ type Poller struct {
 	logger        *logger.Logger
 	auth          *healthpoll.Poller
 	issueInterval time.Duration
-	issueTickHook func()
 
 	// mu guards started/cancel/wg against concurrent Start/Stop calls.
 	mu              sync.Mutex
@@ -111,7 +110,6 @@ func (p *Poller) issueWatchLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			p.checkIssueWatches(ctx)
-			p.fireIssueTickHook()
 		}
 	}
 }
@@ -162,15 +160,6 @@ func isIssueWatchDue(w *IssueWatch, now time.Time) bool {
 		interval = DefaultIssueWatchPollInterval
 	}
 	return now.Sub(*w.LastPolledAt) >= time.Duration(interval)*time.Second
-}
-
-func (p *Poller) fireIssueTickHook() {
-	p.mu.Lock()
-	hook := p.issueTickHook
-	p.mu.Unlock()
-	if hook != nil {
-		hook()
-	}
 }
 
 // svcProber adapts *Service to healthpoll.Prober without leaking the shared

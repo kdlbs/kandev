@@ -38,8 +38,6 @@ type Trigger struct {
 	wg      sync.WaitGroup
 	started bool
 
-	matchHook func(msg SlackMessage, reply string)
-
 	// lastScannedAt tracks when we last ran a scan so the configured
 	// PollIntervalSeconds is honoured exactly. In-memory by design — backend
 	// restart triggers an immediate scan, which is fine.
@@ -155,7 +153,7 @@ func (t *Trigger) processMatches(ctx context.Context, cfg *SlackConfig, prefix s
 		if ctx.Err() != nil {
 			return
 		}
-		reply, err := t.handleOne(ctx, cfg, prefix, m, client)
+		_, err := t.handleOne(ctx, cfg, prefix, m, client)
 		if err != nil {
 			t.log.Warn("slack trigger: handle match failed",
 				zap.String("ts", m.TS), zap.Error(err))
@@ -174,7 +172,6 @@ func (t *Trigger) processMatches(ctx context.Context, cfg *SlackConfig, prefix s
 		if compareTS(m.TS, highest) > 0 {
 			highest = m.TS
 		}
-		t.fireHook(m, reply)
 	}
 	if highest != cfg.LastSeenTS {
 		if err := t.svc.Store().UpdateLastSeenTS(ctx, highest); err != nil {
@@ -221,15 +218,6 @@ func (t *Trigger) replyInThread(ctx context.Context, client Client, msg SlackMes
 	if err := client.ChatPostMessage(ctx, msg.ChannelID, threadTS, body); err != nil {
 		t.log.Warn("slack trigger: reply post failed",
 			zap.String("ts", msg.TS), zap.Error(err))
-	}
-}
-
-func (t *Trigger) fireHook(msg SlackMessage, reply string) {
-	t.mu.Lock()
-	hook := t.matchHook
-	t.mu.Unlock()
-	if hook != nil {
-		hook(msg, reply)
 	}
 }
 
