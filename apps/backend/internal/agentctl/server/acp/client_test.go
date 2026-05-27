@@ -3,6 +3,7 @@ package acp
 import (
 	"context"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/coder/acp-go-sdk"
@@ -96,6 +97,7 @@ func TestForwardPermissionRequestTitleDerivation(t *testing.T) {
 		wantTitle      string
 		wantActionType string
 		wantDescInDtl  bool
+		wantRawInput   map[string]any
 	}{
 		{
 			name: "title present, kind other -> human title wins",
@@ -106,7 +108,7 @@ func TestForwardPermissionRequestTitleDerivation(t *testing.T) {
 			},
 			wantTitle:      "Run bash command 'ls -la'",
 			wantActionType: "other",
-			wantDescInDtl:  false, // description == title, so not duplicated
+			wantDescInDtl:  true,
 		},
 		{
 			name: "title present, kind execute -> human title still wins",
@@ -117,10 +119,10 @@ func TestForwardPermissionRequestTitleDerivation(t *testing.T) {
 			},
 			wantTitle:      "Run bash command 'rm -rf'",
 			wantActionType: "execute",
-			wantDescInDtl:  false,
+			wantDescInDtl:  true,
 		},
 		{
-			name: "only kind -> kind is the title",
+			name: "only kind -> kind is the title, no description forwarded",
 			toolCall: acp.ToolCallUpdate{
 				ToolCallId: "tc-3",
 				Kind:       kind(acp.ToolKindEdit),
@@ -137,7 +139,7 @@ func TestForwardPermissionRequestTitleDerivation(t *testing.T) {
 			},
 			wantTitle:      "Reading configuration file",
 			wantActionType: "",
-			wantDescInDtl:  false,
+			wantDescInDtl:  true,
 		},
 		{
 			name: "neither title nor kind -> both empty",
@@ -147,6 +149,30 @@ func TestForwardPermissionRequestTitleDerivation(t *testing.T) {
 			wantTitle:      "",
 			wantActionType: "",
 			wantDescInDtl:  false,
+		},
+		{
+			name: "whitespace-only title falls back to kind",
+			toolCall: acp.ToolCallUpdate{
+				ToolCallId: "tc-ws",
+				Title:      str("   "),
+				Kind:       kind(acp.ToolKindExecute),
+			},
+			wantTitle:      "execute",
+			wantActionType: "execute",
+			wantDescInDtl:  false,
+		},
+		{
+			name: "raw_input forwarded into ActionDetails",
+			toolCall: acp.ToolCallUpdate{
+				ToolCallId: "tc-6",
+				Title:      str("Run bash"),
+				Kind:       kind(acp.ToolKindExecute),
+				RawInput:   map[string]any{"command": "ls -la", "cwd": "/tmp"},
+			},
+			wantTitle:      "Run bash",
+			wantActionType: "execute",
+			wantDescInDtl:  true,
+			wantRawInput:   map[string]any{"command": "ls -la", "cwd": "/tmp"},
 		},
 	}
 
@@ -178,6 +204,15 @@ func TestForwardPermissionRequestTitleDerivation(t *testing.T) {
 			_, hasDesc := captured.ActionDetails["description"]
 			if hasDesc != tt.wantDescInDtl {
 				t.Errorf("ActionDetails.description present = %v, want %v (details=%v)", hasDesc, tt.wantDescInDtl, captured.ActionDetails)
+			}
+			if tt.wantRawInput != nil {
+				gotRaw, ok := captured.ActionDetails["raw_input"].(map[string]any)
+				if !ok {
+					t.Fatalf("ActionDetails.raw_input missing or wrong type: %#v", captured.ActionDetails["raw_input"])
+				}
+				if !reflect.DeepEqual(gotRaw, tt.wantRawInput) {
+					t.Errorf("ActionDetails.raw_input = %v, want %v", gotRaw, tt.wantRawInput)
+				}
 			}
 		})
 	}

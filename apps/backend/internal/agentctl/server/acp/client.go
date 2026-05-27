@@ -156,7 +156,7 @@ func (c *Client) forwardPermissionRequest(ctx context.Context, handler Permissio
 	// for tools they can't classify, which on its own is meaningless to the user.
 	description := ""
 	if p.ToolCall.Title != nil {
-		description = *p.ToolCall.Title
+		description = strings.TrimSpace(*p.ToolCall.Title)
 	}
 
 	actionType := ""
@@ -169,12 +169,14 @@ func (c *Client) forwardPermissionRequest(ctx context.Context, handler Permissio
 		title = actionType
 	}
 
-	// Build action details from raw input if available
+	// Build action details from raw input if available. The frontend de-dups
+	// description against title at render time, so always forward description
+	// when present — useful for future agents where the two may diverge.
 	actionDetails := make(map[string]any)
 	if p.ToolCall.RawInput != nil {
 		actionDetails["raw_input"] = p.ToolCall.RawInput
 	}
-	if description != "" && description != title {
+	if description != "" {
 		actionDetails["description"] = description
 	}
 
