@@ -12,7 +12,7 @@ import {
   computeBranchPlaceholder,
 } from "@/components/task-create-dialog-pill";
 
-function computeUrlBranchDisabledReason({
+export function computeUrlBranchDisabledReason({
   hasUrl,
   branchesLoading,
   optionCount,
