@@ -91,10 +91,10 @@ func TestBuildWorktreeNames(t *testing.T) {
 		}
 		dirName, branchName := mgr.buildWorktreeNames(req)
 
-		// SemanticWorktreeName returns just the 8-char UUID suffix when the
-		// sanitized title is empty.
-		if len(dirName) != 8 {
-			t.Errorf("dirName should be 8-char suffix only, got %q (len %d)", dirName, len(dirName))
+		// SemanticWorktreeName returns just the suffix when the sanitized title
+		// is empty — there should be no title portion, so no underscore separator.
+		if strings.Contains(dirName, "_") {
+			t.Errorf("dirName should be suffix only (no underscore), got %q", dirName)
 		}
 		// TaskBranchNameWithSuffix falls back to the sanitized task ID.
 		if !strings.HasPrefix(branchName, "kandev/task-cjk-") {

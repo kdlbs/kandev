@@ -90,8 +90,8 @@ func (c *Config) SemanticBranchName(semanticName, suffix string) string {
 // isASCIIAlphaNum reports whether r is an ASCII letter or digit. Restricting
 // to ASCII (rather than the broader unicode.IsLetter/IsDigit) keeps branch
 // and worktree-directory names usable across tools and filesystems — Unicode
-// letters such as CJK ideographs or emoji are valid git refs but break many
-// downstream consumers (see issue #1081).
+// letters such as CJK ideographs, Cyrillic, or Arabic characters are valid
+// git refs but break many downstream consumers (see issue #1081).
 func isASCIIAlphaNum(r rune) bool {
 	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
 }
