@@ -15,8 +15,9 @@ export type PermissionActionDetails = {
   command?: string;
   path?: string;
   cwd?: string;
-  // Free-form human-readable description (set by the ACP adapter when the
-  // agent provides a ToolCall.Title distinct from the displayed title).
+  // Description forwarded from ToolCall.Title. Equals the displayed title
+  // in the current backend; reserved for future use when agents send a
+  // separate description distinct from Title.
   description?: string;
   // Raw tool-call input as sent by the agent (e.g. { command: "ls -la" },
   // { file_path: "foo.go", limit: 10 }, { url: "..." }). Schema varies per

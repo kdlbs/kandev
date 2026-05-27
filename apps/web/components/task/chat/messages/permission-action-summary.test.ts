@@ -6,7 +6,9 @@ describe("summarizePermissionAction", () => {
     expect(summarizePermissionAction(undefined, "x")).toBeNull();
   });
 
-  it("prefers explicit description", () => {
+  // Today the backend always sends description == title; this case covers
+  // the future-reserved path where agents send a distinct description.
+  it("prefers explicit description when it differs from title", () => {
     expect(
       summarizePermissionAction(
         { description: "Run bash command 'ls -la'", raw_input: { command: "ls -la" } },
