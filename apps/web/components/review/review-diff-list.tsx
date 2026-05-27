@@ -374,7 +374,15 @@ function renderDiffContent(opts: {
     // belongs to the local branch, not the PR head — when the same file has
     // both PR and local changes, the wrong content gets paired with the PR
     // patch and @pierre/diffs 1.1.x renders nothing/errors. Disable expansion
-    // for PR-sourced rows; uncommitted/committed rows still get it.
+    // for PR-sourced rows.
+    //
+    // Also disable expansion for committed-source rows: the backend computes
+    // the diff against the session's stored base commit, not HEAD. HEAD
+    // already contains the committed changes, so fetching old content at
+    // baseRef="HEAD" returns the same content as the working tree, leaving
+    // processFile's trailing-context counts inconsistent and crashing the
+    // renderer. Using the right base would need the session's base SHA
+    // plumbed in here; that's a follow-up.
     //
     // Also disable expansion for untracked files: the backend synthesizes a
     // single all-additions hunk against /dev/null, so there is no real
@@ -382,7 +390,7 @@ function renderDiffContent(opts: {
     // races with concurrent edits — if the file shrinks after the snapshot,
     // the cached hunk header advertises more lines than the fetched content
     // has and @pierre/diffs' DiffHunksRenderer throws.
-    const enableExpansion = file.source !== "pr" && file.status !== "untracked";
+    const enableExpansion = file.source === "uncommitted" && file.status !== "untracked";
     return (
       <>
         <DiffErrorBoundary filePath={file.path}>

@@ -32,6 +32,25 @@ function isFileNotFoundError(error: string): boolean {
   return /file not found|not found|no such file|does not exist/i.test(error);
 }
 
+/**
+ * Validate that a reparsed metadata won't trip @pierre/diffs' iterateOverDiff
+ * trailing-context check (which throws and tears down the renderer). When
+ * fetched contents are out of sync with the patch, processFile still produces
+ * a metadata object whose final-hunk indices leave a different number of
+ * trailing addition vs deletion lines — the exact condition iterateOverDiff
+ * asserts on. Detecting it here lets the caller fall back to the partial
+ * metadata instead of crashing.
+ */
+function isReparseConsistent(meta: FileDiffMetadata): boolean {
+  const lastHunk = meta.hunks?.[meta.hunks.length - 1];
+  if (!lastHunk) return true;
+  const addRemain =
+    meta.additionLines.length - (lastHunk.additionLineIndex + lastHunk.additionCount);
+  const delRemain =
+    meta.deletionLines.length - (lastHunk.deletionLineIndex + lastHunk.deletionCount);
+  return addRemain === delRemain;
+}
+
 /** Fetch old file content at a git ref. Returns empty string for new files. */
 async function fetchOldContent(
   client: WsClient,
@@ -157,6 +176,14 @@ export function useExpandableDiff({
       newFile: { name: filePath, contents: loadedContent.newContent },
     });
     if (!reparsed) return fileDiffMetadata;
+    // Reject a reparse whose trailing-context lengths don't match: when the
+    // fetched contents are out of sync with the patch (stale snapshot, wrong
+    // base ref for a committed diff, file edited mid-flight), processFile
+    // still returns a metadata object, but @pierre/diffs' iterateOverDiff
+    // will throw "trailing context mismatch" the moment it tries to render.
+    // Falling back to the original partial metadata loses expansion controls
+    // but renders the patch correctly — same as the dedicated Diff tab.
+    if (!isReparseConsistent(reparsed)) return fileDiffMetadata;
     // Preserve the lang override that useDiffMetadata sets (e.g. lang:'text'
     // for Go files that hit the Shiki backtracking guard). processFile would
     // otherwise infer "go" from the filename and silently re-enable Shiki.
