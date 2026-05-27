@@ -109,9 +109,13 @@ func (s *Service) requeueMessage(ctx context.Context, queuedMsg *messagequeue.Qu
 // agent.ready (turn-end) so the orchestrator never has to disambiguate the
 // two with race-prone flags.
 //
-// The only job here is to flip the session to WAITING_FOR_INPUT so callers
+// Two jobs here: (1) flip the session to WAITING_FOR_INPUT so callers
 // that are gating on that state (e.g. PromptTask's waitForSessionReady after
-// ensureSessionRunning kicked off ResumeSession) can proceed. Crucially we do
+// ensureSessionRunning kicked off ResumeSession) can proceed; (2) drain any
+// orphaned queued message. Without the drain, a workflow auto-start prompt
+// queued against a session that died mid-turn (or before its first prompt)
+// would sit forever after the user resumed it — agent.ready (the usual drain
+// trigger) never fires for a turn that never completed. Crucially we do
 // NOT call processOnTurnCompleteViaEngine — there's no turn to complete, and
 // stepping the workflow off a boot signal is what caused the production
 // ping-pong bug.
@@ -159,15 +163,23 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 
 	// Idempotent: if the session is already WAITING_FOR_INPUT (e.g. revived
 	// from a previously launched session and the boot signal arrived faster
-	// than persistResumeState wrote STARTING), skip — there's nothing to flip
-	// and waitForSessionReady's poll will pick it up.
+	// than persistResumeState wrote STARTING), skip the flip — but still
+	// fall through to the drain below: an orphaned queued message would
+	// otherwise sit forever.
 	if session.State == models.TaskSessionStateWaitingForInput {
-		s.logger.Debug("agent.boot_ready: session already WAITING_FOR_INPUT, no-op",
+		s.logger.Debug("agent.boot_ready: session already WAITING_FOR_INPUT, skipping flip",
 			zap.String("session_id", data.SessionID))
-		return
+	} else {
+		s.setSessionWaitingForInput(ctx, data.TaskID, data.SessionID, session)
 	}
 
-	s.setSessionWaitingForInput(ctx, data.TaskID, data.SessionID, session)
+	// Drain any orphaned queued message. handleAgentReady drains on turn-end,
+	// but a session that crashed mid-turn (or never started its first turn)
+	// won't fire agent.ready — leaving e.g. workflow auto-start prompts stuck
+	// on the queue until the user manually sends another message. After the
+	// agent has booted and the session is back to WAITING_FOR_INPUT it's safe
+	// to dispatch any pending message.
+	s.drainQueuedMessageAfterTransition(ctx, data.SessionID)
 }
 
 // handleAgentReady handles turn-end ready events: the agent finished processing

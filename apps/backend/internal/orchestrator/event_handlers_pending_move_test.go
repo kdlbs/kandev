@@ -601,3 +601,160 @@ func TestHandleAgentBootReady_DoesNotTriggerOnTurnComplete(t *testing.T) {
 		})
 	}
 }
+
+// TestHandleAgentBootReady_DrainsOrphanedQueuedMessage reproduces the
+// production stuck-queue symptom: a workflow auto-start prompt is queued
+// against a session, the agent dies before the turn completes (so no
+// agent.ready fires to drain it), and the user resumes the session. The
+// session ends up WAITING_FOR_INPUT with the message still on the queue —
+// "1 queued" displayed in the UI forever — because handleAgentBootReady
+// only flipped state but never drained.
+//
+// After the fix, handleAgentBootReady takes the queued message and dispatches
+// it (via executeQueuedMessage in a goroutine). The unit test only asserts
+// that the queue is empty after the handler returns; the goroutine's
+// PromptTask is not exercised here (it requires a live executor).
+func TestHandleAgentBootReady_DrainsOrphanedQueuedMessage(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	cases := []struct {
+		name    string
+		startSt models.TaskSessionState
+	}{
+		{"STARTING -> WAITING_FOR_INPUT (boot completes resume)", models.TaskSessionStateStarting},
+		{"already WAITING_FOR_INPUT (boot raced persistResumeState)", models.TaskSessionStateWaitingForInput},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := setupTestRepo(t)
+			if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}); err != nil {
+				t.Fatalf("create workspace: %v", err)
+			}
+			if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}); err != nil {
+				t.Fatalf("create workflow: %v", err)
+			}
+			if err := repo.CreateTask(ctx, &models.Task{
+				ID: "task-1", WorkflowID: "wf1", WorkflowStepID: "step-merge",
+				Title: "T", Description: "D", State: v1.TaskStateInProgress,
+				CreatedAt: now, UpdatedAt: now,
+			}); err != nil {
+				t.Fatalf("create task: %v", err)
+			}
+
+			sessionID := "s1"
+			if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+				ID: sessionID, TaskID: "task-1", AgentProfileID: "profile-impl",
+				State:     tc.startSt,
+				IsPrimary: true,
+				StartedAt: now, UpdatedAt: now,
+			}); err != nil {
+				t.Fatalf("create session: %v", err)
+			}
+
+			taskRepo := newMockTaskRepo()
+			taskRepo.tasks["task-1"] = &v1.Task{
+				ID: "task-1", WorkflowID: "wf1", State: v1.TaskStateInProgress,
+			}
+
+			log := testLogger()
+			svc := &Service{
+				logger:       log,
+				repo:         repo,
+				taskRepo:     taskRepo,
+				agentManager: &mockAgentManager{repoForExecutionLookup: repo},
+				messageQueue: messagequeue.NewServiceMemory(log),
+			}
+
+			// Seed an orphaned workflow auto-start prompt — what the production
+			// bug looked like in the DB at task 9378f7cf.
+			if _, err := svc.messageQueue.QueueMessage(
+				ctx, sessionID, "task-1", "ROLE: Merge operator. ...", "",
+				messagequeue.QueuedByWorkflow, false, nil,
+			); err != nil {
+				t.Fatalf("queue orphaned prompt: %v", err)
+			}
+			if got := svc.messageQueue.GetStatus(ctx, sessionID).Count; got != 1 {
+				t.Fatalf("precondition: queue count = %d, want 1", got)
+			}
+
+			svc.handleAgentBootReady(ctx, watcher.AgentEventData{
+				TaskID: "task-1", SessionID: sessionID,
+			})
+
+			if got := svc.messageQueue.GetStatus(ctx, sessionID).Count; got != 0 {
+				t.Errorf("queue count after boot ready = %d, want 0 (orphaned message must be drained)", got)
+			}
+
+			// Session must still end up WAITING_FOR_INPUT — the drain is
+			// additive, not a replacement for the existing flip behavior.
+			finalSess, err := repo.GetTaskSession(ctx, sessionID)
+			if err != nil {
+				t.Fatalf("load session: %v", err)
+			}
+			if finalSess.State != models.TaskSessionStateWaitingForInput {
+				t.Errorf("session.State = %q, want WAITING_FOR_INPUT", finalSess.State)
+			}
+		})
+	}
+}
+
+// TestHandleAgentBootReady_DoesNotDrainForTerminalSession guards against
+// reviving a queued message on a session that was cancelled or completed —
+// the user explicitly stopped this session, the queued prompt should NOT be
+// dispatched, and the early-return for terminal states must continue to
+// short-circuit before the drain.
+func TestHandleAgentBootReady_DoesNotDrainForTerminalSession(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	repo := setupTestRepo(t)
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-1", WorkflowID: "wf1", WorkflowStepID: "step-merge",
+		Title: "T", Description: "D", State: v1.TaskStateInProgress,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	sessionID := "s1"
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: sessionID, TaskID: "task-1", AgentProfileID: "profile-impl",
+		State:     models.TaskSessionStateCancelled,
+		IsPrimary: true,
+		StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	log := testLogger()
+	svc := &Service{
+		logger:       log,
+		repo:         repo,
+		taskRepo:     newMockTaskRepo(),
+		agentManager: &mockAgentManager{repoForExecutionLookup: repo},
+		messageQueue: messagequeue.NewServiceMemory(log),
+	}
+
+	if _, err := svc.messageQueue.QueueMessage(
+		ctx, sessionID, "task-1", "stuck prompt", "",
+		messagequeue.QueuedByWorkflow, false, nil,
+	); err != nil {
+		t.Fatalf("queue prompt: %v", err)
+	}
+
+	svc.handleAgentBootReady(ctx, watcher.AgentEventData{
+		TaskID: "task-1", SessionID: sessionID,
+	})
+
+	if got := svc.messageQueue.GetStatus(ctx, sessionID).Count; got != 1 {
+		t.Errorf("queue count after boot ready on terminal session = %d, want 1 (must not drain)", got)
+	}
+}
