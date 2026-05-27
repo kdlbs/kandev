@@ -1,13 +1,17 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import type { Branch, LocalRepository } from "@/lib/types/http";
+import type { LocalRepository } from "@/lib/types/http";
 import type {
   DialogFormState,
   StepType,
   TaskFormInputsHandle,
 } from "@/components/task-create-dialog-types";
-import { useRepositoriesState } from "@/components/task-create-dialog-repositories-state";
+import {
+  useRemoteReposState,
+  useRepositoriesState,
+} from "@/components/task-create-dialog-repositories-state";
+import { useBranchesByURL } from "@/hooks/domains/github/use-branches-by-url";
 
 /**
  * Workspace mode the New Subtask dialog supports today. The shared_group
@@ -43,13 +47,12 @@ export function defaultSubtaskWorkspaceMode(
  */
 export function useSubtaskFormState(): DialogFormState {
   const repos = useRepositoriesState();
+  const remoteRepos = useRemoteReposState();
+  const branchesByUrl = useBranchesByURL();
   const [agentProfileId, setAgentProfileId] = useState("");
   const [executorProfileId, setExecutorProfileId] = useState("");
-  const [useGitHubUrl, setUseGitHubUrl] = useState(false);
-  const [githubUrl, setGitHubUrl] = useState("");
+  const [useRemote, setUseRemote] = useState(false);
   const [githubBranch, setGitHubBranch] = useState("");
-  const [githubBranches, setGitHubBranches] = useState<Branch[]>([]);
-  const [githubBranchesLoading, setGitHubBranchesLoading] = useState(false);
   const [githubUrlError, setGitHubUrlError] = useState<string | null>(null);
   const [githubPrHeadBranch, setGitHubPrHeadBranch] = useState<string | null>(null);
   const [githubPrBaseBranch, setGitHubPrBaseBranch] = useState<string | null>(null);
@@ -72,8 +75,14 @@ export function useSubtaskFormState(): DialogFormState {
       addRepository: repos.addRepository,
       removeRepository: repos.removeRepository,
       updateRepository: repos.updateRepository,
+      remoteRepos: remoteRepos.remoteRepos,
+      setRemoteRepos: remoteRepos.setRemoteRepos,
+      addRemoteRepo: remoteRepos.addRemoteRepo,
+      removeRemoteRepo: remoteRepos.removeRemoteRepo,
+      updateRemoteRepo: remoteRepos.updateRemoteRepo,
       githubBranch,
       setGitHubBranch,
+      branchesByUrl,
       agentProfileId,
       setAgentProfileId,
       executorId: "",
@@ -95,14 +104,8 @@ export function useSubtaskFormState(): DialogFormState {
       setIsCreatingSession: NOOP,
       isCreatingTask: false,
       setIsCreatingTask: NOOP,
-      useGitHubUrl,
-      setUseGitHubUrl,
-      githubUrl,
-      setGitHubUrl,
-      githubBranches,
-      setGitHubBranches,
-      githubBranchesLoading,
-      setGitHubBranchesLoading,
+      useRemote,
+      setUseRemote,
       githubUrlError,
       setGitHubUrlError,
       githubPrHeadBranch,
@@ -120,13 +123,16 @@ export function useSubtaskFormState(): DialogFormState {
       repos.addRepository,
       repos.removeRepository,
       repos.updateRepository,
+      remoteRepos.remoteRepos,
+      remoteRepos.setRemoteRepos,
+      remoteRepos.addRemoteRepo,
+      remoteRepos.removeRemoteRepo,
+      remoteRepos.updateRemoteRepo,
+      branchesByUrl,
       githubBranch,
       agentProfileId,
       executorProfileId,
-      useGitHubUrl,
-      githubUrl,
-      githubBranches,
-      githubBranchesLoading,
+      useRemote,
       githubUrlError,
       githubPrHeadBranch,
       githubPrBaseBranch,

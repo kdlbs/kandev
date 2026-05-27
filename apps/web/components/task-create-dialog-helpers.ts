@@ -2,7 +2,11 @@ import type { useRouter } from "next/navigation";
 import type { Task, Branch, LocalRepository, Repository } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { AppState } from "@/lib/state/store";
-import type { StepType, TaskRepoRow } from "@/components/task-create-dialog-types";
+import type {
+  StepType,
+  TaskRemoteRepoRow,
+  TaskRepoRow,
+} from "@/components/task-create-dialog-types";
 import { selectPreferredBranch } from "@/lib/utils";
 import { getLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
@@ -142,14 +146,16 @@ export function validateCreateInputs(inputs: {
   effectiveWorkflowId: string | null;
   /** Unified repos list. The form is valid if any row has a repo set OR URL mode is filled. */
   repositories: TaskRepoRow[];
-  githubUrl?: string;
+  /** Remote URL rows. The form is valid when at least one has a non-empty URL. */
+  remoteRepos?: TaskRemoteRepoRow[];
   agentProfileId: string;
   noRepository?: boolean;
 }): boolean {
+  const hasRemoteRepo = (inputs.remoteRepos ?? []).some((r) => r.url.trim() !== "");
   const hasRepo =
     inputs.noRepository ||
     inputs.repositories.some((r) => r.repositoryId || r.localPath) ||
-    Boolean(inputs.githubUrl?.trim());
+    hasRemoteRepo;
   return Boolean(
     inputs.trimmedTitle &&
     inputs.workspaceId &&
@@ -169,8 +175,15 @@ export function validateCreateInputs(inputs: {
  *   detection happens on the backend.
  */
 export function buildRepositoriesPayload(opts: {
-  useGitHubUrl: boolean;
-  githubUrl: string;
+  /** True when the form is in GitHub Remote (URL) mode. */
+  useRemote: boolean;
+  /** Remote-URL rows; non-empty `url` rows are mapped 1:1 to payload entries. */
+  remoteRepos: TaskRemoteRepoRow[];
+  /**
+   * Branch picked in URL mode for the FIRST remote row. Carried as a separate
+   * field during the transition (single-row URL flow); once each chip owns its
+   * branch this collapses into `remoteRepos[i].branch`.
+   */
   githubBranch: string;
   githubPrHeadBranch: string | null;
   /**
@@ -201,26 +214,8 @@ export function buildRepositoriesPayload(opts: {
    */
   freshBranch?: { confirmDiscard: boolean; consentedDirtyFiles: string[] };
 }): NonNullable<CreateTaskParams["repositories"]> {
-  if (opts.useGitHubUrl && opts.githubUrl) {
-    // For PR URLs we display the PR head branch in the pill (so the user sees
-    // the branch they pasted). The displayed branch is NOT a valid base on
-    // origin for fork PRs — it only exists on the contributor's fork — so we
-    // anchor `base_branch` to the PR's actual target branch from the GitHub
-    // API and let `checkout_branch` carry the head ref. The backend materializes
-    // the head via the refs/pull/<N>/head refspec.
-    const isPrAutoSelection =
-      !!opts.githubPrHeadBranch && opts.githubBranch === opts.githubPrHeadBranch;
-    const baseBranch = isPrAutoSelection
-      ? opts.githubPrBaseBranch || undefined
-      : opts.githubBranch || undefined;
-    return [
-      {
-        repository_id: "",
-        base_branch: baseBranch,
-        checkout_branch: opts.githubPrHeadBranch || undefined,
-        github_url: opts.githubUrl.trim(),
-      },
-    ];
+  if (opts.useRemote) {
+    return buildRemoteRepoPayload(opts);
   }
   const fresh = opts.freshBranch
     ? {
@@ -262,6 +257,49 @@ export function buildRepositoriesPayload(opts: {
         ...fresh,
       };
     });
+}
+
+/**
+ * Builds the `repos: [{ github_url, branch }]` payload from the remote-URL
+ * rows. Rows with an empty URL are dropped silently — they're partially
+ * filled rows the user hasn't completed yet.
+ *
+ * The legacy single-URL flow drives this from `remoteRepos[0]` with
+ * PR-head/base inference; multi-row support comes online in Task 5. Until
+ * then, only the first row's branch is treated as "the URL flow branch"
+ * (`opts.githubBranch`) so PR auto-selection still works.
+ */
+function buildRemoteRepoPayload(opts: {
+  remoteRepos: TaskRemoteRepoRow[];
+  githubBranch: string;
+  githubPrHeadBranch: string | null;
+  githubPrBaseBranch?: string | null;
+}): NonNullable<CreateTaskParams["repositories"]> {
+  const nonEmpty = opts.remoteRepos.filter((r) => r.url.trim() !== "");
+  if (nonEmpty.length === 0) return [];
+  return nonEmpty.map((row, idx) => {
+    // Only the first row is in the legacy PR-head/base inference path during
+    // the transition; subsequent rows just carry their own branch verbatim.
+    if (idx === 0) {
+      const isPrAutoSelection =
+        !!opts.githubPrHeadBranch && opts.githubBranch === opts.githubPrHeadBranch;
+      const baseBranch = isPrAutoSelection
+        ? opts.githubPrBaseBranch || undefined
+        : opts.githubBranch || undefined;
+      return {
+        repository_id: "",
+        base_branch: baseBranch,
+        checkout_branch: opts.githubPrHeadBranch || undefined,
+        github_url: row.url.trim(),
+      };
+    }
+    return {
+      repository_id: "",
+      base_branch: row.branch || undefined,
+      checkout_branch: undefined,
+      github_url: row.url.trim(),
+    };
+  });
 }
 
 function resolveRowDefaultBranch(

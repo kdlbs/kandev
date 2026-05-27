@@ -79,7 +79,7 @@ type RepoChipsRowProps = {
   onRowRepositoryChange: (key: string, value: string) => void;
   onRowBranchChange: (key: string, value: string) => void;
   /** GitHub URL flow lives alongside the chips so users can switch in place. */
-  onToggleGitHubUrl?: () => void;
+  onToggleRemote?: () => void;
   onGitHubUrlChange?: (value: string) => void;
   /**
    * Fresh-branch toggle props. When `freshBranchAvailable` is true the toggle
@@ -111,7 +111,7 @@ export function RepoChipsRow({
   workspaceId,
   onRowRepositoryChange,
   onRowBranchChange,
-  onToggleGitHubUrl,
+  onToggleRemote,
   onGitHubUrlChange,
   freshBranchAvailable,
   freshBranchEnabled,
@@ -166,9 +166,9 @@ export function RepoChipsRow({
         onWorkspacePathChange={onWorkspacePathChange}
       />
       <SourceModeSwitch
-        useGitHubUrl={fs.useGitHubUrl}
+        useRemote={fs.useRemote}
         noRepository={fs.noRepository}
-        onToggleGitHubUrl={onToggleGitHubUrl}
+        onToggleRemote={onToggleRemote}
         onToggleNoRepository={onToggleNoRepository}
       />
     </div>
@@ -215,14 +215,15 @@ function ModeBody({
       />
     );
   }
-  if (fs.useGitHubUrl) {
+  if (fs.useRemote) {
+    const firstRemoteUrl = fs.remoteRepos[0]?.url ?? "";
     return (
       <GitHubUrlSection
-        githubUrl={fs.githubUrl}
+        githubUrl={firstRemoteUrl}
         githubUrlError={fs.githubUrlError}
         githubBranch={fs.githubBranch}
-        githubBranches={fs.githubBranches}
-        githubBranchesLoading={fs.githubBranchesLoading}
+        githubBranches={fs.branchesByUrl.branches(firstRemoteUrl)}
+        githubBranchesLoading={fs.branchesByUrl.loading(firstRemoteUrl)}
         onGitHubUrlChange={onGitHubUrlChange}
         onGitHubBranchChange={fs.setGitHubBranch}
       />

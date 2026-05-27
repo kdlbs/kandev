@@ -414,19 +414,30 @@ describe("useDefaultSelectionsEffect — auth-spec load race", () => {
     expect(fs.setAgentProfileId).not.toHaveBeenCalledWith(claude.id);
   });
 });
-
-type BranchFake = Pick<
-  DialogFormState,
-  "githubBranch" | "githubBranches" | "useGitHubUrl" | "setGitHubBranch" | "githubPrHeadBranch"
->;
-function makeBranchFs(overrides: Partial<BranchFake> = {}): DialogFormState {
+type BranchFake = {
+  githubBranch?: string;
+  /** Synthetic branch list returned by branchesByUrl.branches() for any URL. */
+  githubBranches?: Array<{ name: string; type: "local" | "remote"; remote?: string }>;
+  useRemote?: boolean;
+  setGitHubBranch?: ReturnType<typeof vi.fn>;
+  githubPrHeadBranch?: string | null;
+  /** Optional URL on the first remoteRepos row; tests don't need to vary this. */
+  remoteRepoUrl?: string;
+};
+function makeBranchFs(overrides: BranchFake = {}): DialogFormState {
+  const url = overrides.remoteRepoUrl ?? "github.com/owner/repo";
+  const branches = overrides.githubBranches ?? [];
   return {
-    githubBranch: "",
-    githubBranches: [],
-    useGitHubUrl: true,
-    setGitHubBranch: vi.fn(),
-    githubPrHeadBranch: null,
-    ...overrides,
+    githubBranch: overrides.githubBranch ?? "",
+    useRemote: overrides.useRemote ?? true,
+    setGitHubBranch: overrides.setGitHubBranch ?? vi.fn(),
+    githubPrHeadBranch: overrides.githubPrHeadBranch ?? null,
+    remoteRepos: [{ key: "remote-0", url, branch: "", source: "paste" as const }],
+    branchesByUrl: {
+      branches: (u: string) => (u === url ? branches : []),
+      loading: () => false,
+      ensure: () => undefined,
+    },
   } as unknown as DialogFormState;
 }
 
@@ -469,9 +480,9 @@ describe("useBranchAutoSelectEffect", () => {
     expect(fs.setGitHubBranch).toHaveBeenCalledWith("main");
   });
 
-  it("does nothing when useGitHubUrl is false", () => {
+  it("does nothing when useRemote is false", () => {
     const fs = makeBranchFs({
-      useGitHubUrl: false,
+      useRemote: false,
       githubBranches: [{ name: "main", type: "remote" }],
       githubPrHeadBranch: "feature/x",
     });

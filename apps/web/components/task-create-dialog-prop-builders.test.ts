@@ -3,18 +3,18 @@ import { computeHasAllBranches } from "./task-create-dialog-prop-builders";
 import type { DialogFormState } from "@/components/task-create-dialog-types";
 
 // Minimal fs stub for computeHasAllBranches. The function only reads
-// `noRepository`, `useGitHubUrl`, `githubBranch`, and `repositories[].branch`,
+// `noRepository`, `useRemote`, `githubBranch`, and `repositories[].branch`,
 // so we cast a partial through `unknown` to avoid having to materialise the
 // full DialogFormState surface in tests.
 function fsStub(overrides: {
   noRepository?: boolean;
-  useGitHubUrl?: boolean;
+  useRemote?: boolean;
   githubBranch?: string;
   repositories?: Array<{ branch?: string }>;
 }): DialogFormState {
   return {
     noRepository: false,
-    useGitHubUrl: false,
+    useRemote: false,
     githubBranch: "",
     repositories: [],
     ...overrides,
@@ -29,8 +29,8 @@ describe("computeHasAllBranches", () => {
   });
 
   it("treats the GitHub-URL mode as branched iff githubBranch is non-empty", () => {
-    expect(computeHasAllBranches(fsStub({ useGitHubUrl: true, githubBranch: "" }))).toBe(false);
-    expect(computeHasAllBranches(fsStub({ useGitHubUrl: true, githubBranch: "main" }))).toBe(true);
+    expect(computeHasAllBranches(fsStub({ useRemote: true, githubBranch: "" }))).toBe(false);
+    expect(computeHasAllBranches(fsStub({ useRemote: true, githubBranch: "main" }))).toBe(true);
   });
 
   it("requires every selected repository row to carry a branch", () => {

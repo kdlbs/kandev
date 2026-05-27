@@ -4,8 +4,8 @@ import { buildRepositoriesPayload } from "./task-create-dialog-helpers";
 describe("buildRepositoriesPayload — unified rows", () => {
   it("maps each row in order, dropping empty ones silently", () => {
     const payload = buildRepositoriesPayload({
-      useGitHubUrl: false,
-      githubUrl: "",
+      useRemote: false,
+      remoteRepos: [],
       githubBranch: "",
       githubPrHeadBranch: null,
       repositories: [
@@ -25,8 +25,8 @@ describe("buildRepositoriesPayload — unified rows", () => {
 
   it("emits local_path + default_branch for discovered (on-machine) rows", () => {
     const payload = buildRepositoriesPayload({
-      useGitHubUrl: false,
-      githubUrl: "",
+      useRemote: false,
+      remoteRepos: [],
       githubBranch: "",
       githubPrHeadBranch: null,
       repositories: [
@@ -60,8 +60,8 @@ describe("buildRepositoriesPayload — unified rows", () => {
 describe("buildRepositoriesPayload — local executor branch split (core)", () => {
   it("rowBranch != default_branch → swap into checkout_branch", () => {
     const payload = buildRepositoriesPayload({
-      useGitHubUrl: false,
-      githubUrl: "",
+      useRemote: false,
+      remoteRepos: [],
       githubBranch: "",
       githubPrHeadBranch: null,
       repositories: [{ key: "r0", repositoryId: "repo-1", branch: "feature/x" }],
@@ -77,8 +77,8 @@ describe("buildRepositoriesPayload — local executor branch split (core)", () =
 
   it("rowBranch matches default_branch → no checkout_branch", () => {
     const payload = buildRepositoriesPayload({
-      useGitHubUrl: false,
-      githubUrl: "",
+      useRemote: false,
+      remoteRepos: [],
       githubBranch: "",
       githubPrHeadBranch: null,
       repositories: [{ key: "r0", repositoryId: "repo-1", branch: "main" }],
@@ -94,8 +94,8 @@ describe("buildRepositoriesPayload — local executor branch split (core)", () =
 
   it("localPath row uses discoveredRepositories.default_branch", () => {
     const payload = buildRepositoriesPayload({
-      useGitHubUrl: false,
-      githubUrl: "",
+      useRemote: false,
+      remoteRepos: [],
       githubBranch: "",
       githubPrHeadBranch: null,
       repositories: [{ key: "r0", localPath: "/p/r", branch: "feature/y" }],
@@ -126,8 +126,8 @@ describe("buildRepositoriesPayload — local executor branch split (edge cases)"
     // repo's default ("main") and the fork would happen from main instead
     // of develop — silently wrong.
     const payload = buildRepositoriesPayload({
-      useGitHubUrl: false,
-      githubUrl: "",
+      useRemote: false,
+      remoteRepos: [],
       githubBranch: "",
       githubPrHeadBranch: null,
       repositories: [{ key: "r0", repositoryId: "repo-1", branch: "develop" }],
@@ -158,8 +158,8 @@ describe("buildRepositoriesPayload — local executor branch split (edge cases)"
     // shape alone — the next backend createRepository call will populate
     // default_branch via the gitref probe.
     const payload = buildRepositoriesPayload({
-      useGitHubUrl: false,
-      githubUrl: "",
+      useRemote: false,
+      remoteRepos: [],
       githubBranch: "",
       githubPrHeadBranch: null,
       repositories: [{ key: "r0", repositoryId: "repo-1", branch: "feature/x" }],
@@ -175,8 +175,8 @@ describe("buildRepositoriesPayload — local executor branch split (edge cases)"
 
   it("non-local executor leaves rowBranch as base_branch (worktree flow unchanged)", () => {
     const payload = buildRepositoriesPayload({
-      useGitHubUrl: false,
-      githubUrl: "",
+      useRemote: false,
+      remoteRepos: [],
       githubBranch: "",
       githubPrHeadBranch: null,
       repositories: [{ key: "r0", repositoryId: "repo-1", branch: "main" }],
@@ -191,11 +191,11 @@ describe("buildRepositoriesPayload — local executor branch split (edge cases)"
   });
 });
 
-describe("buildRepositoriesPayload — single-row and URL mode", () => {
+describe("buildRepositoriesPayload — single-row and URL mode (core)", () => {
   it("URL mode produces a single github_url entry and ignores the rows", () => {
     const payload = buildRepositoriesPayload({
-      useGitHubUrl: true,
-      githubUrl: "github.com/owner/repo",
+      useRemote: true,
+      remoteRepos: [{ key: "remote-0", url: "github.com/owner/repo", branch: "", source: "paste" }],
       githubBranch: "feature-x",
       githubPrHeadBranch: null,
       repositories: [{ key: "r0", repositoryId: "ignored", branch: "ignored" }],
@@ -213,8 +213,8 @@ describe("buildRepositoriesPayload — single-row and URL mode", () => {
 
   it("single-row workspace repo: payload mirrors the row", () => {
     const payload = buildRepositoriesPayload({
-      useGitHubUrl: false,
-      githubUrl: "",
+      useRemote: false,
+      remoteRepos: [],
       githubBranch: "",
       githubPrHeadBranch: null,
       repositories: [{ key: "r0", repositoryId: "repo-only", branch: "main" }],
@@ -224,15 +224,24 @@ describe("buildRepositoriesPayload — single-row and URL mode", () => {
       { repository_id: "repo-only", base_branch: "main", checkout_branch: undefined },
     ]);
   });
+});
 
+describe("buildRepositoriesPayload — PR URL inference", () => {
   // Fork PR: the displayed branch equals the PR head (auto-selected for visual
   // consistency with the pasted URL), but that branch doesn't live on origin.
   // The payload must anchor base_branch to the PR's actual target (from the
   // GitHub API) so the backend has a ref it can resolve.
   it("fork PR auto-selection: base_branch comes from PR's target, not displayed branch", () => {
     const payload = buildRepositoriesPayload({
-      useGitHubUrl: true,
-      githubUrl: "https://github.com/kdlbs/kandev/pull/977",
+      useRemote: true,
+      remoteRepos: [
+        {
+          key: "remote-0",
+          url: "https://github.com/kdlbs/kandev/pull/977",
+          branch: "",
+          source: "paste",
+        },
+      ],
       githubBranch: "jira-hosted-path-auth", // displayed = PR head
       githubPrHeadBranch: "jira-hosted-path-auth",
       githubPrBaseBranch: "main",
@@ -253,8 +262,15 @@ describe("buildRepositoriesPayload — single-row and URL mode", () => {
   // We respect their override: send their pick as base, keep PR head as checkout.
   it("user-overridden base branch beats PR's target when displayed branch differs from PR head", () => {
     const payload = buildRepositoriesPayload({
-      useGitHubUrl: true,
-      githubUrl: "https://github.com/owner/repo/pull/42",
+      useRemote: true,
+      remoteRepos: [
+        {
+          key: "remote-0",
+          url: "https://github.com/owner/repo/pull/42",
+          branch: "",
+          source: "paste",
+        },
+      ],
       githubBranch: "develop", // user picked something else
       githubPrHeadBranch: "feature/x",
       githubPrBaseBranch: "main",
@@ -276,8 +292,15 @@ describe("buildRepositoriesPayload — single-row and URL mode", () => {
   // case still anchors to the PR's actual target rather than the head.
   it("same-repo PR auto-selection: still prefers PR target over PR head", () => {
     const payload = buildRepositoriesPayload({
-      useGitHubUrl: true,
-      githubUrl: "https://github.com/owner/repo/pull/10",
+      useRemote: true,
+      remoteRepos: [
+        {
+          key: "remote-0",
+          url: "https://github.com/owner/repo/pull/10",
+          branch: "",
+          source: "paste",
+        },
+      ],
       githubBranch: "feature/x",
       githubPrHeadBranch: "feature/x",
       githubPrBaseBranch: "main",

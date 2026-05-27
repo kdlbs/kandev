@@ -9,7 +9,7 @@ import {
   getLocalRepositoryStatusAction,
 } from "@/app/actions/workspaces";
 import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
-import { fetchRepoBranches, fetchPRInfo } from "@/lib/api/domains/github-api";
+import { fetchPRInfo } from "@/lib/api/domains/github-api";
 import { getLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
 import { parseGitHubRepoUrl } from "@/lib/github/parse-url";
@@ -62,9 +62,9 @@ export function useRepositoryAutoSelectEffect(
   // pre-filled, but fall back to an empty row so the picker is visible
   // instead of just the "+" button. URL mode is excluded — that flow swaps
   // the chip row for a URL input.
-  const { repositories: rows, useGitHubUrl, setRepositories } = fs;
+  const { repositories: rows, useRemote, setRepositories } = fs;
   useEffect(() => {
-    if (!open || !workspaceId || useGitHubUrl) return;
+    if (!open || !workspaceId || useRemote) return;
     if (rows.length > 0) return;
     const lastUsedRepoId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_REPOSITORY_ID, null);
     let pickId: string | null = null;
@@ -88,7 +88,7 @@ export function useRepositoryAutoSelectEffect(
         ];
       });
     });
-  }, [open, repositories, rows, useGitHubUrl, workspaceId, setRepositories]);
+  }, [open, repositories, rows, useRemote, workspaceId, setRepositories]);
 }
 
 export function useDiscoverReposEffect(
@@ -152,14 +152,9 @@ export function useCurrentLocalBranchEffect(
   workspaceId: string | null,
   repositories: Repository[],
 ) {
-  const {
-    repositories: rows,
-    useGitHubUrl,
-    setCurrentLocalBranch,
-    setCurrentLocalBranchLoading,
-  } = fs;
+  const { repositories: rows, useRemote, setCurrentLocalBranch, setCurrentLocalBranchLoading } = fs;
   useEffect(() => {
-    if (!open || !workspaceId || useGitHubUrl || rows.length !== 1) {
+    if (!open || !workspaceId || useRemote || rows.length !== 1) {
       setCurrentLocalBranch("");
       setCurrentLocalBranchLoading(false);
       return;
@@ -194,7 +189,7 @@ export function useCurrentLocalBranchEffect(
   }, [
     open,
     workspaceId,
-    useGitHubUrl,
+    useRemote,
     rows,
     repositories,
     setCurrentLocalBranch,
@@ -292,11 +287,16 @@ export function useDefaultSelectionsEffect(
  * Auto-selects a sensible branch in the GitHub URL flow. Per-repo (workspace
  * or discovered) branch auto-select happens inside RepoChip when a row's
  * branches load — that keeps the per-row state confined to the chip.
+ *
+ * Branches are sourced from the per-URL `branchesByUrl` cache, keyed by the
+ * first remote-repo row's URL (legacy single-URL flow).
  */
 export function useBranchAutoSelectEffect(fs: DialogFormState) {
-  const { githubBranch, githubBranches, useGitHubUrl, setGitHubBranch, githubPrHeadBranch } = fs;
+  const { githubBranch, useRemote, setGitHubBranch, githubPrHeadBranch } = fs;
+  const firstUrl = fs.remoteRepos[0]?.url ?? "";
+  const githubBranches = fs.branchesByUrl.branches(firstUrl);
   useEffect(() => {
-    if (!useGitHubUrl || githubBranch) return;
+    if (!useRemote || githubBranch) return;
     // PR head wins regardless of whether it appears in the base repo's branch
     // list. Fork PRs (head lives only on the contributor's fork) won't match
     // anything in githubBranches, but we still want the pill to surface the
@@ -315,7 +315,7 @@ export function useBranchAutoSelectEffect(fs: DialogFormState) {
       githubBranches.find((b) => b.name === "master") ??
       githubBranches[0];
     if (preferred) setGitHubBranch(preferred.name);
-  }, [githubBranch, githubBranches, useGitHubUrl, setGitHubBranch, githubPrHeadBranch]);
+  }, [githubBranch, githubBranches, useRemote, setGitHubBranch, githubPrHeadBranch]);
 }
 
 /** Parse a GitHub URL to extract owner, repo, and optional PR number. Returns null if invalid. */
@@ -368,81 +368,64 @@ export function useAutoFillTaskNameFromPR(fs: DialogFormState) {
 
 export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
   const {
-    useGitHubUrl,
-    githubUrl,
-    setGitHubBranches,
-    setGitHubBranchesLoading,
+    useRemote,
     setGitHubUrlError,
     setGitHubPrHeadBranch,
     setGitHubPrBaseBranch,
+    branchesByUrl,
   } = fs;
+  const githubUrl = fs.remoteRepos[0]?.url ?? "";
   const autoFillTitle = useAutoFillTaskNameFromPR(fs);
   useEffect(() => {
-    if (!open || !useGitHubUrl) {
-      setGitHubBranchesLoading(false);
-      return;
-    }
+    if (!open || !useRemote) return;
     const trimmed = githubUrl.trim();
     if (!trimmed) {
-      setGitHubBranches([]);
-      setGitHubBranchesLoading(false);
       setGitHubUrlError(null);
       return;
     }
     const parsed = parseGitHubUrl(githubUrl);
     if (!parsed) {
-      setGitHubBranches([]);
       setGitHubPrHeadBranch(null);
       setGitHubPrBaseBranch(null);
-      setGitHubBranchesLoading(false);
       setGitHubUrlError("Invalid GitHub URL — expected github.com/owner/repo or .../pull/123");
       return;
     }
+    // Branches load via the per-URL hook cache (multi-row support via Task 5).
+    branchesByUrl.ensure(githubUrl);
     let cancelled = false;
     setGitHubUrlError(null);
-    setGitHubBranchesLoading(true);
     setGitHubPrHeadBranch(null);
     setGitHubPrBaseBranch(null);
 
+    // PR-info fetch stays here (autofills task name + carries head/base on the
+    // payload). Only fires for PR URLs.
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15_000);
-    const fetchOpts = { init: { signal: controller.signal } };
-
-    const branchesPromise = fetchRepoBranches(parsed.owner, parsed.repo, fetchOpts);
     const prPromise = parsed.prNumber
-      ? fetchPRInfo(parsed.owner, parsed.repo, parsed.prNumber, fetchOpts).catch(() => null)
+      ? fetchPRInfo(parsed.owner, parsed.repo, parsed.prNumber, {
+          init: { signal: controller.signal },
+        }).catch((err: unknown) => {
+          if (err instanceof DOMException && err.name === "AbortError") return null;
+          const isNotConfigured = err instanceof Error && err.message.includes("not configured");
+          if (!cancelled) {
+            setGitHubUrlError(
+              isNotConfigured
+                ? "GitHub is not configured. Set up a token in Settings > GitHub."
+                : "Repository not found or not accessible",
+            );
+          }
+          return null;
+        })
       : Promise.resolve(null);
 
-    Promise.all([branchesPromise, prPromise])
-      .then(([branchesRes, prInfo]) => {
-        if (cancelled) return;
-        setGitHubBranches(
-          branchesRes.branches.map((b) => ({ name: b.name, type: "remote" as const })),
-        );
-        setGitHubUrlError(null);
-        if (prInfo) {
-          setGitHubPrHeadBranch(prInfo.head_branch);
-          setGitHubPrBaseBranch(prInfo.base_branch);
-          autoFillTitle(prInfo.number, prInfo.title);
-        }
+    prPromise
+      .then((prInfo) => {
+        if (cancelled || !prInfo) return;
+        setGitHubPrHeadBranch(prInfo.head_branch);
+        setGitHubPrBaseBranch(prInfo.base_branch);
+        autoFillTitle(prInfo.number, prInfo.title);
       })
-      .catch((err) => {
-        if (cancelled) return;
-        const isAbort = err instanceof DOMException && err.name === "AbortError";
-        const isNotConfigured = err instanceof Error && err.message.includes("not configured");
-        let errorMessage = "Repository not found or not accessible";
-        if (isAbort) {
-          errorMessage = "Request timed out. Check your GitHub configuration in Settings.";
-        } else if (isNotConfigured) {
-          errorMessage = "GitHub is not configured. Set up a token in Settings > GitHub.";
-        }
-        setGitHubUrlError(errorMessage);
-        setGitHubBranches([]);
-      })
-      .finally(() => {
-        clearTimeout(timeoutId);
-        if (!cancelled) setGitHubBranchesLoading(false);
-      });
+      .finally(() => clearTimeout(timeoutId));
     return () => {
       cancelled = true;
       clearTimeout(timeoutId);
@@ -450,18 +433,10 @@ export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
     };
     // autoFillTitle is intentionally omitted: it's a fresh closure each render
     // but reads the latest taskName via ref, so excluding it keeps the fetch
-    // from re-firing on every keystroke.
+    // from re-firing on every keystroke. branchesByUrl reference is stable
+    // (hook returns the same object identity); ensure() is idempotent per URL.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    open,
-    useGitHubUrl,
-    githubUrl,
-    setGitHubBranches,
-    setGitHubBranchesLoading,
-    setGitHubUrlError,
-    setGitHubPrHeadBranch,
-    setGitHubPrBaseBranch,
-  ]);
+  }, [open, useRemote, githubUrl, setGitHubUrlError, setGitHubPrHeadBranch, setGitHubPrBaseBranch]);
 }
 
 export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreateEffectsArgs) {

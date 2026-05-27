@@ -1,6 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { act, renderHook } from "@testing-library/react";
 import { computeDialogDefaultStepId } from "./task-create-dialog-defaults";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
+import { useDialogFormState } from "./task-create-dialog-state";
+import { buildRepositoriesPayload } from "./task-create-dialog-helpers";
+
+// `useBranchesByURL` triggers a real network ensure() when given a URL — stub
+// it so the dialog state hook can mount in JSDOM without hitting fetch. The
+// stubbed shape mirrors the production hook (branches/loading/ensure).
+vi.mock("@/hooks/domains/github/use-branches-by-url", () => ({
+  useBranchesByURL: () => ({
+    branches: () => [],
+    loading: () => false,
+    ensure: () => undefined,
+  }),
+}));
 
 function snapshot(workflowId: string): WorkflowSnapshotData {
   return {
@@ -79,5 +93,96 @@ describe("computeDialogDefaultStepId", () => {
         },
       }),
     ).toBe("selected-start");
+  });
+});
+
+describe("useDialogFormState — remoteRepos mode", () => {
+  it("seeds one empty remoteRepos row when useRemote toggles on with an empty list", () => {
+    const { result } = renderHook(() => useDialogFormState(true, "ws-1", null));
+    expect(result.current.remoteRepos).toHaveLength(0);
+
+    act(() => {
+      result.current.setUseRemote(true);
+    });
+
+    expect(result.current.remoteRepos).toHaveLength(1);
+    expect(result.current.remoteRepos[0]).toMatchObject({ url: "", branch: "", source: "paste" });
+  });
+
+  it("preserves the remoteRepos array when switching Remote → Repo → Remote", () => {
+    const PASTED_URL = "github.com/owner/repo";
+    const { result } = renderHook(() => useDialogFormState(true, "ws-1", null));
+
+    // Enter Remote mode, fill in a URL.
+    act(() => {
+      result.current.setUseRemote(true);
+    });
+    const seededKey = result.current.remoteRepos[0]?.key;
+    act(() => {
+      result.current.updateRemoteRepo(seededKey!, { url: PASTED_URL });
+    });
+    expect(result.current.remoteRepos[0]?.url).toBe(PASTED_URL);
+
+    // Switch back to Repo mode (Remote off). The array must NOT be cleared.
+    act(() => {
+      result.current.setUseRemote(false);
+    });
+    expect(result.current.remoteRepos[0]?.url).toBe(PASTED_URL);
+
+    // Flip back to Remote mode — the prior rows are still there.
+    act(() => {
+      result.current.setUseRemote(true);
+    });
+    expect(result.current.remoteRepos).toHaveLength(1);
+    expect(result.current.remoteRepos[0]?.url).toBe(PASTED_URL);
+  });
+
+  it("seeds remoteRepos from initialValues.githubUrl and sets useRemote=true on dialog open", () => {
+    const initialValues = {
+      title: "",
+      githubUrl: "github.com/acme/site",
+      branch: "main",
+    };
+    const { result, rerender } = renderHook(
+      ({ open }: { open: boolean }) => useDialogFormState(open, "ws-1", null, initialValues),
+      { initialProps: { open: false } },
+    );
+
+    // Rising edge: dialog opens with a pre-filled URL.
+    rerender({ open: true });
+
+    expect(result.current.useRemote).toBe(true);
+    expect(result.current.remoteRepos).toHaveLength(1);
+    expect(result.current.remoteRepos[0]).toMatchObject({
+      url: "github.com/acme/site",
+      branch: "main",
+      source: "paste",
+    });
+  });
+});
+
+describe("buildRepositoriesPayload — remoteRepos rows", () => {
+  it("filters out rows with empty url before mapping to repos[]", () => {
+    const payload = buildRepositoriesPayload({
+      useRemote: true,
+      remoteRepos: [
+        { key: "remote-0", url: "github.com/owner/repo-a", branch: "main", source: "paste" },
+        { key: "remote-1", url: "", branch: "", source: "paste" },
+        { key: "remote-2", url: "  ", branch: "", source: "paste" },
+        { key: "remote-3", url: "github.com/owner/repo-b", branch: "develop", source: "paste" },
+      ],
+      githubBranch: "",
+      githubPrHeadBranch: null,
+      repositories: [],
+      discoveredRepositories: [],
+    });
+    expect(payload).toHaveLength(2);
+    expect(payload[0]).toMatchObject({
+      github_url: "github.com/owner/repo-a",
+    });
+    expect(payload[1]).toMatchObject({
+      github_url: "github.com/owner/repo-b",
+      base_branch: "develop",
+    });
   });
 });

@@ -34,8 +34,8 @@ export function useTaskSubmitHandlers({
   repositories,
   discoveredRepositories,
   workspaceRepositories,
-  useGitHubUrl,
-  githubUrl,
+  useRemote,
+  remoteRepos,
   githubPrHeadBranch,
   githubPrBaseBranch,
   githubBranch,
@@ -55,6 +55,7 @@ export function useTaskSubmitHandlers({
   setHasDescription,
   setTaskName,
   setRepositories,
+  setRemoteRepos,
   setGitHubBranch,
   setAgentProfileId,
   setExecutorId,
@@ -74,7 +75,7 @@ export function useTaskSubmitHandlers({
   const setPlanMode = useAppStore((state) => state.setPlanMode);
 
   const isFreshBranchActive =
-    freshBranchEnabled && isLocalExecutor && !useGitHubUrl && repositoryLocalPath !== "";
+    freshBranchEnabled && isLocalExecutor && !useRemote && repositoryLocalPath !== "";
   const { pendingDiscard, ensureFreshBranchConsent, createTaskWithFreshBranchRetry } =
     useFreshBranchConsent({
       isFreshBranchActive,
@@ -93,11 +94,19 @@ export function useTaskSubmitHandlers({
         workspaceId,
         effectiveWorkflowId,
         repositories,
-        githubUrl,
+        remoteRepos: useRemote ? remoteRepos : undefined,
         agentProfileId,
         noRepository,
       }),
-    [workspaceId, effectiveWorkflowId, repositories, githubUrl, agentProfileId, noRepository],
+    [
+      workspaceId,
+      effectiveWorkflowId,
+      repositories,
+      useRemote,
+      remoteRepos,
+      agentProfileId,
+      noRepository,
+    ],
   );
 
   const resetForm = useCallback(() => {
@@ -105,6 +114,7 @@ export function useTaskSubmitHandlers({
     setHasDescription(false);
     setTaskName("");
     setRepositories([]);
+    setRemoteRepos([]);
     setGitHubBranch("");
     setAgentProfileId("");
     setExecutorId("");
@@ -117,6 +127,7 @@ export function useTaskSubmitHandlers({
     setHasDescription,
     setTaskName,
     setRepositories,
+    setRemoteRepos,
     setGitHubBranch,
     setAgentProfileId,
     setExecutorId,
@@ -128,8 +139,8 @@ export function useTaskSubmitHandlers({
     (consentedDirtyFiles: string[] = []) => {
       if (noRepository) return [];
       return buildRepositoriesPayload({
-        useGitHubUrl,
-        githubUrl,
+        useRemote,
+        remoteRepos,
         githubBranch,
         githubPrHeadBranch,
         githubPrBaseBranch,
@@ -144,8 +155,8 @@ export function useTaskSubmitHandlers({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       noRepository,
-      useGitHubUrl,
-      githubUrl,
+      useRemote,
+      remoteRepos,
       githubBranch,
       githubPrHeadBranch,
       githubPrBaseBranch,

@@ -1,5 +1,6 @@
 import type React from "react";
-import type { LocalRepository, Repository, Executor, Branch, Task } from "@/lib/types/http";
+import type { LocalRepository, Repository, Executor, Task } from "@/lib/types/http";
+import type { UseBranchesByURLResult } from "@/hooks/domains/github/use-branches-by-url";
 import type { AgentProfileOption, WorkspaceState } from "@/lib/state/slices";
 import type {
   KanbanMultiState,
@@ -34,6 +35,21 @@ export type TaskRepoRow = {
   /** On-machine repo path, when the user picked from discovered repos. */
   localPath?: string;
   branch: string;
+};
+
+/**
+ * One remote-repo row in the task-create form. Each row is either a
+ * picker-selected repo or a manually-pasted URL/PR — both collapse to a
+ * single `url` field, with `source` only used for UI affordance.
+ */
+export type TaskRemoteRepoRow = {
+  key: string; // stable client-side React key
+  url: string; // canonical https://… or paste-as-typed
+  branch: string;
+  source: "picker" | "paste";
+  // Optional metadata when source === "picker":
+  provider?: "github" | "gitlab";
+  fullName?: string; // "owner/name"
 };
 
 export type StepType = {
@@ -196,9 +212,25 @@ export type DialogFormState = {
   addRepository: () => void;
   removeRepository: (key: string) => void;
   updateRepository: (key: string, patch: Partial<TaskRepoRow>) => void;
-  /** GitHub URL mode: a separate flow that replaces the chip row with a URL input. */
+  /**
+   * Remote URL list driving the new "GitHub Remote" mode. Each row carries a
+   * URL + branch; legacy singleton URL flow reads `remoteRepos[0]` during the
+   * transitional period until the multi-row UI lands.
+   */
+  remoteRepos: TaskRemoteRepoRow[];
+  setRemoteRepos: React.Dispatch<React.SetStateAction<TaskRemoteRepoRow[]>>;
+  addRemoteRepo: () => void;
+  removeRemoteRepo: (key: string) => void;
+  updateRemoteRepo: (key: string, patch: Partial<TaskRemoteRepoRow>) => void;
+  /** GitHub URL mode: branch picked for the (single, for now) remote URL. */
   githubBranch: string;
   setGitHubBranch: (v: string) => void;
+  /**
+   * Per-URL branches cache (Task 3 hook). Used by the URL-mode branch picker
+   * during the transition. Driven from `remoteRepos[0]?.url` for now; once the
+   * multi-row UI lands every chip will key off its own row's URL.
+   */
+  branchesByUrl: UseBranchesByURLResult;
   agentProfileId: string;
   setAgentProfileId: (v: string) => void;
   executorId: string;
@@ -219,14 +251,9 @@ export type DialogFormState = {
   setIsCreatingSession: (v: boolean) => void;
   isCreatingTask: boolean;
   setIsCreatingTask: (v: boolean) => void;
-  useGitHubUrl: boolean;
-  setUseGitHubUrl: (v: boolean) => void;
-  githubUrl: string;
-  setGitHubUrl: (v: string) => void;
-  githubBranches: Branch[];
-  setGitHubBranches: (v: Branch[]) => void;
-  githubBranchesLoading: boolean;
-  setGitHubBranchesLoading: (v: boolean) => void;
+  /** True when the form is in the GitHub Remote (URL) mode. */
+  useRemote: boolean;
+  setUseRemote: (v: boolean) => void;
   githubUrlError: string | null;
   setGitHubUrlError: (v: string | null) => void;
   githubPrHeadBranch: string | null;
@@ -276,8 +303,10 @@ export type SubmitHandlersDeps = {
   discoveredRepositories: LocalRepository[];
   /** Workspace repositories — used to look up `default_branch` for `repositoryId` rows. */
   workspaceRepositories: Repository[];
-  useGitHubUrl: boolean;
-  githubUrl: string;
+  /** True when the GitHub Remote (URL) mode is active. */
+  useRemote: boolean;
+  /** Remote-repo rows (multi-row). The submit path collapses non-empty rows into `repos[]`. */
+  remoteRepos: TaskRemoteRepoRow[];
   githubPrHeadBranch: string | null;
   githubPrBaseBranch: string | null;
   /** Branch for the GitHub URL flow. Per-row branches live on `repositories[i].branch`. */
@@ -309,6 +338,7 @@ export type SubmitHandlersDeps = {
   setHasDescription: (v: boolean) => void;
   setTaskName: (v: string) => void;
   setRepositories: React.Dispatch<React.SetStateAction<TaskRepoRow[]>>;
+  setRemoteRepos: React.Dispatch<React.SetStateAction<TaskRemoteRepoRow[]>>;
   setGitHubBranch: (v: string) => void;
   setAgentProfileId: (v: string) => void;
   setExecutorId: (v: string) => void;
@@ -372,7 +402,7 @@ export type DialogFormBodyProps = {
   onAgentProfileChange: (v: string) => void;
   onExecutorProfileChange: (v: string) => void;
   onWorkflowChange: (v: string) => void;
-  onToggleGitHubUrl?: () => void;
+  onToggleRemote?: () => void;
   onGitHubUrlChange: (v: string) => void;
   onToggleFreshBranch: (enabled: boolean) => void;
   onToggleNoRepository?: () => void;

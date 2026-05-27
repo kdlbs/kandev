@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import type { TaskRepoRow } from "@/components/task-create-dialog-types";
+import type { TaskRemoteRepoRow, TaskRepoRow } from "@/components/task-create-dialog-types";
 
 /**
  * Manages the unified `repositories` list for task creation. Every chip
@@ -30,4 +30,43 @@ export function useRepositoriesState() {
   }, []);
 
   return { repositories, setRepositories, addRepository, removeRepository, updateRepository };
+}
+
+/**
+ * Manages the unified `remoteRepos` list for task creation. Mirrors
+ * `useRepositoriesState` — same key-generation pattern, same shape of
+ * add/update/remove operations — but rows carry a remote URL + branch
+ * instead of a workspace repoId / localPath. Used by the GitHub Remote
+ * mode of the task-create dialog.
+ */
+export function useRemoteReposState() {
+  const [remoteRepos, setRemoteRepos] = useState<TaskRemoteRepoRow[]>([]);
+  const nextKeyRef = useRef(0);
+
+  const newKey = useCallback(() => {
+    nextKeyRef.current += 1;
+    return `remote-${nextKeyRef.current}`;
+  }, []);
+
+  const addRemoteRepo = useCallback(() => {
+    const key = newKey();
+    setRemoteRepos((rows) => [...rows, { key, url: "", branch: "", source: "paste" }]);
+  }, [newKey]);
+
+  const removeRemoteRepo = useCallback((key: string) => {
+    setRemoteRepos((rows) => rows.filter((r) => r.key !== key));
+  }, []);
+
+  const updateRemoteRepo = useCallback((key: string, patch: Partial<TaskRemoteRepoRow>) => {
+    setRemoteRepos((rows) => rows.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  }, []);
+
+  return {
+    remoteRepos,
+    setRemoteRepos,
+    addRemoteRepo,
+    removeRemoteRepo,
+    updateRemoteRepo,
+    newRemoteRepoKey: newKey,
+  };
 }

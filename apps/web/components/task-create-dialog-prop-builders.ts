@@ -16,7 +16,7 @@ import type { DialogFormBodyProps, DialogFormState } from "@/components/task-cre
 
 export function computeHasAllBranches(fs: DialogFormState): boolean {
   if (fs.noRepository) return true;
-  if (fs.useGitHubUrl) return !!fs.githubBranch;
+  if (fs.useRemote) return !!fs.githubBranch;
   return fs.repositories.length > 0 && fs.repositories.every((r) => !!r.branch);
 }
 
@@ -52,7 +52,7 @@ export function buildDialogFormBodyProps(
     onAgentProfileChange: handlers.handleAgentProfileChange,
     onExecutorProfileChange: handlers.handleExecutorProfileChange,
     onWorkflowChange: handlers.handleWorkflowChange,
-    onToggleGitHubUrl: repoLocked ? undefined : handlers.handleToggleGitHubUrl,
+    onToggleRemote: repoLocked ? undefined : handlers.handleToggleRemote,
     onGitHubUrlChange: handlers.handleGitHubUrlChange,
     onToggleFreshBranch: handlers.handleToggleFreshBranch,
     onToggleNoRepository: repoLocked ? undefined : handlers.handleToggleNoRepository,

@@ -46,15 +46,27 @@ function row(overrides: Partial<TaskRepoRow> = {}): TaskRepoRow {
 
 function makeFs(overrides: Partial<DialogFormState>): DialogFormState {
   // Only the fields RepoChipsRow actually reads/sets need to be real.
+  const remoteUrl = (overrides.remoteRepos?.[0]?.url ?? "") as string;
+  const branchesByUrl = {
+    branches: (url: string) =>
+      url === remoteUrl
+        ? ((overrides as Partial<DialogFormState>).branchesByUrl?.branches(url) ?? [])
+        : [],
+    loading: () => false,
+    ensure: () => undefined,
+  };
   return {
     repositories: [] as TaskRepoRow[],
-    useGitHubUrl: false,
+    useRemote: false,
     discoveredRepositories: [],
-    githubUrl: "",
+    remoteRepos: [] as DialogFormState["remoteRepos"],
+    setRemoteRepos: vi.fn(),
+    addRemoteRepo: vi.fn(),
+    removeRemoteRepo: vi.fn(),
+    updateRemoteRepo: vi.fn(),
     githubUrlError: null,
     githubBranch: "",
-    githubBranches: [] as Branch[],
-    githubBranchesLoading: false,
+    branchesByUrl,
     setGitHubBranch: vi.fn(),
     addRepository: vi.fn(),
     removeRepository: vi.fn(),
@@ -109,13 +121,16 @@ describe("RepoChipsRow", () => {
   it("renders the GitHub URL input in URL mode (chips suppressed)", () => {
     renderInProvider(
       <RepoChipsRow
-        fs={makeFs({ useGitHubUrl: true, githubUrl: "" })}
+        fs={makeFs({
+          useRemote: true,
+          remoteRepos: [{ key: "remote-0", url: "", branch: "", source: "paste" }],
+        })}
         repositories={[makeRepo(REPO_FRONT_ID, "frontend")]}
         isTaskStarted={false}
         workspaceId="ws-1"
         onRowRepositoryChange={NOOP}
         onRowBranchChange={NOOP}
-        onToggleGitHubUrl={() => undefined}
+        onToggleRemote={() => undefined}
         onGitHubUrlChange={() => undefined}
       />,
     );
