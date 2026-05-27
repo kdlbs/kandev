@@ -4,6 +4,7 @@ import { memo } from "react";
 import { IconCheck, IconX, IconTerminal } from "@tabler/icons-react";
 import { GridSpinner } from "@/components/grid-spinner";
 import type { Message } from "@/lib/types/http";
+import { stripAnsi } from "@/lib/utils/ansi";
 import { Badge } from "@kandev/ui/badge";
 import { ExpandableRow } from "./expandable-row";
 import { useExpandState } from "./use-expand-state";
@@ -167,7 +168,7 @@ function ScriptExpandedContent({
             Output
           </div>
           <pre className="font-mono text-xs bg-muted/30 rounded px-3 py-2 overflow-x-auto max-h-[300px] overflow-y-auto whitespace-pre-wrap break-words">
-            {content}
+            {stripAnsi(content)}
           </pre>
         </div>
       )}
@@ -230,7 +231,7 @@ export const ScriptExecutionMessage = memo(function ScriptExecutionMessage({
         {comment.content && (
           <div className="pl-4 border-l-2 border-border/30">
             <pre className="font-mono text-xs bg-muted/30 rounded px-3 py-2 overflow-x-auto max-h-[300px] overflow-y-auto whitespace-pre-wrap break-words">
-              {comment.content}
+              {stripAnsi(comment.content)}
             </pre>
           </div>
         )}

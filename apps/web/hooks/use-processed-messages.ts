@@ -183,6 +183,18 @@ export function isAgentBootResumeMessage(message: Message): boolean {
   return meta?.script_type === "agent_boot" && meta?.is_resuming === true;
 }
 
+/** Per-repo setup scripts (`Repository.setup_script`) run during worktree
+ *  creation and are persisted as `script_execution` rows. They belong
+ *  conceptually to environment preparation, not the chat thread — `PrepareProgress`
+ *  surfaces them as steps inside the env-prep panel. Hiding them from the chat
+ *  prevents the script from rendering above the env-prep panel (which happens
+ *  when the user prompt hasn't been recorded yet, e.g. MCP-auto-started subtasks). */
+export function isSetupScriptMessage(message: Message): boolean {
+  if (message.type !== "script_execution") return false;
+  const meta = message.metadata as { script_type?: string } | undefined;
+  return meta?.script_type === "setup";
+}
+
 /** A resumed session may produce many "Resumed agent …" boot messages over its
  *  lifetime (every backend restart emits one). They all convey the same info;
  *  keep only the most recent and drop the rest — unconditionally, even if user
@@ -207,6 +219,7 @@ function filterVisibleMessages(
 ): Message[] {
   const filtered = messages.filter((message) => {
     if (subagentChildIds.has(message.id)) return false;
+    if (isSetupScriptMessage(message)) return false;
     if (message.type === "clarification_request") {
       const metadata = message.metadata as ClarificationRequestMetadata | undefined;
       return !(!metadata?.status || metadata.status === "pending");

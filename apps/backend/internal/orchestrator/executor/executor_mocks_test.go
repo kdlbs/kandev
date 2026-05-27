@@ -704,6 +704,15 @@ func (m *mockRepository) HasExecutorRunningRow(ctx context.Context, sessionID st
 	}
 	return false, nil
 }
+func (m *mockRepository) UpdateExecutorRunningStatus(ctx context.Context, sessionID, status string) error {
+	if m.executorsRunning == nil {
+		return nil
+	}
+	if row, ok := m.executorsRunning[sessionID]; ok {
+		row.Status = status
+	}
+	return nil
+}
 
 // Environment operations
 func (m *mockRepository) CreateEnvironment(ctx context.Context, environment *models.Environment) error {

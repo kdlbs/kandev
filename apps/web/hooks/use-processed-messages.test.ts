@@ -10,6 +10,7 @@ import {
   collapseTodoSnapshotsPerTurn,
   deduplicateAgentBootResumes,
   isAgentBootResumeMessage,
+  isSetupScriptMessage,
 } from "./use-processed-messages";
 
 function makeMessage(
@@ -80,6 +81,27 @@ describe("isAgentBootResumeMessage", () => {
   it("returns false when metadata is missing", () => {
     const msg = makeMessage("x", "script_execution");
     expect(isAgentBootResumeMessage(msg)).toBe(false);
+  });
+});
+
+describe("isSetupScriptMessage", () => {
+  it("returns true for a script_execution with script_type=setup", () => {
+    const msg = makeMessage("x", "script_execution", { script_type: "setup", status: "exited" });
+    expect(isSetupScriptMessage(msg)).toBe(true);
+  });
+
+  it("returns false for agent_boot and cleanup scripts", () => {
+    expect(isSetupScriptMessage(bootStarted("s1"))).toBe(false);
+    const cleanup = makeMessage("c1", "script_execution", { script_type: "cleanup" });
+    expect(isSetupScriptMessage(cleanup)).toBe(false);
+  });
+
+  it("returns false for non-script messages", () => {
+    expect(isSetupScriptMessage(makeMessage("m1", "message"))).toBe(false);
+  });
+
+  it("returns false when metadata is missing", () => {
+    expect(isSetupScriptMessage(makeMessage("x", "script_execution"))).toBe(false);
   });
 });
 

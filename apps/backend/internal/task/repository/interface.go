@@ -212,6 +212,11 @@ type ExecutorRepository interface {
 	// and writes nothing. Use when persisting state from a specific execution that may have been
 	// replaced concurrently — typically resume tokens emitted by ACP session events.
 	UpdateResumeToken(ctx context.Context, sessionID, expectedExecID, resumeToken, lastMessageUUID string) error
+	// UpdateExecutorRunningStatus performs a narrow status update on the row.
+	// Used when the agent process is intentionally not being started (prepare-only
+	// launch) so the row doesn't sit on the misleading default "starting" forever.
+	// Returns models.ErrExecutorRunningNotFound if no row exists for the session.
+	UpdateExecutorRunningStatus(ctx context.Context, sessionID, status string) error
 }
 
 // EnvironmentRepository handles environment CRUD.

@@ -14,15 +14,13 @@ import { useAppStore } from "@/components/state-provider";
 import { ExpandableRow } from "@/components/task/chat/messages/expandable-row";
 import { isFallbackNoticeStep } from "@/lib/prepare/summarize";
 import { cn } from "@/lib/utils";
+import { stripAnsi } from "@/lib/utils/ansi";
+import { isSetupScriptMessage } from "@/hooks/use-processed-messages";
+import type { Message } from "@/lib/types/http";
 import type {
   PrepareStepInfo,
   SessionPrepareState,
 } from "@/lib/state/slices/session-runtime/types";
-
-const ANSI_RE = /\x1b\[[0-9;]*[a-zA-Z]/g;
-function stripAnsi(s: string): string {
-  return s.replace(ANSI_RE, "");
-}
 
 function formatStepDuration(startedAt?: string, endedAt?: string): string | null {
   if (!startedAt || !endedAt) return null;
@@ -316,6 +314,62 @@ function isVisibleStep(step: PrepareStepInfo): boolean {
   return step.name.trim() !== "" || hasStepDetails(step);
 }
 
+// Map the script_execution status vocabulary (starting/running/exited/failed)
+// onto the PrepareStep status vocabulary (running/completed/failed).
+function scriptStatusToStepStatus(
+  status: string | undefined,
+  exitCode: number | undefined,
+): string {
+  if (status === "starting" || status === "running") return "running";
+  if (status === "failed") return "failed";
+  if (status === "exited") {
+    if (exitCode === undefined || exitCode === 0) return "completed";
+    return "failed";
+  }
+  return status ?? "running";
+}
+
+type ScriptMetadata = {
+  script_type?: string;
+  command?: string;
+  status?: string;
+  exit_code?: number;
+  error?: string;
+  started_at?: string;
+  completed_at?: string;
+};
+
+// Convert a setup-script `script_execution` message into the same step shape
+// the existing prepare panel renders, so it slots in alongside Validate/Sync/
+// Create-worktree without a parallel render path.
+function setupScriptMessageToStep(message: Message): PrepareStepInfo {
+  const meta = (message.metadata ?? {}) as ScriptMetadata;
+  const command = meta.command ?? "";
+  const status = scriptStatusToStepStatus(meta.status, meta.exit_code);
+  const stepError =
+    status === "failed"
+      ? meta.error ||
+        (meta.exit_code !== undefined && meta.exit_code !== 0
+          ? `Script exited with code ${meta.exit_code}`
+          : "Script failed")
+      : undefined;
+  return {
+    name: "Run repository setup script",
+    command,
+    status,
+    output: message.content || undefined,
+    error: stepError,
+    startedAt: meta.started_at,
+    endedAt: meta.completed_at,
+  };
+}
+
+function useSetupScriptSteps(sessionId: string): PrepareStepInfo[] {
+  const messages = useAppStore((state) => state.messages.bySession[sessionId]);
+  if (!messages || messages.length === 0) return [];
+  return messages.filter(isSetupScriptMessage).map(setupScriptMessageToStep);
+}
+
 function SessionInfo({ sessionId }: { sessionId: string }) {
   const session = useAppStore((state) => state.taskSessions.items[sessionId]);
   if (!session) return null;
@@ -358,6 +412,7 @@ function SessionInfo({ sessionId }: { sessionId: string }) {
 export function PrepareProgress({ sessionId }: PrepareProgressProps) {
   const { status, prepareState } = usePrepareStatus(sessionId);
   const session = useAppStore((state) => state.taskSessions.items[sessionId]);
+  const setupScriptSteps = useSetupScriptSteps(sessionId);
   // Only the clean-success status auto-collapses. Anything with running/error/
   // warning context stays open by default so the user sees what's happening.
   const autoExpand = status !== "completed";
@@ -366,7 +421,10 @@ export function PrepareProgress({ sessionId }: PrepareProgressProps) {
   if (!prepareState) return null;
 
   const hasSessionInfo = Boolean(session?.worktree_path || session?.worktree_branch);
-  const visibleSteps = prepareState.steps.filter(isVisibleStep);
+  // Per-repo setup scripts run inside worktree.Manager.Create, so visually they
+  // belong after Create-worktree finishes. Appending keeps the existing prepare
+  // step order intact.
+  const visibleSteps = [...prepareState.steps.filter(isVisibleStep), ...setupScriptSteps];
   const headerLabel = getHeaderLabel(status, prepareState);
   const isErrorStatus = status === "failed" || status === "completed_with_error";
   const headerClass = cn("text-xs", isErrorStatus ? "text-destructive" : "text-muted-foreground");

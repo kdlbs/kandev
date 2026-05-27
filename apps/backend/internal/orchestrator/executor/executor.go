@@ -48,6 +48,7 @@ type executorStore interface {
 	UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error
 	HasExecutorRunningRow(ctx context.Context, sessionID string) (bool, error)
 	DeleteExecutorRunningBySessionID(ctx context.Context, sessionID string) error
+	UpdateExecutorRunningStatus(ctx context.Context, sessionID, status string) error
 	// Workspace
 	GetWorkspace(ctx context.Context, id string) (*models.Workspace, error)
 	// Task environment

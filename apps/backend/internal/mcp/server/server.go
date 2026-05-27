@@ -478,7 +478,7 @@ IMPORTANT:
   - Pass base_branch explicitly to override either default. Use list_repositories_kandev to see each repo's default_branch.
 - Top-level tasks need a repository via repository_url, repository_id, or local_path
 - 'description' is the sub-agent's initial prompt — be specific and detailed
-- Set start_agent=false to create without starting an agent`
+- start_agent defaults to true and is what you want in nearly every case — the new task auto-launches an agent that immediately works on the description. Pass start_agent=false ONLY for an explicit placeholder (e.g. queuing work the user will start later, or creating a tracking task with no immediate work). When in doubt, leave it true.`
 	parentDesc := "Parent task ID for subtasks. Use 'self' to create a subtask of your current task (RECOMMENDED for plan phases, delegated work). Omit only for unrelated top-level tasks."
 
 	if s.mode == ModeExternal {
@@ -488,7 +488,7 @@ IMPORTANT:
 - Provide a repository via repository_url, repository_id, or local_path
 - workspace_id and workflow_id are auto-resolved if only one exists; provide explicitly if ambiguous
 - 'description' is the agent's initial prompt — be specific and detailed
-- Set start_agent=false to create without starting an agent
+- start_agent defaults to true and is what you want in nearly every case — the new task auto-launches an agent that immediately works on the description. Pass start_agent=false ONLY for an explicit placeholder (e.g. queuing work the user will start later). When in doubt, leave it true.
 - Use parent_id only when delegating to a known existing task by its ID`
 		parentDesc = "Optional parent task ID. Omit for top-level tasks; provide an existing task ID only to create a subtask of that task."
 	}
@@ -504,7 +504,7 @@ IMPORTANT:
 			mcp.WithString("description", mcp.Description("The initial prompt for the sub-agent. This is the ONLY context the agent receives when it starts — treat it as the agent's first user message. REQUIRED for subtasks: without a description the sub-agent starts with no context and cannot do useful work. Be specific and detailed.")),
 			mcp.WithString("agent_profile_id", mcp.Description("Agent profile ID to use. For subtasks, inherited from the parent session. For top-level tasks, ask the user which agent profile they want (e.g. Claude Code, OpenCode) if not already known.")),
 			mcp.WithString("executor_profile_id", mcp.Description("Executor profile ID to use (determines the runtime environment: local, worktree, docker, etc.). For subtasks, inherited from the parent session. For top-level tasks, ask the user which executor profile they want if not already known.")),
-			mcp.WithBoolean("start_agent", mcp.Description("Whether to auto-start an agent on the created task. Default: true. Set to false to create the task without starting an agent.")),
+			mcp.WithBoolean("start_agent", mcp.Description("Whether to auto-start an agent on the created task. Default: true — leave it true unless you specifically want a placeholder task with no agent running. Setting false leaves the task waiting for the user to click 'Start agent' in the UI; the description is preserved but no work happens automatically.")),
 			mcp.WithString("repository_id", mcp.Description("Repository ID. Required for top-level tasks unless local_path or repository_url is provided. For subtasks: optional — supply only when the subtask should target a different repo than the parent.")),
 			mcp.WithString("local_path", mcp.Description("Local repository folder path (e.g. '/Users/me/projects/myrepo'). Will create/find the repository automatically. Preferred for local worktree flow. For subtasks: supply only when the subtask should target a different repo than the parent.")),
 			mcp.WithString("repository_url", mcp.Description("GitHub repository URL (e.g. 'https://github.com/owner/repo'). The repository will be cloned automatically on first use. For subtasks: supply only when the subtask should target a different repo than the parent.")),

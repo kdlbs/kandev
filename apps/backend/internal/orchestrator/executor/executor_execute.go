@@ -570,6 +570,18 @@ func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *m
 
 	if startAgent {
 		e.startAgentProcessAsync(ctx, task.ID, sessionID, resp.AgentExecutionID)
+	} else {
+		// Prepare-only launch: the workspace + agentctl are up but the agent
+		// process is intentionally not being started. The lifecycle manager
+		// always writes status='starting' on row creation; flip it to
+		// 'prepared' so the row doesn't look stuck mid-launch. When the user
+		// later starts the agent (StartCreatedSession), Launch re-runs and
+		// rewrites the row with status='starting' via the usual path.
+		if err := e.repo.UpdateExecutorRunningStatus(ctx, sessionID, "prepared"); err != nil {
+			e.logger.Warn("failed to mark executors_running as prepared",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
 	}
 
 	e.logger.Info("agent launched for prepared session",
