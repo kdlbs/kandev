@@ -2,7 +2,6 @@
 
 import { memo } from "react";
 import { IconCheck, IconX, IconTerminal } from "@tabler/icons-react";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { GridSpinner } from "@/components/grid-spinner";
 import { transformPathsInText } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
@@ -110,22 +109,10 @@ function parseExecuteMetadata(comment: Message) {
 }
 
 function CommandHeader({ displayCommand }: { displayCommand: string }) {
-  const className = "font-mono text-xs text-muted-foreground truncate min-w-0 flex-1 text-left";
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span className={className} tabIndex={0}>
-          {displayCommand}
-        </span>
-      </TooltipTrigger>
-      <TooltipContent
-        side="bottom"
-        align="start"
-        className="max-w-[min(90vw,640px)] whitespace-pre-wrap break-all font-mono text-xs"
-      >
-        {displayCommand}
-      </TooltipContent>
-    </Tooltip>
+    <span className="font-mono text-xs text-muted-foreground truncate min-w-0 flex-1 text-left">
+      {displayCommand}
+    </span>
   );
 }
 
