@@ -112,11 +112,14 @@ func TestAutoStartTransientError_BootReadyDrainsOrphanedQueue(t *testing.T) {
 	}
 
 	// Stream-disconnected error matches isTransientPromptError → autoStartStepPrompt
-	// records the user msg, then queues on the retry path.
+	// records the user msg, then queues on the retry path. promptDone closes on
+	// the first PromptAgent call so the test can sync on it without time.Sleep.
+	firstPromptCalled := make(chan struct{})
 	agentMgr := &mockAgentManager{
 		repoForExecutionLookup: repo,
 		isAgentRunning:         true, // skip ensureSessionRunning's resume
 		promptErr:              errors.New("agent stream disconnected mid-prompt"),
+		promptDone:             firstPromptCalled,
 	}
 
 	msgCreator := &mockMessageCreator{}
@@ -151,15 +154,23 @@ func TestAutoStartTransientError_BootReadyDrainsOrphanedQueue(t *testing.T) {
 		t.Fatalf("handleAgentReady did not return within 3s")
 	}
 
-	// Wait for the async processOnEnter goroutine to record the user msg and
-	// queue the prompt. The transient-error path queues on the first attempt
-	// (no backoff sleeps), so this is fast.
-	deadline := time.Now().Add(3 * time.Second)
+	// Sync on PromptAgent's first call (closes firstPromptCalled). After that,
+	// the goroutine returns from PromptAgent and runs handlePromptError +
+	// autoStartStepPrompt's queue branch — a fully synchronous sequence that
+	// ends with messageQueue.QueueMessageWithMetadata. A tight poll covers
+	// the few-microsecond gap between PromptAgent returning and the queue
+	// row being committed (an unbuffered channel isn't available there).
+	select {
+	case <-firstPromptCalled:
+	case <-time.After(3 * time.Second):
+		t.Fatalf("PromptAgent was not called within 3s")
+	}
+	deadline := time.Now().Add(500 * time.Millisecond)
 	for time.Now().Before(deadline) {
 		if svc.messageQueue.GetStatus(ctx, sessionID).Count > 0 {
 			break
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(1 * time.Millisecond)
 	}
 
 	// Verify the workflow transitioned to Merge.
@@ -200,10 +211,17 @@ func TestAutoStartTransientError_BootReadyDrainsOrphanedQueue(t *testing.T) {
 	// Clear the transient error so the drain's executeQueuedMessage → PromptTask
 	// → PromptAgent succeeds. Otherwise the goroutine that runs after the queue
 	// take would re-enter the same transient-retry path and re-queue the message
-	// immediately, racing the queue-empty assertion below.
+	// immediately, racing the queue-empty assertion below. Also swap in a fresh
+	// promptDone channel to signal the second PromptAgent call (the original one
+	// was already closed by Phase 1).
+	secondPromptCalled := make(chan struct{})
 	agentMgr.mu.Lock()
 	agentMgr.promptErr = nil
-	priorPromptCount := len(agentMgr.capturedPrompts)
+	agentMgr.promptDone = secondPromptCalled
+	// Reset capturedPrompts' bookkeeping so the channel re-fires; the mock's
+	// `first := len(m.capturedPrompts) == 0` guard would otherwise skip the close.
+	agentMgr.capturedPrompts = agentMgr.capturedPrompts[:0]
+	agentMgr.capturedPromptCalls = agentMgr.capturedPromptCalls[:0]
 	agentMgr.mu.Unlock()
 
 	// Simulate the resume: agentctl's ACP session has re-initialized so the
@@ -216,24 +234,12 @@ func TestAutoStartTransientError_BootReadyDrainsOrphanedQueue(t *testing.T) {
 
 	// drainQueuedMessageAfterTransition pops the queue synchronously and fires
 	// `go executeQueuedMessage(...)`. The goroutine creates a user message and
-	// calls PromptTask → PromptAgent. Wait for that to land, then assert the
-	// agent received the prompt.
-	deadline = time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		agentMgr.mu.Lock()
-		got := len(agentMgr.capturedPrompts)
-		agentMgr.mu.Unlock()
-		if got > priorPromptCount {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-
-	agentMgr.mu.Lock()
-	postPromptCount := len(agentMgr.capturedPrompts)
-	agentMgr.mu.Unlock()
-	if postPromptCount <= priorPromptCount {
-		t.Fatalf("boot_ready drain did not dispatch the queued prompt: PromptAgent calls before=%d after=%d", priorPromptCount, postPromptCount)
+	// calls PromptTask → PromptAgent. The mock closes secondPromptCalled on
+	// that call, so the assertion below has a deterministic sync point.
+	select {
+	case <-secondPromptCalled:
+	case <-time.After(3 * time.Second):
+		t.Fatalf("boot_ready drain did not reach PromptAgent within 3s")
 	}
 
 	if got := svc.messageQueue.GetStatus(ctx, sessionID).Count; got != 0 {
