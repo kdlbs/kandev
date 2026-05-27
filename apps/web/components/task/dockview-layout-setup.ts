@@ -117,16 +117,21 @@ export function enforcePinnedTargets(
   }
 }
 
-/** Set the loose runtime cap so the user can drag the column past its target. */
+/** Set the loose runtime cap so the user can drag the column past its target.
+ *  Uses `api.width` (dockview's measured grid width) for the cap computation
+ *  instead of `window.innerWidth`, which can briefly read stale during route
+ *  transitions and devtools toggles - a vw=601 read yields cap=301 (=
+ *  vw - VIEWPORT_RESERVE_PX) and squeezes the pinned column down to 301. */
 function setLooseConstraints(api: DockviewReadyEvent["api"]): void {
   const store = useDockviewStore.getState();
   if (store.isRestoringLayout) return;
   if (api.hasMaximizedGroup() || store.preMaximizeLayout !== null) return;
 
+  const vw = api.width > 0 ? api.width : undefined;
   const sb = api.getPanel("sidebar");
   if (sb && store.sidebarVisible) {
     sb.group.api.setConstraints({
-      maximumWidth: computeSidebarMaxPx(),
+      maximumWidth: computeSidebarMaxPx(vw),
       minimumWidth: LAYOUT_PINNED_MIN_PX,
     });
   }
@@ -136,7 +141,7 @@ function setLooseConstraints(api: DockviewReadyEvent["api"]): void {
       const group = api.groups.find((g) => g.id === gid);
       if (group) {
         group.api.setConstraints({
-          maximumWidth: computeRightMaxPx(),
+          maximumWidth: computeRightMaxPx(vw),
           minimumWidth: LAYOUT_PINNED_MIN_PX,
         });
       }
