@@ -83,6 +83,18 @@ describe("getBulkCleanupSummary", () => {
     expect(lines.some((l) => /3 worktrees/.test(l))).toBe(true);
   });
 
+  it("groups remote_docker tasks with their own line", () => {
+    const { lines } = getBulkCleanupSummary(["remote_docker", "remote_docker"]);
+    expect(lines.some((l) => /2 remote Docker containers/.test(l))).toBe(true);
+  });
+
+  it("groups ssh tasks with best-effort wording", () => {
+    const { lines } = getBulkCleanupSummary(["ssh", "ssh"]);
+    expect(lines.some((l) => /2 remote task directories/.test(l) && /best-effort/.test(l))).toBe(
+      true,
+    );
+  });
+
   it("emits worktree/container/sandbox lines before the local-reassurance line", () => {
     const { lines } = getBulkCleanupSummary(["local", "worktree"]);
     const worktreeIdx = lines.findIndex((l) => /worktree/i.test(l));

@@ -1,21 +1,10 @@
-/**
- * Builds the per-executor "what will be cleaned up" lines shown in the
- * task delete/archive confirmation dialogs. The text describes which
- * resources are torn down (worktree / container / sandbox / remote dir)
- * and — importantly for the local executor — what is NOT touched.
- *
- * Executor types match `models.ExecutorType` in the Go backend
- * (apps/backend/internal/task/models/models.go).
- */
+// Executor types match models.ExecutorType in apps/backend/internal/task/models/models.go.
 
 export type CleanupSummary = {
-  /** Lines to render under the dialog description, in order. */
   lines: string[];
 };
 
-// `mock_remote` is a test-only executor and intentionally not listed here:
-// it should never surface user-facing copy, and `normalize()` returns null
-// for unknown keys so it falls through to the generic line.
+// mock_remote is test-only — intentionally absent so it falls through to GENERIC_LINE.
 type KnownExecutor = "local" | "worktree" | "local_docker" | "remote_docker" | "sprites" | "ssh";
 
 const SINGLE: Record<KnownExecutor, string> = {
@@ -68,28 +57,26 @@ export function getBulkCleanupSummary(
 ): CleanupSummary {
   if (executorTypes.length === 0) return { lines: [GENERIC_LINE] };
 
-  const counts = new Map<KnownExecutor | "unknown", number>();
+  const counts = new Map<KnownExecutor, number>();
   for (const t of executorTypes) {
     const known = normalize(t);
-    const key = known ?? "unknown";
-    counts.set(key, (counts.get(key) ?? 0) + 1);
+    if (!known) continue;
+    counts.set(known, (counts.get(known) ?? 0) + 1);
   }
 
-  const order: Array<KnownExecutor | "unknown"> = [
+  const order: KnownExecutor[] = [
     "worktree",
     "local_docker",
     "remote_docker",
     "sprites",
     "ssh",
     "local",
-    "unknown",
   ];
 
   const lines: string[] = [];
   for (const key of order) {
     const count = counts.get(key);
     if (!count) continue;
-    if (key === "unknown") continue;
     const fmt = PLURAL[key];
     if (fmt) lines.push(fmt(count));
   }

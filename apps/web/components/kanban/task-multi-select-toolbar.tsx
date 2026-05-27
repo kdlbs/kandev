@@ -42,16 +42,17 @@ function useBulkExecutorTypes(taskIds: string[]): Array<string | null | undefine
 function BulkArchiveDialog({
   count,
   taskIds,
+  executorTypes,
   isProcessing,
   onConfirm,
 }: {
   count: number;
   taskIds: string[];
+  executorTypes: Array<string | null | undefined>;
   isProcessing: boolean;
   onConfirm: (opts: { cascade: boolean }) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const executorTypes = useBulkExecutorTypes(taskIds);
 
   return (
     <>
@@ -84,16 +85,17 @@ function BulkArchiveDialog({
 function BulkDeleteDialog({
   count,
   taskIds,
+  executorTypes,
   isProcessing,
   onConfirm,
 }: {
   count: number;
   taskIds: string[];
+  executorTypes: Array<string | null | undefined>;
   isProcessing: boolean;
   onConfirm: (opts: { cascade: boolean }) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const executorTypes = useBulkExecutorTypes(taskIds);
 
   return (
     <>
@@ -133,6 +135,9 @@ export function TaskMultiSelectToolbar({
   onBulkArchive,
   onBulkMove,
 }: TaskMultiSelectToolbarProps) {
+  const taskIds = useMemo(() => [...selectedIds], [selectedIds]);
+  const executorTypes = useBulkExecutorTypes(taskIds);
+
   if (selectedIds.size === 0) return null;
 
   const count = selectedIds.size;
@@ -181,14 +186,16 @@ export function TaskMultiSelectToolbar({
 
       <BulkArchiveDialog
         count={count}
-        taskIds={[...selectedIds]}
+        taskIds={taskIds}
+        executorTypes={executorTypes}
         isProcessing={isProcessing}
         onConfirm={({ cascade }) => onBulkArchive({ cascade })}
       />
 
       <BulkDeleteDialog
         count={count}
-        taskIds={[...selectedIds]}
+        taskIds={taskIds}
+        executorTypes={executorTypes}
         isProcessing={isProcessing}
         onConfirm={({ cascade }) => onBulkDelete({ cascade })}
       />
