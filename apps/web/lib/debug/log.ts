@@ -80,6 +80,32 @@
  *                              enforcement loop); mismatch with L/R is the
  *                              smoking gun for a stale-target bug.
  *
+ *   Chat panel rendering (bug: remote-executor agent reply persisted but UI
+ *   doesn't render it until the user refreshes the page)
+ *     [chat:virtuoso]                VirtuosoMessageList render-branch snapshots
+ *                                    (fallback vs virtuoso) and VirtuosoBody mount —
+ *                                    captures itemCount / firstItemIndex /
+ *                                    initialTopMostItemIndex at the moment Virtuoso
+ *                                    first anchors its scroll. If itemCount at
+ *                                    `mount` is < the final item count, Virtuoso
+ *                                    anchored on an earlier item and the new last
+ *                                    item lands below the fold.
+ *     [chat:virtuoso:scrollParent]   `useVisibleScrollParent` lifecycle —
+ *                                    ref-callback-ready / ref-callback-defer /
+ *                                    ro-attach / ro-ready. A long delay between
+ *                                    items growing and `ro-ready` firing is the
+ *                                    smoking gun for the mount-too-early race.
+ *     [chat:virtuoso:firstIndex]     `useStableFirstItemIndex` transitions —
+ *                                    init + key-list deltas. A non-monotonic
+ *                                    `delta` between two transitions means
+ *                                    Virtuoso saw the keyspace shift in a way
+ *                                    that throws off scroll anchoring.
+ *     [chat:prepare-progress]        PrepareProgress status / autoExpand / expanded
+ *                                    transitions per session. Status stuck on
+ *                                    "preparing" with `expanded=true` while
+ *                                    Virtuoso is mounted explains the
+ *                                    agent-reply-pushed-below-fold scenario.
+ *
  *   Other
  *     [ws:connection]         WS hook mount + status transitions
  *     [dockview:*]            layout restore / save / env-switch / session-tabs / task-select
