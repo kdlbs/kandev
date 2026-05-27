@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { IconTrash, IconArchive, IconChevronRight, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
 import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
+import { useAppStore } from "@/components/state-provider";
+import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,6 +27,18 @@ interface TaskMultiSelectToolbarProps {
   onBulkMove: (targetStepId: string) => Promise<void>;
 }
 
+function useBulkExecutorTypes(taskIds: string[]): Array<string | null | undefined> {
+  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
+  const fallbackTasks = useAppStore((state) => state.kanban.tasks);
+  return useMemo(
+    () =>
+      taskIds.map(
+        (id) => findTaskInSnapshots(id, snapshots, fallbackTasks)?.primaryExecutorType ?? null,
+      ),
+    [taskIds, snapshots, fallbackTasks],
+  );
+}
+
 function BulkArchiveDialog({
   count,
   taskIds,
@@ -37,6 +51,7 @@ function BulkArchiveDialog({
   onConfirm: (opts: { cascade: boolean }) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const executorTypes = useBulkExecutorTypes(taskIds);
 
   return (
     <>
@@ -57,6 +72,7 @@ function BulkArchiveDialog({
         isBulkOperation
         count={count}
         taskIds={taskIds}
+        executorTypes={executorTypes}
         isArchiving={isProcessing}
         onConfirm={onConfirm}
         confirmTestId="bulk-archive-confirm"
@@ -77,6 +93,7 @@ function BulkDeleteDialog({
   onConfirm: (opts: { cascade: boolean }) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const executorTypes = useBulkExecutorTypes(taskIds);
 
   return (
     <>
@@ -97,6 +114,7 @@ function BulkDeleteDialog({
         isBulkOperation
         count={count}
         taskIds={taskIds}
+        executorTypes={executorTypes}
         isDeleting={isProcessing}
         onConfirm={onConfirm}
         confirmTestId="bulk-delete-confirm"

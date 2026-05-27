@@ -14,6 +14,7 @@ import {
 } from "@kandev/ui/alert-dialog";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { useSubtaskCount } from "@/hooks/use-subtask-count";
+import { getCleanupSummary, getBulkCleanupSummary } from "./task-cleanup-summary";
 
 type TaskDeleteConfirmDialogProps = {
   open: boolean;
@@ -24,6 +25,10 @@ type TaskDeleteConfirmDialogProps = {
   isDeleting?: boolean;
   taskId?: string;
   taskIds?: string[];
+  /** Executor type of the task being deleted (single). */
+  executorType?: string | null;
+  /** Executor types of the tasks being deleted (bulk). */
+  executorTypes?: Array<string | null | undefined>;
   onConfirm: (opts: { cascade: boolean }) => void;
   confirmTestId?: string;
 };
@@ -37,6 +42,8 @@ export function TaskDeleteConfirmDialog({
   isDeleting,
   taskId,
   taskIds,
+  executorType,
+  executorTypes,
   onConfirm,
   confirmTestId,
 }: TaskDeleteConfirmDialogProps) {
@@ -46,6 +53,9 @@ export function TaskDeleteConfirmDialog({
   const description = isBulkOperation
     ? `Are you sure you want to delete ${safeCount} ${label}? This action cannot be undone.`
     : `Are you sure you want to delete "${taskTitle}"? This action cannot be undone.`;
+  const cleanup = isBulkOperation
+    ? getBulkCleanupSummary(executorTypes ?? [])
+    : getCleanupSummary(executorType);
 
   const [cascade, setCascade] = useState(false);
   const subtaskCount = useSubtaskCount(open, taskId, taskIds);
@@ -60,7 +70,16 @@ export function TaskDeleteConfirmDialog({
       <AlertDialogContent onClick={(e) => e.stopPropagation()}>
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
-          <AlertDialogDescription>{description}</AlertDialogDescription>
+          <AlertDialogDescription asChild>
+            <div>
+              <p>{description}</p>
+              {cleanup.lines.map((line, i) => (
+                <p key={i} className="mt-2" data-testid="cleanup-line">
+                  {line}
+                </p>
+              ))}
+            </div>
+          </AlertDialogDescription>
         </AlertDialogHeader>
         {subtaskCount > 0 && (
           <label className="flex items-start gap-2 text-sm cursor-pointer">

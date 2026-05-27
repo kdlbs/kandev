@@ -165,6 +165,7 @@ function TaskActions({
         onOpenChange={setShowDeleteConfirm}
         taskTitle={task.title}
         taskId={task.id}
+        executorType={task.primaryExecutorType}
         isDeleting={isDeleting}
         onConfirm={({ cascade }) => onDeleteTask(task, { cascade })}
       />
@@ -173,6 +174,7 @@ function TaskActions({
         onOpenChange={setShowArchiveConfirm}
         taskTitle={task.title}
         taskId={task.id}
+        executorType={task.primaryExecutorType}
         isArchiving={isArchiving}
         onConfirm={({ cascade }) => onArchiveTask?.(task, { cascade })}
       />
