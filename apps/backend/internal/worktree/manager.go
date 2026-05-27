@@ -293,7 +293,13 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 	// was anchored to a PR head or fresh branch that has been deleted upstream
 	// or never existed in a sibling repo.
 	fallbackWarning, fallbackDetail := "", ""
-	if !m.branchExists(ctx, req.RepositoryPath, baseRef) {
+	baseExists, baseErr := m.branchExists(ctx, req.RepositoryPath, baseRef)
+	if baseErr != nil {
+		// Could not determine existence (timeout / fs stall). Surface the
+		// real cause instead of pretending the branch is missing.
+		return nil, fmt.Errorf("could not verify base branch %q: %w", baseRef, baseErr)
+	}
+	if !baseExists {
 		fallback := strings.TrimSpace(req.FallbackBaseBranch)
 		if fallback == "" || fallback == baseRef {
 			return nil, fmt.Errorf("%w: %s", ErrInvalidBaseBranch, baseRef)
@@ -307,7 +313,11 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 		if req.PullBeforeWorktree {
 			resolvedFallback = m.pullBaseBranch(ctx, req.RepositoryPath, fallback, nil)
 		}
-		if !m.branchExists(ctx, req.RepositoryPath, resolvedFallback) {
+		fallbackExists, fallbackErr := m.branchExists(ctx, req.RepositoryPath, resolvedFallback)
+		if fallbackErr != nil {
+			return nil, fmt.Errorf("could not verify fallback base branch %q: %w", resolvedFallback, fallbackErr)
+		}
+		if !fallbackExists {
 			return nil, fmt.Errorf("%w: %s (fallback %q also not found)", ErrInvalidBaseBranch, baseRef, fallback)
 		}
 		m.logger.Warn("requested base branch not found, falling back",
@@ -529,7 +539,11 @@ func (m *Manager) fetchBranchToLocal(ctx context.Context, repoPath, branch strin
 			zap.Error(err))
 
 		// Fall back to local branch if it exists.
-		if !m.branchExists(ctx, repoPath, branch) {
+		exists, existsErr := m.branchExists(ctx, repoPath, branch)
+		if existsErr != nil {
+			return nil, fmt.Errorf("could not verify local branch %q after fetch failure (%s): %w", branch, strings.TrimSpace(outputStr), existsErr)
+		}
+		if !exists {
 			return nil, fmt.Errorf("branch %q not found locally or on remote: %s", branch, outputStr)
 		}
 
@@ -1329,10 +1343,16 @@ func (m *Manager) isGitRepo(path string) bool {
 
 // branchExists checks if a branch exists in the repository.
 // Bounded by m.inspectTimeout so a hung git (credential prompt, stuck filter,
-// filesystem stall) cannot deadlock the caller while holding repoLock. When
-// the bound fires, the ctx error is logged so the root cause is visible in
-// logs rather than surfacing only as a misleading "branch not found".
-func (m *Manager) branchExists(ctx context.Context, repoPath, branch string) bool {
+// filesystem stall) cannot deadlock the caller while holding repoLock.
+//
+// Returns:
+//   - (true, nil)  branch exists
+//   - (false, nil) git ran and reported the branch absent
+//   - (false, err) check could not be completed (timeout, fs stall); err
+//     carries the underlying ctx error so callers can distinguish a real
+//     "missing branch" from a "could not tell" and avoid surfacing a
+//     misleading ErrInvalidBaseBranch.
+func (m *Manager) branchExists(ctx context.Context, repoPath, branch string) (bool, error) {
 	inspectCtx, cancel := context.WithTimeout(ctx, m.inspectTimeout)
 	defer cancel()
 	cmd := m.newNonInteractiveGitCmd(inspectCtx, repoPath, "rev-parse", "--verify", branch)
@@ -1342,10 +1362,11 @@ func (m *Manager) branchExists(ctx context.Context, repoPath, branch string) boo
 				zap.String("repository_path", repoPath),
 				zap.String("branch", branch),
 				zap.Error(ctxErr))
+			return false, fmt.Errorf("branch check timed out for %q after %s: %w", branch, m.inspectTimeout, ctxErr)
 		}
-		return false
+		return false, nil
 	}
-	return true
+	return true, nil
 }
 
 func (m *Manager) currentBranch(ctx context.Context, repoPath string) string {
@@ -1469,7 +1490,9 @@ func (m *Manager) resolveLocalBaseRef(
 	if m.currentBranch(ctx, repoPath) == baseBranch {
 		return m.pullCurrentBranchOrFallback(ctx, repoPath, baseBranch, remoteRef, stepName, onProgress)
 	}
-	if m.branchExists(ctx, repoPath, remoteRef) {
+	// Best-effort sync: a timeout / error here is treated the same as a
+	// missing remote ref — caller falls back to the local baseBranch.
+	if exists, _ := m.branchExists(ctx, repoPath, remoteRef); exists {
 		m.reportSyncCompleted(stepName, onProgress, fmt.Sprintf("Synced and using %s", remoteRef), "")
 		return remoteRef
 	}
