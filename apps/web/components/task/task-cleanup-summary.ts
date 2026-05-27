@@ -13,18 +13,13 @@ export type CleanupSummary = {
   lines: string[];
 };
 
-type KnownExecutor =
-  | "local"
-  | "worktree"
-  | "local_docker"
-  | "remote_docker"
-  | "sprites"
-  | "ssh"
-  | "mock_remote";
+// `mock_remote` is a test-only executor and intentionally not listed here:
+// it should never surface user-facing copy, and `normalize()` returns null
+// for unknown keys so it falls through to the generic line.
+type KnownExecutor = "local" | "worktree" | "local_docker" | "remote_docker" | "sprites" | "ssh";
 
 const SINGLE: Record<KnownExecutor, string> = {
-  local:
-    "The agent ran directly in your repo — your files, branch, and folder are not touched. Only the agent session will be stopped.",
+  local: "The agent ran directly in your repo — your files, branch, and folder are not touched.",
   worktree:
     "The task's git worktree and its branch will be deleted. Your main repo and other branches are not affected.",
   local_docker:
@@ -33,7 +28,6 @@ const SINGLE: Record<KnownExecutor, string> = {
   sprites:
     "The Sprites cloud sandbox for this task will be destroyed. Any uncommitted work inside it will be lost.",
   ssh: "The task directory on the remote host will be removed (best-effort). Your local repo is not touched.",
-  mock_remote: "The mock remote environment will be cleaned up.",
 };
 
 const GENERIC_LINE = "Any running agent sessions will be stopped.";
@@ -88,7 +82,6 @@ export function getBulkCleanupSummary(
     "sprites",
     "ssh",
     "local",
-    "mock_remote",
     "unknown",
   ];
 
@@ -96,7 +89,7 @@ export function getBulkCleanupSummary(
   for (const key of order) {
     const count = counts.get(key);
     if (!count) continue;
-    if (key === "unknown" || key === "mock_remote") continue;
+    if (key === "unknown") continue;
     const fmt = PLURAL[key];
     if (fmt) lines.push(fmt(count));
   }
