@@ -65,7 +65,20 @@ func (s *Service) dispatchWatcherEvent(ctx context.Context, integration string, 
 		s.logger.Warn(fmt.Sprintf("watcher coordinator not configured, skipping %s task creation", integration))
 		return
 	}
+
+	// Per-watcher throttle. Synchronous: we MUST acquire the slot before
+	// spawning the goroutine, otherwise a tight burst of bus events all
+	// read the same pre-creation DB count and overshoot the cap. See
+	// docs/specs/throttle-watcher-fanout/spec.md.
+	release, ok := s.acquireWatcherSlot(ctx, integration, src.WatchID(evt), src.MaxInflightTasks(evt))
+	if !ok {
+		return
+	}
+
 	// Detach from cancellation but keep request-scoped values (tracing, etc.):
 	// the bus delivery context may be cancelled before task creation finishes.
-	go coordinator.Dispatch(context.WithoutCancel(ctx), src, evt)
+	go func() {
+		defer release()
+		coordinator.Dispatch(context.WithoutCancel(ctx), src, evt)
+	}()
 }

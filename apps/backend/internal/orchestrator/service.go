@@ -267,6 +267,20 @@ type Service struct {
 	// Constructed lazily once issueTaskCreator is wired (see SetIssueTaskCreator).
 	watcherCoordinator *WatcherDispatchCoordinator
 
+	// Watcher throttle state. watcherTaskCount counts committed open watcher-
+	// created tasks (DB-backed source of truth across restarts). pendingByWatch
+	// tracks in-process events whose dedup row has not yet been written —
+	// without it, a burst of events read the same stale COUNT(*) before any
+	// goroutine commits, and the cap is silently overshot. Both reads and the
+	// pending increment happen under watcherMu to prevent the burst race.
+	watcherTaskCount WatcherTaskCounter
+	watcherMu        sync.Mutex
+	pendingByWatch   map[string]int
+	// watcherSaturated tracks per-watch whether the last gate result was
+	// "deferred", so we log the state-transition Warn ("cap reached" /
+	// "cap cleared") only once per transition instead of every event.
+	watcherSaturated map[string]bool
+
 	// Jira service for issue watch dedup operations
 	jiraService JiraService
 	// jiraSource adapts jiraService onto WatcherSource. Built once in

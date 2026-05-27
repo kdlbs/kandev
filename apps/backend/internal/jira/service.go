@@ -511,6 +511,7 @@ func (s *Service) CreateIssueWatch(ctx context.Context, req *CreateIssueWatchReq
 		ExecutorProfileID:   req.ExecutorProfileID,
 		Prompt:              req.Prompt,
 		PollIntervalSeconds: req.PollIntervalSeconds,
+		MaxInflightTasks:    req.MaxInflightTasks,
 		Enabled:             true,
 	}
 	if req.Enabled != nil {
@@ -563,6 +564,9 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 		return nil, fmt.Errorf("%w: workflowId and workflowStepId cannot be empty", ErrInvalidConfig)
 	}
 	if err := validatePollInterval(w.PollIntervalSeconds); err != nil {
+		return nil, err
+	}
+	if err := validateMaxInflightTasks(w.MaxInflightTasks); err != nil {
 		return nil, err
 	}
 	if err := s.store.UpdateIssueWatch(ctx, w); err != nil {
@@ -645,6 +649,7 @@ func (s *Service) publishNewJiraIssueEvent(ctx context.Context, w *IssueWatch, t
 		AgentProfileID:    w.AgentProfileID,
 		ExecutorProfileID: w.ExecutorProfileID,
 		Prompt:            w.Prompt,
+		MaxInflightTasks:  w.MaxInflightTasks,
 		Issue:             ticket,
 	})
 	if err := eb.Publish(ctx, events.JiraNewIssue, evt); err != nil {
@@ -684,6 +689,21 @@ func validateIssueWatchCreate(req *CreateIssueWatchRequest) error {
 			return err
 		}
 	}
+	if err := validateMaxInflightTasks(req.MaxInflightTasks); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateMaxInflightTasks rejects non-positive caps. A nil pointer is
+// "uncapped" and explicitly allowed.
+func validateMaxInflightTasks(v *int) error {
+	if v == nil {
+		return nil
+	}
+	if *v <= 0 {
+		return fmt.Errorf("%w: maxInflightTasks must be a positive integer", ErrInvalidConfig)
+	}
 	return nil
 }
 
@@ -720,4 +740,10 @@ func applyIssueWatchPatch(w *IssueWatch, req *UpdateIssueWatchRequest) {
 	if req.PollIntervalSeconds != nil {
 		w.PollIntervalSeconds = *req.PollIntervalSeconds
 	}
+	// MaxInflightTasks: JSON null and an omitted field both decode to a
+	// nil *int, so the dialog always sends the full intended value (a
+	// positive int when capped, JSON null when uncapped) and the patch
+	// applies it unconditionally. A curl PATCH that drops the field will
+	// reset the cap to uncapped — accepted for v1.
+	w.MaxInflightTasks = req.MaxInflightTasks
 }
