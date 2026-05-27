@@ -17,7 +17,7 @@ FROM mcr.microsoft.com/playwright:v1.58.2-noble
 ENV DEBIAN_FRONTEND=noninteractive \
     PNPM_HOME=/pnpm \
     GOPATH=/root/go \
-    PATH=/pnpm:/usr/local/go/bin:/root/go/bin:/usr/local/bin:/usr/bin:/bin
+    PATH=/pnpm:/usr/local/go/bin:/root/go/bin:$PATH
 
 # --- System packages -------------------------------------------------------
 # Docker CLI is fetched as a static binary below to avoid pulling the daemon.
@@ -50,11 +50,13 @@ RUN curl -fsSL https://go.dev/dl/go1.26.0.linux-amd64.tar.gz \
     && rm /tmp/go.tar.gz
 
 # --- golangci-lint v2.9.0 --------------------------------------------------
-RUN curl -fsSL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh \
+# Fetch the install script from the matching tagged ref (not `master`) so the
+# script itself is reproducible across rebuilds.
+RUN curl -fsSL https://raw.githubusercontent.com/golangci/golangci-lint/v2.9.0/install.sh \
         | sh -s -- -b /usr/local/bin v2.9.0
 
-# --- go-licenses -----------------------------------------------------------
-RUN go install github.com/google/go-licenses@latest
+# --- go-licenses v1.6.0 ----------------------------------------------------
+RUN go install github.com/google/go-licenses@v1.6.0
 
 # --- Docker CLI (no daemon) ------------------------------------------------
 # Static binary release lets jobs talk to a mounted host socket without
@@ -70,10 +72,10 @@ WORKDIR /work
 # --- Smoke checks ----------------------------------------------------------
 # Fail the build if any pinned tool is missing or mismatched.
 RUN set -eux; \
-    go version; \
+    go version | grep -F 'go1.26.0'; \
     node --version | grep -E '^v24\.'; \
     pnpm --version | grep -E '^9\.15\.9$'; \
     npx playwright --version; \
-    golangci-lint --version; \
+    golangci-lint --version | grep -F '2.9.0'; \
     go-licenses --help >/dev/null; \
     docker --version

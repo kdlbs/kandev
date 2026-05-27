@@ -50,6 +50,7 @@ jobs:
           set -euo pipefail
           hash=$(cat \
               .github/docker/ci-base/Dockerfile \
+              .github/workflows/ci-base-image.yml \
               apps/backend/go.mod \
               apps/pnpm-lock.yaml \
               apps/web/package.json \
