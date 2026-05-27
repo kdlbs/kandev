@@ -1,13 +1,8 @@
 "use client";
 
 import { useCallback } from "react";
-import type { Dispatch, SetStateAction } from "react";
 import type { Repository } from "@/lib/types/http";
-import type {
-  DialogFormState,
-  TaskRemoteRepoRow,
-  TaskRepoRow,
-} from "@/components/task-create-dialog-types";
+import type { DialogFormState, TaskRepoRow } from "@/components/task-create-dialog-types";
 import { setLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
 
@@ -135,26 +130,6 @@ function useGitHubAndFreshBranchHandlers(fs: DialogFormState) {
   );
 
   /**
-   * Routes the legacy single-URL onChange into the first remoteRepos row,
-   * creating one if the list is empty. Mirrors the previous semantics
-   * (clears the branch + PR-info on every URL change).
-   */
-  const handleGitHubUrlChange = useCallback(
-    (value: string) => {
-      const first = fs.remoteRepos[0];
-      if (first) {
-        fs.updateRemoteRepo(first.key, { url: value });
-      } else {
-        fs.setRemoteRepos([{ key: "remote-0", url: value, branch: "", source: "paste" }]);
-      }
-      fs.setGitHubBranch("");
-      fs.setGitHubUrlError(null);
-      fs.setGitHubPrHeadBranch(null);
-    },
-    [fs],
-  );
-
-  /**
    * Toggles "no repository" mode. Replaces the chip row with a folder picker.
    * Clears the URL-mode flag and the workspace_path so flipping back returns
    * the user to a clean slate (the remoteRepos array itself is preserved).
@@ -184,53 +159,8 @@ function useGitHubAndFreshBranchHandlers(fs: DialogFormState) {
   return {
     handleToggleRemote,
     handleToggleFreshBranch,
-    handleGitHubUrlChange,
     handleToggleNoRepository,
     handleWorkspacePathChange,
-  };
-}
-
-// --- Remote chip row helpers --------------------------------------------------
-// Pure prop-builders for the new RemoteRepoChipsRow. They wrap the `setRemoteRepos`
-// dispatch returned by `useRemoteReposState` into the change/add/remove
-// callbacks the chip row expects, so the dialog can hand off without
-// re-implementing the set-state shape at the call site.
-//
-// Key generation for `makeRemoteRowAdd` uses a module-level monotonic counter
-// (paired with `Date.now()` to survive HMR), matching the stable React-key
-// contract `useRemoteReposState` already establishes.
-
-let remoteRowKeyCounter = 0;
-
-function nextRemoteRowKey(): string {
-  remoteRowKeyCounter += 1;
-  return `remote-${Date.now().toString(36)}-${remoteRowKeyCounter}`;
-}
-
-export function makeRemoteRowChange(
-  setRemoteRepos: Dispatch<SetStateAction<TaskRemoteRepoRow[]>>,
-): (key: string, update: Partial<TaskRemoteRepoRow>) => void {
-  return (key, update) => {
-    setRemoteRepos((rows) => rows.map((r) => (r.key === key ? { ...r, ...update } : r)));
-  };
-}
-
-export function makeRemoteRowAdd(
-  setRemoteRepos: Dispatch<SetStateAction<TaskRemoteRepoRow[]>>,
-): () => void {
-  return () => {
-    setRemoteRepos((rows) => [
-      ...rows,
-      { key: nextRemoteRowKey(), url: "", branch: "", source: "paste" },
-    ]);
-  };
-}
-
-export function makeRemoteRowRemove(
-  setRemoteRepos: Dispatch<SetStateAction<TaskRemoteRepoRow[]>>,
-): (key: string) => void {
-  return (key) => {
-    setRemoteRepos((rows) => rows.filter((r) => r.key !== key));
   };
 }
 

@@ -403,7 +403,6 @@ export type DialogFormBodyProps = {
   onExecutorProfileChange: (v: string) => void;
   onWorkflowChange: (v: string) => void;
   onToggleRemote?: () => void;
-  onGitHubUrlChange: (v: string) => void;
   onToggleFreshBranch: (enabled: boolean) => void;
   onToggleNoRepository?: () => void;
   onWorkspacePathChange: (value: string) => void;

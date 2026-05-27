@@ -122,7 +122,6 @@ function CreateModeBody(props: DialogFormBodyProps) {
     onAgentProfileChange,
     onExecutorProfileChange,
     onToggleRemote,
-    onGitHubUrlChange,
     onToggleFreshBranch,
     workflowAgentLocked,
     repositories,
@@ -141,7 +140,6 @@ function CreateModeBody(props: DialogFormBodyProps) {
         onRowRepositoryChange={onRowRepositoryChange}
         onRowBranchChange={onRowBranchChange}
         onToggleRemote={onToggleRemote}
-        onGitHubUrlChange={onGitHubUrlChange}
         freshBranchAvailable={freshBranchAvailable}
         freshBranchEnabled={fs.freshBranchEnabled}
         onToggleFreshBranch={onToggleFreshBranch}

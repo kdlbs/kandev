@@ -20,6 +20,14 @@ vi.mock("@/hooks/domains/workspace/use-repository-branches", () => ({
   },
 }));
 
+// The Remote-mode branch of RepoChipsRow renders RemoteRepoChipsRow, which
+// in turn renders RemoteRepoChip — a heavy popover with its own GitHub
+// hook. Stub the chip here so tests for this row stay focused on the
+// branching logic (workspace chips vs. remote chips vs. folder picker).
+vi.mock("./task-create-dialog-remote-repo-chip", () => ({
+  RemoteRepoChip: () => <div data-testid="remote-repo-chip" />,
+}));
+
 import { RepoChipsRow } from "./task-create-dialog-repo-chips";
 
 afterEach(cleanup);
@@ -118,7 +126,7 @@ describe("RepoChipsRow", () => {
     expect(screen.getAllByTestId("repo-chip")).toHaveLength(2);
   });
 
-  it("renders the GitHub URL input in URL mode (chips suppressed)", () => {
+  it("renders the remote chips row in Remote mode (workspace chips suppressed)", () => {
     renderInProvider(
       <RepoChipsRow
         fs={makeFs({
@@ -131,12 +139,11 @@ describe("RepoChipsRow", () => {
         onRowRepositoryChange={NOOP}
         onRowBranchChange={NOOP}
         onToggleRemote={() => undefined}
-        onGitHubUrlChange={() => undefined}
       />,
     );
     expect(screen.getByTestId("repo-chips-row")).toBeTruthy();
     expect(screen.queryAllByTestId("repo-chip")).toHaveLength(0);
-    expect(screen.getByTestId("github-url-input")).toBeTruthy();
+    expect(screen.getByTestId("remote-repo-chips-row")).toBeTruthy();
   });
 
   it("hides the chip row when the task is already started", () => {

@@ -14,7 +14,6 @@ import {
   computeBranchPlaceholder,
   sortBranches,
 } from "@/components/task-create-dialog-pill";
-import { computeUrlBranchDisabledReason } from "@/components/task-create-dialog-github-url";
 import { scoreBranch } from "@/lib/utils/branch-filter";
 import {
   useAccessibleRepos,
@@ -365,11 +364,11 @@ function RemoteBranchPill({
       options={branchOptions}
       onSelect={onBranchChange}
       disabled={!hasUrl || branchesLoading || branchOptions.length === 0}
-      disabledReason={computeUrlBranchDisabledReason({
+      disabledReason={computeRemoteBranchDisabledReason(
         hasUrl,
         branchesLoading,
-        optionCount: branchOptions.length,
-      })}
+        branchOptions.length,
+      )}
       searchPlaceholder="Search branches..."
       emptyMessage="No branches"
       testId="remote-branch-chip-trigger"
@@ -378,6 +377,17 @@ function RemoteBranchPill({
       flat
     />
   );
+}
+
+function computeRemoteBranchDisabledReason(
+  hasUrl: boolean,
+  branchesLoading: boolean,
+  optionCount: number,
+): string | undefined {
+  if (!hasUrl) return "Enter a GitHub URL first.";
+  if (branchesLoading) return "Loading branches…";
+  if (optionCount === 0) return "No branches available for this URL.";
+  return undefined;
 }
 
 // --- Remove button -----------------------------------------------------------

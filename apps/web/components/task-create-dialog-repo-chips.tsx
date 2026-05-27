@@ -18,7 +18,7 @@ import {
   computeBranchPlaceholder,
   type PillOption,
 } from "@/components/task-create-dialog-pill";
-import { GitHubUrlSection } from "@/components/task-create-dialog-github-url";
+import { RemoteRepoChipsRow } from "@/components/task-create-dialog-remote-repo-chips";
 import { FolderPicker } from "@/components/folder-picker";
 import { SourceModeSwitch } from "@/components/task-create-dialog-source-mode";
 import {
@@ -78,9 +78,8 @@ type RepoChipsRowProps = {
    */
   onRowRepositoryChange: (key: string, value: string) => void;
   onRowBranchChange: (key: string, value: string) => void;
-  /** GitHub URL flow lives alongside the chips so users can switch in place. */
+  /** Toggles the Remote tab on/off. Remote-mode rows live in `fs.remoteRepos`. */
   onToggleRemote?: () => void;
-  onGitHubUrlChange?: (value: string) => void;
   /**
    * Fresh-branch toggle props. When `freshBranchAvailable` is true the toggle
    * renders inline at the right edge of the chip row so it sits next to the
@@ -112,7 +111,6 @@ export function RepoChipsRow({
   onRowRepositoryChange,
   onRowBranchChange,
   onToggleRemote,
-  onGitHubUrlChange,
   freshBranchAvailable,
   freshBranchEnabled,
   onToggleFreshBranch,
@@ -161,7 +159,6 @@ export function RepoChipsRow({
         freshBranchEnabled={freshBranchEnabled}
         onRowRepositoryChange={onRowRepositoryChange}
         onRowBranchChange={onRowBranchChange}
-        onGitHubUrlChange={onGitHubUrlChange}
         onToggleFreshBranch={onToggleFreshBranch}
         onWorkspacePathChange={onWorkspacePathChange}
       />
@@ -187,7 +184,6 @@ function ModeBody({
   freshBranchEnabled,
   onRowRepositoryChange,
   onRowBranchChange,
-  onGitHubUrlChange,
   onToggleFreshBranch,
   onWorkspacePathChange,
 }: {
@@ -202,7 +198,6 @@ function ModeBody({
   freshBranchEnabled?: boolean;
   onRowRepositoryChange: (key: string, value: string) => void;
   onRowBranchChange: (key: string, value: string) => void;
-  onGitHubUrlChange?: (value: string) => void;
   onToggleFreshBranch?: (enabled: boolean) => void;
   onWorkspacePathChange?: (value: string) => void;
 }) {
@@ -216,16 +211,12 @@ function ModeBody({
     );
   }
   if (fs.useRemote) {
-    const firstRemoteUrl = fs.remoteRepos[0]?.url ?? "";
     return (
-      <GitHubUrlSection
-        githubUrl={firstRemoteUrl}
-        githubUrlError={fs.githubUrlError}
-        githubBranch={fs.githubBranch}
-        githubBranches={fs.branchesByUrl.branches(firstRemoteUrl)}
-        githubBranchesLoading={fs.branchesByUrl.loading(firstRemoteUrl)}
-        onGitHubUrlChange={onGitHubUrlChange}
-        onGitHubBranchChange={fs.setGitHubBranch}
+      <RemoteRepoChipsRow
+        fs={fs}
+        onUpdateRow={fs.updateRemoteRepo}
+        onAddRow={fs.addRemoteRepo}
+        onRemoveRow={fs.removeRemoteRepo}
       />
     );
   }

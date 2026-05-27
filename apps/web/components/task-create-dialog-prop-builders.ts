@@ -53,7 +53,6 @@ export function buildDialogFormBodyProps(
     onExecutorProfileChange: handlers.handleExecutorProfileChange,
     onWorkflowChange: handlers.handleWorkflowChange,
     onToggleRemote: repoLocked ? undefined : handlers.handleToggleRemote,
-    onGitHubUrlChange: handlers.handleGitHubUrlChange,
     onToggleFreshBranch: handlers.handleToggleFreshBranch,
     onToggleNoRepository: repoLocked ? undefined : handlers.handleToggleNoRepository,
     onWorkspacePathChange: handlers.handleWorkspacePathChange,

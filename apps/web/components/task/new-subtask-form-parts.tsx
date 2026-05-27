@@ -223,7 +223,6 @@ function WorkspaceSection({
         onRowRepositoryChange={handlers.handleRowRepositoryChange}
         onRowBranchChange={handlers.handleRowBranchChange}
         onToggleRemote={handlers.handleToggleRemote}
-        onGitHubUrlChange={handlers.handleGitHubUrlChange}
       />
       <WorktreeBadge show={showWorktreeBadge} branch={worktreeBranch} />
     </>
