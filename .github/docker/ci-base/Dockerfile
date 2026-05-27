@@ -11,6 +11,8 @@
 #   - Node            : 24             (matches actions/setup-node value)
 #   - pnpm            : 9.15.9         (matches pnpm/action-setup value)
 #   - golangci-lint   : v2.9.0         (matches v2.9 floating pin)
+#   - go-licenses     : v1.6.0
+#   - Docker CLI      : 27.3.1
 
 FROM mcr.microsoft.com/playwright:v1.58.2-noble
 
@@ -79,12 +81,15 @@ RUN curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-27.
 WORKDIR /work
 
 # --- Smoke checks ----------------------------------------------------------
-# Fail the build if any pinned tool is missing or mismatched.
+# Fail the build if any pinned tool is missing or mismatched. The Playwright
+# version is intentionally not asserted at runtime: `npx playwright --version`
+# resolves via npm and fetches the latest release rather than the image's
+# bundled binary, and the bundled binary's location is internal to the
+# Microsoft image. The FROM pin (`v1.58.2-noble`) is the version guarantee.
 RUN set -eux; \
     go version | grep -F 'go1.26.0'; \
     node --version | grep -E '^v24\.'; \
     pnpm --version | grep -E '^9\.15\.9$'; \
-    npx playwright --version | grep -F '1.58.2'; \
     golangci-lint --version | grep -F '2.9.0'; \
     go version -m "$(which go-licenses)" | grep -F 'v1.6.0'; \
     docker --version | grep -F '27.3.1'
