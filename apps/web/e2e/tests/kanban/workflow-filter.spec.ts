@@ -144,8 +144,8 @@ test.describe("Kanban workflow filter", () => {
     await testPage.goto(`/t/${betaTaskId}`);
     await expect(testPage).toHaveURL(new RegExp(`/t/${betaTaskId}`));
 
-    // Breadcrumb = client-side nav: goto("/") re-runs SSR and re-resolves activeId, masking the bug.
-    await testPage.getByTestId("task-breadcrumb-home").click();
+    // AppSidebar Home link = client-side nav: goto("/") re-runs SSR and re-resolves activeId, masking the bug.
+    await testPage.getByTestId("app-sidebar").getByRole("link", { name: "Home" }).click();
     await expect(testPage).toHaveURL(/\/$|\?/);
     await expect(kanban.board).toBeVisible();
 
