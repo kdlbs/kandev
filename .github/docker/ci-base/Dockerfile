@@ -84,7 +84,7 @@ RUN set -eux; \
     go version | grep -F 'go1.26.0'; \
     node --version | grep -E '^v24\.'; \
     pnpm --version | grep -E '^9\.15\.9$'; \
-    npx playwright --version; \
+    npx playwright --version | grep -F '1.58.2'; \
     golangci-lint --version | grep -F '2.9.0'; \
-    go-licenses --help >/dev/null; \
+    go version -m "$(which go-licenses)" | grep -F 'v1.6.0'; \
     docker --version | grep -F '27.3.1'
