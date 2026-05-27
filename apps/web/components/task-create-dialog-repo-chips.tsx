@@ -61,8 +61,9 @@ function runAutoselect({
  * is no "primary" — and any row can hold either a workspace repo or a
  * discovered on-machine path.
  *
- * In GitHub URL mode the chips are replaced by an inline URL input pill;
- * the trailing toggle flips between the two modes.
+ * In Remote mode the chips are replaced by `RemoteRepoChipsRow`, which
+ * renders its own chip row backed by `fs.remoteRepos`; the trailing toggle
+ * flips between the two modes.
  */
 type RepoChipsRowProps = {
   fs: DialogFormState;
