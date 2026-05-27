@@ -35,7 +35,12 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # --- Node 24 (replaces the base image's Node 22) ---------------------------
-RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
+# Download the NodeSource setup script to a temp file first rather than piping
+# `curl` straight into `bash`, so the script is on disk if anything needs to
+# inspect it.
+RUN curl -fsSL https://deb.nodesource.com/setup_24.x -o /tmp/nodesource_setup.sh \
+    && bash /tmp/nodesource_setup.sh \
+    && rm /tmp/nodesource_setup.sh \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
@@ -51,9 +56,13 @@ RUN curl -fsSL https://go.dev/dl/go1.26.0.linux-amd64.tar.gz \
 
 # --- golangci-lint v2.9.0 --------------------------------------------------
 # Fetch the install script from the matching tagged ref (not `master`) so the
-# script itself is reproducible across rebuilds.
-RUN curl -fsSL https://raw.githubusercontent.com/golangci/golangci-lint/v2.9.0/install.sh \
-        | sh -s -- -b /usr/local/bin v2.9.0
+# script itself is reproducible across rebuilds, and save it to a temp file
+# before executing rather than piping `curl` into `sh`.
+RUN curl -fsSL \
+        https://raw.githubusercontent.com/golangci/golangci-lint/v2.9.0/install.sh \
+        -o /tmp/install-golangci-lint.sh \
+    && sh /tmp/install-golangci-lint.sh -b /usr/local/bin v2.9.0 \
+    && rm /tmp/install-golangci-lint.sh
 
 # --- go-licenses v1.6.0 ----------------------------------------------------
 RUN go install github.com/google/go-licenses@v1.6.0
@@ -78,4 +87,4 @@ RUN set -eux; \
     npx playwright --version; \
     golangci-lint --version | grep -F '2.9.0'; \
     go-licenses --help >/dev/null; \
-    docker --version
+    docker --version | grep -F '27.3.1'

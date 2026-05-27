@@ -37,7 +37,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -48,9 +48,11 @@ jobs:
         id: tag
         run: |
           set -euo pipefail
+          # Hash reflects image content (Dockerfile + dependencies) only; the
+          # workflow file is intentionally excluded so cosmetic edits to it
+          # (renaming a step, fixing a summary) don't produce a wasteful retag.
           hash=$(cat \
               .github/docker/ci-base/Dockerfile \
-              .github/workflows/ci-base-image.yml \
               apps/backend/go.mod \
               apps/pnpm-lock.yaml \
               apps/web/package.json \
@@ -64,7 +66,7 @@ jobs:
           context: .
           file: .github/docker/ci-base/Dockerfile
           platforms: linux/amd64
-          push: ${{ github.event_name != 'pull_request' }}
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           tags: |
@@ -82,4 +84,4 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
         env:
           IMAGE_TAG: ${{ steps.tag.outputs.image_tag }}
-          PUSHED: ${{ github.event_name != 'pull_request' }}
+          PUSHED: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
