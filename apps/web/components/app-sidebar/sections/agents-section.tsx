@@ -7,6 +7,7 @@ import { IconPlus, IconRobot } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useOfficeRefetch } from "@/hooks/use-office-refetch";
 import { listAgentProfiles } from "@/lib/api/domains/office-api";
 import { cn } from "@/lib/utils";
@@ -24,21 +25,24 @@ type AgentsSectionProps = {
 
 export function AgentsSection({ collapsed }: AgentsSectionProps) {
   const router = useRouter();
+  const officeEnabled = useFeature("office");
   const agents = useAppStore((s) => s.office.agentProfiles);
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const setOfficeAgentProfiles = useAppStore((s) => s.setOfficeAgentProfiles);
 
   const refetchAgents = useCallback(async () => {
-    if (!workspaceId) return;
+    if (!workspaceId || !officeEnabled) return;
     const res = await listAgentProfiles(workspaceId).catch(() => ({ agents: [] }));
     setOfficeAgentProfiles(res.agents ?? []);
-  }, [workspaceId, setOfficeAgentProfiles]);
+  }, [workspaceId, officeEnabled, setOfficeAgentProfiles]);
 
   useEffect(() => {
     refetchAgents();
   }, [refetchAgents]);
 
   useOfficeRefetch("agents", refetchAgents);
+
+  if (!officeEnabled) return null;
 
   const headerAction = (
     <Tooltip>

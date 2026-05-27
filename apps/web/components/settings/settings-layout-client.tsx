@@ -1,10 +1,8 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { SidebarInset, SidebarProvider, SidebarTrigger } from "@kandev/ui/sidebar";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { PageTopbar } from "@/components/page-topbar";
-import { SettingsAppSidebar } from "@/components/settings/settings-app-sidebar";
 
 // Brand/initialism overrides so the derived label matches how the rest of the
 // app spells these (e.g. "github" → "GitHub", not "Github"). Anything not
@@ -108,20 +106,16 @@ function SettingsShell({
 }) {
   return (
     <TooltipProvider>
-      <SidebarProvider>
-        <SettingsAppSidebar />
-        <SidebarInset>
-          <PageTopbar
-            title={title}
-            backHref={backHref}
-            backLabel={backLabel}
-            parents={parents}
-            className="h-16 border-b-0"
-            leading={<SidebarTrigger size="lg" className="md:hidden h-10 w-10 cursor-pointer" />}
-          />
-          <div className="flex min-w-0 flex-1 flex-col gap-4 p-4 pt-0 mb-20">{children}</div>
-        </SidebarInset>
-      </SidebarProvider>
+      <main className="flex min-h-0 flex-1 flex-col">
+        <PageTopbar
+          title={title}
+          backHref={backHref}
+          backLabel={backLabel}
+          parents={parents}
+          className="h-16 border-b-0"
+        />
+        <div className="flex min-w-0 flex-1 flex-col gap-4 p-4 pt-0 mb-20">{children}</div>
+      </main>
     </TooltipProvider>
   );
 }

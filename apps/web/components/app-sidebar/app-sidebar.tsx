@@ -13,6 +13,7 @@ import { AppSidebarFooter } from "./app-sidebar-footer";
 import { AppSidebarHeader } from "./app-sidebar-header";
 import { AppSidebarPrimaryNav } from "./app-sidebar-primary-nav";
 import { AgentsSection } from "./sections/agents-section";
+import { IntegrationsSection } from "./sections/integrations-section";
 import { ProjectsSection } from "./sections/projects-section";
 import { SettingsSection } from "./sections/settings-section";
 import { TasksSection } from "./sections/tasks-section";
@@ -67,12 +68,17 @@ export function AppSidebar() {
       }}
     >
       <AppSidebarHeader collapsed={collapsed} onToggleCollapse={toggleCollapsed} />
-      <nav className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-2 px-2 py-2">
-        <AppSidebarPrimaryNav collapsed={collapsed} />
+      <nav className="flex-1 min-h-0 flex flex-col gap-2 px-2 py-2 overflow-hidden">
+        <div className="shrink-0 flex flex-col gap-2 overflow-y-auto">
+          <AppSidebarPrimaryNav collapsed={collapsed} />
+          <ProjectsSection collapsed={collapsed} />
+          <AgentsSection collapsed={collapsed} />
+          <IntegrationsSection collapsed={collapsed} />
+          <SettingsSection collapsed={collapsed} />
+        </div>
+        {/* Kanban is the bottom-most flex-grow section so it absorbs all
+            remaining vertical space and scrolls internally. */}
         <TasksSection collapsed={collapsed} />
-        <ProjectsSection collapsed={collapsed} />
-        <AgentsSection collapsed={collapsed} />
-        <SettingsSection collapsed={collapsed} />
       </nav>
       <AppSidebarFooter collapsed={collapsed} />
     </aside>

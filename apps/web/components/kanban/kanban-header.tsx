@@ -1,35 +1,20 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@kandev/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
-import {
-  IconPlus,
-  IconSettings,
-  IconList,
-  IconLayoutKanban,
-  IconMenu2,
-  IconChartBar,
-  IconTimeline,
-  IconStethoscope,
-  IconBuildings,
-} from "@tabler/icons-react";
-import { ImproveKandevDialog } from "@/components/improve-kandev-dialog";
-import { useFeature } from "@/hooks/domains/features/use-feature";
-import { IntegrationsTopbarLinks } from "@/components/integrations/integrations-menu";
+import { IconPlus, IconList, IconLayoutKanban, IconMenu2, IconTimeline } from "@tabler/icons-react";
 import { PageTopbar } from "@/components/page-topbar";
 import { KanbanDisplayDropdown } from "../kanban-display-dropdown";
-import { ReleaseNotesButton } from "../release-notes/release-notes-button";
 import { ReleaseNotesDialog } from "../release-notes/release-notes-dialog";
 import { HealthIndicatorButton, HealthIssuesDialog } from "../system-health/health-indicator";
 import { TaskSearchInput } from "./task-search-input";
 import { QuickChatButton } from "@/components/task/quick-chat-button";
 import { KanbanHeaderMobile } from "./kanban-header-mobile";
 import { MobileMenuSheet } from "./mobile-menu-sheet";
-import { linkToTask, linkToTasks } from "@/lib/links";
+import { linkToTasks } from "@/lib/links";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
@@ -73,111 +58,9 @@ function getHeaderTitle(currentPage: string): string {
   return currentPage === "tasks" ? "Tasks" : "Home";
 }
 
-function SettingsTopbarButton({ size = "icon" }: { size?: ComponentProps<typeof Button>["size"] }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button asChild variant="outline" size={size} className="cursor-pointer">
-          <Link href="/settings" aria-label="Settings">
-            <IconSettings className="h-4 w-4" />
-          </Link>
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>Settings</TooltipContent>
-    </Tooltip>
-  );
-}
-
-function ImproveKandevTopbarButton({
-  workspaceId,
-  buttonSize = "icon-lg",
-}: {
-  workspaceId: string | undefined;
-  buttonSize?: ComponentProps<typeof Button>["size"];
-}) {
-  const router = useRouter();
-  const [open, setOpen] = useState(false);
-  return (
-    <>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="outline"
-            size={buttonSize}
-            onClick={() => setOpen(true)}
-            className="cursor-pointer"
-            data-testid="improve-kandev-button"
-          >
-            <IconStethoscope className="h-4 w-4" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Improve Kandev</TooltipContent>
-      </Tooltip>
-      <ImproveKandevDialog
-        open={open}
-        onOpenChange={setOpen}
-        workspaceId={workspaceId ?? null}
-        onSuccess={(task) => router.push(linkToTask(task.id))}
-      />
-    </>
-  );
-}
-
-function StatsTopbarButton() {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button asChild variant="outline" size="icon-lg" className="cursor-pointer">
-          <Link href="/stats" aria-label="Stats">
-            <IconChartBar className="h-4 w-4" />
-          </Link>
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>Stats</TooltipContent>
-    </Tooltip>
-  );
-}
-
-function OfficeTopbarButton() {
-  // Hidden in production where features.office=false. The hook reads SSR-
-  // hydrated state, so the button never appears for a single frame on
-  // first paint.
-  const officeEnabled = useFeature("office");
-  if (!officeEnabled) return null;
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button asChild variant="outline" size="icon-lg" className="cursor-pointer">
-          <Link href="/office" aria-label="Office">
-            <IconBuildings className="h-4 w-4" />
-          </Link>
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>Office</TooltipContent>
-    </Tooltip>
-  );
-}
-
-function HomeLeftActions({ workspaceId }: { workspaceId?: string }) {
-  return (
-    <>
-      <IntegrationsTopbarLinks />
-      <StatsTopbarButton />
-      <OfficeTopbarButton />
-      <ImproveKandevTopbarButton workspaceId={workspaceId} />
-    </>
-  );
-}
-
-function WorkspaceLeftActions({ workspaceId }: { workspaceId?: string }) {
-  return (
-    <>
-      <IntegrationsTopbarLinks />
-      <OfficeTopbarButton />
-      <ImproveKandevTopbarButton workspaceId={workspaceId} />
-    </>
-  );
-}
+// Integrations / Stats / Office / Improve Kandev / Settings / Release notes
+// have all moved to the unified AppSidebar (Fix 6). The kanban top bar now
+// focuses on task-creation, view-toggle, kanban display, and search.
 
 function ViewToggleGroup({
   toggleValue,
@@ -279,13 +162,6 @@ function TabletHeader({
       subtitle={workspaceLabel}
       className={WORKBENCH_TOPBAR_CLASSNAME}
       variant={isHome ? "root" : "breadcrumb"}
-      leftActions={
-        isHome ? (
-          <HomeLeftActions workspaceId={workspaceId} />
-        ) : (
-          <WorkspaceLeftActions workspaceId={workspaceId} />
-        )
-      }
       actionsClassName="gap-2"
       actions={
         <>
@@ -372,9 +248,6 @@ function DesktopHeader({
   isSearchLoading,
   toggleValue,
   handleViewChange,
-  showReleaseNotesButton,
-  releaseNotesHasUnseen,
-  onOpenReleaseNotes,
   showHealthIndicator,
   onOpenHealthDialog,
 }: {
@@ -387,9 +260,6 @@ function DesktopHeader({
   isSearchLoading: boolean;
   toggleValue: string;
   handleViewChange: (value: string) => void;
-  showReleaseNotesButton: boolean;
-  releaseNotesHasUnseen: boolean;
-  onOpenReleaseNotes: () => void;
   showHealthIndicator: boolean;
   onOpenHealthDialog: () => void;
 }) {
@@ -410,11 +280,6 @@ function DesktopHeader({
       <div data-testid="kanban-header-search">{searchInput}</div>
     ) : null;
   const actionsSearch = !isHome || isNarrow ? searchInput : null;
-  const leftActions = isHome ? (
-    <HomeLeftActions workspaceId={workspaceId} />
-  ) : (
-    <WorkspaceLeftActions workspaceId={workspaceId} />
-  );
 
   return (
     <PageTopbar
@@ -424,7 +289,6 @@ function DesktopHeader({
       center={centerSearch}
       className={WORKBENCH_TOPBAR_CLASSNAME}
       variant={isHome ? "root" : "breadcrumb"}
-      leftActions={leftActions}
       actions={
         <>
           {actionsSearch}
@@ -439,14 +303,6 @@ function DesktopHeader({
             onClick={onOpenHealthDialog}
             size="icon-lg"
           />
-          {showReleaseNotesButton && (
-            <ReleaseNotesButton
-              hasUnseen={releaseNotesHasUnseen}
-              onClick={onOpenReleaseNotes}
-              size="icon-lg"
-            />
-          )}
-          <SettingsTopbarButton size="icon-lg" />
         </>
       }
     />
@@ -492,10 +348,7 @@ export function KanbanHeader({
   const title = getHeaderTitle(currentPage);
   const workspaceLabel = getWorkspaceLabel(workspaces, activeWorkspaceId);
 
-  const indicatorProps = {
-    showReleaseNotesButton: releaseNotes.showTopbarButton,
-    releaseNotesHasUnseen: releaseNotes.hasUnseen,
-    onOpenReleaseNotes: releaseNotes.openDialog,
+  const healthProps = {
     showHealthIndicator: healthIndicator.hasIssues,
     onOpenHealthDialog: healthIndicator.openDialog,
   };
@@ -511,7 +364,7 @@ export function KanbanHeader({
           title={title}
           workspaceLabel={workspaceLabel}
           {...sharedSearch}
-          {...indicatorProps}
+          {...healthProps}
         />
       );
     }
@@ -526,7 +379,7 @@ export function KanbanHeader({
             toggleValue={toggleValue}
             handleViewChange={handleViewChange}
             setMenuOpen={setMenuOpen}
-            {...indicatorProps}
+            {...healthProps}
           />
           <MobileMenuSheet
             open={isMenuOpen}
@@ -534,7 +387,7 @@ export function KanbanHeader({
             workspaceId={workspaceId}
             currentPage={currentPage}
             {...sharedSearch}
-            {...indicatorProps}
+            {...healthProps}
           />
         </>
       );
@@ -547,7 +400,7 @@ export function KanbanHeader({
         {...sharedSearch}
         toggleValue={toggleValue}
         handleViewChange={handleViewChange}
-        {...indicatorProps}
+        {...healthProps}
       />
     );
   };

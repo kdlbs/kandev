@@ -14,8 +14,6 @@ type KanbanHeaderMobileProps = {
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
   isSearchLoading?: boolean;
-  showReleaseNotesButton: boolean;
-  onOpenReleaseNotes: () => void;
   showHealthIndicator: boolean;
   onOpenHealthDialog: () => void;
 };
@@ -28,8 +26,6 @@ export function KanbanHeaderMobile({
   searchQuery = "",
   onSearchChange,
   isSearchLoading = false,
-  showReleaseNotesButton,
-  onOpenReleaseNotes,
   showHealthIndicator,
   onOpenHealthDialog,
 }: KanbanHeaderMobileProps) {
@@ -63,8 +59,6 @@ export function KanbanHeaderMobile({
         searchQuery={searchQuery}
         onSearchChange={onSearchChange}
         isSearchLoading={isSearchLoading}
-        showReleaseNotesButton={showReleaseNotesButton}
-        onOpenReleaseNotes={onOpenReleaseNotes}
         showHealthIndicator={showHealthIndicator}
         onOpenHealthDialog={onOpenHealthDialog}
       />

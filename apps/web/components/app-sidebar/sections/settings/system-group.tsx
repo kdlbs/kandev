@@ -1,0 +1,55 @@
+"use client";
+
+import {
+  IconActivity,
+  IconArchive,
+  IconDatabase,
+  IconFileText,
+  IconInfoCircle,
+  IconRefresh,
+  IconScale,
+  IconServerCog,
+} from "@tabler/icons-react";
+import type { Icon as TablerIcon } from "@tabler/icons-react";
+import { SettingsGroup, SettingsLeaf } from "./settings-nav-primitives";
+
+const ROOT_HREF = "/settings/system";
+const DEFAULT_HREF = `${ROOT_HREF}/status`;
+
+const ITEMS: Array<{ href: string; label: string; icon: TablerIcon }> = [
+  { href: `${ROOT_HREF}/status`, label: "Status", icon: IconActivity },
+  { href: `${ROOT_HREF}/database`, label: "Database", icon: IconDatabase },
+  { href: `${ROOT_HREF}/backups`, label: "Backups", icon: IconArchive },
+  { href: `${ROOT_HREF}/logs`, label: "Logs", icon: IconFileText },
+  { href: `${ROOT_HREF}/updates`, label: "Updates", icon: IconRefresh },
+  { href: `${ROOT_HREF}/about`, label: "About", icon: IconInfoCircle },
+  { href: `${ROOT_HREF}/licenses`, label: "Licenses", icon: IconScale },
+];
+
+type SystemGroupProps = {
+  pathname: string;
+};
+
+export function SystemGroup({ pathname }: SystemGroupProps) {
+  const isSystem = pathname.startsWith(ROOT_HREF);
+  return (
+    <SettingsGroup
+      label="System"
+      icon={IconServerCog}
+      href={DEFAULT_HREF}
+      isActive={pathname === DEFAULT_HREF}
+      defaultExpanded={isSystem}
+    >
+      {ITEMS.map(({ href, label, icon }) => (
+        <SettingsLeaf
+          key={href}
+          href={href}
+          label={label}
+          icon={icon}
+          isActive={pathname === href}
+          depth={1}
+        />
+      ))}
+    </SettingsGroup>
+  );
+}

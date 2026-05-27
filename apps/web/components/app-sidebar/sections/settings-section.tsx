@@ -1,49 +1,35 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   IconBolt,
   IconCode,
-  IconCpu,
-  IconFolder,
   IconKey,
   IconMessageCircle,
   IconPlugConnected,
-  IconRobot,
-  IconServerCog,
   IconSettings,
   IconWand,
 } from "@tabler/icons-react";
-import type { Icon as TablerIcon } from "@tabler/icons-react";
-import { cn } from "@/lib/utils";
 import { APP_SIDEBAR_SECTION_IDS } from "../app-sidebar-constants";
 import { AppSidebarSection } from "../app-sidebar-section";
+import { AgentsGroup } from "./settings/agents-group";
+import { ExecutorsGroup } from "./settings/executors-group";
+import { GeneralGroup } from "./settings/general-group";
+import { IntegrationsGroup } from "./settings/integrations-group";
+import { SettingsLeaf } from "./settings/settings-nav-primitives";
+import { SystemGroup } from "./settings/system-group";
+import { WorkspacesGroup } from "./settings/workspaces-group";
 
 type SettingsSectionProps = {
   collapsed: boolean;
 };
 
-type SettingsEntry = {
-  label: string;
-  href: string;
-  icon: TablerIcon;
-};
-
-const SETTINGS_ENTRIES: SettingsEntry[] = [
-  { label: "General", href: "/settings/general", icon: IconSettings },
-  { label: "Workspaces", href: "/settings/workspace", icon: IconFolder },
-  { label: "Integrations", href: "/settings/integrations", icon: IconPlugConnected },
-  { label: "Automations", href: "/settings/automations", icon: IconBolt },
-  { label: "Agents", href: "/settings/agents", icon: IconRobot },
-  { label: "Prompts", href: "/settings/prompts", icon: IconMessageCircle },
-  { label: "Utility Agents", href: "/settings/utility-agents", icon: IconWand },
-  { label: "Executors", href: "/settings/executors", icon: IconCpu },
-  { label: "Editors", href: "/settings/general/editors", icon: IconCode },
-  { label: "Secrets", href: "/settings/general/secrets", icon: IconKey },
-  { label: "External MCP", href: "/settings/external-mcp", icon: IconPlugConnected },
-  { label: "System", href: "/settings/system/status", icon: IconServerCog },
-];
+const EDITORS_HREF = "/settings/general/editors";
+const SECRETS_HREF = "/settings/general/secrets";
+const AUTOMATIONS_HREF = "/settings/automations";
+const PROMPTS_HREF = "/settings/prompts";
+const UTILITY_HREF = "/settings/utility-agents";
+const EXT_MCP_HREF = "/settings/external-mcp";
 
 export function SettingsSection({ collapsed }: SettingsSectionProps) {
   const pathname = usePathname();
@@ -55,22 +41,48 @@ export function SettingsSection({ collapsed }: SettingsSectionProps) {
       collapsed={collapsed}
       icon={IconSettings}
     >
-      {SETTINGS_ENTRIES.map(({ label, href, icon: Icon }) => {
-        const isActive = pathname === href || pathname.startsWith(`${href}/`);
-        return (
-          <Link
-            key={href}
-            href={href}
-            className={cn(
-              "flex items-center gap-2.5 px-2.5 py-1.5 text-[13px] font-medium rounded-md cursor-pointer",
-              isActive ? "bg-accent text-foreground" : "text-foreground/80 hover:bg-muted/60",
-            )}
-          >
-            <Icon className="h-4 w-4 shrink-0" />
-            <span className="flex-1 truncate">{label}</span>
-          </Link>
-        );
-      })}
+      <GeneralGroup pathname={pathname} />
+      <WorkspacesGroup pathname={pathname} />
+      <IntegrationsGroup pathname={pathname} />
+      <SettingsLeaf
+        href={AUTOMATIONS_HREF}
+        label="Automations"
+        icon={IconBolt}
+        isActive={pathname.startsWith(AUTOMATIONS_HREF)}
+      />
+      <AgentsGroup pathname={pathname} />
+      <SettingsLeaf
+        href={PROMPTS_HREF}
+        label="Prompts"
+        icon={IconMessageCircle}
+        isActive={pathname === PROMPTS_HREF}
+      />
+      <SettingsLeaf
+        href={UTILITY_HREF}
+        label="Utility Agents"
+        icon={IconWand}
+        isActive={pathname === UTILITY_HREF}
+      />
+      <ExecutorsGroup pathname={pathname} />
+      <SettingsLeaf
+        href={EDITORS_HREF}
+        label="Editors"
+        icon={IconCode}
+        isActive={pathname === EDITORS_HREF}
+      />
+      <SettingsLeaf
+        href={SECRETS_HREF}
+        label="Secrets"
+        icon={IconKey}
+        isActive={pathname === SECRETS_HREF}
+      />
+      <SettingsLeaf
+        href={EXT_MCP_HREF}
+        label="External MCP"
+        icon={IconPlugConnected}
+        isActive={pathname === EXT_MCP_HREF}
+      />
+      <SystemGroup pathname={pathname} />
     </AppSidebarSection>
   );
 }

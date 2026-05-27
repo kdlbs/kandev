@@ -3,6 +3,7 @@ export const APP_SIDEBAR_SECTION_IDS = {
   tasks: "tasks",
   projects: "projects",
   agents: "agents",
+  integrations: "integrations",
   settings: "settings",
 } as const;
 

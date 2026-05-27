@@ -15,6 +15,11 @@ type AppSidebarSectionProps = {
   children: React.ReactNode;
   /** Optional right-aligned action shown in the header when expanded. */
   headerAction?: React.ReactNode;
+  /**
+   * When true and expanded, the section wrapper + body get `flex-1 min-h-0` so
+   * it fills remaining sidebar height. Parent must be a flex column.
+   */
+  grow?: boolean;
 };
 
 /**
@@ -31,6 +36,7 @@ export function AppSidebarSection({
   icon: Icon,
   children,
   headerAction,
+  grow,
 }: AppSidebarSectionProps) {
   const expanded = useAppStore((s) => s.appSidebar.sectionExpanded[id] ?? false);
   const toggleSection = useAppStore((s) => s.toggleAppSidebarSection);
@@ -57,9 +63,11 @@ export function AppSidebarSection({
     );
   }
 
+  const growExpanded = grow && expanded;
+
   return (
-    <div>
-      <div className="flex items-center justify-between px-2.5 py-1.5">
+    <div className={cn(growExpanded && "flex-1 min-h-0 flex flex-col")}>
+      <div className="flex items-center justify-between px-2.5 py-1.5 shrink-0">
         <button
           type="button"
           onClick={() => toggleSection(id)}
@@ -77,7 +85,16 @@ export function AppSidebarSection({
         </button>
         {headerAction}
       </div>
-      {expanded && <div className="flex flex-col gap-0.5 sidebar-fade-in-2">{children}</div>}
+      {expanded && (
+        <div
+          className={cn(
+            "flex flex-col gap-0.5 sidebar-fade-in-2",
+            growExpanded && "flex-1 min-h-0",
+          )}
+        >
+          {children}
+        </div>
+      )}
     </div>
   );
 }

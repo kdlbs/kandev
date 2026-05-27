@@ -6,6 +6,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { cn } from "@/lib/utils";
 import { APP_SIDEBAR_SECTION_IDS } from "../app-sidebar-constants";
 import { AppSidebarSection } from "../app-sidebar-section";
@@ -16,8 +17,11 @@ type ProjectsSectionProps = {
 
 export function ProjectsSection({ collapsed }: ProjectsSectionProps) {
   const router = useRouter();
+  const officeEnabled = useFeature("office");
   const projects = useAppStore((s) => s.office.projects);
   const activeProjects = projects.filter((p) => p.status !== "archived");
+
+  if (!officeEnabled) return null;
 
   const headerAction = (
     <Tooltip>

@@ -1,22 +1,12 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
 import { Button } from "@kandev/ui/button";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
-import {
-  IconAlertTriangle,
-  IconChartBar,
-  IconLayoutKanban,
-  IconList,
-  IconSettings,
-  IconSparkles,
-  IconTimeline,
-} from "@tabler/icons-react";
-import { MobileIntegrationsSection } from "@/components/integrations/integrations-menu";
+import { IconAlertTriangle, IconLayoutKanban, IconList, IconTimeline } from "@tabler/icons-react";
 import { TaskSearchInput } from "./task-search-input";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { linkToTasks } from "@/lib/links";
@@ -33,8 +23,6 @@ type MobileMenuSheetProps = {
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
   isSearchLoading?: boolean;
-  showReleaseNotesButton: boolean;
-  onOpenReleaseNotes: () => void;
   showHealthIndicator: boolean;
   onOpenHealthDialog: () => void;
 };
@@ -235,64 +223,33 @@ function MobileViewSection({
 }
 
 function MobileUtilityActions({
-  showReleaseNotesButton,
-  onOpenReleaseNotes,
   showHealthIndicator,
   onOpenHealthDialog,
   onOpenChange,
 }: {
-  showReleaseNotesButton: boolean;
-  onOpenReleaseNotes: () => void;
   showHealthIndicator: boolean;
   onOpenHealthDialog: () => void;
   onOpenChange: (open: boolean) => void;
 }) {
   const closeSheet = () => onOpenChange(false);
-  const openReleaseNotes = () => {
-    closeSheet();
-    onOpenReleaseNotes();
-  };
   const openHealth = () => {
     closeSheet();
     onOpenHealthDialog();
   };
 
+  if (!showHealthIndicator) return null;
+
   return (
     <div className="mt-auto flex flex-col gap-3 pt-4 border-t border-border">
       <div className="text-sm font-medium">Utilities</div>
-      {showReleaseNotesButton && (
-        <Button
-          type="button"
-          variant="outline"
-          className="w-full cursor-pointer justify-start gap-2"
-          onClick={openReleaseNotes}
-        >
-          <IconSparkles className="h-4 w-4" />
-          Release notes
-        </Button>
-      )}
-      {showHealthIndicator && (
-        <Button
-          type="button"
-          variant="outline"
-          className="w-full cursor-pointer justify-start gap-2"
-          onClick={openHealth}
-        >
-          <IconAlertTriangle className="h-4 w-4 text-warning" />
-          Health issues
-        </Button>
-      )}
-      <Button asChild variant="outline" className="w-full cursor-pointer justify-start gap-2">
-        <Link href="/stats" onClick={closeSheet}>
-          <IconChartBar className="h-4 w-4 mr-2" />
-          Stats
-        </Link>
-      </Button>
-      <Button asChild variant="outline" className="w-full cursor-pointer justify-start gap-2">
-        <Link href="/settings" onClick={closeSheet}>
-          <IconSettings className="h-4 w-4 mr-2" />
-          Settings
-        </Link>
+      <Button
+        type="button"
+        variant="outline"
+        className="w-full cursor-pointer justify-start gap-2"
+        onClick={openHealth}
+      >
+        <IconAlertTriangle className="h-4 w-4 text-warning" />
+        Health issues
       </Button>
     </div>
   );
@@ -306,8 +263,6 @@ export function MobileMenuSheet({
   searchQuery = "",
   onSearchChange,
   isSearchLoading = false,
-  showReleaseNotesButton,
-  onOpenReleaseNotes,
   showHealthIndicator,
   onOpenHealthDialog,
 }: MobileMenuSheetProps) {
@@ -378,11 +333,7 @@ export function MobileMenuSheet({
             onTogglePreviewOnClick={onTogglePreviewOnClick}
           />
 
-          <MobileIntegrationsSection onNavigate={() => onOpenChange(false)} />
-
           <MobileUtilityActions
-            showReleaseNotesButton={showReleaseNotesButton}
-            onOpenReleaseNotes={onOpenReleaseNotes}
             showHealthIndicator={showHealthIndicator}
             onOpenHealthDialog={onOpenHealthDialog}
             onOpenChange={onOpenChange}

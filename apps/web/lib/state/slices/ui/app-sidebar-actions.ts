@@ -14,6 +14,7 @@ export const DEFAULT_SECTION_EXPANDED: Record<string, boolean> = {
   tasks: true,
   projects: false,
   agents: false,
+  integrations: false,
   settings: false,
 };
 
