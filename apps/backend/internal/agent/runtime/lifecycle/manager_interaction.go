@@ -243,12 +243,27 @@ func (m *Manager) SetSessionModeBySessionID(ctx context.Context, sessionID, mode
 	return m.SetSessionMode(ctx, execution.ID, execution.ACPSessionID, modeID)
 }
 
-// SetSessionModel changes the session model for a running agent.
+// SetSessionModel changes the session model for a running agent. ACP agents
+// swap the model in-place via session.set_model. Passthrough (TUI) agents have
+// no protocol channel — the model is a CLI flag baked into the launch — so the
+// override is persisted on the execution and the PTY is relaunched so the next
+// process picks up the new --model.
 func (m *Manager) SetSessionModel(ctx context.Context, executionID, modelID string) error {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
+
+	if execution.PassthroughProcessID != "" {
+		_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
+			if exec.Metadata == nil {
+				exec.Metadata = make(map[string]interface{})
+			}
+			exec.Metadata["model_override"] = modelID
+		})
+		return m.RestartAgentProcess(ctx, executionID)
+	}
+
 	if execution.agentctl == nil {
 		return fmt.Errorf("execution %q has no agentctl client", executionID)
 	}

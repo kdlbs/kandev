@@ -343,6 +343,53 @@ func TestManager_RestartAgentProcess_SessionInitFailure(t *testing.T) {
 	}
 }
 
+// --- SetSessionModel passthrough tests ---
+
+// TestManager_SetSessionModel_Passthrough_PersistsOverride is the regression test for
+// the bug where set-model returned "no agentctl client" on passthrough sessions.
+// The fix: passthrough sessions persist a model_override on the execution and
+// restart the PTY so the next launch uses the new --model.
+func TestManager_SetSessionModel_Passthrough_PersistsOverride(t *testing.T) {
+	mgr := newTestManager()
+	exec := &AgentExecution{
+		ID:                   "exec-pt",
+		SessionID:            "session-pt",
+		PassthroughProcessID: "pt-process-1",
+		Status:               v1.AgentStatusRunning,
+		Metadata:             map[string]interface{}{},
+		agentctl:             nil, // passthrough sessions have no agentctl client
+	}
+	require.NoError(t, mgr.executionStore.Add(exec))
+
+	// SetSessionModel triggers a PTY restart. The test manager has no interactive
+	// runner registered, so the restart itself returns an error — but the override
+	// must already be persisted by the time the restart fires.
+	_ = mgr.SetSessionModel(context.Background(), exec.ID, "claude-opus-4-7")
+
+	require.Equal(t, "claude-opus-4-7", exec.Metadata["model_override"],
+		"SetSessionModel must persist model_override on passthrough executions")
+}
+
+func TestEffectivePassthroughModel(t *testing.T) {
+	t.Run("returns override when set", func(t *testing.T) {
+		execution := &AgentExecution{
+			Metadata: map[string]interface{}{"model_override": "claude-opus-4-7"},
+		}
+		profile := &AgentProfileInfo{Model: "claude-sonnet-4-6"}
+		require.Equal(t, "claude-opus-4-7", effectivePassthroughModel(execution, profile))
+	})
+
+	t.Run("falls back to profile model when override empty", func(t *testing.T) {
+		execution := &AgentExecution{Metadata: map[string]interface{}{}}
+		profile := &AgentProfileInfo{Model: "claude-sonnet-4-6"}
+		require.Equal(t, "claude-sonnet-4-6", effectivePassthroughModel(execution, profile))
+	})
+
+	t.Run("handles nil execution and profile", func(t *testing.T) {
+		require.Equal(t, "", effectivePassthroughModel(nil, nil))
+	})
+}
+
 // --- IsAgentRunningForSession tests ---
 
 // mockExecutorWithRunner implements ExecutorBackend and returns a real InteractiveRunner.

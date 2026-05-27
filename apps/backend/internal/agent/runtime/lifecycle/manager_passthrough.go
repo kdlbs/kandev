@@ -359,7 +359,7 @@ func (m *Manager) passthroughAgentCommand(execution *AgentExecution, profileInfo
 	}
 
 	cmd := ptAgent.BuildPassthroughCommand(agents.PassthroughOptions{
-		Model:            profileModel(profileInfo),
+		Model:            effectivePassthroughModel(execution, profileInfo),
 		SessionID:        execution.ACPSessionID,
 		Prompt:           promptForCmd,
 		PermissionValues: profilePermissionValues(profileInfo),
@@ -484,6 +484,20 @@ func profileModel(p *AgentProfileInfo) string {
 	return p.Model
 }
 
+// effectivePassthroughModel returns the model that should be passed to the next
+// passthrough launch: a model_override on the execution wins over the profile's
+// model. SetSessionModel sets the override for passthrough sessions because the
+// model is baked into the CLI command at launch time — there is no live channel
+// to swap it, so the PTY must be relaunched with a new --model.
+func effectivePassthroughModel(execution *AgentExecution, profile *AgentProfileInfo) string {
+	if execution != nil && execution.Metadata != nil {
+		if override, ok := execution.Metadata["model_override"].(string); ok && override != "" {
+			return override
+		}
+	}
+	return profileModel(profile)
+}
+
 // profilePermissionValues builds a permission values map from profile info.
 func profilePermissionValues(p *AgentProfileInfo) map[string]bool {
 	if p == nil {
@@ -509,7 +523,7 @@ func (m *Manager) freshPassthroughCommand(ctx context.Context, execution *AgentE
 	}
 
 	cmd := resolved.agent.BuildPassthroughCommand(agents.PassthroughOptions{
-		Model:            profileModel(resolved.profile),
+		Model:            effectivePassthroughModel(execution, resolved.profile),
 		PermissionValues: profilePermissionValues(resolved.profile),
 		MCPConfigPath:    mcpConfigPath,
 		CLIFlagTokens:    m.profileCLIFlagTokens(resolved.profile),
@@ -527,7 +541,7 @@ func (m *Manager) resumePassthroughCommand(execution *AgentExecution, resolved *
 		return agents.Command{}, err
 	}
 	cmd := resolved.agent.BuildPassthroughCommand(agents.PassthroughOptions{
-		Model:            profileModel(resolved.profile),
+		Model:            effectivePassthroughModel(execution, resolved.profile),
 		Resume:           useResume,
 		PermissionValues: profilePermissionValues(resolved.profile),
 		MCPConfigPath:    mcpConfigPath,
