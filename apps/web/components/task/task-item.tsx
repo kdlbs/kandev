@@ -367,8 +367,16 @@ export const TaskItem = memo(function TaskItem({
         prInfo={prInfo}
         issueInfo={issueInfo}
       />
-      {hasDiffStats && <DiffStatsRight diffStats={diffStats!} menuOpen={effectiveMenuOpen} />}
-      <TaskMenuButton visible={effectiveMenuOpen} />
+      {hasDiffStats ? (
+        <div className="relative shrink-0 self-center flex items-center">
+          <DiffStatsRight diffStats={diffStats!} menuOpen={effectiveMenuOpen} />
+          <div className="absolute inset-0 flex items-center justify-end">
+            <TaskMenuButton visible={effectiveMenuOpen} />
+          </div>
+        </div>
+      ) : (
+        <TaskMenuButton visible={effectiveMenuOpen} />
+      )}
       {showSubtaskToggle && (
         <SubtaskToggle
           taskId={taskId}
