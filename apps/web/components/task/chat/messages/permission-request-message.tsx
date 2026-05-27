@@ -4,6 +4,7 @@ import { IconAlertTriangle, IconCheck, IconX } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
 import { PermissionActionRow } from "./permission-action-row";
+import { summarizePermissionAction } from "./permission-action-summary";
 import {
   parsePermission,
   usePermissionResponseHandlers,
@@ -51,6 +52,8 @@ export function PermissionRequestMessage({ comment }: PermissionRequestMessagePr
   });
 
   const statusBadge = getPermissionStatusBadge(permissionStatus);
+  const titleText = comment.content || "Permission Required";
+  const detailSummary = summarizePermissionAction(permissionMetadata?.action_details, titleText);
 
   return (
     <div className="w-full">
@@ -74,10 +77,19 @@ export function PermissionRequestMessage({ comment }: PermissionRequestMessagePr
                   : "text-muted-foreground",
               )}
             >
-              {comment.content || "Permission Required"}
+              {titleText}
             </span>
             {statusBadge}
           </div>
+
+          {detailSummary && (
+            <div
+              className="mt-1 font-mono text-xs text-muted-foreground break-all"
+              data-testid="permission-action-detail"
+            >
+              {detailSummary}
+            </div>
+          )}
 
           {isPermissionPending && (
             <div className="mt-2">

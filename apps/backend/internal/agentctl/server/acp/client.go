@@ -150,29 +150,23 @@ func (c *Client) forwardPermissionRequest(ctx context.Context, handler Permissio
 		}
 	}
 
-	// Extract title - prefer Kind as the title, use Title as description
-	title := ""
+	// Prefer the agent's human-readable ToolCall.Title for the user-facing label
+	// (e.g. "Run bash command 'ls -la'", "Read 216 lines from foo.go"). Fall back
+	// to Kind only when no Title was provided — many agents send Kind="other"
+	// for tools they can't classify, which on its own is meaningless to the user.
 	description := ""
 	if p.ToolCall.Title != nil {
 		description = *p.ToolCall.Title
 	}
 
-	// Use Kind as the action type (e.g., "run_shell_command", "write_file")
 	actionType := ""
 	if p.ToolCall.Kind != nil {
 		actionType = string(*p.ToolCall.Kind)
-		title = actionType // Use kind as the title for cleaner display
 	}
 
-	// If no Kind, try to extract a short title from the verbose title
-	// Gemini format: "pwd [current working directory /path] (Print the current working directory.)"
-	if title == "" && description != "" {
-		// Use the first word/command as the title
-		if idx := strings.Index(description, " "); idx > 0 {
-			title = description[:idx]
-		} else {
-			title = description
-		}
+	title := description
+	if title == "" {
+		title = actionType
 	}
 
 	// Build action details from raw input if available

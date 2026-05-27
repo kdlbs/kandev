@@ -11,12 +11,25 @@ export type PermissionOption = {
   kind: PermissionOptionKind;
 };
 
+export type PermissionActionDetails = {
+  command?: string;
+  path?: string;
+  cwd?: string;
+  // Free-form human-readable description (set by the ACP adapter when the
+  // agent provides a ToolCall.Title distinct from the displayed title).
+  description?: string;
+  // Raw tool-call input as sent by the agent (e.g. { command: "ls -la" },
+  // { file_path: "foo.go", limit: 10 }, { url: "..." }). Schema varies per
+  // tool; consumers should treat keys as opaque.
+  raw_input?: Record<string, unknown>;
+};
+
 export type PermissionRequestMetadata = {
   pending_id: string;
   tool_call_id: string;
   options: PermissionOption[];
   action_type: PermissionActionType;
-  action_details: { command?: string; path?: string; cwd?: string };
+  action_details: PermissionActionDetails;
   status?: "pending" | "approved" | "rejected" | "expired";
 };
 
