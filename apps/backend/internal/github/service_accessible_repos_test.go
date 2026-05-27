@@ -76,11 +76,11 @@ func TestListAccessibleRepos_MergesOrgsAndUserRepos(t *testing.T) {
 	sc := &accessibleReposStubClient{
 		orgs: []GitHubOrg{{Login: "acme"}, {Login: "globex"}},
 		userRepos: []GitHubRepo{
-			{FullName: "alice/personal", Owner: "alice", Name: "personal", PushedAt: ptrTime(t0.Add(3 * time.Hour))},
+			{FullName: "alice/personal", Owner: "alice", Name: "personal", DefaultBranch: "main", Description: "Alice's personal repo", PushedAt: ptrTime(t0.Add(3 * time.Hour))},
 		},
 		repoByOrg: map[string][]GitHubRepo{
-			"acme":   {{FullName: "acme/widget", Owner: "acme", Name: "widget", PushedAt: ptrTime(t0.Add(2 * time.Hour))}},
-			"globex": {{FullName: "globex/foo", Owner: "globex", Name: "foo", PushedAt: ptrTime(t0.Add(time.Hour))}},
+			"acme":   {{FullName: "acme/widget", Owner: "acme", Name: "widget", DefaultBranch: "trunk", Description: "Widget service", PushedAt: ptrTime(t0.Add(2 * time.Hour))}},
+			"globex": {{FullName: "globex/foo", Owner: "globex", Name: "foo", DefaultBranch: "main", PushedAt: ptrTime(t0.Add(time.Hour))}},
 		},
 	}
 	svc := newAccessibleReposTestService(sc)
@@ -91,16 +91,31 @@ func TestListAccessibleRepos_MergesOrgsAndUserRepos(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("len = %d, want 3 (1 user + 2 orgs)", len(got))
 	}
-	wantNames := map[string]bool{"alice/personal": false, "acme/widget": false, "globex/foo": false}
+	wantByName := map[string]struct {
+		defaultBranch string
+		description   string
+	}{
+		"alice/personal": {"main", "Alice's personal repo"},
+		"acme/widget":    {"trunk", "Widget service"},
+		"globex/foo":     {"main", ""},
+	}
+	seen := map[string]bool{}
 	for _, r := range got {
-		if _, ok := wantNames[r.FullName]; !ok {
+		want, ok := wantByName[r.FullName]
+		if !ok {
 			t.Errorf("unexpected repo %q in result", r.FullName)
 			continue
 		}
-		wantNames[r.FullName] = true
+		seen[r.FullName] = true
+		if r.DefaultBranch != want.defaultBranch {
+			t.Errorf("repo %q DefaultBranch = %q, want %q", r.FullName, r.DefaultBranch, want.defaultBranch)
+		}
+		if r.Description != want.description {
+			t.Errorf("repo %q Description = %q, want %q", r.FullName, r.Description, want.description)
+		}
 	}
-	for name, seen := range wantNames {
-		if !seen {
+	for name := range wantByName {
+		if !seen[name] {
 			t.Errorf("expected repo %q in result", name)
 		}
 	}

@@ -390,8 +390,8 @@ func TestListUserRepos_Success(t *testing.T) {
 			}
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"items":[
-				{"full_name":"octocat/demo","owner":{"login":"octocat"},"name":"demo","private":false},
-				{"full_name":"octocat/demo-private","owner":{"login":"octocat"},"name":"demo-private","private":true}
+				{"full_name":"octocat/demo","owner":{"login":"octocat"},"name":"demo","private":false,"default_branch":"main","description":"Public demo"},
+				{"full_name":"octocat/demo-private","owner":{"login":"octocat"},"name":"demo-private","private":true,"default_branch":"trunk","description":null}
 			]}`))
 		default:
 			t.Fatalf("unexpected path %q", r.URL.Path)
@@ -410,8 +410,21 @@ func TestListUserRepos_Success(t *testing.T) {
 	if repos[0].FullName != "octocat/demo" || repos[0].Owner != "octocat" || repos[0].Name != "demo" || repos[0].Private {
 		t.Errorf("unexpected first repo: %#v", repos[0])
 	}
+	if repos[0].DefaultBranch != "main" {
+		t.Errorf("first repo default_branch = %q, want main", repos[0].DefaultBranch)
+	}
+	if repos[0].Description != "Public demo" {
+		t.Errorf("first repo description = %q, want Public demo", repos[0].Description)
+	}
 	if !repos[1].Private {
 		t.Errorf("expected second repo private")
+	}
+	if repos[1].DefaultBranch != "trunk" {
+		t.Errorf("second repo default_branch = %q, want trunk", repos[1].DefaultBranch)
+	}
+	// JSON `null` description must decode to an empty string (omitempty drops it on serialize).
+	if repos[1].Description != "" {
+		t.Errorf("second repo description = %q, want empty string", repos[1].Description)
 	}
 }
 

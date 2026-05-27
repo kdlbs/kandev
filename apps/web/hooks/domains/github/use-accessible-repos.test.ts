@@ -30,6 +30,7 @@ function makeRepo(name: string) {
     owner: "acme",
     name,
     full_name: `acme/${name}`,
+    default_branch: "main",
     private: false,
   };
 }

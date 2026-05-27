@@ -66,6 +66,8 @@ describe("fetchAccessibleRepos — URL & parsing", () => {
             owner: "kdlbs",
             name: "kandev",
             private: false,
+            default_branch: "main",
+            description: "Kandev mainline",
             pushed_at: "2026-05-20T10:00:00Z",
           },
           {
@@ -73,6 +75,7 @@ describe("fetchAccessibleRepos — URL & parsing", () => {
             owner: "acme",
             name: "site",
             private: true,
+            default_branch: "trunk",
           },
         ],
       }),
@@ -87,6 +90,8 @@ describe("fetchAccessibleRepos — URL & parsing", () => {
       owner: "kdlbs",
       name: "kandev",
       private: false,
+      default_branch: "main",
+      description: "Kandev mainline",
       pushed_at: "2026-05-20T10:00:00Z",
     });
     expect(repos[1]).toMatchObject({
@@ -95,8 +100,10 @@ describe("fetchAccessibleRepos — URL & parsing", () => {
       owner: "acme",
       name: "site",
       private: true,
+      default_branch: "trunk",
     });
     expect(repos[1].pushed_at).toBeUndefined();
+    expect(repos[1].description).toBeUndefined();
   });
 });
 

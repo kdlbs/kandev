@@ -64,7 +64,10 @@ export function RemoteRepoChipsRow({
 
 /**
  * Wires a per-row `onURLChange` so paste-mode strips picker metadata while
- * picker-mode propagates it. Extracted so the JSX above stays compact and
+ * picker-mode propagates it. Picker-mode also pre-fills `branch` with the
+ * repo's `default_branch` so the user can launch without waiting for the
+ * branch list to load (they can still pick another branch from the pill
+ * dropdown once it populates). Extracted so the JSX above stays compact and
  * the metadata-clearing rule lives in one obvious spot.
  */
 function makeURLChange(
@@ -78,7 +81,7 @@ function makeURLChange(
         source,
         provider: metadata.provider,
         fullName: metadata.fullName,
-        branch: "",
+        branch: metadata.defaultBranch,
       });
       return;
     }

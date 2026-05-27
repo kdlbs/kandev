@@ -496,10 +496,10 @@ func TestHandleListAccessibleRepos_OK(t *testing.T) {
 	sc := &listAccessibleReposClient{
 		orgs: []GitHubOrg{{Login: "acme"}},
 		userRepos: []GitHubRepo{
-			{FullName: "alice/personal", Owner: "alice", Name: "personal", PushedAt: func() *time.Time { t := time.Unix(200, 0); return &t }()},
+			{FullName: "alice/personal", Owner: "alice", Name: "personal", DefaultBranch: "main", Description: "Personal repo", PushedAt: func() *time.Time { t := time.Unix(200, 0); return &t }()},
 		},
 		orgRepos: map[string][]GitHubRepo{
-			"acme": {{FullName: "acme/widget", Owner: "acme", Name: "widget", PushedAt: func() *time.Time { t := time.Unix(100, 0); return &t }()}},
+			"acme": {{FullName: "acme/widget", Owner: "acme", Name: "widget", DefaultBranch: "trunk", PushedAt: func() *time.Time { t := time.Unix(100, 0); return &t }()}},
 		},
 	}
 	router, _ := setupControllerTest(sc)
@@ -511,10 +511,11 @@ func TestHandleListAccessibleRepos_OK(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
+	raw := w.Body.String()
 	var body struct {
 		Repos []GitHubRepo `json:"repos"`
 	}
-	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(strings.NewReader(raw)).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if len(body.Repos) != 2 {
@@ -524,8 +525,22 @@ func TestHandleListAccessibleRepos_OK(t *testing.T) {
 	if body.Repos[0].FullName != "alice/personal" {
 		t.Errorf("first repo = %q, want alice/personal", body.Repos[0].FullName)
 	}
+	if body.Repos[0].DefaultBranch != "main" {
+		t.Errorf("first repo default_branch = %q, want main", body.Repos[0].DefaultBranch)
+	}
+	if body.Repos[0].Description != "Personal repo" {
+		t.Errorf("first repo description = %q, want Personal repo", body.Repos[0].Description)
+	}
 	if body.Repos[1].FullName != "acme/widget" {
 		t.Errorf("second repo = %q, want acme/widget", body.Repos[1].FullName)
+	}
+	if body.Repos[1].DefaultBranch != "trunk" {
+		t.Errorf("second repo default_branch = %q, want trunk", body.Repos[1].DefaultBranch)
+	}
+	// Empty description must be omitted (omitempty) — verify via the raw JSON
+	// so a future struct-tag regression dropping omitempty is caught.
+	if strings.Contains(raw, `"description":""`) {
+		t.Errorf("expected empty description to be omitted, got body: %s", raw)
 	}
 }
 

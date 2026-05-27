@@ -464,6 +464,37 @@ func TestBuildUserReposGHArgs(t *testing.T) {
 	}
 }
 
+func TestParseGHSearchRepos(t *testing.T) {
+	// Mixed payload: one public repo with a description and a default branch
+	// other than "main", one private repo with a `null` description that must
+	// decode to an empty string, and one repo with no pushed_at to verify the
+	// nil-pointer branch.
+	data := `[
+		{"full_name":"octocat/hello","owner":{"login":"octocat"},"name":"hello","private":false,"default_branch":"trunk","description":"Hello world","pushed_at":"2025-03-01T10:00:00Z"},
+		{"full_name":"octocat/secret","owner":{"login":"octocat"},"name":"secret","private":true,"default_branch":"main","description":null,"pushed_at":"2025-02-01T10:00:00Z"},
+		{"full_name":"octocat/new","owner":{"login":"octocat"},"name":"new","private":false,"default_branch":"main"}
+	]`
+	repos, err := parseGHSearchRepos(data)
+	if err != nil {
+		t.Fatalf("parseGHSearchRepos: %v", err)
+	}
+	if len(repos) != 3 {
+		t.Fatalf("len = %d, want 3", len(repos))
+	}
+	if repos[0].FullName != "octocat/hello" || repos[0].DefaultBranch != "trunk" || repos[0].Description != "Hello world" {
+		t.Errorf("repo[0] unexpected: %#v", repos[0])
+	}
+	if repos[0].PushedAt == nil {
+		t.Errorf("repo[0] PushedAt nil, want non-nil")
+	}
+	if !repos[1].Private || repos[1].DefaultBranch != "main" || repos[1].Description != "" {
+		t.Errorf("repo[1] unexpected: %#v", repos[1])
+	}
+	if repos[2].DefaultBranch != "main" || repos[2].PushedAt != nil {
+		t.Errorf("repo[2] unexpected: %#v", repos[2])
+	}
+}
+
 func TestBuildUserReposGHArgs_LimitClamping(t *testing.T) {
 	// Mirrors the PAT client test: ListUserRepos must clamp before calling
 	// buildUserReposGHArgs, so verify a full round-trip via clampRepoSearchLimit.

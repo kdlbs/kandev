@@ -6,13 +6,49 @@ import { TooltipProvider } from "@kandev/ui/tooltip";
 // Stub out the chip's heavy popover content (we test that separately). The
 // chips-row's only job is to render N chips + the Add button and pipe
 // branchesByUrl.ensure() for non-empty URLs — so the stub just emits a
-// data-testid and exposes onRemove on the row for click assertions.
+// data-testid and exposes onRemove on the row for click assertions, plus
+// two buttons that invoke onURLChange in picker- and paste-mode so we can
+// assert the parent's metadata-application logic without touching the
+// chip's real popover.
+type ChipURLChange = (
+  url: string,
+  source: "picker" | "paste",
+  metadata?: { provider: "github" | "gitlab"; fullName: string; defaultBranch: string },
+) => void;
 vi.mock("./task-create-dialog-remote-repo-chip", () => ({
-  RemoteRepoChip: ({ row, onRemove }: { row: TaskRemoteRepoRow; onRemove: () => void }) => (
+  RemoteRepoChip: ({
+    row,
+    onRemove,
+    onURLChange,
+  }: {
+    row: TaskRemoteRepoRow;
+    onRemove: () => void;
+    onURLChange: ChipURLChange;
+  }) => (
     <div data-testid="remote-repo-chip" data-url={row.url}>
       <span data-testid="remote-repo-chip-url">{row.url}</span>
       <button type="button" data-testid="remote-chip-remove" onClick={onRemove}>
         x
+      </button>
+      <button
+        type="button"
+        data-testid="remote-chip-fire-picker"
+        onClick={() =>
+          onURLChange("https://github.com/acme/site", "picker", {
+            provider: "github",
+            fullName: "acme/site",
+            defaultBranch: "trunk",
+          })
+        }
+      >
+        pick
+      </button>
+      <button
+        type="button"
+        data-testid="remote-chip-fire-paste"
+        onClick={() => onURLChange("https://github.com/foo/bar", "paste")}
+      >
+        paste
       </button>
     </div>
   ),
@@ -120,5 +156,51 @@ describe("RemoteRepoChipsRow", () => {
     expect(ensure).toHaveBeenCalledWith(URL_AB);
     expect(ensure).toHaveBeenCalledWith(URL_CD);
     expect(ensure).not.toHaveBeenCalledWith("");
+  });
+});
+
+describe("RemoteRepoChipsRow — onURLChange wiring", () => {
+  it("picker onURLChange writes url+metadata AND pre-fills branch with default_branch", () => {
+    const onUpdateRow = vi.fn();
+    renderInProvider(
+      <RemoteRepoChipsRow
+        fs={makeFs({
+          remoteRepos: [{ key: "remote-0", url: "", branch: "", source: "paste" }],
+        })}
+        onUpdateRow={onUpdateRow}
+        onAddRow={vi.fn()}
+        onRemoveRow={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("remote-chip-fire-picker"));
+    expect(onUpdateRow).toHaveBeenCalledWith("remote-0", {
+      url: "https://github.com/acme/site",
+      source: "picker",
+      provider: "github",
+      fullName: "acme/site",
+      branch: "trunk",
+    });
+  });
+
+  it("paste onURLChange clears picker metadata and DOES NOT pre-fill branch", () => {
+    const onUpdateRow = vi.fn();
+    renderInProvider(
+      <RemoteRepoChipsRow
+        fs={makeFs({
+          remoteRepos: [{ key: "remote-0", url: "", branch: "", source: "paste" }],
+        })}
+        onUpdateRow={onUpdateRow}
+        onAddRow={vi.fn()}
+        onRemoveRow={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("remote-chip-fire-paste"));
+    expect(onUpdateRow).toHaveBeenCalledWith("remote-0", {
+      url: "https://github.com/foo/bar",
+      source: "paste",
+      provider: undefined,
+      fullName: undefined,
+      branch: "",
+    });
   });
 });

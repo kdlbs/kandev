@@ -241,17 +241,16 @@ export async function triggerAllReviewWatches(workspaceId: string, options?: Api
 // the backend only returns GitHub repos, so we stamp `provider: "github"` on
 // every entry at the client boundary.
 //
-// `default_branch` and `description` are typed as optional because the
-// current backend response shape (`GitHubRepo` in
-// `internal/github/models.go`) does not include them. Keeping them in the
-// type lets the picker UI render them once the backend grows the fields
-// without churning the type at every call site.
+// `default_branch` is always present on the wire (GitHub's API returns it on
+// every repo) so the picker can pre-fill the row's branch on selection
+// without a round-trip. `description` is optional because the backend uses
+// `omitempty` — null/empty descriptions are dropped from the JSON.
 export type AccessibleRepo = {
   provider: "github" | "gitlab";
   owner: string;
   name: string;
   full_name: string;
-  default_branch?: string;
+  default_branch: string;
   description?: string;
   pushed_at?: string;
   private: boolean;

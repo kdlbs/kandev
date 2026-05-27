@@ -11,6 +11,8 @@ type AccessibleRepo = {
   owner: string;
   name: string;
   full_name: string;
+  default_branch: string;
+  description?: string;
   private: boolean;
 };
 const accessibleReposState = vi.hoisted(
@@ -60,11 +62,18 @@ const noopBranch = () => undefined;
 const noopRemove = () => undefined;
 
 describe("RemoteRepoChip — write paths", () => {
-  it("picker selection writes URL + picker metadata via onURLChange", () => {
+  it("picker selection writes URL + picker metadata (incl. default_branch) via onURLChange", () => {
     accessibleReposState.value = {
       ...accessibleReposState.value,
       repos: [
-        { provider: "github", owner: "acme", name: "site", full_name: FULL_NAME, private: false },
+        {
+          provider: "github",
+          owner: "acme",
+          name: "site",
+          full_name: FULL_NAME,
+          default_branch: "trunk",
+          private: false,
+        },
       ],
     };
     const onURLChange = vi.fn();
@@ -83,6 +92,7 @@ describe("RemoteRepoChip — write paths", () => {
     expect(onURLChange).toHaveBeenCalledWith(URL_ACME_SITE, "picker", {
       provider: "github",
       fullName: FULL_NAME,
+      defaultBranch: "trunk",
     });
   });
 
@@ -150,7 +160,14 @@ describe("RemoteRepoChip — paste/picker race", () => {
     accessibleReposState.value = {
       ...accessibleReposState.value,
       repos: [
-        { provider: "github", owner: "acme", name: "site", full_name: FULL_NAME, private: false },
+        {
+          provider: "github",
+          owner: "acme",
+          name: "site",
+          full_name: FULL_NAME,
+          default_branch: "main",
+          private: false,
+        },
       ],
     };
     const onURLChange = vi.fn();
@@ -176,6 +193,7 @@ describe("RemoteRepoChip — paste/picker race", () => {
     expect(onURLChange).toHaveBeenCalledWith(URL_ACME_SITE, "picker", {
       provider: "github",
       fullName: FULL_NAME,
+      defaultBranch: "main",
     });
   });
 });
@@ -214,6 +232,95 @@ describe("RemoteRepoChip — branch pill", () => {
     const branchTrigger = screen.getByTestId("remote-branch-chip-trigger") as HTMLButtonElement;
     expect(branchTrigger.disabled).toBe(false);
   });
+
+  it("is enabled when the row already has a branch even if branch options haven't loaded yet", () => {
+    // Picker pre-fill sets `row.branch` before the branch list fetch finishes.
+    // The pill must show the value as the active selection rather than
+    // greying out and confusing the user into thinking pre-fill failed.
+    renderInProvider(
+      <RemoteRepoChip
+        row={row({ url: URL_ACME_SITE, branch: "trunk" })}
+        branches={[]}
+        branchesLoading={true}
+        onURLChange={vi.fn()}
+        onBranchChange={noopBranch}
+        onRemove={noopRemove}
+      />,
+    );
+    const branchTrigger = screen.getByTestId("remote-branch-chip-trigger") as HTMLButtonElement;
+    expect(branchTrigger.disabled).toBe(false);
+    expect(branchTrigger.textContent).toContain("trunk");
+  });
+});
+
+describe("RemoteRepoChip — option description", () => {
+  it("renders the description as a second line when present", () => {
+    accessibleReposState.value = {
+      ...accessibleReposState.value,
+      repos: [
+        {
+          provider: "github",
+          owner: "acme",
+          name: "site",
+          full_name: FULL_NAME,
+          default_branch: "main",
+          description: "The acme corporate website",
+          private: false,
+        },
+      ],
+    };
+    renderInProvider(
+      <RemoteRepoChip
+        row={row()}
+        branches={[]}
+        branchesLoading={false}
+        onURLChange={vi.fn()}
+        onBranchChange={noopBranch}
+        onRemove={noopRemove}
+      />,
+    );
+    fireEvent.click(screen.getByTestId(TRIGGER_TID));
+    expect(screen.getByTestId("remote-repo-option-description").textContent).toContain(
+      "The acme corporate website",
+    );
+  });
+
+  it("omits the description line entirely when description is missing or empty", () => {
+    accessibleReposState.value = {
+      ...accessibleReposState.value,
+      repos: [
+        {
+          provider: "github",
+          owner: "acme",
+          name: "site",
+          full_name: FULL_NAME,
+          default_branch: "main",
+          private: false,
+        },
+        {
+          provider: "github",
+          owner: "acme",
+          name: "blank",
+          full_name: "acme/blank",
+          default_branch: "main",
+          description: "",
+          private: false,
+        },
+      ],
+    };
+    renderInProvider(
+      <RemoteRepoChip
+        row={row()}
+        branches={[]}
+        branchesLoading={false}
+        onURLChange={vi.fn()}
+        onBranchChange={noopBranch}
+        onRemove={noopRemove}
+      />,
+    );
+    fireEvent.click(screen.getByTestId(TRIGGER_TID));
+    expect(screen.queryByTestId("remote-repo-option-description")).toBeNull();
+  });
 });
 
 describe("RemoteRepoChip — popover content", () => {
@@ -244,6 +351,7 @@ describe("RemoteRepoChip — popover content", () => {
           owner: "acme",
           name: "secret",
           full_name: "acme/secret",
+          default_branch: "main",
           private: true,
         },
       ],

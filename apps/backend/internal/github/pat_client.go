@@ -334,9 +334,11 @@ func (c *PATClient) fetchRepoSearch(ctx context.Context, endpoint string) ([]Git
 			Owner    struct {
 				Login string `json:"login"`
 			} `json:"owner"`
-			Name     string    `json:"name"`
-			Private  bool      `json:"private"`
-			PushedAt time.Time `json:"pushed_at"`
+			Name          string    `json:"name"`
+			Private       bool      `json:"private"`
+			DefaultBranch string    `json:"default_branch"`
+			Description   string    `json:"description"`
+			PushedAt      time.Time `json:"pushed_at"`
 		} `json:"items"`
 	}
 	if err := c.get(ctx, endpoint, &result); err != nil {
@@ -345,10 +347,12 @@ func (c *PATClient) fetchRepoSearch(ctx context.Context, endpoint string) ([]Git
 	repos := make([]GitHubRepo, len(result.Items))
 	for i, item := range result.Items {
 		repos[i] = GitHubRepo{
-			FullName: item.FullName,
-			Owner:    item.Owner.Login,
-			Name:     item.Name,
-			Private:  item.Private,
+			FullName:      item.FullName,
+			Owner:         item.Owner.Login,
+			Name:          item.Name,
+			Private:       item.Private,
+			DefaultBranch: item.DefaultBranch,
+			Description:   item.Description,
 		}
 		if !item.PushedAt.IsZero() {
 			t := item.PushedAt

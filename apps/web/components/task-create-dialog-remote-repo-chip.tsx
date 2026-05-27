@@ -32,9 +32,11 @@ const TRUNCATE_THRESHOLD = 30;
  * callbacks.
  *
  * `onURLChange` receives the new URL plus how it was produced. The "picker"
- * arm also carries the canonical `owner/name` and provider so the chip can
- * display a friendly label without re-parsing the URL; the "paste" arm
- * leaves metadata undefined so the row drops any stale picker data.
+ * arm also carries the canonical `owner/name`, provider, and the repo's
+ * `default_branch` so the parent can pre-fill the row's branch without
+ * waiting for the branch list to load; the "paste" arm leaves metadata
+ * undefined so the row drops any stale picker data and the user picks
+ * their own branch.
  */
 export type RemoteRepoChipProps = {
   row: TaskRemoteRepoRow;
@@ -43,7 +45,11 @@ export type RemoteRepoChipProps = {
   onURLChange: (
     url: string,
     source: "picker" | "paste",
-    metadata?: { provider: "github" | "gitlab"; fullName: string },
+    metadata?: {
+      provider: "github" | "gitlab";
+      fullName: string;
+      defaultBranch: string;
+    },
   ) => void;
   onBranchChange: (branch: string) => void;
   onRemove: () => void;
@@ -122,6 +128,7 @@ function RemoteRepoPill({
             onURLChange(`https://github.com/${repo.owner}/${repo.name}`, "picker", {
               provider: "github",
               fullName: repo.full_name,
+              defaultBranch: repo.default_branch,
             });
             setOpen(false);
           }}
@@ -254,17 +261,28 @@ function RepoOption({
   repo: AccessibleRepo;
   onPick: (repo: AccessibleRepo) => void;
 }) {
+  const hasDescription = !!repo.description && repo.description.trim().length > 0;
   return (
     <button
       type="button"
       onClick={() => onPick(repo)}
       data-testid="remote-repo-option"
       className={cn(
-        "flex w-full items-center justify-between gap-2 rounded-sm px-2 py-1.5 text-xs",
+        "flex w-full items-start justify-between gap-2 rounded-sm px-2 py-1.5 text-xs",
         "hover:bg-muted cursor-pointer text-left",
       )}
     >
-      <span className="truncate">{repo.full_name}</span>
+      <span className="flex min-w-0 flex-col">
+        <span className="truncate">{repo.full_name}</span>
+        {hasDescription ? (
+          <span
+            className="truncate text-[11px] text-muted-foreground"
+            data-testid="remote-repo-option-description"
+          >
+            {repo.description}
+          </span>
+        ) : null}
+      </span>
       {repo.private ? (
         <Badge variant="outline" className="text-[10px] text-muted-foreground shrink-0">
           private
@@ -354,8 +372,15 @@ function RemoteBranchPill({
   onBranchChange: (branch: string) => void;
 }) {
   const hasUrl = !!url.trim();
+  const hasBranch = !!branch.trim();
   const branchOptions = useMemo(() => sortBranches(branches).map(branchToOption), [branches]);
   const placeholder = computeBranchPlaceholder(hasUrl, branchesLoading, branchOptions.length);
+  // If the row already has a branch (e.g. pre-filled with the repo's
+  // default_branch from a picker selection), keep the pill enabled so the
+  // user sees the value as the active selection and can still re-open the
+  // dropdown to swap branches once the list loads. The pill's own popover
+  // will show "loading" / "no branches" if the list isn't ready yet.
+  const disabled = !hasUrl || (!hasBranch && (branchesLoading || branchOptions.length === 0));
   return (
     <Pill
       icon={<IconGitBranch className="h-3 w-3 shrink-0 text-muted-foreground" />}
@@ -363,14 +388,15 @@ function RemoteBranchPill({
       placeholder={placeholder}
       options={branchOptions}
       onSelect={onBranchChange}
-      disabled={!hasUrl || branchesLoading || branchOptions.length === 0}
+      disabled={disabled}
       disabledReason={computeRemoteBranchDisabledReason(
         hasUrl,
+        hasBranch,
         branchesLoading,
         branchOptions.length,
       )}
       searchPlaceholder="Search branches..."
-      emptyMessage="No branches"
+      emptyMessage={branchesLoading ? "Loading branches…" : "No branches"}
       testId="remote-branch-chip-trigger"
       filter={scoreBranch}
       tooltip="Base branch"
@@ -381,10 +407,13 @@ function RemoteBranchPill({
 
 function computeRemoteBranchDisabledReason(
   hasUrl: boolean,
+  hasBranch: boolean,
   branchesLoading: boolean,
   optionCount: number,
 ): string | undefined {
   if (!hasUrl) return "Enter a GitHub URL first.";
+  // If a branch is already set the pill is enabled; no disabled reason needed.
+  if (hasBranch) return undefined;
   if (branchesLoading) return "Loading branches…";
   if (optionCount === 0) return "No branches available for this URL.";
   return undefined;
