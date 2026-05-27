@@ -34,6 +34,13 @@ export interface FormState {
   prompt: string;
   enabled: boolean;
   pollInterval: number;
+  /**
+   * Per-watcher throttle cap as a free-text input: empty string means
+   * "uncapped" (sent as null), non-empty must parse to a positive integer.
+   * Kept as a string so the user can clear the field without it snapping
+   * back to a number.
+   */
+  maxInflightTasks: string;
 }
 
 export function makeEmptyForm(workspaceId: string): FormState {
@@ -55,6 +62,7 @@ export function makeEmptyForm(workspaceId: string): FormState {
     prompt: DEFAULT_LINEAR_ISSUE_WATCH_PROMPT,
     enabled: true,
     pollInterval: 300,
+    maxInflightTasks: "5",
   };
 }
 
@@ -82,6 +90,82 @@ export function formStateFromWatch(w: LinearIssueWatch): FormState {
     prompt: w.prompt || DEFAULT_LINEAR_ISSUE_WATCH_PROMPT,
     enabled: w.enabled,
     pollInterval: w.pollIntervalSeconds,
+    maxInflightTasks: maxInflightTasksString(w.maxInflightTasks),
+  };
+}
+
+/**
+ * Renders the watch's stored throttle cap for the dialog input. `null` /
+ * `undefined` map to an empty string ("uncapped"); positive integers are
+ * shown as-is. Non-positive values from a stale row are clamped to empty
+ * — the backend rejects them on save anyway, and showing a misleading "0"
+ * would let users think the cap was enforced.
+ */
+export function maxInflightTasksString(v: number | null | undefined): string {
+  if (v === undefined || v === null) return "";
+  if (!Number.isFinite(v) || v <= 0) return "";
+  return String(v);
+}
+
+/**
+ * Parses the throttle-cap input back into a payload value. Returns:
+ *  - `null` when the input is blank (user wants uncapped),
+ *  - the integer when it's a positive whole number,
+ *  - `"invalid"` when the input is non-empty but unparseable / non-positive,
+ *    so the dialog can surface an inline validation error before submit.
+ */
+export function parseMaxInflightTasks(raw: string): number | null | "invalid" {
+  const t = raw.trim();
+  if (t === "") return null;
+  const n = Number(t);
+  if (!Number.isInteger(n) || n <= 0) return "invalid";
+  return n;
+}
+
+/**
+ * Aggregates the dialog's "can the Save button enable?" rule. Pulled out of
+ * the dialog so the file stays under the 600-line ceiling and the rule has
+ * one named home — handy for unit tests as the form grows.
+ */
+export function isWatchFormReady(form: FormState): boolean {
+  return (
+    !!form.workspaceId &&
+    !filterIsEmpty(form) &&
+    !!form.workflowId &&
+    !!form.workflowStepId &&
+    !!form.prompt.trim() &&
+    parseMaxInflightTasks(form.maxInflightTasks) !== "invalid"
+  );
+}
+
+/**
+ * Builds the API payload from the dialog state. Returns `null` when the
+ * throttle cap input fails validation, so the caller can short-circuit
+ * the submit without throwing.
+ */
+export function buildWatchPayload(form: FormState): {
+  filter: LinearSearchFilter;
+  workflowId: string;
+  workflowStepId: string;
+  agentProfileId: string;
+  executorProfileId: string;
+  prompt: string;
+  enabled: boolean;
+  pollIntervalSeconds: number;
+  maxInflightTasks: number | null;
+} | null {
+  const maxInflight = parseMaxInflightTasks(form.maxInflightTasks);
+  if (maxInflight === "invalid") return null;
+  return {
+    filter: buildFilterPayload(form),
+    workflowId: form.workflowId,
+    workflowStepId: form.workflowStepId,
+    agentProfileId: form.agentProfileId,
+    executorProfileId: form.executorProfileId,
+    prompt: form.prompt,
+    enabled: form.enabled,
+    pollIntervalSeconds: form.pollInterval,
+    maxInflightTasks: maxInflight,
   };
 }
 
