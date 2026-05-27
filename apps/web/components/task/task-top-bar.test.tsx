@@ -80,16 +80,6 @@ vi.mock("@/components/task/quick-chat-button", () => ({
   QuickChatButton: () => null,
 }));
 
-vi.mock("@/components/task/topbar-action-overflow", () => ({
-  TopbarActionOverflow: ({ items }: { items: Array<{ id: string; content: React.ReactNode }> }) => (
-    <div>
-      {items.map((item) => (
-        <div key={item.id}>{item.content}</div>
-      ))}
-    </div>
-  ),
-}));
-
 vi.mock("@/components/integrations/integrations-menu", () => ({
   IntegrationsMenu: () => null,
 }));

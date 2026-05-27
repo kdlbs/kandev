@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { useAppStore } from "@/components/state-provider";
 import { cn } from "@/lib/utils";
@@ -12,6 +12,7 @@ import {
 import { AppSidebarFooter } from "./app-sidebar-footer";
 import { AppSidebarHeader } from "./app-sidebar-header";
 import { AppSidebarPrimaryNav } from "./app-sidebar-primary-nav";
+import { AppSidebarResizeHandle } from "./app-sidebar-resize-handle";
 import { AgentsSection } from "./sections/agents-section";
 import { IntegrationsSection } from "./sections/integrations-section";
 import { ProjectsSection } from "./sections/projects-section";
@@ -38,9 +39,37 @@ const SECTION_ROUTE_MAP: Array<{ id: string; matches: (path: string) => boolean 
 export function AppSidebar() {
   const collapsed = useAppStore((s) => s.appSidebar.collapsed);
   const sectionExpanded = useAppStore((s) => s.appSidebar.sectionExpanded);
+  const storedWidth = useAppStore((s) => s.appSidebar.width);
   const toggleSection = useAppStore((s) => s.toggleAppSidebarSection);
   const toggleCollapsed = useAppStore((s) => s.toggleAppSidebar);
+  const setWidth = useAppStore((s) => s.setAppSidebarWidth);
   const pathname = usePathname();
+
+  const handleResize = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startWidth = storedWidth;
+      const maxWidth = Math.floor(window.innerWidth * 0.3);
+
+      const onMove = (moveEvent: MouseEvent) => {
+        const next = Math.min(
+          maxWidth,
+          Math.max(APP_SIDEBAR_EXPANDED_WIDTH, startWidth + (moveEvent.clientX - startX)),
+        );
+        setWidth(next);
+      };
+      const onUp = () => {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    [storedWidth, setWidth],
+  );
+
+  const expandedWidth = Math.max(APP_SIDEBAR_EXPANDED_WIDTH, storedWidth);
 
   useEffect(() => {
     if (!pathname) return;
@@ -64,7 +93,7 @@ export function AppSidebar() {
         "transition-all duration-300 ease-out",
       )}
       style={{
-        width: collapsed ? APP_SIDEBAR_COLLAPSED_WIDTH : APP_SIDEBAR_EXPANDED_WIDTH,
+        width: collapsed ? APP_SIDEBAR_COLLAPSED_WIDTH : expandedWidth,
       }}
     >
       <AppSidebarHeader collapsed={collapsed} onToggleCollapse={toggleCollapsed} />
@@ -81,6 +110,7 @@ export function AppSidebar() {
         <TasksSection collapsed={collapsed} />
       </nav>
       <AppSidebarFooter collapsed={collapsed} />
+      {!collapsed && <AppSidebarResizeHandle onMouseDown={handleResize} />}
     </aside>
   );
 }

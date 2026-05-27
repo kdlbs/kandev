@@ -127,7 +127,11 @@ export const defaultUIState: UISliceState = {
   collapsedSubtaskParents: [],
   kanbanPreviewedTaskId: null,
   sidebarTaskPrefs: { pinnedTaskIds: [], orderedTaskIds: [], subtaskOrderByParentId: {} },
-  appSidebar: { collapsed: false, sectionExpanded: { ...DEFAULT_SECTION_EXPANDED } },
+  appSidebar: {
+    collapsed: false,
+    sectionExpanded: { ...DEFAULT_SECTION_EXPANDED },
+    width: 240,
+  },
 };
 
 type ImmerSet = Parameters<typeof createUISlice>[0];

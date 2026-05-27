@@ -120,6 +120,8 @@ export type AppSidebarState = {
   collapsed: boolean;
   /** Keyed by section id: "tasks", "projects", "agents", "settings". */
   sectionExpanded: Record<string, boolean>;
+  /** User-resized expanded width in pixels. */
+  width: number;
 };
 
 export type UISliceState = {
@@ -211,6 +213,7 @@ export type UISliceActions = {
   toggleAppSidebar: () => void;
   setAppSidebarCollapsed: (collapsed: boolean) => void;
   toggleAppSidebarSection: (sectionId: string) => void;
+  setAppSidebarWidth: (width: number) => void;
 };
 
 export type { SidebarView, SidebarViewDraft };

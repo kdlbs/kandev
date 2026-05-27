@@ -2,9 +2,12 @@ import type { StateCreator } from "zustand";
 import {
   getStoredAppSidebarCollapsed,
   getStoredAppSidebarSectionExpanded,
+  getStoredAppSidebarWidth,
   setStoredAppSidebarCollapsed,
   setStoredAppSidebarSectionExpanded,
+  setStoredAppSidebarWidth,
 } from "@/lib/local-storage";
+import { APP_SIDEBAR_EXPANDED_WIDTH } from "@/components/app-sidebar/app-sidebar-constants";
 import type { AppSidebarState, UISlice } from "./types";
 
 /** Tasks expanded by default; other sections collapsed. Mirrors the
@@ -22,6 +25,7 @@ export function loadAppSidebarState(): AppSidebarState {
   return {
     collapsed: getStoredAppSidebarCollapsed(false),
     sectionExpanded: getStoredAppSidebarSectionExpanded(DEFAULT_SECTION_EXPANDED),
+    width: getStoredAppSidebarWidth(APP_SIDEBAR_EXPANDED_WIDTH),
   };
 }
 
@@ -46,6 +50,12 @@ export function buildAppSidebarActions(set: ImmerSet) {
         const current = draft.appSidebar.sectionExpanded[sectionId] ?? false;
         draft.appSidebar.sectionExpanded[sectionId] = !current;
         setStoredAppSidebarSectionExpanded({ ...draft.appSidebar.sectionExpanded });
+      }),
+    setAppSidebarWidth: (width: number) =>
+      set((draft) => {
+        if (draft.appSidebar.width === width) return;
+        draft.appSidebar.width = width;
+        setStoredAppSidebarWidth(width);
       }),
   };
 }

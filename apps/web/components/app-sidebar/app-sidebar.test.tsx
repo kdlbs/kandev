@@ -40,6 +40,9 @@ vi.mock("./sections/projects-section", () => ({
 vi.mock("./sections/agents-section", () => ({
   AgentsSection: () => <div data-testid="agents-section" />,
 }));
+vi.mock("./sections/integrations-section", () => ({
+  IntegrationsSection: () => <div data-testid="integrations-section" />,
+}));
 vi.mock("./sections/settings-section", () => ({
   SettingsSection: () => <div data-testid="settings-section" />,
 }));
@@ -55,10 +58,12 @@ const storeState = {
   appSidebar: {
     collapsed: false,
     sectionExpanded: { tasks: true, projects: false, agents: false, settings: false },
+    width: 240,
   },
   toggleAppSidebar: vi.fn(),
   setAppSidebarCollapsed: vi.fn(),
   toggleAppSidebarSection: vi.fn(),
+  setAppSidebarWidth: vi.fn(),
 };
 
 vi.mock("@/components/state-provider", () => ({

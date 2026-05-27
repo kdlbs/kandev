@@ -788,6 +788,18 @@ export function setStoredAppSidebarSectionExpanded(map: Record<string, boolean>)
   setLocalStorage(APP_SIDEBAR_SECTION_EXPANDED_KEY, map);
 }
 
+const APP_SIDEBAR_WIDTH_KEY = "kandev.appSidebar.width";
+
+export function getStoredAppSidebarWidth(fallback: number): number {
+  const raw = getLocalStorage<number>(APP_SIDEBAR_WIDTH_KEY, fallback) as unknown;
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) return fallback;
+  return raw;
+}
+
+export function setStoredAppSidebarWidth(width: number): void {
+  setLocalStorage(APP_SIDEBAR_WIDTH_KEY, width);
+}
+
 // --- Sidebar collapsed subtask parents (sessionStorage, tab-scoped) ---
 
 const COLLAPSED_SUBTASKS_KEY = "kandev.sidebar.collapsedSubtasks";
