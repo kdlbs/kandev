@@ -197,6 +197,15 @@ func TestAutoStartTransientError_BootReadyDrainsOrphanedQueue(t *testing.T) {
 
 	// --- Phase 2: user resumes the session — boot_ready must drain the queue ---
 
+	// Clear the transient error so the drain's executeQueuedMessage → PromptTask
+	// → PromptAgent succeeds. Otherwise the goroutine that runs after the queue
+	// take would re-enter the same transient-retry path and re-queue the message
+	// immediately, racing the queue-empty assertion below.
+	agentMgr.mu.Lock()
+	agentMgr.promptErr = nil
+	priorPromptCount := len(agentMgr.capturedPrompts)
+	agentMgr.mu.Unlock()
+
 	// Simulate the resume: agentctl's ACP session has re-initialized so the
 	// lifecycle manager fires events.AgentBootReady. Without the drain fix,
 	// the queue stays orphaned. With the fix, it gets drained.
@@ -205,10 +214,28 @@ func TestAutoStartTransientError_BootReadyDrainsOrphanedQueue(t *testing.T) {
 		SessionID: sessionID,
 	})
 
-	// drainQueuedMessageAfterTransition fires `go executeQueuedMessage(...)`,
-	// so the queue is taken synchronously inside handleAgentBootReady but
-	// further processing is async. Take() happens before the function
-	// returns; we can assert the queue is empty right after.
+	// drainQueuedMessageAfterTransition pops the queue synchronously and fires
+	// `go executeQueuedMessage(...)`. The goroutine creates a user message and
+	// calls PromptTask → PromptAgent. Wait for that to land, then assert the
+	// agent received the prompt.
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		agentMgr.mu.Lock()
+		got := len(agentMgr.capturedPrompts)
+		agentMgr.mu.Unlock()
+		if got > priorPromptCount {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	agentMgr.mu.Lock()
+	postPromptCount := len(agentMgr.capturedPrompts)
+	agentMgr.mu.Unlock()
+	if postPromptCount <= priorPromptCount {
+		t.Fatalf("boot_ready drain did not dispatch the queued prompt: PromptAgent calls before=%d after=%d", priorPromptCount, postPromptCount)
+	}
+
 	if got := svc.messageQueue.GetStatus(ctx, sessionID).Count; got != 0 {
 		t.Errorf("queue not drained after boot_ready: %d messages still queued (the orphaned-queue bug is back)", got)
 	}
