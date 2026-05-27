@@ -1,4 +1,4 @@
-import { fetchJson, type ApiRequestOptions } from "../client";
+import { fetchJson, ApiError, type ApiRequestOptions } from "../client";
 import type {
   GitHubStatusResponse,
   GitHubOrg,
@@ -233,6 +233,81 @@ export async function triggerAllReviewWatches(workspaceId: string, options?: Api
       init: { method: "POST", ...(options?.init ?? {}) },
     },
   );
+}
+
+// Accessible repos — the union of repos the authenticated user can reach
+// (own + each org's), as served by `GET /api/v1/github/repos`. The
+// provider-tagged shape is forward-compat for a future GitLab variant; today
+// the backend only returns GitHub repos, so we stamp `provider: "github"` on
+// every entry at the client boundary.
+//
+// `default_branch` and `description` are typed as optional because the
+// current backend response shape (`GitHubRepo` in
+// `internal/github/models.go`) does not include them. Keeping them in the
+// type lets the picker UI render them once the backend grows the fields
+// without churning the type at every call site.
+export type AccessibleRepo = {
+  provider: "github" | "gitlab";
+  owner: string;
+  name: string;
+  full_name: string;
+  default_branch?: string;
+  description?: string;
+  pushed_at?: string;
+  private: boolean;
+};
+
+// Backend response shape for `GET /api/v1/github/repos` — narrow alias used
+// only at the parse boundary. We keep it scoped to this module to avoid
+// leaking the wire-only shape into the rest of the app.
+type AccessibleReposResponse = {
+  repos: Array<Omit<AccessibleRepo, "provider">>;
+};
+
+// GitHubUnavailableError signals that the backend reported GitHub is not
+// configured (HTTP 503 with `code: "github_not_configured"`). Callers use the
+// instanceof check to render a "Connect GitHub" CTA instead of a generic
+// error toast.
+export class GitHubUnavailableError extends Error {
+  constructor(message = "GitHub is not configured") {
+    super(message);
+    this.name = "GitHubUnavailableError";
+  }
+}
+
+function isGitHubNotConfigured(err: unknown): boolean {
+  if (!(err instanceof ApiError)) return false;
+  if (err.status !== 503) return false;
+  const body = err.body;
+  if (body && typeof body === "object" && "code" in body) {
+    return (body as { code?: unknown }).code === "github_not_configured";
+  }
+  return false;
+}
+
+export async function fetchAccessibleRepos(opts: {
+  q?: string;
+  limit?: number;
+  signal?: AbortSignal;
+}): Promise<AccessibleRepo[]> {
+  const params = new URLSearchParams();
+  if (opts.q) params.set("q", opts.q);
+  if (typeof opts.limit === "number") params.set("limit", String(opts.limit));
+  const suffix = params.toString();
+  const path = `/api/v1/github/repos${suffix ? `?${suffix}` : ""}`;
+  try {
+    const res = await fetchJson<AccessibleReposResponse>(path, {
+      cache: "no-store",
+      init: opts.signal ? { signal: opts.signal } : undefined,
+    });
+    const repos = res?.repos ?? [];
+    return repos.map((r) => ({ ...r, provider: "github" as const }));
+  } catch (err) {
+    if (isGitHubNotConfigured(err)) {
+      throw new GitHubUnavailableError(err instanceof Error ? err.message : undefined);
+    }
+    throw err;
+  }
 }
 
 // Orgs & repo search
