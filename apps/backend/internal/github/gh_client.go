@@ -13,6 +13,12 @@ import (
 	"time"
 )
 
+// ghSearchReposPath is the GitHub REST search-repositories path that gh CLI
+// invocations target via `gh api`. Centralised to keep the search-bucket
+// rate-limit dispatch (`resourceForGHArgs`) and the repo search helpers in
+// sync.
+const ghSearchReposPath = "search/repositories"
+
 // GHClient implements Client using the gh CLI.
 type GHClient struct {
 	rateTracker *RateTracker
@@ -337,10 +343,8 @@ func (c *GHClient) SearchOrgRepos(ctx context.Context, org, query string, limit 
 	if query != "" {
 		q += " " + query
 	}
-	if limit <= 0 {
-		limit = 20
-	}
-	out, err := c.run(ctx, "api", "search/repositories",
+	limit = clampRepoSearchLimit(limit)
+	out, err := c.run(ctx, "api", ghSearchReposPath,
 		"-X", "GET",
 		"-f", "q="+q,
 		"-f", fmt.Sprintf("per_page=%d", limit),
@@ -353,57 +357,36 @@ func (c *GHClient) SearchOrgRepos(ctx context.Context, org, query string, limit 
 
 func (c *GHClient) ListUserRepos(ctx context.Context, query string, limit int) ([]GitHubRepo, error) {
 	limit = clampRepoSearchLimit(limit)
-	out, err := c.run(ctx, "api",
-		fmt.Sprintf("/user/repos?affiliation=owner,collaborator&sort=pushed&per_page=%d", limit))
+	login, err := c.GetAuthenticatedUser(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list user repos: %w", err)
 	}
-	repos, err := parseGHUserRepos(out)
+	args := buildUserReposGHArgs(login, query, limit)
+	out, err := c.run(ctx, args...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list user repos: %w", err)
 	}
-	return filterReposByQuery(repos, query), nil
+	return parseGHSearchRepos(out)
 }
 
-// parseGHUserRepos decodes the gh-CLI response from `gh api /user/repos`.
-func parseGHUserRepos(data string) ([]GitHubRepo, error) {
-	var items []struct {
-		FullName string `json:"full_name"`
-		Owner    struct {
-			Login string `json:"login"`
-		} `json:"owner"`
-		Name    string `json:"name"`
-		Private bool   `json:"private"`
+// buildUserReposGHArgs constructs the `gh api search/repositories` argv used
+// to list repos for the authenticated user. Keeping this pure makes the
+// endpoint + qualifier construction unit-testable without spawning gh. The
+// `q` value mirrors the PAT path (`user:<login> <query>`) so both clients
+// honour the same GitHub search syntax (e.g. `language:go`, `in:name`).
+// Callers must clamp `limit` via clampRepoSearchLimit beforehand.
+func buildUserReposGHArgs(login, query string, limit int) []string {
+	q := "user:" + login
+	if query != "" {
+		q += " " + query
 	}
-	if err := json.Unmarshal([]byte(data), &items); err != nil {
-		return nil, fmt.Errorf("parse user repos: %w", err)
+	return []string{
+		"api", ghSearchReposPath,
+		"-X", "GET",
+		"-f", "q=" + q,
+		"-f", fmt.Sprintf("per_page=%d", limit),
+		"--jq", ".items",
 	}
-	repos := make([]GitHubRepo, len(items))
-	for i, item := range items {
-		repos[i] = GitHubRepo{
-			FullName: item.FullName,
-			Owner:    item.Owner.Login,
-			Name:     item.Name,
-			Private:  item.Private,
-		}
-	}
-	return repos, nil
-}
-
-// filterReposByQuery applies a case-insensitive substring match on the
-// repo's full_name. An empty query returns all repos unchanged.
-func filterReposByQuery(repos []GitHubRepo, query string) []GitHubRepo {
-	if query == "" {
-		return repos
-	}
-	needle := strings.ToLower(query)
-	filtered := make([]GitHubRepo, 0, len(repos))
-	for _, r := range repos {
-		if strings.Contains(strings.ToLower(r.FullName), needle) {
-			filtered = append(filtered, r)
-		}
-	}
-	return filtered
 }
 
 func parseGHSearchRepos(data string) ([]GitHubRepo, error) {

@@ -447,9 +447,9 @@ func TestListUserRepos_EmptyQuery(t *testing.T) {
 
 func TestListUserRepos_LimitClamping(t *testing.T) {
 	cases := []struct {
-		name      string
-		inLimit   int
-		wantQuery string // expected per_page value
+		name        string
+		inLimit     int
+		wantPerPage string
 	}{
 		{"zero defaults to 20", 0, "20"},
 		{"negative defaults to 20", -5, "20"},
@@ -477,8 +477,8 @@ func TestListUserRepos_LimitClamping(t *testing.T) {
 			if _, err := c.ListUserRepos(context.Background(), "", tc.inLimit); err != nil {
 				t.Fatalf("ListUserRepos: %v", err)
 			}
-			if gotPerPage != tc.wantQuery {
-				t.Errorf("per_page = %q, want %q", gotPerPage, tc.wantQuery)
+			if gotPerPage != tc.wantPerPage {
+				t.Errorf("per_page = %q, want %q", gotPerPage, tc.wantPerPage)
 			}
 		})
 	}

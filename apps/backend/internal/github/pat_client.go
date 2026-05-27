@@ -296,9 +296,7 @@ func (c *PATClient) SearchOrgRepos(ctx context.Context, org, query string, limit
 	if query != "" {
 		q += " " + query
 	}
-	if limit <= 0 {
-		limit = 20
-	}
+	limit = clampRepoSearchLimit(limit)
 	var result struct {
 		Items []struct {
 			FullName string `json:"full_name"`

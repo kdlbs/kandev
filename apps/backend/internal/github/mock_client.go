@@ -449,7 +449,9 @@ func (m *MockClient) AddBranches(owner, repo string, branches []RepoBranch) {
 	m.branches[repoKey{owner, repo}] = cp
 }
 
-// AddRepos appends repositories for an organization.
+// AddRepos adds repos under a key (an org login OR the authenticated user's
+// login). The mock's ListUserRepos reads m.repos[m.user], so the same store
+// backs both SearchOrgRepos and ListUserRepos in tests.
 func (m *MockClient) AddRepos(org string, repos []GitHubRepo) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

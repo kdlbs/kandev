@@ -2,6 +2,7 @@ package github
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -390,88 +391,103 @@ func TestResourceForGHArgs(t *testing.T) {
 	}
 }
 
-func TestParseGHUserRepos(t *testing.T) {
+func TestBuildUserReposGHArgs(t *testing.T) {
 	cases := []struct {
-		name    string
-		input   string
-		wantLen int
-		wantErr bool
+		name  string
+		login string
+		query string
+		limit int
+		wantQ string
+		wantP string
 	}{
 		{
-			name: "happy path",
-			input: `[
-				{"full_name":"alice/app","owner":{"login":"alice"},"name":"app","private":false},
-				{"full_name":"alice/secret","owner":{"login":"alice"},"name":"secret","private":true}
-			]`,
-			wantLen: 2,
+			name:  "empty query",
+			login: "alice",
+			query: "",
+			limit: 20,
+			wantQ: "q=user:alice",
+			wantP: "per_page=20",
 		},
 		{
-			name:    "empty array",
-			input:   `[]`,
-			wantLen: 0,
+			name:  "with query",
+			login: "alice",
+			query: "language:go",
+			limit: 50,
+			wantQ: "q=user:alice language:go",
+			wantP: "per_page=50",
 		},
 		{
-			name:    "malformed JSON",
-			input:   `not-json`,
-			wantErr: true,
+			name:  "clamped limit at upper bound",
+			login: "bob",
+			query: "",
+			limit: 100,
+			wantQ: "q=user:bob",
+			wantP: "per_page=100",
+		},
+		{
+			name:  "default clamp value",
+			login: "bob",
+			query: "in:name foo",
+			limit: 20,
+			wantQ: "q=user:bob in:name foo",
+			wantP: "per_page=20",
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			repos, err := parseGHUserRepos(tc.input)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatal("expected error, got nil")
+			args := buildUserReposGHArgs(tc.login, tc.query, tc.limit)
+			// Sanity: first two args pin the gh subcommand to `api search/repositories`.
+			if len(args) < 2 || args[0] != "api" || args[1] != "search/repositories" {
+				t.Fatalf("args prefix = %v, want [api search/repositories ...]", args)
+			}
+			// Find -f q=... and -f per_page=... values without depending on
+			// exact positional layout (so future arg additions don't break the test).
+			gotQ, gotP := "", ""
+			for i := 0; i < len(args)-1; i++ {
+				if args[i] != "-f" {
+					continue
 				}
-				return
+				switch {
+				case strings.HasPrefix(args[i+1], "q="):
+					gotQ = args[i+1]
+				case strings.HasPrefix(args[i+1], "per_page="):
+					gotP = args[i+1]
+				}
 			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
+			if gotQ != tc.wantQ {
+				t.Errorf("q flag = %q, want %q", gotQ, tc.wantQ)
 			}
-			if len(repos) != tc.wantLen {
-				t.Errorf("len = %d, want %d", len(repos), tc.wantLen)
+			if gotP != tc.wantP {
+				t.Errorf("per_page flag = %q, want %q", gotP, tc.wantP)
 			}
 		})
 	}
 }
 
-func TestParseGHUserRepos_FieldMapping(t *testing.T) {
-	repos, err := parseGHUserRepos(`[
-		{"full_name":"alice/app","owner":{"login":"alice"},"name":"app","private":false},
-		{"full_name":"alice/secret","owner":{"login":"alice"},"name":"secret","private":true}
-	]`)
-	if err != nil {
-		t.Fatalf("parseGHUserRepos: %v", err)
-	}
-	if repos[0].FullName != "alice/app" || repos[0].Owner != "alice" || repos[0].Name != "app" || repos[0].Private {
-		t.Errorf("first repo mismatch: %#v", repos[0])
-	}
-	if !repos[1].Private {
-		t.Errorf("expected second repo private")
-	}
-}
-
-func TestFilterReposByQuery(t *testing.T) {
-	repos := []GitHubRepo{
-		{FullName: "alice/kandev", Owner: "alice", Name: "kandev"},
-		{FullName: "alice/other", Owner: "alice", Name: "other"},
-		{FullName: "alice/Kandev-Web", Owner: "alice", Name: "Kandev-Web"},
-	}
+func TestBuildUserReposGHArgs_LimitClamping(t *testing.T) {
+	// Mirrors the PAT client test: ListUserRepos must clamp before calling
+	// buildUserReposGHArgs, so verify a full round-trip via clampRepoSearchLimit.
 	cases := []struct {
-		name    string
-		query   string
-		wantLen int
+		name        string
+		inLimit     int
+		wantPerPage string
 	}{
-		{"empty returns all", "", 3},
-		{"substring match", "kandev", 2},
-		{"case-insensitive", "KANDEV", 2},
-		{"no match", "missing", 0},
+		{"zero defaults to 20", 0, "per_page=20"},
+		{"negative defaults to 20", -5, "per_page=20"},
+		{"in range passes through", 42, "per_page=42"},
+		{"exceeds cap clamps to 100", 500, "per_page=100"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := filterReposByQuery(repos, tc.query)
-			if len(got) != tc.wantLen {
-				t.Errorf("len = %d, want %d", len(got), tc.wantLen)
+			args := buildUserReposGHArgs("alice", "", clampRepoSearchLimit(tc.inLimit))
+			gotP := ""
+			for i := 0; i < len(args)-1; i++ {
+				if args[i] == "-f" && strings.HasPrefix(args[i+1], "per_page=") {
+					gotP = args[i+1]
+				}
+			}
+			if gotP != tc.wantPerPage {
+				t.Errorf("per_page flag = %q, want %q", gotP, tc.wantPerPage)
 			}
 		})
 	}
