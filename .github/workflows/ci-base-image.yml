@@ -1,0 +1,84 @@
+name: CI base image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/docker/ci-base/**
+      - .github/workflows/ci-base-image.yml
+      - apps/backend/go.mod
+      - apps/pnpm-lock.yaml
+      - apps/web/package.json
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/docker/ci-base/**
+      - .github/workflows/ci-base-image.yml
+      - apps/backend/go.mod
+      - apps/pnpm-lock.yaml
+      - apps/web/package.json
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_NAME: ghcr.io/kdlbs/kandev-ci
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tag
+        id: tag
+        run: |
+          set -euo pipefail
+          hash=$(cat \
+              .github/docker/ci-base/Dockerfile \
+              apps/backend/go.mod \
+              apps/pnpm-lock.yaml \
+              apps/web/package.json \
+            | sha256sum | cut -c1-12)
+          echo "image_tag=${hash}" >> "$GITHUB_OUTPUT"
+          echo "Computed content hash: sha-${hash}"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: .github/docker/ci-base/Dockerfile
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: |
+            ${{ env.IMAGE_NAME }}:sha-${{ steps.tag.outputs.image_tag }}
+            ${{ env.IMAGE_NAME }}:latest
+
+      - name: Summarize
+        run: |
+          {
+            echo "### Kandev CI base image"
+            echo ""
+            echo "- image: \`${IMAGE_NAME}:sha-${IMAGE_TAG}\`"
+            echo "- latest: \`${IMAGE_NAME}:latest\`"
+            echo "- pushed: \`${PUSHED}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          IMAGE_TAG: ${{ steps.tag.outputs.image_tag }}
+          PUSHED: ${{ github.event_name != 'pull_request' }}
