@@ -409,7 +409,10 @@ func parseGHSearchRepos(data string) ([]GitHubRepo, error) {
 			Owner:    item.Owner.Login,
 			Name:     item.Name,
 			Private:  item.Private,
-			PushedAt: item.PushedAt,
+		}
+		if !item.PushedAt.IsZero() {
+			t := item.PushedAt
+			repos[i].PushedAt = &t
 		}
 	}
 	return repos, nil

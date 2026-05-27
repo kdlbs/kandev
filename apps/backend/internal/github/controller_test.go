@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -494,10 +496,10 @@ func TestHandleListAccessibleRepos_OK(t *testing.T) {
 	sc := &listAccessibleReposClient{
 		orgs: []GitHubOrg{{Login: "acme"}},
 		userRepos: []GitHubRepo{
-			{FullName: "alice/personal", Owner: "alice", Name: "personal", PushedAt: time.Unix(200, 0)},
+			{FullName: "alice/personal", Owner: "alice", Name: "personal", PushedAt: func() *time.Time { t := time.Unix(200, 0); return &t }()},
 		},
 		orgRepos: map[string][]GitHubRepo{
-			"acme": {{FullName: "acme/widget", Owner: "acme", Name: "widget", PushedAt: time.Unix(100, 0)}},
+			"acme": {{FullName: "acme/widget", Owner: "acme", Name: "widget", PushedAt: func() *time.Time { t := time.Unix(100, 0); return &t }()}},
 		},
 	}
 	router, _ := setupControllerTest(sc)
@@ -544,13 +546,66 @@ func TestHandleListAccessibleRepos_503_WhenUnavailable(t *testing.T) {
 		t.Fatalf("expected 503, got %d: %s", w.Code, w.Body.String())
 	}
 	var body struct {
-		Code string `json:"code"`
+		Error string `json:"error"`
+		Code  string `json:"code"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if body.Code != "github_unavailable" {
-		t.Errorf("code = %q, want github_unavailable", body.Code)
+	if body.Code != "github_not_configured" {
+		t.Errorf("code = %q, want github_not_configured", body.Code)
+	}
+	wantMsg := "GitHub is not configured. Install the gh CLI and run 'gh auth login', or add a GITHUB_TOKEN secret."
+	if body.Error != wantMsg {
+		t.Errorf("error = %q, want %q", body.Error, wantMsg)
+	}
+}
+
+// listAccessibleReposEmptyClient: orgs+user repos both empty. Verifies the
+// handler emits the literal `{"repos":[]}` body so a future regression that
+// emits `null` (omitempty + nil slice) is caught.
+func TestHandleListAccessibleRepos_Empty(t *testing.T) {
+	sc := &listAccessibleReposClient{
+		orgs:      []GitHubOrg{},
+		userRepos: []GitHubRepo{},
+		orgRepos:  map[string][]GitHubRepo{},
+	}
+	router, _ := setupControllerTest(sc)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/repos", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	got := strings.TrimSpace(w.Body.String())
+	if got != `{"repos":[]}` {
+		t.Errorf("body = %q, want %q (regression guard for null repos)", got, `{"repos":[]}`)
+	}
+}
+
+// listAccessibleReposErrClient surfaces an unexpected error from the user
+// orgs lookup — the handler must map it to a 500 rather than swallowing it.
+type listAccessibleReposErrClient struct {
+	stubClient
+	listOrgsErr error
+}
+
+func (c *listAccessibleReposErrClient) ListUserOrgs(context.Context) ([]GitHubOrg, error) {
+	return nil, c.listOrgsErr
+}
+
+func TestHandleListAccessibleRepos_500_OnUnknownError(t *testing.T) {
+	sc := &listAccessibleReposErrClient{listOrgsErr: errors.New("boom")}
+	router, _ := setupControllerTest(sc)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/repos", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

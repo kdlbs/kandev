@@ -3,9 +3,12 @@ package github
 import (
 	"context"
 	"errors"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/common/logger"
 )
 
 // accessibleReposStubClient lets each test wire its own ListUserOrgs /
@@ -13,12 +16,15 @@ import (
 // stubClient (which other tests depend on with its current shape).
 type accessibleReposStubClient struct {
 	stubClient
-	orgs            []GitHubOrg
-	orgsErr         error
-	userRepos       []GitHubRepo
-	userReposErr    error
-	repoByOrg       map[string][]GitHubRepo
-	repoByOrgErr    error
+	orgs         []GitHubOrg
+	orgsErr      error
+	userRepos    []GitHubRepo
+	userReposErr error
+	repoByOrg    map[string][]GitHubRepo
+	repoByOrgErr error
+	// errByOrg lets a test fail one specific org while others succeed —
+	// needed by the partial-failure / best-effort merge test.
+	errByOrg        map[string]error
 	listOrgCalls    atomic.Int32
 	listUserCalls   atomic.Int32
 	searchOrgsCalls atomic.Int32
@@ -42,6 +48,9 @@ func (s *accessibleReposStubClient) ListUserRepos(_ context.Context, _ string, _
 
 func (s *accessibleReposStubClient) SearchOrgRepos(_ context.Context, org, _ string, _ int) ([]GitHubRepo, error) {
 	s.searchOrgsCalls.Add(1)
+	if err, ok := s.errByOrg[org]; ok {
+		return nil, err
+	}
 	if s.repoByOrgErr != nil {
 		return nil, s.repoByOrgErr
 	}
@@ -52,21 +61,26 @@ func newAccessibleReposTestService(client Client) *Service {
 	return &Service{
 		client:               client,
 		authMethod:           AuthMethodPAT,
+		logger:               logger.Default(),
 		userOrgsCache:        newAccessibleReposCache(),
 		accessibleReposCache: newAccessibleReposCache(),
 	}
 }
+
+// ptrTime is a tiny helper to take the address of a time.Time literal for the
+// pointer-typed GitHubRepo.PushedAt field used in these tests.
+func ptrTime(t time.Time) *time.Time { return &t }
 
 func TestListAccessibleRepos_MergesOrgsAndUserRepos(t *testing.T) {
 	t0 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	sc := &accessibleReposStubClient{
 		orgs: []GitHubOrg{{Login: "acme"}, {Login: "globex"}},
 		userRepos: []GitHubRepo{
-			{FullName: "alice/personal", Owner: "alice", Name: "personal", PushedAt: t0.Add(3 * time.Hour)},
+			{FullName: "alice/personal", Owner: "alice", Name: "personal", PushedAt: ptrTime(t0.Add(3 * time.Hour))},
 		},
 		repoByOrg: map[string][]GitHubRepo{
-			"acme":   {{FullName: "acme/widget", Owner: "acme", Name: "widget", PushedAt: t0.Add(2 * time.Hour)}},
-			"globex": {{FullName: "globex/foo", Owner: "globex", Name: "foo", PushedAt: t0.Add(time.Hour)}},
+			"acme":   {{FullName: "acme/widget", Owner: "acme", Name: "widget", PushedAt: ptrTime(t0.Add(2 * time.Hour))}},
+			"globex": {{FullName: "globex/foo", Owner: "globex", Name: "foo", PushedAt: ptrTime(t0.Add(time.Hour))}},
 		},
 	}
 	svc := newAccessibleReposTestService(sc)
@@ -100,10 +114,10 @@ func TestListAccessibleRepos_DedupesByFullName(t *testing.T) {
 	sc := &accessibleReposStubClient{
 		orgs: []GitHubOrg{{Login: "acme"}},
 		userRepos: []GitHubRepo{
-			{FullName: "acme/shared", Owner: "acme", Name: "shared", PushedAt: time.Unix(100, 0)},
+			{FullName: "acme/shared", Owner: "acme", Name: "shared", PushedAt: ptrTime(time.Unix(100, 0))},
 		},
 		repoByOrg: map[string][]GitHubRepo{
-			"acme": {{FullName: "acme/shared", Owner: "acme", Name: "shared", PushedAt: time.Unix(50, 0)}},
+			"acme": {{FullName: "acme/shared", Owner: "acme", Name: "shared", PushedAt: ptrTime(time.Unix(50, 0))}},
 		},
 	}
 	svc := newAccessibleReposTestService(sc)
@@ -124,12 +138,12 @@ func TestListAccessibleRepos_SortsByPushedAt(t *testing.T) {
 	sc := &accessibleReposStubClient{
 		orgs: []GitHubOrg{{Login: "acme"}},
 		userRepos: []GitHubRepo{
-			{FullName: "u/middle", Owner: "u", Name: "middle", PushedAt: t0.Add(2 * time.Hour)},
+			{FullName: "u/middle", Owner: "u", Name: "middle", PushedAt: ptrTime(t0.Add(2 * time.Hour))},
 		},
 		repoByOrg: map[string][]GitHubRepo{
 			"acme": {
-				{FullName: "acme/newest", Owner: "acme", Name: "newest", PushedAt: t0.Add(5 * time.Hour)},
-				{FullName: "acme/oldest", Owner: "acme", Name: "oldest", PushedAt: t0},
+				{FullName: "acme/newest", Owner: "acme", Name: "newest", PushedAt: ptrTime(t0.Add(5 * time.Hour))},
+				{FullName: "acme/oldest", Owner: "acme", Name: "oldest", PushedAt: ptrTime(t0)},
 			},
 		},
 	}
@@ -157,10 +171,10 @@ func TestListAccessibleRepos_LimitClamp(t *testing.T) {
 	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	for i := range repos {
 		repos[i] = GitHubRepo{
-			FullName: "acme/repo" + itoaSimple(i),
+			FullName: "acme/repo" + strconv.Itoa(i),
 			Owner:    "acme",
-			Name:     "repo" + itoaSimple(i),
-			PushedAt: base.Add(time.Duration(i) * time.Minute),
+			Name:     "repo" + strconv.Itoa(i),
+			PushedAt: ptrTime(base.Add(time.Duration(i) * time.Minute)),
 		}
 	}
 	sc := &accessibleReposStubClient{
@@ -208,10 +222,10 @@ func TestListAccessibleRepos_DefaultLimit(t *testing.T) {
 	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	for i := range repos {
 		repos[i] = GitHubRepo{
-			FullName: "acme/r" + itoaSimple(i),
+			FullName: "acme/r" + strconv.Itoa(i),
 			Owner:    "acme",
-			Name:     "r" + itoaSimple(i),
-			PushedAt: base.Add(time.Duration(i) * time.Minute),
+			Name:     "r" + strconv.Itoa(i),
+			PushedAt: ptrTime(base.Add(time.Duration(i) * time.Minute)),
 		}
 	}
 	sc := &accessibleReposStubClient{
@@ -259,19 +273,54 @@ func TestListAccessibleRepos_UsesCache(t *testing.T) {
 	}
 }
 
-// itoaSimple is a tiny non-allocating int-to-decimal helper for test data;
-// using strconv.Itoa would force a separate import only the synthetic-repo
-// tests need.
-func itoaSimple(n int) string {
-	if n == 0 {
-		return "0"
+// TestListAccessibleRepos_PartialFailure_BestEffort verifies the fan-out is
+// best-effort: when one org's SearchOrgRepos errors, the other sources still
+// contribute and the call returns the partial union with no error. The
+// failed source's error is logged (we don't assert on the log contents — the
+// observable contract is "no error returned, healthy sources retained").
+func TestListAccessibleRepos_PartialFailure_BestEffort(t *testing.T) {
+	sc := &accessibleReposStubClient{
+		orgs: []GitHubOrg{{Login: "acme"}, {Login: "broken"}},
+		userRepos: []GitHubRepo{
+			{FullName: "u/own", Owner: "u", Name: "own"},
+		},
+		repoByOrg: map[string][]GitHubRepo{
+			"acme": {{FullName: "acme/widget", Owner: "acme", Name: "widget"}},
+		},
+		errByOrg: map[string]error{
+			"broken": errors.New("simulated 500 from broken org"),
+		},
 	}
-	var buf [20]byte
-	i := len(buf)
-	for n > 0 {
-		i--
-		buf[i] = byte('0' + n%10)
-		n /= 10
+	svc := newAccessibleReposTestService(sc)
+	got, err := svc.ListAccessibleRepos(context.Background(), "", 50)
+	if err != nil {
+		t.Fatalf("ListAccessibleRepos returned error on partial failure: %v", err)
 	}
-	return string(buf[i:])
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2 (user-repos + acme; broken skipped)", len(got))
+	}
+	names := map[string]bool{}
+	for _, r := range got {
+		names[r.FullName] = true
+	}
+	if !names["u/own"] || !names["acme/widget"] {
+		t.Errorf("missing expected repos in %v", names)
+	}
+}
+
+// TestListAccessibleRepos_AllSourcesFail verifies the call DOES error when
+// every fan-out source returns an error — partial failure is best-effort, but
+// "nothing worked" must surface so the picker can show an error state.
+func TestListAccessibleRepos_AllSourcesFail(t *testing.T) {
+	sc := &accessibleReposStubClient{
+		orgs:         []GitHubOrg{{Login: "broken"}},
+		userReposErr: errors.New("user-repos boom"),
+		errByOrg: map[string]error{
+			"broken": errors.New("org boom"),
+		},
+	}
+	svc := newAccessibleReposTestService(sc)
+	if _, err := svc.ListAccessibleRepos(context.Background(), "", 50); err == nil {
+		t.Fatalf("expected error when every source fails, got nil")
+	}
 }

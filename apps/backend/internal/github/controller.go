@@ -490,23 +490,23 @@ func (c *Controller) httpListUserOrgs(ctx *gin.Context) {
 //   - q: optional GitHub search qualifier appended to the per-source query
 //   - limit: 1..100, defaults to 50 when missing / non-positive
 //
-// Returns 503 with `{"code":"github_unavailable"}` when GitHub is not
-// configured / not authenticated (mirrors the existing list-repo-branches
-// 503 behaviour but with the dedicated code the picker UI keys off).
+// Returns 503 with `{"code":"github_not_configured"}` (matches every other
+// GitHub-not-configured 503 in this file) when GitHub is not configured /
+// not authenticated.
 func (c *Controller) httpListAccessibleRepos(ctx *gin.Context) {
 	query := ctx.Query("q")
 	limit, _ := strconv.Atoi(ctx.Query("limit"))
 	repos, err := c.service.ListAccessibleRepos(ctx.Request.Context(), query, limit)
 	if err != nil {
 		if errors.Is(err, ErrNoClient) {
-			ctx.JSON(http.StatusServiceUnavailable, gin.H{"code": "github_unavailable"})
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{
+				"error": "GitHub is not configured. Install the gh CLI and run 'gh auth login', or add a GITHUB_TOKEN secret.",
+				"code":  "github_not_configured",
+			})
 			return
 		}
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
-	}
-	if repos == nil {
-		repos = []GitHubRepo{}
 	}
 	ctx.JSON(http.StatusOK, gin.H{"repos": repos})
 }

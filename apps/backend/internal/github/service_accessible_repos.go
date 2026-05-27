@@ -2,10 +2,12 @@ package github
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
+	"sync"
 
-	"golang.org/x/sync/errgroup"
+	"go.uber.org/zap"
 )
 
 // Repo-list defaults for the list-accessible-repos endpoint.
@@ -39,13 +41,19 @@ func clampAccessibleReposLimit(limit int) int {
 
 // ListAccessibleRepos returns the union of repos the authenticated user can
 // access — their own repos plus repos under each org they belong to — merged,
-// deduped by full_name, and sorted by most-recently-pushed first.
+// deduped by full_name, and sorted by most-recently-pushed first. Returns a
+// non-nil (possibly empty) slice when err == nil.
 //
 // The full merged result is cached per (query, limit) for 60s so picker
 // re-renders and typeahead bursts don't fan out to GitHub on every keystroke.
 // Returns ErrNoClient (untouched) when GitHub is not configured / not
 // authenticated; the HTTP handler maps that to 503 with the
-// `github_unavailable` code.
+// `github_not_configured` code.
+//
+// Per-source failures (a single org or the user-repos call) are logged and
+// skipped — the picker UI gets a partial result rather than nothing when one
+// of N orgs is temporarily failing. Total failure (every source errored or
+// ctx canceled) still surfaces as an error.
 func (s *Service) ListAccessibleRepos(ctx context.Context, query string, limit int) ([]GitHubRepo, error) {
 	if s.client == nil {
 		return nil, ErrNoClient
@@ -72,6 +80,11 @@ func accessibleReposCacheKey(query string, limit int) string {
 // Concurrent misses for the same key coalesce via the cache's singleflight, so
 // a burst of repo-list requests won't each issue a separate /user/orgs round
 // trip.
+//
+// Note: this calls the raw client.ListUserOrgs rather than Service.ListUserOrgs
+// because Service.ListUserOrgs prepends the authenticated user as a pseudo-org,
+// which would double-count against the separate ListUserRepos fan-out in
+// fetchAccessibleRepos.
 func (s *Service) cachedListUserOrgs(ctx context.Context) ([]GitHubOrg, error) {
 	v, err := s.userOrgsCache.doOrFetch(userOrgsCacheKey, func() (any, error) {
 		return s.client.ListUserOrgs(ctx)
@@ -86,8 +99,9 @@ func (s *Service) cachedListUserOrgs(ctx context.Context) ([]GitHubOrg, error) {
 // fetchAccessibleRepos fans out a SearchOrgRepos call per org plus a
 // ListUserRepos call for the authenticated user's own repos, then merges,
 // dedupes by full_name, sorts by pushed_at desc, and truncates to limit.
-// Org calls run in parallel via errgroup so a slow org does not block the
-// others.
+// Per-source errors are logged and the source contributes zero repos; the
+// call returns an error only when ErrNoClient surfaces, the context is
+// canceled, or every source failed.
 func (s *Service) fetchAccessibleRepos(ctx context.Context, query string, limit int) ([]GitHubRepo, error) {
 	orgs, err := s.cachedListUserOrgs(ctx)
 	if err != nil {
@@ -98,28 +112,53 @@ func (s *Service) fetchAccessibleRepos(ctx context.Context, query string, limit 
 	// `orgs`. Pre-sized so workers can write without coordinating on a
 	// shared append.
 	results := make([][]GitHubRepo, len(orgs)+1)
-	g, gctx := errgroup.WithContext(ctx)
-	g.Go(func() error {
-		userRepos, err := s.client.ListUserRepos(gctx, query, limit)
+	sourceCount := len(orgs) + 1
+	var (
+		wg          sync.WaitGroup
+		mu          sync.Mutex
+		fatalErr    error
+		failedCount int
+	)
+	recordResult := func(source string, repos []GitHubRepo, slot int, err error) {
+		mu.Lock()
+		defer mu.Unlock()
 		if err != nil {
-			return err
+			if errors.Is(err, ErrNoClient) && fatalErr == nil {
+				fatalErr = err
+			} else if (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) && fatalErr == nil {
+				fatalErr = err
+			}
+			failedCount++
+			if s.logger != nil {
+				s.logger.Warn("list-accessible-repos: source failed",
+					zap.String("source", source),
+					zap.Error(err))
+			}
+			return
 		}
-		results[0] = userRepos
-		return nil
-	})
+		results[slot] = repos
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		userRepos, err := s.client.ListUserRepos(ctx, query, limit)
+		recordResult("user-repos", userRepos, 0, err)
+	}()
 	for i, org := range orgs {
 		i, org := i, org
-		g.Go(func() error {
-			orgRepos, err := s.client.SearchOrgRepos(gctx, org.Login, query, limit)
-			if err != nil {
-				return err
-			}
-			results[i+1] = orgRepos
-			return nil
-		})
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			orgRepos, err := s.client.SearchOrgRepos(ctx, org.Login, query, limit)
+			recordResult("org:"+org.Login, orgRepos, i+1, err)
+		}()
 	}
-	if err := g.Wait(); err != nil {
-		return nil, err
+	wg.Wait()
+	if fatalErr != nil {
+		return nil, fatalErr
+	}
+	if sourceCount > 0 && failedCount == sourceCount {
+		return nil, fmt.Errorf("all repo sources failed")
 	}
 	return mergeDedupeSortRepos(results, limit), nil
 }
@@ -142,8 +181,17 @@ func mergeDedupeSortRepos(results [][]GitHubRepo, limit int) []GitHubRepo {
 		}
 	}
 	sort.SliceStable(merged, func(i, j int) bool {
-		if !merged[i].PushedAt.Equal(merged[j].PushedAt) {
-			return merged[i].PushedAt.After(merged[j].PushedAt)
+		// nil PushedAt sorts last (unknown timestamp is treated as "oldest").
+		switch {
+		case merged[i].PushedAt == nil && merged[j].PushedAt == nil:
+			return merged[i].FullName < merged[j].FullName
+		case merged[i].PushedAt == nil:
+			return false
+		case merged[j].PushedAt == nil:
+			return true
+		}
+		if !merged[i].PushedAt.Equal(*merged[j].PushedAt) {
+			return merged[i].PushedAt.After(*merged[j].PushedAt)
 		}
 		return merged[i].FullName < merged[j].FullName
 	})
