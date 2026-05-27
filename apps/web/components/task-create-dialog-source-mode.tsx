@@ -98,18 +98,17 @@ function ModeButton({
   onSelect: (m: SourceMode) => void;
 }) {
   const isActive = active === mode;
-  // The previous design used a single text-link with `data-testid="toggle-github-url"`
-  // and the e2e suite still selects by that testid; keep it as a legacy alias on
-  // the Remote button so existing create-task-github-url.spec.ts and subtask.spec.ts
-  // keep passing without a sweep across all e2e files. The primary testid is
-  // `source-mode-remote` (Task 4 renamed "url" → "remote").
+  // The Remote button carries `data-legacy-testid="toggle-github-url"` so the older
+  // create-task-github-url.spec.ts and subtask.spec.ts can keep selecting it during
+  // the migration; the primary `data-testid` follows the source-mode-<mode> convention.
   const legacyTestId = mode === "remote" ? "toggle-github-url" : undefined;
   return (
     <button
       type="button"
       role="radio"
       aria-checked={isActive}
-      data-testid={legacyTestId ?? `source-mode-${mode}`}
+      data-testid={`source-mode-${mode}`}
+      data-legacy-testid={legacyTestId}
       onClick={() => onSelect(mode)}
       className={cn(
         "rounded-sm px-2 py-0.5 text-[11px] font-medium transition-colors cursor-pointer",
