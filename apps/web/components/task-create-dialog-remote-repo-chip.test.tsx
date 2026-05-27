@@ -31,7 +31,7 @@ vi.mock("@/hooks/domains/github/use-accessible-repos", () => ({
   useAccessibleRepos: () => accessibleReposState.value,
 }));
 
-import { RemoteRepoChip } from "./task-create-dialog-remote-repo-chip";
+import { RemoteRepoChip, computeTriggerLabel } from "./task-create-dialog-remote-repo-chip";
 
 const TRIGGER_TID = "remote-repo-chip-trigger";
 const FULL_NAME = "acme/site";
@@ -138,6 +138,45 @@ describe("RemoteRepoChip — write paths", () => {
     );
     fireEvent.click(screen.getByTestId("remote-chip-remove"));
     expect(onRemove).toHaveBeenCalledOnce();
+  });
+});
+
+describe("RemoteRepoChip — paste/picker race", () => {
+  it("picker click after typing in paste input does not trigger paste commit", () => {
+    // Race: user types into paste input, then clicks a picker option. The
+    // input's onBlur fires first (focus moves to the option button). Without
+    // the guard, blur would commit the typed value AND close the popover,
+    // and the subsequent picker click would be dropped.
+    accessibleReposState.value = {
+      ...accessibleReposState.value,
+      repos: [
+        { provider: "github", owner: "acme", name: "site", full_name: FULL_NAME, private: false },
+      ],
+    };
+    const onURLChange = vi.fn();
+    renderInProvider(
+      <RemoteRepoChip
+        row={row()}
+        branches={[]}
+        branchesLoading={false}
+        onURLChange={onURLChange}
+        onBranchChange={noopBranch}
+        onRemove={noopRemove}
+      />,
+    );
+    fireEvent.click(screen.getByTestId(TRIGGER_TID));
+    const input = screen.getByTestId("remote-paste-url-input") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "https://github.com/typed/value" } });
+    // Simulate focus moving to the picker option before the click lands —
+    // this is the exact ordering the browser produces (blur → click).
+    const option = screen.getByText(FULL_NAME).closest("button") as HTMLButtonElement;
+    fireEvent.blur(input, { relatedTarget: option });
+    fireEvent.click(option);
+    expect(onURLChange).toHaveBeenCalledTimes(1);
+    expect(onURLChange).toHaveBeenCalledWith(URL_ACME_SITE, "picker", {
+      provider: "github",
+      fullName: FULL_NAME,
+    });
   });
 });
 
@@ -257,5 +296,46 @@ describe("RemoteRepoChip — trigger label", () => {
     );
     // Short URLs render verbatim; the middle-ellipsis only fires past ~30 chars.
     expect(screen.getByTestId(TRIGGER_TID).textContent).toContain("github.com/foo/bar");
+  });
+});
+
+describe("computeTriggerLabel", () => {
+  it("returns the empty-state placeholder when url is empty", () => {
+    expect(computeTriggerLabel(row())).toBe("Pick or paste a repo");
+  });
+
+  it("returns picker fullName when source is 'picker' and metadata is present", () => {
+    expect(
+      computeTriggerLabel(
+        row({
+          url: "https://github.com/octocat/hello-world",
+          source: "picker",
+          provider: "github",
+          fullName: "octocat/hello-world",
+        }),
+      ),
+    ).toBe("octocat/hello-world");
+  });
+
+  it("returns short paste URLs verbatim (no ellipsis under threshold)", () => {
+    const label = computeTriggerLabel(row({ url: "github.com/x/y", source: "paste" }));
+    expect(label).toBe("github.com/x/y");
+    expect(label).not.toContain("…");
+  });
+
+  it("middle-truncates long paste URLs while preserving first and last chars", () => {
+    const long = "github.com/some-very-long-org/some-very-long-repo-name";
+    const stripped = "github.com/some-very-long-org/some-very-long-repo-name"; // no scheme to strip
+    const label = computeTriggerLabel(row({ url: long, source: "paste" }));
+    expect(label).toContain("…");
+    expect(label.length).toBeLessThan(stripped.length);
+    expect(label.startsWith(stripped[0]!)).toBe(true);
+    expect(label.endsWith(stripped[stripped.length - 1]!)).toBe(true);
+  });
+
+  it("strips https:// and www. prefixes from paste labels", () => {
+    expect(
+      computeTriggerLabel(row({ url: "https://www.github.com/foo/bar", source: "paste" })),
+    ).toBe("github.com/foo/bar");
   });
 });

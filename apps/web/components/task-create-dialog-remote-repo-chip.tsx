@@ -143,7 +143,7 @@ function RepoTriggerIcon({ row }: { row: TaskRemoteRepoRow }) {
   return <IconLink className="h-3 w-3 shrink-0 text-muted-foreground" />;
 }
 
-function computeTriggerLabel(row: TaskRemoteRepoRow): string {
+export function computeTriggerLabel(row: TaskRemoteRepoRow): string {
   if (!row.url) return "Pick or paste a repo";
   if (row.source === "picker" && row.fullName) return row.fullName;
   return truncateMiddle(stripScheme(row.url), TRUNCATE_THRESHOLD);
@@ -307,7 +307,21 @@ function PasteSection({ onPaste }: { onPaste: (value: string) => void }) {
         type="text"
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        onBlur={commit}
+        onBlur={(e) => {
+          // If focus moved to another element inside this popover (e.g., a
+          // picker option click), let that handler run instead of committing
+          // the paste — otherwise the popover would close before the click
+          // lands and the user's pick would be lost.
+          const popoverContent = e.currentTarget.closest('[data-slot="popover-content"]');
+          if (
+            popoverContent &&
+            e.relatedTarget instanceof Node &&
+            popoverContent.contains(e.relatedTarget)
+          ) {
+            return;
+          }
+          commit();
+        }}
         onKeyDown={(e) => {
           if (e.key === "Enter") {
             e.preventDefault();
