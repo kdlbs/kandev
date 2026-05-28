@@ -114,13 +114,28 @@ function useResyncOnTabActivate(
 ) {
   useEffect(() => {
     if (!hasFile || !activeSessionId) return;
+    // panelPortalManager.acquire() runs in usePortalSlot's mount effect (the
+    // dockview-side slot), which fires before child portals' effects, so the
+    // entry is virtually always present here. There is one acceptable miss:
+    // a fromJSON layout restore can swap `entry.api` for the same panelId
+    // without remounting this component, which would silently leave the
+    // subscription pointing at a disposed api. fromJSON is rare and
+    // `useOpenFileWorkspaceSync` still covers the common polling gap, so we
+    // accept that edge case rather than wiring a manager-level subscription.
     const entry = panelPortalManager.get(panelId);
     if (!entry?.api) return;
-    const disposable = entry.api.onDidActiveChange((event) => {
-      if (!event.isActive) return;
+    const syncNow = () => {
       const client = getWebSocketClient();
       if (!client) return;
       void syncOpenFileFromWorkspace({ client, sessionId: activeSessionId, path, updateFileState });
+    };
+    // If the panel is already the active tab when this effect first runs,
+    // onDidActiveChange won't fire (no transition), but the user is already
+    // looking at the editor — sync immediately so the initial open path
+    // benefits from the same WS-event-miss recovery as later activations.
+    if (entry.api.isActive) syncNow();
+    const disposable = entry.api.onDidActiveChange((event) => {
+      if (event.isActive) syncNow();
     });
     return () => disposable.dispose();
   }, [panelId, hasFile, activeSessionId, path, updateFileState]);

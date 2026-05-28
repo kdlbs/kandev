@@ -608,8 +608,9 @@ test.describe("Branch refresh + filter", () => {
 
     // Set the listener up before the click — Promise.all guarantees ordering
     // and the explicit timeout makes a missed request fail fast instead of
-    // hanging until the test-level 60s cap.
-    const [refreshRequest] = await Promise.all([
+    // hanging until the test-level 60s cap. No assertion needed: a missed
+    // request throws from inside Promise.all.
+    await Promise.all([
       testPage.waitForRequest(
         (req) =>
           req.url().includes(`/repositories/${seedData.repositoryId}/branches`) &&
@@ -619,7 +620,6 @@ test.describe("Branch refresh + filter", () => {
       ),
       refreshButton.click(),
     ]);
-    expect(refreshRequest).toBeTruthy();
   });
 
   test("branch filter ranks exact match above substring matches", async ({
