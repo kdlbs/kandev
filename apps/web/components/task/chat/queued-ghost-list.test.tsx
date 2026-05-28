@@ -165,7 +165,54 @@ describe("QueueAffordance", () => {
     fireEvent.click(screen.getByTestId("queue-clear-all"));
     expect(state.clearAll).toHaveBeenCalledTimes(1);
   });
+});
 
+describe("QueueAffordance — renderStatusBar prop", () => {
+  it("calls renderStatusBar with null when there are no queued entries", () => {
+    useQueueMock.mockReturnValue(queueState([]));
+    const renderStatusBar = vi.fn(() => <div data-testid="status-bar-slot" />);
+    render(
+      <QueueAffordance sessionId={SESSION_ID} renderStatusBar={renderStatusBar}>
+        {CHILD}
+      </QueueAffordance>,
+    );
+    expect(renderStatusBar).toHaveBeenCalledWith(null);
+    expect(screen.getByTestId("status-bar-slot")).toBeTruthy();
+  });
+
+  it("calls renderStatusBar with a chip node when entries exist and panel is closed", () => {
+    useQueueMock.mockReturnValue(queueState([entry()]));
+    const renderStatusBar = vi.fn((chip) => <div data-testid="status-bar-slot">{chip}</div>);
+    render(
+      <QueueAffordance sessionId={SESSION_ID} renderStatusBar={renderStatusBar}>
+        {CHILD}
+      </QueueAffordance>,
+    );
+    const callArg = renderStatusBar.mock.calls[0][0];
+    expect(callArg).not.toBeNull();
+    // The chip lives inside the caller-supplied slot, not as a separate
+    // inline element above the input.
+    const slot = screen.getByTestId("status-bar-slot");
+    expect(slot.contains(screen.getByTestId(CHIP_ID))).toBe(true);
+  });
+
+  it("calls renderStatusBar with null when entries exist and the panel is open", () => {
+    useQueueMock.mockReturnValue(queueState([entry()]));
+    const renderStatusBar = vi.fn((chip) => <div data-testid="status-bar-slot">{chip}</div>);
+    render(
+      <QueueAffordance sessionId={SESSION_ID} renderStatusBar={renderStatusBar}>
+        {CHILD}
+      </QueueAffordance>,
+    );
+    // Open the panel — the chip should drop out of the status bar.
+    fireEvent.click(screen.getByTestId(CHIP_ID));
+    expect(screen.getByTestId(PANEL_ID)).toBeTruthy();
+    const lastCall = renderStatusBar.mock.calls.at(-1);
+    expect(lastCall?.[0]).toBeNull();
+  });
+});
+
+describe("QueueAffordance — workflow entries", () => {
   it("workflow queued entries are read-only", () => {
     useQueueMock.mockReturnValue(
       queueState([
