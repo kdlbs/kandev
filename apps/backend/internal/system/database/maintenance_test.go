@@ -107,7 +107,7 @@ func TestOptimize_StartsJobAndSucceeds(t *testing.T) {
 }
 
 func TestHandleVacuum_Returns202WithJobID(t *testing.T) {
-	svc, _, _, _ := newTestService(t)
+	svc, tracker, _, _ := newTestService(t)
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.POST("/vacuum", HandleVacuum(svc))
@@ -119,10 +119,15 @@ func TestHandleVacuum_Returns202WithJobID(t *testing.T) {
 	if !contains(w.Body.String(), `"job_id"`) {
 		t.Errorf("body missing job_id: %s", w.Body.String())
 	}
+	// Make sure the spawned job finishes before the test exits so the temp dir
+	// cleanup does not race with VACUUM still writing the SQLite journal.
+	for _, j := range tracker.List() {
+		waitForState(t, tracker, j.ID, jobs.StateSucceeded)
+	}
 }
 
 func TestHandleOptimize_Returns202WithJobID(t *testing.T) {
-	svc, _, _, _ := newTestService(t)
+	svc, tracker, _, _ := newTestService(t)
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.POST("/optimize", HandleOptimize(svc))
@@ -133,5 +138,9 @@ func TestHandleOptimize_Returns202WithJobID(t *testing.T) {
 	}
 	if !contains(w.Body.String(), `"job_id"`) {
 		t.Errorf("body missing job_id: %s", w.Body.String())
+	}
+	// Same cleanup-race guard as TestHandleVacuum_Returns202WithJobID.
+	for _, j := range tracker.List() {
+		waitForState(t, tracker, j.ID, jobs.StateSucceeded)
 	}
 }
