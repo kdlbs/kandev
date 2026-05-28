@@ -11,6 +11,9 @@ import (
 // respecting each watch's cleanup policy. Returns the count of tasks deleted.
 func (s *Service) CleanupAllReviewTasks(ctx context.Context) (int, error) {
 	store := s.requireStore()
+	if store == nil {
+		return 0, errStoreUnavailable
+	}
 	s.mu.RLock()
 	deleter := s.taskDeleter
 	checker := s.taskSessionChecker
@@ -102,13 +105,18 @@ func (s *Service) deleteReviewMRTaskIfTerminal(ctx context.Context, t *ReviewMRT
 			zap.String("task_id", t.TaskID), zap.Error(err))
 		return false
 	}
-	_ = s.requireStore().DeleteReviewMRTask(ctx, t.ID)
+	if store := s.requireStore(); store != nil {
+		_ = store.DeleteReviewMRTask(ctx, t.ID)
+	}
 	return true
 }
 
 // CleanupAllIssueTasks deletes auto-created issue tasks for closed issues.
 func (s *Service) CleanupAllIssueTasks(ctx context.Context) (int, error) {
 	store := s.requireStore()
+	if store == nil {
+		return 0, errStoreUnavailable
+	}
 	s.mu.RLock()
 	deleter := s.taskDeleter
 	checker := s.taskSessionChecker
@@ -188,6 +196,8 @@ func (s *Service) deleteIssueWatchTaskIfTerminal(ctx context.Context, t *IssueWa
 			zap.String("task_id", t.TaskID), zap.Error(err))
 		return false
 	}
-	_ = s.requireStore().DeleteIssueWatchTask(ctx, t.ID)
+	if store := s.requireStore(); store != nil {
+		_ = store.DeleteIssueWatchTask(ctx, t.ID)
+	}
 	return true
 }

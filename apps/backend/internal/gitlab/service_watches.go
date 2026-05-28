@@ -310,6 +310,9 @@ func clampPollInterval(seconds int) int {
 // it owned (tasks survive when the dedup row dies, so pre-sweep first).
 func (s *Service) DeleteReviewWatch(ctx context.Context, id string) error {
 	store := s.requireStore()
+	if store == nil {
+		return errStoreUnavailable
+	}
 	s.mu.RLock()
 	deleter := s.taskDeleter
 	s.mu.RUnlock()
@@ -359,6 +362,9 @@ func (s *Service) CheckReviewWatch(ctx context.Context, watch *ReviewWatch) ([]*
 		return nil, ErrNoClient
 	}
 	store := s.requireStore()
+	if store == nil {
+		return nil, errStoreUnavailable
+	}
 	mrs, err := s.fetchReviewMRs(ctx, watch)
 	if err != nil {
 		return nil, err
@@ -601,6 +607,9 @@ func applyIssueWatchPatch(iw *IssueWatch, req *UpdateIssueWatchRequest) {
 // DeleteIssueWatch removes an issue watch and best-effort reaps tasks.
 func (s *Service) DeleteIssueWatch(ctx context.Context, id string) error {
 	store := s.requireStore()
+	if store == nil {
+		return errStoreUnavailable
+	}
 	s.mu.RLock()
 	deleter := s.taskDeleter
 	s.mu.RUnlock()
@@ -645,6 +654,9 @@ func (s *Service) CheckIssueWatch(ctx context.Context, watch *IssueWatch) ([]*Is
 		return nil, ErrNoClient
 	}
 	store := s.requireStore()
+	if store == nil {
+		return nil, errStoreUnavailable
+	}
 	issues, err := s.fetchIssues(ctx, watch)
 	if err != nil {
 		return nil, err
