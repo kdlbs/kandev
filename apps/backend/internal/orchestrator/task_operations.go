@@ -964,7 +964,19 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 	// to recordInitialMessage. Without this, the resume can succeed and the
 	// agent starts replying, but the chat shows agent output with no user
 	// prompt above it.
-	if task, taskErr := s.repo.GetTask(resumeCtx, taskID); taskErr == nil && task != nil {
+	//
+	// We use task.Description (the raw user input) rather than the
+	// workflow-effective prompt produced by applyWorkflowAndPlanMode. The
+	// effective prompt may carry a plan-mode prefix or be templated through a
+	// workflow step, but reconstructing the exact prompt the original launch
+	// sent to the agent is brittle (workflow state may have advanced since).
+	// Surfacing the raw description is intentionally conservative: it shows
+	// what the user actually typed, which is what they expect to see in chat.
+	if task, taskErr := s.repo.GetTask(resumeCtx, taskID); taskErr != nil {
+		s.logger.Warn("resume: failed to load task for initial message backfill",
+			zap.String("task_id", taskID),
+			zap.Error(taskErr))
+	} else if task != nil {
 		s.backfillInitialUserMessageIfMissing(resumeCtx, taskID, sessionID, task.Description)
 	}
 

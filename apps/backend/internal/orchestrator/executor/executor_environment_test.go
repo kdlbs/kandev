@@ -269,7 +269,7 @@ func TestBuildResumeRequest_ReusesTaskEnvironmentRuntimeMetadata(t *testing.T) {
 		},
 	}
 
-	req, _, _, running, err := exec.buildResumeRequest(context.Background(), task, session, true)
+	req, _, _, _, running, err := exec.buildResumeRequest(context.Background(), task, session, true)
 	if err != nil {
 		t.Fatalf("buildResumeRequest returned error: %v", err)
 	}
