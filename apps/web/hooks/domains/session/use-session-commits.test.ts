@@ -154,10 +154,33 @@ describe("useSessionCommits", () => {
   });
 });
 
+// Helper: seed store with one existing commit and a deferred request so we
+// can observe the store mid-refetch (stale-while-revalidate test).
+async function seedAndDeferRefetch(sessionId: string) {
+  storeState.sessionCommits = {
+    byEnvironmentId: {
+      [sessionId]: [{ commit_sha: "old", insertions: 1, deletions: 0 }],
+    },
+    loading: {},
+    refetchTrigger: { [sessionId]: 0 },
+  };
+  let resolveRequest!: (value: unknown) => void;
+  mockRequest.mockReturnValueOnce(
+    new Promise((resolve) => {
+      resolveRequest = resolve;
+    }),
+  );
+  return resolveRequest;
+}
+
+function bumpTrigger(sessionId: string, value: number) {
+  (storeState.sessionCommits as { refetchTrigger: Record<string, number> }).refetchTrigger = {
+    [sessionId]: value,
+  };
+}
+
 // Lives in its own describe so the outer block stays under the 100-line
-// max-lines-per-function limit; the test is involved enough (deferred
-// promise, mid-refetch observation) that inlining it pushes the parent
-// describe past the cap.
+// max-lines-per-function limit.
 describe("useSessionCommits — stale-while-revalidate on trigger bump", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -169,50 +192,20 @@ describe("useSessionCommits — stale-while-revalidate on trigger bump", () => {
   });
 
   it("refetches when refetchTrigger bumps without nulling the visible list", async () => {
-    // Seed the store with existing commits. The bug we're guarding against:
-    // a bump clears the list to undefined, the hook returns `[]`, the
-    // Changes panel renders its empty state, then the new list arrives.
-    storeState.sessionCommits = {
-      byEnvironmentId: {
-        "sess-1": [{ commit_sha: "old", insertions: 1, deletions: 0 }],
-      },
-      loading: {},
-      refetchTrigger: { "sess-1": 0 },
-    };
-    // Defer the request resolution so we can observe what the store looks
-    // like while the hook is mid-refetch — that's where the flicker would
-    // happen if the hook were nulling the visible list.
-    let resolveRequest!: (value: unknown) => void;
-    mockRequest.mockReturnValueOnce(
-      new Promise((resolve) => {
-        resolveRequest = resolve;
-      }),
-    );
-
+    const resolveRequest = await seedAndDeferRefetch("sess-1");
     const { rerender } = renderHook(() => useSessionCommits("sess-1"));
-    // Initial mount: commits is already populated, so no fetch should fire.
     expect(mockRequest).not.toHaveBeenCalled();
 
-    // Bump the trigger (this is what commits_reset / branch_switched do).
-    (storeState.sessionCommits as { refetchTrigger: Record<string, number> }).refetchTrigger = {
-      "sess-1": 1,
-    };
+    bumpTrigger("sess-1", 1);
     rerender();
 
-    // The hook fires the refetch but the promise is still pending. During
-    // this window the store must still hold the OLD commits — that's the
-    // whole point of stale-while-revalidate.
     await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(1));
+    // During mid-refetch the store must still hold the OLD commits.
     const midRefetch = (storeState.sessionCommits as { byEnvironmentId: Record<string, unknown> })
       .byEnvironmentId;
     expect(midRefetch["sess-1"]).toEqual([{ commit_sha: "old", insertions: 1, deletions: 0 }]);
 
-    // Now resolve the request — the new commits replace the old via the
-    // (mutating) mockSetSessionCommits.
-    resolveRequest({
-      commits: [{ commit_sha: "new", insertions: 2, deletions: 1 }],
-      ready: true,
-    });
+    resolveRequest({ commits: [{ commit_sha: "new", insertions: 2, deletions: 1 }], ready: true });
     await waitFor(() => {
       const after = (storeState.sessionCommits as { byEnvironmentId: Record<string, unknown[]> })
         .byEnvironmentId;
@@ -221,10 +214,9 @@ describe("useSessionCommits — stale-while-revalidate on trigger bump", () => {
   });
 
   it("accepts an authoritative empty response on trigger bump", async () => {
-    // After a `git reset` that strips every commit back to base, the refetch
-    // legitimately returns []. Without `allowEmpty: true`, the default guard
-    // in `setSessionCommits` would silently drop that response and the panel
-    // would keep showing the pre-reset commits forever.
+    // After a `git reset`, the refetch legitimately returns []. Without
+    // `allowEmpty: true`, the default guard in `setSessionCommits` would
+    // silently drop that response and the panel would keep showing stale data.
     storeState.sessionCommits = {
       byEnvironmentId: {
         "sess-1": [
@@ -238,21 +230,62 @@ describe("useSessionCommits — stale-while-revalidate on trigger bump", () => {
     mockRequest.mockResolvedValueOnce({ commits: [], ready: true });
 
     const { rerender } = renderHook(() => useSessionCommits("sess-1"));
-    (storeState.sessionCommits as { refetchTrigger: Record<string, number> }).refetchTrigger = {
-      "sess-1": 1,
-    };
+    bumpTrigger("sess-1", 1);
     rerender();
 
     await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(1));
-    // The hook MUST pass `{ allowEmpty: true }` for trigger-bump refetches.
     await waitFor(() => {
       expect(mockSetSessionCommits).toHaveBeenCalledWith("sess-1", [], { allowEmpty: true });
     });
-    // And the store actually accepts the empty response.
     await waitFor(() => {
       const after = (storeState.sessionCommits as { byEnvironmentId: Record<string, unknown[]> })
         .byEnvironmentId;
       expect(after["sess-1"]).toEqual([]);
     });
+  });
+
+  it("drops a stale response when a newer fetch already started", async () => {
+    storeState.sessionCommits = {
+      byEnvironmentId: { "sess-1": [{ commit_sha: "initial" }] },
+      loading: {},
+      refetchTrigger: { "sess-1": 0 },
+    };
+    let resolveFirst!: (value: unknown) => void;
+    let resolveSecond!: (value: unknown) => void;
+    mockRequest
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveFirst = resolve;
+        }),
+      )
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveSecond = resolve;
+        }),
+      );
+
+    const { rerender } = renderHook(() => useSessionCommits("sess-1"));
+
+    bumpTrigger("sess-1", 1);
+    rerender();
+    await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(1));
+
+    bumpTrigger("sess-1", 2);
+    rerender();
+    await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(2));
+
+    resolveFirst({ commits: [{ commit_sha: "stale" }], ready: true });
+    resolveSecond({ commits: [{ commit_sha: "fresh" }], ready: true });
+
+    await waitFor(() => {
+      const after = (storeState.sessionCommits as { byEnvironmentId: Record<string, unknown[]> })
+        .byEnvironmentId;
+      expect(after["sess-1"]).toEqual([{ commit_sha: "fresh" }]);
+    });
+
+    const winningCalls = mockSetSessionCommits.mock.calls.filter(
+      ([, commits]) => Array.isArray(commits) && commits.length > 0,
+    );
+    expect(winningCalls).toHaveLength(1);
   });
 });

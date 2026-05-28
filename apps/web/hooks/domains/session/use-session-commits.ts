@@ -53,6 +53,12 @@ export function useSessionCommits(sessionId: string | null) {
   // commit_created notifications were already fired (or pushed and so
   // filtered out by the live watcher).
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Monotonic request version. Captured at fetch start; the response is only
+  // applied if the version still matches. Without this, two trigger bumps in
+  // quick succession (e.g. branch_switched → user reverts) could see the
+  // older in-flight response land after the newer one and clobber the panel
+  // with stale data. Mirrors the pattern in useCumulativeDiff.
+  const requestVersionRef = useRef(0);
 
   // `allowEmpty` is threaded into setSessionCommits's guard. Trigger-bump
   // refetches (commits_reset / branch_switched) can legitimately return [] —
@@ -71,12 +77,20 @@ export function useSessionCommits(sessionId: string | null) {
         retryTimerRef.current = null;
       }
 
+      const version = ++requestVersionRef.current;
       setSessionCommitsLoading(sessionId, true);
       try {
         const response = await client.request<{ commits?: SessionCommit[]; ready?: boolean }>(
           "session.git.commits",
           { session_id: sessionId },
         );
+
+        // Drop stale callbacks: another fetch (e.g. a later trigger bump)
+        // already started, so this response is for an older state and must
+        // not overwrite the newer one. Skips both the retry-scheduling and
+        // the setSessionCommits write so the in-flight winner stays in
+        // control of both.
+        if (version !== requestVersionRef.current) return;
 
         // Backend signals ready:false with an empty commits array when the
         // workspace execution isn't available yet (e.g. agentctl still being
@@ -100,11 +114,9 @@ export function useSessionCommits(sessionId: string | null) {
       } catch (error) {
         console.error("Failed to fetch session commits:", error);
       } finally {
-        // Keep loading:true while a retry is scheduled — the operation isn't
-        // really finished, and flipping the flag here would let consumers see
-        // `{ loading: false, commits: [] }` for the whole retry window, which is
-        // the same misleading state this hook is designed to avoid.
-        if (!retryTimerRef.current) {
+        // Same version guard as above: a stale fetch must not flip loading
+        // off — only the current in-flight call owns the loading flag.
+        if (version === requestVersionRef.current && !retryTimerRef.current) {
           setSessionCommitsLoading(sessionId, false);
         }
       }
