@@ -457,9 +457,9 @@ func startAgentInfrastructure(
 		addCleanup(func() error { linearPoller.Stop(); return nil })
 	}
 
-	// Start Sentry poller. Phase 2 wires the issue-watch loop and dedup
-	// adapter so the orchestrator can turn matching Sentry issues into
-	// kandev tasks (alongside the existing auth-health probe).
+	// Start Sentry poller: an auth-health probe plus an issue-watch loop that
+	// runs configured filters and emits NewSentryIssueEvent. The dedup adapter
+	// lets the orchestrator turn matching Sentry issues into kandev tasks.
 	if services.Sentry != nil {
 		orchestratorSvc.SetSentryService(&sentryServiceAdapter{svc: services.Sentry})
 		sentryPoller := sentrypkg.NewPoller(services.Sentry, log)

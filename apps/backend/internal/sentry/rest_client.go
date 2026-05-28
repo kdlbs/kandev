@@ -206,9 +206,6 @@ func (c *RESTClient) SearchIssues(ctx context.Context, filter SearchFilter, curs
 		return nil, &APIError{StatusCode: http.StatusBadRequest, Message: "orgSlug required"}
 	}
 	q := url.Values{}
-	if filter.ProjectSlug != "" {
-		q.Set("project", filter.ProjectSlug)
-	}
 	if filter.Environment != "" {
 		q.Set("environment", filter.Environment)
 	}
@@ -222,7 +219,7 @@ func (c *RESTClient) SearchIssues(ctx context.Context, filter SearchFilter, curs
 		q.Set("query", built)
 	}
 	var nodes []issueNode
-	resp, err := c.do(ctx, "/organizations/"+filter.OrgSlug+"/issues/", q, &nodes)
+	resp, err := c.do(ctx, issuesSearchPath(filter.OrgSlug, filter.ProjectSlug), q, &nodes)
 	if err != nil {
 		return nil, err
 	}
@@ -236,6 +233,18 @@ func (c *RESTClient) SearchIssues(ctx context.Context, filter SearchFilter, curs
 		out.Issues = append(out.Issues, issueNodeToIssue(&nodes[i]))
 	}
 	return out, nil
+}
+
+// issuesSearchPath picks the issue-search endpoint. The org-scoped
+// /organizations/{org}/issues/ endpoint requires a NUMERIC project id in
+// ?project=, so when a project slug is set we use the project-scoped
+// endpoint, which takes the slug directly in the path. Empty project slug
+// (browse "all projects" in an org) falls back to the org endpoint.
+func issuesSearchPath(orgSlug, projectSlug string) string {
+	if projectSlug == "" {
+		return "/organizations/" + url.PathEscape(orgSlug) + "/issues/"
+	}
+	return "/projects/" + url.PathEscape(orgSlug) + "/" + url.PathEscape(projectSlug) + "/issues/"
 }
 
 // buildIssueQueryString assembles Sentry's search-bar syntax from a

@@ -81,12 +81,12 @@ func TestRESTClient_ListProjects(t *testing.T) {
 
 func TestRESTClient_SearchIssues_BuildsQueryStringAndPaginates(t *testing.T) {
 	ts := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasPrefix(r.URL.Path, "/organizations/acme/issues/") {
-			t.Errorf("expected /organizations/acme/issues/, got %q", r.URL.Path)
+		if !strings.HasPrefix(r.URL.Path, "/projects/acme/frontend/issues/") {
+			t.Errorf("expected /projects/acme/frontend/issues/, got %q", r.URL.Path)
 		}
 		q := r.URL.Query()
-		if q.Get("project") != "frontend" {
-			t.Errorf("expected project=frontend, got %q", q.Get("project"))
+		if q.Has("project") {
+			t.Errorf("project slug must be in the path, not the ?project= param: %q", q.Get("project"))
 		}
 		if q.Get("environment") != "prod" {
 			t.Errorf("expected environment=prod, got %q", q.Get("environment"))
@@ -149,6 +149,28 @@ func TestRESTClient_SearchIssues_RequiresOrgSlug(t *testing.T) {
 	_, err := c.SearchIssues(context.Background(), SearchFilter{}, "")
 	if err == nil {
 		t.Error("expected error when orgSlug missing")
+	}
+}
+
+// TestRESTClient_SearchIssues_AllProjectsUsesOrgEndpoint locks in that an
+// empty project slug falls back to the org-scoped endpoint (browse "all
+// projects"), while a set slug uses the project-scoped path (asserted in
+// TestRESTClient_SearchIssues_BuildsQueryStringAndPaginates). Regression
+// guard for the slug-vs-numeric-id bug: the org endpoint must never receive
+// a slug in ?project=.
+func TestRESTClient_SearchIssues_AllProjectsUsesOrgEndpoint(t *testing.T) {
+	ts := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/organizations/acme/issues/" {
+			t.Errorf("expected /organizations/acme/issues/, got %q", r.URL.Path)
+		}
+		if r.URL.Query().Has("project") {
+			t.Errorf("org endpoint must not receive a project slug param")
+		}
+		_, _ = w.Write([]byte(`[]`))
+	})
+	c := pointTo(NewRESTClient(&SentryConfig{}, "tok"), ts.URL)
+	if _, err := c.SearchIssues(context.Background(), SearchFilter{OrgSlug: "acme"}, ""); err != nil {
+		t.Fatalf("search: %v", err)
 	}
 }
 

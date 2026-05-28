@@ -93,10 +93,13 @@ func (m *MockClient) GetIssue(_ context.Context, idOrShortID string) (*SentryIss
 	return nil, &APIError{StatusCode: http.StatusNotFound, Message: "issue not found: " + idOrShortID}
 }
 
-// mockMatchesFilter applies the same predicates the real Sentry API would, so
-// E2E tests can assert that the backend forwarded the filter rather than
-// silently returning everything. OrgSlug is not enforced — the mock's project
-// list represents a single tenant.
+// mockMatchesFilter applies the filter predicates that map to a per-issue
+// field, so E2E tests can assert the backend forwarded the filter rather than
+// silently returning everything. Deliberately NOT enforced (no per-issue
+// analog on SentryIssue): OrgSlug (the mock's project list is one tenant),
+// Environment (issues carry no environment in our projection), and StatsPeriod
+// (a relative time window, not an issue attribute). The real REST client's
+// URL building for those params is covered in rest_client_test.go.
 func mockMatchesFilter(issue *SentryIssue, f SearchFilter) bool {
 	if f.ProjectSlug != "" && issue.ProjectSlug != f.ProjectSlug {
 		return false

@@ -3,7 +3,7 @@ export type SentryAuthMethod = "auth_token";
 export const SENTRY_AUTH_METHOD: SentryAuthMethod = "auth_token";
 
 export interface SentryConfig {
-  authMethod: string;
+  authMethod: SentryAuthMethod;
   defaultOrgSlug: string;
   defaultProjectSlug: string;
   hasSecret: boolean;
@@ -15,7 +15,7 @@ export interface SentryConfig {
 }
 
 export interface SetSentryConfigRequest {
-  authMethod: string;
+  authMethod: SentryAuthMethod;
   defaultOrgSlug: string;
   defaultProjectSlug: string;
   secret: string;
