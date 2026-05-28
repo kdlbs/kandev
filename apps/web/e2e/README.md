@@ -2,6 +2,12 @@
 
 Playwright-based end-to-end tests. Each Playwright worker spawns its own real Go backend (no mocks of internal services) on isolated ports and a real Next.js standalone frontend, then drives a real Chromium against them.
 
+> **Source changes require a rebuild.** The harness spawns the production
+> standalone server (`.next/standalone/web/server.js`), not `next dev`. After
+> any frontend source edit you must run `pnpm --filter @kandev/web build`
+> before `pnpm e2e`, otherwise the spec runs against stale bytecode and
+> seemingly-correct code looks broken.
+
 ## Project layout
 
 | Folder                 | What's in it                                                                                                                                 |
