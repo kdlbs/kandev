@@ -53,6 +53,16 @@ jobs:
       - name: Mark workspace safe for git
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
+      # Inside the container the home dir is /root, so the pnpm store lives at
+      # /root/.local/share/pnpm/store. actions/cache resolves `~` against $HOME
+      # so the same path string works for both the host and container variants.
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pnpm/store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
+
       - name: Install dependencies
         working-directory: apps
         run: pnpm install --frozen-lockfile
@@ -96,9 +106,7 @@ jobs:
     #
     # `--ipc=host` is required for Chromium: the default container `/dev/shm`
     # is only ~64MiB, which causes tabs to slow to a crawl and renderers to
-    # crash mid-test. Microsoft's Playwright-in-Docker guide calls this out
-    # explicitly; without it our shards time out at 22 min while the same
-    # tests on a bare ubuntu runner finish in ~8–15 min.
+    # crash mid-test.
     container:
       image: ghcr.io/kdlbs/kandev-ci:latest
       options: --ipc=host
@@ -107,6 +115,17 @@ jobs:
     defaults:
       run:
         shell: bash
+    # Node 18+'s `dns.lookup` defaults to `verbatim: true`, returning the OS
+    # resolver order. Inside this container `localhost` resolves to ::1 first,
+    # so `net.Server.listen({ host: "localhost" })` (used by Next.js standalone
+    # via $HOSTNAME) binds IPv6-only — and undici's `fetch("http://localhost…")`
+    # in the test runner only tries the first resolved address (IPv4), so the
+    # frontend health check times out and every spec fails. Forcing
+    # IPv4-first ordering aligns both the bind and the fetch and matches the
+    # effective default on the github-hosted ubuntu runner this workflow
+    # previously ran on.
+    env:
+      NODE_OPTIONS: --dns-result-order=ipv4first
     strategy:
       fail-fast: false
       matrix:
@@ -118,6 +137,13 @@ jobs:
 
       - name: Mark workspace safe for git
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pnpm/store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
 
       - name: Install dependencies
         working-directory: apps
@@ -316,6 +342,13 @@ jobs:
 
       - name: Mark workspace safe for git
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pnpm/store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
 
       - name: Install dependencies
         working-directory: apps
