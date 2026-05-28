@@ -364,7 +364,11 @@ export type SessionRuntimeSliceActions = {
   registerSessionEnvironment: (sessionId: string, environmentId: string) => void;
   setContextWindow: (sessionId: string, contextWindow: ContextWindowEntry) => void;
   // Session commit actions
-  setSessionCommits: (sessionId: string, commits: SessionCommit[]) => void;
+  setSessionCommits: (
+    sessionId: string,
+    commits: SessionCommit[],
+    opts?: { allowEmpty?: boolean },
+  ) => void;
   setSessionCommitsLoading: (sessionId: string, loading: boolean) => void;
   addSessionCommit: (sessionId: string, commit: SessionCommit) => void;
   clearSessionCommits: (sessionId: string) => void;

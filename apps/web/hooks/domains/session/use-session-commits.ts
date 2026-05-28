@@ -54,53 +54,63 @@ export function useSessionCommits(sessionId: string | null) {
   // filtered out by the live watcher).
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const fetchCommits = useCallback(async () => {
-    if (!sessionId) return;
+  // `allowEmpty` is threaded into setSessionCommits's guard. Trigger-bump
+  // refetches (commits_reset / branch_switched) can legitimately return [] —
+  // e.g. a `git reset` stripped every commit back to base — and the store
+  // must accept that authoritatively. Initial fetches keep the default
+  // guard so a stale empty response can't race the addSessionCommit path.
+  const fetchCommits = useCallback(
+    async (opts?: { allowEmpty?: boolean }) => {
+      if (!sessionId) return;
 
-    const client = getWebSocketClient();
-    if (!client) return;
+      const client = getWebSocketClient();
+      if (!client) return;
 
-    if (retryTimerRef.current) {
-      clearTimeout(retryTimerRef.current);
-      retryTimerRef.current = null;
-    }
-
-    setSessionCommitsLoading(sessionId, true);
-    try {
-      const response = await client.request<{ commits?: SessionCommit[]; ready?: boolean }>(
-        "session.git.commits",
-        { session_id: sessionId },
-      );
-
-      // Backend signals ready:false with an empty commits array when the
-      // workspace execution isn't available yet (e.g. agentctl still being
-      // recovered after a backend restart, or a session in WAITING_FOR_INPUT
-      // whose execution was never spawned). Don't overwrite the store with
-      // [] — that would leave commits looking "loaded but empty" forever.
-      // Schedule a retry so we eventually pick up the real list.
-      if (response?.ready === false) {
-        retryTimerRef.current = setTimeout(() => {
-          retryTimerRef.current = null;
-          fetchCommits();
-        }, NOT_READY_RETRY_MS);
-        return;
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
       }
 
-      if (response?.commits) {
-        setSessionCommits(sessionId, response.commits);
+      setSessionCommitsLoading(sessionId, true);
+      try {
+        const response = await client.request<{ commits?: SessionCommit[]; ready?: boolean }>(
+          "session.git.commits",
+          { session_id: sessionId },
+        );
+
+        // Backend signals ready:false with an empty commits array when the
+        // workspace execution isn't available yet (e.g. agentctl still being
+        // recovered after a backend restart, or a session in WAITING_FOR_INPUT
+        // whose execution was never spawned). Don't overwrite the store with
+        // [] — that would leave commits looking "loaded but empty" forever.
+        // Schedule a retry so we eventually pick up the real list. Preserve
+        // `opts` across retries so a trigger-bump fetch that gets ready:false
+        // still applies its authoritative empty response when it succeeds.
+        if (response?.ready === false) {
+          retryTimerRef.current = setTimeout(() => {
+            retryTimerRef.current = null;
+            fetchCommits(opts);
+          }, NOT_READY_RETRY_MS);
+          return;
+        }
+
+        if (response?.commits) {
+          setSessionCommits(sessionId, response.commits, opts);
+        }
+      } catch (error) {
+        console.error("Failed to fetch session commits:", error);
+      } finally {
+        // Keep loading:true while a retry is scheduled — the operation isn't
+        // really finished, and flipping the flag here would let consumers see
+        // `{ loading: false, commits: [] }` for the whole retry window, which is
+        // the same misleading state this hook is designed to avoid.
+        if (!retryTimerRef.current) {
+          setSessionCommitsLoading(sessionId, false);
+        }
       }
-    } catch (error) {
-      console.error("Failed to fetch session commits:", error);
-    } finally {
-      // Keep loading:true while a retry is scheduled — the operation isn't
-      // really finished, and flipping the flag here would let consumers see
-      // `{ loading: false, commits: [] }` for the whole retry window, which is
-      // the same misleading state this hook is designed to avoid.
-      if (!retryTimerRef.current) {
-        setSessionCommitsLoading(sessionId, false);
-      }
-    }
-  }, [sessionId, setSessionCommits, setSessionCommitsLoading]);
+    },
+    [sessionId, setSessionCommits, setSessionCommitsLoading],
+  );
 
   // Fetch commits when:
   //  1. commits is undefined (initial load — clearSessionCommits is still
@@ -119,7 +129,12 @@ export function useSessionCommits(sessionId: string | null) {
     const needsInitialFetch = commits === undefined;
     const triggerBumped = refetchTrigger !== prevRefetchTriggerRef.current;
 
-    if (needsInitialFetch || triggerBumped) {
+    if (triggerBumped) {
+      // Trigger-bump path: the backend already mutated state (reset / branch
+      // switch). An empty response is authoritative — bypass the default
+      // anti-race guard so the panel reflects the actual post-reset state.
+      fetchCommits({ allowEmpty: true });
+    } else if (needsInitialFetch) {
       fetchCommits();
     }
 

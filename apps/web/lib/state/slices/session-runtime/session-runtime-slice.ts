@@ -164,13 +164,20 @@ function buildSessionCommitActions(set: ImmerSet) {
     setSessionCommits: (
       sessionId: string,
       commits: Parameters<SessionRuntimeSlice["setSessionCommits"]>[1],
+      opts?: { allowEmpty?: boolean },
     ) =>
       set((draft) => {
         const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
         const existing = draft.sessionCommits.byEnvironmentId[envKey];
-        // Prevent a stale empty-array response from overwriting commits that
-        // arrived via incremental notifications while the request was in flight.
-        if (commits.length === 0 && existing && existing.length > 0) {
+        // Default guard: prevent a stale empty-array response from overwriting
+        // commits that arrived via incremental notifications while the request
+        // was in flight (race between fetch start and commit_created events).
+        //
+        // Under stale-while-revalidate, a `commits_reset` or `branch_switched`
+        // refetch can *legitimately* return [] — the backend actually has no
+        // commits. The caller must opt in to that path with `allowEmpty: true`
+        // so the panel stops showing the pre-reset list.
+        if (!opts?.allowEmpty && commits.length === 0 && existing && existing.length > 0) {
           return;
         }
         draft.sessionCommits.byEnvironmentId[envKey] = commits;

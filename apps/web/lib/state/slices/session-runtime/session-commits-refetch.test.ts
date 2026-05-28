@@ -71,3 +71,48 @@ describe("bumpSessionCommitsRefetch", () => {
     expect(triggers[SESSION]).toBeUndefined();
   });
 });
+
+describe("setSessionCommits — empty-response guard", () => {
+  let useStore: ReturnType<typeof makeStore>;
+
+  beforeEach(() => {
+    useStore = makeStore();
+  });
+
+  it("rejects [] over a populated list by default (race protection)", () => {
+    // The default guard protects against a stale fetch response landing
+    // after incremental commit_created notifications already populated the
+    // store. Without it, an in-flight initial fetch could clobber the live
+    // list with [].
+    useStore.getState().setSessionCommits(SESSION, [commit({ commit_sha: "abc" })]);
+
+    useStore.getState().setSessionCommits(SESSION, []);
+
+    const after = useStore.getState().sessionCommits.byEnvironmentId[SESSION];
+    expect(after).toHaveLength(1);
+    expect(after[0].commit_sha).toBe("abc");
+  });
+
+  it("accepts [] when allowEmpty:true (authoritative response after reset)", () => {
+    // After commits_reset/branch_switched, a refetch can legitimately return
+    // []. The caller opts into the empty-accepting path so the panel stops
+    // showing the pre-reset list.
+    useStore.getState().setSessionCommits(SESSION, [commit({ commit_sha: "abc" })]);
+
+    useStore.getState().setSessionCommits(SESSION, [], { allowEmpty: true });
+
+    expect(useStore.getState().sessionCommits.byEnvironmentId[SESSION]).toEqual([]);
+  });
+
+  it("writes the populated list regardless of allowEmpty", () => {
+    // Sanity: allowEmpty only changes behaviour for empty arrays. A populated
+    // list always overwrites.
+    useStore.getState().setSessionCommits(SESSION, [commit({ commit_sha: "old" })]);
+
+    useStore.getState().setSessionCommits(SESSION, [commit({ commit_sha: "new" })]);
+
+    const after = useStore.getState().sessionCommits.byEnvironmentId[SESSION];
+    expect(after).toHaveLength(1);
+    expect(after[0].commit_sha).toBe("new");
+  });
+});

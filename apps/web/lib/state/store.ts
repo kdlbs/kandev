@@ -387,7 +387,11 @@ export type AppState = {
   setGitStatus: (sessionId: string, gitStatus: GitStatusEntry) => void;
   clearGitStatus: (sessionId: string) => void;
   registerSessionEnvironment: (sessionId: string, environmentId: string) => void;
-  setSessionCommits: (sessionId: string, commits: SessionCommit[]) => void;
+  setSessionCommits: (
+    sessionId: string,
+    commits: SessionCommit[],
+    opts?: { allowEmpty?: boolean },
+  ) => void;
   setSessionCommitsLoading: (sessionId: string, loading: boolean) => void;
   addSessionCommit: (sessionId: string, commit: SessionCommit) => void;
   clearSessionCommits: (sessionId: string) => void;

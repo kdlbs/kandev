@@ -3,15 +3,22 @@ import { cleanup, renderHook, waitFor } from "@testing-library/react";
 
 const mockRequest = vi.fn();
 // setSessionCommits is the only mock whose default behaviour matters: the
-// trigger-bump regression test asserts the old commits stay in the store
-// throughout the refetch. With a pure `vi.fn()` mock that assertion is
-// vacuous — nothing in the test ever writes to storeState, so it's
-// trivially true. Default to actually mutating storeState so the test
-// would catch a future regression that clears the store mid-refetch.
-const mockSetSessionCommits = vi.fn((sessionId: string, commits: unknown[]) => {
-  const sc = storeState.sessionCommits as { byEnvironmentId: Record<string, unknown[]> };
-  sc.byEnvironmentId[sessionId] = commits;
-});
+// trigger-bump regression tests assert what the store looks like before
+// and after the refetch resolves. With a pure `vi.fn()` mock those
+// assertions would be vacuous. Mirror the real action's anti-race guard
+// (skip writes of `[]` over a populated list unless `allowEmpty` is set)
+// so the tests cover the actual end-to-end behaviour, including the
+// authoritative-empty path used after a `commits_reset` bump.
+const mockSetSessionCommits = vi.fn(
+  (sessionId: string, commits: unknown[], opts?: { allowEmpty?: boolean }) => {
+    const sc = storeState.sessionCommits as { byEnvironmentId: Record<string, unknown[]> };
+    const existing = sc.byEnvironmentId[sessionId];
+    if (!opts?.allowEmpty && commits.length === 0 && existing && existing.length > 0) {
+      return;
+    }
+    sc.byEnvironmentId[sessionId] = commits;
+  },
+);
 const mockSetSessionCommitsLoading = vi.fn();
 
 vi.mock("@/lib/ws/connection", () => ({
@@ -58,9 +65,11 @@ describe("useSessionCommits", () => {
     renderHook(() => useSessionCommits("sess-1"));
 
     await waitFor(() => {
-      expect(mockSetSessionCommits).toHaveBeenCalledWith("sess-1", [
-        { commit_sha: "abc", insertions: 10, deletions: 2 },
-      ]);
+      expect(mockSetSessionCommits).toHaveBeenCalledWith(
+        "sess-1",
+        [{ commit_sha: "abc", insertions: 10, deletions: 2 }],
+        undefined,
+      );
     });
   });
 
@@ -86,9 +95,11 @@ describe("useSessionCommits", () => {
       { timeout: 4000 },
     );
     await waitFor(() => {
-      expect(mockSetSessionCommits).toHaveBeenCalledWith("sess-1", [
-        { commit_sha: "abc", insertions: 5, deletions: 1 },
-      ]);
+      expect(mockSetSessionCommits).toHaveBeenCalledWith(
+        "sess-1",
+        [{ commit_sha: "abc", insertions: 5, deletions: 1 }],
+        undefined,
+      );
     });
   });
 
@@ -206,6 +217,42 @@ describe("useSessionCommits — stale-while-revalidate on trigger bump", () => {
       const after = (storeState.sessionCommits as { byEnvironmentId: Record<string, unknown[]> })
         .byEnvironmentId;
       expect(after["sess-1"]).toEqual([{ commit_sha: "new", insertions: 2, deletions: 1 }]);
+    });
+  });
+
+  it("accepts an authoritative empty response on trigger bump", async () => {
+    // After a `git reset` that strips every commit back to base, the refetch
+    // legitimately returns []. Without `allowEmpty: true`, the default guard
+    // in `setSessionCommits` would silently drop that response and the panel
+    // would keep showing the pre-reset commits forever.
+    storeState.sessionCommits = {
+      byEnvironmentId: {
+        "sess-1": [
+          { commit_sha: "a", insertions: 0, deletions: 0 },
+          { commit_sha: "b", insertions: 0, deletions: 0 },
+        ],
+      },
+      loading: {},
+      refetchTrigger: { "sess-1": 0 },
+    };
+    mockRequest.mockResolvedValueOnce({ commits: [], ready: true });
+
+    const { rerender } = renderHook(() => useSessionCommits("sess-1"));
+    (storeState.sessionCommits as { refetchTrigger: Record<string, number> }).refetchTrigger = {
+      "sess-1": 1,
+    };
+    rerender();
+
+    await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(1));
+    // The hook MUST pass `{ allowEmpty: true }` for trigger-bump refetches.
+    await waitFor(() => {
+      expect(mockSetSessionCommits).toHaveBeenCalledWith("sess-1", [], { allowEmpty: true });
+    });
+    // And the store actually accepts the empty response.
+    await waitFor(() => {
+      const after = (storeState.sessionCommits as { byEnvironmentId: Record<string, unknown[]> })
+        .byEnvironmentId;
+      expect(after["sess-1"]).toEqual([]);
     });
   });
 });
