@@ -250,6 +250,7 @@ export function KanbanCard({
         onOpenChange={setShowDeleteConfirm}
         taskTitle={task.title}
         taskId={task.id}
+        executorType={task.primaryExecutorType}
         isDeleting={isDeleting}
         onConfirm={({ cascade }) => onDelete?.(task, { cascade })}
       />
@@ -258,6 +259,7 @@ export function KanbanCard({
         onOpenChange={setShowArchiveConfirm}
         taskTitle={task.title}
         taskId={task.id}
+        executorType={task.primaryExecutorType}
         isArchiving={isArchiving}
         onConfirm={({ cascade }) => onArchive?.(task, { cascade })}
       />

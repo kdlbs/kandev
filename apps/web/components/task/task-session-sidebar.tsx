@@ -359,14 +359,22 @@ function useMoveToStep(store: StoreApi) {
 
 function useArchiveActions(store: StoreApi) {
   const archiveAndSwitch = useArchiveAndSwitchTask({ useLayoutSwitch: true });
-  const [archivingTask, setArchivingTask] = useState<{ id: string; title: string } | null>(null);
+  const [archivingTask, setArchivingTask] = useState<{
+    id: string;
+    title: string;
+    executorType?: string | null;
+  } | null>(null);
   const [isArchiving, setIsArchiving] = useState(false);
 
   const handleArchiveTask = useCallback(
     (taskId: string) => {
       const state = store.getState();
       const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
-      setArchivingTask({ id: taskId, title: task?.title ?? "this task" });
+      setArchivingTask({
+        id: taskId,
+        title: task?.title ?? "this task",
+        executorType: task?.primaryExecutorType,
+      });
     },
     [store],
   );
@@ -395,14 +403,22 @@ function useDeleteActions(
   removeTaskFromBoard: ReturnType<typeof useTaskRemoval>["removeTaskFromBoard"],
 ) {
   const { deleteTaskById } = useTaskActions();
-  const [deletingTask, setDeletingTask] = useState<{ id: string; title: string } | null>(null);
+  const [deletingTask, setDeletingTask] = useState<{
+    id: string;
+    title: string;
+    executorType?: string | null;
+  } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
   const handleDeleteTask = useCallback(
     (taskId: string) => {
       const state = store.getState();
       const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
-      setDeletingTask({ id: taskId, title: task?.title ?? "this task" });
+      setDeletingTask({
+        id: taskId,
+        title: task?.title ?? "this task",
+        executorType: task?.primaryExecutorType,
+      });
     },
     [store],
   );
