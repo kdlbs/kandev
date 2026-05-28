@@ -29,6 +29,7 @@ import { usePlanActions } from "@/hooks/domains/kanban/use-plan-actions";
 import { useExecutorEnvironmentAvailability } from "@/hooks/domains/session/use-executor-environment-availability";
 import { useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useToast } from "@/components/toast-provider";
+import { markPRMergedBannerDismissed, wasPRMergedBannerDismissed } from "@/lib/local-storage";
 import type { DiffComment } from "@/lib/diff/types";
 import type { useChatPanelState } from "./use-chat-panel-state";
 
@@ -241,9 +242,14 @@ export function useChatPanelHandlers(
 
 export function PRMergedBanner({ taskId }: { taskId: string }) {
   const taskPRs = useAppStore((state) => state.taskPRs.byTaskId[taskId]);
-  const [dismissed, setDismissed] = useState(false);
+  const [dismissed, setDismissed] = useState(() => wasPRMergedBannerDismissed(taskId));
   const archiveAndSwitch = useArchiveAndSwitchTask();
   const { toast } = useToast();
+
+  const handleDismiss = useCallback(() => {
+    markPRMergedBannerDismissed(taskId);
+    setDismissed(true);
+  }, [taskId]);
 
   const handleArchive = useCallback(async () => {
     try {
@@ -282,7 +288,8 @@ export function PRMergedBanner({ taskId }: { taskId: string }) {
       <button
         type="button"
         aria-label="Dismiss"
-        onClick={() => setDismissed(true)}
+        data-testid="pr-merged-dismiss-button"
+        onClick={handleDismiss}
         className="p-0.5 hover:bg-purple-500/10 rounded cursor-pointer"
       >
         <IconX className="h-3 w-3" />

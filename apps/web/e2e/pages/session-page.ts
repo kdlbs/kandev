@@ -58,6 +58,9 @@ export class SessionPage {
   prMergedArchiveButton() {
     return this.page.getByTestId("pr-merged-archive-button");
   }
+  prMergedDismissButton() {
+    return this.page.getByTestId("pr-merged-dismiss-button");
+  }
   todoIndicator() {
     return this.page.getByTestId("todo-indicator");
   }

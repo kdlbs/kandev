@@ -165,6 +165,92 @@ test.describe("Chat status bar", () => {
     );
   });
 
+  test("dismissed PR merged banner stays hidden across reload and task switch", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+
+    const taskA = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Dismiss Banner Task A",
+      seedData.agentProfileId,
+      {
+        description: 'e2e:message("dismiss banner alpha response")',
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Dismiss Banner Task B",
+      seedData.agentProfileId,
+      {
+        description: 'e2e:message("dismiss banner beta response")',
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: taskA.id,
+      owner: "test-org",
+      repo: "test-repo",
+      pr_number: 404,
+      pr_url: "https://github.com/test-org/test-repo/pull/404",
+      pr_title: "Dismiss Test PR",
+      head_branch: "feature/dismiss",
+      base_branch: "main",
+      author_login: "test-user",
+      state: "merged",
+    });
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    const cardA = kanban.taskCardByTitle("Dismiss Banner Task A");
+    await expect(cardA).toBeVisible({ timeout: 30_000 });
+    await cardA.click();
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    await expect(session.chat.getByText("dismiss banner alpha response").last()).toBeVisible({
+      timeout: 30_000,
+    });
+
+    // Banner appears, then user dismisses it.
+    await expect(session.prMergedBanner()).toBeVisible({ timeout: 10_000 });
+    await session.prMergedDismissButton().click();
+    await expect(session.prMergedBanner()).not.toBeVisible();
+
+    // Persists across reload.
+    await testPage.reload();
+    await session.waitForLoad();
+    await expect(session.chat.getByText("dismiss banner alpha response").last()).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(session.prMergedBanner()).not.toBeVisible();
+
+    // Persists across task switch (away and back).
+    await session.taskInSidebar("Dismiss Banner Task B").first().click();
+    await expect(session.chat.getByText("dismiss banner beta response").last()).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(session.prMergedBanner()).not.toBeVisible();
+
+    await session.taskInSidebar("Dismiss Banner Task A").first().click();
+    await expect(session.chat.getByText("dismiss banner alpha response").last()).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(session.prMergedBanner()).not.toBeVisible();
+  });
+
   test("archive via PR banner switches to next task", async ({ testPage, apiClient, seedData }) => {
     test.setTimeout(90_000);
 
