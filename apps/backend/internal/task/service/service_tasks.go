@@ -54,6 +54,12 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 		return nil, err
 	}
 
+	// Subtasks created without explicit repositories inherit the parent's, so
+	// an inherit_parent subtask resolves a repo at launch and can reuse the
+	// parent's worktree (the UI omits repositories expecting this). Mirrors the
+	// MCP create_task path so UI- and agent-created subtasks behave identically.
+	s.inheritParentRepositories(ctx, req)
+
 	// For office tasks, resolve workflow from workspace
 	if isOfficeRequest(req) && req.WorkflowID == "" {
 		if err := s.resolveOfficeWorkflow(ctx, req); err != nil {
@@ -99,6 +105,39 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 	s.logger.Info("task created", zap.String("task_id", task.ID), zap.String("title", task.Title))
 
 	return task, nil
+}
+
+// inheritParentRepositories fills req.Repositories from the parent task when a
+// subtask is created without explicit repositories. RepositoryID and BaseBranch
+// carry over; CheckoutBranch is dropped on purpose because two worktrees can't
+// share a working branch, so the subtask branches off the same base as the
+// parent. Mirrors the MCP create_task path (mcp/handlers.inheritedRepoInputs)
+// so UI- and agent-created subtasks behave identically. A subtask with no
+// repositories can't establish a worktree, which is what blocked inherit_parent
+// from reusing the parent's worktree on the HTTP path.
+func (s *Service) inheritParentRepositories(ctx context.Context, req *CreateTaskRequest) {
+	if req.ParentID == "" || len(req.Repositories) > 0 {
+		return
+	}
+	parentRepos, err := s.taskRepos.ListTaskRepositories(ctx, req.ParentID)
+	if err != nil {
+		s.logger.Warn("failed to list parent repositories for subtask inheritance",
+			zap.String("parent_id", req.ParentID), zap.Error(err))
+		return
+	}
+	inherited := make([]TaskRepositoryInput, 0, len(parentRepos))
+	for _, r := range parentRepos {
+		if r == nil || r.RepositoryID == "" {
+			continue
+		}
+		inherited = append(inherited, TaskRepositoryInput{
+			RepositoryID: r.RepositoryID,
+			BaseBranch:   r.BaseBranch,
+		})
+	}
+	if len(inherited) > 0 {
+		req.Repositories = inherited
+	}
 }
 
 // validateCreateTaskRequest validates constraints for task creation.

@@ -79,6 +79,99 @@ func TestCreateChildTask_OverridesWorkflow(t *testing.T) {
 	}
 }
 
+func TestCreateTask_Subtask_InheritsParentRepositories(t *testing.T) {
+	svc, repo := setupOfficeTest(t)
+	ctx := context.Background()
+
+	if err := repo.CreateRepository(ctx, &models.Repository{ID: "repo-x", WorkspaceID: "ws-1", Name: "Repo"}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+
+	parent, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		Title:       "Parent",
+		ProjectID:   "proj-1",
+		Repositories: []TaskRepositoryInput{{
+			RepositoryID:   "repo-x",
+			BaseBranch:     "main",
+			CheckoutBranch: "feature/parent",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+
+	// Child created without explicit repositories — mirrors the UI inherit_parent
+	// flow, which omits repositories expecting the backend to inherit them.
+	child, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		Title:       "Child",
+		ParentID:    parent.ID,
+		ProjectID:   "proj-1",
+	})
+	if err != nil {
+		t.Fatalf("create child: %v", err)
+	}
+
+	childRepos, err := repo.ListTaskRepositories(ctx, child.ID)
+	if err != nil {
+		t.Fatalf("ListTaskRepositories: %v", err)
+	}
+	if len(childRepos) != 1 {
+		t.Fatalf("child repos = %d, want 1 inherited from parent", len(childRepos))
+	}
+	if childRepos[0].RepositoryID != "repo-x" {
+		t.Errorf("repository_id = %q, want repo-x", childRepos[0].RepositoryID)
+	}
+	if childRepos[0].BaseBranch != "main" {
+		t.Errorf("base_branch = %q, want inherited main", childRepos[0].BaseBranch)
+	}
+	// CheckoutBranch is dropped: two worktrees can't share a working branch.
+	if childRepos[0].CheckoutBranch != "" {
+		t.Errorf("checkout_branch = %q, want empty (dropped on inherit)", childRepos[0].CheckoutBranch)
+	}
+}
+
+func TestCreateTask_Subtask_ExplicitRepositoriesNotOverridden(t *testing.T) {
+	svc, repo := setupOfficeTest(t)
+	ctx := context.Background()
+
+	for _, id := range []string{"repo-a", "repo-b"} {
+		if err := repo.CreateRepository(ctx, &models.Repository{ID: id, WorkspaceID: "ws-1", Name: id}); err != nil {
+			t.Fatalf("CreateRepository %s: %v", id, err)
+		}
+	}
+
+	parent, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID:  "ws-1",
+		Title:        "Parent",
+		ProjectID:    "proj-1",
+		Repositories: []TaskRepositoryInput{{RepositoryID: "repo-a", BaseBranch: "main"}},
+	})
+	if err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+
+	child, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID:  "ws-1",
+		Title:        "Child",
+		ParentID:     parent.ID,
+		ProjectID:    "proj-1",
+		Repositories: []TaskRepositoryInput{{RepositoryID: "repo-b", BaseBranch: "dev"}},
+	})
+	if err != nil {
+		t.Fatalf("create child: %v", err)
+	}
+
+	childRepos, err := repo.ListTaskRepositories(ctx, child.ID)
+	if err != nil {
+		t.Fatalf("ListTaskRepositories: %v", err)
+	}
+	if len(childRepos) != 1 || childRepos[0].RepositoryID != "repo-b" {
+		t.Fatalf("child repos = %+v, want only explicit repo-b", childRepos)
+	}
+}
+
 func TestCreateChildTask_RequiresParent(t *testing.T) {
 	svc, _ := setupOfficeTest(t)
 	_, err := svc.CreateChildTask(context.Background(), nil, ChildTaskSpec{Title: "X"})

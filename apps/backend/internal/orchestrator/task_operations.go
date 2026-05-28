@@ -161,6 +161,8 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 
 	// Create session entry in database. Office tasks route through
 	// EnsureSessionForAgent so runs + advanced-mode reuse one row.
+	// prepareSessionForStart also propagates any inherited workspace
+	// environment (inherit_parent / shared_group) onto the new session.
 	sessionID, err := s.prepareSessionForStart(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
 	if err != nil {
 		s.logger.Error("failed to prepare session",
@@ -168,15 +170,6 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 			zap.Error(err))
 		return "", err
 	}
-
-	// Office task-handoffs phase 4: when this task's workspace policy says
-	// inherit_parent, propagate the parent task's primary-session
-	// TaskEnvironmentID to the new session so executor lookup binds to the
-	// existing materialized environment instead of provisioning a fresh one.
-	// shared_group is handled the same way once the group has been
-	// materialized by an earlier launch — we look up the group's
-	// MaterializedEnvironmentID via the same propagation hook.
-	s.propagateInheritedEnvironment(ctx, task, sessionID)
 
 	// Notify the frontend that a new CREATED session exists. The start path
 	// transitions through updateTaskSessionState which broadcasts; the prepare
@@ -621,11 +614,32 @@ func (s *Service) isOfficeTask(ctx context.Context, taskID string) bool {
 	return err == nil && dbTask != nil && dbTask.AssigneeAgentProfileID != ""
 }
 
-// prepareSessionForStart picks the right session-creation path for the task:
+// prepareSessionForStart creates the session for a launch and propagates any
+// inherited workspace environment onto it.
+//
+// The propagation (inherit_parent / shared_group) lives here rather than only
+// in PrepareTaskSession so every launch entry point inherits consistently —
+// including the direct start path (startTask), which MCP-created subtasks reach
+// via auto-start. Without this, an inherit_parent subtask launched through
+// startTask would provision a fresh worktree instead of reusing the parent's.
+// propagateInheritedEnvironment is a no-op for tasks without a workspace policy.
+func (s *Service) prepareSessionForStart(
+	ctx context.Context, task *v1.Task,
+	agentProfileID, executorID, executorProfileID, workflowStepID string,
+) (string, error) {
+	sessionID, err := s.createStartSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+	if err != nil {
+		return "", err
+	}
+	s.propagateInheritedEnvironment(ctx, task, sessionID)
+	return sessionID, nil
+}
+
+// createStartSession picks the right session-creation path for the task:
 // office tasks with an assignee use the per-(task, agent) EnsureSessionForAgent
 // (so runs reuse one row across turns); kanban / quick-chat fall through to
 // the per-launch PrepareSession used since day one.
-func (s *Service) prepareSessionForStart(
+func (s *Service) createStartSession(
 	ctx context.Context, task *v1.Task,
 	agentProfileID, executorID, executorProfileID, workflowStepID string,
 ) (string, error) {
