@@ -6,6 +6,7 @@ import type { Icon as TablerIcon } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { SIDEBAR_ITEM_ACTIVE, SIDEBAR_ITEM_INACTIVE } from "./app-sidebar-constants";
 
 type AppSidebarNavItemProps = {
   icon: TablerIcon;
@@ -86,10 +87,7 @@ export function AppSidebarNavItem({
     collapsed ? "h-9 w-9 justify-center mx-auto" : "h-9 px-2.5 gap-2.5 w-full text-left",
     disabled
       ? "cursor-not-allowed text-foreground/40"
-      : cn(
-          "cursor-pointer",
-          active ? "bg-accent text-foreground" : "text-foreground/80 hover:bg-muted/60",
-        ),
+      : cn("cursor-pointer", active ? SIDEBAR_ITEM_ACTIVE : SIDEBAR_ITEM_INACTIVE),
   );
 
   const inner = (

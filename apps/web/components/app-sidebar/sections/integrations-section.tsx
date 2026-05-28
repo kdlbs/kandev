@@ -19,7 +19,11 @@ import {
   getGitHubIntegrationStatus,
 } from "@/components/integrations/integrations-menu";
 import { cn } from "@/lib/utils";
-import { APP_SIDEBAR_SECTION_IDS } from "../app-sidebar-constants";
+import {
+  APP_SIDEBAR_SECTION_IDS,
+  SIDEBAR_ITEM_ACTIVE,
+  SIDEBAR_ITEM_INACTIVE,
+} from "../app-sidebar-constants";
 import { AppSidebarSection } from "../app-sidebar-section";
 
 type IntegrationsSectionProps = {
@@ -66,7 +70,7 @@ export function IntegrationsSection({ collapsed }: IntegrationsSectionProps) {
             href={href}
             className={cn(
               "flex items-center gap-2.5 px-2.5 py-1.5 text-[13px] font-medium rounded-md cursor-pointer",
-              isActive ? "bg-accent text-foreground" : "text-foreground/80 hover:bg-muted/60",
+              isActive ? SIDEBAR_ITEM_ACTIVE : SIDEBAR_ITEM_INACTIVE,
             )}
           >
             <Icon className="h-4 w-4 shrink-0" />

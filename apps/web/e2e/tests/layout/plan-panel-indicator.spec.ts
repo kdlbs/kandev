@@ -173,7 +173,7 @@ test.describe("Plan panel auto-open + indicator", () => {
     // otherwise the restore will not bring it back.
     await testPage.waitForFunction(
       () => {
-        const raw = localStorage.getItem("dockview-layout-v2");
+        const raw = localStorage.getItem("dockview-layout-v3");
         return !!raw && raw.includes('"id":"plan"');
       },
       null,

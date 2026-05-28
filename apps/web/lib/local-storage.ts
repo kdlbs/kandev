@@ -260,8 +260,9 @@ export function setFilesPanelScrollPosition(sessionId: string, position: number)
 // new initial-default caps; loading them would resurface the very behaviour
 // users complained about (sidebar "maxed out" by default after upgrade).
 // Bumping the prefix invalidates legacy saves so every env opens at the
-// preset defaults once, then resumes per-env persistence under v2.
-const DOCKVIEW_ENV_LAYOUT_PREFIX = "kandev.dockview.env-layout-v2.";
+// preset defaults once, then resumes per-env persistence. Bumped to v3 to
+// discard layouts captured with the now-removed dockview sidebar column.
+const DOCKVIEW_ENV_LAYOUT_PREFIX = "kandev.dockview.env-layout-v3.";
 
 /**
  * Get the saved dockview layout for a task environment.

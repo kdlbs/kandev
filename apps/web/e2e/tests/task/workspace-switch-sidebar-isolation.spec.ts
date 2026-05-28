@@ -55,13 +55,17 @@ test.describe("Sidebar — cross-workspace isolation", () => {
     await expect(kanban.taskCard(taskA.id)).toBeVisible({ timeout: 10_000 });
     await expect(kanban.taskCard(taskB.id)).not.toBeVisible();
 
-    // --- Switch to workspace B via the display dropdown (SPA, no full reload) ---
-    await testPage.getByTestId("display-button").click();
-    await testPage.getByTestId("workspace-select-trigger").click();
-    await testPage.getByTestId(`workspace-select-item-${workspaceB.id}`).click();
-
-    // Close the dropdown so task cards are interactable.
-    await testPage.keyboard.press("Escape");
+    // --- Switch to workspace B via the sidebar workspace picker ---
+    // The picker (top of the sidebar) is now the only workspace switcher — the
+    // Home display dropdown no longer offers one. In office mode it routes to
+    // /office, but that is a client-side navigation (no full reload), so the
+    // in-memory store must already reflect workspace B with no leaked
+    // workspace-A tasks. We return to the board via the Home nav link, still
+    // without a full reload, to keep the isolation assertions on the kanban.
+    await testPage.getByTestId("sidebar-workspace-trigger").click();
+    await testPage.getByTestId(`sidebar-workspace-item-${workspaceB.id}`).click();
+    await expect(testPage).toHaveURL(/\/office/);
+    await testPage.getByRole("link", { name: "Home", exact: true }).click();
 
     await expect(kanban.taskCard(taskB.id)).toBeVisible({ timeout: 10_000 });
     await expect(kanban.taskCard(taskA.id)).not.toBeVisible();

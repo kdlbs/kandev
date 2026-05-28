@@ -29,6 +29,7 @@ function OfficeTrigger({ collapsed, activeId, activeName }: TriggerProps) {
   return (
     <button
       type="button"
+      data-testid="sidebar-workspace-trigger"
       className={cn(
         "flex items-center gap-2 rounded-md hover:bg-muted/60 cursor-pointer",
         collapsed ? "p-0.5" : "flex-1 min-w-0 px-1.5 py-1",
@@ -56,6 +57,7 @@ function MinimalTrigger({ collapsed, activeName }: TriggerProps) {
   return (
     <button
       type="button"
+      data-testid="sidebar-workspace-trigger"
       className={cn(
         "flex items-center gap-1.5 rounded-md hover:bg-muted/60 cursor-pointer text-foreground/80",
         collapsed
@@ -113,6 +115,7 @@ export function AppSidebarWorkspacePicker({ collapsed }: AppSidebarWorkspacePick
           workspaces.items.map((ws) => (
             <DropdownMenuItem
               key={ws.id}
+              data-testid={`sidebar-workspace-item-${ws.id}`}
               onClick={() => handleSelect(ws.id)}
               className="cursor-pointer gap-2"
             >

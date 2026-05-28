@@ -16,7 +16,11 @@ import { selectActiveSessionsForAgent } from "@/lib/state/slices/session/selecto
 import { AgentAvatar } from "@/app/office/components/agent-avatar";
 import { AgentStatusDot } from "@/app/office/agents/components/agent-status-dot";
 import { LiveAgentIndicator } from "@/app/office/agents/components/live-agent-indicator";
-import { APP_SIDEBAR_SECTION_IDS } from "../app-sidebar-constants";
+import {
+  APP_SIDEBAR_SECTION_IDS,
+  SIDEBAR_ITEM_ACTIVE,
+  SIDEBAR_ITEM_INACTIVE,
+} from "../app-sidebar-constants";
 import { AppSidebarSection } from "../app-sidebar-section";
 
 type AgentsSectionProps = {
@@ -97,7 +101,7 @@ function AgentRow({ agent }: { agent: AgentProfile }) {
       href={href}
       className={cn(
         "flex items-center gap-2.5 px-2.5 py-1.5 text-[13px] font-medium rounded-md cursor-pointer",
-        isActive ? "bg-accent text-foreground" : "text-foreground/80 hover:bg-muted/60",
+        isActive ? SIDEBAR_ITEM_ACTIVE : SIDEBAR_ITEM_INACTIVE,
       )}
     >
       <AgentAvatar role={agent.role} name={agent.name} size="sm" />

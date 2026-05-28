@@ -25,7 +25,7 @@ export function AppSidebarHeader({ collapsed, onToggleCollapse }: AppSidebarHead
               aria-label="Kandev home"
               className="flex h-7 w-7 items-center justify-center rounded-md text-foreground/80 hover:bg-muted/60 cursor-pointer"
             >
-              <span className="text-[15px] font-semibold tracking-tight">K</span>
+              <span className="text-base font-bold tracking-tight">K</span>
             </Link>
           </TooltipTrigger>
           <TooltipContent side="right">Kandev</TooltipContent>
@@ -55,13 +55,11 @@ export function AppSidebarHeader({ collapsed, onToggleCollapse }: AppSidebarHead
         <Link
           href="/"
           className={cn(
-            "flex items-center gap-1.5 min-w-0 cursor-pointer",
+            "flex items-center min-w-0 cursor-pointer",
             "text-foreground hover:text-foreground/80 transition-colors",
           )}
         >
-          <span className="text-[15px] font-semibold tracking-tight leading-none truncate">
-            Kandev
-          </span>
+          <span className="text-base font-bold tracking-tight leading-none truncate">Kandev</span>
         </Link>
         <Tooltip>
           <TooltipTrigger asChild>

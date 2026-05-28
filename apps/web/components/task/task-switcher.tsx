@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useMemo } from "react";
-import { IconChevronDown } from "@tabler/icons-react";
+import { IconChevronRight } from "@tabler/icons-react";
 import {
   DndContext,
   PointerSensor,
@@ -118,16 +118,16 @@ function GroupHeader({
       data-group-label={label}
       className="group/group-header flex w-full items-center gap-1.5 px-2 py-1 cursor-pointer rounded-sm hover:bg-muted/40 transition-colors"
     >
-      <IconChevronDown
-        className={cn(
-          "h-3 w-3 shrink-0 text-muted-foreground/50 transition-transform",
-          isCollapsed && "-rotate-90",
-        )}
-      />
       <span className="flex-1 truncate text-left text-[12px] font-medium text-foreground/65 group-hover/group-header:text-foreground/85 transition-colors">
         {label}
       </span>
       <span className="text-[10px] tabular-nums text-muted-foreground/50">{count}</span>
+      <IconChevronRight
+        className={cn(
+          "h-3 w-3 shrink-0 text-muted-foreground/50 transition-transform",
+          !isCollapsed && "rotate-90",
+        )}
+      />
     </button>
   );
 }

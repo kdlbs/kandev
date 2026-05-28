@@ -16,9 +16,9 @@ import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
 import { stopVscode } from "@/lib/api/domains/vscode-api";
 import { parkUserShell, stopUserShell } from "@/lib/api/domains/user-shell-api";
 
-// v2: bumped alongside DOCKVIEW_ENV_LAYOUT_PREFIX so the no-env fallback
-// also invalidates layouts saved under the previous caps.
-const LAYOUT_STORAGE_KEY = "dockview-layout-v2";
+// v3: bumped alongside DOCKVIEW_ENV_LAYOUT_PREFIX so the no-env fallback
+// also discards layouts captured with the now-removed dockview sidebar column.
+const LAYOUT_STORAGE_KEY = "dockview-layout-v3";
 const terminalTerminateClosePanelIds = new Set<string>();
 
 export function markTerminalPanelTerminateClose(panelId: string): void {

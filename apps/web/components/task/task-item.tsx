@@ -336,7 +336,6 @@ export const TaskItem = memo(function TaskItem({
       className={cn(
         "group relative flex w-full items-start gap-2 py-2 pr-3 text-left text-sm outline-none cursor-pointer",
         "transition-colors duration-75 hover:bg-foreground/[0.05]",
-        isSelected && "bg-primary/10",
         isSubTask ? "pl-8" : "pl-3",
       )}
     >

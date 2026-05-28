@@ -4,10 +4,12 @@ import Link from "next/link";
 import { IconChevronRight } from "@tabler/icons-react";
 import type { Icon as TablerIcon } from "@tabler/icons-react";
 import { useState, type ReactNode } from "react";
+import { Collapsible, CollapsibleContent } from "@kandev/ui/collapsible";
 import { cn } from "@/lib/utils";
+import { SIDEBAR_ITEM_ACTIVE, SIDEBAR_ITEM_INACTIVE } from "../../app-sidebar-constants";
 
-const ACTIVE_CLASS = "bg-accent text-foreground";
-const INACTIVE_CLASS = "text-foreground/80 hover:bg-muted/60";
+const ACTIVE_CLASS = SIDEBAR_ITEM_ACTIVE;
+const INACTIVE_CLASS = SIDEBAR_ITEM_INACTIVE;
 
 type SettingsLeafProps = {
   href: string;
@@ -84,7 +86,7 @@ export function SettingsGroup({
   );
 
   return (
-    <div>
+    <Collapsible open={expanded}>
       <div
         className={cn(
           "flex items-center gap-1 rounded-md",
@@ -120,7 +122,9 @@ export function SettingsGroup({
           />
         </button>
       </div>
-      {expanded && <div className="flex flex-col gap-0.5">{children}</div>}
-    </div>
+      <CollapsibleContent className="sidebar-section-content">
+        <div className="flex flex-col gap-0.5">{children}</div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }

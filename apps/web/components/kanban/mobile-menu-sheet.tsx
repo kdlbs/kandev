@@ -11,9 +11,7 @@ import { TaskSearchInput } from "./task-search-input";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { linkToTasks } from "@/lib/links";
 import type { Repository } from "@/lib/types/http";
-import type { WorkflowsState, WorkspaceState } from "@/lib/state/slices";
-
-type WorkspaceItem = WorkspaceState["items"][number];
+import type { WorkflowsState } from "@/lib/state/slices";
 
 type MobileMenuSheetProps = {
   open: boolean;
@@ -40,9 +38,6 @@ function getMobileViewValue(currentPage: string, kanbanViewMode: string | null):
 }
 
 type MobileDisplayOptionsProps = {
-  activeWorkspaceId: string | null;
-  workspaces: WorkspaceItem[];
-  onWorkspaceChange: (id: string | null) => void;
   activeWorkflowId: string | null;
   workflows: WorkflowsState["items"];
   onWorkflowChange: (id: string | null) => void;
@@ -55,9 +50,6 @@ type MobileDisplayOptionsProps = {
 };
 
 function MobileDisplaySelects({
-  activeWorkspaceId,
-  workspaces,
-  onWorkspaceChange,
   activeWorkflowId,
   workflows,
   onWorkflowChange,
@@ -68,25 +60,6 @@ function MobileDisplaySelects({
 }: Omit<MobileDisplayOptionsProps, "enablePreviewOnClick" | "onTogglePreviewOnClick">) {
   return (
     <>
-      <div className="space-y-2">
-        <label className="text-xs text-muted-foreground">Workspace</label>
-        <Select
-          value={activeWorkspaceId ?? ""}
-          onValueChange={(value) => onWorkspaceChange(value || null)}
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder="Select workspace" />
-          </SelectTrigger>
-          <SelectContent>
-            {workspaces.map((workspace) => (
-              <SelectItem key={workspace.id} value={workspace.id}>
-                {workspace.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
       <div className="space-y-2">
         <label className="text-xs text-muted-foreground">Workflow</label>
         <Select
@@ -268,16 +241,13 @@ export function MobileMenuSheet({
 }: MobileMenuSheetProps) {
   const router = useRouter();
   const {
-    workspaces,
     workflows,
-    activeWorkspaceId,
     activeWorkflowId,
     repositories,
     repositoriesLoading,
     allRepositoriesSelected,
     selectedRepositoryId,
     enablePreviewOnClick,
-    onWorkspaceChange,
     onWorkflowChange,
     onRepositoryChange,
     onTogglePreviewOnClick,
@@ -319,9 +289,6 @@ export function MobileMenuSheet({
           <MobileViewSection viewValue={viewValue} onViewChange={handleViewChange} />
 
           <MobileDisplayOptions
-            activeWorkspaceId={activeWorkspaceId}
-            workspaces={workspaces}
-            onWorkspaceChange={onWorkspaceChange}
             activeWorkflowId={activeWorkflowId}
             workflows={workflows}
             onWorkflowChange={onWorkflowChange}

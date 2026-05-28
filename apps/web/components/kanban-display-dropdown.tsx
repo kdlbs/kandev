@@ -13,9 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { IconAdjustmentsHorizontal } from "@tabler/icons-react";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import type { Repository } from "@/lib/types/http";
-import type { WorkflowsState, WorkspaceState } from "@/lib/state/slices";
-
-type WorkspaceItem = WorkspaceState["items"][number];
+import type { WorkflowsState } from "@/lib/state/slices";
 import type { ComponentProps } from "react";
 
 type KanbanDisplayDropdownProps = {
@@ -29,41 +27,6 @@ function getRepositoryPlaceholder(
   if (repositoriesLoading) return "Loading repositories...";
   if (repositoriesEmpty) return "No repositories";
   return "Select repository";
-}
-
-function WorkspaceSection({
-  activeWorkspaceId,
-  workspaces,
-  onWorkspaceChange,
-}: {
-  activeWorkspaceId: string | null;
-  workspaces: WorkspaceItem[];
-  onWorkspaceChange: (id: string | null) => void;
-}) {
-  return (
-    <div className="space-y-1.5">
-      <DropdownMenuLabel className="px-0 text-foreground">Workspace</DropdownMenuLabel>
-      <Select
-        value={activeWorkspaceId ?? ""}
-        onValueChange={(value) => onWorkspaceChange(value || null)}
-      >
-        <SelectTrigger className="w-full border-border" data-testid="workspace-select-trigger">
-          <SelectValue placeholder="Select workspace" />
-        </SelectTrigger>
-        <SelectContent>
-          {workspaces.map((workspace) => (
-            <SelectItem
-              key={workspace.id}
-              value={workspace.id}
-              data-testid={`workspace-select-item-${workspace.id}`}
-            >
-              {workspace.name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
-  );
 }
 
 function WorkflowSection({
@@ -137,16 +100,13 @@ function RepositorySection({
 
 export function KanbanDisplayDropdown({ triggerSize = "icon" }: KanbanDisplayDropdownProps) {
   const {
-    workspaces,
     workflows,
-    activeWorkspaceId,
     activeWorkflowId,
     repositories,
     repositoriesLoading,
     allRepositoriesSelected,
     selectedRepositoryId,
     enablePreviewOnClick,
-    onWorkspaceChange,
     onWorkflowChange,
     onRepositoryChange,
     onTogglePreviewOnClick,
@@ -168,12 +128,6 @@ export function KanbanDisplayDropdown({ triggerSize = "icon" }: KanbanDisplayDro
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-[280px] p-3">
         <div className="space-y-3">
-          <WorkspaceSection
-            activeWorkspaceId={activeWorkspaceId}
-            workspaces={workspaces}
-            onWorkspaceChange={onWorkspaceChange}
-          />
-          <DropdownMenuSeparator />
           <WorkflowSection
             activeWorkflowId={activeWorkflowId}
             workflows={workflows}

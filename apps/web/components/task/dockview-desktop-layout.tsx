@@ -180,7 +180,13 @@ function useSyncUserDefaultLayout() {
     const state = defaultLayout?.layout as unknown as
       | import("@/lib/state/layout-manager").LayoutState
       | undefined;
-    setUserDefaultLayout(state?.columns ? state : null);
+    // Drop the obsolete "sidebar" column: the dockview-embedded sidebar pane was
+    // retired for the unified AppSidebar, but a default layout saved before that
+    // change still carries it. The default-build path applies this layout
+    // without the restore-time sanitize layer, so an orphaned sidebar column
+    // (its panel component is no longer registered) renders a broken grid.
+    const columns = state?.columns?.filter((c) => c.id !== "sidebar");
+    setUserDefaultLayout(columns && columns.length > 0 ? { ...state, columns } : null);
   }, [savedLayouts, setUserDefaultLayout]);
 }
 
