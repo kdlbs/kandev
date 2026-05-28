@@ -786,6 +786,9 @@
   padding: 0.25rem 0.5rem;
   font-size: 13px;
   vertical-align: top;
+}
+
+.markdown-body td {
   overflow-wrap: anywhere;
   word-break: break-word;
 }
@@ -796,8 +799,7 @@
   white-space: nowrap;
 }
 
-.markdown-body td code,
-.markdown-body th code {
+.markdown-body td code {
   white-space: normal;
   overflow-wrap: anywhere;
 }
