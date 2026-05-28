@@ -23,6 +23,7 @@ function setStore(connectionStatus: "connected" | "disconnected" = "connected") 
     sessionCommits: {
       byEnvironmentId: {} as Record<string, unknown>,
       loading: {} as Record<string, boolean>,
+      refetchTrigger: {} as Record<string, number>,
     },
     connection: { status: connectionStatus },
     setSessionCommits: mockSetSessionCommits,
@@ -130,5 +131,47 @@ describe("useSessionCommits", () => {
   it("does not fetch when sessionId is null", () => {
     renderHook(() => useSessionCommits(null));
     expect(mockRequest).not.toHaveBeenCalled();
+  });
+
+  it("refetches when refetchTrigger bumps without nulling the visible list", async () => {
+    // Seed the store with existing commits so we can assert they survive the
+    // bump. The bug we're guarding against is: a bump clears the list to
+    // undefined, the hook returns `[]`, the Changes panel renders its empty
+    // state, then the new list arrives — a visible flicker.
+    storeState.sessionCommits = {
+      byEnvironmentId: {
+        "sess-1": [{ commit_sha: "old", insertions: 1, deletions: 0 }],
+      },
+      loading: {},
+      refetchTrigger: { "sess-1": 0 },
+    };
+    mockRequest.mockResolvedValueOnce({
+      commits: [{ commit_sha: "new", insertions: 2, deletions: 1 }],
+      ready: true,
+    });
+
+    const { rerender } = renderHook(() => useSessionCommits("sess-1"));
+    // Initial mount: commits is already populated, so no fetch should fire.
+    expect(mockRequest).not.toHaveBeenCalled();
+
+    // Simulate the WS handler bumping the trigger (commits_reset /
+    // branch_switched). Critically, byEnvironmentId stays populated.
+    (storeState.sessionCommits as { refetchTrigger: Record<string, number> }).refetchTrigger = {
+      "sess-1": 1,
+    };
+    rerender();
+
+    await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(1));
+    await waitFor(() => {
+      expect(mockSetSessionCommits).toHaveBeenCalledWith("sess-1", [
+        { commit_sha: "new", insertions: 2, deletions: 1 },
+      ]);
+    });
+
+    // The old list must still be in the store throughout — the hook never
+    // wiped it. Without stale-while-revalidate, the panel would flicker.
+    const byEnv = (storeState.sessionCommits as { byEnvironmentId: Record<string, unknown> })
+      .byEnvironmentId;
+    expect(byEnv["sess-1"]).toEqual([{ commit_sha: "old", insertions: 1, deletions: 0 }]);
   });
 });

@@ -87,7 +87,7 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
   },
   gitStatus: { byEnvironmentId: {}, byEnvironmentRepo: {} },
   environmentIdBySessionId: {},
-  sessionCommits: { byEnvironmentId: {}, loading: {} },
+  sessionCommits: { byEnvironmentId: {}, loading: {}, refetchTrigger: {} },
   contextWindow: { bySessionId: {} },
   agents: { agents: [] },
   availableCommands: { bySessionId: {} },
@@ -199,6 +199,12 @@ function buildSessionCommitActions(set: ImmerSet) {
       set((draft) => {
         const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
         delete draft.sessionCommits.byEnvironmentId[envKey];
+      }),
+    bumpSessionCommitsRefetch: (sessionId: string) =>
+      set((draft) => {
+        const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
+        const prev = draft.sessionCommits.refetchTrigger[envKey] ?? 0;
+        draft.sessionCommits.refetchTrigger[envKey] = prev + 1;
       }),
   };
 }

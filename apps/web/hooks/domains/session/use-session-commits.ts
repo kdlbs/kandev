@@ -21,12 +21,23 @@ export function useSessionCommits(sessionId: string | null) {
     const envKey = state.environmentIdBySessionId[sessionId] ?? sessionId;
     return state.sessionCommits.loading[envKey] ?? false;
   });
+  // Stale-while-revalidate trigger: bumped by commits_reset / branch_switched
+  // WS events. We refetch on change without nulling the visible list, so the
+  // Changes panel keeps showing the previous commits until the new ones land.
+  const refetchTrigger = useAppStore((state) => {
+    if (!sessionId) return 0;
+    const envKey = state.environmentIdBySessionId[sessionId] ?? sessionId;
+    return state.sessionCommits.refetchTrigger[envKey] ?? 0;
+  });
   const setSessionCommits = useAppStore((state) => state.setSessionCommits);
   const setSessionCommitsLoading = useAppStore((state) => state.setSessionCommitsLoading);
   const connectionStatus = useAppStore((state) => state.connection.status);
 
   // Track whether we had commits before (to detect clears)
   const prevCommitsRef = useRef<SessionCommit[] | undefined>(undefined);
+  // Track the last refetch trigger we acted on, so a bump triggers exactly one
+  // refetch rather than re-firing on every render.
+  const prevRefetchTriggerRef = useRef<number>(refetchTrigger);
   // Retry timer for the not-ready case — agentctl recovers asynchronously
   // after a backend restart, so the first fetch may land before the workspace
   // execution has been ensured. Without a retry the store would be stuck on
@@ -83,23 +94,29 @@ export function useSessionCommits(sessionId: string | null) {
     }
   }, [sessionId, setSessionCommits, setSessionCommitsLoading]);
 
-  // Fetch commits on mount or when commits are cleared (e.g., after reset)
+  // Fetch commits when:
+  //  1. commits is undefined (initial load or after an explicit clear)
+  //  2. the refetch trigger was bumped (commits_reset / branch_switched)
+  //
+  // The trigger path replaces the old "clear then refetch from undefined"
+  // pattern: it keeps the previous commits in the store so the Changes panel
+  // doesn't flicker through its empty state while the refetch is in flight
+  // (stale-while-revalidate, matching how useCumulativeDiff works).
   useEffect(() => {
     if (connectionStatus !== "connected") return;
     if (!sessionId) return;
 
-    // Fetch if:
-    // 1. commits is undefined (initial load or after clear)
-    // 2. commits was previously set but is now undefined (reset scenario)
-    const wasCleared = prevCommitsRef.current !== undefined && commits === undefined;
     const needsInitialFetch = commits === undefined;
+    const wasCleared = prevCommitsRef.current !== undefined && commits === undefined;
+    const triggerBumped = refetchTrigger !== prevRefetchTriggerRef.current;
 
-    if (needsInitialFetch || wasCleared) {
+    if (needsInitialFetch || wasCleared || triggerBumped) {
       fetchCommits();
     }
 
     prevCommitsRef.current = commits;
-  }, [sessionId, commits, fetchCommits, connectionStatus]);
+    prevRefetchTriggerRef.current = refetchTrigger;
+  }, [sessionId, commits, refetchTrigger, fetchCommits, connectionStatus]);
 
   // Cancel any in-flight retry on unmount, when the session changes, or when
   // the WS disconnects — a retry firing against a disconnected client would
