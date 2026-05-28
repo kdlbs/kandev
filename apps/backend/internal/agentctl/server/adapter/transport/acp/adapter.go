@@ -2051,7 +2051,7 @@ func (a *Adapter) handlePermissionRequest(ctx context.Context, req *PermissionRe
 	// Only emit a synthetic tool_call event if no ToolCall notification preceded this.
 	// waitForActiveToolCall bounds the race window between a SessionUpdate.ToolCall
 	// notification and a same-id request_permission dispatched on separate goroutines.
-	alreadyTracked := a.waitForActiveToolCall(req.ToolCallID, syntheticToolCallRaceWindow)
+	alreadyTracked := a.waitForActiveToolCall(ctx, req.ToolCallID, syntheticToolCallRaceWindow)
 
 	if !alreadyTracked {
 		toolCallEvent := AgentEvent{

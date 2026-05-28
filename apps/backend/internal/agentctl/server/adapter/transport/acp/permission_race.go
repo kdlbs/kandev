@@ -1,6 +1,9 @@
 package acp
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // syntheticToolCallRaceWindow bounds how long handlePermissionRequest waits
 // for a concurrently-dispatched ToolCall notification to populate
@@ -14,7 +17,9 @@ const syntheticToolCallRaceWindow = 100 * time.Millisecond
 // small increments, and returns true if the entry appears within timeout.
 // Returns false when the wait expires without the entry materializing — the
 // expected outcome when the agent really did skip the tool_call notification.
-func (a *Adapter) waitForActiveToolCall(toolCallID string, timeout time.Duration) bool {
+// Honors ctx so a cancelled session aborts the poll loop immediately rather
+// than blocking the handler for the full timeout window.
+func (a *Adapter) waitForActiveToolCall(ctx context.Context, toolCallID string, timeout time.Duration) bool {
 	const pollInterval = 10 * time.Millisecond
 	deadline := time.Now().Add(timeout)
 	for {
@@ -27,6 +32,10 @@ func (a *Adapter) waitForActiveToolCall(toolCallID string, timeout time.Duration
 		if time.Now().After(deadline) {
 			return false
 		}
-		time.Sleep(pollInterval)
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(pollInterval):
+		}
 	}
 }

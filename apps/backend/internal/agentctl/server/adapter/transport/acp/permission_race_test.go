@@ -8,6 +8,30 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
+// TestWaitForActiveToolCall_ReturnsOnContextCancel ensures a cancelled session
+// breaks out of the poll loop immediately instead of blocking the handler
+// until the timeout window expires.
+func TestWaitForActiveToolCall_ReturnsOnContextCancel(t *testing.T) {
+	a := newTestAdapter()
+	ctx, cancel := context.WithCancel(t.Context())
+
+	go func() {
+		time.Sleep(5 * time.Millisecond)
+		cancel()
+	}()
+
+	start := time.Now()
+	tracked := a.waitForActiveToolCall(ctx, "tool-1", time.Second)
+	elapsed := time.Since(start)
+
+	if tracked {
+		t.Fatalf("expected waitForActiveToolCall to return false on cancellation, got true")
+	}
+	if elapsed >= 200*time.Millisecond {
+		t.Errorf("waitForActiveToolCall did not honor cancel: elapsed=%v", elapsed)
+	}
+}
+
 // TestHandlePermissionRequest_NoDuplicateWhenToolCallNotificationLanded verifies
 // the activeToolCalls check suppresses the synthetic tool_call emit when a
 // SessionUpdate.ToolCall has already populated the map. Pre-existing guard;
@@ -16,7 +40,7 @@ func TestHandlePermissionRequest_NoDuplicateWhenToolCallNotificationLanded(t *te
 	a := newTestAdapter()
 	a.activeToolCalls["tool-1"] = &streams.NormalizedPayload{}
 
-	_, _ = a.handlePermissionRequest(context.Background(), &PermissionRequest{
+	_, _ = a.handlePermissionRequest(t.Context(), &PermissionRequest{
 		SessionID:  "sess-1",
 		ToolCallID: "tool-1",
 		Title:      "Kandev: List Workspaces",
@@ -46,7 +70,7 @@ func TestHandlePermissionRequest_WaitsForRacingToolCallNotification(t *testing.T
 		a.mu.Unlock()
 	}()
 
-	_, _ = a.handlePermissionRequest(context.Background(), &PermissionRequest{
+	_, _ = a.handlePermissionRequest(t.Context(), &PermissionRequest{
 		SessionID:  "sess-1",
 		ToolCallID: "tool-1",
 		Title:      "Kandev: List Workspaces",
@@ -69,7 +93,7 @@ func TestHandlePermissionRequest_EmitsSyntheticAfterTimeout(t *testing.T) {
 	a := newTestAdapter()
 
 	start := time.Now()
-	_, _ = a.handlePermissionRequest(context.Background(), &PermissionRequest{
+	_, _ = a.handlePermissionRequest(t.Context(), &PermissionRequest{
 		SessionID:  "sess-1",
 		ToolCallID: "tool-1",
 		Title:      "Kandev: List Workspaces",
