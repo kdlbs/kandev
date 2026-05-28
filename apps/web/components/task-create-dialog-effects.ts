@@ -2,57 +2,30 @@
 
 import { useEffect, useRef } from "react";
 import type { Repository, Executor } from "@/lib/types/http";
-import type { AgentProfileOption } from "@/lib/state/slices";
 import { DEFAULT_LOCAL_EXECUTOR_TYPE } from "@/lib/utils";
 import { useToast } from "@/components/toast-provider";
 import {
   discoverRepositoriesAction,
   getLocalRepositoryStatusAction,
 } from "@/app/actions/workspaces";
-import { getLocalStorage } from "@/lib/local-storage";
-import { STORAGE_KEYS } from "@/lib/settings/constants";
 import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
 import { fetchRepoBranches, fetchPRInfo } from "@/lib/api/domains/github-api";
+import { getLocalStorage } from "@/lib/local-storage";
+import { STORAGE_KEYS } from "@/lib/settings/constants";
 import type {
   DialogFormState,
   StoreSelections,
   TaskCreateEffectsArgs,
 } from "@/components/task-create-dialog-types";
+import {
+  useAgentProfileAutopickEffect,
+  useWorkflowAgentProfileEffect,
+} from "@/components/task-create-dialog-autopick";
 
-export function useWorkflowAgentProfileEffect(
-  fs: DialogFormState,
-  workflows: Array<{ id: string; agent_profile_id?: string }>,
-  agentProfiles: AgentProfileOption[],
-) {
-  const { selectedWorkflowId, setAgentProfileId, setWorkflowAgentProfileId } = fs;
-  useEffect(() => {
-    if (!selectedWorkflowId) {
-      setWorkflowAgentProfileId("");
-      return;
-    }
-    const workflow = workflows.find((w) => w.id === selectedWorkflowId);
-    if (workflow?.agent_profile_id) {
-      // Always lock the selector when the workflow specifies an agent profile.
-      // This prevents the race condition where agentProfiles hasn't loaded yet.
-      setWorkflowAgentProfileId(workflow.agent_profile_id);
-      // Only set the agentProfileId once the profile is confirmed available.
-      const profileExists = agentProfiles.some((p) => p.id === workflow.agent_profile_id);
-      if (profileExists) {
-        setAgentProfileId(workflow.agent_profile_id);
-      }
-    } else {
-      setWorkflowAgentProfileId("");
-      // Restore the user's last-used agent profile when unlocking, but only
-      // if it still exists. A clean DB mints fresh UUIDs for the same agents,
-      // so the previous run's id never matches and would otherwise poison
-      // the dialog into "No compatible agent profiles" because
-      // useDefaultSelectionsEffect skips when agentProfileId is truthy.
-      const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, null);
-      const isValidLastId = Boolean(lastId && agentProfiles.some((p) => p.id === lastId));
-      setAgentProfileId(isValidLastId && lastId ? lastId : "");
-    }
-  }, [selectedWorkflowId, workflows, agentProfiles, setAgentProfileId, setWorkflowAgentProfileId]);
-}
+// Re-export autopick hooks for callers that imported them from this module.
+export { useWorkflowAgentProfileEffect };
+// Also re-exported for the test file, which expects the symbol to live here.
+export { decideAgentProfileAutopick } from "@/components/task-create-dialog-autopick";
 
 export function useWorkflowStepsEffect(fs: DialogFormState, workflowId: string | null) {
   const { selectedWorkflowId, setFetchedSteps } = fs;
@@ -254,54 +227,9 @@ export function useDefaultSelectionsEffect(
   sel: StoreSelections,
   workflows: Array<{ id: string; agent_profile_id?: string }>,
 ) {
-  const { agentProfiles, executors, workspaceDefaults } = sel;
-  const {
-    agentProfileId,
-    workflowAgentProfileId,
-    selectedWorkflowId,
-    executorId,
-    executorProfileId,
-    setAgentProfileId,
-    setExecutorId,
-    setExecutorProfileId,
-    noRepository,
-  } = fs;
-  useEffect(() => {
-    // Check synchronously whether the selected workflow has an agent override.
-    // This avoids a race condition where workflowAgentProfileId state hasn't
-    // been committed yet by the workflow effect running in the same cycle.
-    const workflowHasAgent = selectedWorkflowId
-      ? workflows.some((w) => w.id === selectedWorkflowId && w.agent_profile_id)
-      : false;
-    if (
-      !open ||
-      agentProfileId ||
-      workflowAgentProfileId ||
-      workflowHasAgent ||
-      agentProfiles.length === 0
-    )
-      return;
-    const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, null);
-    if (lastId && agentProfiles.some((p: AgentProfileOption) => p.id === lastId)) {
-      void Promise.resolve().then(() => setAgentProfileId(lastId));
-      return;
-    }
-    const defId = workspaceDefaults?.default_agent_profile_id ?? null;
-    if (defId && agentProfiles.some((p: AgentProfileOption) => p.id === defId)) {
-      void Promise.resolve().then(() => setAgentProfileId(defId));
-      return;
-    }
-    void Promise.resolve().then(() => setAgentProfileId(agentProfiles[0].id));
-  }, [
-    open,
-    agentProfileId,
-    workflowAgentProfileId,
-    selectedWorkflowId,
-    workflows,
-    agentProfiles,
-    workspaceDefaults,
-    setAgentProfileId,
-  ]);
+  const { executors, workspaceDefaults } = sel;
+  const { executorId, executorProfileId, setExecutorId, setExecutorProfileId, noRepository } = fs;
+  useAgentProfileAutopickEffect(fs, open, sel, workflows);
 
   useEffect(() => {
     if (!open || executorId || executors.length === 0) return;
@@ -541,15 +469,29 @@ export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
 
 export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreateEffectsArgs) {
   const { open, workspaceId, workflowId, repositories, repositoriesLoading } = args;
-  const { agentProfiles, executors, workspaceDefaults, toast, workflows, isLocalExecutor } = args;
+  const {
+    agentProfiles,
+    compatibleAgentProfiles,
+    authLoaded,
+    executors,
+    workspaceDefaults,
+    toast,
+    workflows,
+    isLocalExecutor,
+  } = args;
   useWorkflowStepsEffect(fs, workflowId);
-  useWorkflowAgentProfileEffect(fs, workflows, agentProfiles);
+  useWorkflowAgentProfileEffect(fs, workflows, agentProfiles, compatibleAgentProfiles);
   useRepositoryAutoSelectEffect(fs, open, workspaceId, repositories);
   useDiscoverReposEffect(fs, open, workspaceId, repositoriesLoading, toast);
   useBranchAutoSelectEffect(fs);
   useCurrentLocalBranchEffect(fs, open, workspaceId, repositories);
   useResetBranchOnLocalSwitchEffect(fs, isLocalExecutor, args.preserveBranch);
-  useDefaultSelectionsEffect(fs, open, { agentProfiles, executors, workspaceDefaults }, workflows);
+  useDefaultSelectionsEffect(
+    fs,
+    open,
+    { agentProfiles, compatibleAgentProfiles, authLoaded, executors, workspaceDefaults },
+    workflows,
+  );
   useGitHubUrlBranchesEffect(fs, open);
 }
 

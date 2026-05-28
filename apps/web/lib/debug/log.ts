@@ -46,6 +46,66 @@
  *     [file-browser:load]     tree loader — init / ready-flip / start / retry / gave-up
  *     [file-browser:changes]  session.workspace.file.changes events + folder refresh
  *
+ *   Task-create dialog (bug: "No compatible agent profiles for <executor>")
+ *     [executor-compat:specs]  remote-auth catalog fetch (count + agent ids)
+ *     [executor-compat]        per-agent compat decision: ok + reason
+ *                              (no-spec / no-creds / files-match / env-secret / …)
+ *     [executor-compat:autopick]
+ *                              useDefaultSelectionsEffect decision per fire:
+ *                              skip/defer/pick + reason + which profile was set.
+ *                              Triage path when "No compatible" lingers after
+ *                              specs land — diff the decision sequence against
+ *                              the catalog log to localise the culprit.
+ *     [executor-compat:workflow-autopick]
+ *                              useWorkflowAgentProfileEffect decision per fire:
+ *                              no-workflow / locked / locked-missing /
+ *                              workflow-no-override. The last branch restores
+ *                              localStorage `lastId` against the unfiltered
+ *                              `agentProfiles` — set_to of an executor-incompatible
+ *                              id is the smoking gun for that race.
+ *
+ *   Dockview column widths (bug: sidebar/center/right widths wrong during
+ *   env-prepare and on first task switch with cleared localStorage)
+ *     [dockview:widths]       Per-event width-pipeline snapshots:
+ *                              build-default-{entry,done}     first paint / reset
+ *                              env-switch-{resize,resize-col,done}
+ *                                                              cross-task switch
+ *                              container-resize               DOM ResizeObserver fired
+ *                              sash-drag-end                  user-released sash
+ *                              store-sync                     live widths → store pinnedWidths
+ *                              enforce-restore                target rewind via resizeView
+ *                              Snapshot format (formatWidthsSnapshot):
+ *                                L=240 C=842 R=320 cols=3 api=1402x900 tgt=L240/R320
+ *                              `tgt=` is the pinned-targets map (drives the
+ *                              enforcement loop); mismatch with L/R is the
+ *                              smoking gun for a stale-target bug.
+ *
+ *   Chat panel rendering (bug: remote-executor agent reply persisted but UI
+ *   doesn't render it until the user refreshes the page)
+ *     [chat:virtuoso]                VirtuosoMessageList render-branch snapshots
+ *                                    (fallback vs virtuoso) and VirtuosoBody mount —
+ *                                    captures itemCount / firstItemIndex /
+ *                                    initialTopMostItemIndex at the moment Virtuoso
+ *                                    first anchors its scroll. If itemCount at
+ *                                    `mount` is < the final item count, Virtuoso
+ *                                    anchored on an earlier item and the new last
+ *                                    item lands below the fold.
+ *     [chat:virtuoso:scrollParent]   `useVisibleScrollParent` lifecycle —
+ *                                    ref-callback-ready / ref-callback-defer /
+ *                                    ro-attach / ro-ready. A long delay between
+ *                                    items growing and `ro-ready` firing is the
+ *                                    smoking gun for the mount-too-early race.
+ *     [chat:virtuoso:firstIndex]     `useStableFirstItemIndex` transitions —
+ *                                    init + key-list deltas. A non-monotonic
+ *                                    `delta` between two transitions means
+ *                                    Virtuoso saw the keyspace shift in a way
+ *                                    that throws off scroll anchoring.
+ *     [chat:prepare-progress]        PrepareProgress status / autoExpand / expanded
+ *                                    transitions per session. Status stuck on
+ *                                    "preparing" with `expanded=true` while
+ *                                    Virtuoso is mounted explains the
+ *                                    agent-reply-pushed-below-fold scenario.
+ *
  *   Other
  *     [ws:connection]         WS hook mount + status transitions
  *     [dockview:*]            layout restore / save / env-switch / session-tabs / task-select

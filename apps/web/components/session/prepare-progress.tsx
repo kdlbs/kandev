@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   IconCheck,
   IconX,
@@ -17,10 +17,13 @@ import { cn } from "@/lib/utils";
 import { stripAnsi } from "@/lib/utils/ansi";
 import { isSetupScriptMessage } from "@/hooks/use-processed-messages";
 import type { Message } from "@/lib/types/http";
+import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
 import type {
   PrepareStepInfo,
   SessionPrepareState,
 } from "@/lib/state/slices/session-runtime/types";
+
+const debug = createDebugLogger("chat:prepare-progress");
 
 function formatStepDuration(startedAt?: string, endedAt?: string): string | null {
   if (!startedAt || !endedAt) return null;
@@ -411,6 +414,44 @@ function SessionInfo({ sessionId }: { sessionId: string }) {
   );
 }
 
+type PrepareSnapshot = {
+  status: string;
+  autoExpand: boolean;
+  expanded: boolean;
+  visibleSteps: number;
+  hasPrepareState: boolean;
+};
+
+function prepareSnapshotChanged(prev: PrepareSnapshot | null, next: PrepareSnapshot): boolean {
+  if (!prev) return true;
+  return (
+    prev.status !== next.status ||
+    prev.autoExpand !== next.autoExpand ||
+    prev.expanded !== next.expanded ||
+    prev.visibleSteps !== next.visibleSteps ||
+    prev.hasPrepareState !== next.hasPrepareState
+  );
+}
+
+function logPrepareSnapshotChange(
+  prev: PrepareSnapshot | null,
+  next: PrepareSnapshot,
+  sessionId: string,
+  rawPrepareStatus: string,
+  sessionState: string,
+) {
+  debug(prev ? "transition" : "init", {
+    sessionId,
+    ...next,
+    prevStatus: prev?.status ?? "-",
+    prevAutoExpand: prev?.autoExpand ?? null,
+    prevExpanded: prev?.expanded ?? null,
+    prevVisibleSteps: prev?.visibleSteps ?? -1,
+    rawPrepareStatus,
+    sessionState,
+  });
+}
+
 export function PrepareProgress({ sessionId }: PrepareProgressProps) {
   const { status, prepareState } = usePrepareStatus(sessionId);
   const session = useAppStore((state) => state.taskSessions.items[sessionId]);
@@ -419,6 +460,31 @@ export function PrepareProgress({ sessionId }: PrepareProgressProps) {
   // warning context stays open by default so the user sees what's happening.
   const autoExpand = status !== "completed";
   const [expanded, setExpanded] = useExpandedFlag(sessionId, autoExpand);
+
+  // Track status/expand transitions over the panel's lifetime — the
+  // remote-executor bug suspects the panel staying expanded (tall) while the
+  // env is still "preparing" combined with a Virtuoso initial-scroll race.
+  const prevSnapshotRef = useRef<PrepareSnapshot | null>(null);
+  useEffect(() => {
+    if (!IS_DEBUG) return;
+    const snapshot: PrepareSnapshot = {
+      status,
+      autoExpand,
+      expanded,
+      visibleSteps: prepareState ? prepareState.steps.filter(isVisibleStep).length : 0,
+      hasPrepareState: Boolean(prepareState),
+    };
+    const prev = prevSnapshotRef.current;
+    if (!prepareSnapshotChanged(prev, snapshot)) return;
+    logPrepareSnapshotChange(
+      prev,
+      snapshot,
+      sessionId,
+      prepareState?.status ?? "-",
+      session?.state ?? "-",
+    );
+    prevSnapshotRef.current = snapshot;
+  }, [sessionId, status, autoExpand, expanded, prepareState, session?.state]);
 
   if (!prepareState) return null;
 

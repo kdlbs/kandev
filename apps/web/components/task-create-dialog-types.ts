@@ -61,6 +61,26 @@ export type TaskCreateDialogInitialValues = {
 
 export type StoreSelections = {
   agentProfiles: AgentProfileOption[];
+  /**
+   * Subset of `agentProfiles` that can run on the currently-selected executor
+   * profile (`useExecutorProfileCompat`). Drives auto-selection in
+   * `useDefaultSelectionsEffect` so a previously-used profile that's
+   * incompatible with the current executor (e.g. Claude profile + Sprites)
+   * doesn't get silently restored and trip the "No compatible" empty state.
+   *
+   * Equal to `agentProfiles` until the executor profile + auth-spec catalog
+   * have loaded — read together with `authLoaded` to know which case applies.
+   */
+  compatibleAgentProfiles: AgentProfileOption[];
+  /**
+   * True once the remote-auth catalog has been fetched. Until then,
+   * `compatibleAgentProfiles` is just `agentProfiles` (no filter applied), so
+   * auto-pick must wait — otherwise the first render restores a lastId that
+   * looks valid against the unfiltered list, the specs land milliseconds
+   * later, and `noCompatibleAgent` flips true via the
+   * "selected-not-in-compatible" branch.
+   */
+  authLoaded: boolean;
   executors: Executor[];
   workspaceDefaults: Workspace | null | undefined;
 };
@@ -89,6 +109,10 @@ export type DialogComputedValues = {
   selectedExecutorProfileName: string | null;
   /** True when an executor profile is selected and no agent profile is compatible with it. */
   noCompatibleAgent: boolean;
+  /** Subset of agent profiles that pass the executor's auth-credential check. See `StoreSelections.compatibleAgentProfiles`. */
+  compatibleAgentProfiles: AgentProfileOption[];
+  /** True once the remote-auth catalog has been fetched. See `StoreSelections.authLoaded`. */
+  authLoaded: boolean;
 };
 
 export type DialogComputedArgs = {
@@ -117,6 +141,8 @@ export type TaskCreateEffectsArgs = {
   repositories: Repository[];
   repositoriesLoading: boolean;
   agentProfiles: AgentProfileOption[];
+  compatibleAgentProfiles: AgentProfileOption[];
+  authLoaded: boolean;
   executors: Executor[];
   workspaceDefaults: Workspace | null | undefined;
   toast: ReturnType<typeof useToast>["toast"];

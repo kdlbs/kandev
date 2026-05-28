@@ -56,7 +56,16 @@ func (s *Service) dispatchWatcherEvent(ctx context.Context, integration string, 
 		s.logger.Warn(fmt.Sprintf("issue task creator not configured, skipping %s task creation", integration))
 		return
 	}
+	// Capture the coordinator pointer locally. issueTaskCreator is set before
+	// initWatcherCoordinator in SetIssueTaskCreator, so a concurrent bus event
+	// could otherwise see issueTaskCreator non-nil while watcherCoordinator is
+	// still nil and crash on the goroutine dispatch below.
+	coordinator := s.watcherCoordinator
+	if coordinator == nil {
+		s.logger.Warn(fmt.Sprintf("watcher coordinator not configured, skipping %s task creation", integration))
+		return
+	}
 	// Detach from cancellation but keep request-scoped values (tracing, etc.):
 	// the bus delivery context may be cancelled before task creation finishes.
-	go s.watcherCoordinator.Dispatch(context.WithoutCancel(ctx), src, evt)
+	go coordinator.Dispatch(context.WithoutCancel(ctx), src, evt)
 }
