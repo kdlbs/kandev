@@ -1259,7 +1259,7 @@ func (s *Service) autoStartStepPrompt(
 			return nil
 		}
 
-		if !isAgentPromptInProgressError(err) && !isTransientPromptError(err) && !isSessionResetInProgressError(err) {
+		if !isSessionBusyError(err) && !isTransientPromptError(err) && !isSessionResetInProgressError(err) {
 			requeueTaken()
 			return err
 		}

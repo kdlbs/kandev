@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -60,6 +61,34 @@ func TestPromptTask_IdleSession_IsPromptable(t *testing.T) {
 	// The prompt was forwarded to the (post-resume) live agent.
 	if len(agentMgr.capturedPrompts) != 1 {
 		t.Fatalf("expected one captured prompt, got %d", len(agentMgr.capturedPrompts))
+	}
+}
+
+// TestIsSessionBusyError pins down the requeue umbrella: STARTING / CREATED /
+// RUNNING all need to come back true so executeQueuedMessage and the auto-start
+// loop in event_handlers_workflow.go requeue rather than drop. Without this
+// helper, splitting ErrAgentPromptInProgress and ErrSessionNotPromptable
+// would silently lose queued messages that hit a session mid-startup.
+func TestIsSessionBusyError(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"unrelated", errors.New("something else"), false},
+		{"in-progress sentinel", ErrAgentPromptInProgress, true},
+		{"wrapped in-progress", fmt.Errorf("outer: %w", ErrAgentPromptInProgress), true},
+		{"not-promptable sentinel", ErrSessionNotPromptable, true},
+		{"wrapped not-promptable", fmt.Errorf("outer: %w", ErrSessionNotPromptable), true},
+		{"reset is NOT busy", ErrSessionResetInProgress, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isSessionBusyError(tc.err); got != tc.want {
+				t.Errorf("isSessionBusyError(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -134,9 +163,11 @@ func TestEnsureSessionRunning_IdleSessionTriggersResume(t *testing.T) {
 
 	// Mock launch: report success and capture the call so the test can confirm
 	// the resume path triggered. isAgentRunning starts false (true IDLE shape).
-	// We flip session→WAITING_FOR_INPUT in a goroutine AFTER LaunchAgent so it
-	// happens after ResumeSession's persistResumeState (which forces STARTING).
-	// waitForSessionReady polls every 500ms — a short delay is enough.
+	// After LaunchAgent returns, ResumeSession's persistResumeState forces the
+	// session into STARTING; we then need to flip to WAITING_FOR_INPUT so the
+	// downstream waitForSessionReady poll exits. We watch for STARTING to
+	// appear (deterministic — no time.Sleep race against persistResumeState)
+	// then flip, mirroring the real AgentBootReady → handleAgentBootReady flow.
 	launchCalled := make(chan struct{}, 1)
 	agentMgr := &mockAgentManager{
 		isAgentRunning:         false,
@@ -147,15 +178,18 @@ func TestEnsureSessionRunning_IdleSessionTriggersResume(t *testing.T) {
 			default:
 			}
 			go func(sessID string) {
-				// Wait long enough for persistResumeState (sets STARTING) to
-				// land, then flip to WAITING_FOR_INPUT to mirror the
-				// AgentBootReady → handleAgentBootReady flow.
-				time.Sleep(50 * time.Millisecond)
-				sess, err := repo.GetTaskSession(context.Background(), sessID)
-				if err == nil && sess != nil {
-					sess.State = models.TaskSessionStateWaitingForInput
-					sess.UpdatedAt = time.Now().UTC()
-					_ = repo.UpdateTaskSession(context.Background(), sess)
+				// Poll until we observe STARTING (persistResumeState committed)
+				// then flip — guarantees ordering without a hardcoded sleep.
+				deadline := time.Now().Add(5 * time.Second)
+				for time.Now().Before(deadline) {
+					sess, err := repo.GetTaskSession(context.Background(), sessID)
+					if err == nil && sess != nil && sess.State == models.TaskSessionStateStarting {
+						sess.State = models.TaskSessionStateWaitingForInput
+						sess.UpdatedAt = time.Now().UTC()
+						_ = repo.UpdateTaskSession(context.Background(), sess)
+						return
+					}
+					time.Sleep(5 * time.Millisecond)
 				}
 			}(req.SessionID)
 			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-resumed-1"}, nil

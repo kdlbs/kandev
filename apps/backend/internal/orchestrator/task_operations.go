@@ -50,6 +50,22 @@ func isAgentPromptInProgressError(err error) bool {
 	return err != nil && errors.Is(err, ErrAgentPromptInProgress)
 }
 
+// isSessionBusyError reports whether the session is in a state where a queued
+// or auto-started prompt should be retried later rather than dropped. Covers
+// both "the agent is mid-turn" (ErrAgentPromptInProgress, RUNNING) and "the
+// session isn't yet ready to accept input" (ErrSessionNotPromptable —
+// STARTING, CREATED, FAILED, CANCELLED). The pre-PR code path collapsed both
+// into ErrAgentPromptInProgress; this helper preserves the requeue behaviour
+// after the error split so queued messages targeting a session that is
+// briefly STARTING/CREATED don't get silently dropped (see TODO about the
+// missing dead-letter queue in executeQueuedMessage).
+func isSessionBusyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, ErrAgentPromptInProgress) || errors.Is(err, ErrSessionNotPromptable)
+}
+
 func isSessionResetInProgressError(err error) bool {
 	return err != nil && errors.Is(err, ErrSessionResetInProgress)
 }
