@@ -37,6 +37,7 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"kandev-mcp-permission":   scenarioKandevMCPPermission,
 	"review-cumulative-setup": scenarioReviewCumulativeSetup,
 	"symlink-file-setup":      scenarioSymlinkFileSetup,
+	"markdown-table":          scenarioMarkdownTable,
 }
 
 // emitPredefinedScenario dispatches to a named e2e scenario.
@@ -812,4 +813,22 @@ func makeGitRunner(wd string) func(args ...string) error {
 // contextWithTimeout creates a context with timeout in seconds.
 func contextWithTimeout(seconds int) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), time.Duration(seconds)*time.Second)
+}
+
+// scenarioMarkdownTable: emits a dense label/value markdown table modeled on a
+// real agent bug-report summary. The table has narrow header labels in column 1
+// and long inline-code identifiers in column 2 — the shape that previously
+// caused header words to wrap character-by-character ("Failin g test") because
+// the value column starved the label column.
+func scenarioMarkdownTable(e *emitter) {
+	fixedDelay(100)
+	e.text("Pushed.\n\n" +
+		"## Summary\n\n" +
+		"| | |\n" +
+		"|---|---|\n" +
+		"| **Failing test** | `TestHandleAgentBootReady_DrainsOrphanedQueuedMessage/already_WAITING_FOR_INPUT_(boot_raced_persistResumeState)` |\n" +
+		"| **Symptom** | `session.State = \"RUNNING\", want WAITING_FOR_INPUT` |\n" +
+		"| **Root cause** | Pre-existing race, not introduced by this PR. `handleAgentBootReady` synchronously flips state to `WAITING_FOR_INPUT` then spawns a goroutine that calls `PromptTask` → flips state to `RUNNING`. The test asserted on `WAITING_FOR_INPUT` immediately after the handler returned — on faster CI scheduling the goroutine wins the race. The kandev-ci container apparently schedules tighter than the github-hosted ubuntu, so it loses where the previous env got lucky. |\n" +
+		"| **Fix** | Cherry-picked `b8d06ea8 test(backend): fix race in TestHandleAgentBootReady_DrainsOrphanedQueuedMessage` from `feature/subtask-with-repo-se-vhz` (a parallel branch that already addressed this). The test now accepts either `WAITING_FOR_INPUT` or `RUNNING` — both prove the boot-ready flip landed and rule out the original `STARTING + queue still full` regression. |\n" +
+		"| **Local verification** | `go test -race -count=5` → 5/5 PASS. |\n")
 }

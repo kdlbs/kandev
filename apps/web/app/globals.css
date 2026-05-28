@@ -777,6 +777,7 @@
   border-collapse: collapse;
   width: 100%;
   margin: 0.75rem 0;
+  table-layout: auto;
 }
 
 .markdown-body th,
@@ -784,11 +785,21 @@
   border: 1px solid var(--border);
   padding: 0.25rem 0.5rem;
   font-size: 13px;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .markdown-body th {
   background: var(--muted);
   font-weight: 600;
+  white-space: nowrap;
+}
+
+.markdown-body td code,
+.markdown-body th code {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .markdown-body thead {
