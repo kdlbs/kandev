@@ -2049,12 +2049,9 @@ func (a *Adapter) handlePermissionRequest(ctx context.Context, req *PermissionRe
 	}
 
 	// Only emit a synthetic tool_call event if no ToolCall notification preceded this.
-	// When a ToolCall notification exists (tracked in activeToolCalls), the message
-	// was already created by convertToolCallUpdate → handleToolCallEvent.
-	// Emitting a second tool_call for the same ID creates duplicate messages in the UI.
-	a.mu.RLock()
-	_, alreadyTracked := a.activeToolCalls[req.ToolCallID]
-	a.mu.RUnlock()
+	// waitForActiveToolCall bounds the race window between a SessionUpdate.ToolCall
+	// notification and a same-id request_permission dispatched on separate goroutines.
+	alreadyTracked := a.waitForActiveToolCall(req.ToolCallID, syntheticToolCallRaceWindow)
 
 	if !alreadyTracked {
 		toolCallEvent := AgentEvent{
