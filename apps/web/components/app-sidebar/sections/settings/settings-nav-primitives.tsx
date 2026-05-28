@@ -27,7 +27,6 @@ function clampDepth(depth: number, max: number): number {
   return depth;
 }
 
-/** A clickable link row inside the Settings tree. */
 export function SettingsLeaf({ href, label, icon: Icon, isActive, depth = 0 }: SettingsLeafProps) {
   return (
     <Link
@@ -45,11 +44,9 @@ export function SettingsLeaf({ href, label, icon: Icon, isActive, depth = 0 }: S
 }
 
 type SettingsGroupProps = {
-  /** Group toggle label. */
   label: string;
-  /** Optional leading icon. */
   icon?: TablerIcon;
-  /** When the group itself has a destination, the toggle is also a link. */
+  /** When the group itself has a destination, the label area is also a link. */
   href?: string;
   isActive?: boolean;
   defaultExpanded?: boolean;
@@ -57,10 +54,6 @@ type SettingsGroupProps = {
   children: ReactNode;
 };
 
-/**
- * Collapsible nested group. Toggling the chevron expands/collapses children;
- * if `href` is given, clicking the label area navigates to that route.
- */
 export function SettingsGroup({
   label,
   icon: Icon,
@@ -71,8 +64,15 @@ export function SettingsGroup({
   children,
 }: SettingsGroupProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
-
   const paddingClass = GROUP_DEPTH_PADDING[clampDepth(depth, GROUP_DEPTH_PADDING.length - 1)];
+  const toggle = () => setExpanded((v) => !v);
+
+  const labelInner = (
+    <>
+      {Icon && <Icon className="h-3.5 w-3.5 shrink-0" />}
+      <span className="flex-1 truncate">{label}</span>
+    </>
+  );
 
   return (
     <div>
@@ -83,34 +83,33 @@ export function SettingsGroup({
           paddingClass,
         )}
       >
+        {href ? (
+          <Link
+            href={href}
+            className="flex flex-1 min-w-0 items-center gap-2 py-1.5 text-[13px] font-medium cursor-pointer"
+          >
+            {labelInner}
+          </Link>
+        ) : (
+          <button
+            type="button"
+            onClick={toggle}
+            className="flex flex-1 min-w-0 items-center gap-2 py-1.5 text-[13px] font-medium cursor-pointer text-left"
+          >
+            {labelInner}
+          </button>
+        )}
         <button
           type="button"
-          onClick={() => setExpanded((v) => !v)}
-          className="cursor-pointer p-0.5 -ml-0.5"
+          onClick={toggle}
           aria-label={expanded ? `Collapse ${label}` : `Expand ${label}`}
+          aria-expanded={expanded}
+          className="shrink-0 flex h-5 w-5 items-center justify-center text-muted-foreground/60 hover:text-foreground/80 cursor-pointer transition-colors"
         >
           <IconChevronRight
             className={cn("h-3 w-3 transition-transform", expanded && "rotate-90")}
           />
         </button>
-        {href ? (
-          <Link
-            href={href}
-            className="flex flex-1 items-center gap-2 py-1.5 text-[13px] font-medium cursor-pointer"
-          >
-            {Icon && <Icon className="h-3.5 w-3.5 shrink-0" />}
-            <span className="flex-1 truncate">{label}</span>
-          </Link>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setExpanded((v) => !v)}
-            className="flex flex-1 items-center gap-2 py-1.5 text-[13px] font-medium cursor-pointer text-left"
-          >
-            {Icon && <Icon className="h-3.5 w-3.5 shrink-0" />}
-            <span className="flex-1 truncate">{label}</span>
-          </button>
-        )}
       </div>
       {expanded && <div className="flex flex-col gap-0.5">{children}</div>}
     </div>
