@@ -84,7 +84,7 @@ function makeURLChange(
         source,
         provider: metadata.provider,
         fullName: metadata.fullName,
-        branch: metadata.defaultBranch,
+        branch: metadata.defaultBranch ?? "",
       });
       return;
     }
