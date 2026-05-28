@@ -136,6 +136,7 @@ export function QueueAffordance({ sessionId, children, renderStatusBar }: QueueA
   if (!hasEntries) {
     return (
       <>
+        {/* Call renderStatusBar even with null so the status bar stays mounted when the queue is empty. */}
         {renderStatusBar?.(null)}
         {children}
       </>
