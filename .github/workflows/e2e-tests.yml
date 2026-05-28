@@ -34,27 +34,18 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
+    # Pre-baked image bundles Go, Node 24, pnpm 9.15.9 — see
+    # .github/docker/ci-base/Dockerfile.
+    container: ghcr.io/kdlbs/kandev-ci:latest
     timeout-minutes: 10
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: apps/backend/go.mod
-          cache-dependency-path: apps/backend/go.sum
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v5
-        with:
-          version: "9.15.9"
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: "24"
+      - name: Mark workspace safe for git
+        shell: bash
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Install dependencies
         working-directory: apps
@@ -92,6 +83,11 @@ jobs:
     name: E2E Shard ${{ matrix.shard }}/10
     needs: build
     runs-on: ubuntu-latest
+    # Pre-baked image bundles Node 24, pnpm 9.15.9, and the Playwright browser
+    # binaries (Chromium etc.) — see .github/docker/ci-base/Dockerfile. This is
+    # the biggest speedup since `npx playwright install chromium --with-deps`
+    # alone took ~1.5–2 min per shard.
+    container: ghcr.io/kdlbs/kandev-ci:latest
     timeout-minutes: 22
     strategy:
       fail-fast: false
@@ -102,23 +98,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v5
-        with:
-          version: "9.15.9"
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: "24"
+      - name: Mark workspace safe for git
+        shell: bash
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Install dependencies
         working-directory: apps
         run: pnpm install --frozen-lockfile
-
-      - name: Install Playwright browsers
-        working-directory: apps/web
-        run: npx playwright install chromium --with-deps
 
       - name: Download backend build
         uses: actions/download-artifact@v5
@@ -178,6 +164,11 @@ jobs:
   e2e-containers:
     name: E2E Containers Shard ${{ matrix.shard }}/6
     needs: build
+    # This job intentionally runs on the host ubuntu runner (NOT the kandev-ci
+    # container image): the containers project needs direct access to the
+    # host Docker daemon, and docker/setup-buildx style steps + the
+    # docker-in-container UX are awkward inside a container job. We recover
+    # some of the setup cost via the pnpm-store and Playwright caches below.
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -201,6 +192,21 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: "24"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pnpm/store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
+
+      - name: Cache Playwright browsers
+        # Keep the version suffix in sync with @playwright/test in
+        # apps/web/package.json (and with the FROM tag in the kandev-ci image).
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-1.58.2
 
       - name: Install dependencies
         working-directory: apps
@@ -263,21 +269,17 @@ jobs:
     needs: [e2e, e2e-containers]
     if: always()
     runs-on: ubuntu-latest
+    # Pre-baked image bundles Node 24, pnpm 9.15.9, and the Playwright CLI.
+    container: ghcr.io/kdlbs/kandev-ci:latest
     timeout-minutes: 5
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v5
-        with:
-          version: "9.15.9"
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: "24"
+      - name: Mark workspace safe for git
+        shell: bash
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Install dependencies
         working-directory: apps

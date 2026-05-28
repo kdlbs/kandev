@@ -42,6 +42,9 @@ jobs:
   frontend:
     name: Run Frontend Lint, Tests, and Build
     runs-on: ubuntu-latest
+    # Pre-baked image bundles Node 24, pnpm 9.15.9, Go, and go-licenses —
+    # see .github/docker/ci-base/Dockerfile.
+    container: ghcr.io/kdlbs/kandev-ci:latest
     defaults:
       run:
         working-directory: apps
@@ -52,27 +55,13 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v5
-        with:
-          version: "9.15.9"
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: "24"
+      - name: Mark workspace safe for git
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: apps/backend/go.mod
-          cache-dependency-path: apps/backend/go.sum
-
-      - name: Install go-licenses
-        run: go install github.com/google/go-licenses@latest
 
       - name: Regenerate OSS licenses manifest
         run: pnpm --filter @kandev/web licenses:gen

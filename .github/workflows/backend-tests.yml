@@ -26,6 +26,10 @@ jobs:
   test:
     name: Run Backend Tests
     runs-on: ubuntu-latest
+    # Pre-baked image bundles Go, golangci-lint, go-licenses, Docker CLI, Node,
+    # pnpm, and the Playwright base — see .github/docker/ci-base/Dockerfile.
+    # Skips the per-run setup-go / golangci-lint download steps below.
+    container: ghcr.io/kdlbs/kandev-ci:latest
     defaults:
       run:
         working-directory: apps/backend
@@ -36,14 +40,20 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Go
-        if: ${{ !contains(runner.name, 'homelab') }}
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: apps/backend/go.mod
-          cache-dependency-path: apps/backend/go.sum
+      # actions/checkout under a container job marks the workspace as a safe
+      # directory automatically, but subsequent `git` invocations from steps
+      # that run outside the action (e.g. the gofmt diff below) can still hit
+      # "dubious ownership" when the runner UID differs from the repo owner.
+      - name: Mark workspace safe for git
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Cache Go modules
+        # Homelab self-hosted runners (kept for future re-enablement; the
+        # `container:` above forces the job onto a github-hosted runner today,
+        # so this condition is dormant). If homelab is reactivated, split this
+        # job into a matrix where the homelab variant omits `container:`.
         if: ${{ contains(runner.name, 'homelab') }}
         uses: actions/cache@v4
         with:
@@ -100,11 +110,11 @@ jobs:
           fi
 
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: v2.9
-          args: ./... --new-from-rev=${{ env.BASE_SHA }}
-          working-directory: apps/backend
+        # golangci-lint is preinstalled in the kandev-ci image; invoke it
+        # directly instead of going through `golangci/golangci-lint-action`,
+        # which would re-download its own binary on every run.
+        shell: bash
+        run: golangci-lint run ./... --new-from-rev="${BASE_SHA}"
 
       - name: Run tests
         run: |
