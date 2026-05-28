@@ -70,6 +70,10 @@
  *                              build-default-{entry,done}     first paint / reset
  *                              env-switch-{resize,resize-col,done}
  *                                                              cross-task switch
+ *                              fixups-capture                 target captured vs cap in
+ *                                                              applyLayoutFixups; caller=<chain>,
+ *                                                              cols=<n>, sidebarOverCap=true means
+ *                                                              the recorded target is unreachable
  *                              container-resize               DOM ResizeObserver fired
  *                              sash-drag-end                  user-released sash
  *                              store-sync                     live widths → store pinnedWidths

@@ -605,20 +605,20 @@ function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
       debugSwitch("envSwitch: skip (same env)", { newEnvId });
       return;
     }
-    // First adoption — onReady already built the layout; just adopt it.
-    if (!oldEnvId && !currentLayoutEnvId) {
-      set({ isRestoringLayout: true, currentLayoutEnvId: newEnvId });
-      if (restoreMaximizeFromStorage(api, newEnvId, set)) return;
-      set({ isRestoringLayout: false, currentLayoutEnvId: newEnvId });
-      try {
-        setEnvLayout(newEnvId, api.toJSON());
-      } catch {
-        /* ignore */
-      }
-      return;
-    }
-    // When oldEnvId is null but there is a live layout env (e.g. the
-    // useEnvSwitchCleanup hook fires after passing through a null state),
+    // First adoption (oldEnvId and currentLayoutEnvId both null) falls through
+    // to the general path below. We deliberately do NOT "just adopt" whatever
+    // onReady rendered: this branch only fires when onReady ran with a null
+    // env (otherwise currentLayoutEnvId would equal newEnvId and we'd have
+    // skipped above as same-env), so onReady built the cross-env GLOBAL
+    // FALLBACK layout — not this env's saved/default layout. Adopting it gave a
+    // fresh task the previous env's stale proportions instead of the defaults,
+    // and `setEnvLayout(newEnvId, api.toJSON())` even overwrote the env's real
+    // saved layout with that stale one. `performEnvSwitch` instead restores the
+    // env's saved layout (or builds defaults for a brand-new task), and
+    // `saveOutgoingEnv(null)` below is a no-op so there is nothing to lose.
+    //
+    // When oldEnvId is null but there IS a live layout env (the
+    // useEnvSwitchCleanup hook firing after passing through a null state),
     // fall back to currentLayoutEnvId so we correctly save and release the
     // outgoing env rather than silently skipping it.
     const effectiveOld = oldEnvId ?? currentLayoutEnvId;

@@ -13,9 +13,32 @@ import {
   setPinnedTarget,
 } from "./layout-manager";
 import type { LayoutGroupIds } from "./layout-manager";
+import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
 
 // Re-export for consumers that import from this module
 export { getRootSplitview } from "./layout-manager";
+
+const debugWidths = createDebugLogger("dockview:widths");
+
+/** Best-effort caller chain for the fixups-capture debug log: pull the first
+ *  few stack frames above `applyLayoutFixups` so we can see WHICH layout path
+ *  (env-switch / restore / custom-layout / maximize) recorded a given target.
+ *  Debug-only — never called when IS_DEBUG is false. */
+function captureCallerChain(): string {
+  const stack = new Error().stack;
+  if (!stack) return "-";
+  const lines = stack.split("\n").slice(1);
+  const frames: string[] = [];
+  for (const line of lines) {
+    const m = /at (\S+)/.exec(line);
+    const name = m?.[1] ?? "";
+    if (!name || name === "captureCallerChain" || name === "applyLayoutFixups") continue;
+    const short = name.split(".").pop() ?? name;
+    frames.push(short);
+    if (frames.length >= 3) break;
+  }
+  return frames.join("<") || "-";
+}
 
 /** After fromJSON() restores a session layout, apply fixups and return group IDs.
  *
@@ -24,42 +47,89 @@ export { getRootSplitview } from "./layout-manager";
  *  the column to that target on every subsequent rebalance. */
 export function applyLayoutFixups(api: DockviewApi): LayoutGroupIds {
   const sv = getRootSplitviewImpl(api);
-  const sb = api.getPanel("sidebar");
-  if (sb) {
-    sb.group.locked = SIDEBAR_LOCK;
-    sb.group.header.hidden = false;
-    sb.group.api.setConstraints({
-      maximumWidth: computeSidebarMaxPx(),
-      minimumWidth: LAYOUT_PINNED_MIN_PX,
-    });
-    const live = sv?.getViewSize?.(0) ?? sb.group.width;
-    if (typeof live === "number" && live > 0) setPinnedTarget("sidebar", live);
-  }
+  captureSidebarTarget(api, sv);
 
   const oldChanges = api.getPanel("diff-files");
   if (oldChanges) oldChanges.api.setTitle("Changes");
   const oldFiles = api.getPanel("all-files");
   if (oldFiles) oldFiles.api.setTitle("Files");
 
-  // Constrain right column groups by their well-known IDs.
+  captureRightTarget(api, sv);
+
+  logFixupsCapture(api, sv);
+
+  return resolveGroupIds(api);
+}
+
+/** Lock + constrain the sidebar group and record its target width, clamped to
+ *  the cap. The constraint pins the column at `sidebarCap`, so a target above
+ *  it is unreachable and makes `enforcePinnedTargets` spin forever. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function captureSidebarTarget(api: DockviewApi, sv: any): void {
+  const sb = api.getPanel("sidebar");
+  if (!sb) return;
+  const sidebarCap = computeSidebarMaxPx();
+  sb.group.locked = SIDEBAR_LOCK;
+  sb.group.header.hidden = false;
+  sb.group.api.setConstraints({ maximumWidth: sidebarCap, minimumWidth: LAYOUT_PINNED_MIN_PX });
+  const live = sv?.getViewSize?.(0) ?? sb.group.width;
+  if (typeof live === "number" && live > 0) {
+    setPinnedTarget("sidebar", Math.min(live, sidebarCap));
+  }
+}
+
+/** Constrain the right column's groups and record its target width, clamped to
+ *  the cap.
+ *
+ *  Only records a right target when a genuine right column exists AND it is a
+ *  distinct column from the center (`sv.length >= 3`). In the 2-column
+ *  global-fallback restore (right panels stripped as env-scoped, only
+ *  sidebar + center remain), the LAST splitview child is the CENTER column —
+ *  recording its width as the "right" target inflates the real right column
+ *  once the full layout materializes, and the inflated width gets persisted
+ *  into the env layout, so every later open loads broken widths. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function captureRightTarget(api: DockviewApi, sv: any): void {
   // Groups created from presets carry stable IDs (e.g. "group-right-top"),
   // so this works regardless of which panels are in them.
   const rightCap = computeRightMaxPx();
+  let hasRightColumn = false;
   for (const gid of [RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP]) {
     const group = api.groups.find((g) => g.id === gid);
     if (group) {
-      group.api.setConstraints({
-        maximumWidth: rightCap,
-        minimumWidth: LAYOUT_PINNED_MIN_PX,
-      });
+      hasRightColumn = true;
+      group.api.setConstraints({ maximumWidth: rightCap, minimumWidth: LAYOUT_PINNED_MIN_PX });
     }
   }
-  if (sv && sv.length >= 2) {
-    const liveRight = sv.getViewSize(sv.length - 1);
-    if (typeof liveRight === "number" && liveRight > 0) setPinnedTarget("right", liveRight);
+  if (!hasRightColumn || !sv || sv.length < 3) return;
+  const liveRight = sv.getViewSize(sv.length - 1);
+  if (typeof liveRight === "number" && liveRight > 0) {
+    setPinnedTarget("right", Math.min(liveRight, rightCap));
   }
+}
 
-  return resolveGroupIds(api);
+/** Emit the `fixups-capture` width snapshot. Pulled out of `applyLayoutFixups`
+ *  to keep that function under the complexity limit; no-op in prod. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function logFixupsCapture(api: DockviewApi, sv: any): void {
+  if (!IS_DEBUG) return;
+  // Decisive fields: `sidebarOverCap=true` means the recorded target exceeds
+  // the cap that enforcement clamps the column to — i.e. an unreachable target
+  // that makes `enforcePinnedTargets` spin forever. `cols` shows whether the
+  // layout was complete at capture (cols<3 → no real right column). api.width
+  // vs window.innerWidth surfaces the window-fallback cap divergence.
+  const sidebarCap = computeSidebarMaxPx();
+  const innerW = typeof window !== "undefined" ? window.innerWidth : -1;
+  const liveSidebar = sv?.getViewSize?.(0);
+  const liveRight = sv && sv.length >= 2 ? sv.getViewSize(sv.length - 1) : undefined;
+  const r = (n: number | undefined): string =>
+    typeof n === "number" ? String(Math.round(n)) : "-";
+  debugWidths(
+    `fixups-capture caller=${captureCallerChain()} apiW=${api.width} innerW=${innerW} ` +
+      `cols=${sv?.length ?? 0} sidebarCap=${Math.round(sidebarCap)} liveSidebar=${r(liveSidebar)} ` +
+      `rightCap=${Math.round(computeRightMaxPx())} liveRight=${r(liveRight)} ` +
+      `sidebarOverCap=${typeof liveSidebar === "number" && liveSidebar > sidebarCap + 1}`,
+  );
 }
 
 /**
