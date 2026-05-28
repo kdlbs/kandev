@@ -438,10 +438,10 @@ func startAgentInfrastructure(
 		log.Info("GitHub poller started")
 	}
 
-	// Start GitLab background poller. Three loops: MR-watch (per-session
-	// branch monitoring), review-watch (saved searches for MRs awaiting
-	// review), issue-watch (saved searches for issues).
+	// Start GitLab background poller + wire the service into the
+	// orchestrator so review/issue watch events get turned into tasks.
 	if services.GitLab != nil {
+		orchestratorSvc.SetGitLabService(services.GitLab)
 		glPoller := gitlabpkg.NewPoller(services.GitLab, eventBus, log)
 		glPoller.Start(ctx)
 		addCleanup(func() error { glPoller.Stop(); return nil })

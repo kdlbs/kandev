@@ -580,14 +580,24 @@ func (s *Service) fetchIssues(ctx context.Context, watch *IssueWatch) ([]*Issue,
 	if err != nil {
 		return nil, fmt.Errorf("resolve gitlab username: %w", err)
 	}
-	filter := watch.CustomQuery
-	if filter == "" {
+	// When a custom_query is set, labels need to be folded into it (the
+	// client's buildIssueSearchQuery returns customQuery verbatim and
+	// ignores the auxiliary `filter` arg). Otherwise build a default
+	// "assigned to me" filter and append labels there.
+	filter := ""
+	customQuery := watch.CustomQuery
+	switch {
+	case customQuery != "":
+		if len(watch.Labels) > 0 {
+			customQuery = appendLabelsToQuery(customQuery, watch.Labels)
+		}
+	default:
 		filter = "assignee_username=" + url.QueryEscape(username)
+		if len(watch.Labels) > 0 {
+			filter += "&labels=" + url.QueryEscape(strings.Join(watch.Labels, ","))
+		}
 	}
-	if len(watch.Labels) > 0 {
-		filter = filter + "&labels=" + url.QueryEscape(strings.Join(watch.Labels, ","))
-	}
-	issues, err := client.ListIssues(ctx, filter, watch.CustomQuery)
+	issues, err := client.ListIssues(ctx, filter, customQuery)
 	if err != nil {
 		return nil, fmt.Errorf("list issues: %w", err)
 	}
@@ -688,7 +698,7 @@ func (s *Service) publishMRFeedbackEvent(ctx context.Context, watch *MRWatch, st
 	if eb == nil {
 		return
 	}
-	ev := MRFeedbackEvent{
+	ev := &MRFeedbackEvent{
 		SessionID:        watch.SessionID,
 		TaskID:           watch.TaskID,
 		ProjectPath:      watch.ProjectPath,
@@ -708,7 +718,7 @@ func (s *Service) publishNewReviewMREvent(ctx context.Context, watch *ReviewWatc
 	if eb == nil {
 		return
 	}
-	ev := NewReviewMREvent{
+	ev := &NewReviewMREvent{
 		ReviewWatchID:     watch.ID,
 		WorkspaceID:       watch.WorkspaceID,
 		WorkflowID:        watch.WorkflowID,
@@ -730,7 +740,7 @@ func (s *Service) publishNewIssueEvent(ctx context.Context, watch *IssueWatch, i
 	if eb == nil {
 		return
 	}
-	ev := NewIssueEvent{
+	ev := &NewIssueEvent{
 		IssueWatchID:      watch.ID,
 		WorkspaceID:       watch.WorkspaceID,
 		WorkflowID:        watch.WorkflowID,
@@ -767,6 +777,20 @@ func (s *Service) requireStore() *Store {
 	store := s.store
 	s.mu.RUnlock()
 	return store
+}
+
+// appendLabelsToQuery merges a label list into an existing customQuery string.
+// If the query already contains `labels=`, it is left alone (the user is
+// explicitly controlling the filter and we don't want to silently double-up).
+func appendLabelsToQuery(customQuery string, labels []string) string {
+	if strings.Contains(customQuery, "labels=") {
+		return customQuery
+	}
+	encoded := url.QueryEscape(strings.Join(labels, ","))
+	if customQuery == "" {
+		return "labels=" + encoded
+	}
+	return customQuery + "&labels=" + encoded
 }
 
 func normalizeProjectFilters(in []ProjectFilter) []ProjectFilter {

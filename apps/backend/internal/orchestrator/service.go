@@ -23,6 +23,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/gitlab"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
@@ -292,6 +293,14 @@ type Service struct {
 	// linearSource adapts linearService onto WatcherSource. Built once in
 	// SetLinearService so handlers don't allocate per bus event.
 	linearSource *LinearWatcherSource
+
+	// GitLab service + task creators for auto-creating tasks from review /
+	// issue watch events. When the task creators are nil the events are
+	// logged but no tasks are created — matches the GitHub flow when a
+	// workspace has no task creator wired.
+	gitlabService           *gitlab.Service
+	gitlabReviewTaskCreator GitLabReviewTaskCreator
+	gitlabIssueTaskCreator  GitLabIssueTaskCreator
 
 	// Repository resolver for cloning + finding/creating repos for review tasks
 	repositoryResolver RepositoryResolver
@@ -820,6 +829,9 @@ func (s *Service) Start(ctx context.Context) error {
 
 	// Subscribe to GitHub integration events
 	s.subscribeGitHubEvents()
+
+	// Subscribe to GitLab integration events
+	s.subscribeGitLabEvents()
 
 	// Subscribe to JIRA integration events
 	s.subscribeJiraEvents()

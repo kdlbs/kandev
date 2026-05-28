@@ -130,3 +130,91 @@ describe("resetTaskMRs", () => {
     expect(store.getState().taskMRs.byTaskId).toEqual({});
   });
 });
+
+describe("review watches", () => {
+  it("set + add + update + remove round-trip", () => {
+    const store = makeStore();
+    const watch = {
+      id: "w-1",
+      workspace_id: "ws-1",
+      workflow_id: "",
+      workflow_step_id: "",
+      projects: [{ path: "group/proj" }],
+      agent_profile_id: "",
+      executor_profile_id: "",
+      prompt: "",
+      review_scope: "user",
+      custom_query: "",
+      enabled: true,
+      poll_interval_seconds: 300,
+      cleanup_policy: "auto",
+      created_at: "",
+      updated_at: "",
+    };
+    store.getState().setGitLabReviewWatches([watch]);
+    expect(store.getState().gitlabReviewWatches.items).toHaveLength(1);
+    expect(store.getState().gitlabReviewWatches.loaded).toBe(true);
+
+    const watch2 = { ...watch, id: "w-2" };
+    store.getState().addGitLabReviewWatch(watch2);
+    expect(store.getState().gitlabReviewWatches.items).toHaveLength(2);
+
+    store.getState().updateGitLabReviewWatchInStore({ ...watch, prompt: "updated" });
+    expect(store.getState().gitlabReviewWatches.items.find((w) => w.id === "w-1")?.prompt).toBe(
+      "updated",
+    );
+
+    store.getState().removeGitLabReviewWatch("w-1");
+    expect(store.getState().gitlabReviewWatches.items).toHaveLength(1);
+    expect(store.getState().gitlabReviewWatches.items[0].id).toBe("w-2");
+  });
+});
+
+describe("issue watches", () => {
+  it("set + add + remove round-trip", () => {
+    const store = makeStore();
+    const watch = {
+      id: "iw-1",
+      workspace_id: "ws-1",
+      workflow_id: "",
+      workflow_step_id: "",
+      projects: [],
+      agent_profile_id: "",
+      executor_profile_id: "",
+      prompt: "",
+      labels: ["bug"],
+      custom_query: "",
+      enabled: true,
+      poll_interval_seconds: 300,
+      cleanup_policy: "auto",
+      created_at: "",
+      updated_at: "",
+    };
+    store.getState().setGitLabIssueWatches([watch]);
+    expect(store.getState().gitlabIssueWatches.items).toHaveLength(1);
+
+    store.getState().removeGitLabIssueWatch("iw-1");
+    expect(store.getState().gitlabIssueWatches.items).toHaveLength(0);
+  });
+});
+
+describe("action presets + stats", () => {
+  it("upserts presets by workspace and stores stats with loadedAt timestamp", () => {
+    const store = makeStore();
+    const presets = {
+      workspace_id: "ws-1",
+      mr: [{ id: "x", label: "x", hint: "", icon: "", prompt_template: "" }],
+      issue: [],
+    };
+    store.getState().setGitLabActionPresets("ws-1", presets);
+    expect(store.getState().gitlabActionPresets.byWorkspaceId["ws-1"]).toEqual(presets);
+
+    store.getState().setGitLabStats({
+      open_mrs: 5,
+      mrs_awaiting_my_review: 2,
+      open_issues_assigned_me: 3,
+    });
+    expect(store.getState().gitlabStats.data?.open_mrs).toBe(5);
+    expect(store.getState().gitlabStats.loadedAt).not.toBeNull();
+  });
+});
