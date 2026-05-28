@@ -22,6 +22,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Least-privilege default. The Linux `test` job and the Windows `test-windows`
+# job only read source and run tests — no PR/issue writes, no release ops.
+# Matches the explicit block already present on the Windows job and the
+# workflow-level block on e2e-tests.yml.
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Run Backend Tests
@@ -32,6 +39,9 @@ jobs:
     container: ghcr.io/kdlbs/kandev-ci:latest
     defaults:
       run:
+        # Container jobs default to `sh` (dash); pin to bash so `set -o pipefail`
+        # and other bash-isms in the steps below work without per-step overrides.
+        shell: bash
         working-directory: apps/backend
 
     steps:

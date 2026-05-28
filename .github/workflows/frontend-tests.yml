@@ -38,6 +38,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Least-privilege: the `frontend` job only reads source and runs tests.
+permissions:
+  contents: read
+
 jobs:
   frontend:
     name: Run Frontend Lint, Tests, and Build
@@ -47,6 +51,9 @@ jobs:
     container: ghcr.io/kdlbs/kandev-ci:latest
     defaults:
       run:
+        # Container jobs default to `sh` (dash); pin to bash for `set -euo
+        # pipefail` and other bash-isms used by the formatting / licenses steps.
+        shell: bash
         working-directory: apps
 
     steps:

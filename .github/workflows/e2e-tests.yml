@@ -38,13 +38,16 @@ jobs:
     # .github/docker/ci-base/Dockerfile.
     container: ghcr.io/kdlbs/kandev-ci:latest
     timeout-minutes: 10
+    # Container jobs default to `sh`; pin to bash for the few shell steps below.
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
 
       - name: Mark workspace safe for git
-        shell: bash
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Install dependencies
@@ -89,6 +92,10 @@ jobs:
     # alone took ~1.5–2 min per shard.
     container: ghcr.io/kdlbs/kandev-ci:latest
     timeout-minutes: 22
+    # Container jobs default to `sh`; pin to bash.
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
@@ -99,7 +106,6 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Mark workspace safe for git
-        shell: bash
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Install dependencies
@@ -200,13 +206,25 @@ jobs:
           key: pnpm-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
           restore-keys: pnpm-${{ runner.os }}-
 
+      # Derive the Playwright version from apps/web/package.json at runtime so
+      # the cache key below auto-busts on every @playwright/test bump. The
+      # previous hardcoded `1.58.2` suffix would have silently served stale
+      # browser binaries until manually updated.
+      - name: Resolve Playwright version
+        id: pw
+        shell: bash
+        run: |
+          set -euo pipefail
+          raw=$(node -p "require('./apps/web/package.json').devDependencies['@playwright/test']")
+          version=$(printf '%s' "$raw" | sed -E 's/^[^0-9]*//; s/[^0-9.].*$//')
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "Playwright version: ${version}"
+
       - name: Cache Playwright browsers
-        # Keep the version suffix in sync with @playwright/test in
-        # apps/web/package.json (and with the FROM tag in the kandev-ci image).
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-1.58.2
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
 
       - name: Install dependencies
         working-directory: apps
@@ -272,13 +290,16 @@ jobs:
     # Pre-baked image bundles Node 24, pnpm 9.15.9, and the Playwright CLI.
     container: ghcr.io/kdlbs/kandev-ci:latest
     timeout-minutes: 5
+    # Container jobs default to `sh`; pin to bash.
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
 
       - name: Mark workspace safe for git
-        shell: bash
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Install dependencies
