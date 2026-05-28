@@ -565,11 +565,6 @@ func TestApplyResumeRepoConfig_WorktreeStampsTaskDir(t *testing.T) {
 			Name:      "my-repo",
 			LocalPath: "/tmp/repo",
 		}
-		repo.taskEnvironments["env-1"] = &models.TaskEnvironment{
-			ID:          "env-1",
-			TaskID:      "task-1",
-			TaskDirName: "",
-		}
 		repo.tasks["task-1"] = &models.Task{ID: "task-1"}
 		task := &v1.Task{ID: "task-1", Title: "Fix login bug"}
 		session := &models.TaskSession{
@@ -580,8 +575,13 @@ func TestApplyResumeRepoConfig_WorktreeStampsTaskDir(t *testing.T) {
 		}
 		exec := newTestExecutor(t, &mockAgentManager{}, repo)
 		req := &LaunchAgentRequest{TaskID: "task-1", SessionID: "sess-1", ExecutorType: "worktree"}
+		existingEnv := &models.TaskEnvironment{
+			ID:          "env-1",
+			TaskID:      "task-1",
+			TaskDirName: "",
+		}
 
-		if _, err := exec.applyResumeRepoConfig(context.Background(), task, session, req, nil); err != nil {
+		if _, err := exec.applyResumeRepoConfig(context.Background(), task, session, req, existingEnv); err != nil {
 			t.Fatalf("applyResumeRepoConfig: %v", err)
 		}
 
