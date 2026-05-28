@@ -12,14 +12,10 @@ import (
 // stderr poller) spawned across manager_*.go and session.go. Regressions
 // where a Stop path returns before background work drains surface here.
 //
-// IgnoreTopFunction notes:
-//   - The OTLP HTTP trace exporter and its retry helper run inside
-//     tracing.InitTracing (called by NewManager via the agent execution
-//     trace path); they only exit when the process does, which is fine
-//     in production but trips goleak.
+// OTel note: `agentctl/tracing.initTracing` lazily inits the SDK provider
+// only when `OTEL_EXPORTER_OTLP_ENDPOINT` is set — in tests it isn't, so
+// the noop provider is used and no batchSpanProcessor / OTLP retry
+// goroutines are spawned. No IgnoreTopFunction is needed here.
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m,
-		goleak.IgnoreTopFunction("go.opentelemetry.io/otel/sdk/trace.(*batchSpanProcessor).processQueue"),
-		goleak.IgnoreTopFunction("go.opentelemetry.io/otel/exporters/otlp/otlptrace/internal/retry.WaitFunc.func1"),
-	)
+	goleak.VerifyTestMain(m)
 }
