@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import { IconArrowRight, IconGitMerge, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -306,6 +306,7 @@ function ChatStatusBar({
   onProceed,
   isAgentBusy,
   isMoving,
+  queueChip,
 }: {
   todoItems: TodoDisplayItem[];
   taskId: string | null;
@@ -315,6 +316,7 @@ function ChatStatusBar({
   onProceed: () => void;
   isAgentBusy: boolean;
   isMoving: boolean;
+  queueChip?: ReactNode;
 }) {
   const showTodos = todoItems.length > 0;
   const showProceed = !!nextStepName && !isAgentBusy;
@@ -327,6 +329,7 @@ function ChatStatusBar({
     >
       {showTodos && <TodoIndicator todos={todoItems} />}
       <PRStatusChip taskId={taskId} />
+      {queueChip}
       {taskId && <PRMergedBanner key={taskId} taskId={taskId} />}
       {canShare && taskId && sessionId && (
         <div className="ml-auto">
@@ -440,17 +443,22 @@ export function ChatInputArea({
   const { implementPlanHandler, proceedStepName, proceed, isMoving } = planActions;
   return (
     <div className="bg-card flex-shrink-0 px-2 pb-2 pt-1">
-      <ChatStatusBar
-        todoItems={todoItems}
-        taskId={taskId}
+      <QueueAffordance
         sessionId={resolvedSessionId}
-        sessionState={panelState.session?.state ?? null}
-        nextStepName={proceedStepName}
-        onProceed={proceed}
-        isAgentBusy={isAgentBusy}
-        isMoving={isMoving}
-      />
-      <QueueAffordance sessionId={resolvedSessionId}>
+        renderStatusBar={(queueChip) => (
+          <ChatStatusBar
+            todoItems={todoItems}
+            taskId={taskId}
+            sessionId={resolvedSessionId}
+            sessionState={panelState.session?.state ?? null}
+            nextStepName={proceedStepName}
+            onProceed={proceed}
+            isAgentBusy={isAgentBusy}
+            isMoving={isMoving}
+            queueChip={queueChip}
+          />
+        )}
+      >
         <ChatInputContainer
           ref={chatInputRef}
           key={clarificationKey}

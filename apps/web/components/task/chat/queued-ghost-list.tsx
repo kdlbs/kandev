@@ -57,16 +57,24 @@ function useEscToClose(open: boolean, onClose: () => void): void {
 type QueueAffordanceProps = {
   sessionId: string | null;
   children: ReactNode;
+  /**
+   * Optional render slot for placing the chip inside an external row (e.g. the
+   * chat status bar). The callback receives the chip node (or `null` when no
+   * chip should be shown) and returns the row markup. When omitted, the chip
+   * falls back to rendering inline above the input.
+   */
+  renderStatusBar?: (queueChip: ReactNode) => ReactNode;
 };
 
 /**
  * Wraps the chat input with the per-session queue affordance:
  * - When there are no queued entries, just renders `children` (the input).
- * - Otherwise a small floating "n queued" chip sits over the input frame and
- *   clicking it expands a panel above the input. Drained or session-switched
- *   queues auto-collapse.
+ * - Otherwise a small "n queued" chip is exposed (either inline above the
+ *   input, or via `renderStatusBar` into a caller-controlled row); clicking
+ *   it expands a panel above the input. Drained or session-switched queues
+ *   auto-collapse.
  */
-export function QueueAffordance({ sessionId, children }: QueueAffordanceProps) {
+export function QueueAffordance({ sessionId, children, renderStatusBar }: QueueAffordanceProps) {
   const { entries, count, max, isFull, clearAll, editEntry, removeEntry } = useQueue(sessionId);
   const [isOpen, setIsOpen] = useState(false);
 
@@ -114,10 +122,29 @@ export function QueueAffordance({ sessionId, children }: QueueAffordanceProps) {
     });
   }, [clearAll]);
 
-  if (!sessionId || entryCount === 0) return <>{children}</>;
+  const hasEntries = !!sessionId && entryCount > 0;
+  const chipNode =
+    hasEntries && !isOpen ? (
+      <QueueChip
+        count={count}
+        isFull={isFull}
+        previewText={headPreviewText(entries)}
+        onToggle={() => setIsOpen((v) => !v)}
+      />
+    ) : null;
+
+  if (!hasEntries) {
+    return (
+      <>
+        {renderStatusBar?.(null)}
+        {children}
+      </>
+    );
+  }
 
   return (
     <>
+      {renderStatusBar?.(chipNode)}
       <Collapsible open={isOpen} onOpenChange={setIsOpen}>
         <CollapsibleContent
           className={cn(
@@ -137,14 +164,9 @@ export function QueueAffordance({ sessionId, children }: QueueAffordanceProps) {
           />
         </CollapsibleContent>
       </Collapsible>
-      {!isOpen && (
+      {!renderStatusBar && chipNode && (
         <div className="flex items-center px-1 pb-1 animate-in fade-in-0 slide-in-from-bottom-1 duration-150 motion-reduce:animate-none">
-          <QueueChip
-            count={count}
-            isFull={isFull}
-            previewText={headPreviewText(entries)}
-            onToggle={() => setIsOpen((v) => !v)}
-          />
+          {chipNode}
         </div>
       )}
       {children}
@@ -161,9 +183,9 @@ type QueueChipProps = {
 
 function chipPalette(isFull: boolean): string {
   if (isFull) {
-    return "text-amber-600 dark:text-amber-400 border-amber-500/40 hover:bg-amber-500/10";
+    return "text-amber-600 dark:text-amber-400 border-amber-500/60 hover:bg-amber-500/10";
   }
-  return "text-muted-foreground border-border hover:text-foreground hover:border-border/80";
+  return "text-muted-foreground border-muted-foreground/40 hover:text-foreground hover:border-muted-foreground/60";
 }
 
 function QueueChip({ count, isFull, previewText, onToggle }: QueueChipProps) {
