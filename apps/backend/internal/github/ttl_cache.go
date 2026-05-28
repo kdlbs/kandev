@@ -173,7 +173,14 @@ func (c *ttlCache) doOrFetch(key string, fetch func() (any, error)) (any, error)
 		return v, nil
 	}
 	gen := c.generation()
-	v, err, _ := c.sf.Do(key, func() (any, error) {
+	// Key the singleflight on the generation as well as the cache key. Without
+	// the generation prefix, a caller arriving after clear() would join an
+	// already-in-flight fetch from the previous generation and receive its
+	// stale result — singleflight's whole point is shared results. Bumping
+	// gen on clear() guarantees the post-clear caller mints its own fetch
+	// instead of inheriting the old one.
+	sfKey := fmt.Sprintf("%d|%s", gen, key)
+	v, err, _ := c.sf.Do(sfKey, func() (any, error) {
 		if v, ok := c.get(key); ok {
 			return v, nil
 		}

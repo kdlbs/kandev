@@ -104,8 +104,15 @@ function useGitHubAndFreshBranchHandlers(fs: DialogFormState) {
    * into Remote mode.
    */
   const handleToggleRemote = useCallback(() => {
-    fs.setUseRemote(!fs.useRemote);
+    const next = !fs.useRemote;
+    fs.setUseRemote(next);
     fs.setGitHubUrlError(null);
+    // Remote and no-repository are mutually exclusive source modes. Without
+    // this, the user could land on both true at once (toggle no-repo on, then
+    // toggle Remote on) and the submit gate's mode-aware checks would produce
+    // confusing results. Mirror the no-repo handler which already clears
+    // useRemote when flipping the other way.
+    if (next) fs.setNoRepository(false);
     clearFreshBranch(fs);
   }, [fs]);
 

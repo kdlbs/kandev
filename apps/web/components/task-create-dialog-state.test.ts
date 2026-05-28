@@ -244,39 +244,39 @@ describe("buildRepositoriesPayload — remoteRepos rows", () => {
   });
 });
 
-describe("useDialogFormState — title autofill from first row PR info", () => {
-  const PR_URL = "https://github.com/acme/site/pull/42";
+const PR_URL_42 = "https://github.com/acme/site/pull/42";
+const PR_TITLE_42 = "PR #42: Test PR";
 
+function seedPRInfo(url: string, prNumber: number, suggestedTitle: string) {
+  prInfoMap.set(url, {
+    prHeadBranch: "feature/x",
+    prBaseBranch: "main",
+    prNumber,
+    suggestedTitle,
+  });
+}
+
+describe("useDialogFormState — title autofill from first row PR info", () => {
   beforeEach(() => {
     prInfoMap.clear();
   });
 
   it("seeds the task title from the first row's PR info when title is empty", () => {
-    prInfoMap.set(PR_URL, {
-      prHeadBranch: "feature/x",
-      prBaseBranch: "main",
-      prNumber: 42,
-      suggestedTitle: "PR #42: Test PR",
-    });
+    seedPRInfo(PR_URL_42, 42, PR_TITLE_42);
     const { result } = renderHook(() => useDialogFormState(true, "ws-1", null));
     act(() => {
       result.current.setUseRemote(true);
     });
     const key = result.current.remoteRepos[0]?.key;
     act(() => {
-      result.current.updateRemoteRepo(key!, { url: PR_URL });
+      result.current.updateRemoteRepo(key!, { url: PR_URL_42 });
     });
-    expect(result.current.taskName).toBe("PR #42: Test PR");
+    expect(result.current.taskName).toBe(PR_TITLE_42);
     expect(result.current.hasTitle).toBe(true);
   });
 
   it("does NOT overwrite a title the user typed themselves", () => {
-    prInfoMap.set(PR_URL, {
-      prHeadBranch: "feature/x",
-      prBaseBranch: "main",
-      prNumber: 42,
-      suggestedTitle: "PR #42: Test PR",
-    });
+    seedPRInfo(PR_URL_42, 42, PR_TITLE_42);
     const { result } = renderHook(() => useDialogFormState(true, "ws-1", null));
     act(() => {
       result.current.setTaskName("my own title");
@@ -284,9 +284,59 @@ describe("useDialogFormState — title autofill from first row PR info", () => {
     });
     const key = result.current.remoteRepos[0]?.key;
     act(() => {
-      result.current.updateRemoteRepo(key!, { url: PR_URL });
+      result.current.updateRemoteRepo(key!, { url: PR_URL_42 });
     });
     expect(result.current.taskName).toBe("my own title");
+  });
+
+  it("does NOT re-apply autofill after the user clears the title (user took ownership)", () => {
+    // Regression: clearing an auto-filled title used to reset the ref to ""
+    // and trigger a re-application on the next render, so the user could
+    // never actually clear the field — every kestroke or render brought
+    // the suggested title right back.
+    seedPRInfo(PR_URL_42, 42, PR_TITLE_42);
+    const { result } = renderHook(() => useDialogFormState(true, "ws-1", null));
+    act(() => {
+      result.current.setUseRemote(true);
+    });
+    const key = result.current.remoteRepos[0]?.key;
+    act(() => {
+      result.current.updateRemoteRepo(key!, { url: PR_URL_42 });
+    });
+    expect(result.current.taskName).toBe(PR_TITLE_42);
+    act(() => {
+      result.current.setTaskName("");
+    });
+    // Even after re-render, autofill MUST NOT reapply for this URL.
+    expect(result.current.taskName).toBe("");
+  });
+
+  it("re-applies autofill when the user switches to a different PR URL", () => {
+    // Once the user pastes a fresh PR URL, the previous "user-cleared" lock
+    // for the earlier URL must lift — the fresh URL is a new autofill
+    // opportunity.
+    seedPRInfo(PR_URL_42, 42, PR_TITLE_42);
+    const NEW_PR_URL = "https://github.com/acme/site/pull/99";
+    seedPRInfo(NEW_PR_URL, 99, "PR #99: Another PR");
+    const { result } = renderHook(() => useDialogFormState(true, "ws-1", null));
+    act(() => {
+      result.current.setUseRemote(true);
+    });
+    const key = result.current.remoteRepos[0]?.key;
+    act(() => {
+      result.current.updateRemoteRepo(key!, { url: PR_URL_42 });
+    });
+    expect(result.current.taskName).toBe(PR_TITLE_42);
+    act(() => {
+      result.current.setTaskName("");
+    });
+    expect(result.current.taskName).toBe("");
+
+    // Switch to a different PR URL → fresh autofill opportunity.
+    act(() => {
+      result.current.updateRemoteRepo(key!, { url: NEW_PR_URL });
+    });
+    expect(result.current.taskName).toBe("PR #99: Another PR");
   });
 
   it("does NOT autofill from a non-first row's PR info", () => {

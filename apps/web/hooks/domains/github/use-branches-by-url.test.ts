@@ -150,6 +150,27 @@ describe("useBranchesByURL — failure & invalidation", () => {
     expect(fetchRepoBranchesMock).toHaveBeenCalledTimes(2);
   });
 
+  it("accepts a PR URL and fetches branches against the underlying repo", async () => {
+    // Regression: the hook used to call parseGitHubRepoUrl which rejects
+    // `/pull/N` paths, so pasting a PR URL marked the URL as loaded with an
+    // empty branches list — the branch picker stayed permanently empty even
+    // though the repo itself has branches.
+    fetchRepoBranchesMock.mockImplementation((owner: string, repo: string) => {
+      expect(owner).toBe("acme");
+      expect(repo).toBe("site");
+      return Promise.resolve({ branches: [{ name: "main" }, { name: "feature/x" }] });
+    });
+    const { result } = renderHook(() => useBranchesByURL());
+    const PR_URL = "https://github.com/acme/site/pull/42";
+
+    act(() => {
+      result.current.ensure(PR_URL);
+    });
+
+    await waitFor(() => expect(result.current.branches(PR_URL)).toHaveLength(2));
+    expect(fetchRepoBranchesMock).toHaveBeenCalledTimes(1);
+  });
+
   it("clear(url) lets the next ensure() refetch a successfully loaded URL", async () => {
     fetchRepoBranchesMock.mockResolvedValue({ branches: [{ name: "main" }] });
 

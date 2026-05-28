@@ -462,7 +462,10 @@ describe("useGitHubUrlErrorEffect", () => {
     expect(setGitHubUrlError).toHaveBeenCalledWith(null);
   });
 
-  it("does nothing when useRemote is false", () => {
+  it("clears the error when useRemote is false (stale error from a prior Remote-mode pass)", () => {
+    // Regression: the early return on !useRemote used to skip clearing the
+    // error, so a banner produced while the user was in Remote mode would
+    // stick around after they switched back to workspace mode.
     const setGitHubUrlError = vi.fn();
     const fs = makeUrlErrorFs({
       useRemote: false,
@@ -470,6 +473,115 @@ describe("useGitHubUrlErrorEffect", () => {
       setGitHubUrlError,
     });
     renderHook(() => useGitHubUrlErrorEffect(fs, true));
-    expect(setGitHubUrlError).not.toHaveBeenCalled();
+    expect(setGitHubUrlError).toHaveBeenCalledWith(null);
+  });
+});
+
+const PROFILE_DOCKER = "profile-docker";
+const PROFILE_WORKTREE = "profile-worktree";
+
+function dockerExecutor(): StoreSelections["executors"][number] {
+  return {
+    id: "exec-docker",
+    type: "local_docker",
+    profiles: [{ id: PROFILE_DOCKER, executor_type: "local_docker" }],
+  } as unknown as StoreSelections["executors"][number];
+}
+function worktreeExecutor(): StoreSelections["executors"][number] {
+  return {
+    id: "exec-worktree",
+    type: "worktree",
+    profiles: [{ id: PROFILE_WORKTREE, executor_type: "worktree" }],
+  } as unknown as StoreSelections["executors"][number];
+}
+
+type MultiRepoGuardFake = Pick<
+  DialogFormState,
+  | "agentProfileId"
+  | "workflowAgentProfileId"
+  | "selectedWorkflowId"
+  | "executorId"
+  | "executorProfileId"
+  | "setAgentProfileId"
+  | "setExecutorId"
+  | "setExecutorProfileId"
+  | "noRepository"
+  | "repositories"
+  | "remoteRepos"
+  | "useRemote"
+>;
+function makeMultiRepoFs(overrides: Partial<MultiRepoGuardFake> = {}): DialogFormState {
+  return {
+    agentProfileId: "",
+    workflowAgentProfileId: "",
+    selectedWorkflowId: null,
+    executorId: "exec-docker",
+    executorProfileId: PROFILE_DOCKER,
+    setAgentProfileId: vi.fn(),
+    setExecutorId: vi.fn(),
+    setExecutorProfileId: vi.fn(),
+    noRepository: false,
+    repositories: [],
+    remoteRepos: [],
+    useRemote: false,
+    ...overrides,
+  } as unknown as DialogFormState;
+}
+
+describe("useDefaultSelectionsEffect — multi-repo guard counts Remote rows", () => {
+  it("swaps a non-worktree profile to worktree when 2+ Remote URL rows are set", async () => {
+    // Regression: the multi-repo guard used to count only fs.repositories
+    // (workspace/local rows), so 2 Remote rows + 0 workspace rows slipped
+    // past the guard. The submit gate disabled incompatible profiles at the
+    // option level, but a profile already pre-selected stayed active and the
+    // backend rejected submit.
+    const fs = makeMultiRepoFs({
+      executorProfileId: PROFILE_DOCKER,
+      useRemote: true,
+      remoteRepos: [
+        { key: "remote-0", url: "github.com/acme/a", branch: "", source: "paste" },
+        { key: "remote-1", url: "github.com/acme/b", branch: "", source: "paste" },
+      ] as DialogFormState["remoteRepos"],
+    });
+    const sel = makeSel({ executors: [dockerExecutor(), worktreeExecutor()] });
+
+    renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
+
+    await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(PROFILE_WORKTREE));
+  });
+
+  it("leaves a worktree profile alone when 2+ Remote rows are set (already compatible)", async () => {
+    const fs = makeMultiRepoFs({
+      executorProfileId: PROFILE_WORKTREE,
+      useRemote: true,
+      remoteRepos: [
+        { key: "remote-0", url: "github.com/acme/a", branch: "", source: "paste" },
+        { key: "remote-1", url: "github.com/acme/b", branch: "", source: "paste" },
+      ] as DialogFormState["remoteRepos"],
+    });
+    const sel = makeSel({ executors: [worktreeExecutor()] });
+
+    renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    // No swap needed — guard sees a worktree profile already.
+    expect(fs.setExecutorProfileId).not.toHaveBeenCalled();
+  });
+
+  it("does not swap when only a single Remote row is filled (single-repo Remote tasks keep all executors)", async () => {
+    const fs = makeMultiRepoFs({
+      executorProfileId: PROFILE_DOCKER,
+      useRemote: true,
+      remoteRepos: [
+        { key: "remote-0", url: "github.com/acme/a", branch: "", source: "paste" },
+        { key: "remote-1", url: "", branch: "", source: "paste" },
+      ] as DialogFormState["remoteRepos"],
+    });
+    const sel = makeSel({ executors: [dockerExecutor(), worktreeExecutor()] });
+
+    renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(fs.setExecutorProfileId).not.toHaveBeenCalled();
   });
 });

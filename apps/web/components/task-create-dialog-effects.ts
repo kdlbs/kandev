@@ -21,6 +21,7 @@ import {
   useAgentProfileAutopickEffect,
   useWorkflowAgentProfileEffect,
 } from "@/components/task-create-dialog-autopick";
+import { computeSelectedRepoCount } from "@/components/task-create-dialog-computed";
 
 // Re-export autopick hooks for callers that imported them from this module.
 export { useWorkflowAgentProfileEffect };
@@ -261,10 +262,14 @@ export function useDefaultSelectionsEffect(
   // repos under one task root). If the current profile is non-worktree, swap
   // to a worktree profile — preferring the last-used worktree, otherwise the
   // first one available. Single-repo selections leave the profile alone.
+  //
+  // Count is mode-aware: Remote mode counts non-empty URL rows, workspace
+  // mode counts rows with a repo/path. Without this, 2 Remote rows + 0
+  // workspace rows would slip past the guard because the legacy check only
+  // inspected `fs.repositories` — `computeSelectedRepoCount` handles both.
   useEffect(() => {
     if (!open || !executorProfileId || executors.length === 0) return;
-    const namedRepos = fs.repositories.filter((r) => r.repositoryId || r.localPath);
-    if (namedRepos.length <= 1) return;
+    if (computeSelectedRepoCount(fs) <= 1) return;
     const profileToType = new Map<string, string | undefined>();
     const worktreeProfileIds: string[] = [];
     for (const e of executors) {
@@ -279,7 +284,17 @@ export function useDefaultSelectionsEffect(
     const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID, null);
     const pick = lastId && worktreeProfileIds.includes(lastId) ? lastId : worktreeProfileIds[0];
     void Promise.resolve().then(() => setExecutorProfileId(pick));
-  }, [open, executorProfileId, executors, fs.repositories, setExecutorProfileId]);
+  }, [
+    open,
+    executorProfileId,
+    executors,
+    fs,
+    fs.repositories,
+    fs.remoteRepos,
+    fs.useRemote,
+    fs.noRepository,
+    setExecutorProfileId,
+  ]);
 }
 
 /**
@@ -293,7 +308,17 @@ export function useGitHubUrlErrorEffect(fs: DialogFormState, open: boolean) {
   const { useRemote, setGitHubUrlError } = fs;
   const firstUrl = fs.remoteRepos[0]?.url ?? "";
   useEffect(() => {
-    if (!open || !useRemote) return;
+    if (!open) return;
+    // When the user leaves Remote mode (toggle off / switch to workspace
+    // mode / dialog reopens in non-Remote mode) we must clear any stale
+    // error left over from a previous Remote-mode pass. The early return
+    // used to skip this — the banner stuck around after the field that
+    // produced it had been hidden, which surfaced confusing "Invalid
+    // GitHub URL" text alongside a repo picker.
+    if (!useRemote) {
+      setGitHubUrlError(null);
+      return;
+    }
     const trimmed = firstUrl.trim();
     if (!trimmed) {
       setGitHubUrlError(null);

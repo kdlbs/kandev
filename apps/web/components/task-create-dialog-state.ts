@@ -434,6 +434,12 @@ export function useDialogFormState(
  * lastAutoFilledRef tracks our own writes so re-pasting a different PR URL
  * still works while a user-edited title is preserved.
  */
+/** Sentinel stored in `lastAutoFilledRef` once the user clears an
+ * auto-filled title. Distinguishable from any real suggested title (which
+ * always begins with `"PR #"`) so the effect can refuse to re-apply autofill
+ * for the current URL until the URL itself changes. */
+const USER_CLEARED_SENTINEL = "\0cleared";
+
 function useTitleAutofillFromFirstRowPRInfo(args: {
   open: boolean;
   firstRowUrl: string;
@@ -444,22 +450,44 @@ function useTitleAutofillFromFirstRowPRInfo(args: {
 }) {
   const { open, firstRowUrl, prInfoByUrl, taskName, setTaskName, setHasTitle } = args;
   const lastAutoFilledRef = useRef("");
+  const lastUrlRef = useRef("");
   // Re-read latest info on every render; cheap because the cache is memoized
   // by URL inside the hook.
   const suggested = firstRowUrl ? prInfoByUrl.info(firstRowUrl)?.suggestedTitle : undefined;
+
+  // Reset ownership-tracking when the URL changes — switching to a different
+  // PR URL grants a fresh autofill opportunity even if the user previously
+  // cleared an autofill on the prior URL.
   useEffect(() => {
-    // Reset the sentinel whenever the user clears the title — otherwise a
-    // re-typed value matching a prior auto-fill could be silently replaced.
-    if (!taskName.trim()) {
+    if (firstRowUrl !== lastUrlRef.current) {
+      lastUrlRef.current = firstRowUrl;
       lastAutoFilledRef.current = "";
     }
+  }, [firstRowUrl]);
+
+  useEffect(() => {
+    // Detect the "user cleared an auto-filled title" transition. Once we see
+    // it, lock further autofill for the current URL (until the URL changes,
+    // which is handled by the effect above). Without this, the effect below
+    // would see `trimmed === ""` again and dutifully re-apply the suggested
+    // title that the user just removed.
+    if (
+      !taskName.trim() &&
+      lastAutoFilledRef.current &&
+      lastAutoFilledRef.current !== USER_CLEARED_SENTINEL
+    ) {
+      lastAutoFilledRef.current = USER_CLEARED_SENTINEL;
+    }
   }, [taskName]);
+
   useEffect(() => {
     if (!open) return;
     if (!suggested) return;
+    if (lastAutoFilledRef.current === USER_CLEARED_SENTINEL) return;
     const trimmed = taskName.trim();
-    // Two writeable states: title is empty, or title equals our last auto-fill
-    // (so a fresh PR URL replaces a previous PR's auto-filled title).
+    // Two writeable states: title is empty AND we haven't auto-filled yet, or
+    // title equals our last auto-fill (so a fresh PR URL replaces a previous
+    // PR's auto-filled title).
     if (trimmed && taskName !== lastAutoFilledRef.current) return;
     if (taskName === suggested) return;
     lastAutoFilledRef.current = suggested;
