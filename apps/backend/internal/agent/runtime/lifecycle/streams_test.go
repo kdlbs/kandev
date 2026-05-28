@@ -14,7 +14,7 @@ import (
 // "workspace stream already connected" and burned 5 retries before logging
 // a terminal ERROR. The fix short-circuits when a stream is already attached.
 func TestConnectWorkspaceStream_IdempotentWhenAlreadyAttached(t *testing.T) {
-	sm := NewStreamManager(newTestLogger(), StreamCallbacks{}, nil)
+	sm := NewStreamManager(newTestLogger(), StreamCallbacks{}, nil, nil)
 
 	execution := &AgentExecution{ID: "exec-1", SessionID: "sess-1"}
 	// Pre-attach a non-nil workspace stream — simulates another goroutine
@@ -42,5 +42,48 @@ func TestConnectWorkspaceStream_IdempotentWhenAlreadyAttached(t *testing.T) {
 	case <-ready:
 	default:
 		t.Error("ready channel was not closed on early-exit path")
+	}
+}
+
+// TestConnectWorkspaceStream_BackoffDrainsOnStop is the regression test for
+// the workspace-stream retry-backoff leak. Before the fix, connectWorkspaceStream
+// slept the full backoff in time.Sleep between retries; if the test (or
+// production Manager) tore down while a retry was in flight, the goroutine
+// stranded until the backoff fired, surviving the Manager's Stop(). The fix
+// selects on stopCh so the backoff drains immediately on shutdown.
+//
+// We trigger the failing path by pointing the client at a closed port —
+// StreamWorkspace returns "connection refused" on every attempt, sending the
+// loop into its retry backoff. Closing stopCh must release the goroutine in
+// well under the (uncapped) backoff window.
+func TestConnectWorkspaceStream_BackoffDrainsOnStop(t *testing.T) {
+	stopCh := make(chan struct{})
+	sm := NewStreamManager(newTestLogger(), StreamCallbacks{}, nil, stopCh)
+
+	log := newTestLogger()
+	badClient := agentctl.NewClient("127.0.0.1", 1, log) // port 1 is reserved
+	defer badClient.Close()
+
+	execution := &AgentExecution{
+		ID:        "exec-backoff",
+		SessionID: "sess-backoff",
+		agentctl:  badClient,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		sm.connectWorkspaceStream(execution, nil)
+		close(done)
+	}()
+
+	// Give the loop a beat to hit at least one failed attempt and enter the
+	// backoff sleep — that's the state the regression test cares about.
+	time.Sleep(50 * time.Millisecond)
+	close(stopCh)
+
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("connectWorkspaceStream did not drain on stopCh close — backoff is leaking")
 	}
 }

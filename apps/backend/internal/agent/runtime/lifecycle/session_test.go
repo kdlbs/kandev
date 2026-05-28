@@ -28,6 +28,23 @@ func newSessionTestLogger() *logger.Logger {
 	return log
 }
 
+// newTestStopCh returns a stopCh shared with t.Cleanup so any background
+// StreamManager retry loop that races past the test body's return drains
+// cleanly. Closing on cleanup is what lets goleak.VerifyTestMain stay green
+// for tests that exercise connectWorkspaceStream's backoff.
+func newTestStopCh(t *testing.T) chan struct{} {
+	t.Helper()
+	stopCh := make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-stopCh:
+		default:
+			close(stopCh)
+		}
+	})
+	return stopCh
+}
+
 // mockAgentServer creates a test WebSocket server simulating agentctl.
 // It responds to agent stream requests and tracks which actions were called and in what order.
 type mockAgentServer struct {
@@ -196,12 +213,13 @@ func TestInitializeAndPrompt_StreamBeforeInitialize(t *testing.T) {
 	defer mock.Close()
 
 	log := newSessionTestLogger()
-	sm := NewSessionManager(log, make(chan struct{}))
+	stopCh := newTestStopCh(t)
+	sm := NewSessionManager(log, stopCh)
 
 	// Set up real stream manager with callbacks
 	streamMgr := NewStreamManager(log, StreamCallbacks{
 		OnAgentEvent: func(execution *AgentExecution, event agentctl.AgentEvent) {},
-	}, nil)
+	}, nil, stopCh)
 	sm.SetDependencies(nil, streamMgr, nil, nil)
 
 	client := createTestClient(t, mock.server.URL)
@@ -269,12 +287,13 @@ func TestInitializeAndPrompt_StreamTimeout(t *testing.T) {
 	// This test verifies that InitializeAndPrompt returns an error if
 	// the stream fails to connect within the timeout.
 	log := newSessionTestLogger()
-	sm := NewSessionManager(log, make(chan struct{}))
+	stopCh := newTestStopCh(t)
+	sm := NewSessionManager(log, stopCh)
 
 	// Create a stream manager that will try to connect to a server that doesn't exist
 	streamMgr := NewStreamManager(log, StreamCallbacks{
 		OnAgentEvent: func(execution *AgentExecution, event agentctl.AgentEvent) {},
-	}, nil)
+	}, nil, stopCh)
 	sm.SetDependencies(nil, streamMgr, nil, nil)
 
 	// Point client at a port that doesn't exist
@@ -322,11 +341,12 @@ func TestInitializeAndPrompt_WithTaskDescription(t *testing.T) {
 	defer mock.Close()
 
 	log := newSessionTestLogger()
-	sm := NewSessionManager(log, make(chan struct{}))
+	stopCh := newTestStopCh(t)
+	sm := NewSessionManager(log, stopCh)
 
 	streamMgr := NewStreamManager(log, StreamCallbacks{
 		OnAgentEvent: func(execution *AgentExecution, event agentctl.AgentEvent) {},
-	}, nil)
+	}, nil, stopCh)
 	sm.SetDependencies(nil, streamMgr, nil, nil)
 
 	client := createTestClient(t, mock.server.URL)

@@ -184,7 +184,8 @@ func NewManager(
 	}
 
 	// Initialize stream manager with callbacks that delegate to manager methods
-	// mcpHandler will be set later via SetMCPHandler
+	// mcpHandler will be set later via SetMCPHandler.
+	// stopCh is shared with the manager so workspace-stream backoff drains on Stop.
 	mgr.streamManager = NewStreamManager(log, StreamCallbacks{
 		OnAgentEvent:       mgr.handleAgentEvent,
 		OnStreamDisconnect: mgr.handleStreamDisconnect,
@@ -197,7 +198,7 @@ func NewManager(
 		OnShellExit:        mgr.handleShellExit,
 		OnProcessOutput:    mgr.handleProcessOutput,
 		OnProcessStatus:    mgr.handleProcessStatus,
-	}, nil)
+	}, nil, stopCh)
 
 	// Set session manager dependencies for full orchestration
 	sessionManager.SetDependencies(eventPublisher, mgr.streamManager, executionStore, historyManager)
