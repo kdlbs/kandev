@@ -326,7 +326,7 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 	}
 	defer unlock()
 
-	req, repositoryID, _, _, err := e.buildResumeRequest(ctx, task, session, startAgent)
+	req, repositoryID, execCfg, _, err := e.buildResumeRequest(ctx, task, session, startAgent)
 	if err != nil {
 		return nil, err
 	}
@@ -388,6 +388,21 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 
 	e.persistResumeState(ctx, task.ID, session, startAgent)
 	e.persistWorktreeAssociation(ctx, task.ID, session, repositoryID, resp)
+	// Refresh task_environments after a successful resume so the row reflects
+	// the new worktree, container, and ready status. Without this, sessions
+	// that failed on initial launch (empty task_dir_name / worktree_path,
+	// status=stopped) stay stuck on those stale values even though the resume
+	// just prepared a fresh worktree — the frontend keeps showing
+	// "Executor environment is unavailable (stopped)" and disables chat input.
+	existingEnv, envErr := e.repo.GetTaskEnvironmentByTaskID(ctx, task.ID)
+	if envErr != nil {
+		e.logger.Warn("failed to load task environment for resume persistence",
+			zap.String("task_id", task.ID),
+			zap.String("session_id", session.ID),
+			zap.Error(envErr))
+	} else {
+		e.persistTaskEnvironment(ctx, task.ID, session, existingEnv, req, resp, execCfg)
+	}
 
 	worktreePath := resp.WorktreePath
 	worktreeBranch := resp.WorktreeBranch

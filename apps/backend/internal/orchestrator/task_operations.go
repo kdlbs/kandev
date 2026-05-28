@@ -797,6 +797,34 @@ func (s *Service) applyWorkflowAndPlanMode(ctx context.Context, prompt string, t
 	return effectivePrompt, planMode || stepHasPlanMode
 }
 
+// backfillInitialUserMessageIfMissing records the task's description as the
+// first user message when the session has no messages at all. This covers the
+// edge case where the initial launch failed before recordInitialMessage was
+// called (postLaunchStart only runs after a successful LaunchAgent), leaving
+// the chat empty even though the task carries the prompt the user originally
+// typed.
+//
+// The check requires *zero* messages, not just zero user messages: if any
+// agent output already exists from a partial prior run, the backfilled
+// message would land at the bottom of the chat (CreateMessage stamps
+// CreatedAt=now), which is worse than leaving the chat alone.
+func (s *Service) backfillInitialUserMessageIfMissing(ctx context.Context, taskID, sessionID, prompt string) {
+	if prompt == "" || s.messageCreator == nil {
+		return
+	}
+	msgs, err := s.repo.ListMessages(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("backfill initial message: list messages failed",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	if len(msgs) > 0 {
+		return
+	}
+	s.recordInitialMessage(ctx, taskID, sessionID, prompt, false, false, nil)
+}
+
 // recordInitialMessage creates the initial user message and updates session state after launch.
 // autoStart marks the message as having been created by an automated trigger
 // (workflow auto-start, PR/issue watch, Jira/Linear integration) so cleanup
@@ -931,6 +959,14 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 	}
 	// Preserve persisted task/session state; resume should not mutate state/columns.
 	execution.SessionState = v1.TaskSessionState(session.State)
+
+	// Backfill the initial user message when a prior failed launch never got
+	// to recordInitialMessage. Without this, the resume can succeed and the
+	// agent starts replying, but the chat shows agent output with no user
+	// prompt above it.
+	if task, taskErr := s.repo.GetTask(resumeCtx, taskID); taskErr == nil && task != nil {
+		s.backfillInitialUserMessageIfMissing(resumeCtx, taskID, sessionID, task.Description)
+	}
 
 	s.logger.Debug("task session resumed and ready for input",
 		zap.String("task_id", taskID),

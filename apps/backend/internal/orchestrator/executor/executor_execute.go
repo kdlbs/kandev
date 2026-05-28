@@ -1071,6 +1071,12 @@ func (e *Executor) persistTaskEnvironment(
 		if sandboxID := extractSandboxID(resp.Metadata); sandboxID != "" {
 			existingEnv.SandboxID = sandboxID
 		}
+		// Refresh TaskDirName when the request carries a new value — covers
+		// resume-after-failure where the original env row was stamped with an
+		// empty task_dir_name and the resume regenerates it.
+		if req.TaskDirName != "" {
+			existingEnv.TaskDirName = req.TaskDirName
+		}
 		if err := e.repo.UpdateTaskEnvironment(ctx, existingEnv); err != nil {
 			e.logger.Warn("failed to update task environment",
 				zap.String("task_id", taskID),

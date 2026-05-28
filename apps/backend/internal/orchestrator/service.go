@@ -181,6 +181,9 @@ type sessionExecutorStore interface {
 	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	ListNonTerminalSessionsByAgentInstance(ctx context.Context, agentInstanceID string) ([]*models.TaskSession, error)
 	DeleteTaskSession(ctx context.Context, id string) error
+	// Messages — used by resume to backfill the initial user prompt when a
+	// prior launch failed before recordInitialMessage ran.
+	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
 	// Workspace
 	GetWorkspace(ctx context.Context, id string) (*models.Workspace, error)
 	// Task environment
