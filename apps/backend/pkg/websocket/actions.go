@@ -417,6 +417,61 @@ const (
 	ActionGitHubCleanupIssueTasks  = "github.cleanup.issue_tasks"
 )
 
+// GitLab integration actions
+const (
+	ActionGitLabStatus            = "gitlab.status"
+	ActionGitLabTaskMRsList       = "gitlab.task_mrs.list"
+	ActionGitLabTaskMRGet         = "gitlab.task_mr.get"
+	ActionGitLabMRFeedbackGet     = "gitlab.mr_feedback.get"
+	ActionGitLabReviewWatchesList = "gitlab.review_watches.list"
+	ActionGitLabReviewWatchCreate = "gitlab.review_watches.create"
+	ActionGitLabReviewWatchUpdate = "gitlab.review_watches.update"
+	ActionGitLabReviewWatchDelete = "gitlab.review_watches.delete"
+	ActionGitLabReviewTrigger     = "gitlab.review_watches.trigger"
+	ActionGitLabReviewTriggerAll  = "gitlab.review_watches.trigger_all"
+	ActionGitLabMRWatchesList     = "gitlab.mr_watches.list"
+	ActionGitLabMRWatchDelete     = "gitlab.mr_watches.delete"
+	ActionGitLabMRFilesGet        = "gitlab.mr_files.get"
+	ActionGitLabMRCommitsGet      = "gitlab.mr_commits.get"
+	ActionGitLabTaskMRUpdated     = "gitlab.task_mr.updated"      // Notification
+	ActionGitLabMRFeedbackNotify  = "gitlab.mr_feedback.notify"   // Notification
+	ActionGitLabNewReviewMRNotify = "gitlab.new_review_mr.notify" // Notification
+	ActionGitLabTaskMRSync        = "gitlab.task_mr.sync"
+	ActionGitLabStats             = "gitlab.stats"
+
+	ActionGitLabMRMerge                = "gitlab.mr.merge"
+	ActionGitLabMRApprove              = "gitlab.mr.approve"
+	ActionGitLabMRUnapprove            = "gitlab.mr.unapprove"
+	ActionGitLabMRSetLabels            = "gitlab.mr.set_labels"
+	ActionGitLabMRSetAssignees         = "gitlab.mr.set_assignees"
+	ActionGitLabMRDiscussionNew        = "gitlab.mr.discussion.new"
+	ActionGitLabMRDiscussionResolve    = "gitlab.mr.discussion.resolve"
+	ActionGitLabProjectMergeMethodsGet = "gitlab.project.merge_methods.get"
+
+	// Issue watch actions
+	ActionGitLabIssueWatchesList = "gitlab.issue_watches.list"
+	ActionGitLabIssueWatchCreate = "gitlab.issue_watches.create"
+	ActionGitLabIssueWatchUpdate = "gitlab.issue_watches.update"
+	ActionGitLabIssueWatchDelete = "gitlab.issue_watches.delete"
+	ActionGitLabIssueTrigger     = "gitlab.issue_watches.trigger"
+	ActionGitLabIssueTriggerAll  = "gitlab.issue_watches.trigger_all"
+	ActionGitLabNewIssueNotify   = "gitlab.new_issue.notify" // Notification
+
+	// Action preset actions for the /gitlab page quick-launch prompts.
+	ActionGitLabActionPresetsList   = "gitlab.action_presets.list"
+	ActionGitLabActionPresetsUpdate = "gitlab.action_presets.update"
+	ActionGitLabActionPresetsReset  = "gitlab.action_presets.reset"
+
+	// Project discovery / autocomplete.
+	ActionGitLabListUserProjects = "gitlab.projects.list"
+	ActionGitLabSearchProjects   = "gitlab.projects.search"
+	ActionGitLabProjectBranches  = "gitlab.project.branches"
+
+	// Manual cleanup sweeps.
+	ActionGitLabCleanupReviewTasks = "gitlab.cleanup.review_tasks"
+	ActionGitLabCleanupIssueTasks  = "gitlab.cleanup.issue_tasks"
+)
+
 // Jira integration actions
 const (
 	ActionJiraConfigGet        = "jira.config.get"

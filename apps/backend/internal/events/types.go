@@ -228,6 +228,16 @@ const (
 	GitHubRateLimitUpdated = "github.rate_limit.updated" // GitHub API rate-limit snapshot changed
 )
 
+// Event types for GitLab integration
+const (
+	GitLabMRFeedback     = "gitlab.mr_feedback"      // MR has new feedback (UI notification only)
+	GitLabMRStateChanged = "gitlab.mr_state_changed" // MR state changed (merged, closed, etc.)
+	GitLabNewReviewMR    = "gitlab.new_mr_to_review" // New MR found needing review
+	GitLabNewIssue       = "gitlab.new_issue"        // New issue found matching issue watch
+	GitLabTaskMRUpdated  = "gitlab.task_mr.updated"  // TaskMR record updated (for UI refresh)
+	GitLabWatchEvent     = "gitlab.watch.event"      // Watch created/deleted
+)
+
 // Event types for Jira integration
 const (
 	JiraNewIssue = "jira.new_issue" // New issue found matching a Jira issue watch

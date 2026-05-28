@@ -398,6 +398,58 @@ func (c *MockClient) GetIssueState(_ context.Context, projectPath string, iid in
 	return "", fmt.Errorf("mock: issue %s#%d not found", projectPath, iid)
 }
 
+// MergeMR marks the seeded MR as merged.
+func (c *MockClient) MergeMR(_ context.Context, projectPath string, iid int, _ bool, _ string) (*MR, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	mr, ok := c.mrs[mockMRKey{Project: projectPath, IID: iid}]
+	if !ok {
+		return nil, fmt.Errorf("mock: MR %s!%d not found", projectPath, iid)
+	}
+	mr.State = gitlabStateMerged
+	now := time.Now().UTC()
+	mr.MergedAt = &now
+	return mr, nil
+}
+
+// GetProjectMergeMethods returns a canned merge-methods response (merge + squash).
+func (c *MockClient) GetProjectMergeMethods(context.Context, string) (*ProjectMergeMethods, error) {
+	return &ProjectMergeMethods{Merge: true, AllowSquash: true}, nil
+}
+
+// GetProtectedBranch always reports the branch as unprotected in the mock.
+func (c *MockClient) GetProtectedBranch(context.Context, string, string) (*ProtectedBranch, error) {
+	return nil, nil
+}
+
+// ListUserProjects returns one fake project for the mock.
+func (c *MockClient) ListUserProjects(context.Context) ([]Project, error) {
+	return []Project{
+		{ID: 1, PathWithNamespace: "kandev/sample", Namespace: "kandev", Path: "sample", Name: "sample"},
+	}, nil
+}
+
+// SearchProjects returns the same fake project filtered by query substring.
+func (c *MockClient) SearchProjects(ctx context.Context, query string, _ int) ([]Project, error) {
+	projects, _ := c.ListUserProjects(ctx)
+	if query == "" {
+		return projects, nil
+	}
+	out := make([]Project, 0, len(projects))
+	for _, p := range projects {
+		if p.PathWithNamespace == query || p.Path == query {
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}
+
+// SetMRLabels is a no-op in the mock (seeded MRs are accepted verbatim).
+func (c *MockClient) SetMRLabels(context.Context, string, int, []string) error { return nil }
+
+// SetMRAssignees is a no-op in the mock.
+func (c *MockClient) SetMRAssignees(context.Context, string, int, []int) error { return nil }
+
 // Stats returns a summary of the seeded data, useful for E2E assertions.
 func (c *MockClient) Stats() string {
 	c.mu.Lock()

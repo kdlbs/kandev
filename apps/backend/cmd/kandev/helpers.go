@@ -747,8 +747,9 @@ func registerSecondaryRoutes(
 	}
 
 	if p.services.GitLab != nil {
-		gitlab.RegisterRoutes(p.router, p.services.GitLab, p.log)
-		p.log.Debug("Registered GitLab handlers (HTTP)")
+		gitlab.RegisterRoutesWithDispatcher(p.router, p.gateway.Dispatcher, p.services.GitLab, p.log)
+		gitlab.RegisterMockRoutes(p.router, p.services.GitLab, p.log)
+		p.log.Debug("Registered GitLab handlers (HTTP + WebSocket)")
 	}
 
 	if p.services.Jira != nil {

@@ -30,6 +30,7 @@ import (
 
 	// GitHub integration
 	githubpkg "github.com/kandev/kandev/internal/github"
+	gitlabpkg "github.com/kandev/kandev/internal/gitlab"
 
 	// JIRA integration
 	jirapkg "github.com/kandev/kandev/internal/jira"
@@ -435,6 +436,16 @@ func startAgentInfrastructure(
 		ghPoller.Start(ctx)
 		addCleanup(func() error { ghPoller.Stop(); return nil })
 		log.Info("GitHub poller started")
+	}
+
+	// Start GitLab background poller. Three loops: MR-watch (per-session
+	// branch monitoring), review-watch (saved searches for MRs awaiting
+	// review), issue-watch (saved searches for issues).
+	if services.GitLab != nil {
+		glPoller := gitlabpkg.NewPoller(services.GitLab, eventBus, log)
+		glPoller.Start(ctx)
+		addCleanup(func() error { glPoller.Stop(); return nil })
+		log.Info("GitLab poller started")
 	}
 
 	// Start JIRA poller. Drives two background loops sharing one service: an
