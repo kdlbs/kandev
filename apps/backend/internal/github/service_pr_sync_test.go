@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 	"testing"
-	"time"
+	"testing/synctest"
 )
 
 func TestTriggerPRSync_SyncsExistingWatch(t *testing.T) {
@@ -160,52 +160,52 @@ func TestTriggerPRSyncAll_ThrottlesDetectionProbe(t *testing.T) {
 // per-watch singleflight. We force overlap by blocking the probe: the leader
 // enters FindPRByBranch and parks; the followers must coalesce into it rather
 // than issue their own probes.
+//
+// synctest.Wait() supplies the otherwise-unobservable "all followers have
+// joined the singleflight" signal: it returns only once every goroutine is
+// durably blocked (the leader on the release channel, the followers inside
+// singleflight). That makes the coalescing assertion deterministic without a
+// fixed sleep.
 func TestTriggerPRDetection_CoalescesConcurrentProbes(t *testing.T) {
-	_, svc, mockClient, store := setupPollerTest(t)
-	ctx := context.Background()
+	synctest.Test(t, func(t *testing.T) {
+		_, svc, mockClient, store := setupPollerTest(t)
+		ctx := context.Background()
 
-	watch := &PRWatch{
-		SessionID: "s1",
-		TaskID:    "t1",
-		Owner:     "org",
-		Repo:      "missing",
-		PRNumber:  0,
-		Branch:    "feat/never-merged",
-	}
-	if err := store.CreatePRWatch(ctx, watch); err != nil {
-		t.Fatal(err)
-	}
+		watch := &PRWatch{
+			SessionID: "s1",
+			TaskID:    "t1",
+			Owner:     "org",
+			Repo:      "missing",
+			PRNumber:  0,
+			Branch:    "feat/never-merged",
+		}
+		if err := store.CreatePRWatch(ctx, watch); err != nil {
+			t.Fatal(err)
+		}
 
-	const concurrency = 6
-	entered := make(chan string, concurrency) // buffered so a broken (uncoalesced) impl can't deadlock
-	release := make(chan struct{})
-	mockClient.GateFindPRByBranch(entered, release)
+		const concurrency = 6
+		release := make(chan struct{})
+		mockClient.GateFindPRByBranch(nil, release) // block the leader inside FindPRByBranch
 
-	var wg sync.WaitGroup
-	wg.Add(concurrency)
-	for range concurrency {
-		go func() {
-			defer wg.Done()
-			_, _ = svc.TriggerPRSyncAll(ctx, "t1")
-		}()
-	}
+		var wg sync.WaitGroup
+		wg.Add(concurrency)
+		for range concurrency {
+			go func() {
+				defer wg.Done()
+				if _, err := svc.TriggerPRSyncAll(ctx, "t1"); err != nil {
+					t.Errorf("TriggerPRSyncAll: %v", err)
+				}
+			}()
+		}
 
-	// Wait for the leader probe to enter FindPRByBranch.
-	select {
-	case <-entered:
-	case <-time.After(2 * time.Second):
-		t.Fatal("no probe entered FindPRByBranch")
-	}
+		// Block until the leader is parked in FindPRByBranch and every other
+		// caller has coalesced into its singleflight call.
+		synctest.Wait()
+		close(release)
+		wg.Wait()
 
-	// Give the followers time to reach (and block in) the singleflight before
-	// releasing the leader. The singleflight in-flight window isn't observable
-	// via channels, so this short wait is the one unavoidable timing element;
-	// it only risks a false failure if scheduling stalls >100ms.
-	time.Sleep(100 * time.Millisecond)
-	close(release)
-	wg.Wait()
-
-	if got := mockClient.FindPRByBranchCallCount(); got != 1 {
-		t.Errorf("expected concurrent detection probes to coalesce to 1 GitHub call, got %d", got)
-	}
+		if got := mockClient.FindPRByBranchCallCount(); got != 1 {
+			t.Errorf("expected concurrent detection probes to coalesce to 1 GitHub call, got %d", got)
+		}
+	})
 }
