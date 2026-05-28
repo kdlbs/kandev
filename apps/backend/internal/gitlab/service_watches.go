@@ -182,7 +182,11 @@ func (s *Service) CreateReviewWatch(ctx context.Context, req *CreateReviewWatchR
 		PollIntervalSeconds: interval,
 		CleanupPolicy:       NormalizeCleanupPolicy(req.CleanupPolicy),
 	}
-	if err := s.requireStore().CreateReviewWatch(ctx, rw); err != nil {
+	store := s.requireStore()
+	if store == nil {
+		return nil, errStoreUnavailable
+	}
+	if err := store.CreateReviewWatch(ctx, rw); err != nil {
 		return nil, fmt.Errorf("create review watch: %w", err)
 	}
 	go s.initialReviewCheck(context.Background(), rw)
@@ -203,22 +207,38 @@ func (s *Service) initialReviewCheck(ctx context.Context, watch *ReviewWatch) {
 
 // GetReviewWatch returns a review watch by id.
 func (s *Service) GetReviewWatch(ctx context.Context, id string) (*ReviewWatch, error) {
-	return s.requireStore().GetReviewWatch(ctx, id)
+	store := s.requireStore()
+	if store == nil {
+		return nil, errStoreUnavailable
+	}
+	return store.GetReviewWatch(ctx, id)
 }
 
 // ListReviewWatches lists review watches in a workspace.
 func (s *Service) ListReviewWatches(ctx context.Context, workspaceID string) ([]*ReviewWatch, error) {
-	return s.requireStore().ListReviewWatches(ctx, workspaceID)
+	store := s.requireStore()
+	if store == nil {
+		return nil, errStoreUnavailable
+	}
+	return store.ListReviewWatches(ctx, workspaceID)
 }
 
 // ListAllReviewWatches returns every review watch.
 func (s *Service) ListAllReviewWatches(ctx context.Context) ([]*ReviewWatch, error) {
-	return s.requireStore().ListAllReviewWatches(ctx)
+	store := s.requireStore()
+	if store == nil {
+		return nil, errStoreUnavailable
+	}
+	return store.ListAllReviewWatches(ctx)
 }
 
 // UpdateReviewWatch applies a partial update to a review watch.
 func (s *Service) UpdateReviewWatch(ctx context.Context, id string, req *UpdateReviewWatchRequest) error {
-	rw, err := s.requireStore().GetReviewWatch(ctx, id)
+	store := s.requireStore()
+	if store == nil {
+		return errStoreUnavailable
+	}
+	rw, err := store.GetReviewWatch(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -229,7 +249,7 @@ func (s *Service) UpdateReviewWatch(ctx context.Context, id string, req *UpdateR
 	if req.CleanupPolicy != nil && !IsValidCleanupPolicy(*req.CleanupPolicy) {
 		return fmt.Errorf("invalid cleanup_policy: %q", *req.CleanupPolicy)
 	}
-	return s.requireStore().UpdateReviewWatch(ctx, rw)
+	return store.UpdateReviewWatch(ctx, rw)
 }
 
 // the ReviewWatch shape (with ReviewScope instead of Labels). The two are
@@ -417,7 +437,11 @@ func (s *Service) TriggerReviewWatch(ctx context.Context, id string) ([]*MR, err
 
 // TriggerReviewWatchAll runs every enabled watch and aggregates new MRs.
 func (s *Service) TriggerReviewWatchAll(ctx context.Context) (int, error) {
-	watches, err := s.requireStore().ListEnabledReviewWatches(ctx)
+	store := s.requireStore()
+	if store == nil {
+		return 0, errStoreUnavailable
+	}
+	watches, err := store.ListEnabledReviewWatches(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -467,7 +491,11 @@ func (s *Service) CreateIssueWatch(ctx context.Context, req *CreateIssueWatchReq
 		PollIntervalSeconds: interval,
 		CleanupPolicy:       NormalizeCleanupPolicy(req.CleanupPolicy),
 	}
-	if err := s.requireStore().CreateIssueWatch(ctx, iw); err != nil {
+	store := s.requireStore()
+	if store == nil {
+		return nil, errStoreUnavailable
+	}
+	if err := store.CreateIssueWatch(ctx, iw); err != nil {
 		return nil, fmt.Errorf("create issue watch: %w", err)
 	}
 	go s.initialIssueCheck(context.Background(), iw)
@@ -488,22 +516,38 @@ func (s *Service) initialIssueCheck(ctx context.Context, watch *IssueWatch) {
 
 // GetIssueWatch returns an issue watch by id.
 func (s *Service) GetIssueWatch(ctx context.Context, id string) (*IssueWatch, error) {
-	return s.requireStore().GetIssueWatch(ctx, id)
+	store := s.requireStore()
+	if store == nil {
+		return nil, errStoreUnavailable
+	}
+	return store.GetIssueWatch(ctx, id)
 }
 
 // ListIssueWatches lists issue watches in a workspace.
 func (s *Service) ListIssueWatches(ctx context.Context, workspaceID string) ([]*IssueWatch, error) {
-	return s.requireStore().ListIssueWatches(ctx, workspaceID)
+	store := s.requireStore()
+	if store == nil {
+		return nil, errStoreUnavailable
+	}
+	return store.ListIssueWatches(ctx, workspaceID)
 }
 
 // ListAllIssueWatches returns every issue watch.
 func (s *Service) ListAllIssueWatches(ctx context.Context) ([]*IssueWatch, error) {
-	return s.requireStore().ListAllIssueWatches(ctx)
+	store := s.requireStore()
+	if store == nil {
+		return nil, errStoreUnavailable
+	}
+	return store.ListAllIssueWatches(ctx)
 }
 
 // UpdateIssueWatch applies a partial update.
 func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIssueWatchRequest) error {
-	iw, err := s.requireStore().GetIssueWatch(ctx, id)
+	store := s.requireStore()
+	if store == nil {
+		return errStoreUnavailable
+	}
+	iw, err := store.GetIssueWatch(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -514,7 +558,7 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 	if req.CleanupPolicy != nil && !IsValidCleanupPolicy(*req.CleanupPolicy) {
 		return fmt.Errorf("invalid cleanup_policy: %q", *req.CleanupPolicy)
 	}
-	return s.requireStore().UpdateIssueWatch(ctx, iw)
+	return store.UpdateIssueWatch(ctx, iw)
 }
 
 //nolint:dupl // see applyReviewWatchPatch — same shape, different domain.
@@ -687,7 +731,11 @@ func (s *Service) TriggerIssueWatch(ctx context.Context, id string) ([]*Issue, e
 
 // TriggerIssueWatchAll runs every enabled watch.
 func (s *Service) TriggerIssueWatchAll(ctx context.Context) (int, error) {
-	watches, err := s.requireStore().ListEnabledIssueWatches(ctx)
+	store := s.requireStore()
+	if store == nil {
+		return 0, errStoreUnavailable
+	}
+	watches, err := store.ListEnabledIssueWatches(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -710,32 +758,56 @@ func (s *Service) TriggerIssueWatchAll(ctx context.Context) (int, error) {
 
 // ReserveReviewMRTask atomically claims an MR for task creation.
 func (s *Service) ReserveReviewMRTask(ctx context.Context, watchID, projectPath string, iid int, mrURL string) (bool, error) {
-	return s.requireStore().ReserveReviewMRTask(ctx, watchID, projectPath, iid, mrURL)
+	store := s.requireStore()
+	if store == nil {
+		return false, errStoreUnavailable
+	}
+	return store.ReserveReviewMRTask(ctx, watchID, projectPath, iid, mrURL)
 }
 
 // AssignReviewMRTaskID stamps the claim with the freshly-created task id.
 func (s *Service) AssignReviewMRTaskID(ctx context.Context, watchID, projectPath string, iid int, taskID string) error {
-	return s.requireStore().AssignReviewMRTaskID(ctx, watchID, projectPath, iid, taskID)
+	store := s.requireStore()
+	if store == nil {
+		return errStoreUnavailable
+	}
+	return store.AssignReviewMRTaskID(ctx, watchID, projectPath, iid, taskID)
 }
 
 // ReleaseReviewMRTask undoes a reservation (used after task-create failure).
 func (s *Service) ReleaseReviewMRTask(ctx context.Context, watchID, projectPath string, iid int) error {
-	return s.requireStore().ReleaseReviewMRTask(ctx, watchID, projectPath, iid)
+	store := s.requireStore()
+	if store == nil {
+		return errStoreUnavailable
+	}
+	return store.ReleaseReviewMRTask(ctx, watchID, projectPath, iid)
 }
 
 // ReserveIssueWatchTask atomically claims an issue for task creation.
 func (s *Service) ReserveIssueWatchTask(ctx context.Context, watchID, projectPath string, iid int, issueURL string) (bool, error) {
-	return s.requireStore().ReserveIssueWatchTask(ctx, watchID, projectPath, iid, issueURL)
+	store := s.requireStore()
+	if store == nil {
+		return false, errStoreUnavailable
+	}
+	return store.ReserveIssueWatchTask(ctx, watchID, projectPath, iid, issueURL)
 }
 
 // AssignIssueWatchTaskID stamps the claim with the freshly-created task id.
 func (s *Service) AssignIssueWatchTaskID(ctx context.Context, watchID, projectPath string, iid int, taskID string) error {
-	return s.requireStore().AssignIssueWatchTaskID(ctx, watchID, projectPath, iid, taskID)
+	store := s.requireStore()
+	if store == nil {
+		return errStoreUnavailable
+	}
+	return store.AssignIssueWatchTaskID(ctx, watchID, projectPath, iid, taskID)
 }
 
 // ReleaseIssueWatchTask undoes a reservation.
 func (s *Service) ReleaseIssueWatchTask(ctx context.Context, watchID, projectPath string, iid int) error {
-	return s.requireStore().ReleaseIssueWatchTask(ctx, watchID, projectPath, iid)
+	store := s.requireStore()
+	if store == nil {
+		return errStoreUnavailable
+	}
+	return store.ReleaseIssueWatchTask(ctx, watchID, projectPath, iid)
 }
 
 // --- Event publishing ---

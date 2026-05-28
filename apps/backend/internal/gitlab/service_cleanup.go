@@ -52,7 +52,11 @@ func (s *Service) resolveReviewWatchPolicies(ctx context.Context, tasks []*Revie
 }
 
 func (s *Service) lookupReviewPolicy(ctx context.Context, watchID string) string {
-	w, err := s.requireStore().GetReviewWatch(ctx, watchID)
+	store := s.requireStore()
+	if store == nil {
+		return CleanupPolicyNever
+	}
+	w, err := store.GetReviewWatch(ctx, watchID)
 	if err == nil && w != nil {
 		return w.CleanupPolicy
 	}
@@ -146,7 +150,11 @@ func (s *Service) resolveIssueWatchPolicies(ctx context.Context, tasks []*IssueW
 }
 
 func (s *Service) lookupIssuePolicy(ctx context.Context, watchID string) string {
-	w, err := s.requireStore().GetIssueWatch(ctx, watchID)
+	store := s.requireStore()
+	if store == nil {
+		return CleanupPolicyNever
+	}
+	w, err := store.GetIssueWatch(ctx, watchID)
 	if err == nil && w != nil {
 		return w.CleanupPolicy
 	}
