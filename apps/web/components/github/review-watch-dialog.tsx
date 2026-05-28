@@ -29,6 +29,7 @@ import {
 import { DEFAULT_REVIEW_WATCH_PROMPT } from "@/components/github/review-watch-placeholders";
 import { ReviewWatchPromptField } from "@/components/github/review-watch-prompt-field";
 import { RepoFilterSelector } from "@/components/github/repo-filter-selector";
+import { STEP_DEFAULT, STEP_DEFAULT_LABEL, resolveProfileId } from "@/lib/watcher-profile-default";
 import type {
   RepoFilter,
   ReviewWatch,
@@ -441,15 +442,18 @@ function ProfileFields({
     <div className="grid grid-cols-2 gap-4">
       <SelectField
         label="Agent Profile"
-        description="The agent configuration used to review the PR."
-        value={form.agentProfileId}
-        onChange={(v) => setForm((prev) => ({ ...prev, agentProfileId: v }))}
-        placeholder="Select agent profile"
-        items={agentProfiles.map((p) => ({
-          id: p.id,
-          label: p.label,
-          icon: p.cli_passthrough ? <CliModeIcon /> : undefined,
-        }))}
+        description="Optional — falls back to step default."
+        value={form.agentProfileId || STEP_DEFAULT}
+        onChange={(v) => setForm((prev) => ({ ...prev, agentProfileId: resolveProfileId(v) }))}
+        placeholder={STEP_DEFAULT_LABEL}
+        items={[
+          { id: STEP_DEFAULT, label: STEP_DEFAULT_LABEL },
+          ...agentProfiles.map((p) => ({
+            id: p.id,
+            label: p.label,
+            icon: p.cli_passthrough ? <CliModeIcon /> : undefined,
+          })),
+        ]}
       />
       <div className="space-y-1.5">
         <div className="flex items-center gap-1.5">
@@ -457,16 +461,19 @@ function ProfileFields({
           <HelpTip text="The repository will be automatically cloned to ~/.kandev/repos/<owner>/<repo> if it is not already present in the workspace." />
         </div>
         <p className="text-xs text-muted-foreground">
-          The executor environment where the agent will run.
+          Optional — falls back to step default. The executor environment where the agent will run.
         </p>
         <Select
-          value={form.executorProfileId || undefined}
-          onValueChange={(v) => setForm((prev) => ({ ...prev, executorProfileId: v }))}
+          value={form.executorProfileId || STEP_DEFAULT}
+          onValueChange={(v) =>
+            setForm((prev) => ({ ...prev, executorProfileId: resolveProfileId(v) }))
+          }
         >
           <SelectTrigger className="cursor-pointer">
-            <SelectValue placeholder="Select executor profile" />
+            <SelectValue placeholder={STEP_DEFAULT_LABEL} />
           </SelectTrigger>
           <SelectContent>
+            <SelectItem value={STEP_DEFAULT}>{STEP_DEFAULT_LABEL}</SelectItem>
             {executorProfiles.map((p) => (
               <SelectItem key={p.id} value={p.id}>
                 {p.name}
