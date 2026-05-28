@@ -53,7 +53,11 @@ test.describe("Keyboard Shortcuts Settings", () => {
     await expect(recorderAfterReload).toContainText("T");
   });
 
-  test("can reset a customized shortcut to default", async ({ testPage, apiClient, seedData }) => {
+  test("can reset a customized shortcut back to unbound", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
     // Set a custom shortcut via API
     await apiClient.saveUserSettings({
       workspace_id: seedData.workspaceId,
@@ -70,16 +74,14 @@ test.describe("Keyboard Shortcuts Settings", () => {
     // Should show the custom shortcut (X)
     await expect(recorder).toContainText("X", { timeout: 3_000 });
 
-    // Should have a reset button since it's customized
+    // Click reset (TOGGLE_SIDEBAR has no default binding, so reset clears it)
     const row = recorder.locator("..");
-    const resetButton = row.getByTitle("Reset to default");
+    const resetButton = row.getByTitle(/Reset/);
     await expect(resetButton).toBeVisible();
-
-    // Click reset
     await resetButton.click();
 
-    // Should now show the default (B for Cmd/Ctrl+B)
-    await expect(recorder).toContainText("B", { timeout: 3_000 });
+    // Should now show "Unbound"
+    await expect(recorder).toContainText("Unbound", { timeout: 3_000 });
   });
 
   test("customized command panel shortcut opens the panel", async ({

@@ -78,15 +78,23 @@ function TopbarBreadcrumb({
   subtitle?: string;
   icon?: ReactNode;
 }) {
+  // The Home prefix is redundant now that the AppSidebar always shows a Home
+  // nav item. Only render the back link when a page sets a non-root backHref
+  // (e.g. a true ancestor route within a section).
+  const showBackLink = backHref !== "/" && !!backLabel;
   return (
     <Breadcrumb className="relative z-10 min-w-0">
       <BreadcrumbList className="flex-nowrap text-sm">
-        <BreadcrumbItem className="shrink-0">
-          <BreadcrumbLink asChild>
-            <BackLink href={backHref} label={backLabel} />
-          </BreadcrumbLink>
-        </BreadcrumbItem>
-        <BreadcrumbSeparator className="shrink-0" />
+        {showBackLink && (
+          <>
+            <BreadcrumbItem className="shrink-0">
+              <BreadcrumbLink asChild>
+                <BackLink href={backHref} label={backLabel} />
+              </BreadcrumbLink>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator className="shrink-0" />
+          </>
+        )}
         {parents?.flatMap((p) => [
           <BreadcrumbItem key={`${p.href}-item`} className="shrink-0">
             <BreadcrumbLink asChild>

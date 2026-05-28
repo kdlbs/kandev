@@ -2,7 +2,9 @@ import { describe, it, expect } from "vitest";
 import { SHORTCUTS } from "./constants";
 import {
   CONFIGURABLE_SHORTCUTS,
+  UNBOUND_SHORTCUT,
   getShortcut,
+  isUnboundShortcut,
   resolveAllShortcuts,
   type ConfigurableShortcutId,
 } from "./shortcut-overrides";
@@ -28,7 +30,7 @@ describe("CONFIGURABLE_SHORTCUTS", () => {
     expect(CONFIGURABLE_SHORTCUTS.BOTTOM_TERMINAL.default).toBe(SHORTCUTS.BOTTOM_TERMINAL);
 
     expect(CONFIGURABLE_SHORTCUTS.TOGGLE_SIDEBAR.label).toBe("Toggle Sidebar");
-    expect(CONFIGURABLE_SHORTCUTS.TOGGLE_SIDEBAR.default).toBe(SHORTCUTS.TOGGLE_SIDEBAR);
+    expect(CONFIGURABLE_SHORTCUTS.TOGGLE_SIDEBAR.default).toBe(UNBOUND_SHORTCUT);
 
     expect(CONFIGURABLE_SHORTCUTS.COMMAND_PANEL.label).toBe("Command Panel (Alt)");
     expect(CONFIGURABLE_SHORTCUTS.COMMAND_PANEL.default).toBe(SHORTCUTS.COMMAND_PANEL);
@@ -50,7 +52,7 @@ describe("CONFIGURABLE_SHORTCUTS", () => {
 describe("getShortcut", () => {
   it("returns default when no overrides provided", () => {
     expect(getShortcut("BOTTOM_TERMINAL")).toBe(SHORTCUTS.BOTTOM_TERMINAL);
-    expect(getShortcut("TOGGLE_SIDEBAR")).toBe(SHORTCUTS.TOGGLE_SIDEBAR);
+    expect(getShortcut("TOGGLE_SIDEBAR")).toBe(UNBOUND_SHORTCUT);
   });
 
   it("returns default when override does not contain the ID", () => {
@@ -65,7 +67,19 @@ describe("getShortcut", () => {
 
   it("does not affect other shortcuts when one is overridden", () => {
     const overrides = { BOTTOM_TERMINAL: { key: "x", modifiers: { ctrlOrCmd: true } } };
-    expect(getShortcut("TOGGLE_SIDEBAR", overrides)).toBe(SHORTCUTS.TOGGLE_SIDEBAR);
+    expect(getShortcut("TOGGLE_SIDEBAR", overrides)).toBe(UNBOUND_SHORTCUT);
+  });
+});
+
+describe("isUnboundShortcut", () => {
+  it("returns true for the sentinel and null/undefined", () => {
+    expect(isUnboundShortcut(UNBOUND_SHORTCUT)).toBe(true);
+    expect(isUnboundShortcut(null)).toBe(true);
+    expect(isUnboundShortcut(undefined)).toBe(true);
+  });
+
+  it("returns false for a real shortcut", () => {
+    expect(isUnboundShortcut(SHORTCUTS.BOTTOM_TERMINAL)).toBe(false);
   });
 });
 

@@ -17,6 +17,17 @@ export type StoredShortcutOverrides = Record<
   { key: string; modifiers?: Record<string, boolean> }
 >;
 
+/**
+ * Sentinel "no shortcut" value. `matchesShortcut` never matches a real key
+ * event against an empty key, so using this as a default makes a shortcut
+ * unbound until the user records one.
+ */
+export const UNBOUND_SHORTCUT: KeyboardShortcut = { key: "" as KeyboardShortcut["key"] };
+
+export function isUnboundShortcut(shortcut: KeyboardShortcut | undefined | null): boolean {
+  return !shortcut || (shortcut.key as string) === "";
+}
+
 export const CONFIGURABLE_SHORTCUTS: Record<
   ConfigurableShortcutId,
   { label: string; default: KeyboardShortcut }
@@ -25,7 +36,7 @@ export const CONFIGURABLE_SHORTCUTS: Record<
   FILE_SEARCH: { label: "File Search", default: SHORTCUTS.FILE_SEARCH },
   QUICK_CHAT: { label: "Quick Chat", default: SHORTCUTS.QUICK_CHAT },
   BOTTOM_TERMINAL: { label: "Toggle Bottom Terminal", default: SHORTCUTS.BOTTOM_TERMINAL },
-  TOGGLE_SIDEBAR: { label: "Toggle Sidebar", default: SHORTCUTS.TOGGLE_SIDEBAR },
+  TOGGLE_SIDEBAR: { label: "Toggle Sidebar", default: UNBOUND_SHORTCUT },
   COMMAND_PANEL: { label: "Command Panel (Alt)", default: SHORTCUTS.COMMAND_PANEL },
   NEW_TASK: { label: "New Task", default: SHORTCUTS.NEW_TASK },
   FOCUS_INPUT: { label: "Focus Chat Input", default: SHORTCUTS.FOCUS_INPUT },
