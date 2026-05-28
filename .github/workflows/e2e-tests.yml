@@ -93,7 +93,15 @@ jobs:
     # binaries (Chromium etc.) — see .github/docker/ci-base/Dockerfile. This is
     # the biggest speedup since `npx playwright install chromium --with-deps`
     # alone took ~1.5–2 min per shard.
-    container: ghcr.io/kdlbs/kandev-ci:latest
+    #
+    # `--ipc=host` is required for Chromium: the default container `/dev/shm`
+    # is only ~64MiB, which causes tabs to slow to a crawl and renderers to
+    # crash mid-test. Microsoft's Playwright-in-Docker guide calls this out
+    # explicitly; without it our shards time out at 22 min while the same
+    # tests on a bare ubuntu runner finish in ~8–15 min.
+    container:
+      image: ghcr.io/kdlbs/kandev-ci:latest
+      options: --ipc=host
     timeout-minutes: 22
     # Container jobs default to `sh`; pin to bash.
     defaults:
