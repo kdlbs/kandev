@@ -363,7 +363,14 @@ jobs:
 
       - name: Merge reports
         working-directory: apps/web
-        run: npx playwright merge-reports --reporter=html ./e2e/blob-reports
+        # `-c e2e/playwright.config.ts` is required because the blobs come from
+        # two different absolute checkout paths: the containerized `e2e` shards
+        # check out under `/__w/...` while `e2e-containers` runs on the host
+        # runner and checks out under `/home/runner/work/...`. Playwright
+        # embeds the absolute testDir in each blob and refuses to merge
+        # reports recorded with different test directories — passing the
+        # config makes it normalize against the config's `testDir` instead.
+        run: npx playwright merge-reports --config e2e/playwright.config.ts --reporter=html ./e2e/blob-reports
 
       - name: Upload merged report
         uses: actions/upload-artifact@v5
