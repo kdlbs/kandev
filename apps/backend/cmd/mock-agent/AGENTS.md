@@ -12,7 +12,7 @@ Friendly aliases live in `handler.go` next to the dispatcher: `/ask-single`, `/a
 
 **2. Inline scripts — `e2e:<directive>(...)`**
 
-`script.go` parses prompts starting with `e2e:` (no leading slash) as multi-line scripts. Supported directives include `e2e:message(...)`, `e2e:thinking(...)`, `e2e:tool_use("Name", {...})`, `e2e:tool_result(...)`, `e2e:delay(ms)`, and the MCP-flavoured `e2e:mcp:kandev:<tool>({...})`. Comments start with `#`, blank lines are ignored. Tests live in `script_test.go`.
+`script.go` parses prompts starting with `e2e:` (no leading slash) as multi-line scripts. Supported directives include `e2e:message(...)`, `e2e:thinking(...)`, `e2e:tool_use("Name", {...})`, `e2e:tool_result(...)`, `e2e:delay(ms)`, the Monitor-flavoured `e2e:monitor_start/event/end`, and the MCP-flavoured `e2e:mcp:kandev:<tool>({...})`. Comments start with `#`, blank lines are ignored. Tests live in `script_test.go`.
 
 Use predefined scenarios for anything you want to trigger from the slash menu or replay across sessions; use inline scripts for ad-hoc shapes inside a single E2E spec or manual session.
 
@@ -33,8 +33,22 @@ This avoids burning real-agent tokens, gives you a deterministic payload to iter
 - `e.text(s)` / `e.thought(s)` — plain agent message vs reasoning channel.
 - `e.startTool(id, title, kind, input, locs...)` / `e.completeTool(id, output)` — paired tool-call lifecycle.
 - `e.plan(entries)` — ACP plan updates.
-- `e.startMonitorTool(id, taskID, command)` / `e.emitMonitorEvent(taskID, body)` / `e.endMonitorTool(id)` — reproduces the two-frame Monitor wire pattern the kandev ACP adapter recognises. Use these instead of building raw `SessionNotification`s when you need to test the Monitor recogniser path; they embed the correct `_meta.claudeCode.toolName=Monitor` shape.
+- `e.startMonitorTool(id, taskID, command)` / `e.emitMonitorEvent(taskID, body)` / `e.endMonitorTool(id)` — reproduces the two-frame Monitor wire pattern the kandev ACP adapter recognises.
+- `e.startSubagentTool(...)` / `e.completeSubagentTool(...)` — claude-style subagent (Task) frames with the `_meta.claudeCode` Agent marker and result metrics.
 - `e.requestPermission(...)` — interactive permission flow for scenarios that need an Allow/Reject decision.
+
+### Emitting `_meta`-tagged tool calls
+
+The acp-go-sdk has no `WithStartMeta`/`WithUpdateMeta`. To reproduce claude-agent-acp's `_meta.claudeCode.*` wire shape (`Monitor`, `Agent`-subagent), set `tc.Meta` via a local option closure — see `startMonitorTool` / `startSubagentTool` in `emitter.go`. Use these instead of building raw `SessionNotification`s when you need to exercise the adapter's `_meta` recognisers.
+
+## Rebuild before running e2e (easy to miss)
+
+The web e2e suite runs the **prebuilt host binary** `apps/backend/bin/mock-agent` (resolved via `PATH`); the `containers` project additionally uses `bin/mock-agent-linux-amd64`. `global-setup.ts` only checks the binary **exists**, not that it's current — so a stale binary silently runs the OLD behavior and your new scenario/edit won't take effect. After changing anything under `cmd/mock-agent`:
+
+```bash
+make -C apps/backend build-mock-agent          # host binary (default suite)
+make -C apps/backend build-mock-agent-linux    # only for the `containers` project
+```
 
 ## Tests
 

@@ -53,6 +53,10 @@ Env knobs (all optional): `KANDEV_DEBUG_ACP_MAX_FILES` (default 200), `KANDEV_DE
 
 **PRIVACY / PERF:** frames carry the full prompt, file, and tool-call content. Keep this strictly behind the debug flag and local-dev-scoped — never enable in a shared/production deployment. When agentctl runs inside a Docker executor the files land *inside the container*, so this is meant for standalone/dev.
 
+### Recognizing claude-acp meta-tagged tools
+
+`claude-agent-acp` tags certain tool calls with `_meta.claudeCode.toolName` (e.g. `Monitor`, `ScheduleWakeup`, `Agent` for subagents) and may carry results in `_meta.claudeCode.toolResponse`. These are normalized into typed `streams.NormalizedPayload` kinds in `server/adapter/transport/acp/`. The established pattern is **one file per recognized tool** (`monitor.go`, `wakeup.go`, `subagent.go`), each with a defensive untyped-map recognizer (`recognize*`/`is*Meta`/`extract*`), a typed payload, and a sibling `*_test.go`. `convertToolCallUpdate` stashes `title`/`Meta` into the normalizer args; result enrichment happens in `convertToolCallResultUpdate`. To add another claude-acp meta-tool, copy that shape — don't inline detection in `adapter.go`. Detection can also be cross-agent: subagent recognition keys off Claude's `_meta`, OpenCode's tool `title`, and Cursor's `rawInput._toolName`.
+
 ## Further scoped notes
 
 - `server/api/AGENTS.md` — reverse-proxy body rewriting (`Accept-Encoding`) and iframe-blocking header stripping.
