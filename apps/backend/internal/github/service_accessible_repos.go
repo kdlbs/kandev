@@ -21,8 +21,13 @@ const (
 )
 
 // userOrgsCacheKey is the singleton key for the cached ListUserOrgs result.
-// The cache is service-instance-scoped — the authenticated user is fixed for
-// the lifetime of the Service — so a constant key is sufficient.
+//
+// The authenticated user can change at runtime (ConfigureToken / ClearToken
+// swap s.client without rebuilding the Service), so a constant key would
+// surface the previous identity's orgs to the next caller. Both ConfigureToken
+// and ClearToken invoke ClearAccessibleReposCaches to invalidate this cache
+// (and the merged accessibleReposCache) on every auth change, which keeps the
+// constant key safe.
 const userOrgsCacheKey = "user-orgs"
 
 // clampAccessibleReposLimit normalises caller-supplied limit values: <=0 falls
@@ -99,10 +104,18 @@ func (s *Service) cachedListUserOrgs(ctx context.Context) ([]GitHubOrg, error) {
 // ClearAccessibleReposCaches drops every cached entry from the accessible-repos
 // and user-orgs caches. Used by the e2e mock controller so flipping the mock's
 // "repos unavailable" toggle takes effect immediately instead of waiting for the
-// 60s TTL on a prior cached success to expire.
+// 60s TTL on a prior cached success to expire, and by ConfigureToken / ClearToken
+// so an auth change invalidates the user-scoped caches synchronously.
+//
+// Nil-guards each cache because tests construct Service literals without going
+// through NewService (so the caches stay nil).
 func (s *Service) ClearAccessibleReposCaches() {
-	s.accessibleReposCache.clear()
-	s.userOrgsCache.clear()
+	if s.accessibleReposCache != nil {
+		s.accessibleReposCache.clear()
+	}
+	if s.userOrgsCache != nil {
+		s.userOrgsCache.clear()
+	}
 }
 
 // fetchAccessibleRepos fans out a SearchOrgRepos call per org plus a

@@ -202,4 +202,60 @@ describe("usePRInfoByURL — cache invalidation", () => {
     expect(result.current.info("https://github.com/who/what/pull/1")).toBeUndefined();
     expect(result.current.loading("https://github.com/who/what/pull/1")).toBe(false);
   });
+
+  it("ignores a stale fetch resolved after clear() + ensure() restarted the request", async () => {
+    // Simulates the race the per-URL sequence counter guards: the first
+    // fetch is still in flight when the caller clear()s and re-ensure()s;
+    // the SECOND fetch resolves first; the FIRST (stale) fetch then
+    // resolves and must NOT clobber the state.
+    let resolveFirst: ((v: ReturnType<typeof makePR>) => void) | null = null;
+    let resolveSecond: ((v: ReturnType<typeof makePR>) => void) | null = null;
+    fetchPRInfoMock
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSecond = resolve;
+          }),
+      );
+
+    const { result } = renderHook(() => usePRInfoByURL());
+
+    act(() => {
+      result.current.ensure(PR_URL_A);
+    });
+    await waitFor(() => expect(fetchPRInfoMock).toHaveBeenCalledTimes(1));
+
+    // Clear forgets the cached entry AND aborts the in-flight request;
+    // immediately re-ensure() to kick off a fresh request for the same URL.
+    act(() => {
+      result.current.clear(PR_URL_A);
+      result.current.ensure(PR_URL_A);
+    });
+    await waitFor(() => expect(fetchPRInfoMock).toHaveBeenCalledTimes(2));
+
+    // Second fetch resolves first with the up-to-date PR (title "Fresh").
+    act(() => {
+      resolveSecond?.(makePR({ number: 99, title: "Fresh" }));
+    });
+    await waitFor(() => expect(result.current.info(PR_URL_A)?.prNumber).toBe(99));
+
+    // Now the stale first fetch resolves — its callback must observe that
+    // its sequence number is no longer current and bail without overwriting
+    // the fresh state.
+    act(() => {
+      resolveFirst?.(makePR({ number: 42, title: "Stale" }));
+    });
+    // Give the microtask queue a chance to drain.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(result.current.info(PR_URL_A)?.prNumber).toBe(99);
+    expect(result.current.info(PR_URL_A)?.suggestedTitle).toBe("PR #99: Fresh");
+  });
 });

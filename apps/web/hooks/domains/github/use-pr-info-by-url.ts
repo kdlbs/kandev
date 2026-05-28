@@ -76,6 +76,11 @@ export function usePRInfoByURL(): UsePRInfoByURLResult {
   const inFlightRef = useRef<Set<string>>(new Set());
   const loadedRef = useRef<Set<string>>(new Set());
   const abortersRef = useRef<Map<string, AbortController>>(new Map());
+  // Per-URL request sequence number. Incremented before each fetch so the
+  // .then/.catch/.finally callbacks can confirm they're still the latest
+  // request for `url` — a clear() or follow-up ensure() bumps the sequence
+  // and any in-flight callbacks fall through without mutating state.
+  const requestSeqByURLRef = useRef<Map<string, number>>(new Map());
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -83,12 +88,14 @@ export function usePRInfoByURL(): UsePRInfoByURLResult {
     const aborters = abortersRef.current;
     const inFlight = inFlightRef.current;
     const loaded = loadedRef.current;
+    const seqs = requestSeqByURLRef.current;
     return () => {
       mountedRef.current = false;
       for (const controller of aborters.values()) controller.abort();
       aborters.clear();
       inFlight.clear();
       loaded.clear();
+      seqs.clear();
     };
   }, []);
 
@@ -110,12 +117,18 @@ export function usePRInfoByURL(): UsePRInfoByURLResult {
     inFlightRef.current.add(url);
     const controller = new AbortController();
     abortersRef.current.set(url, controller);
+    // Snapshot this request's sequence number; the settled callbacks below
+    // compare against the latest value and bail if a newer request for the
+    // same URL has superseded this one.
+    const seq = (requestSeqByURLRef.current.get(url) ?? 0) + 1;
+    requestSeqByURLRef.current.set(url, seq);
 
     fetchPRInfo(parsed.owner, parsed.repo, parsed.prNumber, {
       init: { signal: controller.signal },
     })
       .then((pr) => {
         if (!mountedRef.current) return;
+        if (requestSeqByURLRef.current.get(url) !== seq) return;
         loadedRef.current.add(url);
         const info: PRInfo = {
           prHeadBranch: pr.head_branch,
@@ -130,6 +143,7 @@ export function usePRInfoByURL(): UsePRInfoByURLResult {
       })
       .catch(() => {
         if (!mountedRef.current) return;
+        if (requestSeqByURLRef.current.get(url) !== seq) return;
         // On failure mark loaded so we don't retry in a tight loop. Callers
         // that want to retry can clear() and ensure() again.
         loadedRef.current.add(url);
@@ -139,6 +153,7 @@ export function usePRInfoByURL(): UsePRInfoByURLResult {
         }));
       })
       .finally(() => {
+        if (requestSeqByURLRef.current.get(url) !== seq) return;
         inFlightRef.current.delete(url);
         abortersRef.current.delete(url);
       });
@@ -150,6 +165,9 @@ export function usePRInfoByURL(): UsePRInfoByURLResult {
     if (!url) return;
     inFlightRef.current.delete(url);
     loadedRef.current.delete(url);
+    // Bump the sequence so any in-flight callbacks for this URL bail —
+    // they would otherwise resurrect the cleared state.
+    requestSeqByURLRef.current.set(url, (requestSeqByURLRef.current.get(url) ?? 0) + 1);
     const aborter = abortersRef.current.get(url);
     if (aborter) {
       aborter.abort();

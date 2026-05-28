@@ -202,6 +202,12 @@ func (s *Service) ConfigureToken(ctx context.Context, token string) error {
 	s.authMethod = AuthMethodPAT
 	s.mu.Unlock()
 
+	// Drop user-scoped caches — the previous token's user/orgs and merged
+	// repo list are no longer valid under the new identity. Without this,
+	// the picker would surface the prior user's repos for up to 60s after
+	// a token swap.
+	s.ClearAccessibleReposCaches()
+
 	return nil
 }
 
@@ -226,6 +232,9 @@ func (s *Service) ClearToken(ctx context.Context) error {
 	s.client = nil
 	s.authMethod = AuthMethodNone
 	s.mu.Unlock()
+
+	// Drop user-scoped caches — see ConfigureToken for rationale.
+	s.ClearAccessibleReposCaches()
 
 	// Try to re-establish connection via other methods
 	s.retryClientCreation(ctx)

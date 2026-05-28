@@ -79,6 +79,7 @@ function makeBranchesByUrl(ensure = vi.fn()) {
     branches: () => [],
     loading: () => false,
     ensure,
+    clear: () => undefined,
   };
 }
 

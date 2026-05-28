@@ -108,6 +108,7 @@ function makeFs(): DialogFormState {
       branches: () => [],
       loading: () => false,
       ensure: () => undefined,
+      clear: () => undefined,
     },
     prInfoByUrl: {
       info: () => undefined,

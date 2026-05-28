@@ -624,6 +624,42 @@ func TestHandleListAccessibleRepos_500_OnUnknownError(t *testing.T) {
 	}
 }
 
+// TestHandleListAccessibleRepos_PreservesAPIErrorStatus verifies that when the
+// upstream GitHub API returns 401 / 403 / 404, the handler surfaces the same
+// status to the frontend rather than collapsing it into a generic 500. The
+// frontend needs the distinct status to render the right UX (auth re-prompt,
+// permission notice, "not found").
+func TestHandleListAccessibleRepos_PreservesAPIErrorStatus(t *testing.T) {
+	cases := []struct {
+		name       string
+		statusCode int
+	}{
+		{"unauthorized", http.StatusUnauthorized},
+		{"forbidden", http.StatusForbidden},
+		{"not_found", http.StatusNotFound},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sc := &listAccessibleReposErrClient{
+				listOrgsErr: &GitHubAPIError{
+					StatusCode: tc.statusCode,
+					Endpoint:   "/user/orgs",
+					Body:       "{}",
+				},
+			}
+			router, _ := setupControllerTest(sc)
+
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/github/repos", nil)
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			if w.Code != tc.statusCode {
+				t.Fatalf("expected %d, got %d: %s", tc.statusCode, w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
 func TestHttpMergePR_Conflict(t *testing.T) {
 	sc := &stubClient{
 		mergePRFn: func(context.Context, string, string, int, string) error {

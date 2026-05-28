@@ -130,6 +130,24 @@ describe("useAccessibleRepos — errors, cache & unmount", () => {
     expect(result.current.loading).toBe(false);
   });
 
+  it("clears stale repos when a follow-up query errors", async () => {
+    // First query succeeds and populates repos. The follow-up query errors —
+    // the UI must NOT keep showing the previous query's repos next to the
+    // new query's error banner.
+    fetchAccessibleReposMock.mockResolvedValueOnce([makeRepo("foo-1"), makeRepo("foo-2")]);
+
+    const { result } = renderHook(() => useAccessibleRepos("foo"));
+    await waitFor(() => expect(result.current.repos).toHaveLength(2));
+
+    fetchAccessibleReposMock.mockRejectedValueOnce(new Error("boom"));
+    act(() => result.current.search("bar"));
+
+    await waitFor(() => expect(result.current.error).toBeInstanceOf(Error));
+    expect(result.current.repos).toEqual([]);
+    expect(result.current.unavailable).toBe(false);
+    expect(result.current.loading).toBe(false);
+  });
+
   it("caches results by query — repeating a query does not re-fetch", async () => {
     fetchAccessibleReposMock.mockResolvedValueOnce([makeRepo("initial")]);
 

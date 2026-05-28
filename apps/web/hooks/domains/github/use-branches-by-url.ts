@@ -36,6 +36,12 @@ export type UseBranchesByURLResult = {
   branches: (url: string) => Branch[];
   loading: (url: string) => boolean;
   ensure: (url: string) => void;
+  /**
+   * Forget the cached entry for `url` so the next `ensure(url)` re-fetches.
+   * Aborts any in-flight request and discards any pending callbacks via the
+   * per-URL sequence counter. Use after a failed fetch to retry.
+   */
+  clear: (url: string) => void;
 };
 
 const EMPTY: Branch[] = [];
@@ -48,6 +54,11 @@ export function useBranchesByURL(): UseBranchesByURLResult {
   const inFlightRef = useRef<Set<string>>(new Set());
   const loadedRef = useRef<Set<string>>(new Set());
   const abortersRef = useRef<Map<string, AbortController>>(new Map());
+  // Per-URL request sequence. Incremented on every fetch and on clear();
+  // settled callbacks compare against the latest value and bail when a newer
+  // request has superseded them. Prevents a stale fetch from clobbering the
+  // state set by a later ensure() for the same URL.
+  const requestSeqByURLRef = useRef<Map<string, number>>(new Map());
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -59,12 +70,14 @@ export function useBranchesByURL(): UseBranchesByURLResult {
     const aborters = abortersRef.current;
     const inFlight = inFlightRef.current;
     const loaded = loadedRef.current;
+    const seqs = requestSeqByURLRef.current;
     return () => {
       mountedRef.current = false;
       for (const controller of aborters.values()) controller.abort();
       aborters.clear();
       inFlight.clear();
       loaded.clear();
+      seqs.clear();
     };
   }, []);
 
@@ -90,12 +103,15 @@ export function useBranchesByURL(): UseBranchesByURLResult {
     inFlightRef.current.add(url);
     const controller = new AbortController();
     abortersRef.current.set(url, controller);
+    const seq = (requestSeqByURLRef.current.get(url) ?? 0) + 1;
+    requestSeqByURLRef.current.set(url, seq);
 
     fetchRepoBranches(parsed.owner, parsed.repo, {
       init: { signal: controller.signal },
     })
       .then((res) => {
         if (!mountedRef.current) return;
+        if (requestSeqByURLRef.current.get(url) !== seq) return;
         const branches: Branch[] = (res?.branches ?? []).map((b) => ({
           name: b.name,
           type: "remote" as const,
@@ -108,9 +124,11 @@ export function useBranchesByURL(): UseBranchesByURLResult {
       })
       .catch(() => {
         if (!mountedRef.current) return;
-        // On failure mark loaded so we don't retry in a tight loop. Callers
-        // that need to retry can clear the entry and call ensure() again.
-        loadedRef.current.add(url);
+        if (requestSeqByURLRef.current.get(url) !== seq) return;
+        // Don't mark `loaded` on failure — leaving it unmarked allows the
+        // next ensure() call for the same URL to retry instead of
+        // short-circuiting on the cached failure. Callers can also call
+        // clear(url) to force a refetch.
         setState((prev) => ({
           ...prev,
           [url]: {
@@ -120,13 +138,32 @@ export function useBranchesByURL(): UseBranchesByURLResult {
         }));
       })
       .finally(() => {
+        if (requestSeqByURLRef.current.get(url) !== seq) return;
         inFlightRef.current.delete(url);
         abortersRef.current.delete(url);
       });
   }, []);
 
+  const clear = useCallback((url: string) => {
+    if (!url) return;
+    inFlightRef.current.delete(url);
+    loadedRef.current.delete(url);
+    requestSeqByURLRef.current.set(url, (requestSeqByURLRef.current.get(url) ?? 0) + 1);
+    const aborter = abortersRef.current.get(url);
+    if (aborter) {
+      aborter.abort();
+      abortersRef.current.delete(url);
+    }
+    setState((prev) => {
+      if (!(url in prev)) return prev;
+      const next = { ...prev };
+      delete next[url];
+      return next;
+    });
+  }, []);
+
   const branches = useCallback((url: string): Branch[] => state[url]?.branches ?? EMPTY, [state]);
   const loading = useCallback((url: string): boolean => Boolean(state[url]?.loading), [state]);
 
-  return { branches, loading, ensure };
+  return { branches, loading, ensure, clear };
 }

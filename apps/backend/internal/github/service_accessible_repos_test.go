@@ -339,3 +339,67 @@ func TestListAccessibleRepos_AllSourcesFail(t *testing.T) {
 		t.Fatalf("expected error when every source fails, got nil")
 	}
 }
+
+// TestListAccessibleRepos_CacheClearedOnTokenChange verifies the
+// user-orgs + merged-repos caches are invalidated when authentication
+// changes. The Service lives across token swaps (ConfigureToken /
+// ClearToken mutate s.client in place rather than rebuilding the Service),
+// so without an explicit invalidation, a token swap would surface the
+// previous user's repos for up to the 60s TTL.
+//
+// We exercise the invalidation path directly via ClearAccessibleReposCaches
+// — both ConfigureToken and ClearToken call it after every auth change.
+func TestListAccessibleRepos_CacheClearedOnTokenChange(t *testing.T) {
+	scA := &accessibleReposStubClient{
+		orgs: []GitHubOrg{{Login: "user-a-org"}},
+		userRepos: []GitHubRepo{
+			{FullName: "user-a/repo", Owner: "user-a", Name: "repo"},
+		},
+		repoByOrg: map[string][]GitHubRepo{
+			"user-a-org": {{FullName: "user-a-org/widget", Owner: "user-a-org", Name: "widget"}},
+		},
+	}
+	svc := newAccessibleReposTestService(scA)
+
+	// Populate the caches by issuing one call under "user A".
+	if _, err := svc.ListAccessibleRepos(context.Background(), "", 50); err != nil {
+		t.Fatalf("initial ListAccessibleRepos: %v", err)
+	}
+	if got := scA.listOrgCalls.Load(); got != 1 {
+		t.Fatalf("user-a ListUserOrgs called %d times, want 1", got)
+	}
+
+	// Swap the client to a "user B" stub and clear caches — this mirrors
+	// what ConfigureToken / ClearToken do when auth changes.
+	scB := &accessibleReposStubClient{
+		orgs: []GitHubOrg{{Login: "user-b-org"}},
+		userRepos: []GitHubRepo{
+			{FullName: "user-b/repo", Owner: "user-b", Name: "repo"},
+		},
+		repoByOrg: map[string][]GitHubRepo{
+			"user-b-org": {{FullName: "user-b-org/foo", Owner: "user-b-org", Name: "foo"}},
+		},
+	}
+	svc.client = scB
+	svc.ClearAccessibleReposCaches()
+
+	got, err := svc.ListAccessibleRepos(context.Background(), "", 50)
+	if err != nil {
+		t.Fatalf("post-swap ListAccessibleRepos: %v", err)
+	}
+	// user-b's fan-out must have actually run (cache miss after the clear).
+	if calls := scB.listOrgCalls.Load(); calls != 1 {
+		t.Errorf("user-b ListUserOrgs called %d times, want 1 (cache miss expected)", calls)
+	}
+	// And we should see ONLY user-b's repos — no leakage from user-a's cache.
+	names := map[string]bool{}
+	for _, r := range got {
+		names[r.FullName] = true
+	}
+	if !names["user-b/repo"] || !names["user-b-org/foo"] {
+		t.Errorf("missing user-b repos in result: %v", names)
+	}
+	if names["user-a/repo"] || names["user-a-org/widget"] {
+		t.Errorf("user-a repos leaked across token swap: %v", names)
+	}
+}

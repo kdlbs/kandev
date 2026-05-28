@@ -505,7 +505,19 @@ func (c *Controller) httpListAccessibleRepos(ctx *gin.Context) {
 			})
 			return
 		}
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		// Preserve GitHub-side status codes (401 / 403 / 404) so the
+		// frontend can render the appropriate UX — auth re-prompt for 401,
+		// permission notice for 403, etc. — instead of collapsing every
+		// upstream failure into an opaque 500.
+		status := http.StatusInternalServerError
+		var apiErr *GitHubAPIError
+		if errors.As(err, &apiErr) {
+			switch apiErr.StatusCode {
+			case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
+				status = apiErr.StatusCode
+			}
+		}
+		ctx.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"repos": repos})

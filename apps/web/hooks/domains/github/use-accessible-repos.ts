@@ -112,7 +112,12 @@ export function useAccessibleRepos(initialQuery: string = ""): UseAccessibleRepo
             return;
           }
           if (err instanceof DOMException && err.name === "AbortError") return;
+          // Clear stale `repos` so the UI doesn't render the previous
+          // query's results next to the new query's error banner. We don't
+          // touch cacheRef — the previous query's entry stays cached for
+          // when the user navigates back to it.
           setError(err instanceof Error ? err : new Error(String(err)));
+          setRepos([]);
           setLoading(false);
         });
     }

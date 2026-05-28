@@ -51,6 +51,29 @@ describe("parseGitHubRepoUrl", () => {
     });
   });
 
+  it("tolerates a query string suffix (canonical share URL)", () => {
+    // The GitHub UI pins active tabs via ?tab=… and similar; the picker
+    // should accept these without stripping the tail by hand.
+    expect(parseGitHubRepoUrl("https://github.com/acme/site?tab=readme")).toEqual({
+      owner: "acme",
+      repo: "site",
+    });
+  });
+
+  it("tolerates a fragment suffix", () => {
+    expect(parseGitHubRepoUrl("https://github.com/acme/site#readme")).toEqual({
+      owner: "acme",
+      repo: "site",
+    });
+  });
+
+  it("tolerates a trailing slash followed by a fragment", () => {
+    expect(parseGitHubRepoUrl("https://github.com/acme/site/#section")).toEqual({
+      owner: "acme",
+      repo: "site",
+    });
+  });
+
   it("accepts hyphens, dots, and underscores in owner and repo", () => {
     expect(parseGitHubRepoUrl("https://github.com/my-org_1.x/repo-name_2.x")).toEqual({
       owner: "my-org_1.x",

@@ -64,13 +64,30 @@ function pickExecutorDisabledReason(
 
 /**
  * The form has a repo selection when either: (a) any chip in the unified
- * repo list has a repo set, (b) Remote (URL) mode has a non-empty first
- * URL, or (c) the task is intentionally repo-less (noRepository toggle on).
+ * repo list has a repo set, (b) Remote (URL) mode has at least one row with a
+ * non-empty URL (any row — not just row 0), or (c) the task is intentionally
+ * repo-less (noRepository toggle on).
+ *
+ * Exported for unit-testing the repo-selection gate independently of the
+ * full `useDialogComputed` React hook.
  */
-function computeHasRepositorySelection(fs: DialogFormState, firstRemoteUrl: string): boolean {
+export function computeHasRepositorySelection(fs: DialogFormState): boolean {
   if (fs.noRepository) return true;
   if (fs.repositories.some((r) => r.repositoryId || r.localPath)) return true;
-  return Boolean(fs.useRemote && firstRemoteUrl);
+  return Boolean(fs.useRemote && fs.remoteRepos.some((r) => r.url.trim() !== ""));
+}
+
+/**
+ * Number of repositories the task will operate on. Combines workspace/local
+ * chips and (when Remote mode is on) any non-empty remote-URL rows so the
+ * multi-repo executor gate trips on multi-row remote selections too.
+ *
+ * Exported for unit-testing the executor gate independently of the React hook.
+ */
+export function computeSelectedRepoCount(fs: DialogFormState): number {
+  const local = fs.repositories.filter((r) => r.repositoryId || r.localPath).length;
+  const remote = fs.useRemote ? fs.remoteRepos.filter((r) => r.url.trim() !== "").length : 0;
+  return local + remote;
 }
 
 function useExecutorProfileCompat(
@@ -160,7 +177,7 @@ export function useDialogComputed({
   });
   const workspaceDefaults = workspaceId ? workspaces.find((ws) => ws.id === workspaceId) : null;
   const firstRemoteUrl = fs.remoteRepos[0]?.url.trim() ?? "";
-  const hasRepositorySelection = computeHasRepositorySelection(fs, firstRemoteUrl);
+  const hasRepositorySelection = computeHasRepositorySelection(fs);
   // Branch options are only used by the URL-mode flow now (the chip's branch
   // pill loads branches per-repo). Keep the computed value but always feed it
   // the URL branches when in URL mode — sourced from the per-URL hook cache.
@@ -179,8 +196,10 @@ export function useDialogComputed({
   // Multi-repo tasks only run on the git-worktree executor today — Docker /
   // Sprites / standalone don't yet know how to provision N sibling repos. Gate
   // non-worktree options only when 2+ repos are selected; single-repo tasks
-  // keep the full executor catalogue.
-  const selectedRepoCount = fs.repositories.filter((r) => r.repositoryId || r.localPath).length;
+  // keep the full executor catalogue. Count BOTH workspace/local rows AND
+  // remote-URL rows (each non-empty row is a distinct repo the task will
+  // operate on) so a 2-row Remote selection trips the same restriction.
+  const selectedRepoCount = computeSelectedRepoCount(fs);
   const isMultiRepoSelection = selectedRepoCount > 1;
   // Use the effective agent ID (form value OR the workflow-locked override)
   // so the compatibility gate catches the override case too — passing the
