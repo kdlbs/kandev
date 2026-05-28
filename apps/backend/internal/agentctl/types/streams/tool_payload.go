@@ -247,11 +247,13 @@ type SubagentTaskPayload struct {
 	SubagentType string `json:"subagent_type"`
 
 	// Result fields (populated from tool_use_result on completion)
-	Status       string `json:"status,omitempty"`
-	AgentID      string `json:"agent_id,omitempty"`
-	DurationMs   int64  `json:"duration_ms,omitempty"`
-	TotalTokens  int64  `json:"total_tokens,omitempty"`
-	ToolUseCount int    `json:"tool_use_count,omitempty"`
+	Status         string `json:"status,omitempty"`
+	AgentID        string `json:"agent_id,omitempty"`
+	Model          string `json:"model,omitempty"`
+	ChildSessionID string `json:"child_session_id,omitempty"`
+	DurationMs     int64  `json:"duration_ms,omitempty"`
+	TotalTokens    int64  `json:"total_tokens,omitempty"`
+	ToolUseCount   int    `json:"tool_use_count,omitempty"`
 }
 
 // ShowPlanPayload contains normalized data for plan display operations.

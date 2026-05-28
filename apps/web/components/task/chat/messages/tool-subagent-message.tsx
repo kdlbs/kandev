@@ -6,6 +6,7 @@ import { GridSpinner } from "@/components/grid-spinner";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
 import type { ToolCallMetadata } from "@/components/task/chat/types";
+import { SubagentMetaRow } from "@/components/task/chat/messages/subagent-meta-row";
 
 type ToolSubagentMessageProps = {
   comment: Message;
@@ -59,10 +60,16 @@ function SubagentHeader({
       ) : (
         <IconChevronRight className="h-3.5 w-3.5 text-muted-foreground/60 flex-shrink-0" />
       )}
-      <span className="bg-muted text-muted-foreground text-[10px] px-1.5 rounded font-medium uppercase tracking-wide">
+      <span
+        data-testid="subagent-type"
+        className="bg-muted text-muted-foreground text-[10px] px-1.5 rounded font-medium uppercase tracking-wide"
+      >
         {subagentType}
       </span>
-      <span className="font-mono text-xs truncate text-muted-foreground inline-flex items-center gap-1.5">
+      <span
+        data-testid="subagent-description"
+        className="font-mono text-xs truncate text-muted-foreground inline-flex items-center gap-1.5"
+      >
         {description}
         {isActive && <GridSpinner className="text-muted-foreground shrink-0" />}
       </span>
@@ -75,10 +82,13 @@ function SubagentHeader({
   );
 }
 
+const NESTED_BORDER = "ml-2 pl-4 border-l-2 border-border/30 mt-1";
+
 type SubagentContentProps = {
   isExpanded: boolean;
   childMessages: Message[];
   isActive: boolean;
+  prompt?: string;
   renderChild: (message: Message) => React.ReactNode;
 };
 
@@ -86,12 +96,13 @@ function SubagentContent({
   isExpanded,
   childMessages,
   isActive,
+  prompt,
   renderChild,
 }: SubagentContentProps) {
   if (!isExpanded) return null;
   if (childMessages.length > 0) {
     return (
-      <div className="ml-2 pl-4 border-l-2 border-border/30 mt-1 space-y-2">
+      <div className={cn(NESTED_BORDER, "space-y-2")}>
         {childMessages.map((child) => (
           <div key={child.id}>{renderChild(child)}</div>
         ))}
@@ -100,8 +111,15 @@ function SubagentContent({
   }
   if (isActive) {
     return (
-      <div className="ml-2 pl-4 border-l-2 border-border/30 mt-1">
+      <div className={NESTED_BORDER}>
         <span className="text-xs text-muted-foreground italic">Subagent working...</span>
+      </div>
+    );
+  }
+  if (prompt) {
+    return (
+      <div className={NESTED_BORDER}>
+        <p className="text-xs text-muted-foreground whitespace-pre-wrap break-words">{prompt}</p>
       </div>
     );
   }
@@ -127,6 +145,8 @@ export const ToolSubagentMessage = memo(function ToolSubagentMessage({
   const childCount = childMessages.length;
 
   const isActive = status === "running";
+  const showMeta = !isActive;
+  const prompt = childCount === 0 ? subagentTask?.prompt : undefined;
 
   // Track manual override state - null means "use auto behavior"
   const [manualExpandState, setManualExpandState] = useState<boolean | null>(null);
@@ -142,7 +162,7 @@ export const ToolSubagentMessage = memo(function ToolSubagentMessage({
   }, [autoExpanded]);
 
   return (
-    <div className="w-full">
+    <div className="w-full" data-testid="subagent-card">
       <SubagentHeader
         isExpanded={isExpanded}
         subagentType={subagentType}
@@ -151,10 +171,12 @@ export const ToolSubagentMessage = memo(function ToolSubagentMessage({
         childCount={childCount}
         onToggle={handleToggle}
       />
+      {showMeta && <SubagentMetaRow subagentTask={subagentTask} />}
       <SubagentContent
         isExpanded={isExpanded}
         childMessages={childMessages}
         isActive={isActive}
+        prompt={prompt}
         renderChild={renderChild}
       />
     </div>

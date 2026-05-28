@@ -121,16 +121,16 @@ func emitCodeSearch(e *emitter, model string) {
 	e.completeTool(toolID, map[string]any{"matches": strings.Join(results, "\n")})
 }
 
-// emitSubagent emits a Task tool call with child tool calls.
+// emitSubagent emits a claude-style subagent (Task) tool call plus a sibling
+// search tool call.
 func emitSubagent(e *emitter, model string) {
 	taskToolID := nextToolID()
 	randomDelay(model)
 
-	e.startTool(taskToolID, "Explore codebase", acp.ToolKindOther,
-		map[string]any{
-			"description": "Explore codebase",
-			"prompt":      "Find all files and summarize the project structure",
-		})
+	e.startSubagentTool(taskToolID,
+		"Explore codebase",
+		"Find all files and summarize the project structure",
+		"general-purpose")
 
 	randomDelay(model)
 	e.thought("Exploring the project structure...")
@@ -140,7 +140,7 @@ func emitSubagent(e *emitter, model string) {
 	e.text(fmt.Sprintf("Found %d files. The project structure looks well-organized.", len(paths)))
 	randomDelay(model)
 
-	// Child glob tool call
+	// Sibling glob tool call (subagents do not nest over ACP)
 	childToolID := nextToolID()
 	e.startTool(childToolID, "Glob **/*", acp.ToolKindSearch,
 		map[string]any{"pattern": "**/*"})
@@ -150,9 +150,15 @@ func emitSubagent(e *emitter, model string) {
 
 	e.text("Project structure analysis complete.")
 	randomDelay(model)
-	e.completeTool(taskToolID, map[string]any{
-		"result": fmt.Sprintf("Subagent completed: Found %d files across the project.", len(paths)),
-	})
+	e.completeSubagentTool(taskToolID,
+		fmt.Sprintf("Subagent completed: Found %d files across the project.", len(paths)),
+		subagentResult{
+			agentID:      "agent_dev_0001",
+			subagentType: "general-purpose",
+			durationMs:   1850,
+			totalTokens:  7421,
+			toolUseCount: 1,
+		})
 }
 
 // emitTodo emits a TodoWrite tool call.
