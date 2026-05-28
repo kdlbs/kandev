@@ -85,6 +85,7 @@ import type {
 // Re-export all types from slices for backwards compatibility.
 export type * from "./store-reexports";
 import type { TaskMR } from "@/lib/types/gitlab";
+import type { GitLabSliceActions } from "./slices/gitlab/types";
 import type { JiraIssueWatch } from "@/lib/types/jira";
 import type { LinearIssueWatch } from "@/lib/types/linear";
 import type {
@@ -186,6 +187,12 @@ export type AppState = {
 
   // GitLab slice
   taskMRs: (typeof defaultGitLabState)["taskMRs"];
+  gitlabReviewWatches: (typeof defaultGitLabState)["gitlabReviewWatches"];
+  gitlabIssueWatches: (typeof defaultGitLabState)["gitlabIssueWatches"];
+  gitlabMRWatches: (typeof defaultGitLabState)["gitlabMRWatches"];
+  gitlabActionPresets: (typeof defaultGitLabState)["gitlabActionPresets"];
+  gitlabStats: (typeof defaultGitLabState)["gitlabStats"];
+  gitlabStatus: (typeof defaultGitLabState)["gitlabStatus"];
 
   // JIRA slice
   jiraIssueWatches: (typeof defaultJiraState)["jiraIssueWatches"];
@@ -229,6 +236,25 @@ export type AppState = {
   setTaskMRs: (mrs: Record<string, TaskMR[]>) => void;
   setTaskMR: (taskId: string, mr: TaskMR) => void;
   resetTaskMRs: () => void;
+  setGitLabReviewWatches: GitLabSliceActions["setGitLabReviewWatches"];
+  setGitLabReviewWatchesLoading: GitLabSliceActions["setGitLabReviewWatchesLoading"];
+  addGitLabReviewWatch: GitLabSliceActions["addGitLabReviewWatch"];
+  updateGitLabReviewWatchInStore: GitLabSliceActions["updateGitLabReviewWatchInStore"];
+  removeGitLabReviewWatch: GitLabSliceActions["removeGitLabReviewWatch"];
+  setGitLabIssueWatches: GitLabSliceActions["setGitLabIssueWatches"];
+  setGitLabIssueWatchesLoading: GitLabSliceActions["setGitLabIssueWatchesLoading"];
+  addGitLabIssueWatch: GitLabSliceActions["addGitLabIssueWatch"];
+  updateGitLabIssueWatchInStore: GitLabSliceActions["updateGitLabIssueWatchInStore"];
+  removeGitLabIssueWatch: GitLabSliceActions["removeGitLabIssueWatch"];
+  setGitLabMRWatches: GitLabSliceActions["setGitLabMRWatches"];
+  setGitLabMRWatchesLoading: GitLabSliceActions["setGitLabMRWatchesLoading"];
+  removeGitLabMRWatch: GitLabSliceActions["removeGitLabMRWatch"];
+  setGitLabActionPresets: GitLabSliceActions["setGitLabActionPresets"];
+  setGitLabActionPresetsLoading: GitLabSliceActions["setGitLabActionPresetsLoading"];
+  setGitLabStats: GitLabSliceActions["setGitLabStats"];
+  setGitLabStatsLoading: GitLabSliceActions["setGitLabStatsLoading"];
+  setGitLabStatus: GitLabSliceActions["setGitLabStatus"];
+  setGitLabStatusLoading: GitLabSliceActions["setGitLabStatusLoading"];
 
   // JIRA actions
   setJiraIssueWatches: (watches: JiraIssueWatch[]) => void;

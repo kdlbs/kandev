@@ -41,6 +41,8 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 
 	api.GET("/user/mrs", c.httpSearchUserMRs)
 	api.GET("/user/issues", c.httpSearchUserIssues)
+
+	c.RegisterWatchHTTPRoutes(router)
 }
 
 // RegisterRoutes is the package-level entrypoint mirroring github.RegisterRoutes.
