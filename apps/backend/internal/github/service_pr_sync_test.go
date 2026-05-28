@@ -2,7 +2,9 @@ package github
 
 import (
 	"context"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestTriggerPRSync_SyncsExistingWatch(t *testing.T) {
@@ -148,5 +150,62 @@ func TestTriggerPRSyncAll_ThrottlesDetectionProbe(t *testing.T) {
 	}
 	if got := mockClient.FindPRByBranchCallCount(); got != 1 {
 		t.Errorf("expected detection probe to be throttled on second sync (still 1 call), got %d", got)
+	}
+}
+
+// TestTriggerPRDetection_CoalescesConcurrentProbes verifies that parallel
+// syncs for the same watch collapse to a single GitHub probe. The freshness
+// guard alone is racy — concurrent callers can all read a stale
+// last_checked_at and probe simultaneously — so detection runs inside a
+// per-watch singleflight. We force overlap by blocking the probe: the leader
+// enters FindPRByBranch and parks; the followers must coalesce into it rather
+// than issue their own probes.
+func TestTriggerPRDetection_CoalescesConcurrentProbes(t *testing.T) {
+	_, svc, mockClient, store := setupPollerTest(t)
+	ctx := context.Background()
+
+	watch := &PRWatch{
+		SessionID: "s1",
+		TaskID:    "t1",
+		Owner:     "org",
+		Repo:      "missing",
+		PRNumber:  0,
+		Branch:    "feat/never-merged",
+	}
+	if err := store.CreatePRWatch(ctx, watch); err != nil {
+		t.Fatal(err)
+	}
+
+	const concurrency = 6
+	entered := make(chan string, concurrency) // buffered so a broken (uncoalesced) impl can't deadlock
+	release := make(chan struct{})
+	mockClient.GateFindPRByBranch(entered, release)
+
+	var wg sync.WaitGroup
+	wg.Add(concurrency)
+	for range concurrency {
+		go func() {
+			defer wg.Done()
+			_, _ = svc.TriggerPRSyncAll(ctx, "t1")
+		}()
+	}
+
+	// Wait for the leader probe to enter FindPRByBranch.
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no probe entered FindPRByBranch")
+	}
+
+	// Give the followers time to reach (and block in) the singleflight before
+	// releasing the leader. The singleflight in-flight window isn't observable
+	// via channels, so this short wait is the one unavoidable timing element;
+	// it only risks a false failure if scheduling stalls >100ms.
+	time.Sleep(100 * time.Millisecond)
+	close(release)
+	wg.Wait()
+
+	if got := mockClient.FindPRByBranchCallCount(); got != 1 {
+		t.Errorf("expected concurrent detection probes to coalesce to 1 GitHub call, got %d", got)
 	}
 }

@@ -586,6 +586,30 @@ func (s *Service) triggerPRDetection(ctx context.Context, watch *PRWatch, taskID
 	if s.client == nil {
 		return nil, nil
 	}
+	// Coalesce concurrent detection probes for the same watch. Without this the
+	// freshness check below is racy: parallel callers (e.g. the 5s frontend
+	// retry racing the workspace background refresh) can all read a stale
+	// last_checked_at and probe GitHub simultaneously, defeating the throttle.
+	// Keyed distinctly from triggerPRStatusSync's owner/repo/number key so the
+	// two never collide. singleflight only blocks same-key calls, so the nested
+	// triggerPRStatusSync (different key) below cannot deadlock.
+	key := "pr-detect:" + watch.ID
+	v, err, _ := s.syncGroup.Do(key, func() (interface{}, error) {
+		return s.detectPRForWatchOnce(ctx, watch, taskID)
+	})
+	if err != nil {
+		return nil, err
+	}
+	if v == nil {
+		return nil, nil
+	}
+	return v.(*TaskPR), nil
+}
+
+// detectPRForWatchOnce performs a single branch-detection probe for a
+// searching (pr_number=0) watch. It runs inside triggerPRDetection's
+// singleflight so only one probe per watch is in flight at a time.
+func (s *Service) detectPRForWatchOnce(ctx context.Context, watch *PRWatch, taskID string) (*TaskPR, error) {
 	// Throttle branch-detection probes. A watch still searching for its PR
 	// (pr_number=0) has no TaskPR row yet, so triggerPRStatusSync's freshness
 	// check can't gate it — we gate on the watch's own last_checked_at instead.
@@ -597,10 +621,13 @@ func (s *Service) triggerPRDetection(ctx context.Context, watch *PRWatch, taskID
 	}
 
 	pr, err := s.client.FindPRByBranch(ctx, watch.Owner, watch.Repo, watch.Branch)
-	// Stamp last_checked_at regardless of outcome so the freshness guard above
-	// engages on the next call. The background poller (detectPRForWatch) already
-	// records this; the on-demand path historically didn't, which is why
-	// repeated syncs always re-probed.
+	// Stamp last_checked_at regardless of outcome — including on error. The
+	// flood this fixes IS the error path (an unresolvable repo makes `gh` exit
+	// non-zero), so stamping only on success would leave the bug unfixed. The
+	// tradeoff: a transient GitHub error throttles the next on-demand probe for
+	// prSyncFreshnessWindow, which is fine — it stops hammering a failing
+	// endpoint, and the 60s background poller still retries. This diverges
+	// intentionally from poller.detectPRForWatch, which stamps only on success.
 	now := time.Now().UTC()
 	if tsErr := s.store.UpdatePRWatchTimestamps(ctx, watch.ID, now, nil, "", ""); tsErr != nil {
 		s.logger.Debug("failed to stamp PR watch after detection probe",

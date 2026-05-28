@@ -83,6 +83,13 @@ type MockClient struct {
 	// assert that branch-detection probes are throttled. Atomic because
 	// FindPRByBranch otherwise only takes a read lock.
 	findPRByBranchCalls atomic.Int64
+
+	// probeEntered/probeRelease let a test gate FindPRByBranch: when set, each
+	// invocation signals on probeEntered and then blocks until probeRelease is
+	// closed. Used to force concurrent probes to overlap and assert
+	// singleflight coalescing.
+	probeEntered chan string
+	probeRelease chan struct{}
 }
 
 // mockGist captures a gist that was created via the mock client so tests
@@ -141,8 +148,17 @@ func (m *MockClient) GetPR(_ context.Context, owner, repo string, number int) (*
 func (m *MockClient) FindPRByBranch(_ context.Context, owner, repo, branch string) (*PR, error) {
 	m.findPRByBranchCalls.Add(1)
 	m.mu.RLock()
-	defer m.mu.RUnlock()
 	pr := m.prsByBranch[branchKey{owner, repo, branch}]
+	entered, release := m.probeEntered, m.probeRelease
+	m.mu.RUnlock()
+	// Gate (if a test installed one) outside the lock so a blocked probe
+	// doesn't wedge other mock operations.
+	if entered != nil {
+		entered <- branch
+	}
+	if release != nil {
+		<-release
+	}
 	return pr, nil
 }
 
@@ -150,6 +166,16 @@ func (m *MockClient) FindPRByBranch(_ context.Context, owner, repo, branch strin
 // called. Used by tests asserting detection-probe throttling.
 func (m *MockClient) FindPRByBranchCallCount() int {
 	return int(m.findPRByBranchCalls.Load())
+}
+
+// GateFindPRByBranch installs a gate around FindPRByBranch: each invocation
+// signals on entered, then blocks until release is closed. Pass nil/nil to
+// remove the gate. Used to force concurrent probes to overlap.
+func (m *MockClient) GateFindPRByBranch(entered chan string, release chan struct{}) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.probeEntered = entered
+	m.probeRelease = release
 }
 
 func (m *MockClient) ListAuthoredPRs(_ context.Context, owner, repo string) ([]*PR, error) {
@@ -541,6 +567,8 @@ func (m *MockClient) Reset() {
 	m.deletedGists = nil
 	m.nextGistID = 0
 	m.findPRByBranchCalls.Store(0)
+	m.probeEntered = nil
+	m.probeRelease = nil
 }
 
 // SubmittedReviews returns all recorded SubmitReview calls.
