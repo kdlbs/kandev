@@ -262,6 +262,41 @@ describe("appSidebar actions", () => {
     store.getState().toggleAppSidebarSection("projects");
     expect(store.getState().appSidebar.sectionExpanded.projects).toBe(false);
   });
+
+  it("settingsMode defaults off and is never read from storage", () => {
+    window.localStorage.setItem("kandev.appSidebar.settingsMode", JSON.stringify(true));
+    const store = makeStore();
+    expect(store.getState().appSidebar.settingsMode).toBe(false);
+  });
+
+  it("toggleAppSidebarSettingsMode flips the flag without persisting it", () => {
+    const store = makeStore();
+    store.getState().toggleAppSidebarSettingsMode();
+    expect(store.getState().appSidebar.settingsMode).toBe(true);
+    expect(window.localStorage.getItem("kandev.appSidebar.settingsMode")).toBeNull();
+
+    store.getState().toggleAppSidebarSettingsMode();
+    expect(store.getState().appSidebar.settingsMode).toBe(false);
+  });
+
+  it("entering settings mode while collapsed force-expands the rail", () => {
+    window.localStorage.setItem(COLLAPSED_KEY, JSON.stringify(true));
+    const store = makeStore();
+    expect(store.getState().appSidebar.collapsed).toBe(true);
+
+    store.getState().toggleAppSidebarSettingsMode();
+    expect(store.getState().appSidebar.settingsMode).toBe(true);
+    expect(store.getState().appSidebar.collapsed).toBe(false);
+    expect(JSON.parse(window.localStorage.getItem(COLLAPSED_KEY) ?? "null")).toBe(false);
+  });
+
+  it("leaving settings mode leaves the collapsed flag untouched", () => {
+    const store = makeStore();
+    store.getState().toggleAppSidebarSettingsMode(); // on (expands)
+    store.getState().toggleAppSidebarSettingsMode(); // off
+    expect(store.getState().appSidebar.settingsMode).toBe(false);
+    expect(store.getState().appSidebar.collapsed).toBe(false);
+  });
 });
 
 describe("reorderSidebarViews", () => {

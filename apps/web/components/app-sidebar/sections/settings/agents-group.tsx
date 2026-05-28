@@ -10,12 +10,13 @@ const ROOT_HREF = "/settings/agents";
 
 type AgentsGroupProps = {
   pathname: string;
+  expanded?: boolean;
+  onToggle?: () => void;
 };
 
-export function AgentsGroup({ pathname }: AgentsGroupProps) {
+export function AgentsGroup({ pathname, expanded, onToggle }: AgentsGroupProps) {
   const agents = useAppStore((s) => s.settingsAgents.items);
   useAvailableAgents();
-  const isAgents = pathname.startsWith(ROOT_HREF);
 
   return (
     <SettingsGroup
@@ -23,7 +24,8 @@ export function AgentsGroup({ pathname }: AgentsGroupProps) {
       icon={IconRobot}
       href={ROOT_HREF}
       isActive={pathname === ROOT_HREF}
-      defaultExpanded={isAgents}
+      expanded={expanded}
+      onToggle={onToggle}
     >
       {agents.flatMap((agent) =>
         agent.profiles.map((profile) => {

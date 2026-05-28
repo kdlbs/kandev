@@ -131,6 +131,7 @@ export const defaultUIState: UISliceState = {
     collapsed: false,
     sectionExpanded: { ...DEFAULT_SECTION_EXPANDED },
     width: 240,
+    settingsMode: false,
   },
 };
 

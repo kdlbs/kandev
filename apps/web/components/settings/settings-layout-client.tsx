@@ -114,7 +114,11 @@ function SettingsShell({
           parents={parents}
           className="h-16 border-b-0"
         />
-        <div className="flex min-w-0 flex-1 flex-col gap-4 p-4 pt-0 mb-20">{children}</div>
+        {/* Scroll the content, not the topbar: min-h-0 lets this flex child
+            shrink below its content height so overflow-y-auto can take effect. */}
+        <div className="flex min-w-0 min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 pt-0 pb-20">
+          {children}
+        </div>
       </main>
     </TooltipProvider>
   );

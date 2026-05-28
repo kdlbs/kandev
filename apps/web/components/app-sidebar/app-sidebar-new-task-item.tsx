@@ -2,11 +2,13 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { IconSquarePlus } from "@tabler/icons-react";
+import { IconSquarePlus, IconSubtask } from "@tabler/icons-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { NewTaskDialog } from "@/app/office/components/new-task-dialog";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
+import { NewSubtaskDialog } from "@/components/task/new-subtask-dialog";
 import { linkToTask } from "@/lib/links";
 import type { Task } from "@/lib/types/http";
 import { AppSidebarNavItem } from "./app-sidebar-nav-item";
@@ -20,28 +22,62 @@ type AppSidebarNewTaskItemProps = {
  * "New issue" dialog (projects/assignees/stages); regular Kandev opens the
  * standard task-create dialog wired to the active workflow. The Office dialog
  * must stay behind the `office` flag so it never leaks into regular mode.
+ *
+ * When the user is inside a task (an active task in regular mode), a trailing
+ * subtask affordance appears so a child task can be created against the current
+ * one — restoring the contextual action the retired dockview header dropdown
+ * used to provide.
  */
 export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps) {
   const router = useRouter();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const workflowId = useAppStore((s) => s.kanban.workflowId);
   const steps = useAppStore((s) => s.kanban.steps);
+  const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
+  const activeTaskTitle = useAppStore((s) => {
+    const id = s.tasks.activeTaskId;
+    if (!id) return "";
+    return s.kanban.tasks.find((t) => t.id === id)?.title ?? "";
+  });
   const officeEnabled = useFeature("office");
   const [open, setOpen] = useState(false);
+  const [subtaskOpen, setSubtaskOpen] = useState(false);
 
   const handleCreated = (task: Task) => {
     router.push(linkToTask(task.id));
   };
 
+  // Subtasks only apply to regular mode (NewSubtaskDialog is non-office) and
+  // need both an active task and the expanded rail to host the trailing button.
+  const canCreateSubtask = !collapsed && !officeEnabled && !!workspaceId && !!activeTaskId;
+
   return (
     <>
-      <AppSidebarNavItem
-        icon={IconSquarePlus}
-        label="New Task"
-        onClick={() => setOpen(true)}
-        collapsed={collapsed}
-        disabled={!workspaceId}
-      />
+      <div className="relative">
+        <AppSidebarNavItem
+          icon={IconSquarePlus}
+          label="New Task"
+          onClick={() => setOpen(true)}
+          collapsed={collapsed}
+          disabled={!workspaceId}
+        />
+        {canCreateSubtask && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => setSubtaskOpen(true)}
+                aria-label="New subtask of current task"
+                data-testid="sidebar-new-subtask"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 flex h-6 w-6 items-center justify-center rounded text-muted-foreground/70 hover:bg-muted hover:text-foreground cursor-pointer"
+              >
+                <IconSubtask className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">New subtask of current task</TooltipContent>
+          </Tooltip>
+        )}
+      </div>
       {workspaceId &&
         (officeEnabled ? (
           <NewTaskDialog open={open} onOpenChange={setOpen} />
@@ -57,6 +93,14 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
             onSuccess={handleCreated}
           />
         ))}
+      {canCreateSubtask && (
+        <NewSubtaskDialog
+          open={subtaskOpen}
+          onOpenChange={setSubtaskOpen}
+          parentTaskId={activeTaskId}
+          parentTaskTitle={activeTaskTitle}
+        />
+      )}
     </>
   );
 }

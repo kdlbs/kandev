@@ -9,18 +9,19 @@ const EDITORS_HREF = "/settings/general/editors";
 
 type GeneralGroupProps = {
   pathname: string;
+  expanded?: boolean;
+  onToggle?: () => void;
 };
 
-export function GeneralGroup({ pathname }: GeneralGroupProps) {
-  const isGeneral = pathname.startsWith(GENERAL_HREF);
-
+export function GeneralGroup({ pathname, expanded, onToggle }: GeneralGroupProps) {
   return (
     <SettingsGroup
       label="General"
       icon={IconSettings}
       href={GENERAL_HREF}
       isActive={pathname === GENERAL_HREF}
-      defaultExpanded={isGeneral}
+      expanded={expanded}
+      onToggle={onToggle}
     >
       <SettingsLeaf
         href={NOTIFICATIONS_HREF}

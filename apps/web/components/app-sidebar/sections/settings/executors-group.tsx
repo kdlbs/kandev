@@ -9,14 +9,15 @@ const ROOT_HREF = "/settings/executors";
 
 type ExecutorsGroupProps = {
   pathname: string;
+  expanded?: boolean;
+  onToggle?: () => void;
 };
 
-export function ExecutorsGroup({ pathname }: ExecutorsGroupProps) {
+export function ExecutorsGroup({ pathname, expanded, onToggle }: ExecutorsGroupProps) {
   const executors = useAppStore((s) => s.executors.items);
   const allProfiles = executors.flatMap((executor) =>
     (executor.profiles ?? []).map((profile) => ({ ...profile, executorType: executor.type })),
   );
-  const isExecutors = pathname.startsWith(ROOT_HREF);
 
   return (
     <SettingsGroup
@@ -24,7 +25,8 @@ export function ExecutorsGroup({ pathname }: ExecutorsGroupProps) {
       icon={IconCpu}
       href={ROOT_HREF}
       isActive={pathname === ROOT_HREF}
-      defaultExpanded={isExecutors}
+      expanded={expanded}
+      onToggle={onToggle}
     >
       {allProfiles.map((profile) => {
         const Icon = getExecutorIcon(profile.executorType);

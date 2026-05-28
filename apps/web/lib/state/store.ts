@@ -481,6 +481,7 @@ export type AppState = {
   setAppSidebarCollapsed: UIA["setAppSidebarCollapsed"];
   toggleAppSidebarSection: UIA["toggleAppSidebarSection"];
   setAppSidebarWidth: UIA["setAppSidebarWidth"];
+  toggleAppSidebarSettingsMode: UIA["toggleAppSidebarSettingsMode"];
   // Office actions
   setOfficeAgentProfiles: (agents: AgentProfile[]) => void;
   addOfficeAgentProfile: (agent: AgentProfile) => void;

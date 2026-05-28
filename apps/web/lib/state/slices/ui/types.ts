@@ -122,6 +122,12 @@ export type AppSidebarState = {
   sectionExpanded: Record<string, boolean>;
   /** User-resized expanded width in pixels. */
   width: number;
+  /**
+   * When true the whole sidebar is taken over by the settings tree (toggled by
+   * the footer gear). Transient view mode — intentionally NOT persisted so a
+   * reload never traps the user in settings.
+   */
+  settingsMode: boolean;
 };
 
 export type UISliceState = {
@@ -214,6 +220,7 @@ export type UISliceActions = {
   setAppSidebarCollapsed: (collapsed: boolean) => void;
   toggleAppSidebarSection: (sectionId: string) => void;
   setAppSidebarWidth: (width: number) => void;
+  toggleAppSidebarSettingsMode: () => void;
 };
 
 export type { SidebarView, SidebarViewDraft };

@@ -63,6 +63,14 @@ type SettingsGroupProps = {
   defaultExpanded?: boolean;
   depth?: number;
   children: ReactNode;
+  /**
+   * Controlled expansion. When `expanded` is provided the group becomes a
+   * controlled accordion member (open/close driven by the parent SettingsTree)
+   * and `onToggle` fires on header/chevron clicks. Omit both for the legacy
+   * self-managed behavior used by nested (per-workspace) groups.
+   */
+  expanded?: boolean;
+  onToggle?: () => void;
 };
 
 export function SettingsGroup({
@@ -73,10 +81,17 @@ export function SettingsGroup({
   defaultExpanded = false,
   depth = 0,
   children,
+  expanded: controlledExpanded,
+  onToggle,
 }: SettingsGroupProps) {
-  const [expanded, setExpanded] = useState(defaultExpanded);
+  const [internalExpanded, setInternalExpanded] = useState(defaultExpanded);
+  const isControlled = controlledExpanded !== undefined;
+  const expanded = isControlled ? controlledExpanded : internalExpanded;
   const paddingClass = GROUP_DEPTH_PADDING[clampDepth(depth, GROUP_DEPTH_PADDING.length - 1)];
-  const toggle = () => setExpanded((v) => !v);
+  const toggle = () => {
+    if (isControlled) onToggle?.();
+    else setInternalExpanded((v) => !v);
+  };
 
   const labelInner = (
     <>

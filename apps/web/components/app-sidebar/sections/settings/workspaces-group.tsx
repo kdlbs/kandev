@@ -8,11 +8,12 @@ const ROOT_HREF = "/settings/workspace";
 
 type WorkspacesGroupProps = {
   pathname: string;
+  expanded?: boolean;
+  onToggle?: () => void;
 };
 
-export function WorkspacesGroup({ pathname }: WorkspacesGroupProps) {
+export function WorkspacesGroup({ pathname, expanded, onToggle }: WorkspacesGroupProps) {
   const workspaces = useAppStore((s) => s.workspaces.items);
-  const isWorkspace = pathname.startsWith(ROOT_HREF);
 
   return (
     <SettingsGroup
@@ -20,7 +21,8 @@ export function WorkspacesGroup({ pathname }: WorkspacesGroupProps) {
       icon={IconFolder}
       href={ROOT_HREF}
       isActive={pathname === ROOT_HREF}
-      defaultExpanded={isWorkspace}
+      expanded={expanded}
+      onToggle={onToggle}
     >
       {workspaces.map((workspace) => {
         const workspacePath = `${ROOT_HREF}/${workspace.id}`;

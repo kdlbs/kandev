@@ -28,17 +28,19 @@ const ITEMS: Array<{ href: string; label: string; icon: TablerIcon }> = [
 
 type SystemGroupProps = {
   pathname: string;
+  expanded?: boolean;
+  onToggle?: () => void;
 };
 
-export function SystemGroup({ pathname }: SystemGroupProps) {
-  const isSystem = pathname.startsWith(ROOT_HREF);
+export function SystemGroup({ pathname, expanded, onToggle }: SystemGroupProps) {
   return (
     <SettingsGroup
       label="System"
       icon={IconServerCog}
       href={DEFAULT_HREF}
       isActive={pathname === DEFAULT_HREF}
-      defaultExpanded={isSystem}
+      expanded={expanded}
+      onToggle={onToggle}
     >
       {ITEMS.map(({ href, label, icon }) => (
         <SettingsLeaf

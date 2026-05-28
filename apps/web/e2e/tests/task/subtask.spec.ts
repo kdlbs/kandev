@@ -73,17 +73,11 @@ test.describe("Subtask basics", () => {
     // Wait for agent to complete
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
 
-    // Open the Task split-button chevron and click "New Subtask"
-    const primary = testPage.getByTestId("new-task-primary");
-    const chevron = testPage.getByTestId("new-task-chevron");
-    await expect(primary).toBeVisible({ timeout: 5_000 });
-    await expect(chevron).toBeVisible({ timeout: 5_000 });
-    await expect(primary).toHaveCSS("border-top-right-radius", "0px");
-    await expect(primary).toHaveCSS("border-bottom-right-radius", "0px");
-    await expect(chevron).toHaveCSS("border-top-left-radius", "0px");
-    await expect(chevron).toHaveCSS("border-bottom-left-radius", "0px");
-    await chevron.click();
-    await testPage.getByTestId("new-subtask-button").click();
+    // Open the New Subtask dialog from the sidebar New Task row's trailing
+    // subtask affordance (shown while viewing a task).
+    const subtaskButton = testPage.getByTestId("sidebar-new-subtask");
+    await expect(subtaskButton).toBeVisible({ timeout: 5_000 });
+    await subtaskButton.click();
 
     // The compact NewSubtaskDialog should open with pre-filled title containing numeric suffix
     const titleInput = testPage.getByTestId("subtask-title-input");
@@ -255,8 +249,7 @@ test.describe("MCP subtask creation", () => {
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
 
     // 4. Open the Task split-button chevron and click "New Subtask"
-    await testPage.getByTestId("new-task-chevron").click();
-    await testPage.getByTestId("new-subtask-button").click();
+    await testPage.getByTestId("sidebar-new-subtask").click();
     const subtaskTitleInput = testPage.getByTestId("subtask-title-input");
     await expect(subtaskTitleInput).toBeVisible();
 
@@ -317,8 +310,7 @@ test.describe("MCP subtask creation", () => {
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
 
     // 3. Open the New Subtask dialog from the split-button.
-    await testPage.getByTestId("new-task-chevron").click();
-    await testPage.getByTestId("new-subtask-button").click();
+    await testPage.getByTestId("sidebar-new-subtask").click();
 
     const titleInput = testPage.getByTestId("subtask-title-input");
     await expect(titleInput).toBeVisible({ timeout: 5_000 });
@@ -652,8 +644,7 @@ test.describe("Subtask dialog feature parity", () => {
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
 
     // 3. Open the subtask dialog and toggle to GitHub URL mode.
-    await testPage.getByTestId("new-task-chevron").click();
-    await testPage.getByTestId("new-subtask-button").click();
+    await testPage.getByTestId("sidebar-new-subtask").click();
     const titleInput = testPage.getByTestId("subtask-title-input");
     await expect(titleInput).toBeVisible({ timeout: 5_000 });
 
@@ -757,8 +748,7 @@ test.describe("Subtask dialog feature parity", () => {
     //    reopening the popover each tick because cmdk's listbox snapshots
     //    options at open time and won't update if discovery resolves while
     //    the popover is already showing.
-    await testPage.getByTestId("new-task-chevron").click();
-    await testPage.getByTestId("new-subtask-button").click();
+    await testPage.getByTestId("sidebar-new-subtask").click();
     await expect(testPage.getByTestId("subtask-title-input")).toBeVisible({ timeout: 5_000 });
 
     const discoveredOption = testPage
@@ -822,8 +812,7 @@ test.describe("Subtask dialog feature parity", () => {
     // 3. Open the subtask dialog. The first chip is seeded with the parent's
     //    repo. Click the "+ add repository" button to append a second chip,
     //    then point that chip at repo B.
-    await testPage.getByTestId("new-task-chevron").click();
-    await testPage.getByTestId("new-subtask-button").click();
+    await testPage.getByTestId("sidebar-new-subtask").click();
     const titleInput = testPage.getByTestId("subtask-title-input");
     await expect(titleInput).toBeVisible({ timeout: 5_000 });
 

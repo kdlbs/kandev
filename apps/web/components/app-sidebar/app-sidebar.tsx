@@ -13,6 +13,7 @@ import { AppSidebarFooter } from "./app-sidebar-footer";
 import { AppSidebarHeader } from "./app-sidebar-header";
 import { AppSidebarPrimaryNav } from "./app-sidebar-primary-nav";
 import { AppSidebarResizeHandle } from "./app-sidebar-resize-handle";
+import { AppSidebarSettingsMode } from "./app-sidebar-settings-mode";
 import { AgentsSection } from "./sections/agents-section";
 import { IntegrationsSection } from "./sections/integrations-section";
 import { ProjectsSection } from "./sections/projects-section";
@@ -38,6 +39,7 @@ const SECTION_ROUTE_MAP: Array<{ id: string; matches: (path: string) => boolean 
  */
 export function AppSidebar() {
   const collapsed = useAppStore((s) => s.appSidebar.collapsed);
+  const settingsMode = useAppStore((s) => s.appSidebar.settingsMode);
   const sectionExpanded = useAppStore((s) => s.appSidebar.sectionExpanded);
   const storedWidth = useAppStore((s) => s.appSidebar.width);
   const toggleSection = useAppStore((s) => s.toggleAppSidebarSection);
@@ -98,18 +100,24 @@ export function AppSidebar() {
     >
       <AppSidebarHeader collapsed={collapsed} onToggleCollapse={toggleCollapsed} />
       <nav className="flex-1 min-h-0 flex flex-col gap-2 px-2 py-2 overflow-hidden">
-        <div className="shrink-0 flex flex-col gap-2 overflow-y-auto">
-          <AppSidebarPrimaryNav collapsed={collapsed} />
-          <ProjectsSection collapsed={collapsed} />
-          <AgentsSection collapsed={collapsed} />
-          <IntegrationsSection collapsed={collapsed} />
-        </div>
-        {/* Tasks is the flex-grow middle section so it absorbs remaining
-            vertical space and scrolls internally; Settings sits below it. */}
-        <TasksSection collapsed={collapsed} />
-        <div className="shrink-0 flex flex-col gap-2 overflow-y-auto">
-          <SettingsSection collapsed={collapsed} />
-        </div>
+        {settingsMode && !collapsed ? (
+          <AppSidebarSettingsMode />
+        ) : (
+          <>
+            <div className="shrink-0 flex flex-col gap-2 overflow-y-auto">
+              <AppSidebarPrimaryNav collapsed={collapsed} />
+              <ProjectsSection collapsed={collapsed} />
+              <AgentsSection collapsed={collapsed} />
+              <IntegrationsSection collapsed={collapsed} />
+            </div>
+            {/* Tasks is the flex-grow middle section so it absorbs remaining
+                vertical space and scrolls internally; Settings sits below it. */}
+            <TasksSection collapsed={collapsed} />
+            <div className="shrink-0 flex flex-col gap-2 overflow-y-auto">
+              <SettingsSection collapsed={collapsed} />
+            </div>
+          </>
+        )}
       </nav>
       <AppSidebarFooter collapsed={collapsed} />
       {!collapsed && <AppSidebarResizeHandle onMouseDown={handleResize} />}

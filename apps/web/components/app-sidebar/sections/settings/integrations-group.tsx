@@ -23,17 +23,19 @@ const ITEMS: Array<{ href: string; label: string; icon: TablerIcon }> = [
 
 type IntegrationsGroupProps = {
   pathname: string;
+  expanded?: boolean;
+  onToggle?: () => void;
 };
 
-export function IntegrationsGroup({ pathname }: IntegrationsGroupProps) {
-  const isIntegrations = pathname.startsWith(ROOT_HREF);
+export function IntegrationsGroup({ pathname, expanded, onToggle }: IntegrationsGroupProps) {
   return (
     <SettingsGroup
       label="Integrations"
       icon={IconPlugConnected}
       href={ROOT_HREF}
       isActive={pathname === ROOT_HREF}
-      defaultExpanded={isIntegrations}
+      expanded={expanded}
+      onToggle={onToggle}
     >
       {ITEMS.map(({ href, label, icon }) => (
         <SettingsLeaf

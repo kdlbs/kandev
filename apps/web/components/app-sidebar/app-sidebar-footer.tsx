@@ -3,7 +3,13 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { IconBuildings, IconChartBar, IconSparkles, IconStethoscope } from "@tabler/icons-react";
+import {
+  IconBuildings,
+  IconChartBar,
+  IconSettings,
+  IconSparkles,
+  IconStethoscope,
+} from "@tabler/icons-react";
 import type { Icon as TablerIcon } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -28,6 +34,8 @@ type FooterIconButtonProps = {
   href?: string;
   badge?: boolean;
   testId?: string;
+  /** Toggle state: rotates the icon a half-turn (spins back out when cleared). */
+  active?: boolean;
 };
 
 function FooterIconButton({
@@ -38,6 +46,7 @@ function FooterIconButton({
   href,
   badge,
   testId,
+  active,
 }: FooterIconButtonProps) {
   const buttonProps = {
     variant: "ghost" as const,
@@ -47,7 +56,12 @@ function FooterIconButton({
 
   const content = (
     <>
-      <Icon className="h-3.5 w-3.5" />
+      <Icon
+        className={cn(
+          "h-3.5 w-3.5 transition-transform duration-300",
+          active && "rotate-180 text-foreground",
+        )}
+      />
       {badge && (
         <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-primary border border-background" />
       )}
@@ -61,7 +75,13 @@ function FooterIconButton({
       </Link>
     </Button>
   ) : (
-    <Button onClick={onClick} {...buttonProps} aria-label={label} data-testid={testId}>
+    <Button
+      onClick={onClick}
+      {...buttonProps}
+      aria-label={label}
+      aria-pressed={active}
+      data-testid={testId}
+    >
       {content}
     </Button>
   );
@@ -77,6 +97,8 @@ function FooterIconButton({
 export function AppSidebarFooter({ collapsed }: AppSidebarFooterProps) {
   const router = useRouter();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const settingsMode = useAppStore((s) => s.appSidebar.settingsMode);
+  const toggleSettingsMode = useAppStore((s) => s.toggleAppSidebarSettingsMode);
   const officeEnabled = useFeature("office");
   const releaseNotes = useReleaseNotes();
   const [improveOpen, setImproveOpen] = useState(false);
@@ -88,6 +110,14 @@ export function AppSidebarFooter({ collapsed }: AppSidebarFooterProps) {
         collapsed ? "flex-col gap-1 justify-center px-1 py-1.5" : "px-2 py-1.5 gap-1 flex-wrap",
       )}
     >
+      <FooterIconButton
+        icon={IconSettings}
+        label={settingsMode ? "Close settings" : "Settings"}
+        collapsed={collapsed}
+        onClick={toggleSettingsMode}
+        active={settingsMode}
+        testId="sidebar-settings-gear"
+      />
       <FooterIconButton
         icon={IconChartBar}
         label="Stats"

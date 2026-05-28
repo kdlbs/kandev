@@ -26,6 +26,8 @@ export function loadAppSidebarState(): AppSidebarState {
     collapsed: getStoredAppSidebarCollapsed(false),
     sectionExpanded: getStoredAppSidebarSectionExpanded(DEFAULT_SECTION_EXPANDED),
     width: getStoredAppSidebarWidth(APP_SIDEBAR_EXPANDED_WIDTH),
+    // Transient — always starts off, never read from / written to storage.
+    settingsMode: false,
   };
 }
 
@@ -56,6 +58,17 @@ export function buildAppSidebarActions(set: ImmerSet) {
         if (draft.appSidebar.width === width) return;
         draft.appSidebar.width = width;
         setStoredAppSidebarWidth(width);
+      }),
+    toggleAppSidebarSettingsMode: () =>
+      set((draft) => {
+        const next = !draft.appSidebar.settingsMode;
+        draft.appSidebar.settingsMode = next;
+        // Entering settings mode while collapsed would render an empty rail —
+        // the tree needs the expanded width — so force-expand on the way in.
+        if (next && draft.appSidebar.collapsed) {
+          draft.appSidebar.collapsed = false;
+          setStoredAppSidebarCollapsed(false);
+        }
       }),
   };
 }
