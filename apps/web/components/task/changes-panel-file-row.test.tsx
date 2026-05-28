@@ -135,8 +135,10 @@ describe("FileRow hover swap (stats <-> actions occupy same cell)", () => {
     expect(actionsLayer.className).toContain("group-hover:opacity-100");
     expect(actionsLayer.className).toContain("transition-opacity");
     // Critical: the actions div is the top child in the same grid cell, so
-    // without pointer-events gating it would (a) eat clicks aimed at the
-    // visually-shown stats, and (b) remain Tab-reachable on every row.
+    // without pointer-events gating it would eat clicks aimed at the
+    // visually-shown stats. (Keyboard Tab focus is a separate concern — a
+    // pre-existing gap not closed by `pointer-events: none`, which only
+    // blocks mouse/touch.)
     expect(actionsLayer.className).toContain("pointer-events-none");
     expect(actionsLayer.className).toContain("group-hover:pointer-events-auto");
   });
