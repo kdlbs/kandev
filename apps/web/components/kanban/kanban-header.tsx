@@ -11,7 +11,6 @@ import { KanbanDisplayDropdown } from "../kanban-display-dropdown";
 import { ReleaseNotesDialog } from "../release-notes/release-notes-dialog";
 import { HealthIndicatorButton, HealthIssuesDialog } from "../system-health/health-indicator";
 import { TaskSearchInput } from "./task-search-input";
-import { QuickChatButton } from "@/components/task/quick-chat-button";
 import { KanbanHeaderMobile } from "./kanban-header-mobile";
 import { MobileMenuSheet } from "./mobile-menu-sheet";
 import { linkToTasks } from "@/lib/links";
@@ -129,7 +128,6 @@ function useIsHeaderNarrow(ref: RefObject<HTMLElement | null>): boolean {
 
 function TabletHeader({
   onCreateTask,
-  workspaceId,
   title,
   workspaceLabel,
   searchQuery,
@@ -142,7 +140,6 @@ function TabletHeader({
   onOpenHealthDialog,
 }: {
   onCreateTask: () => void;
-  workspaceId?: string;
   title: string;
   workspaceLabel: string;
   searchQuery: string;
@@ -183,7 +180,6 @@ function TabletHeader({
             <IconPlus className="h-4 w-4" />
             <span className="hidden sm:inline ml-1">Add task</span>
           </Button>
-          <QuickChatButton workspaceId={workspaceId} size="lg" />
           <TooltipProvider>
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} size="lg" />
           </TooltipProvider>
@@ -240,7 +236,6 @@ function CreateTaskTopbarButton({
 
 function DesktopHeader({
   onCreateTask,
-  workspaceId,
   title,
   workspaceLabel,
   searchQuery,
@@ -252,7 +247,6 @@ function DesktopHeader({
   onOpenHealthDialog,
 }: {
   onCreateTask: () => void;
-  workspaceId?: string;
   title: string;
   workspaceLabel: string;
   searchQuery: string;
@@ -293,7 +287,6 @@ function DesktopHeader({
         <>
           {actionsSearch}
           <CreateTaskTopbarButton onCreateTask={onCreateTask} compact={isNarrow} />
-          <QuickChatButton workspaceId={workspaceId} size="lg" compact={isNarrow} />
           <TooltipProvider>
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} size="lg" />
           </TooltipProvider>

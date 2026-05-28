@@ -24,7 +24,7 @@ export function TasksSection({ collapsed }: TasksSectionProps) {
       headerAction={<TasksViewPicker />}
       grow
     >
-      <div className="flex-1 min-h-0 -mx-2.5 sidebar-fade-in-2 [&_[data-testid=task-sidebar]]:bg-transparent [&_[data-testid=task-sidebar-scroll]]:bg-transparent">
+      <div className="flex-1 min-h-0 sidebar-fade-in-2 [&_[data-testid=task-sidebar]]:bg-transparent [&_[data-testid=task-sidebar-scroll]]:bg-transparent">
         <TaskSessionSidebar workspaceId={workspaceId} workflowId={workflowId} hideFilterBar />
       </div>
     </AppSidebarSection>
