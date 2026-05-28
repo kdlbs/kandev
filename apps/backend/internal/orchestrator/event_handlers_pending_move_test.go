@@ -701,14 +701,22 @@ func TestHandleAgentBootReady_DrainsOrphanedQueuedMessage(t *testing.T) {
 				t.Errorf("queue count after boot ready = %d, want 0 (orphaned message must be drained)", got)
 			}
 
-			// Session must still end up WAITING_FOR_INPUT — the drain is
-			// additive, not a replacement for the existing flip behavior.
+			// The handler synchronously flips the session to WAITING_FOR_INPUT
+			// (line 173 of event_handlers_agent.go) and then spawns
+			// executeQueuedMessage in a goroutine; that goroutine calls
+			// PromptTask which immediately moves state to RUNNING. We can race
+			// with that goroutine on slow CI runners, so accept either
+			// WAITING_FOR_INPUT (goroutine hasn't transitioned yet) or RUNNING
+			// (goroutine got ahead of us). Either proves the boot-ready flip
+			// landed; the orphaned-message regression we guard against would
+			// leave state stuck on STARTING with the queue still full.
 			finalSess, err := repo.GetTaskSession(ctx, sessionID)
 			if err != nil {
 				t.Fatalf("load session: %v", err)
 			}
-			if finalSess.State != models.TaskSessionStateWaitingForInput {
-				t.Errorf("session.State = %q, want WAITING_FOR_INPUT", finalSess.State)
+			if finalSess.State != models.TaskSessionStateWaitingForInput &&
+				finalSess.State != models.TaskSessionStateRunning {
+				t.Errorf("session.State = %q, want WAITING_FOR_INPUT or RUNNING (post-flip, possibly post-goroutine)", finalSess.State)
 			}
 		})
 	}

@@ -29,32 +29,39 @@ concurrency:
 
 permissions:
   contents: read
+  # Required so the containerized build / e2e shards / e2e-report jobs can
+  # pull the kandev-ci image from GHCR via GITHUB_TOKEN.
+  packages: read
 
 jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
+    # Pre-baked image bundles Go, Node 24, pnpm 9.15.9 — see
+    # .github/docker/ci-base/Dockerfile.
+    container: ghcr.io/kdlbs/kandev-ci:latest
     timeout-minutes: 10
+    # Container jobs default to `sh`; pin to bash for the few shell steps below.
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: apps/backend/go.mod
-          cache-dependency-path: apps/backend/go.sum
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v5
+      # Inside the container the home dir is /root, so the pnpm store lives at
+      # /root/.local/share/pnpm/store. actions/cache resolves `~` against $HOME
+      # so the same path string works for both the host and container variants.
+      - name: Cache pnpm store
+        uses: actions/cache@v4
         with:
-          version: "9.15.9"
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: "24"
+          path: ~/.local/share/pnpm/store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
 
       - name: Install dependencies
         working-directory: apps
@@ -92,7 +99,33 @@ jobs:
     name: E2E Shard ${{ matrix.shard }}/10
     needs: build
     runs-on: ubuntu-latest
+    # Pre-baked image bundles Node 24, pnpm 9.15.9, and the Playwright browser
+    # binaries (Chromium etc.) — see .github/docker/ci-base/Dockerfile. This is
+    # the biggest speedup since `npx playwright install chromium --with-deps`
+    # alone took ~1.5–2 min per shard.
+    #
+    # `--ipc=host` is required for Chromium: the default container `/dev/shm`
+    # is only ~64MiB, which causes tabs to slow to a crawl and renderers to
+    # crash mid-test.
+    container:
+      image: ghcr.io/kdlbs/kandev-ci:latest
+      options: --ipc=host
     timeout-minutes: 22
+    # Container jobs default to `sh`; pin to bash.
+    defaults:
+      run:
+        shell: bash
+    # Node 18+'s `dns.lookup` defaults to `verbatim: true`, returning the OS
+    # resolver order. Inside this container `localhost` resolves to ::1 first,
+    # so `net.Server.listen({ host: "localhost" })` (used by Next.js standalone
+    # via $HOSTNAME) binds IPv6-only — and undici's `fetch("http://localhost…")`
+    # in the test runner only tries the first resolved address (IPv4), so the
+    # frontend health check times out and every spec fails. Forcing
+    # IPv4-first ordering aligns both the bind and the fetch and matches the
+    # effective default on the github-hosted ubuntu runner this workflow
+    # previously ran on.
+    env:
+      NODE_OPTIONS: --dns-result-order=ipv4first
     strategy:
       fail-fast: false
       matrix:
@@ -102,23 +135,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v5
-        with:
-          version: "9.15.9"
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
+      - name: Cache pnpm store
+        uses: actions/cache@v4
         with:
-          node-version: "24"
+          path: ~/.local/share/pnpm/store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
 
       - name: Install dependencies
         working-directory: apps
         run: pnpm install --frozen-lockfile
-
-      - name: Install Playwright browsers
-        working-directory: apps/web
-        run: npx playwright install chromium --with-deps
 
       - name: Download backend build
         uses: actions/download-artifact@v5
@@ -178,6 +207,11 @@ jobs:
   e2e-containers:
     name: E2E Containers Shard ${{ matrix.shard }}/6
     needs: build
+    # This job intentionally runs on the host ubuntu runner (NOT the kandev-ci
+    # container image): the containers project needs direct access to the
+    # host Docker daemon, and docker/setup-buildx style steps + the
+    # docker-in-container UX are awkward inside a container job. We recover
+    # some of the setup cost via the pnpm-store and Playwright caches below.
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -202,11 +236,42 @@ jobs:
         with:
           node-version: "24"
 
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pnpm/store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
+
+      # Derive the Playwright version from apps/web/package.json at runtime so
+      # the cache key below auto-busts on every @playwright/test bump. The
+      # previous hardcoded `1.58.2` suffix would have silently served stale
+      # browser binaries until manually updated.
+      - name: Resolve Playwright version
+        id: pw
+        shell: bash
+        run: |
+          set -euo pipefail
+          raw=$(node -p "require('./apps/web/package.json').devDependencies['@playwright/test']")
+          version=$(printf '%s' "$raw" | sed -E 's/^[^0-9]*//; s/[^0-9.].*$//')
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "Playwright version: ${version}"
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+
       - name: Install dependencies
         working-directory: apps
         run: pnpm install --frozen-lockfile
 
+      # `--with-deps` runs apt-get install on every invocation (~20–30s), so
+      # skip the step entirely when the cache restored the browser binaries.
       - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         working-directory: apps/web
         run: npx playwright install chromium --with-deps
 
@@ -263,21 +328,27 @@ jobs:
     needs: [e2e, e2e-containers]
     if: always()
     runs-on: ubuntu-latest
+    # Pre-baked image bundles Node 24, pnpm 9.15.9, and the Playwright CLI.
+    container: ghcr.io/kdlbs/kandev-ci:latest
     timeout-minutes: 5
+    # Container jobs default to `sh`; pin to bash.
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v5
-        with:
-          version: "9.15.9"
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
+      - name: Cache pnpm store
+        uses: actions/cache@v4
         with:
-          node-version: "24"
+          path: ~/.local/share/pnpm/store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
 
       - name: Install dependencies
         working-directory: apps
@@ -292,7 +363,14 @@ jobs:
 
       - name: Merge reports
         working-directory: apps/web
-        run: npx playwright merge-reports --reporter=html ./e2e/blob-reports
+        # `-c e2e/playwright.config.ts` is required because the blobs come from
+        # two different absolute checkout paths: the containerized `e2e` shards
+        # check out under `/__w/...` while `e2e-containers` runs on the host
+        # runner and checks out under `/home/runner/work/...`. Playwright
+        # embeds the absolute testDir in each blob and refuses to merge
+        # reports recorded with different test directories — passing the
+        # config makes it normalize against the config's `testDir` instead.
+        run: npx playwright merge-reports --config e2e/playwright.config.ts --reporter=html ./e2e/blob-reports
 
       - name: Upload merged report
         uses: actions/upload-artifact@v5
