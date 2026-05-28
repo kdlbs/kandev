@@ -267,16 +267,17 @@ jobs:
       # Skip the Playwright CDN download (~7 min and an outage-prone path) by
       # copying the prebaked chromium out of the kandev-ci image, which is
       # `FROM mcr.microsoft.com/playwright:...` and already ships the matching
-      # browser at /ms-playwright. Pinning to :latest matches the other e2e
-      # jobs that use the same image via `container:`.
+      # browser at /ms-playwright. Pulling the `runtime` tag (matches the
+      # `e2e` / `e2e-report` jobs above) — the `build` tag has the same
+      # browser layer but is ~300 MB larger because of the Go toolchain.
       - name: Extract Playwright browsers from kandev-ci image
         run: |
           set -euo pipefail
-          docker pull ghcr.io/kdlbs/kandev-ci:latest
+          docker pull ghcr.io/kdlbs/kandev-ci:runtime-latest
           mkdir -p /tmp/ms-playwright
           docker run --rm \
             -v /tmp/ms-playwright:/dest \
-            ghcr.io/kdlbs/kandev-ci:latest \
+            ghcr.io/kdlbs/kandev-ci:runtime-latest \
             cp -a /ms-playwright/. /dest/
           echo "PLAYWRIGHT_BROWSERS_PATH=/tmp/ms-playwright" >> "$GITHUB_ENV"
 
