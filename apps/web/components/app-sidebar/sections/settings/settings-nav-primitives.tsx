@@ -13,6 +13,8 @@ type SettingsLeafProps = {
   href: string;
   label: string;
   icon?: TablerIcon;
+  /** Pre-rendered leading visual (e.g. AgentLogo). Takes precedence over `icon`. */
+  leadingIcon?: ReactNode;
   isActive: boolean;
   /** Nesting level — used to add left padding. */
   depth?: number;
@@ -27,7 +29,14 @@ function clampDepth(depth: number, max: number): number {
   return depth;
 }
 
-export function SettingsLeaf({ href, label, icon: Icon, isActive, depth = 0 }: SettingsLeafProps) {
+export function SettingsLeaf({
+  href,
+  label,
+  icon: Icon,
+  leadingIcon,
+  isActive,
+  depth = 0,
+}: SettingsLeafProps) {
   return (
     <Link
       href={href}
@@ -37,7 +46,7 @@ export function SettingsLeaf({ href, label, icon: Icon, isActive, depth = 0 }: S
         isActive ? ACTIVE_CLASS : INACTIVE_CLASS,
       )}
     >
-      {Icon && <Icon className="h-3.5 w-3.5 shrink-0" />}
+      {leadingIcon ?? (Icon && <Icon className="h-3.5 w-3.5 shrink-0" />)}
       <span className="flex-1 truncate">{label}</span>
     </Link>
   );

@@ -1,6 +1,7 @@
 "use client";
 
 import { IconRobot } from "@tabler/icons-react";
+import { AgentLogo } from "@/components/agent-logo";
 import { useAppStore } from "@/components/state-provider";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { SettingsGroup, SettingsLeaf } from "./settings-nav-primitives";
@@ -34,6 +35,7 @@ export function AgentsGroup({ pathname }: AgentsGroupProps) {
               key={profile.id}
               href={profilePath}
               label={`${agentLabel} • ${profile.name}`}
+              leadingIcon={<AgentLogo agentName={agent.name} className="h-3.5 w-3.5 shrink-0" />}
               isActive={pathname === profilePath}
               depth={1}
             />
