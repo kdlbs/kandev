@@ -15,7 +15,7 @@ import {
 } from "@kandev/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Textarea } from "@kandev/ui/textarea";
-import { IconInfoCircle } from "@tabler/icons-react";
+import { IconInfoCircle, IconTerminal2 } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
@@ -122,13 +122,15 @@ const CLEANUP_POLICY_OPTIONS: Array<{ id: CleanupPolicy; label: string; descript
 
 // --- Generic select field with description ---
 
+type SelectFieldItem = { id: string; label: string; cliPassthrough?: boolean };
+
 type SelectFieldProps = {
   label: string;
   description?: string;
   value: string;
   onChange: (value: string) => void;
   placeholder: string;
-  items: Array<{ id: string; label: string }>;
+  items: SelectFieldItem[];
   disabled?: boolean;
 };
 
@@ -152,7 +154,15 @@ function SelectField({
         <SelectContent>
           {items.map((item) => (
             <SelectItem key={item.id} value={item.id}>
-              {item.label}
+              <span className="flex items-center gap-1.5">
+                <span>{item.label}</span>
+                {item.cliPassthrough && (
+                  <IconTerminal2
+                    className="size-3.5 text-muted-foreground"
+                    title="CLI mode — your prompt will be auto-injected into the terminal"
+                  />
+                )}
+              </span>
             </SelectItem>
           ))}
         </SelectContent>
@@ -202,13 +212,7 @@ function useWatchFormData(workspaceId: string) {
     [executors],
   );
 
-  // Filter out passthrough/TUI profiles — they don't accept initial prompts
-  const filteredAgentProfiles = useMemo(
-    () => agentProfiles.filter((p) => !p.cli_passthrough),
-    [agentProfiles],
-  );
-
-  return { workflows, agentProfiles: filteredAgentProfiles, allExecutorProfiles };
+  return { workflows, agentProfiles, allExecutorProfiles };
 }
 
 // --- Section header ---
@@ -430,7 +434,7 @@ function ProfileFields({
 }: {
   form: FormState;
   setForm: React.Dispatch<React.SetStateAction<FormState>>;
-  agentProfiles: Array<{ id: string; label: string }>;
+  agentProfiles: Array<{ id: string; label: string; cli_passthrough?: boolean }>;
   executorProfiles: Array<{ id: string; name: string }>;
 }) {
   return (
@@ -441,7 +445,11 @@ function ProfileFields({
         value={form.agentProfileId}
         onChange={(v) => setForm((prev) => ({ ...prev, agentProfileId: v }))}
         placeholder="Select agent profile"
-        items={agentProfiles.map((p) => ({ id: p.id, label: p.label }))}
+        items={agentProfiles.map((p) => ({
+          id: p.id,
+          label: p.label,
+          cliPassthrough: p.cli_passthrough,
+        }))}
       />
       <div className="space-y-1.5">
         <div className="flex items-center gap-1.5">

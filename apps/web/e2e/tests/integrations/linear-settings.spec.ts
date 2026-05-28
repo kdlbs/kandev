@@ -98,4 +98,41 @@ test.describe("Linear settings", () => {
     await expect(settings.secretInput).toHaveValue("");
     await expect(settings.statusBanner).toHaveCount(0);
   });
+
+  // Regression test for #1107: passthrough profiles were silently filtered
+  // out of the watcher dialog after #805 — once #923 made auto-start viable,
+  // this filter became stale and hid Claude Code / Codex / Copilot CLI from
+  // the Agent Profile selector. The dropdown must now list them.
+  test("watcher dialog lists CLI-passthrough agent profiles", async ({ testPage, apiClient }) => {
+    await apiClient.setLinearConfig({ secret: "lin_api_xxx" });
+    await apiClient.waitForIntegrationAuthHealthy("linear");
+
+    const { agents } = await apiClient.listAgents();
+    if (agents.length === 0) throw new Error("no agents registered in this e2e profile");
+    const passthroughName = "Watcher CLI Passthrough";
+    await apiClient.createAgentProfile(agents[0].id, passthroughName, {
+      model: "mock-fast",
+      cli_passthrough: true,
+    });
+
+    await testPage.goto("/settings/integrations/linear");
+    await testPage.getByRole("button", { name: /new watcher/i }).click();
+
+    const dialog = testPage.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+
+    // Reach the Agent Profile combobox via its <label> parent so we don't
+    // collide with the other comboboxes (workspace / workflow / executor)
+    // rendered in the same dialog.
+    const trigger = dialog
+      .getByText("Agent Profile", { exact: true })
+      .locator("xpath=..")
+      .getByRole("combobox");
+    await trigger.click();
+
+    // Radix portals the listbox to the document root, so search the page (not
+    // the dialog) for the option. Substring match on the profile name handles
+    // the "<agent> • <profile>" label format.
+    await expect(testPage.getByRole("option", { name: new RegExp(passthroughName) })).toBeVisible();
+  });
 });

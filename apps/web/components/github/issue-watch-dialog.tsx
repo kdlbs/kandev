@@ -15,7 +15,7 @@ import {
 } from "@kandev/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Textarea } from "@kandev/ui/textarea";
-import { IconInfoCircle } from "@tabler/icons-react";
+import { IconInfoCircle, IconTerminal2 } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
@@ -138,12 +138,7 @@ function useWatchFormData(workspaceId: string) {
     [executors],
   );
 
-  const filteredAgentProfiles = useMemo(
-    () => agentProfiles.filter((p) => !p.cli_passthrough),
-    [agentProfiles],
-  );
-
-  return { workflows, agentProfiles: filteredAgentProfiles, allExecutorProfiles };
+  return { workflows, agentProfiles, allExecutorProfiles };
 }
 
 function SectionHeader({ children }: { children: React.ReactNode }) {
@@ -308,7 +303,11 @@ function IssueAutomationFields({
           value={form.agentProfileId}
           onChange={(v) => setForm((prev) => ({ ...prev, agentProfileId: v }))}
           placeholder="Select agent profile"
-          items={agentProfiles.map((p) => ({ id: p.id, label: p.label }))}
+          items={agentProfiles.map((p) => ({
+            id: p.id,
+            label: p.label,
+            cliPassthrough: p.cli_passthrough,
+          }))}
         />
         <SelectField
           label="Executor Profile"
@@ -500,13 +499,15 @@ export function IssueWatchDialog({
   );
 }
 
+type SelectFieldItem = { id: string; label: string; cliPassthrough?: boolean };
+
 function SelectField(props: {
   label: string;
   description?: string;
   value: string;
   onChange: (v: string) => void;
   placeholder: string;
-  items: { id: string; label: string }[];
+  items: SelectFieldItem[];
   disabled?: boolean;
 }) {
   return (
@@ -524,7 +525,15 @@ function SelectField(props: {
         <SelectContent>
           {props.items.map((item) => (
             <SelectItem key={item.id} value={item.id}>
-              {item.label}
+              <span className="flex items-center gap-1.5">
+                <span>{item.label}</span>
+                {item.cliPassthrough && (
+                  <IconTerminal2
+                    className="size-3.5 text-muted-foreground"
+                    title="CLI mode — your prompt will be auto-injected into the terminal"
+                  />
+                )}
+              </span>
             </SelectItem>
           ))}
         </SelectContent>
