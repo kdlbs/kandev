@@ -7,7 +7,7 @@
 ```
 apps/
 ├── backend/          # Go backend (orchestrator, lifecycle, agentctl, WS gateway)
-├── web/              # Next.js frontend (SSR + WS + Zustand)
+├── web/              # Next.js frontend (SSR + WS + TanStack Query + Zustand)
 ├── cli/              # CLI tool (TypeScript)
 ├── landing/          # Landing page
 └── packages/         # Shared packages/types
@@ -37,7 +37,7 @@ Architecture notes and per-area conventions live alongside the code they describ
 - `apps/backend/internal/agentctl/AGENTS.md` — agentctl HTTP server: route groups, adapter model, ACP protocol.
 - `apps/backend/internal/agentctl/server/api/AGENTS.md` — reverse-proxy body rewriting (`Accept-Encoding`), iframe-blocking header stripping.
 - `apps/backend/internal/integrations/AGENTS.md` — adding a new third-party integration (Jira/Linear pattern, both backend and frontend halves). The `/add-integration` skill mirrors this for scaffolding new integrations.
-- `apps/web/AGENTS.md` — Next.js frontend: shadcn imports, SSR-hydrate-store data flow, store slice structure (incl. `office`), WS format, component conventions, TS lint limits.
+- `apps/web/AGENTS.md` — Next.js frontend: shadcn imports, TanStack Query data flow (queries + WS→cache bridges + ring-buffered streams), client-only Zustand slices (transitional mirrors), WS format, component conventions, TS lint limits.
 
 ---
 

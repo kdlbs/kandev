@@ -1,11 +1,14 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
+import { officeQueryOptions } from "@/lib/query/query-options/office";
+import { settingsQueryOptions } from "@/lib/query/query-options/settings";
 import { AgentSelector } from "@/components/task-create-dialog-selectors";
 import { useAgentProfileOptions } from "@/components/task-create-dialog-options";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
@@ -64,9 +67,9 @@ export function StepAgent({
   onChange,
   onAgentProfilesChange,
 }: StepAgentProps) {
-  const meta = useAppStore((s) => s.office.meta);
+  const { data: meta } = useQuery(officeQueryOptions.metaGlobal());
   const executorOptions = meta?.executorTypes ?? FALLBACK_EXECUTOR_OPTIONS;
-  const settingsAgents = useAppStore((s) => s.settingsAgents.items);
+  const { data: settingsAgents = [] } = useQuery({ ...settingsQueryOptions.agents() });
   const setAgentProfiles = useAppStore((s) => s.setAgentProfiles);
   const agentProfilesState = useAppStore((s) => s.agentProfiles.items);
 

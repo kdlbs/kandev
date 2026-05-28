@@ -1,56 +1,29 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
-import { useOfficeRefetch } from "@/hooks/use-office-refetch";
 import { useRoutingPreview } from "@/hooks/domains/office/use-routing-preview";
 import { useWorkspaceRouting } from "@/hooks/domains/office/use-workspace-routing";
-import { listAgentProfiles } from "@/lib/api/domains/office-api";
-import type { AgentProfile } from "@/lib/state/slices/office/types";
+import { officeQueryOptions } from "@/lib/query/query-options/office";
 import { AgentCard } from "./components/agent-card";
 import { CreateAgentDialog } from "./components/create-agent-dialog";
 import { EmptyState } from "../components/shared/empty-state";
 import { PageHeader } from "../components/shared/page-header";
 
-type AgentsPageClientProps = {
-  initialAgents: AgentProfile[];
-};
-
-export function AgentsPageClient({ initialAgents }: AgentsPageClientProps) {
-  const agents = useAppStore((s) => s.office.agentProfiles);
-  const setOfficeAgentProfiles = useAppStore((s) => s.setOfficeAgentProfiles);
+export function AgentsPageClient() {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const [showCreate, setShowCreate] = useState(false);
-  // Mounting these hooks fetches workspace routing config + preview once;
-  // every agent card reads the resolved preview from the store.
+  const { data: agents = [] } = useQuery({
+    ...officeQueryOptions.agents(workspaceId ?? ""),
+    enabled: !!workspaceId,
+  });
+  // Mount routing hooks to prefetch workspace routing config + preview so
+  // every agent card reads resolved preview from the TQ cache.
   useWorkspaceRouting(workspaceId);
   useRoutingPreview(workspaceId);
-
-  useEffect(() => {
-    if (initialAgents.length > 0) {
-      setOfficeAgentProfiles(initialAgents);
-    }
-  }, [initialAgents, setOfficeAgentProfiles]);
-
-  const refetchAgents = useCallback(async () => {
-    if (!workspaceId) return;
-    const res = await listAgentProfiles(workspaceId).catch(() => ({
-      agents: [] as AgentProfile[],
-    }));
-    setOfficeAgentProfiles(res.agents ?? []);
-  }, [workspaceId, setOfficeAgentProfiles]);
-
-  // Fire once on mount to recover from stale SSR hydration. The SSR fetch
-  // may have raced ahead of a just-created agent's DB write; this re-hit
-  // ensures the store reflects the current DB state without waiting for a
-  // WS event.
-  useEffect(() => {
-    refetchAgents();
-  }, [refetchAgents]);
-
-  useOfficeRefetch("agents", refetchAgents);
 
   return (
     <div className="p-6 space-y-4">

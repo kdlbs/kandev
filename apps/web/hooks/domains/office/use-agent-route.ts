@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { useAppStore } from "@/components/state-provider";
-import { getAgentRoute, updateAgentRouting } from "@/lib/api/domains/office-extended-api";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { updateAgentRouting } from "@/lib/api/domains/office-routing-api";
+import { officeQueryOptions } from "@/lib/query/query-options/office";
+import { qk } from "@/lib/query/keys";
 import type { AgentRouteData, AgentRoutingOverrides } from "@/lib/state/slices/office/types";
 
 export type UseAgentRouteResult = {
@@ -14,39 +15,34 @@ export type UseAgentRouteResult = {
 };
 
 export function useAgentRoute(agentId: string | null): UseAgentRouteResult {
-  const data = useAppStore((s) => (agentId ? s.office.agentRouting.byAgentId[agentId] : undefined));
-  const setAgentRouting = useAppStore((s) => s.setAgentRouting);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const qc = useQueryClient();
 
-  const refresh = useCallback(async () => {
-    if (!agentId) return;
-    setIsLoading(true);
-    setError(null);
-    try {
-      const res = await getAgentRoute(agentId);
-      setAgentRouting(agentId, res);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load agent route");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [agentId, setAgentRouting]);
+  const { data, isLoading, error, refetch } = useQuery({
+    ...officeQueryOptions.agentRouting(agentId ?? ""),
+    enabled: !!agentId,
+  });
 
-  useEffect(() => {
-    if (!agentId) return;
-    if (data !== undefined) return;
-    void refresh();
-  }, [agentId, data, refresh]);
-
-  const updateOverrides = useCallback(
-    async (ov: AgentRoutingOverrides) => {
-      if (!agentId) return;
-      await updateAgentRouting(agentId, ov);
-      await refresh();
+  const updateMutation = useMutation({
+    mutationFn: (ov: AgentRoutingOverrides) => updateAgentRouting(agentId!, ov),
+    onSuccess: () => {
+      if (agentId) void qc.invalidateQueries({ queryKey: qk.office.agentRouting(agentId) });
     },
-    [agentId, refresh],
-  );
+  });
 
-  return { data, isLoading, error, refresh, updateOverrides };
+  function toErrorMessage(e: unknown): string | null {
+    if (!e) return null;
+    return e instanceof Error ? e.message : "Failed to load agent route";
+  }
+
+  return {
+    data,
+    isLoading,
+    error: toErrorMessage(error),
+    refresh: async () => {
+      await refetch();
+    },
+    updateOverrides: async (ov: AgentRoutingOverrides) => {
+      await updateMutation.mutateAsync(ov);
+    },
+  };
 }

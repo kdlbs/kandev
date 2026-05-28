@@ -1,8 +1,7 @@
 "use server";
 
 import { getBackendConfig } from "@/lib/config";
-import { defaultFeaturesState } from "@/lib/state/slices/features/features-slice";
-import type { FeatureFlags } from "@/lib/state/slices/features/types";
+import { defaultFeatureFlags, type FeatureFlags } from "@/lib/features";
 
 const { apiBaseUrl } = getBackendConfig();
 
@@ -11,7 +10,7 @@ const { apiBaseUrl } = getBackendConfig();
 // store. Falls back to defaults (all-off) when the backend is unreachable,
 // so a dev-server restart doesn't crash page rendering.
 //
-// Parsing is type-driven via `defaultFeaturesState.features`: every key
+// Parsing is type-driven via `defaultFeatureFlags`: every key
 // declared on FeatureFlags is read from the response and Boolean-coerced;
 // missing or non-bool values fall through to the default. Adding a flag
 // is therefore one entry in FeatureFlags + the default — no edit here.
@@ -19,7 +18,7 @@ const { apiBaseUrl } = getBackendConfig();
 // See docs/decisions/0007-runtime-feature-flags.md.
 export async function getFeatureFlagsAction(): Promise<FeatureFlags> {
   const url = `${apiBaseUrl}/api/v1/features`;
-  const defaults = defaultFeaturesState.features;
+  const defaults = defaultFeatureFlags;
   try {
     const response = await fetch(url, { cache: "no-store" });
     if (!response.ok) {

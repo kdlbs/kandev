@@ -1,15 +1,16 @@
 "use client";
 
-import { useAppStore } from "@/components/state-provider";
+import { useQuery } from "@tanstack/react-query";
+import { settingsQueryOptions } from "@/lib/query/query-options/settings";
+import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 
 export function useShellSettings() {
-  const preferredShell = useAppStore((state) => state.userSettings.preferredShell);
-  const shellOptions = useAppStore((state) => state.userSettings.shellOptions);
-  const loaded = useAppStore((state) => state.userSettings.loaded);
+  const query = useQuery(settingsQueryOptions.userSettings());
+  const mapped = query.data ? mapUserSettingsResponse(query.data) : null;
 
   return {
-    preferredShell,
-    shellOptions,
-    loaded,
+    preferredShell: mapped?.preferredShell ?? null,
+    shellOptions: mapped?.shellOptions ?? [],
+    loaded: query.isSuccess,
   };
 }

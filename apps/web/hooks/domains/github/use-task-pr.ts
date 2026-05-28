@@ -1,47 +1,15 @@
 "use client";
 
 import { useEffect, useCallback, useRef } from "react";
-import { listWorkspaceTaskPRs } from "@/lib/api/domains/github-api";
-import { getWebSocketClient } from "@/lib/ws/connection";
+import { useQuery } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
+import { getWebSocketClient } from "@/lib/ws/connection";
+import { githubQueryOptions } from "@/lib/query/query-options/github";
 import type { TaskPR } from "@/lib/types/github";
-
-/** Fetch all PR associations for a workspace. */
-export function useWorkspacePRs(workspaceId: string | null) {
-  const setTaskPRs = useAppStore((state) => state.setTaskPRs);
-  const fetchedRef = useRef<string | null>(null);
-  const requestRef = useRef(0);
-
-  useEffect(() => {
-    if (!workspaceId) {
-      fetchedRef.current = null;
-      return;
-    }
-    if (fetchedRef.current === workspaceId) return;
-
-    const requestId = ++requestRef.current;
-    fetchedRef.current = workspaceId;
-
-    listWorkspaceTaskPRs(workspaceId, { cache: "no-store" })
-      .then((response) => {
-        if (requestRef.current !== requestId) return;
-        setTaskPRs(response?.task_prs ?? {});
-      })
-      .catch(() => {
-        if (requestRef.current === requestId) {
-          fetchedRef.current = null; // allow retry on failure
-        }
-      });
-  }, [workspaceId, setTaskPRs]);
-}
 
 const SYNC_RETRY_DELAY = 5_000; // 5 seconds
 const SYNC_MAX_RETRIES = 6; // Up to 30 seconds of retries
 
-/**
- * Returns the primary PR (first by created_at) for a task. Multi-repo tasks
- * may have additional PRs — use `useTaskPRs` to get the full list.
- */
 export function getPrimaryTaskPR(prs: TaskPR[] | undefined): TaskPR | null {
   return prs && prs.length > 0 ? prs[0] : null;
 }
@@ -61,8 +29,37 @@ function normalizeSyncResponse(result: { prs?: TaskPR[] } | TaskPR | null | unde
   return [];
 }
 
-/** Fetch a single task's PR associations, with on-demand sync via WS. */
+/**
+ * Fetch all PR associations for a workspace and prime both the TQ cache and
+ * the Zustand `taskPRs.byTaskId` mirror — `usePRKeyToTasks` (the /github
+ * page's PR-row task indicator) still reads from Zustand, and the
+ * github bridge only writes to TQ for streaming WS events, not the initial
+ * fetch.
+ */
+export function useWorkspacePRs(workspaceId: string | null) {
+  const { data } = useQuery(githubQueryOptions.workspacePRs(workspaceId ?? ""));
+  const setTaskPR = useAppStore((s) => s.setTaskPR);
+  useEffect(() => {
+    if (!data?.task_prs) return;
+    for (const [taskId, prs] of Object.entries(data.task_prs)) {
+      if (!Array.isArray(prs)) continue;
+      for (const pr of prs) {
+        if (pr.task_id) setTaskPR(taskId, pr);
+      }
+    }
+  }, [data, setTaskPR]);
+}
+
+/**
+ * Fetch a single task's PR associations, with on-demand sync via WS.
+ *
+ * Reads from the Zustand slice (updated by both the old WS handler and the
+ * new bridge) so cross-domain components stay consistent during the
+ * transitional Wave 2 period.
+ */
 export function useTaskPR(taskId: string | null) {
+  // Read from the Zustand slice — the WS handler and the TQ bridge both write
+  // here, so we always have the freshest value from either path.
   const prs = useAppStore((state) => (taskId ? (state.taskPRs.byTaskId[taskId] ?? null) : null));
   const pr = getPrimaryTaskPR(prs ?? undefined);
   const setTaskPR = useAppStore((state) => state.setTaskPR);
@@ -73,33 +70,29 @@ export function useTaskPR(taskId: string | null) {
     const client = getWebSocketClient();
     if (!client) return;
 
-    // Backend returns `{prs: TaskPR[]}` — multi-repo tasks have one row per
-    // repo. We push each into the store so the per-repo PR icon stays in
-    // sync. Empty array means no watches yet (the freshness retry below
-    // handles the polling cadence). Legacy single-PR shape (`TaskPR` only)
-    // is detected via the absence of `.prs`.
     client
-      .request<{ prs?: TaskPR[] } | TaskPR | null>("github.task_pr.sync", { task_id: taskId })
+      .request<{ prs?: TaskPR[] } | TaskPR | null>("github.task_pr.sync", {
+        task_id: taskId,
+      })
       .then((result) => {
         const list = normalizeSyncResponse(result);
         if (list.length === 0) return;
-        for (const pr of list) {
-          if (pr.task_id) setTaskPR(taskId, pr);
+        for (const taskPR of list) {
+          if (taskPR.task_id) setTaskPR(taskId, taskPR);
         }
         retryRef.current = 0;
       })
       .catch(() => {
-        // Ignore - sync may fail if no watch exists
+        // Ignore — sync may fail if no watch exists
       });
   }, [taskId, setTaskPR]);
 
-  // Reset retry count when taskId changes
+  // Reset retry count when taskId changes.
   useEffect(() => {
     retryRef.current = 0;
   }, [taskId]);
 
-  // Sync once when the task becomes active (freshness check).
-  // Intentionally excludes `pr` so WS-driven store updates don't re-trigger.
+  // Sync once when the task becomes active.
   useEffect(() => {
     if (!taskId) return;
     refresh();
@@ -108,7 +101,6 @@ export function useTaskPR(taskId: string | null) {
   // Retry polling when no PR is in the store yet.
   useEffect(() => {
     if (!taskId || pr) return;
-
     const interval = setInterval(() => {
       if (retryRef.current >= SYNC_MAX_RETRIES) {
         clearInterval(interval);
@@ -117,15 +109,14 @@ export function useTaskPR(taskId: string | null) {
       retryRef.current++;
       refresh();
     }, SYNC_RETRY_DELAY);
-
     return () => clearInterval(interval);
   }, [taskId, pr, refresh]);
 
-  return { pr, prs: prs ?? [], refresh } as {
-    pr: TaskPR | null;
-    prs: TaskPR[];
-    refresh: () => void;
-  };
+  return {
+    pr,
+    prs: prs ?? [],
+    refresh,
+  } as { pr: TaskPR | null; prs: TaskPR[]; refresh: () => void };
 }
 
 /** Read the active task's primary PR from the store (no fetching). */

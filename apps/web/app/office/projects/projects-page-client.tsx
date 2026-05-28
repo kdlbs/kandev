@@ -1,51 +1,27 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
-import { useOfficeRefetch } from "@/hooks/use-office-refetch";
-import { listProjects } from "@/lib/api/domains/office-api";
+import { officeQueryOptions } from "@/lib/query/query-options/office";
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
-import type { Project } from "@/lib/state/slices/office/types";
 import { ProjectCard } from "./project-card";
 import { CreateProjectDialog } from "./create-project-dialog";
 import { EmptyState } from "../components/shared/empty-state";
 
-type ProjectsPageClientProps = {
-  initialProjects: Project[];
-};
-
-export function ProjectsPageClient({ initialProjects }: ProjectsPageClientProps) {
-  const projects = useAppStore((s) => s.office.projects);
-  const agents = useAppStore((s) => s.office.agentProfiles);
-  const setProjects = useAppStore((s) => s.setProjects);
+export function ProjectsPageClient() {
   const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
   const [dialogOpen, setDialogOpen] = useState(false);
-
-  // Hydrate from SSR; subsequent updates flow through the WS-driven
-  // refetch below. Skipping the unconditional mount fetch removes a
-  // redundant round-trip when SSR data is already in the store
-  // (Stream G of office optimization).
-  useEffect(() => {
-    if (initialProjects.length > 0) {
-      setProjects(initialProjects);
-    }
-  }, [initialProjects, setProjects]);
-
-  const loadProjects = useCallback(async () => {
-    if (!activeWorkspaceId) return;
-    try {
-      const res = await listProjects(activeWorkspaceId);
-      if (res?.projects) {
-        setProjects(res.projects);
-      }
-    } catch {
-      // Silently handle fetch errors
-    }
-  }, [activeWorkspaceId, setProjects]);
-
-  useOfficeRefetch("projects", loadProjects);
+  const { data: projects = [] } = useQuery({
+    ...officeQueryOptions.projects(activeWorkspaceId ?? ""),
+    enabled: !!activeWorkspaceId,
+  });
+  const { data: agents = [] } = useQuery({
+    ...officeQueryOptions.agents(activeWorkspaceId ?? ""),
+    enabled: !!activeWorkspaceId,
+  });
 
   const agentNameMap = new Map(agents.map((a) => [a.id, a.name]));
 

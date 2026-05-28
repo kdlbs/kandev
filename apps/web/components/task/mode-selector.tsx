@@ -2,6 +2,7 @@
 
 import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { IconCheck, IconChevronDown } from "@tabler/icons-react";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@kandev/ui/button";
 import {
   DropdownMenu,
@@ -12,6 +13,7 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
+import { settingsQueryOptions } from "@/lib/query/query-options/settings";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { setSessionMode } from "@/lib/api/domains/session-api";
@@ -95,7 +97,7 @@ function useModeSelectorState(sessionId: string | null) {
   const liveModeState = useAppStore((state) =>
     sessionId ? state.sessionMode.bySessionId[sessionId] : undefined,
   );
-  const settingsAgents = useAppStore((state) => state.settingsAgents.items);
+  const { data: settingsAgents = [] } = useQuery({ ...settingsQueryOptions.agents() });
   const taskSessions = useAppStore((state) => state.taskSessions.items);
   const { items: availableAgents } = useAvailableAgents();
 

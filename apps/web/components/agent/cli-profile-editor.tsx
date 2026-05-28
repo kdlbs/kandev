@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Label } from "@kandev/ui/label";
 import { Input } from "@kandev/ui/input";
 import { Switch } from "@kandev/ui/switch";
 import { Button } from "@kandev/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
-import { useAppStore } from "@/components/state-provider";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
+import { settingsQueryOptions } from "@/lib/query/query-options/settings";
 import { ModelCombobox } from "@/components/settings/model-combobox";
 import { ModeCombobox } from "@/components/settings/mode-combobox";
 import { CLIFlagsField } from "@/components/settings/cli-flags-field";
@@ -105,7 +106,12 @@ export function CliProfileEditor({
   allowCliPassthrough = true,
 }: CliProfileEditorProps) {
   const availableAgents = useAvailableAgents();
-  const settingsAgents = useAppStore((s) => s.settingsAgents.items);
+  // Read the registered settings agents from TanStack Query — the Zustand
+  // settingsAgents.items mirror is no longer populated since the settings
+  // domain was migrated. `saveNewProfile` needs this list so it can attach
+  // the new profile to the existing agent row instead of failing to recreate
+  // an agent with a duplicate name.
+  const { data: settingsAgents = [] } = useQuery({ ...settingsQueryOptions.agents() });
   const installed = useMemo(
     () => availableAgents.items.filter((a) => a.available),
     [availableAgents.items],

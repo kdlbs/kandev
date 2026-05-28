@@ -1,10 +1,27 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { StateProvider } from "@/components/state-provider";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 import { defaultOfficeState } from "@/lib/state/slices/office/office-slice";
 import { AgentConfigurationTab } from "./agent-configuration-tab";
+import { createTestQueryClient } from "@/test-utils/render-with-query";
+import { qk } from "@/lib/query/keys";
+
+function renderWithProfiles(
+  ui: React.ReactElement,
+  profileOptions: unknown[],
+  initialState: Parameters<typeof StateProvider>[0]["initialState"] = {},
+) {
+  const client = createTestQueryClient();
+  client.setQueryData(qk.settings.agentProfiles(), profileOptions);
+  return render(
+    <QueryClientProvider client={client}>
+      <StateProvider initialState={initialState}>{ui}</StateProvider>
+    </QueryClientProvider>,
+  );
+}
 
 // Mock toast so the act-like hooks don't error and we don't need the toast
 // provider tree for these isolated tests.
@@ -52,20 +69,12 @@ const PROFILE_OPTION = {
 
 describe("AgentConfigurationTab", () => {
   it("renders the CLI configuration card with the linked profile summary", () => {
-    render(
-      <StateProvider
-        initialState={{
-          workspaces: { activeId: "ws-1", items: [] },
-          office: { ...defaultOfficeState.office, agentProfiles: [baseAgent] },
-          agentProfiles: { items: [PROFILE_OPTION], version: 0 },
-        }}
-      >
-        <AgentConfigurationTab agent={baseAgent} />
-      </StateProvider>,
-    );
+    renderWithProfiles(<AgentConfigurationTab agent={baseAgent} />, [PROFILE_OPTION], {
+      workspaces: { activeId: "ws-1", items: [] },
+      office: { ...defaultOfficeState.office, agentProfiles: [baseAgent] },
+    });
 
     expect(screen.getByText("CLI Configuration")).toBeTruthy();
-    // Linked profile is surfaced with the CLI client badge.
     expect(screen.getByText(CLAUDE_AGENT_ID)).toBeTruthy();
   });
 
@@ -76,34 +85,20 @@ describe("AgentConfigurationTab", () => {
       agentId: CLAUDE_AGENT_ID,
       agentDisplayName: "Claude",
     };
-    render(
-      <StateProvider
-        initialState={{
-          workspaces: { activeId: "ws-1", items: [] },
-          office: { ...defaultOfficeState.office, agentProfiles: [orphan] },
-          agentProfiles: { items: [PROFILE_OPTION], version: 0 },
-        }}
-      >
-        <AgentConfigurationTab agent={orphan} />
-      </StateProvider>,
-    );
+    renderWithProfiles(<AgentConfigurationTab agent={orphan} />, [PROFILE_OPTION], {
+      workspaces: { activeId: "ws-1", items: [] },
+      office: { ...defaultOfficeState.office, agentProfiles: [orphan] },
+    });
 
     expect(screen.queryByText(/no cli profile selected/i)).toBeNull();
     expect(screen.getByText("Claude")).toBeTruthy();
   });
 
   it("shows create-agent capability for CEO agents", () => {
-    render(
-      <StateProvider
-        initialState={{
-          workspaces: { activeId: "ws-1", items: [] },
-          office: { ...defaultOfficeState.office, agentProfiles: [baseAgent] },
-          agentProfiles: { items: [PROFILE_OPTION], version: 0 },
-        }}
-      >
-        <AgentConfigurationTab agent={baseAgent} />
-      </StateProvider>,
-    );
+    renderWithProfiles(<AgentConfigurationTab agent={baseAgent} />, [PROFILE_OPTION], {
+      workspaces: { activeId: "ws-1", items: [] },
+      office: { ...defaultOfficeState.office, agentProfiles: [baseAgent] },
+    });
 
     expect(screen.getByTestId("agent-capability-preview").textContent).toContain("Create agent");
   });
@@ -115,17 +110,10 @@ describe("AgentConfigurationTab", () => {
       name: "Worker",
       role: "worker" as const,
     };
-    render(
-      <StateProvider
-        initialState={{
-          workspaces: { activeId: "ws-1", items: [] },
-          office: { ...defaultOfficeState.office, agentProfiles: [worker] },
-          agentProfiles: { items: [PROFILE_OPTION], version: 0 },
-        }}
-      >
-        <AgentConfigurationTab agent={worker} />
-      </StateProvider>,
-    );
+    renderWithProfiles(<AgentConfigurationTab agent={worker} />, [PROFILE_OPTION], {
+      workspaces: { activeId: "ws-1", items: [] },
+      office: { ...defaultOfficeState.office, agentProfiles: [worker] },
+    });
 
     expect(screen.getByTestId("agent-capability-preview").textContent).not.toContain(
       "Create agent",

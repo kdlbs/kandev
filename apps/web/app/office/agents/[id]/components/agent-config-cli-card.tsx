@@ -1,12 +1,14 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { useAppStore } from "@/components/state-provider";
+import { settingsQueryOptions } from "@/lib/query/query-options/settings";
 import { useHealthyAgentProfiles } from "@/hooks/domains/settings/use-healthy-agent-profiles";
 import { CliProfileEditor } from "@/components/agent/cli-profile-editor";
 import type { AgentProfile } from "@/lib/types/agent-profile";
@@ -26,7 +28,7 @@ type Props = {
  */
 export function AgentConfigCliCard({ agentProfileId, currentAgent, onAgentProfileChange }: Props) {
   const healthy = useHealthyAgentProfiles(agentProfileId);
-  const settingsAgents = useAppStore((s) => s.settingsAgents.items);
+  const { data: settingsAgents = [] } = useQuery({ ...settingsQueryOptions.agents() });
   const setAgentProfiles = useAppStore((s) => s.setAgentProfiles);
   const agentProfilesState = useAppStore((s) => s.agentProfiles.items);
 

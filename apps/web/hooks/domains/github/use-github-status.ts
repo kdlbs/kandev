@@ -1,41 +1,23 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
-import { fetchGitHubStatus } from "@/lib/api/domains/github-api";
-import { useAppStore } from "@/components/state-provider";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { githubQueryOptions } from "@/lib/query/query-options/github";
+import { qk } from "@/lib/query/keys";
 
 export function useGitHubStatus() {
-  const status = useAppStore((state) => state.githubStatus.status);
-  const loaded = useAppStore((state) => state.githubStatus.loaded);
-  const loading = useAppStore((state) => state.githubStatus.loading);
-  const setGitHubStatus = useAppStore((state) => state.setGitHubStatus);
-  const setGitHubStatusLoading = useAppStore((state) => state.setGitHubStatusLoading);
-  const invalidateSystemHealth = useAppStore((state) => state.invalidateSystemHealth);
+  const qc = useQueryClient();
+  const { data: status, isLoading, isFetching, isSuccess } = useQuery(githubQueryOptions.status());
 
-  const doFetch = useCallback(() => {
-    setGitHubStatusLoading(true);
-    fetchGitHubStatus({ cache: "no-store" })
-      .then((response) => {
-        setGitHubStatus(response ?? null);
-      })
-      .catch(() => {
-        setGitHubStatus(null);
-      })
-      .finally(() => {
-        setGitHubStatusLoading(false);
-      });
-  }, [setGitHubStatus, setGitHubStatusLoading]);
+  function refresh() {
+    // Invalidate both github status and system health so the header indicator refetches.
+    void qc.invalidateQueries({ queryKey: qk.github.status() });
+    void qc.invalidateQueries({ queryKey: qk.settings.systemHealth() });
+  }
 
-  useEffect(() => {
-    if (loaded || loading) return;
-    doFetch();
-  }, [loaded, loading, doFetch]);
-
-  const refresh = useCallback(() => {
-    // Also invalidate system health so the header indicator refetches
-    invalidateSystemHealth();
-    doFetch();
-  }, [doFetch, invalidateSystemHealth]);
-
-  return { status, loaded, loading, refresh };
+  return {
+    status: status ?? null,
+    loaded: isSuccess,
+    loading: isLoading || isFetching,
+    refresh,
+  };
 }

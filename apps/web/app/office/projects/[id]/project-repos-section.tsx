@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { IconCode, IconWorld, IconX } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { toast } from "sonner";
@@ -20,6 +21,7 @@ type ProjectReposSectionProps = {
 export function ProjectReposSection({ project }: ProjectReposSectionProps) {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const updateProjectStore = useAppStore((s) => s.updateProject);
+  const qc = useQueryClient();
   const { repositories } = useRepositories(workspaceId);
   const repos = useMemo(() => normalizeRepos(project.repositories), [project.repositories]);
 
@@ -28,12 +30,18 @@ export function ProjectReposSection({ project }: ProjectReposSectionProps) {
       try {
         await updateProject(project.id, { repositories: next });
         updateProjectStore(project.id, { repositories: next });
+        // The parent page reads project via the office projects query; the
+        // Zustand mirror is transitional. Invalidate so the chip list reflects
+        // the new repositories.
+        if (workspaceId) {
+          await qc.invalidateQueries({ queryKey: ["office", workspaceId, "projects"] });
+        }
         toast.success(successMessage);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : failureMessage);
       }
     },
-    [project.id, updateProjectStore],
+    [project.id, updateProjectStore, qc, workspaceId],
   );
 
   const handleAdd = useCallback(

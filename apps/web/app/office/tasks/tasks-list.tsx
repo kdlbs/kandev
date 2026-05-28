@@ -1,9 +1,24 @@
 "use client";
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import {
+  type Dispatch,
+  type SetStateAction,
+  useCallback,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
+import { officeQueryOptions } from "@/lib/query/query-options/office";
 import { useOfficeRefetch } from "@/hooks/use-office-refetch";
+import type {
+  TaskFilterState,
+  TaskSortField,
+  TaskSortDir,
+  TaskGroupBy,
+  OfficeTask,
+} from "@/lib/state/slices/office/types";
 import { NewTaskDialog } from "../components/new-task-dialog";
 import { TasksToolbar } from "./tasks-toolbar";
 import { TasksContent } from "./tasks-content";
@@ -14,6 +29,14 @@ import { usePaginatedTasks } from "./use-paginated-tasks";
 const STORAGE_KEY_PREFIX = "kandev-tasks-filters-";
 const SHOW_SYSTEM_STORAGE_KEY = "kandev-tasks-show-system";
 const SHOW_SYSTEM_EVENT = "kandev:tasks-show-system";
+
+const DEFAULT_FILTERS: TaskFilterState = {
+  statuses: [],
+  priorities: [],
+  assigneeIds: [],
+  projectIds: [],
+  search: "",
+};
 
 function readShowSystemPref(): boolean {
   if (typeof window === "undefined") return false;
@@ -77,85 +100,178 @@ function persistFilters(workspaceId: string | null, filters: Record<string, unkn
   }
 }
 
-function useRehydratePersistedFilters(workspaceId: string | null) {
-  const setTaskFilters = useAppStore((s) => s.setTaskFilters);
-  useEffect(() => {
+function useTasksListState(workspaceId: string | null) {
+  // UI state lives in local React state (not Zustand) per TQ migration plan.
+  // Lazily seed filters from localStorage so we don't need a setState-in-effect.
+  const [filters, setFilters] = useState<TaskFilterState>(() => {
     const persisted = loadPersistedFilters(workspaceId);
-    if (Object.keys(persisted).length > 0) setTaskFilters(persisted);
-  }, [workspaceId, setTaskFilters]);
-}
-
-export function TasksList() {
-  const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const tasks = useAppStore((s) => s.office.tasks.items);
-  const filters = useAppStore((s) => s.office.tasks.filters);
-  const viewMode = useAppStore((s) => s.office.tasks.viewMode);
-  const sortField = useAppStore((s) => s.office.tasks.sortField);
-  const sortDir = useAppStore((s) => s.office.tasks.sortDir);
-  const groupBy = useAppStore((s) => s.office.tasks.groupBy);
-  const nestingEnabled = useAppStore((s) => s.office.tasks.nestingEnabled);
-  const isLoading = useAppStore((s) => s.office.tasks.isLoading);
-  const agents = useAppStore((s) => s.office.agentProfiles);
-
-  const setTaskFilters = useAppStore((s) => s.setTaskFilters);
-  const setTaskViewMode = useAppStore((s) => s.setTaskViewMode);
-  const setTaskSortField = useAppStore((s) => s.setTaskSortField);
-  const setTaskSortDir = useAppStore((s) => s.setTaskSortDir);
-  const setTaskGroupBy = useAppStore((s) => s.setTaskGroupBy);
-  const toggleNesting = useAppStore((s) => s.toggleNesting);
-
+    return Object.keys(persisted).length > 0
+      ? { ...DEFAULT_FILTERS, ...persisted }
+      : DEFAULT_FILTERS;
+  });
+  const [viewMode, setViewMode] = useState<"list" | "board">("list");
+  const [sortField, setSortField] = useState<TaskSortField>("updated");
+  const [sortDir, setSortDir] = useState<TaskSortDir>("desc");
+  const [groupBy, setGroupBy] = useState<TaskGroupBy>("none");
+  const [nestingEnabled, setNestingEnabled] = useState(true);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [newTaskOpen, setNewTaskOpen] = useState(false);
-  const [showSystem, setShowSystem] = useShowSystemPref();
-  const { searchResults, triggerSearch } = useServerSearch(workspaceId);
+  return {
+    filters,
+    setFilters,
+    viewMode,
+    setViewMode,
+    sortField,
+    setSortField,
+    sortDir,
+    setSortDir,
+    groupBy,
+    setGroupBy,
+    nestingEnabled,
+    setNestingEnabled,
+    expandedIds,
+    setExpandedIds,
+    newTaskOpen,
+    setNewTaskOpen,
+  };
+}
 
-  const agentMap = new Map(agents.map((a) => [a.id, a.name]));
+type TasksHandlersOptions = {
+  workspaceId: string | null;
+  tasks: OfficeTask[];
+  filters: TaskFilterState;
+  setFilters: Dispatch<SetStateAction<TaskFilterState>>;
+  sortField: TaskSortField;
+  sortDir: TaskSortDir;
+  nestingEnabled: boolean;
+  expandedIds: Set<string>;
+  setExpandedIds: Dispatch<SetStateAction<Set<string>>>;
+  triggerSearch: (search: string) => void;
+  searchResults: OfficeTask[] | null;
+};
 
-  useRehydratePersistedFilters(workspaceId);
-  const { loadMore, hasMore, isLoadingMore, refetch } = usePaginatedTasks(workspaceId, showSystem);
-  // WS-driven invalidation: refetch the current filter/sort/page-1 on
-  // task lifecycle events (task created, etc.) — moved from the page
-  // client so the refetch preserves the user's active filters.
-  useOfficeRefetch("tasks", refetch);
+type TasksHandlers = {
+  handleFilterChange: (patch: Record<string, unknown>) => void;
+  handleSearchChange: (search: string) => void;
+  handleToggleExpand: (id: string) => void;
+  flatNodes: ReturnType<typeof useIssuesTree>;
+};
 
+function useTasksHandlers(opts: TasksHandlersOptions): TasksHandlers {
+  const {
+    workspaceId,
+    tasks,
+    filters,
+    setFilters,
+    sortField,
+    sortDir,
+    nestingEnabled,
+    expandedIds,
+    setExpandedIds,
+    triggerSearch,
+    searchResults,
+  } = opts;
   const handleFilterChange = useCallback(
     (patch: Record<string, unknown>) => {
-      setTaskFilters(patch);
-      persistFilters(workspaceId, { ...filters, ...patch });
+      setFilters((prev) => {
+        const next = { ...prev, ...patch } as TaskFilterState;
+        persistFilters(workspaceId, next);
+        return next;
+      });
     },
-    [setTaskFilters, filters, workspaceId],
+    [workspaceId, setFilters],
   );
 
   const handleSearchChange = useCallback(
     (search: string) => {
-      setTaskFilters({ search });
+      setFilters((prev) => ({ ...prev, search }));
       triggerSearch(search);
     },
-    [setTaskFilters, triggerSearch],
+    [triggerSearch, setFilters],
   );
 
-  const handleToggleExpand = useCallback((id: string) => {
-    setExpandedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
+  const handleToggleExpand = useCallback(
+    (id: string) => {
+      setExpandedIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      });
+    },
+    [setExpandedIds],
+  );
 
-  const activeIssues = searchResults ?? tasks;
-  // Skip local search filter when using server results to avoid
-  // rejecting matches on description or identifier.
   const treeFilters = searchResults ? { ...filters, search: "" } : filters;
-
   const flatNodes = useIssuesTree({
-    tasks: activeIssues,
+    tasks: searchResults ?? tasks,
     filters: treeFilters,
     sortField,
     sortDir,
     nestingEnabled,
     expandedIds,
   });
+
+  return { handleFilterChange, handleSearchChange, handleToggleExpand, flatNodes };
+}
+
+export function TasksList() {
+  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const tasks = useAppStore((s) => s.office.tasks.items);
+  const isLoading = useAppStore((s) => s.office.tasks.isLoading);
+
+  const {
+    filters,
+    setFilters,
+    viewMode,
+    setViewMode,
+    sortField,
+    setSortField,
+    sortDir,
+    setSortDir,
+    groupBy,
+    setGroupBy,
+    nestingEnabled,
+    setNestingEnabled,
+    expandedIds,
+    setExpandedIds,
+    newTaskOpen,
+    setNewTaskOpen,
+  } = useTasksListState(workspaceId);
+
+  const { data: agents = [] } = useQuery({
+    ...officeQueryOptions.agents(workspaceId ?? ""),
+    enabled: !!workspaceId,
+  });
+  const [showSystem, setShowSystem] = useShowSystemPref();
+  const { searchResults, triggerSearch } = useServerSearch(workspaceId);
+  const agentMap = new Map(agents.map((a) => [a.id, a.name]));
+
+  const { loadMore, hasMore, isLoadingMore, refetch } = usePaginatedTasks(
+    workspaceId,
+    showSystem,
+    filters,
+    sortField,
+    sortDir,
+  );
+  // WS-driven invalidation: refetch the current filter/sort/page-1 on
+  // task lifecycle events so the list stays current.
+  useOfficeRefetch("tasks", refetch);
+
+  const { handleFilterChange, handleSearchChange, handleToggleExpand, flatNodes } =
+    useTasksHandlers({
+      workspaceId,
+      tasks,
+      filters,
+      setFilters,
+      sortField,
+      sortDir,
+      nestingEnabled,
+      expandedIds,
+      setExpandedIds,
+      triggerSearch,
+      searchResults,
+    });
 
   return (
     <div className="space-y-4 p-6">
@@ -167,17 +283,16 @@ export function TasksList() {
         sortDir={sortDir}
         groupBy={groupBy}
         showSystem={showSystem}
-        onViewModeChange={setTaskViewMode}
-        onToggleNesting={toggleNesting}
+        onViewModeChange={setViewMode}
+        onToggleNesting={() => setNestingEnabled((v) => !v)}
         onFilterChange={handleFilterChange}
-        onSortFieldChange={setTaskSortField}
-        onSortDirChange={setTaskSortDir}
-        onGroupByChange={setTaskGroupBy}
+        onSortFieldChange={setSortField}
+        onSortDirChange={setSortDir}
+        onGroupByChange={setGroupBy}
         onSearchChange={handleSearchChange}
         onShowSystemChange={setShowSystem}
         onNewIssue={() => setNewTaskOpen(true)}
       />
-
       <TasksContent
         viewMode={viewMode}
         isLoading={isLoading}
@@ -186,7 +301,6 @@ export function TasksList() {
         onToggleExpand={handleToggleExpand}
         agentMap={agentMap}
       />
-
       <LoadMoreButton
         visible={hasMore && !searchResults}
         loading={isLoadingMore}

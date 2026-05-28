@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
-import { listTasks } from "@/lib/api/domains/office-tasks-api";
+import { officeQueryOptions } from "@/lib/query/query-options/office";
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 import { TaskRow } from "../../tasks/task-row";
 
@@ -12,40 +13,20 @@ type ProjectTasksSectionProps = {
 
 export function ProjectTasksSection({ projectId }: ProjectTasksSectionProps) {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const appendTasks = useAppStore((s) => s.appendTasks);
-  // Select stable references; derive the filtered list and the agent-name
-  // lookup via useMemo. Returning a freshly `.filter()`'d array or a
-  // `new Map(...)` straight from the selector tripped React's
-  // getSnapshot caching guard because every render produced a new
-  // reference.
-  const allTasks = useAppStore((s) => s.office.tasks.items);
-  const agentProfiles = useAppStore((s) => s.office.agentProfiles);
-
-  // Fetch tasks for this project once on mount. The list is merged into
-  // the global store via appendTasks so other consumers (the Tasks page,
-  // the inbox, etc.) keep seeing the union of every task they've loaded.
-  useEffect(() => {
-    if (!workspaceId) return;
-    let cancelled = false;
-    listTasks(workspaceId, { project: projectId })
-      .then((res) => {
-        if (cancelled || !res?.tasks?.length) return;
-        appendTasks(res.tasks);
-      })
-      .catch(() => {
-        // Failure is non-fatal — store-resident tasks still render.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceId, projectId, appendTasks]);
+  // TQ fetches tasks for this project directly — no global store merge needed.
+  const { data: tasks = [] } = useQuery({
+    ...officeQueryOptions.tasks(workspaceId ?? "", { projectIds: [projectId] }),
+    enabled: !!workspaceId,
+  });
+  const { data: agentProfiles = [] } = useQuery({
+    ...officeQueryOptions.agents(workspaceId ?? ""),
+    enabled: !!workspaceId,
+  });
 
   const sorted = useMemo(
     () =>
-      allTasks
-        .filter((t) => t.projectId === projectId)
-        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
-    [allTasks, projectId],
+      [...tasks].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
+    [tasks],
   );
 
   const agentNameById = useMemo(

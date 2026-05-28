@@ -64,17 +64,20 @@ export type UsePaginatedTasksResult = {
  * Resets the cursor and replaces the list whenever the workspace, filters
  * or sort change. Exposes loadMore() to fetch the next page (appending to
  * the store) and refetch() for WS-driven invalidations.
+ *
+ * Accepts filters / sort as explicit params (rather than reading from Zustand)
+ * so callers can keep UI state in local React state per the TQ migration plan.
  */
 export function usePaginatedTasks(
   workspaceId: string | null,
   includeSystem: boolean,
+  filters: TaskFilterState,
+  sortField: TaskSortField,
+  sortDir: TaskSortDir,
 ): UsePaginatedTasksResult {
   const setTasks = useAppStore((s) => s.setTasks);
   const appendTasks = useAppStore((s) => s.appendTasks);
   const setTasksLoading = useAppStore((s) => s.setTasksLoading);
-  const filters = useAppStore((s) => s.office.tasks.filters);
-  const sortField = useAppStore((s) => s.office.tasks.sortField);
-  const sortDir = useAppStore((s) => s.office.tasks.sortDir);
 
   // Cursor + the params snapshot that produced it, kept atomically so a
   // stale cursor from a previous filter set can't be used for loadMore.

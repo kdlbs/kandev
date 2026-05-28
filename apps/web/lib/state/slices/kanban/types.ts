@@ -133,6 +133,7 @@ export type KanbanSliceActions = {
   setActiveSessionAuto: (taskId: string, sessionId: string) => void;
   clearActiveSession: () => void;
   setWorkflowSnapshot: (workflowId: string, data: WorkflowSnapshotData) => void;
+  setKanbanMultiSnapshots: (snapshots: Record<string, WorkflowSnapshotData>) => void;
   setKanbanMultiLoading: (loading: boolean) => void;
   clearKanbanMulti: () => void;
   updateMultiTask: (workflowId: string, task: KanbanState["tasks"][number]) => void;

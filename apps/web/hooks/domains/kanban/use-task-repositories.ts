@@ -1,8 +1,10 @@
 "use client";
 
 import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { multiKanbanQueryOptions } from "@/lib/query/query-options/kanban";
 import { useAppStore } from "@/components/state-provider";
-import type { KanbanState } from "@/lib/state/slices";
+import type { KanbanState } from "@/lib/state/slices/kanban/types";
 
 /**
  * Slim per-task repository shape carried in the kanban store. Mirrors
@@ -14,20 +16,32 @@ export type KanbanTaskRepository = NonNullable<
 
 /**
  * Returns the repositories linked to a task, ordered by Position. Empty
- * array for repo-less tasks. The hook reads from the kanban tasks slice;
- * use this instead of poking task.repositories directly so multi-repo
- * consumers all share one source of truth.
+ * array for repo-less tasks.
+ *
+ * Reads from the TQ kanban multi-cache. Falls back to an empty array when
+ * the cache has no data yet or the task is not found.
+ *
+ * Preserved signature: `useTaskRepositories(taskId)`.
  */
 export function useTaskRepositories(taskId: string | null | undefined): KanbanTaskRepository[] {
-  const task = useAppStore((state) =>
-    taskId
-      ? (state.kanban.tasks.find((t: KanbanState["tasks"][number]) => t.id === taskId) ?? null)
-      : null,
-  );
+  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+
+  const { data: multiData } = useQuery({
+    ...multiKanbanQueryOptions(workspaceId ?? ""),
+    enabled: !!workspaceId,
+  });
+
   return useMemo(() => {
-    const repos = task?.repositories ?? [];
-    return [...repos].sort((a, b) => a.position - b.position);
-  }, [task]);
+    if (!taskId || !multiData) return [];
+    for (const snap of Object.values(multiData.snapshots)) {
+      const task = snap.tasks.find((t) => t.id === taskId);
+      if (task) {
+        const repos = task.repositories ?? [];
+        return [...repos].sort((a, b) => a.position - b.position);
+      }
+    }
+    return [];
+  }, [taskId, multiData]);
 }
 
 /**

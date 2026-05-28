@@ -1,9 +1,11 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { useAppStore } from "@/components/state-provider";
+import { officeQueryOptions } from "@/lib/query/query-options/office";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
 
 // Execution policy stage types
@@ -144,7 +146,11 @@ type Props = {
 };
 
 export function NewTaskStages({ stages, onUpdate }: Props) {
-  const agents = useAppStore((s) => s.office.agentProfiles);
+  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const { data: agents = [] } = useQuery({
+    ...officeQueryOptions.agents(workspaceId ?? ""),
+    enabled: !!workspaceId,
+  });
 
   return (
     <div className="border border-border rounded-lg overflow-hidden">

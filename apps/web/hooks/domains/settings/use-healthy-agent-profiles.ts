@@ -1,7 +1,8 @@
 "use client";
 
-import { useAppStore } from "@/components/state-provider";
-import type { AgentProfileOption } from "@/lib/state/slices";
+import { useQuery } from "@tanstack/react-query";
+import { settingsQueryOptions } from "@/lib/query/query-options/settings";
+import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
 
 /**
  * Returns agent profiles that are healthy (no capability issues). If `selectedId`
@@ -9,8 +10,8 @@ import type { AgentProfileOption } from "@/lib/state/slices";
  * user can see what's currently set instead of seeing a blank select.
  */
 export function useHealthyAgentProfiles(selectedId?: string): AgentProfileOption[] {
-  const agentProfiles = useAppStore((s) => s.agentProfiles.items);
-  return agentProfiles.filter(
+  const { data: profiles = [] } = useQuery(settingsQueryOptions.agentProfiles());
+  return profiles.filter(
     (p) =>
       !p.capability_status ||
       p.capability_status === "ok" ||

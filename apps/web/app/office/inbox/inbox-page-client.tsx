@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { IconSearch } from "@tabler/icons-react";
 import { Tabs, TabsList, TabsTrigger } from "@kandev/ui/tabs";
 import { Input } from "@kandev/ui/input";
 import { toast } from "sonner";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
-import { useOfficeRefetch } from "@/hooks/use-office-refetch";
+import { officeQueryOptions } from "@/lib/query/query-options/office";
 import * as officeApi from "@/lib/api/domains/office-api";
 import type { InboxItem } from "@/lib/state/slices/office/types";
 import { InboxItemRow } from "./inbox-item-row";
@@ -18,66 +19,31 @@ type InboxPageClientProps = {
   initialCount: number;
 };
 
-function useInboxData(workspaceId: string | null, initialItems: InboxItem[], initialCount: number) {
-  const setInboxItems = useAppStore((s) => s.setInboxItems);
-  const setInboxCount = useAppStore((s) => s.setInboxCount);
-  const setOfficeAgentProfiles = useAppStore((s) => s.setOfficeAgentProfiles);
-
-  useEffect(() => {
-    if (initialItems.length > 0) setInboxItems(initialItems);
-    if (initialCount > 0) setInboxCount(initialCount);
-  }, [initialItems, initialCount, setInboxItems, setInboxCount]);
-
-  const fetchInbox = useCallback(async () => {
-    if (!workspaceId) return;
-    const [inboxRes, agentsRes] = await Promise.all([
-      // Single call returns items + total_count (Stream F of office
-      // optimization). Was getInbox + getInboxCount in parallel.
-      officeApi.getInbox(workspaceId),
-      // Refetch agents alongside inbox so unpause-on-dismiss clears the
-      // sidebar paused badge without waiting on a WS event.
-      officeApi.listAgentProfiles(workspaceId),
-    ]);
-    const items = inboxRes.items ?? [];
-    setInboxItems(items);
-    setInboxCount(inboxRes.total_count ?? items.length);
-    if (Array.isArray(agentsRes.agents)) {
-      setOfficeAgentProfiles(agentsRes.agents);
-    }
-  }, [workspaceId, setInboxItems, setInboxCount, setOfficeAgentProfiles]);
-
-  useEffect(() => {
-    void fetchInbox();
-  }, [fetchInbox]);
-
-  return fetchInbox;
-}
-
-function useApprovalActions(fetchInbox: () => Promise<void>) {
+function useApprovalActions(refetch: () => void) {
   const handleApprove = useCallback(
     async (id: string) => {
       try {
         await officeApi.decideApproval(id, { status: "approved" });
-        void fetchInbox();
+        refetch();
         toast.success("Approved");
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Failed to approve");
       }
     },
-    [fetchInbox],
+    [refetch],
   );
 
   const handleReject = useCallback(
     async (id: string) => {
       try {
         await officeApi.decideApproval(id, { status: "rejected" });
-        void fetchInbox();
+        refetch();
         toast.success("Rejected");
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Failed to reject");
       }
     },
-    [fetchInbox],
+    [refetch],
   );
 
   return { handleApprove, handleReject };
@@ -122,19 +88,28 @@ function InboxToolbar({
   );
 }
 
-export function InboxPageClient({ initialItems, initialCount }: InboxPageClientProps) {
+export function InboxPageClient({
+  initialItems: _initialItems,
+  initialCount: _initialCount,
+}: InboxPageClientProps) {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const inboxItems = useAppStore((s) => s.office.inboxItems);
+  const qc = useQueryClient();
   const [tab, setTab] = useState<TabValue>("mine");
   const [search, setSearch] = useState("");
 
-  const fetchInbox = useInboxData(workspaceId, initialItems, initialCount);
-  const { handleApprove, handleReject } = useApprovalActions(fetchInbox);
+  const { data: inboxData } = useQuery({
+    ...officeQueryOptions.inbox(workspaceId ?? ""),
+    enabled: !!workspaceId,
+  });
 
-  useOfficeRefetch("inbox", fetchInbox);
+  const refetch = useCallback(() => {
+    void qc.invalidateQueries({ queryKey: ["office", workspaceId, "inbox"] });
+  }, [qc, workspaceId]);
+
+  const { handleApprove, handleReject } = useApprovalActions(refetch);
 
   const filteredItems = useMemo(() => {
-    let items: InboxItem[] = inboxItems;
+    let items: InboxItem[] = inboxData?.items ?? [];
     if (tab === "mine") {
       items = items.filter(
         (i) =>
@@ -155,7 +130,7 @@ export function InboxPageClient({ initialItems, initialCount }: InboxPageClientP
       );
     }
     return items;
-  }, [inboxItems, tab, search]);
+  }, [inboxData, tab, search]);
 
   return (
     <div className="space-y-4 p-6">
@@ -175,7 +150,7 @@ export function InboxPageClient({ initialItems, initialCount }: InboxPageClientP
               item={item}
               onApprove={handleApprove}
               onReject={handleReject}
-              onChanged={() => void fetchInbox()}
+              onChanged={refetch}
             />
           ))
         )}

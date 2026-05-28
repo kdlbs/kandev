@@ -1,7 +1,9 @@
 "use client";
 
 import { memo, useCallback, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
+import { settingsQueryOptions } from "@/lib/query/query-options/settings";
 import { Combobox, type ComboboxOption } from "@/components/combobox";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
@@ -100,7 +102,7 @@ function resolveCurrentModel(
 function useModelSelectorState(sessionId: string | null) {
   useSettingsData(true);
 
-  const settingsAgents = useAppStore((state) => state.settingsAgents.items);
+  const { data: settingsAgents = [] } = useQuery({ ...settingsQueryOptions.agents() });
   const taskSessions = useAppStore((state) => state.taskSessions.items);
   const activeModels = useAppStore((state) => state.activeModel.bySessionId);
   const setActiveModel = useAppStore((state) => state.setActiveModel);

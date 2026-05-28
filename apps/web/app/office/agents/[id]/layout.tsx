@@ -1,13 +1,13 @@
 "use client";
 
-import { use, useCallback, useEffect, type ReactNode } from "react";
+import { use, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import { IconInfoCircle } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
-import { useOfficeRefetch } from "@/hooks/use-office-refetch";
-import { listAgentProfiles } from "@/lib/api/domains/office-api";
+import { officeQueryOptions } from "@/lib/query/query-options/office";
 import { cn } from "@/lib/utils";
 import { OfficeTopbarPortal } from "../../components/office-topbar-portal";
 import { AgentAvatar } from "../../components/agent-avatar";
@@ -42,27 +42,21 @@ const TABS: Array<{ slug: string; label: string }> = [
 export default function AgentDetailLayout({ children, params }: AgentDetailLayoutProps) {
   const { id } = use(params);
   const pathname = usePathname();
-  const agent = useAppStore((s) => s.office.agentProfiles.find((a) => a.id === id));
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const setOfficeAgentProfiles = useAppStore((s) => s.setOfficeAgentProfiles);
-
-  // Refetch the agents list on mount and on WS "agents" events so this
-  // layout recovers when SSR hydrated the store with a stale agent set
-  // (e.g. the agent was created after the SSR fetch fired).
-  const refetchAgents = useCallback(async () => {
-    if (!workspaceId) return;
-    const res = await listAgentProfiles(workspaceId).catch(() => ({ agents: [] }));
-    setOfficeAgentProfiles(res.agents ?? []);
-  }, [workspaceId, setOfficeAgentProfiles]);
-
-  // Fire once on mount to recover from stale SSR hydration.
-  useEffect(() => {
-    refetchAgents();
-  }, [refetchAgents]);
-
-  useOfficeRefetch("agents", refetchAgents);
-
+  const { data: agents = [], isPending } = useQuery({
+    ...officeQueryOptions.agents(workspaceId ?? ""),
+    enabled: !!workspaceId,
+  });
+  const agent = agents.find((a) => a.id === id);
   const activeSlug = activeSlugFromPath(pathname, id);
+
+  if (isPending) {
+    return (
+      <div className="p-6">
+        <p className="text-muted-foreground">Loading...</p>
+      </div>
+    );
+  }
 
   if (!agent) {
     return (
@@ -145,7 +139,11 @@ function activeSlugFromPath(pathname: string | null, agentId: string): string {
  * don't get this hint since they only run on assignment, not schedule.
  */
 function CoordinatorRoutineHint({ agentId, agentRole }: { agentId: string; agentRole: string }) {
-  const routines = useAppStore((s) => s.office.routines);
+  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const { data: routines = [] } = useQuery({
+    ...officeQueryOptions.routines(workspaceId ?? ""),
+    enabled: !!workspaceId && agentRole === "ceo",
+  });
   if (agentRole !== "ceo") return null;
   const hasActive = routines.some(
     (r) => r.assigneeAgentProfileId === agentId && r.status === "active",

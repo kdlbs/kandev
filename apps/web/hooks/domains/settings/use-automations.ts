@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useCallback, useRef, useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  listAutomations,
   createAutomation,
   updateAutomation as apiUpdateAutomation,
   deleteAutomation,
@@ -10,127 +9,95 @@ import {
   disableAutomation,
   triggerAutomation,
 } from "@/lib/api/domains/automation-api";
-import { useAppStore } from "@/components/state-provider";
+import { automationsQueryOptions } from "@/lib/query/query-options/automations";
+import { qk } from "@/lib/query/keys";
 import type {
   CreateAutomationRequest,
   CreateAutomationResponse,
   UpdateAutomationRequest,
+  Automation,
 } from "@/lib/types/automation";
 
 export function useAutomations(workspaceId: string | null) {
-  const items = useAppStore((state) => state.automations.items);
-  const loading = useAppStore((state) => state.automations.loading);
-  const setAutomations = useAppStore((state) => state.setAutomations);
-  const setLoading = useAppStore((state) => state.setAutomationsLoading);
-  const addToStore = useAppStore((state) => state.addAutomation);
-  const updateInStore = useAppStore((state) => state.updateAutomation);
-  const removeFromStore = useAppStore((state) => state.removeAutomation);
+  const qc = useQueryClient();
+  const safeId = workspaceId ?? "";
 
-  // Track which workspace the current store contents belong to so a
-  // workspace switch refetches instead of serving stale data from the
-  // previous workspace. Also gate the response apply behind the in-flight
-  // workspace id to drop late responses that arrive after a quick switch.
-  //
-  // loadedWorkspaceRef is a ref (not state) so the effect guard on line
-  // below does not create a stale-closure problem. loadedWorkspaceId is
-  // the parallel state copy used only for the render-time `loaded` flag.
-  const loadedWorkspaceRef = useRef<string | null>(null);
-  const inFlightWorkspaceRef = useRef<string | null>(null);
-  const [loadedWorkspaceId, setLoadedWorkspaceId] = useState<string | null>(null);
+  const { data, isLoading } = useQuery({
+    ...automationsQueryOptions.list(safeId),
+    enabled: !!workspaceId,
+  });
 
-  useEffect(() => {
-    if (!workspaceId) return;
-    if (loadedWorkspaceRef.current === workspaceId) return;
-    inFlightWorkspaceRef.current = workspaceId;
-    setLoading(true);
-    listAutomations(workspaceId)
-      .then((result) => {
-        if (inFlightWorkspaceRef.current !== workspaceId) return; // stale
-        setAutomations(result ?? []);
-        loadedWorkspaceRef.current = workspaceId;
-        setLoadedWorkspaceId(workspaceId);
-      })
-      .catch(() => {
-        if (inFlightWorkspaceRef.current !== workspaceId) return;
-        setAutomations([]);
-        loadedWorkspaceRef.current = workspaceId;
-        setLoadedWorkspaceId(workspaceId);
-      })
-      .finally(() => {
-        if (inFlightWorkspaceRef.current === workspaceId) {
-          setLoading(false);
-        }
-      });
-  }, [workspaceId, setAutomations, setLoading]);
+  const items = data ?? [];
 
-  const create = useCallback(
-    async (req: CreateAutomationRequest): Promise<CreateAutomationResponse> => {
-      const automation = await createAutomation(req);
-      // Strip the one-time webhook_secret before persisting to the store so it
+  const createMutation = useMutation({
+    mutationFn: (req: CreateAutomationRequest): Promise<CreateAutomationResponse> =>
+      createAutomation(req),
+    onSuccess: (response) => {
+      // Strip the one-time webhook_secret before patching the cache so it
       // doesn't leak into devtools or error-reporting SDKs. The full response
       // (with secret) is still returned to the caller for the reveal dialog.
-      const { webhook_secret: _secret, ...stored } = automation;
-      addToStore(stored);
-      return automation;
+      const { webhook_secret: _secret, ...stored } = response;
+      qc.setQueryData(qk.automations.list(safeId), (prev: Automation[] | undefined) =>
+        prev ? [...prev, stored] : [stored],
+      );
     },
-    [addToStore],
-  );
+  });
 
-  const update = useCallback(
-    async (id: string, req: UpdateAutomationRequest) => {
-      const automation = await apiUpdateAutomation(id, req);
-      updateInStore(automation);
-      return automation;
+  const updateMutation = useMutation({
+    mutationFn: ({ id, req }: { id: string; req: UpdateAutomationRequest }) =>
+      apiUpdateAutomation(id, req),
+    onSuccess: (updated) => {
+      qc.setQueryData(qk.automations.list(safeId), (prev: Automation[] | undefined) =>
+        prev ? prev.map((a) => (a.id === updated.id ? updated : a)) : [updated],
+      );
     },
-    [updateInStore],
-  );
+  });
 
-  const remove = useCallback(
-    async (id: string) => {
-      await deleteAutomation(id);
-      removeFromStore(id);
+  const removeMutation = useMutation({
+    mutationFn: (id: string) => deleteAutomation(id),
+    onSuccess: (_data, id) => {
+      qc.setQueryData(
+        qk.automations.list(safeId),
+        (prev: Automation[] | undefined) => prev?.filter((a) => a.id !== id) ?? [],
+      );
     },
-    [removeFromStore],
-  );
+  });
 
-  const enable = useCallback(
-    async (id: string) => {
-      const automation = await enableAutomation(id);
-      updateInStore(automation);
-      return automation;
+  const enableMutation = useMutation({
+    mutationFn: (id: string) => enableAutomation(id),
+    onSuccess: (updated) => {
+      qc.setQueryData(qk.automations.list(safeId), (prev: Automation[] | undefined) =>
+        prev ? prev.map((a) => (a.id === updated.id ? updated : a)) : [updated],
+      );
     },
-    [updateInStore],
-  );
+  });
 
-  const disable = useCallback(
-    async (id: string) => {
-      const automation = await disableAutomation(id);
-      updateInStore(automation);
-      return automation;
+  const disableMutation = useMutation({
+    mutationFn: (id: string) => disableAutomation(id),
+    onSuccess: (updated) => {
+      qc.setQueryData(qk.automations.list(safeId), (prev: Automation[] | undefined) =>
+        prev ? prev.map((a) => (a.id === updated.id ? updated : a)) : [updated],
+      );
     },
-    [updateInStore],
-  );
+  });
 
-  const trigger = useCallback(async (id: string) => {
-    return triggerAutomation(id);
-  }, []);
+  const triggerMutation = useMutation({
+    mutationFn: (id: string) => triggerAutomation(id),
+  });
 
-  const refresh = useCallback(() => {
-    if (!workspaceId) return;
-    inFlightWorkspaceRef.current = workspaceId;
-    setLoading(true);
-    listAutomations(workspaceId)
-      .then((result) => {
-        if (inFlightWorkspaceRef.current !== workspaceId) return;
-        setAutomations(result ?? []);
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (inFlightWorkspaceRef.current === workspaceId) setLoading(false);
-      });
-  }, [workspaceId, setAutomations, setLoading]);
+  const create = (req: CreateAutomationRequest) => createMutation.mutateAsync(req);
+  const update = (id: string, req: UpdateAutomationRequest) =>
+    updateMutation.mutateAsync({ id, req });
+  const remove = (id: string) => removeMutation.mutateAsync(id);
+  const enable = (id: string) => enableMutation.mutateAsync(id);
+  const disable = (id: string) => disableMutation.mutateAsync(id);
+  const trigger = (id: string) => triggerMutation.mutateAsync(id);
 
-  // loaded mirrors "are we on the workspace we've fetched at least once?"
-  const loaded = loadedWorkspaceId === workspaceId;
-  return { items, loaded, loading, create, update, remove, enable, disable, trigger, refresh };
+  const refresh = () => {
+    if (workspaceId) {
+      void qc.invalidateQueries({ queryKey: qk.automations.list(safeId) });
+    }
+  };
+
+  return { items, loading: isLoading, create, update, remove, enable, disable, trigger, refresh };
 }

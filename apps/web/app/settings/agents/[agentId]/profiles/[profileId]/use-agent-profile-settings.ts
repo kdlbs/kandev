@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { useAppStore } from "@/components/state-provider";
+import { settingsQueryOptions } from "@/lib/query/query-options/settings";
 import { listAgents } from "@/lib/api";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import type {
@@ -26,7 +28,7 @@ export function useAgentProfileSettings(
   agentKey: string,
   profileId: string,
 ): AgentProfileSettingsResult {
-  const settingsAgents = useAppStore((state) => state.settingsAgents.items);
+  const { data: settingsAgents = [] } = useQuery({ ...settingsQueryOptions.agents() });
   const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
   const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
   const availableAgents = useAvailableAgents().items;

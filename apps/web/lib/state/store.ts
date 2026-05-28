@@ -22,11 +22,8 @@ import {
   createUISlice,
   createGitHubSlice,
   createGitLabSlice,
-  createJiraSlice,
   createLinearSlice,
   createOfficeSlice,
-  createFeaturesSlice,
-  createAutomationsSlice,
   createSystemSlice,
   defaultKanbanState,
   defaultWorkspaceState,
@@ -36,11 +33,8 @@ import {
   defaultUIState,
   defaultGitHubState,
   defaultGitLabState,
-  defaultJiraState,
   defaultLinearState,
   defaultOfficeState,
-  defaultFeaturesState,
-  defaultAutomationsState,
   defaultSystemState,
   type WorkspaceState,
   type WorkflowsState,
@@ -66,8 +60,6 @@ import {
   type PreviewDevicePreset,
   type ConnectionState,
   type SystemSliceActions,
-  type AutomationsSliceActions,
-  type FeaturesSliceActions,
   type GitHubSliceActions,
 } from "./slices";
 import type {
@@ -85,7 +77,6 @@ import type {
 // Re-export all types from slices for backwards compatibility.
 export type * from "./store-reexports";
 import type { TaskMR } from "@/lib/types/gitlab";
-import type { JiraIssueWatch } from "@/lib/types/jira";
 import type { LinearIssueWatch } from "@/lib/types/linear";
 import type {
   AgentProfile,
@@ -187,21 +178,11 @@ export type AppState = {
   // GitLab slice
   taskMRs: (typeof defaultGitLabState)["taskMRs"];
 
-  // JIRA slice
-  jiraIssueWatches: (typeof defaultJiraState)["jiraIssueWatches"];
-
   // Linear slice
   linearIssueWatches: (typeof defaultLinearState)["linearIssueWatches"];
 
   // Office slice
   office: (typeof defaultOfficeState)["office"];
-
-  // Feature flags slice
-  features: (typeof defaultFeaturesState)["features"];
-
-  // Automations slice
-  automations: (typeof defaultAutomationsState)["automations"];
-  automationRuns: (typeof defaultAutomationsState)["automationRuns"];
 
   // System slice (actions merged via SystemSliceActions intersection on AppState)
   system: (typeof defaultSystemState)["system"];
@@ -230,14 +211,6 @@ export type AppState = {
   setTaskMR: (taskId: string, mr: TaskMR) => void;
   resetTaskMRs: () => void;
 
-  // JIRA actions
-  setJiraIssueWatches: (watches: JiraIssueWatch[]) => void;
-  setJiraIssueWatchesLoading: (loading: boolean) => void;
-  addJiraIssueWatch: (watch: JiraIssueWatch) => void;
-  updateJiraIssueWatch: (watch: JiraIssueWatch) => void;
-  removeJiraIssueWatch: (id: string) => void;
-  resetJiraIssueWatches: () => void;
-
   // Linear actions
   setLinearIssueWatches: (watches: LinearIssueWatch[]) => void;
   setLinearIssueWatchesLoading: (loading: boolean) => void;
@@ -256,6 +229,9 @@ export type AppState = {
   setWorkflowSnapshot: (
     workflowId: string,
     data: import("./slices/kanban/types").WorkflowSnapshotData,
+  ) => void;
+  setKanbanMultiSnapshots: (
+    snapshots: Record<string, import("./slices/kanban/types").WorkflowSnapshotData>,
   ) => void;
   setKanbanMultiLoading: (loading: boolean) => void;
   clearKanbanMulti: () => void;
@@ -520,9 +496,7 @@ export type AppState = {
   appendRunAttempt: (runId: string, attempt: RouteAttempt) => void;
   setAgentRouting: (agentId: string, data: AgentRouteData | undefined) => void;
 } & GitHubSliceActions &
-  SystemSliceActions &
-  FeaturesSliceActions &
-  AutomationsSliceActions;
+  SystemSliceActions;
 
 export function createAppStore(initialState?: Partial<AppState>) {
   const merged = mergeInitialState(initialState);
@@ -546,19 +520,13 @@ export function createAppStore(initialState?: Partial<AppState>) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createGitLabSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ...createJiraSlice(set as any, get as any, api as any),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createLinearSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createOfficeSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ...createFeaturesSlice(set as any, get as any, api as any),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createSystemSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createUISlice(set as any, get as any, api as any),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ...createAutomationsSlice(set as any, get as any, api as any),
       // Override state with merged initial state
       kanban: merged.kanban,
       kanbanMulti: merged.kanbanMulti,
@@ -611,12 +579,8 @@ export function createAppStore(initialState?: Partial<AppState>) {
       issueWatches: merged.issueWatches,
       actionPresets: merged.actionPresets,
       taskMRs: merged.taskMRs,
-      jiraIssueWatches: merged.jiraIssueWatches,
       linearIssueWatches: merged.linearIssueWatches,
       office: merged.office,
-      features: merged.features,
-      automations: merged.automations,
-      automationRuns: merged.automationRuns,
       system: merged.system,
       previewPanel: merged.previewPanel,
       rightPanel: merged.rightPanel,

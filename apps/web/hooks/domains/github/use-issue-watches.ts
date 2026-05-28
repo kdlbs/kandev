@@ -1,85 +1,111 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  listIssueWatches,
   createIssueWatch,
   updateIssueWatch,
   deleteIssueWatch,
   triggerIssueWatch,
   triggerAllIssueWatches,
 } from "@/lib/api/domains/github-api";
-import { useAppStore } from "@/components/state-provider";
-import type { CreateIssueWatchRequest, UpdateIssueWatchRequest } from "@/lib/types/github";
+import { githubQueryOptions } from "@/lib/query/query-options/github";
+import { qk } from "@/lib/query/keys";
+import type {
+  IssueWatch,
+  CreateIssueWatchRequest,
+  UpdateIssueWatchRequest,
+} from "@/lib/types/github";
 
 // useIssueWatches has three modes:
 //   - workspaceId: string         → fetch watches scoped to one workspace
 //   - workspaceId: undefined      → fetch watches across all workspaces
 //   - workspaceId: null           → don't fetch (caller hasn't resolved a workspace yet)
 export function useIssueWatches(workspaceId?: string | null) {
-  const items = useAppStore((state) => state.issueWatches.items);
-  const loaded = useAppStore((state) => state.issueWatches.loaded);
-  const loading = useAppStore((state) => state.issueWatches.loading);
-  const setIssueWatches = useAppStore((state) => state.setIssueWatches);
-  const setIssueWatchesLoading = useAppStore((state) => state.setIssueWatchesLoading);
-  const addWatch = useAppStore((state) => state.addIssueWatch);
-  const updateWatch = useAppStore((state) => state.updateIssueWatch);
-  const removeWatch = useAppStore((state) => state.removeIssueWatch);
+  const qc = useQueryClient();
+  const cacheKey =
+    workspaceId !== null
+      ? qk.github.issueWatches(workspaceId ?? undefined)
+      : qk.github.issueWatches();
 
-  useEffect(() => {
-    if (workspaceId === null || loaded || loading) return;
-    setIssueWatchesLoading(true);
-    listIssueWatches(workspaceId ?? undefined, { cache: "no-store" })
-      .then((response) => {
-        setIssueWatches(response?.watches ?? []);
-      })
-      .catch(() => {
-        setIssueWatches([]);
-      })
-      .finally(() => {
-        setIssueWatchesLoading(false);
+  const { data, isLoading, isSuccess } = useQuery(githubQueryOptions.issueWatches(workspaceId));
+
+  const createMutation = useMutation({
+    mutationFn: (req: CreateIssueWatchRequest) => createIssueWatch(req),
+    onSuccess: (watch) => {
+      qc.setQueryData<{ watches: IssueWatch[] }>(cacheKey, (prev) => {
+        if (!prev) return { watches: [watch] };
+        return {
+          ...prev,
+          watches: [...prev.watches.filter((w) => w.id !== watch.id), watch],
+        };
       });
-  }, [workspaceId, loaded, loading, setIssueWatches, setIssueWatchesLoading]);
-
-  const create = useCallback(
-    async (req: CreateIssueWatchRequest) => {
-      const watch = await createIssueWatch(req);
-      addWatch(watch);
-      return watch;
     },
-    [addWatch],
-  );
-
-  const update = useCallback(
-    async (id: string, req: UpdateIssueWatchRequest) => {
-      const watch = await updateIssueWatch(id, req);
-      updateWatch(watch);
-      return watch;
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: cacheKey });
     },
-    [updateWatch],
-  );
+  });
 
-  const remove = useCallback(
-    async (id: string) => {
-      await deleteIssueWatch(id);
-      removeWatch(id);
+  const updateMutation = useMutation({
+    mutationFn: ({ id, req }: { id: string; req: UpdateIssueWatchRequest }) =>
+      updateIssueWatch(id, req),
+    onSuccess: (watch) => {
+      qc.setQueryData<{ watches: IssueWatch[] }>(cacheKey, (prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          watches: prev.watches.map((w) => (w.id === watch.id ? watch : w)),
+        };
+      });
     },
-    [removeWatch],
-  );
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: cacheKey });
+    },
+  });
 
-  const trigger = useCallback(async (id: string) => {
+  const removeMutation = useMutation({
+    mutationFn: (id: string) => deleteIssueWatch(id),
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: cacheKey });
+      const prev = qc.getQueryData<{ watches: IssueWatch[] }>(cacheKey);
+      qc.setQueryData<{ watches: IssueWatch[] }>(cacheKey, (old) => {
+        if (!old) return old;
+        return { ...old, watches: old.watches.filter((w) => w.id !== id) };
+      });
+      return { prev };
+    },
+    onError: (_err, _id, ctx) => {
+      if (ctx?.prev !== undefined) qc.setQueryData(cacheKey, ctx.prev);
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: cacheKey });
+    },
+  });
+
+  async function create(req: CreateIssueWatchRequest) {
+    return createMutation.mutateAsync(req);
+  }
+
+  async function update(id: string, req: UpdateIssueWatchRequest) {
+    return updateMutation.mutateAsync({ id, req });
+  }
+
+  async function remove(id: string) {
+    return removeMutation.mutateAsync(id);
+  }
+
+  async function trigger(id: string) {
     return triggerIssueWatch(id);
-  }, []);
+  }
 
-  const triggerAll = useCallback(async () => {
+  async function triggerAll() {
     if (!workspaceId) return null;
     return triggerAllIssueWatches(workspaceId);
-  }, [workspaceId]);
+  }
 
   return {
-    items,
-    loaded,
-    loading,
+    items: data?.watches ?? [],
+    loaded: isSuccess,
+    loading: isLoading,
     create,
     update,
     remove,

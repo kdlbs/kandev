@@ -1,46 +1,52 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { listPRWatches, deletePRWatch } from "@/lib/api/domains/github-api";
-import { useAppStore } from "@/components/state-provider";
+import { githubQueryOptions } from "@/lib/query/query-options/github";
+import { qk } from "@/lib/query/keys";
+import type { PRWatch } from "@/lib/types/github";
 
 export function usePRWatches() {
-  const items = useAppStore((state) => state.prWatches.items);
-  const loaded = useAppStore((state) => state.prWatches.loaded);
-  const loading = useAppStore((state) => state.prWatches.loading);
-  const setPRWatches = useAppStore((state) => state.setPRWatches);
-  const setPRWatchesLoading = useAppStore((state) => state.setPRWatchesLoading);
-  const removePRWatch = useAppStore((state) => state.removePRWatch);
+  const qc = useQueryClient();
+  const { data, isLoading, isSuccess } = useQuery(githubQueryOptions.prWatches());
 
-  useEffect(() => {
-    if (loaded || loading) return;
-    setPRWatchesLoading(true);
-    listPRWatches({ cache: "no-store" })
-      .then((response) => {
-        setPRWatches(response?.watches ?? []);
-      })
-      .catch(() => {
-        setPRWatches([]);
-      })
-      .finally(() => {
-        setPRWatchesLoading(false);
+  const removeMutation = useMutation({
+    mutationFn: (id: string) => deletePRWatch(id),
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: qk.github.prWatches() });
+      const prev = qc.getQueryData<{ watches: PRWatch[] }>(qk.github.prWatches());
+      qc.setQueryData<{ watches: PRWatch[] }>(qk.github.prWatches(), (old) => {
+        if (!old) return old;
+        return { ...old, watches: old.watches.filter((w) => w.id !== id) };
       });
-  }, [loaded, loading, setPRWatches, setPRWatchesLoading]);
-
-  const remove = useCallback(
-    async (id: string) => {
-      await deletePRWatch(id);
-      removePRWatch(id);
+      return { prev };
     },
-    [removePRWatch],
-  );
+    onError: (_err, _id, ctx) => {
+      if (ctx?.prev !== undefined) {
+        qc.setQueryData(qk.github.prWatches(), ctx.prev);
+      }
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: qk.github.prWatches() });
+    },
+  });
 
-  return { items, loaded, loading, remove };
+  return {
+    items: data?.watches ?? [],
+    loaded: isSuccess,
+    loading: isLoading,
+    remove: (id: string) => removeMutation.mutateAsync(id),
+  };
 }
 
 /** Get the PR watch for a specific session. */
-export function usePRWatchForSession(sessionId: string | null) {
-  const items = useAppStore((state) => state.prWatches.items);
-  const watch = sessionId ? (items.find((w) => w.session_id === sessionId) ?? null) : null;
-  return watch;
+export function usePRWatchForSession(sessionId: string | null): PRWatch | null {
+  const { data } = useQuery({
+    ...githubQueryOptions.prWatches(),
+    select: (d) => (sessionId ? (d.watches.find((w) => w.session_id === sessionId) ?? null) : null),
+  });
+  return data ?? null;
 }
+
+// Re-export for backwards compat
+export { listPRWatches };

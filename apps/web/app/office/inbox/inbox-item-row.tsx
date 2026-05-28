@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   IconShieldCheck,
   IconAlertTriangle,
@@ -14,6 +15,7 @@ import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import { useAppStore } from "@/components/state-provider";
 import { dismissInboxItem, retryProvider } from "@/lib/api/domains/office-extended-api";
+import { officeQueryOptions } from "@/lib/query/query-options/office";
 import type { InboxItem } from "@/lib/state/slices/office/types";
 import { timeAgo } from "../components/shared/time-ago";
 
@@ -62,7 +64,7 @@ type Props = {
 };
 
 function useInboxTypeConfig(type: string) {
-  const meta = useAppStore((s) => s.office.meta);
+  const { data: meta } = useQuery(officeQueryOptions.metaGlobal());
   const metaType = meta?.inboxItemTypes.find((t) => t.id === type);
   if (metaType) {
     return {

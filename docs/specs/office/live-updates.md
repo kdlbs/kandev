@@ -18,7 +18,7 @@ Note on history: `office-ux-parity` was largely a retroactive-unification effort
 
 ### A. WS event forwarding model
 
-The backend already publishes internal events on its event bus (`task.updated`, `task.moved`, `office.comment.created`, `agent.completed`, ...). An office WS handler subscribes to office-relevant events and forwards them to connected clients scoped by the client's active workspace. The frontend WS client receives these events and updates the Zustand store; all pages read from the store, so they re-render automatically.
+The backend already publishes internal events on its event bus (`task.updated`, `task.moved`, `office.comment.created`, `agent.completed`, ...). An office WS handler subscribes to office-relevant events and forwards them to connected clients scoped by the client's active workspace. The frontend WS client receives these events; the office bridge (`lib/query/bridge/office.ts`) calls `setQueryData` or `invalidateQueries` on the TanStack Query cache, causing all query-subscribed components to re-render automatically.
 
 Forwarded events:
 
@@ -209,7 +209,7 @@ WebSocketClient
   reconnectAttempts     number
 ```
 
-The store layer (`apps/web/lib/state/slices/office/office-slice.ts`) holds a single `officeRefetchTrigger: string` field that pages watch. Office WS handlers either patch the store directly (task status, agent status, routing) or call `setOfficeRefetchTrigger(type)` to invalidate a page-scoped fetch, where `type` is one of `"dashboard" | "tasks" | "agents" | "inbox" | "activity" | "comments:<taskId>" | "task:<taskId>" | "runs" | "routines" | "costs" | "approvals"`.
+The office bridge (`apps/web/lib/query/bridge/office.ts`) subscribes to the WS client and calls `setQueryData` for direct patches (task status, agent status, routing) or `invalidateQueries` for coarser invalidations (dashboard, inbox, activity). The legacy `officeRefetchTrigger` field in the Zustand `office` slice is no longer the primary live-update mechanism; it remains as a transitional mirror until all consumers read from TanStack Query.
 
 ## API surface
 
@@ -329,18 +329,18 @@ The kandev backend runs in a single-user model (`store.DefaultUserID = "default-
 
 ### Does NOT survive a WS reconnect
 
-- Missed notifications during the gap. There is no replay window, no event sequence number, no last-event-id header. Surfaces reconcile by re-reading the server state via REST (driven by the `setOfficeRefetchTrigger` plumbing) plus any new notifications that arrive after `open`.
+- Missed notifications during the gap. There is no replay window, no event sequence number, no last-event-id header. Surfaces reconcile by re-reading the server state via REST (driven by TanStack Query `invalidateQueries` calls from the office bridge on reconnect) plus any new notifications that arrive after `open`.
 - The "initial session-data snapshot" pushed on `session.subscribe` / `session.focus` is re-sent each time those frames are re-issued from `resubscribe()`.
 
 ### Survives a WS reconnect
 
 - Frontend subscription intent (`subscriptions`, `sessionSubscriptions`, `sessionFocusCounts`, `userSubscriptionCount`, `runSubscriptions` maps). `resubscribe()` replays every entry as a fresh subscribe frame on `open`.
-- All Zustand store slices not specifically invalidated by a refetch trigger. The store is not cleared on reconnect.
+- TanStack Query cache entries that were not explicitly invalidated on reconnect. The cache is not cleared on reconnect.
 
 ### TTL / retention
 
 - No event log retention. There is no replay window — past-tense notifications are gone the moment the gateway hands them off.
-- No client-side cache of WS messages beyond what individual store slices choose to keep.
+- No client-side cache of WS messages beyond what the TanStack Query cache and ring-buffer streams choose to retain.
 - The optimistic-comment client UUID is held only for the lifetime of the pending row; once `office.comment.created` reconciles or the row is dropped on failure, it is forgotten.
 
 ## Scenarios
@@ -399,7 +399,7 @@ The kandev backend runs in a single-user model (`store.DefaultUserID = "default-
 
 - Polling fallbacks of any kind. If the WS connection is down, surfaces stay as-is until the connection recovers and the next event arrives.
 - Cross-workspace event subscriptions. A client only receives events for its active workspace.
-- Replacing the Zustand `refetchTrigger` mechanism with React Query / SWR.
+- ~~Replacing the Zustand `refetchTrigger` mechanism with React Query / SWR.~~ Done in wave 4: the office bridge now drives invalidation via TanStack Query (ADR-0010).
 - Optimistic UI updates outside of user-initiated comments (dashboard metrics, agent state, task properties beyond comment send all wait for server confirmation via event).
 - Animating chart bar transitions on update.
 - Retry-on-error UI for failed comment sends (clicking a "retry" button on a failed comment). Draft restoration covers the common case.

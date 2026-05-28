@@ -72,6 +72,10 @@ export const createKanbanSlice: StateCreator<
     set((draft) => {
       draft.kanbanMulti.snapshots[workflowId] = data;
     }),
+  setKanbanMultiSnapshots: (snapshots) =>
+    set((draft) => {
+      draft.kanbanMulti.snapshots = snapshots;
+    }),
   setKanbanMultiLoading: (loading) =>
     set((draft) => {
       draft.kanbanMulti.isLoading = loading;

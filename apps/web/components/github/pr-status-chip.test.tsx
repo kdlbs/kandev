@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
+import { createTestQueryClient } from "@/test-utils/render-with-query";
 import { PRStatusChip } from "./pr-status-chip";
 import type { AppState } from "@/lib/state/store";
 import type { TaskPR } from "@/lib/types/github";
@@ -27,12 +29,15 @@ vi.mock("@/lib/ws/connection", () => ({
 }));
 
 function renderWithStore(initialState: Partial<AppState> | undefined, ui: ReactNode) {
+  const queryClient = createTestQueryClient();
   return render(
-    <StateProvider initialState={initialState}>
-      <ToastProvider>
-        <TooltipProvider>{ui}</TooltipProvider>
-      </ToastProvider>
-    </StateProvider>,
+    <QueryClientProvider client={queryClient}>
+      <StateProvider initialState={initialState}>
+        <ToastProvider>
+          <TooltipProvider>{ui}</TooltipProvider>
+        </ToastProvider>
+      </StateProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -157,7 +162,7 @@ describe("PRStatusChip", () => {
     // The mobile-pr-ci-chip.spec.ts e2e covers close-button dismissal in a
     // real browser.
 
-    it("renders the no-checks empty state in the drawer when the PR has no checks", () => {
+    it("renders the no-checks empty state in the drawer when the PR has no checks", async () => {
       renderWithStore(
         {
           taskPRs: {
@@ -179,6 +184,9 @@ describe("PRStatusChip", () => {
       act(() => {
         fireEvent.click(screen.getByTestId(CHIP_TESTID));
       });
+      // The feedback fetch is now TanStack Query-backed; let the (mocked-null)
+      // request settle before asserting the empty state renders.
+      await screen.findByTestId("pr-checks-empty");
       expect(document.querySelector("[data-testid='pr-checks-empty']")).not.toBeNull();
     });
   });

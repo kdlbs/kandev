@@ -28,6 +28,9 @@ export type BackendMessageType =
   | "workflow.step.created"
   | "workflow.step.updated"
   | "workflow.step.deleted"
+  | "repository.created"
+  | "repository.updated"
+  | "repository.deleted"
   | "session.message.added"
   | "session.message.updated"
   | "session.state_changed"
@@ -69,6 +72,7 @@ export type BackendMessageType =
   | "message.queue.status_changed"
   | "github.task_pr.updated"
   | "github.rate_limit.updated"
+  | "gitlab.task_mr.updated"
   | OfficeEventType
   | "run.event.appended";
 
@@ -87,6 +91,7 @@ import type {
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { GitEventPayload } from "@/lib/types/git-events";
 import type { GitHubRateLimitUpdate, TaskPR } from "@/lib/types/github";
+import type { TaskMR } from "@/lib/types/gitlab";
 import type { FileChangeNotificationPayload } from "./workspace-files";
 import type {
   AgentCapabilitiesPayload,
@@ -241,6 +246,13 @@ export type StepPayload = {
 
 export type WorkflowStepEventPayload = {
   step: StepPayload;
+};
+
+export type RepositoryEventPayload = {
+  id?: string;
+  workspace_id?: string;
+  name?: string;
+  local_path?: string;
 };
 
 export type MessageAddedPayload = {
@@ -517,6 +529,9 @@ export type BackendMessageMap = OfficeBackendMessageMap & {
   "workflow.step.created": BackendMessage<"workflow.step.created", WorkflowStepEventPayload>;
   "workflow.step.updated": BackendMessage<"workflow.step.updated", WorkflowStepEventPayload>;
   "workflow.step.deleted": BackendMessage<"workflow.step.deleted", WorkflowStepEventPayload>;
+  "repository.created": BackendMessage<"repository.created", RepositoryEventPayload>;
+  "repository.updated": BackendMessage<"repository.updated", RepositoryEventPayload>;
+  "repository.deleted": BackendMessage<"repository.deleted", RepositoryEventPayload>;
   "session.message.added": BackendMessage<"session.message.added", MessageAddedPayload>;
   "session.message.updated": BackendMessage<"session.message.updated", MessageAddedPayload>;
   "session.state_changed": BackendMessage<"session.state_changed", TaskSessionStateChangedPayload>;
@@ -582,6 +597,7 @@ export type BackendMessageMap = OfficeBackendMessageMap & {
   >;
   "github.task_pr.updated": BackendMessage<"github.task_pr.updated", TaskPR>;
   "github.rate_limit.updated": BackendMessage<"github.rate_limit.updated", GitHubRateLimitUpdate>;
+  "gitlab.task_mr.updated": BackendMessage<"gitlab.task_mr.updated", TaskMR>;
   "run.event.appended": BackendMessage<"run.event.appended", RunEventAppendedPayload>;
 };
 

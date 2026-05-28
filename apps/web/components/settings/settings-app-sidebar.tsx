@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import {
   IconSettings,
   IconFolder,
@@ -49,6 +50,7 @@ import {
 import { ScrollArea } from "@kandev/ui/scroll-area";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import { useAppStore } from "@/components/state-provider";
+import { settingsQueryOptions } from "@/lib/query/query-options/settings";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 
 import { AgentLogo } from "@/components/agent-logo";
@@ -333,7 +335,7 @@ export function SettingsAppSidebar() {
   const { setOpenMobile, isMobile } = useSidebar();
   const workspaces = useAppStore((state) => state.workspaces.items);
   const executors = useAppStore((state) => state.executors.items);
-  const agents = useAppStore((state) => state.settingsAgents.items);
+  const { data: agents = [] } = useQuery({ ...settingsQueryOptions.agents() });
   useAvailableAgents();
 
   // Close mobile sidebar when navigating to a new page

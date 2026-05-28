@@ -17,7 +17,9 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
+import { useQuery } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
+import { settingsQueryOptions } from "@/lib/query/query-options/settings";
 import {
   createCustomTUIAgent,
   installAgent,
@@ -448,7 +450,7 @@ function useInstallAgent(onSuccess: () => Promise<void>) {
 
 function useAgentPageState() {
   const { items: discoveryAgents, loading: discoveryLoading } = useAgentDiscovery();
-  const savedAgents = useAppStore((state) => state.settingsAgents.items);
+  const { data: savedAgents = [] } = useQuery({ ...settingsQueryOptions.agents() });
   const setAgentDiscovery = useAppStore((state) => state.setAgentDiscovery);
   const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
   const setAvailableAgents = useAppStore((state) => state.setAvailableAgents);

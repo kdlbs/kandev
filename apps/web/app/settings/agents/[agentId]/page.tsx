@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
@@ -19,6 +20,7 @@ import { seedDefaultCLIFlags } from "@/lib/cli-flags";
 import { generateUUID } from "@/lib/utils";
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 import { useAppStore } from "@/components/state-provider";
+import { settingsQueryOptions } from "@/lib/query/query-options/settings";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { deleteAgentAction } from "@/app/actions/agents";
 import { saveNewAgent, saveExistingAgent, isProfileDirty } from "./agent-save-helpers";
@@ -147,7 +149,7 @@ function useAgentFormState(
 }
 
 function useAgentStoreSync() {
-  const settingsAgents = useAppStore((state) => state.settingsAgents.items);
+  const { data: settingsAgents = [] } = useQuery({ ...settingsQueryOptions.agents() });
   const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
   const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
 
@@ -440,7 +442,7 @@ export default function AgentSetupPage() {
   const agentKey = Array.isArray(params.agentId) ? params.agentId[0] : params.agentId;
   const decodedKey = decodeURIComponent(agentKey ?? "");
   const discoveryAgents = useAppStore((state) => state.agentDiscovery.items);
-  const savedAgents = useAppStore((state) => state.settingsAgents.items);
+  const { data: savedAgents = [] } = useQuery({ ...settingsQueryOptions.agents() });
   const availableAgents = useAvailableAgents().items;
 
   const discoveryAgent = useMemo(

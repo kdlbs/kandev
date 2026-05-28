@@ -16,3 +16,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 0008 | [DB upgrade safety - meta table, pre-migration backup, migration logging](0008-db-upgrade-safety.md) | accepted | backend | 2026-05-16 |
 | 0009 | [Fail-closed GC semantics for filesystem and container cleanup](0009-fail-closed-gc-semantics.md) | accepted | backend | 2026-05-16 |
 | 0010 | [Worktree copy-files — per-repo, idempotent, host-local](0010-worktree-copy-files.md) | accepted | backend, frontend | 2026-05-19 |
+| 0011 | [TanStack Query as the canonical server-state layer](0011-tanstack-query-server-state.md) | accepted | frontend | 2026-05-24 |

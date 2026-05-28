@@ -16,8 +16,10 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { useQuery } from "@tanstack/react-query";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useAppStore } from "@/components/state-provider";
+import { officeQueryOptions } from "@/lib/query/query-options/office";
 import type { Skill, SkillSourceType } from "@/lib/state/slices/office/types";
 import { FileTree, type FileTreeNode } from "@/components/shared/file-tree";
 import { ScriptEditor } from "@/components/settings/profile-edit/script-editor";
@@ -50,7 +52,7 @@ function SourceIcon({ sourceType }: { sourceType: SkillSourceType }) {
 }
 
 function useSkillSourceMeta(sourceType: SkillSourceType) {
-  const meta = useAppStore((s) => s.office.meta);
+  const { data: meta } = useQuery(officeQueryOptions.metaGlobal());
   const metaSource = meta?.skillSourceTypes.find((s) => s.id === sourceType);
   return {
     label: metaSource?.label ?? FALLBACK_SOURCE_LABELS[sourceType] ?? sourceType,
@@ -68,7 +70,11 @@ export function SkillDetail({ skill, onSave, onDelete }: SkillDetailProps) {
   // local edits would just get overwritten. Lock both edit and delete
   // for them regardless of what the source meta says.
   const readOnly = sourceMeta.readOnly || !!skill.isSystem;
-  const agents = useAppStore((s) => s.office.agentProfiles);
+  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const { data: agents = [] } = useQuery({
+    ...officeQueryOptions.agents(workspaceId ?? ""),
+    enabled: !!workspaceId,
+  });
   const usedByCount = useMemo(
     () => agents.filter((a) => a.desiredSkills?.includes(skill.id)).length,
     [agents, skill.id],
@@ -120,37 +126,66 @@ export function SkillDetail({ skill, onSave, onDelete }: SkillDetailProps) {
           />
         </div>
       )}
+      <SkillContentEditor
+        draft={draft}
+        readOnly={readOnly}
+        isDirty={isDirty}
+        isSaving={isSaving}
+        activeFilePath={activeFilePath}
+        onChange={setDraft}
+        onSave={handleSave}
+      />
+    </div>
+  );
+}
 
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <span className="text-sm font-mono text-muted-foreground">{activeFilePath}</span>
-          {!readOnly && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleSave}
-              disabled={!isDirty || isSaving}
-              className="cursor-pointer"
-            >
-              <IconDeviceFloppy className="h-4 w-4 mr-1" />
-              {isSaving ? "Saving…" : "Save"}
-            </Button>
-          )}
-        </div>
-        <div
-          className="border border-border rounded-lg overflow-hidden"
-          data-testid="skill-content-editor"
-          data-readonly={readOnly ? "true" : "false"}
-        >
-          {readOnly && <span data-testid="skill-content-readonly" hidden />}
-          <ScriptEditor
-            value={draft}
-            onChange={setDraft}
-            language="markdown"
-            height="520px"
-            readOnly={readOnly}
-          />
-        </div>
+function SkillContentEditor({
+  draft,
+  readOnly,
+  isDirty,
+  isSaving,
+  activeFilePath,
+  onChange,
+  onSave,
+}: {
+  draft: string;
+  readOnly: boolean;
+  isDirty: boolean;
+  isSaving: boolean;
+  activeFilePath: string;
+  onChange: (v: string) => void;
+  onSave: () => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-mono text-muted-foreground">{activeFilePath}</span>
+        {!readOnly && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onSave}
+            disabled={!isDirty || isSaving}
+            className="cursor-pointer"
+          >
+            <IconDeviceFloppy className="h-4 w-4 mr-1" />
+            {isSaving ? "Saving…" : "Save"}
+          </Button>
+        )}
+      </div>
+      <div
+        className="border border-border rounded-lg overflow-hidden"
+        data-testid="skill-content-editor"
+        data-readonly={readOnly ? "true" : "false"}
+      >
+        {readOnly && <span data-testid="skill-content-readonly" hidden />}
+        <ScriptEditor
+          value={draft}
+          onChange={onChange}
+          language="markdown"
+          height="520px"
+          readOnly={readOnly}
+        />
       </div>
     </div>
   );

@@ -1,7 +1,8 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
-import { useAppStore } from "@/components/state-provider";
+import { officeQueryOptions } from "@/lib/query/query-options/office";
 import type { AgentStatus } from "@/lib/state/slices/office/types";
 
 const FALLBACK_STYLES: Record<AgentStatus, string> = {
@@ -18,7 +19,7 @@ type AgentStatusDotProps = {
 };
 
 export function AgentStatusDot({ status, className }: AgentStatusDotProps) {
-  const meta = useAppStore((s) => s.office.meta);
+  const { data: meta } = useQuery(officeQueryOptions.metaGlobal());
   const metaStatus = meta?.agentStatuses.find((s) => s.id === status);
   const colorClass = metaStatus?.color ?? FALLBACK_STYLES[status] ?? "";
   const label = metaStatus?.label ?? status;

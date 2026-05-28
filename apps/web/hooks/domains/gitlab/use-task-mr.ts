@@ -1,87 +1,64 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { fetchGitLabStatus, listWorkspaceTaskMRs } from "@/lib/api/domains/gitlab-api";
 import { useAppStore } from "@/components/state-provider";
+import { qk } from "@/lib/query/keys";
 import type { TaskMR } from "@/lib/types/gitlab";
 
-/**
- * Hydrate the gitlab task-MRs slice for a workspace. Fetches once per
- * workspaceId switch and clears the cache on null. Mirrors useWorkspacePRs
- * for GitHub but stays minimal (no WS subscription yet — that lands with
- * the poller in a follow-up phase).
- */
-export function useWorkspaceMRs(workspaceId: string | null) {
-  const setTaskMRs = useAppStore((state) => state.setTaskMRs);
-  const resetTaskMRs = useAppStore((state) => state.resetTaskMRs);
-  const fetchedRef = useRef<string | null>(null);
-  const requestRef = useRef(0);
-
-  useEffect(() => {
-    if (!workspaceId) {
-      // Invalidate any in-flight request and clear the cached MRs so a
-      // workspace switch / sign-out doesn't leave the previous workspace's
-      // MRs visible until the next fetch.
-      requestRef.current += 1;
-      fetchedRef.current = null;
-      resetTaskMRs();
-      return;
-    }
-    if (fetchedRef.current === workspaceId) return;
-    const requestId = ++requestRef.current;
-    fetchedRef.current = workspaceId;
-    listWorkspaceTaskMRs(workspaceId, { cache: "no-store" })
-      .then((response) => {
-        if (requestRef.current !== requestId) return;
-        setTaskMRs(response?.task_mrs ?? {});
-      })
-      .catch(() => {
-        if (requestRef.current === requestId) {
-          fetchedRef.current = null; // allow retry on failure
-        }
-      });
-  }, [workspaceId, setTaskMRs, resetTaskMRs]);
-}
-
-// Stable empty array so the zustand selector output stays referentially
-// equal across renders when a task has no MRs. Returning a fresh [] each
-// call triggers an infinite re-render loop.
+// Stable empty array so referential equality is preserved across renders when
+// a task has no MRs, preventing unnecessary re-renders.
 const EMPTY_MRS: TaskMR[] = [];
 
-/** Return MRs linked to a task. Reads directly from the store. */
+/**
+ * Hydrate the workspace's task-MR associations into the TanStack Query cache.
+ *
+ * Replaces the manual inFlight + fetchedRef pattern with useQuery dedup.
+ * TanStack Query handles deduplication — mounting this hook multiple times for
+ * the same workspaceId will issue only one request.
+ */
+export function useWorkspaceMRs(workspaceId: string | null) {
+  useQuery({
+    queryKey: qk.gitlab.mrs(workspaceId ?? ""),
+    queryFn: () => listWorkspaceTaskMRs(workspaceId!, { cache: "no-store" }),
+    enabled: !!workspaceId,
+    staleTime: 30_000,
+  });
+}
+
+/**
+ * Return MRs linked to a task.
+ *
+ * Reads from the active workspace's MR cache so the hook signature stays
+ * identical to the old Zustand-backed version (single taskId arg). The active
+ * workspace ID is read from the Zustand UI store — that slice is retained as
+ * UI state per the migration plan.
+ */
 export function useTaskMRs(taskId: string | null): TaskMR[] {
-  return useAppStore((state) =>
-    taskId ? (state.taskMRs.byTaskId[taskId] ?? EMPTY_MRS) : EMPTY_MRS,
-  );
+  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const { data } = useQuery({
+    queryKey: qk.gitlab.mrs(workspaceId ?? ""),
+    queryFn: () => listWorkspaceTaskMRs(workspaceId!, { cache: "no-store" }),
+    enabled: !!workspaceId,
+    staleTime: 30_000,
+    select: (d) => (taskId ? (d?.task_mrs[taskId] ?? EMPTY_MRS) : EMPTY_MRS),
+  });
+  return data ?? EMPTY_MRS;
 }
 
 /**
  * Returns whether GitLab is configured enough to surface in the integrations
- * menu. Token-configured or authenticated counts as "available" — same bar
- * as useGitHubStatus's `ready` flag. Probes /status on mount + after window
- * regains focus so settings changes propagate without a hard reload.
+ * menu. Token-configured or authenticated counts as "available".
+ *
+ * Uses useQuery so the status is cached and deduped across consumers.
+ * Replaces the manual mount + window focus listener pattern.
  */
 export function useGitLabAvailable(): boolean {
-  const [available, setAvailable] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    const probe = () => {
-      // `cache` MUST be top-level — fetchJson reads options.cache directly
-      // and overwrites init.cache with undefined. See lib/api/client.ts.
-      fetchGitLabStatus({ cache: "no-store" })
-        .then((s) => {
-          if (!cancelled) setAvailable(Boolean(s?.authenticated || s?.token_configured));
-        })
-        .catch(() => {
-          if (!cancelled) setAvailable(false);
-        });
-    };
-    probe();
-    window.addEventListener("focus", probe);
-    return () => {
-      cancelled = true;
-      window.removeEventListener("focus", probe);
-    };
-  }, []);
-  return available;
+  const { data } = useQuery({
+    queryKey: ["gitlab", "status"] as const,
+    queryFn: () => fetchGitLabStatus({ cache: "no-store" }),
+    staleTime: 30_000,
+    select: (s) => Boolean(s?.authenticated || s?.token_configured),
+  });
+  return data ?? false;
 }

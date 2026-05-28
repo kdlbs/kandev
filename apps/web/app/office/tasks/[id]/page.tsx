@@ -2,6 +2,7 @@
 
 import { use, useState, useEffect, useRef, useCallback, useMemo, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
 import { useOfficeRefetch } from "@/hooks/use-office-refetch";
 import { TaskOptimisticContextProvider } from "@/hooks/use-optimistic-task-mutation";
@@ -304,17 +305,17 @@ function useTaskOptimisticHelpers(
 // ---------------------------------------------------------------------------
 
 function useIssueData(id: string) {
-  const storeIssues = useAppStore((s) => s.office.tasks.items);
+  const qc = useQueryClient();
+  const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const setTaskSessionsForTask = useAppStore((s) => s.setTaskSessionsForTask);
-  // Snapshot storeIssues in a ref so the load effect can seed `task` from
-  // the store without re-running on every store update. Re-running the GET
-  // on store changes would race with in-flight optimistic mutations (the
-  // WS-driven refetch in useTaskOptimisticHelpers handles canonical
-  // refresh after a property mutation commits).
-  const storeIssuesRef = useRef(storeIssues);
+  // Peek into the TQ tasks cache to pre-seed the task while the API call is
+  // in flight. We use a ref so the load effect doesn't re-run on cache changes.
+  const cachedTasksRef = useRef<OfficeTask[] | null>(null);
   useEffect(() => {
-    storeIssuesRef.current = storeIssues;
-  }, [storeIssues]);
+    if (!workspaceId) return;
+    const cached = qc.getQueryData<OfficeTask[]>(["office", workspaceId, "tasks"]);
+    cachedTasksRef.current = cached ?? null;
+  }, [qc, workspaceId]);
 
   const [task, setTask] = useState<Task | null>(null);
   const [comments, setComments] = useState<TaskComment[]>([]);
@@ -340,7 +341,7 @@ function useIssueData(id: string) {
     async function load() {
       setLoading(true);
       setError(null);
-      const fromStore = storeIssuesRef.current.find((i) => i.id === id);
+      const fromStore = (cachedTasksRef.current ?? []).find((i) => i.id === id);
       if (fromStore && !cancelled) setTask(mapOfficeTaskToTask(fromStore));
 
       try {

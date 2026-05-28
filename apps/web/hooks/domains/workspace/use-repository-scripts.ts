@@ -1,62 +1,26 @@
-import { useEffect, useRef } from "react";
-import { useAppStore } from "@/components/state-provider";
+import { useQuery } from "@tanstack/react-query";
 import type { RepositoryScript } from "@/lib/types/http";
-import { listRepositoryScripts } from "@/lib/api";
+import { workspaceQueryOptions } from "@/lib/query/query-options/workspace";
 
 const EMPTY_SCRIPTS: RepositoryScript[] = [];
 
+/**
+ * Returns repository scripts for the given repository.
+ *
+ * The old inFlightRef + manual loading-state pattern is replaced by
+ * TanStack Query. The `isLoaded` return value maps to `!isLoading && !!data`.
+ *
+ * Signature-compatible with the old Zustand-backed hook.
+ */
 export function useRepositoryScripts(repositoryId: string | null, enabled = true) {
-  const scripts = useAppStore((state) =>
-    repositoryId
-      ? (state.repositoryScripts.itemsByRepositoryId[repositoryId] ?? EMPTY_SCRIPTS)
-      : EMPTY_SCRIPTS,
-  );
-  const isLoading = useAppStore((state) =>
-    repositoryId ? (state.repositoryScripts.loadingByRepositoryId[repositoryId] ?? false) : false,
-  );
-  const isLoaded = useAppStore((state) =>
-    repositoryId ? (state.repositoryScripts.loadedByRepositoryId[repositoryId] ?? false) : false,
-  );
-  const setRepositoryScripts = useAppStore((state) => state.setRepositoryScripts);
-  const setRepositoryScriptsLoading = useAppStore((state) => state.setRepositoryScriptsLoading);
-  const inFlightRef = useRef(false);
+  const { data, isLoading, isFetched } = useQuery({
+    ...workspaceQueryOptions.scripts(repositoryId),
+    enabled: !!repositoryId && enabled,
+  });
 
-  useEffect(() => {
-    if (!enabled || !repositoryId) return;
-    if (isLoaded && isLoading) {
-      setRepositoryScriptsLoading(repositoryId, false);
-    }
-  }, [enabled, isLoaded, isLoading, setRepositoryScriptsLoading, repositoryId]);
-
-  useEffect(() => {
-    if (!enabled || !repositoryId) return;
-    if (isLoaded || inFlightRef.current) return;
-
-    let cancelled = false;
-    inFlightRef.current = true;
-    setRepositoryScriptsLoading(repositoryId, true);
-
-    listRepositoryScripts(repositoryId, { cache: "no-store" })
-      .then((response) => {
-        if (cancelled) return;
-        setRepositoryScripts(repositoryId, response.scripts ?? []);
-      })
-      .catch((error) => {
-        console.error("[useRepositoryScripts] Fetch error:", { repositoryId, error });
-        if (cancelled) return;
-        setRepositoryScripts(repositoryId, []);
-      })
-      .finally(() => {
-        inFlightRef.current = false;
-        if (cancelled) return;
-        setRepositoryScriptsLoading(repositoryId, false);
-      });
-
-    return () => {
-      cancelled = true;
-      inFlightRef.current = false;
-    };
-  }, [enabled, isLoaded, setRepositoryScripts, setRepositoryScriptsLoading, repositoryId]);
-
-  return { scripts, isLoading, isLoaded };
+  return {
+    scripts: data?.scripts ?? EMPTY_SCRIPTS,
+    isLoading,
+    isLoaded: isFetched,
+  };
 }
