@@ -2,7 +2,16 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { cleanup, renderHook, waitFor } from "@testing-library/react";
 
 const mockRequest = vi.fn();
-const mockSetSessionCommits = vi.fn();
+// setSessionCommits is the only mock whose default behaviour matters: the
+// trigger-bump regression test asserts the old commits stay in the store
+// throughout the refetch. With a pure `vi.fn()` mock that assertion is
+// vacuous — nothing in the test ever writes to storeState, so it's
+// trivially true. Default to actually mutating storeState so the test
+// would catch a future regression that clears the store mid-refetch.
+const mockSetSessionCommits = vi.fn((sessionId: string, commits: unknown[]) => {
+  const sc = storeState.sessionCommits as { byEnvironmentId: Record<string, unknown[]> };
+  sc.byEnvironmentId[sessionId] = commits;
+});
 const mockSetSessionCommitsLoading = vi.fn();
 
 vi.mock("@/lib/ws/connection", () => ({
@@ -132,12 +141,26 @@ describe("useSessionCommits", () => {
     renderHook(() => useSessionCommits(null));
     expect(mockRequest).not.toHaveBeenCalled();
   });
+});
+
+// Lives in its own describe so the outer block stays under the 100-line
+// max-lines-per-function limit; the test is involved enough (deferred
+// promise, mid-refetch observation) that inlining it pushes the parent
+// describe past the cap.
+describe("useSessionCommits — stale-while-revalidate on trigger bump", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setStore();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
 
   it("refetches when refetchTrigger bumps without nulling the visible list", async () => {
-    // Seed the store with existing commits so we can assert they survive the
-    // bump. The bug we're guarding against is: a bump clears the list to
-    // undefined, the hook returns `[]`, the Changes panel renders its empty
-    // state, then the new list arrives — a visible flicker.
+    // Seed the store with existing commits. The bug we're guarding against:
+    // a bump clears the list to undefined, the hook returns `[]`, the
+    // Changes panel renders its empty state, then the new list arrives.
     storeState.sessionCommits = {
       byEnvironmentId: {
         "sess-1": [{ commit_sha: "old", insertions: 1, deletions: 0 }],
@@ -145,33 +168,44 @@ describe("useSessionCommits", () => {
       loading: {},
       refetchTrigger: { "sess-1": 0 },
     };
-    mockRequest.mockResolvedValueOnce({
-      commits: [{ commit_sha: "new", insertions: 2, deletions: 1 }],
-      ready: true,
-    });
+    // Defer the request resolution so we can observe what the store looks
+    // like while the hook is mid-refetch — that's where the flicker would
+    // happen if the hook were nulling the visible list.
+    let resolveRequest!: (value: unknown) => void;
+    mockRequest.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveRequest = resolve;
+      }),
+    );
 
     const { rerender } = renderHook(() => useSessionCommits("sess-1"));
     // Initial mount: commits is already populated, so no fetch should fire.
     expect(mockRequest).not.toHaveBeenCalled();
 
-    // Simulate the WS handler bumping the trigger (commits_reset /
-    // branch_switched). Critically, byEnvironmentId stays populated.
+    // Bump the trigger (this is what commits_reset / branch_switched do).
     (storeState.sessionCommits as { refetchTrigger: Record<string, number> }).refetchTrigger = {
       "sess-1": 1,
     };
     rerender();
 
+    // The hook fires the refetch but the promise is still pending. During
+    // this window the store must still hold the OLD commits — that's the
+    // whole point of stale-while-revalidate.
     await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(1));
-    await waitFor(() => {
-      expect(mockSetSessionCommits).toHaveBeenCalledWith("sess-1", [
-        { commit_sha: "new", insertions: 2, deletions: 1 },
-      ]);
-    });
-
-    // The old list must still be in the store throughout — the hook never
-    // wiped it. Without stale-while-revalidate, the panel would flicker.
-    const byEnv = (storeState.sessionCommits as { byEnvironmentId: Record<string, unknown> })
+    const midRefetch = (storeState.sessionCommits as { byEnvironmentId: Record<string, unknown> })
       .byEnvironmentId;
-    expect(byEnv["sess-1"]).toEqual([{ commit_sha: "old", insertions: 1, deletions: 0 }]);
+    expect(midRefetch["sess-1"]).toEqual([{ commit_sha: "old", insertions: 1, deletions: 0 }]);
+
+    // Now resolve the request — the new commits replace the old via the
+    // (mutating) mockSetSessionCommits.
+    resolveRequest({
+      commits: [{ commit_sha: "new", insertions: 2, deletions: 1 }],
+      ready: true,
+    });
+    await waitFor(() => {
+      const after = (storeState.sessionCommits as { byEnvironmentId: Record<string, unknown[]> })
+        .byEnvironmentId;
+      expect(after["sess-1"]).toEqual([{ commit_sha: "new", insertions: 2, deletions: 1 }]);
+    });
   });
 });

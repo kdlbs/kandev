@@ -3,6 +3,13 @@ import { useAppStore } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { SessionCommit } from "@/lib/state/slices/session-runtime/types";
 
+// Sentinel ref value: forces the trigger-bumped path to fire on first mount if
+// the store already carries a non-zero refetchTrigger (e.g. a bump landed
+// before the hook mounted). Any real trigger value the store can hold is > 0,
+// so 0 reliably "looks bumped" when the store's first observed value isn't 0
+// and "looks unbumped" when it is — there's no first-render flash either way.
+const REFETCH_TRIGGER_INIT = 0;
+
 const NOT_READY_RETRY_MS = 2000;
 
 /**
@@ -33,11 +40,12 @@ export function useSessionCommits(sessionId: string | null) {
   const setSessionCommitsLoading = useAppStore((state) => state.setSessionCommitsLoading);
   const connectionStatus = useAppStore((state) => state.connection.status);
 
-  // Track whether we had commits before (to detect clears)
-  const prevCommitsRef = useRef<SessionCommit[] | undefined>(undefined);
   // Track the last refetch trigger we acted on, so a bump triggers exactly one
-  // refetch rather than re-firing on every render.
-  const prevRefetchTriggerRef = useRef<number>(refetchTrigger);
+  // refetch rather than re-firing on every render. Initialise to a sentinel
+  // (not `refetchTrigger`) so a bump that arrived before this hook mounted
+  // still drives an initial refetch — otherwise prevRef would equal the live
+  // value and `triggerBumped` would silently be false on first render.
+  const prevRefetchTriggerRef = useRef<number>(REFETCH_TRIGGER_INIT);
   // Retry timer for the not-ready case — agentctl recovers asynchronously
   // after a backend restart, so the first fetch may land before the workspace
   // execution has been ensured. Without a retry the store would be stuck on
@@ -95,8 +103,10 @@ export function useSessionCommits(sessionId: string | null) {
   }, [sessionId, setSessionCommits, setSessionCommitsLoading]);
 
   // Fetch commits when:
-  //  1. commits is undefined (initial load or after an explicit clear)
-  //  2. the refetch trigger was bumped (commits_reset / branch_switched)
+  //  1. commits is undefined (initial load — clearSessionCommits is still
+  //     called by callers that genuinely want to drop the list, e.g. session
+  //     teardown).
+  //  2. the refetch trigger was bumped (commits_reset / branch_switched).
   //
   // The trigger path replaces the old "clear then refetch from undefined"
   // pattern: it keeps the previous commits in the store so the Changes panel
@@ -107,14 +117,12 @@ export function useSessionCommits(sessionId: string | null) {
     if (!sessionId) return;
 
     const needsInitialFetch = commits === undefined;
-    const wasCleared = prevCommitsRef.current !== undefined && commits === undefined;
     const triggerBumped = refetchTrigger !== prevRefetchTriggerRef.current;
 
-    if (needsInitialFetch || wasCleared || triggerBumped) {
+    if (needsInitialFetch || triggerBumped) {
       fetchCommits();
     }
 
-    prevCommitsRef.current = commits;
     prevRefetchTriggerRef.current = refetchTrigger;
   }, [sessionId, commits, refetchTrigger, fetchCommits, connectionStatus]);
 

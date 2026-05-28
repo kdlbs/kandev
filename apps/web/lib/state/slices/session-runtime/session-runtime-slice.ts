@@ -287,6 +287,7 @@ export function migrateEnvKeyedData(
   migrate(draft.sessionCommits.byEnvironmentId);
   migrate(draft.gitStatus.byEnvironmentRepo);
   migrate(draft.sessionCommits.loading);
+  migrate(draft.sessionCommits.refetchTrigger);
   migrate(draft.gitStatus.byEnvironmentId);
   migrate(draft.shell.outputs);
   migrate(draft.shell.statuses);

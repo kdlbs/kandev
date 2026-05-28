@@ -1,7 +1,6 @@
 package process
 
 import (
-	"context"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -52,8 +51,11 @@ func (wt *WorkspaceTracker) AttachWorkspaceStreamSubscriber(sub types.WorkspaceS
 	// tryUpdateGitStatus here because its broadcast would (a) duplicate the
 	// manual replay below for this subscriber and (b) push a redundant frame
 	// to every already-attached subscriber.
+	//
+	// Use the tracker's cancellable context (not context.Background) so
+	// Stop() can kill an in-flight `git status` here without waiting it out.
 	if wt.updateMu.TryLock() {
-		if status, err := wt.getGitStatus(context.Background()); err == nil {
+		if status, err := wt.getGitStatus(wt.cancelCtx); err == nil {
 			wt.mu.Lock()
 			wt.currentStatus = status
 			wt.mu.Unlock()
