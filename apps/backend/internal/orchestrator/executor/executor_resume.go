@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/gitref"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 )
@@ -720,6 +721,16 @@ func (e *Executor) applyResumeRepoConfig(ctx context.Context, task *v1.Task, ses
 		}
 		req.WorktreeBranchPrefix = repository.WorktreeBranchPrefix
 		req.PullBeforeWorktree = repository.PullBeforeWorktree
+		// Worktree manager requires TaskDirName and RepoName. Mirror the
+		// initial-launch path (applyRepositoryConfig) so resumes of single-repo
+		// tasks don't fail with ErrTaskDirRequired. Prefer a persisted
+		// TaskDirName so we reuse the same on-disk task root; fall back to a
+		// freshly generated one when the original launch failed before the
+		// environment was stamped.
+		if repository.Name != "" {
+			req.RepoName = repository.Name
+		}
+		req.TaskDirName = resolveResumeTaskDirName(ctx, e, task)
 	}
 
 	// Multi-repo: when the task has more than one repository, populate
@@ -733,15 +744,24 @@ func (e *Executor) applyResumeRepoConfig(ctx context.Context, task *v1.Task, ses
 		}
 		if len(allRepos) > 1 {
 			req.Repositories = buildRepoSpecs(allRepos)
-			// Stamp the per-repo TaskDirName so the preparer reuses the same
-			// task root that the original launch created.
-			if env, _ := e.repo.GetTaskEnvironmentByTaskID(ctx, task.ID); env != nil && env.TaskDirName != "" {
-				req.TaskDirName = env.TaskDirName
-			}
+			req.TaskDirName = resolveResumeTaskDirName(ctx, e, task)
 		}
 	}
 
 	return repositoryID, nil
+}
+
+// resolveResumeTaskDirName returns the per-task directory name to use when
+// resuming. It prefers the value persisted on task_environments (so we reuse
+// the same ~/.kandev/tasks/{name}/ root the initial launch created) and falls
+// back to a fresh semantic name when the original launch failed before any
+// environment was stamped. That fallback is what lets a previously failed
+// session recover instead of looping on ErrTaskDirRequired.
+func resolveResumeTaskDirName(ctx context.Context, e *Executor, task *v1.Task) string {
+	if env, _ := e.repo.GetTaskEnvironmentByTaskID(ctx, task.ID); env != nil && env.TaskDirName != "" {
+		return env.TaskDirName
+	}
+	return worktree.SemanticWorktreeName(task.Title, worktree.SmallSuffix(3))
 }
 
 // persistResumeState updates the session row after a successful resume launch.
