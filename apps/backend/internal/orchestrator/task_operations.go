@@ -40,6 +40,12 @@ const resumeReasonFailedSessionResumable = "failed_session_resumable"
 var ErrAgentPromptInProgress = errors.New("agent is currently processing a prompt")
 var ErrSessionResetInProgress = errors.New("session reset in progress")
 
+// ErrSessionNotPromptable is returned when a session cannot accept a prompt
+// because of its lifecycle state (STARTING, CREATED, FAILED, CANCELLED).
+// Distinct from ErrAgentPromptInProgress, which is RUNNING-only — confusing
+// the two misleads the UI and any caller doing errors.Is checks.
+var ErrSessionNotPromptable = errors.New("session not promptable")
+
 func isAgentPromptInProgressError(err error) bool {
 	return err != nil && errors.Is(err, ErrAgentPromptInProgress)
 }
@@ -1933,10 +1939,18 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 }
 
 // checkSessionPromptable returns nil when the session's state accepts a new
-// prompt, or an ErrAgentPromptInProgress-wrapped error otherwise.
+// prompt. RUNNING is rejected with ErrAgentPromptInProgress; any other
+// non-acceptable state (STARTING / CREATED / FAILED / CANCELLED) is rejected
+// with ErrSessionNotPromptable so callers can distinguish "wait for the
+// current turn" from "this session is not in a state where it can take a
+// prompt". IDLE is acceptable: office sessions intentionally park in IDLE
+// between turns (agent torn down, ACP session preserved) and the next prompt
+// resumes them — see ensureSessionRunning.
 func (s *Service) checkSessionPromptable(taskID, sessionID string, state models.TaskSessionState) error {
 	switch state {
-	case models.TaskSessionStateWaitingForInput, models.TaskSessionStateCompleted:
+	case models.TaskSessionStateWaitingForInput,
+		models.TaskSessionStateCompleted,
+		models.TaskSessionStateIdle:
 		return nil
 	case models.TaskSessionStateRunning:
 		s.logger.Warn("rejected prompt while agent is already running",
@@ -1949,7 +1963,7 @@ func (s *Service) checkSessionPromptable(taskID, sessionID string, state models.
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.String("session_state", string(state)))
-		return fmt.Errorf("%w, session is in %s state", ErrAgentPromptInProgress, state)
+		return fmt.Errorf("%w: session is in %s state", ErrSessionNotPromptable, state)
 	}
 }
 
