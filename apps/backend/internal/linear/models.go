@@ -254,7 +254,9 @@ type CreateIssueWatchRequest struct {
 }
 
 // UpdateIssueWatchRequest is the payload for PATCH /api/v1/linear/watches/issue/:id.
-// All fields are pointers so the caller can omit ones it doesn't want to change.
+// Most fields are pointers so callers can omit the ones they don't want to
+// change. MaxInflightTasks uses optional.Int for tri-state PATCH semantics
+// (absent = unchanged, null = uncapped, positive int = cap).
 type UpdateIssueWatchRequest struct {
 	WorkflowID          *string       `json:"workflowId,omitempty"`
 	WorkflowStepID      *string       `json:"workflowStepId,omitempty"`

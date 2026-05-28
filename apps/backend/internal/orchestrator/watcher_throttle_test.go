@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -268,15 +269,14 @@ func TestDispatchWatcherEvent_GateBlocksBurstRace(t *testing.T) {
 		maxInflightTasks: ptrInt(1),
 	}
 
-	// Block CreateIssueTask so the first goroutine holds its slot for the
-	// duration of the burst. Without this, the first goroutine could
-	// complete and release before the next handler enters, masking the bug.
-	// `entered` lets the test deterministically wait until the one admitted
-	// goroutine has reached CreateIssueTask before releasing the gate — no
-	// wall-clock polling.
+	// Block CreateIssueTask so the admitted goroutine holds its slot for the
+	// duration of the burst. `entered` / `done` are buffered to `burst` so a
+	// (wrongly) over-admitted goroutine can never block on signaling — the
+	// test must observe the over-admission, not deadlock on it.
 	gate := make(chan struct{})
-	entered := make(chan struct{}, 1)
-	creator := &blockingTaskCreator{block: gate, entered: entered}
+	entered := make(chan struct{}, burstSize)
+	done := make(chan struct{}, burstSize)
+	creator := &blockingTaskCreator{block: gate, entered: entered, done: done}
 
 	starter := &fakeTaskStarter{}
 	s := &Service{
@@ -287,42 +287,67 @@ func TestDispatchWatcherEvent_GateBlocksBurstRace(t *testing.T) {
 	}
 	s.watcherCoordinator.SetTaskCreator(creator)
 
-	// Fire 10 events back-to-back. Only one should pass the gate; the rest
+	// Fire the burst back-to-back. Only one should pass the gate; the rest
 	// must defer without spawning a goroutine.
-	const burst = 10
-	for i := 0; i < burst; i++ {
+	for i := 0; i < burstSize; i++ {
 		s.dispatchWatcherEvent(context.Background(), "linear", src, "evt")
 	}
 
-	// Exactly one goroutine must reach CreateIssueTask. Wait for it
-	// deterministically, then release the gate so it can finish.
-	<-entered
+	// Gate acquisition is synchronous (it happens before the goroutine spawns),
+	// so once the burst loop returns the pending counter is final. Asserting on
+	// it here catches over-admission deterministically, independent of how the
+	// admitted goroutine(s) are scheduled — this is the real regression guard.
+	s.watcherMu.Lock()
+	pending := s.pendingByWatch["linear|w-1"]
+	s.watcherMu.Unlock()
+	if pending != 1 {
+		t.Fatalf("expected exactly 1 slot acquired across the burst, got %d", pending)
+	}
+
+	// Confirm the admitted goroutine actually reached CreateIssueTask. Bounded
+	// so a broken gate that admits nothing fails fast instead of hanging.
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no goroutine reached CreateIssueTask within 5s")
+	}
 	close(gate)
 
+	// Wait for the admitted goroutine to finish before asserting the call
+	// count, so a late over-admitted call can't slip past the assertion.
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("admitted goroutine did not finish within 5s")
+	}
 	if got := creator.callCount(); got != 1 {
 		t.Fatalf("expected exactly 1 CreateIssueTask call (gate enforced), got %d", got)
 	}
 }
 
+// burstSize is the number of events fired at the gate in the burst-race test.
+const burstSize = 10
+
 // blockingTaskCreator counts calls and blocks each one on `block` until it is
-// closed. It signals `entered` (non-blocking) on the first call so a test can
-// wait for the admitted goroutine to reach CreateIssueTask without polling.
+// closed. It signals `entered` when a call reaches CreateIssueTask and `done`
+// when that call unblocks, so a test can wait deterministically (with a
+// timeout) instead of polling. Both channels are buffered by the caller so an
+// over-admitted goroutine never blocks on signaling.
 type blockingTaskCreator struct {
 	mu      sync.Mutex
 	calls   int
 	block   <-chan struct{}
 	entered chan<- struct{}
+	done    chan<- struct{}
 }
 
 func (b *blockingTaskCreator) CreateIssueTask(_ context.Context, _ *IssueTaskRequest) (*models.Task, error) {
 	b.mu.Lock()
 	b.calls++
 	b.mu.Unlock()
-	select {
-	case b.entered <- struct{}{}:
-	default:
-	}
+	b.entered <- struct{}{}
 	<-b.block
+	b.done <- struct{}{}
 	return &models.Task{ID: "t-blocked"}, nil
 }
 
