@@ -149,6 +149,36 @@ func TestTTLCache_Singleflight(t *testing.T) {
 	}
 }
 
+// Regression: a clear() that races with an in-flight singleflight fetch must
+// invalidate the late write so the cache stays empty afterward. Otherwise a
+// token swap (the user-facing trigger for clear()) could surface the
+// previous user's repos for up to one TTL window — the cleared entries get
+// re-populated by the still-pending fetch from the old generation.
+func TestTTLCache_ClearInvalidatesInFlightFetch(t *testing.T) {
+	cache := newTTLCache()
+	fetchStarted := make(chan struct{})
+	releaseFetch := make(chan struct{})
+	fetchDone := make(chan struct{})
+
+	go func() {
+		_, _ = cache.doOrFetch("k", func() (any, error) {
+			close(fetchStarted)
+			<-releaseFetch
+			return "stale", nil
+		})
+		close(fetchDone)
+	}()
+
+	<-fetchStarted
+	cache.clear()
+	close(releaseFetch)
+	<-fetchDone
+
+	if v, ok := cache.get("k"); ok {
+		t.Fatalf("expected cache to remain empty after clear(); got %v", v)
+	}
+}
+
 func TestTTLCache_MaxSizeEviction(t *testing.T) {
 	cache := newTTLCache()
 	cache.maxSize = 3

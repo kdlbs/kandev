@@ -5,6 +5,9 @@ import {
 } from "./task-create-dialog-computed";
 import type { DialogFormState } from "@/components/task-create-dialog-types";
 
+const URL_A = "github.com/a/b";
+const URL_B = "github.com/c/d";
+
 // Minimal fs stub for the two pure helpers below. Each function only reads
 // `noRepository`, `useRemote`, `remoteRepos`, and `repositories`, so we cast a
 // partial through `unknown` to avoid having to materialise the full
@@ -76,6 +79,22 @@ describe("computeHasRepositorySelection", () => {
   it("returns false on the empty form", () => {
     expect(computeHasRepositorySelection(fsStub({}))).toBe(false);
   });
+
+  it("Remote mode: ignores hidden workspace/local rows", () => {
+    // Toggle-back preserves the workspace/local rows when useRemote flips on
+    // — they're hidden from the UI and must not count toward the selection
+    // gate. Otherwise the submit button stays enabled in Remote mode even
+    // when the user hasn't filled in any URLs.
+    expect(
+      computeHasRepositorySelection(
+        fsStub({
+          useRemote: true,
+          repositories: [{ repositoryId: "r-1" }],
+          remoteRepos: [{ url: "" }],
+        }),
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("computeSelectedRepoCount", () => {
@@ -93,27 +112,56 @@ describe("computeSelectedRepoCount", () => {
     expect(computeSelectedRepoCount(fsStub({ repositories: [{ branch: "main" }] }))).toBe(0);
   });
 
-  it("Remote mode: counts non-empty URL rows alongside local rows", () => {
+  it("Remote mode: counts non-empty URL rows only", () => {
     // Two remote URLs — without the local rows, this alone trips the gate.
     expect(
       computeSelectedRepoCount(
         fsStub({
           useRemote: true,
-          remoteRepos: [{ url: "github.com/a/b" }, { url: "github.com/c/d" }],
+          remoteRepos: [{ url: URL_A }, { url: URL_B }],
         }),
       ),
     ).toBe(2);
+  });
 
-    // Mix: 1 local + 2 remote = 3 repos total.
+  it("Remote mode: ignores hidden workspace/local rows", () => {
+    // useRemote=true hides the workspace/local list — those rows must not
+    // contribute to the count even if they're still in the form state from
+    // a prior mode (toggle-back preserves them).
+    expect(
+      computeSelectedRepoCount(
+        fsStub({
+          useRemote: true,
+          repositories: [{ repositoryId: "r-1" }, { localPath: "/tmp/x" }],
+          remoteRepos: [{ url: URL_A }],
+        }),
+      ),
+    ).toBe(1);
+  });
+
+  it("Remote mode: returns 0 when only hidden workspace/local rows exist", () => {
     expect(
       computeSelectedRepoCount(
         fsStub({
           useRemote: true,
           repositories: [{ repositoryId: "r-1" }],
-          remoteRepos: [{ url: "github.com/a/b" }, { url: "github.com/c/d" }],
+          remoteRepos: [],
         }),
       ),
-    ).toBe(3);
+    ).toBe(0);
+  });
+
+  it("returns 0 in no-repository mode regardless of stale rows", () => {
+    expect(
+      computeSelectedRepoCount(
+        fsStub({
+          noRepository: true,
+          repositories: [{ repositoryId: "r-1" }],
+          remoteRepos: [{ url: URL_A }],
+          useRemote: true,
+        }),
+      ),
+    ).toBe(0);
   });
 
   it("ignores remote rows when useRemote is false", () => {
@@ -123,7 +171,7 @@ describe("computeSelectedRepoCount", () => {
       computeSelectedRepoCount(
         fsStub({
           useRemote: false,
-          remoteRepos: [{ url: "github.com/a/b" }, { url: "github.com/c/d" }],
+          remoteRepos: [{ url: URL_A }, { url: URL_B }],
         }),
       ),
     ).toBe(0);

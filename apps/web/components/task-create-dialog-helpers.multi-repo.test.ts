@@ -421,3 +421,37 @@ describe("buildRepositoriesPayload — multi-row PR/repo mix", () => {
     ]);
   });
 });
+
+describe("buildRepositoriesPayload — URL trimming for prInfoByUrl lookup", () => {
+  // Regression: the cache lookup in buildRepositoriesPayload must use the
+  // same canonical (trimmed) URL key that the rest of the dialog uses for
+  // ensure() / info(). Without trimming, stray whitespace on the pasted URL
+  // would silently miss the PR-info cache and skip base-branch anchoring.
+  it("trims row.url before looking up prInfoByUrl.info", () => {
+    const canonical = "https://github.com/owner/repo/pull/42";
+    const payload = buildRepositoriesPayload({
+      useRemote: true,
+      remoteRepos: [
+        { key: "remote-0", url: `  ${canonical}  `, branch: "feature/x", source: "paste" },
+      ],
+      prInfoByUrl: prInfoStub({
+        [canonical]: {
+          prHeadBranch: "feature/x",
+          prBaseBranch: "main",
+          prNumber: 42,
+          suggestedTitle: "PR #42: x",
+        },
+      }),
+      repositories: [],
+      discoveredRepositories: [],
+    });
+    expect(payload).toEqual([
+      {
+        repository_id: "",
+        base_branch: "main",
+        checkout_branch: "feature/x",
+        github_url: canonical,
+      },
+    ]);
+  });
+});

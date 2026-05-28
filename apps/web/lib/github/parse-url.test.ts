@@ -101,4 +101,14 @@ describe("parseGitHubRepoUrl", () => {
     expect(parseGitHubRepoUrl("https://github.com/acme")).toBeNull();
     expect(parseGitHubRepoUrl("not a url at all")).toBeNull();
   });
+
+  it("returns null when the URL is embedded in surrounding text", () => {
+    // Regression: the regex was unanchored, so anything containing a valid
+    // github.com/<owner>/<repo> substring (chat messages, log lines, etc.)
+    // matched and got treated as a clean repo URL. Anchoring at ^ rules out
+    // these false positives — input must START with the URL pattern.
+    expect(parseGitHubRepoUrl("some prefix text github.com/owner/repo")).toBeNull();
+    expect(parseGitHubRepoUrl("see https://github.com/owner/repo for details")).toBeNull();
+    expect(parseGitHubRepoUrl("malicious.com/github.com/owner/repo")).toBeNull();
+  });
 });

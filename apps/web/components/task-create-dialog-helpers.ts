@@ -276,7 +276,11 @@ function buildRemoteRepoPayload(opts: {
   if (nonEmpty.length === 0) return [];
   return nonEmpty.map((row) => {
     const url = row.url.trim();
-    const prInfo = opts.prInfoByUrl?.info(row.url);
+    // The cache is keyed on the trimmed URL (ensure() also trims), so we
+    // must look it up with the trimmed value too. Passing `row.url` directly
+    // would miss the cache when the user has stray whitespace around their
+    // URL and silently lose the PR base-branch anchoring.
+    const prInfo = opts.prInfoByUrl?.info(url);
     if (prInfo) {
       const isPrAutoSelection = !!prInfo.prHeadBranch && row.branch === prInfo.prHeadBranch;
       const baseBranch = isPrAutoSelection

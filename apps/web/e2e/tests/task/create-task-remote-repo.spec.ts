@@ -70,13 +70,17 @@ async function seedAccessibleRepos(apiClient: ApiClient): Promise<void> {
   await apiClient.mockGitHubAddBranches("mock-user", "gamma", [{ name: "main" }]);
 }
 
-async function pickFirstRepoInChip(testPage: Page, chipIndex = 0): Promise<void> {
+async function pickRepoInChip(testPage: Page, repoFullName: string, chipIndex = 0): Promise<void> {
   const triggers = testPage.getByTestId("remote-repo-chip-trigger");
   await triggers.nth(chipIndex).click();
-  // The picker fetches on open; wait for at least one option to appear.
-  const firstOption = testPage.getByTestId("remote-repo-option").first();
-  await expect(firstOption).toBeVisible({ timeout: 10_000 });
-  await firstOption.click();
+  // Pick by repo full_name instead of relying on list order — the picker's
+  // sort can change without notice and we want each call site to spell out
+  // which repo it expects to land on (later assertions reference the same
+  // name). Filtering the option testid by text scopes the click to the
+  // intended row even when the description / private badge add extra text.
+  const option = testPage.getByTestId("remote-repo-option").filter({ hasText: repoFullName });
+  await expect(option).toBeVisible({ timeout: 10_000 });
+  await option.first().click();
 }
 
 async function pasteUrlInChip(testPage: Page, url: string, chipIndex = 0): Promise<void> {
@@ -115,7 +119,7 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     await openCreateDialog(testPage, kanban);
     await clickRemoteMode(testPage);
 
-    await pickFirstRepoInChip(testPage);
+    await pickRepoInChip(testPage, "mock-user/alpha");
 
     // After picking, the chip trigger shows owner/name (full_name).
     const trigger = testPage.getByTestId("remote-repo-chip-trigger").first();
@@ -231,7 +235,7 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     await clickRemoteMode(testPage);
 
     // Row 0: picker selection (mock-user/alpha)
-    await pickFirstRepoInChip(testPage, 0);
+    await pickRepoInChip(testPage, "mock-user/alpha", 0);
     await expect(testPage.getByTestId("remote-repo-chip-trigger").nth(0)).toContainText(
       "mock-user/alpha",
       { timeout: 5_000 },
@@ -300,7 +304,7 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     await openCreateDialog(testPage, kanban);
     await clickRemoteMode(testPage);
 
-    await pickFirstRepoInChip(testPage, 0);
+    await pickRepoInChip(testPage, "mock-user/alpha", 0);
 
     // Add a second row, then remove it via the per-chip × button.
     await testPage.getByTestId("remote-add-row").click();
@@ -394,7 +398,7 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     await openCreateDialog(testPage, kanban);
     await clickRemoteMode(testPage);
 
-    await pickFirstRepoInChip(testPage, 0);
+    await pickRepoInChip(testPage, "mock-user/alpha", 0);
     await testPage.getByTestId("remote-add-row").click();
     await pasteUrlInChip(testPage, "https://github.com/paste-owner/paste-repo", 1);
 

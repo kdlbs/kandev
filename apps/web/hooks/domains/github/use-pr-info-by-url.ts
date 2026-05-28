@@ -54,7 +54,7 @@ export function parseGitHubPrUrl(
   const trimmed = url.trim();
   if (!trimmed) return null;
   const prMatch = trimmed.match(
-    /(?:https?:\/\/)?(?:www\.)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/pull\/(\d+)(?:[/?#].*)?$/,
+    /^(?:https?:\/\/)?(?:www\.)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/pull\/(\d+)(?:[/?#].*)?$/,
   );
   if (!prMatch) return null;
   return { owner: prMatch[1], repo: prMatch[2], prNumber: parseInt(prMatch[3], 10) };
@@ -71,24 +71,100 @@ export function parseGitHubAnyUrl(
   return parseGitHubRepoUrl(url);
 }
 
+/** Shared ref bag passed to the extracted handlers. Bundling the refs into
+ *  one object keeps every handler's signature small and lets us split the
+ *  fetch flow into focused steps without re-deriving the closure each call. */
+type Refs = {
+  mountedRef: React.MutableRefObject<boolean>;
+  inFlightRef: React.MutableRefObject<Set<string>>;
+  loadedRef: React.MutableRefObject<Set<string>>;
+  abortersRef: React.MutableRefObject<Map<string, AbortController>>;
+  seqRef: React.MutableRefObject<Map<string, number>>;
+};
+
+type SetState = React.Dispatch<React.SetStateAction<Record<string, URLState>>>;
+
+/** Marks the entry as loading=true (preserving any prior info) and bumps the
+ *  per-URL sequence counter. */
+function initRequest(
+  refs: Refs,
+  setState: SetState,
+  url: string,
+): { seq: number; signal: AbortSignal } {
+  setState((prev) => ({
+    ...prev,
+    [url]: { info: prev[url]?.info, loading: true },
+  }));
+  refs.inFlightRef.current.add(url);
+  const controller = new AbortController();
+  refs.abortersRef.current.set(url, controller);
+  const seq = (refs.seqRef.current.get(url) ?? 0) + 1;
+  refs.seqRef.current.set(url, seq);
+  return { seq, signal: controller.signal };
+}
+
+/** Writes the successful PR info when the request is still current. */
+function handleSuccess(
+  refs: Refs,
+  setState: SetState,
+  url: string,
+  seq: number,
+  pr: Awaited<ReturnType<typeof fetchPRInfo>>,
+): void {
+  if (!refs.mountedRef.current) return;
+  if (refs.seqRef.current.get(url) !== seq) return;
+  refs.loadedRef.current.add(url);
+  const info: PRInfo = {
+    prHeadBranch: pr.head_branch,
+    prBaseBranch: pr.base_branch,
+    prNumber: pr.number,
+    suggestedTitle: `PR #${pr.number}: ${pr.title}`,
+  };
+  setState((prev) => ({ ...prev, [url]: { info, loading: false } }));
+}
+
+/** Marks loaded on failure (we don't want to retry in a tight loop) and
+ *  clears the loading flag. Callers that want to retry can clear() + ensure(). */
+function handleFailure(refs: Refs, setState: SetState, url: string, seq: number): void {
+  if (!refs.mountedRef.current) return;
+  if (refs.seqRef.current.get(url) !== seq) return;
+  refs.loadedRef.current.add(url);
+  setState((prev) => ({
+    ...prev,
+    [url]: { info: prev[url]?.info, loading: false },
+  }));
+}
+
+/** Cleans up the in-flight + aborters maps for the request that just settled. */
+function finalizeRequest(refs: Refs, url: string, seq: number): void {
+  if (refs.seqRef.current.get(url) !== seq) return;
+  refs.inFlightRef.current.delete(url);
+  refs.abortersRef.current.delete(url);
+}
+
 export function usePRInfoByURL(): UsePRInfoByURLResult {
   const [state, setState] = useState<Record<string, URLState>>({});
   const inFlightRef = useRef<Set<string>>(new Set());
   const loadedRef = useRef<Set<string>>(new Set());
   const abortersRef = useRef<Map<string, AbortController>>(new Map());
   // Per-URL request sequence number. Incremented before each fetch so the
-  // .then/.catch/.finally callbacks can confirm they're still the latest
-  // request for `url` — a clear() or follow-up ensure() bumps the sequence
-  // and any in-flight callbacks fall through without mutating state.
-  const requestSeqByURLRef = useRef<Map<string, number>>(new Map());
+  // settled callbacks can confirm they're still the latest request for `url`.
+  const seqRef = useRef<Map<string, number>>(new Map());
   const mountedRef = useRef(true);
+  const refsRef = useRef<Refs>({
+    mountedRef,
+    inFlightRef,
+    loadedRef,
+    abortersRef,
+    seqRef,
+  });
 
   useEffect(() => {
     mountedRef.current = true;
     const aborters = abortersRef.current;
     const inFlight = inFlightRef.current;
     const loaded = loadedRef.current;
-    const seqs = requestSeqByURLRef.current;
+    const seqs = seqRef.current;
     return () => {
       mountedRef.current = false;
       for (const controller of aborters.values()) controller.abort();
@@ -99,7 +175,13 @@ export function usePRInfoByURL(): UsePRInfoByURLResult {
     };
   }, []);
 
-  const ensure = useCallback((url: string) => {
+  const ensure = useCallback((rawUrl: string) => {
+    // Normalize on entry so all internal state (in-flight, loaded, aborters,
+    // sequence counter, state map) is keyed on the same canonical form.
+    // Without this, a chip wiring that called ensure() with stray whitespace
+    // could cache under the whitespaced key while consumers that look up
+    // via the trimmed URL would miss the cache.
+    const url = rawUrl.trim();
     if (!url) return;
     if (inFlightRef.current.has(url) || loadedRef.current.has(url)) return;
     const parsed = parseGitHubPrUrl(url);
@@ -110,64 +192,30 @@ export function usePRInfoByURL(): UsePRInfoByURLResult {
       loadedRef.current.add(url);
       return;
     }
-    setState((prev) => ({
-      ...prev,
-      [url]: { info: prev[url]?.info, loading: true },
-    }));
-    inFlightRef.current.add(url);
-    const controller = new AbortController();
-    abortersRef.current.set(url, controller);
-    // Snapshot this request's sequence number; the settled callbacks below
-    // compare against the latest value and bail if a newer request for the
-    // same URL has superseded this one.
-    const seq = (requestSeqByURLRef.current.get(url) ?? 0) + 1;
-    requestSeqByURLRef.current.set(url, seq);
-
-    fetchPRInfo(parsed.owner, parsed.repo, parsed.prNumber, {
-      init: { signal: controller.signal },
-    })
-      .then((pr) => {
-        if (!mountedRef.current) return;
-        if (requestSeqByURLRef.current.get(url) !== seq) return;
-        loadedRef.current.add(url);
-        const info: PRInfo = {
-          prHeadBranch: pr.head_branch,
-          prBaseBranch: pr.base_branch,
-          prNumber: pr.number,
-          suggestedTitle: `PR #${pr.number}: ${pr.title}`,
-        };
-        setState((prev) => ({
-          ...prev,
-          [url]: { info, loading: false },
-        }));
-      })
-      .catch(() => {
-        if (!mountedRef.current) return;
-        if (requestSeqByURLRef.current.get(url) !== seq) return;
-        // On failure mark loaded so we don't retry in a tight loop. Callers
-        // that want to retry can clear() and ensure() again.
-        loadedRef.current.add(url);
-        setState((prev) => ({
-          ...prev,
-          [url]: { info: prev[url]?.info, loading: false },
-        }));
-      })
-      .finally(() => {
-        if (requestSeqByURLRef.current.get(url) !== seq) return;
-        inFlightRef.current.delete(url);
-        abortersRef.current.delete(url);
-      });
+    const refs = refsRef.current;
+    const { seq, signal } = initRequest(refs, setState, url);
+    fetchPRInfo(parsed.owner, parsed.repo, parsed.prNumber, { init: { signal } })
+      .then((pr) => handleSuccess(refs, setState, url, seq, pr))
+      .catch(() => handleFailure(refs, setState, url, seq))
+      .finally(() => finalizeRequest(refs, url, seq));
   }, []);
 
-  const info = useCallback((url: string): PRInfo | undefined => state[url]?.info, [state]);
-  const loading = useCallback((url: string): boolean => Boolean(state[url]?.loading), [state]);
-  const clear = useCallback((url: string) => {
+  const info = useCallback(
+    (rawUrl: string): PRInfo | undefined => state[rawUrl.trim()]?.info,
+    [state],
+  );
+  const loading = useCallback(
+    (rawUrl: string): boolean => Boolean(state[rawUrl.trim()]?.loading),
+    [state],
+  );
+  const clear = useCallback((rawUrl: string) => {
+    const url = rawUrl.trim();
     if (!url) return;
     inFlightRef.current.delete(url);
     loadedRef.current.delete(url);
     // Bump the sequence so any in-flight callbacks for this URL bail —
     // they would otherwise resurrect the cleared state.
-    requestSeqByURLRef.current.set(url, (requestSeqByURLRef.current.get(url) ?? 0) + 1);
+    seqRef.current.set(url, (seqRef.current.get(url) ?? 0) + 1);
     const aborter = abortersRef.current.get(url);
     if (aborter) {
       aborter.abort();

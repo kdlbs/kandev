@@ -48,10 +48,24 @@ export function useRemoteReposState() {
     return `remote-${nextKeyRef.current}`;
   }, []);
 
+  // Allocates a fresh key by bumping the local counter until it lands on
+  // one not already used by the current rows. The plain `newKey()` helper
+  // can't see the rows list, so a hydrated state — e.g. `setRemoteRepos`
+  // injecting `{key: "remote-1", …}` from initialValues — would collide
+  // with the next addRemoteRepo() (counter starts at 0, first call hands
+  // out "remote-1"). Using the setter callback gives us the current rows
+  // synchronously so we can skip taken keys.
   const addRemoteRepo = useCallback(() => {
-    const key = newKey();
-    setRemoteRepos((rows) => [...rows, { key, url: "", branch: "", source: "paste" }]);
-  }, [newKey]);
+    setRemoteRepos((rows) => {
+      const taken = new Set(rows.map((r) => r.key));
+      let key: string;
+      do {
+        nextKeyRef.current += 1;
+        key = `remote-${nextKeyRef.current}`;
+      } while (taken.has(key));
+      return [...rows, { key, url: "", branch: "", source: "paste" }];
+    });
+  }, []);
 
   const removeRemoteRepo = useCallback((key: string) => {
     setRemoteRepos((rows) => rows.filter((r) => r.key !== key));

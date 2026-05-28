@@ -35,16 +35,22 @@ export function RemoteRepoChipsRow({
   onAddRow,
   onRemoveRow,
 }: RemoteRepoChipsRowProps) {
-  // Keep the per-URL caches warm. Re-runs whenever the set of URLs changes;
-  // both `ensure` calls are internally idempotent so re-firing on unrelated
-  // re-renders is cheap. PR-info is a no-op for plain repo URLs.
+  // Keep the per-URL caches warm. Destructure the stable `ensure` callbacks
+  // out of the parent cache objects so the effect deps array doesn't churn
+  // every render: `fs.branchesByUrl` / `fs.prInfoByUrl` themselves are new
+  // object refs each render (they wrap hook results), but the underlying
+  // `ensure` callbacks are stable (`useCallback(..., [])`). Both calls are
+  // internally idempotent so re-firing on unrelated re-renders is cheap.
+  // PR-info is a no-op for plain repo URLs.
+  const { ensure: ensureBranches } = fs.branchesByUrl;
+  const { ensure: ensurePRInfo } = fs.prInfoByUrl;
   useEffect(() => {
     for (const row of fs.remoteRepos) {
       if (!row.url) continue;
-      fs.branchesByUrl.ensure(row.url);
-      fs.prInfoByUrl.ensure(row.url);
+      ensureBranches(row.url);
+      ensurePRInfo(row.url);
     }
-  }, [fs.remoteRepos, fs.branchesByUrl, fs.prInfoByUrl]);
+  }, [fs.remoteRepos, ensureBranches, ensurePRInfo]);
 
   // Hoist the accessible-repos hook to the row level so a single backend
   // request serves every chip's popover. Previously each chip called the

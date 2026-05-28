@@ -24,6 +24,12 @@ type ttlEntry struct {
 // ttlCache is a tiny TTL map guarded by singleflight to coalesce concurrent
 // misses for the same key. When size exceeds the cap, entries with the
 // earliest expiry are dropped — good enough for a sub-minute window.
+//
+// `gen` is bumped on every `clear()`. A fetch in flight at the time of a
+// clear (e.g. token swap) is allowed to finish, but its result is dropped on
+// the floor by `setIfCurrentGeneration` instead of being written back into
+// the cache — otherwise the new user could see stale repos from the prior
+// user for up to one TTL.
 type ttlCache struct {
 	mu      sync.Mutex
 	entries map[string]ttlEntry
@@ -31,6 +37,7 @@ type ttlCache struct {
 	ttl     time.Duration
 	maxSize int
 	now     func() time.Time
+	gen     uint64
 }
 
 func newTTLCache() *ttlCache {
@@ -75,18 +82,48 @@ func (c *ttlCache) get(key string) (any, bool) {
 	return entry.value, true
 }
 
-// clear drops every cached entry. Used by the e2e mock controller to make a
-// "GitHub repos unavailable" toggle visible immediately instead of waiting
-// for the 60s TTL on a prior cached success to expire.
+// clear drops every cached entry and bumps the generation counter so any
+// fetch that was already in flight is prevented from writing its result back
+// (its post-fetch setIfCurrentGeneration becomes a no-op). Used by the e2e
+// mock controller to make a "GitHub repos unavailable" toggle visible
+// immediately instead of waiting for the 60s TTL on a prior cached success
+// to expire, and by the token-swap path so the new user never sees the old
+// user's cached repos through a late-resolving singleflight.
 func (c *ttlCache) clear() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.entries = make(map[string]ttlEntry)
+	c.gen++
+}
+
+// generation returns the current generation counter. Callers snapshot this
+// before launching a fetch and pass it back into setIfCurrentGeneration so a
+// concurrent clear() can invalidate a still-pending write.
+func (c *ttlCache) generation() uint64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.gen
 }
 
 func (c *ttlCache) set(key string, value any) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if len(c.entries) >= c.maxSize {
+		c.evictLocked()
+	}
+	c.entries[key] = ttlEntry{value: value, expiresAt: c.now().Add(c.ttl)}
+}
+
+// setIfCurrentGeneration writes `value` for `key` only if the cache's
+// generation counter still matches `gen`. If a clear() ran since `gen` was
+// snapshotted, the write is dropped on the floor — preventing a stale fetch
+// from clobbering the post-clear empty cache.
+func (c *ttlCache) setIfCurrentGeneration(key string, value any, gen uint64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.gen != gen {
+		return
+	}
 	if len(c.entries) >= c.maxSize {
 		c.evictLocked()
 	}
@@ -126,10 +163,16 @@ func (c *ttlCache) evictLocked() {
 // doOrFetch returns a cached value when fresh; otherwise runs fetch under a
 // singleflight guard, caches the result, and returns it. Errors are not
 // cached. The returned value is shared — callers must not mutate it.
+//
+// The generation snapshot is taken BEFORE launching the singleflight: if a
+// clear() races with this fetch, the post-fetch write becomes a no-op so the
+// caller still receives the freshly-fetched value but the cache stays empty
+// (the next ensure() will re-fetch under the new generation).
 func (c *ttlCache) doOrFetch(key string, fetch func() (any, error)) (any, error) {
 	if v, ok := c.get(key); ok {
 		return v, nil
 	}
+	gen := c.generation()
 	v, err, _ := c.sf.Do(key, func() (any, error) {
 		if v, ok := c.get(key); ok {
 			return v, nil
@@ -138,7 +181,7 @@ func (c *ttlCache) doOrFetch(key string, fetch func() (any, error)) (any, error)
 		if err != nil {
 			return nil, err
 		}
-		c.set(key, v)
+		c.setIfCurrentGeneration(key, v, gen)
 		return v, nil
 	})
 	return v, err

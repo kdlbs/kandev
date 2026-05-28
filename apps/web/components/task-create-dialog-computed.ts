@@ -63,31 +63,36 @@ function pickExecutorDisabledReason(
 }
 
 /**
- * The form has a repo selection when either: (a) any chip in the unified
- * repo list has a repo set, (b) Remote (URL) mode has at least one row with a
- * non-empty URL (any row — not just row 0), or (c) the task is intentionally
- * repo-less (noRepository toggle on).
+ * The form has a repo selection when:
+ *   - noRepository is on (intentionally repo-less), OR
+ *   - useRemote is on and at least one remote-URL row has a non-empty URL, OR
+ *   - useRemote is off and any workspace/local row has a repo set.
+ *
+ * The mode (useRemote) gates which list is consulted — rows from the
+ * inactive mode are hidden but not cleared (toggle-back is non-destructive),
+ * and they must not influence the submit gate.
  *
  * Exported for unit-testing the repo-selection gate independently of the
  * full `useDialogComputed` React hook.
  */
 export function computeHasRepositorySelection(fs: DialogFormState): boolean {
   if (fs.noRepository) return true;
-  if (fs.repositories.some((r) => r.repositoryId || r.localPath)) return true;
-  return Boolean(fs.useRemote && fs.remoteRepos.some((r) => r.url.trim() !== ""));
+  if (fs.useRemote) return fs.remoteRepos.some((r) => r.url.trim() !== "");
+  return fs.repositories.some((r) => r.repositoryId || r.localPath);
 }
 
 /**
- * Number of repositories the task will operate on. Combines workspace/local
- * chips and (when Remote mode is on) any non-empty remote-URL rows so the
- * multi-repo executor gate trips on multi-row remote selections too.
+ * Number of repositories the task will operate on. Mode-aware: when Remote
+ * mode is on we count non-empty URL rows, otherwise we count workspace/local
+ * rows with a repo set. Rows from the inactive mode are hidden in the UI and
+ * must not influence the multi-repo executor gate.
  *
  * Exported for unit-testing the executor gate independently of the React hook.
  */
 export function computeSelectedRepoCount(fs: DialogFormState): number {
-  const local = fs.repositories.filter((r) => r.repositoryId || r.localPath).length;
-  const remote = fs.useRemote ? fs.remoteRepos.filter((r) => r.url.trim() !== "").length : 0;
-  return local + remote;
+  if (fs.noRepository) return 0;
+  if (fs.useRemote) return fs.remoteRepos.filter((r) => r.url.trim() !== "").length;
+  return fs.repositories.filter((r) => r.repositoryId || r.localPath).length;
 }
 
 function useExecutorProfileCompat(

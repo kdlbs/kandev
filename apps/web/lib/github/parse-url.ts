@@ -17,7 +17,7 @@ export function parseGitHubRepoUrl(url: string): { owner: string; repo: string }
   const trimmed = url.trim();
   if (!trimmed) return null;
   const match = trimmed.match(
-    /(?:https?:\/\/)?(?:www\.)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?(?:[?#].*)?$/,
+    /^(?:https?:\/\/)?(?:www\.)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?(?:[?#].*)?$/,
   );
   if (!match) return null;
   return { owner: match[1], repo: match[2] };

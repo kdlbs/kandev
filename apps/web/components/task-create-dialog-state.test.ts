@@ -183,6 +183,43 @@ describe("useDialogFormState — remoteRepos mode", () => {
   });
 });
 
+describe("useDialogFormState — remoteRepos key allocation", () => {
+  // Regression: the per-hook counter starts at 0 and increments locally, so
+  // a hydrated state that already contains `remote-1` (e.g. from the seed
+  // effect or initialValues) would collide on the next addRemoteRepo() —
+  // the new row would also be named `remote-1`, breaking React keys.
+  it("addRemoteRepo skips keys already present in the rows array", () => {
+    const { result } = renderHook(() => useDialogFormState(true, "ws-1", null));
+
+    // Flip into Remote mode so the seed effect injects `remote-0`.
+    act(() => {
+      result.current.setUseRemote(true);
+    });
+    expect(result.current.remoteRepos).toHaveLength(1);
+    expect(result.current.remoteRepos[0]?.key).toBe("remote-0");
+
+    // Manually hydrate with a row whose key matches what the local counter
+    // is about to hand out (remote-1).
+    act(() => {
+      result.current.setRemoteRepos([
+        { key: "remote-1", url: "github.com/a/b", branch: "main", source: "paste" },
+      ]);
+    });
+
+    act(() => {
+      result.current.addRemoteRepo();
+    });
+
+    const keys = result.current.remoteRepos.map((r) => r.key);
+    // No duplicates: hydrated `remote-1` still present, but the new row
+    // skipped past it instead of colliding.
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(result.current.remoteRepos).toHaveLength(2);
+    expect(result.current.remoteRepos[0]?.key).toBe("remote-1");
+    expect(result.current.remoteRepos[1]?.key).not.toBe("remote-1");
+  });
+});
+
 describe("buildRepositoriesPayload — remoteRepos rows", () => {
   it("filters out rows with empty url before mapping to repos[]", () => {
     const payload = buildRepositoriesPayload({

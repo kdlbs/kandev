@@ -46,6 +46,77 @@ export type UseBranchesByURLResult = {
 
 const EMPTY: Branch[] = [];
 
+/** Shared ref bag passed to the extracted handlers. Bundling the refs into
+ *  one object keeps every handler's signature small and lets us split the
+ *  fetch flow into focused steps without re-deriving the closure each call. */
+type Refs = {
+  mountedRef: React.MutableRefObject<boolean>;
+  inFlightRef: React.MutableRefObject<Set<string>>;
+  loadedRef: React.MutableRefObject<Set<string>>;
+  abortersRef: React.MutableRefObject<Map<string, AbortController>>;
+  seqRef: React.MutableRefObject<Map<string, number>>;
+};
+
+type SetState = React.Dispatch<React.SetStateAction<Record<string, URLState>>>;
+
+/** Marks the entry as loading=true (preserving any prior branches) and bumps
+ *  the per-URL sequence counter. Returns the new sequence number + the abort
+ *  controller the fetch should hand to fetchRepoBranches. */
+function initRequest(
+  refs: Refs,
+  setState: SetState,
+  url: string,
+): { seq: number; signal: AbortSignal } {
+  setState((prev) => ({
+    ...prev,
+    [url]: { branches: prev[url]?.branches ?? [], loading: true },
+  }));
+  refs.inFlightRef.current.add(url);
+  const controller = new AbortController();
+  refs.abortersRef.current.set(url, controller);
+  const seq = (refs.seqRef.current.get(url) ?? 0) + 1;
+  refs.seqRef.current.set(url, seq);
+  return { seq, signal: controller.signal };
+}
+
+/** Writes the successful branches list when the request is still current. */
+function handleSuccess(
+  refs: Refs,
+  setState: SetState,
+  url: string,
+  seq: number,
+  res: Awaited<ReturnType<typeof fetchRepoBranches>>,
+): void {
+  if (!refs.mountedRef.current) return;
+  if (refs.seqRef.current.get(url) !== seq) return;
+  const branches: Branch[] = (res?.branches ?? []).map((b) => ({
+    name: b.name,
+    type: "remote" as const,
+  }));
+  refs.loadedRef.current.add(url);
+  setState((prev) => ({ ...prev, [url]: { branches, loading: false } }));
+}
+
+/** Marks the URL as no longer loading on failure. Does NOT add to loadedRef:
+ *  leaving it unmarked lets the next ensure() call retry instead of
+ *  short-circuiting on the cached failure. */
+function handleFailure(refs: Refs, setState: SetState, url: string, seq: number): void {
+  if (!refs.mountedRef.current) return;
+  if (refs.seqRef.current.get(url) !== seq) return;
+  setState((prev) => ({
+    ...prev,
+    [url]: { branches: prev[url]?.branches ?? [], loading: false },
+  }));
+}
+
+/** Cleans up the in-flight + aborters maps for the request that just settled.
+ *  Skipped when a newer request has superseded this one (it owns the slot). */
+function finalizeRequest(refs: Refs, url: string, seq: number): void {
+  if (refs.seqRef.current.get(url) !== seq) return;
+  refs.inFlightRef.current.delete(url);
+  refs.abortersRef.current.delete(url);
+}
+
 export function useBranchesByURL(): UseBranchesByURLResult {
   const [state, setState] = useState<Record<string, URLState>>({});
   // Tracks in-flight URLs so concurrent ensure() calls coalesce. We use a ref
@@ -58,19 +129,25 @@ export function useBranchesByURL(): UseBranchesByURLResult {
   // settled callbacks compare against the latest value and bail when a newer
   // request has superseded them. Prevents a stale fetch from clobbering the
   // state set by a later ensure() for the same URL.
-  const requestSeqByURLRef = useRef<Map<string, number>>(new Map());
+  const seqRef = useRef<Map<string, number>>(new Map());
   const mountedRef = useRef(true);
+  const refsRef = useRef<Refs>({
+    mountedRef,
+    inFlightRef,
+    loadedRef,
+    abortersRef,
+    seqRef,
+  });
 
   useEffect(() => {
     mountedRef.current = true;
-    // Snapshot the refs into local consts so the cleanup function reads from
-    // the same object identity the effect captured at mount, even if the
-    // (frozen) ref instance changes — silences exhaustive-deps' ref-cleanup
-    // warning without changing behavior, since these refs are never reassigned.
+    // Snapshot refs into locals so the cleanup reads from the same object
+    // identity the effect captured at mount (silences exhaustive-deps without
+    // changing behavior — these refs are never reassigned).
     const aborters = abortersRef.current;
     const inFlight = inFlightRef.current;
     const loaded = loadedRef.current;
-    const seqs = requestSeqByURLRef.current;
+    const seqs = seqRef.current;
     return () => {
       mountedRef.current = false;
       for (const controller of aborters.values()) controller.abort();
@@ -81,74 +158,32 @@ export function useBranchesByURL(): UseBranchesByURLResult {
     };
   }, []);
 
-  const ensure = useCallback((url: string) => {
+  const ensure = useCallback((rawUrl: string) => {
+    // Normalize on entry so the cache key is canonical — see the matching
+    // comment in usePRInfoByURL for the rationale.
+    const url = rawUrl.trim();
     if (!url) return;
     if (inFlightRef.current.has(url) || loadedRef.current.has(url)) return;
     const parsed = parseGitHubRepoUrl(url);
     if (!parsed) {
       loadedRef.current.add(url);
-      setState((prev) => ({
-        ...prev,
-        [url]: { branches: [], loading: false },
-      }));
+      setState((prev) => ({ ...prev, [url]: { branches: [], loading: false } }));
       return;
     }
-    setState((prev) => ({
-      ...prev,
-      [url]: {
-        branches: prev[url]?.branches ?? [],
-        loading: true,
-      },
-    }));
-    inFlightRef.current.add(url);
-    const controller = new AbortController();
-    abortersRef.current.set(url, controller);
-    const seq = (requestSeqByURLRef.current.get(url) ?? 0) + 1;
-    requestSeqByURLRef.current.set(url, seq);
-
-    fetchRepoBranches(parsed.owner, parsed.repo, {
-      init: { signal: controller.signal },
-    })
-      .then((res) => {
-        if (!mountedRef.current) return;
-        if (requestSeqByURLRef.current.get(url) !== seq) return;
-        const branches: Branch[] = (res?.branches ?? []).map((b) => ({
-          name: b.name,
-          type: "remote" as const,
-        }));
-        loadedRef.current.add(url);
-        setState((prev) => ({
-          ...prev,
-          [url]: { branches, loading: false },
-        }));
-      })
-      .catch(() => {
-        if (!mountedRef.current) return;
-        if (requestSeqByURLRef.current.get(url) !== seq) return;
-        // Don't mark `loaded` on failure — leaving it unmarked allows the
-        // next ensure() call for the same URL to retry instead of
-        // short-circuiting on the cached failure. Callers can also call
-        // clear(url) to force a refetch.
-        setState((prev) => ({
-          ...prev,
-          [url]: {
-            branches: prev[url]?.branches ?? [],
-            loading: false,
-          },
-        }));
-      })
-      .finally(() => {
-        if (requestSeqByURLRef.current.get(url) !== seq) return;
-        inFlightRef.current.delete(url);
-        abortersRef.current.delete(url);
-      });
+    const refs = refsRef.current;
+    const { seq, signal } = initRequest(refs, setState, url);
+    fetchRepoBranches(parsed.owner, parsed.repo, { init: { signal } })
+      .then((res) => handleSuccess(refs, setState, url, seq, res))
+      .catch(() => handleFailure(refs, setState, url, seq))
+      .finally(() => finalizeRequest(refs, url, seq));
   }, []);
 
-  const clear = useCallback((url: string) => {
+  const clear = useCallback((rawUrl: string) => {
+    const url = rawUrl.trim();
     if (!url) return;
     inFlightRef.current.delete(url);
     loadedRef.current.delete(url);
-    requestSeqByURLRef.current.set(url, (requestSeqByURLRef.current.get(url) ?? 0) + 1);
+    seqRef.current.set(url, (seqRef.current.get(url) ?? 0) + 1);
     const aborter = abortersRef.current.get(url);
     if (aborter) {
       aborter.abort();
@@ -162,8 +197,14 @@ export function useBranchesByURL(): UseBranchesByURLResult {
     });
   }, []);
 
-  const branches = useCallback((url: string): Branch[] => state[url]?.branches ?? EMPTY, [state]);
-  const loading = useCallback((url: string): boolean => Boolean(state[url]?.loading), [state]);
+  const branches = useCallback(
+    (rawUrl: string): Branch[] => state[rawUrl.trim()]?.branches ?? EMPTY,
+    [state],
+  );
+  const loading = useCallback(
+    (rawUrl: string): boolean => Boolean(state[rawUrl.trim()]?.loading),
+    [state],
+  );
 
   return { branches, loading, ensure, clear };
 }
