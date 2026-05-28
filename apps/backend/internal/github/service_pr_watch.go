@@ -628,6 +628,11 @@ func (s *Service) detectPRForWatchOnce(ctx context.Context, watch *PRWatch, task
 	// prSyncFreshnessWindow, which is fine — it stops hammering a failing
 	// endpoint, and the 60s background poller still retries. This diverges
 	// intentionally from poller.detectPRForWatch, which stamps only on success.
+	// The empty-string check/review args clear last_check_status /
+	// last_review_state. That's harmless here — this path only runs for
+	// pr_number=0 (searching) watches, which never carry those fields — and
+	// matches the poller's detection stamp. Only call this on searching
+	// watches; for a resolved PR use the status-sync path instead.
 	now := time.Now().UTC()
 	if tsErr := s.store.UpdatePRWatchTimestamps(ctx, watch.ID, now, nil, "", ""); tsErr != nil {
 		s.logger.Debug("failed to stamp PR watch after detection probe",
