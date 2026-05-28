@@ -53,7 +53,11 @@ type Props = {
   watch: SentryIssueWatch | null;
   workspaceId?: string;
   onCreate: (req: CreateSentryIssueWatchRequest) => Promise<unknown>;
-  onUpdate: (id: string, workspaceId: string, req: UpdateSentryIssueWatchRequest) => Promise<unknown>;
+  onUpdate: (
+    id: string,
+    workspaceId: string,
+    req: UpdateSentryIssueWatchRequest,
+  ) => Promise<unknown>;
 };
 
 function useFormData(workspaceId: string) {
@@ -288,9 +292,7 @@ function FilterFields({ form, setForm }: { form: FormState; setForm: FormSetter 
       </div>
       <div className="space-y-1.5">
         <Label>Query</Label>
-        <p className="text-xs text-muted-foreground">
-          Free-text Sentry search query (optional).
-        </p>
+        <p className="text-xs text-muted-foreground">Free-text Sentry search query (optional).</p>
         <Input
           value={form.query}
           onChange={(e) => setForm((p) => ({ ...p, query: e.target.value }))}
@@ -507,7 +509,10 @@ export function SentryIssueWatchDialog({
     !!form.projectSlug.trim() &&
     !!form.workflowId &&
     !!form.workflowStepId &&
-    !!form.prompt.trim();
+    !!form.prompt.trim() &&
+    Number.isInteger(form.pollInterval) &&
+    form.pollInterval >= 60 &&
+    form.pollInterval <= 3600;
 
   const handleSave = useCallback(async () => {
     setSaving(true);

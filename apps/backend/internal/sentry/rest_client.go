@@ -134,21 +134,40 @@ type projectNode struct {
 	} `json:"organization"`
 }
 
+// listProjectsMaxPages bounds the pagination loop so a misbehaving API or an
+// enormous account can't spin forever. 100 pages × 100/page = 10k projects.
+const listProjectsMaxPages = 100
+
 // ListProjects returns all projects the token can access, across every
-// organization. The settings dropdown filters client-side by DefaultOrgSlug.
+// organization, following Sentry's Link-header cursor pagination (the endpoint
+// returns ~100 per page). The settings dropdown filters client-side by
+// DefaultOrgSlug.
 func (c *RESTClient) ListProjects(ctx context.Context) ([]SentryProject, error) {
-	var nodes []projectNode
-	if _, err := c.do(ctx, "/projects/", nil, &nodes); err != nil {
-		return nil, err
-	}
-	out := make([]SentryProject, 0, len(nodes))
-	for _, n := range nodes {
-		out = append(out, SentryProject{
-			ID:      n.ID,
-			Slug:    n.Slug,
-			Name:    n.Name,
-			OrgSlug: n.Organization.Slug,
-		})
+	out := make([]SentryProject, 0, 32)
+	cursor := ""
+	for page := 0; page < listProjectsMaxPages; page++ {
+		q := url.Values{}
+		if cursor != "" {
+			q.Set("cursor", cursor)
+		}
+		var nodes []projectNode
+		resp, err := c.do(ctx, "/projects/", q, &nodes)
+		if err != nil {
+			return nil, err
+		}
+		for _, n := range nodes {
+			out = append(out, SentryProject{
+				ID:      n.ID,
+				Slug:    n.Slug,
+				Name:    n.Name,
+				OrgSlug: n.Organization.Slug,
+			})
+		}
+		next, hasNext := parseNextCursor(resp.Header.Get("Link"))
+		if !hasNext {
+			break
+		}
+		cursor = next
 	}
 	return out, nil
 }

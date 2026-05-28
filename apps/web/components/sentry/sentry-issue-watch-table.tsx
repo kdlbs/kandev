@@ -21,7 +21,9 @@ type SentryIssueWatchTableProps = {
 
 function formatLastPolled(dateStr?: string | null): string {
   if (!dateStr) return "Never";
-  const diff = Date.now() - new Date(dateStr).getTime();
+  const ts = new Date(dateStr).getTime();
+  if (Number.isNaN(ts)) return "Never";
+  const diff = Date.now() - ts;
   const minutes = Math.floor(diff / 60000);
   if (minutes < 1) return "Just now";
   if (minutes < 60) return `${minutes}m ago`;

@@ -102,7 +102,9 @@ function useDialogState(open: boolean) {
       try {
         const payload = toSearchFilter(filter);
         const res = await searchSentryIssues(payload, nextCursorValue);
-        setIssues(res.issues ?? []);
+        const page = res.issues ?? [];
+        // nextCursorValue set => "Load more": append. Empty => fresh search: replace.
+        setIssues((prev) => (nextCursorValue ? [...prev, ...page] : page));
         setNextCursor(res.nextPageToken);
         setIsLast(res.isLast);
       } catch (err) {
@@ -147,7 +149,13 @@ function useDefaultsFromConfig(
   setProjects: (p: SentryProject[]) => void,
 ) {
   useEffect(() => {
-    if (!open || configLoaded) return;
+    // Reset when the dialog closes so reopening (component stays mounted)
+    // refetches config + projects rather than showing a stale snapshot.
+    if (!open) {
+      setConfigLoaded(false);
+      return;
+    }
+    if (configLoaded) return;
     let cancelled = false;
     (async () => {
       try {
@@ -220,10 +228,7 @@ function FilterTopRow({ state }: { state: DialogState }) {
         onChange={(v) => updateFilter("environment", v)}
         placeholder="production"
       />
-      <PeriodSelect
-        value={filter.statsPeriod}
-        onChange={(v) => updateFilter("statsPeriod", v)}
-      />
+      <PeriodSelect value={filter.statsPeriod} onChange={(v) => updateFilter("statsPeriod", v)} />
     </div>
   );
 }
@@ -263,10 +268,7 @@ function ProjectFilterSelect({ value, projects, onChange }: ProjectFilterSelectP
   return (
     <div className="space-y-1">
       <Label className="text-xs text-muted-foreground">Project</Label>
-      <Select
-        value={value || "__all__"}
-        onValueChange={(v) => onChange(v === "__all__" ? "" : v)}
-      >
+      <Select value={value || "__all__"} onValueChange={(v) => onChange(v === "__all__" ? "" : v)}>
         <SelectTrigger className="h-8 text-xs">
           <SelectValue placeholder="All projects" />
         </SelectTrigger>

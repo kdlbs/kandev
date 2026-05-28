@@ -33,29 +33,38 @@ export function useSentryIssueWatches(workspaceId?: string | null) {
   const scope: string | null = workspaceId ?? null;
 
   useEffect(() => {
-    if (workspaceId === null) return;
     if (lastScope.current !== undefined && lastScope.current !== scope) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- resetting cached list when scope changes
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- resetting cached list when scope changes (incl. → null)
       setItems([]);
       setLoaded(false);
     }
     lastScope.current = scope;
-  }, [workspaceId, scope]);
+  }, [scope]);
 
   useEffect(() => {
     if (workspaceId === null || loaded || loading) return;
+    // ignore guards against a stale response landing after workspaceId changed
+    // mid-flight — otherwise it would set loaded=true and block the new scope.
+    let ignore = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- starting external fetch
     setLoading(true);
     listSentryIssueWatches(workspaceId ?? undefined, { cache: "no-store" })
       .then((res) => {
+        if (ignore) return;
         setItems(res ?? []);
         setLoaded(true);
       })
       .catch(() => {
+        if (ignore) return;
         setItems([]);
         setLoaded(true);
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!ignore) setLoading(false);
+      });
+    return () => {
+      ignore = true;
+    };
   }, [workspaceId, loaded, loading]);
 
   const create = useCallback(async (req: CreateSentryIssueWatchRequest) => {
