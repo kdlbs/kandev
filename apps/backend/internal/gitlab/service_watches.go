@@ -261,11 +261,23 @@ func applyReviewWatchPatch(rw *ReviewWatch, req *UpdateReviewWatchRequest) {
 		rw.Enabled = *req.Enabled
 	}
 	if req.PollIntervalSeconds != nil {
-		rw.PollIntervalSeconds = *req.PollIntervalSeconds
+		rw.PollIntervalSeconds = clampPollInterval(*req.PollIntervalSeconds)
 	}
 	if req.CleanupPolicy != nil {
 		rw.CleanupPolicy = NormalizeCleanupPolicy(*req.CleanupPolicy)
 	}
+}
+
+// clampPollInterval enforces the same bounds the create path applies (0 → default,
+// below minimum → minimum). Used by both review-watch and issue-watch update paths.
+func clampPollInterval(seconds int) int {
+	if seconds <= 0 {
+		return defaultWatchPollIntervalSec
+	}
+	if seconds < minWatchPollIntervalSec {
+		return minWatchPollIntervalSec
+	}
+	return seconds
 }
 
 // DeleteReviewWatch removes a review watch and best-effort reaps any tasks
@@ -528,7 +540,7 @@ func applyIssueWatchPatch(iw *IssueWatch, req *UpdateIssueWatchRequest) {
 		iw.Enabled = *req.Enabled
 	}
 	if req.PollIntervalSeconds != nil {
-		iw.PollIntervalSeconds = *req.PollIntervalSeconds
+		iw.PollIntervalSeconds = clampPollInterval(*req.PollIntervalSeconds)
 	}
 	if req.CleanupPolicy != nil {
 		iw.CleanupPolicy = NormalizeCleanupPolicy(*req.CleanupPolicy)

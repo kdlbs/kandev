@@ -80,7 +80,16 @@ func (s *Service) deleteReviewMRTaskIfTerminal(ctx context.Context, t *ReviewMRT
 		return false
 	}
 	if policy == CleanupPolicyAuto && checker != nil {
-		if authored, _ := checker.HasUserAuthoredMessage(ctx, t.TaskID); authored {
+		// On a transient DB error preserve the task — silently deleting
+		// something the user might have engaged with is a much worse
+		// outcome than leaving an orphan to be reaped on the next sweep.
+		authored, err := checker.HasUserAuthoredMessage(ctx, t.TaskID)
+		if err != nil {
+			s.logger.Warn("check user authored message during cleanup",
+				zap.String("task_id", t.TaskID), zap.Error(err))
+			return false
+		}
+		if authored {
 			return false
 		}
 	}
@@ -156,7 +165,13 @@ func (s *Service) deleteIssueWatchTaskIfTerminal(ctx context.Context, t *IssueWa
 		return false
 	}
 	if policy == CleanupPolicyAuto && checker != nil {
-		if authored, _ := checker.HasUserAuthoredMessage(ctx, t.TaskID); authored {
+		authored, err := checker.HasUserAuthoredMessage(ctx, t.TaskID)
+		if err != nil {
+			s.logger.Warn("check user authored message during cleanup",
+				zap.String("task_id", t.TaskID), zap.Error(err))
+			return false
+		}
+		if authored {
 			return false
 		}
 	}
