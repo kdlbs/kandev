@@ -598,14 +598,28 @@ test.describe("Branch refresh + filter", () => {
     // disabled when we click it.
     await expect(refreshButton).toBeEnabled({ timeout: 10_000 });
 
-    const refreshRequest = testPage.waitForRequest(
-      (req) =>
-        req.url().includes(`/repositories/${seedData.repositoryId}/branches`) &&
-        req.url().includes("refresh=true") &&
-        req.method() === "GET",
-    );
-    await refreshButton.click();
-    await refreshRequest;
+    // Also wait for the branch list inside the popover to render at least one
+    // option. `toBeEnabled` only checks the button itself; there's a small
+    // window where `refreshing` flips to false while the popover is still
+    // hydrating its CommandList, and a click during that window is swallowed
+    // before the refresh handler is wired, so the ?refresh=true request never
+    // fires and `waitForRequest` hangs the full test timeout.
+    await expect(testPage.getByRole("option").first()).toBeVisible({ timeout: 10_000 });
+
+    // Set the listener up before the click — Promise.all guarantees ordering
+    // and the explicit timeout makes a missed request fail fast instead of
+    // hanging until the test-level 60s cap.
+    const [refreshRequest] = await Promise.all([
+      testPage.waitForRequest(
+        (req) =>
+          req.url().includes(`/repositories/${seedData.repositoryId}/branches`) &&
+          req.url().includes("refresh=true") &&
+          req.method() === "GET",
+        { timeout: 15_000 },
+      ),
+      refreshButton.click(),
+    ]);
+    expect(refreshRequest).toBeTruthy();
   });
 
   test("branch filter ranks exact match above substring matches", async ({
