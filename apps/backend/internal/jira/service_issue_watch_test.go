@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/kandev/kandev/internal/integrations/optional"
 )
 
 // withSearchResults returns a fakeClient that always returns the given tickets
@@ -94,11 +96,11 @@ func TestService_IssueWatch_MaxInflightTasks(t *testing.T) {
 		}
 	}
 
-	// PATCH applies the full value unconditionally: positive int sets, nil
-	// clears back to uncapped. Pins the intentional contract.
+	// PATCH is tri-state: present+int sets, present+null clears, absent leaves
+	// the cap unchanged. The absent case must NOT silently drop the cap.
 	cap3 := 3
 	updated, err := f.svc.UpdateIssueWatch(ctx, capped.ID, &UpdateIssueWatchRequest{
-		MaxInflightTasks: &cap3,
+		MaxInflightTasks: optional.Int{Present: true, Value: &cap3},
 	})
 	if err != nil {
 		t.Fatalf("update set cap: %v", err)
@@ -106,8 +108,22 @@ func TestService_IssueWatch_MaxInflightTasks(t *testing.T) {
 	if updated.MaxInflightTasks == nil || *updated.MaxInflightTasks != 3 {
 		t.Fatalf("cap not updated: %v", updated.MaxInflightTasks)
 	}
+
+	// Partial PATCH that omits MaxInflightTasks preserves the existing cap.
+	newPrompt := "changed"
+	preserved, err := f.svc.UpdateIssueWatch(ctx, capped.ID, &UpdateIssueWatchRequest{
+		Prompt: &newPrompt,
+	})
+	if err != nil {
+		t.Fatalf("partial update: %v", err)
+	}
+	if preserved.MaxInflightTasks == nil || *preserved.MaxInflightTasks != 3 {
+		t.Fatalf("partial PATCH wrongly cleared the cap: %v", preserved.MaxInflightTasks)
+	}
+
+	// Explicit null clears back to uncapped.
 	cleared, err := f.svc.UpdateIssueWatch(ctx, capped.ID, &UpdateIssueWatchRequest{
-		MaxInflightTasks: nil,
+		MaxInflightTasks: optional.Int{Present: true, Value: nil},
 	})
 	if err != nil {
 		t.Fatalf("update clear cap: %v", err)
@@ -119,7 +135,7 @@ func TestService_IssueWatch_MaxInflightTasks(t *testing.T) {
 	// Non-positive cap rejected on update.
 	zero := 0
 	if _, err := f.svc.UpdateIssueWatch(ctx, capped.ID, &UpdateIssueWatchRequest{
-		MaxInflightTasks: &zero,
+		MaxInflightTasks: optional.Int{Present: true, Value: &zero},
 	}); !errors.Is(err, ErrInvalidConfig) {
 		t.Errorf("expected ErrInvalidConfig for update cap=0, got %v", err)
 	}

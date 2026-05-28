@@ -3,11 +3,9 @@ package orchestrator
 import (
 	"context"
 	"errors"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -271,10 +269,14 @@ func TestDispatchWatcherEvent_GateBlocksBurstRace(t *testing.T) {
 	}
 
 	// Block CreateIssueTask so the first goroutine holds its slot for the
-	// duration of the test. Without this, the first goroutine could
+	// duration of the burst. Without this, the first goroutine could
 	// complete and release before the next handler enters, masking the bug.
+	// `entered` lets the test deterministically wait until the one admitted
+	// goroutine has reached CreateIssueTask before releasing the gate — no
+	// wall-clock polling.
 	gate := make(chan struct{})
-	creator := &blockingTaskCreator{calls: 0, block: gate}
+	entered := make(chan struct{}, 1)
+	creator := &blockingTaskCreator{block: gate, entered: entered}
 
 	starter := &fakeTaskStarter{}
 	s := &Service{
@@ -292,49 +294,40 @@ func TestDispatchWatcherEvent_GateBlocksBurstRace(t *testing.T) {
 		s.dispatchWatcherEvent(context.Background(), "linear", src, "evt")
 	}
 
-	// Drain the in-flight goroutine.
+	// Exactly one goroutine must reach CreateIssueTask. Wait for it
+	// deterministically, then release the gate so it can finish.
+	<-entered
 	close(gate)
-	// The coordinator runs synchronously inside the goroutine — we don't have
-	// a clean wait primitive here, so wait until the in-flight count drops
-	// back to 0 (release() has run).
-	waitForPendingDrain(t, s, "linear|w-1")
 
-	if creator.calls != 1 {
-		t.Fatalf("expected exactly 1 CreateIssueTask call (gate enforced), got %d", creator.calls)
+	if got := creator.callCount(); got != 1 {
+		t.Fatalf("expected exactly 1 CreateIssueTask call (gate enforced), got %d", got)
 	}
 }
 
-// blockingTaskCreator counts calls and blocks each one on the provided
-// channel until it's closed. Used to keep the first dispatch goroutine
-// holding its pending slot while subsequent events race the gate.
+// blockingTaskCreator counts calls and blocks each one on `block` until it is
+// closed. It signals `entered` (non-blocking) on the first call so a test can
+// wait for the admitted goroutine to reach CreateIssueTask without polling.
 type blockingTaskCreator struct {
-	mu    sync.Mutex
-	calls int
-	block <-chan struct{}
+	mu      sync.Mutex
+	calls   int
+	block   <-chan struct{}
+	entered chan<- struct{}
 }
 
 func (b *blockingTaskCreator) CreateIssueTask(_ context.Context, _ *IssueTaskRequest) (*models.Task, error) {
 	b.mu.Lock()
 	b.calls++
 	b.mu.Unlock()
+	select {
+	case b.entered <- struct{}{}:
+	default:
+	}
 	<-b.block
 	return &models.Task{ID: "t-blocked"}, nil
 }
 
-// waitForPendingDrain spins until the named watch's pending counter reaches 0
-// or the test deadline expires. The pending map deletes empty entries, so we
-// check membership.
-func waitForPendingDrain(t *testing.T, s *Service, key string) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		s.watcherMu.Lock()
-		_, stillPending := s.pendingByWatch[key]
-		s.watcherMu.Unlock()
-		if !stillPending {
-			return
-		}
-		runtime.Gosched()
-	}
-	t.Fatalf("timed out waiting for pending counter to drain for %s", key)
+func (b *blockingTaskCreator) callCount() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.calls
 }

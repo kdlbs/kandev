@@ -5,6 +5,8 @@ import (
 	"errors"
 	"math"
 	"testing"
+
+	"github.com/kandev/kandev/internal/integrations/optional"
 )
 
 func TestService_CreateIssueWatch_AcceptsRichFilters(t *testing.T) {
@@ -173,13 +175,12 @@ func TestService_IssueWatch_MaxInflightTasks(t *testing.T) {
 		}
 	}
 
-	// PATCH sends the full intended value every time: a positive int sets the
-	// cap, JSON null (nil pointer) clears it back to uncapped. This pins the
-	// intentional "applied unconditionally" contract so a future refactor to
-	// the if-nil presence pattern doesn't silently flip it.
+	// PATCH is tri-state: present+int sets the cap, present+null clears it,
+	// absent leaves it unchanged. The absent case is the footgun greptile/the
+	// local reviewer flagged — a partial update must NOT silently drop the cap.
 	cap3 := 3
 	updated, err := f.svc.UpdateIssueWatch(ctx, capped.ID, &UpdateIssueWatchRequest{
-		MaxInflightTasks: &cap3,
+		MaxInflightTasks: optional.Int{Present: true, Value: &cap3},
 	})
 	if err != nil {
 		t.Fatalf("update set cap: %v", err)
@@ -187,8 +188,23 @@ func TestService_IssueWatch_MaxInflightTasks(t *testing.T) {
 	if updated.MaxInflightTasks == nil || *updated.MaxInflightTasks != 3 {
 		t.Fatalf("cap not updated: %v", updated.MaxInflightTasks)
 	}
+
+	// Partial PATCH that omits MaxInflightTasks (Present=false) must preserve
+	// the existing cap of 3 — not reset it to uncapped.
+	newPrompt := "changed"
+	preserved, err := f.svc.UpdateIssueWatch(ctx, capped.ID, &UpdateIssueWatchRequest{
+		Prompt: &newPrompt,
+	})
+	if err != nil {
+		t.Fatalf("partial update: %v", err)
+	}
+	if preserved.MaxInflightTasks == nil || *preserved.MaxInflightTasks != 3 {
+		t.Fatalf("partial PATCH wrongly cleared the cap: %v", preserved.MaxInflightTasks)
+	}
+
+	// Explicit null clears the cap back to uncapped.
 	cleared, err := f.svc.UpdateIssueWatch(ctx, capped.ID, &UpdateIssueWatchRequest{
-		MaxInflightTasks: nil,
+		MaxInflightTasks: optional.Int{Present: true, Value: nil},
 	})
 	if err != nil {
 		t.Fatalf("update clear cap: %v", err)
@@ -200,7 +216,7 @@ func TestService_IssueWatch_MaxInflightTasks(t *testing.T) {
 	// Non-positive cap is rejected on update too.
 	zero := 0
 	if _, err := f.svc.UpdateIssueWatch(ctx, capped.ID, &UpdateIssueWatchRequest{
-		MaxInflightTasks: &zero,
+		MaxInflightTasks: optional.Int{Present: true, Value: &zero},
 	}); !errors.Is(err, ErrInvalidConfig) {
 		t.Errorf("expected ErrInvalidConfig for update cap=0, got %v", err)
 	}

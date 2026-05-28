@@ -4,7 +4,11 @@
 // expose these capabilities to the frontend.
 package jira
 
-import "time"
+import (
+	"time"
+
+	"github.com/kandev/kandev/internal/integrations/optional"
+)
 
 // Auth method identifiers persisted in JiraConfig.AuthMethod.
 const (
@@ -230,5 +234,8 @@ type UpdateIssueWatchRequest struct {
 	Prompt              *string `json:"prompt,omitempty"`
 	Enabled             *bool   `json:"enabled,omitempty"`
 	PollIntervalSeconds *int    `json:"pollIntervalSeconds,omitempty"`
-	MaxInflightTasks    *int    `json:"maxInflightTasks,omitempty"`
+	// MaxInflightTasks is tri-state so a partial PATCH that omits the field
+	// leaves the cap unchanged (a plain *int can't tell "omitted" from
+	// "null"). Absent = unchanged, null = uncapped, positive int = cap.
+	MaxInflightTasks optional.Int `json:"maxInflightTasks"`
 }

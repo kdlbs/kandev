@@ -349,10 +349,10 @@ func applyIssueWatchPatch(w *IssueWatch, req *UpdateIssueWatchRequest) {
 	if req.PollIntervalSeconds != nil {
 		w.PollIntervalSeconds = *req.PollIntervalSeconds
 	}
-	// MaxInflightTasks: JSON null and an omitted field both decode to a
-	// nil *int, so the dialog always sends the full intended value (a
-	// positive int when capped, JSON null when uncapped) and the patch
-	// applies it unconditionally. A curl PATCH that drops the field will
-	// reset the cap to uncapped — accepted for v1.
-	w.MaxInflightTasks = req.MaxInflightTasks
+	// MaxInflightTasks is tri-state (optional.Int): only apply it when the
+	// PATCH actually carried the key, so a partial update that omits it
+	// leaves the cap intact. Present+null clears the cap; present+int sets it.
+	if req.MaxInflightTasks.Present {
+		w.MaxInflightTasks = req.MaxInflightTasks.Value
+	}
 }

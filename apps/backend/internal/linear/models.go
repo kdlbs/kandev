@@ -3,7 +3,11 @@
 // and WebSocket handlers that expose these capabilities to the frontend.
 package linear
 
-import "time"
+import (
+	"time"
+
+	"github.com/kandev/kandev/internal/integrations/optional"
+)
 
 // AuthMethodAPIKey is the only auth method Linear supports today: a Personal
 // API Key sent as the `Authorization` header (no Bearer prefix). The constant
@@ -260,5 +264,8 @@ type UpdateIssueWatchRequest struct {
 	Prompt              *string       `json:"prompt,omitempty"`
 	Enabled             *bool         `json:"enabled,omitempty"`
 	PollIntervalSeconds *int          `json:"pollIntervalSeconds,omitempty"`
-	MaxInflightTasks    *int          `json:"maxInflightTasks,omitempty"`
+	// MaxInflightTasks is tri-state so a partial PATCH that omits the field
+	// leaves the cap unchanged (a plain *int can't tell "omitted" from
+	// "null"). Absent = unchanged, null = uncapped, positive int = cap.
+	MaxInflightTasks optional.Int `json:"maxInflightTasks"`
 }
