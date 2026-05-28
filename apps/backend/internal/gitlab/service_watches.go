@@ -232,6 +232,12 @@ func (s *Service) UpdateReviewWatch(ctx context.Context, id string, req *UpdateR
 	return s.requireStore().UpdateReviewWatch(ctx, rw)
 }
 
+// the ReviewWatch shape (with ReviewScope instead of Labels). The two are
+// kept as separate functions so each domain's fields are explicit; merging
+// them via generics would obscure the per-type validation that lives in
+// CreateXxxWatch.
+//
+//nolint:dupl // structurally similar to applyIssueWatchPatch but operates on
 func applyReviewWatchPatch(rw *ReviewWatch, req *UpdateReviewWatchRequest) {
 	if req.WorkflowID != nil {
 		rw.WorkflowID = *req.WorkflowID
@@ -511,6 +517,7 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 	return s.requireStore().UpdateIssueWatch(ctx, iw)
 }
 
+//nolint:dupl // see applyReviewWatchPatch — same shape, different domain.
 func applyIssueWatchPatch(iw *IssueWatch, req *UpdateIssueWatchRequest) {
 	if req.WorkflowID != nil {
 		iw.WorkflowID = *req.WorkflowID

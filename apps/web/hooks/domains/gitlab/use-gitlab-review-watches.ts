@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef } from "react";
 import {
   listReviewWatches,
   createReviewWatch,
@@ -18,6 +18,11 @@ import { useAppStore } from "@/components/state-provider";
  *   - workspaceId: string         → fetch watches scoped to one workspace
  *   - workspaceId: undefined      → fetch watches across all workspaces
  *   - workspaceId: null           → don't fetch (caller hasn't resolved a workspace yet)
+ *
+ * The internal `loaded` flag lives on the slice and is shared across all
+ * useGitLabReviewWatches instances, so it can't double as a per-workspace
+ * cache key. We track the last-fetched workspace key here and re-fetch when
+ * it changes (workspace switch).
  */
 export function useGitLabReviewWatches(workspaceId?: string | null) {
   const items = useAppStore((state) => state.gitlabReviewWatches.items);
@@ -28,9 +33,12 @@ export function useGitLabReviewWatches(workspaceId?: string | null) {
   const add = useAppStore((state) => state.addGitLabReviewWatch);
   const upd = useAppStore((state) => state.updateGitLabReviewWatchInStore);
   const rm = useAppStore((state) => state.removeGitLabReviewWatch);
+  const lastFetchedRef = useRef<string | null | undefined>(undefined);
 
   useEffect(() => {
-    if (workspaceId === null || loaded || loading) return;
+    if (workspaceId === null || loading) return;
+    if (loaded && lastFetchedRef.current === workspaceId) return;
+    lastFetchedRef.current = workspaceId;
     setLoading(true);
     listReviewWatches(workspaceId ?? undefined, { cache: "no-store" })
       .then((response) => set(response?.watches ?? []))

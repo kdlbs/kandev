@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef } from "react";
 import {
   getActionPresets,
   updateActionPresets,
@@ -9,6 +9,12 @@ import {
 import { useAppStore } from "@/components/state-provider";
 import type { GitLabActionPreset } from "@/lib/types/gitlab";
 
+/**
+ * useGitLabActionPresets fetches the workspace's stored presets (falling back
+ * to defaults server-side) and exposes update/reset helpers. The per-workspace
+ * attempted set guards against an infinite re-fetch loop when the API is
+ * unreachable.
+ */
 export function useGitLabActionPresets(workspaceId: string | null | undefined) {
   const presets = useAppStore((state) =>
     workspaceId ? state.gitlabActionPresets.byWorkspaceId[workspaceId] : null,
@@ -16,9 +22,12 @@ export function useGitLabActionPresets(workspaceId: string | null | undefined) {
   const loading = useAppStore((state) => state.gitlabActionPresets.loading);
   const set = useAppStore((state) => state.setGitLabActionPresets);
   const setLoading = useAppStore((state) => state.setGitLabActionPresetsLoading);
+  const attemptedRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!workspaceId || presets || loading) return;
+    if (attemptedRef.current.has(workspaceId)) return;
+    attemptedRef.current.add(workspaceId);
     setLoading(true);
     getActionPresets(workspaceId)
       .then((res) => {

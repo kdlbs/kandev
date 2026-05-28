@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef } from "react";
 import {
   listIssueWatches,
   createIssueWatch,
@@ -13,6 +13,11 @@ import {
 } from "@/lib/api/domains/gitlab-api";
 import { useAppStore } from "@/components/state-provider";
 
+/**
+ * useGitLabIssueWatches mirrors useGitLabReviewWatches — the per-instance
+ * lastFetchedRef triggers a refetch on workspace switch, working around the
+ * fact that the slice-level `loaded` flag is shared across all consumers.
+ */
 export function useGitLabIssueWatches(workspaceId?: string | null) {
   const items = useAppStore((state) => state.gitlabIssueWatches.items);
   const loaded = useAppStore((state) => state.gitlabIssueWatches.loaded);
@@ -22,9 +27,12 @@ export function useGitLabIssueWatches(workspaceId?: string | null) {
   const add = useAppStore((state) => state.addGitLabIssueWatch);
   const upd = useAppStore((state) => state.updateGitLabIssueWatchInStore);
   const rm = useAppStore((state) => state.removeGitLabIssueWatch);
+  const lastFetchedRef = useRef<string | null | undefined>(undefined);
 
   useEffect(() => {
-    if (workspaceId === null || loaded || loading) return;
+    if (workspaceId === null || loading) return;
+    if (loaded && lastFetchedRef.current === workspaceId) return;
+    lastFetchedRef.current = workspaceId;
     setLoading(true);
     listIssueWatches(workspaceId ?? undefined, { cache: "no-store" })
       .then((response) => set(response?.watches ?? []))
