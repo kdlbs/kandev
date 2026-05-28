@@ -24,6 +24,8 @@ const debugWidths = createDebugLogger("dockview:widths");
  *  few stack frames above `applyLayoutFixups` so we can see WHICH layout path
  *  (env-switch / restore / custom-layout / maximize) recorded a given target.
  *  Debug-only — never called when IS_DEBUG is false. */
+const CALLER_CHAIN_SKIP = new Set(["captureCallerChain", "applyLayoutFixups", "logFixupsCapture"]);
+
 function captureCallerChain(): string {
   const stack = new Error().stack;
   if (!stack) return "-";
@@ -32,7 +34,7 @@ function captureCallerChain(): string {
   for (const line of lines) {
     const m = /at (\S+)/.exec(line);
     const name = m?.[1] ?? "";
-    if (!name || name === "captureCallerChain" || name === "applyLayoutFixups") continue;
+    if (!name || CALLER_CHAIN_SKIP.has(name)) continue;
     const short = name.split(".").pop() ?? name;
     frames.push(short);
     if (frames.length >= 3) break;
@@ -121,7 +123,9 @@ function logFixupsCapture(api: DockviewApi, sv: any): void {
   const sidebarCap = computeSidebarMaxPx();
   const innerW = typeof window !== "undefined" ? window.innerWidth : -1;
   const liveSidebar = sv?.getViewSize?.(0);
-  const liveRight = sv && sv.length >= 2 ? sv.getViewSize(sv.length - 1) : undefined;
+  // Threshold matches captureRightTarget (>= 3): in a 2-column layout the last
+  // child is the center, not a right column, so we don't mislabel it here.
+  const liveRight = sv && sv.length >= 3 ? sv.getViewSize(sv.length - 1) : undefined;
   const r = (n: number | undefined): string =>
     typeof n === "number" ? String(Math.round(n)) : "-";
   debugWidths(
