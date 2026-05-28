@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"go.uber.org/zap"
 
@@ -12,6 +13,19 @@ import (
 	"github.com/kandev/kandev/internal/sentry"
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+// maxSentryTitleRunes bounds the issue-title portion of a generated task
+// title. Sentry titles are derived from error messages / culprits and can be
+// arbitrarily long (unlike Linear/Jira issue titles, which are short upstream),
+// so the producer truncates here rather than deferring to the UI.
+const maxSentryTitleRunes = 80
+
+func truncateSentryTitle(s string) string {
+	if utf8.RuneCountInString(s) <= maxSentryTitleRunes {
+		return s
+	}
+	return string([]rune(s)[:maxSentryTitleRunes-1]) + "…"
+}
 
 // SentryWatcherSource adapts the Sentry integration onto the WatcherSource
 // pipeline. Mirrors LinearWatcherSource so a third integration is a clean
@@ -62,7 +76,7 @@ func (s *SentryWatcherSource) BuildTaskRequest(evt any) (*IssueTaskRequest, erro
 		WorkspaceID:    e.WorkspaceID,
 		WorkflowID:     e.WorkflowID,
 		WorkflowStepID: e.WorkflowStepID,
-		Title:          fmt.Sprintf("[%s] %s — %s", strings.ToUpper(e.Issue.Level), e.Issue.ShortID, e.Issue.Title),
+		Title:          fmt.Sprintf("[%s] %s — %s", strings.ToUpper(e.Issue.Level), e.Issue.ShortID, truncateSentryTitle(e.Issue.Title)),
 		Description:    interpolateSentryPrompt(e.Prompt, e.Issue),
 		Metadata: map[string]interface{}{
 			"sentry_issue_watch_id":         e.IssueWatchID,

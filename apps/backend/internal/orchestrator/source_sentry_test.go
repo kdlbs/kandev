@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/kandev/kandev/internal/sentry"
 )
@@ -143,6 +144,27 @@ func TestSentrySource_BuildTaskRequest_WrongType(t *testing.T) {
 	src := &SentryWatcherSource{}
 	if _, err := src.BuildTaskRequest("not an event"); err == nil {
 		t.Fatal("expected error for wrong event type")
+	}
+}
+
+func TestSentrySource_BuildTaskRequest_TruncatesLongTitle(t *testing.T) {
+	src := &SentryWatcherSource{}
+	evt := sampleSentryEvent()
+	// Sentry titles come from error messages and can be arbitrarily long.
+	evt.Issue.Title = strings.Repeat("é", 500) // multibyte to catch byte-slicing bugs
+	req, err := src.BuildTaskRequest(evt)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// The title portion must be bounded at the producer and stay valid UTF-8.
+	if !utf8.ValidString(req.Title) {
+		t.Errorf("title is not valid UTF-8 after truncation: %q", req.Title)
+	}
+	if !strings.HasSuffix(req.Title, "…") {
+		t.Errorf("expected truncation ellipsis, got %q", req.Title)
+	}
+	if got := utf8.RuneCountInString(req.Title); got > 100 {
+		t.Errorf("title not bounded: %d runes", got)
 	}
 }
 
