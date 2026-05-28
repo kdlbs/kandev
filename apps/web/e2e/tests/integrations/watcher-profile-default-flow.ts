@@ -26,7 +26,12 @@ export async function assertWatcherAgentProfileResetsToStepDefault(testPage: Pag
   // Radix renders the open list in a portal; scope to its listbox so the option
   // count can't drift across other (closed) selects in the dialog.
   await agentTrigger.click();
-  const profileOption = testPage.getByRole("listbox").getByRole("option").nth(1);
+  const options = testPage.getByRole("listbox").getByRole("option");
+  // Sentinel + at least one real profile. A bare sentinel means the settings
+  // fixture seeded no agent profiles — fail with a clear count, not a vague
+  // "element not found" timeout on nth(1) below.
+  await expect.poll(() => options.count()).toBeGreaterThan(1);
+  const profileOption = options.nth(1);
   await expect(profileOption).toBeVisible();
   const profileLabel = ((await profileOption.textContent()) ?? "").trim();
   expect(profileLabel.length).toBeGreaterThan(0);
