@@ -4,10 +4,16 @@ const CI = !!process.env.CI;
 
 export default defineConfig({
   testDir: "./tests",
-  // Single worker per process — CI uses --shard to split tests across matrix
-  // runners (each gets its own 4 vCPUs). Tests run serially within the worker
-  // because the testPage fixture does e2eReset on a shared worker-scoped
-  // backend before each test.
+  // `fullyParallel: true` is required so `--shard=N/M` splits work at the test
+  // level (not the file level). With file-level sharding the suite was wildly
+  // unbalanced: largest shard ran 12 min, smallest 1.5 min, because spec files
+  // vary from 1 to 30+ tests. Test-level sharding flattens that distribution.
+  //
+  // Concurrency is still capped by `workers: 1` below — only one test runs at a
+  // time per shard process, preserving the worker-scoped backend invariant that
+  // the testPage fixture relies on (e2eReset before each test on a shared
+  // backend). `fullyParallel: true` alone does not introduce intra-shard
+  // parallelism unless workers > 1.
   //
   // Isolation strategy: office-routing-* specs are gathered into their own
   // Playwright project (see below) so the worker-scoped backend env
@@ -16,7 +22,7 @@ export default defineConfig({
   // topbar agent name. Each routing spec restarts the backend back to
   // baseline in `afterAll` (see backend.restart() — no args = revert to
   // the fixture's baseline env snapshot).
-  fullyParallel: false,
+  fullyParallel: true,
   forbidOnly: CI,
   retries: CI ? 2 : 0,
   workers: 1,
