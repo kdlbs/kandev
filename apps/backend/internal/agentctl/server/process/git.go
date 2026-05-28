@@ -528,6 +528,11 @@ func (g *GitOperator) Commit(ctx context.Context, message string, stageAll bool,
 		}
 
 		g.workspaceTracker.NotifyGitCommit(commit)
+		// Refresh git status so the UI's "unstaged" list clears immediately.
+		// NotifyGitCommit only updates cachedHeadSHA — without an explicit
+		// refresh, currentStatus keeps the pre-commit "modified" entries until
+		// the next poll tick (which never fires when polling is paused).
+		g.triggerRefresh()
 	}
 
 	return result, nil
