@@ -37,6 +37,9 @@ type SubagentTaskResult struct {
 	DurationMs     int64
 	TotalTokens    int64
 	ToolUseCount   int
+	// ToolUseCountKnown distinguishes a reported zero from "not reported" — the
+	// agent supplied totalToolUseCount (possibly 0) vs the field being absent.
+	ToolUseCountKnown bool
 }
 
 // recognizeSubagent reports whether a tool call spawns a subagent (Task) and
@@ -143,7 +146,10 @@ func claudeSubagentResponse(meta map[string]any, res *SubagentTaskResult) bool {
 	res.Status, _ = resp["status"].(string)
 	res.DurationMs = asInt64(resp["totalDurationMs"])
 	res.TotalTokens = asInt64(resp["totalTokens"])
-	res.ToolUseCount = int(asInt64(resp["totalToolUseCount"]))
+	if count, present := resp["totalToolUseCount"]; present {
+		res.ToolUseCount = int(asInt64(count))
+		res.ToolUseCountKnown = true
+	}
 	return true
 }
 
@@ -162,8 +168,15 @@ func openCodeSubagentMetadata(out map[string]any, res *SubagentTaskResult) bool 
 	if model, ok := md["model"].(map[string]any); ok {
 		provider, _ := model["providerID"].(string)
 		modelID, _ := model["modelID"].(string)
-		if provider != "" || modelID != "" {
+		switch {
+		case provider != "" && modelID != "":
 			res.Model = provider + "/" + modelID
+			found = true
+		case provider != "":
+			res.Model = provider
+			found = true
+		case modelID != "":
+			res.Model = modelID
 			found = true
 		}
 	}
@@ -223,7 +236,8 @@ func applySubagentResult(p *streams.SubagentTaskPayload, res SubagentTaskResult)
 	if res.TotalTokens != 0 {
 		p.TotalTokens = res.TotalTokens
 	}
-	if res.ToolUseCount != 0 {
-		p.ToolUseCount = res.ToolUseCount
+	if res.ToolUseCountKnown {
+		count := res.ToolUseCount
+		p.ToolUseCount = &count
 	}
 }

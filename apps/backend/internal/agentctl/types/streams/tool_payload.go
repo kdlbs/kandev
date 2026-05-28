@@ -253,7 +253,10 @@ type SubagentTaskPayload struct {
 	ChildSessionID string `json:"child_session_id,omitempty"`
 	DurationMs     int64  `json:"duration_ms,omitempty"`
 	TotalTokens    int64  `json:"total_tokens,omitempty"`
-	ToolUseCount   int    `json:"tool_use_count,omitempty"`
+	// ToolUseCount is a pointer so a genuine zero ("0 tools" for a completed
+	// subagent) serializes, while agents that don't report it (OpenCode,
+	// Cursor) stay omitted rather than surfacing a misleading "0 tools" chip.
+	ToolUseCount *int `json:"tool_use_count,omitempty"`
 }
 
 // ShowPlanPayload contains normalized data for plan display operations.

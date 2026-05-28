@@ -1,6 +1,8 @@
 package acp
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -266,11 +268,57 @@ func TestEnrichSubagentResult_Claude(t *testing.T) {
 	if sa.Status != "completed" || sa.AgentID != "agent_abc" {
 		t.Errorf("status/agentId = %q/%q", sa.Status, sa.AgentID)
 	}
-	if sa.DurationMs != 12345 || sa.TotalTokens != 6789 || sa.ToolUseCount != 11 {
-		t.Errorf("metrics = %d/%d/%d", sa.DurationMs, sa.TotalTokens, sa.ToolUseCount)
+	if sa.ToolUseCount == nil || *sa.ToolUseCount != 11 {
+		t.Errorf("ToolUseCount = %v, want 11", sa.ToolUseCount)
+	}
+	if sa.DurationMs != 12345 || sa.TotalTokens != 6789 {
+		t.Errorf("metrics = %d/%d", sa.DurationMs, sa.TotalTokens)
 	}
 	if sa.SubagentType != "general-purpose" {
 		t.Errorf("SubagentType = %q", sa.SubagentType)
+	}
+}
+
+// A completed subagent that ran zero tools must serialize tool_use_count: 0
+// (not drop it), so the UI can render the "0 tools" chip. Regression test for
+// the omitempty + non-zero-guard bug.
+func TestEnrichSubagentResult_ClaudeZeroToolUses(t *testing.T) {
+	n := NewNormalizer()
+	payload := streams.NewSubagentTask("Investigate", "do it", "")
+	meta := map[string]any{"claudeCode": map[string]any{"toolResponse": map[string]any{
+		"status":            "completed",
+		"totalToolUseCount": float64(0),
+	}}}
+	n.EnrichSubagentResult(payload, meta, nil)
+	sa := payload.SubagentTask()
+	if sa.ToolUseCount == nil || *sa.ToolUseCount != 0 {
+		t.Fatalf("ToolUseCount = %v, want a non-nil pointer to 0", sa.ToolUseCount)
+	}
+	out, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(out), `"tool_use_count":0`) {
+		t.Errorf("expected tool_use_count:0 in JSON, got %s", out)
+	}
+}
+
+// Agents that don't report a tool count (OpenCode/Cursor) must leave the field
+// omitted, not emit a misleading "0 tools".
+func TestEnrichSubagentResult_OmitsUnknownToolUseCount(t *testing.T) {
+	n := NewNormalizer()
+	payload := streams.NewSubagentTask("Investigate", "do it", "general-purpose")
+	out := map[string]any{"metadata": map[string]any{"sessionId": "child_1"}}
+	n.EnrichSubagentResult(payload, nil, out)
+	if payload.SubagentTask().ToolUseCount != nil {
+		t.Errorf("ToolUseCount = %v, want nil (unknown)", payload.SubagentTask().ToolUseCount)
+	}
+	j, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(j), "tool_use_count") {
+		t.Errorf("did not expect tool_use_count in JSON, got %s", j)
 	}
 }
 
@@ -289,6 +337,30 @@ func TestEnrichSubagentResult_OpenCode(t *testing.T) {
 	}
 	if sa.Model != "opencode/big-pickle" {
 		t.Errorf("Model = %q", sa.Model)
+	}
+}
+
+// Model must not carry a leading/trailing slash when only one of
+// providerID/modelID is present.
+func TestEnrichSubagentResult_OpenCodePartialModel(t *testing.T) {
+	for _, tc := range []struct {
+		name, provider, modelID, want string
+	}{
+		{"modelOnly", "", "big-pickle", "big-pickle"},
+		{"providerOnly", "opencode", "", "opencode"},
+		{"both", "opencode", "big-pickle", "opencode/big-pickle"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			n := NewNormalizer()
+			payload := streams.NewSubagentTask("d", "p", "general-purpose")
+			rawOutput := map[string]any{"metadata": map[string]any{
+				"model": map[string]any{"providerID": tc.provider, "modelID": tc.modelID},
+			}}
+			n.EnrichSubagentResult(payload, nil, rawOutput)
+			if got := payload.SubagentTask().Model; got != tc.want {
+				t.Errorf("Model = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
