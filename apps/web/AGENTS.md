@@ -69,6 +69,26 @@ lib/api/domains/                    # API clients
 
 Use subscription hooks only; the WS client auto-deduplicates.
 
+## Browser persistence (local/session storage)
+
+All client-side persistence lives in `lib/local-storage.ts`. Do NOT call
+`window.localStorage` / `window.sessionStorage` directly from components.
+
+Conventions enforced by the file:
+
+- One prefix/key constant per concern, kept private to the file.
+- Exposed `wasX` / `markX` (boolean flags) or `getX` / `setX` (values) helpers,
+  each with a `typeof window === "undefined"` SSR guard and a `try/catch`
+  around storage I/O.
+- Per-task / per-session keys: prefix + ID suffix (`${PREFIX}${taskId}`). Add
+  the prefix to `cleanupTaskStorage` so deleted tasks don't leak storage.
+- Components read at mount via lazy `useState(() => getX(...))` and write
+  inline. Use `<Component key={taskId} />` when the stored value depends on a
+  prop that can change.
+- `sessionStorage` for tab-scoped state (dismissals, drafts, dockview layout).
+  `localStorage` for cross-tab prefs (pinned tasks, sidebar views, quick-chat
+  names).
+
 ## Component conventions
 
 - Components: <200 lines, extract to domain components, composition over props.
