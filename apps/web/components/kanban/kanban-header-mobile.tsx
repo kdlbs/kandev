@@ -37,6 +37,7 @@ export function KanbanHeaderMobile({
       <PageTopbar
         title={title}
         subtitle={workspaceLabel}
+        backLabel={title === "Home" ? "" : "Kandev"}
         className="h-10 px-3 py-1"
         variant={title === "Home" ? "root" : "breadcrumb"}
         actions={

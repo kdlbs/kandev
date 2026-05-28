@@ -18,7 +18,47 @@ type AppSidebarNavItemProps = {
   isActive?: boolean;
   /** Suppress the default href-startsWith activation (use for "Home"). */
   exactMatch?: boolean;
+  /** Render as visually disabled and ignore clicks. */
+  disabled?: boolean;
 };
+
+type TriggerProps = {
+  onClick?: () => void;
+  disabled: boolean;
+  baseClass: string;
+  label: string;
+  href?: string;
+  inner: React.ReactNode;
+};
+
+function renderTrigger({ onClick, disabled, baseClass, label, href, inner }: TriggerProps) {
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={disabled ? undefined : onClick}
+        className={baseClass}
+        aria-label={label}
+        aria-disabled={disabled || undefined}
+        disabled={disabled}
+      >
+        {inner}
+      </button>
+    );
+  }
+  if (disabled) {
+    return (
+      <span className={baseClass} aria-label={label} aria-disabled="true">
+        {inner}
+      </span>
+    );
+  }
+  return (
+    <Link href={href ?? "#"} className={baseClass} aria-label={label}>
+      {inner}
+    </Link>
+  );
+}
 
 function isPathActive(pathname: string, href: string | undefined, exactMatch: boolean): boolean {
   if (!href) return false;
@@ -36,14 +76,20 @@ export function AppSidebarNavItem({
   collapsed,
   isActive,
   exactMatch = false,
+  disabled = false,
 }: AppSidebarNavItemProps) {
   const pathname = usePathname();
   const active = isActive ?? isPathActive(pathname, href, exactMatch);
 
   const baseClass = cn(
-    "flex items-center rounded-md text-[13px] font-medium cursor-pointer transition-colors",
+    "flex items-center rounded-md text-[13px] font-medium transition-colors",
     collapsed ? "h-9 w-9 justify-center mx-auto" : "h-9 px-2.5 gap-2.5 w-full text-left",
-    active ? "bg-accent text-foreground" : "text-foreground/80 hover:bg-muted/60",
+    disabled
+      ? "cursor-not-allowed text-foreground/40"
+      : cn(
+          "cursor-pointer",
+          active ? "bg-accent text-foreground" : "text-foreground/80 hover:bg-muted/60",
+        ),
   );
 
   const inner = (
@@ -62,15 +108,7 @@ export function AppSidebarNavItem({
     </>
   );
 
-  const buttonOrLink = onClick ? (
-    <button type="button" onClick={onClick} className={baseClass} aria-label={label}>
-      {inner}
-    </button>
-  ) : (
-    <Link href={href ?? "#"} className={baseClass} aria-label={label}>
-      {inner}
-    </Link>
-  );
+  const buttonOrLink = renderTrigger({ onClick, disabled, baseClass, label, href, inner });
 
   if (!collapsed) return buttonOrLink;
   return (

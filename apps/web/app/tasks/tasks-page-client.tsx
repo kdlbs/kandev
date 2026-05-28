@@ -413,7 +413,6 @@ export function TasksPageClient(props: TasksPageClientProps) {
   return (
     <div className="h-screen w-full flex flex-col bg-background">
       <KanbanHeader
-        onCreateTask={() => s.setCreateDialogOpen(true)}
         workspaceId={s.activeWorkspaceId ?? undefined}
         currentPage="tasks"
         searchQuery={s.searchQuery}

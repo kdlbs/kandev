@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@kandev/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
-import { IconPlus, IconList, IconLayoutKanban, IconMenu2, IconTimeline } from "@tabler/icons-react";
+import { IconList, IconLayoutKanban, IconMenu2, IconTimeline } from "@tabler/icons-react";
 import { PageTopbar } from "@/components/page-topbar";
 import { KanbanDisplayDropdown } from "../kanban-display-dropdown";
 import { ReleaseNotesDialog } from "../release-notes/release-notes-dialog";
@@ -22,7 +22,6 @@ import { useSystemHealthIndicator } from "@/hooks/use-system-health-indicator";
 import type { ComponentProps, RefObject } from "react";
 
 type KanbanHeaderProps = {
-  onCreateTask: () => void;
   workspaceId?: string;
   currentPage?: "kanban" | "tasks";
   searchQuery?: string;
@@ -127,7 +126,6 @@ function useIsHeaderNarrow(ref: RefObject<HTMLElement | null>): boolean {
 }
 
 function TabletHeader({
-  onCreateTask,
   title,
   workspaceLabel,
   searchQuery,
@@ -139,7 +137,6 @@ function TabletHeader({
   showHealthIndicator,
   onOpenHealthDialog,
 }: {
-  onCreateTask: () => void;
   title: string;
   workspaceLabel: string;
   searchQuery: string;
@@ -157,6 +154,7 @@ function TabletHeader({
     <PageTopbar
       title={title}
       subtitle={workspaceLabel}
+      backLabel={isHome ? "" : "Kandev"}
       className={WORKBENCH_TOPBAR_CLASSNAME}
       variant={isHome ? "root" : "breadcrumb"}
       actionsClassName="gap-2"
@@ -171,15 +169,6 @@ function TabletHeader({
               className="hidden md:flex w-48 lg:w-56 [&_input]:h-8"
             />
           )}
-          <Button
-            onClick={onCreateTask}
-            size="lg"
-            className="cursor-pointer"
-            data-testid="create-task-button"
-          >
-            <IconPlus className="h-4 w-4" />
-            <span className="hidden sm:inline ml-1">Add task</span>
-          </Button>
           <TooltipProvider>
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} size="lg" />
           </TooltipProvider>
@@ -204,38 +193,7 @@ function TabletHeader({
   );
 }
 
-function CreateTaskTopbarButton({
-  onCreateTask,
-  compact,
-}: {
-  onCreateTask: () => void;
-  compact: boolean;
-}) {
-  const button = (
-    <Button
-      onClick={onCreateTask}
-      size={compact ? "icon-lg" : "lg"}
-      className="cursor-pointer"
-      data-testid="create-task-button"
-      aria-label={compact ? "Add task" : undefined}
-    >
-      <IconPlus className="h-4 w-4" />
-      {!compact && "Add task"}
-    </Button>
-  );
-
-  if (!compact) return button;
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>{button}</TooltipTrigger>
-      <TooltipContent>Add task</TooltipContent>
-    </Tooltip>
-  );
-}
-
 function DesktopHeader({
-  onCreateTask,
   title,
   workspaceLabel,
   searchQuery,
@@ -246,7 +204,6 @@ function DesktopHeader({
   showHealthIndicator,
   onOpenHealthDialog,
 }: {
-  onCreateTask: () => void;
   title: string;
   workspaceLabel: string;
   searchQuery: string;
@@ -280,13 +237,13 @@ function DesktopHeader({
       ref={headerRef}
       title={title}
       subtitle={workspaceLabel}
+      backLabel={isHome ? "" : "Kandev"}
       center={centerSearch}
       className={WORKBENCH_TOPBAR_CLASSNAME}
       variant={isHome ? "root" : "breadcrumb"}
       actions={
         <>
           {actionsSearch}
-          <CreateTaskTopbarButton onCreateTask={onCreateTask} compact={isNarrow} />
           <TooltipProvider>
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} size="lg" />
           </TooltipProvider>
@@ -322,7 +279,6 @@ function useHeaderViewChange(
 }
 
 export function KanbanHeader({
-  onCreateTask,
   workspaceId,
   currentPage = "kanban",
   searchQuery = "",
@@ -346,7 +302,6 @@ export function KanbanHeader({
     onOpenHealthDialog: healthIndicator.openDialog,
   };
   const sharedSearch = { searchQuery, onSearchChange, isSearchLoading };
-  const sharedActions = { onCreateTask, workspaceId };
 
   const renderHeader = () => {
     if (isMobile) {
@@ -365,7 +320,6 @@ export function KanbanHeader({
       return (
         <>
           <TabletHeader
-            {...sharedActions}
             title={title}
             workspaceLabel={workspaceLabel}
             {...sharedSearch}
@@ -387,7 +341,6 @@ export function KanbanHeader({
     }
     return (
       <DesktopHeader
-        {...sharedActions}
         title={title}
         workspaceLabel={workspaceLabel}
         {...sharedSearch}

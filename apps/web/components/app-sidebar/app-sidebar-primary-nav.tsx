@@ -39,20 +39,14 @@ export function AppSidebarPrimaryNav({ collapsed }: AppSidebarPrimaryNavProps) {
           collapsed={collapsed}
         />
       )}
-      {/* Kanban-mode New Task is reachable from the kanban top bar; the office
-          NewTaskDialog requires an office workspace context, so we only mount
-          the AppSidebar shortcut when office is enabled. */}
-      {officeEnabled && (
-        <>
-          <AppSidebarNavItem
-            icon={IconSquarePlus}
-            label="New Task"
-            onClick={() => setNewTaskOpen(true)}
-            collapsed={collapsed}
-          />
-          <NewTaskDialog open={newTaskOpen} onOpenChange={setNewTaskOpen} />
-        </>
-      )}
+      <AppSidebarNavItem
+        icon={IconSquarePlus}
+        label="New Task"
+        onClick={() => setNewTaskOpen(true)}
+        collapsed={collapsed}
+        disabled={!workspaceId}
+      />
+      {workspaceId && <NewTaskDialog open={newTaskOpen} onOpenChange={setNewTaskOpen} />}
     </div>
   );
 }

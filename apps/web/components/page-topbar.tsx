@@ -119,6 +119,45 @@ function TopbarBreadcrumb({
   );
 }
 
+type TopbarLeadingProps = {
+  variant: "breadcrumb" | "root";
+  backHref: string;
+  backLabel: string;
+  parents: Array<{ label: string; href: string }> | undefined;
+  title: string;
+  subtitle?: string;
+  icon?: ReactNode;
+};
+
+function TopbarLeading({
+  variant,
+  backHref,
+  backLabel,
+  parents,
+  title,
+  subtitle,
+  icon,
+}: TopbarLeadingProps) {
+  if (variant === "root") {
+    if (!backLabel) return null;
+    return (
+      <div className="relative z-10 flex min-w-0 items-center">
+        <span className="truncate text-[15px] font-semibold leading-none">{backLabel}</span>
+      </div>
+    );
+  }
+  return (
+    <TopbarBreadcrumb
+      backHref={backHref}
+      backLabel={backLabel}
+      parents={parents}
+      title={title}
+      subtitle={subtitle}
+      icon={icon}
+    />
+  );
+}
+
 export const PageTopbar = forwardRef<HTMLElement, PageTopbarProps>(function PageTopbar(
   {
     title,
@@ -144,20 +183,15 @@ export const PageTopbar = forwardRef<HTMLElement, PageTopbarProps>(function Page
       className={cn("relative flex h-10 shrink-0 items-center gap-3 border-b px-3 py-1", className)}
     >
       {leading}
-      {variant === "root" ? (
-        <div className="relative z-10 flex min-w-0 items-center">
-          <span className="truncate text-[15px] font-semibold leading-none">{backLabel}</span>
-        </div>
-      ) : (
-        <TopbarBreadcrumb
-          backHref={backHref}
-          backLabel={backLabel}
-          parents={parents}
-          title={title}
-          subtitle={subtitle}
-          icon={icon}
-        />
-      )}
+      <TopbarLeading
+        variant={variant}
+        backHref={backHref}
+        backLabel={backLabel}
+        parents={parents}
+        title={title}
+        subtitle={subtitle}
+        icon={icon}
+      />
       {leftActions && (
         <div className="relative z-10 flex shrink-0 items-center gap-1 [&:empty]:hidden">
           {leftActions}
