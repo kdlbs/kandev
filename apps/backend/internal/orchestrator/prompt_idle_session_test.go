@@ -178,18 +178,28 @@ func TestEnsureSessionRunning_IdleSessionTriggersResume(t *testing.T) {
 			default:
 			}
 			go func(sessID string) {
-				// Poll until we observe STARTING (persistResumeState committed)
-				// then flip — guarantees ordering without a hardcoded sleep.
-				deadline := time.Now().Add(5 * time.Second)
-				for time.Now().Before(deadline) {
-					sess, err := repo.GetTaskSession(context.Background(), sessID)
-					if err == nil && sess != nil && sess.State == models.TaskSessionStateStarting {
-						sess.State = models.TaskSessionStateWaitingForInput
-						sess.UpdatedAt = time.Now().UTC()
-						_ = repo.UpdateTaskSession(context.Background(), sess)
+				// Watch for STARTING (committed by persistResumeState) then flip
+				// — guarantees ordering without time.Sleep. Ticker + select per
+				// AGENTS.md "channel-based synchronization over sleep-based
+				// waits" guidance (testing/synctest doesn't help here because
+				// the SQLite repo runs real I/O goroutines that synctest can't
+				// fully observe as idle).
+				tick := time.NewTicker(5 * time.Millisecond)
+				defer tick.Stop()
+				timeout := time.After(5 * time.Second)
+				for {
+					select {
+					case <-tick.C:
+						sess, err := repo.GetTaskSession(context.Background(), sessID)
+						if err == nil && sess != nil && sess.State == models.TaskSessionStateStarting {
+							sess.State = models.TaskSessionStateWaitingForInput
+							sess.UpdatedAt = time.Now().UTC()
+							_ = repo.UpdateTaskSession(context.Background(), sess)
+							return
+						}
+					case <-timeout:
 						return
 					}
-					time.Sleep(5 * time.Millisecond)
 				}
 			}(req.SessionID)
 			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-resumed-1"}, nil
