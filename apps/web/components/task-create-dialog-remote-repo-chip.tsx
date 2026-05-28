@@ -15,10 +15,7 @@ import {
   sortBranches,
 } from "@/components/task-create-dialog-pill";
 import { scoreBranch } from "@/lib/utils/branch-filter";
-import {
-  useAccessibleRepos,
-  type UseAccessibleReposResult,
-} from "@/hooks/domains/github/use-accessible-repos";
+import type { UseAccessibleReposResult } from "@/hooks/domains/github/use-accessible-repos";
 import type { AccessibleRepo } from "@/lib/api/domains/github-api";
 import type { PRInfo } from "@/hooks/domains/github/use-pr-info-by-url";
 import type { TaskRemoteRepoRow } from "@/components/task-create-dialog-types";
@@ -51,6 +48,17 @@ export type RemoteRepoChipProps = {
    * the task title.
    */
   prInfo?: PRInfo;
+  /**
+   * Shared `useAccessibleRepos` result hoisted up to the chips-row level so
+   * one backend request serves every chip in the row (previously each open
+   * popover fired its own request). Each chip still keeps its own local
+   * search-text state — the hoisted hook only owns the in-flight fetch and
+   * the cache. When two popovers happen to be open at once with different
+   * search texts, both see the same `repos` (the last `search(q)` wins);
+   * that's acceptable because in practice only one popover is open at a
+   * time.
+   */
+  accessibleRepos: UseAccessibleReposResult;
   onURLChange: (
     url: string,
     source: "picker" | "paste",
@@ -79,6 +87,7 @@ export function RemoteRepoChip({
   branches,
   branchesLoading,
   prInfo,
+  accessibleRepos,
   onURLChange,
   onBranchChange,
   onRemove,
@@ -90,7 +99,7 @@ export function RemoteRepoChip({
       data-testid="remote-repo-chip"
       data-remote-url={row.url}
     >
-      <RemoteRepoPill row={row} onURLChange={onURLChange} />
+      <RemoteRepoPill row={row} accessibleRepos={accessibleRepos} onURLChange={onURLChange} />
       <RemoteBranchPill
         url={row.url}
         branch={row.branch}
@@ -144,13 +153,14 @@ function useRowBranchAutoSelect(args: {
 
 function RemoteRepoPill({
   row,
+  accessibleRepos,
   onURLChange,
 }: {
   row: TaskRemoteRepoRow;
+  accessibleRepos: UseAccessibleReposResult;
   onURLChange: RemoteRepoChipProps["onURLChange"];
 }) {
   const [open, setOpen] = useState(false);
-  const accessible = useAccessibleRepos();
   const triggerLabel = useMemo(() => computeTriggerLabel(row), [row]);
   const hasValue = !!row.url;
   return (
@@ -171,7 +181,7 @@ function RemoteRepoPill({
       </PopoverTrigger>
       <PopoverContent className="w-[380px] p-0" align="start" portal={false}>
         <RemoteRepoPopoverContent
-          accessible={accessible}
+          accessible={accessibleRepos}
           onPick={(repo) => {
             onURLChange(`https://github.com/${repo.owner}/${repo.name}`, "picker", {
               provider: "github",
@@ -225,11 +235,14 @@ function RemoteRepoPopoverContent({
   onPaste: (value: string) => void;
 }) {
   const [search, setSearch] = useState("");
-  // Drive the hook's debounced search whenever the user types. The hook
+  // Destructure the stable `search` callback so the effect's dep array is
+  // not invalidated on every render of the parent (the hook's result object
+  // identity changes each render, but `search` is a useCallback). The hook
   // itself owns the 250ms debounce so we just forward the latest value.
+  const { search: triggerSearch } = accessible;
   useEffect(() => {
-    accessible.search(search);
-  }, [search, accessible]);
+    triggerSearch(search);
+  }, [search, triggerSearch]);
   return (
     <div className="flex flex-col">
       <PickerSection

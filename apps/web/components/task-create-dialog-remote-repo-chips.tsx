@@ -9,6 +9,7 @@ import {
   RemoteRepoChip,
   type RemoteRepoChipProps,
 } from "@/components/task-create-dialog-remote-repo-chip";
+import { useAccessibleRepos } from "@/hooks/domains/github/use-accessible-repos";
 
 /**
  * Chip row for the Remote tab. Renders one `RemoteRepoChip` per row in
@@ -45,6 +46,15 @@ export function RemoteRepoChipsRow({
     }
   }, [fs.remoteRepos, fs.branchesByUrl, fs.prInfoByUrl]);
 
+  // Hoist the accessible-repos hook to the row level so a single backend
+  // request serves every chip's popover. Previously each chip called the
+  // hook independently and every open popover fired its own request. Each
+  // chip still keeps its own local search-text state (typing in one
+  // popover doesn't reset another), at the cost of the shared cache: if
+  // two popovers are open with different searches, both see the latest
+  // search's results. In practice only one popover is open at a time.
+  const accessibleRepos = useAccessibleRepos();
+
   const rows = fs.remoteRepos;
   return (
     <div className="flex min-h-9 flex-wrap items-center gap-2" data-testid="remote-repo-chips-row">
@@ -55,6 +65,7 @@ export function RemoteRepoChipsRow({
           branches={fs.branchesByUrl.branches(row.url)}
           branchesLoading={fs.branchesByUrl.loading(row.url)}
           prInfo={fs.prInfoByUrl.info(row.url)}
+          accessibleRepos={accessibleRepos}
           onURLChange={makeURLChange(onUpdateRow, row.key)}
           onBranchChange={(branch) => onUpdateRow(row.key, { branch })}
           onRemove={() => onRemoveRow(row.key)}

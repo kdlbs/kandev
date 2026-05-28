@@ -250,7 +250,8 @@ describe("buildRepositoriesPayload — PR URL inference (per-row prInfoByUrl)", 
   });
 
   // User picked a non-PR-head branch from the dropdown after pasting a PR URL.
-  // We respect their override: send their pick as base, keep PR head as checkout.
+  // We respect their override and drop checkout_branch entirely: their pick is
+  // treated as the base they want to work from, not as a PR-head checkout.
   it("user-overridden base branch beats PR's target when row.branch differs from PR head", () => {
     const url = "https://github.com/owner/repo/pull/42";
     const payload = buildRepositoriesPayload({
@@ -271,7 +272,7 @@ describe("buildRepositoriesPayload — PR URL inference (per-row prInfoByUrl)", 
       {
         repository_id: "",
         base_branch: "develop",
-        checkout_branch: "feature/x",
+        checkout_branch: undefined,
         github_url: url,
       },
     ]);
@@ -304,6 +305,42 @@ describe("buildRepositoriesPayload — PR URL inference (per-row prInfoByUrl)", 
         github_url: url,
       },
     ]);
+  });
+});
+
+describe("buildRepositoriesPayload — checkout_branch gating on PR-auto-selection", () => {
+  // Regression for PR review feedback: checkout_branch was set even when the
+  // user had overridden the row's branch to something other than the PR head.
+  // The contract is: checkout_branch is only meaningful when we're carrying
+  // forward the PR's head as the auto-selection. Any user override drops it.
+  const url = "https://github.com/owner/repo/pull/42";
+  const prInfo = {
+    prHeadBranch: "feature/x",
+    prBaseBranch: "main",
+    prNumber: 42,
+    suggestedTitle: "PR #42: x",
+  };
+
+  it("row.branch === prHeadBranch → payload carries checkout_branch", () => {
+    const payload = buildRepositoriesPayload({
+      useRemote: true,
+      remoteRepos: [{ key: "remote-0", url, branch: "feature/x", source: "paste" }],
+      prInfoByUrl: prInfoStub({ [url]: prInfo }),
+      repositories: [],
+      discoveredRepositories: [],
+    });
+    expect(payload[0]).toMatchObject({ checkout_branch: "feature/x" });
+  });
+
+  it("row.branch !== prHeadBranch → payload has NO checkout_branch", () => {
+    const payload = buildRepositoriesPayload({
+      useRemote: true,
+      remoteRepos: [{ key: "remote-0", url, branch: "develop", source: "paste" }],
+      prInfoByUrl: prInfoStub({ [url]: prInfo }),
+      repositories: [],
+      discoveredRepositories: [],
+    });
+    expect(payload[0]?.checkout_branch).toBeUndefined();
   });
 });
 

@@ -3,6 +3,19 @@ import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import type { DialogFormState, TaskRemoteRepoRow } from "./task-create-dialog-types";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 
+// The chips-row now owns the single `useAccessibleRepos()` call. Stub it so
+// these tests don't hit the network layer; the chip stub below ignores the
+// prop entirely so its exact shape doesn't matter for these assertions.
+vi.mock("@/hooks/domains/github/use-accessible-repos", () => ({
+  useAccessibleRepos: () => ({
+    repos: [],
+    loading: false,
+    unavailable: false,
+    error: null,
+    search: () => undefined,
+  }),
+}));
+
 // Stub out the chip's heavy popover content (we test that separately). The
 // chips-row's only job is to render N chips + the Add button and pipe
 // branchesByUrl.ensure() for non-empty URLs — so the stub just emits a

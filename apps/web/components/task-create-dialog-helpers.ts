@@ -285,7 +285,7 @@ function buildRemoteRepoPayload(opts: {
       return {
         repository_id: "",
         base_branch: baseBranch,
-        checkout_branch: prInfo.prHeadBranch || undefined,
+        checkout_branch: isPrAutoSelection ? prInfo.prHeadBranch || undefined : undefined,
         github_url: url,
       };
     }

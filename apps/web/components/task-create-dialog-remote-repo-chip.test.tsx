@@ -3,9 +3,12 @@ import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import type { Branch } from "@/lib/types/http";
 import type { TaskRemoteRepoRow } from "./task-create-dialog-types";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import type { UseAccessibleReposResult } from "@/hooks/domains/github/use-accessible-repos";
 
-// Mocked hook so the chip's repo-picker popover renders deterministic options
-// (and we can flip `unavailable` to true to assert the "Connect GitHub" banner).
+// Each test passes a stubbed `accessibleRepos` prop to the chip. The hook
+// itself now lives at the chips-row level (see chips-row test); the chip is
+// pure presentational glue over the result. Defaults to an empty/idle state
+// and individual tests override the slice they care about.
 type AccessibleRepo = {
   provider: "github" | "gitlab";
   owner: string;
@@ -15,23 +18,18 @@ type AccessibleRepo = {
   description?: string;
   private: boolean;
 };
-const accessibleReposState = vi.hoisted(
-  (): {
-    value: {
-      repos: AccessibleRepo[];
-      loading: boolean;
-      unavailable: boolean;
-      error: Error | null;
-      search: (q: string) => void;
-    };
-  } => ({
-    value: { repos: [], loading: false, unavailable: false, error: null, search: () => undefined },
-  }),
-);
-
-vi.mock("@/hooks/domains/github/use-accessible-repos", () => ({
-  useAccessibleRepos: () => accessibleReposState.value,
-}));
+function makeAccessible(
+  overrides: Partial<UseAccessibleReposResult> = {},
+): UseAccessibleReposResult {
+  return {
+    repos: [] as AccessibleRepo[],
+    loading: false,
+    unavailable: false,
+    error: null,
+    search: () => undefined,
+    ...overrides,
+  };
+}
 
 import { RemoteRepoChip, computeTriggerLabel } from "./task-create-dialog-remote-repo-chip";
 
@@ -41,13 +39,6 @@ const URL_ACME_SITE = "https://github.com/acme/site";
 
 afterEach(() => {
   cleanup();
-  accessibleReposState.value = {
-    repos: [],
-    loading: false,
-    unavailable: false,
-    error: null,
-    search: () => undefined,
-  };
 });
 
 function row(overrides: Partial<TaskRemoteRepoRow> = {}): TaskRemoteRepoRow {
@@ -63,8 +54,7 @@ const noopRemove = () => undefined;
 
 describe("RemoteRepoChip — write paths", () => {
   it("picker selection writes URL + picker metadata (incl. default_branch) via onURLChange", () => {
-    accessibleReposState.value = {
-      ...accessibleReposState.value,
+    const accessibleRepos = makeAccessible({
       repos: [
         {
           provider: "github",
@@ -75,13 +65,14 @@ describe("RemoteRepoChip — write paths", () => {
           private: false,
         },
       ],
-    };
+    });
     const onURLChange = vi.fn();
     renderInProvider(
       <RemoteRepoChip
         row={row()}
         branches={[]}
         branchesLoading={false}
+        accessibleRepos={accessibleRepos}
         onURLChange={onURLChange}
         onBranchChange={noopBranch}
         onRemove={noopRemove}
@@ -103,6 +94,7 @@ describe("RemoteRepoChip — write paths", () => {
         row={row()}
         branches={[]}
         branchesLoading={false}
+        accessibleRepos={makeAccessible()}
         onURLChange={onURLChange}
         onBranchChange={noopBranch}
         onRemove={noopRemove}
@@ -122,6 +114,7 @@ describe("RemoteRepoChip — write paths", () => {
         row={row()}
         branches={[]}
         branchesLoading={false}
+        accessibleRepos={makeAccessible()}
         onURLChange={onURLChange}
         onBranchChange={noopBranch}
         onRemove={noopRemove}
@@ -141,6 +134,7 @@ describe("RemoteRepoChip — write paths", () => {
         row={row({ url: URL_ACME_SITE })}
         branches={[]}
         branchesLoading={false}
+        accessibleRepos={makeAccessible()}
         onURLChange={vi.fn()}
         onBranchChange={noopBranch}
         onRemove={onRemove}
@@ -157,8 +151,7 @@ describe("RemoteRepoChip — paste/picker race", () => {
     // input's onBlur fires first (focus moves to the option button). Without
     // the guard, blur would commit the typed value AND close the popover,
     // and the subsequent picker click would be dropped.
-    accessibleReposState.value = {
-      ...accessibleReposState.value,
+    const accessibleRepos = makeAccessible({
       repos: [
         {
           provider: "github",
@@ -169,13 +162,14 @@ describe("RemoteRepoChip — paste/picker race", () => {
           private: false,
         },
       ],
-    };
+    });
     const onURLChange = vi.fn();
     renderInProvider(
       <RemoteRepoChip
         row={row()}
         branches={[]}
         branchesLoading={false}
+        accessibleRepos={accessibleRepos}
         onURLChange={onURLChange}
         onBranchChange={noopBranch}
         onRemove={noopRemove}
@@ -205,6 +199,7 @@ describe("RemoteRepoChip — branch pill", () => {
         row={row()}
         branches={[]}
         branchesLoading={false}
+        accessibleRepos={makeAccessible()}
         onURLChange={vi.fn()}
         onBranchChange={noopBranch}
         onRemove={noopRemove}
@@ -224,6 +219,7 @@ describe("RemoteRepoChip — branch pill", () => {
         row={row({ url: URL_ACME_SITE })}
         branches={branches}
         branchesLoading={false}
+        accessibleRepos={makeAccessible()}
         onURLChange={vi.fn()}
         onBranchChange={noopBranch}
         onRemove={noopRemove}
@@ -242,6 +238,7 @@ describe("RemoteRepoChip — branch pill", () => {
         row={row({ url: URL_ACME_SITE, branch: "trunk" })}
         branches={[]}
         branchesLoading={true}
+        accessibleRepos={makeAccessible()}
         onURLChange={vi.fn()}
         onBranchChange={noopBranch}
         onRemove={noopRemove}
@@ -255,8 +252,7 @@ describe("RemoteRepoChip — branch pill", () => {
 
 describe("RemoteRepoChip — option description", () => {
   it("renders the description as a second line when present", () => {
-    accessibleReposState.value = {
-      ...accessibleReposState.value,
+    const accessibleRepos = makeAccessible({
       repos: [
         {
           provider: "github",
@@ -268,12 +264,13 @@ describe("RemoteRepoChip — option description", () => {
           private: false,
         },
       ],
-    };
+    });
     renderInProvider(
       <RemoteRepoChip
         row={row()}
         branches={[]}
         branchesLoading={false}
+        accessibleRepos={accessibleRepos}
         onURLChange={vi.fn()}
         onBranchChange={noopBranch}
         onRemove={noopRemove}
@@ -286,8 +283,7 @@ describe("RemoteRepoChip — option description", () => {
   });
 
   it("omits the description line entirely when description is missing or empty", () => {
-    accessibleReposState.value = {
-      ...accessibleReposState.value,
+    const accessibleRepos = makeAccessible({
       repos: [
         {
           provider: "github",
@@ -307,12 +303,13 @@ describe("RemoteRepoChip — option description", () => {
           private: false,
         },
       ],
-    };
+    });
     renderInProvider(
       <RemoteRepoChip
         row={row()}
         branches={[]}
         branchesLoading={false}
+        accessibleRepos={accessibleRepos}
         onURLChange={vi.fn()}
         onBranchChange={noopBranch}
         onRemove={noopRemove}
@@ -324,13 +321,13 @@ describe("RemoteRepoChip — option description", () => {
 });
 
 describe("RemoteRepoChip — popover content", () => {
-  it("renders the 'Connect GitHub' banner when useAccessibleRepos returns unavailable=true", () => {
-    accessibleReposState.value = { ...accessibleReposState.value, unavailable: true };
+  it("renders the 'Connect GitHub' banner when accessibleRepos.unavailable=true", () => {
     renderInProvider(
       <RemoteRepoChip
         row={row()}
         branches={[]}
         branchesLoading={false}
+        accessibleRepos={makeAccessible({ unavailable: true })}
         onURLChange={vi.fn()}
         onBranchChange={noopBranch}
         onRemove={noopRemove}
@@ -343,8 +340,7 @@ describe("RemoteRepoChip — popover content", () => {
   });
 
   it("renders 'private' badge next to private repo options", () => {
-    accessibleReposState.value = {
-      ...accessibleReposState.value,
+    const accessibleRepos = makeAccessible({
       repos: [
         {
           provider: "github",
@@ -355,12 +351,13 @@ describe("RemoteRepoChip — popover content", () => {
           private: true,
         },
       ],
-    };
+    });
     renderInProvider(
       <RemoteRepoChip
         row={row()}
         branches={[]}
         branchesLoading={false}
+        accessibleRepos={accessibleRepos}
         onURLChange={vi.fn()}
         onBranchChange={noopBranch}
         onRemove={noopRemove}
@@ -383,6 +380,7 @@ describe("RemoteRepoChip — trigger label", () => {
         })}
         branches={[]}
         branchesLoading={false}
+        accessibleRepos={makeAccessible()}
         onURLChange={vi.fn()}
         onBranchChange={noopBranch}
         onRemove={noopRemove}
@@ -397,6 +395,7 @@ describe("RemoteRepoChip — trigger label", () => {
         row={row({ url: "https://github.com/foo/bar", source: "paste" })}
         branches={[]}
         branchesLoading={false}
+        accessibleRepos={makeAccessible()}
         onURLChange={vi.fn()}
         onBranchChange={noopBranch}
         onRemove={noopRemove}
@@ -415,6 +414,7 @@ describe("RemoteRepoChip — per-row branch auto-select", () => {
         row={row({ url: "https://github.com/acme/site/pull/42" })}
         branches={[{ name: "main", type: "remote" }]}
         branchesLoading={false}
+        accessibleRepos={makeAccessible()}
         prInfo={{
           prHeadBranch: "feature/pr-branch",
           prBaseBranch: "main",
@@ -442,6 +442,7 @@ describe("RemoteRepoChip — per-row branch auto-select", () => {
           { name: "develop", type: "remote" },
         ]}
         branchesLoading={false}
+        accessibleRepos={makeAccessible()}
         prInfo={{
           prHeadBranch: "feature/pr-branch",
           prBaseBranch: "main",
@@ -469,6 +470,7 @@ describe("RemoteRepoChip — per-row branch auto-select", () => {
           { name: "develop", type: "remote" },
         ]}
         branchesLoading={false}
+        accessibleRepos={makeAccessible()}
         prInfo={{
           prHeadBranch: "fork-only-branch",
           prBaseBranch: "main",
@@ -482,7 +484,9 @@ describe("RemoteRepoChip — per-row branch auto-select", () => {
     );
     expect(onBranchChange).toHaveBeenCalledWith("fork-only-branch");
   });
+});
 
+describe("RemoteRepoChip — per-row branch auto-select (no PR info)", () => {
   it("falls back to 'main' when there is no PR info and branches have loaded", () => {
     const onBranchChange = vi.fn();
     renderInProvider(
@@ -493,6 +497,7 @@ describe("RemoteRepoChip — per-row branch auto-select", () => {
           { name: "main", type: "remote" },
         ]}
         branchesLoading={false}
+        accessibleRepos={makeAccessible()}
         onURLChange={vi.fn()}
         onBranchChange={onBranchChange}
         onRemove={noopRemove}
@@ -508,6 +513,7 @@ describe("RemoteRepoChip — per-row branch auto-select", () => {
         row={row()}
         branches={[{ name: "main", type: "remote" }]}
         branchesLoading={false}
+        accessibleRepos={makeAccessible()}
         onURLChange={vi.fn()}
         onBranchChange={onBranchChange}
         onRemove={noopRemove}
