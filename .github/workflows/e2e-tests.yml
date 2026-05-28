@@ -38,8 +38,9 @@ jobs:
     name: Build
     runs-on: ubuntu-latest
     # Pre-baked image bundles Go, Node 24, pnpm 9.15.9 — see
-    # .github/docker/ci-base/Dockerfile.
-    container: ghcr.io/kdlbs/kandev-ci:latest
+    # .github/docker/ci-base/Dockerfile. Uses the `build` tag (with Go)
+    # because this job compiles the backend.
+    container: ghcr.io/kdlbs/kandev-ci:build-latest
     timeout-minutes: 10
     # Container jobs default to `sh`; pin to bash for the few shell steps below.
     defaults:
@@ -107,8 +108,11 @@ jobs:
     # `--ipc=host` is required for Chromium: the default container `/dev/shm`
     # is only ~64MiB, which causes tabs to slow to a crawl and renderers to
     # crash mid-test.
+    # Uses the `runtime` tag — no Go toolchain needed; the shards consume the
+    # pre-built backend artifact from the `build` job. ~600 MB smaller pull
+    # than the build image, saves ~20s per shard at startup.
     container:
-      image: ghcr.io/kdlbs/kandev-ci:latest
+      image: ghcr.io/kdlbs/kandev-ci:runtime-latest
       options: --ipc=host
     timeout-minutes: 22
     # Container jobs default to `sh`; pin to bash.
@@ -337,7 +341,8 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     # Pre-baked image bundles Node 24, pnpm 9.15.9, and the Playwright CLI.
-    container: ghcr.io/kdlbs/kandev-ci:latest
+    # `runtime` tag — no Go needed for merging blob reports.
+    container: ghcr.io/kdlbs/kandev-ci:runtime-latest
     timeout-minutes: 5
     # Container jobs default to `sh`; pin to bash.
     defaults:
