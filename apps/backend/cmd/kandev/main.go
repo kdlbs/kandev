@@ -442,6 +442,8 @@ func startAgentInfrastructure(
 	// orchestrator so review/issue watch events get turned into tasks.
 	if services.GitLab != nil {
 		orchestratorSvc.SetGitLabService(services.GitLab)
+		services.GitLab.SetTaskDeleter(&taskDeleterAdapter{svc: services.Task})
+		services.GitLab.SetTaskSessionChecker(&taskSessionCheckerAdapter{repo: repos.Task})
 		glPoller := gitlabpkg.NewPoller(services.GitLab, eventBus, log)
 		glPoller.Start(ctx)
 		addCleanup(func() error { glPoller.Stop(); return nil })

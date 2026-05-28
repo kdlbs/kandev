@@ -56,7 +56,15 @@ func (s *Service) lookupReviewPolicy(ctx context.Context, watchID string) string
 	if err == nil && w != nil {
 		return w.CleanupPolicy
 	}
-	return CleanupPolicyAuto
+	// On transient DB error or genuinely-missing watch, fall back to
+	// CleanupPolicyNever so we never silently delete a task that the user
+	// might still care about. The genuine "watch was deleted" case is
+	// uncommon enough that requiring the user to manually delete the
+	// orphan tasks is the safer trade-off.
+	if err != nil {
+		s.logger.Warn("lookup review watch policy", zap.String("watch_id", watchID), zap.Error(err))
+	}
+	return CleanupPolicyNever
 }
 
 func (s *Service) deleteReviewMRTaskIfTerminal(ctx context.Context, t *ReviewMRTask, policy string, client Client, deleter TaskDeleter, checker TaskSessionChecker) bool {
@@ -133,7 +141,10 @@ func (s *Service) lookupIssuePolicy(ctx context.Context, watchID string) string 
 	if err == nil && w != nil {
 		return w.CleanupPolicy
 	}
-	return CleanupPolicyAuto
+	if err != nil {
+		s.logger.Warn("lookup issue watch policy", zap.String("watch_id", watchID), zap.Error(err))
+	}
+	return CleanupPolicyNever
 }
 
 func (s *Service) deleteIssueWatchTaskIfTerminal(ctx context.Context, t *IssueWatchTask, policy string, client Client, deleter TaskDeleter, checker TaskSessionChecker) bool {

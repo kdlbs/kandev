@@ -48,33 +48,63 @@ func (s *Service) CreateMRWatch(ctx context.Context, sessionID, taskID, reposito
 
 // GetMRWatchBySession fetches the legacy single-repo watch.
 func (s *Service) GetMRWatchBySession(ctx context.Context, sessionID string) (*MRWatch, error) {
-	return s.requireStore().GetMRWatchBySession(ctx, sessionID)
+	store := s.requireStore()
+	if store == nil {
+		return nil, errStoreUnavailable
+	}
+	return store.GetMRWatchBySession(ctx, sessionID)
 }
 
 // GetMRWatchBySessionAndRepo fetches a watch keyed by (session, repo).
 func (s *Service) GetMRWatchBySessionAndRepo(ctx context.Context, sessionID, repositoryID string) (*MRWatch, error) {
-	return s.requireStore().GetMRWatchBySessionAndRepo(ctx, sessionID, repositoryID)
+	store := s.requireStore()
+	if store == nil {
+		return nil, errStoreUnavailable
+	}
+	return store.GetMRWatchBySessionAndRepo(ctx, sessionID, repositoryID)
 }
 
 // ListMRWatchesBySession lists every MR watch on a session.
 func (s *Service) ListMRWatchesBySession(ctx context.Context, sessionID string) ([]*MRWatch, error) {
-	return s.requireStore().ListMRWatchesBySession(ctx, sessionID)
+	store := s.requireStore()
+	if store == nil {
+		return nil, errStoreUnavailable
+	}
+	return store.ListMRWatchesBySession(ctx, sessionID)
 }
 
 // ListMRWatchesByTask lists every MR watch on a task.
 func (s *Service) ListMRWatchesByTask(ctx context.Context, taskID string) ([]*MRWatch, error) {
-	return s.requireStore().ListMRWatchesByTask(ctx, taskID)
+	store := s.requireStore()
+	if store == nil {
+		return nil, errStoreUnavailable
+	}
+	return store.ListMRWatchesByTask(ctx, taskID)
 }
 
 // ListActiveMRWatches returns every MR watch (used by the poller).
 func (s *Service) ListActiveMRWatches(ctx context.Context) ([]*MRWatch, error) {
-	return s.requireStore().ListActiveMRWatches(ctx)
+	store := s.requireStore()
+	if store == nil {
+		return nil, errStoreUnavailable
+	}
+	return store.ListActiveMRWatches(ctx)
 }
 
 // DeleteMRWatch removes a single MR watch.
 func (s *Service) DeleteMRWatch(ctx context.Context, id string) error {
-	return s.requireStore().DeleteMRWatch(ctx, id)
+	store := s.requireStore()
+	if store == nil {
+		return errStoreUnavailable
+	}
+	return store.DeleteMRWatch(ctx, id)
 }
+
+// errStoreUnavailable is returned by Service methods that require the
+// SQLite store to be wired but the runtime didn't manage to create it
+// (table migration failure on boot). Distinct error so callers can render
+// a "GitLab unconfigured" UI instead of "500 internal error".
+var errStoreUnavailable = fmt.Errorf("gitlab store not configured")
 
 // CheckMRWatch polls a watch once: returns the latest MR status and whether
 // the underlying MR moved into a state worth notifying about (new note,
