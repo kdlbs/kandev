@@ -46,6 +46,85 @@ func TestService_CreateIssueWatch_DefaultsAndValidation(t *testing.T) {
 	}
 }
 
+func TestService_IssueWatch_MaxInflightTasks(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+
+	// Default create (no cap) persists NULL → reads back nil (uncapped); the
+	// column default of 5 must not leak through the explicit-NULL INSERT.
+	uncapped, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+		JQL: "project = PROJ",
+	})
+	if err != nil {
+		t.Fatalf("create uncapped: %v", err)
+	}
+	if uncapped.MaxInflightTasks != nil {
+		t.Fatalf("expected nil (uncapped), got %v", *uncapped.MaxInflightTasks)
+	}
+	got, err := f.svc.GetIssueWatch(ctx, uncapped.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.MaxInflightTasks != nil {
+		t.Fatalf("uncapped did not round-trip as nil: %v", *got.MaxInflightTasks)
+	}
+
+	// Positive cap round-trips.
+	cap5 := 5
+	capped, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+		JQL: "project = PROJ", MaxInflightTasks: &cap5,
+	})
+	if err != nil {
+		t.Fatalf("create capped: %v", err)
+	}
+	if capped.MaxInflightTasks == nil || *capped.MaxInflightTasks != 5 {
+		t.Fatalf("cap not persisted: %v", capped.MaxInflightTasks)
+	}
+
+	// Non-positive caps rejected on create.
+	for _, bad := range []int{0, -1} {
+		b := bad
+		if _, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+			WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+			JQL: "project = PROJ", MaxInflightTasks: &b,
+		}); !errors.Is(err, ErrInvalidConfig) {
+			t.Errorf("expected ErrInvalidConfig for cap=%d, got %v", bad, err)
+		}
+	}
+
+	// PATCH applies the full value unconditionally: positive int sets, nil
+	// clears back to uncapped. Pins the intentional contract.
+	cap3 := 3
+	updated, err := f.svc.UpdateIssueWatch(ctx, capped.ID, &UpdateIssueWatchRequest{
+		MaxInflightTasks: &cap3,
+	})
+	if err != nil {
+		t.Fatalf("update set cap: %v", err)
+	}
+	if updated.MaxInflightTasks == nil || *updated.MaxInflightTasks != 3 {
+		t.Fatalf("cap not updated: %v", updated.MaxInflightTasks)
+	}
+	cleared, err := f.svc.UpdateIssueWatch(ctx, capped.ID, &UpdateIssueWatchRequest{
+		MaxInflightTasks: nil,
+	})
+	if err != nil {
+		t.Fatalf("update clear cap: %v", err)
+	}
+	if cleared.MaxInflightTasks != nil {
+		t.Fatalf("expected cap cleared to nil, got %v", *cleared.MaxInflightTasks)
+	}
+
+	// Non-positive cap rejected on update.
+	zero := 0
+	if _, err := f.svc.UpdateIssueWatch(ctx, capped.ID, &UpdateIssueWatchRequest{
+		MaxInflightTasks: &zero,
+	}); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("expected ErrInvalidConfig for update cap=0, got %v", err)
+	}
+}
+
 func TestService_UpdateIssueWatch_PartialPatch(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -213,6 +214,42 @@ func TestAcquireWatcherSlot_NilCounterBypasses(t *testing.T) {
 		t.Fatal("expected nil counter to bypass gate (fail-open)")
 	}
 	release()
+}
+
+// TestAcquireWatcherSlot_ConcurrentBurstRespectsCap fires N goroutines at the
+// gate simultaneously with cap=1 and DB count=0. Exactly one must acquire; the
+// rest must defer. Unlike the sequential dispatch test below, this exercises
+// watcherMu under real contention — run with `-race` to catch a regression
+// that drops the lock. Acquirers hold their slot (never release) so the cap
+// stays saturated for the duration of the burst.
+func TestAcquireWatcherSlot_ConcurrentBurstRespectsCap(t *testing.T) {
+	const goroutines = 64
+	for _, capValue := range []int{1, 5} {
+		counter := newFakeWatcherCounter() // count=0 for the watch
+		s := nopServiceWithCounter(t, counter)
+
+		var acquired int64
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		for i := 0; i < goroutines; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				if _, ok := s.acquireWatcherSlot(context.Background(), "linear", "w-burst", ptrInt(capValue)); ok {
+					atomic.AddInt64(&acquired, 1)
+					// Hold the slot — do NOT release, so the cap stays full.
+				}
+			}()
+		}
+		close(start)
+		wg.Wait()
+
+		if int(acquired) != capValue {
+			t.Fatalf("cap=%d: expected exactly %d acquisitions under %d concurrent callers, got %d",
+				capValue, capValue, goroutines, acquired)
+		}
+	}
 }
 
 // TestDispatchWatcherEvent_GateBlocksBurstRace is the regression test for

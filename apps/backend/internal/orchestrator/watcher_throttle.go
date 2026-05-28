@@ -83,11 +83,11 @@ func watcherSlotKey(integration, watchID string) string {
 // defers. Pending is incremented atomically with the read under watcherMu
 // so a burst of events arriving in the same poll tick cannot collectively
 // read the same stale DB count and all pass.
-func (s *Service) acquireWatcherSlot(ctx context.Context, integration, watchID string, cap *int) (func(), bool) {
+func (s *Service) acquireWatcherSlot(ctx context.Context, integration, watchID string, maxInflight *int) (func(), bool) {
 	watcherDispatchAttemptedTotal.Add(watcherMetricLabel("integration", integration), 1)
 	noop := func() {}
 
-	if cap == nil || *cap <= 0 || watchID == "" {
+	if maxInflight == nil || *maxInflight <= 0 || watchID == "" {
 		return noop, true
 	}
 	if s.watcherTaskCount == nil {
@@ -113,8 +113,8 @@ func (s *Service) acquireWatcherSlot(ctx context.Context, integration, watchID s
 		s.watcherSaturated = make(map[string]bool)
 	}
 	pending := s.pendingByWatch[key]
-	if count+pending >= *cap {
-		s.recordSaturatedLocked(integration, watchID, key, count, pending, *cap)
+	if count+pending >= *maxInflight {
+		s.recordSaturatedLocked(integration, watchID, key, count, pending, *maxInflight)
 		return noop, false
 	}
 	s.recordClearedLocked(integration, watchID, key)
@@ -141,7 +141,7 @@ func (s *Service) releaseFunc(key string) func() {
 // (count + pending) >= cap for this watch, and bumps the deferred counter.
 // Subsequent deferrals during the same saturation window are Debug-only.
 // Must be called with s.watcherMu held.
-func (s *Service) recordSaturatedLocked(integration, watchID, key string, count, pending, cap int) {
+func (s *Service) recordSaturatedLocked(integration, watchID, key string, count, pending, maxInflight int) {
 	watcherDispatchDeferredTotal.Add(watcherMetricLabel("integration", integration), 1)
 	if s.watcherSaturated[key] {
 		s.logger.Debug("watcher throttle: deferring event (cap held)",
@@ -149,7 +149,7 @@ func (s *Service) recordSaturatedLocked(integration, watchID, key string, count,
 			zap.String("watch_id", watchID),
 			zap.Int("count", count),
 			zap.Int("pending", pending),
-			zap.Int("cap", cap))
+			zap.Int("cap", maxInflight))
 		return
 	}
 	s.watcherSaturated[key] = true
@@ -160,7 +160,7 @@ func (s *Service) recordSaturatedLocked(integration, watchID, key string, count,
 		zap.String("watch_id", watchID),
 		zap.Int("count", count),
 		zap.Int("pending", pending),
-		zap.Int("cap", cap))
+		zap.Int("cap", maxInflight))
 }
 
 // recordClearedLocked emits a single Warn when the gate transitions back

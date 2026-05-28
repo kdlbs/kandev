@@ -124,6 +124,88 @@ func TestService_UpdateIssueWatch_PartialPatch(t *testing.T) {
 	}
 }
 
+func TestService_IssueWatch_MaxInflightTasks(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+
+	// Default create (no cap supplied) persists NULL → reads back as nil
+	// (uncapped). The store column default of 5 must NOT leak through the
+	// INSERT path, which names the column explicitly with a NULL bind.
+	uncapped, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+		Filter: SearchFilter{TeamKey: "ENG"},
+	})
+	if err != nil {
+		t.Fatalf("create uncapped: %v", err)
+	}
+	if uncapped.MaxInflightTasks != nil {
+		t.Fatalf("expected nil (uncapped), got %v", *uncapped.MaxInflightTasks)
+	}
+	got, err := f.svc.GetIssueWatch(ctx, uncapped.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.MaxInflightTasks != nil {
+		t.Fatalf("uncapped did not round-trip as nil: %v", *got.MaxInflightTasks)
+	}
+
+	// Create with a positive cap round-trips through the nullable column.
+	cap5 := 5
+	capped, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+		Filter: SearchFilter{TeamKey: "ENG"}, MaxInflightTasks: &cap5,
+	})
+	if err != nil {
+		t.Fatalf("create capped: %v", err)
+	}
+	if capped.MaxInflightTasks == nil || *capped.MaxInflightTasks != 5 {
+		t.Fatalf("cap not persisted: %v", capped.MaxInflightTasks)
+	}
+
+	// Non-positive caps are rejected on create.
+	for _, bad := range []int{0, -1} {
+		b := bad
+		if _, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+			WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+			Filter: SearchFilter{TeamKey: "ENG"}, MaxInflightTasks: &b,
+		}); !errors.Is(err, ErrInvalidConfig) {
+			t.Errorf("expected ErrInvalidConfig for cap=%d, got %v", bad, err)
+		}
+	}
+
+	// PATCH sends the full intended value every time: a positive int sets the
+	// cap, JSON null (nil pointer) clears it back to uncapped. This pins the
+	// intentional "applied unconditionally" contract so a future refactor to
+	// the if-nil presence pattern doesn't silently flip it.
+	cap3 := 3
+	updated, err := f.svc.UpdateIssueWatch(ctx, capped.ID, &UpdateIssueWatchRequest{
+		MaxInflightTasks: &cap3,
+	})
+	if err != nil {
+		t.Fatalf("update set cap: %v", err)
+	}
+	if updated.MaxInflightTasks == nil || *updated.MaxInflightTasks != 3 {
+		t.Fatalf("cap not updated: %v", updated.MaxInflightTasks)
+	}
+	cleared, err := f.svc.UpdateIssueWatch(ctx, capped.ID, &UpdateIssueWatchRequest{
+		MaxInflightTasks: nil,
+	})
+	if err != nil {
+		t.Fatalf("update clear cap: %v", err)
+	}
+	if cleared.MaxInflightTasks != nil {
+		t.Fatalf("expected cap cleared to nil, got %v", *cleared.MaxInflightTasks)
+	}
+
+	// Non-positive cap is rejected on update too.
+	zero := 0
+	if _, err := f.svc.UpdateIssueWatch(ctx, capped.ID, &UpdateIssueWatchRequest{
+		MaxInflightTasks: &zero,
+	}); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("expected ErrInvalidConfig for update cap=0, got %v", err)
+	}
+}
+
 func TestValidateFilterBounds_RejectsNonFiniteAndNegativeEstimates(t *testing.T) {
 	nan := math.NaN()
 	posInf := math.Inf(1)
