@@ -46,7 +46,7 @@ test.describe("Claude-acp Monitor tool", () => {
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // The dedicated Monitor card renders, not the generic tool_call row.
     const monitorCard = session.chat.locator('[data-testid="monitor-card"]').first();
@@ -104,7 +104,7 @@ test.describe("Claude-acp Monitor tool", () => {
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     const card = session.chat.locator('[data-testid="monitor-card"]').first();
     await expect(card).toContainText("1 event");
@@ -143,7 +143,7 @@ test.describe("Claude-acp Monitor tool", () => {
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
     await expect(session.chat.locator('[data-testid="monitor-card"]').first()).toContainText(
       "2 events",
     );
@@ -151,7 +151,7 @@ test.describe("Claude-acp Monitor tool", () => {
     // Reload — SSR + Zustand hydration must reconstitute the card from DB.
     await testPage.reload();
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     const card = session.chat.locator('[data-testid="monitor-card"]').first();
     await expect(card).toBeVisible();
