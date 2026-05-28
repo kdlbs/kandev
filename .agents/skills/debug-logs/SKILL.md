@@ -48,6 +48,7 @@ Key properties:
 - **Register the namespace** in the cheat-sheet docblock at the top of `lib/debug/log.ts`. Future agents triage by reading that list — an unregistered namespace is invisible.
 - **One log per event**, not per render frame. The factory is no-op in prod but allocates a closure per call in dev — still cheap, but per-render-frame logs spam the console and slow devtools.
 - **Guard expensive arg computation** with `if (IS_DEBUG) { ... }`. The `debug()` call itself is free, but JS evaluates args first.
+- **`IS_DEBUG` is true under vitest** (`NODE_ENV === "test"` ≠ `"production"`), so persistent debug branches *execute in tests*. If a debug line — or a helper it calls (e.g. a `formatXSnapshot`) — reaches into a module that a test `vi.mock`s, that mock must export every symbol the debug path touches, or the log throws `No "<symbol>" export is defined on the "..." mock` and turns a green suite red. Adding a `debug()` call to a code path covered by a partial-mock test is enough to trigger this. Fix by completing the mock (add the missing export) or by keeping the debug helper's transitive deps minimal.
 
 ### ✅ Correct — flat primitives as a single object arg
 
