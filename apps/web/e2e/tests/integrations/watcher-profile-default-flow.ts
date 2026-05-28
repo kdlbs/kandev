@@ -23,8 +23,10 @@ export async function assertWatcherAgentProfileResetsToStepDefault(testPage: Pag
   await expect(agentTrigger).toContainText("(use step default)");
 
   // Pick the first real profile — option 0 is the "(use step default)" sentinel.
+  // Radix renders the open list in a portal; scope to its listbox so the option
+  // count can't drift across other (closed) selects in the dialog.
   await agentTrigger.click();
-  const profileOption = testPage.getByRole("option").nth(1);
+  const profileOption = testPage.getByRole("listbox").getByRole("option").nth(1);
   await expect(profileOption).toBeVisible();
   const profileLabel = ((await profileOption.textContent()) ?? "").trim();
   expect(profileLabel.length).toBeGreaterThan(0);
@@ -33,7 +35,7 @@ export async function assertWatcherAgentProfileResetsToStepDefault(testPage: Pag
 
   // Re-select "(use step default)" and confirm the field reverts.
   await agentTrigger.click();
-  await testPage.getByRole("option", { name: "(use step default)" }).click();
+  await testPage.getByRole("listbox").getByRole("option", { name: "(use step default)" }).click();
   await expect(agentTrigger).toContainText("(use step default)");
   await expect(agentTrigger).not.toContainText(profileLabel);
 }

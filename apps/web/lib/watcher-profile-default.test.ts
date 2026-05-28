@@ -10,4 +10,8 @@ describe("resolveProfileId", () => {
     expect(resolveProfileId("agent-profile-123")).toBe("agent-profile-123");
     expect(resolveProfileId("exec-profile-abc")).toBe("exec-profile-abc");
   });
+
+  it("leaves an already-empty value empty (initial/reset state)", () => {
+    expect(resolveProfileId("")).toBe("");
+  });
 });
