@@ -10,25 +10,14 @@ type AppSidebarSectionProps = {
   id: string;
   label: string;
   collapsed: boolean;
-  /** Icon used as the collapsed-mode label. */
   icon: TablerIcon;
   children: React.ReactNode;
-  /** Optional right-aligned action shown in the header when expanded. */
+  /** Optional control rendered between the label and the collapse chevron. */
   headerAction?: React.ReactNode;
-  /**
-   * When true and expanded, the section wrapper + body get `flex-1 min-h-0` so
-   * it fills remaining sidebar height. Parent must be a flex column.
-   */
+  /** Fills remaining sidebar height when expanded. Parent must be a flex column. */
   grow?: boolean;
 };
 
-/**
- * Reusable collapsible section primitive for the AppSidebar.
- *
- * Reads/writes per-section expanded state via the store. When the sidebar is
- * fully collapsed (icon-rail mode) we render the icon as a tooltip target and
- * clicking it expands the sidebar AND the section.
- */
 export function AppSidebarSection({
   id,
   label,
@@ -64,26 +53,35 @@ export function AppSidebarSection({
   }
 
   const growExpanded = grow && expanded;
+  const handleToggle = () => toggleSection(id);
 
   return (
     <div className={cn(growExpanded && "flex-1 min-h-0 flex flex-col")}>
-      <div className="flex items-center justify-between px-2.5 py-1.5 shrink-0">
+      <div className="group/section flex items-center px-2 h-7 shrink-0">
         <button
           type="button"
-          onClick={() => toggleSection(id)}
-          className="flex items-center gap-1 cursor-pointer"
+          onClick={handleToggle}
+          className="flex min-w-0 flex-1 items-center text-left cursor-pointer text-foreground/70 hover:text-foreground transition-colors"
+          aria-expanded={expanded}
         >
-          <IconChevronRight
-            className={cn(
-              "h-3 w-3 text-muted-foreground/60 transition-transform",
-              expanded && "rotate-90",
-            )}
-          />
-          <span className="text-[10px] font-medium uppercase tracking-widest font-mono text-muted-foreground/60">
+          <span className="text-[11px] font-semibold uppercase tracking-wider truncate">
             {label}
           </span>
         </button>
-        {headerAction}
+        {expanded && headerAction && (
+          <div className="shrink-0 mr-1 flex items-center">{headerAction}</div>
+        )}
+        <button
+          type="button"
+          onClick={handleToggle}
+          tabIndex={-1}
+          aria-hidden="true"
+          className="shrink-0 flex h-5 w-5 items-center justify-center text-muted-foreground/60 hover:text-foreground/70 cursor-pointer transition-colors"
+        >
+          <IconChevronRight
+            className={cn("h-3.5 w-3.5 transition-transform", expanded && "rotate-90")}
+          />
+        </button>
       </div>
       {expanded && (
         <div

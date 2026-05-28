@@ -176,6 +176,8 @@ function toSidebarItem(
 type TaskSessionSidebarProps = {
   workspaceId: string | null;
   workflowId: string | null;
+  /** Hide the embedded filter bar when the host surface (e.g. AppSidebar) renders its own. */
+  hideFilterBar?: boolean;
 };
 
 type SidebarItem = Omit<ReturnType<typeof toSidebarItem>, "workflowId"> & { workflowId?: string };
@@ -542,6 +544,7 @@ function useGroupedSidebarView(displayTasks: TaskSwitcherItem[]) {
 
 export const TaskSessionSidebar = memo(function TaskSessionSidebar({
   workspaceId,
+  hideFilterBar,
 }: TaskSessionSidebarProps) {
   const store = useAppStoreApi();
   useRepositories(workspaceId);
@@ -586,7 +589,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
   const { pinnedTaskIds, togglePinnedTask, handleReorderGroup, handleReorderSubtasks } = prefs;
   return (
     <PanelRoot data-testid="task-sidebar">
-      <SidebarFilterBar />
+      {!hideFilterBar && <SidebarFilterBar />}
       <PanelBody className="space-y-4 p-0" data-testid="task-sidebar-scroll">
         <TaskSwitcher
           grouped={grouped}

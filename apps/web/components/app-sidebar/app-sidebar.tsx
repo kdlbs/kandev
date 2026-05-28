@@ -103,11 +103,13 @@ export function AppSidebar() {
           <ProjectsSection collapsed={collapsed} />
           <AgentsSection collapsed={collapsed} />
           <IntegrationsSection collapsed={collapsed} />
+        </div>
+        {/* Tasks is the flex-grow middle section so it absorbs remaining
+            vertical space and scrolls internally; Settings sits below it. */}
+        <TasksSection collapsed={collapsed} />
+        <div className="shrink-0 flex flex-col gap-2 overflow-y-auto">
           <SettingsSection collapsed={collapsed} />
         </div>
-        {/* Kanban is the bottom-most flex-grow section so it absorbs all
-            remaining vertical space and scrolls internally. */}
-        <TasksSection collapsed={collapsed} />
       </nav>
       <AppSidebarFooter collapsed={collapsed} />
       {!collapsed && <AppSidebarResizeHandle onMouseDown={handleResize} />}

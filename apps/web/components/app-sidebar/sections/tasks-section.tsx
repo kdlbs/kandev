@@ -1,36 +1,31 @@
 "use client";
 
-import { IconLayoutKanban } from "@tabler/icons-react";
+import { IconCircleDot } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { TaskSessionSidebar } from "@/components/task/task-session-sidebar";
 import { APP_SIDEBAR_SECTION_IDS } from "../app-sidebar-constants";
 import { AppSidebarSection } from "../app-sidebar-section";
+import { TasksViewPicker } from "./tasks-view-picker";
 
-type KanbanSectionProps = {
+type TasksSectionProps = {
   collapsed: boolean;
 };
 
-/**
- * Workspace kanban task list embedded as the bottom-most AppSidebar section.
- * The wrapper resets the embedded panel's card chrome (background) so it
- * visually integrates with the AppSidebar instead of looking transplanted from
- * its old dockview pane. The container flex-grows to fill the remaining
- * sidebar height; AppSidebar gives it `flex-1 min-h-0`.
- */
-export function TasksSection({ collapsed }: KanbanSectionProps) {
+export function TasksSection({ collapsed }: TasksSectionProps) {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const workflowId = useAppStore((s) => s.kanban.workflowId);
 
   return (
     <AppSidebarSection
       id={APP_SIDEBAR_SECTION_IDS.tasks}
-      label="Kanban"
+      label="Tasks"
       collapsed={collapsed}
-      icon={IconLayoutKanban}
+      icon={IconCircleDot}
+      headerAction={<TasksViewPicker />}
       grow
     >
       <div className="flex-1 min-h-0 -mx-2.5 sidebar-fade-in-2 [&_[data-testid=task-sidebar]]:bg-transparent [&_[data-testid=task-sidebar-scroll]]:bg-transparent">
-        <TaskSessionSidebar workspaceId={workspaceId} workflowId={workflowId} />
+        <TaskSessionSidebar workspaceId={workspaceId} workflowId={workflowId} hideFilterBar />
       </div>
     </AppSidebarSection>
   );
