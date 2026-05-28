@@ -162,7 +162,12 @@ test.describe("Plan panel auto-open + indicator", () => {
       CREATE_PLAN_SCRIPT,
     );
     await expect(planTabLocator(testPage)).toBeVisible({ timeout: 15_000 });
-    await expect(planTabIndicator(testPage)).toBeVisible();
+    // The plan-update WS event arrives separately from the agent's idle
+    // signal — the tab mounts as soon as the panel registers, but the
+    // indicator only flips on once `plan.created_by === "agent"` is in the
+    // store. Match the tab's 15s budget instead of using the default 5s,
+    // which raced the WS push under shard load.
+    await expect(planTabIndicator(testPage)).toBeVisible({ timeout: 15_000 });
 
     // Acknowledge
     await session.clickTab("Plan");

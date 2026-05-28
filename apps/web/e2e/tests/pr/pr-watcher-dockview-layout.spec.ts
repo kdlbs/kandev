@@ -163,7 +163,10 @@ test.describe("PR watcher dockview layout stability", () => {
 
     // Wait for the mock agent to complete and the layout to be stable before toggling
     // plan mode. Without this, an in-flight layout restore could swallow the panel add.
-    await session.idleInput().waitFor({ state: "visible", timeout: 30_000 });
+    // Use `waitForChatIdle` (vs. raw `idleInput().waitFor`) so the helper's
+    // reload-and-retry recovery covers the rare case where the WS-driven idle
+    // signal misses its window under shard pressure.
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // --- Toggle plan mode on task 1 ---
     await session.togglePlanMode();
