@@ -15,8 +15,9 @@ import {
 } from "@kandev/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Textarea } from "@kandev/ui/textarea";
-import { IconInfoCircle, IconTerminal2 } from "@tabler/icons-react";
+import { IconInfoCircle } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
+import { CliModeIcon } from "@/components/cli-mode-icon";
 import { useAppStore } from "@/components/state-provider";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useWorkflows } from "@/hooks/use-workflows";
@@ -122,7 +123,7 @@ const CLEANUP_POLICY_OPTIONS: Array<{ id: CleanupPolicy; label: string; descript
 
 // --- Generic select field with description ---
 
-type SelectFieldItem = { id: string; label: string; cliPassthrough?: boolean };
+type SelectFieldItem = { id: string; label: string; icon?: React.ReactNode };
 
 type SelectFieldProps = {
   label: string;
@@ -154,15 +155,14 @@ function SelectField({
         <SelectContent>
           {items.map((item) => (
             <SelectItem key={item.id} value={item.id}>
-              <span className="flex items-center gap-1.5">
-                <span>{item.label}</span>
-                {item.cliPassthrough && (
-                  <IconTerminal2
-                    className="size-3.5 text-muted-foreground"
-                    title="CLI mode — your prompt will be auto-injected into the terminal"
-                  />
-                )}
-              </span>
+              {item.icon ? (
+                <span className="flex items-center gap-1.5">
+                  <span>{item.label}</span>
+                  {item.icon}
+                </span>
+              ) : (
+                item.label
+              )}
             </SelectItem>
           ))}
         </SelectContent>
@@ -448,7 +448,7 @@ function ProfileFields({
         items={agentProfiles.map((p) => ({
           id: p.id,
           label: p.label,
-          cliPassthrough: p.cli_passthrough,
+          icon: p.cli_passthrough ? <CliModeIcon /> : undefined,
         }))}
       />
       <div className="space-y-1.5">
