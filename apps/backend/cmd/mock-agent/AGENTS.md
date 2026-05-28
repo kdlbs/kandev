@@ -1,0 +1,41 @@
+# mock-agent — scenario library for reproducing agent output locally
+
+Scoped guidance for `apps/backend/cmd/mock-agent/`. The mock agent satisfies the same ACP surface a real agent does, so the rest of the stack (orchestrator, lifecycle manager, agentctl, web UI) sees it as an ordinary agent. It runs in dev/e2e mode behind `KANDEV_MOCK_AGENT=true` (set automatically by the `dev` and `e2e` profiles — see `profiles.yaml`).
+
+## Two ways to drive it
+
+**1. Predefined scenarios — `/e2e:<name>`**
+
+`handler.go` routes any prompt starting with `/e2e:` to `emitPredefinedScenario(e, name)`, which looks `name` up in `scenarioRegistry` (`scenarios.go`). The registry is the single source of truth for scenario names — to add a scenario, add one map entry and one `scenario<Name>(e *emitter)` function.
+
+Friendly aliases live in `handler.go` next to the dispatcher: `/ask-single`, `/ask-multiple`, `/crash`, `/todo`, `/mermaid`, `/markdown`, `/sleep [n]`, `/tool:<name>`, `/subagent`, `/subtask`.
+
+**2. Inline scripts — `e2e:<directive>(...)`**
+
+`script.go` parses prompts starting with `e2e:` (no leading slash) as multi-line scripts. Supported directives include `e2e:message(...)`, `e2e:thinking(...)`, `e2e:tool_use("Name", {...})`, `e2e:tool_result(...)`, `e2e:delay(ms)`, and the MCP-flavoured `e2e:mcp:kandev:<tool>({...})`. Comments start with `#`, blank lines are ignored. Tests live in `script_test.go`.
+
+Use predefined scenarios for anything you want to trigger from the slash menu or replay across sessions; use inline scripts for ad-hoc shapes inside a single E2E spec or manual session.
+
+## Adding a scenario to reproduce a UI rendering bug
+
+When a real-agent message renders poorly (markdown table, tool card, diff panel, plan summary, etc.), the cheapest reliable repro is a mock scenario that emits a representative payload. Pattern:
+
+1. Add `"<your-name>": scenario<YourName>` to `scenarioRegistry` in `scenarios.go`.
+2. Implement `scenario<YourName>(e *emitter)` using the helpers in `emitter.go` — `e.text`, `e.thought`, `e.startTool` / `e.completeTool`, `e.plan`, etc. Keep delays modest (`fixedDelay(100)`) so manual repro feels live but tests stay fast.
+3. Trigger from any task in dev/mock mode by typing `/e2e:<your-name>` as the prompt.
+
+This avoids burning real-agent tokens, gives you a deterministic payload to iterate against, and the scenario stays around as a permanent regression hook — anyone can re-trigger it after the fix.
+
+## Emitter helpers worth knowing
+
+`emitter.go` wraps the ACP `sessionUpdater` with helpers that shield scenarios from SDK plumbing:
+
+- `e.text(s)` / `e.thought(s)` — plain agent message vs reasoning channel.
+- `e.startTool(id, title, kind, input, locs...)` / `e.completeTool(id, output)` — paired tool-call lifecycle.
+- `e.plan(entries)` — ACP plan updates.
+- `e.startMonitorTool(id, taskID, command)` / `e.emitMonitorEvent(taskID, body)` / `e.endMonitorTool(id)` — reproduces the two-frame Monitor wire pattern the kandev ACP adapter recognises. Use these instead of building raw `SessionNotification`s when you need to test the Monitor recogniser path; they embed the correct `_meta.claudeCode.toolName=Monitor` shape.
+- `e.requestPermission(...)` — interactive permission flow for scenarios that need an Allow/Reject decision.
+
+## Tests
+
+`mock_agent_test.go` exercises the top-level handler dispatch. `script_test.go` covers the inline-script parser end-to-end. New scenarios don't typically need a unit test — the assertion is that the scenario name is registered in `scenarioRegistry` and the payload looks right when triggered manually. If a scenario contains conditional logic worth pinning, add a focused test that constructs an emitter with a fake `sessionUpdater` and asserts on the emitted notifications.
