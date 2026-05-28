@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"go.uber.org/goleak"
 )
 
 // kandevTestFixtureEnv activates fixture-binary mode in this test binary.
@@ -22,13 +24,15 @@ import (
 const kandevTestFixtureEnv = "KANDEV_TEST_FIXTURE"
 
 // TestMain branches into fixture-binary mode when the activation env var
-// is set; otherwise it runs the test suite normally.
+// is set; otherwise it runs the test suite normally — wrapped in goleak so
+// the per-process subprocess managers (workspace tracker, PTY pumps, poll
+// loops) surface goroutine leaks here.
 func TestMain(m *testing.M) {
 	if spec := os.Getenv(kandevTestFixtureEnv); spec != "" {
 		runFixture(spec)
 		return
 	}
-	os.Exit(m.Run())
+	goleak.VerifyTestMain(m)
 }
 
 // runFixture executes a whitespace-separated command spec and exits.
