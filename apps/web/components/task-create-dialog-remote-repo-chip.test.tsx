@@ -250,8 +250,13 @@ describe("RemoteRepoChip — branch pill", () => {
   });
 });
 
-describe("RemoteRepoChip — option description", () => {
-  it("renders the description as a second line when present", () => {
+describe("RemoteRepoChip — option layout", () => {
+  it("never renders an option description line, even when the repo has a description", () => {
+    // Inverted from the original "renders description as a second line" test —
+    // the description was dropped from the picker to keep each row compact and
+    // one-line, after the picker switched to client-side filtering over a
+    // single fetch (descriptions added visual noise without aiding the
+    // case-insensitive full_name substring match).
     const accessibleRepos = makeAccessible({
       repos: [
         {
@@ -277,46 +282,58 @@ describe("RemoteRepoChip — option description", () => {
       />,
     );
     fireEvent.click(screen.getByTestId(TRIGGER_TID));
-    expect(screen.getByTestId("remote-repo-option-description").textContent).toContain(
-      "The acme corporate website",
-    );
+    expect(screen.queryByTestId("remote-repo-option-description")).toBeNull();
+    expect(screen.queryByText("The acme corporate website")).toBeNull();
+    // The owner/name line is still rendered.
+    expect(screen.getByText(FULL_NAME)).toBeTruthy();
   });
+});
 
-  it("omits the description line entirely when description is missing or empty", () => {
-    const accessibleRepos = makeAccessible({
-      repos: [
-        {
-          provider: "github",
-          owner: "acme",
-          name: "site",
-          full_name: FULL_NAME,
-          default_branch: "main",
-          private: false,
-        },
-        {
-          provider: "github",
-          owner: "acme",
-          name: "blank",
-          full_name: "acme/blank",
-          default_branch: "main",
-          description: "",
-          private: false,
-        },
-      ],
-    });
+describe("RemoteRepoChip — picker loading state", () => {
+  it("renders an inline spinner while the initial fetch is loading and no repos are yet available", () => {
     renderInProvider(
       <RemoteRepoChip
         row={row()}
         branches={[]}
         branchesLoading={false}
-        accessibleRepos={accessibleRepos}
+        accessibleRepos={makeAccessible({ loading: true })}
         onURLChange={vi.fn()}
         onBranchChange={noopBranch}
         onRemove={noopRemove}
       />,
     );
     fireEvent.click(screen.getByTestId(TRIGGER_TID));
-    expect(screen.queryByTestId("remote-repo-option-description")).toBeNull();
+    const loadingNode = screen.getByTestId("remote-repo-picker-loading");
+    expect(loadingNode.textContent).toContain("Loading repositories");
+  });
+
+  it("does NOT render the spinner once repos have loaded (even if loading flips true again later)", () => {
+    renderInProvider(
+      <RemoteRepoChip
+        row={row()}
+        branches={[]}
+        branchesLoading={false}
+        accessibleRepos={makeAccessible({
+          loading: true,
+          repos: [
+            {
+              provider: "github",
+              owner: "acme",
+              name: "site",
+              full_name: FULL_NAME,
+              default_branch: "main",
+              private: false,
+            },
+          ],
+        })}
+        onURLChange={vi.fn()}
+        onBranchChange={noopBranch}
+        onRemove={noopRemove}
+      />,
+    );
+    fireEvent.click(screen.getByTestId(TRIGGER_TID));
+    expect(screen.queryByTestId("remote-repo-picker-loading")).toBeNull();
+    expect(screen.getByText(FULL_NAME)).toBeTruthy();
   });
 });
 

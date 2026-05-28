@@ -59,19 +59,36 @@ func clampAccessibleReposLimit(limit int) int {
 // skipped — the picker UI gets a partial result rather than nothing when one
 // of N orgs is temporarily failing. Total failure (every source errored or
 // ctx canceled) still surfaces as an error.
+//
+// Cache write policy: only fully successful fan-outs are cached. If any
+// source errored (rate limit, transient 5xx, etc.), the partial result is
+// returned to the caller but NOT written to the cache — the next call
+// re-fans out so a recovering source can contribute. Caching partial
+// failures was a footgun in practice: rate-limited org searches would
+// poison the cache for 60s with a result missing every org repo, and the
+// picker would render "No repositories found" even for repos the user
+// definitely has access to.
 func (s *Service) ListAccessibleRepos(ctx context.Context, query string, limit int) ([]GitHubRepo, error) {
 	if s.client == nil {
 		return nil, ErrNoClient
 	}
 	limit = clampAccessibleReposLimit(limit)
 	key := accessibleReposCacheKey(query, limit)
-	v, err := s.accessibleReposCache.doOrFetch(key, func() (any, error) {
-		return s.fetchAccessibleRepos(ctx, query, limit)
-	})
+	// Cache lookup is best-effort: a previous fully-successful fetch may have
+	// populated the entry. On miss we fan out directly (no singleflight here
+	// — the per-source caches above absorb concurrent traffic, and we need
+	// the post-fetch `hadErrors` signal to decide whether to write back).
+	if v, ok := s.accessibleReposCache.get(key); ok {
+		return v.([]GitHubRepo), nil
+	}
+	repos, hadErrors, err := s.fetchAccessibleRepos(ctx, query, limit)
 	if err != nil {
 		return nil, err
 	}
-	return v.([]GitHubRepo), nil
+	if !hadErrors {
+		s.accessibleReposCache.set(key, repos)
+	}
+	return repos, nil
 }
 
 // accessibleReposCacheKey composes a cache key with length-prefixed string
@@ -124,10 +141,15 @@ func (s *Service) ClearAccessibleReposCaches() {
 // Per-source errors are logged and the source contributes zero repos; the
 // call returns an error only when ErrNoClient surfaces, the context is
 // canceled, or every source failed.
-func (s *Service) fetchAccessibleRepos(ctx context.Context, query string, limit int) ([]GitHubRepo, error) {
+//
+// The second return value (`hadErrors`) is true when at least one non-fatal
+// source errored (the partial result was still returned). ListAccessibleRepos
+// uses it to skip the cache write so a recovering source can contribute on
+// the next call instead of being shadowed by a 60s stale-cache.
+func (s *Service) fetchAccessibleRepos(ctx context.Context, query string, limit int) ([]GitHubRepo, bool, error) {
 	orgs, err := s.cachedListUserOrgs(ctx)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	// Slot 0 is reserved for the authenticated user's own repos; slots 1..n
 	// hold the per-org search results, indexed by the org's position in
@@ -177,12 +199,12 @@ func (s *Service) fetchAccessibleRepos(ctx context.Context, query string, limit 
 	}
 	wg.Wait()
 	if fatalErr != nil {
-		return nil, fatalErr
+		return nil, false, fatalErr
 	}
 	if sourceCount > 0 && failedCount == sourceCount {
-		return nil, fmt.Errorf("all repo sources failed")
+		return nil, true, fmt.Errorf("all repo sources failed")
 	}
-	return mergeDedupeSortRepos(results, limit), nil
+	return mergeDedupeSortRepos(results, limit), failedCount > 0, nil
 }
 
 // mergeDedupeSortRepos collapses the parallel fan-out results into a single

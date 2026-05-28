@@ -323,6 +323,91 @@ func TestListAccessibleRepos_PartialFailure_BestEffort(t *testing.T) {
 	}
 }
 
+// TestListAccessibleRepos_PartialFailure_NotCached verifies the partial-result
+// caching footgun is closed: if ANY source errored (rate limit, transient
+// 5xx, etc.), the merged result is returned to the caller but NOT written to
+// the cache. The next call must re-fan out so a recovering source can
+// contribute, instead of being shadowed by a 60s stale-cache entry that
+// mistakenly excludes its repos.
+//
+// Real-world incident: user had a repo "kdlbs/kandev" under an org. The org
+// search rate-limited, the user-repos endpoint legitimately returned 0
+// matches (it can't see org repos), the partial result (empty) was cached for
+// 60s, and the picker rendered "No repositories found" for the next minute
+// even after the rate limit cleared.
+func TestListAccessibleRepos_PartialFailure_NotCached(t *testing.T) {
+	sc := &accessibleReposStubClient{
+		orgs: []GitHubOrg{{Login: "broken"}},
+		userRepos: []GitHubRepo{
+			{FullName: "u/own", Owner: "u", Name: "own"},
+		},
+		errByOrg: map[string]error{
+			"broken": errors.New("simulated rate limit"),
+		},
+	}
+	svc := newAccessibleReposTestService(sc)
+
+	// First call: partial success — user-repos returns, org errors.
+	got1, err := svc.ListAccessibleRepos(context.Background(), "", 50)
+	if err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	if len(got1) != 1 || got1[0].FullName != "u/own" {
+		t.Fatalf("first call got %v, want [u/own]", got1)
+	}
+	if got := sc.searchOrgsCalls.Load(); got != 1 {
+		t.Fatalf("first call SearchOrgRepos = %d, want 1", got)
+	}
+	if got := sc.listUserCalls.Load(); got != 1 {
+		t.Fatalf("first call ListUserRepos = %d, want 1", got)
+	}
+
+	// Second call MUST re-fan out (cache miss) because the previous result
+	// was a partial failure and should not have been cached.
+	got2, err := svc.ListAccessibleRepos(context.Background(), "", 50)
+	if err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if len(got2) != 1 || got2[0].FullName != "u/own" {
+		t.Fatalf("second call got %v, want [u/own]", got2)
+	}
+	if got := sc.searchOrgsCalls.Load(); got != 2 {
+		t.Errorf("second call SearchOrgRepos = %d, want 2 (cache miss expected)", got)
+	}
+	if got := sc.listUserCalls.Load(); got != 2 {
+		t.Errorf("second call ListUserRepos = %d, want 2 (cache miss expected)", got)
+	}
+}
+
+// TestListAccessibleRepos_FullSuccess_IsCached verifies the cache write path
+// is intact when every source succeeds — a guard against accidentally turning
+// off caching entirely while fixing the partial-failure case.
+func TestListAccessibleRepos_FullSuccess_IsCached(t *testing.T) {
+	sc := &accessibleReposStubClient{
+		orgs: []GitHubOrg{{Login: "acme"}},
+		userRepos: []GitHubRepo{
+			{FullName: "u/own", Owner: "u", Name: "own"},
+		},
+		repoByOrg: map[string][]GitHubRepo{
+			"acme": {{FullName: "acme/widget", Owner: "acme", Name: "widget"}},
+		},
+	}
+	svc := newAccessibleReposTestService(sc)
+
+	if _, err := svc.ListAccessibleRepos(context.Background(), "", 50); err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	if _, err := svc.ListAccessibleRepos(context.Background(), "", 50); err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if got := sc.searchOrgsCalls.Load(); got != 1 {
+		t.Errorf("SearchOrgRepos = %d, want 1 (second call should hit cache)", got)
+	}
+	if got := sc.listUserCalls.Load(); got != 1 {
+		t.Errorf("ListUserRepos = %d, want 1 (second call should hit cache)", got)
+	}
+}
+
 // TestListAccessibleRepos_AllSourcesFail verifies the call DOES error when
 // every fan-out source returns an error — partial failure is best-effort, but
 // "nothing worked" must surface so the picker can show an error state.

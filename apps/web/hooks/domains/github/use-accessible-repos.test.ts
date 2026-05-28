@@ -24,91 +24,141 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function makeRepo(name: string) {
+function makeRepo(name: string, owner: string = "acme") {
   return {
     provider: "github" as const,
-    owner: "acme",
+    owner,
     name,
-    full_name: `acme/${name}`,
+    full_name: `${owner}/${name}`,
     default_branch: "main",
     private: false,
   };
 }
 
-describe("useAccessibleRepos — fetching & debouncing", () => {
-  it("fetches once on mount for the initial empty query", async () => {
+describe("useAccessibleRepos — initial fetch", () => {
+  it("fetches once on mount with limit=100 and an empty query", async () => {
     fetchAccessibleReposMock.mockResolvedValueOnce([makeRepo("site"), makeRepo("api")]);
 
     const { result } = renderHook(() => useAccessibleRepos());
 
     await waitFor(() => expect(result.current.repos).toHaveLength(2));
     expect(fetchAccessibleReposMock).toHaveBeenCalledTimes(1);
+    const args = fetchAccessibleReposMock.mock.calls[0]![0] as { q?: string; limit?: number };
+    expect(args.q).toBeUndefined();
+    expect(args.limit).toBe(100);
     expect(result.current.loading).toBe(false);
     expect(result.current.error).toBeNull();
     expect(result.current.unavailable).toBe(false);
   });
 
-  it("debounces and coalesces rapid search() calls into a single fetch", async () => {
-    fetchAccessibleReposMock.mockResolvedValue([makeRepo("first")]);
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+  it("reports loading=true while the initial fetch is in flight", async () => {
+    let resolve: ((repos: ReturnType<typeof makeRepo>[]) => void) | undefined;
+    fetchAccessibleReposMock.mockImplementationOnce(
+      () =>
+        new Promise((res) => {
+          resolve = res;
+        }),
+    );
 
     const { result } = renderHook(() => useAccessibleRepos());
 
-    // Initial fetch settles immediately.
+    expect(result.current.loading).toBe(true);
+    expect(result.current.repos).toEqual([]);
+
     await act(async () => {
+      resolve!([makeRepo("foo")]);
       await Promise.resolve();
     });
 
-    fetchAccessibleReposMock.mockClear();
-    fetchAccessibleReposMock.mockResolvedValue([makeRepo("foo")]);
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.repos).toEqual([makeRepo("foo")]);
+  });
+});
+
+describe("useAccessibleRepos — client-side filtering", () => {
+  it("filters by case-insensitive substring against full_name without re-fetching", async () => {
+    fetchAccessibleReposMock.mockResolvedValueOnce([
+      makeRepo("kandev", "kdlbs"),
+      makeRepo("widget", "acme"),
+      makeRepo("api", "acme"),
+    ]);
+
+    const { result } = renderHook(() => useAccessibleRepos());
+    await waitFor(() => expect(result.current.repos).toHaveLength(3));
+    expect(fetchAccessibleReposMock).toHaveBeenCalledTimes(1);
+
+    act(() => result.current.search("kandev"));
+    await waitFor(() =>
+      expect(result.current.repos.map((r) => r.full_name)).toEqual(["kdlbs/kandev"]),
+    );
+
+    // Case-insensitive.
+    act(() => result.current.search("KDLBS"));
+    await waitFor(() =>
+      expect(result.current.repos.map((r) => r.full_name)).toEqual(["kdlbs/kandev"]),
+    );
+
+    // Matches against owner OR name (substring against full_name).
+    act(() => result.current.search("acme/"));
+    await waitFor(() =>
+      expect(result.current.repos.map((r) => r.full_name).sort()).toEqual([
+        "acme/api",
+        "acme/widget",
+      ]),
+    );
+
+    // Subsequent search() calls trigger ZERO additional fetches.
+    expect(fetchAccessibleReposMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("empty / whitespace query returns the full list", async () => {
+    fetchAccessibleReposMock.mockResolvedValueOnce([makeRepo("a"), makeRepo("b")]);
+
+    const { result } = renderHook(() => useAccessibleRepos());
+    await waitFor(() => expect(result.current.repos).toHaveLength(2));
+
+    act(() => result.current.search("foo"));
+    await waitFor(() => expect(result.current.repos).toHaveLength(0));
+
+    act(() => result.current.search("   "));
+    await waitFor(() => expect(result.current.repos).toHaveLength(2));
+    expect(fetchAccessibleReposMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("repeated identical search() is idempotent (no extra fetches, stable result)", async () => {
+    fetchAccessibleReposMock.mockResolvedValueOnce([makeRepo("foo"), makeRepo("bar")]);
+
+    const { result } = renderHook(() => useAccessibleRepos());
+    await waitFor(() => expect(result.current.repos).toHaveLength(2));
+
+    act(() => result.current.search("foo"));
+    await waitFor(() => expect(result.current.repos).toHaveLength(1));
+    act(() => result.current.search("foo"));
+    act(() => result.current.search("foo"));
+    expect(result.current.repos.map((r) => r.full_name)).toEqual(["acme/foo"]);
+    expect(fetchAccessibleReposMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rapid search() calls do NOT trigger any backend requests", async () => {
+    fetchAccessibleReposMock.mockResolvedValueOnce([makeRepo("foo")]);
+
+    const { result } = renderHook(() => useAccessibleRepos());
+    await waitFor(() => expect(result.current.repos).toHaveLength(1));
 
     act(() => {
       result.current.search("f");
       result.current.search("fo");
       result.current.search("foo");
+      result.current.search("fooo");
+      result.current.search("");
     });
 
-    // Inside the debounce window: no fetch yet.
-    expect(fetchAccessibleReposMock).not.toHaveBeenCalled();
-
-    await act(async () => {
-      vi.advanceTimersByTime(260);
-      await Promise.resolve();
-    });
-
+    // Only the original mount fetch ever happened.
     expect(fetchAccessibleReposMock).toHaveBeenCalledTimes(1);
-    const lastCall = fetchAccessibleReposMock.mock.calls.at(-1)!;
-    expect((lastCall[0] as { q?: string }).q).toBe("foo");
-  });
-
-  it("aborts the in-flight fetch when search() switches to a new query", async () => {
-    let firstAborted = false;
-    fetchAccessibleReposMock.mockImplementationOnce(
-      (opts: { signal?: AbortSignal }) =>
-        new Promise((_resolve, reject) => {
-          opts.signal?.addEventListener("abort", () => {
-            firstAborted = true;
-            reject(new DOMException("Aborted", "AbortError"));
-          });
-        }),
-    );
-
-    const { result } = renderHook(() => useAccessibleRepos("foo"));
-
-    // Wait for the debounced fetch to start.
-    await waitFor(() => expect(fetchAccessibleReposMock).toHaveBeenCalledTimes(1));
-
-    fetchAccessibleReposMock.mockResolvedValueOnce([makeRepo("bar")]);
-    act(() => {
-      result.current.search("bar");
-    });
-
-    await waitFor(() => expect(firstAborted).toBe(true));
-    await waitFor(() => expect(result.current.repos).toEqual([makeRepo("bar")]));
   });
 });
 
-describe("useAccessibleRepos — errors, cache & unmount", () => {
+describe("useAccessibleRepos — errors & unmount", () => {
   it("surfaces GitHubUnavailableError as unavailable: true (and not error)", async () => {
     fetchAccessibleReposMock.mockRejectedValueOnce(new GitHubUnavailableError("nope"));
 
@@ -128,67 +178,10 @@ describe("useAccessibleRepos — errors, cache & unmount", () => {
     await waitFor(() => expect(result.current.error).toBeInstanceOf(Error));
     expect(result.current.unavailable).toBe(false);
     expect(result.current.loading).toBe(false);
-  });
-
-  it("clears stale repos when a follow-up query errors", async () => {
-    // First query succeeds and populates repos. The follow-up query errors —
-    // the UI must NOT keep showing the previous query's repos next to the
-    // new query's error banner.
-    fetchAccessibleReposMock.mockResolvedValueOnce([makeRepo("foo-1"), makeRepo("foo-2")]);
-
-    const { result } = renderHook(() => useAccessibleRepos("foo"));
-    await waitFor(() => expect(result.current.repos).toHaveLength(2));
-
-    fetchAccessibleReposMock.mockRejectedValueOnce(new Error("boom"));
-    act(() => result.current.search("bar"));
-
-    await waitFor(() => expect(result.current.error).toBeInstanceOf(Error));
     expect(result.current.repos).toEqual([]);
-    expect(result.current.unavailable).toBe(false);
-    expect(result.current.loading).toBe(false);
   });
 
-  it("caches results by query — repeating a query does not re-fetch", async () => {
-    fetchAccessibleReposMock.mockResolvedValueOnce([makeRepo("initial")]);
-
-    const { result } = renderHook(() => useAccessibleRepos());
-
-    await waitFor(() => expect(result.current.repos).toHaveLength(1));
-
-    fetchAccessibleReposMock.mockResolvedValueOnce([makeRepo("foo-1")]);
-    act(() => result.current.search("foo"));
-    await waitFor(() => expect(result.current.repos).toEqual([makeRepo("foo-1")]));
-    expect(fetchAccessibleReposMock).toHaveBeenCalledTimes(2);
-
-    // Switch away and back — second 'foo' must reuse the cache.
-    fetchAccessibleReposMock.mockResolvedValueOnce([makeRepo("bar-1")]);
-    act(() => result.current.search("bar"));
-    await waitFor(() => expect(result.current.repos).toEqual([makeRepo("bar-1")]));
-    expect(fetchAccessibleReposMock).toHaveBeenCalledTimes(3);
-
-    act(() => result.current.search("foo"));
-    // Cache hit: no new fetch and the previous foo result is restored synchronously.
-    await waitFor(() => expect(result.current.repos).toEqual([makeRepo("foo-1")]));
-    expect(fetchAccessibleReposMock).toHaveBeenCalledTimes(3);
-  });
-
-  it("treats whitespace-only queries as empty and reuses the initial cache entry", async () => {
-    fetchAccessibleReposMock.mockResolvedValueOnce([makeRepo("initial")]);
-
-    const { result } = renderHook(() => useAccessibleRepos());
-
-    // Initial empty-query fetch settles.
-    await waitFor(() => expect(result.current.repos).toEqual([makeRepo("initial")]));
-    expect(fetchAccessibleReposMock).toHaveBeenCalledTimes(1);
-
-    act(() => result.current.search("   "));
-
-    // Whitespace collapses to "" — same cache entry, no extra fetch.
-    await waitFor(() => expect(result.current.repos).toEqual([makeRepo("initial")]));
-    expect(fetchAccessibleReposMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("aborts the in-flight fetch on unmount", async () => {
+  it("aborts the in-flight initial fetch on unmount", async () => {
     let aborted = false;
     fetchAccessibleReposMock.mockImplementationOnce(
       (opts: { signal?: AbortSignal }) =>

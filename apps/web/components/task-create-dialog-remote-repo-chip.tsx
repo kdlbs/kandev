@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import type { Branch } from "@/lib/types/http";
 import { Badge } from "@kandev/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
+import { Spinner } from "@kandev/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
   Pill,
@@ -298,7 +299,13 @@ function PickerList({
   return (
     <div className="max-h-56 overflow-y-auto p-1">
       {loading && repos.length === 0 ? (
-        <div className="px-2 py-3 text-xs text-muted-foreground">Loading…</div>
+        <div
+          className="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground"
+          data-testid="remote-repo-picker-loading"
+        >
+          <Spinner className="size-3" />
+          <span>Loading repositories…</span>
+        </div>
       ) : null}
       {!loading && repos.length === 0 && !error ? (
         <div className="px-2 py-3 text-xs text-muted-foreground">No repositories found.</div>
@@ -322,28 +329,17 @@ function RepoOption({
   repo: AccessibleRepo;
   onPick: (repo: AccessibleRepo) => void;
 }) {
-  const hasDescription = !!repo.description && repo.description.trim().length > 0;
   return (
     <button
       type="button"
       onClick={() => onPick(repo)}
       data-testid="remote-repo-option"
       className={cn(
-        "flex w-full items-start justify-between gap-2 rounded-sm px-2 py-1.5 text-xs",
+        "flex w-full items-center justify-between gap-2 rounded-sm px-2 py-1.5 text-xs",
         "hover:bg-muted cursor-pointer text-left",
       )}
     >
-      <span className="flex min-w-0 flex-col">
-        <span className="truncate">{repo.full_name}</span>
-        {hasDescription ? (
-          <span
-            className="truncate text-[11px] text-muted-foreground"
-            data-testid="remote-repo-option-description"
-          >
-            {repo.description}
-          </span>
-        ) : null}
-      </span>
+      <span className="truncate min-w-0">{repo.full_name}</span>
       {repo.private ? (
         <Badge variant="outline" className="text-[10px] text-muted-foreground shrink-0">
           private
