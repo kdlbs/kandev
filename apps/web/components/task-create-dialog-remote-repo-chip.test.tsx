@@ -407,6 +407,116 @@ describe("RemoteRepoChip — trigger label", () => {
   });
 });
 
+describe("RemoteRepoChip — per-row branch auto-select", () => {
+  it("auto-selects the PR head branch when prInfo arrives and row.branch is empty", () => {
+    const onBranchChange = vi.fn();
+    renderInProvider(
+      <RemoteRepoChip
+        row={row({ url: "https://github.com/acme/site/pull/42" })}
+        branches={[{ name: "main", type: "remote" }]}
+        branchesLoading={false}
+        prInfo={{
+          prHeadBranch: "feature/pr-branch",
+          prBaseBranch: "main",
+          prNumber: 42,
+          suggestedTitle: "PR #42: x",
+        }}
+        onURLChange={vi.fn()}
+        onBranchChange={onBranchChange}
+        onRemove={noopRemove}
+      />,
+    );
+    expect(onBranchChange).toHaveBeenCalledWith("feature/pr-branch");
+  });
+
+  it("does NOT overwrite a user-picked branch when PR info arrives later", () => {
+    // Regression guard for the "PR info should not clobber user pick" case:
+    // once the user has picked or accepted a branch (row.branch non-empty),
+    // the chip never overwrites it — re-paste / clear is required to reset.
+    const onBranchChange = vi.fn();
+    renderInProvider(
+      <RemoteRepoChip
+        row={row({ url: "https://github.com/acme/site/pull/42", branch: "develop" })}
+        branches={[
+          { name: "main", type: "remote" },
+          { name: "develop", type: "remote" },
+        ]}
+        branchesLoading={false}
+        prInfo={{
+          prHeadBranch: "feature/pr-branch",
+          prBaseBranch: "main",
+          prNumber: 42,
+          suggestedTitle: "PR #42: x",
+        }}
+        onURLChange={vi.fn()}
+        onBranchChange={onBranchChange}
+        onRemove={noopRemove}
+      />,
+    );
+    expect(onBranchChange).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a fork PR head branch even when it isn't in the base repo's branch list", () => {
+    // Fork PRs: PR head lives only on the contributor's fork, so the base
+    // repo's branch list won't contain it. The chip still surfaces the head
+    // name so the pill matches the URL the user just pasted.
+    const onBranchChange = vi.fn();
+    renderInProvider(
+      <RemoteRepoChip
+        row={row({ url: "https://github.com/acme/site/pull/977" })}
+        branches={[
+          { name: "main", type: "remote" },
+          { name: "develop", type: "remote" },
+        ]}
+        branchesLoading={false}
+        prInfo={{
+          prHeadBranch: "fork-only-branch",
+          prBaseBranch: "main",
+          prNumber: 977,
+          suggestedTitle: "PR #977: x",
+        }}
+        onURLChange={vi.fn()}
+        onBranchChange={onBranchChange}
+        onRemove={noopRemove}
+      />,
+    );
+    expect(onBranchChange).toHaveBeenCalledWith("fork-only-branch");
+  });
+
+  it("falls back to 'main' when there is no PR info and branches have loaded", () => {
+    const onBranchChange = vi.fn();
+    renderInProvider(
+      <RemoteRepoChip
+        row={row({ url: "https://github.com/acme/site" })}
+        branches={[
+          { name: "feature/y", type: "remote" },
+          { name: "main", type: "remote" },
+        ]}
+        branchesLoading={false}
+        onURLChange={vi.fn()}
+        onBranchChange={onBranchChange}
+        onRemove={noopRemove}
+      />,
+    );
+    expect(onBranchChange).toHaveBeenCalledWith("main");
+  });
+
+  it("does nothing when the row has no URL yet", () => {
+    const onBranchChange = vi.fn();
+    renderInProvider(
+      <RemoteRepoChip
+        row={row()}
+        branches={[{ name: "main", type: "remote" }]}
+        branchesLoading={false}
+        onURLChange={vi.fn()}
+        onBranchChange={onBranchChange}
+        onRemove={noopRemove}
+      />,
+    );
+    expect(onBranchChange).not.toHaveBeenCalled();
+  });
+});
+
 describe("computeTriggerLabel", () => {
   it("returns the empty-state placeholder when url is empty", () => {
     expect(computeTriggerLabel(row())).toBe("Pick or paste a repo");

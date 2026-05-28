@@ -34,14 +34,16 @@ export function RemoteRepoChipsRow({
   onAddRow,
   onRemoveRow,
 }: RemoteRepoChipsRowProps) {
-  // Keep the per-URL branches cache warm. Re-runs whenever the set of URLs
-  // changes; `ensure` is internally idempotent so re-firing on unrelated
-  // re-renders is cheap.
+  // Keep the per-URL caches warm. Re-runs whenever the set of URLs changes;
+  // both `ensure` calls are internally idempotent so re-firing on unrelated
+  // re-renders is cheap. PR-info is a no-op for plain repo URLs.
   useEffect(() => {
     for (const row of fs.remoteRepos) {
-      if (row.url) fs.branchesByUrl.ensure(row.url);
+      if (!row.url) continue;
+      fs.branchesByUrl.ensure(row.url);
+      fs.prInfoByUrl.ensure(row.url);
     }
-  }, [fs.remoteRepos, fs.branchesByUrl]);
+  }, [fs.remoteRepos, fs.branchesByUrl, fs.prInfoByUrl]);
 
   const rows = fs.remoteRepos;
   return (
@@ -52,6 +54,7 @@ export function RemoteRepoChipsRow({
           row={row}
           branches={fs.branchesByUrl.branches(row.url)}
           branchesLoading={fs.branchesByUrl.loading(row.url)}
+          prInfo={fs.prInfoByUrl.info(row.url)}
           onURLChange={makeURLChange(onUpdateRow, row.key)}
           onBranchChange={(branch) => onUpdateRow(row.key, { branch })}
           onRemove={() => onRemoveRow(row.key)}

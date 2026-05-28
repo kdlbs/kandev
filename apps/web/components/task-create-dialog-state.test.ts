@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import { computeDialogDefaultStepId } from "./task-create-dialog-defaults";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
@@ -15,6 +15,28 @@ vi.mock("@/hooks/domains/github/use-branches-by-url", () => ({
     ensure: () => undefined,
   }),
 }));
+
+// `usePRInfoByURL` also touches the network on ensure(); stub it to a
+// per-test-controlled cache so the title-autofill effect can be exercised
+// without an actual fetch. Each test that needs a specific PR-info value
+// writes into `prInfoMap` before calling `setUseRemote(true)`.
+const prInfoMap = new Map<
+  string,
+  { prHeadBranch: string; prBaseBranch: string; prNumber: number; suggestedTitle: string }
+>();
+vi.mock("@/hooks/domains/github/use-pr-info-by-url", async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import("@/hooks/domains/github/use-pr-info-by-url")>();
+  return {
+    ...original,
+    usePRInfoByURL: () => ({
+      info: (url: string) => prInfoMap.get(url),
+      loading: () => false,
+      ensure: () => undefined,
+      clear: () => undefined,
+    }),
+  };
+});
 
 function snapshot(workflowId: string): WorkflowSnapshotData {
   return {
@@ -171,8 +193,6 @@ describe("buildRepositoriesPayload — remoteRepos rows", () => {
         { key: "remote-2", url: "  ", branch: "", source: "paste" },
         { key: "remote-3", url: "github.com/owner/repo-b", branch: "develop", source: "paste" },
       ],
-      githubBranch: "",
-      githubPrHeadBranch: null,
       repositories: [],
       discoveredRepositories: [],
     });
@@ -184,5 +204,74 @@ describe("buildRepositoriesPayload — remoteRepos rows", () => {
       github_url: "github.com/owner/repo-b",
       base_branch: "develop",
     });
+  });
+});
+
+describe("useDialogFormState — title autofill from first row PR info", () => {
+  const PR_URL = "https://github.com/acme/site/pull/42";
+
+  beforeEach(() => {
+    prInfoMap.clear();
+  });
+
+  it("seeds the task title from the first row's PR info when title is empty", () => {
+    prInfoMap.set(PR_URL, {
+      prHeadBranch: "feature/x",
+      prBaseBranch: "main",
+      prNumber: 42,
+      suggestedTitle: "PR #42: Test PR",
+    });
+    const { result } = renderHook(() => useDialogFormState(true, "ws-1", null));
+    act(() => {
+      result.current.setUseRemote(true);
+    });
+    const key = result.current.remoteRepos[0]?.key;
+    act(() => {
+      result.current.updateRemoteRepo(key!, { url: PR_URL });
+    });
+    expect(result.current.taskName).toBe("PR #42: Test PR");
+    expect(result.current.hasTitle).toBe(true);
+  });
+
+  it("does NOT overwrite a title the user typed themselves", () => {
+    prInfoMap.set(PR_URL, {
+      prHeadBranch: "feature/x",
+      prBaseBranch: "main",
+      prNumber: 42,
+      suggestedTitle: "PR #42: Test PR",
+    });
+    const { result } = renderHook(() => useDialogFormState(true, "ws-1", null));
+    act(() => {
+      result.current.setTaskName("my own title");
+      result.current.setUseRemote(true);
+    });
+    const key = result.current.remoteRepos[0]?.key;
+    act(() => {
+      result.current.updateRemoteRepo(key!, { url: PR_URL });
+    });
+    expect(result.current.taskName).toBe("my own title");
+  });
+
+  it("does NOT autofill from a non-first row's PR info", () => {
+    const SECOND_PR_URL = "https://github.com/acme/api/pull/99";
+    prInfoMap.set(SECOND_PR_URL, {
+      prHeadBranch: "feature/y",
+      prBaseBranch: "main",
+      prNumber: 99,
+      suggestedTitle: "PR #99: Second PR",
+    });
+    const { result } = renderHook(() => useDialogFormState(true, "ws-1", null));
+    act(() => {
+      result.current.setUseRemote(true);
+    });
+    // Add a second row with a PR URL; row 0 stays empty.
+    act(() => {
+      result.current.addRemoteRepo();
+    });
+    const secondKey = result.current.remoteRepos[1]?.key;
+    act(() => {
+      result.current.updateRemoteRepo(secondKey!, { url: SECOND_PR_URL });
+    });
+    expect(result.current.taskName).toBe("");
   });
 });

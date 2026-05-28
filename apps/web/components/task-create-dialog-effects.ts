@@ -9,10 +9,9 @@ import {
   getLocalRepositoryStatusAction,
 } from "@/app/actions/workspaces";
 import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
-import { fetchPRInfo } from "@/lib/api/domains/github-api";
 import { getLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
-import { parseGitHubRepoUrl } from "@/lib/github/parse-url";
+import { parseGitHubAnyUrl } from "@/hooks/domains/github/use-pr-info-by-url";
 import type {
   DialogFormState,
   StoreSelections,
@@ -284,180 +283,29 @@ export function useDefaultSelectionsEffect(
 }
 
 /**
- * Auto-selects a sensible branch in the GitHub URL flow. Per-repo (workspace
- * or discovered) branch auto-select happens inside RepoChip when a row's
- * branches load — that keeps the per-row state confined to the chip.
- *
- * Branches are sourced from the per-URL `branchesByUrl` cache, keyed by the
- * first remote-repo row's URL (legacy single-URL flow).
+ * Surfaces a "Invalid GitHub URL" error for the first remote row when its URL
+ * doesn't parse as a repo or a PR URL. Per-row PR-info fetching + branch
+ * auto-select live inside `RemoteRepoChip` via `usePRInfoByURL` and
+ * `useRowBranchAutoSelect`; this effect just keeps the surfaced error banner
+ * in sync with the first row's URL.
  */
-export function useBranchAutoSelectEffect(fs: DialogFormState) {
-  const { githubBranch, useRemote, setGitHubBranch, githubPrHeadBranch, updateRemoteRepo } = fs;
+export function useGitHubUrlErrorEffect(fs: DialogFormState, open: boolean) {
+  const { useRemote, setGitHubUrlError } = fs;
   const firstUrl = fs.remoteRepos[0]?.url ?? "";
-  const firstRowKey = fs.remoteRepos[0]?.key ?? "";
-  const githubBranches = fs.branchesByUrl.branches(firstUrl);
-  useEffect(() => {
-    if (!useRemote || githubBranch) return;
-    // Helper: write the resolved branch to both the singleton (legacy submit
-    // path) and the first remote row (so the chip's branch pill renders).
-    // Only mirror when the row exists, has a non-empty URL, and we have an
-    // actual branch to write — never overwrite a user-typed selection with "".
-    const apply = (branch: string) => {
-      if (!branch) return;
-      setGitHubBranch(branch);
-      if (firstRowKey && firstUrl) {
-        updateRemoteRepo(firstRowKey, { branch });
-      }
-    };
-    // PR head wins regardless of whether it appears in the base repo's branch
-    // list. Fork PRs (head lives only on the contributor's fork) won't match
-    // anything in githubBranches, but we still want the pill to surface the
-    // PR's branch name — the worktree will materialize it from the PR refspec
-    // on the backend, and falling through to "main" would visually contradict
-    // the URL the user just pasted.
-    if (githubPrHeadBranch) {
-      apply(githubPrHeadBranch);
-      return;
-    }
-    if (githubBranches.length === 0) return;
-    // GitHub URL branches are referenced by name only (no remote prefix);
-    // selectPreferredBranch expects origin-prefixed remotes, so pick directly.
-    const preferred =
-      githubBranches.find((b) => b.name === "main") ??
-      githubBranches.find((b) => b.name === "master") ??
-      githubBranches[0];
-    if (preferred) apply(preferred.name);
-  }, [
-    githubBranch,
-    githubBranches,
-    useRemote,
-    setGitHubBranch,
-    githubPrHeadBranch,
-    updateRemoteRepo,
-    firstRowKey,
-    firstUrl,
-  ]);
-}
-
-/** Parse a GitHub URL to extract owner, repo, and optional PR number. Returns null if invalid. */
-function parseGitHubUrl(url: string): { owner: string; repo: string; prNumber?: number } | null {
-  const trimmed = url.trim();
-  if (!trimmed) return null;
-  // Try PR URL first: github.com/owner/repo/pull/123 (with optional trailing path/hash like /files#diff-...)
-  const prMatch = trimmed.match(
-    /(?:https?:\/\/)?(?:www\.)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/pull\/(\d+)(?:[/?#].*)?$/,
-  );
-  if (prMatch) {
-    return { owner: prMatch[1], repo: prMatch[2], prNumber: parseInt(prMatch[3], 10) };
-  }
-  // Fall back to plain repo URL: github.com/owner/repo
-  return parseGitHubRepoUrl(trimmed);
-}
-
-/**
- * Returns a callback that auto-fills the task name with `PR #N: <title>` when
- * a PR URL is pasted, leaving anything the user typed themselves alone. The
- * callback reads the latest taskName via a ref so the fetch effect doesn't
- * need to list taskName as a dep (which would re-fire the branches/PR fetch on
- * every keystroke in the title input).
- *
- * NOTE: Callers must omit the returned callback from `useEffect` dependency
- * arrays — including it causes the fetch to re-fire on every keystroke,
- * defeating the purpose of the ref. The call site uses
- * `eslint-disable react-hooks/exhaustive-deps` intentionally.
- */
-export function useAutoFillTaskNameFromPR(fs: DialogFormState) {
-  const { taskName, setTaskName, setHasTitle } = fs;
-  const lastAutoFilledTitleRef = useRef("");
-  const taskNameRef = useRef(taskName);
-  useEffect(() => {
-    taskNameRef.current = taskName;
-    if (!taskName.trim()) {
-      lastAutoFilledTitleRef.current = "";
-    }
-  }, [taskName]);
-  return (prNumber: number, prTitle: string) => {
-    const next = `PR #${prNumber}: ${prTitle}`;
-    const current = taskNameRef.current;
-    if (!current.trim() || current === lastAutoFilledTitleRef.current) {
-      lastAutoFilledTitleRef.current = next;
-      setTaskName(next);
-      setHasTitle(true);
-    }
-  };
-}
-
-export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
-  const {
-    useRemote,
-    setGitHubUrlError,
-    setGitHubPrHeadBranch,
-    setGitHubPrBaseBranch,
-    branchesByUrl,
-  } = fs;
-  const githubUrl = fs.remoteRepos[0]?.url ?? "";
-  const autoFillTitle = useAutoFillTaskNameFromPR(fs);
   useEffect(() => {
     if (!open || !useRemote) return;
-    const trimmed = githubUrl.trim();
+    const trimmed = firstUrl.trim();
     if (!trimmed) {
       setGitHubUrlError(null);
       return;
     }
-    const parsed = parseGitHubUrl(githubUrl);
+    const parsed = parseGitHubAnyUrl(trimmed);
     if (!parsed) {
-      setGitHubPrHeadBranch(null);
-      setGitHubPrBaseBranch(null);
       setGitHubUrlError("Invalid GitHub URL — expected github.com/owner/repo or .../pull/123");
       return;
     }
-    // Branches load via the per-URL hook cache (multi-row support via Task 5).
-    branchesByUrl.ensure(githubUrl);
-    let cancelled = false;
     setGitHubUrlError(null);
-    setGitHubPrHeadBranch(null);
-    setGitHubPrBaseBranch(null);
-
-    // PR-info fetch stays here (autofills task name + carries head/base on the
-    // payload). Only fires for PR URLs.
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15_000);
-    const prPromise = parsed.prNumber
-      ? fetchPRInfo(parsed.owner, parsed.repo, parsed.prNumber, {
-          init: { signal: controller.signal },
-        }).catch((err: unknown) => {
-          if (err instanceof DOMException && err.name === "AbortError") return null;
-          const isNotConfigured = err instanceof Error && err.message.includes("not configured");
-          if (!cancelled) {
-            setGitHubUrlError(
-              isNotConfigured
-                ? "GitHub is not configured. Set up a token in Settings > GitHub."
-                : "Repository not found or not accessible",
-            );
-          }
-          return null;
-        })
-      : Promise.resolve(null);
-
-    prPromise
-      .then((prInfo) => {
-        if (cancelled || !prInfo) return;
-        setGitHubPrHeadBranch(prInfo.head_branch);
-        setGitHubPrBaseBranch(prInfo.base_branch);
-        autoFillTitle(prInfo.number, prInfo.title);
-      })
-      .finally(() => clearTimeout(timeoutId));
-    return () => {
-      cancelled = true;
-      clearTimeout(timeoutId);
-      controller.abort();
-    };
-    // autoFillTitle is intentionally omitted: it's a fresh closure each render
-    // but reads the latest taskName via ref, so excluding it keeps the fetch
-    // from re-firing on every keystroke. branchesByUrl reference is stable
-    // (hook returns the same object identity); ensure() is idempotent per URL.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, useRemote, githubUrl, setGitHubUrlError, setGitHubPrHeadBranch, setGitHubPrBaseBranch]);
+  }, [open, useRemote, firstUrl, setGitHubUrlError]);
 }
 
 export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreateEffectsArgs) {
@@ -476,7 +324,6 @@ export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreate
   useWorkflowAgentProfileEffect(fs, workflows, agentProfiles, compatibleAgentProfiles);
   useRepositoryAutoSelectEffect(fs, open, workspaceId, repositories);
   useDiscoverReposEffect(fs, open, workspaceId, repositoriesLoading, toast);
-  useBranchAutoSelectEffect(fs);
   useCurrentLocalBranchEffect(fs, open, workspaceId, repositories);
   useResetBranchOnLocalSwitchEffect(fs, isLocalExecutor, args.preserveBranch);
   useDefaultSelectionsEffect(
@@ -485,7 +332,7 @@ export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreate
     { agentProfiles, compatibleAgentProfiles, authLoaded, executors, workspaceDefaults },
     workflows,
   );
-  useGitHubUrlBranchesEffect(fs, open);
+  useGitHubUrlErrorEffect(fs, open);
 }
 
 // Reset row.branch on every "switch to local executor" transition so the

@@ -13,6 +13,7 @@ import {
   useRepositoriesState,
 } from "@/components/task-create-dialog-repositories-state";
 import { useBranchesByURL } from "@/hooks/domains/github/use-branches-by-url";
+import { usePRInfoByURL } from "@/hooks/domains/github/use-pr-info-by-url";
 
 /**
  * Workspace mode the New Subtask dialog supports today. The shared_group
@@ -50,13 +51,11 @@ export function useSubtaskFormState(): DialogFormState {
   const repos = useRepositoriesState();
   const remoteRepos = useRemoteReposState();
   const branchesByUrl = useBranchesByURL();
+  const prInfoByUrl = usePRInfoByURL();
   const [agentProfileId, setAgentProfileId] = useState("");
   const [executorProfileId, setExecutorProfileId] = useState("");
   const [useRemote, setUseRemote] = useState(false);
-  const [githubBranch, setGitHubBranch] = useState("");
   const [githubUrlError, setGitHubUrlError] = useState<string | null>(null);
-  const [githubPrHeadBranch, setGitHubPrHeadBranch] = useState<string | null>(null);
-  const [githubPrBaseBranch, setGitHubPrBaseBranch] = useState<string | null>(null);
   // Discovered (on-disk) repos — populated by useDiscoverReposEffect when the
   // dialog opens, same as the create-task flow. This lets users target
   // not-yet-imported on-machine git folders for the subtask.
@@ -86,9 +85,8 @@ export function useSubtaskFormState(): DialogFormState {
       addRemoteRepo: remoteRepos.addRemoteRepo,
       removeRemoteRepo: remoteRepos.removeRemoteRepo,
       updateRemoteRepo: remoteRepos.updateRemoteRepo,
-      githubBranch,
-      setGitHubBranch,
       branchesByUrl,
+      prInfoByUrl,
       agentProfileId,
       setAgentProfileId,
       executorId: "",
@@ -114,10 +112,6 @@ export function useSubtaskFormState(): DialogFormState {
       setUseRemote,
       githubUrlError,
       setGitHubUrlError,
-      githubPrHeadBranch,
-      setGitHubPrHeadBranch,
-      githubPrBaseBranch,
-      setGitHubPrBaseBranch,
       workflowAgentProfileId: "",
       setWorkflowAgentProfileId: NOOP,
       clearDraft: NOOP,
@@ -135,13 +129,11 @@ export function useSubtaskFormState(): DialogFormState {
       remoteRepos.removeRemoteRepo,
       remoteRepos.updateRemoteRepo,
       branchesByUrl,
-      githubBranch,
+      prInfoByUrl,
       agentProfileId,
       executorProfileId,
       useRemote,
       githubUrlError,
-      githubPrHeadBranch,
-      githubPrBaseBranch,
       discoveredRepositories,
       discoverReposLoading,
       discoverReposLoaded,

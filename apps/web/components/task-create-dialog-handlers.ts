@@ -83,13 +83,6 @@ function useProfileAndNameHandlers(fs: DialogFormState) {
     },
     [fs],
   );
-  const handleGitHubBranchChange = useCallback(
-    (value: string) => {
-      fs.setGitHubBranch(value);
-      setLocalStorage(STORAGE_KEYS.LAST_BRANCH, value);
-    },
-    [fs],
-  );
   const handleWorkflowChange = useCallback(
     (value: string) => fs.setSelectedWorkflowId(value),
     [fs],
@@ -98,7 +91,6 @@ function useProfileAndNameHandlers(fs: DialogFormState) {
     handleAgentProfileChange,
     handleExecutorProfileChange,
     handleTaskNameChange,
-    handleGitHubBranchChange,
     handleWorkflowChange,
   };
 }
@@ -113,9 +105,7 @@ function useGitHubAndFreshBranchHandlers(fs: DialogFormState) {
    */
   const handleToggleRemote = useCallback(() => {
     fs.setUseRemote(!fs.useRemote);
-    fs.setGitHubBranch("");
     fs.setGitHubUrlError(null);
-    fs.setGitHubPrHeadBranch(null);
     clearFreshBranch(fs);
   }, [fs]);
 
@@ -139,7 +129,6 @@ function useGitHubAndFreshBranchHandlers(fs: DialogFormState) {
     fs.setNoRepository(next);
     if (next) {
       fs.setUseRemote(false);
-      fs.setGitHubBranch("");
       // Clear the executor selection so the auto-fill effect re-picks a
       // non-worktree default (worktree is unworkable in no-repo mode).
       fs.setExecutorId("");

@@ -68,9 +68,7 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
           : buildRepositoriesPayload({
               useRemote: fs.useRemote,
               remoteRepos: fs.remoteRepos,
-              githubBranch: fs.githubBranch,
-              githubPrHeadBranch: fs.githubPrHeadBranch,
-              githubPrBaseBranch: fs.githubPrBaseBranch,
+              prInfoByUrl: fs.prInfoByUrl,
               repositories: fs.repositories,
               discoveredRepositories: fs.discoveredRepositories,
               workspaceRepositories: availableRepositories,

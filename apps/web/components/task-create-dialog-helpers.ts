@@ -7,6 +7,7 @@ import type {
   TaskRemoteRepoRow,
   TaskRepoRow,
 } from "@/components/task-create-dialog-types";
+import type { UsePRInfoByURLResult } from "@/hooks/domains/github/use-pr-info-by-url";
 import { selectPreferredBranch } from "@/lib/utils";
 import { getLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
@@ -180,19 +181,13 @@ export function buildRepositoriesPayload(opts: {
   /** Remote-URL rows; non-empty `url` rows are mapped 1:1 to payload entries. */
   remoteRepos: TaskRemoteRepoRow[];
   /**
-   * Branch picked in URL mode for the FIRST remote row. Carried as a separate
-   * field during the transition (single-row URL flow); once each chip owns its
-   * branch this collapses into `remoteRepos[i].branch`.
+   * Per-URL PR-info cache. Consulted for each remote row whose URL is a PR
+   * URL: if the row's branch equals the PR head (auto-fill or user-confirmed
+   * default), the payload anchors `base_branch` to the PR's actual target
+   * from the API so origin can resolve it even when the head only lives on
+   * a fork. Optional — non-Remote call sites can omit it.
    */
-  githubBranch: string;
-  githubPrHeadBranch: string | null;
-  /**
-   * PR's target branch from the GitHub API. When set and the displayed branch
-   * still matches the auto-selected PR head, this is sent as `base_branch`
-   * (so origin can resolve it for fork PRs). Optional to keep existing test
-   * fixtures and non-PR call sites compiling without a sentinel.
-   */
-  githubPrBaseBranch?: string | null;
+  prInfoByUrl?: Pick<UsePRInfoByURLResult, "info">;
   repositories: TaskRepoRow[];
   /** Used to look up `default_branch` for `localPath` rows. */
   discoveredRepositories: LocalRepository[];
@@ -264,40 +259,41 @@ export function buildRepositoriesPayload(opts: {
  * rows. Rows with an empty URL are dropped silently — they're partially
  * filled rows the user hasn't completed yet.
  *
- * The legacy single-URL flow drives this from `remoteRepos[0]` with
- * PR-head/base inference; multi-row support comes online in Task 5. Until
- * then, only the first row's branch is treated as "the URL flow branch"
- * (`opts.githubBranch`) so PR auto-selection still works.
+ * Per-row PR-info inference: if a row's URL is a PR URL and the row's
+ * branch equals the PR's head branch (auto-selected by the chip or
+ * user-confirmed via "leave default"), the payload anchors `base_branch`
+ * to the PR's actual target from the GitHub API and surfaces the PR head
+ * as `checkout_branch`. This keeps fork PRs resolvable on `origin` (their
+ * head doesn't live there, but the base does). When the user overrides
+ * the branch to something other than the PR head, we treat their pick as
+ * the base and drop `checkout_branch`.
  */
 function buildRemoteRepoPayload(opts: {
   remoteRepos: TaskRemoteRepoRow[];
-  githubBranch: string;
-  githubPrHeadBranch: string | null;
-  githubPrBaseBranch?: string | null;
+  prInfoByUrl?: Pick<UsePRInfoByURLResult, "info">;
 }): NonNullable<CreateTaskParams["repositories"]> {
   const nonEmpty = opts.remoteRepos.filter((r) => r.url.trim() !== "");
   if (nonEmpty.length === 0) return [];
-  return nonEmpty.map((row, idx) => {
-    // Only the first row is in the legacy PR-head/base inference path during
-    // the transition; subsequent rows just carry their own branch verbatim.
-    if (idx === 0) {
-      const isPrAutoSelection =
-        !!opts.githubPrHeadBranch && opts.githubBranch === opts.githubPrHeadBranch;
+  return nonEmpty.map((row) => {
+    const url = row.url.trim();
+    const prInfo = opts.prInfoByUrl?.info(row.url);
+    if (prInfo) {
+      const isPrAutoSelection = !!prInfo.prHeadBranch && row.branch === prInfo.prHeadBranch;
       const baseBranch = isPrAutoSelection
-        ? opts.githubPrBaseBranch || undefined
-        : opts.githubBranch || undefined;
+        ? prInfo.prBaseBranch || undefined
+        : row.branch || undefined;
       return {
         repository_id: "",
         base_branch: baseBranch,
-        checkout_branch: opts.githubPrHeadBranch || undefined,
-        github_url: row.url.trim(),
+        checkout_branch: prInfo.prHeadBranch || undefined,
+        github_url: url,
       };
     }
     return {
       repository_id: "",
       base_branch: row.branch || undefined,
       checkout_branch: undefined,
-      github_url: row.url.trim(),
+      github_url: url,
     };
   });
 }

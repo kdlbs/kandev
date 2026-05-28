@@ -16,7 +16,10 @@ import type { DialogFormBodyProps, DialogFormState } from "@/components/task-cre
 
 export function computeHasAllBranches(fs: DialogFormState): boolean {
   if (fs.noRepository) return true;
-  if (fs.useRemote) return !!fs.githubBranch;
+  if (fs.useRemote) {
+    const rows = fs.remoteRepos.filter((r) => r.url.trim() !== "");
+    return rows.length > 0 && rows.every((r) => !!r.branch);
+  }
   return fs.repositories.length > 0 && fs.repositories.every((r) => !!r.branch);
 }
 

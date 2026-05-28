@@ -1,9 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import {
-  useAutoFillTaskNameFromPR,
-  useBranchAutoSelectEffect,
   useDefaultSelectionsEffect,
+  useGitHubUrlErrorEffect,
   useWorkflowAgentProfileEffect,
 } from "./task-create-dialog-effects";
 import type { DialogFormState, StoreSelections } from "@/components/task-create-dialog-types";
@@ -414,289 +413,63 @@ describe("useDefaultSelectionsEffect — auth-spec load race", () => {
     expect(fs.setAgentProfileId).not.toHaveBeenCalledWith(claude.id);
   });
 });
-type BranchFake = {
-  githubBranch?: string;
-  /** Synthetic branch list returned by branchesByUrl.branches() for any URL. */
-  githubBranches?: Array<{ name: string; type: "local" | "remote"; remote?: string }>;
+type UrlErrorFake = {
   useRemote?: boolean;
-  setGitHubBranch?: ReturnType<typeof vi.fn>;
-  updateRemoteRepo?: ReturnType<typeof vi.fn>;
-  githubPrHeadBranch?: string | null;
-  /** Optional URL on the first remoteRepos row; tests don't need to vary this. */
-  remoteRepoUrl?: string;
-  /** When provided, replaces the default [{ key: "remote-0", url, ... }] row list. */
   remoteRepos?: Array<{ key: string; url: string; branch: string; source: "paste" | "picker" }>;
+  setGitHubUrlError?: ReturnType<typeof vi.fn>;
 };
-function makeBranchFs(overrides: BranchFake = {}): DialogFormState {
-  const url = overrides.remoteRepoUrl ?? "github.com/owner/repo";
-  const branches = overrides.githubBranches ?? [];
+function makeUrlErrorFs(overrides: UrlErrorFake = {}): DialogFormState {
   const remoteRepos = overrides.remoteRepos ?? [
-    { key: "remote-0", url, branch: "", source: "paste" as const },
+    { key: "remote-0", url: "", branch: "", source: "paste" as const },
   ];
   return {
-    githubBranch: overrides.githubBranch ?? "",
     useRemote: overrides.useRemote ?? true,
-    setGitHubBranch: overrides.setGitHubBranch ?? vi.fn(),
-    updateRemoteRepo: overrides.updateRemoteRepo ?? vi.fn(),
-    githubPrHeadBranch: overrides.githubPrHeadBranch ?? null,
+    setGitHubUrlError: overrides.setGitHubUrlError ?? vi.fn(),
     remoteRepos,
-    branchesByUrl: {
-      branches: (u: string) => (u === url ? branches : []),
-      loading: () => false,
-      ensure: () => undefined,
-    },
   } as unknown as DialogFormState;
 }
 
-describe("useBranchAutoSelectEffect", () => {
-  it("selects the PR head branch when it is present in the base repo's branch list", () => {
-    const fs = makeBranchFs({
-      githubBranches: [
-        { name: "main", type: "remote" },
-        { name: "feature/x", type: "remote" },
-      ],
-      githubPrHeadBranch: "feature/x",
+describe("useGitHubUrlErrorEffect", () => {
+  it("surfaces 'Invalid GitHub URL' for an unparseable first-row URL", () => {
+    const setGitHubUrlError = vi.fn();
+    const fs = makeUrlErrorFs({
+      remoteRepos: [{ key: "remote-0", url: "not a url", branch: "", source: "paste" }],
+      setGitHubUrlError,
     });
-    renderHook(() => useBranchAutoSelectEffect(fs));
-    expect(fs.setGitHubBranch).toHaveBeenCalledWith("feature/x");
+    renderHook(() => useGitHubUrlErrorEffect(fs, true));
+    expect(setGitHubUrlError).toHaveBeenCalledWith(expect.stringContaining("Invalid GitHub URL"));
   });
 
-  it("still surfaces the PR head branch for fork PRs whose head is NOT in the base repo's branch list", () => {
-    // Regression guard for the fork-PR display bug: previously the effect
-    // fell through to "main" when the PR head was missing from the base
-    // repo's branches, visually contradicting the URL the user just pasted.
-    const fs = makeBranchFs({
-      githubBranches: [
-        { name: "main", type: "remote" },
-        { name: "develop", type: "remote" },
+  it("clears the error for a valid repo URL", () => {
+    const setGitHubUrlError = vi.fn();
+    const fs = makeUrlErrorFs({
+      remoteRepos: [
+        { key: "remote-0", url: "https://github.com/acme/site", branch: "", source: "paste" },
       ],
-      githubPrHeadBranch: "jira-hosted-path-auth",
+      setGitHubUrlError,
     });
-    renderHook(() => useBranchAutoSelectEffect(fs));
-    expect(fs.setGitHubBranch).toHaveBeenCalledWith("jira-hosted-path-auth");
+    renderHook(() => useGitHubUrlErrorEffect(fs, true));
+    expect(setGitHubUrlError).toHaveBeenLastCalledWith(null);
   });
 
-  it("falls back to main when there is no PR head branch", () => {
-    const fs = makeBranchFs({
-      githubBranches: [
-        { name: "feature/y", type: "remote" },
-        { name: "main", type: "remote" },
-      ],
+  it("clears the error for an empty URL (rows the user hasn't completed)", () => {
+    const setGitHubUrlError = vi.fn();
+    const fs = makeUrlErrorFs({
+      remoteRepos: [{ key: "remote-0", url: "", branch: "", source: "paste" }],
+      setGitHubUrlError,
     });
-    renderHook(() => useBranchAutoSelectEffect(fs));
-    expect(fs.setGitHubBranch).toHaveBeenCalledWith("main");
+    renderHook(() => useGitHubUrlErrorEffect(fs, true));
+    expect(setGitHubUrlError).toHaveBeenCalledWith(null);
   });
 
   it("does nothing when useRemote is false", () => {
-    const fs = makeBranchFs({
+    const setGitHubUrlError = vi.fn();
+    const fs = makeUrlErrorFs({
       useRemote: false,
-      githubBranches: [{ name: "main", type: "remote" }],
-      githubPrHeadBranch: "feature/x",
+      remoteRepos: [{ key: "remote-0", url: "not a url", branch: "", source: "paste" }],
+      setGitHubUrlError,
     });
-    renderHook(() => useBranchAutoSelectEffect(fs));
-    expect(fs.setGitHubBranch).not.toHaveBeenCalled();
-  });
-
-  it("does nothing once a branch has already been selected (manual override)", () => {
-    const fs = makeBranchFs({
-      githubBranch: "develop",
-      githubBranches: [
-        { name: "main", type: "remote" },
-        { name: "develop", type: "remote" },
-      ],
-      githubPrHeadBranch: "feature/x",
-    });
-    renderHook(() => useBranchAutoSelectEffect(fs));
-    expect(fs.setGitHubBranch).not.toHaveBeenCalled();
-  });
-});
-
-const PR_HEAD = "feature/pr-branch";
-
-describe("useBranchAutoSelectEffect — mirror to remoteRepos[0].branch", () => {
-  it("mirrors the resolved PR head branch into remoteRepos[0].branch so the chip pill renders", () => {
-    // Bug fix: writing the PR head to the singleton githubBranch was enough
-    // for submit, but left the per-row branch empty so the chip's branch pill
-    // stayed disabled/empty even though the task was submitted with the right
-    // branch. Verify both writes happen on the same effect tick.
-    const updateRemoteRepo = vi.fn();
-    const fs = makeBranchFs({
-      remoteRepoUrl: "https://github.com/owner/repo/pull/42",
-      githubBranches: [{ name: "main", type: "remote" }],
-      githubPrHeadBranch: PR_HEAD,
-      updateRemoteRepo,
-    });
-    renderHook(() => useBranchAutoSelectEffect(fs));
-    expect(fs.setGitHubBranch).toHaveBeenCalledWith(PR_HEAD);
-    expect(updateRemoteRepo).toHaveBeenCalledWith("remote-0", { branch: PR_HEAD });
-  });
-
-  it("mirrors the fallback 'main' selection into remoteRepos[0].branch when there is no PR head", () => {
-    const updateRemoteRepo = vi.fn();
-    const fs = makeBranchFs({
-      githubBranches: [
-        { name: "feature/y", type: "remote" },
-        { name: "main", type: "remote" },
-      ],
-      updateRemoteRepo,
-    });
-    renderHook(() => useBranchAutoSelectEffect(fs));
-    expect(fs.setGitHubBranch).toHaveBeenCalledWith("main");
-    expect(updateRemoteRepo).toHaveBeenCalledWith("remote-0", { branch: "main" });
-  });
-
-  it("does NOT call updateRemoteRepo when the first row's URL is empty", () => {
-    // Guard: only mirror once the user has a real URL on row 0 — otherwise
-    // we'd be writing a phantom branch to an empty chip slot.
-    const updateRemoteRepo = vi.fn();
-    const fs = makeBranchFs({
-      remoteRepos: [{ key: "remote-0", url: "", branch: "", source: "paste" }],
-      githubPrHeadBranch: PR_HEAD,
-      updateRemoteRepo,
-    });
-    renderHook(() => useBranchAutoSelectEffect(fs));
-    // The singleton still gets set (legacy submit path keeps reading it),
-    // but the per-row write is skipped because the row has no URL yet.
-    expect(updateRemoteRepo).not.toHaveBeenCalled();
-  });
-
-  it("does NOT call updateRemoteRepo when remoteRepos is empty", () => {
-    const updateRemoteRepo = vi.fn();
-    const fs = makeBranchFs({
-      remoteRepos: [],
-      githubPrHeadBranch: PR_HEAD,
-      updateRemoteRepo,
-    });
-    renderHook(() => useBranchAutoSelectEffect(fs));
-    expect(updateRemoteRepo).not.toHaveBeenCalled();
-  });
-});
-
-const PR_1_TITLE = "PR #1: first";
-
-type AutoFillFake = Pick<DialogFormState, "taskName" | "setTaskName" | "setHasTitle">;
-function makeAutoFillFs(overrides: Partial<AutoFillFake> = {}): DialogFormState {
-  return {
-    taskName: "",
-    setTaskName: vi.fn(),
-    setHasTitle: vi.fn(),
-    ...overrides,
-  } as unknown as DialogFormState;
-}
-
-describe("useAutoFillTaskNameFromPR", () => {
-  it("fills the task name with 'PR #N: <title>' when the title is empty", () => {
-    const fs = makeAutoFillFs({ taskName: "" });
-    const { result } = renderHook(() => useAutoFillTaskNameFromPR(fs));
-    result.current(971, "feat/omp-acp-agent");
-    expect(fs.setTaskName).toHaveBeenCalledWith("PR #971: feat/omp-acp-agent");
-    expect(fs.setHasTitle).toHaveBeenCalledWith(true);
-  });
-
-  it("fills when the title contains only whitespace", () => {
-    // Regression guard: hasTitle treats whitespace-only as empty, so the
-    // auto-fill check must too — otherwise pasting a PR URL after typing a
-    // stray space would silently keep the spaces.
-    const fs = makeAutoFillFs({ taskName: "   " });
-    const { result } = renderHook(() => useAutoFillTaskNameFromPR(fs));
-    result.current(7, "fix");
-    expect(fs.setTaskName).toHaveBeenCalledWith("PR #7: fix");
-  });
-
-  it("does NOT overwrite a title the user typed themselves", () => {
-    const fs = makeAutoFillFs({ taskName: "my custom title" });
-    const { result } = renderHook(() => useAutoFillTaskNameFromPR(fs));
-    result.current(42, "something");
-    expect(fs.setTaskName).not.toHaveBeenCalled();
-    expect(fs.setHasTitle).not.toHaveBeenCalled();
-  });
-
-  it("replaces a previously auto-filled title when a different PR URL is pasted", () => {
-    // Re-paste flow: the user pastes PR #1 (autofills "PR #1: foo"), then
-    // realizes wrong URL and pastes PR #2. Without the lastAutoFilled-ref
-    // tracking, the second paste would see a non-empty title and bail.
-    let currentName = "";
-    const fs = makeAutoFillFs({
-      taskName: currentName,
-      setTaskName: vi.fn((v: string) => {
-        currentName = v;
-      }),
-    });
-    const { result, rerender } = renderHook(() => {
-      // Re-read taskName from the closure on every render so the ref-mirror
-      // effect sees the latest value.
-      fs.taskName = currentName;
-      return useAutoFillTaskNameFromPR(fs);
-    });
-    result.current(1, "first");
-    expect(currentName).toBe(PR_1_TITLE);
-
-    rerender();
-    result.current(2, "second");
-    expect(currentName).toBe("PR #2: second");
-    expect(fs.setTaskName).toHaveBeenCalledTimes(2);
-  });
-
-  it("does NOT replace once the user edits the auto-filled title", () => {
-    let currentName = "";
-    const fs = makeAutoFillFs({
-      taskName: currentName,
-      setTaskName: vi.fn((v: string) => {
-        currentName = v;
-      }),
-    });
-    const { result, rerender } = renderHook(() => {
-      fs.taskName = currentName;
-      return useAutoFillTaskNameFromPR(fs);
-    });
-    result.current(1, "first");
-    expect(currentName).toBe(PR_1_TITLE);
-
-    // User edits the title manually.
-    currentName = "my edits";
-    rerender();
-
-    result.current(2, "second");
-    // Setter is still only called once (the initial auto-fill); the manual
-    // edit is preserved.
-    expect(fs.setTaskName).toHaveBeenCalledTimes(1);
-    expect(currentName).toBe("my edits");
-  });
-
-  it("clears the sentinel when taskName resets to empty, preventing a re-typed auto-fill from being overwritten", () => {
-    // Regression guard for the mounted-across-open/close edge case:
-    // after a dialog reset clears taskName, the user manually types the same
-    // text that was previously auto-filled. A second PR paste must NOT
-    // overwrite it because the sentinel was cleared on the empty transition.
-    let currentName = "";
-    const fs = makeAutoFillFs({
-      taskName: currentName,
-      setTaskName: vi.fn((v: string) => {
-        currentName = v;
-      }),
-    });
-    const { result, rerender } = renderHook(() => {
-      fs.taskName = currentName;
-      return useAutoFillTaskNameFromPR(fs);
-    });
-    result.current(1, "first");
-    expect(currentName).toBe(PR_1_TITLE);
-
-    // Simulate React flushing the setTaskName state update back into the hook
-    // so the ref-mirror effect sees taskName = PR_1_TITLE.
-    rerender();
-
-    // Dialog resets taskName to empty (sentinel should clear).
-    currentName = "";
-    rerender();
-
-    // User re-types the exact previously auto-filled value.
-    currentName = PR_1_TITLE;
-    rerender();
-
-    // A second paste with a different PR should NOT overwrite.
-    result.current(2, "second");
-    expect(fs.setTaskName).toHaveBeenCalledTimes(1); // only the first auto-fill
-    expect(currentName).toBe(PR_1_TITLE);
+    renderHook(() => useGitHubUrlErrorEffect(fs, true));
+    expect(setGitHubUrlError).not.toHaveBeenCalled();
   });
 });

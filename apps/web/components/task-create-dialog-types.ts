@@ -1,6 +1,7 @@
 import type React from "react";
 import type { LocalRepository, Repository, Executor, Task } from "@/lib/types/http";
 import type { UseBranchesByURLResult } from "@/hooks/domains/github/use-branches-by-url";
+import type { UsePRInfoByURLResult } from "@/hooks/domains/github/use-pr-info-by-url";
 import type { AgentProfileOption, WorkspaceState } from "@/lib/state/slices";
 import type {
   KanbanMultiState,
@@ -222,15 +223,18 @@ export type DialogFormState = {
   addRemoteRepo: () => void;
   removeRemoteRepo: (key: string) => void;
   updateRemoteRepo: (key: string, patch: Partial<TaskRemoteRepoRow>) => void;
-  /** GitHub URL mode: branch picked for the (single, for now) remote URL. */
-  githubBranch: string;
-  setGitHubBranch: (v: string) => void;
   /**
-   * Per-URL branches cache (Task 3 hook). Used by the URL-mode branch picker
-   * during the transition. Driven from `remoteRepos[0]?.url` for now; once the
-   * multi-row UI lands every chip will key off its own row's URL.
+   * Per-URL branches cache. Each chip reads its own row's branches by URL;
+   * no dialog-level singleton branch field remains.
    */
   branchesByUrl: UseBranchesByURLResult;
+  /**
+   * Per-URL PR-info cache. Each chip calls `ensure(row.url)` when its URL
+   * changes; the chip auto-selects the PR head branch when the URL is a PR
+   * URL and the row's branch is still empty. The dialog also reads the
+   * first row's `info(url).suggestedTitle` to autofill the task title.
+   */
+  prInfoByUrl: UsePRInfoByURLResult;
   agentProfileId: string;
   setAgentProfileId: (v: string) => void;
   executorId: string;
@@ -256,16 +260,6 @@ export type DialogFormState = {
   setUseRemote: (v: boolean) => void;
   githubUrlError: string | null;
   setGitHubUrlError: (v: string | null) => void;
-  githubPrHeadBranch: string | null;
-  setGitHubPrHeadBranch: (v: string | null) => void;
-  /**
-   * PR's target/base branch from the GitHub API (e.g. "main"). Captured so the
-   * payload can send a base_branch that resolves on origin, even when the PR
-   * head only lives on a fork. Without this, fork PRs would propagate the
-   * head-branch name into base_branch and the worktree would fail to anchor.
-   */
-  githubPrBaseBranch: string | null;
-  setGitHubPrBaseBranch: (v: string | null) => void;
   /** When non-empty, the selected workflow overrides the agent profile */
   workflowAgentProfileId: string;
   setWorkflowAgentProfileId: (v: string) => void;
@@ -307,10 +301,12 @@ export type SubmitHandlersDeps = {
   useRemote: boolean;
   /** Remote-repo rows (multi-row). The submit path collapses non-empty rows into `repos[]`. */
   remoteRepos: TaskRemoteRepoRow[];
-  githubPrHeadBranch: string | null;
-  githubPrBaseBranch: string | null;
-  /** Branch for the GitHub URL flow. Per-row branches live on `repositories[i].branch`. */
-  githubBranch: string;
+  /**
+   * Per-URL PR-info cache. The submit path consults this so a PR row whose
+   * head lives on a fork can still anchor `base_branch` to the PR's actual
+   * target (from the GitHub API).
+   */
+  prInfoByUrl: UsePRInfoByURLResult;
   agentProfileId: string;
   executorId: string;
   executorProfileId: string;
@@ -339,7 +335,6 @@ export type SubmitHandlersDeps = {
   setTaskName: (v: string) => void;
   setRepositories: React.Dispatch<React.SetStateAction<TaskRepoRow[]>>;
   setRemoteRepos: React.Dispatch<React.SetStateAction<TaskRemoteRepoRow[]>>;
-  setGitHubBranch: (v: string) => void;
   setAgentProfileId: (v: string) => void;
   setExecutorId: (v: string) => void;
   setSelectedWorkflowId: (v: string | null) => void;

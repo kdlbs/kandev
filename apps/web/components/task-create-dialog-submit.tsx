@@ -36,9 +36,7 @@ export function useTaskSubmitHandlers({
   workspaceRepositories,
   useRemote,
   remoteRepos,
-  githubPrHeadBranch,
-  githubPrBaseBranch,
-  githubBranch,
+  prInfoByUrl,
   agentProfileId,
   executorId,
   executorProfileId,
@@ -56,7 +54,6 @@ export function useTaskSubmitHandlers({
   setTaskName,
   setRepositories,
   setRemoteRepos,
-  setGitHubBranch,
   setAgentProfileId,
   setExecutorId,
   setSelectedWorkflowId,
@@ -115,7 +112,6 @@ export function useTaskSubmitHandlers({
     setTaskName("");
     setRepositories([]);
     setRemoteRepos([]);
-    setGitHubBranch("");
     setAgentProfileId("");
     setExecutorId("");
     setSelectedWorkflowId(workflowId);
@@ -128,7 +124,6 @@ export function useTaskSubmitHandlers({
     setTaskName,
     setRepositories,
     setRemoteRepos,
-    setGitHubBranch,
     setAgentProfileId,
     setExecutorId,
     setSelectedWorkflowId,
@@ -141,9 +136,7 @@ export function useTaskSubmitHandlers({
       return buildRepositoriesPayload({
         useRemote,
         remoteRepos,
-        githubBranch,
-        githubPrHeadBranch,
-        githubPrBaseBranch,
+        prInfoByUrl,
         repositories,
         discoveredRepositories,
         workspaceRepositories,
@@ -157,9 +150,7 @@ export function useTaskSubmitHandlers({
       noRepository,
       useRemote,
       remoteRepos,
-      githubBranch,
-      githubPrHeadBranch,
-      githubPrBaseBranch,
+      prInfoByUrl,
       repositories,
       discoveredRepositories,
       workspaceRepositories,

@@ -20,6 +20,7 @@ import {
   type UseAccessibleReposResult,
 } from "@/hooks/domains/github/use-accessible-repos";
 import type { AccessibleRepo } from "@/lib/api/domains/github-api";
+import type { PRInfo } from "@/hooks/domains/github/use-pr-info-by-url";
 import type { TaskRemoteRepoRow } from "@/components/task-create-dialog-types";
 
 const TRUNCATE_THRESHOLD = 30;
@@ -42,6 +43,14 @@ export type RemoteRepoChipProps = {
   row: TaskRemoteRepoRow;
   branches: Branch[];
   branchesLoading: boolean;
+  /**
+   * PR info for the row's URL (when the URL is a PR URL and the info has
+   * loaded). Drives the per-row PR-head auto-select effect: if the row's
+   * branch is empty, the chip writes the PR head branch into it. The
+   * dialog separately reads the first row's `suggestedTitle` to autofill
+   * the task title.
+   */
+  prInfo?: PRInfo;
   onURLChange: (
     url: string,
     source: "picker" | "paste",
@@ -69,10 +78,12 @@ export function RemoteRepoChip({
   row,
   branches,
   branchesLoading,
+  prInfo,
   onURLChange,
   onBranchChange,
   onRemove,
 }: RemoteRepoChipProps) {
+  useRowBranchAutoSelect({ row, branches, prInfo, onBranchChange });
   return (
     <span
       className="inline-flex items-center rounded-md border border-input bg-input/20 dark:bg-input/30 pr-0.5"
@@ -90,6 +101,43 @@ export function RemoteRepoChip({
       <RemoveButton onRemove={onRemove} />
     </span>
   );
+}
+
+/**
+ * Per-row branch autoselect for the Remote tab. Runs whenever the row's
+ * URL / PR-info / branch list changes; bails out the moment the row already
+ * has a branch (user pick or earlier auto-fill).
+ *
+ * Order of preference:
+ *   1. PR head branch (when the row's URL is a PR URL and PR info has
+ *      loaded). Wins regardless of whether the head appears in the base
+ *      repo's branch list — fork PRs keep the head name surfaced on the
+ *      pill even though `origin` can't resolve it.
+ *   2. `main` / `master` / first available, from the per-URL branch list.
+ *
+ * When the row's URL is empty the effect is a no-op.
+ */
+function useRowBranchAutoSelect(args: {
+  row: TaskRemoteRepoRow;
+  branches: Branch[];
+  prInfo?: PRInfo;
+  onBranchChange: (branch: string) => void;
+}) {
+  const { row, branches, prInfo, onBranchChange } = args;
+  useEffect(() => {
+    if (!row.url) return;
+    if (row.branch) return; // user-pick or earlier autofill wins
+    if (prInfo?.prHeadBranch) {
+      onBranchChange(prInfo.prHeadBranch);
+      return;
+    }
+    if (branches.length === 0) return;
+    const preferred =
+      branches.find((b) => b.name === "main") ??
+      branches.find((b) => b.name === "master") ??
+      branches[0];
+    if (preferred) onBranchChange(preferred.name);
+  }, [row.url, row.branch, prInfo, branches, onBranchChange]);
 }
 
 // --- Repo pill ---------------------------------------------------------------

@@ -7,6 +7,7 @@ import type {
   TaskRemoteRepoRow,
 } from "@/components/task-create-dialog-types";
 import { useBranchesByURL } from "@/hooks/domains/github/use-branches-by-url";
+import { usePRInfoByURL } from "@/hooks/domains/github/use-pr-info-by-url";
 import { useAppStore } from "@/components/state-provider";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
@@ -37,7 +38,6 @@ type FormResetters = {
   setHasDescription: (v: boolean) => void;
   setRepositories: (v: TaskRepoRow[]) => void;
   setRemoteRepos: (v: TaskRemoteRepoRow[]) => void;
-  setGitHubBranch: (v: string) => void;
   setAgentProfileId: (v: string) => void;
   setExecutorId: (v: string) => void;
   setExecutorProfileId: (v: string) => void;
@@ -49,8 +49,6 @@ type FormResetters = {
   setNoRepository: (v: boolean) => void;
   setWorkspacePath: (v: string) => void;
   setGitHubUrlError: (v: string | null) => void;
-  setGitHubPrHeadBranch: (v: string | null) => void;
-  setGitHubPrBaseBranch: (v: string | null) => void;
   setFreshBranchEnabled: (v: boolean) => void;
   setCurrentLocalBranch: (v: string) => void;
 };
@@ -151,7 +149,6 @@ function resetTaskForm(
   } else {
     resetters.setRepositories([]);
   }
-  resetters.setGitHubBranch(initialValues?.branch ?? "");
   resetters.setAgentProfileId("");
   resetters.setExecutorId("");
   resetters.setExecutorProfileId("");
@@ -166,18 +163,19 @@ function resetDiscoveryState(resetters: FormResetters, iv?: TaskCreateDialogInit
   resetters.setDiscoverReposLoaded(false);
   resetters.setUseRemote(Boolean(ghUrl));
   // Seed remoteRepos with a single paste row when the dialog opens with a
-  // pre-filled URL (Quick-task launcher path). Otherwise start empty — the
-  // seed effect creates an empty row on mode toggle.
+  // pre-filled URL (Quick-task launcher path). When `checkoutBranch` is set
+  // (PR launch flow), seed the row's branch with it so the chip pill shows
+  // the PR head immediately. Otherwise start empty — the seed effect creates
+  // an empty row on mode toggle.
   if (ghUrl) {
+    const seededBranch = iv?.checkoutBranch ?? iv?.branch ?? "";
     resetters.setRemoteRepos([
-      { key: "remote-0", url: ghUrl, branch: iv?.branch ?? "", source: "paste" },
+      { key: "remote-0", url: ghUrl, branch: seededBranch, source: "paste" },
     ]);
   } else {
     resetters.setRemoteRepos([]);
   }
   resetters.setGitHubUrlError(null);
-  resetters.setGitHubPrHeadBranch(iv?.checkoutBranch ?? null);
-  resetters.setGitHubPrBaseBranch(null);
   resetters.setFreshBranchEnabled(false);
   resetters.setCurrentLocalBranch("");
   // Source-mode toggle resets — without these, opening the dialog in "None"
@@ -251,27 +249,16 @@ function useFreshBranchState() {
 function useGitHubUrlState() {
   const [useRemote, setUseRemote] = useState(false);
   const [githubUrlError, setGitHubUrlError] = useState<string | null>(null);
-  const [githubPrHeadBranch, setGitHubPrHeadBranch] = useState<string | null>(null);
-  const [githubPrBaseBranch, setGitHubPrBaseBranch] = useState<string | null>(null);
   return {
     useRemote,
     setUseRemote,
     githubUrlError,
     setGitHubUrlError,
-    githubPrHeadBranch,
-    setGitHubPrHeadBranch,
-    githubPrBaseBranch,
-    setGitHubPrBaseBranch,
   };
 }
 
 /** Core form state declarations */
-function useFormStateValues(
-  workflowId: string | null,
-  workspaceId: string | null,
-  open: boolean,
-  initialValues?: TaskCreateDialogInitialValues,
-) {
+function useFormStateValues(workflowId: string | null) {
   // openCycle increments each time dialog opens - used in key to force TaskFormInputs remount
   const [openCycle, setOpenCycle] = useState(0);
   // Start as false so a fresh mount with open=true is detected as a rising edge
@@ -291,9 +278,6 @@ function useFormStateValues(
   const [draftDescription, setDraftDescription] = useState("");
 
   const descriptionInputRef = useRef<TaskFormInputsHandle | null>(null);
-  // GitHub URL flow has its own branch field (the per-repo branch lives on
-  // each row in `repositories`). Seed from initialValues for the URL flow only.
-  const [githubBranch, setGitHubBranch] = useState(initialValues?.branch ?? "");
   const [agentProfileId, setAgentProfileId] = useState("");
   const [executorId, setExecutorId] = useState("");
   const [executorProfileId, setExecutorProfileId] = useState("");
@@ -316,8 +300,6 @@ function useFormStateValues(
     draftDescription,
     setDraftDescription,
     descriptionInputRef,
-    githubBranch,
-    setGitHubBranch,
     agentProfileId,
     setAgentProfileId,
     executorId,
@@ -368,7 +350,7 @@ export function useDialogFormState(
   workflowId: string | null,
   initialValues?: TaskCreateDialogInitialValues,
 ) {
-  const form = useFormStateValues(workflowId, workspaceId, open, initialValues);
+  const form = useFormStateValues(workflowId);
   const discovery = useDiscoveryState();
   const ghUrl = useGitHubUrlState();
   const wfAgent = useWorkflowAgentProfileState();
@@ -376,6 +358,7 @@ export function useDialogFormState(
   const remoteRepos = useRemoteReposState();
   const freshBranch = useFreshBranchState();
   const branchesByUrl = useBranchesByURL();
+  const prInfoByUrl = usePRInfoByURL();
 
   useFormResetEffects({
     open,
@@ -392,7 +375,6 @@ export function useDialogFormState(
       setHasDescription: form.setHasDescription,
       setRepositories: repos.setRepositories,
       setRemoteRepos: remoteRepos.setRemoteRepos,
-      setGitHubBranch: form.setGitHubBranch,
       setAgentProfileId: form.setAgentProfileId,
       setExecutorId: form.setExecutorId,
       setExecutorProfileId: form.setExecutorProfileId,
@@ -402,8 +384,6 @@ export function useDialogFormState(
       setDiscoverReposLoaded: discovery.setDiscoverReposLoaded,
       setUseRemote: ghUrl.setUseRemote,
       setGitHubUrlError: ghUrl.setGitHubUrlError,
-      setGitHubPrHeadBranch: ghUrl.setGitHubPrHeadBranch,
-      setGitHubPrBaseBranch: ghUrl.setGitHubPrBaseBranch,
       setFreshBranchEnabled: freshBranch.setFreshBranchEnabled,
       setCurrentLocalBranch: freshBranch.setCurrentLocalBranch,
       setNoRepository: form.setNoRepository,
@@ -412,6 +392,18 @@ export function useDialogFormState(
   });
 
   useRemoteReposSeedEffect(ghUrl.useRemote, remoteRepos.remoteRepos, remoteRepos.setRemoteRepos);
+
+  // Title autofill: the first remote-repo row's PR info seeds the task title
+  // when the user hasn't typed one. Keyed only off row 0 — adding more PR
+  // rows later never overwrites the title.
+  useTitleAutofillFromFirstRowPRInfo({
+    open: open && ghUrl.useRemote,
+    firstRowUrl: remoteRepos.remoteRepos[0]?.url ?? "",
+    prInfoByUrl,
+    taskName: form.taskName,
+    setTaskName: form.setTaskName,
+    setHasTitle: form.setHasTitle,
+  });
 
   const { clearDraft } = useDraftPersistence(
     open,
@@ -430,8 +422,50 @@ export function useDialogFormState(
     ...remoteRepos,
     ...freshBranch,
     branchesByUrl,
+    prInfoByUrl,
     clearDraft,
   };
+}
+
+/**
+ * Seeds the task title from the first Remote row's PR info (when present)
+ * the first time it arrives, and only when the user hasn't typed a title.
+ * Subsequent PR-info changes for the same URL don't overwrite — the
+ * lastAutoFilledRef tracks our own writes so re-pasting a different PR URL
+ * still works while a user-edited title is preserved.
+ */
+function useTitleAutofillFromFirstRowPRInfo(args: {
+  open: boolean;
+  firstRowUrl: string;
+  prInfoByUrl: ReturnType<typeof usePRInfoByURL>;
+  taskName: string;
+  setTaskName: (v: string) => void;
+  setHasTitle: (v: boolean) => void;
+}) {
+  const { open, firstRowUrl, prInfoByUrl, taskName, setTaskName, setHasTitle } = args;
+  const lastAutoFilledRef = useRef("");
+  // Re-read latest info on every render; cheap because the cache is memoized
+  // by URL inside the hook.
+  const suggested = firstRowUrl ? prInfoByUrl.info(firstRowUrl)?.suggestedTitle : undefined;
+  useEffect(() => {
+    // Reset the sentinel whenever the user clears the title — otherwise a
+    // re-typed value matching a prior auto-fill could be silently replaced.
+    if (!taskName.trim()) {
+      lastAutoFilledRef.current = "";
+    }
+  }, [taskName]);
+  useEffect(() => {
+    if (!open) return;
+    if (!suggested) return;
+    const trimmed = taskName.trim();
+    // Two writeable states: title is empty, or title equals our last auto-fill
+    // (so a fresh PR URL replaces a previous PR's auto-filled title).
+    if (trimmed && taskName !== lastAutoFilledRef.current) return;
+    if (taskName === suggested) return;
+    lastAutoFilledRef.current = suggested;
+    setTaskName(suggested);
+    setHasTitle(true);
+  }, [open, suggested, taskName, setTaskName, setHasTitle]);
 }
 
 export type { DialogFormState } from "@/components/task-create-dialog-types";

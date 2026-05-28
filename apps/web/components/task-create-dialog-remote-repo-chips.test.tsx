@@ -69,10 +69,20 @@ function makeBranchesByUrl(ensure = vi.fn()) {
   };
 }
 
+function makePrInfoByUrl(ensure = vi.fn()) {
+  return {
+    info: () => undefined,
+    loading: () => false,
+    ensure,
+    clear: () => undefined,
+  };
+}
+
 function makeFs(overrides: Partial<DialogFormState>): DialogFormState {
   return {
     remoteRepos: [] as TaskRemoteRepoRow[],
     branchesByUrl: makeBranchesByUrl(),
+    prInfoByUrl: makePrInfoByUrl(),
     ...overrides,
   } as unknown as DialogFormState;
 }
