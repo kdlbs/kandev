@@ -286,11 +286,21 @@ function applyLayoutAndSet(
   state: LayoutState,
   pinnedWidths: Map<string, number>,
   set: StoreSet,
+  preMeasured?: { width: number; height: number },
 ): LayoutGroupIds {
   // Pass measured container dims so fromJSON's grid.width matches the live
   // container — avoids the proportional rescale that would otherwise grow
   // pinned columns past their legacy initial caps on the next api.layout.
-  const measured = measureDockviewContainer(api);
+  //
+  // Callers can pre-measure and pass `preMeasured` to avoid re-measuring inside
+  // the middle of a layout transition. The visibility toggles below take that
+  // path because `set({ sidebarVisible: ... })` runs before this call and can
+  // trigger React to repaint the host shell, momentarily shrinking the
+  // dockview parent's `clientWidth` — re-measuring then would read the
+  // transient narrow width and clamp pinned columns to it (the
+  // `pane-resize-sidebar.spec.ts:41` flake mode: cap=301 from a 601px stale
+  // measurement clamps the 430px sidebar override down to 301).
+  const measured = preMeasured ?? measureDockviewContainer(api);
   const ids = applyLayout(api, state, pinnedWidths, measured.width, measured.height);
   set(ids);
   return ids;
@@ -323,13 +333,14 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
       const liveWidths = captureLiveWidths(api, set);
       preserveChatScrollDuringLayout();
       const { width: safeWidth, height: safeHeight } = measureDockviewContainer(api);
+      const preMeasured = { width: safeWidth, height: safeHeight };
       if (sidebarVisible) {
         const current = fromDockviewApi(api);
         const withoutSidebar: LayoutState = {
           columns: current.columns.filter((c) => c.id !== "sidebar"),
         };
         set({ isRestoringLayout: true, sidebarVisible: false });
-        applyLayoutAndSet(api, withoutSidebar, liveWidths, set);
+        applyLayoutAndSet(api, withoutSidebar, liveWidths, set, preMeasured);
         requestAnimationFrame(() => {
           api.layout(safeWidth, safeHeight);
           enforceFromStore(api, get);
@@ -343,7 +354,7 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
           columns: [sidebarCol, ...current.columns],
         };
         set({ isRestoringLayout: true, sidebarVisible: true });
-        applyLayoutAndSet(api, withSidebar, liveWidths, set);
+        applyLayoutAndSet(api, withSidebar, liveWidths, set, preMeasured);
         requestAnimationFrame(() => {
           api.layout(safeWidth, safeHeight);
           enforceFromStore(api, get);
