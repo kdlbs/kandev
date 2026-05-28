@@ -93,7 +93,7 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 		return err
 	}
 	if iw == nil {
-		return fmt.Errorf("issue watch not found: %s", id)
+		return fmt.Errorf("%w: issue watch %s", ErrWatchNotFound, id)
 	}
 	applyIssueWatchPatch(iw, req)
 	if req.CleanupPolicy != nil && !IsValidCleanupPolicy(*req.CleanupPolicy) {
@@ -264,7 +264,7 @@ func (s *Service) TriggerIssueWatch(ctx context.Context, id string) ([]*Issue, e
 		return nil, err
 	}
 	if iw == nil {
-		return nil, fmt.Errorf("issue watch not found: %s", id)
+		return nil, fmt.Errorf("%w: issue watch %s", ErrWatchNotFound, id)
 	}
 	found, err := s.CheckIssueWatch(ctx, iw)
 	if err != nil {

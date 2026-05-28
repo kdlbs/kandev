@@ -118,7 +118,13 @@ func wsListTaskMRs(svc *Service, _ *logger.Logger) ws.HandlerFunc {
 			WorkspaceID string `json:"workspace_id"`
 			TaskID      string `json:"task_id"`
 		}
-		_ = parseInto(msg, &req)
+		// Malformed payloads must not silently fall through to the "list
+		// everything in workspace" branch — that exposes more data than the
+		// caller intended. Empty payload (both fields absent) is rejected
+		// further down by the workspace_id check.
+		if err := parseInto(msg, &req); err != nil {
+			return badRequest(msg, errMsgInvalidPayload)
+		}
 		if req.TaskID != "" {
 			mrs, err := svc.ListTaskMRsByTask(ctx, req.TaskID)
 			if err != nil {
@@ -237,7 +243,9 @@ func wsListReviewWatches(svc *Service, _ *logger.Logger) ws.HandlerFunc {
 		var req struct {
 			WorkspaceID string `json:"workspace_id"`
 		}
-		_ = parseInto(msg, &req)
+		if err := parseInto(msg, &req); err != nil {
+			return badRequest(msg, errMsgInvalidPayload)
+		}
 		var watches []*ReviewWatch
 		var err error
 		if req.WorkspaceID == "" {
@@ -331,7 +339,9 @@ func wsListMRWatches(svc *Service, _ *logger.Logger) ws.HandlerFunc {
 			SessionID string `json:"session_id"`
 			TaskID    string `json:"task_id"`
 		}
-		_ = parseInto(msg, &req)
+		if err := parseInto(msg, &req); err != nil {
+			return badRequest(msg, errMsgInvalidPayload)
+		}
 		switch {
 		case req.SessionID != "":
 			ws, err := svc.ListMRWatchesBySession(ctx, req.SessionID)
@@ -377,7 +387,9 @@ func wsListIssueWatches(svc *Service, _ *logger.Logger) ws.HandlerFunc {
 		var req struct {
 			WorkspaceID string `json:"workspace_id"`
 		}
-		_ = parseInto(msg, &req)
+		if err := parseInto(msg, &req); err != nil {
+			return badRequest(msg, errMsgInvalidPayload)
+		}
 		var watches []*IssueWatch
 		var err error
 		if req.WorkspaceID == "" {
@@ -620,7 +632,9 @@ func wsSearchProjects(svc *Service, _ *logger.Logger) ws.HandlerFunc {
 			Query string `json:"query"`
 			Limit int    `json:"limit"`
 		}
-		_ = parseInto(msg, &req)
+		if err := parseInto(msg, &req); err != nil {
+			return badRequest(msg, errMsgInvalidPayload)
+		}
 		projects, err := svc.SearchProjects(ctx, req.Query, req.Limit)
 		if err != nil {
 			return internalError(msg, err)

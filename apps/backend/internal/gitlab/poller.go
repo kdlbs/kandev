@@ -23,6 +23,7 @@ type Poller struct {
 	eventBus bus.EventBus
 	logger   *logger.Logger
 
+	mu      sync.Mutex
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup
 	started bool
@@ -34,7 +35,10 @@ func NewPoller(svc *Service, eventBus bus.EventBus, log *logger.Logger) *Poller 
 }
 
 // Start kicks off the polling loops. Repeated Start calls are no-ops.
+// Safe to call concurrently with Stop.
 func (p *Poller) Start(ctx context.Context) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if p.started {
 		return
 	}
@@ -47,14 +51,21 @@ func (p *Poller) Start(ctx context.Context) {
 	go p.issueWatchLoop(ctx)
 }
 
-// Stop cancels all loops and waits for them to drain.
+// Stop cancels all loops and waits for them to drain. Safe to call
+// concurrently with Start.
 func (p *Poller) Stop() {
+	p.mu.Lock()
 	if !p.started || p.cancel == nil {
+		p.mu.Unlock()
 		return
 	}
-	p.cancel()
+	cancel := p.cancel
+	p.mu.Unlock()
+	cancel()
 	p.wg.Wait()
+	p.mu.Lock()
 	p.started = false
+	p.mu.Unlock()
 }
 
 // --- MR watcher loop ---

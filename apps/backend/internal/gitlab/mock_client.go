@@ -3,6 +3,7 @@ package gitlab
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -435,9 +436,12 @@ func (c *MockClient) SearchProjects(ctx context.Context, query string, _ int) ([
 	if query == "" {
 		return projects, nil
 	}
+	needle := strings.ToLower(query)
 	out := make([]Project, 0, len(projects))
 	for _, p := range projects {
-		if p.PathWithNamespace == query || p.Path == query {
+		if strings.Contains(strings.ToLower(p.PathWithNamespace), needle) ||
+			strings.Contains(strings.ToLower(p.Name), needle) ||
+			strings.Contains(strings.ToLower(p.Path), needle) {
 			out = append(out, p)
 		}
 	}

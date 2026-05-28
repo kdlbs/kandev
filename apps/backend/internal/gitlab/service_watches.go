@@ -105,6 +105,11 @@ func (s *Service) DeleteMRWatch(ctx context.Context, id string) error {
 // a "GitLab unconfigured" UI instead of "500 internal error".
 var errStoreUnavailable = fmt.Errorf("gitlab store not configured")
 
+// ErrWatchNotFound is returned by Update/Trigger methods when the watch id
+// doesn't exist. Sentinel so the HTTP controller can map it to 404 rather
+// than 500.
+var ErrWatchNotFound = fmt.Errorf("watch not found")
+
 // CheckMRWatch polls a watch once: returns the latest MR status and whether
 // the underlying MR moved into a state worth notifying about (new note,
 // pipeline transition, approval transition).
@@ -242,7 +247,7 @@ func (s *Service) UpdateReviewWatch(ctx context.Context, id string, req *UpdateR
 		return err
 	}
 	if rw == nil {
-		return fmt.Errorf("review watch not found: %s", id)
+		return fmt.Errorf("%w: review watch %s", ErrWatchNotFound, id)
 	}
 	applyReviewWatchPatch(rw, req)
 	if req.CleanupPolicy != nil && !IsValidCleanupPolicy(*req.CleanupPolicy) {
@@ -395,12 +400,13 @@ func (s *Service) fetchReviewMRs(ctx context.Context, watch *ReviewWatch) ([]*MR
 	if username == "" {
 		return nil, fmt.Errorf("no authenticated gitlab user")
 	}
-	filter := watch.CustomQuery
-	if filter == "" {
+	// SearchMRs's buildMRSearchQuery returns customQuery verbatim when
+	// non-empty (ignoring filter), so only build the default filter when
+	// the watch has no customQuery to pass through.
+	filter := ""
+	if watch.CustomQuery == "" {
 		filter = "reviewer_username=" + url.QueryEscape(username)
 	}
-	// Project filter: when projects are specified, narrow each result;
-	// otherwise the API returns all MRs the user can review.
 	mrs, err := client.SearchMRs(ctx, filter, watch.CustomQuery)
 	if err != nil {
 		return nil, fmt.Errorf("search MRs: %w", err)
@@ -428,7 +434,7 @@ func (s *Service) TriggerReviewWatch(ctx context.Context, id string) ([]*MR, err
 		return nil, err
 	}
 	if rw == nil {
-		return nil, fmt.Errorf("review watch not found: %s", id)
+		return nil, fmt.Errorf("%w: review watch %s", ErrWatchNotFound, id)
 	}
 	mrs, err := s.CheckReviewWatch(ctx, rw)
 	if err != nil {
@@ -475,10 +481,12 @@ func (s *Service) requireStore() *Store {
 }
 
 // appendLabelsToQuery merges a label list into an existing customQuery string.
-// If the query already contains `labels=`, it is left alone (the user is
-// explicitly controlling the filter and we don't want to silently double-up).
+// If the query already has a `labels` key the caller's value is kept (we
+// don't want to silently double-up). url.ParseQuery is used for an exact
+// key match — strings.Contains("labels=") would false-positive on keys
+// like `mylabels=` and silently drop the watch's labels.
 func appendLabelsToQuery(customQuery string, labels []string) string {
-	if strings.Contains(customQuery, "labels=") {
+	if parsed, err := url.ParseQuery(customQuery); err == nil && parsed.Has("labels") {
 		return customQuery
 	}
 	encoded := url.QueryEscape(strings.Join(labels, ","))

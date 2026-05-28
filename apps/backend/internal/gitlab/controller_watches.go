@@ -7,6 +7,22 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// httpRespondError maps known sentinel errors to their HTTP code and
+// writes a JSON {"error": "..."} body. Returns true when a response was
+// written so callers can early-return.
+func httpRespondError(ctx *gin.Context, err error) bool {
+	if err == nil {
+		return false
+	}
+	switch {
+	case errors.Is(err, ErrWatchNotFound):
+		ctx.JSON(http.StatusNotFound, gin.H{responseErrorKey: err.Error()})
+	default:
+		ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: err.Error()})
+	}
+	return true
+}
+
 // RegisterWatchHTTPRoutes wires the watch + presets + write-action HTTP
 // surface on top of the v1 routes. Called from RegisterHTTPRoutes after the
 // base set is registered.
@@ -147,8 +163,7 @@ func (c *Controller) httpUpdateReviewWatch(ctx *gin.Context) {
 	if !bindJSON(ctx, &req) {
 		return
 	}
-	if err := c.service.UpdateReviewWatch(ctx.Request.Context(), id, &req); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: err.Error()})
+	if err := c.service.UpdateReviewWatch(ctx.Request.Context(), id, &req); httpRespondError(ctx, err) {
 		return
 	}
 	rw, err := c.service.GetReviewWatch(ctx.Request.Context(), id)
@@ -171,8 +186,7 @@ func (c *Controller) httpDeleteReviewWatch(ctx *gin.Context) {
 func (c *Controller) httpTriggerReviewWatch(ctx *gin.Context) {
 	id := ctx.Param("id")
 	mrs, err := c.service.TriggerReviewWatch(ctx.Request.Context(), id)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: err.Error()})
+	if httpRespondError(ctx, err) {
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"mrs": mrs, "count": len(mrs)})
@@ -226,8 +240,7 @@ func (c *Controller) httpUpdateIssueWatch(ctx *gin.Context) {
 	if !bindJSON(ctx, &req) {
 		return
 	}
-	if err := c.service.UpdateIssueWatch(ctx.Request.Context(), id, &req); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: err.Error()})
+	if err := c.service.UpdateIssueWatch(ctx.Request.Context(), id, &req); httpRespondError(ctx, err) {
 		return
 	}
 	iw, err := c.service.GetIssueWatch(ctx.Request.Context(), id)
@@ -250,8 +263,7 @@ func (c *Controller) httpDeleteIssueWatch(ctx *gin.Context) {
 func (c *Controller) httpTriggerIssueWatch(ctx *gin.Context) {
 	id := ctx.Param("id")
 	issues, err := c.service.TriggerIssueWatch(ctx.Request.Context(), id)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: err.Error()})
+	if httpRespondError(ctx, err) {
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"issues": issues, "count": len(issues)})

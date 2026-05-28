@@ -85,10 +85,16 @@ func (s *Service) publishWatchEvent(ctx context.Context, kind, id, sessionID, ta
 	if eb == nil {
 		return
 	}
-	_ = eb.Publish(ctx, events.GitLabWatchEvent, bus.NewEvent(events.GitLabWatchEvent, eventSource, map[string]string{
+	payload := map[string]string{
 		"kind":       kind,
 		"id":         id,
 		"session_id": sessionID,
 		"task_id":    taskID,
-	}))
+	}
+	if err := eb.Publish(ctx, events.GitLabWatchEvent, bus.NewEvent(events.GitLabWatchEvent, eventSource, payload)); err != nil {
+		s.logger.Warn("publish gitlab watch event",
+			zap.String("kind", kind),
+			zap.String("id", id),
+			zap.Error(err))
+	}
 }

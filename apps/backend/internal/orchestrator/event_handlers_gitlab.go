@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"fmt"
 
 	"go.uber.org/zap"
 
@@ -153,14 +152,3 @@ func (s *Service) createGitLabIssueTask(ctx context.Context, evt *gitlab.NewIssu
 		zap.String("project", issue.ProjectPath),
 		zap.Int("iid", issue.IID))
 }
-
-// gitlabRepoSlug returns the project path for logging when the issue/MR struct
-// might be partial. Kept private to this file.
-func gitlabRepoSlug(projectPath string) string {
-	if projectPath == "" {
-		return "<unknown>"
-	}
-	return fmt.Sprintf("gitlab:%s", projectPath)
-}
-
-var _ = gitlabRepoSlug // reserved for future structured-logging helpers

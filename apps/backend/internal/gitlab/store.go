@@ -101,6 +101,7 @@ const createTablesSQL = `
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
 	);
+	CREATE INDEX IF NOT EXISTS idx_gitlab_review_watches_workspace_id ON gitlab_review_watches(workspace_id);
 
 	CREATE TABLE IF NOT EXISTS gitlab_review_mr_tasks (
 		id TEXT PRIMARY KEY,
@@ -131,6 +132,7 @@ const createTablesSQL = `
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
 	);
+	CREATE INDEX IF NOT EXISTS idx_gitlab_issue_watches_workspace_id ON gitlab_issue_watches(workspace_id);
 
 	CREATE TABLE IF NOT EXISTS gitlab_issue_watch_tasks (
 		id TEXT PRIMARY KEY,

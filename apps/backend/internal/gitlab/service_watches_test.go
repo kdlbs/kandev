@@ -28,6 +28,16 @@ func TestAppendLabelsToQuery_PreservesExistingLabelsClause(t *testing.T) {
 	}
 }
 
+func TestAppendLabelsToQuery_DoesNotMatchSimilarKeys(t *testing.T) {
+	// A key like `mylabels` must not false-trigger the "already has labels"
+	// guard; the watch's labels should still be appended.
+	got := appendLabelsToQuery("mylabels=foo&state=opened", []string{"bug"})
+	want := "mylabels=foo&state=opened&labels=bug"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
 func TestIsValidCleanupPolicy(t *testing.T) {
 	cases := map[string]bool{
 		"":        true,
