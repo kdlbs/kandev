@@ -123,7 +123,11 @@ export function FileRow({
           </p>
         </button>
       </div>
-      <div className="flex items-center gap-2 shrink-0">
+      <div className="grid items-center shrink-0 [&>*]:col-start-1 [&>*]:row-start-1">
+        <div className="flex items-center gap-2 justify-end transition-opacity group-hover:opacity-0">
+          <LineStat added={file.plus} removed={file.minus} />
+          <FileStatusIcon status={file.status} />
+        </div>
         <FileRowActions
           path={file.path}
           repo={file.repositoryName}
@@ -142,8 +146,6 @@ export function FileRow({
             ) : null
           }
         />
-        <LineStat added={file.plus} removed={file.minus} />
-        <FileStatusIcon status={file.status} />
       </div>
     </li>
   );
@@ -217,7 +219,7 @@ function FileRowActions({
   stageButton?: React.ReactNode;
 }) {
   return (
-    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
+    <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
       <Tooltip>
         <TooltipTrigger asChild>
           <button
