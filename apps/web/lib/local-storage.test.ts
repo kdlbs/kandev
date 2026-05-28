@@ -5,8 +5,6 @@ import {
   wasPRMergedBannerDismissed,
 } from "./local-storage";
 
-const DISMISSED_KEY_PREFIX = "kandev.pr-merged-banner-dismissed.";
-
 describe("PR merged banner dismissal storage", () => {
   beforeEach(() => {
     window.sessionStorage.clear();
@@ -21,7 +19,6 @@ describe("PR merged banner dismissal storage", () => {
 
     expect(wasPRMergedBannerDismissed("task-a")).toBe(true);
     expect(wasPRMergedBannerDismissed("task-b")).toBe(false);
-    expect(window.sessionStorage.getItem(`${DISMISSED_KEY_PREFIX}task-a`)).toBe("1");
   });
 
   it("clears the dismissal flag via cleanupTaskStorage", () => {

@@ -237,12 +237,13 @@ test.describe("Chat status bar", () => {
     });
     await expect(session.prMergedBanner()).not.toBeVisible();
 
-    // Persists across task switch (away and back).
+    // Switch to task B and back. Task B has no merged PR so it never shows
+    // the banner — the real proof of cross-task-switch persistence is that
+    // the banner is still hidden on the return trip to task A.
     await session.taskInSidebar("Dismiss Banner Task B").first().click();
     await expect(session.chat.getByText("dismiss banner beta response").last()).toBeVisible({
       timeout: 30_000,
     });
-    await expect(session.prMergedBanner()).not.toBeVisible();
 
     await session.taskInSidebar("Dismiss Banner Task A").first().click();
     await expect(session.chat.getByText("dismiss banner alpha response").last()).toBeVisible({
