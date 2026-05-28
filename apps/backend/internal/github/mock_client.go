@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -77,6 +78,11 @@ type MockClient struct {
 	gists            map[string]mockGist
 	deletedGists     []string
 	nextGistID       int
+
+	// findPRByBranchCalls counts FindPRByBranch invocations so tests can
+	// assert that branch-detection probes are throttled. Atomic because
+	// FindPRByBranch otherwise only takes a read lock.
+	findPRByBranchCalls atomic.Int64
 }
 
 // mockGist captures a gist that was created via the mock client so tests
@@ -133,10 +139,17 @@ func (m *MockClient) GetPR(_ context.Context, owner, repo string, number int) (*
 }
 
 func (m *MockClient) FindPRByBranch(_ context.Context, owner, repo, branch string) (*PR, error) {
+	m.findPRByBranchCalls.Add(1)
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	pr := m.prsByBranch[branchKey{owner, repo, branch}]
 	return pr, nil
+}
+
+// FindPRByBranchCallCount returns how many times FindPRByBranch has been
+// called. Used by tests asserting detection-probe throttling.
+func (m *MockClient) FindPRByBranchCallCount() int {
+	return int(m.findPRByBranchCalls.Load())
 }
 
 func (m *MockClient) ListAuthoredPRs(_ context.Context, owner, repo string) ([]*PR, error) {
@@ -527,6 +540,7 @@ func (m *MockClient) Reset() {
 	m.gists = make(map[string]mockGist)
 	m.deletedGists = nil
 	m.nextGistID = 0
+	m.findPRByBranchCalls.Store(0)
 }
 
 // SubmittedReviews returns all recorded SubmitReview calls.

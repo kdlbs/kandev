@@ -108,3 +108,45 @@ func TestTriggerPRSync_NoWatch(t *testing.T) {
 		t.Errorf("expected nil TaskPR for task without watch, got %+v", result)
 	}
 }
+
+// TestTriggerPRSyncAll_ThrottlesDetectionProbe reproduces the log-flood bug:
+// a pr_number=0 watch on a branch that has no PR (e.g. an unresolvable repo)
+// was re-probing GitHub on every on-demand sync, because the detection path —
+// unlike the status-sync path — had no freshness guard and never stamped
+// last_checked_at. The frontend re-syncs every 5s while no PR is found, so
+// each repeated sync hit `gh` again and logged a warning. After the fix the
+// first sync probes once and stamps the watch; the immediate second sync is
+// throttled within prSyncFreshnessWindow and must NOT probe again.
+func TestTriggerPRSyncAll_ThrottlesDetectionProbe(t *testing.T) {
+	_, svc, mockClient, store := setupPollerTest(t)
+	ctx := context.Background()
+
+	// Watch with pr_number=0 on a branch that has no PR in the mock — every
+	// FindPRByBranch returns (nil, nil), mirroring "PR not found yet".
+	watch := &PRWatch{
+		SessionID: "s1",
+		TaskID:    "t1",
+		Owner:     "org",
+		Repo:      "missing",
+		PRNumber:  0,
+		Branch:    "feat/never-merged",
+	}
+	if err := store.CreatePRWatch(ctx, watch); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.TriggerPRSyncAll(ctx, "t1"); err != nil {
+		t.Fatalf("first TriggerPRSyncAll: %v", err)
+	}
+	if got := mockClient.FindPRByBranchCallCount(); got != 1 {
+		t.Fatalf("expected exactly 1 detection probe on first sync, got %d", got)
+	}
+
+	// Second sync immediately after — well within prSyncFreshnessWindow.
+	if _, err := svc.TriggerPRSyncAll(ctx, "t1"); err != nil {
+		t.Fatalf("second TriggerPRSyncAll: %v", err)
+	}
+	if got := mockClient.FindPRByBranchCallCount(); got != 1 {
+		t.Errorf("expected detection probe to be throttled on second sync (still 1 call), got %d", got)
+	}
+}

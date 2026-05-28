@@ -562,7 +562,13 @@ func (s *Service) TriggerPRSyncAll(ctx context.Context, taskID string) ([]*TaskP
 			tp, syncErr = s.triggerPRStatusSync(ctx, w, taskID)
 		}
 		if syncErr != nil {
-			s.logger.Warn("per-repo PR sync failed",
+			// Debug, not Warn: this is best-effort background reconciliation and
+			// the most common failure — a branch with no PR yet, or an
+			// unresolvable repo — is an expected steady state, not an
+			// operational warning. The background poller logs the same failure
+			// at Debug (see poller.detectPRForWatch / checkSinglePRWatch); the
+			// WS handler still returns the error to the caller.
+			s.logger.Debug("per-repo PR sync failed",
 				zap.String("task_id", taskID),
 				zap.String("repository_id", w.RepositoryID),
 				zap.Int("pr_number", w.PRNumber),
@@ -580,7 +586,26 @@ func (s *Service) triggerPRDetection(ctx context.Context, watch *PRWatch, taskID
 	if s.client == nil {
 		return nil, nil
 	}
+	// Throttle branch-detection probes. A watch still searching for its PR
+	// (pr_number=0) has no TaskPR row yet, so triggerPRStatusSync's freshness
+	// check can't gate it — we gate on the watch's own last_checked_at instead.
+	// Without this, a branch whose PR never appears (e.g. an unresolvable repo)
+	// re-hits `gh` on every on-demand sync, and the frontend re-syncs every 5s
+	// while no PR is found — flooding the logs with identical failures.
+	if watch.LastCheckedAt != nil && time.Since(*watch.LastCheckedAt) < prSyncFreshnessWindow {
+		return s.store.GetTaskPRByRepository(ctx, taskID, watch.RepositoryID)
+	}
+
 	pr, err := s.client.FindPRByBranch(ctx, watch.Owner, watch.Repo, watch.Branch)
+	// Stamp last_checked_at regardless of outcome so the freshness guard above
+	// engages on the next call. The background poller (detectPRForWatch) already
+	// records this; the on-demand path historically didn't, which is why
+	// repeated syncs always re-probed.
+	now := time.Now().UTC()
+	if tsErr := s.store.UpdatePRWatchTimestamps(ctx, watch.ID, now, nil, "", ""); tsErr != nil {
+		s.logger.Debug("failed to stamp PR watch after detection probe",
+			zap.String("watch_id", watch.ID), zap.Error(tsErr))
+	}
 	if err != nil || pr == nil {
 		return nil, err
 	}
