@@ -39,8 +39,10 @@ concurrency:
   cancel-in-progress: true
 
 # Least-privilege: the `frontend` job only reads source and runs tests.
+# `packages: read` lets the container job pull the kandev-ci image from GHCR.
 permissions:
   contents: read
+  packages: read
 
 jobs:
   frontend:

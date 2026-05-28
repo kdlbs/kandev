@@ -24,10 +24,13 @@ concurrency:
 
 # Least-privilege default. The Linux `test` job and the Windows `test-windows`
 # job only read source and run tests — no PR/issue writes, no release ops.
-# Matches the explicit block already present on the Windows job and the
-# workflow-level block on e2e-tests.yml.
+# `packages: read` is required for the Linux job to pull the kandev-ci
+# container image from GHCR (currently public; explicit grant keeps the
+# workflow working if the package ever goes private). Declaring any scope
+# explicitly zeroes out every unlisted one.
 permissions:
   contents: read
+  packages: read
 
 jobs:
   test:

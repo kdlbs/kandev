@@ -29,6 +29,9 @@ concurrency:
 
 permissions:
   contents: read
+  # Required so the containerized build / e2e shards / e2e-report jobs can
+  # pull the kandev-ci image from GHCR via GITHUB_TOKEN.
+  packages: read
 
 jobs:
   build:
@@ -221,6 +224,7 @@ jobs:
           echo "Playwright version: ${version}"
 
       - name: Cache Playwright browsers
+        id: playwright-cache
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
@@ -230,7 +234,10 @@ jobs:
         working-directory: apps
         run: pnpm install --frozen-lockfile
 
+      # `--with-deps` runs apt-get install on every invocation (~20–30s), so
+      # skip the step entirely when the cache restored the browser binaries.
       - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         working-directory: apps/web
         run: npx playwright install chromium --with-deps
 
