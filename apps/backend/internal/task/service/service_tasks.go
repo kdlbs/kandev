@@ -58,7 +58,9 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 	// an inherit_parent subtask resolves a repo at launch and can reuse the
 	// parent's worktree (the UI omits repositories expecting this). Mirrors the
 	// MCP create_task path so UI- and agent-created subtasks behave identically.
-	s.inheritParentRepositories(ctx, req)
+	if err := s.inheritParentRepositories(ctx, req); err != nil {
+		return nil, err
+	}
 
 	// For office tasks, resolve workflow from workspace
 	if isOfficeRequest(req) && req.WorkflowID == "" {
@@ -108,22 +110,26 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 }
 
 // inheritParentRepositories fills req.Repositories from the parent task when a
-// subtask is created without explicit repositories. RepositoryID and BaseBranch
-// carry over; CheckoutBranch is dropped on purpose because two worktrees can't
-// share a working branch, so the subtask branches off the same base as the
-// parent. Mirrors the MCP create_task path (mcp/handlers.inheritedRepoInputs)
-// so UI- and agent-created subtasks behave identically. A subtask with no
-// repositories can't establish a worktree, which is what blocked inherit_parent
-// from reusing the parent's worktree on the HTTP path.
-func (s *Service) inheritParentRepositories(ctx context.Context, req *CreateTaskRequest) {
+// subtask is created without explicit repositories. This applies to any
+// repo-less subtask (not only inherit_parent ones), matching the MCP
+// create_task path (mcp/handlers.inheritedRepoInputs) so UI- and agent-created
+// subtasks behave identically — the UI's new_workspace mode always sends repos,
+// so in practice only inherit_parent reaches here empty. RepositoryID and
+// BaseBranch carry over; CheckoutBranch is dropped on purpose because two
+// worktrees can't share a working branch, so the subtask branches off the same
+// base as the parent.
+//
+// A lookup failure is returned rather than swallowed: a subtask silently
+// created with no repositories can't establish a worktree, which would
+// reintroduce the exact fresh-worktree bug this inheritance is meant to fix —
+// failing fast surfaces the problem at creation time instead.
+func (s *Service) inheritParentRepositories(ctx context.Context, req *CreateTaskRequest) error {
 	if req.ParentID == "" || len(req.Repositories) > 0 {
-		return
+		return nil
 	}
 	parentRepos, err := s.taskRepos.ListTaskRepositories(ctx, req.ParentID)
 	if err != nil {
-		s.logger.Warn("failed to list parent repositories for subtask inheritance",
-			zap.String("parent_id", req.ParentID), zap.Error(err))
-		return
+		return fmt.Errorf("list parent repositories for subtask inheritance: %w", err)
 	}
 	inherited := make([]TaskRepositoryInput, 0, len(parentRepos))
 	for _, r := range parentRepos {
@@ -138,6 +144,7 @@ func (s *Service) inheritParentRepositories(ctx context.Context, req *CreateTask
 	if len(inherited) > 0 {
 		req.Repositories = inherited
 	}
+	return nil
 }
 
 // validateCreateTaskRequest validates constraints for task creation.
