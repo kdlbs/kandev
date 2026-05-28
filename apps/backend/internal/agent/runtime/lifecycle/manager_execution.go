@@ -391,6 +391,21 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		return nil, fmt.Errorf("agent type %q not found in registry", info.AgentID)
 	}
 
+	// Forward AgentProfile.EnvVars to the runtime instance. The Launch /
+	// ResumeSession paths merge these into req.Env via buildEnvForExecution
+	// before calling LaunchAgent; the lazy workspace-only path (any
+	// GetOrEnsureExecution* caller after backend restart) lands here directly,
+	// so without this merge the runtime instance gets spawned with empty env
+	// and CLAUDE_CONFIG_DIR (and any other workspace profile var) is lost.
+	// The agent subprocess inherits the instance env via agentctl, and ACP
+	// session/load then looks under the wrong SDK root → -32002 Resource not
+	// found.
+	env := map[string]string{}
+	m.mergeAgentProfileEnv(ctx, info.AgentProfileID, env)
+	if len(env) == 0 {
+		env = nil
+	}
+
 	req := &ExecutorCreateRequest{
 		InstanceID:          executionID,
 		TaskID:              taskID,
@@ -399,6 +414,7 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		AgentProfileID:      info.AgentProfileID,
 		WorkspacePath:       info.WorkspacePath,
 		Protocol:            string(agentConfig.Runtime().Protocol),
+		Env:                 env,
 		AgentConfig:         agentConfig,
 		Metadata:            info.Metadata,
 		PreviousExecutionID: info.AgentExecutionID,
