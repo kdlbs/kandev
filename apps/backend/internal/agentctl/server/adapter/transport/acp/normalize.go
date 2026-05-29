@@ -286,7 +286,7 @@ func (n *Normalizer) UpdatePayloadInput(payload *streams.NormalizedPayload, rawI
 		if v := shared.GetString(inputMap, subagentKeyPrompt); v != "" && sa.Prompt == "" {
 			sa.Prompt = v
 		}
-		if v := shared.GetString(inputMap, subagentKeySubagentTyp); v != "" && sa.SubagentType == "" {
+		if v := shared.GetString(inputMap, subagentKeySubagentType); v != "" && sa.SubagentType == "" {
 			sa.SubagentType = v
 		}
 	}

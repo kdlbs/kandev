@@ -19,10 +19,10 @@ const (
 // rawInput field keys carrying subagent invocation details. These arrive on a
 // later tool_call_update for Claude/OpenCode; the initial tool_call is empty.
 const (
-	subagentKeyDescription = "description"
-	subagentKeyPrompt      = "prompt"
-	subagentKeySubagentTyp = "subagent_type"
-	subagentKeyToolName    = "_toolName"
+	subagentKeyDescription  = "description"
+	subagentKeyPrompt       = "prompt"
+	subagentKeySubagentType = "subagent_type"
+	subagentKeyToolName     = "_toolName"
 )
 
 // SubagentTaskResult holds the result metadata extracted from a completion
@@ -99,7 +99,7 @@ func subagentInputFields(rawInput any) (description, prompt, subagentType string
 	}
 	description, _ = input[subagentKeyDescription].(string)
 	prompt, _ = input[subagentKeyPrompt].(string)
-	subagentType, _ = input[subagentKeySubagentTyp].(string)
+	subagentType, _ = input[subagentKeySubagentType].(string)
 	return description, prompt, subagentType
 }
 

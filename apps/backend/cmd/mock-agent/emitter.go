@@ -179,6 +179,9 @@ func (e *emitter) endMonitorTool(id acp.ToolCallId) {
 const (
 	subagentKeyStatus       = "status"
 	subagentStatusCompleted = "completed"
+	subagentKeyDescription  = "description"
+	subagentKeyPrompt       = "prompt"
+	subagentKeySubagentType = "subagent_type"
 )
 
 // subagentClaudeMeta builds the `_meta.claudeCode.toolName=Agent` payload that
@@ -230,9 +233,9 @@ func (e *emitter) startSubagentTool(id acp.ToolCallId, description, prompt, suba
 			acp.WithStartKind(acp.ToolKindOther),
 			acp.WithStartStatus(acp.ToolCallStatusPending),
 			acp.WithStartRawInput(map[string]any{
-				clarificationDescKey:   description,
-				clarificationPromptKey: prompt,
-				"subagent_type":        subagentType,
+				subagentKeyDescription:  description,
+				subagentKeyPrompt:       prompt,
+				subagentKeySubagentType: subagentType,
 			}),
 			withStartMeta(subagentClaudeMeta()),
 		),
