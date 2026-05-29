@@ -35,10 +35,12 @@ describe("describeMergeability", () => {
     });
   });
 
-  it("shows nothing for clean / unstable / has_hooks", () => {
+  it("shows nothing for clean / unstable / has_hooks / draft", () => {
     expect(describe_({ state: "clean", mergeable: true })).toEqual({ kind: "none" });
     expect(describe_({ state: "unstable", mergeable: true })).toEqual({ kind: "none" });
     expect(describe_({ state: "has_hooks", mergeable: true })).toEqual({ kind: "none" });
+    // "draft" enum on a non-draft PR object must not fall through to "Not mergeable".
+    expect(describe_({ state: "draft", mergeable: false })).toEqual({ kind: "none" });
   });
 
   it("falls back to generic text for unknown states that GitHub deems non-mergeable", () => {

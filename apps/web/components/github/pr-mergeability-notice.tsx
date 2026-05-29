@@ -12,13 +12,7 @@ export type MergeabilityNotice =
   | { kind: "chip"; label: string } // blocked / behind base
   | { kind: "text" }; // generic non-mergeable fallback
 
-/**
- * Maps a PR's merge state to how prominently the panel should surface it.
- * Conflicts (`dirty`) get a callout banner; `blocked`/`behind` get a compact
- * chip; anything else GitHub still reports as non-mergeable keeps the legacy
- * "Not mergeable" text so we never lose the existing signal. Draft and
- * non-open PRs surface nothing.
- */
+/** Maps a PR's merge state to how prominently the panel surfaces it. */
 export function describeMergeability({
   state,
   mergeable,
@@ -41,6 +35,8 @@ export function describeMergeability({
     case "clean":
     case "unstable":
     case "has_hooks":
+    case "draft":
+      // "draft" is gated above via isDraft, but handle the enum value too.
       return { kind: "none" };
     default:
       // unknown / "" / future states: defer to the legacy boolean signal.
@@ -48,10 +44,7 @@ export function describeMergeability({
   }
 }
 
-/**
- * Builds the chat-context message sent to the working agent when the user
- * clicks "Resolve conflicts". Exported for unit testing.
- */
+/** Chat-context message sent to the agent when the user clicks "Resolve conflicts". */
 export function buildConflictResolutionMessage({
   prNumber,
   headBranch,
@@ -73,9 +66,11 @@ export function buildConflictResolutionMessage({
 function ConflictBanner({
   baseBranch,
   onResolveConflicts,
+  resolveDisabled,
 }: {
   baseBranch: string;
-  onResolveConflicts: () => void;
+  onResolveConflicts?: () => void;
+  resolveDisabled?: boolean;
 }) {
   return (
     <div
@@ -90,15 +85,18 @@ function ConflictBanner({
         <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
           This branch can&apos;t be merged automatically. Resolve the conflicts before merging.
         </p>
-        <Button
-          size="sm"
-          variant="outline"
-          data-testid="pr-resolve-conflicts-button"
-          className="mt-2 h-6 cursor-pointer px-2 text-[11px]"
-          onClick={onResolveConflicts}
-        >
-          Resolve conflicts
-        </Button>
+        {onResolveConflicts && (
+          <Button
+            size="sm"
+            variant="outline"
+            data-testid="pr-resolve-conflicts-button"
+            className="mt-2 h-6 cursor-pointer px-2 text-[11px]"
+            onClick={onResolveConflicts}
+            disabled={resolveDisabled}
+          >
+            {resolveDisabled ? "Added to chat context" : "Resolve conflicts"}
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -129,18 +127,26 @@ export function PRMergeabilityNotice({
   prState,
   baseBranch,
   onResolveConflicts,
+  resolveDisabled,
 }: {
   state: MergeableState | undefined;
   mergeable: boolean;
   isDraft: boolean;
   prState: string;
   baseBranch: string;
-  onResolveConflicts: () => void;
+  onResolveConflicts?: () => void;
+  resolveDisabled?: boolean;
 }) {
   const notice = describeMergeability({ state, mergeable, isDraft, prState });
   if (notice.kind === "none") return null;
   if (notice.kind === "banner")
-    return <ConflictBanner baseBranch={baseBranch} onResolveConflicts={onResolveConflicts} />;
+    return (
+      <ConflictBanner
+        baseBranch={baseBranch}
+        onResolveConflicts={onResolveConflicts}
+        resolveDisabled={resolveDisabled}
+      />
+    );
   return (
     <div className="flex items-center gap-1.5 flex-wrap">
       {notice.kind === "chip" ? <MergeabilityChip label={notice.label} /> : <NotMergeableText />}

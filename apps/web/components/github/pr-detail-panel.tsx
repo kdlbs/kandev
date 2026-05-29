@@ -20,7 +20,7 @@ import { useActiveTaskPR, useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { prPanelLabel } from "@/components/github/pr-utils";
 import { usePRFeedback } from "@/hooks/domains/github/use-pr-feedback";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
-import { useCommentsStore } from "@/lib/state/slices/comments";
+import { useCommentsStore, isPRFeedbackComment } from "@/lib/state/slices/comments";
 import type { PRFeedbackComment } from "@/lib/state/slices/comments";
 import { useToast } from "@/components/toast-provider";
 import { submitPRReview } from "@/lib/api/domains/github-api";
@@ -122,6 +122,7 @@ function useSyncLivePRState(taskPR: TaskPR, feedback: PRFeedback | null) {
   const prClosedAt = taskPR.closed_at ?? null;
   const prAdditions = taskPR.additions;
   const prDeletions = taskPR.deletions;
+  const prMergeableState = taskPR.mergeable_state;
   const prTaskId = taskPR.task_id;
   useEffect(() => {
     if (!feedback) return;
@@ -135,12 +136,15 @@ function useSyncLivePRState(taskPR: TaskPR, feedback: PRFeedback | null) {
     const effectiveState = stateRank(livePR.state) >= stateRank(prState) ? livePR.state : prState;
     const effectiveMergedAt = effectiveState === prState ? prMergedAt : (livePR.merged_at ?? null);
     const effectiveClosedAt = effectiveState === prState ? prClosedAt : (livePR.closed_at ?? null);
+    // Live mergeable_state is authoritative when present; otherwise keep the stored value.
+    const effectiveMergeableState = livePR.mergeable_state ?? prMergeableState;
     if (
       effectiveState !== prState ||
       effectiveMergedAt !== prMergedAt ||
       effectiveClosedAt !== prClosedAt ||
       livePR.additions !== prAdditions ||
-      livePR.deletions !== prDeletions
+      livePR.deletions !== prDeletions ||
+      effectiveMergeableState !== prMergeableState
     ) {
       setTaskPR(prTaskId, {
         ...taskPR,
@@ -149,10 +153,21 @@ function useSyncLivePRState(taskPR: TaskPR, feedback: PRFeedback | null) {
         deletions: livePR.deletions,
         merged_at: effectiveMergedAt,
         closed_at: effectiveClosedAt,
+        mergeable_state: effectiveMergeableState,
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [feedback, prState, prMergedAt, prClosedAt, prAdditions, prDeletions, prTaskId, setTaskPR]);
+  }, [
+    feedback,
+    prState,
+    prMergedAt,
+    prClosedAt,
+    prAdditions,
+    prDeletions,
+    prMergeableState,
+    prTaskId,
+    setTaskPR,
+  ]);
 }
 
 type PRPanelMetrics = {
@@ -300,7 +315,22 @@ export function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; session
 
   const metrics = derivePanelMetrics(taskPR, feedback);
 
+  // True once a conflict prompt for this PR is already queued — avoids piling
+  // up identical instructions if the user clicks "Resolve conflicts" again.
+  const conflictQueued = useCommentsStore((s) =>
+    s.pendingForChat.some((id) => {
+      const c = s.byId[id];
+      return (
+        !!c &&
+        isPRFeedbackComment(c) &&
+        c.feedbackType === "conflict" &&
+        c.prNumber === taskPR.pr_number
+      );
+    }),
+  );
+
   const onResolveConflicts = useCallback(() => {
+    if (conflictQueued) return;
     addAsContext(
       "conflict",
       buildConflictResolutionMessage({
@@ -309,7 +339,7 @@ export function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; session
         baseBranch: taskPR.base_branch,
       }),
     );
-  }, [addAsContext, taskPR.pr_number, taskPR.head_branch, taskPR.base_branch]);
+  }, [addAsContext, conflictQueued, taskPR.pr_number, taskPR.head_branch, taskPR.base_branch]);
 
   return (
     <div className="flex flex-col h-full">
@@ -320,6 +350,7 @@ export function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; session
         loading={loading}
         onRefresh={refresh}
         onResolveConflicts={onResolveConflicts}
+        conflictQueued={conflictQueued}
       />
       <Separator />
       <ScrollArea className="flex-1 overflow-hidden">
@@ -484,6 +515,7 @@ function PRHeader({
   loading,
   onRefresh,
   onResolveConflicts,
+  conflictQueued,
 }: {
   taskPR: TaskPR;
   feedback: PRFeedback | null;
@@ -491,6 +523,7 @@ function PRHeader({
   loading: boolean;
   onRefresh: () => void;
   onResolveConflicts: () => void;
+  conflictQueued: boolean;
 }) {
   const liveState = feedback?.pr.state ?? taskPR.state;
   const isDraft = feedback?.pr.draft ?? false;
@@ -526,6 +559,7 @@ function PRHeader({
         prState={liveState}
         baseBranch={taskPR.base_branch}
         onResolveConflicts={onResolveConflicts}
+        resolveDisabled={conflictQueued}
       />
       <HeaderDateLine taskPR={taskPR} />
       <HeaderStatsLine taskPR={taskPR} metrics={metrics} />
