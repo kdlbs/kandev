@@ -2,12 +2,16 @@ import path from "node:path";
 import fs from "node:fs";
 import { execSync } from "node:child_process";
 import { test, expect } from "../../fixtures/test-base";
+import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { makeGitEnv } from "../../helpers/git-helper";
 
 function escapeRe(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+// Exercises the regular task-create dialog (New Task in the sidebar); run with office off.
+useRegularMode();
 
 test.describe("Branch selector behavior with executor types", () => {
   test.describe.configure({ retries: 1 });

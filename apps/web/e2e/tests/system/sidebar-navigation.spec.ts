@@ -16,7 +16,10 @@ test.describe("System sidebar navigation", () => {
   }) => {
     test.setTimeout(120_000);
 
-    await testPage.goto("/settings/general/notifications");
+    // The settings nav is a single-open accordion: a group's sub-entries are
+    // only mounted while that group is the open one. Landing on a System page
+    // opens the System group (route-synced), so its sub-entries are visible.
+    await testPage.goto("/settings/system/status");
 
     // Each sub-entry is present in the settings sidebar.
     for (const entry of SYSTEM_ENTRIES) {

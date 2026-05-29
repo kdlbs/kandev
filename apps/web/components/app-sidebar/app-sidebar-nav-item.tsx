@@ -21,6 +21,8 @@ type AppSidebarNavItemProps = {
   exactMatch?: boolean;
   /** Render as visually disabled and ignore clicks. */
   disabled?: boolean;
+  /** Optional data-testid placed on the button/link element. */
+  testId?: string;
 };
 
 type TriggerProps = {
@@ -30,9 +32,10 @@ type TriggerProps = {
   label: string;
   href?: string;
   inner: React.ReactNode;
+  testId?: string;
 };
 
-function renderTrigger({ onClick, disabled, baseClass, label, href, inner }: TriggerProps) {
+function renderTrigger({ onClick, disabled, baseClass, label, href, inner, testId }: TriggerProps) {
   if (onClick) {
     return (
       <button
@@ -42,6 +45,7 @@ function renderTrigger({ onClick, disabled, baseClass, label, href, inner }: Tri
         aria-label={label}
         aria-disabled={disabled || undefined}
         disabled={disabled}
+        data-testid={testId}
       >
         {inner}
       </button>
@@ -49,13 +53,13 @@ function renderTrigger({ onClick, disabled, baseClass, label, href, inner }: Tri
   }
   if (disabled) {
     return (
-      <span className={baseClass} aria-label={label} aria-disabled="true">
+      <span className={baseClass} aria-label={label} aria-disabled="true" data-testid={testId}>
         {inner}
       </span>
     );
   }
   return (
-    <Link href={href ?? "#"} className={baseClass} aria-label={label}>
+    <Link href={href ?? "#"} className={baseClass} aria-label={label} data-testid={testId}>
       {inner}
     </Link>
   );
@@ -78,6 +82,7 @@ export function AppSidebarNavItem({
   isActive,
   exactMatch = false,
   disabled = false,
+  testId,
 }: AppSidebarNavItemProps) {
   const pathname = usePathname();
   const active = isActive ?? isPathActive(pathname, href, exactMatch);
@@ -106,7 +111,7 @@ export function AppSidebarNavItem({
     </>
   );
 
-  const buttonOrLink = renderTrigger({ onClick, disabled, baseClass, label, href, inner });
+  const buttonOrLink = renderTrigger({ onClick, disabled, baseClass, label, href, inner, testId });
 
   if (!collapsed) return buttonOrLink;
   return (

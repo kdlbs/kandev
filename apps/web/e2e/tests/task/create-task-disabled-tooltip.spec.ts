@@ -1,9 +1,13 @@
 import { test, expect } from "../../fixtures/test-base";
+import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 
 const START_AGENT_TEST_ID = "submit-start-agent";
 const WRAPPER_TEST_ID = "submit-start-agent-wrapper";
 const START_ENABLED_TIMEOUT = 30_000;
+
+// Exercises the regular task-create dialog (New Task in the sidebar); run with office off.
+useRegularMode();
 
 test.describe("Create task button: disabled-reason tooltip", () => {
   test("shows 'Add a task title' when title is empty", async ({ testPage }) => {

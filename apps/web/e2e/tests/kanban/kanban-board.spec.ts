@@ -1,5 +1,9 @@
 import { test, expect } from "../../fixtures/test-base";
+import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
+
+// Exercises the regular task-create dialog (New Task in the sidebar); run with office off.
+useRegularMode();
 
 test.describe("Kanban board", () => {
   test("displays a seeded task card", async ({ testPage, apiClient, seedData }) => {

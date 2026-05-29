@@ -3,8 +3,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { makeGitEnv } from "../../helpers/git-helper";
+import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+
+// The parent-task setup and the sidebar New Task button exercise the regular
+// task-create dialog, so run this file with the office feature disabled.
+useRegularMode();
 
 const START_AGENT_TEST_ID = "submit-start-agent";
 const START_ENABLED_TIMEOUT = 30_000;

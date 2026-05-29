@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 
 /**
@@ -8,6 +9,10 @@ import { KanbanPage } from "../../pages/kanban-page";
  * has been removed; the backend now auto-injects the prompt into the
  * running CLI after the first idle window.
  */
+
+// Exercises the regular task-create dialog (New Task in the sidebar); run with office off.
+useRegularMode();
+
 test.describe("CLI mode: create-task dialog prompt", () => {
   test("prompt textarea is enabled, no 'prompt ignored' warning, and submit works", async ({
     testPage,

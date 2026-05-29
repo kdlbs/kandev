@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { test, expect } from "../../fixtures/test-base";
+import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 
 // Regression: Combobox popovers (Repository / Base Branch / Agent Profile)
@@ -11,6 +12,10 @@ import { KanbanPage } from "../../pages/kanban-page";
 // wheel events were swallowed and the list could not be scrolled. The fix
 // renders these popovers inline (portal={false}) so they live inside the
 // Dialog content tree.
+
+// Exercises the regular task-create dialog (New Task in the sidebar); run with office off.
+useRegularMode();
+
 test.describe("repository selector scroll inside dialog", () => {
   test("wheel scrolls the repository list and the list is inside the dialog", async ({
     testPage,

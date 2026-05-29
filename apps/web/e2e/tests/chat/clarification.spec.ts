@@ -1,5 +1,6 @@
 import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
+import { useRegularMode } from "../../helpers/regular-mode";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
@@ -37,6 +38,9 @@ async function seedClarificationTask(
 
   return session;
 }
+
+// Exercises the regular task-create dialog (New Task in the sidebar); run with office off.
+useRegularMode();
 
 test.describe("Clarification flow", () => {
   test.describe.configure({ retries: 1 });

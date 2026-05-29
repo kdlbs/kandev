@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { IconSquarePlus, IconSubtask } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
@@ -9,8 +8,6 @@ import { useFeature } from "@/hooks/domains/features/use-feature";
 import { NewTaskDialog } from "@/app/office/components/new-task-dialog";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { NewSubtaskDialog } from "@/components/task/new-subtask-dialog";
-import { linkToTask } from "@/lib/links";
-import type { Task } from "@/lib/types/http";
 import { AppSidebarNavItem } from "./app-sidebar-nav-item";
 
 type AppSidebarNewTaskItemProps = {
@@ -29,7 +26,6 @@ type AppSidebarNewTaskItemProps = {
  * used to provide.
  */
 export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps) {
-  const router = useRouter();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const workflowId = useAppStore((s) => s.kanban.workflowId);
   const steps = useAppStore((s) => s.kanban.steps);
@@ -43,13 +39,11 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
   const [open, setOpen] = useState(false);
   const [subtaskOpen, setSubtaskOpen] = useState(false);
 
-  const handleCreated = (task: Task) => {
-    router.push(linkToTask(task.id));
-  };
-
-  // Subtasks only apply to regular mode (NewSubtaskDialog is non-office) and
-  // need both an active task and the expanded rail to host the trailing button.
-  const canCreateSubtask = !collapsed && !officeEnabled && !!workspaceId && !!activeTaskId;
+  // The subtask affordance is available in both modes (office uses the richer
+  // dialog for the primary New Task, but subtasks always go through the compact
+  // NewSubtaskDialog, matching the retired dropdown). It needs an active task
+  // and the expanded rail to host the trailing button.
+  const canCreateSubtask = !collapsed && !!workspaceId && !!activeTaskId;
 
   return (
     <>
@@ -60,6 +54,7 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
           onClick={() => setOpen(true)}
           collapsed={collapsed}
           disabled={!workspaceId}
+          testId="create-task-button"
         />
         {canCreateSubtask && (
           <Tooltip>
@@ -90,7 +85,7 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
             workflowId={workflowId}
             defaultStepId={steps[0]?.id ?? null}
             steps={steps}
-            onSuccess={handleCreated}
+            onSuccess={() => setOpen(false)}
           />
         ))}
       {canCreateSubtask && (

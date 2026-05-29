@@ -1,6 +1,11 @@
 import { test, expect } from "../../fixtures/test-base";
+import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+
+// Exercises the regular task-create dialog (New Task in the sidebar), so run
+// with the office feature disabled.
+useRegularMode();
 
 const START_AGENT_TEST_ID = "submit-start-agent";
 const START_ENABLED_TIMEOUT = 30_000;

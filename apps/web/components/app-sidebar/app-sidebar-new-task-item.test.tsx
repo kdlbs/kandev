@@ -44,6 +44,7 @@ vi.mock("@/components/task/new-subtask-dialog", () => ({
 import { AppSidebarNewTaskItem } from "./app-sidebar-new-task-item";
 
 const SUBTASK_TESTID = "sidebar-new-subtask";
+const OFFICE_DIALOG_TESTID = "office-new-task-dialog";
 
 describe("AppSidebarNewTaskItem", () => {
   beforeEach(() => {
@@ -61,13 +62,13 @@ describe("AppSidebarNewTaskItem", () => {
     officeEnabled = false;
     renderItem(false);
     expect(screen.getByTestId("regular-task-create-dialog")).toBeTruthy();
-    expect(screen.queryByTestId("office-new-task-dialog")).toBeNull();
+    expect(screen.queryByTestId(OFFICE_DIALOG_TESTID)).toBeNull();
   });
 
   it("uses the office new-issue dialog when office is enabled", () => {
     officeEnabled = true;
     renderItem(false);
-    expect(screen.getByTestId("office-new-task-dialog")).toBeTruthy();
+    expect(screen.getByTestId(OFFICE_DIALOG_TESTID)).toBeTruthy();
     expect(screen.queryByTestId("regular-task-create-dialog")).toBeNull();
   });
 
@@ -75,7 +76,7 @@ describe("AppSidebarNewTaskItem", () => {
     state.workspaces.activeId = null;
     renderItem(false);
     expect(screen.queryByTestId("regular-task-create-dialog")).toBeNull();
-    expect(screen.queryByTestId("office-new-task-dialog")).toBeNull();
+    expect(screen.queryByTestId(OFFICE_DIALOG_TESTID)).toBeNull();
   });
 
   it("offers a subtask affordance when a task is active in regular mode", () => {
@@ -91,11 +92,15 @@ describe("AppSidebarNewTaskItem", () => {
     expect(screen.queryByTestId(SUBTASK_TESTID)).toBeNull();
   });
 
-  it("hides the subtask affordance in office mode", () => {
+  it("offers the subtask affordance in office mode too (compact subtask dialog)", () => {
     officeEnabled = true;
     state.tasks.activeTaskId = "t-1";
     renderItem(false);
-    expect(screen.queryByTestId(SUBTASK_TESTID)).toBeNull();
+    // Primary New Task uses the office dialog, but subtasks still go through
+    // the compact NewSubtaskDialog regardless of mode.
+    expect(screen.getByTestId(OFFICE_DIALOG_TESTID)).toBeTruthy();
+    expect(screen.getByTestId(SUBTASK_TESTID)).toBeTruthy();
+    expect(screen.getByTestId("new-subtask-dialog")).toBeTruthy();
   });
 
   it("hides the subtask affordance when the rail is collapsed", () => {

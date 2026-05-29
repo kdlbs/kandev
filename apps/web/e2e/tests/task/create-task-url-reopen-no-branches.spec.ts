@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 
 // Regression test for the user-reported bug:
@@ -18,6 +19,10 @@ import { KanbanPage } from "../../pages/kanban-page";
 // owner/repo so the orchestrator's background `gh repo clone` fails - that
 // keeps local_path empty, proving the remote-first path is what's serving
 // the branches.
+
+// Exercises the regular task-create dialog (New Task in the sidebar); run with office off.
+useRegularMode();
+
 test.describe("Create-task URL flow - branches after reopen", () => {
   test.describe.configure({ retries: 1 });
 
