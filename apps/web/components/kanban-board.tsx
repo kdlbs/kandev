@@ -327,6 +327,7 @@ function useKanbanBoardSetup(
 
 export function KanbanBoard({ onPreviewTask, onOpenTask, onBeforeEdit }: KanbanBoardProps = {}) {
   const s = useKanbanBoardSetup(onPreviewTask, onOpenTask, onBeforeEdit);
+  const isMobileSearchOpen = useAppStore((state) => state.mobileKanban.isSearchOpen);
 
   if (!s.isMounted) {
     return <div className="h-dvh w-full bg-background" />;
@@ -347,7 +348,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask, onBeforeEdit }: KanbanB
         searchQuery={s.searchQuery}
         onSearchChange={s.setSearchQuery}
       />
-      {s.isMobile && (
+      {s.isMobile && isMobileSearchOpen && (
         <MobileSearchBar searchQuery={s.searchQuery} onSearchChange={s.setSearchQuery} />
       )}
       <KanbanBoardDialogs

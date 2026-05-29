@@ -510,7 +510,7 @@ export function KanbanHeader({
           currentPage={currentPage}
           title={title}
           workspaceLabel={workspaceLabel}
-          {...sharedSearch}
+          onSearchChange={onSearchChange}
           {...indicatorProps}
         />
       );
