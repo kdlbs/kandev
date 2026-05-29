@@ -103,7 +103,9 @@ export function AppSidebarSection({
           headerAction={headerAction}
           onToggle={handleToggle}
         />
-        {expanded && <div className="flex flex-col gap-0.5 flex-1 min-h-0">{children}</div>}
+        {expanded && (
+          <div className="flex flex-col gap-0.5 flex-1 min-h-0 sidebar-fade-in">{children}</div>
+        )}
       </div>
     );
   }

@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, memo } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { linkToTask } from "@/lib/links";
 import type {
   Message,
   TaskState,
@@ -446,6 +448,8 @@ function useSidebarActions(store: StoreApi) {
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const [preparingTaskId, setPreparingTaskId] = useState<string | null>(null);
   const { renameTaskById } = useTaskActions();
+  const router = useRouter();
+  const pathname = usePathname();
   const { removeTaskFromBoard, loadTaskSessionsForTask } = useTaskRemoval({
     store,
     useLayoutSwitch: true,
@@ -458,6 +462,18 @@ function useSidebarActions(store: StoreApi) {
 
   const handleSelectTask = useCallback(
     (taskId: string) => {
+      // The AppSidebar is mounted globally. On a non-task route the dockview
+      // isn't mounted, so the in-place layout switch (which only rewrites the
+      // URL via history.replaceState) would change the address bar without
+      // ever showing the task. Navigate to the task page in that case; the
+      // in-place fast-switch is only correct once the dockview is on screen.
+      const onTaskRoute =
+        !!pathname && (pathname.startsWith("/t/") || pathname.startsWith("/office/tasks/"));
+      if (!onTaskRoute) {
+        setActiveTask(taskId);
+        router.push(linkToTask(taskId));
+        return;
+      }
       const state = store.getState();
       const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
       selectTaskWithLayout({
@@ -470,7 +486,7 @@ function useSidebarActions(store: StoreApi) {
         setPreparingTaskId,
       });
     },
-    [loadTaskSessionsForTask, switchToSession, setActiveTask, store],
+    [loadTaskSessionsForTask, switchToSession, setActiveTask, store, router, pathname],
   );
 
   const archiveActions = useArchiveActions(store);
