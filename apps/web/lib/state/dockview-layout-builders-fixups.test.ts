@@ -101,6 +101,19 @@ describe("applyLayoutFixups — pinned target capture", () => {
     expect(setPinnedTarget).toHaveBeenCalledWith("right", 400);
   });
 
+  it("records the side-column target for a 3-column preset without RIGHT_TOP_GROUP", () => {
+    // Regression: vscode/preview/plan presets put their side column in a group
+    // with a generated id (not RIGHT_TOP_GROUP). The target must still be
+    // captured per-env, or switching to such a task leaks the previous task's
+    // right target and snaps its side column to the wrong width.
+    mockSplitview([350, 720, 420]); // sidebar, center, vscode/preview side col
+    const api = makeApi([SIDEBAR_GROUP, CENTER_GROUP, "group-generated-7"]);
+
+    applyLayoutFixups(api);
+
+    expect(setPinnedTarget).toHaveBeenCalledWith("right", 420);
+  });
+
   it("clamps an over-cap right target down to the cap", () => {
     mockSplitview([350, 200, 1200]); // right (1200) exceeds RIGHT_CAP (1029)
     const api = makeApi([SIDEBAR_GROUP, CENTER_GROUP, RIGHT_TOP_GROUP]);

@@ -276,7 +276,7 @@ export function LayoutPresetSelector() {
               return (
                 <DropdownMenuItem
                   key={preset.id}
-                  onClick={() => applyBuiltInPreset(preset.id)}
+                  onClick={() => applyBuiltInPreset(preset.id, true)}
                   className="cursor-pointer"
                 >
                   <Icon className="h-4 w-4 mr-2 shrink-0" />

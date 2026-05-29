@@ -10,6 +10,7 @@ import {
   TERMINAL_DEFAULT_ID,
 } from "./constants";
 import { computePinnedMaxPxFor, LAYOUT_PINNED_MIN_PX } from "./caps";
+import { getPinnedWidth } from "./sizing";
 import { setPinnedTarget } from "./pinned-targets";
 
 export type LayoutGroupIds = {
@@ -95,16 +96,19 @@ export function applyLayout(
   return resolveGroupIds(api);
 }
 
-/** Set the pinned target for a column. Prefers an explicit override from
- *  `pinnedWidths` over what fromJSON happened to render — fromJSON can
- *  produce a clamped value during a sidebar/right toggle (the panel's NEW
- *  group is mounted with default constraints and a transient internal
- *  rebalance can squeeze it below the serialized target before our
- *  setConstraints lifts the cap), and reading `sv.getViewSize` at that
- *  moment would silently overwrite the saved user-resized width with the
- *  clamped value (the `pane-resize-sidebar.spec.ts:41` failure mode). When
- *  the override is known we also proactively resize dockview to match so
- *  the user sees their intended width immediately.
+/** Set the pinned target for a column.
+ *
+ *  Resolve the intended width as `override ?? defaultWidth` — an explicit
+ *  user-resized width if we have one (from `pinnedWidths`), otherwise the
+ *  column's computed default. We resize dockview to that width and pin it as
+ *  the target. We deliberately do NOT fall back to reading `sv.getViewSize`:
+ *  fromJSON can produce a transient clamped/rebalanced size during a layout
+ *  switch (the panel's NEW group mounts with default constraints, or the grid
+ *  is briefly laid out at a narrower width before our setConstraints/api.layout
+ *  settle), and capturing that would pin the column too narrow and then persist
+ *  it — e.g. toggling plan mode off left the right column stuck at the
+ *  transient width instead of its default. `getViewSize` is only a last resort
+ *  when neither an override nor a default is available.
  */
 function syncPinnedColumnTarget(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -112,17 +116,19 @@ function syncPinnedColumnTarget(
   idx: number,
   columnId: "sidebar" | "right",
   override: number | undefined,
+  defaultWidth: number | undefined,
 ): void {
-  if (override !== undefined && override > 0) {
+  const target = override !== undefined && override > 0 ? override : defaultWidth;
+  if (target !== undefined && target > 0) {
     const live = sv?.getViewSize?.(idx);
-    if (typeof live === "number" && live > 0 && Math.abs(live - override) > 1) {
+    if (typeof live === "number" && live > 0 && Math.abs(live - target) > 1) {
       try {
-        sv.resizeView(idx, override);
+        sv.resizeView(idx, target);
       } catch {
         /* dockview rejects unreachable sizes — ignore */
       }
     }
-    setPinnedTarget(columnId, override);
+    setPinnedTarget(columnId, target);
     return;
   }
   const live = sv?.getViewSize?.(idx);
@@ -154,7 +160,8 @@ function configureSidebarPinned(
     minimumWidth: LAYOUT_PINNED_MIN_PX,
   });
   if (!sidebarCol) return;
-  syncPinnedColumnTarget(sv, 0, "sidebar", pinnedWidths.get("sidebar"));
+  const defaultWidth = getPinnedWidth(sidebarCol, viewportWidth, undefined);
+  syncPinnedColumnTarget(sv, 0, "sidebar", pinnedWidths.get("sidebar"), defaultWidth);
 }
 
 function configureRightPinned(
@@ -173,7 +180,8 @@ function configureRightPinned(
     const cap = col.maxWidth ?? computePinnedMaxPxFor(col.id, viewportWidth);
     applyConstraintsToAllPanelGroups(api, col, cap);
     if (col.id !== "right") continue;
-    syncPinnedColumnTarget(sv, i, "right", pinnedWidths.get("right"));
+    const defaultWidth = getPinnedWidth(col, viewportWidth, undefined);
+    syncPinnedColumnTarget(sv, i, "right", pinnedWidths.get("right"), defaultWidth);
   }
 }
 

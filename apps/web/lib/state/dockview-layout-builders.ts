@@ -80,30 +80,33 @@ function captureSidebarTarget(api: DockviewApi, sv: any): void {
   }
 }
 
-/** Constrain the right column's groups and record its target width, clamped to
- *  the cap.
+/** Constrain the default layout's right column groups and record the side
+ *  column's target width, clamped to the cap.
  *
- *  Only records a right target when a genuine right column exists AND it is a
- *  distinct column from the center (`sv.length >= 3`). In the 2-column
- *  global-fallback restore (right panels stripped as env-scoped, only
- *  sidebar + center remain), the LAST splitview child is the CENTER column —
- *  recording its width as the "right" target inflates the real right column
- *  once the full layout materializes, and the inflated width gets persisted
- *  into the env layout, so every later open loads broken widths. */
+ *  The target is recorded whenever a distinct last column exists
+ *  (`sv.length >= 3`). It must NOT be gated on the well-known RIGHT_TOP/BOTTOM
+ *  group ids: the vscode/preview/plan presets put their side column in a group
+ *  with a generated id, so gating on those ids would skip the capture and let
+ *  the PREVIOUS task's right target leak in — switching to one of those tasks
+ *  would then snap its side column to whatever width the last task left.
+ *
+ *  `sv.length >= 3` still excludes the 2-column global-fallback restore
+ *  (sidebar + center, right panels stripped as env-scoped), where the last
+ *  splitview child is the CENTER column — recording its width as the "right"
+ *  target would inflate the real right column once the full layout materializes
+ *  and persist that into the env layout. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function captureRightTarget(api: DockviewApi, sv: any): void {
-  // Groups created from presets carry stable IDs (e.g. "group-right-top"),
-  // so this works regardless of which panels are in them.
+  // Constrain the default preset's right column groups (stable well-known IDs).
+  // Other presets' side columns aren't pinned and carry no max-width cap.
   const rightCap = computeRightMaxPx();
-  let hasRightColumn = false;
   for (const gid of [RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP]) {
     const group = api.groups.find((g) => g.id === gid);
     if (group) {
-      hasRightColumn = true;
       group.api.setConstraints({ maximumWidth: rightCap, minimumWidth: LAYOUT_PINNED_MIN_PX });
     }
   }
-  if (!hasRightColumn || !sv || sv.length < 3) return;
+  if (!sv || sv.length < 3) return;
   const liveRight = sv.getViewSize(sv.length - 1);
   if (typeof liveRight === "number" && liveRight > 0) {
     setPinnedTarget("right", Math.min(liveRight, rightCap));
