@@ -114,26 +114,24 @@ func TestConnectWorkspaceStream_ClosesWSOnStop(t *testing.T) {
 		agentctl:  client,
 	}
 
+	// ready closes after SetWorkspaceStream returns and signalReady fires —
+	// channel-based sync per the testing convention, no sleep polling.
+	ready := make(chan struct{})
 	done := make(chan struct{})
 	go func() {
-		sm.connectWorkspaceStream(execution, nil)
+		sm.connectWorkspaceStream(execution, ready)
 		close(done)
 	}()
 
-	// Wait for the stream to attach so we know we've reached the
-	// post-connect select. 500ms is generous on slow CI but short
-	// enough to fail loudly if the connect never lands.
-	deadline := time.Now().Add(500 * time.Millisecond)
-	var ws *agentctl.WorkspaceStream
-	for time.Now().Before(deadline) {
-		ws = execution.GetWorkspaceStream()
-		if ws != nil {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
+	select {
+	case <-ready:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("workspace stream never attached (ready channel did not close)")
 	}
+
+	ws := execution.GetWorkspaceStream()
 	if ws == nil {
-		t.Fatal("workspace stream never attached")
+		t.Fatal("workspace stream attached but execution lost the reference")
 	}
 
 	close(stopCh)
