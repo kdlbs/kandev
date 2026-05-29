@@ -273,6 +273,7 @@ function DeleteWorkspaceCard({
               value={deleteConfirmText}
               onChange={(event) => setDeleteConfirmText(event.target.value)}
               placeholder={workspaceName}
+              autoComplete="off"
               data-testid="workspace-settings-delete-confirm-input"
             />
           </div>
@@ -453,6 +454,14 @@ function useWorkspaceEditForm(workspace: Workspace) {
     }
   };
 
+  // Reset the confirmation field whenever the dialog closes so a
+  // Cancel-then-reopen can't leave it pre-filled with the workspace
+  // name (which would silently bypass the re-type requirement).
+  const handleDeleteDialogOpenChange = (open: boolean) => {
+    setDeleteDialogOpen(open);
+    if (!open) setDeleteConfirmText("");
+  };
+
   return {
     currentWorkspace,
     workspaceNameDraft,
@@ -462,7 +471,7 @@ function useWorkspaceEditForm(workspace: Workspace) {
     defaultAgentProfileId,
     setDefaultAgentProfileId,
     deleteDialogOpen,
-    setDeleteDialogOpen,
+    setDeleteDialogOpen: handleDeleteDialogOpenChange,
     deleteConfirmText,
     setDeleteConfirmText,
     activeExecutors,

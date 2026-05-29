@@ -25,6 +25,16 @@ test.describe("Workspace settings deletion", () => {
     await confirmInput.fill(workspaceName);
     await expect(confirmButton).toBeEnabled();
 
+    // Cancel-then-reopen must reset the confirmation field; otherwise the
+    // re-type requirement would be silently bypassed on the second open.
+    await testPage.getByRole("button", { name: "Cancel" }).click();
+    await testPage.getByTestId("workspace-settings-delete-button").click();
+    await expect(confirmInput).toHaveValue("");
+    await expect(confirmButton).toBeDisabled();
+
+    await confirmInput.fill(workspaceName);
+    await expect(confirmButton).toBeEnabled();
+
     // Deletion runs through a Next.js server action (the DELETE to the backend
     // happens server-side), so assert the user-visible outcome: redirect to the
     // workspace list and the workspace gone from the backend.
