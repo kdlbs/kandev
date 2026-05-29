@@ -16,6 +16,7 @@ import {
   type FileAttachment,
 } from "@/components/task/chat/file-attachment";
 import { ContextZone } from "@/components/task/chat/context-items/context-zone";
+import { MentionMenu } from "@/components/task/chat/mention-menu";
 import type { ContextItem, ImageContextItem, FileAttachmentContextItem } from "@/lib/types/context";
 import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types";
 import { EnhancePromptButton } from "@/components/enhance-prompt-button";
@@ -23,6 +24,7 @@ import { JiraImportBar } from "@/components/jira/jira-import-bar";
 import { LinearImportBar } from "@/components/linear/linear-import-bar";
 import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
+import { useTaskCreatePromptMention } from "@/hooks/use-task-create-prompt-mention";
 
 const CURSOR_POINTER_CLASS = "cursor-pointer";
 
@@ -489,9 +491,8 @@ function useDescriptionInput(
     textarea.setSelectionRange(textarea.value.length, textarea.value.length);
   }, [autoFocus]);
 
-  const handleDescriptionChange = useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      const newValue = e.target.value;
+  const setDescriptionValue = useCallback(
+    (newValue: string) => {
       const hadContent = description.trim().length > 0;
       const hasContent = newValue.trim().length > 0;
       setDescription(newValue);
@@ -500,7 +501,7 @@ function useDescriptionInput(
     [description, onDescriptionChange],
   );
 
-  return { description, textareaRef, handleDescriptionChange };
+  return { description, textareaRef, setDescriptionValue };
 }
 
 type FormInputsToolbarProps = {
@@ -550,6 +551,87 @@ function FormInputsToolbar({
   );
 }
 
+function PromptMentionPopover({
+  mention,
+}: {
+  mention: ReturnType<typeof useTaskCreatePromptMention>;
+}) {
+  return (
+    <MentionMenu
+      isOpen={mention.isOpen}
+      isLoading={mention.isLoading}
+      position={mention.position}
+      items={mention.items}
+      query={mention.query}
+      selectedIndex={mention.selectedIndex}
+      onSelect={mention.handleSelect}
+      onClose={mention.closeMenu}
+      setSelectedIndex={mention.setSelectedIndex}
+    />
+  );
+}
+
+function useTextareaHandlers(
+  mention: ReturnType<typeof useTaskCreatePromptMention>,
+  onKeyDown: TaskFormInputsProps["onKeyDown"],
+) {
+  const handleChange = useCallback(
+    (e: React.ChangeEvent<HTMLTextAreaElement>) => mention.handleChange(e.target.value),
+    [mention],
+  );
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      mention.handleKeyDown(e);
+      if (e.defaultPrevented) return;
+      onKeyDown?.(e);
+    },
+    [mention, onKeyDown],
+  );
+  return { handleChange, handleKeyDown };
+}
+
+function useFileInputClick(addFiles: (files: File[]) => Promise<void> | void) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const handleAttachClick = useCallback(() => fileInputRef.current?.click(), []);
+  const handleFileInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files;
+      if (files && files.length > 0) void addFiles(Array.from(files));
+      e.target.value = "";
+    },
+    [addFiles],
+  );
+  return { fileInputRef, handleAttachClick, handleFileInputChange };
+}
+
+function HiddenFileInput({
+  inputRef,
+  onChange,
+}: {
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+}) {
+  return (
+    <input
+      ref={inputRef}
+      type="file"
+      multiple
+      className="hidden"
+      onChange={onChange}
+      tabIndex={-1}
+    />
+  );
+}
+
+function DraggingOverlay({ isDragging }: { isDragging: boolean }) {
+  if (!isDragging) return null;
+  return (
+    <div className="absolute inset-0 flex items-center justify-center bg-primary/10 border-2 border-dashed border-primary rounded-md pointer-events-none">
+      <span className="text-sm text-primary font-medium">Drop files here</span>
+    </div>
+  );
+}
+
 export const TaskFormInputs = memo(function TaskFormInputs({
   isSessionMode,
   autoFocus,
@@ -565,7 +647,6 @@ export const TaskFormInputs = memo(function TaskFormInputs({
   jiraImport,
   linearImport,
 }: TaskFormInputsProps) {
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const { attachments, isDragging, setIsDragging, addFiles, handleRemoveAttachment } =
     useFileAttachments();
   const { handlePaste, handleDragOver, handleDragLeave, handleDrop } = useAttachmentHandlers(
@@ -577,22 +658,20 @@ export const TaskFormInputs = memo(function TaskFormInputs({
     () => toContextItems(attachments, handleRemoveAttachment),
     [attachments, handleRemoveAttachment],
   );
-  const { description, textareaRef, handleDescriptionChange } = useDescriptionInput(
+  const { description, textareaRef, setDescriptionValue } = useDescriptionInput(
     initialDescription,
     autoFocus,
     descriptionValueRef,
     onDescriptionChange,
     attachments,
   );
-  const handleAttachClick = useCallback(() => fileInputRef.current?.click(), []);
-  const handleFileInputChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const files = e.target.files;
-      if (files && files.length > 0) void addFiles(Array.from(files));
-      e.target.value = "";
-    },
-    [addFiles],
-  );
+  const mention = useTaskCreatePromptMention({
+    textareaRef,
+    value: description,
+    onChange: setDescriptionValue,
+  });
+  const { handleChange, handleKeyDown } = useTextareaHandlers(mention, onKeyDown);
+  const { fileInputRef, handleAttachClick, handleFileInputChange } = useFileInputClick(addFiles);
 
   return (
     <div
@@ -610,12 +689,12 @@ export const TaskFormInputs = memo(function TaskFormInputs({
           placeholder={
             placeholder ??
             (isSessionMode
-              ? "Describe what you want the agent to do..."
-              : "Write a prompt for the agent...")
+              ? "Describe what you want the agent to do... (@ to insert a saved prompt)"
+              : "Write a prompt for the agent... (@ to insert a saved prompt)")
           }
           value={description}
-          onChange={handleDescriptionChange}
-          onKeyDown={onKeyDown}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           data-testid="task-description-input"
           rows={2}
@@ -632,20 +711,10 @@ export const TaskFormInputs = memo(function TaskFormInputs({
           jiraImport={jiraImport}
           linearImport={linearImport}
         />
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          className="hidden"
-          onChange={handleFileInputChange}
-          tabIndex={-1}
-        />
+        <HiddenFileInput inputRef={fileInputRef} onChange={handleFileInputChange} />
       </div>
-      {isDragging && (
-        <div className="absolute inset-0 flex items-center justify-center bg-primary/10 border-2 border-dashed border-primary rounded-md pointer-events-none">
-          <span className="text-sm text-primary font-medium">Drop files here</span>
-        </div>
-      )}
+      <PromptMentionPopover mention={mention} />
+      <DraggingOverlay isDragging={isDragging} />
     </div>
   );
 });
