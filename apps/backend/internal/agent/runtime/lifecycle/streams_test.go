@@ -76,9 +76,6 @@ func TestConnectWorkspaceStream_BackoffDrainsOnStop(t *testing.T) {
 		close(done)
 	}()
 
-	// Give the loop a beat to hit at least one failed attempt and enter the
-	// backoff sleep — that's the state the regression test cares about.
-	time.Sleep(50 * time.Millisecond)
 	close(stopCh)
 
 	select {
