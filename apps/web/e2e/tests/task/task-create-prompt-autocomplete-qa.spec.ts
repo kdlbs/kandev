@@ -105,10 +105,9 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
     await textarea.press("Enter");
 
     const value = await textarea.inputValue();
-    // The 2nd entry should be selected. The mention items come back in filter-score
-    // order; with equal scores order should be insertion (stable sort). The test
-    // accepts either content -- but asserts ONE of them was inserted, not both.
-    expect(["FIRST", "SECOND"]).toContain(value);
+    // Equal filter scores → insertion order (stable sort): qa-arr-1 at index 0,
+    // qa-arr-2 at index 1. One ArrowDown moves from 0 → 1, so "SECOND" is selected.
+    expect(value).toBe("SECOND");
     await expect(testPage.getByText(MENU_TITLE)).not.toBeVisible();
   });
 
