@@ -23,11 +23,13 @@ export async function transcribeAudio(
   formData.append("audio", blob, filename);
 
   // Do NOT set Content-Type: the browser sets multipart/form-data with the
-  // correct boundary automatically when given a FormData body.
+  // correct boundary automatically when given a FormData body. Spread caller
+  // init *first* so method/body always win — otherwise a caller passing
+  // `init: { method: "GET" }` (or a stale body) would silently break the upload.
   const response = await fetch(`${baseUrl}/api/v1/transcribe`, {
+    ...options?.init,
     method: "POST",
     body: formData,
-    ...options?.init,
   });
 
   if (!response.ok) {

@@ -512,16 +512,22 @@ func TestApplyVoiceMode(t *testing.T) {
 		}
 	})
 
-	t.Run("partial update preserves untouched fields", func(t *testing.T) {
+	t.Run("partial update preserves string fields but zeroes booleans", func(t *testing.T) {
 		settings := &models.UserSettings{
 			VoiceMode: models.VoiceModeSettings{
+				Enabled:         true,
 				Engine:          "whisperServer",
 				Language:        "en-GB",
 				Mode:            "toggle",
+				AutoSend:        true,
 				WhisperWebModel: "tiny",
 			},
 		}
-		// Empty strings on the new payload mean "no change" for those fields.
+		// Empty strings on the new payload mean "no change" for the string fields,
+		// but bools have no "unset" sentinel — every PATCH carries them. The settings
+		// UI always sends the full VoiceMode object so partial updates here would
+		// only happen in test or hand-crafted requests; the assertions below lock in
+		// that explicit behavior so it doesn't drift silently.
 		err := applyVoiceMode(settings, &models.VoiceModeSettings{Engine: "webSpeech"})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -537,6 +543,12 @@ func TestApplyVoiceMode(t *testing.T) {
 		}
 		if settings.VoiceMode.WhisperWebModel != "tiny" {
 			t.Fatalf("expected whisper model preserved, got %q", settings.VoiceMode.WhisperWebModel)
+		}
+		if settings.VoiceMode.Enabled {
+			t.Fatalf("expected Enabled zeroed on partial update, got true")
+		}
+		if settings.VoiceMode.AutoSend {
+			t.Fatalf("expected AutoSend zeroed on partial update, got true")
 		}
 	})
 }

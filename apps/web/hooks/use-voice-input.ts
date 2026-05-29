@@ -127,8 +127,14 @@ function resolveLang(preference: string): string {
 }
 
 function resolveWhisperLang(preference: string): string | undefined {
-  if (preference && preference !== "auto") return preference;
-  return undefined;
+  if (!preference || preference === "auto") return undefined;
+  // Whisper's tokenizer only knows ISO 639-1 two-letter codes ("en", "pt").
+  // The settings UI stores BCP-47 ("en-US", "pt-BR") so we can render
+  // human-friendly variant names — strip the region suffix here so the hint
+  // isn't silently dropped by the pipeline (which would then auto-detect and
+  // potentially pick the wrong dialect).
+  const dash = preference.indexOf("-");
+  return dash > 0 ? preference.slice(0, dash).toLowerCase() : preference.toLowerCase();
 }
 
 // ── MediaRecorder capture primitive ─────────────────────────────────────
@@ -209,8 +215,15 @@ type WhisperRefBox = { current: WhisperWebClient | null };
 function abortDriver(ref: DriverRefBox) {
   const driver = ref.current;
   if (!driver) return;
-  if (driver.kind === "webSpeech") driver.recognition.abort();
-  else teardownCapture(driver.handle);
+  if (driver.kind === "webSpeech") {
+    // Detach callbacks before aborting so the trailing onerror/onend events
+    // that some browsers fire after .abort() don't sneak through and mutate
+    // hook state that the caller (cancel()) just reset.
+    driver.recognition.onresult = null;
+    driver.recognition.onerror = null;
+    driver.recognition.onend = null;
+    driver.recognition.abort();
+  } else teardownCapture(driver.handle);
   ref.current = null;
 }
 

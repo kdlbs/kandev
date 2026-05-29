@@ -16,7 +16,7 @@ import {
   SelectValue,
 } from "@kandev/ui/select";
 import { Switch } from "@kandev/ui/switch";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { updateUserSettings } from "@/lib/api";
 import { SettingsSection } from "@/components/settings/settings-section";
@@ -78,27 +78,36 @@ function toWire(state: VoiceModeState): VoiceModeWire {
 // ── Save hook ────────────────────────────────────────────────────────────
 
 function useVoiceModeSaver() {
-  const userSettings = useAppStore((s) => s.userSettings);
+  // Read userSettings via the store API (not as a React selector) so the
+  // async save handler reads the latest snapshot at invocation time instead
+  // of capturing a stale closure. Without this, concurrent settings updates
+  // racing with this save (or a rejection rolling back to a stale snapshot)
+  // can silently overwrite unrelated fields.
+  const storeApi = useAppStoreApi();
   const setUserSettings = useAppStore((s) => s.setUserSettings);
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
 
   const save = useCallback(
     async (patch: Partial<VoiceModeState>) => {
-      const previous = userSettings.voiceMode;
+      const current = storeApi.getState().userSettings;
+      const previous = current.voiceMode;
       const next = { ...previous, ...patch };
-      setUserSettings({ ...userSettings, voiceMode: next });
+      setUserSettings({ ...current, voiceMode: next });
       setSaving(true);
       try {
         await updateUserSettings({ voice_mode: toWire(next) });
       } catch {
-        setUserSettings({ ...userSettings, voiceMode: previous });
+        // Rollback against the *current* state (which may have moved on
+        // since we kicked off the request), not against the original.
+        const latest = storeApi.getState().userSettings;
+        setUserSettings({ ...latest, voiceMode: previous });
         toast({ title: "Failed to save Voice Mode setting", variant: "error" });
       } finally {
         setSaving(false);
       }
     },
-    [userSettings, setUserSettings, toast],
+    [storeApi, setUserSettings, toast],
   );
 
   return { save, saving };
@@ -396,19 +405,24 @@ function AvailabilityBanner({ caps }: { caps: VoiceCapabilities }) {
 // ── Voice keyboard shortcut card ─────────────────────────────────────────
 
 function useShortcutSaver() {
-  const userSettings = useAppStore((s) => s.userSettings);
+  // Same stale-closure protection as useVoiceModeSaver — read live store
+  // state at call time so a concurrent keyboard-shortcut change from another
+  // settings card isn't clobbered by this card's optimistic update / rollback.
+  const storeApi = useAppStoreApi();
   const setUserSettings = useAppStore((s) => s.setUserSettings);
   const { toast } = useToast();
   return useCallback(
     (next: StoredShortcutOverrides) => {
-      const previous = userSettings.keyboardShortcuts;
-      setUserSettings({ ...userSettings, keyboardShortcuts: next });
+      const current = storeApi.getState().userSettings;
+      const previous = current.keyboardShortcuts;
+      setUserSettings({ ...current, keyboardShortcuts: next });
       updateUserSettings({ keyboard_shortcuts: next }).catch(() => {
-        setUserSettings({ ...userSettings, keyboardShortcuts: previous });
+        const latest = storeApi.getState().userSettings;
+        setUserSettings({ ...latest, keyboardShortcuts: previous });
         toast({ title: "Failed to save shortcut", variant: "error" });
       });
     },
-    [userSettings, setUserSettings, toast],
+    [storeApi, setUserSettings, toast],
   );
 }
 

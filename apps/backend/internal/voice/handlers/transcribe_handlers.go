@@ -50,12 +50,20 @@ func (h *Handlers) httpTranscribe(c *gin.Context) {
 		return
 	}
 
-	// MaxBytesReader makes the io.ReadAll below short-circuit with an error
-	// once the cap is exceeded, instead of letting Gin buffer the whole body.
+	// MaxBytesReader caps multipart parsing — once the cap is exceeded, Gin's
+	// multipart parser surfaces *http.MaxBytesError out of c.FormFile (because
+	// it reads the whole body through the wrapped reader before we ever get
+	// the *FileHeader). We need to distinguish that case from a genuinely
+	// missing field so the client sees 413 instead of a misleading 400.
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxAudioBytes)
 
 	fh, err := c.FormFile("audio")
 	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "audio payload too large"})
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": "audio file is required (multipart field 'audio')"})
 		return
 	}
@@ -71,7 +79,7 @@ func (h *Handlers) httpTranscribe(c *gin.Context) {
 	data, err := io.ReadAll(file)
 	if err != nil {
 		h.log.Warn("read uploaded audio failed", zap.Error(err))
-		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "audio payload too large or unreadable"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read uploaded audio"})
 		return
 	}
 	if len(data) == 0 {

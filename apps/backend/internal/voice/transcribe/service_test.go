@@ -53,14 +53,19 @@ func TestService_Transcribe_Success(t *testing.T) {
 		}
 		capturedModel = r.FormValue("model")
 		capturedFormat = r.FormValue("response_format")
+		// Use Errorf + return inside the HTTP handler goroutine — t.Fatalf
+		// from a non-test goroutine triggers FailNow which panics rather than
+		// failing the test cleanly.
 		fh := r.MultipartForm.File["file"]
 		if len(fh) != 1 {
-			t.Fatalf("expected 1 file part, got %d", len(fh))
+			t.Errorf("expected 1 file part, got %d", len(fh))
+			return
 		}
 		capturedFilename = fh[0].Filename
 		f, err := fh[0].Open()
 		if err != nil {
-			t.Fatalf("open file: %v", err)
+			t.Errorf("open file: %v", err)
+			return
 		}
 		defer func() { _ = f.Close() }()
 		capturedFileBytes, _ = io.ReadAll(f)

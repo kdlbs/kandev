@@ -107,6 +107,14 @@ export class WhisperWebClient {
     );
     this.worker.addEventListener("error", (e) => {
       const err = new Error(e.message || "Whisper worker crashed");
+      // Tear the dead worker down so the next init()/transcribe() recreates
+      // a fresh one. Without this, ensureWorker() short-circuits on the
+      // still-truthy reference, posts to nothing, and the new request hangs
+      // forever — bricking voice input until a full page reload.
+      this.worker?.terminate();
+      this.worker = null;
+      this.ready = false;
+      this.loadingModelId = null;
       if (this.pending) {
         this.pending.reject(err);
         this.pending = null;
