@@ -203,6 +203,14 @@ func (p *WorktreePreparer) createWorktreeWithSync(
 			reportProgress(onProgress, *syncStep, syncStepIndex, totalSteps)
 		}
 	}
+	// Complete the "Create worktree" step the moment the worktree dir is ready,
+	// before the per-repo setup script runs inside Create() — the setup script
+	// streams its own step, so this keeps the two from overlapping in the UI.
+	stepCompleted := false
+	createReq.OnWorktreeCreated = func(wt *worktree.Worktree) {
+		completeCreateWorktreeStep(&step, wt, stepIdx, totalSteps, onProgress)
+		stepCompleted = true
+	}
 
 	wt, err := p.worktreeMgr.Create(ctx, createReq)
 	steps = finalizeSyncStep(syncStep, syncStepIndex, totalSteps, onProgress, steps, err)
@@ -214,18 +222,29 @@ func (p *WorktreePreparer) createWorktreeWithSync(
 		return nil, steps, stepIdx, err
 	}
 
-	completeStepSuccess(&step)
-	if wt.BaseBranchFallbackWarning != "" {
-		step.Warning = wt.BaseBranchFallbackWarning
-		step.WarningDetail = wt.BaseBranchFallbackDetail
+	// Reuse of an existing worktree skips OnWorktreeCreated, so complete the
+	// step here when the callback did not fire.
+	if !stepCompleted {
+		completeCreateWorktreeStep(&step, wt, stepIdx, totalSteps, onProgress)
 	}
 	// wt.FetchWarning is surfaced in the separate "Fetch PR branch" step
 	// rendered later in the pipeline. It can only be non-empty when
 	// req.CheckoutBranch != "" (it is set inside fetchBranchToLocal), so the
 	// two warnings always co-occur and FetchWarning is never silently dropped.
 	steps = append(steps, step)
-	reportProgress(onProgress, step, stepIdx, totalSteps)
 	return wt, steps, stepIdx + 1, nil
+}
+
+// completeCreateWorktreeStep marks the "Create worktree" step successful,
+// attaches any base-branch fallback warning carried by the worktree, and
+// reports progress.
+func completeCreateWorktreeStep(step *PrepareStep, wt *worktree.Worktree, stepIdx, totalSteps int, onProgress PrepareProgressCallback) {
+	completeStepSuccess(step)
+	if wt.BaseBranchFallbackWarning != "" {
+		step.Warning = wt.BaseBranchFallbackWarning
+		step.WarningDetail = wt.BaseBranchFallbackDetail
+	}
+	reportProgress(onProgress, *step, stepIdx, totalSteps)
 }
 
 // finalizeSyncStep closes out the optional sync step after worktree.Create returns.

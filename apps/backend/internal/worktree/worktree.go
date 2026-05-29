@@ -162,6 +162,15 @@ type CreateRequest struct {
 
 	// OnSyncProgress receives progress updates for pre-worktree branch sync.
 	OnSyncProgress SyncProgressCallback
+
+	// OnWorktreeCreated, when set, is invoked once the worktree directory has
+	// been created and persisted (git worktree add succeeded) but BEFORE the
+	// per-repo setup script runs. The env preparer uses it to complete the
+	// "Create worktree" UI step so the setup script renders as a distinct,
+	// subsequent step instead of overlapping it. The passed worktree already
+	// carries any base-branch fallback warning. Called synchronously on the
+	// Create goroutine; not invoked when an existing worktree is reused.
+	OnWorktreeCreated func(*Worktree)
 }
 
 // Validate validates the create request.

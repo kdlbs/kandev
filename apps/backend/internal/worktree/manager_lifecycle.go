@@ -57,13 +57,9 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 	if req.TaskDirName == "" || req.RepoName == "" {
 		return nil, ErrTaskDirRequired
 	}
-	wt, err := m.createInTaskDir(ctx, req, baseRef)
+	wt, err := m.createInTaskDir(ctx, req, baseRef, fallbackWarning, fallbackDetail)
 	if err != nil {
 		return nil, err
-	}
-	if fallbackWarning != "" {
-		wt.BaseBranchFallbackWarning = fallbackWarning
-		wt.BaseBranchFallbackDetail = fallbackDetail
 	}
 	return wt, nil
 }
@@ -192,7 +188,7 @@ func (m *Manager) resolveBaseRefWithFallback(ctx context.Context, req *CreateReq
 // "owner/repo" don't produce a nested subdirectory — that would push the
 // worktree one level below the task root and break agentctl's sibling-based
 // multi-repo detection.
-func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRef string) (*Worktree, error) {
+func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRef, fallbackWarning, fallbackDetail string) (*Worktree, error) {
 	repoDir := SanitizeRepoDirName(req.RepoName)
 	if repoDir == "" {
 		return nil, ErrInvalidRepoName
@@ -237,6 +233,21 @@ func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRe
 
 	if err := m.persistAndCacheWorktree(ctx, wt, req, worktreePath); err != nil {
 		return nil, err
+	}
+
+	// Surface any base-branch fallback before signaling readiness so the
+	// "Create worktree" step can show the warning when completed early.
+	if fallbackWarning != "" {
+		wt.BaseBranchFallbackWarning = fallbackWarning
+		wt.BaseBranchFallbackDetail = fallbackDetail
+	}
+
+	// The worktree directory now exists and is persisted. Signal readiness
+	// before running the per-repo setup script so the env preparer can complete
+	// the "Create worktree" UI step and render the setup script as a distinct,
+	// subsequent step rather than overlapping it.
+	if req.OnWorktreeCreated != nil {
+		req.OnWorktreeCreated(wt)
 	}
 
 	m.copyConfiguredFiles(ctx, req, wt)
