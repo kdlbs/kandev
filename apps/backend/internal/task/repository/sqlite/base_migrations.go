@@ -26,6 +26,20 @@ func (r *Repository) migrateTaskSessions() error {
 	return nil
 }
 
+// migrateSessionsAddCostColumns backfills the per-session cost/token columns on
+// task_sessions. These are otherwise only introduced inside two gated
+// CREATE-TABLE statements — the fresh create (a no-op once the table exists) and
+// the agent_execution_id-drop rebuild (gated on that column still being present).
+// A DB that no longer contains the rebuild trigger columns would never gain the
+// cost columns, breaking the office cost subscriber's IncrementTaskSessionUsage
+// with "no such column: tokens_in". These additive ALTERs are idempotent — the
+// MigrateLogger swallows "duplicate column name" on DBs that already have them.
+func (r *Repository) migrateSessionsAddCostColumns() {
+	r.migrate.Apply("task_sessions.cost_subcents", `ALTER TABLE task_sessions ADD COLUMN cost_subcents INTEGER NOT NULL DEFAULT 0`)
+	r.migrate.Apply("task_sessions.tokens_in", `ALTER TABLE task_sessions ADD COLUMN tokens_in INTEGER NOT NULL DEFAULT 0`)
+	r.migrate.Apply("task_sessions.tokens_out", `ALTER TABLE task_sessions ADD COLUMN tokens_out INTEGER NOT NULL DEFAULT 0`)
+}
+
 // runMigrations applies idempotent ALTER TABLE migrations for schema evolution.
 func (r *Repository) runMigrations() error {
 	r.migrate.Apply("executors_running.last_message_uuid", `ALTER TABLE executors_running ADD COLUMN last_message_uuid TEXT DEFAULT ''`)
@@ -65,6 +79,11 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("workflows.hidden", `ALTER TABLE workflows ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("task_sessions.workspace_path", `ALTER TABLE task_sessions ADD COLUMN workspace_path TEXT DEFAULT ''`)
 	r.migrate.Apply("repositories.copy_files", `ALTER TABLE repositories ADD COLUMN copy_files TEXT DEFAULT ''`)
+
+	// Backfill the per-session cost/token columns. Runs after the gated
+	// task_sessions rebuilds above so it repairs legacy DBs whose schema can no
+	// longer trigger a rebuild (see migrateSessionsAddCostColumns).
+	r.migrateSessionsAddCostColumns()
 
 	// Office task extensions - net-new columns on existing main tables.
 	// Idempotent ALTERs; main upgrades pick them up at first boot.
