@@ -775,7 +775,11 @@
 
 .markdown-body table {
   border-collapse: collapse;
-  width: 100%;
+  /* Size to content (capped at the container) instead of always stretching to
+     100%. A label/value table with one long value row no longer forces every
+     short row into a cavernous, mostly-empty value cell. */
+  width: auto;
+  max-width: 100%;
   margin: 0.75rem 0;
   table-layout: auto;
 }
@@ -790,7 +794,6 @@
 
 .markdown-body td {
   overflow-wrap: anywhere;
-  word-break: break-word;
 }
 
 .markdown-body th {
@@ -799,7 +802,22 @@
   white-space: nowrap;
 }
 
-.markdown-body td code {
+/* Label/value tables (common in agent output) put short keys in the first
+   column. Keep that column on one line and sized to its content so a long
+   value cell can't starve it down to a few characters and wrap "Failing"
+   into "Failin g". */
+.markdown-body td:first-child {
+  white-space: nowrap;
+  width: 1%;
+}
+
+/* Cap value columns at a readable measure so a single long identifier wraps
+   into a tidy block instead of dragging the whole table to full width. */
+.markdown-body td:not(:first-child) {
+  max-width: 56ch;
+}
+
+.markdown-body td:not(:first-child) code {
   white-space: normal;
   overflow-wrap: anywhere;
 }
