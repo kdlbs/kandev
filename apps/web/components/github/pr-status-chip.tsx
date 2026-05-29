@@ -63,7 +63,9 @@ function chipStatus(pr: TaskPR): ChipStatus {
  * Mobile: tapping opens the same popover content inside a bottom-sheet Drawer
  * — hover is unreachable on touch devices.
  *
- * Returns null when the task has no PR yet.
+ * Returns null when the task has no PR yet, or once the PR reaches a terminal
+ * state (merged / closed) — the chat-input banner already conveys that, so the
+ * CI chip would be redundant.
  */
 export function PRStatusChip({ taskId }: { taskId: string | null }) {
   const { pr } = useTaskPR(taskId);
@@ -71,6 +73,7 @@ export function PRStatusChip({ taskId }: { taskId: string | null }) {
   // top-bar PR button isn't mounted (e.g. small viewport that hides it).
   usePRFeedbackBackgroundSync(pr);
   if (!pr) return null;
+  if (pr.state === "merged" || pr.state === "closed") return null;
   return <PRStatusChipInner pr={pr} />;
 }
 

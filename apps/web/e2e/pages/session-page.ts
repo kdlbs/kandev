@@ -61,6 +61,18 @@ export class SessionPage {
   prMergedDismissButton() {
     return this.page.getByTestId("pr-merged-dismiss-button");
   }
+  prClosedBanner() {
+    return this.page.getByTestId("pr-closed-banner");
+  }
+  prClosedArchiveButton() {
+    return this.page.getByTestId("pr-closed-archive-button");
+  }
+  prClosedDismissButton() {
+    return this.page.getByTestId("pr-closed-dismiss-button");
+  }
+  prStatusChip() {
+    return this.page.getByTestId("pr-status-chip");
+  }
   todoIndicator() {
     return this.page.getByTestId("todo-indicator");
   }

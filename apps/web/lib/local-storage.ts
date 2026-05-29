@@ -386,6 +386,28 @@ export function markPRMergedBannerDismissed(taskId: string): void {
   }
 }
 
+// PR closed banner dismissal — same lifetime as the merged banner: per-task,
+// survives reload + task switch within the tab session, resets on tab close.
+const PR_CLOSED_BANNER_DISMISSED_PREFIX = "kandev.pr-closed-banner-dismissed.";
+
+export function wasPRClosedBannerDismissed(taskId: string): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.sessionStorage.getItem(`${PR_CLOSED_BANNER_DISMISSED_PREFIX}${taskId}`) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function markPRClosedBannerDismissed(taskId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(`${PR_CLOSED_BANNER_DISMISSED_PREFIX}${taskId}`, "1");
+  } catch {
+    // Ignore write failures
+  }
+}
+
 // Internal storage keys for open file tabs
 const OPEN_FILES_KEY = "kandev.openFiles";
 const ACTIVE_TAB_KEY = "kandev.activeTab";
@@ -595,8 +617,9 @@ export function cleanupTaskStorage(
   // Plan notification (localStorage, keyed per task inside a Record)
   setPlanLastSeen(taskId, null);
 
-  // PR merged banner dismissal (sessionStorage, keyed per task)
+  // PR merged / closed banner dismissal (sessionStorage, keyed per task)
   removeSessionStorage(`${PR_MERGED_BANNER_DISMISSED_PREFIX}${taskId}`);
+  removeSessionStorage(`${PR_CLOSED_BANNER_DISMISSED_PREFIX}${taskId}`);
 
   // Sidebar collapsed-subtask set (sessionStorage, array keyed by parent taskId)
   const collapsed = getStoredCollapsedSubtaskParents();

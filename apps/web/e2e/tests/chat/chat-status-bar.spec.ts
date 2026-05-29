@@ -252,6 +252,62 @@ test.describe("Chat status bar", () => {
     await expect(session.prMergedBanner()).not.toBeVisible();
   });
 
+  test("shows PR closed banner and hides the CI chip when the PR is closed", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "PR Closed Banner Task",
+      seedData.agentProfileId,
+      {
+        description: 'e2e:message("pr closed banner response")',
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: "test-org",
+      repo: "test-repo",
+      pr_number: 505,
+      pr_url: "https://github.com/test-org/test-repo/pull/505",
+      pr_title: "Closed Test PR",
+      head_branch: "feature/closed",
+      base_branch: "main",
+      author_login: "test-user",
+      state: "closed",
+    });
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    const card = kanban.taskCardByTitle("PR Closed Banner Task");
+    await expect(card).toBeVisible({ timeout: 30_000 });
+    await card.click();
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    await expect(session.chat.getByText("pr closed banner response").last()).toBeVisible({
+      timeout: 30_000,
+    });
+
+    const statusBar = session.chatStatusBar();
+    await expect(statusBar).toBeVisible({ timeout: 10_000 });
+    await expect(session.prClosedBanner()).toBeVisible({ timeout: 10_000 });
+    await expect(session.prClosedBanner()).toContainText("PR #505 was closed without merging");
+    // The CI chip is redundant once the PR is terminal — the banner conveys it.
+    await expect(session.prStatusChip()).not.toBeVisible();
+    await expect(session.prMergedBanner()).not.toBeVisible();
+  });
+
   test("archive via PR banner switches to next task", async ({ testPage, apiClient, seedData }) => {
     test.setTimeout(90_000);
 
