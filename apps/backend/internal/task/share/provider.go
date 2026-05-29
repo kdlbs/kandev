@@ -36,8 +36,6 @@ func Provide(
 	svc := New(repo, taskReader, backend, log, cfg.KandevVersion)
 	h := NewHTTPHandlers(svc, ghClient, log)
 	// Cleanup is a true no-op — the repository doesn't own its database
-	// connection (the pool is owned by cmd/kandev), and Repository.Close()
-	// reflects that by returning nil. Returning an inline noop here keeps
-	// the contract obvious to readers without needing to chase Close.
+	// connection (the pool is owned by cmd/kandev).
 	return h, func() error { return nil }, nil
 }
