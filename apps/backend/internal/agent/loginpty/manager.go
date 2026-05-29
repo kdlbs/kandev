@@ -110,13 +110,6 @@ func (m *Manager) Start(agentID string, cmd []string, cols, rows uint16) (*Sessi
 	return sess, nil
 }
 
-// Get returns a session by agent ID (or nil).
-func (m *Manager) Get(agentID string) *Session {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.sessions[agentID]
-}
-
 // GetByID returns a session by session ID (or nil).
 func (m *Manager) GetByID(sessionID string) *Session {
 	m.mu.Lock()
