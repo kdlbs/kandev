@@ -20,6 +20,13 @@ export { getRootSplitview } from "./layout-manager";
 
 const debugWidths = createDebugLogger("dockview:widths");
 
+/** Dockview's measured grid width, or undefined when not yet laid out — passed
+ *  to the cap helpers so they don't fall back to a possibly-stale
+ *  `window.innerWidth`. */
+function layoutWidth(api: DockviewApi): number | undefined {
+  return api.width > 0 ? api.width : undefined;
+}
+
 /** Best-effort caller chain for the fixups-capture debug log: pull the first
  *  few stack frames above `applyLayoutFixups` so we can see WHICH layout path
  *  (env-switch / restore / custom-layout / maximize) recorded a given target.
@@ -70,7 +77,12 @@ export function applyLayoutFixups(api: DockviewApi): LayoutGroupIds {
 function captureSidebarTarget(api: DockviewApi, sv: any): void {
   const sb = api.getPanel("sidebar");
   if (!sb) return;
-  const sidebarCap = computeSidebarMaxPx();
+  // Derive the cap from dockview's measured grid width, not the implicit
+  // window.innerWidth fallback: innerWidth can read transiently stale during
+  // route transitions / devtools toggles, yielding a too-small cap that would
+  // clamp the captured target too narrow and persist it — the width drift this
+  // pipeline exists to prevent.
+  const sidebarCap = computeSidebarMaxPx(layoutWidth(api));
   sb.group.locked = SIDEBAR_LOCK;
   sb.group.header.hidden = false;
   sb.group.api.setConstraints({ maximumWidth: sidebarCap, minimumWidth: LAYOUT_PINNED_MIN_PX });
@@ -99,7 +111,9 @@ function captureSidebarTarget(api: DockviewApi, sv: any): void {
 function captureRightTarget(api: DockviewApi, sv: any): void {
   // Constrain the default preset's right column groups (stable well-known IDs).
   // Other presets' side columns aren't pinned and carry no max-width cap.
-  const rightCap = computeRightMaxPx();
+  // Use the measured grid width, not the window.innerWidth fallback (see
+  // captureSidebarTarget).
+  const rightCap = computeRightMaxPx(layoutWidth(api));
   for (const gid of [RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP]) {
     const group = api.groups.find((g) => g.id === gid);
     if (group) {
@@ -123,7 +137,8 @@ function logFixupsCapture(api: DockviewApi, sv: any): void {
   // that makes `enforcePinnedTargets` spin forever. `cols` shows whether the
   // layout was complete at capture (cols<3 → no real right column). api.width
   // vs window.innerWidth surfaces the window-fallback cap divergence.
-  const sidebarCap = computeSidebarMaxPx();
+  const w = layoutWidth(api);
+  const sidebarCap = computeSidebarMaxPx(w);
   const innerW = typeof window !== "undefined" ? window.innerWidth : -1;
   const liveSidebar = sv?.getViewSize?.(0);
   // Threshold matches captureRightTarget (>= 3): in a 2-column layout the last
@@ -134,7 +149,7 @@ function logFixupsCapture(api: DockviewApi, sv: any): void {
   debugWidths(
     `fixups-capture caller=${captureCallerChain()} apiW=${api.width} innerW=${innerW} ` +
       `cols=${sv?.length ?? 0} sidebarCap=${Math.round(sidebarCap)} liveSidebar=${r(liveSidebar)} ` +
-      `rightCap=${Math.round(computeRightMaxPx())} liveRight=${r(liveRight)} ` +
+      `rightCap=${Math.round(computeRightMaxPx(w))} liveRight=${r(liveRight)} ` +
       `sidebarOverCap=${typeof liveSidebar === "number" && liveSidebar > sidebarCap + 1}`,
   );
 }

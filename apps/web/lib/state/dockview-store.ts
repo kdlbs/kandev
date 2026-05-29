@@ -217,9 +217,6 @@ function applyDeferredPanelActions(api: DockviewApi, actions: DeferredPanelActio
   }
 }
 
-/** Read live column widths from dockview's splitview and persist them as pinned overrides.
- *  Only syncs widths for columns identified as "sidebar" or "right" to avoid
- *  capturing plan/preview/vscode column widths as stale "right" overrides. */
 /**
  * Build the pinnedWidths updates for a width sync, tracking a column only when
  * it is the VISIBLE default sidebar/right.
@@ -248,6 +245,8 @@ export function collectPinnedWidthUpdates(
   return updates;
 }
 
+/** Read live column widths from dockview's splitview and persist the visible
+ *  sidebar/right widths as pinned overrides (see `collectPinnedWidthUpdates`). */
 function syncPinnedWidthsFromApi(api: DockviewApi, set: StoreSet): void {
   if (api.hasMaximizedGroup()) return;
   const sv = getRootSplitview(api);
@@ -278,7 +277,6 @@ function syncPinnedWidthsFromApi(api: DockviewApi, set: StoreSet): void {
   }
 }
 
-/** Capture the live sidebar/right pixel widths into pinnedWidths before a layout rebuild. */
 /**
  * Decide which pinned-width overrides to apply when switching to a preset.
  *
@@ -315,6 +313,7 @@ export function resolvePresetPinnedWidths(
   return cleaned;
 }
 
+/** Capture the live sidebar/right pixel widths into pinnedWidths before a layout rebuild. */
 function captureLiveWidths(api: DockviewApi, set: StoreSet): Map<string, number> {
   if (api.hasMaximizedGroup()) {
     api.exitMaximizedGroup();
