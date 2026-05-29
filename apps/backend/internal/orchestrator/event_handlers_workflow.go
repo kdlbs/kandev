@@ -1518,6 +1518,11 @@ func (s *Service) queueAutoStartPrompt(
 // will drain on the next turn end. Uses the same tryEnsureExecution path as
 // EnsureSession (office panels), which drives ResumeSession → agent.boot_ready
 // → handleAgentBootReady → drainQueuedMessageAfterTransition.
+//
+// Covers the case where the execution is dead at queue time (e.g. agent
+// crashed just before the on_enter transition). If the agent is alive when
+// the queue is written but dies later, the queue is drained by the next
+// handleAgentBootReady (manual or automatic resume).
 func (s *Service) scheduleAutoResumeForWorkflowQueue(ctx context.Context, sessionID string) {
 	if s.executor == nil {
 		return
