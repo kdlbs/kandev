@@ -17,7 +17,6 @@ import { AppSidebarSettingsMode } from "./app-sidebar-settings-mode";
 import { AgentsSection } from "./sections/agents-section";
 import { IntegrationsSection } from "./sections/integrations-section";
 import { ProjectsSection } from "./sections/projects-section";
-import { SettingsSection } from "./sections/settings-section";
 import { TasksSection } from "./sections/tasks-section";
 
 const SECTION_ROUTE_MAP: Array<{ id: string; matches: (path: string) => boolean }> = [
@@ -27,7 +26,6 @@ const SECTION_ROUTE_MAP: Array<{ id: string; matches: (path: string) => boolean 
   },
   { id: APP_SIDEBAR_SECTION_IDS.projects, matches: (p) => p.startsWith("/office/projects") },
   { id: APP_SIDEBAR_SECTION_IDS.agents, matches: (p) => p.startsWith("/office/agents") },
-  { id: APP_SIDEBAR_SECTION_IDS.settings, matches: (p) => p.startsWith("/settings") },
 ];
 
 /**
@@ -111,11 +109,10 @@ export function AppSidebar() {
               <IntegrationsSection collapsed={collapsed} />
             </div>
             {/* Tasks is the flex-grow middle section so it absorbs remaining
-                vertical space and scrolls internally; Settings sits below it. */}
+                vertical space and scrolls internally. Settings is intentionally
+                not a nav section — it's reached only via the footer gear, which
+                takes the whole sidebar over with the settings tree. */}
             <TasksSection collapsed={collapsed} />
-            <div className="shrink-0 flex flex-col gap-2 overflow-y-auto">
-              <SettingsSection collapsed={collapsed} />
-            </div>
           </>
         )}
       </nav>

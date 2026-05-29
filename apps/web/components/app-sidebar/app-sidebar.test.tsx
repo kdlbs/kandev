@@ -43,9 +43,6 @@ vi.mock("./sections/agents-section", () => ({
 vi.mock("./sections/integrations-section", () => ({
   IntegrationsSection: () => <div data-testid="integrations-section" />,
 }));
-vi.mock("./sections/settings-section", () => ({
-  SettingsSection: () => <div data-testid="settings-section" />,
-}));
 vi.mock("./app-sidebar-footer", () => ({
   AppSidebarFooter: () => <div data-testid="footer" />,
 }));
@@ -83,13 +80,13 @@ describe("AppSidebar", () => {
     cleanup();
   });
 
-  it("renders all sections when expanded", () => {
+  it("renders the nav sections when expanded (no Settings section — that's the footer gear)", () => {
     render(<AppSidebar />);
     expect(screen.getByTestId("app-sidebar").getAttribute("data-collapsed")).toBe("false");
     expect(screen.getByTestId("tasks-section")).toBeTruthy();
     expect(screen.getByTestId("projects-section")).toBeTruthy();
     expect(screen.getByTestId("agents-section")).toBeTruthy();
-    expect(screen.getByTestId("settings-section")).toBeTruthy();
+    expect(screen.queryByTestId("settings-section")).toBeNull();
   });
 
   it("renders collapsed when store reports collapsed=true", () => {
