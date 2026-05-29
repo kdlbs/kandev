@@ -334,17 +334,6 @@ func NewCodeSearch(query, pattern, path, glob string) *NormalizedPayload {
 	}
 }
 
-// NewHttpRequest creates a NormalizedPayload for HTTP request operations.
-func NewHttpRequest(url, method string) *NormalizedPayload {
-	return &NormalizedPayload{
-		kind: ToolKindHttpRequest,
-		httpRequest: &HttpRequestPayload{
-			URL:    url,
-			Method: method,
-		},
-	}
-}
-
 // NewGeneric creates a NormalizedPayload for unrecognized tools.
 func NewGeneric(name string, input any) *NormalizedPayload {
 	return &NormalizedPayload{
@@ -352,62 +341,6 @@ func NewGeneric(name string, input any) *NormalizedPayload {
 		generic: &GenericPayload{
 			Name:  name,
 			Input: input,
-		},
-	}
-}
-
-// NewCreateTask creates a NormalizedPayload for task creation operations.
-func NewCreateTask(title, description string) *NormalizedPayload {
-	return &NormalizedPayload{
-		kind: ToolKindCreateTask,
-		createTask: &CreateTaskPayload{
-			Title:       title,
-			Description: description,
-		},
-	}
-}
-
-// NewSubagentTask creates a NormalizedPayload for subagent task invocations.
-func NewSubagentTask(description, prompt, subagentType string) *NormalizedPayload {
-	return &NormalizedPayload{
-		kind: ToolKindSubagentTask,
-		subagentTask: &SubagentTaskPayload{
-			Description:  description,
-			Prompt:       prompt,
-			SubagentType: subagentType,
-		},
-	}
-}
-
-// NewShowPlan creates a NormalizedPayload for plan display operations.
-func NewShowPlan(summary string, steps []string) *NormalizedPayload {
-	return &NormalizedPayload{
-		kind: ToolKindShowPlan,
-		showPlan: &ShowPlanPayload{
-			Summary: summary,
-			Steps:   steps,
-		},
-	}
-}
-
-// NewManageTodos creates a NormalizedPayload for todo management operations.
-func NewManageTodos(operation string, items []TodoItem) *NormalizedPayload {
-	return &NormalizedPayload{
-		kind: ToolKindManageTodos,
-		manageTodos: &ManageTodosPayload{
-			Operation: operation,
-			Items:     items,
-		},
-	}
-}
-
-// NewMisc creates a NormalizedPayload for miscellaneous operations.
-func NewMisc(label string, details any) *NormalizedPayload {
-	return &NormalizedPayload{
-		kind: ToolKindMisc,
-		misc: &MiscPayload{
-			Label:   label,
-			Details: details,
 		},
 	}
 }
