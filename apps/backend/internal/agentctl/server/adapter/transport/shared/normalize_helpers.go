@@ -3,9 +3,10 @@ package shared
 import (
 	"fmt"
 	"strings"
-
-	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
+
+// langPlaintext is the fallback language identifier for files without a known extension.
+const langPlaintext = "plaintext"
 
 // GenerateUnifiedDiff creates a unified diff string from old and new content.
 func GenerateUnifiedDiff(oldStr, newStr, path string, startLine int) string {
@@ -55,97 +56,6 @@ func SplitLines(s string) []string {
 		return []string{}
 	}
 	return strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
-}
-
-// NormalizeShellResult updates a ShellExecPayload with result data.
-func NormalizeShellResult(payload *streams.ShellExecPayload, result any) {
-	if payload.Output == nil {
-		payload.Output = &streams.ShellExecOutput{}
-	}
-
-	switch r := result.(type) {
-	case string:
-		payload.Output.Stdout = r
-	case map[string]any:
-		if stdout, ok := r["stdout"].(string); ok {
-			payload.Output.Stdout = stdout
-		}
-		if stderr, ok := r["stderr"].(string); ok {
-			payload.Output.Stderr = stderr
-		}
-		if exitCode, ok := r["exit_code"].(float64); ok {
-			payload.Output.ExitCode = int(exitCode)
-		}
-	}
-}
-
-// MaxContentLength is the maximum length for tool output content before truncation.
-const MaxContentLength = 50000
-
-// MaxFileCount is the maximum number of files to include in code search results.
-const MaxFileCount = 500
-
-// langPlaintext is the fallback language identifier for files without a known extension.
-const langPlaintext = "plaintext"
-
-// TruncateIfNeeded truncates a string if it exceeds maxLen.
-func TruncateIfNeeded(s string, maxLen int) (string, bool) {
-	if len(s) <= maxLen {
-		return s, false
-	}
-	return s[:maxLen], true
-}
-
-// NormalizeReadResult populates ReadFilePayload.Output with result content.
-func NormalizeReadResult(payload *streams.ReadFilePayload, result string) {
-	lines := SplitLines(result)
-	content, truncated := TruncateIfNeeded(result, MaxContentLength)
-
-	payload.Output = &streams.ReadFileOutput{
-		Content:   content,
-		LineCount: len(lines),
-		Truncated: truncated,
-		Language:  DetectLanguage(payload.FilePath),
-	}
-}
-
-// NormalizeCodeSearchResult populates CodeSearchPayload.Output with result content.
-func NormalizeCodeSearchResult(payload *streams.CodeSearchPayload, result string) {
-	result = strings.TrimSpace(result)
-	if result == "" {
-		payload.Output = &streams.CodeSearchOutput{
-			Files:     []string{},
-			FileCount: 0,
-		}
-		return
-	}
-
-	files := strings.Split(result, "\n")
-	truncated := false
-	if len(files) > MaxFileCount {
-		files = files[:MaxFileCount]
-		truncated = true
-	}
-
-	payload.Output = &streams.CodeSearchOutput{
-		Files:     files,
-		FileCount: len(files),
-		Truncated: truncated,
-	}
-}
-
-// NormalizeModifyResult updates ModifyFilePayload with result content for Write operations.
-func NormalizeModifyResult(payload *streams.ModifyFilePayload, result string) {
-	// For Write tool, store the written content confirmation
-	// The tool result confirms what was written
-	if len(payload.Mutations) > 0 {
-		mut := &payload.Mutations[0]
-		// If Content not already set from input args (for create), use result
-		if mut.Content == "" && mut.NewContent == "" && result != "" {
-			content, _ := TruncateIfNeeded(result, MaxContentLength)
-			mut.Content = content
-		}
-	}
 }
 
 // DetectLanguage maps file extension to language identifier.

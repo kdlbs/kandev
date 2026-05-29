@@ -38,9 +38,6 @@ const (
 	ProtocolCopilot    = "copilot"
 )
 
-// DebugEnabled reports whether agent message debug mode is active.
-func DebugEnabled() bool { return debugMode }
-
 func resolveDebugLogDir() string {
 	if dir := os.Getenv("KANDEV_DEBUG_LOG_DIR"); dir != "" {
 		return dir
