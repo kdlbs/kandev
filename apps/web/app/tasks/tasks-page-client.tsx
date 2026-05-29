@@ -415,6 +415,11 @@ export function TasksPageClient(props: TasksPageClientProps) {
   const s = useTasksPageSetup(props);
   const { isMobile } = useResponsiveBreakpoint();
   const isMobileSearchOpen = useAppStore((state) => state.mobileKanban.isSearchOpen);
+  const setMobileSearchOpen = useAppStore((state) => state.setMobileKanbanSearchOpen);
+
+  // Collapse search on unmount so the global flag doesn't auto-open (and focus)
+  // the search bar after navigating to another route.
+  useEffect(() => () => setMobileSearchOpen(false), [setMobileSearchOpen]);
   return (
     <div className="h-screen w-full flex flex-col bg-background">
       <KanbanHeader
