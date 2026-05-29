@@ -3,6 +3,7 @@ package mcpconfig
 import (
 	"encoding/json"
 	"path/filepath"
+	"strings"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
 )
@@ -193,15 +194,47 @@ func codexServerArgs(srv types.McpServer) ([]string, error) {
 			pairs = append(pairs, pair{"http_headers", srv.Headers})
 		}
 	}
+	// NOTE: env vars and headers are JSON-encoded into `-c` overrides, which
+	// land in the process argument list (visible via `ps aux`) — a local user
+	// on the host could read tokens this way. Codex has no file-based MCP config
+	// injection (unlike Claude/OpenCode), so the `-c` path is the only option.
 	args := make([]string, 0, len(pairs)*2)
 	for _, p := range pairs {
 		enc, err := json.Marshal(p.value)
 		if err != nil {
 			return nil, err
 		}
-		args = append(args, "-c", "mcp_servers."+srv.Name+"."+p.key+"="+string(enc))
+		args = append(args, "-c", "mcp_servers."+codexKeyName(srv.Name)+"."+p.key+"="+string(enc))
 	}
 	return args, nil
+}
+
+// codexKeyName renders an MCP server name as a single TOML key segment for a
+// `-c mcp_servers.<name>.<key>` override. Names that are valid TOML bare keys
+// are emitted as-is; names containing dots (or other non-bare characters) are
+// quoted so Codex does not misread an embedded dot as extra key nesting (which
+// would silently inject the server under the wrong path).
+func codexKeyName(name string) string {
+	if isTOMLBareKey(name) {
+		return name
+	}
+	escaped := strings.ReplaceAll(name, `\`, `\\`)
+	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+	return `"` + escaped + `"`
+}
+
+func isTOMLBareKey(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '-':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // --- Cursor ------------------------------------------------------------------

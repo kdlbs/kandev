@@ -166,6 +166,15 @@ func TestCodexStrategy_OmitsEmptyArgsAndEnv(t *testing.T) {
 	}
 }
 
+func TestCodexStrategy_QuotesServerNamesWithDots(t *testing.T) {
+	servers := []types.McpServer{{Name: "my.server", Type: "stdio", Command: "run"}}
+	art, _ := CodexStrategy{}.BuildPassthroughMCP(servers, PassthroughPaths{})
+	// A dotted name must be TOML-quoted so codex doesn't read the dot as nesting.
+	if got := strings.Join(art.Args, " "); got != `-c mcp_servers."my.server".command="run"` {
+		t.Errorf("Args = %q", got)
+	}
+}
+
 // --- Cursor ------------------------------------------------------------------
 
 func TestCursorStrategy_ProjectFileSkipIfExists(t *testing.T) {

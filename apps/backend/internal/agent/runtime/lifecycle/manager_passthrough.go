@@ -175,11 +175,12 @@ func (m *Manager) startPassthroughShell(ctx context.Context, execution *AgentExe
 // resolvedPassthrough holds the agent config, passthrough config, runtime config, and profile
 // info resolved from an execution. Used as the basis for building passthrough commands.
 type resolvedPassthrough struct {
-	agentID string
-	agent   agents.PassthroughAgent
-	pt      agents.PassthroughConfig
-	rt      *agents.RuntimeConfig
-	profile *AgentProfileInfo
+	agentID     string
+	agentConfig agents.Agent
+	agent       agents.PassthroughAgent
+	pt          agents.PassthroughConfig
+	rt          *agents.RuntimeConfig
+	profile     *AgentProfileInfo
 }
 
 // resolvePassthroughAgent loads the agent config and profile for a passthrough execution.
@@ -201,11 +202,12 @@ func (m *Manager) resolvePassthroughAgent(ctx context.Context, execution *AgentE
 	}
 
 	return &resolvedPassthrough{
-		agentID: agentConfig.ID(),
-		agent:   ptAgent,
-		pt:      ptAgent.PassthroughConfig(),
-		rt:      agentConfig.Runtime(),
-		profile: profileInfo,
+		agentID:     agentConfig.ID(),
+		agentConfig: agentConfig,
+		agent:       ptAgent,
+		pt:          ptAgent.PassthroughConfig(),
+		rt:          agentConfig.Runtime(),
+		profile:     profileInfo,
 	}, nil
 }
 
@@ -283,13 +285,9 @@ func safePassthroughMCPConfigName(value string) string {
 // strategy's env vars on the execution (merged later in buildPassthroughEnv),
 // and returns the extra CLI args to append to the passthrough command. It is a
 // no-op for agents that declare no strategy.
-func (m *Manager) applyPassthroughMCP(ctx context.Context, execution *AgentExecution, pt agents.PassthroughConfig) ([]string, error) {
+func (m *Manager) applyPassthroughMCP(ctx context.Context, execution *AgentExecution, pt agents.PassthroughConfig, agentConfig agents.Agent) ([]string, error) {
 	if pt.MCPStrategy == nil {
 		return nil, nil
-	}
-	agentConfig, err := m.getAgentConfigForExecution(execution)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get agent config: %w", err)
 	}
 	servers, err := m.passthroughMCPServers(ctx, execution, agentConfig)
 	if err != nil {
@@ -484,7 +482,7 @@ func (m *Manager) passthroughAgentCommand(ctx context.Context, execution *AgentE
 	rt := agentConfig.Runtime()
 	taskDescription := getTaskDescriptionFromMetadata(execution)
 	promptForCmd := promptForPassthroughCommand(pt, taskDescription)
-	mcpArgs, err := m.applyPassthroughMCP(ctx, execution, pt)
+	mcpArgs, err := m.applyPassthroughMCP(ctx, execution, pt, agentConfig)
 	if err != nil {
 		return nil, agents.PassthroughConfig{}, nil, agents.Command{}, err
 	}
@@ -649,7 +647,7 @@ func (m *Manager) freshPassthroughCommand(ctx context.Context, execution *AgentE
 	if err != nil {
 		return agents.PassthroughConfig{}, nil, agents.Command{}, err
 	}
-	mcpArgs, err := m.applyPassthroughMCP(ctx, execution, resolved.pt)
+	mcpArgs, err := m.applyPassthroughMCP(ctx, execution, resolved.pt, resolved.agentConfig)
 	if err != nil {
 		return agents.PassthroughConfig{}, nil, agents.Command{}, err
 	}
@@ -668,7 +666,7 @@ func (m *Manager) freshPassthroughCommand(ctx context.Context, execution *AgentE
 }
 
 func (m *Manager) resumePassthroughCommand(ctx context.Context, execution *AgentExecution, resolved *resolvedPassthrough, useResume bool) (agents.Command, error) {
-	mcpArgs, err := m.applyPassthroughMCP(ctx, execution, resolved.pt)
+	mcpArgs, err := m.applyPassthroughMCP(ctx, execution, resolved.pt, resolved.agentConfig)
 	if err != nil {
 		return agents.Command{}, err
 	}

@@ -649,6 +649,34 @@ func TestPassthroughAgentCommandErrorsWhenMCPPortMissing(t *testing.T) {
 	}
 }
 
+func TestFreshPassthroughCommandErrorsWhenMCPPortMissing(t *testing.T) {
+	mgr, execution, _ := newClaudePassthroughMCPTestManager(t)
+	execution.standalonePort = 0
+	delete(execution.Metadata, "standalone_port")
+
+	if _, _, _, err := mgr.freshPassthroughCommand(context.Background(), execution); err == nil {
+		t.Fatal("freshPassthroughCommand returned nil, want missing MCP port error")
+	} else if err.Error() != "standalone port unavailable for passthrough MCP config" {
+		t.Fatalf("error = %q, want missing MCP port error", err.Error())
+	}
+}
+
+func TestResumePassthroughCommandErrorsWhenMCPPortMissing(t *testing.T) {
+	mgr, execution, _ := newClaudePassthroughMCPTestManager(t)
+	execution.standalonePort = 0
+	delete(execution.Metadata, "standalone_port")
+
+	resolved, err := mgr.resolvePassthroughAgent(context.Background(), execution)
+	if err != nil {
+		t.Fatalf("resolvePassthroughAgent returned error: %v", err)
+	}
+	if _, err := mgr.resumePassthroughCommand(context.Background(), execution, resolved, true); err == nil {
+		t.Fatal("resumePassthroughCommand returned nil, want missing MCP port error")
+	} else if err.Error() != "standalone port unavailable for passthrough MCP config" {
+		t.Fatalf("error = %q, want missing MCP port error", err.Error())
+	}
+}
+
 func TestRemoveExecutionCleansPassthroughMCPConfig(t *testing.T) {
 	mgr, execution, profile := newClaudePassthroughMCPTestManager(t)
 	execution.Metadata = nil
