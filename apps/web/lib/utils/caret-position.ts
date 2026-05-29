@@ -39,19 +39,25 @@ export function measureCaretRect(textarea: HTMLTextAreaElement, value: string): 
 
   mirror.textContent = value.substring(0, selectionStart);
   const marker = document.createElement("span");
-  marker.textContent = "\u200B";
+  marker.textContent = "​";
   mirror.appendChild(marker);
 
-  const textareaRect = textarea.getBoundingClientRect();
-  const markerRect = marker.getBoundingClientRect();
-  const mirrorRect = mirror.getBoundingClientRect();
-  const scrollTop = textarea.scrollTop;
-
-  document.body.removeChild(mirror);
+  let caretLeft: number;
+  let caretTop: number;
+  try {
+    const textareaRect = textarea.getBoundingClientRect();
+    const markerRect = marker.getBoundingClientRect();
+    const mirrorRect = mirror.getBoundingClientRect();
+    const scrollTop = textarea.scrollTop;
+    caretLeft = textareaRect.left + (markerRect.left - mirrorRect.left);
+    caretTop = textareaRect.top + (markerRect.top - mirrorRect.top) - scrollTop;
+  } finally {
+    document.body.removeChild(mirror);
+  }
 
   return new DOMRect(
-    textareaRect.left + (markerRect.left - mirrorRect.left),
-    textareaRect.top + (markerRect.top - mirrorRect.top) - scrollTop,
+    caretLeft,
+    caretTop,
     0,
     parseInt(computed.lineHeight, 10) || parseInt(computed.fontSize, 10) * 1.2,
   );

@@ -575,17 +575,18 @@ function useTextareaHandlers(
   mention: ReturnType<typeof useTaskCreatePromptMention>,
   onKeyDown: TaskFormInputsProps["onKeyDown"],
 ) {
+  const { handleChange: mentionHandleChange, handleKeyDown: mentionHandleKeyDown } = mention;
   const handleChange = useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => mention.handleChange(e.target.value),
-    [mention],
+    (e: React.ChangeEvent<HTMLTextAreaElement>) => mentionHandleChange(e.target.value),
+    [mentionHandleChange],
   );
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      mention.handleKeyDown(e);
+      mentionHandleKeyDown(e);
       if (e.defaultPrevented) return;
       onKeyDown?.(e);
     },
-    [mention, onKeyDown],
+    [mentionHandleKeyDown, onKeyDown],
   );
   return { handleChange, handleKeyDown };
 }
