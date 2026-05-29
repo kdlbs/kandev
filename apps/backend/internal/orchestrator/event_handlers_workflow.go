@@ -1508,7 +1508,24 @@ func (s *Service) queueAutoStartPrompt(
 		return fmt.Errorf("failed to queue workflow auto-start prompt: %w", err)
 	}
 	s.publishQueueStatusEvent(ctx, sessionID)
+	s.scheduleAutoResumeForWorkflowQueue(ctx, sessionID)
 	return nil
+}
+
+// scheduleAutoResumeForWorkflowQueue kicks off a background resume when a
+// workflow auto-start prompt was just queued but no live agent process exists
+// to drain it. No-op when the agent is already running — handleAgentReady
+// will drain on the next turn end. Uses the same tryEnsureExecution path as
+// EnsureSession (office panels), which drives ResumeSession → agent.boot_ready
+// → handleAgentBootReady → drainQueuedMessageAfterTransition.
+func (s *Service) scheduleAutoResumeForWorkflowQueue(ctx context.Context, sessionID string) {
+	if s.executor == nil {
+		return
+	}
+	if exec, ok := s.executor.GetExecutionBySession(sessionID); ok && exec != nil {
+		return
+	}
+	go s.tryEnsureExecution(context.WithoutCancel(ctx), sessionID)
 }
 
 // flipStaleRunningToWaiting flips the session to WAITING_FOR_INPUT when its

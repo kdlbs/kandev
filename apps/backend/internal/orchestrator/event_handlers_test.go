@@ -120,8 +120,12 @@ func (m *mockTaskRepo) UpdateTaskState(_ context.Context, taskID string, state v
 
 // mockAgentManager is a minimal mock of executor.AgentManagerClient for testing.
 type mockAgentManager struct {
-	isPassthrough       bool
-	isAgentRunning      bool
+	isPassthrough  bool
+	isAgentRunning bool
+	// isAgentRunningFn, when non-nil, overrides isAgentRunning for
+	// IsAgentRunningForSession. Lets tests model state changes mid-sequence
+	// (e.g. stream disconnect between PromptAgent call and queue write).
+	isAgentRunningFn    func(context.Context, string) bool
 	resolveProfileErr   error
 	restartProcessCalls []string // tracks execution IDs passed to RestartAgentProcess
 	restartProcessErr   error
@@ -252,7 +256,10 @@ func (m *mockAgentManager) CancelAgent(_ context.Context, _ string) error {
 func (m *mockAgentManager) RespondToPermissionBySessionID(_ context.Context, _, _, _ string, _ bool) error {
 	return nil
 }
-func (m *mockAgentManager) IsAgentRunningForSession(_ context.Context, _ string) bool {
+func (m *mockAgentManager) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
+	if m.isAgentRunningFn != nil {
+		return m.isAgentRunningFn(ctx, sessionID)
+	}
 	return m.isAgentRunning
 }
 func (m *mockAgentManager) ResolveAgentProfile(_ context.Context, _ string) (*executor.AgentProfileInfo, error) {
