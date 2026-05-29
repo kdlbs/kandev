@@ -22,12 +22,12 @@ import (
 // strict (no broad IgnoreTopFunction suppression) without polluting prod code.
 func TestMain(m *testing.M) {
 	exitCode := m.Run()
-	if exitCode == 0 {
-		if tr, ok := http.DefaultTransport.(*http.Transport); ok {
-			tr.CloseIdleConnections()
-		}
-		if err := goleak.Find(); err != nil {
-			println("goleak:", err.Error())
+	if tr, ok := http.DefaultTransport.(*http.Transport); ok {
+		tr.CloseIdleConnections()
+	}
+	if err := goleak.Find(); err != nil {
+		println("goleak:", err.Error())
+		if exitCode == 0 {
 			exitCode = 1
 		}
 	}

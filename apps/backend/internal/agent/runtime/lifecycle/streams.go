@@ -280,8 +280,14 @@ func (sm *StreamManager) connectWorkspaceStream(execution *AgentExecution, ready
 		// Signal that workspace stream is ready
 		signalReady()
 
-		// Wait for the stream to close (it stays open until disconnected)
-		<-ws.Done()
+		// Wait for the stream to close. Also exits on Manager shutdown so the
+		// goroutine drains when the remote end keeps the connection open.
+		// A nil stopCh (isolated tests) blocks on the nil channel forever,
+		// which degrades to plain <-ws.Done() semantics.
+		select {
+		case <-ws.Done():
+		case <-sm.stopCh:
+		}
 		execution.ClearWorkspaceStream(ws)
 		return
 	}
