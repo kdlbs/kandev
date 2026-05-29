@@ -243,6 +243,8 @@ After the push, CI restarts and bots may re-review. Delegate to `pr-poller` agai
 
 Cap re-check loops at **3 iterations** to prevent runaway sessions. After 3, surface the remaining state to the user and stop.
 
+**GraphQL rate-limit watch.** Each `pr-poller` run consumes the shared 5,000/hr GraphQL budget; after 2-3 re-checks (especially with slow E2E shards holding the poller near its cap) GraphQL can hit 0, at which point `gh pr checks`, `gh api graphql`, and `scripts/pr-resolve` mutations all start failing with "rate limit exceeded". When that happens, read CI status via REST instead — `gh api repos/:owner/:repo/commits/<headSHA>/check-runs` draws from the separate, much larger `core` budget — and use `gh api rate_limit` (free, counts against neither pool) to see remaining budget and reset times. For a slow-but-passing E2E run, a lightweight background REST poll on `check-runs` is cheaper than another full `pr-poller` invocation.
+
 Mark task 6 as completed.
 
 ### 7. Summary

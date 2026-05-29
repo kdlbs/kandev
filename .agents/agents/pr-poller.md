@@ -41,24 +41,28 @@ The `claude_summary` line carries the **latest** Claude summary's structured fin
 
 ## Procedure
 
-1. **Resolve PR.** `gh pr view --json number,url,headRefName,baseRefName` (or `gh pr view <num> --json …` if the parent passed a number). Capture `number` and `headRefName`.
+1. **Resolve PR.** `gh pr view --json number,url,headRefName,headRefOid,baseRefName` (or `gh pr view <num> --json …` if the parent passed a number). Capture `number`, `headRefName`, and `headRefOid` (the head SHA — needed for the REST poll in 3a).
 
 2. **Wrap any heavy `gh` call with `scripts/run-quiet`** so its raw output does not enter your own context. You only care about the parsed result:
    ```bash
-   scripts/run-quiet gh-checks -- gh pr checks <num>
+   scripts/run-quiet gh-checks -- gh api "repos/:owner/:repo/commits/<headRefOid>/check-runs?per_page=100"
    ```
    For JSON queries use `--jq` directly; those are short and can run unwrapped. `gh run view --log-failed` is the big one to wrap — but the parent uses that, not you.
 
 3. **Poll loop, 30 s cadence, 20 min cap (40 rounds).** Each round, in parallel:
 
-   a. **CI status:**
+   a. **CI status — poll via REST, not `gh pr checks`:**
       ```bash
-      gh pr checks <num> --json name,status,conclusion,detailsUrl
+      gh api "repos/:owner/:repo/commits/<headRefOid>/check-runs?per_page=100" --paginate \
+        --jq '.check_runs[] | {name, status, conclusion, details_url}'
       ```
       - `status` ∈ `{queued, in_progress, completed}`
-      - `completed` + `conclusion=success` → passing
-      - `completed` + `conclusion∈{failure,cancelled,timed_out}` → failed
+      - `completed` + `conclusion=success` (or `skipped`/`neutral`) → passing
+      - `completed` + `conclusion∈{failure,cancelled,timed_out,action_required}` → failed
       - anything else → pending
+      - For the report's `run_id`/`url` on failed checks, parse `details_url` — it has the form `.../actions/runs/<run_id>/job/<job_id>`.
+
+      **Why REST, not `gh pr checks`:** `gh pr checks` is GraphQL-backed. Looping it (≤40 rounds × possibly several `pr-poller` invocations per fixup) drains the shared **5,000/hr GraphQL budget** that the step-4 thread-count query and the parent's resolve mutations also draw from — once it hits 0, status reads *and* resolves start failing. The REST `check-runs` endpoint returns the same data from the separate, much larger `core` budget. It covers GitHub Actions check runs; if the repo also uses legacy commit-status contexts (rare here), additionally read `gh api repos/:owner/:repo/commits/<headRefOid>/status`. `gh api rate_limit` is free and shows remaining budget + reset times for both pools.
 
    b. **Bot reviews** (terminal conditions):
 
@@ -79,14 +83,14 @@ The `claude_summary` line carries the **latest** Claude summary's structured fin
       - **Claude** — two delivery paths, accept either:
         - same-repo: `gh api repos/:owner/:repo/pulls/<num>/reviews --jq '.[] | select(.user.login == "claude[bot]")'` → `done`, `path=app`
         - fork: `gh pr view <num> --json comments --jq '.comments[] | select(.author.login == "github-actions" and ((.body | startswith("**Claude finished ")) or (.body | startswith("## Code Review"))))'` → `done`, `path=fork`
-        - also stop waiting if `gh pr checks` shows the `claude-review` check completed (any conclusion) → use whichever signal arrives first
+        - also stop waiting if the 3a `check-runs` result shows the `claude-review` check completed (any conclusion) → use whichever signal arrives first
         - else `pending`, `path=none`
 
       - **cubic** (`cubic-dev-ai[bot]`):
         ```bash
         gh api repos/:owner/:repo/pulls/<num>/reviews --jq '.[] | select(.user.login == "cubic-dev-ai[bot]")'
         ```
-        - `done` if a matching review exists OR if `gh pr checks` shows the `cubic · AI code reviewer` check completed
+        - `done` if a matching review exists OR if the 3a `check-runs` result shows the `cubic · AI code reviewer` check completed
         - else `pending`
 
    c. **Exit conditions:**
