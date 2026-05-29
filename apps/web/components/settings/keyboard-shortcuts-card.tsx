@@ -17,7 +17,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
 
-function ShortcutRecorder({
+export function ShortcutRecorder({
   shortcutId,
   current,
   onChange,

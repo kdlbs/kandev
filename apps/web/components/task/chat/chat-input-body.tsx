@@ -52,6 +52,10 @@ export type ChatInputEditorAreaProps = {
   onEnhancePrompt?: () => void;
   isEnhancingPrompt?: boolean;
   isUtilityConfigured?: boolean;
+  /** Inserts a voice transcript into the editor at the current cursor. */
+  onVoiceTranscript?: (text: string) => void;
+  /** Submit the message after a voice transcript is inserted (when auto-send is on). */
+  onVoiceAutoSend?: () => void;
 };
 
 function EditorWithTooltip({
@@ -123,6 +127,7 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
   const { isSending, onCancel, contextCount, contextPopoverOpen, setContextPopoverOpen } = p;
   const { contextFiles, onImplementPlan, onEnhancePrompt, isEnhancingPrompt } = p;
   const { isUtilityConfigured, hideSessionsDropdown, minimalToolbar, hidePlanMode } = p;
+  const { onVoiceTranscript, onVoiceAutoSend } = p;
   // Exclude auto-added plan context from the count — it's always present in plan mode
   // and shouldn't by itself enable the send button.
   const userContextCount = planContextEnabled ? Math.max(0, contextCount - 1) : contextCount;
@@ -186,6 +191,8 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
         isEnhancingPrompt={isEnhancingPrompt}
         isUtilityConfigured={isUtilityConfigured}
         onAttachFiles={handleAttachFiles}
+        onVoiceTranscript={onVoiceTranscript}
+        onVoiceAutoSend={onVoiceAutoSend}
         hideSessionsDropdown={hideSessionsDropdown}
         minimalToolbar={minimalToolbar}
         hidePlanMode={hidePlanMode}

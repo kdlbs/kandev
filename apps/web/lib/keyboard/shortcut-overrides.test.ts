@@ -20,7 +20,8 @@ describe("CONFIGURABLE_SHORTCUTS", () => {
     expect(ids).toContain("FOCUS_INPUT");
     expect(ids).toContain("TOGGLE_PLAN_MODE");
     expect(ids).toContain("TASK_SWITCHER");
-    expect(ids).toHaveLength(10);
+    expect(ids).toContain("VOICE_INPUT_TOGGLE");
+    expect(ids).toHaveLength(11);
   });
 
   it("each entry has a label and default matching SHORTCUTS", () => {

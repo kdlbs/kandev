@@ -1,6 +1,7 @@
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
+import { parseVoiceMode } from "@/lib/ssr/user-settings";
 
 export function registerUsersHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
@@ -31,6 +32,7 @@ export function registerUsersHandlers(store: StoreApi<AppState>): WsHandlers {
               ? "browser_panel"
               : "new_tab",
           changesPanelLayout: message.payload.changes_panel_layout === "tree" ? "tree" : "flat",
+          voiceMode: parseVoiceMode(message.payload.voice_mode),
           loaded: true,
         },
       }));

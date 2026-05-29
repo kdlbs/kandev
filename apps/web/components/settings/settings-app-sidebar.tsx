@@ -11,6 +11,7 @@ import {
   IconCode,
   IconCpu,
   IconKey,
+  IconMicrophone,
   IconMessageCircle,
   IconBrandGithub,
   IconBrandGitlab,
@@ -315,6 +316,47 @@ function ExecutorsSidebarSection({ pathname, executors }: ExecutorsSidebarSectio
   );
 }
 
+type SimpleSidebarEntry = {
+  href: string;
+  label: string;
+  Icon: typeof IconBrandGithub;
+};
+
+/**
+ * A short row of single-link sidebar entries (Automations, Prompts, Voice
+ * Mode, Utility Agents, External MCP) — extracted from `SettingsAppSidebar`
+ * so the parent function stays under the 100-line lint limit.
+ */
+function SimpleSidebarRows({
+  pathname,
+  entries,
+}: {
+  pathname: string;
+  entries: SimpleSidebarEntry[];
+}) {
+  return (
+    <>
+      {entries.map(({ href, label, Icon }) => (
+        <SidebarMenuItem key={href}>
+          <SidebarMenuButton
+            asChild
+            isActive={
+              href === "/settings/automations"
+                ? pathname.includes("/automations")
+                : pathname === href
+            }
+          >
+            <Link href={href}>
+              <Icon className="h-4 w-4" />
+              <span>{label}</span>
+            </Link>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+      ))}
+    </>
+  );
+}
+
 function SecretsSidebarSection({ pathname }: { pathname: string }) {
   return (
     <SidebarMenuItem>
@@ -369,57 +411,33 @@ export function SettingsAppSidebar() {
                 <WorkspacesSidebarSection pathname={pathname} workspaces={workspaces} />
                 <IntegrationsSidebarSection pathname={pathname} />
 
-                {/* Automations */}
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={
-                      pathname.startsWith("/settings/automations") ||
-                      pathname.includes("/automations")
-                    }
-                  >
-                    <Link href="/settings/automations">
-                      <IconBolt className="h-4 w-4" />
-                      <span>Automations</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-
+                <SimpleSidebarRows
+                  pathname={pathname}
+                  entries={[
+                    { href: "/settings/automations", label: "Automations", Icon: IconBolt },
+                  ]}
+                />
                 <AgentsSidebarSection pathname={pathname} agents={agents} />
-
-                {/* Prompts */}
-                <SidebarMenuItem>
-                  <SidebarMenuButton asChild isActive={pathname === "/settings/prompts"}>
-                    <Link href="/settings/prompts">
-                      <IconMessageCircle className="h-4 w-4" />
-                      <span>Prompts</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-
-                {/* Utility Agents */}
-                <SidebarMenuItem>
-                  <SidebarMenuButton asChild isActive={pathname === "/settings/utility-agents"}>
-                    <Link href="/settings/utility-agents">
-                      <IconWand className="h-4 w-4" />
-                      <span>Utility Agents</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-
+                <SimpleSidebarRows
+                  pathname={pathname}
+                  entries={[
+                    { href: "/settings/prompts", label: "Prompts", Icon: IconMessageCircle },
+                    { href: "/settings/voice-mode", label: "Voice Mode", Icon: IconMicrophone },
+                    { href: "/settings/utility-agents", label: "Utility Agents", Icon: IconWand },
+                  ]}
+                />
                 <ExecutorsSidebarSection pathname={pathname} executors={executors} />
-
                 <SecretsSidebarSection pathname={pathname} />
-
-                {/* External MCP */}
-                <SidebarMenuItem>
-                  <SidebarMenuButton asChild isActive={pathname === "/settings/external-mcp"}>
-                    <Link href="/settings/external-mcp">
-                      <IconPlugConnected className="h-4 w-4" />
-                      <span>External MCP</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
+                <SimpleSidebarRows
+                  pathname={pathname}
+                  entries={[
+                    {
+                      href: "/settings/external-mcp",
+                      label: "External MCP",
+                      Icon: IconPlugConnected,
+                    },
+                  ]}
+                />
 
                 {/* System */}
                 <SystemSidebarSection pathname={pathname} />

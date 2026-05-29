@@ -383,6 +383,7 @@ export type UserSettingsUpdatedPayload = {
   keyboard_shortcuts?: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
   terminal_link_behavior?: string;
   changes_panel_layout?: "flat" | "tree";
+  voice_mode?: import("@/lib/types/http-voice").VoiceModeSettings;
   updated_at?: string;
 };
 

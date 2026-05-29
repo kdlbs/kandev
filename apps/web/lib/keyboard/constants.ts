@@ -153,4 +153,10 @@ export const SHORTCUTS = {
     key: KEYS.F,
     modifiers: { ctrlOrCmd: true },
   },
+  // Cmd+Shift+M starts/stops voice input on the chat composer. The default
+  // is configurable per-user via the Voice Mode settings page.
+  VOICE_INPUT_TOGGLE: {
+    key: KEYS.M,
+    modifiers: { ctrlOrCmd: true, shift: true },
+  },
 } as const;

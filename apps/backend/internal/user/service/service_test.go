@@ -441,3 +441,102 @@ func TestApplySidebarViews(t *testing.T) {
 		})
 	}
 }
+
+func TestApplyVoiceMode(t *testing.T) {
+	t.Run("nil value leaves settings unchanged", func(t *testing.T) {
+		settings := &models.UserSettings{
+			VoiceMode: models.VoiceModeSettings{Engine: "webSpeech", Language: "en-US"},
+		}
+		if err := applyVoiceMode(settings, nil); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.VoiceMode.Engine != "webSpeech" || settings.VoiceMode.Language != "en-US" {
+			t.Fatalf("expected unchanged, got %+v", settings.VoiceMode)
+		}
+	})
+
+	t.Run("happy path: applies a full update", func(t *testing.T) {
+		settings := &models.UserSettings{}
+		err := applyVoiceMode(settings, &models.VoiceModeSettings{
+			Enabled:         true,
+			Engine:          "whisperWeb",
+			Language:        "pt-PT",
+			Mode:            "hold",
+			AutoSend:        true,
+			WhisperWebModel: "small",
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		want := models.VoiceModeSettings{
+			Enabled:         true,
+			Engine:          "whisperWeb",
+			Language:        "pt-PT",
+			Mode:            "hold",
+			AutoSend:        true,
+			WhisperWebModel: "small",
+		}
+		if settings.VoiceMode != want {
+			t.Fatalf("expected %+v, got %+v", want, settings.VoiceMode)
+		}
+	})
+
+	t.Run("enabled=false is honored (user disabled the feature)", func(t *testing.T) {
+		settings := &models.UserSettings{VoiceMode: models.VoiceModeSettings{Enabled: true}}
+		if err := applyVoiceMode(settings, &models.VoiceModeSettings{Enabled: false}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.VoiceMode.Enabled {
+			t.Fatalf("expected Enabled=false after disable, got true")
+		}
+	})
+
+	t.Run("invalid engine is rejected", func(t *testing.T) {
+		err := applyVoiceMode(&models.UserSettings{}, &models.VoiceModeSettings{Engine: "bogus"})
+		if err == nil || !strings.Contains(err.Error(), "voice_mode.engine") {
+			t.Fatalf("expected engine validation error, got %v", err)
+		}
+	})
+
+	t.Run("invalid mode is rejected", func(t *testing.T) {
+		err := applyVoiceMode(&models.UserSettings{}, &models.VoiceModeSettings{Mode: "tap"})
+		if err == nil || !strings.Contains(err.Error(), "voice_mode.mode") {
+			t.Fatalf("expected mode validation error, got %v", err)
+		}
+	})
+
+	t.Run("invalid whisper_web_model is rejected", func(t *testing.T) {
+		err := applyVoiceMode(&models.UserSettings{}, &models.VoiceModeSettings{WhisperWebModel: "huge"})
+		if err == nil || !strings.Contains(err.Error(), "voice_mode.whisper_web_model") {
+			t.Fatalf("expected model validation error, got %v", err)
+		}
+	})
+
+	t.Run("partial update preserves untouched fields", func(t *testing.T) {
+		settings := &models.UserSettings{
+			VoiceMode: models.VoiceModeSettings{
+				Engine:          "whisperServer",
+				Language:        "en-GB",
+				Mode:            "toggle",
+				WhisperWebModel: "tiny",
+			},
+		}
+		// Empty strings on the new payload mean "no change" for those fields.
+		err := applyVoiceMode(settings, &models.VoiceModeSettings{Engine: "webSpeech"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.VoiceMode.Engine != "webSpeech" {
+			t.Fatalf("expected engine=webSpeech, got %q", settings.VoiceMode.Engine)
+		}
+		if settings.VoiceMode.Language != "en-GB" {
+			t.Fatalf("expected language preserved, got %q", settings.VoiceMode.Language)
+		}
+		if settings.VoiceMode.Mode != "toggle" {
+			t.Fatalf("expected mode preserved, got %q", settings.VoiceMode.Mode)
+		}
+		if settings.VoiceMode.WhisperWebModel != "tiny" {
+			t.Fatalf("expected whisper model preserved, got %q", settings.VoiceMode.WhisperWebModel)
+		}
+	})
+}

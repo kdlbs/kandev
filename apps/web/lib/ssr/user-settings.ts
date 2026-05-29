@@ -1,6 +1,8 @@
 import { fromApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
 import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
+import { DEFAULT_VOICE_MODE_STATE, type VoiceModeState } from "@/lib/state/slices/settings/types";
 import type { SavedLayout, UserSettingsResponse } from "@/lib/types/http";
+import type { VoiceModeSettings } from "@/lib/types/http-voice";
 
 export type UserSettingsData = NonNullable<UserSettingsResponse["settings"]>;
 
@@ -12,6 +14,25 @@ export function parseChangesPanelLayout(value: string | undefined): "flat" | "tr
   return value === "tree" ? "tree" : "flat";
 }
 
+/**
+ * Maps the backend's snake_case VoiceMode payload into the camelCase shape
+ * the store and UI use. Missing or partial payloads fall back to the defaults
+ * so an old user row (written before VoiceMode existed) doesn't surface as
+ * an empty string the radio groups can't render. `enabled` defaults to true
+ * for users who haven't toggled it — voice mode is opt-out, not opt-in.
+ */
+export function parseVoiceMode(value: VoiceModeSettings | undefined): VoiceModeState {
+  if (!value) return { ...DEFAULT_VOICE_MODE_STATE };
+  return {
+    enabled: typeof value.enabled === "boolean" ? value.enabled : true,
+    engine: value.engine || DEFAULT_VOICE_MODE_STATE.engine,
+    language: value.language || DEFAULT_VOICE_MODE_STATE.language,
+    mode: value.mode || DEFAULT_VOICE_MODE_STATE.mode,
+    autoSend: typeof value.auto_send === "boolean" ? value.auto_send : false,
+    whisperWebModel: value.whisper_web_model || DEFAULT_VOICE_MODE_STATE.whisperWebModel,
+  };
+}
+
 function buildTerminalFields(s: UserSettingsData) {
   return {
     terminalLinkBehavior: parseTerminalLinkBehavior(s.terminal_link_behavior),
@@ -19,6 +40,10 @@ function buildTerminalFields(s: UserSettingsData) {
     terminalFontSize: s.terminal_font_size || null,
     changesPanelLayout: parseChangesPanelLayout(s.changes_panel_layout),
   };
+}
+
+function buildVoiceModeFields(s: UserSettingsData) {
+  return { voiceMode: parseVoiceMode(s.voice_mode) };
 }
 
 function buildIdentityFields(s: UserSettingsData) {
@@ -51,6 +76,7 @@ export function buildCoreFields(s: UserSettingsData) {
     savedLayouts: s.saved_layouts ?? [],
     sidebarViews: (s.sidebar_views ?? []).map(fromApiSidebarView) as SidebarView[],
     ...buildTerminalFields(s),
+    ...buildVoiceModeFields(s),
   };
 }
 
@@ -91,6 +117,7 @@ export function mapUserSettingsResponse(response: UserSettingsResponse | null) {
       terminalFontFamily: null,
       terminalFontSize: null,
       changesPanelLayout: "flat" as const,
+      voiceMode: { ...DEFAULT_VOICE_MODE_STATE },
       ...buildLspFields(undefined),
       loaded: false,
     };
