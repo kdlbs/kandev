@@ -81,6 +81,48 @@ func TestOfficeEventBroadcaster_BroadcastsEvent(t *testing.T) {
 	}
 }
 
+// TestStripPayloadKeys verifies the office re-broadcast payload transform:
+// office.task.moved is workspace-scoped, so the session-scoped session_id it
+// inherits from the source task.moved event must be dropped (otherwise the FE
+// WS-account stamps the envelope session-routed and the bridge audit then
+// expects a per-session cache mutation that no office handler makes on a
+// non-office page). workspace_id and the rest must survive, and the source
+// payload (shared with other subscribers) must not be mutated.
+func TestStripPayloadKeys(t *testing.T) {
+	source := map[string]interface{}{
+		"workspace_id": "ws-1",
+		"task_id":      "t-1",
+		"session_id":   "sess-1",
+		"to_step_id":   "step-2",
+	}
+
+	out := stripPayloadKeys(source, []string{"session_id"})
+	m, ok := out.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map output, got %T", out)
+	}
+	if _, present := m["session_id"]; present {
+		t.Error("session_id must be stripped from the office.task.moved payload")
+	}
+	if m["workspace_id"] != "ws-1" || m["task_id"] != "t-1" || m["to_step_id"] != "step-2" {
+		t.Errorf("non-dropped fields must be preserved, got %#v", m)
+	}
+	// Source must be untouched — every other subscriber shares this map.
+	if source["session_id"] != "sess-1" {
+		t.Error("source payload must not be mutated")
+	}
+}
+
+func TestStripPayloadKeys_NoKeysOrNonMap(t *testing.T) {
+	source := map[string]interface{}{"a": 1}
+	if got := stripPayloadKeys(source, nil); got == nil {
+		t.Fatal("nil dropKeys should return the payload unchanged")
+	}
+	if got := stripPayloadKeys("not-a-map", []string{"x"}); got != "not-a-map" {
+		t.Errorf("non-map payload should pass through, got %v", got)
+	}
+}
+
 // TestOfficeEventBroadcaster_NilEventBus verifies no panic when event bus is nil.
 func TestOfficeEventBroadcaster_NilEventBus(t *testing.T) {
 	log := testLogger()
