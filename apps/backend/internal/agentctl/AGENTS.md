@@ -35,6 +35,8 @@ Protocol adapters in `server/adapter/transport/` normalize different agent CLIs:
 - `process.Manager` owns subprocess, wires stdio to adapter
 - Factory pattern in `server/adapter/factory.go` selects adapter by agent type
 
+The `acp` transport is split by concern across `adapter_*.go` files: `adapter.go` (core/lifecycle), `adapter_session.go` (initialize/new/load/resume), `adapter_prompt.go` (prompt/cancel), `adapter_updates.go` (`session/update` notification fan-out), `adapter_tools.go` (`convertToolCallUpdate` / `convertToolCallResultUpdate` → normalized payloads), `adapter_permissions.go`, and `adapter_helpers.go`. Tool-call conversion lives in `adapter_tools.go`, not `adapter.go`.
+
 ## ACP Protocol
 
 JSON-RPC 2.0 over stdin/stdout between agentctl and agent process. Requests: `initialize`, `session/new`, `session/load`, `session/prompt`, `session/cancel`. Notifications: `session/update` with types `message_chunk`, `tool_call`, `tool_update`, `complete`, `error`, `permission_request`, `context_window`.
