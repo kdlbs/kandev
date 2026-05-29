@@ -93,6 +93,7 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		TaskID:             req.TaskID,
 		DisableAskQuestion: req.DisableAskQuestion,
 		AssumeMcpSse:       req.AssumeMcpSse,
+		AssumeMcpHttp:      req.AssumeMcpHttp,
 		McpMode:            req.McpMode,
 	}
 

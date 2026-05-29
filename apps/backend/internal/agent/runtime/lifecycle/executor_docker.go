@@ -443,11 +443,13 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 	agentType := ""
 	disableAskQuestion := false
 	assumeMcpSse := false
+	assumeMcpHttp := false
 	if req.AgentConfig != nil {
 		agentType = req.AgentConfig.ID()
 		disableAskQuestion = agents.IsPassthroughOnly(req.AgentConfig)
 		if rt := req.AgentConfig.Runtime(); rt != nil {
 			assumeMcpSse = rt.AssumeMcpSse
+			assumeMcpHttp = rt.AssumeMcpHttp
 		}
 	}
 	return &agentctl.CreateInstanceRequest{
@@ -461,6 +463,7 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 		TaskID:             req.TaskID,
 		DisableAskQuestion: disableAskQuestion,
 		AssumeMcpSse:       assumeMcpSse,
+		AssumeMcpHttp:      assumeMcpHttp,
 		McpMode:            req.McpMode,
 	}
 }

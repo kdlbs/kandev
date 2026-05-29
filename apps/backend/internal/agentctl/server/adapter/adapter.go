@@ -267,6 +267,9 @@ type Config struct {
 
 	// AssumeMcpSse overrides MCP capability filtering to assume SSE support.
 	AssumeMcpSse bool
+
+	// AssumeMcpHttp overrides MCP capability filtering to assume HTTP support.
+	AssumeMcpHttp bool
 }
 
 // ToSharedConfig converts this Config to the shared.Config used by transport adapters.
@@ -296,5 +299,6 @@ func (c *Config) ToSharedConfig() *shared.Config {
 		Headers:        c.Headers,
 		Extra:          c.Extra,
 		AssumeMcpSse:   c.AssumeMcpSse,
+		AssumeMcpHttp:  c.AssumeMcpHttp,
 	}
 }

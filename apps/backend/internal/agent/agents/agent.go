@@ -180,6 +180,7 @@ type RuntimeConfig struct {
 	ModelFlag       Param  // e.g. NewParam("--model", "{model}")
 	WorkspaceFlag   string // e.g. "--workspace-root"
 	AssumeMcpSse    bool   // Override: assume agent supports SSE MCP servers even if not advertised
+	AssumeMcpHttp   bool   // Override: assume agent supports HTTP MCP servers even if not advertised
 	ProjectSkillDir string // CWD-relative path for project-level skills (e.g. ".claude/skills")
 	UserSkillDir    string // home-relative path for user-level skills (e.g. ".claude/skills")
 }

@@ -40,6 +40,9 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 	if a.cfg.AssumeMcpSse {
 		caps.Sse = true
 	}
+	if a.cfg.AssumeMcpHttp {
+		caps.Http = true
+	}
 	filteredServers := filterMcpServersByCapabilities(mcpServers, caps, a.logger)
 	resp, err := conn.NewSession(ctx, acp.NewSessionRequest{
 		Cwd:        a.cfg.WorkDir,
@@ -228,6 +231,9 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	caps := a.capabilities.McpCapabilities
 	if a.cfg.AssumeMcpSse {
 		caps.Sse = true
+	}
+	if a.cfg.AssumeMcpHttp {
+		caps.Http = true
 	}
 	filteredServers := filterMcpServersByCapabilities(mcpServers, caps, a.logger)
 

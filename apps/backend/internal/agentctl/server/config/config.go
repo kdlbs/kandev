@@ -192,6 +192,9 @@ type InstanceConfig struct {
 	// AssumeMcpSse overrides MCP capability filtering to assume the agent supports SSE.
 	AssumeMcpSse bool
 
+	// AssumeMcpHttp overrides MCP capability filtering to assume the agent supports HTTP.
+	AssumeMcpHttp bool
+
 	// McpMode controls which MCP tools are registered for this instance.
 	// "task" (default) registers kanban/plan tools; "config" registers config tools.
 	McpMode string
@@ -348,6 +351,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.AssumeMcpSse {
 		cfg.AssumeMcpSse = true
 	}
+	if overrides.AssumeMcpHttp {
+		cfg.AssumeMcpHttp = true
+	}
 	if overrides.McpMode != "" {
 		cfg.McpMode = overrides.McpMode
 	}
@@ -368,6 +374,7 @@ type InstanceOverrides struct {
 	TaskID             string
 	DisableAskQuestion bool
 	AssumeMcpSse       bool
+	AssumeMcpHttp      bool
 	McpMode            string
 }
 
