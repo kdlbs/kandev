@@ -27,6 +27,40 @@ var runtimeEnvironmentRules = []runtimeRule{
 			}
 		},
 	},
+	{
+		// Anthropic 400 surfaced by the claude-agent-acp adapter on a
+		// prompt after session/load: the reconstructed history loses the
+		// extended-thinking block signatures, so the API rejects the
+		// modified `thinking`/`redacted_thinking` blocks. Provider-agnostic
+		// because the signature is unique enough to never false-positive,
+		// and any adapter routing to Anthropic models can hit it.
+		id:      resumeCorruptedRuleID,
+		pattern: thinkingBlocksImmutableRe,
+		build: func(string) *Error {
+			return &Error{
+				Code:            CodeResumeCorrupted,
+				Confidence:      ConfHigh,
+				RemediationPath: RemediationStartFreshSession,
+			}
+		},
+	},
+}
+
+const resumeCorruptedRuleID = "anthropic.thinking_blocks.immutable.v1"
+
+// thinkingBlocksImmutableRe matches the Anthropic "thinking blocks cannot be
+// modified" 400 in either the `thinking` or `redacted_thinking` form. The
+// gaps stay bounded ([^\n] is non-greedy-friendly within a single line) so a
+// stray "thinking" elsewhere in a multi-line log can't accidentally bridge to
+// an unrelated "cannot be modified".
+var thinkingBlocksImmutableRe = regexp.MustCompile(`(?i)(?:redacted_)?thinking[^\n]*blocks[^\n]*cannot be modified`)
+
+// IsResumeCorrupted reports whether the error message carries the
+// resume-corrupted (thinking-blocks-immutable) signature. Exposed for callers
+// outside the classify path (e.g. the orchestrator's recovery UI) that need to
+// steer the user toward a fresh session without re-running full Classify.
+func IsResumeCorrupted(message string) bool {
+	return message != "" && thinkingBlocksImmutableRe.MatchString(message)
 }
 
 type runtimeRule struct {

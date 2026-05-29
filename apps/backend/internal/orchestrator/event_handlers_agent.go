@@ -7,6 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -645,6 +646,7 @@ func (s *Service) handleRecoverableFailure(ctx context.Context, data watcher.Age
 // be called for non-office sessions (office sessions render their own error UI).
 func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.AgentEventData) {
 	authErr := isAuthError(data.ErrorMessage)
+	resumeCorrupted := routingerr.IsResumeCorrupted(data.ErrorMessage)
 	displayMsg := data.ErrorMessage
 	if authErr {
 		if readable := extractReadableAuthError(data.ErrorMessage); readable != "" {
@@ -652,7 +654,13 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 		}
 	}
 
+	// Resume-corrupted failures (poisoned extended-thinking state after a
+	// session/load) can't be fixed by resuming — steer the user to a fresh
+	// session instead of dumping the raw 400.
 	statusMsg := fmt.Sprintf("Agent encountered an error: %s", displayMsg)
+	if resumeCorrupted {
+		statusMsg = "This agent session can't be resumed — its saved reasoning state is corrupted. Start a fresh session to continue."
+	}
 	hasResumeToken := s.wasResumeAttempt(ctx, data.SessionID)
 	meta := map[string]interface{}{
 		"variant":          "error",
@@ -661,6 +669,7 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 		"task_id":          data.TaskID,
 		"has_resume_token": hasResumeToken,
 		"is_auth_error":    authErr,
+		"resume_corrupted": resumeCorrupted,
 	}
 
 	// Include cached auth methods so the frontend can show login options.
@@ -670,7 +679,7 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 		}
 	}
 
-	meta["actions"] = buildRecoveryActions(data.TaskID, data.SessionID, hasResumeToken, authErr)
+	meta["actions"] = buildRecoveryActions(data.TaskID, data.SessionID, hasResumeToken, authErr, resumeCorrupted)
 
 	if err := s.messageCreator.CreateSessionMessage(
 		ctx,
@@ -733,35 +742,75 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 	return true
 }
 
-// buildRecoveryActions creates the generic actions array for agent error recovery.
-func buildRecoveryActions(taskID, sessionID string, hasResumeToken, isAuthError bool) []map[string]interface{} {
-	recoverPayload := func(action string) map[string]interface{} {
-		return map[string]interface{}{
+// actionMetaKey* are the shared keys of the frontend ActionMessage button
+// descriptor (see apps/web .../messages/action-message.tsx). Defined as
+// constants because the shape is built in more than one place in this package.
+const (
+	actionMetaKeyType    = "type"
+	actionMetaKeyLabel   = "label"
+	actionMetaKeyIcon    = "icon"
+	actionMetaKeyTooltip = "tooltip"
+	actionMetaKeyTestID  = "test_id"
+)
+
+const (
+	recoveryFreshButtonTestID   = "recovery-fresh-button"
+	recoveryRestartButtonTestID = "recovery-restart-button"
+	recoveryResumeButtonTestID  = "recovery-resume-button"
+)
+
+// wsRecoveryAction builds a single session.recover button descriptor. Keeping
+// the map keys in one place avoids drift between the buttons and keeps the
+// metadata shape consistent.
+func wsRecoveryAction(taskID, sessionID, recoverAction, label, icon, tooltip, testID string) map[string]interface{} {
+	return map[string]interface{}{
+		actionMetaKeyType:    "ws_request",
+		actionMetaKeyLabel:   label,
+		actionMetaKeyIcon:    icon,
+		actionMetaKeyTooltip: tooltip,
+		actionMetaKeyTestID:  testID,
+		"params": map[string]interface{}{
 			"method":  "session.recover",
-			"payload": map[string]interface{}{"task_id": taskID, "session_id": sessionID, "action": action},
-		}
+			"payload": map[string]interface{}{"task_id": taskID, "session_id": sessionID, "action": recoverAction},
+		},
 	}
+}
+
+// buildRecoveryActions creates the generic actions array for agent error
+// recovery. Ordinary failures list Resume first (cheapest recovery, keeps
+// context) then Start fresh. For resume-corrupted failures the order flips:
+// Start fresh becomes the primary action and Resume is kept but flagged as
+// likely-to-fail, since the agent's persisted state is poisoned.
+func buildRecoveryActions(taskID, sessionID string, hasResumeToken, isAuthError, resumeCorrupted bool) []map[string]interface{} {
+	resumeTooltip := "Re-launch with resume flag — keeps all previous messages and context"
+	if resumeCorrupted {
+		resumeTooltip = "Resume will likely fail again — this session's saved state is corrupted. Prefer Start fresh."
+	}
+	resume := func() map[string]interface{} {
+		return wsRecoveryAction(taskID, sessionID, "resume",
+			"Resume session", "refresh", resumeTooltip, recoveryResumeButtonTestID)
+	}
+
+	freshLabel, freshTestID := "Start fresh session", recoveryFreshButtonTestID
+	if isAuthError {
+		freshLabel, freshTestID = "Restart session", recoveryRestartButtonTestID
+	}
+	fresh := wsRecoveryAction(taskID, sessionID, "fresh_start", freshLabel, "player-play",
+		"New agent process on the same workspace — no previous conversation context", freshTestID)
+
 	actions := []map[string]interface{}{}
+	if resumeCorrupted {
+		// Fresh is primary; resume kept but de-emphasized below it.
+		actions = append(actions, fresh)
+		if hasResumeToken {
+			actions = append(actions, resume())
+		}
+		return actions
+	}
 	if hasResumeToken {
-		actions = append(actions, map[string]interface{}{
-			"type": "ws_request", "label": "Resume session", "icon": "refresh",
-			"tooltip": "Re-launch with resume flag — keeps all previous messages and context",
-			"test_id": "recovery-resume-button", "params": recoverPayload("resume"),
-		})
+		actions = append(actions, resume())
 	}
-	label := "Start fresh session"
-	if isAuthError {
-		label = "Restart session"
-	}
-	testID := "recovery-fresh-button"
-	if isAuthError {
-		testID = "recovery-restart-button"
-	}
-	actions = append(actions, map[string]interface{}{
-		"type": "ws_request", "label": label, "icon": "player-play",
-		"tooltip": "New agent process on the same workspace — no previous conversation context",
-		"test_id": testID, "params": recoverPayload("fresh_start"),
-	})
+	actions = append(actions, fresh)
 	return actions
 }
 

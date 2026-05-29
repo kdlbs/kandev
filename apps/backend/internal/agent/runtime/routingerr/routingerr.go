@@ -30,7 +30,16 @@ const (
 	CodeRepo                   Code = "repo_error"
 	CodePermissionDeniedByUser Code = "permission_denied_by_user"
 	CodeNpxCacheCorrupted      Code = "npx_cache_corrupted"
+	CodeResumeCorrupted        Code = "resume_corrupted"
 )
+
+// RemediationStartFreshSession is the symbolic RemediationPath value for
+// CodeResumeCorrupted. Unlike CodeNpxCacheCorrupted (whose RemediationPath is
+// a filesystem path to delete), this is a remediation *token* the UI maps to
+// the "start a fresh session" recovery action — there is nothing on disk to
+// clean; the agent's persisted reasoning state is corrupted and only a brand
+// new session recovers.
+const RemediationStartFreshSession = "start_fresh_session"
 
 // Confidence reflects how strongly the classifier trusts the matched signal.
 type Confidence string
@@ -212,6 +221,13 @@ func applyInvariants(e *Error) *Error {
 	case CodeNpxCacheCorrupted:
 		e.AutoRetryable = true
 		e.FallbackAllowed = true
+	case CodeResumeCorrupted:
+		// The agent's persisted reasoning state is poisoned. Retrying the
+		// resume hits the same 400, and falling back to another provider
+		// can't fix a session-state problem — only a fresh session does.
+		e.UserAction = true
+		e.AutoRetryable = false
+		e.FallbackAllowed = false
 	case CodePermissionDeniedByUser, CodeTask, CodeRepo, CodeAgentRuntime:
 		e.FallbackAllowed = false
 		e.AutoRetryable = false
