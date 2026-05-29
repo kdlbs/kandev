@@ -324,6 +324,7 @@ export function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; session
         !!c &&
         isPRFeedbackComment(c) &&
         c.feedbackType === "conflict" &&
+        c.sessionId === sessionId &&
         c.prNumber === taskPR.pr_number
       );
     }),
