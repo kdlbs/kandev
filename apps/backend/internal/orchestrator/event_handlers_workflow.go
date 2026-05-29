@@ -1126,6 +1126,13 @@ func (s *Service) autoStartPassthroughPrompt(
 	return nil
 }
 
+// metaKeyUserMessageRecorded marks a queued workflow auto-start message
+// whose chat-history user row was already inserted by recordAutoStartMessage
+// before the prompt was queued. executeQueuedMessage reads this flag to skip
+// its own CreateUserMessage and avoid the duplicate observed when PromptTask
+// failed transiently and the queue was later drained via boot_ready.
+const metaKeyUserMessageRecorded = "user_message_recorded"
+
 type workflowMessageOrigin struct {
 	StepID    string
 	StepName  string
@@ -1185,7 +1192,10 @@ func (s *Service) autoStartStepPrompt(
 	}
 
 	if shouldQueueIfBusy {
-		queued, err := s.queueAutoStartPromptIfRunning(ctx, taskID, session, prompt, planMode, attachments, origin)
+		// userMessageRecorded=false: recordAutoStartMessage has not run yet —
+		// the drain side (executeQueuedMessage) is responsible for inserting
+		// the chat-history row.
+		queued, err := s.queueAutoStartPromptIfRunning(ctx, taskID, session, prompt, planMode, attachments, origin, false)
 		if err != nil {
 			requeueTaken()
 			return err
@@ -1251,8 +1261,10 @@ func (s *Service) autoStartStepPrompt(
 		// "already has an agent running" means the execution store still tracks
 		// an active agent for this session (e.g. session state is CREATED but
 		// the agent was launched by a concurrent path). Queue instead of retrying.
+		// userMessageRecorded=true: recordAutoStartMessage already inserted the
+		// chat row above, so the drain side must NOT re-insert it.
 		if isAgentAlreadyRunningError(err) && shouldQueueIfBusy {
-			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode, attachments, origin); queueErr != nil {
+			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode, attachments, origin, true); queueErr != nil {
 				requeueTaken()
 				return queueErr
 			}
@@ -1265,7 +1277,9 @@ func (s *Service) autoStartStepPrompt(
 		}
 
 		if shouldQueueIfBusy {
-			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode, attachments, origin); queueErr != nil {
+			// userMessageRecorded=true: recordAutoStartMessage already inserted
+			// the chat row above before this retry loop began.
+			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode, attachments, origin, true); queueErr != nil {
 				requeueTaken()
 				return queueErr
 			}
@@ -1421,11 +1435,12 @@ func (s *Service) queueAutoStartPromptIfRunning(
 	planMode bool,
 	attachments []v1.MessageAttachment,
 	origin workflowMessageOrigin,
+	userMessageRecorded bool,
 ) (bool, error) {
 	if session.State != models.TaskSessionStateRunning && session.State != models.TaskSessionStateStarting {
 		return false, nil
 	}
-	if err := s.queueAutoStartPrompt(ctx, taskID, session.ID, prompt, planMode, attachments, origin); err != nil {
+	if err := s.queueAutoStartPrompt(ctx, taskID, session.ID, prompt, planMode, attachments, origin, userMessageRecorded); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -1446,15 +1461,29 @@ func toQueuedAttachments(attachments []v1.MessageAttachment) []messagequeue.Mess
 	return queued
 }
 
+// queueAutoStartPrompt persists a workflow auto-start prompt for later drain.
+// userMessageRecorded must be true when the caller has already inserted the
+// chat-history user message via recordAutoStartMessage — the flag is stamped
+// onto the queue metadata so executeQueuedMessage skips its own
+// CreateUserMessage and avoids the duplicate-user-message bug observed when
+// PromptTask failed transiently and the queue was later drained on boot_ready.
+// Callers that queue BEFORE recordAutoStartMessage runs (e.g.
+// queueAutoStartPromptIfRunning's early-busy path) must pass false so the
+// drain side still records the message.
 func (s *Service) queueAutoStartPrompt(
 	ctx context.Context,
 	taskID, sessionID, prompt string,
 	planMode bool,
 	attachments []v1.MessageAttachment,
 	origin workflowMessageOrigin,
+	userMessageRecorded bool,
 ) error {
 	if s.messageQueue == nil {
 		return fmt.Errorf("message queue is not configured")
+	}
+	meta := workflowMessageMetadata(planMode, origin)
+	if userMessageRecorded {
+		meta[metaKeyUserMessageRecorded] = true
 	}
 	_, err := s.messageQueue.QueueMessageWithMetadata(
 		ctx,
@@ -1465,7 +1494,7 @@ func (s *Service) queueAutoStartPrompt(
 		messagequeue.QueuedByWorkflow,
 		planMode,
 		toQueuedAttachments(attachments),
-		workflowMessageMetadata(planMode, origin),
+		meta,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to queue workflow auto-start prompt: %w", err)

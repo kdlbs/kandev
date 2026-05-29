@@ -50,6 +50,58 @@ func TestExecuteQueuedMessage_RequeuesWhenResetInProgress(t *testing.T) {
 	}
 }
 
+// TestExecuteQueuedMessage_SkipsUserMessageWhenAlreadyRecorded pins the
+// duplicate-prompt fix: when a queued workflow auto-start carries
+// metadata[user_message_recorded]=true (set by autoStartStepPrompt's
+// post-recordAutoStartMessage retry branches), executeQueuedMessage must NOT
+// call CreateUserMessage. Without this guard, the boot_ready drain produces
+// the second identical "Merge"-step user row observed on the ACP-removal task.
+func TestExecuteQueuedMessage_SkipsUserMessageWhenAlreadyRecorded(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("failed to get session: %v", err)
+	}
+	session.State = models.TaskSessionStateWaitingForInput
+	session.AgentExecutionID = "exec-1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
+
+	mc := &mockMessageCreator{}
+	svc.messageCreator = mc
+
+	queuedMsg := &messagequeue.QueuedMessage{
+		ID:        "q1",
+		SessionID: "s1",
+		TaskID:    "t1",
+		Content:   "merge it",
+		QueuedBy:  messagequeue.QueuedByWorkflow,
+		Metadata: map[string]interface{}{
+			"workflow_step_name":       "Merge",
+			metaKeyUserMessageRecorded: true,
+		},
+	}
+
+	svc.executeQueuedMessage("s1", queuedMsg)
+
+	if len(mc.userMessages) != 0 {
+		t.Fatalf("expected 0 user messages (already recorded before queueing), got %d", len(mc.userMessages))
+	}
+	if len(agentMgr.capturedPrompts) != 1 {
+		t.Fatalf("expected the prompt to still reach PromptAgent, captured=%d", len(agentMgr.capturedPrompts))
+	}
+}
+
 func TestExecuteQueuedMessage_StoresAttachmentsInUserMessageMetadata(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

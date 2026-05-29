@@ -329,8 +329,14 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 		}
 	}
 
-	// Create user message for the queued message (so it appears in chat history)
-	if s.messageCreator != nil {
+	// Create user message for the queued message (so it appears in chat history).
+	// Skip when the queued metadata is tagged user_message_recorded — that means
+	// autoStartStepPrompt already inserted the chat row via recordAutoStartMessage
+	// before queueing (the post-recordAutoStartMessage retry branches). Recording
+	// here would produce the duplicate user message observed when a workflow
+	// auto-start failed transiently and the queue drained on boot_ready.
+	alreadyRecorded, _ := queuedMsg.Metadata[metaKeyUserMessageRecorded].(bool)
+	if s.messageCreator != nil && !alreadyRecorded {
 		turnID := s.getActiveTurnID(queuedMsg.SessionID)
 		if turnID == "" {
 			// Start a new turn if needed
@@ -352,6 +358,10 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 				zap.Error(err))
 			// Continue anyway - the prompt should still be sent
 		}
+	} else if alreadyRecorded {
+		s.logger.Debug("skipping CreateUserMessage for queued workflow auto-start; already recorded before queueing",
+			zap.String("session_id", queuedMsg.SessionID),
+			zap.String("queue_id", queuedMsg.ID))
 	}
 
 	// Process on_turn_start before sending the queued prompt, just like
