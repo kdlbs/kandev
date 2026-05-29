@@ -223,8 +223,16 @@ func (p *WorktreePreparer) createWorktreeWithSync(
 	// OnWorktreeCreated already completed the step — so surface the warning
 	// here, once Create has returned, rather than in completeCreateWorktreeStep.
 	if wt.SetupScriptWarning != "" {
-		step.Warning = wt.SetupScriptWarning
-		step.WarningDetail = wt.SetupScriptWarningDetail
+		// Don't clobber a base-branch fallback warning that
+		// completeCreateWorktreeStep may have already set — append instead so
+		// both "wrong branch" and "setup script failed" survive.
+		if step.Warning != "" {
+			step.Warning += "\n" + wt.SetupScriptWarning
+			step.WarningDetail += "\n" + wt.SetupScriptWarningDetail
+		} else {
+			step.Warning = wt.SetupScriptWarning
+			step.WarningDetail = wt.SetupScriptWarningDetail
+		}
 		reportProgress(onProgress, step, stepIdx, totalSteps)
 	}
 	// wt.FetchWarning is surfaced in the separate "Fetch PR branch" step
