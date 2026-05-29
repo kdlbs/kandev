@@ -306,9 +306,14 @@ type FinishCaptureHandlers = {
 async function finishCapture(h: FinishCaptureHandlers): Promise<void> {
   const driver = h.driverRef.current;
   if (!driver || driver.kind !== "capture") return;
+  // Claim the driver synchronously *before* the first await. In hold mode,
+  // pointerup + pointerleave both fire in the same task and both call stop();
+  // without this early null, the second invocation would also enter
+  // finishCapture, race the first, and could clobber a brand-new recording's
+  // driverRef if the user re-triggered between them.
+  h.driverRef.current = null;
   h.setState("processing");
   const blob = await stopCapture(driver.handle);
-  h.driverRef.current = null;
   if (!blob) {
     h.setState("idle");
     return;
@@ -341,7 +346,11 @@ async function ensureWhisperClient(h: FinishCaptureHandlers): Promise<WhisperWeb
   if (!h.whisperRef.current) {
     h.whisperRef.current = new WhisperWebClient({
       onProgress: (p: WhisperWebProgress) =>
-        h.setModelLoad({ state: "loading", progress: p.progress }),
+        // transformers.js emits progress on a 0–100 scale, but the rest of the
+        // pipeline (and the button's `* 100` display) treats `modelLoad.progress`
+        // as a 0–1 fraction (matching the `ready: 1` convention below). Normalise
+        // here so the button doesn't render "5000%" mid-download.
+        h.setModelLoad({ state: "loading", progress: p.progress / 100 }),
     });
     h.setModelLoad({ state: "loading", progress: 0 });
   }

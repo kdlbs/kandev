@@ -98,12 +98,14 @@ function useVoiceModeSaver() {
       try {
         await updateUserSettings({ voice_mode: toWire(next) });
       } catch {
-        // Rollback only the keys this request changed — restoring the whole
-        // voiceMode snapshot would clobber any concurrent edits to other
-        // fields that landed while the request was in flight.
+        // Rollback only the keys this request changed AND only when the live
+        // value still matches what we optimistically wrote. If a newer save
+        // for the same key landed first, that's now the truth — reverting
+        // would silently roll back the user's later edit.
         const latest = storeApi.getState().userSettings;
         const reverted: Partial<VoiceModeState> = {};
         for (const key of Object.keys(patch) as Array<keyof VoiceModeState>) {
+          if (latest.voiceMode[key] !== next[key]) continue;
           // Cast through unknown so the per-key assignment passes strict checks.
           (reverted as Record<string, unknown>)[key] = previous[key];
         }
@@ -426,14 +428,15 @@ function useShortcutSaver() {
       const previous = current.keyboardShortcuts;
       setUserSettings({ ...current, keyboardShortcuts: next });
       updateUserSettings({ keyboard_shortcuts: next }).catch(() => {
-        // Rollback only the keys this request changed, restoring their prior
-        // values (or deleting them if they didn't exist). Replacing the whole
-        // map would clobber unrelated shortcut edits that landed since.
+        // Rollback only the keys this request changed AND only when the live
+        // value still matches what we optimistically wrote. Skip otherwise so
+        // a newer successful save to the same key isn't reverted.
         const latest = storeApi.getState().userSettings;
         const restored: StoredShortcutOverrides = { ...latest.keyboardShortcuts };
         const changedKeys = new Set([...Object.keys(previous), ...Object.keys(next)]);
         for (const key of changedKeys) {
           if (previous[key] === next[key]) continue;
+          if (latest.keyboardShortcuts[key] !== next[key]) continue;
           if (previous[key] === undefined) delete restored[key];
           else restored[key] = previous[key];
         }

@@ -9,7 +9,7 @@
  * main thread for several seconds — would freeze the chat input otherwise.
  *
  * Wire protocol (postMessage):
- *   in:  { type: "init",       model: "Xenova/whisper-base" }
+ *   in:  { type: "init",       model: "onnx-community/whisper-base" }
  *   in:  { type: "transcribe", audio: Float32Array, language?: string }
  *   in:  { type: "dispose" }
  *   out: { type: "progress",   stage: string, progress: number }
