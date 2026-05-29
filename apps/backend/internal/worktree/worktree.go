@@ -84,6 +84,17 @@ type Worktree struct {
 	// detail alongside BaseBranchFallbackWarning.
 	BaseBranchFallbackDetail string `json:"base_branch_fallback_detail,omitempty"`
 
+	// SetupScriptWarning is set when the repository's setup script failed.
+	// Setup script failures are non-fatal: the worktree is kept and the agent
+	// launches normally, but the failure is surfaced as a warning so the user
+	// can fix it. Empty when the script succeeded or no script was configured.
+	SetupScriptWarning string `json:"setup_script_warning,omitempty"`
+
+	// SetupScriptWarningDetail mirrors FetchWarningDetail: a longer message
+	// describing the setup-script failure. Surfaced as collapsible detail
+	// alongside SetupScriptWarning.
+	SetupScriptWarningDetail string `json:"setup_script_warning_detail,omitempty"`
+
 	// CopiedFiles lists the relative paths of files copied from the source
 	// repo into this worktree per the repository's CopyFiles spec. Populated
 	// only on the in-memory record returned by Create — not persisted, since

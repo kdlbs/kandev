@@ -218,6 +218,15 @@ func (p *WorktreePreparer) createWorktreeWithSync(
 	if !stepCompleted {
 		completeCreateWorktreeStep(&step, wt, stepIdx, totalSteps, onProgress)
 	}
+	// A failed repository setup script is non-fatal: worktree.Manager.Create
+	// keeps the worktree and records the warning, but the script runs *after*
+	// OnWorktreeCreated already completed the step — so surface the warning
+	// here, once Create has returned, rather than in completeCreateWorktreeStep.
+	if wt.SetupScriptWarning != "" {
+		step.Warning = wt.SetupScriptWarning
+		step.WarningDetail = wt.SetupScriptWarningDetail
+		reportProgress(onProgress, step, stepIdx, totalSteps)
+	}
 	// wt.FetchWarning is surfaced in the separate "Fetch PR branch" step
 	// rendered later in the pipeline. It can only be non-empty when
 	// req.CheckoutBranch != "" (it is set inside fetchBranchToLocal), so the

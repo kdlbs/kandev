@@ -93,24 +93,29 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 	return nil
 }
 
-func (m *Manager) runWorktreeSetupScript(ctx context.Context, wt *Worktree, repositoryPath string) error {
+// runWorktreeSetupScript runs the repository's setup script in the freshly
+// created worktree. Setup script failures are non-fatal: the worktree is kept
+// and the failure is recorded on wt as a warning (surfaced by the env preparer)
+// so the agent can still launch. This mirrors the task-level setup script
+// behavior in runSetupScriptStep — a broken setup script must not block the task.
+func (m *Manager) runWorktreeSetupScript(ctx context.Context, wt *Worktree) {
 	if m.scriptMsgHandler == nil || m.repoProvider == nil {
-		return nil
+		return
 	}
 	if wt.RepositoryID == "" {
 		// Nothing to set up without a linked repository; upstream may not
 		// always populate this field.
-		return nil
+		return
 	}
 	repo, err := m.repoProvider.GetRepository(ctx, wt.RepositoryID)
 	if err != nil {
 		m.logger.Warn("failed to fetch repository for setup script",
 			zap.String("repository_id", wt.RepositoryID),
 			zap.Error(err))
-		return nil
+		return
 	}
 	if strings.TrimSpace(repo.SetupScript) == "" {
-		return nil
+		return
 	}
 	m.logger.Info("executing setup script for worktree",
 		zap.String("worktree_id", wt.ID),
@@ -124,37 +129,17 @@ func (m *Manager) runWorktreeSetupScript(ctx context.Context, wt *Worktree, repo
 		ScriptType:   "setup",
 	}
 	if err := m.scriptMsgHandler.ExecuteSetupScript(ctx, scriptReq); err != nil {
-		m.logger.Error("setup script failed, cleaning up worktree",
+		// Non-fatal: keep the worktree and surface a warning. The detailed
+		// script output is already streamed to the script_execution chat
+		// message; here we only record a concise, user-facing warning.
+		m.logger.Warn("setup script failed, continuing without it",
 			zap.String("worktree_id", wt.ID),
 			zap.Error(err))
-		m.cleanupWorktreeOnSetupFailure(ctx, wt, repositoryPath)
-		return fmt.Errorf("setup script failed: %w", err)
-	}
-	m.logger.Info("setup script completed successfully", zap.String("worktree_id", wt.ID))
-	return nil
-}
-
-// cleanupWorktreeOnSetupFailure removes the in-memory cache entry, deletes the worktree
-// directory, and marks the worktree as deleted in the store after a setup script failure.
-func (m *Manager) cleanupWorktreeOnSetupFailure(ctx context.Context, wt *Worktree, repositoryPath string) {
-	if wt.SessionID != "" {
-		m.mu.Lock()
-		delete(m.worktrees, cacheKey(wt.SessionID, wt.RepositoryID))
-		m.mu.Unlock()
-	}
-	if cleanupErr := m.removeWorktreeDir(ctx, wt.Path, repositoryPath); cleanupErr != nil {
-		m.logger.Warn("failed to cleanup worktree after setup failure", zap.Error(cleanupErr))
-	}
-	if m.store == nil {
+		wt.SetupScriptWarning = "Repository setup script failed; the worktree was created without it. Fix the setup script and re-run if needed."
+		wt.SetupScriptWarningDetail = err.Error()
 		return
 	}
-	now := time.Now()
-	wt.Status = StatusDeleted
-	wt.DeletedAt = &now
-	wt.UpdatedAt = now
-	if updateErr := m.store.UpdateWorktree(ctx, wt); updateErr != nil {
-		m.logger.Warn("failed to update worktree status", zap.Error(updateErr))
-	}
+	m.logger.Info("setup script completed successfully", zap.String("worktree_id", wt.ID))
 }
 
 // runWorktreeCleanupScript executes the repository cleanup script for a worktree before removal.

@@ -252,9 +252,9 @@ func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRe
 
 	m.copyConfiguredFiles(ctx, req, wt)
 
-	if err := m.runWorktreeSetupScript(ctx, wt, req.RepositoryPath); err != nil {
-		return nil, err
-	}
+	// Setup script failures are non-fatal — runWorktreeSetupScript records a
+	// warning on wt and keeps the worktree so the agent can still launch.
+	m.runWorktreeSetupScript(ctx, wt)
 
 	m.logger.Info("created worktree in task directory",
 		zap.String("session_id", req.SessionID),
