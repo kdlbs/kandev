@@ -2,7 +2,8 @@ import type { WhisperWebModelSize } from "@/lib/types/http-voice";
 
 export type WhisperModelConfig = {
   size: WhisperWebModelSize;
-  /** Hugging Face model id (the Xenova/* mirrors are pre-quantized for transformers.js). */
+  /** Hugging Face model id. Use the `onnx-community/*` mirrors — `Xenova/*`
+   *  defaults to 4-bit MatMulNBits weights that crash on WASM (see note below). */
   modelId: string;
   /** Rough on-disk size after download, shown in the settings UI. */
   approxBytes: number;

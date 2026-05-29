@@ -105,16 +105,21 @@ export class WhisperWebClient {
     this.worker.addEventListener("message", (e: MessageEvent<WorkerMessage>) =>
       this.handleMessage(e.data),
     );
+    // Capture the worker reference at listener-attach time. A late error from
+    // a previously-disposed worker can still bubble up after we've already
+    // created its replacement; without the identity check below, that stale
+    // event would terminate the brand-new worker too.
+    const ownWorker = this.worker;
     this.worker.addEventListener("error", (e) => {
       const err = new Error(e.message || "Whisper worker crashed");
-      // Tear the dead worker down so the next init()/transcribe() recreates
-      // a fresh one. Without this, ensureWorker() short-circuits on the
-      // still-truthy reference, posts to nothing, and the new request hangs
-      // forever — bricking voice input until a full page reload.
-      this.worker?.terminate();
-      this.worker = null;
-      this.ready = false;
-      this.loadingModelId = null;
+      ownWorker?.terminate();
+      // Only clear our refs if this is still the active worker — a stale
+      // error from a worker we already replaced must not nuke the new one.
+      if (this.worker === ownWorker) {
+        this.worker = null;
+        this.ready = false;
+        this.loadingModelId = null;
+      }
       if (this.pending) {
         this.pending.reject(err);
         this.pending = null;

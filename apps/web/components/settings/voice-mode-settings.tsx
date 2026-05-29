@@ -98,10 +98,19 @@ function useVoiceModeSaver() {
       try {
         await updateUserSettings({ voice_mode: toWire(next) });
       } catch {
-        // Rollback against the *current* state (which may have moved on
-        // since we kicked off the request), not against the original.
+        // Rollback only the keys this request changed — restoring the whole
+        // voiceMode snapshot would clobber any concurrent edits to other
+        // fields that landed while the request was in flight.
         const latest = storeApi.getState().userSettings;
-        setUserSettings({ ...latest, voiceMode: previous });
+        const reverted: Partial<VoiceModeState> = {};
+        for (const key of Object.keys(patch) as Array<keyof VoiceModeState>) {
+          // Cast through unknown so the per-key assignment passes strict checks.
+          (reverted as Record<string, unknown>)[key] = previous[key];
+        }
+        setUserSettings({
+          ...latest,
+          voiceMode: { ...latest.voiceMode, ...reverted },
+        });
         toast({ title: "Failed to save Voice Mode setting", variant: "error" });
       } finally {
         setSaving(false);
@@ -417,8 +426,18 @@ function useShortcutSaver() {
       const previous = current.keyboardShortcuts;
       setUserSettings({ ...current, keyboardShortcuts: next });
       updateUserSettings({ keyboard_shortcuts: next }).catch(() => {
+        // Rollback only the keys this request changed, restoring their prior
+        // values (or deleting them if they didn't exist). Replacing the whole
+        // map would clobber unrelated shortcut edits that landed since.
         const latest = storeApi.getState().userSettings;
-        setUserSettings({ ...latest, keyboardShortcuts: previous });
+        const restored: StoredShortcutOverrides = { ...latest.keyboardShortcuts };
+        const changedKeys = new Set([...Object.keys(previous), ...Object.keys(next)]);
+        for (const key of changedKeys) {
+          if (previous[key] === next[key]) continue;
+          if (previous[key] === undefined) delete restored[key];
+          else restored[key] = previous[key];
+        }
+        setUserSettings({ ...latest, keyboardShortcuts: restored });
         toast({ title: "Failed to save shortcut", variant: "error" });
       });
     },
