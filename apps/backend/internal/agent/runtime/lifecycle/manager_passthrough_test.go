@@ -619,6 +619,27 @@ func TestPassthroughMCPServersMergesProfileAndDropsKandevCollision(t *testing.T)
 	}
 }
 
+func TestWorkspacePathEscapesViaSymlink(t *testing.T) {
+	ws := t.TempDir()
+	outside := t.TempDir()
+
+	// A clean path inside the workspace does not escape.
+	if escaped, err := workspacePathEscapes(ws, filepath.Join(ws, ".cursor", "mcp.json")); err != nil || escaped {
+		t.Fatalf("clean workspace path: escaped=%v err=%v, want false/nil", escaped, err)
+	}
+	// A file outside the workspace (kandev's temp dir) is exempt from the check.
+	if escaped, err := workspacePathEscapes(ws, filepath.Join(outside, "cfg.json")); err != nil || escaped {
+		t.Fatalf("temp path: escaped=%v err=%v, want false/nil", escaped, err)
+	}
+	// A symlinked `.cursor` pointing outside the workspace escapes.
+	if err := os.Symlink(outside, filepath.Join(ws, ".cursor")); err != nil {
+		t.Fatal(err)
+	}
+	if escaped, err := workspacePathEscapes(ws, filepath.Join(ws, ".cursor", "mcp.json")); err != nil || !escaped {
+		t.Fatalf("symlinked path: escaped=%v err=%v, want true/nil", escaped, err)
+	}
+}
+
 func TestResumePassthroughSessionWithoutRunnerDoesNotWriteMCPConfig(t *testing.T) {
 	mgr, execution, _ := newClaudePassthroughMCPTestManager(t)
 	mgr.executorRegistry = nil

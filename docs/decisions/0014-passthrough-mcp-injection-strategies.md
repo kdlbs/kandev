@@ -37,7 +37,7 @@ Four implementations:
 | Claude | temp file + `--mcp-config <path>` args | `{"mcpServers":{…}}`, `streamable_http`→`streamable-http` | No |
 | Codex | repeated `-c mcp_servers.<name>.<key>=<json>` args | transport inferred from `command` vs `url`; no `type` key | No |
 | Cursor | project-local `<workspace>/.cursor/mcp.json`, `SkipIfExists` | `{"mcpServers":{…}}` | No |
-| OpenCode | temp file + `OPENCODE_CONFIG` env var | `{"mcp":{name:{type:"local"|"remote",…}}}` | No |
+| OpenCode | temp file + `OPENCODE_CONFIG` env var | `{"mcp":{name:{type:"local"\|"remote",…}}}` | No |
 
 Runtime wiring (`internal/agent/runtime/lifecycle/manager_passthrough.go`, `applyPassthroughMCP`):
 

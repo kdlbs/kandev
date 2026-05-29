@@ -3,7 +3,6 @@ package mcpconfig
 import (
 	"encoding/json"
 	"path/filepath"
-	"strings"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
 )
@@ -106,6 +105,11 @@ func (s ClaudeStrategy) BuildPassthroughMCP(servers []types.McpServer, paths Pas
 			continue
 		}
 		entries[srv.Name] = claudeServerEntryFromServer(srv)
+	}
+	if len(entries) == 0 {
+		// Every server was filtered out (blank/reserved names); emit nothing
+		// rather than a `--mcp-config` flag pointing at an empty config.
+		return PassthroughArtifacts{}, nil
 	}
 	content, err := marshalMCPFile(claudeMCPFile{MCPServers: entries})
 	if err != nil {
@@ -218,9 +222,14 @@ func codexKeyName(name string) string {
 	if isTOMLBareKey(name) {
 		return name
 	}
-	escaped := strings.ReplaceAll(name, `\`, `\\`)
-	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
-	return `"` + escaped + `"`
+	// Non-bare key: emit a quoted key. JSON string encoding produces
+	// TOML-compatible escaping (\", \\, \n, \t, \uXXXX, …), covering dots and
+	// control characters alike.
+	enc, err := json.Marshal(name)
+	if err != nil {
+		return `""`
+	}
+	return string(enc)
 }
 
 func isTOMLBareKey(s string) bool {

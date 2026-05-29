@@ -369,6 +369,17 @@ func (m *Manager) writePassthroughMCPFiles(execution *AgentExecution, files []mc
 				return fmt.Errorf("stat passthrough MCP config: %w", err)
 			}
 		}
+		// Guard the workspace-relative write (Cursor) against a symlinked parent
+		// (e.g. a malicious repo shipping `.cursor` as a symlink) that would
+		// redirect the write outside the worktree. Temp files under the kandev
+		// data dir are exempt. Mirrors the worktree copyfiles containment check.
+		if escapes, err := workspacePathEscapes(execution.WorkspacePath, f.Path); err != nil {
+			return fmt.Errorf("validate passthrough MCP config path: %w", err)
+		} else if escapes {
+			m.logger.Warn("passthrough MCP config path escapes workspace via symlink; skipping",
+				zap.String("path", f.Path))
+			continue
+		}
 		if err := os.MkdirAll(filepath.Dir(f.Path), 0o700); err != nil {
 			return fmt.Errorf("create passthrough MCP config dir: %w", err)
 		}
@@ -379,6 +390,45 @@ func (m *Manager) writePassthroughMCPFiles(execution *AgentExecution, files []mc
 	}
 	setPassthroughMCPFiles(execution, written)
 	return nil
+}
+
+// workspacePathEscapes reports whether path — assumed to live under
+// workspaceDir — would, after resolving symlinks on its deepest existing
+// ancestor, land outside workspaceDir. Files not lexically under workspaceDir
+// (kandev's own temp configs) are exempt and return false. An empty
+// workspaceDir disables the check.
+func workspacePathEscapes(workspaceDir, path string) (bool, error) {
+	if workspaceDir == "" {
+		return false, nil
+	}
+	cleanWS := filepath.Clean(workspaceDir)
+	cleanPath := filepath.Clean(path)
+	if rel, err := filepath.Rel(cleanWS, cleanPath); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false, nil // not a workspace-relative file; not our concern
+	}
+	canonWS, err := filepath.EvalSymlinks(cleanWS)
+	if err != nil {
+		return false, fmt.Errorf("resolve workspace dir: %w", err)
+	}
+	// Resolve the deepest existing ancestor of the target (the leaf and some
+	// parents may not exist yet — those get created as real dirs).
+	ancestor := filepath.Dir(cleanPath)
+	for {
+		resolved, err := filepath.EvalSymlinks(ancestor)
+		if err == nil {
+			rel, relErr := filepath.Rel(canonWS, resolved)
+			escaped := relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
+			return escaped, nil
+		}
+		if !os.IsNotExist(err) {
+			return false, fmt.Errorf("resolve ancestor %q: %w", ancestor, err)
+		}
+		parent := filepath.Dir(ancestor)
+		if parent == ancestor {
+			return false, nil // reached filesystem root with nothing existing
+		}
+		ancestor = parent
+	}
 }
 
 func (m *Manager) cleanupPassthroughMCPConfig(execution *AgentExecution) {
