@@ -40,4 +40,33 @@ test.describe("Sidebar task open", () => {
     await expect(testPage).toHaveURL(new RegExp(`/t/${task.id}`), { timeout: 15_000 });
     await expect(testPage.getByTestId("dockview-task-layout")).toBeVisible({ timeout: 15_000 });
   });
+
+  test("returning Home clears the selected-task highlight in the sidebar", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Home Deselect Target",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    const session = new SessionPage(testPage);
+    await testPage.goto(`/t/${task.id}`);
+    await expect(testPage.getByTestId("dockview-task-layout")).toBeVisible({ timeout: 15_000 });
+
+    const item = session.sidebarTaskItem("Home Deselect Target").first();
+    await expect(item).toHaveAttribute("data-active", "true", { timeout: 10_000 });
+
+    // Back to Home — the global sidebar must drop the selection highlight.
+    await testPage.getByRole("link", { name: "Home", exact: true }).click();
+    await expect(item).toHaveAttribute("data-active", "false", { timeout: 10_000 });
+  });
 });

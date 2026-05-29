@@ -331,6 +331,8 @@ export const TaskItem = memo(function TaskItem({
       role="button"
       tabIndex={0}
       data-testid="sidebar-task-item"
+      data-active={isSelected ? "true" : "false"}
+      aria-current={isSelected ? "true" : undefined}
       onClick={onClick}
       onKeyDown={(e) => handleTaskItemKeyDown(e, onClick)}
       className={cn(

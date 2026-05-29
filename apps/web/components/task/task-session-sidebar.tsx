@@ -565,6 +565,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
   const store = useAppStoreApi();
   useRepositories(workspaceId);
   useWorkspacePRs(workspaceId);
+  const pathname = usePathname();
 
   const {
     activeTaskId,
@@ -575,6 +576,14 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
     tasksWithRepositories,
     primarySessionIds,
   } = useSidebarData(workspaceId);
+
+  // The sidebar is global, so `activeTaskId` lingers after navigating Home.
+  // Only highlight a task while actually viewing a task route — otherwise the
+  // last-opened task stays visually "selected" on Home and elsewhere.
+  const onTaskRoute =
+    !!pathname && (pathname.startsWith("/t/") || pathname.startsWith("/office/tasks/"));
+  const highlightedTaskId = onTaskRoute ? activeTaskId : null;
+  const highlightedSelectedTaskId = onTaskRoute ? selectedTaskId : null;
 
   useBulkGitStatusSubscription(primarySessionIds);
 
@@ -611,8 +620,8 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
           grouped={grouped}
           workflows={workflows}
           stepsByWorkflowId={stepsByWorkflowId}
-          activeTaskId={activeTaskId}
-          selectedTaskId={selectedTaskId}
+          activeTaskId={highlightedTaskId}
+          selectedTaskId={highlightedSelectedTaskId}
           collapsedGroupKeys={effectiveView.collapsedGroups}
           onToggleGroup={(groupKey) => toggleSidebarGroupCollapsed(effectiveView.id, groupKey)}
           collapsedSubtaskParentIds={collapsedSubtaskParents}
