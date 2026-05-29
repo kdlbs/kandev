@@ -84,3 +84,69 @@ func TestConnectWorkspaceStream_BackoffDrainsOnStop(t *testing.T) {
 		t.Fatal("connectWorkspaceStream did not drain on stopCh close — backoff is leaking")
 	}
 }
+
+// TestConnectWorkspaceStream_ClosesWSOnStop is the regression test for the
+// connected-stream shutdown leak. Once StreamWorkspace returns successfully
+// the goroutine parks on `<-ws.Done()`. If the manager shuts down while the
+// remote WS is still alive, simply observing stopCh isn't enough — the
+// underlying WS connection (and the agentctl-side read/write loops it owns)
+// keep running. The fix calls ws.Close() on the stopCh path so the WS
+// actually tears down, and ws.Done() fires for any other observer.
+//
+// We exercise this by pointing a real agentctl client at a mock workspace
+// stream server that stays open until the client closes the WS. After the
+// goroutine connects, we close stopCh and assert ws.Done() fires within
+// a short window — which is only true if connectWorkspaceStream called
+// ws.Close() on its way out.
+func TestConnectWorkspaceStream_ClosesWSOnStop(t *testing.T) {
+	mock := newMockAgentServer(t)
+	defer mock.Close()
+
+	stopCh := make(chan struct{})
+	sm := NewStreamManager(newSessionTestLogger(), StreamCallbacks{}, nil, stopCh)
+
+	client := createTestClient(t, mock.server.URL)
+	defer client.Close()
+
+	execution := &AgentExecution{
+		ID:        "exec-close",
+		SessionID: "sess-close",
+		agentctl:  client,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		sm.connectWorkspaceStream(execution, nil)
+		close(done)
+	}()
+
+	// Wait for the stream to attach so we know we've reached the
+	// post-connect select. 500ms is generous on slow CI but short
+	// enough to fail loudly if the connect never lands.
+	deadline := time.Now().Add(500 * time.Millisecond)
+	var ws *agentctl.WorkspaceStream
+	for time.Now().Before(deadline) {
+		ws = execution.GetWorkspaceStream()
+		if ws != nil {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if ws == nil {
+		t.Fatal("workspace stream never attached")
+	}
+
+	close(stopCh)
+
+	select {
+	case <-ws.Done():
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("ws.Done() did not fire on stopCh close — ws.Close() was not called")
+	}
+
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("connectWorkspaceStream goroutine did not drain on stopCh close")
+	}
+}
