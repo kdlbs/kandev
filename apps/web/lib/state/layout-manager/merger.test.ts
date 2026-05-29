@@ -132,6 +132,32 @@ describe("mergePanelsIntoPreset", () => {
     expect(panelIdsIn(result, "right")).toEqual(["files", "changes"]);
   });
 
+  it("places surviving browser/vscode/pr-detail in center, files/changes in the side column", () => {
+    // Switching from a content preset (vscode/preview/etc.) back to default:
+    // main-content surfaces (browser, vscode, pr-detail) must follow the chat
+    // into the center group, not get stranded in the narrow right "tools"
+    // column. Only files/changes/terminal belong on the right.
+    const currentState = makeLayoutWithSide([{ id: SESSION_ABC, component: "chat" }], "preview", [
+      { id: "vscode", component: "vscode" },
+      { id: "browser:http://localhost:3000", component: "browser" },
+      { id: "pr-detail", component: "pr-detail" },
+      { id: "files", component: "files" },
+    ]);
+    const targetPreset = makeLayoutWithSide([{ id: "chat", component: "chat" }], "right", [
+      { id: "changes", component: "changes" },
+    ]);
+
+    const result = mergePanelsIntoPreset(currentState, targetPreset);
+
+    expect(panelIdsIn(result, "center")).toEqual([
+      SESSION_ABC,
+      "vscode",
+      "browser:http://localhost:3000",
+      "pr-detail",
+    ]);
+    expect(panelIdsIn(result, "right")).toEqual(["changes", "files"]);
+  });
+
   it("falls back to center for side extras when the target preset has no side column", () => {
     const currentState = makeLayoutWithSide([{ id: SESSION_ABC, component: "chat" }], "right", [
       { id: "files", component: "files" },
