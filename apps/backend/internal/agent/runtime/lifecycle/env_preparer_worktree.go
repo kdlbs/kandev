@@ -181,22 +181,7 @@ func (p *WorktreePreparer) createWorktreeWithSync(
 	step.Command = "git worktree add"
 	reportProgress(onProgress, step, stepIdx, totalSteps)
 
-	createReq := worktree.CreateRequest{
-		TaskID:               req.TaskID,
-		SessionID:            req.SessionID,
-		TaskTitle:            req.TaskTitle,
-		RepositoryID:         req.RepositoryID,
-		RepositoryPath:       req.RepositoryPath,
-		BaseBranch:           req.BaseBranch,
-		FallbackBaseBranch:   req.DefaultBranch,
-		CheckoutBranch:       req.CheckoutBranch,
-		PRNumber:             req.PRNumber,
-		WorktreeBranchPrefix: req.WorktreeBranchPrefix,
-		PullBeforeWorktree:   req.PullBeforeWorktree,
-		WorktreeID:           req.WorktreeID,
-		TaskDirName:          req.TaskDirName,
-		RepoName:             req.RepoName,
-	}
+	createReq := buildWorktreeCreateRequest(req)
 	if syncStep != nil {
 		createReq.OnSyncProgress = func(event worktree.SyncProgressEvent) {
 			applySyncProgressEvent(syncStep, event)
@@ -215,9 +200,15 @@ func (p *WorktreePreparer) createWorktreeWithSync(
 	wt, err := p.worktreeMgr.Create(ctx, createReq)
 	steps = finalizeSyncStep(syncStep, syncStepIndex, totalSteps, onProgress, steps, err)
 	if err != nil {
-		completeStepError(&step, err.Error())
+		// If the callback already completed the step (worktree add succeeded,
+		// but a later phase like the setup script failed), leave it green — the
+		// failing phase owns its own step. Only attribute the error to "Create
+		// worktree" when it never completed (the creation itself failed).
+		if !stepCompleted {
+			completeStepError(&step, err.Error())
+			reportProgress(onProgress, step, stepIdx, totalSteps)
+		}
 		steps = append(steps, step)
-		reportProgress(onProgress, step, stepIdx, totalSteps)
 		p.logger.Error("worktree creation failed", zap.String("task_id", req.TaskID), zap.Error(err))
 		return nil, steps, stepIdx, err
 	}
@@ -233,6 +224,27 @@ func (p *WorktreePreparer) createWorktreeWithSync(
 	// two warnings always co-occur and FetchWarning is never silently dropped.
 	steps = append(steps, step)
 	return wt, steps, stepIdx + 1, nil
+}
+
+// buildWorktreeCreateRequest maps an EnvPrepareRequest onto the worktree
+// manager's CreateRequest. Progress callbacks are wired by the caller.
+func buildWorktreeCreateRequest(req *EnvPrepareRequest) worktree.CreateRequest {
+	return worktree.CreateRequest{
+		TaskID:               req.TaskID,
+		SessionID:            req.SessionID,
+		TaskTitle:            req.TaskTitle,
+		RepositoryID:         req.RepositoryID,
+		RepositoryPath:       req.RepositoryPath,
+		BaseBranch:           req.BaseBranch,
+		FallbackBaseBranch:   req.DefaultBranch,
+		CheckoutBranch:       req.CheckoutBranch,
+		PRNumber:             req.PRNumber,
+		WorktreeBranchPrefix: req.WorktreeBranchPrefix,
+		PullBeforeWorktree:   req.PullBeforeWorktree,
+		WorktreeID:           req.WorktreeID,
+		TaskDirName:          req.TaskDirName,
+		RepoName:             req.RepoName,
+	}
 }
 
 // completeCreateWorktreeStep marks the "Create worktree" step successful,
