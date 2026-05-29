@@ -250,6 +250,13 @@ export function findSessionAnchorGroupId(api: DockviewApi): string | null {
 }
 
 function resolveInitialPosition(api: DockviewApi): AddPanelOptions["position"] {
+  // Prefer the live "chat" placeholder's group. The session panel must be added
+  // INTO that group (so it's a tab beside chat) BEFORE chat is removed —
+  // otherwise removing chat empties and destroys the center group, the stored
+  // centerGroupId goes stale, and the session panel gets appended as a new row,
+  // collapsing the horizontal default layout into a vertical stack.
+  const chatGroupId = api.getPanel("chat")?.group?.id;
+  if (chatGroupId) return { referenceGroup: chatGroupId };
   const { centerGroupId } = useDockviewStore.getState();
   const centerGroupExists = centerGroupId && api.groups.some((g) => g.id === centerGroupId);
   if (centerGroupExists) return { referenceGroup: centerGroupId };
@@ -342,20 +349,25 @@ export function reconcileRemovedSessionPanels(
 const EMPTY_SESSION_IDS_KEY = "";
 
 /**
- * Drop the generic "chat" placeholder once a real session is active.
- * Skips removal in maximized state to preserve the saved maximize layout.
- * Returns true when callers should continue ensuring session panels;
- * false when the maximized state intentionally suppresses them.
+ * Whether the layout is maximized — session panels are intentionally absent
+ * then (restored on exit-maximize). Returns true when callers should continue
+ * ensuring panels, false to skip.
  */
-function prepareLayoutForSessionPanels(api: DockviewApi): boolean {
-  const preMaximizeLayout = useDockviewStore.getState().preMaximizeLayout;
+function shouldEnsureSessionPanels(): boolean {
+  return useDockviewStore.getState().preMaximizeLayout === null;
+}
+
+/**
+ * Drop the generic "chat" placeholder once a real session panel exists.
+ *
+ * MUST run AFTER the session panel has been added to chat's group — removing
+ * chat while it's the only panel in the center group destroys that group and
+ * collapses the horizontal default layout into a vertical stack.
+ */
+function removeChatPlaceholder(api: DockviewApi): void {
+  if (useDockviewStore.getState().preMaximizeLayout) return;
   const chatPanel = api.getPanel("chat");
-  if (chatPanel && !preMaximizeLayout) {
-    api.removePanel(chatPanel);
-  }
-  // In maximized state, session panels are intentionally absent from the
-  // layout — they'll be restored when the user exits maximize.
-  return preMaximizeLayout === null;
+  if (chatPanel) api.removePanel(chatPanel);
 }
 
 /**
@@ -488,7 +500,7 @@ function shouldSkipPanelEnsure(
     }
     return true;
   }
-  if (!prepareLayoutForSessionPanels(api)) {
+  if (!shouldEnsureSessionPanels()) {
     if (IS_DEBUG)
       debug("useAutoSessionTab: skip body (maximized - panels suppressed)", { effectiveSessionId });
     createdSet.add(effectiveSessionId);
@@ -564,6 +576,11 @@ function runAutoSessionTabEffect(
     false,
     refs.sessionTabCreatedRef.current,
   );
+
+  // Now that the session panel occupies the center group, drop the generic
+  // "chat" placeholder. Order matters: removing chat first would empty and
+  // destroy the center group, collapsing the horizontal layout.
+  removeChatPlaceholder(api);
 
   const activePanel = activateSessionPanel(
     api,
