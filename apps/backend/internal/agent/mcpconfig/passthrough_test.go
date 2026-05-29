@@ -257,6 +257,27 @@ func TestOpenCodeStrategy_NoPath(t *testing.T) {
 	}
 }
 
+// When every server is filtered out (blank/reserved names), the file-based
+// strategies must emit nothing — no empty config file, flag, or env var.
+func TestStrategies_NoArtifactsWhenAllServersFiltered(t *testing.T) {
+	filtered := []types.McpServer{{Name: "", Type: "stdio", Command: "x"}}
+
+	if art, _ := (ClaudeStrategy{}).BuildPassthroughMCP(filtered, PassthroughPaths{TempConfigPath: "/tmp/c.json"}); len(art.Files) != 0 || len(art.Args) != 0 {
+		t.Errorf("claude: want no artifacts, got %+v", art)
+	}
+	if art, _ := (CursorStrategy{}).BuildPassthroughMCP(filtered, PassthroughPaths{WorkspaceDir: "/work"}); len(art.Files) != 0 {
+		t.Errorf("cursor: want no artifacts, got %+v", art)
+	}
+	if art, _ := (OpenCodeStrategy{}).BuildPassthroughMCP(filtered, PassthroughPaths{TempConfigPath: "/tmp/oc.json"}); len(art.Files) != 0 || len(art.Env) != 0 {
+		t.Errorf("opencode: want no artifacts, got %+v", art)
+	}
+	// Claude additionally filters the reserved "workspace" name.
+	reserved := []types.McpServer{{Name: "workspace", Type: "stdio", Command: "y"}}
+	if art, _ := (ClaudeStrategy{}).BuildPassthroughMCP(reserved, PassthroughPaths{TempConfigPath: "/tmp/c.json"}); len(art.Files) != 0 || len(art.Args) != 0 {
+		t.Errorf("claude reserved-only: want no artifacts, got %+v", art)
+	}
+}
+
 // All four strategies satisfy the interface.
 func TestStrategiesImplementInterface(t *testing.T) {
 	var _ PassthroughMCPStrategy = ClaudeStrategy{}

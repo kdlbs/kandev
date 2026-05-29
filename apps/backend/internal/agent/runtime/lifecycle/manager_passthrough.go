@@ -289,12 +289,12 @@ func (m *Manager) applyPassthroughMCP(ctx context.Context, execution *AgentExecu
 	if pt.MCPStrategy == nil {
 		return nil, nil
 	}
+	// passthroughMCPServers always returns at least the kandev server (or an
+	// error when the port is unavailable), so the strategy receives a non-empty
+	// list; each strategy guards its own empty-after-filtering case.
 	servers, err := m.passthroughMCPServers(ctx, execution, agentConfig)
 	if err != nil {
 		return nil, err
-	}
-	if len(servers) == 0 {
-		return nil, nil
 	}
 	artifacts, err := pt.MCPStrategy.BuildPassthroughMCP(servers, m.passthroughMCPPaths(execution))
 	if err != nil {

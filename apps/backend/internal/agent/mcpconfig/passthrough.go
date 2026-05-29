@@ -283,6 +283,9 @@ func (CursorStrategy) BuildPassthroughMCP(servers []types.McpServer, paths Passt
 			entries[srv.Name] = cursorServerEntry{URL: srv.URL, Headers: srv.Headers}
 		}
 	}
+	if len(entries) == 0 {
+		return PassthroughArtifacts{}, nil
+	}
 	content, err := marshalMCPFile(cursorMCPFile{MCPServers: entries})
 	if err != nil {
 		return PassthroughArtifacts{}, err
@@ -343,6 +346,9 @@ func (OpenCodeStrategy) BuildPassthroughMCP(servers []types.McpServer, paths Pas
 		} else {
 			entries[srv.Name] = opencodeServerEntry{Type: opencodeServerTypeRemote, URL: srv.URL, Headers: srv.Headers, Enabled: true}
 		}
+	}
+	if len(entries) == 0 {
+		return PassthroughArtifacts{}, nil
 	}
 	content, err := marshalMCPFile(opencodeMCPFile{Schema: opencodeConfigSchema, MCP: entries})
 	if err != nil {
