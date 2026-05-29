@@ -349,3 +349,17 @@ func NewGeneric(name string, input any) *NormalizedPayload {
 		},
 	}
 }
+
+// NewSubagentTask creates a NormalizedPayload for subagent (Task) tool calls.
+// Result fields (status, agent id, metrics, …) are filled later from the
+// completion tool_call_update via the ACP normalizer's EnrichSubagentResult.
+func NewSubagentTask(description, prompt, subagentType string) *NormalizedPayload {
+	return &NormalizedPayload{
+		kind: ToolKindSubagentTask,
+		subagentTask: &SubagentTaskPayload{
+			Description:  description,
+			Prompt:       prompt,
+			SubagentType: subagentType,
+		},
+	}
+}
