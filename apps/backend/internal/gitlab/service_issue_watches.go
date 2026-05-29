@@ -84,6 +84,9 @@ func (s *Service) ListAllIssueWatches(ctx context.Context) ([]*IssueWatch, error
 
 // UpdateIssueWatch applies a partial update.
 func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIssueWatchRequest) error {
+	if req == nil {
+		return fmt.Errorf("nil request")
+	}
 	store := s.requireStore()
 	if store == nil {
 		return errStoreUnavailable

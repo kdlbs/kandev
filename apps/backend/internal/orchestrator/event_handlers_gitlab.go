@@ -94,7 +94,13 @@ func (s *Service) createGitLabReviewTask(ctx context.Context, evt *gitlab.NewRev
 	taskID, err := s.gitlabReviewTaskCreator.CreateGitLabReviewTask(ctx, evt)
 	if err != nil {
 		s.logger.Warn("create gitlab review task", zap.Error(err))
-		_ = s.gitlabService.ReleaseReviewMRTask(ctx, evt.ReviewWatchID, mr.ProjectPath, mr.IID)
+		if relErr := s.gitlabService.ReleaseReviewMRTask(ctx, evt.ReviewWatchID, mr.ProjectPath, mr.IID); relErr != nil {
+			s.logger.Warn("release gitlab review MR dedup row after task-create failure",
+				zap.String("review_watch_id", evt.ReviewWatchID),
+				zap.String("project", mr.ProjectPath),
+				zap.Int("iid", mr.IID),
+				zap.Error(relErr))
+		}
 		return
 	}
 	if err := s.gitlabService.AssignReviewMRTaskID(ctx, evt.ReviewWatchID, mr.ProjectPath, mr.IID, taskID); err != nil {
@@ -141,7 +147,13 @@ func (s *Service) createGitLabIssueTask(ctx context.Context, evt *gitlab.NewIssu
 	taskID, err := s.gitlabIssueTaskCreator.CreateGitLabIssueTask(ctx, evt)
 	if err != nil {
 		s.logger.Warn("create gitlab issue task", zap.Error(err))
-		_ = s.gitlabService.ReleaseIssueWatchTask(ctx, evt.IssueWatchID, issue.ProjectPath, issue.IID)
+		if relErr := s.gitlabService.ReleaseIssueWatchTask(ctx, evt.IssueWatchID, issue.ProjectPath, issue.IID); relErr != nil {
+			s.logger.Warn("release gitlab issue dedup row after task-create failure",
+				zap.String("issue_watch_id", evt.IssueWatchID),
+				zap.String("project", issue.ProjectPath),
+				zap.Int("iid", issue.IID),
+				zap.Error(relErr))
+		}
 		return
 	}
 	if err := s.gitlabService.AssignIssueWatchTaskID(ctx, evt.IssueWatchID, issue.ProjectPath, issue.IID, taskID); err != nil {

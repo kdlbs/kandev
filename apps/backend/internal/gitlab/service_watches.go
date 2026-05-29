@@ -122,6 +122,9 @@ func (s *Service) CheckMRWatch(ctx context.Context, watch *MRWatch) (*MRStatus, 
 		return nil, false, ErrNoClient
 	}
 	store := s.requireStore()
+	if store == nil {
+		return nil, false, errStoreUnavailable
+	}
 	// If we don't yet know an iid, try to find it from the branch.
 	if watch.MRIID <= 0 {
 		mr, err := client.FindMRByBranch(ctx, watch.ProjectPath, watch.Branch)
@@ -238,6 +241,9 @@ func (s *Service) ListAllReviewWatches(ctx context.Context) ([]*ReviewWatch, err
 
 // UpdateReviewWatch applies a partial update to a review watch.
 func (s *Service) UpdateReviewWatch(ctx context.Context, id string, req *UpdateReviewWatchRequest) error {
+	if req == nil {
+		return fmt.Errorf("nil request")
+	}
 	store := s.requireStore()
 	if store == nil {
 		return errStoreUnavailable

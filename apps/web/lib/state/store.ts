@@ -13,6 +13,7 @@ import type { SystemHealthResponse } from "@/lib/types/health";
 import type { UISliceActions as UIA } from "./slices/ui/types";
 import type * as UISliceTypes from "./slices/ui/types";
 import { mergeInitialState } from "./default-state";
+import { buildStateOverrides } from "./store-overrides";
 import {
   createKanbanSlice,
   createWorkspaceSlice,
@@ -562,7 +563,6 @@ export function createAppStore(initialState?: Partial<AppState>) {
   return createStore<AppState>()(
     immer((set, get, api) => ({
       ...merged,
-      // Compose all slices
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createKanbanSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -591,80 +591,8 @@ export function createAppStore(initialState?: Partial<AppState>) {
       ...createUISlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createAutomationsSlice(set as any, get as any, api as any),
-      // Override state with merged initial state
-      kanban: merged.kanban,
-      kanbanMulti: merged.kanbanMulti,
-      workflows: merged.workflows,
-      tasks: merged.tasks,
-      workspaces: merged.workspaces,
-      repositories: merged.repositories,
-      repositoryBranches: merged.repositoryBranches,
-      repositoryScripts: merged.repositoryScripts,
-      executors: merged.executors,
-      settingsAgents: merged.settingsAgents,
-      agentDiscovery: merged.agentDiscovery,
-      availableAgents: merged.availableAgents,
-      agentProfiles: merged.agentProfiles,
-      editors: merged.editors,
-      prompts: merged.prompts,
-      secrets: merged.secrets,
-      notificationProviders: merged.notificationProviders,
-      settingsData: merged.settingsData,
-      userSettings: merged.userSettings,
-      messages: merged.messages,
-      turns: merged.turns,
-      taskSessions: merged.taskSessions,
-      taskSessionsByTask: merged.taskSessionsByTask,
-      sessionAgentctl: merged.sessionAgentctl,
-      worktrees: merged.worktrees,
-      sessionWorktreesBySessionId: merged.sessionWorktreesBySessionId,
-      pendingModel: merged.pendingModel,
-      activeModel: merged.activeModel,
-      queue: merged.queue,
-      terminal: merged.terminal,
-      shell: merged.shell,
-      processes: merged.processes,
-      gitStatus: merged.gitStatus,
-      contextWindow: merged.contextWindow,
-      agents: merged.agents,
-      sessionMode: merged.sessionMode,
-      userShells: merged.userShells,
-      prepareProgress: merged.prepareProgress,
-      sessionTodos: merged.sessionTodos,
-      agentCapabilities: merged.agentCapabilities,
-      sessionModels: merged.sessionModels,
-      promptUsage: merged.promptUsage,
-      sessionPollMode: merged.sessionPollMode,
-      githubStatus: merged.githubStatus,
-      taskPRs: merged.taskPRs,
-      pendingPrUrlByTaskId: merged.pendingPrUrlByTaskId,
-      prWatches: merged.prWatches,
-      reviewWatches: merged.reviewWatches,
-      issueWatches: merged.issueWatches,
-      actionPresets: merged.actionPresets,
-      taskMRs: merged.taskMRs,
-      jiraIssueWatches: merged.jiraIssueWatches,
-      linearIssueWatches: merged.linearIssueWatches,
-      office: merged.office,
-      features: merged.features,
-      automations: merged.automations,
-      automationRuns: merged.automationRuns,
-      system: merged.system,
-      previewPanel: merged.previewPanel,
-      rightPanel: merged.rightPanel,
-      diffs: merged.diffs,
-      connection: merged.connection,
-      mobileKanban: merged.mobileKanban,
-      mobileSession: merged.mobileSession,
-      chatInput: merged.chatInput,
-      documentPanel: merged.documentPanel,
-      systemHealth: merged.systemHealth,
-      quickChat: merged.quickChat,
-      sessionFailureNotification: merged.sessionFailureNotification,
-      bottomTerminal: merged.bottomTerminal,
-      // Note: collapsedSubtaskParents is intentionally not overridden here —
-      // createUISlice hydrates it from sessionStorage and we want that to win.
-      // Add hydrate method
+      // Re-assert merged initial state so caller-supplied values win over slice defaults.
+      ...buildStateOverrides(merged),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       hydrate: (state, options) => set((draft) => hydrateState(draft as any, state, options)),
     })),

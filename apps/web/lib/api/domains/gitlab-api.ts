@@ -143,7 +143,10 @@ export type CreateReviewWatchRequest = Omit<
   ReviewWatch,
   "id" | "enabled" | "last_polled_at" | "created_at" | "updated_at"
 >;
-export type UpdateReviewWatchRequest = Partial<CreateReviewWatchRequest> & {
+// workspace_id is fixed at creation; the backend update schema ignores it.
+// Excluding it here keeps the type honest so callers don't think they can
+// move a watch between workspaces by sending a different id.
+export type UpdateReviewWatchRequest = Partial<Omit<CreateReviewWatchRequest, "workspace_id">> & {
   enabled?: boolean;
 };
 
@@ -192,7 +195,8 @@ export type CreateIssueWatchRequest = Omit<
   IssueWatch,
   "id" | "enabled" | "last_polled_at" | "created_at" | "updated_at"
 >;
-export type UpdateIssueWatchRequest = Partial<CreateIssueWatchRequest> & {
+// See UpdateReviewWatchRequest for the workspace_id rationale.
+export type UpdateIssueWatchRequest = Partial<Omit<CreateIssueWatchRequest, "workspace_id">> & {
   enabled?: boolean;
 };
 

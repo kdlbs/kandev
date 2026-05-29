@@ -26,7 +26,10 @@ func (s *Service) GetActionPresetsOrDefault(ctx context.Context, workspaceID str
 }
 
 // UpdateActionPresets persists a partial update to a workspace's presets.
-// Nil fields are left unchanged. The full updated row is returned.
+// Nil fields are left unchanged. Untouched kinds are NOT filled with current
+// defaults before persistence — that would freeze stale defaults into the
+// workspace row, masking future default changes. The reader
+// (GetActionPresetsOrDefault) substitutes defaults on read instead.
 func (s *Service) UpdateActionPresets(ctx context.Context, req *UpdateActionPresetsRequest) (*ActionPresets, error) {
 	if req == nil || req.WorkspaceID == "" {
 		return nil, fmt.Errorf("workspace_id required")
@@ -35,9 +38,12 @@ func (s *Service) UpdateActionPresets(ctx context.Context, req *UpdateActionPres
 	if store == nil {
 		return nil, fmt.Errorf("gitlab store not configured")
 	}
-	current, err := s.GetActionPresetsOrDefault(ctx, req.WorkspaceID)
+	current, err := store.GetActionPresets(ctx, req.WorkspaceID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get action presets: %w", err)
+	}
+	if current == nil {
+		current = &ActionPresets{WorkspaceID: req.WorkspaceID}
 	}
 	if req.MR != nil {
 		current.MR = *req.MR
@@ -48,11 +54,16 @@ func (s *Service) UpdateActionPresets(ctx context.Context, req *UpdateActionPres
 	if err := store.UpsertActionPresets(ctx, current); err != nil {
 		return nil, fmt.Errorf("upsert action presets: %w", err)
 	}
-	return current, nil
+	// Return the rendered view (defaults substituted) so the caller sees the
+	// same shape the read endpoint produces.
+	return s.GetActionPresetsOrDefault(ctx, req.WorkspaceID)
 }
 
 // ResetActionPresets removes a workspace's stored presets, falling back to defaults.
 func (s *Service) ResetActionPresets(ctx context.Context, workspaceID string) (*ActionPresets, error) {
+	if workspaceID == "" {
+		return nil, fmt.Errorf("workspace_id required")
+	}
 	store := s.requireStore()
 	if store == nil {
 		return defaultPresets(workspaceID), nil

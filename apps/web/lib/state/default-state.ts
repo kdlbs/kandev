@@ -71,6 +71,12 @@ export const defaultState = {
   issueWatches: defaultGitHubState.issueWatches,
   actionPresets: defaultGitHubState.actionPresets,
   taskMRs: defaultGitLabState.taskMRs,
+  gitlabReviewWatches: defaultGitLabState.gitlabReviewWatches,
+  gitlabIssueWatches: defaultGitLabState.gitlabIssueWatches,
+  gitlabMRWatches: defaultGitLabState.gitlabMRWatches,
+  gitlabActionPresets: defaultGitLabState.gitlabActionPresets,
+  gitlabStats: defaultGitLabState.gitlabStats,
+  gitlabStatus: defaultGitLabState.gitlabStatus,
   jiraIssueWatches: defaultJiraState.jiraIssueWatches,
   linearIssueWatches: defaultLinearState.linearIssueWatches,
   office: defaultOfficeState.office,
@@ -97,6 +103,30 @@ export const defaultState = {
 };
 
 export type DefaultState = typeof defaultState;
+
+function mergeGitLabFields(
+  d: DefaultState,
+  s: Partial<DefaultState>,
+): Pick<
+  DefaultState,
+  | "taskMRs"
+  | "gitlabReviewWatches"
+  | "gitlabIssueWatches"
+  | "gitlabMRWatches"
+  | "gitlabActionPresets"
+  | "gitlabStats"
+  | "gitlabStatus"
+> {
+  return {
+    taskMRs: { ...d.taskMRs, ...s.taskMRs },
+    gitlabReviewWatches: { ...d.gitlabReviewWatches, ...s.gitlabReviewWatches },
+    gitlabIssueWatches: { ...d.gitlabIssueWatches, ...s.gitlabIssueWatches },
+    gitlabMRWatches: { ...d.gitlabMRWatches, ...s.gitlabMRWatches },
+    gitlabActionPresets: { ...d.gitlabActionPresets, ...s.gitlabActionPresets },
+    gitlabStats: { ...d.gitlabStats, ...s.gitlabStats },
+    gitlabStatus: { ...d.gitlabStatus, ...s.gitlabStatus },
+  };
+}
 
 export function mergeInitialState(initialState?: Partial<DefaultState>): DefaultState {
   if (!initialState) return defaultState;
@@ -162,7 +192,7 @@ export function mergeInitialState(initialState?: Partial<DefaultState>): Default
     reviewWatches: { ...defaultState.reviewWatches, ...initialState.reviewWatches },
     issueWatches: { ...defaultState.issueWatches, ...initialState.issueWatches },
     actionPresets: { ...defaultState.actionPresets, ...initialState.actionPresets },
-    taskMRs: { ...defaultState.taskMRs, ...initialState.taskMRs },
+    ...mergeGitLabFields(defaultState, initialState),
     jiraIssueWatches: { ...defaultState.jiraIssueWatches, ...initialState.jiraIssueWatches },
     linearIssueWatches: {
       ...defaultState.linearIssueWatches,

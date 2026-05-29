@@ -2,6 +2,7 @@ package gitlab
 
 import (
 	"context"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -572,6 +573,9 @@ func wsNewDiscussionNote(svc *Service, _ *logger.Logger) ws.HandlerFunc {
 		}
 		if err := parseInto(msg, &req); err != nil || req.Project == "" || req.IID <= 0 || req.DiscussionID == "" {
 			return badRequest(msg, "project, iid, discussion_id required")
+		}
+		if strings.TrimSpace(req.Body) == "" {
+			return badRequest(msg, "body required")
 		}
 		note, err := svc.CreateMRDiscussionNote(ctx, req.Project, req.IID, req.DiscussionID, req.Body)
 		if err != nil {
