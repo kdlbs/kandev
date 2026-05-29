@@ -29,11 +29,11 @@ import type { TaskPR } from "@/lib/types/github";
 const HOVER_OPEN_DELAY_MS = 150;
 const HOVER_CLOSE_DELAY_MS = 150;
 
-type ChipStatus = "passed" | "failed" | "in_progress" | "merged" | "closed" | "neutral";
+// Terminal states (merged / closed) never reach here — PRStatusChip returns
+// null for them before rendering — so the chip status union omits them.
+type ChipStatus = "passed" | "failed" | "in_progress" | "neutral";
 
 function chipStatus(pr: TaskPR): ChipStatus {
-  if (pr.state === "merged") return "merged";
-  if (pr.state === "closed") return "closed";
   if (pr.review_state === "changes_requested" || pr.checks_state === "failure") return "failed";
   // Pending checks / pending review must beat checks_state === "success" so a
   // PR with all checks green but reviewers still outstanding renders as
@@ -54,7 +54,6 @@ function chipStatus(pr: TaskPR): ChipStatus {
  *   passed  → green check
  *   failed  → red X
  *   in progress → yellow spinner
- *   merged  → purple dot
  *   neutral → muted dot
  *
  * Desktop: hovering opens the full PRCIPopover anchored to the top edge so the
@@ -193,10 +192,6 @@ function ChipStatusGlyph({ status }: { status: ChipStatus }) {
           aria-hidden="true"
         />
       );
-    case "merged":
-      return <IconPointFilled className="h-3.5 w-3.5 text-purple-500" aria-hidden="true" />;
-    case "closed":
-      return <IconPointFilled className="h-3.5 w-3.5 text-red-500" aria-hidden="true" />;
     default:
       return <IconPointFilled className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />;
   }
