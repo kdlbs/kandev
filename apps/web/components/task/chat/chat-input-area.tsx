@@ -415,7 +415,7 @@ function ChatStatusBar({
       <PRStatusChip taskId={taskId} />
       {queueChip}
       {taskId && <PRMergedBanner key={taskId} taskId={taskId} />}
-      {taskId && <PRClosedBanner key={`${taskId}-closed`} taskId={taskId} />}
+      {taskId && <PRClosedBanner key={taskId} taskId={taskId} />}
       {canShare && taskId && sessionId && (
         <div className="ml-auto">
           <ShareButton taskId={taskId} sessionId={sessionId} iconOnly />
