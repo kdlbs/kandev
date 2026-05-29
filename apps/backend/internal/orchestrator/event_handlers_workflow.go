@@ -1219,7 +1219,7 @@ func (s *Service) autoStartStepPrompt(
 	if session.State == models.TaskSessionStateCreated && !session.IsPassthrough && (prompt != "" || len(attachments) > 0) && !sysprompt.HasKandevContext(prompt) {
 		recordedPrompt = sysprompt.InjectKandevContext(taskID, sessionID, prompt)
 	}
-	s.recordAutoStartMessage(ctx, taskID, sessionID, recordedPrompt, planMode, origin)
+	userMsgRecorded := s.recordAutoStartMessage(ctx, taskID, sessionID, recordedPrompt, planMode, origin)
 
 	// If the session is in CREATED state, the agent was never started (e.g. workspace-only
 	// preparation from a blocked auto-start). PromptTask will reject CREATED sessions,
@@ -1261,10 +1261,11 @@ func (s *Service) autoStartStepPrompt(
 		// "already has an agent running" means the execution store still tracks
 		// an active agent for this session (e.g. session state is CREATED but
 		// the agent was launched by a concurrent path). Queue instead of retrying.
-		// userMessageRecorded=true: recordAutoStartMessage already inserted the
-		// chat row above, so the drain side must NOT re-insert it.
+		// Pass userMsgRecorded so the drain skips CreateUserMessage only when the
+		// chat row was successfully inserted above; a failed write passes false,
+		// letting the drain re-attempt insertion.
 		if isAgentAlreadyRunningError(err) && shouldQueueIfBusy {
-			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode, attachments, origin, true); queueErr != nil {
+			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode, attachments, origin, userMsgRecorded); queueErr != nil {
 				requeueTaken()
 				return queueErr
 			}
@@ -1277,9 +1278,9 @@ func (s *Service) autoStartStepPrompt(
 		}
 
 		if shouldQueueIfBusy {
-			// userMessageRecorded=true: recordAutoStartMessage already inserted
-			// the chat row above before this retry loop began.
-			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode, attachments, origin, true); queueErr != nil {
+			// Pass userMsgRecorded so the drain skips CreateUserMessage only when
+			// the chat row was successfully inserted above by recordAutoStartMessage.
+			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode, attachments, origin, userMsgRecorded); queueErr != nil {
 				requeueTaken()
 				return queueErr
 			}
@@ -1393,14 +1394,19 @@ func (s *Service) takeAndMergeHandoffMessage(ctx context.Context, sessionID, bas
 // recordAutoStartMessage creates a user message for a workflow auto-start prompt
 // so it appears in the chat history. The prompt content includes system-injected
 // tags which are stripped when displayed to users via ToAPI().
+// Returns true when the chat row was successfully inserted, false otherwise
+// (messageCreator nil, empty prompt, or DB write failure). Callers that queue
+// the prompt after this call must pass the return value to queueAutoStartPrompt
+// as userMessageRecorded, so the drain side only skips CreateUserMessage when
+// the write actually succeeded.
 func (s *Service) recordAutoStartMessage(
 	ctx context.Context,
 	taskID, sessionID, prompt string,
 	planMode bool,
 	origin workflowMessageOrigin,
-) {
+) bool {
 	if s.messageCreator == nil || prompt == "" {
-		return
+		return false
 	}
 	turnID := s.getActiveTurnID(sessionID)
 	if turnID == "" {
@@ -1420,7 +1426,9 @@ func (s *Service) recordAutoStartMessage(
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.Error(err))
+		return false
 	}
+	return true
 }
 
 // queueAutoStartPromptIfRunning queues the workflow auto-start prompt only
@@ -1462,14 +1470,14 @@ func toQueuedAttachments(attachments []v1.MessageAttachment) []messagequeue.Mess
 }
 
 // queueAutoStartPrompt persists a workflow auto-start prompt for later drain.
-// userMessageRecorded must be true when the caller has already inserted the
-// chat-history user message via recordAutoStartMessage — the flag is stamped
-// onto the queue metadata so executeQueuedMessage skips its own
-// CreateUserMessage and avoids the duplicate-user-message bug observed when
-// PromptTask failed transiently and the queue was later drained on boot_ready.
+// userMessageRecorded must be the return value of recordAutoStartMessage: true
+// only when CreateUserMessage actually succeeded. The flag is stamped onto the
+// queue metadata so executeQueuedMessage skips its own CreateUserMessage and
+// avoids the duplicate-user-message bug observed when PromptTask failed
+// transiently and the queue drained on boot_ready. Passing false (failed write
+// or pre-record queue path) lets the drain side record the message instead.
 // Callers that queue BEFORE recordAutoStartMessage runs (e.g.
-// queueAutoStartPromptIfRunning's early-busy path) must pass false so the
-// drain side still records the message.
+// queueAutoStartPromptIfRunning's early-busy path) must pass false.
 func (s *Service) queueAutoStartPrompt(
 	ctx context.Context,
 	taskID, sessionID, prompt string,

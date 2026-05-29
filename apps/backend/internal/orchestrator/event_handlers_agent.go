@@ -358,7 +358,7 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 				zap.Error(err))
 			// Continue anyway - the prompt should still be sent
 		}
-	} else if alreadyRecorded {
+	} else if s.messageCreator != nil && alreadyRecorded {
 		s.logger.Debug("skipping CreateUserMessage for queued workflow auto-start; already recorded before queueing",
 			zap.String("session_id", queuedMsg.SessionID),
 			zap.String("queue_id", queuedMsg.ID))
