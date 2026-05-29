@@ -283,7 +283,7 @@ exec git "$@"
       const agentctlLinuxBinary = path.join(BACKEND_DIR, "bin", "agentctl-linux-amd64");
 
       const backendEnv = {
-        ...stripGitHubTokens(process.env as Record<string, string>),
+        ...sanitizeInheritedEnv(process.env as Record<string, string>),
         // Prepend the kandev bin dir so the host utility probe can locate
         // the `mock-agent` binary via PATH. In production that dir is the
         // same as the running kandev binary's dir, but e2e spawns via an
@@ -326,8 +326,10 @@ exec git "$@"
         // Specs that need different values (e.g.
         // permission-approval.spec.ts setting auto-approve=false) set
         // process.env.X before spawn — that already flows through the
-        // `...stripGitHubTokens(process.env)` spread above, and the
-        // backend's ApplyProfile leaves already-set vars alone.
+        // `...sanitizeInheritedEnv(process.env)` spread above, and the
+        // backend's ApplyProfile leaves already-set vars alone. (Note:
+        // KANDEV_FEATURES_* is the exception — it's stripped from the
+        // inherited env so the profile always governs feature flags.)
         GIT_AUTHOR_NAME: "E2E Test",
         GIT_AUTHOR_EMAIL: "e2e@test.local",
         GIT_COMMITTER_NAME: "E2E Test",
@@ -426,9 +428,23 @@ exec git "$@"
 });
 
 /** Strip GH_TOKEN / GITHUB_TOKEN so the mock client is used. */
-function stripGitHubTokens(env: Record<string, string>): Record<string, string> {
+// Sanitize the inherited environment before handing it to the e2e backend.
+// Two classes of vars must not leak through the `...process.env` spread:
+//   - GitHub tokens — tests must hit the mock GitHub, never a real token.
+//   - KANDEV_FEATURES_* flags — these are profile-managed (profiles.yaml `e2e:`
+//     column turns them on). When the suite is launched from inside a kandev
+//     task, the parent process exports KANDEV_FEATURES_OFFICE=false; left in
+//     place it survives the spread and, because the backend's ApplyProfile
+//     leaves already-set vars alone, disables Office (and any future feature)
+//     in the test backend → /api/v1/office/* 404s. Dropping the whole
+//     KANDEV_FEATURES_* namespace lets the e2e profile govern feature flags so
+//     the suite always exercises them, regardless of where it's launched.
+function sanitizeInheritedEnv(env: Record<string, string>): Record<string, string> {
   const cleaned = { ...env };
   delete cleaned.GH_TOKEN;
   delete cleaned.GITHUB_TOKEN;
+  for (const key of Object.keys(cleaned)) {
+    if (key.startsWith("KANDEV_FEATURES_")) delete cleaned[key];
+  }
   return cleaned;
 }
