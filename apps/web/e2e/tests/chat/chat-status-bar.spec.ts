@@ -308,6 +308,93 @@ test.describe("Chat status bar", () => {
     await expect(session.prMergedBanner()).not.toBeVisible();
   });
 
+  test("dismissed PR closed banner stays hidden across reload and task switch", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+
+    const taskA = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Dismiss Closed Banner Task A",
+      seedData.agentProfileId,
+      {
+        description: 'e2e:message("dismiss closed alpha response")',
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Dismiss Closed Banner Task B",
+      seedData.agentProfileId,
+      {
+        description: 'e2e:message("dismiss closed beta response")',
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: taskA.id,
+      owner: "test-org",
+      repo: "test-repo",
+      pr_number: 606,
+      pr_url: "https://github.com/test-org/test-repo/pull/606",
+      pr_title: "Dismiss Closed Test PR",
+      head_branch: "feature/dismiss-closed",
+      base_branch: "main",
+      author_login: "test-user",
+      state: "closed",
+    });
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    const cardA = kanban.taskCardByTitle("Dismiss Closed Banner Task A");
+    await expect(cardA).toBeVisible({ timeout: 30_000 });
+    await cardA.click();
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    await expect(session.chat.getByText("dismiss closed alpha response").last()).toBeVisible({
+      timeout: 30_000,
+    });
+
+    // Banner appears, then user dismisses it.
+    await expect(session.prClosedBanner()).toBeVisible({ timeout: 10_000 });
+    await session.prClosedDismissButton().click();
+    await expect(session.prClosedBanner()).not.toBeVisible();
+
+    // Persists across reload.
+    await testPage.reload();
+    await session.waitForLoad();
+    await expect(session.chat.getByText("dismiss closed alpha response").last()).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(session.prClosedBanner()).not.toBeVisible();
+
+    // Switch to task B (no closed PR, so never shows the banner) and back. The
+    // proof of cross-task-switch persistence is the banner still hidden on the
+    // return trip to task A.
+    await session.taskInSidebar("Dismiss Closed Banner Task B").first().click();
+    await expect(session.chat.getByText("dismiss closed beta response").last()).toBeVisible({
+      timeout: 30_000,
+    });
+
+    await session.taskInSidebar("Dismiss Closed Banner Task A").first().click();
+    await expect(session.chat.getByText("dismiss closed alpha response").last()).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(session.prClosedBanner()).not.toBeVisible();
+  });
+
   test("archive via PR banner switches to next task", async ({ testPage, apiClient, seedData }) => {
     test.setTimeout(90_000);
 
