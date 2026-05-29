@@ -36,13 +36,7 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "session.new")
 	defer span.End()
 
-	caps := a.capabilities.McpCapabilities
-	if a.cfg.AssumeMcpSse {
-		caps.Sse = true
-	}
-	if a.cfg.AssumeMcpHttp {
-		caps.Http = true
-	}
+	caps := effectiveMcpCapabilities(a.capabilities.McpCapabilities, a.cfg)
 	filteredServers := filterMcpServersByCapabilities(mcpServers, caps, a.logger)
 	resp, err := conn.NewSession(ctx, acp.NewSessionRequest{
 		Cwd:        a.cfg.WorkDir,
@@ -91,6 +85,24 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 	})
 
 	return sessionID, nil
+}
+
+// effectiveMcpCapabilities applies the adapter's AssumeMcpSse/AssumeMcpHttp
+// config overrides on top of the capabilities advertised by the agent during
+// the ACP handshake. Some agents (e.g. Auggie) support SSE/HTTP MCP transports
+// but don't advertise the corresponding capability, which would otherwise cause
+// filterMcpServersByCapabilities to drop user-configured remote MCP servers.
+func effectiveMcpCapabilities(caps acp.McpCapabilities, cfg *shared.Config) acp.McpCapabilities {
+	if cfg == nil {
+		return caps
+	}
+	if cfg.AssumeMcpSse {
+		caps.Sse = true
+	}
+	if cfg.AssumeMcpHttp {
+		caps.Http = true
+	}
+	return caps
 }
 
 // filterMcpServersByCapabilities removes MCP servers that the agent doesn't support.
@@ -228,13 +240,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	defer span.End()
 
 	// Filter MCP servers by agent capabilities (same logic as NewSession).
-	caps := a.capabilities.McpCapabilities
-	if a.cfg.AssumeMcpSse {
-		caps.Sse = true
-	}
-	if a.cfg.AssumeMcpHttp {
-		caps.Http = true
-	}
+	caps := effectiveMcpCapabilities(a.capabilities.McpCapabilities, a.cfg)
 	filteredServers := filterMcpServersByCapabilities(mcpServers, caps, a.logger)
 
 	// Suppress history replay notifications during load.
