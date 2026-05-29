@@ -120,3 +120,6 @@ docs/plans/
 
 # Local worktrees (not the backend-managed tree under ~/.kandev)
 /.worktrees/
+
+# Visual brainstorming companion (superpowers)
+.superpowers/

@@ -52,7 +52,7 @@ export type FileEditorComment = CommentBase & {
 export type PRFeedbackComment = CommentBase & {
   source: "pr-feedback";
   prNumber: number;
-  feedbackType: "check" | "review" | "comment";
+  feedbackType: "check" | "review" | "comment" | "conflict";
   /** Pre-formatted markdown text for display and sending */
   content: string;
 };
