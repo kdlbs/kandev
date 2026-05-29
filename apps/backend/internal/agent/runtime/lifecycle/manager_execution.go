@@ -430,6 +430,14 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	execution := runtimeInstance.ToAgentExecution(req)
 	execution.RuntimeName = rt.Name()
 
+	// Cache the resolved profile env on the execution so a subsequent
+	// configureAndStartAgent (when this workspace-only execution is promoted)
+	// reuses it via mergeAgentProfileEnvForExecution instead of doing another
+	// secret-store round-trip. Mirrors the Launch path (manager_launch.go).
+	if env != nil {
+		m.cacheResolvedProfileEnv(execution, env)
+	}
+
 	// Set the ACP session ID for session resumption
 	if info.ACPSessionID != "" {
 		execution.ACPSessionID = info.ACPSessionID
