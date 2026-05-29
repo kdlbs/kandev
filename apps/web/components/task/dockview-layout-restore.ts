@@ -12,9 +12,6 @@ import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
 
 const debug = createDebugLogger("dockview:restore");
 
-// Mirrors LAYOUT_STORAGE_KEY in dockview-layout-setup.ts. Bump in lockstep.
-const LAYOUT_STORAGE_KEY = "dockview-layout-v2";
-
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type SanitizeLayoutOptions =
   | { stripSessionPanels: true; stripEnvScopedPanels?: boolean; excludeSessionIds?: never }
@@ -242,34 +239,19 @@ export function tryRestoreLayout(
   validComponents: Set<string>,
   phantomSessionIds?: Set<string>,
 ): boolean {
-  if (currentEnvId) {
-    try {
-      if (tryRestoreEnvLayout(api, currentEnvId, validComponents, phantomSessionIds)) return true;
-    } catch {
-      // fall through to maximize-only / global fallback
-    }
-    if (tryRestoreMaximizeOnly(api, currentEnvId)) return true;
+  // No env yet — the task is still preparing or its session→env mapping hasn't
+  // hydrated. Return false so `onReady` builds the DEFAULT layout instead of
+  // restoring a cross-env "last layout": the global layout key is shared across
+  // tasks, so restoring it here would flash the *previous* task's proportions
+  // while a fresh task prepares. The env's own saved layout is applied later by
+  // `switchEnvLayout` once the env hydrates.
+  if (!currentEnvId) return false;
+  try {
+    if (tryRestoreEnvLayout(api, currentEnvId, validComponents, phantomSessionIds)) return true;
+  } catch {
+    // fall through to maximize-only
   }
-
-  if (!currentEnvId) {
-    try {
-      const saved = localStorage.getItem(LAYOUT_STORAGE_KEY);
-      if (saved) {
-        const layout = sanitizeLayout(JSON.parse(saved), validComponents, {
-          stripSessionPanels: true,
-          stripEnvScopedPanels: true,
-        });
-        if (!layout) return false;
-        api.fromJSON(layout);
-        useDockviewStore.setState(applyLayoutFixups(api));
-        return true;
-      }
-    } catch {
-      // fall through to default-build
-    }
-  }
-
-  return false;
+  return tryRestoreMaximizeOnly(api, currentEnvId);
 }
 
 /**

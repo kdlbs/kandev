@@ -242,6 +242,11 @@ export function setupLayoutPersistence(
     try {
       const json = api.toJSON();
       const envId = envIdRef.current;
+      // Global snapshot of the last layout. NOTE: restore is per-env (see
+      // tryRestoreLayout) — this key is no longer read on load, since
+      // restoring a cross-env layout flashed the previous task's proportions
+      // while a fresh task prepared. Kept as a debounced-save checkpoint that
+      // e2e polls to know a layout change has flushed before reloading.
       localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(json));
       if (envId) {
         setEnvLayout(envId, json);
