@@ -454,9 +454,7 @@ function useWorkspaceEditForm(workspace: Workspace) {
     }
   };
 
-  // Reset the confirmation field whenever the dialog closes so a
-  // Cancel-then-reopen can't leave it pre-filled with the workspace
-  // name (which would silently bypass the re-type requirement).
+  // Clears pre-fill so Cancel-then-reopen can't silently bypass the re-type requirement.
   const handleDeleteDialogOpenChange = (open: boolean) => {
     setDeleteDialogOpen(open);
     if (!open) setDeleteConfirmText("");
