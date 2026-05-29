@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
 )
@@ -43,6 +44,10 @@ func NewOpenCodeACP() *OpenCodeACP {
 				IdleTimeout:    3 * time.Second,
 				BufferMaxBytes: DefaultBufferMaxBytes,
 				ResumeFlag:     NewParam("-c"),
+				// opencode has no MCP flag; write a temp opencode.json and point
+				// it there via the OPENCODE_CONFIG env var (merges, never writes
+				// ~/.config/opencode).
+				MCPStrategy: mcpconfig.OpenCodeStrategy{},
 			},
 		},
 	}

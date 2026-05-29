@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
 )
@@ -56,6 +57,7 @@ func NewCodexACP() *CodexACP {
 				ModelFlag:        NewParam("--model", "{model}"),
 				IdleTimeout:      3 * time.Second,
 				BufferMaxBytes:   DefaultBufferMaxBytes,
+				MCPStrategy:      mcpconfig.CodexStrategy{},
 				AutoInjectPrompt: true,
 				SubmitSequence:   "\r",
 			},

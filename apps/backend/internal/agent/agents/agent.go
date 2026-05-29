@@ -9,6 +9,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/pkg/agent"
@@ -157,7 +158,10 @@ type PassthroughOptions struct {
 	Resume           bool            // generic "continue last session" (e.g. -c, --resume latest)
 	PermissionValues map[string]bool // e.g. {"auto_approve": true}
 	WorkDir          string
-	MCPConfigPath    string // path to generated MCP config file for passthrough CLIs that support it
+	// MCPArgs are extra argv tokens produced by the agent's MCP passthrough
+	// strategy (e.g. claude's "--mcp-config <path>", codex's repeated "-c
+	// mcp_servers.…" overrides). Appended to the built command.
+	MCPArgs []string
 	// CLIFlagTokens are user-configured CLI flag argv tokens derived from
 	// AgentProfile.CLIFlags (only Enabled entries, shell-tokenised). Appended
 	// verbatim to the built passthrough command, mirroring CommandOptions.
@@ -259,8 +263,11 @@ type PassthroughConfig struct {
 	StabilityWindow   time.Duration
 	ResumeFlag        Param // generic "continue last session" (e.g. NewParam("-c"), NewParam("--resume", "latest"))
 	SessionResumeFlag Param // resume a specific session by ID (e.g. NewParam("--resume"))
-	MCPConfigFlag     Param // flag used to load an MCP config file, e.g. NewParam("--mcp-config", "{mcp_config}")
-	WaitForTerminal   bool
+	// MCPStrategy materializes resolved MCP servers into this CLI's passthrough
+	// shape (config file + flag, repeated -c overrides, project file, or env var)
+	// without touching the user's global config. Nil means no MCP injection.
+	MCPStrategy     mcpconfig.PassthroughMCPStrategy
+	WaitForTerminal bool
 	// AutoInjectPrompt enables writing the task description to the PTY stdin
 	// after the first idle window. Default false preserves today's behavior.
 	AutoInjectPrompt bool

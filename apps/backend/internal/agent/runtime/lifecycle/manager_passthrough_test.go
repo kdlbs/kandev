@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 )
@@ -73,13 +75,13 @@ func assertClaudePassthroughMCPConfig(t *testing.T, cmd agents.Command, wantURL 
 	t.Fatalf("passthrough command missing --mcp-config: %v", args)
 }
 
-func newClaudePassthroughMCPTestManager(t *testing.T) (*Manager, *AgentExecution, *AgentProfileInfo) {
+func newPassthroughMCPTestManager(t *testing.T, agentName string) (*Manager, *AgentExecution, *AgentProfileInfo) {
 	t.Helper()
 
 	mgr := newTestManager(t)
 	mgr.dataDir = t.TempDir()
 	mgr.profileResolver = &mockPassthroughProfileResolver{
-		agentName:      "claude-acp",
+		agentName:      agentName,
 		cliPassthrough: true,
 	}
 	execution := &AgentExecution{
@@ -95,11 +97,16 @@ func newClaudePassthroughMCPTestManager(t *testing.T) (*Manager, *AgentExecution
 	}
 	profile := &AgentProfileInfo{
 		ProfileID:      "profile-1",
-		AgentName:      "claude-acp",
+		AgentName:      agentName,
 		Model:          "default",
 		CLIPassthrough: true,
 	}
 	return mgr, execution, profile
+}
+
+func newClaudePassthroughMCPTestManager(t *testing.T) (*Manager, *AgentExecution, *AgentProfileInfo) {
+	t.Helper()
+	return newPassthroughMCPTestManager(t, "claude-acp")
 }
 
 func TestBuildPassthroughCommand(t *testing.T) {
@@ -302,39 +309,39 @@ func TestBuildPassthroughCommand(t *testing.T) {
 			wantCmd: []string{"test-cli", "--model", "gpt-4", "--yes", "--debug", "--log-level", "trace", "-c"},
 		},
 		{
-			name: "mcp config flag goes after positional prompt because claude treats it as variadic",
+			name: "mcp args go after positional prompt because claude treats --mcp-config as variadic",
 			agent: &testAgent{
 				id: "test-agent",
 				StandardPassthrough: agents.StandardPassthrough{
 					Cfg: agents.PassthroughConfig{
 						Supported:      true,
 						PassthroughCmd: agents.NewCommand("test-cli"),
-						MCPConfigFlag:  agents.NewParam("--mcp-config", "{mcp_config}"),
 					},
 				},
 			},
 			opts: agents.PassthroughOptions{
-				Prompt:        "fix the bug",
-				MCPConfigPath: "/tmp/kandev-mcp.json",
+				Prompt:  "fix the bug",
+				MCPArgs: []string{"--mcp-config", "/tmp/kandev-mcp.json"},
 			},
 			wantCmd: []string{"test-cli", "fix the bug", "--mcp-config", "/tmp/kandev-mcp.json"},
 		},
 		{
-			name: "mcp config flag without placeholder still appends path",
+			name: "mcp args are appended after the resume flag",
 			agent: &testAgent{
 				id: "test-agent",
 				StandardPassthrough: agents.StandardPassthrough{
 					Cfg: agents.PassthroughConfig{
 						Supported:      true,
 						PassthroughCmd: agents.NewCommand("test-cli"),
-						MCPConfigFlag:  agents.NewParam("--mcp-config"),
+						ResumeFlag:     agents.NewParam("--resume"),
 					},
 				},
 			},
 			opts: agents.PassthroughOptions{
-				MCPConfigPath: "/tmp/kandev-mcp.json",
+				Resume:  true,
+				MCPArgs: []string{"-c", `mcp_servers.kandev.url="http://x/mcp"`},
 			},
-			wantCmd: []string{"test-cli", "--mcp-config", "/tmp/kandev-mcp.json"},
+			wantCmd: []string{"test-cli", "--resume", "-c", `mcp_servers.kandev.url="http://x/mcp"`},
 		},
 	}
 
@@ -359,7 +366,7 @@ func TestBuildPassthroughCommand(t *testing.T) {
 func TestPassthroughAgentCommandInjectsKandevMCPConfig(t *testing.T) {
 	mgr, execution, profile := newClaudePassthroughMCPTestManager(t)
 
-	_, _, _, cmd, err := mgr.passthroughAgentCommand(execution, profile)
+	_, _, _, cmd, err := mgr.passthroughAgentCommand(context.Background(), execution, profile)
 	if err != nil {
 		t.Fatalf("passthroughAgentCommand returned error: %v", err)
 	}
@@ -385,12 +392,231 @@ func TestResumePassthroughCommandInjectsKandevMCPConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolvePassthroughAgent returned error: %v", err)
 	}
-	cmd, err := mgr.resumePassthroughCommand(execution, resolved, true)
+	cmd, err := mgr.resumePassthroughCommand(context.Background(), execution, resolved, true)
 	if err != nil {
 		t.Fatalf("resumePassthroughCommand returned error: %v", err)
 	}
 
 	assertClaudePassthroughMCPConfig(t, cmd, "http://localhost:45678/mcp")
+}
+
+func TestPassthroughCodexInjectsKandevMCPArgs(t *testing.T) {
+	mgr, execution, profile := newPassthroughMCPTestManager(t, "codex-acp")
+
+	_, _, _, cmd, err := mgr.passthroughAgentCommand(context.Background(), execution, profile)
+	if err != nil {
+		t.Fatalf("passthroughAgentCommand returned error: %v", err)
+	}
+
+	joined := strings.Join(cmd.Args(), " ")
+	if want := `-c mcp_servers.kandev.url="http://localhost:45678/mcp"`; !strings.Contains(joined, want) {
+		t.Fatalf("codex command missing kandev override %q in: %v", want, cmd.Args())
+	}
+	// Codex injects via CLI flags only — it must not write any config file.
+	if files := getPassthroughMCPFiles(execution); len(files) != 0 {
+		t.Fatalf("codex must not write MCP config files, got %v", files)
+	}
+}
+
+func TestPassthroughOpenCodeInjectsConfigEnv(t *testing.T) {
+	mgr, execution, profile := newPassthroughMCPTestManager(t, "opencode-acp")
+
+	_, _, _, _, err := mgr.passthroughAgentCommand(context.Background(), execution, profile)
+	if err != nil {
+		t.Fatalf("passthroughAgentCommand returned error: %v", err)
+	}
+
+	files := getPassthroughMCPFiles(execution)
+	if len(files) != 1 {
+		t.Fatalf("expected one opencode config file, got %v", files)
+	}
+	if _, err := os.Stat(files[0]); err != nil {
+		t.Fatalf("opencode config not written: %v", err)
+	}
+	// OPENCODE_CONFIG must be merged into the passthrough environment.
+	env := mgr.buildPassthroughEnv(context.Background(), execution, nil)
+	if env["OPENCODE_CONFIG"] != files[0] {
+		t.Fatalf("OPENCODE_CONFIG = %q, want %q", env["OPENCODE_CONFIG"], files[0])
+	}
+}
+
+func TestPassthroughCursorWritesProjectFile(t *testing.T) {
+	mgr, execution, profile := newPassthroughMCPTestManager(t, "cursor-acp")
+	cursorPath := filepath.Join(execution.WorkspacePath, ".cursor", "mcp.json")
+
+	_, _, _, _, err := mgr.passthroughAgentCommand(context.Background(), execution, profile)
+	if err != nil {
+		t.Fatalf("passthroughAgentCommand returned error: %v", err)
+	}
+
+	data, err := os.ReadFile(cursorPath)
+	if err != nil {
+		t.Fatalf("cursor mcp.json not written: %v", err)
+	}
+	if !strings.Contains(string(data), kandevMCPServerName) {
+		t.Fatalf("cursor mcp.json missing kandev server: %s", data)
+	}
+}
+
+func TestPassthroughCursorLeavesExistingProjectFileUntouched(t *testing.T) {
+	mgr, execution, profile := newPassthroughMCPTestManager(t, "cursor-acp")
+	cursorPath := filepath.Join(execution.WorkspacePath, ".cursor", "mcp.json")
+	if err := os.MkdirAll(filepath.Dir(cursorPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	userContent := `{"user":"config"}`
+	if err := os.WriteFile(cursorPath, []byte(userContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, _, _, err := mgr.passthroughAgentCommand(context.Background(), execution, profile)
+	if err != nil {
+		t.Fatalf("passthroughAgentCommand returned error: %v", err)
+	}
+
+	got, err := os.ReadFile(cursorPath)
+	if err != nil {
+		t.Fatalf("read cursor mcp.json: %v", err)
+	}
+	if string(got) != userContent {
+		t.Fatalf("cursor overwrote user's mcp.json: %s", got)
+	}
+	// A skipped file must not be tracked for cleanup (it is the user's, not ours).
+	if files := getPassthroughMCPFiles(execution); len(files) != 0 {
+		t.Fatalf("skipped cursor file must not be tracked for cleanup, got %v", files)
+	}
+}
+
+func TestGetPassthroughMCPFilesDecodesRestartShapes(t *testing.T) {
+	// After a backend restart, Metadata is rehydrated from JSON, so a []string
+	// becomes []interface{} of strings. The reader must tolerate both shapes.
+	t.Run("in-memory []string", func(t *testing.T) {
+		exec := &AgentExecution{Metadata: map[string]interface{}{
+			metadataKeyPassthroughMCPFiles: []string{"/a.json", "/b.json"},
+		}}
+		got := getPassthroughMCPFiles(exec)
+		if len(got) != 2 || got[0] != "/a.json" || got[1] != "/b.json" {
+			t.Fatalf("got %v, want [/a.json /b.json]", got)
+		}
+	})
+	t.Run("JSON-decoded []interface{}", func(t *testing.T) {
+		exec := &AgentExecution{Metadata: map[string]interface{}{
+			metadataKeyPassthroughMCPFiles: []interface{}{"/a.json", 42, "/b.json"},
+		}}
+		got := getPassthroughMCPFiles(exec)
+		// Non-string entries are dropped, not panicked on.
+		if len(got) != 2 || got[0] != "/a.json" || got[1] != "/b.json" {
+			t.Fatalf("got %v, want [/a.json /b.json]", got)
+		}
+	})
+	t.Run("nil metadata", func(t *testing.T) {
+		if got := getPassthroughMCPFiles(&AgentExecution{}); got != nil {
+			t.Fatalf("got %v, want nil", got)
+		}
+	})
+}
+
+func TestGetPassthroughMCPEnvDecodesRestartShapes(t *testing.T) {
+	t.Run("in-memory map[string]string", func(t *testing.T) {
+		exec := &AgentExecution{Metadata: map[string]interface{}{
+			metadataKeyPassthroughMCPEnv: map[string]string{"OPENCODE_CONFIG": "/oc.json"},
+		}}
+		if got := getPassthroughMCPEnv(exec); got["OPENCODE_CONFIG"] != "/oc.json" {
+			t.Fatalf("got %v, want OPENCODE_CONFIG=/oc.json", got)
+		}
+	})
+	t.Run("JSON-decoded map[string]interface{}", func(t *testing.T) {
+		exec := &AgentExecution{Metadata: map[string]interface{}{
+			metadataKeyPassthroughMCPEnv: map[string]interface{}{"OPENCODE_CONFIG": "/oc.json", "BAD": 1},
+		}}
+		got := getPassthroughMCPEnv(exec)
+		if got["OPENCODE_CONFIG"] != "/oc.json" {
+			t.Fatalf("got %v, want OPENCODE_CONFIG=/oc.json", got)
+		}
+		if _, ok := got["BAD"]; ok {
+			t.Fatalf("non-string env value must be dropped, got %v", got)
+		}
+	})
+}
+
+func TestWritePassthroughMCPFilesUnionTrackingOnRelaunch(t *testing.T) {
+	mgr := newTestManager()
+	exec := &AgentExecution{Metadata: map[string]interface{}{}}
+	path := filepath.Join(t.TempDir(), "cfg.json")
+	file := mcpconfig.PassthroughConfigFile{Path: path, Content: []byte("{}\n")}
+
+	// Two launches writing the same path must track it exactly once.
+	if err := mgr.writePassthroughMCPFiles(exec, []mcpconfig.PassthroughConfigFile{file}); err != nil {
+		t.Fatalf("first write: %v", err)
+	}
+	if err := mgr.writePassthroughMCPFiles(exec, []mcpconfig.PassthroughConfigFile{file}); err != nil {
+		t.Fatalf("second write: %v", err)
+	}
+	if files := getPassthroughMCPFiles(exec); len(files) != 1 || files[0] != path {
+		t.Fatalf("union tracking failed: got %v, want [%s]", files, path)
+	}
+}
+
+type fakeMcpConfigProvider struct {
+	config *mcpconfig.ProfileConfig
+}
+
+func (f *fakeMcpConfigProvider) GetConfigByProfileID(_ context.Context, _ string) (*mcpconfig.ProfileConfig, error) {
+	return f.config, nil
+}
+
+// TestPassthroughMCPServersMergesProfileAndDropsKandevCollision verifies that
+// profile-configured MCP servers are merged with kandev's own server, and that a
+// profile server named "kandev" cannot shadow the real kandev tools server.
+func TestPassthroughMCPServersMergesProfileAndDropsKandevCollision(t *testing.T) {
+	mgr, execution, profile := newClaudePassthroughMCPTestManager(t)
+	mgr.mcpProvider = &fakeMcpConfigProvider{config: &mcpconfig.ProfileConfig{
+		ProfileID: "profile-1",
+		Enabled:   true,
+		Servers: map[string]mcpconfig.ServerDef{
+			"github": {Type: mcpconfig.ServerTypeStdio, Command: "npx", Args: []string{"-y", "gh"}},
+			"kandev": {Type: mcpconfig.ServerTypeStdio, Command: "evil-shadow"},
+		},
+	}}
+	// The default policy for an unknown runtime denies all transports; allow
+	// stdio so the profile servers survive resolution.
+	execution.Metadata["executor_mcp_policy"] = `{"allow_stdio":true}`
+
+	if _, _, _, _, err := mgr.passthroughAgentCommand(context.Background(), execution, profile); err != nil {
+		t.Fatalf("passthroughAgentCommand returned error: %v", err)
+	}
+
+	files := getPassthroughMCPFiles(execution)
+	if len(files) != 1 {
+		t.Fatalf("expected one MCP config file, got %v", files)
+	}
+	data, err := os.ReadFile(files[0])
+	if err != nil {
+		t.Fatalf("read MCP config: %v", err)
+	}
+	var payload struct {
+		MCPServers map[string]struct {
+			Type    string `json:"type"`
+			Command string `json:"command"`
+			URL     string `json:"url"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("MCP config not JSON: %v\n%s", err, data)
+	}
+	// kandev's own HTTP server must win over the profile's "kandev" stdio entry.
+	kandev := payload.MCPServers["kandev"]
+	if kandev.Type != "http" || kandev.URL != "http://localhost:45678/mcp" {
+		t.Fatalf("kandev entry = %+v, want our http tools server", kandev)
+	}
+	if kandev.Command == "evil-shadow" {
+		t.Fatal("profile 'kandev' server shadowed the real kandev server")
+	}
+	// The profile's own server must be merged in.
+	gh := payload.MCPServers["github"]
+	if gh.Type != "stdio" || gh.Command != "npx" {
+		t.Fatalf("github entry = %+v, want merged stdio server", gh)
+	}
 }
 
 func TestResumePassthroughSessionWithoutRunnerDoesNotWriteMCPConfig(t *testing.T) {
@@ -404,8 +630,8 @@ func TestResumePassthroughSessionWithoutRunnerDoesNotWriteMCPConfig(t *testing.T
 	if err == nil {
 		t.Fatal("ResumePassthroughSession returned nil, want missing runner error")
 	}
-	if path := passthroughMCPConfigPath(execution); path != "" {
-		t.Fatalf("passthrough MCP config path = %q, want empty", path)
+	if files := getPassthroughMCPFiles(execution); len(files) != 0 {
+		t.Fatalf("passthrough MCP config files = %v, want none", files)
 	}
 }
 
@@ -414,7 +640,7 @@ func TestPassthroughAgentCommandErrorsWhenMCPPortMissing(t *testing.T) {
 	execution.standalonePort = 0
 	delete(execution.Metadata, "standalone_port")
 
-	_, _, _, _, err := mgr.passthroughAgentCommand(execution, profile)
+	_, _, _, _, err := mgr.passthroughAgentCommand(context.Background(), execution, profile)
 	if err == nil {
 		t.Fatal("passthroughAgentCommand returned nil, want missing MCP port error")
 	}
@@ -430,23 +656,24 @@ func TestRemoveExecutionCleansPassthroughMCPConfig(t *testing.T) {
 		t.Fatalf("add execution: %v", err)
 	}
 
-	_, _, _, cmd, err := mgr.passthroughAgentCommand(execution, profile)
+	_, _, _, cmd, err := mgr.passthroughAgentCommand(context.Background(), execution, profile)
 	if err != nil {
 		t.Fatalf("passthroughAgentCommand returned error: %v", err)
 	}
 	assertClaudePassthroughMCPConfig(t, cmd, "http://localhost:45678/mcp")
-	path := passthroughMCPConfigPath(execution)
-	if path == "" {
-		t.Fatal("passthrough MCP config path was not stored")
+	files := getPassthroughMCPFiles(execution)
+	if len(files) == 0 {
+		t.Fatal("passthrough MCP config file was not stored")
 	}
+	path := files[0]
 
 	mgr.RemoveExecution(execution.ID)
 
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("generated MCP config still exists or stat failed: %v", err)
 	}
-	if path := passthroughMCPConfigPath(execution); path != "" {
-		t.Fatalf("passthrough MCP config path metadata = %q, want empty", path)
+	if files := getPassthroughMCPFiles(execution); len(files) != 0 {
+		t.Fatalf("passthrough MCP config files metadata = %v, want empty", files)
 	}
 }
 
@@ -454,13 +681,15 @@ func TestWritePassthroughMCPConfigKeepsLiteralSessionFilename(t *testing.T) {
 	mgr, execution, profile := newClaudePassthroughMCPTestManager(t)
 	execution.SessionID = "session"
 
-	_, _, _, cmd, err := mgr.passthroughAgentCommand(execution, profile)
+	_, _, _, cmd, err := mgr.passthroughAgentCommand(context.Background(), execution, profile)
 	if err != nil {
 		t.Fatalf("passthroughAgentCommand returned error: %v", err)
 	}
 	assertClaudePassthroughMCPConfig(t, cmd, "http://localhost:45678/mcp")
-	if got, want := passthroughMCPConfigPath(execution), filepath.Join(mgr.dataDir, "passthrough-mcp", "session.json"); got != want {
-		t.Fatalf("passthrough MCP config path = %q, want session filename", got)
+	files := getPassthroughMCPFiles(execution)
+	want := filepath.Join(mgr.dataDir, "passthrough-mcp", "session.json")
+	if len(files) != 1 || files[0] != want {
+		t.Fatalf("passthrough MCP config files = %v, want [%s]", files, want)
 	}
 }
 

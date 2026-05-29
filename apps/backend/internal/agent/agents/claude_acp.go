@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
 )
@@ -44,7 +45,7 @@ func NewClaudeACP() *ClaudeACP {
 				BufferMaxBytes:        DefaultBufferMaxBytes,
 				ResumeFlag:            NewParam("-c"),
 				SessionResumeFlag:     NewParam("--resume"),
-				MCPConfigFlag:         NewParam("--mcp-config", "{mcp_config}"),
+				MCPStrategy:           mcpconfig.ClaudeStrategy{},
 				AutoInjectPrompt:      true,
 				SubmitSequence:        "\r",
 				DisableBracketedPaste: true,

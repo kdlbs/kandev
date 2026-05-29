@@ -104,25 +104,6 @@ func (b *CmdBuilder) Prompt(flag Param, prompt string) *CmdBuilder {
 	return b
 }
 
-// MCPConfig appends an MCP config flag when a passthrough CLI supports one.
-// flag args support {mcp_config} placeholder, e.g. NewParam("--mcp-config", "{mcp_config}").
-func (b *CmdBuilder) MCPConfig(flag Param, path string) *CmdBuilder {
-	if flag.IsEmpty() || path == "" {
-		return b
-	}
-	hasPlaceholder := false
-	for _, arg := range flag.args {
-		if strings.Contains(arg, "{mcp_config}") {
-			hasPlaceholder = true
-		}
-		b.args = append(b.args, strings.ReplaceAll(arg, "{mcp_config}", path))
-	}
-	if !hasPlaceholder {
-		b.args = append(b.args, path)
-	}
-	return b
-}
-
 // Flag appends arbitrary flag parts to the command.
 func (b *CmdBuilder) Flag(parts ...string) *CmdBuilder {
 	b.args = append(b.args, parts...)

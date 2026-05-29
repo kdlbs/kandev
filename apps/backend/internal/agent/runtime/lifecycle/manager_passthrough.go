@@ -2,7 +2,6 @@ package lifecycle
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
@@ -148,6 +148,11 @@ func (m *Manager) buildPassthroughEnv(ctx context.Context, execution *AgentExecu
 			}
 		}
 	}
+	// Merge env vars contributed by the passthrough MCP strategy (e.g. opencode's
+	// OPENCODE_CONFIG). Set during command building in applyPassthroughMCP.
+	for key, value := range getPassthroughMCPEnv(execution) {
+		env[key] = value
+	}
 	return env
 }
 
@@ -217,14 +222,17 @@ func promptForPassthroughCommand(pt agents.PassthroughConfig, taskDescription st
 	return taskDescription
 }
 
-type passthroughMCPServerConfig struct {
-	Type string `json:"type"`
-	URL  string `json:"url"`
-}
-
-type passthroughMCPConfigFile struct {
-	MCPServers map[string]passthroughMCPServerConfig `json:"mcpServers"`
-}
+const (
+	// metadataKeyPassthroughMCPFiles tracks config files kandev wrote for the
+	// passthrough MCP injection so they can be removed when the execution ends.
+	metadataKeyPassthroughMCPFiles = "passthrough_mcp_files"
+	// metadataKeyPassthroughMCPEnv carries env vars the MCP strategy needs on the
+	// agent process (e.g. opencode's OPENCODE_CONFIG), merged in buildPassthroughEnv.
+	metadataKeyPassthroughMCPEnv = "passthrough_mcp_env"
+	// kandevMCPServerName is the reserved name of kandev's own HTTP MCP server,
+	// which exposes the task tools to the agent.
+	kandevMCPServerName = "kandev"
+)
 
 func passthroughMCPConfigPort(execution *AgentExecution) int {
 	if execution == nil {
@@ -269,76 +277,199 @@ func safePassthroughMCPConfigName(value string) string {
 	return out.String()
 }
 
-func passthroughMCPConfigPath(execution *AgentExecution) string {
-	if execution == nil || execution.Metadata == nil {
-		return ""
+// applyPassthroughMCP resolves the session's MCP servers (kandev's own server
+// plus the profile's configured servers), runs the agent's passthrough MCP
+// strategy, materializes any config files, records them for cleanup, stores the
+// strategy's env vars on the execution (merged later in buildPassthroughEnv),
+// and returns the extra CLI args to append to the passthrough command. It is a
+// no-op for agents that declare no strategy.
+func (m *Manager) applyPassthroughMCP(ctx context.Context, execution *AgentExecution, pt agents.PassthroughConfig) ([]string, error) {
+	if pt.MCPStrategy == nil {
+		return nil, nil
 	}
-	path, _ := execution.Metadata["passthrough_mcp_config_path"].(string)
-	return path
+	agentConfig, err := m.getAgentConfigForExecution(execution)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get agent config: %w", err)
+	}
+	servers, err := m.passthroughMCPServers(ctx, execution, agentConfig)
+	if err != nil {
+		return nil, err
+	}
+	if len(servers) == 0 {
+		return nil, nil
+	}
+	artifacts, err := pt.MCPStrategy.BuildPassthroughMCP(servers, m.passthroughMCPPaths(execution))
+	if err != nil {
+		return nil, fmt.Errorf("build passthrough MCP config: %w", err)
+	}
+	if err := m.writePassthroughMCPFiles(execution, artifacts.Files); err != nil {
+		return nil, err
+	}
+	setPassthroughMCPEnv(execution, artifacts.Env)
+	return artifacts.Args, nil
 }
 
-func (m *Manager) writePassthroughMCPConfig(execution *AgentExecution, pt agents.PassthroughConfig) (string, error) {
-	if pt.MCPConfigFlag.IsEmpty() {
-		return "", nil
-	}
+// passthroughMCPServers returns kandev's own HTTP MCP server followed by the
+// profile's resolved MCP servers. The kandev server requires the standalone
+// port; a profile server named "kandev" is dropped so it cannot shadow ours.
+func (m *Manager) passthroughMCPServers(ctx context.Context, execution *AgentExecution, agentConfig agents.Agent) ([]agentctltypes.McpServer, error) {
 	port := passthroughMCPConfigPort(execution)
 	if port <= 0 {
-		return "", fmt.Errorf("standalone port unavailable for passthrough MCP config")
+		return nil, fmt.Errorf("standalone port unavailable for passthrough MCP config")
 	}
+	servers := []agentctltypes.McpServer{{
+		Name: kandevMCPServerName,
+		Type: string(mcpconfig.ServerTypeHTTP),
+		URL:  fmt.Sprintf("http://localhost:%d/mcp", port),
+	}}
+	profileServers, err := m.resolveMcpServersWithParams(ctx, execution.AgentProfileID, execution.Metadata, agentConfig)
+	if err != nil {
+		return nil, err
+	}
+	for _, srv := range profileServers {
+		if srv.Name == kandevMCPServerName {
+			continue
+		}
+		servers = append(servers, srv)
+	}
+	return servers, nil
+}
+
+// passthroughMCPPaths computes the filesystem locations a strategy may use: a
+// kandev-owned temp config path (for file+flag / file+env strategies) and the
+// workspace dir (for project-local file strategies like Cursor).
+func (m *Manager) passthroughMCPPaths(execution *AgentExecution) mcpconfig.PassthroughPaths {
 	root := m.dataDir
 	if root == "" {
 		root = filepath.Join(os.TempDir(), "kandev")
-	}
-	dir := filepath.Join(root, "passthrough-mcp")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", fmt.Errorf("create passthrough MCP config dir: %w", err)
 	}
 	name := safePassthroughMCPConfigName(execution.SessionID)
 	if execution.SessionID == "" {
 		name = safePassthroughMCPConfigName(execution.ID)
 	}
-	path := filepath.Join(dir, name+".json")
-	cfg := passthroughMCPConfigFile{
-		MCPServers: map[string]passthroughMCPServerConfig{
-			"kandev": {
-				Type: "http",
-				URL:  fmt.Sprintf("http://localhost:%d/mcp", port),
-			},
-		},
+	return mcpconfig.PassthroughPaths{
+		TempConfigPath: filepath.Join(root, "passthrough-mcp", name+".json"),
+		WorkspaceDir:   execution.WorkspacePath,
 	}
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return "", fmt.Errorf("marshal passthrough MCP config: %w", err)
+}
+
+// writePassthroughMCPFiles materializes the strategy's config files, honoring
+// SkipIfExists (Cursor must never overwrite a user's existing mcp.json), and
+// records every file kandev wrote (unioned with prior launches) for cleanup.
+func (m *Manager) writePassthroughMCPFiles(execution *AgentExecution, files []mcpconfig.PassthroughConfigFile) error {
+	written := getPassthroughMCPFiles(execution)
+	for _, f := range files {
+		if f.Path == "" {
+			continue
+		}
+		if f.SkipIfExists {
+			if _, err := os.Stat(f.Path); err == nil {
+				m.logger.Info("passthrough MCP config already exists; leaving user file untouched",
+					zap.String("path", f.Path))
+				continue
+			} else if !os.IsNotExist(err) {
+				return fmt.Errorf("stat passthrough MCP config: %w", err)
+			}
+		}
+		if err := os.MkdirAll(filepath.Dir(f.Path), 0o700); err != nil {
+			return fmt.Errorf("create passthrough MCP config dir: %w", err)
+		}
+		if err := os.WriteFile(f.Path, f.Content, 0o600); err != nil {
+			return fmt.Errorf("write passthrough MCP config: %w", err)
+		}
+		written = appendUnique(written, f.Path)
 	}
-	data = append(data, '\n')
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return "", fmt.Errorf("write passthrough MCP config: %w", err)
+	setPassthroughMCPFiles(execution, written)
+	return nil
+}
+
+func (m *Manager) cleanupPassthroughMCPConfig(execution *AgentExecution) {
+	for _, path := range getPassthroughMCPFiles(execution) {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			m.logger.Warn("failed to remove passthrough MCP config",
+				zap.String("path", path),
+				zap.Error(err))
+		}
+	}
+	if execution.Metadata != nil {
+		delete(execution.Metadata, metadataKeyPassthroughMCPFiles)
+		delete(execution.Metadata, metadataKeyPassthroughMCPEnv)
+	}
+}
+
+func appendUnique(list []string, value string) []string {
+	for _, v := range list {
+		if v == value {
+			return list
+		}
+	}
+	return append(list, value)
+}
+
+// getPassthroughMCPFiles reads the recorded config-file list, tolerating both
+// []string (in-memory) and []interface{} (JSON-decoded after a restart).
+func getPassthroughMCPFiles(execution *AgentExecution) []string {
+	if execution == nil || execution.Metadata == nil {
+		return nil
+	}
+	switch v := execution.Metadata[metadataKeyPassthroughMCPFiles].(type) {
+	case []string:
+		return append([]string(nil), v...)
+	case []interface{}:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func setPassthroughMCPFiles(execution *AgentExecution, files []string) {
+	if execution.Metadata == nil {
+		execution.Metadata = map[string]interface{}{}
+	}
+	execution.Metadata[metadataKeyPassthroughMCPFiles] = files
+}
+
+// getPassthroughMCPEnv reads the recorded MCP env map, tolerating both
+// map[string]string and map[string]interface{} (JSON-decoded after a restart).
+func getPassthroughMCPEnv(execution *AgentExecution) map[string]string {
+	if execution == nil || execution.Metadata == nil {
+		return nil
+	}
+	switch v := execution.Metadata[metadataKeyPassthroughMCPEnv].(type) {
+	case map[string]string:
+		return v
+	case map[string]interface{}:
+		out := make(map[string]string, len(v))
+		for key, item := range v {
+			if s, ok := item.(string); ok {
+				out[key] = s
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func setPassthroughMCPEnv(execution *AgentExecution, env map[string]string) {
+	if len(env) == 0 {
+		return
 	}
 	if execution.Metadata == nil {
 		execution.Metadata = map[string]interface{}{}
 	}
-	execution.Metadata["passthrough_mcp_config_path"] = path
-	return path, nil
-}
-
-func (m *Manager) cleanupPassthroughMCPConfig(execution *AgentExecution) {
-	path := passthroughMCPConfigPath(execution)
-	if path == "" {
-		return
-	}
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		m.logger.Warn("failed to remove passthrough MCP config",
-			zap.String("path", path),
-			zap.Error(err))
-	}
-	if execution.Metadata != nil {
-		delete(execution.Metadata, "passthrough_mcp_config_path")
-	}
+	execution.Metadata[metadataKeyPassthroughMCPEnv] = env
 }
 
 // passthroughAgentCommand validates passthrough support and builds the command for a passthrough session.
 // Returns the PassthroughAgent, PassthroughConfig, RuntimeConfig pointer, command, and any error.
-func (m *Manager) passthroughAgentCommand(execution *AgentExecution, profileInfo *AgentProfileInfo) (agents.PassthroughAgent, agents.PassthroughConfig, *agents.RuntimeConfig, agents.Command, error) {
+func (m *Manager) passthroughAgentCommand(ctx context.Context, execution *AgentExecution, profileInfo *AgentProfileInfo) (agents.PassthroughAgent, agents.PassthroughConfig, *agents.RuntimeConfig, agents.Command, error) {
 	agentConfig, err := m.getAgentConfigForExecution(execution)
 	if err != nil {
 		return nil, agents.PassthroughConfig{}, nil, agents.Command{}, fmt.Errorf("failed to get agent config: %w", err)
@@ -353,7 +484,7 @@ func (m *Manager) passthroughAgentCommand(execution *AgentExecution, profileInfo
 	rt := agentConfig.Runtime()
 	taskDescription := getTaskDescriptionFromMetadata(execution)
 	promptForCmd := promptForPassthroughCommand(pt, taskDescription)
-	mcpConfigPath, err := m.writePassthroughMCPConfig(execution, pt)
+	mcpArgs, err := m.applyPassthroughMCP(ctx, execution, pt)
 	if err != nil {
 		return nil, agents.PassthroughConfig{}, nil, agents.Command{}, err
 	}
@@ -363,7 +494,7 @@ func (m *Manager) passthroughAgentCommand(execution *AgentExecution, profileInfo
 		SessionID:        execution.ACPSessionID,
 		Prompt:           promptForCmd,
 		PermissionValues: profilePermissionValues(profileInfo),
-		MCPConfigPath:    mcpConfigPath,
+		MCPArgs:          mcpArgs,
 		CLIFlagTokens:    m.profileCLIFlagTokens(profileInfo),
 	})
 	if cmd.IsEmpty() {
@@ -437,7 +568,7 @@ func (m *Manager) startInteractiveProcess(ctx context.Context, execution *AgentE
 // startPassthroughSession starts an agent in passthrough mode (direct terminal interaction).
 // Instead of using ACP protocol, the agent's stdin/stdout is passed through directly.
 func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentExecution, profileInfo *AgentProfileInfo) error {
-	_, pt, rt, cmd, err := m.passthroughAgentCommand(execution, profileInfo)
+	_, pt, rt, cmd, err := m.passthroughAgentCommand(ctx, execution, profileInfo)
 	if err != nil {
 		return err
 	}
@@ -518,7 +649,7 @@ func (m *Manager) freshPassthroughCommand(ctx context.Context, execution *AgentE
 	if err != nil {
 		return agents.PassthroughConfig{}, nil, agents.Command{}, err
 	}
-	mcpConfigPath, err := m.writePassthroughMCPConfig(execution, resolved.pt)
+	mcpArgs, err := m.applyPassthroughMCP(ctx, execution, resolved.pt)
 	if err != nil {
 		return agents.PassthroughConfig{}, nil, agents.Command{}, err
 	}
@@ -526,7 +657,7 @@ func (m *Manager) freshPassthroughCommand(ctx context.Context, execution *AgentE
 	cmd := resolved.agent.BuildPassthroughCommand(agents.PassthroughOptions{
 		Model:            effectivePassthroughModel(execution, resolved.profile),
 		PermissionValues: profilePermissionValues(resolved.profile),
-		MCPConfigPath:    mcpConfigPath,
+		MCPArgs:          mcpArgs,
 		CLIFlagTokens:    m.profileCLIFlagTokens(resolved.profile),
 	})
 	if cmd.IsEmpty() {
@@ -536,8 +667,8 @@ func (m *Manager) freshPassthroughCommand(ctx context.Context, execution *AgentE
 	return resolved.pt, resolved.rt, cmd, nil
 }
 
-func (m *Manager) resumePassthroughCommand(execution *AgentExecution, resolved *resolvedPassthrough, useResume bool) (agents.Command, error) {
-	mcpConfigPath, err := m.writePassthroughMCPConfig(execution, resolved.pt)
+func (m *Manager) resumePassthroughCommand(ctx context.Context, execution *AgentExecution, resolved *resolvedPassthrough, useResume bool) (agents.Command, error) {
+	mcpArgs, err := m.applyPassthroughMCP(ctx, execution, resolved.pt)
 	if err != nil {
 		return agents.Command{}, err
 	}
@@ -545,7 +676,7 @@ func (m *Manager) resumePassthroughCommand(execution *AgentExecution, resolved *
 		Model:            effectivePassthroughModel(execution, resolved.profile),
 		Resume:           useResume,
 		PermissionValues: profilePermissionValues(resolved.profile),
-		MCPConfigPath:    mcpConfigPath,
+		MCPArgs:          mcpArgs,
 		CLIFlagTokens:    m.profileCLIFlagTokens(resolved.profile),
 	})
 	if cmd.IsEmpty() {
@@ -647,7 +778,7 @@ func (m *Manager) ResumePassthroughSession(ctx context.Context, sessionID string
 	// backend restart. Once the sticky flag is set, every subsequent launch
 	// for this execution starts fresh.
 	useResume := !execution.passthroughResumeFailed
-	cmd, err := m.resumePassthroughCommand(execution, resolved, useResume)
+	cmd, err := m.resumePassthroughCommand(ctx, execution, resolved, useResume)
 	if err != nil {
 		return err
 	}
