@@ -35,6 +35,78 @@ test.describe("System Updates page", () => {
 
     await expect(testPage.getByTestId("system-updates-current")).toHaveText("v1.0.0");
     await expect(testPage.getByTestId("system-updates-latest")).toHaveText("v1.0.1");
+    await expect(testPage.getByTestId("system-updates-apply")).toHaveCount(0);
+  });
+
+  test("Apply update is available only for managed service installs", async ({ testPage }) => {
+    test.setTimeout(30_000);
+
+    await testPage.route("**/api/v1/system/updates/check", (route) => {
+      void route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          current: "v1.0.0",
+          latest: "v1.0.1",
+          latest_url: "https://example.com/r/v1.0.1",
+          latest_checked_at: new Date().toISOString(),
+          update_available: true,
+          install: {
+            running_as_service: true,
+            managed_service: true,
+            mode: "user",
+            manager: "systemd",
+            kind: "npm",
+          },
+          apply_supported: true,
+        }),
+      });
+    });
+
+    let applyCalled = false;
+    await testPage.route("**/api/v1/system/updates/apply", (route) => {
+      applyCalled = true;
+      void route.fulfill({
+        status: 202,
+        contentType: "application/json",
+        body: JSON.stringify({ job_id: "self-update-1" }),
+      });
+    });
+
+    await testPage.goto("/settings/system/updates");
+    await testPage.getByTestId("system-updates-check").click();
+    await expect(testPage.getByTestId("system-updates-apply")).toBeVisible({ timeout: 10_000 });
+
+    await testPage.getByTestId("system-updates-apply").click();
+    await testPage.getByTestId("system-updates-apply-confirm").click();
+    await expect.poll(() => applyCalled).toBe(true);
+  });
+
+  test("mobile keeps Apply update hidden for non-service installs", async ({ testPage }) => {
+    await testPage.setViewportSize({ width: 390, height: 844 });
+    await testPage.route("**/api/v1/system/updates/check", (route) => {
+      void route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          current: "v1.0.0",
+          latest: "v1.0.1",
+          latest_url: "https://example.com/r/v1.0.1",
+          latest_checked_at: new Date().toISOString(),
+          update_available: true,
+          install: { running_as_service: false, managed_service: false },
+          apply_supported: false,
+          apply_unsupported_reason: "Kandev is not running as a managed service.",
+          manual_commands: ["kandev service install"],
+        }),
+      });
+    });
+
+    await testPage.goto("/settings/system/updates");
+    await testPage.getByTestId("system-updates-check").click();
+
+    await expect(testPage.getByTestId("system-updates-apply")).toHaveCount(0);
+    await expect(testPage.getByTestId("system-updates-manual")).toBeVisible();
   });
 
   test("changelog pagination is URL-driven via ?page=N", async ({ testPage }) => {

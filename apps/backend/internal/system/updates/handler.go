@@ -1,6 +1,7 @@
 package updates
 
 import (
+	"context"
 	"errors"
 	"math"
 	"net/http"
@@ -19,6 +20,10 @@ func HandleGet(svc *Service) gin.HandlerFunc {
 		}
 		c.JSON(http.StatusOK, resp)
 	}
+}
+
+type applyRequestBody struct {
+	Confirm string `json:"confirm"`
 }
 
 // HandleCheck triggers a synchronous GitHub poll. When the per-process
@@ -44,5 +49,33 @@ func HandleCheck(svc *Service) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, resp)
+	}
+}
+
+// HandleApply queues a service-managed self-update. It is deliberately gated
+// behind service metadata and a browser same-origin check because the helper
+// mutates the local Kandev installation and restarts the service.
+func HandleApply(svc *Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !sameOriginOrNoOrigin(c.Request) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "cross-origin update apply is not allowed"})
+			return
+		}
+		var req applyRequestBody
+		_ = c.ShouldBindJSON(&req)
+		jobID, err := svc.Apply(context.Background(), req.Confirm)
+		if errors.Is(err, ErrApplyConfirm) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if errors.Is(err, ErrNoUpdateAvailable) || errors.Is(err, ErrApplyUnsupported) {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusAccepted, ApplyResponse{JobID: jobID})
 	}
 }

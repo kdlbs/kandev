@@ -34,7 +34,7 @@ export function macosSystemPlistPath(): string {
   return path.join(MACOS_SYSTEM_DAEMON_DIR, `${LAUNCHD_LABEL}.plist`);
 }
 
-export type LauncherKind = "homebrew" | "npm" | "unknown";
+export type LauncherKind = "homebrew" | "npm" | "npx" | "unknown";
 
 export type LauncherInfo = {
   /** Absolute path to node executable (process.execPath at install time). */
@@ -64,10 +64,16 @@ export function captureLauncher(): LauncherInfo {
   const version = process.env.KANDEV_VERSION;
   const kind: LauncherKind = bundleDir
     ? "homebrew"
-    : cliEntry.includes(`${path.sep}node_modules${path.sep}`)
-      ? "npm"
-      : "unknown";
+    : looksLikeNpxEntry(cliEntry)
+      ? "npx"
+      : cliEntry.includes(`${path.sep}node_modules${path.sep}`)
+        ? "npm"
+        : "unknown";
   return { nodePath, cliEntry, kind, bundleDir, version };
+}
+
+function looksLikeNpxEntry(cliEntry: string): boolean {
+  return cliEntry.includes(`${path.sep}_npx${path.sep}`);
 }
 
 function resolveCliEntry(): string {

@@ -70,6 +70,19 @@ export interface UpdatesResponse {
   /** ISO timestamp. */
   latest_checked_at: string;
   update_available: boolean;
+  install?: InstallState;
+  apply_supported?: boolean;
+  apply_unsupported_reason?: string;
+  manual_commands?: string[];
+}
+
+export interface InstallState {
+  running_as_service: boolean;
+  managed_service: boolean;
+  mode?: string;
+  manager?: string;
+  kind?: string;
+  metadata_path?: string;
 }
 
 export type SystemJobKind =
@@ -78,7 +91,8 @@ export type SystemJobKind =
   | "factory-reset"
   | "backup-create"
   | "restore"
-  | "disk-walk";
+  | "disk-walk"
+  | "self-update";
 
 export type SystemJobState = "queued" | "running" | "succeeded" | "failed";
 

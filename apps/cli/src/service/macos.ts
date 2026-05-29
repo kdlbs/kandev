@@ -7,6 +7,11 @@ import type { ServiceArgs } from "./args";
 import { dumpLaunchdLogs, waitForServiceHealth } from "./health_check";
 import { commandExists, writeUnitFile } from "./install_helpers";
 import {
+  buildServiceInstallMetadata,
+  serviceMetadataPath,
+  writeServiceInstallMetadata,
+} from "./metadata";
+import {
   captureLauncher,
   LAUNCHD_LABEL,
   macosUserAgentDir,
@@ -64,6 +69,9 @@ export async function runMacosService(args: ServiceArgs): Promise<void> {
     case "config":
       // Handled by the dispatcher in index.ts before reaching the platform layer.
       throw new Error("unreachable: config action handled in service/index.ts");
+    case "self-update":
+      // Handled by the dispatcher in index.ts before reaching the platform layer.
+      throw new Error("unreachable: self-update action handled in service/index.ts");
     default: {
       const _exhaustive: never = args.action;
       throw new Error(`unhandled service action: ${_exhaustive as string}`);
@@ -80,6 +88,9 @@ function installSync(ctx: Ctx): { logDir: string } {
   const launcher = captureLauncher();
   const homeDir = resolveHomeDir(ctx.args.homeDir, ctx.isSystem);
   const logDir = resolveLogDir(homeDir);
+  const metadataPath = serviceMetadataPath(homeDir);
+  const mode = ctx.isSystem ? "system" : "user";
+  const systemUser = ctx.isSystem ? resolveServiceUser(true) : undefined;
   fs.mkdirSync(logDir, { recursive: true });
 
   const plist = renderLaunchdPlist({
@@ -87,12 +98,26 @@ function installSync(ctx: Ctx): { logDir: string } {
     homeDir,
     logDir,
     port: ctx.args.port,
-    systemUser: ctx.isSystem ? resolveServiceUser(true) : undefined,
-    mode: ctx.isSystem ? "system" : "user",
+    systemUser,
+    mode,
+    serviceMetadataPath: metadataPath,
   });
 
   fs.mkdirSync(path.dirname(ctx.plistPath), { recursive: true });
   const outcome = writeUnitFile(ctx.plistPath, plist);
+  writeServiceInstallMetadata(
+    metadataPath,
+    buildServiceInstallMetadata({
+      manager: "launchd",
+      mode,
+      launcher,
+      homeDir,
+      logDir,
+      servicePath: ctx.plistPath,
+      port: ctx.args.port,
+      systemUser,
+    }),
+  );
 
   // launchctl bootstrap fails if the label is already loaded — bootout first
   // (ignoring its error if nothing was loaded). This means 'install' is

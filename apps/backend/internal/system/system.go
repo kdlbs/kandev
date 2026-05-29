@@ -89,7 +89,7 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 		Database: dbSvc,
 		Backups:  backupsSvc,
 		Logs:     logs.NewService(logDir, logFile, log),
-		Updates:  updates.NewService(pool, build.Version, nil, log),
+		Updates:  updates.NewService(pool, build.Version, nil, log, updates.WithHomeDir(homeDir), updates.WithJobs(tracker)),
 	}
 }
 
@@ -118,6 +118,7 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 
 	g.GET("/updates", updates.HandleGet(s.Updates))
 	g.POST("/updates/check", updates.HandleCheck(s.Updates))
+	g.POST("/updates/apply", updates.HandleApply(s.Updates))
 
 	g.GET("/jobs/:id", jobs.HandleGet(s.Jobs))
 

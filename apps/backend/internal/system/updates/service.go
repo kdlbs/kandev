@@ -8,6 +8,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -16,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/persistence"
+	"github.com/kandev/kandev/internal/system/jobs"
 )
 
 // PollInterval is the cadence at which the background goroutine polls GitHub.
@@ -28,17 +31,51 @@ const ManualCheckWindow = 30 * time.Second
 // per-process rate limiter window has not yet elapsed.
 var ErrRateLimited = errors.New("updates check rate limited")
 
+// ErrApplyConfirm indicates that POST /updates/apply did not include the
+// explicit confirmation token.
+var ErrApplyConfirm = errors.New("update apply requires confirm=UPDATE")
+
+// ErrApplyUnsupported indicates that the current installation cannot be
+// updated safely from the UI.
+var ErrApplyUnsupported = errors.New("update apply unsupported")
+
+// ErrNoUpdateAvailable indicates that the cached release state does not show
+// a newer semver than the running binary.
+var ErrNoUpdateAvailable = errors.New("no update available")
+
 // devVersion is the sentinel used by the ldflags-injected current version
 // when no release tag was baked in (i.e. local dev builds).
 const devVersion = "dev"
 
 // UpdatesResponse is the JSON shape returned by both Get() and Check().
 type UpdatesResponse struct {
-	Current         string    `json:"current"`
-	Latest          string    `json:"latest"`
-	LatestURL       string    `json:"latest_url"`
-	LatestCheckedAt time.Time `json:"latest_checked_at"`
-	UpdateAvailable bool      `json:"update_available"`
+	Current                string               `json:"current"`
+	Latest                 string               `json:"latest"`
+	LatestURL              string               `json:"latest_url"`
+	LatestCheckedAt        time.Time            `json:"latest_checked_at"`
+	UpdateAvailable        bool                 `json:"update_available"`
+	Install                InstallStateResponse `json:"install"`
+	ApplySupported         bool                 `json:"apply_supported"`
+	ApplyUnsupportedReason string               `json:"apply_unsupported_reason,omitempty"`
+	ManualCommands         []string             `json:"manual_commands,omitempty"`
+}
+
+// ApplyResponse is the 202 payload returned when a self-update helper has
+// been queued.
+type ApplyResponse struct {
+	JobID string `json:"job_id"`
+}
+
+// InstallStateResponse describes whether this backend is currently running
+// under a kandev-managed service unit/plist. The UI uses this to hard-gate
+// one-click updates.
+type InstallStateResponse struct {
+	RunningAsService bool   `json:"running_as_service"`
+	ManagedService   bool   `json:"managed_service"`
+	Mode             string `json:"mode,omitempty"`
+	Manager          string `json:"manager,omitempty"`
+	Kind             string `json:"kind,omitempty"`
+	MetadataPath     string `json:"metadata_path,omitempty"`
 }
 
 // releaseURL is the GitHub endpoint the service polls. Tests override it via
@@ -52,6 +89,11 @@ type Service struct {
 	httpClient *http.Client
 	log        *logger.Logger
 	limiter    *Limiter
+	jobs       *jobs.Tracker
+	homeDir    string
+	getenv     func(string) string
+	now        func() time.Time
+	applyRun   applyRunner
 
 	// releaseURL is the GitHub endpoint hit by Check + the poller; defaults
 	// to DefaultReleaseURL and can be overridden by SetReleaseURL for tests.
@@ -76,17 +118,58 @@ type Service struct {
 // the poller and Check() without spinning up an httptest server.
 type Fetcher func(ctx context.Context) (tag, url string, err error)
 
+// Option customises Service construction without growing NewService's public
+// parameter list.
+type Option func(*Service)
+
+// WithJobs wires the system job tracker used by Apply.
+func WithJobs(tracker *jobs.Tracker) Option {
+	return func(s *Service) {
+		s.jobs = tracker
+	}
+}
+
+// WithHomeDir sets the resolved Kandev home directory. It is used as a
+// fallback for service metadata discovery.
+func WithHomeDir(homeDir string) Option {
+	return func(s *Service) {
+		s.homeDir = homeDir
+	}
+}
+
+// WithEnvReader overrides environment reads. Intended for tests.
+func WithEnvReader(getenv func(string) string) Option {
+	return func(s *Service) {
+		if getenv != nil {
+			s.getenv = getenv
+		}
+	}
+}
+
+// WithApplyRunner overrides helper launch. Intended for tests and e2e mocks.
+func WithApplyRunner(r applyRunner) Option {
+	return func(s *Service) {
+		if r != nil {
+			s.applyRun = r
+		}
+	}
+}
+
 // NewService constructs the updates service. When httpClient is nil, a fresh
 // client carrying defaultClientTimeout is allocated — http.DefaultClient has
 // no timeout, so handing it the poller would let a stalled socket hang a
 // goroutine for hours. current is the running binary version (typically
 // injected via ldflags); the sentinel "dev" disables UpdateAvailable.
-func NewService(pool *db.Pool, current string, httpClient *http.Client, log *logger.Logger) *Service {
+func NewService(pool *db.Pool, current string, httpClient *http.Client, log *logger.Logger, opts ...Option) *Service {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: defaultClientTimeout}
 	}
 	if log == nil {
 		log = logger.Default()
+	}
+	homeDir := ""
+	if dir, err := os.UserHomeDir(); err == nil {
+		homeDir = filepath.Join(dir, ".kandev")
 	}
 	s := &Service{
 		pool:           pool,
@@ -96,8 +179,15 @@ func NewService(pool *db.Pool, current string, httpClient *http.Client, log *log
 		limiter:        NewLimiter(ManualCheckWindow),
 		releaseURL:     DefaultReleaseURL,
 		pollerInterval: PollInterval,
+		homeDir:        homeDir,
+		getenv:         os.Getenv,
+		now:            time.Now,
 	}
 	s.fetcher = s.defaultFetcher
+	s.applyRun = s.defaultApplyRunner
+	for _, opt := range opts {
+		opt(s)
+	}
 	return s
 }
 
@@ -151,6 +241,34 @@ func (s *Service) Check(ctx context.Context) (UpdatesResponse, error) {
 	return s.fetchAndPersist(ctx)
 }
 
+// Apply validates the cached update and current service install, writes an
+// intent file, and queues the OS-manager helper that performs the actual
+// package upgrade + service reinstall.
+func (s *Service) Apply(ctx context.Context, confirm string) (string, error) {
+	if confirm != "UPDATE" {
+		return "", ErrApplyConfirm
+	}
+	if s.jobs == nil {
+		return "", ErrApplyUnsupported
+	}
+	resp, metadata, err := s.applyPreflight()
+	if err != nil {
+		return "", err
+	}
+	intentPath, intent, err := s.writeApplyIntent(resp, metadata)
+	if err != nil {
+		return "", err
+	}
+	req := applyRequest{
+		IntentPath: intentPath,
+		Intent:     intent,
+	}
+	jobID := s.jobs.Start(ctx, "self-update", func(jobCtx context.Context) (map[string]interface{}, error) {
+		return s.applyRun(jobCtx, req)
+	})
+	return jobID, nil
+}
+
 // RetryAfter exposes the limiter's remaining window so the HTTP handler can
 // surface a Retry-After value to clients.
 func (s *Service) RetryAfter() time.Duration {
@@ -197,12 +315,18 @@ func (s *Service) fetchAndPersist(ctx context.Context) (UpdatesResponse, error) 
 }
 
 func (s *Service) buildResponse(latest, url string, checkedAt time.Time) UpdatesResponse {
+	install, _ := s.detectInstallState()
+	applySupported, reason := install.applySupport()
 	return UpdatesResponse{
-		Current:         s.current,
-		Latest:          latest,
-		LatestURL:       url,
-		LatestCheckedAt: checkedAt,
-		UpdateAvailable: s.updateAvailable(latest),
+		Current:                s.current,
+		Latest:                 latest,
+		LatestURL:              url,
+		LatestCheckedAt:        checkedAt,
+		UpdateAvailable:        s.updateAvailable(latest),
+		Install:                install,
+		ApplySupported:         applySupported,
+		ApplyUnsupportedReason: reason,
+		ManualCommands:         manualCommands(install, latest),
 	}
 }
 

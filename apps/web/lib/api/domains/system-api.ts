@@ -157,3 +157,13 @@ export function checkUpdates(options?: ApiRequestOptions): Promise<UpdatesRespon
     init: { method: "POST", ...(options?.init ?? {}) },
   });
 }
+
+export function applyUpdate(
+  confirm = "UPDATE",
+  options?: ApiRequestOptions,
+): Promise<JobAcceptResponse> {
+  return fetchJson<JobAcceptResponse>(`${SYSTEM_BASE}/updates/apply`, {
+    ...options,
+    init: { method: "POST", body: JSON.stringify({ confirm }), ...(options?.init ?? {}) },
+  });
+}

@@ -17,6 +17,8 @@ export type UnitInputs = {
   systemUser?: string;
   /** Mode controls WantedBy and User= directives. */
   mode: "user" | "system";
+  /** Absolute path to service install metadata, baked into managed units. */
+  serviceMetadataPath?: string;
 };
 
 // User-mode PATH includes ~/.local/bin so user-installed agent CLIs (npm user
@@ -84,6 +86,9 @@ export function renderSystemdUnit(input: UnitInputs): string {
   if (input.launcher.version) {
     env.push(envLine("KANDEV_VERSION", input.launcher.version));
   }
+  if (input.serviceMetadataPath) {
+    env.push(...serviceEnvLines(input, "systemd"));
+  }
 
   const wantedBy = input.mode === "system" ? "multi-user.target" : "default.target";
   const userLine = input.mode === "system" && input.systemUser ? `User=${input.systemUser}\n` : "";
@@ -133,6 +138,9 @@ export function renderLaunchdPlist(input: UnitInputs): string {
   }
   if (input.launcher.version) {
     envEntries.push(["KANDEV_VERSION", input.launcher.version]);
+  }
+  if (input.serviceMetadataPath) {
+    envEntries.push(...serviceEnvEntries(input, "launchd"));
   }
 
   const envXml = envEntries
@@ -209,4 +217,22 @@ function envLine(key: string, value: string): string {
   if (!/[\s"\\]/.test(value)) return `Environment=${key}=${value}`;
   const escaped = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   return `Environment="${key}=${escaped}"`;
+}
+
+function serviceEnvLines(input: UnitInputs, manager: "systemd" | "launchd"): string[] {
+  return serviceEnvEntries(input, manager).map(([key, value]) => envLine(key, value));
+}
+
+function serviceEnvEntries(
+  input: UnitInputs,
+  manager: "systemd" | "launchd",
+): Array<[string, string]> {
+  if (!input.serviceMetadataPath) return [];
+  return [
+    ["KANDEV_RUNNING_AS_SERVICE", "true"],
+    ["KANDEV_SERVICE_MODE", input.mode],
+    ["KANDEV_SERVICE_MANAGER", manager],
+    ["KANDEV_INSTALL_KIND", input.launcher.kind],
+    ["KANDEV_SERVICE_METADATA", input.serviceMetadataPath],
+  ];
 }

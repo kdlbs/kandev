@@ -96,4 +96,22 @@ describe("parseServiceArgs", () => {
     // happy path
     expect(parseServiceArgs(["install", "--port=9000"]).port).toBe(9000);
   });
+
+  it("parses hidden self-update helper flags", () => {
+    const args = parseServiceArgs(["self-update", "--intent", "/tmp/intent.json", "--dry-run"]);
+    expect(args.action).toBe("self-update");
+    expect(args.intent).toBe("/tmp/intent.json");
+    expect(args.dryRun).toBe(true);
+  });
+
+  it("requires --intent for self-update", () => {
+    expect(() => parseServiceArgs(["self-update"])).toThrow(/requires --intent/);
+  });
+
+  it("rejects self-update-only flags elsewhere", () => {
+    expect(() => parseServiceArgs(["install", "--intent=/tmp/intent.json"])).toThrow(
+      /--intent only applies/,
+    );
+    expect(() => parseServiceArgs(["install", "--dry-run"])).toThrow(/--dry-run only applies/);
+  });
 });

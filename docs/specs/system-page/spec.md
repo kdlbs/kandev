@@ -71,8 +71,9 @@ DELETE /api/v1/system/backups/:name               - delete snapshot
 GET    /api/v1/system/logs                        - { files: [{ name, size, mtime }] }
 GET    /api/v1/system/logs/tail?n=1000            - last N lines of current log
 GET    /api/v1/system/logs/:name/download         - stream log file
-GET    /api/v1/system/updates                     - { current, latest, latestCheckedAt, releaseUrl }
+GET    /api/v1/system/updates                     - { current, latest, latestCheckedAt, releaseUrl, install, applySupported }
 POST   /api/v1/system/updates/check               - force GitHub re-poll; rate-limited 30s
+POST   /api/v1/system/updates/apply               - queue service-only self-update; requires confirm=UPDATE
 ```
 
 Long-running operations (vacuum, optimize, reset, restore, snapshot create, disk walk) return `202 Accepted` with a `jobId` and publish progress on the existing event bus. The frontend subscribes via WS (`system.job.update` event) to render progress and final result. On success/failure the operation flips a corresponding entry in the existing health surface (e.g., a "VACUUM completed: reclaimed X MB" info issue that auto-expires).
@@ -85,7 +86,9 @@ A background goroutine in `internal/system/updates/poller.go` starts on backend 
 - `latest_version_url TEXT` — URL to that GitHub release
 - `latest_version_checked_at INTEGER` — unix timestamp of last successful poll
 
-The `GET /api/v1/system/updates` handler reads from `kandev_meta` only; it never calls GitHub synchronously. `POST /api/v1/system/updates/check` triggers an out-of-band refresh, rate-limited per-process to one call per 30 seconds. If the GitHub call fails (offline, rate limited, 5xx), the handler returns the last-known value and the `latestCheckedAt` exposes the staleness.
+The `GET /api/v1/system/updates` handler reads from `kandev_meta` only; it never calls GitHub synchronously. It also reports the current service install state (`running_as_service`, `managed_service`, `mode`, `manager`, `kind`) so the UI can decide whether one-click apply is allowed. `POST /api/v1/system/updates/check` triggers an out-of-band refresh, rate-limited per-process to one call per 30 seconds. If the GitHub call fails (offline, rate limited, 5xx), the handler returns the last-known value and the `latestCheckedAt` exposes the staleness.
+
+`POST /api/v1/system/updates/apply` is available only when Kandev is running as a kandev-managed user service (`systemd --user` or launchd user agent) and the latest release is newer than the current binary. It writes an update intent under `<KANDEV_HOME_DIR>/service/update-intents/`, starts a manager-owned helper (`systemd-run --user` or `launchctl submit`), and returns a `self-update` system job id. Under `KANDEV_E2E_MOCK=true`, the helper path is fake so UI and backend tests can exercise the flow without mutating npm/Homebrew or restarting the service.
 
 ### Disk-usage cache
 
@@ -117,6 +120,8 @@ The page reads the JSON statically; no backend endpoint is needed.
 - **GIVEN** the disk-usage cache is 30 minutes old, **WHEN** the user reopens the Status page, **THEN** the cached value renders instantly with "as of <30 min ago>" and **no** refresh kicks off.
 - **GIVEN** the disk-usage cache is 3 hours old, **WHEN** the user reopens the Status page, **THEN** the stale value renders immediately, the page badge shows "Refreshing…", and the value updates when the background walk completes.
 - **GIVEN** the user is on `1.2.3` and the GitHub latest release is `1.2.4`, **WHEN** they open `/settings/system/updates`, **THEN** an "Update available" badge renders next to the version, the changelog list shows `1.2.4` highlighted as the new entry, and the System sidebar group shows a `1` badge.
+- **GIVEN** the user is running a kandev-managed user service and a newer release exists, **WHEN** they open `/settings/system/updates`, **THEN** the page shows **Apply update** and the confirmation queues a `self-update` job.
+- **GIVEN** the user is not running as a kandev-managed service or is running a `--system` service, **WHEN** they open `/settings/system/updates`, **THEN** the page does not render an update-apply control and instead shows the manual update commands.
 - **GIVEN** the user clicks **VACUUM** on the Database page, **WHEN** the operation completes, **THEN** the DB size delta is shown ("Reclaimed 12.3 MB"), the page Database stats refresh, and a transient info issue appears on the Status page.
 - **GIVEN** the user clicks **Factory Reset**, types `RESET`, and confirms, **WHEN** the backend executes, **THEN** a fresh snapshot is created first, all tables are dropped and migrations re-run, the backend restarts, and the frontend redirects to the empty onboarding state once it reconnects.
 - **GIVEN** the backend cannot reach GitHub, **WHEN** the poller fires, **THEN** the failure is logged but the previous `latest_version` and `latest_version_checked_at` remain in `kandev_meta`; the Updates page surfaces the stale value with a "Last checked <time>" subtitle.
