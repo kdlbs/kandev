@@ -216,6 +216,7 @@ function WorkspaceLinksCard({ workspaceId }: WorkspaceLinksCardProps) {
 }
 
 type DeleteWorkspaceCardProps = {
+  workspaceName: string;
   deleteDialogOpen: boolean;
   setDeleteDialogOpen: (open: boolean) => void;
   deleteConfirmText: string;
@@ -224,6 +225,7 @@ type DeleteWorkspaceCardProps = {
 };
 
 function DeleteWorkspaceCard({
+  workspaceName,
   deleteDialogOpen,
   setDeleteDialogOpen,
   deleteConfirmText,
@@ -246,6 +248,7 @@ function DeleteWorkspaceCard({
               variant="destructive"
               onClick={() => setDeleteDialogOpen(true)}
               className="cursor-pointer"
+              data-testid="workspace-settings-delete-button"
             >
               <IconTrash className="h-4 w-4 mr-2" />
               Delete
@@ -259,7 +262,8 @@ function DeleteWorkspaceCard({
           <DialogHeader>
             <DialogTitle>Delete Workspace</DialogTitle>
             <DialogDescription>
-              Type &quot;delete&quot; to confirm deletion. This action cannot be undone.
+              Type the workspace name <span className="font-medium">{workspaceName}</span> to
+              confirm deletion. This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
@@ -268,7 +272,8 @@ function DeleteWorkspaceCard({
               id="confirm-delete"
               value={deleteConfirmText}
               onChange={(event) => setDeleteConfirmText(event.target.value)}
-              placeholder="delete"
+              placeholder={workspaceName}
+              data-testid="workspace-settings-delete-confirm-input"
             />
           </div>
           <DialogFooter>
@@ -282,8 +287,9 @@ function DeleteWorkspaceCard({
             <Button
               variant="destructive"
               onClick={onDelete}
-              disabled={deleteConfirmText !== "delete"}
+              disabled={deleteConfirmText !== workspaceName}
               className="cursor-pointer"
+              data-testid="workspace-settings-delete-confirm-button"
             >
               Delete
             </Button>
@@ -433,9 +439,9 @@ function useWorkspaceEditForm(workspace: Workspace) {
   });
 
   const handleDeleteWorkspace = async () => {
-    if (deleteConfirmText !== "delete") return;
+    if (deleteConfirmText !== currentWorkspace.name) return;
     try {
-      await deleteWorkspaceRequest.run(currentWorkspace.id);
+      await deleteWorkspaceRequest.run(currentWorkspace.id, currentWorkspace.name);
       setWorkspaces(workspaces.filter((ws: Workspace) => ws.id !== currentWorkspace.id));
       router.push("/settings/workspace");
     } catch (error) {
@@ -518,6 +524,7 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
       <WorkspaceLinksCard workspaceId={currentWorkspace.id} />
       <Separator />
       <DeleteWorkspaceCard
+        workspaceName={currentWorkspace.name}
         deleteDialogOpen={deleteDialogOpen}
         setDeleteDialogOpen={setDeleteDialogOpen}
         deleteConfirmText={deleteConfirmText}
