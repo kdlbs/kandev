@@ -4,6 +4,10 @@ Kandev ships with five workflow templates. Each defines a sequence of steps with
 
 You can use these as-is or **create custom workflows** tailored to you or your team.
 
+> **Sharing workflows?** Workflows can be exported to and imported from a
+> portable YAML file. See [Workflow Import / Export](workflow-import-export.md)
+> for the full format reference and a worked example.
+
 ## Default Workflows
 
 ### Kanban
