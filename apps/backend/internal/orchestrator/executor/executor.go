@@ -139,6 +139,11 @@ type AgentManagerClient interface {
 	// Returns an error if the agent doesn't support in-place model switching.
 	SetSessionModelBySessionID(ctx context.Context, sessionID, modelID string) error
 
+	// SetSessionModeBySessionID applies a session permission mode (e.g. "default",
+	// "acceptEdits") to the running agent via ACP session/set_mode. Returns an
+	// error when no agent is running for the session. See issue #1183.
+	SetSessionModeBySessionID(ctx context.Context, sessionID, modeID string) error
+
 	// WasSessionInitialized reports whether the given execution completed session initialization.
 	// Used to distinguish launch-phase failures from normal prompt failures.
 	WasSessionInitialized(executionID string) bool

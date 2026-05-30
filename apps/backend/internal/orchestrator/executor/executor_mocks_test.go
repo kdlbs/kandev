@@ -116,6 +116,10 @@ func (m *mockAgentManager) SetSessionModelBySessionID(ctx context.Context, sessi
 	return fmt.Errorf("not supported")
 }
 
+func (m *mockAgentManager) SetSessionModeBySessionID(ctx context.Context, sessionID, modeID string) error {
+	return fmt.Errorf("not supported")
+}
+
 func (m *mockAgentManager) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
 	m.isAgentRunningForSessionCallArgs = append(m.isAgentRunningForSessionCallArgs, sessionID)
 	if m.isAgentRunningForSessionFunc != nil {

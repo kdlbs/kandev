@@ -3,6 +3,9 @@ package workflows
 import (
 	"fmt"
 	"testing"
+
+	"github.com/kandev/kandev/internal/workflow/models"
+	"gopkg.in/yaml.v3"
 )
 
 func TestLoadTemplates_AllValid(t *testing.T) {
@@ -23,6 +26,35 @@ func TestLoadTemplates_AllValid(t *testing.T) {
 		if len(tmpl.Steps) == 0 {
 			t.Errorf("template %q has no steps", tmpl.ID)
 		}
+	}
+}
+
+// TestConvertEvents_SetSessionMode round-trips a set_session_mode on_enter
+// action through the YAML loader: the action type passes the allow-list and its
+// "mode" config survives into the typed StepEvents. See issue #1183.
+func TestConvertEvents_SetSessionMode(t *testing.T) {
+	const yamlDoc = `
+on_enter:
+  - type: set_session_mode
+    config:
+      mode: acceptEdits
+`
+	var e stepEventsYAML
+	if err := yaml.Unmarshal([]byte(yamlDoc), &e); err != nil {
+		t.Fatalf("unmarshal yaml: %v", err)
+	}
+	events, err := convertEvents(e)
+	if err != nil {
+		t.Fatalf("convertEvents returned error: %v", err)
+	}
+	if len(events.OnEnter) != 1 {
+		t.Fatalf("expected 1 on_enter action, got %d", len(events.OnEnter))
+	}
+	if events.OnEnter[0].Type != models.OnEnterSetSessionMode {
+		t.Fatalf("unexpected action type %q", events.OnEnter[0].Type)
+	}
+	if mode, _ := events.OnEnter[0].Config["mode"].(string); mode != "acceptEdits" {
+		t.Fatalf("expected mode=acceptEdits, got %q", mode)
 	}
 }
 

@@ -174,6 +174,17 @@ type mockAgentManager struct {
 	cancelAgentCalls   atomic.Int32
 	cancelAgentBlock   chan struct{}
 	cancelAgentEntered chan struct{}
+
+	// set_session_mode tracking (issue #1183). Records (sessionID, modeID) for
+	// every SetSessionModeBySessionID call. setSessionModeErr, when set, is
+	// returned to simulate "no running agent".
+	setSessionModeCalls []sessionModeCall
+	setSessionModeErr   error
+}
+
+type sessionModeCall struct {
+	SessionID string
+	ModeID    string
 }
 
 type stopAgentCall struct {
@@ -281,6 +292,12 @@ func (m *mockAgentManager) SetExecutionEnv(_ context.Context, _ string, _ map[st
 }
 func (m *mockAgentManager) SetSessionModelBySessionID(_ context.Context, _, _ string) error {
 	return fmt.Errorf("not supported")
+}
+func (m *mockAgentManager) SetSessionModeBySessionID(_ context.Context, sessionID, modeID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.setSessionModeCalls = append(m.setSessionModeCalls, sessionModeCall{SessionID: sessionID, ModeID: modeID})
+	return m.setSessionModeErr
 }
 func (m *mockAgentManager) SetMcpMode(_ context.Context, _ string, _ string) error {
 	return nil

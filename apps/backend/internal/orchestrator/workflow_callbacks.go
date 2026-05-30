@@ -24,6 +24,7 @@ func buildWorkflowCallbacks(svc *Service) engine.MapRegistry {
 		engine.ActionResetAgentContext: &resetAgentContextCallback{svc: svc},
 		engine.ActionAutoStartAgent:    &autoStartAgentCallback{svc: svc},
 		engine.ActionSetWorkflowData:   &setWorkflowDataCallback{},
+		engine.ActionSetSessionMode:    &setSessionModeCallback{svc: svc},
 	}
 	if svc.engineRunQueue != nil {
 		r[engine.ActionQueueRun] = engine.QueueRunCallback{
@@ -106,6 +107,24 @@ func (c *disablePlanModeCallback) Execute(ctx context.Context, in engine.ActionI
 		return engine.ActionResult{}, fmt.Errorf("load session for disable plan mode: %w", err)
 	}
 	c.svc.clearSessionPlanMode(ctx, session)
+	return engine.ActionResult{}, nil
+}
+
+// setSessionModeCallback applies a workflow-declared session permission mode
+// (e.g. "acceptEdits") when entering a step. See issue #1183.
+type setSessionModeCallback struct {
+	svc *Service
+}
+
+func (c *setSessionModeCallback) Execute(ctx context.Context, in engine.ActionInput) (engine.ActionResult, error) {
+	if in.State.IsPassthrough || in.Action.SetSessionMode == nil {
+		return engine.ActionResult{}, nil
+	}
+	session, err := c.svc.repo.GetTaskSession(ctx, in.State.SessionID)
+	if err != nil {
+		return engine.ActionResult{}, fmt.Errorf("load session for set session mode: %w", err)
+	}
+	c.svc.applyStepSessionMode(ctx, session, in.Action.SetSessionMode.Mode, in.State.IsPassthrough)
 	return engine.ActionResult{}, nil
 }
 

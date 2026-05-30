@@ -862,6 +862,8 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 			if !isPassthrough && hasPlanMode {
 				s.setSessionPlanMode(ctx, session, true)
 			}
+		case wfmodels.OnEnterSetSessionMode:
+			s.applyStepSessionMode(ctx, session, readSessionModeConfig(action.Config), isPassthrough)
 		case wfmodels.OnEnterAutoStartAgent:
 			hasAutoStart = true
 		}
@@ -1720,6 +1722,45 @@ func (s *Service) setSessionPlanMode(ctx context.Context, session *models.TaskSe
 		s.logger.Warn("failed to update session plan mode",
 			zap.String("session_id", session.ID),
 			zap.Bool("enabled", enabled),
+			zap.Error(err))
+	}
+}
+
+// readSessionModeConfig extracts the target mode from a set_session_mode action's
+// config map. Returns "" when absent.
+func readSessionModeConfig(config map[string]interface{}) string {
+	if config == nil {
+		return ""
+	}
+	mode, _ := config["mode"].(string)
+	return mode
+}
+
+// applyStepSessionMode applies a workflow-declared session permission mode to a
+// session entering a step (set_session_mode action, issue #1183). It persists the
+// mode to metadata (durable + restored on reset) and best-effort applies it to a
+// running agent via ACP session/set_mode. Passthrough sessions manage their own
+// mode in the underlying CLI and are skipped, mirroring plan-mode handling.
+func (s *Service) applyStepSessionMode(ctx context.Context, session *models.TaskSession, mode string, isPassthrough bool) {
+	if mode == "" || isPassthrough {
+		return
+	}
+	// Persist for durability (SSR / backend restart) and so Part 1's reset
+	// re-apply has the right value. Mirror the in-memory struct for callers
+	// that read session.Metadata afterwards.
+	if session.Metadata == nil {
+		session.Metadata = make(map[string]interface{})
+	}
+	session.Metadata[models.SessionMetaKeySessionMode] = mode
+	s.persistSessionMode(ctx, session.ID, mode)
+
+	// Apply live when an agent is running. When none is (e.g. the step also
+	// auto-starts the agent fresh), this is a no-op and the profile default
+	// governs the new session — the declared mode stays persisted.
+	if err := s.agentManager.SetSessionModeBySessionID(ctx, session.ID, mode); err != nil {
+		s.logger.Debug("set_session_mode: could not apply mode to a live agent (persisted for next launch/reset)",
+			zap.String("session_id", session.ID),
+			zap.String("mode", mode),
 			zap.Error(err))
 	}
 }

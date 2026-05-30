@@ -205,6 +205,7 @@ var (
 		string(models.OnEnterEnablePlanMode):             true,
 		string(models.OnEnterAutoStartAgent):             true,
 		string(models.OnEnterResetAgentContext):          true,
+		string(models.OnEnterSetSessionMode):             true,
 		string(models.OnEnterClearDecisions):             true,
 		string(models.OnEnterQueueRunForEachParticipant): true,
 		string(models.OnEnterQueueRun):                   true,

@@ -166,7 +166,7 @@ import/export:
 
 | Trigger | Allowed action `type`s | `config` |
 |---------|------------------------|----------|
-| `on_enter` | `enable_plan_mode`, `auto_start_agent`, `reset_agent_context`, `clear_decisions`, `queue_run`, `queue_run_for_each_participant` | first four take no config; `queue_run` / `queue_run_for_each_participant` use the same config keys as the office triggers (see [Office triggers](#office--phase-2-triggers-intended-format--see-caveat)) |
+| `on_enter` | `enable_plan_mode`, `auto_start_agent`, `reset_agent_context`, `set_session_mode`, `clear_decisions`, `queue_run`, `queue_run_for_each_participant` | the first three take no config; `set_session_mode` takes `mode` (the agent permission mode to apply, e.g. `acceptEdits`); `queue_run` / `queue_run_for_each_participant` use the same config keys as the office triggers (see [Office triggers](#office--phase-2-triggers-intended-format--see-caveat)) |
 | `on_turn_start` | `move_to_next`, `move_to_previous`, `move_to_step` | `move_to_step` needs `step_position` |
 | `on_turn_complete` | `move_to_next`, `move_to_previous`, `move_to_step`, `disable_plan_mode` | `move_to_step` needs `step_position` |
 | `on_exit` | `disable_plan_mode` | — |
