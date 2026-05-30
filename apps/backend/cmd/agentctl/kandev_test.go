@@ -291,16 +291,29 @@ func TestTaskCreate_WorkspacePolicyFlags(t *testing.T) {
 }
 
 // TestTaskCreate_SharedGroupRequiresGroupID pins the CLI-side validation
-// that guards against missing --workspace-group-id when the caller asks
-// for shared_group mode.
+// that guards against missing or whitespace-only --workspace-group-id when
+// the caller asks for shared_group mode.
 func TestTaskCreate_SharedGroupRequiresGroupID(t *testing.T) {
-	code := runKandevCLI([]string{
-		"task", "create",
-		"--title", "Bad task",
-		"--workspace-mode", "shared_group",
-	})
-	if code == 0 {
-		t.Fatal("expected non-zero exit when --workspace-group-id is missing for shared_group")
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "missing",
+			args: []string{"task", "create", "--title", "Bad task", "--workspace-mode", "shared_group"},
+		},
+		{
+			name: "whitespace only",
+			args: []string{"task", "create", "--title", "Bad task", "--workspace-mode", "shared_group", "--workspace-group-id", "   "},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			code := runKandevCLI(tc.args)
+			if code == 0 {
+				t.Fatal("expected non-zero exit when --workspace-group-id is invalid for shared_group")
+			}
+		})
 	}
 }
 
