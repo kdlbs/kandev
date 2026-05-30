@@ -894,6 +894,14 @@ func (s *Service) handleSessionModeEvent(ctx context.Context, payload *lifecycle
 	if sessionID == "" || s.eventBus == nil {
 		return
 	}
+	// Persist the agent-reported mode to session metadata so the user's chosen
+	// permission mode survives a backend restart / SSR reload, mirroring how the
+	// current model is persisted. Only non-empty modes are stored — an empty
+	// CurrentModeID means the agent left a special mode, with nothing sticky to keep.
+	if mode := payload.Data.CurrentModeID; mode != "" {
+		s.persistSessionMode(ctx, sessionID, mode)
+	}
+
 	eventPayload := lifecycle.SessionModeEventPayload{
 		TaskID:         payload.TaskID,
 		SessionID:      sessionID,
@@ -904,6 +912,21 @@ func (s *Service) handleSessionModeEvent(ctx context.Context, payload *lifecycle
 	}
 	subject := events.BuildSessionModeSubject(sessionID)
 	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionModeChanged, "orchestrator", eventPayload))
+}
+
+// persistSessionMode stores the agent-reported session permission mode in the
+// session metadata using a targeted json_set, so other metadata keys (plan_mode,
+// acp_session_id, …) are preserved. See issue #1183.
+func (s *Service) persistSessionMode(ctx context.Context, sessionID, modeID string) {
+	if s.repo == nil {
+		return
+	}
+	if err := s.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeySessionMode, modeID); err != nil {
+		s.logger.Warn("failed to persist session mode to metadata",
+			zap.String("session_id", sessionID),
+			zap.String("mode", modeID),
+			zap.Error(err))
+	}
 }
 
 // handleAgentCapabilitiesEvent broadcasts agent_capabilities events to the WebSocket.

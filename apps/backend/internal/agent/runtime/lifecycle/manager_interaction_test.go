@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/agent/executor"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
@@ -112,6 +113,15 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 						"session_id": "new-session-123",
 					})
 				}
+			case "agent.session.reset":
+				resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+					"success":    true,
+					"session_id": "reset-session-456",
+				})
+			case "agent.session.set_mode":
+				resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+					"success": true,
+				})
 			default:
 				resp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnknownAction, "unknown action", nil)
 			}
@@ -341,6 +351,94 @@ func TestManager_RestartAgentProcess_SessionInitFailure(t *testing.T) {
 			t.Fatalf("did not expect %q event on failed restart", events.AgentContextReset)
 		}
 	}
+}
+
+// --- Session mode preservation across reset (issue #1183) ---
+
+// TestManager_RestartAgentProcess_ReappliesSessionMode is the regression test for
+// the full-process-restart path: a non-default session permission mode (auto /
+// accept-edits) chosen by the user must be re-applied to the fresh ACP session
+// after restart instead of silently reverting to the agent's default.
+func TestManager_RestartAgentProcess_ReappliesSessionMode(t *testing.T) {
+	mgr := newTestManager()
+	mock := newRestartMockAgentctlServer(t, false, false)
+
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+
+	exec := &AgentExecution{
+		ID:             "exec-mode-restart",
+		TaskID:         "task-1",
+		SessionID:      "session-1",
+		AgentProfileID: "profile-1",
+		ACPSessionID:   "old-session",
+		AgentCommand:   "auggie --model test",
+		Status:         v1.AgentStatusRunning,
+		WorkspacePath:  "/workspace",
+		agentctl:       client,
+		promptDoneCh:   make(chan PromptCompletionSignal, 1),
+	}
+	exec.SetModeState(&CachedModeState{
+		CurrentModeID:  "acceptEdits",
+		AvailableModes: []streams.SessionModeInfo{{ID: "default"}, {ID: "acceptEdits"}},
+	})
+	require.NoError(t, mgr.executionStore.Add(exec))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	require.NoError(t, mgr.RestartAgentProcess(ctx, exec.ID))
+
+	require.Contains(t, mock.getWSActions(), "agent.session.set_mode",
+		"restart must re-apply the previously-active session mode to the new session")
+	require.NotNil(t, exec.GetModeState())
+	require.Equal(t, "acceptEdits", exec.GetModeState().CurrentModeID,
+		"cached mode state must reflect the re-applied mode after restart")
+}
+
+// TestManager_ResetAgentContext_ReappliesSessionMode is the regression test for
+// the ACP fast-path (session reset without a process restart): the user's chosen
+// session permission mode must deterministically survive the reset.
+func TestManager_ResetAgentContext_ReappliesSessionMode(t *testing.T) {
+	mgr := newTestManager()
+	mock := newRestartMockAgentctlServer(t, false, false)
+
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	// The ACP fast-path reuses the existing agent stream, so connect it first.
+	require.NoError(t, client.StreamUpdates(ctx, func(agentctl.AgentEvent) {}, nil, nil))
+
+	exec := &AgentExecution{
+		ID:                 "exec-mode-reset",
+		TaskID:             "task-1",
+		SessionID:          "session-1",
+		AgentProfileID:     "profile-1",
+		ACPSessionID:       "old-session",
+		AgentCommand:       "auggie --model test",
+		Status:             v1.AgentStatusRunning,
+		WorkspacePath:      "/workspace",
+		sessionInitialized: true,
+		agentctl:           client,
+		promptDoneCh:       make(chan PromptCompletionSignal, 1),
+	}
+	exec.SetModeState(&CachedModeState{
+		CurrentModeID:  "acceptEdits",
+		AvailableModes: []streams.SessionModeInfo{{ID: "default"}, {ID: "acceptEdits"}},
+	})
+	require.NoError(t, mgr.executionStore.Add(exec))
+
+	require.NoError(t, mgr.ResetAgentContext(ctx, exec.ID))
+
+	require.Equal(t, "reset-session-456", exec.ACPSessionID,
+		"fast-path reset should create a new ACP session, not restart the process")
+	require.Contains(t, mock.getWSActions(), "agent.session.set_mode",
+		"fast-path reset must re-apply the previously-active session mode")
+	require.NotNil(t, exec.GetModeState())
+	require.Equal(t, "acceptEdits", exec.GetModeState().CurrentModeID)
 }
 
 // --- SetSessionModel passthrough tests ---

@@ -71,6 +71,11 @@ const (
 	SessionCreatedByWorkflowSwitch = "workflow_switch"
 )
 
+// SessionMetaKeySessionMode records the agent's last-known session permission
+// mode (auto / default / accept-edits, etc.) so it survives a backend restart or
+// SSR reload, alongside the in-memory re-apply on context reset. See issue #1183.
+const SessionMetaKeySessionMode = "session_mode"
+
 // Task origin values for the Origin field.
 const (
 	TaskOriginManual        = "manual"
