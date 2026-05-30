@@ -31,7 +31,6 @@ func newTestService(client Client) *Service {
 		logger:               logger.Default(),
 		searchCache:          newTTLCache(),
 		prStatusCache:        newTTLCache(),
-		userOrgsCache:        newAccessibleReposCache(),
 		accessibleReposCache: newAccessibleReposCache(),
 	}
 }

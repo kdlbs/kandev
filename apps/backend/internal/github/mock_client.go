@@ -254,6 +254,31 @@ func (m *MockClient) ListUserRepos(_ context.Context, query string, _ int) ([]Gi
 	return filtered, nil
 }
 
+// ListAccessibleRepos returns the union of every seeded repo (the user's own
+// repos plus every org's repos), deduped by full_name, applying the same
+// case-insensitive full_name substring filter the real clients use. Honours the
+// reposUnavailable toggle by returning ErrNoClient so the 503/banner e2e path
+// still works. Mirrors the single GET /user/repos call the real clients make.
+func (m *MockClient) ListAccessibleRepos(_ context.Context, query string, _ int) ([]GitHubRepo, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.reposUnavailable {
+		return nil, ErrNoClient
+	}
+	seen := make(map[string]struct{})
+	var all []GitHubRepo
+	for _, repos := range m.repos {
+		for _, r := range repos {
+			if _, ok := seen[r.FullName]; ok {
+				continue
+			}
+			seen[r.FullName] = struct{}{}
+			all = append(all, r)
+		}
+	}
+	return filterReposByQuery(all, query), nil
+}
+
 func (m *MockClient) ListPRReviews(_ context.Context, owner, repo string, number int) ([]PRReview, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

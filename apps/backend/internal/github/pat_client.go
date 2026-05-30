@@ -19,6 +19,13 @@ const (
 	githubAPIVersion = "2022-11-28"
 )
 
+// accessibleReposAffiliation is the GitHub /user/repos affiliation filter that
+// returns every repo the authenticated user can reach in one call: their own
+// repos (owner), repos they collaborate on, and repos in orgs they belong to.
+// This replaces the per-org search/repositories fan-out (which burns the 30/min
+// search quota) with a single call on the 5000/min core quota.
+const accessibleReposAffiliation = "owner,collaborator,organization_member"
+
 // GitHubAPIError represents an error response from the GitHub API with a status code.
 type GitHubAPIError struct {
 	StatusCode int
@@ -321,6 +328,74 @@ func (c *PATClient) ListUserRepos(ctx context.Context, query string, limit int) 
 		return nil, fmt.Errorf("list user repos: %w", err)
 	}
 	return repos, nil
+}
+
+// ListAccessibleRepos lists every repo the authenticated user can access via a
+// single GET /user/repos call on the core REST quota. The response is a flat
+// JSON array (not a search wrapper), so it decodes differently from
+// fetchRepoSearch. The query is applied client-side as a case-insensitive
+// substring filter on full_name (matching the gh ListUserRepos semantics).
+func (c *PATClient) ListAccessibleRepos(ctx context.Context, query string, limit int) ([]GitHubRepo, error) {
+	limit = clampRepoSearchLimit(limit)
+	endpoint := fmt.Sprintf("/user/repos?affiliation=%s&sort=pushed&per_page=%d",
+		url.QueryEscape(accessibleReposAffiliation), limit)
+	var items []repoListItem
+	if err := c.get(ctx, endpoint, &items); err != nil {
+		return nil, fmt.Errorf("list accessible repos: %w", err)
+	}
+	return filterReposByQuery(convertRepoListItems(items), query), nil
+}
+
+// repoListItem is the per-repo JSON shape returned by the flat-array endpoints
+// (GET /user/repos). The search endpoints wrap the same fields under `.items`.
+type repoListItem struct {
+	FullName string `json:"full_name"`
+	Owner    struct {
+		Login string `json:"login"`
+	} `json:"owner"`
+	Name          string    `json:"name"`
+	Private       bool      `json:"private"`
+	DefaultBranch string    `json:"default_branch"`
+	Description   string    `json:"description"`
+	PushedAt      time.Time `json:"pushed_at"`
+}
+
+// convertRepoListItems maps the raw flat-array items into the lightweight
+// GitHubRepo shape, preserving PushedAt as a pointer so callers can sort by
+// recency (a zero pushed_at becomes nil).
+func convertRepoListItems(items []repoListItem) []GitHubRepo {
+	repos := make([]GitHubRepo, len(items))
+	for i, item := range items {
+		repos[i] = GitHubRepo{
+			FullName:      item.FullName,
+			Owner:         item.Owner.Login,
+			Name:          item.Name,
+			Private:       item.Private,
+			DefaultBranch: item.DefaultBranch,
+			Description:   item.Description,
+		}
+		if !item.PushedAt.IsZero() {
+			t := item.PushedAt
+			repos[i].PushedAt = &t
+		}
+	}
+	return repos
+}
+
+// filterReposByQuery returns the repos whose full_name contains query
+// (case-insensitive). An empty query returns the input unchanged.
+func filterReposByQuery(repos []GitHubRepo, query string) []GitHubRepo {
+	if query == "" {
+		return repos
+	}
+	needle := strings.ToLower(query)
+	filtered := make([]GitHubRepo, 0, len(repos))
+	for _, r := range repos {
+		if strings.Contains(strings.ToLower(r.FullName), needle) {
+			filtered = append(filtered, r)
+		}
+	}
+	return filtered
 }
 
 // fetchRepoSearch executes a /search/repositories request and decodes the

@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -585,4 +586,111 @@ func (rt *rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	}
 	req2.Header = req.Header.Clone()
 	return http.DefaultTransport.RoundTrip(req2)
+}
+
+func TestListAccessibleRepos_Success(t *testing.T) {
+	var gotAffiliation, gotSort, gotPerPage string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/user/repos" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		gotAffiliation = r.URL.Query().Get("affiliation")
+		gotSort = r.URL.Query().Get("sort")
+		gotPerPage = r.URL.Query().Get("per_page")
+		w.WriteHeader(http.StatusOK)
+		// Flat array (NOT a search wrapper with .items).
+		_, _ = w.Write([]byte(`[
+			{"full_name":"kdlbs/kandev","owner":{"login":"kdlbs"},"name":"kandev","private":false,"default_branch":"main","description":"the app","pushed_at":"2025-05-01T10:00:00Z"},
+			{"full_name":"alice/secret","owner":{"login":"alice"},"name":"secret","private":true,"default_branch":"trunk","description":null}
+		]`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := newPATClientPointingAt(t, srv.URL)
+	repos, err := c.ListAccessibleRepos(context.Background(), "", 50)
+	if err != nil {
+		t.Fatalf("ListAccessibleRepos: %v", err)
+	}
+	if gotAffiliation != "owner,collaborator,organization_member" {
+		t.Errorf("affiliation = %q, want owner,collaborator,organization_member", gotAffiliation)
+	}
+	if gotSort != "pushed" {
+		t.Errorf("sort = %q, want pushed", gotSort)
+	}
+	if gotPerPage != "50" {
+		t.Errorf("per_page = %q, want 50", gotPerPage)
+	}
+	if len(repos) != 2 {
+		t.Fatalf("repos = %d, want 2", len(repos))
+	}
+	if repos[0].FullName != "kdlbs/kandev" || repos[0].Owner != "kdlbs" || repos[0].DefaultBranch != "main" {
+		t.Errorf("unexpected first repo: %#v", repos[0])
+	}
+	if repos[0].Description != "the app" {
+		t.Errorf("first repo description = %q, want 'the app'", repos[0].Description)
+	}
+	if repos[0].PushedAt == nil {
+		t.Errorf("first repo PushedAt nil, want non-nil")
+	}
+	if !repos[1].Private || repos[1].DefaultBranch != "trunk" {
+		t.Errorf("unexpected second repo: %#v", repos[1])
+	}
+	// JSON null description must decode to empty string.
+	if repos[1].Description != "" {
+		t.Errorf("second repo description = %q, want empty", repos[1].Description)
+	}
+}
+
+func TestListAccessibleRepos_QueryFilterAndClamp(t *testing.T) {
+	var gotPerPage string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/user/repos" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		gotPerPage = r.URL.Query().Get("per_page")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`[
+			{"full_name":"acme/widget","owner":{"login":"acme"},"name":"widget"},
+			{"full_name":"acme/gadget","owner":{"login":"acme"},"name":"gadget"},
+			{"full_name":"u/other","owner":{"login":"u"},"name":"other"}
+		]`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := newPATClientPointingAt(t, srv.URL)
+	// limit above cap must clamp per_page to 100; query filters client-side.
+	repos, err := c.ListAccessibleRepos(context.Background(), "WIDGET", 5000)
+	if err != nil {
+		t.Fatalf("ListAccessibleRepos: %v", err)
+	}
+	if gotPerPage != "100" {
+		t.Errorf("per_page = %q, want 100 (clamped)", gotPerPage)
+	}
+	if len(repos) != 1 || repos[0].FullName != "acme/widget" {
+		t.Fatalf("got %v, want [acme/widget] (case-insensitive substring on full_name)", repos)
+	}
+}
+
+func TestListAccessibleRepos_AuthError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/user/repos" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"message":"bad creds"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := newPATClientPointingAt(t, srv.URL)
+	repos, err := c.ListAccessibleRepos(context.Background(), "", 0)
+	if err == nil {
+		t.Fatal("expected error on 401")
+	}
+	if repos != nil {
+		t.Errorf("expected nil repos on error, got %v", repos)
+	}
+	var apiErr *GitHubAPIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusUnauthorized {
+		t.Errorf("err = %v, want *GitHubAPIError with 401", err)
+	}
 }

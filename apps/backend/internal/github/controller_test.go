@@ -56,6 +56,9 @@ func (s *stubClient) SearchOrgRepos(context.Context, string, string, int) ([]Git
 func (s *stubClient) ListUserRepos(context.Context, string, int) ([]GitHubRepo, error) {
 	return nil, nil
 }
+func (s *stubClient) ListAccessibleRepos(context.Context, string, int) ([]GitHubRepo, error) {
+	return nil, nil
+}
 func (s *stubClient) ListPRReviews(context.Context, string, string, int) ([]PRReview, error) {
 	return nil, nil
 }
@@ -475,31 +478,18 @@ func TestHttpSubmitReview_SelfApproveReturns422(t *testing.T) {
 // stubClient so the existing PR/merge tests above keep their minimal shape.
 type listAccessibleReposClient struct {
 	stubClient
-	orgs      []GitHubOrg
-	userRepos []GitHubRepo
-	orgRepos  map[string][]GitHubRepo
+	repos []GitHubRepo
 }
 
-func (c *listAccessibleReposClient) ListUserOrgs(context.Context) ([]GitHubOrg, error) {
-	return c.orgs, nil
-}
-
-func (c *listAccessibleReposClient) ListUserRepos(context.Context, string, int) ([]GitHubRepo, error) {
-	return c.userRepos, nil
-}
-
-func (c *listAccessibleReposClient) SearchOrgRepos(_ context.Context, org string, _ string, _ int) ([]GitHubRepo, error) {
-	return c.orgRepos[org], nil
+func (c *listAccessibleReposClient) ListAccessibleRepos(_ context.Context, query string, _ int) ([]GitHubRepo, error) {
+	return filterReposByQuery(c.repos, query), nil
 }
 
 func TestHandleListAccessibleRepos_OK(t *testing.T) {
 	sc := &listAccessibleReposClient{
-		orgs: []GitHubOrg{{Login: "acme"}},
-		userRepos: []GitHubRepo{
+		repos: []GitHubRepo{
 			{FullName: "alice/personal", Owner: "alice", Name: "personal", DefaultBranch: "main", Description: "Personal repo", PushedAt: func() *time.Time { t := time.Unix(200, 0); return &t }()},
-		},
-		orgRepos: map[string][]GitHubRepo{
-			"acme": {{FullName: "acme/widget", Owner: "acme", Name: "widget", DefaultBranch: "trunk", PushedAt: func() *time.Time { t := time.Unix(100, 0); return &t }()}},
+			{FullName: "acme/widget", Owner: "acme", Name: "widget", DefaultBranch: "trunk", PushedAt: func() *time.Time { t := time.Unix(100, 0); return &t }()},
 		},
 	}
 	router, _ := setupControllerTest(sc)
@@ -580,11 +570,7 @@ func TestHandleListAccessibleRepos_503_WhenUnavailable(t *testing.T) {
 // handler emits the literal `{"repos":[]}` body so a future regression that
 // emits `null` (omitempty + nil slice) is caught.
 func TestHandleListAccessibleRepos_Empty(t *testing.T) {
-	sc := &listAccessibleReposClient{
-		orgs:      []GitHubOrg{},
-		userRepos: []GitHubRepo{},
-		orgRepos:  map[string][]GitHubRepo{},
-	}
+	sc := &listAccessibleReposClient{repos: []GitHubRepo{}}
 	router, _ := setupControllerTest(sc)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/repos", nil)
@@ -600,19 +586,19 @@ func TestHandleListAccessibleRepos_Empty(t *testing.T) {
 	}
 }
 
-// listAccessibleReposErrClient surfaces an unexpected error from the user
-// orgs lookup — the handler must map it to a 500 rather than swallowing it.
+// listAccessibleReposErrClient surfaces an unexpected error from the repo
+// fetch — the handler must map it to a 500 rather than swallowing it.
 type listAccessibleReposErrClient struct {
 	stubClient
-	listOrgsErr error
+	reposErr error
 }
 
-func (c *listAccessibleReposErrClient) ListUserOrgs(context.Context) ([]GitHubOrg, error) {
-	return nil, c.listOrgsErr
+func (c *listAccessibleReposErrClient) ListAccessibleRepos(context.Context, string, int) ([]GitHubRepo, error) {
+	return nil, c.reposErr
 }
 
 func TestHandleListAccessibleRepos_500_OnUnknownError(t *testing.T) {
-	sc := &listAccessibleReposErrClient{listOrgsErr: errors.New("boom")}
+	sc := &listAccessibleReposErrClient{reposErr: errors.New("boom")}
 	router, _ := setupControllerTest(sc)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/repos", nil)
@@ -641,9 +627,9 @@ func TestHandleListAccessibleRepos_PreservesAPIErrorStatus(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			sc := &listAccessibleReposErrClient{
-				listOrgsErr: &GitHubAPIError{
+				reposErr: &GitHubAPIError{
 					StatusCode: tc.statusCode,
-					Endpoint:   "/user/orgs",
+					Endpoint:   "/user/repos",
 					Body:       "{}",
 				},
 			}

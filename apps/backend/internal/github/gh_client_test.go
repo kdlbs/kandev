@@ -537,3 +537,95 @@ func TestGHClient_InspectRateStderr_RestEndpointMarksCore(t *testing.T) {
 		t.Errorf("REST 429 must not pause graphql bucket")
 	}
 }
+
+func TestBuildAccessibleReposGHArgs(t *testing.T) {
+	cases := []struct {
+		name     string
+		inLimit  int
+		wantPath string
+	}{
+		{"in range", 50, "/user/repos?affiliation=owner,collaborator,organization_member&sort=pushed&per_page=50"},
+		{"cap clamps to 100", 100, "/user/repos?affiliation=owner,collaborator,organization_member&sort=pushed&per_page=100"},
+		{"small page", 5, "/user/repos?affiliation=owner,collaborator,organization_member&sort=pushed&per_page=5"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			args := buildAccessibleReposGHArgs(clampRepoSearchLimit(tc.inLimit))
+			if len(args) != 2 || args[0] != "api" {
+				t.Fatalf("args = %v, want [api <path>]", args)
+			}
+			if args[1] != tc.wantPath {
+				t.Errorf("path = %q, want %q", args[1], tc.wantPath)
+			}
+			// Must NOT include --paginate: the picker wants a single page.
+			for _, a := range args {
+				if a == "--paginate" {
+					t.Errorf("args must not contain --paginate, got %v", args)
+				}
+			}
+		})
+	}
+}
+
+func TestBuildAccessibleReposGHArgs_ClampsPerPage(t *testing.T) {
+	cases := []struct {
+		name        string
+		inLimit     int
+		wantPerPage string
+	}{
+		{"zero defaults to 20", 0, "per_page=20"},
+		{"negative defaults to 20", -5, "per_page=20"},
+		{"exceeds cap clamps to 100", 500, "per_page=100"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			args := buildAccessibleReposGHArgs(clampRepoSearchLimit(tc.inLimit))
+			if !strings.Contains(args[1], tc.wantPerPage) {
+				t.Errorf("path %q must contain %q", args[1], tc.wantPerPage)
+			}
+		})
+	}
+}
+
+// TestParseGHSearchRepos_FlatArray confirms the flat /user/repos array shape
+// (used by ListAccessibleRepos) decodes correctly: happy path, empty, and a
+// null description mapping to empty string.
+func TestParseGHSearchRepos_FlatArray(t *testing.T) {
+	t.Run("happy", func(t *testing.T) {
+		data := `[
+			{"full_name":"kdlbs/kandev","owner":{"login":"kdlbs"},"name":"kandev","private":false,"default_branch":"main","description":"the app","pushed_at":"2025-05-01T10:00:00Z"}
+		]`
+		repos, err := parseGHSearchRepos(data)
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if len(repos) != 1 || repos[0].FullName != "kdlbs/kandev" || repos[0].Owner != "kdlbs" {
+			t.Fatalf("unexpected repos: %#v", repos)
+		}
+		if repos[0].PushedAt == nil {
+			t.Errorf("PushedAt nil, want non-nil")
+		}
+	})
+	t.Run("empty", func(t *testing.T) {
+		repos, err := parseGHSearchRepos(`[]`)
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if len(repos) != 0 {
+			t.Errorf("len = %d, want 0", len(repos))
+		}
+	})
+	t.Run("null description", func(t *testing.T) {
+		data := `[{"full_name":"o/r","owner":{"login":"o"},"name":"r","private":true,"default_branch":"main","description":null}]`
+		repos, err := parseGHSearchRepos(data)
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if repos[0].Description != "" {
+			t.Errorf("description = %q, want empty", repos[0].Description)
+		}
+		if repos[0].PushedAt != nil {
+			t.Errorf("PushedAt = %v, want nil", repos[0].PushedAt)
+		}
+	})
+}

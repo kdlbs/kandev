@@ -19,6 +19,11 @@ import (
 // sync.
 const ghSearchReposPath = "search/repositories"
 
+// ghAccessibleReposPath is the GET /user/repos endpoint (with affiliation +
+// sort + per_page baked in) that backs ListAccessibleRepos. It returns a flat
+// JSON array on the core REST quota, replacing the per-org search fan-out.
+const ghAccessibleReposPathFmt = "/user/repos?affiliation=%s&sort=pushed&per_page=%d"
+
 // GHClient implements Client using the gh CLI.
 type GHClient struct {
 	rateTracker *RateTracker
@@ -387,6 +392,34 @@ func buildUserReposGHArgs(login, query string, limit int) []string {
 		"-f", fmt.Sprintf("per_page=%d", limit),
 		"--jq", ".items",
 	}
+}
+
+// ListAccessibleRepos lists every repo the authenticated user can access via a
+// single `gh api /user/repos` call on the core REST quota. The endpoint returns
+// a flat JSON array (parsed by parseGHSearchRepos, which already decodes a
+// top-level array). The query is applied client-side as a case-insensitive
+// substring filter on full_name. No --paginate: one page of up to 100 is what
+// the picker needs (the frontend caps at 100 and filters client-side).
+func (c *GHClient) ListAccessibleRepos(ctx context.Context, query string, limit int) ([]GitHubRepo, error) {
+	limit = clampRepoSearchLimit(limit)
+	out, err := c.run(ctx, buildAccessibleReposGHArgs(limit)...)
+	if err != nil {
+		return nil, fmt.Errorf("list accessible repos: %w", err)
+	}
+	repos, err := parseGHSearchRepos(out)
+	if err != nil {
+		return nil, err
+	}
+	return filterReposByQuery(repos, query), nil
+}
+
+// buildAccessibleReposGHArgs constructs the `gh api /user/repos?...` argv for
+// ListAccessibleRepos. Keeping it pure makes the endpoint/query construction
+// unit-testable without spawning gh. Callers must clamp `limit` via
+// clampRepoSearchLimit beforehand.
+func buildAccessibleReposGHArgs(limit int) []string {
+	endpoint := fmt.Sprintf(ghAccessibleReposPathFmt, accessibleReposAffiliation, limit)
+	return []string{"api", endpoint}
 }
 
 func parseGHSearchRepos(data string) ([]GitHubRepo, error) {

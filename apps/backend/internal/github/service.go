@@ -85,7 +85,6 @@ type Service struct {
 	searchCache          *ttlCache
 	prStatusCache        *ttlCache
 	mergeMethodsCache    *ttlCache
-	userOrgsCache        *ttlCache
 	accessibleReposCache *ttlCache
 	protectionCache      *branchProtectionCache
 	rateTracker          *RateTracker
@@ -109,7 +108,6 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 		searchCache:          newTTLCache(),
 		prStatusCache:        newTTLCache(),
 		mergeMethodsCache:    newMergeMethodsCache(),
-		userOrgsCache:        newAccessibleReposCache(),
 		accessibleReposCache: newAccessibleReposCache(),
 		protectionCache:      newBranchProtectionCache(),
 		rateTracker:          NewRateTracker(eventBus, log),

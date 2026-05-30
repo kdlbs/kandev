@@ -40,6 +40,13 @@ type Client interface {
 	// (clamped to GitHub's 100 max by implementations).
 	ListUserRepos(ctx context.Context, query string, limit int) ([]GitHubRepo, error)
 
+	// ListAccessibleRepos lists every repo the authenticated user can access —
+	// their own repos plus collaborator and org-member repos — in a single
+	// GET /user/repos call on the core REST quota (no per-org search fan-out).
+	// query is applied as a case-insensitive substring filter on full_name
+	// after fetching; limit bounds the page size (clamped to GitHub's 100 max).
+	ListAccessibleRepos(ctx context.Context, query string, limit int) ([]GitHubRepo, error)
+
 	// ListPRReviews lists reviews on a pull request.
 	ListPRReviews(ctx context.Context, owner, repo string, number int) ([]PRReview, error)
 
