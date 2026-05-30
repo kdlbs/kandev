@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -35,7 +36,10 @@ type StreamManager struct {
 	// reconnect/backoff loops below select on stopCh to drain on Manager.Stop.
 	// nil is treated as "no shutdown signal" and falls back to the prior
 	// uncancellable behaviour (compat with constructors used by isolated tests).
-	stopCh <-chan struct{}
+	stopCh  <-chan struct{}
+	wg      sync.WaitGroup
+	wgMu    sync.Mutex
+	stopped bool
 }
 
 type stopChannelContext struct {
@@ -78,8 +82,48 @@ func NewStreamManager(log *logger.Logger, callbacks StreamCallbacks, mcpHandler 
 // completes (success or failure). Agent operations require the updates stream;
 // workspace stream readiness is handled independently.
 func (sm *StreamManager) ConnectAll(execution *AgentExecution, ready chan<- struct{}) {
-	go sm.connectUpdatesStream(execution, ready)
-	go sm.connectWorkspaceStream(execution, nil)
+	sm.connectUpdatesStreamAsync(execution, ready)
+	sm.ConnectWorkspaceStream(execution, nil)
+}
+
+func (sm *StreamManager) connectUpdatesStreamAsync(execution *AgentExecution, ready chan<- struct{}) {
+	if !sm.start(func() {
+		sm.connectUpdatesStream(execution, ready)
+	}) && ready != nil {
+		close(ready)
+	}
+}
+
+// ConnectWorkspaceStream starts the workspace stream and tracks the goroutine
+// so shutdown and tests can wait for it to drain after stopCh closes.
+func (sm *StreamManager) ConnectWorkspaceStream(execution *AgentExecution, ready chan<- struct{}) {
+	if !sm.start(func() {
+		sm.connectWorkspaceStream(execution, ready)
+	}) && ready != nil {
+		close(ready)
+	}
+}
+
+// Wait blocks until all StreamManager-owned stream goroutines have exited.
+func (sm *StreamManager) Wait() {
+	sm.wgMu.Lock()
+	sm.stopped = true
+	sm.wgMu.Unlock()
+	sm.wg.Wait()
+}
+
+func (sm *StreamManager) start(fn func()) bool {
+	sm.wgMu.Lock()
+	defer sm.wgMu.Unlock()
+	if sm.stopped {
+		return false
+	}
+	sm.wg.Add(1)
+	go func() {
+		defer sm.wg.Done()
+		fn()
+	}()
+	return true
 }
 
 // ReconnectAll reconnects to all streams (used after backend restart).

@@ -218,7 +218,7 @@ func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, se
 		if m.streamManager != nil {
 			m.logger.Info("connecting workspace stream for workspace-only execution",
 				zap.String("execution_id", execution.ID))
-			go m.streamManager.connectWorkspaceStream(execution, nil)
+			m.streamManager.ConnectWorkspaceStream(execution, nil)
 		}
 	}()
 

@@ -671,7 +671,7 @@ func newEnvironmentExecutionTestManager(t *testing.T, provider WorkspaceInfoProv
 		ExecutorFallbackWarn, "", log,
 	)
 	mgr.workspaceInfoProvider = provider
-	t.Cleanup(func() { close(mgr.stopCh) })
+	cleanupManagerStopCh(t, mgr)
 	return mgr, backend
 }
 

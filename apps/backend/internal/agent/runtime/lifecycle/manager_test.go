@@ -177,6 +177,32 @@ func newTestRegistry() *registry.Registry {
 	return reg
 }
 
+func closeStopCh(stopCh chan struct{}) {
+	select {
+	case <-stopCh:
+	default:
+		close(stopCh)
+	}
+}
+
+func cleanupManagerStopCh(t *testing.T, mgr *Manager) {
+	t.Helper()
+	t.Cleanup(func() {
+		closeStopCh(mgr.stopCh)
+		if mgr.streamManager != nil {
+			mgr.streamManager.Wait()
+		}
+	})
+}
+
+func cleanupStreamManager(t *testing.T, stopCh chan struct{}, streamMgr *StreamManager) {
+	t.Helper()
+	t.Cleanup(func() {
+		closeStopCh(stopCh)
+		streamMgr.Wait()
+	})
+}
+
 // MockCredentialsManager implements CredentialsManager for testing
 type MockCredentialsManager struct{}
 

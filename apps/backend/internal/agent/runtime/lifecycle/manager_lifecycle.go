@@ -170,6 +170,9 @@ func (m *Manager) Stop() error {
 	m.logger.Info("stopping lifecycle manager")
 
 	close(m.stopCh)
+	if m.streamManager != nil {
+		m.streamManager.Wait()
+	}
 	m.wg.Wait()
 
 	// Close executor backends that hold resources (e.g., Docker SDK client).
