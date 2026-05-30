@@ -76,6 +76,10 @@ func setupImportHandlers(t *testing.T) (*Handlers, *memWorkflowProvider, *reposi
 	t.Helper()
 	rawDB, err := sql.Open("sqlite3", ":memory:")
 	require.NoError(t, err)
+	// Pin the pool to a single connection: each new connection to an in-memory
+	// SQLite DB gets its own isolated database, so a second pooled connection
+	// would not see the schema created on the first, causing flaky failures.
+	rawDB.SetMaxOpenConns(1)
 	db := sqlx.NewDb(rawDB, "sqlite3")
 	t.Cleanup(func() { _ = db.Close() })
 
@@ -232,7 +236,8 @@ func TestHandleImportWorkflow_InvalidDocument(t *testing.T) {
 
 func TestHandleImportWorkflow_ValidationError(t *testing.T) {
 	h, _, _ := setupImportHandlers(t)
-	// Wrong export type fails WorkflowExport.Validate inside the service.
+	// Wrong export type fails WorkflowExport.Validate — a client-side error
+	// surfaced as a validation error so the agent can correct its document.
 	msg := makeWSMessage(t, ws.ActionMCPImportWorkflow, map[string]interface{}{
 		"workspace_id": "ws-1",
 		"document":     "version: 1\ntype: not_kandev\nworkflows:\n  - name: X\n    steps: []\n",
@@ -240,5 +245,5 @@ func TestHandleImportWorkflow_ValidationError(t *testing.T) {
 
 	resp, err := h.handleImportWorkflow(context.Background(), msg)
 	require.NoError(t, err)
-	assertWSError(t, resp, ws.ErrorCodeBadRequest)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
 }

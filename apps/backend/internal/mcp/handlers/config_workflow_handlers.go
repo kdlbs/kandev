@@ -111,11 +111,20 @@ func (h *Handlers) handleImportWorkflow(ctx context.Context, msg *ws.Message) (*
 	if err := yaml.Unmarshal([]byte(req.Document), &export); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid document: "+err.Error(), nil)
 	}
+	// Validate the document up front: a malformed envelope (wrong type/version,
+	// missing names, duplicate positions, bad move_to_step refs) is a client
+	// error, and surfacing the detail is what lets the calling agent fix its
+	// document. Past this point any ImportWorkflows error is a server-side DB
+	// failure, so it gets a generic internal error without leaking internals —
+	// matching the sibling workflow handlers.
+	if err := export.Validate(); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Invalid workflow document: "+err.Error(), nil)
+	}
 
 	result, err := h.workflowSvc.ImportWorkflows(ctx, req.WorkspaceID, &export)
 	if err != nil {
 		h.logger.Error("failed to import workflows", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Failed to import workflows: "+err.Error(), nil)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to import workflows", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, result)
 }
