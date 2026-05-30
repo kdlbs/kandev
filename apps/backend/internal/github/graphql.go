@@ -511,14 +511,17 @@ func runBatchedBranchQuery(ctx context.Context, exec GraphQLExecutor, refs []gra
 		if err := graphQLErrorsToErr(resp.Errors); err != nil {
 			return nil, err
 		}
-		decodeBatchedBranchChunk(chunk, resp.Data, result)
+		if err := decodeBatchedBranchChunk(chunk, resp.Data, result); err != nil {
+			return nil, err
+		}
 	}
 	return result, nil
 }
 
-func decodeBatchedBranchChunk(refs []graphQLBranchRef, data map[string]json.RawMessage, result map[string]*PRStatus) {
+func decodeBatchedBranchChunk(refs []graphQLBranchRef, data map[string]json.RawMessage, result map[string]*PRStatus) error {
 	for i, ref := range refs {
-		raw, ok := data[fmt.Sprintf("b%d", i)]
+		alias := fmt.Sprintf("b%d", i)
+		raw, ok := data[alias]
 		if !ok || len(raw) == 0 || string(raw) == "null" {
 			continue
 		}
@@ -528,7 +531,7 @@ func decodeBatchedBranchChunk(refs []graphQLBranchRef, data map[string]json.RawM
 			} `json:"pullRequests"`
 		}
 		if err := json.Unmarshal(raw, &inner); err != nil {
-			continue
+			return fmt.Errorf("decode branch alias %s: %w", alias, err)
 		}
 		node, ok := selectBatchedBranchPRNode(inner.PullRequests.Nodes)
 		if !ok {
@@ -537,6 +540,7 @@ func decodeBatchedBranchChunk(refs []graphQLBranchRef, data map[string]json.RawM
 		status := convertBatchedPRResult(&node.batchedPRResult, ref.Owner, ref.Repo, node.Number)
 		result[graphqlBranchKey(ref.Owner, ref.Repo, ref.Branch)] = status
 	}
+	return nil
 }
 
 func selectBatchedBranchPRNode(nodes []batchedBranchPRNode) (*batchedBranchPRNode, bool) {

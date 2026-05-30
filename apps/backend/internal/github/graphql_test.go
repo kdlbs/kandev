@@ -182,6 +182,19 @@ func TestRunBatchedBranchQuery_SurfacesGraphQLErrors(t *testing.T) {
 	}
 }
 
+func TestRunBatchedBranchQuery_SurfacesDecodeErrors(t *testing.T) {
+	exec := &stubGraphQLExecutor{
+		response: `{"data": {"b0": {"pullRequests": {"nodes": [{"number": "bad"}]}}}}`,
+	}
+	_, err := runBatchedBranchQuery(context.Background(), exec, []graphQLBranchRef{{Owner: "o", Repo: "r", Branch: "feat"}})
+	if err == nil {
+		t.Fatalf("expected malformed branch node to return an error")
+	}
+	if !strings.Contains(err.Error(), "decode branch alias b0") {
+		t.Errorf("expected error to identify branch alias, got: %v", err)
+	}
+}
+
 func TestRunBatchedBranchQuery_DecodesPRNode(t *testing.T) {
 	exec := &stubGraphQLExecutor{
 		response: `{
