@@ -249,7 +249,6 @@ func TestRunBatchedBranchQuery_SkipsAmbiguousForkHeads(t *testing.T) {
 					"pullRequests": {
 						"nodes": [{
 							"number": 7,
-							"headRepositoryOwner": {"login":"alice"},
 							"state": "OPEN", "title": "branch PR A", "url": "https://x/7",
 							"isDraft": false, "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
 							"headRefName": "feat", "baseRefName": "main", "headRefOid": "deadbeef",
@@ -259,7 +258,6 @@ func TestRunBatchedBranchQuery_SkipsAmbiguousForkHeads(t *testing.T) {
 							"commits": {"nodes": []}
 						}, {
 							"number": 8,
-							"headRepositoryOwner": {"login":"bob"},
 							"state": "OPEN", "title": "branch PR B", "url": "https://x/8",
 							"isDraft": false, "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
 							"headRefName": "feat", "baseRefName": "main", "headRefOid": "cafebabe",
@@ -292,7 +290,6 @@ func TestRunBatchedBranchQuery_SkipsMultipleBranchMatchesEvenWithOwnerMatch(t *t
 					"pullRequests": {
 						"nodes": [{
 							"number": 7,
-							"headRepositoryOwner": {"login":"alice"},
 							"state": "OPEN", "title": "fork PR", "url": "https://x/7",
 							"isDraft": false, "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
 							"headRefName": "feat", "baseRefName": "main", "headRefOid": "deadbeef",
@@ -302,7 +299,6 @@ func TestRunBatchedBranchQuery_SkipsMultipleBranchMatchesEvenWithOwnerMatch(t *t
 							"commits": {"nodes": []}
 						}, {
 							"number": 9,
-							"headRepositoryOwner": {"login":"o"},
 							"state": "OPEN", "title": "base PR", "url": "https://x/9",
 							"isDraft": false, "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
 							"headRefName": "feat", "baseRefName": "main", "headRefOid": "cafebabe",
