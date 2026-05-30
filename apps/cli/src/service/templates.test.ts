@@ -210,10 +210,10 @@ describe("renderSystemdUnit", () => {
       mode: "user",
     });
     expect(unit).toContain("ExecStart=/home/linuxbrew/.linuxbrew/bin/kandev --headless");
-    // No version-pinned Cellar paths anywhere in the unit (node or kandev).
+    // No version-pinned Cellar paths anywhere in the unit — this single check
+    // covers both the kandev cli.js path and the versioned node bin dir, since
+    // any `/Cellar/node/...` or `/Cellar/kandev/...` path contains "/Cellar/".
     expect(unit).not.toContain("/Cellar/");
-    // The versioned node bin dir must not leak into PATH either.
-    expect(unit).not.toContain("Cellar/node");
   });
 
   it("drops KANDEV_BUNDLE_DIR / KANDEV_VERSION and the versioned node bin dir when using the shim", () => {
