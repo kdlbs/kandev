@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
+import { useState } from "react";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import type { Branch } from "@/lib/types/http";
 import type { TaskRemoteRepoRow } from "./task-create-dialog-types";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import type { UseAccessibleReposResult } from "@/hooks/domains/github/use-accessible-repos";
+import type { PRInfo } from "@/hooks/domains/github/use-pr-info-by-url";
 
 // Each test passes a stubbed `accessibleRepos` prop to the chip. The hook
 // itself now lives at the chips-row level (see chips-row test); the chip is
@@ -36,6 +38,14 @@ import { RemoteRepoChip, computeTriggerLabel } from "./task-create-dialog-remote
 const TRIGGER_TID = "remote-repo-chip-trigger";
 const FULL_NAME = "acme/site";
 const URL_ACME_SITE = "https://github.com/acme/site";
+const URL_PR_42 = "https://github.com/acme/site/pull/42";
+const HEAD_BRANCH = "feature/pr-branch";
+const PR_INFO_FEATURE: PRInfo = {
+  prHeadBranch: HEAD_BRANCH,
+  prBaseBranch: "main",
+  prNumber: 42,
+  suggestedTitle: "PR #42: x",
+};
 
 afterEach(() => {
   cleanup();
@@ -428,22 +438,17 @@ describe("RemoteRepoChip — per-row branch auto-select", () => {
     const onBranchChange = vi.fn();
     renderInProvider(
       <RemoteRepoChip
-        row={row({ url: "https://github.com/acme/site/pull/42" })}
+        row={row({ url: URL_PR_42 })}
         branches={[{ name: "main", type: "remote" }]}
         branchesLoading={false}
         accessibleRepos={makeAccessible()}
-        prInfo={{
-          prHeadBranch: "feature/pr-branch",
-          prBaseBranch: "main",
-          prNumber: 42,
-          suggestedTitle: "PR #42: x",
-        }}
+        prInfo={PR_INFO_FEATURE}
         onURLChange={vi.fn()}
         onBranchChange={onBranchChange}
         onRemove={noopRemove}
       />,
     );
-    expect(onBranchChange).toHaveBeenCalledWith("feature/pr-branch");
+    expect(onBranchChange).toHaveBeenCalledWith(HEAD_BRANCH);
   });
 
   it("does NOT overwrite a user-picked branch when PR info arrives later", () => {
@@ -453,19 +458,14 @@ describe("RemoteRepoChip — per-row branch auto-select", () => {
     const onBranchChange = vi.fn();
     renderInProvider(
       <RemoteRepoChip
-        row={row({ url: "https://github.com/acme/site/pull/42", branch: "develop" })}
+        row={row({ url: URL_PR_42, branch: "develop" })}
         branches={[
           { name: "main", type: "remote" },
           { name: "develop", type: "remote" },
         ]}
         branchesLoading={false}
         accessibleRepos={makeAccessible()}
-        prInfo={{
-          prHeadBranch: "feature/pr-branch",
-          prBaseBranch: "main",
-          prNumber: 42,
-          suggestedTitle: "PR #42: x",
-        }}
+        prInfo={PR_INFO_FEATURE}
         onURLChange={vi.fn()}
         onBranchChange={onBranchChange}
         onRemove={noopRemove}
@@ -536,6 +536,81 @@ describe("RemoteRepoChip — per-row branch auto-select (no PR info)", () => {
         onRemove={noopRemove}
       />,
     );
+    expect(onBranchChange).not.toHaveBeenCalled();
+  });
+});
+
+// Controlled harness: mirrors the real parent by writing onBranchChange back
+// into row.branch, so the auto-select effect sees the value it set on the next
+// render. Lets us simulate the list-resolves-then-PR-arrives sequence.
+function ControlledChip(props: {
+  url: string;
+  initialBranch?: string;
+  branches: Branch[];
+  prInfo?: PRInfo;
+  onBranchChange: (b: string) => void;
+}) {
+  const [branch, setBranch] = useState(props.initialBranch ?? "");
+  return (
+    <RemoteRepoChip
+      row={row({ url: props.url, branch })}
+      branches={props.branches}
+      branchesLoading={false}
+      accessibleRepos={makeAccessible()}
+      prInfo={props.prInfo}
+      onURLChange={vi.fn()}
+      onBranchChange={(b) => {
+        setBranch(b);
+        props.onBranchChange(b);
+      }}
+      onRemove={noopRemove}
+    />
+  );
+}
+
+describe("RemoteRepoChip — PR head outranks list default (resolve-order independence)", () => {
+  it("applies the PR head even when the branch list resolved first and set 'main'", () => {
+    // Item-2 regression: list resolves first → auto-select writes 'main'; then
+    // prInfo arrives. The PR head must REPLACE the list-derived 'main' default,
+    // not be skipped because row.branch is already non-empty.
+    const onBranchChange = vi.fn();
+    const branches: Branch[] = [{ name: "main", type: "remote" }];
+    const chip = (prInfo?: PRInfo) => (
+      <ControlledChip
+        url={URL_PR_42}
+        branches={branches}
+        prInfo={prInfo}
+        onBranchChange={onBranchChange}
+      />
+    );
+    const { rerender } = renderInProvider(chip());
+    // After the first render, the auto-selector should have written 'main'.
+    expect(onBranchChange).toHaveBeenLastCalledWith("main");
+    // Now prInfo arrives → PR head replaces the list-derived 'main'.
+    rerender(<TooltipProvider>{chip(PR_INFO_FEATURE)}</TooltipProvider>);
+    expect(onBranchChange).toHaveBeenLastCalledWith(HEAD_BRANCH);
+  });
+
+  it("does NOT overwrite a genuine user pick when prInfo arrives later", () => {
+    // The user picked 'develop' (initialBranch differs from anything the
+    // auto-selector would have written), then prInfo arrives — the pick stays.
+    const onBranchChange = vi.fn();
+    const branches: Branch[] = [
+      { name: "main", type: "remote" },
+      { name: "develop", type: "remote" },
+    ];
+    const chip = (prInfo?: PRInfo) => (
+      <ControlledChip
+        url={URL_PR_42}
+        initialBranch="develop"
+        branches={branches}
+        prInfo={prInfo}
+        onBranchChange={onBranchChange}
+      />
+    );
+    const { rerender } = renderInProvider(chip());
+    expect(onBranchChange).not.toHaveBeenCalled();
+    rerender(<TooltipProvider>{chip(PR_INFO_FEATURE)}</TooltipProvider>);
     expect(onBranchChange).not.toHaveBeenCalled();
   });
 });

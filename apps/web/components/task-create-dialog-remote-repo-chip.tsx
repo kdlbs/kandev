@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { IconBrandGithub, IconGitBranch, IconLink, IconX } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
@@ -115,17 +115,26 @@ export function RemoteRepoChip({
 
 /**
  * Per-row branch autoselect for the Remote tab. Runs whenever the row's
- * URL / PR-info / branch list changes; bails out the moment the row already
- * has a branch (user pick or earlier auto-fill).
+ * URL / PR-info / branch list changes.
  *
- * Order of preference:
+ * Order of preference when the auto-selector is allowed to write:
  *   1. PR head branch (when the row's URL is a PR URL and PR info has
  *      loaded). Wins regardless of whether the head appears in the base
  *      repo's branch list — fork PRs keep the head name surfaced on the
  *      pill even though `origin` can't resolve it.
  *   2. `main` / `master` / first available, from the per-URL branch list.
  *
- * When the row's URL is empty the effect is a no-op.
+ * The PR head must outrank a list-derived default even when the branch LIST
+ * resolves before the PR info: if the list resolves first and the auto-selector
+ * writes `main`, the later-arriving PR head must still replace it. A naive
+ * `if (row.branch) return` guard breaks this — it bails once `main` is set.
+ *
+ * To distinguish "the auto-selector set this" from "the user picked this", we
+ * track the last value the auto-selector wrote in `autoSetRef`. The auto-
+ * selector may overwrite `row.branch` only when it is empty OR equals the last
+ * value we wrote; a value that differs from the ref means the user picked it,
+ * and we never clobber a user pick. When the row's URL is empty the effect is a
+ * no-op.
  */
 function useRowBranchAutoSelect(args: {
   row: TaskRemoteRepoRow;
@@ -134,20 +143,38 @@ function useRowBranchAutoSelect(args: {
   onBranchChange: (branch: string) => void;
 }) {
   const { row, branches, prInfo, onBranchChange } = args;
+  // Last branch value this auto-selector wrote. Used to tell an auto-set value
+  // (safe to overwrite) apart from a user pick (must be preserved).
+  const autoSetRef = useRef<string | null>(null);
   useEffect(() => {
     if (!row.url) return;
-    if (row.branch) return; // user-pick or earlier autofill wins
-    if (prInfo?.prHeadBranch) {
-      onBranchChange(prInfo.prHeadBranch);
+    // A non-empty branch that we didn't write ourselves is a user pick — leave
+    // it alone.
+    if (row.branch && row.branch !== autoSetRef.current) return;
+    const desired = computeAutoSelectedBranch(prInfo, branches);
+    if (!desired) return;
+    if (desired === row.branch) {
+      // Already on the desired value (e.g. we wrote it on a prior run); just
+      // make sure the ref reflects it so a later user pick is detectable.
+      autoSetRef.current = desired;
       return;
     }
-    if (branches.length === 0) return;
-    const preferred =
-      branches.find((b) => b.name === "main") ??
-      branches.find((b) => b.name === "master") ??
-      branches[0];
-    if (preferred) onBranchChange(preferred.name);
+    autoSetRef.current = desired;
+    onBranchChange(desired);
   }, [row.url, row.branch, prInfo, branches, onBranchChange]);
+}
+
+// computeAutoSelectedBranch returns the branch the auto-selector wants for a
+// row: the PR head branch (when known) outranks a list-derived default
+// (main → master → first available). Returns "" when nothing can be chosen yet.
+function computeAutoSelectedBranch(prInfo: PRInfo | undefined, branches: Branch[]): string {
+  if (prInfo?.prHeadBranch) return prInfo.prHeadBranch;
+  if (branches.length === 0) return "";
+  const preferred =
+    branches.find((b) => b.name === "main") ??
+    branches.find((b) => b.name === "master") ??
+    branches[0];
+  return preferred?.name ?? "";
 }
 
 // --- Repo pill ---------------------------------------------------------------

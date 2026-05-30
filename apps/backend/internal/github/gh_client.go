@@ -397,9 +397,13 @@ func buildUserReposGHArgs(login, query string, limit int) []string {
 // ListAccessibleRepos lists every repo the authenticated user can access via a
 // single `gh api /user/repos` call on the core REST quota. The endpoint returns
 // a flat JSON array (parsed by parseGHSearchRepos, which already decodes a
-// top-level array). The query is applied client-side as a case-insensitive
-// substring filter on full_name. No --paginate: one page of up to 100 is what
-// the picker needs (the frontend caps at 100 and filters client-side).
+// top-level array). No --paginate: one page of up to 100 is what the picker
+// needs (the frontend caps at 100 and filters client-side).
+//
+// query is a BEST-EFFORT substring filter over only that single un-paginated
+// page — a match beyond the cap returns nothing. The frontend does the
+// canonical client-side filtering, so this server filter is just optional
+// narrowing; do not rely on it for completeness.
 func (c *GHClient) ListAccessibleRepos(ctx context.Context, query string, limit int) ([]GitHubRepo, error) {
 	limit = clampRepoSearchLimit(limit)
 	out, err := c.run(ctx, buildAccessibleReposGHArgs(limit)...)

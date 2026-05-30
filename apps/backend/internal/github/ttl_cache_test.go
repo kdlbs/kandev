@@ -209,7 +209,9 @@ func TestTTLCache_ClearMakesPostClearCallersMintNewFetch(t *testing.T) {
 	cache.clear()
 
 	// Caller B arrives after clear() while A is still in flight. B's fetch
-	// returns "B"; the test asserts B sees "B", not "A".
+	// returns "B" immediately (it does not block on releaseA), so under the
+	// generation-keyed singleflight B must mint its own fetch and resolve right
+	// away rather than joining A's still-blocked call.
 	resultB := make(chan any, 1)
 	go func() {
 		v, _ := cache.doOrFetch("k", func() (any, error) {
@@ -219,24 +221,15 @@ func TestTTLCache_ClearMakesPostClearCallersMintNewFetch(t *testing.T) {
 		resultB <- v
 	}()
 
-	// Wait until B has had a chance to run its fetch — without a delay the
-	// scheduler may not have entered B's goroutine yet.
-	bDone := false
-	for i := 0; i < 100; i++ {
-		select {
-		case v := <-resultB:
-			if v != "B" {
-				t.Fatalf("caller B got %v, expected 'B' (joined A's stale fetch?)", v)
-			}
-			bDone = true
-		default:
-			time.Sleep(time.Millisecond)
+	// Block on B's result with a timeout guard instead of a sleep busy-loop. If
+	// generation-keyed singleflight regressed (B joining A's blocked fetch), B
+	// would never resolve and the timeout fires deterministically.
+	select {
+	case v := <-resultB:
+		if v != "B" {
+			t.Fatalf("caller B got %v, expected 'B' (joined A's stale fetch?)", v)
 		}
-		if bDone {
-			break
-		}
-	}
-	if !bDone {
+	case <-time.After(2 * time.Second):
 		t.Fatal("caller B never completed — generation-keyed singleflight may still be blocking")
 	}
 

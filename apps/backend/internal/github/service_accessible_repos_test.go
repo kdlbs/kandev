@@ -354,3 +354,55 @@ func TestListAccessibleRepos_CacheClearedOnTokenChange(t *testing.T) {
 		t.Errorf("user-a repo leaked across token swap: %v", names)
 	}
 }
+
+// blockingAccessibleReposClient blocks inside ListAccessibleRepos until the test
+// releases it, letting the test race a ClearAccessibleReposCaches() with an
+// in-flight fetch.
+type blockingAccessibleReposClient struct {
+	stubClient
+	repos   []GitHubRepo
+	started chan struct{}
+	release chan struct{}
+}
+
+func (c *blockingAccessibleReposClient) ListAccessibleRepos(_ context.Context, query string, _ int) ([]GitHubRepo, error) {
+	close(c.started)
+	<-c.release
+	return filterReposByQuery(c.repos, query), nil
+}
+
+// TestListAccessibleRepos_ClearDuringFetchDropsStaleWrite is the service-level
+// mirror of the ttl_cache TestTTLCache_ClearInvalidatesInFlightFetch regression:
+// a fetch that started BEFORE a clear() (token swap) must not write its stale
+// result back into the just-cleared cache. The fix snapshots the cache
+// generation before the fetch and writes via setIfCurrentGeneration so the bump
+// from clear() drops the late write.
+func TestListAccessibleRepos_ClearDuringFetchDropsStaleWrite(t *testing.T) {
+	sc := &blockingAccessibleReposClient{
+		repos:   []GitHubRepo{{FullName: "user-a/repo", Owner: "user-a", Name: "repo"}},
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	svc := newAccessibleReposTestService(sc)
+
+	done := make(chan struct{})
+	go func() {
+		_, _ = svc.ListAccessibleRepos(context.Background(), "", 50)
+		close(done)
+	}()
+
+	// Wait until the fetch is in flight, then clear (simulating a token swap),
+	// then let the stale fetch complete.
+	<-sc.started
+	svc.ClearAccessibleReposCaches()
+	close(sc.release)
+	<-done
+
+	// The stale write must have been dropped: the cache key must miss so the
+	// next call refetches under the new generation rather than serving the
+	// pre-clear (prior-user) repos.
+	key := accessibleReposCacheKey("", 50)
+	if v, ok := svc.accessibleReposCache.get(key); ok {
+		t.Fatalf("expected cache to miss after clear() during in-flight fetch; got %v", v)
+	}
+}

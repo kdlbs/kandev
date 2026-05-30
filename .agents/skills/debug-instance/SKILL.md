@@ -118,7 +118,7 @@ scripts/dev-isolated --web
 It prints a `READY` block with the backend URL (e.g. `http://localhost:48429`), the
 pidfile, and:
 
-```
+```text
 Teardown : scripts/kandev-kill --pidfile /tmp/kandev-dev-isolated-<port>.pid --yes
 ```
 

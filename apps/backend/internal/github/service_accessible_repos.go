@@ -63,6 +63,12 @@ func (s *Service) ListAccessibleRepos(ctx context.Context, query string, limit i
 	if v, ok := s.accessibleReposCache.get(key); ok {
 		return v.([]GitHubRepo), nil
 	}
+	// Snapshot the cache generation BEFORE the fetch. If a clear() runs while
+	// this fetch is in flight (token swap via ConfigureToken/ClearToken, or the
+	// e2e mock toggle), the generation bumps and the post-fetch write is
+	// dropped — otherwise a fetch that started under the previous user/token
+	// could write that user's stale repos back into the just-cleared cache.
+	gen := s.accessibleReposCache.generation()
 	// Detach from the caller's request context so a client-side abort can't
 	// cancel (and SIGKILL) the shared fetch; bound it with our own timeout.
 	fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), accessibleReposFetchTimeout)
@@ -75,7 +81,7 @@ func (s *Service) ListAccessibleRepos(ctx context.Context, query string, limit i
 	if len(repos) > limit {
 		repos = repos[:limit]
 	}
-	s.accessibleReposCache.set(key, repos)
+	s.accessibleReposCache.setIfCurrentGeneration(key, repos, gen)
 	return repos, nil
 }
 

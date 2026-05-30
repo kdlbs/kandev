@@ -15,8 +15,10 @@
 #
 # Options:
 #   --export          Hit the debug-export endpoint (default).
-#   --level LEVEL      Filter export by level (error|warn|info|debug). Passes
-#                      ?level=LEVEL and prints only .logs.
+#   --level LEVEL      Filter export by level. The export endpoint matches the
+#                      log entry's level string exactly (zap lowercase levels),
+#                      so LEVEL must be one of: debug|info|warn|error|dpanic|
+#                      panic|fatal. Passes ?level=LEVEL and prints only .logs.
 #   --tail             Tail the backend stderr log file instead of the endpoint.
 #   --lines N          Lines to show with --tail (default: 80).
 #   --file PATH        Explicit log file for --tail (overrides auto-resolve).
@@ -35,7 +37,12 @@ LINES=80
 FILE=""
 PORT=""
 
-usage() { sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-2}"; }
+# Levels the export endpoint can match (zapcore.Level.String(), lowercase). The
+# endpoint compares the entry's level string exactly, so any other value would
+# silently match nothing — we reject it up front instead.
+ALLOWED_LEVELS=(debug info warn error dpanic panic fatal)
+
+usage() { sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-2}"; }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -58,8 +65,24 @@ done
 [[ -n "$PORT" ]] || { echo "kandev-logs: a backend port is required." >&2; usage 2; }
 [[ "$PORT" =~ ^[0-9]+$ ]] || { echo "kandev-logs: port must be numeric, got '$PORT'" >&2; exit 2; }
 
+# Validate --level against the allowed set BEFORE it reaches the URL. An invalid
+# value would otherwise be interpolated into ?level= and silently return zero
+# matching logs, masking the typo.
+if [[ -n "$LEVEL" ]]; then
+  level_ok=0
+  for lvl in "${ALLOWED_LEVELS[@]}"; do
+    [[ "$LEVEL" == "$lvl" ]] && { level_ok=1; break; }
+  done
+  if [[ "$level_ok" -ne 1 ]]; then
+    echo "kandev-logs: invalid --level '$LEVEL'. Allowed: ${ALLOWED_LEVELS[*]}" >&2
+    exit 2
+  fi
+fi
+
 if [[ "$MODE" == "export" ]]; then
   url="http://localhost:$PORT/api/v1/system/debug/export"
+  # LEVEL is whitelisted above (alphabetic, no metacharacters), so it is safe to
+  # interpolate directly; the query value needs no further encoding.
   [[ -n "$LEVEL" ]] && url="$url?level=$LEVEL"
   if ! body="$(curl -s --fail-with-body "$url" 2>/dev/null)"; then
     echo "kandev-logs: request to $url failed (is the instance on port $PORT up?)" >&2

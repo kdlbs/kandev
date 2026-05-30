@@ -592,7 +592,11 @@ func TestListAccessibleRepos_Success(t *testing.T) {
 	var gotAffiliation, gotSort, gotPerPage string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/user/repos" {
-			t.Fatalf("unexpected path %q", r.URL.Path)
+			// t.Fatalf must not run in a handler goroutine (it's a data race);
+			// use Errorf+return and let the main goroutine fail the assertion.
+			t.Errorf("unexpected path %q", r.URL.Path)
+			http.Error(w, "unexpected path", http.StatusInternalServerError)
+			return
 		}
 		gotAffiliation = r.URL.Query().Get("affiliation")
 		gotSort = r.URL.Query().Get("sort")
@@ -645,7 +649,9 @@ func TestListAccessibleRepos_QueryFilterAndClamp(t *testing.T) {
 	var gotPerPage string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/user/repos" {
-			t.Fatalf("unexpected path %q", r.URL.Path)
+			t.Errorf("unexpected path %q", r.URL.Path)
+			http.Error(w, "unexpected path", http.StatusInternalServerError)
+			return
 		}
 		gotPerPage = r.URL.Query().Get("per_page")
 		w.WriteHeader(http.StatusOK)
@@ -674,7 +680,7 @@ func TestListAccessibleRepos_QueryFilterAndClamp(t *testing.T) {
 func TestListAccessibleRepos_AuthError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/user/repos" {
-			t.Fatalf("unexpected path %q", r.URL.Path)
+			t.Errorf("unexpected path %q", r.URL.Path)
 		}
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"message":"bad creds"}`))

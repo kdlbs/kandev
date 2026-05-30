@@ -292,7 +292,7 @@ describe("useDialogFormState — title autofill from first row PR info", () => {
   it("does NOT re-apply autofill after the user clears the title (user took ownership)", () => {
     // Regression: clearing an auto-filled title used to reset the ref to ""
     // and trigger a re-application on the next render, so the user could
-    // never actually clear the field — every kestroke or render brought
+    // never actually clear the field — every keystroke or render brought
     // the suggested title right back.
     seedPRInfo(PR_URL_42, 42, PR_TITLE_42);
     const { result } = renderHook(() => useDialogFormState(true, "ws-1", null));

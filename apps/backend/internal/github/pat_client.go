@@ -333,8 +333,15 @@ func (c *PATClient) ListUserRepos(ctx context.Context, query string, limit int) 
 // ListAccessibleRepos lists every repo the authenticated user can access via a
 // single GET /user/repos call on the core REST quota. The response is a flat
 // JSON array (not a search wrapper), so it decodes differently from
-// fetchRepoSearch. The query is applied client-side as a case-insensitive
-// substring filter on full_name (matching the gh ListUserRepos semantics).
+// fetchRepoSearch.
+//
+// query is a BEST-EFFORT substring filter applied only over the first `limit`
+// repos returned by this single (un-paginated) page — a query matching a repo
+// beyond the cap returns nothing here. This is intentional: the picker fetches
+// limit=100 and the frontend performs the canonical, comprehensive client-side
+// filtering over that page, so the server filter is just an optional narrowing.
+// Do NOT rely on it for completeness, and do NOT add pagination to "fix" it
+// without revisiting the picker contract.
 func (c *PATClient) ListAccessibleRepos(ctx context.Context, query string, limit int) ([]GitHubRepo, error) {
 	limit = clampRepoSearchLimit(limit)
 	endpoint := fmt.Sprintf("/user/repos?affiliation=%s&sort=pushed&per_page=%d",
@@ -383,7 +390,8 @@ func convertRepoListItems(items []repoListItem) []GitHubRepo {
 }
 
 // filterReposByQuery returns the repos whose full_name contains query
-// (case-insensitive). An empty query returns the input unchanged.
+// (case-insensitive). An empty query returns the input unchanged. Best-effort:
+// it filters only the already-fetched (capped) slice — see ListAccessibleRepos.
 func filterReposByQuery(repos []GitHubRepo, query string) []GitHubRepo {
 	if query == "" {
 		return repos

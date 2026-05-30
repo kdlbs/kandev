@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { Repository, Executor } from "@/lib/types/http";
 import { DEFAULT_LOCAL_EXECUTOR_TYPE } from "@/lib/utils";
 import { useToast } from "@/components/toast-provider";
@@ -267,9 +267,24 @@ export function useDefaultSelectionsEffect(
   // mode counts rows with a repo/path. Without this, 2 Remote rows + 0
   // workspace rows would slip past the guard because the legacy check only
   // inspected `fs.repositories` — `computeSelectedRepoCount` handles both.
+  // Depend on the count primitive, not the whole `fs` object. `fs` is a fresh
+  // literal every render, so listing it in the dep array would re-run this
+  // effect on every render. computeSelectedRepoCount only reads noRepository /
+  // useRemote / remoteRepos / repositories, so memoize over exactly those.
+  const { noRepository: fsNoRepository, useRemote, remoteRepos, repositories } = fs;
+  const selectedRepoCount = useMemo(
+    () =>
+      computeSelectedRepoCount({
+        noRepository: fsNoRepository,
+        useRemote,
+        remoteRepos,
+        repositories,
+      } as DialogFormState),
+    [fsNoRepository, useRemote, remoteRepos, repositories],
+  );
   useEffect(() => {
     if (!open || !executorProfileId || executors.length === 0) return;
-    if (computeSelectedRepoCount(fs) <= 1) return;
+    if (selectedRepoCount <= 1) return;
     const profileToType = new Map<string, string | undefined>();
     const worktreeProfileIds: string[] = [];
     for (const e of executors) {
@@ -284,17 +299,7 @@ export function useDefaultSelectionsEffect(
     const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID, null);
     const pick = lastId && worktreeProfileIds.includes(lastId) ? lastId : worktreeProfileIds[0];
     void Promise.resolve().then(() => setExecutorProfileId(pick));
-  }, [
-    open,
-    executorProfileId,
-    executors,
-    fs,
-    fs.repositories,
-    fs.remoteRepos,
-    fs.useRemote,
-    fs.noRepository,
-    setExecutorProfileId,
-  ]);
+  }, [open, executorProfileId, executors, selectedRepoCount, setExecutorProfileId]);
 }
 
 /**

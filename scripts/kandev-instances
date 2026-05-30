@@ -7,7 +7,10 @@
 #
 # Sources:
 #   - backend PID + listening port: `ss -tlnp` (falls back to `lsof`)
-#   - web port: KANDEV_WEB_INTERNAL_URL in /proc/<pid>/environ (else `?`)
+#   - web port: the separate `next-server` listener pointing at this backend
+#     (matched via its KANDEV_API_BASE_URL / NEXT_PUBLIC_KANDEV_API_PORT, port
+#     read from `ss`); falls back to the backend's KANDEV_WEB_INTERNAL_URL
+#     (else `?`). The backend's own port is never the web port.
 #   - agentctl port: KANDEV_AGENT_STANDALONE_PORT / AGENTCTL_PORT in environ,
 #     else the `-port=` flag of a child `agentctl` process (else `?`)
 #   - HOME_DIR: KANDEV_HOME_DIR in environ, else HOME, else `?`
@@ -80,15 +83,87 @@ resolve_agentctl_port() {
   printf '%s\n' "${port:-?}"
 }
 
-# Resolve web port from KANDEV_WEB_INTERNAL_URL (http://host:PORT).
-resolve_web_port() {
-  local pid="$1" url
-  url="$(read_environ_var "$pid" KANDEV_WEB_INTERNAL_URL)"
-  if [[ "$url" =~ :([0-9]+) ]]; then
-    printf '%s\n' "${BASH_REMATCH[1]}"
+# True if something is currently listening on the given TCP port.
+port_has_listener() {
+  local port="$1"
+  if command -v ss >/dev/null 2>&1; then
+    ss -tlnH "sport = :$port" 2>/dev/null | grep -q .
+  elif command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN -t >/dev/null 2>&1
   else
-    printf '?\n'
+    return 1
   fi
+}
+
+# Resolve the web port for a backend.
+#
+# The web UI is served by a SEPARATE `next-server` process, not the backend, so
+# the backend's own listening port is never the web port. We resolve in two
+# steps, preferring the authoritative source:
+#
+#   1. The next-server process that points back at THIS backend. Each web
+#      process is launched with KANDEV_API_BASE_URL=http://host:<backend_port>
+#      (and/or NEXT_PUBLIC_KANDEV_API_PORT=<backend_port>) and its own
+#      PORT=<web_port>. We find the next-server whose backend-pointing env
+#      matches this backend's port, then read its ACTUAL listening port from ss
+#      (authoritative — the real socket, not an env hint).
+#   2. Fallback: the backend's KANDEV_WEB_INTERNAL_URL=http://host:<web_port>,
+#      which the backend uses to reach the web server. Parse the trailing
+#      :<port> (the host:port pair, never the scheme's colon).
+#
+# If neither resolves, print `?` rather than guessing a wrong port (e.g. the
+# backend port from PORT / NEXT_PUBLIC_KANDEV_API_PORT, which are the backend's).
+resolve_web_port() {
+  local backend_pid="$1" backend_port="${2:-}" port
+  port="$(resolve_web_port_via_next_server "$backend_port")"
+  if [[ -z "$port" ]]; then
+    local url cand=""
+    url="$(read_environ_var "$backend_pid" KANDEV_WEB_INTERNAL_URL)"
+    # Match the LAST :<port> so an IPv6 host or path can't fool us; the trailing
+    # host:port is what we want, not the scheme separator (http:).
+    if [[ "$url" =~ :([0-9]+)([/?#].*)?$ ]]; then
+      cand="${BASH_REMATCH[1]}"
+    fi
+    # KANDEV_WEB_INTERNAL_URL is the web URL the backend was CONFIGURED with — it
+    # may name a web port that never started (e.g. a backend-only dev-isolated
+    # run). Only trust it if something is actually listening there; otherwise the
+    # web UI isn't reachable, so report `?` rather than a dead port.
+    if [[ -n "$cand" ]] && port_has_listener "$cand"; then
+      port="$cand"
+    fi
+  fi
+  printf '%s\n' "${port:-?}"
+}
+
+# Find the next-server process bound to this backend and return its listening
+# port (the web port). Empty output means "not found".
+resolve_web_port_via_next_server() {
+  local backend_port="$1"
+  [[ -n "$backend_port" ]] || return 0
+  command -v ss >/dev/null 2>&1 || return 0
+
+  # Enumerate listening next-server sockets as "pid port" pairs.
+  local pid web_port api_port api_url
+  while read -r _ _ _ local_addr _ procinfo; do
+    case "$procinfo" in
+      *'next-server'*) ;;
+      *) continue ;;
+    esac
+    pid="$(printf '%s' "$procinfo" | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2)"
+    web_port="${local_addr##*:}"
+    [[ -n "$pid" && -n "$web_port" ]] || continue
+    # Does this web process point back at OUR backend port?
+    api_port="$(read_environ_var "$pid" NEXT_PUBLIC_KANDEV_API_PORT)"
+    if [[ -z "$api_port" ]]; then
+      api_url="$(read_environ_var "$pid" KANDEV_API_BASE_URL)"
+      [[ "$api_url" =~ :([0-9]+)([/?#].*)?$ ]] && api_port="${BASH_REMATCH[1]}"
+    fi
+    if [[ "$api_port" == "$backend_port" ]]; then
+      printf '%s\n' "$web_port"
+      return 0
+    fi
+  done < <(ss -tlnpH 2>/dev/null)
+  return 0
 }
 
 # Emit "PID PORT" pairs for every listening kandev backend socket.
@@ -149,7 +224,7 @@ fi
 
 for pid in "${pids[@]}"; do
   backend_port="${SEEN_PORT[$pid]}"
-  web_port="$(resolve_web_port "$pid")"
+  web_port="$(resolve_web_port "$pid" "$backend_port")"
   agentctl_port="$(resolve_agentctl_port "$pid")"
   home_dir="$(read_environ_var "$pid" KANDEV_HOME_DIR)"
   [[ -z "$home_dir" ]] && home_dir="$(read_environ_var "$pid" HOME)"

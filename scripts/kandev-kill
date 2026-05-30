@@ -9,10 +9,16 @@
 #
 # Safety:
 #   - Refuses to act unless you explicitly pass a port or a --pidfile.
-#   - The well-known production port 38429 is GUARDED: killing it requires an
-#     explicit --force. (This is the port the user's live instance uses.)
+#   - GUARDED PORTS (the well-known production ports the user's live instance
+#     uses — see GUARDED_PORTS below) are protected: killing one requires an
+#     explicit --force. The guard is applied to the RESOLVED backend port, so it
+#     holds no matter HOW you reached it — by `<port>` OR via a `--pidfile` whose
+#     process happens to listen on a guarded port. There is no bypass path.
 #   - Prints exactly what will be killed and asks for confirmation, unless --yes
 #     is given (for scripted teardown).
+#   - Only signals a process group (kill -- -<pid>) when the target PID is
+#     actually the group leader; otherwise it kills the PID + its discovered
+#     descendants individually, never a group it doesn't own.
 #
 # Usage:
 #   scripts/kandev-kill <backend_port> [--yes] [--force]
@@ -24,8 +30,20 @@
 #
 set -euo pipefail
 
-GUARDED_PORT=38429
+# Ports we refuse to kill without --force (the user's live production instance).
+# Extend by adding entries — the guard runs on the RESOLVED port, so every entry
+# is protected through both the <port> and --pidfile entry paths.
+GUARDED_PORTS=(38429)
 GRACE_SECONDS=5
+
+# True if $1 is one of the guarded ports.
+is_guarded_port() {
+  local p="$1" g
+  for g in "${GUARDED_PORTS[@]}"; do
+    [[ "$p" == "$g" ]] && return 0
+  done
+  return 1
+}
 
 PORT=""
 PIDFILE=""
@@ -33,7 +51,7 @@ ASSUME_YES=0
 FORCE=0
 
 usage() {
-  sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-2}"
 }
 
@@ -83,6 +101,18 @@ pid_for_port() {
   printf '%s\n' "$pid"
 }
 
+# List every TCP port a PID is listening on, one per line.
+listening_ports_for_pid() {
+  local pid="$1"
+  if command -v ss >/dev/null 2>&1; then
+    ss -tlnpH 2>/dev/null | grep "pid=$pid," |
+      grep -oE ':[0-9]+ ' | tr -d ': ' | sort -nu
+  elif command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP -sTCP:LISTEN -a -p "$pid" 2>/dev/null |
+      awk 'NR>1 {n=split($9,a,":"); print a[n]}' | sort -nu
+  fi
+}
+
 # Confirm a PID is a kandev backend (exe basename or cmdline mentions kandev).
 is_kandev_backend() {
   local pid="$1" exe cmd
@@ -107,10 +137,6 @@ if [[ -n "$PIDFILE" ]]; then
     rm -f "$PIDFILE" 2>/dev/null || true
     exit 0
   fi
-  # Derive the listening port from the running process for guard checks/output.
-  if command -v ss >/dev/null 2>&1; then
-    PORT="$(ss -tlnpH 2>/dev/null | grep "pid=$BACKEND_PID," | grep -oE ':[0-9]+ ' | tr -d ': ' | sort -n | head -1)"
-  fi
 elif [[ -n "$PORT" ]]; then
   [[ "$PORT" =~ ^[0-9]+$ ]] || { echo "kandev-kill: port must be numeric, got '$PORT'" >&2; exit 2; }
   BACKEND_PID="$(pid_for_port "$PORT")"
@@ -120,10 +146,32 @@ else
   usage 2
 fi
 
+# --- Resolve EVERY listening port of the target PID (for guard + display) ---
+# The guard must hold no matter how the target was supplied. We derive all
+# listening ports from the running process itself, so a --pidfile pointing at a
+# guarded port is refused exactly like `kandev-kill <guarded_port>`.
+mapfile -t TARGET_PORTS < <(listening_ports_for_pid "$BACKEND_PID")
+# Prefer the explicitly supplied port for display; else the lowest listening one.
+if [[ -z "$PORT" && ${#TARGET_PORTS[@]} -gt 0 ]]; then
+  PORT="${TARGET_PORTS[0]}"
+fi
+
 # --- Safety guards ---
-if [[ "${PORT:-}" == "$GUARDED_PORT" && "$FORCE" -ne 1 ]]; then
-  echo "kandev-kill: port $GUARDED_PORT is the guarded production port (the user's live instance)." >&2
-  echo "             Refusing to kill it without --force." >&2
+# Refuse if ANY resolved listening port (or the supplied port) is guarded.
+guarded_hit=""
+if [[ -n "${PORT:-}" ]] && is_guarded_port "$PORT"; then
+  guarded_hit="$PORT"
+fi
+for p in "${TARGET_PORTS[@]:-}"; do
+  [[ -z "$p" ]] && continue
+  if is_guarded_port "$p"; then
+    guarded_hit="$p"
+    break
+  fi
+done
+if [[ -n "$guarded_hit" && "$FORCE" -ne 1 ]]; then
+  echo "kandev-kill: port $guarded_hit is a guarded production port (the user's live instance)." >&2
+  echo "             PID $BACKEND_PID listens on it — refusing to kill without --force." >&2
   exit 3
 fi
 
@@ -181,13 +229,49 @@ if [[ "$ASSUME_YES" -ne 1 ]]; then
   esac
 fi
 
-# --- Terminate: SIGTERM the process group first (cascades to agent children),
-# then any stragglers individually, then SIGKILL after the grace period. ---
+# Is the backend PID its own process-group leader? Only then is it safe to
+# signal the whole group (kill -- -<pid>); otherwise that negative PID would
+# target some OTHER process's group. `dev-isolated` launches via setsid (leader),
+# but a kandev started another way may not be.
+pid_is_pgleader() {
+  local pid="$1" pgid
+  pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d '[:space:]')"
+  [[ -n "$pgid" && "$pgid" == "$pid" ]]
+}
+
+BACKEND_IS_LEADER=0
+if pid_is_pgleader "$BACKEND_PID"; then
+  BACKEND_IS_LEADER=1
+fi
+
+# A PID is "alive" only if it exists AND is not a zombie. A zombie (state Z) has
+# already exited; it just hasn't been reaped by its parent. When kandev-kill
+# targets a non-leader backend whose parent is a sleeping launcher (not us), the
+# dead process lingers as a zombie — treat that as success, not failure.
+pid_is_alive() {
+  local pid="$1" stat state
+  [[ -d "/proc/$pid" ]] || return 1
+  stat="$(cat "/proc/$pid/stat" 2>/dev/null || true)"
+  [[ -n "$stat" ]] || return 1
+  # The state char is the first field after the comm field, which is wrapped in
+  # parens and may itself contain spaces — strip through the LAST ')' first.
+  state="${stat##*) }"
+  state="${state%% *}"
+  [[ "$state" == "Z" ]] && return 1
+  return 0
+}
+
+# --- Terminate: SIGTERM first (cascades to agent children), then any stragglers
+# individually, then SIGKILL after the grace period. ---
 signal_tree() {
   local sig="$1"
-  # Signal the backend's process group (negative PID) so detached children
-  # cascade. Then signal each known PID individually as a fallback.
-  kill -"$sig" -- -"$BACKEND_PID" 2>/dev/null || true
+  # If the backend leads its own process group, signal the whole group so
+  # detached children cascade. Never signal a negative PID we don't lead.
+  if [[ "$BACKEND_IS_LEADER" -eq 1 ]]; then
+    kill -"$sig" -- -"$BACKEND_PID" 2>/dev/null || true
+  fi
+  # Always signal each discovered PID individually (the fallback when we don't
+  # own the group, and a belt-and-suspenders pass when we do).
   for p in "${TREE[@]}"; do
     kill -"$sig" "$p" 2>/dev/null || true
   done
@@ -197,12 +281,12 @@ signal_tree TERM
 
 # Wait up to GRACE_SECONDS for the backend to exit.
 waited=0
-while [[ -d "/proc/$BACKEND_PID" && "$waited" -lt "$GRACE_SECONDS" ]]; do
+while pid_is_alive "$BACKEND_PID" && [[ "$waited" -lt "$GRACE_SECONDS" ]]; do
   sleep 1
   waited=$((waited + 1))
 done
 
-if [[ -d "/proc/$BACKEND_PID" ]]; then
+if pid_is_alive "$BACKEND_PID"; then
   echo "kandev-kill: backend still alive after ${GRACE_SECONDS}s, sending SIGKILL."
   signal_tree KILL
   sleep 1
@@ -210,12 +294,12 @@ fi
 
 # Reap any remaining tracked PIDs with SIGKILL.
 for p in "${TREE[@]}"; do
-  if [[ -d "/proc/$p" ]]; then
+  if pid_is_alive "$p"; then
     kill -KILL "$p" 2>/dev/null || true
   fi
 done
 
-if [[ -d "/proc/$BACKEND_PID" ]]; then
+if pid_is_alive "$BACKEND_PID"; then
   echo "kandev-kill: WARNING — backend PID $BACKEND_PID is still present." >&2
   exit 5
 fi
