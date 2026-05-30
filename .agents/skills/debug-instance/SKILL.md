@@ -101,8 +101,11 @@ under the user's home, typically backend port **38429**). **Never act on it.**
 ### Launch an isolated parallel instance
 
 `dev-isolated` auto-picks non-colliding ports (never 38429/37429/39429), creates a
-throwaway `HOME` + fresh SQLite DB, builds the backend if stale, waits for health,
-and prints the URLs, log paths, and the exact teardown command.
+throwaway `HOME` + fresh SQLite DB, builds the backend binaries a live instance
+actually needs (kandev + agentctl + mock-agent) if stale, waits for health, and
+prints the URLs, log paths, and the exact teardown command. On a **clean checkout**,
+pass `--install` (or run `make install` once) so `node_modules` + deps are present —
+the `--web` frontend needs them.
 
 ```bash
 # Backend only (enough for class-A/B work and API probing):
