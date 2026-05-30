@@ -3,11 +3,13 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/assert"
@@ -205,6 +207,42 @@ func TestWsDrainQueue(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, ws.MessageTypeError, response.Type)
 		assert.Contains(t, parseError(t, response).Message, "session_id is required")
+	})
+
+	t.Run("rejects unavailable drainer", func(t *testing.T) {
+		handlers, _ := setupQueueHandlers(t)
+		response, err := handlers.wsDrainQueue(context.Background(),
+			createTestMessage(t, ws.ActionMessageQueueDrain, map[string]interface{}{"session_id": "s"}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeError, response.Type)
+		assert.Equal(t, ws.ErrorCodeInternalError, parseError(t, response).Code)
+	})
+
+	t.Run("reports busy session", func(t *testing.T) {
+		handlers, _ := setupQueueHandlersWithDrainer(t, &mockQueueDrainer{err: orchestrator.ErrAgentPromptInProgress})
+		response, err := handlers.wsDrainQueue(context.Background(),
+			createTestMessage(t, ws.ActionMessageQueueDrain, map[string]interface{}{"session_id": "s"}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeError, response.Type)
+		assert.Equal(t, queueErrorCodeSessionBusy, parseError(t, response).Code)
+	})
+
+	t.Run("reports not promptable session", func(t *testing.T) {
+		handlers, _ := setupQueueHandlersWithDrainer(t, &mockQueueDrainer{err: orchestrator.ErrSessionNotPromptable})
+		response, err := handlers.wsDrainQueue(context.Background(),
+			createTestMessage(t, ws.ActionMessageQueueDrain, map[string]interface{}{"session_id": "s"}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeError, response.Type)
+		assert.Equal(t, queueErrorCodeNotPromptable, parseError(t, response).Code)
+	})
+
+	t.Run("reports internal drain errors", func(t *testing.T) {
+		handlers, _ := setupQueueHandlersWithDrainer(t, &mockQueueDrainer{err: errors.New("boom")})
+		response, err := handlers.wsDrainQueue(context.Background(),
+			createTestMessage(t, ws.ActionMessageQueueDrain, map[string]interface{}{"session_id": "s"}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeError, response.Type)
+		assert.Equal(t, ws.ErrorCodeInternalError, parseError(t, response).Code)
 	})
 }
 

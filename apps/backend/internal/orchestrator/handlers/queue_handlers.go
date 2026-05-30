@@ -17,6 +17,8 @@ const (
 	// queueErrorCodeEntryNotFound is surfaced when an edit/remove targets an entry
 	// that has already been drained (atomic-take won the race).
 	queueErrorCodeEntryNotFound = "entry_not_found"
+	queueErrorCodeSessionBusy   = "session_busy"
+	queueErrorCodeNotPromptable = "session_not_promptable"
 
 	// Payload field names — extracted to satisfy goconst (≥3 occurrences).
 	fieldSessionID = "session_id"
@@ -173,9 +175,9 @@ func (h *QueueHandlers) wsDrainQueue(ctx context.Context, msg *ws.Message) (*ws.
 	if err != nil {
 		switch {
 		case errors.Is(err, orchestrator.ErrAgentPromptInProgress):
-			return ws.NewError(msg.ID, msg.Action, "session_busy", "Session is busy", nil)
+			return ws.NewError(msg.ID, msg.Action, queueErrorCodeSessionBusy, "Session is busy", nil)
 		case errors.Is(err, orchestrator.ErrSessionNotPromptable):
-			return ws.NewError(msg.ID, msg.Action, "session_not_promptable", err.Error(), nil)
+			return ws.NewError(msg.ID, msg.Action, queueErrorCodeNotPromptable, err.Error(), nil)
 		default:
 			h.logger.Error("failed to drain queued message", zap.String(fieldSessionID, req.SessionID), zap.Error(err))
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to drain queued message", nil)
