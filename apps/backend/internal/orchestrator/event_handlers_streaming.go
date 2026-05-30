@@ -695,13 +695,35 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 	// READY events own workflow transitions and queued prompt execution.
 	// If we're still RUNNING here, avoid racing READY by forcing WAITING/REVIEW.
 	if session != nil && session.State == models.TaskSessionStateRunning {
-		s.logger.Debug("skipping complete-event terminal state update while session is running",
+		// Deferring the running→waiting transition to a READY event. If no READY
+		// follows, the session stays RUNNING and the chat UI keeps showing the
+		// agent as working even though the turn already completed. This is the
+		// backend half of the frontend [session:state] trace — filter both by the
+		// same task_id to see whether a clear ever lands.
+		s.logger.Debug("complete-event deferring running->waiting to READY (turn done, state not yet cleared)",
 			zap.String("task_id", payload.TaskID),
 			zap.String("session_id", payload.SessionID))
 		return
 	}
 
+	// Positive path: this complete event owns the running→WAITING_FOR_INPUT
+	// transition (no READY race). Pairs with the frontend [session:state] line
+	// under the same task_id.
+	s.logger.Debug("complete-event clearing running->waiting (this event owns the transition)",
+		zap.String("task_id", payload.TaskID),
+		zap.String("session_id", payload.SessionID),
+		zap.String("prev_state", sessionStateString(session)))
 	s.setSessionWaitingForInput(ctx, payload.TaskID, payload.SessionID, session)
+}
+
+// sessionStateString renders a session's state for logging, returning "" when
+// the session is nil (e.g. a complete event with no session ID). Kept tiny so
+// state-transition trace logs don't add branching to their hot-path callers.
+func sessionStateString(session *models.TaskSession) string {
+	if session == nil {
+		return ""
+	}
+	return string(session.State)
 }
 
 // Mirrors the same read in lifecycle/manager_events.go.
