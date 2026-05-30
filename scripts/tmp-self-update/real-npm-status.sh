@@ -11,6 +11,7 @@ fi
 PORT="${KANDEV_TEST_PORT:-38429}"
 NPM_PREFIX="${KANDEV_TEST_NPM_PREFIX:-$TEST_HOME/npm-global}"
 KANDEV_BIN="${KANDEV_TEST_KANDEV_BIN:-$NPM_PREFIX/bin/kandev}"
+METADATA_PATH="${KANDEV_TEST_METADATA_PATH:-$TEST_HOME/service/install.json}"
 export PATH="$NPM_PREFIX/bin:$PATH"
 export npm_config_prefix="$NPM_PREFIX"
 export NPM_CONFIG_PREFIX="$NPM_PREFIX"
@@ -29,6 +30,11 @@ if [ -z "$INFO" ]; then
 fi
 echo "$INFO"
 echo
+if [ -f "$METADATA_PATH" ]; then
+  echo "[self-update-real-npm] service install metadata:"
+  node -e 'const fs=require("fs"); const m=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); console.log(JSON.stringify({kind:m.kind, manager:m.manager, mode:m.mode, cli_entry:m.cli_entry}, null, 2));' "$METADATA_PATH"
+  echo
+fi
 echo "[self-update-real-npm] isolated npm kandev:"
 npm list -g --prefix "$NPM_PREFIX" kandev --depth=0 || true
 echo "[self-update-real-npm] service status:"

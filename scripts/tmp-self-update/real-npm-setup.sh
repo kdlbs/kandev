@@ -115,9 +115,18 @@ export NPM_CONFIG_PREFIX="$NPM_PREFIX"
 echo "[self-update-real-npm] installing user service from $KANDEV_BIN"
 "$KANDEV_BIN" service install --home-dir "$TEST_HOME" --port "$PORT" --no-boot-start
 
+METADATA_PATH="$TEST_HOME/service/install.json"
+INSTALL_KIND="$(node -e 'const fs=require("fs"); const p=process.argv[1]; console.log(JSON.parse(fs.readFileSync(p, "utf8")).kind || "");' "$METADATA_PATH")"
+if [ "$INSTALL_KIND" != "npm" ]; then
+  echo "[self-update-real-npm] expected service metadata kind=npm, got kind=$INSTALL_KIND" >&2
+  cat "$METADATA_PATH" >&2
+  exit 1
+fi
+
 cat >"$TEST_HOME/real-npm-env.sh" <<EOF
 export TEST_HOME="$TEST_HOME"
 export KANDEV_TEST_NPM_PREFIX="$NPM_PREFIX"
+export KANDEV_TEST_METADATA_PATH="$METADATA_PATH"
 export KANDEV_TEST_PORT="$PORT"
 export KANDEV_TEST_CURRENT_VERSION="$CURRENT_VERSION"
 export KANDEV_TEST_TARGET_VERSION="$LATEST_VERSION"

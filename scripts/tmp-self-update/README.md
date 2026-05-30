@@ -57,6 +57,10 @@ KANDEV_REAL_NPM_CONFIRM=1 scripts/tmp-self-update/real-npm-setup.sh
 scripts/tmp-self-update/real-npm-seed-latest.sh
 ```
 
+The setup step fails early if the installed service metadata is not detected as
+`kind=npm`, because the UI updater is intentionally hidden for unsupported
+install kinds.
+
 Then open:
 
 ```

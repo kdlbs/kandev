@@ -54,8 +54,8 @@ export type LauncherInfo = {
  *
  * The unit file hard-codes absolute paths because systemd/launchd start with an
  * empty PATH and may not see the user's `node` or `kandev` shim. By recording
- * `process.execPath` (node) and `process.argv[1]` (cli.js) at install time we
- * avoid any PATH lookups at service-run time.
+ * `process.execPath` (node) and the resolved CLI entry at install time we avoid
+ * any PATH lookups at service-run time.
  */
 export function captureLauncher(): LauncherInfo {
   const nodePath = process.execPath;
@@ -79,7 +79,7 @@ function looksLikeNpxEntry(cliEntry: string): boolean {
 function resolveCliEntry(): string {
   const argvEntry = process.argv[1];
   if (argvEntry && fs.existsSync(argvEntry)) {
-    return path.resolve(argvEntry);
+    return path.resolve(fs.realpathSync(argvEntry));
   }
   throw new Error(
     "could not resolve the kandev CLI entry path from process.argv[1]; " +
