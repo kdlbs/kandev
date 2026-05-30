@@ -20,6 +20,44 @@ func insertMsgWithType(t *testing.T, repo *Repository, id, sessionID, turnID, ms
 	}
 }
 
+func TestListMessagesByTurnID(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	seedForMsgTest(t, repo, "task-T", "sess-T", "turn-1")
+	seedForMsgTest(t, repo, "task-T2", "sess-T", "turn-2")
+
+	// Two messages on turn-1 (out of insertion order to check created_at sort)
+	// and one on turn-2 in the same session.
+	insertMsgWithType(t, repo, "m-b", "sess-T", "turn-1", "message", now.Add(2*time.Second))
+	insertMsgWithType(t, repo, "m-a", "sess-T", "turn-1", "tool_call", now)
+	insertMsgWithType(t, repo, "m-other", "sess-T", "turn-2", "message", now.Add(time.Second))
+
+	got, err := repo.ListMessagesByTurnID(ctx, "turn-1")
+	if err != nil {
+		t.Fatalf("ListMessagesByTurnID: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 messages for turn-1, got %d", len(got))
+	}
+	if got[0].ID != "m-a" || got[1].ID != "m-b" {
+		t.Errorf("expected [m-a, m-b] ordered by created_at, got [%s, %s]", got[0].ID, got[1].ID)
+	}
+	for _, m := range got {
+		if m.TurnID != "turn-1" {
+			t.Errorf("message %s has turn_id %q, want turn-1", m.ID, m.TurnID)
+		}
+	}
+
+	empty, err := repo.ListMessagesByTurnID(ctx, "turn-missing")
+	if err != nil {
+		t.Fatalf("ListMessagesByTurnID(missing): %v", err)
+	}
+	if len(empty) != 0 {
+		t.Errorf("expected no messages for unknown turn, got %d", len(empty))
+	}
+}
+
 func TestCountToolCallMessagesBySession_Empty(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	got, err := repo.CountToolCallMessagesBySession(context.Background(), nil)

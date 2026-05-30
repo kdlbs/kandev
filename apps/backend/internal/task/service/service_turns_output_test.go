@@ -186,9 +186,14 @@ func TestTurnHadAgentOutput(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "a standalone permission request is not output",
+			name: "a permission request is visible output",
 			msgs: []*models.Message{agentMsg(models.MessageTypePermissionRequest, "")},
-			want: false,
+			want: true,
+		},
+		{
+			name: "a clarification request is visible output",
+			msgs: []*models.Message{agentMsg(models.MessageTypeClarificationRequest, "")},
+			want: true,
 		},
 		{
 			name: "lifecycle status notices are not output",

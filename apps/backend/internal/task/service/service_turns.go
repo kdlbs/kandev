@@ -43,9 +43,8 @@ func (s *Service) StartTurn(ctx context.Context, sessionID string) (*models.Turn
 		return nil, err
 	}
 
-	// A freshly started turn has produced no agent output yet. had_output is
-	// only meaningful on turn.completed; pass false here for a consistent payload.
-	s.publishTurnEvent(events.TurnStarted, turn, false)
+	// had_output is only meaningful on turn.completed; omit it from turn.started.
+	s.publishTurnEvent(events.TurnStarted, turn, nil)
 
 	s.logger.Debug("started turn",
 		zap.String("turn_id", turn.ID),
@@ -83,7 +82,8 @@ func (s *Service) CompleteTurn(ctx context.Context, turnID string) error {
 		return nil
 	}
 
-	s.publishTurnEvent(events.TurnCompleted, turn, s.turnHadOutput(ctx, turn))
+	hadOutput := s.turnHadOutput(ctx, turn)
+	s.publishTurnEvent(events.TurnCompleted, turn, &hadOutput)
 
 	s.logger.Debug("completed turn",
 		zap.String("turn_id", turnID),
@@ -154,7 +154,8 @@ func (s *Service) AbandonOpenTurns(ctx context.Context, sessionID string) error 
 			// Abandoned turns are orphans swept on resume, not live completions.
 			// Report had_output=true so the frontend never shows an "empty turn"
 			// notice for them — only genuine live completions should trigger it.
-			s.publishTurnEvent(events.TurnCompleted, refreshed, true)
+			hadOutput := true
+			s.publishTurnEvent(events.TurnCompleted, refreshed, &hadOutput)
 		}
 		s.logger.Info("abandoned orphan turn on session resume",
 			zap.String("turn_id", turn.ID),
@@ -195,8 +196,10 @@ func (s *Service) getOrStartTurn(ctx context.Context, sessionID string) (*models
 
 // publishTurnEvent publishes a turn event to the event bus. hadOutput reports
 // whether the turn produced any agent output; it is only meaningful for
-// turn.completed events (the frontend uses it to surface an "empty turn" notice).
-func (s *Service) publishTurnEvent(eventType string, turn *models.Turn, hadOutput bool) {
+// turn.completed events (the frontend uses it to surface an "empty turn"
+// notice). Pass nil for turn.started so the field is omitted entirely rather
+// than carrying a misleading "false" on a turn that has not completed.
+func (s *Service) publishTurnEvent(eventType string, turn *models.Turn, hadOutput *bool) {
 	if s.eventBus == nil {
 		return
 	}
@@ -204,27 +207,30 @@ func (s *Service) publishTurnEvent(eventType string, turn *models.Turn, hadOutpu
 		s.logger.Warn("publishTurnEvent: turn is nil, skipping", zap.String("event_type", eventType))
 		return
 	}
-	_ = s.eventBus.Publish(context.Background(), eventType, bus.NewEvent(eventType, "task-service", map[string]interface{}{
+	payload := map[string]interface{}{
 		"id":           turn.ID,
 		"session_id":   turn.TaskSessionID,
 		"task_id":      turn.TaskID,
 		"started_at":   turn.StartedAt,
 		"completed_at": turn.CompletedAt,
 		"metadata":     turn.Metadata,
-		"had_output":   hadOutput,
 		"created_at":   turn.CreatedAt,
 		"updated_at":   turn.UpdatedAt,
-	}))
+	}
+	if hadOutput != nil {
+		payload["had_output"] = *hadOutput
+	}
+	_ = s.eventBus.Publish(context.Background(), eventType, bus.NewEvent(eventType, "task-service", payload))
 }
 
 // turnHadOutput reports whether a completed turn produced any agent output.
-// It reads the turn's persisted messages (all agent text/tool messages are
-// written before the turn is completed, so the DB is authoritative even for
-// streaming agents whose text is drained via chunk events). A read failure
-// defaults to true so a transient DB error never produces a spurious
-// "empty turn" notice.
+// It reads only the turn's own persisted messages (indexed by turn_id; all
+// agent text/tool messages are written before the turn is completed, so the DB
+// is authoritative even for streaming agents whose text is drained via chunk
+// events). A read failure defaults to true so a transient DB error never
+// produces a spurious "empty turn" notice.
 func (s *Service) turnHadOutput(ctx context.Context, turn *models.Turn) bool {
-	msgs, err := s.messages.ListMessages(ctx, turn.TaskSessionID)
+	msgs, err := s.messages.ListMessagesByTurnID(ctx, turn.ID)
 	if err != nil {
 		s.logger.Debug("failed to list messages for had_output; assuming output",
 			zap.String("turn_id", turn.ID),
@@ -235,13 +241,13 @@ func (s *Service) turnHadOutput(ctx context.Context, turn *models.Turn) bool {
 }
 
 // turnHadAgentOutput returns true when any message belonging to turnID is
-// agent-authored, substantive output: a tool call, a native plan/todo, or a
+// agent-authored, user-visible output: a tool call, a native plan/todo, a
+// permission or clarification prompt (both render inline in chat), or a
 // non-empty text response. It is an allowlist on purpose — incidental,
 // non-answer messages the runtime attaches to a turn (lifecycle "status" /
-// "script_execution" notices, logs, progress, thinking, and standalone
-// permission/clarification prompts) must NOT count, so a turn that only emits
-// those (or nothing at all) is still treated as empty. User messages never
-// count.
+// "script_execution" notices, logs, progress, thinking) must NOT count, so a
+// turn that only emits those (or nothing at all) is still treated as empty.
+// User messages never count.
 func turnHadAgentOutput(msgs []*models.Message, turnID string) bool {
 	for _, m := range msgs {
 		if m == nil || m.TurnID != turnID || m.AuthorType != models.MessageAuthorAgent {
@@ -249,7 +255,8 @@ func turnHadAgentOutput(msgs []*models.Message, turnID string) bool {
 		}
 		switch m.Type {
 		case models.MessageTypeToolCall, models.MessageTypeToolEdit, models.MessageTypeToolRead,
-			models.MessageTypeToolExecute, models.MessageTypeAgentPlan, models.MessageTypeTodo:
+			models.MessageTypeToolExecute, models.MessageTypeAgentPlan, models.MessageTypeTodo,
+			models.MessageTypePermissionRequest, models.MessageTypeClarificationRequest:
 			return true
 		case models.MessageTypeMessage, models.MessageTypeContent, "":
 			if strings.TrimSpace(m.Content) != "" {

@@ -184,6 +184,9 @@ func (m *mockRepository) UpdateMessage(ctx context.Context, message *models.Mess
 func (m *mockRepository) ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error) {
 	return nil, nil
 }
+func (m *mockRepository) ListMessagesByTurnID(ctx context.Context, turnID string) ([]*models.Message, error) {
+	return nil, nil
+}
 func (m *mockRepository) ListMessagesPaginated(ctx context.Context, sessionID string, opts models.ListMessagesOptions) ([]*models.Message, bool, error) {
 	return nil, false, nil
 }

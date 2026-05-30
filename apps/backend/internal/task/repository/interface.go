@@ -99,6 +99,7 @@ type MessageRepository interface {
 	FindMessageByPendingIDAndQuestion(ctx context.Context, sessionID, pendingID, questionID string) (*models.Message, error)
 	UpdateMessage(ctx context.Context, message *models.Message) error
 	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
+	ListMessagesByTurnID(ctx context.Context, turnID string) ([]*models.Message, error)
 	ListMessagesPaginated(ctx context.Context, sessionID string, opts models.ListMessagesOptions) ([]*models.Message, bool, error)
 	SearchMessages(ctx context.Context, sessionID string, opts models.SearchMessagesOptions) ([]*models.Message, error)
 	DeleteMessage(ctx context.Context, id string) error
