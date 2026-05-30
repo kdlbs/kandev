@@ -186,6 +186,11 @@ func TestTurnHadAgentOutput(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "todo is visible output",
+			msgs: []*models.Message{agentMsg(models.MessageTypeTodo, "")},
+			want: true,
+		},
+		{
 			name: "a permission request is visible output",
 			msgs: []*models.Message{agentMsg(models.MessageTypePermissionRequest, "")},
 			want: true,
