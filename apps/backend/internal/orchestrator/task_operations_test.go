@@ -372,13 +372,10 @@ func TestCancelAgent_DeduplicatesConcurrentCalls(t *testing.T) {
 	}
 }
 
-func TestCancelAgent_DrainsQueuedMessage(t *testing.T) {
+func TestCancelAgent_LeavesQueuedMessageForManualDrain(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
-	agentMgr := &mockAgentManager{
-		isAgentRunning: true,
-		promptDone:     make(chan struct{}),
-	}
+	agentMgr := &mockAgentManager{isAgentRunning: true}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
 
@@ -394,20 +391,23 @@ func TestCancelAgent_DrainsQueuedMessage(t *testing.T) {
 		t.Fatalf("cancel agent: %v", err)
 	}
 
-	if status := svc.messageQueue.GetStatus(ctx, "session1"); status.Count != 0 {
-		t.Fatalf("expected cancel to drain queued messages, count=%d entries=%+v", status.Count, status.Entries)
+	updated, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("get updated session: %v", err)
+	}
+	if updated.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("expected session state %q, got %q", models.TaskSessionStateWaitingForInput, updated.State)
 	}
 
-	select {
-	case <-agentMgr.promptDone:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for queued message to be sent after cancel")
+	status := svc.messageQueue.GetStatus(ctx, "session1")
+	if status.Count != 1 {
+		t.Fatalf("expected cancel to leave queued message for manual drain, count=%d entries=%+v", status.Count, status.Entries)
 	}
-	if len(agentMgr.capturedPrompts) != 1 {
-		t.Fatalf("expected one queued prompt to be sent after cancel, got %d", len(agentMgr.capturedPrompts))
+	if got := status.Entries[0].Content; got != "queued after cancel" {
+		t.Fatalf("queued prompt = %q, want %q", got, "queued after cancel")
 	}
-	if agentMgr.capturedPrompts[0] != "queued after cancel" {
-		t.Fatalf("queued prompt = %q, want %q", agentMgr.capturedPrompts[0], "queued after cancel")
+	if len(agentMgr.capturedPrompts) != 0 {
+		t.Fatalf("expected cancel not to prompt queued message, got %d prompts", len(agentMgr.capturedPrompts))
 	}
 }
 

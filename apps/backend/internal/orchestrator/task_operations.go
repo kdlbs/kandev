@@ -2311,13 +2311,6 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 	// Complete the turn since the agent was cancelled. Idempotent w.r.t. a
 	// concurrent agent.complete event having already closed the turn.
 	s.completeTurnForSession(ctx, sessionID)
-	if session != nil {
-		if _, err := s.DrainQueuedMessage(ctx, sessionID); err != nil {
-			s.logger.Warn("failed to drain queued message after cancel",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-		}
-	}
 
 	s.logger.Debug("agent turn cancelled", zap.String("session_id", sessionID))
 	return nil
