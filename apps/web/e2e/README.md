@@ -2,12 +2,6 @@
 
 Playwright-based end-to-end tests. Each Playwright worker spawns its own real Go backend (no mocks of internal services) on isolated ports and a real Next.js standalone frontend, then drives a real Chromium against them.
 
-> **Source changes require a rebuild.** The harness spawns the production
-> standalone server (`.next/standalone/web/server.js`), not `next dev`. After
-> any frontend source edit you must run `pnpm --filter @kandev/web build`
-> before `pnpm e2e`, otherwise the spec runs against stale bytecode and
-> seemingly-correct code looks broken.
-
 ## Project layout
 
 | Folder                 | What's in it                                                                                                                                 |
@@ -78,6 +72,27 @@ This project used to be named `docker`. It was renamed to `containers` once SSH 
 | `E2E_DEBUG=1 pnpm e2e`             | Surface Docker build output + extra logging.     |
 
 Common flags: `--shard=1/4`, `-g "fragment of test name"`, `--repeat-each=3` (flake hunting).
+
+### `pnpm e2e:run` — the managed runner (build + run + teardown)
+
+`e2e/scripts/run-e2e.sh` (aliased as `pnpm e2e:run`) handles the build, the run, and cleanup so you don't have to assemble the steps by hand. It **auto-selects docker vs host**, runs **N shards concurrently**, enforces strict WS accounting by default (`KANDEV_E2E_WS_ASSERT=1`, matching CI), and never leaves root-owned artifacts behind.
+
+```bash
+pnpm e2e:run                                  # auto: docker if the daemon + CI image are available, else host
+pnpm e2e:run --shards 3                        # 3 shards concurrently (isolated containers, or host procs with distinct ports)
+pnpm e2e:run tests/chat/foo.spec.ts            # extra args pass straight through to Playwright
+pnpm e2e:run --host --no-build -- --grep "x"   # force host, skip rebuild, forward flags after --
+pnpm e2e:docker                                # force the docker CI image (full isolation from a host dev instance)
+pnpm e2e:clean                                 # remove build/test artifacts, incl. root-owned ones from prior docker runs
+```
+
+Why a script instead of raw `docker run`: in docker mode it builds the CGO/`fts5` backend on the **host** and runs it in the runtime image — a host glibc that's the same or older than the image's (the usual case; the image tracks recent Ubuntu) is forward-compatible, so no build image is needed. The runner smoke-tests the binary in the image first and only falls back to the build image (`KANDEV_CI_BUILD_IMAGE`, default `…/kandev-ci:build-latest`) if your host glibc is _newer_. It also builds the FE standalone on the host, pre-creates the standalone symlinks as **relative** links (so in-container `global-setup` doesn't recreate them as root), points Playwright output at a container-local dir, and cleans up. Run `clean` if a previous bare `docker run` left root-owned files you can't delete.
+
+> **Office is always enabled in e2e (and dev); only prod gates it off.** `profiles.yaml` sets `KANDEV_FEATURES_OFFICE` to `"true"` in the `e2e` and `dev` profiles and `"false"` in `prod`, and the fixture selects the e2e profile via `KANDEV_E2E_MOCK=true`. So `tests/office/*` always have office routes registered — no manual env setup.
+>
+> This used to break when e2e was launched from a shell that had inherited `KANDEV_FEATURES_OFFICE=false` (e.g. from a host kandev backend running the prod profile): `profiles.ApplyProfile` only sets vars that are **unset** (so launchers/shells win — see `docs/decisions/0007-runtime-feature-flags.md`), and the fixture spreads `process.env` into the spawned backend, so the stale prod value won and 404'd every office spec. Fixed at the source: `sanitizeInheritedEnv` in `e2e/fixtures/backend.ts` strips all inherited `KANDEV_FEATURES_*` before spawn, so the e2e profile — not whatever the host exported — decides feature flags. No `unset` needed.
+
+> **Host oversubscription:** running ≥5 heavy shards concurrently on one machine (each = Go backend + Next standalone + Chromium + mock agent) starves CPU/IO and induces timing flakes that CI's isolated runners never see. Use 2–3 concurrent shards locally for a clean signal; see "flake triage" in the `/e2e` skill.
 
 ## Backend isolation per worker
 
