@@ -60,6 +60,19 @@ function TimelineSection({
   "data-testid"?: string;
 }) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
+  // Git data arrives in separate async store updates, so `defaultCollapsed`
+  // (derived from which section is first-visible) can flip after mount. Re-sync
+  // to it whenever it changes — but stop once the user has manually toggled, so
+  // their choice is never clobbered by a later data update. Adjusting state
+  // during render (storing the previous prop in state) is the React-recommended
+  // pattern and avoids both the setState-in-effect and ref-during-render lint
+  // rules.
+  const [userToggled, setUserToggled] = useState(false);
+  const [prevDefaultCollapsed, setPrevDefaultCollapsed] = useState(defaultCollapsed);
+  if (prevDefaultCollapsed !== defaultCollapsed) {
+    setPrevDefaultCollapsed(defaultCollapsed);
+    if (!userToggled) setCollapsed(defaultCollapsed);
+  }
   const canCollapse = collapsible && !!label;
 
   return (
@@ -79,7 +92,10 @@ function TimelineSection({
               <button
                 type="button"
                 className="flex items-center gap-1 text-[11px] font-medium uppercase tracking-wider text-foreground/70 cursor-pointer hover:text-foreground/90"
-                onClick={() => setCollapsed((c) => !c)}
+                onClick={() => {
+                  setUserToggled(true);
+                  setCollapsed((c) => !c);
+                }}
                 aria-expanded={!collapsed}
                 data-testid={`${testId ?? label.toLowerCase()}-collapse-toggle`}
               >
