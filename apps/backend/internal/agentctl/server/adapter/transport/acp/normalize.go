@@ -407,7 +407,17 @@ func (n *Normalizer) normalizeCodeSearch(toolName string, args map[string]any) *
 
 // normalizeGeneric wraps unknown tools as generic.
 func (n *Normalizer) normalizeGeneric(toolName string, args map[string]any) *streams.NormalizedPayload {
-	return streams.NewGeneric(toolName, args)
+	// Exclude the adapter-injected subagent-detection keys (title/meta) so
+	// internal routing data — notably the raw `_meta.claudeCode` map — never
+	// leaks into the generic payload shipped to the client.
+	input := make(map[string]any, len(args))
+	for k, v := range args {
+		if k == argKeyTitle || k == argKeyMeta {
+			continue
+		}
+		input[k] = v
+	}
+	return streams.NewGeneric(toolName, input)
 }
 
 // normalizeSubagent recognizes subagent (Task) tool calls from the meta, title,

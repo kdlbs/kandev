@@ -37,25 +37,16 @@ test.describe("Mobile subagent card", () => {
     const card = cards.first();
     await expect(card).toBeVisible();
 
-    await expect(session.chat.locator('[data-testid="subagent-type"]').first()).toContainText(
-      "general-purpose",
+    // Scope chip queries to the single card (strict mode catches duplicates).
+    await expect(card.locator('[data-testid="subagent-type"]')).toContainText("general-purpose");
+    await expect(card.locator('[data-testid="subagent-description"]')).toContainText(
+      "Explore the codebase",
     );
-    await expect(
-      session.chat.locator('[data-testid="subagent-description"]').first(),
-    ).toContainText("Explore the codebase");
 
-    await expect(session.chat.locator('[data-testid="subagent-meta"]').first()).toBeVisible();
-    await expect(
-      session.chat.locator('[data-testid="subagent-meta-duration"]').first(),
-    ).toContainText("2.2s");
-    await expect(
-      session.chat.locator('[data-testid="subagent-meta-tokens"]').first(),
-    ).toContainText("9,987");
-    await expect(session.chat.locator('[data-testid="subagent-meta-tools"]').first()).toContainText(
-      "3 tools",
-    );
-    await expect(session.chat.locator('[data-testid="subagent-meta-agent"]').first()).toContainText(
-      "agent_e2e",
-    );
+    await expect(card.locator('[data-testid="subagent-meta"]')).toBeVisible();
+    await expect(card.locator('[data-testid="subagent-meta-duration"]')).toContainText("2.2s");
+    await expect(card.locator('[data-testid="subagent-meta-tokens"]')).toContainText("9,987");
+    await expect(card.locator('[data-testid="subagent-meta-tools"]')).toContainText("3 tools");
+    await expect(card.locator('[data-testid="subagent-meta-agent"]')).toContainText("agent_e2e");
   });
 });

@@ -42,28 +42,20 @@ test.describe("Subagent card", () => {
     const card = cards.first();
     await expect(card).toBeVisible();
 
-    // Type badge and description (visible while collapsed).
-    await expect(session.chat.locator('[data-testid="subagent-type"]').first()).toContainText(
-      "general-purpose",
+    // Type badge and description (visible while collapsed). Scope chip queries
+    // to the single card so Playwright strict mode catches duplicates instead
+    // of silently selecting the first match.
+    await expect(card.locator('[data-testid="subagent-type"]')).toContainText("general-purpose");
+    await expect(card.locator('[data-testid="subagent-description"]')).toContainText(
+      "Explore the codebase",
     );
-    await expect(
-      session.chat.locator('[data-testid="subagent-description"]').first(),
-    ).toContainText("Explore the codebase");
 
     // Metadata row of chips surfaces the completed subagent's metrics.
-    await expect(session.chat.locator('[data-testid="subagent-meta"]').first()).toBeVisible();
-    await expect(
-      session.chat.locator('[data-testid="subagent-meta-duration"]').first(),
-    ).toContainText("2.2s");
-    await expect(
-      session.chat.locator('[data-testid="subagent-meta-tokens"]').first(),
-    ).toContainText("9,987");
-    await expect(session.chat.locator('[data-testid="subagent-meta-tools"]').first()).toContainText(
-      "3 tools",
-    );
+    await expect(card.locator('[data-testid="subagent-meta"]')).toBeVisible();
+    await expect(card.locator('[data-testid="subagent-meta-duration"]')).toContainText("2.2s");
+    await expect(card.locator('[data-testid="subagent-meta-tokens"]')).toContainText("9,987");
+    await expect(card.locator('[data-testid="subagent-meta-tools"]')).toContainText("3 tools");
     // The agent id is truncated with an ellipsis, so assert on a substring.
-    await expect(session.chat.locator('[data-testid="subagent-meta-agent"]').first()).toContainText(
-      "agent_e2e",
-    );
+    await expect(card.locator('[data-testid="subagent-meta-agent"]')).toContainText("agent_e2e");
   });
 });
