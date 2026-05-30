@@ -13,7 +13,11 @@ export function registerTurnsHandlers(store: StoreApi<AppState>): WsHandlers {
       if (!payload.session_id) {
         return;
       }
-      debug("turn.started", { sessionId: payload.session_id, turnId: payload.id });
+      debug("turn.started", {
+        sessionId: payload.session_id,
+        task_id: payload.task_id,
+        turnId: payload.id,
+      });
       store.getState().addTurn({
         id: payload.id,
         session_id: sessionId(payload.session_id),
@@ -34,6 +38,7 @@ export function registerTurnsHandlers(store: StoreApi<AppState>): WsHandlers {
       }
       debug("turn.completed", {
         sessionId: payload.session_id,
+        task_id: payload.task_id,
         turnId: payload.id,
         completedAt: payload.completed_at ?? "-",
       });

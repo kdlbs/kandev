@@ -99,11 +99,18 @@ describe("registerSessionTaskResolver", () => {
     expect(console.debug).toHaveBeenCalledWith("[ns] msg session_id=s_1 task_id=t_99");
   });
 
-  it("does not annotate when the line already names a task", () => {
+  it("does not annotate when the line already names a task via taskId", () => {
     registerSessionTaskResolver(() => "t_resolved");
     const log = createDebugLogger("ns");
     log("msg", { sessionId: "s_1", taskId: "t_explicit" });
     expect(console.debug).toHaveBeenCalledWith("[ns] msg sessionId=s_1 taskId=t_explicit");
+  });
+
+  it("does not annotate when the line already names a task via task_id", () => {
+    registerSessionTaskResolver(() => "t_resolved");
+    const log = createDebugLogger("ns");
+    log("msg", { sessionId: "s_1", task_id: "t_explicit" });
+    expect(console.debug).toHaveBeenCalledWith("[ns] msg sessionId=s_1 task_id=t_explicit");
   });
 
   it("does not annotate when no session is present", () => {

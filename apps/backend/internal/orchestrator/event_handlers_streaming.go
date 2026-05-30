@@ -702,8 +702,7 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 		// same task_id to see whether a clear ever lands.
 		s.logger.Debug("complete-event deferring running->waiting to READY (turn done, state not yet cleared)",
 			zap.String("task_id", payload.TaskID),
-			zap.String("session_id", payload.SessionID),
-			zap.String("session_state", string(session.State)))
+			zap.String("session_id", payload.SessionID))
 		return
 	}
 

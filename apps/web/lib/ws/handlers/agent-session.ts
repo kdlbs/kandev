@@ -343,6 +343,11 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
 
       debug("state_changed", {
         sessionId,
+        // Logged before upsertTaskSessionList below, so on the first event for a
+        // session the store has no row yet and the auto-resolver can't map it —
+        // exactly the oldState="-" anchor line. taskId is already in scope, so
+        // pass it directly (rendered as task_id=, matching the auto-annotation).
+        task_id: taskId,
         oldState: existingSession?.state ?? "-",
         newState: newState ?? "-",
       });
