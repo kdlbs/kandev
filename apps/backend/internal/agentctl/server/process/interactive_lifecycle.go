@@ -154,7 +154,7 @@ func (r *InteractiveRunner) Start(ctx context.Context, req InteractiveStartReque
 		r.logger.Info("interactive process created (waiting for terminal dimensions)",
 			zap.String("process_id", id),
 			zap.String("session_id", req.SessionID),
-			zap.Strings("command", req.Command),
+			zap.Strings("command", req.commandForLog()),
 			zap.String("working_dir", req.WorkingDir),
 		)
 	}
@@ -209,7 +209,7 @@ func (r *InteractiveRunner) immediateStartProcess(req InteractiveStartRequest, p
 	r.logger.Info("interactive process started immediately",
 		zap.String("process_id", id),
 		zap.String("session_id", req.SessionID),
-		zap.Strings("command", req.Command),
+		zap.Strings("command", req.commandForLog()),
 		zap.String("working_dir", req.WorkingDir),
 	)
 	return nil

@@ -450,9 +450,13 @@ func (m *Manager) writeFileNoFollow(path string, content []byte) (bool, error) {
 	}
 	if _, werr := file.Write(content); werr != nil {
 		_ = file.Close()
+		// Remove the empty file so a later SkipIfExists probe doesn't see it and
+		// silently skip writing the real config.
+		_ = os.Remove(path)
 		return false, fmt.Errorf("write passthrough MCP config: %w", werr)
 	}
 	if cerr := file.Close(); cerr != nil {
+		_ = os.Remove(path)
 		return false, fmt.Errorf("close passthrough MCP config: %w", cerr)
 	}
 	return true, nil
@@ -640,8 +644,11 @@ func (m *Manager) profileCLIFlagTokens(p *AgentProfileInfo) []string {
 // terminal WebSocket is already connected).
 func buildInteractiveStartRequest(sessionID string, execution *AgentExecution, pt agents.PassthroughConfig, env map[string]string, cmd agents.Command, immediateStart bool) process.InteractiveStartRequest {
 	return process.InteractiveStartRequest{
-		SessionID:       sessionID,
-		Command:         cmd.Args(),
+		SessionID: sessionID,
+		Command:   cmd.Args(),
+		// Redacted copy logged in place of Command by the interactive runner so
+		// Codex MCP `-c` overrides (env/headers tokens) never reach process logs.
+		LogCommand:      redactPassthroughArgs(cmd.Args()),
 		WorkingDir:      execution.WorkspacePath,
 		Env:             env,
 		PromptPattern:   pt.PromptPattern,
