@@ -188,9 +188,9 @@ func TestRespond_Duplicate(t *testing.T) {
 
 func TestCancelSession_CancelsMatchingRequests(t *testing.T) {
 	s := NewStore(time.Minute)
-	id1 := s.CreateRequest(&Request{SessionID: "s1"})
-	id2 := s.CreateRequest(&Request{SessionID: "s1"})
-	id3 := s.CreateRequest(&Request{SessionID: "s2"})
+	id1 := s.CreateRequest(&Request{SessionID: "s1", Questions: []Question{{Prompt: "q1?", Options: []Option{{ID: "o1", Label: "A"}}}}})
+	id2 := s.CreateRequest(&Request{SessionID: "s1", Questions: []Question{{Prompt: "q2?", Options: []Option{{ID: "o1", Label: "B"}}}}})
+	id3 := s.CreateRequest(&Request{SessionID: "s2", Questions: []Question{{Prompt: "q3?", Options: []Option{{ID: "o1", Label: "C"}}}}})
 
 	cancelled := s.CancelSession("s1")
 
@@ -343,4 +343,71 @@ func TestListPendingPermissions_ImplementsInterface(t *testing.T) {
 	var _ interface {
 		ListPendingPermissions() []shared.PendingPermission
 	} = s
+}
+
+func TestCreateRequest_Dedup_SameSessionAndQuestions(t *testing.T) {
+	s := NewStore(time.Minute)
+	q := []Question{{Prompt: "What colour?", Options: []Option{{ID: "o1", Label: "Red"}, {ID: "o2", Label: "Blue"}}}}
+
+	id1 := s.CreateRequest(&Request{SessionID: "s1", Questions: q})
+	id2 := s.CreateRequest(&Request{SessionID: "s1", Questions: q})
+
+	if id1 != id2 {
+		t.Fatalf("expected duplicate request to reuse pending ID %q, got %q", id1, id2)
+	}
+
+	pending := s.ListPending()
+	if len(pending) != 1 {
+		t.Fatalf("expected 1 pending request after dedup, got %d", len(pending))
+	}
+}
+
+func TestCreateRequest_NoDedup_DifferentQuestions(t *testing.T) {
+	s := NewStore(time.Minute)
+	id1 := s.CreateRequest(&Request{SessionID: "s1", Questions: []Question{{Prompt: "Q1?", Options: []Option{{ID: "o1", Label: "A"}}}}})
+	id2 := s.CreateRequest(&Request{SessionID: "s1", Questions: []Question{{Prompt: "Q2?", Options: []Option{{ID: "o1", Label: "A"}}}}})
+
+	if id1 == id2 {
+		t.Fatal("expected different pending IDs for different questions")
+	}
+}
+
+func TestWaitForResponse_Broadcast_MultipleWaiters(t *testing.T) {
+	s := NewStore(time.Minute)
+	id := s.CreateRequest(&Request{SessionID: "s1", Questions: []Question{{Prompt: "test?", Options: []Option{{ID: "o1", Label: "A"}}}}})
+
+	started := make(chan struct{}, 2)
+	done := make(chan *Response, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			started <- struct{}{}
+			resp, err := s.WaitForResponse(context.Background(), id)
+			if err != nil {
+				done <- nil
+				return
+			}
+			done <- resp
+		}()
+	}
+	<-started
+	<-started
+
+	if err := s.Respond(id, &Response{Answers: []Answer{{CustomText: "hello"}}}); err != nil {
+		t.Fatalf("unexpected respond error: %v", err)
+	}
+
+	var got int
+	for i := 0; i < 2; i++ {
+		select {
+		case resp := <-done:
+			if resp != nil && len(resp.Answers) == 1 && resp.Answers[0].CustomText == "hello" {
+				got++
+			}
+		case <-time.After(time.Second):
+			t.Fatal("WaitForResponse did not return")
+		}
+	}
+	if got != 2 {
+		t.Fatalf("expected both waiters to receive response, got %d", got)
+	}
 }

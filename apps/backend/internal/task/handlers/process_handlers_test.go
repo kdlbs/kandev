@@ -178,6 +178,9 @@ func (m *mockRepository) FindMessagesByPendingID(ctx context.Context, pendingID 
 func (m *mockRepository) FindMessageByPendingIDAndQuestion(ctx context.Context, sessionID, pendingID, questionID string) (*models.Message, error) {
 	return nil, nil
 }
+func (m *mockRepository) FindPendingClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*models.Message, error) {
+	return nil, nil
+}
 func (m *mockRepository) UpdateMessage(ctx context.Context, message *models.Message) error {
 	return nil
 }

@@ -31,6 +31,7 @@ type messageStore interface {
 	GetTaskSession(ctx context.Context, id string) (*taskmodels.TaskSession, error)
 	FindMessageByPendingID(ctx context.Context, pendingID string) (*taskmodels.Message, error)
 	FindMessagesByPendingID(ctx context.Context, pendingID string) ([]*taskmodels.Message, error)
+	FindPendingClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*taskmodels.Message, error)
 	UpdateMessage(ctx context.Context, message *taskmodels.Message) error
 }
 
