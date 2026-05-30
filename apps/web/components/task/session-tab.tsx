@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { DockviewDefaultTab, type IDockviewPanelHeaderProps } from "dockview-react";
 import { IconStar } from "@tabler/icons-react";
 import { AgentLogo } from "@/components/agent-logo";
@@ -220,6 +220,7 @@ function SessionContextMenuItems({
 
 function SessionTabTriggerContent({
   props,
+  sessionId,
   isPrimary,
   showMultiSessionBadges,
   sessionNumber,
@@ -230,6 +231,7 @@ function SessionTabTriggerContent({
   onCloseTab,
 }: {
   props: IDockviewPanelHeaderProps;
+  sessionId: string | undefined;
   isPrimary: boolean;
   showMultiSessionBadges: boolean;
   sessionNumber: number | null;
@@ -239,8 +241,18 @@ function SessionTabTriggerContent({
   showDeleteOnClose: boolean;
   onCloseTab: () => void;
 }) {
+  const tabContentRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showDeleteOnClose || !sessionId) return;
+    const closeAction = tabContentRef.current?.querySelector(".dv-default-tab-action");
+    if (!closeAction) return;
+    closeAction.setAttribute("data-testid", `session-tab-close-${sessionId}`);
+    return () => closeAction.removeAttribute("data-testid");
+  }, [showDeleteOnClose, sessionId, isActive]);
+
   return (
-    <div className="flex items-center">
+    <div ref={tabContentRef} className="flex items-center">
       {isPrimary && showMultiSessionBadges && (
         <IconStar className="h-3 w-3 fill-foreground/50 stroke-0 shrink-0 ml-2" />
       )}
@@ -296,6 +308,8 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
   }, [agentLabel, api]);
 
   const showMultiSessionBadges = sessionCount > 1;
+  // Multi-session tab close means delete, not hide-only. Running/starting sessions are
+  // not deletable, so we omit the X rather than reviving hide-only close behavior.
   const showDeleteOnClose = showMultiSessionBadges && !!sessionState && isDeletable(sessionState);
   const handleCloseTab = useCallback(() => {
     setConfirmDelete(true);
@@ -311,6 +325,7 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
         >
           <SessionTabTriggerContent
             props={props}
+            sessionId={sessionId}
             isPrimary={isPrimary}
             showMultiSessionBadges={showMultiSessionBadges}
             sessionNumber={sessionNumber}

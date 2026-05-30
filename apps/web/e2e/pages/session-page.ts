@@ -1014,7 +1014,7 @@ export class SessionPage {
 
   /** Dockview close (X) button inside a session tab. */
   sessionTabCloseButton(sessionId: string): Locator {
-    return this.sessionTabBySessionId(sessionId).locator(".dv-default-tab-action");
+    return this.page.getByTestId(`session-tab-close-${sessionId}`);
   }
 
   /** Context menu on a dockview tab — right-click the tab to trigger it. */
