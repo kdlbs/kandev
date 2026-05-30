@@ -302,13 +302,9 @@ func (s *Service) resetTransientRetry(sessionID string) {
 
 // cancelAllTransientRetries drains every armed retry timer at shutdown.
 func (s *Service) cancelAllTransientRetries() {
-	s.transientRetries.Range(func(key, value interface{}) bool {
+	s.transientRetries.Range(func(key, _ interface{}) bool {
 		if keyStr, ok := key.(string); ok {
 			s.resetTransientRetry(keyStr)
-			return true
-		}
-		if entry, ok := value.(*transientRetryEntry); ok && entry.cancel != nil {
-			entry.cancel()
 		}
 		return true
 	})
