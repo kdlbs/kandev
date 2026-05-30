@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
 TEST_HOME="${TEST_HOME:-$HOME/.kandev-selfupdate-test}"
 PORT="${KANDEV_TEST_PORT:-38429}"
+WEB_PORT="${KANDEV_TEST_WEB_PORT:-37429}"
 MODE="${KANDEV_TEST_MODE:-user}"
 KIND="${KANDEV_TEST_KIND:-npm}"
 NODE_PATH="${KANDEV_TEST_NODE:-$(command -v node)}"
@@ -62,7 +63,10 @@ PY
 
 cat >"$ENV_PATH" <<EOF
 export KANDEV_HOME_DIR="$TEST_HOME"
+export KANDEV_DATABASE_PATH="$TEST_HOME/data/kandev.db"
 export KANDEV_SERVER_PORT="$PORT"
+export KANDEV_BACKEND_PORT="$PORT"
+export KANDEV_WEB_PORT="$WEB_PORT"
 export KANDEV_RUNNING_AS_SERVICE=true
 export KANDEV_SERVICE_MODE="$MODE"
 export KANDEV_SERVICE_MANAGER="$MANAGER"
@@ -74,4 +78,4 @@ EOF
 echo "[self-update-test] TEST_HOME=$TEST_HOME"
 echo "[self-update-test] wrote $METADATA_PATH"
 echo "[self-update-test] wrote $ENV_PATH"
-echo "[self-update-test] next: scripts/tmp-self-update/run-backend.sh"
+echo "[self-update-test] next: scripts/tmp-self-update/run-app.sh"

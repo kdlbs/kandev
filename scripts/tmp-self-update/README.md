@@ -8,7 +8,7 @@ Remove this directory after the manual test pass.
 ```
 scripts/tmp-self-update/build-local.sh
 scripts/tmp-self-update/setup-fake-service.sh
-scripts/tmp-self-update/run-backend.sh
+scripts/tmp-self-update/run-app.sh
 ```
 
 In another shell:
@@ -42,6 +42,7 @@ Other useful overrides:
 - `KANDEV_TEST_CURRENT_VERSION=v0.53.0`
 - `KANDEV_TEST_TARGET_TAG=v99.0.0`
 - `KANDEV_TEST_PORT=38429`
+- `KANDEV_TEST_WEB_PORT=37429`
 - `KANDEV_TEST_MANAGER=systemd` or `launchd`
 - `KANDEV_TEST_KIND=npm`, `npx`, or `homebrew`
 
