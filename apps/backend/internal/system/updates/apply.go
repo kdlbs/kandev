@@ -111,17 +111,7 @@ func (s *Service) defaultApplyRunner(ctx context.Context, req applyRequest) (map
 
 func runSystemdSelfUpdate(ctx context.Context, req applyRequest) (map[string]interface{}, error) {
 	unitName := "kandev-self-update-" + strconv.FormatInt(time.Now().UnixNano(), 10)
-	args := []string{
-		"--user",
-		"--unit", unitName,
-		"--collect",
-		req.Intent.Install.NodePath,
-		req.Intent.Install.CLIEntry,
-		"service",
-		"self-update",
-		"--intent",
-		req.IntentPath,
-	}
+	args := systemdSelfUpdateArgs(req, unitName)
 	out, err := exec.CommandContext(ctx, "systemd-run", args...).CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("systemd-run self-update helper: %w: %s", err, strings.TrimSpace(string(out)))
@@ -134,19 +124,28 @@ func runSystemdSelfUpdate(ctx context.Context, req applyRequest) (map[string]int
 	}, nil
 }
 
-func runLaunchdSelfUpdate(ctx context.Context, req applyRequest) (map[string]interface{}, error) {
-	label := "com.kdlbs.kandev.self-update." + strconv.FormatInt(time.Now().UnixNano(), 10)
+func systemdSelfUpdateArgs(req applyRequest, unitName string) []string {
 	args := []string{
-		"submit",
-		"-l", label,
-		"--",
+		"--user",
+		"--unit", unitName,
+		"--collect",
+	}
+	for _, env := range selfUpdateEnvironment() {
+		args = append(args, "--setenv="+env)
+	}
+	return append(args,
 		req.Intent.Install.NodePath,
 		req.Intent.Install.CLIEntry,
 		"service",
 		"self-update",
 		"--intent",
 		req.IntentPath,
-	}
+	)
+}
+
+func runLaunchdSelfUpdate(ctx context.Context, req applyRequest) (map[string]interface{}, error) {
+	label := "com.kdlbs.kandev.self-update." + strconv.FormatInt(time.Now().UnixNano(), 10)
+	args := launchdSelfUpdateArgs(req, label)
 	out, err := exec.CommandContext(ctx, "launchctl", args...).CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("launchctl self-update helper: %w: %s", err, strings.TrimSpace(string(out)))
@@ -157,6 +156,37 @@ func runLaunchdSelfUpdate(ctx context.Context, req applyRequest) (map[string]int
 		"label":                  label,
 		applyResultIntentPathKey: req.IntentPath,
 	}, nil
+}
+
+func launchdSelfUpdateArgs(req applyRequest, label string) []string {
+	args := []string{
+		"submit",
+		"-l", label,
+		"--",
+	}
+	command := []string{
+		req.Intent.Install.NodePath,
+		req.Intent.Install.CLIEntry,
+		"service",
+		"self-update",
+		"--intent",
+		req.IntentPath,
+	}
+	if env := selfUpdateEnvironment(); len(env) > 0 {
+		command = append(append([]string{"/usr/bin/env"}, env...), command...)
+	}
+	return append(args, command...)
+}
+
+func selfUpdateEnvironment() []string {
+	keys := []string{"PATH", "npm_config_prefix", "NPM_CONFIG_PREFIX"}
+	env := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if value := os.Getenv(key); value != "" {
+			env = append(env, key+"="+value)
+		}
+	}
+	return env
 }
 
 func sameOriginOrNoOrigin(r *http.Request) bool {

@@ -31,18 +31,24 @@ test environment.
 
 ## Real npm upgrade path
 
-This path mutates the global npm `kandev` install and installs a real user
-service. Use a disposable machine or VM.
+This path installs a real user service and writes an isolated npm prefix under
+`$TEST_HOME/npm-global`. It should not overwrite a Homebrew `kandev` binary, but
+still use a disposable machine or VM because it owns the Kandev user service
+while the test is running.
 
 It builds this branch as the previous published npm version, installs that
-temporary package globally, installs a user service from it, and seeds the
-update cache to the current npm latest. Clicking `Apply update` should run:
+temporary package into the isolated prefix, installs a user service from it, and
+seeds the update cache to the current npm latest. Clicking `Apply update` should
+run:
 
 ```
-npm install -g kandev@latest
+npm install -g --prefix "$TEST_HOME/npm-global" kandev@latest
 kandev service install --home-dir "$TEST_HOME"
-kandev service restart
+systemctl --user restart kandev
 ```
+
+On macOS the final restart command is
+`launchctl kickstart -k gui/<uid>/com.kdlbs.kandev`.
 
 Run:
 
@@ -64,7 +70,8 @@ scripts/tmp-self-update/real-npm-status.sh
 ```
 
 Expected result: `/api/v1/system/info` reports the current npm latest version,
-and `npm list -g kandev --depth=0` reports the same version.
+and `npm list -g --prefix "$TEST_HOME/npm-global" kandev --depth=0` reports the
+same version.
 
 Clean up:
 
@@ -80,12 +87,21 @@ All scripts use:
 TEST_HOME="${TEST_HOME:-$HOME/.kandev-selfupdate-test}"
 ```
 
+The real npm scripts default to:
+
+```
+TEST_HOME="${TEST_HOME:-$HOME/.kandev-selfupdate-real-npm}"
+KANDEV_TEST_NPM_PREFIX="${KANDEV_TEST_NPM_PREFIX:-$TEST_HOME/npm-global}"
+```
+
 Override it by exporting `TEST_HOME` before running any script.
 
 Other useful overrides:
 
-- `KANDEV_TEST_CURRENT_VERSION=v0.53.0`
+- `KANDEV_TEST_CURRENT_VERSION=0.53.0`
+- `KANDEV_TEST_TARGET_VERSION=0.54.0`
 - `KANDEV_TEST_TARGET_TAG=v99.0.0`
+- `KANDEV_TEST_NPM_PREFIX="$TEST_HOME/npm-global"`
 - `KANDEV_TEST_PORT=38429`
 - `KANDEV_TEST_WEB_PORT=37429`
 - `KANDEV_TEST_MANAGER=systemd` or `launchd`

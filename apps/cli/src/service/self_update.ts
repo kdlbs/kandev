@@ -1,6 +1,7 @@
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
+import path from "node:path";
 
 import type { ServiceArgs } from "./args";
 import type { ServiceInstallMetadata } from "./metadata";
@@ -48,7 +49,7 @@ export function planSelfUpdate(
     commands.push({ command: "brew", args: ["upgrade", "kandev"] });
     commands.push({ command: install.node_path, args: [install.cli_entry, ...installArgs] });
   } else if (install.kind === "npm") {
-    commands.push({ command: "npm", args: ["install", "-g", `kandev@${target}`] });
+    commands.push({ command: "npm", args: npmInstallArgs(install.cli_entry, target) });
     commands.push({ command: install.node_path, args: [install.cli_entry, ...installArgs] });
   } else if (install.kind === "npx") {
     commands.push({ command: "npx", args: ["-y", `kandev@${target}`, ...installArgs] });
@@ -103,6 +104,25 @@ function serviceInstallArgs(install: ServiceInstallMetadata): string[] {
     args.push("--port", String(install.port));
   }
   return args;
+}
+
+function npmInstallArgs(cliEntry: string, target: string): string[] {
+  const args = ["install", "-g"];
+  const prefix = npmPrefixFromCliEntry(cliEntry);
+  if (prefix) {
+    args.push("--prefix", prefix);
+  }
+  args.push(`kandev@${target}`);
+  return args;
+}
+
+function npmPrefixFromCliEntry(cliEntry: string): string | undefined {
+  const marker = `${path.sep}lib${path.sep}node_modules${path.sep}kandev${path.sep}`;
+  const index = cliEntry.indexOf(marker);
+  if (index < 0) {
+    return undefined;
+  }
+  return index === 0 ? path.sep : cliEntry.slice(0, index);
 }
 
 function restartCommand(

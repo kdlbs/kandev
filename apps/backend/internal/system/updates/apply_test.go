@@ -97,6 +97,85 @@ func TestService_ApplyRejectsWrongConfirm(t *testing.T) {
 	}
 }
 
+func TestSystemdSelfUpdateArgsPropagateUpdateEnvironment(t *testing.T) {
+	t.Setenv("PATH", "/opt/homebrew/bin:/usr/bin")
+	t.Setenv("npm_config_prefix", "/tmp/npm-global")
+	t.Setenv("NPM_CONFIG_PREFIX", "/tmp/npm-global")
+
+	req := applyRequest{
+		IntentPath: "/tmp/intent.json",
+		Intent: updateIntent{Install: serviceInstallMetadata{
+			NodePath: "/opt/homebrew/bin/node",
+			CLIEntry: "/tmp/npm-global/lib/node_modules/kandev/bin/cli.js",
+		}},
+	}
+
+	got := systemdSelfUpdateArgs(req, "kandev-self-update-test")
+	want := []string{
+		"--user",
+		"--unit", "kandev-self-update-test",
+		"--collect",
+		"--setenv=PATH=/opt/homebrew/bin:/usr/bin",
+		"--setenv=npm_config_prefix=/tmp/npm-global",
+		"--setenv=NPM_CONFIG_PREFIX=/tmp/npm-global",
+		"/opt/homebrew/bin/node",
+		"/tmp/npm-global/lib/node_modules/kandev/bin/cli.js",
+		"service",
+		"self-update",
+		"--intent",
+		"/tmp/intent.json",
+	}
+	if !stringSlicesEqual(got, want) {
+		t.Fatalf("args=%#v want %#v", got, want)
+	}
+}
+
+func TestLaunchdSelfUpdateArgsPropagateUpdateEnvironment(t *testing.T) {
+	t.Setenv("PATH", "/opt/homebrew/bin:/usr/bin")
+	t.Setenv("npm_config_prefix", "/tmp/npm-global")
+	t.Setenv("NPM_CONFIG_PREFIX", "/tmp/npm-global")
+
+	req := applyRequest{
+		IntentPath: "/tmp/intent.json",
+		Intent: updateIntent{Install: serviceInstallMetadata{
+			NodePath: "/opt/homebrew/bin/node",
+			CLIEntry: "/tmp/npm-global/lib/node_modules/kandev/bin/cli.js",
+		}},
+	}
+
+	got := launchdSelfUpdateArgs(req, "com.kdlbs.kandev.self-update.test")
+	want := []string{
+		"submit",
+		"-l", "com.kdlbs.kandev.self-update.test",
+		"--",
+		"/usr/bin/env",
+		"PATH=/opt/homebrew/bin:/usr/bin",
+		"npm_config_prefix=/tmp/npm-global",
+		"NPM_CONFIG_PREFIX=/tmp/npm-global",
+		"/opt/homebrew/bin/node",
+		"/tmp/npm-global/lib/node_modules/kandev/bin/cli.js",
+		"service",
+		"self-update",
+		"--intent",
+		"/tmp/intent.json",
+	}
+	if !stringSlicesEqual(got, want) {
+		t.Fatalf("args=%#v want %#v", got, want)
+	}
+}
+
+func stringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func waitForJobState(t *testing.T, tracker *jobs.Tracker, id string, want jobs.State) *jobs.Job {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)

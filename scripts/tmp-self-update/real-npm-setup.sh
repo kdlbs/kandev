@@ -3,10 +3,11 @@ set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
 TEST_HOME="${TEST_HOME:-$HOME/.kandev-selfupdate-real-npm}"
+NPM_PREFIX="${KANDEV_TEST_NPM_PREFIX:-$TEST_HOME/npm-global}"
 PORT="${KANDEV_TEST_PORT:-38429}"
 
 if [ "${KANDEV_REAL_NPM_CONFIRM:-}" != "1" ]; then
-  echo "[self-update-real-npm] this mutates your global npm kandev install and user service." >&2
+  echo "[self-update-real-npm] this installs a user service and writes an isolated npm prefix under TEST_HOME." >&2
   echo "[self-update-real-npm] re-run with KANDEV_REAL_NPM_CONFIRM=1 when ready." >&2
   exit 2
 fi
@@ -19,6 +20,8 @@ fi
 VERSIONS_JSON="$(npm view kandev versions --json)"
 LATEST_VERSION="${KANDEV_TEST_TARGET_VERSION:-$(node -e 'const v=JSON.parse(process.argv[1]); console.log(v[v.length - 1]);' "$VERSIONS_JSON")}"
 CURRENT_VERSION="${KANDEV_TEST_CURRENT_VERSION:-$(node -e 'const v=JSON.parse(process.argv[1]); console.log(v[v.length - 2]);' "$VERSIONS_JSON")}"
+LATEST_VERSION="${LATEST_VERSION#v}"
+CURRENT_VERSION="${CURRENT_VERSION#v}"
 
 if [ "$CURRENT_VERSION" = "$LATEST_VERSION" ]; then
   echo "[self-update-real-npm] current and latest are both $CURRENT_VERSION" >&2
@@ -37,7 +40,7 @@ case "$(uname -s)-$(uname -m)" in
 esac
 
 rm -rf "$TEST_HOME"
-mkdir -p "$TEST_HOME/packages" "$TEST_HOME/tarballs"
+mkdir -p "$TEST_HOME/packages" "$TEST_HOME/tarballs" "$NPM_PREFIX"
 
 if [ ! -d "$ROOT/apps/node_modules" ]; then
   echo "[self-update-real-npm] installing pnpm workspace deps"
@@ -96,24 +99,32 @@ NODE
 CLI_TGZ="$(cd "$TEST_HOME/tarballs" && npm pack "$CLI_DIR" --silent)"
 CLI_TGZ="$TEST_HOME/tarballs/$CLI_TGZ"
 
-echo "[self-update-real-npm] installing temporary global kandev@$CURRENT_VERSION"
-npm install -g "$CLI_TGZ"
+echo "[self-update-real-npm] installing temporary kandev@$CURRENT_VERSION into $NPM_PREFIX"
+npm install -g --prefix "$NPM_PREFIX" "$CLI_TGZ"
 
-KANDEV_BIN="$(command -v kandev)"
-if [ -z "$KANDEV_BIN" ]; then
-  echo "[self-update-real-npm] kandev is not on PATH after npm install -g" >&2
+KANDEV_BIN="$NPM_PREFIX/bin/kandev"
+if [ ! -x "$KANDEV_BIN" ]; then
+  echo "[self-update-real-npm] kandev was not installed at $KANDEV_BIN" >&2
   exit 1
 fi
+
+export PATH="$NPM_PREFIX/bin:$PATH"
+export npm_config_prefix="$NPM_PREFIX"
+export NPM_CONFIG_PREFIX="$NPM_PREFIX"
 
 echo "[self-update-real-npm] installing user service from $KANDEV_BIN"
 "$KANDEV_BIN" service install --home-dir "$TEST_HOME" --port "$PORT" --no-boot-start
 
 cat >"$TEST_HOME/real-npm-env.sh" <<EOF
 export TEST_HOME="$TEST_HOME"
+export KANDEV_TEST_NPM_PREFIX="$NPM_PREFIX"
 export KANDEV_TEST_PORT="$PORT"
 export KANDEV_TEST_CURRENT_VERSION="$CURRENT_VERSION"
 export KANDEV_TEST_TARGET_VERSION="$LATEST_VERSION"
 export KANDEV_TEST_KANDEV_BIN="$KANDEV_BIN"
+export PATH="$NPM_PREFIX/bin:\$PATH"
+export npm_config_prefix="$NPM_PREFIX"
+export NPM_CONFIG_PREFIX="$NPM_PREFIX"
 EOF
 
 echo "[self-update-real-npm] service is running branch code stamped v$CURRENT_VERSION"

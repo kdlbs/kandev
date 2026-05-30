@@ -9,6 +9,11 @@ if [ -f "$ENV_PATH" ]; then
 fi
 
 PORT="${KANDEV_TEST_PORT:-38429}"
+NPM_PREFIX="${KANDEV_TEST_NPM_PREFIX:-$TEST_HOME/npm-global}"
+KANDEV_BIN="${KANDEV_TEST_KANDEV_BIN:-$NPM_PREFIX/bin/kandev}"
+export PATH="$NPM_PREFIX/bin:$PATH"
+export npm_config_prefix="$NPM_PREFIX"
+export NPM_CONFIG_PREFIX="$NPM_PREFIX"
 
 echo "[self-update-real-npm] backend info:"
 INFO=""
@@ -24,7 +29,11 @@ if [ -z "$INFO" ]; then
 fi
 echo "$INFO"
 echo
-echo "[self-update-real-npm] global npm kandev:"
-npm list -g kandev --depth=0 || true
+echo "[self-update-real-npm] isolated npm kandev:"
+npm list -g --prefix "$NPM_PREFIX" kandev --depth=0 || true
 echo "[self-update-real-npm] service status:"
-kandev service status || true
+if [ -x "$KANDEV_BIN" ]; then
+  "$KANDEV_BIN" service status || true
+else
+  echo "[self-update-real-npm] missing $KANDEV_BIN" >&2
+fi

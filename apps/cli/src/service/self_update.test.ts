@@ -31,7 +31,7 @@ function intent(kind: "homebrew" | "npm" | "npx" = "npm"): SelfUpdateIntent {
 describe("planSelfUpdate", () => {
   it("plans npm upgrade, service reinstall, then user-service restart", () => {
     expect(planSelfUpdate(intent("npm"), { platform: "linux" })).toEqual([
-      { command: "npm", args: ["install", "-g", "kandev@1.2.3"] },
+      { command: "npm", args: ["install", "-g", "--prefix", "/usr", "kandev@1.2.3"] },
       {
         command: "/usr/bin/node",
         args: [
@@ -46,6 +46,26 @@ describe("planSelfUpdate", () => {
       },
       { command: "systemctl", args: ["--user", "restart", "kandev"] },
     ]);
+  });
+
+  it("keeps npm updates inside the original global prefix", () => {
+    const npm = intent("npm");
+    npm.install.cli_entry = "/tmp/kandev-test/npm-global/lib/node_modules/kandev/bin/cli.js";
+
+    expect(planSelfUpdate(npm, { platform: "linux" })[0]).toEqual({
+      command: "npm",
+      args: ["install", "-g", "--prefix", "/tmp/kandev-test/npm-global", "kandev@1.2.3"],
+    });
+  });
+
+  it("falls back to npm's configured prefix when the cli path is non-standard", () => {
+    const npm = intent("npm");
+    npm.install.cli_entry = "/opt/kandev/bin/cli.js";
+
+    expect(planSelfUpdate(npm, { platform: "linux" })[0]).toEqual({
+      command: "npm",
+      args: ["install", "-g", "kandev@1.2.3"],
+    });
   });
 
   it("plans npx reinstall without mutating global npm packages", () => {
