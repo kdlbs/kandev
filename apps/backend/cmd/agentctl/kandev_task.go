@@ -112,7 +112,7 @@ func taskCreate(args []string) int {
 		cliError("--title is required")
 		return 1
 	}
-	if *workspaceMode == workspaceModeSharedGroup && strings.TrimSpace(*workspaceGroupID) == "" {
+	if strings.TrimSpace(*workspaceMode) == workspaceModeSharedGroup && strings.TrimSpace(*workspaceGroupID) == "" {
 		cliError("--workspace-group-id is required when --workspace-mode=%s", workspaceModeSharedGroup)
 		return 1
 	}
@@ -142,8 +142,8 @@ func taskCreate(args []string) int {
 	}
 	// Workspace-policy fields (office task-handoffs). Empty values fall
 	// through so the backend resolves defaults / parent inheritance.
-	if *workspaceMode != "" {
-		payload["workspace_mode"] = *workspaceMode
+	if m := strings.TrimSpace(*workspaceMode); m != "" {
+		payload["workspace_mode"] = m
 	}
 	if gid := strings.TrimSpace(*workspaceGroupID); gid != "" {
 		payload["workspace_group_id"] = gid
