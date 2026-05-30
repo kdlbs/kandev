@@ -13,47 +13,12 @@ import {
 import { useAppStore } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { cn } from "@/lib/utils";
-import { getWorkspaceGradient, getWorkspaceInitials } from "./workspace-gradient";
 
 type AppSidebarWorkspacePickerProps = {
   collapsed: boolean;
 };
 
-type TriggerProps = {
-  collapsed: boolean;
-  activeId: string | null;
-  activeName: string;
-};
-
-function OfficeTrigger({ collapsed, activeId, activeName }: TriggerProps) {
-  return (
-    <button
-      type="button"
-      data-testid="sidebar-workspace-trigger"
-      className={cn(
-        "flex items-center gap-2 rounded-md hover:bg-muted/60 cursor-pointer",
-        collapsed ? "p-0.5" : "flex-1 min-w-0 px-1.5 py-1",
-      )}
-      aria-label="Switch workspace"
-    >
-      <span
-        className="h-7 w-7 rounded-md flex items-center justify-center text-[11px] font-black text-white shrink-0 select-none"
-        style={{
-          background: activeId ? getWorkspaceGradient(activeId) : "var(--muted)",
-        }}
-      >
-        {getWorkspaceInitials(activeName)}
-      </span>
-      {!collapsed && (
-        <span className="flex-1 min-w-0 text-sm font-semibold truncate text-left sidebar-fade-in">
-          {activeName}
-        </span>
-      )}
-    </button>
-  );
-}
-
-function MinimalTrigger({ collapsed, activeName }: TriggerProps) {
+function WorkspaceTrigger({ collapsed, activeName }: { collapsed: boolean; activeName: string }) {
   return (
     <button
       type="button"
@@ -101,12 +66,10 @@ export function AppSidebarWorkspacePicker({ collapsed }: AppSidebarWorkspacePick
     [router, setActiveWorkspace, officeEnabled],
   );
 
-  const triggerProps: TriggerProps = { collapsed, activeId, activeName };
-
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
-        {officeEnabled ? <OfficeTrigger {...triggerProps} /> : <MinimalTrigger {...triggerProps} />}
+        <WorkspaceTrigger collapsed={collapsed} activeName={activeName} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-60">
         {workspaces.items.length === 0 ? (
@@ -119,14 +82,6 @@ export function AppSidebarWorkspacePicker({ collapsed }: AppSidebarWorkspacePick
               onClick={() => handleSelect(ws.id)}
               className="cursor-pointer gap-2"
             >
-              {officeEnabled && (
-                <span
-                  className="h-5 w-5 rounded-sm flex items-center justify-center text-[9px] font-black text-white shrink-0"
-                  style={{ background: getWorkspaceGradient(ws.id) }}
-                >
-                  {getWorkspaceInitials(ws.name)}
-                </span>
-              )}
               <span className="flex-1 truncate">{ws.name}</span>
               {ws.id === activeId && <IconCheck className="h-3.5 w-3.5" />}
             </DropdownMenuItem>
