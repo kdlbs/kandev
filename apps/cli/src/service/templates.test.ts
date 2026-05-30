@@ -244,6 +244,24 @@ describe("renderSystemdUnit", () => {
       "ExecStart=/usr/local/bin/node /usr/local/lib/node_modules/kandev/bin/cli.js --headless",
     );
   });
+
+  it("prepends the shim's bin dir to PATH for a custom Homebrew prefix not in the base PATH", () => {
+    const unit = renderSystemdUnit({
+      launcher: {
+        nodePath: "/home/me/.brew/Cellar/node/26.0.0/bin/node",
+        cliEntry: "/home/me/.brew/Cellar/kandev/0.52.0/libexec/cli/bin/cli.js",
+        kind: "homebrew",
+        shimPath: "/home/me/.brew/bin/kandev",
+      },
+      homeDir: "/home/me/.kandev",
+      logDir: "/home/me/.kandev/logs",
+      mode: "user",
+    });
+    // Custom prefix's bin dir is prepended so npm/npx resolve, even though it
+    // isn't one of the hardcoded default prefixes.
+    expect(unit).toContain("Environment=PATH=/home/me/.brew/bin:%h/.local/bin:%h/.bun/bin:");
+    expect(unit).not.toContain("/Cellar/");
+  });
 });
 
 describe("renderLaunchdPlist", () => {
