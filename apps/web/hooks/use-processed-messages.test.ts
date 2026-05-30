@@ -7,6 +7,7 @@ import {
 } from "@/lib/types/http";
 import type { RichMetadata } from "@/components/task/chat/types";
 import {
+  buildGroupedRenderItems,
   collapseTodoSnapshotsPerTurn,
   deduplicateAgentBootResumes,
   isAgentBootResumeMessage,
@@ -37,6 +38,17 @@ function makeTodo(
   todos: Array<{ text: string; done?: boolean }>,
 ): Message {
   return { ...makeMessage(id, "todo", { todos }), turn_id: turnId };
+}
+
+function toolExecute(id: string, turnId = "turn-1"): Message {
+  return {
+    ...makeMessage(id, "tool_execute", {
+      status: "complete",
+      normalized: { shell_exec: { command: "gh pr checks", output: { exit_code: 0 } } },
+    }),
+    content: "gh pr checks",
+    turn_id: turnId,
+  };
 }
 
 function bootStarted(id: string): Message {
@@ -221,5 +233,27 @@ describe("collapseTodoSnapshotsPerTurn", () => {
     collapseTodoSnapshotsPerTurn([t1, t2]);
     expect(t1.metadata).toEqual({ todos: [{ text: "a" }] });
     expect(t2.metadata).toEqual({ todos: [{ text: "a", done: true }] });
+  });
+});
+
+describe("buildGroupedRenderItems prepare progress placement", () => {
+  it("does not inject prepare progress into a partial tool-only history window", () => {
+    const partialWindow = [toolExecute("tool-1"), toolExecute("tool-2")];
+
+    const result = buildGroupedRenderItems(partialWindow, "s1", {
+      canAnchorPrepareProgress: false,
+    });
+
+    expect(result.map((item) => item.type)).toEqual(["turn_group"]);
+  });
+
+  it("injects prepare progress when the session start is loaded", () => {
+    const initialPrompt = makeMessage("user-1", "message", undefined, "start");
+
+    const result = buildGroupedRenderItems([initialPrompt], "s1", {
+      canAnchorPrepareProgress: true,
+    });
+
+    expect(result.map((item) => item.type)).toEqual(["message", "prepare_progress"]);
   });
 });

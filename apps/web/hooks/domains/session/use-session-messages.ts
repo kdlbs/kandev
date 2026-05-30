@@ -7,7 +7,7 @@ import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
 
 const INITIAL_FETCH_LIMIT = 100;
 const BACKFILL_PAGE_LIMIT = 100;
-const MAX_BACKFILL_ROUNDS = 3;
+const MAX_AUTO_BACKFILL_PAGES = 10;
 
 export function hasUserOrAgentMessage(messages: Message[]): boolean {
   return messages.some(
@@ -120,7 +120,7 @@ async function fetchAndStoreMessages(
  * past — the lazy-load sentinel at the top of the list never fires because
  * the user has no anchor to scroll from. Paginate backward via the same HTTP
  * endpoint `useLazyLoadMessages` uses until we span at least one user/agent
- * message or hit the round cap.
+ * message or hit the page budget.
  */
 export type BackfillStep = "continue" | "stop";
 
@@ -178,13 +178,14 @@ export async function autoBackfillUntilUserMessage(
   sessionId: string,
   store: ReturnType<typeof useAppStoreApi>,
 ): Promise<void> {
-  for (let round = 0; round < MAX_BACKFILL_ROUNDS; round++) {
+  for (let round = 0; round < MAX_AUTO_BACKFILL_PAGES; round++) {
     const step = await runBackfillRound(sessionId, store, round);
     if (step === "stop") return;
   }
-  debug("autoBackfill: hit round cap without finding user/agent message", {
+  debug("autoBackfill: hit page budget without finding user/agent message", {
     sessionId,
-    cap: MAX_BACKFILL_ROUNDS,
+    pageBudget: MAX_AUTO_BACKFILL_PAGES,
+    messageBudget: MAX_AUTO_BACKFILL_PAGES * BACKFILL_PAGE_LIMIT,
   });
 }
 

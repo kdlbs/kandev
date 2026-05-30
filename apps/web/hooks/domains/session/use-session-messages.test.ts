@@ -162,14 +162,43 @@ describe("runBackfillRound", () => {
 });
 
 describe("autoBackfillUntilUserMessage", () => {
-  it("stops after MAX_BACKFILL_ROUNDS (3) without finding a user/agent message", async () => {
+  it("continues past three pages until a user/agent message is found", async () => {
+    mockListTaskSessionMessages
+      .mockResolvedValueOnce({
+        messages: [makeMessage({ id: "tool-1", type: "tool_call", author_type: "agent" })],
+        has_more: true,
+      })
+      .mockResolvedValueOnce({
+        messages: [makeMessage({ id: "tool-2", type: "tool_call", author_type: "agent" })],
+        has_more: true,
+      })
+      .mockResolvedValueOnce({
+        messages: [makeMessage({ id: "tool-3", type: "tool_call", author_type: "agent" })],
+        has_more: true,
+      })
+      .mockResolvedValueOnce({
+        messages: [makeMessage({ id: "tool-4", type: "tool_call", author_type: "agent" })],
+        has_more: true,
+      })
+      .mockResolvedValueOnce({
+        messages: [makeMessage({ id: "user-1", type: "message", author_type: "user" })],
+        has_more: true,
+      });
+    const store = makeStore({ messages: [], hasMore: true, oldestCursor: "cursor-0" });
+
+    await autoBackfillUntilUserMessage("sess-1", store as never);
+
+    expect(mockListTaskSessionMessages).toHaveBeenCalledTimes(5);
+  });
+
+  it("stops after the auto-backfill page budget without finding a user/agent message", async () => {
     mockListTaskSessionMessages.mockResolvedValue({
       messages: [makeMessage({ id: "t1", type: "tool_call", author_type: "agent" })],
       has_more: true,
     });
     const store = makeStore({ messages: [], hasMore: true, oldestCursor: "cursor-0" });
     await autoBackfillUntilUserMessage("sess-1", store as never);
-    expect(mockListTaskSessionMessages).toHaveBeenCalledTimes(3);
+    expect(mockListTaskSessionMessages).toHaveBeenCalledTimes(10);
   });
 
   it("stops after round 1 once a user message is prepended", async () => {

@@ -384,8 +384,14 @@ function useSessionData(
   taskId: string | null,
   taskDescription: string | null,
 ) {
-  const { messages, isLoading: messagesLoading } = useSessionMessages(resolvedSessionId);
-  const processed = useProcessedMessages(messages, taskId, resolvedSessionId, taskDescription);
+  const {
+    messages,
+    isLoading: messagesLoading,
+    hasMore: hasOlderMessages,
+  } = useSessionMessages(resolvedSessionId);
+  const processed = useProcessedMessages(messages, taskId, resolvedSessionId, taskDescription, {
+    hasOlderMessages,
+  });
   const { sessionModel, activeModel } = useSessionModel(
     resolvedSessionId,
     session?.agent_profile_id,
