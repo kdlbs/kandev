@@ -181,8 +181,8 @@ list_backend_sockets() {
         *'"kandev"'*)
           local pid port
           # sed (not grep) so a no-match yields empty + exit 0 instead of tripping
-    # `set -o pipefail` when a socket line carries no pid= field.
-    pid="$(printf '%s\n' "$procinfo" | sed -nE 's/.*pid=([0-9]+).*/\1/p' | head -1)"
+          # `set -o pipefail` when a socket line carries no pid= field.
+          pid="$(printf '%s\n' "$procinfo" | sed -nE 's/.*pid=([0-9]+).*/\1/p' | head -1)"
           port="${local_addr##*:}"
           [[ -n "$pid" && -n "$port" ]] && printf '%s %s\n' "$pid" "$port"
           ;;
