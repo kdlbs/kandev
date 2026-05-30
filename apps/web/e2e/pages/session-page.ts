@@ -419,6 +419,16 @@ export class SessionPage {
     return this.page.getByTestId("recovery-fresh-button");
   }
 
+  /** "Cancel" button shown on the yellow transient-retry (529 Overloaded) card. */
+  recoveryCancelRetryButton(): Locator {
+    return this.page.getByTestId("recovery-cancel-retry-button");
+  }
+
+  /** The yellow "Provider overloaded — retrying…" status card text. */
+  transientRetryCard(): Locator {
+    return this.chat.getByText(/Provider overloaded — retrying/i);
+  }
+
   /** Context reset divider shown in chat after resetting agent context. */
   contextResetDivider(): Locator {
     return this.chat.getByText("Context reset");
@@ -739,6 +749,17 @@ export class SessionPage {
     await editor.fill(text);
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
     await editor.press(`${modifier}+Enter`);
+  }
+
+  /**
+   * Type and submit a chat message via the Send button. Mobile (touch) layouts
+   * don't submit on Ctrl/Cmd+Enter, so mobile specs use this instead.
+   */
+  async sendMessageViaButton(text: string) {
+    const editor = this.page.locator(".tiptap.ProseMirror").first();
+    await editor.click();
+    await editor.fill(text);
+    await this.page.getByTestId("submit-message-button").click();
   }
 
   /** Toggle plan mode on/off by clicking the plan mode toggle button in the toolbar.

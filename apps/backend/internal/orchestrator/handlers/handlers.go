@@ -180,7 +180,7 @@ func (h *Handlers) wsSetPlanMode(ctx context.Context, msg *ws.Message) (*ws.Mess
 type wsRecoverSessionRequest struct {
 	TaskID    string `json:"task_id"`
 	SessionID string `json:"session_id"`
-	Action    string `json:"action"` // "resume" or "fresh_start"
+	Action    string `json:"action"` // "resume", "fresh_start", or "cancel_retry"
 }
 
 func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -194,8 +194,16 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 	if req.SessionID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
+	// Cancel an in-progress transient (529 Overloaded) retry loop and surface
+	// the manual recovery banner. Distinct from resume/fresh_start: it does not
+	// relaunch the agent, it stops the backoff timer.
+	if req.Action == "cancel_retry" {
+		h.service.CancelTransientRetry(ctx, req.TaskID, req.SessionID)
+		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"cancelled": true})
+	}
+
 	if req.Action != "resume" && req.Action != "fresh_start" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "action must be 'resume' or 'fresh_start'", nil)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "action must be 'resume', 'fresh_start', or 'cancel_retry'", nil)
 	}
 
 	resp, err := h.service.RecoverSession(ctx, req.TaskID, req.SessionID, req.Action)

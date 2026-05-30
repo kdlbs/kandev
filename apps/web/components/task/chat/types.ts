@@ -130,6 +130,12 @@ export type StatusMetadata = {
   message?: string;
   variant?: "default" | "warning" | "error";
   cancelled?: boolean;
+  // Transient provider-error (529 Overloaded) retry state. Present on the
+  // yellow "retrying" status message the orchestrator emits during backoff.
+  retrying?: boolean;
+  attempt?: number;
+  max_attempts?: number;
+  retry_in_seconds?: number;
 };
 
 export type RecoveryAuthMethod = {

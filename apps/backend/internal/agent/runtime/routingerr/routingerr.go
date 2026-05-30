@@ -22,6 +22,7 @@ const (
 	CodeQuotaLimited           Code = "quota_limited"
 	CodeRateLimited            Code = "rate_limited"
 	CodeProviderUnavailable    Code = "provider_unavailable"
+	CodeProviderOverloaded     Code = "provider_overloaded"
 	CodeModelUnavailable       Code = "model_unavailable"
 	CodeProviderNotConfigured  Code = "provider_not_configured"
 	CodeUnknownProvider        Code = "unknown_provider_error"
@@ -95,6 +96,10 @@ type Input struct {
 }
 
 const exitCodeBinaryMissing = 127
+
+// statusOverloaded is the non-standard HTTP 529 ("Overloaded") that Anthropic
+// returns when temporarily overloaded. Not in net/http, so defined here.
+const statusOverloaded = 529
 
 // Classify normalizes a failure into a routing-aware Error. See package doc.
 func Classify(in Input) *Error {
@@ -176,6 +181,8 @@ func httpStatusToCode(status int) Code {
 		return CodeRateLimited
 	case http.StatusServiceUnavailable:
 		return CodeProviderUnavailable
+	case statusOverloaded:
+		return CodeProviderOverloaded
 	}
 	return ""
 }
@@ -216,6 +223,12 @@ func applyInvariants(e *Error) *Error {
 		e.AutoRetryable = true
 		e.FallbackAllowed = true
 	case CodeProviderUnavailable, CodeUnknownProvider:
+		e.AutoRetryable = true
+		e.FallbackAllowed = true
+	case CodeProviderOverloaded:
+		// 529 Overloaded is a transient, server-side condition. Retrying the
+		// same provider after a short backoff is the right move; falling back
+		// to another provider is also fine if backoff keeps failing.
 		e.AutoRetryable = true
 		e.FallbackAllowed = true
 	case CodeNpxCacheCorrupted:

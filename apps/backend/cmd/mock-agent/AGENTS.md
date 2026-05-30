@@ -26,6 +26,12 @@ When a real-agent message renders poorly (markdown table, tool card, diff panel,
 
 This avoids burning real-agent tokens, gives you a deterministic payload to iterate against, and the scenario stays around as a permanent regression hook — anyone can re-trigger it after the fix.
 
+## Special case: emitting a real prompt-time ACP *error*
+
+Scenarios in `scenarioRegistry` can only emit `SessionUpdate` notifications — they cannot make the prompt itself fail. When you need a real JSON-RPC error response (the kind the backend turns into `agent.failed` with a populated `data.ErrorMessage`), intercept the command in the `Prompt` method (`main.go`) and return a non-nil `error` — typically `&acp.RequestError{Code, Message, Data}`, whose `Error()` serializes the exact `{"code":...,"message":...,"data":...}` envelope a real agent sends.
+
+`/overloaded[:N]` is the reference example (`handler.go: handleOverloaded`): it returns the production `529 Overloaded` error for the first `N` prompts of a session (default 1), then recovers with a normal text response. The orchestrator's backoff retry tears the agent process down and relaunches it between attempts, so the fail-count is persisted in a **temp file** keyed by the session id (`overloadedCounterPath`) rather than an in-memory map — it survives the relaunch (and is cleaned up on recovery and in `CloseSession`). Use `/overloaded` to demo the yellow retry status, or a large `N` like `/overloaded:9` to keep failing so the retry loop stays visible / exhausts to the red recovery banner.
+
 ## Emitter helpers worth knowing
 
 `emitter.go` wraps the ACP `sessionUpdater` with helpers that shield scenarios from SDK plumbing:

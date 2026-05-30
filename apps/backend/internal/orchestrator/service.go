@@ -334,6 +334,17 @@ type Service struct {
 	// phantom turn just to host it.
 	cancelInFlight sync.Map
 
+	// transientRetries tracks in-progress transient-provider-error (529
+	// Overloaded) retry loops. key: sessionID, value: *transientRetryEntry.
+	// A backoff timer per session re-drives the failed prompt; cancelled on
+	// success, user-cancel, or service shutdown.
+	transientRetries sync.Map
+
+	// lastTurnPrompt caches the most recent outbound prompt per session so a
+	// transient-failure retry can re-drive the same turn without the caller's
+	// context. key: sessionID, value: capturedPrompt. Replaced every turn.
+	lastTurnPrompt sync.Map
+
 	// Service state
 	mu        sync.RWMutex
 	running   bool
@@ -844,6 +855,7 @@ func (s *Service) Stop() error {
 	}
 
 	s.cancelAllClarificationWatchdogs()
+	s.cancelAllTransientRetries()
 
 	if len(errs) > 0 {
 		return errs[0]

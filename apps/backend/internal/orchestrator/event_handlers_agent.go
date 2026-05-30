@@ -224,6 +224,10 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		return
 	}
 
+	// A turn completed successfully — clear any transient retry budget so a
+	// later, unrelated provider overload starts its backoff fresh at attempt 1.
+	s.resetTransientRetry(data.SessionID)
+
 	// Complete the current turn
 	s.completeTurnForSession(ctx, data.SessionID)
 
@@ -408,6 +412,9 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 		zap.String("session_id", data.SessionID),
 		zap.String("agent_execution_id", data.AgentExecutionID))
 
+	// A successful completion clears any transient retry budget for the session.
+	s.resetTransientRetry(data.SessionID)
+
 	// Update scheduler and remove from queue
 	s.scheduler.HandleTaskCompleted(data.TaskID, true)
 	s.scheduler.RemoveTask(data.TaskID)
@@ -488,10 +495,21 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 		zap.String("agent_execution_id", data.AgentExecutionID),
 		zap.String("error_message", data.ErrorMessage))
 
-	// Finalize run-mode automation runs first — every other branch below
-	// returns early (resume failure, session-backed recoverable failure,
+	// Transient provider errors (529 Overloaded) get a paced, visible
+	// retry-with-backoff before any red banner. This is the ONLY non-terminal
+	// failure path, so it runs before automation finalization below — otherwise
+	// a transient 529 on a run-mode automation would mark the run failed and
+	// reap its ephemeral worktree out from under the in-flight retry.
+	// handleTransientFailure returns false (falling through) for non-transient
+	// errors, office tasks, or an exhausted budget.
+	if data.SessionID != "" && s.handleTransientFailure(ctx, data) {
+		return
+	}
+
+	// Terminal from here. Finalize run-mode automation runs — every branch
+	// below returns early (resume failure, session-backed recoverable failure,
 	// no-session retry), and run-mode automations need their AutomationRun
-	// flipped + worktree reaped on *every* failure path.
+	// flipped + worktree reaped on *every* terminal failure path.
 	errMsg := data.ErrorMessage
 	if errMsg == "" {
 		errMsg = "agent failed"
@@ -670,6 +688,10 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 	statusMsg := fmt.Sprintf("Agent encountered an error: %s", displayMsg)
 	if resumeCorrupted {
 		statusMsg = "This agent session can't be resumed — its saved reasoning state is corrupted. Start a fresh session to continue."
+	} else if routingerr.IsTransientProviderError(data.ErrorMessage) {
+		// Reached after the transient retry budget is exhausted — show friendly
+		// copy instead of dumping the raw 529 JSON envelope.
+		statusMsg = "The provider stayed overloaded after several retries. Resume to try again, or start a fresh session."
 	}
 	hasResumeToken := s.wasResumeAttempt(ctx, data.SessionID)
 	meta := map[string]interface{}{
@@ -830,6 +852,12 @@ func (s *Service) handleAgentStopped(ctx context.Context, data watcher.AgentEven
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),
 		zap.String("agent_execution_id", data.AgentExecutionID))
+
+	// NOTE: we deliberately do NOT resetTransientRetry here — the transient
+	// retry tears down the failed execution via StopExecution as part of its
+	// own re-drive, which surfaces as an agent.stopped event; clearing the loop
+	// on that self-inflicted stop would abort the retry. The loop is freed on
+	// ready/completed (success), cancel, and exhaustion instead.
 
 	// Complete the current turn if there is one
 	s.completeTurnForSession(ctx, data.SessionID)

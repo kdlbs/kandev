@@ -44,9 +44,41 @@ var runtimeEnvironmentRules = []runtimeRule{
 			}
 		},
 	},
+	{
+		// Anthropic 529 Overloaded surfaced over ACP as a prompt-time error
+		// event: a transient, server-side condition the orchestrator should
+		// retry with backoff rather than tear down. Provider-agnostic because
+		// the "529 ... overloaded" / "overloaded_error" signature is unique
+		// enough not to false-positive on unrelated logs.
+		id:      overloadedRuleID,
+		pattern: overloadedRe,
+		build: func(string) *Error {
+			return &Error{
+				Code:       CodeProviderOverloaded,
+				Confidence: ConfHigh,
+			}
+		},
+	},
 }
 
 const resumeCorruptedRuleID = "anthropic.thinking_blocks.immutable.v1"
+
+const overloadedRuleID = "anthropic.overloaded.529.v1"
+
+// overloadedRe matches the transient 529 Overloaded signature: either the
+// numeric code adjacent to "overloaded" on a single line (in either order), or
+// the Anthropic "overloaded_error" type token. Kept tight ([^\n] stays within
+// one line) so a stray "529" and "overloaded" in unrelated multi-line logs
+// can't bridge into a false positive.
+var overloadedRe = regexp.MustCompile(`(?i)\b529\b[^\n]*overloaded|overloaded[^\n]*\b529\b|overloaded_error`)
+
+// IsTransientProviderError reports whether the error message carries the
+// transient provider-overload (529 Overloaded) signature. Exposed for callers
+// outside the classify path (e.g. the orchestrator's retry-with-backoff) that
+// need to branch on transience without re-running full Classify.
+func IsTransientProviderError(message string) bool {
+	return message != "" && overloadedRe.MatchString(message)
+}
 
 // thinkingBlocksImmutableRe matches the Anthropic "thinking blocks cannot be
 // modified" 400 in either the `thinking` or `redacted_thinking` form. The

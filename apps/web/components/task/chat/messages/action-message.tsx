@@ -9,6 +9,7 @@ import {
   IconPlayerPlay,
   IconSparkles,
   IconGitCommit,
+  IconX,
 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@kandev/ui/button";
@@ -31,6 +32,7 @@ const ICON_MAP: Record<string, React.ElementType> = {
   sparkles: IconSparkles,
   "git-commit": IconGitCommit,
   "alert-triangle": IconAlertTriangle,
+  x: IconX,
 };
 
 type ActionMeta = {
