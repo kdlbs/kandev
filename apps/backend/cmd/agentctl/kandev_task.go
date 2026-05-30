@@ -112,6 +112,10 @@ func taskCreate(args []string) int {
 		cliError("--title is required")
 		return 1
 	}
+	if *workspaceMode == workspaceModeSharedGroup && *workspaceGroupID == "" {
+		cliError("--workspace-group-id is required when --workspace-mode=%s", workspaceModeSharedGroup)
+		return 1
+	}
 
 	client, err := newKandevClient()
 	if err != nil {

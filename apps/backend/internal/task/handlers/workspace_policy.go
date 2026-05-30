@@ -7,8 +7,7 @@ import (
 	"github.com/kandev/kandev/internal/task/service"
 )
 
-// Workspace mode values mirrored from the office task-handoffs phase 4
-// MCP surface so the HTTP path validates payloads identically.
+// Workspace mode values for the office task-handoffs HTTP path.
 const (
 	workspaceModeInheritParent = "inherit_parent"
 	workspaceModeNewWorkspace  = "new_workspace"
@@ -17,9 +16,7 @@ const (
 
 // resolveWorkspacePolicy resolves the effective workspace policy for an
 // HTTP create-task request, applying parent defaults when the caller
-// didn't supply explicit values. Mirrors the MCP-side helper in
-// internal/mcp/handlers/workspace_policy.go so both surfaces produce the
-// same metadata block.
+// didn't supply explicit values.
 func (h *TaskHandlers) resolveWorkspacePolicy(ctx context.Context, body httpCreateTaskRequest) (service.WorkspacePolicy, error) {
 	pol := service.WorkspacePolicy{
 		Mode:                  body.WorkspaceMode,
