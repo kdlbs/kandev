@@ -45,6 +45,10 @@ const (
 	defaultACPRetentionHrs = 48
 	defaultACPMaxFileBytes = 8 << 20 // 8 MiB
 	defaultACPRingSize     = 500
+
+	// Owner-only perms: these files carry full prompt/file/tool content.
+	acpDirPerm  = 0o700
+	acpFilePerm = 0o600
 )
 
 // acpLogConfig is the resolved configuration for the managed writer registry.
@@ -63,10 +67,22 @@ func acpLogConfigFromEnv() acpLogConfig {
 	return acpLogConfig{
 		dir:          resolveACPLogDir(),
 		maxFileBytes: envInt64(envACPMaxFileBytes, defaultACPMaxFileBytes),
-		maxFiles:     int(envInt64(envACPMaxFiles, defaultACPMaxFiles)),
+		maxFiles:     envInt(envACPMaxFiles, defaultACPMaxFiles),
 		retention:    time.Duration(envInt64(envACPRetentionHrs, defaultACPRetentionHrs)) * time.Hour,
 		ringSize:     defaultACPRingSize,
 	}
+}
+
+// envInt reads a positive int env var with a sane upper bound, so the value
+// (a file-count cap) can't overflow when narrowed from the parsed int64 on a
+// 32-bit platform.
+func envInt(key string, def int) int {
+	const maxInt = 1 << 30 // generous; well within int on every platform
+	n := envInt64(key, int64(def))
+	if n > maxInt {
+		return maxInt
+	}
+	return int(n)
 }
 
 func resolveACPLogDir() string {
@@ -161,6 +177,10 @@ func (m *acpLogManager) write(name string, entry any) []byte {
 	}
 	w := m.getWriter(name)
 	if w == nil {
+		// The file couldn't be opened (e.g. no writable dir, as in a container
+		// without a mounted volume). Still return the marshaled line so the
+		// in-memory ring buffer / live-tail endpoint keeps working — those
+		// events just aren't persisted to disk.
 		return line
 	}
 	w.writeLine(line)
@@ -173,12 +193,12 @@ func (m *acpLogManager) getWriter(name string) *acpWriter {
 	if w, ok := m.writers[name]; ok {
 		return w
 	}
-	if err := os.MkdirAll(m.cfg.dir, 0o755); err != nil {
+	if err := os.MkdirAll(m.cfg.dir, acpDirPerm); err != nil {
 		log.Printf("[DEBUG] acplog: mkdir %s: %v", m.cfg.dir, err)
 		return nil
 	}
 	path := filepath.Join(m.cfg.dir, name)
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, acpFilePerm)
 	if err != nil {
 		log.Printf("[DEBUG] acplog: open %s: %v", path, err)
 		return nil
@@ -385,7 +405,13 @@ func (w *acpWriter) writeLine(line []byte) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.f == nil {
-		return
+		// A prior open/rotate left this writer without a handle. Retry here so
+		// a transient FS error doesn't permanently disable a session's logging
+		// (the writer stays cached in the manager map and self-heals).
+		w.reopen(os.O_APPEND, true /* keepSize */)
+		if w.f == nil {
+			return
+		}
 	}
 	need := int64(len(line) + 1)
 	if w.size > 0 && w.size+need > w.maxBytes {
@@ -438,7 +464,7 @@ func (w *acpWriter) nextRotatedPath() string {
 // O_APPEND to keep the existing one) and resets the buffered writer. keepSize
 // preserves the on-disk size so a failed rotation retries on the next write.
 func (w *acpWriter) reopen(modeBit int, keepSize bool) {
-	f, err := os.OpenFile(w.path, os.O_CREATE|os.O_WRONLY|modeBit, 0o644)
+	f, err := os.OpenFile(w.path, os.O_CREATE|os.O_WRONLY|modeBit, acpFilePerm)
 	if err != nil {
 		log.Printf("[DEBUG] acplog: reopen %s: %v", w.path, err)
 		w.f = nil
@@ -541,8 +567,11 @@ func (r *ringBuffer) add(entry json.RawMessage) {
 	defer r.mu.Unlock()
 	r.entries = append(r.entries, entry)
 	if len(r.entries) > r.cap {
-		// Drop oldest; copy to avoid unbounded backing-array growth.
-		r.entries = append([]json.RawMessage(nil), r.entries[len(r.entries)-r.cap:]...)
+		// Drop oldest. Pre-size with one spare slot so the next append lands in
+		// the existing backing array instead of reallocating every time.
+		trimmed := make([]json.RawMessage, r.cap, r.cap+1)
+		copy(trimmed, r.entries[len(r.entries)-r.cap:])
+		r.entries = trimmed
 	}
 	r.lastWrite = time.Now()
 }

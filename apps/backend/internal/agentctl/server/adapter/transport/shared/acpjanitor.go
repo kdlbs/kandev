@@ -59,12 +59,15 @@ func (j *Janitor) Start(ctx context.Context) {
 	j.started = true
 	loopCtx, cancel := context.WithCancel(ctx)
 	j.cancel = cancel
+	// Add to the WaitGroup while still holding j.mu so a concurrent Stop()
+	// (which must take j.mu before it can Wait) can't reach wg.Wait() before
+	// this Add — that would be a WaitGroup misuse on a zero counter.
+	j.wg.Add(1)
 	j.mu.Unlock()
 
 	// Initial pass on startup so a previous run's files are pruned promptly.
 	j.mgr.prune(time.Now())
 
-	j.wg.Add(1)
 	go j.loop(loopCtx)
 }
 

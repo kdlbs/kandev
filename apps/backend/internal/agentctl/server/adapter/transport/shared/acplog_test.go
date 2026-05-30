@@ -113,10 +113,11 @@ func TestACPLog_RingTail(t *testing.T) {
 	if len(tail) != 3 {
 		t.Fatalf("ring should cap at 3, got %d", len(tail))
 	}
-	// Oldest two (a,b) evicted; newest is 'e'.
+	// Oldest two (a,b) evicted; newest is 'e'. Assert the specific text field
+	// so the check can't pass on an incidental 'e' in some JSON key.
 	last := string(tail[len(tail)-1])
-	if !strings.Contains(last, `"e"`) && !strings.Contains(last, "e") {
-		t.Errorf("expected newest entry to contain 'e', got %s", last)
+	if !strings.Contains(last, `"text":"e"`) {
+		t.Errorf("expected newest entry text 'e', got %s", last)
 	}
 	if got := m.ringTail("nope", 10); got != nil {
 		t.Errorf("unknown session should return nil tail, got %v", got)
@@ -183,9 +184,12 @@ func TestACPLog_RingEviction(t *testing.T) {
 // disabled mode records nothing.
 func TestACPRingTail_GlobalWrapper(t *testing.T) {
 	prevMgr, prevDebug := acpLog, debugMode
-	acpLog = newACPLogManager(acpLogConfig{dir: t.TempDir(), maxFileBytes: 1 << 20, ringSize: 8})
+	mgr := newACPLogManager(acpLogConfig{dir: t.TempDir(), maxFileBytes: 1 << 20, ringSize: 8})
+	acpLog = mgr
 	debugMode = true
-	t.Cleanup(func() { acpLog = prevMgr; debugMode = prevDebug })
+	// Close the temporary manager's writers (not just restore the globals) so
+	// no file handles leak.
+	t.Cleanup(func() { mgr.closeAll(); acpLog = prevMgr; debugMode = prevDebug })
 
 	for range 3 {
 		LogNormalizedEvent(ProtocolACP, "acp", "sess", testEvent("sess"))
