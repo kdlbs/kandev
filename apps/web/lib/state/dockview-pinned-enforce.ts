@@ -19,7 +19,7 @@
  * `sv.resizeView`.
  */
 import type { DockviewApi } from "dockview-react";
-import { getRootSplitview, getPinnedTarget } from "./layout-manager";
+import { getRootSplitview, getPinnedTarget, computeSidebarMaxPx } from "./layout-manager";
 import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
 
 const debugWidths = createDebugLogger("dockview:widths");
@@ -97,7 +97,14 @@ export function enforcePinnedTargets(api: DockviewApi, ctx: EnforcePinnedTargets
   if (!sv || sv.length < 2) return;
   enforcing = true;
   try {
-    if (ctx.sidebarVisible) restoreColumnToTarget(sv, 0, getPinnedTarget("sidebar"));
+    if (ctx.sidebarVisible) {
+      // Clamp the (global, raw) sidebar target to the current screen so a width
+      // set on a wide monitor fits a narrower one. Storage keeps the raw value,
+      // so returning to the wide monitor restores it.
+      const raw = getPinnedTarget("sidebar");
+      const clamped = raw === undefined ? undefined : Math.min(raw, computeSidebarMaxPx(api.width));
+      restoreColumnToTarget(sv, 0, clamped);
+    }
     if (ctx.rightPanelsVisible) {
       restoreColumnToTarget(sv, sv.length - 1, getPinnedTarget("right"));
     }

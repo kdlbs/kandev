@@ -288,6 +288,28 @@ export function setEnvLayout(envId: string, layout: object): void {
   }
 }
 
+// --- Dockview global left-sidebar width (localStorage) ---
+// The LEFT sidebar width is a single GLOBAL preference shared across every
+// task env (unlike the per-env layout above, which keys widths by envId).
+// Stores the user's raw, unclamped width — clamping to the current screen
+// happens at apply time. Written only by a genuine sash drag; read by every
+// layout build/restore/switch via getPinnedWidth.
+const DOCKVIEW_GLOBAL_SIDEBAR_WIDTH_KEY = "kandev.dockview.sidebar-width";
+
+export function getGlobalSidebarWidth(): number | null {
+  const v = getLocalStorage<number | null>(DOCKVIEW_GLOBAL_SIDEBAR_WIDTH_KEY, null);
+  return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;
+}
+
+export function setGlobalSidebarWidth(width: number): void {
+  if (!Number.isFinite(width) || width <= 0) return;
+  setLocalStorage(DOCKVIEW_GLOBAL_SIDEBAR_WIDTH_KEY, Math.round(width));
+}
+
+export function clearGlobalSidebarWidth(): void {
+  removeLocalStorage(DOCKVIEW_GLOBAL_SIDEBAR_WIDTH_KEY);
+}
+
 // --- Dockview per-env maximize state (sessionStorage) ---
 // v2: bumped alongside DOCKVIEW_ENV_LAYOUT_PREFIX. The maximize blob
 // references the pre-maximize layout, which can carry the same oversized

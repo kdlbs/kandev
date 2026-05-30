@@ -13,6 +13,7 @@ import {
   setPinnedTarget,
 } from "./layout-manager";
 import type { LayoutGroupIds } from "./layout-manager";
+import { getGlobalSidebarWidth } from "@/lib/local-storage";
 import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
 
 // Re-export for consumers that import from this module
@@ -70,6 +71,15 @@ export function applyLayoutFixups(api: DockviewApi): LayoutGroupIds {
   return resolveGroupIds(api);
 }
 
+/** Resolve the sidebar's target width (clamped to the cap): the GLOBAL width
+ *  pref when set, else the just-restored live width. */
+function resolveSidebarTarget(cap: number, live: unknown): number | undefined {
+  const pref = getGlobalSidebarWidth();
+  if (pref !== null) return Math.min(pref, cap);
+  if (typeof live === "number" && live > 0) return Math.min(live, cap);
+  return undefined;
+}
+
 /** Lock + constrain the sidebar group and record its target width, clamped to
  *  the cap. The constraint pins the column at `sidebarCap`, so a target above
  *  it is unreachable and makes `enforcePinnedTargets` spin forever. */
@@ -86,9 +96,22 @@ function captureSidebarTarget(api: DockviewApi, sv: any): void {
   sb.group.locked = SIDEBAR_LOCK;
   sb.group.header.hidden = false;
   sb.group.api.setConstraints({ maximumWidth: sidebarCap, minimumWidth: LAYOUT_PINNED_MIN_PX });
+  // Slow-path env restore: fromJSON brought back this env's saved sidebar
+  // pixel width, but the sidebar is a GLOBAL pref. Seed the target from the
+  // pref (clamped to fit) and resize the column so the restore honors it; fall
+  // back to the just-restored live width when no pref exists.
   const live = sv?.getViewSize?.(0) ?? sb.group.width;
-  if (typeof live === "number" && live > 0) {
-    setPinnedTarget("sidebar", Math.min(live, sidebarCap));
+  const target = resolveSidebarTarget(sidebarCap, live);
+  if (target !== undefined) {
+    const cur = sv?.getViewSize?.(0);
+    if (typeof cur === "number" && cur > 0 && Math.abs(cur - target) > 1) {
+      try {
+        sv?.resizeView?.(0, target);
+      } catch {
+        /* dockview rejects unreachable sizes — ignore */
+      }
+    }
+    setPinnedTarget("sidebar", target);
   }
 }
 

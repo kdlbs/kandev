@@ -1,6 +1,7 @@
 import type { LayoutColumn, LayoutGroup } from "./types";
 import { LAYOUT_INITIAL_RATIO } from "./constants";
-import { computePinnedMaxPxFor, LAYOUT_PINNED_MIN_PX } from "./caps";
+import { computePinnedMaxPxFor, computeSidebarMaxPx, LAYOUT_PINNED_MIN_PX } from "./caps";
+import { getGlobalSidebarWidth } from "@/lib/local-storage";
 
 // Legacy hard caps used to clamp the *initial* default width. Users can still
 // drag past these via setConstraints (which uses the larger runtime cap),
@@ -26,6 +27,16 @@ export function getPinnedWidth(
   const min = column.minWidth ?? LAYOUT_PINNED_MIN_PX;
   if (override !== undefined) {
     return Math.max(min, Math.min(override, runtimeMax));
+  }
+  // No override: the left sidebar honors the persisted GLOBAL width pref so it
+  // opens identically across every task. Clamp-to-fit against the current
+  // screen (the raw value stays in storage, so a wider monitor restores it).
+  if (column.id === "sidebar") {
+    const pref = getGlobalSidebarWidth();
+    if (pref !== null) {
+      const max = column.maxWidth ?? computeSidebarMaxPx(totalWidth);
+      return Math.max(min, Math.min(pref, max));
+    }
   }
   const ratioWidth = Math.round(totalWidth * LAYOUT_INITIAL_RATIO);
   const initialCap =

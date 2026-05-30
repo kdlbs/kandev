@@ -5,6 +5,8 @@ import {
   resolvePresetPinnedWidths,
   collectPinnedWidthUpdates,
 } from "./dockview-store";
+import { getGlobalSidebarWidth, setGlobalSidebarWidth } from "@/lib/local-storage";
+import { getPinnedTarget, setPinnedTarget, clearPinnedTarget } from "./layout-manager";
 
 type ActivePanelEvent = { id: string };
 type CapturedHandlers = {
@@ -156,6 +158,35 @@ describe("resolvePresetPinnedWidths", () => {
     const live = new Map([["sidebar", 300]]);
     resolvePresetPinnedWidths(live, cols, 1600, false);
     expect(live.get("sidebar")).toBe(300);
+  });
+
+  describe("Default layout reset clears the global sidebar width", () => {
+    beforeEach(() => {
+      window.localStorage.clear();
+      clearPinnedTarget("sidebar");
+    });
+
+    it("clears the global pref + runtime target and uses the ratio default", () => {
+      setGlobalSidebarWidth(520);
+      setPinnedTarget("sidebar", 520);
+
+      const result = resolvePresetPinnedWidths(new Map(), cols, 1600, true);
+
+      // pref cleared → ratio default (1600*0.25=400, clamped to sidebar cap 350)
+      expect(result.get("sidebar")).toBe(350);
+      expect(getGlobalSidebarWidth()).toBeNull();
+      expect(getPinnedTarget("sidebar")).toBeUndefined();
+    });
+
+    it("does NOT clear the pref/target on a non-reset (programmatic) switch", () => {
+      setGlobalSidebarWidth(520);
+      setPinnedTarget("sidebar", 520);
+
+      resolvePresetPinnedWidths(new Map([["sidebar", 480]]), cols, 1600, false);
+
+      expect(getGlobalSidebarWidth()).toBe(520);
+      expect(getPinnedTarget("sidebar")).toBe(520);
+    });
   });
 });
 

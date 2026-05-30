@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   cleanupTaskStorage,
+  clearGlobalSidebarWidth,
+  getGlobalSidebarWidth,
   markPRClosedBannerDismissed,
   markPRMergedBannerDismissed,
+  setGlobalSidebarWidth,
   wasPRClosedBannerDismissed,
   wasPRMergedBannerDismissed,
 } from "./local-storage";
@@ -64,5 +67,39 @@ describe("PR closed banner dismissal storage", () => {
 
     expect(wasPRClosedBannerDismissed("task-a")).toBe(false);
     expect(wasPRClosedBannerDismissed("task-b")).toBe(true);
+  });
+});
+
+describe("global sidebar width storage", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("returns null when no width has been stored", () => {
+    expect(getGlobalSidebarWidth()).toBeNull();
+  });
+
+  it("persists a width globally and reads it back (rounded)", () => {
+    setGlobalSidebarWidth(412.6);
+    expect(getGlobalSidebarWidth()).toBe(413);
+  });
+
+  it("ignores non-positive or non-finite widths", () => {
+    setGlobalSidebarWidth(0);
+    setGlobalSidebarWidth(-100);
+    setGlobalSidebarWidth(Number.NaN);
+    expect(getGlobalSidebarWidth()).toBeNull();
+  });
+
+  it("clears the stored width", () => {
+    setGlobalSidebarWidth(320);
+    clearGlobalSidebarWidth();
+    expect(getGlobalSidebarWidth()).toBeNull();
+  });
+
+  it("is NOT removed by cleanupTaskStorage (it is global, not task-scoped)", () => {
+    setGlobalSidebarWidth(320);
+    cleanupTaskStorage("task-a", []);
+    expect(getGlobalSidebarWidth()).toBe(320);
   });
 });

@@ -11,7 +11,7 @@ import {
   RIGHT_BOTTOM_GROUP,
   setPinnedTarget,
 } from "@/lib/state/layout-manager";
-import { setEnvLayout } from "@/lib/local-storage";
+import { setEnvLayout, setGlobalSidebarWidth } from "@/lib/local-storage";
 import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
 import { stopVscode } from "@/lib/api/domains/vscode-api";
 import { parkUserShell, stopUserShell } from "@/lib/api/domains/user-shell-api";
@@ -123,7 +123,15 @@ export function setupSashDragCapToggle(api: DockviewReadyEvent["api"]): () => vo
       const sv = getRootSplitview(api);
       if (!sv) return;
       const store = useDockviewStore.getState();
-      if (store.sidebarVisible) setPinnedTarget("sidebar", sv.getViewSize(0));
+      if (store.sidebarVisible) {
+        // A genuine drag is the ONLY writer of the global sidebar width pref.
+        // Persist it globally and mirror into the store's pinnedWidths so the
+        // override path (resolvePresetPinnedWidths / classifyColumns) agrees.
+        const sidebarW = sv.getViewSize(0);
+        setPinnedTarget("sidebar", sidebarW);
+        setGlobalSidebarWidth(sidebarW);
+        store.setPinnedWidth("sidebar", sidebarW);
+      }
       if (store.rightPanelsVisible) setPinnedTarget("right", sv.getViewSize(sv.length - 1));
       if (IS_DEBUG) {
         debugWidths(`sash-drag-end ${formatWidthsSnapshot(snapshotColumnWidths(api))}`);
@@ -152,18 +160,12 @@ function trackPinnedWidths(api: DockviewReadyEvent["api"]): void {
   const sv = getRootSplitview(api);
   if (!sv || sv.length < 2) return;
   try {
-    // Sidebar is grid index 0 *only when sidebar is visible*. Without the
-    // visibility guard, hiding the sidebar makes index 0 the center column,
-    // and we'd persist the center width as the sidebar's preferred width.
-    if (store.sidebarVisible) {
-      const sidebarW = sv.getViewSize(0);
-      if (sidebarW > 50) {
-        const current = store.pinnedWidths.get("sidebar");
-        if (current !== sidebarW) {
-          store.setPinnedWidth("sidebar", sidebarW);
-        }
-      }
-    }
+    // The sidebar width is NOT tracked here: it is a global pref written only
+    // by a genuine sash drag (see setupSashDragCapToggle). Capturing the live
+    // width on every layout change would persist dockview's transient
+    // proportional-rebalance widths (e.g. 320→213 on a monitor shrink) and
+    // fight enforcePinnedTargets. Right column is still mirrored below.
+    //
     // Right column is the last grid index when present. Skip when there is
     // no right column (compact preset, rightPanelsVisible=false).
     if (store.rightPanelsVisible) {

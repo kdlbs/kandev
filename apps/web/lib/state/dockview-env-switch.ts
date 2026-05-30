@@ -386,7 +386,12 @@ function applyPinnedColumnSizes(
   for (let i = 0; i < liveLayout.columns.length && i < sv.length; i++) {
     const col = liveLayout.columns[i];
     if (col.id !== "sidebar" && col.id !== "right") continue;
-    const target = targetPinnedWidth(col, i, savedSizes, totalWidth);
+    // Sidebar uses the GLOBAL width pref (single source of truth across tasks),
+    // so it ignores this env's saved size. Right keeps per-env saved sizes.
+    const target =
+      col.id === "sidebar"
+        ? getPinnedWidth(col, totalWidth, undefined)
+        : targetPinnedWidth(col, i, savedSizes, totalWidth);
     if (typeof target !== "number" || target <= 0) continue;
     try {
       sv.resizeView(i, target);

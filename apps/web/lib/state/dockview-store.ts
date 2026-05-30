@@ -6,8 +6,10 @@ import {
   getEnvMaximizeState,
   setEnvMaximizeState,
   removeEnvMaximizeState,
+  clearGlobalSidebarWidth,
+  setGlobalSidebarWidth,
 } from "@/lib/local-storage";
-import { setPinnedTarget } from "./layout-manager";
+import { setPinnedTarget, clearPinnedTarget } from "./layout-manager";
 import { applyLayoutFixups, focusOrAddPanel } from "./dockview-layout-builders";
 import {
   SIDEBAR_GROUP,
@@ -299,6 +301,11 @@ export function resolvePresetPinnedWidths(
   resetWidths: boolean,
 ): Map<string, number> {
   if (resetWidths) {
+    // "Default layout" is the reset gesture: drop any custom global sidebar
+    // width (and its runtime target) so getPinnedWidth returns the fresh
+    // ratio default for the current screen instead of re-reading the pref.
+    clearGlobalSidebarWidth();
+    clearPinnedTarget("sidebar");
     const defaults = new Map<string, number>();
     for (const col of columns) {
       if (col.pinned) defaults.set(col.id, getPinnedWidth(col, totalWidth, undefined));
@@ -867,12 +874,15 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
       type TestWindow = {
         __dockviewApi__: DockviewApi | null;
         __setPinnedTarget__?: typeof setPinnedTarget;
+        __setGlobalSidebarWidth__?: typeof setGlobalSidebarWidth;
       };
       const w = window as unknown as TestWindow;
       w.__dockviewApi__ = api;
       // E2E test helpers: let `resizeColumnViaSplitview` update the target
-      // width after a programmatic resize (mirroring the sash-drag mouseup).
+      // width after a programmatic resize (mirroring the sash-drag mouseup),
+      // including persisting the global sidebar-width pref like a real drag.
       w.__setPinnedTarget__ = setPinnedTarget;
+      w.__setGlobalSidebarWidth__ = setGlobalSidebarWidth;
     }
     if (api) {
       const resolveFilePath = (panelId: string | undefined): string | null => {
