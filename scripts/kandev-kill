@@ -151,6 +151,15 @@ fi
 # listening ports from the running process itself, so a --pidfile pointing at a
 # guarded port is refused exactly like `kandev-kill <guarded_port>`.
 mapfile -t TARGET_PORTS < <(listening_ports_for_pid "$BACKEND_PID")
+# Fail closed: in --pidfile mode the guard relies entirely on resolving the
+# target's listening ports. If neither ss nor lsof is available (empty list and
+# no explicit port supplied), we can't prove the target isn't a guarded
+# production instance — refuse rather than kill blind, unless --force.
+if [[ -n "$PIDFILE" && -z "$PORT" && ${#TARGET_PORTS[@]} -eq 0 && "$FORCE" -ne 1 ]]; then
+  echo "kandev-kill: cannot resolve listening ports for PID $BACKEND_PID (need ss or lsof)." >&2
+  echo "             Refusing a --pidfile kill without --force — the guarded-port check can't run." >&2
+  exit 3
+fi
 # Prefer the explicitly supplied port for display; else the lowest listening one.
 if [[ -z "$PORT" && ${#TARGET_PORTS[@]} -gt 0 ]]; then
   PORT="${TARGET_PORTS[0]}"

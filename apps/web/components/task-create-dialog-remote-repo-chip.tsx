@@ -146,8 +146,17 @@ function useRowBranchAutoSelect(args: {
   // Last branch value this auto-selector wrote. Used to tell an auto-set value
   // (safe to overwrite) apart from a user pick (must be preserved).
   const autoSetRef = useRef<string | null>(null);
+  // The URL the autoSetRef belongs to. When the row switches to a different
+  // repo/URL, ownership resets — otherwise a branch prefilled for the new URL
+  // (e.g. its default_branch) could be mistaken for an auto-set value and
+  // clobbered, or a stale value could leak across repos.
+  const lastUrlRef = useRef<string>("");
   useEffect(() => {
     if (!row.url) return;
+    if (row.url !== lastUrlRef.current) {
+      lastUrlRef.current = row.url;
+      autoSetRef.current = null;
+    }
     // A non-empty branch that we didn't write ourselves is a user pick — leave
     // it alone.
     if (row.branch && row.branch !== autoSetRef.current) return;
