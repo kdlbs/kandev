@@ -77,6 +77,7 @@ clean_artifacts() {
 # makes global-setup's existsSync() return false and then EEXIST on recreate.
 # Use python3 to compute the relative path portably (ln -r is GNU-only).
 prelink_standalone() {
+  command -v python3 >/dev/null 2>&1 || die "python3 is required for prelink_standalone"
   local sa="$WEB_DIR/.next/standalone/web"
   [[ -d "$sa" ]] || return 0
   mkdir -p "$sa/.next"
