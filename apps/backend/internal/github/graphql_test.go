@@ -54,8 +54,11 @@ func TestBuildBatchedBranchQuery_AliasesAllBranches(t *testing.T) {
 	if !strings.Contains(q, `b0: repository`) || !strings.Contains(q, `b1: repository`) {
 		t.Errorf("expected b0/b1 aliases: %s", q)
 	}
-	if !strings.Contains(q, `qualifiedName: "refs/heads/feat-1"`) {
-		t.Errorf("expected qualifiedName for feat-1: %s", q)
+	if !strings.Contains(q, `pullRequests(first: 1, states: OPEN, headRefName: "feat-1")`) {
+		t.Errorf("expected headRefName lookup for feat-1: %s", q)
+	}
+	if strings.Contains(q, `ref(qualifiedName:`) {
+		t.Errorf("branch lookup should not require a base-repo ref: %s", q)
 	}
 }
 
@@ -184,19 +187,17 @@ func TestRunBatchedBranchQuery_DecodesPRNode(t *testing.T) {
 		response: `{
 			"data": {
 				"b0": {
-					"ref": {
-						"associatedPullRequests": {
-							"nodes": [{
-								"number": 7,
-								"state": "OPEN", "title": "branch PR", "url": "https://x/7",
-								"isDraft": false, "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
-								"headRefName": "feat", "baseRefName": "main", "headRefOid": "deadbeef",
-								"author": {"login":"alice"},
-								"createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
-								"reviews": {"nodes": []}, "reviewRequests": {"totalCount": 0},
-								"commits": {"nodes": []}
-							}]
-						}
+					"pullRequests": {
+						"nodes": [{
+							"number": 7,
+							"state": "OPEN", "title": "branch PR", "url": "https://x/7",
+							"isDraft": false, "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
+							"headRefName": "feat", "baseRefName": "main", "headRefOid": "deadbeef",
+							"author": {"login":"alice"},
+							"createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+							"reviews": {"nodes": []}, "reviewRequests": {"totalCount": 0},
+							"commits": {"nodes": []}
+						}]
 					}
 				}
 			}

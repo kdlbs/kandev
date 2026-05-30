@@ -641,19 +641,17 @@ func TestTryBatchedPRWatchCheck_SearchingWatch_DetectsPR(t *testing.T) {
 	gh.branchResponses = []string{`{
 		"data": {
 			"b0": {
-				"ref": {
-					"associatedPullRequests": {
-						"nodes": [{
-							"number": 7,
-							"state": "OPEN", "title": "branch PR", "url": "https://x/7",
-							"isDraft": false, "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
-							"headRefName": "feat", "baseRefName": "main", "headRefOid": "deadbeef",
-							"author": {"login": "alice"},
-							"createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
-							"reviews": {"nodes": []}, "reviewRequests": {"totalCount": 0},
-							"commits": {"nodes": []}
-						}]
-					}
+				"pullRequests": {
+					"nodes": [{
+						"number": 7,
+						"state": "OPEN", "title": "branch PR", "url": "https://x/7",
+						"isDraft": false, "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
+						"headRefName": "feat", "baseRefName": "main", "headRefOid": "deadbeef",
+						"author": {"login": "alice"},
+						"createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+						"reviews": {"nodes": []}, "reviewRequests": {"totalCount": 0},
+						"commits": {"nodes": []}
+					}]
 				}
 			}
 		}
