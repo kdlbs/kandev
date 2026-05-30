@@ -148,11 +148,11 @@ func taskCreate(args []string) int {
 	if gid := strings.TrimSpace(*workspaceGroupID); gid != "" {
 		payload["workspace_group_id"] = gid
 	}
-	if *defaultChildWorkspace != "" {
-		payload["default_child_workspace"] = *defaultChildWorkspace
+	if dcw := strings.TrimSpace(*defaultChildWorkspace); dcw != "" {
+		payload["default_child_workspace"] = dcw
 	}
-	if *defaultChildOrdering != "" {
-		payload["default_child_ordering"] = *defaultChildOrdering
+	if dco := strings.TrimSpace(*defaultChildOrdering); dco != "" {
+		payload["default_child_ordering"] = dco
 	}
 
 	body, status, err := client.do(http.MethodPost, "/api/v1/tasks", payload)
