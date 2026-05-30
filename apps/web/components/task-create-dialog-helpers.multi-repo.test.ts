@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { buildRepositoriesPayload } from "./task-create-dialog-helpers";
+import { buildRepositoriesPayload, findDuplicateRemoteRepo } from "./task-create-dialog-helpers";
+import type { TaskRemoteRepoRow } from "@/components/task-create-dialog-types";
 import type { PRInfo } from "@/hooks/domains/github/use-pr-info-by-url";
+
+/** Minimal TaskRemoteRepoRow builder for the dedup tests. */
+function remoteRow(key: string, url: string): TaskRemoteRepoRow {
+  return { key, url, branch: "", source: "paste" };
+}
 
 /** Builds a `prInfoByUrl` stub for `buildRepositoriesPayload`. The submit
  * path only ever reads `info(url)` from the per-URL cache; the test stub
@@ -453,5 +459,61 @@ describe("buildRepositoriesPayload — URL trimming for prInfoByUrl lookup", () 
         github_url: canonical,
       },
     ]);
+  });
+});
+
+describe("findDuplicateRemoteRepo", () => {
+  const PR_1116 = "https://github.com/kdlbs/kandev/pull/1116";
+  const REPO_URL = "https://github.com/kdlbs/kandev";
+  const REPO_LABEL = "kdlbs/kandev";
+
+  it("flags two rows with the identical URL, naming the repo", () => {
+    expect(findDuplicateRemoteRepo([remoteRow("r0", PR_1116), remoteRow("r1", PR_1116)])).toBe(
+      REPO_LABEL,
+    );
+  });
+
+  it("flags two different PRs of the same repo", () => {
+    expect(
+      findDuplicateRemoteRepo([
+        remoteRow("r0", PR_1116),
+        remoteRow("r1", "https://github.com/kdlbs/kandev/pull/1117"),
+      ]),
+    ).toBe(REPO_LABEL);
+  });
+
+  it("flags a PR URL and a plain repo URL of the same repo", () => {
+    expect(findDuplicateRemoteRepo([remoteRow("r0", PR_1116), remoteRow("r1", REPO_URL)])).toBe(
+      REPO_LABEL,
+    );
+  });
+
+  it("compares case-insensitively but reports the first row's casing", () => {
+    expect(
+      findDuplicateRemoteRepo([
+        remoteRow("r0", "https://github.com/KdLbS/Kandev"),
+        remoteRow("r1", "https://github.com/kdlbs/kandev/pull/9"),
+      ]),
+    ).toBe("KdLbS/Kandev");
+  });
+
+  it("returns null for genuinely different repos", () => {
+    expect(
+      findDuplicateRemoteRepo([
+        remoteRow("r0", PR_1116),
+        remoteRow("r1", "https://github.com/kdlbs/other/pull/1"),
+      ]),
+    ).toBeNull();
+  });
+
+  it("ignores empty and unparseable rows (no false positives)", () => {
+    expect(
+      findDuplicateRemoteRepo([
+        remoteRow("r0", ""),
+        remoteRow("r1", "not a url"),
+        remoteRow("r2", "totally garbage"),
+        remoteRow("r3", REPO_URL),
+      ]),
+    ).toBeNull();
   });
 });

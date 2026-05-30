@@ -15,11 +15,13 @@ import {
   activatePlanMode,
   buildCreateTaskPayload,
   buildRepositoriesPayload,
+  findDuplicateRemoteRepo,
   validateCreateInputs,
   toMessageAttachments,
 } from "@/components/task-create-dialog-helpers";
 
 const GENERIC_ERROR_MESSAGE = "An error occurred";
+const DUPLICATE_REPO_TITLE = "Duplicate repository";
 
 // eslint-disable-next-line max-lines-per-function
 export function useTaskSubmitHandlers({
@@ -105,6 +107,22 @@ export function useTaskSubmitHandlers({
       noRepository,
     ],
   );
+
+  // Blocks submit when two Remote rows resolve to the same GitHub repo (same
+  // PR URL twice, or two PRs of one repo). Surfaces a repo-named toast before
+  // the backend round-trip so the user never sees the raw-UUID dedup error.
+  // Returns true when a duplicate was found (caller should abort).
+  const checkRemoteDuplicates = useCallback((): boolean => {
+    if (!useRemote) return false;
+    const duplicate = findDuplicateRemoteRepo(remoteRepos);
+    if (!duplicate) return false;
+    toast({
+      title: DUPLICATE_REPO_TITLE,
+      description: `${duplicate} is added more than once — remove the duplicate row.`,
+      variant: "error",
+    });
+    return true;
+  }, [useRemote, remoteRepos, toast]);
 
   const resetForm = useCallback(() => {
     setHasTitle(false);
@@ -425,6 +443,7 @@ export function useTaskSubmitHandlers({
     const trimmedDescription = description.trim();
     const attachments = toMessageAttachments(descriptionInputRef.current?.getAttachments() ?? []);
     if (!validateForCreate(trimmedTitle)) return;
+    if (checkRemoteDuplicates()) return;
     const consent = await ensureFreshBranchConsent();
     if (consent === null) return;
     setIsCreatingTask(true);
@@ -451,6 +470,7 @@ export function useTaskSubmitHandlers({
     performEditWithPlanMode,
     taskName,
     validateForCreate,
+    checkRemoteDuplicates,
     ensureFreshBranchConsent,
     performCreate,
     toast,
@@ -464,6 +484,7 @@ export function useTaskSubmitHandlers({
     const trimmedDescription = description.trim();
     const attachments = toMessageAttachments(descriptionInputRef.current?.getAttachments() ?? []);
     if (!validateForCreate(trimmedTitle)) return;
+    if (checkRemoteDuplicates()) return;
     const consent = await ensureFreshBranchConsent();
     if (consent === null) return;
     setIsCreatingTask(true);
@@ -494,6 +515,7 @@ export function useTaskSubmitHandlers({
   }, [
     taskName,
     validateForCreate,
+    checkRemoteDuplicates,
     ensureFreshBranchConsent,
     performCreate,
     handleCreatePlanMode,
@@ -509,6 +531,7 @@ export function useTaskSubmitHandlers({
     if (!validateForCreate(trimmedTitle)) return;
     if (!trimmedDescription || !effectiveDefaultStepId || !workspaceId || !effectiveWorkflowId)
       return;
+    if (checkRemoteDuplicates()) return;
 
     const consent = await ensureFreshBranchConsent();
     if (consent === null) return;
@@ -555,6 +578,7 @@ export function useTaskSubmitHandlers({
     noRepository,
     workspacePath,
     validateForCreate,
+    checkRemoteDuplicates,
     getRepositoriesPayload,
     ensureFreshBranchConsent,
     createTaskWithFreshBranchRetry,

@@ -43,6 +43,7 @@ vi.mock("@/components/task-create-dialog-helpers", () => ({
   activatePlanMode: vi.fn(),
   buildCreateTaskPayload: (...args: unknown[]) => buildCreateTaskPayloadMock(...args),
   buildRepositoriesPayload: () => [],
+  findDuplicateRemoteRepo: () => null,
   validateCreateInputs: (...args: unknown[]) => validateCreateInputsMock(...args),
   toMessageAttachments: () => [],
 }));

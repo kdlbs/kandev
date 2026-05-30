@@ -8,6 +8,7 @@ import type {
   TaskRepoRow,
 } from "@/components/task-create-dialog-types";
 import type { UsePRInfoByURLResult } from "@/hooks/domains/github/use-pr-info-by-url";
+import { parseGitHubAnyUrl } from "@/hooks/domains/github/use-pr-info-by-url";
 import { selectPreferredBranch } from "@/lib/utils";
 import { getLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
@@ -164,6 +165,36 @@ export function validateCreateInputs(inputs: {
     inputs.agentProfileId &&
     hasRepo,
   );
+}
+
+/**
+ * Detects two remote-repo rows that resolve to the same GitHub `owner/repo`.
+ *
+ * Both plain repo URLs and PR URLs are parsed via `parseGitHubAnyUrl`, so two
+ * different PRs of the same repo (`/pull/1116` and `/pull/1117`) or the same
+ * PR URL pasted twice are caught — they all collapse to the same backend
+ * repository, which would otherwise surface as an opaque UUID-laden error.
+ *
+ * Rows with an empty URL, or a URL that can't be parsed to `owner/repo`
+ * (garbage), are skipped — only parseable rows participate in the comparison,
+ * which is case-insensitive on `owner/repo`.
+ *
+ * Returns the human-readable label (`owner/repo`, preserving the first row's
+ * casing) of the first duplicate found, or `null` when every parseable row is
+ * a distinct repo.
+ */
+export function findDuplicateRemoteRepo(remoteRepos: TaskRemoteRepoRow[]): string | null {
+  const seen = new Map<string, string>();
+  for (const row of remoteRepos) {
+    const parsed = parseGitHubAnyUrl(row.url ?? "");
+    if (!parsed) continue;
+    const label = `${parsed.owner}/${parsed.repo}`;
+    const key = label.toLowerCase();
+    const existing = seen.get(key);
+    if (existing) return existing;
+    seen.set(key, label);
+  }
+  return null;
 }
 
 /**
