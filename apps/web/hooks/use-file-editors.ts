@@ -140,6 +140,22 @@ async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Pr
       quiet: true,
       pin: savedTab.pinned,
     });
+    // Seed a placeholder file state synchronously, carrying the restored
+    // `markdownPreview` flag. This makes `openFiles.has(path)` true the moment
+    // FileEditorPanel mounts, which suppresses its own `useFileLoader` fetch.
+    // Without this seed, useFileLoader races the per-tab fetch below: both call
+    // setFileState (a wholesale replace), and useFileLoader's state has no
+    // markdownPreview — so when it wins the race (common under CPU load) the
+    // restored preview flag is clobbered and the tab reopens in code view.
+    setFileState(savedTab.path, {
+      path: savedTab.path,
+      name: savedTab.name,
+      content: "",
+      originalContent: "",
+      originalHash: "",
+      isDirty: false,
+      markdownPreview: savedTab.markdownPreview,
+    });
   }
   for (const savedTab of savedTabs) {
     try {
