@@ -381,3 +381,10 @@ func TestSetSessionWaitingForInput_WritesOnTransition(t *testing.T) {
 		"setSessionWaitingForInput must write tasks.state on actual transition")
 	require.Equal(t, v1.TaskStateReview, taskRepo.updatedStates["t1"])
 }
+
+func TestSessionStateString(t *testing.T) {
+	require.Equal(t, "", sessionStateString(nil),
+		"nil session must render as empty so trace logs stay clean")
+	require.Equal(t, string(models.TaskSessionStateRunning),
+		sessionStateString(&models.TaskSession{State: models.TaskSessionStateRunning}))
+}

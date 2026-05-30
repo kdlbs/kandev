@@ -1,4 +1,5 @@
 import type { StoreApi } from "zustand";
+import { createDebugLogger } from "@/lib/debug/log";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import {
@@ -9,6 +10,8 @@ import {
   type TaskSessionState,
 } from "@/lib/types/http";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
+
+const debug = createDebugLogger("session:state");
 
 const TERMINAL_SESSION_STATES: ReadonlySet<TaskSessionState> = new Set([
   "COMPLETED",
@@ -337,6 +340,12 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
 
       const sessionUpdate = buildSessionUpdate(payload);
       const existingSession = store.getState().taskSessions.items[sessionId];
+
+      debug("state_changed", {
+        sessionId,
+        oldState: existingSession?.state ?? "-",
+        newState: newState ?? "-",
+      });
 
       upsertTaskSessionList(store, taskId, sessionId, payload, sessionUpdate);
       extractContextWindow(store, sessionId, payload);

@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import type { StoreApi } from "zustand";
 import { useStore } from "zustand";
+import { IS_DEBUG, registerSessionTaskResolver } from "@/lib/debug/log";
 import type { AppState, StoreProviderProps } from "@/lib/state/store";
 import { createAppStore } from "@/lib/state/store";
 
@@ -21,6 +22,17 @@ export function StateProvider({ children, initialState }: StoreProviderProps) {
     if (win.__KANDEV_E2E_EXPOSE_STORE__) {
       win.__KANDEV_E2E_STORE__ = store;
     }
+  }, [store]);
+
+  // In debug builds, let the namespaced debug logger annotate every line that
+  // carries a sessionId with `task_id=<...>` so console/log filters can scope to
+  // a single task (see lib/debug/log.ts). No-op in production.
+  useEffect(() => {
+    if (!IS_DEBUG) return;
+    registerSessionTaskResolver(
+      (sessionId) => store.getState().taskSessions.items[sessionId]?.task_id ?? undefined,
+    );
+    return () => registerSessionTaskResolver(null);
   }, [store]);
 
   return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;

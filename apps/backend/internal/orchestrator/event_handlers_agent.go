@@ -456,6 +456,19 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 
 	transitioned := s.processOnTurnCompleteViaEngine(ctx, data.TaskID, session)
 
+	// Agent-exit path: unlike the streaming complete event, this path does NOT
+	// itself complete the open turn or clear the session's RUNNING state — it
+	// relies entirely on the workflow engine's on_turn_complete transition.
+	// workflow_transitioned=false means no transition fired, so the session may
+	// still be RUNNING (only the task row moves to REVIEW below) and the chat UI
+	// keeps showing the agent as working. Pairs with the frontend [session:state]
+	// / [session:turns] trace — filter both by the same task_id.
+	s.logger.Debug("agent.completed turn-complete decision (session state not cleared by this path)",
+		zap.String("task_id", data.TaskID),
+		zap.String("session_id", data.SessionID),
+		zap.String("session_state", string(session.State)),
+		zap.Bool("workflow_transitioned", transitioned))
+
 	// If no workflow transition occurred, move task to REVIEW state for user review
 	if !transitioned {
 		if err := s.taskRepo.UpdateTaskState(ctx, data.TaskID, v1.TaskStateReview); err != nil {

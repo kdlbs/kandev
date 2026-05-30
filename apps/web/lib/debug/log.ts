@@ -26,6 +26,21 @@
  *
  *   [namespace] message key1=value key2="value with space" key3={"nested":1}
  *
+ * ## Filtering by task
+ *
+ * Most call sites only have a `sessionId` in scope, but triage usually happens
+ * per *task*. When a session→task resolver is registered (the `StateProvider`
+ * wires one up in dev — see `registerSessionTaskResolver`), every line that
+ * carries a `sessionId` / `session_id` field is auto-annotated with a trailing
+ * `task_id=<...>`:
+ *
+ *   [git-status:ws] status_update received sessionId=abc fileCount=3 task_id=t_42
+ *
+ * So `task_id=t_42` in the devtools console filter narrows *all* namespaces to a
+ * single task. No call site has to thread the task ID through by hand — just keep
+ * logging `sessionId` and the task ID rides along. (If a line already names a
+ * task via `taskId` / `task_id`, it is left as-is.)
+ *
  * ## Namespace convention
  *
  * Names use `<domain>:<aspect>` so a devtools console filter can narrow on
@@ -114,6 +129,20 @@
  *                                    Virtuoso is mounted explains the
  *                                    agent-reply-pushed-below-fold scenario.
  *
+ *   Agent running-state (bug: ACP turn completes but chat still shows the agent
+ *   as running). The chat "agent is working" indicator is driven by
+ *   taskSessions.items[sessionId].state === "RUNNING"; it only clears when a
+ *   session.state_changed WS event flips new_state off RUNNING.
+ *     [session:state]         session.state_changed handler — old→new state per
+ *                             session. If you never see a line transitioning
+ *                             newState off RUNNING after the turn completes, the
+ *                             backend never published the clear (look at the
+ *                             orchestrator complete-event guard / handleAgentCompleted).
+ *     [session:turns]         session.turn.started / session.turn.completed
+ *                             handlers. A `turn.completed` line with no following
+ *                             `[session:state] newState=WAITING_FOR_INPUT` is the
+ *                             smoking gun: the turn ended but running-state stuck.
+ *
  *   Other
  *     [ws:connection]         WS hook mount + status transitions
  *     [dockview:*]            layout restore / save / env-switch / session-tabs / task-select
@@ -188,10 +217,67 @@ function flattenArgs(args: unknown[]): string {
   return parts.join(" ");
 }
 
+export type SessionTaskResolver = (sessionId: string) => string | undefined;
+
+let sessionTaskResolver: SessionTaskResolver | null = null;
+
+/**
+ * Register a function that maps a session ID to its owning task ID.
+ *
+ * Most debug call sites only have a `sessionId` in scope, but when triaging a
+ * problem you usually think in terms of a *task*. Once a resolver is registered,
+ * every `debug(...)` call that carries a `sessionId` / `session_id` field is
+ * automatically annotated with a trailing `task_id=<...>` — so a devtools
+ * console filter (or a grep over an exported log) can scope to a single task
+ * without every call site having to thread the task ID through.
+ *
+ * The frontend store is created per-`StateProvider` (there is no module-level
+ * singleton), so the provider wires this up on mount and tears it down on
+ * unmount — see `components/state-provider.tsx`. Pass `null` to clear it.
+ * Calls are no-ops in production because `createDebugLogger` returns `NOOP`.
+ */
+export function registerSessionTaskResolver(resolver: SessionTaskResolver | null): void {
+  sessionTaskResolver = resolver;
+}
+
+const SESSION_ID_KEYS = ["sessionId", "session_id"];
+const TASK_ID_KEYS = ["taskId", "task_id"];
+
+function readStringKey(args: unknown[], keys: string[]): string | undefined {
+  for (const arg of args) {
+    if (!isPlainObject(arg)) continue;
+    for (const key of keys) {
+      const val = arg[key];
+      if (typeof val === "string" && val.length > 0) return val;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Build the trailing ` task_id=<...>` annotation for a log line from the
+ * `sessionId` it already carries. Returns "" (no annotation) when there is no
+ * resolver, the line already names a task, no session is present, or the
+ * session can't be mapped. Never throws — a faulty resolver must not break a
+ * debug log.
+ */
+function resolveTaskAnnotation(args: unknown[]): string {
+  if (!sessionTaskResolver) return "";
+  if (readStringKey(args, TASK_ID_KEYS)) return ""; // already filterable by task
+  const sid = readStringKey(args, SESSION_ID_KEYS);
+  if (!sid) return "";
+  try {
+    const taskId = sessionTaskResolver(sid);
+    return taskId ? ` task_id=${formatValue(taskId)}` : "";
+  } catch {
+    return "";
+  }
+}
+
 export function createDebugLogger(namespace: string): DebugLogger {
   if (!IS_DEBUG) return NOOP;
   const prefix = `[${namespace}]`;
   return (...args: unknown[]) => {
-    console.debug(`${prefix} ${flattenArgs(args)}`);
+    console.debug(`${prefix} ${flattenArgs(args)}${resolveTaskAnnotation(args)}`);
   };
 }
