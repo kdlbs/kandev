@@ -86,6 +86,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | Spec | Status |
 |---|---|
 | [comment-markdown](ui/comment-markdown.md) | shipped |
+| [empty-turn-notice](ui/empty-turn-notice.md) | shipped |
 
 ## system-page/ — operational diagnostics & maintenance UI
 

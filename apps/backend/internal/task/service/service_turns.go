@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -42,7 +43,9 @@ func (s *Service) StartTurn(ctx context.Context, sessionID string) (*models.Turn
 		return nil, err
 	}
 
-	s.publishTurnEvent(events.TurnStarted, turn)
+	// A freshly started turn has produced no agent output yet. had_output is
+	// only meaningful on turn.completed; pass false here for a consistent payload.
+	s.publishTurnEvent(events.TurnStarted, turn, false)
 
 	s.logger.Debug("started turn",
 		zap.String("turn_id", turn.ID),
@@ -80,7 +83,7 @@ func (s *Service) CompleteTurn(ctx context.Context, turnID string) error {
 		return nil
 	}
 
-	s.publishTurnEvent(events.TurnCompleted, turn)
+	s.publishTurnEvent(events.TurnCompleted, turn, s.turnHadOutput(ctx, turn))
 
 	s.logger.Debug("completed turn",
 		zap.String("turn_id", turnID),
@@ -148,7 +151,10 @@ func (s *Service) AbandonOpenTurns(ctx context.Context, sessionID string) error 
 				zap.String("turn_id", turn.ID),
 				zap.Error(err))
 		} else {
-			s.publishTurnEvent(events.TurnCompleted, refreshed)
+			// Abandoned turns are orphans swept on resume, not live completions.
+			// Report had_output=true so the frontend never shows an "empty turn"
+			// notice for them — only genuine live completions should trigger it.
+			s.publishTurnEvent(events.TurnCompleted, refreshed, true)
 		}
 		s.logger.Info("abandoned orphan turn on session resume",
 			zap.String("turn_id", turn.ID),
@@ -187,8 +193,10 @@ func (s *Service) getOrStartTurn(ctx context.Context, sessionID string) (*models
 	return s.StartTurn(ctx, sessionID)
 }
 
-// publishTurnEvent publishes a turn event to the event bus.
-func (s *Service) publishTurnEvent(eventType string, turn *models.Turn) {
+// publishTurnEvent publishes a turn event to the event bus. hadOutput reports
+// whether the turn produced any agent output; it is only meaningful for
+// turn.completed events (the frontend uses it to surface an "empty turn" notice).
+func (s *Service) publishTurnEvent(eventType string, turn *models.Turn, hadOutput bool) {
 	if s.eventBus == nil {
 		return
 	}
@@ -203,9 +211,53 @@ func (s *Service) publishTurnEvent(eventType string, turn *models.Turn) {
 		"started_at":   turn.StartedAt,
 		"completed_at": turn.CompletedAt,
 		"metadata":     turn.Metadata,
+		"had_output":   hadOutput,
 		"created_at":   turn.CreatedAt,
 		"updated_at":   turn.UpdatedAt,
 	}))
+}
+
+// turnHadOutput reports whether a completed turn produced any agent output.
+// It reads the turn's persisted messages (all agent text/tool messages are
+// written before the turn is completed, so the DB is authoritative even for
+// streaming agents whose text is drained via chunk events). A read failure
+// defaults to true so a transient DB error never produces a spurious
+// "empty turn" notice.
+func (s *Service) turnHadOutput(ctx context.Context, turn *models.Turn) bool {
+	msgs, err := s.messages.ListMessages(ctx, turn.TaskSessionID)
+	if err != nil {
+		s.logger.Debug("failed to list messages for had_output; assuming output",
+			zap.String("turn_id", turn.ID),
+			zap.Error(err))
+		return true
+	}
+	return turnHadAgentOutput(msgs, turn.ID)
+}
+
+// turnHadAgentOutput returns true when any message belonging to turnID is
+// agent-authored, substantive output: a tool call, a native plan/todo, or a
+// non-empty text response. It is an allowlist on purpose — incidental,
+// non-answer messages the runtime attaches to a turn (lifecycle "status" /
+// "script_execution" notices, logs, progress, thinking, and standalone
+// permission/clarification prompts) must NOT count, so a turn that only emits
+// those (or nothing at all) is still treated as empty. User messages never
+// count.
+func turnHadAgentOutput(msgs []*models.Message, turnID string) bool {
+	for _, m := range msgs {
+		if m == nil || m.TurnID != turnID || m.AuthorType != models.MessageAuthorAgent {
+			continue
+		}
+		switch m.Type {
+		case models.MessageTypeToolCall, models.MessageTypeToolEdit, models.MessageTypeToolRead,
+			models.MessageTypeToolExecute, models.MessageTypeAgentPlan, models.MessageTypeTodo:
+			return true
+		case models.MessageTypeMessage, models.MessageTypeContent, "":
+			if strings.TrimSpace(m.Content) != "" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // GetGitSnapshots retrieves git snapshots for a session

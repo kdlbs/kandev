@@ -38,6 +38,20 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"review-cumulative-setup": scenarioReviewCumulativeSetup,
 	"symlink-file-setup":      scenarioSymlinkFileSetup,
 	"markdown-table":          scenarioMarkdownTable,
+	"empty-turn":              scenarioEmptyTurn,
+}
+
+// scenarioEmptyTurn emits no content and no tool calls, so the turn ends
+// cleanly with no agent output. Reproduces the case where an agent treats a
+// prompt (e.g. an unsupported slash command) as a no-op and returns an empty
+// end_turn. Drives the frontend "empty turn" notice.
+func scenarioEmptyTurn(e *emitter) {
+	_ = e
+	// Stay "running" for a few seconds rather than returning instantly. The
+	// empty-turn notice is driven by the live turn.completed event, so the turn
+	// must outlast the client's initial WS subscribe (especially on mobile,
+	// where a fast auto-start turn can finish before the chat subscribes).
+	fixedDelay(3000)
 }
 
 // emitPredefinedScenario dispatches to a named e2e scenario.

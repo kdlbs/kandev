@@ -401,6 +401,8 @@ export type TurnEventPayload = {
   started_at: string;
   completed_at?: string;
   metadata?: Record<string, unknown>;
+  /** Whether the completed turn produced any agent output. Only set on turn.completed. */
+  had_output?: boolean;
   created_at: string;
   updated_at: string;
 };
