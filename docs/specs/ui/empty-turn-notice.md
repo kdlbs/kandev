@@ -13,7 +13,7 @@ When a user sends a message to the agent chat and the turn completes with **no c
 ## What
 
 - When an agent turn completes having produced **no agent output**, the chat shows an unobtrusive inline status notice instead of nothing.
-- "Output" means at least one agent message that is a tool call (`tool_call`/`tool_edit`/`tool_read`/`tool_execute`), a native plan/todo (`agent_plan`/`todo`), or a non-empty text response (`message`/`content`). Incidental per-turn messages — lifecycle `status`/`script_execution` notices, `log`, `progress`, `thinking`, and standalone `permission_request`/`clarification_request` prompts — do **not** count as output.
+- "Output" means at least one agent message that is a tool call (`tool_call`/`tool_edit`/`tool_read`/`tool_execute`), a native plan/todo (`agent_plan`/`todo`), a permission or clarification prompt (`permission_request`/`clarification_request`), or a non-empty text response (`message`/`content`). Incidental per-turn messages — lifecycle `status`/`script_execution` notices, `log`, `progress`, and `thinking` — do **not** count as output.
 - The backend is authoritative: the `session.turn.completed` event carries a transient `had_output` boolean computed from the turn's persisted messages at completion time (no DB column; the notice is live-only).
 - The notice text adapts to the triggering user message:
   - **No leading `/`** → "The agent finished without producing any output."
@@ -44,6 +44,6 @@ When a user sends a message to the agent chat and the turn completes with **no c
 
 ## Notes
 
-- Backend: `had_output` is computed in `Service.CompleteTurn` via `turnHadAgentOutput` over the turn's persisted messages (`apps/backend/internal/task/service/service_turns.go`) and added to the `turn.completed` payload in `publishTurnEvent`. Listing the turn's messages on each completion is an accepted O(session-history) read on an already-heavy path; revisit with a turn-scoped query if it becomes hot.
+- Backend: `had_output` is computed in `Service.CompleteTurn` via `turnHadAgentOutput` over the turn's persisted messages (`apps/backend/internal/task/service/service_turns.go`). Messages are fetched via `ListMessagesByTurnID` (indexed by `turn_id`), so the read is O(turn_messages) rather than O(session_messages). The result is added to the `turn.completed` payload in `publishTurnEvent`.
 - Frontend: pure decision logic in `apps/web/lib/ws/handlers/empty-turn-notice.ts` (`computeEmptyTurnNotice`), wired from the `session.turn.completed` handler in `turns.ts`.
 - E2E: the mock agent's `empty-turn` scenario (`apps/backend/cmd/mock-agent/scenarios.go`) emits a multi-second empty `end_turn`; specs in `apps/web/e2e/tests/chat/empty-turn.spec.ts` (desktop) and `mobile-empty-turn.spec.ts` seed it as the auto-started turn so the live completion is observed.
