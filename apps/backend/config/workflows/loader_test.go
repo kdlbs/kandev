@@ -58,6 +58,28 @@ on_enter:
 	}
 }
 
+// TestConvertEvents_SetSessionModeRejectsMissingMode verifies the loader fails
+// fast when a set_session_mode action has no usable "mode" config, rather than
+// silently dropping it at compile time. See issue #1183.
+func TestConvertEvents_SetSessionModeRejectsMissingMode(t *testing.T) {
+	cases := map[string]string{
+		"no config":  "on_enter:\n  - type: set_session_mode\n",
+		"empty mode": "on_enter:\n  - type: set_session_mode\n    config:\n      mode: \"\"\n",
+		"non-string": "on_enter:\n  - type: set_session_mode\n    config:\n      mode: 3\n",
+	}
+	for name, doc := range cases {
+		t.Run(name, func(t *testing.T) {
+			var e stepEventsYAML
+			if err := yaml.Unmarshal([]byte(doc), &e); err != nil {
+				t.Fatalf("unmarshal yaml: %v", err)
+			}
+			if _, err := convertEvents(e); err == nil {
+				t.Fatal("expected convertEvents to reject set_session_mode with no usable mode")
+			}
+		})
+	}
+}
+
 func TestLoadTemplates_EachHasStartStep(t *testing.T) {
 	templates, err := LoadTemplates()
 	if err != nil {

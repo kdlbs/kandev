@@ -232,6 +232,16 @@ func convertEvents(e stepEventsYAML) (models.StepEvents, error) {
 		if !validOnEnter[a.Type] {
 			return events, fmt.Errorf("invalid on_enter action type %q", a.Type)
 		}
+		// set_session_mode must carry a non-empty string mode. Modes are
+		// agent-specific (reported dynamically by the agent), so there is no
+		// global allow-list to check against — but a missing or non-string
+		// value would otherwise be silently dropped at compile time, so reject
+		// it here to fail misconfigured templates loudly.
+		if a.Type == string(models.OnEnterSetSessionMode) {
+			if mode, _ := a.Config["mode"].(string); mode == "" {
+				return events, fmt.Errorf("on_enter set_session_mode requires a non-empty string \"mode\" config")
+			}
+		}
 		events.OnEnter = append(events.OnEnter, models.OnEnterAction{
 			Type:   models.OnEnterActionType(a.Type),
 			Config: a.Config,
