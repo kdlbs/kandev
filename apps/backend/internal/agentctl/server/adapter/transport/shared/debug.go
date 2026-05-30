@@ -3,30 +3,20 @@ package shared
 
 import (
 	"encoding/json"
-	"fmt"
-	"log"
 	"os"
-	"path/filepath"
-	"sync"
-	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
 // debugMode controls whether agent messages are logged.
 // Enable via KANDEV_DEBUG_AGENT_MESSAGES=true environment variable.
-var debugMode = os.Getenv("KANDEV_DEBUG_AGENT_MESSAGES") == "true"
+var debugMode = os.Getenv(envDebugMessages) == "true"
 
-// debugLogDir is the directory where debug log files are written.
-// Defaults to the process CWD; override with KANDEV_DEBUG_LOG_DIR.
-var debugLogDir = resolveDebugLogDir()
-
-// debugLogMu protects concurrent writes to debug log files.
-var debugLogMu sync.Mutex
-
-// initializedFiles tracks which log files have been truncated in this session.
-// First write to a file truncates it; subsequent writes append.
-var initializedFiles = make(map[string]bool)
+// acpLog is the process-wide managed writer registry. It is allocated even
+// when debug mode is off (cheap, no file handles) so the janitor and tail
+// endpoint can reference a stable instance; nothing is written unless
+// debugMode is true.
+var acpLog = newACPLogManager(acpLogConfigFromEnv())
 
 // Protocol constants for debug file naming
 const (
@@ -38,78 +28,37 @@ const (
 	ProtocolCopilot    = "copilot"
 )
 
-func resolveDebugLogDir() string {
-	if dir := os.Getenv("KANDEV_DEBUG_LOG_DIR"); dir != "" {
-		return dir
-	}
-	if cwd, err := os.Getwd(); err == nil {
-		return cwd
-	}
-	return "."
+// ACPDebugEnabled reports whether agent-message debug logging is on.
+func ACPDebugEnabled() bool { return debugMode }
+
+// ACPLogDir returns the directory debug log files are written to. Exported so
+// the debug reader (internal/debug) can discover per-session files. It
+// resolves live from the environment: the reader runs in the backend process
+// while the writer runs in agentctl, but both start from the same forwarded
+// env so they resolve to the same directory.
+func ACPLogDir() string { return resolveACPLogDir() }
+
+// ACPRingTail returns up to n most recent normalized events for a session as
+// raw JSON lines, for the dev-only live-tail endpoint. Returns nil when the
+// session is unknown.
+func ACPRingTail(sessionID string, n int) []json.RawMessage {
+	return acpLog.ringTail(sessionID, n)
 }
 
 // LogRawEvent logs a raw protocol event without transformation.
-// File: raw-{protocol}-{agentId}.jsonl
-func LogRawEvent(protocol, agentID, eventType string, rawData json.RawMessage) {
+// File: raw-{protocol}-{agentID}-{sessionID}.jsonl
+func LogRawEvent(protocol, agentID, sessionID, eventType string, rawData json.RawMessage) {
 	if !debugMode {
 		return
 	}
-
-	entry := map[string]any{
-		"ts":       time.Now().UnixMilli(),
-		"protocol": protocol,
-		"agent":    agentID,
-		"event":    eventType,
-		"data":     rawData,
-	}
-
-	logFile := filepath.Join(debugLogDir, fmt.Sprintf("raw-%s-%s.jsonl", protocol, agentID))
-	writeJSONLine(logFile, entry)
+	acpLog.writeRaw(protocol, agentID, sessionID, eventType, rawData)
 }
 
 // LogNormalizedEvent logs a normalized AgentEvent.
-// File: normalized-{protocol}-{agentId}.jsonl
-func LogNormalizedEvent(protocol, agentID string, event *streams.AgentEvent) {
+// File: normalized-{protocol}-{agentID}-{sessionID}.jsonl
+func LogNormalizedEvent(protocol, agentID, sessionID string, event *streams.AgentEvent) {
 	if !debugMode {
 		return
 	}
-
-	entry := map[string]any{
-		"ts":    time.Now().UnixMilli(),
-		"event": event,
-	}
-
-	logFile := filepath.Join(debugLogDir, fmt.Sprintf("normalized-%s-%s.jsonl", protocol, agentID))
-	writeJSONLine(logFile, entry)
-}
-
-// writeJSONLine writes a JSON entry as a line to the specified file.
-// On first write to a file in this session, the file is truncated.
-func writeJSONLine(logFile string, entry any) {
-	entryJSON, err := json.Marshal(entry)
-	if err != nil {
-		log.Printf("[DEBUG] Failed to marshal entry: %v", err)
-		return
-	}
-
-	debugLogMu.Lock()
-	defer debugLogMu.Unlock()
-
-	// Determine open flags: truncate on first write, append on subsequent
-	flags := os.O_CREATE | os.O_WRONLY
-	if initializedFiles[logFile] {
-		flags |= os.O_APPEND
-	} else {
-		flags |= os.O_TRUNC
-		initializedFiles[logFile] = true
-	}
-
-	f, err := os.OpenFile(logFile, flags, 0644)
-	if err != nil {
-		log.Printf("[DEBUG] Failed to open log file %s: %v", logFile, err)
-		return
-	}
-	defer func() { _ = f.Close() }()
-
-	_, _ = f.WriteString(string(entryJSON) + "\n")
+	acpLog.writeNormalized(protocol, agentID, sessionID, event)
 }
