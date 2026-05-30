@@ -355,12 +355,28 @@ func parseDebugFilename(filename string) (fileType, protocol, agent string) {
 }
 
 // splitProtocolAgent splits "{protocol}-{agent}" into protocol and agent.
+// Per-session ACP debug files append "-{sessionID}" after the agent ID. ACP
+// registry IDs consistently end in "-acp", so trim that session tail for
+// display while leaving unknown legacy shapes unchanged.
 func splitProtocolAgent(s string) (protocol, agent string) {
 	idx := strings.Index(s, "-")
 	if idx <= 0 {
 		return s, ""
 	}
-	return s[:idx], s[idx+1:]
+	protocol, agent = s[:idx], s[idx+1:]
+	if protocol == protocolACP {
+		agent = trimACPSessionTail(agent)
+	}
+	return protocol, agent
+}
+
+func trimACPSessionTail(agent string) string {
+	const acpMarker = "-acp-"
+	idx := strings.Index(agent, acpMarker)
+	if idx < 0 {
+		return agent
+	}
+	return agent[:idx+len("-acp")]
 }
 
 // parseProtocolFromFilename extracts protocol from filename patterns (legacy).

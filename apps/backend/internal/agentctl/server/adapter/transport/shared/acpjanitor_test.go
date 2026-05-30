@@ -158,4 +158,7 @@ func TestJanitor_StartStopIdempotent(t *testing.T) {
 	j.Start(context.Background()) // no-op
 	j.Stop()
 	j.Stop() // no-op
+
+	j.Start(context.Background())
+	j.Stop()
 }

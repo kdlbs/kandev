@@ -67,6 +67,25 @@ func TestACPLog_SanitizesSessionID(t *testing.T) {
 	}
 }
 
+func TestACPLog_EnforcesPrivateDirPerm(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatalf("chmod broad dir: %v", err)
+	}
+	m := newACPLogManager(acpLogConfig{dir: dir, maxFileBytes: 1 << 20, ringSize: 8})
+	defer m.closeAll()
+
+	m.writeNormalized(ProtocolACP, "claude-acp", "sess", testEvent("sess"))
+
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("stat log dir: %v", err)
+	}
+	if got := info.Mode().Perm(); got != acpDirPerm {
+		t.Fatalf("log dir perms = %o, want %o", got, acpDirPerm)
+	}
+}
+
 // TestACPLog_Rotation verifies a chatty session rolls its file once it passes
 // the byte cap, capping a single file's size while preserving prior data in a
 // rotated sibling.
@@ -176,6 +195,22 @@ func TestACPLog_RingEviction(t *testing.T) {
 
 	if got := m.ringTail("sess", 10); got != nil {
 		t.Errorf("expected ring evicted after idle sweep, got %d entries", len(got))
+	}
+}
+
+func TestACPLog_CloseAllClearsRings(t *testing.T) {
+	dir := t.TempDir()
+	m := newACPLogManager(acpLogConfig{dir: dir, maxFileBytes: 1 << 20, ringSize: 4})
+
+	m.writeNormalized(ProtocolACP, "acp", "sess", testEvent("sess"))
+	if m.ringTail("sess", 10) == nil {
+		t.Fatal("expected ring tail before closeAll")
+	}
+
+	m.closeAll()
+
+	if got := m.ringTail("sess", 10); got != nil {
+		t.Errorf("expected closeAll to clear ring buffers, got %d entries", len(got))
 	}
 }
 

@@ -19,6 +19,7 @@ type Janitor struct {
 
 	mu      sync.Mutex
 	started bool
+	gen     uint64
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup
 }
@@ -57,6 +58,7 @@ func (j *Janitor) Start(ctx context.Context) {
 		return
 	}
 	j.started = true
+	j.gen++
 	loopCtx, cancel := context.WithCancel(ctx)
 	j.cancel = cancel
 	// Add to the WaitGroup while still holding j.mu so a concurrent Stop()
@@ -66,6 +68,8 @@ func (j *Janitor) Start(ctx context.Context) {
 	j.mu.Unlock()
 
 	// Initial pass on startup so a previous run's files are pruned promptly.
+	// Stop() may wait for this scan to finish before the goroutine starts and
+	// observes cancellation; the bounded dev-log directory keeps that brief.
 	j.mgr.prune(time.Now())
 
 	go j.loop(loopCtx)
@@ -103,9 +107,8 @@ func (j *Janitor) Stop() {
 		j.mu.Unlock()
 		return
 	}
-	j.started = false
+	gen := j.gen
 	cancel := j.cancel
-	j.cancel = nil
 	j.mu.Unlock()
 
 	if cancel != nil {
@@ -113,4 +116,11 @@ func (j *Janitor) Stop() {
 	}
 	j.wg.Wait()
 	j.mgr.closeAll()
+
+	j.mu.Lock()
+	if j.gen == gen {
+		j.started = false
+		j.cancel = nil
+	}
+	j.mu.Unlock()
 }

@@ -37,8 +37,25 @@ func TestDiscoverNormalizedFiles_FindsPerSessionFiles(t *testing.T) {
 	if found.Protocol != "acp" {
 		t.Errorf("expected protocol acp, got %q", found.Protocol)
 	}
+	if found.Agent != "claude-acp" {
+		t.Errorf("expected agent claude-acp, got %q", found.Agent)
+	}
 	if found.MessageCount != 1 {
 		t.Errorf("expected 1 message, got %d", found.MessageCount)
+	}
+}
+
+func TestParseDebugFilename_TrimsPerSessionACPTail(t *testing.T) {
+	fileType, protocol, agent := parseDebugFilename("normalized-acp-opencode-acp-sess-xyz.jsonl")
+
+	if fileType != "normalized" {
+		t.Fatalf("fileType = %q, want normalized", fileType)
+	}
+	if protocol != "acp" {
+		t.Fatalf("protocol = %q, want acp", protocol)
+	}
+	if agent != "opencode-acp" {
+		t.Fatalf("agent = %q, want opencode-acp", agent)
 	}
 }
 

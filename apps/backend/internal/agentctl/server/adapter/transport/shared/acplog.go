@@ -197,6 +197,10 @@ func (m *acpLogManager) getWriter(name string) *acpWriter {
 		log.Printf("[DEBUG] acplog: mkdir %s: %v", m.cfg.dir, err)
 		return nil
 	}
+	if err := os.Chmod(m.cfg.dir, acpDirPerm); err != nil {
+		log.Printf("[DEBUG] acplog: chmod %s: %v", m.cfg.dir, err)
+		return nil
+	}
 	path := filepath.Join(m.cfg.dir, name)
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, acpFilePerm)
 	if err != nil {
@@ -265,6 +269,7 @@ func (m *acpLogManager) closeAll() {
 		w.close()
 		delete(m.writers, name)
 	}
+	m.rings = make(map[string]*ringBuffer)
 }
 
 // closeIdle flushes+closes writers untouched for longer than maxIdle so file
@@ -551,7 +556,7 @@ func sanitizeFilenamePart(s string) string {
 type ringBuffer struct {
 	mu        sync.Mutex
 	entries   []json.RawMessage
-	cap       int
+	capacity  int
 	lastWrite time.Time
 }
 
@@ -559,18 +564,18 @@ func newRingBuffer(capacity int) *ringBuffer {
 	if capacity <= 0 {
 		capacity = defaultACPRingSize
 	}
-	return &ringBuffer{cap: capacity}
+	return &ringBuffer{capacity: capacity}
 }
 
 func (r *ringBuffer) add(entry json.RawMessage) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.entries = append(r.entries, entry)
-	if len(r.entries) > r.cap {
+	if len(r.entries) > r.capacity {
 		// Drop oldest. Pre-size with one spare slot so the next append lands in
 		// the existing backing array instead of reallocating every time.
-		trimmed := make([]json.RawMessage, r.cap, r.cap+1)
-		copy(trimmed, r.entries[len(r.entries)-r.cap:])
+		trimmed := make([]json.RawMessage, r.capacity, r.capacity+1)
+		copy(trimmed, r.entries[len(r.entries)-r.capacity:])
 		r.entries = trimmed
 	}
 	r.lastWrite = time.Now()
