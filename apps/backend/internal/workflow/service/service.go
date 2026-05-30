@@ -413,13 +413,19 @@ func (s *Service) ExportWorkflow(ctx context.Context, workflowID string) (*model
 }
 
 // ExportWorkflows exports workflows for a workspace. When workflowIDs is nil,
-// every workflow is exported (back-compat). When workflowIDs is non-nil, only
-// workflows whose ID is in the set are exported — an empty set exports nothing.
-// Filtering is by ID membership only: the backend MUST NOT branch on a
-// workflow's style (see internal/workflow/models/phase2.go), so the frontend
-// decides which workflows (e.g. kanban-only) to include and passes their IDs.
+// every (non-hidden) workflow is exported (back-compat). When workflowIDs is
+// non-nil, only workflows whose ID is in the set are exported — an empty set
+// exports nothing. Filtering is by ID membership only: the backend MUST NOT
+// branch on a workflow's style (see internal/workflow/models/phase2.go), so the
+// frontend decides which workflows (e.g. kanban-only) to include and passes
+// their IDs.
+//
+// Hidden/system workflows (e.g. improve-kandev) are only listed when the caller
+// passes explicit IDs; the back-compat "export everything" path leaves them out
+// so a bare GET of the export endpoint can't leak system flows.
 func (s *Service) ExportWorkflows(ctx context.Context, workspaceID string, workflowIDs []string) (*models.WorkflowExport, error) {
-	workflows, err := s.workflowProvider.ListWorkflows(ctx, workspaceID, true)
+	includeHidden := workflowIDs != nil
+	workflows, err := s.workflowProvider.ListWorkflows(ctx, workspaceID, includeHidden)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list workflows: %w", err)
 	}

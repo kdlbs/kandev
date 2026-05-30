@@ -529,6 +529,27 @@ func TestExportWorkflows(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, export.Workflows)
 	})
+
+	t.Run("nil ID list omits hidden workflows but explicit IDs include them", func(t *testing.T) {
+		svc, _, mock := setupTestServiceWithProvider(t)
+		ctx := context.Background()
+
+		mock.addWorkflow("wf-1", "ws-1", "Alpha")
+		mock.addWorkflow("hidden-1", "ws-1", "System Flow")
+		mock.workflows[1].Hidden = true
+
+		// Back-compat path (nil) must not leak the hidden system workflow.
+		all, err := svc.ExportWorkflows(ctx, "ws-1", nil)
+		require.NoError(t, err)
+		require.Len(t, all.Workflows, 1)
+		assert.Equal(t, "Alpha", all.Workflows[0].Name)
+
+		// Explicitly requesting a hidden workflow's ID still exports it.
+		explicit, err := svc.ExportWorkflows(ctx, "ws-1", []string{"hidden-1"})
+		require.NoError(t, err)
+		require.Len(t, explicit.Workflows, 1)
+		assert.Equal(t, "System Flow", explicit.Workflows[0].Name)
+	})
 }
 
 func TestImportWorkflows(t *testing.T) {

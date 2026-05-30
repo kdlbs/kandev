@@ -559,15 +559,15 @@ export async function exportAllWorkflowsAction(
   workspaceId: string,
   workflowIds?: string[],
 ): Promise<string> {
-  const url = new URL(`${apiBaseUrl}/api/v1/workspaces/${workspaceId}/workflows/export`);
   // When workflowIds is provided, restrict the export to exactly that set
   // (the settings UI passes its kanban workflows, excluding office ones). An
   // empty list is sent intentionally as `ids=` so nothing is exported, rather
   // than omitting the param and falling back to exporting every workflow.
-  if (workflowIds !== undefined) {
-    url.searchParams.set("ids", workflowIds.join(","));
-  }
-  const response = await fetch(url.toString());
+  const query =
+    workflowIds !== undefined ? `?ids=${encodeURIComponent(workflowIds.join(","))}` : "";
+  const response = await fetch(
+    `${apiBaseUrl}/api/v1/workspaces/${workspaceId}/workflows/export${query}`,
+  );
   if (!response.ok) throw new Error(`Export failed: ${response.statusText}`);
   return response.text();
 }
