@@ -36,6 +36,10 @@ This path installs a real user service and writes an isolated npm prefix under
 still use a disposable machine or VM because it owns the Kandev user service
 while the test is running.
 
+Setup resets the existing Kandev user service label before installing the test
+service, including any stale launchd/systemd registration from an earlier test
+run.
+
 It builds this branch as the previous published npm version, installs that
 temporary package into the isolated prefix, installs a user service from it, and
 seeds the update cache to the current npm latest. Clicking `Apply update` should

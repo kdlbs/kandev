@@ -17,6 +17,51 @@ if ! command -v npm >/dev/null 2>&1; then
   exit 1
 fi
 
+reset_user_service() {
+  case "$(uname -s)" in
+    Darwin)
+      local uid label plist
+      uid="$(id -u)"
+      label="com.kdlbs.kandev"
+      plist="$HOME/Library/LaunchAgents/$label.plist"
+      echo "[self-update-real-npm] resetting launchd user service $label"
+      launchctl bootout "gui/$uid/$label" >/dev/null 2>&1 || true
+      launchctl bootout "gui/$uid" "$plist" >/dev/null 2>&1 || true
+      launchctl enable "gui/$uid/$label" >/dev/null 2>&1 || true
+      rm -f "$plist"
+      ;;
+    Linux)
+      echo "[self-update-real-npm] resetting systemd user service kandev"
+      systemctl --user stop kandev >/dev/null 2>&1 || true
+      systemctl --user disable kandev >/dev/null 2>&1 || true
+      rm -f "$HOME/.config/systemd/user/kandev.service"
+      systemctl --user daemon-reload >/dev/null 2>&1 || true
+      ;;
+  esac
+}
+
+print_service_diagnostics() {
+  case "$(uname -s)" in
+    Darwin)
+      local uid label plist
+      uid="$(id -u)"
+      label="com.kdlbs.kandev"
+      plist="$HOME/Library/LaunchAgents/$label.plist"
+      echo "[self-update-real-npm] launchd diagnostics:" >&2
+      if [ -f "$plist" ]; then
+        plutil -lint "$plist" >&2 || true
+        sed -n '1,220p' "$plist" >&2 || true
+      else
+        echo "[self-update-real-npm] missing plist: $plist" >&2
+      fi
+      launchctl print "gui/$uid/$label" >&2 || true
+      ;;
+    Linux)
+      systemctl --user status kandev --no-pager >&2 || true
+      ;;
+  esac
+}
+
 VERSIONS_JSON="$(npm view kandev versions --json)"
 LATEST_VERSION="${KANDEV_TEST_TARGET_VERSION:-$(node -e 'const v=JSON.parse(process.argv[1]); console.log(v[v.length - 1]);' "$VERSIONS_JSON")}"
 CURRENT_VERSION="${KANDEV_TEST_CURRENT_VERSION:-$(node -e 'const v=JSON.parse(process.argv[1]); console.log(v[v.length - 2]);' "$VERSIONS_JSON")}"
@@ -41,6 +86,7 @@ esac
 
 rm -rf "$TEST_HOME"
 mkdir -p "$TEST_HOME/packages" "$TEST_HOME/tarballs" "$NPM_PREFIX"
+reset_user_service
 
 if [ ! -d "$ROOT/apps/node_modules" ]; then
   echo "[self-update-real-npm] installing pnpm workspace deps"
@@ -113,7 +159,10 @@ export npm_config_prefix="$NPM_PREFIX"
 export NPM_CONFIG_PREFIX="$NPM_PREFIX"
 
 echo "[self-update-real-npm] installing user service from $KANDEV_BIN"
-"$KANDEV_BIN" service install --home-dir "$TEST_HOME" --port "$PORT" --no-boot-start
+if ! "$KANDEV_BIN" service install --home-dir "$TEST_HOME" --port "$PORT" --no-boot-start; then
+  print_service_diagnostics
+  exit 1
+fi
 
 METADATA_PATH="$TEST_HOME/service/install.json"
 INSTALL_KIND="$(node -e 'const fs=require("fs"); const p=process.argv[1]; console.log(JSON.parse(fs.readFileSync(p, "utf8")).kind || "");' "$METADATA_PATH")"
