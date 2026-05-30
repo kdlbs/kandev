@@ -284,6 +284,49 @@ func TestRunBatchedBranchQuery_SkipsAmbiguousForkHeads(t *testing.T) {
 	}
 }
 
+func TestRunBatchedBranchQuery_SkipsMultipleBranchMatchesEvenWithOwnerMatch(t *testing.T) {
+	exec := &stubGraphQLExecutor{
+		response: `{
+			"data": {
+				"b0": {
+					"pullRequests": {
+						"nodes": [{
+							"number": 7,
+							"headRepositoryOwner": {"login":"alice"},
+							"state": "OPEN", "title": "fork PR", "url": "https://x/7",
+							"isDraft": false, "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
+							"headRefName": "feat", "baseRefName": "main", "headRefOid": "deadbeef",
+							"author": {"login":"alice"},
+							"createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+							"reviews": {"nodes": []}, "reviewRequests": {"totalCount": 0},
+							"commits": {"nodes": []}
+						}, {
+							"number": 9,
+							"headRepositoryOwner": {"login":"o"},
+							"state": "OPEN", "title": "base PR", "url": "https://x/9",
+							"isDraft": false, "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
+							"headRefName": "feat", "baseRefName": "main", "headRefOid": "cafebabe",
+							"author": {"login":"o"},
+							"createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+							"reviews": {"nodes": []}, "reviewRequests": {"totalCount": 0},
+							"commits": {"nodes": []}
+						}]
+					}
+				}
+			}
+		}`,
+	}
+	got, err := runBatchedBranchQuery(context.Background(), exec, []graphQLBranchRef{
+		{Owner: "o", Repo: "r", Branch: "feat"},
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected duplicate branch matches to be skipped, got %#v", got)
+	}
+}
+
 func TestSummarizeReviewState_PrefersChangesRequested(t *testing.T) {
 	mk := func(login, state string, sec int) reviewNode {
 		var n reviewNode

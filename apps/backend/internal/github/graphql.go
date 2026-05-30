@@ -116,10 +116,7 @@ type batchedPRResult struct {
 }
 
 type batchedBranchPRNode struct {
-	Number              int `json:"number"`
-	HeadRepositoryOwner struct {
-		Login string `json:"login"`
-	} `json:"headRepositoryOwner"`
+	Number int `json:"number"`
 	batchedPRResult
 }
 
@@ -212,7 +209,7 @@ func buildBatchedBranchQuery(refs []graphQLBranchRef) (string, map[string]any) {
 	var b strings.Builder
 	b.WriteString("query Branches { ")
 	for i, r := range refs {
-		fmt.Fprintf(&b, `b%d: repository(owner: %q, name: %q) { pullRequests(first: %d, states: OPEN, headRefName: %q) { nodes { number headRepositoryOwner { login } %s } } } `,
+		fmt.Fprintf(&b, `b%d: repository(owner: %q, name: %q) { pullRequests(first: %d, states: OPEN, headRefName: %q) { nodes { number %s } } } `,
 			i, r.Owner, r.Repo, graphQLBranchProbeLimit, r.Branch, prFieldsBlock())
 	}
 	b.WriteString(`rateLimit { limit remaining resetAt cost } `)
@@ -533,7 +530,7 @@ func decodeBatchedBranchChunk(refs []graphQLBranchRef, data map[string]json.RawM
 		if err := json.Unmarshal(raw, &inner); err != nil {
 			continue
 		}
-		node, ok := selectBatchedBranchPRNode(inner.PullRequests.Nodes, ref.Owner)
+		node, ok := selectBatchedBranchPRNode(inner.PullRequests.Nodes)
 		if !ok {
 			continue
 		}
@@ -542,24 +539,11 @@ func decodeBatchedBranchChunk(refs []graphQLBranchRef, data map[string]json.RawM
 	}
 }
 
-func selectBatchedBranchPRNode(nodes []batchedBranchPRNode, owner string) (*batchedBranchPRNode, bool) {
-	if len(nodes) == 0 {
+func selectBatchedBranchPRNode(nodes []batchedBranchPRNode) (*batchedBranchPRNode, bool) {
+	if len(nodes) != 1 {
 		return nil, false
 	}
-	if len(nodes) == 1 {
-		return &nodes[0], true
-	}
-	var selected *batchedBranchPRNode
-	for i := range nodes {
-		if !strings.EqualFold(nodes[i].HeadRepositoryOwner.Login, owner) {
-			continue
-		}
-		if selected != nil {
-			return nil, false
-		}
-		selected = &nodes[i]
-	}
-	return selected, selected != nil
+	return &nodes[0], true
 }
 
 // graphqlBranchKey is the lookup key used in batched-branch result maps.
