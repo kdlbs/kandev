@@ -74,6 +74,9 @@ function findLastUserMessage(messages: Message[], turnId: string): Message | und
  * id, so it fires once).
  */
 export function computeEmptyTurnNotice(input: EmptyTurnNoticeInput): Message | null {
+  // Only an explicit `false` triggers the notice. `true` means the turn had
+  // output; `undefined` means an older backend that doesn't send the field —
+  // both correctly fall through here and produce no notice.
   if (input.hadOutput !== false) return null;
   if (input.isEphemeralSurface) return null;
 
