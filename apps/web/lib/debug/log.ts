@@ -220,9 +220,11 @@ function flattenArgs(args: unknown[]): string {
 export type SessionTaskResolver = (sessionId: string) => string | undefined;
 
 let sessionTaskResolver: SessionTaskResolver | null = null;
+let sessionTaskResolverToken = 0;
 
 /**
- * Register a function that maps a session ID to its owning task ID.
+ * Register a function that maps a session ID to its owning task ID, and return
+ * an unregister callback.
  *
  * Most debug call sites only have a `sessionId` in scope, but when triaging a
  * problem you usually think in terms of a *task*. Once a resolver is registered,
@@ -231,13 +233,22 @@ let sessionTaskResolver: SessionTaskResolver | null = null;
  * console filter (or a grep over an exported log) can scope to a single task
  * without every call site having to thread the task ID through.
  *
- * The frontend store is created per-`StateProvider` (there is no module-level
- * singleton), so the provider wires this up on mount and tears it down on
- * unmount — see `components/state-provider.tsx`. Pass `null` to clear it.
- * Calls are no-ops in production because `createDebugLogger` returns `NOOP`.
+ * The frontend store is created per-`StateProvider` (it is not a module-level
+ * singleton), so the provider wires this up on mount and calls the returned
+ * unregister on unmount — see `components/state-provider.tsx`. The resolver
+ * itself *is* a single module-level global, so the unregister callback only
+ * clears it when this registration is still the active one: during HMR or a
+ * provider swap the new provider mounts (and registers) before the old one's
+ * cleanup runs, and an unconditional null-clear would silently kill annotation
+ * until a full reload. Calls are no-ops in production because
+ * `createDebugLogger` returns `NOOP`.
  */
-export function registerSessionTaskResolver(resolver: SessionTaskResolver | null): void {
+export function registerSessionTaskResolver(resolver: SessionTaskResolver | null): () => void {
+  const token = ++sessionTaskResolverToken;
   sessionTaskResolver = resolver;
+  return () => {
+    if (sessionTaskResolverToken === token) sessionTaskResolver = null;
+  };
 }
 
 const SESSION_ID_KEYS = ["sessionId", "session_id"];

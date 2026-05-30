@@ -143,6 +143,23 @@ describe("registerSessionTaskResolver", () => {
     log("msg", { sessionId: "s_1" });
     expect(console.debug).toHaveBeenCalledWith("[ns] msg sessionId=s_1");
   });
+
+  it("returned unregister clears the active resolver", () => {
+    const unregister = registerSessionTaskResolver(() => "t_42");
+    unregister();
+    const log = createDebugLogger("ns");
+    log("msg", { sessionId: "s_1" });
+    expect(console.debug).toHaveBeenCalledWith("[ns] msg sessionId=s_1");
+  });
+
+  it("a stale unregister does not clear a newer resolver (HMR-safe)", () => {
+    const unregisterA = registerSessionTaskResolver(() => "t_A");
+    registerSessionTaskResolver(() => "t_B"); // newer registration takes over
+    unregisterA(); // stale cleanup must NOT kill the newer resolver
+    const log = createDebugLogger("ns");
+    log("msg", { sessionId: "s_1" });
+    expect(console.debug).toHaveBeenCalledWith("[ns] msg sessionId=s_1 task_id=t_B");
+  });
 });
 
 describe("IS_DEBUG", () => {

@@ -29,10 +29,9 @@ export function StateProvider({ children, initialState }: StoreProviderProps) {
   // a single task (see lib/debug/log.ts). No-op in production.
   useEffect(() => {
     if (!IS_DEBUG) return;
-    registerSessionTaskResolver(
+    return registerSessionTaskResolver(
       (sessionId) => store.getState().taskSessions.items[sessionId]?.task_id,
     );
-    return () => registerSessionTaskResolver(null);
   }, [store]);
 
   return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;
