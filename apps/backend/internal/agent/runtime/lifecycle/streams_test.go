@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"net"
 	"testing"
 	"time"
 
@@ -62,7 +63,17 @@ func TestConnectWorkspaceStream_BackoffDrainsOnStop(t *testing.T) {
 	sm := NewStreamManager(newTestLogger(), StreamCallbacks{}, nil, stopCh)
 
 	log := newTestLogger()
-	badClient := agentctl.NewClient("127.0.0.1", 1, log) // port 1 is reserved
+	// Bind to a random port and immediately close it so the port is guaranteed
+	// to be closed and returns connection refused quickly on every system.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	if cerr := ln.Close(); cerr != nil {
+		t.Fatalf("failed to close listener: %v", cerr)
+	}
+	badClient := agentctl.NewClient("127.0.0.1", port, log)
 	defer badClient.Close()
 
 	execution := &AgentExecution{

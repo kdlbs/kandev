@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -296,8 +297,17 @@ func TestInitializeAndPrompt_StreamTimeout(t *testing.T) {
 	}, nil, stopCh)
 	sm.SetDependencies(nil, streamMgr, nil, nil)
 
-	// Point client at a port that doesn't exist
-	badClient := agentctl.NewClient("127.0.0.1", 1, log)
+	// Bind to a random port and immediately close it so the port is guaranteed
+	// to be closed and returns connection refused quickly on every system.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	if cerr := ln.Close(); cerr != nil {
+		t.Fatalf("failed to close listener: %v", cerr)
+	}
+	badClient := agentctl.NewClient("127.0.0.1", port, log)
 	defer badClient.Close()
 
 	execution := &AgentExecution{
@@ -323,7 +333,7 @@ func TestInitializeAndPrompt_StreamTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil, func(executionID string) error {
+	err = sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil, func(executionID string) error {
 		return nil
 	}, "", "")
 
