@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -151,6 +152,63 @@ func TestConvertPatPR_MergeableState(t *testing.T) {
 	pr := convertPatPR(raw, "o", "r")
 	if pr.MergeableState != "clean" {
 		t.Errorf("expected normalized mergeable_state=clean, got %q", pr.MergeableState)
+	}
+}
+
+func TestPATClient_FindPRByBranch_UsesGraphQLHeadRefName(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/graphql" {
+			t.Errorf("unexpected path %q, want /graphql", r.URL.Path)
+			http.Error(w, "unexpected path", http.StatusInternalServerError)
+			return
+		}
+		if r.Method != http.MethodPost {
+			t.Errorf("method = %s, want POST", r.Method)
+		}
+		var body struct {
+			Query string `json:"query"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request body: %v", err)
+			http.Error(w, "bad json", http.StatusBadRequest)
+			return
+		}
+		if !strings.Contains(body.Query, `pullRequests(first: 2, states: OPEN, headRefName: "feature")`) {
+			t.Errorf("query should look up branch by headRefName, got: %s", body.Query)
+		}
+		if strings.Contains(body.Query, `head=acme:feature`) || strings.Contains(body.Query, `ref(qualifiedName:`) {
+			t.Errorf("query should not require a base-repo branch ref, got: %s", body.Query)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"data": {
+				"b0": {
+					"pullRequests": {
+						"nodes": [{
+							"number": 12,
+							"headRepositoryOwner": {"login":"fork-owner"},
+							"state": "OPEN", "title": "fork PR", "url": "https://x/12",
+							"isDraft": false, "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
+							"headRefName": "feature", "baseRefName": "main", "headRefOid": "abc123",
+							"author": {"login":"alice"},
+							"createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+							"reviews": {"nodes": []}, "reviewRequests": {"totalCount": 0},
+							"commits": {"nodes": []}
+						}]
+					}
+				}
+			}
+		}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := newPATClientPointingAt(t, srv.URL)
+	pr, err := c.FindPRByBranch(context.Background(), "acme", "widget", "feature")
+	if err != nil {
+		t.Fatalf("FindPRByBranch: %v", err)
+	}
+	if pr == nil || pr.Number != 12 || pr.HeadBranch != "feature" {
+		t.Fatalf("unexpected PR: %#v", pr)
 	}
 }
 

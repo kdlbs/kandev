@@ -28,6 +28,10 @@ const graphQLPRBatchAlias = "pr"
 // fields = ~500 nodes, leaving headroom.
 const graphQLBatchChunkSize = 50
 
+// graphQLBranchProbeLimit fetches two matches so branch lookup can detect
+// ambiguous fork heads instead of linking the first arbitrary PR.
+const graphQLBranchProbeLimit = 2
+
 // reviewNode is one PR review entry from the batched GraphQL query.
 type reviewNode struct {
 	State  string `json:"state"`
@@ -109,6 +113,14 @@ type batchedPRResult struct {
 			} `json:"commit"`
 		} `json:"nodes"`
 	} `json:"commits"`
+}
+
+type batchedBranchPRNode struct {
+	Number              int `json:"number"`
+	HeadRepositoryOwner struct {
+		Login string `json:"login"`
+	} `json:"headRepositoryOwner"`
+	batchedPRResult
 }
 
 // graphQLError mirrors a single entry in a GraphQL response's "errors" array.
@@ -200,8 +212,8 @@ func buildBatchedBranchQuery(refs []graphQLBranchRef) (string, map[string]any) {
 	var b strings.Builder
 	b.WriteString("query Branches { ")
 	for i, r := range refs {
-		fmt.Fprintf(&b, `b%d: repository(owner: %q, name: %q) { pullRequests(first: 1, states: OPEN, headRefName: %q) { nodes { number %s } } } `,
-			i, r.Owner, r.Repo, r.Branch, prFieldsBlock())
+		fmt.Fprintf(&b, `b%d: repository(owner: %q, name: %q) { pullRequests(first: %d, states: OPEN, headRefName: %q) { nodes { number headRepositoryOwner { login } %s } } } `,
+			i, r.Owner, r.Repo, graphQLBranchProbeLimit, r.Branch, prFieldsBlock())
 	}
 	b.WriteString(`rateLimit { limit remaining resetAt cost } `)
 	b.WriteString(`}`)
@@ -483,7 +495,7 @@ func decodeBatchedPRChunk(refs []graphQLPRRef, data map[string]json.RawMessage, 
 }
 
 // runBatchedBranchQuery executes the branch-lookup query in chunks and maps
-// each branch name to its first OPEN PR (if any). Result keys are
+// each branch name to its unambiguous OPEN PR (if any). Result keys are
 // "owner/repo/branch" so callers can index by their input refs.
 func runBatchedBranchQuery(ctx context.Context, exec GraphQLExecutor, refs []graphQLBranchRef) (map[string]*PRStatus, error) {
 	if exec == nil || len(refs) == 0 {
@@ -515,22 +527,39 @@ func decodeBatchedBranchChunk(refs []graphQLBranchRef, data map[string]json.RawM
 		}
 		var inner struct {
 			PullRequests struct {
-				Nodes []struct {
-					Number int `json:"number"`
-					batchedPRResult
-				} `json:"nodes"`
+				Nodes []batchedBranchPRNode `json:"nodes"`
 			} `json:"pullRequests"`
 		}
 		if err := json.Unmarshal(raw, &inner); err != nil {
 			continue
 		}
-		if len(inner.PullRequests.Nodes) == 0 {
+		node, ok := selectBatchedBranchPRNode(inner.PullRequests.Nodes, ref.Owner)
+		if !ok {
 			continue
 		}
-		node := inner.PullRequests.Nodes[0]
 		status := convertBatchedPRResult(&node.batchedPRResult, ref.Owner, ref.Repo, node.Number)
 		result[graphqlBranchKey(ref.Owner, ref.Repo, ref.Branch)] = status
 	}
+}
+
+func selectBatchedBranchPRNode(nodes []batchedBranchPRNode, owner string) (*batchedBranchPRNode, bool) {
+	if len(nodes) == 0 {
+		return nil, false
+	}
+	if len(nodes) == 1 {
+		return &nodes[0], true
+	}
+	var selected *batchedBranchPRNode
+	for i := range nodes {
+		if !strings.EqualFold(nodes[i].HeadRepositoryOwner.Login, owner) {
+			continue
+		}
+		if selected != nil {
+			return nil, false
+		}
+		selected = &nodes[i]
+	}
+	return selected, selected != nil
 }
 
 // graphqlBranchKey is the lookup key used in batched-branch result maps.

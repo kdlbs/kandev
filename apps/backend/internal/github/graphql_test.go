@@ -54,7 +54,7 @@ func TestBuildBatchedBranchQuery_AliasesAllBranches(t *testing.T) {
 	if !strings.Contains(q, `b0: repository`) || !strings.Contains(q, `b1: repository`) {
 		t.Errorf("expected b0/b1 aliases: %s", q)
 	}
-	if !strings.Contains(q, `pullRequests(first: 1, states: OPEN, headRefName: "feat-1")`) {
+	if !strings.Contains(q, `pullRequests(first: 2, states: OPEN, headRefName: "feat-1")`) {
 		t.Errorf("expected headRefName lookup for feat-1: %s", q)
 	}
 	if strings.Contains(q, `ref(qualifiedName:`) {
@@ -215,6 +215,72 @@ func TestRunBatchedBranchQuery_DecodesPRNode(t *testing.T) {
 	}
 	if status.PR == nil || status.PR.Number != 7 {
 		t.Errorf("expected PR number 7, got %#v", status.PR)
+	}
+}
+
+func TestRunBatchedBranchQuery_EmptyNodesReturnsNoResult(t *testing.T) {
+	exec := &stubGraphQLExecutor{
+		response: `{
+			"data": {
+				"b0": {
+					"pullRequests": {
+						"nodes": []
+					}
+				}
+			}
+		}`,
+	}
+	got, err := runBatchedBranchQuery(context.Background(), exec, []graphQLBranchRef{
+		{Owner: "o", Repo: "r", Branch: "feat"},
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected no branch result, got %#v", got)
+	}
+}
+
+func TestRunBatchedBranchQuery_SkipsAmbiguousForkHeads(t *testing.T) {
+	exec := &stubGraphQLExecutor{
+		response: `{
+			"data": {
+				"b0": {
+					"pullRequests": {
+						"nodes": [{
+							"number": 7,
+							"headRepositoryOwner": {"login":"alice"},
+							"state": "OPEN", "title": "branch PR A", "url": "https://x/7",
+							"isDraft": false, "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
+							"headRefName": "feat", "baseRefName": "main", "headRefOid": "deadbeef",
+							"author": {"login":"alice"},
+							"createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+							"reviews": {"nodes": []}, "reviewRequests": {"totalCount": 0},
+							"commits": {"nodes": []}
+						}, {
+							"number": 8,
+							"headRepositoryOwner": {"login":"bob"},
+							"state": "OPEN", "title": "branch PR B", "url": "https://x/8",
+							"isDraft": false, "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
+							"headRefName": "feat", "baseRefName": "main", "headRefOid": "cafebabe",
+							"author": {"login":"bob"},
+							"createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+							"reviews": {"nodes": []}, "reviewRequests": {"totalCount": 0},
+							"commits": {"nodes": []}
+						}]
+					}
+				}
+			}
+		}`,
+	}
+	got, err := runBatchedBranchQuery(context.Background(), exec, []graphQLBranchRef{
+		{Owner: "o", Repo: "r", Branch: "feat"},
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected ambiguous fork heads to be skipped, got %#v", got)
 	}
 }
 

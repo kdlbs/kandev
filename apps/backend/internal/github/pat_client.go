@@ -166,16 +166,19 @@ func (c *PATClient) GetPR(ctx context.Context, owner, repo string, number int) (
 }
 
 func (c *PATClient) FindPRByBranch(ctx context.Context, owner, repo, branch string) (*PR, error) {
-	var raw []patPR
-	endpoint := fmt.Sprintf("/repos/%s/%s/pulls?head=%s:%s&state=open&per_page=1",
-		owner, repo, owner, branch)
-	if err := c.get(ctx, endpoint, &raw); err != nil {
-		return nil, fmt.Errorf("find PR by branch: %w", err)
+	statuses, err := runBatchedBranchQuery(ctx, c, []graphQLBranchRef{{
+		Owner:  owner,
+		Repo:   repo,
+		Branch: branch,
+	}})
+	if err != nil {
+		return nil, fmt.Errorf("find PR by branch %q: %w", branch, err)
 	}
-	if len(raw) == 0 {
+	status := statuses[graphqlBranchKey(owner, repo, branch)]
+	if status == nil {
 		return nil, nil
 	}
-	return convertPatPR(&raw[0], owner, repo), nil
+	return status.PR, nil
 }
 
 func (c *PATClient) ListAuthoredPRs(ctx context.Context, owner, repo string) ([]*PR, error) {
