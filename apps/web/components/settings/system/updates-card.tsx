@@ -264,8 +264,8 @@ function ApplyUpdateDialog({ canApply, latest, isApplying, onApply }: ApplyUpdat
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Apply update?</AlertDialogTitle>
-          <AlertDialogDescription>
-            Kandev will update to {latest} and restart the managed service.
+          <AlertDialogDescription className="text-left">
+            Kandev will update to {latest}, reinstall the user service, and restart it.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

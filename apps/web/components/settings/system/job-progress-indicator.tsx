@@ -3,7 +3,7 @@
 import { Badge } from "@kandev/ui/badge";
 import { Spinner } from "@kandev/ui/spinner";
 import { IconCheck, IconAlertTriangle } from "@tabler/icons-react";
-import { useSystemJobs } from "@/hooks/domains/system/use-system-jobs";
+import { useSystemJob, useSystemJobs } from "@/hooks/domains/system/use-system-jobs";
 import type { SystemJob, SystemJobKind } from "@/lib/types/system";
 
 type JobProgressIndicatorProps = {
@@ -48,8 +48,9 @@ function stateLabel(state: SystemJob["state"]): string {
 }
 
 export function JobProgressIndicator({ kind, jobId, testId }: JobProgressIndicatorProps) {
+  const pinnedJob = useSystemJob(jobId);
   const jobs = useSystemJobs(kind);
-  const job = pickJob(jobs, jobId);
+  const job = jobId ? (pinnedJob ?? pickJob(jobs, jobId)) : pickJob(jobs);
   if (!job) return null;
 
   const tid = testId ?? `system-job-${kind}`;
