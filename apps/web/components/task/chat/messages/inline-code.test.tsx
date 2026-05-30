@@ -66,4 +66,29 @@ describe("InlineCode", () => {
     expect(copyMock).toHaveBeenCalledWith("echo hi");
     expect(screen.getByRole("tooltip").textContent).toBe("Copied!");
   });
+
+  it("wires the trigger to the tooltip via aria-describedby only while visible", () => {
+    render(<InlineCode>pwd</InlineCode>);
+    const code = screen.getByText("pwd");
+
+    expect(code.getAttribute("aria-describedby")).toBeNull();
+
+    fireEvent.mouseEnter(code);
+    const tooltip = screen.getByRole("tooltip");
+    expect(code.getAttribute("aria-describedby")).toBe(tooltip.id);
+    expect(tooltip.id).not.toBe("");
+  });
+
+  it("dismisses the tooltip on scroll so it cannot drift from the anchored code", () => {
+    render(<InlineCode>cd</InlineCode>);
+
+    fireEvent.mouseEnter(screen.getByText("cd"));
+    expect(screen.queryByRole("tooltip")).not.toBeNull();
+
+    act(() => {
+      window.dispatchEvent(new Event("scroll"));
+    });
+
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
 });

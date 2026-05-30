@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
@@ -13,22 +13,14 @@ const COPIED_RESET_MS = 1500;
 
 type TooltipAnchor = { left: number; top: number };
 
-/**
- * Inline `code` span with a click-to-copy affordance.
- *
- * The hover / "Copied!" tooltip is rendered through a portal on `document.body`
- * rather than as an absolutely-positioned child. Inline code frequently lives
- * inside containers that clip their overflow (e.g. the rounded user-message
- * bubble, which nests several `overflow-hidden` layers); an in-flow absolute
- * tooltip gets clipped by those ancestors. Portaling it to the body lets it
- * float freely so it is never clipped.
- */
+// Tooltip is portaled to document.body so overflow-hidden ancestors (e.g. the user-message bubble) can't clip it.
 export function InlineCode({ children }: InlineCodeProps) {
   const { copy } = useCopyToClipboard();
   const [anchor, setAnchor] = useState<TooltipAnchor | null>(null);
   const [hovered, setHovered] = useState(false);
   const [copied, setCopied] = useState(false);
   const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tooltipId = useId();
 
   useEffect(
     () => () => {
@@ -36,6 +28,23 @@ export function InlineCode({ children }: InlineCodeProps) {
     },
     [],
   );
+
+  // The anchor is a captured viewport rect, so scroll/resize would let the
+  // fixed tooltip drift away from the code. Dismiss it instead of repositioning.
+  const visible = hovered || copied;
+  useEffect(() => {
+    if (!visible) return;
+    const dismiss = () => {
+      setHovered(false);
+      setCopied(false);
+    };
+    window.addEventListener("scroll", dismiss, true);
+    window.addEventListener("resize", dismiss);
+    return () => {
+      window.removeEventListener("scroll", dismiss, true);
+      window.removeEventListener("resize", dismiss);
+    };
+  }, [visible]);
 
   const anchorTo = (el: HTMLElement) => {
     const rect = el.getBoundingClientRect();
@@ -59,17 +68,19 @@ export function InlineCode({ children }: InlineCodeProps) {
           setHovered(true);
         }}
         onMouseLeave={() => setHovered(false)}
+        aria-describedby={visible ? tooltipId : undefined}
         className="cursor-pointer hover:bg-foreground/10 transition-colors"
       >
         {children}
       </code>
 
-      {(hovered || copied) &&
+      {visible &&
         anchor &&
         typeof document !== "undefined" &&
         createPortal(
           <span
             role="tooltip"
+            id={tooltipId}
             style={{ left: anchor.left, top: anchor.top - 4 }}
             className={cn(
               "fixed z-50 -translate-x-1/2 -translate-y-full",
