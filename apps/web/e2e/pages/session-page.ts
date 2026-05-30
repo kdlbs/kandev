@@ -1012,6 +1012,11 @@ export class SessionPage {
     return this.page.getByTestId(`session-tab-${sessionId}`);
   }
 
+  /** Dockview close (X) button inside a session tab. */
+  sessionTabCloseButton(sessionId: string): Locator {
+    return this.sessionTabBySessionId(sessionId).locator(".dv-default-tab-action");
+  }
+
   /** Context menu on a dockview tab — right-click the tab to trigger it. */
   async rightClickTab(text: string): Promise<void> {
     const tab = this.page.locator(`[data-testid^='session-tab-']:has-text('${text}')`);
