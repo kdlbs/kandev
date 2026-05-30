@@ -775,15 +775,11 @@
 
 .markdown-body table {
   border-collapse: collapse;
-  /* width:100% pins the table to its container so it can never grow into the
-     surrounding overflow-x-auto scroll container (no horizontal scrollbar).
-     max-width caps it at a readable measure so a label/value table doesn't
-     stretch the value column across an ultra-wide panel, leaving short rows
-     in cavernous mostly-empty cells. The cap is on the <table> (a block box,
-     where max-width is honored) rather than on <td> (where browsers treat
-     max-width only as a hint to the table-layout algorithm). */
+  /* width:100% fills the container and pins the table to it, so it can never
+     shrink-to-fit and grow into the surrounding overflow-x-auto scroll
+     container (which is what produced a horizontal scrollbar under width:auto).
+     Long values wrap instead of overflowing. */
   width: 100%;
-  max-width: 72ch;
   margin: 0.75rem 0;
   table-layout: auto;
 }
