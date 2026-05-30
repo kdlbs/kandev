@@ -19,13 +19,15 @@ export type UnitInputs = {
   mode: "user" | "system";
 };
 
-// User-mode PATH includes ~/.local/bin so user-installed agent CLIs (npm user
-// prefix, pipx, fnm, etc.) are discoverable.
+// User-mode PATH includes ~/.local/bin and ~/.bun/bin so user-installed agent
+// CLIs (npm user prefix, pipx, fnm, Bun globals like oh-my-pi/omp, etc.) are
+// discoverable.
 const SYSTEMD_SYSTEM_PATH =
   "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin";
-const SYSTEMD_USER_PATH = `%h/.local/bin:${SYSTEMD_SYSTEM_PATH}`;
+const SYSTEMD_USER_PATH = `%h/.local/bin:%h/.bun/bin:${SYSTEMD_SYSTEM_PATH}`;
 const LAUNCHD_SYSTEM_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin";
-const launchdUserPath = (): string => `${os.homedir()}/.local/bin:${LAUNCHD_SYSTEM_PATH}`;
+const launchdUserPath = (): string =>
+  `${os.homedir()}/.local/bin:${os.homedir()}/.bun/bin:${LAUNCHD_SYSTEM_PATH}`;
 
 // Prepend the launcher node's bin dir so `npm`/`npx` resolve under per-user
 // node managers (fnm, nvm, asdf, volta, mise), where node lives in a versioned

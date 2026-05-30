@@ -51,8 +51,18 @@ describe("renderSystemdUnit", () => {
       mode: "user",
     });
     expect(unit).toMatch(
-      /^Environment=PATH=%h\/\.local\/bin:\/usr\/local\/bin:\/usr\/bin:\/bin:\/opt\/homebrew\/bin:\/home\/linuxbrew\/\.linuxbrew\/bin$/m,
+      /^Environment=PATH=%h\/\.local\/bin:%h\/\.bun\/bin:\/usr\/local\/bin:\/usr\/bin:\/bin:\/opt\/homebrew\/bin:\/home\/linuxbrew\/\.linuxbrew\/bin$/m,
     );
+  });
+
+  it("includes %h/.bun/bin in PATH for user-mode units so Bun-global agent CLIs (e.g. omp) resolve", () => {
+    const unit = renderSystemdUnit({
+      launcher: NPM_LAUNCHER,
+      homeDir: "/home/alice/.kandev",
+      logDir: "/home/alice/.kandev/logs",
+      mode: "user",
+    });
+    expect(unit).toContain("%h/.bun/bin");
   });
 
   it("omits %h/.local/bin from PATH for system-mode units", () => {
@@ -109,7 +119,7 @@ describe("renderSystemdUnit", () => {
       mode: "user",
     });
     expect(unit).toContain(
-      "Environment=PATH=/home/alice/.local/share/fnm/node-versions/v24.14.0/installation/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin",
+      "Environment=PATH=/home/alice/.local/share/fnm/node-versions/v24.14.0/installation/bin:%h/.local/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin",
     );
   });
 
@@ -122,7 +132,7 @@ describe("renderSystemdUnit", () => {
     });
     // /usr/local/bin already in SYSTEMD_USER_PATH — dirname(nodePath) must not double it.
     expect(unit).toContain(
-      "Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin",
+      "Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin",
     );
     expect(unit).not.toContain("/usr/local/bin:/usr/local/bin");
   });
@@ -156,7 +166,7 @@ describe("renderSystemdUnit", () => {
     });
     expect(unit).not.toMatch(/^Environment=PATH=\.:/m);
     expect(unit).toContain(
-      "Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin",
+      "Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin",
     );
   });
 
@@ -207,7 +217,7 @@ describe("renderLaunchdPlist", () => {
       mode: "user",
     });
     expect(plist).toMatch(
-      /<key>PATH<\/key>\s*<string>\/Users\/alice\/\.volta\/tools\/image\/node\/24\.14\.0\/bin:[^<]+\/\.local\/bin:\/opt\/homebrew\/bin:\/usr\/local\/bin:\/usr\/bin:\/bin<\/string>/,
+      /<key>PATH<\/key>\s*<string>\/Users\/alice\/\.volta\/tools\/image\/node\/24\.14\.0\/bin:[^<]+\/\.local\/bin:[^<]+\/\.bun\/bin:\/opt\/homebrew\/bin:\/usr\/local\/bin:\/usr\/bin:\/bin<\/string>/,
     );
   });
 
@@ -220,7 +230,7 @@ describe("renderLaunchdPlist", () => {
     });
     // /opt/homebrew/bin already in LAUNCHD_USER_PATH — must not be doubled.
     expect(plist).toMatch(
-      /<key>PATH<\/key>\s*<string>[^<]+\/\.local\/bin:\/opt\/homebrew\/bin:\/usr\/local\/bin:\/usr\/bin:\/bin<\/string>/,
+      /<key>PATH<\/key>\s*<string>[^<]+\/\.local\/bin:[^<]+\/\.bun\/bin:\/opt\/homebrew\/bin:\/usr\/local\/bin:\/usr\/bin:\/bin<\/string>/,
     );
     expect(plist).not.toContain("/opt/homebrew/bin:/opt/homebrew/bin");
   });
@@ -233,8 +243,18 @@ describe("renderLaunchdPlist", () => {
       mode: "user",
     });
     expect(plist).toMatch(
-      /<key>PATH<\/key>\s*<string>[^<]+\/\.local\/bin:\/opt\/homebrew\/bin:\/usr\/local\/bin:\/usr\/bin:\/bin<\/string>/,
+      /<key>PATH<\/key>\s*<string>[^<]+\/\.local\/bin:[^<]+\/\.bun\/bin:\/opt\/homebrew\/bin:\/usr\/local\/bin:\/usr\/bin:\/bin<\/string>/,
     );
+  });
+
+  it("includes $HOME/.bun/bin in PATH for user-mode plists so Bun-global agent CLIs (e.g. omp) resolve", () => {
+    const plist = renderLaunchdPlist({
+      launcher: NPM_LAUNCHER,
+      homeDir: "/Users/alice/.kandev",
+      logDir: "/Users/alice/.kandev/logs",
+      mode: "user",
+    });
+    expect(plist).toMatch(/<key>PATH<\/key>\s*<string>[^<]*\/\.bun\/bin:/);
   });
 
   it("prepends node bin dir for system-mode LaunchDaemons too", () => {
@@ -281,7 +301,7 @@ describe("renderLaunchdPlist", () => {
     });
     expect(plist).not.toMatch(/<key>PATH<\/key>\s*<string>\.:/);
     expect(plist).toMatch(
-      /<key>PATH<\/key>\s*<string>[^<]+\/\.local\/bin:\/opt\/homebrew\/bin:\/usr\/local\/bin:\/usr\/bin:\/bin<\/string>/,
+      /<key>PATH<\/key>\s*<string>[^<]+\/\.local\/bin:[^<]+\/\.bun\/bin:\/opt\/homebrew\/bin:\/usr\/local\/bin:\/usr\/bin:\/bin<\/string>/,
     );
   });
 
@@ -322,7 +342,7 @@ describe("renderLaunchdPlist", () => {
     // The whole assignment must be wrapped, not just the value.
     expect(unit).toContain('Environment="KANDEV_HOME_DIR=/home/john doe/.kandev"');
     // PATH always contains colons but no spaces — should NOT be quoted.
-    expect(unit).toMatch(/^Environment=PATH=%h\/\.local\/bin:\/usr\/local\/bin/m);
+    expect(unit).toMatch(/^Environment=PATH=%h\/\.local\/bin:%h\/\.bun\/bin:\/usr\/local\/bin/m);
   });
 
   it("escapes backslash + double-quote in Environment= and ExecStart values", () => {
