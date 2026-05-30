@@ -44,6 +44,7 @@ func isNotFound(err error) bool {
 		return false
 	}
 	if errors.Is(err, taskrepo.ErrTaskNotFound) ||
+		errors.Is(err, taskrepo.ErrNoPrimarySession) ||
 		errors.Is(err, service.ErrDocumentNotFound) ||
 		errors.Is(err, service.ErrTaskPlanNotFound) ||
 		errors.Is(err, service.ErrRevisionNotFound) {
