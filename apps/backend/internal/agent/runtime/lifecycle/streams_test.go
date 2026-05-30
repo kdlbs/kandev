@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -82,6 +83,23 @@ func TestConnectWorkspaceStream_BackoffDrainsOnStop(t *testing.T) {
 	case <-done:
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("connectWorkspaceStream did not drain on stopCh close — backoff is leaking")
+	}
+}
+
+func TestStreamContextCancelsOnStop(t *testing.T) {
+	stopCh := make(chan struct{})
+	sm := NewStreamManager(newTestLogger(), StreamCallbacks{}, nil, stopCh)
+
+	ctx := sm.streamContext(&AgentExecution{ID: "exec-context"})
+	close(stopCh)
+
+	select {
+	case <-ctx.Done():
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("stream context did not observe stopCh close")
+	}
+	if err := ctx.Err(); err != context.Canceled {
+		t.Fatalf("ctx.Err() = %v, want context.Canceled", err)
 	}
 }
 

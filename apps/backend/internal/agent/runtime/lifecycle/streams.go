@@ -38,6 +38,27 @@ type StreamManager struct {
 	stopCh <-chan struct{}
 }
 
+type stopChannelContext struct {
+	context.Context
+	stopCh <-chan struct{}
+}
+
+func (c stopChannelContext) Done() <-chan struct{} {
+	if c.stopCh == nil {
+		return c.Context.Done()
+	}
+	return c.stopCh
+}
+
+func (c stopChannelContext) Err() error {
+	select {
+	case <-c.stopCh:
+		return context.Canceled
+	default:
+		return c.Context.Err()
+	}
+}
+
 // NewStreamManager creates a new StreamManager.
 //
 // stopCh is the Manager-owned shutdown signal used by the workspace-stream
@@ -112,9 +133,19 @@ func (sm *StreamManager) sleepOrStop(d time.Duration) bool {
 	}
 }
 
+// streamContext preserves the execution's session trace values while making
+// in-flight WebSocket dials cancellable by the manager shutdown signal.
+func (sm *StreamManager) streamContext(execution *AgentExecution) context.Context {
+	ctx := execution.SessionTraceContext()
+	if sm.stopCh == nil {
+		return ctx
+	}
+	return stopChannelContext{Context: ctx, stopCh: sm.stopCh}
+}
+
 // connectUpdatesStream handles the updates WebSocket stream with ready signaling
 func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready chan<- struct{}) {
-	ctx := execution.SessionTraceContext()
+	ctx := sm.streamContext(execution)
 
 	err := execution.agentctl.StreamUpdates(ctx, func(event agentctl.AgentEvent) {
 		if sm.callbacks.OnAgentEvent != nil {
@@ -215,7 +246,7 @@ func (sm *StreamManager) buildWorkspaceCallbacks(execution *AgentExecution) agen
 
 // connectWorkspaceStream handles the unified workspace stream with retry logic
 func (sm *StreamManager) connectWorkspaceStream(execution *AgentExecution, ready chan<- struct{}) {
-	ctx := execution.SessionTraceContext()
+	ctx := sm.streamContext(execution)
 
 	// Retry connection with exponential backoff
 	maxRetries := 5
