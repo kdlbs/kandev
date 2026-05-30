@@ -15,6 +15,10 @@ vi.mock("@/lib/debug/log", () => ({
   IS_DEBUG: false,
 }));
 
+vi.mock("@/lib/local-storage", () => ({
+  getGlobalSidebarWidth: vi.fn(() => null),
+}));
+
 vi.mock("./layout-manager", () => ({
   SIDEBAR_LOCK: "no-drop-target",
   SIDEBAR_GROUP: "group-sidebar",
@@ -24,6 +28,7 @@ vi.mock("./layout-manager", () => ({
   LAYOUT_PINNED_MIN_PX: 180,
   computeSidebarMaxPx: vi.fn(() => SIDEBAR_CAP),
   computeRightMaxPx: vi.fn(() => RIGHT_CAP),
+  getPinnedWidth: vi.fn(() => 350),
   getRootSplitview: vi.fn(),
   resolveGroupIds: vi.fn(() => ({
     sidebarGroupId: "group-sidebar",
@@ -40,8 +45,10 @@ import {
   setPinnedTarget,
   computeSidebarMaxPx,
   computeRightMaxPx,
+  getPinnedWidth,
   RIGHT_TOP_GROUP,
 } from "./layout-manager";
+import { getGlobalSidebarWidth } from "@/lib/local-storage";
 
 const SIDEBAR_GROUP = "group-sidebar";
 const CENTER_GROUP = "group-center";
@@ -71,6 +78,8 @@ function makeApi(groupIds: string[]): DockviewApi {
 describe("applyLayoutFixups — pinned target capture", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(getGlobalSidebarWidth).mockReturnValue(null);
+    vi.mocked(getPinnedWidth).mockReturnValue(350);
   });
 
   it("does NOT record a right target in the 2-column fallback (center is last)", () => {
@@ -86,9 +95,20 @@ describe("applyLayoutFixups — pinned target capture", () => {
     expect(setPinnedTarget).not.toHaveBeenCalledWith("right", expect.anything());
   });
 
-  it("clamps an over-cap sidebar target down to the cap", () => {
-    // sidebar live (474) exceeds the cap (441); the constraint pins it at the
-    // cap, so the target must be clamped or enforcePinnedTargets spins forever.
+  it("uses the default sidebar target instead of an env-saved live width when no global pref exists", () => {
+    // Slow fromJSON restore can bring back an env-specific sidebar width. With
+    // sidebar now a global pref, no pref means "use the default", not the
+    // env-saved live width.
+    mockSplitview([420, 1050]);
+    const api = makeApi([SIDEBAR_GROUP, CENTER_GROUP]);
+
+    applyLayoutFixups(api);
+
+    expect(setPinnedTarget).toHaveBeenCalledWith("sidebar", 350);
+  });
+
+  it("clamps a global sidebar pref down to the cap", () => {
+    vi.mocked(getGlobalSidebarWidth).mockReturnValue(900);
     mockSplitview([474, 996]);
     const api = makeApi([SIDEBAR_GROUP, CENTER_GROUP]);
 

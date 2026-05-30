@@ -220,27 +220,27 @@ function applyDeferredPanelActions(api: DockviewApi, actions: DeferredPanelActio
 }
 
 /**
- * Build the pinnedWidths updates for a width sync, tracking a column only when
- * it is the VISIBLE default sidebar/right.
+ * Build the pinnedWidths updates for a width sync, tracking only the VISIBLE
+ * default right column.
  *
  * In plan/preview/vscode layouts the side column inherits merged files/changes
  * panels and `fromDockviewApi` mislabels it "right"; storing its width as the
  * right override would then leak into the default layout when toggling back
  * (e.g. plan-mode off snapping the right column to the plan column's width).
- * Mirrors the visibility guards in `trackPinnedWidths`. Widths <= 50px are
- * treated as transient/collapsed and skipped.
+ *
+ * Sidebar is intentionally excluded: its persisted width is a global pref
+ * written only by explicit sash drag, and syncing live layout-change widths
+ * would overwrite the raw pref with viewport-clamped transient widths.
+ * Widths <= 50px are treated as transient/collapsed and skipped.
  */
 export function collectPinnedWidthUpdates(
   columns: { id: string }[],
   getSize: (index: number) => number,
-  visibility: { sidebarVisible: boolean; rightPanelsVisible: boolean },
+  visibility: { rightPanelsVisible: boolean },
 ): Map<string, number> {
   const updates = new Map<string, number>();
   columns.forEach((col, i) => {
-    const tracked =
-      (col.id === "sidebar" && visibility.sidebarVisible) ||
-      (col.id === "right" && visibility.rightPanelsVisible);
-    if (!tracked) return;
+    if (col.id !== "right" || !visibility.rightPanelsVisible) return;
     const w = getSize(i);
     if (w > 50) updates.set(col.id, w);
   });
@@ -248,7 +248,7 @@ export function collectPinnedWidthUpdates(
 }
 
 /** Read live column widths from dockview's splitview and persist the visible
- *  sidebar/right widths as pinned overrides (see `collectPinnedWidthUpdates`). */
+ *  right width as a pinned override (see `collectPinnedWidthUpdates`). */
 function syncPinnedWidthsFromApi(api: DockviewApi, set: StoreSet): void {
   if (api.hasMaximizedGroup()) return;
   const sv = getRootSplitview(api);
@@ -256,9 +256,8 @@ function syncPinnedWidthsFromApi(api: DockviewApi, set: StoreSet): void {
   try {
     const state = fromDockviewApi(api);
     if (state.columns.length !== sv.length) return;
-    const { sidebarVisible, rightPanelsVisible } = useDockviewStore.getState();
+    const { rightPanelsVisible } = useDockviewStore.getState();
     const updates = collectPinnedWidthUpdates(state.columns, (i) => sv.getViewSize(i), {
-      sidebarVisible,
       rightPanelsVisible,
     });
     if (updates.size > 0) {
@@ -290,9 +289,10 @@ function syncPinnedWidthsFromApi(api: DockviewApi, set: StoreSet): void {
  *   `fromJSON` out at a transient narrower width, and that shrunken size would
  *   be captured as the pinned target and then enforced, leaving the columns
  *   too narrow.
- * - otherwise (programmatic switch, e.g. plan-mode toggle): keep the live
- *   widths, minus overrides for columns absent in the target layout, so the
- *   user's current sidebar/right widths carry across the switch.
+ * - otherwise (programmatic switch, e.g. plan-mode toggle): keep the live right
+ *   width, minus overrides for columns absent in the target layout. Sidebar is
+ *   always resolved from the global pref/default instead of an in-memory
+ *   override.
  */
 export function resolvePresetPinnedWidths(
   liveWidths: Map<string, number>,
@@ -315,12 +315,12 @@ export function resolvePresetPinnedWidths(
   const targetColumnIds = new Set(columns.map((c) => c.id));
   const cleaned = new Map(liveWidths);
   for (const key of cleaned.keys()) {
-    if (!targetColumnIds.has(key)) cleaned.delete(key);
+    if (key === "sidebar" || !targetColumnIds.has(key)) cleaned.delete(key);
   }
   return cleaned;
 }
 
-/** Capture the live sidebar/right pixel widths into pinnedWidths before a layout rebuild. */
+/** Capture the live right pixel width into pinnedWidths before a layout rebuild. */
 function captureLiveWidths(api: DockviewApi, set: StoreSet): Map<string, number> {
   if (api.hasMaximizedGroup()) {
     api.exitMaximizedGroup();

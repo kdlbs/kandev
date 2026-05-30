@@ -124,7 +124,7 @@ describe("resolvePresetPinnedWidths", () => {
     expect(result.has("center")).toBe(false); // not pinned
   });
 
-  it("keeps live widths for columns in the target layout when not resetting", () => {
+  it("keeps right live widths for columns in the target layout when not resetting", () => {
     const live = new Map([
       ["sidebar", 519],
       ["right", 900],
@@ -132,8 +132,22 @@ describe("resolvePresetPinnedWidths", () => {
 
     const result = resolvePresetPinnedWidths(live, cols, 1600, false);
 
-    expect(result.get("sidebar")).toBe(519);
+    expect(result.has("sidebar")).toBe(false);
     expect(result.get("right")).toBe(900);
+  });
+
+  it("does not carry a live sidebar override on non-reset switches", () => {
+    setGlobalSidebarWidth(520);
+    const live = new Map([
+      ["sidebar", 350],
+      ["right", 900],
+    ]);
+
+    const result = resolvePresetPinnedWidths(live, cols, 1600, false);
+
+    expect(result.has("sidebar")).toBe(false);
+    expect(result.get("right")).toBe(900);
+    expect(getGlobalSidebarWidth()).toBe(520);
   });
 
   it("drops live overrides for columns absent from the target layout", () => {
@@ -150,7 +164,7 @@ describe("resolvePresetPinnedWidths", () => {
 
     const result = resolvePresetPinnedWidths(live, noRight, 1600, false);
 
-    expect(result.get("sidebar")).toBe(300);
+    expect(result.has("sidebar")).toBe(false);
     expect(result.has("right")).toBe(false);
   });
 
@@ -193,15 +207,14 @@ describe("resolvePresetPinnedWidths", () => {
 describe("collectPinnedWidthUpdates", () => {
   const size = (i: number) => [350, 560, 560][i]; // sidebar, center, last
 
-  it("tracks sidebar + right when both are visible", () => {
+  it("tracks right but not sidebar when both are visible", () => {
     const columns = [{ id: "sidebar" }, { id: "center" }, { id: "right" }];
 
     const updates = collectPinnedWidthUpdates(columns, size, {
-      sidebarVisible: true,
       rightPanelsVisible: true,
     });
 
-    expect(updates.get("sidebar")).toBe(350);
+    expect(updates.has("sidebar")).toBe(false);
     expect(updates.get("right")).toBe(560);
   });
 
@@ -213,19 +226,17 @@ describe("collectPinnedWidthUpdates", () => {
     const columns = [{ id: "sidebar" }, { id: "center" }, { id: "right" }];
 
     const updates = collectPinnedWidthUpdates(columns, size, {
-      sidebarVisible: true,
       rightPanelsVisible: false,
     });
 
     expect(updates.has("right")).toBe(false);
-    expect(updates.get("sidebar")).toBe(350);
+    expect(updates.has("sidebar")).toBe(false);
   });
 
   it("skips collapsed/transient widths <= 50px", () => {
     const columns = [{ id: "sidebar" }, { id: "right" }];
 
     const updates = collectPinnedWidthUpdates(columns, () => 40, {
-      sidebarVisible: true,
       rightPanelsVisible: true,
     });
 

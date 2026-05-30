@@ -8,6 +8,7 @@ import {
   LAYOUT_PINNED_MIN_PX,
   computeSidebarMaxPx,
   computeRightMaxPx,
+  getPinnedWidth,
   getRootSplitview as getRootSplitviewImpl,
   resolveGroupIds,
   setPinnedTarget,
@@ -72,12 +73,17 @@ export function applyLayoutFixups(api: DockviewApi): LayoutGroupIds {
 }
 
 /** Resolve the sidebar's target width (clamped to the cap): the GLOBAL width
- *  pref when set, else the just-restored live width. */
-function resolveSidebarTarget(cap: number, live: unknown): number | undefined {
+ *  pref when set, else the default width for the current measured layout. */
+function resolveSidebarTarget(cap: number, totalWidth: number | undefined): number | undefined {
   const pref = getGlobalSidebarWidth();
   if (pref !== null) return Math.min(pref, cap);
-  if (typeof live === "number" && live > 0) return Math.min(live, cap);
-  return undefined;
+  const width =
+    totalWidth ??
+    (typeof window !== "undefined" && window.innerWidth > 0 ? window.innerWidth : cap);
+  return Math.min(
+    getPinnedWidth({ id: "sidebar", pinned: true, groups: [] }, width, undefined),
+    cap,
+  );
 }
 
 /** Lock + constrain the sidebar group and record its target width, clamped to
@@ -92,16 +98,16 @@ function captureSidebarTarget(api: DockviewApi, sv: any): void {
   // route transitions / devtools toggles, yielding a too-small cap that would
   // clamp the captured target too narrow and persist it — the width drift this
   // pipeline exists to prevent.
-  const sidebarCap = computeSidebarMaxPx(layoutWidth(api));
+  const measuredWidth = layoutWidth(api);
+  const sidebarCap = computeSidebarMaxPx(measuredWidth);
   sb.group.locked = SIDEBAR_LOCK;
   sb.group.header.hidden = false;
   sb.group.api.setConstraints({ maximumWidth: sidebarCap, minimumWidth: LAYOUT_PINNED_MIN_PX });
   // Slow-path env restore: fromJSON brought back this env's saved sidebar
   // pixel width, but the sidebar is a GLOBAL pref. Seed the target from the
   // pref (clamped to fit) and resize the column so the restore honors it; fall
-  // back to the just-restored live width when no pref exists.
-  const live = sv?.getViewSize?.(0) ?? sb.group.width;
-  const target = resolveSidebarTarget(sidebarCap, live);
+  // back to the default sidebar width when no pref exists.
+  const target = resolveSidebarTarget(sidebarCap, measuredWidth);
   if (target !== undefined) {
     const cur = sv?.getViewSize?.(0);
     if (typeof cur === "number" && cur > 0 && Math.abs(cur - target) > 1) {
