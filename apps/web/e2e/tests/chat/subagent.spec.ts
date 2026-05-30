@@ -35,7 +35,11 @@ test.describe("Subagent card", () => {
     await session.waitForChatIdle({ timeout: 30_000 });
 
     // The dedicated subagent card renders, not the generic tool_call row.
-    const card = session.chat.locator('[data-testid="subagent-card"]').first();
+    // Assert exactly one so an accidental duplicate render fails the test
+    // rather than being masked by .first().
+    const cards = session.chat.locator('[data-testid="subagent-card"]');
+    await expect(cards).toHaveCount(1);
+    const card = cards.first();
     await expect(card).toBeVisible();
 
     // Type badge and description (visible while collapsed).

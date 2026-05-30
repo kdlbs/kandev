@@ -31,7 +31,10 @@ test.describe("Mobile subagent card", () => {
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
 
-    const card = session.chat.locator('[data-testid="subagent-card"]').first();
+    // Assert exactly one card so a duplicate render fails rather than hiding behind .first().
+    const cards = session.chat.locator('[data-testid="subagent-card"]');
+    await expect(cards).toHaveCount(1);
+    const card = cards.first();
     await expect(card).toBeVisible();
 
     await expect(session.chat.locator('[data-testid="subagent-type"]').first()).toContainText(
