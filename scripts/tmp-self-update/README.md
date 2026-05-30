@@ -5,7 +5,7 @@ Remove this directory after the manual test pass.
 
 ## Quick path
 
-```sh
+```
 scripts/tmp-self-update/build-local.sh
 scripts/tmp-self-update/setup-fake-service.sh
 scripts/tmp-self-update/run-backend.sh
@@ -13,13 +13,13 @@ scripts/tmp-self-update/run-backend.sh
 
 In another shell:
 
-```sh
+```
 scripts/tmp-self-update/seed-update.sh
 ```
 
 Open:
 
-```text
+```
 http://localhost:38429/settings/system/updates
 ```
 
@@ -31,7 +31,7 @@ test environment.
 
 All scripts use:
 
-```sh
+```
 TEST_HOME="${TEST_HOME:-$HOME/.kandev-selfupdate-test}"
 ```
 
@@ -47,6 +47,6 @@ Other useful overrides:
 
 Clean up:
 
-```sh
+```
 scripts/tmp-self-update/teardown.sh
 ```
