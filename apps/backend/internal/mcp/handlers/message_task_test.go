@@ -394,9 +394,11 @@ func TestHandleMessageTask_NoPrimarySession_Rejects(t *testing.T) {
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeNotFound)
 
-	// The task exists, so the error must come from the session lookup — not the
-	// task-existence check. This keeps the two failure modes distinguishable.
-	assert.Contains(t, string(resp.Payload), "task exists but has no session")
+	// The task exists but has no session — must report "no active session", not
+	// the generic "task not found" from the task-existence check.
+	payload := string(resp.Payload)
+	assert.Contains(t, payload, "no active session")
+	assert.NotContains(t, payload, "task not found")
 }
 
 func TestHandleMessageTask_NonexistentTask_ReportsTaskNotFound(t *testing.T) {

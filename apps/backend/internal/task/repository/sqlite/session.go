@@ -404,6 +404,11 @@ func (r *Repository) GetTaskSessionByTaskAndAgent(ctx context.Context, taskID, a
 // to detect "no row found" so the caller gets nil, nil instead of an error.
 const sessionNotFoundMsg = "task_sessions: no matching row"
 
+// noPrimarySessionSentinel is the no-rows marker passed to scanTaskSession by
+// GetPrimarySessionByTaskID. Matching this exact string lets the function wrap
+// the result with ErrNoPrimarySession so callers can use errors.Is.
+const noPrimarySessionSentinel = "task_sessions: no primary session row"
+
 // ListNonTerminalSessionsByAgentInstance returns every office task_session row
 // for the given agent_profile_id whose state is NOT terminal
 // (CREATED / STARTING / RUNNING / IDLE / WAITING_FOR_INPUT). Used by the
@@ -1071,12 +1076,18 @@ func (r *Repository) DeleteTaskSessionWorktreesBySession(ctx context.Context, se
 	return err
 }
 
-// GetPrimarySessionByTaskID retrieves the primary session for a task
+// GetPrimarySessionByTaskID retrieves the primary session for a task.
+// Returns ErrNoPrimarySession (wrapped) when the task has no primary session
+// row; callers should use errors.Is to distinguish this from real DB errors.
 func (r *Repository) GetPrimarySessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(
 		`SELECT `+taskSessionSelectCols+` `+taskSessionFromClause+` WHERE ts.task_id = ? AND ts.is_primary = 1 LIMIT 1`,
 	), taskID)
-	return r.scanTaskSession(ctx, row, fmt.Sprintf("no primary session found for task: %s", taskID))
+	session, err := r.scanTaskSession(ctx, row, noPrimarySessionSentinel)
+	if err != nil && err.Error() == noPrimarySessionSentinel {
+		return nil, fmt.Errorf("%w: %s", ErrNoPrimarySession, taskID)
+	}
+	return session, err
 }
 
 // GetPrimarySessionIDsByTaskIDs returns a map of task ID to primary session ID for the given task IDs.

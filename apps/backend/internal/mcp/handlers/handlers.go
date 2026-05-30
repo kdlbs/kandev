@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	workflowctrl "github.com/kandev/kandev/internal/workflow/controller"
 	workflowsvc "github.com/kandev/kandev/internal/workflow/service"
@@ -764,14 +765,23 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 	// task_id (e.g. a truncated UUID prefix) reports "task not found" instead
 	// of the misleading "no primary session" error from the session lookup.
 	targetTask, err := h.taskSvc.GetTask(ctx, req.TaskID)
-	if err != nil || targetTask == nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound,
-			"target task not found: "+req.TaskID+" (pass the full task UUID, not a truncated prefix)", nil)
+	if err != nil {
+		if errors.Is(err, taskrepo.ErrTaskNotFound) || targetTask == nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound,
+				"target task not found: "+req.TaskID+" (pass the full task UUID, not a truncated prefix)", nil)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+			"failed to look up target task: "+err.Error(), nil)
 	}
 
 	session, err := h.taskSvc.GetPrimarySession(ctx, req.TaskID)
 	if err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task exists but has no session: "+err.Error(), nil)
+		if errors.Is(err, taskrepo.ErrNoPrimarySession) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound,
+				"task has no active session — use create_task_kandev to start one", nil)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+			"failed to get session for task: "+err.Error(), nil)
 	}
 	if session == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task has no active session — use create_task_kandev to start one", nil)
