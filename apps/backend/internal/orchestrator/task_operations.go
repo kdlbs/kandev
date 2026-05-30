@@ -2216,6 +2216,11 @@ func (s *Service) DrainQueuedMessage(ctx context.Context, sessionID string) (boo
 	return s.drainQueuedMessageForPromptableSession(ctx, sessionID), nil
 }
 
+func (s *Service) isCancelInFlight(sessionID string) bool {
+	_, ok := s.cancelInFlight.Load(sessionID)
+	return ok
+}
+
 // CancelAgent interrupts the current agent turn without terminating the process,
 // allowing the user to send a new prompt.
 //

@@ -326,12 +326,9 @@ type Service struct {
 	clarificationWatchdogTimeout time.Duration
 
 	// cancelInFlight tracks sessionIDs whose CancelAgent call is currently in
-	// progress. Used to deduplicate impatient retries from the UI: while the
-	// first cancel is still propagating through the agent (which can take several
-	// seconds when a long-running tool like Claude's Monitor is being torn down),
-	// the user often clicks the button repeatedly. Without this guard each click
-	// would create another "Turn cancelled by user" message and lazily start a
-	// phantom turn just to host it.
+	// progress. It deduplicates impatient retries from the UI and lets late
+	// agent.ready/boot_ready events from the cancelled turn return before they
+	// evaluate workflow transitions or drain queued messages.
 	cancelInFlight sync.Map
 
 	// transientRetries tracks in-progress transient-provider-error (529

@@ -616,6 +616,34 @@ func TestHandleAgentReadyGuards(t *testing.T) {
 		}
 	})
 
+	t.Run("ignores ready while cancel is in flight", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+			ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+		}
+		agentMgr := &mockAgentManager{isAgentRunning: true}
+		svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), agentMgr)
+
+		if _, err := svc.messageQueue.QueueMessage(ctx, "s1", "t1", "queued", "", messagequeue.QueuedByUser, false, nil); err != nil {
+			t.Fatalf("failed to queue message: %v", err)
+		}
+		svc.cancelInFlight.Store("s1", struct{}{})
+		defer svc.cancelInFlight.Delete("s1")
+
+		svc.handleAgentReady(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
+
+		status := svc.messageQueue.GetStatus(ctx, "s1")
+		if status.Count != 1 {
+			t.Fatalf("expected queued message to remain parked during cancel, count=%d entries=%+v", status.Count, status.Entries)
+		}
+		if len(agentMgr.capturedPrompts) != 0 {
+			t.Fatalf("expected no queued prompt dispatch during cancel, got %d prompts", len(agentMgr.capturedPrompts))
+		}
+	})
+
 	t.Run("moves STARTING session to waiting for input", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")

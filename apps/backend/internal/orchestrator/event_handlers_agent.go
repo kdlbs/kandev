@@ -133,6 +133,12 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 			zap.String("session_id", data.SessionID))
 		return
 	}
+	if s.isCancelInFlight(data.SessionID) {
+		s.logger.Debug("ignoring agent.boot_ready while cancel is in progress",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID))
+		return
+	}
 
 	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
 	if err != nil {
@@ -197,6 +203,13 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 
 	if s.isSessionResetInProgress(data.SessionID) {
 		s.logger.Debug("ignoring agent.ready while session reset is in progress",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("agent_execution_id", data.AgentExecutionID))
+		return
+	}
+	if s.isCancelInFlight(data.SessionID) {
+		s.logger.Debug("ignoring agent.ready while cancel is in progress",
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID),
 			zap.String("agent_execution_id", data.AgentExecutionID))
