@@ -212,6 +212,8 @@ describe("renderSystemdUnit", () => {
     expect(unit).toContain("ExecStart=/home/linuxbrew/.linuxbrew/bin/kandev --headless");
     // No version-pinned Cellar paths anywhere in the unit (node or kandev).
     expect(unit).not.toContain("/Cellar/");
+    // The versioned node bin dir must not leak into PATH either.
+    expect(unit).not.toContain("Cellar/node");
   });
 
   it("drops KANDEV_BUNDLE_DIR / KANDEV_VERSION and the versioned node bin dir when using the shim", () => {
@@ -223,9 +225,11 @@ describe("renderSystemdUnit", () => {
     });
     expect(unit).not.toContain("KANDEV_BUNDLE_DIR");
     expect(unit).not.toContain("KANDEV_VERSION");
-    // PATH must fall back to the static base path, not the versioned Cellar node bin.
+    // PATH must fall back to the static base path, not the versioned Cellar node
+    // bin. The shim's own bin dir (/home/linuxbrew/.linuxbrew/bin) is already in
+    // the base path, so it is not duplicated.
     expect(unit).toContain(
-      "Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin",
+      "Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin",
     );
   });
 

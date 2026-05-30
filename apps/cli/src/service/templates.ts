@@ -78,7 +78,10 @@ export function looksLikeManagedUnit(content: string): boolean {
 export function renderSystemdUnit(input: UnitInputs): string {
   const shimPath = input.launcher.shimPath;
   const basePath = input.mode === "system" ? SYSTEMD_SYSTEM_PATH : SYSTEMD_USER_PATH;
-  const pathValue = shimPath ? basePath : pathWithNodeBinDir(basePath, input.launcher.nodePath);
+  // For the shim, prepend its own bin dir (the Homebrew prefix's `bin`, where
+  // node/npm/npx live) so npx-based agents resolve even when the prefix isn't
+  // one of the hardcoded defaults. pathWithNodeBinDir dedupes when it already is.
+  const pathValue = pathWithNodeBinDir(basePath, shimPath ?? input.launcher.nodePath);
   const env: string[] = [
     envLine("KANDEV_HOME_DIR", input.homeDir),
     envLine("KANDEV_LOG_LEVEL", "info"),
@@ -132,7 +135,8 @@ WantedBy=${wantedBy}
 export function renderLaunchdPlist(input: UnitInputs): string {
   const shimPath = input.launcher.shimPath;
   const basePath = input.mode === "system" ? LAUNCHD_SYSTEM_PATH : launchdUserPath();
-  const pathValue = shimPath ? basePath : pathWithNodeBinDir(basePath, input.launcher.nodePath);
+  // See renderSystemdUnit: prepend the shim's own bin dir so npm/npx resolve.
+  const pathValue = pathWithNodeBinDir(basePath, shimPath ?? input.launcher.nodePath);
   const envEntries: Array<[string, string]> = [
     ["KANDEV_HOME_DIR", input.homeDir],
     ["KANDEV_LOG_LEVEL", "info"],

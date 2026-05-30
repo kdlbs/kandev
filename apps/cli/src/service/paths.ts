@@ -57,7 +57,11 @@ export type LauncherInfo = {
   shimPath?: string;
 };
 
-const HOMEBREW_CELLAR_SEGMENT = `${path.sep}Cellar${path.sep}`;
+// Homebrew is POSIX-only, so the Cellar segment is a hardcoded "/Cellar/"
+// rather than `path.sep`-based. On a Windows CI runner `path.sep` would be
+// "\\", which would never match a POSIX Cellar path and silently break shim
+// derivation (and its tests).
+const HOMEBREW_CELLAR_SEGMENT = "/Cellar/";
 
 /**
  * Derive the floating Homebrew launcher shim from a Cellar-installed cli.js path.
@@ -73,7 +77,9 @@ export function homebrewShimPath(cliEntry: string): string | undefined {
   const idx = cliEntry.indexOf(HOMEBREW_CELLAR_SEGMENT);
   if (idx === -1) return undefined;
   const prefix = cliEntry.slice(0, idx);
-  return path.join(prefix, "bin", SERVICE_NAME);
+  // Homebrew layout is POSIX; use path.posix.join so the result keeps forward
+  // slashes regardless of the host the install/tests run on.
+  return path.posix.join(prefix, "bin", SERVICE_NAME);
 }
 
 /**
