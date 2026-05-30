@@ -31,7 +31,7 @@ import (
 
 // ClarificationService defines the interface for clarification operations.
 type ClarificationService interface {
-	CreateRequest(req *clarification.Request) string
+	CreateRequest(req *clarification.Request) (string, bool)
 	WaitForResponse(ctx context.Context, pendingID string) (*clarification.Response, error)
 	CancelRequest(pendingID string) bool
 }
@@ -1156,13 +1156,14 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 		Questions: req.Questions,
 		Context:   req.Context,
 	}
-	pendingID := h.clarificationSvc.CreateRequest(clarificationReq)
+	pendingID, isNew := h.clarificationSvc.CreateRequest(clarificationReq)
 
 	// Create one chat message per question (triggers WS events to frontend).
 	// If the create fails, the in-store pending entry must be cancelled too —
 	// otherwise the agent's WaitForResponse would block for the full 2-hour
 	// timeout while the user never sees clarification cards.
-	if h.messageCreator != nil {
+	// When dedup fires (isNew=false) the messages already exist, so skip creation.
+	if isNew && h.messageCreator != nil {
 		if _, err := h.messageCreator.CreateClarificationRequestMessages(
 			ctx, taskID, req.SessionID, pendingID, req.Questions, req.Context,
 		); err != nil {

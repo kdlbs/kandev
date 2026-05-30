@@ -32,16 +32,6 @@ func NewCanceller(store *Store, repo messageStore, eventBus EventBus, log *logge
 	}
 }
 
-// CancelSessionAndNotify cancels all pending clarifications for a session,
-// unblocking WaitForResponse callers, and marks the database messages
-// as expired (with agent_disconnected=true for context) so the frontend
-// closes the interactive overlay and renders a "Timed out" history entry.
-// Returns the number of cancelled clarifications.
-//
-// Setting status=expired also prevents a UX bug where clicking the overlay's
-// X button after the agent moved on would trigger a new turn via the
-// respond handler's event fallback path (rejected responses were being
-// forwarded to the orchestrator as "User declined to answer").
 // isTerminalStatus returns true for statuses that should not be overwritten.
 func isTerminalStatus(status string) bool {
 	switch status {

@@ -36,11 +36,12 @@ func NewStore(timeout time.Duration) *Store {
 	}
 }
 
-// CreateRequest creates a new clarification request and returns its pending ID.
-// The request will be stored until a response is received or it times out.
-// If a pending entry for the same session with identical normalised questions
-// already exists, the existing pending ID is returned (deduplication).
-func (s *Store) CreateRequest(req *Request) string {
+// CreateRequest creates a new clarification request and returns its pending ID
+// plus a boolean indicating whether a new entry was created (true) or an
+// existing one was reused (false). If a pending entry for the same session
+// with identical normalised questions already exists, the existing pending ID
+// is returned and isNew is false.
+func (s *Store) CreateRequest(req *Request) (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -52,7 +53,7 @@ func (s *Store) CreateRequest(req *Request) string {
 	// normalised questions already exists, return the existing pending ID.
 	for _, existing := range s.pending {
 		if existing.Request.SessionID == req.SessionID && questionsEqual(existing.Request.Questions, req.Questions) {
-			return existing.Request.PendingID
+			return existing.Request.PendingID, false
 		}
 	}
 
@@ -68,7 +69,7 @@ func (s *Store) CreateRequest(req *Request) string {
 		CreatedAt: time.Now(),
 	}
 
-	return req.PendingID
+	return req.PendingID, true
 }
 
 // GetRequest returns a pending clarification request by ID.
