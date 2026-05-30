@@ -236,6 +236,34 @@ const (
 	kandevMCPServerName = "kandev"
 )
 
+// redactPassthroughArgs masks secret-bearing MCP override values before the
+// command is logged. Codex injects MCP servers via `-c mcp_servers.<name>.<key>=<json>`
+// argv (no file-based option), so env vars and HTTP headers — which commonly
+// carry tokens — would otherwise be written verbatim into backend logs. The
+// real (unredacted) args are still what's executed; only the log copy is masked.
+func redactPassthroughArgs(args []string) []string {
+	out := make([]string, len(args))
+	for i, a := range args {
+		out[i] = redactMCPArg(a)
+	}
+	return out
+}
+
+func redactMCPArg(arg string) string {
+	if !strings.HasPrefix(arg, "mcp_servers.") {
+		return arg
+	}
+	eq := strings.IndexByte(arg, '=')
+	if eq < 0 {
+		return arg
+	}
+	key := arg[:eq]
+	if strings.HasSuffix(key, ".env") || strings.HasSuffix(key, ".http_headers") {
+		return key + "=<redacted>"
+	}
+	return arg
+}
+
 func passthroughMCPConfigPort(execution *AgentExecution) int {
 	if execution == nil {
 		return 0
@@ -360,36 +388,74 @@ func (m *Manager) writePassthroughMCPFiles(execution *AgentExecution, files []mc
 		if f.Path == "" {
 			continue
 		}
-		if f.SkipIfExists {
-			if _, err := os.Stat(f.Path); err == nil {
-				m.logger.Info("passthrough MCP config already exists; leaving user file untouched",
-					zap.String("path", f.Path))
-				continue
-			} else if !os.IsNotExist(err) {
-				return fmt.Errorf("stat passthrough MCP config: %w", err)
-			}
+		ok, err := m.materializePassthroughFile(execution, f)
+		if err != nil {
+			return err
 		}
-		// Guard the workspace-relative write (Cursor) against a symlinked parent
-		// (e.g. a malicious repo shipping `.cursor` as a symlink) that would
-		// redirect the write outside the worktree. Temp files under the kandev
-		// data dir are exempt. Mirrors the worktree copyfiles containment check.
-		if escapes, err := workspacePathEscapes(execution.WorkspacePath, f.Path); err != nil {
-			return fmt.Errorf("validate passthrough MCP config path: %w", err)
-		} else if escapes {
-			m.logger.Warn("passthrough MCP config path escapes workspace via symlink; skipping",
-				zap.String("path", f.Path))
-			continue
+		if ok {
+			written = appendUnique(written, f.Path)
 		}
-		if err := os.MkdirAll(filepath.Dir(f.Path), 0o700); err != nil {
-			return fmt.Errorf("create passthrough MCP config dir: %w", err)
-		}
-		if err := os.WriteFile(f.Path, f.Content, 0o600); err != nil {
-			return fmt.Errorf("write passthrough MCP config: %w", err)
-		}
-		written = appendUnique(written, f.Path)
 	}
 	setPassthroughMCPFiles(execution, written)
 	return nil
+}
+
+// materializePassthroughFile writes one config file and reports whether it was
+// actually written (false = skipped). For SkipIfExists files (Cursor) it probes
+// with Lstat — so an existing leaf, including a symlink (even a dangling one a
+// malicious repo committed), is treated as present and never written through —
+// guards against a symlinked parent escaping the worktree, and writes with
+// O_EXCL so a symlink racing in after the probe can't redirect the write either.
+func (m *Manager) materializePassthroughFile(execution *AgentExecution, f mcpconfig.PassthroughConfigFile) (bool, error) {
+	if f.SkipIfExists {
+		if _, err := os.Lstat(f.Path); err == nil {
+			m.logger.Info("passthrough MCP config already exists; leaving user file untouched",
+				zap.String("path", f.Path))
+			return false, nil
+		} else if !os.IsNotExist(err) {
+			return false, fmt.Errorf("lstat passthrough MCP config: %w", err)
+		}
+	}
+	if escapes, err := workspacePathEscapes(execution.WorkspacePath, f.Path); err != nil {
+		return false, fmt.Errorf("validate passthrough MCP config path: %w", err)
+	} else if escapes {
+		m.logger.Warn("passthrough MCP config path escapes workspace via symlink; skipping",
+			zap.String("path", f.Path))
+		return false, nil
+	}
+	if err := os.MkdirAll(filepath.Dir(f.Path), 0o700); err != nil {
+		return false, fmt.Errorf("create passthrough MCP config dir: %w", err)
+	}
+	if f.SkipIfExists {
+		return m.writeFileNoFollow(f.Path, f.Content)
+	}
+	if err := os.WriteFile(f.Path, f.Content, 0o600); err != nil {
+		return false, fmt.Errorf("write passthrough MCP config: %w", err)
+	}
+	return true, nil
+}
+
+// writeFileNoFollow creates path with O_EXCL so it never follows or overwrites
+// an existing leaf (including a symlink). A concurrently-created file is treated
+// as "leave it alone" rather than an error.
+func (m *Manager) writeFileNoFollow(path string, content []byte) (bool, error) {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		if os.IsExist(err) {
+			m.logger.Info("passthrough MCP config appeared concurrently; leaving it untouched",
+				zap.String("path", path))
+			return false, nil
+		}
+		return false, fmt.Errorf("create passthrough MCP config: %w", err)
+	}
+	if _, werr := file.Write(content); werr != nil {
+		_ = file.Close()
+		return false, fmt.Errorf("write passthrough MCP config: %w", werr)
+	}
+	if cerr := file.Close(); cerr != nil {
+		return false, fmt.Errorf("close passthrough MCP config: %w", cerr)
+	}
+	return true, nil
 }
 
 // workspacePathEscapes reports whether path — assumed to live under
@@ -623,7 +689,7 @@ func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentE
 
 	m.logger.Info("passthrough command built",
 		zap.String("session_id", execution.SessionID),
-		zap.Strings("full_command", cmd.Args()))
+		zap.Strings("full_command", redactPassthroughArgs(cmd.Args())))
 
 	env := m.buildPassthroughEnv(ctx, execution, rt.RequiredEnv)
 
@@ -641,7 +707,7 @@ func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentE
 		zap.String("task_id", execution.TaskID),
 		zap.String("session_id", execution.SessionID),
 		zap.String("process_id", processInfo.ID),
-		zap.Strings("command", cmd.Args()))
+		zap.Strings("command", redactPassthroughArgs(cmd.Args())))
 
 	m.eventPublisher.PublishAgentctlEvent(ctx, events.AgentctlReady, execution, "")
 	m.startPassthroughShell(ctx, execution, "failed to start shell for passthrough session")
@@ -835,7 +901,7 @@ func (m *Manager) ResumePassthroughSession(ctx context.Context, sessionID string
 		zap.String("session_id", sessionID),
 		zap.String("execution_id", execution.ID),
 		zap.Bool("use_resume", useResume),
-		zap.Strings("command", cmd.Args()))
+		zap.Strings("command", redactPassthroughArgs(cmd.Args())))
 
 	env := m.buildPassthroughEnv(ctx, execution, resolved.rt.RequiredEnv)
 

@@ -640,6 +640,63 @@ func TestWorkspacePathEscapesViaSymlink(t *testing.T) {
 	}
 }
 
+func TestRedactPassthroughArgsRedactsCodexSecrets(t *testing.T) {
+	args := []string{
+		"npx", "-y", "@openai/codex",
+		"-c", `mcp_servers.gh.command="npx"`,
+		"-c", `mcp_servers.gh.env={"GITHUB_TOKEN":"s3cret"}`,
+		"-c", `mcp_servers.remote.http_headers={"Authorization":"Bearer tok"}`,
+		"-c", `mcp_servers.remote.url="http://x/mcp"`,
+		"--mcp-config", "/tmp/c.json",
+	}
+	joined := strings.Join(redactPassthroughArgs(args), " ")
+
+	if strings.Contains(joined, "s3cret") || strings.Contains(joined, "Bearer tok") {
+		t.Fatalf("secrets not redacted: %s", joined)
+	}
+	if !strings.Contains(joined, "mcp_servers.gh.env=<redacted>") ||
+		!strings.Contains(joined, "mcp_servers.remote.http_headers=<redacted>") {
+		t.Errorf("expected redaction markers: %s", joined)
+	}
+	// Non-secret tokens must be preserved verbatim.
+	for _, want := range []string{`mcp_servers.gh.command="npx"`, `mcp_servers.remote.url="http://x/mcp"`, "--mcp-config", "/tmp/c.json"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("redaction dropped non-secret %q: %s", want, joined)
+		}
+	}
+}
+
+func TestWritePassthroughMCPFilesSkipsDanglingLeafSymlink(t *testing.T) {
+	mgr := newTestManager()
+	ws := t.TempDir()
+	outside := t.TempDir()
+	outsideTarget := filepath.Join(outside, "target.json") // intentionally never created
+	cursorDir := filepath.Join(ws, ".cursor")
+	if err := os.MkdirAll(cursorDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	leaf := filepath.Join(cursorDir, "mcp.json")
+	if err := os.Symlink(outsideTarget, leaf); err != nil {
+		t.Fatal(err)
+	}
+
+	execution := &AgentExecution{WorkspacePath: ws, Metadata: map[string]interface{}{}}
+	if err := mgr.writePassthroughMCPFiles(execution, []mcpconfig.PassthroughConfigFile{
+		{Path: leaf, Content: []byte(`{"secret":"x"}`), SkipIfExists: true},
+	}); err != nil {
+		t.Fatalf("writePassthroughMCPFiles: %v", err)
+	}
+
+	// The write must NOT have followed the dangling symlink to create the outside file.
+	if _, err := os.Stat(outsideTarget); !os.IsNotExist(err) {
+		t.Fatalf("write followed dangling symlink to outside target (err=%v)", err)
+	}
+	// A skipped symlink must not be tracked for cleanup.
+	if files := getPassthroughMCPFiles(execution); len(files) != 0 {
+		t.Fatalf("skipped symlink leaf must not be tracked, got %v", files)
+	}
+}
+
 func TestResumePassthroughSessionWithoutRunnerDoesNotWriteMCPConfig(t *testing.T) {
 	mgr, execution, _ := newClaudePassthroughMCPTestManager(t)
 	mgr.executorRegistry = nil
