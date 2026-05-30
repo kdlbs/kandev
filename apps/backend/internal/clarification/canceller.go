@@ -77,33 +77,32 @@ func (c *Canceller) markMessagesExpired(ctx context.Context, msgs []*taskmodels.
 // forwarded to the orchestrator as "User declined to answer").
 func (c *Canceller) CancelSessionAndNotify(ctx context.Context, sessionID string) int {
 	pendingIDs := c.store.CancelSession(sessionID)
-	if len(pendingIDs) > 0 {
-		for _, id := range pendingIDs {
-			msgs, err := c.repo.FindMessagesByPendingID(ctx, id)
-			if err != nil || len(msgs) == 0 {
-				c.logger.Debug("messages not found for cancelled clarification",
-					zap.String("pending_id", id),
-					zap.Error(err))
-				continue
-			}
-			c.markMessagesExpired(ctx, msgs, id)
+
+	handled := make(map[string]bool, len(pendingIDs))
+	for _, id := range pendingIDs {
+		msgs, err := c.repo.FindMessagesByPendingID(ctx, id)
+		if err != nil || len(msgs) == 0 {
+			c.logger.Debug("messages not found for cancelled clarification",
+				zap.String("pending_id", id),
+				zap.Error(err))
+			continue
 		}
+		c.markMessagesExpired(ctx, msgs, id)
+		handled[id] = true
+	}
+
+	// Defense-in-depth: also find any still-pending clarification messages in
+	// the DB whose in-memory store entry was already removed (e.g. by a racing
+	// timeout path). Group by pending_id and mark each bundle expired.
+	msgs, err := c.repo.FindPendingClarificationMessagesBySessionID(ctx, sessionID)
+	if err != nil || len(msgs) == 0 {
 		return len(pendingIDs)
 	}
 
-	// Defense-in-depth: the in-memory store was already drained by a racing
-	// cancel path (e.g. the MCP-timeout cleanup). Find still-pending
-	// clarification messages in the DB and mark them expired directly.
-	msgs, err := c.repo.FindPendingClarificationMessagesBySessionID(ctx, sessionID)
-	if err != nil || len(msgs) == 0 {
-		return 0
-	}
-
-	// Group by pending_id so we return a bundle count.
 	byPendingID := make(map[string][]*taskmodels.Message)
 	for _, msg := range msgs {
 		pid := stringFromMetadata(msg.Metadata, "pending_id")
-		if pid == "" {
+		if pid == "" || handled[pid] {
 			continue
 		}
 		byPendingID[pid] = append(byPendingID[pid], msg)
@@ -111,7 +110,7 @@ func (c *Canceller) CancelSessionAndNotify(ctx context.Context, sessionID string
 	for pid, bundle := range byPendingID {
 		c.markMessagesExpired(ctx, bundle, pid)
 	}
-	return len(byPendingID)
+	return len(pendingIDs) + len(byPendingID)
 }
 
 // publishMessageUpdated publishes a message.updated event to the event bus.

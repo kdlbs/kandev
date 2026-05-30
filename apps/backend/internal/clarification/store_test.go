@@ -372,16 +372,28 @@ func TestCreateRequest_NoDedup_DifferentQuestions(t *testing.T) {
 	}
 }
 
+// testStore wraps Store so WaitForResponse can signal that it has passed the
+// initial lookup and is about to block. This eliminates the race where
+// Respond fires before a late goroutine even enters WaitForResponse.
+type testStore struct {
+	*Store
+	entered chan string
+}
+
+func (ts *testStore) WaitForResponse(ctx context.Context, id string) (*Response, error) {
+	ts.entered <- id
+	return ts.Store.WaitForResponse(ctx, id)
+}
+
 func TestWaitForResponse_Broadcast_MultipleWaiters(t *testing.T) {
 	s := NewStore(time.Minute)
+	ts := &testStore{Store: s, entered: make(chan string, 2)}
 	id, _ := s.CreateRequest(&Request{SessionID: "s1", Questions: []Question{{Prompt: "test?", Options: []Option{{ID: "o1", Label: "A"}}}}})
 
-	started := make(chan struct{}, 2)
 	done := make(chan *Response, 2)
 	for i := 0; i < 2; i++ {
 		go func() {
-			started <- struct{}{}
-			resp, err := s.WaitForResponse(context.Background(), id)
+			resp, err := ts.WaitForResponse(context.Background(), id)
 			if err != nil {
 				done <- nil
 				return
@@ -389,8 +401,8 @@ func TestWaitForResponse_Broadcast_MultipleWaiters(t *testing.T) {
 			done <- resp
 		}()
 	}
-	<-started
-	<-started
+	<-ts.entered
+	<-ts.entered
 
 	if err := s.Respond(id, &Response{Answers: []Answer{{CustomText: "hello"}}}); err != nil {
 		t.Fatalf("unexpected respond error: %v", err)

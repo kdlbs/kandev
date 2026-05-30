@@ -818,14 +818,17 @@ func TestHandleAskUserQuestion_Dedup_CreatesOnePendingBundle(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			msg := makeWSMessage(t, ws.ActionMCPAskUserQuestion, payload)
-			_, _ = h.handleAskUserQuestion(ctx, msg)
-			// We can't easily read the pending ID from the handler, but we can
-			// inspect the store after the fact.
+			if _, err := h.handleAskUserQuestion(ctx, msg); err != nil {
+				t.Errorf("handleAskUserQuestion returned unexpected error: %v", err)
+			}
 		}()
 	}
 
-	// Give the goroutines time to enter WaitForResponse, then cancel.
-	time.Sleep(50 * time.Millisecond)
+	// Wait until the single deduped pending bundle is visible in the store
+	// (confirming both goroutines have passed the CreateRequest gate).
+	require.Eventually(t, func() bool {
+		return len(store.ListPending()) == 1
+	}, time.Second, 5*time.Millisecond)
 	store.CancelSession(sess.ID)
 	wg.Wait()
 
