@@ -113,13 +113,15 @@ func (s *Store) WaitForResponse(ctx context.Context, pendingID string) (*Respons
 		s.mu.Unlock()
 		return nil, fmt.Errorf("clarification cancelled (agent moved on): %s", pendingID)
 	case <-timeoutCtx.Done():
-		// Clean up on timeout
+		if ctx.Err() != nil {
+			// Parent context cancelled — do not delete the shared entry
+			// because another waiter may still be blocked on it.
+			return nil, ctx.Err()
+		}
+		// Store-level timeout — safe to clean up.
 		s.mu.Lock()
 		delete(s.pending, pendingID)
 		s.mu.Unlock()
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
 		return nil, fmt.Errorf("clarification request timed out: %s", pendingID)
 	}
 }
