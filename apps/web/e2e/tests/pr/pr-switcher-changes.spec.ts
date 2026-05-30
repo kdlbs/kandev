@@ -190,6 +190,12 @@ test.describe("PR switcher changes panel", () => {
 
     // --- Verify Task A PR data ---
     await expect(session.prFilesSection()).toBeVisible({ timeout: 15_000 });
+    // Review mode (PR, no local changes): PR Changes is the first visible section,
+    // so it is expanded by default — the panel never opens looking empty.
+    await expect(testPage.getByTestId("pr-changes-section-collapse-toggle")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
     await session.expandPRChangesSection();
     await session.expandCommitsSection();
     await expect(session.prFilesSection().getByText("auth.go")).toBeVisible();

@@ -136,6 +136,8 @@ type CommitsSectionProps = {
   perRepoStatus?: Array<{ repository_name: string; ahead: number }>;
   /** Existing PR URL keyed by repository_name; "" key for single-repo. */
   prByRepo?: Record<string, string | undefined>;
+  /** Initial collapse state. Defaults to collapsed; the panel expands it when it is the first visible section. */
+  defaultCollapsed?: boolean;
 };
 
 // Commits grouping shares the helper above with files — see @/lib/group-by-repo.
@@ -153,6 +155,7 @@ export function CommitsSection({
   repoBaseBranch,
   perRepoStatus,
   prByRepo,
+  defaultCollapsed = true,
 }: CommitsSectionProps) {
   const groups = groupByRepositoryName(commits, (c) => c.repository_name);
   const aheadByRepo = new Map((perRepoStatus ?? []).map((s) => [s.repository_name, s.ahead]));
@@ -179,7 +182,7 @@ export function CommitsSection({
       label="Commits"
       count={commits.length}
       isLast={isLast}
-      defaultCollapsed
+      defaultCollapsed={defaultCollapsed}
       data-testid="commits-section"
       action={sectionAction}
     >
@@ -529,6 +532,8 @@ type PRFilesSectionProps = {
   onOpenDiff: (path: string, options?: OpenDiffOptions) => void;
   /** Maps a repository_name to a human-readable label (used for the per-repo header). */
   repoDisplayName?: (repositoryName: string) => string | undefined;
+  /** Initial collapse state. Defaults to collapsed; the panel expands it when it is the first visible section. */
+  defaultCollapsed?: boolean;
 };
 
 export function PRFilesSection({
@@ -536,6 +541,7 @@ export function PRFilesSection({
   isLast,
   onOpenDiff,
   repoDisplayName,
+  defaultCollapsed = true,
 }: PRFilesSectionProps) {
   return (
     <TimelineSection
@@ -543,7 +549,7 @@ export function PRFilesSection({
       label="PR Changes"
       count={files.length}
       isLast={isLast}
-      defaultCollapsed
+      defaultCollapsed={defaultCollapsed}
       data-testid="pr-changes-section"
     >
       {files.length > 0 && (

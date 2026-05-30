@@ -138,6 +138,32 @@ export function filterUnpushedCommits<T extends { commit_sha: string }>(
   );
 }
 
+/** Which timeline section, if any, renders first (topmost) in the Changes panel. */
+export type FirstVisibleSection = "pr" | "unstaged" | "staged" | "commits" | null;
+
+/**
+ * Computes the first (topmost) visible section so the panel can auto-expand it,
+ * mirroring the render precedence in `ChangesPanelTimeline`:
+ *   PR (review mode, no local changes) → Unstaged → Staged → Commits.
+ *
+ * The "review mode" PR section only sits at the top when there are no local
+ * working-tree changes; with local changes the PR section moves below Staged and
+ * is therefore never first. Returns null when nothing is shown.
+ */
+export function firstVisibleSection(flags: {
+  hasPRFiles: boolean;
+  hasUnstaged: boolean;
+  hasStaged: boolean;
+  showCommitsList: boolean;
+}): FirstVisibleSection {
+  const { hasPRFiles, hasUnstaged, hasStaged, showCommitsList } = flags;
+  if (hasPRFiles && !hasUnstaged && !hasStaged) return "pr";
+  if (hasUnstaged) return "unstaged";
+  if (hasStaged) return "staged";
+  if (showCommitsList) return "commits";
+  return null;
+}
+
 type MergedCommit = {
   commit_sha: string;
   commit_message: string;
