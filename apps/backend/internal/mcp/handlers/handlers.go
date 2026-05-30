@@ -782,7 +782,7 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 	if err != nil {
 		if errors.Is(err, taskrepo.ErrNoPrimarySession) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound,
-				"task has no active session — use create_task_kandev to start one", nil)
+				"target task exists but has no active session", nil)
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
 			"failed to get session for task: "+err.Error(), nil)
