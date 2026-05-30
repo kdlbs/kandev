@@ -760,9 +760,18 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "sender task not found", nil)
 	}
 
+	// Verify the target task exists before looking up its session, so a bad
+	// task_id (e.g. a truncated UUID prefix) reports "task not found" instead
+	// of the misleading "no primary session" error from the session lookup.
+	targetTask, err := h.taskSvc.GetTask(ctx, req.TaskID)
+	if err != nil || targetTask == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound,
+			"target task not found: "+req.TaskID+" (pass the full task UUID, not a truncated prefix)", nil)
+	}
+
 	session, err := h.taskSvc.GetPrimarySession(ctx, req.TaskID)
 	if err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task not found or has no session: "+err.Error(), nil)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task exists but has no session: "+err.Error(), nil)
 	}
 	if session == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task has no active session — use create_task_kandev to start one", nil)

@@ -393,6 +393,38 @@ func TestHandleMessageTask_NoPrimarySession_Rejects(t *testing.T) {
 	resp, err := h.handleMessageTask(ctx, msg)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeNotFound)
+
+	// The task exists, so the error must come from the session lookup — not the
+	// task-existence check. This keeps the two failure modes distinguishable.
+	assert.Contains(t, string(resp.Payload), "task exists but has no session")
+}
+
+func TestHandleMessageTask_NonexistentTask_ReportsTaskNotFound(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
+	// Only the sender exists; the target task_id below was never created (mimics
+	// passing a truncated UUID prefix).
+	sender, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		WorkflowID:  "wf-1",
+		Title:       "Sender task",
+	})
+	require.NoError(t, err)
+
+	h, _ := newMessageTaskHandler(t, svc)
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask,
+		senderPayload("00000000-0000-0000-0000-000000000000", "hello", sender.ID))
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeNotFound)
+
+	// Must surface the task-not-found error, NOT the misleading no-session error.
+	payload := string(resp.Payload)
+	assert.Contains(t, payload, "target task not found")
+	assert.NotContains(t, payload, "no session")
 }
 
 // --- sender attribution validation ---
