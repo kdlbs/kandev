@@ -200,6 +200,21 @@ func TestWsDrainQueue(t *testing.T) {
 		assert.Equal(t, true, payload["drained"])
 	})
 
+	t.Run("reports no queued message", func(t *testing.T) {
+		drainer := &mockQueueDrainer{drained: false}
+		handlers, _ := setupQueueHandlersWithDrainer(t, drainer)
+
+		response, err := handlers.wsDrainQueue(context.Background(),
+			createTestMessage(t, ws.ActionMessageQueueDrain, map[string]interface{}{"session_id": "s"}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeResponse, response.Type)
+		assert.Equal(t, 1, drainer.calls)
+
+		var payload map[string]interface{}
+		require.NoError(t, json.Unmarshal(response.Payload, &payload))
+		assert.Equal(t, false, payload["drained"])
+	})
+
 	t.Run("rejects missing session_id", func(t *testing.T) {
 		handlers, _ := setupQueueHandlersWithDrainer(t, &mockQueueDrainer{})
 		response, err := handlers.wsDrainQueue(context.Background(),
@@ -234,6 +249,7 @@ func TestWsDrainQueue(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, ws.MessageTypeError, response.Type)
 		assert.Equal(t, queueErrorCodeNotPromptable, parseError(t, response).Code)
+		assert.Equal(t, "Session is not ready for input", parseError(t, response).Message)
 	})
 
 	t.Run("reports internal drain errors", func(t *testing.T) {

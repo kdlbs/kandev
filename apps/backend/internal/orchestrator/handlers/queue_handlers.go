@@ -177,7 +177,7 @@ func (h *QueueHandlers) wsDrainQueue(ctx context.Context, msg *ws.Message) (*ws.
 		case errors.Is(err, orchestrator.ErrAgentPromptInProgress):
 			return ws.NewError(msg.ID, msg.Action, queueErrorCodeSessionBusy, "Session is busy", nil)
 		case errors.Is(err, orchestrator.ErrSessionNotPromptable):
-			return ws.NewError(msg.ID, msg.Action, queueErrorCodeNotPromptable, err.Error(), nil)
+			return ws.NewError(msg.ID, msg.Action, queueErrorCodeNotPromptable, "Session is not ready for input", nil)
 		default:
 			h.logger.Error("failed to drain queued message", zap.String(fieldSessionID, req.SessionID), zap.Error(err))
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to drain queued message", nil)
