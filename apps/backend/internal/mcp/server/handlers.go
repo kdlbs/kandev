@@ -25,6 +25,7 @@ const (
 	questionIDFieldKey = "question_id"
 	answeredFieldKey   = "answered"
 	rejectedFieldKey   = "rejected"
+	documentArg        = "document"
 )
 
 func (s *Server) listWorkspacesHandler() server.ToolHandlerFunc {

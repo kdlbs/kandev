@@ -169,11 +169,12 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 		d.RegisterFunc(ws.ActionMCPCreateWorkflow, h.handleCreateWorkflow)
 		d.RegisterFunc(ws.ActionMCPUpdateWorkflow, h.handleUpdateWorkflow)
 		d.RegisterFunc(ws.ActionMCPDeleteWorkflow, h.handleDeleteWorkflow)
+		d.RegisterFunc(ws.ActionMCPImportWorkflow, h.handleImportWorkflow)
 		d.RegisterFunc(ws.ActionMCPCreateWorkflowStep, h.handleCreateWorkflowStep)
 		d.RegisterFunc(ws.ActionMCPUpdateWorkflowStep, h.handleUpdateWorkflowStep)
 		d.RegisterFunc(ws.ActionMCPDeleteWorkflowStep, h.handleDeleteWorkflowStep)
 		d.RegisterFunc(ws.ActionMCPReorderWorkflowStep, h.handleReorderWorkflowSteps)
-		count += 7
+		count += 8
 	}
 	if h.agentSettingsCtrl != nil {
 		d.RegisterFunc(ws.ActionMCPListAgents, h.handleListAgents)

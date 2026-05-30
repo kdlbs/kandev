@@ -107,6 +107,7 @@ func TestServerModeConfig_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, tools, "create_workflow_kandev")
 	assert.Contains(t, tools, "update_workflow_kandev")
 	assert.Contains(t, tools, "delete_workflow_kandev")
+	assert.Contains(t, tools, "import_workflow_kandev")
 	assert.Contains(t, tools, "list_workflow_steps_kandev")
 	assert.Contains(t, tools, "create_workflow_step_kandev")
 	assert.Contains(t, tools, "update_workflow_step_kandev")
@@ -216,8 +217,8 @@ func TestServerModeConfig_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeConfig)
 	tools := getRegisteredToolNames(s)
-	// 11 workflow (incl. list_repositories) + 4 agent + 4 mcp + 5 executor + 6 task + 1 interaction = 31
-	assert.Equal(t, 31, len(tools))
+	// 12 workflow (incl. list_repositories + import_workflow) + 4 agent + 4 mcp + 5 executor + 6 task + 1 interaction = 32
+	assert.Equal(t, 32, len(tools))
 }
 
 func TestServerModeConfig_ToolDescriptions(t *testing.T) {
@@ -360,8 +361,8 @@ func TestServerModeExternal_ToolCount(t *testing.T) {
 
 	s := New(backend, "", "", 0, log, "", true, ModeExternal)
 	tools := getRegisteredToolNames(s)
-	// 11 workflow (incl. list_repositories) + 4 agent + 4 mcp + 5 executor + 6 task + 1 create_task = 31
-	assert.Equal(t, 31, len(tools))
+	// 12 workflow (incl. list_repositories + import_workflow) + 4 agent + 4 mcp + 5 executor + 6 task + 1 create_task = 32
+	assert.Equal(t, 32, len(tools))
 }
 
 func TestNewExternal_Constructs(t *testing.T) {

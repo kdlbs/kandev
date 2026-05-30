@@ -340,6 +340,7 @@ const (
 	ActionMCPCreateWorkflow = "mcp.create_workflow"
 	ActionMCPUpdateWorkflow = "mcp.update_workflow"
 	ActionMCPDeleteWorkflow = "mcp.delete_workflow"
+	ActionMCPImportWorkflow = "mcp.import_workflow"
 
 	ActionMCPCreateWorkflowStep  = "mcp.create_workflow_step"
 	ActionMCPUpdateWorkflowStep  = "mcp.update_workflow_step"
