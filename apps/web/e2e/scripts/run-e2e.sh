@@ -72,15 +72,19 @@ clean_artifacts() {
 
 # Pre-create the standalone symlinks host-side so in-container global-setup
 # finds them and skips creating them (which would make them root-owned).
-# Use RELATIVE symlinks (ln -sr) so they resolve both on the host and at the
+# Use RELATIVE symlinks so they resolve both on the host and at the
 # container's /work mount — an absolute host path is broken in-container, which
 # makes global-setup's existsSync() return false and then EEXIST on recreate.
+# Use python3 to compute the relative path portably (ln -r is GNU-only).
 prelink_standalone() {
   local sa="$WEB_DIR/.next/standalone/web"
   [[ -d "$sa" ]] || return 0
   mkdir -p "$sa/.next"
-  [[ -e "$sa/.next/static" ]] || ln -srn "$WEB_DIR/.next/static" "$sa/.next/static" 2>/dev/null || true
-  [[ -e "$sa/public" ]]       || ln -srn "$WEB_DIR/public"       "$sa/public"       2>/dev/null || true
+  local rel_static rel_public
+  rel_static=$(python3 -c "import os,sys; print(os.path.relpath(sys.argv[1],sys.argv[2]))" "$WEB_DIR/.next/static" "$sa/.next")
+  rel_public=$(python3 -c "import os,sys; print(os.path.relpath(sys.argv[1],sys.argv[2]))" "$WEB_DIR/public" "$sa")
+  [[ -e "$sa/.next/static" ]] || ln -sn "$rel_static" "$sa/.next/static" 2>/dev/null || true
+  [[ -e "$sa/public" ]]       || ln -sn "$rel_public" "$sa/public"       2>/dev/null || true
 }
 
 build_fe() {
@@ -105,10 +109,11 @@ build_backend_in_build_image() {
   log "building backend in $BUILD_IMAGE (glibc-matched to runtime image)"
   docker image inspect "$BUILD_IMAGE" >/dev/null 2>&1 \
     || die "host-built backend is incompatible with the runtime image's glibc and $BUILD_IMAGE isn't available. Pull it (docker pull $BUILD_IMAGE) or run with --host."
+  local uid_gid; uid_gid="$(id -u):$(id -g)"
   docker run --rm -v "$REPO_ROOT":/work -w /work/apps/backend \
     -v kandev-gocache:/root/.cache/go-build -v kandev-gomod:/go/pkg/mod \
     "$BUILD_IMAGE" \
-    bash -lc 'git config --global --add safe.directory /work 2>/dev/null; make build VERSION=dev-docker' \
+    bash -lc "git config --global --add safe.directory /work 2>/dev/null; make build VERSION=dev-docker && chown -R $uid_gid /work/apps/backend/bin" \
     >/dev/null || die "in-container backend build failed"
 }
 
@@ -141,10 +146,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --docker) MODE=docker ;;
     --host) MODE=host ;;
-    --shards) SHARDS="$2"; shift ;;
+    --shards) [[ "${2:-}" =~ ^[1-9][0-9]*$ ]] || die "--shards must be a positive integer (got '${2:-}')"; SHARDS="$2"; shift ;;
     --no-build) DO_BUILD=0 ;;
     --no-strict) STRICT=0 ;;
-    --project) PROJECT="$2"; shift ;;
+    --project) [[ "${2:-}" =~ ^[a-zA-Z0-9_-]+$ ]] || die "invalid --project name: '${2:-}'"; PROJECT="$2"; shift ;;
     --) shift; PW_ARGS+=("$@"); break ;;
     *) PW_ARGS+=("$1") ;;
   esac
@@ -206,7 +211,7 @@ run_docker() {
 
   local strict_flag=()
   [[ "$STRICT" == 1 ]] && strict_flag=(-e KANDEV_E2E_WS_ASSERT=1)
-  local pw="git config --global --add safe.directory /work 2>/dev/null; cd /work/apps/web && pnpm exec playwright test --config e2e/playwright.config.ts --project=$PROJECT"
+  local pw="git config --global --add safe.directory /work 2>/dev/null; cd /work/apps/web && pnpm exec playwright test --config e2e/playwright.config.ts --project=\"$PROJECT\""
 
   run_one() {  # $1=shard index (or 0 for unsharded)
     local i="$1" shardflag="" out="/tmp/pw-out"
