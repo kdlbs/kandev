@@ -136,7 +136,28 @@ func TestClient_NormalizesCodexAndOpencodeForms(t *testing.T) {
 func TestClient_FirstBootMissesGracefully(t *testing.T) {
 	dir := t.TempDir()
 	cachePath := filepath.Join(dir, "models-dev.json")
-	c, _ := newTestClient(t, cachePath)
+
+	// A cold-boot lookup schedules a background refresh against the
+	// configured URL. Block that refresh at the server so it can't
+	// populate the cache before the lookup reads it — otherwise the
+	// "miss" we're asserting races a fast background fetch and flakes
+	// into a hit. The handler unblocks at cleanup so nothing leaks.
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		<-release
+		_, _ = w.Write([]byte(sampleDataset))
+	}))
+	t.Cleanup(func() {
+		close(release)
+		srv.Close()
+	})
+	c := modelsdev.New(modelsdev.Config{
+		CachePath:  cachePath,
+		URL:        srv.URL,
+		TTL:        time.Hour,
+		HTTPClient: srv.Client(),
+	}, logger.Default())
+
 	// No Refresh — simulating cold boot before any HTTP fetch.
 	if _, ok := c.LookupForModel(context.Background(), "claude-opus-4-7"); ok {
 		t.Error("expected miss on cold-boot lookup")
