@@ -207,12 +207,19 @@ func acpDebugTailEnabled() bool {
 
 // handleACPRingTail returns the most recent normalized ACP events for a
 // session from the in-memory ring buffer. Query param n caps the count
-// (default 200).
+// (default 200, max 1000).
 func (s *Server) handleACPRingTail(c *gin.Context) {
+	const (
+		defaultACPRingTailCount = 200
+		maxACPRingTailCount     = 1000
+	)
 	session := c.Param("session")
-	n := 200
+	n := defaultACPRingTailCount
+	// Bound the untrusted n at the source so it can't drive an oversized
+	// allocation downstream (the ring tail clamps to its size too, but
+	// keeping the limit explicit here is the defensive default).
 	if v := c.Query("n"); v != "" {
-		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 && parsed <= maxACPRingTailCount {
 			n = parsed
 		}
 	}
