@@ -35,7 +35,7 @@ func newSessionTestLogger() *logger.Logger {
 func newTestStopCh(t *testing.T) chan struct{} {
 	t.Helper()
 	stopCh := make(chan struct{})
-	t.Cleanup(func() { closeStopCh(stopCh) })
+	t.Cleanup(func() { closeStopChOnce(stopCh) })
 	return stopCh
 }
 

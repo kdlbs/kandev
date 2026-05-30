@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -177,18 +178,17 @@ func newTestRegistry() *registry.Registry {
 	return reg
 }
 
-func closeStopCh(stopCh chan struct{}) {
-	select {
-	case <-stopCh:
-	default:
-		close(stopCh)
-	}
+var testStopChClosers sync.Map
+
+func closeStopChOnce(stopCh chan struct{}) {
+	closer, _ := testStopChClosers.LoadOrStore(stopCh, &sync.Once{})
+	closer.(*sync.Once).Do(func() { close(stopCh) })
 }
 
 func cleanupManagerStopCh(t *testing.T, mgr *Manager) {
 	t.Helper()
 	t.Cleanup(func() {
-		closeStopCh(mgr.stopCh)
+		closeStopChOnce(mgr.stopCh)
 		if mgr.streamManager != nil {
 			mgr.streamManager.Wait()
 		}
@@ -198,7 +198,7 @@ func cleanupManagerStopCh(t *testing.T, mgr *Manager) {
 func cleanupStreamManager(t *testing.T, stopCh chan struct{}, streamMgr *StreamManager) {
 	t.Helper()
 	t.Cleanup(func() {
-		closeStopCh(stopCh)
+		closeStopChOnce(stopCh)
 		streamMgr.Wait()
 	})
 }
