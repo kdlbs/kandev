@@ -186,7 +186,6 @@ func TestPATClient_FindPRByBranch_UsesGraphQLHeadRefName(t *testing.T) {
 					"pullRequests": {
 						"nodes": [{
 							"number": 12,
-							"headRepositoryOwner": {"login":"fork-owner"},
 							"state": "OPEN", "title": "fork PR", "url": "https://x/12",
 							"isDraft": false, "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
 							"headRefName": "feature", "baseRefName": "main", "headRefOid": "abc123",
