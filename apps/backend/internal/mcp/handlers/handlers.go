@@ -369,11 +369,6 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		BaseBranch             string               `json:"base_branch"`               // top-level fallback applied to every resolved repo only when no per-repo entries are supplied; explicit per-repo BaseBranch is authoritative when Repositories is set
 		BlockedBy              []string             `json:"blocked_by"`                // task IDs that must complete before this task
 		AssigneeAgentProfileID string               `json:"assignee_agent_profile_id"` // agent instance to assign the task to
-		// Office task-handoffs phase 4 — workspace policy.
-		WorkspaceMode         string `json:"workspace_mode"`
-		WorkspaceGroupID      string `json:"workspace_group_id"`
-		DefaultChildWorkspace string `json:"default_child_workspace"`
-		DefaultChildOrdering  string `json:"default_child_ordering"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -437,16 +432,6 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_id is required", nil)
 	}
 
-	// Office task-handoffs phase 4: resolve effective workspace policy and
-	// build the metadata block that gets persisted on the new task.
-	wsPolicy, policyErr := h.resolveWorkspacePolicy(ctx, req.ParentID,
-		req.WorkspaceMode, req.WorkspaceGroupID,
-		req.DefaultChildWorkspace, req.DefaultChildOrdering)
-	if policyErr != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, policyErr.Error(), nil)
-	}
-	metadata := wsPolicy.MetadataBlock()
-
 	task, err := h.taskSvc.CreateTask(ctx, &service.CreateTaskRequest{
 		ParentID:               req.ParentID,
 		WorkspaceID:            req.WorkspaceID,
@@ -457,30 +442,10 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Repositories:           repos,
 		BlockedBy:              req.BlockedBy,
 		AssigneeAgentProfileID: req.AssigneeAgentProfileID,
-		Metadata:               metadata,
 	})
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create task", nil)
-	}
-
-	// Office task-handoffs phase 4: attach workspace-group membership and
-	// (if parent says sequential) add a blocker edge to the previous
-	// non-archived sibling. A failed attach leaves the task in a broken
-	// state — the metadata claims it belongs to a group it never joined.
-	// Compensate by deleting the just-created task so the caller gets a
-	// clean error and can retry (post-review #3).
-	if h.handoffSvc != nil && wsPolicy.NeedsAttachment() {
-		if err := h.handoffSvc.AttachWorkspacePolicy(ctx, task.ID, req.ParentID, wsPolicy); err != nil {
-			h.logger.Error("attach workspace policy; rolling back task creation",
-				zap.String("task_id", task.ID), zap.Error(err))
-			if delErr := h.taskSvc.DeleteTask(ctx, task.ID); delErr != nil {
-				h.logger.Error("rollback delete failed; task left in inconsistent state",
-					zap.String("task_id", task.ID), zap.Error(delErr))
-			}
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
-				"failed to attach workspace policy: "+err.Error(), nil)
-		}
 	}
 
 	// Auto-start agent session asynchronously only if requested

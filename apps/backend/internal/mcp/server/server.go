@@ -509,11 +509,6 @@ IMPORTANT:
 			mcp.WithString("local_path", mcp.Description("Local repository folder path (e.g. '/Users/me/projects/myrepo'). Will create/find the repository automatically. Preferred for local worktree flow. For subtasks: supply only when the subtask should target a different repo than the parent.")),
 			mcp.WithString("repository_url", mcp.Description("GitHub repository URL (e.g. 'https://github.com/owner/repo'). The repository will be cloned automatically on first use. For subtasks: supply only when the subtask should target a different repo than the parent.")),
 			mcp.WithString("base_branch", mcp.Description("Base branch for the repository (e.g. 'main'). Optional. Defaults: same-repo subtasks inherit the parent's base_branch; cross-repo subtasks and top-level tasks fall back to the repository's default_branch (visible via list_repositories_kandev).")),
-			// Office task-handoffs phase 4: workspace policy.
-			mcp.WithString("workspace_mode", mcp.Description("Workspace mode for this task: 'inherit_parent' (reuse the parent task's materialized workspace), 'new_workspace' (default — create a fresh workspace), or 'shared_group' (join an explicit shared workspace group via workspace_group_id).")),
-			mcp.WithString("workspace_group_id", mcp.Description("Required when workspace_mode='shared_group'. The ID of an existing task workspace group to join.")),
-			mcp.WithString("default_child_workspace", mcp.Description("Parent-only: default workspace mode applied to children created later. 'inherit_parent' or 'new_workspace'.")),
-			mcp.WithString("default_child_ordering", mcp.Description("Parent-only: ordering policy for children created later. 'sequential' creates dependency edges between siblings; 'parallel' lets them run concurrently.")),
 		),
 		s.wrapHandler("create_task_kandev", s.createTaskHandler()),
 	)

@@ -99,6 +99,10 @@ func taskCreate(args []string) int {
 	assignee := fs.String("assignee", "", "Assignee agent ID")
 	priority := fs.String("priority", "", "Priority value")
 	blockedBy := fs.String("blocked-by", "", "Comma-separated task IDs that must complete before this task")
+	workspaceMode := fs.String("workspace-mode", "", "Workspace mode for this task: inherit_parent, new_workspace, or shared_group")
+	workspaceGroupID := fs.String("workspace-group-id", "", "Workspace group ID to join (required when --workspace-mode=shared_group)")
+	defaultChildWorkspace := fs.String("default-child-workspace", "", "Parent-only: default workspace mode for children (inherit_parent or new_workspace)")
+	defaultChildOrdering := fs.String("default-child-ordering", "", "Parent-only: ordering for children — 'sequential' adds dependency edges between siblings, 'parallel' lets them run concurrently")
 	if err := fs.Parse(args); err != nil {
 		cliError("parse flags: %v", err)
 		return 1
@@ -131,6 +135,20 @@ func taskCreate(args []string) int {
 			ids[i] = strings.TrimSpace(id)
 		}
 		payload["blocked_by"] = ids
+	}
+	// Workspace-policy fields (office task-handoffs). Empty values fall
+	// through so the backend resolves defaults / parent inheritance.
+	if *workspaceMode != "" {
+		payload["workspace_mode"] = *workspaceMode
+	}
+	if *workspaceGroupID != "" {
+		payload["workspace_group_id"] = *workspaceGroupID
+	}
+	if *defaultChildWorkspace != "" {
+		payload["default_child_workspace"] = *defaultChildWorkspace
+	}
+	if *defaultChildOrdering != "" {
+		payload["default_child_ordering"] = *defaultChildOrdering
 	}
 
 	body, status, err := client.do(http.MethodPost, "/api/v1/tasks", payload)
