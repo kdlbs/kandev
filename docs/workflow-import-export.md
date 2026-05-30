@@ -65,7 +65,7 @@ Each entry under `workflows:`:
   description: Optional human description.
   agent_profile:        # optional, workflow-level default agent
     agent_name: Claude Code
-    model: claude-opus-4-8
+    model: claude-opus-4-7
     mode: default
   steps:
     - # StepPortable …
@@ -99,7 +99,7 @@ Each entry under `steps:`:
   auto_archive_after_hours: 24
   agent_profile:           # optional, step-level agent override
     agent_name: Claude Code
-    model: claude-opus-4-8
+    model: claude-opus-4-7
     mode: default
   events:
     # triggers — see "Triggers" below
@@ -137,7 +137,7 @@ Each entry under `steps:`:
 ```yaml
 agent_profile:
   agent_name: Claude Code   # required
-  model: claude-opus-4-8    # optional, omitted when empty
+  model: claude-opus-4-7    # optional, omitted when empty
   mode: default             # optional, omitted when empty
 ```
 
@@ -166,7 +166,7 @@ import/export:
 
 | Trigger | Allowed action `type`s | `config` |
 |---------|------------------------|----------|
-| `on_enter` | `enable_plan_mode`, `auto_start_agent`, `reset_agent_context`, `clear_decisions`, `queue_run`, `queue_run_for_each_participant` | depends on action (see below) |
+| `on_enter` | `enable_plan_mode`, `auto_start_agent`, `reset_agent_context`, `clear_decisions`, `queue_run`, `queue_run_for_each_participant` | first four take no config; `queue_run` / `queue_run_for_each_participant` use the same config keys as the office triggers (see [Office triggers](#office--phase-2-triggers-intended-format--see-caveat)) |
 | `on_turn_start` | `move_to_next`, `move_to_previous`, `move_to_step` | `move_to_step` needs `step_position` |
 | `on_turn_complete` | `move_to_next`, `move_to_previous`, `move_to_step`, `disable_plan_mode` | `move_to_step` needs `step_position` |
 | `on_exit` | `disable_plan_mode` | — |
@@ -313,10 +313,6 @@ workflows:
         events:
           on_turn_start:
             - type: move_to_next
-          on_turn_complete:
-            - type: move_to_step
-              config:
-                step_position: 2
 
       - name: In Progress
         position: 1
@@ -359,7 +355,7 @@ workflows:
     description: Plan first, then implement.
     agent_profile:
       agent_name: Claude Code
-      model: claude-opus-4-8
+      model: claude-opus-4-7
       mode: default
     steps:
       - name: Plan
@@ -373,7 +369,7 @@ workflows:
           Save the plan with create_task_plan_kandev, then stop for review.
         agent_profile:
           agent_name: Claude Code
-          model: claude-opus-4-8
+          model: claude-opus-4-7
           mode: plan
         events:
           on_enter:
