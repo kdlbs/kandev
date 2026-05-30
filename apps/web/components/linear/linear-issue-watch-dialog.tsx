@@ -38,11 +38,12 @@ import {
   CREATOR_ANY,
   type FormState,
   type LinearPriority,
-  buildFilterPayload,
+  buildWatchPayload,
   creatorPlaceholder,
-  filterIsEmpty,
   formStateFromWatch,
+  isWatchFormReady,
   makeEmptyForm,
+  parseMaxInflightTasks,
   userOptionLabel,
 } from "./linear-issue-watch-form";
 import type {
@@ -452,6 +453,38 @@ function AutomationFields({
   );
 }
 
+function MaxInflightTasksField({
+  form,
+  setForm,
+}: {
+  form: FormState;
+  setForm: React.Dispatch<React.SetStateAction<FormState>>;
+}) {
+  const parsed = parseMaxInflightTasks(form.maxInflightTasks);
+  const invalid = parsed === "invalid";
+  return (
+    <div className="space-y-1.5">
+      <Label>Max in-flight tasks</Label>
+      <p className="text-xs text-muted-foreground">
+        Cap on open tasks created by this watcher. Leave blank for no cap. New matches are deferred
+        to the next poll when the cap is reached.
+      </p>
+      <Input
+        type="number"
+        value={form.maxInflightTasks}
+        onChange={(e) => setForm((p) => ({ ...p, maxInflightTasks: e.target.value }))}
+        min={1}
+        step={1}
+        placeholder="(no cap)"
+        aria-invalid={invalid}
+      />
+      {invalid && (
+        <p className="text-xs text-destructive">Enter a positive integer or leave blank.</p>
+      )}
+    </div>
+  );
+}
+
 function SettingsFields({
   form,
   setForm,
@@ -474,6 +507,7 @@ function SettingsFields({
           max={3600}
         />
       </div>
+      <MaxInflightTasksField form={form} setForm={setForm} />
       <div className="flex items-center justify-between">
         <div>
           <Label>Enabled</Label>
@@ -515,28 +549,13 @@ export function LinearIssueWatchDialog({
   }, [watch, open, workspaceId, activeWorkspaceId]);
 
   const workspaceLocked = !!watch || !!workspaceId;
-
-  const canSave =
-    !!form.workspaceId &&
-    !filterIsEmpty(form) &&
-    !!form.workflowId &&
-    !!form.workflowStepId &&
-    !!form.prompt.trim();
+  const canSave = isWatchFormReady(form);
 
   const handleSave = useCallback(async () => {
+    const payload = buildWatchPayload(form);
+    if (!payload) return; // re-checks the cap input — see canSave gate
     setSaving(true);
     try {
-      const filter = buildFilterPayload(form);
-      const payload = {
-        filter,
-        workflowId: form.workflowId,
-        workflowStepId: form.workflowStepId,
-        agentProfileId: form.agentProfileId,
-        executorProfileId: form.executorProfileId,
-        prompt: form.prompt,
-        enabled: form.enabled,
-        pollIntervalSeconds: form.pollInterval,
-      };
       if (watch) {
         await onUpdate(watch.id, payload);
       } else {

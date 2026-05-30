@@ -82,6 +82,22 @@ func (s *JiraWatcherSource) AttachTaskID(ctx context.Context, evt any, taskID st
 	return s.service.AssignIssueWatchTaskID(ctx, e.IssueWatchID, e.Issue.Key, taskID)
 }
 
+func (s *JiraWatcherSource) WatchID(evt any) string {
+	e, ok := evt.(*jira.NewJiraIssueEvent)
+	if !ok || e == nil {
+		return ""
+	}
+	return e.IssueWatchID
+}
+
+func (s *JiraWatcherSource) MaxInflightTasks(evt any) *int {
+	e, ok := evt.(*jira.NewJiraIssueEvent)
+	if !ok || e == nil {
+		return nil
+	}
+	return e.MaxInflightTasks
+}
+
 func (s *JiraWatcherSource) AutoStartParams(evt any) AutoStartParams {
 	e, ok := evt.(*jira.NewJiraIssueEvent)
 	if !ok || e == nil {

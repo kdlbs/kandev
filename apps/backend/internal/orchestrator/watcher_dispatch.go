@@ -96,6 +96,17 @@ type WatcherSource interface {
 	// AutoStartParams returns the parameters needed to kick the task off
 	// when its workflow step is configured for auto-start.
 	AutoStartParams(evt any) AutoStartParams
+
+	// WatchID extracts the per-integration watch identifier from the event
+	// payload. Used by the throttle gate to key the per-watch pending
+	// counter and look up the per-watch cap. Returns "" if the event has
+	// no watch (the gate then treats it as unthrottled).
+	WatchID(evt any) string
+
+	// MaxInflightTasks returns the per-watch cap on open watcher-created
+	// tasks, or nil when the watch is uncapped. The orchestrator gate uses
+	// this to decide whether to defer the event.
+	MaxInflightTasks(evt any) *int
 }
 
 // Dispatch runs one event through the full pipeline. Safe to call from a

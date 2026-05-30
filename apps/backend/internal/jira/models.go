@@ -4,7 +4,11 @@
 // expose these capabilities to the frontend.
 package jira
 
-import "time"
+import (
+	"time"
+
+	"github.com/kandev/kandev/internal/integrations/optional"
+)
 
 // Auth method identifiers persisted in JiraConfig.AuthMethod.
 const (
@@ -156,19 +160,23 @@ const DefaultIssueWatchPollInterval = 300
 // target workflow step's defaults determine where the resulting task runs, so
 // there's no `repos` column.
 type IssueWatch struct {
-	ID                  string     `json:"id" db:"id"`
-	WorkspaceID         string     `json:"workspaceId" db:"workspace_id"`
-	WorkflowID          string     `json:"workflowId" db:"workflow_id"`
-	WorkflowStepID      string     `json:"workflowStepId" db:"workflow_step_id"`
-	JQL                 string     `json:"jql" db:"jql"`
-	AgentProfileID      string     `json:"agentProfileId" db:"agent_profile_id"`
-	ExecutorProfileID   string     `json:"executorProfileId" db:"executor_profile_id"`
-	Prompt              string     `json:"prompt" db:"prompt"`
-	Enabled             bool       `json:"enabled" db:"enabled"`
-	PollIntervalSeconds int        `json:"pollIntervalSeconds" db:"poll_interval_seconds"`
-	LastPolledAt        *time.Time `json:"lastPolledAt,omitempty" db:"last_polled_at"`
-	CreatedAt           time.Time  `json:"createdAt" db:"created_at"`
-	UpdatedAt           time.Time  `json:"updatedAt" db:"updated_at"`
+	ID                  string `json:"id" db:"id"`
+	WorkspaceID         string `json:"workspaceId" db:"workspace_id"`
+	WorkflowID          string `json:"workflowId" db:"workflow_id"`
+	WorkflowStepID      string `json:"workflowStepId" db:"workflow_step_id"`
+	JQL                 string `json:"jql" db:"jql"`
+	AgentProfileID      string `json:"agentProfileId" db:"agent_profile_id"`
+	ExecutorProfileID   string `json:"executorProfileId" db:"executor_profile_id"`
+	Prompt              string `json:"prompt" db:"prompt"`
+	Enabled             bool   `json:"enabled" db:"enabled"`
+	PollIntervalSeconds int    `json:"pollIntervalSeconds" db:"poll_interval_seconds"`
+	// MaxInflightTasks caps how many open watcher-created tasks this watch can
+	// hold at once. nil = uncapped. Values <= 0 are rejected at the API layer.
+	// See docs/specs/throttle-watcher-fanout/spec.md for the open-task definition.
+	MaxInflightTasks *int       `json:"maxInflightTasks,omitempty" db:"max_inflight_tasks"`
+	LastPolledAt     *time.Time `json:"lastPolledAt,omitempty" db:"last_polled_at"`
+	CreatedAt        time.Time  `json:"createdAt" db:"created_at"`
+	UpdatedAt        time.Time  `json:"updatedAt" db:"updated_at"`
 }
 
 // IssueWatchTask deduplicates task creation per (watch, ticket) tuple. The
@@ -187,14 +195,18 @@ type IssueWatchTask struct {
 // ticket matching a watch that has no existing dedup row. The orchestrator
 // consumes this to create (and optionally auto-start) a Kandev task.
 type NewJiraIssueEvent struct {
-	IssueWatchID      string      `json:"issueWatchId"`
-	WorkspaceID       string      `json:"workspaceId"`
-	WorkflowID        string      `json:"workflowId"`
-	WorkflowStepID    string      `json:"workflowStepId"`
-	AgentProfileID    string      `json:"agentProfileId"`
-	ExecutorProfileID string      `json:"executorProfileId"`
-	Prompt            string      `json:"prompt"`
-	Issue             *JiraTicket `json:"issue"`
+	IssueWatchID      string `json:"issueWatchId"`
+	WorkspaceID       string `json:"workspaceId"`
+	WorkflowID        string `json:"workflowId"`
+	WorkflowStepID    string `json:"workflowStepId"`
+	AgentProfileID    string `json:"agentProfileId"`
+	ExecutorProfileID string `json:"executorProfileId"`
+	Prompt            string `json:"prompt"`
+	// MaxInflightTasks mirrors the watch row's per-watcher throttle cap so the
+	// orchestrator's gate can read it without loading the row again. nil =
+	// uncapped.
+	MaxInflightTasks *int        `json:"maxInflightTasks,omitempty"`
+	Issue            *JiraTicket `json:"issue"`
 }
 
 // CreateIssueWatchRequest is the payload for POST /api/v1/jira/watches/issue.
@@ -207,11 +219,14 @@ type CreateIssueWatchRequest struct {
 	ExecutorProfileID   string `json:"executorProfileId"`
 	Prompt              string `json:"prompt"`
 	PollIntervalSeconds int    `json:"pollIntervalSeconds"`
+	MaxInflightTasks    *int   `json:"maxInflightTasks,omitempty"`
 	Enabled             *bool  `json:"enabled,omitempty"`
 }
 
 // UpdateIssueWatchRequest is the payload for PATCH /api/v1/jira/watches/issue/:id.
-// All fields are pointers so the caller can omit ones it doesn't want to change.
+// Most fields are pointers so callers can omit the ones they don't want to
+// change. MaxInflightTasks uses optional.Int for tri-state PATCH semantics
+// (absent = unchanged, null = uncapped, positive int = cap).
 type UpdateIssueWatchRequest struct {
 	WorkflowID          *string `json:"workflowId,omitempty"`
 	WorkflowStepID      *string `json:"workflowStepId,omitempty"`
@@ -221,4 +236,8 @@ type UpdateIssueWatchRequest struct {
 	Prompt              *string `json:"prompt,omitempty"`
 	Enabled             *bool   `json:"enabled,omitempty"`
 	PollIntervalSeconds *int    `json:"pollIntervalSeconds,omitempty"`
+	// MaxInflightTasks is tri-state so a partial PATCH that omits the field
+	// leaves the cap unchanged (a plain *int can't tell "omitted" from
+	// "null"). Absent = unchanged, null = uncapped, positive int = cap.
+	MaxInflightTasks optional.Int `json:"maxInflightTasks"`
 }

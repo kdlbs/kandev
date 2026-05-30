@@ -60,7 +60,26 @@ type FormState = {
   prompt: string;
   enabled: boolean;
   pollInterval: number;
+  /**
+   * Per-watcher throttle cap as a free-text input: empty string means
+   * "uncapped" (sent as null), non-empty must parse to a positive integer.
+   */
+  maxInflightTasks: string;
 };
+
+function maxInflightTasksString(v: number | null | undefined): string {
+  if (v === undefined || v === null) return "";
+  if (!Number.isFinite(v) || v <= 0) return "";
+  return String(v);
+}
+
+function parseMaxInflightTasks(raw: string): number | null | "invalid" {
+  const t = raw.trim();
+  if (t === "") return null;
+  const n = Number(t);
+  if (!Number.isInteger(n) || n <= 0) return "invalid";
+  return n;
+}
 
 const DEFAULT_JQL = `project = PROJ AND status = "Open" ORDER BY created DESC`;
 
@@ -75,6 +94,7 @@ function makeEmptyForm(workspaceId: string): FormState {
     prompt: DEFAULT_JIRA_ISSUE_WATCH_PROMPT,
     enabled: true,
     pollInterval: 300,
+    maxInflightTasks: "5",
   };
 }
 
@@ -89,6 +109,7 @@ function formStateFromWatch(w: JiraIssueWatch): FormState {
     prompt: w.prompt.trim() ? w.prompt : DEFAULT_JIRA_ISSUE_WATCH_PROMPT,
     enabled: w.enabled,
     pollInterval: w.pollIntervalSeconds,
+    maxInflightTasks: maxInflightTasksString(w.maxInflightTasks),
   };
 }
 
@@ -327,6 +348,38 @@ function AutomationFields({
   );
 }
 
+function MaxInflightTasksField({
+  form,
+  setForm,
+}: {
+  form: FormState;
+  setForm: React.Dispatch<React.SetStateAction<FormState>>;
+}) {
+  const parsed = parseMaxInflightTasks(form.maxInflightTasks);
+  const invalid = parsed === "invalid";
+  return (
+    <div className="space-y-1.5">
+      <Label>Max in-flight tasks</Label>
+      <p className="text-xs text-muted-foreground">
+        Cap on open tasks created by this watcher. Leave blank for no cap. New matches are deferred
+        to the next poll when the cap is reached.
+      </p>
+      <Input
+        type="number"
+        value={form.maxInflightTasks}
+        onChange={(e) => setForm((p) => ({ ...p, maxInflightTasks: e.target.value }))}
+        min={1}
+        step={1}
+        placeholder="(no cap)"
+        aria-invalid={invalid}
+      />
+      {invalid && (
+        <p className="text-xs text-destructive">Enter a positive integer or leave blank.</p>
+      )}
+    </div>
+  );
+}
+
 function SettingsFields({
   form,
   setForm,
@@ -349,6 +402,7 @@ function SettingsFields({
           max={3600}
         />
       </div>
+      <MaxInflightTasksField form={form} setForm={setForm} />
       <div className="flex items-center justify-between">
         <div>
           <Label>Enabled</Label>
@@ -397,16 +451,23 @@ export function JiraIssueWatchDialog({
   // refs) or when the dialog was opened from a single-workspace surface.
   const workspaceLocked = !!watch || !!workspaceId;
 
+  const parsedMaxInflight = parseMaxInflightTasks(form.maxInflightTasks);
   const canSave =
     !!form.workspaceId &&
     !!form.jql.trim() &&
     !!form.workflowId &&
     !!form.workflowStepId &&
-    !!form.prompt.trim();
+    !!form.prompt.trim() &&
+    parsedMaxInflight !== "invalid";
 
   const handleSave = useCallback(async () => {
     setSaving(true);
     try {
+      const maxInflight = parseMaxInflightTasks(form.maxInflightTasks);
+      if (maxInflight === "invalid") {
+        // canSave gates the button but guard the handler too — see Linear dialog.
+        return;
+      }
       const payload = {
         jql: form.jql,
         workflowId: form.workflowId,
@@ -416,6 +477,7 @@ export function JiraIssueWatchDialog({
         prompt: form.prompt,
         enabled: form.enabled,
         pollIntervalSeconds: form.pollInterval,
+        maxInflightTasks: maxInflight,
       };
       if (watch) {
         await onUpdate(watch.id, payload);

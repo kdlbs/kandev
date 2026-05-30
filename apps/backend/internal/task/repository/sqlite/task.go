@@ -730,6 +730,49 @@ func (r *Repository) ListTasksForAutoArchive(ctx context.Context) ([]*models.Tas
 	return r.scanTasks(rows)
 }
 
+// watcherMetadataKeyByIntegration maps an integration name to the metadata key
+// that watcher-created tasks carry. Used by CountOpenWatcherCreatedTasks to
+// scope the COUNT to a single watcher. Returns "" for unknown integrations so
+// the count query returns 0 without erroring.
+func watcherMetadataKeyByIntegration(integration string) string {
+	switch integration {
+	case "linear":
+		return "linear_issue_watch_id"
+	case "jira":
+		return "jira_issue_watch_id"
+	default:
+		return ""
+	}
+}
+
+// CountOpenWatcherCreatedTasks returns the number of open watcher-created tasks
+// for a single (integration, watchID) pair. "Open" means non-archived AND not
+// in a terminal state (COMPLETED, FAILED, CANCELLED). Watcher-created tasks
+// are identified via the integration's JSON metadata key, scoped per
+// integration so a Linear and Jira watch with the same id don't collide.
+//
+// Unknown integrations return (0, nil) — the throttle gate falls open for
+// integrations not yet wired into the JSON predicate map.
+func (r *Repository) CountOpenWatcherCreatedTasks(ctx context.Context, integration, watchID string) (int, error) {
+	key := watcherMetadataKeyByIntegration(integration)
+	if key == "" || watchID == "" {
+		return 0, nil
+	}
+	query := r.ro.Rebind(`
+		SELECT COUNT(*) FROM tasks
+		WHERE archived_at IS NULL
+			AND state NOT IN (?, ?, ?)
+			AND json_extract(metadata, '$.` + key + `') = ?
+	`)
+	var n int
+	if err := r.ro.QueryRowxContext(ctx, query,
+		v1.TaskStateCompleted, v1.TaskStateFailed, v1.TaskStateCancelled, watchID,
+	).Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
 // UpdateTaskState updates the state of a task
 func (r *Repository) UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error {
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?`), state, time.Now().UTC(), id)

@@ -83,6 +83,22 @@ func (s *LinearWatcherSource) AttachTaskID(ctx context.Context, evt any, taskID 
 	return s.service.AssignIssueWatchTaskID(ctx, e.IssueWatchID, e.Issue.Identifier, taskID)
 }
 
+func (s *LinearWatcherSource) WatchID(evt any) string {
+	e, ok := evt.(*linear.NewLinearIssueEvent)
+	if !ok || e == nil {
+		return ""
+	}
+	return e.IssueWatchID
+}
+
+func (s *LinearWatcherSource) MaxInflightTasks(evt any) *int {
+	e, ok := evt.(*linear.NewLinearIssueEvent)
+	if !ok || e == nil {
+		return nil
+	}
+	return e.MaxInflightTasks
+}
+
 func (s *LinearWatcherSource) AutoStartParams(evt any) AutoStartParams {
 	e, ok := evt.(*linear.NewLinearIssueEvent)
 	if !ok || e == nil {
