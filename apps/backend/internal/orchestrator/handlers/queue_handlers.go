@@ -7,6 +7,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -35,17 +36,27 @@ type QueueService interface {
 	GetStatus(ctx context.Context, sessionID string) *messagequeue.QueueStatus
 }
 
+type QueueDrainer interface {
+	DrainQueuedMessage(ctx context.Context, sessionID string) (bool, error)
+}
+
 // QueueHandlers handles WebSocket message-queue operations.
 type QueueHandlers struct {
 	queueService QueueService
+	queueDrainer QueueDrainer
 	eventBus     bus.EventBus
 	logger       *logger.Logger
 }
 
 // NewQueueHandlers creates a new QueueHandlers instance.
-func NewQueueHandlers(queueService QueueService, eventBus bus.EventBus, log *logger.Logger) *QueueHandlers {
+func NewQueueHandlers(queueService QueueService, eventBus bus.EventBus, log *logger.Logger, drainer ...QueueDrainer) *QueueHandlers {
+	var queueDrainer QueueDrainer
+	if len(drainer) > 0 {
+		queueDrainer = drainer[0]
+	}
 	return &QueueHandlers{
 		queueService: queueService,
+		queueDrainer: queueDrainer,
 		eventBus:     eventBus,
 		logger:       log.WithFields(zap.String("component", "queue-handlers")),
 	}
@@ -58,6 +69,7 @@ func (h *QueueHandlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMessageQueueGet, h.wsGetQueueStatus)
 	d.RegisterFunc(ws.ActionMessageQueueUpdate, h.wsUpdateMessage)
 	d.RegisterFunc(ws.ActionMessageQueueAppend, h.wsAppendToQueue)
+	d.RegisterFunc(ws.ActionMessageQueueDrain, h.wsDrainQueue)
 	d.RegisterFunc(ws.ActionMessageQueueRemove, h.wsRemoveEntry)
 }
 
@@ -138,6 +150,42 @@ func (h *QueueHandlers) wsCancelAll(ctx context.Context, msg *ws.Message) (*ws.M
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		fieldSessionID: req.SessionID,
 		"removed":      removed,
+	})
+}
+
+type wsDrainQueueRequest struct {
+	SessionID string `json:"session_id"`
+}
+
+func (h *QueueHandlers) wsDrainQueue(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsDrainQueueRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+	if h.queueDrainer == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Queue drain is unavailable", nil)
+	}
+
+	drained, err := h.queueDrainer.DrainQueuedMessage(ctx, req.SessionID)
+	if err != nil {
+		switch {
+		case errors.Is(err, orchestrator.ErrAgentPromptInProgress):
+			return ws.NewError(msg.ID, msg.Action, "session_busy", "Session is busy", nil)
+		case errors.Is(err, orchestrator.ErrSessionNotPromptable):
+			return ws.NewError(msg.ID, msg.Action, "session_not_promptable", err.Error(), nil)
+		default:
+			h.logger.Error("failed to drain queued message", zap.String(fieldSessionID, req.SessionID), zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to drain queued message", nil)
+		}
+	}
+
+	h.publishStatus(ctx, req.SessionID)
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		fieldSessionID: req.SessionID,
+		"drained":      drained,
 	})
 }
 

@@ -838,7 +838,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		}
 		s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
 		s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
-		s.drainQueuedMessageAfterTransition(ctx, sessionID)
+		s.drainQueuedMessageForPromptableSession(ctx, sessionID)
 		return
 	}
 
@@ -924,7 +924,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 						zap.Error(err))
 					s.setSessionWaitingForInput(asyncCtx, taskID, sessionID, session)
 					s.publishSessionWaitingEvent(asyncCtx, taskID, sessionID, stepID, session)
-					s.drainQueuedMessageAfterTransition(asyncCtx, sessionID)
+					s.drainQueuedMessageForPromptableSession(asyncCtx, sessionID)
 				}
 			}()
 			return
@@ -942,7 +942,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		// steps without auto_start_agent (e.g. Review). Drain here to match the
 		// pre-#677 behavior where handleAgentReady always drained after returning
 		// from inline processOnEnter.
-		s.drainQueuedMessageAfterTransition(ctx, sessionID)
+		s.drainQueuedMessageForPromptableSession(ctx, sessionID)
 	}
 }
 
@@ -953,7 +953,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 // task.moved handler doesn't run a second processStepExitAndEnter for the same
 // transition. The message queue is left intact — any user-supplied prompt
 // already queued by handleMoveTask is delivered by the on_enter path or by
-// drainQueuedMessageAfterTransition.
+// drainQueuedMessageForPromptableSession.
 func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string, session *models.TaskSession, move *messagequeue.PendingMove) {
 	// reinsertPendingMove restores the move so a future agent.ready can retry.
 	// Used on early failure paths (load errors, config issues) where the state
@@ -992,7 +992,7 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		s.logger.Info("pending move target equals current step; skipping transition",
 			zap.String("task_id", taskID),
 			zap.String("step_id", fromStepID))
-		s.drainQueuedMessageAfterTransition(ctx, sessionID)
+		s.drainQueuedMessageForPromptableSession(ctx, sessionID)
 		return
 	}
 
@@ -1048,26 +1048,29 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 	go s.processStepExitAndEnter(context.WithoutCancel(ctx), taskID, session, fromStepID, move.WorkflowStepID, taskDescription)
 }
 
-// drainQueuedMessageAfterTransition takes any user-queued message and dispatches
-// it for execution. Used by processOnEnter branches that don't auto-start the
-// agent — without this, the message is orphaned because handleAgentReady skips
-// the queue when a workflow transition occurred.
-func (s *Service) drainQueuedMessageAfterTransition(ctx context.Context, sessionID string) {
+// drainQueuedMessageForPromptableSession takes the next queued message and dispatches
+// it for execution. Callers must ensure the session is ready for input first.
+//
+// Used by processOnEnter branches that don't auto-start the agent, manual
+// drain requests, and cancel recovery. Without this, the message is orphaned
+// because handleAgentReady only drains from a normal turn-end event.
+func (s *Service) drainQueuedMessageForPromptableSession(ctx context.Context, sessionID string) bool {
 	if s.messageQueue == nil {
-		return
+		return false
 	}
 	queuedMsg, ok := s.messageQueue.TakeQueued(ctx, sessionID)
 	if !ok || queuedMsg == nil {
-		return
+		return false
 	}
 	s.publishQueueStatusEvent(ctx, sessionID)
 	if queuedMsg.Content == "" && len(queuedMsg.Attachments) == 0 {
 		s.logger.Warn("skipping empty queued message after transition",
 			zap.String("session_id", sessionID),
 			zap.String("queue_id", queuedMsg.ID))
-		return
+		return false
 	}
 	go s.executeQueuedMessage(sessionID, queuedMsg)
+	return true
 }
 
 // deliverPassthroughPrompt writes a prompt to PTY stdin and marks the session as running.
@@ -1359,7 +1362,7 @@ func (s *Service) fallbackFreshLaunchOnMissingExecution(
 }
 
 // takeAndMergeHandoffMessage drains any queued hand-off message for the session
-// (set by handleMoveTask via move_task_kandev or by drainQueuedMessageAfterTransition)
+// (set by handleMoveTask via move_task_kandev or by drainQueuedMessageForPromptableSession)
 // and merges its content + attachments into the auto-start prompt. Returns the
 // original queued message (so terminal failure paths can re-queue it via
 // requeueMessage), the merged prompt, and the converted attachments. Empty

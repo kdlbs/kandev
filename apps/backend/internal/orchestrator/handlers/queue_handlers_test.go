@@ -32,7 +32,24 @@ func (m *mockEventBus) Request(_ context.Context, _ string, _ *bus.Event, _ time
 func (m *mockEventBus) Close()            {}
 func (m *mockEventBus) IsConnected() bool { return true }
 
+type mockQueueDrainer struct {
+	calls     int
+	sessionID string
+	drained   bool
+	err       error
+}
+
+func (m *mockQueueDrainer) DrainQueuedMessage(_ context.Context, sessionID string) (bool, error) {
+	m.calls++
+	m.sessionID = sessionID
+	return m.drained, m.err
+}
+
 func setupQueueHandlers(t *testing.T) (*QueueHandlers, *messagequeue.Service) {
+	return setupQueueHandlersWithDrainer(t, nil)
+}
+
+func setupQueueHandlersWithDrainer(t *testing.T, drainer QueueDrainer) (*QueueHandlers, *messagequeue.Service) {
 	t.Helper()
 	log, err := logger.NewLogger(logger.LoggingConfig{
 		Level:      "error",
@@ -41,7 +58,7 @@ func setupQueueHandlers(t *testing.T) (*QueueHandlers, *messagequeue.Service) {
 	})
 	require.NoError(t, err)
 	svc := messagequeue.NewServiceMemory(log)
-	return NewQueueHandlers(svc, &mockEventBus{}, log), svc
+	return NewQueueHandlers(svc, &mockEventBus{}, log, drainer), svc
 }
 
 func createTestMessage(t *testing.T, action string, payload interface{}) *ws.Message {
@@ -158,6 +175,33 @@ func TestWsCancelAll(t *testing.T) {
 		handlers, _ := setupQueueHandlers(t)
 		response, err := handlers.wsCancelAll(context.Background(),
 			createTestMessage(t, ws.ActionMessageQueueCancel, map[string]interface{}{}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeError, response.Type)
+		assert.Contains(t, parseError(t, response).Message, "session_id is required")
+	})
+}
+
+func TestWsDrainQueue(t *testing.T) {
+	t.Run("drains next queued message", func(t *testing.T) {
+		drainer := &mockQueueDrainer{drained: true}
+		handlers, _ := setupQueueHandlersWithDrainer(t, drainer)
+
+		response, err := handlers.wsDrainQueue(context.Background(),
+			createTestMessage(t, ws.ActionMessageQueueDrain, map[string]interface{}{"session_id": "s"}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeResponse, response.Type)
+		assert.Equal(t, 1, drainer.calls)
+		assert.Equal(t, "s", drainer.sessionID)
+
+		var payload map[string]interface{}
+		require.NoError(t, json.Unmarshal(response.Payload, &payload))
+		assert.Equal(t, true, payload["drained"])
+	})
+
+	t.Run("rejects missing session_id", func(t *testing.T) {
+		handlers, _ := setupQueueHandlersWithDrainer(t, &mockQueueDrainer{})
+		response, err := handlers.wsDrainQueue(context.Background(),
+			createTestMessage(t, ws.ActionMessageQueueDrain, map[string]interface{}{}))
 		require.NoError(t, err)
 		assert.Equal(t, ws.MessageTypeError, response.Type)
 		assert.Contains(t, parseError(t, response).Message, "session_id is required")

@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/orchestrator/dto"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
 	"github.com/kandev/kandev/internal/orchestrator/scheduler"
 	"github.com/kandev/kandev/internal/sysprompt"
@@ -368,6 +369,45 @@ func TestCancelAgent_DeduplicatesConcurrentCalls(t *testing.T) {
 	}
 	if got := agentMgr.cancelAgentCalls.Load(); got != 2 {
 		t.Fatalf("expected 2 agentManager.CancelAgent calls after release, got %d", got)
+	}
+}
+
+func TestCancelAgent_DrainsQueuedMessage(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	agentMgr := &mockAgentManager{
+		isAgentRunning: true,
+		promptDone:     make(chan struct{}),
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+	if _, err := svc.messageQueue.QueueMessage(
+		ctx, "session1", "task1", "queued after cancel", "", messagequeue.QueuedByUser, false, nil,
+	); err != nil {
+		t.Fatalf("queue message: %v", err)
+	}
+
+	if err := svc.CancelAgent(ctx, "session1"); err != nil {
+		t.Fatalf("cancel agent: %v", err)
+	}
+
+	if status := svc.messageQueue.GetStatus(ctx, "session1"); status.Count != 0 {
+		t.Fatalf("expected cancel to drain queued messages, count=%d entries=%+v", status.Count, status.Entries)
+	}
+
+	select {
+	case <-agentMgr.promptDone:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for queued message to be sent after cancel")
+	}
+	if len(agentMgr.capturedPrompts) != 1 {
+		t.Fatalf("expected one queued prompt to be sent after cancel, got %d", len(agentMgr.capturedPrompts))
+	}
+	if agentMgr.capturedPrompts[0] != "queued after cancel" {
+		t.Fatalf("queued prompt = %q, want %q", agentMgr.capturedPrompts[0], "queued after cancel")
 	}
 }
 

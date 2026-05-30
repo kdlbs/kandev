@@ -523,6 +523,8 @@ export function ChatInputArea({
 }: ChatInputAreaProps) {
   const { resolvedSessionId, taskId, isAgentBusy, needsRecovery, planModeEnabled, todoItems } =
     panelState;
+  const sessionState = panelState.session?.state ?? null;
+  const canDrainQueue = sessionState === "WAITING_FOR_INPUT" || sessionState === "IDLE";
   const { planActions, executor, placeholder } = useChatInputDerived(
     panelState,
     chatInputRef,
@@ -533,12 +535,13 @@ export function ChatInputArea({
     <div className="bg-card flex-shrink-0 px-2 pb-2 pt-1">
       <QueueAffordance
         sessionId={resolvedSessionId}
+        canDrain={canDrainQueue}
         renderStatusBar={(queueChip) => (
           <ChatStatusBar
             todoItems={todoItems}
             taskId={taskId}
             sessionId={resolvedSessionId}
-            sessionState={panelState.session?.state ?? null}
+            sessionState={sessionState}
             nextStepName={proceedStepName}
             onProceed={proceed}
             isAgentBusy={isAgentBusy}

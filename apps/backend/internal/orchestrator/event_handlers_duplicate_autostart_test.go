@@ -232,7 +232,7 @@ func TestAutoStartTransientError_BootReadyDrainsOrphanedQueue(t *testing.T) {
 		SessionID: sessionID,
 	})
 
-	// drainQueuedMessageAfterTransition pops the queue synchronously and fires
+	// drainQueuedMessageForPromptableSession pops the queue synchronously and fires
 	// `go executeQueuedMessage(...)`. With the user_message_recorded flag set
 	// at queue time (see autoStartStepPrompt's retry branch), the goroutine
 	// SKIPS its CreateUserMessage and just calls PromptTask → PromptAgent.

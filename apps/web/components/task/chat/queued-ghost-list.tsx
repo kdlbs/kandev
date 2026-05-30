@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { IconLayoutList, IconTrash, IconX } from "@tabler/icons-react";
+import { IconLayoutList, IconPlayerPlay, IconTrash, IconX } from "@tabler/icons-react";
 import { toast } from "sonner";
 import { Button } from "@kandev/ui";
 import { Collapsible, CollapsibleContent } from "@kandev/ui/collapsible";
@@ -57,6 +57,7 @@ function useEscToClose(open: boolean, onClose: () => void): void {
 type QueueAffordanceProps = {
   sessionId: string | null;
   children: ReactNode;
+  canDrain?: boolean;
   /**
    * Optional render slot for placing the chip inside an external row (e.g. the
    * chat status bar). The callback receives the chip node (or `null` when no
@@ -66,6 +67,52 @@ type QueueAffordanceProps = {
   renderStatusBar?: (queueChip: ReactNode) => ReactNode;
 };
 
+type QueuePanelHandlerArgs = {
+  clearAll: () => Promise<void>;
+  drainNext: () => Promise<void>;
+  editEntry: (entryId: string, content: string) => Promise<void>;
+  removeEntry: (entryId: string) => Promise<void>;
+};
+
+function useQueuePanelHandlers({
+  clearAll,
+  drainNext,
+  editEntry,
+  removeEntry,
+}: QueuePanelHandlerArgs) {
+  const handleSave = useCallback(
+    async (entryId: string, content: string) => {
+      await editEntry(entryId, content);
+    },
+    [editEntry],
+  );
+  const handleRemove = useCallback(
+    async (entryId: string) => {
+      try {
+        await removeEntry(entryId);
+      } catch (err) {
+        console.error("Failed to remove queued entry:", err);
+        toast.error("Failed to remove queued message.");
+      }
+    },
+    [removeEntry],
+  );
+  const handleClear = useCallback(() => {
+    clearAll().catch((err) => {
+      console.error("Failed to clear queued messages:", err);
+      toast.error("Failed to clear queued messages.");
+    });
+  }, [clearAll]);
+  const handleDrain = useCallback(() => {
+    drainNext().catch((err) => {
+      console.error("Failed to run queued message:", err);
+      toast.error("Failed to run queued message.");
+    });
+  }, [drainNext]);
+
+  return { handleSave, handleRemove, handleClear, handleDrain };
+}
+
 /**
  * Wraps the chat input with the per-session queue affordance:
  * - When there are no queued entries, just renders `children` (the input).
@@ -74,9 +121,21 @@ type QueueAffordanceProps = {
  *   it expands a panel above the input. Drained or session-switched queues
  *   auto-collapse.
  */
-export function QueueAffordance({ sessionId, children, renderStatusBar }: QueueAffordanceProps) {
-  const { entries, count, max, isFull, clearAll, editEntry, removeEntry } = useQueue(sessionId);
+export function QueueAffordance({
+  sessionId,
+  children,
+  canDrain = false,
+  renderStatusBar,
+}: QueueAffordanceProps) {
+  const { entries, count, max, isFull, isLoading, clearAll, drainNext, editEntry, removeEntry } =
+    useQueue(sessionId);
   const [isOpen, setIsOpen] = useState(false);
+  const { handleSave, handleRemove, handleClear, handleDrain } = useQueuePanelHandlers({
+    clearAll,
+    drainNext,
+    editEntry,
+    removeEntry,
+  });
 
   // Reset disclosure on session switch or full drain using render-phase state
   // adjustment (React docs: "Adjusting some state when a prop changes"). This
@@ -95,32 +154,6 @@ export function QueueAffordance({ sessionId, children, renderStatusBar }: QueueA
 
   const close = useCallback(() => setIsOpen(false), []);
   useEscToClose(isOpen, close);
-
-  const handleSave = useCallback(
-    async (entryId: string, content: string) => {
-      await editEntry(entryId, content);
-    },
-    [editEntry],
-  );
-
-  const handleRemove = useCallback(
-    async (entryId: string) => {
-      try {
-        await removeEntry(entryId);
-      } catch (err) {
-        console.error("Failed to remove queued entry:", err);
-        toast.error("Failed to remove queued message.");
-      }
-    },
-    [removeEntry],
-  );
-
-  const handleClear = useCallback(() => {
-    clearAll().catch((err) => {
-      console.error("Failed to clear queued messages:", err);
-      toast.error("Failed to clear queued messages.");
-    });
-  }, [clearAll]);
 
   const hasEntries = !!sessionId && entryCount > 0;
   const chipNode =
@@ -158,8 +191,11 @@ export function QueueAffordance({ sessionId, children, renderStatusBar }: QueueA
             count={count}
             max={max}
             isFull={isFull}
+            canDrain={canDrain}
+            isLoading={isLoading}
             onClose={close}
             onClear={handleClear}
+            onDrain={handleDrain}
             onSave={handleSave}
             onRemove={handleRemove}
           />
@@ -229,8 +265,11 @@ type QueuePanelProps = {
   count: number;
   max: number;
   isFull: boolean;
+  canDrain: boolean;
+  isLoading: boolean;
   onClose: () => void;
   onClear: () => void;
+  onDrain: () => void;
   onSave: (entryId: string, content: string) => Promise<void>;
   onRemove: (entryId: string) => Promise<void>;
 };
@@ -240,8 +279,11 @@ function QueuePanel({
   count,
   max,
   isFull,
+  canDrain,
+  isLoading,
   onClose,
   onClear,
+  onDrain,
   onSave,
   onRemove,
 }: QueuePanelProps) {
@@ -260,7 +302,10 @@ function QueuePanel({
         count={count}
         max={max}
         isFull={isFull}
+        canDrain={canDrain}
+        isLoading={isLoading}
         onClear={onClear}
+        onDrain={onDrain}
         onClose={onClose}
       />
       <div className="space-y-1.5">
@@ -283,11 +328,23 @@ type QueuePanelHeaderProps = {
   count: number;
   max: number;
   isFull: boolean;
+  canDrain: boolean;
+  isLoading: boolean;
   onClear: () => void;
+  onDrain: () => void;
   onClose: () => void;
 };
 
-function QueuePanelHeader({ count, max, isFull, onClear, onClose }: QueuePanelHeaderProps) {
+function QueuePanelHeader({
+  count,
+  max,
+  isFull,
+  canDrain,
+  isLoading,
+  onClear,
+  onDrain,
+  onClose,
+}: QueuePanelHeaderProps) {
   const capacityText = max > 0 ? `${count} of ${max}` : `${count}`;
   return (
     <div className="flex items-center justify-between gap-3 py-1">
@@ -300,6 +357,20 @@ function QueuePanelHeader({ count, max, isFull, onClear, onClose }: QueuePanelHe
         </span>
       </div>
       <div className="flex items-center gap-1">
+        {canDrain && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 px-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
+            onClick={onDrain}
+            disabled={isLoading}
+            title="Run next queued message"
+            data-testid="queue-drain-next"
+          >
+            <IconPlayerPlay className="mr-1 h-3 w-3" />
+            Run next
+          </Button>
+        )}
         <Button
           variant="ghost"
           size="sm"

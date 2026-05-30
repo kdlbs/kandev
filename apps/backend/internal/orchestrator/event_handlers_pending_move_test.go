@@ -676,7 +676,7 @@ func TestHandleAgentBootReady_DrainsOrphanedQueuedMessage(t *testing.T) {
 				agentManager: agentMgr,
 				messageQueue: messagequeue.NewServiceMemory(log),
 				// Wire a real executor so the executeQueuedMessage goroutine
-				// spawned by drainQueuedMessageAfterTransition can safely call
+				// spawned by drainQueuedMessageForPromptableSession can safely call
 				// PromptTask -> executor.GetExecutionBySession without nil-derefing.
 				executor: executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}),
 			}

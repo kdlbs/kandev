@@ -180,7 +180,7 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 	// on the queue until the user manually sends another message. After the
 	// agent has booted and the session is back to WAITING_FOR_INPUT it's safe
 	// to dispatch any pending message.
-	s.drainQueuedMessageAfterTransition(ctx, data.SessionID)
+	s.drainQueuedMessageForPromptableSession(ctx, data.SessionID)
 }
 
 // handleAgentReady handles turn-end ready events: the agent finished processing

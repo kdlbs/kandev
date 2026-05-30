@@ -2199,6 +2199,23 @@ func (s *Service) RespondToPermission(ctx context.Context, sessionID, pendingID,
 	return nil
 }
 
+// DrainQueuedMessage dispatches one queued message for a session that is ready
+// for input. It is intentionally one-at-a-time: each successful prompt will
+// complete its own turn and then drain the next entry through handleAgentReady.
+func (s *Service) DrainQueuedMessage(ctx context.Context, sessionID string) (bool, error) {
+	if sessionID == "" {
+		return false, fmt.Errorf("session_id is required")
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return false, fmt.Errorf("failed to get session: %w", err)
+	}
+	if err := s.checkSessionPromptable(session.TaskID, sessionID, session.State); err != nil {
+		return false, err
+	}
+	return s.drainQueuedMessageForPromptableSession(ctx, sessionID), nil
+}
+
 // CancelAgent interrupts the current agent turn without terminating the process,
 // allowing the user to send a new prompt.
 //
@@ -2294,6 +2311,13 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 	// Complete the turn since the agent was cancelled. Idempotent w.r.t. a
 	// concurrent agent.complete event having already closed the turn.
 	s.completeTurnForSession(ctx, sessionID)
+	if session != nil {
+		if _, err := s.DrainQueuedMessage(ctx, sessionID); err != nil {
+			s.logger.Warn("failed to drain queued message after cancel",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+	}
 
 	s.logger.Debug("agent turn cancelled", zap.String("session_id", sessionID))
 	return nil
