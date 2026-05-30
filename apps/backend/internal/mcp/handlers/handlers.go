@@ -766,12 +766,16 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 	// of the misleading "no primary session" error from the session lookup.
 	targetTask, err := h.taskSvc.GetTask(ctx, req.TaskID)
 	if err != nil {
-		if errors.Is(err, taskrepo.ErrTaskNotFound) || targetTask == nil {
+		if errors.Is(err, taskrepo.ErrTaskNotFound) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound,
 				"target task not found: "+req.TaskID+" (pass the full task UUID, not a truncated prefix)", nil)
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
 			"failed to look up target task: "+err.Error(), nil)
+	}
+	if targetTask == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound,
+			"target task not found: "+req.TaskID+" (pass the full task UUID, not a truncated prefix)", nil)
 	}
 
 	session, err := h.taskSvc.GetPrimarySession(ctx, req.TaskID)
