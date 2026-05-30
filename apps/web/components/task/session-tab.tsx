@@ -249,7 +249,7 @@ function SessionTabTriggerContent({
     if (!closeAction) return;
     closeAction.setAttribute("data-testid", `session-tab-close-${sessionId}`);
     return () => closeAction.removeAttribute("data-testid");
-  }, [showDeleteOnClose, sessionId, isActive]);
+  }, [showDeleteOnClose, sessionId, isActive]); // isActive: re-run when tab activates so Dockview renders .dv-default-tab-action
 
   return (
     <div ref={tabContentRef} className="flex items-center">
