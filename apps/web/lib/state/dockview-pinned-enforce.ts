@@ -102,7 +102,11 @@ export function enforcePinnedTargets(api: DockviewApi, ctx: EnforcePinnedTargets
       // set on a wide monitor fits a narrower one. Storage keeps the raw value,
       // so returning to the wide monitor restores it.
       const raw = getPinnedTarget("sidebar");
-      const clamped = raw === undefined ? undefined : Math.min(raw, computeSidebarMaxPx(api.width));
+      // Guard against an unmeasured container (api.width === 0): passing 0 to
+      // computeSidebarMaxPx bypasses its window.innerWidth fallback and clamps
+      // the target down to LAYOUT_PINNED_MIN_PX. undefined lets it fall back.
+      const safeWidth = api.width > 0 ? api.width : undefined;
+      const clamped = raw === undefined ? undefined : Math.min(raw, computeSidebarMaxPx(safeWidth));
       restoreColumnToTarget(sv, 0, clamped);
     }
     if (ctx.rightPanelsVisible) {
