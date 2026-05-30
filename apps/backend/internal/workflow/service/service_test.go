@@ -492,13 +492,42 @@ func TestExportWorkflows(t *testing.T) {
 		createStep(t, svc, &models.WorkflowStep{WorkflowID: "wf-1", Name: "Step1", Position: 0})
 		createStep(t, svc, &models.WorkflowStep{WorkflowID: "wf-2", Name: "Step2", Position: 0})
 
-		export, err := svc.ExportWorkflows(ctx, "ws-1")
+		export, err := svc.ExportWorkflows(ctx, "ws-1", nil)
 		require.NoError(t, err)
 		require.Len(t, export.Workflows, 2)
 
 		names := []string{export.Workflows[0].Name, export.Workflows[1].Name}
 		assert.Contains(t, names, "Alpha")
 		assert.Contains(t, names, "Beta")
+	})
+
+	t.Run("filters to the requested workflow IDs", func(t *testing.T) {
+		svc, _, mock := setupTestServiceWithProvider(t)
+		ctx := context.Background()
+
+		mock.addWorkflow("wf-1", "ws-1", "Alpha")
+		mock.addWorkflow("wf-2", "ws-1", "Beta")
+		mock.addWorkflow("wf-3", "ws-1", "Gamma")
+
+		export, err := svc.ExportWorkflows(ctx, "ws-1", []string{"wf-1", "wf-3"})
+		require.NoError(t, err)
+		require.Len(t, export.Workflows, 2)
+
+		names := []string{export.Workflows[0].Name, export.Workflows[1].Name}
+		assert.Contains(t, names, "Alpha")
+		assert.Contains(t, names, "Gamma")
+		assert.NotContains(t, names, "Beta")
+	})
+
+	t.Run("empty (non-nil) ID list exports nothing", func(t *testing.T) {
+		svc, _, mock := setupTestServiceWithProvider(t)
+		ctx := context.Background()
+
+		mock.addWorkflow("wf-1", "ws-1", "Alpha")
+
+		export, err := svc.ExportWorkflows(ctx, "ws-1", []string{})
+		require.NoError(t, err)
+		assert.Empty(t, export.Workflows)
 	})
 }
 

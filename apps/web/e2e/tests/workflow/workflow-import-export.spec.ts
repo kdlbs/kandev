@@ -30,6 +30,30 @@ test.describe("Workflow import/export", () => {
     await expect(dialog).not.toBeVisible();
   });
 
+  test("export all excludes office-style workflows", async ({ testPage, apiClient, seedData }) => {
+    // Workflow settings is kanban-only by design (ADR-0004). Seed an
+    // office-style workflow alongside the kanban "E2E Workflow" and confirm
+    // Export All omits it (regression for issue #1109, where Export All
+    // dumped every workflow — office triggers would silently drop on import).
+    await apiClient.seedWorkflow(seedData.workspaceId, "Office Only Workflow", "office");
+
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId);
+
+    // The office workflow must not even appear in the kanban settings list.
+    await expect(testPage.getByText("Office Only Workflow")).toHaveCount(0);
+
+    await testPage.getByRole("button", { name: "Export All" }).click();
+
+    const dialog = testPage.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    const yamlContent = await dialog.locator("textarea").inputValue();
+    expect(yamlContent).toContain("E2E Workflow");
+    expect(yamlContent).not.toContain("Office Only Workflow");
+
+    await dialog.getByRole("button", { name: "Close" }).first().click();
+  });
+
   test("per-workflow export button shows that workflow's YAML", async ({ testPage, seedData }) => {
     const page = new WorkflowSettingsPage(testPage);
     await page.goto(seedData.workspaceId);

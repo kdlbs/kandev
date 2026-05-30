@@ -197,6 +197,25 @@ export class ApiClient {
     });
   }
 
+  /**
+   * Seed a workflow with an explicit style (kanban / office / custom) via the
+   * KANDEV_E2E_MOCK test harness. Production has no HTTP path that creates an
+   * office-style workflow (the normal create endpoint always normalises to
+   * kanban), so this is the only way to stand up an office workflow for the
+   * "exclude office from settings export" coverage (issue #1109).
+   */
+  async seedWorkflow(
+    workspaceId: string,
+    name: string,
+    style: "kanban" | "office" | "custom",
+  ): Promise<{ workflow_id: string }> {
+    return this.request("POST", "/api/v1/_test/workflows", {
+      workspace_id: workspaceId,
+      name,
+      style,
+    });
+  }
+
   async reorderWorkflows(
     workspaceId: string,
     workflowIds: string[],

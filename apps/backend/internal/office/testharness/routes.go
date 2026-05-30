@@ -76,6 +76,7 @@ func RegisterRoutes(
 	})
 	g.POST("/task-sessions", seedTaskSessionHandler(repo, eventBus, log))
 	g.POST("/messages", seedMessageHandler(repo, eventBus, log))
+	g.POST("/workflows", seedWorkflowHandler(repo, log))
 	if officeRepo != nil {
 		g.POST("/comments", seedCommentHandler(officeRepo, eventBus, log))
 		g.POST("/agent-failures", seedAgentFailureHandler(officeRepo, eventBus, log))
@@ -159,6 +160,47 @@ func seedTaskSessionHandler(repo *sqliterepo.Repository, eventBus bus.EventBus, 
 
 		publishSessionStateChanged(ctx, eventBus, session, log)
 		c.JSON(http.StatusOK, seedTaskSessionResponse{SessionID: session.ID})
+	}
+}
+
+type seedWorkflowRequest struct {
+	WorkspaceID string `json:"workspace_id"`
+	Name        string `json:"name"`
+	// Style is persisted as-is (kanban / office / custom). Production has no
+	// HTTP path that creates an office-style workflow — the normal create
+	// endpoint always normalises to kanban — so this seed route lets the
+	// Playwright suite stand up an office workflow to exercise the
+	// "exclude office from settings export" behaviour (issue #1109).
+	Style string `json:"style"`
+}
+
+type seedWorkflowResponse struct {
+	WorkflowID string `json:"workflow_id"`
+}
+
+func seedWorkflowHandler(repo *sqliterepo.Repository, log *logger.Logger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req seedWorkflowRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON: " + err.Error()})
+			return
+		}
+		if req.WorkspaceID == "" || req.Name == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id and name are required"})
+			return
+		}
+		workflow := &models.Workflow{
+			ID:          uuid.New().String(),
+			WorkspaceID: req.WorkspaceID,
+			Name:        req.Name,
+			Style:       req.Style,
+		}
+		if err := repo.CreateWorkflow(c.Request.Context(), workflow); err != nil {
+			log.Error("test harness: create workflow failed", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, seedWorkflowResponse{WorkflowID: workflow.ID})
 	}
 }
 
