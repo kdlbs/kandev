@@ -60,9 +60,10 @@ resolve_runtime_image() {
 # --- clean: remove build/test artifacts, including root-owned ones from prior
 # docker runs (host user can't rm root-owned files, so shell out to a container).
 clean_artifacts() {
-  log "cleaning e2e/test-results, blob-report, standalone symlinks"
+  log "cleaning e2e/test-results, blob-report, standalone symlinks, and /tmp shard logs"
   rm -rf "$WEB_DIR"/e2e/test-results* "$WEB_DIR"/e2e/blob-report 2>/dev/null
   rm -f "$WEB_DIR"/.next/standalone/web/.next/static "$WEB_DIR"/.next/standalone/web/public 2>/dev/null
+  rm -f /tmp/e2e-host-shard-*.log /tmp/e2e-docker-shard-*.log 2>/dev/null
   if docker_up; then
     docker run --rm -v "$WEB_DIR":/web alpine sh -c \
       'rm -rf /web/e2e/test-results* /web/e2e/blob-report; rm -f /web/.next/standalone/web/.next/static /web/.next/standalone/web/public' \
@@ -180,14 +181,14 @@ run_host() {
   prelink_standalone
   local base_args=(playwright test --config e2e/playwright.config.ts --project="$PROJECT")
   if [[ "$SHARDS" -le 1 ]]; then
-    ( cd "$WEB_DIR" && env "${STRICT_ENV[@]}" pnpm exec "${base_args[@]}" "${PW_ARGS[@]}" )
+    ( cd "$WEB_DIR" && env ${STRICT_ENV[@]+"${STRICT_ENV[@]}"} pnpm exec "${base_args[@]}" ${PW_ARGS[@]+"${PW_ARGS[@]}"} )
     return $?
   fi
   log "running $SHARDS host shards (distinct E2E_PORT_OFFSET + output dirs)"
   local pids=() rc=0 i
   for ((i=1; i<=SHARDS; i++)); do
-    ( cd "$WEB_DIR" && env "${STRICT_ENV[@]}" E2E_PORT_OFFSET=$((i-1)) \
-        pnpm exec "${base_args[@]}" --shard="$i/$SHARDS" --output="e2e/test-results-shard-$i" "${PW_ARGS[@]}" \
+    ( cd "$WEB_DIR" && env ${STRICT_ENV[@]+"${STRICT_ENV[@]}"} E2E_PORT_OFFSET=$((i-1)) \
+        pnpm exec "${base_args[@]}" --shard="$i/$SHARDS" --output="e2e/test-results-shard-$i" ${PW_ARGS[@]+"${PW_ARGS[@]}"} \
         > "/tmp/e2e-host-shard-$i.log" 2>&1 ) &
     pids+=("$!")
   done
@@ -219,11 +220,11 @@ run_docker() {
     [[ "$i" != 0 ]] && shardflag="--shard=$i/$SHARDS"
     docker run --rm --ipc=host \
       -v "$REPO_ROOT":/work -w /work/apps/web \
-      "${strict_flag[@]}" \
+      ${strict_flag[@]+"${strict_flag[@]}"} \
       -e NODE_OPTIONS=--dns-result-order=ipv4first \
       -e PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
       "$img" \
-      bash -lc "$pw $shardflag --output=$out --reporter=list \"\$@\"" e2e-runner "${PW_ARGS[@]}"
+      bash -lc "$pw $shardflag --output=$out --reporter=list \"\$@\"" e2e-runner ${PW_ARGS[@]+"${PW_ARGS[@]}"}
   }
 
   if [[ "$SHARDS" -le 1 ]]; then run_one 0; return $?; fi
