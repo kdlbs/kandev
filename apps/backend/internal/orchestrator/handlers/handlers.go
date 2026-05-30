@@ -198,8 +198,8 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 	// the manual recovery banner. Distinct from resume/fresh_start: it does not
 	// relaunch the agent, it stops the backoff timer.
 	if req.Action == "cancel_retry" {
-		h.service.CancelTransientRetry(ctx, req.TaskID, req.SessionID)
-		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"cancelled": true})
+		cancelled := h.service.CancelTransientRetry(ctx, req.TaskID, req.SessionID)
+		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"cancelled": cancelled})
 	}
 
 	if req.Action != "resume" && req.Action != "fresh_start" {

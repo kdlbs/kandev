@@ -90,6 +90,7 @@ func TestIsTransientProviderError(t *testing.T) {
 		{"real 529 envelope", realOverloaded529, true},
 		{"overloaded_error token", `"type":"overloaded_error"`, true},
 		{"529 then overloaded on one line", "API Error: 529 Overloaded.", true},
+		{"prefixed overloaded error token", `"type":"not_overloaded_error"`, false},
 		{"unrelated 401", "API Error: 401 authentication_error", false},
 		{"plain overloaded word, no code", "the disk is overloaded with files", false},
 		{"bare 529 no overloaded", "got status 529 from upstream", false},

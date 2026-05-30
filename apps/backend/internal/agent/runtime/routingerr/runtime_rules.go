@@ -70,7 +70,7 @@ const overloadedRuleID = "anthropic.overloaded.529.v1"
 // the Anthropic "overloaded_error" type token. Kept tight ([^\n] stays within
 // one line) so a stray "529" and "overloaded" in unrelated multi-line logs
 // can't bridge into a false positive.
-var overloadedRe = regexp.MustCompile(`(?i)\b529\b[^\n]*overloaded|overloaded[^\n]*\b529\b|overloaded_error`)
+var overloadedRe = regexp.MustCompile(`(?i)\b529\b[^\n]*overloaded|overloaded[^\n]*\b529\b|\boverloaded_error\b`)
 
 // IsTransientProviderError reports whether the error message carries the
 // transient provider-overload (529 Overloaded) signature. Exposed for callers

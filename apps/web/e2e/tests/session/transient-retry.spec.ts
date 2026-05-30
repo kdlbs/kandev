@@ -1,38 +1,6 @@
-import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
-import type { SeedData } from "../../fixtures/test-base";
-import type { ApiClient } from "../../helpers/api-client";
+import { seedIdleSession } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
-
-/**
- * Seed a task + session and navigate to it, waiting for the first (normal)
- * turn to complete. Follow-up `/overloaded` prompts then exercise the
- * transient-retry flow from a clean idle state.
- */
-async function seedIdleSession(
-  testPage: Page,
-  apiClient: ApiClient,
-  seedData: SeedData,
-  title: string,
-): Promise<SessionPage> {
-  const task = await apiClient.createTaskWithAgent(
-    seedData.workspaceId,
-    title,
-    seedData.agentProfileId,
-    {
-      description: "/e2e:simple-message",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    },
-  );
-  if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
-  await testPage.goto(`/t/${task.id}`);
-  const session = new SessionPage(testPage);
-  await session.waitForLoad();
-  await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
-  return session;
-}
 
 test.describe("transient provider error (529 Overloaded) retry", () => {
   test("shows the yellow retrying card, not the red error banner", async ({

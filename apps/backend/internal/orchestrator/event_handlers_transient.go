@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -70,6 +71,18 @@ type capturedPrompt struct {
 type transientRetryEntry struct {
 	attempt int
 	cancel  func()
+	mu      sync.Mutex
+	claimed bool
+}
+
+func (e *transientRetryEntry) claim() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.claimed {
+		return false
+	}
+	e.claimed = true
+	return true
 }
 
 // rememberTurnPrompt caches the raw outbound prompt so a transient retry can
@@ -169,10 +182,10 @@ func (s *Service) runTransientRetry(retryCtx context.Context, taskID, sessionID,
 		return
 	case <-timer.C:
 		// Only fire if this entry is still the active one for the session.
-		if cur, ok := s.transientRetries.Load(sessionID); !ok || cur != entry {
+		if cur, ok := s.transientRetries.Load(sessionID); !ok || cur != entry || !entry.claim() {
 			return
 		}
-		s.retryTransientPrompt(taskID, sessionID, execID)
+		s.retryTransientPrompt(retryCtx, taskID, sessionID, execID)
 	}
 }
 
@@ -182,9 +195,15 @@ func (s *Service) runTransientRetry(retryCtx context.Context, taskID, sessionID,
 // than reusing the FAILED execution, which rejects prompts. The session was
 // parked in WAITING_FOR_INPUT by handleTransientFailure so PromptTask accepts
 // the re-send straight away.
-func (s *Service) retryTransientPrompt(taskID, sessionID, execID string) {
+func (s *Service) retryTransientPrompt(ctx context.Context, taskID, sessionID, execID string) {
+	if ctx.Err() != nil {
+		return
+	}
 	v, ok := s.lastTurnPrompt.Load(sessionID)
 	if !ok {
+		if ctx.Err() != nil {
+			return
+		}
 		// No prompt to re-drive (e.g. an uncached launch path). Don't leave the
 		// retry loop parked behind a stuck yellow card — clear it and surface
 		// the manual recovery banner so the user can resume or start fresh.
@@ -202,7 +221,6 @@ func (s *Service) retryTransientPrompt(taskID, sessionID, execID string) {
 	}
 	cp, _ := v.(capturedPrompt)
 
-	ctx := context.Background()
 	if execID != "" {
 		if err := s.executor.StopExecution(ctx, execID, "transient retry: relaunching agent", true); err != nil {
 			s.logger.Debug("failed to stop failed execution before transient retry",
@@ -211,12 +229,25 @@ func (s *Service) retryTransientPrompt(taskID, sessionID, execID string) {
 				zap.Error(err))
 		}
 	}
+	if ctx.Err() != nil {
+		return
+	}
 
 	if _, err := s.PromptTask(ctx, taskID, sessionID, cp.text, cp.model, cp.planMode, cp.attachments, false); err != nil {
-		s.logger.Error("transient retry prompt failed; awaiting next failure event",
+		if ctx.Err() != nil {
+			return
+		}
+		s.logger.Error("transient retry prompt failed synchronously; surfacing recovery banner",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.Error(err))
+		s.resetTransientRetry(sessionID)
+		s.handleRecoverableFailure(context.Background(), watcher.AgentEventData{
+			TaskID:           taskID,
+			SessionID:        sessionID,
+			AgentExecutionID: execID,
+			ErrorMessage:     "Provider overloaded — automatic retry could not be started. Resume or start fresh to continue.",
+		})
 	}
 }
 
@@ -273,7 +304,8 @@ func (s *Service) resetTransientRetry(sessionID string) {
 func (s *Service) cancelAllTransientRetries() {
 	s.transientRetries.Range(func(key, value interface{}) bool {
 		if keyStr, ok := key.(string); ok {
-			s.transientRetries.Delete(keyStr)
+			s.resetTransientRetry(keyStr)
+			return true
 		}
 		if entry, ok := value.(*transientRetryEntry); ok && entry.cancel != nil {
 			entry.cancel()

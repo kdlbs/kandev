@@ -2,11 +2,13 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // overloaded529 is the exact transient 529 Overloaded envelope the
@@ -184,7 +186,7 @@ func TestRetryTransientPrompt_NoCachedPromptSurfacesRecovery(t *testing.T) {
 
 	// The timer firing with no cached prompt must NOT leave the loop parked —
 	// it clears the entry and surfaces the manual recovery banner.
-	svc.retryTransientPrompt("t1", "s1", "")
+	svc.retryTransientPrompt(context.Background(), "t1", "s1", "")
 
 	if _, ok := svc.transientRetries.Load("s1"); ok {
 		t.Error("expected retry entry cleared when no prompt is cached")
@@ -197,6 +199,75 @@ func TestRetryTransientPrompt_NoCachedPromptSurfacesRecovery(t *testing.T) {
 	}
 	if !hasRecovery {
 		t.Error("expected a recovery_actions banner after an uncached retry")
+	}
+}
+
+func TestRetryTransientPrompt_SynchronousPromptErrorSurfacesRecovery(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	session, err := repo.GetTaskSession(context.Background(), "s1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	session.State = models.TaskSessionStateWaitingForInput
+	if err := repo.UpdateTaskSession(context.Background(), session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
+
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		promptErr:              errors.New("session rejected prompt synchronously"),
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	mc := &mockMessageCreator{}
+	svc.messageCreator = mc
+	t.Cleanup(svc.cancelAllTransientRetries)
+
+	svc.rememberTurnPrompt("s1", "hello", "", false, nil)
+	svc.transientRetries.Store("s1", &transientRetryEntry{attempt: 1, cancel: func() {}})
+
+	svc.retryTransientPrompt(context.Background(), "t1", "s1", "exec-1")
+
+	if _, ok := svc.transientRetries.Load("s1"); ok {
+		t.Error("expected retry entry cleared after synchronous PromptTask failure")
+	}
+	if _, ok := svc.lastTurnPrompt.Load("s1"); ok {
+		t.Error("expected cached prompt cleared after synchronous PromptTask failure")
+	}
+	hasRecovery := false
+	for _, m := range mc.sessionMessages {
+		if m.metadata["recovery_actions"] == true {
+			hasRecovery = true
+		}
+	}
+	if !hasRecovery {
+		t.Error("expected recovery banner after synchronous PromptTask failure")
+	}
+}
+
+func TestTransientRetryEntryClaimPreventsDoubleFire(t *testing.T) {
+	entry := &transientRetryEntry{}
+	if !entry.claim() {
+		t.Fatal("first claim = false, want true")
+	}
+	if entry.claim() {
+		t.Fatal("second claim = true, want false")
+	}
+}
+
+func TestCancelAllTransientRetries_DropsCachedPrompt(t *testing.T) {
+	svc, _ := newTransientTestService(t)
+	svc.rememberTurnPrompt("s1", "hello", "", false, nil)
+	svc.scheduleTransientRetry("t1", "s1", "", 1, time.Hour)
+
+	svc.cancelAllTransientRetries()
+
+	if _, ok := svc.transientRetries.Load("s1"); ok {
+		t.Error("expected retry entry cleared after cancelAllTransientRetries")
+	}
+	if _, ok := svc.lastTurnPrompt.Load("s1"); ok {
+		t.Error("expected cached prompt cleared after cancelAllTransientRetries")
 	}
 }
 
