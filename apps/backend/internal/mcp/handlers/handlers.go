@@ -787,9 +787,6 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
 			"failed to get session for task: "+err.Error(), nil)
 	}
-	if session == nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task has no active session — use create_task_kandev to start one", nil)
-	}
 
 	wrappedPrompt, senderMeta := wrapAgentMessage(req.Prompt, senderTask, req.SenderSessionID)
 
