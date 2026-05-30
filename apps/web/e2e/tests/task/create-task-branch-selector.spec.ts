@@ -610,20 +610,25 @@ test.describe("Branch refresh + filter", () => {
     // fires and `waitForRequest` hangs the full test timeout.
     await expect(testPage.getByRole("option").first()).toBeVisible({ timeout: 10_000 });
 
-    // Set the listener up before the click — Promise.all guarantees ordering
-    // and the explicit timeout makes a missed request fail fast instead of
-    // hanging until the test-level 60s cap. No assertion needed: a missed
-    // request throws from inside Promise.all.
-    await Promise.all([
-      testPage.waitForRequest(
+    // Retry the click until the ?refresh=true request actually fires. Even
+    // with the button enabled and an option visible, there's a brief
+    // hydration window (documented above) where a click is swallowed before
+    // the refresh handler is wired — so a single click can never produce the
+    // request and the listener hangs the full test timeout. `toPass` re-runs
+    // the whole block: a swallowed click just clicks again next attempt, and
+    // once the handler is wired the request fires and the block passes. The
+    // refresh is idempotent, so an extra click is harmless.
+    await expect(async () => {
+      const requestPromise = testPage.waitForRequest(
         (req) =>
           req.url().includes(`/repositories/${seedData.repositoryId}/branches`) &&
           req.url().includes("refresh=true") &&
           req.method() === "GET",
-        { timeout: 15_000 },
-      ),
-      refreshButton.click(),
-    ]);
+        { timeout: 4_000 },
+      );
+      await refreshButton.click();
+      await requestPromise;
+    }).toPass({ timeout: 30_000 });
   });
 
   test("branch filter ranks exact match above substring matches", async ({
