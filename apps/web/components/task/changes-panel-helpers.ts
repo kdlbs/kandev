@@ -139,7 +139,7 @@ export function filterUnpushedCommits<T extends { commit_sha: string }>(
 }
 
 /** Which timeline section, if any, renders first (topmost) in the Changes panel. */
-export type FirstVisibleSection = "pr" | "unstaged" | "staged" | "commits" | null;
+type FirstVisibleSection = "pr" | "unstaged" | "staged" | "commits" | null;
 
 /**
  * Computes the first (topmost) visible section so the panel can auto-expand it,
