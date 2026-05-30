@@ -2,7 +2,7 @@ import os from "node:os";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { resolveHomeDir, resolveServiceUser } from "./paths";
+import { homebrewShimPath, resolveHomeDir, resolveServiceUser } from "./paths";
 
 describe("resolveServiceUser", () => {
   const originalSudoUser = process.env.SUDO_USER;
@@ -100,5 +100,23 @@ describe("resolveHomeDir", () => {
     // time. We just check it ends with .kandev and starts with the home dir.
     const result = resolveHomeDir(undefined, false);
     expect(result.endsWith(".kandev")).toBe(true);
+  });
+});
+
+describe("homebrewShimPath", () => {
+  it("derives the floating bin shim from a linuxbrew Cellar cli.js path", () => {
+    expect(
+      homebrewShimPath("/home/linuxbrew/.linuxbrew/Cellar/kandev/0.52.0/libexec/cli/bin/cli.js"),
+    ).toBe("/home/linuxbrew/.linuxbrew/bin/kandev");
+  });
+
+  it("derives the floating bin shim from an Apple-silicon Cellar path", () => {
+    expect(homebrewShimPath("/opt/homebrew/Cellar/kandev/1.2.3/libexec/cli/bin/cli.js")).toBe(
+      "/opt/homebrew/bin/kandev",
+    );
+  });
+
+  it("returns undefined for a non-Cellar path (npm install)", () => {
+    expect(homebrewShimPath("/usr/local/lib/node_modules/kandev/bin/cli.js")).toBeUndefined();
   });
 });

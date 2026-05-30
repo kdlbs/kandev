@@ -25,6 +25,19 @@ const FNM_LAUNCHER: LauncherInfo = {
   kind: "npm",
 };
 
+// A Homebrew launcher whose floating shim has been resolved. nodePath/cliEntry
+// still point at the versioned Cellar paths (as captured at install time), but
+// shimPath is the version-independent `<prefix>/bin/kandev` symlink that
+// survives `brew upgrade`. See issue #1162.
+const SHIM_LAUNCHER: LauncherInfo = {
+  nodePath: "/home/linuxbrew/.linuxbrew/Cellar/node/26.0.0/bin/node",
+  cliEntry: "/home/linuxbrew/.linuxbrew/Cellar/kandev/0.52.0/libexec/cli/bin/cli.js",
+  kind: "homebrew",
+  bundleDir: "/home/linuxbrew/.linuxbrew/Cellar/kandev/0.52.0/libexec",
+  version: "0.52.0",
+  shimPath: "/home/linuxbrew/.linuxbrew/bin/kandev",
+};
+
 describe("renderSystemdUnit", () => {
   it("renders a user unit with absolute paths and --headless", () => {
     const unit = renderSystemdUnit({
@@ -183,6 +196,48 @@ describe("renderSystemdUnit", () => {
     });
     expect(unit).toContain(
       `ExecStart="/Library/Application Support/node" "/Library/Application Support/kandev/cli.js" --headless`,
+    );
+  });
+
+  // Regression: https://github.com/kdlbs/kandev/issues/1162 — the unit must not
+  // bake version-pinned Cellar paths for Homebrew installs, or it crash-loops
+  // after `brew upgrade` deletes the old Cellar dir.
+  it("uses the floating Homebrew shim in ExecStart when shimPath is set", () => {
+    const unit = renderSystemdUnit({
+      launcher: SHIM_LAUNCHER,
+      homeDir: "/home/alice/.kandev",
+      logDir: "/home/alice/.kandev/logs",
+      mode: "user",
+    });
+    expect(unit).toContain("ExecStart=/home/linuxbrew/.linuxbrew/bin/kandev --headless");
+    // No version-pinned Cellar paths anywhere in the unit (node or kandev).
+    expect(unit).not.toContain("/Cellar/");
+  });
+
+  it("drops KANDEV_BUNDLE_DIR / KANDEV_VERSION and the versioned node bin dir when using the shim", () => {
+    const unit = renderSystemdUnit({
+      launcher: SHIM_LAUNCHER,
+      homeDir: "/home/alice/.kandev",
+      logDir: "/home/alice/.kandev/logs",
+      mode: "user",
+    });
+    expect(unit).not.toContain("KANDEV_BUNDLE_DIR");
+    expect(unit).not.toContain("KANDEV_VERSION");
+    // PATH must fall back to the static base path, not the versioned Cellar node bin.
+    expect(unit).toContain(
+      "Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin",
+    );
+  });
+
+  it("keeps versioned node + cli.js ExecStart for npm installs (no shim)", () => {
+    const unit = renderSystemdUnit({
+      launcher: NPM_LAUNCHER,
+      homeDir: "/home/alice/.kandev",
+      logDir: "/home/alice/.kandev/logs",
+      mode: "user",
+    });
+    expect(unit).toContain(
+      "ExecStart=/usr/local/bin/node /usr/local/lib/node_modules/kandev/bin/cli.js --headless",
     );
   });
 });
@@ -383,5 +438,20 @@ describe("renderLaunchdPlist", () => {
       mode: "user",
     });
     expect(plist).not.toContain("<key>UserName</key>");
+  });
+
+  // Regression: https://github.com/kdlbs/kandev/issues/1162
+  it("uses the floating Homebrew shim in ProgramArguments when shimPath is set", () => {
+    const plist = renderLaunchdPlist({
+      launcher: SHIM_LAUNCHER,
+      homeDir: "/Users/alice/.kandev",
+      logDir: "/Users/alice/.kandev/logs",
+      mode: "user",
+    });
+    expect(plist).toContain("<string>/home/linuxbrew/.linuxbrew/bin/kandev</string>");
+    expect(plist).toContain("<string>--headless</string>");
+    expect(plist).not.toContain("/Cellar/");
+    expect(plist).not.toContain("KANDEV_BUNDLE_DIR");
+    expect(plist).not.toContain("KANDEV_VERSION");
   });
 });
