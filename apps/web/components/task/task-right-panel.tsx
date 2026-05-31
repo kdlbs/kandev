@@ -21,7 +21,9 @@ import { useDefaultLayout } from "@/lib/layout/use-default-layout";
 import { SessionTabs, type SessionTab } from "@/components/session-tabs";
 import { useRepositoryScripts } from "@/hooks/domains/workspace/use-repository-scripts";
 import { useTerminals } from "@/hooks/domains/session/use-terminals";
+import { isTerminalBusy } from "@/lib/terminal/terminal-busy-registry";
 import { ParkedTerminalsMenu } from "@/components/task/parked-terminals-menu";
+import { CloseTerminalConfirmDialog } from "@/components/task/close-terminal-confirm-dialog";
 import type { RepositoryScript } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 
@@ -184,6 +186,47 @@ function useRightPanelTabs({
   return { tabs, handleTabChange };
 }
 
+/**
+ * Gate the X-button close behind a confirm when the terminal looks busy or is
+ * a script terminal — mirrors the dockview tab and mobile picker so every
+ * close path warns before it destroys a running shell. Idle shells still close
+ * immediately via the underlying `handleCloseTab`.
+ */
+function useConfirmableTerminalClose({
+  terminals,
+  handleCloseTab,
+  destroyTerminal,
+}: {
+  terminals: Terminal[];
+  handleCloseTab: (event: MouseEvent, terminalId: string) => void;
+  destroyTerminal: (id: string) => Promise<void> | void;
+}) {
+  const [pendingClose, setPendingClose] = useState<Terminal | null>(null);
+
+  const handleAskCloseTab = useCallback(
+    (event: MouseEvent, terminalId: string) => {
+      const terminal = terminals.find((t) => t.id === terminalId);
+      const needsConfirm = !!terminal && (terminal.type === "script" || isTerminalBusy(terminalId));
+      if (needsConfirm) {
+        event.preventDefault();
+        event.stopPropagation();
+        setPendingClose(terminal);
+        return;
+      }
+      handleCloseTab(event, terminalId);
+    },
+    [terminals, handleCloseTab],
+  );
+
+  const handleConfirmClose = useCallback(() => {
+    if (!pendingClose) return;
+    void destroyTerminal(pendingClose.id);
+    setPendingClose(null);
+  }, [pendingClose, destroyTerminal]);
+
+  return { pendingClose, setPendingClose, handleAskCloseTab, handleConfirmClose };
+}
+
 type CollapsedRightPanelProps = {
   topPanel: ReactNode;
   tabs: SessionTab[];
@@ -331,18 +374,17 @@ function RightPanelContent({
   );
 }
 
-const TaskRightPanel = memo(function TaskRightPanel({
-  topPanel,
-  sessionId = null,
-  repositoryId = null,
+function useTaskRightPanel({
+  sessionId,
+  repositoryId,
   initialScripts = [],
   initialTerminals,
-}: TaskRightPanelProps) {
-  const rightPanelIds = ["top", "bottom"];
+}: Required<Pick<TaskRightPanelProps, "sessionId" | "repositoryId">> &
+  Pick<TaskRightPanelProps, "initialScripts" | "initialTerminals">) {
   const rightLayoutKey = "task-layout-right-v2";
   const { defaultLayout: rightLayout, onLayoutChanged: onRightLayoutChange } = useDefaultLayout({
     id: rightLayoutKey,
-    panelIds: rightPanelIds,
+    panelIds: ["top", "bottom"],
     baseLayout: DEFAULT_RIGHT_LAYOUT,
   });
 
@@ -357,22 +399,15 @@ const TaskRightPanel = memo(function TaskRightPanel({
   const closeLayoutPreview = useLayoutStore((state) => state.closePreview);
 
   // Use the terminals hook — env-keyed for shell ops, session-keyed for tab UX
+  const terminalsApi = useTerminals({ sessionId, environmentId, initialTerminals });
   const {
     terminals,
-    parkedTerminals,
     activeTab,
-    terminalTabValue,
-    addTerminal,
     handleCloseDevTab: baseHandleCloseDevTab,
     handleCloseTab,
-    handleRunCommand,
     renameTerminal,
-    resumeTerminal,
     destroyTerminal,
-    isStoppingDev,
-    devProcessId,
-    devOutput,
-  } = useTerminals({ sessionId, environmentId, initialTerminals });
+  } = terminalsApi;
 
   // Wrap handleCloseDevTab to also close the layout preview
   const handleCloseDevTab = useCallback(
@@ -393,39 +428,96 @@ const TaskRightPanel = memo(function TaskRightPanel({
     isBottomCollapsed,
     setRightPanelActiveTab,
   });
+  const closeConfirm = useConfirmableTerminalClose({ terminals, handleCloseTab, destroyTerminal });
   const { tabs, handleTabChange } = useRightPanelTabs({
     hasScripts,
     terminals,
     handleCloseDevTab,
-    handleCloseTab,
+    handleCloseTab: closeConfirm.handleAskCloseTab,
     renameTerminal,
     destroyTerminal,
     sessionId,
     setRightPanelActiveTab,
   });
+
+  return {
+    ...terminalsApi,
+    rightLayoutKey,
+    rightLayout,
+    onRightLayoutChange,
+    isBottomCollapsed,
+    setIsBottomCollapsed,
+    environmentId,
+    scripts,
+    tabs,
+    handleTabChange,
+    closeConfirm,
+  };
+}
+
+const TaskRightPanel = memo(function TaskRightPanel({
+  topPanel,
+  sessionId = null,
+  repositoryId = null,
+  initialScripts = [],
+  initialTerminals,
+}: TaskRightPanelProps) {
+  const {
+    terminals,
+    parkedTerminals,
+    terminalTabValue,
+    addTerminal,
+    handleRunCommand,
+    resumeTerminal,
+    destroyTerminal,
+    isStoppingDev,
+    devProcessId,
+    devOutput,
+    rightLayoutKey,
+    rightLayout,
+    onRightLayoutChange,
+    isBottomCollapsed,
+    setIsBottomCollapsed,
+    environmentId,
+    scripts,
+    tabs,
+    handleTabChange,
+    closeConfirm,
+  } = useTaskRightPanel({ sessionId, repositoryId, initialScripts, initialTerminals });
+  const { pendingClose, setPendingClose, handleConfirmClose } = closeConfirm;
   return (
-    <RightPanelContent
-      isBottomCollapsed={isBottomCollapsed}
-      topPanel={topPanel}
-      tabs={tabs}
-      terminalTabValue={terminalTabValue}
-      handleTabChange={handleTabChange}
-      addTerminal={addTerminal}
-      setIsBottomCollapsed={setIsBottomCollapsed}
-      rightLayoutKey={rightLayoutKey}
-      rightLayout={rightLayout}
-      onRightLayoutChange={onRightLayoutChange}
-      scripts={scripts}
-      handleRunCommand={handleRunCommand}
-      terminals={terminals}
-      parkedTerminals={parkedTerminals}
-      resumeTerminal={resumeTerminal}
-      destroyTerminal={destroyTerminal}
-      environmentId={environmentId}
-      devProcessId={devProcessId}
-      devOutput={devOutput}
-      isStoppingDev={isStoppingDev}
-    />
+    <>
+      <RightPanelContent
+        isBottomCollapsed={isBottomCollapsed}
+        topPanel={topPanel}
+        tabs={tabs}
+        terminalTabValue={terminalTabValue}
+        handleTabChange={handleTabChange}
+        addTerminal={addTerminal}
+        setIsBottomCollapsed={setIsBottomCollapsed}
+        rightLayoutKey={rightLayoutKey}
+        rightLayout={rightLayout}
+        onRightLayoutChange={onRightLayoutChange}
+        scripts={scripts}
+        handleRunCommand={handleRunCommand}
+        terminals={terminals}
+        parkedTerminals={parkedTerminals}
+        resumeTerminal={resumeTerminal}
+        destroyTerminal={destroyTerminal}
+        environmentId={environmentId}
+        devProcessId={devProcessId}
+        devOutput={devOutput}
+        isStoppingDev={isStoppingDev}
+      />
+      <CloseTerminalConfirmDialog
+        open={pendingClose !== null}
+        terminalName={pendingClose?.label ?? ""}
+        onOpenChange={(open) => {
+          if (!open) setPendingClose(null);
+        }}
+        onConfirm={handleConfirmClose}
+      />
+    </>
   );
 });
 

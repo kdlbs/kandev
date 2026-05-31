@@ -11,6 +11,8 @@ import {
 } from "@kandev/ui/context-menu";
 import { useAppStore } from "@/components/state-provider";
 import { destroyUserShell, renameUserShell } from "@/lib/api/domains/user-shell-api";
+import { isTerminalBusy } from "@/lib/terminal/terminal-busy-registry";
+import { CloseTerminalConfirmDialog } from "./close-terminal-confirm-dialog";
 import { markTerminalPanelTerminateClose } from "./dockview-layout-setup";
 
 /**
@@ -72,14 +74,21 @@ function useTerminalTabState(stampedEnv: string | undefined, terminalId: string,
   const seq = shell?.seq;
   const showBadge = isOrdinary && ordinaryCount > 1 && typeof seq === "number";
   const displayName = pickDisplayName(shell, apiTitle);
-  return { shell, isOrdinary, seq, showBadge, displayName };
+  const closable = shell?.closable ?? true;
+  return { shell, isOrdinary, seq, showBadge, displayName, closable };
+}
+
+function shouldConfirmTerminalClose(terminalId: string, shell: { initialCommand?: string } | null) {
+  if (shell?.initialCommand) return true;
+  return isTerminalBusy(terminalId);
 }
 
 export function TerminalTab(props: IDockviewPanelHeaderProps) {
   const { terminalId, taskID: stampedTaskID, environmentId: stampedEnv } = extractParams(props);
   const activeTaskID = useAppStore((s) => s.tasks?.activeTaskId ?? null);
   const taskID = stampedTaskID ?? activeTaskID ?? null;
-  const { shell, isOrdinary, seq, showBadge, displayName } = useTerminalTabState(
+  const removeUserShellStore = useAppStore((s) => s.removeUserShell);
+  const { shell, isOrdinary, seq, showBadge, displayName, closable } = useTerminalTabState(
     stampedEnv,
     terminalId,
     props.api.title ?? "Terminal",
@@ -93,6 +102,7 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
   }, [props.api, displayName]);
 
   const [isRenaming, setIsRenaming] = useState(false);
+  const [confirmClose, setConfirmClose] = useState(false);
   const handleCommitRename = useRenameCommitter({
     isOrdinary,
     stampedEnv,
@@ -102,40 +112,80 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
     onDone: () => setIsRenaming(false),
   });
 
+  const destroyAndClosePanel = useCallback(async () => {
+    if (!stampedEnv) {
+      props.api.close();
+      return;
+    }
+    try {
+      await destroyUserShell(stampedEnv, terminalId, taskID ?? undefined);
+      removeUserShellStore(stampedEnv, terminalId);
+      markTerminalPanelTerminateClose(props.api.id);
+      props.api.close();
+    } catch (error) {
+      console.error("close terminal:", error);
+    }
+  }, [stampedEnv, terminalId, taskID, removeUserShellStore, props.api]);
+
+  const handleCloseTab = useCallback(() => {
+    if (!closable) return;
+    if (shouldConfirmTerminalClose(terminalId, shell)) {
+      setConfirmClose(true);
+      return;
+    }
+    void destroyAndClosePanel();
+  }, [closable, terminalId, shell, destroyAndClosePanel]);
+
   const renameInitial =
     shell?.customName && shell.customName !== "" ? shell.customName : displayName;
   const seqBadgeForInput = showBadge && typeof seq === "number" ? seq : null;
 
   return (
-    <ContextMenu>
-      <ContextMenuTrigger
-        className="flex h-full items-center cursor-pointer select-none"
-        data-testid={`terminal-tab-${terminalId}`}
-      >
-        {isRenaming ? (
-          <TerminalTabRenameInput
-            initial={renameInitial}
-            seqBadge={seqBadgeForInput}
-            onCommit={handleCommitRename}
-            onCancel={() => setIsRenaming(false)}
-          />
-        ) : (
-          <TerminalTabBody {...props} showBadge={showBadge} seq={seq} displayName={displayName} />
-        )}
-      </ContextMenuTrigger>
-      <TerminalTabMenu
-        terminalId={terminalId}
-        taskID={taskID}
-        environmentId={stampedEnv ?? null}
-        canMutate={isOrdinary}
-        onStartRename={() => setIsRenaming(true)}
-        onClosePanel={() => props.api.close()}
-        onTerminatePanel={() => {
-          markTerminalPanelTerminateClose(props.api.id);
-          props.api.close();
-        }}
+    <>
+      <ContextMenu>
+        <ContextMenuTrigger
+          className="flex h-full items-center cursor-pointer select-none"
+          data-testid={`terminal-tab-${terminalId}`}
+        >
+          {isRenaming ? (
+            <TerminalTabRenameInput
+              initial={renameInitial}
+              seqBadge={seqBadgeForInput}
+              onCommit={handleCommitRename}
+              onCancel={() => setIsRenaming(false)}
+            />
+          ) : (
+            <TerminalTabBody
+              {...props}
+              showBadge={showBadge}
+              seq={seq}
+              displayName={displayName}
+              closable={closable}
+              terminalId={terminalId}
+              onCloseTab={handleCloseTab}
+            />
+          )}
+        </ContextMenuTrigger>
+        <TerminalTabMenu
+          terminalId={terminalId}
+          taskID={taskID}
+          environmentId={stampedEnv ?? null}
+          canMutate={isOrdinary}
+          onStartRename={() => setIsRenaming(true)}
+          onClosePanel={() => props.api.close()}
+          onTerminatePanel={() => {
+            markTerminalPanelTerminateClose(props.api.id);
+            props.api.close();
+          }}
+        />
+      </ContextMenu>
+      <CloseTerminalConfirmDialog
+        open={confirmClose}
+        terminalName={displayName}
+        onOpenChange={setConfirmClose}
+        onConfirm={() => void destroyAndClosePanel()}
       />
-    </ContextMenu>
+    </>
   );
 }
 
@@ -175,6 +225,9 @@ function useRenameCommitter({
 function TerminalTabBody({
   showBadge,
   seq,
+  closable,
+  terminalId,
+  onCloseTab,
   // `displayName` is computed in the parent but consumed via the
   // api.setTitle effect — drop it here so it doesn't leak into the
   // DOM via the {...props} spread below (React warning otherwise).
@@ -184,10 +237,23 @@ function TerminalTabBody({
   showBadge: boolean;
   seq: number | undefined;
   displayName: string;
+  closable: boolean;
+  onCloseTab: () => void;
+  terminalId: string;
 }) {
   void _displayName;
+  const tabContentRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!closable) return;
+    const closeAction = tabContentRef.current?.querySelector(".dv-default-tab-action");
+    if (!closeAction) return;
+    closeAction.setAttribute("data-testid", `terminal-tab-close-${terminalId}`);
+    return () => closeAction.removeAttribute("data-testid");
+  }, [closable, terminalId, props.api.id]);
+
   return (
-    <div className="flex h-full items-center">
+    <div ref={tabContentRef} className="flex h-full items-center">
       {showBadge && (
         <span
           data-testid={`terminal-tab-seq-${seq}`}
@@ -196,7 +262,11 @@ function TerminalTabBody({
           {seq}
         </span>
       )}
-      <DockviewDefaultTab {...props} />
+      <DockviewDefaultTab
+        {...props}
+        hideClose={!closable}
+        closeActionOverride={closable ? onCloseTab : undefined}
+      />
     </div>
   );
 }

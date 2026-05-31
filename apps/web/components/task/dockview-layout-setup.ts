@@ -14,7 +14,7 @@ import {
 import { setEnvLayout, setGlobalSidebarWidth } from "@/lib/local-storage";
 import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
 import { stopVscode } from "@/lib/api/domains/vscode-api";
-import { parkUserShell, stopUserShell } from "@/lib/api/domains/user-shell-api";
+import { stopUserShell } from "@/lib/api/domains/user-shell-api";
 import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
 import { snapshotColumnWidths, formatWidthsSnapshot } from "@/lib/state/dockview-widths-debug";
 import { enforcePinnedTargets, setSashDragging } from "@/lib/state/dockview-pinned-enforce";
@@ -347,8 +347,8 @@ function resolveSessionForEntry(
   return match?.[0] ?? active;
 }
 
-/** Tab close → ordinary terminals park (PTY + DB row survive, reappear in
- *  the "+" menu); scripts/bottom-panel/legacy passthrough still destroy. */
+/** Tab close → destroy the shell (PTY stopped, DB row removed). When the tab
+ *  component already destroyed the shell it marks the panel id so we skip. */
 function handleTerminalPanelClosed(
   appStore: StoreApi<AppState>,
   panelId: string,
@@ -364,19 +364,9 @@ function handleTerminalPanelClosed(
   const fallbackEnv = active ? (state.environmentIdBySessionId[active] ?? null) : null;
   const envForTerminal = stampedEnv || fallbackEnv;
   if (!envForTerminal) return;
-  const shell = state.userShells.byEnvironmentId[envForTerminal]?.find(
-    (s) => s.terminalId === terminalId,
-  );
-  if (shell?.kind === "ordinary") {
-    parkUserShell(terminalId, stampedTaskID).then(
-      () => state.updateUserShell(envForTerminal, terminalId, { state: "parked" }),
-      (err: unknown) => console.error("park terminal on tab close:", err),
-    );
-  } else {
-    stopUserShell(envForTerminal, terminalId, stampedTaskID).catch((err: unknown) =>
-      console.warn("stop terminal on tab close:", err),
-    );
-  }
+  stopUserShell(envForTerminal, terminalId, stampedTaskID)
+    .then(() => state.removeUserShell(envForTerminal, terminalId))
+    .catch((err: unknown) => console.warn("stop terminal on tab close:", err));
 }
 
 export function setupPortalCleanup(

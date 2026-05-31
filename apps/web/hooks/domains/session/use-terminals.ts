@@ -6,7 +6,6 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { stopProcess } from "@/lib/api";
 import {
   destroyUserShell,
-  parkUserShell,
   resumeUserShell,
   renameUserShell,
   createUserShell,
@@ -273,58 +272,36 @@ function useCloseDevTab({
 type CloseTabOpts = {
   environmentId: string | null;
   taskID: string | null;
-  terminals: Terminal[];
   removeTerminal: (id: string) => void;
   removeUserShellStore: (environmentId: string, terminalId: string) => void;
-  updateUserShell: (
-    environmentId: string,
-    terminalId: string,
-    patch: { state?: "open" | "parked" },
-  ) => void;
 };
 
 /**
- * X-button close. For ordinary terminals this PARKS the tab (PTY keeps
- * running, user can resume from the "Parked terminals" submenu). For
- * scripts and any non-ordinary terminal it falls back to destroy.
- *
- * The local tab is removed only AFTER the backend call resolves — that
- * way a transient failure (network, backend 500) leaves the tab on the
- * strip rather than disappearing into thin air. The next `user_shell.list`
- * poll then reflects whatever state the backend actually settled on.
+ * X-button close. Destroys the shell (PTY stopped, DB row removed). The local
+ * tab is removed only AFTER the backend call resolves — that way a transient
+ * failure (network, backend 500) leaves the tab on the strip rather than
+ * disappearing into thin air. The next `user_shell.list` poll then reflects
+ * whatever state the backend actually settled on.
  */
 function useCloseTab({
   environmentId,
   taskID,
-  terminals,
   removeTerminal,
   removeUserShellStore,
-  updateUserShell,
 }: CloseTabOpts) {
   return useCallback(
     (event: MouseEvent, terminalId: string) => {
       event.preventDefault();
       event.stopPropagation();
       if (!environmentId) return;
-      const term = terminals.find((t) => t.id === terminalId);
-      const isOrdinaryTab = term?.kind === "ordinary";
-      if (isOrdinaryTab) {
-        parkUserShell(terminalId, taskID ?? undefined)
-          .then(() => {
-            updateUserShell(environmentId, terminalId, { state: "parked" });
-            removeTerminal(terminalId);
-          })
-          .catch((error) => console.error("Failed to park terminal:", error));
-      } else {
-        destroyUserShell(environmentId, terminalId, taskID ?? undefined)
-          .then(() => {
-            removeUserShellStore(environmentId, terminalId);
-            removeTerminal(terminalId);
-          })
-          .catch((error) => console.error("Failed to destroy terminal:", error));
-      }
+      destroyUserShell(environmentId, terminalId, taskID ?? undefined)
+        .then(() => {
+          removeUserShellStore(environmentId, terminalId);
+          removeTerminal(terminalId);
+        })
+        .catch((error) => console.error("Failed to destroy terminal:", error));
     },
-    [environmentId, taskID, terminals, removeTerminal, removeUserShellStore, updateUserShell],
+    [environmentId, taskID, removeTerminal, removeUserShellStore],
   );
 }
 
@@ -478,10 +455,8 @@ function useTerminalActions({
   const handleCloseTab = useCloseTab({
     environmentId,
     taskID,
-    terminals,
     removeTerminal,
     removeUserShellStore,
-    updateUserShell,
   });
 
   const { renameTerminal, resumeTerminal, destroyTerminal } = useManagedTerminalActions({
