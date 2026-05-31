@@ -25,7 +25,7 @@ export function SentryIssueButton() {
             className="cursor-pointer px-2 gap-1"
             onClick={() => setOpen(true)}
           >
-            <IconBug className="h-4 w-4" />
+            <IconBrandSentry className="h-4 w-4" />
             <span className="text-xs font-medium">Sentry</span>
           </Button>
         </TooltipTrigger>
