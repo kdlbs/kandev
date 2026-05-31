@@ -176,7 +176,7 @@ function npmPrefixFromCliEntry(cliEntry: string): string | undefined {
 function restartCommand(
   install: ServiceInstallMetadata,
   platform: NodeJS.Platform,
-  uid = os.userInfo().uid,
+  uid?: number,
 ): PlannedCommand {
   if (platform === "linux") {
     return install.mode === "system"
@@ -184,7 +184,10 @@ function restartCommand(
       : { command: "systemctl", args: ["--user", "restart", SERVICE_NAME] };
   }
   if (platform === "darwin") {
-    const domain = install.mode === "system" ? "system" : `gui/${uid}`;
+    // Resolve the uid lazily inside the darwin branch — Linux never needs it, so
+    // os.userInfo() shouldn't run there.
+    const resolvedUid = uid ?? os.userInfo().uid;
+    const domain = install.mode === "system" ? "system" : `gui/${resolvedUid}`;
     return { command: "launchctl", args: ["kickstart", "-k", `${domain}/${LAUNCHD_LABEL}`] };
   }
   throw new Error(`unsupported platform "${platform}"`);
@@ -225,6 +228,9 @@ function openSelfUpdateLog(intent: SelfUpdateIntent): SelfUpdateLog | null {
   }
   try {
     fs.mkdirSync(dir, { recursive: true });
+    // Self-update logs can contain install paths/env; keep the dir owner-only
+    // even if it pre-existed with looser perms.
+    fs.chmodSync(dir, 0o700);
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     const filePath = path.join(dir, `self-update-${stamp}.log`);
     const fd = fs.openSync(filePath, "a");

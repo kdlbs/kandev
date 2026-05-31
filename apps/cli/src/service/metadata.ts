@@ -65,6 +65,12 @@ export function writeServiceInstallMetadata(
   metadataPath: string,
   metadata: ServiceInstallMetadata,
 ): void {
-  fs.mkdirSync(path.dirname(metadataPath), { recursive: true, mode: 0o700 });
+  const dir = path.dirname(metadataPath);
+  // `mode` on mkdir/writeFile only applies when the path is created. chmod after
+  // so a pre-existing service dir / install.json is tightened to owner-only too
+  // (it can hold launcher paths and the metadata that gates self-update).
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  fs.chmodSync(dir, 0o700);
   fs.writeFileSync(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`, { mode: 0o600 });
+  fs.chmodSync(metadataPath, 0o600);
 }

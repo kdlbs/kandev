@@ -155,6 +155,9 @@ export async function runStart({
   // Production mode: use warn log level for clean output unless verbose/debug
   const showOutput = verbose || debug;
   fs.mkdirSync(resolveDataDir(), { recursive: true });
+  // The data dir holds the SQLite DB; keep it owner-only even if it pre-existed
+  // with a looser umask-derived mode.
+  fs.chmodSync(resolveDataDir(), 0o700);
   const dbPath = resolveDatabasePath();
   const logLevel =
     process.env.KANDEV_LOG_LEVEL?.trim() || (debug ? "debug" : verbose ? "info" : "warn");
