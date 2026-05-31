@@ -179,12 +179,14 @@ function ChangesPanelTimeline(props: TimelineProps) {
   const hasSomethingAfterStaged = (props.hasPRFiles && hasLocalChanges) || showCommitsList;
   // Auto-expand the first (topmost) visible section so the panel never opens
   // looking empty (e.g. review mode: PR + Commits both collapsed). Unstaged /
-  // Staged keep their always-expanded default; only PR and Commits are gated.
+  // Staged keep their always-expanded default; PR and Commits are gated. Large
+  // PR diffs (>5 files) skip PR Changes and expand Commits instead.
   const firstSection = firstVisibleSection({
     hasPRFiles: props.hasPRFiles,
     hasUnstaged: props.hasUnstaged,
     hasStaged: props.hasStaged,
     showCommitsList,
+    prFileCount: props.prFiles.length,
   });
 
   return (
