@@ -133,6 +133,54 @@ func TestService_ApplyRejectsConcurrentSelfUpdate(t *testing.T) {
 	close(release)
 }
 
+func TestService_ApplyGuardExpiresAfterTTL(t *testing.T) {
+	homeDir := t.TempDir()
+	metadataPath, _ := writeServiceInstallForTest(t, homeDir, serviceInstallMetadata{
+		Manager:     "systemd",
+		Mode:        "user",
+		Kind:        "npm",
+		HomeDir:     homeDir,
+		LogDir:      filepath.Join(homeDir, "logs"),
+		ServicePath: filepath.Join(homeDir, "kandev.service"),
+		NodePath:    "/usr/bin/node",
+		CLIEntry:    "/usr/lib/node_modules/kandev/bin/cli.js",
+	})
+	t.Setenv(envRunningAsService, "true")
+	t.Setenv(envServiceMode, "user")
+	t.Setenv(envServiceManager, "systemd")
+	t.Setenv(envInstallKind, "npm")
+	t.Setenv(envServiceMetadata, metadataPath)
+
+	pool := newTestPool(t)
+	if err := persistence.WriteLatestVersion(pool.Writer(), "v1.0.1", "https://example/v1.0.1", time.Now().UTC()); err != nil {
+		t.Fatalf("write latest: %v", err)
+	}
+	svc := NewService(pool, "v1.0.0", nil, logger.Default(),
+		WithHomeDir(homeDir),
+		WithJobs(jobs.NewTracker(nil, logger.Default())),
+		WithApplyRunner(func(_ context.Context, _ applyRequest) (map[string]interface{}, error) {
+			// Launch "succeeds" (helper started) but never restarts the backend,
+			// so the guard is not released by an error path.
+			return map[string]interface{}{"status": "started"}, nil
+		}),
+	)
+	clock := time.Now()
+	svc.now = func() time.Time { return clock }
+
+	if _, err := svc.Apply(context.Background(), "UPDATE"); err != nil {
+		t.Fatalf("first Apply: %v", err)
+	}
+	// Within the TTL a second apply is still refused.
+	if _, err := svc.Apply(context.Background(), "UPDATE"); !errors.Is(err, ErrApplyInProgress) {
+		t.Fatalf("within TTL err=%v want ErrApplyInProgress", err)
+	}
+	// Past the TTL the guard expires (helper assumed dead) and a retry succeeds.
+	clock = clock.Add(applyGuardTTL + time.Second)
+	if _, err := svc.Apply(context.Background(), "UPDATE"); err != nil {
+		t.Fatalf("after TTL Apply: %v", err)
+	}
+}
+
 func TestService_ApplyRejectsWrongConfirm(t *testing.T) {
 	svc := NewService(newTestPool(t), "v1.0.0", nil, logger.Default())
 	_, err := svc.Apply(context.Background(), "NOPE")

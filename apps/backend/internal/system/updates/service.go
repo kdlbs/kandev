@@ -28,6 +28,12 @@ const PollInterval = 6 * time.Hour
 // ManualCheckWindow is the minimum gap between two manual /check calls.
 const ManualCheckWindow = 30 * time.Second
 
+// applyGuardTTL bounds how long a single self-update launch blocks further
+// applies. It matches the frontend progress timeout: past this window we assume
+// the helper failed without restarting the backend and allow a retry, instead
+// of wedging apply behind a permanent 409.
+const applyGuardTTL = 5 * time.Minute
+
 // ErrRateLimited indicates that a manual check was denied because the
 // per-process rate limiter window has not yet elapsed.
 var ErrRateLimited = errors.New("updates check rate limited")
@@ -100,9 +106,12 @@ type Service struct {
 	now        func() time.Time
 	applyRun   applyRunner
 
-	// applyInFlight guards against two concurrent /updates/apply calls each
-	// launching a helper that would race the reinstall/restart.
-	applyInFlight atomic.Bool
+	// applyStartedAt holds the unix-nano timestamp of the last self-update launch
+	// (0 = none in flight). It guards against two concurrent /updates/apply calls
+	// each launching a helper that would race the reinstall/restart, and
+	// self-expires after applyGuardTTL so a helper that exits 0 but never restarts
+	// the backend cannot wedge apply behind a permanent 409.
+	applyStartedAt atomic.Int64
 
 	// releaseURL is the GitHub endpoint hit by Check + the poller; defaults
 	// to DefaultReleaseURL and can be overridden by SetReleaseURL for tests.
@@ -264,16 +273,17 @@ func (s *Service) Apply(ctx context.Context, confirm string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// Hold the in-flight guard across the launch. It is released only when the
-	// launch itself fails; a successful launch keeps it held because the helper
-	// restarts the backend shortly, which clears the flag by replacing the
-	// process.
-	if !s.applyInFlight.CompareAndSwap(false, true) {
+	// Claim the in-flight guard across the launch. A successful launch keeps it
+	// held because the helper restarts the backend shortly (which clears it by
+	// replacing the process); a launch error releases it for an immediate retry.
+	// The guard self-expires after applyGuardTTL (see claimApplyGuard) so a
+	// helper that exits 0 but never restarts cannot block apply forever.
+	if !s.claimApplyGuard() {
 		return "", ErrApplyInProgress
 	}
 	intentPath, intent, err := s.writeApplyIntent(resp, metadata)
 	if err != nil {
-		s.applyInFlight.Store(false)
+		s.applyStartedAt.Store(0)
 		return "", err
 	}
 	req := applyRequest{
@@ -283,11 +293,27 @@ func (s *Service) Apply(ctx context.Context, confirm string) (string, error) {
 	jobID := s.jobs.Start(ctx, "self-update", func(jobCtx context.Context) (map[string]interface{}, error) {
 		result, runErr := s.applyRun(jobCtx, req)
 		if runErr != nil {
-			s.applyInFlight.Store(false)
+			s.applyStartedAt.Store(0)
 		}
 		return result, runErr
 	})
 	return jobID, nil
+}
+
+// claimApplyGuard atomically reserves the self-update guard. It succeeds when no
+// apply is in flight or the previous one started more than applyGuardTTL ago
+// (assumed dead); it returns false while a recent apply still holds it.
+func (s *Service) claimApplyGuard() bool {
+	now := s.now().UnixNano()
+	for {
+		prev := s.applyStartedAt.Load()
+		if prev != 0 && now-prev < applyGuardTTL.Nanoseconds() {
+			return false
+		}
+		if s.applyStartedAt.CompareAndSwap(prev, now) {
+			return true
+		}
+	}
 }
 
 // RetryAfter exposes the limiter's remaining window so the HTTP handler can
