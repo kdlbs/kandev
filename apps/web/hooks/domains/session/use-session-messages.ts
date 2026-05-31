@@ -401,13 +401,21 @@ function useResyncOnTurnSettle(
   connectionStatus: string,
   store: ReturnType<typeof useAppStoreApi>,
 ) {
-  const prevStateRef = useRef<TaskSessionState | null>(null);
+  const prevRef = useRef<{ sessionId: string | null; state: TaskSessionState | null }>({
+    sessionId: null,
+    state: null,
+  });
   useEffect(() => {
-    const prev = prevStateRef.current;
-    prevStateRef.current = taskSessionState;
+    const prev = prevRef.current;
+    prevRef.current = { sessionId: taskSessionId, state: taskSessionState };
     if (!taskSessionId || connectionStatus !== "connected") return;
-    if (!isTurnSettleTransition(prev, taskSessionState)) return;
-    debug("resync on turn settle", { sessionId: taskSessionId, prev, next: taskSessionState });
+    const prevState = prev.sessionId === taskSessionId ? prev.state : null;
+    if (!isTurnSettleTransition(prevState, taskSessionState)) return;
+    debug("resync on turn settle", {
+      sessionId: taskSessionId,
+      prev: prevState,
+      next: taskSessionState,
+    });
     fetchAndStoreMessages(taskSessionId, store).catch(() => {});
   }, [taskSessionId, taskSessionState, connectionStatus, store]);
 }
