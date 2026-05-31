@@ -163,6 +163,26 @@ func TestOSLimitsChecker_TopConsumersInMessage(t *testing.T) {
 	}
 }
 
+func TestOSLimitsChecker_WatchConsumersShowWatchCount(t *testing.T) {
+	s := makeWatchSample(0.85)
+	s.TopConsumers = []Consumer{
+		{PID: 99, Command: "webpack", FDCount: 2, WatchCount: 8412},
+	}
+	probe := &stubProbe{samples: []Sample{s}}
+	checker := NewOSLimitsChecker(probe)
+
+	issues := checker.Check(context.Background())
+	if len(issues) != 1 {
+		t.Fatalf("expected 1 issue, got %d", len(issues))
+	}
+	if !strings.Contains(issues[0].Message, "8412 watches") {
+		t.Errorf("watches message should show WatchCount, got %q", issues[0].Message)
+	}
+	if strings.Contains(issues[0].Message, "2 fds") {
+		t.Errorf("watches message must not show FDCount, got %q", issues[0].Message)
+	}
+}
+
 func TestOSLimitsChecker_NameCategory(t *testing.T) {
 	checker := NewOSLimitsChecker()
 	if checker.Name() != "OS resource limits" {

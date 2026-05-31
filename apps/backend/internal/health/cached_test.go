@@ -3,6 +3,7 @@ package health
 import (
 	"context"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -46,16 +47,18 @@ func TestCachedChecker_CacheHitOnSecondCall(t *testing.T) {
 }
 
 func TestCachedChecker_CacheExpiresAfterTTL(t *testing.T) {
-	inner := &countingChecker{issues: []Issue{{ID: "test_issue", Severity: SeverityWarning}}}
-	cc := NewCachedChecker(inner, time.Millisecond)
+	synctest.Test(t, func(t *testing.T) {
+		inner := &countingChecker{issues: []Issue{{ID: "test_issue", Severity: SeverityWarning}}}
+		cc := NewCachedChecker(inner, time.Minute)
 
-	cc.Check(context.Background())
-	time.Sleep(5 * time.Millisecond)
-	cc.Check(context.Background())
+		cc.Check(context.Background())
+		time.Sleep(2 * time.Minute) // fake time advances instantly inside synctest bubble
+		cc.Check(context.Background())
 
-	if inner.calls != 2 {
-		t.Errorf("inner called %d times, want 2 (second call after TTL expiry)", inner.calls)
-	}
+		if inner.calls != 2 {
+			t.Errorf("inner called %d times, want 2 (second call after TTL expiry)", inner.calls)
+		}
+	})
 }
 
 func TestCachedChecker_NilResultIsCached(t *testing.T) {

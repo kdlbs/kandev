@@ -3,6 +3,7 @@ package oslimits
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/kandev/kandev/internal/health"
@@ -62,7 +63,10 @@ func sampleIssues(s Sample) []health.Issue {
 	if s.UsageRatio >= errorThreshold {
 		severity = health.SeverityError
 	}
-	pct := int(s.UsageRatio * 100)
+	pct := int(math.Round(s.UsageRatio * 100))
+	if pct > 100 {
+		pct = 100
+	}
 	title := fmt.Sprintf("%s limit nearly exhausted", s.Name)
 	msg := buildMessage(s, pct)
 	return []health.Issue{{
@@ -85,7 +89,7 @@ func buildMessage(s Sample, pct int) string {
 	base := fmt.Sprintf("%d/%d %s in use (%d%%)", s.Used, s.Limit, s.Unit, pct)
 	base += unitAdvice(s.Unit)
 	if len(s.TopConsumers) > 0 {
-		base += " Top consumers: " + formatConsumers(s.TopConsumers)
+		base += " Top consumers: " + formatConsumers(s.TopConsumers, s.Unit)
 	}
 	return base
 }
@@ -103,17 +107,23 @@ func unitAdvice(unit string) string {
 	}
 }
 
-func formatConsumers(consumers []Consumer) string {
+func formatConsumers(consumers []Consumer, unit string) string {
 	parts := make([]string, 0, len(consumers))
 	for _, c := range consumers {
-		parts = append(parts, formatConsumer(c))
+		parts = append(parts, formatConsumer(c, unit))
 	}
 	return strings.Join(parts, ", ")
 }
 
-func formatConsumer(c Consumer) string {
-	if c.Command != "" {
-		return fmt.Sprintf("%s (pid %d, %d fds)", c.Command, c.PID, c.FDCount)
+func formatConsumer(c Consumer, unit string) string {
+	count := c.FDCount
+	countLabel := "fds"
+	if unit == unitWatches {
+		count = c.WatchCount
+		countLabel = "watches"
 	}
-	return fmt.Sprintf("pid %d (%d fds)", c.PID, c.FDCount)
+	if c.Command != "" {
+		return fmt.Sprintf("%s (pid %d, %d %s)", c.Command, c.PID, count, countLabel)
+	}
+	return fmt.Sprintf("pid %d (%d %s)", c.PID, count, countLabel)
 }
