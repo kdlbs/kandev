@@ -90,6 +90,49 @@ func TestService_ApplyRejectsUnsupportedInstall(t *testing.T) {
 	}
 }
 
+func TestService_ApplyRejectsConcurrentSelfUpdate(t *testing.T) {
+	homeDir := t.TempDir()
+	metadataPath, _ := writeServiceInstallForTest(t, homeDir, serviceInstallMetadata{
+		Manager:     "systemd",
+		Mode:        "user",
+		Kind:        "npm",
+		HomeDir:     homeDir,
+		LogDir:      filepath.Join(homeDir, "logs"),
+		ServicePath: filepath.Join(homeDir, "kandev.service"),
+		NodePath:    "/usr/bin/node",
+		CLIEntry:    "/usr/lib/node_modules/kandev/bin/cli.js",
+	})
+	t.Setenv(envRunningAsService, "true")
+	t.Setenv(envServiceMode, "user")
+	t.Setenv(envServiceManager, "systemd")
+	t.Setenv(envInstallKind, "npm")
+	t.Setenv(envServiceMetadata, metadataPath)
+
+	pool := newTestPool(t)
+	if err := persistence.WriteLatestVersion(pool.Writer(), "v1.0.1", "https://example/v1.0.1", time.Now().UTC()); err != nil {
+		t.Fatalf("write latest: %v", err)
+	}
+	// Block the first helper so its job stays running while the second apply is
+	// attempted, making the in-flight guard deterministic.
+	release := make(chan struct{})
+	svc := NewService(pool, "v1.0.0", nil, logger.Default(),
+		WithHomeDir(homeDir),
+		WithJobs(jobs.NewTracker(nil, logger.Default())),
+		WithApplyRunner(func(_ context.Context, _ applyRequest) (map[string]interface{}, error) {
+			<-release
+			return map[string]interface{}{"status": "started"}, nil
+		}),
+	)
+
+	if _, err := svc.Apply(context.Background(), "UPDATE"); err != nil {
+		t.Fatalf("first Apply: %v", err)
+	}
+	if _, err := svc.Apply(context.Background(), "UPDATE"); !errors.Is(err, ErrApplyInProgress) {
+		t.Fatalf("second Apply err=%v want ErrApplyInProgress", err)
+	}
+	close(release)
+}
+
 func TestService_ApplyRejectsWrongConfirm(t *testing.T) {
 	svc := NewService(newTestPool(t), "v1.0.0", nil, logger.Default())
 	_, err := svc.Apply(context.Background(), "NOPE")

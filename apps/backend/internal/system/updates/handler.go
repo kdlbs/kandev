@@ -68,7 +68,8 @@ func HandleApply(svc *Service) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		if errors.Is(err, ErrNoUpdateAvailable) || errors.Is(err, ErrApplyUnsupported) {
+		if errors.Is(err, ErrNoUpdateAvailable) || errors.Is(err, ErrApplyUnsupported) ||
+			errors.Is(err, ErrApplyInProgress) {
 			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 			return
 		}

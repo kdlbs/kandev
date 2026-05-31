@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -42,6 +43,10 @@ var ErrApplyUnsupported = errors.New("update apply unsupported")
 // ErrNoUpdateAvailable indicates that the cached release state does not show
 // a newer semver than the running binary.
 var ErrNoUpdateAvailable = errors.New("no update available")
+
+// ErrApplyInProgress indicates that a self-update helper has already been
+// launched and not yet completed, so a second apply is refused.
+var ErrApplyInProgress = errors.New("a self-update is already in progress")
 
 // devVersion is the sentinel used by the ldflags-injected current version
 // when no release tag was baked in (i.e. local dev builds).
@@ -94,6 +99,10 @@ type Service struct {
 	getenv     func(string) string
 	now        func() time.Time
 	applyRun   applyRunner
+
+	// applyInFlight guards against two concurrent /updates/apply calls each
+	// launching a helper that would race the reinstall/restart.
+	applyInFlight atomic.Bool
 
 	// releaseURL is the GitHub endpoint hit by Check + the poller; defaults
 	// to DefaultReleaseURL and can be overridden by SetReleaseURL for tests.
@@ -255,8 +264,16 @@ func (s *Service) Apply(ctx context.Context, confirm string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// Hold the in-flight guard across the launch. It is released only when the
+	// launch itself fails; a successful launch keeps it held because the helper
+	// restarts the backend shortly, which clears the flag by replacing the
+	// process.
+	if !s.applyInFlight.CompareAndSwap(false, true) {
+		return "", ErrApplyInProgress
+	}
 	intentPath, intent, err := s.writeApplyIntent(resp, metadata)
 	if err != nil {
+		s.applyInFlight.Store(false)
 		return "", err
 	}
 	req := applyRequest{
@@ -264,7 +281,11 @@ func (s *Service) Apply(ctx context.Context, confirm string) (string, error) {
 		Intent:     intent,
 	}
 	jobID := s.jobs.Start(ctx, "self-update", func(jobCtx context.Context) (map[string]interface{}, error) {
-		return s.applyRun(jobCtx, req)
+		result, runErr := s.applyRun(jobCtx, req)
+		if runErr != nil {
+			s.applyInFlight.Store(false)
+		}
+		return result, runErr
 	})
 	return jobID, nil
 }
