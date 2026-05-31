@@ -189,11 +189,12 @@ test.describe("Agent profile deletion", () => {
 
     await expect(testPage).toHaveURL(/\/settings\/agents$/, { timeout: 15_000 });
 
-    // The eager-disable path in prepareProfileDeletion (cycle 5 fix) must
-    // have flipped the watcher row to enabled=0 and stamped a cause —
-    // without it the watcher would stay live, orphaned at the now-deleted
-    // profile, and only self-heal whenever the next external issue happens
-    // to match its filter (could be never for a narrow filter).
+    // The eager-disable path (DeleteProfile disables referencing watchers
+    // after the row delete succeeds) must have flipped the watcher row to
+    // enabled=0 and stamped a cause — without it the watcher would stay live,
+    // orphaned at the now-deleted profile, and only self-heal whenever the
+    // next external issue happens to match its filter (could be never for a
+    // narrow filter).
     const after = await apiClient.getLinearIssueWatch(seedData.workspaceId, watch.id);
     expect(after).not.toBeNull();
     expect(after!.enabled).toBe(false);

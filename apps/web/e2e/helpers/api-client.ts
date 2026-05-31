@@ -1456,10 +1456,11 @@ export class ApiClient {
   } | null> {
     // No single-watch GET on the route table (only POST/PATCH/DELETE/trigger);
     // walk the workspace list and find by id. Scoped by workspace_id so the
-    // result set stays small even if the install accumulates watchers.
-    const watches = await this.request<
-      Array<{ id: string; enabled: boolean; lastError?: string; lastErrorAt?: string }>
-    >("GET", `/api/v1/linear/watches/issue?workspace_id=${encodeURIComponent(workspaceId)}`);
+    // result set stays small even if the install accumulates watchers. The
+    // list endpoint wraps the rows in a { watches: [...] } envelope.
+    const { watches } = await this.request<{
+      watches: Array<{ id: string; enabled: boolean; lastError?: string; lastErrorAt?: string }>;
+    }>("GET", `/api/v1/linear/watches/issue?workspace_id=${encodeURIComponent(workspaceId)}`);
     return watches.find((w) => w.id === watchId) ?? null;
   }
 
