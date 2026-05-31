@@ -126,6 +126,17 @@ function SecretField({ form, loading, update, hasSavedSecret }: SecretFieldProps
         onChange={(e) => update("secret", e.target.value)}
         disabled={loading}
       />
+      <p className="text-xs text-muted-foreground">
+        Create a new personal token at{" "}
+        <a
+          className="underline"
+          href="https://sentry.io/settings/account/api/auth-tokens/new-token/"
+          target="_blank"
+          rel="noreferrer"
+        >
+          sentry.io → Settings → Auth Tokens
+        </a>
+      </p>
     </div>
   );
 }
