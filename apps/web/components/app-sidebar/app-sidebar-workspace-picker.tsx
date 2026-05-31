@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
-import { IconCheck, IconChevronDown, IconFolder, IconPlus } from "@tabler/icons-react";
+import { IconCheck, IconChevronDown, IconPlus } from "@tabler/icons-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -12,38 +12,28 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { useAppStore } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
-import { cn } from "@/lib/utils";
 
-type AppSidebarWorkspacePickerProps = {
-  collapsed: boolean;
-};
-
-function WorkspaceTrigger({ collapsed, activeName }: { collapsed: boolean; activeName: string }) {
+/**
+ * Compact, secondary workspace switcher inlined after the Kandev brand in the
+ * sidebar header. Muted by default so the brand stays primary; the active
+ * workspace name truncates with a small chevron hinting the dropdown. Only
+ * rendered while the sidebar is expanded — the collapsed rail omits it.
+ */
+function WorkspaceTrigger({ activeName }: { activeName: string }) {
   return (
     <button
       type="button"
       data-testid="sidebar-workspace-trigger"
-      className={cn(
-        "flex items-center gap-1.5 rounded-md hover:bg-muted/60 cursor-pointer text-foreground/80",
-        collapsed
-          ? "h-7 w-7 justify-center mx-auto p-0"
-          : "flex-1 min-w-0 px-1.5 py-1 text-sm font-semibold",
-      )}
+      className="group/ws flex min-w-0 flex-1 items-center gap-1 rounded-md px-1.5 py-1 text-sm font-medium text-muted-foreground hover:bg-muted/60 hover:text-foreground cursor-pointer transition-colors"
       aria-label="Switch workspace"
     >
-      {collapsed ? (
-        <IconFolder className="h-4 w-4" />
-      ) : (
-        <>
-          <span className="flex-1 min-w-0 truncate text-left sidebar-fade-in">{activeName}</span>
-          <IconChevronDown className="h-3.5 w-3.5 text-muted-foreground/70 shrink-0" />
-        </>
-      )}
+      <span className="min-w-0 flex-1 truncate text-left sidebar-fade-in">{activeName}</span>
+      <IconChevronDown className="h-3.5 w-3.5 shrink-0 opacity-50 transition-opacity group-hover/ws:opacity-80" />
     </button>
   );
 }
 
-export function AppSidebarWorkspacePicker({ collapsed }: AppSidebarWorkspacePickerProps) {
+export function AppSidebarWorkspacePicker() {
   const router = useRouter();
   const officeEnabled = useFeature("office");
   const workspaces = useAppStore((s) => s.workspaces);
@@ -69,7 +59,7 @@ export function AppSidebarWorkspacePicker({ collapsed }: AppSidebarWorkspacePick
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
-        <WorkspaceTrigger collapsed={collapsed} activeName={activeName} />
+        <WorkspaceTrigger activeName={activeName} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-60">
         {workspaces.items.length === 0 ? (

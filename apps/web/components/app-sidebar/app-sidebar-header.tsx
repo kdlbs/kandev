@@ -16,6 +16,8 @@ const COLLAPSE_BUTTON_CLASS = "h-7 w-7 shrink-0 cursor-pointer";
 
 export function AppSidebarHeader({ collapsed, onToggleCollapse }: AppSidebarHeaderProps) {
   if (collapsed) {
+    // Minimal rail: brand home + expand. The workspace switcher lives only in
+    // the expanded header — a lone workspace glyph here read as noise.
     return (
       <div className="flex flex-col items-center gap-1 px-1 py-1.5 border-b border-border shrink-0">
         <Tooltip>
@@ -30,7 +32,6 @@ export function AppSidebarHeader({ collapsed, onToggleCollapse }: AppSidebarHead
           </TooltipTrigger>
           <TooltipContent side="right">Kandev</TooltipContent>
         </Tooltip>
-        <AppSidebarWorkspacePicker collapsed />
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -50,20 +51,25 @@ export function AppSidebarHeader({ collapsed, onToggleCollapse }: AppSidebarHead
   }
 
   // Single h-10 row — brand · workspace picker · collapse — so the sidebar's
-  // top section lines up with the page/dockview top bar (also h-10).
+  // top section lines up with the page/dockview top bar (also h-10). Brand and
+  // workspace share the same text size so they sit on a common baseline; the
+  // brand carries weight/colour, the workspace stays muted and secondary.
   return (
-    <div className="flex items-center gap-1.5 h-10 px-2 shrink-0 border-b border-border">
+    <div className="flex items-center gap-1.5 h-10 px-3 shrink-0 border-b border-border">
       <Link
         href="/"
         aria-label="Kandev home"
         className={cn(
-          "flex items-center shrink-0 cursor-pointer",
+          "shrink-0 cursor-pointer text-sm font-semibold tracking-tight",
           "text-foreground hover:text-foreground/80 transition-colors",
         )}
       >
-        <span className="text-base font-bold tracking-tight leading-none">Kandev</span>
+        Kandev
       </Link>
-      <AppSidebarWorkspacePicker collapsed={false} />
+      <span aria-hidden className="shrink-0 select-none text-muted-foreground/30">
+        /
+      </span>
+      <AppSidebarWorkspacePicker />
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
