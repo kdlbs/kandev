@@ -54,6 +54,19 @@ func TestResolveACPLogDir_Precedence(t *testing.T) {
 		}
 	})
 
+	t.Run("expands bare tilde home dir", func(t *testing.T) {
+		userHome, err := os.UserHomeDir()
+		if err != nil || userHome == "" {
+			t.Skip("no user home dir on this platform")
+		}
+		t.Setenv(envLogDir, "")
+		t.Setenv(envHomeDir, "~")
+		want := filepath.Join(userHome, "logs", "acp")
+		if got := resolveACPLogDir(); got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
 	t.Run("falls back to $HOME/.kandev when home dir unset", func(t *testing.T) {
 		userHome, err := os.UserHomeDir()
 		if err != nil || userHome == "" {

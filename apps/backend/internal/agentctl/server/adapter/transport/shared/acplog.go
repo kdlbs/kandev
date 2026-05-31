@@ -114,12 +114,15 @@ func resolveACPLogDir() string {
 // config.expandTilde. Returns the input unchanged if expansion is unnecessary
 // or fails.
 func expandTilde(p string) string {
-	if !strings.HasPrefix(p, "~/") {
+	if p != "~" && !strings.HasPrefix(p, "~/") {
 		return p
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return p
+	}
+	if p == "~" {
+		return home
 	}
 	return filepath.Join(home, p[2:])
 }
