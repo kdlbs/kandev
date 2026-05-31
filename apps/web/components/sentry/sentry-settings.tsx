@@ -105,6 +105,24 @@ function SecretField({ form, loading, update, hasSavedSecret }: SecretFieldProps
           sentry.io/settings/account/api/auth-tokens
         </a>
       </p>
+      <p className="text-xs text-muted-foreground">
+        Grant <span className="font-medium text-foreground">Read</span> access to these scopes when
+        creating the token:
+      </p>
+      <ul className="ml-4 list-disc text-xs text-muted-foreground space-y-0.5">
+        <li>
+          <span className="font-medium text-foreground">Organization</span> (<code>org:read</code>)
+          — resolve the org and list issues
+        </li>
+        <li>
+          <span className="font-medium text-foreground">Project</span> (<code>project:read</code>) —
+          list projects and scope searches
+        </li>
+        <li>
+          <span className="font-medium text-foreground">Issue &amp; Event</span> (
+          <code>event:read</code>) — browse issues and run watchers
+        </li>
+      </ul>
     </div>
   );
 }
