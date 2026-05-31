@@ -133,29 +133,13 @@ type OrgFieldProps = {
   loading: boolean;
   update: UpdateFn;
   orgs: string[];
-  hasSecret: boolean;
   loadingProjects: boolean;
 };
 
-function OrgField({ form, loading, update, orgs, hasSecret, loadingProjects }: OrgFieldProps) {
-  // Before a token is saved there are no projects to derive orgs from, so fall
-  // back to free text (gating on hasSecret avoids the input flipping to a
-  // dropdown mid-typing). Once orgs are known, offer them as a dropdown.
-  if (!hasSecret || orgs.length === 0) {
-    return (
-      <div className="space-y-1.5">
-        <Label htmlFor="sentry-org">Default organization slug</Label>
-        <Input
-          id="sentry-org"
-          data-testid="sentry-org-input"
-          placeholder="my-org"
-          value={form.defaultOrgSlug}
-          onChange={(e) => update("defaultOrgSlug", e.target.value)}
-          disabled={loading}
-        />
-      </div>
-    );
-  }
+// OrgField is a dropdown populated from the API. It is only rendered once the
+// token is validated, so there is no free-text fallback — the options always
+// come from the org list the verified token can see.
+function OrgField({ form, loading, update, orgs, loadingProjects }: OrgFieldProps) {
   return (
     <div className="space-y-1.5">
       <Label htmlFor="sentry-org">Default organization</Label>
@@ -500,6 +484,10 @@ export function SentryConnectionSection() {
   const missingSecret = !s.config?.hasSecret && !s.form.secret;
   const disableSave = s.saving || missingSecret;
   const disableTest = missingSecret;
+  // Org/project selectors only make sense once the token is validated (saved
+  // and the auth-health probe passed) — before that they'd be empty, so we hide
+  // them entirely rather than show an unusable free-text input.
+  const validated = !!s.config?.hasSecret && !!s.config?.lastOk;
 
   return (
     <SettingsSection
@@ -517,22 +505,23 @@ export function SentryConnectionSection() {
             update={s.update}
             hasSavedSecret={!!s.config?.hasSecret}
           />
-          <OrgField
-            form={s.form}
-            loading={s.loading}
-            update={s.update}
-            orgs={s.orgs}
-            hasSecret={!!s.config?.hasSecret}
-            loadingProjects={s.loadingProjects}
-          />
-          {s.config?.hasSecret && (
-            <ProjectSelector
-              form={s.form}
-              loading={s.loading}
-              update={s.update}
-              projects={s.projects}
-              loadingProjects={s.loadingProjects}
-            />
+          {validated && (
+            <>
+              <OrgField
+                form={s.form}
+                loading={s.loading}
+                update={s.update}
+                orgs={s.orgs}
+                loadingProjects={s.loadingProjects}
+              />
+              <ProjectSelector
+                form={s.form}
+                loading={s.loading}
+                update={s.update}
+                projects={s.projects}
+                loadingProjects={s.loadingProjects}
+              />
+            </>
           )}
           <TestResultAlert result={s.testResult} />
           <Separator />
