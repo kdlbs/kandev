@@ -293,35 +293,50 @@ func (m *Manager) AuthenticateBySessionID(ctx context.Context, sessionID, method
 	return execution.agentctl.Authenticate(ctx, methodID)
 }
 
-// reapplySessionModeAfterReset re-applies a previously-active session permission
-// mode (e.g. auto / accept-edits) to a freshly (re)initialized ACP session so the
+// reapplySessionModeAfterReset re-applies the active session permission mode
+// (e.g. auto / accept-edits) to a freshly (re)initialized ACP session so the
 // user's choice survives a context reset instead of silently reverting to the
-// agent's default. prev is the mode state captured before the reset; a nil prev or
-// an empty CurrentModeID is a no-op (the session was already at its default mode).
+// agent's default.
 //
-// This is the deterministic restore mirror of the metadata-based plan-mode
-// preservation, addressing issue #1183 where reset_agent_context dropped the mode.
+// The mode to restore is resolved from the persisted session_mode in the DB
+// (the authoritative, synchronously-written source — see persistSessionMode and
+// the set_session_mode action), falling back to prev (the in-memory mode state
+// captured before the reset) only when no provider is wired or nothing is
+// persisted. Preferring the DB avoids re-applying a stale in-memory mode when a
+// set_session_mode action persisted a newer mode in the same on_enter batch
+// before its agent mode event updated modeState. A nil/empty resolved mode is a
+// no-op. Addresses issue #1183.
 func (m *Manager) reapplySessionModeAfterReset(ctx context.Context, execution *AgentExecution, newSessionID string, prev *CachedModeState) {
-	if prev == nil || prev.CurrentModeID == "" || execution.agentctl == nil {
+	if execution.agentctl == nil {
 		return
 	}
-	if err := execution.agentctl.SetMode(ctx, newSessionID, prev.CurrentModeID); err != nil {
+	fallback := ""
+	var availableModes []streams.SessionModeInfo
+	if prev != nil {
+		fallback = prev.CurrentModeID
+		availableModes = prev.AvailableModes
+	}
+	mode := m.effectiveSessionMode(ctx, execution, fallback)
+	if mode == "" {
+		return
+	}
+	if err := execution.agentctl.SetMode(ctx, newSessionID, mode); err != nil {
 		m.logger.Warn("failed to re-apply session mode after context reset",
 			zap.String("execution_id", execution.ID),
-			zap.String("mode", prev.CurrentModeID),
+			zap.String("mode", mode),
 			zap.Error(err))
 		return
 	}
 	// Restore the cache too: the fresh session would otherwise report the agent's
 	// default mode, leaving modeState stale relative to what we just re-applied.
 	execution.SetModeState(&CachedModeState{
-		CurrentModeID:  prev.CurrentModeID,
-		AvailableModes: prev.AvailableModes,
+		CurrentModeID:  mode,
+		AvailableModes: availableModes,
 	})
 	m.logger.Info("re-applied session mode after context reset",
 		zap.String("execution_id", execution.ID),
 		zap.String("session_id", execution.SessionID),
-		zap.String("mode", prev.CurrentModeID))
+		zap.String("mode", mode))
 }
 
 // ResetAgentContext resets the agent's conversation context. For ACP agents that support

@@ -441,6 +441,49 @@ func TestManager_ResetAgentContext_ReappliesSessionMode(t *testing.T) {
 	require.Equal(t, "acceptEdits", exec.GetModeState().CurrentModeID)
 }
 
+// TestManager_RestartAgentProcess_PrefersPersistedModeOverStaleCache is the
+// regression for the ordering hazard flagged on #1188: when a set_session_mode
+// action persists a newer mode to the DB in the same on_enter batch just before
+// reset_agent_context, the in-memory modeState is still the old value (its agent
+// mode event is async). The restart must restore the persisted (DB) mode, not the
+// stale cached one.
+func TestManager_RestartAgentProcess_PrefersPersistedModeOverStaleCache(t *testing.T) {
+	mgr := newTestManager()
+	mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{
+		infos: map[string]*WorkspaceInfo{
+			"session-1": {SessionID: "session-1", SessionMode: "acceptEdits"},
+		},
+	}
+	mock := newRestartMockAgentctlServer(t, false, false)
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+
+	exec := &AgentExecution{
+		ID:             "exec-mode-stale",
+		TaskID:         "task-1",
+		SessionID:      "session-1",
+		AgentProfileID: "profile-1",
+		ACPSessionID:   "old-session",
+		AgentCommand:   "auggie --model test",
+		Status:         v1.AgentStatusRunning,
+		WorkspacePath:  "/workspace",
+		agentctl:       client,
+		promptDoneCh:   make(chan PromptCompletionSignal, 1),
+	}
+	// Stale in-memory cache: the previous (pre-action) mode.
+	exec.SetModeState(&CachedModeState{CurrentModeID: "default"})
+	require.NoError(t, mgr.executionStore.Add(exec))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	require.NoError(t, mgr.RestartAgentProcess(ctx, exec.ID))
+
+	require.Contains(t, mock.getWSActions(), "agent.session.set_mode")
+	require.NotNil(t, exec.GetModeState())
+	require.Equal(t, "acceptEdits", exec.GetModeState().CurrentModeID,
+		"restart must restore the persisted DB mode, not the stale in-memory cache")
+}
+
 // --- SetSessionModel passthrough tests ---
 
 // TestManager_SetSessionModel_Passthrough_PersistsOverride is the regression test for
