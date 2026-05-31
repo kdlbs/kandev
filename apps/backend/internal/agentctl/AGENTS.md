@@ -59,6 +59,18 @@ Env knobs (all optional): `KANDEV_DEBUG_ACP_MAX_FILES` (default 200), `KANDEV_DE
 
 `claude-agent-acp` tags certain tool calls with `_meta.claudeCode.toolName` (e.g. `Monitor`, `ScheduleWakeup`, `Agent` for subagents) and may carry results in `_meta.claudeCode.toolResponse`. These are normalized into typed `streams.NormalizedPayload` kinds in `server/adapter/transport/acp/`. The established pattern is **one file per recognized tool** (`monitor.go`, `wakeup.go`, `subagent.go`), each with a defensive untyped-map recognizer (`recognize*`/`is*Meta`/`extract*`), a typed payload, and a sibling `*_test.go`. `convertToolCallUpdate` stashes `title`/`Meta` into the normalizer args; result enrichment happens in `convertToolCallResultUpdate`. To add another claude-acp meta-tool, copy that shape — don't inline detection in `adapter.go`. Detection can also be cross-agent: subagent recognition keys off Claude's `_meta`, OpenCode's tool `title`, and Cursor's `rawInput._toolName`.
 
+### Subagent tool-call nesting: what each agent emits
+
+Kandev renders subagents (the `Task` tool) as cards and *wants* to nest each subagent's internal tool calls under its card (via `parent_tool_call_id`, see `tool-subagent-message.tsx`). Reality differs per agent — verified from captured `~/.kandev/logs/acp/` frames of a "spawn 3 subagents that each run `sleep 30`" prompt:
+
+| Agent | Subagent-internal tool calls | Nestable? |
+|---|---|---|
+| **Claude** | emitted **flat on the parent session**, **no `parentToolCallId`** | No — children present but unlinked |
+| **Cursor** | **not emitted over ACP at all** (Task `tool_call_update` carries only `{durationMs, isBackground}`) | No — no child data exists |
+| **OpenCode** | emitted into a **separate child ACP session** (the `metadata.sessionId` we store as `SubagentTaskPayload.ChildSessionID`) | Only by merging that child session — they never reach the parent stream |
+
+Implications: a `parentToolCallId` field (whether upstream-provided or heuristically inferred) only helps the Claude/Cursor flat-stream case. **OpenCode needs a child-session merge** — fold the child session's tool calls into the card using the stored `child_session_id`. No timing heuristic can attribute flat parent-stream calls when multiple subagents run in parallel.
+
 ## Further scoped notes
 
 - `server/api/AGENTS.md` — reverse-proxy body rewriting (`Accept-Encoding`) and iframe-blocking header stripping.
