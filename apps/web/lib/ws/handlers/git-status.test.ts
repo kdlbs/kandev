@@ -79,28 +79,65 @@ function statusUpdateEvent(timestamp: string, diff = "-old\n+new"): GitStatusUpd
   };
 }
 
+function repoStatusUpdateEvent(
+  timestamp: string,
+  repositoryName: string,
+  modifiedPath: string,
+): GitStatusUpdateEvent {
+  return {
+    type: "status_update",
+    session_id: SESSION,
+    timestamp,
+    status: {
+      branch: "main",
+      remote_branch: null,
+      modified: [modifiedPath],
+      added: [],
+      deleted: [],
+      untracked: [],
+      renamed: [],
+      ahead: 0,
+      behind: 0,
+      repository_name: repositoryName,
+      files: {
+        [modifiedPath]: {
+          path: modifiedPath,
+          status: "modified",
+          staged: false,
+          additions: 1,
+          deletions: 0,
+        },
+      },
+    },
+  };
+}
+
+function seedSessionCommits(store: StoreApi<AppState>) {
+  store.getState().setSessionCommits(SESSION, [
+    {
+      id: "id",
+      session_id: SESSION,
+      commit_sha: "old",
+      parent_sha: "parent",
+      commit_message: "msg",
+      author_name: "a",
+      author_email: "a@a",
+      files_changed: 0,
+      insertions: 0,
+      deletions: 0,
+      committed_at: "2026-05-28T00:00:00Z",
+      created_at: "2026-05-28T00:00:00Z",
+    },
+  ]);
+}
+
 describe("git-status WS handler — stale-while-revalidate", () => {
   let store: StoreApi<AppState>;
 
   beforeEach(() => {
     invalidateCumulativeDiffCacheMock.mockClear();
     store = makeStore();
-    store.getState().setSessionCommits(SESSION, [
-      {
-        id: "id",
-        session_id: SESSION,
-        commit_sha: "old",
-        parent_sha: "parent",
-        commit_message: "msg",
-        author_name: "a",
-        author_email: "a@a",
-        files_changed: 0,
-        insertions: 0,
-        deletions: 0,
-        committed_at: "2026-05-28T00:00:00Z",
-        created_at: "2026-05-28T00:00:00Z",
-      },
-    ]);
+    seedSessionCommits(store);
   });
 
   it("commits_reset bumps refetchTrigger and keeps existing commits visible", () => {
@@ -163,5 +200,19 @@ describe("git-status WS handler — stale-while-revalidate", () => {
     handler(gitEvent(statusUpdateEvent(STATUS_TIME_2, "-old\n+newer")));
 
     expect(invalidateCumulativeDiffCacheMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not invalidate or overwrite env status for duplicate sibling-repo snapshots", () => {
+    const handler = gitStatusHandler(store);
+
+    handler(gitEvent(repoStatusUpdateEvent(STATUS_TIME_1, "frontend", "frontend.tsx")));
+    handler(gitEvent(repoStatusUpdateEvent(STATUS_TIME_2, "backend", "backend.go")));
+    const envAfterBackend = store.getState().gitStatus.byEnvironmentId[SESSION];
+    invalidateCumulativeDiffCacheMock.mockClear();
+
+    handler(gitEvent(repoStatusUpdateEvent("2026-05-28T00:00:03Z", "backend", "backend.go")));
+
+    expect(store.getState().gitStatus.byEnvironmentId[SESSION]).toBe(envAfterBackend);
+    expect(invalidateCumulativeDiffCacheMock).not.toHaveBeenCalled();
   });
 });

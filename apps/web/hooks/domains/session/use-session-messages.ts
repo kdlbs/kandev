@@ -47,10 +47,6 @@ export function isTurnSettleTransition(
   return ACTIVE_SESSION_STATES.has(prev) && SETTLED_SESSION_STATES.has(next);
 }
 
-export function isActiveTurnCompletion(prev: string | null, next: string | null): boolean {
-  return prev !== null && next === null;
-}
-
 export function hasUserPromptInActiveTurn(messages: Message[], activeTurnId: string | null) {
   if (!activeTurnId) return false;
   return messages.some(
@@ -446,27 +442,6 @@ function useResyncOnTurnSettle(
   }, [taskSessionId, taskSessionState, connectionStatus, store]);
 }
 
-function useResyncOnActiveTurnComplete(
-  taskSessionId: string | null,
-  activeTurnId: string | null,
-  connectionStatus: string,
-  store: ReturnType<typeof useAppStoreApi>,
-) {
-  const prevRef = useRef<{ sessionId: string | null; activeTurnId: string | null }>({
-    sessionId: null,
-    activeTurnId: null,
-  });
-  useEffect(() => {
-    const prev = prevRef.current;
-    prevRef.current = { sessionId: taskSessionId, activeTurnId };
-    if (!taskSessionId || connectionStatus !== "connected") return;
-    const prevTurnId = prev.sessionId === taskSessionId ? prev.activeTurnId : null;
-    if (!isActiveTurnCompletion(prevTurnId, activeTurnId)) return;
-    debug("resync on active turn complete", { sessionId: taskSessionId, prevTurnId });
-    fetchAndStoreMessages(taskSessionId, store).catch(() => {});
-  }, [taskSessionId, activeTurnId, connectionStatus, store]);
-}
-
 function useRunningMessageBackfill(
   taskSessionId: string | null,
   shouldBackfill: boolean,
@@ -475,11 +450,18 @@ function useRunningMessageBackfill(
   useEffect(() => {
     if (!taskSessionId || !shouldBackfill) return;
 
+    let inFlight = false;
     const sync = () => {
+      if (inFlight) return;
+      inFlight = true;
       debug("running backfill", { sessionId: taskSessionId });
-      fetchAndStoreMessages(taskSessionId, store).catch((err) => {
-        debug("running backfill failed", { sessionId: taskSessionId, err });
-      });
+      fetchAndStoreMessages(taskSessionId, store)
+        .catch((err) => {
+          debug("running backfill failed", { sessionId: taskSessionId, err });
+        })
+        .finally(() => {
+          inFlight = false;
+        });
     };
     const initial = window.setTimeout(sync, RUNNING_BACKFILL_INITIAL_DELAY_MS);
     const interval = window.setInterval(sync, RUNNING_BACKFILL_INTERVAL_MS);
@@ -623,7 +605,6 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
 
   useSessionSubscription(taskSessionId, connectionStatus, isSessionStartingOrUnknown, store);
   useResyncOnTurnSettle(taskSessionId, taskSessionState, connectionStatus, store);
-  useResyncOnActiveTurnComplete(taskSessionId, activeTurnId, connectionStatus, store);
   useRunningMessageBackfill(
     taskSessionId,
     shouldRunMessageBackfill({

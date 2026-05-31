@@ -133,4 +133,24 @@ describe("session-runtime gitStatus multi-repo routing", () => {
       "-old\n+newer",
     );
   });
+
+  it("does not overwrite byEnvironmentId for duplicate sibling-repo snapshots", () => {
+    useStore
+      .getState()
+      .setGitStatus(SESSION, entry({ modified: [FRONTEND_FILE], repository_name: REPO_FRONTEND }));
+    useStore
+      .getState()
+      .setGitStatus(SESSION, entry({ modified: [BACKEND_FILE], repository_name: REPO_BACKEND }));
+    const envAfterBackend = useStore.getState().gitStatus.byEnvironmentId[SESSION];
+
+    useStore
+      .getState()
+      .setGitStatus(SESSION, entry({ modified: [BACKEND_FILE], repository_name: REPO_BACKEND }));
+
+    const state = useStore.getState();
+    expect(state.gitStatus.byEnvironmentId[SESSION]).toBe(envAfterBackend);
+    expect(state.gitStatus.byEnvironmentRepo[SESSION][REPO_BACKEND].modified).toEqual([
+      BACKEND_FILE,
+    ]);
+  });
 });

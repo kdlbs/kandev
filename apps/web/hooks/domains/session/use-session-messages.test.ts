@@ -29,7 +29,6 @@ afterEach(() => {
 import {
   hasUserPromptInActiveTurn,
   hasUserOrAgentMessage,
-  isActiveTurnCompletion,
   isTurnSettleTransition,
   shouldRunMessageBackfill,
   runBackfillRound,
@@ -155,18 +154,6 @@ describe("isTurnSettleTransition", () => {
 
   it("is false when the next state is unknown", () => {
     expect(isTurnSettleTransition("RUNNING", null)).toBe(false);
-  });
-});
-
-describe("isActiveTurnCompletion", () => {
-  it("is true when an active turn clears", () => {
-    expect(isActiveTurnCompletion("turn-1", null)).toBe(true);
-  });
-
-  it("is false for initial null and turn switches", () => {
-    expect(isActiveTurnCompletion(null, null)).toBe(false);
-    expect(isActiveTurnCompletion(null, "turn-1")).toBe(false);
-    expect(isActiveTurnCompletion("turn-1", "turn-2")).toBe(false);
   });
 });
 

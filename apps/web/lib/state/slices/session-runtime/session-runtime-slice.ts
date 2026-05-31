@@ -108,11 +108,30 @@ function hasFileListsChanged(existing: GitStatusEntry, incoming: GitStatusEntry)
 }
 
 function hasFileStatsChanged(existing: GitStatusEntry, incoming: GitStatusEntry): boolean {
+  // Fast early-exit: aggregate totals differ → sameFiles would also return false,
+  // but this avoids the per-file deep comparison when the gross numbers differ.
   const existingTotal = computeFileStats(existing.files);
   const newTotal = computeFileStats(incoming.files);
   return (
     existingTotal.additions !== newTotal.additions || existingTotal.deletions !== newTotal.deletions
   );
+}
+
+/** True when setGitStatus would write at least one map entry for this update. */
+export function gitStatusWouldMutate(
+  gitStatusState: SessionRuntimeSliceState["gitStatus"],
+  envKey: string,
+  gitStatus: GitStatusEntry,
+): boolean {
+  const repoName = gitStatus.repository_name ?? "";
+  const existingEnv = gitStatusState.byEnvironmentId[envKey];
+  const existingRepo = gitStatusState.byEnvironmentRepo[envKey]?.[repoName];
+  const repoChanged = !existingRepo || hasGitStatusChanged(existingRepo, gitStatus);
+  if (repoName !== "") {
+    return repoChanged;
+  }
+  const envChanged = !existingEnv || hasGitStatusChanged(existingEnv, gitStatus);
+  return envChanged || repoChanged;
 }
 
 /** Compare two git status entries to determine if a meaningful change occurred. */
@@ -379,26 +398,32 @@ export const createSessionRuntimeSlice: StateCreator<
       // single-status path; the per-repo map mirrors the same entry under an
       // empty key so consumers using only byEnvironmentRepo still see it.
       const repoName = gitStatus.repository_name ?? "";
-      const existing = draft.gitStatus.byEnvironmentId[envKey];
+      const repoMap = (draft.gitStatus.byEnvironmentRepo[envKey] ??= {});
+      const existingRepo = repoMap[repoName];
+      const repoChanged = !existingRepo || hasGitStatusChanged(existingRepo, gitStatus);
       if (IS_DEBUG) {
         debugGit("setGitStatus", {
           sessionId,
           envKey,
           usingFallbackKey: envKey === sessionId,
           repoName,
-          prevFileCount: Object.keys(existing?.files ?? {}).length,
+          prevFileCount: Object.keys(existingRepo?.files ?? {}).length,
           nextFileCount: Object.keys(gitStatus.files ?? {}).length,
-          prevRepoKeys: Object.keys(draft.gitStatus.byEnvironmentRepo[envKey] ?? {}),
-          willOverwriteByEnv: !existing || hasGitStatusChanged(existing, gitStatus),
+          prevRepoKeys: Object.keys(repoMap),
+          willMutate: gitStatusWouldMutate(draft.gitStatus, envKey, gitStatus),
         });
       }
-      if (!existing || hasGitStatusChanged(existing, gitStatus)) {
-        draft.gitStatus.byEnvironmentId[envKey] = gitStatus;
-      }
-      const repoMap = (draft.gitStatus.byEnvironmentRepo[envKey] ??= {});
-      const existingRepo = repoMap[repoName];
-      if (!existingRepo || hasGitStatusChanged(existingRepo, gitStatus)) {
+      if (repoChanged) {
         repoMap[repoName] = gitStatus;
+      }
+      if (repoName === "") {
+        const existing = draft.gitStatus.byEnvironmentId[envKey];
+        if (!existing || hasGitStatusChanged(existing, gitStatus)) {
+          draft.gitStatus.byEnvironmentId[envKey] = gitStatus;
+        }
+      } else if (repoChanged) {
+        // Multi-repo: only mirror into the legacy map when this repo's entry changed.
+        draft.gitStatus.byEnvironmentId[envKey] = gitStatus;
       }
     }),
   clearGitStatus: (sessionId) =>

@@ -2,7 +2,7 @@ import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
-import { hasGitStatusChanged } from "@/lib/state/slices/session-runtime/session-runtime-slice";
+import { gitStatusWouldMutate } from "@/lib/state/slices/session-runtime/session-runtime-slice";
 import type {
   GitEventPayload,
   GitStatusUpdateEvent,
@@ -56,11 +56,7 @@ function statusUpdateChangesGitState(
 ): boolean {
   const state = store.getState();
   const envKey = resolveEnvKey(store, sessionId);
-  const repoName = gitStatus.repository_name ?? "";
-  const existing = state.gitStatus.byEnvironmentRepo[envKey]?.[repoName];
-  if (existing) return hasGitStatusChanged(existing, gitStatus);
-  const fallback = state.gitStatus.byEnvironmentId[envKey];
-  return !fallback || hasGitStatusChanged(fallback, gitStatus);
+  return gitStatusWouldMutate(state.gitStatus, envKey, gitStatus);
 }
 
 const gitEventHandlers: GitEventHandlers = {
