@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -226,8 +227,8 @@ func TestCreateTask_SubtaskOfSubtask_Kanban_Rejected(t *testing.T) {
 		ParentID:    child.ID,
 		Title:       "Grandchild",
 	})
-	if err == nil || !strings.Contains(err.Error(), "maximum nesting depth is 1") {
-		t.Fatalf("expected depth error, got: %v", err)
+	if err == nil || !errors.Is(err, ErrSubtaskDepthExceeded) {
+		t.Fatalf("expected ErrSubtaskDepthExceeded, got: %v", err)
 	}
 }
 
