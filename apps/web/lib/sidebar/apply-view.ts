@@ -224,8 +224,11 @@ function getEffectiveStateGroup(
         bestTask = sub;
         bestBucketOrder = subBucketOrder;
         bestStateOrder = STATE_GROUP_ORDER[sub.state ?? NOT_STARTED_STATE_GROUP_KEY] ?? 99;
-      } else if (subBucketOrder === bestBucketOrder) {
-        const subStateOrder = STATE_GROUP_ORDER[sub.state ?? NOT_STARTED_STATE_GROUP_KEY] ?? 99;
+      } else if (subBucketOrder === bestBucketOrder && sub.state) {
+        // Only subtasks with an explicit state participate in the tie-break.
+        // A subtask with no state would resolve to NOT_STARTED_STATE_GROUP_KEY
+        // (order 0) and incorrectly beat every explicit parent state.
+        const subStateOrder = STATE_GROUP_ORDER[sub.state] ?? 99;
         if (subStateOrder < bestStateOrder) {
           bestTask = sub;
           bestStateOrder = subStateOrder;
@@ -287,14 +290,14 @@ function separateSubtasks(tasks: TaskSwitcherItem[]): {
 export function applyGroup(
   tasks: TaskSwitcherItem[],
   groupKey: GroupKey,
-  subTasksByParentId?: Map<string, TaskSwitcherItem[]>,
+  effectiveStateSubMap?: Map<string, TaskSwitcherItem[]>,
 ): GroupedSidebarList {
-  const { rootTasks, subTasksByParentId: separatedSubMap } = separateSubtasks(tasks);
+  const { rootTasks, subTasksByParentId } = separateSubtasks(tasks);
 
   if (groupKey === "none") {
     return {
       groups: [{ key: "__all__", label: "All", tasks: rootTasks }],
-      subTasksByParentId: separatedSubMap,
+      subTasksByParentId,
     };
   }
 
@@ -302,8 +305,8 @@ export function applyGroup(
   const buckets = new Map<string, SidebarGroup>();
   for (const task of rootTasks) {
     const { key, label } =
-      groupKey === "state" && subTasksByParentId
-        ? getEffectiveStateGroup(task, subTasksByParentId)
+      groupKey === "state" && effectiveStateSubMap
+        ? getEffectiveStateGroup(task, effectiveStateSubMap)
         : extract(task);
     let group = buckets.get(key);
     if (!group) {
@@ -319,7 +322,7 @@ export function applyGroup(
     sortRepoGroups(groups);
   }
   if (groupKey === "state") sortStateGroups(groups);
-  return { groups, subTasksByParentId: separatedSubMap };
+  return { groups, subTasksByParentId };
 }
 
 function mergeSingleRepoUnassigned(groups: SidebarGroup[]): void {

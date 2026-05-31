@@ -39,6 +39,7 @@ test.describe("Sidebar subtasks — effective state sort", () => {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
       parent_id: parent.id,
+      repository_ids: [seedData.repositoryId],
     });
     await apiClient.updateTaskState(child.id, "IN_PROGRESS");
 
