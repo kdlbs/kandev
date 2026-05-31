@@ -162,6 +162,23 @@ describe("applyGroup — effective state grouping (subtasks)", () => {
     const completedGroup = out.groups.find((g) => g.key === "COMPLETED");
     expect(completedGroup?.tasks.map((t) => t.id)).toEqual(["p"]);
   });
+
+  it("parent with null-state running subtask stays in its own group", () => {
+    const parent = task({ id: "p", state: "TODO" });
+    const nullStateSub = task({
+      id: "sub",
+      parentTaskId: "p",
+      sessionState: "RUNNING",
+      // state intentionally omitted — subtask has a live session but no persisted state
+    });
+    const subMap = new Map<string, TaskSwitcherItem[]>([["p", [nullStateSub]]]);
+    const out = applyGroup([parent, nullStateSub], "state", subMap);
+    // Null-state subtask must not displace the parent from its own TODO group
+    const todoGroup = out.groups.find((g) => g.key === "TODO");
+    expect(todoGroup?.tasks.map((t) => t.id)).toContain("p");
+    // Should NOT appear under NOT_STARTED (the old bug) or IN_PROGRESS
+    expect(out.groups.find((g) => g.key === "__not_started__")).toBeUndefined();
+  });
 });
 
 describe("applyView — effective state bubbling (integration)", () => {
