@@ -43,6 +43,7 @@ import (
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/gitlab"
 	"github.com/kandev/kandev/internal/health"
+	"github.com/kandev/kandev/internal/health/oslimits"
 	"github.com/kandev/kandev/internal/improvekandev"
 	"github.com/kandev/kandev/internal/jira"
 	"github.com/kandev/kandev/internal/linear"
@@ -849,9 +850,14 @@ func registerHealthRoutes(p routeParams) {
 	if githubRateProvider != nil {
 		githubChecker.WithRateLimitProvider(githubRateProvider)
 	}
+	osLimitsChecker := health.NewCachedChecker(
+		oslimits.NewOSLimitsChecker(oslimits.NewInotifyProbe()),
+		5*time.Minute,
+	)
 	healthSvc := health.NewService(p.log,
 		githubChecker,
 		health.NewAgentChecker(p.agentSettingsController),
+		osLimitsChecker,
 	)
 	health.RegisterRoutes(p.router, healthSvc, p.log)
 }
