@@ -209,6 +209,29 @@ func TestInotifyProbe_TopNConsumers(t *testing.T) {
 	}
 }
 
+func TestInotifyProbe_ZeroWatchProcessesExcludedFromWatchConsumers(t *testing.T) {
+	fb := newFakeProcBuilder(t)
+	fb.setSysctl(128, 8192)
+	fb.addPID(100, "haswatches", 1, 5) // 1 inotify fd, 5 watches
+	fb.addPID(101, "nowatches", 2, 0)  // 2 inotify fds, 0 watches
+
+	samples, err := fb.probe().Samples(context.Background())
+	if err != nil {
+		t.Fatalf("Samples() error: %v", err)
+	}
+	// Instances sample counts both processes (1+2=3 fds total).
+	if samples[0].Used != 3 {
+		t.Errorf("instances used = %d, want 3", samples[0].Used)
+	}
+	// Watch consumer list must exclude the zero-watch process.
+	if len(samples[1].TopConsumers) != 1 {
+		t.Errorf("watch consumers len = %d, want 1 (zero-watch process must be excluded)", len(samples[1].TopConsumers))
+	}
+	if samples[1].TopConsumers[0].Command != "haswatches" {
+		t.Errorf("watch consumer[0] = %q, want %q", samples[1].TopConsumers[0].Command, "haswatches")
+	}
+}
+
 func TestInotifyProbe_SortedByFDCount(t *testing.T) {
 	fb := newFakeProcBuilder(t)
 	fb.setSysctl(128, 8192)
