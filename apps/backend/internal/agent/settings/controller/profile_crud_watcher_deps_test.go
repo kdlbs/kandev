@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -111,8 +112,10 @@ func TestDeleteProfile_ForceBypassesWatcherCheck(t *testing.T) {
 	if deps.disabledProfile != "prof-1" {
 		t.Errorf("disabled profile = %q, want %q", deps.disabledProfile, "prof-1")
 	}
-	if deps.disabledCause == "" {
-		t.Error("disable cause must be non-empty so the settings UI can render it")
+	// The cause must carry the human-readable profile name (not just the UUID)
+	// so the settings banner is legible and matches the lazy preflight's cause.
+	if !strings.Contains(deps.disabledCause, "Kilo Profile") {
+		t.Errorf("disable cause %q must include the profile name", deps.disabledCause)
 	}
 }
 
