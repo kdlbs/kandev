@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { IconBrandSentry } from "@tabler/icons-react";
+import { IconBrandSentry, IconInfoCircle } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
@@ -10,9 +10,9 @@ import { Separator } from "@kandev/ui/separator";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Switch } from "@kandev/ui/switch";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
-import { IntegrationCredentialHelp } from "@/components/integrations/integration-credential-help";
 import { useSentryEnabled } from "@/hooks/domains/sentry/use-sentry-enabled";
 import {
   IntegrationAuthStatusBanner,
@@ -78,7 +78,7 @@ type SecretFieldProps = {
 function SecretField({ form, loading, update, hasSavedSecret }: SecretFieldProps) {
   return (
     <div className="space-y-1.5">
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1.5">
         <Label htmlFor="sentry-secret">
           Auth token
           {hasSavedSecret && (
@@ -87,37 +87,31 @@ function SecretField({ form, loading, update, hasSavedSecret }: SecretFieldProps
             </span>
           )}
         </Label>
-        <IntegrationCredentialHelp title="How to create a Sentry auth token">
-          <p>
-            Create a user auth token at{" "}
-            <a
-              className="text-primary underline"
-              href="https://sentry.io/settings/account/api/auth-tokens/"
-              target="_blank"
-              rel="noreferrer"
-            >
-              sentry.io/settings/account/api/auth-tokens
-            </a>
-            .
-          </p>
-          <p>
-            Grant <span className="font-medium text-foreground">Read</span> access to these scopes:
-          </p>
-          <ul className="list-disc space-y-1 pl-4">
-            <li>
-              <span className="font-medium text-foreground">Organization</span> (
-              <code>org:read</code>) — resolve the org and list issues
-            </li>
-            <li>
-              <span className="font-medium text-foreground">Project</span> (<code>project:read</code>
-              ) — list projects and scope searches
-            </li>
-            <li>
-              <span className="font-medium text-foreground">Issue &amp; Event</span> (
-              <code>event:read</code>) — browse issues and run watchers
-            </li>
-          </ul>
-        </IntegrationCredentialHelp>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <IconInfoCircle
+              className="h-3.5 w-3.5 text-muted-foreground/50 hover:text-muted-foreground cursor-help shrink-0"
+              aria-label="Required token scopes"
+            />
+          </TooltipTrigger>
+          <TooltipContent className="max-w-xs" align="start">
+            <p className="text-xs font-medium mb-1">Grant Read access to these scopes:</p>
+            <ul className="text-xs space-y-0.5">
+              <li>
+                <code className="text-[10px] bg-white/15 px-1 rounded">org:read</code>{" "}
+                <span className="opacity-70">Organization — resolve the org and list issues</span>
+              </li>
+              <li>
+                <code className="text-[10px] bg-white/15 px-1 rounded">project:read</code>{" "}
+                <span className="opacity-70">Project — list projects and scope searches</span>
+              </li>
+              <li>
+                <code className="text-[10px] bg-white/15 px-1 rounded">event:read</code>{" "}
+                <span className="opacity-70">Issue &amp; Event — browse issues and run watchers</span>
+              </li>
+            </ul>
+          </TooltipContent>
+        </Tooltip>
       </div>
       <Input
         id="sentry-secret"
