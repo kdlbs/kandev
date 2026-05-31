@@ -466,6 +466,22 @@ func TestConvertMessageChunk_TextAssistant(t *testing.T) {
 	}
 }
 
+func TestConvertMessageChunk_PreservesAssistantWhitespaceOnlyText(t *testing.T) {
+	a := newTestAdapter()
+	cases := []string{" ", "\n", "\n\n"}
+
+	for _, text := range cases {
+		result := a.convertMessageChunk("session-1", acp.TextBlock(text), "assistant")
+
+		if result == nil {
+			t.Fatalf("expected non-nil result for %q", text)
+		}
+		if result.Text != text {
+			t.Errorf("Text = %q, want %q", result.Text, text)
+		}
+	}
+}
+
 func TestConvertMessageChunk_TextUser(t *testing.T) {
 	a := newTestAdapter()
 	cb := acp.TextBlock("Hello from user")

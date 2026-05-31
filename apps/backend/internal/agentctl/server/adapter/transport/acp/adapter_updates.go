@@ -287,11 +287,13 @@ func (a *Adapter) convertMessageChunk(sessionID string, content acp.ContentBlock
 		// strip them from the chat text. Assistant role only — genuine user
 		// messages don't carry these.
 		if role == "assistant" {
-			text = a.routeMonitorEvents(sessionID, text)
-			if isMonitorHumanEcho(text) {
+			cleaned := a.routeMonitorEvents(sessionID, text)
+			monitorTextRemoved := cleaned != text
+			text = cleaned
+			if monitorTextRemoved && strings.TrimSpace(text) == "" {
 				return nil
 			}
-			if strings.TrimSpace(text) == "" {
+			if isMonitorHumanEcho(text) {
 				return nil
 			}
 		}
