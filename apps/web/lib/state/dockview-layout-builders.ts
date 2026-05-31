@@ -176,12 +176,12 @@ function captureRightTarget(api: DockviewApi, sv: any, savedRightWidth?: number)
   const idx = sv.length - 1;
   // Default preset (pinned right column): anchor to saved-or-default, resize the
   // column to it, and record it as the target. Never the live size.
-  if (api.groups.some((g) => g.id === RIGHT_TOP_GROUP)) {
+  if (api.groups.some((g) => g.id === RIGHT_TOP_GROUP || g.id === RIGHT_BOTTOM_GROUP)) {
     const target = resolveRightTarget(rightCap, measuredWidth, savedRightWidth);
     const cur = sv.getViewSize(idx);
     if (typeof cur === "number" && cur > 0 && Math.abs(cur - target) > 1) {
       try {
-        sv.resizeView(idx, target);
+        sv?.resizeView?.(idx, target);
       } catch {
         /* dockview rejects unreachable sizes — ignore */
       }

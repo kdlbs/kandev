@@ -54,10 +54,14 @@ const SIDEBAR_GROUP = "group-sidebar";
 const CENTER_GROUP = "group-center";
 const RIGHT_BOTTOM_GROUP = "group-right-bottom";
 
+let mockResizeView: ReturnType<typeof vi.fn>;
+
 function mockSplitview(sizesByIndex: number[]): void {
+  mockResizeView = vi.fn();
   vi.mocked(getRootSplitview).mockReturnValue({
     length: sizesByIndex.length,
     getViewSize: (idx: number) => sizesByIndex[idx],
+    resizeView: mockResizeView,
   } as unknown as NonNullable<ReturnType<typeof getRootSplitview>>);
 }
 
@@ -137,7 +141,8 @@ describe("applyLayoutFixups — pinned target capture", () => {
   it("anchors the pinned right target to the saved per-env width, not the live size", () => {
     // A restore passes the env's saved right width; it wins over both the live
     // size (400) and the default (350) so a deliberately-resized task restores
-    // its own remembered width.
+    // its own remembered width. Also asserts that the column is physically
+    // resized to the stable width (not left at the transient live size).
     mockSplitview([350, 720, 400]);
     const api = makeApi([SIDEBAR_GROUP, CENTER_GROUP, RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP]);
 
@@ -145,6 +150,7 @@ describe("applyLayoutFixups — pinned target capture", () => {
 
     expect(setPinnedTarget).toHaveBeenCalledWith("right", 420);
     expect(setPinnedTarget).not.toHaveBeenCalledWith("right", 400);
+    expect(mockResizeView).toHaveBeenCalledWith(2, 420);
   });
 
   it("derives the caps from api.width, not the window.innerWidth fallback", () => {
