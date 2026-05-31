@@ -20,6 +20,7 @@ const state = {
   tasks: { activeTaskId: null as string | null },
 };
 let officeEnabled = false;
+let pathname = "/";
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: typeof state) => unknown) => selector(state),
@@ -29,7 +30,7 @@ vi.mock("@/hooks/domains/features/use-feature", () => ({
 }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
-  usePathname: () => "/",
+  usePathname: () => pathname,
 }));
 vi.mock("@/app/office/components/new-task-dialog", () => ({
   NewTaskDialog: () => <div data-testid="office-new-task-dialog" />,
@@ -45,6 +46,7 @@ import { AppSidebarNewTaskItem } from "./app-sidebar-new-task-item";
 
 const SUBTASK_TESTID = "sidebar-new-subtask";
 const OFFICE_DIALOG_TESTID = "office-new-task-dialog";
+const REGULAR_DIALOG_TESTID = "regular-task-create-dialog";
 
 describe("AppSidebarNewTaskItem", () => {
   beforeEach(() => {
@@ -54,6 +56,7 @@ describe("AppSidebarNewTaskItem", () => {
     state.kanban.tasks = [{ id: "t-1", title: "Parent task" }];
     state.tasks.activeTaskId = null;
     officeEnabled = false;
+    pathname = "/";
   });
 
   afterEach(() => cleanup());
@@ -61,21 +64,32 @@ describe("AppSidebarNewTaskItem", () => {
   it("uses the regular task-create dialog when office is disabled", () => {
     officeEnabled = false;
     renderItem(false);
-    expect(screen.getByTestId("regular-task-create-dialog")).toBeTruthy();
+    expect(screen.getByTestId(REGULAR_DIALOG_TESTID)).toBeTruthy();
     expect(screen.queryByTestId(OFFICE_DIALOG_TESTID)).toBeNull();
   });
 
-  it("uses the office new-issue dialog when office is enabled", () => {
+  it("uses the regular dialog when office is enabled but NOT on an office route", () => {
+    // The bug: office-on alone routed to the Office dialog even in Kanban mode.
+    // Gating is now on the actual /office route, so home stays on the Kanban dialog.
     officeEnabled = true;
+    pathname = "/";
+    renderItem(false);
+    expect(screen.getByTestId(REGULAR_DIALOG_TESTID)).toBeTruthy();
+    expect(screen.queryByTestId(OFFICE_DIALOG_TESTID)).toBeNull();
+  });
+
+  it("uses the office new-issue dialog when inside an office route", () => {
+    officeEnabled = true;
+    pathname = "/office";
     renderItem(false);
     expect(screen.getByTestId(OFFICE_DIALOG_TESTID)).toBeTruthy();
-    expect(screen.queryByTestId("regular-task-create-dialog")).toBeNull();
+    expect(screen.queryByTestId(REGULAR_DIALOG_TESTID)).toBeNull();
   });
 
   it("renders no dialog when there is no active workspace", () => {
     state.workspaces.activeId = null;
     renderItem(false);
-    expect(screen.queryByTestId("regular-task-create-dialog")).toBeNull();
+    expect(screen.queryByTestId(REGULAR_DIALOG_TESTID)).toBeNull();
     expect(screen.queryByTestId(OFFICE_DIALOG_TESTID)).toBeNull();
   });
 
@@ -94,6 +108,7 @@ describe("AppSidebarNewTaskItem", () => {
 
   it("offers the subtask affordance in office mode too (compact subtask dialog)", () => {
     officeEnabled = true;
+    pathname = "/office";
     state.tasks.activeTaskId = "t-1";
     renderItem(false);
     // Primary New Task uses the office dialog, but subtasks still go through

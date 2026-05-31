@@ -4,7 +4,7 @@ import { useState } from "react";
 import { IconSquarePlus, IconSubtask } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
-import { useFeature } from "@/hooks/domains/features/use-feature";
+import { useInOffice } from "@/hooks/use-in-office";
 import { NewTaskDialog } from "@/app/office/components/new-task-dialog";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { NewSubtaskDialog } from "@/components/task/new-subtask-dialog";
@@ -15,10 +15,12 @@ type AppSidebarNewTaskItemProps = {
 };
 
 /**
- * "New Task" entry in the sidebar primary nav. Office mode opens the richer
- * "New issue" dialog (projects/assignees/stages); regular Kandev opens the
- * standard task-create dialog wired to the active workflow. The Office dialog
- * must stay behind the `office` flag so it never leaks into regular mode.
+ * "New Task" entry in the sidebar primary nav. Inside Office (an `/office`
+ * route) it opens the richer "New issue" dialog (projects/assignees/stages);
+ * everywhere else — including regular Kanban while the office feature is merely
+ * enabled — it opens the standard task-create dialog wired to the active
+ * workflow. Gate on `useInOffice()` (route), not the bare `office` flag, so the
+ * Office dialog never leaks into Kanban mode.
  *
  * When the user is inside a task (an active task in regular mode), a trailing
  * subtask affordance appears so a child task can be created against the current
@@ -35,7 +37,7 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
     if (!id) return "";
     return s.kanban.tasks.find((t) => t.id === id)?.title ?? "";
   });
-  const officeEnabled = useFeature("office");
+  const inOffice = useInOffice();
   const [open, setOpen] = useState(false);
   const [subtaskOpen, setSubtaskOpen] = useState(false);
 
@@ -74,7 +76,7 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
         )}
       </div>
       {workspaceId &&
-        (officeEnabled ? (
+        (inOffice ? (
           <NewTaskDialog open={open} onOpenChange={setOpen} />
         ) : (
           <TaskCreateDialog

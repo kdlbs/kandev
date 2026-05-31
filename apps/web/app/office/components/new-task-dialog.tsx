@@ -88,7 +88,10 @@ export function NewTaskDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl sm:max-w-3xl lg:max-w-4xl">
+      <DialogContent
+        data-testid="office-new-issue-dialog"
+        className="max-w-3xl sm:max-w-3xl lg:max-w-4xl"
+      >
         <NewIssueDialogBody
           draft={draft}
           updateDraft={updateDraft}

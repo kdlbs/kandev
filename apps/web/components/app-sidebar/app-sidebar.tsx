@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
 import { useAppStore } from "@/components/state-provider";
 import { cn } from "@/lib/utils";
@@ -42,6 +42,7 @@ export function AppSidebar() {
   const storedWidth = useAppStore((s) => s.appSidebar.width);
   const toggleSection = useAppStore((s) => s.toggleAppSidebarSection);
   const toggleCollapsed = useAppStore((s) => s.toggleAppSidebar);
+  const toggleSettingsMode = useAppStore((s) => s.toggleAppSidebarSettingsMode);
   const setWidth = useAppStore((s) => s.setAppSidebarWidth);
   const pathname = usePathname();
 
@@ -70,6 +71,20 @@ export function AppSidebar() {
   );
 
   const expandedWidth = Math.max(APP_SIDEBAR_EXPANDED_WIDTH, storedWidth);
+
+  // Close the settings takeover when the user navigates off the settings
+  // surface — e.g. the Home button, the Kandev brand, the Office/Stats footer
+  // buttons, or opening a task. Keyed on an actual pathname *change* so opening
+  // the gear from a non-settings page (no navigation) doesn't immediately close
+  // it, and clicking within the tree (`/settings/...`) keeps it open.
+  const prevPathnameRef = useRef(pathname);
+  useEffect(() => {
+    if (prevPathnameRef.current === pathname) return;
+    prevPathnameRef.current = pathname;
+    if (settingsMode && (!pathname || !pathname.startsWith("/settings"))) {
+      toggleSettingsMode();
+    }
+  }, [pathname, settingsMode, toggleSettingsMode]);
 
   useEffect(() => {
     if (!pathname) return;

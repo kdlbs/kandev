@@ -28,4 +28,40 @@ test.describe("Settings sidebar takeover", () => {
     await gear.click();
     await expect(takeover).toHaveCount(0);
   });
+
+  test("navigating off settings (Kandev brand → Home) closes the takeover", async ({
+    testPage,
+  }) => {
+    await testPage.goto("/settings");
+
+    const gear = testPage.getByTestId("sidebar-settings-gear");
+    const takeover = testPage.getByTestId("app-sidebar-settings-mode");
+    const sidebar = testPage.getByTestId("app-sidebar");
+
+    await gear.click();
+    await expect(takeover).toBeVisible();
+
+    // The Kandev brand navigates Home — leaving the settings surface must close
+    // the takeover (the bug left the tree up after going Home).
+    await sidebar.locator('[aria-label="Kandev home"]').first().click();
+    await expect(testPage).not.toHaveURL(/\/settings/);
+    await expect(takeover).toHaveCount(0);
+  });
+
+  test("the gear expands a collapsed sidebar and reveals the tree", async ({ testPage }) => {
+    await testPage.goto("/");
+
+    const sidebar = testPage.getByTestId("app-sidebar");
+    const takeover = testPage.getByTestId("app-sidebar-settings-mode");
+
+    // Collapse the rail first.
+    await sidebar.getByRole("button", { name: "Collapse sidebar" }).click();
+    await expect(sidebar).toHaveAttribute("data-collapsed", "true");
+
+    // Clicking the gear while collapsed must expand the rail AND show the tree —
+    // a collapsed rail can't host the settings tree.
+    await testPage.getByTestId("sidebar-settings-gear").click();
+    await expect(sidebar).toHaveAttribute("data-collapsed", "false");
+    await expect(takeover).toBeVisible();
+  });
 });
