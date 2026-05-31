@@ -21,19 +21,7 @@ import type { TaskSwitcherItem } from "./task-switcher";
 
 export const DRAG_ACTIVATION_DISTANCE = 8;
 
-/**
- * A single sortable node in the (arbitrarily deep) task tree.
- *
- * `setNodeRef` and the CSS transform live on the outer wrapper so the row and
- * its nested subtree move together while dragging. Drag listeners attach ONLY
- * to the `handle` (the task row) — `nested` (the child subtree) renders as a
- * sibling outside the handle so a pointer-down on a descendant row drags that
- * descendant, not this node. This is the same handle/children split the root
- * level has always used; generalizing it is what makes nesting safe at depth.
- */
-/**
- * Sortable variant — isolated so the hook is never called conditionally.
- */
+/** Sortable implementation — isolated so `useSortable` is never called conditionally. */
 function DraggableSortableTaskNode({
   taskId,
   depth,
@@ -84,6 +72,18 @@ function DraggableSortableTaskNode({
   );
 }
 
+/**
+ * A single sortable node in the (arbitrarily deep) task tree.
+ *
+ * `setNodeRef` and the CSS transform live on the outer wrapper so the row and
+ * its nested subtree move together while dragging. Drag listeners attach ONLY
+ * to the `handle` (the task row) — `nested` (the child subtree) renders as a
+ * sibling outside the handle so a pointer-down on a descendant row drags that
+ * descendant, not this node. This is the same handle/children split the root
+ * level has always used; generalizing it is what makes nesting safe at depth.
+ *
+ * When `isDraggable` is false, renders a plain wrapper with no DnD wiring.
+ */
 export function SortableTaskNode({
   taskId,
   depth,
