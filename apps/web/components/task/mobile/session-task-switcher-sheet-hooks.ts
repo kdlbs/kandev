@@ -48,22 +48,17 @@ function mapSnapshotToKanban(snapshot: WorkflowSnapshot, newWorkflowId: string) 
     tasks: snapshot.tasks.map((task) => ({
       id: task.id,
       workflowStepId: task.workflow_step_id,
+      parentTaskId: task.parent_id ?? undefined,
       title: task.title,
       description: task.description ?? undefined,
       position: task.position ?? 0,
       state: task.state,
       repositoryId: task.repositories?.[0]?.repository_id ?? undefined,
       // Carry the full TaskRepository array so the mobile repo picker
-      // (useTaskRepoCount + MobileReposSection) keeps working after a
-      // workspace switch. Without this, the picker silently disappears for
-      // multi-repo tasks because length defaults to 0.
-      repositories: task.repositories?.map((r) => ({
-        id: r.id,
-        repository_id: r.repository_id,
-        base_branch: r.base_branch,
-        checkout_branch: r.checkout_branch,
-        position: r.position,
-      })),
+      // (useTaskRepoCount + MobileReposSection) keeps working after a workspace
+      // switch. Without this, the picker silently disappears for multi-repo
+      // tasks because length defaults to 0.
+      repositories: mapTaskRepositories(task.repositories),
       primarySessionId: task.primary_session_id ?? undefined,
       primarySessionState: task.primary_session_state ?? undefined,
       sessionCount: task.session_count ?? undefined,
@@ -108,6 +103,9 @@ function toSheetItem(
   return {
     id: task.id,
     title: task.title,
+    // Carry the parent link so the mobile task switcher nests subtasks the same
+    // way the desktop sidebar does (applyView/TaskSwitcher read parentTaskId).
+    parentTaskId: task.parentTaskId ?? undefined,
     state: task.state as TaskState | undefined,
     sessionState:
       sessionInfo.sessionState ?? (task.primarySessionState as TaskSessionState | undefined),
@@ -314,6 +312,7 @@ function buildKanbanTaskUpsert(
   const taskSessionId = meta?.taskSessionId ?? null;
   return {
     id: task.id,
+    parentTaskId: task.parent_id ?? undefined,
     workflowStepId: task.workflow_step_id,
     title: task.title,
     description: task.description,
