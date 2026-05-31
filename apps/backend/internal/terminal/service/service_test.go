@@ -51,6 +51,7 @@ func (f *fakeBackend) StopScope(_ context.Context, scopeID string) (int, error) 
 		}
 		f.stopped[terminalID] = true
 		delete(f.alive, terminalID)
+		delete(f.envByID, terminalID)
 		stopped++
 	}
 	return stopped, nil
