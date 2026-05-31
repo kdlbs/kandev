@@ -76,7 +76,7 @@ func assertClaudePassthroughMCPConfig(t *testing.T, cmd agents.Command, wantURL 
 func newClaudePassthroughMCPTestManager(t *testing.T) (*Manager, *AgentExecution, *AgentProfileInfo) {
 	t.Helper()
 
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	mgr.dataDir = t.TempDir()
 	mgr.profileResolver = &mockPassthroughProfileResolver{
 		agentName:      "claude-acp",
@@ -477,7 +477,7 @@ func TestWritePassthroughMCPConfigKeepsLiteralSessionFilename(t *testing.T) {
 // cleanupDelay (and then take the nil-runner branch in the test rig).
 func TestManager_HandlePassthroughExit_SkipsDuringShutdown(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		mgr := newTestManager()
+		mgr := newTestManager(t)
 
 		if mgr.IsShuttingDown() {
 			t.Fatal("fresh manager reports IsShuttingDown() == true")
@@ -508,7 +508,7 @@ func TestManager_HandlePassthroughExit_SkipsDuringShutdown(t *testing.T) {
 // teardown.
 func TestManager_HandlePassthroughExit_ResumeFallback_SkipsDuringShutdown(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		mgr := newTestManager()
+		mgr := newTestManager(t)
 		if err := mgr.StopAllAgents(context.Background()); err != nil {
 			t.Fatalf("StopAllAgents returned error: %v", err)
 		}
@@ -597,7 +597,7 @@ func TestIsFastFailExit(t *testing.T) {
 // reach the passthrough launch path (regression for issue #718, where the
 // passthrough builder silently dropped them).
 func TestManager_ProfileCLIFlagTokens(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 
 	t.Run("nil profile returns nil", func(t *testing.T) {
 		if got := mgr.profileCLIFlagTokens(nil); got != nil {
@@ -640,7 +640,7 @@ func TestManager_ProfileCLIFlagTokens(t *testing.T) {
 }
 
 func TestBuildPassthroughEnv_MergesProfileEnvVars(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	mgr.profileResolver = &mockPassthroughProfileResolver{
 		envVars: []settingsmodels.ProfileEnvVar{
 			{Key: "PLAIN", Value: "plain-value"},
@@ -682,7 +682,7 @@ func TestManager_VerifyPassthroughEnabled(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mgr := newTestManager()
+			mgr := newTestManager(t)
 
 			// Override profile resolver for this test
 			if tt.profileID != "" {

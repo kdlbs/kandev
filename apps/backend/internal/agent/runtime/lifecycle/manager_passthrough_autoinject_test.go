@@ -71,7 +71,7 @@ func newAutoInjectExecution(description string) *AgentExecution {
 }
 
 func TestAutoInject_disabled_does_nothing(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	runner := &fakePassthroughRunner{}
 
 	mgr.autoInjectInitialPromptWith(runner, newAutoInjectExecution("do a thing"), agents.PassthroughConfig{
@@ -85,7 +85,7 @@ func TestAutoInject_disabled_does_nothing(t *testing.T) {
 }
 
 func TestAutoInject_skipped_when_PromptFlag_set(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	runner := &fakePassthroughRunner{}
 
 	mgr.autoInjectInitialPromptWith(runner, newAutoInjectExecution("do a thing"), agents.PassthroughConfig{
@@ -100,7 +100,7 @@ func TestAutoInject_skipped_when_PromptFlag_set(t *testing.T) {
 }
 
 func TestAutoInject_skipped_when_description_empty(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	runner := &fakePassthroughRunner{}
 
 	mgr.autoInjectInitialPromptWith(runner, newAutoInjectExecution(""), agents.PassthroughConfig{
@@ -114,7 +114,7 @@ func TestAutoInject_skipped_when_description_empty(t *testing.T) {
 }
 
 func TestAutoInject_writes_description_plus_submit(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	runner := &fakePassthroughRunner{}
 
 	mgr.autoInjectInitialPromptWith(runner, newAutoInjectExecution("hello world"), agents.PassthroughConfig{
@@ -137,7 +137,7 @@ func TestAutoInject_writes_description_plus_submit(t *testing.T) {
 // error-return path: the helper must skip the stdin write and exit cleanly
 // rather than panic or loop.
 func TestAutoInject_returns_when_wait_errors(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	runner := &fakePassthroughRunner{waitErr: context.DeadlineExceeded}
 
 	done := make(chan struct{})
@@ -166,7 +166,7 @@ func TestAutoInject_returns_when_wait_errors(t *testing.T) {
 // sees the trailing \r as a discrete keystroke instead of absorbing it into the
 // pasted text.
 func TestAutoInject_SubmitDelay_splits_writes_with_pause(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	runner := &fakePassthroughRunner{}
 
 	const delay = 40 * time.Millisecond
@@ -196,7 +196,7 @@ func TestAutoInject_SubmitDelay_splits_writes_with_pause(t *testing.T) {
 }
 
 func TestAutoInject_skipped_when_process_id_missing(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	runner := &fakePassthroughRunner{}
 
 	exec := newAutoInjectExecution("hello")

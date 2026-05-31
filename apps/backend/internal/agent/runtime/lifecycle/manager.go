@@ -87,6 +87,7 @@ type Manager struct {
 	remoteStatusMu           sync.RWMutex
 	remoteStatusBySession    map[string]*RemoteStatus
 	stopCh                   chan struct{}
+	stopOnce                 sync.Once
 	wg                       sync.WaitGroup
 	// shuttingDown is flipped true when graceful shutdown begins (see
 	// StopAllAgents) so handlers running in detached goroutines can

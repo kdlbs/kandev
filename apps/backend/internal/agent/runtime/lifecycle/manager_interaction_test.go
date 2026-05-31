@@ -184,7 +184,7 @@ func (m *restartMockAgentctlServer) getWSActions() []string {
 }
 
 func TestManager_RestartAgentProcess_Success(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	mock := newRestartMockAgentctlServer(t, false, false)
 
 	client := createTestClient(t, mock.server.URL)
@@ -276,7 +276,7 @@ func TestManager_RestartAgentProcess_Success(t *testing.T) {
 }
 
 func TestManager_RestartAgentProcess_StopErrorIsNonFatal(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	mock := newRestartMockAgentctlServer(t, true, false)
 
 	client := createTestClient(t, mock.server.URL)
@@ -304,7 +304,7 @@ func TestManager_RestartAgentProcess_StopErrorIsNonFatal(t *testing.T) {
 }
 
 func TestManager_RestartAgentProcess_SessionInitFailure(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	mock := newRestartMockAgentctlServer(t, false, true)
 
 	client := createTestClient(t, mock.server.URL)
@@ -360,7 +360,7 @@ func TestManager_RestartAgentProcess_SessionInitFailure(t *testing.T) {
 // accept-edits) chosen by the user must be re-applied to the fresh ACP session
 // after restart instead of silently reverting to the agent's default.
 func TestManager_RestartAgentProcess_ReappliesSessionMode(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	mock := newRestartMockAgentctlServer(t, false, false)
 
 	client := createTestClient(t, mock.server.URL)
@@ -400,7 +400,7 @@ func TestManager_RestartAgentProcess_ReappliesSessionMode(t *testing.T) {
 // the ACP fast-path (session reset without a process restart): the user's chosen
 // session permission mode must deterministically survive the reset.
 func TestManager_ResetAgentContext_ReappliesSessionMode(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	mock := newRestartMockAgentctlServer(t, false, false)
 
 	client := createTestClient(t, mock.server.URL)
@@ -448,7 +448,7 @@ func TestManager_ResetAgentContext_ReappliesSessionMode(t *testing.T) {
 // mode event is async). The restart must restore the persisted (DB) mode, not the
 // stale cached one.
 func TestManager_RestartAgentProcess_PrefersPersistedModeOverStaleCache(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{
 		infos: map[string]*WorkspaceInfo{
 			"session-1": {SessionID: "session-1", SessionMode: "acceptEdits"},
@@ -491,7 +491,7 @@ func TestManager_RestartAgentProcess_PrefersPersistedModeOverStaleCache(t *testi
 // The fix: passthrough sessions persist a model_override on the execution and
 // restart the PTY so the next launch uses the new --model.
 func TestManager_SetSessionModel_Passthrough_PersistsOverride(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	exec := &AgentExecution{
 		ID:                   "exec-pt",
 		SessionID:            "session-pt",
@@ -710,7 +710,7 @@ func TestEffectiveSessionMode(t *testing.T) {
 	exec := &AgentExecution{ID: "exec-1", TaskID: "task-1", SessionID: "session-1"}
 
 	t.Run("session mode overrides profile mode", func(t *testing.T) {
-		mgr := newTestManager()
+		mgr := newTestManager(t)
 		mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{
 			infos: map[string]*WorkspaceInfo{"session-1": {SessionID: "session-1", SessionMode: "acceptEdits"}},
 		}
@@ -718,7 +718,7 @@ func TestEffectiveSessionMode(t *testing.T) {
 	})
 
 	t.Run("falls back to profile mode when no session mode set", func(t *testing.T) {
-		mgr := newTestManager()
+		mgr := newTestManager(t)
 		mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{
 			infos: map[string]*WorkspaceInfo{"session-1": {SessionID: "session-1"}},
 		}
@@ -726,13 +726,13 @@ func TestEffectiveSessionMode(t *testing.T) {
 	})
 
 	t.Run("falls back to profile mode on provider error", func(t *testing.T) {
-		mgr := newTestManager()
+		mgr := newTestManager(t)
 		mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{err: fmt.Errorf("boom")}
 		require.Equal(t, "default", mgr.effectiveSessionMode(context.Background(), exec, "default"))
 	})
 
 	t.Run("falls back to profile mode when no provider wired", func(t *testing.T) {
-		mgr := newTestManager()
+		mgr := newTestManager(t)
 		require.Equal(t, "default", mgr.effectiveSessionMode(context.Background(), exec, "default"))
 	})
 }

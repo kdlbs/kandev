@@ -30,7 +30,7 @@ func (m *mockAgentProfileResolver) ResolveProfile(_ context.Context, profileID s
 }
 
 func TestStartAgentProcess_NotFound(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	err := mgr.StartAgentProcess(context.Background(), "non-existent")
 	if err == nil {
 		t.Fatal("expected error for non-existent execution")
@@ -41,7 +41,7 @@ func TestStartAgentProcess_NotFound(t *testing.T) {
 }
 
 func TestStartAgentProcess_NonPassthrough_NoAgentctl(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	// Use a resolver that returns CLIPassthrough=false
 	mgr.profileResolver = &mockAgentProfileResolver{cliPassthrough: false}
 
@@ -64,7 +64,7 @@ func TestStartAgentProcess_NonPassthrough_NoAgentctl(t *testing.T) {
 }
 
 func TestStartAgentProcess_Passthrough_NotResumed(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	mgr.profileResolver = &mockAgentProfileResolver{cliPassthrough: true}
 
 	execution := &AgentExecution{
@@ -89,7 +89,7 @@ func TestStartAgentProcess_Passthrough_NotResumed(t *testing.T) {
 }
 
 func TestStartAgentProcess_Passthrough_Resumed(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	mgr.profileResolver = &mockAgentProfileResolver{cliPassthrough: true}
 
 	execution := &AgentExecution{
@@ -122,7 +122,7 @@ func TestStartAgentProcess_Passthrough_Resumed(t *testing.T) {
 // even after its profile has been toggled to CLIPassthrough — the
 // session-snapshot wins so existing sessions don't get stranded.
 func TestStartAgentProcess_AgentSession_IgnoresProfileToggleToPassthrough(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	// Profile currently advertises passthrough — simulates the post-toggle state.
 	mgr.profileResolver = &mockAgentProfileResolver{cliPassthrough: true}
 
@@ -153,7 +153,7 @@ func TestStartAgentProcess_AgentSession_IgnoresProfileToggleToPassthrough(t *tes
 // passthrough mode must keep using the passthrough path even if the profile
 // is later toggled back to ACP.
 func TestStartAgentProcess_PassthroughSession_IgnoresProfileToggleToAgent(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	// Profile currently advertises ACP — simulates a toggle away from passthrough.
 	mgr.profileResolver = &mockAgentProfileResolver{cliPassthrough: false}
 
@@ -183,7 +183,7 @@ func TestStartAgentProcess_PassthroughSession_IgnoresProfileToggleToAgent(t *tes
 // what matters is that we do NOT silently fall through to the ACP path (the
 // bug that would otherwise strand the session in the wrong launch mode).
 func TestStartAgentProcess_PassthroughResume_SurvivesProfileResolveError(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	mgr.profileResolver = &mockAgentProfileResolver{err: errors.New("transient DB error")}
 
 	execution := &AgentExecution{
@@ -212,7 +212,7 @@ func TestStartAgentProcess_PassthroughResume_SurvivesProfileResolveError(t *test
 // building, so a profile-resolve error must surface as an explicit error
 // rather than silently falling through to ACP.
 func TestStartAgentProcess_FreshPassthrough_SurfacesProfileResolveError(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	mgr.profileResolver = &mockAgentProfileResolver{err: errors.New("transient DB error")}
 
 	execution := &AgentExecution{
@@ -241,7 +241,7 @@ func TestStartAgentProcess_FreshPassthrough_SurfacesProfileResolveError(t *testi
 // doesn't carry a SessionID) still fall back to live profile resolution so
 // first-time launches reflect the current mode.
 func TestStartAgentProcess_NoSession_FallsBackToLiveProfile(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	mgr.profileResolver = &mockAgentProfileResolver{cliPassthrough: true}
 
 	execution := &AgentExecution{
