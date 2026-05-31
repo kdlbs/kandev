@@ -163,13 +163,18 @@ func (r *InteractiveRunner) StartUserShell(ctx context.Context, scopeID, process
 		initialCommand = existingEntry.InitialCommand
 	}
 
+	label := opts.Label
+	if existingEntry != nil && existingEntry.Label != "" {
+		label = existingEntry.Label
+	}
+
 	req := InteractiveStartRequest{
 		SessionID:            processSessionID,
 		Command:              defaultShellCommand(preferredShell),
 		WorkingDir:           workingDir,
 		ScopeID:              scopeID,
 		TerminalID:           terminalID,
-		Label:                opts.Label,
+		Label:                label,
 		InitialCommand:       initialCommand,
 		DisableTurnDetection: true,
 		IsUserShell:          true,
@@ -307,6 +312,7 @@ func (r *InteractiveRunner) StopUserShellsForScope(ctx context.Context, scopeID 
 	r.userShellsMu.Unlock()
 
 	var lastErr error
+	stoppedCount := 0
 	for _, target := range targets {
 		processID := ""
 		label := ""
@@ -326,6 +332,7 @@ func (r *InteractiveRunner) StopUserShellsForScope(ctx context.Context, scopeID 
 		if processID == "" {
 			continue
 		}
+		stoppedCount++
 		if err := r.Stop(ctx, processID); err != nil {
 			r.logger.Warn("failed to stop user shell for scope cleanup",
 				zap.String("scope_id", scopeID),
@@ -335,7 +342,7 @@ func (r *InteractiveRunner) StopUserShellsForScope(ctx context.Context, scopeID 
 			lastErr = err
 		}
 	}
-	return len(targets), lastErr
+	return stoppedCount, lastErr
 }
 
 // IsUserShellAlive reports whether the PTY behind (scopeID, terminalID) is

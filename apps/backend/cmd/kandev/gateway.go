@@ -125,6 +125,9 @@ func provideGateway(
 			ptyBackend = terminalservice.NewInteractiveRunnerBackend(lifecycleMgr.GetInteractiveRunner())
 		}
 		terminalSvc = terminalservice.New(terminalRepo, ptyBackend, log)
+		if taskRepo != nil {
+			terminalSvc.SetTaskEnvironmentReader(taskRepo)
+		}
 	}
 
 	// Enable dedicated terminal WebSocket for passthrough mode

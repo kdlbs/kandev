@@ -16,6 +16,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/terminal/models"
 	"github.com/kandev/kandev/internal/terminal/repository"
 )
@@ -60,16 +61,29 @@ type PTYBackend interface {
 	IsAlive(scopeID, terminalID string) bool
 }
 
+// taskEnvironmentReader is the minimal surface the terminal service needs
+// from the task layer to discover environments for cleanup.
+type taskEnvironmentReader interface {
+	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*taskmodels.TaskEnvironment, error)
+}
+
 // Service is the single entry point for all user-terminal RPCs.
 type Service struct {
-	repo *repository.Repository
-	pty  PTYBackend
-	log  *logger.Logger
+	repo        *repository.Repository
+	pty         PTYBackend
+	taskEnvRepo taskEnvironmentReader
+	log         *logger.Logger
 }
 
 // New constructs a Service.
 func New(repo *repository.Repository, pty PTYBackend, log *logger.Logger) *Service {
 	return &Service{repo: repo, pty: pty, log: log}
+}
+
+// SetTaskEnvironmentReader wires the task-environment repository. Called by
+// cmd/kandev/gateway.go after all repos are initialized.
+func (s *Service) SetTaskEnvironmentReader(r taskEnvironmentReader) {
+	s.taskEnvRepo = r
 }
 
 // IsManaged reports whether the terminal id corresponds to an ordinary
@@ -234,6 +248,12 @@ func (s *Service) CleanupTask(ctx context.Context, taskID string) (int, error) {
 		return 0, err
 	}
 	envIDs := uniqueTerminalEnvironmentIDs(rows)
+
+	// Also discover the environment from the task layer so shells that were
+	// registered for a bottom-panel or script terminal — but never had an
+	// ordinary terminal row — are still torn down.
+	envIDs = s.appendTaskEnvID(ctx, taskID, envIDs)
+
 	removedPTYEntries := 0
 	if s.pty != nil {
 		for _, envID := range envIDs {
@@ -257,6 +277,22 @@ func (s *Service) CleanupTask(ctx context.Context, taskID string) (int, error) {
 			zap.Int("deleted_rows", deleted))
 	}
 	return deleted, err
+}
+
+func (s *Service) appendTaskEnvID(ctx context.Context, taskID string, envIDs []string) []string {
+	if s.taskEnvRepo == nil {
+		return envIDs
+	}
+	env, _ := s.taskEnvRepo.GetTaskEnvironmentByTaskID(ctx, taskID)
+	if env == nil || env.ID == "" {
+		return envIDs
+	}
+	for _, id := range envIDs {
+		if id == env.ID {
+			return envIDs
+		}
+	}
+	return append(envIDs, env.ID)
 }
 
 func uniqueTerminalEnvironmentIDs(rows []*models.Terminal) []string {

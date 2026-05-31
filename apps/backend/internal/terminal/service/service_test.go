@@ -9,6 +9,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/terminal/models"
 	"github.com/kandev/kandev/internal/terminal/repository"
 )
@@ -57,6 +58,16 @@ func (f *fakeBackend) StopScope(_ context.Context, scopeID string) (int, error) 
 
 func (f *fakeBackend) IsAlive(_, terminalID string) bool {
 	return f.alive[terminalID]
+}
+
+// fakeTaskEnvReader implements the minimal taskEnvironmentReader interface
+// for testing CleanupTask when no ordinary terminal rows exist.
+type fakeTaskEnvReader struct {
+	env *taskmodels.TaskEnvironment
+}
+
+func (f *fakeTaskEnvReader) GetTaskEnvironmentByTaskID(_ context.Context, _ string) (*taskmodels.TaskEnvironment, error) {
+	return f.env, nil
 }
 
 func setupService(t *testing.T) (*Service, *fakeBackend) {
@@ -224,6 +235,28 @@ func TestCleanupTask_StopsAllAndDeletes(t *testing.T) {
 	}
 	if be.stopped[other.ID] {
 		t.Errorf("other task affected: %s", other.ID)
+	}
+}
+
+// TestCleanupTask_StopsShellsWhenNoOrdinaryTerminals ensures that bottom-panel
+// and script shells are still torn down when a task has no persisted ordinary
+// terminal rows (the env ID can only be discovered via the task layer).
+func TestCleanupTask_StopsShellsWhenNoOrdinaryTerminals(t *testing.T) {
+	svc, be := setupService(t)
+	ctx := context.Background()
+
+	// No ordinary terminals for task-1, but there is a task environment.
+	be.Register("env-orphan", "bottom-panel")
+	svc.SetTaskEnvironmentReader(&fakeTaskEnvReader{
+		env: &taskmodels.TaskEnvironment{ID: "env-orphan", TaskID: "task-1"},
+	})
+
+	_, err := svc.CleanupTask(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("cleanup: %v", err)
+	}
+	if !be.stopped["bottom-panel"] {
+		t.Errorf("unmanaged shell was not stopped when no ordinary terminals exist")
 	}
 }
 
