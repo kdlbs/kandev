@@ -191,6 +191,43 @@ func TestHandleApply_WrongConfirmReturns400(t *testing.T) {
 	}
 }
 
+func TestHandleApply_RejectsCrossScheme(t *testing.T) {
+	pool := newTestPool(t)
+	svc := NewService(pool, "v1.0.0", nil, logger.Default())
+	r := newRouter(svc)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/system/updates/apply", bytes.NewBufferString(`{"confirm":"UPDATE"}`))
+	req.Host = "localhost:38429"
+	// Server was reached over plain http (no TLS); an https Origin is cross-scheme.
+	req.Header.Set("Origin", "https://localhost:38429")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status=%d body=%s want 403", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleApply_HonorsForwardedProtoForScheme(t *testing.T) {
+	pool := newTestPool(t)
+	svc := NewService(pool, "v1.0.0", nil, logger.Default())
+	r := newRouter(svc)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/system/updates/apply", bytes.NewBufferString(`{"confirm":"UPDATE"}`))
+	req.Host = "localhost:38429"
+	req.Header.Set("Origin", "https://localhost:38429")
+	// A reverse proxy terminated TLS upstream, so the https Origin is same-origin.
+	req.Header.Set("X-Forwarded-Proto", "https")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	// Passes the same-origin gate, so it proceeds to the install-state check and
+	// is refused there (409) rather than blocked as cross-origin (403).
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status=%d body=%s want 409 (not 403)", w.Code, w.Body.String())
+	}
+}
+
 func TestHandleApply_RejectsLoopbackDifferentPort(t *testing.T) {
 	pool := newTestPool(t)
 	svc := NewService(pool, "v1.0.0", nil, logger.Default())

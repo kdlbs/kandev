@@ -156,6 +156,11 @@ const selfUpdateHelperDirName = "self-update"
 // `systemd-run --collect` gives us on Linux). The job lives outside the kandev
 // service so reinstalling/restarting the service mid-update doesn't kill it.
 func runLaunchdSelfUpdate(ctx context.Context, req applyRequest) (map[string]interface{}, error) {
+	// Empty home/log dirs would turn the plist path and log path into relative
+	// locations, scattering helper files. Refuse rather than guess.
+	if strings.TrimSpace(req.Intent.Install.HomeDir) == "" || strings.TrimSpace(req.Intent.Install.LogDir) == "" {
+		return nil, fmt.Errorf("service metadata missing home_dir or log_dir")
+	}
 	label := "com.kdlbs.kandev.self-update." + strconv.FormatInt(time.Now().UnixNano(), 10)
 	uid := os.Getuid()
 	domain := launchdSelfUpdateDomain(req, uid)
@@ -278,12 +283,31 @@ func sameOriginOrNoOrigin(r *http.Request) bool {
 		return true
 	}
 	originURL, err := url.Parse(origin)
-	if err != nil {
+	if err != nil || originURL.Host == "" {
 		return false
 	}
 	requestHost := r.Host
 	if requestHost == "" {
 		requestHost = r.URL.Host
 	}
-	return strings.EqualFold(originURL.Host, requestHost)
+	if !strings.EqualFold(originURL.Host, requestHost) {
+		return false
+	}
+	return strings.EqualFold(originURL.Scheme, requestScheme(r))
+}
+
+// requestScheme reports the scheme the server was reached on so the same-origin
+// check rejects a cross-scheme Origin (e.g. http://host against an https host).
+// A reverse proxy terminating TLS upstream is honoured via X-Forwarded-Proto.
+func requestScheme(r *http.Request) string {
+	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+		if i := strings.IndexByte(proto, ','); i >= 0 {
+			proto = proto[:i]
+		}
+		return strings.TrimSpace(proto)
+	}
+	if r.TLS != nil {
+		return "https"
+	}
+	return "http"
 }
