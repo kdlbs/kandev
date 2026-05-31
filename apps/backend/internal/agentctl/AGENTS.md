@@ -65,11 +65,11 @@ Kandev renders subagents (the `Task` tool) as cards and *wants* to nest each sub
 
 | Agent | Subagent-internal tool calls | Nestable? |
 |---|---|---|
-| **Claude** | emitted **flat on the parent session**, **no `parentToolCallId`** | No — children present but unlinked |
+| **Claude** | emitted on the parent session, each tagged with **`_meta.claudeCode.parentToolUseId`** = the parent Task tool_call's id | **Yes** — `parentToolUseID()` reads it in `adapter_tools.go` and sets `AgentEvent.ParentToolCallID`, which becomes the message's `parent_tool_call_id` and nests under the card |
 | **Cursor** | **not emitted over ACP at all** (Task `tool_call_update` carries only `{durationMs, isBackground}`) | No — no child data exists |
-| **OpenCode** | emitted into a **separate child ACP session** (the `metadata.sessionId` we store as `SubagentTaskPayload.ChildSessionID`) | Only by merging that child session — they never reach the parent stream |
+| **OpenCode** | emitted into a **separate child ACP session** (the `metadata.sessionId` we store as `SubagentTaskPayload.ChildSessionID`) | Not yet — they never reach the parent stream; would require merging that child session via the stored `child_session_id` |
 
-Implications: a `parentToolCallId` field (whether upstream-provided or heuristically inferred) only helps the Claude/Cursor flat-stream case. **OpenCode needs a child-session merge** — fold the child session's tool calls into the card using the stored `child_session_id`. No timing heuristic can attribute flat parent-stream calls when multiple subagents run in parallel.
+Claude is the one that works today: `claude-agent-acp` (since PR #341) sets `_meta.claudeCode.parentToolUseId` on a subagent's internal calls, and its value already equals the parent Task tool_call id — so it maps straight onto our `parent_tool_call_id`. Cursor exposes nothing to nest. OpenCode needs a kandev-side child-session merge. (Top-level `parentToolCallId` is NOT in the ACP schema — `_meta` is the spec-compliant carrier.)
 
 ## Further scoped notes
 

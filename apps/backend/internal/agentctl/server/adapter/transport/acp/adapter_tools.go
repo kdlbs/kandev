@@ -137,6 +137,7 @@ func (a *Adapter) convertToolCallUpdate(sessionID string, tc *acp.SessionUpdateT
 		Type:              streams.EventTypeToolCall,
 		SessionID:         sessionID,
 		ToolCallID:        toolCallID,
+		ParentToolCallID:  parentToolUseID(tc.Meta),
 		ToolName:          toolKind, // Kind is effectively the tool name
 		ToolTitle:         tc.Title,
 		ToolStatus:        status,
@@ -286,6 +287,7 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 		Type:              streams.EventTypeToolUpdate,
 		SessionID:         sessionID,
 		ToolCallID:        toolCallID,
+		ParentToolCallID:  parentToolUseID(tcu.Meta),
 		ToolTitle:         title,
 		ToolStatus:        status,
 		NormalizedPayload: payload,

@@ -252,6 +252,26 @@ func TestUpdatePayloadInput_FillsSubagentFields(t *testing.T) {
 	}
 }
 
+func TestParentToolUseID(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		meta map[string]any
+		want string
+	}{
+		{"present", map[string]any{"claudeCode": map[string]any{"parentToolUseId": "toolu_parent"}}, "toolu_parent"},
+		{"absent (top-level call)", map[string]any{"claudeCode": map[string]any{"toolName": "Bash"}}, ""},
+		{"nil meta", nil, ""},
+		{"no claudeCode", map[string]any{"other": 1}, ""},
+		{"wrong type", map[string]any{"claudeCode": map[string]any{"parentToolUseId": 123}}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := parentToolUseID(tc.meta); got != tc.want {
+				t.Errorf("parentToolUseID = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestEnrichSubagentResult_Claude(t *testing.T) {
 	n := NewNormalizer()
 	payload := streams.NewSubagentTask("Investigate", "do it", "")

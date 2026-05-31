@@ -77,6 +77,23 @@ func isSubagentSignal(meta map[string]any, title string, rawInput any) bool {
 	return false
 }
 
+// parentToolUseID returns `_meta.claudeCode.parentToolUseId` — the tool-call id
+// of the subagent (Task) that issued this tool call. claude-agent-acp sets it
+// on a subagent's internal tool calls (Bash/Read/…) and leaves it empty for
+// top-level calls. Its value equals the parent Task tool_call's id, so it maps
+// directly onto our `parent_tool_call_id` for nesting under the subagent card.
+func parentToolUseID(meta map[string]any) string {
+	if meta == nil {
+		return ""
+	}
+	cc, ok := meta["claudeCode"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	id, _ := cc["parentToolUseId"].(string)
+	return id
+}
+
 // isClaudeAgentMeta returns true when `_meta.claudeCode.toolName == "Agent"`.
 func isClaudeAgentMeta(meta map[string]any) bool {
 	if meta == nil {

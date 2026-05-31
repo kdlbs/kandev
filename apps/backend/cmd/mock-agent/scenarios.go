@@ -206,6 +206,14 @@ func scenarioSubagent(e *emitter) {
 	fixedDelay(50)
 	e.text("Subagent working on the task...")
 
+	// A tool call the subagent runs internally, attributed to the Task via
+	// `_meta.claudeCode.parentToolUseId` so it nests under the subagent card.
+	childToolID := nextToolID()
+	e.startChildTool(childToolID, taskToolID, "sleep 30", acp.ToolKindExecute,
+		map[string]any{"command": "sleep 30"})
+	fixedDelay(50)
+	e.completeChildTool(childToolID, taskToolID, map[string]any{"output": ""})
+
 	fixedDelay(50)
 	e.completeSubagentTool(taskToolID, "E2E subagent completed", subagentResult{
 		agentID:      "agent_e2e_0001",

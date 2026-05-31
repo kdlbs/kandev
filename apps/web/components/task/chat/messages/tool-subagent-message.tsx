@@ -74,7 +74,10 @@ function SubagentHeader({
         {isActive && <GridSpinner className="text-muted-foreground shrink-0" />}
       </span>
       {childCount > 0 && (
-        <span className="text-muted-foreground/60 text-xs px-1.5 rounded min-w-[20px] text-center font-mono">
+        <span
+          data-testid="subagent-child-count"
+          className="text-muted-foreground/60 text-xs px-1.5 rounded min-w-[20px] text-center font-mono"
+        >
           {childCount} tool call{childCount !== 1 ? "s" : ""}
         </span>
       )}

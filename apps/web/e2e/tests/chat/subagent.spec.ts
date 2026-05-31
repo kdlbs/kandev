@@ -57,5 +57,12 @@ test.describe("Subagent card", () => {
     await expect(card.locator('[data-testid="subagent-meta-tools"]')).toContainText("3 tools");
     // The agent id is truncated with an ellipsis, so assert on a substring.
     await expect(card.locator('[data-testid="subagent-meta-agent"]')).toContainText("agent_e2e");
+
+    // The subagent's internal tool call is nested UNDER its card (the mock emits
+    // a child carrying `_meta.claudeCode.parentToolUseId`), not as a flat sibling.
+    await expect(card.locator('[data-testid="subagent-child-count"]')).toContainText("1 tool call");
+    // Expand the card and confirm the child (sleep 30) renders inside it.
+    await card.getByRole("button").first().click();
+    await expect(card).toContainText("sleep 30");
   });
 });

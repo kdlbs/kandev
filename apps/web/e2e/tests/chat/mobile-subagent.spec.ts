@@ -48,5 +48,8 @@ test.describe("Mobile subagent card", () => {
     await expect(card.locator('[data-testid="subagent-meta-tokens"]')).toContainText("9,987");
     await expect(card.locator('[data-testid="subagent-meta-tools"]')).toContainText("3 tools");
     await expect(card.locator('[data-testid="subagent-meta-agent"]')).toContainText("agent_e2e");
+
+    // The subagent's internal tool call nests under its card (parentToolUseId).
+    await expect(card.locator('[data-testid="subagent-child-count"]')).toContainText("1 tool call");
   });
 });
