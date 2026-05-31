@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
@@ -1208,6 +1209,7 @@ func (h *Handlers) setSessionRunning(ctx context.Context, taskID, sessionID stri
 		h.logger.Warn("failed to update session state to RUNNING",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
+		return
 	}
 	if taskID != "" {
 		if err := h.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {
@@ -1223,6 +1225,7 @@ func (h *Handlers) setSessionRunning(ctx context.Context, taskID, sessionID stri
 			"task_id":    taskID,
 			"session_id": sessionID,
 			"new_state":  string(models.TaskSessionStateRunning),
+			"updated_at": h.sessionUpdatedAtForStateEvent(ctx, sessionID),
 		}
 		_ = h.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
 			events.TaskSessionStateChanged,
@@ -1239,6 +1242,7 @@ func (h *Handlers) setSessionWaitingForInput(ctx context.Context, taskID, sessio
 		h.logger.Warn("failed to update session state to WAITING_FOR_INPUT",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
+		return
 	}
 
 	// Update task state to REVIEW
@@ -1256,6 +1260,7 @@ func (h *Handlers) setSessionWaitingForInput(ctx context.Context, taskID, sessio
 			"task_id":    taskID,
 			"session_id": sessionID,
 			"new_state":  string(models.TaskSessionStateWaitingForInput),
+			"updated_at": h.sessionUpdatedAtForStateEvent(ctx, sessionID),
 		}
 		_ = h.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
 			events.TaskSessionStateChanged,
@@ -1263,6 +1268,13 @@ func (h *Handlers) setSessionWaitingForInput(ctx context.Context, taskID, sessio
 			eventData,
 		))
 	}
+}
+
+func (h *Handlers) sessionUpdatedAtForStateEvent(ctx context.Context, sessionID string) string {
+	if session, err := h.sessionRepo.GetTaskSession(ctx, sessionID); err == nil && session != nil && !session.UpdatedAt.IsZero() {
+		return session.UpdatedAt.UTC().Format(time.RFC3339Nano)
+	}
+	return time.Now().UTC().Format(time.RFC3339Nano)
 }
 
 // handleCreateTaskPlan creates a new task plan.

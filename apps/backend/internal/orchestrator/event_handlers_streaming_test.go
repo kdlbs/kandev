@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -39,6 +40,25 @@ func (b *recordingEventBus) Request(context.Context, string, *bus.Event, time.Du
 }
 func (b *recordingEventBus) Close()            {}
 func (b *recordingEventBus) IsConnected() bool { return true }
+
+func TestUpdateTaskSessionStatePublishesPersistedUpdatedAt(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	eb := &recordingEventBus{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.eventBus = eb
+
+	svc.updateTaskSessionState(ctx, "t1", "s1", models.TaskSessionStateWaitingForInput, "", false)
+
+	require.Len(t, eb.events, 1)
+	require.Equal(t, events.TaskSessionStateChanged, eb.events[0].subject)
+	data, ok := eb.events[0].event.Data.(map[string]interface{})
+	require.True(t, ok)
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, session.UpdatedAt.UTC().Format(time.RFC3339Nano), data["updated_at"])
+}
 
 func TestHandleSessionModeEvent(t *testing.T) {
 	t.Run("publishes plan mode", func(t *testing.T) {

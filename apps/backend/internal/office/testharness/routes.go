@@ -314,6 +314,7 @@ func publishSessionStateChanged(ctx context.Context, eventBus bus.EventBus, sess
 		"session_id":       session.ID,
 		"old_state":        "",
 		"new_state":        string(session.State),
+		"updated_at":       session.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		"agent_profile_id": session.AgentProfileID,
 	}
 	if session.Metadata != nil {

@@ -100,6 +100,9 @@ func buildSessionDataProvider(taskRepo *sqliterepo.Repository, lifecycleMgr *lif
 }
 
 const sessionIDPayloadKey = "session_id"
+const taskIDPayloadKey = "task_id"
+const newStatePayloadKey = "new_state"
+const sessionUpdatedAtPayloadKey = "updated_at"
 
 // appendAgentctlStatusMessage snapshots the current agentctl readiness for a
 // session so late-subscribing clients (page reload, task switch, WS reconnect)
@@ -158,9 +161,10 @@ func appendAgentctlStatusMessage(
 // — without it, env-routed shell terminals stall on "Connecting terminal...".
 func appendSessionStateMessage(sessionID string, session *models.TaskSession, result []*ws.Message) []*ws.Message {
 	payload := map[string]interface{}{
-		"session_id": sessionID,
-		"task_id":    session.TaskID,
-		"new_state":  string(session.State),
+		sessionIDPayloadKey:        sessionID,
+		taskIDPayloadKey:           session.TaskID,
+		newStatePayloadKey:         string(session.State),
+		sessionUpdatedAtPayloadKey: session.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	}
 	if session.ReviewStatus != models.ReviewStatusNone {
 		payload["review_status"] = string(session.ReviewStatus)
@@ -342,7 +346,6 @@ func appendContextWindowMessage(sessionID string, session *models.TaskSession, r
 	notification, err := ws.NewNotification(ws.ActionSessionStateChanged, map[string]interface{}{
 		"session_id": sessionID,
 		"task_id":    session.TaskID,
-		"new_state":  string(session.State),
 		"metadata": map[string]interface{}{
 			"context_window": contextWindow,
 		},

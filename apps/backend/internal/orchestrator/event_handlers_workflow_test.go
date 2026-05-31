@@ -95,6 +95,9 @@ func TestPublishSessionWaitingEvent(t *testing.T) {
 		if data["new_state"] != string(models.TaskSessionStateWaitingForInput) {
 			t.Errorf("expected new_state %q, got %q", models.TaskSessionStateWaitingForInput, data["new_state"])
 		}
+		if data["updated_at"] == "" {
+			t.Fatal("expected updated_at for state ordering")
+		}
 		if data["agent_profile_id"] != "profile-auggie" {
 			t.Errorf("expected agent_profile_id %q, got %v", "profile-auggie", data["agent_profile_id"])
 		}
@@ -137,4 +140,31 @@ func TestPublishSessionWaitingEvent(t *testing.T) {
 		// Should not panic.
 		svc.publishSessionWaitingEvent(ctx, "t1", "s1", "step1")
 	})
+}
+
+func TestPublishSessionCreatedEventIncludesUpdatedAt(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	eb := &mockEventBus{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.eventBus = eb
+
+	svc.publishSessionCreatedEvent(ctx, "t1", "s1", "step1")
+
+	published := eb.published()
+	if len(published) != 1 {
+		t.Fatalf("expected 1 published event, got %d", len(published))
+	}
+	data, ok := published[0].Event.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected event data to be map[string]any, got %T", published[0].Event.Data)
+	}
+	if data["new_state"] != string(models.TaskSessionStateCreated) {
+		t.Errorf("expected new_state %q, got %q", models.TaskSessionStateCreated, data["new_state"])
+	}
+	if data["updated_at"] == "" {
+		t.Fatal("expected updated_at for state ordering")
+	}
 }

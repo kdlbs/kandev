@@ -35,6 +35,7 @@ type TaskSessionStatusResponse struct {
 	SessionID      string `json:"session_id"`
 	TaskID         string `json:"task_id"`
 	State          string `json:"state"`
+	UpdatedAt      string `json:"updated_at,omitempty"`
 	AgentProfileID string `json:"agent_profile_id,omitempty"`
 
 	// Runtime status

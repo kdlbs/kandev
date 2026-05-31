@@ -263,6 +263,8 @@ export type TaskSessionStateChangedPayload = {
   session_id: string;
   old_state?: string;
   new_state?: string;
+  /** Authoritative row timestamp — used to drop out-of-order subscribe snapshots. */
+  updated_at?: string;
   /**
    * Agent profile id — drives the per-agent live-session selectors on the
    * sidebar. Empty for sessions launched without a profile.

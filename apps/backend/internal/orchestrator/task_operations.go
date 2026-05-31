@@ -1272,6 +1272,7 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 	}
 
 	resp.State = string(session.State)
+	resp.UpdatedAt = session.UpdatedAt.UTC().Format(time.RFC3339Nano)
 	resp.AgentProfileID = session.AgentProfileID
 	s.populateExecutorStatusInfo(ctx, session, &resp)
 

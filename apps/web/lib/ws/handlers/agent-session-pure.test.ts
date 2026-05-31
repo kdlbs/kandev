@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   isTerminalSessionState,
+  isStaleSessionStateEvent,
   pickReplacementSessionId,
   shouldAdoptNewSession,
 } from "./agent-session";
@@ -33,6 +34,36 @@ describe("isTerminalSessionState", () => {
     [undefined, false],
   ])("returns %o → %s", (input, expected) => {
     expect(isTerminalSessionState(input)).toBe(expected);
+  });
+});
+
+describe("isStaleSessionStateEvent", () => {
+  it("returns false when payload has no updated_at", () => {
+    expect(isStaleSessionStateEvent({ updated_at: "2026-01-02T00:00:00.000Z" }, undefined)).toBe(
+      false,
+    );
+  });
+
+  it("returns false when existing session has no updated_at", () => {
+    expect(isStaleSessionStateEvent({}, "2026-01-01T00:00:00.000Z")).toBe(false);
+  });
+
+  it("returns true when payload updated_at is older than store", () => {
+    expect(
+      isStaleSessionStateEvent(
+        { updated_at: "2026-01-02T00:00:00.000Z" },
+        "2026-01-01T00:00:00.000Z",
+      ),
+    ).toBe(true);
+  });
+
+  it("returns false when payload updated_at is newer than store", () => {
+    expect(
+      isStaleSessionStateEvent(
+        { updated_at: "2026-01-01T00:00:00.000Z" },
+        "2026-01-02T00:00:00.000Z",
+      ),
+    ).toBe(false);
   });
 });
 

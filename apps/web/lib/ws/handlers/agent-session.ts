@@ -91,12 +91,23 @@ export function pickReplacementSessionId(state: AppState, taskId: string): strin
   return null;
 }
 
+/** Ignore subscribe snapshots that were read before a newer state landed. */
+export function isStaleSessionStateEvent(
+  existing: { updated_at?: string } | null | undefined,
+  payloadUpdatedAt: string | undefined,
+): boolean {
+  if (!payloadUpdatedAt || !existing?.updated_at) return false;
+  const payloadTime = Date.parse(payloadUpdatedAt);
+  const existingTime = Date.parse(existing.updated_at);
+  if (Number.isNaN(payloadTime) || Number.isNaN(existingTime)) return false;
+  return payloadTime < existingTime;
+}
+
 /** Build a session update object from the state_changed payload. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildSessionUpdate(payload: any): Record<string, unknown> {
   const update: Record<string, unknown> = {};
   if (payload.new_state) update.state = payload.new_state;
-  if (payload.agent_profile_id) update.agent_profile_id = payload.agent_profile_id;
   if (payload.agent_profile_id) update.agent_profile_id = payload.agent_profile_id;
   if (payload.review_status !== undefined) update.review_status = payload.review_status;
   if (payload.error_message !== undefined) update.error_message = payload.error_message;
@@ -105,6 +116,7 @@ function buildSessionUpdate(payload: any): Record<string, unknown> {
   if (payload.is_passthrough !== undefined) update.is_passthrough = payload.is_passthrough;
   if (payload.session_metadata !== undefined) update.metadata = payload.session_metadata;
   if (payload.task_environment_id) update.task_environment_id = payload.task_environment_id;
+  if (payload.updated_at) update.updated_at = payload.updated_at;
   return update;
 }
 
@@ -129,7 +141,7 @@ function upsertTaskSessionList(
     task_id: taskId,
     state: (newState ?? existing?.state) as TaskSessionState,
     started_at: existing?.started_at ?? "",
-    updated_at: existing?.updated_at ?? "",
+    updated_at: (sessionUpdate.updated_at as string | undefined) ?? existing?.updated_at ?? "",
     ...(payload.agent_profile_id ? { agent_profile_id: payload.agent_profile_id } : {}),
     ...sessionUpdate,
   });
@@ -340,6 +352,17 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
 
       const sessionUpdate = buildSessionUpdate(payload);
       const existingSession = store.getState().taskSessions.items[sessionId];
+
+      if (isStaleSessionStateEvent(existingSession, payload.updated_at)) {
+        debug("state_changed ignored stale snapshot", {
+          sessionId,
+          task_id: taskId,
+          existingUpdatedAt: existingSession?.updated_at,
+          payloadUpdatedAt: payload.updated_at,
+          newState: newState ?? "-",
+        });
+        return;
+      }
 
       debug("state_changed", {
         sessionId,

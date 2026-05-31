@@ -376,7 +376,7 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 // check, same-state check). This is an optimistic fast-path: between load and check another
 // goroutine may have changed the state in the DB. The guards are best-effort to avoid
 // unnecessary writes; the DB update via UpdateTaskSessionState is the atomic source of truth.
-func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID string, nextState models.TaskSessionState, errorMessage string, allowWakeFromWaiting bool, preloadedSession ...*models.TaskSession) {
+func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID string, nextState models.TaskSessionState, errorMessage string, allowWakeFromWaiting bool, preloadedSession ...*models.TaskSession) *models.TaskSession {
 	var session *models.TaskSession
 	if len(preloadedSession) > 0 && preloadedSession[0] != nil {
 		session = preloadedSession[0]
@@ -384,75 +384,85 @@ func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID 
 		var err error
 		session, err = s.repo.GetTaskSession(ctx, sessionID)
 		if err != nil {
-			return
+			return nil
 		}
 	}
 	if session.State == models.TaskSessionStateWaitingForInput && nextState == models.TaskSessionStateRunning && !allowWakeFromWaiting {
-		return
+		return session
 	}
 	oldState := session.State
 	switch session.State {
 	case models.TaskSessionStateCompleted, models.TaskSessionStateFailed, models.TaskSessionStateCancelled:
-		return
+		return session
 	}
 	if session.State == nextState {
-		return
+		return session
 	}
+	stateUpdatedAt := time.Now().UTC()
 	if err := s.repo.UpdateTaskSessionState(ctx, sessionID, nextState, errorMessage); err != nil {
 		s.logger.Error("failed to update task session state",
 			zap.String("session_id", sessionID),
 			zap.String("state", string(nextState)),
 			zap.Error(err))
+		return session
+	}
+	if refreshed, err := s.repo.GetTaskSession(ctx, sessionID); err == nil && refreshed != nil {
+		session = refreshed
+		stateUpdatedAt = refreshed.UpdatedAt.UTC()
 	}
 	s.logger.Debug("task session state updated",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
 		zap.String("old_state", string(oldState)),
 		zap.String("new_state", string(nextState)))
-	if s.eventBus != nil {
-		// Resolve agent_profile_id for the office per-agent live indicators on
-		// the frontend. Prefer the value stored on the session row (post
-		// office-task-session-lifecycle, populated for office sessions); fall
-		// back to the task's assignee for legacy rows that pre-date that spec.
-		// Best-effort: a missed lookup just omits the field, it doesn't drop
-		// the rest of the event.
-		agentProfileID := session.AgentProfileID
-		if agentProfileID == "" {
-			if task, terr := s.repo.GetTask(ctx, taskID); terr == nil && task != nil {
-				agentProfileID = task.AssigneeAgentProfileID
-			}
-		}
-		eventData := map[string]interface{}{
-			"task_id":                taskID,
-			"session_id":             sessionID,
-			"old_state":              string(oldState),
-			"new_state":              string(nextState),
-			"error_message":          errorMessage,
-			"agent_profile_id":       agentProfileID,
-			"agent_profile_snapshot": session.AgentProfileSnapshot,
-			"is_passthrough":         session.IsPassthrough,
-		}
-		// Include review_status if present to ensure frontend state consistency
-		if session.ReviewStatus != models.ReviewStatusNone {
-			eventData["review_status"] = string(session.ReviewStatus)
-		}
-		// Include session metadata (e.g. plan_mode set by workflow events).
-		// Key is "session_metadata" to avoid conflict with message-level "metadata".
-		if len(session.Metadata) > 0 {
-			eventData["session_metadata"] = session.Metadata
-		}
-		// Propagate toast suppression flag set by failure handlers (e.g. missing branch).
-		if suppressed, ok := s.suppressToast.LoadAndDelete(sessionID); ok && suppressed.(bool) {
-			eventData["suppress_toast"] = true
-		}
-		if session.TaskEnvironmentID != "" {
-			eventData["task_environment_id"] = session.TaskEnvironmentID
-		}
-		_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(events.TaskSessionStateChanged, "task-session", eventData))
-	}
+	s.publishTaskSessionStateChanged(ctx, taskID, sessionID, oldState, nextState, errorMessage, stateUpdatedAt, session)
 
 	// Auto-promote another session to primary when the current primary enters a terminal state
 	s.maybePromotePrimary(ctx, taskID, sessionID, nextState)
+	return session
+}
+
+func (s *Service) publishTaskSessionStateChanged(
+	ctx context.Context,
+	taskID, sessionID string,
+	oldState, nextState models.TaskSessionState,
+	errorMessage string,
+	stateUpdatedAt time.Time,
+	session *models.TaskSession,
+) {
+	if s.eventBus == nil || session == nil {
+		return
+	}
+	agentProfileID := session.AgentProfileID
+	if agentProfileID == "" {
+		if task, terr := s.repo.GetTask(ctx, taskID); terr == nil && task != nil {
+			agentProfileID = task.AssigneeAgentProfileID
+		}
+	}
+	eventData := map[string]interface{}{
+		metaKeyTaskID:            taskID,
+		metaKeySessionID:         sessionID,
+		"old_state":              string(oldState),
+		metaKeyNewState:          string(nextState),
+		metaKeyUpdatedAt:         stateUpdatedAt.Format(time.RFC3339Nano),
+		"error_message":          errorMessage,
+		metaKeyAgentProfileID:    agentProfileID,
+		"agent_profile_snapshot": session.AgentProfileSnapshot,
+		"is_passthrough":         session.IsPassthrough,
+	}
+	if session.ReviewStatus != models.ReviewStatusNone {
+		eventData["review_status"] = string(session.ReviewStatus)
+	}
+	if len(session.Metadata) > 0 {
+		eventData["session_metadata"] = session.Metadata
+	}
+	if suppressed, ok := s.suppressToast.LoadAndDelete(sessionID); ok && suppressed.(bool) {
+		eventData["suppress_toast"] = true
+	}
+	if session.TaskEnvironmentID != "" {
+		eventData["task_environment_id"] = session.TaskEnvironmentID
+	}
+	_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(events.TaskSessionStateChanged, "task-session", eventData))
 }
 
 // maybePromotePrimary promotes the next best active session to primary when the
@@ -537,7 +547,11 @@ func (s *Service) setSessionWaitingForInput(ctx context.Context, taskID, session
 	}
 
 	wasAlreadyWaiting := session.State == models.TaskSessionStateWaitingForInput
-	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", false, session)
+	if updatedSession := s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", false, session); updatedSession != nil {
+		if len(preloadedSession) > 0 && preloadedSession[0] != nil && preloadedSession[0] != updatedSession {
+			*preloadedSession[0] = *updatedSession
+		}
+	}
 
 	if wasAlreadyWaiting {
 		return
@@ -582,7 +596,11 @@ func (s *Service) setSessionRunning(ctx context.Context, taskID, sessionID strin
 	// (2,000+ redundant writes observed on long-running turns).
 	wasAlreadyRunning := session.State == models.TaskSessionStateRunning
 
-	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateRunning, "", true, session)
+	if updatedSession := s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateRunning, "", true, session); updatedSession != nil {
+		if len(preloadedSession) > 0 && preloadedSession[0] != nil && preloadedSession[0] != updatedSession {
+			*preloadedSession[0] = *updatedSession
+		}
+	}
 
 	if wasAlreadyRunning {
 		return

@@ -1,13 +1,29 @@
+import { renderHook, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockRequest = vi.fn();
+const mockSetTaskSession = vi.fn();
+const mockSetSessionAgentctlStatus = vi.fn();
+let mockConnectionStatus = "connected";
+let mockSessionItems: Record<string, { started_at?: string; updated_at?: string }> = {};
 
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => ({ request: mockRequest }),
 }));
 
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
+    selector({
+      connection: { status: mockConnectionStatus },
+      taskSessions: { items: mockSessionItems },
+      setTaskSession: mockSetTaskSession,
+      setSessionAgentctlStatus: mockSetSessionAgentctlStatus,
+    }),
+}));
+
 import {
   resumeWithSilentFallback,
+  useSessionResumption,
   type ResumeStateSetter,
   type ResumptionState,
 } from "./use-session-resumption";
@@ -52,6 +68,8 @@ function createSetters(): { setters: ResumeStateSetter; calls: SetterCalls } {
 describe("resumeWithSilentFallback", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockConnectionStatus = "connected";
+    mockSessionItems = {};
     // tryLaunch logs caught errors via console.error; silence in tests so the
     // expected error paths don't pollute the test output.
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -190,5 +208,33 @@ describe("resumeWithSilentFallback", () => {
     await resumeWithSilentFallback("t1", "s1", null, setters);
 
     expect(setAgentctlReady).not.toHaveBeenCalled();
+  });
+});
+
+describe("useSessionResumption", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockConnectionStatus = "connected";
+    mockSessionItems = {
+      s1: {
+        started_at: "2026-01-01T00:00:00.000Z",
+      },
+    };
+  });
+
+  it("does not mint client timestamps when status has no updated_at", async () => {
+    mockRequest.mockResolvedValueOnce({
+      session_id: "s1",
+      task_id: "t1",
+      state: "WAITING_FOR_INPUT",
+      is_agent_running: false,
+      is_resumable: false,
+      needs_resume: false,
+    });
+
+    renderHook(() => useSessionResumption("t1", "s1"));
+
+    await waitFor(() => expect(mockSetTaskSession).toHaveBeenCalled());
+    expect(mockSetTaskSession).toHaveBeenCalledWith(expect.objectContaining({ updated_at: "" }));
   });
 });

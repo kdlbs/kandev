@@ -131,6 +131,37 @@ describe("session.state_changed handler", () => {
   });
 });
 
+describe("session.state_changed stale guard", () => {
+  it("ignores older state events before upserting the session", () => {
+    const upsertTaskSessionFromEvent = vi.fn();
+    store = makeStore({
+      taskSessions: {
+        items: {
+          "s-1": {
+            id: "s-1",
+            task_id: "t-1",
+            state: "WAITING_FOR_INPUT",
+            updated_at: "2026-01-02T00:00:00.000Z",
+          },
+        },
+      },
+      upsertTaskSessionFromEvent,
+    });
+    handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        new_state: "RUNNING",
+        updated_at: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+
+    expect(upsertTaskSessionFromEvent).not.toHaveBeenCalled();
+  });
+});
+
 describe("session.state_changed → active session switching", () => {
   beforeEach(() => {
     vi.clearAllMocks();

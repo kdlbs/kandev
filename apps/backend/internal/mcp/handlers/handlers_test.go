@@ -64,6 +64,42 @@ func newTestTaskService(t *testing.T) (*service.Service, *sqliterepo.Repository)
 	return svc, repo
 }
 
+func seedMCPHandlerSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID string, state models.TaskSessionState) {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{
+		ID:        "ws-state-event",
+		Name:      "State Event",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{
+		ID:          taskID,
+		WorkspaceID: "ws-state-event",
+		Title:       "State Event Task",
+		State:       v1.TaskStateInProgress,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}))
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:        sessionID,
+		TaskID:    taskID,
+		State:     state,
+		StartedAt: now,
+		UpdatedAt: now,
+	}))
+}
+
+type mcpRecordingEventBus struct {
+	events []*bus.Event
+}
+
+func (b *mcpRecordingEventBus) Publish(_ context.Context, _ string, event *bus.Event) error {
+	b.events = append(b.events, event)
+	return nil
+}
+
 func TestHandleCreateTask_MissingTitle(t *testing.T) {
 	h := &Handlers{}
 	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
@@ -74,6 +110,54 @@ func TestHandleCreateTask_MissingTitle(t *testing.T) {
 	resp, err := h.handleCreateTask(context.Background(), msg)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeValidation)
+}
+
+func TestSessionStateEventsIncludeUpdatedAt(t *testing.T) {
+	tests := []struct {
+		name      string
+		initial   models.TaskSessionState
+		run       func(*Handlers, context.Context, string, string)
+		wantState models.TaskSessionState
+	}{
+		{
+			name:      "running",
+			initial:   models.TaskSessionStateWaitingForInput,
+			run:       (*Handlers).setSessionRunning,
+			wantState: models.TaskSessionStateRunning,
+		},
+		{
+			name:      "waiting for input",
+			initial:   models.TaskSessionStateRunning,
+			run:       (*Handlers).setSessionWaitingForInput,
+			wantState: models.TaskSessionStateWaitingForInput,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, repo := newTestTaskService(t)
+			seedMCPHandlerSession(t, repo, "task-state-event", "session-state-event", tt.initial)
+			eventBus := &mcpRecordingEventBus{}
+			h := &Handlers{
+				sessionRepo: repo,
+				taskRepo:    repo,
+				eventBus:    eventBus,
+				logger:      testLogger(t).WithFields(),
+			}
+
+			tt.run(h, context.Background(), "task-state-event", "session-state-event")
+
+			require.Len(t, eventBus.events, 1)
+			data, ok := eventBus.events[0].Data.(map[string]interface{})
+			require.True(t, ok)
+			assert.Equal(t, string(tt.wantState), data["new_state"])
+			gotUpdatedAt, ok := data["updated_at"].(string)
+			require.True(t, ok, "expected updated_at for state ordering")
+			updatedSession, err := repo.GetTaskSession(context.Background(), "session-state-event")
+			require.NoError(t, err)
+			assert.Equal(t, updatedSession.UpdatedAt.UTC().Format(time.RFC3339Nano), gotUpdatedAt)
+		})
+	}
 }
 
 func TestHandleCreateTask_SubtaskMissingDescription(t *testing.T) {

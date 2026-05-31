@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -49,6 +50,50 @@ func TestAppendSessionStateMessage_IncludesTaskEnvironmentID(t *testing.T) {
 	}
 	if got != "env-42" {
 		t.Fatalf("expected task_environment_id=env-42, got %v", got)
+	}
+}
+
+func TestAppendSessionStateMessage_IncludesUpdatedAt(t *testing.T) {
+	updatedAt := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
+	session := &models.TaskSession{
+		ID:        "sess-3",
+		TaskID:    "task-1",
+		State:     models.TaskSessionStateWaitingForInput,
+		UpdatedAt: updatedAt,
+	}
+
+	msgs := appendSessionStateMessage(session.ID, session, nil)
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	payload := decodePayload(t, msgs[0].Payload)
+	got, present := payload["updated_at"]
+	if !present {
+		t.Fatal("payload missing updated_at — stale subscribe snapshots cannot be ignored")
+	}
+	if got != updatedAt.Format(time.RFC3339Nano) {
+		t.Fatalf("expected updated_at=%q, got %v", updatedAt.Format(time.RFC3339Nano), got)
+	}
+}
+
+func TestAppendContextWindowMessage_DoesNotEmitStateSnapshot(t *testing.T) {
+	session := &models.TaskSession{
+		ID:        "sess-4",
+		TaskID:    "task-1",
+		State:     models.TaskSessionStateRunning,
+		UpdatedAt: time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC),
+		Metadata: map[string]interface{}{
+			"context_window": map[string]interface{}{"size": 100},
+		},
+	}
+
+	msgs := appendContextWindowMessage(session.ID, session, nil)
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	payload := decodePayload(t, msgs[0].Payload)
+	if _, present := payload["new_state"]; present {
+		t.Fatal("context-window snapshot must not carry new_state and overwrite fresher session state")
 	}
 }
 
