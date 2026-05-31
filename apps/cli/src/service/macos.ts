@@ -6,6 +6,7 @@ import path from "node:path";
 import type { ServiceArgs } from "./args";
 import { dumpLaunchdLogs, waitForServiceHealth } from "./health_check";
 import { commandExists, writeUnitFile } from "./install_helpers";
+import { reloadService } from "./launchctl";
 import {
   buildServiceInstallMetadata,
   serviceMetadataPath,
@@ -123,8 +124,12 @@ function installSync(ctx: Ctx): { logDir: string } {
   // (ignoring its error if nothing was loaded). This means 'install' is
   // idempotent: re-running it reloads the unit even if the file is unchanged,
   // which is how we recover from a user manually unloading the service.
-  spawnSync("launchctl", ["bootout", ctx.target], { stdio: "ignore" });
-  runLaunchctl(["bootstrap", ctx.domain, ctx.plistPath]);
+  //
+  // `reloadService` waits for bootout's async teardown before bootstrapping and
+  // retries the transient EIO ("Bootstrap failed: 5") that launchd returns while
+  // a still-running instance is torn down — the failure that broke self-update,
+  // where this install runs against a live service. See launchctl.ts.
+  reloadService(ctx.target, ctx.domain, ctx.plistPath);
   runLaunchctl(["enable", ctx.target], { allowFailure: true });
   console.log(
     outcome === "unchanged"
@@ -156,9 +161,9 @@ function uninstall(ctx: Ctx): void {
 // so each begins with a bootout-then-bootstrap dance similar to installSync.
 function startService(ctx: Ctx): void {
   // Idempotent: if the label is already loaded, bootstrap would fail. Bootout
-  // first so start works whether the service was previously running or stopped.
-  spawnSync("launchctl", ["bootout", ctx.target], { stdio: "ignore" });
-  runLaunchctl(["bootstrap", ctx.domain, ctx.plistPath]);
+  // first (waiting for teardown) so start works whether the service was
+  // previously running or stopped.
+  reloadService(ctx.target, ctx.domain, ctx.plistPath);
 }
 
 function stopService(ctx: Ctx): void {
@@ -171,7 +176,9 @@ function stopService(ctx: Ctx): void {
 function restartService(ctx: Ctx): void {
   const res = spawnSync("launchctl", ["kickstart", "-k", ctx.target], { stdio: "inherit" });
   if (res.status === 0) return;
-  runLaunchctl(["bootstrap", ctx.domain, ctx.plistPath]);
+  // kickstart fails when the job isn't loaded — reload it (waiting for any
+  // residual teardown and retrying the transient bootstrap EIO).
+  reloadService(ctx.target, ctx.domain, ctx.plistPath);
 }
 
 function showStatus(ctx: Ctx): void {
