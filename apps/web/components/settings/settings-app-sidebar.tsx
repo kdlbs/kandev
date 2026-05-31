@@ -15,6 +15,7 @@ import {
   IconBrandGithub,
   IconBrandGitlab,
   IconBrandSlack,
+  IconBug,
   IconHexagon,
   IconWand,
   IconGitBranch,
@@ -202,6 +203,7 @@ function IntegrationsSidebarSection({ pathname }: { pathname: string }) {
     { href: "/settings/integrations/gitlab", label: "GitLab", Icon: IconBrandGitlab },
     { href: "/settings/integrations/jira", label: "Jira", Icon: IconTicket },
     { href: "/settings/integrations/linear", label: "Linear", Icon: IconHexagon },
+    { href: "/settings/integrations/sentry", label: "Sentry", Icon: IconBug },
     { href: "/settings/integrations/slack", label: "Slack", Icon: IconBrandSlack },
   ];
   return (
