@@ -200,6 +200,8 @@ func (s *Service) UpdateTaskStateIfCurrentIn(
 	if err != nil || !updated {
 		return false, err
 	}
+	// Unreachable for current callers (allowed never includes state) — kept so a
+	// future caller that includes state in allowed still skips a duplicate publish.
 	if oldState == state {
 		return false, nil
 	}
@@ -208,11 +210,14 @@ func (s *Service) UpdateTaskStateIfCurrentIn(
 	if err != nil {
 		return true, err
 	}
+	// The CAS wrote `state`; pin it on the payload so a concurrent transition
+	// between commit and read cannot publish a mismatched new_state.
+	task.State = state
 
 	s.logger.Info("task state updated",
 		zap.String("task_id", id),
 		zap.String("workflow_step_id", task.WorkflowStepID),
-		zap.String("state", string(task.State)))
+		zap.String("state", string(state)))
 
 	s.publishTaskEvent(ctx, events.TaskStateChanged, task, &oldState)
 	s.logger.Info("task state changed",

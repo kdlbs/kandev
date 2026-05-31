@@ -401,6 +401,10 @@ func TestCancelAgent_TaskStateReconcile(t *testing.T) {
 
 			if tc.office {
 				seedOfficeSession(t, repo, taskID, sessionID, "")
+				// Seed the mock so a missing office guard would fail the test: without
+				// AssigneeAgentProfileID early-return, UpdateTaskStateIfCurrentIn would
+				// run against this IN_PROGRESS row and write updatedStates.
+				taskRepo.tasks[taskID] = &v1.Task{ID: taskID, State: tc.taskState}
 			} else {
 				seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
 				task, err := repo.GetTask(ctx, taskID)
