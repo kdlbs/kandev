@@ -863,7 +863,8 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 				s.setSessionPlanMode(ctx, session, true)
 			}
 		case wfmodels.OnEnterSetSessionMode:
-			s.applyStepSessionMode(ctx, session, readSessionModeConfig(action.Config), isPassthrough)
+			mode, _ := action.Config["mode"].(string)
+			s.applyStepSessionMode(ctx, session, mode, isPassthrough)
 		case wfmodels.OnEnterAutoStartAgent:
 			hasAutoStart = true
 		}
@@ -1724,16 +1725,6 @@ func (s *Service) setSessionPlanMode(ctx context.Context, session *models.TaskSe
 			zap.Bool("enabled", enabled),
 			zap.Error(err))
 	}
-}
-
-// readSessionModeConfig extracts the target mode from a set_session_mode action's
-// config map. Returns "" when absent.
-func readSessionModeConfig(config map[string]interface{}) string {
-	if config == nil {
-		return ""
-	}
-	mode, _ := config["mode"].(string)
-	return mode
 }
 
 // applyStepSessionMode applies a workflow-declared session permission mode to a

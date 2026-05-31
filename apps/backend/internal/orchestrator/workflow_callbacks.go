@@ -117,17 +117,20 @@ type setSessionModeCallback struct {
 }
 
 func (c *setSessionModeCallback) Execute(ctx context.Context, in engine.ActionInput) (engine.ActionResult, error) {
-	if in.Action.SetSessionMode == nil {
+	// Skip before any DB lookup: passthrough sessions manage their own mode in
+	// the CLI, and an action with no mode is a no-op. Guarding here keeps a
+	// skipped action from failing on a session-load error, and mirrors the
+	// enable/disable plan-mode callbacks.
+	if in.Action.SetSessionMode == nil || in.State.IsPassthrough {
 		return engine.ActionResult{}, nil
 	}
 	session, err := c.svc.repo.GetTaskSession(ctx, in.State.SessionID)
 	if err != nil {
 		return engine.ActionResult{}, fmt.Errorf("load session for set session mode: %w", err)
 	}
-	// applyStepSessionMode owns the passthrough skip (those sessions manage
-	// their own mode in the CLI), so pass the state through rather than
-	// pre-guarding here.
-	c.svc.applyStepSessionMode(ctx, session, in.Action.SetSessionMode.Mode, in.State.IsPassthrough)
+	// Passthrough is already excluded above, so pass false explicitly; the
+	// isPassthrough parameter exists for the legacy processOnEnter call site.
+	c.svc.applyStepSessionMode(ctx, session, in.Action.SetSessionMode.Mode, false)
 	return engine.ActionResult{}, nil
 }
 
