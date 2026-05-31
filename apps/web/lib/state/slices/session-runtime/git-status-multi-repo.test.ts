@@ -101,4 +101,36 @@ describe("session-runtime gitStatus multi-repo routing", () => {
     expect(state.gitStatus.byEnvironmentId[SESSION]).toBeUndefined();
     expect(state.gitStatus.byEnvironmentRepo[SESSION]).toBeUndefined();
   });
+
+  it("ignores duplicate snapshots when only the timestamp changes", () => {
+    useStore.getState().setGitStatus(SESSION, entry({ modified: [FRONTEND_FILE] }));
+    const stateAfterFirst = useStore.getState();
+    const firstStatus = stateAfterFirst.gitStatus.byEnvironmentId[SESSION];
+    const firstRepoStatus = stateAfterFirst.gitStatus.byEnvironmentRepo[SESSION][""];
+
+    useStore.getState().setGitStatus(SESSION, entry({ modified: [FRONTEND_FILE] }));
+
+    const stateAfterSecond = useStore.getState();
+    expect(stateAfterSecond.gitStatus.byEnvironmentId[SESSION]).toBe(firstStatus);
+    expect(stateAfterSecond.gitStatus.byEnvironmentRepo[SESSION][""]).toBe(firstRepoStatus);
+  });
+
+  it("updates when file diff content changes with the same file stats", () => {
+    const first = entry({ modified: [FRONTEND_FILE] });
+    first.files[FRONTEND_FILE].additions = 1;
+    first.files[FRONTEND_FILE].deletions = 1;
+    first.files[FRONTEND_FILE].diff = "-old\n+new";
+
+    const second = entry({ modified: [FRONTEND_FILE] });
+    second.files[FRONTEND_FILE].additions = 1;
+    second.files[FRONTEND_FILE].deletions = 1;
+    second.files[FRONTEND_FILE].diff = "-old\n+newer";
+
+    useStore.getState().setGitStatus(SESSION, first);
+    useStore.getState().setGitStatus(SESSION, second);
+
+    expect(useStore.getState().gitStatus.byEnvironmentId[SESSION].files[FRONTEND_FILE].diff).toBe(
+      "-old\n+newer",
+    );
+  });
 });

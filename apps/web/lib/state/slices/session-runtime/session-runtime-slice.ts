@@ -27,45 +27,105 @@ function computeFileStats(files: Record<string, FileInfo> | undefined): {
   return { additions, deletions };
 }
 
-/** Check if any file's staged status differs between two git statuses. */
-function hasStagedDifference(
+function sameStringList(existing: string[] | undefined, incoming: string[] | undefined): boolean {
+  const a = existing ?? [];
+  const b = incoming ?? [];
+  if (a.length !== b.length) return false;
+  const sortedA = [...a].sort();
+  const sortedB = [...b].sort();
+  return sortedA.every((value, index) => value === sortedB[index]);
+}
+
+const COMPARABLE_FILE_FIELDS = [
+  "path",
+  "status",
+  "staged",
+  "additions",
+  "deletions",
+  "old_path",
+  "diff",
+  "diff_skip_reason",
+  "repository_name",
+] as const;
+
+function comparableFileInfo(file: FileInfo) {
+  return {
+    path: file.path,
+    status: file.status,
+    staged: file.staged,
+    additions: file.additions ?? 0,
+    deletions: file.deletions ?? 0,
+    old_path: file.old_path ?? "",
+    diff: file.diff ?? "",
+    diff_skip_reason: file.diff_skip_reason ?? "",
+    repository_name: file.repository_name ?? "",
+  };
+}
+
+function sameFileInfo(existing: FileInfo | undefined, incoming: FileInfo | undefined): boolean {
+  if (!existing || !incoming) return existing === incoming;
+  const a = comparableFileInfo(existing);
+  const b = comparableFileInfo(incoming);
+  return COMPARABLE_FILE_FIELDS.every((field) => a[field] === b[field]);
+}
+
+function sameFiles(
   existingFiles: Record<string, FileInfo> | undefined,
   newFiles: Record<string, FileInfo> | undefined,
 ): boolean {
-  if (!existingFiles || !newFiles) return existingFiles !== newFiles;
-  for (const key of Object.keys(newFiles)) {
-    if (existingFiles[key]?.staged !== newFiles[key]?.staged) return true;
+  if (!existingFiles || !newFiles) return existingFiles === newFiles;
+  const existingFileKeys = Object.keys(existingFiles).sort();
+  const newFileKeys = Object.keys(newFiles).sort();
+  if (existingFileKeys.length !== newFileKeys.length) return false;
+  for (let i = 0; i < existingFileKeys.length; i += 1) {
+    const key = existingFileKeys[i];
+    if (key !== newFileKeys[i]) return false;
+    if (!sameFileInfo(existingFiles[key], newFiles[key])) return false;
   }
-  return false;
+  return true;
+}
+
+function hasBranchSummaryChanged(existing: GitStatusEntry, incoming: GitStatusEntry): boolean {
+  return (
+    existing.branch !== incoming.branch ||
+    existing.remote_branch !== incoming.remote_branch ||
+    existing.ahead !== incoming.ahead ||
+    existing.behind !== incoming.behind ||
+    (existing.repository_name ?? "") !== (incoming.repository_name ?? "") ||
+    existing.branch_additions !== incoming.branch_additions ||
+    existing.branch_deletions !== incoming.branch_deletions
+  );
+}
+
+function hasFileListsChanged(existing: GitStatusEntry, incoming: GitStatusEntry): boolean {
+  return (
+    !sameStringList(existing.modified, incoming.modified) ||
+    !sameStringList(existing.added, incoming.added) ||
+    !sameStringList(existing.deleted, incoming.deleted) ||
+    !sameStringList(existing.untracked, incoming.untracked) ||
+    !sameStringList(existing.renamed, incoming.renamed)
+  );
+}
+
+function hasFileStatsChanged(existing: GitStatusEntry, incoming: GitStatusEntry): boolean {
+  const existingTotal = computeFileStats(existing.files);
+  const newTotal = computeFileStats(incoming.files);
+  return (
+    existingTotal.additions !== newTotal.additions || existingTotal.deletions !== newTotal.deletions
+  );
 }
 
 /** Compare two git status entries to determine if a meaningful change occurred. */
-function hasGitStatusChanged(existing: GitStatusEntry, incoming: GitStatusEntry): boolean {
-  // Timestamp change means the backend detected a real change — always accept.
-  if (existing.timestamp !== incoming.timestamp) return true;
-
-  if (existing.branch !== incoming.branch || existing.remote_branch !== incoming.remote_branch)
-    return true;
-  if (existing.ahead !== incoming.ahead || existing.behind !== incoming.behind) return true;
-  if (
-    existing.branch_additions !== incoming.branch_additions ||
-    existing.branch_deletions !== incoming.branch_deletions
-  )
-    return true;
-
-  const existingFileKeys = existing.files ? Object.keys(existing.files).sort().join(",") : "";
-  const newFileKeys = incoming.files ? Object.keys(incoming.files).sort().join(",") : "";
-  if (existingFileKeys !== newFileKeys) return true;
-
-  const existingTotal = computeFileStats(existing.files);
-  const newTotal = computeFileStats(incoming.files);
-  if (
-    existingTotal.additions !== newTotal.additions ||
-    existingTotal.deletions !== newTotal.deletions
-  )
-    return true;
-
-  return hasStagedDifference(existing.files, incoming.files);
+export function hasGitStatusChanged(existing: GitStatusEntry, incoming: GitStatusEntry): boolean {
+  // The backend also emits fresh snapshots for focus/startup/poll events. Those
+  // can carry a new timestamp for identical git data, so timestamp alone must
+  // not force a store update or diff-cache invalidation.
+  return (
+    hasBranchSummaryChanged(existing, incoming) ||
+    hasFileListsChanged(existing, incoming) ||
+    hasFileStatsChanged(existing, incoming) ||
+    !sameFiles(existing.files, incoming.files)
+  );
 }
 
 function trimProcessOutput(value: string) {
