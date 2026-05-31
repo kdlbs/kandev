@@ -333,7 +333,7 @@ func (s *Server) registerTools() {
 		// a sibling to message_task_kandev) but NOT the task-document
 		// tools — those are office coordination plumbing.
 		s.registerKanbanTools()
-		count += 11
+		count += 13
 		if !s.disableAskQuestion {
 			s.registerInteractionTools()
 			count++
@@ -417,6 +417,20 @@ func (s *Server) registerKanbanTools() {
 			mcp.WithString("prompt", mcp.Description("Optional hand-off message for the receiving agent. When supplied AND the source session is mid-turn, the move is deferred to the agent's turn-end and the prompt is delivered at the new step (concatenated after the step's own auto_start prompt, if any). Omit for plain admin/config moves where there's no agent to address.")),
 		),
 		s.wrapHandler("move_task_kandev", s.moveTaskHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("delete_task_kandev",
+			mcp.WithDescription("Delete a task permanently. Use to clean up orphaned, duplicate, or test tasks you no longer need. This cannot be undone — prefer archive_task_kandev when the task may still be wanted. Restoring an archived task is a user action done from the UI, not via MCP."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to delete")),
+		),
+		s.wrapHandler("delete_task_kandev", s.deleteTaskHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("archive_task_kandev",
+			mcp.WithDescription("Archive a task. The task is hidden from active board views but kept in the database. Use to tidy up finished or abandoned tasks. Unarchiving is a user action done from the UI, not via MCP."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to archive")),
+		),
+		s.wrapHandler("archive_task_kandev", s.archiveTaskHandler()),
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("message_task_kandev",

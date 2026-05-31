@@ -66,6 +66,13 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	assert.NotContains(t, tools, "get_task_document_kandev")
 	assert.NotContains(t, tools, "write_task_document_kandev")
 
+	// Task mode exposes delete + archive so agents can clean up the tasks
+	// they fan out. Restore/unarchive is intentionally NOT exposed via MCP —
+	// it stays a user action in the UI.
+	assert.Contains(t, tools, "delete_task_kandev")
+	assert.Contains(t, tools, "archive_task_kandev")
+	assert.NotContains(t, tools, "restore_task_kandev")
+
 	// Task mode should NOT have config/mutation tools
 	assert.NotContains(t, tools, "create_workflow_kandev")
 	assert.NotContains(t, tools, "update_workflow_kandev")
@@ -79,8 +86,6 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	assert.NotContains(t, tools, "update_agent_profile_kandev")
 	assert.NotContains(t, tools, "get_mcp_config_kandev")
 	assert.NotContains(t, tools, "update_mcp_config_kandev")
-	assert.NotContains(t, tools, "delete_task_kandev")
-	assert.NotContains(t, tools, "archive_task_kandev")
 	assert.NotContains(t, tools, "list_executors_kandev")
 	assert.NotContains(t, tools, "create_executor_profile_kandev")
 	assert.NotContains(t, tools, "update_executor_profile_kandev")
@@ -205,9 +210,9 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
 	tools := getRegisteredToolNames(s)
-	// 11 kanban + 1 interaction + 4 plan + 1 related-tasks = 17.
-	// Task-document tools (list/get/write) are office-only.
-	assert.Equal(t, 17, len(tools))
+	// 13 kanban (incl. delete + archive task) + 1 interaction + 4 plan
+	// + 1 related-tasks = 19. Task-document tools (list/get/write) are office-only.
+	assert.Equal(t, 19, len(tools))
 }
 
 func TestServerModeConfig_ToolCount(t *testing.T) {
