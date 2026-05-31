@@ -211,7 +211,6 @@ function useConfirmableTerminalClose({
         shouldConfirmTerminalClose(terminalId, {
           type: terminal.type,
           kind: terminal.kind,
-          initialCommand: terminal.initialCommand,
         });
       if (needsConfirm) {
         event.preventDefault();

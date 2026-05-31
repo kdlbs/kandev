@@ -18,7 +18,6 @@ const PROMPT_TAIL = /(?:(?:^|\s)|[\w.@~:/-]*[@~/][\w.@~:/-]*)[$#>%]\s*$/;
 export type TerminalCloseConfirmOpts = {
   kind?: string;
   type?: string;
-  initialCommand?: string;
 };
 
 /** True when closing should warn because a script/non-ordinary shell or a busy command is active. */
@@ -28,7 +27,6 @@ export function shouldConfirmTerminalClose(
 ): boolean {
   if (opts.type === "script" || opts.kind === "script") return true;
   if (opts.kind && opts.kind !== "ordinary") return true;
-  if (opts.initialCommand) return true;
   return isTerminalBusy(terminalId);
 }
 
@@ -41,6 +39,7 @@ export function markTerminalInput(terminalId: string, data: string): void {
 
 export function markTerminalOutput(terminalId: string, terminal: Terminal): void {
   if (typeof window === "undefined") return;
+  if (!busyByTerminalId.get(terminalId)) return;
   if (bufferLooksAtPrompt(terminal)) {
     busyByTerminalId.set(terminalId, false);
   }

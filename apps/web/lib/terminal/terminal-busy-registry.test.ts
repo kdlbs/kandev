@@ -54,13 +54,18 @@ describe("terminal-busy-registry", () => {
     expect(isTerminalBusy("term-1")).toBe(true);
   });
 
+  it("ignores output when terminal is already idle", () => {
+    markTerminalOutput("term-1", mockTerminal("user@host:~/proj$ "));
+    expect(isTerminalBusy("term-1")).toBe(false);
+  });
+
   it("requires confirm for script terminals regardless of busy state", () => {
     expect(shouldConfirmTerminalClose("term-1", { type: "script" })).toBe(true);
     expect(shouldConfirmTerminalClose("term-1", { kind: "script" })).toBe(true);
   });
 
-  it("requires confirm when initialCommand is set on legacy shells", () => {
-    expect(shouldConfirmTerminalClose("term-1", { initialCommand: "npm run dev" })).toBe(true);
+  it("does not require confirm for idle ordinary terminals with initialCommand metadata", () => {
+    expect(shouldConfirmTerminalClose("term-1", { kind: "ordinary", type: "shell" })).toBe(false);
   });
 
   it("requires confirm when busy for ordinary terminals", () => {

@@ -90,7 +90,7 @@ function useTerminalTabClose({
   terminalId: string;
   taskID: string | null;
   stampedEnv: string | undefined;
-  shell: { kind?: string; initialCommand?: string } | null;
+  shell: { kind?: string } | null;
   closable: boolean;
   panelId: string;
   closePanel: () => void;
@@ -118,7 +118,6 @@ function useTerminalTabClose({
     if (
       shouldConfirmTerminalClose(terminalId, {
         kind: shell?.kind,
-        initialCommand: shell?.initialCommand,
       })
     ) {
       setConfirmClose(true);
