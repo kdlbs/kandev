@@ -28,10 +28,12 @@ afterEach(() => {
 });
 import {
   hasUserOrAgentMessage,
+  isTurnSettleTransition,
   runBackfillRound,
   autoBackfillUntilUserMessage,
   MAX_AUTO_BACKFILL_PAGES,
 } from "./use-session-messages";
+import type { TaskSessionState } from "@/lib/types/http";
 
 function makeMessage(overrides: Partial<Message>): Message {
   return {
@@ -109,6 +111,47 @@ describe("hasUserOrAgentMessage", () => {
       makeMessage({ id: "u1", type: "message", author_type: "user" }),
     ];
     expect(hasUserOrAgentMessage(msgs)).toBe(true);
+  });
+});
+
+describe("isTurnSettleTransition", () => {
+  const settled: TaskSessionState[] = [
+    "IDLE",
+    "WAITING_FOR_INPUT",
+    "COMPLETED",
+    "FAILED",
+    "CANCELLED",
+  ];
+
+  it("is true when leaving RUNNING for a settled state (resume turn ends)", () => {
+    for (const next of settled) {
+      expect(isTurnSettleTransition("RUNNING", next)).toBe(true);
+    }
+  });
+
+  it("is true when leaving STARTING for a settled state (resume boots with no turn)", () => {
+    expect(isTurnSettleTransition("STARTING", "WAITING_FOR_INPUT")).toBe(true);
+  });
+
+  it("is false for the active-phase transition STARTING -> RUNNING", () => {
+    expect(isTurnSettleTransition("STARTING", "RUNNING")).toBe(false);
+  });
+
+  it("is false when staying in a settled state (no churn on WAITING -> WAITING)", () => {
+    expect(isTurnSettleTransition("WAITING_FOR_INPUT", "WAITING_FOR_INPUT")).toBe(false);
+  });
+
+  it("is false when entering an active state", () => {
+    expect(isTurnSettleTransition("WAITING_FOR_INPUT", "RUNNING")).toBe(false);
+    expect(isTurnSettleTransition("IDLE", "STARTING")).toBe(false);
+  });
+
+  it("is false when there is no previous state (initial render)", () => {
+    expect(isTurnSettleTransition(null, "WAITING_FOR_INPUT")).toBe(false);
+  });
+
+  it("is false when the next state is unknown", () => {
+    expect(isTurnSettleTransition("RUNNING", null)).toBe(false);
   });
 });
 

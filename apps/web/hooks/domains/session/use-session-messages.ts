@@ -15,6 +15,36 @@ export function hasUserOrAgentMessage(messages: Message[]): boolean {
   );
 }
 
+// States where a turn (or the agent boot) is actively progressing.
+const ACTIVE_SESSION_STATES: ReadonlySet<TaskSessionState> = new Set(["STARTING", "RUNNING"]);
+// States the session settles into once a turn finishes.
+const SETTLED_SESSION_STATES: ReadonlySet<TaskSessionState> = new Set([
+  "IDLE",
+  "WAITING_FOR_INPUT",
+  "COMPLETED",
+  "FAILED",
+  "CANCELLED",
+]);
+
+/**
+ * True when the session just left an active state for a settled one — i.e. a
+ * turn (or a resume's agent boot) finished. Session-scoped message updates
+ * emitted as the turn winds down (e.g. the `agent_boot` `script_execution`
+ * completion during a resume) can be missed if the live subscription lapsed
+ * during the resume churn, so this is the signal to refetch and reconcile.
+ *
+ * `state_changed` / `turn.completed` are broadcast globally (not session-scoped),
+ * so the client always observes this transition even when its session
+ * subscription was dropped.
+ */
+export function isTurnSettleTransition(
+  prev: TaskSessionState | null,
+  next: TaskSessionState | null,
+): boolean {
+  if (prev === null || next === null) return false;
+  return ACTIVE_SESSION_STATES.has(prev) && SETTLED_SESSION_STATES.has(next);
+}
+
 const debug = createDebugLogger("messages:fetch");
 
 function summarizeMessages(messages: Message[]): {
@@ -356,6 +386,32 @@ function useSessionSubscription(
   }, [taskSessionId, connectionStatus, store, isSessionStartingOrUnknown]);
 }
 
+/**
+ * Refetch messages whenever a turn settles (active → settled). During a resume
+ * the agent_boot `script_execution` is created and then marked completed within
+ * ~1s, all server-side; if the live session subscription lapsed in that window
+ * the completion `session.message.updated` is dropped and the entry renders
+ * with a spinner forever (until a manual refresh). The settle transition is
+ * delivered globally, so reconciling messages here recovers any session-scoped
+ * updates missed while the turn was running.
+ */
+function useResyncOnTurnSettle(
+  taskSessionId: string | null,
+  taskSessionState: TaskSessionState | null,
+  connectionStatus: string,
+  store: ReturnType<typeof useAppStoreApi>,
+) {
+  const prevStateRef = useRef<TaskSessionState | null>(null);
+  useEffect(() => {
+    const prev = prevStateRef.current;
+    prevStateRef.current = taskSessionState;
+    if (!taskSessionId || connectionStatus !== "connected") return;
+    if (!isTurnSettleTransition(prev, taskSessionState)) return;
+    debug("resync on turn settle", { sessionId: taskSessionId, prev, next: taskSessionState });
+    fetchAndStoreMessages(taskSessionId, store).catch(() => {});
+  }, [taskSessionId, taskSessionState, connectionStatus, store]);
+}
+
 export function useSessionMessages(taskSessionId: string | null): UseSessionMessagesReturn {
   const store = useAppStoreApi();
   const messages = useAppStore((state) =>
@@ -444,6 +500,7 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
   const isSessionStartingOrUnknown = taskSessionState === null || taskSessionState === "STARTING";
 
   useSessionSubscription(taskSessionId, connectionStatus, isSessionStartingOrUnknown, store);
+  useResyncOnTurnSettle(taskSessionId, taskSessionState, connectionStatus, store);
   useVisibilityBackfill(taskSessionId, store);
 
   const terminalFetchRefs = useMemo(
