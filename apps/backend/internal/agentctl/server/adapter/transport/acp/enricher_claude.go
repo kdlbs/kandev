@@ -7,9 +7,6 @@ import (
 
 func enrichClaudePayload(payload *streams.NormalizedPayload, frame EnrichFrame) {
 	cc := claudeCodeMeta(frame.Meta)
-	if cc == nil && frame.RawInput == nil {
-		return
-	}
 
 	switch payload.Kind() {
 	case streams.ToolKindReadFile:
@@ -36,10 +33,13 @@ func enrichClaudeRead(rf *streams.ReadFilePayload, frame EnrichFrame, cc map[str
 }
 
 func enrichClaudeModify(mf *streams.ModifyFilePayload, frame EnrichFrame) {
-	if mf == nil || frame.RawInput == nil {
+	if mf == nil {
 		return
 	}
 	fillIfEmpty(&mf.FilePath, firstStructuredPath(frame.RawInput, frame.Supplemental))
+	if frame.RawInput == nil {
+		return
+	}
 	oldStr, _ := frame.RawInput["old_string"].(string)
 	newStr, _ := frame.RawInput["new_string"].(string)
 	if oldStr == "" && newStr == "" {

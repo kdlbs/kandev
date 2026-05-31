@@ -86,16 +86,9 @@ func (a *Adapter) convertToolCallUpdate(sessionID string, tc *acp.SessionUpdateT
 	}
 
 	if len(tc.Locations) > 0 {
-		locations := make([]map[string]any, len(tc.Locations))
-		for i, loc := range tc.Locations {
-			locMap := map[string]any{"path": loc.Path}
-			if loc.Line != nil {
-				locMap["line"] = *loc.Line
-			}
-			locations[i] = locMap
+		for k, v := range locationsArgsFromACP(tc.Locations) {
+			args[k] = v
 		}
-		args[keyLocations] = locations
-		args["path"] = tc.Locations[0].Path
 	}
 
 	if tc.RawInput != nil {
@@ -324,19 +317,25 @@ func enrichModifyFileFromContents(mf *streams.ModifyFilePayload, contents []acp.
 }
 
 func toolCallUpdateSupplemental(tcu *acp.SessionToolCallUpdate) map[string]any {
-	if len(tcu.Locations) == 0 {
+	return locationsArgsFromACP(tcu.Locations)
+}
+
+// locationsArgsFromACP builds the locations/path args map shared by initial tool_call
+// frames and tool_call_update supplemental maps.
+func locationsArgsFromACP(locations []acp.ToolCallLocation) map[string]any {
+	if len(locations) == 0 {
 		return nil
 	}
-	locations := make([]map[string]any, len(tcu.Locations))
-	for i, loc := range tcu.Locations {
-		locMap := map[string]any{"path": loc.Path}
+	locMaps := make([]map[string]any, len(locations))
+	for i, loc := range locations {
+		locMap := map[string]any{keyPath: loc.Path}
 		if loc.Line != nil {
 			locMap["line"] = *loc.Line
 		}
-		locations[i] = locMap
+		locMaps[i] = locMap
 	}
 	return map[string]any{
-		keyLocations: locations,
-		keyPath:      tcu.Locations[0].Path,
+		keyLocations: locMaps,
+		keyPath:      locations[0].Path,
 	}
 }

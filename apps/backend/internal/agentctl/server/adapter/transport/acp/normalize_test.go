@@ -846,6 +846,21 @@ func TestUpdatePayloadInput_ModifyFile(t *testing.T) {
 			t.Errorf("expected FilePath to remain 'existing.ts', got %q", payload.ModifyFile().FilePath)
 		}
 	})
+
+	t.Run("updates empty file path from supplemental locations", func(t *testing.T) {
+		payload := normalizer.NormalizeToolCall("edit", map[string]any{
+			"kind":      "edit",
+			"raw_input": map[string]any{},
+		})
+		normalizer.UpdatePayloadInput(payload, nil, map[string]any{
+			keyLocations: []map[string]any{
+				{keyPath: "/workspace/file.ts"},
+			},
+		})
+		if payload.ModifyFile().FilePath != "/workspace/file.ts" {
+			t.Errorf("expected FilePath '/workspace/file.ts', got %q", payload.ModifyFile().FilePath)
+		}
+	})
 }
 
 // TestUpdatePayloadInput_ReadFile tests incremental rawInput updates for read_file payloads.

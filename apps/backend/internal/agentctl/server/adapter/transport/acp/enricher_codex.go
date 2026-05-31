@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -48,26 +49,43 @@ func enrichCodexModify(mf *streams.ModifyFilePayload, frame EnrichFrame) {
 	if !ok || len(changes) == 0 {
 		return
 	}
-	for path, changeAny := range changes {
-		if mf.FilePath == "" && path != "" {
-			mf.FilePath = path
-		}
-		change, ok := changeAny.(map[string]any)
+	// NormalizedPayload surfaces one file; pick a stable canonical entry.
+	path, diff := codexCanonicalChange(changes)
+	fillIfEmpty(&mf.FilePath, path)
+	if diff == "" {
+		return
+	}
+	if len(mf.Mutations) == 0 {
+		mf.Mutations = []streams.FileMutation{{Type: streams.MutationPatch, Diff: diff}}
+		return
+	}
+	if mf.Mutations[0].Diff == "" {
+		mf.Mutations[0].Diff = diff
+	}
+}
+
+// codexCanonicalChange picks the lexicographically first path with a unified_diff.
+// Multi-file Codex edits still collapse to one surfaced file in NormalizedPayload.
+func codexCanonicalChange(changes map[string]any) (path, diff string) {
+	paths := make([]string, 0, len(changes))
+	for p := range changes {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	for _, p := range paths {
+		change, ok := changes[p].(map[string]any)
 		if !ok {
 			continue
 		}
-		diff, _ := change["unified_diff"].(string)
-		if diff == "" {
-			continue
-		}
-		if len(mf.Mutations) == 0 {
-			mf.Mutations = []streams.FileMutation{{Type: streams.MutationPatch, Diff: diff}}
-			continue
-		}
-		if mf.Mutations[0].Diff == "" {
-			mf.Mutations[0].Diff = diff
+		d, _ := change["unified_diff"].(string)
+		if d != "" {
+			return p, d
 		}
 	}
+	if len(paths) > 0 {
+		return paths[0], ""
+	}
+	return "", ""
 }
 
 func codexParsedCmdPath(rawInput map[string]any) string {
@@ -115,14 +133,12 @@ func codexParsedCommands(rawInput map[string]any) []map[string]any {
 
 // codexReadTitleHint parses codex-acp shell read titles — codex-specific, not ACP.
 func codexReadTitleHint(title string) string {
-	for _, prefix := range []string{"Read ", "Write ", "Edit "} {
-		if strings.HasPrefix(title, prefix) {
-			target := strings.TrimSpace(strings.TrimPrefix(title, prefix))
-			if target != "" && !isGenericPathLabel(target) {
-				return target
-			}
-			return ""
-		}
+	if !strings.HasPrefix(title, "Read ") {
+		return ""
+	}
+	target := strings.TrimSpace(strings.TrimPrefix(title, "Read "))
+	if target != "" && !isGenericPathLabel(target) {
+		return target
 	}
 	return ""
 }

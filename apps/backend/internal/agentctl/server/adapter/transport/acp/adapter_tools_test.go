@@ -6,6 +6,18 @@ import (
 	"github.com/coder/acp-go-sdk"
 )
 
+func TestLocationsArgsFromACP(t *testing.T) {
+	args := locationsArgsFromACP([]acp.ToolCallLocation{
+		{Path: "/workspace/src/index.ts"},
+	})
+	if args == nil {
+		t.Fatal("expected args map")
+	}
+	if got, _ := args[keyPath].(string); got != "/workspace/src/index.ts" {
+		t.Fatalf("path = %q, want /workspace/src/index.ts", got)
+	}
+}
+
 func TestToolCallUpdateSupplemental(t *testing.T) {
 	tcu := &acp.SessionToolCallUpdate{
 		Locations: []acp.ToolCallLocation{

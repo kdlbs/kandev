@@ -6,6 +6,5 @@ import "github.com/kandev/kandev/internal/agentctl/types/streams"
 // generic titles ("Read File") without locations or structured rawInput on
 // updates. We do not infer paths from titles — the UI falls back to title +
 // expandable rawOutput.
-func enrichCursorPayload(payload *streams.NormalizedPayload, _ EnrichFrame) {
-	_ = payload
+func enrichCursorPayload(_ *streams.NormalizedPayload, _ EnrichFrame) {
 }

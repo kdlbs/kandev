@@ -280,7 +280,7 @@ func (n *Normalizer) UpdatePayloadInput(payload *streams.NormalizedPayload, rawI
 	}
 	// Claude ACP sends file_path in incremental rawInput updates; OpenCode uses filePath.
 	if mf := payload.ModifyFile(); mf != nil {
-		updateModifyFileInput(mf, inputMap)
+		updateModifyFileInput(mf, supplemental, inputMap)
 	}
 	if rf := payload.ReadFile(); rf != nil {
 		updateReadFileInput(rf, supplemental, inputMap)
@@ -307,8 +307,8 @@ func updateShellExecInput(se *streams.ShellExecPayload, inputMap map[string]any)
 	}
 }
 
-func updateModifyFileInput(mf *streams.ModifyFilePayload, inputMap map[string]any) {
-	if path := stringFromMap(inputMap, "file_path", "filePath", "path"); path != "" && mf.FilePath == "" {
+func updateModifyFileInput(mf *streams.ModifyFilePayload, supplemental, inputMap map[string]any) {
+	if path := pathFromArgs(supplemental, inputMap); path != "" && mf.FilePath == "" {
 		mf.FilePath = path
 	}
 }

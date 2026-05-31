@@ -144,6 +144,16 @@ func TestAgentEnrichment_GoldenFixtures(t *testing.T) {
 	})
 }
 
+func TestCodexCanonicalChange(t *testing.T) {
+	path, diff := codexCanonicalChange(map[string]any{
+		"z.go": map[string]any{"unified_diff": "diff-z"},
+		"a.go": map[string]any{"unified_diff": "diff-a"},
+	})
+	if path != "a.go" || diff != "diff-a" {
+		t.Fatalf("codexCanonicalChange() = (%q, %q), want (a.go, diff-a)", path, diff)
+	}
+}
+
 func TestCodexTitleHints(t *testing.T) {
 	tests := []struct {
 		name        string
