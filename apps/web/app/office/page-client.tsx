@@ -21,7 +21,7 @@ import { ActivityRow } from "./workspace/activity/activity-row";
 import { RunActivityChart, SuccessRateChart } from "./components/dashboard-charts";
 import { AgentCardsPanel } from "./components/agent-cards-panel";
 import { ProviderHealthCard } from "./components/routing/provider-health-card";
-import { timeAgo } from "./components/shared/time-ago";
+import { timeAgo } from "@/lib/utils/time";
 
 import { UtilizationBars } from "./components/utilization-bars";
 import { formatDollars } from "@/lib/utils";
