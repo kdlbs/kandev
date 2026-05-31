@@ -27,8 +27,8 @@ function formatTools(count: number): string {
 
 /**
  * Turns a SubagentTaskPayload into an ordered list of display chips. Different
- * agents populate different subsets (Claude: agent_id/tokens/duration/
- * tool_use_count; OpenCode: model/child_session_id; Cursor: duration_ms only),
+ * agents populate different subsets (Claude: tokens/duration/tool_use_count;
+ * OpenCode: model/child_session_id; Cursor: duration_ms only),
  * so each field is only included when meaningfully present. Duration and tokens
  * are skipped when zero; tool_use_count is shown even at zero since "0 tools"
  * is meaningful for a completed subagent.
@@ -49,9 +49,6 @@ export function subagentMetaChips(payload: SubagentTaskPayload | undefined): Sub
   }
   if (payload.model) {
     chips.push({ label: "model", value: payload.model });
-  }
-  if (payload.agent_id) {
-    chips.push({ label: "agent", value: truncateId(payload.agent_id) });
   }
   if (payload.child_session_id) {
     chips.push({ label: "session", value: truncateId(payload.child_session_id) });
