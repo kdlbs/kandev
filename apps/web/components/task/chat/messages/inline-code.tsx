@@ -85,6 +85,7 @@ export function InlineCode({ children }: InlineCodeProps) {
               "fixed z-50 -translate-x-1/2 -translate-y-full",
               "rounded border border-border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-md",
               "pointer-events-none select-none whitespace-nowrap",
+              "animate-in fade-in-0 duration-150",
             )}
           >
             {copied ? "Copied!" : "Copy to clipboard"}

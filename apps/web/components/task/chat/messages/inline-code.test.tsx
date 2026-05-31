@@ -25,8 +25,7 @@ describe("InlineCode", () => {
   });
 
   it("portals the hover tooltip to document.body so overflow-hidden ancestors cannot clip it", () => {
-    // Mirrors the user-message bubble: content wrapped in nested overflow-hidden
-    // layers that previously clipped the in-flow absolute tooltip.
+    // Mirrors the user-message bubble with nested overflow-hidden layers that previously clipped the tooltip.
     const { container } = render(
       <div className="overflow-hidden">
         <div className="overflow-hidden">
@@ -39,8 +38,7 @@ describe("InlineCode", () => {
 
     const tooltip = screen.getByRole("tooltip");
     expect(tooltip.textContent).toBe("Copy to clipboard");
-    // The tooltip must escape the clipping wrapper: it lives on document.body,
-    // not inside the overflow-hidden container.
+    // Tooltip must escape the clipping wrapper: lives on document.body, not inside the container.
     expect(container.contains(tooltip)).toBe(false);
     expect(document.body.contains(tooltip)).toBe(true);
   });
