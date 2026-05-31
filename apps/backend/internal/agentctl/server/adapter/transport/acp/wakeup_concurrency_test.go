@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
 // concurrencyFakeAgent is a minimal acp.Agent whose Prompt handler blocks until
@@ -63,6 +64,49 @@ func (f *concurrencyFakeAgent) SetSessionMode(_ context.Context, _ acp.SetSessio
 	return acp.SetSessionModeResponse{}, nil
 }
 
+// setupConcurrencyFakeAgent wires an adapter to a blocking fake agent and
+// registers cleanup immediately so early t.Fatal paths cannot leak pipes or
+// background goroutines.
+func setupConcurrencyFakeAgent(t *testing.T) (*Adapter, *concurrencyFakeAgent) {
+	t.Helper()
+
+	a := newTestAdapter()
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+	t.Cleanup(func() {
+		_ = a.Close()
+		_ = c2aW.Close()
+		_ = a2cW.Close()
+	})
+
+	if err := a.Connect(c2aW, a2cR); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	fa := &concurrencyFakeAgent{
+		entered: make(chan struct{}, 8),
+		release: make(chan struct{}),
+	}
+	_ = acp.NewAgentSideConnection(fa, a2cW, c2aR)
+	return a, fa
+}
+
+// waitForPromptComplete blocks until sendPrompt emits EventTypeComplete or times out.
+func waitForPromptComplete(t *testing.T, a *Adapter) {
+	t.Helper()
+	deadline := time.After(100 * time.Millisecond)
+	for {
+		select {
+		case ev := <-a.updatesCh:
+			if ev.Type == streams.EventTypeComplete {
+				return
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for prompt complete event")
+		}
+	}
+}
+
 // TestWakeupDoesNotRaceConcurrentPromptWithUserPrompt reproduces the
 // turn-misalignment bug: when a ScheduleWakeup timer fires while a user prompt
 // is still in flight, fireWakeup must NOT issue a second, concurrent
@@ -75,23 +119,7 @@ func (f *concurrencyFakeAgent) SetSessionMode(_ context.Context, _ acp.SetSessio
 // because fireWakeup called conn.Prompt() concurrently. This test verifies the
 // fix serializes them so maxInFlight never exceeds 1 during the overlap window.
 func TestWakeupDoesNotRaceConcurrentPromptWithUserPrompt(t *testing.T) {
-	a := newTestAdapter()
-
-	// Two in-memory pipes wire the adapter (client side) to the fake agent.
-	//   clientToAgent: adapter writes requests -> agent reads.
-	//   agentToClient: agent writes replies   -> adapter reads.
-	c2aR, c2aW := io.Pipe()
-	a2cR, a2cW := io.Pipe()
-
-	if err := a.Connect(c2aW, a2cR); err != nil {
-		t.Fatalf("Connect: %v", err)
-	}
-
-	fa := &concurrencyFakeAgent{
-		entered: make(chan struct{}, 8),
-		release: make(chan struct{}),
-	}
-	_ = acp.NewAgentSideConnection(fa, a2cW, c2aR)
+	a, fa := setupConcurrencyFakeAgent(t)
 
 	ctx := context.Background()
 	if err := a.Initialize(ctx); err != nil {
@@ -133,18 +161,14 @@ func TestWakeupDoesNotRaceConcurrentPromptWithUserPrompt(t *testing.T) {
 	// Release the user prompt; the queued wakeup should run serially afterwards.
 	close(fa.release)
 	userWG.Wait()
+	waitForPromptComplete(t, a)
 
 	select {
 	case <-fa.entered:
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("wakeup never ran after user prompt completed")
 	}
-
-	t.Cleanup(func() {
-		_ = a.Close()
-		_ = c2aW.Close()
-		_ = a2cW.Close()
-	})
+	waitForPromptComplete(t, a)
 }
 
 // TestWakeupDroppedWhenSessionChangesWhileQueued covers the case where a wakeup
@@ -153,18 +177,7 @@ func TestWakeupDoesNotRaceConcurrentPromptWithUserPrompt(t *testing.T) {
 // queued wakeup must target the session it was scheduled for; if that session is
 // no longer current it must be dropped, not injected into the new session.
 func TestWakeupDroppedWhenSessionChangesWhileQueued(t *testing.T) {
-	a := newTestAdapter()
-
-	c2aR, c2aW := io.Pipe()
-	a2cR, a2cW := io.Pipe()
-	if err := a.Connect(c2aW, a2cR); err != nil {
-		t.Fatalf("Connect: %v", err)
-	}
-	fa := &concurrencyFakeAgent{
-		entered: make(chan struct{}, 8),
-		release: make(chan struct{}),
-	}
-	_ = acp.NewAgentSideConnection(fa, a2cW, c2aR)
+	a, fa := setupConcurrencyFakeAgent(t)
 
 	ctx := context.Background()
 	if err := a.Initialize(ctx); err != nil {
@@ -204,30 +217,14 @@ func TestWakeupDroppedWhenSessionChangesWhileQueued(t *testing.T) {
 		t.Fatal("queued wakeup was sent after the session changed; it must be dropped to avoid injecting into an unrelated session")
 	case <-time.After(100 * time.Millisecond):
 	}
-
-	t.Cleanup(func() {
-		_ = a.Close()
-		_ = c2aW.Close()
-		_ = a2cW.Close()
-	})
+	waitForPromptComplete(t, a)
 }
 
 // TestWakeupDoesNotConsumePendingContext verifies that a synthetic wakeup prompt
 // does not read-and-clear pendingContext, which is reserved for the next user
 // prompt (e.g. fork_session resume context).
 func TestWakeupDoesNotConsumePendingContext(t *testing.T) {
-	a := newTestAdapter()
-
-	c2aR, c2aW := io.Pipe()
-	a2cR, a2cW := io.Pipe()
-	if err := a.Connect(c2aW, a2cR); err != nil {
-		t.Fatalf("Connect: %v", err)
-	}
-	fa := &concurrencyFakeAgent{
-		entered: make(chan struct{}, 8),
-		release: make(chan struct{}),
-	}
-	_ = acp.NewAgentSideConnection(fa, a2cW, c2aR)
+	a, fa := setupConcurrencyFakeAgent(t)
 
 	ctx := context.Background()
 	if err := a.Initialize(ctx); err != nil {
@@ -251,6 +248,7 @@ func TestWakeupDoesNotConsumePendingContext(t *testing.T) {
 		t.Fatal("wakeup never reached the agent")
 	}
 	close(fa.release)
+	waitForPromptComplete(t, a)
 
 	a.mu.Lock()
 	got := a.pendingContext
@@ -258,10 +256,4 @@ func TestWakeupDoesNotConsumePendingContext(t *testing.T) {
 	if got != canary {
 		t.Fatalf("pendingContext=%q, want %q — wakeup must not consume resume context", got, canary)
 	}
-
-	t.Cleanup(func() {
-		_ = a.Close()
-		_ = c2aW.Close()
-		_ = a2cW.Close()
-	})
 }
