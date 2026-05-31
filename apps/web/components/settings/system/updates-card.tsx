@@ -17,9 +17,10 @@ import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Spinner } from "@kandev/ui/spinner";
 import { IconDownload, IconExternalLink, IconRefresh } from "@tabler/icons-react";
+import { useSelfUpdate } from "@/hooks/domains/system/use-self-update";
 import { useUpdates } from "@/hooks/domains/system/use-updates";
 import type { UpdatesResponse } from "@/lib/types/system";
-import { JobProgressIndicator } from "./job-progress-indicator";
+import { SelfUpdateProgress } from "./self-update-progress";
 
 interface ApplyGate {
   canApply: boolean;
@@ -59,11 +60,11 @@ function getApplyGate(updates: UpdatesResponse | null | undefined): ApplyGate {
 }
 
 export function UpdatesCard() {
-  const { updates, check, apply, isApplying } = useUpdates();
+  const { updates, check, reload } = useUpdates();
+  const selfUpdate = useSelfUpdate({ latestVersion: updates?.latest, onComplete: reload });
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
-  const [applyJobId, setApplyJobId] = useState<string | null>(null);
 
   const onCheck = async () => {
     setChecking(true);
@@ -80,20 +81,13 @@ export function UpdatesCard() {
     }
   };
 
-  const onApply = async () => {
-    setError(null);
-    try {
-      const res = await apply();
-      setApplyJobId(res.job_id);
-    } catch (err) {
-      setError(errorMessage(err, "Update apply failed"));
-    }
-  };
-
   const current = updates?.current ?? "-";
   const latest = updates?.latest ?? "-";
   const available = updates?.update_available === true;
   const gate = getApplyGate(updates);
+  // Hide the Apply button while an update is in flight (and once it's done —
+  // the version has flipped) so it can't be re-triggered mid-restart.
+  const showApply = gate.canApply && !selfUpdate.isUpdating && selfUpdate.phase !== "done";
 
   return (
     <Card data-testid="system-updates-card">
@@ -105,22 +99,22 @@ export function UpdatesCard() {
         <LastChecked checkedAt={updates?.latest_checked_at} />
         <UpdateActions
           checking={checking}
-          isApplying={isApplying}
-          canApply={gate.canApply}
+          showApply={showApply}
           latest={latest}
           url={updates?.latest_url}
           onCheck={onCheck}
-          onApply={onApply}
+          onApply={selfUpdate.start}
         />
         <ManualUpdateInstructions
-          show={available && !gate.canApply}
+          show={available && !gate.canApply && !selfUpdate.isUpdating}
           reason={gate.cannotApplyReason}
           commands={gate.manualCommands}
         />
-        <JobProgressIndicator
-          kind="self-update"
-          jobId={applyJobId ?? undefined}
-          successLabel="Restarting service"
+        <SelfUpdateProgress
+          phase={selfUpdate.phase}
+          targetVersion={selfUpdate.targetVersion}
+          errorMessage={selfUpdate.errorMessage}
+          onDismiss={selfUpdate.dismiss}
         />
         <UpdateError error={error} retryAfter={retryAfter} />
       </CardContent>
@@ -172,8 +166,7 @@ function LastChecked({ checkedAt }: { checkedAt?: string }) {
 
 interface UpdateActionsProps {
   checking: boolean;
-  isApplying: boolean;
-  canApply: boolean;
+  showApply: boolean;
   latest: string;
   url?: string;
   onCheck: () => Promise<void>;
@@ -186,9 +179,8 @@ function UpdateActions(props: UpdateActionsProps) {
       <CheckNowButton checking={props.checking} onCheck={props.onCheck} />
       <ReleaseNotesLink url={props.url} />
       <ApplyUpdateDialog
-        canApply={props.canApply}
+        showApply={props.showApply}
         latest={props.latest}
-        isApplying={props.isApplying}
         onApply={props.onApply}
       />
     </div>
@@ -240,28 +232,18 @@ function ReleaseNotesLink({ url }: { url?: string }) {
 }
 
 interface ApplyUpdateDialogProps {
-  canApply: boolean;
+  showApply: boolean;
   latest: string;
-  isApplying: boolean;
   onApply: () => Promise<void>;
 }
 
-function ApplyUpdateDialog({ canApply, latest, isApplying, onApply }: ApplyUpdateDialogProps) {
-  if (!canApply) return null;
+function ApplyUpdateDialog({ showApply, latest, onApply }: ApplyUpdateDialogProps) {
+  if (!showApply) return null;
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
-        <Button
-          size="sm"
-          disabled={isApplying}
-          className="cursor-pointer"
-          data-testid="system-updates-apply"
-        >
-          {isApplying ? (
-            <Spinner className="size-3.5 mr-1" />
-          ) : (
-            <IconDownload className="h-3.5 w-3.5 mr-1" />
-          )}
+        <Button size="sm" className="cursor-pointer" data-testid="system-updates-apply">
+          <IconDownload className="h-3.5 w-3.5 mr-1" />
           Apply update
         </Button>
       </AlertDialogTrigger>
