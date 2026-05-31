@@ -31,6 +31,7 @@ type messageStore interface {
 	GetTaskSession(ctx context.Context, id string) (*taskmodels.TaskSession, error)
 	FindMessageByPendingID(ctx context.Context, pendingID string) (*taskmodels.Message, error)
 	FindMessagesByPendingID(ctx context.Context, pendingID string) ([]*taskmodels.Message, error)
+	FindPendingClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*taskmodels.Message, error)
 	UpdateMessage(ctx context.Context, message *taskmodels.Message) error
 }
 
@@ -139,14 +140,15 @@ func (h *Handlers) httpCreateRequest(c *gin.Context) {
 		Context:   body.Context,
 	}
 
-	pendingID := h.store.CreateRequest(req)
+	pendingID, isNew := h.store.CreateRequest(req)
 
 	// Create one message per question in the database; all share the same
 	// pending_id and are rendered as a stacked group on the frontend. The
 	// session.message.added WebSocket event fires per message. On failure we
 	// also cancel the in-store pending entry so any blocking WaitForResponse
 	// caller unblocks immediately rather than waiting for the MCP timeout.
-	if h.messageCreator != nil {
+	// When dedup fires (isNew=false) the messages already exist, so skip creation.
+	if isNew && h.messageCreator != nil {
 		_, err := h.messageCreator.CreateClarificationRequestMessages(
 			c.Request.Context(),
 			taskID,

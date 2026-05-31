@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, memo } from "react";
+import { useState, useCallback, memo, useMemo } from "react";
 import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { GridSpinner } from "@/components/grid-spinner";
 import { cn, transformPathsInText } from "@/lib/utils";
@@ -160,6 +160,158 @@ type TurnGroupContentProps = {
   onScrollToMessage?: (messageId: string) => void;
 };
 
+const MIN_REPEAT_TOOL_RUN = 4;
+
+type TurnGroupContentEntry =
+  | { kind: "message"; message: Message }
+  | { kind: "repeated_tool_summary"; id: string; messages: Message[] };
+
+type ShellExecSummary = {
+  command: string;
+  workDir: string;
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+};
+
+type ShellExecPayload = NonNullable<NonNullable<ToolCallMetadata["normalized"]>["shell_exec"]>;
+
+function getCompleteShellExec(message: Message): ShellExecPayload | null {
+  if (message.type !== "tool_execute") return null;
+  const metadata = message.metadata as ToolCallMetadata | undefined;
+  if (metadata?.status !== "complete") return null;
+  return metadata.normalized?.shell_exec ?? null;
+}
+
+function isZeroExitCode(shellExec: ShellExecPayload): boolean {
+  const exitCode = shellExec?.output?.exit_code;
+  return exitCode === 0;
+}
+
+function readShellExecSummary(message: Message): ShellExecSummary | null {
+  const shellExec = getCompleteShellExec(message);
+  if (!shellExec) return null;
+  if (!isZeroExitCode(shellExec)) return null;
+  const output = shellExec.output;
+  return {
+    command: shellExec?.command ?? message.content,
+    workDir: shellExec?.work_dir ?? "",
+    exitCode: 0,
+    stdout: output?.stdout ?? "",
+    stderr: output?.stderr ?? "",
+  };
+}
+
+function repeatFingerprint(message: Message): string | null {
+  const summary = readShellExecSummary(message);
+  return summary ? JSON.stringify(summary) : null;
+}
+
+function compactRepeatRun(entries: TurnGroupContentEntry[], run: Message[]) {
+  if (run.length >= MIN_REPEAT_TOOL_RUN) {
+    entries.push({ kind: "message", message: run[0] });
+    entries.push({
+      kind: "repeated_tool_summary",
+      id: `repeated-tools-${run[1].id}`,
+      messages: run.slice(1, -1),
+    });
+    entries.push({ kind: "message", message: run[run.length - 1] });
+    return;
+  }
+  for (const message of run) entries.push({ kind: "message", message });
+}
+
+export function compactTurnGroupMessages(messages: Message[]): TurnGroupContentEntry[] {
+  const entries: TurnGroupContentEntry[] = [];
+  let repeatRun: Message[] = [];
+  let currentFingerprint: string | null = null;
+
+  const flushRun = () => {
+    if (repeatRun.length === 0) return;
+    compactRepeatRun(entries, repeatRun);
+    repeatRun = [];
+    currentFingerprint = null;
+  };
+
+  for (const message of messages) {
+    const fingerprint = repeatFingerprint(message);
+    if (!fingerprint) {
+      flushRun();
+      entries.push({ kind: "message", message });
+      continue;
+    }
+    if (currentFingerprint === fingerprint) {
+      repeatRun.push(message);
+      continue;
+    }
+    flushRun();
+    currentFingerprint = fingerprint;
+    repeatRun = [message];
+  }
+  flushRun();
+  return entries;
+}
+
+type MessageRenderProps = Omit<TurnGroupContentProps, "group">;
+
+function renderMessageEntry(message: Message, props: MessageRenderProps) {
+  return (
+    <MessageRenderer
+      key={message.id}
+      comment={message}
+      isTaskDescription={false}
+      taskId={props.taskId}
+      sessionState={props.sessionState}
+      taskState={props.taskState}
+      permissionsByToolCallId={props.permissionsByToolCallId}
+      childrenByParentToolCallId={props.childrenByParentToolCallId}
+      worktreePath={props.worktreePath}
+      sessionId={props.sessionId ?? undefined}
+      onOpenFile={props.onOpenFile}
+      allMessages={props.allMessages}
+      onScrollToMessage={props.onScrollToMessage}
+    />
+  );
+}
+
+function RepeatedToolSummary({
+  entry,
+  renderProps,
+}: {
+  entry: Extract<TurnGroupContentEntry, { kind: "repeated_tool_summary" }>;
+  renderProps: MessageRenderProps;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const count = entry.messages.length;
+  return (
+    <div data-testid="repeated-tool-summary" className="text-xs text-muted-foreground">
+      <button
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((prev) => !prev)}
+        className={cn(
+          "flex w-full items-center gap-2 rounded px-2 py-1 -mx-2 text-left cursor-pointer",
+          "hover:bg-muted/40 transition-colors",
+        )}
+      >
+        {expanded ? (
+          <IconChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+        ) : (
+          <IconChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+        )}
+        <span className="min-w-0 break-words">
+          {count} repeated identical terminal commands {expanded ? "shown" : "hidden"}
+        </span>
+      </button>
+      {expanded && (
+        <div className="mt-1 space-y-2">
+          {entry.messages.map((msg) => renderMessageEntry(msg, renderProps))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TurnGroupContent({
   group,
   sessionId,
@@ -173,25 +325,28 @@ function TurnGroupContent({
   taskState,
   onScrollToMessage,
 }: TurnGroupContentProps) {
+  const renderProps: MessageRenderProps = {
+    sessionId,
+    permissionsByToolCallId,
+    childrenByParentToolCallId,
+    taskId,
+    worktreePath,
+    onOpenFile,
+    allMessages,
+    sessionState,
+    taskState,
+    onScrollToMessage,
+  };
+  const compacted = useMemo(() => compactTurnGroupMessages(group.messages), [group.messages]);
   return (
     <div className="ml-2 pl-4 border-l-2 border-border/30 mt-1 space-y-2">
-      {group.messages.map((msg) => (
-        <MessageRenderer
-          key={msg.id}
-          comment={msg}
-          isTaskDescription={false}
-          taskId={taskId}
-          sessionState={sessionState}
-          taskState={taskState}
-          permissionsByToolCallId={permissionsByToolCallId}
-          childrenByParentToolCallId={childrenByParentToolCallId}
-          worktreePath={worktreePath}
-          sessionId={sessionId ?? undefined}
-          onOpenFile={onOpenFile}
-          allMessages={allMessages}
-          onScrollToMessage={onScrollToMessage}
-        />
-      ))}
+      {compacted.map((entry) =>
+        entry.kind === "message" ? (
+          renderMessageEntry(entry.message, renderProps)
+        ) : (
+          <RepeatedToolSummary key={entry.id} entry={entry} renderProps={renderProps} />
+        ),
+      )}
     </div>
   );
 }

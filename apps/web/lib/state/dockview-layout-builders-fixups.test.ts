@@ -15,6 +15,10 @@ vi.mock("@/lib/debug/log", () => ({
   IS_DEBUG: false,
 }));
 
+vi.mock("@/lib/local-storage", () => ({
+  getGlobalSidebarWidth: vi.fn(() => null),
+}));
+
 vi.mock("./layout-manager", () => ({
   SIDEBAR_LOCK: "no-drop-target",
   SIDEBAR_GROUP: "group-sidebar",
@@ -24,6 +28,7 @@ vi.mock("./layout-manager", () => ({
   LAYOUT_PINNED_MIN_PX: 180,
   computeSidebarMaxPx: vi.fn(() => SIDEBAR_CAP),
   computeRightMaxPx: vi.fn(() => RIGHT_CAP),
+  getPinnedWidth: vi.fn(() => 350),
   getRootSplitview: vi.fn(),
   resolveGroupIds: vi.fn(() => ({
     sidebarGroupId: "group-sidebar",
@@ -35,16 +40,28 @@ vi.mock("./layout-manager", () => ({
 }));
 
 import { applyLayoutFixups } from "./dockview-layout-builders";
-import { getRootSplitview, setPinnedTarget, RIGHT_TOP_GROUP } from "./layout-manager";
+import {
+  getRootSplitview,
+  setPinnedTarget,
+  computeSidebarMaxPx,
+  computeRightMaxPx,
+  getPinnedWidth,
+  RIGHT_TOP_GROUP,
+} from "./layout-manager";
+import { getGlobalSidebarWidth } from "@/lib/local-storage";
 
 const SIDEBAR_GROUP = "group-sidebar";
 const CENTER_GROUP = "group-center";
 const RIGHT_BOTTOM_GROUP = "group-right-bottom";
 
+let mockResizeView: ReturnType<typeof vi.fn>;
+
 function mockSplitview(sizesByIndex: number[]): void {
+  mockResizeView = vi.fn();
   vi.mocked(getRootSplitview).mockReturnValue({
     length: sizesByIndex.length,
     getViewSize: (idx: number) => sizesByIndex[idx],
+    resizeView: mockResizeView,
   } as unknown as NonNullable<ReturnType<typeof getRootSplitview>>);
 }
 
@@ -65,6 +82,8 @@ function makeApi(groupIds: string[]): DockviewApi {
 describe("applyLayoutFixups — pinned target capture", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(getGlobalSidebarWidth).mockReturnValue(null);
+    vi.mocked(getPinnedWidth).mockReturnValue(350);
   });
 
   it("does NOT record a right target in the 2-column fallback (center is last)", () => {
@@ -80,9 +99,20 @@ describe("applyLayoutFixups — pinned target capture", () => {
     expect(setPinnedTarget).not.toHaveBeenCalledWith("right", expect.anything());
   });
 
-  it("clamps an over-cap sidebar target down to the cap", () => {
-    // sidebar live (474) exceeds the cap (441); the constraint pins it at the
-    // cap, so the target must be clamped or enforcePinnedTargets spins forever.
+  it("uses the default sidebar target instead of an env-saved live width when no global pref exists", () => {
+    // Slow fromJSON restore can bring back an env-specific sidebar width. With
+    // sidebar now a global pref, no pref means "use the default", not the
+    // env-saved live width.
+    mockSplitview([420, 1050]);
+    const api = makeApi([SIDEBAR_GROUP, CENTER_GROUP]);
+
+    applyLayoutFixups(api);
+
+    expect(setPinnedTarget).toHaveBeenCalledWith("sidebar", 350);
+  });
+
+  it("clamps a global sidebar pref down to the cap", () => {
+    vi.mocked(getGlobalSidebarWidth).mockReturnValue(900);
     mockSplitview([474, 996]);
     const api = makeApi([SIDEBAR_GROUP, CENTER_GROUP]);
 
@@ -91,14 +121,49 @@ describe("applyLayoutFixups — pinned target capture", () => {
     expect(setPinnedTarget).toHaveBeenCalledWith("sidebar", SIDEBAR_CAP);
   });
 
-  it("records both targets in a real 3-column layout", () => {
-    mockSplitview([350, 720, 400]); // sidebar, center, right
+  it("uses the column default for the pinned right column when no saved width is given", () => {
+    // Regression (dockview-wrong-width): the default-preset right column must
+    // anchor to a STABLE width — the per-env saved width, or the column default
+    // when none — NOT dockview's post-fromJSON live size (400 here). Capturing
+    // the live size ratcheted the column wider on every restore. Mirrors
+    // captureSidebarTarget, which anchors to the pref/default, never the live
+    // size. getPinnedWidth is mocked to 350 (the default).
+    mockSplitview([350, 720, 400]); // live right = 400 (transient/rescaled)
     const api = makeApi([SIDEBAR_GROUP, CENTER_GROUP, RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP]);
 
     applyLayoutFixups(api);
 
     expect(setPinnedTarget).toHaveBeenCalledWith("sidebar", 350);
-    expect(setPinnedTarget).toHaveBeenCalledWith("right", 400);
+    expect(setPinnedTarget).toHaveBeenCalledWith("right", 350); // default, NOT live 400
+    expect(setPinnedTarget).not.toHaveBeenCalledWith("right", 400);
+  });
+
+  it("anchors the pinned right target to the saved per-env width, not the live size", () => {
+    // A restore passes the env's saved right width; it wins over both the live
+    // size (400) and the default (350) so a deliberately-resized task restores
+    // its own remembered width. Also asserts that the column is physically
+    // resized to the stable width (not left at the transient live size).
+    mockSplitview([350, 720, 400]);
+    const api = makeApi([SIDEBAR_GROUP, CENTER_GROUP, RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP]);
+
+    applyLayoutFixups(api, 420);
+
+    expect(setPinnedTarget).toHaveBeenCalledWith("right", 420);
+    expect(setPinnedTarget).not.toHaveBeenCalledWith("right", 400);
+    expect(mockResizeView).toHaveBeenCalledWith(2, 420);
+  });
+
+  it("derives the caps from api.width, not the window.innerWidth fallback", () => {
+    // Regression: caps computed without the measured width fall back to
+    // window.innerWidth, which can be transiently stale and clamp the captured
+    // target too narrow. They must be derived from api.width (1470 here).
+    mockSplitview([350, 720, 400]);
+    const api = makeApi([SIDEBAR_GROUP, CENTER_GROUP, RIGHT_TOP_GROUP]);
+
+    applyLayoutFixups(api);
+
+    expect(computeSidebarMaxPx).toHaveBeenCalledWith(1470);
+    expect(computeRightMaxPx).toHaveBeenCalledWith(1470);
   });
 
   it("records the side-column target for a 3-column preset without RIGHT_TOP_GROUP", () => {
@@ -114,11 +179,11 @@ describe("applyLayoutFixups — pinned target capture", () => {
     expect(setPinnedTarget).toHaveBeenCalledWith("right", 420);
   });
 
-  it("clamps an over-cap right target down to the cap", () => {
-    mockSplitview([350, 200, 1200]); // right (1200) exceeds RIGHT_CAP (1029)
+  it("clamps an over-cap saved right width down to the cap", () => {
+    mockSplitview([350, 200, 800]);
     const api = makeApi([SIDEBAR_GROUP, CENTER_GROUP, RIGHT_TOP_GROUP]);
 
-    applyLayoutFixups(api);
+    applyLayoutFixups(api, 1200); // saved 1200 exceeds RIGHT_CAP (1029)
 
     expect(setPinnedTarget).toHaveBeenCalledWith("right", RIGHT_CAP);
   });

@@ -279,7 +279,7 @@ func (s *Server) registerTools() {
 	switch s.mode {
 	case ModeConfig:
 		s.registerConfigWorkflowTools()
-		count += 11
+		count += 12
 		s.registerConfigAgentTools()
 		count += 4
 		s.registerConfigMcpTools()
@@ -297,7 +297,7 @@ func (s *Server) registerTools() {
 		// they can both manage Kandev configuration and spawn new tasks.
 		// No interaction or plan tools (no live session to attach them to).
 		s.registerConfigWorkflowTools()
-		count += 11
+		count += 12
 		s.registerConfigAgentTools()
 		count += 4
 		s.registerConfigMcpTools()
@@ -333,7 +333,7 @@ func (s *Server) registerTools() {
 		// a sibling to message_task_kandev) but NOT the task-document
 		// tools — those are office coordination plumbing.
 		s.registerKanbanTools()
-		count += 11
+		count += 13
 		if !s.disableAskQuestion {
 			s.registerInteractionTools()
 			count++
@@ -419,6 +419,20 @@ func (s *Server) registerKanbanTools() {
 		s.wrapHandler("move_task_kandev", s.moveTaskHandler()),
 	)
 	s.mcpServer.AddTool(
+		mcp.NewTool("delete_task_kandev",
+			mcp.WithDescription("Delete a task permanently. Use to clean up orphaned, duplicate, or test tasks you no longer need. This cannot be undone — prefer archive_task_kandev when the task may still be wanted. Restoring an archived task is a user action done from the UI, not via MCP."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to delete")),
+		),
+		s.wrapHandler("delete_task_kandev", s.deleteTaskHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("archive_task_kandev",
+			mcp.WithDescription("Archive a task. The task is hidden from active board views but kept in the database. Use to tidy up finished or abandoned tasks. Unarchiving is a user action done from the UI, not via MCP."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to archive")),
+		),
+		s.wrapHandler("archive_task_kandev", s.archiveTaskHandler()),
+	)
+	s.mcpServer.AddTool(
 		mcp.NewTool("message_task_kandev",
 			mcp.WithDescription(`Send a follow-up prompt (message) to an existing task's primary session.
 
@@ -431,7 +445,7 @@ Behaviour by session state:
 - Failed/cancelled: an error is returned (use create_task_kandev to start fresh).
 
 Returns the dispatch status: "queued", "sent", or "started".`),
-			mcp.WithString("task_id", mcp.Required(), mcp.Description("The target task ID")),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The target task's full UUID (not a truncated prefix)")),
 			mcp.WithString("prompt", mcp.Required(), mcp.Description("The message to deliver to the task's agent")),
 		),
 		s.wrapHandler("message_task_kandev", s.messageTaskHandler()),
@@ -478,7 +492,8 @@ IMPORTANT:
   - Pass base_branch explicitly to override either default. Use list_repositories_kandev to see each repo's default_branch.
 - Top-level tasks need a repository via repository_url, repository_id, or local_path
 - 'description' is the sub-agent's initial prompt — be specific and detailed
-- start_agent defaults to true and is what you want in nearly every case — the new task auto-launches an agent that immediately works on the description. Pass start_agent=false ONLY for an explicit placeholder (e.g. queuing work the user will start later, or creating a tracking task with no immediate work). When in doubt, leave it true.`
+- start_agent defaults to true and is what you want in nearly every case — the new task auto-launches an agent that immediately works on the description. Pass start_agent=false ONLY for an explicit placeholder (e.g. queuing work the user will start later, or creating a tracking task with no immediate work). When in doubt, leave it true.
+- Kanban subtasks cannot have their own subtasks (max nesting depth is 1). To break work down further, create a sibling under the same parent. (Office task trees are exempt.)`
 	parentDesc := "Parent task ID for subtasks. Use 'self' to create a subtask of your current task (RECOMMENDED for plan phases, delegated work). Omit only for unrelated top-level tasks."
 
 	if s.mode == ModeExternal {
@@ -509,11 +524,6 @@ IMPORTANT:
 			mcp.WithString("local_path", mcp.Description("Local repository folder path (e.g. '/Users/me/projects/myrepo'). Will create/find the repository automatically. Preferred for local worktree flow. For subtasks: supply only when the subtask should target a different repo than the parent.")),
 			mcp.WithString("repository_url", mcp.Description("GitHub repository URL (e.g. 'https://github.com/owner/repo'). The repository will be cloned automatically on first use. For subtasks: supply only when the subtask should target a different repo than the parent.")),
 			mcp.WithString("base_branch", mcp.Description("Base branch for the repository (e.g. 'main'). Optional. Defaults: same-repo subtasks inherit the parent's base_branch; cross-repo subtasks and top-level tasks fall back to the repository's default_branch (visible via list_repositories_kandev).")),
-			// Office task-handoffs phase 4: workspace policy.
-			mcp.WithString("workspace_mode", mcp.Description("Workspace mode for this task: 'inherit_parent' (reuse the parent task's materialized workspace), 'new_workspace' (default — create a fresh workspace), or 'shared_group' (join an explicit shared workspace group via workspace_group_id).")),
-			mcp.WithString("workspace_group_id", mcp.Description("Required when workspace_mode='shared_group'. The ID of an existing task workspace group to join.")),
-			mcp.WithString("default_child_workspace", mcp.Description("Parent-only: default workspace mode applied to children created later. 'inherit_parent' or 'new_workspace'.")),
-			mcp.WithString("default_child_ordering", mcp.Description("Parent-only: ordering policy for children created later. 'sequential' creates dependency edges between siblings; 'parallel' lets them run concurrently.")),
 		),
 		s.wrapHandler("create_task_kandev", s.createTaskHandler()),
 	)

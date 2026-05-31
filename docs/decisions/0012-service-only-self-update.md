@@ -1,4 +1,4 @@
-# 0011: Service-only UI self-update
+# 0012: Service-only UI self-update
 
 Status: accepted
 Date: 2026-05-29

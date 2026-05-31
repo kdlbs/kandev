@@ -62,6 +62,7 @@ function baseState(entries: QueuedMessage[]) {
     isLoading: false,
     queue: vi.fn(async () => {}),
     clearAll: vi.fn(async () => {}),
+    drainNext: vi.fn(async () => {}),
     editEntry: vi.fn(async () => {}),
     removeEntry: vi.fn(async () => {}),
     refetch: vi.fn(async () => {}),
@@ -164,6 +165,30 @@ describe("QueueAffordance", () => {
     fireEvent.click(screen.getByTestId(CHIP_ID));
     fireEvent.click(screen.getByTestId("queue-clear-all"));
     expect(state.clearAll).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a run-next action when manual drain is available", () => {
+    const state = queueState([entry()]);
+    useQueueMock.mockReturnValue(state);
+    render(
+      <QueueAffordance sessionId={SESSION_ID} canDrain>
+        {CHILD}
+      </QueueAffordance>,
+    );
+    fireEvent.click(screen.getByTestId(CHIP_ID));
+    fireEvent.click(screen.getByTestId("queue-drain-next"));
+    expect(state.drainNext).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides the run-next action while the agent is busy", () => {
+    useQueueMock.mockReturnValue(queueState([entry()]));
+    render(
+      <QueueAffordance sessionId={SESSION_ID} canDrain={false}>
+        {CHILD}
+      </QueueAffordance>,
+    );
+    fireEvent.click(screen.getByTestId(CHIP_ID));
+    expect(screen.queryByTestId("queue-drain-next")).toBeNull();
   });
 });
 

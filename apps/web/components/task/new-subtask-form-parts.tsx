@@ -222,8 +222,7 @@ function WorkspaceSection({
         workspaceId={workspaceId}
         onRowRepositoryChange={handlers.handleRowRepositoryChange}
         onRowBranchChange={handlers.handleRowBranchChange}
-        onToggleGitHubUrl={handlers.handleToggleGitHubUrl}
-        onGitHubUrlChange={handlers.handleGitHubUrlChange}
+        onToggleRemote={handlers.handleToggleRemote}
       />
       <WorktreeBadge show={showWorktreeBadge} branch={worktreeBranch} />
     </>
@@ -364,7 +363,7 @@ function shouldShowWorktreeBadge(
     !!worktreeBranch &&
     fs.repositories.length === 1 &&
     fs.repositories[0]?.repositoryId === parentRepositoryId &&
-    !fs.useGitHubUrl
+    !fs.useRemote
   );
 }
 

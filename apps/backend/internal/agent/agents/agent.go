@@ -226,6 +226,12 @@ func (c SessionConfig) SupportsRecovery() bool {
 // filter chain across agents, so the literal lives in exactly one place.
 const PermissionApplyMethodCLIFlag = "cli_flag"
 
+// PermissionKeyAutoApprove is the PermissionSettings map key wired to the
+// profile "Auto approve" toggle (see PermissionValues in buildAgentCommand).
+// Centralised for the same reason as PermissionApplyMethodCLIFlag: a typo in
+// any one agent silently disables its auto-approve flag.
+const PermissionKeyAutoApprove = "auto_approve"
+
 // PermissionSetting defines metadata for a permission setting option.
 type PermissionSetting struct {
 	Supported    bool   `json:"supported"`

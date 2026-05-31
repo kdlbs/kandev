@@ -18,7 +18,7 @@ import {
   type AgentRunsListPage,
   type AgentRunSummary,
 } from "@/lib/api/domains/office-extended-api";
-import { timeAgo } from "../../../components/shared/time-ago";
+import { timeAgo } from "@/lib/utils/time";
 
 type Props = {
   initial: AgentRunsListPage;

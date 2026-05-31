@@ -3,6 +3,7 @@
 package clarification
 
 import (
+	"sync"
 	"time"
 )
 
@@ -53,10 +54,13 @@ type Response struct {
 
 // PendingClarification represents a clarification request waiting for a response.
 type PendingClarification struct {
-	Request    *Request
-	ResponseCh chan *Response
-	CancelCh   chan struct{} // Closed when session's turn completes (agent moved on)
-	CreatedAt  time.Time
+	Request   *Request
+	done      chan struct{} // Closed when a response is submitted (broadcast to all waiters)
+	resp      *Response
+	mu        sync.Mutex
+	resolved  bool
+	CancelCh  chan struct{} // Closed when session's turn completes (agent moved on)
+	CreatedAt time.Time
 }
 
 // Status represents the status of a clarification request.

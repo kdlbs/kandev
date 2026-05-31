@@ -105,6 +105,14 @@ export type PrepareProgressItem = {
 
 export type RenderItem = { type: "message"; message: Message } | TurnGroup | PrepareProgressItem;
 
+export type GroupedRenderOptions = {
+  canAnchorPrepareProgress?: boolean;
+};
+
+export type ProcessedMessagesOptions = {
+  hasOlderMessages?: boolean;
+};
+
 function buildToolCallIds(messages: Message[]): Set<string> {
   const set = new Set<string>();
   for (const message of messages) {
@@ -332,8 +340,10 @@ function groupActivityMessages(allMessages: Message[]): RenderItem[] {
 function injectPrepareProgressItem(
   items: RenderItem[],
   resolvedSessionId: string | null,
+  options: GroupedRenderOptions = {},
 ): RenderItem[] {
   if (!resolvedSessionId) return items;
+  if (options.canAnchorPrepareProgress === false) return items;
   const prepareItem: PrepareProgressItem = {
     type: "prepare_progress",
     id: `prepare-progress-${resolvedSessionId}`,
@@ -343,11 +353,58 @@ function injectPrepareProgressItem(
   return [items[0], prepareItem, ...items.slice(1)];
 }
 
+export function buildGroupedRenderItems(
+  regularMessages: Message[],
+  resolvedSessionId: string | null,
+  options: GroupedRenderOptions = {},
+): RenderItem[] {
+  return injectPrepareProgressItem(
+    groupActivityMessages(regularMessages),
+    resolvedSessionId,
+    options,
+  );
+}
+
+function canAnchorPrepareProgress(messages: Message[], hasOlderMessages: boolean): boolean {
+  if (!hasOlderMessages) return true;
+  return messages.some(isSetupScriptMessage);
+}
+
+function buildGroupedItemsForHook(args: {
+  regularMessages: Message[];
+  allSessionMessages: Message[];
+  resolvedSessionId: string | null;
+  hasOlderMessages: boolean;
+}): RenderItem[] {
+  return buildGroupedRenderItems(args.regularMessages, args.resolvedSessionId, {
+    canAnchorPrepareProgress: canAnchorPrepareProgress(
+      args.allSessionMessages,
+      args.hasOlderMessages,
+    ),
+  });
+}
+
+function buildTodoItems(visibleMessages: Message[]) {
+  const latestTodos = [...visibleMessages]
+    .reverse()
+    .find((message) => message.type === "todo" || (message.metadata as { todos?: unknown })?.todos);
+  return (
+    (
+      latestTodos?.metadata as
+        | { todos?: Array<{ text: string; done?: boolean } | string> }
+        | undefined
+    )?.todos
+      ?.map((item) => (typeof item === "string" ? { text: item, done: false } : item))
+      .filter((item) => item.text) ?? []
+  );
+}
+
 export function useProcessedMessages(
   messages: Message[],
   taskId: string | null,
   resolvedSessionId: string | null,
   taskDescription: string | null,
+  options: ProcessedMessagesOptions = {},
 ) {
   const toolCallIds = useMemo(() => buildToolCallIds(messages), [messages]);
   const permissionsByToolCallId = useMemo(() => buildPermissionsByToolCallId(messages), [messages]);
@@ -388,22 +445,7 @@ export function useProcessedMessages(
     return taskDescriptionMessage ? [taskDescriptionMessage, ...visibleMessages] : visibleMessages;
   }, [taskDescriptionMessage, visibleMessages]);
 
-  const todoItems = useMemo(() => {
-    const latestTodos = [...visibleMessages]
-      .reverse()
-      .find(
-        (message) => message.type === "todo" || (message.metadata as { todos?: unknown })?.todos,
-      );
-    return (
-      (
-        latestTodos?.metadata as
-          | { todos?: Array<{ text: string; done?: boolean } | string> }
-          | undefined
-      )?.todos
-        ?.map((item) => (typeof item === "string" ? { text: item, done: false } : item))
-        .filter((item) => item.text) ?? []
-    );
-  }, [visibleMessages]);
+  const todoItems = useMemo(() => buildTodoItems(visibleMessages), [visibleMessages]);
 
   const agentMessageCount = useMemo(() => {
     return visibleMessages.filter((c) => c.author_type !== "user").length;
@@ -426,8 +468,13 @@ export function useProcessedMessages(
   }, [allMessages]);
 
   const groupedItems = useMemo<RenderItem[]>(() => {
-    return injectPrepareProgressItem(groupActivityMessages(regularMessages), resolvedSessionId);
-  }, [regularMessages, resolvedSessionId]);
+    return buildGroupedItemsForHook({
+      regularMessages,
+      allSessionMessages: messages,
+      resolvedSessionId,
+      hasOlderMessages: options.hasOlderMessages ?? false,
+    });
+  }, [regularMessages, resolvedSessionId, messages, options.hasOlderMessages]);
 
   useDebugProcessedPipeline({
     sessionId: resolvedSessionId,

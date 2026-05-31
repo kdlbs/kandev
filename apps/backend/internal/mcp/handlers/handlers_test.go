@@ -3,12 +3,14 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -509,6 +511,67 @@ func TestResolveTaskRepositories_EphemeralParent_Rejected(t *testing.T) {
 	assert.Contains(t, err.Error(), "ephemeral")
 }
 
+func TestResolveTaskRepositories_SubtaskParent_Rejected(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+
+	// Seed workspace, non-office workflow, root task, and a subtask
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
+	root, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		WorkflowID:  "wf-1",
+		Title:       "Root task",
+	})
+	require.NoError(t, err)
+	child, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		WorkflowID:  "wf-1",
+		ParentID:    root.ID,
+		Title:       "Subtask",
+	})
+	require.NoError(t, err)
+
+	log := testLogger(t)
+	h := &Handlers{taskSvc: svc, logger: log.WithFields()}
+
+	_, err = h.resolveTaskRepositories(ctx, child.ID, "", nil)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, service.ErrSubtaskDepthExceeded), "expected ErrSubtaskDepthExceeded, got: %v", err)
+}
+
+func TestResolveTaskRepositories_OfficeSubtaskParent_Allowed(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+
+	// Seed office workspace (office workflow stamps IsFromOffice = true)
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-office", Name: "Office"}))
+	_, err := repo.EnsureOfficeWorkflow(ctx, "ws-office")
+	require.NoError(t, err)
+
+	root, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: "ws-office",
+		Title:       "Root office task",
+		ProjectID:   "proj-1",
+	})
+	require.NoError(t, err)
+	child, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: "ws-office",
+		ParentID:    root.ID,
+		Title:       "Office subtask",
+		ProjectID:   "proj-1",
+	})
+	require.NoError(t, err)
+
+	log := testLogger(t)
+	h := &Handlers{taskSvc: svc, logger: log.WithFields()}
+
+	result, err := h.resolveTaskRepositories(ctx, child.ID, "", nil)
+	require.NoError(t, err)
+	assert.Equal(t, "ws-office", result.WorkspaceID)
+	assert.Equal(t, root.WorkflowID, result.WorkflowID)
+}
+
 func TestResolveTaskRepositories_ExplicitRepos_InheritsSourceWorkspace(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	ctx := context.Background()
@@ -705,4 +768,136 @@ func TestHandleCreateTask_BlockedBy_Accepted(t *testing.T) {
 	require.NoError(t, err)
 	// Fails on workspace_id, not on blocked_by parsing
 	assertWSError(t, resp, ws.ErrorCodeValidation)
+}
+
+func TestHandleClarificationTimeout_MarksMessagesExpired(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
+	task, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		WorkflowID:  "wf-1",
+		Title:       "Task",
+	})
+	require.NoError(t, err)
+
+	sess := &models.TaskSession{
+		ID:        "sess-1",
+		TaskID:    task.ID,
+		IsPrimary: true,
+		State:     models.TaskSessionStateRunning,
+	}
+	require.NoError(t, repo.CreateTaskSession(ctx, sess))
+	turn := &models.Turn{ID: "turn-1", TaskSessionID: sess.ID, TaskID: task.ID}
+	require.NoError(t, repo.CreateTurn(ctx, turn))
+
+	store := clarification.NewStore(time.Minute)
+	eventBus := bus.NewMemoryEventBus(testLogger(t))
+	t.Cleanup(func() { eventBus.Close() })
+	canceller := clarification.NewCanceller(store, repo, eventBus, testLogger(t))
+
+	pendingID := "test-pending-id"
+	require.NoError(t, repo.CreateMessage(ctx, &models.Message{
+		TaskSessionID: sess.ID,
+		TaskID:        task.ID,
+		TurnID:        turn.ID,
+		AuthorType:    "agent",
+		Type:          "clarification_request",
+		Content:       "Q?",
+		Metadata: map[string]interface{}{
+			"pending_id":  pendingID,
+			"question_id": "q1",
+			"status":      "pending",
+		},
+	}))
+
+	// Drain the in-memory store so the handler must fall back to DB-driven cleanup
+	store.CancelSession(sess.ID)
+
+	h := NewHandlers(svc, nil, store, canceller, nil, repo, repo, eventBus, nil, nil, nil, testLogger(t))
+	msg := makeWSMessage(t, ws.ActionMCPClarificationTimeout, map[string]interface{}{"session_id": sess.ID})
+	resp, err := h.handleClarificationTimeout(ctx, msg)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	msgs, err := repo.FindPendingClarificationMessagesBySessionID(ctx, sess.ID)
+	require.NoError(t, err)
+	require.Empty(t, msgs, "all clarification messages should be expired")
+}
+
+func TestHandleClarificationTimeout_WithoutCanceller_ReturnsZero(t *testing.T) {
+	h := &Handlers{sessionCanceller: nil, logger: testLogger(t).WithFields()}
+	msg := makeWSMessage(t, ws.ActionMCPClarificationTimeout, map[string]interface{}{"session_id": "s1"})
+	resp, err := h.handleClarificationTimeout(context.Background(), msg)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+}
+
+func TestHandleAskUserQuestion_Dedup_CreatesOnePendingBundle(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
+	task, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		WorkflowID:  "wf-1",
+		Title:       "Task",
+	})
+	require.NoError(t, err)
+
+	sess := &models.TaskSession{
+		ID:        "sess-dedup",
+		TaskID:    task.ID,
+		IsPrimary: true,
+		State:     models.TaskSessionStateRunning,
+	}
+	require.NoError(t, repo.CreateTaskSession(ctx, sess))
+
+	store := clarification.NewStore(time.Minute)
+	log := testLogger(t)
+	h := NewHandlers(svc, nil, store, nil, nil, repo, repo, nil, nil, nil, nil, log)
+
+	payload := map[string]interface{}{
+		"session_id": sess.ID,
+		"task_id":    task.ID,
+		"questions": []map[string]interface{}{
+			{"prompt": "What colour?", "options": []map[string]interface{}{
+				{"label": "Red", "description": "R"},
+				{"label": "Blue", "description": "B"},
+			}},
+		},
+	}
+
+	// Fire two identical requests concurrently. Because handleAskUserQuestion
+	// blocks, we run them in goroutines and cancel the session after a short
+	// delay so both return.
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			msg := makeWSMessage(t, ws.ActionMCPAskUserQuestion, payload)
+			if _, err := h.handleAskUserQuestion(ctx, msg); err != nil {
+				t.Errorf("handleAskUserQuestion returned unexpected error: %v", err)
+			}
+		}()
+	}
+
+	// Wait until the single deduped pending bundle is visible in the store
+	// (confirming both goroutines have passed the CreateRequest gate).
+	require.Eventually(t, func() bool {
+		return len(store.ListPending()) == 1
+	}, time.Second, 5*time.Millisecond)
+	store.CancelSession(sess.ID)
+	wg.Wait()
+
+	// After dedup there should be exactly one pending entry even though two
+	// handlers were invoked.
+	pending := store.ListPending()
+	require.Len(t, pending, 0) // cancelled
+	// The actual dedup invariant is verified at the Store level; this test
+	// ensures the handler path does not panic or leak with concurrent calls.
 }

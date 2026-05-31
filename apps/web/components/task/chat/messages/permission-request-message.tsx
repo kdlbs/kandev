@@ -46,10 +46,11 @@ type PermissionRequestMessageProps = {
 
 export function PermissionRequestMessage({ comment }: PermissionRequestMessageProps) {
   const { permissionMetadata, permissionStatus, isPermissionPending } = parsePermission(comment);
-  const { isResponding, handleApprove, handleReject } = usePermissionResponseHandlers({
-    permissionMetadata,
-    permissionMessage: comment,
-  });
+  const { isResponding, handleApprove, handleAllowAlways, hasAllowAlways, handleReject } =
+    usePermissionResponseHandlers({
+      permissionMetadata,
+      permissionMessage: comment,
+    });
 
   const statusBadge = getPermissionStatusBadge(permissionStatus);
   const titleText = comment.content || "Permission Required";
@@ -96,6 +97,7 @@ export function PermissionRequestMessage({ comment }: PermissionRequestMessagePr
               <PermissionActionRow
                 onApprove={handleApprove}
                 onReject={handleReject}
+                onAllowAlways={hasAllowAlways ? handleAllowAlways : undefined}
                 isResponding={isResponding}
               />
             </div>

@@ -96,6 +96,23 @@ debug:
     dev:  "true"
     e2e:  ""
 
+  # Dump every ACP protocol frame (raw + normalized) to per-session JSONL
+  # files for offline debugging of stuck/odd sessions. Always-on in dev:
+  # the agentctl janitor caps file size (rotation), prunes by age + total
+  # count, and flushes/closes writers on shutdown, so it can't grow disk
+  # without bound. Files default to ~/.kandev/logs/acp/ (override with
+  # KANDEV_DEBUG_LOG_DIR). PRIVACY: frames carry full prompt/file/tool
+  # content — strictly local-dev; never enable in prod. When agentctl runs
+  # inside a Docker executor the files land *inside the container*, so this
+  # is meant for standalone/dev. Retention knobs (all optional):
+  #   KANDEV_DEBUG_ACP_MAX_FILES       (default 200)
+  #   KANDEV_DEBUG_ACP_RETENTION_HOURS (default 48)
+  #   KANDEV_DEBUG_ACP_MAX_FILE_BYTES  (default 8388608 = 8 MiB)
+  KANDEV_DEBUG_AGENT_MESSAGES:
+    prod: ""
+    dev:  "true"
+    e2e:  ""
+
 # ── E2E test tuning ───────────────────────────────────────────────
 # Behaviour knobs that only matter when running playwright. These
 # don't belong in dev (would mask real interactions) and never in

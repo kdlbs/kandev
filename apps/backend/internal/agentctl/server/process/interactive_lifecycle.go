@@ -3,6 +3,7 @@ package process
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"sync"
@@ -274,9 +275,17 @@ func (r *InteractiveRunner) startProcess(proc *interactiveProcess, cols, rows in
 	r.logger.Info("interactive process started at exact dimensions",
 		zap.String("process_id", proc.info.ID),
 		zap.String("session_id", proc.info.SessionID),
+		zap.String("scope_id", req.ScopeID),
+		zap.String("terminal_id", req.TerminalID),
+		zap.String("label", req.Label),
+		zap.Bool("is_user_shell", proc.isUserShell),
+		zap.Strings("command", proc.startCmd),
+		zap.String("working_dir", proc.startDir),
+		zap.Int("parent_pid", os.Getpid()),
 		zap.Int("cols", cols),
 		zap.Int("rows", rows),
-		zap.Int("pid", pid),
+		zap.Int("os_pid", pid),
+		zap.Bool("has_initial_command", req.InitialCommand != ""),
 	)
 
 	// Start output reading and process waiting goroutines
@@ -357,6 +366,18 @@ func (r *InteractiveRunner) Stop(ctx context.Context, processID string) error {
 		return fmt.Errorf("process not found: %s", processID)
 	}
 
+	pid := proc.osPID()
+	r.logger.Info("stopping interactive process",
+		zap.String("process_id", processID),
+		zap.String("session_id", proc.info.SessionID),
+		zap.Bool("is_user_shell", proc.isUserShell),
+		zap.String("scope_id", proc.startReq.ScopeID),
+		zap.String("terminal_id", proc.startReq.TerminalID),
+		zap.Strings("command", proc.info.Command),
+		zap.String("working_dir", proc.info.WorkingDir),
+		zap.Int("os_pid", pid),
+		zap.Bool("started", proc.started))
+
 	// Unblock anyone waiting on first-idle — the process is going away.
 	proc.firstIdleOnce.Do(func() {
 		close(proc.firstIdleCh)
@@ -389,8 +410,15 @@ func (r *InteractiveRunner) Stop(ctx context.Context, processID string) error {
 		// If it doesn't exit in time, force-kill the process.
 		select {
 		case <-ctx.Done():
+			r.logger.Warn("interactive process stop context canceled; killing process",
+				zap.String("process_id", processID),
+				zap.Int("os_pid", pid),
+				zap.Error(ctx.Err()))
 			_ = proc.cmd.Process.Kill()
 		case <-time.After(2 * time.Second):
+			r.logger.Warn("interactive process stop timed out; killing process",
+				zap.String("process_id", processID),
+				zap.Int("os_pid", pid))
 			_ = proc.cmd.Process.Kill()
 		case <-proc.waitDone:
 			// Process exited cleanly
@@ -475,6 +503,17 @@ func (r *InteractiveRunner) IsProcessReadyOrPending(processID string) bool {
 	return r.isProcessAlive(proc)
 }
 
+// GetOSPID returns the underlying OS process ID for a started interactive
+// process. Deferred-start processes return (0, true) until their first resize
+// spawns the PTY child.
+func (r *InteractiveRunner) GetOSPID(processID string) (int, bool) {
+	proc, ok := r.get(processID)
+	if !ok {
+		return 0, false
+	}
+	return proc.osPID(), true
+}
+
 // GetBuffer returns the buffered output for a process.
 func (r *InteractiveRunner) GetBuffer(processID string) ([]ProcessOutputChunk, bool) {
 	proc, ok := r.get(processID)
@@ -518,6 +557,12 @@ func (r *InteractiveRunner) wait(proc *interactiveProcess) {
 	r.logger.Info("interactive process exited",
 		zap.String("process_id", proc.info.ID),
 		zap.String("session_id", proc.info.SessionID),
+		zap.String("scope_id", proc.startReq.ScopeID),
+		zap.String("terminal_id", proc.startReq.TerminalID),
+		zap.Bool("is_user_shell", proc.isUserShell),
+		zap.Strings("command", proc.info.Command),
+		zap.String("working_dir", proc.info.WorkingDir),
+		zap.Int("os_pid", proc.osPID()),
 		zap.String("status", string(status)),
 		zap.Int("exit_code", exitCode),
 		zap.String("signal", signalName),
@@ -642,8 +687,22 @@ func (p *interactiveProcess) snapshot(includeOutput bool) InteractiveProcessInfo
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	info := p.info
+	info.OSPID = p.osPIDLocked()
 	if includeOutput && p.buffer != nil {
 		info.Output = p.buffer.snapshot()
 	}
 	return info
+}
+
+func (p *interactiveProcess) osPID() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.osPIDLocked()
+}
+
+func (p *interactiveProcess) osPIDLocked() int {
+	if p.cmd == nil || p.cmd.Process == nil {
+		return 0
+	}
+	return p.cmd.Process.Pid
 }

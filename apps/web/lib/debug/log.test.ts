@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createDebugLogger } from "./log";
+import { createDebugLogger, registerSessionTaskResolver } from "./log";
 
 describe("createDebugLogger", () => {
   beforeEach(() => {
@@ -72,6 +72,93 @@ describe("createDebugLogger", () => {
     const log = createDebugLogger("ns");
     log("prefix", { a: 1 }, "suffix");
     expect(console.debug).toHaveBeenCalledWith("[ns] prefix a=1 suffix");
+  });
+});
+
+describe("registerSessionTaskResolver", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "debug").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    registerSessionTaskResolver(null);
+    vi.restoreAllMocks();
+  });
+
+  it("annotates lines carrying a sessionId with task_id", () => {
+    registerSessionTaskResolver((sid) => (sid === "s_1" ? "t_42" : undefined));
+    const log = createDebugLogger("ns");
+    log("msg", { sessionId: "s_1", fileCount: 3 });
+    expect(console.debug).toHaveBeenCalledWith("[ns] msg sessionId=s_1 fileCount=3 task_id=t_42");
+  });
+
+  it("resolves from a snake_case session_id field too", () => {
+    registerSessionTaskResolver(() => "t_99");
+    const log = createDebugLogger("ns");
+    log("msg", { session_id: "s_1" });
+    expect(console.debug).toHaveBeenCalledWith("[ns] msg session_id=s_1 task_id=t_99");
+  });
+
+  it("does not annotate when the line already names a task via taskId", () => {
+    registerSessionTaskResolver(() => "t_resolved");
+    const log = createDebugLogger("ns");
+    log("msg", { sessionId: "s_1", taskId: "t_explicit" });
+    expect(console.debug).toHaveBeenCalledWith("[ns] msg sessionId=s_1 taskId=t_explicit");
+  });
+
+  it("does not annotate when the line already names a task via task_id", () => {
+    registerSessionTaskResolver(() => "t_resolved");
+    const log = createDebugLogger("ns");
+    log("msg", { sessionId: "s_1", task_id: "t_explicit" });
+    expect(console.debug).toHaveBeenCalledWith("[ns] msg sessionId=s_1 task_id=t_explicit");
+  });
+
+  it("does not annotate when no session is present", () => {
+    registerSessionTaskResolver(() => "t_42");
+    const log = createDebugLogger("ns");
+    log("msg", { foo: "bar" });
+    expect(console.debug).toHaveBeenCalledWith("[ns] msg foo=bar");
+  });
+
+  it("omits task_id when the session cannot be resolved", () => {
+    registerSessionTaskResolver(() => undefined);
+    const log = createDebugLogger("ns");
+    log("msg", { sessionId: "s_unknown" });
+    expect(console.debug).toHaveBeenCalledWith("[ns] msg sessionId=s_unknown");
+  });
+
+  it("never throws when the resolver throws", () => {
+    registerSessionTaskResolver(() => {
+      throw new Error("store gone");
+    });
+    const log = createDebugLogger("ns");
+    expect(() => log("msg", { sessionId: "s_1" })).not.toThrow();
+    expect(console.debug).toHaveBeenCalledWith("[ns] msg sessionId=s_1");
+  });
+
+  it("stops annotating once cleared with null", () => {
+    registerSessionTaskResolver(() => "t_42");
+    registerSessionTaskResolver(null);
+    const log = createDebugLogger("ns");
+    log("msg", { sessionId: "s_1" });
+    expect(console.debug).toHaveBeenCalledWith("[ns] msg sessionId=s_1");
+  });
+
+  it("returned unregister clears the active resolver", () => {
+    const unregister = registerSessionTaskResolver(() => "t_42");
+    unregister();
+    const log = createDebugLogger("ns");
+    log("msg", { sessionId: "s_1" });
+    expect(console.debug).toHaveBeenCalledWith("[ns] msg sessionId=s_1");
+  });
+
+  it("a stale unregister does not clear a newer resolver (HMR-safe)", () => {
+    const unregisterA = registerSessionTaskResolver(() => "t_A");
+    registerSessionTaskResolver(() => "t_B"); // newer registration takes over
+    unregisterA(); // stale cleanup must NOT kill the newer resolver
+    const log = createDebugLogger("ns");
+    log("msg", { sessionId: "s_1" });
+    expect(console.debug).toHaveBeenCalledWith("[ns] msg sessionId=s_1 task_id=t_B");
   });
 });
 

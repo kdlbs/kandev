@@ -288,6 +288,28 @@ export function setEnvLayout(envId: string, layout: object): void {
   }
 }
 
+// --- Dockview global left-sidebar width (localStorage) ---
+// The LEFT sidebar width is a single GLOBAL preference shared across every
+// task env (unlike the per-env layout above, which keys widths by envId).
+// Stores the user's raw, unclamped width — clamping to the current screen
+// happens at apply time. Written only by a genuine sash drag; read by every
+// layout build/restore/switch via getPinnedWidth.
+const DOCKVIEW_GLOBAL_SIDEBAR_WIDTH_KEY = "kandev.dockview.sidebar-width";
+
+export function getGlobalSidebarWidth(): number | null {
+  const v = getLocalStorage<number | null>(DOCKVIEW_GLOBAL_SIDEBAR_WIDTH_KEY, null);
+  return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;
+}
+
+export function setGlobalSidebarWidth(width: number): void {
+  if (!Number.isFinite(width) || width <= 0) return;
+  setLocalStorage(DOCKVIEW_GLOBAL_SIDEBAR_WIDTH_KEY, Math.round(width));
+}
+
+export function clearGlobalSidebarWidth(): void {
+  removeLocalStorage(DOCKVIEW_GLOBAL_SIDEBAR_WIDTH_KEY);
+}
+
 // --- Dockview per-env maximize state (sessionStorage) ---
 // v2: bumped alongside DOCKVIEW_ENV_LAYOUT_PREFIX. The maximize blob
 // references the pre-maximize layout, which can carry the same oversized
@@ -381,6 +403,28 @@ export function markPRMergedBannerDismissed(taskId: string): void {
   if (typeof window === "undefined") return;
   try {
     window.sessionStorage.setItem(`${PR_MERGED_BANNER_DISMISSED_PREFIX}${taskId}`, "1");
+  } catch {
+    // Ignore write failures
+  }
+}
+
+// PR closed banner dismissal — same lifetime as the merged banner: per-task,
+// survives reload + task switch within the tab session, resets on tab close.
+const PR_CLOSED_BANNER_DISMISSED_PREFIX = "kandev.pr-closed-banner-dismissed.";
+
+export function wasPRClosedBannerDismissed(taskId: string): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.sessionStorage.getItem(`${PR_CLOSED_BANNER_DISMISSED_PREFIX}${taskId}`) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function markPRClosedBannerDismissed(taskId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(`${PR_CLOSED_BANNER_DISMISSED_PREFIX}${taskId}`, "1");
   } catch {
     // Ignore write failures
   }
@@ -595,8 +639,9 @@ export function cleanupTaskStorage(
   // Plan notification (localStorage, keyed per task inside a Record)
   setPlanLastSeen(taskId, null);
 
-  // PR merged banner dismissal (sessionStorage, keyed per task)
+  // PR merged / closed banner dismissal (sessionStorage, keyed per task)
   removeSessionStorage(`${PR_MERGED_BANNER_DISMISSED_PREFIX}${taskId}`);
+  removeSessionStorage(`${PR_CLOSED_BANNER_DISMISSED_PREFIX}${taskId}`);
 
   // Sidebar collapsed-subtask set (sessionStorage, array keyed by parent taskId)
   const collapsed = getStoredCollapsedSubtaskParents();

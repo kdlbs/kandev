@@ -11,10 +11,10 @@ import {
   RIGHT_BOTTOM_GROUP,
   setPinnedTarget,
 } from "@/lib/state/layout-manager";
-import { setEnvLayout } from "@/lib/local-storage";
+import { setEnvLayout, setGlobalSidebarWidth } from "@/lib/local-storage";
 import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
 import { stopVscode } from "@/lib/api/domains/vscode-api";
-import { parkUserShell, stopUserShell } from "@/lib/api/domains/user-shell-api";
+import { stopUserShell } from "@/lib/api/domains/user-shell-api";
 import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
 import { snapshotColumnWidths, formatWidthsSnapshot } from "@/lib/state/dockview-widths-debug";
 import { enforcePinnedTargets, setSashDragging } from "@/lib/state/dockview-pinned-enforce";
@@ -123,7 +123,15 @@ export function setupSashDragCapToggle(api: DockviewReadyEvent["api"]): () => vo
       const sv = getRootSplitview(api);
       if (!sv) return;
       const store = useDockviewStore.getState();
-      if (store.sidebarVisible) setPinnedTarget("sidebar", sv.getViewSize(0));
+      if (store.sidebarVisible) {
+        // A genuine drag is the ONLY writer of the global sidebar width pref.
+        // Persist it globally and mirror into the store's pinnedWidths so the
+        // override path (resolvePresetPinnedWidths / classifyColumns) agrees.
+        const sidebarW = sv.getViewSize(0);
+        setPinnedTarget("sidebar", sidebarW);
+        setGlobalSidebarWidth(sidebarW);
+        store.setPinnedWidth("sidebar", sidebarW);
+      }
       if (store.rightPanelsVisible) setPinnedTarget("right", sv.getViewSize(sv.length - 1));
       if (IS_DEBUG) {
         debugWidths(`sash-drag-end ${formatWidthsSnapshot(snapshotColumnWidths(api))}`);
@@ -143,42 +151,6 @@ export function setupSashDragCapToggle(api: DockviewReadyEvent["api"]): () => vo
     dragging = false;
     setSashDragging(false);
   };
-}
-
-function trackPinnedWidths(api: DockviewReadyEvent["api"]): void {
-  const store = useDockviewStore.getState();
-  if (store.isRestoringLayout) return;
-  if (api.hasMaximizedGroup() || store.preMaximizeLayout !== null) return;
-  const sv = getRootSplitview(api);
-  if (!sv || sv.length < 2) return;
-  try {
-    // Sidebar is grid index 0 *only when sidebar is visible*. Without the
-    // visibility guard, hiding the sidebar makes index 0 the center column,
-    // and we'd persist the center width as the sidebar's preferred width.
-    if (store.sidebarVisible) {
-      const sidebarW = sv.getViewSize(0);
-      if (sidebarW > 50) {
-        const current = store.pinnedWidths.get("sidebar");
-        if (current !== sidebarW) {
-          store.setPinnedWidth("sidebar", sidebarW);
-        }
-      }
-    }
-    // Right column is the last grid index when present. Skip when there is
-    // no right column (compact preset, rightPanelsVisible=false).
-    if (store.rightPanelsVisible) {
-      const rightIdx = sv.length - 1;
-      const rightW = sv.getViewSize(rightIdx);
-      if (rightW > 50) {
-        const current = store.pinnedWidths.get("right");
-        if (current !== rightW) {
-          store.setPinnedWidth("right", rightW);
-        }
-      }
-    }
-  } catch {
-    /* noop */
-  }
 }
 
 /**
@@ -223,11 +195,8 @@ export function setupGroupTracking(api: DockviewReadyEvent["api"]): () => void {
     useDockviewStore.setState({ activeGroupId: group?.id ?? null });
   });
   useDockviewStore.setState({ activeGroupId: api.activeGroup?.id ?? null });
-  const d2 = api.onDidLayoutChange(() => trackPinnedWidths(api));
-  trackPinnedWidths(api);
   return () => {
     d1.dispose();
-    d2.dispose();
   };
 }
 
@@ -345,8 +314,8 @@ function resolveSessionForEntry(
   return match?.[0] ?? active;
 }
 
-/** Tab close → ordinary terminals park (PTY + DB row survive, reappear in
- *  the "+" menu); scripts/bottom-panel/legacy passthrough still destroy. */
+/** Tab close → destroy the shell (PTY stopped, DB row removed). When the tab
+ *  component already destroyed the shell it marks the panel id so we skip. */
 function handleTerminalPanelClosed(
   appStore: StoreApi<AppState>,
   panelId: string,
@@ -362,19 +331,9 @@ function handleTerminalPanelClosed(
   const fallbackEnv = active ? (state.environmentIdBySessionId[active] ?? null) : null;
   const envForTerminal = stampedEnv || fallbackEnv;
   if (!envForTerminal) return;
-  const shell = state.userShells.byEnvironmentId[envForTerminal]?.find(
-    (s) => s.terminalId === terminalId,
-  );
-  if (shell?.kind === "ordinary") {
-    parkUserShell(terminalId, stampedTaskID).then(
-      () => state.updateUserShell(envForTerminal, terminalId, { state: "parked" }),
-      (err: unknown) => console.error("park terminal on tab close:", err),
-    );
-  } else {
-    stopUserShell(envForTerminal, terminalId, stampedTaskID).catch((err: unknown) =>
-      console.warn("stop terminal on tab close:", err),
-    );
-  }
+  stopUserShell(envForTerminal, terminalId, stampedTaskID)
+    .then(() => state.removeUserShell(envForTerminal, terminalId))
+    .catch((err: unknown) => console.warn("stop terminal on tab close:", err));
 }
 
 export function setupPortalCleanup(

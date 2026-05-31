@@ -49,6 +49,7 @@ If task has no UI surface, say why this skill does not apply and continue.
    - Run the narrowest relevant viewport locally or with screenshots when possible.
    - Check that text does not overlap, controls remain clickable, focus/keyboard flows still work, and no unintended horizontal scroll appears.
    - Run the focused Playwright tests. If full E2E cannot run, report the command and blocker.
+   - E2E runs against the standalone build, not a dev server, so rebuild after frontend changes: `make build-web` (and `make build-backend` for Go), or use `make test-e2e` which rebuilds both. Skipping this silently tests stale code. See `/e2e`.
 
 ## Mobile E2E Expectations
 

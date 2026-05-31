@@ -150,7 +150,7 @@ func resolvePermissionDefaults(permSettings map[string]agents.PermissionSetting)
 	if permSettings == nil {
 		return
 	}
-	if s, exists := permSettings["auto_approve"]; exists {
+	if s, exists := permSettings[agents.PermissionKeyAutoApprove]; exists {
 		autoApprove = s.Default
 	}
 	if s, exists := permSettings["allow_indexing"]; exists {

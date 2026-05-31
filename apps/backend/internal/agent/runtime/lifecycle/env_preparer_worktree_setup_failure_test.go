@@ -16,10 +16,11 @@ import (
 // The per-repo setup script runs inside worktree.Manager.Create() AFTER the
 // worktree directory is created (git worktree add succeeded) and the
 // OnWorktreeCreated callback has already completed the "Create worktree" step.
-// When that script fails, Create() returns an error — but the failure belongs
-// to the setup script (which streams its own step), not to worktree creation.
-// The preparer must therefore leave "Create worktree" completed rather than
-// re-marking it as failed.
+// A setup-script failure is non-fatal: Create() keeps the worktree, records a
+// warning, and returns no error, so preparation still succeeds and the agent
+// launches. The failure belongs to the setup script (which streams its own
+// step), not to worktree creation — so "Create worktree" stays completed and
+// carries the setup-script warning rather than being re-marked as failed.
 func TestWorktreePreparer_SetupScriptFailure_KeepsCreateWorktreeStepCompleted(t *testing.T) {
 	repo := initBareGitRepo(t, "single")
 
@@ -47,9 +48,10 @@ func TestWorktreePreparer_SetupScriptFailure_KeepsCreateWorktreeStepCompleted(t 
 	if err != nil {
 		t.Fatalf("prepare returned hard error: %v", err)
 	}
-	// The setup script failed, so the prepare as a whole fails.
-	if res.Success {
-		t.Fatalf("expected prepare to fail when the setup script errors")
+	// A failed setup script is non-fatal: preparation still succeeds so the
+	// agent launches (and Resume / Start-fresh keep working).
+	if !res.Success {
+		t.Fatalf("expected prepare to succeed (setup-script failures are non-fatal)")
 	}
 
 	var createStep *PrepareStep
@@ -67,5 +69,9 @@ func TestWorktreePreparer_SetupScriptFailure_KeepsCreateWorktreeStepCompleted(t 
 	}
 	if createStep.Error != "" {
 		t.Errorf(`"Create worktree" unexpectedly carries error %q`, createStep.Error)
+	}
+	// The non-fatal failure surfaces as a warning on the step instead.
+	if createStep.Warning == "" {
+		t.Errorf(`"Create worktree" should carry the setup-script warning when the script fails`)
 	}
 }

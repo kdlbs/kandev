@@ -155,7 +155,7 @@ func TestHttpRespond_AnsweredAfterTimeout_PublishesEvent(t *testing.T) {
 // receive a phantom answer for the question that was actually skipped.
 func TestHttpRespond_DuplicateQuestionID_Rejected400(t *testing.T) {
 	h, _, _, _ := setupTestHandler(t, map[string][]*taskmodels.Message{})
-	pendingID := h.store.CreateRequest(&Request{
+	pendingID, _ := h.store.CreateRequest(&Request{
 		SessionID: "s1",
 		TaskID:    "t1",
 		Questions: []Question{
@@ -179,7 +179,7 @@ func TestHttpRespond_DuplicateQuestionID_Rejected400(t *testing.T) {
 // are rejected even with the right cardinality.
 func TestHttpRespond_UnknownQuestionID_Rejected400(t *testing.T) {
 	h, _, _, _ := setupTestHandler(t, map[string][]*taskmodels.Message{})
-	pendingID := h.store.CreateRequest(&Request{
+	pendingID, _ := h.store.CreateRequest(&Request{
 		SessionID: "s1",
 		TaskID:    "t1",
 		Questions: []Question{
@@ -201,7 +201,7 @@ func TestHttpRespond_UnknownQuestionID_Rejected400(t *testing.T) {
 func TestHttpRespond_PartialAnswers_Rejected400(t *testing.T) {
 	h, _, _, _ := setupTestHandler(t, map[string][]*taskmodels.Message{})
 
-	pendingID := h.store.CreateRequest(&Request{
+	pendingID, _ := h.store.CreateRequest(&Request{
 		SessionID: "s1",
 		TaskID:    "t1",
 		Questions: []Question{
@@ -230,7 +230,7 @@ func TestHttpRespond_PartialAnswers_Rejected400(t *testing.T) {
 func TestHttpRespond_AllAnswers_PrimaryPath_Success(t *testing.T) {
 	h, _, _, msgCreator := setupTestHandler(t, map[string][]*taskmodels.Message{})
 
-	pendingID := h.store.CreateRequest(&Request{
+	pendingID, _ := h.store.CreateRequest(&Request{
 		SessionID: "s1",
 		TaskID:    "t1",
 		Questions: []Question{

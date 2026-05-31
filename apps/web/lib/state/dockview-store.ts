@@ -6,8 +6,10 @@ import {
   getEnvMaximizeState,
   setEnvMaximizeState,
   removeEnvMaximizeState,
+  clearGlobalSidebarWidth,
+  setGlobalSidebarWidth,
 } from "@/lib/local-storage";
-import { setPinnedTarget } from "./layout-manager";
+import { setPinnedTarget, clearPinnedTarget } from "./layout-manager";
 import { applyLayoutFixups, focusOrAddPanel } from "./dockview-layout-builders";
 import {
   SIDEBAR_GROUP,
@@ -217,37 +219,36 @@ function applyDeferredPanelActions(api: DockviewApi, actions: DeferredPanelActio
   }
 }
 
-/** Read live column widths from dockview's splitview and persist them as pinned overrides.
- *  Only syncs widths for columns identified as "sidebar" or "right" to avoid
- *  capturing plan/preview/vscode column widths as stale "right" overrides. */
 /**
- * Build the pinnedWidths updates for a width sync, tracking a column only when
- * it is the VISIBLE default sidebar/right.
+ * Build the pinnedWidths updates for a width sync, tracking only the VISIBLE
+ * default right column.
  *
  * In plan/preview/vscode layouts the side column inherits merged files/changes
  * panels and `fromDockviewApi` mislabels it "right"; storing its width as the
  * right override would then leak into the default layout when toggling back
  * (e.g. plan-mode off snapping the right column to the plan column's width).
- * Mirrors the visibility guards in `trackPinnedWidths`. Widths <= 50px are
- * treated as transient/collapsed and skipped.
+ *
+ * Sidebar is intentionally excluded: its persisted width is a global pref
+ * written only by explicit sash drag, and syncing live layout-change widths
+ * would overwrite the raw pref with viewport-clamped transient widths.
+ * Widths <= 50px are treated as transient/collapsed and skipped.
  */
 export function collectPinnedWidthUpdates(
   columns: { id: string }[],
   getSize: (index: number) => number,
-  visibility: { sidebarVisible: boolean; rightPanelsVisible: boolean },
+  visibility: { rightPanelsVisible: boolean },
 ): Map<string, number> {
   const updates = new Map<string, number>();
   columns.forEach((col, i) => {
-    const tracked =
-      (col.id === "sidebar" && visibility.sidebarVisible) ||
-      (col.id === "right" && visibility.rightPanelsVisible);
-    if (!tracked) return;
+    if (col.id !== "right" || !visibility.rightPanelsVisible) return;
     const w = getSize(i);
     if (w > 50) updates.set(col.id, w);
   });
   return updates;
 }
 
+/** Read live column widths from dockview's splitview and persist the visible
+ *  right width as a pinned override (see `collectPinnedWidthUpdates`). */
 function syncPinnedWidthsFromApi(api: DockviewApi, set: StoreSet): void {
   if (api.hasMaximizedGroup()) return;
   const sv = getRootSplitview(api);
@@ -255,9 +256,8 @@ function syncPinnedWidthsFromApi(api: DockviewApi, set: StoreSet): void {
   try {
     const state = fromDockviewApi(api);
     if (state.columns.length !== sv.length) return;
-    const { sidebarVisible, rightPanelsVisible } = useDockviewStore.getState();
+    const { rightPanelsVisible } = useDockviewStore.getState();
     const updates = collectPinnedWidthUpdates(state.columns, (i) => sv.getViewSize(i), {
-      sidebarVisible,
       rightPanelsVisible,
     });
     if (updates.size > 0) {
@@ -278,7 +278,6 @@ function syncPinnedWidthsFromApi(api: DockviewApi, set: StoreSet): void {
   }
 }
 
-/** Capture the live sidebar/right pixel widths into pinnedWidths before a layout rebuild. */
 /**
  * Decide which pinned-width overrides to apply when switching to a preset.
  *
@@ -290,9 +289,10 @@ function syncPinnedWidthsFromApi(api: DockviewApi, set: StoreSet): void {
  *   `fromJSON` out at a transient narrower width, and that shrunken size would
  *   be captured as the pinned target and then enforced, leaving the columns
  *   too narrow.
- * - otherwise (programmatic switch, e.g. plan-mode toggle): keep the live
- *   widths, minus overrides for columns absent in the target layout, so the
- *   user's current sidebar/right widths carry across the switch.
+ * - otherwise (programmatic switch, e.g. plan-mode toggle): keep the live right
+ *   width, minus overrides for columns absent in the target layout. Sidebar is
+ *   always resolved from the global pref/default instead of an in-memory
+ *   override.
  */
 export function resolvePresetPinnedWidths(
   liveWidths: Map<string, number>,
@@ -301,6 +301,11 @@ export function resolvePresetPinnedWidths(
   resetWidths: boolean,
 ): Map<string, number> {
   if (resetWidths) {
+    // "Default layout" is the reset gesture: drop any custom global sidebar
+    // width (and its runtime target) so getPinnedWidth returns the fresh
+    // ratio default for the current screen instead of re-reading the pref.
+    clearGlobalSidebarWidth();
+    clearPinnedTarget("sidebar");
     const defaults = new Map<string, number>();
     for (const col of columns) {
       if (col.pinned) defaults.set(col.id, getPinnedWidth(col, totalWidth, undefined));
@@ -310,11 +315,12 @@ export function resolvePresetPinnedWidths(
   const targetColumnIds = new Set(columns.map((c) => c.id));
   const cleaned = new Map(liveWidths);
   for (const key of cleaned.keys()) {
-    if (!targetColumnIds.has(key)) cleaned.delete(key);
+    if (key === "sidebar" || !targetColumnIds.has(key)) cleaned.delete(key);
   }
   return cleaned;
 }
 
+/** Capture the live right pixel width into pinnedWidths before a layout rebuild. */
 function captureLiveWidths(api: DockviewApi, set: StoreSet): Map<string, number> {
   if (api.hasMaximizedGroup()) {
     api.exitMaximizedGroup();
@@ -868,12 +874,15 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
       type TestWindow = {
         __dockviewApi__: DockviewApi | null;
         __setPinnedTarget__?: typeof setPinnedTarget;
+        __setGlobalSidebarWidth__?: typeof setGlobalSidebarWidth;
       };
       const w = window as unknown as TestWindow;
       w.__dockviewApi__ = api;
       // E2E test helpers: let `resizeColumnViaSplitview` update the target
-      // width after a programmatic resize (mirroring the sash-drag mouseup).
+      // width after a programmatic resize (mirroring the sash-drag mouseup),
+      // including persisting the global sidebar-width pref like a real drag.
       w.__setPinnedTarget__ = setPinnedTarget;
+      w.__setGlobalSidebarWidth__ = setGlobalSidebarWidth;
     }
     if (api) {
       const resolveFilePath = (panelId: string | undefined): string | null => {

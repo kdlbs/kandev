@@ -298,6 +298,41 @@ func TestProcessOnTurnStart(t *testing.T) {
 	})
 }
 
+// TestProcessOnEnterSetSessionMode verifies the set_session_mode on_enter action
+// (issue #1183): it persists the declared mode to metadata and applies it live to
+// the running agent.
+func TestProcessOnEnterSetSessionMode(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	agentMgr := &mockAgentManager{}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+	step := &wfmodels.WorkflowStep{
+		ID: "step1", WorkflowID: "wf1", Name: "Implement",
+		Events: wfmodels.StepEvents{
+			OnEnter: []wfmodels.OnEnterAction{
+				{Type: wfmodels.OnEnterSetSessionMode, Config: map[string]interface{}{"mode": "acceptEdits"}},
+			},
+		},
+	}
+
+	session, _ := repo.GetTaskSession(ctx, "s1")
+	svc.processOnEnter(ctx, "t1", session, step, "test task")
+
+	updated, _ := repo.GetTaskSession(ctx, "s1")
+	if got, _ := updated.Metadata[models.SessionMetaKeySessionMode].(string); got != "acceptEdits" {
+		t.Errorf("expected session_mode metadata acceptEdits, got %q", got)
+	}
+	if len(agentMgr.setSessionModeCalls) != 1 {
+		t.Fatalf("expected 1 live set-mode call, got %d", len(agentMgr.setSessionModeCalls))
+	}
+	if c := agentMgr.setSessionModeCalls[0]; c.SessionID != "s1" || c.ModeID != "acceptEdits" {
+		t.Errorf("unexpected live set-mode call: %+v", c)
+	}
+}
+
 func TestProcessOnEnter(t *testing.T) {
 	ctx := context.Background()
 

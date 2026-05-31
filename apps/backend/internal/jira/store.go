@@ -67,6 +67,10 @@ const createTablesSQL = `
 		prompt TEXT NOT NULL DEFAULT '',
 		enabled BOOLEAN NOT NULL DEFAULT 1,
 		poll_interval_seconds INTEGER NOT NULL DEFAULT 300,
+		-- Cap on concurrent open watcher-created tasks for this watch.
+		-- NULL = uncapped. Positive integer = cap. Values <= 0 are rejected at
+		-- the API layer. See docs/specs/throttle-watcher-fanout/.
+		max_inflight_tasks INTEGER DEFAULT 5,
 		last_polled_at DATETIME,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
@@ -100,6 +104,30 @@ func (s *Store) initSchema() error {
 	}
 	if err := s.addInstanceTypeColumn(); err != nil {
 		return err
+	}
+	if err := s.addMaxInflightTasksColumn(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// addMaxInflightTasksColumn brings older databases up to the current schema by
+// adding the max_inflight_tasks column to jira_issue_watches when missing.
+// Existing rows backfill to the default (5). A fresh install hits the
+// column-already-present branch since createTablesSQL declares the column.
+func (s *Store) addMaxInflightTasksColumn() error {
+	cols, err := s.tableColumns("jira_issue_watches")
+	if err != nil {
+		return err
+	}
+	if len(cols) == 0 {
+		return nil
+	}
+	if _, ok := cols["max_inflight_tasks"]; ok {
+		return nil
+	}
+	if _, err := s.db.Exec(`ALTER TABLE jira_issue_watches ADD COLUMN max_inflight_tasks INTEGER DEFAULT 5`); err != nil {
+		return fmt.Errorf("add max_inflight_tasks column: %w", err)
 	}
 	return nil
 }
@@ -341,7 +369,17 @@ func (s *Store) UpdateAuthHealth(ctx context.Context, ok bool, errMsg string, ch
 
 const issueWatchColumns = `id, workspace_id, workflow_id, workflow_step_id, jql,
 	agent_profile_id, executor_profile_id, prompt, enabled,
-	poll_interval_seconds, last_polled_at, created_at, updated_at`
+	poll_interval_seconds, max_inflight_tasks, last_polled_at, created_at, updated_at`
+
+// nullableInt converts a *int into a value suitable for a nullable SQL column.
+// A nil pointer becomes a SQL NULL; a non-nil pointer becomes the underlying
+// int. Used for max_inflight_tasks where NULL means "uncapped".
+func nullableInt(v *int) interface{} {
+	if v == nil {
+		return nil
+	}
+	return *v
+}
 
 // CreateIssueWatch persists a new issue watch row. ID and timestamps are
 // assigned here so callers can pass a partially-populated struct.
@@ -357,10 +395,11 @@ func (s *Store) CreateIssueWatch(ctx context.Context, w *IssueWatch) error {
 	}
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO jira_issue_watches (`+issueWatchColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		w.ID, w.WorkspaceID, w.WorkflowID, w.WorkflowStepID, w.JQL,
 		w.AgentProfileID, w.ExecutorProfileID, w.Prompt, w.Enabled,
-		w.PollIntervalSeconds, w.LastPolledAt, w.CreatedAt, w.UpdatedAt)
+		w.PollIntervalSeconds, nullableInt(w.MaxInflightTasks),
+		w.LastPolledAt, w.CreatedAt, w.UpdatedAt)
 	return err
 }
 
@@ -429,11 +468,13 @@ func (s *Store) UpdateIssueWatch(ctx context.Context, w *IssueWatch) error {
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE jira_issue_watches SET workflow_id = ?, workflow_step_id = ?, jql = ?,
 			agent_profile_id = ?, executor_profile_id = ?, prompt = ?,
-			enabled = ?, poll_interval_seconds = ?, last_polled_at = ?, updated_at = ?
+			enabled = ?, poll_interval_seconds = ?, max_inflight_tasks = ?,
+			last_polled_at = ?, updated_at = ?
 		WHERE id = ?`,
 		w.WorkflowID, w.WorkflowStepID, w.JQL,
 		w.AgentProfileID, w.ExecutorProfileID, w.Prompt,
-		w.Enabled, w.PollIntervalSeconds, w.LastPolledAt, w.UpdatedAt, w.ID)
+		w.Enabled, w.PollIntervalSeconds, nullableInt(w.MaxInflightTasks),
+		w.LastPolledAt, w.UpdatedAt, w.ID)
 	return err
 }
 

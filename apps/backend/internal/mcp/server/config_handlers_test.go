@@ -68,6 +68,7 @@ func TestActionConstants_MatchWebSocketActions(t *testing.T) {
 	assert.Equal(t, "mcp.create_workflow", ws.ActionMCPCreateWorkflow)
 	assert.Equal(t, "mcp.update_workflow", ws.ActionMCPUpdateWorkflow)
 	assert.Equal(t, "mcp.delete_workflow", ws.ActionMCPDeleteWorkflow)
+	assert.Equal(t, "mcp.import_workflow", ws.ActionMCPImportWorkflow)
 	assert.Equal(t, "mcp.create_workflow_step", ws.ActionMCPCreateWorkflowStep)
 	assert.Equal(t, "mcp.update_workflow_step", ws.ActionMCPUpdateWorkflowStep)
 	assert.Equal(t, "mcp.delete_workflow_step", ws.ActionMCPDeleteWorkflowStep)
@@ -182,6 +183,48 @@ func TestDeleteWorkflowHandler_MissingWorkflowID(t *testing.T) {
 	s := newTestServer(t, backend)
 
 	result := callTool(t, s, "delete_workflow_kandev", map[string]interface{}{})
+
+	assert.True(t, result.IsError)
+}
+
+func TestImportWorkflowHandler_Success(t *testing.T) {
+	backend := &testBackend{
+		response: map[string]interface{}{"created": []interface{}{"Sprint Board"}, "skipped": []interface{}{}},
+	}
+	s := newTestServer(t, backend)
+
+	doc := "version: 1\ntype: kandev_workflow\nworkflows:\n  - name: Sprint Board\n    steps: []\n"
+	result := callTool(t, s, "import_workflow_kandev", map[string]interface{}{
+		"workspace_id": "ws-123",
+		"document":     doc,
+	})
+
+	assert.False(t, result.IsError)
+	assert.Equal(t, ws.ActionMCPImportWorkflow, backend.lastAction)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "ws-123", payload["workspace_id"])
+	assert.Equal(t, doc, payload["document"])
+}
+
+func TestImportWorkflowHandler_MissingWorkspaceID(t *testing.T) {
+	backend := &testBackend{}
+	s := newTestServer(t, backend)
+
+	result := callTool(t, s, "import_workflow_kandev", map[string]interface{}{
+		"document": "version: 1",
+	})
+
+	assert.True(t, result.IsError)
+}
+
+func TestImportWorkflowHandler_MissingDocument(t *testing.T) {
+	backend := &testBackend{}
+	s := newTestServer(t, backend)
+
+	result := callTool(t, s, "import_workflow_kandev", map[string]interface{}{
+		"workspace_id": "ws-123",
+	})
 
 	assert.True(t, result.IsError)
 }

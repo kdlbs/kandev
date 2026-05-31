@@ -197,6 +197,50 @@ export class ApiClient {
     });
   }
 
+  /**
+   * Seed a workflow with an explicit style (kanban / office / custom) via the
+   * KANDEV_E2E_MOCK test harness. Production has no HTTP path that creates an
+   * office-style workflow (the normal create endpoint always normalises to
+   * kanban), so this is the only way to stand up an office workflow for the
+   * "exclude office from settings export" coverage (issue #1109).
+   */
+  async seedWorkflow(
+    workspaceId: string,
+    name: string,
+    style: "kanban" | "office" | "custom",
+  ): Promise<{ workflow_id: string }> {
+    return this.request("POST", "/api/v1/_test/workflows", {
+      workspace_id: workspaceId,
+      name,
+      style,
+    });
+  }
+
+  /**
+   * Seed a task row directly via the test harness, bypassing the service-layer
+   * subtask-depth guard. Use this (not `createTask`) to build nested chains
+   * deeper than one level — `createTask` rejects depth > 1 for kanban tasks.
+   */
+  async seedTask(
+    workspaceId: string,
+    title: string,
+    opts?: {
+      workflow_id?: string;
+      workflow_step_id?: string;
+      parent_id?: string;
+      state?: string;
+    },
+  ): Promise<{ task_id: string }> {
+    return this.request("POST", "/api/v1/_test/tasks", {
+      workspace_id: workspaceId,
+      title,
+      workflow_id: opts?.workflow_id ?? "",
+      workflow_step_id: opts?.workflow_step_id ?? "",
+      parent_id: opts?.parent_id ?? "",
+      state: opts?.state ?? "",
+    });
+  }
+
   async reorderWorkflows(
     workspaceId: string,
     workflowIds: string[],
@@ -967,6 +1011,16 @@ export class ApiClient {
 
   async mockGitHubSetAuthHealth(data: { authenticated: boolean; error?: string }): Promise<void> {
     await this.request("PUT", "/api/v1/github/mock/auth-health", data);
+  }
+
+  /**
+   * Toggles the mock client's "list accessible repos unavailable" branch.
+   * When set to true, GET /api/v1/github/repos responds with 503
+   * `github_not_configured` — used by Remote-tab e2e specs that need to
+   * verify the "Connect GitHub" banner in the chip popover.
+   */
+  async mockGitHubSetReposUnavailable(unavailable: boolean): Promise<void> {
+    await this.request("PUT", "/api/v1/github/mock/repos-unavailable", { unavailable });
   }
 
   async mockGitHubGetStatus(): Promise<{

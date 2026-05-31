@@ -16,6 +16,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/terminal/models"
 	"github.com/kandev/kandev/internal/terminal/repository"
 )
@@ -56,19 +57,33 @@ var ErrTaskMismatch = errors.New("terminal does not belong to the supplied task"
 type PTYBackend interface {
 	Register(scopeID, terminalID string)
 	Stop(ctx context.Context, scopeID, terminalID string) error
+	StopScope(ctx context.Context, scopeID string) (int, error)
 	IsAlive(scopeID, terminalID string) bool
+}
+
+// taskEnvironmentReader is the minimal surface the terminal service needs
+// from the task layer to discover environments for cleanup.
+type taskEnvironmentReader interface {
+	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*taskmodels.TaskEnvironment, error)
 }
 
 // Service is the single entry point for all user-terminal RPCs.
 type Service struct {
-	repo *repository.Repository
-	pty  PTYBackend
-	log  *logger.Logger
+	repo        *repository.Repository
+	pty         PTYBackend
+	taskEnvRepo taskEnvironmentReader
+	log         *logger.Logger
 }
 
 // New constructs a Service.
 func New(repo *repository.Repository, pty PTYBackend, log *logger.Logger) *Service {
 	return &Service{repo: repo, pty: pty, log: log}
+}
+
+// SetTaskEnvironmentReader wires the task-environment repository. Called by
+// cmd/kandev/gateway.go after all repos are initialized.
+func (s *Service) SetTaskEnvironmentReader(r taskEnvironmentReader) {
+	s.taskEnvRepo = r
 }
 
 // IsManaged reports whether the terminal id corresponds to an ordinary
@@ -223,25 +238,83 @@ func (s *Service) Destroy(ctx context.Context, taskID, id string) error {
 }
 
 // CleanupTask is called by the task.deleted/archived event subscriber. It
-// stops every ordinary PTY for the task and deletes the rows. Stop
-// failures are logged but don't block deletion — the DB row is the source
+// stops every PTY registered under the task's terminal environments, including
+// unmanaged bottom-panel/script shells, then deletes ordinary terminal rows.
+// Stop failures are logged but don't block deletion — the DB row is the source
 // of truth for "the user expects this terminal gone".
 func (s *Service) CleanupTask(ctx context.Context, taskID string) (int, error) {
 	rows, err := s.repo.ListByTask(ctx, taskID, true)
 	if err != nil {
 		return 0, err
 	}
+	envIDs := uniqueTerminalEnvironmentIDs(rows)
+
+	// Also discover the environment from the task layer so shells that were
+	// registered for a bottom-panel or script terminal — but never had an
+	// ordinary terminal row — are still torn down.
+	envIDs = s.appendTaskEnvID(ctx, taskID, envIDs)
+
+	removedPTYEntries := 0
 	if s.pty != nil {
-		for _, r := range rows {
-			if stopErr := s.pty.Stop(ctx, r.EnvironmentID, r.ID); stopErr != nil {
-				s.logWarn("pty stop on cleanup (best-effort)",
+		for _, envID := range envIDs {
+			removed, stopErr := s.pty.StopScope(ctx, envID)
+			removedPTYEntries += removed
+			if stopErr != nil {
+				s.logWarn("pty scope stop on cleanup (best-effort)",
 					zap.String("task_id", taskID),
-					zap.String("terminal_id", r.ID),
+					zap.String("environment_id", envID),
 					zap.Error(stopErr))
 			}
 		}
 	}
-	return s.repo.DeleteByTask(ctx, taskID)
+	deleted, err := s.repo.DeleteByTask(ctx, taskID)
+	if err == nil {
+		s.logInfo("terminal cleanup completed",
+			zap.String("task_id", taskID),
+			zap.Int("terminal_rows", len(rows)),
+			zap.Int("environment_scopes", len(envIDs)),
+			zap.Int("pty_entries_removed", removedPTYEntries),
+			zap.Int("deleted_rows", deleted))
+	}
+	return deleted, err
+}
+
+func (s *Service) appendTaskEnvID(ctx context.Context, taskID string, envIDs []string) []string {
+	if s.taskEnvRepo == nil {
+		return envIDs
+	}
+	env, err := s.taskEnvRepo.GetTaskEnvironmentByTaskID(ctx, taskID)
+	if err != nil {
+		s.logWarn("failed to look up task environment for cleanup",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return envIDs
+	}
+	if env == nil || env.ID == "" {
+		return envIDs
+	}
+	for _, id := range envIDs {
+		if id == env.ID {
+			return envIDs
+		}
+	}
+	return append(envIDs, env.ID)
+}
+
+func uniqueTerminalEnvironmentIDs(rows []*models.Terminal) []string {
+	seen := make(map[string]struct{}, len(rows))
+	envIDs := []string{}
+	for _, row := range rows {
+		if row == nil || row.EnvironmentID == "" {
+			continue
+		}
+		if _, ok := seen[row.EnvironmentID]; ok {
+			continue
+		}
+		seen[row.EnvironmentID] = struct{}{}
+		envIDs = append(envIDs, row.EnvironmentID)
+	}
+	return envIDs
 }
 
 // logWarn is a nil-safe wrapper around s.log.Warn; service unit tests
@@ -251,4 +324,11 @@ func (s *Service) logWarn(msg string, fields ...zap.Field) {
 		return
 	}
 	s.log.Warn(msg, fields...)
+}
+
+func (s *Service) logInfo(msg string, fields ...zap.Field) {
+	if s.log == nil {
+		return
+	}
+	s.log.Info(msg, fields...)
 }

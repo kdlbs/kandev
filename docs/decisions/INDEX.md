@@ -16,4 +16,5 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 0008 | [DB upgrade safety - meta table, pre-migration backup, migration logging](0008-db-upgrade-safety.md) | accepted | backend | 2026-05-16 |
 | 0009 | [Fail-closed GC semantics for filesystem and container cleanup](0009-fail-closed-gc-semantics.md) | accepted | backend | 2026-05-16 |
 | 0010 | [Worktree copy-files — per-repo, idempotent, host-local](0010-worktree-copy-files.md) | accepted | backend, frontend | 2026-05-19 |
-| 0011 | [Service-only UI self-update](0011-service-only-self-update.md) | accepted | backend, frontend, cli | 2026-05-29 |
+| 0011 | [Transient provider errors (529 Overloaded) auto-retry with visible backoff](0011-transient-provider-error-retry.md) | accepted | backend, frontend | 2026-05-30 |
+| 0012 | [Service-only UI self-update](0012-service-only-self-update.md) | accepted | backend, frontend, cli | 2026-05-29 |

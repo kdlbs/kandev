@@ -1,6 +1,8 @@
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
+import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
+import { gitStatusWouldMutate } from "@/lib/state/slices/session-runtime/session-runtime-slice";
 import type {
   GitEventPayload,
   GitStatusUpdateEvent,
@@ -26,8 +28,41 @@ function resolveEnvKey(store: StoreApi<AppState>, sessionId: string): string {
   return store.getState().environmentIdBySessionId[sessionId] ?? sessionId;
 }
 
+function buildGitStatusEntry(event: GitStatusUpdateEvent): GitStatusEntry {
+  return {
+    branch: event.status.branch,
+    remote_branch: event.status.remote_branch,
+    modified: event.status.modified,
+    added: event.status.added,
+    deleted: event.status.deleted,
+    untracked: event.status.untracked,
+    renamed: event.status.renamed,
+    ahead: event.status.ahead,
+    behind: event.status.behind,
+    files: event.status.files,
+    timestamp: event.timestamp,
+    branch_additions: event.status.branch_additions,
+    branch_deletions: event.status.branch_deletions,
+    // Multi-repo workspaces tag each status with the repository it belongs to;
+    // setGitStatus routes the entry into byEnvironmentRepo accordingly.
+    repository_name: event.status.repository_name,
+  };
+}
+
+function statusUpdateChangesGitState(
+  store: StoreApi<AppState>,
+  sessionId: string,
+  gitStatus: GitStatusEntry,
+): boolean {
+  const state = store.getState();
+  const envKey = resolveEnvKey(store, sessionId);
+  return gitStatusWouldMutate(state.gitStatus, envKey, gitStatus);
+}
+
 const gitEventHandlers: GitEventHandlers = {
   status_update: (store, event) => {
+    const gitStatus = buildGitStatusEntry(event);
+    const changed = statusUpdateChangesGitState(store, event.session_id, gitStatus);
     if (IS_DEBUG) {
       debug("status_update", {
         sessionId: event.session_id,
@@ -42,28 +77,13 @@ const gitEventHandlers: GitEventHandlers = {
         behind: event.status.behind,
         envKey: resolveEnvKey(store, event.session_id),
         envMapped: event.session_id in store.getState().environmentIdBySessionId,
+        changed,
       });
     }
-    store.getState().setGitStatus(event.session_id, {
-      branch: event.status.branch,
-      remote_branch: event.status.remote_branch,
-      modified: event.status.modified,
-      added: event.status.added,
-      deleted: event.status.deleted,
-      untracked: event.status.untracked,
-      renamed: event.status.renamed,
-      ahead: event.status.ahead,
-      behind: event.status.behind,
-      files: event.status.files,
-      timestamp: event.timestamp,
-      branch_additions: event.status.branch_additions,
-      branch_deletions: event.status.branch_deletions,
-      // Multi-repo workspaces tag each status with the repository it belongs to;
-      // setGitStatus routes the entry into byEnvironmentRepo accordingly.
-      repository_name: event.status.repository_name,
-    });
-    // Invalidate cumulative diff cache when files change
-    invalidateCumulativeDiffCache(resolveEnvKey(store, event.session_id));
+    store.getState().setGitStatus(event.session_id, gitStatus);
+    if (changed) {
+      invalidateCumulativeDiffCache(resolveEnvKey(store, event.session_id));
+    }
   },
 
   commit_created: (store, event) => {

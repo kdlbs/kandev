@@ -3,12 +3,13 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -176,20 +177,18 @@ func (h *Handlers) synthesizeMovedTaskDTO(ctx context.Context, taskID, workflowI
 //   - (session, nil) — task has a primary session.
 //   - (nil, nil)     — task has no primary session yet (legitimate "empty"
 //     state — task was created but no agent has been launched). The
-//     repository signals this with a "no primary session found for task:"
-//     error string; we treat it as a not-found rather than a failure so the
-//     caller can fall through to the idle-move path instead of rejecting the
-//     request.
+//     repository signals this with the taskrepo.ErrNoPrimarySession sentinel;
+//     we treat it as a not-found rather than a failure so the caller can fall
+//     through to the idle-move path instead of rejecting the request.
 //   - (nil, err)     — real backend lookup failure (DB error, etc.). The
 //     caller should map this to an internal error rather than collapsing it
 //     into "no session" downstream.
 func (h *Handlers) lookupSession(ctx context.Context, taskID string) (*models.TaskSession, error) {
 	session, err := h.taskSvc.GetPrimarySession(ctx, taskID)
 	if err != nil {
-		// "no primary session found for task: <id>" is the repo's not-found
-		// signal — see scanTaskSession's noRowsErr formatting. Match by
-		// substring; there's no exported sentinel to errors.Is against.
-		if strings.Contains(err.Error(), "no primary session found for task") {
+		// Classify the repo's not-found signal via the typed sentinel rather
+		// than substring-matching the formatted message, which is brittle.
+		if errors.Is(err, taskrepo.ErrNoPrimarySession) {
 			return nil, nil
 		}
 		return nil, err

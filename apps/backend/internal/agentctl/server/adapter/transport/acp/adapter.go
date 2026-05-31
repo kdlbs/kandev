@@ -164,6 +164,18 @@ type Adapter struct {
 	mu     sync.RWMutex
 	closed bool
 
+	// promptGate is a 1-slot semaphore that serializes session/prompt calls so
+	// at most one is in flight against the bridge at a time. The ScheduleWakeup
+	// path injects a synthetic prompt via fireWakeup; without this gate it can
+	// race a user prompt, and the claude-agent-acp bridge then returns each
+	// prompt's stop_reason against the wrong turn — shifting chat turns one
+	// prompt behind. A queued synthetic prompt waits here and drains the wakeup
+	// turn once the in-flight prompt finishes. It is a channel rather than a
+	// sync.Mutex so the wait honours the caller's context (a wakeup whose
+	// timeout/lifetime context is cancelled while queued aborts instead of
+	// blocking on a stuck turn).
+	promptGate chan struct{}
+
 	// lifetimeCtx is cancelled by Close. Background work that may outlive
 	// the call site (e.g. the synthetic wakeup prompt goroutine) derives its
 	// context from this one so it aborts when the adapter shuts down rather
@@ -189,6 +201,7 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		pendingWakeups:  make(map[string]*pendingWakeup),
 		usageBySession:  make(map[string]*usageTracker),
 		attachMgr:       shared.NewAttachmentManager(cfg.WorkDir, l.Zap()),
+		promptGate:      make(chan struct{}, 1),
 		lifetimeCtx:     ctx,
 		lifetimeCancel:  cancel,
 	}

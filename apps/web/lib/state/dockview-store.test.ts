@@ -5,6 +5,8 @@ import {
   resolvePresetPinnedWidths,
   collectPinnedWidthUpdates,
 } from "./dockview-store";
+import { getGlobalSidebarWidth, setGlobalSidebarWidth } from "@/lib/local-storage";
+import { getPinnedTarget, setPinnedTarget, clearPinnedTarget } from "./layout-manager";
 
 type ActivePanelEvent = { id: string };
 type CapturedHandlers = {
@@ -122,7 +124,7 @@ describe("resolvePresetPinnedWidths", () => {
     expect(result.has("center")).toBe(false); // not pinned
   });
 
-  it("keeps live widths for columns in the target layout when not resetting", () => {
+  it("keeps right live widths for columns in the target layout when not resetting", () => {
     const live = new Map([
       ["sidebar", 519],
       ["right", 900],
@@ -130,8 +132,22 @@ describe("resolvePresetPinnedWidths", () => {
 
     const result = resolvePresetPinnedWidths(live, cols, 1600, false);
 
-    expect(result.get("sidebar")).toBe(519);
+    expect(result.has("sidebar")).toBe(false);
     expect(result.get("right")).toBe(900);
+  });
+
+  it("does not carry a live sidebar override on non-reset switches", () => {
+    setGlobalSidebarWidth(520);
+    const live = new Map([
+      ["sidebar", 350],
+      ["right", 900],
+    ]);
+
+    const result = resolvePresetPinnedWidths(live, cols, 1600, false);
+
+    expect(result.has("sidebar")).toBe(false);
+    expect(result.get("right")).toBe(900);
+    expect(getGlobalSidebarWidth()).toBe(520);
   });
 
   it("drops live overrides for columns absent from the target layout", () => {
@@ -148,7 +164,7 @@ describe("resolvePresetPinnedWidths", () => {
 
     const result = resolvePresetPinnedWidths(live, noRight, 1600, false);
 
-    expect(result.get("sidebar")).toBe(300);
+    expect(result.has("sidebar")).toBe(false);
     expect(result.has("right")).toBe(false);
   });
 
@@ -157,20 +173,48 @@ describe("resolvePresetPinnedWidths", () => {
     resolvePresetPinnedWidths(live, cols, 1600, false);
     expect(live.get("sidebar")).toBe(300);
   });
+
+  describe("Default layout reset clears the global sidebar width", () => {
+    beforeEach(() => {
+      window.localStorage.clear();
+      clearPinnedTarget("sidebar");
+    });
+
+    it("clears the global pref + runtime target and uses the ratio default", () => {
+      setGlobalSidebarWidth(520);
+      setPinnedTarget("sidebar", 520);
+
+      const result = resolvePresetPinnedWidths(new Map(), cols, 1600, true);
+
+      // pref cleared → ratio default (1600*0.25=400, clamped to sidebar cap 350)
+      expect(result.get("sidebar")).toBe(350);
+      expect(getGlobalSidebarWidth()).toBeNull();
+      expect(getPinnedTarget("sidebar")).toBeUndefined();
+    });
+
+    it("does NOT clear the pref/target on a non-reset (programmatic) switch", () => {
+      setGlobalSidebarWidth(520);
+      setPinnedTarget("sidebar", 520);
+
+      resolvePresetPinnedWidths(new Map([["sidebar", 480]]), cols, 1600, false);
+
+      expect(getGlobalSidebarWidth()).toBe(520);
+      expect(getPinnedTarget("sidebar")).toBe(520);
+    });
+  });
 });
 
 describe("collectPinnedWidthUpdates", () => {
   const size = (i: number) => [350, 560, 560][i]; // sidebar, center, last
 
-  it("tracks sidebar + right when both are visible", () => {
+  it("tracks right but not sidebar when both are visible", () => {
     const columns = [{ id: "sidebar" }, { id: "center" }, { id: "right" }];
 
     const updates = collectPinnedWidthUpdates(columns, size, {
-      sidebarVisible: true,
       rightPanelsVisible: true,
     });
 
-    expect(updates.get("sidebar")).toBe(350);
+    expect(updates.has("sidebar")).toBe(false);
     expect(updates.get("right")).toBe(560);
   });
 
@@ -182,19 +226,17 @@ describe("collectPinnedWidthUpdates", () => {
     const columns = [{ id: "sidebar" }, { id: "center" }, { id: "right" }];
 
     const updates = collectPinnedWidthUpdates(columns, size, {
-      sidebarVisible: true,
       rightPanelsVisible: false,
     });
 
     expect(updates.has("right")).toBe(false);
-    expect(updates.get("sidebar")).toBe(350);
+    expect(updates.has("sidebar")).toBe(false);
   });
 
   it("skips collapsed/transient widths <= 50px", () => {
     const columns = [{ id: "sidebar" }, { id: "right" }];
 
     const updates = collectPinnedWidthUpdates(columns, () => 40, {
-      sidebarVisible: true,
       rightPanelsVisible: true,
     });
 

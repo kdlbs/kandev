@@ -15,6 +15,7 @@ import {
   ContextMenuItem,
   ContextMenuTrigger,
 } from "@kandev/ui/context-menu";
+import { timeAgo } from "@/lib/utils/time";
 
 export type CommitItem = {
   commit_sha: string;
@@ -24,6 +25,7 @@ export type CommitItem = {
   pushed?: boolean;
   /** Multi-repo: name of the repo this commit was made in. Empty for single-repo. */
   repository_name?: string;
+  committed_at?: string;
 };
 
 /** Context menu for commit items */
@@ -102,7 +104,7 @@ function CommitRowActions({
   onResetToCommit?: (sha: string, repo?: string) => void;
 }) {
   return (
-    <span className="absolute right-2 top-0 bottom-0 hidden group-hover:flex items-center gap-1">
+    <span className="hidden group-hover:flex items-center gap-1">
       {isLatest && onAmendCommit && (
         <Tooltip>
           <TooltipTrigger asChild>
@@ -223,10 +225,17 @@ export function CommitRow({
           {commit.commit_sha.slice(0, 7)}
         </code>
         <span className="flex-1 min-w-0 truncate text-foreground">{commit.commit_message}</span>
-        <span className="shrink-0 text-[11px] flex items-center gap-1 mr-1 group-hover:opacity-0">
+        <span
+          className={`shrink-0 text-[11px] flex items-center gap-1 mr-1 ${commit.committed_at ? "group-hover:hidden" : ""}`}
+        >
           <span className="text-emerald-500">+{commit.insertions}</span>{" "}
           <span className="text-rose-500">-{commit.deletions}</span>
         </span>
+        {commit.committed_at && (
+          <span className="hidden group-hover:flex shrink-0 text-[11px] items-center gap-1 mr-1 text-muted-foreground">
+            {timeAgo(commit.committed_at)}
+          </span>
+        )}
         {showActions && (
           <CommitRowActions
             commit={commit}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
 type fakeStore struct {
@@ -79,6 +81,57 @@ type fakeCallback struct {
 func (c *fakeCallback) Execute(_ context.Context, _ ActionInput) (ActionResult, error) {
 	c.executed = true
 	return c.result, nil
+}
+
+// recordingCallback captures the ActionInput it was invoked with so tests can
+// assert the engine dispatched the right typed action to the callback.
+type recordingCallback struct {
+	calls []ActionInput
+}
+
+func (c *recordingCallback) Execute(_ context.Context, in ActionInput) (ActionResult, error) {
+	c.calls = append(c.calls, in)
+	return ActionResult{}, nil
+}
+
+// TestHandleTrigger_SetSessionMode_InvokesCallback exercises the full engine path
+// for the set_session_mode action (issue #1183): a step compiled from a
+// set_session_mode on_enter action dispatches to the registered callback with the
+// typed mode carried through. This is the engine-level end-to-end of the feature.
+func TestHandleTrigger_SetSessionMode_InvokesCallback(t *testing.T) {
+	compiled := CompileStep(&wfmodels.WorkflowStep{
+		ID: "step-1", WorkflowID: "wf1",
+		Events: wfmodels.StepEvents{
+			OnEnter: []wfmodels.OnEnterAction{
+				{Type: wfmodels.OnEnterSetSessionMode, Config: map[string]any{"mode": "acceptEdits"}},
+			},
+		},
+	})
+	store := &fakeStore{
+		state:     MachineState{TaskID: "t1", SessionID: "s1", WorkflowID: "wf1", CurrentStepID: "step-1"},
+		stepsByID: map[string]StepSpec{"step-1": compiled},
+		applied:   map[string]bool{},
+	}
+
+	cb := &recordingCallback{}
+	eng := New(store, MapRegistry{ActionSetSessionMode: cb})
+
+	if _, err := eng.HandleTrigger(context.Background(), HandleInput{
+		TaskID: "t1", SessionID: "s1", Trigger: TriggerOnEnter,
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(cb.calls) != 1 {
+		t.Fatalf("expected set_session_mode callback to fire once, got %d", len(cb.calls))
+	}
+	got := cb.calls[0].Action
+	if got.Kind != ActionSetSessionMode {
+		t.Fatalf("unexpected action kind dispatched: %s", got.Kind)
+	}
+	if got.SetSessionMode == nil || got.SetSessionMode.Mode != "acceptEdits" {
+		t.Fatalf("expected dispatched mode acceptEdits, got %+v", got.SetSessionMode)
+	}
 }
 
 func TestHandleTrigger_FirstTransitionWins(t *testing.T) {

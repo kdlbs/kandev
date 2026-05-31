@@ -39,6 +39,7 @@ func (r *InteractiveRunner) SetDirectOutput(processID string, writer DirectOutpu
 	r.logger.Info("direct output set for process",
 		zap.String("process_id", processID),
 		zap.String("session_id", sessionID),
+		zap.Int("os_pid", proc.osPID()),
 		zap.Bool("is_user_shell", proc.isUserShell))
 
 	return nil
@@ -86,7 +87,9 @@ func (r *InteractiveRunner) ClearDirectOutput(processID string) error {
 
 	r.logger.Info("direct output cleared for process",
 		zap.String("process_id", processID),
-		zap.String("session_id", sessionID))
+		zap.String("session_id", sessionID),
+		zap.Int("os_pid", proc.osPID()),
+		zap.Bool("is_user_shell", proc.isUserShell))
 
 	return nil
 }

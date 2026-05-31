@@ -36,11 +36,26 @@ func NewStore(timeout time.Duration) *Store {
 	}
 }
 
-// CreateRequest creates a new clarification request and returns its pending ID.
-// The request will be stored until a response is received or it times out.
-func (s *Store) CreateRequest(req *Request) string {
+// CreateRequest creates a new clarification request and returns its pending ID
+// plus a boolean indicating whether a new entry was created (true) or an
+// existing one was reused (false). If a pending entry for the same session
+// with identical normalised questions already exists, the existing pending ID
+// is returned and isNew is false.
+func (s *Store) CreateRequest(req *Request) (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// Normalise in-place so dedup keys are stable even when the caller
+	// hasn't assigned IDs yet.
+	_ = NormalizeAndValidateQuestions(req.Questions)
+
+	// Deduplicate: if a pending entry for the same session with identical
+	// normalised questions already exists, return the existing pending ID.
+	for _, existing := range s.pending {
+		if existing.Request.SessionID == req.SessionID && questionsEqual(existing.Request.Questions, req.Questions) {
+			return existing.Request.PendingID, false
+		}
+	}
 
 	if req.PendingID == "" {
 		req.PendingID = uuid.New().String()
@@ -48,13 +63,13 @@ func (s *Store) CreateRequest(req *Request) string {
 	req.CreatedAt = time.Now()
 
 	s.pending[req.PendingID] = &PendingClarification{
-		Request:    req,
-		ResponseCh: make(chan *Response, 1),
-		CancelCh:   make(chan struct{}),
-		CreatedAt:  time.Now(),
+		Request:   req,
+		done:      make(chan struct{}),
+		CancelCh:  make(chan struct{}),
+		CreatedAt: time.Now(),
 	}
 
-	return req.PendingID
+	return req.PendingID, true
 }
 
 // GetRequest returns a pending clarification request by ID.
@@ -85,12 +100,12 @@ func (s *Store) WaitForResponse(ctx context.Context, pendingID string) (*Respons
 	defer cancel()
 
 	select {
-	case resp := <-pending.ResponseCh:
+	case <-pending.done:
 		// Clean up after receiving response
 		s.mu.Lock()
 		delete(s.pending, pendingID)
 		s.mu.Unlock()
-		return resp, nil
+		return pending.resp, nil
 	case <-pending.CancelCh:
 		// Agent's turn completed — cancel the blocking wait
 		s.mu.Lock()
@@ -98,13 +113,15 @@ func (s *Store) WaitForResponse(ctx context.Context, pendingID string) (*Respons
 		s.mu.Unlock()
 		return nil, fmt.Errorf("clarification cancelled (agent moved on): %s", pendingID)
 	case <-timeoutCtx.Done():
-		// Clean up on timeout
+		if ctx.Err() != nil {
+			// Parent context cancelled — do not delete the shared entry
+			// because another waiter may still be blocked on it.
+			return nil, ctx.Err()
+		}
+		// Store-level timeout — safe to clean up.
 		s.mu.Lock()
 		delete(s.pending, pendingID)
 		s.mu.Unlock()
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
 		return nil, fmt.Errorf("clarification request timed out: %s", pendingID)
 	}
 }
@@ -120,16 +137,19 @@ func (s *Store) Respond(pendingID string, resp *Response) error {
 		return fmt.Errorf("%w: %s", ErrNotFound, pendingID)
 	}
 
-	resp.PendingID = pendingID
-	resp.RespondedAt = time.Now()
+	pending.mu.Lock()
+	defer pending.mu.Unlock()
 
-	// Non-blocking send (channel has buffer of 1)
-	select {
-	case pending.ResponseCh <- resp:
-		return nil
-	default:
+	if pending.resolved {
 		return fmt.Errorf("%w: %s", ErrAlreadyResponded, pendingID)
 	}
+
+	resp.PendingID = pendingID
+	resp.RespondedAt = time.Now()
+	pending.resp = resp
+	pending.resolved = true
+	close(pending.done)
+	return nil
 }
 
 // CancelRequest cancels a single pending clarification by id, unblocking any
@@ -178,4 +198,31 @@ func (s *Store) CancelSession(sessionID string) []string {
 		}
 	}
 	return cancelled
+}
+
+func questionsEqual(a, b []Question) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Prompt != b[i].Prompt {
+			return false
+		}
+		if !optionsEqual(a[i].Options, b[i].Options) {
+			return false
+		}
+	}
+	return true
+}
+
+func optionsEqual(a, b []Option) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].ID != b[i].ID || a[i].Label != b[i].Label || a[i].Description != b[i].Description {
+			return false
+		}
+	}
+	return true
 }

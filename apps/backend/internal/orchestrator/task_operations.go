@@ -13,6 +13,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/orchestrator/dto"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
@@ -380,6 +381,10 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 
 	executorID := session.ExecutorID
 
+	// Cache the raw prompt so a transient-provider-error (529) retry can
+	// re-drive this first turn — initial launches bypass PromptTask.
+	s.rememberTurnPrompt(sessionID, prompt, "", planMode, attachments)
+
 	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: effectiveProfileID, ExecutorID: executorID, Prompt: effectivePrompt, StartAgent: true, Attachments: attachments})
 	if err != nil {
 		return nil, err
@@ -605,6 +610,10 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	if s.isOfficeTask(ctx, taskID) {
 		mcpMode = executor.McpModeOffice
 	}
+
+	// Cache the raw prompt so a transient-provider-error (529) retry can
+	// re-drive this first turn — initial launches bypass PromptTask.
+	s.rememberTurnPrompt(sessionID, prompt, "", planMode, attachments)
 
 	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{
 		AgentProfileID: agentProfileID,
@@ -1999,6 +2008,11 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 
 	previousSessionState := session.State
 
+	// Cache the raw prompt so a transient-provider-error (529) retry can
+	// re-drive this turn after backoff without the caller's context. Stores
+	// the pre-injection prompt; PromptTask re-applies config/plan transforms.
+	s.rememberTurnPrompt(sessionID, prompt, model, planMode, attachments)
+
 	s.setSessionRunning(ctx, taskID, sessionID, session)
 	s.startTurnForSession(ctx, sessionID)
 
@@ -2076,7 +2090,11 @@ func (s *Service) handlePromptError(ctx context.Context, taskID, sessionID strin
 	// force-unblock a hung agent. That is not a "review this failure" condition —
 	// Service.CancelAgent reconciles DB state (WAITING_FOR_INPUT, cancel message,
 	// complete turn) already.
-	if !isTransientPromptError(err) && !errors.Is(err, lifecycle.ErrCancelEscalated) {
+	// A transient provider error (529 Overloaded) is owned by the async
+	// retry-with-backoff path (handleTransientFailure), which keeps the task
+	// in progress while it retries — so don't flap it to REVIEW here.
+	if !isTransientPromptError(err) && !errors.Is(err, lifecycle.ErrCancelEscalated) &&
+		!routingerr.IsTransientProviderError(err.Error()) {
 		_ = s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview)
 	}
 	s.completeTurnForSession(ctx, sessionID)
@@ -2179,6 +2197,28 @@ func (s *Service) RespondToPermission(ctx context.Context, sessionID, pendingID,
 	}
 
 	return nil
+}
+
+// DrainQueuedMessage dispatches one queued message for a session that is ready
+// for input. It is intentionally one-at-a-time: each successful prompt will
+// complete its own turn and then drain the next entry through handleAgentReady.
+func (s *Service) DrainQueuedMessage(ctx context.Context, sessionID string) (bool, error) {
+	if sessionID == "" {
+		return false, fmt.Errorf("session_id is required")
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return false, fmt.Errorf("failed to get session: %w", err)
+	}
+	if err := s.checkSessionPromptable(session.TaskID, sessionID, session.State); err != nil {
+		return false, err
+	}
+	return s.drainQueuedMessageForPromptableSession(ctx, sessionID), nil
+}
+
+func (s *Service) isCancelInFlight(sessionID string) bool {
+	_, ok := s.cancelInFlight.Load(sessionID)
+	return ok
 }
 
 // CancelAgent interrupts the current agent turn without terminating the process,

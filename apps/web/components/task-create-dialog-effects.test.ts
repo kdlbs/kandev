@@ -1,9 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import {
-  useAutoFillTaskNameFromPR,
-  useBranchAutoSelectEffect,
   useDefaultSelectionsEffect,
+  useGitHubUrlErrorEffect,
   useWorkflowAgentProfileEffect,
 } from "./task-create-dialog-effects";
 import type { DialogFormState, StoreSelections } from "@/components/task-create-dialog-types";
@@ -414,210 +413,175 @@ describe("useDefaultSelectionsEffect — auth-spec load race", () => {
     expect(fs.setAgentProfileId).not.toHaveBeenCalledWith(claude.id);
   });
 });
-
-type BranchFake = Pick<
-  DialogFormState,
-  "githubBranch" | "githubBranches" | "useGitHubUrl" | "setGitHubBranch" | "githubPrHeadBranch"
->;
-function makeBranchFs(overrides: Partial<BranchFake> = {}): DialogFormState {
+type UrlErrorFake = {
+  useRemote?: boolean;
+  remoteRepos?: Array<{ key: string; url: string; branch: string; source: "paste" | "picker" }>;
+  setGitHubUrlError?: ReturnType<typeof vi.fn>;
+};
+function makeUrlErrorFs(overrides: UrlErrorFake = {}): DialogFormState {
+  const remoteRepos = overrides.remoteRepos ?? [
+    { key: "remote-0", url: "", branch: "", source: "paste" as const },
+  ];
   return {
-    githubBranch: "",
-    githubBranches: [],
-    useGitHubUrl: true,
-    setGitHubBranch: vi.fn(),
-    githubPrHeadBranch: null,
-    ...overrides,
+    useRemote: overrides.useRemote ?? true,
+    setGitHubUrlError: overrides.setGitHubUrlError ?? vi.fn(),
+    remoteRepos,
   } as unknown as DialogFormState;
 }
 
-describe("useBranchAutoSelectEffect", () => {
-  it("selects the PR head branch when it is present in the base repo's branch list", () => {
-    const fs = makeBranchFs({
-      githubBranches: [
-        { name: "main", type: "remote" },
-        { name: "feature/x", type: "remote" },
-      ],
-      githubPrHeadBranch: "feature/x",
+describe("useGitHubUrlErrorEffect", () => {
+  it("surfaces 'Invalid GitHub URL' for an unparseable first-row URL", () => {
+    const setGitHubUrlError = vi.fn();
+    const fs = makeUrlErrorFs({
+      remoteRepos: [{ key: "remote-0", url: "not a url", branch: "", source: "paste" }],
+      setGitHubUrlError,
     });
-    renderHook(() => useBranchAutoSelectEffect(fs));
-    expect(fs.setGitHubBranch).toHaveBeenCalledWith("feature/x");
+    renderHook(() => useGitHubUrlErrorEffect(fs, true));
+    expect(setGitHubUrlError).toHaveBeenCalledWith(expect.stringContaining("Invalid GitHub URL"));
   });
 
-  it("still surfaces the PR head branch for fork PRs whose head is NOT in the base repo's branch list", () => {
-    // Regression guard for the fork-PR display bug: previously the effect
-    // fell through to "main" when the PR head was missing from the base
-    // repo's branches, visually contradicting the URL the user just pasted.
-    const fs = makeBranchFs({
-      githubBranches: [
-        { name: "main", type: "remote" },
-        { name: "develop", type: "remote" },
+  it("clears the error for a valid repo URL", () => {
+    const setGitHubUrlError = vi.fn();
+    const fs = makeUrlErrorFs({
+      remoteRepos: [
+        { key: "remote-0", url: "https://github.com/acme/site", branch: "", source: "paste" },
       ],
-      githubPrHeadBranch: "jira-hosted-path-auth",
+      setGitHubUrlError,
     });
-    renderHook(() => useBranchAutoSelectEffect(fs));
-    expect(fs.setGitHubBranch).toHaveBeenCalledWith("jira-hosted-path-auth");
+    renderHook(() => useGitHubUrlErrorEffect(fs, true));
+    expect(setGitHubUrlError).toHaveBeenLastCalledWith(null);
   });
 
-  it("falls back to main when there is no PR head branch", () => {
-    const fs = makeBranchFs({
-      githubBranches: [
-        { name: "feature/y", type: "remote" },
-        { name: "main", type: "remote" },
-      ],
+  it("clears the error for an empty URL (rows the user hasn't completed)", () => {
+    const setGitHubUrlError = vi.fn();
+    const fs = makeUrlErrorFs({
+      remoteRepos: [{ key: "remote-0", url: "", branch: "", source: "paste" }],
+      setGitHubUrlError,
     });
-    renderHook(() => useBranchAutoSelectEffect(fs));
-    expect(fs.setGitHubBranch).toHaveBeenCalledWith("main");
+    renderHook(() => useGitHubUrlErrorEffect(fs, true));
+    expect(setGitHubUrlError).toHaveBeenCalledWith(null);
   });
 
-  it("does nothing when useGitHubUrl is false", () => {
-    const fs = makeBranchFs({
-      useGitHubUrl: false,
-      githubBranches: [{ name: "main", type: "remote" }],
-      githubPrHeadBranch: "feature/x",
+  it("clears the error when useRemote is false (stale error from a prior Remote-mode pass)", () => {
+    // Regression: the early return on !useRemote used to skip clearing the
+    // error, so a banner produced while the user was in Remote mode would
+    // stick around after they switched back to workspace mode.
+    const setGitHubUrlError = vi.fn();
+    const fs = makeUrlErrorFs({
+      useRemote: false,
+      remoteRepos: [{ key: "remote-0", url: "not a url", branch: "", source: "paste" }],
+      setGitHubUrlError,
     });
-    renderHook(() => useBranchAutoSelectEffect(fs));
-    expect(fs.setGitHubBranch).not.toHaveBeenCalled();
-  });
-
-  it("does nothing once a branch has already been selected (manual override)", () => {
-    const fs = makeBranchFs({
-      githubBranch: "develop",
-      githubBranches: [
-        { name: "main", type: "remote" },
-        { name: "develop", type: "remote" },
-      ],
-      githubPrHeadBranch: "feature/x",
-    });
-    renderHook(() => useBranchAutoSelectEffect(fs));
-    expect(fs.setGitHubBranch).not.toHaveBeenCalled();
+    renderHook(() => useGitHubUrlErrorEffect(fs, true));
+    expect(setGitHubUrlError).toHaveBeenCalledWith(null);
   });
 });
 
-const PR_1_TITLE = "PR #1: first";
+const PROFILE_DOCKER = "profile-docker";
+const PROFILE_WORKTREE = "profile-worktree";
 
-type AutoFillFake = Pick<DialogFormState, "taskName" | "setTaskName" | "setHasTitle">;
-function makeAutoFillFs(overrides: Partial<AutoFillFake> = {}): DialogFormState {
+function dockerExecutor(): StoreSelections["executors"][number] {
   return {
-    taskName: "",
-    setTaskName: vi.fn(),
-    setHasTitle: vi.fn(),
+    id: "exec-docker",
+    type: "local_docker",
+    profiles: [{ id: PROFILE_DOCKER, executor_type: "local_docker" }],
+  } as unknown as StoreSelections["executors"][number];
+}
+function worktreeExecutor(): StoreSelections["executors"][number] {
+  return {
+    id: "exec-worktree",
+    type: "worktree",
+    profiles: [{ id: PROFILE_WORKTREE, executor_type: "worktree" }],
+  } as unknown as StoreSelections["executors"][number];
+}
+
+type MultiRepoGuardFake = Pick<
+  DialogFormState,
+  | "agentProfileId"
+  | "workflowAgentProfileId"
+  | "selectedWorkflowId"
+  | "executorId"
+  | "executorProfileId"
+  | "setAgentProfileId"
+  | "setExecutorId"
+  | "setExecutorProfileId"
+  | "noRepository"
+  | "repositories"
+  | "remoteRepos"
+  | "useRemote"
+>;
+function makeMultiRepoFs(overrides: Partial<MultiRepoGuardFake> = {}): DialogFormState {
+  return {
+    agentProfileId: "",
+    workflowAgentProfileId: "",
+    selectedWorkflowId: null,
+    executorId: "exec-docker",
+    executorProfileId: PROFILE_DOCKER,
+    setAgentProfileId: vi.fn(),
+    setExecutorId: vi.fn(),
+    setExecutorProfileId: vi.fn(),
+    noRepository: false,
+    repositories: [],
+    remoteRepos: [],
+    useRemote: false,
     ...overrides,
   } as unknown as DialogFormState;
 }
 
-describe("useAutoFillTaskNameFromPR", () => {
-  it("fills the task name with 'PR #N: <title>' when the title is empty", () => {
-    const fs = makeAutoFillFs({ taskName: "" });
-    const { result } = renderHook(() => useAutoFillTaskNameFromPR(fs));
-    result.current(971, "feat/omp-acp-agent");
-    expect(fs.setTaskName).toHaveBeenCalledWith("PR #971: feat/omp-acp-agent");
-    expect(fs.setHasTitle).toHaveBeenCalledWith(true);
+describe("useDefaultSelectionsEffect — multi-repo guard counts Remote rows", () => {
+  it("swaps a non-worktree profile to worktree when 2+ Remote URL rows are set", async () => {
+    // Regression: the multi-repo guard used to count only fs.repositories
+    // (workspace/local rows), so 2 Remote rows + 0 workspace rows slipped
+    // past the guard. The submit gate disabled incompatible profiles at the
+    // option level, but a profile already pre-selected stayed active and the
+    // backend rejected submit.
+    const fs = makeMultiRepoFs({
+      executorProfileId: PROFILE_DOCKER,
+      useRemote: true,
+      remoteRepos: [
+        { key: "remote-0", url: "github.com/acme/a", branch: "", source: "paste" },
+        { key: "remote-1", url: "github.com/acme/b", branch: "", source: "paste" },
+      ] as DialogFormState["remoteRepos"],
+    });
+    const sel = makeSel({ executors: [dockerExecutor(), worktreeExecutor()] });
+
+    renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
+
+    await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(PROFILE_WORKTREE));
   });
 
-  it("fills when the title contains only whitespace", () => {
-    // Regression guard: hasTitle treats whitespace-only as empty, so the
-    // auto-fill check must too — otherwise pasting a PR URL after typing a
-    // stray space would silently keep the spaces.
-    const fs = makeAutoFillFs({ taskName: "   " });
-    const { result } = renderHook(() => useAutoFillTaskNameFromPR(fs));
-    result.current(7, "fix");
-    expect(fs.setTaskName).toHaveBeenCalledWith("PR #7: fix");
+  it("leaves a worktree profile alone when 2+ Remote rows are set (already compatible)", async () => {
+    const fs = makeMultiRepoFs({
+      executorProfileId: PROFILE_WORKTREE,
+      useRemote: true,
+      remoteRepos: [
+        { key: "remote-0", url: "github.com/acme/a", branch: "", source: "paste" },
+        { key: "remote-1", url: "github.com/acme/b", branch: "", source: "paste" },
+      ] as DialogFormState["remoteRepos"],
+    });
+    const sel = makeSel({ executors: [worktreeExecutor()] });
+
+    renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    // No swap needed — guard sees a worktree profile already.
+    expect(fs.setExecutorProfileId).not.toHaveBeenCalled();
   });
 
-  it("does NOT overwrite a title the user typed themselves", () => {
-    const fs = makeAutoFillFs({ taskName: "my custom title" });
-    const { result } = renderHook(() => useAutoFillTaskNameFromPR(fs));
-    result.current(42, "something");
-    expect(fs.setTaskName).not.toHaveBeenCalled();
-    expect(fs.setHasTitle).not.toHaveBeenCalled();
-  });
-
-  it("replaces a previously auto-filled title when a different PR URL is pasted", () => {
-    // Re-paste flow: the user pastes PR #1 (autofills "PR #1: foo"), then
-    // realizes wrong URL and pastes PR #2. Without the lastAutoFilled-ref
-    // tracking, the second paste would see a non-empty title and bail.
-    let currentName = "";
-    const fs = makeAutoFillFs({
-      taskName: currentName,
-      setTaskName: vi.fn((v: string) => {
-        currentName = v;
-      }),
+  it("does not swap when only a single Remote row is filled (single-repo Remote tasks keep all executors)", async () => {
+    const fs = makeMultiRepoFs({
+      executorProfileId: PROFILE_DOCKER,
+      useRemote: true,
+      remoteRepos: [
+        { key: "remote-0", url: "github.com/acme/a", branch: "", source: "paste" },
+        { key: "remote-1", url: "", branch: "", source: "paste" },
+      ] as DialogFormState["remoteRepos"],
     });
-    const { result, rerender } = renderHook(() => {
-      // Re-read taskName from the closure on every render so the ref-mirror
-      // effect sees the latest value.
-      fs.taskName = currentName;
-      return useAutoFillTaskNameFromPR(fs);
-    });
-    result.current(1, "first");
-    expect(currentName).toBe(PR_1_TITLE);
+    const sel = makeSel({ executors: [dockerExecutor(), worktreeExecutor()] });
 
-    rerender();
-    result.current(2, "second");
-    expect(currentName).toBe("PR #2: second");
-    expect(fs.setTaskName).toHaveBeenCalledTimes(2);
-  });
+    renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
 
-  it("does NOT replace once the user edits the auto-filled title", () => {
-    let currentName = "";
-    const fs = makeAutoFillFs({
-      taskName: currentName,
-      setTaskName: vi.fn((v: string) => {
-        currentName = v;
-      }),
-    });
-    const { result, rerender } = renderHook(() => {
-      fs.taskName = currentName;
-      return useAutoFillTaskNameFromPR(fs);
-    });
-    result.current(1, "first");
-    expect(currentName).toBe(PR_1_TITLE);
-
-    // User edits the title manually.
-    currentName = "my edits";
-    rerender();
-
-    result.current(2, "second");
-    // Setter is still only called once (the initial auto-fill); the manual
-    // edit is preserved.
-    expect(fs.setTaskName).toHaveBeenCalledTimes(1);
-    expect(currentName).toBe("my edits");
-  });
-
-  it("clears the sentinel when taskName resets to empty, preventing a re-typed auto-fill from being overwritten", () => {
-    // Regression guard for the mounted-across-open/close edge case:
-    // after a dialog reset clears taskName, the user manually types the same
-    // text that was previously auto-filled. A second PR paste must NOT
-    // overwrite it because the sentinel was cleared on the empty transition.
-    let currentName = "";
-    const fs = makeAutoFillFs({
-      taskName: currentName,
-      setTaskName: vi.fn((v: string) => {
-        currentName = v;
-      }),
-    });
-    const { result, rerender } = renderHook(() => {
-      fs.taskName = currentName;
-      return useAutoFillTaskNameFromPR(fs);
-    });
-    result.current(1, "first");
-    expect(currentName).toBe(PR_1_TITLE);
-
-    // Simulate React flushing the setTaskName state update back into the hook
-    // so the ref-mirror effect sees taskName = PR_1_TITLE.
-    rerender();
-
-    // Dialog resets taskName to empty (sentinel should clear).
-    currentName = "";
-    rerender();
-
-    // User re-types the exact previously auto-filled value.
-    currentName = PR_1_TITLE;
-    rerender();
-
-    // A second paste with a different PR should NOT overwrite.
-    result.current(2, "second");
-    expect(fs.setTaskName).toHaveBeenCalledTimes(1); // only the first auto-fill
-    expect(currentName).toBe(PR_1_TITLE);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(fs.setExecutorProfileId).not.toHaveBeenCalled();
   });
 });

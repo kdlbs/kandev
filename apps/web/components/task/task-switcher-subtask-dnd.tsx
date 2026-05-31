@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import {
   DndContext,
   PointerSensor,
@@ -21,7 +21,18 @@ import type { TaskSwitcherItem } from "./task-switcher";
 
 export const DRAG_ACTIVATION_DISTANCE = 8;
 
-function SortableSubtaskRow({ taskId, children }: { taskId: string; children: React.ReactNode }) {
+/** Sortable implementation — isolated so `useSortable` is never called conditionally. */
+function DraggableSortableTaskNode({
+  taskId,
+  depth,
+  handle,
+  nested,
+}: {
+  taskId: string;
+  depth: number;
+  handle: React.ReactNode;
+  nested?: React.ReactNode;
+}) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: taskId,
   });
@@ -39,101 +50,114 @@ function SortableSubtaskRow({ taskId, children }: { taskId: string; children: Re
     <div
       ref={setNodeRef}
       style={style}
-      {...sortableAttributes}
-      {...listeners}
-      tabIndex={undefined}
-      data-testid="sortable-subtask-row"
+      data-testid="sortable-task-block"
       data-task-id={taskId}
-      className={cn("cursor-grab active:cursor-grabbing", isDragging && "z-50")}
+      data-depth={depth}
+      className={cn(isDragging && "z-50")}
     >
-      {children}
+      <div
+        {...sortableAttributes}
+        {...listeners}
+        // Strip dnd-kit's default tabIndex={0}: only PointerSensor is wired,
+        // so keyboard tab stops here lead nowhere. If KeyboardSensor is
+        // added later, drop this override.
+        tabIndex={undefined}
+        data-testid="sortable-task-handle"
+        className="cursor-grab active:cursor-grabbing"
+      >
+        {handle}
+      </div>
+      {nested}
     </div>
   );
 }
 
-function useSubtaskDnd(
-  parentTaskId: string,
-  subtasks: TaskSwitcherItem[],
-  onReorderSubtasks: (parentTaskId: string, orderedSubtaskIds: string[]) => void,
-) {
+/**
+ * A single sortable node in the (arbitrarily deep) task tree.
+ *
+ * `setNodeRef` and the CSS transform live on the outer wrapper so the row and
+ * its nested subtree move together while dragging. Drag listeners attach ONLY
+ * to the `handle` (the task row) — `nested` (the child subtree) renders as a
+ * sibling outside the handle so a pointer-down on a descendant row drags that
+ * descendant, not this node. This is the same handle/children split the root
+ * level has always used; generalizing it is what makes nesting safe at depth.
+ *
+ * When `isDraggable` is false, renders a plain wrapper with no DnD wiring.
+ */
+export function SortableTaskNode({
+  taskId,
+  depth,
+  handle,
+  nested,
+  isDraggable = true,
+}: {
+  taskId: string;
+  depth: number;
+  handle: React.ReactNode;
+  nested?: React.ReactNode;
+  isDraggable?: boolean;
+}) {
+  if (!isDraggable) {
+    return (
+      <div data-testid="sortable-task-block" data-task-id={taskId} data-depth={depth}>
+        <div data-testid="sortable-task-handle">{handle}</div>
+        {nested}
+      </div>
+    );
+  }
+
+  return (
+    <DraggableSortableTaskNode taskId={taskId} depth={depth} handle={handle} nested={nested} />
+  );
+}
+
+/**
+ * DnD wiring for one level of sibling tasks. Reordering is scoped to the
+ * siblings sharing a parent (cross-parent drag is intentionally unsupported).
+ */
+function useLevelDnd(tasks: TaskSwitcherItem[], onReorder?: (orderedTaskIds: string[]) => void) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: DRAG_ACTIVATION_DISTANCE } }),
   );
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
+      if (!onReorder) return;
       const { active, over } = event;
       if (!over || active.id === over.id) return;
-      const ids = subtasks.map((t) => t.id);
+      const ids = tasks.map((t) => t.id);
       const oldIndex = ids.indexOf(String(active.id));
       const newIndex = ids.indexOf(String(over.id));
       if (oldIndex < 0 || newIndex < 0) return;
-      onReorderSubtasks(parentTaskId, arrayMove(ids, oldIndex, newIndex));
+      onReorder(arrayMove(ids, oldIndex, newIndex));
     },
-    [parentTaskId, subtasks, onReorderSubtasks],
+    [tasks, onReorder],
   );
-  const sortableIds = useMemo(() => subtasks.map((t) => t.id), [subtasks]);
+  const sortableIds = useMemo(() => tasks.map((t) => t.id), [tasks]);
   return { sensors, handleDragEnd, sortableIds };
 }
 
 /**
- * Per-parent sortable list. When `onReorderSubtasks` is omitted the DnD
- * scaffolding (and the misleading grab cursor) is skipped — callers that
- * don't reorder get a plain list with no wasted setup.
+ * Renders one level of sibling task nodes. When `onReorder` is omitted the DnD
+ * scaffolding (and the misleading grab cursor) is skipped, so non-reorderable
+ * callers get a plain list with no wasted setup.
  */
-export function SortableSubtaskList({
-  parentTaskId,
-  subtasks,
-  onReorderSubtasks,
-  renderRow,
+export function SortableTaskLevel({
+  tasks,
+  onReorder,
+  renderNode,
 }: {
-  parentTaskId: string;
-  subtasks: TaskSwitcherItem[];
-  onReorderSubtasks?: (parentTaskId: string, orderedSubtaskIds: string[]) => void;
-  renderRow: (sub: TaskSwitcherItem) => React.ReactNode;
+  tasks: TaskSwitcherItem[];
+  onReorder?: (orderedTaskIds: string[]) => void;
+  renderNode: (task: TaskSwitcherItem, isDraggable: boolean) => React.ReactNode;
 }) {
-  if (!onReorderSubtasks) {
-    return (
-      <>
-        {subtasks.map((sub) => (
-          <Fragment key={sub.id}>{renderRow(sub)}</Fragment>
-        ))}
-      </>
-    );
-  }
-  return (
-    <SortableSubtaskListInner
-      parentTaskId={parentTaskId}
-      subtasks={subtasks}
-      onReorderSubtasks={onReorderSubtasks}
-      renderRow={renderRow}
-    />
-  );
-}
-
-function SortableSubtaskListInner({
-  parentTaskId,
-  subtasks,
-  onReorderSubtasks,
-  renderRow,
-}: {
-  parentTaskId: string;
-  subtasks: TaskSwitcherItem[];
-  onReorderSubtasks: (parentTaskId: string, orderedSubtaskIds: string[]) => void;
-  renderRow: (sub: TaskSwitcherItem) => React.ReactNode;
-}) {
-  const { sensors, handleDragEnd, sortableIds } = useSubtaskDnd(
-    parentTaskId,
-    subtasks,
-    onReorderSubtasks,
-  );
+  const { sensors, handleDragEnd, sortableIds } = useLevelDnd(tasks, onReorder);
+  const isDraggable = !!onReorder;
+  const body = tasks.map((task) => renderNode(task, isDraggable));
+  if (!onReorder) return <>{body}</>;
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
       <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
-        {subtasks.map((sub) => (
-          <SortableSubtaskRow key={sub.id} taskId={sub.id}>
-            {renderRow(sub)}
-          </SortableSubtaskRow>
-        ))}
+        {body}
       </SortableContext>
     </DndContext>
   );

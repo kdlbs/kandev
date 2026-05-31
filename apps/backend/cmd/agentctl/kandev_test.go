@@ -241,6 +241,80 @@ func TestTaskCreate_NoExecutionPolicyOrBlockedBy_OmitsFields(t *testing.T) {
 	if _, exists := body["blocked_by"]; exists {
 		t.Error("blocked_by should not be present when flag is not set")
 	}
+	// Workspace-policy fields are office-only and must stay absent unless the
+	// corresponding flag is supplied — the backend resolves sensible defaults.
+	for _, k := range []string{"workspace_mode", "workspace_group_id", "default_child_workspace", "default_child_ordering"} {
+		if _, exists := body[k]; exists {
+			t.Errorf("%s should not be present when flag is not set", k)
+		}
+	}
+}
+
+// TestTaskCreate_WorkspacePolicyFlags pins the office-only workspace-policy
+// flags that moved off the kanban create_task_kandev MCP tool and onto this
+// CLI. A coordinator agent in office mode uses these to make sibling subtasks
+// run sequentially (dependency edges) or in parallel. The backend's
+// POST /api/v1/tasks handler resolves the policy and attaches blocker edges.
+func TestTaskCreate_WorkspacePolicyFlags(t *testing.T) {
+	srv, captured := setupMockServer(t, 201, `{"task":{"id":"new-5"}}`)
+	setEnvVars(t, srv)
+
+	code := runKandevCLI([]string{
+		"task", "create",
+		"--title", "Phase task",
+		"--parent", "parent-1",
+		"--workspace-mode", "shared_group",
+		"--workspace-group-id", "grp-1",
+		"--default-child-workspace", "inherit_parent",
+		"--default-child-ordering", "sequential",
+	})
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+
+	var body map[string]interface{}
+	if err := json.Unmarshal([]byte(captured.Body), &body); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	if body["workspace_mode"] != "shared_group" {
+		t.Errorf("expected workspace_mode=shared_group, got %v", body["workspace_mode"])
+	}
+	if body["workspace_group_id"] != "grp-1" {
+		t.Errorf("expected workspace_group_id=grp-1, got %v", body["workspace_group_id"])
+	}
+	if body["default_child_workspace"] != "inherit_parent" {
+		t.Errorf("expected default_child_workspace=inherit_parent, got %v", body["default_child_workspace"])
+	}
+	if body["default_child_ordering"] != "sequential" {
+		t.Errorf("expected default_child_ordering=sequential, got %v", body["default_child_ordering"])
+	}
+}
+
+// TestTaskCreate_SharedGroupRequiresGroupID pins the CLI-side validation
+// that guards against missing or whitespace-only --workspace-group-id when
+// the caller asks for shared_group mode.
+func TestTaskCreate_SharedGroupRequiresGroupID(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "missing",
+			args: []string{"task", "create", "--title", "Bad task", "--workspace-mode", "shared_group"},
+		},
+		{
+			name: "whitespace only",
+			args: []string{"task", "create", "--title", "Bad task", "--workspace-mode", "shared_group", "--workspace-group-id", "   "},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			code := runKandevCLI(tc.args)
+			if code == 0 {
+				t.Fatal("expected non-zero exit when --workspace-group-id is invalid for shared_group")
+			}
+		})
+	}
 }
 
 // --- Comment Tests ---

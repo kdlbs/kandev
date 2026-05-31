@@ -51,4 +51,44 @@ test.describe("Kanban topbar utilities", () => {
 
     await expect(testPage.getByRole("button", { name: "Setup Issues" })).toBeVisible();
   });
+
+  test("inotify health issue appears in the kanban health dialog", async ({
+    testPage,
+    backend,
+  }) => {
+    await testPage.setViewportSize({ width: 1280, height: 800 });
+
+    await testPage.route(`${backend.baseUrl}/api/v1/system/health`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          healthy: false,
+          issues: [
+            {
+              id: "os_inotify_instances_high",
+              category: "system_resources",
+              title: "Inotify instances limit nearly exhausted",
+              message:
+                "123/128 instances in use (96%). Exhaustion causes new terminals, dev servers, and agent CLIs to fail or hang. To increase: sudo sysctl -w fs.inotify.max_user_instances=1024",
+              severity: "error",
+              fix_url: "/settings/system/status",
+              fix_label: "View system status",
+            },
+          ],
+          checks: [],
+        }),
+      }),
+    );
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    const issueButton = testPage.getByRole("button", { name: "Setup Issues" });
+    await expect(issueButton).toBeVisible();
+    await issueButton.click();
+
+    await expect(testPage.getByText("Inotify instances limit nearly exhausted")).toBeVisible();
+    await expect(testPage.getByRole("button", { name: "View system status" })).toBeVisible();
+  });
 });

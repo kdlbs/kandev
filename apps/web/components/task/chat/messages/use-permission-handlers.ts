@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { Message } from "@/lib/types/http";
 import type { PermissionActionType, PermissionOptionKind } from "@/lib/types/permission";
@@ -85,12 +85,28 @@ export function usePermissionResponseHandlers({
     [permissionMessage, permissionMetadata],
   );
 
+  // "Approve" is the one-shot allow. Prefer an explicit allow_once option and
+  // only fall back to allow_always when the agent offers nothing else, so the
+  // dedicated "Always allow" button (handleAllowAlways) stays distinct.
   const handleApprove = useCallback(() => {
-    const allowOption = permissionMetadata?.options.find(
-      (opt) => opt.kind === "allow_once" || opt.kind === "allow_always",
-    );
+    const options = permissionMetadata?.options ?? [];
+    const allowOption =
+      options.find((opt) => opt.kind === "allow_once") ??
+      options.find((opt) => opt.kind === "allow_always");
     if (allowOption) handleRespond(allowOption.option_id);
   }, [permissionMetadata, handleRespond]);
+
+  // "Always allow" maps to the agent's allow_always option, telling the agent
+  // to persist the decision so the same action is not re-prompted. Only some
+  // agents offer it (Cursor does); hasAllowAlways gates the button.
+  const allowAlwaysOption = useMemo(
+    () => permissionMetadata?.options.find((opt) => opt.kind === "allow_always"),
+    [permissionMetadata],
+  );
+  const hasAllowAlways = !!allowAlwaysOption;
+  const handleAllowAlways = useCallback(() => {
+    if (allowAlwaysOption) handleRespond(allowAlwaysOption.option_id);
+  }, [allowAlwaysOption, handleRespond]);
 
   const handleReject = useCallback(() => {
     const rejectOption = permissionMetadata?.options.find(
@@ -106,5 +122,5 @@ export function usePermissionResponseHandlers({
     }
   }, [permissionMetadata, handleRespond]);
 
-  return { isResponding, handleApprove, handleReject };
+  return { isResponding, handleApprove, handleAllowAlways, hasAllowAlways, handleReject };
 }

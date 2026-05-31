@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -191,5 +192,84 @@ func TestCreateChildTask_RequiresTitle(t *testing.T) {
 	_, err := svc.CreateChildTask(ctx, parent, ChildTaskSpec{})
 	if err == nil || !strings.Contains(err.Error(), "title") {
 		t.Fatalf("expected title error, got: %v", err)
+	}
+}
+
+func TestCreateTask_SubtaskOfSubtask_Kanban_Rejected(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"})
+
+	root, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		WorkflowID:  "wf-1",
+		Title:       "Root",
+	})
+	if err != nil {
+		t.Fatalf("create root: %v", err)
+	}
+
+	child, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		WorkflowID:  "wf-1",
+		ParentID:    root.ID,
+		Title:       "Child",
+	})
+	if err != nil {
+		t.Fatalf("create child: %v", err)
+	}
+
+	_, err = svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		WorkflowID:  "wf-1",
+		ParentID:    child.ID,
+		Title:       "Grandchild",
+	})
+	if err == nil || !errors.Is(err, ErrSubtaskDepthExceeded) {
+		t.Fatalf("expected ErrSubtaskDepthExceeded, got: %v", err)
+	}
+}
+
+func TestCreateTask_SubtaskOfSubtask_Office_Allowed(t *testing.T) {
+	svc, repo := setupOfficeTest(t)
+	ctx := context.Background()
+
+	root, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		Title:       "Root office",
+		ProjectID:   "proj-1",
+	})
+	if err != nil {
+		t.Fatalf("create root: %v", err)
+	}
+
+	child, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		ParentID:    root.ID,
+		Title:       "Child office",
+		ProjectID:   "proj-1",
+	})
+	if err != nil {
+		t.Fatalf("create child: %v", err)
+	}
+
+	grandchild, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		ParentID:    child.ID,
+		Title:       "Grandchild office",
+		ProjectID:   "proj-1",
+	})
+	if err != nil {
+		t.Fatalf("create grandchild: %v", err)
+	}
+
+	got, err := repo.GetTask(ctx, grandchild.ID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if got.ParentID != child.ID {
+		t.Errorf("parent_id = %q, want %q", got.ParentID, child.ID)
 	}
 }

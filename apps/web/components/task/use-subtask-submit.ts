@@ -66,11 +66,9 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
         workspaceMode === "inherit_parent"
           ? undefined
           : buildRepositoriesPayload({
-              useGitHubUrl: fs.useGitHubUrl,
-              githubUrl: fs.githubUrl,
-              githubBranch: fs.githubBranch,
-              githubPrHeadBranch: fs.githubPrHeadBranch,
-              githubPrBaseBranch: fs.githubPrBaseBranch,
+              useRemote: fs.useRemote,
+              remoteRepos: fs.remoteRepos,
+              prInfoByUrl: fs.prInfoByUrl,
               repositories: fs.repositories,
               discoveredRepositories: fs.discoveredRepositories,
               workspaceRepositories: availableRepositories,

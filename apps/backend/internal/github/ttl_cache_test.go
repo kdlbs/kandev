@@ -149,6 +149,105 @@ func TestTTLCache_Singleflight(t *testing.T) {
 	}
 }
 
+// Regression: a clear() that races with an in-flight singleflight fetch must
+// invalidate the late write so the cache stays empty afterward. Otherwise a
+// token swap (the user-facing trigger for clear()) could surface the
+// previous user's repos for up to one TTL window — the cleared entries get
+// re-populated by the still-pending fetch from the old generation.
+func TestTTLCache_ClearInvalidatesInFlightFetch(t *testing.T) {
+	cache := newTTLCache()
+	fetchStarted := make(chan struct{})
+	releaseFetch := make(chan struct{})
+	fetchDone := make(chan struct{})
+
+	go func() {
+		_, _ = cache.doOrFetch("k", func() (any, error) {
+			close(fetchStarted)
+			<-releaseFetch
+			return "stale", nil
+		})
+		close(fetchDone)
+	}()
+
+	<-fetchStarted
+	cache.clear()
+	close(releaseFetch)
+	<-fetchDone
+
+	if v, ok := cache.get("k"); ok {
+		t.Fatalf("expected cache to remain empty after clear(); got %v", v)
+	}
+}
+
+// Regression: a caller arriving after clear() must not join a still-in-flight
+// fetch from the previous generation via singleflight's shared result. Before
+// keying singleflight by generation, B's doOrFetch joined A's in-flight call
+// and received A's stale value — the post-clear cache stayed empty, but the
+// caller still saw old data. After the fix, B mints its own fetch under the
+// new generation.
+func TestTTLCache_ClearMakesPostClearCallersMintNewFetch(t *testing.T) {
+	cache := newTTLCache()
+	var calls atomic.Int32
+	fetchAStarted := make(chan struct{})
+	releaseA := make(chan struct{})
+
+	// Caller A: starts a fetch, blocks on releaseA, eventually returns "A".
+	resultA := make(chan any, 1)
+	go func() {
+		v, _ := cache.doOrFetch("k", func() (any, error) {
+			calls.Add(1)
+			close(fetchAStarted)
+			<-releaseA
+			return "A", nil
+		})
+		resultA <- v
+	}()
+
+	<-fetchAStarted
+	// Clear races between A's fetch starting and finishing. After this, any
+	// new caller must NOT receive A's value via singleflight.
+	cache.clear()
+
+	// Caller B arrives after clear() while A is still in flight. B's fetch
+	// returns "B" immediately (it does not block on releaseA), so under the
+	// generation-keyed singleflight B must mint its own fetch and resolve right
+	// away rather than joining A's still-blocked call.
+	resultB := make(chan any, 1)
+	go func() {
+		v, _ := cache.doOrFetch("k", func() (any, error) {
+			calls.Add(1)
+			return "B", nil
+		})
+		resultB <- v
+	}()
+
+	// Block on B's result with a timeout guard instead of a sleep busy-loop. If
+	// generation-keyed singleflight regressed (B joining A's blocked fetch), B
+	// would never resolve and the timeout fires deterministically.
+	select {
+	case v := <-resultB:
+		if v != "B" {
+			t.Fatalf("caller B got %v, expected 'B' (joined A's stale fetch?)", v)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("caller B never completed — generation-keyed singleflight may still be blocking")
+	}
+
+	// Now let A finish; its write must be dropped via the generation guard.
+	close(releaseA)
+	<-resultA
+	if v, ok := cache.get("k"); ok {
+		// We expect either empty (A's setIfCurrentGeneration was a no-op AND B
+		// fetched but landed under the new generation) or "B" — never "A".
+		if v == "A" {
+			t.Fatalf("stale A result leaked into cache: %v", v)
+		}
+	}
+	if got := calls.Load(); got < 2 {
+		t.Fatalf("expected at least 2 fetches (A then B); got %d", got)
+	}
+}
+
 func TestTTLCache_MaxSizeEviction(t *testing.T) {
 	cache := newTTLCache()
 	cache.maxSize = 3

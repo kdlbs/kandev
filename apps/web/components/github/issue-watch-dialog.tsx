@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@kandev/ui/textarea";
 import { IconInfoCircle } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
+import { CliModeIcon } from "@/components/cli-mode-icon";
 import { useAppStore } from "@/components/state-provider";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useWorkflows } from "@/hooks/use-workflows";
@@ -30,6 +31,7 @@ import {
   DEFAULT_ISSUE_WATCH_PROMPT,
 } from "@/components/github/issue-watch-placeholders";
 import { RepoFilterSelector } from "@/components/github/repo-filter-selector";
+import { STEP_DEFAULT, STEP_DEFAULT_LABEL, resolveProfileId } from "@/lib/watcher-profile-default";
 import type {
   RepoFilter,
   IssueWatch,
@@ -138,12 +140,7 @@ function useWatchFormData(workspaceId: string) {
     [executors],
   );
 
-  const filteredAgentProfiles = useMemo(
-    () => agentProfiles.filter((p) => !p.cli_passthrough),
-    [agentProfiles],
-  );
-
-  return { workflows, agentProfiles: filteredAgentProfiles, allExecutorProfiles };
+  return { workflows, agentProfiles, allExecutorProfiles };
 }
 
 function SectionHeader({ children }: { children: React.ReactNode }) {
@@ -304,19 +301,29 @@ function IssueAutomationFields({
       <div className="grid grid-cols-2 gap-4">
         <SelectField
           label="Agent Profile"
-          description="The agent configuration for the task."
-          value={form.agentProfileId}
-          onChange={(v) => setForm((prev) => ({ ...prev, agentProfileId: v }))}
-          placeholder="Select agent profile"
-          items={agentProfiles.map((p) => ({ id: p.id, label: p.label }))}
+          description="Optional — falls back to step default."
+          value={form.agentProfileId || STEP_DEFAULT}
+          onChange={(v) => setForm((prev) => ({ ...prev, agentProfileId: resolveProfileId(v) }))}
+          placeholder={STEP_DEFAULT_LABEL}
+          items={[
+            { id: STEP_DEFAULT, label: STEP_DEFAULT_LABEL },
+            ...agentProfiles.map((p) => ({
+              id: p.id,
+              label: p.label,
+              icon: p.cli_passthrough ? <CliModeIcon /> : undefined,
+            })),
+          ]}
         />
         <SelectField
           label="Executor Profile"
-          description="The executor environment for the agent."
-          value={form.executorProfileId}
-          onChange={(v) => setForm((prev) => ({ ...prev, executorProfileId: v }))}
-          placeholder="Select executor profile"
-          items={allExecutorProfiles.map((p) => ({ id: p.id, label: p.name }))}
+          description="Optional — falls back to step default."
+          value={form.executorProfileId || STEP_DEFAULT}
+          onChange={(v) => setForm((prev) => ({ ...prev, executorProfileId: resolveProfileId(v) }))}
+          placeholder={STEP_DEFAULT_LABEL}
+          items={[
+            { id: STEP_DEFAULT, label: STEP_DEFAULT_LABEL },
+            ...allExecutorProfiles.map((p) => ({ id: p.id, label: p.name })),
+          ]}
         />
       </div>
       <div className="space-y-1.5">
@@ -500,13 +507,15 @@ export function IssueWatchDialog({
   );
 }
 
+type SelectFieldItem = { id: string; label: string; icon?: React.ReactNode };
+
 function SelectField(props: {
   label: string;
   description?: string;
   value: string;
   onChange: (v: string) => void;
   placeholder: string;
-  items: { id: string; label: string }[];
+  items: SelectFieldItem[];
   disabled?: boolean;
 }) {
   return (
@@ -524,7 +533,14 @@ function SelectField(props: {
         <SelectContent>
           {props.items.map((item) => (
             <SelectItem key={item.id} value={item.id}>
-              {item.label}
+              {item.icon ? (
+                <span className="flex items-center gap-1.5">
+                  <span>{item.label}</span>
+                  {item.icon}
+                </span>
+              ) : (
+                item.label
+              )}
             </SelectItem>
           ))}
         </SelectContent>

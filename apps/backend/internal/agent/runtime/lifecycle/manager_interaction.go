@@ -293,6 +293,52 @@ func (m *Manager) AuthenticateBySessionID(ctx context.Context, sessionID, method
 	return execution.agentctl.Authenticate(ctx, methodID)
 }
 
+// reapplySessionModeAfterReset re-applies the active session permission mode
+// (e.g. auto / accept-edits) to a freshly (re)initialized ACP session so the
+// user's choice survives a context reset instead of silently reverting to the
+// agent's default.
+//
+// The mode to restore is resolved from the persisted session_mode in the DB
+// (the authoritative, synchronously-written source — see persistSessionMode and
+// the set_session_mode action), falling back to prev (the in-memory mode state
+// captured before the reset) only when no provider is wired or nothing is
+// persisted. Preferring the DB avoids re-applying a stale in-memory mode when a
+// set_session_mode action persisted a newer mode in the same on_enter batch
+// before its agent mode event updated modeState. A nil/empty resolved mode is a
+// no-op. Addresses issue #1183.
+func (m *Manager) reapplySessionModeAfterReset(ctx context.Context, execution *AgentExecution, newSessionID string, prev *CachedModeState) {
+	if execution.agentctl == nil {
+		return
+	}
+	fallback := ""
+	var availableModes []streams.SessionModeInfo
+	if prev != nil {
+		fallback = prev.CurrentModeID
+		availableModes = prev.AvailableModes
+	}
+	mode := m.effectiveSessionMode(ctx, execution, fallback)
+	if mode == "" {
+		return
+	}
+	if err := execution.agentctl.SetMode(ctx, newSessionID, mode); err != nil {
+		m.logger.Warn("failed to re-apply session mode after context reset",
+			zap.String("execution_id", execution.ID),
+			zap.String("mode", mode),
+			zap.Error(err))
+		return
+	}
+	// Restore the cache too: the fresh session would otherwise report the agent's
+	// default mode, leaving modeState stale relative to what we just re-applied.
+	execution.SetModeState(&CachedModeState{
+		CurrentModeID:  mode,
+		AvailableModes: availableModes,
+	})
+	m.logger.Info("re-applied session mode after context reset",
+		zap.String("execution_id", execution.ID),
+		zap.String("session_id", execution.SessionID),
+		zap.String("mode", mode))
+}
+
 // ResetAgentContext resets the agent's conversation context. For ACP agents that support
 // session reset, this creates a new session on the existing connection (fast, no process restart).
 // For all other agents, this falls back to RestartAgentProcess (full subprocess restart).
@@ -310,6 +356,11 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 	if execution.agentctl == nil {
 		return fmt.Errorf("execution %q has no agentctl client", executionID)
 	}
+
+	// Capture the active session mode before the reset so it can be re-applied to
+	// the fresh ACP session (issue #1183). The agent's new session starts at its
+	// default mode, so without this the user's chosen mode is lost.
+	prevMode := execution.GetModeState()
 
 	// Resolve agent config and MCP servers for session reset
 	agentConfig, err := m.getAgentConfigForExecution(execution)
@@ -354,6 +405,9 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 		default:
 		}
 	})
+
+	// Restore the user's session permission mode onto the fresh ACP session.
+	m.reapplySessionModeAfterReset(ctx, execution, newSessionID, prevMode)
 
 	m.logger.Info("agent context reset via session (no process restart)",
 		zap.String("execution_id", executionID),
@@ -510,6 +564,11 @@ func (m *Manager) RestartAgentProcess(ctx context.Context, executionID string) e
 		zap.String("task_id", execution.TaskID),
 		zap.String("session_id", execution.SessionID))
 
+	// Capture the active session mode before the restart so it can be re-applied to
+	// the fresh ACP session (issue #1183). Capture now, before the streams reconnect
+	// and the restarted agent reports its default mode (which would overwrite the cache).
+	prevMode := execution.GetModeState()
+
 	// Resolve agent config early — needed for both command rebuild and ACP session init
 	agentConfig, err := m.getAgentConfigForExecution(execution)
 	if err != nil {
@@ -584,6 +643,9 @@ func (m *Manager) RestartAgentProcess(ctx context.Context, executionID string) e
 		m.updateExecutionError(executionID, "failed to initialize ACP session after restart: "+err.Error())
 		return fmt.Errorf("failed to initialize ACP session after restart: %w", err)
 	}
+
+	// Restore the user's session permission mode onto the fresh ACP session.
+	m.reapplySessionModeAfterReset(ctx, execution, execution.ACPSessionID, prevMode)
 
 	m.logger.Info("agent process restarted with fresh context",
 		zap.String("execution_id", executionID),
@@ -1207,7 +1269,7 @@ func (m *Manager) buildFreshAgentCommand(ctx context.Context, execution *AgentEx
 	if profileInfo != nil {
 		model = profileInfo.Model
 		autoApprove = profileInfo.AutoApprove
-		permissionValues["auto_approve"] = profileInfo.AutoApprove
+		permissionValues[agents.PermissionKeyAutoApprove] = profileInfo.AutoApprove
 		permissionValues["allow_indexing"] = profileInfo.AllowIndexing
 		permissionValues["dangerously_skip_permissions"] = profileInfo.DangerouslySkipPermissions
 	}

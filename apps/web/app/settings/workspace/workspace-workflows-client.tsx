@@ -95,6 +95,7 @@ function buildWorkflowSteps(workflow: Workflow, definitions: StepDefinition[]): 
 
 function useWorkflowImportExport(
   workspace: Workspace | null,
+  workflowItems: Workflow[],
   router: ReturnType<typeof useRouter>,
   toast: ReturnType<typeof useToast>["toast"],
 ) {
@@ -108,7 +109,11 @@ function useWorkflowImportExport(
   const handleExportAll = async () => {
     if (!workspace) return;
     try {
-      const yamlText = await exportAllWorkflowsAction(workspace.id);
+      // Export only the workflows shown in this settings view (kanban-only —
+      // office workflows are filtered out upstream) and skip unsaved drafts.
+      // Workflow import/export is kanban-only by design (ADR-0004).
+      const exportIds = workflowItems.filter((wf) => !wf.id.startsWith("temp-")).map((wf) => wf.id);
+      const yamlText = await exportAllWorkflowsAction(workspace.id, exportIds);
       setExportYaml(yamlText);
       setIsExportDialogOpen(true);
     } catch (error) {
@@ -531,10 +536,17 @@ function useWorkspaceWorkflowsPage(
 ) {
   const router = useRouter();
   const { toast } = useToast();
+  // Workflow settings is kanban-only by design (ADR-0004): office-style
+  // workflows are managed from the Office surface and are not importable /
+  // exportable here, so we keep them out of this view entirely.
+  const kanbanWorkflows = useMemo(
+    () => workflows.filter((wf) => wf.style !== "office"),
+    [workflows],
+  );
   const { workflowItems, setWorkflowItems, setSavedWorkflowItems, isWorkflowDirty } =
-    useWorkflowSettings(workflows, workspace?.id);
+    useWorkflowSettings(kanbanWorkflows, workspace?.id);
 
-  const importExport = useWorkflowImportExport(workspace, router, toast);
+  const importExport = useWorkflowImportExport(workspace, workflowItems, router, toast);
   const {
     isExportDialogOpen,
     setIsExportDialogOpen,

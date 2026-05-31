@@ -650,7 +650,7 @@ func (sm *SessionManager) retryPromptAfterReconnect(
 	attachments []v1.MessageAttachment,
 ) error {
 	ready := make(chan struct{})
-	go sm.streamManager.connectUpdatesStream(execution, ready)
+	sm.streamManager.connectUpdatesStreamAsync(execution, ready)
 
 	select {
 	case <-ready:

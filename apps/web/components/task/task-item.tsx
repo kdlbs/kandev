@@ -15,6 +15,7 @@ import { PRTaskIcon } from "@/components/github/pr-task-icon";
 import { IssueTaskIcon } from "@/components/github/issue-task-icon";
 import { useAppStore } from "@/components/state-provider";
 import { cn } from "@/lib/utils";
+import { computeRowIndent, resolveRowDepth } from "@/lib/sidebar/row-indent";
 import { DEBUG_UI } from "@/lib/config";
 import { useTaskColor } from "@/hooks/use-task-color";
 import { TASK_COLOR_BAR_CLASS, type TaskColor } from "@/lib/task-colors";
@@ -51,6 +52,12 @@ type TaskItemProps = {
   hasPendingPermission?: boolean;
   parentTaskTitle?: string;
   isSubTask?: boolean;
+  /**
+   * Nesting depth in the sidebar tree (0 = root). Drives left indentation so
+   * arbitrarily deep subtask trees read as a hierarchy. Falls back to
+   * `isSubTask` (depth 1) when omitted.
+   */
+  depth?: number;
   /** Number of subtasks under this parent task. Only set for parent rows. */
   subtaskCount?: number;
   /** Whether the subtasks of this parent are currently hidden. */
@@ -312,6 +319,7 @@ export const TaskItem = memo(function TaskItem({
   hasPendingClarification,
   hasPendingPermission,
   isSubTask,
+  depth,
   subtaskCount,
   subtasksCollapsed,
   onToggleSubtasks,
@@ -325,6 +333,7 @@ export const TaskItem = memo(function TaskItem({
   const hasDiffStats = !!diffStats && (diffStats.additions > 0 || diffStats.deletions > 0);
   const showSubtaskToggle = !!subtaskCount && subtaskCount > 0 && !!onToggleSubtasks;
   const taskColor = useTaskColor(taskId);
+  const indent = computeRowIndent(resolveRowDepth(depth, isSubTask));
 
   return (
     <div
@@ -333,16 +342,20 @@ export const TaskItem = memo(function TaskItem({
       data-testid="sidebar-task-item"
       onClick={onClick}
       onKeyDown={(e) => handleTaskItemKeyDown(e, onClick)}
+      style={indent.depth > 0 ? { paddingLeft: indent.paddingLeftPx } : undefined}
       className={cn(
         "group relative flex w-full items-start gap-2 py-2 pr-3 text-left text-sm outline-none cursor-pointer",
         "transition-colors duration-75 hover:bg-foreground/[0.05]",
         isSelected && "bg-primary/10",
-        isSubTask ? "pl-8" : "pl-3",
+        indent.depth === 0 && "pl-3",
       )}
     >
       <SelectionBar isSelected={isSelected} color={taskColor} />
-      {isSubTask && (
-        <span className="absolute left-3.5 top-[10px] select-none text-[11px] text-muted-foreground/30">
+      {indent.depth > 0 && (
+        <span
+          style={{ left: indent.connectorLeftPx }}
+          className="absolute top-[10px] select-none text-[11px] text-muted-foreground/30"
+        >
           ↳
         </span>
       )}

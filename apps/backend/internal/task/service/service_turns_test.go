@@ -78,6 +78,37 @@ func TestGetWorkspaceInfoForSession_BasicFields(t *testing.T) {
 	}
 }
 
+// TestGetWorkspaceInfoForSession_IncludesSessionMode verifies the persisted
+// session permission mode is surfaced on WorkspaceInfo so the lifecycle can apply
+// it as a mode override on a fresh launch. See issue #1183.
+func TestGetWorkspaceInfoForSession_IncludesSessionMode(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+
+	session := &models.TaskSession{
+		ID:        "session-1",
+		TaskID:    "task-123",
+		State:     models.TaskSessionStateRunning,
+		Metadata:  map[string]interface{}{models.SessionMetaKeySessionMode: "acceptEdits"},
+		StartedAt: now,
+		UpdatedAt: now,
+	}
+	if err := repo.CreateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	info, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-1")
+	if err != nil {
+		t.Fatalf("GetWorkspaceInfoForSession returned error: %v", err)
+	}
+	if info.SessionMode != "acceptEdits" {
+		t.Errorf("expected SessionMode 'acceptEdits', got %q", info.SessionMode)
+	}
+}
+
 func TestGetWorkspaceInfoForSession_InfersTaskID(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()

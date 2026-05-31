@@ -16,15 +16,53 @@ import (
 // If pending context is set (from SetPendingContext), it will be prepended to the message.
 // Attachments (images) are converted to ACP ImageBlocks and included in the prompt.
 // When the prompt completes, a complete event is emitted via the updates channel.
+func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.MessageAttachment) error {
+	// A user prompt always targets the current session, so it is not pinned.
+	return a.sendPrompt(ctx, message, attachments, "")
+}
+
+// sendPrompt serializes session/prompt calls through promptGate and sends one
+// prompt to the agent. When expectSession is non-empty the prompt is pinned to
+// that session: if the adapter's active session changed (or the adapter closed)
+// while this call waited on the gate, the prompt is dropped instead of being
+// sent to whatever session is now current. This is the ScheduleWakeup path —
+// a wakeup must reach the session it was scheduled for or not at all.
 //
 //nolint:cyclop,funlen // pre-existing complexity preserved from adapter.go file split
-func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.MessageAttachment) error {
+func (a *Adapter) sendPrompt(ctx context.Context, message string, attachments []v1.MessageAttachment, expectSession string) error {
+	// Acquire the prompt gate, honouring ctx so a queued wakeup whose context
+	// is cancelled (timeout / adapter Close) aborts instead of blocking on a
+	// stuck in-flight turn.
+	select {
+	case a.promptGate <- struct{}{}:
+		defer func() { <-a.promptGate }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
 	a.mu.Lock()
 	conn := a.acpConn
 	sessionID := a.sessionID
-	pendingContext := a.pendingContext
-	a.pendingContext = "" // Clear after use
+	closed := a.closed
+	// A pinned prompt that no longer matches the active session (or a closed
+	// adapter) is dropped. Wakeup-pinned prompts are synthetic turns — they
+	// must not consume pendingContext reserved for the next user prompt (e.g.
+	// fork_session resume context).
+	drop := expectSession != "" && (closed || sessionID != expectSession)
+	var pendingContext string
+	if !drop && expectSession == "" {
+		pendingContext = a.pendingContext
+		a.pendingContext = "" // Clear after use
+	}
 	a.mu.Unlock()
+
+	if drop {
+		a.logger.Info("dropping queued wakeup prompt: session changed or adapter closed before it ran",
+			zap.String("scheduled_for", expectSession),
+			zap.String("current_session", sessionID),
+			zap.Bool("closed", closed))
+		return nil
+	}
 
 	if conn == nil {
 		return fmt.Errorf("adapter not initialized")
@@ -170,14 +208,15 @@ func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.M
 // turn and emits visible ACP frames. The session must still match (the user
 // hasn't started a fresh session) and the adapter must not be closed.
 //
-// Concurrent-prompt safety: if a user prompt is already in flight when this
-// runs, both end up calling conn.Prompt() on the same ClientSideConnection.
-// That's safe at the wire level — the ACP SDK's Connection.sendMessage
-// holds a write mutex, so request frames never interleave on stdin, and
-// JSON-RPC pairs each response back to its originating request via id —
-// but it does mean two prompts can be in flight against the bridge at
-// once. The bridge serialises them in the order it receives them, which
-// is exactly what we want for a wakeup that races a user message.
+// Prompt serialization: the synthetic prompt goes through sendPrompt, which
+// gates on promptGate so only one session/prompt is in flight at a time. If a
+// user prompt is already running the wakeup waits behind it rather than racing
+// it — two concurrent conn.Prompt() calls would let the bridge return each
+// prompt's stop_reason against the wrong turn, shifting chat turns one prompt
+// behind. Because the wakeup can wait, the session is re-validated inside
+// sendPrompt (via the pinned expectSession argument): if a NewSession/LoadSession
+// changed the active session while the wakeup queued, it is dropped instead of
+// being injected into the new session.
 func (a *Adapter) fireWakeup(sessionID, prompt string) {
 	a.mu.RLock()
 	closed := a.closed
@@ -205,7 +244,9 @@ func (a *Adapter) fireWakeup(sessionID, prompt string) {
 		// prompt instead of letting it run against a dead subprocess.
 		ctx, cancel := context.WithTimeout(a.lifetimeCtx, wakeupPromptTimeout)
 		defer cancel()
-		if err := a.Prompt(ctx, prompt, nil); err != nil {
+		// Pin to the scheduled session: if the active session changed while this
+		// wakeup waited on the prompt gate, sendPrompt drops it.
+		if err := a.sendPrompt(ctx, prompt, nil, sessionID); err != nil {
 			a.logger.Error("synthetic wakeup prompt failed",
 				zap.String("session_id", sessionID),
 				zap.Error(err))

@@ -8,6 +8,9 @@ vi.mock("@/lib/local-storage", () => ({
   getEnvMaximizeState: vi.fn(() => null),
   setEnvMaximizeState: vi.fn(),
   removeEnvMaximizeState: vi.fn(),
+  getGlobalSidebarWidth: vi.fn(() => null),
+  setGlobalSidebarWidth: vi.fn(),
+  clearGlobalSidebarWidth: vi.fn(),
 }));
 
 vi.mock("@/lib/layout/panel-portal-manager", () => ({

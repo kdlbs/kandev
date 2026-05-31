@@ -96,8 +96,11 @@ export async function updateWorkspaceAction(
   });
 }
 
-export async function deleteWorkspaceAction(id: string) {
-  await fetchJson<void>(`${apiBaseUrl}/api/v1/office/workspaces/${id}`, { method: "DELETE" });
+export async function deleteWorkspaceAction(id: string, confirmName: string) {
+  await fetchJson<void>(`${apiBaseUrl}/api/v1/office/workspaces/${id}`, {
+    method: "DELETE",
+    body: JSON.stringify({ confirm_name: confirmName }),
+  });
 }
 
 export async function listWorkflowsAction(workspaceId: string): Promise<ListWorkflowsResponse> {
@@ -552,8 +555,22 @@ export async function exportWorkflowAction(workflowId: string): Promise<string> 
   return response.text();
 }
 
-export async function exportAllWorkflowsAction(workspaceId: string): Promise<string> {
-  const response = await fetch(`${apiBaseUrl}/api/v1/workspaces/${workspaceId}/workflows/export`);
+export async function exportAllWorkflowsAction(
+  workspaceId: string,
+  workflowIds?: string[],
+): Promise<string> {
+  // When workflowIds is provided, restrict the export to exactly that set
+  // (the settings UI passes its kanban workflows, excluding office ones). An
+  // empty list is sent intentionally as `ids=` so nothing is exported, rather
+  // than omitting the param and falling back to exporting every workflow.
+  // Encode the user-provided values that flow into the request URL (workspace
+  // ID in the path, workflow IDs in the query) so they can't alter the request
+  // target — clears CodeQL's js/request-forgery (SSRF) check on this path.
+  const query =
+    workflowIds !== undefined ? `?ids=${encodeURIComponent(workflowIds.join(","))}` : "";
+  const response = await fetch(
+    `${apiBaseUrl}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/workflows/export${query}`,
+  );
   if (!response.ok) throw new Error(`Export failed: ${response.statusText}`);
   return response.text();
 }

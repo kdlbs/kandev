@@ -89,6 +89,22 @@ describe("PRStatusChip", () => {
     expect(screen.queryByTestId(CHIP_TESTID)).toBeNull();
   });
 
+  it("returns null when the PR has been merged (terminal state)", () => {
+    renderWithStore(
+      { taskPRs: { byTaskId: { "task-1": [makePR({ state: "merged" })] } } },
+      <PRStatusChip taskId="task-1" />,
+    );
+    expect(screen.queryByTestId(CHIP_TESTID)).toBeNull();
+  });
+
+  it("returns null when the PR has been closed (terminal state)", () => {
+    renderWithStore(
+      { taskPRs: { byTaskId: { "task-1": [makePR({ state: "closed" })] } } },
+      <PRStatusChip taskId="task-1" />,
+    );
+    expect(screen.queryByTestId(CHIP_TESTID)).toBeNull();
+  });
+
   describe("desktop branch", () => {
     beforeEach(() => isMobileMock.mockReturnValue(false));
 

@@ -104,6 +104,13 @@ func (a *Adapter) convertToolCallUpdate(sessionID string, tc *acp.SessionUpdateT
 		args["raw_input"] = tc.RawInput
 	}
 
+	// Title + meta let the normalizer detect subagent (Task) tool calls
+	// (OpenCode keys off title, Claude off `_meta.claudeCode.toolName`).
+	args[argKeyTitle] = tc.Title
+	if tc.Meta != nil {
+		args[argKeyMeta] = tc.Meta
+	}
+
 	toolKind := string(tc.Kind)
 	normalizedPayload := a.normalizer.NormalizeToolCall(toolKind, args)
 
@@ -130,6 +137,7 @@ func (a *Adapter) convertToolCallUpdate(sessionID string, tc *acp.SessionUpdateT
 		Type:              streams.EventTypeToolCall,
 		SessionID:         sessionID,
 		ToolCallID:        toolCallID,
+		ParentToolCallID:  parentToolUseID(tc.Meta),
 		ToolName:          toolKind, // Kind is effectively the tool name
 		ToolTitle:         tc.Title,
 		ToolStatus:        status,
@@ -200,6 +208,12 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	// view rather than getting clobbered by the rawOutput string.
 	if tcu.RawOutput != nil && payload != nil && !isTrackedMonitorTerminal {
 		a.normalizer.NormalizeToolResult(payload, tcu.RawOutput)
+	}
+
+	// Subagent (Task) result metadata is split across meta (Claude) and
+	// rawOutput (OpenCode/Cursor); enrich the stored payload from both.
+	if payload != nil && payload.Kind() == streams.ToolKindSubagentTask {
+		a.normalizer.EnrichSubagentResult(payload, tcu.Meta, tcu.RawOutput)
 	}
 
 	// Seed the Monitor view AFTER NormalizeToolResult so we overwrite the
@@ -273,6 +287,7 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 		Type:              streams.EventTypeToolUpdate,
 		SessionID:         sessionID,
 		ToolCallID:        toolCallID,
+		ParentToolCallID:  parentToolUseID(tcu.Meta),
 		ToolTitle:         title,
 		ToolStatus:        status,
 		NormalizedPayload: payload,

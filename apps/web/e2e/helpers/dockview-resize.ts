@@ -184,6 +184,11 @@ export async function resizeColumnViaSplitview(
       if (typeof w.__setPinnedTarget__ === "function") {
         w.__setPinnedTarget__(col, actual);
       }
+      // The sidebar width is a global pref persisted on a real drag's mouseup.
+      // Mirror that so cross-task / reload assertions see the same width.
+      if (col === "sidebar" && typeof w.__setGlobalSidebarWidth__ === "function") {
+        w.__setGlobalSidebarWidth__(actual);
+      }
       // `sv.resizeView` alone does not fire `onDidLayoutChange` in dockview
       // 4.x — without that, the debounced layout-persistence handler never
       // saves the new width. Call the exposed test helper to force-flush the

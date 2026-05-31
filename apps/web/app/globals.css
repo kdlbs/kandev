@@ -775,8 +775,13 @@
 
 .markdown-body table {
   border-collapse: collapse;
+  /* width:100% fills the container and pins the table to it, so it can never
+     shrink-to-fit and grow into the surrounding overflow-x-auto scroll
+     container (which is what produced a horizontal scrollbar under width:auto).
+     Long values wrap instead of overflowing. */
   width: 100%;
   margin: 0.75rem 0;
+  table-layout: auto;
 }
 
 .markdown-body th,
@@ -784,11 +789,31 @@
   border: 1px solid var(--border);
   padding: 0.25rem 0.5rem;
   font-size: 13px;
+  vertical-align: top;
+}
+
+.markdown-body td {
+  overflow-wrap: anywhere;
 }
 
 .markdown-body th {
   background: var(--muted);
   font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Label/value tables (common in agent output) put short keys in the first
+   column. Keep that column on one line and sized to its content so a long
+   value cell can't starve it down to a few characters and wrap "Failing"
+   into "Failin g". */
+.markdown-body td:first-child {
+  white-space: nowrap;
+  width: 1%;
+}
+
+.markdown-body td:not(:first-child) code {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .markdown-body thead {

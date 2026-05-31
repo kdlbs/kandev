@@ -138,6 +138,41 @@ export function filterUnpushedCommits<T extends { commit_sha: string }>(
   );
 }
 
+/** Which timeline section, if any, renders first (topmost) in the Changes panel. */
+type FirstVisibleSection = "pr" | "unstaged" | "staged" | "commits" | null;
+
+/** PR Changes auto-expands only when the diff is small enough to scan inline. */
+export const PR_CHANGES_AUTO_EXPAND_MAX_FILES = 5;
+
+/**
+ * Computes the first (topmost) visible section so the panel can auto-expand it,
+ * mirroring the render precedence in `ChangesPanelTimeline`:
+ *   PR (review mode, no local changes) → Unstaged → Staged → Commits.
+ *
+ * The "review mode" PR section only sits at the top when there are no local
+ * working-tree changes; with local changes the PR section moves below Staged and
+ * is therefore never first. Large PR diffs (>5 files) skip auto-expanding PR
+ * Changes and expand Commits instead. Returns null when nothing is shown.
+ */
+export function firstVisibleSection(flags: {
+  hasPRFiles: boolean;
+  hasUnstaged: boolean;
+  hasStaged: boolean;
+  showCommitsList: boolean;
+  prFileCount?: number;
+}): FirstVisibleSection {
+  const { hasPRFiles, hasUnstaged, hasStaged, showCommitsList, prFileCount = 0 } = flags;
+  if (hasPRFiles && !hasUnstaged && !hasStaged) {
+    if (prFileCount <= PR_CHANGES_AUTO_EXPAND_MAX_FILES) return "pr";
+    if (showCommitsList) return "commits";
+    return null;
+  }
+  if (hasUnstaged) return "unstaged";
+  if (hasStaged) return "staged";
+  if (showCommitsList) return "commits";
+  return null;
+}
+
 type MergedCommit = {
   commit_sha: string;
   commit_message: string;
@@ -146,6 +181,7 @@ type MergedCommit = {
   pushed: boolean;
   /** Multi-repo: name of the repo this commit was made in. Empty for single-repo. */
   repository_name?: string;
+  committed_at?: string;
 };
 
 /**
@@ -168,8 +204,15 @@ export function mergeCommits(
     /** Multi-repo: name of the repo this commit was made in. */
     repository_name?: string;
     pushed?: boolean;
+    committed_at?: string;
   }[],
-  prCommits: { sha: string; message: string; additions: number; deletions: number }[],
+  prCommits: {
+    sha: string;
+    message: string;
+    additions: number;
+    deletions: number;
+    author_date?: string;
+  }[],
 ): MergedCommit[] {
   const shaMatches = (a: string, b: string) => a.startsWith(b) || b.startsWith(a);
   const unpushed: MergedCommit[] = [];
@@ -199,6 +242,7 @@ export function mergeCommits(
         insertions: pr.additions,
         deletions: pr.deletions,
         pushed: true,
+        committed_at: pr.author_date,
       });
     }
   }

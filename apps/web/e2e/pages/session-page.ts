@@ -61,6 +61,18 @@ export class SessionPage {
   prMergedDismissButton() {
     return this.page.getByTestId("pr-merged-dismiss-button");
   }
+  prClosedBanner() {
+    return this.page.getByTestId("pr-closed-banner");
+  }
+  prClosedArchiveButton() {
+    return this.page.getByTestId("pr-closed-archive-button");
+  }
+  prClosedDismissButton() {
+    return this.page.getByTestId("pr-closed-dismiss-button");
+  }
+  prStatusChip() {
+    return this.page.getByTestId("pr-status-chip");
+  }
   todoIndicator() {
     return this.page.getByTestId("todo-indicator");
   }
@@ -407,6 +419,16 @@ export class SessionPage {
     return this.page.getByTestId("recovery-fresh-button");
   }
 
+  /** "Cancel" button shown on the yellow transient-retry (529 Overloaded) card. */
+  recoveryCancelRetryButton(): Locator {
+    return this.page.getByTestId("recovery-cancel-retry-button");
+  }
+
+  /** The yellow "Provider overloaded — retrying…" status card text. */
+  transientRetryCard(): Locator {
+    return this.chat.getByText(/Provider overloaded — retrying/i);
+  }
+
   /** Context reset divider shown in chat after resetting agent context. */
   contextResetDivider(): Locator {
     return this.chat.getByText("Context reset");
@@ -559,6 +581,11 @@ export class SessionPage {
   /** Unresolved-comments row inside the popover. */
   prCommentsRow(): Locator {
     return this.prTopbarPopover().getByTestId("pr-comments-row");
+  }
+
+  /** Header PR-link icon (top-right corner of the popover). */
+  prPopoverPRLink(): Locator {
+    return this.prTopbarPopover().getByTestId("pr-popover-pr-link");
   }
 
   /** Header external-link icon (top-right corner of the popover). */
@@ -727,6 +754,17 @@ export class SessionPage {
     await editor.fill(text);
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
     await editor.press(`${modifier}+Enter`);
+  }
+
+  /**
+   * Type and submit a chat message via the Send button. Mobile (touch) layouts
+   * don't submit on Ctrl/Cmd+Enter, so mobile specs use this instead.
+   */
+  async sendMessageViaButton(text: string) {
+    const editor = this.page.locator(".tiptap.ProseMirror").first();
+    await editor.click();
+    await editor.fill(text);
+    await this.page.getByTestId("submit-message-button").click();
   }
 
   /** Toggle plan mode on/off by clicking the plan mode toggle button in the toolbar.
@@ -998,6 +1036,11 @@ export class SessionPage {
   /** Session tab container identified by session ID (data-testid="session-tab-{id}"). */
   sessionTabBySessionId(sessionId: string): Locator {
     return this.page.getByTestId(`session-tab-${sessionId}`);
+  }
+
+  /** Dockview close (X) button inside a session tab. */
+  sessionTabCloseButton(sessionId: string): Locator {
+    return this.page.getByTestId(`session-tab-close-${sessionId}`);
   }
 
   /** Context menu on a dockview tab — right-click the tab to trigger it. */

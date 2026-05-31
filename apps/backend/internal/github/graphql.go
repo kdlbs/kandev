@@ -28,6 +28,10 @@ const graphQLPRBatchAlias = "pr"
 // fields = ~500 nodes, leaving headroom.
 const graphQLBatchChunkSize = 50
 
+// graphQLBranchProbeLimit fetches two matches so branch lookup can detect
+// ambiguous fork heads instead of linking the first arbitrary PR.
+const graphQLBranchProbeLimit = 2
+
 // reviewNode is one PR review entry from the batched GraphQL query.
 type reviewNode struct {
 	State  string `json:"state"`
@@ -109,6 +113,11 @@ type batchedPRResult struct {
 			} `json:"commit"`
 		} `json:"nodes"`
 	} `json:"commits"`
+}
+
+type batchedBranchPRNode struct {
+	Number int `json:"number"`
+	batchedPRResult
 }
 
 // graphQLError mirrors a single entry in a GraphQL response's "errors" array.
@@ -194,14 +203,14 @@ func prFieldsBlock() string {
 		`commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }`
 }
 
-// buildBatchedBranchQuery emits one aliased associatedPullRequests block per
-// (owner, repo, branch) ref. Used to batch the "find PR by branch" path.
+// buildBatchedBranchQuery emits one aliased pullRequests(headRefName:) block
+// per (owner, repo, branch). Used to batch the "find PR by branch" path.
 func buildBatchedBranchQuery(refs []graphQLBranchRef) (string, map[string]any) {
 	var b strings.Builder
 	b.WriteString("query Branches { ")
 	for i, r := range refs {
-		fmt.Fprintf(&b, `b%d: repository(owner: %q, name: %q) { ref(qualifiedName: %q) { associatedPullRequests(first: 1, states: OPEN) { nodes { number %s } } } } `,
-			i, r.Owner, r.Repo, "refs/heads/"+r.Branch, prFieldsBlock())
+		fmt.Fprintf(&b, `b%d: repository(owner: %q, name: %q) { pullRequests(first: %d, states: OPEN, headRefName: %q) { nodes { number %s } } } `,
+			i, r.Owner, r.Repo, graphQLBranchProbeLimit, r.Branch, prFieldsBlock())
 	}
 	b.WriteString(`rateLimit { limit remaining resetAt cost } `)
 	b.WriteString(`}`)
@@ -483,7 +492,7 @@ func decodeBatchedPRChunk(refs []graphQLPRRef, data map[string]json.RawMessage, 
 }
 
 // runBatchedBranchQuery executes the branch-lookup query in chunks and maps
-// each branch ref to its first OPEN associated PR (if any). Result keys are
+// each branch name to its unambiguous OPEN PR (if any). Result keys are
 // "owner/repo/branch" so callers can index by their input refs.
 func runBatchedBranchQuery(ctx context.Context, exec GraphQLExecutor, refs []graphQLBranchRef) (map[string]*PRStatus, error) {
 	if exec == nil || len(refs) == 0 {
@@ -502,37 +511,43 @@ func runBatchedBranchQuery(ctx context.Context, exec GraphQLExecutor, refs []gra
 		if err := graphQLErrorsToErr(resp.Errors); err != nil {
 			return nil, err
 		}
-		decodeBatchedBranchChunk(chunk, resp.Data, result)
+		if err := decodeBatchedBranchChunk(chunk, resp.Data, result); err != nil {
+			return nil, err
+		}
 	}
 	return result, nil
 }
 
-func decodeBatchedBranchChunk(refs []graphQLBranchRef, data map[string]json.RawMessage, result map[string]*PRStatus) {
+func decodeBatchedBranchChunk(refs []graphQLBranchRef, data map[string]json.RawMessage, result map[string]*PRStatus) error {
 	for i, ref := range refs {
-		raw, ok := data[fmt.Sprintf("b%d", i)]
+		alias := fmt.Sprintf("b%d", i)
+		raw, ok := data[alias]
 		if !ok || len(raw) == 0 || string(raw) == "null" {
 			continue
 		}
 		var inner struct {
-			Ref *struct {
-				AssociatedPullRequests struct {
-					Nodes []struct {
-						Number int `json:"number"`
-						batchedPRResult
-					} `json:"nodes"`
-				} `json:"associatedPullRequests"`
-			} `json:"ref"`
+			PullRequests struct {
+				Nodes []batchedBranchPRNode `json:"nodes"`
+			} `json:"pullRequests"`
 		}
 		if err := json.Unmarshal(raw, &inner); err != nil {
+			return fmt.Errorf("decode branch alias %s: %w", alias, err)
+		}
+		node, ok := selectBatchedBranchPRNode(inner.PullRequests.Nodes)
+		if !ok {
 			continue
 		}
-		if inner.Ref == nil || len(inner.Ref.AssociatedPullRequests.Nodes) == 0 {
-			continue
-		}
-		node := inner.Ref.AssociatedPullRequests.Nodes[0]
 		status := convertBatchedPRResult(&node.batchedPRResult, ref.Owner, ref.Repo, node.Number)
 		result[graphqlBranchKey(ref.Owner, ref.Repo, ref.Branch)] = status
 	}
+	return nil
+}
+
+func selectBatchedBranchPRNode(nodes []batchedBranchPRNode) (*batchedBranchPRNode, bool) {
+	if len(nodes) != 1 {
+		return nil, false
+	}
+	return &nodes[0], true
 }
 
 // graphqlBranchKey is the lookup key used in batched-branch result maps.

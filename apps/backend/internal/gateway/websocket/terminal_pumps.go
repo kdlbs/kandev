@@ -423,8 +423,8 @@ func (h *TerminalHandler) runUserShellBridge(
 
 	defer func() {
 		// Clean up WebSocket resources but DON'T stop the process
-		// The process should only be stopped via explicit user_shell.stop message from frontend
-		// This allows reconnection after React remounts or temporary disconnects
+		// The process is stopped by explicit user_shell.stop/destroy or task cleanup.
+		// Keeping it alive here allows reconnect after React remounts or temporary disconnects.
 		interactiveRunner.ClearUserShellDirectOutput(scopeID, terminalID)
 
 		_ = wsw.Close()
@@ -432,7 +432,9 @@ func (h *TerminalHandler) runUserShellBridge(
 
 		h.logger.Info("user shell WebSocket disconnected (process still running for potential reconnect)",
 			zap.String("session_id", sessionID),
-			zap.String("terminal_id", terminalID))
+			zap.String("terminal_id", terminalID),
+			zap.String("process_id", processID),
+			zap.Int("os_pid", osPIDForInteractiveProcess(interactiveRunner, processID)))
 	}()
 
 	// Read from WebSocket and handle input/resize

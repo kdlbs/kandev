@@ -7,7 +7,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useOfficeRefetch } from "@/hooks/use-office-refetch";
 import { listRuns } from "@/lib/api/domains/office-api";
 import type { AgentProfile, Run } from "@/lib/state/slices/office/types";
-import { timeAgo } from "../../../components/shared/time-ago";
+import { timeAgo } from "@/lib/utils/time";
 
 type AgentRunsTabProps = {
   agent: AgentProfile;

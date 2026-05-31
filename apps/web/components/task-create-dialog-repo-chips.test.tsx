@@ -20,6 +20,14 @@ vi.mock("@/hooks/domains/workspace/use-repository-branches", () => ({
   },
 }));
 
+// The Remote-mode branch of RepoChipsRow renders RemoteRepoChipsRow, which
+// in turn renders RemoteRepoChip — a heavy popover with its own GitHub
+// hook. Stub the chip here so tests for this row stay focused on the
+// branching logic (workspace chips vs. remote chips vs. folder picker).
+vi.mock("./task-create-dialog-remote-repo-chip", () => ({
+  RemoteRepoChip: () => <div data-testid="remote-repo-chip" />,
+}));
+
 import { RepoChipsRow } from "./task-create-dialog-repo-chips";
 
 afterEach(cleanup);
@@ -46,16 +54,32 @@ function row(overrides: Partial<TaskRepoRow> = {}): TaskRepoRow {
 
 function makeFs(overrides: Partial<DialogFormState>): DialogFormState {
   // Only the fields RepoChipsRow actually reads/sets need to be real.
+  const remoteUrl = (overrides.remoteRepos?.[0]?.url ?? "") as string;
+  const branchesByUrl = {
+    branches: (url: string) =>
+      url === remoteUrl
+        ? ((overrides as Partial<DialogFormState>).branchesByUrl?.branches(url) ?? [])
+        : [],
+    loading: () => false,
+    ensure: () => undefined,
+  };
   return {
     repositories: [] as TaskRepoRow[],
-    useGitHubUrl: false,
+    useRemote: false,
     discoveredRepositories: [],
-    githubUrl: "",
+    remoteRepos: [] as DialogFormState["remoteRepos"],
+    setRemoteRepos: vi.fn(),
+    addRemoteRepo: vi.fn(),
+    removeRemoteRepo: vi.fn(),
+    updateRemoteRepo: vi.fn(),
     githubUrlError: null,
-    githubBranch: "",
-    githubBranches: [] as Branch[],
-    githubBranchesLoading: false,
-    setGitHubBranch: vi.fn(),
+    branchesByUrl,
+    prInfoByUrl: {
+      info: () => undefined,
+      loading: () => false,
+      ensure: () => undefined,
+      clear: () => undefined,
+    },
     addRepository: vi.fn(),
     removeRepository: vi.fn(),
     updateRepository: vi.fn(),
@@ -106,22 +130,24 @@ describe("RepoChipsRow", () => {
     expect(screen.getAllByTestId("repo-chip")).toHaveLength(2);
   });
 
-  it("renders the GitHub URL input in URL mode (chips suppressed)", () => {
+  it("renders the remote chips row in Remote mode (workspace chips suppressed)", () => {
     renderInProvider(
       <RepoChipsRow
-        fs={makeFs({ useGitHubUrl: true, githubUrl: "" })}
+        fs={makeFs({
+          useRemote: true,
+          remoteRepos: [{ key: "remote-0", url: "", branch: "", source: "paste" }],
+        })}
         repositories={[makeRepo(REPO_FRONT_ID, "frontend")]}
         isTaskStarted={false}
         workspaceId="ws-1"
         onRowRepositoryChange={NOOP}
         onRowBranchChange={NOOP}
-        onToggleGitHubUrl={() => undefined}
-        onGitHubUrlChange={() => undefined}
+        onToggleRemote={() => undefined}
       />,
     );
     expect(screen.getByTestId("repo-chips-row")).toBeTruthy();
     expect(screen.queryAllByTestId("repo-chip")).toHaveLength(0);
-    expect(screen.getByTestId("github-url-input")).toBeTruthy();
+    expect(screen.getByTestId("remote-repo-chips-row")).toBeTruthy();
   });
 
   it("hides the chip row when the task is already started", () => {

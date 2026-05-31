@@ -267,6 +267,20 @@ type Service struct {
 	// Constructed lazily once issueTaskCreator is wired (see SetIssueTaskCreator).
 	watcherCoordinator *WatcherDispatchCoordinator
 
+	// Watcher throttle state. watcherTaskCount counts committed open watcher-
+	// created tasks (DB-backed source of truth across restarts). pendingByWatch
+	// tracks in-process events whose dedup row has not yet been written —
+	// without it, a burst of events read the same stale COUNT(*) before any
+	// goroutine commits, and the cap is silently overshot. Both reads and the
+	// pending increment happen under watcherMu to prevent the burst race.
+	watcherTaskCount WatcherTaskCounter
+	watcherMu        sync.Mutex
+	pendingByWatch   map[string]int
+	// watcherSaturated tracks per-watch whether the last gate result was
+	// "deferred", so we log the state-transition Warn ("cap reached" /
+	// "cap cleared") only once per transition instead of every event.
+	watcherSaturated map[string]bool
+
 	// Jira service for issue watch dedup operations
 	jiraService JiraService
 	// jiraSource adapts jiraService onto WatcherSource. Built once in
@@ -326,13 +340,21 @@ type Service struct {
 	clarificationWatchdogTimeout time.Duration
 
 	// cancelInFlight tracks sessionIDs whose CancelAgent call is currently in
-	// progress. Used to deduplicate impatient retries from the UI: while the
-	// first cancel is still propagating through the agent (which can take several
-	// seconds when a long-running tool like Claude's Monitor is being torn down),
-	// the user often clicks the button repeatedly. Without this guard each click
-	// would create another "Turn cancelled by user" message and lazily start a
-	// phantom turn just to host it.
+	// progress. It deduplicates impatient retries from the UI and lets late
+	// agent.ready/boot_ready events from the cancelled turn return before they
+	// evaluate workflow transitions or drain queued messages.
 	cancelInFlight sync.Map
+
+	// transientRetries tracks in-progress transient-provider-error (529
+	// Overloaded) retry loops. key: sessionID, value: *transientRetryEntry.
+	// A backoff timer per session re-drives the failed prompt; cancelled on
+	// success, user-cancel, or service shutdown.
+	transientRetries sync.Map
+
+	// lastTurnPrompt caches the most recent outbound prompt per session so a
+	// transient-failure retry can re-drive the same turn without the caller's
+	// context. key: sessionID, value: capturedPrompt. Replaced every turn.
+	lastTurnPrompt sync.Map
 
 	// Service state
 	mu        sync.RWMutex
@@ -844,6 +866,7 @@ func (s *Service) Stop() error {
 	}
 
 	s.cancelAllClarificationWatchdogs()
+	s.cancelAllTransientRetries()
 
 	if len(errs) > 0 {
 		return errs[0]

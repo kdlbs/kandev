@@ -17,7 +17,7 @@ func (a *Adapter) handleACPUpdate(n acp.SessionNotification) {
 
 	// Log raw event for debugging
 	if len(rawData) > 0 {
-		shared.LogRawEvent(shared.ProtocolACP, a.agentID, "session_notification", rawData)
+		shared.LogRawEvent(shared.ProtocolACP, a.agentID, string(n.SessionId), "session_notification", rawData)
 	}
 
 	// During session/load, suppress history replay notifications.
@@ -65,7 +65,7 @@ func (a *Adapter) handleACPUpdate(n acp.SessionNotification) {
 		event = a.tryConvertUntypedUpdate(rawData, sessionID)
 	}
 	if event != nil {
-		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, event)
+		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, event)
 		shared.TraceProtocolEvent(a.getPromptTraceCtx(), shared.ProtocolACP, a.agentID,
 			event.Type, rawData, event)
 		a.sendUpdate(*event)
@@ -287,11 +287,13 @@ func (a *Adapter) convertMessageChunk(sessionID string, content acp.ContentBlock
 		// strip them from the chat text. Assistant role only — genuine user
 		// messages don't carry these.
 		if role == "assistant" {
-			text = a.routeMonitorEvents(sessionID, text)
-			if isMonitorHumanEcho(text) {
+			cleaned := a.routeMonitorEvents(sessionID, text)
+			monitorTextRemoved := cleaned != text
+			text = cleaned
+			if monitorTextRemoved && strings.TrimSpace(text) == "" {
 				return nil
 			}
-			if strings.TrimSpace(text) == "" {
+			if isMonitorHumanEcho(text) {
 				return nil
 			}
 		}
