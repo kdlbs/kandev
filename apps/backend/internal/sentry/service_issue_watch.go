@@ -114,6 +114,10 @@ func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*Sentry
 	if err != nil {
 		return nil, err
 	}
+	// Intentionally reads only the first page per tick (bounded-page-per-tick
+	// invariant, matching the Linear/Jira watchers). SearchIssues sorts results
+	// by first-seen descending (sort=new) so newly created issues reliably land
+	// on page one and are not missed by the single-page read.
 	res, err := client.SearchIssues(ctx, w.Filter, "")
 	if err != nil {
 		return nil, err
@@ -186,7 +190,7 @@ func (s *Service) publishNewSentryIssueEvent(ctx context.Context, w *IssueWatch,
 		Issue:             issue,
 	})
 	if err := eb.Publish(ctx, events.SentryNewIssue, evt); err != nil {
-		s.log.Debug("sentry: publish new issue event failed",
+		s.log.Warn("sentry: publish new issue event failed",
 			zap.String("watch_id", w.ID), zap.String("short_id", issue.ShortID), zap.Error(err))
 	}
 }

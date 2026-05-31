@@ -220,11 +220,19 @@ func issueNodeToIssue(n *issueNode) SentryIssue {
 // SearchIssues runs a filtered issue search scoped to filter.OrgSlug. cursor
 // is the opaque token returned in the previous page's NextPageToken; pass ""
 // for the first page.
+//
+// Results are always sorted by first-seen date descending (sort=new) so that
+// newly created issues appear on page one. The issue watcher relies on this to
+// detect new issues in a single bounded page read per poll tick.
 func (c *RESTClient) SearchIssues(ctx context.Context, filter SearchFilter, cursor string) (*SearchResult, error) {
 	if filter.OrgSlug == "" {
 		return nil, &APIError{StatusCode: http.StatusBadRequest, Message: "orgSlug required"}
 	}
 	q := url.Values{}
+	// Sort by first-seen descending so the newest issues land on page one.
+	// The issue watcher reads only a single page per tick; this ensures newly
+	// created issues are not buried behind older frequently-occurring ones.
+	q.Set("sort", "new")
 	if filter.Environment != "" {
 		q.Set("environment", filter.Environment)
 	}

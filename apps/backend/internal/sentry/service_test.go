@@ -11,6 +11,20 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
+// slowSecretStore wraps fakeSecretStore and calls a hook just before returning
+// from Reveal, allowing tests to inject a concurrent invalidation mid-build.
+type slowSecretStore struct {
+	*fakeSecretStore
+	revealHook func()
+}
+
+func (s *slowSecretStore) Reveal(ctx context.Context, id string) (string, error) {
+	if s.revealHook != nil {
+		s.revealHook()
+	}
+	return s.fakeSecretStore.Reveal(ctx, id)
+}
+
 type fakeSecretStore struct {
 	mu      sync.Mutex
 	secrets map[string]string
@@ -322,5 +336,74 @@ func TestService_DeleteConfig_RemovesSecretAndCache(t *testing.T) {
 	cfg, _ := f.svc.GetConfig(ctx)
 	if cfg != nil {
 		t.Errorf("expected config gone, got %+v", cfg)
+	}
+}
+
+// TestService_ClientFor_InvalidateDuringBuild verifies the TOCTOU fix: when
+// invalidateClient runs while clientFor is blocked on I/O, the freshly built
+// (now-stale) client must not be stored in s.client. The subsequent call must
+// rebuild, hitting the factory a second time.
+func TestService_ClientFor_InvalidateDuringBuild(t *testing.T) {
+	fakes := newFakeSecretStore()
+	_ = fakes.Set(context.Background(), SecretKey, "tok", "sntrys_xyz")
+
+	store := newTestStore(t)
+	ctx := context.Background()
+	// Seed a config row so clientFor gets past the nil-config check.
+	if err := store.UpsertConfig(ctx, &SentryConfig{
+		AuthMethod: AuthMethodAuthToken, DefaultOrgSlug: "acme",
+	}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	var factoryHit atomic.Int32
+	client := &fakeClient{}
+
+	// invalidateCh is closed by the Reveal hook to signal the main goroutine
+	// to call invalidateClient while the first clientFor is mid-I/O.
+	invalidateCh := make(chan struct{})
+	// doneCh is closed by the Reveal hook after it has signalled.
+	doneCh := make(chan struct{})
+
+	slow := &slowSecretStore{fakeSecretStore: fakes}
+
+	svc := NewService(store, slow, func(_ *SentryConfig, _ string) Client {
+		factoryHit.Add(1)
+		return client
+	}, logger.Default())
+
+	slow.revealHook = func() {
+		// Signal that we're mid-I/O, then wait for the invalidation to complete.
+		close(invalidateCh)
+		// Give the invalidation goroutine time to run.
+		time.Sleep(10 * time.Millisecond)
+		close(doneCh)
+	}
+
+	// First clientFor call — will block in Reveal while we invalidate.
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := svc.clientFor(ctx)
+		errCh <- err
+	}()
+
+	// Wait until clientFor is inside Reveal, then invalidate.
+	<-invalidateCh
+	svc.invalidateClient()
+
+	// Wait for the first clientFor to finish.
+	if err := <-errCh; err != nil {
+		t.Fatalf("first clientFor: %v", err)
+	}
+
+	// The invalidation must have reset the cache, so s.client should be nil now.
+	// A second clientFor must hit the factory again (not return the cached stale client).
+	slow.revealHook = nil // no more blocking
+	if _, err := svc.clientFor(ctx); err != nil {
+		t.Fatalf("second clientFor: %v", err)
+	}
+
+	if got := factoryHit.Load(); got < 2 {
+		t.Errorf("expected factory called at least twice (once per clientFor after invalidation), got %d", got)
 	}
 }

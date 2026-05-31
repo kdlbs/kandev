@@ -24,12 +24,17 @@ type SecretStore interface {
 // Service orchestrates Sentry config storage, the cached client, and the
 // browse operations used by the HTTP handlers.
 type Service struct {
-	store     *Store
-	secrets   SecretStore
-	log       *logger.Logger
-	mu        sync.Mutex
-	clientFn  ClientFactory
-	client    Client
+	store    *Store
+	secrets  SecretStore
+	log      *logger.Logger
+	mu       sync.Mutex
+	clientFn ClientFactory
+	client   Client
+	// clientGen is incremented by invalidateClient each time the cached client
+	// is discarded. clientFor captures it before I/O and only stores a newly
+	// built client when the value is unchanged, preventing a stale client from
+	// clobbering a concurrent invalidation.
+	clientGen uint64
 	probeHook func()
 	// mockClient is non-nil only when Provide built the service with a MockClient.
 	mockClient *MockClient
@@ -235,6 +240,11 @@ func (s *Service) defaultOrgSlug(ctx context.Context) string {
 }
 
 // clientFor returns the cached client, creating it if needed.
+// It captures the generation counter before releasing the lock for I/O so
+// that a concurrent invalidateClient call during the build window is not
+// silently overwritten: if the counter changed the freshly built client is
+// returned to the caller without being cached, and the next call rebuilds
+// with the updated config.
 func (s *Service) clientFor(ctx context.Context) (Client, error) {
 	s.mu.Lock()
 	if s.client != nil {
@@ -242,6 +252,7 @@ func (s *Service) clientFor(ctx context.Context) (Client, error) {
 		s.mu.Unlock()
 		return c, nil
 	}
+	gen := s.clientGen
 	s.mu.Unlock()
 
 	cfg, err := s.store.GetConfig(ctx)
@@ -265,16 +276,26 @@ func (s *Service) clientFor(ctx context.Context) (Client, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.client != nil {
+		// Another goroutine already cached a client; use that one.
 		return s.client, nil
+	}
+	if s.clientGen != gen {
+		// invalidateClient ran while we were doing I/O — the config/secret we
+		// read is now stale. Return the client to the caller for this call only;
+		// the next call will rebuild with fresh credentials.
+		return client, nil
 	}
 	s.client = client
 	return client, nil
 }
 
 // invalidateClient drops the cached client so the next request rebuilds it.
+// The generation counter is incremented so a concurrent clientFor build does
+// not restore a client built from the now-stale config.
 func (s *Service) invalidateClient() {
 	s.mu.Lock()
 	s.client = nil
+	s.clientGen++
 	s.mu.Unlock()
 }
 
