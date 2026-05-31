@@ -316,6 +316,14 @@ func (s *Service) fetchAndPersist(ctx context.Context) (UpdatesResponse, error) 
 
 func (s *Service) buildResponse(latest, url string, checkedAt time.Time) UpdatesResponse {
 	install, _ := s.detectInstallState()
+	return s.buildResponseFrom(install, latest, url, checkedAt)
+}
+
+// buildResponseFrom assembles the response from an already-detected install
+// state. Apply reuses this so the ApplySupported gate and the intent file are
+// derived from a single install-state snapshot rather than two independent
+// reads (closing a narrow TOCTOU window).
+func (s *Service) buildResponseFrom(install InstallStateResponse, latest, url string, checkedAt time.Time) UpdatesResponse {
 	applySupported, reason := install.applySupport()
 	return UpdatesResponse{
 		Current:                s.current,

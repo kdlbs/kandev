@@ -48,14 +48,16 @@ func (s *Service) applyPreflight() (UpdatesResponse, *serviceInstallMetadata, er
 	if err != nil {
 		return UpdatesResponse{}, nil, err
 	}
-	resp := s.buildResponse(version, releaseURL, checkedAt)
+	// Read install state once so the ApplySupported gate below and the intent
+	// file written by the caller both reflect the same snapshot.
+	install, metadata := s.detectInstallState()
+	resp := s.buildResponseFrom(install, version, releaseURL, checkedAt)
 	if !resp.UpdateAvailable {
 		return UpdatesResponse{}, nil, ErrNoUpdateAvailable
 	}
 	if !resp.ApplySupported {
 		return UpdatesResponse{}, nil, fmt.Errorf("%w: %s", ErrApplyUnsupported, resp.ApplyUnsupportedReason)
 	}
-	_, metadata := s.detectInstallState()
 	if metadata == nil {
 		return UpdatesResponse{}, nil, ErrApplyUnsupported
 	}
