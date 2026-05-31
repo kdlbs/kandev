@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import type { Terminal } from "@xterm/xterm";
+import type { IDisposable } from "@xterm/xterm";
 import {
   clearTerminalBusy,
   markTerminalInput,
@@ -11,19 +12,36 @@ export function useTerminalBusyTracking(
   terminalId: string | undefined,
   xtermRef: React.MutableRefObject<Terminal | null>,
   enabled: boolean,
+  terminalReady: boolean,
 ): void {
   useEffect(() => {
-    if (!enabled || !terminalId) return;
-    const terminal = xtermRef.current;
-    if (!terminal) return;
+    if (!enabled || !terminalId || !terminalReady) return;
 
-    const inputSub = terminal.onData((data) => markTerminalInput(terminalId, data));
-    const outputSub = terminal.onWriteParsed(() => markTerminalOutput(terminalId, terminal));
+    let disposed = false;
+    let inputSub: IDisposable | undefined;
+    let outputSub: IDisposable | undefined;
+    let raf = 0;
+
+    const attach = () => {
+      if (disposed) return;
+      const terminal = xtermRef.current;
+      if (!terminal) {
+        raf = requestAnimationFrame(attach);
+        return;
+      }
+      inputSub = terminal.onData((data) => markTerminalInput(terminalId, data));
+      outputSub = terminal.onWriteParsed(() => markTerminalOutput(terminalId, terminal));
+    };
+
+    attach();
 
     return () => {
-      inputSub.dispose();
-      outputSub.dispose();
+      disposed = true;
+      if (raf) cancelAnimationFrame(raf);
+      inputSub?.dispose();
+      outputSub?.dispose();
       clearTerminalBusy(terminalId);
     };
-  }, [enabled, terminalId, xtermRef]);
+    // xtermRef object is stable; included to satisfy exhaustive-deps.
+  }, [enabled, terminalId, terminalReady, xtermRef]);
 }

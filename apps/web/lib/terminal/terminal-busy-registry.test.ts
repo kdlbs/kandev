@@ -1,10 +1,11 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import type { Terminal } from "@xterm/xterm";
 import {
-  clearTerminalBusy,
   isTerminalBusy,
   markTerminalInput,
   markTerminalOutput,
+  resetTerminalBusyRegistry,
+  shouldConfirmTerminalClose,
 } from "./terminal-busy-registry";
 
 function mockTerminal(lineText: string): Terminal {
@@ -23,7 +24,7 @@ function mockTerminal(lineText: string): Terminal {
 
 describe("terminal-busy-registry", () => {
   beforeEach(() => {
-    clearTerminalBusy("term-1");
+    resetTerminalBusyRegistry();
   });
 
   it("starts idle", () => {
@@ -45,5 +46,21 @@ describe("terminal-busy-registry", () => {
     markTerminalInput("term-1", "make dev\r");
     markTerminalOutput("term-1", mockTerminal("DEBUG logger/logger.go:42"));
     expect(isTerminalBusy("term-1")).toBe(true);
+  });
+
+  it("stays busy when cursor is on a blank line before prompt redraw", () => {
+    markTerminalInput("term-1", "make\r");
+    markTerminalOutput("term-1", mockTerminal(""));
+    expect(isTerminalBusy("term-1")).toBe(true);
+  });
+
+  it("requires confirm for script terminals regardless of busy state", () => {
+    expect(shouldConfirmTerminalClose("term-1", { type: "script" })).toBe(true);
+    expect(shouldConfirmTerminalClose("term-1", { kind: "script" })).toBe(true);
+  });
+
+  it("requires confirm when busy for ordinary terminals", () => {
+    markTerminalInput("term-1", "npm install\r");
+    expect(shouldConfirmTerminalClose("term-1", { kind: "ordinary" })).toBe(true);
   });
 });

@@ -21,7 +21,7 @@ import { useDefaultLayout } from "@/lib/layout/use-default-layout";
 import { SessionTabs, type SessionTab } from "@/components/session-tabs";
 import { useRepositoryScripts } from "@/hooks/domains/workspace/use-repository-scripts";
 import { useTerminals } from "@/hooks/domains/session/use-terminals";
-import { isTerminalBusy } from "@/lib/terminal/terminal-busy-registry";
+import { shouldConfirmTerminalClose } from "@/lib/terminal/terminal-busy-registry";
 import { ParkedTerminalsMenu } from "@/components/task/parked-terminals-menu";
 import { CloseTerminalConfirmDialog } from "@/components/task/close-terminal-confirm-dialog";
 import type { RepositoryScript } from "@/lib/types/http";
@@ -206,7 +206,9 @@ function useConfirmableTerminalClose({
   const handleAskCloseTab = useCallback(
     (event: MouseEvent, terminalId: string) => {
       const terminal = terminals.find((t) => t.id === terminalId);
-      const needsConfirm = !!terminal && (terminal.type === "script" || isTerminalBusy(terminalId));
+      const needsConfirm =
+        !!terminal &&
+        shouldConfirmTerminalClose(terminalId, { type: terminal.type, kind: terminal.kind });
       if (needsConfirm) {
         event.preventDefault();
         event.stopPropagation();
@@ -511,7 +513,7 @@ const TaskRightPanel = memo(function TaskRightPanel({
       />
       <CloseTerminalConfirmDialog
         open={pendingClose !== null}
-        terminalName={pendingClose?.label ?? ""}
+        terminalName={pendingClose?.label || "Terminal"}
         onOpenChange={(open) => {
           if (!open) setPendingClose(null);
         }}

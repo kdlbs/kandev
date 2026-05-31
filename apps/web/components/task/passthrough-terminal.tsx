@@ -233,7 +233,7 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     keyboardShortcutsRef,
     onFindInPanelRef,
   });
-  useTerminalBusyTracking(terminalId, xtermRef, mode === "shell" && isTerminalReady);
+  useTerminalBusyTracking(terminalId, xtermRef, mode === "shell", isTerminalReady);
 
   useTouchScroll({
     terminalRef: refs.terminalRef,

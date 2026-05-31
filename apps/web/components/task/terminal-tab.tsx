@@ -11,7 +11,7 @@ import {
 } from "@kandev/ui/context-menu";
 import { useAppStore } from "@/components/state-provider";
 import { destroyUserShell, renameUserShell } from "@/lib/api/domains/user-shell-api";
-import { isTerminalBusy } from "@/lib/terminal/terminal-busy-registry";
+import { shouldConfirmTerminalClose } from "@/lib/terminal/terminal-busy-registry";
 import { CloseTerminalConfirmDialog } from "./close-terminal-confirm-dialog";
 import { markTerminalPanelTerminateClose } from "./dockview-layout-setup";
 
@@ -78,11 +78,6 @@ function useTerminalTabState(stampedEnv: string | undefined, terminalId: string,
   return { shell, isOrdinary, seq, showBadge, displayName, closable };
 }
 
-function shouldConfirmTerminalClose(terminalId: string, shell: { initialCommand?: string } | null) {
-  if (shell?.initialCommand) return true;
-  return isTerminalBusy(terminalId);
-}
-
 export function TerminalTab(props: IDockviewPanelHeaderProps) {
   const { terminalId, taskID: stampedTaskID, environmentId: stampedEnv } = extractParams(props);
   const activeTaskID = useAppStore((s) => s.tasks?.activeTaskId ?? null);
@@ -129,7 +124,7 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
 
   const handleCloseTab = useCallback(() => {
     if (!closable) return;
-    if (shouldConfirmTerminalClose(terminalId, shell)) {
+    if (shouldConfirmTerminalClose(terminalId, { kind: shell?.kind })) {
       setConfirmClose(true);
       return;
     }
