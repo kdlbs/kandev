@@ -366,6 +366,11 @@ func (sm *StreamManager) connectWorkspaceStream(execution *AgentExecution, ready
 		case <-sm.stopCh:
 			ws.Close()
 		}
+		// Block until the stream's read/write goroutines have fully unwound
+		// before returning. Done()/Close only signal shutdown, so without this
+		// the StreamManager's wg releases while a blocked websocket read is
+		// still draining — stranding a goroutine that leak detection catches.
+		ws.Wait()
 		execution.ClearWorkspaceStream(ws)
 		return
 	}

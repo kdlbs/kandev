@@ -33,7 +33,13 @@ type WorkspaceStream struct {
 	inputCh   chan types.WorkspaceStreamMessage
 	closeCh   chan struct{}
 	closeOnce sync.Once
-	logger    *logger.Logger
+	// wg tracks the read + write goroutines so Wait() can block until they have
+	// fully unwound. Close()/Done() only signal shutdown; the read loop may
+	// still be returning from a blocked ReadJSON when they fire, so callers
+	// that need a true drain barrier (StreamManager shutdown, leak-sensitive
+	// tests) must call Wait after Close/Done.
+	wg     sync.WaitGroup
+	logger *logger.Logger
 }
 
 // StreamWorkspace opens a unified WebSocket connection for all workspace events
@@ -64,8 +70,19 @@ func (c *Client) StreamWorkspace(ctx context.Context, callbacks WorkspaceStreamC
 		logger:  c.logger,
 	}
 
-	go c.readWorkspaceStream(conn, stream, callbacks)
-	go stream.writeLoop(conn)
+	// Track both goroutines on the per-stream wg so WorkspaceStream.Wait can
+	// block until they have fully unwound. The workspace read loop only invokes
+	// data callbacks (shell/git/process) and self-closes on exit — it never
+	// re-enters manager teardown — so draining it is side-effect-free.
+	stream.wg.Add(2)
+	go func() {
+		defer stream.wg.Done()
+		c.readWorkspaceStream(conn, stream, callbacks)
+	}()
+	go func() {
+		defer stream.wg.Done()
+		stream.writeLoop(conn)
+	}()
 
 	return stream, nil
 }
@@ -173,6 +190,14 @@ func (ws *WorkspaceStream) Close() {
 // Done returns a channel that is closed when the stream is closed
 func (ws *WorkspaceStream) Done() <-chan struct{} {
 	return ws.closeCh
+}
+
+// Wait blocks until the stream's read and write goroutines have fully exited.
+// Done() only reports that shutdown was *requested* (closeCh closed); Wait
+// reports that the goroutines have actually drained. Call after Close (or after
+// Done fires) to make teardown a true barrier for leak detection.
+func (ws *WorkspaceStream) Wait() {
+	ws.wg.Wait()
 }
 
 // CloseWorkspaceStream closes the workspace stream connection
