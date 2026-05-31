@@ -15,7 +15,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-import { DATA_DIR, HEALTH_TIMEOUT_MS_RELEASE } from "./constants";
+import { HEALTH_TIMEOUT_MS_RELEASE, resolveDataDir, resolveDatabasePath } from "./constants";
 import { resolveHealthTimeoutMs, waitForHealth, waitForUrlReady } from "./health";
 import { getBinaryName } from "./platform";
 import { createProcessSupervisor } from "./process";
@@ -154,7 +154,8 @@ export async function runStart({
 
   // Production mode: use warn log level for clean output unless verbose/debug
   const showOutput = verbose || debug;
-  const dbPath = process.env.KANDEV_DATABASE_PATH || path.join(DATA_DIR, "kandev.db");
+  fs.mkdirSync(resolveDataDir(), { recursive: true });
+  const dbPath = resolveDatabasePath();
   const logLevel =
     process.env.KANDEV_LOG_LEVEL?.trim() || (debug ? "debug" : verbose ? "info" : "warn");
   const backendEnv = buildBackendEnv({

@@ -54,4 +54,16 @@ describe("JobProgressIndicator", () => {
 
     expect(screen.getByTestId("system-job-self-update").getAttribute("data-state")).toBe("failed");
   });
+
+  it("allows a flow-specific success label", () => {
+    mocks.useSystemJob.mockReturnValue(job({ id: "job-42", state: "succeeded" }));
+    mocks.useSystemJobs.mockReturnValue([]);
+
+    render(
+      <JobProgressIndicator kind="self-update" jobId="job-42" successLabel="Restarting service" />,
+    );
+
+    expect(screen.getByText("Restarting service")).not.toBeNull();
+    expect(screen.queryByText("Done")).toBeNull();
+  });
 });

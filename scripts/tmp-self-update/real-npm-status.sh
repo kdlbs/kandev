@@ -49,26 +49,44 @@ print_diagnostics() {
   echo "[self-update-real-npm] no candidate port answered" >&2
   echo "[self-update-real-npm] tried ports: $(candidate_ports | paste -sd ', ' -)" >&2
   echo >&2
-  if [ -f "$PLIST_PATH" ]; then
-    echo "[self-update-real-npm] launchd plist port:" >&2
-    plist_port >&2 || true
-    echo "[self-update-real-npm] launchd plist:" >&2
-    sed -n '1,220p' "$PLIST_PATH" >&2 || true
-  else
-    echo "[self-update-real-npm] missing plist: $PLIST_PATH" >&2
-  fi
-  echo >&2
-  launchctl print "gui/$(id -u)/com.kdlbs.kandev" >&2 || true
-  launchctl print-disabled "gui/$(id -u)" 2>/dev/null | grep com.kdlbs.kandev >&2 || true
-  echo >&2
-  echo "[self-update-real-npm] listening kandev processes:" >&2
-  lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | grep -i kandev >&2 || true
-  echo >&2
-  echo "[self-update-real-npm] recent service logs:" >&2
-  tail -n 120 "$TEST_HOME/logs/service.err" "$TEST_HOME/logs/service.out" >&2 || true
-  echo >&2
-  echo "[self-update-real-npm] recent macOS unified logs mentioning kandev:" >&2
-  log show --last 10m --style compact --predicate 'eventMessage CONTAINS[c] "kandev" OR process CONTAINS[c] "kandev"' >&2 || true
+  case "$(uname -s)" in
+    Darwin)
+      if [ -f "$PLIST_PATH" ]; then
+        echo "[self-update-real-npm] launchd plist port:" >&2
+        plist_port >&2 || true
+        echo "[self-update-real-npm] launchd plist:" >&2
+        sed -n '1,220p' "$PLIST_PATH" >&2 || true
+      else
+        echo "[self-update-real-npm] missing plist: $PLIST_PATH" >&2
+      fi
+      echo >&2
+      launchctl print "gui/$(id -u)/com.kdlbs.kandev" >&2 || true
+      launchctl print-disabled "gui/$(id -u)" 2>/dev/null | grep com.kdlbs.kandev >&2 || true
+      echo >&2
+      echo "[self-update-real-npm] listening kandev processes:" >&2
+      lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | grep -i kandev >&2 || true
+      echo >&2
+      echo "[self-update-real-npm] recent service logs:" >&2
+      tail -n 120 "$TEST_HOME/logs/service.err" "$TEST_HOME/logs/service.out" >&2 || true
+      echo >&2
+      echo "[self-update-real-npm] recent macOS unified logs mentioning kandev:" >&2
+      log show --last 10m --style compact --predicate 'eventMessage CONTAINS[c] "kandev" OR process CONTAINS[c] "kandev"' >&2 || true
+      ;;
+    Linux)
+      echo "[self-update-real-npm] systemd user status:" >&2
+      systemctl --user status kandev --no-pager >&2 || true
+      echo >&2
+      echo "[self-update-real-npm] recent systemd user logs:" >&2
+      journalctl --user-unit kandev -n 160 --no-pager >&2 || true
+      echo >&2
+      echo "[self-update-real-npm] listening ports:" >&2
+      if command -v ss >/dev/null 2>&1; then
+        ss -ltnp >&2 || true
+      elif command -v lsof >/dev/null 2>&1; then
+        lsof -nP -iTCP -sTCP:LISTEN >&2 || true
+      fi
+      ;;
+  esac
 }
 
 echo "[self-update-real-npm] backend info:"

@@ -12,10 +12,17 @@ if [ "${KANDEV_REAL_NPM_CONFIRM:-}" != "1" ]; then
   exit 2
 fi
 
-if ! command -v npm >/dev/null 2>&1; then
-  echo "[self-update-real-npm] npm is required" >&2
-  exit 1
-fi
+require_command() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "[self-update-real-npm] $1 is required" >&2
+    exit 1
+  fi
+}
+
+require_command npm
+require_command node
+require_command python3
+require_command rsync
 
 reset_user_service() {
   case "$(uname -s)" in

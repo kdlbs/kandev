@@ -4,12 +4,13 @@ import path from "node:path";
 
 import { ensureExtracted, findBundleRoot, resolveWebServerPath } from "./bundle";
 import {
-  CACHE_DIR,
-  DATA_DIR,
   DEFAULT_AGENTCTL_PORT,
   DEFAULT_BACKEND_PORT,
   DEFAULT_WEB_PORT,
   HEALTH_TIMEOUT_MS_RELEASE,
+  resolveCacheDir,
+  resolveDataDir,
+  resolveDatabasePath,
 } from "./constants";
 import { ensureAsset, getRelease } from "./github";
 import { resolveHealthTimeoutMs, waitForHealth, waitForUrlReady } from "./health";
@@ -56,8 +57,9 @@ export function findCachedRelease(
   platformDir: string,
   version?: string,
 ): { cacheDir: string; tag: string } | null {
+  const rootCacheDir = resolveCacheDir();
   if (version) {
-    const cacheDir = path.join(CACHE_DIR, version, platformDir);
+    const cacheDir = path.join(rootCacheDir, version, platformDir);
     const bundleDir = path.join(cacheDir, "kandev");
     const backendBin = path.join(bundleDir, "bin", getBinaryName("kandev"));
     if (fs.existsSync(backendBin)) {
@@ -67,15 +69,15 @@ export function findCachedRelease(
   }
 
   // No version specified — scan for cached tags and pick the latest.
-  if (!fs.existsSync(CACHE_DIR)) return null;
+  if (!fs.existsSync(rootCacheDir)) return null;
 
-  const entries = fs.readdirSync(CACHE_DIR).filter((d) => d.startsWith("v"));
+  const entries = fs.readdirSync(rootCacheDir).filter((d) => d.startsWith("v"));
   if (entries.length === 0) return null;
 
   const sorted = sortVersionsDesc(entries);
 
   for (const tag of sorted) {
-    const cacheDir = path.join(CACHE_DIR, tag, platformDir);
+    const cacheDir = path.join(rootCacheDir, tag, platformDir);
     const bundleDir = path.join(cacheDir, "kandev");
     const backendBin = path.join(bundleDir, "bin", getBinaryName("kandev"));
     if (fs.existsSync(backendBin)) {
@@ -92,9 +94,10 @@ export function findCachedRelease(
  * The previous version is kept as a fallback for offline use.
  */
 export function cleanOldReleases(currentTag: string) {
+  const rootCacheDir = resolveCacheDir();
   try {
-    if (!fs.existsSync(CACHE_DIR)) return;
-    const entries = fs.readdirSync(CACHE_DIR).filter((d) => d.startsWith("v"));
+    if (!fs.existsSync(rootCacheDir)) return;
+    const entries = fs.readdirSync(rootCacheDir).filter((d) => d.startsWith("v"));
     if (entries.length <= 2) return;
 
     const sorted = sortVersionsDesc(entries);
@@ -103,7 +106,7 @@ export function cleanOldReleases(currentTag: string) {
     const keep = new Set<string>([currentTag, sorted[0], sorted[1]]);
     for (const entry of entries) {
       if (!keep.has(entry)) {
-        fs.rmSync(path.join(CACHE_DIR, entry), { recursive: true, force: true });
+        fs.rmSync(path.join(rootCacheDir, entry), { recursive: true, force: true });
       }
     }
   } catch {
@@ -120,7 +123,7 @@ async function downloadRuntimeVersion(runtimeVersion: string): Promise<string> {
   const release = await getRelease(runtimeVersion);
   const tag = release.tag_name;
   const assetName = `kandev-${platformDir}.tar.gz`;
-  const cacheDir = path.join(CACHE_DIR, tag, platformDir);
+  const cacheDir = path.join(resolveCacheDir(), tag, platformDir);
 
   const archivePath = await ensureAsset(tag, assetName, cacheDir, (downloaded, total) => {
     const percent = total ? Math.round((downloaded / total) * 100) : 0;
@@ -156,7 +159,7 @@ async function prepareBundleForLaunch({
     } else {
       try {
         tag = await downloadRuntimeVersion(runtimeVersion);
-        const cacheDir = path.join(CACHE_DIR, tag, platformDir);
+        const cacheDir = path.join(resolveCacheDir(), tag, platformDir);
         bundleDir = findBundleRoot(cacheDir);
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
@@ -186,8 +189,9 @@ async function prepareBundleForLaunch({
   const logLevel =
     process.env.KANDEV_LOG_LEVEL?.trim() || (debug ? "debug" : verbose ? "info" : "warn");
 
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  const dbPath = path.join(DATA_DIR, "kandev.db");
+  const dataDir = resolveDataDir();
+  fs.mkdirSync(dataDir, { recursive: true });
+  const dbPath = resolveDatabasePath();
 
   const backendBin = path.join(bundleDir, "bin", getBinaryName("kandev"));
 

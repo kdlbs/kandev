@@ -117,7 +117,11 @@ export function UpdatesCard() {
           reason={gate.cannotApplyReason}
           commands={gate.manualCommands}
         />
-        <JobProgressIndicator kind="self-update" jobId={applyJobId ?? undefined} />
+        <JobProgressIndicator
+          kind="self-update"
+          jobId={applyJobId ?? undefined}
+          successLabel="Restarting service"
+        />
         <UpdateError error={error} retryAfter={retryAfter} />
       </CardContent>
     </Card>
