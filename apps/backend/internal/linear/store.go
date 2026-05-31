@@ -63,6 +63,10 @@ const createTablesSQL = `
 		prompt TEXT NOT NULL DEFAULT '',
 		enabled BOOLEAN NOT NULL DEFAULT 1,
 		poll_interval_seconds INTEGER NOT NULL DEFAULT 300,
+		-- Cap on concurrent open watcher-created tasks for this watch.
+		-- NULL = uncapped. Positive integer = cap. Values <= 0 are rejected at
+		-- the API layer. See docs/specs/throttle-watcher-fanout/.
+		max_inflight_tasks INTEGER DEFAULT 5,
 		last_polled_at DATETIME,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
@@ -91,6 +95,30 @@ func (s *Store) initSchema() error {
 	}
 	if _, err := s.db.Exec(createTablesSQL); err != nil {
 		return err
+	}
+	if err := s.addMaxInflightTasksColumn(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// addMaxInflightTasksColumn brings older databases up to the current schema by
+// adding the max_inflight_tasks column to linear_issue_watches when missing.
+// Existing rows backfill to the default (5). A fresh install hits the
+// column-already-present branch since createTablesSQL declares the column.
+func (s *Store) addMaxInflightTasksColumn() error {
+	cols, err := s.tableColumns("linear_issue_watches")
+	if err != nil {
+		return err
+	}
+	if len(cols) == 0 {
+		return nil
+	}
+	if _, ok := cols["max_inflight_tasks"]; ok {
+		return nil
+	}
+	if _, err := s.db.Exec(`ALTER TABLE linear_issue_watches ADD COLUMN max_inflight_tasks INTEGER DEFAULT 5`); err != nil {
+		return fmt.Errorf("add max_inflight_tasks column: %w", err)
 	}
 	return nil
 }

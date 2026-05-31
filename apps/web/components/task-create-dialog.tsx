@@ -121,8 +121,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
     onRowBranchChange,
     onAgentProfileChange,
     onExecutorProfileChange,
-    onToggleGitHubUrl,
-    onGitHubUrlChange,
+    onToggleRemote,
     onToggleFreshBranch,
     workflowAgentLocked,
     repositories,
@@ -130,7 +129,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
     isLocalExecutor,
   } = props;
   const showTaskName = (isCreateMode || isEditMode) && !isTaskStarted;
-  const taskNameAutoFocus = !isEditMode && !fs.useGitHubUrl;
+  const taskNameAutoFocus = !isEditMode && !fs.useRemote;
   return (
     <>
       <RepoChipsRow
@@ -140,8 +139,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
         workspaceId={workspaceId}
         onRowRepositoryChange={onRowRepositoryChange}
         onRowBranchChange={onRowBranchChange}
-        onToggleGitHubUrl={onToggleGitHubUrl}
-        onGitHubUrlChange={onGitHubUrlChange}
+        onToggleRemote={onToggleRemote}
         freshBranchAvailable={freshBranchAvailable}
         freshBranchEnabled={fs.freshBranchEnabled}
         onToggleFreshBranch={onToggleFreshBranch}
@@ -323,11 +321,9 @@ function useSubmitHandlersWiring({
     repositories: fs.repositories,
     discoveredRepositories: fs.discoveredRepositories,
     workspaceRepositories,
-    useGitHubUrl: fs.useGitHubUrl,
-    githubUrl: fs.githubUrl,
-    githubPrHeadBranch: fs.githubPrHeadBranch,
-    githubPrBaseBranch: fs.githubPrBaseBranch,
-    githubBranch: fs.githubBranch,
+    useRemote: fs.useRemote,
+    remoteRepos: fs.remoteRepos,
+    prInfoByUrl: fs.prInfoByUrl,
     agentProfileId: computed.effectiveAgentProfileId,
     executorId: fs.executorId,
     executorProfileId: fs.executorProfileId,
@@ -344,7 +340,7 @@ function useSubmitHandlersWiring({
     setHasDescription: fs.setHasDescription,
     setTaskName: fs.setTaskName,
     setRepositories: fs.setRepositories,
-    setGitHubBranch: fs.setGitHubBranch,
+    setRemoteRepos: fs.setRemoteRepos,
     setAgentProfileId: fs.setAgentProfileId,
     setExecutorId: fs.setExecutorId,
     setSelectedWorkflowId: fs.setSelectedWorkflowId,
@@ -400,6 +396,8 @@ export function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     repositories,
     repositoriesLoading,
     agentProfiles,
+    compatibleAgentProfiles: computed.compatibleAgentProfiles,
+    authLoaded: computed.authLoaded,
     executors,
     workspaceDefaults: computed.workspaceDefaults,
     toast,
@@ -429,7 +427,7 @@ export function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
   // can hold any number of repos; we hide the toggle whenever the question
   // ("which repo do we discard local changes in?") becomes ambiguous.
   const freshBranchAvailable =
-    !fs.useGitHubUrl && computed.isLocalExecutor && fs.repositories.length === 1;
+    !fs.useRemote && computed.isLocalExecutor && fs.repositories.length === 1;
   return {
     fs,
     isSessionMode,

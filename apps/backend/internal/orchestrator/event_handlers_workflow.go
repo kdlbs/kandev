@@ -838,7 +838,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		}
 		s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
 		s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
-		s.drainQueuedMessageAfterTransition(ctx, sessionID)
+		s.drainQueuedMessageForPromptableSession(ctx, sessionID)
 		return
 	}
 
@@ -862,6 +862,9 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 			if !isPassthrough && hasPlanMode {
 				s.setSessionPlanMode(ctx, session, true)
 			}
+		case wfmodels.OnEnterSetSessionMode:
+			mode, _ := action.Config["mode"].(string)
+			s.applyStepSessionMode(ctx, session, mode, isPassthrough)
 		case wfmodels.OnEnterAutoStartAgent:
 			hasAutoStart = true
 		}
@@ -924,7 +927,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 						zap.Error(err))
 					s.setSessionWaitingForInput(asyncCtx, taskID, sessionID, session)
 					s.publishSessionWaitingEvent(asyncCtx, taskID, sessionID, stepID, session)
-					s.drainQueuedMessageAfterTransition(asyncCtx, sessionID)
+					s.drainQueuedMessageForPromptableSession(asyncCtx, sessionID)
 				}
 			}()
 			return
@@ -942,7 +945,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		// steps without auto_start_agent (e.g. Review). Drain here to match the
 		// pre-#677 behavior where handleAgentReady always drained after returning
 		// from inline processOnEnter.
-		s.drainQueuedMessageAfterTransition(ctx, sessionID)
+		s.drainQueuedMessageForPromptableSession(ctx, sessionID)
 	}
 }
 
@@ -953,7 +956,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 // task.moved handler doesn't run a second processStepExitAndEnter for the same
 // transition. The message queue is left intact — any user-supplied prompt
 // already queued by handleMoveTask is delivered by the on_enter path or by
-// drainQueuedMessageAfterTransition.
+// drainQueuedMessageForPromptableSession.
 func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string, session *models.TaskSession, move *messagequeue.PendingMove) {
 	// reinsertPendingMove restores the move so a future agent.ready can retry.
 	// Used on early failure paths (load errors, config issues) where the state
@@ -992,7 +995,7 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		s.logger.Info("pending move target equals current step; skipping transition",
 			zap.String("task_id", taskID),
 			zap.String("step_id", fromStepID))
-		s.drainQueuedMessageAfterTransition(ctx, sessionID)
+		s.drainQueuedMessageForPromptableSession(ctx, sessionID)
 		return
 	}
 
@@ -1048,26 +1051,29 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 	go s.processStepExitAndEnter(context.WithoutCancel(ctx), taskID, session, fromStepID, move.WorkflowStepID, taskDescription)
 }
 
-// drainQueuedMessageAfterTransition takes any user-queued message and dispatches
-// it for execution. Used by processOnEnter branches that don't auto-start the
-// agent — without this, the message is orphaned because handleAgentReady skips
-// the queue when a workflow transition occurred.
-func (s *Service) drainQueuedMessageAfterTransition(ctx context.Context, sessionID string) {
+// drainQueuedMessageForPromptableSession takes the next queued message and dispatches
+// it for execution. Callers must ensure the session is ready for input first.
+//
+// Used by processOnEnter branches that don't auto-start the agent, manual
+// drain requests, and cancel recovery. Without this, the message is orphaned
+// because handleAgentReady only drains from a normal turn-end event.
+func (s *Service) drainQueuedMessageForPromptableSession(ctx context.Context, sessionID string) bool {
 	if s.messageQueue == nil {
-		return
+		return false
 	}
 	queuedMsg, ok := s.messageQueue.TakeQueued(ctx, sessionID)
 	if !ok || queuedMsg == nil {
-		return
+		return false
 	}
 	s.publishQueueStatusEvent(ctx, sessionID)
 	if queuedMsg.Content == "" && len(queuedMsg.Attachments) == 0 {
 		s.logger.Warn("skipping empty queued message after transition",
 			zap.String("session_id", sessionID),
 			zap.String("queue_id", queuedMsg.ID))
-		return
+		return false
 	}
 	go s.executeQueuedMessage(sessionID, queuedMsg)
+	return true
 }
 
 // deliverPassthroughPrompt writes a prompt to PTY stdin and marks the session as running.
@@ -1125,6 +1131,13 @@ func (s *Service) autoStartPassthroughPrompt(
 		zap.String("step_name", stepName))
 	return nil
 }
+
+// metaKeyUserMessageRecorded marks a queued workflow auto-start message
+// whose chat-history user row was already inserted by recordAutoStartMessage
+// before the prompt was queued. executeQueuedMessage reads this flag to skip
+// its own CreateUserMessage and avoid the duplicate observed when PromptTask
+// failed transiently and the queue was later drained via boot_ready.
+const metaKeyUserMessageRecorded = "user_message_recorded"
 
 type workflowMessageOrigin struct {
 	StepID    string
@@ -1185,7 +1198,10 @@ func (s *Service) autoStartStepPrompt(
 	}
 
 	if shouldQueueIfBusy {
-		queued, err := s.queueAutoStartPromptIfRunning(ctx, taskID, session, prompt, planMode, attachments, origin)
+		// userMessageRecorded=false: recordAutoStartMessage has not run yet —
+		// the drain side (executeQueuedMessage) is responsible for inserting
+		// the chat-history row.
+		queued, err := s.queueAutoStartPromptIfRunning(ctx, taskID, session, prompt, planMode, attachments, origin, false)
 		if err != nil {
 			requeueTaken()
 			return err
@@ -1209,7 +1225,7 @@ func (s *Service) autoStartStepPrompt(
 	if session.State == models.TaskSessionStateCreated && !session.IsPassthrough && (prompt != "" || len(attachments) > 0) && !sysprompt.HasKandevContext(prompt) {
 		recordedPrompt = sysprompt.InjectKandevContext(taskID, sessionID, prompt)
 	}
-	s.recordAutoStartMessage(ctx, taskID, sessionID, recordedPrompt, planMode, origin)
+	userMsgRecorded := s.recordAutoStartMessage(ctx, taskID, sessionID, recordedPrompt, planMode, origin)
 
 	// If the session is in CREATED state, the agent was never started (e.g. workspace-only
 	// preparation from a blocked auto-start). PromptTask will reject CREATED sessions,
@@ -1251,21 +1267,26 @@ func (s *Service) autoStartStepPrompt(
 		// "already has an agent running" means the execution store still tracks
 		// an active agent for this session (e.g. session state is CREATED but
 		// the agent was launched by a concurrent path). Queue instead of retrying.
+		// Pass userMsgRecorded so the drain skips CreateUserMessage only when the
+		// chat row was successfully inserted above; a failed write passes false,
+		// letting the drain re-attempt insertion.
 		if isAgentAlreadyRunningError(err) && shouldQueueIfBusy {
-			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode, attachments, origin); queueErr != nil {
+			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode, attachments, origin, userMsgRecorded); queueErr != nil {
 				requeueTaken()
 				return queueErr
 			}
 			return nil
 		}
 
-		if !isAgentPromptInProgressError(err) && !isTransientPromptError(err) && !isSessionResetInProgressError(err) {
+		if !isSessionBusyError(err) && !isTransientPromptError(err) && !isSessionResetInProgressError(err) {
 			requeueTaken()
 			return err
 		}
 
 		if shouldQueueIfBusy {
-			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode, attachments, origin); queueErr != nil {
+			// Pass userMsgRecorded so the drain skips CreateUserMessage only when
+			// the chat row was successfully inserted above by recordAutoStartMessage.
+			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode, attachments, origin, userMsgRecorded); queueErr != nil {
 				requeueTaken()
 				return queueErr
 			}
@@ -1344,7 +1365,7 @@ func (s *Service) fallbackFreshLaunchOnMissingExecution(
 }
 
 // takeAndMergeHandoffMessage drains any queued hand-off message for the session
-// (set by handleMoveTask via move_task_kandev or by drainQueuedMessageAfterTransition)
+// (set by handleMoveTask via move_task_kandev or by drainQueuedMessageForPromptableSession)
 // and merges its content + attachments into the auto-start prompt. Returns the
 // original queued message (so terminal failure paths can re-queue it via
 // requeueMessage), the merged prompt, and the converted attachments. Empty
@@ -1379,14 +1400,19 @@ func (s *Service) takeAndMergeHandoffMessage(ctx context.Context, sessionID, bas
 // recordAutoStartMessage creates a user message for a workflow auto-start prompt
 // so it appears in the chat history. The prompt content includes system-injected
 // tags which are stripped when displayed to users via ToAPI().
+// Returns true when the chat row was successfully inserted, false otherwise
+// (messageCreator nil, empty prompt, or DB write failure). Callers that queue
+// the prompt after this call must pass the return value to queueAutoStartPrompt
+// as userMessageRecorded, so the drain side only skips CreateUserMessage when
+// the write actually succeeded.
 func (s *Service) recordAutoStartMessage(
 	ctx context.Context,
 	taskID, sessionID, prompt string,
 	planMode bool,
 	origin workflowMessageOrigin,
-) {
+) bool {
 	if s.messageCreator == nil || prompt == "" {
-		return
+		return false
 	}
 	turnID := s.getActiveTurnID(sessionID)
 	if turnID == "" {
@@ -1406,7 +1432,9 @@ func (s *Service) recordAutoStartMessage(
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.Error(err))
+		return false
 	}
+	return true
 }
 
 // queueAutoStartPromptIfRunning queues the workflow auto-start prompt only
@@ -1421,11 +1449,12 @@ func (s *Service) queueAutoStartPromptIfRunning(
 	planMode bool,
 	attachments []v1.MessageAttachment,
 	origin workflowMessageOrigin,
+	userMessageRecorded bool,
 ) (bool, error) {
 	if session.State != models.TaskSessionStateRunning && session.State != models.TaskSessionStateStarting {
 		return false, nil
 	}
-	if err := s.queueAutoStartPrompt(ctx, taskID, session.ID, prompt, planMode, attachments, origin); err != nil {
+	if err := s.queueAutoStartPrompt(ctx, taskID, session.ID, prompt, planMode, attachments, origin, userMessageRecorded); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -1446,15 +1475,29 @@ func toQueuedAttachments(attachments []v1.MessageAttachment) []messagequeue.Mess
 	return queued
 }
 
+// queueAutoStartPrompt persists a workflow auto-start prompt for later drain.
+// userMessageRecorded must be the return value of recordAutoStartMessage: true
+// only when CreateUserMessage actually succeeded. The flag is stamped onto the
+// queue metadata so executeQueuedMessage skips its own CreateUserMessage and
+// avoids the duplicate-user-message bug observed when PromptTask failed
+// transiently and the queue drained on boot_ready. Passing false (failed write
+// or pre-record queue path) lets the drain side record the message instead.
+// Callers that queue BEFORE recordAutoStartMessage runs (e.g.
+// queueAutoStartPromptIfRunning's early-busy path) must pass false.
 func (s *Service) queueAutoStartPrompt(
 	ctx context.Context,
 	taskID, sessionID, prompt string,
 	planMode bool,
 	attachments []v1.MessageAttachment,
 	origin workflowMessageOrigin,
+	userMessageRecorded bool,
 ) error {
 	if s.messageQueue == nil {
 		return fmt.Errorf("message queue is not configured")
+	}
+	meta := workflowMessageMetadata(planMode, origin)
+	if userMessageRecorded {
+		meta[metaKeyUserMessageRecorded] = true
 	}
 	_, err := s.messageQueue.QueueMessageWithMetadata(
 		ctx,
@@ -1465,7 +1508,7 @@ func (s *Service) queueAutoStartPrompt(
 		messagequeue.QueuedByWorkflow,
 		planMode,
 		toQueuedAttachments(attachments),
-		workflowMessageMetadata(planMode, origin),
+		meta,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to queue workflow auto-start prompt: %w", err)
@@ -1683,6 +1726,35 @@ func (s *Service) setSessionPlanMode(ctx context.Context, session *models.TaskSe
 		s.logger.Warn("failed to update session plan mode",
 			zap.String("session_id", session.ID),
 			zap.Bool("enabled", enabled),
+			zap.Error(err))
+	}
+}
+
+// applyStepSessionMode applies a workflow-declared session permission mode to a
+// session entering a step (set_session_mode action, issue #1183). It persists the
+// mode to metadata (durable + restored on reset) and best-effort applies it to a
+// running agent via ACP session/set_mode. Passthrough sessions manage their own
+// mode in the underlying CLI and are skipped, mirroring plan-mode handling.
+func (s *Service) applyStepSessionMode(ctx context.Context, session *models.TaskSession, mode string, isPassthrough bool) {
+	if mode == "" || isPassthrough {
+		return
+	}
+	// Persist for durability (SSR / backend restart) and so Part 1's reset
+	// re-apply has the right value. Mirror the in-memory struct for callers
+	// that read session.Metadata afterwards.
+	if session.Metadata == nil {
+		session.Metadata = make(map[string]interface{})
+	}
+	session.Metadata[models.SessionMetaKeySessionMode] = mode
+	s.persistSessionMode(ctx, session.ID, mode)
+
+	// Apply live when an agent is running. When none is (e.g. the step also
+	// auto-starts the agent fresh), this is a no-op and the profile default
+	// governs the new session — the declared mode stays persisted.
+	if err := s.agentManager.SetSessionModeBySessionID(ctx, session.ID, mode); err != nil {
+		s.logger.Debug("set_session_mode: could not apply mode to a live agent (persisted for next launch/reset)",
+			zap.String("session_id", session.ID),
+			zap.String("mode", mode),
 			zap.Error(err))
 	}
 }

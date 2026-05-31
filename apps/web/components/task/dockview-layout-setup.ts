@@ -10,12 +10,16 @@ import {
   RIGHT_TOP_GROUP,
   RIGHT_BOTTOM_GROUP,
   setPinnedTarget,
-  getPinnedTarget,
 } from "@/lib/state/layout-manager";
-import { setEnvLayout } from "@/lib/local-storage";
+import { setEnvLayout, setGlobalSidebarWidth } from "@/lib/local-storage";
 import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
 import { stopVscode } from "@/lib/api/domains/vscode-api";
 import { parkUserShell, stopUserShell } from "@/lib/api/domains/user-shell-api";
+import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+import { snapshotColumnWidths, formatWidthsSnapshot } from "@/lib/state/dockview-widths-debug";
+import { enforcePinnedTargets, setSashDragging } from "@/lib/state/dockview-pinned-enforce";
+
+const debugWidths = createDebugLogger("dockview:widths");
 
 // v2: bumped alongside DOCKVIEW_ENV_LAYOUT_PREFIX so the no-env fallback
 // also invalidates layouts saved under the previous caps.
@@ -26,67 +30,26 @@ export function markTerminalPanelTerminateClose(panelId: string): void {
   terminalTerminateClosePanelIds.add(panelId);
 }
 
-/**
- * Pinned-column target enforcement.
- *
- * Dockview's splitview rebalances proportionally on any `api.layout` call,
- * which would otherwise grow pinned columns past their initial defaults on
- * container expansion and shrink them on container contraction. We treat
- * sidebar/right as having a *target width* (stored in `pinned-targets.ts`)
- * that is updated only by explicit user actions (drag, initial layout,
- * restore from saved); after every layout-change event we force the live
- * columns back to their targets via `sv.resizeView`.
- */
+// Pinned-column target enforcement and the `sashDragging` flag live in
+// `lib/state/dockview-pinned-enforce.ts` so the store can call enforcement
+// without importing this component-layer module. The sash mousedown/mouseup
+// handlers below toggle the flag via `setSashDragging`.
 
-/** Enforcement-in-progress guard to prevent infinite loops when our own
- *  `sv.resizeView` triggers `onDidLayoutChange`. */
-let enforcing = false;
-
-/** True while the user is actively dragging a `.dv-sash`. We pause target
- *  enforcement during the drag so the in-progress resize doesn't get
- *  reverted to the previous target on every intermediate layout change. */
-let sashDragging = false;
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function restoreColumnToTarget(sv: any, idx: number, target: number | undefined): void {
-  if (target === undefined) return;
-  const cur = sv.getViewSize(idx);
-  if (Math.abs(cur - target) <= 1) return;
-  try {
-    sv.resizeView(idx, target);
-  } catch {
-    /* dockview rejects unreachable sizes — ignore */
-  }
-}
-
-function enforcePinnedTargets(api: DockviewReadyEvent["api"]): void {
-  if (enforcing || sashDragging) return;
-  const store = useDockviewStore.getState();
-  if (store.isRestoringLayout) return;
-  if (api.hasMaximizedGroup() || store.preMaximizeLayout !== null) return;
-  const sv = getRootSplitview(api);
-  if (!sv || sv.length < 2) return;
-  enforcing = true;
-  try {
-    if (store.sidebarVisible) restoreColumnToTarget(sv, 0, getPinnedTarget("sidebar"));
-    if (store.rightPanelsVisible) {
-      restoreColumnToTarget(sv, sv.length - 1, getPinnedTarget("right"));
-    }
-  } finally {
-    enforcing = false;
-  }
-}
-
-/** Set the loose runtime cap so the user can drag the column past its target. */
+/** Set the loose runtime cap so the user can drag the column past its target.
+ *  Uses `api.width` (dockview's measured grid width) for the cap computation
+ *  instead of `window.innerWidth`, which can briefly read stale during route
+ *  transitions and devtools toggles - a vw=601 read yields cap=301 (=
+ *  vw - VIEWPORT_RESERVE_PX) and squeezes the pinned column down to 301. */
 function setLooseConstraints(api: DockviewReadyEvent["api"]): void {
   const store = useDockviewStore.getState();
   if (store.isRestoringLayout) return;
   if (api.hasMaximizedGroup() || store.preMaximizeLayout !== null) return;
 
+  const vw = api.width > 0 ? api.width : undefined;
   const sb = api.getPanel("sidebar");
   if (sb && store.sidebarVisible) {
     sb.group.api.setConstraints({
-      maximumWidth: computeSidebarMaxPx(),
+      maximumWidth: computeSidebarMaxPx(vw),
       minimumWidth: LAYOUT_PINNED_MIN_PX,
     });
   }
@@ -96,7 +59,7 @@ function setLooseConstraints(api: DockviewReadyEvent["api"]): void {
       const group = api.groups.find((g) => g.id === gid);
       if (group) {
         group.api.setConstraints({
-          maximumWidth: computeRightMaxPx(),
+          maximumWidth: computeRightMaxPx(vw),
           minimumWidth: LAYOUT_PINNED_MIN_PX,
         });
       }
@@ -117,29 +80,62 @@ export function setupSashDragCapToggle(api: DockviewReadyEvent["api"]): () => vo
   // enforced post-hoc via `enforcePinnedTargets`.
   setLooseConstraints(api);
 
-  const layoutSub = api.onDidLayoutChange(() => enforcePinnedTargets(api));
+  const layoutSub = api.onDidLayoutChange(() => {
+    // Skip the reactive enforcement during a programmatic restore - the
+    // restore path itself calls `enforcePinnedTargets` synchronously inside
+    // its rAF so the user never sees a transient post-rebalance flicker.
+    // Without this gate, the in-flight restore (which fires its own
+    // layout-change events) would be re-entered before its rAF settled.
+    const s = useDockviewStore.getState();
+    if (s.isRestoringLayout) return;
+    enforcePinnedTargets(api, {
+      sidebarVisible: s.sidebarVisible,
+      rightPanelsVisible: s.rightPanelsVisible,
+      maximized: s.preMaximizeLayout !== null,
+    });
+  });
 
   if (typeof document === "undefined") {
     return () => layoutSub.dispose();
   }
 
+  // Local mirror of the enforcement-module flag so the mouseup handler can
+  // short-circuit when no drag was in progress without round-tripping through
+  // a getter. Both this local and the module flag (via setSashDragging) must
+  // stay in lockstep.
+  let dragging = false;
   const onMouseDown = (e: MouseEvent): void => {
     // Only track primary-button drags. A right/middle mousedown that didn't
-    // start a drag must not leave `sashDragging` permanently set (cubic P2).
+    // start a drag must not leave the flag permanently set (cubic P2).
     if (e.button !== 0) return;
     const t = e.target as HTMLElement | null;
-    if (t?.closest(".dv-sash")) sashDragging = true;
+    if (t?.closest(".dv-sash")) {
+      dragging = true;
+      setSashDragging(true);
+    }
   };
   const onMouseUp = (e: MouseEvent): void => {
-    if (e.button !== 0 || !sashDragging) return;
-    sashDragging = false;
+    if (e.button !== 0 || !dragging) return;
+    dragging = false;
+    setSashDragging(false);
     // Capture the post-drag width as the new target.
     requestAnimationFrame(() => {
       const sv = getRootSplitview(api);
       if (!sv) return;
       const store = useDockviewStore.getState();
-      if (store.sidebarVisible) setPinnedTarget("sidebar", sv.getViewSize(0));
+      if (store.sidebarVisible) {
+        // A genuine drag is the ONLY writer of the global sidebar width pref.
+        // Persist it globally and mirror into the store's pinnedWidths so the
+        // override path (resolvePresetPinnedWidths / classifyColumns) agrees.
+        const sidebarW = sv.getViewSize(0);
+        setPinnedTarget("sidebar", sidebarW);
+        setGlobalSidebarWidth(sidebarW);
+        store.setPinnedWidth("sidebar", sidebarW);
+      }
       if (store.rightPanelsVisible) setPinnedTarget("right", sv.getViewSize(sv.length - 1));
+      if (IS_DEBUG) {
+        debugWidths(`sash-drag-end ${formatWidthsSnapshot(snapshotColumnWidths(api))}`);
+      }
     });
   };
   document.addEventListener("mousedown", onMouseDown, true);
@@ -149,10 +145,11 @@ export function setupSashDragCapToggle(api: DockviewReadyEvent["api"]): () => vo
     layoutSub.dispose();
     document.removeEventListener("mousedown", onMouseDown, true);
     document.removeEventListener("mouseup", onMouseUp, true);
-    // Reset the module-scope flag so an unmount mid-drag (e.g. user navigates
-    // away while holding a sash) doesn't leave enforcement permanently paused
-    // for the next mount (claude).
-    sashDragging = false;
+    // Reset both flags so an unmount mid-drag (e.g. user navigates away while
+    // holding a sash) doesn't leave enforcement permanently paused for the
+    // next mount.
+    dragging = false;
+    setSashDragging(false);
   };
 }
 
@@ -163,18 +160,12 @@ function trackPinnedWidths(api: DockviewReadyEvent["api"]): void {
   const sv = getRootSplitview(api);
   if (!sv || sv.length < 2) return;
   try {
-    // Sidebar is grid index 0 *only when sidebar is visible*. Without the
-    // visibility guard, hiding the sidebar makes index 0 the center column,
-    // and we'd persist the center width as the sidebar's preferred width.
-    if (store.sidebarVisible) {
-      const sidebarW = sv.getViewSize(0);
-      if (sidebarW > 50) {
-        const current = store.pinnedWidths.get("sidebar");
-        if (current !== sidebarW) {
-          store.setPinnedWidth("sidebar", sidebarW);
-        }
-      }
-    }
+    // The sidebar width is NOT tracked here: it is a global pref written only
+    // by a genuine sash drag (see setupSashDragCapToggle). Capturing the live
+    // width on every layout change would persist dockview's transient
+    // proportional-rebalance widths (e.g. 320→213 on a monitor shrink) and
+    // fight enforcePinnedTargets. Right column is still mirrored below.
+    //
     // Right column is the last grid index when present. Skip when there is
     // no right column (compact preset, rightPanelsVisible=false).
     if (store.rightPanelsVisible) {
@@ -214,6 +205,12 @@ export function setupContainerResizeSync(api: DockviewReadyEvent["api"]): () => 
     const h = parent.clientHeight;
     if (w <= 0 || h <= 0) return;
     if (w === api.width && h === api.height) return;
+    if (IS_DEBUG) {
+      debugWidths(
+        `container-resize prev=${api.width}x${api.height} next=${w}x${h} ` +
+          `pre=${formatWidthsSnapshot(snapshotColumnWidths(api))}`,
+      );
+    }
     api.layout(w, h);
     // `enforcePinnedTargets` (wired in `setupSashDragCapToggle`) restores
     // sidebar/right to their target widths via `onDidLayoutChange`, so we
@@ -247,6 +244,11 @@ export function setupLayoutPersistence(
     try {
       const json = api.toJSON();
       const envId = envIdRef.current;
+      // Global snapshot of the last layout. NOTE: restore is per-env (see
+      // tryRestoreLayout) — this key is no longer read on load, since
+      // restoring a cross-env layout flashed the previous task's proportions
+      // while a fresh task prepared. Kept as a debounced-save checkpoint that
+      // e2e polls to know a layout change has flushed before reloading.
       localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(json));
       if (envId) {
         setEnvLayout(envId, json);

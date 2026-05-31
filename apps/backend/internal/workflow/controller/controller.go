@@ -236,9 +236,10 @@ func (c *Controller) ExportWorkflow(ctx context.Context, workflowID string) (*mo
 	return c.svc.ExportWorkflow(ctx, workflowID)
 }
 
-// ExportWorkflows exports all workflows for a workspace.
-func (c *Controller) ExportWorkflows(ctx context.Context, workspaceID string) (*models.WorkflowExport, error) {
-	return c.svc.ExportWorkflows(ctx, workspaceID)
+// ExportWorkflows exports workflows for a workspace. A nil workflowIDs exports
+// every workflow; a non-nil slice restricts the export to that set of IDs.
+func (c *Controller) ExportWorkflows(ctx context.Context, workspaceID string, workflowIDs []string) (*models.WorkflowExport, error) {
+	return c.svc.ExportWorkflows(ctx, workspaceID, workflowIDs)
 }
 
 // ImportWorkflows imports workflows into a workspace.

@@ -1,58 +1,32 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { Repository, Executor } from "@/lib/types/http";
-import type { AgentProfileOption } from "@/lib/state/slices";
 import { DEFAULT_LOCAL_EXECUTOR_TYPE } from "@/lib/utils";
 import { useToast } from "@/components/toast-provider";
 import {
   discoverRepositoriesAction,
   getLocalRepositoryStatusAction,
 } from "@/app/actions/workspaces";
+import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
 import { getLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
-import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
-import { fetchRepoBranches, fetchPRInfo } from "@/lib/api/domains/github-api";
+import { parseGitHubAnyUrl } from "@/hooks/domains/github/use-pr-info-by-url";
 import type {
   DialogFormState,
   StoreSelections,
   TaskCreateEffectsArgs,
 } from "@/components/task-create-dialog-types";
+import {
+  useAgentProfileAutopickEffect,
+  useWorkflowAgentProfileEffect,
+} from "@/components/task-create-dialog-autopick";
+import { computeSelectedRepoCount } from "@/components/task-create-dialog-computed";
 
-export function useWorkflowAgentProfileEffect(
-  fs: DialogFormState,
-  workflows: Array<{ id: string; agent_profile_id?: string }>,
-  agentProfiles: AgentProfileOption[],
-) {
-  const { selectedWorkflowId, setAgentProfileId, setWorkflowAgentProfileId } = fs;
-  useEffect(() => {
-    if (!selectedWorkflowId) {
-      setWorkflowAgentProfileId("");
-      return;
-    }
-    const workflow = workflows.find((w) => w.id === selectedWorkflowId);
-    if (workflow?.agent_profile_id) {
-      // Always lock the selector when the workflow specifies an agent profile.
-      // This prevents the race condition where agentProfiles hasn't loaded yet.
-      setWorkflowAgentProfileId(workflow.agent_profile_id);
-      // Only set the agentProfileId once the profile is confirmed available.
-      const profileExists = agentProfiles.some((p) => p.id === workflow.agent_profile_id);
-      if (profileExists) {
-        setAgentProfileId(workflow.agent_profile_id);
-      }
-    } else {
-      setWorkflowAgentProfileId("");
-      // Restore the user's last-used agent profile when unlocking, but only
-      // if it still exists. A clean DB mints fresh UUIDs for the same agents,
-      // so the previous run's id never matches and would otherwise poison
-      // the dialog into "No compatible agent profiles" because
-      // useDefaultSelectionsEffect skips when agentProfileId is truthy.
-      const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, null);
-      const isValidLastId = Boolean(lastId && agentProfiles.some((p) => p.id === lastId));
-      setAgentProfileId(isValidLastId && lastId ? lastId : "");
-    }
-  }, [selectedWorkflowId, workflows, agentProfiles, setAgentProfileId, setWorkflowAgentProfileId]);
-}
+// Re-export autopick hooks for callers that imported them from this module.
+export { useWorkflowAgentProfileEffect };
+// Also re-exported for the test file, which expects the symbol to live here.
+export { decideAgentProfileAutopick } from "@/components/task-create-dialog-autopick";
 
 export function useWorkflowStepsEffect(fs: DialogFormState, workflowId: string | null) {
   const { selectedWorkflowId, setFetchedSteps } = fs;
@@ -88,9 +62,9 @@ export function useRepositoryAutoSelectEffect(
   // pre-filled, but fall back to an empty row so the picker is visible
   // instead of just the "+" button. URL mode is excluded — that flow swaps
   // the chip row for a URL input.
-  const { repositories: rows, useGitHubUrl, setRepositories } = fs;
+  const { repositories: rows, useRemote, setRepositories } = fs;
   useEffect(() => {
-    if (!open || !workspaceId || useGitHubUrl) return;
+    if (!open || !workspaceId || useRemote) return;
     if (rows.length > 0) return;
     const lastUsedRepoId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_REPOSITORY_ID, null);
     let pickId: string | null = null;
@@ -114,7 +88,7 @@ export function useRepositoryAutoSelectEffect(
         ];
       });
     });
-  }, [open, repositories, rows, useGitHubUrl, workspaceId, setRepositories]);
+  }, [open, repositories, rows, useRemote, workspaceId, setRepositories]);
 }
 
 export function useDiscoverReposEffect(
@@ -178,14 +152,9 @@ export function useCurrentLocalBranchEffect(
   workspaceId: string | null,
   repositories: Repository[],
 ) {
-  const {
-    repositories: rows,
-    useGitHubUrl,
-    setCurrentLocalBranch,
-    setCurrentLocalBranchLoading,
-  } = fs;
+  const { repositories: rows, useRemote, setCurrentLocalBranch, setCurrentLocalBranchLoading } = fs;
   useEffect(() => {
-    if (!open || !workspaceId || useGitHubUrl || rows.length !== 1) {
+    if (!open || !workspaceId || useRemote || rows.length !== 1) {
       setCurrentLocalBranch("");
       setCurrentLocalBranchLoading(false);
       return;
@@ -220,7 +189,7 @@ export function useCurrentLocalBranchEffect(
   }, [
     open,
     workspaceId,
-    useGitHubUrl,
+    useRemote,
     rows,
     repositories,
     setCurrentLocalBranch,
@@ -254,54 +223,9 @@ export function useDefaultSelectionsEffect(
   sel: StoreSelections,
   workflows: Array<{ id: string; agent_profile_id?: string }>,
 ) {
-  const { agentProfiles, executors, workspaceDefaults } = sel;
-  const {
-    agentProfileId,
-    workflowAgentProfileId,
-    selectedWorkflowId,
-    executorId,
-    executorProfileId,
-    setAgentProfileId,
-    setExecutorId,
-    setExecutorProfileId,
-    noRepository,
-  } = fs;
-  useEffect(() => {
-    // Check synchronously whether the selected workflow has an agent override.
-    // This avoids a race condition where workflowAgentProfileId state hasn't
-    // been committed yet by the workflow effect running in the same cycle.
-    const workflowHasAgent = selectedWorkflowId
-      ? workflows.some((w) => w.id === selectedWorkflowId && w.agent_profile_id)
-      : false;
-    if (
-      !open ||
-      agentProfileId ||
-      workflowAgentProfileId ||
-      workflowHasAgent ||
-      agentProfiles.length === 0
-    )
-      return;
-    const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, null);
-    if (lastId && agentProfiles.some((p: AgentProfileOption) => p.id === lastId)) {
-      void Promise.resolve().then(() => setAgentProfileId(lastId));
-      return;
-    }
-    const defId = workspaceDefaults?.default_agent_profile_id ?? null;
-    if (defId && agentProfiles.some((p: AgentProfileOption) => p.id === defId)) {
-      void Promise.resolve().then(() => setAgentProfileId(defId));
-      return;
-    }
-    void Promise.resolve().then(() => setAgentProfileId(agentProfiles[0].id));
-  }, [
-    open,
-    agentProfileId,
-    workflowAgentProfileId,
-    selectedWorkflowId,
-    workflows,
-    agentProfiles,
-    workspaceDefaults,
-    setAgentProfileId,
-  ]);
+  const { executors, workspaceDefaults } = sel;
+  const { executorId, executorProfileId, setExecutorId, setExecutorProfileId, noRepository } = fs;
+  useAgentProfileAutopickEffect(fs, open, sel, workflows);
 
   useEffect(() => {
     if (!open || executorId || executors.length === 0) return;
@@ -338,10 +262,29 @@ export function useDefaultSelectionsEffect(
   // repos under one task root). If the current profile is non-worktree, swap
   // to a worktree profile — preferring the last-used worktree, otherwise the
   // first one available. Single-repo selections leave the profile alone.
+  //
+  // Count is mode-aware: Remote mode counts non-empty URL rows, workspace
+  // mode counts rows with a repo/path. Without this, 2 Remote rows + 0
+  // workspace rows would slip past the guard because the legacy check only
+  // inspected `fs.repositories` — `computeSelectedRepoCount` handles both.
+  // Depend on the count primitive, not the whole `fs` object. `fs` is a fresh
+  // literal every render, so listing it in the dep array would re-run this
+  // effect on every render. computeSelectedRepoCount only reads noRepository /
+  // useRemote / remoteRepos / repositories, so memoize over exactly those.
+  const { noRepository: fsNoRepository, useRemote, remoteRepos, repositories } = fs;
+  const selectedRepoCount = useMemo(
+    () =>
+      computeSelectedRepoCount({
+        noRepository: fsNoRepository,
+        useRemote,
+        remoteRepos,
+        repositories,
+      } as DialogFormState),
+    [fsNoRepository, useRemote, remoteRepos, repositories],
+  );
   useEffect(() => {
     if (!open || !executorProfileId || executors.length === 0) return;
-    const namedRepos = fs.repositories.filter((r) => r.repositoryId || r.localPath);
-    if (namedRepos.length <= 1) return;
+    if (selectedRepoCount <= 1) return;
     const profileToType = new Map<string, string | undefined>();
     const worktreeProfileIds: string[] = [];
     for (const e of executors) {
@@ -356,201 +299,70 @@ export function useDefaultSelectionsEffect(
     const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID, null);
     const pick = lastId && worktreeProfileIds.includes(lastId) ? lastId : worktreeProfileIds[0];
     void Promise.resolve().then(() => setExecutorProfileId(pick));
-  }, [open, executorProfileId, executors, fs.repositories, setExecutorProfileId]);
+  }, [open, executorProfileId, executors, selectedRepoCount, setExecutorProfileId]);
 }
 
 /**
- * Auto-selects a sensible branch in the GitHub URL flow. Per-repo (workspace
- * or discovered) branch auto-select happens inside RepoChip when a row's
- * branches load — that keeps the per-row state confined to the chip.
+ * Surfaces a "Invalid GitHub URL" error for the first remote row when its URL
+ * doesn't parse as a repo or a PR URL. Per-row PR-info fetching + branch
+ * auto-select live inside `RemoteRepoChip` via `usePRInfoByURL` and
+ * `useRowBranchAutoSelect`; this effect just keeps the surfaced error banner
+ * in sync with the first row's URL.
  */
-export function useBranchAutoSelectEffect(fs: DialogFormState) {
-  const { githubBranch, githubBranches, useGitHubUrl, setGitHubBranch, githubPrHeadBranch } = fs;
+export function useGitHubUrlErrorEffect(fs: DialogFormState, open: boolean) {
+  const { useRemote, setGitHubUrlError } = fs;
+  const firstUrl = fs.remoteRepos[0]?.url ?? "";
   useEffect(() => {
-    if (!useGitHubUrl || githubBranch) return;
-    // PR head wins regardless of whether it appears in the base repo's branch
-    // list. Fork PRs (head lives only on the contributor's fork) won't match
-    // anything in githubBranches, but we still want the pill to surface the
-    // PR's branch name — the worktree will materialize it from the PR refspec
-    // on the backend, and falling through to "main" would visually contradict
-    // the URL the user just pasted.
-    if (githubPrHeadBranch) {
-      setGitHubBranch(githubPrHeadBranch);
-      return;
-    }
-    if (githubBranches.length === 0) return;
-    // GitHub URL branches are referenced by name only (no remote prefix);
-    // selectPreferredBranch expects origin-prefixed remotes, so pick directly.
-    const preferred =
-      githubBranches.find((b) => b.name === "main") ??
-      githubBranches.find((b) => b.name === "master") ??
-      githubBranches[0];
-    if (preferred) setGitHubBranch(preferred.name);
-  }, [githubBranch, githubBranches, useGitHubUrl, setGitHubBranch, githubPrHeadBranch]);
-}
-
-/** Parse a GitHub URL to extract owner, repo, and optional PR number. Returns null if invalid. */
-function parseGitHubUrl(url: string): { owner: string; repo: string; prNumber?: number } | null {
-  const trimmed = url.trim();
-  if (!trimmed) return null;
-  // Try PR URL first: github.com/owner/repo/pull/123 (with optional trailing path/hash like /files#diff-...)
-  const prMatch = trimmed.match(
-    /(?:https?:\/\/)?(?:www\.)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/pull\/(\d+)(?:[/?#].*)?$/,
-  );
-  if (prMatch) {
-    return { owner: prMatch[1], repo: prMatch[2], prNumber: parseInt(prMatch[3], 10) };
-  }
-  // Fall back to repo URL: github.com/owner/repo
-  const match = trimmed.match(
-    /(?:https?:\/\/)?(?:www\.)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/,
-  );
-  if (!match) return null;
-  return { owner: match[1], repo: match[2] };
-}
-
-/**
- * Returns a callback that auto-fills the task name with `PR #N: <title>` when
- * a PR URL is pasted, leaving anything the user typed themselves alone. The
- * callback reads the latest taskName via a ref so the fetch effect doesn't
- * need to list taskName as a dep (which would re-fire the branches/PR fetch on
- * every keystroke in the title input).
- *
- * NOTE: Callers must omit the returned callback from `useEffect` dependency
- * arrays — including it causes the fetch to re-fire on every keystroke,
- * defeating the purpose of the ref. The call site uses
- * `eslint-disable react-hooks/exhaustive-deps` intentionally.
- */
-export function useAutoFillTaskNameFromPR(fs: DialogFormState) {
-  const { taskName, setTaskName, setHasTitle } = fs;
-  const lastAutoFilledTitleRef = useRef("");
-  const taskNameRef = useRef(taskName);
-  useEffect(() => {
-    taskNameRef.current = taskName;
-    if (!taskName.trim()) {
-      lastAutoFilledTitleRef.current = "";
-    }
-  }, [taskName]);
-  return (prNumber: number, prTitle: string) => {
-    const next = `PR #${prNumber}: ${prTitle}`;
-    const current = taskNameRef.current;
-    if (!current.trim() || current === lastAutoFilledTitleRef.current) {
-      lastAutoFilledTitleRef.current = next;
-      setTaskName(next);
-      setHasTitle(true);
-    }
-  };
-}
-
-export function useGitHubUrlBranchesEffect(fs: DialogFormState, open: boolean) {
-  const {
-    useGitHubUrl,
-    githubUrl,
-    setGitHubBranches,
-    setGitHubBranchesLoading,
-    setGitHubUrlError,
-    setGitHubPrHeadBranch,
-    setGitHubPrBaseBranch,
-  } = fs;
-  const autoFillTitle = useAutoFillTaskNameFromPR(fs);
-  useEffect(() => {
-    if (!open || !useGitHubUrl) {
-      setGitHubBranchesLoading(false);
-      return;
-    }
-    const trimmed = githubUrl.trim();
-    if (!trimmed) {
-      setGitHubBranches([]);
-      setGitHubBranchesLoading(false);
+    if (!open) return;
+    // When the user leaves Remote mode (toggle off / switch to workspace
+    // mode / dialog reopens in non-Remote mode) we must clear any stale
+    // error left over from a previous Remote-mode pass. The early return
+    // used to skip this — the banner stuck around after the field that
+    // produced it had been hidden, which surfaced confusing "Invalid
+    // GitHub URL" text alongside a repo picker.
+    if (!useRemote) {
       setGitHubUrlError(null);
       return;
     }
-    const parsed = parseGitHubUrl(githubUrl);
+    const trimmed = firstUrl.trim();
+    if (!trimmed) {
+      setGitHubUrlError(null);
+      return;
+    }
+    const parsed = parseGitHubAnyUrl(trimmed);
     if (!parsed) {
-      setGitHubBranches([]);
-      setGitHubPrHeadBranch(null);
-      setGitHubPrBaseBranch(null);
-      setGitHubBranchesLoading(false);
       setGitHubUrlError("Invalid GitHub URL — expected github.com/owner/repo or .../pull/123");
       return;
     }
-    let cancelled = false;
     setGitHubUrlError(null);
-    setGitHubBranchesLoading(true);
-    setGitHubPrHeadBranch(null);
-    setGitHubPrBaseBranch(null);
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15_000);
-    const fetchOpts = { init: { signal: controller.signal } };
-
-    const branchesPromise = fetchRepoBranches(parsed.owner, parsed.repo, fetchOpts);
-    const prPromise = parsed.prNumber
-      ? fetchPRInfo(parsed.owner, parsed.repo, parsed.prNumber, fetchOpts).catch(() => null)
-      : Promise.resolve(null);
-
-    Promise.all([branchesPromise, prPromise])
-      .then(([branchesRes, prInfo]) => {
-        if (cancelled) return;
-        setGitHubBranches(
-          branchesRes.branches.map((b) => ({ name: b.name, type: "remote" as const })),
-        );
-        setGitHubUrlError(null);
-        if (prInfo) {
-          setGitHubPrHeadBranch(prInfo.head_branch);
-          setGitHubPrBaseBranch(prInfo.base_branch);
-          autoFillTitle(prInfo.number, prInfo.title);
-        }
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        const isAbort = err instanceof DOMException && err.name === "AbortError";
-        const isNotConfigured = err instanceof Error && err.message.includes("not configured");
-        let errorMessage = "Repository not found or not accessible";
-        if (isAbort) {
-          errorMessage = "Request timed out. Check your GitHub configuration in Settings.";
-        } else if (isNotConfigured) {
-          errorMessage = "GitHub is not configured. Set up a token in Settings > GitHub.";
-        }
-        setGitHubUrlError(errorMessage);
-        setGitHubBranches([]);
-      })
-      .finally(() => {
-        clearTimeout(timeoutId);
-        if (!cancelled) setGitHubBranchesLoading(false);
-      });
-    return () => {
-      cancelled = true;
-      clearTimeout(timeoutId);
-      controller.abort();
-    };
-    // autoFillTitle is intentionally omitted: it's a fresh closure each render
-    // but reads the latest taskName via ref, so excluding it keeps the fetch
-    // from re-firing on every keystroke.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    open,
-    useGitHubUrl,
-    githubUrl,
-    setGitHubBranches,
-    setGitHubBranchesLoading,
-    setGitHubUrlError,
-    setGitHubPrHeadBranch,
-    setGitHubPrBaseBranch,
-  ]);
+  }, [open, useRemote, firstUrl, setGitHubUrlError]);
 }
 
 export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreateEffectsArgs) {
   const { open, workspaceId, workflowId, repositories, repositoriesLoading } = args;
-  const { agentProfiles, executors, workspaceDefaults, toast, workflows, isLocalExecutor } = args;
+  const {
+    agentProfiles,
+    compatibleAgentProfiles,
+    authLoaded,
+    executors,
+    workspaceDefaults,
+    toast,
+    workflows,
+    isLocalExecutor,
+  } = args;
   useWorkflowStepsEffect(fs, workflowId);
-  useWorkflowAgentProfileEffect(fs, workflows, agentProfiles);
+  useWorkflowAgentProfileEffect(fs, workflows, agentProfiles, compatibleAgentProfiles);
   useRepositoryAutoSelectEffect(fs, open, workspaceId, repositories);
   useDiscoverReposEffect(fs, open, workspaceId, repositoriesLoading, toast);
-  useBranchAutoSelectEffect(fs);
   useCurrentLocalBranchEffect(fs, open, workspaceId, repositories);
   useResetBranchOnLocalSwitchEffect(fs, isLocalExecutor, args.preserveBranch);
-  useDefaultSelectionsEffect(fs, open, { agentProfiles, executors, workspaceDefaults }, workflows);
-  useGitHubUrlBranchesEffect(fs, open);
+  useDefaultSelectionsEffect(
+    fs,
+    open,
+    { agentProfiles, compatibleAgentProfiles, authLoaded, executors, workspaceDefaults },
+    workflows,
+  );
+  useGitHubUrlErrorEffect(fs, open);
 }
 
 // Reset row.branch on every "switch to local executor" transition so the

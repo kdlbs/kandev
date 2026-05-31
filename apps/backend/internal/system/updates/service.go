@@ -131,14 +131,6 @@ func (s *Service) SetReleaseURL(url string) {
 	s.mu.Unlock()
 }
 
-// SetPollInterval overrides the default 6h cadence. Must be called before
-// StartPoller. Intended for tests.
-func (s *Service) SetPollInterval(d time.Duration) {
-	s.mu.Lock()
-	s.pollerInterval = d
-	s.mu.Unlock()
-}
-
 // Get returns the last-known state from kandev_meta without contacting
 // GitHub. Safe to call on every page load.
 func (s *Service) Get() (UpdatesResponse, error) {

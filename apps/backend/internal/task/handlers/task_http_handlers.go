@@ -80,8 +80,14 @@ func (h *TaskHandlers) httpListTasksByWorkspace(c *gin.Context) {
 	})
 }
 
-// buildTaskDTOsWithSessionInfo converts tasks to DTOs enriched with primary session IDs,
-// session counts, and review status using bulk queries.
+// buildTaskDTOsWithSessionInfo converts tasks to DTOs enriched with primary
+// session IDs, session counts, and review status. Uses BatchGetSessionsForTasks
+// to derive the primary session ID and session count in a single round trip,
+// then calls GetPrimarySessionInfoForTasks for the executor type/name fields
+// — those are populated by a LEFT JOIN to the executors table inside that
+// method (the persisted ExecutorSnapshot JSON uses different keys), so the
+// batch loader alone can't supply them without a regression. Two queries
+// total, down from three pre-batch.
 func buildTaskDTOsWithSessionInfo(ctx context.Context, svc *service.Service, tasks []*models.Task) ([]dto.TaskDTO, error) {
 	if len(tasks) == 0 {
 		return []dto.TaskDTO{}, nil
@@ -90,11 +96,7 @@ func buildTaskDTOsWithSessionInfo(ctx context.Context, svc *service.Service, tas
 	for i, t := range tasks {
 		taskIDs[i] = t.ID
 	}
-	primarySessionMap, err := svc.GetPrimarySessionIDsForTasks(ctx, taskIDs)
-	if err != nil {
-		return nil, err
-	}
-	sessionCountMap, err := svc.GetSessionCountsForTasks(ctx, taskIDs)
+	sessionsByTask, err := svc.BatchGetSessionsForTasks(ctx, taskIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -104,13 +106,18 @@ func buildTaskDTOsWithSessionInfo(ctx context.Context, svc *service.Service, tas
 	}
 	result := make([]dto.TaskDTO, 0, len(tasks))
 	for _, task := range tasks {
+		sessions := sessionsByTask[task.ID]
 		var primarySessionID *string
-		if sid, ok := primarySessionMap[task.ID]; ok {
-			primarySessionID = &sid
+		for _, s := range sessions {
+			if s.IsPrimary {
+				id := s.ID
+				primarySessionID = &id
+				break
+			}
 		}
 		var sessionCount *int
-		if count, ok := sessionCountMap[task.ID]; ok {
-			sessionCount = &count
+		if n := len(sessions); n > 0 {
+			sessionCount = &n
 		}
 		si := extractSessionInfo(primarySessionInfoMap[task.ID])
 		result = append(result, dto.FromTaskWithSessionInfo(

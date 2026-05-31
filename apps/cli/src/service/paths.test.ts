@@ -1,8 +1,9 @@
+import fs from "node:fs";
 import os from "node:os";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { resolveHomeDir, resolveServiceUser } from "./paths";
+import { captureLauncher, homebrewShimPath, resolveHomeDir, resolveServiceUser } from "./paths";
 
 describe("resolveServiceUser", () => {
   const originalSudoUser = process.env.SUDO_USER;
@@ -100,5 +101,58 @@ describe("resolveHomeDir", () => {
     // time. We just check it ends with .kandev and starts with the home dir.
     const result = resolveHomeDir(undefined, false);
     expect(result.endsWith(".kandev")).toBe(true);
+  });
+});
+
+describe("homebrewShimPath", () => {
+  it("derives the floating bin shim from a linuxbrew Cellar cli.js path", () => {
+    expect(
+      homebrewShimPath("/home/linuxbrew/.linuxbrew/Cellar/kandev/0.52.0/libexec/cli/bin/cli.js"),
+    ).toBe("/home/linuxbrew/.linuxbrew/bin/kandev");
+  });
+
+  it("derives the floating bin shim from an Apple-silicon Cellar path", () => {
+    expect(homebrewShimPath("/opt/homebrew/Cellar/kandev/1.2.3/libexec/cli/bin/cli.js")).toBe(
+      "/opt/homebrew/bin/kandev",
+    );
+  });
+
+  it("returns undefined for a non-Cellar path (npm install)", () => {
+    expect(homebrewShimPath("/usr/local/lib/node_modules/kandev/bin/cli.js")).toBeUndefined();
+  });
+});
+
+describe("captureLauncher shim resolution", () => {
+  const originalArgv = process.argv;
+
+  afterEach(() => {
+    process.argv = originalArgv;
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("adopts the floating shim when it exists on disk", () => {
+    const cliEntry = "/opt/homebrew/Cellar/kandev/1.2.3/libexec/cli/bin/cli.js";
+    const shim = "/opt/homebrew/bin/kandev";
+    process.argv = ["/path/to/node", cliEntry];
+    vi.stubEnv("KANDEV_BUNDLE_DIR", "/opt/homebrew/Cellar/kandev/1.2.3/libexec");
+    // Both the cli.js entry and the shim resolve on disk.
+    vi.spyOn(fs, "existsSync").mockImplementation((p) => p === cliEntry || p === shim);
+
+    const info = captureLauncher();
+    expect(info.kind).toBe("homebrew");
+    expect(info.shimPath).toBe(shim);
+  });
+
+  it("falls back to version-pinned paths when the shim is absent on disk", () => {
+    const cliEntry = "/opt/homebrew/Cellar/kandev/1.2.3/libexec/cli/bin/cli.js";
+    process.argv = ["/path/to/node", cliEntry];
+    vi.stubEnv("KANDEV_BUNDLE_DIR", "/opt/homebrew/Cellar/kandev/1.2.3/libexec");
+    // The cli.js entry resolves, but the floating shim does not exist.
+    vi.spyOn(fs, "existsSync").mockImplementation((p) => p === cliEntry);
+
+    const info = captureLauncher();
+    expect(info.kind).toBe("homebrew");
+    expect(info.shimPath).toBeUndefined();
   });
 });

@@ -202,9 +202,11 @@ func (cm *ContainerManager) createInstanceAndClient(
 	}
 	disableAskQuestion := agents.IsPassthroughOnly(config.AgentConfig)
 	assumeMcpSse := false
+	assumeMcpHttp := false
 	if config.AgentConfig != nil {
 		if rt := config.AgentConfig.Runtime(); rt != nil {
 			assumeMcpSse = rt.AssumeMcpSse
+			assumeMcpHttp = rt.AssumeMcpHttp
 		}
 	}
 
@@ -219,6 +221,7 @@ func (cm *ContainerManager) createInstanceAndClient(
 		SessionID:          config.SessionID,
 		DisableAskQuestion: disableAskQuestion,
 		AssumeMcpSse:       assumeMcpSse,
+		AssumeMcpHttp:      assumeMcpHttp,
 		McpMode:            config.McpMode,
 	}
 

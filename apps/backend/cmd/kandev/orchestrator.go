@@ -117,6 +117,11 @@ func provideOrchestrator(
 	// Wire issue task creator for auto-creating tasks from issue watch events
 	orchestratorSvc.SetIssueTaskCreator(&issueTaskCreatorAdapter{svc: taskSvc})
 
+	// Wire the per-watcher throttle gate. taskRepo exposes the JSON-scoped
+	// count of open watcher-created tasks; the orchestrator combines it with
+	// an in-process pending counter so a poll-tick burst can't overshoot.
+	orchestratorSvc.SetWatcherTaskCounter(taskRepo)
+
 	// Wire repository resolver for auto-cloning repos during review task creation
 	if repoCloner != nil {
 		orchestratorSvc.SetRepositoryResolver(&repositoryResolverAdapter{

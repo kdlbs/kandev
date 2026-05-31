@@ -18,7 +18,7 @@ import {
   computeBranchPlaceholder,
   type PillOption,
 } from "@/components/task-create-dialog-pill";
-import { GitHubUrlSection } from "@/components/task-create-dialog-github-url";
+import { RemoteRepoChipsRow } from "@/components/task-create-dialog-remote-repo-chips";
 import { FolderPicker } from "@/components/folder-picker";
 import { SourceModeSwitch } from "@/components/task-create-dialog-source-mode";
 import {
@@ -61,8 +61,9 @@ function runAutoselect({
  * is no "primary" — and any row can hold either a workspace repo or a
  * discovered on-machine path.
  *
- * In GitHub URL mode the chips are replaced by an inline URL input pill;
- * the trailing toggle flips between the two modes.
+ * In Remote mode the chips are replaced by `RemoteRepoChipsRow`, which
+ * renders its own chip row backed by `fs.remoteRepos`; the trailing toggle
+ * flips between the two modes.
  */
 type RepoChipsRowProps = {
   fs: DialogFormState;
@@ -78,9 +79,8 @@ type RepoChipsRowProps = {
    */
   onRowRepositoryChange: (key: string, value: string) => void;
   onRowBranchChange: (key: string, value: string) => void;
-  /** GitHub URL flow lives alongside the chips so users can switch in place. */
-  onToggleGitHubUrl?: () => void;
-  onGitHubUrlChange?: (value: string) => void;
+  /** Toggles the Remote tab on/off. Remote-mode rows live in `fs.remoteRepos`. */
+  onToggleRemote?: () => void;
   /**
    * Fresh-branch toggle props. When `freshBranchAvailable` is true the toggle
    * renders inline at the right edge of the chip row so it sits next to the
@@ -111,8 +111,7 @@ export function RepoChipsRow({
   workspaceId,
   onRowRepositoryChange,
   onRowBranchChange,
-  onToggleGitHubUrl,
-  onGitHubUrlChange,
+  onToggleRemote,
   freshBranchAvailable,
   freshBranchEnabled,
   onToggleFreshBranch,
@@ -161,14 +160,13 @@ export function RepoChipsRow({
         freshBranchEnabled={freshBranchEnabled}
         onRowRepositoryChange={onRowRepositoryChange}
         onRowBranchChange={onRowBranchChange}
-        onGitHubUrlChange={onGitHubUrlChange}
         onToggleFreshBranch={onToggleFreshBranch}
         onWorkspacePathChange={onWorkspacePathChange}
       />
       <SourceModeSwitch
-        useGitHubUrl={fs.useGitHubUrl}
+        useRemote={fs.useRemote}
         noRepository={fs.noRepository}
-        onToggleGitHubUrl={onToggleGitHubUrl}
+        onToggleRemote={onToggleRemote}
         onToggleNoRepository={onToggleNoRepository}
       />
     </div>
@@ -187,7 +185,6 @@ function ModeBody({
   freshBranchEnabled,
   onRowRepositoryChange,
   onRowBranchChange,
-  onGitHubUrlChange,
   onToggleFreshBranch,
   onWorkspacePathChange,
 }: {
@@ -202,7 +199,6 @@ function ModeBody({
   freshBranchEnabled?: boolean;
   onRowRepositoryChange: (key: string, value: string) => void;
   onRowBranchChange: (key: string, value: string) => void;
-  onGitHubUrlChange?: (value: string) => void;
   onToggleFreshBranch?: (enabled: boolean) => void;
   onWorkspacePathChange?: (value: string) => void;
 }) {
@@ -215,16 +211,13 @@ function ModeBody({
       />
     );
   }
-  if (fs.useGitHubUrl) {
+  if (fs.useRemote) {
     return (
-      <GitHubUrlSection
-        githubUrl={fs.githubUrl}
-        githubUrlError={fs.githubUrlError}
-        githubBranch={fs.githubBranch}
-        githubBranches={fs.githubBranches}
-        githubBranchesLoading={fs.githubBranchesLoading}
-        onGitHubUrlChange={onGitHubUrlChange}
-        onGitHubBranchChange={fs.setGitHubBranch}
+      <RemoteRepoChipsRow
+        fs={fs}
+        onUpdateRow={fs.updateRemoteRepo}
+        onAddRow={fs.addRemoteRepo}
+        onRemoveRow={fs.removeRemoteRepo}
       />
     );
   }

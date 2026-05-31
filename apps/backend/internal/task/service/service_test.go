@@ -239,6 +239,43 @@ func TestService_CreateTask_RejectsDuplicateRepositories(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected duplicate-repository error, got nil")
 	}
+	// The error must name the repository (its display name) rather than leak
+	// the raw repository UUID, which the create-task dialog shows verbatim.
+	if !strings.Contains(err.Error(), "Dup") {
+		t.Errorf("expected error to name the repo (%q), got: %v", "Dup", err)
+	}
+	if strings.Contains(err.Error(), "repo-dup") {
+		t.Errorf("expected error not to leak repository UUID, got: %v", err)
+	}
+}
+
+// Regression: two PR URLs of the same GitHub repo (e.g. /pull/1116 and
+// /pull/1117) parse to the same owner/repo and collapse to one repositoryID,
+// tripping the duplicate guard. The error must name owner/repo, not the UUID.
+func TestService_CreateTask_RejectsDuplicateGitHubURLs(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
+
+	req := &CreateTaskRequest{
+		WorkspaceID:    "ws-1",
+		WorkflowID:     "wf-1",
+		WorkflowStepID: "step-1",
+		Title:          "dup PR urls",
+		Repositories: []TaskRepositoryInput{
+			{GitHubURL: "https://github.com/kdlbs/kandev/pull/1116"},
+			{GitHubURL: "https://github.com/kdlbs/kandev/pull/1117"},
+		},
+	}
+	_, err := svc.CreateTask(ctx, req)
+	if err == nil {
+		t.Fatal("expected duplicate-repository error, got nil")
+	}
+	if !strings.Contains(err.Error(), "kdlbs/kandev") {
+		t.Errorf("expected error to name owner/repo (kdlbs/kandev), got: %v", err)
+	}
 }
 
 func TestService_CreateTask_AcceptsMultipleDistinctRepositories(t *testing.T) {

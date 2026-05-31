@@ -492,13 +492,63 @@ func TestExportWorkflows(t *testing.T) {
 		createStep(t, svc, &models.WorkflowStep{WorkflowID: "wf-1", Name: "Step1", Position: 0})
 		createStep(t, svc, &models.WorkflowStep{WorkflowID: "wf-2", Name: "Step2", Position: 0})
 
-		export, err := svc.ExportWorkflows(ctx, "ws-1")
+		export, err := svc.ExportWorkflows(ctx, "ws-1", nil)
 		require.NoError(t, err)
 		require.Len(t, export.Workflows, 2)
 
 		names := []string{export.Workflows[0].Name, export.Workflows[1].Name}
 		assert.Contains(t, names, "Alpha")
 		assert.Contains(t, names, "Beta")
+	})
+
+	t.Run("filters to the requested workflow IDs", func(t *testing.T) {
+		svc, _, mock := setupTestServiceWithProvider(t)
+		ctx := context.Background()
+
+		mock.addWorkflow("wf-1", "ws-1", "Alpha")
+		mock.addWorkflow("wf-2", "ws-1", "Beta")
+		mock.addWorkflow("wf-3", "ws-1", "Gamma")
+
+		export, err := svc.ExportWorkflows(ctx, "ws-1", []string{"wf-1", "wf-3"})
+		require.NoError(t, err)
+		require.Len(t, export.Workflows, 2)
+
+		names := []string{export.Workflows[0].Name, export.Workflows[1].Name}
+		assert.Contains(t, names, "Alpha")
+		assert.Contains(t, names, "Gamma")
+		assert.NotContains(t, names, "Beta")
+	})
+
+	t.Run("empty (non-nil) ID list exports nothing", func(t *testing.T) {
+		svc, _, mock := setupTestServiceWithProvider(t)
+		ctx := context.Background()
+
+		mock.addWorkflow("wf-1", "ws-1", "Alpha")
+
+		export, err := svc.ExportWorkflows(ctx, "ws-1", []string{})
+		require.NoError(t, err)
+		assert.Empty(t, export.Workflows)
+	})
+
+	t.Run("nil ID list omits hidden workflows but explicit IDs include them", func(t *testing.T) {
+		svc, _, mock := setupTestServiceWithProvider(t)
+		ctx := context.Background()
+
+		mock.addWorkflow("wf-1", "ws-1", "Alpha")
+		mock.addWorkflow("hidden-1", "ws-1", "System Flow")
+		mock.workflows[1].Hidden = true
+
+		// Back-compat path (nil) must not leak the hidden system workflow.
+		all, err := svc.ExportWorkflows(ctx, "ws-1", nil)
+		require.NoError(t, err)
+		require.Len(t, all.Workflows, 1)
+		assert.Equal(t, "Alpha", all.Workflows[0].Name)
+
+		// Explicitly requesting a hidden workflow's ID still exports it.
+		explicit, err := svc.ExportWorkflows(ctx, "ws-1", []string{"hidden-1"})
+		require.NoError(t, err)
+		require.Len(t, explicit.Workflows, 1)
+		assert.Equal(t, "System Flow", explicit.Workflows[0].Name)
 	})
 }
 

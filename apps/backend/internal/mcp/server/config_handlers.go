@@ -58,6 +58,14 @@ func (s *Server) registerConfigWorkflowTools() {
 		),
 		s.wrapHandler("delete_workflow_kandev", s.deleteWorkflowHandler()),
 	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("import_workflow_kandev",
+			mcp.WithDescription("Import one or more workflows into a workspace from a portable document. The document is the same YAML/JSON envelope produced by the workflow export (type: kandev_workflow, version: 1) and may contain multiple workflows. Workflows whose name already exists in the workspace are skipped. Returns the names that were created and skipped."),
+			mcp.WithString("workspace_id", mcp.Required(), mcp.Description("The workspace ID to import the workflows into")),
+			mcp.WithString(documentArg, mcp.Required(), mcp.Description("The portable workflow document as a YAML or JSON string (a kandev_workflow export envelope). Includes the workflows and their steps.")),
+		),
+		s.wrapHandler("import_workflow_kandev", s.importWorkflowHandler()),
+	)
 	s.registerConfigWorkflowStepTools()
 }
 
@@ -347,6 +355,24 @@ func (s *Server) deleteWorkflowHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultError("workflow_id is required"), nil
 		}
 		return s.forwardToBackend(ctx, ws.ActionMCPDeleteWorkflow, map[string]string{"workflow_id": workflowID})
+	}
+}
+
+func (s *Server) importWorkflowHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		workspaceID, err := req.RequireString("workspace_id")
+		if err != nil {
+			return mcp.NewToolResultError("workspace_id is required"), nil
+		}
+		document, err := req.RequireString(documentArg)
+		if err != nil {
+			return mcp.NewToolResultError("document is required"), nil
+		}
+		payload := map[string]interface{}{
+			"workspace_id": workspaceID,
+			documentArg:    document,
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPImportWorkflow, payload)
 	}
 }
 

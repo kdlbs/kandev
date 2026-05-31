@@ -133,6 +133,12 @@ export type CumulativeDiff = {
 export type SessionCommitsState = {
   byEnvironmentId: Record<string, SessionCommit[]>;
   loading: Record<string, boolean>;
+  // Stale-while-revalidate signal: bumped by WS handlers (commits_reset /
+  // branch_switched) that previously cleared `byEnvironmentId` outright.
+  // useSessionCommits watches this counter and refetches without nulling the
+  // visible list, so the Changes panel doesn't flicker through its empty
+  // state while the refetch is in flight.
+  refetchTrigger: Record<string, number>;
 };
 
 export type ContextWindowEntry = {
@@ -358,10 +364,17 @@ export type SessionRuntimeSliceActions = {
   registerSessionEnvironment: (sessionId: string, environmentId: string) => void;
   setContextWindow: (sessionId: string, contextWindow: ContextWindowEntry) => void;
   // Session commit actions
-  setSessionCommits: (sessionId: string, commits: SessionCommit[]) => void;
+  setSessionCommits: (
+    sessionId: string,
+    commits: SessionCommit[],
+    opts?: { allowEmpty?: boolean },
+  ) => void;
   setSessionCommitsLoading: (sessionId: string, loading: boolean) => void;
   addSessionCommit: (sessionId: string, commit: SessionCommit) => void;
   clearSessionCommits: (sessionId: string) => void;
+  // Signal a refetch without clearing the visible list — see
+  // SessionCommitsState.refetchTrigger.
+  bumpSessionCommitsRefetch: (sessionId: string) => void;
   // Available commands actions
   setAvailableCommands: (sessionId: string, commands: AvailableCommand[]) => void;
   clearAvailableCommands: (sessionId: string) => void;

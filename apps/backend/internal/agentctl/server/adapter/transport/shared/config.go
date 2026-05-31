@@ -49,6 +49,9 @@ type Config struct {
 
 	// AssumeMcpSse overrides MCP capability filtering to assume SSE support.
 	AssumeMcpSse bool
+
+	// AssumeMcpHttp overrides MCP capability filtering to assume HTTP support.
+	AssumeMcpHttp bool
 }
 
 // GetPermissionTimeout returns the configured permission timeout or the default.

@@ -269,18 +269,51 @@ func (h *Hub) BroadcastToTask(taskID string, msg *ws.Message) {
 	h.sendToClients(data, clients, msg.Action)
 }
 
-// BroadcastToSession sends a notification to clients subscribed to a specific session
+// getSessionRecipientsLocked returns the deduped set of clients that should
+// receive a session-scoped broadcast: those subscribed to the session OR
+// focused on it.
+//
+// Focus is the stable "actively viewing this session" signal — it's held for
+// the whole time the task page is open. The ref-counted session.subscribe, by
+// contrast, churns to 0 during task-switch/resume (the sidebar hands the
+// active session off to the task-page hooks, and the resume state transitions
+// re-run the subscription effects). If a client is focused but its subscribe
+// ref-count was transiently dropped, it must still receive session events
+// (e.g. the session.message.updated that marks an agent_boot script_execution
+// completed) — otherwise the UI is stuck until a manual refetch.
+func (h *Hub) getSessionRecipientsLocked(sessionID string) []*Client {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	subs := h.sessionSubscribers[sessionID]
+	focus := h.sessionMode.focusByClient[sessionID]
+	clients := make([]*Client, 0, len(subs)+len(focus))
+	seen := make(map[*Client]struct{}, len(subs)+len(focus))
+	for client := range subs {
+		seen[client] = struct{}{}
+		clients = append(clients, client)
+	}
+	for client := range focus {
+		if _, ok := seen[client]; ok {
+			continue
+		}
+		clients = append(clients, client)
+	}
+	return clients
+}
+
+// BroadcastToSession sends a notification to clients subscribed to OR focused on
+// a specific session. See getSessionRecipientsLocked for why focus is included.
 func (h *Hub) BroadcastToSession(sessionID string, msg *ws.Message) {
 	data, err := json.Marshal(msg)
 	if err != nil {
 		h.logger.Error("Failed to marshal message", zap.Error(err))
 		return
 	}
-	clients := h.getSubscribersLocked(h.sessionSubscribers, sessionID)
+	clients := h.getSessionRecipientsLocked(sessionID)
 	h.logger.Debug("BroadcastToSession",
 		zap.String("session_id", sessionID),
 		zap.String("action", msg.Action),
-		zap.Int("subscriber_count", len(clients)))
+		zap.Int("recipient_count", len(clients)))
 	h.sendToClients(data, clients, msg.Action)
 }
 

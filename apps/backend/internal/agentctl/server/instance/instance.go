@@ -95,6 +95,9 @@ type CreateRequest struct {
 	// AssumeMcpSse overrides MCP capability filtering to assume SSE support.
 	AssumeMcpSse bool `json:"assume_mcp_sse,omitempty"`
 
+	// AssumeMcpHttp overrides MCP capability filtering to assume HTTP support.
+	AssumeMcpHttp bool `json:"assume_mcp_http,omitempty"`
+
 	// McpMode controls which MCP tools are registered: "task" (default) or "config".
 	McpMode string `json:"mcp_mode,omitempty"`
 }

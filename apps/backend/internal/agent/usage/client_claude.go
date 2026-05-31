@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"time"
 )
 
@@ -22,15 +21,6 @@ const (
 type ClaudeUsageClient struct {
 	credentialsPath string
 	httpClient      *http.Client
-}
-
-// NewClaudeUsageClient creates a client that reads from the default credentials path.
-func NewClaudeUsageClient() *ClaudeUsageClient {
-	home, _ := os.UserHomeDir()
-	return &ClaudeUsageClient{
-		credentialsPath: filepath.Join(home, ".claude", ".credentials.json"),
-		httpClient:      &http.Client{Timeout: 10 * time.Second},
-	}
 }
 
 // NewClaudeUsageClientWithPath creates a client with an explicit credentials path (for tests).

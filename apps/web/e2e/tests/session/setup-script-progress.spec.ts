@@ -237,6 +237,79 @@ test.describe("Setup script progress UX", () => {
     }
   });
 
+  test("repository setup script failure is non-fatal — agent still launches", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+
+    // This exercises the REPOSITORY-level setup_script (run inside
+    // worktree.Manager.Create via the script handler), which is a different
+    // path from the profile prepare_script the tests above cover. Before the
+    // fix, a non-zero exit aborted environment preparation and stopped the
+    // agent ("Environment setup failed"); the Resume / Start-fresh buttons
+    // then couldn't recover because each relaunch re-ran the same failing
+    // script. The script must now be non-fatal: the worktree is kept, the
+    // failure shows as a warning, and the agent launches normally.
+    const failingScript = [
+      "echo '[repo-setup] installing deps'",
+      "sleep 4",
+      "echo 'make: *** No rule to make target `i2nstall`.  Stop.' 1>&2",
+      "exit 2",
+    ].join("; ");
+    await apiClient.updateRepository(seedData.repositoryId, { setup_script: failingScript });
+
+    try {
+      const task = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        "Repo Setup Script Failure",
+        seedData.agentProfileId,
+        {
+          description: "/e2e:simple-message",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+          executor_profile_id: seedData.worktreeExecutorProfileId,
+        },
+      );
+
+      await testPage.goto(`/t/${task.id}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+
+      const panel = testPage.getByTestId("prepare-progress-panel");
+      await expect(panel).toBeVisible({ timeout: 15_000 });
+
+      // The failure is surfaced as a non-fatal warning, NOT the fatal `failed`
+      // state — preparation completes and the worktree survives.
+      await expect(panel).toHaveAttribute("data-status", "completed_with_warnings", {
+        timeout: 45_000,
+      });
+
+      // The failure is surfaced as a warning banner on the worktree step so
+      // the user knows the setup script didn't run — without it blocking the
+      // launch. (The full script output also streams to a separate
+      // script_execution chat message.)
+      await expect(panel.getByTestId("prepare-warning-banner")).toContainText(
+        "Repository setup script failed",
+      );
+
+      // The core regression: the agent must launch and run to completion
+      // instead of stopping. Reaching chat-idle proves the turn finished and
+      // the session is awaiting input — preparation did not abort the launch.
+      await session.waitForChatIdle();
+
+      // The "agent stopped" recovery affordances must not appear — the task
+      // continued normally.
+      await expect(session.recoveryResumeButton()).toBeHidden();
+      await expect(session.recoveryFreshButton()).toBeHidden();
+    } finally {
+      // Reset the worker-scoped seed repo so sibling specs aren't contaminated.
+      await apiClient.updateRepository(seedData.repositoryId, { setup_script: "" }).catch(() => {});
+    }
+  });
+
   test("renders collapsed on success when no setup script is configured", async ({
     testPage,
     apiClient,

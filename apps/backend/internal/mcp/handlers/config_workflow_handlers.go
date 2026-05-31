@@ -11,6 +11,7 @@ import (
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
+	"gopkg.in/yaml.v3"
 )
 
 func (h *Handlers) handleCreateWorkflow(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -79,6 +80,53 @@ func (h *Handlers) handleDeleteWorkflow(ctx context.Context, msg *ws.Message) (*
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete workflow", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"success": true})
+}
+
+// handleImportWorkflow imports one or more workflows into a workspace from a
+// portable document. The document is the same YAML/JSON envelope produced by
+// the export endpoint; YAML parsing accepts JSON too, matching the HTTP
+// /workspaces/{id}/workflows/import contract.
+func (h *Handlers) handleImportWorkflow(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		WorkspaceID string `json:"workspace_id"`
+		Document    string `json:"document"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.WorkspaceID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workspace_id is required", nil)
+	}
+	if req.Document == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "document is required", nil)
+	}
+	// Mirror the 1 MB cap the HTTP import endpoint enforces — the WS tunnel
+	// permits much larger frames, so bound the document before parsing it.
+	const maxImportSize = 1 << 20
+	if len(req.Document) > maxImportSize {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "document exceeds 1MB limit", nil)
+	}
+
+	var export wfmodels.WorkflowExport
+	if err := yaml.Unmarshal([]byte(req.Document), &export); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid document: "+err.Error(), nil)
+	}
+	// Validate the document up front: a malformed envelope (wrong type/version,
+	// missing names, duplicate positions, bad move_to_step refs) is a client
+	// error, and surfacing the detail is what lets the calling agent fix its
+	// document. Past this point any ImportWorkflows error is a server-side DB
+	// failure, so it gets a generic internal error without leaking internals —
+	// matching the sibling workflow handlers.
+	if err := export.Validate(); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Invalid workflow document: "+err.Error(), nil)
+	}
+
+	result, err := h.workflowSvc.ImportWorkflows(ctx, req.WorkspaceID, &export)
+	if err != nil {
+		h.logger.Error("failed to import workflows", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to import workflows", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, result)
 }
 
 func (h *Handlers) handleCreateWorkflowStep(ctx context.Context, msg *ws.Message) (*ws.Message, error) {

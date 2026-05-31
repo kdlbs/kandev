@@ -22,6 +22,7 @@ const (
 	CodeQuotaLimited           Code = "quota_limited"
 	CodeRateLimited            Code = "rate_limited"
 	CodeProviderUnavailable    Code = "provider_unavailable"
+	CodeProviderOverloaded     Code = "provider_overloaded"
 	CodeModelUnavailable       Code = "model_unavailable"
 	CodeProviderNotConfigured  Code = "provider_not_configured"
 	CodeUnknownProvider        Code = "unknown_provider_error"
@@ -30,7 +31,16 @@ const (
 	CodeRepo                   Code = "repo_error"
 	CodePermissionDeniedByUser Code = "permission_denied_by_user"
 	CodeNpxCacheCorrupted      Code = "npx_cache_corrupted"
+	CodeResumeCorrupted        Code = "resume_corrupted"
 )
+
+// RemediationStartFreshSession is the symbolic RemediationPath value for
+// CodeResumeCorrupted. Unlike CodeNpxCacheCorrupted (whose RemediationPath is
+// a filesystem path to delete), this is a remediation *token* the UI maps to
+// the "start a fresh session" recovery action — there is nothing on disk to
+// clean; the agent's persisted reasoning state is corrupted and only a brand
+// new session recovers.
+const RemediationStartFreshSession = "start_fresh_session"
 
 // Confidence reflects how strongly the classifier trusts the matched signal.
 type Confidence string
@@ -86,6 +96,10 @@ type Input struct {
 }
 
 const exitCodeBinaryMissing = 127
+
+// statusOverloaded is the non-standard HTTP 529 ("Overloaded") that Anthropic
+// returns when temporarily overloaded. Not in net/http, so defined here.
+const statusOverloaded = 529
 
 // Classify normalizes a failure into a routing-aware Error. See package doc.
 func Classify(in Input) *Error {
@@ -167,6 +181,8 @@ func httpStatusToCode(status int) Code {
 		return CodeRateLimited
 	case http.StatusServiceUnavailable:
 		return CodeProviderUnavailable
+	case statusOverloaded:
+		return CodeProviderOverloaded
 	}
 	return ""
 }
@@ -209,9 +225,22 @@ func applyInvariants(e *Error) *Error {
 	case CodeProviderUnavailable, CodeUnknownProvider:
 		e.AutoRetryable = true
 		e.FallbackAllowed = true
+	case CodeProviderOverloaded:
+		// 529 Overloaded is a transient, server-side condition. Retrying the
+		// same provider after a short backoff is the right move; falling back
+		// to another provider is also fine if backoff keeps failing.
+		e.AutoRetryable = true
+		e.FallbackAllowed = true
 	case CodeNpxCacheCorrupted:
 		e.AutoRetryable = true
 		e.FallbackAllowed = true
+	case CodeResumeCorrupted:
+		// The agent's persisted reasoning state is poisoned. Retrying the
+		// resume hits the same 400, and falling back to another provider
+		// can't fix a session-state problem — only a fresh session does.
+		e.UserAction = true
+		e.AutoRetryable = false
+		e.FallbackAllowed = false
 	case CodePermissionDeniedByUser, CodeTask, CodeRepo, CodeAgentRuntime:
 		e.FallbackAllowed = false
 		e.AutoRetryable = false

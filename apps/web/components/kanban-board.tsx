@@ -327,6 +327,12 @@ function useKanbanBoardSetup(
 
 export function KanbanBoard({ onPreviewTask, onOpenTask, onBeforeEdit }: KanbanBoardProps = {}) {
   const s = useKanbanBoardSetup(onPreviewTask, onOpenTask, onBeforeEdit);
+  const isMobileSearchOpen = useAppStore((state) => state.mobileKanban.isSearchOpen);
+  const setMobileSearchOpen = useAppStore((state) => state.setMobileKanbanSearchOpen);
+
+  // Collapse search on unmount so the global flag doesn't auto-open (and focus)
+  // the search bar after navigating to another route.
+  useEffect(() => () => setMobileSearchOpen(false), [setMobileSearchOpen]);
 
   if (!s.isMounted) {
     return <div className="h-dvh w-full bg-background" />;
@@ -347,7 +353,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask, onBeforeEdit }: KanbanB
         searchQuery={s.searchQuery}
         onSearchChange={s.setSearchQuery}
       />
-      {s.isMobile && (
+      {s.isMobile && isMobileSearchOpen && (
         <MobileSearchBar searchQuery={s.searchQuery} onSearchChange={s.setSearchQuery} />
       )}
       <KanbanBoardDialogs

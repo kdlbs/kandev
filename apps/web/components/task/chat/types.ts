@@ -4,6 +4,13 @@ export type SubagentTaskPayload = {
   description?: string;
   prompt?: string;
   subagent_type?: string;
+  status?: string; // result lifecycle, e.g. "complete" | "error"
+  agent_id?: string; // Claude
+  model?: string; // OpenCode, e.g. "opencode/big-pickle"
+  child_session_id?: string; // OpenCode child session
+  duration_ms?: number; // Claude (totalDurationMs) + Cursor (durationMs)
+  total_tokens?: number; // Claude
+  tool_use_count?: number; // Claude
 };
 
 export type GenericPayload = {
@@ -130,6 +137,12 @@ export type StatusMetadata = {
   message?: string;
   variant?: "default" | "warning" | "error";
   cancelled?: boolean;
+  // Transient provider-error (529 Overloaded) retry state. Present on the
+  // yellow "retrying" status message the orchestrator emits during backoff.
+  retrying?: boolean;
+  attempt?: number;
+  max_attempts?: number;
+  retry_in_seconds?: number;
 };
 
 export type RecoveryAuthMethod = {

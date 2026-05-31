@@ -45,6 +45,14 @@ func (c *NoopClient) SearchOrgRepos(context.Context, string, string, int) ([]Git
 	return nil, ErrNoClient
 }
 
+func (c *NoopClient) ListUserRepos(context.Context, string, int) ([]GitHubRepo, error) {
+	return nil, ErrNoClient
+}
+
+func (c *NoopClient) ListAccessibleRepos(context.Context, string, int) ([]GitHubRepo, error) {
+	return nil, ErrNoClient
+}
+
 func (c *NoopClient) ListPRReviews(context.Context, string, string, int) ([]PRReview, error) {
 	return nil, ErrNoClient
 }

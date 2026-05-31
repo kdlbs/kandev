@@ -31,10 +31,15 @@ import (
 
 // ClarificationService defines the interface for clarification operations.
 type ClarificationService interface {
-	CreateRequest(req *clarification.Request) string
+	CreateRequest(req *clarification.Request) (string, bool)
 	WaitForResponse(ctx context.Context, pendingID string) (*clarification.Response, error)
 	CancelRequest(pendingID string) bool
-	CancelSession(sessionID string) []string
+}
+
+// SessionCanceller cancels all pending clarifications for a session and marks
+// the related chat messages as expired. Used by the MCP-timeout handler.
+type SessionCanceller interface {
+	CancelSessionAndNotify(ctx context.Context, sessionID string) int
 }
 
 // MessageCreator creates messages for clarification requests.
@@ -83,6 +88,7 @@ type Handlers struct {
 	taskSvc          *service.Service
 	workflowCtrl     *workflowctrl.Controller
 	clarificationSvc ClarificationService
+	sessionCanceller SessionCanceller
 	messageCreator   MessageCreator
 	sessionRepo      SessionRepository
 	taskRepo         TaskRepository
@@ -108,6 +114,7 @@ func NewHandlers(
 	taskSvc *service.Service,
 	workflowCtrl *workflowctrl.Controller,
 	clarificationSvc ClarificationService,
+	sessionCanceller SessionCanceller,
 	messageCreator MessageCreator,
 	sessionRepo SessionRepository,
 	taskRepo TaskRepository,
@@ -121,6 +128,7 @@ func NewHandlers(
 		taskSvc:          taskSvc,
 		workflowCtrl:     workflowCtrl,
 		clarificationSvc: clarificationSvc,
+		sessionCanceller: sessionCanceller,
 		messageCreator:   messageCreator,
 		sessionRepo:      sessionRepo,
 		taskRepo:         taskRepo,
@@ -169,11 +177,12 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 		d.RegisterFunc(ws.ActionMCPCreateWorkflow, h.handleCreateWorkflow)
 		d.RegisterFunc(ws.ActionMCPUpdateWorkflow, h.handleUpdateWorkflow)
 		d.RegisterFunc(ws.ActionMCPDeleteWorkflow, h.handleDeleteWorkflow)
+		d.RegisterFunc(ws.ActionMCPImportWorkflow, h.handleImportWorkflow)
 		d.RegisterFunc(ws.ActionMCPCreateWorkflowStep, h.handleCreateWorkflowStep)
 		d.RegisterFunc(ws.ActionMCPUpdateWorkflowStep, h.handleUpdateWorkflowStep)
 		d.RegisterFunc(ws.ActionMCPDeleteWorkflowStep, h.handleDeleteWorkflowStep)
 		d.RegisterFunc(ws.ActionMCPReorderWorkflowStep, h.handleReorderWorkflowSteps)
-		count += 7
+		count += 8
 	}
 	if h.agentSettingsCtrl != nil {
 		d.RegisterFunc(ws.ActionMCPListAgents, h.handleListAgents)
@@ -369,11 +378,6 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		BaseBranch             string               `json:"base_branch"`               // top-level fallback applied to every resolved repo only when no per-repo entries are supplied; explicit per-repo BaseBranch is authoritative when Repositories is set
 		BlockedBy              []string             `json:"blocked_by"`                // task IDs that must complete before this task
 		AssigneeAgentProfileID string               `json:"assignee_agent_profile_id"` // agent instance to assign the task to
-		// Office task-handoffs phase 4 — workspace policy.
-		WorkspaceMode         string `json:"workspace_mode"`
-		WorkspaceGroupID      string `json:"workspace_group_id"`
-		DefaultChildWorkspace string `json:"default_child_workspace"`
-		DefaultChildOrdering  string `json:"default_child_ordering"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -437,16 +441,6 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_id is required", nil)
 	}
 
-	// Office task-handoffs phase 4: resolve effective workspace policy and
-	// build the metadata block that gets persisted on the new task.
-	wsPolicy, policyErr := h.resolveWorkspacePolicy(ctx, req.ParentID,
-		req.WorkspaceMode, req.WorkspaceGroupID,
-		req.DefaultChildWorkspace, req.DefaultChildOrdering)
-	if policyErr != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, policyErr.Error(), nil)
-	}
-	metadata := wsPolicy.MetadataBlock()
-
 	task, err := h.taskSvc.CreateTask(ctx, &service.CreateTaskRequest{
 		ParentID:               req.ParentID,
 		WorkspaceID:            req.WorkspaceID,
@@ -457,30 +451,15 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Repositories:           repos,
 		BlockedBy:              req.BlockedBy,
 		AssigneeAgentProfileID: req.AssigneeAgentProfileID,
-		Metadata:               metadata,
 	})
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create task", nil)
-	}
-
-	// Office task-handoffs phase 4: attach workspace-group membership and
-	// (if parent says sequential) add a blocker edge to the previous
-	// non-archived sibling. A failed attach leaves the task in a broken
-	// state — the metadata claims it belongs to a group it never joined.
-	// Compensate by deleting the just-created task so the caller gets a
-	// clean error and can retry (post-review #3).
-	if h.handoffSvc != nil && wsPolicy.NeedsAttachment() {
-		if err := h.handoffSvc.AttachWorkspacePolicy(ctx, task.ID, req.ParentID, wsPolicy); err != nil {
-			h.logger.Error("attach workspace policy; rolling back task creation",
-				zap.String("task_id", task.ID), zap.Error(err))
-			if delErr := h.taskSvc.DeleteTask(ctx, task.ID); delErr != nil {
-				h.logger.Error("rollback delete failed; task left in inconsistent state",
-					zap.String("task_id", task.ID), zap.Error(delErr))
-			}
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
-				"failed to attach workspace policy: "+err.Error(), nil)
+		// Defense-in-depth: resolveTaskRepositories already catches this for the
+		// MCP path, but non-MCP callers (UI, internal engine) reach here directly.
+		if errors.Is(err, service.ErrSubtaskDepthExceeded) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create task", nil)
 	}
 
 	// Auto-start agent session asynchronously only if requested
@@ -522,6 +501,9 @@ func (h *Handlers) resolveTaskRepositories(
 		}
 		if parent.IsEphemeral {
 			return taskRepoResult{}, fmt.Errorf("cannot create subtasks of an ephemeral task (quick chat); omit parent_id to create a top-level task")
+		}
+		if parent.ParentID != "" && !parent.IsFromOffice {
+			return taskRepoResult{}, service.ErrSubtaskDepthExceeded
 		}
 		repos := explicitRepos
 		if repos == nil {
@@ -1148,13 +1130,14 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 		Questions: req.Questions,
 		Context:   req.Context,
 	}
-	pendingID := h.clarificationSvc.CreateRequest(clarificationReq)
+	pendingID, isNew := h.clarificationSvc.CreateRequest(clarificationReq)
 
 	// Create one chat message per question (triggers WS events to frontend).
 	// If the create fails, the in-store pending entry must be cancelled too —
 	// otherwise the agent's WaitForResponse would block for the full 2-hour
 	// timeout while the user never sees clarification cards.
-	if h.messageCreator != nil {
+	// When dedup fires (isNew=false) the messages already exist, so skip creation.
+	if isNew && h.messageCreator != nil {
 		if _, err := h.messageCreator.CreateClarificationRequestMessages(
 			ctx, taskID, req.SessionID, pendingID, req.Questions, req.Context,
 		); err != nil {
@@ -1391,7 +1374,7 @@ func (h *Handlers) handleDeleteTaskPlan(ctx context.Context, msg *ws.Message) (*
 // disconnects while waiting for a clarification response. It cancels the pending
 // clarification so the user's eventual answer goes through the event fallback path
 // (new turn) instead of the primary path (which would be dropped).
-func (h *Handlers) handleClarificationTimeout(_ context.Context, msg *ws.Message) (*ws.Message, error) {
+func (h *Handlers) handleClarificationTimeout(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
 		SessionID string `json:"session_id"`
 	}
@@ -1402,10 +1385,13 @@ func (h *Handlers) handleClarificationTimeout(_ context.Context, msg *ws.Message
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
 
-	cancelled := h.clarificationSvc.CancelSession(req.SessionID)
+	cancelled := 0
+	if h.sessionCanceller != nil {
+		cancelled = h.sessionCanceller.CancelSessionAndNotify(ctx, req.SessionID)
+	}
 	h.logger.Info("cancelled pending clarifications on agent MCP timeout",
 		zap.String("session_id", req.SessionID),
-		zap.Int("count", len(cancelled)))
+		zap.Int("count", cancelled))
 
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"ok": true, "cancelled": len(cancelled)})
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"ok": true, "cancelled": cancelled})
 }

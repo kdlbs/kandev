@@ -192,6 +192,84 @@ func TestIncrementTaskSessionUsage_EmptySessionIDNoOp(t *testing.T) {
 	}
 }
 
+// rebuildSessionsWithoutCostColumns drops and recreates task_sessions with the
+// post-migration schema MINUS the cost/token columns (cost_subcents, tokens_in,
+// tokens_out) and without the agent_execution_id / workflow_step_id trigger
+// columns. This reproduces a legacy DB that can never gain the cost columns: the
+// gated CREATE-TABLE rebuilds won't fire (their trigger columns are absent) and
+// the fresh-create is a no-op because the table already exists.
+func rebuildSessionsWithoutCostColumns(t *testing.T, repo *Repository) {
+	t.Helper()
+	if _, err := repo.db.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
+		t.Fatalf("disable fk: %v", err)
+	}
+	defer func() { _, _ = repo.db.Exec(`PRAGMA foreign_keys=ON`) }()
+	stmts := []string{
+		`DROP TABLE task_sessions`,
+		`CREATE TABLE task_sessions (
+			id TEXT PRIMARY KEY,
+			task_id TEXT NOT NULL,
+			agent_profile_id TEXT,
+			executor_id TEXT DEFAULT '',
+			executor_profile_id TEXT DEFAULT '',
+			environment_id TEXT DEFAULT '',
+			repository_id TEXT DEFAULT '',
+			base_branch TEXT DEFAULT '',
+			agent_profile_snapshot TEXT DEFAULT '{}',
+			executor_snapshot TEXT DEFAULT '{}',
+			environment_snapshot TEXT DEFAULT '{}',
+			repository_snapshot TEXT DEFAULT '{}',
+			state TEXT NOT NULL DEFAULT 'CREATED',
+			error_message TEXT DEFAULT '',
+			metadata TEXT DEFAULT '{}',
+			started_at TIMESTAMP NOT NULL,
+			completed_at TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL,
+			is_primary INTEGER DEFAULT 0,
+			is_passthrough INTEGER DEFAULT 0,
+			review_status TEXT DEFAULT '',
+			base_commit_sha TEXT DEFAULT '',
+			task_environment_id TEXT DEFAULT '',
+			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		)`,
+	}
+	for _, stmt := range stmts {
+		if _, err := repo.db.Exec(stmt); err != nil {
+			t.Fatalf("rebuild task_sessions: %v", err)
+		}
+	}
+}
+
+// TestMigrateSessionsAddCostColumns_BackfillsLegacySchema reproduces the office
+// cost subscriber failure ("no such column: tokens_in"): a task_sessions table
+// that predates the cost columns and no longer contains the rebuild trigger
+// columns can never gain them, so IncrementTaskSessionUsage fails. The additive
+// migration must backfill the columns idempotently.
+func TestMigrateSessionsAddCostColumns_BackfillsLegacySchema(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+
+	rebuildSessionsWithoutCostColumns(t, repo)
+	seedForMsgTest(t, repo, "task-mig", "sess-mig", "turn-mig")
+
+	// Precondition: this is the reported bug on a legacy schema.
+	if err := repo.IncrementTaskSessionUsage(ctx, "sess-mig", 1, 2, 3); err == nil {
+		t.Fatal("expected missing-column error before backfill")
+	}
+
+	repo.migrateSessionsAddCostColumns()
+
+	if err := repo.IncrementTaskSessionUsage(ctx, "sess-mig", 1, 2, 3); err != nil {
+		t.Fatalf("IncrementTaskSessionUsage after backfill: %v", err)
+	}
+
+	// Idempotent: a second pass over a table that already has the columns is a no-op.
+	repo.migrateSessionsAddCostColumns()
+	if err := repo.IncrementTaskSessionUsage(ctx, "sess-mig", 10, 20, 30); err != nil {
+		t.Fatalf("IncrementTaskSessionUsage after second pass: %v", err)
+	}
+}
+
 // seedRepoLink wires up a workspace, repository, task, task_repositories link
 // row, and a task_session row in the given state. Used to exercise the join
 // in CountActiveTaskSessionsByRepository.

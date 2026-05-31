@@ -109,6 +109,12 @@ export interface JiraIssueWatch {
   prompt: string;
   enabled: boolean;
   pollIntervalSeconds: number;
+  /**
+   * Cap on concurrent open watcher-created tasks for this watch.
+   * `null`/omitted means uncapped. Positive integers are accepted; the backend
+   * rejects values ≤ 0.
+   */
+  maxInflightTasks?: number | null;
   /** Last poll timestamp, or null when the watch has never run. */
   lastPolledAt?: string | null;
   createdAt: string;
@@ -124,6 +130,8 @@ export interface CreateJiraIssueWatchInput {
   executorProfileId?: string;
   prompt?: string;
   pollIntervalSeconds?: number;
+  /** Per-watch throttle cap; null = uncapped, positive int = cap. */
+  maxInflightTasks?: number | null;
   enabled?: boolean;
 }
 
@@ -137,4 +145,6 @@ export interface UpdateJiraIssueWatchInput {
   prompt?: string;
   enabled?: boolean;
   pollIntervalSeconds?: number;
+  /** Per-watch throttle cap; null = uncapped, positive int = cap. */
+  maxInflightTasks?: number | null;
 }

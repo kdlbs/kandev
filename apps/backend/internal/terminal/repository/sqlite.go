@@ -37,9 +37,6 @@ func NewWithDB(writer, reader *sqlx.DB, log *logger.Logger) (*Repository, error)
 	return r, nil
 }
 
-// Close is a no-op — the writer/reader pools are owned by the caller.
-func (r *Repository) Close() error { return nil }
-
 func (r *Repository) initSchema() error {
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS user_terminals (

@@ -1,11 +1,18 @@
-# Kandev CI base image.
+# Kandev CI base image — split into two tags.
 #
-# Bundles every tool the CI workflows need so jobs can run via `container:`
-# without re-downloading Playwright browsers, Go, Node, pnpm, golangci-lint,
-# and go-licenses on every run.
+# Two stages published as separate tags on the same GHCR repo:
 #
-# Pinned versions (keep in sync with the matching workflow inputs and
-# apps/backend/go.mod, apps/web/package.json):
+#   - `runtime` (~700 MB): Playwright + Node + pnpm + Docker CLI. Used by the
+#     `e2e` shards and `e2e-report` — they consume pre-built backend artifacts
+#     and don't need the Go toolchain. Smaller pull = faster shard startup
+#     (~20s per shard saved across 10 shards).
+#
+#   - `build`  (~1.3 GB): runtime + Go + golangci-lint + go-licenses. Used by
+#     the `build` job (compiles backend + web), `backend-tests`, and
+#     `frontend-tests`. These all need the Go toolchain.
+#
+# Pinned versions (keep in sync with apps/backend/go.mod, apps/web/package.json,
+# and the matching workflow inputs):
 #   - Playwright base : v1.58.2-noble  (matches @playwright/test ^1.58.2)
 #   - Go              : 1.26.0         (matches apps/backend/go.mod)
 #   - Node            : 24             (matches actions/setup-node value)
@@ -14,12 +21,14 @@
 #   - go-licenses     : v1.6.0
 #   - Docker CLI      : 27.3.1
 
-FROM mcr.microsoft.com/playwright:v1.58.2-noble
+# =============================================================================
+# Stage 1: runtime — Playwright + Node + pnpm + Docker CLI (no Go)
+# =============================================================================
+FROM mcr.microsoft.com/playwright:v1.58.2-noble AS runtime
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PNPM_HOME=/pnpm \
-    GOPATH=/root/go \
-    PATH=/pnpm:/usr/local/go/bin:/root/go/bin:$PATH
+    PATH=/pnpm:$PATH
 
 # --- System packages -------------------------------------------------------
 # Docker CLI is fetched as a static binary below to avoid pulling the daemon.
@@ -30,16 +39,12 @@ RUN apt-get update \
         gnupg \
         git \
         make \
-        build-essential \
         jq \
         tar \
         xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # --- Node 24 (replaces the base image's Node 22) ---------------------------
-# Download the NodeSource setup script to a temp file first rather than piping
-# `curl` straight into `bash`, so the script is on disk if anything needs to
-# inspect it.
 RUN curl -fsSL https://deb.nodesource.com/setup_24.x -o /tmp/nodesource_setup.sh \
     && bash /tmp/nodesource_setup.sh \
     && rm /tmp/nodesource_setup.sh \
@@ -50,6 +55,34 @@ RUN curl -fsSL https://deb.nodesource.com/setup_24.x -o /tmp/nodesource_setup.sh
 RUN corepack enable \
     && corepack prepare pnpm@9.15.9 --activate
 
+# --- Docker CLI (no daemon) ------------------------------------------------
+RUN curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-27.3.1.tgz \
+        -o /tmp/docker.tgz \
+    && tar -xzf /tmp/docker.tgz -C /tmp \
+    && mv /tmp/docker/docker /usr/local/bin/docker \
+    && rm -rf /tmp/docker /tmp/docker.tgz
+
+WORKDIR /work
+
+# --- Runtime smoke checks --------------------------------------------------
+RUN set -eux; \
+    node --version | grep -E '^v24\.'; \
+    pnpm --version | grep -E '^9\.15\.9$'; \
+    docker --version | grep -F '27.3.1'
+
+# =============================================================================
+# Stage 2: build — runtime + Go + golangci-lint + go-licenses
+# =============================================================================
+FROM runtime AS build
+
+ENV GOPATH=/root/go \
+    PATH=/pnpm:/usr/local/go/bin:/root/go/bin:$PATH
+
+# build-essential is only needed by Go's CGO path (sqlite via fts5 tag).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
 # --- Go 1.26.0 -------------------------------------------------------------
 RUN curl -fsSL https://go.dev/dl/go1.26.0.linux-amd64.tar.gz \
         -o /tmp/go.tar.gz \
@@ -57,9 +90,6 @@ RUN curl -fsSL https://go.dev/dl/go1.26.0.linux-amd64.tar.gz \
     && rm /tmp/go.tar.gz
 
 # --- golangci-lint v2.9.0 --------------------------------------------------
-# Fetch the install script from the matching tagged ref (not `master`) so the
-# script itself is reproducible across rebuilds, and save it to a temp file
-# before executing rather than piping `curl` into `sh`.
 RUN curl -fsSL \
         https://raw.githubusercontent.com/golangci/golangci-lint/v2.9.0/install.sh \
         -o /tmp/install-golangci-lint.sh \
@@ -69,27 +99,8 @@ RUN curl -fsSL \
 # --- go-licenses v1.6.0 ----------------------------------------------------
 RUN go install github.com/google/go-licenses@v1.6.0
 
-# --- Docker CLI (no daemon) ------------------------------------------------
-# Static binary release lets jobs talk to a mounted host socket without
-# dragging containerd/dockerd into the image.
-RUN curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-27.3.1.tgz \
-        -o /tmp/docker.tgz \
-    && tar -xzf /tmp/docker.tgz -C /tmp \
-    && mv /tmp/docker/docker /usr/local/bin/docker \
-    && rm -rf /tmp/docker /tmp/docker.tgz
-
-WORKDIR /work
-
-# --- Smoke checks ----------------------------------------------------------
-# Fail the build if any pinned tool is missing or mismatched. The Playwright
-# version is intentionally not asserted at runtime: `npx playwright --version`
-# resolves via npm and fetches the latest release rather than the image's
-# bundled binary, and the bundled binary's location is internal to the
-# Microsoft image. The FROM pin (`v1.58.2-noble`) is the version guarantee.
+# --- Build smoke checks ----------------------------------------------------
 RUN set -eux; \
     go version | grep -F 'go1.26.0'; \
-    node --version | grep -E '^v24\.'; \
-    pnpm --version | grep -E '^9\.15\.9$'; \
     golangci-lint --version | grep -F '2.9.0'; \
-    go version -m "$(which go-licenses)" | grep -F 'v1.6.0'; \
-    docker --version | grep -F '27.3.1'
+    go version -m "$(which go-licenses)" | grep -F 'v1.6.0'

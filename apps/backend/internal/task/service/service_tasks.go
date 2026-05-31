@@ -24,6 +24,11 @@ import (
 // Used when a caller omits priority so the DB CHECK constraint is satisfied.
 const defaultPriority = "medium"
 
+// ErrSubtaskDepthExceeded is returned when a caller tries to create a
+// subtask of a kanban subtask (nesting depth > 1). Office task trees are
+// intentionally exempt.
+var ErrSubtaskDepthExceeded = fmt.Errorf("cannot create a subtask of a subtask — maximum nesting depth is 1 for kanban tasks. Create a sibling task under the same parent or a top-level task instead")
+
 type taskStopTarget struct {
 	sessionID   string
 	executionID string
@@ -51,6 +56,17 @@ func isOfficeRequest(req *CreateTaskRequest) bool {
 // Ephemeral tasks (quick chat, config chat) must NOT have a workflow.
 func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*models.Task, error) {
 	if err := s.validateCreateTaskRequest(req); err != nil {
+		return nil, err
+	}
+	if err := s.validateSubtaskDepth(ctx, req); err != nil {
+		return nil, err
+	}
+
+	// Subtasks created without explicit repositories inherit the parent's, so
+	// an inherit_parent subtask resolves a repo at launch and can reuse the
+	// parent's worktree (the UI omits repositories expecting this). Mirrors the
+	// MCP create_task path so UI- and agent-created subtasks behave identically.
+	if err := s.inheritParentRepositories(ctx, req); err != nil {
 		return nil, err
 	}
 
@@ -101,6 +117,44 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 	return task, nil
 }
 
+// inheritParentRepositories fills req.Repositories from the parent task when a
+// subtask is created without explicit repositories. This applies to any
+// repo-less subtask (not only inherit_parent ones), matching the MCP
+// create_task path (mcp/handlers.inheritedRepoInputs) so UI- and agent-created
+// subtasks behave identically — the UI's new_workspace mode always sends repos,
+// so in practice only inherit_parent reaches here empty. RepositoryID and
+// BaseBranch carry over; CheckoutBranch is dropped on purpose because two
+// worktrees can't share a working branch, so the subtask branches off the same
+// base as the parent.
+//
+// A lookup failure is returned rather than swallowed: a subtask silently
+// created with no repositories can't establish a worktree, which would
+// reintroduce the exact fresh-worktree bug this inheritance is meant to fix —
+// failing fast surfaces the problem at creation time instead.
+func (s *Service) inheritParentRepositories(ctx context.Context, req *CreateTaskRequest) error {
+	if req.ParentID == "" || len(req.Repositories) > 0 {
+		return nil
+	}
+	parentRepos, err := s.taskRepos.ListTaskRepositories(ctx, req.ParentID)
+	if err != nil {
+		return fmt.Errorf("list parent repositories for subtask inheritance: %w", err)
+	}
+	inherited := make([]TaskRepositoryInput, 0, len(parentRepos))
+	for _, r := range parentRepos {
+		if r == nil || r.RepositoryID == "" {
+			continue
+		}
+		inherited = append(inherited, TaskRepositoryInput{
+			RepositoryID: r.RepositoryID,
+			BaseBranch:   r.BaseBranch,
+		})
+	}
+	if len(inherited) > 0 {
+		req.Repositories = inherited
+	}
+	return nil
+}
+
 // validateCreateTaskRequest validates constraints for task creation.
 func (s *Service) validateCreateTaskRequest(req *CreateTaskRequest) error {
 	isOffice := isOfficeRequest(req)
@@ -109,6 +163,22 @@ func (s *Service) validateCreateTaskRequest(req *CreateTaskRequest) error {
 	}
 	if req.IsEphemeral && req.WorkflowID != "" {
 		return fmt.Errorf("workflow_id must be empty for ephemeral tasks")
+	}
+	return nil
+}
+
+// validateSubtaskDepth prevents nesting deeper than one level for kanban
+// (non-office) tasks. Office task trees intentionally allow arbitrary depth.
+func (s *Service) validateSubtaskDepth(ctx context.Context, req *CreateTaskRequest) error {
+	if req.ParentID == "" {
+		return nil
+	}
+	parent, err := s.tasks.GetTask(ctx, req.ParentID)
+	if err != nil {
+		return fmt.Errorf("invalid parent_id: %w", err)
+	}
+	if parent.ParentID != "" && !parent.IsFromOffice {
+		return ErrSubtaskDepthExceeded
 	}
 	return nil
 }
@@ -243,9 +313,13 @@ func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceI
 		// Multi-repo validation: each repository may appear at most once per task.
 		// Without this guard the unique (task_id, repository_id) constraint on
 		// task_repositories would surface as an opaque DB error mid-loop, leaving
-		// some rows already inserted.
+		// some rows already inserted. Name the repository (owner/name) instead of
+		// the raw UUID so the create-task dialog's error toast is human-readable —
+		// two PR URLs of the same repo (e.g. /pull/1116 and /pull/1117) collapse
+		// to the same repositoryID and hit this path.
 		if seen[repositoryID] {
-			return fmt.Errorf("repository %q listed more than once for the task", repositoryID)
+			label := s.repoDisplayLabel(ctx, repoInput, repositoryID)
+			return fmt.Errorf("repository %q is listed more than once for this task", label)
 		}
 		seen[repositoryID] = true
 		metadata := make(map[string]interface{})
@@ -266,6 +340,28 @@ func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceI
 		}
 	}
 	return nil
+}
+
+// repoDisplayLabel returns a human-readable label for a repository to surface
+// in the duplicate-repository error. It prefers owner/name parsed from the
+// input's GitHub URL, then the resolved repo entity's owner/name (or bare
+// name), and finally falls back to the repositoryID so the message is never
+// empty. Best-effort: lookup failures degrade to the next fallback.
+func (s *Service) repoDisplayLabel(ctx context.Context, repoInput TaskRepositoryInput, repositoryID string) string {
+	if repoInput.GitHubURL != "" {
+		if owner, name, err := parseGitHubRepoURL(repoInput.GitHubURL); err == nil {
+			return owner + "/" + name
+		}
+	}
+	if repo, err := s.repoEntities.GetRepository(ctx, repositoryID); err == nil && repo != nil {
+		if repo.ProviderOwner != "" && repo.ProviderName != "" {
+			return repo.ProviderOwner + "/" + repo.ProviderName
+		}
+		if repo.Name != "" {
+			return repo.Name
+		}
+	}
+	return repositoryID
 }
 
 // resolveRepoInput resolves a RepositoryInput to a repositoryID and baseBranch,

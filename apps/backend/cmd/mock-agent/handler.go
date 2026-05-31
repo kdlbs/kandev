@@ -1,15 +1,106 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
 )
+
+// overloaded529Message is the exact transient 529 message the real Anthropic
+// API returns and the claude-agent-acp adapter surfaces over ACP. The
+// orchestrator's routingerr classifier matches the "529 ... Overloaded"
+// signature in this string and routes it to the retry-with-backoff path.
+const overloaded529Message = "Internal error: API Error: 529 Overloaded. This is a server-side issue, " +
+	"usually temporary — try again in a moment. If it persists, check https://status.claude.com."
+
+// overloadedCmdRe matches `/overloaded` or `/e2e:overloaded`, optionally
+// followed by `:N` — the number of consecutive prompts to fail with a 529
+// before recovering (default 1, so the turn self-heals on the first retry).
+// Use a large N (e.g. `/overloaded:9`) to exhaust the retry budget and fall
+// through to the red recovery banner.
+var overloadedCmdRe = regexp.MustCompile(`(?i)^/(?:e2e:)?overloaded(?::(\d+))?$`)
+
+// parseOverloadedCmd reports whether the prompt is the /overloaded command and,
+// if so, how many consecutive prompts it should fail before recovering
+// (default 1). Returns ok=false for any other prompt.
+func parseOverloadedCmd(prompt string) (failTimes int, ok bool) {
+	cmd := stripKandevSystem(strings.TrimSpace(prompt))
+	m := overloadedCmdRe.FindStringSubmatch(cmd)
+	if m == nil {
+		return 0, false
+	}
+	failTimes = 1
+	if m[1] != "" {
+		if n, err := strconv.Atoi(m[1]); err == nil && n >= 0 {
+			failTimes = n
+		}
+	}
+	return failTimes, true
+}
+
+// handleOverloaded implements the /overloaded scenario: it returns a real
+// prompt-time ACP error carrying the production 529 string for the first N
+// prompts of a session, then recovers with a normal text response. Returns
+// handled=false when the prompt is not the overloaded command.
+func (a *mockAgent) handleOverloaded(ctx context.Context, sid acp.SessionId, prompt string) (acp.PromptResponse, error, bool) {
+	failTimes, ok := parseOverloadedCmd(prompt)
+	if !ok {
+		return acp.PromptResponse{}, nil, false
+	}
+
+	// The orchestrator's backoff retry tears the agent process down and
+	// relaunches it via --resume, so an in-memory counter would reset every
+	// attempt and never recover. Persist the attempt count in a file keyed by
+	// the (resume-stable) session id so fail-then-recover survives relaunch.
+	attempt := nextOverloadedAttempt(sid)
+
+	if attempt <= failTimes {
+		_, _ = fmt.Fprintf(logOutput, "mock-agent[%d]: emitting 529 Overloaded for session %s (failure %d/%d)\n",
+			os.Getpid(), sid, attempt, failTimes)
+		return acp.PromptResponse{}, &acp.RequestError{
+			Code:    -32603,
+			Message: overloaded529Message,
+			Data:    map[string]any{"errorKind": "server_error"},
+		}, true
+	}
+
+	// Recovered: clear the counter and emit a normal success response so the
+	// turn completes (and the orchestrator clears the retry budget).
+	_ = os.Remove(overloadedCounterPath(sid))
+	e := &emitter{ctx: ctx, conn: a.conn, sid: sid}
+	e.text(fmt.Sprintf("Provider recovered after %d transient failure(s) — here is your response.", failTimes))
+	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil, true
+}
+
+// overloadedCounterPath returns the temp-file path tracking how many times the
+// /overloaded scenario has fired for a session. Keyed by the resume-stable ACP
+// session id so the count survives process relaunch across backoff retries.
+func overloadedCounterPath(sid acp.SessionId) string {
+	safe := strings.NewReplacer("/", "_", "\\", "_", "..", "_").Replace(string(sid))
+	return filepath.Join(os.TempDir(), "kandev-mock-overloaded-"+safe+".count")
+}
+
+// nextOverloadedAttempt increments and returns the persisted attempt count.
+func nextOverloadedAttempt(sid acp.SessionId) int {
+	path := overloadedCounterPath(sid)
+	prev := 0
+	if raw, err := os.ReadFile(path); err == nil {
+		if n, convErr := strconv.Atoi(strings.TrimSpace(string(raw))); convErr == nil {
+			prev = n
+		}
+	}
+	next := prev + 1
+	_ = os.WriteFile(path, []byte(strconv.Itoa(next)), 0o600)
+	return next
+}
 
 // delayRange returns min/max delay in milliseconds based on model name.
 func delayRange(model string) (int, int) {

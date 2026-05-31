@@ -20,9 +20,12 @@ import {
   setPinnedTarget,
 } from "./layout-manager";
 import type { LayoutState, LayoutGroupIds } from "./layout-manager";
+import { ENV_SCOPED_DOCKVIEW_COMPONENTS } from "./dockview-env-scoped-components";
 import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+import { snapshotColumnWidths, formatWidthsSnapshot } from "./dockview-widths-debug";
 
 const debug = createDebugLogger("dockview:env-switch");
+const debugWidths = createDebugLogger("dockview:widths");
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function snapshotGridShape(node: any, depth = 0): unknown {
@@ -45,14 +48,7 @@ function snapshotGridShape(node: any, depth = 0): unknown {
   return null;
 }
 
-const EPHEMERAL_COMPONENTS = new Set([
-  "file-editor",
-  "browser",
-  "vscode",
-  "commit-detail",
-  "diff-viewer",
-  "pr-detail",
-]);
+const EPHEMERAL_COMPONENTS = ENV_SCOPED_DOCKVIEW_COMPONENTS;
 
 /** Fetch the saved layout for an env, dropping it if its shape is corrupted. */
 function getHealthyEnvLayout(envId: string): object | null {
@@ -378,16 +374,33 @@ function applyPinnedColumnSizes(
 
   const savedSizes = saved ? extractSavedColumnSizes(saved) : null;
   const liveLayout = fromDockviewApi(api);
+  if (IS_DEBUG) {
+    const savedStr = savedSizes
+      ? savedSizes.map((n) => (Number.isFinite(n) ? String(Math.round(n)) : "-")).join(",")
+      : "-";
+    debugWidths(
+      `env-switch-resize totalWidth=${totalWidth} savedSizes=${savedStr} ` +
+        `pre=${formatWidthsSnapshot(snapshotColumnWidths(api))}`,
+    );
+  }
   for (let i = 0; i < liveLayout.columns.length && i < sv.length; i++) {
     const col = liveLayout.columns[i];
     if (col.id !== "sidebar" && col.id !== "right") continue;
-    const target = targetPinnedWidth(col, i, savedSizes, totalWidth);
+    // Sidebar uses the GLOBAL width pref (single source of truth across tasks),
+    // so it ignores this env's saved size. Right keeps per-env saved sizes.
+    const target =
+      col.id === "sidebar"
+        ? getPinnedWidth(col, totalWidth, undefined)
+        : targetPinnedWidth(col, i, savedSizes, totalWidth);
     if (typeof target !== "number" || target <= 0) continue;
     try {
       sv.resizeView(i, target);
       // Update the pinned-target so enforcement keeps the new env's width
       // through subsequent rebalances.
       setPinnedTarget(col.id, target);
+      if (IS_DEBUG) {
+        debugWidths(`env-switch-resize-col col=${col.id} idx=${i} target=${Math.round(target)}`);
+      }
     } catch {
       /* dockview rejects out-of-range sizes — ignore */
     }

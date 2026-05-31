@@ -74,6 +74,12 @@ Use subscription hooks only; the WS client auto-deduplicates.
 - Components: <200 lines, extract to domain components, composition over props.
 - Hooks: domain-organized in `hooks/domains/`, encapsulate subscription + selection.
 - **Interactivity:** all buttons and links with actions must have `cursor-pointer` class.
+- **Renaming a `data-testid`:** set the new id as `data-testid="<new>"` and keep
+  the old id as `data-legacy-testid="<old>"`, then migrate e2e specs to the new
+  id in the same PR. JSX rejects two `data-testid` attributes on one element,
+  and Playwright's `getByTestId` only matches one attribute name — the
+  `data-legacy-testid` alias lets existing specs keep selecting the element
+  while the migration is in flight.
 
 ## Code-quality limits
 

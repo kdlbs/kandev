@@ -25,6 +25,7 @@ const (
 	questionIDFieldKey = "question_id"
 	answeredFieldKey   = "answered"
 	rejectedFieldKey   = "rejected"
+	documentArg        = "document"
 )
 
 func (s *Server) listWorkspacesHandler() server.ToolHandlerFunc {
@@ -144,22 +145,6 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 			"executor_profile_id": req.GetString("executor_profile_id", ""),
 			"source_task_id":      s.taskID,
 			"start_agent":         startAgent,
-		}
-
-		// Office task-handoffs phase 4: workspace policy. Empty values fall
-		// through; the WS handler resolves defaults (new_workspace, parent
-		// policy inheritance) on the server side.
-		if v := req.GetString("workspace_mode", ""); v != "" {
-			payload["workspace_mode"] = v
-		}
-		if v := req.GetString("workspace_group_id", ""); v != "" {
-			payload["workspace_group_id"] = v
-		}
-		if v := req.GetString("default_child_workspace", ""); v != "" {
-			payload["default_child_workspace"] = v
-		}
-		if v := req.GetString("default_child_ordering", ""); v != "" {
-			payload["default_child_ordering"] = v
 		}
 
 		// Add repository info. For subtasks an explicit repo overrides the

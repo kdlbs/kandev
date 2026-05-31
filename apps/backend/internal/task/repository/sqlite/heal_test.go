@@ -566,3 +566,40 @@ func TestHealSessionTaskEnvironmentIDs_Idempotent(t *testing.T) {
 
 // silences "imported and not used" if some future refactor drops a use.
 var _ = sql.ErrNoRows
+
+// TestBackfillSingleTask_DefaultsExecutorTypeOnMissingRow — when the
+// referenced executor row is genuinely absent (legacy session whose executor
+// was deleted), backfillSingleTask must default executor_type to "local_pc"
+// and continue. Locks in the narrowed error-handling: only sql.ErrNoRows
+// triggers the default; any other scan error must propagate so operators see
+// the real cause instead of every backfilled env silently getting the wrong
+// type.
+func TestBackfillSingleTask_DefaultsExecutorTypeOnMissingRow(t *testing.T) {
+	repo := newRepoForHealTests(t)
+	insertTask(t, repo.db, "task-bf")
+	// Session references an executor id that does NOT exist in `executors`.
+	// backfillTaskEnvironments queries task_sessions for orphans (no env)
+	// and calls backfillSingleTask for each — exercising the executor
+	// lookup path with sql.ErrNoRows.
+	insertSessionWithEnvID(t, repo.db, "sess-bf", "task-bf", "")
+	if _, err := repo.db.Exec(
+		`UPDATE task_sessions SET executor_id = 'exec-deleted', started_at = ? WHERE id = 'sess-bf'`,
+		time.Now().UTC(),
+	); err != nil {
+		t.Fatalf("seed executor_id: %v", err)
+	}
+
+	if err := repo.backfillTaskEnvironments(); err != nil {
+		t.Fatalf("backfillTaskEnvironments: %v", err)
+	}
+
+	var executorType string
+	if err := repo.db.QueryRow(
+		`SELECT executor_type FROM task_environments WHERE task_id = 'task-bf'`,
+	).Scan(&executorType); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if executorType != "local_pc" {
+		t.Errorf("executor_type = %q, want default 'local_pc' when executor row absent", executorType)
+	}
+}

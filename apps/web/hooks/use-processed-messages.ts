@@ -105,6 +105,14 @@ export type PrepareProgressItem = {
 
 export type RenderItem = { type: "message"; message: Message } | TurnGroup | PrepareProgressItem;
 
+export type GroupedRenderOptions = {
+  canAnchorPrepareProgress?: boolean;
+};
+
+export type ProcessedMessagesOptions = {
+  hasOlderMessages?: boolean;
+};
+
 function buildToolCallIds(messages: Message[]): Set<string> {
   const set = new Set<string>();
   for (const message of messages) {
@@ -183,6 +191,18 @@ export function isAgentBootResumeMessage(message: Message): boolean {
   return meta?.script_type === "agent_boot" && meta?.is_resuming === true;
 }
 
+/** Per-repo setup scripts (`Repository.setup_script`) run during worktree
+ *  creation and are persisted as `script_execution` rows. They belong
+ *  conceptually to environment preparation, not the chat thread — `PrepareProgress`
+ *  surfaces them as steps inside the env-prep panel. Hiding them from the chat
+ *  prevents the script from rendering above the env-prep panel (which happens
+ *  when the user prompt hasn't been recorded yet, e.g. MCP-auto-started subtasks). */
+export function isSetupScriptMessage(message: Message): boolean {
+  if (message.type !== "script_execution") return false;
+  const meta = message.metadata as { script_type?: string } | undefined;
+  return meta?.script_type === "setup";
+}
+
 /** A resumed session may produce many "Resumed agent …" boot messages over its
  *  lifetime (every backend restart emits one). They all convey the same info;
  *  keep only the most recent and drop the rest — unconditionally, even if user
@@ -207,6 +227,7 @@ function filterVisibleMessages(
 ): Message[] {
   const filtered = messages.filter((message) => {
     if (subagentChildIds.has(message.id)) return false;
+    if (isSetupScriptMessage(message)) return false;
     if (message.type === "clarification_request") {
       const metadata = message.metadata as ClarificationRequestMetadata | undefined;
       return !(!metadata?.status || metadata.status === "pending");
@@ -319,8 +340,10 @@ function groupActivityMessages(allMessages: Message[]): RenderItem[] {
 function injectPrepareProgressItem(
   items: RenderItem[],
   resolvedSessionId: string | null,
+  options: GroupedRenderOptions = {},
 ): RenderItem[] {
   if (!resolvedSessionId) return items;
+  if (options.canAnchorPrepareProgress === false) return items;
   const prepareItem: PrepareProgressItem = {
     type: "prepare_progress",
     id: `prepare-progress-${resolvedSessionId}`,
@@ -330,11 +353,58 @@ function injectPrepareProgressItem(
   return [items[0], prepareItem, ...items.slice(1)];
 }
 
+export function buildGroupedRenderItems(
+  regularMessages: Message[],
+  resolvedSessionId: string | null,
+  options: GroupedRenderOptions = {},
+): RenderItem[] {
+  return injectPrepareProgressItem(
+    groupActivityMessages(regularMessages),
+    resolvedSessionId,
+    options,
+  );
+}
+
+function canAnchorPrepareProgress(messages: Message[], hasOlderMessages: boolean): boolean {
+  if (!hasOlderMessages) return true;
+  return messages.some(isSetupScriptMessage);
+}
+
+function buildGroupedItemsForHook(args: {
+  regularMessages: Message[];
+  allSessionMessages: Message[];
+  resolvedSessionId: string | null;
+  hasOlderMessages: boolean;
+}): RenderItem[] {
+  return buildGroupedRenderItems(args.regularMessages, args.resolvedSessionId, {
+    canAnchorPrepareProgress: canAnchorPrepareProgress(
+      args.allSessionMessages,
+      args.hasOlderMessages,
+    ),
+  });
+}
+
+function buildTodoItems(visibleMessages: Message[]) {
+  const latestTodos = [...visibleMessages]
+    .reverse()
+    .find((message) => message.type === "todo" || (message.metadata as { todos?: unknown })?.todos);
+  return (
+    (
+      latestTodos?.metadata as
+        | { todos?: Array<{ text: string; done?: boolean } | string> }
+        | undefined
+    )?.todos
+      ?.map((item) => (typeof item === "string" ? { text: item, done: false } : item))
+      .filter((item) => item.text) ?? []
+  );
+}
+
 export function useProcessedMessages(
   messages: Message[],
   taskId: string | null,
   resolvedSessionId: string | null,
   taskDescription: string | null,
+  options: ProcessedMessagesOptions = {},
 ) {
   const toolCallIds = useMemo(() => buildToolCallIds(messages), [messages]);
   const permissionsByToolCallId = useMemo(() => buildPermissionsByToolCallId(messages), [messages]);
@@ -375,22 +445,7 @@ export function useProcessedMessages(
     return taskDescriptionMessage ? [taskDescriptionMessage, ...visibleMessages] : visibleMessages;
   }, [taskDescriptionMessage, visibleMessages]);
 
-  const todoItems = useMemo(() => {
-    const latestTodos = [...visibleMessages]
-      .reverse()
-      .find(
-        (message) => message.type === "todo" || (message.metadata as { todos?: unknown })?.todos,
-      );
-    return (
-      (
-        latestTodos?.metadata as
-          | { todos?: Array<{ text: string; done?: boolean } | string> }
-          | undefined
-      )?.todos
-        ?.map((item) => (typeof item === "string" ? { text: item, done: false } : item))
-        .filter((item) => item.text) ?? []
-    );
-  }, [visibleMessages]);
+  const todoItems = useMemo(() => buildTodoItems(visibleMessages), [visibleMessages]);
 
   const agentMessageCount = useMemo(() => {
     return visibleMessages.filter((c) => c.author_type !== "user").length;
@@ -413,8 +468,13 @@ export function useProcessedMessages(
   }, [allMessages]);
 
   const groupedItems = useMemo<RenderItem[]>(() => {
-    return injectPrepareProgressItem(groupActivityMessages(regularMessages), resolvedSessionId);
-  }, [regularMessages, resolvedSessionId]);
+    return buildGroupedItemsForHook({
+      regularMessages,
+      allSessionMessages: messages,
+      resolvedSessionId,
+      hasOlderMessages: options.hasOlderMessages ?? false,
+    });
+  }, [regularMessages, resolvedSessionId, messages, options.hasOlderMessages]);
 
   useDebugProcessedPipeline({
     sessionId: resolvedSessionId,

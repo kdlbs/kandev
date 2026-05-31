@@ -38,8 +38,9 @@ jobs:
     name: Build
     runs-on: ubuntu-latest
     # Pre-baked image bundles Go, Node 24, pnpm 9.15.9 — see
-    # .github/docker/ci-base/Dockerfile.
-    container: ghcr.io/kdlbs/kandev-ci:latest
+    # .github/docker/ci-base/Dockerfile. Uses the `build` tag (with Go)
+    # because this job compiles the backend.
+    container: ghcr.io/kdlbs/kandev-ci:build-latest
     timeout-minutes: 10
     # Container jobs default to `sh`; pin to bash for the few shell steps below.
     defaults:
@@ -107,10 +108,16 @@ jobs:
     # `--ipc=host` is required for Chromium: the default container `/dev/shm`
     # is only ~64MiB, which causes tabs to slow to a crawl and renderers to
     # crash mid-test.
+    # Uses the `runtime` tag — no Go toolchain needed; the shards consume the
+    # pre-built backend artifact from the `build` job. ~600 MB smaller pull
+    # than the build image, saves ~20s per shard at startup.
     container:
-      image: ghcr.io/kdlbs/kandev-ci:latest
+      image: ghcr.io/kdlbs/kandev-ci:runtime-latest
       options: --ipc=host
-    timeout-minutes: 22
+    # 25 min (was 22) — leaves room for the worst-case "every shard hits a few
+    # flake-retries" combination without blowing past the cap. Average shard
+    # runs ~10 min, so this only kicks in when something is going wrong.
+    timeout-minutes: 25
     # Container jobs default to `sh`; pin to bash.
     defaults:
       run:
@@ -209,9 +216,11 @@ jobs:
     needs: build
     # This job intentionally runs on the host ubuntu runner (NOT the kandev-ci
     # container image): the containers project needs direct access to the
-    # host Docker daemon, and docker/setup-buildx style steps + the
-    # docker-in-container UX are awkward inside a container job. We recover
-    # some of the setup cost via the pnpm-store and Playwright caches below.
+    # host Docker daemon, and a docker-in-docker setup would break the tests'
+    # host-style bind mounts (paths under os.tmpdir() inside a runner container
+    # wouldn't exist on the host where the docker daemon resolves them).
+    # We still avoid the slow `playwright install --with-deps` step by copying
+    # browsers out of the kandev-ci image — see the extract step below.
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -243,37 +252,44 @@ jobs:
           key: pnpm-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
           restore-keys: pnpm-${{ runner.os }}-
 
-      # Derive the Playwright version from apps/web/package.json at runtime so
-      # the cache key below auto-busts on every @playwright/test bump. The
-      # previous hardcoded `1.58.2` suffix would have silently served stale
-      # browser binaries until manually updated.
-      - name: Resolve Playwright version
-        id: pw
-        shell: bash
-        run: |
-          set -euo pipefail
-          raw=$(node -p "require('./apps/web/package.json').devDependencies['@playwright/test']")
-          version=$(printf '%s' "$raw" | sed -E 's/^[^0-9]*//; s/[^0-9.].*$//')
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
-          echo "Playwright version: ${version}"
-
-      - name: Cache Playwright browsers
-        id: playwright-cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
-
       - name: Install dependencies
         working-directory: apps
         run: pnpm install --frozen-lockfile
 
-      # `--with-deps` runs apt-get install on every invocation (~20–30s), so
-      # skip the step entirely when the cache restored the browser binaries.
-      - name: Install Playwright browsers
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
+      # Required for the docker pull below to succeed even if the kandev-ci
+      # package is private on GHCR. The `e2e` / `e2e-report` jobs above don't
+      # need this because GitHub's `container:` integration handles auth
+      # implicitly using GITHUB_TOKEN.
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Skip the Playwright CDN download (~7 min and an outage-prone path) by
+      # copying the prebaked chromium out of the kandev-ci image, which is
+      # `FROM mcr.microsoft.com/playwright:...` and already ships the matching
+      # browser at /ms-playwright. Pulling the `runtime` tag (matches the
+      # `e2e` / `e2e-report` jobs above) — the `build` tag has the same
+      # browser layer but is ~300 MB larger because of the Go toolchain.
+      - name: Extract Playwright browsers from kandev-ci image
+        run: |
+          set -euo pipefail
+          docker pull ghcr.io/kdlbs/kandev-ci:runtime-latest
+          mkdir -p /tmp/ms-playwright
+          docker run --rm \
+            -v /tmp/ms-playwright:/dest \
+            ghcr.io/kdlbs/kandev-ci:runtime-latest \
+            cp -a /ms-playwright/. /dest/
+          echo "PLAYWRIGHT_BROWSERS_PATH=/tmp/ms-playwright" >> "$GITHUB_ENV"
+
+      # Browser binaries come from the image above; this only installs the
+      # apt-level shared libs chromium links against. Fast (~20–30s) and avoids
+      # any CDN dependency.
+      - name: Install Playwright system deps
         working-directory: apps/web
-        run: npx playwright install chromium --with-deps
+        run: npx playwright install-deps chromium
 
       - name: Download backend build
         uses: actions/download-artifact@v5
@@ -329,7 +345,8 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     # Pre-baked image bundles Node 24, pnpm 9.15.9, and the Playwright CLI.
-    container: ghcr.io/kdlbs/kandev-ci:latest
+    # `runtime` tag — no Go needed for merging blob reports.
+    container: ghcr.io/kdlbs/kandev-ci:runtime-latest
     timeout-minutes: 5
     # Container jobs default to `sh`; pin to bash.
     defaults:

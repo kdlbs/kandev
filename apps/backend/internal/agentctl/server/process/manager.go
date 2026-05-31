@@ -634,6 +634,7 @@ func (m *Manager) buildAdapterConfig() error {
 		McpServers:     mcpServers,
 		AgentID:        m.cfg.AgentType, // From registry (e.g., "auggie", "amp", "claude-code")
 		AssumeMcpSse:   m.cfg.AssumeMcpSse,
+		AssumeMcpHttp:  m.cfg.AssumeMcpHttp,
 	}
 
 	// Configure one-shot mode when a continue command is provided.

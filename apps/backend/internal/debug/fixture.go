@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/acp"
+	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -101,32 +102,50 @@ func discoverFixtureFiles(baseDir string) ([]DiscoveredFile, error) {
 }
 
 // discoverNormalizedFiles finds all normalized event files (normalized-*.jsonl).
+// It looks in two places: the legacy backend-root location (where older runs
+// wrote files into the process CWD) and the per-session log dir used by the
+// managed ACP writer (~/.kandev/logs/acp by default).
 func discoverNormalizedFiles(baseDir string) ([]DiscoveredFile, error) {
-	backendRoot := filepath.Join(baseDir, "..", "..", "..", "..")
-	pattern := filepath.Join(backendRoot, "normalized-*.jsonl")
-	matches, err := filepath.Glob(pattern)
-	if err != nil {
-		return nil, err
+	dirs := []string{
+		filepath.Join(baseDir, "..", "..", "..", ".."), // backend root (legacy CWD)
+		shared.ACPLogDir(), // per-session managed writer dir
 	}
 
+	seen := make(map[string]bool)
 	var files []DiscoveredFile
-	for _, fullPath := range matches {
-		filename := filepath.Base(fullPath)
-		_, protocol, agent := parseDebugFilename(filename)
-		count := countLines(fullPath)
-		relPath, err := filepath.Rel(baseDir, fullPath)
+	for _, dir := range dirs {
+		matches, err := filepath.Glob(filepath.Join(dir, "normalized-*.jsonl"))
 		if err != nil {
-			relPath = fullPath
+			return nil, err
 		}
-		files = append(files, DiscoveredFile{
-			Path:         relPath,
-			Protocol:     protocol,
-			Agent:        agent,
-			MessageCount: count,
-			FileType:     "normalized",
-		})
+		for _, fullPath := range matches {
+			if seen[fullPath] {
+				continue
+			}
+			seen[fullPath] = true
+			files = append(files, normalizedFileEntry(baseDir, fullPath))
+		}
 	}
 	return files, nil
+}
+
+// normalizedFileEntry builds a DiscoveredFile for a normalized log file, with a
+// path expressed relative to baseDir so handleReadNormalizedEvents can re-join
+// it.
+func normalizedFileEntry(baseDir, fullPath string) DiscoveredFile {
+	filename := filepath.Base(fullPath)
+	_, protocol, agent := parseDebugFilename(filename)
+	relPath, err := filepath.Rel(baseDir, fullPath)
+	if err != nil {
+		relPath = fullPath
+	}
+	return DiscoveredFile{
+		Path:         relPath,
+		Protocol:     protocol,
+		Agent:        agent,
+		MessageCount: countLines(fullPath),
+		FileType:     "normalized",
+	}
 }
 
 // readNormalizedEventsAsMessages reads a normalized events file and returns v1.Message objects.
@@ -336,12 +355,28 @@ func parseDebugFilename(filename string) (fileType, protocol, agent string) {
 }
 
 // splitProtocolAgent splits "{protocol}-{agent}" into protocol and agent.
+// Per-session ACP debug files append "-{sessionID}" after the agent ID. ACP
+// registry IDs consistently end in "-acp", so trim that session tail for
+// display while leaving unknown legacy shapes unchanged.
 func splitProtocolAgent(s string) (protocol, agent string) {
 	idx := strings.Index(s, "-")
 	if idx <= 0 {
 		return s, ""
 	}
-	return s[:idx], s[idx+1:]
+	protocol, agent = s[:idx], s[idx+1:]
+	if protocol == protocolACP {
+		agent = trimACPSessionTail(agent)
+	}
+	return protocol, agent
+}
+
+func trimACPSessionTail(agent string) string {
+	const acpMarker = "-acp-"
+	idx := strings.Index(agent, acpMarker)
+	if idx < 0 {
+		return agent
+	}
+	return agent[:idx+len("-acp")]
 }
 
 // parseProtocolFromFilename extracts protocol from filename patterns (legacy).

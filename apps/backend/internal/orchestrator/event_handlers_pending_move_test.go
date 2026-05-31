@@ -676,7 +676,7 @@ func TestHandleAgentBootReady_DrainsOrphanedQueuedMessage(t *testing.T) {
 				agentManager: agentMgr,
 				messageQueue: messagequeue.NewServiceMemory(log),
 				// Wire a real executor so the executeQueuedMessage goroutine
-				// spawned by drainQueuedMessageAfterTransition can safely call
+				// spawned by drainQueuedMessageForPromptableSession can safely call
 				// PromptTask -> executor.GetExecutionBySession without nil-derefing.
 				executor: executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}),
 			}
@@ -778,5 +778,46 @@ func TestHandleAgentBootReady_DoesNotDrainForTerminalSession(t *testing.T) {
 
 	if got := svc.messageQueue.GetStatus(ctx, sessionID).Count; got != 1 {
 		t.Errorf("queue count after boot ready on terminal session = %d, want 1 (must not drain)", got)
+	}
+}
+
+func TestHandleAgentBootReady_DoesNotDrainWhileCancelInFlight(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
+
+	log := testLogger()
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+		promptDone:             make(chan struct{}),
+	}
+	svc := &Service{
+		logger:       log,
+		repo:         repo,
+		taskRepo:     newMockTaskRepo(),
+		agentManager: agentMgr,
+		messageQueue: messagequeue.NewServiceMemory(log),
+		executor:     executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}),
+	}
+
+	if _, err := svc.messageQueue.QueueMessage(
+		ctx, "s1", "t1", "queued after cancel", "",
+		messagequeue.QueuedByUser, false, nil,
+	); err != nil {
+		t.Fatalf("queue prompt: %v", err)
+	}
+	svc.cancelInFlight.Store("s1", struct{}{})
+	defer svc.cancelInFlight.Delete("s1")
+
+	svc.handleAgentBootReady(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
+
+	status := svc.messageQueue.GetStatus(ctx, "s1")
+	if status.Count != 1 {
+		t.Fatalf("queue count after boot ready during cancel = %d, want 1", status.Count)
+	}
+	if len(agentMgr.capturedPrompts) != 0 {
+		t.Fatalf("expected no queued prompt dispatch during cancel, got %d prompts", len(agentMgr.capturedPrompts))
 	}
 }

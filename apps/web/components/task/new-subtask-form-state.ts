@@ -1,13 +1,19 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import type { Branch, LocalRepository } from "@/lib/types/http";
+import type { LocalRepository } from "@/lib/types/http";
 import type {
   DialogFormState,
   StepType,
   TaskFormInputsHandle,
 } from "@/components/task-create-dialog-types";
-import { useRepositoriesState } from "@/components/task-create-dialog-repositories-state";
+import {
+  useRemoteReposSeedEffect,
+  useRemoteReposState,
+  useRepositoriesState,
+} from "@/components/task-create-dialog-repositories-state";
+import { useBranchesByURL } from "@/hooks/domains/github/use-branches-by-url";
+import { usePRInfoByURL } from "@/hooks/domains/github/use-pr-info-by-url";
 
 /**
  * Workspace mode the New Subtask dialog supports today. The shared_group
@@ -43,16 +49,13 @@ export function defaultSubtaskWorkspaceMode(
  */
 export function useSubtaskFormState(): DialogFormState {
   const repos = useRepositoriesState();
+  const remoteRepos = useRemoteReposState();
+  const branchesByUrl = useBranchesByURL();
+  const prInfoByUrl = usePRInfoByURL();
   const [agentProfileId, setAgentProfileId] = useState("");
   const [executorProfileId, setExecutorProfileId] = useState("");
-  const [useGitHubUrl, setUseGitHubUrl] = useState(false);
-  const [githubUrl, setGitHubUrl] = useState("");
-  const [githubBranch, setGitHubBranch] = useState("");
-  const [githubBranches, setGitHubBranches] = useState<Branch[]>([]);
-  const [githubBranchesLoading, setGitHubBranchesLoading] = useState(false);
+  const [useRemote, setUseRemote] = useState(false);
   const [githubUrlError, setGitHubUrlError] = useState<string | null>(null);
-  const [githubPrHeadBranch, setGitHubPrHeadBranch] = useState<string | null>(null);
-  const [githubPrBaseBranch, setGitHubPrBaseBranch] = useState<string | null>(null);
   // Discovered (on-disk) repos — populated by useDiscoverReposEffect when the
   // dialog opens, same as the create-task flow. This lets users target
   // not-yet-imported on-machine git folders for the subtask.
@@ -60,6 +63,11 @@ export function useSubtaskFormState(): DialogFormState {
   const [discoverReposLoading, setDiscoverReposLoading] = useState(false);
   const [discoverReposLoaded, setDiscoverReposLoaded] = useState(false);
   const descriptionInputRef = useRef<TaskFormInputsHandle | null>(null);
+
+  // Mirror the create-task dialog: when the user flips Remote mode on and
+  // the chip list is empty, seed a single empty paste row so the URL input
+  // has somewhere to land. Non-destructive on toggle-off.
+  useRemoteReposSeedEffect(useRemote, remoteRepos.remoteRepos, remoteRepos.setRemoteRepos);
 
   return useMemo<DialogFormState>(
     () => ({
@@ -72,8 +80,13 @@ export function useSubtaskFormState(): DialogFormState {
       addRepository: repos.addRepository,
       removeRepository: repos.removeRepository,
       updateRepository: repos.updateRepository,
-      githubBranch,
-      setGitHubBranch,
+      remoteRepos: remoteRepos.remoteRepos,
+      setRemoteRepos: remoteRepos.setRemoteRepos,
+      addRemoteRepo: remoteRepos.addRemoteRepo,
+      removeRemoteRepo: remoteRepos.removeRemoteRepo,
+      updateRemoteRepo: remoteRepos.updateRemoteRepo,
+      branchesByUrl,
+      prInfoByUrl,
       agentProfileId,
       setAgentProfileId,
       executorId: "",
@@ -95,20 +108,10 @@ export function useSubtaskFormState(): DialogFormState {
       setIsCreatingSession: NOOP,
       isCreatingTask: false,
       setIsCreatingTask: NOOP,
-      useGitHubUrl,
-      setUseGitHubUrl,
-      githubUrl,
-      setGitHubUrl,
-      githubBranches,
-      setGitHubBranches,
-      githubBranchesLoading,
-      setGitHubBranchesLoading,
+      useRemote,
+      setUseRemote,
       githubUrlError,
       setGitHubUrlError,
-      githubPrHeadBranch,
-      setGitHubPrHeadBranch,
-      githubPrBaseBranch,
-      setGitHubPrBaseBranch,
       workflowAgentProfileId: "",
       setWorkflowAgentProfileId: NOOP,
       clearDraft: NOOP,
@@ -120,16 +123,17 @@ export function useSubtaskFormState(): DialogFormState {
       repos.addRepository,
       repos.removeRepository,
       repos.updateRepository,
-      githubBranch,
+      remoteRepos.remoteRepos,
+      remoteRepos.setRemoteRepos,
+      remoteRepos.addRemoteRepo,
+      remoteRepos.removeRemoteRepo,
+      remoteRepos.updateRemoteRepo,
+      branchesByUrl,
+      prInfoByUrl,
       agentProfileId,
       executorProfileId,
-      useGitHubUrl,
-      githubUrl,
-      githubBranches,
-      githubBranchesLoading,
+      useRemote,
       githubUrlError,
-      githubPrHeadBranch,
-      githubPrBaseBranch,
       discoveredRepositories,
       discoverReposLoading,
       discoverReposLoaded,

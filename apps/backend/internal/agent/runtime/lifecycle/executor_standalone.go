@@ -96,9 +96,11 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 	}
 	disableAskQuestion := agents.IsPassthroughOnly(req.AgentConfig)
 	assumeMcpSse := false
+	assumeMcpHttp := false
 	if req.AgentConfig != nil {
 		if rt := req.AgentConfig.Runtime(); rt != nil {
 			assumeMcpSse = rt.AssumeMcpSse
+			assumeMcpHttp = rt.AssumeMcpHttp
 		}
 	}
 
@@ -115,6 +117,7 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 		TaskID:             req.TaskID,
 		DisableAskQuestion: disableAskQuestion,
 		AssumeMcpSse:       assumeMcpSse,
+		AssumeMcpHttp:      assumeMcpHttp,
 		McpMode:            req.McpMode,
 	}
 

@@ -2,6 +2,8 @@ package github
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -150,6 +152,62 @@ func TestConvertPatPR_MergeableState(t *testing.T) {
 	pr := convertPatPR(raw, "o", "r")
 	if pr.MergeableState != "clean" {
 		t.Errorf("expected normalized mergeable_state=clean, got %q", pr.MergeableState)
+	}
+}
+
+func TestPATClient_FindPRByBranch_UsesGraphQLHeadRefName(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/graphql" {
+			t.Errorf("unexpected path %q, want /graphql", r.URL.Path)
+			http.Error(w, "unexpected path", http.StatusInternalServerError)
+			return
+		}
+		if r.Method != http.MethodPost {
+			t.Errorf("method = %s, want POST", r.Method)
+		}
+		var body struct {
+			Query string `json:"query"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request body: %v", err)
+			http.Error(w, "bad json", http.StatusBadRequest)
+			return
+		}
+		if !strings.Contains(body.Query, `pullRequests(first: 2, states: OPEN, headRefName: "feature")`) {
+			t.Errorf("query should look up branch by headRefName, got: %s", body.Query)
+		}
+		if strings.Contains(body.Query, `head=acme:feature`) || strings.Contains(body.Query, `ref(qualifiedName:`) {
+			t.Errorf("query should not require a base-repo branch ref, got: %s", body.Query)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"data": {
+				"b0": {
+					"pullRequests": {
+						"nodes": [{
+							"number": 12,
+							"state": "OPEN", "title": "fork PR", "url": "https://x/12",
+							"isDraft": false, "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
+							"headRefName": "feature", "baseRefName": "main", "headRefOid": "abc123",
+							"author": {"login":"alice"},
+							"createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+							"reviews": {"nodes": []}, "reviewRequests": {"totalCount": 0},
+							"commits": {"nodes": []}
+						}]
+					}
+				}
+			}
+		}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := newPATClientPointingAt(t, srv.URL)
+	pr, err := c.FindPRByBranch(context.Background(), "acme", "widget", "feature")
+	if err != nil {
+		t.Fatalf("FindPRByBranch: %v", err)
+	}
+	if pr == nil || pr.Number != 12 || pr.HeadBranch != "feature" {
+		t.Fatalf("unexpected PR: %#v", pr)
 	}
 }
 
@@ -371,6 +429,198 @@ func TestPATClient_FetchBranchProtection(t *testing.T) {
 	}
 }
 
+func TestListUserRepos_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/user":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"login":"octocat"}`))
+		case "/search/repositories":
+			q := r.URL.Query().Get("q")
+			if !strings.Contains(q, "user:octocat") {
+				t.Errorf("q = %q, want to contain user:octocat", q)
+			}
+			if !strings.Contains(q, "demo") {
+				t.Errorf("q = %q, want to contain demo", q)
+			}
+			if got := r.URL.Query().Get("per_page"); got != "50" {
+				t.Errorf("per_page = %q, want 50", got)
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"items":[
+				{"full_name":"octocat/demo","owner":{"login":"octocat"},"name":"demo","private":false,"default_branch":"main","description":"Public demo"},
+				{"full_name":"octocat/demo-private","owner":{"login":"octocat"},"name":"demo-private","private":true,"default_branch":"trunk","description":null}
+			]}`))
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c := newPATClientPointingAt(t, srv.URL)
+	repos, err := c.ListUserRepos(context.Background(), "demo", 50)
+	if err != nil {
+		t.Fatalf("ListUserRepos: %v", err)
+	}
+	if len(repos) != 2 {
+		t.Fatalf("repos = %d, want 2", len(repos))
+	}
+	if repos[0].FullName != "octocat/demo" || repos[0].Owner != "octocat" || repos[0].Name != "demo" || repos[0].Private {
+		t.Errorf("unexpected first repo: %#v", repos[0])
+	}
+	if repos[0].DefaultBranch != "main" {
+		t.Errorf("first repo default_branch = %q, want main", repos[0].DefaultBranch)
+	}
+	if repos[0].Description != "Public demo" {
+		t.Errorf("first repo description = %q, want Public demo", repos[0].Description)
+	}
+	if !repos[1].Private {
+		t.Errorf("expected second repo private")
+	}
+	if repos[1].DefaultBranch != "trunk" {
+		t.Errorf("second repo default_branch = %q, want trunk", repos[1].DefaultBranch)
+	}
+	// JSON `null` description must decode to an empty string (omitempty drops it on serialize).
+	if repos[1].Description != "" {
+		t.Errorf("second repo description = %q, want empty string", repos[1].Description)
+	}
+}
+
+func TestListUserRepos_EmptyQuery(t *testing.T) {
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/user":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"login":"alice"}`))
+		case "/search/repositories":
+			gotQuery = r.URL.Query().Get("q")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"items":[]}`))
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c := newPATClientPointingAt(t, srv.URL)
+	repos, err := c.ListUserRepos(context.Background(), "", 0)
+	if err != nil {
+		t.Fatalf("ListUserRepos: %v", err)
+	}
+	if len(repos) != 0 {
+		t.Fatalf("repos = %d, want 0", len(repos))
+	}
+	if gotQuery != "user:alice" {
+		t.Errorf("q = %q, want exactly %q", gotQuery, "user:alice")
+	}
+}
+
+func TestListUserRepos_LimitClamping(t *testing.T) {
+	cases := []struct {
+		name        string
+		inLimit     int
+		wantPerPage string
+	}{
+		{"zero defaults to 20", 0, "20"},
+		{"negative defaults to 20", -5, "20"},
+		{"in range passes through", 42, "42"},
+		{"exceeds cap clamps to 100", 500, "100"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotPerPage string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/user":
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write([]byte(`{"login":"alice"}`))
+				case "/search/repositories":
+					gotPerPage = r.URL.Query().Get("per_page")
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write([]byte(`{"items":[]}`))
+				default:
+					t.Fatalf("unexpected path %q", r.URL.Path)
+				}
+			}))
+			t.Cleanup(srv.Close)
+			c := newPATClientPointingAt(t, srv.URL)
+			if _, err := c.ListUserRepos(context.Background(), "", tc.inLimit); err != nil {
+				t.Fatalf("ListUserRepos: %v", err)
+			}
+			if gotPerPage != tc.wantPerPage {
+				t.Errorf("per_page = %q, want %q", gotPerPage, tc.wantPerPage)
+			}
+		})
+	}
+}
+
+func TestListUserRepos_APIError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/user":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"login":"alice"}`))
+		case "/search/repositories":
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"message":"boom"}`))
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c := newPATClientPointingAt(t, srv.URL)
+	repos, err := c.ListUserRepos(context.Background(), "", 0)
+	if err == nil {
+		t.Fatal("expected error from 500, got nil")
+	}
+	if repos != nil {
+		t.Errorf("expected nil repos on error, got %v", repos)
+	}
+}
+
+func TestListUserRepos_AuthError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/user" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"message":"bad creds"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := newPATClientPointingAt(t, srv.URL)
+	repos, err := c.ListUserRepos(context.Background(), "", 0)
+	if err == nil {
+		t.Fatal("expected error when /user returns 401")
+	}
+	if repos != nil {
+		t.Errorf("expected nil repos on auth error, got %v", repos)
+	}
+}
+
+func TestClampRepoSearchLimit(t *testing.T) {
+	cases := []struct {
+		name string
+		in   int
+		want int
+	}{
+		{"zero", 0, 20},
+		{"negative", -1, 20},
+		{"small", 10, 10},
+		{"exact cap", 100, 100},
+		{"over cap", 1000, 100},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := clampRepoSearchLimit(tc.in); got != tc.want {
+				t.Errorf("clampRepoSearchLimit(%d) = %d, want %d", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 // newPATClientPointingAt builds a PATClient whose underlying HTTP client
 // reroutes any github API URL to the given test server.
 func newPATClientPointingAt(t *testing.T, baseURL string) *PATClient {
@@ -393,4 +643,117 @@ func (rt *rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	}
 	req2.Header = req.Header.Clone()
 	return http.DefaultTransport.RoundTrip(req2)
+}
+
+func TestListAccessibleRepos_Success(t *testing.T) {
+	var gotAffiliation, gotSort, gotPerPage string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/user/repos" {
+			// t.Fatalf must not run in a handler goroutine (it's a data race);
+			// use Errorf+return and let the main goroutine fail the assertion.
+			t.Errorf("unexpected path %q", r.URL.Path)
+			http.Error(w, "unexpected path", http.StatusInternalServerError)
+			return
+		}
+		gotAffiliation = r.URL.Query().Get("affiliation")
+		gotSort = r.URL.Query().Get("sort")
+		gotPerPage = r.URL.Query().Get("per_page")
+		w.WriteHeader(http.StatusOK)
+		// Flat array (NOT a search wrapper with .items).
+		_, _ = w.Write([]byte(`[
+			{"full_name":"kdlbs/kandev","owner":{"login":"kdlbs"},"name":"kandev","private":false,"default_branch":"main","description":"the app","pushed_at":"2025-05-01T10:00:00Z"},
+			{"full_name":"alice/secret","owner":{"login":"alice"},"name":"secret","private":true,"default_branch":"trunk","description":null}
+		]`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := newPATClientPointingAt(t, srv.URL)
+	repos, err := c.ListAccessibleRepos(context.Background(), "", 50)
+	if err != nil {
+		t.Fatalf("ListAccessibleRepos: %v", err)
+	}
+	if gotAffiliation != "owner,collaborator,organization_member" {
+		t.Errorf("affiliation = %q, want owner,collaborator,organization_member", gotAffiliation)
+	}
+	if gotSort != "pushed" {
+		t.Errorf("sort = %q, want pushed", gotSort)
+	}
+	if gotPerPage != "50" {
+		t.Errorf("per_page = %q, want 50", gotPerPage)
+	}
+	if len(repos) != 2 {
+		t.Fatalf("repos = %d, want 2", len(repos))
+	}
+	if repos[0].FullName != "kdlbs/kandev" || repos[0].Owner != "kdlbs" || repos[0].DefaultBranch != "main" {
+		t.Errorf("unexpected first repo: %#v", repos[0])
+	}
+	if repos[0].Description != "the app" {
+		t.Errorf("first repo description = %q, want 'the app'", repos[0].Description)
+	}
+	if repos[0].PushedAt == nil {
+		t.Errorf("first repo PushedAt nil, want non-nil")
+	}
+	if !repos[1].Private || repos[1].DefaultBranch != "trunk" {
+		t.Errorf("unexpected second repo: %#v", repos[1])
+	}
+	// JSON null description must decode to empty string.
+	if repos[1].Description != "" {
+		t.Errorf("second repo description = %q, want empty", repos[1].Description)
+	}
+}
+
+func TestListAccessibleRepos_QueryFilterAndClamp(t *testing.T) {
+	var gotPerPage string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/user/repos" {
+			t.Errorf("unexpected path %q", r.URL.Path)
+			http.Error(w, "unexpected path", http.StatusInternalServerError)
+			return
+		}
+		gotPerPage = r.URL.Query().Get("per_page")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`[
+			{"full_name":"acme/widget","owner":{"login":"acme"},"name":"widget"},
+			{"full_name":"acme/gadget","owner":{"login":"acme"},"name":"gadget"},
+			{"full_name":"u/other","owner":{"login":"u"},"name":"other"}
+		]`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := newPATClientPointingAt(t, srv.URL)
+	// limit above cap must clamp per_page to 100; query filters client-side.
+	repos, err := c.ListAccessibleRepos(context.Background(), "WIDGET", 5000)
+	if err != nil {
+		t.Fatalf("ListAccessibleRepos: %v", err)
+	}
+	if gotPerPage != "100" {
+		t.Errorf("per_page = %q, want 100 (clamped)", gotPerPage)
+	}
+	if len(repos) != 1 || repos[0].FullName != "acme/widget" {
+		t.Fatalf("got %v, want [acme/widget] (case-insensitive substring on full_name)", repos)
+	}
+}
+
+func TestListAccessibleRepos_AuthError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/user/repos" {
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"message":"bad creds"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := newPATClientPointingAt(t, srv.URL)
+	repos, err := c.ListAccessibleRepos(context.Background(), "", 0)
+	if err == nil {
+		t.Fatal("expected error on 401")
+	}
+	if repos != nil {
+		t.Errorf("expected nil repos on error, got %v", repos)
+	}
+	var apiErr *GitHubAPIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusUnauthorized {
+		t.Errorf("err = %v, want *GitHubAPIError with 401", err)
+	}
 }

@@ -97,16 +97,21 @@ const gitEventHandlers: GitEventHandlers = {
 
   commits_reset: (store, event) => {
     if (IS_DEBUG) debug("commits_reset", { sessionId: event.session_id });
-    // Clear commits to trigger refetch in useSessionCommits hook
-    store.getState().clearSessionCommits(event.session_id);
+    // Trigger a refetch without clearing the visible commits — the Changes
+    // panel would otherwise flicker through its empty state ("Your changed
+    // files will appear here") while the refetch is in flight, because
+    // useSessionCommits returns `commits ?? []` and the panel's hasAnything
+    // gate flips to false the moment commits goes undefined.
+    store.getState().bumpSessionCommitsRefetch(event.session_id);
     // Invalidate cumulative diff cache when commits are reset
     invalidateCumulativeDiffCache(resolveEnvKey(store, event.session_id));
   },
 
   branch_switched: (store, event) => {
     if (IS_DEBUG) debug("branch_switched", { sessionId: event.session_id });
-    // Clear commits to trigger refetch with new base commit
-    store.getState().clearSessionCommits(event.session_id);
+    // Stale-while-revalidate (see commits_reset above): refetch with the new
+    // base commit but keep the old list visible until the new one arrives.
+    store.getState().bumpSessionCommitsRefetch(event.session_id);
     // Invalidate cumulative diff cache when branch switches
     invalidateCumulativeDiffCache(resolveEnvKey(store, event.session_id));
   },

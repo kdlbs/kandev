@@ -362,7 +362,7 @@ func TestHandleTaskMovedWithSession(t *testing.T) {
 		_ = repo.UpdateTaskSession(ctx, session)
 
 		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
-		queued, err := svc.queueAutoStartPromptIfRunning(ctx, "t1", session, "prompt", false, nil, workflowMessageOrigin{})
+		queued, err := svc.queueAutoStartPromptIfRunning(ctx, "t1", session, "prompt", false, nil, workflowMessageOrigin{}, false)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

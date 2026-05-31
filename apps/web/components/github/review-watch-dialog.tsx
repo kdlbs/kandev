@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@kandev/ui/textarea";
 import { IconInfoCircle } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
+import { CliModeIcon } from "@/components/cli-mode-icon";
 import { useAppStore } from "@/components/state-provider";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useWorkflows } from "@/hooks/use-workflows";
@@ -122,13 +123,15 @@ const CLEANUP_POLICY_OPTIONS: Array<{ id: CleanupPolicy; label: string; descript
 
 // --- Generic select field with description ---
 
+type SelectFieldItem = { id: string; label: string; icon?: React.ReactNode };
+
 type SelectFieldProps = {
   label: string;
   description?: string;
   value: string;
   onChange: (value: string) => void;
   placeholder: string;
-  items: Array<{ id: string; label: string }>;
+  items: SelectFieldItem[];
   disabled?: boolean;
 };
 
@@ -152,7 +155,14 @@ function SelectField({
         <SelectContent>
           {items.map((item) => (
             <SelectItem key={item.id} value={item.id}>
-              {item.label}
+              {item.icon ? (
+                <span className="flex items-center gap-1.5">
+                  <span>{item.label}</span>
+                  {item.icon}
+                </span>
+              ) : (
+                item.label
+              )}
             </SelectItem>
           ))}
         </SelectContent>
@@ -202,13 +212,7 @@ function useWatchFormData(workspaceId: string) {
     [executors],
   );
 
-  // Filter out passthrough/TUI profiles — they don't accept initial prompts
-  const filteredAgentProfiles = useMemo(
-    () => agentProfiles.filter((p) => !p.cli_passthrough),
-    [agentProfiles],
-  );
-
-  return { workflows, agentProfiles: filteredAgentProfiles, allExecutorProfiles };
+  return { workflows, agentProfiles, allExecutorProfiles };
 }
 
 // --- Section header ---
@@ -430,7 +434,7 @@ function ProfileFields({
 }: {
   form: FormState;
   setForm: React.Dispatch<React.SetStateAction<FormState>>;
-  agentProfiles: Array<{ id: string; label: string }>;
+  agentProfiles: Array<{ id: string; label: string; cli_passthrough?: boolean }>;
   executorProfiles: Array<{ id: string; name: string }>;
 }) {
   return (
@@ -441,7 +445,11 @@ function ProfileFields({
         value={form.agentProfileId}
         onChange={(v) => setForm((prev) => ({ ...prev, agentProfileId: v }))}
         placeholder="Select agent profile"
-        items={agentProfiles.map((p) => ({ id: p.id, label: p.label }))}
+        items={agentProfiles.map((p) => ({
+          id: p.id,
+          label: p.label,
+          icon: p.cli_passthrough ? <CliModeIcon /> : undefined,
+        }))}
       />
       <div className="space-y-1.5">
         <div className="flex items-center gap-1.5">

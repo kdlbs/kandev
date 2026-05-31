@@ -6,8 +6,10 @@ import {
   getEnvMaximizeState,
   setEnvMaximizeState,
   removeEnvMaximizeState,
+  clearGlobalSidebarWidth,
+  setGlobalSidebarWidth,
 } from "@/lib/local-storage";
-import { setPinnedTarget } from "./layout-manager";
+import { setPinnedTarget, clearPinnedTarget } from "./layout-manager";
 import { applyLayoutFixups, focusOrAddPanel } from "./dockview-layout-builders";
 import {
   SIDEBAR_GROUP,
@@ -18,6 +20,7 @@ import {
   getPresetLayout,
   getPresetSidebarColumn,
   applyLayout,
+  getPinnedWidth,
   getRootSplitview,
   fromDockviewApi,
   filterEphemeral,
@@ -27,6 +30,7 @@ import {
 } from "./layout-manager";
 import type { BuiltInPreset, LayoutState, LayoutGroupIds } from "./layout-manager";
 import { performEnvSwitch } from "./dockview-env-switch";
+import { enforcePinnedTargets } from "./dockview-pinned-enforce";
 import {
   injectIntentPanels,
   applyActivePanelOverrides,
@@ -43,9 +47,11 @@ import { preserveChatScrollDuringLayout } from "./dockview-scroll-preserve";
 import { measureDockviewContainer } from "./dockview-measure";
 import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
 import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+import { snapshotColumnWidths, formatWidthsSnapshot } from "./dockview-widths-debug";
 
 const debugSwitch = createDebugLogger("dockview:store-switch");
 const debugSave = createDebugLogger("dockview:save");
+const debugWidths = createDebugLogger("dockview:widths");
 
 const RIGHT_PANEL_IDS = new Set(["changes", "files", TERMINAL_DEFAULT_ID]);
 
@@ -154,7 +160,7 @@ type DockviewStore = {
   toggleRightPanels: () => void;
   setSidebarVisible: (visible: boolean) => void;
   setRightPanelsVisible: (visible: boolean) => void;
-  applyBuiltInPreset: (preset: BuiltInPreset) => void;
+  applyBuiltInPreset: (preset: BuiltInPreset, resetWidths?: boolean) => void;
   defaultPreset: BuiltInPreset;
   setDefaultPreset: (preset: BuiltInPreset) => void;
   applyCustomLayout: (layout: SavedLayoutConfig) => void;
@@ -213,9 +219,36 @@ function applyDeferredPanelActions(api: DockviewApi, actions: DeferredPanelActio
   }
 }
 
-/** Read live column widths from dockview's splitview and persist them as pinned overrides.
- *  Only syncs widths for columns identified as "sidebar" or "right" to avoid
- *  capturing plan/preview/vscode column widths as stale "right" overrides. */
+/**
+ * Build the pinnedWidths updates for a width sync, tracking only the VISIBLE
+ * default right column.
+ *
+ * In plan/preview/vscode layouts the side column inherits merged files/changes
+ * panels and `fromDockviewApi` mislabels it "right"; storing its width as the
+ * right override would then leak into the default layout when toggling back
+ * (e.g. plan-mode off snapping the right column to the plan column's width).
+ *
+ * Sidebar is intentionally excluded: its persisted width is a global pref
+ * written only by explicit sash drag, and syncing live layout-change widths
+ * would overwrite the raw pref with viewport-clamped transient widths.
+ * Widths <= 50px are treated as transient/collapsed and skipped.
+ */
+export function collectPinnedWidthUpdates(
+  columns: { id: string }[],
+  getSize: (index: number) => number,
+  visibility: { rightPanelsVisible: boolean },
+): Map<string, number> {
+  const updates = new Map<string, number>();
+  columns.forEach((col, i) => {
+    if (col.id !== "right" || !visibility.rightPanelsVisible) return;
+    const w = getSize(i);
+    if (w > 50) updates.set(col.id, w);
+  });
+  return updates;
+}
+
+/** Read live column widths from dockview's splitview and persist the visible
+ *  right width as a pinned override (see `collectPinnedWidthUpdates`). */
 function syncPinnedWidthsFromApi(api: DockviewApi, set: StoreSet): void {
   if (api.hasMaximizedGroup()) return;
   const sv = getRootSplitview(api);
@@ -223,15 +256,17 @@ function syncPinnedWidthsFromApi(api: DockviewApi, set: StoreSet): void {
   try {
     const state = fromDockviewApi(api);
     if (state.columns.length !== sv.length) return;
-    const updates = new Map<string, number>();
-    for (let i = 0; i < state.columns.length; i++) {
-      const col = state.columns[i];
-      if (col.id === "sidebar" || col.id === "right") {
-        const w = sv.getViewSize(i);
-        if (w > 50) updates.set(col.id, w);
-      }
-    }
+    const { rightPanelsVisible } = useDockviewStore.getState();
+    const updates = collectPinnedWidthUpdates(state.columns, (i) => sv.getViewSize(i), {
+      rightPanelsVisible,
+    });
     if (updates.size > 0) {
+      if (IS_DEBUG) {
+        const pairs = Array.from(updates.entries())
+          .map(([k, v]) => `${k}=${Math.round(v)}`)
+          .join(",");
+        debugWidths(`store-sync ${pairs} ${formatWidthsSnapshot(snapshotColumnWidths(api))}`);
+      }
       set((prev) => {
         const m = new Map(prev.pinnedWidths);
         for (const [k, v] of updates) m.set(k, v);
@@ -243,7 +278,49 @@ function syncPinnedWidthsFromApi(api: DockviewApi, set: StoreSet): void {
   }
 }
 
-/** Capture the live sidebar/right pixel widths into pinnedWidths before a layout rebuild. */
+/**
+ * Decide which pinned-width overrides to apply when switching to a preset.
+ *
+ * - `resetWidths` (explicit layout pick from the selector): return each pinned
+ *   column's computed DEFAULT width (ratio clamped to its initial cap). These
+ *   are passed as explicit overrides — NOT an empty map — so `applyLayout`'s
+ *   resize-to-target path is used. An empty map makes it read the
+ *   post-`fromJSON` live size instead, which is fragile: dockview can lay
+ *   `fromJSON` out at a transient narrower width, and that shrunken size would
+ *   be captured as the pinned target and then enforced, leaving the columns
+ *   too narrow.
+ * - otherwise (programmatic switch, e.g. plan-mode toggle): keep the live right
+ *   width, minus overrides for columns absent in the target layout. Sidebar is
+ *   always resolved from the global pref/default instead of an in-memory
+ *   override.
+ */
+export function resolvePresetPinnedWidths(
+  liveWidths: Map<string, number>,
+  columns: LayoutState["columns"],
+  totalWidth: number,
+  resetWidths: boolean,
+): Map<string, number> {
+  if (resetWidths) {
+    // "Default layout" is the reset gesture: drop any custom global sidebar
+    // width (and its runtime target) so getPinnedWidth returns the fresh
+    // ratio default for the current screen instead of re-reading the pref.
+    clearGlobalSidebarWidth();
+    clearPinnedTarget("sidebar");
+    const defaults = new Map<string, number>();
+    for (const col of columns) {
+      if (col.pinned) defaults.set(col.id, getPinnedWidth(col, totalWidth, undefined));
+    }
+    return defaults;
+  }
+  const targetColumnIds = new Set(columns.map((c) => c.id));
+  const cleaned = new Map(liveWidths);
+  for (const key of cleaned.keys()) {
+    if (key === "sidebar" || !targetColumnIds.has(key)) cleaned.delete(key);
+  }
+  return cleaned;
+}
+
+/** Capture the live right pixel width into pinnedWidths before a layout rebuild. */
 function captureLiveWidths(api: DockviewApi, set: StoreSet): Map<string, number> {
   if (api.hasMaximizedGroup()) {
     api.exitMaximizedGroup();
@@ -252,16 +329,46 @@ function captureLiveWidths(api: DockviewApi, set: StoreSet): Map<string, number>
   return useDockviewStore.getState().pinnedWidths;
 }
 
+/**
+ * Snap pinned columns to their targets using the current store state.
+ *
+ * Called inside every programmatic layout path's post-`api.layout` rAF
+ * before flipping `isRestoringLayout` false - dockview's proportional
+ * rebalance can grow pinned columns up to their loose `setConstraints` max,
+ * and the reactive enforcement (wired via `onDidLayoutChange`) is gated by
+ * `isRestoringLayout`, so without this synchronous call the correction
+ * would only land on the next user-triggered layout-change event,
+ * producing a visible jerk once env prep settles.
+ */
+function enforceFromStore(api: DockviewApi, get: StoreGet): void {
+  const s = get();
+  enforcePinnedTargets(api, {
+    sidebarVisible: s.sidebarVisible,
+    rightPanelsVisible: s.rightPanelsVisible,
+    maximized: s.preMaximizeLayout !== null,
+  });
+}
+
 function applyLayoutAndSet(
   api: DockviewApi,
   state: LayoutState,
   pinnedWidths: Map<string, number>,
   set: StoreSet,
+  preMeasured?: { width: number; height: number },
 ): LayoutGroupIds {
   // Pass measured container dims so fromJSON's grid.width matches the live
   // container — avoids the proportional rescale that would otherwise grow
   // pinned columns past their legacy initial caps on the next api.layout.
-  const measured = measureDockviewContainer(api);
+  //
+  // Callers can pre-measure and pass `preMeasured` to avoid re-measuring inside
+  // the middle of a layout transition. The visibility toggles below take that
+  // path because `set({ sidebarVisible: ... })` runs before this call and can
+  // trigger React to repaint the host shell, momentarily shrinking the
+  // dockview parent's `clientWidth` — re-measuring then would read the
+  // transient narrow width and clamp pinned columns to it (the
+  // `pane-resize-sidebar.spec.ts:41` flake mode: cap=301 from a 601px stale
+  // measurement clamps the 430px sidebar override down to 301).
+  const measured = preMeasured ?? measureDockviewContainer(api);
   const ids = applyLayout(api, state, pinnedWidths, measured.width, measured.height);
   set(ids);
   return ids;
@@ -294,15 +401,17 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
       const liveWidths = captureLiveWidths(api, set);
       preserveChatScrollDuringLayout();
       const { width: safeWidth, height: safeHeight } = measureDockviewContainer(api);
+      const preMeasured = { width: safeWidth, height: safeHeight };
       if (sidebarVisible) {
         const current = fromDockviewApi(api);
         const withoutSidebar: LayoutState = {
           columns: current.columns.filter((c) => c.id !== "sidebar"),
         };
         set({ isRestoringLayout: true, sidebarVisible: false });
-        applyLayoutAndSet(api, withoutSidebar, liveWidths, set);
+        applyLayoutAndSet(api, withoutSidebar, liveWidths, set, preMeasured);
         requestAnimationFrame(() => {
           api.layout(safeWidth, safeHeight);
+          enforceFromStore(api, get);
           syncPinnedWidthsFromApi(api, set);
           set({ isRestoringLayout: false });
         });
@@ -313,9 +422,10 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
           columns: [sidebarCol, ...current.columns],
         };
         set({ isRestoringLayout: true, sidebarVisible: true });
-        applyLayoutAndSet(api, withSidebar, liveWidths, set);
+        applyLayoutAndSet(api, withSidebar, liveWidths, set, preMeasured);
         requestAnimationFrame(() => {
           api.layout(safeWidth, safeHeight);
+          enforceFromStore(api, get);
           syncPinnedWidthsFromApi(api, set);
           set({ isRestoringLayout: false });
         });
@@ -340,6 +450,7 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
         applyLayoutAndSet(api, withoutRight, liveWidths, set);
         requestAnimationFrame(() => {
           api.layout(safeWidth, safeHeight);
+          enforceFromStore(api, get);
           syncPinnedWidthsFromApi(api, set);
           set({ isRestoringLayout: false });
         });
@@ -355,6 +466,7 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
         applyLayoutAndSet(api, withRight, liveWidths, set);
         requestAnimationFrame(() => {
           api.layout(safeWidth, safeHeight);
+          enforceFromStore(api, get);
           syncPinnedWidthsFromApi(api, set);
           set({ isRestoringLayout: false });
         });
@@ -376,7 +488,7 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
 
 function buildPresetActions(set: StoreSet, get: StoreGet) {
   return {
-    applyBuiltInPreset: (preset: BuiltInPreset) => {
+    applyBuiltInPreset: (preset: BuiltInPreset, resetWidths = false) => {
       const { api } = get();
       if (!api) return;
       const liveWidths = captureLiveWidths(api, set);
@@ -387,13 +499,23 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
       set({ isRestoringLayout: true });
       const presetState = getPresetLayout(preset);
       const state = mergeCurrentPanelsIntoPreset(api, presetState);
-      // Remove stale pinned overrides for columns absent in the target layout
-      const targetColumnIds = new Set(state.columns.map((c) => c.id));
-      const cleanedWidths = new Map(liveWidths);
-      for (const key of cleanedWidths.keys()) {
-        if (!targetColumnIds.has(key)) cleanedWidths.delete(key);
-      }
+      // resetWidths (explicit pick from the layout selector) → preset defaults;
+      // otherwise carry live widths minus columns absent in the target layout.
+      const cleanedWidths = resolvePresetPinnedWidths(
+        liveWidths,
+        state.columns,
+        safeWidth,
+        resetWidths,
+      );
       const ids = applyLayout(api, state, cleanedWidths, safeWidth, safeHeight);
+      if (IS_DEBUG) {
+        const applied =
+          [...cleanedWidths].map(([k, v]) => `${k}:${Math.round(v)}`).join(",") || "-";
+        debugWidths(
+          `preset-apply preset=${preset} reset=${resetWidths} safeW=${safeWidth} ` +
+            `applied=${applied} postApply=${formatWidthsSnapshot(snapshotColumnWidths(api))}`,
+        );
+      }
       set({
         ...ids,
         sidebarVisible: true,
@@ -402,6 +524,12 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
       });
       requestAnimationFrame(() => {
         api.layout(safeWidth, safeHeight);
+        if (IS_DEBUG) {
+          debugWidths(
+            `preset-post-layout preset=${preset} ${formatWidthsSnapshot(snapshotColumnWidths(api))}`,
+          );
+        }
+        enforceFromStore(api, get);
         syncPinnedWidthsFromApi(api, set);
         set({ isRestoringLayout: false });
       });
@@ -432,6 +560,7 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
       set({ sidebarVisible: hasSidebar, rightPanelsVisible: hasRight });
       requestAnimationFrame(() => {
         api.layout(safeWidth, safeHeight);
+        enforceFromStore(api, get);
         syncPinnedWidthsFromApi(api, set);
         set({ isRestoringLayout: false });
       });
@@ -559,20 +688,20 @@ function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
       debugSwitch("envSwitch: skip (same env)", { newEnvId });
       return;
     }
-    // First adoption — onReady already built the layout; just adopt it.
-    if (!oldEnvId && !currentLayoutEnvId) {
-      set({ isRestoringLayout: true, currentLayoutEnvId: newEnvId });
-      if (restoreMaximizeFromStorage(api, newEnvId, set)) return;
-      set({ isRestoringLayout: false, currentLayoutEnvId: newEnvId });
-      try {
-        setEnvLayout(newEnvId, api.toJSON());
-      } catch {
-        /* ignore */
-      }
-      return;
-    }
-    // When oldEnvId is null but there is a live layout env (e.g. the
-    // useEnvSwitchCleanup hook fires after passing through a null state),
+    // First adoption (oldEnvId and currentLayoutEnvId both null) falls through
+    // to the general path below. We deliberately do NOT "just adopt" whatever
+    // onReady rendered: this branch only fires when onReady ran with a null
+    // env (otherwise currentLayoutEnvId would equal newEnvId and we'd have
+    // skipped above as same-env), so onReady built the cross-env GLOBAL
+    // FALLBACK layout — not this env's saved/default layout. Adopting it gave a
+    // fresh task the previous env's stale proportions instead of the defaults,
+    // and `setEnvLayout(newEnvId, api.toJSON())` even overwrote the env's real
+    // saved layout with that stale one. `performEnvSwitch` instead restores the
+    // env's saved layout (or builds defaults for a brand-new task), and
+    // `saveOutgoingEnv(null)` below is a no-op so there is nothing to lose.
+    //
+    // When oldEnvId is null but there IS a live layout env (the
+    // useEnvSwitchCleanup hook firing after passing through a null state),
     // fall back to currentLayoutEnvId so we correctly save and release the
     // outgoing env rather than silently skipping it.
     const effectiveOld = oldEnvId ?? currentLayoutEnvId;
@@ -593,7 +722,14 @@ function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
         getDefaultLayout: () => get().userDefaultLayout ?? getPresetLayout(get().defaultPreset),
       });
       set(ids);
+      enforceFromStore(api, get);
       set({ isRestoringLayout: false });
+      if (IS_DEBUG) {
+        debugWidths(
+          `env-switch-done old=${effectiveOld ?? "-"} new=${newEnvId} ` +
+            `${formatWidthsSnapshot(snapshotColumnWidths(api))}`,
+        );
+      }
       panelPortalManager.reconcile(new Set(api.panels.map((p) => p.id)));
     } catch {
       set({ isRestoringLayout: false });
@@ -664,6 +800,7 @@ function buildMaximizeActions(set: StoreSet, get: StoreGet) {
       applyLayoutAndSet(api, preMaximizeLayout, liveWidths, set);
       requestAnimationFrame(() => {
         api.layout(safeWidth, safeHeight);
+        enforceFromStore(api, get);
         syncPinnedWidthsFromApi(api, set);
         set({ isRestoringLayout: false });
       });
@@ -683,6 +820,13 @@ function performBuildDefault(
   // Capture dimensions before layout change — api.width can become stale
   // after fromJSON inside applyLayout
   const { width: safeWidth, height: safeHeight } = measureDockviewContainer(api);
+  if (IS_DEBUG) {
+    debugWidths(
+      `build-default-entry intent=${intentName ?? "-"} ` +
+        `measured=${safeWidth}x${safeHeight} ` +
+        `pre=${formatWidthsSnapshot(snapshotColumnWidths(api))}`,
+    );
+  }
   set({ isRestoringLayout: true, pinnedWidths: freshPinned });
 
   const basePreset = intent?.preset as BuiltInPreset | undefined;
@@ -710,7 +854,11 @@ function performBuildDefault(
 
   requestAnimationFrame(() => {
     api.layout(safeWidth, safeHeight);
+    enforceFromStore(api, get);
     syncPinnedWidthsFromApi(api, set);
+    if (IS_DEBUG) {
+      debugWidths(`build-default-done ${formatWidthsSnapshot(snapshotColumnWidths(api))}`);
+    }
     set({ isRestoringLayout: false });
   });
 }
@@ -726,12 +874,15 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
       type TestWindow = {
         __dockviewApi__: DockviewApi | null;
         __setPinnedTarget__?: typeof setPinnedTarget;
+        __setGlobalSidebarWidth__?: typeof setGlobalSidebarWidth;
       };
       const w = window as unknown as TestWindow;
       w.__dockviewApi__ = api;
       // E2E test helpers: let `resizeColumnViaSplitview` update the target
-      // width after a programmatic resize (mirroring the sash-drag mouseup).
+      // width after a programmatic resize (mirroring the sash-drag mouseup),
+      // including persisting the global sidebar-width pref like a real drag.
       w.__setPinnedTarget__ = setPinnedTarget;
+      w.__setGlobalSidebarWidth__ = setGlobalSidebarWidth;
     }
     if (api) {
       const resolveFilePath = (panelId: string | undefined): string | null => {

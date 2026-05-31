@@ -4,6 +4,7 @@ export class MobileKanbanPage {
   readonly board: Locator;
   readonly mobileFab: Locator;
   readonly mobileSearchBar: Locator;
+  readonly mobileSearchToggle: Locator;
   readonly mobileMenuButton: Locator;
   readonly mobileTaskSheet: Locator;
   readonly swimlaneContainer: Locator;
@@ -12,6 +13,7 @@ export class MobileKanbanPage {
     this.board = page.getByTestId("kanban-board");
     this.mobileFab = page.getByTestId("mobile-fab");
     this.mobileSearchBar = page.getByTestId("mobile-search-bar");
+    this.mobileSearchToggle = page.getByTestId("mobile-search-toggle");
     this.mobileMenuButton = page.getByRole("button", { name: "Open menu" });
     this.mobileTaskSheet = page.getByTestId("mobile-task-sheet");
     this.swimlaneContainer = page.getByTestId("swimlane-container");
@@ -44,6 +46,11 @@ export class MobileKanbanPage {
 
   searchInput(): Locator {
     return this.mobileSearchBar.getByPlaceholder("Search tasks...");
+  }
+
+  async openSearch() {
+    await this.mobileSearchToggle.click();
+    await this.mobileSearchBar.waitFor({ state: "visible" });
   }
 
   sheetGoToSession(): Locator {

@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+# kandev-logs — fetch logs for a running kandev instance by backend port.
+#
+# Two modes:
+#   --export  (default)  GET /api/v1/system/debug/export[?level=LEVEL], pretty
+#                        printed with jq. This is the structured in-memory log
+#                        buffer + runtime metadata.
+#   --tail               Tail the stderr log file written by dev-isolated
+#                        (/tmp/kandev-iso-<port>-*/backend.log), or a file given
+#                        with --file.
+#
+# Usage:
+#   scripts/kandev-logs <backend_port> [--export] [--level LEVEL]
+#   scripts/kandev-logs <backend_port> --tail [--lines N] [--file PATH]
+#
+# Options:
+#   --export          Hit the debug-export endpoint (default).
+#   --level LEVEL      Filter export by level. The export endpoint matches the
+#                      log entry's level string exactly (zap lowercase levels),
+#                      so LEVEL must be one of: debug|info|warn|error|dpanic|
+#                      panic|fatal. Passes ?level=LEVEL and prints only .logs.
+#   --tail             Tail the backend stderr log file instead of the endpoint.
+#   --lines N          Lines to show with --tail (default: 80).
+#   --file PATH        Explicit log file for --tail (overrides auto-resolve).
+#   -h, --help         Show this help.
+#
+# Examples:
+#   scripts/kandev-logs 48429 --export
+#   scripts/kandev-logs 48429 --export --level error
+#   scripts/kandev-logs 48429 --tail --lines 120
+#
+set -euo pipefail
+
+MODE="export"
+LEVEL=""
+LINES=80
+FILE=""
+PORT=""
+
+# Levels the export endpoint can match (zapcore.Level.String(), lowercase). The
+# endpoint compares the entry's level string exactly, so any other value would
+# silently match nothing — we reject it up front instead.
+ALLOWED_LEVELS=(debug info warn error dpanic panic fatal)
+
+usage() { sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-2}"; }
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --export) MODE="export"; shift ;;
+    --tail) MODE="tail"; shift ;;
+    --level) LEVEL="${2:?--level requires a value}"; shift 2 ;;
+    --lines) LINES="${2:?--lines requires a number}"; shift 2 ;;
+    --file) FILE="${2:?--file requires a path}"; shift 2 ;;
+    -h|--help) usage 0 ;;
+    --*) echo "kandev-logs: unknown flag '$1'" >&2; usage 2 ;;
+    *)
+      if [[ -z "$PORT" ]]; then PORT="$1"; else
+        echo "kandev-logs: unexpected argument '$1'" >&2; usage 2
+      fi
+      shift
+      ;;
+  esac
+done
+
+[[ -n "$PORT" ]] || { echo "kandev-logs: a backend port is required." >&2; usage 2; }
+[[ "$PORT" =~ ^[0-9]+$ ]] || { echo "kandev-logs: port must be numeric, got '$PORT'" >&2; exit 2; }
+
+# Validate --level against the allowed set BEFORE it reaches the URL. An invalid
+# value would otherwise be interpolated into ?level= and silently return zero
+# matching logs, masking the typo.
+if [[ -n "$LEVEL" ]]; then
+  level_ok=0
+  for lvl in "${ALLOWED_LEVELS[@]}"; do
+    [[ "$LEVEL" == "$lvl" ]] && { level_ok=1; break; }
+  done
+  if [[ "$level_ok" -ne 1 ]]; then
+    echo "kandev-logs: invalid --level '$LEVEL'. Allowed: ${ALLOWED_LEVELS[*]}" >&2
+    exit 2
+  fi
+fi
+
+if [[ "$MODE" == "export" ]]; then
+  url="http://localhost:$PORT/api/v1/system/debug/export"
+  # LEVEL is whitelisted above (alphabetic, no metacharacters), so it is safe to
+  # interpolate directly; the query value needs no further encoding.
+  [[ -n "$LEVEL" ]] && url="$url?level=$LEVEL"
+  if ! body="$(curl -s --fail-with-body "$url" 2>/dev/null)"; then
+    echo "kandev-logs: request to $url failed (is the instance on port $PORT up?)" >&2
+    exit 1
+  fi
+  if command -v jq >/dev/null 2>&1; then
+    if [[ -n "$LEVEL" ]]; then
+      printf '%s' "$body" | jq '.logs'
+    else
+      printf '%s' "$body" | jq .
+    fi
+  else
+    printf '%s\n' "$body"
+  fi
+  exit 0
+fi
+
+# --- tail mode ---
+if [[ -z "$FILE" ]]; then
+  # Resolve the dev-isolated log convention: /tmp/kandev-iso-<port>-*/backend.log
+  # Pick the most recent match.
+  FILE="$(ls -t /tmp/kandev-iso-"$PORT"-*/backend.log 2>/dev/null | head -1 || true)"
+fi
+[[ -n "$FILE" && -f "$FILE" ]] || {
+  echo "kandev-logs: no log file found for port $PORT. Pass --file PATH." >&2
+  exit 1
+}
+echo "kandev-logs: tail -n $LINES $FILE" >&2
+tail -n "$LINES" "$FILE"

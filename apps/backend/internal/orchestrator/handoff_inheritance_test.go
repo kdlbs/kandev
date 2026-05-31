@@ -67,6 +67,49 @@ func TestInheritFromParentEnvironment_FallsBackToGroupEnv(t *testing.T) {
 	}
 }
 
+// RC1 regression: inherited-environment propagation must run on the direct
+// start path (prepareSessionForStart), not only PrepareTaskSession. MCP-created
+// subtasks auto-start through startTask, which prepares the session via
+// prepareSessionForStart. Without propagation there, an inherit_parent subtask
+// would provision a fresh worktree instead of reusing the parent's.
+func TestPrepareSessionForStart_PropagatesInheritedEnvironment(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{repoForExecutionLookup: repo})
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	ws := &models.Workspace{ID: "ws1", Name: "WS", CreatedAt: now, UpdatedAt: now}
+	_ = repo.CreateWorkspace(ctx, ws)
+	wf := &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}
+	_ = repo.CreateWorkflow(ctx, wf)
+	parent := &models.Task{ID: "parent", WorkspaceID: "ws1", WorkflowID: "wf1", Title: "P", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now}
+	_ = repo.CreateTask(ctx, parent)
+	child := &models.Task{ID: "child", ParentID: "parent", WorkspaceID: "ws1", WorkflowID: "wf1", Title: "C", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now}
+	_ = repo.CreateTask(ctx, child)
+	_ = repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "ps1", TaskID: "parent", State: models.TaskSessionStateRunning,
+		IsPrimary: true, TaskEnvironmentID: "env-parent", StartedAt: now, UpdatedAt: now,
+	})
+
+	childTask := &v1.Task{
+		ID:       "child",
+		ParentID: "parent",
+		Metadata: map[string]interface{}{"workspace": map[string]interface{}{"mode": "inherit_parent"}},
+	}
+	sessionID, err := svc.prepareSessionForStart(ctx, childTask, "profile-1", "exec-1", "", "")
+	if err != nil {
+		t.Fatalf("prepareSessionForStart: %v", err)
+	}
+
+	got, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil || got == nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if got.TaskEnvironmentID != "env-parent" {
+		t.Errorf("TaskEnvironmentID = %q, want env-parent (inherited via start path)", got.TaskEnvironmentID)
+	}
+}
+
 // When the parent has a primary session with an env, that takes
 // precedence over the group fallback.
 func TestInheritFromParentEnvironment_ParentSessionWins(t *testing.T) {

@@ -12,6 +12,10 @@ const (
 	OnEnterEnablePlanMode    OnEnterActionType = "enable_plan_mode"
 	OnEnterAutoStartAgent    OnEnterActionType = "auto_start_agent"
 	OnEnterResetAgentContext OnEnterActionType = "reset_agent_context"
+	// OnEnterSetSessionMode declares the agent's session permission mode (e.g.
+	// "default", "acceptEdits") for a step on entry. The target mode is carried
+	// in the action Config under the "mode" key. See issue #1183.
+	OnEnterSetSessionMode OnEnterActionType = "set_session_mode"
 
 	// Phase 2 (ADR-0004) — generic actions are also permitted on on_enter
 	// so review/approval steps can clear decisions and fan out runs to

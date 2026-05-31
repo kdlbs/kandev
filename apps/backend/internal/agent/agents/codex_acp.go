@@ -33,7 +33,7 @@ type CodexACP struct {
 // codexPassthroughPermSettings maps profile toggles to @openai/codex CLI flags.
 // The legacy --full-auto flag was removed; auto_approve uses --ask-for-approval never.
 var codexPassthroughPermSettings = map[string]PermissionSetting{
-	"auto_approve": {
+	PermissionKeyAutoApprove: {
 		Supported:    true,
 		Default:      true,
 		Label:        "Auto approve",

@@ -92,3 +92,67 @@ describe("TaskDeleteConfirmDialog", () => {
     await screen.findByText(/Also delete 7 subtasks/i);
   });
 });
+
+describe("TaskDeleteConfirmDialog executor cleanup copy", () => {
+  it("local reassures repo is untouched", async () => {
+    mockGetSubtaskCount.mockResolvedValue({ count: 0 });
+    render(
+      <TaskDeleteConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="My task"
+        taskId="task-1"
+        executorType="local"
+        onConfirm={() => {}}
+      />,
+    );
+    expect(screen.getByText(/directly in your repo/i)).toBeTruthy();
+    expect(screen.getByText(/not touched/i)).toBeTruthy();
+  });
+
+  it("worktree describes worktree+branch removal", async () => {
+    mockGetSubtaskCount.mockResolvedValue({ count: 0 });
+    render(
+      <TaskDeleteConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="My task"
+        taskId="task-1"
+        executorType="worktree"
+        onConfirm={() => {}}
+      />,
+    );
+    expect(screen.getByText(/worktree and its branch will be deleted/i)).toBeTruthy();
+  });
+
+  it("groups bulk delete copy by executor type", async () => {
+    mockGetSubtaskCount.mockResolvedValue({ count: 0 });
+    render(
+      <TaskDeleteConfirmDialog
+        open
+        onOpenChange={() => {}}
+        isBulkOperation
+        count={3}
+        taskIds={["a", "b", "c"]}
+        executorTypes={["worktree", "worktree", "local"]}
+        onConfirm={() => {}}
+      />,
+    );
+    expect(screen.getByText(/2 worktrees/i)).toBeTruthy();
+    expect(screen.getByText(/1 local task/i)).toBeTruthy();
+  });
+
+  it("falls back to a generic message when no executorType is provided", async () => {
+    mockGetSubtaskCount.mockResolvedValue({ count: 0 });
+    render(
+      <TaskDeleteConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="My task"
+        taskId="task-1"
+        onConfirm={() => {}}
+      />,
+    );
+    expect(screen.getByText(/Any running agent sessions will be stopped/i)).toBeTruthy();
+  });
+});

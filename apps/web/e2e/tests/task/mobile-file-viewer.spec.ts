@@ -61,7 +61,7 @@ async function setupMobileFileViewerTest({
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
-  await expect(session.idleInput()).toBeVisible({ timeout: 45_000 });
+  await session.waitForChatIdle({ timeout: 45_000 });
   return { session, filePath };
 }
 

@@ -57,6 +57,36 @@ func TestACPNormalization(t *testing.T) {
 	}
 }
 
+// TestNormalizeGeneric_ExcludesAdapterKeys verifies the adapter-injected
+// title/meta subagent-detection keys don't leak into a generic (unrecognized)
+// tool's client payload — only the real tool args should reach GenericPayload.Input.
+func TestNormalizeGeneric_ExcludesAdapterKeys(t *testing.T) {
+	n := NewNormalizer()
+	args := map[string]any{
+		"kind":      "other",
+		"raw_input": map[string]any{"foo": "bar"},
+		argKeyTitle: "SomeTool",
+		argKeyMeta:  map[string]any{"claudeCode": map[string]any{"toolName": "SomeTool"}},
+	}
+	payload := n.NormalizeToolCall("SomeTool", args)
+	if payload.Kind() != streams.ToolKindGeneric {
+		t.Fatalf("Kind = %q, want generic", payload.Kind())
+	}
+	input, ok := payload.Generic().Input.(map[string]any)
+	if !ok {
+		t.Fatalf("Generic().Input is not a map: %T", payload.Generic().Input)
+	}
+	if _, present := input[argKeyTitle]; present {
+		t.Errorf("generic input leaked adapter key %q", argKeyTitle)
+	}
+	if _, present := input[argKeyMeta]; present {
+		t.Errorf("generic input leaked adapter key %q", argKeyMeta)
+	}
+	if _, present := input["raw_input"]; !present {
+		t.Error("generic input dropped raw_input")
+	}
+}
+
 // TestDetectToolOperationType tests the ACP tool type detection function.
 func TestDetectToolOperationType(t *testing.T) {
 	tests := []struct {

@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/orchestrator/dto"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
 	"github.com/kandev/kandev/internal/orchestrator/scheduler"
 	"github.com/kandev/kandev/internal/sysprompt"
@@ -371,6 +372,45 @@ func TestCancelAgent_DeduplicatesConcurrentCalls(t *testing.T) {
 	}
 }
 
+func TestCancelAgent_LeavesQueuedMessageForManualDrain(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	agentMgr := &mockAgentManager{isAgentRunning: true}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+	if _, err := svc.messageQueue.QueueMessage(
+		ctx, "session1", "task1", "queued after cancel", "", messagequeue.QueuedByUser, false, nil,
+	); err != nil {
+		t.Fatalf("queue message: %v", err)
+	}
+
+	if err := svc.CancelAgent(ctx, "session1"); err != nil {
+		t.Fatalf("cancel agent: %v", err)
+	}
+
+	updated, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("get updated session: %v", err)
+	}
+	if updated.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("expected session state %q, got %q", models.TaskSessionStateWaitingForInput, updated.State)
+	}
+
+	status := svc.messageQueue.GetStatus(ctx, "session1")
+	if status.Count != 1 {
+		t.Fatalf("expected cancel to leave queued message for manual drain, count=%d entries=%+v", status.Count, status.Entries)
+	}
+	if got := status.Entries[0].Content; got != "queued after cancel" {
+		t.Fatalf("queued prompt = %q, want %q", got, "queued after cancel")
+	}
+	if len(agentMgr.capturedPrompts) != 0 {
+		t.Fatalf("expected cancel not to prompt queued message, got %d prompts", len(agentMgr.capturedPrompts))
+	}
+}
+
 // --- StartCreatedSession ---
 
 func TestStartCreatedSession_WrongTask(t *testing.T) {
@@ -472,6 +512,113 @@ func (m *mockMessageCreator) AppendThinkingMessage(context.Context, string, stri
 	return nil
 }
 func (m *mockMessageCreator) InvalidateModelCache(string) {}
+
+// --- backfillInitialUserMessageIfMissing ---
+
+func TestBackfillInitialUserMessageIfMissing_RecordsWhenSessionEmpty(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
+
+	mc := &mockMessageCreator{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.messageCreator = mc
+
+	// Session has zero messages — backfill should record the prompt.
+	svc.backfillInitialUserMessageIfMissing(ctx, "task1", "session1", "original prompt")
+
+	if len(mc.userMessages) != 1 {
+		t.Fatalf("expected 1 user message recorded, got %d", len(mc.userMessages))
+	}
+	if mc.userMessages[0].content != "original prompt" {
+		t.Errorf("content = %q, want %q", mc.userMessages[0].content, "original prompt")
+	}
+}
+
+func TestBackfillInitialUserMessageIfMissing_SkipsWhenUserMessageExists(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
+
+	// Seed an existing user message — the backfill must be a no-op so a
+	// successful prior launch isn't duplicated on a subsequent resume.
+	if err := repo.CreateTurn(ctx, &models.Turn{ID: "turn1", TaskSessionID: "session1", TaskID: "task1", StartedAt: time.Now().UTC()}); err != nil {
+		t.Fatalf("create turn: %v", err)
+	}
+	if err := repo.CreateMessage(ctx, &models.Message{
+		ID:            "msg1",
+		TaskSessionID: "session1",
+		TaskID:        "task1",
+		TurnID:        "turn1",
+		AuthorType:    models.MessageAuthorUser,
+		Content:       "user already sent this",
+		CreatedAt:     time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("create message: %v", err)
+	}
+
+	mc := &mockMessageCreator{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.messageCreator = mc
+
+	svc.backfillInitialUserMessageIfMissing(ctx, "task1", "session1", "would be a duplicate")
+
+	if len(mc.userMessages) != 0 {
+		t.Fatalf("expected no user message recorded (one already exists), got %d", len(mc.userMessages))
+	}
+}
+
+// TestBackfillInitialUserMessageIfMissing_SkipsWhenAgentMessageExists covers
+// the regression where a partial prior run produced agent output but never
+// recorded the initial user message. Recording the user message now with
+// CreatedAt=time.Now() would place it at the bottom of the chat (after the
+// agent messages), which is worse than leaving the chat alone.
+func TestBackfillInitialUserMessageIfMissing_SkipsWhenAgentMessageExists(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
+
+	if err := repo.CreateTurn(ctx, &models.Turn{ID: "turn1", TaskSessionID: "session1", TaskID: "task1", StartedAt: time.Now().UTC()}); err != nil {
+		t.Fatalf("create turn: %v", err)
+	}
+	if err := repo.CreateMessage(ctx, &models.Message{
+		ID:            "agent-msg-1",
+		TaskSessionID: "session1",
+		TaskID:        "task1",
+		TurnID:        "turn1",
+		AuthorType:    models.MessageAuthorAgent,
+		Content:       "agent partial output from a prior run",
+		CreatedAt:     time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("create agent message: %v", err)
+	}
+
+	mc := &mockMessageCreator{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.messageCreator = mc
+
+	svc.backfillInitialUserMessageIfMissing(ctx, "task1", "session1", "the original prompt")
+
+	if len(mc.userMessages) != 0 {
+		t.Fatalf("expected no backfill when agent messages exist, got %d", len(mc.userMessages))
+	}
+}
+
+func TestBackfillInitialUserMessageIfMissing_SkipsEmptyPrompt(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
+
+	mc := &mockMessageCreator{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.messageCreator = mc
+
+	svc.backfillInitialUserMessageIfMissing(ctx, "task1", "session1", "")
+
+	if len(mc.userMessages) != 0 {
+		t.Fatalf("expected no user message for empty prompt, got %d", len(mc.userMessages))
+	}
+}
 
 func TestRecordInitialMessage_DoesNotChangeSessionState(t *testing.T) {
 	ctx := context.Background()

@@ -39,7 +39,7 @@ jobs:
     # Pre-baked image bundles Go, golangci-lint, go-licenses, Docker CLI, Node,
     # pnpm, and the Playwright base — see .github/docker/ci-base/Dockerfile.
     # Skips the per-run setup-go / golangci-lint download steps below.
-    container: ghcr.io/kdlbs/kandev-ci:latest
+    container: ghcr.io/kdlbs/kandev-ci:build-latest
     defaults:
       run:
         # Container jobs default to `sh` (dash); pin to bash so `set -o pipefail`

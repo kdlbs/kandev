@@ -247,11 +247,16 @@ type SubagentTaskPayload struct {
 	SubagentType string `json:"subagent_type"`
 
 	// Result fields (populated from tool_use_result on completion)
-	Status       string `json:"status,omitempty"`
-	AgentID      string `json:"agent_id,omitempty"`
-	DurationMs   int64  `json:"duration_ms,omitempty"`
-	TotalTokens  int64  `json:"total_tokens,omitempty"`
-	ToolUseCount int    `json:"tool_use_count,omitempty"`
+	Status         string `json:"status,omitempty"`
+	AgentID        string `json:"agent_id,omitempty"`
+	Model          string `json:"model,omitempty"`
+	ChildSessionID string `json:"child_session_id,omitempty"`
+	DurationMs     int64  `json:"duration_ms,omitempty"`
+	TotalTokens    int64  `json:"total_tokens,omitempty"`
+	// ToolUseCount is a pointer so a genuine zero ("0 tools" for a completed
+	// subagent) serializes, while agents that don't report it (OpenCode,
+	// Cursor) stay omitted rather than surfacing a misleading "0 tools" chip.
+	ToolUseCount *int `json:"tool_use_count,omitempty"`
 }
 
 // ShowPlanPayload contains normalized data for plan display operations.
@@ -334,17 +339,6 @@ func NewCodeSearch(query, pattern, path, glob string) *NormalizedPayload {
 	}
 }
 
-// NewHttpRequest creates a NormalizedPayload for HTTP request operations.
-func NewHttpRequest(url, method string) *NormalizedPayload {
-	return &NormalizedPayload{
-		kind: ToolKindHttpRequest,
-		httpRequest: &HttpRequestPayload{
-			URL:    url,
-			Method: method,
-		},
-	}
-}
-
 // NewGeneric creates a NormalizedPayload for unrecognized tools.
 func NewGeneric(name string, input any) *NormalizedPayload {
 	return &NormalizedPayload{
@@ -356,18 +350,9 @@ func NewGeneric(name string, input any) *NormalizedPayload {
 	}
 }
 
-// NewCreateTask creates a NormalizedPayload for task creation operations.
-func NewCreateTask(title, description string) *NormalizedPayload {
-	return &NormalizedPayload{
-		kind: ToolKindCreateTask,
-		createTask: &CreateTaskPayload{
-			Title:       title,
-			Description: description,
-		},
-	}
-}
-
-// NewSubagentTask creates a NormalizedPayload for subagent task invocations.
+// NewSubagentTask creates a NormalizedPayload for subagent (Task) tool calls.
+// Result fields (status, agent id, metrics, …) are filled later from the
+// completion tool_call_update via the ACP normalizer's EnrichSubagentResult.
 func NewSubagentTask(description, prompt, subagentType string) *NormalizedPayload {
 	return &NormalizedPayload{
 		kind: ToolKindSubagentTask,
@@ -375,39 +360,6 @@ func NewSubagentTask(description, prompt, subagentType string) *NormalizedPayloa
 			Description:  description,
 			Prompt:       prompt,
 			SubagentType: subagentType,
-		},
-	}
-}
-
-// NewShowPlan creates a NormalizedPayload for plan display operations.
-func NewShowPlan(summary string, steps []string) *NormalizedPayload {
-	return &NormalizedPayload{
-		kind: ToolKindShowPlan,
-		showPlan: &ShowPlanPayload{
-			Summary: summary,
-			Steps:   steps,
-		},
-	}
-}
-
-// NewManageTodos creates a NormalizedPayload for todo management operations.
-func NewManageTodos(operation string, items []TodoItem) *NormalizedPayload {
-	return &NormalizedPayload{
-		kind: ToolKindManageTodos,
-		manageTodos: &ManageTodosPayload{
-			Operation: operation,
-			Items:     items,
-		},
-	}
-}
-
-// NewMisc creates a NormalizedPayload for miscellaneous operations.
-func NewMisc(label string, details any) *NormalizedPayload {
-	return &NormalizedPayload{
-		kind: ToolKindMisc,
-		misc: &MiscPayload{
-			Label:   label,
-			Details: details,
 		},
 	}
 }

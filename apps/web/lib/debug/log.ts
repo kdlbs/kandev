@@ -26,6 +26,21 @@
  *
  *   [namespace] message key1=value key2="value with space" key3={"nested":1}
  *
+ * ## Filtering by task
+ *
+ * Most call sites only have a `sessionId` in scope, but triage usually happens
+ * per *task*. When a session→task resolver is registered (the `StateProvider`
+ * wires one up in dev — see `registerSessionTaskResolver`), every line that
+ * carries a `sessionId` / `session_id` field is auto-annotated with a trailing
+ * `task_id=<...>`:
+ *
+ *   [git-status:ws] status_update received sessionId=abc fileCount=3 task_id=t_42
+ *
+ * So `task_id=t_42` in the devtools console filter narrows *all* namespaces to a
+ * single task. No call site has to thread the task ID through by hand — just keep
+ * logging `sessionId` and the task ID rides along. (If a line already names a
+ * task via `taskId` / `task_id`, it is left as-is.)
+ *
  * ## Namespace convention
  *
  * Names use `<domain>:<aspect>` so a devtools console filter can narrow on
@@ -45,6 +60,88 @@
  *     [agentctl:status]       per-session agentctl status transitions
  *     [file-browser:load]     tree loader — init / ready-flip / start / retry / gave-up
  *     [file-browser:changes]  session.workspace.file.changes events + folder refresh
+ *
+ *   Task-create dialog (bug: "No compatible agent profiles for <executor>")
+ *     [executor-compat:specs]  remote-auth catalog fetch (count + agent ids)
+ *     [executor-compat]        per-agent compat decision: ok + reason
+ *                              (no-spec / no-creds / files-match / env-secret / …)
+ *     [executor-compat:autopick]
+ *                              useDefaultSelectionsEffect decision per fire:
+ *                              skip/defer/pick + reason + which profile was set.
+ *                              Triage path when "No compatible" lingers after
+ *                              specs land — diff the decision sequence against
+ *                              the catalog log to localise the culprit.
+ *     [executor-compat:workflow-autopick]
+ *                              useWorkflowAgentProfileEffect decision per fire:
+ *                              no-workflow / locked / locked-missing /
+ *                              workflow-no-override. The last branch restores
+ *                              localStorage `lastId` against the unfiltered
+ *                              `agentProfiles` — set_to of an executor-incompatible
+ *                              id is the smoking gun for that race.
+ *
+ *   Dockview column widths (bug: sidebar/center/right widths wrong during
+ *   env-prepare and on first task switch with cleared localStorage)
+ *     [dockview:widths]       Per-event width-pipeline snapshots:
+ *                              build-default-{entry,done}     first paint / reset
+ *                              env-switch-{resize,resize-col,done}
+ *                                                              cross-task switch
+ *                              preset-apply / preset-post-layout
+ *                                                              layout-selector preset switch:
+ *                                                              applied widths + snapshot before
+ *                                                              and after the rAF api.layout
+ *                              fixups-capture                 target captured vs cap in
+ *                                                              applyLayoutFixups; caller=<chain>,
+ *                                                              cols=<n>, sidebarOverCap=true means
+ *                                                              the recorded target is unreachable
+ *                              container-resize               DOM ResizeObserver fired
+ *                              sash-drag-end                  user-released sash
+ *                              store-sync                     live widths → store pinnedWidths
+ *                              enforce-restore                target rewind via resizeView
+ *                              Snapshot format (formatWidthsSnapshot):
+ *                                L=240 C=842 R=320 cols=3 api=1402x900 tgt=L240/R320
+ *                              `tgt=` is the pinned-targets map (drives the
+ *                              enforcement loop); mismatch with L/R is the
+ *                              smoking gun for a stale-target bug.
+ *
+ *   Chat panel rendering (bug: remote-executor agent reply persisted but UI
+ *   doesn't render it until the user refreshes the page)
+ *     [chat:virtuoso]                VirtuosoMessageList render-branch snapshots
+ *                                    (fallback vs virtuoso) and VirtuosoBody mount —
+ *                                    captures itemCount / firstItemIndex /
+ *                                    initialTopMostItemIndex at the moment Virtuoso
+ *                                    first anchors its scroll. If itemCount at
+ *                                    `mount` is < the final item count, Virtuoso
+ *                                    anchored on an earlier item and the new last
+ *                                    item lands below the fold.
+ *     [chat:virtuoso:scrollParent]   `useVisibleScrollParent` lifecycle —
+ *                                    ref-callback-ready / ref-callback-defer /
+ *                                    ro-attach / ro-ready. A long delay between
+ *                                    items growing and `ro-ready` firing is the
+ *                                    smoking gun for the mount-too-early race.
+ *     [chat:virtuoso:firstIndex]     `useStableFirstItemIndex` transitions —
+ *                                    init + key-list deltas. A non-monotonic
+ *                                    `delta` between two transitions means
+ *                                    Virtuoso saw the keyspace shift in a way
+ *                                    that throws off scroll anchoring.
+ *     [chat:prepare-progress]        PrepareProgress status / autoExpand / expanded
+ *                                    transitions per session. Status stuck on
+ *                                    "preparing" with `expanded=true` while
+ *                                    Virtuoso is mounted explains the
+ *                                    agent-reply-pushed-below-fold scenario.
+ *
+ *   Agent running-state (bug: ACP turn completes but chat still shows the agent
+ *   as running). The chat "agent is working" indicator is driven by
+ *   taskSessions.items[sessionId].state === "RUNNING"; it only clears when a
+ *   session.state_changed WS event flips new_state off RUNNING.
+ *     [session:state]         session.state_changed handler — old→new state per
+ *                             session. If you never see a line transitioning
+ *                             newState off RUNNING after the turn completes, the
+ *                             backend never published the clear (look at the
+ *                             orchestrator complete-event guard / handleAgentCompleted).
+ *     [session:turns]         session.turn.started / session.turn.completed
+ *                             handlers. A `turn.completed` line with no following
+ *                             `[session:state] newState=WAITING_FOR_INPUT` is the
+ *                             smoking gun: the turn ended but running-state stuck.
  *
  *   Other
  *     [ws:connection]         WS hook mount + status transitions
@@ -120,10 +217,78 @@ function flattenArgs(args: unknown[]): string {
   return parts.join(" ");
 }
 
+export type SessionTaskResolver = (sessionId: string) => string | undefined;
+
+let sessionTaskResolver: SessionTaskResolver | null = null;
+let sessionTaskResolverToken = 0;
+
+/**
+ * Register a function that maps a session ID to its owning task ID, and return
+ * an unregister callback.
+ *
+ * Most debug call sites only have a `sessionId` in scope, but when triaging a
+ * problem you usually think in terms of a *task*. Once a resolver is registered,
+ * every `debug(...)` call that carries a `sessionId` / `session_id` field is
+ * automatically annotated with a trailing `task_id=<...>` — so a devtools
+ * console filter (or a grep over an exported log) can scope to a single task
+ * without every call site having to thread the task ID through.
+ *
+ * The frontend store is created per-`StateProvider` (it is not a module-level
+ * singleton), so the provider wires this up on mount and calls the returned
+ * unregister on unmount — see `components/state-provider.tsx`. The resolver
+ * itself *is* a single module-level global, so the unregister callback only
+ * clears it when this registration is still the active one: during HMR or a
+ * provider swap the new provider mounts (and registers) before the old one's
+ * cleanup runs, and an unconditional null-clear would silently kill annotation
+ * until a full reload. Calls are no-ops in production because
+ * `createDebugLogger` returns `NOOP`.
+ */
+export function registerSessionTaskResolver(resolver: SessionTaskResolver | null): () => void {
+  const token = ++sessionTaskResolverToken;
+  sessionTaskResolver = resolver;
+  return () => {
+    if (sessionTaskResolverToken === token) sessionTaskResolver = null;
+  };
+}
+
+const SESSION_ID_KEYS = ["sessionId", "session_id"];
+const TASK_ID_KEYS = ["taskId", "task_id"];
+
+function readStringKey(args: unknown[], keys: string[]): string | undefined {
+  for (const arg of args) {
+    if (!isPlainObject(arg)) continue;
+    for (const key of keys) {
+      const val = arg[key];
+      if (typeof val === "string" && val.length > 0) return val;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Build the trailing ` task_id=<...>` annotation for a log line from the
+ * `sessionId` it already carries. Returns "" (no annotation) when there is no
+ * resolver, the line already names a task, no session is present, or the
+ * session can't be mapped. Never throws — a faulty resolver must not break a
+ * debug log.
+ */
+function resolveTaskAnnotation(args: unknown[]): string {
+  if (!sessionTaskResolver) return "";
+  if (readStringKey(args, TASK_ID_KEYS)) return ""; // already filterable by task
+  const sid = readStringKey(args, SESSION_ID_KEYS);
+  if (!sid) return "";
+  try {
+    const taskId = sessionTaskResolver(sid);
+    return taskId ? ` task_id=${formatValue(taskId)}` : "";
+  } catch {
+    return "";
+  }
+}
+
 export function createDebugLogger(namespace: string): DebugLogger {
   if (!IS_DEBUG) return NOOP;
   const prefix = `[${namespace}]`;
   return (...args: unknown[]) => {
-    console.debug(`${prefix} ${flattenArgs(args)}`);
+    console.debug(`${prefix} ${flattenArgs(args)}${resolveTaskAnnotation(args)}`);
   };
 }

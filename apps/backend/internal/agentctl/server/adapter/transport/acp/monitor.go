@@ -402,7 +402,7 @@ func monitorEventEvent(sessionID, toolCallID string, body string, payload *strea
 		Type:              streams.EventTypeToolUpdate,
 		SessionID:         sessionID,
 		ToolCallID:        toolCallID,
-		ToolStatus:        "in_progress",
+		ToolStatus:        toolStatusInProgress,
 		NormalizedPayload: payload,
 		ToolCallContents: []streams.ToolCallContentItem{
 			{Type: "content", Content: &streams.ContentBlock{Type: "text", Text: body}},
@@ -443,7 +443,7 @@ func (a *Adapter) captureReplayMonitor(sessionID string, u acp.SessionUpdate) {
 		// post-replay sweep doesn't double-emit a cancellation.
 		if tcu.Status != nil {
 			s := string(*tcu.Status)
-			if s == "completed" || s == "failed" || s == "cancelled" {
+			if s == "completed" || s == "failed" || s == toolStatusCancelled {
 				a.dropMonitorByToolCallID(sessionID, toolCallID)
 			}
 		}
@@ -519,7 +519,7 @@ func (a *Adapter) sweepMonitorsOnReplayEnd(sessionID string) {
 		markMonitorEnded(payload, "session_restart")
 		delete(a.activeToolCalls, toolCallID)
 		a.mu.Unlock()
-		a.sendUpdate(monitorTerminalEvent(sessionID, toolCallID, "cancelled", "Monitor ended (session restart)", payload))
+		a.sendUpdate(monitorTerminalEvent(sessionID, toolCallID, toolStatusCancelled, "Monitor ended (session restart)", payload))
 	}
 }
 

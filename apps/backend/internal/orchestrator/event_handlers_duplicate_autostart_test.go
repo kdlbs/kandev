@@ -232,10 +232,12 @@ func TestAutoStartTransientError_BootReadyDrainsOrphanedQueue(t *testing.T) {
 		SessionID: sessionID,
 	})
 
-	// drainQueuedMessageAfterTransition pops the queue synchronously and fires
-	// `go executeQueuedMessage(...)`. The goroutine creates a user message and
-	// calls PromptTask → PromptAgent. The mock closes secondPromptCalled on
-	// that call, so the assertion below has a deterministic sync point.
+	// drainQueuedMessageForPromptableSession pops the queue synchronously and fires
+	// `go executeQueuedMessage(...)`. With the user_message_recorded flag set
+	// at queue time (see autoStartStepPrompt's retry branch), the goroutine
+	// SKIPS its CreateUserMessage and just calls PromptTask → PromptAgent.
+	// The mock closes secondPromptCalled on that call, so the assertion below
+	// has a deterministic sync point.
 	select {
 	case <-secondPromptCalled:
 	case <-time.After(3 * time.Second):
@@ -244,5 +246,19 @@ func TestAutoStartTransientError_BootReadyDrainsOrphanedQueue(t *testing.T) {
 
 	if got := svc.messageQueue.GetStatus(ctx, sessionID).Count; got != 0 {
 		t.Errorf("queue not drained after boot_ready: %d messages still queued (the orphaned-queue bug is back)", got)
+	}
+
+	// After the drain: exactly ONE Merge user message must exist. Phase 1
+	// inserted it via recordAutoStartMessage; Phase 2 (executeQueuedMessage)
+	// must not double-insert. Without the user_message_recorded flag, this
+	// would be 2 — the symptom reported on the ACP-removal task.
+	mergeUserMsgsAfterDrain := 0
+	for _, m := range msgCreator.userMessages {
+		if name, _ := m.metadata["workflow_step_name"].(string); name == "Merge" {
+			mergeUserMsgsAfterDrain++
+		}
+	}
+	if mergeUserMsgsAfterDrain != 1 {
+		t.Errorf("expected exactly 1 Merge user_message after boot_ready drain, got %d (duplicate-prompt bug is back)", mergeUserMsgsAfterDrain)
 	}
 }

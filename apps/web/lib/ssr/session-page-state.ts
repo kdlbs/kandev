@@ -22,6 +22,8 @@ import type {
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 import { snapshotToState, taskToState } from "@/lib/ssr/mapper";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
+import { prepareResultToSessionState } from "@/lib/state/slices/session-runtime/prepare-result";
+import type { SessionPrepareState } from "@/lib/state/slices/session-runtime/types";
 import type { AppState } from "@/lib/state/store";
 
 function buildWorktreeState(allSessions: TaskSession[]) {
@@ -160,65 +162,11 @@ function buildSessionState(p: BuildSessionPageStateParams) {
 }
 
 function buildPrepareProgressState(allSessions: TaskSession[]) {
-  const bySessionId: Record<
-    string,
-    {
-      sessionId: string;
-      status: string;
-      steps: Array<{
-        name: string;
-        command?: string;
-        status: string;
-        output?: string;
-        error?: string;
-        warning?: string;
-        warningDetail?: string;
-        startedAt?: string;
-        endedAt?: string;
-      }>;
-      errorMessage?: string;
-      durationMs?: number;
-    }
-  > = {};
+  const bySessionId: Record<string, SessionPrepareState> = {};
 
   for (const session of allSessions) {
-    const pr = session.metadata?.prepare_result as
-      | {
-          status?: string;
-          steps?: Array<{
-            name: string;
-            command?: string;
-            status: string;
-            output?: string;
-            error?: string;
-            warning?: string;
-            warning_detail?: string;
-            started_at?: string;
-            ended_at?: string;
-          }>;
-          error_message?: string;
-          duration_ms?: number;
-        }
-      | undefined;
-    if (!pr) continue;
-
-    bySessionId[session.id] = {
-      sessionId: session.id,
-      status: pr.status ?? "completed",
-      steps: (pr.steps ?? []).map((s) => ({
-        name: s.name,
-        command: s.command,
-        status: s.status,
-        output: s.output,
-        error: s.error,
-        warning: s.warning,
-        warningDetail: s.warning_detail,
-        startedAt: s.started_at,
-        endedAt: s.ended_at,
-      })),
-      errorMessage: pr.error_message,
-      durationMs: pr.duration_ms,
-    };
+    const prepareState = prepareResultToSessionState(session.id, session.metadata);
+    if (prepareState) bySessionId[session.id] = prepareState;
   }
 
   if (Object.keys(bySessionId).length === 0) return {};

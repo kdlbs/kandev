@@ -168,6 +168,12 @@ func (a *mockAgent) LoadSession(_ context.Context, req acp.LoadSessionRequest) (
 func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.PromptResponse, error) {
 	a.emitAvailableCommandsOnce(ctx, req.SessionId)
 	prompt := extractPromptText(req.Prompt)
+	// The /overloaded scenario must surface a real prompt-time ACP *error*
+	// (a JSON-RPC error response), which handlePrompt's emitter cannot do —
+	// so intercept it here and return the error from Prompt directly.
+	if resp, err, handled := a.handleOverloaded(ctx, req.SessionId, prompt); handled {
+		return resp, err
+	}
 	e := &emitter{ctx: ctx, conn: a.conn, sid: req.SessionId}
 	handlePrompt(e, prompt, a.model)
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
@@ -196,6 +202,7 @@ func (a *mockAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest)
 	delete(a.sessions, req.SessionId)
 	delete(a.commandsEmitted, req.SessionId)
 	a.mu.Unlock()
+	_ = os.Remove(overloadedCounterPath(req.SessionId))
 	return acp.CloseSessionResponse{}, nil
 }
 
@@ -254,6 +261,7 @@ func mockAvailableCommands() []acp.AvailableCommand {
 	return []acp.AvailableCommand{
 		{Name: "slow", Description: "Run a slow response (default 5s)", Input: hint("duration (e.g. 10s)")},
 		{Name: "error", Description: "Simulate an error"},
+		{Name: "overloaded", Description: "Simulate a transient 529 Overloaded error (fails once, then recovers)"},
 		{Name: "thinking", Description: "Emit thinking/reasoning blocks"},
 		{Name: "crash", Description: "Simulate agent crash"},
 		{Name: "all", Description: "Demonstrate all message types"},

@@ -490,6 +490,11 @@ type WorkspaceInfo struct {
 	AgentProfileID    string // Optional - agent profile for the task
 	AgentID           string // Agent type ID (e.g., "auggie", "codex") - required for runtime creation
 	ACPSessionID      string // Agent's session ID for conversation resumption (from session metadata)
+	// SessionMode is the persisted session permission mode (e.g. "acceptEdits")
+	// from session metadata, declared via the set_session_mode workflow action or
+	// a user toggle. Applied as a mode override at ACP session init so a fresh
+	// launch starts in the declared mode before the first prompt. See issue #1183.
+	SessionMode string
 
 	// Executor-aware fields for correct runtime selection and remote reconnection
 	ExecutorType     string                 // Executor type (e.g., "local_pc", "sprites")

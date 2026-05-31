@@ -23,8 +23,15 @@ const (
 	toolTypeSearch  = "tool_search"
 	toolTypeGeneric = "tool_call"
 
-	toolStatusComplete = "complete"
-	toolStatusError    = "error"
+	toolStatusComplete   = "complete"
+	toolStatusError      = "error"
+	toolStatusInProgress = "in_progress"
+	toolStatusCancelled  = "cancelled"
+
+	// args map keys the adapter stashes so the normalizer can detect subagent
+	// (Task) tool calls without changing NormalizeToolCall's signature.
+	argKeyTitle = "title"
+	argKeyMeta  = "meta"
 )
 
 // DetectToolOperationType determines the specific tool operation type from ACP tool data.
@@ -73,6 +80,12 @@ func NewNormalizer() *Normalizer {
 
 // NormalizeToolCall converts ACP tool call data to NormalizedPayload.
 func (n *Normalizer) NormalizeToolCall(toolName string, args map[string]any) *streams.NormalizedPayload {
+	// Subagent (Task) tool calls are detected from meta/title/rawInput before
+	// the kind switch — they otherwise fall through to normalizeGeneric.
+	if payload, ok := n.normalizeSubagent(args); ok {
+		return payload
+	}
+
 	// ACP uses "kind" field to identify tool type
 	kind, _ := args["kind"].(string)
 	if kind == "" {
@@ -263,6 +276,20 @@ func (n *Normalizer) UpdatePayloadInput(payload *streams.NormalizedPayload, rawI
 			rf.FilePath = path
 		}
 	}
+
+	// Subagent (Task) calls send description/prompt/subagent_type in a later
+	// tool_call_update rawInput (Claude/OpenCode); fill empty fields only.
+	if sa := payload.SubagentTask(); sa != nil {
+		if v := shared.GetString(inputMap, subagentKeyDescription); v != "" && sa.Description == "" {
+			sa.Description = v
+		}
+		if v := shared.GetString(inputMap, subagentKeyPrompt); v != "" && sa.Prompt == "" {
+			sa.Prompt = v
+		}
+		if v := shared.GetString(inputMap, subagentKeySubagentType); v != "" && sa.SubagentType == "" {
+			sa.SubagentType = v
+		}
+	}
 }
 
 // normalizeEdit converts ACP edit tool data.
@@ -380,7 +407,46 @@ func (n *Normalizer) normalizeCodeSearch(toolName string, args map[string]any) *
 
 // normalizeGeneric wraps unknown tools as generic.
 func (n *Normalizer) normalizeGeneric(toolName string, args map[string]any) *streams.NormalizedPayload {
-	return streams.NewGeneric(toolName, args)
+	// Exclude the adapter-injected subagent-detection keys (title/meta) so
+	// internal routing data — notably the raw `_meta.claudeCode` map — never
+	// leaks into the generic payload shipped to the client.
+	input := make(map[string]any, len(args))
+	for k, v := range args {
+		if k == argKeyTitle || k == argKeyMeta {
+			continue
+		}
+		input[k] = v
+	}
+	return streams.NewGeneric(toolName, input)
+}
+
+// normalizeSubagent recognizes subagent (Task) tool calls from the meta, title,
+// and rawInput the adapter stashes in args. Returns (payload, true) when the
+// call spawns a subagent; the initial call usually has empty description/prompt
+// /subagent_type — those arrive incrementally via UpdatePayloadInput.
+func (n *Normalizer) normalizeSubagent(args map[string]any) (*streams.NormalizedPayload, bool) {
+	meta, _ := args[argKeyMeta].(map[string]any)
+	title, _ := args[argKeyTitle].(string)
+	rawInput := args["raw_input"]
+	desc, prompt, subagentType, ok := recognizeSubagent(meta, title, rawInput)
+	if !ok {
+		return nil, false
+	}
+	return streams.NewSubagentTask(desc, prompt, subagentType), true
+}
+
+// EnrichSubagentResult fills the result fields of a subagent payload from a
+// completion tool_call_update. Claude's result lives in meta, OpenCode's and
+// Cursor's in rawOutput — so this takes both. No-op for non-subagent payloads.
+func (n *Normalizer) EnrichSubagentResult(payload *streams.NormalizedPayload, meta map[string]any, rawOutput any) {
+	if payload == nil || payload.Kind() != streams.ToolKindSubagentTask {
+		return
+	}
+	res, ok := extractSubagentResult(meta, rawOutput)
+	if !ok {
+		return
+	}
+	applySubagentResult(payload.SubagentTask(), res)
 }
 
 // --- Helper functions ---

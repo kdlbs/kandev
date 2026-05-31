@@ -18,6 +18,23 @@ var cursorACPLogoDark []byte
 
 const cursorACPBin = "cursor-agent"
 
+// cursorPermSettings maps the profile "Auto approve" toggle to cursor-agent's
+// --force flag. In ACP mode Cursor emits a session/request_permission for every
+// command not on its internal allowlist; --force ("Run Everything") suppresses
+// those prompts entirely. Empirically --force is the only flag that bypasses
+// the allowlist over ACP — --yolo and --sandbox still prompt. Default off
+// because --force runs everything unsandboxed.
+var cursorPermSettings = map[string]PermissionSetting{
+	PermissionKeyAutoApprove: {
+		Supported:   true,
+		Default:     false,
+		Label:       "Auto approve",
+		Description: "Run all commands without approval prompts (cursor-agent --force)",
+		ApplyMethod: PermissionApplyMethodCLIFlag,
+		CLIFlag:     "--force",
+	},
+}
+
 var (
 	_ Agent            = (*CursorACP)(nil)
 	_ PassthroughAgent = (*CursorACP)(nil)
@@ -34,7 +51,7 @@ type CursorACP struct {
 func NewCursorACP() *CursorACP {
 	return &CursorACP{
 		StandardPassthrough: StandardPassthrough{
-			PermSettings: emptyPermSettings,
+			PermSettings: cursorPermSettings,
 			Cfg: PassthroughConfig{
 				Supported:      true,
 				Label:          "CLI Passthrough",
@@ -77,7 +94,9 @@ func (a *CursorACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 }
 
 func (a *CursorACP) BuildCommand(opts CommandOptions) Command {
-	return Cmd(cursorACPBin, "acp").Build()
+	return Cmd(cursorACPBin, "acp").
+		Settings(a.PermissionSettings(), opts.PermissionValues).
+		Build()
 }
 
 func (a *CursorACP) Runtime() *RuntimeConfig {
@@ -97,14 +116,33 @@ func (a *CursorACP) Runtime() *RuntimeConfig {
 	}
 }
 
-func (a *CursorACP) RemoteAuth() *RemoteAuth { return nil }
+func (a *CursorACP) RemoteAuth() *RemoteAuth {
+	return &RemoteAuth{
+		Methods: []RemoteAuthMethod{
+			{
+				Type:      "env",
+				EnvVar:    "CURSOR_API_KEY",
+				SetupHint: "Create an API key at https://cursor.com/dashboard/integrations (Cursor Pro).",
+			},
+		},
+	}
+}
 
+// cursor-agent isn't on npm. The official installer drops the binary into
+// ~/.local/bin; make sure that dir is on PATH for the rest of the prepare
+// script and for future shells on the sprite.
 func (a *CursorACP) InstallScript() string {
-	return "curl https://cursor.com/install -fsS | bash"
+	return `set -e
+tmp="$(mktemp)"
+curl -fsS https://cursor.com/install -o "$tmp"
+bash "$tmp"
+rm -f "$tmp"
+export PATH="$HOME/.local/bin:$PATH"
+grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$HOME/.bashrc" 2>/dev/null || echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"`
 }
 
 func (a *CursorACP) PermissionSettings() map[string]PermissionSetting {
-	return emptyPermSettings
+	return cursorPermSettings
 }
 
 func (a *CursorACP) InferenceConfig() *InferenceConfig {

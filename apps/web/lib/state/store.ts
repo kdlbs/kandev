@@ -330,6 +330,7 @@ export type AppState = {
   setConnectionStatus: (status: ConnectionState["status"], error?: string | null) => void;
   setMobileKanbanColumnIndex: (index: number) => void;
   setMobileKanbanMenuOpen: (open: boolean) => void;
+  setMobileKanbanSearchOpen: (open: boolean) => void;
   setMobileSessionPanel: (sessionId: string, panel: UISliceTypes.MobileSessionPanel) => void;
   setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
   setPlanMode: (sessionId: string, enabled: boolean) => void;
@@ -387,10 +388,15 @@ export type AppState = {
   setGitStatus: (sessionId: string, gitStatus: GitStatusEntry) => void;
   clearGitStatus: (sessionId: string) => void;
   registerSessionEnvironment: (sessionId: string, environmentId: string) => void;
-  setSessionCommits: (sessionId: string, commits: SessionCommit[]) => void;
+  setSessionCommits: (
+    sessionId: string,
+    commits: SessionCommit[],
+    opts?: { allowEmpty?: boolean },
+  ) => void;
   setSessionCommitsLoading: (sessionId: string, loading: boolean) => void;
   addSessionCommit: (sessionId: string, commit: SessionCommit) => void;
   clearSessionCommits: (sessionId: string) => void;
+  bumpSessionCommitsRefetch: (sessionId: string) => void;
   setContextWindow: (sessionId: string, contextWindow: ContextWindowEntry) => void;
   bumpAgentProfilesVersion: () => void;
   setPendingModel: (sessionId: string, modelId: string) => void;

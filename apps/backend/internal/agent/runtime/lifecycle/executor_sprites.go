@@ -47,10 +47,22 @@ type commandOutputRunner interface {
 }
 
 const (
-	spritesAgentctlPort    = 8765
-	spritesWorkspacePath   = "/workspace"
-	spritesNamePrefix      = "kandev-"
-	spriteStepTimeout      = 120 * time.Second
+	spritesAgentctlPort  = 8765
+	spritesWorkspacePath = "/workspace"
+	spritesNamePrefix    = "kandev-"
+	// spriteStepTimeout caps cheap one-shot API calls (create sprite, reconnect,
+	// network policy). These are pure JSON round-trips; if they exceed 2 minutes
+	// the API is unhealthy and retrying longer won't help.
+	spriteStepTimeout = 120 * time.Second
+	// spriteUploadTimeout caps file uploads from the user's machine to the
+	// sprite (agentctl ~21 MB, credential files, skill files). Sized for slow
+	// home connections — a 21 MB push needs ~1.4 Mbit/s to fit in 2 min, which
+	// many residential uplinks can't sustain.
+	spriteUploadTimeout = 10 * time.Minute
+	// spritePrepareTimeout caps the prepare script run inside the sprite,
+	// which does git clones and npm/curl agent installs over the sprite's
+	// internet. Five+ agent installs commonly run past 2 minutes.
+	spritePrepareTimeout   = 10 * time.Minute
 	spriteHealthTimeout    = 15 * time.Second
 	spriteDestroyTimeout   = 30 * time.Second
 	spriteHealthRetryWait  = 500 * time.Millisecond

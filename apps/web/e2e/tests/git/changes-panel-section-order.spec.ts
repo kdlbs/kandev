@@ -318,6 +318,18 @@ test.describe("Changes panel section ordering", () => {
     // PR files should appear above commits
     await expectAbove(prFiles, commits);
 
+    // Review mode (PR, no local changes): PR Changes is the first visible
+    // section, so it is expanded by default — the panel never opens looking
+    // empty. Commits, being second, stays collapsed.
+    await expect(testPage.getByTestId("pr-changes-section-collapse-toggle")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    await expect(testPage.getByTestId("commits-section-collapse-toggle")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+
     // No unstaged or staged sections
     await expect(testPage.getByTestId("unstaged-files-section")).not.toBeVisible();
     await expect(testPage.getByTestId("staged-files-section")).not.toBeVisible();

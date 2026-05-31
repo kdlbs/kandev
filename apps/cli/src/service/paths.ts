@@ -47,7 +47,40 @@ export type LauncherInfo = {
   bundleDir?: string;
   /** KANDEV_VERSION if set (Homebrew sets this). */
   version?: string;
+  /**
+   * Absolute path to the floating Homebrew launcher shim
+   * (`<prefix>/bin/kandev`), set only for Homebrew installs where the shim
+   * exists on disk. When present, the unit is rendered to exec this shim
+   * instead of the version-pinned Cellar node + cli.js, so it survives
+   * `brew upgrade`. See {@link homebrewShimPath}.
+   */
+  shimPath?: string;
 };
+
+// Homebrew is POSIX-only, so the Cellar segment is a hardcoded "/Cellar/"
+// rather than `path.sep`-based. On a Windows CI runner `path.sep` would be
+// "\\", which would never match a POSIX Cellar path and silently break shim
+// derivation (and its tests).
+const HOMEBREW_CELLAR_SEGMENT = "/Cellar/";
+
+/**
+ * Derive the floating Homebrew launcher shim from a Cellar-installed cli.js path.
+ *
+ * Homebrew installs the CLI under `<prefix>/Cellar/kandev/<version>/...` and
+ * symlinks a version-independent shim at `<prefix>/bin/kandev`. That shim sets
+ * KANDEV_BUNDLE_DIR / KANDEV_VERSION itself and execs cli.js via the floating
+ * `opt/node` symlink, so it keeps working after `brew upgrade` deletes the old
+ * Cellar dir. Returns undefined when `cliEntry` isn't a Cellar layout (npm /
+ * unknown installs), so callers fall back to the version-pinned paths.
+ */
+export function homebrewShimPath(cliEntry: string): string | undefined {
+  const idx = cliEntry.indexOf(HOMEBREW_CELLAR_SEGMENT);
+  if (idx === -1) return undefined;
+  const prefix = cliEntry.slice(0, idx);
+  // Homebrew layout is POSIX; use path.posix.join so the result keeps forward
+  // slashes regardless of the host the install/tests run on.
+  return path.posix.join(prefix, "bin", SERVICE_NAME);
+}
 
 /**
  * Snapshot the current invocation so the service unit can faithfully reproduce it.
@@ -67,7 +100,16 @@ export function captureLauncher(): LauncherInfo {
     : cliEntry.includes(`${path.sep}node_modules${path.sep}`)
       ? "npm"
       : "unknown";
-  return { nodePath, cliEntry, kind, bundleDir, version };
+  // For Homebrew installs, prefer the floating bin shim so the unit survives
+  // `brew upgrade` (which deletes the versioned Cellar dir baked into nodePath
+  // /cliEntry). Only adopt it when the shim actually exists on disk; otherwise
+  // fall back to the version-pinned paths below.
+  let shimPath: string | undefined;
+  if (kind === "homebrew") {
+    const candidate = homebrewShimPath(cliEntry);
+    if (candidate && fs.existsSync(candidate)) shimPath = candidate;
+  }
+  return { nodePath, cliEntry, kind, bundleDir, version, shimPath };
 }
 
 function resolveCliEntry(): string {

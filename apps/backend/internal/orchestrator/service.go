@@ -163,6 +163,7 @@ type sessionExecutorStore interface {
 	DeleteExecutorRunningBySessionID(ctx context.Context, sessionID string) error
 	HasExecutorRunningRow(ctx context.Context, sessionID string) (bool, error)
 	UpdateResumeToken(ctx context.Context, sessionID, expectedExecID, resumeToken, lastMessageUUID string) error
+	UpdateExecutorRunningStatus(ctx context.Context, sessionID, status string) error
 	// Executor
 	GetExecutor(ctx context.Context, id string) (*models.Executor, error)
 	// Task
@@ -180,6 +181,9 @@ type sessionExecutorStore interface {
 	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	ListNonTerminalSessionsByAgentInstance(ctx context.Context, agentInstanceID string) ([]*models.TaskSession, error)
 	DeleteTaskSession(ctx context.Context, id string) error
+	// Messages — used by resume to backfill the initial user prompt when a
+	// prior launch failed before recordInitialMessage ran.
+	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
 	// Workspace
 	GetWorkspace(ctx context.Context, id string) (*models.Workspace, error)
 	// Task environment
@@ -263,6 +267,20 @@ type Service struct {
 	// Constructed lazily once issueTaskCreator is wired (see SetIssueTaskCreator).
 	watcherCoordinator *WatcherDispatchCoordinator
 
+	// Watcher throttle state. watcherTaskCount counts committed open watcher-
+	// created tasks (DB-backed source of truth across restarts). pendingByWatch
+	// tracks in-process events whose dedup row has not yet been written —
+	// without it, a burst of events read the same stale COUNT(*) before any
+	// goroutine commits, and the cap is silently overshot. Both reads and the
+	// pending increment happen under watcherMu to prevent the burst race.
+	watcherTaskCount WatcherTaskCounter
+	watcherMu        sync.Mutex
+	pendingByWatch   map[string]int
+	// watcherSaturated tracks per-watch whether the last gate result was
+	// "deferred", so we log the state-transition Warn ("cap reached" /
+	// "cap cleared") only once per transition instead of every event.
+	watcherSaturated map[string]bool
+
 	// Jira service for issue watch dedup operations
 	jiraService JiraService
 	// jiraSource adapts jiraService onto WatcherSource. Built once in
@@ -328,13 +346,21 @@ type Service struct {
 	clarificationWatchdogTimeout time.Duration
 
 	// cancelInFlight tracks sessionIDs whose CancelAgent call is currently in
-	// progress. Used to deduplicate impatient retries from the UI: while the
-	// first cancel is still propagating through the agent (which can take several
-	// seconds when a long-running tool like Claude's Monitor is being torn down),
-	// the user often clicks the button repeatedly. Without this guard each click
-	// would create another "Turn cancelled by user" message and lazily start a
-	// phantom turn just to host it.
+	// progress. It deduplicates impatient retries from the UI and lets late
+	// agent.ready/boot_ready events from the cancelled turn return before they
+	// evaluate workflow transitions or drain queued messages.
 	cancelInFlight sync.Map
+
+	// transientRetries tracks in-progress transient-provider-error (529
+	// Overloaded) retry loops. key: sessionID, value: *transientRetryEntry.
+	// A backoff timer per session re-drives the failed prompt; cancelled on
+	// success, user-cancel, or service shutdown.
+	transientRetries sync.Map
+
+	// lastTurnPrompt caches the most recent outbound prompt per session so a
+	// transient-failure retry can re-drive the same turn without the caller's
+	// context. key: sessionID, value: capturedPrompt. Replaced every turn.
+	lastTurnPrompt sync.Map
 
 	// Service state
 	mu        sync.RWMutex
@@ -849,6 +875,7 @@ func (s *Service) Stop() error {
 	}
 
 	s.cancelAllClarificationWatchdogs()
+	s.cancelAllTransientRetries()
 
 	if len(errs) > 0 {
 		return errs[0]
@@ -1111,19 +1138,19 @@ func (s *Service) handleSessionLaunchFailed(ctx context.Context, taskID, session
 		"missing_branch": branch,
 		"actions": []map[string]interface{}{
 			{
-				"type":    "archive_task",
-				"label":   "Archive task",
-				"tooltip": "Keep task history and hide it from active work",
-				"icon":    "archive",
-				"test_id": "missing-branch-archive-button",
+				actionMetaKeyType:    "archive_task",
+				actionMetaKeyLabel:   "Archive task",
+				actionMetaKeyTooltip: "Keep task history and hide it from active work",
+				actionMetaKeyIcon:    "archive",
+				actionMetaKeyTestID:  "missing-branch-archive-button",
 			},
 			{
-				"type":    "delete_task",
-				"label":   "Delete task",
-				"tooltip": "Permanently remove this task",
-				"variant": "destructive",
-				"icon":    "trash",
-				"test_id": "missing-branch-delete-button",
+				actionMetaKeyType:    "delete_task",
+				actionMetaKeyLabel:   "Delete task",
+				actionMetaKeyTooltip: "Permanently remove this task",
+				"variant":            "destructive",
+				actionMetaKeyIcon:    "trash",
+				actionMetaKeyTestID:  "missing-branch-delete-button",
 			},
 		},
 	}

@@ -94,6 +94,15 @@ export async function clearQueue(sessionId: string): Promise<{ removed: number }
   return client.request<{ removed: number }>("message.queue.cancel", { session_id: sessionId });
 }
 
+/** Dispatch one queued entry now when the session is ready for input. */
+export async function drainQueuedMessage(sessionId: string): Promise<{ drained: boolean }> {
+  const client = getWebSocketClient();
+  if (!client) {
+    throw new Error(WS_CLIENT_UNAVAILABLE);
+  }
+  return client.request<{ drained: boolean }>("message.queue.drain", { session_id: sessionId });
+}
+
 /** Fetch the full queue snapshot (entries + capacity). */
 export async function getQueueStatus(sessionId: string): Promise<QueueStatus> {
   const client = getWebSocketClient();

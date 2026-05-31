@@ -118,6 +118,7 @@ function ActionsCell({ row, ctx }: { row: Row<TaskWithResolution>; ctx: ActionsC
         onOpenChange={setShowDeleteConfirm}
         taskTitle={task.title}
         taskId={task.id}
+        executorType={task.primary_executor_type}
         isDeleting={isDeleting}
         onConfirm={({ cascade }) => ctx.onDelete(task.id, { cascade })}
       />
@@ -126,6 +127,7 @@ function ActionsCell({ row, ctx }: { row: Row<TaskWithResolution>; ctx: ActionsC
         onOpenChange={setShowArchiveConfirm}
         taskTitle={task.title}
         taskId={task.id}
+        executorType={task.primary_executor_type}
         onConfirm={({ cascade }) => ctx.onArchive(task.id, { cascade })}
       />
     </div>

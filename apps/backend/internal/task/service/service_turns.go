@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -42,7 +43,8 @@ func (s *Service) StartTurn(ctx context.Context, sessionID string) (*models.Turn
 		return nil, err
 	}
 
-	s.publishTurnEvent(events.TurnStarted, turn)
+	// had_output is only meaningful on turn.completed; omit it from turn.started.
+	s.publishTurnEvent(events.TurnStarted, turn, nil)
 
 	s.logger.Debug("started turn",
 		zap.String("turn_id", turn.ID),
@@ -80,7 +82,8 @@ func (s *Service) CompleteTurn(ctx context.Context, turnID string) error {
 		return nil
 	}
 
-	s.publishTurnEvent(events.TurnCompleted, turn)
+	hadOutput := s.turnHadOutput(ctx, turn)
+	s.publishTurnEvent(events.TurnCompleted, turn, &hadOutput)
 
 	s.logger.Debug("completed turn",
 		zap.String("turn_id", turnID),
@@ -148,7 +151,11 @@ func (s *Service) AbandonOpenTurns(ctx context.Context, sessionID string) error 
 				zap.String("turn_id", turn.ID),
 				zap.Error(err))
 		} else {
-			s.publishTurnEvent(events.TurnCompleted, refreshed)
+			// Abandoned turns are orphans swept on resume, not live completions.
+			// Report had_output=true so the frontend never shows an "empty turn"
+			// notice for them — only genuine live completions should trigger it.
+			hadOutput := true
+			s.publishTurnEvent(events.TurnCompleted, refreshed, &hadOutput)
 		}
 		s.logger.Info("abandoned orphan turn on session resume",
 			zap.String("turn_id", turn.ID),
@@ -187,8 +194,12 @@ func (s *Service) getOrStartTurn(ctx context.Context, sessionID string) (*models
 	return s.StartTurn(ctx, sessionID)
 }
 
-// publishTurnEvent publishes a turn event to the event bus.
-func (s *Service) publishTurnEvent(eventType string, turn *models.Turn) {
+// publishTurnEvent publishes a turn event to the event bus. hadOutput reports
+// whether the turn produced any agent output; it is only meaningful for
+// turn.completed events (the frontend uses it to surface an "empty turn"
+// notice). Pass nil for turn.started so the field is omitted entirely rather
+// than carrying a misleading "false" on a turn that has not completed.
+func (s *Service) publishTurnEvent(eventType string, turn *models.Turn, hadOutput *bool) {
 	if s.eventBus == nil {
 		return
 	}
@@ -196,7 +207,7 @@ func (s *Service) publishTurnEvent(eventType string, turn *models.Turn) {
 		s.logger.Warn("publishTurnEvent: turn is nil, skipping", zap.String("event_type", eventType))
 		return
 	}
-	_ = s.eventBus.Publish(context.Background(), eventType, bus.NewEvent(eventType, "task-service", map[string]interface{}{
+	payload := map[string]interface{}{
 		"id":           turn.ID,
 		"session_id":   turn.TaskSessionID,
 		"task_id":      turn.TaskID,
@@ -205,7 +216,55 @@ func (s *Service) publishTurnEvent(eventType string, turn *models.Turn) {
 		"metadata":     turn.Metadata,
 		"created_at":   turn.CreatedAt,
 		"updated_at":   turn.UpdatedAt,
-	}))
+	}
+	if hadOutput != nil {
+		payload["had_output"] = *hadOutput
+	}
+	_ = s.eventBus.Publish(context.Background(), eventType, bus.NewEvent(eventType, "task-service", payload))
+}
+
+// turnHadOutput reports whether a completed turn produced any agent output.
+// It reads only the turn's own persisted messages (indexed by turn_id; all
+// agent text/tool messages are written before the turn is completed, so the DB
+// is authoritative even for streaming agents whose text is drained via chunk
+// events). A read failure defaults to true so a transient DB error never
+// produces a spurious "empty turn" notice.
+func (s *Service) turnHadOutput(ctx context.Context, turn *models.Turn) bool {
+	msgs, err := s.messages.ListMessagesByTurnID(ctx, turn.ID)
+	if err != nil {
+		s.logger.Debug("failed to list messages for had_output; assuming output",
+			zap.String("turn_id", turn.ID),
+			zap.Error(err))
+		return true
+	}
+	return turnHadAgentOutput(msgs, turn.ID)
+}
+
+// turnHadAgentOutput returns true when any message belonging to turnID is
+// agent-authored, user-visible output: a tool call, a native plan/todo, a
+// permission or clarification prompt (both render inline in chat), or a
+// non-empty text response. It is an allowlist on purpose — incidental,
+// non-answer messages the runtime attaches to a turn (lifecycle "status" /
+// "script_execution" notices, logs, progress, thinking) must NOT count, so a
+// turn that only emits those (or nothing at all) is still treated as empty.
+// User messages never count.
+func turnHadAgentOutput(msgs []*models.Message, turnID string) bool {
+	for _, m := range msgs {
+		if m == nil || m.TurnID != turnID || m.AuthorType != models.MessageAuthorAgent {
+			continue
+		}
+		switch m.Type {
+		case models.MessageTypeToolCall, models.MessageTypeToolEdit, models.MessageTypeToolRead,
+			models.MessageTypeToolExecute, models.MessageTypeAgentPlan, models.MessageTypeTodo,
+			models.MessageTypePermissionRequest, models.MessageTypeClarificationRequest:
+			return true
+		case models.MessageTypeMessage, models.MessageTypeContent, "":
+			if strings.TrimSpace(m.Content) != "" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // GetGitSnapshots retrieves git snapshots for a session
@@ -314,11 +373,14 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		}
 	}
 
-	// Get ACP session ID from metadata
-	var acpSessionID string
+	// Get ACP session ID and persisted session permission mode from metadata.
+	var acpSessionID, sessionMode string
 	if session.Metadata != nil {
 		if id, ok := session.Metadata["acp_session_id"].(string); ok {
 			acpSessionID = id
+		}
+		if mode, ok := session.Metadata[models.SessionMetaKeySessionMode].(string); ok {
+			sessionMode = mode
 		}
 	}
 
@@ -330,6 +392,7 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		AgentProfileID:    session.AgentProfileID,
 		AgentID:           agentID,
 		ACPSessionID:      acpSessionID,
+		SessionMode:       sessionMode,
 	}
 
 	var taskEnv *models.TaskEnvironment

@@ -468,7 +468,7 @@ func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentE
 	m.startPassthroughShell(ctx, execution, "failed to start shell for passthrough session")
 
 	if m.streamManager != nil && execution.agentctl != nil {
-		go m.streamManager.connectWorkspaceStream(execution, nil)
+		m.streamManager.ConnectWorkspaceStream(execution, nil)
 	}
 
 	go m.autoInjectInitialPrompt(execution, pt)
@@ -503,11 +503,12 @@ func profilePermissionValues(p *AgentProfileInfo) map[string]bool {
 	if p == nil {
 		return nil
 	}
-	return map[string]bool{
-		"auto_approve":                 p.AutoApprove,
+	values := map[string]bool{
 		"dangerously_skip_permissions": p.DangerouslySkipPermissions,
 		"allow_indexing":               p.AllowIndexing,
 	}
+	values[agents.PermissionKeyAutoApprove] = p.AutoApprove
+	return values
 }
 
 // freshPassthroughCommand resolves the agent config and profile, and builds a
@@ -687,7 +688,7 @@ func (m *Manager) ResumePassthroughSession(ctx context.Context, sessionID string
 	// Connect to workspace stream for shell/git/file features.
 	// Only connect if not already connected (process restart reuses the same agentctl).
 	if m.streamManager != nil && execution.agentctl != nil && execution.GetWorkspaceStream() == nil {
-		go m.streamManager.connectWorkspaceStream(execution, nil)
+		m.streamManager.ConnectWorkspaceStream(execution, nil)
 	}
 
 	return nil
@@ -959,7 +960,7 @@ func (m *Manager) attemptResumeFallback(execution *AgentExecution, runner *proce
 	// works but the user's shell session and workspace stream stay torn down.
 	m.startPassthroughShell(ctx, execution, "failed to start shell after passthrough resume fallback")
 	if m.streamManager != nil && execution.agentctl != nil && execution.GetWorkspaceStream() == nil {
-		go m.streamManager.connectWorkspaceStream(execution, nil)
+		m.streamManager.ConnectWorkspaceStream(execution, nil)
 	}
 
 	// Fallback path is a fresh session (no --resume) — re-inject the prompt.

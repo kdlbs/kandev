@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
+import { backupProductionDb, isProductionDb } from "./backup";
 import { devKandevHome, HEALTH_TIMEOUT_MS_DEV } from "./constants";
 import { resolveHealthTimeoutMs, waitForHealth, waitForUrlReady } from "./health";
 import { isInsideKandevTask } from "./kandev-env";
@@ -24,6 +25,23 @@ export type DevOptions = {
 export async function runDev({ repoRoot, backendPort, webPort }: DevOptions): Promise<void> {
   const ports = await pickPorts(backendPort, webPort);
   const { dbPath, extra } = resolveDevBackendEnv(repoRoot);
+
+  if (isProductionDb(dbPath)) {
+    try {
+      const backupPath = backupProductionDb(dbPath);
+      if (backupPath) {
+        const name = path.basename(backupPath);
+        console.log(`[kandev] backed up production db → ${name}`);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // Abort rather than continue: the backup exists precisely to protect the
+      // production db before dev mode touches it. Proceeding on failure would
+      // remove the safety guarantee that justified introducing this guard.
+      throw new Error(`failed to back up production db (${message}); aborting dev startup`);
+    }
+  }
+
   const backendEnv = buildBackendEnv({ ports, extra });
   const webEnv = buildWebEnv({ ports, debug: true });
   const logLevel =

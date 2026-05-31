@@ -17,6 +17,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { IconInfoCircle } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
+import { CliModeIcon } from "@/components/cli-mode-icon";
 import { useAppStore } from "@/components/state-provider";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useWorkflows } from "@/hooks/use-workflows";
@@ -37,11 +38,12 @@ import {
   CREATOR_ANY,
   type FormState,
   type LinearPriority,
-  buildFilterPayload,
+  buildWatchPayload,
   creatorPlaceholder,
-  filterIsEmpty,
   formStateFromWatch,
+  isWatchFormReady,
   makeEmptyForm,
+  parseMaxInflightTasks,
   userOptionLabel,
 } from "./linear-issue-watch-form";
 import type {
@@ -75,12 +77,10 @@ function useFormData(workspaceId: string) {
         .flatMap((e) => e.profiles ?? []),
     [executors],
   );
-  const filteredAgentProfiles = useMemo(
-    () => agentProfiles.filter((p) => !p.cli_passthrough),
-    [agentProfiles],
-  );
-  return { workflows, agentProfiles: filteredAgentProfiles, allExecutorProfiles };
+  return { workflows, agentProfiles, allExecutorProfiles };
 }
+
+type SelectFieldItem = { id: string; label: string; icon?: React.ReactNode };
 
 function SelectField(props: {
   label: string;
@@ -88,7 +88,7 @@ function SelectField(props: {
   value: string;
   onChange: (v: string) => void;
   placeholder: string;
-  items: { id: string; label: string }[];
+  items: SelectFieldItem[];
   disabled?: boolean;
 }) {
   return (
@@ -106,7 +106,14 @@ function SelectField(props: {
         <SelectContent>
           {props.items.map((item) => (
             <SelectItem key={item.id} value={item.id}>
-              {item.label}
+              {item.icon ? (
+                <span className="flex items-center gap-1.5">
+                  <span>{item.label}</span>
+                  {item.icon}
+                </span>
+              ) : (
+                item.label
+              )}
             </SelectItem>
           ))}
         </SelectContent>
@@ -427,7 +434,11 @@ function AutomationFields({
           value={form.agentProfileId}
           onChange={(v) => setForm((p) => ({ ...p, agentProfileId: v }))}
           placeholder="(use step default)"
-          items={agentProfiles.map((p) => ({ id: p.id, label: p.label }))}
+          items={agentProfiles.map((p) => ({
+            id: p.id,
+            label: p.label,
+            icon: p.cli_passthrough ? <CliModeIcon /> : undefined,
+          }))}
         />
         <SelectField
           label="Executor Profile"
@@ -439,6 +450,38 @@ function AutomationFields({
         />
       </div>
     </>
+  );
+}
+
+function MaxInflightTasksField({
+  form,
+  setForm,
+}: {
+  form: FormState;
+  setForm: React.Dispatch<React.SetStateAction<FormState>>;
+}) {
+  const parsed = parseMaxInflightTasks(form.maxInflightTasks);
+  const invalid = parsed === "invalid";
+  return (
+    <div className="space-y-1.5">
+      <Label>Max in-flight tasks</Label>
+      <p className="text-xs text-muted-foreground">
+        Cap on open tasks created by this watcher. Leave blank for no cap. New matches are deferred
+        to the next poll when the cap is reached.
+      </p>
+      <Input
+        type="number"
+        value={form.maxInflightTasks}
+        onChange={(e) => setForm((p) => ({ ...p, maxInflightTasks: e.target.value }))}
+        min={1}
+        step={1}
+        placeholder="(no cap)"
+        aria-invalid={invalid}
+      />
+      {invalid && (
+        <p className="text-xs text-destructive">Enter a positive integer or leave blank.</p>
+      )}
+    </div>
   );
 }
 
@@ -464,6 +507,7 @@ function SettingsFields({
           max={3600}
         />
       </div>
+      <MaxInflightTasksField form={form} setForm={setForm} />
       <div className="flex items-center justify-between">
         <div>
           <Label>Enabled</Label>
@@ -505,28 +549,13 @@ export function LinearIssueWatchDialog({
   }, [watch, open, workspaceId, activeWorkspaceId]);
 
   const workspaceLocked = !!watch || !!workspaceId;
-
-  const canSave =
-    !!form.workspaceId &&
-    !filterIsEmpty(form) &&
-    !!form.workflowId &&
-    !!form.workflowStepId &&
-    !!form.prompt.trim();
+  const canSave = isWatchFormReady(form);
 
   const handleSave = useCallback(async () => {
+    const payload = buildWatchPayload(form);
+    if (!payload) return; // re-checks the cap input — see canSave gate
     setSaving(true);
     try {
-      const filter = buildFilterPayload(form);
-      const payload = {
-        filter,
-        workflowId: form.workflowId,
-        workflowStepId: form.workflowStepId,
-        agentProfileId: form.agentProfileId,
-        executorProfileId: form.executorProfileId,
-        prompt: form.prompt,
-        enabled: form.enabled,
-        pollIntervalSeconds: form.pollInterval,
-      };
       if (watch) {
         await onUpdate(watch.id, payload);
       } else {

@@ -7,9 +7,11 @@ import {
 } from "@/lib/types/http";
 import type { RichMetadata } from "@/components/task/chat/types";
 import {
+  buildGroupedRenderItems,
   collapseTodoSnapshotsPerTurn,
   deduplicateAgentBootResumes,
   isAgentBootResumeMessage,
+  isSetupScriptMessage,
 } from "./use-processed-messages";
 
 function makeMessage(
@@ -36,6 +38,17 @@ function makeTodo(
   todos: Array<{ text: string; done?: boolean }>,
 ): Message {
   return { ...makeMessage(id, "todo", { todos }), turn_id: turnId };
+}
+
+function toolExecute(id: string, turnId = "turn-1"): Message {
+  return {
+    ...makeMessage(id, "tool_execute", {
+      status: "complete",
+      normalized: { shell_exec: { command: "gh pr checks", output: { exit_code: 0 } } },
+    }),
+    content: "gh pr checks",
+    turn_id: turnId,
+  };
 }
 
 function bootStarted(id: string): Message {
@@ -80,6 +93,27 @@ describe("isAgentBootResumeMessage", () => {
   it("returns false when metadata is missing", () => {
     const msg = makeMessage("x", "script_execution");
     expect(isAgentBootResumeMessage(msg)).toBe(false);
+  });
+});
+
+describe("isSetupScriptMessage", () => {
+  it("returns true for a script_execution with script_type=setup", () => {
+    const msg = makeMessage("x", "script_execution", { script_type: "setup", status: "exited" });
+    expect(isSetupScriptMessage(msg)).toBe(true);
+  });
+
+  it("returns false for agent_boot and cleanup scripts", () => {
+    expect(isSetupScriptMessage(bootStarted("s1"))).toBe(false);
+    const cleanup = makeMessage("c1", "script_execution", { script_type: "cleanup" });
+    expect(isSetupScriptMessage(cleanup)).toBe(false);
+  });
+
+  it("returns false for non-script messages", () => {
+    expect(isSetupScriptMessage(makeMessage("m1", "message"))).toBe(false);
+  });
+
+  it("returns false when metadata is missing", () => {
+    expect(isSetupScriptMessage(makeMessage("x", "script_execution"))).toBe(false);
   });
 });
 
@@ -199,5 +233,27 @@ describe("collapseTodoSnapshotsPerTurn", () => {
     collapseTodoSnapshotsPerTurn([t1, t2]);
     expect(t1.metadata).toEqual({ todos: [{ text: "a" }] });
     expect(t2.metadata).toEqual({ todos: [{ text: "a", done: true }] });
+  });
+});
+
+describe("buildGroupedRenderItems prepare progress placement", () => {
+  it("does not inject prepare progress into a partial tool-only history window", () => {
+    const partialWindow = [toolExecute("tool-1"), toolExecute("tool-2")];
+
+    const result = buildGroupedRenderItems(partialWindow, "s1", {
+      canAnchorPrepareProgress: false,
+    });
+
+    expect(result.map((item) => item.type)).toEqual(["turn_group"]);
+  });
+
+  it("injects prepare progress when the session start is loaded", () => {
+    const initialPrompt = makeMessage("user-1", "message", undefined, "start");
+
+    const result = buildGroupedRenderItems([initialPrompt], "s1", {
+      canAnchorPrepareProgress: true,
+    });
+
+    expect(result.map((item) => item.type)).toEqual(["message", "prepare_progress"]);
   });
 });

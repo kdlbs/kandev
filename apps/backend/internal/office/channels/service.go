@@ -144,16 +144,6 @@ func (s *ChannelService) ListChannelsByAgent(ctx context.Context, agentInstanceI
 	return s.repo.ListChannelsByAgent(ctx, agentInstanceID)
 }
 
-// UpdateChannelStatus updates a channel's status.
-func (s *ChannelService) UpdateChannelStatus(ctx context.Context, id, status string) error {
-	channel, err := s.repo.GetChannel(ctx, id)
-	if err != nil {
-		return err
-	}
-	channel.Status = models.ChannelStatus(status)
-	return s.repo.UpdateChannel(ctx, channel)
-}
-
 // DeleteChannel deletes a channel by ID.
 func (s *ChannelService) DeleteChannel(ctx context.Context, id string) error {
 	return s.repo.DeleteChannel(ctx, id)

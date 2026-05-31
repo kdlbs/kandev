@@ -46,7 +46,7 @@ func (r *SpritesExecutor) uploadAgentctl(ctx context.Context, sprite *sprites.Sp
 		return fmt.Errorf("failed to read agentctl binary: %w", err)
 	}
 
-	stepCtx, cancel := context.WithTimeout(ctx, spriteStepTimeout)
+	stepCtx, cancel := context.WithTimeout(ctx, spriteUploadTimeout)
 	defer cancel()
 
 	r.logger.Debug("uploading agentctl binary", zap.Int("size_bytes", len(data)))
@@ -100,7 +100,7 @@ func (r *SpritesExecutor) uploadSkillFiles(
 		return fmt.Errorf("unmarshal skill manifest: %w", err)
 	}
 
-	stepCtx, cancel := context.WithTimeout(ctx, spriteStepTimeout)
+	stepCtx, cancel := context.WithTimeout(ctx, spriteUploadTimeout)
 	defer cancel()
 
 	projectSkillDir := manifest.ProjectSkillDir
@@ -192,7 +192,7 @@ func (r *SpritesExecutor) runPrepareScript(
 		return nil
 	}
 
-	stepCtx, cancel := context.WithTimeout(ctx, spriteStepTimeout)
+	stepCtx, cancel := context.WithTimeout(ctx, spritePrepareTimeout)
 	defer cancel()
 
 	r.logger.Debug("running prepare script")

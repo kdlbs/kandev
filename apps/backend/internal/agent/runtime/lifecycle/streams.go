@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -30,14 +31,49 @@ type StreamManager struct {
 	logger     *logger.Logger
 	callbacks  StreamCallbacks
 	mcpHandler agentctl.MCPHandler
+	// stopCh is the Manager-owned shutdown signal. SessionTraceContext is
+	// deliberately uncancellable (it carries a long-lived span), so the
+	// reconnect/backoff loops below select on stopCh to drain on Manager.Stop.
+	// nil is treated as "no shutdown signal" and falls back to the prior
+	// uncancellable behaviour (compat with constructors used by isolated tests).
+	stopCh  <-chan struct{}
+	wg      sync.WaitGroup
+	wgMu    sync.Mutex
+	stopped bool
 }
 
-// NewStreamManager creates a new StreamManager
-func NewStreamManager(log *logger.Logger, callbacks StreamCallbacks, mcpHandler agentctl.MCPHandler) *StreamManager {
+type stopChannelContext struct {
+	context.Context
+	stopCh <-chan struct{}
+}
+
+func (c stopChannelContext) Done() <-chan struct{} {
+	if c.stopCh == nil {
+		return c.Context.Done()
+	}
+	return c.stopCh
+}
+
+func (c stopChannelContext) Err() error {
+	select {
+	case <-c.stopCh:
+		return context.Canceled
+	default:
+		return c.Context.Err()
+	}
+}
+
+// NewStreamManager creates a new StreamManager.
+//
+// stopCh is the Manager-owned shutdown signal used by the workspace-stream
+// retry backoff to drain cleanly. Pass nil from tests that exercise the
+// manager in isolation; production callers wire it from Manager.stopCh.
+func NewStreamManager(log *logger.Logger, callbacks StreamCallbacks, mcpHandler agentctl.MCPHandler, stopCh <-chan struct{}) *StreamManager {
 	return &StreamManager{
 		logger:     log.WithFields(zap.String("component", "stream-manager")),
 		callbacks:  callbacks,
 		mcpHandler: mcpHandler,
+		stopCh:     stopCh,
 	}
 }
 
@@ -46,8 +82,48 @@ func NewStreamManager(log *logger.Logger, callbacks StreamCallbacks, mcpHandler 
 // completes (success or failure). Agent operations require the updates stream;
 // workspace stream readiness is handled independently.
 func (sm *StreamManager) ConnectAll(execution *AgentExecution, ready chan<- struct{}) {
-	go sm.connectUpdatesStream(execution, ready)
-	go sm.connectWorkspaceStream(execution, nil)
+	sm.connectUpdatesStreamAsync(execution, ready)
+	sm.ConnectWorkspaceStream(execution, nil)
+}
+
+func (sm *StreamManager) connectUpdatesStreamAsync(execution *AgentExecution, ready chan<- struct{}) {
+	if !sm.start(func() {
+		sm.connectUpdatesStream(execution, ready)
+	}) && ready != nil {
+		close(ready)
+	}
+}
+
+// ConnectWorkspaceStream starts the workspace stream and tracks the goroutine
+// so shutdown and tests can wait for it to drain after stopCh closes.
+func (sm *StreamManager) ConnectWorkspaceStream(execution *AgentExecution, ready chan<- struct{}) {
+	if !sm.start(func() {
+		sm.connectWorkspaceStream(execution, ready)
+	}) && ready != nil {
+		close(ready)
+	}
+}
+
+// Wait blocks until all StreamManager-owned stream goroutines have exited.
+func (sm *StreamManager) Wait() {
+	sm.wgMu.Lock()
+	sm.stopped = true
+	sm.wgMu.Unlock()
+	sm.wg.Wait()
+}
+
+func (sm *StreamManager) start(fn func()) bool {
+	sm.wgMu.Lock()
+	defer sm.wgMu.Unlock()
+	if sm.stopped {
+		return false
+	}
+	sm.wg.Add(1)
+	go func() {
+		defer sm.wg.Done()
+		fn()
+	}()
+	return true
 }
 
 // ReconnectAll reconnects to all streams (used after backend restart).
@@ -57,8 +133,12 @@ func (sm *StreamManager) ReconnectAll(execution *AgentExecution) {
 		zap.String("instance_id", execution.ID),
 		zap.String("task_id", execution.TaskID))
 
-	// Wait a moment for any startup operations to settle
-	time.Sleep(500 * time.Millisecond)
+	// Wait a moment for any startup operations to settle. Selecting on
+	// stopCh lets shutdown drain this goroutine without burning the full
+	// 500ms when the manager is already stopping.
+	if !sm.sleepOrStop(500 * time.Millisecond) {
+		return
+	}
 
 	// Check if agentctl is responsive
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -79,9 +159,37 @@ func (sm *StreamManager) ReconnectAll(execution *AgentExecution) {
 		zap.String("task_id", execution.TaskID))
 }
 
+// sleepOrStop blocks for d or until the Manager begins shutting down.
+// Returns true when the timer fires, false when stopCh closes first.
+// A nil stopCh degrades to time.Sleep semantics (always returns true).
+func (sm *StreamManager) sleepOrStop(d time.Duration) bool {
+	if sm.stopCh == nil {
+		time.Sleep(d)
+		return true
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-sm.stopCh:
+		return false
+	}
+}
+
+// streamContext preserves the execution's session trace values while making
+// in-flight WebSocket dials cancellable by the manager shutdown signal.
+func (sm *StreamManager) streamContext(execution *AgentExecution) context.Context {
+	ctx := execution.SessionTraceContext()
+	if sm.stopCh == nil {
+		return ctx
+	}
+	return stopChannelContext{Context: ctx, stopCh: sm.stopCh}
+}
+
 // connectUpdatesStream handles the updates WebSocket stream with ready signaling
 func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready chan<- struct{}) {
-	ctx := execution.SessionTraceContext()
+	ctx := sm.streamContext(execution)
 
 	err := execution.agentctl.StreamUpdates(ctx, func(event agentctl.AgentEvent) {
 		if sm.callbacks.OnAgentEvent != nil {
@@ -182,7 +290,7 @@ func (sm *StreamManager) buildWorkspaceCallbacks(execution *AgentExecution) agen
 
 // connectWorkspaceStream handles the unified workspace stream with retry logic
 func (sm *StreamManager) connectWorkspaceStream(execution *AgentExecution, ready chan<- struct{}) {
-	ctx := execution.SessionTraceContext()
+	ctx := sm.streamContext(execution)
 
 	// Retry connection with exponential backoff
 	maxRetries := 5
@@ -229,7 +337,11 @@ func (sm *StreamManager) connectWorkspaceStream(execution *AgentExecution, ready
 				zap.Error(err))
 
 			if attempt < maxRetries {
-				time.Sleep(backoff)
+				// Exit early on Manager shutdown so the backoff doesn't
+				// strand a goroutine after Stop() returns.
+				if !sm.sleepOrStop(backoff) {
+					return
+				}
 				backoff *= 2 // Exponential backoff
 			}
 			continue
@@ -243,8 +355,17 @@ func (sm *StreamManager) connectWorkspaceStream(execution *AgentExecution, ready
 		// Signal that workspace stream is ready
 		signalReady()
 
-		// Wait for the stream to close (it stays open until disconnected)
-		<-ws.Done()
+		// Wait for the stream to close. Also exits on Manager shutdown so the
+		// goroutine drains when the remote end keeps the connection open —
+		// in that case we close ws ourselves so the underlying WS read/write
+		// loops in agentctl.WorkspaceStream also exit. ws.Close is idempotent
+		// via closeOnce. A nil stopCh (isolated tests) blocks on the nil
+		// channel forever, which degrades to plain <-ws.Done() semantics.
+		select {
+		case <-ws.Done():
+		case <-sm.stopCh:
+			ws.Close()
+		}
 		execution.ClearWorkspaceStream(ws)
 		return
 	}

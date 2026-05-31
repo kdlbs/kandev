@@ -15,19 +15,20 @@ import (
 // the way SQLite holds it. The store marshals/unmarshals at this boundary so
 // service callers see a typed SearchFilter and never have to think about JSON.
 type issueWatchRow struct {
-	ID                  string     `db:"id"`
-	WorkspaceID         string     `db:"workspace_id"`
-	WorkflowID          string     `db:"workflow_id"`
-	WorkflowStepID      string     `db:"workflow_step_id"`
-	FilterJSON          string     `db:"filter_json"`
-	AgentProfileID      string     `db:"agent_profile_id"`
-	ExecutorProfileID   string     `db:"executor_profile_id"`
-	Prompt              string     `db:"prompt"`
-	Enabled             bool       `db:"enabled"`
-	PollIntervalSeconds int        `db:"poll_interval_seconds"`
-	LastPolledAt        *time.Time `db:"last_polled_at"`
-	CreatedAt           time.Time  `db:"created_at"`
-	UpdatedAt           time.Time  `db:"updated_at"`
+	ID                  string        `db:"id"`
+	WorkspaceID         string        `db:"workspace_id"`
+	WorkflowID          string        `db:"workflow_id"`
+	WorkflowStepID      string        `db:"workflow_step_id"`
+	FilterJSON          string        `db:"filter_json"`
+	AgentProfileID      string        `db:"agent_profile_id"`
+	ExecutorProfileID   string        `db:"executor_profile_id"`
+	Prompt              string        `db:"prompt"`
+	Enabled             bool          `db:"enabled"`
+	PollIntervalSeconds int           `db:"poll_interval_seconds"`
+	MaxInflightTasks    sql.NullInt64 `db:"max_inflight_tasks"`
+	LastPolledAt        *time.Time    `db:"last_polled_at"`
+	CreatedAt           time.Time     `db:"created_at"`
+	UpdatedAt           time.Time     `db:"updated_at"`
 }
 
 func (r *issueWatchRow) toIssueWatch() (*IssueWatch, error) {
@@ -36,6 +37,11 @@ func (r *issueWatchRow) toIssueWatch() (*IssueWatch, error) {
 		if err := json.Unmarshal([]byte(r.FilterJSON), &filter); err != nil {
 			return nil, fmt.Errorf("decode filter: %w", err)
 		}
+	}
+	var maxInflight *int
+	if r.MaxInflightTasks.Valid {
+		v := int(r.MaxInflightTasks.Int64)
+		maxInflight = &v
 	}
 	return &IssueWatch{
 		ID:                  r.ID,
@@ -48,6 +54,7 @@ func (r *issueWatchRow) toIssueWatch() (*IssueWatch, error) {
 		Prompt:              r.Prompt,
 		Enabled:             r.Enabled,
 		PollIntervalSeconds: r.PollIntervalSeconds,
+		MaxInflightTasks:    maxInflight,
 		LastPolledAt:        r.LastPolledAt,
 		CreatedAt:           r.CreatedAt,
 		UpdatedAt:           r.UpdatedAt,
@@ -64,7 +71,7 @@ func encodeFilter(f SearchFilter) (string, error) {
 
 const issueWatchColumns = `id, workspace_id, workflow_id, workflow_step_id, filter_json,
 	agent_profile_id, executor_profile_id, prompt, enabled,
-	poll_interval_seconds, last_polled_at, created_at, updated_at`
+	poll_interval_seconds, max_inflight_tasks, last_polled_at, created_at, updated_at`
 
 // CreateIssueWatch persists a new issue watch row. ID and timestamps are
 // assigned here so callers can pass a partially-populated struct.
@@ -84,11 +91,21 @@ func (s *Store) CreateIssueWatch(ctx context.Context, w *IssueWatch) error {
 	}
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO linear_issue_watches (`+issueWatchColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		w.ID, w.WorkspaceID, w.WorkflowID, w.WorkflowStepID, filterJSON,
 		w.AgentProfileID, w.ExecutorProfileID, w.Prompt, w.Enabled,
-		w.PollIntervalSeconds, w.LastPolledAt, w.CreatedAt, w.UpdatedAt)
+		w.PollIntervalSeconds, nullableInt(w.MaxInflightTasks), w.LastPolledAt, w.CreatedAt, w.UpdatedAt)
 	return err
+}
+
+// nullableInt converts a *int into a value suitable for a nullable SQL column.
+// A nil pointer becomes a SQL NULL; a non-nil pointer becomes the underlying
+// int. Used for max_inflight_tasks where NULL means "uncapped".
+func nullableInt(v *int) interface{} {
+	if v == nil {
+		return nil
+	}
+	return *v
 }
 
 // GetIssueWatch returns a single watch by ID, or nil when no row matches.
@@ -168,11 +185,13 @@ func (s *Store) UpdateIssueWatch(ctx context.Context, w *IssueWatch) error {
 	_, err = s.db.ExecContext(ctx, `
 		UPDATE linear_issue_watches SET workflow_id = ?, workflow_step_id = ?, filter_json = ?,
 			agent_profile_id = ?, executor_profile_id = ?, prompt = ?,
-			enabled = ?, poll_interval_seconds = ?, last_polled_at = ?, updated_at = ?
+			enabled = ?, poll_interval_seconds = ?, max_inflight_tasks = ?,
+			last_polled_at = ?, updated_at = ?
 		WHERE id = ?`,
 		w.WorkflowID, w.WorkflowStepID, filterJSON,
 		w.AgentProfileID, w.ExecutorProfileID, w.Prompt,
-		w.Enabled, w.PollIntervalSeconds, w.LastPolledAt, w.UpdatedAt, w.ID)
+		w.Enabled, w.PollIntervalSeconds, nullableInt(w.MaxInflightTasks),
+		w.LastPolledAt, w.UpdatedAt, w.ID)
 	return err
 }
 

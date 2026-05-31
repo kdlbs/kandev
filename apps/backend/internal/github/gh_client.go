@@ -13,6 +13,17 @@ import (
 	"time"
 )
 
+// ghSearchReposPath is the GitHub REST search-repositories path that gh CLI
+// invocations target via `gh api`. Centralised to keep the search-bucket
+// rate-limit dispatch (`resourceForGHArgs`) and the repo search helpers in
+// sync.
+const ghSearchReposPath = "search/repositories"
+
+// ghAccessibleReposPath is the GET /user/repos endpoint (with affiliation +
+// sort + per_page baked in) that backs ListAccessibleRepos. It returns a flat
+// JSON array on the core REST quota, replacing the per-org search fan-out.
+const ghAccessibleReposPathFmt = "/user/repos?affiliation=%s&sort=pushed&per_page=%d"
+
 // GHClient implements Client using the gh CLI.
 type GHClient struct {
 	rateTracker *RateTracker
@@ -337,10 +348,8 @@ func (c *GHClient) SearchOrgRepos(ctx context.Context, org, query string, limit 
 	if query != "" {
 		q += " " + query
 	}
-	if limit <= 0 {
-		limit = 20
-	}
-	out, err := c.run(ctx, "api", "search/repositories",
+	limit = clampRepoSearchLimit(limit)
+	out, err := c.run(ctx, "api", ghSearchReposPath,
 		"-X", "GET",
 		"-f", "q="+q,
 		"-f", fmt.Sprintf("per_page=%d", limit),
@@ -351,14 +360,83 @@ func (c *GHClient) SearchOrgRepos(ctx context.Context, org, query string, limit 
 	return parseGHSearchRepos(out)
 }
 
+func (c *GHClient) ListUserRepos(ctx context.Context, query string, limit int) ([]GitHubRepo, error) {
+	limit = clampRepoSearchLimit(limit)
+	login, err := c.GetAuthenticatedUser(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list user repos: %w", err)
+	}
+	args := buildUserReposGHArgs(login, query, limit)
+	out, err := c.run(ctx, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list user repos: %w", err)
+	}
+	return parseGHSearchRepos(out)
+}
+
+// buildUserReposGHArgs constructs the `gh api search/repositories` argv used
+// to list repos for the authenticated user. Keeping this pure makes the
+// endpoint + qualifier construction unit-testable without spawning gh. The
+// `q` value mirrors the PAT path (`user:<login> <query>`) so both clients
+// honour the same GitHub search syntax (e.g. `language:go`, `in:name`).
+// Callers must clamp `limit` via clampRepoSearchLimit beforehand.
+func buildUserReposGHArgs(login, query string, limit int) []string {
+	q := "user:" + login
+	if query != "" {
+		q += " " + query
+	}
+	return []string{
+		"api", ghSearchReposPath,
+		"-X", "GET",
+		"-f", "q=" + q,
+		"-f", fmt.Sprintf("per_page=%d", limit),
+		"--jq", ".items",
+	}
+}
+
+// ListAccessibleRepos lists every repo the authenticated user can access via a
+// single `gh api /user/repos` call on the core REST quota. The endpoint returns
+// a flat JSON array (parsed by parseGHSearchRepos, which already decodes a
+// top-level array). No --paginate: one page of up to 100 is what the picker
+// needs (the frontend caps at 100 and filters client-side).
+//
+// query is a BEST-EFFORT substring filter over only that single un-paginated
+// page — a match beyond the cap returns nothing. The frontend does the
+// canonical client-side filtering, so this server filter is just optional
+// narrowing; do not rely on it for completeness.
+func (c *GHClient) ListAccessibleRepos(ctx context.Context, query string, limit int) ([]GitHubRepo, error) {
+	limit = clampRepoSearchLimit(limit)
+	out, err := c.run(ctx, buildAccessibleReposGHArgs(limit)...)
+	if err != nil {
+		return nil, fmt.Errorf("list accessible repos: %w", err)
+	}
+	repos, err := parseGHSearchRepos(out)
+	if err != nil {
+		return nil, err
+	}
+	return filterReposByQuery(repos, query), nil
+}
+
+// buildAccessibleReposGHArgs constructs the `gh api /user/repos?...` argv for
+// ListAccessibleRepos. Keeping it pure makes the endpoint/query construction
+// unit-testable without spawning gh. Callers must clamp `limit` via
+// clampRepoSearchLimit beforehand.
+func buildAccessibleReposGHArgs(limit int) []string {
+	endpoint := fmt.Sprintf(ghAccessibleReposPathFmt, accessibleReposAffiliation, limit)
+	return []string{"api", endpoint}
+}
+
 func parseGHSearchRepos(data string) ([]GitHubRepo, error) {
 	var items []struct {
 		FullName string `json:"full_name"`
 		Owner    struct {
 			Login string `json:"login"`
 		} `json:"owner"`
-		Name    string `json:"name"`
-		Private bool   `json:"private"`
+		Name          string    `json:"name"`
+		Private       bool      `json:"private"`
+		DefaultBranch string    `json:"default_branch"`
+		Description   string    `json:"description"`
+		PushedAt      time.Time `json:"pushed_at"`
 	}
 	if err := json.Unmarshal([]byte(data), &items); err != nil {
 		return nil, fmt.Errorf("parse search repos: %w", err)
@@ -366,10 +444,16 @@ func parseGHSearchRepos(data string) ([]GitHubRepo, error) {
 	repos := make([]GitHubRepo, len(items))
 	for i, item := range items {
 		repos[i] = GitHubRepo{
-			FullName: item.FullName,
-			Owner:    item.Owner.Login,
-			Name:     item.Name,
-			Private:  item.Private,
+			FullName:      item.FullName,
+			Owner:         item.Owner.Login,
+			Name:          item.Name,
+			Private:       item.Private,
+			DefaultBranch: item.DefaultBranch,
+			Description:   item.Description,
+		}
+		if !item.PushedAt.IsZero() {
+			t := item.PushedAt
+			repos[i].PushedAt = &t
 		}
 	}
 	return repos, nil

@@ -31,7 +31,7 @@ vi.mock("@/components/state-provider", () => ({
   ) => selector({ userSettings: { changesPanelLayout: "flat" } }),
 }));
 
-import { FileListSection, CommitsSection } from "./changes-panel-timeline";
+import { FileListSection, CommitsSection, PRFilesSection } from "./changes-panel-timeline";
 
 const REPO_HEADER_TID = "changes-repo-header";
 const COMMIT_ROW_TID = "commit-row";
@@ -245,5 +245,54 @@ describe("CommitsSection", () => {
       .filter((r) => r.getAttribute("data-is-latest") === "true")
       .map((r) => r.getAttribute("data-sha"));
     expect(latestByShas.sort()).toEqual(["backend-only", "frontend-new"]);
+  });
+});
+
+describe("section auto-expand (defaultCollapsed prop)", () => {
+  const PR_TOGGLE_TID = "pr-changes-section-collapse-toggle";
+
+  function prFile(path: string) {
+    return { path, status: "modified" as const, plus: 1, minus: 0, oldPath: undefined };
+  }
+
+  it("PR Changes is collapsed by default (no prop)", () => {
+    render(<PRFilesSection files={[prFile("a.ts")]} isLast onOpenDiff={vi.fn()} />);
+    expect(screen.getByTestId(PR_TOGGLE_TID).getAttribute(ARIA_EXPANDED)).toBe("false");
+    expect(screen.queryByTestId("pr-files-list")).toBeNull();
+  });
+
+  it("PR Changes is expanded when defaultCollapsed={false}", () => {
+    render(
+      <PRFilesSection
+        files={[prFile("a.ts")]}
+        isLast
+        onOpenDiff={vi.fn()}
+        defaultCollapsed={false}
+      />,
+    );
+    expect(screen.getByTestId(PR_TOGGLE_TID).getAttribute(ARIA_EXPANDED)).toBe("true");
+    expect(screen.getByTestId("pr-files-list")).toBeTruthy();
+  });
+
+  it("Commits is expanded when defaultCollapsed={false}", () => {
+    render(
+      <CommitsSection
+        commits={[
+          {
+            commit_sha: "abc123",
+            commit_message: "first",
+            insertions: 1,
+            deletions: 0,
+            pushed: false,
+            repository_name: undefined,
+          },
+        ]}
+        isLast
+        defaultCollapsed={false}
+      />,
+    );
+    const toggle = screen.getByTestId(COMMITS_SECTION_TOGGLE_TID);
+    expect(toggle.getAttribute(ARIA_EXPANDED)).toBe("true");
+    expect(screen.getByTestId(COMMIT_ROW_TID)).toBeTruthy();
   });
 });

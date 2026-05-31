@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -49,6 +51,12 @@ func (s *stubClient) ListReviewRequestedPRs(context.Context, string, string, str
 }
 func (s *stubClient) ListUserOrgs(context.Context) ([]GitHubOrg, error) { return nil, nil }
 func (s *stubClient) SearchOrgRepos(context.Context, string, string, int) ([]GitHubRepo, error) {
+	return nil, nil
+}
+func (s *stubClient) ListUserRepos(context.Context, string, int) ([]GitHubRepo, error) {
+	return nil, nil
+}
+func (s *stubClient) ListAccessibleRepos(context.Context, string, int) ([]GitHubRepo, error) {
 	return nil, nil
 }
 func (s *stubClient) ListPRReviews(context.Context, string, string, int) ([]PRReview, error) {
@@ -462,6 +470,179 @@ func TestHttpSubmitReview_SelfApproveReturns422(t *testing.T) {
 	}
 	if resp.Error != ErrSelfApprove.Error() {
 		t.Errorf("expected error %q, got %q", ErrSelfApprove.Error(), resp.Error)
+	}
+}
+
+// listAccessibleReposClient is a per-test client tuned for the
+// /api/v1/github/repos handler tests. Kept separate from the larger
+// stubClient so the existing PR/merge tests above keep their minimal shape.
+type listAccessibleReposClient struct {
+	stubClient
+	repos []GitHubRepo
+}
+
+func (c *listAccessibleReposClient) ListAccessibleRepos(_ context.Context, query string, _ int) ([]GitHubRepo, error) {
+	return filterReposByQuery(c.repos, query), nil
+}
+
+func TestHandleListAccessibleRepos_OK(t *testing.T) {
+	sc := &listAccessibleReposClient{
+		repos: []GitHubRepo{
+			{FullName: "alice/personal", Owner: "alice", Name: "personal", DefaultBranch: "main", Description: "Personal repo", PushedAt: func() *time.Time { t := time.Unix(200, 0); return &t }()},
+			{FullName: "acme/widget", Owner: "acme", Name: "widget", DefaultBranch: "trunk", PushedAt: func() *time.Time { t := time.Unix(100, 0); return &t }()},
+		},
+	}
+	router, _ := setupControllerTest(sc)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/repos?q=&limit=10", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	raw := w.Body.String()
+	var body struct {
+		Repos []GitHubRepo `json:"repos"`
+	}
+	if err := json.NewDecoder(strings.NewReader(raw)).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Repos) != 2 {
+		t.Fatalf("got %d repos, want 2", len(body.Repos))
+	}
+	// Sorted by pushed_at desc → personal (200) first, widget (100) second.
+	if body.Repos[0].FullName != "alice/personal" {
+		t.Errorf("first repo = %q, want alice/personal", body.Repos[0].FullName)
+	}
+	if body.Repos[0].DefaultBranch != "main" {
+		t.Errorf("first repo default_branch = %q, want main", body.Repos[0].DefaultBranch)
+	}
+	if body.Repos[0].Description != "Personal repo" {
+		t.Errorf("first repo description = %q, want Personal repo", body.Repos[0].Description)
+	}
+	if body.Repos[1].FullName != "acme/widget" {
+		t.Errorf("second repo = %q, want acme/widget", body.Repos[1].FullName)
+	}
+	if body.Repos[1].DefaultBranch != "trunk" {
+		t.Errorf("second repo default_branch = %q, want trunk", body.Repos[1].DefaultBranch)
+	}
+	// Empty description must be omitted (omitempty) — verify via the raw JSON
+	// so a future struct-tag regression dropping omitempty is caught.
+	if strings.Contains(raw, `"description":""`) {
+		t.Errorf("expected empty description to be omitted, got body: %s", raw)
+	}
+}
+
+func TestHandleListAccessibleRepos_503_WhenUnavailable(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log := newControllerTestLogger()
+	// nil client triggers ErrNoClient via Service.ListAccessibleRepos.
+	svc := NewService(nil, "none", nil, nil, nil, log)
+	ctrl := NewController(svc, log)
+	router := gin.New()
+	ctrl.RegisterHTTPRoutes(router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/repos", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Error string `json:"error"`
+		Code  string `json:"code"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Code != "github_not_configured" {
+		t.Errorf("code = %q, want github_not_configured", body.Code)
+	}
+	wantMsg := "GitHub is not configured. Install the gh CLI and run 'gh auth login', or add a GITHUB_TOKEN secret."
+	if body.Error != wantMsg {
+		t.Errorf("error = %q, want %q", body.Error, wantMsg)
+	}
+}
+
+// listAccessibleReposEmptyClient: orgs+user repos both empty. Verifies the
+// handler emits the literal `{"repos":[]}` body so a future regression that
+// emits `null` (omitempty + nil slice) is caught.
+func TestHandleListAccessibleRepos_Empty(t *testing.T) {
+	sc := &listAccessibleReposClient{repos: []GitHubRepo{}}
+	router, _ := setupControllerTest(sc)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/repos", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	got := strings.TrimSpace(w.Body.String())
+	if got != `{"repos":[]}` {
+		t.Errorf("body = %q, want %q (regression guard for null repos)", got, `{"repos":[]}`)
+	}
+}
+
+// listAccessibleReposErrClient surfaces an unexpected error from the repo
+// fetch — the handler must map it to a 500 rather than swallowing it.
+type listAccessibleReposErrClient struct {
+	stubClient
+	reposErr error
+}
+
+func (c *listAccessibleReposErrClient) ListAccessibleRepos(context.Context, string, int) ([]GitHubRepo, error) {
+	return nil, c.reposErr
+}
+
+func TestHandleListAccessibleRepos_500_OnUnknownError(t *testing.T) {
+	sc := &listAccessibleReposErrClient{reposErr: errors.New("boom")}
+	router, _ := setupControllerTest(sc)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/repos", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestHandleListAccessibleRepos_PreservesAPIErrorStatus verifies that when the
+// upstream GitHub API returns 401 / 403 / 404, the handler surfaces the same
+// status to the frontend rather than collapsing it into a generic 500. The
+// frontend needs the distinct status to render the right UX (auth re-prompt,
+// permission notice, "not found").
+func TestHandleListAccessibleRepos_PreservesAPIErrorStatus(t *testing.T) {
+	cases := []struct {
+		name       string
+		statusCode int
+	}{
+		{"unauthorized", http.StatusUnauthorized},
+		{"forbidden", http.StatusForbidden},
+		{"not_found", http.StatusNotFound},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sc := &listAccessibleReposErrClient{
+				reposErr: &GitHubAPIError{
+					StatusCode: tc.statusCode,
+					Endpoint:   "/user/repos",
+					Body:       "{}",
+				},
+			}
+			router, _ := setupControllerTest(sc)
+
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/github/repos", nil)
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			if w.Code != tc.statusCode {
+				t.Fatalf("expected %d, got %d: %s", tc.statusCode, w.Code, w.Body.String())
+			}
+		})
 	}
 }
 

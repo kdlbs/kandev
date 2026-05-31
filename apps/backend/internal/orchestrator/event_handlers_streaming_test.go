@@ -115,6 +115,57 @@ func TestHandleSessionModeEvent(t *testing.T) {
 
 		require.Empty(t, eb.events)
 	})
+
+	// Regression for issue #1183: a non-empty mode is persisted to session
+	// metadata (so it survives backend restart / SSR) without clobbering other
+	// keys such as plan_mode.
+	t.Run("persists non-empty mode without clobbering plan_mode", func(t *testing.T) {
+		ctx := context.Background()
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		require.NoError(t, repo.UpdateSessionMetadata(ctx, "s1", map[string]interface{}{"plan_mode": true}))
+
+		eb := &recordingEventBus{}
+		svc := &Service{logger: testLogger(), eventBus: eb, repo: repo}
+
+		svc.handleSessionModeEvent(ctx, &lifecycle.AgentStreamEventPayload{
+			TaskID:    "t1",
+			SessionID: "s1",
+			AgentID:   "a1",
+			Data:      &lifecycle.AgentStreamEventData{CurrentModeID: "acceptEdits"},
+		})
+
+		updated, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		require.Equal(t, "acceptEdits", updated.Metadata[models.SessionMetaKeySessionMode],
+			"session mode must be persisted to metadata")
+		pm, _ := updated.Metadata["plan_mode"].(bool)
+		require.True(t, pm, "plan_mode and other metadata keys must be preserved")
+	})
+
+	// An empty CurrentModeID (agent left a special mode) must not overwrite a
+	// previously-stored sticky mode.
+	t.Run("empty mode does not overwrite stored mode", func(t *testing.T) {
+		ctx := context.Background()
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		require.NoError(t, repo.UpdateSessionMetadata(ctx, "s1",
+			map[string]interface{}{models.SessionMetaKeySessionMode: "acceptEdits"}))
+
+		eb := &recordingEventBus{}
+		svc := &Service{logger: testLogger(), eventBus: eb, repo: repo}
+
+		svc.handleSessionModeEvent(ctx, &lifecycle.AgentStreamEventPayload{
+			TaskID:    "t1",
+			SessionID: "s1",
+			AgentID:   "a1",
+			Data:      &lifecycle.AgentStreamEventData{CurrentModeID: ""},
+		})
+
+		updated, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		require.Equal(t, "acceptEdits", updated.Metadata[models.SessionMetaKeySessionMode])
+	})
 }
 
 // TestToolEventsWakeSessionAndTaskTogether locks in the fix for the
@@ -380,4 +431,11 @@ func TestSetSessionWaitingForInput_WritesOnTransition(t *testing.T) {
 	require.Equal(t, 1, taskRepo.stateWrites["t1"],
 		"setSessionWaitingForInput must write tasks.state on actual transition")
 	require.Equal(t, v1.TaskStateReview, taskRepo.updatedStates["t1"])
+}
+
+func TestSessionStateString(t *testing.T) {
+	require.Equal(t, "", sessionStateString(nil),
+		"nil session must render as empty so trace logs stay clean")
+	require.Equal(t, string(models.TaskSessionStateRunning),
+		sessionStateString(&models.TaskSession{State: models.TaskSessionStateRunning}))
 }

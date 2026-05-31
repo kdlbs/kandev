@@ -41,6 +41,14 @@ func (b *InteractiveRunnerBackend) Stop(ctx context.Context, scopeID, terminalID
 	return b.runner.StopUserShell(ctx, scopeID, terminalID)
 }
 
+// StopScope tears down every PTY registered under a task-environment scope.
+func (b *InteractiveRunnerBackend) StopScope(ctx context.Context, scopeID string) (int, error) {
+	if b.runner == nil {
+		return 0, nil
+	}
+	return b.runner.StopUserShellsForScope(ctx, scopeID)
+}
+
 // IsAlive reports whether the PTY backing (scopeID, terminalID) is currently
 // running.
 func (b *InteractiveRunnerBackend) IsAlive(scopeID, terminalID string) bool {

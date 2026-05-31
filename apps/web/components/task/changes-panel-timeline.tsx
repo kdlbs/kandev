@@ -60,6 +60,19 @@ function TimelineSection({
   "data-testid"?: string;
 }) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
+  // Git data arrives in separate async store updates, so `defaultCollapsed`
+  // (derived from which section is first-visible) can flip after mount. Re-sync
+  // to it whenever it changes — but stop once the user has manually toggled, so
+  // their choice is never clobbered by a later data update. Adjusting state
+  // during render (storing the previous prop in state) is the React-recommended
+  // pattern and avoids both the setState-in-effect and ref-during-render lint
+  // rules.
+  const [userToggled, setUserToggled] = useState(false);
+  const [prevDefaultCollapsed, setPrevDefaultCollapsed] = useState(defaultCollapsed);
+  if (prevDefaultCollapsed !== defaultCollapsed) {
+    setPrevDefaultCollapsed(defaultCollapsed);
+    if (!userToggled) setCollapsed(defaultCollapsed);
+  }
   const canCollapse = collapsible && !!label;
 
   return (
@@ -79,7 +92,10 @@ function TimelineSection({
               <button
                 type="button"
                 className="flex items-center gap-1 text-[11px] font-medium uppercase tracking-wider text-foreground/70 cursor-pointer hover:text-foreground/90"
-                onClick={() => setCollapsed((c) => !c)}
+                onClick={() => {
+                  setUserToggled(true);
+                  setCollapsed((c) => !c);
+                }}
                 aria-expanded={!collapsed}
                 data-testid={`${testId ?? label.toLowerCase()}-collapse-toggle`}
               >
@@ -136,6 +152,8 @@ type CommitsSectionProps = {
   perRepoStatus?: Array<{ repository_name: string; ahead: number }>;
   /** Existing PR URL keyed by repository_name; "" key for single-repo. */
   prByRepo?: Record<string, string | undefined>;
+  /** Initial collapse state. Defaults to collapsed; the panel expands it when it is the first visible section. */
+  defaultCollapsed?: boolean;
 };
 
 // Commits grouping shares the helper above with files — see @/lib/group-by-repo.
@@ -153,6 +171,7 @@ export function CommitsSection({
   repoBaseBranch,
   perRepoStatus,
   prByRepo,
+  defaultCollapsed = true,
 }: CommitsSectionProps) {
   const groups = groupByRepositoryName(commits, (c) => c.repository_name);
   const aheadByRepo = new Map((perRepoStatus ?? []).map((s) => [s.repository_name, s.ahead]));
@@ -179,7 +198,7 @@ export function CommitsSection({
       label="Commits"
       count={commits.length}
       isLast={isLast}
-      defaultCollapsed
+      defaultCollapsed={defaultCollapsed}
       data-testid="commits-section"
       action={sectionAction}
     >
@@ -529,6 +548,8 @@ type PRFilesSectionProps = {
   onOpenDiff: (path: string, options?: OpenDiffOptions) => void;
   /** Maps a repository_name to a human-readable label (used for the per-repo header). */
   repoDisplayName?: (repositoryName: string) => string | undefined;
+  /** Initial collapse state. Defaults to collapsed; the panel expands it when it is the first visible section. */
+  defaultCollapsed?: boolean;
 };
 
 export function PRFilesSection({
@@ -536,6 +557,7 @@ export function PRFilesSection({
   isLast,
   onOpenDiff,
   repoDisplayName,
+  defaultCollapsed = true,
 }: PRFilesSectionProps) {
   return (
     <TimelineSection
@@ -543,7 +565,7 @@ export function PRFilesSection({
       label="PR Changes"
       count={files.length}
       isLast={isLast}
-      defaultCollapsed
+      defaultCollapsed={defaultCollapsed}
       data-testid="pr-changes-section"
     >
       {files.length > 0 && (

@@ -1,0 +1,340 @@
+#!/usr/bin/env bash
+# dev-isolated — launch a parallel, fully isolated kandev instance for
+# debugging, without touching the user's live instance or production data.
+#
+# It auto-picks non-colliding ports (scanning upward from a base, skipping
+# anything in use and always skipping the well-known prod ports), creates a
+# throwaway HOME + KANDEV_HOME_DIR under a mktemp dir (fresh SQLite DB), builds
+# the backend binaries if needed, launches the backend (and optionally the web
+# frontend) with the `dev` profile + mock providers, waits for health, writes a
+# pidfile, and prints the URLs, log paths, and the exact teardown command.
+#
+# A running kandev instance needs more than just the `kandev` binary: the
+# backend spawns `agentctl` to create executions (file/shell ops, local agents),
+# and the dev/mock profile launches `mock-agent`. The `--web` frontend needs
+# `apps/node_modules`. This script ensures all of those exist before launching.
+#
+# Build strategy: when a (re)build is needed we run `make -C apps/backend build`,
+# which builds kandev (with `-tags fts5`) + agentctl + agentctl-linux +
+# mock-agent + acpdbg + winjob with the correct flags/ldflags. A warm
+# (no-source-change) `make build` is ~3s on this machine — cheap enough that the
+# correctness/consistency of the canonical build path wins over a leaner set of
+# explicit `go build` calls.
+#
+# All process stdout+stderr go to log files (run-quiet philosophy) so tailing
+# them never pollutes agent context.
+#
+# Usage:
+#   scripts/dev-isolated [options]
+#
+# Options:
+#   --web                 Also start the Next.js dev frontend (default: backend only)
+#   --backend-port N      Force the backend port (default: auto from base 48429)
+#   --web-port N          Force the web port (default: auto from base 47429)
+#   --agentctl-port N     Force the agentctl base port (default: auto from base 49429)
+#   --no-build            Don't (re)build; require kandev + agentctl + mock-agent to exist
+#   --install             Run `make install` (backend deps + pnpm install + playwright
+#                         browsers) before building/launching — for clean checkouts
+#   --copy-db PATH        Seed the isolated DB from an existing kandev.db (copied,
+#                         never the original) instead of starting empty
+#   --timeout SECONDS     Health-wait timeout (default: 60)
+#   -h, --help            Show this help
+#
+# Teardown (printed again at the end):
+#   scripts/kandev-kill --pidfile <pidfile> --yes
+#
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+BACKEND_DIR="$REPO_ROOT/apps/backend"
+BIN_DIR="$BACKEND_DIR/bin"
+BACKEND_BIN="$BIN_DIR/kandev"
+AGENTCTL_BIN="$BIN_DIR/agentctl"
+MOCK_AGENT_BIN="$BIN_DIR/mock-agent"
+NODE_MODULES="$REPO_ROOT/apps/node_modules"
+
+# The backend binaries a live instance actually needs at runtime:
+#   kandev      — the backend itself
+#   agentctl    — spawned to create executions (file/shell ops, local agents)
+#   mock-agent  — launched by the dev/mock profile in place of a real agent
+REQUIRED_BINS=("$BACKEND_BIN" "$AGENTCTL_BIN" "$MOCK_AGENT_BIN")
+
+# Ports we must never reuse (the user's live instance).
+PROD_BACKEND_PORT=38429
+PROD_WEB_PORT=37429
+PROD_AGENTCTL_PORT=39429
+
+# Isolated defaults — deliberately far from prod.
+BACKEND_BASE=48429
+WEB_BASE=47429
+AGENTCTL_BASE=49429
+
+WANT_WEB=0
+NO_BUILD=0
+DO_INSTALL=0
+COPY_DB=""
+TIMEOUT=60
+FORCE_BACKEND_PORT=""
+FORCE_WEB_PORT=""
+FORCE_AGENTCTL_PORT=""
+
+usage() { sed -n '2,44p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-2}"; }
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --web) WANT_WEB=1; shift ;;
+    --no-build) NO_BUILD=1; shift ;;
+    --install) DO_INSTALL=1; shift ;;
+    --copy-db) COPY_DB="${2:?--copy-db requires a path}"; shift 2 ;;
+    --timeout) TIMEOUT="${2:?--timeout requires seconds}"; shift 2 ;;
+    --backend-port) FORCE_BACKEND_PORT="${2:?}"; shift 2 ;;
+    --web-port) FORCE_WEB_PORT="${2:?}"; shift 2 ;;
+    --agentctl-port) FORCE_AGENTCTL_PORT="${2:?}"; shift 2 ;;
+    -h|--help) usage 0 ;;
+    *) echo "dev-isolated: unknown argument '$1'" >&2; usage 2 ;;
+  esac
+done
+
+# True if a TCP port is currently in use (listening).
+port_in_use() {
+  local port="$1"
+  if command -v ss >/dev/null 2>&1; then
+    ss -tlnH "sport = :$port" 2>/dev/null | grep -q . && return 0 || return 1
+  elif command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN -t >/dev/null 2>&1 && return 0 || return 1
+  fi
+  return 1
+}
+
+# Find a free port at or above `base`, never returning a guarded prod port.
+pick_port() {
+  local base="$1" p="$1"
+  while :; do
+    if [[ "$p" != "$PROD_BACKEND_PORT" && "$p" != "$PROD_WEB_PORT" && "$p" != "$PROD_AGENTCTL_PORT" ]] && ! port_in_use "$p"; then
+      printf '%s\n' "$p"
+      return 0
+    fi
+    p=$((p + 1))
+    if [[ "$p" -gt $((base + 500)) ]]; then
+      echo "dev-isolated: could not find a free port near $base" >&2
+      return 1
+    fi
+  done
+}
+
+BACKEND_PORT="${FORCE_BACKEND_PORT:-$(pick_port "$BACKEND_BASE")}"
+WEB_PORT="${FORCE_WEB_PORT:-$(pick_port "$WEB_BASE")}"
+AGENTCTL_PORT="${FORCE_AGENTCTL_PORT:-$(pick_port "$AGENTCTL_BASE")}"
+
+# Reserve an agentctl instance range above the base for spawned agent procs.
+AGENTCTL_RANGE_BASE=$((AGENTCTL_PORT + 100))
+AGENTCTL_RANGE_MAX=$((AGENTCTL_RANGE_BASE + 99))
+
+# --- Preflight: prerequisites with actionable errors ---
+# `go` is required for any build path (including --install, which builds too).
+if [[ "$NO_BUILD" -ne 1 ]] && ! command -v go >/dev/null 2>&1; then
+  echo "dev-isolated: 'go' not found on PATH — install Go (or activate your toolchain, e.g. \`mise\`) before building." >&2
+  echo "             (Pass --no-build to skip building if the binaries already exist.)" >&2
+  exit 1
+fi
+
+# --- Optional clean-checkout setup ---
+# `make install` pulls backend deps + `pnpm install` + playwright browsers.
+if [[ "$DO_INSTALL" -eq 1 ]]; then
+  echo "dev-isolated: running 'make install' (backend deps + pnpm install + playwright browsers)..."
+  make -C "$REPO_ROOT" install
+  echo "dev-isolated: install complete."
+fi
+
+# --- Ensure the backend binaries a live instance needs ---
+# A running instance needs kandev + agentctl + mock-agent, not just kandev.
+if [[ "$NO_BUILD" -eq 1 ]]; then
+  missing=()
+  for bin in "${REQUIRED_BINS[@]}"; do
+    [[ -x "$bin" ]] || missing+=("$bin")
+  done
+  if [[ "${#missing[@]}" -gt 0 ]]; then
+    echo "dev-isolated: --no-build set but required binaries are missing:" >&2
+    for bin in "${missing[@]}"; do echo "  - $bin" >&2; done
+    echo "             Build them with \`make -C apps/backend build\` (or drop --no-build)." >&2
+    exit 1
+  fi
+else
+  need_build=0
+  for bin in "${REQUIRED_BINS[@]}"; do
+    if [[ ! -x "$bin" ]]; then
+      need_build=1
+      break
+    fi
+  done
+  if [[ "$need_build" -eq 0 ]]; then
+    # Rebuild if any Go source is newer than the OLDEST required binary, so a
+    # source change is picked up even if only one binary lagged behind.
+    oldest_bin="$BACKEND_BIN"
+    for bin in "${REQUIRED_BINS[@]}"; do
+      [[ "$bin" -ot "$oldest_bin" ]] && oldest_bin="$bin"
+    done
+    if [[ -n "$(find "$BACKEND_DIR" -name '*.go' -newer "$oldest_bin" -print -quit 2>/dev/null)" ]]; then
+      need_build=1
+    fi
+  fi
+  if [[ "$need_build" -eq 1 ]]; then
+    echo "dev-isolated: building backend binaries (make -C apps/backend build)..."
+    make -C "$BACKEND_DIR" build
+    echo "dev-isolated: build complete."
+    # Sanity-check the binaries we actually depend on now exist.
+    for bin in "${REQUIRED_BINS[@]}"; do
+      [[ -x "$bin" ]] || { echo "dev-isolated: expected $bin after build, but it is missing" >&2; exit 1; }
+    done
+  fi
+fi
+
+# --- Preflight: web prerequisites ---
+if [[ "$WANT_WEB" -eq 1 && ! -d "$NODE_MODULES" ]]; then
+  echo "dev-isolated: node_modules not found — run \`make install\` first, or pass \`--install\`." >&2
+  exit 1
+fi
+
+# --- Create the isolated home / data dir ---
+TMPDIR_ISO="$(mktemp -d "/tmp/kandev-iso-${BACKEND_PORT}-XXXXXX")"
+HOME_ISO="$TMPDIR_ISO/home"
+KHOME="$HOME_ISO/.kandev"
+DATA_DIR="$KHOME/data"
+mkdir -p "$DATA_DIR"
+
+# Minimal gitconfig so the isolated HOME doesn't prompt for identity.
+cat >"$HOME_ISO/.gitconfig" <<'EOF'
+[user]
+  name = Kandev Debug
+  email = debug@kandev.local
+[commit]
+  gpgsign = false
+[tag]
+  gpgsign = false
+EOF
+
+DB_PATH="$DATA_DIR/kandev.db"
+if [[ -n "$COPY_DB" ]]; then
+  [[ -f "$COPY_DB" ]] || { echo "dev-isolated: --copy-db source not found: $COPY_DB" >&2; exit 1; }
+  cp "$COPY_DB" "$DB_PATH"
+  # Copy WAL/SHM sidecars too if present, so the snapshot is consistent.
+  [[ -f "$COPY_DB-wal" ]] && cp "$COPY_DB-wal" "$DB_PATH-wal"
+  [[ -f "$COPY_DB-shm" ]] && cp "$COPY_DB-shm" "$DB_PATH-shm"
+  echo "dev-isolated: seeded isolated DB from $COPY_DB"
+fi
+
+BACKEND_LOG="$TMPDIR_ISO/backend.log"
+WEB_LOG="$TMPDIR_ISO/web.log"
+PIDFILE="/tmp/kandev-dev-isolated-${BACKEND_PORT}.pid"
+WEB_PIDFILE="/tmp/kandev-dev-isolated-${BACKEND_PORT}.web.pid"
+
+# --- Launch the backend (detached process-group leader, logs to file) ---
+# KANDEV_DEBUG_DEV_MODE=true selects the `dev` profile (mock agent, pprof,
+# feature flags) from profiles.yaml. We also force mock providers so the
+# isolated instance needs no real GitHub/agents.
+echo "dev-isolated: starting backend on :$BACKEND_PORT ..."
+env -i \
+  PATH="$PATH" \
+  HOME="$HOME_ISO" \
+  KANDEV_HOME_DIR="$KHOME" \
+  KANDEV_DATABASE_PATH="$DB_PATH" \
+  KANDEV_SERVER_PORT="$BACKEND_PORT" \
+  KANDEV_WEB_INTERNAL_URL="http://localhost:$WEB_PORT" \
+  KANDEV_AGENT_STANDALONE_PORT="$AGENTCTL_PORT" \
+  AGENTCTL_INSTANCE_PORT_BASE="$AGENTCTL_RANGE_BASE" \
+  AGENTCTL_INSTANCE_PORT_MAX="$AGENTCTL_RANGE_MAX" \
+  KANDEV_DEBUG_DEV_MODE=true \
+  KANDEV_MOCK_AGENT=true \
+  KANDEV_MOCK_GITHUB=true \
+  KANDEV_MOCK_JIRA=true \
+  KANDEV_MOCK_LINEAR=true \
+  KANDEV_LOG_LEVEL="${KANDEV_LOG_LEVEL:-info}" \
+  setsid "$BACKEND_BIN" >"$BACKEND_LOG" 2>&1 &
+BACKEND_PID=$!
+echo "$BACKEND_PID" >"$PIDFILE"
+
+# --- Wait for backend health ---
+BACKEND_URL="http://localhost:$BACKEND_PORT"
+HEALTH_URL="$BACKEND_URL/api/v1/system/health"
+deadline=$(( $(date +%s) + TIMEOUT ))
+healthy=0
+while [[ "$(date +%s)" -lt "$deadline" ]]; do
+  if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
+    echo "dev-isolated: backend exited early. Last log lines:" >&2
+    tail -n 30 "$BACKEND_LOG" >&2 || true
+    rm -f "$PIDFILE"
+    exit 1
+  fi
+  if curl -sf "$HEALTH_URL" >/dev/null 2>&1; then
+    healthy=1
+    break
+  fi
+  sleep 1
+done
+
+if [[ "$healthy" -ne 1 ]]; then
+  echo "dev-isolated: backend did not become healthy within ${TIMEOUT}s. Last log lines:" >&2
+  tail -n 30 "$BACKEND_LOG" >&2 || true
+  kill -TERM -- -"$BACKEND_PID" 2>/dev/null || kill "$BACKEND_PID" 2>/dev/null || true
+  rm -f "$PIDFILE"
+  exit 1
+fi
+
+# --- Optionally launch the web frontend (Next.js dev) ---
+WEB_STARTED=0
+if [[ "$WANT_WEB" -eq 1 ]]; then
+  echo "dev-isolated: starting web (next dev) on :$WEB_PORT ..."
+  env \
+    NEXT_PUBLIC_KANDEV_API_PORT="$BACKEND_PORT" \
+    KANDEV_API_BASE_URL="$BACKEND_URL" \
+    PORT="$WEB_PORT" \
+    HOSTNAME="127.0.0.1" \
+    NEXT_PUBLIC_KANDEV_DEBUG="true" \
+    setsid pnpm -C "$REPO_ROOT/apps" --filter @kandev/web dev >"$WEB_LOG" 2>&1 &
+  WEB_PID=$!
+  echo "$WEB_PID" >"$WEB_PIDFILE"
+
+  WEB_URL="http://localhost:$WEB_PORT"
+  web_deadline=$(( $(date +%s) + TIMEOUT ))
+  web_ready=0
+  while [[ "$(date +%s)" -lt "$web_deadline" ]]; do
+    if ! kill -0 "$WEB_PID" 2>/dev/null; then
+      echo "dev-isolated: web exited early. Last log lines:" >&2
+      tail -n 30 "$WEB_LOG" >&2 || true
+      break
+    fi
+    if curl -sf "$WEB_URL" >/dev/null 2>&1; then
+      web_ready=1
+      break
+    fi
+    sleep 1
+  done
+  [[ "$web_ready" -eq 1 ]] && WEB_STARTED=1
+  if [[ "$WEB_STARTED" -ne 1 ]]; then
+    echo "dev-isolated: WARNING — web did not become ready within ${TIMEOUT}s (backend is fine; see $WEB_LOG)." >&2
+  fi
+fi
+
+# --- Summary ---
+echo
+echo "================ kandev dev-isolated: READY ================"
+echo "  backend URL : $BACKEND_URL   (PID $BACKEND_PID)"
+if [[ "$WEB_STARTED" -eq 1 ]]; then
+  echo "  web URL     : http://localhost:$WEB_PORT"
+elif [[ "$WANT_WEB" -eq 1 ]]; then
+  echo "  web URL     : http://localhost:$WEB_PORT   (NOT ready — check log)"
+else
+  echo "  web URL     : (not started; pass --web to launch the frontend)"
+fi
+echo "  agentctl    : http://localhost:$AGENTCTL_PORT  (range ${AGENTCTL_RANGE_BASE}-${AGENTCTL_RANGE_MAX})"
+echo "  HOME        : $HOME_ISO"
+echo "  KANDEV_HOME : $KHOME"
+echo "  DB          : $DB_PATH"
+echo "  backend log : $BACKEND_LOG"
+[[ "$WANT_WEB" -eq 1 ]] && echo "  web log     : $WEB_LOG"
+echo "  pidfile     : $PIDFILE"
+echo
+echo "  Logs        : scripts/kandev-logs $BACKEND_PORT --export"
+echo "  Teardown    : scripts/kandev-kill --pidfile $PIDFILE --yes"
+echo "==========================================================="

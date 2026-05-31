@@ -84,6 +84,17 @@ type Worktree struct {
 	// detail alongside BaseBranchFallbackWarning.
 	BaseBranchFallbackDetail string `json:"base_branch_fallback_detail,omitempty"`
 
+	// SetupScriptWarning is set when the repository's setup script failed.
+	// Setup script failures are non-fatal: the worktree is kept and the agent
+	// launches normally, but the failure is surfaced as a warning so the user
+	// can fix it. Empty when the script succeeded or no script was configured.
+	SetupScriptWarning string `json:"setup_script_warning,omitempty"`
+
+	// SetupScriptWarningDetail mirrors FetchWarningDetail: a longer message
+	// describing the setup-script failure. Surfaced as collapsible detail
+	// alongside SetupScriptWarning.
+	SetupScriptWarningDetail string `json:"setup_script_warning_detail,omitempty"`
+
 	// CopiedFiles lists the relative paths of files copied from the source
 	// repo into this worktree per the repository's CopyFiles spec. Populated
 	// only on the in-memory record returned by Create — not persisted, since
@@ -162,6 +173,15 @@ type CreateRequest struct {
 
 	// OnSyncProgress receives progress updates for pre-worktree branch sync.
 	OnSyncProgress SyncProgressCallback
+
+	// OnWorktreeCreated, when set, is invoked once the worktree directory has
+	// been created and persisted (git worktree add succeeded) but BEFORE the
+	// per-repo setup script runs. The env preparer uses it to complete the
+	// "Create worktree" UI step so the setup script renders as a distinct,
+	// subsequent step instead of overlapping it. The passed worktree already
+	// carries any base-branch fallback warning. Called synchronously on the
+	// Create goroutine; not invoked when an existing worktree is reused.
+	OnWorktreeCreated func(*Worktree)
 }
 
 // Validate validates the create request.

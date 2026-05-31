@@ -1,7 +1,11 @@
 import type { StoreApi } from "zustand";
+import { createDebugLogger } from "@/lib/debug/log";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import { sessionId, taskId } from "@/lib/types/http";
+import { maybeEmitEmptyTurnNotice } from "@/lib/ws/handlers/empty-turn-notice";
+
+const debug = createDebugLogger("session:turns");
 
 export function registerTurnsHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
@@ -10,6 +14,11 @@ export function registerTurnsHandlers(store: StoreApi<AppState>): WsHandlers {
       if (!payload.session_id) {
         return;
       }
+      debug("turn.started", {
+        sessionId: payload.session_id,
+        task_id: payload.task_id ?? "-",
+        turnId: payload.id,
+      });
       store.getState().addTurn({
         id: payload.id,
         session_id: sessionId(payload.session_id),
@@ -28,6 +37,12 @@ export function registerTurnsHandlers(store: StoreApi<AppState>): WsHandlers {
       if (!payload.session_id || !payload.id) {
         return;
       }
+      debug("turn.completed", {
+        sessionId: payload.session_id,
+        task_id: payload.task_id ?? "-",
+        turnId: payload.id,
+        completedAt: payload.completed_at ?? "-",
+      });
       store
         .getState()
         .completeTurn(
@@ -35,6 +50,8 @@ export function registerTurnsHandlers(store: StoreApi<AppState>): WsHandlers {
           payload.id,
           payload.completed_at || new Date().toISOString(),
         );
+      // Surface a notice when the turn finished with no agent output.
+      maybeEmitEmptyTurnNotice(store, payload);
       // Clear the active turn when it completes
       store.getState().setActiveTurn(payload.session_id, null);
 

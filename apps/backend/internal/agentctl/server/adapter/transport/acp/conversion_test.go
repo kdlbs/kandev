@@ -466,6 +466,39 @@ func TestConvertMessageChunk_TextAssistant(t *testing.T) {
 	}
 }
 
+func TestConvertMessageChunk_PreservesAssistantWhitespaceOnlyText(t *testing.T) {
+	a := newTestAdapter()
+	cases := []string{" ", "\n", "\n\n"}
+
+	for _, text := range cases {
+		result := a.convertMessageChunk("session-1", acp.TextBlock(text), "assistant")
+
+		if result == nil {
+			t.Errorf("expected non-nil result for %q", text)
+			continue
+		}
+		if result.Text != text {
+			t.Errorf("Text = %q, want %q", result.Text, text)
+		}
+	}
+}
+
+func TestConvertMessageChunk_MonitorEnvelopeRemovedLeavesWhitespace_DropsChunk(t *testing.T) {
+	a := newTestAdapter()
+	seedMonitor(t, a, "s1", "t1", "tc-monitor")
+
+	// The envelope is the only non-whitespace content; after stripping it only
+	// "\n\n" remains. Because monitorTextRemoved is true and the remainder is
+	// whitespace-only, the chunk should be suppressed (return nil).
+	chunk := acp.TextBlock(
+		"<task-notification><task-id>t1</task-id><event>x</event></task-notification>\n\n",
+	)
+	ev := a.convertMessageChunk("s1", chunk, "assistant")
+	if ev != nil {
+		t.Errorf("expected nil (envelope stripped to whitespace-only should drop), got %+v", ev)
+	}
+}
+
 func TestConvertMessageChunk_TextUser(t *testing.T) {
 	a := newTestAdapter()
 	cb := acp.TextBlock("Hello from user")

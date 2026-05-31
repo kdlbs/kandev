@@ -180,6 +180,7 @@ type RuntimeConfig struct {
 	ModelFlag       Param  // e.g. NewParam("--model", "{model}")
 	WorkspaceFlag   string // e.g. "--workspace-root"
 	AssumeMcpSse    bool   // Override: assume agent supports SSE MCP servers even if not advertised
+	AssumeMcpHttp   bool   // Override: assume agent supports HTTP MCP servers even if not advertised
 	ProjectSkillDir string // CWD-relative path for project-level skills (e.g. ".claude/skills")
 	UserSkillDir    string // home-relative path for user-level skills (e.g. ".claude/skills")
 }
@@ -224,6 +225,12 @@ func (c SessionConfig) SupportsRecovery() bool {
 // A typo in any one caller (e.g. "cli-flag") silently breaks the seed and
 // filter chain across agents, so the literal lives in exactly one place.
 const PermissionApplyMethodCLIFlag = "cli_flag"
+
+// PermissionKeyAutoApprove is the PermissionSettings map key wired to the
+// profile "Auto approve" toggle (see PermissionValues in buildAgentCommand).
+// Centralised for the same reason as PermissionApplyMethodCLIFlag: a typo in
+// any one agent silently disables its auto-approve flag.
+const PermissionKeyAutoApprove = "auto_approve"
 
 // PermissionSetting defines metadata for a permission setting option.
 type PermissionSetting struct {

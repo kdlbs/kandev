@@ -164,5 +164,23 @@ func (m *Manager) resolveProfileModelAndMode(ctx context.Context, profileID stri
 // MarkReady fires later from handleCompleteEvent — that path is the true turn-end.
 func (m *Manager) initializeACPSession(ctx context.Context, execution *AgentExecution, agentConfig agents.Agent, taskDescription string, attachments []MessageAttachment, mcpServers []agentctltypes.McpServer) error {
 	profileModel, profileMode := m.resolveProfileModelAndMode(ctx, execution.AgentProfileID)
-	return m.sessionManager.InitializeAndPrompt(ctx, execution, agentConfig, taskDescription, attachments, mcpServers, m.MarkBootReady, profileModel, profileMode)
+	mode := m.effectiveSessionMode(ctx, execution, profileMode)
+	return m.sessionManager.InitializeAndPrompt(ctx, execution, agentConfig, taskDescription, attachments, mcpServers, m.MarkBootReady, profileModel, mode)
+}
+
+// effectiveSessionMode prefers a session-level permission mode persisted in the
+// session metadata (session_mode — declared via the set_session_mode workflow
+// action or a user toggle) over the agent profile's default mode. This makes a
+// fresh launch start in the declared mode before the first prompt, rather than
+// reverting to the profile default. Falls back to profileMode when no provider
+// is wired, the lookup fails, or no session mode is set. See issue #1183.
+func (m *Manager) effectiveSessionMode(ctx context.Context, execution *AgentExecution, profileMode string) string {
+	if m.workspaceInfoProvider == nil {
+		return profileMode
+	}
+	info, err := m.workspaceInfoProvider.GetWorkspaceInfoForSession(ctx, execution.TaskID, execution.SessionID)
+	if err != nil || info == nil || info.SessionMode == "" {
+		return profileMode
+	}
+	return info.SessionMode
 }

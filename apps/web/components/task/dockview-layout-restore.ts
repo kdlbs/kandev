@@ -4,6 +4,7 @@ import { useDockviewStore } from "@/lib/state/dockview-store";
 import { applyLayoutFixups } from "@/lib/state/dockview-layout-builders";
 import { isLayoutShapeHealthy } from "@/lib/state/dockview-layout-health";
 import { measureDockviewContainer } from "@/lib/state/dockview-measure";
+import { isEnvScopedDockviewComponent } from "@/lib/state/dockview-env-scoped-components";
 import type { LayoutState } from "@/lib/state/layout-manager";
 import type { AppState } from "@/lib/state/store";
 import { getEnvLayout, getEnvMaximizeState, removeEnvMaximizeState } from "@/lib/local-storage";
@@ -11,21 +12,34 @@ import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
 
 const debug = createDebugLogger("dockview:restore");
 
-// Mirrors LAYOUT_STORAGE_KEY in dockview-layout-setup.ts. Bump in lockstep.
-const LAYOUT_STORAGE_KEY = "dockview-layout-v2";
-
 /* eslint-disable @typescript-eslint/no-explicit-any */
+type SanitizeLayoutOptions =
+  | { stripSessionPanels: true; stripEnvScopedPanels?: boolean; excludeSessionIds?: never }
+  | {
+      stripSessionPanels?: false | undefined;
+      stripEnvScopedPanels?: boolean;
+      excludeSessionIds?: Set<string>;
+    };
+
 function describeSanitizeMode(options: {
   stripSessionPanels?: boolean;
+  stripEnvScopedPanels?: boolean;
   excludeSessionIds?: Set<string>;
 }): string {
+  if (options.stripSessionPanels && options.stripEnvScopedPanels)
+    return "stripSessionsAndEnvScoped";
   if (options.stripSessionPanels) return "stripAllSessions";
+  if (options.stripEnvScopedPanels) return "stripEnvScoped";
   if (options.excludeSessionIds) return "excludeSpecificSessions";
   return "keepAll";
 }
 
 function logSanitizeOutcome(
-  options: { stripSessionPanels?: boolean; excludeSessionIds?: Set<string> },
+  options: {
+    stripSessionPanels?: boolean;
+    stripEnvScopedPanels?: boolean;
+    excludeSessionIds?: Set<string>;
+  },
   totalPanels: Record<string, any>,
   validPanels: Record<string, any>,
   invalidIds: Set<string>,
@@ -42,15 +56,46 @@ function logSanitizeOutcome(
     strippedPanels: Array.from(invalidIds),
   });
 }
+
+function shouldKeepSessionPanel(id: string, options: SanitizeLayoutOptions): boolean {
+  if (options.stripSessionPanels) return false;
+  if (!options.excludeSessionIds) return true;
+
+  // Per-env restore: drop session panels that we know belong to a
+  // different env (a phantom from a previously-deleted task). Sessions
+  // we have no mapping for are kept — they may be a still-loading WS
+  // arrival, and useAutoSessionTab's reconcile will clean them up if
+  // they turn out to be stale.
+  const sid = id.slice("session:".length);
+  return !options.excludeSessionIds.has(sid);
+}
+
+function shouldKeepPanel(
+  id: string,
+  panel: any,
+  validComponents: Set<string>,
+  options: SanitizeLayoutOptions,
+): boolean {
+  const comp = panel.contentComponent;
+
+  // Session panels are scoped to a specific environment; when restoring the
+  // global fallback (no envId yet), they belong to the previous task and
+  // would leak in as duplicate tabs. Strip them in that case. The session
+  // check must happen before component-validity, since session panels are
+  // serialized with contentComponent: "chat" (a valid component) and would
+  // otherwise short-circuit the strip guard.
+  if (id.startsWith("session:")) return shouldKeepSessionPanel(id, options);
+
+  if (options.stripEnvScopedPanels && isEnvScopedDockviewComponent(comp)) return false;
+  return !!(comp && validComponents.has(comp));
+}
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export function sanitizeLayout(
   layout: any,
   validComponents: Set<string>,
-  options:
-    | { stripSessionPanels: true; excludeSessionIds?: never }
-    | { stripSessionPanels?: false | undefined; excludeSessionIds?: Set<string> } = {},
+  options: SanitizeLayoutOptions = {},
 ): any {
   if (!isLayoutShapeHealthy(layout)) {
     debug("sanitizeLayout: layout shape unhealthy, returning null");
@@ -60,32 +105,7 @@ export function sanitizeLayout(
   const invalidIds = new Set<string>();
   const validPanels: Record<string, any> = {};
   for (const [id, panel] of Object.entries(layout.panels)) {
-    const comp = (panel as any).contentComponent;
-    // Session panels are scoped to a specific environment; when restoring the
-    // global fallback (no envId yet), they belong to the previous task and
-    // would leak in as duplicate tabs. Strip them in that case. The session
-    // check must happen before component-validity, since session panels are
-    // serialized with contentComponent: "chat" (a valid component) and would
-    // otherwise short-circuit the strip guard.
-    if (id.startsWith("session:")) {
-      if (options.stripSessionPanels) {
-        invalidIds.add(id);
-      } else if (options.excludeSessionIds) {
-        // Per-env restore: drop session panels that we know belong to a
-        // different env (a phantom from a previously-deleted task). Sessions
-        // we have no mapping for are kept — they may be a still-loading WS
-        // arrival, and useAutoSessionTab's reconcile will clean them up if
-        // they turn out to be stale.
-        const sid = id.slice("session:".length);
-        if (options.excludeSessionIds.has(sid)) {
-          invalidIds.add(id);
-        } else {
-          validPanels[id] = panel;
-        }
-      } else {
-        validPanels[id] = panel;
-      }
-    } else if (comp && validComponents.has(comp)) {
+    if (shouldKeepPanel(id, panel, validComponents, options)) {
       validPanels[id] = panel;
     } else {
       invalidIds.add(id);
@@ -219,33 +239,19 @@ export function tryRestoreLayout(
   validComponents: Set<string>,
   phantomSessionIds?: Set<string>,
 ): boolean {
-  if (currentEnvId) {
-    try {
-      if (tryRestoreEnvLayout(api, currentEnvId, validComponents, phantomSessionIds)) return true;
-    } catch {
-      // fall through to maximize-only / global fallback
-    }
-    if (tryRestoreMaximizeOnly(api, currentEnvId)) return true;
+  // No env yet — the task is still preparing or its session→env mapping hasn't
+  // hydrated. Return false so `onReady` builds the DEFAULT layout instead of
+  // restoring a cross-env "last layout": the global layout key is shared across
+  // tasks, so restoring it here would flash the *previous* task's proportions
+  // while a fresh task prepares. The env's own saved layout is applied later by
+  // `switchEnvLayout` once the env hydrates.
+  if (!currentEnvId) return false;
+  try {
+    if (tryRestoreEnvLayout(api, currentEnvId, validComponents, phantomSessionIds)) return true;
+  } catch {
+    // fall through to maximize-only
   }
-
-  if (!currentEnvId) {
-    try {
-      const saved = localStorage.getItem(LAYOUT_STORAGE_KEY);
-      if (saved) {
-        const layout = sanitizeLayout(JSON.parse(saved), validComponents, {
-          stripSessionPanels: true,
-        });
-        if (!layout) return false;
-        api.fromJSON(layout);
-        useDockviewStore.setState(applyLayoutFixups(api));
-        return true;
-      }
-    } catch {
-      // fall through to default-build
-    }
-  }
-
-  return false;
+  return tryRestoreMaximizeOnly(api, currentEnvId);
 }
 
 /**

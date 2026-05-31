@@ -137,6 +137,15 @@ describe("resolveRuntime", () => {
 
   describe("no runtime found", () => {
     it("throws an actionable error message mentioning install paths", () => {
+      // Ensure require.resolve fails so we reach the "no runtime found" path.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ModuleAny = Module as unknown as { _resolveFilename: any };
+      vi.spyOn(ModuleAny, "_resolveFilename").mockImplementationOnce(() => {
+        const err = new Error("Cannot find module") as Error & { code: string };
+        err.code = "MODULE_NOT_FOUND";
+        throw err;
+      });
+
       let error: Error | null = null;
       try {
         resolveRuntime();

@@ -29,16 +29,6 @@ func (s *ChannelService) CreateComment(ctx context.Context, comment *models.Task
 	return nil
 }
 
-// ListComments returns all comments for a task.
-func (s *ChannelService) ListComments(ctx context.Context, taskID string) ([]*models.TaskComment, error) {
-	return s.repo.ListTaskComments(ctx, taskID)
-}
-
-// DeleteComment deletes a task comment by ID.
-func (s *ChannelService) DeleteComment(ctx context.Context, id string) error {
-	return s.repo.DeleteTaskComment(ctx, id)
-}
-
 // publishCommentCreated emits an OfficeCommentCreated event.
 // If no event bus is configured the call is silently skipped.
 func (s *ChannelService) publishCommentCreated(ctx context.Context, comment *models.TaskComment) {

@@ -10,6 +10,7 @@ import {
   TERMINAL_DEFAULT_ID,
 } from "./constants";
 import { computePinnedMaxPxFor, LAYOUT_PINNED_MIN_PX } from "./caps";
+import { getPinnedWidth } from "./sizing";
 import { setPinnedTarget } from "./pinned-targets";
 
 export type LayoutGroupIds = {
@@ -89,10 +90,49 @@ export function applyLayout(
   // This avoids the "lock to current" ratchet bug where transient container
   // shrinks would permanently pin the sidebar at the smaller size.
   const sv = getRootSplitview(api);
-  configureSidebarPinned(api, state, sv);
-  configureRightPinned(api, state, sv);
+  configureSidebarPinned(api, state, sv, w, pinnedWidths);
+  configureRightPinned(api, state, sv, w, pinnedWidths);
 
   return resolveGroupIds(api);
+}
+
+/** Set the pinned target for a column.
+ *
+ *  Resolve the intended width as `override ?? defaultWidth` — an explicit
+ *  user-resized width if we have one (from `pinnedWidths`), otherwise the
+ *  column's computed default. We resize dockview to that width and pin it as
+ *  the target. We deliberately do NOT fall back to reading `sv.getViewSize`:
+ *  fromJSON can produce a transient clamped/rebalanced size during a layout
+ *  switch (the panel's NEW group mounts with default constraints, or the grid
+ *  is briefly laid out at a narrower width before our setConstraints/api.layout
+ *  settle), and capturing that would pin the column too narrow and then persist
+ *  it — e.g. toggling plan mode off left the right column stuck at the
+ *  transient width instead of its default. `getViewSize` is only a last resort
+ *  when neither an override nor a default is available.
+ */
+function syncPinnedColumnTarget(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sv: any,
+  idx: number,
+  columnId: "sidebar" | "right",
+  override: number | undefined,
+  defaultWidth: number | undefined,
+): void {
+  const target = override !== undefined && override > 0 ? override : defaultWidth;
+  if (target !== undefined && target > 0) {
+    const live = sv?.getViewSize?.(idx);
+    if (typeof live === "number" && live > 0 && Math.abs(live - target) > 1) {
+      try {
+        sv.resizeView(idx, target);
+      } catch {
+        /* dockview rejects unreachable sizes — ignore */
+      }
+    }
+    setPinnedTarget(columnId, target);
+    return;
+  }
+  const live = sv?.getViewSize?.(idx);
+  if (typeof live === "number" && live > 0) setPinnedTarget(columnId, live);
 }
 
 function configureSidebarPinned(
@@ -100,19 +140,28 @@ function configureSidebarPinned(
   state: LayoutState,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   sv: any,
+  viewportWidth: number,
+  pinnedWidths: Map<string, number>,
 ): void {
   const sidebarCol = state.columns.find((c) => c.id === "sidebar");
   const sb = api.getPanel("sidebar");
   if (!sb) return;
   sb.group.locked = SIDEBAR_LOCK;
   sb.group.header.hidden = false;
+  // Use the measured dockview width (passed via `applyLayout`'s `totalWidth`)
+  // rather than letting `computePinnedMaxPxFor` fall back to `window.innerWidth`.
+  // The window-derived path is racy during a layout toggle: a stale
+  // `innerWidth` of ~601 produces cap=301 (= 601 - VIEWPORT_RESERVE_PX), and
+  // setConstraints({max:301}) then squeezes a 430px sidebar down to 301 —
+  // reproducible as the rare `pane-resize-sidebar.spec.ts:41` failure in CI.
+  const cap = sidebarCol?.maxWidth ?? computePinnedMaxPxFor("sidebar", viewportWidth);
   sb.group.api.setConstraints({
-    maximumWidth: sidebarCol?.maxWidth ?? computePinnedMaxPxFor("sidebar"),
+    maximumWidth: cap,
     minimumWidth: LAYOUT_PINNED_MIN_PX,
   });
   if (!sidebarCol) return;
-  const live = sv?.getViewSize?.(0);
-  if (typeof live === "number" && live > 0) setPinnedTarget("sidebar", live);
+  const defaultWidth = getPinnedWidth(sidebarCol, viewportWidth, undefined);
+  syncPinnedColumnTarget(sv, 0, "sidebar", pinnedWidths.get("sidebar"), defaultWidth);
 }
 
 function configureRightPinned(
@@ -120,15 +169,19 @@ function configureRightPinned(
   state: LayoutState,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   sv: any,
+  viewportWidth: number,
+  pinnedWidths: Map<string, number>,
 ): void {
   for (let i = 0; i < state.columns.length; i++) {
     const col = state.columns[i];
     if (col.id === "sidebar" || !col.pinned) continue;
-    const cap = col.maxWidth ?? computePinnedMaxPxFor(col.id);
+    // Same rationale as `configureSidebarPinned`: derive the cap from the
+    // measured dockview width, not `window.innerWidth`.
+    const cap = col.maxWidth ?? computePinnedMaxPxFor(col.id, viewportWidth);
     applyConstraintsToAllPanelGroups(api, col, cap);
     if (col.id !== "right") continue;
-    const live = sv?.getViewSize?.(i);
-    if (typeof live === "number" && live > 0) setPinnedTarget("right", live);
+    const defaultWidth = getPinnedWidth(col, viewportWidth, undefined);
+    syncPinnedColumnTarget(sv, i, "right", pinnedWidths.get("right"), defaultWidth);
   }
 }
 

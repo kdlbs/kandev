@@ -83,13 +83,6 @@ function useProfileAndNameHandlers(fs: DialogFormState) {
     },
     [fs],
   );
-  const handleGitHubBranchChange = useCallback(
-    (value: string) => {
-      fs.setGitHubBranch(value);
-      setLocalStorage(STORAGE_KEYS.LAST_BRANCH, value);
-    },
-    [fs],
-  );
   const handleWorkflowChange = useCallback(
     (value: string) => fs.setSelectedWorkflowId(value),
     [fs],
@@ -98,27 +91,28 @@ function useProfileAndNameHandlers(fs: DialogFormState) {
     handleAgentProfileChange,
     handleExecutorProfileChange,
     handleTaskNameChange,
-    handleGitHubBranchChange,
     handleWorkflowChange,
   };
 }
 
 function useGitHubAndFreshBranchHandlers(fs: DialogFormState) {
   /**
-   * Toggles between "repo chips" mode and "GitHub URL" mode. URL mode
-   * replaces the chip row with a single URL input; flipping back restores
-   * the chip flow with whatever rows were already there.
+   * Toggles between "repo chips" mode and "GitHub Remote (URL)" mode. URL mode
+   * replaces the chip row with a URL input; flipping back leaves
+   * `remoteRepos` alone (toggle-back is non-destructive — Task 4 spec). The
+   * seed effect in state.ts inserts a single empty row on the first toggle
+   * into Remote mode.
    */
-  const handleToggleGitHubUrl = useCallback(() => {
-    const next = !fs.useGitHubUrl;
-    fs.setUseGitHubUrl(next);
-    if (!next) {
-      fs.setGitHubUrl("");
-      fs.setGitHubBranches([]);
-      fs.setGitHubUrlError(null);
-      fs.setGitHubPrHeadBranch(null);
-    }
-    fs.setGitHubBranch("");
+  const handleToggleRemote = useCallback(() => {
+    const next = !fs.useRemote;
+    fs.setUseRemote(next);
+    fs.setGitHubUrlError(null);
+    // Remote and no-repository are mutually exclusive source modes. Without
+    // this, the user could land on both true at once (toggle no-repo on, then
+    // toggle Remote on) and the submit gate's mode-aware checks would produce
+    // confusing results. Mirror the no-repo handler which already clears
+    // useRemote when flipping the other way.
+    if (next) fs.setNoRepository(false);
     clearFreshBranch(fs);
   }, [fs]);
 
@@ -132,29 +126,16 @@ function useGitHubAndFreshBranchHandlers(fs: DialogFormState) {
     [fs],
   );
 
-  const handleGitHubUrlChange = useCallback(
-    (value: string) => {
-      fs.setGitHubUrl(value);
-      fs.setGitHubBranch("");
-      fs.setGitHubBranches([]);
-      fs.setGitHubUrlError(null);
-      fs.setGitHubPrHeadBranch(null);
-    },
-    [fs],
-  );
-
   /**
    * Toggles "no repository" mode. Replaces the chip row with a folder picker.
-   * Clears the URL-mode state and the workspace_path so flipping back returns
-   * the user to a clean slate.
+   * Clears the URL-mode flag and the workspace_path so flipping back returns
+   * the user to a clean slate (the remoteRepos array itself is preserved).
    */
   const handleToggleNoRepository = useCallback(() => {
     const next = !fs.noRepository;
     fs.setNoRepository(next);
     if (next) {
-      fs.setUseGitHubUrl(false);
-      fs.setGitHubUrl("");
-      fs.setGitHubBranch("");
+      fs.setUseRemote(false);
       // Clear the executor selection so the auto-fill effect re-picks a
       // non-worktree default (worktree is unworkable in no-repo mode).
       fs.setExecutorId("");
@@ -172,9 +153,8 @@ function useGitHubAndFreshBranchHandlers(fs: DialogFormState) {
   );
 
   return {
-    handleToggleGitHubUrl,
+    handleToggleRemote,
     handleToggleFreshBranch,
-    handleGitHubUrlChange,
     handleToggleNoRepository,
     handleWorkspacePathChange,
   };

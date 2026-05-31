@@ -25,6 +25,19 @@ const FNM_LAUNCHER: LauncherInfo = {
   kind: "npm",
 };
 
+// A Homebrew launcher whose floating shim has been resolved. nodePath/cliEntry
+// still point at the versioned Cellar paths (as captured at install time), but
+// shimPath is the version-independent `<prefix>/bin/kandev` symlink that
+// survives `brew upgrade`. See issue #1162.
+const SHIM_LAUNCHER: LauncherInfo = {
+  nodePath: "/home/linuxbrew/.linuxbrew/Cellar/node/26.0.0/bin/node",
+  cliEntry: "/home/linuxbrew/.linuxbrew/Cellar/kandev/0.52.0/libexec/cli/bin/cli.js",
+  kind: "homebrew",
+  bundleDir: "/home/linuxbrew/.linuxbrew/Cellar/kandev/0.52.0/libexec",
+  version: "0.52.0",
+  shimPath: "/home/linuxbrew/.linuxbrew/bin/kandev",
+};
+
 describe("renderSystemdUnit", () => {
   it("renders a user unit with absolute paths and --headless", () => {
     const unit = renderSystemdUnit({
@@ -51,8 +64,18 @@ describe("renderSystemdUnit", () => {
       mode: "user",
     });
     expect(unit).toMatch(
-      /^Environment=PATH=%h\/\.local\/bin:\/usr\/local\/bin:\/usr\/bin:\/bin:\/opt\/homebrew\/bin:\/home\/linuxbrew\/\.linuxbrew\/bin$/m,
+      /^Environment=PATH=%h\/\.local\/bin:%h\/\.bun\/bin:\/usr\/local\/bin:\/usr\/bin:\/bin:\/opt\/homebrew\/bin:\/home\/linuxbrew\/\.linuxbrew\/bin$/m,
     );
+  });
+
+  it("includes %h/.bun/bin in PATH for user-mode units so Bun-global agent CLIs (e.g. omp) resolve", () => {
+    const unit = renderSystemdUnit({
+      launcher: NPM_LAUNCHER,
+      homeDir: "/home/alice/.kandev",
+      logDir: "/home/alice/.kandev/logs",
+      mode: "user",
+    });
+    expect(unit).toContain("%h/.bun/bin");
   });
 
   it("omits %h/.local/bin from PATH for system-mode units", () => {
@@ -109,7 +132,7 @@ describe("renderSystemdUnit", () => {
       mode: "user",
     });
     expect(unit).toContain(
-      "Environment=PATH=/home/alice/.local/share/fnm/node-versions/v24.14.0/installation/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin",
+      "Environment=PATH=/home/alice/.local/share/fnm/node-versions/v24.14.0/installation/bin:%h/.local/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin",
     );
   });
 
@@ -122,7 +145,7 @@ describe("renderSystemdUnit", () => {
     });
     // /usr/local/bin already in SYSTEMD_USER_PATH — dirname(nodePath) must not double it.
     expect(unit).toContain(
-      "Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin",
+      "Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin",
     );
     expect(unit).not.toContain("/usr/local/bin:/usr/local/bin");
   });
@@ -156,7 +179,7 @@ describe("renderSystemdUnit", () => {
     });
     expect(unit).not.toMatch(/^Environment=PATH=\.:/m);
     expect(unit).toContain(
-      "Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin",
+      "Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin",
     );
   });
 
@@ -174,6 +197,70 @@ describe("renderSystemdUnit", () => {
     expect(unit).toContain(
       `ExecStart="/Library/Application Support/node" "/Library/Application Support/kandev/cli.js" --headless`,
     );
+  });
+
+  // Regression: https://github.com/kdlbs/kandev/issues/1162 — the unit must not
+  // bake version-pinned Cellar paths for Homebrew installs, or it crash-loops
+  // after `brew upgrade` deletes the old Cellar dir.
+  it("uses the floating Homebrew shim in ExecStart when shimPath is set", () => {
+    const unit = renderSystemdUnit({
+      launcher: SHIM_LAUNCHER,
+      homeDir: "/home/alice/.kandev",
+      logDir: "/home/alice/.kandev/logs",
+      mode: "user",
+    });
+    expect(unit).toContain("ExecStart=/home/linuxbrew/.linuxbrew/bin/kandev --headless");
+    // No version-pinned Cellar paths anywhere in the unit — this single check
+    // covers both the kandev cli.js path and the versioned node bin dir, since
+    // any `/Cellar/node/...` or `/Cellar/kandev/...` path contains "/Cellar/".
+    expect(unit).not.toContain("/Cellar/");
+  });
+
+  it("drops KANDEV_BUNDLE_DIR / KANDEV_VERSION and the versioned node bin dir when using the shim", () => {
+    const unit = renderSystemdUnit({
+      launcher: SHIM_LAUNCHER,
+      homeDir: "/home/alice/.kandev",
+      logDir: "/home/alice/.kandev/logs",
+      mode: "user",
+    });
+    expect(unit).not.toContain("KANDEV_BUNDLE_DIR");
+    expect(unit).not.toContain("KANDEV_VERSION");
+    // PATH must fall back to the static base path, not the versioned Cellar node
+    // bin. The shim's own bin dir (/home/linuxbrew/.linuxbrew/bin) is already in
+    // the base path, so it is not duplicated.
+    expect(unit).toContain(
+      "Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin",
+    );
+  });
+
+  it("keeps versioned node + cli.js ExecStart for npm installs (no shim)", () => {
+    const unit = renderSystemdUnit({
+      launcher: NPM_LAUNCHER,
+      homeDir: "/home/alice/.kandev",
+      logDir: "/home/alice/.kandev/logs",
+      mode: "user",
+    });
+    expect(unit).toContain(
+      "ExecStart=/usr/local/bin/node /usr/local/lib/node_modules/kandev/bin/cli.js --headless",
+    );
+  });
+
+  it("prepends the shim's bin dir to PATH for a custom Homebrew prefix not in the base PATH", () => {
+    const unit = renderSystemdUnit({
+      launcher: {
+        nodePath: "/home/me/.brew/Cellar/node/26.0.0/bin/node",
+        cliEntry: "/home/me/.brew/Cellar/kandev/0.52.0/libexec/cli/bin/cli.js",
+        kind: "homebrew",
+        shimPath: "/home/me/.brew/bin/kandev",
+      },
+      homeDir: "/home/me/.kandev",
+      logDir: "/home/me/.kandev/logs",
+      mode: "user",
+    });
+    // Custom prefix's bin dir is prepended so npm/npx resolve, even though it
+    // isn't one of the hardcoded default prefixes.
+    expect(unit).toContain("Environment=PATH=/home/me/.brew/bin:%h/.local/bin:%h/.bun/bin:");
+    expect(unit).not.toContain("/Cellar/");
   });
 });
 
@@ -207,7 +294,7 @@ describe("renderLaunchdPlist", () => {
       mode: "user",
     });
     expect(plist).toMatch(
-      /<key>PATH<\/key>\s*<string>\/Users\/alice\/\.volta\/tools\/image\/node\/24\.14\.0\/bin:[^<]+\/\.local\/bin:\/opt\/homebrew\/bin:\/usr\/local\/bin:\/usr\/bin:\/bin<\/string>/,
+      /<key>PATH<\/key>\s*<string>\/Users\/alice\/\.volta\/tools\/image\/node\/24\.14\.0\/bin:[^<]+\/\.local\/bin:[^<]+\/\.bun\/bin:\/opt\/homebrew\/bin:\/usr\/local\/bin:\/usr\/bin:\/bin<\/string>/,
     );
   });
 
@@ -220,7 +307,7 @@ describe("renderLaunchdPlist", () => {
     });
     // /opt/homebrew/bin already in LAUNCHD_USER_PATH — must not be doubled.
     expect(plist).toMatch(
-      /<key>PATH<\/key>\s*<string>[^<]+\/\.local\/bin:\/opt\/homebrew\/bin:\/usr\/local\/bin:\/usr\/bin:\/bin<\/string>/,
+      /<key>PATH<\/key>\s*<string>[^<]+\/\.local\/bin:[^<]+\/\.bun\/bin:\/opt\/homebrew\/bin:\/usr\/local\/bin:\/usr\/bin:\/bin<\/string>/,
     );
     expect(plist).not.toContain("/opt/homebrew/bin:/opt/homebrew/bin");
   });
@@ -233,8 +320,18 @@ describe("renderLaunchdPlist", () => {
       mode: "user",
     });
     expect(plist).toMatch(
-      /<key>PATH<\/key>\s*<string>[^<]+\/\.local\/bin:\/opt\/homebrew\/bin:\/usr\/local\/bin:\/usr\/bin:\/bin<\/string>/,
+      /<key>PATH<\/key>\s*<string>[^<]+\/\.local\/bin:[^<]+\/\.bun\/bin:\/opt\/homebrew\/bin:\/usr\/local\/bin:\/usr\/bin:\/bin<\/string>/,
     );
+  });
+
+  it("includes $HOME/.bun/bin in PATH for user-mode plists so Bun-global agent CLIs (e.g. omp) resolve", () => {
+    const plist = renderLaunchdPlist({
+      launcher: NPM_LAUNCHER,
+      homeDir: "/Users/alice/.kandev",
+      logDir: "/Users/alice/.kandev/logs",
+      mode: "user",
+    });
+    expect(plist).toMatch(/<key>PATH<\/key>\s*<string>[^<]*\/\.bun\/bin:/);
   });
 
   it("prepends node bin dir for system-mode LaunchDaemons too", () => {
@@ -281,7 +378,7 @@ describe("renderLaunchdPlist", () => {
     });
     expect(plist).not.toMatch(/<key>PATH<\/key>\s*<string>\.:/);
     expect(plist).toMatch(
-      /<key>PATH<\/key>\s*<string>[^<]+\/\.local\/bin:\/opt\/homebrew\/bin:\/usr\/local\/bin:\/usr\/bin:\/bin<\/string>/,
+      /<key>PATH<\/key>\s*<string>[^<]+\/\.local\/bin:[^<]+\/\.bun\/bin:\/opt\/homebrew\/bin:\/usr\/local\/bin:\/usr\/bin:\/bin<\/string>/,
     );
   });
 
@@ -322,7 +419,7 @@ describe("renderLaunchdPlist", () => {
     // The whole assignment must be wrapped, not just the value.
     expect(unit).toContain('Environment="KANDEV_HOME_DIR=/home/john doe/.kandev"');
     // PATH always contains colons but no spaces — should NOT be quoted.
-    expect(unit).toMatch(/^Environment=PATH=%h\/\.local\/bin:\/usr\/local\/bin/m);
+    expect(unit).toMatch(/^Environment=PATH=%h\/\.local\/bin:%h\/\.bun\/bin:\/usr\/local\/bin/m);
   });
 
   it("escapes backslash + double-quote in Environment= and ExecStart values", () => {
@@ -363,5 +460,20 @@ describe("renderLaunchdPlist", () => {
       mode: "user",
     });
     expect(plist).not.toContain("<key>UserName</key>");
+  });
+
+  // Regression: https://github.com/kdlbs/kandev/issues/1162
+  it("uses the floating Homebrew shim in ProgramArguments when shimPath is set", () => {
+    const plist = renderLaunchdPlist({
+      launcher: SHIM_LAUNCHER,
+      homeDir: "/Users/alice/.kandev",
+      logDir: "/Users/alice/.kandev/logs",
+      mode: "user",
+    });
+    expect(plist).toContain("<string>/home/linuxbrew/.linuxbrew/bin/kandev</string>");
+    expect(plist).toContain("<string>--headless</string>");
+    expect(plist).not.toContain("/Cellar/");
+    expect(plist).not.toContain("KANDEV_BUNDLE_DIR");
+    expect(plist).not.toContain("KANDEV_VERSION");
   });
 });

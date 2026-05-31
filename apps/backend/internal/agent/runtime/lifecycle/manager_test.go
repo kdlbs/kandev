@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -175,6 +176,31 @@ func newTestRegistry() *registry.Registry {
 	reg := registry.NewRegistry(log)
 	reg.LoadDefaults()
 	return reg
+}
+
+var testStopChClosers sync.Map
+
+func closeStopChOnce(stopCh chan struct{}) {
+	closer, _ := testStopChClosers.LoadOrStore(stopCh, &sync.Once{})
+	closer.(*sync.Once).Do(func() { close(stopCh) })
+}
+
+func cleanupManagerStopCh(t *testing.T, mgr *Manager) {
+	t.Helper()
+	t.Cleanup(func() {
+		closeStopChOnce(mgr.stopCh)
+		if mgr.streamManager != nil {
+			mgr.streamManager.Wait()
+		}
+	})
+}
+
+func cleanupStreamManager(t *testing.T, stopCh chan struct{}, streamMgr *StreamManager) {
+	t.Helper()
+	t.Cleanup(func() {
+		closeStopChOnce(stopCh)
+		streamMgr.Wait()
+	})
 }
 
 // MockCredentialsManager implements CredentialsManager for testing

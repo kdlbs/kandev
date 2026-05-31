@@ -237,7 +237,7 @@ func TestLaunch_PublishesPrepareCompletedAfterRuntimeProgress(t *testing.T) {
 	)
 	mgr.preparerRegistry = NewPreparerRegistry(log)
 	mgr.preparerRegistry.Register(models.ExecutorTypeLocalDocker, &progressPreparer{})
-	t.Cleanup(func() { close(mgr.stopCh) })
+	cleanupManagerStopCh(t, mgr)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -506,7 +506,7 @@ func TestLaunch_RaceRollback(t *testing.T) {
 		ExecutorFallbackWarn, "", log,
 	)
 	mgr.dataDir = t.TempDir()
-	t.Cleanup(func() { close(mgr.stopCh) })
+	cleanupManagerStopCh(t, mgr)
 
 	req := &LaunchRequest{
 		TaskID:         "task-1",
@@ -571,7 +571,7 @@ func TestLaunch_PersistsDockerRuntimeSecrets(t *testing.T) {
 	)
 	mgr.SetSecretStore(store)
 	mgr.dataDir = t.TempDir()
-	t.Cleanup(func() { close(mgr.stopCh) })
+	cleanupManagerStopCh(t, mgr)
 
 	execution, err := mgr.Launch(context.Background(), &LaunchRequest{
 		TaskID:         "task-1",

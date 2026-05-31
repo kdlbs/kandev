@@ -2,6 +2,54 @@
 
 All notable changes to Kandev.
 
+## 0.53.0 - 2026-05-29
+
+### Features
+
+- persist PR-merged banner dismissal in sessionStorage ([#1129](https://github.com/kdlbs/kandev/pull/1129))
+- move queued chip into chat status bar row ([#1127](https://github.com/kdlbs/kandev/pull/1127))
+- show executor-specific cleanup details in task delete/archive dialog ([#1103](https://github.com/kdlbs/kandev/pull/1103))
+- stop filename squeeze on changes-panel row hover ([#1114](https://github.com/kdlbs/kandev/pull/1114))
+- normalize /gitlab page to match /github layout ([#1082](https://github.com/kdlbs/kandev/pull/1082))
+
+### Bug Fixes
+
+- honor default dockview widths on task open ([#1136](https://github.com/kdlbs/kandev/pull/1136))
+- inherit parent workspace for subtasks (UI + MCP) ([#1131](https://github.com/kdlbs/kandev/pull/1131))
+- stop changes panel from showing stale or flickering content ([#1128](https://github.com/kdlbs/kandev/pull/1128))
+- repair worktree state and prompt persistence on resume ([#1121](https://github.com/kdlbs/kandev/pull/1121))
+- allow IDLE office sessions to accept follow-up prompts ([#1119](https://github.com/kdlbs/kandev/pull/1119))
+- show human-readable title and details in permission prompts ([#1101](https://github.com/kdlbs/kandev/pull/1101))
+- dockview, sprite, auth, and CLI db backup improvements ([#1075](https://github.com/kdlbs/kandev/pull/1075))
+- improve UX for subtasks with repo setup scripts ([#1105](https://github.com/kdlbs/kandev/pull/1105))
+- avoid trailing-context crash in multi-file diff panel ([#1097](https://github.com/kdlbs/kandev/pull/1097))
+- support model switching for passthrough sessions ([#1100](https://github.com/kdlbs/kandev/pull/1100))
+- use official cursor CLI install command in InstallScript() ([#1099](https://github.com/kdlbs/kandev/pull/1099))
+- drain orphaned queued messages on agent boot ready ([#1096](https://github.com/kdlbs/kandev/pull/1096))
+- restrict branch/dir name sanitizers to ASCII alphanumerics ([#1095](https://github.com/kdlbs/kandev/pull/1095))
+- honor base_branch for same-repo subtasks via MCP ([#1093](https://github.com/kdlbs/kandev/pull/1093))
+- always allow expanding tool execute to reveal full command ([#1086](https://github.com/kdlbs/kandev/pull/1086))
+- force fresh git status on session subscribe ([#1092](https://github.com/kdlbs/kandev/pull/1092))
+- keep cancelled office turns promptable instead of parking IDLE ([#1088](https://github.com/kdlbs/kandev/pull/1088))
+- drain stuck auto-start prompts after step transitions ([#1087](https://github.com/kdlbs/kandev/pull/1087))
+- wire MCP config into CLI passthrough ([#1078](https://github.com/kdlbs/kandev/pull/1078))
+- group sidebar tasks by real state ([#1077](https://github.com/kdlbs/kandev/pull/1077))
+- remove duplicate breadcrumbs and system sidebar badges ([#1080](https://github.com/kdlbs/kandev/pull/1080))
+- wire permission approval UI for Kandev MCP tools ([#1037](https://github.com/kdlbs/kandev/pull/1037)) by @luancm
+
+### Refactoring
+
+- split terminal_handler.go into pumps/sessions/messages ([#1056](https://github.com/kdlbs/kandev/pull/1056))
+- split sqlite/base.go and add session batch loader ([#1058](https://github.com/kdlbs/kandev/pull/1058))
+- split manager.go into per-concern files ([#1055](https://github.com/kdlbs/kandev/pull/1055))
+- split service.go into domain subfiles ([#1053](https://github.com/kdlbs/kandev/pull/1053))
+- split adapter.go into per-concern files ([#1054](https://github.com/kdlbs/kandev/pull/1054))
+- classify errors via sentinels instead of substring matches ([#1057](https://github.com/kdlbs/kandev/pull/1057))
+
+### Documentation
+
+- note IS_DEBUG runs under vitest in debug-logs skill ([#1137](https://github.com/kdlbs/kandev/pull/1137))
+
 ## 0.52.0 - 2026-05-25
 
 ### Features

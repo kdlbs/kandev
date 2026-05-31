@@ -341,6 +341,11 @@ func (a *lifecycleAdapter) SetSessionModelBySessionID(ctx context.Context, sessi
 	return a.mgr.SetSessionModelBySessionID(ctx, sessionID, modelID)
 }
 
+// SetSessionModeBySessionID applies a session permission mode via ACP session/set_mode.
+func (a *lifecycleAdapter) SetSessionModeBySessionID(ctx context.Context, sessionID, modeID string) error {
+	return a.mgr.SetSessionModeBySessionID(ctx, sessionID, modeID)
+}
+
 // RespondToPermissionBySessionID sends a response to a permission request for a session
 func (a *lifecycleAdapter) RespondToPermissionBySessionID(ctx context.Context, sessionID, pendingID, optionID string, cancelled bool) error {
 	return a.mgr.RespondToPermissionBySessionID(sessionID, pendingID, optionID, cancelled)

@@ -30,26 +30,3 @@ func Detached(parent context.Context, stopCh <-chan struct{}, timeout time.Durat
 
 	return ctx, cancel
 }
-
-// DetachedWithValues creates a detached context that copies deadline-insensitive values
-// from the parent context while starting fresh with no deadline.
-// Use sparingly - most values should be passed explicitly.
-func DetachedWithValues(parent context.Context, stopCh <-chan struct{}, timeout time.Duration) (context.Context, context.CancelFunc) {
-	var ctx context.Context
-	var cancel context.CancelFunc
-	if timeout > 0 {
-		ctx, cancel = context.WithTimeout(context.Background(), timeout)
-	} else {
-		ctx, cancel = context.WithCancel(context.Background())
-	}
-
-	go func() {
-		select {
-		case <-stopCh:
-			cancel()
-		case <-ctx.Done():
-		}
-	}()
-
-	return ctx, cancel
-}

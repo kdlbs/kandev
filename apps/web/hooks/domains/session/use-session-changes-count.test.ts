@@ -35,6 +35,7 @@ function setStore(opts: {
     sessionCommits: {
       byEnvironmentId: opts.commitsByEnvironmentId ?? {},
       loading: {} as Record<string, boolean>,
+      refetchTrigger: {} as Record<string, number>,
     },
     connection: { status: "disconnected" },
     setSessionCommits: vi.fn(),

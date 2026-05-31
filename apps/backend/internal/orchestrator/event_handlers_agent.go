@@ -7,6 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -132,6 +133,12 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 			zap.String("session_id", data.SessionID))
 		return
 	}
+	if s.isCancelInFlight(data.SessionID) {
+		s.logger.Debug("ignoring agent.boot_ready while cancel is in progress",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID))
+		return
+	}
 
 	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
 	if err != nil {
@@ -179,7 +186,7 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 	// on the queue until the user manually sends another message. After the
 	// agent has booted and the session is back to WAITING_FOR_INPUT it's safe
 	// to dispatch any pending message.
-	s.drainQueuedMessageAfterTransition(ctx, data.SessionID)
+	s.drainQueuedMessageForPromptableSession(ctx, data.SessionID)
 }
 
 // handleAgentReady handles turn-end ready events: the agent finished processing
@@ -196,6 +203,13 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 
 	if s.isSessionResetInProgress(data.SessionID) {
 		s.logger.Debug("ignoring agent.ready while session reset is in progress",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("agent_execution_id", data.AgentExecutionID))
+		return
+	}
+	if s.isCancelInFlight(data.SessionID) {
+		s.logger.Debug("ignoring agent.ready while cancel is in progress",
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID),
 			zap.String("agent_execution_id", data.AgentExecutionID))
@@ -222,6 +236,10 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 			zap.String("session_state", string(session.State)))
 		return
 	}
+
+	// A turn completed successfully — clear any transient retry budget so a
+	// later, unrelated provider overload starts its backoff fresh at attempt 1.
+	s.resetTransientRetry(data.SessionID)
 
 	// Complete the current turn
 	s.completeTurnForSession(ctx, data.SessionID)
@@ -328,8 +346,14 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 		}
 	}
 
-	// Create user message for the queued message (so it appears in chat history)
-	if s.messageCreator != nil {
+	// Create user message for the queued message (so it appears in chat history).
+	// Skip when the queued metadata is tagged user_message_recorded — that means
+	// autoStartStepPrompt already inserted the chat row via recordAutoStartMessage
+	// before queueing (the post-recordAutoStartMessage retry branches). Recording
+	// here would produce the duplicate user message observed when a workflow
+	// auto-start failed transiently and the queue drained on boot_ready.
+	alreadyRecorded, _ := queuedMsg.Metadata[metaKeyUserMessageRecorded].(bool)
+	if s.messageCreator != nil && !alreadyRecorded {
 		turnID := s.getActiveTurnID(queuedMsg.SessionID)
 		if turnID == "" {
 			// Start a new turn if needed
@@ -351,6 +375,10 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 				zap.Error(err))
 			// Continue anyway - the prompt should still be sent
 		}
+	} else if s.messageCreator != nil && alreadyRecorded {
+		s.logger.Debug("skipping CreateUserMessage for queued workflow auto-start; already recorded before queueing",
+			zap.String("session_id", queuedMsg.SessionID),
+			zap.String("queue_id", queuedMsg.ID))
 	}
 
 	// Process on_turn_start before sending the queued prompt, just like
@@ -369,7 +397,7 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 			zap.String("queue_id", queuedMsg.ID),
 			zap.Error(err))
 
-		if isAgentPromptInProgressError(err) || isTransientPromptError(err) || isSessionResetInProgressError(err) {
+		if isSessionBusyError(err) || isTransientPromptError(err) || isSessionResetInProgressError(err) {
 			s.logger.Warn("queued message execution failed transiently; requeueing",
 				zap.String("session_id", callerSessionID),
 				zap.String("task_id", queuedMsg.TaskID),
@@ -396,6 +424,9 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),
 		zap.String("agent_execution_id", data.AgentExecutionID))
+
+	// A successful completion clears any transient retry budget for the session.
+	s.resetTransientRetry(data.SessionID)
 
 	// Update scheduler and remove from queue
 	s.scheduler.HandleTaskCompleted(data.TaskID, true)
@@ -445,6 +476,19 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 
 	transitioned := s.processOnTurnCompleteViaEngine(ctx, data.TaskID, session)
 
+	// Agent-exit path: unlike the streaming complete event, this path does NOT
+	// itself complete the open turn or clear the session's RUNNING state — it
+	// relies entirely on the workflow engine's on_turn_complete transition.
+	// workflow_transitioned=false means no transition fired, so the session may
+	// still be RUNNING (only the task row moves to REVIEW below) and the chat UI
+	// keeps showing the agent as working. Pairs with the frontend [session:state]
+	// / [session:turns] trace — filter both by the same task_id.
+	s.logger.Debug("agent.completed turn-complete decision (session state not cleared by this path)",
+		zap.String("task_id", data.TaskID),
+		zap.String("session_id", data.SessionID),
+		zap.String("session_state", string(session.State)),
+		zap.Bool("workflow_transitioned", transitioned))
+
 	// If no workflow transition occurred, move task to REVIEW state for user review
 	if !transitioned {
 		if err := s.taskRepo.UpdateTaskState(ctx, data.TaskID, v1.TaskStateReview); err != nil {
@@ -477,10 +521,21 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 		zap.String("agent_execution_id", data.AgentExecutionID),
 		zap.String("error_message", data.ErrorMessage))
 
-	// Finalize run-mode automation runs first — every other branch below
-	// returns early (resume failure, session-backed recoverable failure,
+	// Transient provider errors (529 Overloaded) get a paced, visible
+	// retry-with-backoff before any red banner. This is the ONLY non-terminal
+	// failure path, so it runs before automation finalization below — otherwise
+	// a transient 529 on a run-mode automation would mark the run failed and
+	// reap its ephemeral worktree out from under the in-flight retry.
+	// handleTransientFailure returns false (falling through) for non-transient
+	// errors, office tasks, or an exhausted budget.
+	if data.SessionID != "" && s.handleTransientFailure(ctx, data) {
+		return
+	}
+
+	// Terminal from here. Finalize run-mode automation runs — every branch
+	// below returns early (resume failure, session-backed recoverable failure,
 	// no-session retry), and run-mode automations need their AutomationRun
-	// flipped + worktree reaped on *every* failure path.
+	// flipped + worktree reaped on *every* terminal failure path.
 	errMsg := data.ErrorMessage
 	if errMsg == "" {
 		errMsg = "agent failed"
@@ -645,6 +700,7 @@ func (s *Service) handleRecoverableFailure(ctx context.Context, data watcher.Age
 // be called for non-office sessions (office sessions render their own error UI).
 func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.AgentEventData) {
 	authErr := isAuthError(data.ErrorMessage)
+	resumeCorrupted := routingerr.IsResumeCorrupted(data.ErrorMessage)
 	displayMsg := data.ErrorMessage
 	if authErr {
 		if readable := extractReadableAuthError(data.ErrorMessage); readable != "" {
@@ -652,7 +708,17 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 		}
 	}
 
+	// Resume-corrupted failures (poisoned extended-thinking state after a
+	// session/load) can't be fixed by resuming — steer the user to a fresh
+	// session instead of dumping the raw 400.
 	statusMsg := fmt.Sprintf("Agent encountered an error: %s", displayMsg)
+	if resumeCorrupted {
+		statusMsg = "This agent session can't be resumed — its saved reasoning state is corrupted. Start a fresh session to continue."
+	} else if routingerr.IsTransientProviderError(data.ErrorMessage) {
+		// Reached after the transient retry budget is exhausted — show friendly
+		// copy instead of dumping the raw 529 JSON envelope.
+		statusMsg = "The provider stayed overloaded after several retries. Resume to try again, or start a fresh session."
+	}
 	hasResumeToken := s.wasResumeAttempt(ctx, data.SessionID)
 	meta := map[string]interface{}{
 		"variant":          "error",
@@ -661,6 +727,7 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 		"task_id":          data.TaskID,
 		"has_resume_token": hasResumeToken,
 		"is_auth_error":    authErr,
+		"resume_corrupted": resumeCorrupted,
 	}
 
 	// Include cached auth methods so the frontend can show login options.
@@ -670,7 +737,7 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 		}
 	}
 
-	meta["actions"] = buildRecoveryActions(data.TaskID, data.SessionID, hasResumeToken, authErr)
+	meta["actions"] = buildRecoveryActions(data.TaskID, data.SessionID, hasResumeToken, authErr, resumeCorrupted)
 
 	if err := s.messageCreator.CreateSessionMessage(
 		ctx,
@@ -733,35 +800,75 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 	return true
 }
 
-// buildRecoveryActions creates the generic actions array for agent error recovery.
-func buildRecoveryActions(taskID, sessionID string, hasResumeToken, isAuthError bool) []map[string]interface{} {
-	recoverPayload := func(action string) map[string]interface{} {
-		return map[string]interface{}{
+// actionMetaKey* are the shared keys of the frontend ActionMessage button
+// descriptor (see apps/web .../messages/action-message.tsx). Defined as
+// constants because the shape is built in more than one place in this package.
+const (
+	actionMetaKeyType    = "type"
+	actionMetaKeyLabel   = "label"
+	actionMetaKeyIcon    = "icon"
+	actionMetaKeyTooltip = "tooltip"
+	actionMetaKeyTestID  = "test_id"
+)
+
+const (
+	recoveryFreshButtonTestID   = "recovery-fresh-button"
+	recoveryRestartButtonTestID = "recovery-restart-button"
+	recoveryResumeButtonTestID  = "recovery-resume-button"
+)
+
+// wsRecoveryAction builds a single session.recover button descriptor. Keeping
+// the map keys in one place avoids drift between the buttons and keeps the
+// metadata shape consistent.
+func wsRecoveryAction(taskID, sessionID, recoverAction, label, icon, tooltip, testID string) map[string]interface{} {
+	return map[string]interface{}{
+		actionMetaKeyType:    "ws_request",
+		actionMetaKeyLabel:   label,
+		actionMetaKeyIcon:    icon,
+		actionMetaKeyTooltip: tooltip,
+		actionMetaKeyTestID:  testID,
+		"params": map[string]interface{}{
 			"method":  "session.recover",
-			"payload": map[string]interface{}{"task_id": taskID, "session_id": sessionID, "action": action},
-		}
+			"payload": map[string]interface{}{"task_id": taskID, "session_id": sessionID, "action": recoverAction},
+		},
 	}
+}
+
+// buildRecoveryActions creates the generic actions array for agent error
+// recovery. Ordinary failures list Resume first (cheapest recovery, keeps
+// context) then Start fresh. For resume-corrupted failures the order flips:
+// Start fresh becomes the primary action and Resume is kept but flagged as
+// likely-to-fail, since the agent's persisted state is poisoned.
+func buildRecoveryActions(taskID, sessionID string, hasResumeToken, isAuthError, resumeCorrupted bool) []map[string]interface{} {
+	resumeTooltip := "Re-launch with resume flag — keeps all previous messages and context"
+	if resumeCorrupted {
+		resumeTooltip = "Resume will likely fail again — this session's saved state is corrupted. Prefer Start fresh."
+	}
+	resume := func() map[string]interface{} {
+		return wsRecoveryAction(taskID, sessionID, "resume",
+			"Resume session", "refresh", resumeTooltip, recoveryResumeButtonTestID)
+	}
+
+	freshLabel, freshTestID := "Start fresh session", recoveryFreshButtonTestID
+	if isAuthError {
+		freshLabel, freshTestID = "Restart session", recoveryRestartButtonTestID
+	}
+	fresh := wsRecoveryAction(taskID, sessionID, "fresh_start", freshLabel, "player-play",
+		"New agent process on the same workspace — no previous conversation context", freshTestID)
+
 	actions := []map[string]interface{}{}
+	if resumeCorrupted {
+		// Fresh is primary; resume kept but de-emphasized below it.
+		actions = append(actions, fresh)
+		if hasResumeToken {
+			actions = append(actions, resume())
+		}
+		return actions
+	}
 	if hasResumeToken {
-		actions = append(actions, map[string]interface{}{
-			"type": "ws_request", "label": "Resume session", "icon": "refresh",
-			"tooltip": "Re-launch with resume flag — keeps all previous messages and context",
-			"test_id": "recovery-resume-button", "params": recoverPayload("resume"),
-		})
+		actions = append(actions, resume())
 	}
-	label := "Start fresh session"
-	if isAuthError {
-		label = "Restart session"
-	}
-	testID := "recovery-fresh-button"
-	if isAuthError {
-		testID = "recovery-restart-button"
-	}
-	actions = append(actions, map[string]interface{}{
-		"type": "ws_request", "label": label, "icon": "player-play",
-		"tooltip": "New agent process on the same workspace — no previous conversation context",
-		"test_id": testID, "params": recoverPayload("fresh_start"),
-	})
+	actions = append(actions, fresh)
 	return actions
 }
 
@@ -771,6 +878,12 @@ func (s *Service) handleAgentStopped(ctx context.Context, data watcher.AgentEven
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),
 		zap.String("agent_execution_id", data.AgentExecutionID))
+
+	// NOTE: we deliberately do NOT resetTransientRetry here — the transient
+	// retry tears down the failed execution via StopExecution as part of its
+	// own re-drive, which surfaces as an agent.stopped event; clearing the loop
+	// on that self-inflicted stop would abort the retry. The loop is freed on
+	// ready/completed (success), cancel, and exhaustion instead.
 
 	// Complete the current turn if there is one
 	s.completeTurnForSession(ctx, data.SessionID)

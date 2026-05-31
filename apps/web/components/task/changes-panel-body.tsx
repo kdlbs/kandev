@@ -8,7 +8,7 @@ import {
   ReviewProgressBar,
   PRFilesSection,
 } from "./changes-panel-timeline";
-import { mergeCommits } from "./changes-panel-helpers";
+import { mergeCommits, firstVisibleSection } from "./changes-panel-helpers";
 import type { ChangesPanelBodyProps } from "./changes-panel-data";
 
 function ChangesPanelDialogsSection({
@@ -177,6 +177,15 @@ function ChangesPanelTimeline(props: TimelineProps) {
   const showCommits = props.hasStaged || props.hasCommits;
   const showCommitsList = props.hasStaged || hasMergedCommits;
   const hasSomethingAfterStaged = (props.hasPRFiles && hasLocalChanges) || showCommitsList;
+  // Auto-expand the first (topmost) visible section so the panel never opens
+  // looking empty (e.g. review mode: PR + Commits both collapsed). Unstaged /
+  // Staged keep their always-expanded default; only PR and Commits are gated.
+  const firstSection = firstVisibleSection({
+    hasPRFiles: props.hasPRFiles,
+    hasUnstaged: props.hasUnstaged,
+    hasStaged: props.hasStaged,
+    showCommitsList,
+  });
 
   return (
     <div className="flex flex-col">
@@ -187,6 +196,7 @@ function ChangesPanelTimeline(props: TimelineProps) {
             isLast={!showCommitsList}
             onOpenDiff={props.onOpenDiffFile}
             repoDisplayName={props.repoDisplayName}
+            defaultCollapsed={firstSection !== "pr"}
           />
         </div>
       )}
@@ -212,6 +222,7 @@ function ChangesPanelTimeline(props: TimelineProps) {
         <CommitsSection
           commits={mergedCommits}
           isLast={!showCommits}
+          defaultCollapsed={firstSection !== "commits"}
           onOpenCommitDetail={props.onOpenCommitDetail}
           onRevertCommit={props.onRevertCommit}
           onAmendCommit={props.dialogs.handleOpenAmendDialog}

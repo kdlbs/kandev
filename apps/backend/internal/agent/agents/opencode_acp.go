@@ -100,7 +100,21 @@ func (a *OpenCodeACP) Runtime() *RuntimeConfig {
 	}
 }
 
-func (a *OpenCodeACP) RemoteAuth() *RemoteAuth { return nil }
+func (a *OpenCodeACP) RemoteAuth() *RemoteAuth {
+	return &RemoteAuth{
+		Methods: []RemoteAuthMethod{
+			{
+				Type:  "files",
+				Label: "Copy auth files",
+				SourceFiles: map[string][]string{
+					"darwin": {".local/share/opencode/auth.json"},
+					"linux":  {".local/share/opencode/auth.json"},
+				},
+				TargetRelDir: ".local/share/opencode",
+			},
+		},
+	}
+}
 
 func (a *OpenCodeACP) InstallScript() string {
 	return "npm install -g " + opencodeACPPkg

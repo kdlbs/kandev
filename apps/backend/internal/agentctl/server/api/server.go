@@ -2,14 +2,17 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/pprof"
 	"os"
 	"runtime"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
@@ -183,6 +186,52 @@ func (s *Server) setupRoutes() {
 	if os.Getenv("KANDEV_DEBUG_PPROF_ENABLED") == "true" { //nolint:goconst // env-var check, not a query param
 		s.registerPprofRoutes()
 	}
+
+	// Dev-only live tail of a session's recent ACP frames from an in-memory
+	// ring buffer (zero disk growth). Complements the file sink for
+	// investigating a currently-stuck session. Frames carry full prompt/tool
+	// content, so require BOTH frame logging and dev mode to be on — message
+	// logging alone (e.g. someone debugging a non-dev deployment) must not
+	// expose this endpoint.
+	if acpDebugTailEnabled() {
+		s.router.GET("/api/v1/debug/acp/:session", s.handleACPRingTail)
+	}
+}
+
+// acpDebugTailEnabled gates the ACP live-tail endpoint on both ACP frame
+// logging and dev mode. Read live (like the pprof gate) so it is testable.
+func acpDebugTailEnabled() bool {
+	return os.Getenv("KANDEV_DEBUG_AGENT_MESSAGES") == "true" && //nolint:goconst // env-var values, not query params
+		os.Getenv("KANDEV_DEBUG_DEV_MODE") == "true"
+}
+
+// handleACPRingTail returns the most recent normalized ACP events for a
+// session from the in-memory ring buffer. Query param n caps the count
+// (default 200, max 1000).
+func (s *Server) handleACPRingTail(c *gin.Context) {
+	const (
+		defaultACPRingTailCount = 200
+		maxACPRingTailCount     = 1000
+	)
+	session := c.Param("session")
+	n := defaultACPRingTailCount
+	// Bound the untrusted n at the source so it can't drive an oversized
+	// allocation downstream (the ring tail clamps to its size too, but
+	// keeping the limit explicit here is the defensive default).
+	if v := c.Query("n"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 && parsed <= maxACPRingTailCount {
+			n = parsed
+		}
+	}
+	events := shared.ACPRingTail(session, n)
+	if events == nil {
+		events = []json.RawMessage{}
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"session": session,
+		"count":   len(events),
+		"events":  events,
+	})
 }
 
 // Health check response

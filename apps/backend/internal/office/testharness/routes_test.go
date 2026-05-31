@@ -291,6 +291,49 @@ func TestSeedMessageRejectsUnknownSession(t *testing.T) {
 	}
 }
 
+func TestSeedWorkflowPersistsStyle(t *testing.T) {
+	repo, _ := newTestRepo(t)
+	r := newRouter(t, repo, nil)
+
+	body := mustJSON(t, map[string]interface{}{
+		"workspace_id": "ws-1",
+		"name":         "Office Only Workflow",
+		"style":        models.WorkflowStyleOffice,
+	})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/_test/workflows", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	workflows, err := repo.ListWorkflows(context.Background(), "ws-1", true)
+	if err != nil {
+		t.Fatalf("list workflows: %v", err)
+	}
+	if len(workflows) != 1 {
+		t.Fatalf("expected 1 workflow, got %d", len(workflows))
+	}
+	if got := workflows[0].Style; got != models.WorkflowStyleOffice {
+		t.Fatalf("expected style %q, got %q", models.WorkflowStyleOffice, got)
+	}
+}
+
+func TestSeedWorkflowRejectsMissingFields(t *testing.T) {
+	repo, _ := newTestRepo(t)
+	r := newRouter(t, repo, nil)
+
+	body := mustJSON(t, map[string]interface{}{"style": "office"})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/_test/workflows", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing workspace_id/name, got %d", w.Code)
+	}
+}
+
 func mustJSON(t *testing.T, v interface{}) []byte {
 	t.Helper()
 	b, err := json.Marshal(v)

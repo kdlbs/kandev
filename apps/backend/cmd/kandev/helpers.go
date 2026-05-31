@@ -507,7 +507,7 @@ func registerRoutes(p routeParams) {
 
 	p.gateway.SetupRoutes(p.router)
 	registerTaskRoutes(p, planService, handoffSvc)
-	registerSecondaryRoutes(p, workflowCtrl, clarificationStore, planService, handoffSvc)
+	registerSecondaryRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, planService, handoffSvc)
 
 	// /health is a readiness probe, not a liveness probe. It only
 	// returns 200 after main has flipped the package-level `ready`
@@ -663,6 +663,7 @@ func registerSecondaryRoutes(
 	p routeParams,
 	workflowCtrl *workflowcontroller.Controller,
 	clarificationStore *clarification.Store,
+	clarificationCanceller *clarification.Canceller,
 	planService *taskservice.PlanService,
 	handoffSvc *taskservice.HandoffService,
 ) {
@@ -782,7 +783,7 @@ func registerSecondaryRoutes(
 		p.log.Debug("Registered Improve Kandev handlers (HTTP)")
 	}
 
-	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, planService, handoffSvc)
+	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, planService, handoffSvc)
 
 	var automationSvc *automation.Service
 	if p.services.Automation != nil {
@@ -889,12 +890,13 @@ func registerMCPAndDebugRoutes(
 	p routeParams,
 	wfCtrl *workflowcontroller.Controller,
 	clarificationStore *clarification.Store,
+	clarificationCanceller *clarification.Canceller,
 	planService *taskservice.PlanService,
 	handoffSvc *taskservice.HandoffService,
 ) {
 	mcpHandlers := mcphandlers.NewHandlers(
 		p.taskSvc, wfCtrl,
-		clarificationStore, p.msgCreator, p.taskRepo, p.taskRepo, p.eventBus, planService, p.orchestratorSvc, p.orchestratorSvc.GetMessageQueue(), p.log,
+		clarificationStore, clarificationCanceller, p.msgCreator, p.taskRepo, p.taskRepo, p.eventBus, planService, p.orchestratorSvc, p.orchestratorSvc.GetMessageQueue(), p.log,
 	)
 	// Wire config-mode dependencies for agent-native configuration
 	mcpHandlers.SetConfigDeps(p.services.Workflow, p.agentSettingsController, p.mcpConfigSvc)
