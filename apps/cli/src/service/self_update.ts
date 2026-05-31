@@ -49,7 +49,16 @@ export function planSelfUpdate(
 
   if (install.kind === "homebrew") {
     commands.push({ command: "brew", args: ["upgrade", "kandev"] });
-    commands.push({ command: install.node_path, args: [install.cli_entry, ...installArgs] });
+    // Re-run service install via the upgraded `kandev` wrapper (resolved on
+    // PATH), NOT `node <cli_entry>`. Homebrew installs into version-pinned
+    // Cellar dirs, so the recorded cli_entry still points at the OLD bundle
+    // after `brew upgrade`; worse, invoking node on it directly runs without
+    // KANDEV_BUNDLE_DIR/KANDEV_VERSION, so the install is mis-detected as
+    // kind "unknown" and the regenerated unit loses the bundle env — the
+    // restarted backend then can't find its runtime and the service stays down.
+    // The wrapper is version-stable and re-sets the bundle env. (Mirrors the
+    // manual `kandev service install` we already document for Homebrew.)
+    commands.push({ command: "kandev", args: installArgs });
   } else if (install.kind === "npm") {
     commands.push({ command: "npm", args: npmInstallArgs(install.cli_entry, target) });
     commands.push({ command: install.node_path, args: [install.cli_entry, ...installArgs] });

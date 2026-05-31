@@ -68,6 +68,24 @@ describe("planSelfUpdate", () => {
     });
   });
 
+  it("plans homebrew upgrade then reinstall via the kandev wrapper (not node <cli_entry>)", () => {
+    const brew = intent("homebrew");
+    // A real Homebrew install records a version-pinned Cellar cli_entry.
+    brew.install.cli_entry = "/opt/homebrew/Cellar/kandev/1.2.2/libexec/cli/bin/cli.js";
+    brew.install.node_path = "/opt/homebrew/bin/node";
+
+    const commands = planSelfUpdate(brew, { platform: "linux" });
+
+    expect(commands[0]).toEqual({ command: "brew", args: ["upgrade", "kandev"] });
+    // Step 2 must use the upgraded `kandev` wrapper (version-stable, re-sets
+    // KANDEV_BUNDLE_DIR), never `node` on the stale version-pinned cli_entry.
+    expect(commands[1]).toEqual({
+      command: "kandev",
+      args: ["service", "install", "--home-dir", "/home/alice/.kandev", "--port", "38429"],
+    });
+    expect(commands[1].command).not.toBe("/opt/homebrew/bin/node");
+  });
+
   it("plans npx reinstall without mutating global npm packages", () => {
     const commands = planSelfUpdate(intent("npx"), { platform: "linux" });
     expect(commands[0]).toEqual({
