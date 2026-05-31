@@ -1269,7 +1269,7 @@ func (m *Manager) buildFreshAgentCommand(ctx context.Context, execution *AgentEx
 	if profileInfo != nil {
 		model = profileInfo.Model
 		autoApprove = profileInfo.AutoApprove
-		permissionValues["auto_approve"] = profileInfo.AutoApprove
+		permissionValues[agents.PermissionKeyAutoApprove] = profileInfo.AutoApprove
 		permissionValues["allow_indexing"] = profileInfo.AllowIndexing
 		permissionValues["dangerously_skip_permissions"] = profileInfo.DangerouslySkipPermissions
 	}

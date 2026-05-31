@@ -503,11 +503,12 @@ func profilePermissionValues(p *AgentProfileInfo) map[string]bool {
 	if p == nil {
 		return nil
 	}
-	return map[string]bool{
-		"auto_approve":                 p.AutoApprove,
+	values := map[string]bool{
 		"dangerously_skip_permissions": p.DangerouslySkipPermissions,
 		"allow_indexing":               p.AllowIndexing,
 	}
+	values[agents.PermissionKeyAutoApprove] = p.AutoApprove
+	return values
 }
 
 // freshPassthroughCommand resolves the agent config and profile, and builds a

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { Message } from "@/lib/types/http";
 import type { PermissionActionType, PermissionOptionKind } from "@/lib/types/permission";
@@ -99,7 +99,10 @@ export function usePermissionResponseHandlers({
   // "Always allow" maps to the agent's allow_always option, telling the agent
   // to persist the decision so the same action is not re-prompted. Only some
   // agents offer it (Cursor does); hasAllowAlways gates the button.
-  const allowAlwaysOption = permissionMetadata?.options.find((opt) => opt.kind === "allow_always");
+  const allowAlwaysOption = useMemo(
+    () => permissionMetadata?.options.find((opt) => opt.kind === "allow_always"),
+    [permissionMetadata],
+  );
   const hasAllowAlways = !!allowAlwaysOption;
   const handleAllowAlways = useCallback(() => {
     if (allowAlwaysOption) handleRespond(allowAlwaysOption.option_id);
