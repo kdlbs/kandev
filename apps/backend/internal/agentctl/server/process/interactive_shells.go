@@ -213,7 +213,7 @@ func (r *InteractiveRunner) StartUserShell(ctx context.Context, scopeID, process
 		zap.String("shell", req.Command[0]),
 		zap.String("working_dir", workingDir),
 		zap.String("label", label),
-		zap.String("initial_command", opts.InitialCommand),
+		zap.String("initial_command", initialCommand),
 		zap.Bool("deferred_start", info.OSPID == 0))
 
 	return info, nil
