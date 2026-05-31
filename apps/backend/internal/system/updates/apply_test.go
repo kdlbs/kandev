@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -130,7 +131,7 @@ func TestSystemdSelfUpdateArgsPropagateUpdateEnvironment(t *testing.T) {
 	}
 }
 
-func TestLaunchdSelfUpdateArgsPropagateUpdateEnvironment(t *testing.T) {
+func TestRenderLaunchdHelperPlistRunsOnceWithUpdateEnvironment(t *testing.T) {
 	t.Setenv("PATH", "/opt/homebrew/bin:/usr/bin")
 	t.Setenv("npm_config_prefix", "/tmp/npm-global")
 	t.Setenv("NPM_CONFIG_PREFIX", "/tmp/npm-global")
@@ -140,27 +141,47 @@ func TestLaunchdSelfUpdateArgsPropagateUpdateEnvironment(t *testing.T) {
 		Intent: updateIntent{Install: serviceInstallMetadata{
 			NodePath: "/opt/homebrew/bin/node",
 			CLIEntry: "/tmp/npm-global/lib/node_modules/kandev/bin/cli.js",
+			LogDir:   "/tmp/kandev/logs",
 		}},
 	}
 
-	got := launchdSelfUpdateArgs(req, "com.kdlbs.kandev.self-update.test")
-	want := []string{
-		"submit",
-		"-l", "com.kdlbs.kandev.self-update.test",
-		"--",
-		"/usr/bin/env",
-		"PATH=/opt/homebrew/bin:/usr/bin",
-		"npm_config_prefix=/tmp/npm-global",
-		"NPM_CONFIG_PREFIX=/tmp/npm-global",
-		"/opt/homebrew/bin/node",
-		"/tmp/npm-global/lib/node_modules/kandev/bin/cli.js",
-		"service",
-		"self-update",
-		"--intent",
-		"/tmp/intent.json",
+	plist := renderLaunchdHelperPlist("com.kdlbs.kandev.self-update.test", req)
+
+	// The whole point of this change: the helper must run exactly once. A
+	// KeepAlive=true (the implicit behaviour of `launchctl submit`) would make
+	// launchd re-run the one-shot updater forever.
+	if !strings.Contains(plist, "<key>KeepAlive</key>\n  <false/>") {
+		t.Fatalf("plist must set KeepAlive=false to run once:\n%s", plist)
 	}
-	if !stringSlicesEqual(got, want) {
-		t.Fatalf("args=%#v want %#v", got, want)
+	for _, want := range []string{
+		"<string>com.kdlbs.kandev.self-update.test</string>",
+		"<key>RunAtLoad</key>\n  <true/>",
+		"<string>/opt/homebrew/bin/node</string>",
+		"<string>/tmp/npm-global/lib/node_modules/kandev/bin/cli.js</string>",
+		"<string>self-update</string>",
+		"<string>/tmp/intent.json</string>",
+		"<key>PATH</key>\n    <string>/opt/homebrew/bin:/usr/bin</string>",
+		"<key>NPM_CONFIG_PREFIX</key>\n    <string>/tmp/npm-global</string>",
+		"<string>/tmp/kandev/logs/self-update-launchd.log</string>",
+	} {
+		if !strings.Contains(plist, want) {
+			t.Fatalf("plist missing %q:\n%s", want, plist)
+		}
+	}
+	// Must not regress to the looping `launchctl submit` mechanism.
+	if strings.Contains(plist, "submit") {
+		t.Fatalf("plist should not reference submit:\n%s", plist)
+	}
+}
+
+func TestLaunchdSelfUpdateDomain(t *testing.T) {
+	user := applyRequest{Intent: updateIntent{Install: serviceInstallMetadata{Mode: installModeUser}}}
+	if got := launchdSelfUpdateDomain(user, 501); got != "gui/501" {
+		t.Fatalf("user domain=%q want gui/501", got)
+	}
+	system := applyRequest{Intent: updateIntent{Install: serviceInstallMetadata{Mode: installModeSystem}}}
+	if got := launchdSelfUpdateDomain(system, 501); got != "system" {
+		t.Fatalf("system domain=%q want system", got)
 	}
 }
 

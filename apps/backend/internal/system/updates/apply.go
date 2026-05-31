@@ -143,12 +143,38 @@ func systemdSelfUpdateArgs(req applyRequest, unitName string) []string {
 	)
 }
 
+const selfUpdateHelperDirName = "self-update"
+
+// runLaunchdSelfUpdate spawns the self-update helper as a transient launchd job.
+//
+// The previous implementation used `launchctl submit`, which registers the job
+// with an implicit KeepAlive — launchd re-ran the one-shot updater every ~15s
+// forever, so the service reinstalled and restarted in an endless loop. A
+// bootstrapped plist with KeepAlive=false runs exactly once (matching what
+// `systemd-run --collect` gives us on Linux). The job lives outside the kandev
+// service so reinstalling/restarting the service mid-update doesn't kill it.
 func runLaunchdSelfUpdate(ctx context.Context, req applyRequest) (map[string]interface{}, error) {
 	label := "com.kdlbs.kandev.self-update." + strconv.FormatInt(time.Now().UnixNano(), 10)
-	args := launchdSelfUpdateArgs(req, label)
-	out, err := exec.CommandContext(ctx, "launchctl", args...).CombinedOutput()
+	uid := os.Getuid()
+	domain := launchdSelfUpdateDomain(req, uid)
+
+	dir := filepath.Join(req.Intent.Install.HomeDir, "service", selfUpdateHelperDirName)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, fmt.Errorf("self-update helper dir: %w", err)
+	}
+	// Boot out and delete any idle helper job left loaded by a prior update so
+	// they don't accumulate (a KeepAlive=false job stays registered after it
+	// exits until it's booted out).
+	cleanupStaleLaunchdHelpers(ctx, dir, domain)
+
+	plistPath := filepath.Join(dir, label+".plist")
+	if err := os.WriteFile(plistPath, []byte(renderLaunchdHelperPlist(label, req)), 0o600); err != nil {
+		return nil, fmt.Errorf("write self-update helper plist: %w", err)
+	}
+
+	out, err := exec.CommandContext(ctx, "launchctl", "bootstrap", domain, plistPath).CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("launchctl self-update helper: %w: %s", err, strings.TrimSpace(string(out)))
+		return nil, fmt.Errorf("launchctl bootstrap self-update helper: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return map[string]interface{}{
 		applyResultStatusKey:     applyResultStarted,
@@ -158,13 +184,36 @@ func runLaunchdSelfUpdate(ctx context.Context, req applyRequest) (map[string]int
 	}, nil
 }
 
-func launchdSelfUpdateArgs(req applyRequest, label string) []string {
-	args := []string{
-		"submit",
-		"-l", label,
-		"--",
+func launchdSelfUpdateDomain(req applyRequest, uid int) string {
+	if req.Intent.Install.Mode == installModeSystem {
+		return "system"
 	}
-	command := []string{
+	return fmt.Sprintf("gui/%d", uid)
+}
+
+func cleanupStaleLaunchdHelpers(ctx context.Context, dir, domain string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".plist") {
+			continue
+		}
+		label := strings.TrimSuffix(name, ".plist")
+		_ = exec.CommandContext(ctx, "launchctl", "bootout", domain+"/"+label).Run()
+		_ = os.Remove(filepath.Join(dir, name))
+	}
+}
+
+// renderLaunchdHelperPlist builds a transient LaunchAgent plist for the helper:
+// RunAtLoad fires it once on bootstrap, KeepAlive=false stops launchd from
+// re-running it. Update env (PATH/npm prefix) is carried via EnvironmentVariables
+// so the helper can resolve npm; stdout/stderr are captured to the log dir as a
+// fallback alongside the helper's own self-update-<ts>.log.
+func renderLaunchdHelperPlist(label string, req applyRequest) string {
+	args := []string{
 		req.Intent.Install.NodePath,
 		req.Intent.Install.CLIEntry,
 		"service",
@@ -172,10 +221,42 @@ func launchdSelfUpdateArgs(req applyRequest, label string) []string {
 		"--intent",
 		req.IntentPath,
 	}
-	if env := selfUpdateEnvironment(); len(env) > 0 {
-		command = append(append([]string{"/usr/bin/env"}, env...), command...)
+	var argsXML strings.Builder
+	for _, arg := range args {
+		argsXML.WriteString("    <string>" + escapeXML(arg) + "</string>\n")
 	}
-	return append(args, command...)
+	var envXML strings.Builder
+	for _, kv := range selfUpdateEnvironment() {
+		key, value, _ := strings.Cut(kv, "=")
+		envXML.WriteString("    <key>" + escapeXML(key) + "</key>\n")
+		envXML.WriteString("    <string>" + escapeXML(value) + "</string>\n")
+	}
+	logPath := filepath.Join(req.Intent.Install.LogDir, "self-update-launchd.log")
+	return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>` + escapeXML(label) + `</string>
+  <key>ProgramArguments</key>
+  <array>
+` + argsXML.String() + `  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+` + envXML.String() + `  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <false/>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>` + escapeXML(logPath) + `</string>
+  <key>StandardErrorPath</key>
+  <string>` + escapeXML(logPath) + `</string>
+</dict>
+</plist>
+`
 }
 
 func selfUpdateEnvironment() []string {
