@@ -22,7 +22,7 @@ echo "Building CLI for release bundle..."
 echo "  TypeScript build complete"
 
 # Bundle with esbuild (inlines tree-kill and all other deps)
-(cd "$ROOT_DIR/apps/cli" && pnpm bundle)
+(cd "$ROOT_DIR/apps" && pnpm --filter kandev bundle)
 echo "  esbuild bundle complete"
 
 # Copy artifacts into dist/kandev/cli/
