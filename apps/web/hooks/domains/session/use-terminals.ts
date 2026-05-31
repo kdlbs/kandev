@@ -186,7 +186,7 @@ type RemoveTerminalOpts = {
   /**
    * Source-of-truth getter for the currently active tab. The handler reads
    * this at call-time rather than capturing the value in the closure so an
-   * async close (`parkUserShell(...).then(removeTerminal)`) that resolves
+   * async close (`destroyUserShell(...).then(removeTerminal)`) that resolves
    * after the user switches tabs doesn't clobber the new selection with a
    * stale fallback shift.
    */
