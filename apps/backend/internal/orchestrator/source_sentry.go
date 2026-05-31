@@ -126,3 +126,12 @@ func (s *SentryWatcherSource) WatchID(evt any) string {
 func (s *SentryWatcherSource) MaxInflightTasks(evt any) *int {
 	return nil
 }
+
+// MaxInflightTasks caps the number of watcher-created tasks that may be
+// inflight (created but not yet terminal) for the Sentry source. Mirrors the
+// Linear/Jira watchers.
+func (s *SentryWatcherSource) MaxInflightTasks() int { return sentryMaxInflightTasks }
+
+const (
+	sentryMaxInflightTasks = 50
+)
