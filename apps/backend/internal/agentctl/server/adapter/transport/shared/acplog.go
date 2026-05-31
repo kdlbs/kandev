@@ -35,6 +35,7 @@ const (
 const (
 	envDebugMessages   = "KANDEV_DEBUG_AGENT_MESSAGES"
 	envLogDir          = "KANDEV_DEBUG_LOG_DIR"
+	envHomeDir         = "KANDEV_HOME_DIR"
 	envACPMaxFiles     = "KANDEV_DEBUG_ACP_MAX_FILES"
 	envACPRetentionHrs = "KANDEV_DEBUG_ACP_RETENTION_HOURS"
 	envACPMaxFileBytes = "KANDEV_DEBUG_ACP_MAX_FILE_BYTES"
@@ -62,7 +63,8 @@ type acpLogConfig struct {
 
 // acpLogConfigFromEnv resolves the on-disk config from the environment,
 // applying defaults. The output directory resolves to KANDEV_DEBUG_LOG_DIR,
-// then ~/.kandev/logs/acp, then the process CWD as a last resort.
+// then <KANDEV_HOME_DIR>/logs/acp, then ~/.kandev/logs/acp, then the process
+// CWD as a last resort.
 func acpLogConfigFromEnv() acpLogConfig {
 	return acpLogConfig{
 		dir:          resolveACPLogDir(),
@@ -89,6 +91,16 @@ func resolveACPLogDir() string {
 	if dir := os.Getenv(envLogDir); dir != "" {
 		return dir
 	}
+	// Honor KANDEV_HOME_DIR before $HOME so dev/e2e isolation (and Docker/K8s
+	// roots) keep ACP logs inside the configured Kandev home. The env value is
+	// already the Kandev root (e.g. <repo>/.kandev-dev), mirroring
+	// config.Config.ResolvedHomeDir — so we append logs/acp directly and must
+	// NOT add another ".kandev" segment. agentctl is a lean container binary
+	// that doesn't pull in the viper-based common/config, so we read the env
+	// directly rather than importing ResolvedHomeDir.
+	if home := os.Getenv(envHomeDir); home != "" {
+		return filepath.Join(expandTilde(home), "logs", "acp")
+	}
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
 		return filepath.Join(home, ".kandev", "logs", "acp")
 	}
@@ -96,6 +108,20 @@ func resolveACPLogDir() string {
 		return cwd
 	}
 	return "."
+}
+
+// expandTilde expands a leading "~/" to the user's home directory, mirroring
+// config.expandTilde. Returns the input unchanged if expansion is unnecessary
+// or fails.
+func expandTilde(p string) string {
+	if !strings.HasPrefix(p, "~/") {
+		return p
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return p
+	}
+	return filepath.Join(home, p[2:])
 }
 
 func envInt64(key string, def int64) int64 {

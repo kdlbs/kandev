@@ -12,7 +12,7 @@
 //
 // Debug logging (set externally — read at package init time). Frames are
 // written to per-session files raw-/normalized-{protocol}-{agentID}-{sessionID}.jsonl
-// under KANDEV_DEBUG_LOG_DIR (default ~/.kandev/logs/acp):
+// under KANDEV_DEBUG_LOG_DIR (default <KANDEV_HOME_DIR>/logs/acp, else ~/.kandev/logs/acp):
 //
 //	KANDEV_DEBUG_AGENT_MESSAGES=true KANDEV_DEBUG_LOG_DIR=/tmp/e2e-debug ...
 //

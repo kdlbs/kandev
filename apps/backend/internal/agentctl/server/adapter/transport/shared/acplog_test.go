@@ -16,6 +16,58 @@ func testEvent(sessionID string) *streams.AgentEvent {
 	return &streams.AgentEvent{Type: streams.EventTypeMessageChunk, SessionID: sessionID, Text: "hello"}
 }
 
+// TestResolveACPLogDir_Precedence pins the directory resolution order:
+// KANDEV_DEBUG_LOG_DIR > KANDEV_HOME_DIR > $HOME/.kandev. Critically,
+// KANDEV_HOME_DIR is already the Kandev root (e.g. <repo>/.kandev-dev), so the
+// logs land at <home>/logs/acp with NO extra ".kandev" segment — keeping dev
+// logs inside the isolated dev home that `make clean-db` wipes.
+func TestResolveACPLogDir_Precedence(t *testing.T) {
+	t.Run("explicit log dir wins over home dir", func(t *testing.T) {
+		explicit := filepath.Join(t.TempDir(), "explicit")
+		t.Setenv(envLogDir, explicit)
+		t.Setenv(envHomeDir, filepath.Join("/repo", ".kandev-dev"))
+		if got := resolveACPLogDir(); got != explicit {
+			t.Errorf("got %q, want %q", got, explicit)
+		}
+	})
+
+	t.Run("home dir honored before $HOME, no extra dotdir", func(t *testing.T) {
+		t.Setenv(envLogDir, "")
+		home := filepath.Join("/repo", ".kandev-dev")
+		t.Setenv(envHomeDir, home)
+		want := filepath.Join(home, "logs", "acp")
+		if got := resolveACPLogDir(); got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("expands leading tilde in home dir", func(t *testing.T) {
+		userHome, err := os.UserHomeDir()
+		if err != nil || userHome == "" {
+			t.Skip("no user home dir on this platform")
+		}
+		t.Setenv(envLogDir, "")
+		t.Setenv(envHomeDir, "~/.kandev-dev")
+		want := filepath.Join(userHome, ".kandev-dev", "logs", "acp")
+		if got := resolveACPLogDir(); got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("falls back to $HOME/.kandev when home dir unset", func(t *testing.T) {
+		userHome, err := os.UserHomeDir()
+		if err != nil || userHome == "" {
+			t.Skip("no user home dir on this platform")
+		}
+		t.Setenv(envLogDir, "")
+		t.Setenv(envHomeDir, "")
+		want := filepath.Join(userHome, ".kandev", "logs", "acp")
+		if got := resolveACPLogDir(); got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+}
+
 // TestACPLog_PerSessionRouting verifies two sessions land in two distinct
 // files, each filename carrying its own session id, and keeping the
 // normalized-/raw- prefix + .jsonl suffix the debug reader requires.
