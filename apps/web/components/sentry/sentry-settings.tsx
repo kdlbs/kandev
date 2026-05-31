@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { IconBug } from "@tabler/icons-react";
+import { IconBrandSentry } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
@@ -10,6 +10,7 @@ import { Separator } from "@kandev/ui/separator";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Switch } from "@kandev/ui/switch";
+import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { useSentryEnabled } from "@/hooks/domains/sentry/use-sentry-enabled";
@@ -104,25 +105,35 @@ function SecretField({ form, loading, update, hasSavedSecret }: SecretFieldProps
         >
           sentry.io/settings/account/api/auth-tokens
         </a>
+        .{" "}
+        <Popover>
+          <PopoverTrigger asChild>
+            <button type="button" className="underline cursor-pointer">
+              Required scopes
+            </button>
+          </PopoverTrigger>
+          <PopoverContent align="start" className="w-80">
+            <p className="text-xs text-muted-foreground">
+              Grant <span className="font-medium text-foreground">Read</span> access to these scopes
+              when creating the token:
+            </p>
+            <ul className="ml-4 list-disc text-xs text-muted-foreground space-y-1">
+              <li>
+                <span className="font-medium text-foreground">Organization</span> (
+                <code>org:read</code>) — resolve the org and list issues
+              </li>
+              <li>
+                <span className="font-medium text-foreground">Project</span> (
+                <code>project:read</code>) — list projects and scope searches
+              </li>
+              <li>
+                <span className="font-medium text-foreground">Issue &amp; Event</span> (
+                <code>event:read</code>) — browse issues and run watchers
+              </li>
+            </ul>
+          </PopoverContent>
+        </Popover>
       </p>
-      <p className="text-xs text-muted-foreground">
-        Grant <span className="font-medium text-foreground">Read</span> access to these scopes when
-        creating the token:
-      </p>
-      <ul className="ml-4 list-disc text-xs text-muted-foreground space-y-0.5">
-        <li>
-          <span className="font-medium text-foreground">Organization</span> (<code>org:read</code>)
-          — resolve the org and list issues
-        </li>
-        <li>
-          <span className="font-medium text-foreground">Project</span> (<code>project:read</code>) —
-          list projects and scope searches
-        </li>
-        <li>
-          <span className="font-medium text-foreground">Issue &amp; Event</span> (
-          <code>event:read</code>) — browse issues and run watchers
-        </li>
-      </ul>
     </div>
   );
 }
@@ -433,7 +444,7 @@ export function SentryConnectionSection() {
 
   return (
     <SettingsSection
-      icon={<IconBug className="h-5 w-5" />}
+      icon={<IconBrandSentry className="h-5 w-5" />}
       title="Sentry integration"
       description="Connect Kandev to Sentry with a user auth token. Credentials are stored encrypted server-side and shared across all workspaces."
       action={<EnabledPill />}

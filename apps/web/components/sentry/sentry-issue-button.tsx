@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { IconBug } from "@tabler/icons-react";
+import { IconBrandSentry } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useSentryAvailable } from "@/hooks/domains/sentry/use-sentry-availability";

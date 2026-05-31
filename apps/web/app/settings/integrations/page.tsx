@@ -2,8 +2,8 @@ import Link from "next/link";
 import {
   IconBrandGithub,
   IconBrandGitlab,
+  IconBrandSentry,
   IconBrandSlack,
-  IconBug,
   IconHexagon,
   IconTicket,
 } from "@tabler/icons-react";
@@ -38,7 +38,7 @@ const INTEGRATIONS = [
     href: "/settings/integrations/sentry",
     label: "Sentry",
     description: "Auth token, org/project defaults, and issue browsing.",
-    Icon: IconBug,
+    Icon: IconBrandSentry,
   },
   {
     href: "/settings/integrations/slack",
