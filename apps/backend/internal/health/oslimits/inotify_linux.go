@@ -137,7 +137,13 @@ func buildProcStats(perPID []pidStats) procStats {
 		total.totalWatches += s.watchCount
 	}
 	total.topConsumers = topN(perPID, func(a, b pidStats) bool { return a.fdCount > b.fdCount })
-	total.topWatchConsumers = topN(perPID, func(a, b pidStats) bool { return a.watchCount > b.watchCount })
+	var withWatches []pidStats
+	for _, s := range perPID {
+		if s.watchCount > 0 {
+			withWatches = append(withWatches, s)
+		}
+	}
+	total.topWatchConsumers = topN(withWatches, func(a, b pidStats) bool { return a.watchCount > b.watchCount })
 	return total
 }
 
