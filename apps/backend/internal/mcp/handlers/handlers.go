@@ -1228,6 +1228,10 @@ func (h *Handlers) setSessionRunning(ctx context.Context, taskID, sessionID stri
 		}
 		if updatedAt, ok := h.sessionUpdatedAtForStateEvent(ctx, sessionID); ok {
 			eventData["updated_at"] = updatedAt
+		} else {
+			h.logger.Warn("skipping session state_changed publish; could not load authoritative updated_at",
+				zap.String("session_id", sessionID))
+			return
 		}
 		_ = h.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
 			events.TaskSessionStateChanged,
@@ -1265,6 +1269,10 @@ func (h *Handlers) setSessionWaitingForInput(ctx context.Context, taskID, sessio
 		}
 		if updatedAt, ok := h.sessionUpdatedAtForStateEvent(ctx, sessionID); ok {
 			eventData["updated_at"] = updatedAt
+		} else {
+			h.logger.Warn("skipping session state_changed publish; could not load authoritative updated_at",
+				zap.String("session_id", sessionID))
+			return
 		}
 		_ = h.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
 			events.TaskSessionStateChanged,

@@ -1792,7 +1792,6 @@ func (s *Service) publishSessionWaitingEvent(ctx context.Context, taskID, sessio
 		metaKeySessionID:   sessionID,
 		"workflow_step_id": stepID,
 		metaKeyNewState:    string(models.TaskSessionStateWaitingForInput),
-		metaKeyUpdatedAt:   time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	// Include agent_profile_id and session metadata so the frontend can
 	// identify the agent (e.g. MCP support) without waiting for SSR hydration.
@@ -1838,7 +1837,6 @@ func (s *Service) publishSessionCreatedEvent(ctx context.Context, taskID, sessio
 		metaKeyTaskID:    taskID,
 		metaKeySessionID: sessionID,
 		metaKeyNewState:  string(models.TaskSessionStateCreated),
-		metaKeyUpdatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	if stepID != "" {
 		eventData["workflow_step_id"] = stepID

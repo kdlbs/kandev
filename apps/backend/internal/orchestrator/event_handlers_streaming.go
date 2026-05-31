@@ -415,6 +415,13 @@ func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID 
 			authoritativeUpdatedAt = &t
 		}
 	}
+	if authoritativeUpdatedAt == nil {
+		s.logger.Warn("skipping session state_changed publish; could not read authoritative updated_at",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("new_state", string(nextState)))
+		return session
+	}
 	s.logger.Debug("task session state updated",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),

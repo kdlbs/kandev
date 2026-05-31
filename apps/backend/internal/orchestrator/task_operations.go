@@ -1298,6 +1298,9 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 		if refreshErr == nil && refreshedSession != nil {
 			session = refreshedSession
 			resp.State = string(session.State)
+			if !session.UpdatedAt.IsZero() {
+				resp.UpdatedAt = session.UpdatedAt.UTC().Format(time.RFC3339Nano)
+			}
 		}
 	}
 

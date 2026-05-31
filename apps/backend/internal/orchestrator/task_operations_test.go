@@ -1295,6 +1295,9 @@ func TestGetTaskSessionStatus_HealsStuckStartingSession(t *testing.T) {
 	if updated.State != models.TaskSessionStateWaitingForInput {
 		t.Fatalf("expected persisted session state %q, got %q", models.TaskSessionStateWaitingForInput, updated.State)
 	}
+	if resp.UpdatedAt != updated.UpdatedAt.UTC().Format(time.RFC3339Nano) {
+		t.Fatalf("expected response updated_at %q, got %q", updated.UpdatedAt.UTC().Format(time.RFC3339Nano), resp.UpdatedAt)
+	}
 	if state, ok := taskRepo.updatedStates["task1"]; !ok || state != v1.TaskStateReview {
 		t.Fatalf("expected task state %q, got %q (ok=%v)", v1.TaskStateReview, state, ok)
 	}

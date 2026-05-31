@@ -127,6 +127,9 @@ export class SessionPage {
 
       if (await this.recoveryResumeButton().isVisible()) {
         await this.recoveryResumeButton().click();
+        await this.recoveryResumeButton()
+          .waitFor({ state: "hidden", timeout: pollSlice })
+          .catch(() => undefined);
         continue;
       }
 
@@ -134,7 +137,9 @@ export class SessionPage {
       if (!reloaded && elapsed >= attemptTimeout) {
         reloaded = true;
         await this.page.reload();
-        await this.activeChat().waitFor({ state: "visible", timeout: attemptTimeout });
+        await this.activeChat()
+          .waitFor({ state: "visible", timeout: attemptTimeout })
+          .catch(() => undefined);
         continue;
       }
 
