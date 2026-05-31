@@ -53,6 +53,9 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 	if err := s.validateCreateTaskRequest(req); err != nil {
 		return nil, err
 	}
+	if err := s.validateSubtaskDepth(ctx, req); err != nil {
+		return nil, err
+	}
 
 	// Subtasks created without explicit repositories inherit the parent's, so
 	// an inherit_parent subtask resolves a repo at launch and can reuse the
@@ -155,6 +158,22 @@ func (s *Service) validateCreateTaskRequest(req *CreateTaskRequest) error {
 	}
 	if req.IsEphemeral && req.WorkflowID != "" {
 		return fmt.Errorf("workflow_id must be empty for ephemeral tasks")
+	}
+	return nil
+}
+
+// validateSubtaskDepth prevents nesting deeper than one level for kanban
+// (non-office) tasks. Office task trees intentionally allow arbitrary depth.
+func (s *Service) validateSubtaskDepth(ctx context.Context, req *CreateTaskRequest) error {
+	if req.ParentID == "" {
+		return nil
+	}
+	parent, err := s.tasks.GetTask(ctx, req.ParentID)
+	if err != nil {
+		return fmt.Errorf("invalid parent_id: %w", err)
+	}
+	if parent.ParentID != "" && !parent.IsFromOffice {
+		return fmt.Errorf("cannot create a subtask of a subtask — maximum nesting depth is 1 for kanban tasks. Create a sibling task under the same parent or a top-level task instead")
 	}
 	return nil
 }

@@ -509,6 +509,67 @@ func TestResolveTaskRepositories_EphemeralParent_Rejected(t *testing.T) {
 	assert.Contains(t, err.Error(), "ephemeral")
 }
 
+func TestResolveTaskRepositories_SubtaskParent_Rejected(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+
+	// Seed workspace, non-office workflow, root task, and a subtask
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
+	root, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		WorkflowID:  "wf-1",
+		Title:       "Root task",
+	})
+	require.NoError(t, err)
+	child, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		WorkflowID:  "wf-1",
+		ParentID:    root.ID,
+		Title:       "Subtask",
+	})
+	require.NoError(t, err)
+
+	log := testLogger(t)
+	h := &Handlers{taskSvc: svc, logger: log.WithFields()}
+
+	_, err = h.resolveTaskRepositories(ctx, child.ID, "", nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "maximum nesting depth is 1")
+}
+
+func TestResolveTaskRepositories_OfficeSubtaskParent_Allowed(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+
+	// Seed office workspace (office workflow stamps IsFromOffice = true)
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-office", Name: "Office"}))
+	_, err := repo.EnsureOfficeWorkflow(ctx, "ws-office")
+	require.NoError(t, err)
+
+	root, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: "ws-office",
+		Title:       "Root office task",
+		ProjectID:   "proj-1",
+	})
+	require.NoError(t, err)
+	child, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: "ws-office",
+		ParentID:    root.ID,
+		Title:       "Office subtask",
+		ProjectID:   "proj-1",
+	})
+	require.NoError(t, err)
+
+	log := testLogger(t)
+	h := &Handlers{taskSvc: svc, logger: log.WithFields()}
+
+	result, err := h.resolveTaskRepositories(ctx, child.ID, "", nil)
+	require.NoError(t, err)
+	assert.Equal(t, "ws-office", result.WorkspaceID)
+	assert.Equal(t, root.WorkflowID, result.WorkflowID)
+}
+
 func TestResolveTaskRepositories_ExplicitRepos_InheritsSourceWorkspace(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	ctx := context.Background()

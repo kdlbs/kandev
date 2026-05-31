@@ -523,6 +523,9 @@ func (h *Handlers) resolveTaskRepositories(
 		if parent.IsEphemeral {
 			return taskRepoResult{}, fmt.Errorf("cannot create subtasks of an ephemeral task (quick chat); omit parent_id to create a top-level task")
 		}
+		if parent.ParentID != "" && !parent.IsFromOffice {
+			return taskRepoResult{}, fmt.Errorf("cannot create a subtask of a subtask — maximum nesting depth is 1 for kanban tasks. Create a sibling task under the same parent or a top-level task instead")
+		}
 		repos := explicitRepos
 		if repos == nil {
 			repos = inheritedRepoInputs(parent.Repositories)
