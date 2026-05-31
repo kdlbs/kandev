@@ -290,7 +290,7 @@ function RepeatedToolSummary({
         aria-expanded={expanded}
         onClick={() => setExpanded((prev) => !prev)}
         className={cn(
-          "flex w-full items-center gap-2 rounded px-2 py-1 -mx-2 text-left",
+          "flex w-full items-center gap-2 rounded px-2 py-1 -mx-2 text-left cursor-pointer",
           "hover:bg-muted/40 transition-colors",
         )}
       >
