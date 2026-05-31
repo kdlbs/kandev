@@ -48,6 +48,14 @@ export function planSelfUpdate(
   const commands: PlannedCommand[] = [];
 
   if (install.kind === "homebrew") {
+    // `brew upgrade` installs the tap formula's current version; it can't be
+    // pinned to intent.target_version the way npm/npx can (Homebrew has no
+    // stable "install version X" without a separate versioned formula). In
+    // practice both target_version and the formula derive from the same latest
+    // GitHub release, so they match. If the formula lags, the restarted backend
+    // reports the older version and the frontend progress poll (which waits for
+    // info.version === target_version) times out gracefully rather than
+    // reporting a false success.
     commands.push({ command: "brew", args: ["upgrade", "kandev"] });
     // Re-run service install via the upgraded `kandev` wrapper (resolved on
     // PATH), NOT `node <cli_entry>`. Homebrew installs into version-pinned

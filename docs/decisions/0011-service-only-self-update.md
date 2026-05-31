@@ -25,7 +25,7 @@ The backend returns this state from `GET /api/v1/system/updates`. The frontend r
 `POST /api/v1/system/updates/apply` writes an intent file and starts a helper outside the running service's lifetime:
 
 - Linux user services use `systemd-run --user --collect`.
-- macOS user agents use `launchctl submit`.
+- macOS user agents use a one-shot transient LaunchAgent plist (`RunAtLoad=true`, `KeepAlive=false`) bootstrapped via `launchctl bootstrap`. (`launchctl submit` was rejected: its implicit KeepAlive re-ran the one-shot helper in a loop.)
 - E2E/dev tests can fake the helper with `KANDEV_E2E_MOCK=true`.
 
 The CLI owns the helper planner through a hidden `kandev service self-update --intent <path>` command. It upgrades the package via Homebrew, npm, or npx, re-runs `kandev service install`, then restarts the service.
