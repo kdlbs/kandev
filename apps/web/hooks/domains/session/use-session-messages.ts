@@ -7,7 +7,7 @@ import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
 
 const INITIAL_FETCH_LIMIT = 100;
 const BACKFILL_PAGE_LIMIT = 100;
-const MAX_AUTO_BACKFILL_PAGES = 10;
+export const MAX_AUTO_BACKFILL_PAGES = 10;
 
 export function hasUserOrAgentMessage(messages: Message[]): boolean {
   return messages.some(

@@ -30,6 +30,7 @@ import {
   hasUserOrAgentMessage,
   runBackfillRound,
   autoBackfillUntilUserMessage,
+  MAX_AUTO_BACKFILL_PAGES,
 } from "./use-session-messages";
 
 function makeMessage(overrides: Partial<Message>): Message {
@@ -198,7 +199,7 @@ describe("autoBackfillUntilUserMessage", () => {
     });
     const store = makeStore({ messages: [], hasMore: true, oldestCursor: "cursor-0" });
     await autoBackfillUntilUserMessage("sess-1", store as never);
-    expect(mockListTaskSessionMessages).toHaveBeenCalledTimes(10);
+    expect(mockListTaskSessionMessages).toHaveBeenCalledTimes(MAX_AUTO_BACKFILL_PAGES);
   });
 
   it("stops after round 1 once a user message is prepended", async () => {

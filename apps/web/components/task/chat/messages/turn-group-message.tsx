@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, memo } from "react";
+import { useState, useCallback, memo, useMemo } from "react";
 import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { GridSpinner } from "@/components/grid-spinner";
 import { cn, transformPathsInText } from "@/lib/utils";
@@ -183,22 +183,20 @@ function getCompleteShellExec(message: Message): ShellExecPayload | null {
   return metadata.normalized?.shell_exec ?? null;
 }
 
-function readZeroExitCode(shellExec: ShellExecPayload): number | null {
-  const output = shellExec?.output;
-  const exitCode = output?.exit_code ?? 0;
-  return exitCode === 0 ? exitCode : null;
+function isZeroExitCode(shellExec: ShellExecPayload): boolean {
+  const exitCode = shellExec?.output?.exit_code;
+  return exitCode === 0;
 }
 
 function readShellExecSummary(message: Message): ShellExecSummary | null {
   const shellExec = getCompleteShellExec(message);
   if (!shellExec) return null;
-  const exitCode = readZeroExitCode(shellExec);
-  if (exitCode === null) return null;
+  if (!isZeroExitCode(shellExec)) return null;
   const output = shellExec.output;
   return {
     command: shellExec?.command ?? message.content,
     workDir: shellExec?.work_dir ?? "",
-    exitCode,
+    exitCode: 0,
     stdout: output?.stdout ?? "",
     stderr: output?.stderr ?? "",
   };
@@ -339,9 +337,10 @@ function TurnGroupContent({
     taskState,
     onScrollToMessage,
   };
+  const compacted = useMemo(() => compactTurnGroupMessages(group.messages), [group.messages]);
   return (
     <div className="ml-2 pl-4 border-l-2 border-border/30 mt-1 space-y-2">
-      {compactTurnGroupMessages(group.messages).map((entry) =>
+      {compacted.map((entry) =>
         entry.kind === "message" ? (
           renderMessageEntry(entry.message, renderProps)
         ) : (
