@@ -445,9 +445,12 @@ export function countGroupTasks(
   subTasksByParentId: Map<string, TaskSwitcherItem[]>,
 ): number {
   let total = 0;
+  const visited = new Set<string>();
   const stack = [...rootTasks];
   while (stack.length > 0) {
     const task = stack.pop()!;
+    if (visited.has(task.id)) continue;
+    visited.add(task.id);
     total += 1;
     const children = subTasksByParentId.get(task.id);
     if (children) stack.push(...children);

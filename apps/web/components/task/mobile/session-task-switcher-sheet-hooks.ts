@@ -312,6 +312,7 @@ function buildKanbanTaskUpsert(
   const taskSessionId = meta?.taskSessionId ?? null;
   return {
     id: task.id,
+    parentTaskId: task.parent_id ?? undefined,
     workflowStepId: task.workflow_step_id,
     title: task.title,
     description: task.description,

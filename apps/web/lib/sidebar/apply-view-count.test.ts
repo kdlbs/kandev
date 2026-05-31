@@ -34,4 +34,12 @@ describe("countGroupTasks — recursive subtree count", () => {
     // (r1 + c1 + g1) + (r2) = 4
     expect(countGroupTasks([task("r1"), task("r2")], subMap)).toBe(4);
   });
+
+  it("terminates on cyclic parent links instead of looping forever", () => {
+    const subMap = new Map([
+      ["a", [task("b", "a")]],
+      ["b", [task("a", "b")]],
+    ]);
+    expect(countGroupTasks([task("a")], subMap)).toBe(2);
+  });
 });
