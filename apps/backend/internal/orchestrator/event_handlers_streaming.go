@@ -420,14 +420,14 @@ func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID 
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.String("new_state", string(nextState)))
-		return session
+	} else {
+		s.logger.Debug("task session state updated",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("old_state", string(oldState)),
+			zap.String("new_state", string(nextState)))
+		s.publishTaskSessionStateChanged(ctx, taskID, sessionID, oldState, nextState, errorMessage, authoritativeUpdatedAt, session)
 	}
-	s.logger.Debug("task session state updated",
-		zap.String("task_id", taskID),
-		zap.String("session_id", sessionID),
-		zap.String("old_state", string(oldState)),
-		zap.String("new_state", string(nextState)))
-	s.publishTaskSessionStateChanged(ctx, taskID, sessionID, oldState, nextState, errorMessage, authoritativeUpdatedAt, session)
 
 	// Auto-promote another session to primary when the current primary enters a terminal state
 	s.maybePromotePrimary(ctx, taskID, sessionID, nextState)
