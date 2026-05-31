@@ -4,6 +4,7 @@ import type {
   SentryConfig,
   SentryIssue,
   SentryIssueWatch,
+  SentryOrganization,
   SentryProject,
   SentrySearchFilter,
   SentrySearchResult,
@@ -45,6 +46,13 @@ export async function testSentryConnection(secret?: string, options?: ApiRequest
       body: JSON.stringify(secret ? { secret } : {}),
     },
   });
+}
+
+export async function listSentryOrganizations(options?: ApiRequestOptions) {
+  return fetchJson<{ organizations: SentryOrganization[] }>(
+    `/api/v1/sentry/organizations`,
+    options,
+  );
 }
 
 export async function listSentryProjects(options?: ApiRequestOptions) {

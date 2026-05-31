@@ -132,6 +132,42 @@ func TestHTTPListProjects_NotConfigured_Returns503(t *testing.T) {
 	}
 }
 
+func TestHTTPListOrganizations_ReturnsOrganizations(t *testing.T) {
+	ctrl, router, client := newTestController(t)
+	seedConfig(t, ctrl)
+	client.listOrganizationsFn = func() ([]SentryOrganization, error) {
+		return []SentryOrganization{{ID: "1", Slug: "acme", Name: "Acme"}}, nil
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sentry/organizations", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Organizations []SentryOrganization `json:"organizations"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Organizations) != 1 || resp.Organizations[0].Slug != "acme" {
+		t.Errorf("organizations = %+v", resp.Organizations)
+	}
+}
+
+func TestHTTPListOrganizations_NotConfigured_Returns503(t *testing.T) {
+	_, router, _ := newTestController(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sentry/organizations", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), `"code":"SENTRY_NOT_CONFIGURED"`) {
+		t.Errorf("missing code in body: %s", w.Body.String())
+	}
+}
+
 func TestHTTPSetConfig_BadJSON(t *testing.T) {
 	_, router, _ := newTestController(t)
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/sentry/config", strings.NewReader("not-json"))

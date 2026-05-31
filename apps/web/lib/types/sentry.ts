@@ -29,6 +29,12 @@ export interface TestSentryConnectionResult {
   error?: string;
 }
 
+export interface SentryOrganization {
+  id: string;
+  slug: string;
+  name: string;
+}
+
 export interface SentryProject {
   id: string;
   slug: string;

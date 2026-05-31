@@ -200,6 +200,15 @@ func (s *Service) RecordAuthHealth(ctx context.Context) {
 	}
 }
 
+// ListOrganizations returns the organizations the stored token can access.
+func (s *Service) ListOrganizations(ctx context.Context) ([]SentryOrganization, error) {
+	client, err := s.clientFor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return client.ListOrganizations(ctx)
+}
+
 // ListProjects returns the projects the stored token can access.
 func (s *Service) ListProjects(ctx context.Context) ([]SentryProject, error) {
 	client, err := s.clientFor(ctx)

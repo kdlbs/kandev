@@ -49,6 +49,14 @@ type TestConnectionResult struct {
 	Error       string `json:"error,omitempty"`
 }
 
+// SentryOrganization is the minimal shape used by the organization selector on
+// the settings page.
+type SentryOrganization struct {
+	ID   string `json:"id"`
+	Slug string `json:"slug"`
+	Name string `json:"name"`
+}
+
 // SentryProject is the minimal shape used by the project selector on the
 // settings page and by the issue browser to scope searches.
 type SentryProject struct {

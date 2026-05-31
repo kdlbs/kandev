@@ -11,10 +11,11 @@ import (
 // shared instance per process, driven by HTTP control routes mounted in mock
 // mode.
 type MockClient struct {
-	mu         sync.RWMutex
-	authResult *TestConnectionResult
-	projects   []SentryProject
-	issues     map[string]*SentryIssue // short ID → issue
+	mu            sync.RWMutex
+	authResult    *TestConnectionResult
+	organizations []SentryOrganization
+	projects      []SentryProject
+	issues        map[string]*SentryIssue // short ID → issue
 	// issueOrder preserves insertion order so SearchIssues returns a stable
 	// sequence — Go map range is randomised.
 	issueOrder []string
@@ -45,6 +46,14 @@ func (m *MockClient) TestAuth(context.Context) (*TestConnectionResult, error) {
 	}
 	r := *m.authResult
 	return &r, nil
+}
+
+func (m *MockClient) ListOrganizations(context.Context) ([]SentryOrganization, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]SentryOrganization, len(m.organizations))
+	copy(out, m.organizations)
+	return out, nil
 }
 
 func (m *MockClient) ListProjects(context.Context) ([]SentryProject, error) {
@@ -135,6 +144,14 @@ func (m *MockClient) SetAuthResult(r *TestConnectionResult) {
 	m.authResult = r
 }
 
+func (m *MockClient) SetOrganizations(organizations []SentryOrganization) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := make([]SentryOrganization, len(organizations))
+	copy(cp, organizations)
+	m.organizations = cp
+}
+
 func (m *MockClient) SetProjects(projects []SentryProject) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -173,6 +190,7 @@ func (m *MockClient) Reset() {
 		DisplayName: "Mock User",
 		Email:       "mock@example.com",
 	}
+	m.organizations = nil
 	m.projects = nil
 	m.issues = make(map[string]*SentryIssue)
 	m.issueOrder = nil

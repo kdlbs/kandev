@@ -69,6 +69,7 @@ func (f *fakeSecretStore) Exists(_ context.Context, id string) (bool, error) {
 type fakeClient struct {
 	testAuthFn     func() (*TestConnectionResult, error)
 	getIssueFn     func(id string) (*SentryIssue, error)
+	listOrganizationsFn func() ([]SentryOrganization, error)
 	listProjectsFn func() ([]SentryProject, error)
 	searchIssuesFn func(filter SearchFilter, cursor string) (*SearchResult, error)
 }
@@ -78,6 +79,13 @@ func (c *fakeClient) TestAuth(context.Context) (*TestConnectionResult, error) {
 		return c.testAuthFn()
 	}
 	return &TestConnectionResult{OK: true}, nil
+}
+
+func (c *fakeClient) ListOrganizations(context.Context) ([]SentryOrganization, error) {
+	if c.listOrganizationsFn != nil {
+		return c.listOrganizationsFn()
+	}
+	return nil, nil
 }
 
 func (c *fakeClient) ListProjects(context.Context) ([]SentryProject, error) {

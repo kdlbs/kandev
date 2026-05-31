@@ -33,6 +33,7 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.PUT("/config", c.httpSetConfig)
 	api.DELETE("/config", c.httpDeleteConfig)
 	api.POST("/config/test", c.httpTestConfig)
+	api.GET("/organizations", c.httpListOrganizations)
 	api.GET("/projects", c.httpListProjects)
 	api.GET("/issues", c.httpSearchIssues)
 	api.GET("/issues/:id", c.httpGetIssue)
@@ -90,6 +91,15 @@ func (c *Controller) httpTestConfig(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, result)
+}
+
+func (c *Controller) httpListOrganizations(ctx *gin.Context) {
+	organizations, err := c.service.ListOrganizations(ctx.Request.Context())
+	if err != nil {
+		c.writeClientError(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"organizations": organizations})
 }
 
 func (c *Controller) httpListProjects(ctx *gin.Context) {

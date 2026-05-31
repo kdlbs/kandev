@@ -29,6 +29,7 @@ func (c *MockController) RegisterRoutes(router *gin.Engine) {
 	api := router.Group("/api/v1/sentry/mock")
 	api.PUT("/auth-result", c.setAuthResult)
 	api.PUT("/auth-health", c.setAuthHealth)
+	api.POST("/organizations", c.setOrganizations)
 	api.POST("/projects", c.setProjects)
 	api.POST("/issues", c.addIssues)
 	api.PUT("/get-issue-error", c.setGetIssueError)
@@ -60,6 +61,18 @@ func (c *MockController) setAuthHealth(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"set": true})
+}
+
+func (c *MockController) setOrganizations(ctx *gin.Context) {
+	var req struct {
+		Organizations []SentryOrganization `json:"organizations"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	c.mock.SetOrganizations(req.Organizations)
+	ctx.JSON(http.StatusOK, gin.H{"count": len(req.Organizations)})
 }
 
 func (c *MockController) setProjects(ctx *gin.Context) {

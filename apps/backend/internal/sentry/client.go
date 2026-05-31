@@ -14,6 +14,7 @@ var ErrNotConfigured = errors.New("sentry: not configured")
 // real implementation is RESTClient; tests can substitute a fake.
 type Client interface {
 	TestAuth(ctx context.Context) (*TestConnectionResult, error)
+	ListOrganizations(ctx context.Context) ([]SentryOrganization, error)
 	ListProjects(ctx context.Context) ([]SentryProject, error)
 	SearchIssues(ctx context.Context, filter SearchFilter, cursor string) (*SearchResult, error)
 	GetIssue(ctx context.Context, idOrShortID string) (*SentryIssue, error)

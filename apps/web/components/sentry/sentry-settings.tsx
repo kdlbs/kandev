@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { IconBrandSentry, IconInfoCircle } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
@@ -24,11 +24,13 @@ import {
   saveSentryConfig,
   deleteSentryConfig,
   testSentryConnection,
+  listSentryOrganizations,
   listSentryProjects,
 } from "@/lib/api/domains/sentry-api";
 import {
   SENTRY_AUTH_METHOD,
   type SentryConfig,
+  type SentryOrganization,
   type SentryProject,
   type TestSentryConnectionResult,
 } from "@/lib/types/sentry";
@@ -380,6 +382,25 @@ function useProjectsLoader(hasSecret: boolean | undefined, lastOk: boolean | und
   return { projects: projects ?? [], loadingProjects: projects === null && !!hasSecret };
 }
 
+function useOrgsLoader(hasSecret: boolean | undefined, lastOk: boolean | undefined) {
+  const [organizations, setOrganizations] = useState<SentryOrganization[] | null>(null);
+  useEffect(() => {
+    if (!hasSecret) return;
+    let cancelled = false;
+    listSentryOrganizations()
+      .then((res) => {
+        if (!cancelled) setOrganizations(res.organizations ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setOrganizations([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hasSecret, lastOk]);
+  return { organizations: organizations ?? [] };
+}
+
 function useSentrySettings() {
   const { toast } = useToast();
   const [config, setConfig] = useState<SentryConfig | null>(null);
@@ -388,14 +409,15 @@ function useSentrySettings() {
   const [testResult, setTestResult] = useState<TestSentryConnectionResult | null>(null);
   const health = configToHealth(config);
   const { projects, loadingProjects } = useProjectsLoader(config?.hasSecret, config?.lastOk);
-  // Organizations the token can see, derived from the projects payload (Sentry
-  // has no cheap org-list endpoint for user tokens). The saved org is kept in
-  // the list so it stays selectable even if it currently has no visible project.
-  const orgs = useMemo(() => {
-    const set = new Set(projects.map((p) => p.orgSlug).filter(Boolean));
+  const { organizations } = useOrgsLoader(config?.hasSecret, config?.lastOk);
+  // Organizations the token can see, fetched from the backend. The saved org is
+  // kept in the list so it stays selectable even if it is not currently
+  // returned (e.g. the token's org membership changed).
+  const orgs = (() => {
+    const set = new Set(organizations.map((o) => o.slug).filter(Boolean));
     if (form.defaultOrgSlug) set.add(form.defaultOrgSlug);
     return Array.from(set).sort();
-  }, [projects, form.defaultOrgSlug]);
+  })();
 
   const load = useCallback(async () => {
     setLoading(true);
