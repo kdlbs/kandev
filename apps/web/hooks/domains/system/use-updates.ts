@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
-import { applyUpdate, checkUpdates, fetchUpdates } from "@/lib/api/domains/system-api";
+import { checkUpdates, fetchUpdates } from "@/lib/api/domains/system-api";
 
 export function useUpdates() {
   const updates = useAppStore((s) => s.system.updates);
@@ -10,7 +10,6 @@ export function useUpdates() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isChecking, setIsChecking] = useState(false);
-  const [isApplying, setIsApplying] = useState(false);
 
   const reload = useCallback(async () => {
     setIsLoading(true);
@@ -45,23 +44,10 @@ export function useUpdates() {
     }
   }, [setSystemUpdates]);
 
-  const apply = useCallback(async () => {
-    setIsApplying(true);
-    setError(null);
-    try {
-      return await applyUpdate("UPDATE");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      throw e;
-    } finally {
-      setIsApplying(false);
-    }
-  }, []);
-
   useEffect(() => {
     if (updates) return;
     void reload();
   }, [updates, reload]);
 
-  return { updates, isLoading, isChecking, isApplying, error, reload, check, apply };
+  return { updates, isLoading, isChecking, error, reload, check };
 }
