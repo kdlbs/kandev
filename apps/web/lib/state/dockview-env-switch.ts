@@ -334,7 +334,22 @@ function tryFastEnvSwitch(params: EnvSwitchParams): LayoutGroupIds | null {
   applyPinnedColumnSizes(api, saved as SerializedDockview | null, params.safeWidth);
 
   api.layout(params.safeWidth, params.safeHeight);
-  return applyLayoutFixups(api);
+  return applyLayoutFixups(api, savedRightColumnWidth(saved as SerializedDockview | null));
+}
+
+/**
+ * The per-env saved width of the right column (the last grid-root child) for a
+ * default-preset layout, or undefined when the saved layout has no distinct
+ * right column. Forwarded to `applyLayoutFixups` so the fixups pass anchors the
+ * pinned right target to this stable saved width instead of dockview's
+ * transient post-`fromJSON` live size (the dockview-wrong-width drift).
+ */
+export function savedRightColumnWidth(saved: SerializedDockview | null): number | undefined {
+  if (!saved) return undefined;
+  const sizes = extractSavedColumnSizes(saved);
+  if (!sizes || sizes.length < 3) return undefined;
+  const w = sizes[sizes.length - 1];
+  return Number.isFinite(w) && w > 0 ? w : undefined;
 }
 
 /** Extract per-column sizes from a saved SerializedDockview grid root. */
@@ -497,7 +512,7 @@ export function performEnvSwitch(params: EnvSwitchParams): LayoutGroupIds {
           livePanelIdsAfter: api.panels.map((p) => p.id),
         });
       }
-      return applyLayoutFixups(api);
+      return applyLayoutFixups(api, savedRightColumnWidth(saved as SerializedDockview));
     } catch (err) {
       console.warn("performEnvSwitch: fromJSON threw", err);
       debug("performEnvSwitch: fromJSON threw, falling through to default", { newEnvId, err });

@@ -153,36 +153,6 @@ export function setupSashDragCapToggle(api: DockviewReadyEvent["api"]): () => vo
   };
 }
 
-function trackPinnedWidths(api: DockviewReadyEvent["api"]): void {
-  const store = useDockviewStore.getState();
-  if (store.isRestoringLayout) return;
-  if (api.hasMaximizedGroup() || store.preMaximizeLayout !== null) return;
-  const sv = getRootSplitview(api);
-  if (!sv || sv.length < 2) return;
-  try {
-    // The sidebar width is NOT tracked here: it is a global pref written only
-    // by a genuine sash drag (see setupSashDragCapToggle). Capturing the live
-    // width on every layout change would persist dockview's transient
-    // proportional-rebalance widths (e.g. 320→213 on a monitor shrink) and
-    // fight enforcePinnedTargets. Right column is still mirrored below.
-    //
-    // Right column is the last grid index when present. Skip when there is
-    // no right column (compact preset, rightPanelsVisible=false).
-    if (store.rightPanelsVisible) {
-      const rightIdx = sv.length - 1;
-      const rightW = sv.getViewSize(rightIdx);
-      if (rightW > 50) {
-        const current = store.pinnedWidths.get("right");
-        if (current !== rightW) {
-          store.setPinnedWidth("right", rightW);
-        }
-      }
-    }
-  } catch {
-    /* noop */
-  }
-}
-
 /**
  * Keep dockview's internal grid width in sync with the live DOM container.
  *
@@ -225,11 +195,8 @@ export function setupGroupTracking(api: DockviewReadyEvent["api"]): () => void {
     useDockviewStore.setState({ activeGroupId: group?.id ?? null });
   });
   useDockviewStore.setState({ activeGroupId: api.activeGroup?.id ?? null });
-  const d2 = api.onDidLayoutChange(() => trackPinnedWidths(api));
-  trackPinnedWidths(api);
   return () => {
     d1.dispose();
-    d2.dispose();
   };
 }
 

@@ -2,6 +2,7 @@ import type { DockviewReadyEvent, SerializedDockview } from "dockview-react";
 import type { StoreApi } from "zustand";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { applyLayoutFixups } from "@/lib/state/dockview-layout-builders";
+import { savedRightColumnWidth } from "@/lib/state/dockview-env-switch";
 import { isLayoutShapeHealthy } from "@/lib/state/dockview-layout-health";
 import { measureDockviewContainer } from "@/lib/state/dockview-measure";
 import { isEnvScopedDockviewComponent } from "@/lib/state/dockview-env-scoped-components";
@@ -164,12 +165,19 @@ function applySavedMaximize(api: DockviewReadyEvent["api"], savedMax: NonNullabl
   });
 }
 
-function applyFixupsWithMaximize(api: DockviewReadyEvent["api"], envId: string | null): void {
+function applyFixupsWithMaximize(
+  api: DockviewReadyEvent["api"],
+  envId: string | null,
+  savedRightWidth?: number,
+): void {
   const savedMax = envId ? getEnvMaximizeState(envId) : null;
   if (savedMax) {
     applySavedMaximize(api, savedMax);
   } else {
-    const ids = applyLayoutFixups(api);
+    // Anchor the right column to its per-env saved width (see
+    // `captureRightTarget`) so a page reload restores the task's remembered
+    // width instead of resetting it to the default.
+    const ids = applyLayoutFixups(api, savedRightWidth);
     useDockviewStore.setState(ids);
   }
 }
@@ -229,7 +237,7 @@ function tryRestoreEnvLayout(
     });
   }
   api.fromJSON(sanitized as SerializedDockview);
-  applyFixupsWithMaximize(api, envId);
+  applyFixupsWithMaximize(api, envId, savedRightColumnWidth(sanitized as SerializedDockview));
   return true;
 }
 

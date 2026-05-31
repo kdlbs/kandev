@@ -117,14 +117,34 @@ describe("applyLayoutFixups — pinned target capture", () => {
     expect(setPinnedTarget).toHaveBeenCalledWith("sidebar", SIDEBAR_CAP);
   });
 
-  it("records both targets in a real 3-column layout", () => {
-    mockSplitview([350, 720, 400]); // sidebar, center, right
+  it("uses the column default for the pinned right column when no saved width is given", () => {
+    // Regression (dockview-wrong-width): the default-preset right column must
+    // anchor to a STABLE width — the per-env saved width, or the column default
+    // when none — NOT dockview's post-fromJSON live size (400 here). Capturing
+    // the live size ratcheted the column wider on every restore. Mirrors
+    // captureSidebarTarget, which anchors to the pref/default, never the live
+    // size. getPinnedWidth is mocked to 350 (the default).
+    mockSplitview([350, 720, 400]); // live right = 400 (transient/rescaled)
     const api = makeApi([SIDEBAR_GROUP, CENTER_GROUP, RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP]);
 
     applyLayoutFixups(api);
 
     expect(setPinnedTarget).toHaveBeenCalledWith("sidebar", 350);
-    expect(setPinnedTarget).toHaveBeenCalledWith("right", 400);
+    expect(setPinnedTarget).toHaveBeenCalledWith("right", 350); // default, NOT live 400
+    expect(setPinnedTarget).not.toHaveBeenCalledWith("right", 400);
+  });
+
+  it("anchors the pinned right target to the saved per-env width, not the live size", () => {
+    // A restore passes the env's saved right width; it wins over both the live
+    // size (400) and the default (350) so a deliberately-resized task restores
+    // its own remembered width.
+    mockSplitview([350, 720, 400]);
+    const api = makeApi([SIDEBAR_GROUP, CENTER_GROUP, RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP]);
+
+    applyLayoutFixups(api, 420);
+
+    expect(setPinnedTarget).toHaveBeenCalledWith("right", 420);
+    expect(setPinnedTarget).not.toHaveBeenCalledWith("right", 400);
   });
 
   it("derives the caps from api.width, not the window.innerWidth fallback", () => {
@@ -153,11 +173,11 @@ describe("applyLayoutFixups — pinned target capture", () => {
     expect(setPinnedTarget).toHaveBeenCalledWith("right", 420);
   });
 
-  it("clamps an over-cap right target down to the cap", () => {
-    mockSplitview([350, 200, 1200]); // right (1200) exceeds RIGHT_CAP (1029)
+  it("clamps an over-cap saved right width down to the cap", () => {
+    mockSplitview([350, 200, 800]);
     const api = makeApi([SIDEBAR_GROUP, CENTER_GROUP, RIGHT_TOP_GROUP]);
 
-    applyLayoutFixups(api);
+    applyLayoutFixups(api, 1200); // saved 1200 exceeds RIGHT_CAP (1029)
 
     expect(setPinnedTarget).toHaveBeenCalledWith("right", RIGHT_CAP);
   });

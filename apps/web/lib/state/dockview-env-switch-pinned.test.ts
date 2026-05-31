@@ -43,6 +43,7 @@ vi.mock("./layout-manager", () => {
 
 import { getEnvLayout } from "@/lib/local-storage";
 import { getRootSplitview, savedLayoutMatchesLive } from "./layout-manager";
+import { applyLayoutFixups } from "./dockview-layout-builders";
 
 function makeMockApi(): EnvSwitchParams["api"] {
   return {
@@ -188,5 +189,10 @@ describe("performEnvSwitch — pinned column resize after fast-path", () => {
     expect(resizeView).toHaveBeenCalledWith(0, 300);
     expect(resizeView).toHaveBeenCalledWith(2, 420);
     expect(resizeView).not.toHaveBeenCalledWith(1, expect.anything());
+
+    // The saved right width is also forwarded to applyLayoutFixups so the
+    // fixups pass anchors the right target to the per-env saved width (420)
+    // rather than re-capturing dockview's transient post-fromJSON live size.
+    expect(applyLayoutFixups).toHaveBeenCalledWith(expect.anything(), 420);
   });
 });
