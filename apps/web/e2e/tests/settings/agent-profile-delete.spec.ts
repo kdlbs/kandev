@@ -98,6 +98,108 @@ test.describe("Agent profile deletion", () => {
     );
   });
 
+  test("deleting profile referenced by a watcher shows watcher in conflict dialog", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(60_000);
+
+    // Linear config has to be present before /api/v1/linear/watches/issue
+    // accepts the create POST; the auth-health probe is also what surfaces
+    // hasSecret on the watch row's downstream consumers.
+    await apiClient.setLinearConfig({ secret: "lin_api_xxx" });
+    await apiClient.waitForIntegrationAuthHealthy("linear");
+
+    const { agents } = await apiClient.listAgents();
+    const agent = agents[0];
+    const profile = await apiClient.createAgentProfile(agent.id, "Watched Profile", {
+      model: agent.profiles[0].model,
+    });
+
+    await apiClient.createLinearIssueWatch({
+      workspaceId: seedData.workspaceId,
+      workflowId: seedData.workflowId,
+      workflowStepId: seedData.startStepId,
+      agentProfileId: profile.id,
+      filter: { teamKey: "ENG" },
+    });
+
+    await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
+    await expect(testPage.getByText("Delete profile", { exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
+
+    await testPage.getByRole("button", { name: "Delete", exact: true }).click();
+    const confirmDialog = testPage.getByRole("alertdialog");
+    await expect(confirmDialog).toBeVisible({ timeout: 10_000 });
+    await confirmDialog.getByRole("button", { name: "Delete", exact: true }).click();
+
+    // Conflict dialog pops with NO active sessions — only the watcher path.
+    // Without the cycle-5 frontend wiring the dialog would either not pop
+    // (sessions-only check) or pop empty (watchers ignored).
+    const conflictDialog = testPage.getByRole("alertdialog");
+    await expect(conflictDialog).toBeVisible({ timeout: 10_000 });
+    await expect(conflictDialog.getByText("Watchers (will be disabled):")).toBeVisible();
+    await expect(conflictDialog.getByText(/Linear:/)).toBeVisible();
+    await expect(conflictDialog.getByText(/team ENG/)).toBeVisible();
+
+    await conflictDialog.getByRole("button", { name: "Cancel" }).click();
+    await expect(conflictDialog).not.toBeVisible();
+  });
+
+  test("force-deleting profile with watcher disables the watcher row", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(60_000);
+
+    await apiClient.setLinearConfig({ secret: "lin_api_xxx" });
+    await apiClient.waitForIntegrationAuthHealthy("linear");
+
+    const { agents } = await apiClient.listAgents();
+    const agent = agents[0];
+    const profile = await apiClient.createAgentProfile(agent.id, "Watched ForceRemove", {
+      model: agent.profiles[0].model,
+    });
+
+    const watch = await apiClient.createLinearIssueWatch({
+      workspaceId: seedData.workspaceId,
+      workflowId: seedData.workflowId,
+      workflowStepId: seedData.startStepId,
+      agentProfileId: profile.id,
+      filter: { teamKey: "ENG" },
+    });
+    expect(watch.enabled).toBe(true);
+
+    await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
+    await expect(testPage.getByText("Delete profile", { exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
+
+    await testPage.getByRole("button", { name: "Delete", exact: true }).click();
+    const confirmDialog = testPage.getByRole("alertdialog");
+    await expect(confirmDialog).toBeVisible({ timeout: 10_000 });
+    await confirmDialog.getByRole("button", { name: "Delete", exact: true }).click();
+
+    const conflictDialog = testPage.getByRole("alertdialog");
+    await expect(conflictDialog).toBeVisible({ timeout: 10_000 });
+    await conflictDialog.getByRole("button", { name: "Delete Anyway" }).click();
+
+    await expect(testPage).toHaveURL(/\/settings\/agents$/, { timeout: 15_000 });
+
+    // The eager-disable path in prepareProfileDeletion (cycle 5 fix) must
+    // have flipped the watcher row to enabled=0 and stamped a cause —
+    // without it the watcher would stay live, orphaned at the now-deleted
+    // profile, and only self-heal whenever the next external issue happens
+    // to match its filter (could be never for a narrow filter).
+    const after = await apiClient.getLinearIssueWatch(seedData.workspaceId, watch.id);
+    expect(after).not.toBeNull();
+    expect(after!.enabled).toBe(false);
+    expect(after!.lastError ?? "").toContain(profile.id);
+  });
+
   test("force-deleting profile with active task succeeds after both confirmations", async ({
     testPage,
     apiClient,

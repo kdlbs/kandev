@@ -466,8 +466,9 @@ func (h *Handlers) httpDeleteProfile(c *gin.Context) {
 		var inUseErr *controller.ErrProfileInUseDetail
 		if errors.As(err, &inUseErr) {
 			c.JSON(http.StatusConflict, gin.H{
-				"error":           "agent profile is used by active session(s)",
+				"error":           "agent profile is used by active session(s) or watcher(s)",
 				"active_sessions": inUseErr.ActiveSessions,
+				"watchers":        inUseErr.Watchers,
 			})
 			return
 		}

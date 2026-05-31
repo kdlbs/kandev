@@ -14,10 +14,10 @@ import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/un
 import { ProfileFormFields, type ProfileFormData } from "@/components/settings/profile-form-fields";
 import { toAgentProfilePatch } from "@/app/settings/agents/[agentId]/agent-save-helpers";
 import { deleteAgentProfileAction, updateAgentProfileAction } from "@/app/actions/agents";
-import type { ActiveSessionInfo } from "@/lib/types/agent-profile-errors";
 import {
   AgentProfileDeleteConfirmDialog,
   AgentProfileDeleteConflictDialog,
+  type AgentProfileDeleteConflict,
 } from "@/components/settings/agent-profile-delete-dialog";
 import {
   ProfileEnvVarsSection,
@@ -293,7 +293,7 @@ function useProfileDelete(
   toast: ReturnType<typeof useToast>["toast"],
 ) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [conflictSessions, setConflictSessions] = useState<ActiveSessionInfo[] | null>(null);
+  const [conflict, setConflict] = useState<AgentProfileDeleteConflict | null>(null);
 
   const removeProfileFromStore = () => {
     const nextAgents = settingsAgents.map((agentItem: Agent) =>
@@ -318,7 +318,7 @@ function useProfileDelete(
     if (result.status === "ok") {
       removeProfileFromStore();
     } else if (result.status === "conflict") {
-      setConflictSessions(result.activeSessions);
+      setConflict({ activeSessions: result.activeSessions, watchers: result.watchers });
     } else {
       toast({ title: "Failed to delete profile", description: result.message, variant: "error" });
     }
@@ -326,7 +326,7 @@ function useProfileDelete(
 
   const handleForceDelete = async () => {
     const result = await deleteAgentProfileAction(draft.id, true);
-    setConflictSessions(null);
+    setConflict(null);
     if (result.status === "ok") {
       removeProfileFromStore();
     } else if (result.status === "error") {
@@ -339,8 +339,8 @@ function useProfileDelete(
     showDeleteConfirm,
     setShowDeleteConfirm,
     handleDeleteProfile,
-    conflictSessions,
-    setConflictSessions,
+    conflict,
+    setConflict,
     handleForceDelete,
   };
 }
@@ -349,8 +349,8 @@ type ProfileDeleteDialogsProps = {
   showDeleteConfirm: boolean;
   setShowDeleteConfirm: (open: boolean) => void;
   handleDeleteProfile: () => void;
-  conflictSessions: ActiveSessionInfo[] | null;
-  setConflictSessions: (sessions: ActiveSessionInfo[] | null) => void;
+  conflict: AgentProfileDeleteConflict | null;
+  setConflict: (c: AgentProfileDeleteConflict | null) => void;
   handleForceDelete: () => void;
 };
 
@@ -358,8 +358,8 @@ function ProfileDeleteDialogs({
   showDeleteConfirm,
   setShowDeleteConfirm,
   handleDeleteProfile,
-  conflictSessions,
-  setConflictSessions,
+  conflict,
+  setConflict,
   handleForceDelete,
 }: ProfileDeleteDialogsProps) {
   return (
@@ -373,9 +373,9 @@ function ProfileDeleteDialogs({
       />
 
       <AgentProfileDeleteConflictDialog
-        activeSessions={conflictSessions}
+        conflict={conflict}
         onOpenChange={(open) => {
-          if (!open) setConflictSessions(null);
+          if (!open) setConflict(null);
         }}
         onConfirm={handleForceDelete}
       />
@@ -488,8 +488,8 @@ function ProfileEditor({
     showDeleteConfirm,
     setShowDeleteConfirm,
     handleDeleteProfile,
-    conflictSessions,
-    setConflictSessions,
+    conflict,
+    setConflict,
     handleForceDelete,
   } = useProfileDelete(agent, draft, settingsAgents, syncAgentsToStore, toast);
 
@@ -531,8 +531,8 @@ function ProfileEditor({
         showDeleteConfirm={showDeleteConfirm}
         setShowDeleteConfirm={setShowDeleteConfirm}
         handleDeleteProfile={handleDeleteProfile}
-        conflictSessions={conflictSessions}
-        setConflictSessions={setConflictSessions}
+        conflict={conflict}
+        setConflict={setConflict}
         handleForceDelete={handleForceDelete}
       />
     </div>

@@ -106,8 +106,22 @@ func (f *fakeStore) DeleteAgentProfile(_ context.Context, id string) error {
 	return nil
 }
 
-func (f *fakeStore) GetAgentProfile(context.Context, string) (*models.AgentProfile, error) {
-	return nil, nil
+func (f *fakeStore) GetAgentProfile(_ context.Context, id string) (*models.AgentProfile, error) {
+	for _, list := range f.profiles {
+		for _, p := range list {
+			if p.ID == id {
+				return p, nil
+			}
+		}
+	}
+	return nil, sql.ErrNoRows
+}
+
+func (f *fakeStore) GetAgentProfileIncludingDeleted(ctx context.Context, id string) (*models.AgentProfile, error) {
+	// Delegate to the deleted_at-aware lookup; the fake does not model
+	// soft-delete state, so both methods see the same rows. This keeps
+	// nil dereferences out of any test that calls the new method.
+	return f.GetAgentProfile(ctx, id)
 }
 
 func (f *fakeStore) ListAgentProfiles(_ context.Context, agentID string) ([]*models.AgentProfile, error) {

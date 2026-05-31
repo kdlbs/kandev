@@ -729,25 +729,47 @@ func (r *sqliteRepository) DeleteAgentProfile(ctx context.Context, id string) er
 	return nil
 }
 
+// agentProfileSelectColumns is the SELECT projection used by every
+// AgentProfile read path. Extracted once so the next column added to
+// agent_profiles only has to land here — duplicating the list across
+// GetAgentProfile / GetAgentProfileIncludingDeleted / ListAgentProfiles
+// risks the soft-delete path silently scanning zero values for a freshly
+// added column, which is the same shape of bug this package fixes in
+// another layer (orphaned watchers vs. stale projection drift).
+const agentProfileSelectColumns = `
+	SELECT id, agent_id, name, agent_display_name, model, mode, migrated_from,
+		auto_approve, dangerously_skip_permissions, allow_indexing,
+		cli_passthrough, user_modified, plan, cli_flags,
+		COALESCE(env_vars, '[]'),
+		created_at, updated_at, deleted_at,
+		COALESCE(workspace_id, ''), COALESCE(role, ''), COALESCE(icon, ''),
+		COALESCE(reports_to, ''), COALESCE(skill_ids, '[]'),
+		COALESCE(desired_skills, '[]'), COALESCE(custom_prompt, ''),
+		COALESCE(status, 'idle'), COALESCE(pause_reason, ''),
+		last_run_finished_at,
+		COALESCE(max_concurrent_sessions, 1), COALESCE(cooldown_sec, 0),
+		COALESCE(skip_idle_runs, 0), COALESCE(consecutive_failures, 0),
+		COALESCE(failure_threshold, 3), COALESCE(executor_preference, ''),
+		COALESCE(budget_monthly_cents, 0),
+		COALESCE(settings, '{}'), COALESCE(permissions, '{}')
+	FROM agent_profiles`
+
 func (r *sqliteRepository) GetAgentProfile(ctx context.Context, id string) (*models.AgentProfile, error) {
-	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, agent_id, name, agent_display_name, model, mode, migrated_from,
-			auto_approve, dangerously_skip_permissions, allow_indexing,
-			cli_passthrough, user_modified, plan, cli_flags,
-			COALESCE(env_vars, '[]'),
-			created_at, updated_at, deleted_at,
-			COALESCE(workspace_id, ''), COALESCE(role, ''), COALESCE(icon, ''),
-			COALESCE(reports_to, ''), COALESCE(skill_ids, '[]'),
-			COALESCE(desired_skills, '[]'), COALESCE(custom_prompt, ''),
-			COALESCE(status, 'idle'), COALESCE(pause_reason, ''),
-			last_run_finished_at,
-			COALESCE(max_concurrent_sessions, 1), COALESCE(cooldown_sec, 0),
-			COALESCE(skip_idle_runs, 0), COALESCE(consecutive_failures, 0),
-			COALESCE(failure_threshold, 3), COALESCE(executor_preference, ''),
-			COALESCE(budget_monthly_cents, 0),
-			COALESCE(settings, '{}'), COALESCE(permissions, '{}')
-		FROM agent_profiles WHERE id = ? AND deleted_at IS NULL
-	`), id)
+	row := r.ro.QueryRowContext(ctx,
+		r.ro.Rebind(agentProfileSelectColumns+` WHERE id = ? AND deleted_at IS NULL`), id)
+	profile, err := scanAgentProfile(row)
+	if err != nil {
+		return nil, err
+	}
+	return r.applyLegacyBackfill(ctx, profile), nil
+}
+
+// GetAgentProfileIncludingDeleted returns the row even when soft-deleted.
+// Resolver and watcher self-heal callers use this to disambiguate
+// "row removed" (recoverable: orphan reference) from "row never existed".
+func (r *sqliteRepository) GetAgentProfileIncludingDeleted(ctx context.Context, id string) (*models.AgentProfile, error) {
+	row := r.ro.QueryRowContext(ctx,
+		r.ro.Rebind(agentProfileSelectColumns+` WHERE id = ?`), id)
 	profile, err := scanAgentProfile(row)
 	if err != nil {
 		return nil, err
@@ -756,24 +778,9 @@ func (r *sqliteRepository) GetAgentProfile(ctx context.Context, id string) (*mod
 }
 
 func (r *sqliteRepository) ListAgentProfiles(ctx context.Context, agentID string) ([]*models.AgentProfile, error) {
-	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT id, agent_id, name, agent_display_name, model, mode, migrated_from,
-			auto_approve, dangerously_skip_permissions, allow_indexing,
-			cli_passthrough, user_modified, plan, cli_flags,
-			COALESCE(env_vars, '[]'),
-			created_at, updated_at, deleted_at,
-			COALESCE(workspace_id, ''), COALESCE(role, ''), COALESCE(icon, ''),
-			COALESCE(reports_to, ''), COALESCE(skill_ids, '[]'),
-			COALESCE(desired_skills, '[]'), COALESCE(custom_prompt, ''),
-			COALESCE(status, 'idle'), COALESCE(pause_reason, ''),
-			last_run_finished_at,
-			COALESCE(max_concurrent_sessions, 1), COALESCE(cooldown_sec, 0),
-			COALESCE(skip_idle_runs, 0), COALESCE(consecutive_failures, 0),
-			COALESCE(failure_threshold, 3), COALESCE(executor_preference, ''),
-			COALESCE(budget_monthly_cents, 0),
-			COALESCE(settings, '{}'), COALESCE(permissions, '{}')
-		FROM agent_profiles WHERE agent_id = ? AND deleted_at IS NULL ORDER BY created_at DESC
-	`), agentID)
+	rows, err := r.ro.QueryContext(ctx,
+		r.ro.Rebind(agentProfileSelectColumns+` WHERE agent_id = ? AND deleted_at IS NULL ORDER BY created_at DESC`),
+		agentID)
 	if err != nil {
 		return nil, err
 	}

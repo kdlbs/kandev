@@ -13,9 +13,11 @@ type fakeLinearService struct {
 	reserveErr error
 	assignErr  error
 	releaseErr error
+	disableErr error
 	gotReserve []string
 	gotAssign  []string
 	gotRelease []string
+	gotDisable []string
 }
 
 func (f *fakeLinearService) ReserveIssueWatchTask(_ context.Context, watchID, id, _ string) (bool, error) {
@@ -31,6 +33,11 @@ func (f *fakeLinearService) AssignIssueWatchTaskID(_ context.Context, watchID, i
 func (f *fakeLinearService) ReleaseIssueWatchTask(_ context.Context, watchID, id string) error {
 	f.gotRelease = append(f.gotRelease, watchID+":"+id)
 	return f.releaseErr
+}
+
+func (f *fakeLinearService) DisableIssueWatchWithError(_ context.Context, watchID, cause string) error {
+	f.gotDisable = append(f.gotDisable, watchID+":"+cause)
+	return f.disableErr
 }
 
 func sampleLinearEvent() *linear.NewLinearIssueEvent {

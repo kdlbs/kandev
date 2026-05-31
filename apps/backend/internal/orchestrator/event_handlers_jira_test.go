@@ -13,14 +13,17 @@ import (
 // mockJiraService records dedup calls so tests can assert on the
 // reserve→assign→release contract used by handleNewJiraIssue.
 type mockJiraService struct {
-	reserveReturn  bool
-	reserveErr     error
-	reserveCalls   int
-	assignCalls    int
-	releaseCalls   int
-	lastWatchID    string
-	lastIssueKey   string
-	assignedTaskID string
+	reserveReturn      bool
+	reserveErr         error
+	reserveCalls       int
+	assignCalls        int
+	releaseCalls       int
+	lastWatchID        string
+	lastIssueKey       string
+	assignedTaskID     string
+	disableCalls       int
+	lastDisableWatchID string
+	lastDisableCause   string
 }
 
 func (m *mockJiraService) ReserveIssueWatchTask(_ context.Context, watchID, issueKey, _ string) (bool, error) {
@@ -38,6 +41,13 @@ func (m *mockJiraService) AssignIssueWatchTaskID(_ context.Context, _, _ string,
 
 func (m *mockJiraService) ReleaseIssueWatchTask(_ context.Context, _, _ string) error {
 	m.releaseCalls++
+	return nil
+}
+
+func (m *mockJiraService) DisableIssueWatchWithError(_ context.Context, watchID, cause string) error {
+	m.disableCalls++
+	m.lastDisableWatchID = watchID
+	m.lastDisableCause = cause
 	return nil
 }
 

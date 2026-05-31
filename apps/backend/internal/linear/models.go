@@ -203,8 +203,13 @@ type IssueWatch struct {
 	// See docs/specs/throttle-watcher-fanout/spec.md for the open-task definition.
 	MaxInflightTasks *int       `json:"maxInflightTasks,omitempty" db:"max_inflight_tasks"`
 	LastPolledAt     *time.Time `json:"lastPolledAt,omitempty" db:"last_polled_at"`
-	CreatedAt        time.Time  `json:"createdAt" db:"created_at"`
-	UpdatedAt        time.Time  `json:"updatedAt" db:"updated_at"`
+	// LastError / LastErrorAt are stamped when the dispatch pipeline self-
+	// heals the watcher (e.g. the bound agent profile was soft-deleted).
+	// Empty for a healthy watcher.
+	LastError   string     `json:"lastError,omitempty" db:"last_error"`
+	LastErrorAt *time.Time `json:"lastErrorAt,omitempty" db:"last_error_at"`
+	CreatedAt   time.Time  `json:"createdAt" db:"created_at"`
+	UpdatedAt   time.Time  `json:"updatedAt" db:"updated_at"`
 }
 
 // IssueWatchTask deduplicates task creation per (watch, issue) tuple. The

@@ -72,6 +72,8 @@ const createTablesSQL = `
 		-- the API layer. See docs/specs/throttle-watcher-fanout/.
 		max_inflight_tasks INTEGER DEFAULT 5,
 		last_polled_at DATETIME,
+		last_error TEXT NOT NULL DEFAULT '',
+		last_error_at DATETIME,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
 	);
@@ -108,6 +110,9 @@ func (s *Store) initSchema() error {
 	if err := s.addMaxInflightTasksColumn(); err != nil {
 		return err
 	}
+	if err := s.addIssueWatchLastErrorColumns(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -128,6 +133,28 @@ func (s *Store) addMaxInflightTasksColumn() error {
 	}
 	if _, err := s.db.Exec(`ALTER TABLE jira_issue_watches ADD COLUMN max_inflight_tasks INTEGER DEFAULT 5`); err != nil {
 		return fmt.Errorf("add max_inflight_tasks column: %w", err)
+	}
+	return nil
+}
+
+// addIssueWatchLastErrorColumns brings older databases up to the current
+// schema by appending last_error / last_error_at to jira_issue_watches when
+// missing. Idempotent — column lookup before each ALTER avoids the
+// "duplicate column name" error on fresh installs that already have them.
+func (s *Store) addIssueWatchLastErrorColumns() error {
+	cols, err := s.tableColumns("jira_issue_watches")
+	if err != nil {
+		return err
+	}
+	if _, ok := cols["last_error"]; !ok {
+		if _, err := s.db.Exec(`ALTER TABLE jira_issue_watches ADD COLUMN last_error TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add last_error column: %w", err)
+		}
+	}
+	if _, ok := cols["last_error_at"]; !ok {
+		if _, err := s.db.Exec(`ALTER TABLE jira_issue_watches ADD COLUMN last_error_at DATETIME`); err != nil {
+			return fmt.Errorf("add last_error_at column: %w", err)
+		}
 	}
 	return nil
 }
@@ -367,9 +394,14 @@ func (s *Store) UpdateAuthHealth(ctx context.Context, ok bool, errMsg string, ch
 
 // --- Issue watch operations ---
 
-const issueWatchColumns = `id, workspace_id, workflow_id, workflow_step_id, jql,
+// issueWatchInsertColumns / issueWatchSelectColumns split insert vs read so
+// the SELECT path can wrap nullable last_error in COALESCE (older databases
+// pre-self-heal migration may return NULL).
+const issueWatchInsertColumns = `id, workspace_id, workflow_id, workflow_step_id, jql,
 	agent_profile_id, executor_profile_id, prompt, enabled,
-	poll_interval_seconds, max_inflight_tasks, last_polled_at, created_at, updated_at`
+	poll_interval_seconds, max_inflight_tasks, last_polled_at,
+	last_error, last_error_at,
+	created_at, updated_at`
 
 // nullableInt converts a *int into a value suitable for a nullable SQL column.
 // A nil pointer becomes a SQL NULL; a non-nil pointer becomes the underlying
@@ -380,6 +412,12 @@ func nullableInt(v *int) interface{} {
 	}
 	return *v
 }
+
+const issueWatchSelectColumns = `id, workspace_id, workflow_id, workflow_step_id, jql,
+	agent_profile_id, executor_profile_id, prompt, enabled,
+	poll_interval_seconds, max_inflight_tasks, last_polled_at,
+	COALESCE(last_error, '') AS last_error, last_error_at,
+	created_at, updated_at`
 
 // CreateIssueWatch persists a new issue watch row. ID and timestamps are
 // assigned here so callers can pass a partially-populated struct.
@@ -394,12 +432,13 @@ func (s *Store) CreateIssueWatch(ctx context.Context, w *IssueWatch) error {
 		w.PollIntervalSeconds = DefaultIssueWatchPollInterval
 	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO jira_issue_watches (`+issueWatchColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO jira_issue_watches (`+issueWatchInsertColumns+`)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		w.ID, w.WorkspaceID, w.WorkflowID, w.WorkflowStepID, w.JQL,
 		w.AgentProfileID, w.ExecutorProfileID, w.Prompt, w.Enabled,
-		w.PollIntervalSeconds, nullableInt(w.MaxInflightTasks),
-		w.LastPolledAt, w.CreatedAt, w.UpdatedAt)
+		w.PollIntervalSeconds, nullableInt(w.MaxInflightTasks), w.LastPolledAt,
+		w.LastError, w.LastErrorAt,
+		w.CreatedAt, w.UpdatedAt)
 	return err
 }
 
@@ -407,7 +446,7 @@ func (s *Store) CreateIssueWatch(ctx context.Context, w *IssueWatch) error {
 func (s *Store) GetIssueWatch(ctx context.Context, id string) (*IssueWatch, error) {
 	var w IssueWatch
 	err := s.ro.GetContext(ctx, &w,
-		`SELECT `+issueWatchColumns+` FROM jira_issue_watches WHERE id = ?`, id)
+		`SELECT `+issueWatchSelectColumns+` FROM jira_issue_watches WHERE id = ?`, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -422,7 +461,7 @@ func (s *Store) GetIssueWatch(ctx context.Context, id string) (*IssueWatch, erro
 func (s *Store) ListIssueWatches(ctx context.Context, workspaceID string) ([]*IssueWatch, error) {
 	var watches []*IssueWatch
 	err := s.ro.SelectContext(ctx, &watches,
-		`SELECT `+issueWatchColumns+` FROM jira_issue_watches
+		`SELECT `+issueWatchSelectColumns+` FROM jira_issue_watches
 		 WHERE workspace_id = ? ORDER BY created_at`, workspaceID)
 	if err != nil {
 		return nil, err
@@ -437,7 +476,7 @@ func (s *Store) ListIssueWatches(ctx context.Context, workspaceID string) ([]*Is
 func (s *Store) ListAllIssueWatches(ctx context.Context) ([]*IssueWatch, error) {
 	var watches []*IssueWatch
 	err := s.ro.SelectContext(ctx, &watches,
-		`SELECT `+issueWatchColumns+` FROM jira_issue_watches ORDER BY workspace_id, created_at`)
+		`SELECT `+issueWatchSelectColumns+` FROM jira_issue_watches ORDER BY workspace_id, created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -449,7 +488,7 @@ func (s *Store) ListAllIssueWatches(ctx context.Context) ([]*IssueWatch, error) 
 func (s *Store) ListEnabledIssueWatches(ctx context.Context) ([]*IssueWatch, error) {
 	var watches []*IssueWatch
 	err := s.ro.SelectContext(ctx, &watches,
-		`SELECT `+issueWatchColumns+` FROM jira_issue_watches
+		`SELECT `+issueWatchSelectColumns+` FROM jira_issue_watches
 		 WHERE enabled = 1 ORDER BY created_at`)
 	if err != nil {
 		return nil, err
@@ -485,6 +524,21 @@ func (s *Store) UpdateIssueWatchLastPolled(ctx context.Context, id string, t tim
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE jira_issue_watches SET last_polled_at = ?, updated_at = ? WHERE id = ?`,
 		t, time.Now().UTC(), id)
+	return err
+}
+
+// DisableIssueWatchWithError is the self-heal write: it disables the watch
+// and stamps a human-readable cause + timestamp so the settings UI can show
+// a "disabled because ..." banner. Called by the orchestrator dispatch
+// pipeline when the watcher's bound agent profile is detected as
+// soft-deleted.
+func (s *Store) DisableIssueWatchWithError(ctx context.Context, id, cause string) error {
+	now := time.Now().UTC()
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE jira_issue_watches
+		   SET enabled = 0, last_error = ?, last_error_at = ?, updated_at = ?
+		 WHERE id = ?`,
+		cause, now, now, id)
 	return err
 }
 

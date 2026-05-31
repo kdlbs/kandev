@@ -49,6 +49,12 @@ type GitHubService interface {
 	ReserveIssueWatchTask(ctx context.Context, watchID, repoOwner, repoName string, issueNumber int, issueURL string) (bool, error)
 	AssignIssueWatchTaskID(ctx context.Context, watchID, repoOwner, repoName string, issueNumber int, taskID string) error
 	ReleaseIssueWatchTask(ctx context.Context, watchID, repoOwner, repoName string, issueNumber int) error
+
+	// Self-heal operations: invoked from createIssueTask / createReviewTask
+	// when the watcher's bound agent profile has been soft-deleted. Symmetric
+	// with the Linear/Jira coordinator-driven path.
+	DisableIssueWatchWithError(ctx context.Context, watchID, cause string) error
+	DisableReviewWatchWithError(ctx context.Context, watchID, cause string) error
 }
 
 // ReviewTaskCreator creates tasks from review watch events.
@@ -124,10 +130,16 @@ func (s *Service) SetRepositoryResolver(rr RepositoryResolver) {
 	s.repositoryResolver = rr
 }
 
-// SetIssueTaskCreator sets the task creator for issue watch auto-task creation.
+// SetIssueTaskCreator sets the task creator for issue watch auto-task
+// creation. Holds s.mu across both the field write and the coordinator
+// (re)init so the watcherCoordinator / issueTaskCreator pair stays
+// consistent against concurrent SetProfileLookup or dispatchWatcherEvent
+// goroutines — the asymmetric locking surface flagged on PR #1094 review.
 func (s *Service) SetIssueTaskCreator(tc IssueTaskCreator) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.issueTaskCreator = tc
-	s.initWatcherCoordinator()
+	s.initWatcherCoordinatorLocked()
 }
 
 // handlePRFeedback logs PR feedback events. WS broadcasting is handled in main.go.
@@ -178,6 +190,10 @@ func (s *Service) createReviewTask(ctx context.Context, evt *github.NewReviewPRE
 		zap.String("head_branch", pr.HeadBranch),
 		zap.String("base_branch", pr.BaseBranch),
 		zap.String("review_watch_id", evt.ReviewWatchID))
+
+	if s.preflightDeletedProfileForGitHubReview(ctx, evt) {
+		return
+	}
 
 	if !s.reserveReviewPR(ctx, evt) {
 		return
@@ -1112,6 +1128,10 @@ func (s *Service) handleNewIssue(ctx context.Context, event *bus.Event) error {
 func (s *Service) createIssueTask(ctx context.Context, evt *github.NewIssueEvent) {
 	issue := evt.Issue
 	repoSlug := fmt.Sprintf("%s/%s", issue.RepoOwner, issue.RepoName)
+
+	if s.preflightDeletedProfileForGitHubIssue(ctx, evt) {
+		return
+	}
 
 	if !s.reserveIssueWatch(ctx, evt) {
 		return

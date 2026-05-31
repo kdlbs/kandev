@@ -50,6 +50,7 @@ type Controller struct {
 	discovery      *discovery.Registry
 	agentRegistry  *registry.Registry
 	sessionChecker SessionChecker
+	watcherDeps    WatcherDependencyChecker
 	mcpService     *mcpconfig.Service
 	modelCache     *modelfetcher.Cache
 	hostUtility    *hostutility.Manager
@@ -58,13 +59,51 @@ type Controller struct {
 	logger         *logger.Logger
 }
 
-// ErrProfileInUseDetail is returned when a profile cannot be deleted because active sessions exist.
+// SetWatcherDependencyChecker wires in the watcher dependency enumerator so
+// DeleteProfile can include referencing watchers in ErrProfileInUseDetail.
+// Optional; when unset the delete path keeps its pre-watcher behaviour.
+func (c *Controller) SetWatcherDependencyChecker(w WatcherDependencyChecker) {
+	c.watcherDeps = w
+}
+
+// ErrProfileInUseDetail is returned when a profile cannot be deleted because
+// active sessions or external integration watchers reference it. The UI uses
+// the breakdown to render a "this will also disable N watchers — continue?"
+// confirmation dialog before re-issuing the request with force=true.
 type ErrProfileInUseDetail struct {
 	ActiveSessions []agentdto.ActiveTaskInfo
+	Watchers       []WatcherReference
 }
 
 func (e *ErrProfileInUseDetail) Error() string {
-	return fmt.Sprintf("agent profile is used by %d active session(s)", len(e.ActiveSessions))
+	return fmt.Sprintf("agent profile is used by %d active session(s) and %d watcher(s)",
+		len(e.ActiveSessions), len(e.Watchers))
+}
+
+// WatcherReference points at one issue/PR watcher row that uses the profile
+// being deleted. Kind is the integration name ("linear", "jira",
+// "github_issue", "github_review"). Label is a short human-friendly string
+// (the filter, repo list, or JQL clipped to a UI-safe length by the producer).
+type WatcherReference struct {
+	ID    string `json:"id"`
+	Kind  string `json:"kind"`
+	Label string `json:"label"`
+}
+
+// WatcherDependencyChecker enumerates watcher rows that reference an agent
+// profile and disables them on force-delete. Implementations live in
+// cmd/kandev (one per integration store); the controller stays decoupled
+// from linear/jira/github packages.
+//
+// ListWatchersByAgentProfile feeds the confirmation dialog; the user sees
+// the list and confirms. DisableWatchersByAgentProfile fires on force-delete
+// so the watcher row reflects the deletion immediately — without it, the
+// watcher stays enabled-but-orphaned until its next external trigger fires
+// the lazy preflight, which never happens for filters that match nothing
+// new after the profile is deleted.
+type WatcherDependencyChecker interface {
+	ListWatchersByAgentProfile(ctx context.Context, agentProfileID string) ([]WatcherReference, error)
+	DisableWatchersByAgentProfile(ctx context.Context, agentProfileID, cause string) ([]WatcherReference, error)
 }
 
 type SessionChecker interface {

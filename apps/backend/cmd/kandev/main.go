@@ -422,6 +422,22 @@ func startAgentInfrastructure(
 		return false
 	}
 
+	// Wire the soft-deleted-profile pre-flight into the watcher dispatch.
+	// Orphan watchers (their agent profile was soft-deleted by the
+	// reconciler when its agent type left the registry) self-heal on the
+	// next poll instead of looping on "profile not found" forever.
+	orchestratorSvc.SetProfileLookup(&profileLookupAdapter{store: repos.AgentSettings})
+
+	// Wire the watcher-dependency enumerator into the agent settings
+	// controller so the profile-delete UI can surface "this will also
+	// disable N watchers" before the user confirms.
+	agentSettingsController.SetWatcherDependencyChecker(&watcherDepsAdapter{
+		linear: services.Linear,
+		jira:   services.Jira,
+		github: services.GitHub,
+		log:    log,
+	})
+
 	// Wire GitHub service into orchestrator for PR auto-detection on push
 	if services.GitHub != nil {
 		orchestratorSvc.SetGitHubService(services.GitHub)

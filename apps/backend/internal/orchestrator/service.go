@@ -281,6 +281,11 @@ type Service struct {
 	// "cap cleared") only once per transition instead of every event.
 	watcherSaturated map[string]bool
 
+	// profileLookup answers "is this agent profile still live?" for the
+	// dispatch pre-flight. Set via SetProfileLookup from main; nil-safe so
+	// the legacy code path (and tests without profile wiring) keep working.
+	profileLookup ProfileLookup
+
 	// Jira service for issue watch dedup operations
 	jiraService JiraService
 	// jiraSource adapts jiraService onto WatcherSource. Built once in

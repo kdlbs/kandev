@@ -213,26 +213,70 @@ func (c *Controller) DeleteProfile(ctx context.Context, id string, force bool) (
 	return &result, nil
 }
 
-// prepareProfileDeletion checks for active sessions and cleans up ephemeral tasks before deletion.
+// prepareProfileDeletion checks for active sessions and referencing watchers,
+// then cleans up ephemeral tasks. Returns *ErrProfileInUseDetail when force
+// is false and any active session OR referencing watcher exists — the UI uses
+// the breakdown to render a confirmation dialog. force=true skips both checks
+// and proactively disables any referencing watchers; the dispatch coordinator's
+// preflight stays as the safety net for profiles deleted by other paths
+// (reconciler cleanup of disabled agent types).
 func (c *Controller) prepareProfileDeletion(ctx context.Context, profileID string, force bool) error {
 	if c.sessionChecker == nil {
 		return nil
 	}
-	// Check for active non-ephemeral sessions (unless force is true)
-	// This allows the UI to show a confirmation dialog with affected tasks
 	if !force {
 		activeTasks, err := c.sessionChecker.GetActiveTaskInfoByAgentProfile(ctx, profileID)
 		if err != nil {
 			return err
 		}
-		if len(activeTasks) > 0 {
-			return &ErrProfileInUseDetail{ActiveSessions: activeTasks}
+		var watcherRefs []WatcherReference
+		if c.watcherDeps != nil {
+			refs, err := c.watcherDeps.ListWatchersByAgentProfile(ctx, profileID)
+			if err != nil {
+				c.logger.Warn("watcher deps lookup failed; proceeding without watcher info",
+					zap.String("profile_id", profileID), zap.Error(err))
+			} else {
+				watcherRefs = refs
+			}
 		}
+		if len(activeTasks) > 0 || len(watcherRefs) > 0 {
+			return &ErrProfileInUseDetail{ActiveSessions: activeTasks, Watchers: watcherRefs}
+		}
+	} else {
+		c.disableReferencingWatchers(ctx, profileID)
 	}
-	// Clean up ephemeral tasks (quick chat, config chat) using this profile
-	// Done after the force check since these don't need user confirmation
+	// Clean up ephemeral tasks (quick chat, config chat) using this profile.
+	// Done after the force check since these don't need user confirmation.
 	c.cleanupEphemeralTasks(ctx, profileID)
 	return nil
+}
+
+// disableReferencingWatchers stamps the deletion cause onto every watcher
+// row that referenced this profile so the UI shows "disabled because the
+// agent profile was deleted" the moment the request returns. Without this
+// eager disable, watchers whose filter no longer matches anything after the
+// profile is gone would stay enabled-but-orphaned indefinitely — the
+// dispatch coordinator's preflight only runs when a new external event
+// fires the watcher.
+//
+// Best-effort: a failure is logged and ignored so the delete still proceeds.
+// The preflight remains as a safety net for reconciler-driven deletes that
+// don't pass through this path.
+func (c *Controller) disableReferencingWatchers(ctx context.Context, profileID string) {
+	if c.watcherDeps == nil {
+		return
+	}
+	cause := fmt.Sprintf("agent profile %s was deleted", profileID)
+	disabled, err := c.watcherDeps.DisableWatchersByAgentProfile(ctx, profileID, cause)
+	if err != nil {
+		c.logger.Warn("failed to disable referencing watchers on force-delete",
+			zap.String("profile_id", profileID), zap.Error(err))
+		return
+	}
+	if len(disabled) > 0 {
+		c.logger.Info("disabled referencing watchers on profile force-delete",
+			zap.String("profile_id", profileID), zap.Int("count", len(disabled)))
+	}
 }
 
 // cleanupEphemeralTasks removes ephemeral tasks (quick chat, config chat) associated with a profile.

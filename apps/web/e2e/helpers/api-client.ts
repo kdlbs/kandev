@@ -1416,6 +1416,53 @@ export class ApiClient {
     await this.request("PUT", "/api/v1/linear/mock/get-issue-error", args);
   }
 
+  // --- Linear issue watch CRUD ---
+  // Used by the agent-profile-delete spec to exercise the watcher dependency
+  // surface added in the watcher self-heal PR. Filter shape matches
+  // linear.CreateIssueWatchRequest (Go side).
+
+  async createLinearIssueWatch(opts: {
+    workspaceId: string;
+    workflowId: string;
+    workflowStepId: string;
+    agentProfileId: string;
+    executorProfileId?: string;
+    filter?: { teamKey?: string };
+    prompt?: string;
+    enabled?: boolean;
+    pollIntervalSeconds?: number;
+  }): Promise<{ id: string; enabled: boolean; lastError?: string }> {
+    return this.request("POST", "/api/v1/linear/watches/issue", {
+      workspaceId: opts.workspaceId,
+      workflowId: opts.workflowId,
+      workflowStepId: opts.workflowStepId,
+      agentProfileId: opts.agentProfileId,
+      executorProfileId: opts.executorProfileId ?? "",
+      filter: { teamKey: "ENG", ...(opts.filter ?? {}) },
+      prompt: opts.prompt ?? "",
+      enabled: opts.enabled ?? true,
+      pollIntervalSeconds: opts.pollIntervalSeconds ?? 300,
+    });
+  }
+
+  async getLinearIssueWatch(
+    workspaceId: string,
+    watchId: string,
+  ): Promise<{
+    id: string;
+    enabled: boolean;
+    lastError?: string;
+    lastErrorAt?: string;
+  } | null> {
+    // No single-watch GET on the route table (only POST/PATCH/DELETE/trigger);
+    // walk the workspace list and find by id. Scoped by workspace_id so the
+    // result set stays small even if the install accumulates watchers.
+    const watches = await this.request<
+      Array<{ id: string; enabled: boolean; lastError?: string; lastErrorAt?: string }>
+    >("GET", `/api/v1/linear/watches/issue?workspace_id=${encodeURIComponent(workspaceId)}`);
+    return watches.find((w) => w.id === watchId) ?? null;
+  }
+
   // --- Agent dashboard E2E seed helpers (KANDEV_E2E_MOCK=true) ---
   // These wrappers append rows to office_runs / office_cost_events /
   // office_activity_log directly so the agent dashboard E2E spec can
