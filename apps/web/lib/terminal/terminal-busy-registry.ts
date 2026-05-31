@@ -28,6 +28,7 @@ export function shouldConfirmTerminalClose(
 ): boolean {
   if (opts.type === "script" || opts.kind === "script") return true;
   if (opts.kind && opts.kind !== "ordinary") return true;
+  if (opts.initialCommand) return true;
   return isTerminalBusy(terminalId);
 }
 

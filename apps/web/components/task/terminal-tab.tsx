@@ -78,11 +78,62 @@ function useTerminalTabState(stampedEnv: string | undefined, terminalId: string,
   return { shell, isOrdinary, seq, showBadge, displayName, closable };
 }
 
+function useTerminalTabClose({
+  terminalId,
+  taskID,
+  stampedEnv,
+  shell,
+  closable,
+  panelId,
+  closePanel,
+}: {
+  terminalId: string;
+  taskID: string | null;
+  stampedEnv: string | undefined;
+  shell: { kind?: string; initialCommand?: string } | null;
+  closable: boolean;
+  panelId: string;
+  closePanel: () => void;
+}) {
+  const removeUserShellStore = useAppStore((s) => s.removeUserShell);
+  const [confirmClose, setConfirmClose] = useState(false);
+
+  const destroyAndClosePanel = useCallback(async () => {
+    if (!stampedEnv) {
+      closePanel();
+      return;
+    }
+    try {
+      await destroyUserShell(stampedEnv, terminalId, taskID ?? undefined);
+      removeUserShellStore(stampedEnv, terminalId);
+      markTerminalPanelTerminateClose(panelId);
+      closePanel();
+    } catch (error) {
+      console.error("close terminal:", error);
+    }
+  }, [stampedEnv, terminalId, taskID, removeUserShellStore, panelId, closePanel]);
+
+  const handleCloseTab = useCallback(() => {
+    if (!closable) return;
+    if (
+      shouldConfirmTerminalClose(terminalId, {
+        kind: shell?.kind,
+        initialCommand: shell?.initialCommand,
+      })
+    ) {
+      setConfirmClose(true);
+      return;
+    }
+    void destroyAndClosePanel();
+  }, [closable, terminalId, shell, destroyAndClosePanel]);
+
+  return { confirmClose, setConfirmClose, handleCloseTab, destroyAndClosePanel };
+}
+
 export function TerminalTab(props: IDockviewPanelHeaderProps) {
   const { terminalId, taskID: stampedTaskID, environmentId: stampedEnv } = extractParams(props);
   const activeTaskID = useAppStore((s) => s.tasks?.activeTaskId ?? null);
   const taskID = stampedTaskID ?? activeTaskID ?? null;
-  const removeUserShellStore = useAppStore((s) => s.removeUserShell);
   const { shell, isOrdinary, seq, showBadge, displayName, closable } = useTerminalTabState(
     stampedEnv,
     terminalId,
@@ -97,7 +148,16 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
   }, [props.api, displayName]);
 
   const [isRenaming, setIsRenaming] = useState(false);
-  const [confirmClose, setConfirmClose] = useState(false);
+  const { confirmClose, setConfirmClose, handleCloseTab, destroyAndClosePanel } =
+    useTerminalTabClose({
+      terminalId,
+      taskID,
+      stampedEnv,
+      shell,
+      closable,
+      panelId: props.api.id,
+      closePanel: () => props.api.close(),
+    });
   const handleCommitRename = useRenameCommitter({
     isOrdinary,
     stampedEnv,
@@ -106,30 +166,6 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
     currentCustomName: shell?.customName ?? null,
     onDone: () => setIsRenaming(false),
   });
-
-  const destroyAndClosePanel = useCallback(async () => {
-    if (!stampedEnv) {
-      props.api.close();
-      return;
-    }
-    try {
-      await destroyUserShell(stampedEnv, terminalId, taskID ?? undefined);
-      removeUserShellStore(stampedEnv, terminalId);
-      markTerminalPanelTerminateClose(props.api.id);
-      props.api.close();
-    } catch (error) {
-      console.error("close terminal:", error);
-    }
-  }, [stampedEnv, terminalId, taskID, removeUserShellStore, props.api]);
-
-  const handleCloseTab = useCallback(() => {
-    if (!closable) return;
-    if (shouldConfirmTerminalClose(terminalId, { kind: shell?.kind })) {
-      setConfirmClose(true);
-      return;
-    }
-    void destroyAndClosePanel();
-  }, [closable, terminalId, shell, destroyAndClosePanel]);
 
   const renameInitial =
     shell?.customName && shell.customName !== "" ? shell.customName : displayName;

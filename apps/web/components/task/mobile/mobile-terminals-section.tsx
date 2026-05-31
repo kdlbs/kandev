@@ -135,9 +135,9 @@ const MobileTerminalsList = memo(function MobileTerminalsList({
 }) {
   const { terminals, terminalTabValue, addTerminal, removeTerminal, environmentId } =
     useMobileTerminalsContext();
-  const { shells } = useUserShells(environmentId);
   const setRightPanelActiveTab = useAppStore((s) => s.setRightPanelActiveTab);
   const taskId = useAppStore((s) => s.tasks?.activeTaskId ?? null);
+  const { shells } = useUserShells(environmentId, taskId);
   const { pendingClose, setPendingClose, handleConfirmClose, closeTerminal } =
     useTerminalCloseHandler({
       sessionId,

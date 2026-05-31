@@ -59,6 +59,10 @@ describe("terminal-busy-registry", () => {
     expect(shouldConfirmTerminalClose("term-1", { kind: "script" })).toBe(true);
   });
 
+  it("requires confirm when initialCommand is set on legacy shells", () => {
+    expect(shouldConfirmTerminalClose("term-1", { initialCommand: "npm run dev" })).toBe(true);
+  });
+
   it("requires confirm when busy for ordinary terminals", () => {
     markTerminalInput("term-1", "npm install\r");
     expect(shouldConfirmTerminalClose("term-1", { kind: "ordinary" })).toBe(true);
