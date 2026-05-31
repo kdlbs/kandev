@@ -73,7 +73,7 @@ GET    /api/v1/system/logs/tail?n=1000            - last N lines of current log
 GET    /api/v1/system/logs/:name/download         - stream log file
 GET    /api/v1/system/updates                     - { current, latest, latestCheckedAt, releaseUrl, install, applySupported }
 POST   /api/v1/system/updates/check               - force GitHub re-poll; rate-limited 30s
-POST   /api/v1/system/updates/apply               - queue service-only self-update; requires confirm=UPDATE
+POST   /api/v1/system/updates/apply               - queue service-only self-update; body { confirm: "UPDATE" }
 ```
 
 Long-running operations (vacuum, optimize, reset, restore, snapshot create, disk walk) return `202 Accepted` with a `jobId` and publish progress on the existing event bus. The frontend subscribes via WS (`system.job.update` event) to render progress and final result. On success/failure the operation flips a corresponding entry in the existing health surface (e.g., a "VACUUM completed: reclaimed X MB" info issue that auto-expires).
