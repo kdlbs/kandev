@@ -483,7 +483,8 @@ func (h *TerminalHandler) startUserShellProcess(
 	h.logger.Info("handleUserShellWS: user shell started successfully",
 		zap.String("session_id", sessionID),
 		zap.String("terminal_id", terminalID),
-		zap.String("process_id", info.ID))
+		zap.String("process_id", info.ID),
+		zap.Int("os_pid", info.OSPID))
 
 	return info.ID, 0, ""
 }
@@ -518,8 +519,20 @@ func (h *TerminalHandler) handleUserShellWS(
 	h.logger.Info("user shell WebSocket connected",
 		zap.String("session_id", sessionID),
 		zap.String("terminal_id", terminalID),
-		zap.String("process_id", processID))
+		zap.String("process_id", processID),
+		zap.Int("os_pid", osPIDForInteractiveProcess(interactiveRunner, processID)))
 
 	wsw := newWsWriter(conn)
 	h.runUserShellBridge(conn, sessionID, scopeID, terminalID, processID, interactiveRunner, wsw)
+}
+
+func osPIDForInteractiveProcess(runner *process.InteractiveRunner, processID string) int {
+	if runner == nil || processID == "" {
+		return 0
+	}
+	pid, ok := runner.GetOSPID(processID)
+	if !ok {
+		return 0
+	}
+	return pid
 }

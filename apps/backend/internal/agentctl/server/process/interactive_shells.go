@@ -141,6 +141,16 @@ func (r *InteractiveRunner) StartUserShell(ctx context.Context, scopeID, process
 		if entry.ProcessID != "" {
 			if info, ok := r.Get(entry.ProcessID, false); ok {
 				r.userShellsMu.RUnlock()
+				r.logger.Info("reusing user shell",
+					zap.String("scope_id", scopeID),
+					zap.String("session_id", processSessionID),
+					zap.String("terminal_id", terminalID),
+					zap.String("process_id", info.ID),
+					zap.Int("os_pid", info.OSPID),
+					zap.Strings("command", info.Command),
+					zap.String("working_dir", info.WorkingDir),
+					zap.String("label", entry.Label),
+					zap.String("initial_command", entry.InitialCommand))
 				return info, nil
 			}
 		}
@@ -157,6 +167,9 @@ func (r *InteractiveRunner) StartUserShell(ctx context.Context, scopeID, process
 		SessionID:            processSessionID,
 		Command:              defaultShellCommand(preferredShell),
 		WorkingDir:           workingDir,
+		ScopeID:              scopeID,
+		TerminalID:           terminalID,
+		Label:                opts.Label,
 		InitialCommand:       initialCommand,
 		DisableTurnDetection: true,
 		IsUserShell:          true,
@@ -191,10 +204,12 @@ func (r *InteractiveRunner) StartUserShell(ctx context.Context, scopeID, process
 		zap.String("session_id", processSessionID),
 		zap.String("terminal_id", terminalID),
 		zap.String("process_id", info.ID),
+		zap.Int("os_pid", info.OSPID),
 		zap.String("shell", req.Command[0]),
 		zap.String("working_dir", workingDir),
 		zap.String("label", opts.Label),
-		zap.String("initial_command", opts.InitialCommand))
+		zap.String("initial_command", opts.InitialCommand),
+		zap.Bool("deferred_start", info.OSPID == 0))
 
 	return info, nil
 }
@@ -255,9 +270,72 @@ func (r *InteractiveRunner) StopUserShell(ctx context.Context, scopeID, terminal
 	r.logger.Info("stopping user shell",
 		zap.String("scope_id", scopeID),
 		zap.String("terminal_id", terminalID),
-		zap.String("process_id", entry.ProcessID))
+		zap.String("process_id", entry.ProcessID),
+		zap.Int("os_pid", r.osPIDForProcess(entry.ProcessID)),
+		zap.String("label", entry.Label),
+		zap.String("initial_command", entry.InitialCommand))
 
 	return r.Stop(ctx, entry.ProcessID)
+}
+
+// StopUserShellsForScope stops and unregisters every user shell in a scope.
+// This is used by task archive/delete cleanup where bottom-panel/script shells
+// may not have DB rows but still need to be torn down with the task environment.
+func (r *InteractiveRunner) StopUserShellsForScope(ctx context.Context, scopeID string) (int, error) {
+	if scopeID == "" {
+		return 0, nil
+	}
+
+	prefix := scopeID + ":"
+	type stopTarget struct {
+		terminalID string
+		entry      *userShellEntry
+	}
+	targets := []stopTarget{}
+
+	r.userShellsMu.Lock()
+	for key, entry := range r.userShells {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		delete(r.userShells, key)
+		targets = append(targets, stopTarget{
+			terminalID: key[len(prefix):],
+			entry:      entry,
+		})
+	}
+	r.userShellsMu.Unlock()
+
+	var lastErr error
+	for _, target := range targets {
+		processID := ""
+		label := ""
+		initialCommand := ""
+		if target.entry != nil {
+			processID = target.entry.ProcessID
+			label = target.entry.Label
+			initialCommand = target.entry.InitialCommand
+		}
+		r.logger.Info("stopping user shell for scope cleanup",
+			zap.String("scope_id", scopeID),
+			zap.String("terminal_id", target.terminalID),
+			zap.String("process_id", processID),
+			zap.Int("os_pid", r.osPIDForProcess(processID)),
+			zap.String("label", label),
+			zap.String("initial_command", initialCommand))
+		if processID == "" {
+			continue
+		}
+		if err := r.Stop(ctx, processID); err != nil {
+			r.logger.Warn("failed to stop user shell for scope cleanup",
+				zap.String("scope_id", scopeID),
+				zap.String("terminal_id", target.terminalID),
+				zap.String("process_id", processID),
+				zap.Error(err))
+			lastErr = err
+		}
+	}
+	return len(targets), lastErr
 }
 
 // IsUserShellAlive reports whether the PTY behind (scopeID, terminalID) is
@@ -352,5 +430,18 @@ func (r *InteractiveRunner) ClearUserShellDirectOutput(scopeID, terminalID strin
 
 	r.logger.Info("direct output cleared for user shell",
 		zap.String("scope_id", scopeID),
-		zap.String("terminal_id", terminalID))
+		zap.String("terminal_id", terminalID),
+		zap.String("process_id", entry.ProcessID),
+		zap.Int("os_pid", proc.osPID()))
+}
+
+func (r *InteractiveRunner) osPIDForProcess(processID string) int {
+	if processID == "" {
+		return 0
+	}
+	pid, ok := r.GetOSPID(processID)
+	if !ok {
+		return 0
+	}
+	return pid
 }

@@ -18,6 +18,7 @@ type fakeBackend struct {
 	registered map[string]bool
 	stopped    map[string]bool
 	alive      map[string]bool
+	envByID    map[string]string
 }
 
 func newFakeBackend() *fakeBackend {
@@ -25,18 +26,33 @@ func newFakeBackend() *fakeBackend {
 		registered: map[string]bool{},
 		stopped:    map[string]bool{},
 		alive:      map[string]bool{},
+		envByID:    map[string]string{},
 	}
 }
 
-func (f *fakeBackend) Register(_, terminalID string) {
+func (f *fakeBackend) Register(scopeID, terminalID string) {
 	f.registered[terminalID] = true
 	f.alive[terminalID] = true
+	f.envByID[terminalID] = scopeID
 }
 
 func (f *fakeBackend) Stop(_ context.Context, _, terminalID string) error {
 	f.stopped[terminalID] = true
 	delete(f.alive, terminalID)
 	return nil
+}
+
+func (f *fakeBackend) StopScope(_ context.Context, scopeID string) (int, error) {
+	stopped := 0
+	for terminalID, envID := range f.envByID {
+		if envID != scopeID {
+			continue
+		}
+		f.stopped[terminalID] = true
+		delete(f.alive, terminalID)
+		stopped++
+	}
+	return stopped, nil
 }
 
 func (f *fakeBackend) IsAlive(_, terminalID string) bool {
@@ -191,6 +207,7 @@ func TestCleanupTask_StopsAllAndDeletes(t *testing.T) {
 	t1, _ := svc.Create(ctx, "task-1", "env-1", "")
 	t2, _ := svc.Create(ctx, "task-1", "env-1", "")
 	other, _ := svc.Create(ctx, "task-2", "env-2", "")
+	be.Register("env-1", "bottom-panel")
 
 	n, err := svc.CleanupTask(ctx, "task-1")
 	if err != nil {
@@ -201,6 +218,9 @@ func TestCleanupTask_StopsAllAndDeletes(t *testing.T) {
 	}
 	if !be.stopped[t1.ID] || !be.stopped[t2.ID] {
 		t.Errorf("not all stopped: %+v", be.stopped)
+	}
+	if !be.stopped["bottom-panel"] {
+		t.Errorf("unmanaged shell in task environment was not stopped")
 	}
 	if be.stopped[other.ID] {
 		t.Errorf("other task affected: %s", other.ID)
