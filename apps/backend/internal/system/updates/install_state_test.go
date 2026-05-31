@@ -114,6 +114,16 @@ func TestService_GetForeignServiceDisablesApply(t *testing.T) {
 	}
 }
 
+func TestManualCommandsNPXHasNoDuplicateBinaryName(t *testing.T) {
+	cmds := manualCommands(InstallStateResponse{Kind: installKindNPX, Mode: installModeUser}, "v1.2.3")
+	if !hasString(cmds, "npx -y kandev@1.2.3 service install") {
+		t.Fatalf("manual commands = %v, want non-duplicated npx install command", cmds)
+	}
+	if hasString(cmds, "npx -y kandev@1.2.3 kandev service install") {
+		t.Fatalf("npx manual command duplicates the binary name: %v", cmds)
+	}
+}
+
 func writeServiceInstallForTest(t *testing.T, homeDir string, metadata serviceInstallMetadata) (string, string) {
 	t.Helper()
 	metadata.Version = serviceMetadataVersion

@@ -163,7 +163,9 @@ func manualCommands(install InstallStateResponse, latest string) []string {
 	case installKindNPM:
 		return []string{"npm install -g kandev@" + target, installCmd, restartCmd}
 	case installKindNPX:
-		return []string{"npx -y kandev@" + target + " " + installCmd, restartCmd}
+		// installCmd already starts with "kandev "; npx supplies the package, so
+		// strip the duplicate binary name (npx -y kandev@X service install ...).
+		return []string{"npx -y kandev@" + target + " " + strings.TrimPrefix(installCmd, "kandev "), restartCmd}
 	default:
 		return []string{installCmd, restartCmd}
 	}
