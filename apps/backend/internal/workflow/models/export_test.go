@@ -137,6 +137,34 @@ func TestValidate(t *testing.T) {
 		assert.NoError(t, e.Validate())
 	})
 
+	t.Run("set_session_mode with mode passes", func(t *testing.T) {
+		e := validExport()
+		e.Workflows[0].Steps[0].Events = StepEvents{
+			OnEnter: []OnEnterAction{
+				{Type: OnEnterSetSessionMode, Config: map[string]any{"mode": "acceptEdits"}},
+			},
+		}
+		assert.NoError(t, e.Validate())
+	})
+
+	t.Run("set_session_mode without mode fails", func(t *testing.T) {
+		e := validExport()
+		e.Workflows[0].Steps[0].Events = StepEvents{
+			OnEnter: []OnEnterAction{{Type: OnEnterSetSessionMode}},
+		}
+		assert.ErrorContains(t, e.Validate(), "set_session_mode requires a non-empty string")
+	})
+
+	t.Run("set_session_mode with non-string mode fails", func(t *testing.T) {
+		e := validExport()
+		e.Workflows[0].Steps[0].Events = StepEvents{
+			OnEnter: []OnEnterAction{
+				{Type: OnEnterSetSessionMode, Config: map[string]any{"mode": 3}},
+			},
+		}
+		assert.ErrorContains(t, e.Validate(), "set_session_mode requires a non-empty string")
+	})
+
 	t.Run("invalid move_to_step position ref fails", func(t *testing.T) {
 		e := validExport()
 		e.Workflows[0].Steps[0].Events = StepEvents{
