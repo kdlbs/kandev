@@ -84,6 +84,12 @@ describe("terminal-busy-registry", () => {
     expect(isTerminalBusy("term-1")).toBe(false);
   });
 
+  it("stays busy when command output ends with a bare sigil after text", () => {
+    markTerminalInput("term-1", "grep pattern\r");
+    markTerminalOutput("term-1", mockTerminal("foo $"));
+    expect(isTerminalBusy("term-1")).toBe(true);
+  });
+
   it("ignores output when terminal is already idle", () => {
     markTerminalOutput("term-1", mockTerminal("user@host:~/proj$ "));
     expect(isTerminalBusy("term-1")).toBe(false);

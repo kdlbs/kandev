@@ -7,11 +7,12 @@ import { stripAnsi } from "@/lib/utils/ansi";
  */
 const busyByTerminalId = new Map<string, boolean>();
 
-// A line "looks like a prompt" when it ends with a shell sigil ($ # > %)
-// optionally preceded by arbitrary prefix text (virtualenv markers, fish
-// brackets, etc.) separated by whitespace. Bare `> ` at line start is
-// excluded because `>` requires a path token with @, ~, or / before it.
-const PROMPT_TAIL = /^(?:.*\s)?(?:[$#%]|[\w.@~:/-]*[@~/][\w.@~:/-]*\]?[$#>%])\s*$/;
+// A line "looks like a prompt" when it ends with a shell sigil ($ # > %).
+// Bare sigils match only at line start (optional whitespace or a parenthesized
+// env marker like "(venv) "). Path-attached sigils require @, ~, or / and
+// allow optional prefix text (fish brackets, etc.). Bare `> ` is excluded.
+const PROMPT_TAIL =
+  /^(?:(?:\([^)\n]*\)\s+|\s*)[$#%]|(?:.*\s)?[\w.@~:/-]*[@~/][\w.@~:/-]*\]?[$#>%])\s*$/;
 
 export type TerminalCloseConfirmOpts = {
   kind?: string;
