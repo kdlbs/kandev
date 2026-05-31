@@ -77,6 +77,9 @@ describe("InlineCode", () => {
     const tooltip = screen.getByRole("tooltip");
     expect(code.getAttribute("aria-describedby")).toBe(tooltip.id);
     expect(tooltip.id).not.toBe("");
+
+    fireEvent.mouseLeave(code);
+    expect(code.getAttribute("aria-describedby")).toBeNull();
   });
 
   it("dismisses the tooltip on scroll so it cannot drift from the anchored code", () => {

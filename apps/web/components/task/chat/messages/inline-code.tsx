@@ -29,8 +29,7 @@ export function InlineCode({ children }: InlineCodeProps) {
     [],
   );
 
-  // The anchor is a captured viewport rect, so scroll/resize would let the
-  // fixed tooltip drift away from the code. Dismiss it instead of repositioning.
+  // Viewport snapshot; dismiss on scroll/resize rather than repositioning.
   const visible = hovered || copied;
   useEffect(() => {
     if (!visible) return;
