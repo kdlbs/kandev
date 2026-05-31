@@ -583,6 +583,11 @@ export class SessionPage {
     return this.prTopbarPopover().getByTestId("pr-comments-row");
   }
 
+  /** Header PR-link icon (top-right corner of the popover). */
+  prPopoverPRLink(): Locator {
+    return this.prTopbarPopover().getByTestId("pr-popover-pr-link");
+  }
+
   /** Header external-link icon (top-right corner of the popover). */
   prPopoverExternalLink(): Locator {
     return this.prTopbarPopover().getByTestId("pr-popover-external-link");
