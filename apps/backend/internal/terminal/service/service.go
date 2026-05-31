@@ -283,7 +283,13 @@ func (s *Service) appendTaskEnvID(ctx context.Context, taskID string, envIDs []s
 	if s.taskEnvRepo == nil {
 		return envIDs
 	}
-	env, _ := s.taskEnvRepo.GetTaskEnvironmentByTaskID(ctx, taskID)
+	env, err := s.taskEnvRepo.GetTaskEnvironmentByTaskID(ctx, taskID)
+	if err != nil {
+		s.logWarn("failed to look up task environment for cleanup",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return envIDs
+	}
 	if env == nil || env.ID == "" {
 		return envIDs
 	}

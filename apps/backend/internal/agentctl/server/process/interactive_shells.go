@@ -212,7 +212,7 @@ func (r *InteractiveRunner) StartUserShell(ctx context.Context, scopeID, process
 		zap.Int("os_pid", info.OSPID),
 		zap.String("shell", req.Command[0]),
 		zap.String("working_dir", workingDir),
-		zap.String("label", opts.Label),
+		zap.String("label", label),
 		zap.String("initial_command", opts.InitialCommand),
 		zap.Bool("deferred_start", info.OSPID == 0))
 
@@ -332,7 +332,6 @@ func (r *InteractiveRunner) StopUserShellsForScope(ctx context.Context, scopeID 
 		if processID == "" {
 			continue
 		}
-		stoppedCount++
 		if err := r.Stop(ctx, processID); err != nil {
 			r.logger.Warn("failed to stop user shell for scope cleanup",
 				zap.String("scope_id", scopeID),
@@ -340,7 +339,9 @@ func (r *InteractiveRunner) StopUserShellsForScope(ctx context.Context, scopeID 
 				zap.String("process_id", processID),
 				zap.Error(err))
 			lastErr = err
+			continue
 		}
+		stoppedCount++
 	}
 	return stoppedCount, lastErr
 }
