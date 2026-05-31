@@ -7,6 +7,8 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -340,6 +342,34 @@ func TestHandleMoveTask_InvalidPayload(t *testing.T) {
 	resp, err := h.handleMoveTask(context.Background(), msg)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeBadRequest)
+}
+
+// TestLookupSession_NoPrimarySession_ReturnsNilNil pins the contract that a
+// task with no primary session resolves to (nil, nil) — a legitimate "empty"
+// state that lets handleMoveTask fall through to the idle-move path — rather
+// than a backend error. Regression guard: lookupSession originally detected
+// this case by substring-matching the repository's error message; when the
+// repository switched to a wrapped taskrepo.ErrNoPrimarySession sentinel the
+// substring stopped matching, so sessionless task moves were wrongly rejected
+// as internal errors. Classifying via errors.Is keeps the two decoupled.
+func TestLookupSession_NoPrimarySession_ReturnsNilNil(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
+	// Task created without an agent → no primary session row.
+	task, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		WorkflowID:  "wf-1",
+		Title:       "Sessionless task",
+	})
+	require.NoError(t, err)
+
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+
+	session, lookupErr := h.lookupSession(ctx, task.ID)
+	require.NoError(t, lookupErr, "no-primary-session must not surface as a backend error")
+	assert.Nil(t, session, "no-primary-session must resolve to a nil session, not a value")
 }
 
 // recordingMessageQueuer captures QueueMessage calls for assertion.
