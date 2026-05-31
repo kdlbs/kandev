@@ -408,10 +408,10 @@ func countLines(path string) int {
 }
 
 // getNormalizerForProtocol returns the appropriate normalizer for the protocol.
-func getNormalizerForProtocol(protocol string) normalizer {
+func getNormalizerForProtocol(protocol, agentID string) normalizer {
 	switch protocol {
 	case protocolACP:
-		return acp.NewNormalizer()
+		return acp.NewNormalizer(agentID)
 	default:
 		return nil
 	}
@@ -420,7 +420,8 @@ func getNormalizerForProtocol(protocol string) normalizer {
 // normalizeFixtureFile normalizes a specific fixture file.
 func normalizeFixtureFile(filePath string) ([]NormalizedFixture, error) {
 	protocol := parseProtocolFromFilename(filepath.Base(filePath))
-	norm := getNormalizerForProtocol(protocol)
+	_, _, agent := parseDebugFilename(filepath.Base(filePath))
+	norm := getNormalizerForProtocol(protocol, agent)
 	if norm == nil {
 		return nil, fmt.Errorf("unknown protocol: %s", protocol)
 	}
