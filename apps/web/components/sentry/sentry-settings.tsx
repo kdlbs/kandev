@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { IconBrandSentry } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
@@ -10,9 +10,9 @@ import { Separator } from "@kandev/ui/separator";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Switch } from "@kandev/ui/switch";
-import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
+import { IntegrationCredentialHelp } from "@/components/integrations/integration-credential-help";
 import { useSentryEnabled } from "@/hooks/domains/sentry/use-sentry-enabled";
 import {
   IntegrationAuthStatusBanner,
@@ -78,14 +78,47 @@ type SecretFieldProps = {
 function SecretField({ form, loading, update, hasSavedSecret }: SecretFieldProps) {
   return (
     <div className="space-y-1.5">
-      <Label htmlFor="sentry-secret">
-        Auth token
-        {hasSavedSecret && (
-          <span className="text-xs text-muted-foreground ml-2">
-            (saved — leave blank to keep the current value)
-          </span>
-        )}
-      </Label>
+      <div className="flex items-center gap-1">
+        <Label htmlFor="sentry-secret">
+          Auth token
+          {hasSavedSecret && (
+            <span className="text-xs text-muted-foreground ml-2">
+              (saved — leave blank to keep the current value)
+            </span>
+          )}
+        </Label>
+        <IntegrationCredentialHelp title="How to create a Sentry auth token">
+          <p>
+            Create a user auth token at{" "}
+            <a
+              className="text-primary underline"
+              href="https://sentry.io/settings/account/api/auth-tokens/"
+              target="_blank"
+              rel="noreferrer"
+            >
+              sentry.io/settings/account/api/auth-tokens
+            </a>
+            .
+          </p>
+          <p>
+            Grant <span className="font-medium text-foreground">Read</span> access to these scopes:
+          </p>
+          <ul className="list-disc space-y-1 pl-4">
+            <li>
+              <span className="font-medium text-foreground">Organization</span> (
+              <code>org:read</code>) — resolve the org and list issues
+            </li>
+            <li>
+              <span className="font-medium text-foreground">Project</span> (<code>project:read</code>
+              ) — list projects and scope searches
+            </li>
+            <li>
+              <span className="font-medium text-foreground">Issue &amp; Event</span> (
+              <code>event:read</code>) — browse issues and run watchers
+            </li>
+          </ul>
+        </IntegrationCredentialHelp>
+      </div>
       <Input
         id="sentry-secret"
         data-testid="sentry-secret-input"
@@ -95,45 +128,6 @@ function SecretField({ form, loading, update, hasSavedSecret }: SecretFieldProps
         onChange={(e) => update("secret", e.target.value)}
         disabled={loading}
       />
-      <p className="text-xs text-muted-foreground">
-        Create a user auth token at{" "}
-        <a
-          className="underline cursor-pointer"
-          href="https://sentry.io/settings/account/api/auth-tokens/"
-          target="_blank"
-          rel="noreferrer"
-        >
-          sentry.io/settings/account/api/auth-tokens
-        </a>
-        .{" "}
-        <Popover>
-          <PopoverTrigger asChild>
-            <button type="button" className="underline cursor-pointer">
-              Required scopes
-            </button>
-          </PopoverTrigger>
-          <PopoverContent align="start" className="w-80">
-            <p className="text-xs text-muted-foreground">
-              Grant <span className="font-medium text-foreground">Read</span> access to these scopes
-              when creating the token:
-            </p>
-            <ul className="ml-4 list-disc text-xs text-muted-foreground space-y-1">
-              <li>
-                <span className="font-medium text-foreground">Organization</span> (
-                <code>org:read</code>) — resolve the org and list issues
-              </li>
-              <li>
-                <span className="font-medium text-foreground">Project</span> (
-                <code>project:read</code>) — list projects and scope searches
-              </li>
-              <li>
-                <span className="font-medium text-foreground">Issue &amp; Event</span> (
-                <code>event:read</code>) — browse issues and run watchers
-              </li>
-            </ul>
-          </PopoverContent>
-        </Popover>
-      </p>
     </div>
   );
 }
@@ -142,20 +136,55 @@ type OrgFieldProps = {
   form: FormState;
   loading: boolean;
   update: UpdateFn;
+  orgs: string[];
+  hasSecret: boolean;
+  loadingProjects: boolean;
 };
 
-function OrgField({ form, loading, update }: OrgFieldProps) {
+function OrgField({ form, loading, update, orgs, hasSecret, loadingProjects }: OrgFieldProps) {
+  // Before a token is saved there are no projects to derive orgs from, so fall
+  // back to free text (gating on hasSecret avoids the input flipping to a
+  // dropdown mid-typing). Once orgs are known, offer them as a dropdown.
+  if (!hasSecret || orgs.length === 0) {
+    return (
+      <div className="space-y-1.5">
+        <Label htmlFor="sentry-org">Default organization slug</Label>
+        <Input
+          id="sentry-org"
+          data-testid="sentry-org-input"
+          placeholder="my-org"
+          value={form.defaultOrgSlug}
+          onChange={(e) => update("defaultOrgSlug", e.target.value)}
+          disabled={loading}
+        />
+      </div>
+    );
+  }
   return (
     <div className="space-y-1.5">
-      <Label htmlFor="sentry-org">Default organization slug</Label>
-      <Input
-        id="sentry-org"
-        data-testid="sentry-org-input"
-        placeholder="my-org"
-        value={form.defaultOrgSlug}
-        onChange={(e) => update("defaultOrgSlug", e.target.value)}
-        disabled={loading}
-      />
+      <Label htmlFor="sentry-org">Default organization</Label>
+      <Select
+        value={form.defaultOrgSlug || "__none__"}
+        onValueChange={(v) => {
+          update("defaultOrgSlug", v === "__none__" ? "" : v);
+          // The selected project may belong to a different org — clear it so the
+          // project dropdown re-picks within the new org.
+          update("defaultProjectSlug", "");
+        }}
+        disabled={loading || loadingProjects}
+      >
+        <SelectTrigger id="sentry-org" data-testid="sentry-org-input" className="w-full">
+          <SelectValue placeholder="Choose an organization" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="__none__">No default</SelectItem>
+          {orgs.map((slug) => (
+            <SelectItem key={slug} value={slug}>
+              {slug}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
 }
@@ -175,6 +204,11 @@ function ProjectSelector({
   projects,
   loadingProjects,
 }: ProjectSelectorProps) {
+  // Scope the list to the selected org so the dropdown only offers projects the
+  // chosen org actually contains.
+  const visibleProjects = form.defaultOrgSlug
+    ? projects.filter((p) => p.orgSlug === form.defaultOrgSlug)
+    : projects;
   return (
     <div className="space-y-1.5">
       <Label htmlFor="sentry-project">Default project (optional)</Label>
@@ -188,7 +222,7 @@ function ProjectSelector({
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="__none__">No default</SelectItem>
-          {projects.map((p) => (
+          {visibleProjects.map((p) => (
             <SelectItem key={p.id} value={p.slug}>
               {p.name} ({p.slug})
             </SelectItem>
@@ -360,6 +394,14 @@ function useSentrySettings() {
   const [testResult, setTestResult] = useState<TestSentryConnectionResult | null>(null);
   const health = configToHealth(config);
   const { projects, loadingProjects } = useProjectsLoader(config?.hasSecret, config?.lastOk);
+  // Organizations the token can see, derived from the projects payload (Sentry
+  // has no cheap org-list endpoint for user tokens). The saved org is kept in
+  // the list so it stays selectable even if it currently has no visible project.
+  const orgs = useMemo(() => {
+    const set = new Set(projects.map((p) => p.orgSlug).filter(Boolean));
+    if (form.defaultOrgSlug) set.add(form.defaultOrgSlug);
+    return Array.from(set).sort();
+  }, [projects, form.defaultOrgSlug]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -411,6 +453,7 @@ function useSentrySettings() {
     testResult,
     health,
     projects,
+    orgs,
     loadingProjects,
     update,
     handleTest,
@@ -458,7 +501,14 @@ export function SentryConnectionSection() {
             update={s.update}
             hasSavedSecret={!!s.config?.hasSecret}
           />
-          <OrgField form={s.form} loading={s.loading} update={s.update} />
+          <OrgField
+            form={s.form}
+            loading={s.loading}
+            update={s.update}
+            orgs={s.orgs}
+            hasSecret={!!s.config?.hasSecret}
+            loadingProjects={s.loadingProjects}
+          />
           {s.config?.hasSecret && (
             <ProjectSelector
               form={s.form}
