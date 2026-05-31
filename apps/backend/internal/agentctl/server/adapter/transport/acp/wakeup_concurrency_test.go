@@ -70,9 +70,10 @@ func (f *concurrencyFakeAgent) SetSessionMode(_ context.Context, _ acp.SetSessio
 // bridge's per-prompt stop_reason from the turn it belongs to, shifting chat
 // turns one prompt behind.
 //
-// The fake agent blocks inside Prompt and records peak concurrency. With the
-// current code the synthetic wakeup prompt overlaps the user prompt
-// (maxInFlight == 2); a correct fix serializes them (maxInFlight == 1).
+// The fake agent blocks inside Prompt and records peak concurrency. Before this
+// fix, the synthetic wakeup prompt overlapped the user prompt (maxInFlight == 2)
+// because fireWakeup called conn.Prompt() concurrently. This test verifies the
+// fix serializes them so maxInFlight never exceeds 1 during the overlap window.
 func TestWakeupDoesNotRaceConcurrentPromptWithUserPrompt(t *testing.T) {
 	a := newTestAdapter()
 
@@ -118,26 +119,32 @@ func TestWakeupDoesNotRaceConcurrentPromptWithUserPrompt(t *testing.T) {
 	// Fire the wakeup while the user prompt is still in flight.
 	a.fireWakeup(sid, "synthetic wakeup prompt")
 
-	// Did a second prompt overlap the in-flight user prompt?
-	secondOverlapped := false
+	// Wakeup must not enter the agent while the user prompt is still parked.
 	select {
 	case <-fa.entered:
-		secondOverlapped = true
-	case <-time.After(2 * time.Second):
+		t.Fatal("wakeup entered agent while user prompt was in flight")
+	case <-time.After(100 * time.Millisecond):
 	}
 
+	if fa.maxInFlight.Load() > 1 {
+		t.Fatalf("maxInFlight=%d during overlap window; prompts must be serialized so the bridge's stop_reason stays aligned with its turn", fa.maxInFlight.Load())
+	}
+
+	// Release the user prompt; the queued wakeup should run serially afterwards.
 	close(fa.release)
 	userWG.Wait()
+
+	select {
+	case <-fa.entered:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("wakeup never ran after user prompt completed")
+	}
 
 	t.Cleanup(func() {
 		_ = a.Close()
 		_ = c2aW.Close()
 		_ = a2cW.Close()
 	})
-
-	if secondOverlapped || fa.maxInFlight.Load() > 1 {
-		t.Fatalf("wakeup issued a concurrent conn.Prompt() while a user prompt was in flight (maxInFlight=%d); prompts must be serialized so the bridge's stop_reason stays aligned with its turn", fa.maxInFlight.Load())
-	}
 }
 
 // TestWakeupDroppedWhenSessionChangesWhileQueued covers the case where a wakeup
@@ -195,7 +202,61 @@ func TestWakeupDroppedWhenSessionChangesWhileQueued(t *testing.T) {
 	select {
 	case <-fa.entered:
 		t.Fatal("queued wakeup was sent after the session changed; it must be dropped to avoid injecting into an unrelated session")
-	case <-time.After(2 * time.Second):
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	t.Cleanup(func() {
+		_ = a.Close()
+		_ = c2aW.Close()
+		_ = a2cW.Close()
+	})
+}
+
+// TestWakeupDoesNotConsumePendingContext verifies that a synthetic wakeup prompt
+// does not read-and-clear pendingContext, which is reserved for the next user
+// prompt (e.g. fork_session resume context).
+func TestWakeupDoesNotConsumePendingContext(t *testing.T) {
+	a := newTestAdapter()
+
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+	if err := a.Connect(c2aW, a2cR); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	fa := &concurrencyFakeAgent{
+		entered: make(chan struct{}, 8),
+		release: make(chan struct{}),
+	}
+	_ = acp.NewAgentSideConnection(fa, a2cW, c2aR)
+
+	ctx := context.Background()
+	if err := a.Initialize(ctx); err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+	sid, err := a.NewSession(ctx, nil)
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+
+	const canary = "resume-context-for-next-user-prompt"
+	a.mu.Lock()
+	a.pendingContext = canary
+	a.mu.Unlock()
+
+	a.fireWakeup(sid, "scheduled wakeup prompt")
+
+	select {
+	case <-fa.entered:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("wakeup never reached the agent")
+	}
+	close(fa.release)
+
+	a.mu.Lock()
+	got := a.pendingContext
+	a.mu.Unlock()
+	if got != canary {
+		t.Fatalf("pendingContext=%q, want %q — wakeup must not consume resume context", got, canary)
 	}
 
 	t.Cleanup(func() {

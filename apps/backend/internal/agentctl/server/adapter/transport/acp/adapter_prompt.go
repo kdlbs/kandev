@@ -45,10 +45,12 @@ func (a *Adapter) sendPrompt(ctx context.Context, message string, attachments []
 	sessionID := a.sessionID
 	closed := a.closed
 	// A pinned prompt that no longer matches the active session (or a closed
-	// adapter) is dropped; only consume pendingContext when actually sending.
+	// adapter) is dropped. Wakeup-pinned prompts are synthetic turns — they
+	// must not consume pendingContext reserved for the next user prompt (e.g.
+	// fork_session resume context).
 	drop := expectSession != "" && (closed || sessionID != expectSession)
 	var pendingContext string
-	if !drop {
+	if !drop && expectSession == "" {
 		pendingContext = a.pendingContext
 		a.pendingContext = "" // Clear after use
 	}
