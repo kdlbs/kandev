@@ -110,3 +110,19 @@ func (s *SentryWatcherSource) AutoStartParams(evt any) AutoStartParams {
 		WorkflowStepID:    e.WorkflowStepID,
 	}
 }
+
+func (s *SentryWatcherSource) WatchID(evt any) string {
+	e, ok := evt.(*sentry.NewSentryIssueEvent)
+	if !ok || e == nil {
+		return ""
+	}
+	return e.IssueWatchID
+}
+
+// MaxInflightTasks reports the per-watch cap on open watcher-created tasks.
+// Sentry issue-watch events carry no per-watch override, so this always
+// returns nil and the coordinator applies its default cap (mirrors the
+// Linear/Jira sources' nil path).
+func (s *SentryWatcherSource) MaxInflightTasks(evt any) *int {
+	return nil
+}
