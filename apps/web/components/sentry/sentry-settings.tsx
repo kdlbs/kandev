@@ -109,7 +109,9 @@ function SecretField({ form, loading, update, hasSavedSecret }: SecretFieldProps
               </li>
               <li>
                 <code className="text-[10px] bg-white/15 px-1 rounded">event:read</code>{" "}
-                <span className="opacity-70">Issue &amp; Event — browse issues and run watchers</span>
+                <span className="opacity-70">
+                  Issue &amp; Event — browse issues and run watchers
+                </span>
               </li>
             </ul>
           </TooltipContent>
