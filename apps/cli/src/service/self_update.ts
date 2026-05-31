@@ -236,13 +236,9 @@ function openSelfUpdateLog(intent: SelfUpdateIntent): SelfUpdateLog | null {
     const fd = fs.openSync(filePath, "a");
     const write = (chunk: Buffer | string): void => {
       try {
-        // Branch so TypeScript can resolve the writeSync overload — a
-        // `Buffer | string` union matches neither overload directly.
-        if (typeof chunk === "string") {
-          fs.writeSync(fd, chunk);
-        } else {
-          fs.writeSync(fd, chunk);
-        }
+        // The `Buffer | string` union matches neither writeSync overload
+        // directly; the cast picks one — both write the runtime value correctly.
+        fs.writeSync(fd, chunk as string);
       } catch {
         // A write failure mid-update must not abort the update itself.
       }
