@@ -322,6 +322,9 @@ func (r *InteractiveRunner) StopUserShellsForScope(ctx context.Context, scopeID 
 			label = target.entry.Label
 			initialCommand = target.entry.InitialCommand
 		}
+		if processID == "" {
+			continue
+		}
 		r.logger.Info("stopping user shell for scope cleanup",
 			zap.String("scope_id", scopeID),
 			zap.String("terminal_id", target.terminalID),
@@ -329,9 +332,6 @@ func (r *InteractiveRunner) StopUserShellsForScope(ctx context.Context, scopeID 
 			zap.Int("os_pid", r.osPIDForProcess(processID)),
 			zap.String("label", label),
 			zap.String("initial_command", initialCommand))
-		if processID == "" {
-			continue
-		}
 		if err := r.Stop(ctx, processID); err != nil {
 			r.logger.Warn("failed to stop user shell for scope cleanup",
 				zap.String("scope_id", scopeID),
