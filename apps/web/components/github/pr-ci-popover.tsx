@@ -83,19 +83,8 @@ function PRCIPopoverHeader({ pr }: { pr: TaskPR }) {
       data-testid="pr-popover-header"
       className="flex items-center justify-between gap-2 border-b border-border/50 pb-2"
     >
-      <span className="text-sm font-medium">CI status</span>
       <div className="flex items-center gap-1.5">
-        <a
-          data-testid="pr-popover-pr-link"
-          href={pr.pr_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="cursor-pointer text-muted-foreground hover:text-foreground"
-          aria-label="View pull request on GitHub"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <IconGitPullRequest className="h-3.5 w-3.5" />
-        </a>
+        <span className="text-sm font-medium">CI status</span>
         <a
           data-testid="pr-popover-external-link"
           href={checksUrl}
@@ -108,6 +97,17 @@ function PRCIPopoverHeader({ pr }: { pr: TaskPR }) {
           <IconExternalLink className="h-3.5 w-3.5" />
         </a>
       </div>
+      <a
+        data-testid="pr-popover-pr-link"
+        href={pr.pr_url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="cursor-pointer text-muted-foreground hover:text-foreground"
+        aria-label="View pull request on GitHub"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <IconGitPullRequest className="h-3.5 w-3.5" />
+      </a>
     </div>
   );
 }
