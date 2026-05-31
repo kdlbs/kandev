@@ -224,10 +224,12 @@ function TaskTreeNode({
   task,
   depth,
   ctx,
+  isDraggable,
 }: {
   task: TaskSwitcherItem;
   depth: number;
   ctx: TaskTreeContext;
+  isDraggable: boolean;
 }) {
   const subs = ctx.subTasksByParentId.get(task.id);
   const hasSubs = !!subs?.length;
@@ -235,7 +237,7 @@ function TaskTreeNode({
   const toggleInfo: SubtaskToggleInfo | undefined =
     hasSubs && ctx.onToggleSubtasks
       ? {
-          subtaskCount: subs!.length,
+          subtaskCount: countGroupTasks(subs!, ctx.subTasksByParentId),
           subtasksCollapsed: subsHidden,
           onToggleSubtasks: () => ctx.onToggleSubtasks!(task.id),
         }
@@ -258,7 +260,15 @@ function TaskTreeNode({
     !subsHidden && hasSubs ? (
       <TaskTreeLevel parentTaskId={task.id} tasks={subs!} depth={depth + 1} ctx={ctx} />
     ) : undefined;
-  return <SortableTaskNode taskId={task.id} depth={depth} handle={handle} nested={nested} />;
+  return (
+    <SortableTaskNode
+      taskId={task.id}
+      depth={depth}
+      handle={handle}
+      nested={nested}
+      isDraggable={isDraggable}
+    />
+  );
 }
 
 // One level of sibling tasks. `parentTaskId === null` is the group root (whose
@@ -286,7 +296,15 @@ function TaskTreeLevel({
     <SortableTaskLevel
       tasks={tasks}
       onReorder={onReorder}
-      renderNode={(task) => <TaskTreeNode key={task.id} task={task} depth={depth} ctx={ctx} />}
+      renderNode={(task, levelDraggable) => (
+        <TaskTreeNode
+          key={task.id}
+          task={task}
+          depth={depth}
+          ctx={ctx}
+          isDraggable={levelDraggable}
+        />
+      )}
     />
   );
 }

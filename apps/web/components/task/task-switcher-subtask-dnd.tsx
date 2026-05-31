@@ -31,7 +31,10 @@ export const DRAG_ACTIVATION_DISTANCE = 8;
  * descendant, not this node. This is the same handle/children split the root
  * level has always used; generalizing it is what makes nesting safe at depth.
  */
-export function SortableTaskNode({
+/**
+ * Sortable variant — isolated so the hook is never called conditionally.
+ */
+function DraggableSortableTaskNode({
   taskId,
   depth,
   handle,
@@ -81,6 +84,33 @@ export function SortableTaskNode({
   );
 }
 
+export function SortableTaskNode({
+  taskId,
+  depth,
+  handle,
+  nested,
+  isDraggable = true,
+}: {
+  taskId: string;
+  depth: number;
+  handle: React.ReactNode;
+  nested?: React.ReactNode;
+  isDraggable?: boolean;
+}) {
+  if (!isDraggable) {
+    return (
+      <div data-testid="sortable-task-block" data-task-id={taskId} data-depth={depth}>
+        <div data-testid="sortable-task-handle">{handle}</div>
+        {nested}
+      </div>
+    );
+  }
+
+  return (
+    <DraggableSortableTaskNode taskId={taskId} depth={depth} handle={handle} nested={nested} />
+  );
+}
+
 /**
  * DnD wiring for one level of sibling tasks. Reordering is scoped to the
  * siblings sharing a parent (cross-parent drag is intentionally unsupported).
@@ -118,10 +148,11 @@ export function SortableTaskLevel({
 }: {
   tasks: TaskSwitcherItem[];
   onReorder?: (orderedTaskIds: string[]) => void;
-  renderNode: (task: TaskSwitcherItem) => React.ReactNode;
+  renderNode: (task: TaskSwitcherItem, isDraggable: boolean) => React.ReactNode;
 }) {
   const { sensors, handleDragEnd, sortableIds } = useLevelDnd(tasks, onReorder);
-  const body = tasks.map((task) => renderNode(task));
+  const isDraggable = !!onReorder;
+  const body = tasks.map((task) => renderNode(task, isDraggable));
   if (!onReorder) return <>{body}</>;
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>

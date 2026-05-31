@@ -103,4 +103,36 @@ describe("TaskSwitcher — nested subtasks beyond depth 1", () => {
     // Root + Child + Grandchild = 3
     expect(screen.queryByText("3")).not.toBeNull();
   });
+
+  it("parent subtask toggle counts all descendants, not just direct children", () => {
+    const { container } = renderSwitcher();
+    const rootToggle = container.querySelector(
+      "[data-testid='sidebar-subtask-toggle'][data-task-id='Root']",
+    );
+    expect(rootToggle).not.toBeNull();
+    // Root → Child → Grandchild: badge should reflect 2 hidden rows, not 1.
+    expect(rootToggle!.textContent).toContain("2");
+  });
+
+  it("omits grab cursor on nested rows when subtask reorder is disabled", () => {
+    const { container } = render(
+      <Providers>
+        <TaskSwitcher
+          grouped={grouped()}
+          activeTaskId={null}
+          selectedTaskId={null}
+          onSelectTask={vi.fn()}
+          onToggleSubtasks={vi.fn()}
+          collapsedSubtaskParentIds={[]}
+        />
+      </Providers>,
+    );
+    for (const taskId of ["Child", "Grandchild"]) {
+      const handle = container.querySelector(
+        `[data-testid='sortable-task-block'][data-task-id='${taskId}'] > [data-testid='sortable-task-handle']`,
+      );
+      expect(handle).not.toBeNull();
+      expect(handle!.className).not.toContain("cursor-grab");
+    }
+  });
 });
