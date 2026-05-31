@@ -41,6 +41,10 @@ type TaskRepository interface {
 	// orchestrator's watcher throttle gate to enforce a per-watch cap.
 	CountOpenWatcherCreatedTasks(ctx context.Context, integration, watchID string) (int, error)
 	UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error
+	// UpdateTaskStateIfCurrentIn atomically transitions state only when the
+	// task's current state is in allowed. Returns the pre-update state and
+	// whether a row was modified.
+	UpdateTaskStateIfCurrentIn(ctx context.Context, id string, state v1.TaskState, allowed []v1.TaskState) (v1.TaskState, bool, error)
 	CountTasksByWorkflow(ctx context.Context, workflowID string) (int, error)
 	CountTasksByWorkflowStep(ctx context.Context, stepID string) (int, error)
 	AddTaskToWorkflow(ctx context.Context, taskID, workflowID, workflowStepID string, position int) error

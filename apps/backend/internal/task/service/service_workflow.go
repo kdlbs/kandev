@@ -190,6 +190,39 @@ func (s *Service) UpdateTaskState(ctx context.Context, id string, state v1.TaskS
 	return task, nil
 }
 
+// UpdateTaskStateIfCurrentIn transitions state only when the task is currently
+// in one of the allowed values. Publishes task.state_changed only when a row
+// changes.
+func (s *Service) UpdateTaskStateIfCurrentIn(
+	ctx context.Context, id string, state v1.TaskState, allowed []v1.TaskState,
+) (bool, error) {
+	oldState, updated, err := s.tasks.UpdateTaskStateIfCurrentIn(ctx, id, state, allowed)
+	if err != nil || !updated {
+		return false, err
+	}
+	if oldState == state {
+		return false, nil
+	}
+
+	task, err := s.tasks.GetTask(ctx, id)
+	if err != nil {
+		return true, err
+	}
+
+	s.logger.Info("task state updated",
+		zap.String("task_id", id),
+		zap.String("workflow_step_id", task.WorkflowStepID),
+		zap.String("state", string(task.State)))
+
+	s.publishTaskEvent(ctx, events.TaskStateChanged, task, &oldState)
+	s.logger.Info("task state changed",
+		zap.String("task_id", id),
+		zap.String("old_state", string(oldState)),
+		zap.String("new_state", string(state)))
+
+	return true, nil
+}
+
 // UpdateTaskMetadata updates only the metadata of a task (merges with existing)
 func (s *Service) UpdateTaskMetadata(ctx context.Context, id string, metadata map[string]interface{}) (*models.Task, error) {
 	task, err := s.tasks.GetTask(ctx, id)

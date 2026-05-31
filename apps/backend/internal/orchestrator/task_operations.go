@@ -2289,6 +2289,7 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 	// Transition to WAITING_FOR_INPUT so the user can send a new prompt
 	if session != nil {
 		s.updateTaskSessionState(ctx, session.TaskID, sessionID, models.TaskSessionStateWaitingForInput, "", true, session)
+		s.writeTaskWaitingForInputState(ctx, session.TaskID)
 	}
 
 	// Record cancellation in the message history

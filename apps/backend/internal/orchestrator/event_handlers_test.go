@@ -115,7 +115,31 @@ func (m *mockTaskRepo) UpdateTaskState(_ context.Context, taskID string, state v
 	defer m.mu.Unlock()
 	m.updatedStates[taskID] = state
 	m.stateWrites[taskID]++
+	if t, ok := m.tasks[taskID]; ok {
+		t.State = state
+	}
 	return nil
+}
+
+func (m *mockTaskRepo) UpdateTaskStateIfCurrentIn(
+	_ context.Context, taskID string, state v1.TaskState, allowed []v1.TaskState,
+) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t, ok := m.tasks[taskID]
+	if !ok {
+		return false, nil
+	}
+	for _, candidate := range allowed {
+		if t.State != candidate {
+			continue
+		}
+		m.updatedStates[taskID] = state
+		m.stateWrites[taskID]++
+		t.State = state
+		return true, nil
+	}
+	return false, nil
 }
 
 // mockAgentManager is a minimal mock of executor.AgentManagerClient for testing.

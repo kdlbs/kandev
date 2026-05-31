@@ -557,6 +557,44 @@ func (s *Service) writeTaskReviewState(ctx context.Context, taskID string) {
 		zap.String("task_id", taskID))
 }
 
+// writeTaskWaitingForInputState clears the kanban "actively working" task states
+// when the user cancels a turn mid-flight. Normal turn completion lands on
+// REVIEW via setSessionWaitingForInput; cancel bypasses that path and must
+// reconcile tasks.state explicitly or the card stays IN_PROGRESS.
+func (s *Service) writeTaskWaitingForInputState(ctx context.Context, taskID string) {
+	dbTask, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || dbTask == nil {
+		if err != nil {
+			s.logger.Warn("failed to load task for cancel state reconcile",
+				zap.String("task_id", taskID),
+				zap.Error(err))
+		}
+		return
+	}
+	// Office task status reflects workflow position, not runtime cancel.
+	if dbTask.AssigneeAgentProfileID != "" {
+		return
+	}
+
+	updated, err := s.taskRepo.UpdateTaskStateIfCurrentIn(
+		ctx,
+		taskID,
+		v1.TaskStateWaitingForInput,
+		[]v1.TaskState{v1.TaskStateInProgress, v1.TaskStateScheduling},
+	)
+	if err != nil {
+		s.logger.Error("failed to update task state to WAITING_FOR_INPUT",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return
+	}
+	if !updated {
+		return
+	}
+	s.logger.Info("task moved to WAITING_FOR_INPUT state after turn cancel",
+		zap.String("task_id", taskID))
+}
+
 func (s *Service) setSessionRunning(ctx context.Context, taskID, sessionID string, preloadedSession ...*models.TaskSession) {
 	// Resolve session up front so we can guard the task write against terminal
 	// states. updateTaskSessionState silently no-ops for terminal sessions, so

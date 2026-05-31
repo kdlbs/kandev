@@ -48,6 +48,14 @@ func (a *taskRepositoryAdapter) UpdateTaskState(ctx context.Context, taskID stri
 	return err
 }
 
+// UpdateTaskStateIfCurrentIn transitions task state via the service when the
+// current state is in allowed.
+func (a *taskRepositoryAdapter) UpdateTaskStateIfCurrentIn(
+	ctx context.Context, taskID string, state v1.TaskState, allowed []v1.TaskState,
+) (bool, error) {
+	return a.svc.UpdateTaskStateIfCurrentIn(ctx, taskID, state, allowed)
+}
+
 // lifecycleAdapter adapts the lifecycle manager as an AgentManagerClient
 type lifecycleAdapter struct {
 	mgr      *lifecycle.Manager
