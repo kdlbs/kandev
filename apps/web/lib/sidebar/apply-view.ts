@@ -133,9 +133,29 @@ export function applySort(
   tasks: TaskSwitcherItem[],
   spec: SortSpec,
   orderedTaskIds: string[] = [],
+  subTasksByParentId?: Map<string, TaskSwitcherItem[]>,
 ): TaskSwitcherItem[] {
-  const cmp: SortComparator =
-    spec.key === "custom" ? customComparator(orderedTaskIds) : SORT_COMPARATORS[spec.key];
+  let cmp: SortComparator;
+  if (spec.key === "state" && subTasksByParentId) {
+    const effectiveOrder = new Map<string, number>();
+    for (const t of tasks) {
+      let order = STATE_BUCKET_ORDER[getStateBucket(t)];
+      const subs = subTasksByParentId.get(t.id);
+      if (subs) {
+        for (const sub of subs) {
+          order = Math.min(order, STATE_BUCKET_ORDER[getStateBucket(sub)]);
+        }
+      }
+      effectiveOrder.set(t.id, order);
+    }
+    cmp = (a, b) => {
+      const bucket = effectiveOrder.get(a.id)! - effectiveOrder.get(b.id)!;
+      if (bucket !== 0) return bucket;
+      return (b.createdAt ?? "").localeCompare(a.createdAt ?? "");
+    };
+  } else {
+    cmp = spec.key === "custom" ? customComparator(orderedTaskIds) : SORT_COMPARATORS[spec.key];
+  }
   // "Custom" is a manual order — reversing it on direction=desc would flip
   // the user's drag, which has no intuitive meaning. The picker hides the
   // direction toggle for custom; this guard keeps the data layer consistent
@@ -174,6 +194,47 @@ function getTaskStateGroup(task: TaskSwitcherItem): { key: string; label: string
   if (!task.state)
     return { key: NOT_STARTED_STATE_GROUP_KEY, label: formatTaskStateLabel(undefined) };
   return { key: task.state, label: formatTaskStateLabel(task.state) };
+}
+
+/**
+ * Computes the effective state group for a parent task, considering its direct
+ * subtasks. The task (or its "best" subtask) with the highest-priority bucket
+ * (lowest STATE_BUCKET_ORDER) determines the group. This makes a parent with an
+ * active subtask bubble up to the same section as genuinely-running top-level
+ * tasks.
+ *
+ * Tie-break: when multiple candidates share the same bucket, prefer the one
+ * with the lowest STATE_GROUP_ORDER (i.e. the earlier/more-active lifecycle
+ * state). This is consistent with the existing top-level sort where review
+ * (which includes COMPLETED/FAILED/CANCELLED) sorts above in_progress.
+ */
+function getEffectiveStateGroup(
+  task: TaskSwitcherItem,
+  subMap: Map<string, TaskSwitcherItem[]>,
+): { key: string; label: string } {
+  let bestTask = task;
+  let bestBucketOrder = STATE_BUCKET_ORDER[getStateBucket(task)];
+  let bestStateOrder = STATE_GROUP_ORDER[task.state ?? NOT_STARTED_STATE_GROUP_KEY] ?? 99;
+
+  const subs = subMap.get(task.id);
+  if (subs) {
+    for (const sub of subs) {
+      const subBucketOrder = STATE_BUCKET_ORDER[getStateBucket(sub)];
+      if (subBucketOrder < bestBucketOrder) {
+        bestTask = sub;
+        bestBucketOrder = subBucketOrder;
+        bestStateOrder = STATE_GROUP_ORDER[sub.state ?? NOT_STARTED_STATE_GROUP_KEY] ?? 99;
+      } else if (subBucketOrder === bestBucketOrder) {
+        const subStateOrder = STATE_GROUP_ORDER[sub.state ?? NOT_STARTED_STATE_GROUP_KEY] ?? 99;
+        if (subStateOrder < bestStateOrder) {
+          bestTask = sub;
+          bestStateOrder = subStateOrder;
+        }
+      }
+    }
+  }
+
+  return getTaskStateGroup(bestTask);
 }
 
 const groupExtractors: Record<Exclude<GroupKey, "none">, GroupExtractor> = {
@@ -223,20 +284,27 @@ function separateSubtasks(tasks: TaskSwitcherItem[]): {
   return { rootTasks, subTasksByParentId: subMap };
 }
 
-export function applyGroup(tasks: TaskSwitcherItem[], groupKey: GroupKey): GroupedSidebarList {
-  const { rootTasks, subTasksByParentId } = separateSubtasks(tasks);
+export function applyGroup(
+  tasks: TaskSwitcherItem[],
+  groupKey: GroupKey,
+  subTasksByParentId?: Map<string, TaskSwitcherItem[]>,
+): GroupedSidebarList {
+  const { rootTasks, subTasksByParentId: separatedSubMap } = separateSubtasks(tasks);
 
   if (groupKey === "none") {
     return {
       groups: [{ key: "__all__", label: "All", tasks: rootTasks }],
-      subTasksByParentId,
+      subTasksByParentId: separatedSubMap,
     };
   }
 
   const extract = groupExtractors[groupKey];
   const buckets = new Map<string, SidebarGroup>();
   for (const task of rootTasks) {
-    const { key, label } = extract(task);
+    const { key, label } =
+      groupKey === "state" && subTasksByParentId
+        ? getEffectiveStateGroup(task, subTasksByParentId)
+        : extract(task);
     let group = buckets.get(key);
     if (!group) {
       group = { key, label, tasks: [] };
@@ -251,7 +319,7 @@ export function applyGroup(tasks: TaskSwitcherItem[], groupKey: GroupKey): Group
     sortRepoGroups(groups);
   }
   if (groupKey === "state") sortStateGroups(groups);
-  return { groups, subTasksByParentId };
+  return { groups, subTasksByParentId: separatedSubMap };
 }
 
 function mergeSingleRepoUnassigned(groups: SidebarGroup[]): void {
@@ -369,8 +437,9 @@ export function applyView(
   prefs?: SidebarTaskPrefs,
 ): GroupedSidebarList {
   const filtered = applyFilters(tasks, view.filters);
-  const sorted = applySort(filtered, view.sort, prefs?.orderedTaskIds);
-  const grouped = applyGroup(sorted, view.group);
+  const { subTasksByParentId } = separateSubtasks(filtered);
+  const sorted = applySort(filtered, view.sort, prefs?.orderedTaskIds, subTasksByParentId);
+  const grouped = applyGroup(sorted, view.group, subTasksByParentId);
   const subOrderMap = prefs?.subtaskOrderByParentId;
   if (subOrderMap) {
     for (const [parentId, orderedIds] of Object.entries(subOrderMap)) {
