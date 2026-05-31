@@ -659,6 +659,41 @@ func TestIsAgentRunningForSession(t *testing.T) {
 	})
 }
 
+// TestEffectiveSessionMode covers the fresh-launch mode propagation for issue
+// #1183: a persisted session_mode (e.g. from a set_session_mode workflow step)
+// must override the profile default at ACP session init, while a missing
+// provider / lookup error / empty session mode falls back to the profile mode.
+func TestEffectiveSessionMode(t *testing.T) {
+	exec := &AgentExecution{ID: "exec-1", TaskID: "task-1", SessionID: "session-1"}
+
+	t.Run("session mode overrides profile mode", func(t *testing.T) {
+		mgr := newTestManager()
+		mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{
+			infos: map[string]*WorkspaceInfo{"session-1": {SessionID: "session-1", SessionMode: "acceptEdits"}},
+		}
+		require.Equal(t, "acceptEdits", mgr.effectiveSessionMode(context.Background(), exec, "default"))
+	})
+
+	t.Run("falls back to profile mode when no session mode set", func(t *testing.T) {
+		mgr := newTestManager()
+		mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{
+			infos: map[string]*WorkspaceInfo{"session-1": {SessionID: "session-1"}},
+		}
+		require.Equal(t, "default", mgr.effectiveSessionMode(context.Background(), exec, "default"))
+	})
+
+	t.Run("falls back to profile mode on provider error", func(t *testing.T) {
+		mgr := newTestManager()
+		mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{err: fmt.Errorf("boom")}
+		require.Equal(t, "default", mgr.effectiveSessionMode(context.Background(), exec, "default"))
+	})
+
+	t.Run("falls back to profile mode when no provider wired", func(t *testing.T) {
+		mgr := newTestManager()
+		require.Equal(t, "default", mgr.effectiveSessionMode(context.Background(), exec, "default"))
+	})
+}
+
 // --- IsRemoteSession tests ---
 
 type mockWorkspaceInfoProvider struct {

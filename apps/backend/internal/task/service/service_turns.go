@@ -314,11 +314,14 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		}
 	}
 
-	// Get ACP session ID from metadata
-	var acpSessionID string
+	// Get ACP session ID and persisted session permission mode from metadata.
+	var acpSessionID, sessionMode string
 	if session.Metadata != nil {
 		if id, ok := session.Metadata["acp_session_id"].(string); ok {
 			acpSessionID = id
+		}
+		if mode, ok := session.Metadata[models.SessionMetaKeySessionMode].(string); ok {
+			sessionMode = mode
 		}
 	}
 
@@ -330,6 +333,7 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		AgentProfileID:    session.AgentProfileID,
 		AgentID:           agentID,
 		ACPSessionID:      acpSessionID,
+		SessionMode:       sessionMode,
 	}
 
 	var taskEnv *models.TaskEnvironment
