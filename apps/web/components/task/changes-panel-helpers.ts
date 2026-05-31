@@ -197,7 +197,13 @@ export function mergeCommits(
     pushed?: boolean;
     committed_at?: string;
   }[],
-  prCommits: { sha: string; message: string; additions: number; deletions: number }[],
+  prCommits: {
+    sha: string;
+    message: string;
+    additions: number;
+    deletions: number;
+    author_date?: string;
+  }[],
 ): MergedCommit[] {
   const shaMatches = (a: string, b: string) => a.startsWith(b) || b.startsWith(a);
   const unpushed: MergedCommit[] = [];
@@ -227,6 +233,7 @@ export function mergeCommits(
         insertions: pr.additions,
         deletions: pr.deletions,
         pushed: true,
+        committed_at: pr.author_date,
       });
     }
   }
