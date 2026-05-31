@@ -208,7 +208,11 @@ function useConfirmableTerminalClose({
       const terminal = terminals.find((t) => t.id === terminalId);
       const needsConfirm =
         !!terminal &&
-        shouldConfirmTerminalClose(terminalId, { type: terminal.type, kind: terminal.kind });
+        shouldConfirmTerminalClose(terminalId, {
+          type: terminal.type,
+          kind: terminal.kind,
+          initialCommand: terminal.initialCommand,
+        });
       if (needsConfirm) {
         event.preventDefault();
         event.stopPropagation();

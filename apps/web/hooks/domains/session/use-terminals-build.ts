@@ -37,6 +37,7 @@ export function shellToTerminal(shell: UserShellInfo): Terminal {
     customName: shell.customName,
     state: shell.state,
     ptyStatus: shell.ptyStatus,
+    initialCommand: shell.initialCommand,
   };
 }
 

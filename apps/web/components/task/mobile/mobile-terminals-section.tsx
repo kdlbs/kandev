@@ -167,6 +167,7 @@ const MobileTerminalsList = memo(function MobileTerminalsList({
       const needsConfirm = shouldConfirmTerminalClose(terminal.id, {
         type: terminal.type,
         kind: terminal.kind,
+        initialCommand: terminal.initialCommand,
       });
       if (needsConfirm) {
         setPendingClose(terminal);

@@ -22,4 +22,5 @@ export type Terminal = {
   customName?: string | null;
   state?: UserShellState;
   ptyStatus?: UserShellPTYStatus;
+  initialCommand?: string;
 };
