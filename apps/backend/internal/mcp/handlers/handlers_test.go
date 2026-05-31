@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -535,7 +536,7 @@ func TestResolveTaskRepositories_SubtaskParent_Rejected(t *testing.T) {
 
 	_, err = h.resolveTaskRepositories(ctx, child.ID, "", nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "maximum nesting depth is 1")
+	assert.True(t, errors.Is(err, service.ErrSubtaskDepthExceeded), "expected ErrSubtaskDepthExceeded, got: %v", err)
 }
 
 func TestResolveTaskRepositories_OfficeSubtaskParent_Allowed(t *testing.T) {
