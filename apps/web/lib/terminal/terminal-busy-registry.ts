@@ -7,12 +7,11 @@ import { stripAnsi } from "@/lib/utils/ansi";
  */
 const busyByTerminalId = new Map<string, boolean>();
 
-// A line "looks like a prompt" when its last non-space glyph is a shell
-// sigil ($ # > %) that is either preceded by whitespace at line start for
-// bare prompts like "$ " / "# " / "% " (but not "> ", which is bash PS2 /
-// heredoc continuation), or sits at the end of a path/host-ish token
-// containing @, ~ or / (e.g. "user@host:~/proj$", "/usr/bin%").
-const PROMPT_TAIL = /^(?:[$#%]\s*|[\w.@~:/-]*[@~/][\w.@~:/-]*[$#>%]\s*)$/;
+// A line "looks like a prompt" when it ends with a shell sigil ($ # > %)
+// optionally preceded by arbitrary prefix text (virtualenv markers, fish
+// brackets, etc.) separated by whitespace. Bare `> ` at line start is
+// excluded because `>` requires a path token with @, ~, or / before it.
+const PROMPT_TAIL = /^(?:.*\s)?(?:[$#%]|[\w.@~:/-]*[@~/][\w.@~:/-]*\]?[$#>%])\s*$/;
 
 export type TerminalCloseConfirmOpts = {
   kind?: string;

@@ -66,6 +66,24 @@ describe("terminal-busy-registry", () => {
     expect(isTerminalBusy("term-1")).toBe(false);
   });
 
+  it("clears busy on virtualenv-prefixed prompts", () => {
+    markTerminalInput("term-1", "echo hi\r");
+    markTerminalOutput("term-1", mockTerminal("(venv) $ "));
+    expect(isTerminalBusy("term-1")).toBe(false);
+  });
+
+  it("clears busy on fish-style bracket prompts", () => {
+    markTerminalInput("term-1", "echo hi\r");
+    markTerminalOutput("term-1", mockTerminal("[user@host ~/proj]$ "));
+    expect(isTerminalBusy("term-1")).toBe(false);
+  });
+
+  it("clears busy when the prompt has leading whitespace before the sigil", () => {
+    markTerminalInput("term-1", "echo hi\r");
+    markTerminalOutput("term-1", mockTerminal(" $ "));
+    expect(isTerminalBusy("term-1")).toBe(false);
+  });
+
   it("ignores output when terminal is already idle", () => {
     markTerminalOutput("term-1", mockTerminal("user@host:~/proj$ "));
     expect(isTerminalBusy("term-1")).toBe(false);
