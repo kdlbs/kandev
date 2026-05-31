@@ -133,7 +133,7 @@ function validateActionFlags(args: ServiceArgs): void {
       `--intent only applies to 'kandev service self-update', not '${args.action}'`,
     );
   }
-  if (args.action === "self-update" && !args.intent) {
+  if (args.action === "self-update" && !args.showHelp && !args.intent) {
     throw new ParseError("kandev service self-update requires --intent <path>");
   }
   const installOnly: Array<keyof ServiceArgs> = ["port", "homeDir", "noBootStart"];

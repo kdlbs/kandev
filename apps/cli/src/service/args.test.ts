@@ -108,6 +108,12 @@ describe("parseServiceArgs", () => {
     expect(() => parseServiceArgs(["self-update"])).toThrow(/requires --intent/);
   });
 
+  it("allows --help for self-update without --intent", () => {
+    const r = parseServiceArgs(["self-update", "--help"]);
+    expect(r.action).toBe("self-update");
+    expect(r.showHelp).toBe(true);
+  });
+
   it("rejects self-update-only flags elsewhere", () => {
     expect(() => parseServiceArgs(["install", "--intent=/tmp/intent.json"])).toThrow(
       /--intent only applies/,
