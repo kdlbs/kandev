@@ -31,10 +31,15 @@ import (
 
 // ClarificationService defines the interface for clarification operations.
 type ClarificationService interface {
-	CreateRequest(req *clarification.Request) string
+	CreateRequest(req *clarification.Request) (string, bool)
 	WaitForResponse(ctx context.Context, pendingID string) (*clarification.Response, error)
 	CancelRequest(pendingID string) bool
-	CancelSession(sessionID string) []string
+}
+
+// SessionCanceller cancels all pending clarifications for a session and marks
+// the related chat messages as expired. Used by the MCP-timeout handler.
+type SessionCanceller interface {
+	CancelSessionAndNotify(ctx context.Context, sessionID string) int
 }
 
 // MessageCreator creates messages for clarification requests.
@@ -83,6 +88,7 @@ type Handlers struct {
 	taskSvc          *service.Service
 	workflowCtrl     *workflowctrl.Controller
 	clarificationSvc ClarificationService
+	sessionCanceller SessionCanceller
 	messageCreator   MessageCreator
 	sessionRepo      SessionRepository
 	taskRepo         TaskRepository
@@ -108,6 +114,7 @@ func NewHandlers(
 	taskSvc *service.Service,
 	workflowCtrl *workflowctrl.Controller,
 	clarificationSvc ClarificationService,
+	sessionCanceller SessionCanceller,
 	messageCreator MessageCreator,
 	sessionRepo SessionRepository,
 	taskRepo TaskRepository,
@@ -121,6 +128,7 @@ func NewHandlers(
 		taskSvc:          taskSvc,
 		workflowCtrl:     workflowCtrl,
 		clarificationSvc: clarificationSvc,
+		sessionCanceller: sessionCanceller,
 		messageCreator:   messageCreator,
 		sessionRepo:      sessionRepo,
 		taskRepo:         taskRepo,
@@ -1114,13 +1122,14 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 		Questions: req.Questions,
 		Context:   req.Context,
 	}
-	pendingID := h.clarificationSvc.CreateRequest(clarificationReq)
+	pendingID, isNew := h.clarificationSvc.CreateRequest(clarificationReq)
 
 	// Create one chat message per question (triggers WS events to frontend).
 	// If the create fails, the in-store pending entry must be cancelled too —
 	// otherwise the agent's WaitForResponse would block for the full 2-hour
 	// timeout while the user never sees clarification cards.
-	if h.messageCreator != nil {
+	// When dedup fires (isNew=false) the messages already exist, so skip creation.
+	if isNew && h.messageCreator != nil {
 		if _, err := h.messageCreator.CreateClarificationRequestMessages(
 			ctx, taskID, req.SessionID, pendingID, req.Questions, req.Context,
 		); err != nil {
@@ -1357,7 +1366,7 @@ func (h *Handlers) handleDeleteTaskPlan(ctx context.Context, msg *ws.Message) (*
 // disconnects while waiting for a clarification response. It cancels the pending
 // clarification so the user's eventual answer goes through the event fallback path
 // (new turn) instead of the primary path (which would be dropped).
-func (h *Handlers) handleClarificationTimeout(_ context.Context, msg *ws.Message) (*ws.Message, error) {
+func (h *Handlers) handleClarificationTimeout(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
 		SessionID string `json:"session_id"`
 	}
@@ -1368,10 +1377,13 @@ func (h *Handlers) handleClarificationTimeout(_ context.Context, msg *ws.Message
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
 
-	cancelled := h.clarificationSvc.CancelSession(req.SessionID)
+	cancelled := 0
+	if h.sessionCanceller != nil {
+		cancelled = h.sessionCanceller.CancelSessionAndNotify(ctx, req.SessionID)
+	}
 	h.logger.Info("cancelled pending clarifications on agent MCP timeout",
 		zap.String("session_id", req.SessionID),
-		zap.Int("count", len(cancelled)))
+		zap.Int("count", cancelled))
 
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"ok": true, "cancelled": len(cancelled)})
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"ok": true, "cancelled": cancelled})
 }

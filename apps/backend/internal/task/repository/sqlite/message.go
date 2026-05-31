@@ -353,6 +353,27 @@ func (r *Repository) FindMessagesByPendingID(ctx context.Context, pendingID stri
 	return result, err
 }
 
+// FindPendingClarificationMessagesBySessionID returns every clarification_request
+// message for the session whose metadata.status is still "pending". Used by the
+// canceller as a fallback when the in-memory store entry has already been drained
+// by a racing timeout path.
+func (r *Repository) FindPendingClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*models.Message, error) {
+	drv := r.ro.DriverName()
+	query := fmt.Sprintf(`
+		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at
+		FROM task_session_messages
+		WHERE task_session_id = ? AND type = 'clarification_request' AND %s = 'pending'
+		ORDER BY created_at ASC
+	`, dialect.JSONExtract(drv, "metadata", "status"))
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	result, _, err := scanMessageRows(rows, 0)
+	return result, err
+}
+
 // FindMessageByPendingIDAndQuestion finds the message for a specific (pending_id,
 // question_id) pair within a session. Used to flip per-question status (answered /
 // rejected) on multi-question clarification bundles. The persistence layer stores

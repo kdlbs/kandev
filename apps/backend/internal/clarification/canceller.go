@@ -32,6 +32,39 @@ func NewCanceller(store *Store, repo messageStore, eventBus EventBus, log *logge
 	}
 }
 
+// isTerminalStatus returns true for statuses that should not be overwritten.
+func isTerminalStatus(status string) bool {
+	switch status {
+	case string(StatusAnswered), string(StatusExpired), string(StatusRejected), string(StatusCancelled):
+		return true
+	}
+	return false
+}
+
+// markMessagesExpired updates the given messages to status=expired and publishes
+// a message.updated event for each one. It is idempotent: already-terminal
+// messages are skipped.
+func (c *Canceller) markMessagesExpired(ctx context.Context, msgs []*taskmodels.Message, pendingID string) {
+	for _, msg := range msgs {
+		if msg.Metadata == nil {
+			msg.Metadata = map[string]any{}
+		}
+		if current, _ := msg.Metadata["status"].(string); isTerminalStatus(current) {
+			continue
+		}
+		msg.Metadata["agent_disconnected"] = true
+		msg.Metadata["status"] = string(StatusExpired)
+		if err := c.repo.UpdateMessage(ctx, msg); err != nil {
+			c.logger.Warn("failed to update message with expired status",
+				zap.String("pending_id", pendingID),
+				zap.String("message_id", msg.ID),
+				zap.Error(err))
+			continue
+		}
+		c.publishMessageUpdated(ctx, msg)
+	}
+}
+
 // CancelSessionAndNotify cancels all pending clarifications for a session,
 // unblocking WaitForResponse callers, and marks the database messages
 // as expired (with agent_disconnected=true for context) so the frontend
@@ -44,10 +77,8 @@ func NewCanceller(store *Store, repo messageStore, eventBus EventBus, log *logge
 // forwarded to the orchestrator as "User declined to answer").
 func (c *Canceller) CancelSessionAndNotify(ctx context.Context, sessionID string) int {
 	pendingIDs := c.store.CancelSession(sessionID)
-	if len(pendingIDs) == 0 {
-		return 0
-	}
 
+	handled := make(map[string]bool, len(pendingIDs))
 	for _, id := range pendingIDs {
 		msgs, err := c.repo.FindMessagesByPendingID(ctx, id)
 		if err != nil || len(msgs) == 0 {
@@ -56,24 +87,30 @@ func (c *Canceller) CancelSessionAndNotify(ctx context.Context, sessionID string
 				zap.Error(err))
 			continue
 		}
-		for _, msg := range msgs {
-			if msg.Metadata == nil {
-				msg.Metadata = map[string]any{}
-			}
-			msg.Metadata["agent_disconnected"] = true
-			msg.Metadata["status"] = string(StatusExpired)
-			if err := c.repo.UpdateMessage(ctx, msg); err != nil {
-				c.logger.Warn("failed to update message with expired status",
-					zap.String("pending_id", id),
-					zap.String("message_id", msg.ID),
-					zap.Error(err))
-				continue
-			}
-			c.publishMessageUpdated(ctx, msg)
-		}
+		c.markMessagesExpired(ctx, msgs, id)
+		handled[id] = true
 	}
 
-	return len(pendingIDs)
+	// Defense-in-depth: also find any still-pending clarification messages in
+	// the DB whose in-memory store entry was already removed (e.g. by a racing
+	// timeout path). Group by pending_id and mark each bundle expired.
+	msgs, err := c.repo.FindPendingClarificationMessagesBySessionID(ctx, sessionID)
+	if err != nil || len(msgs) == 0 {
+		return len(pendingIDs)
+	}
+
+	byPendingID := make(map[string][]*taskmodels.Message)
+	for _, msg := range msgs {
+		pid := stringFromMetadata(msg.Metadata, "pending_id")
+		if pid == "" || handled[pid] {
+			continue
+		}
+		byPendingID[pid] = append(byPendingID[pid], msg)
+	}
+	for pid, bundle := range byPendingID {
+		c.markMessagesExpired(ctx, bundle, pid)
+	}
+	return len(pendingIDs) + len(byPendingID)
 }
 
 // publishMessageUpdated publishes a message.updated event to the event bus.
