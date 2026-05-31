@@ -117,13 +117,16 @@ type setSessionModeCallback struct {
 }
 
 func (c *setSessionModeCallback) Execute(ctx context.Context, in engine.ActionInput) (engine.ActionResult, error) {
-	if in.State.IsPassthrough || in.Action.SetSessionMode == nil {
+	if in.Action.SetSessionMode == nil {
 		return engine.ActionResult{}, nil
 	}
 	session, err := c.svc.repo.GetTaskSession(ctx, in.State.SessionID)
 	if err != nil {
 		return engine.ActionResult{}, fmt.Errorf("load session for set session mode: %w", err)
 	}
+	// applyStepSessionMode owns the passthrough skip (those sessions manage
+	// their own mode in the CLI), so pass the state through rather than
+	// pre-guarding here.
 	c.svc.applyStepSessionMode(ctx, session, in.Action.SetSessionMode.Mode, in.State.IsPassthrough)
 	return engine.ActionResult{}, nil
 }
