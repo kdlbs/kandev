@@ -461,6 +461,9 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	})
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))
+		if errors.Is(err, service.ErrSubtaskDepthExceeded) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create task", nil)
 	}
 
@@ -524,7 +527,7 @@ func (h *Handlers) resolveTaskRepositories(
 			return taskRepoResult{}, fmt.Errorf("cannot create subtasks of an ephemeral task (quick chat); omit parent_id to create a top-level task")
 		}
 		if parent.ParentID != "" && !parent.IsFromOffice {
-			return taskRepoResult{}, fmt.Errorf("cannot create a subtask of a subtask — maximum nesting depth is 1 for kanban tasks. Create a sibling task under the same parent or a top-level task instead")
+			return taskRepoResult{}, service.ErrSubtaskDepthExceeded
 		}
 		repos := explicitRepos
 		if repos == nil {

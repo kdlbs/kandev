@@ -24,6 +24,11 @@ import (
 // Used when a caller omits priority so the DB CHECK constraint is satisfied.
 const defaultPriority = "medium"
 
+// ErrSubtaskDepthExceeded is returned when a caller tries to create a
+// subtask of a kanban subtask (nesting depth > 1). Office task trees are
+// intentionally exempt.
+var ErrSubtaskDepthExceeded = fmt.Errorf("cannot create a subtask of a subtask — maximum nesting depth is 1 for kanban tasks. Create a sibling task under the same parent or a top-level task instead")
+
 type taskStopTarget struct {
 	sessionID   string
 	executionID string
@@ -173,7 +178,7 @@ func (s *Service) validateSubtaskDepth(ctx context.Context, req *CreateTaskReque
 		return fmt.Errorf("invalid parent_id: %w", err)
 	}
 	if parent.ParentID != "" && !parent.IsFromOffice {
-		return fmt.Errorf("cannot create a subtask of a subtask — maximum nesting depth is 1 for kanban tasks. Create a sibling task under the same parent or a top-level task instead")
+		return ErrSubtaskDepthExceeded
 	}
 	return nil
 }
