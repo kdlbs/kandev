@@ -1,29 +1,18 @@
 "use client";
 
-import { memo, useCallback, useMemo } from "react";
+import { memo, useMemo } from "react";
 import { IconChevronDown } from "@tabler/icons-react";
-import {
-  DndContext,
-  PointerSensor,
-  closestCenter,
-  type DragEndEvent,
-  useSensor,
-  useSensors,
-} from "@dnd-kit/core";
-import {
-  SortableContext,
-  arrayMove,
-  useSortable,
-  verticalListSortingStrategy,
-} from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
 import type { TaskState, TaskSessionState } from "@/lib/types/http";
 import { cn } from "@/lib/utils";
 import { TaskItem } from "./task-item";
 import { TaskItemWithContextMenu, type StepDef } from "./task-switcher-context-menu";
-import type { GroupedSidebarList, SidebarGroup } from "@/lib/sidebar/apply-view";
+import {
+  countGroupTasks,
+  type GroupedSidebarList,
+  type SidebarGroup,
+} from "@/lib/sidebar/apply-view";
 import { type TaskMoveWorkflow } from "@/components/task/task-move-context-menu";
-import { DRAG_ACTIVATION_DISTANCE, SortableSubtaskList } from "./task-switcher-subtask-dnd";
+import { SortableTaskLevel, SortableTaskNode } from "./task-switcher-subtask-dnd";
 
 export type TaskSwitcherItem = {
   id: string;
@@ -135,6 +124,7 @@ function GroupHeader({
 type TaskRowProps = {
   task: TaskSwitcherItem;
   isSubTask?: boolean;
+  depth?: number;
   subtaskToggle?: SubtaskToggleInfo;
   workflows?: TaskMoveWorkflow[];
   stepsByWorkflowId?: Record<string, StepDef[]>;
@@ -153,6 +143,7 @@ type TaskRowProps = {
 function TaskRow({
   task,
   isSubTask,
+  depth,
   subtaskToggle,
   workflows,
   stepsByWorkflowId,
@@ -202,6 +193,7 @@ function TaskRow({
         prInfo={task.prInfo}
         issueInfo={task.issueInfo}
         isSubTask={isSubTask}
+        depth={depth}
         subtaskCount={subtaskToggle?.subtaskCount}
         subtasksCollapsed={subtaskToggle?.subtasksCollapsed}
         onToggleSubtasks={subtaskToggle?.onToggleSubtasks}
@@ -213,54 +205,89 @@ function TaskRow({
   );
 }
 
-function SortableTaskBlock({
-  taskId,
-  parent,
-  subTasks,
+// Shared, per-render context threaded through the recursive task tree so each
+// node can look up its children, collapse state, and reorder callbacks without
+// drilling a dozen props through every level.
+type TaskTreeContext = {
+  subTasksByParentId: Map<string, TaskSwitcherItem[]>;
+  collapsedSubs: Set<string>;
+  onToggleSubtasks?: (parentTaskId: string) => void;
+  pinnedSet: Set<string>;
+  rowProps: Omit<TaskRowProps, "task" | "subtaskToggle" | "isPinned" | "isSubTask" | "depth">;
+  onReorderGroup?: (groupTaskIds: string[]) => void;
+  onReorderSubtasks?: (parentTaskId: string, orderedSubtaskIds: string[]) => void;
+};
+
+// One task row plus — when expanded — its nested subtree. Mutually recursive
+// with TaskTreeLevel, so it renders arbitrarily deep hierarchies.
+function TaskTreeNode({
+  task,
+  depth,
+  ctx,
 }: {
-  taskId: string;
-  parent: React.ReactNode;
-  subTasks?: React.ReactNode;
+  task: TaskSwitcherItem;
+  depth: number;
+  ctx: TaskTreeContext;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: taskId,
-  });
-  const sortableAttributes = {
-    ...attributes,
-    role: undefined,
-    "aria-roledescription": undefined,
-  };
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : undefined,
-  };
-  // setNodeRef stays on the outer wrapper so the CSS transform applies to
-  // the parent row + its subtasks together. Drag listeners only attach to
-  // the parent row's wrapper, so a pointer-down on a subtask row does NOT
-  // trigger a drag of the parent block.
+  const subs = ctx.subTasksByParentId.get(task.id);
+  const hasSubs = !!subs?.length;
+  const subsHidden = hasSubs && !!ctx.onToggleSubtasks && ctx.collapsedSubs.has(task.id);
+  const toggleInfo: SubtaskToggleInfo | undefined =
+    hasSubs && ctx.onToggleSubtasks
+      ? {
+          subtaskCount: subs!.length,
+          subtasksCollapsed: subsHidden,
+          onToggleSubtasks: () => ctx.onToggleSubtasks!(task.id),
+        }
+      : undefined;
+  const isRoot = depth === 0;
+  const handle = (
+    <TaskRow
+      task={task}
+      depth={depth}
+      isSubTask={!isRoot}
+      subtaskToggle={toggleInfo}
+      isPinned={isRoot && ctx.pinnedSet.has(task.id)}
+      {...ctx.rowProps}
+      // Only root tasks are pinnable — `floatPinnedToTop` reorders root tasks
+      // only, so a pin on a nested row would show an icon but never move it.
+      onTogglePin={isRoot ? ctx.rowProps.onTogglePin : undefined}
+    />
+  );
+  const nested =
+    !subsHidden && hasSubs ? (
+      <TaskTreeLevel parentTaskId={task.id} tasks={subs!} depth={depth + 1} ctx={ctx} />
+    ) : undefined;
+  return <SortableTaskNode taskId={task.id} depth={depth} handle={handle} nested={nested} />;
+}
+
+// One level of sibling tasks. `parentTaskId === null` is the group root (whose
+// reorder maps to onReorderGroup); deeper levels reorder via onReorderSubtasks
+// scoped to that parent's children.
+function TaskTreeLevel({
+  parentTaskId,
+  tasks,
+  depth,
+  ctx,
+}: {
+  parentTaskId: string | null;
+  tasks: TaskSwitcherItem[];
+  depth: number;
+  ctx: TaskTreeContext;
+}) {
+  let onReorder: ((orderedTaskIds: string[]) => void) | undefined;
+  if (parentTaskId === null) {
+    onReorder = ctx.onReorderGroup;
+  } else if (ctx.onReorderSubtasks) {
+    const pid = parentTaskId;
+    onReorder = (ids: string[]) => ctx.onReorderSubtasks!(pid, ids);
+  }
   return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      data-testid="sortable-task-block"
-      data-task-id={taskId}
-      className={cn(isDragging && "z-50")}
-    >
-      <div
-        {...sortableAttributes}
-        {...listeners}
-        // Strip dnd-kit's default tabIndex={0}: only PointerSensor is wired,
-        // so keyboard tab stops here lead nowhere. If KeyboardSensor is
-        // added later, drop this override.
-        tabIndex={undefined}
-        data-testid="sortable-task-handle"
-        className="cursor-grab active:cursor-grabbing"
-      >
-        {parent}
-      </div>
-      {subTasks}
-    </div>
+    <SortableTaskLevel
+      tasks={tasks}
+      onReorder={onReorder}
+      renderNode={(task) => <TaskTreeNode key={task.id} task={task} depth={depth} ctx={ctx} />}
+    />
   );
 }
 
@@ -288,95 +315,6 @@ type GroupSectionProps = {
   deletingTaskId?: string | null;
 };
 
-function useGroupDnd(
-  groupTasks: TaskSwitcherItem[],
-  onReorderGroup?: (groupTaskIds: string[]) => void,
-) {
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: DRAG_ACTIVATION_DISTANCE } }),
-  );
-  const handleDragEnd = useCallback(
-    (event: DragEndEvent) => {
-      if (!onReorderGroup) return;
-      const { active, over } = event;
-      if (!over || active.id === over.id) return;
-      const ids = groupTasks.map((t) => t.id);
-      const oldIndex = ids.indexOf(String(active.id));
-      const newIndex = ids.indexOf(String(over.id));
-      if (oldIndex < 0 || newIndex < 0) return;
-      onReorderGroup(arrayMove(ids, oldIndex, newIndex));
-    },
-    [groupTasks, onReorderGroup],
-  );
-  const sortableIds = useMemo(() => groupTasks.map((t) => t.id), [groupTasks]);
-  return { sensors, handleDragEnd, sortableIds };
-}
-
-function GroupTaskList({
-  group,
-  subTasksByParentId,
-  collapsedSubs,
-  onToggleSubtasks,
-  pinnedSet,
-  rowProps,
-  onReorderSubtasks,
-}: {
-  group: SidebarGroup;
-  subTasksByParentId: Map<string, TaskSwitcherItem[]>;
-  collapsedSubs: Set<string>;
-  onToggleSubtasks?: (parentTaskId: string) => void;
-  pinnedSet: Set<string>;
-  rowProps: Omit<TaskRowProps, "task" | "subtaskToggle" | "isPinned" | "isSubTask">;
-  onReorderSubtasks?: (parentTaskId: string, orderedSubtaskIds: string[]) => void;
-}) {
-  return (
-    <>
-      {group.tasks.map((task) => {
-        const subs = subTasksByParentId.get(task.id);
-        const hasSubs = !!subs?.length;
-        const subsHidden = hasSubs && !!onToggleSubtasks && collapsedSubs.has(task.id);
-        const toggleInfo: SubtaskToggleInfo | undefined =
-          hasSubs && onToggleSubtasks
-            ? {
-                subtaskCount: subs!.length,
-                subtasksCollapsed: subsHidden,
-                onToggleSubtasks: () => onToggleSubtasks(task.id),
-              }
-            : undefined;
-        return (
-          <SortableTaskBlock
-            key={task.id}
-            taskId={task.id}
-            parent={
-              <TaskRow
-                task={task}
-                subtaskToggle={toggleInfo}
-                isPinned={pinnedSet.has(task.id)}
-                {...rowProps}
-              />
-            }
-            subTasks={
-              !subsHidden && subs && subs.length > 0 ? (
-                <SortableSubtaskList
-                  parentTaskId={task.id}
-                  subtasks={subs}
-                  onReorderSubtasks={onReorderSubtasks}
-                  // Subtasks aren't pinnable — pinning would show an icon but
-                  // `floatPinnedToTop` only operates on root tasks, so the row
-                  // wouldn't move. Drop the prop to avoid the no-op menu item.
-                  renderRow={(sub) => (
-                    <TaskRow task={sub} isSubTask {...rowProps} onTogglePin={undefined} />
-                  )}
-                />
-              ) : undefined
-            }
-          />
-        );
-      })}
-    </>
-  );
-}
-
 function GroupSection({
   group,
   subTasksByParentId,
@@ -400,25 +338,28 @@ function GroupSection({
   pinnedSet,
   deletingTaskId,
 }: GroupSectionProps) {
-  const totalCount = group.tasks.reduce(
-    (sum, t) => sum + 1 + (subTasksByParentId.get(t.id)?.length ?? 0),
-    0,
-  );
-  const collapsedSubs = new Set(collapsedSubtaskParentIds ?? []);
-  const rowProps = {
-    workflows,
-    stepsByWorkflowId,
-    activeTaskId,
-    selectedTaskId,
-    onSelectTask,
-    onRenameTask,
-    onArchiveTask,
-    onDeleteTask,
-    onMoveToStep,
-    onTogglePin,
-    deletingTaskId,
+  const totalCount = countGroupTasks(group.tasks, subTasksByParentId);
+  const ctx: TaskTreeContext = {
+    subTasksByParentId,
+    collapsedSubs: new Set(collapsedSubtaskParentIds ?? []),
+    onToggleSubtasks,
+    pinnedSet,
+    rowProps: {
+      workflows,
+      stepsByWorkflowId,
+      activeTaskId,
+      selectedTaskId,
+      onSelectTask,
+      onRenameTask,
+      onArchiveTask,
+      onDeleteTask,
+      onMoveToStep,
+      onTogglePin,
+      deletingTaskId,
+    },
+    onReorderGroup,
+    onReorderSubtasks,
   };
-  const { sensors, handleDragEnd, sortableIds } = useGroupDnd(group.tasks, onReorderGroup);
 
   return (
     <div>
@@ -432,19 +373,7 @@ function GroupSection({
         />
       )}
       {!isCollapsed && (
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-          <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
-            <GroupTaskList
-              group={group}
-              subTasksByParentId={subTasksByParentId}
-              collapsedSubs={collapsedSubs}
-              onToggleSubtasks={onToggleSubtasks}
-              pinnedSet={pinnedSet}
-              rowProps={rowProps}
-              onReorderSubtasks={onReorderSubtasks}
-            />
-          </SortableContext>
-        </DndContext>
+        <TaskTreeLevel parentTaskId={null} tasks={group.tasks} depth={0} ctx={ctx} />
       )}
     </div>
   );

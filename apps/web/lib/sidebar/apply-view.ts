@@ -435,6 +435,26 @@ function applySubtaskOrder(
   return withSortIndex.map((x) => x.t);
 }
 
+/**
+ * Count a group's tasks including every nested descendant. The sidebar renders
+ * an arbitrarily deep tree, so the header count walks `subTasksByParentId`
+ * recursively rather than counting only root + direct children.
+ */
+export function countGroupTasks(
+  rootTasks: TaskSwitcherItem[],
+  subTasksByParentId: Map<string, TaskSwitcherItem[]>,
+): number {
+  let total = 0;
+  const stack = [...rootTasks];
+  while (stack.length > 0) {
+    const task = stack.pop()!;
+    total += 1;
+    const children = subTasksByParentId.get(task.id);
+    if (children) stack.push(...children);
+  }
+  return total;
+}
+
 export function applyView(
   tasks: TaskSwitcherItem[],
   view: SidebarView,
