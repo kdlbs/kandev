@@ -219,15 +219,16 @@ function getEffectiveStateGroup(
   const subs = subMap.get(task.id);
   if (subs) {
     for (const sub of subs) {
+      // Subtasks without an explicit persisted state can't provide a meaningful
+      // group heading (getTaskStateGroup would return "not started"), so skip
+      // them entirely. The parent still bubbles in applySort via bucket numbers.
+      if (!sub.state) continue;
       const subBucketOrder = STATE_BUCKET_ORDER[getStateBucket(sub)];
       if (subBucketOrder < bestBucketOrder) {
         bestTask = sub;
         bestBucketOrder = subBucketOrder;
-        bestStateOrder = STATE_GROUP_ORDER[sub.state ?? NOT_STARTED_STATE_GROUP_KEY] ?? 99;
-      } else if (subBucketOrder === bestBucketOrder && sub.state) {
-        // Only subtasks with an explicit state participate in the tie-break.
-        // A subtask with no state would resolve to NOT_STARTED_STATE_GROUP_KEY
-        // (order 0) and incorrectly beat every explicit parent state.
+        bestStateOrder = STATE_GROUP_ORDER[sub.state] ?? 99;
+      } else if (subBucketOrder === bestBucketOrder) {
         const subStateOrder = STATE_GROUP_ORDER[sub.state] ?? 99;
         if (subStateOrder < bestStateOrder) {
           bestTask = sub;
