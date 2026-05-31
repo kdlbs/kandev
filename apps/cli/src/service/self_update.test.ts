@@ -116,4 +116,58 @@ describe("runSelfUpdateCommand", () => {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });
+
+  function readLog(logDir: string): string {
+    const file = fs.readdirSync(logDir).find((name) => name.startsWith("self-update-"));
+    expect(file, "a self-update log file should be written").toBeTruthy();
+    return fs.readFileSync(path.join(logDir, file as string), "utf8");
+  }
+
+  it("tees each command, its output, and exit status to a log file", () => {
+    const tmp = fs.mkdtempSync(path.join(process.cwd(), "self-update-test-"));
+    const logDir = path.join(tmp, "logs");
+    const it_ = intent("npm");
+    it_.install.log_dir = logDir;
+    const intentPath = path.join(tmp, "intent.json");
+    fs.writeFileSync(intentPath, JSON.stringify(it_));
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const runner = vi.fn().mockReturnValue({ status: 0, stdout: Buffer.from("ok output") });
+    try {
+      runSelfUpdateCommand({ action: "self-update", intent: intentPath }, runner);
+      const contents = readLog(logDir);
+      expect(contents).toContain("npm install -g");
+      expect(contents).toContain("service install");
+      expect(contents).toContain("ok output");
+      expect(contents).toContain("exit 0");
+      expect(contents).toContain("self-update completed successfully");
+    } finally {
+      stdout.mockRestore();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("logs the failing command and its code before throwing", () => {
+    const tmp = fs.mkdtempSync(path.join(process.cwd(), "self-update-test-"));
+    const logDir = path.join(tmp, "logs");
+    const it_ = intent("npm");
+    it_.install.log_dir = logDir;
+    const intentPath = path.join(tmp, "intent.json");
+    fs.writeFileSync(intentPath, JSON.stringify(it_));
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const runner = vi.fn().mockReturnValue({ status: 7, stderr: Buffer.from("npm boom") });
+    try {
+      expect(() =>
+        runSelfUpdateCommand({ action: "self-update", intent: intentPath }, runner),
+      ).toThrow(/failed with code 7/);
+      const contents = readLog(logDir);
+      expect(contents).toContain("npm boom");
+      expect(contents).toContain("exited with code 7");
+      expect(contents).not.toContain("self-update completed successfully");
+    } finally {
+      stdout.mockRestore();
+      stderr.mockRestore();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
 });
