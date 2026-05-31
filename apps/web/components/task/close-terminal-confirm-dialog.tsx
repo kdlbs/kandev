@@ -26,7 +26,7 @@ export function CloseTerminalConfirmDialog({
   open: boolean;
   terminalName: string;
   onOpenChange: (open: boolean) => void;
-  onConfirm: () => void;
+  onConfirm: () => void | Promise<void>;
 }) {
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
@@ -40,9 +40,9 @@ export function CloseTerminalConfirmDialog({
         <AlertDialogFooter>
           <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
           <AlertDialogAction
-            onClick={() => {
-              onOpenChange(false);
-              onConfirm();
+            onClick={(event) => {
+              event.preventDefault();
+              void onConfirm();
             }}
             className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
           >

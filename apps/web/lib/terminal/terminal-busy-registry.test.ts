@@ -54,6 +54,18 @@ describe("terminal-busy-registry", () => {
     expect(isTerminalBusy("term-1")).toBe(true);
   });
 
+  it("stays busy on bash heredoc continuation prompt", () => {
+    markTerminalInput("term-1", "cat << EOF\r");
+    markTerminalOutput("term-1", mockTerminal("> "));
+    expect(isTerminalBusy("term-1")).toBe(true);
+  });
+
+  it("clears busy on bare dollar prompt at line start", () => {
+    markTerminalInput("term-1", "echo hi\r");
+    markTerminalOutput("term-1", mockTerminal("$ "));
+    expect(isTerminalBusy("term-1")).toBe(false);
+  });
+
   it("ignores output when terminal is already idle", () => {
     markTerminalOutput("term-1", mockTerminal("user@host:~/proj$ "));
     expect(isTerminalBusy("term-1")).toBe(false);

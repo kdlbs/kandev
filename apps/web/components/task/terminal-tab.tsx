@@ -107,6 +107,7 @@ function useTerminalTabClose({
       await destroyUserShell(stampedEnv, terminalId, taskID ?? undefined);
       removeUserShellStore(stampedEnv, terminalId);
       markTerminalPanelTerminateClose(panelId);
+      setConfirmClose(false);
       closePanel();
     } catch (error) {
       console.error("close terminal:", error);
@@ -212,7 +213,9 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
       <CloseTerminalConfirmDialog
         open={confirmClose}
         terminalName={displayName}
-        onOpenChange={setConfirmClose}
+        onOpenChange={(open) => {
+          if (!open) setConfirmClose(false);
+        }}
         onConfirm={() => void destroyAndClosePanel()}
       />
     </>
