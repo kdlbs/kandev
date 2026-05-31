@@ -77,10 +77,11 @@ export const KandevToolMessage = memo(function KandevToolMessage({
   const renderer = getKandevRenderer(kandevStemOf(comment));
   const { permissionMetadata, permissionStatus, isPermissionPending } =
     parsePermission(permissionMessage);
-  const { isResponding, handleApprove, handleReject } = usePermissionResponseHandlers({
-    permissionMetadata,
-    permissionMessage,
-  });
+  const { isResponding, handleApprove, handleAllowAlways, hasAllowAlways, handleReject } =
+    usePermissionResponseHandlers({
+      permissionMetadata,
+      permissionMessage,
+    });
   if (!renderer) return null;
 
   // The ACP normalizer stores MCP tool args/result inside the Generic payload:
@@ -114,6 +115,7 @@ export const KandevToolMessage = memo(function KandevToolMessage({
         <PermissionActionRow
           onApprove={handleApprove}
           onReject={handleReject}
+          onAllowAlways={hasAllowAlways ? handleAllowAlways : undefined}
           isResponding={isResponding}
         />
       </div>
