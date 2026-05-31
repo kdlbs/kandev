@@ -100,6 +100,8 @@ export function isStaleSessionStateEvent(
   const payloadTime = Date.parse(payloadUpdatedAt);
   const existingTime = Date.parse(existing.updated_at);
   if (Number.isNaN(payloadTime) || Number.isNaN(existingTime)) return false;
+  // Strict less-than: equal timestamps are treated as not-stale so identical
+  // events upsert idempotently rather than being silently dropped.
   return payloadTime < existingTime;
 }
 

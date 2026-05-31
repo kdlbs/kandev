@@ -1225,7 +1225,9 @@ func (h *Handlers) setSessionRunning(ctx context.Context, taskID, sessionID stri
 			"task_id":    taskID,
 			"session_id": sessionID,
 			"new_state":  string(models.TaskSessionStateRunning),
-			"updated_at": h.sessionUpdatedAtForStateEvent(ctx, sessionID),
+		}
+		if updatedAt, ok := h.sessionUpdatedAtForStateEvent(ctx, sessionID); ok {
+			eventData["updated_at"] = updatedAt
 		}
 		_ = h.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
 			events.TaskSessionStateChanged,
@@ -1260,7 +1262,9 @@ func (h *Handlers) setSessionWaitingForInput(ctx context.Context, taskID, sessio
 			"task_id":    taskID,
 			"session_id": sessionID,
 			"new_state":  string(models.TaskSessionStateWaitingForInput),
-			"updated_at": h.sessionUpdatedAtForStateEvent(ctx, sessionID),
+		}
+		if updatedAt, ok := h.sessionUpdatedAtForStateEvent(ctx, sessionID); ok {
+			eventData["updated_at"] = updatedAt
 		}
 		_ = h.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
 			events.TaskSessionStateChanged,
@@ -1270,11 +1274,11 @@ func (h *Handlers) setSessionWaitingForInput(ctx context.Context, taskID, sessio
 	}
 }
 
-func (h *Handlers) sessionUpdatedAtForStateEvent(ctx context.Context, sessionID string) string {
+func (h *Handlers) sessionUpdatedAtForStateEvent(ctx context.Context, sessionID string) (string, bool) {
 	if session, err := h.sessionRepo.GetTaskSession(ctx, sessionID); err == nil && session != nil && !session.UpdatedAt.IsZero() {
-		return session.UpdatedAt.UTC().Format(time.RFC3339Nano)
+		return session.UpdatedAt.UTC().Format(time.RFC3339Nano), true
 	}
-	return time.Now().UTC().Format(time.RFC3339Nano)
+	return "", false
 }
 
 // handleCreateTaskPlan creates a new task plan.

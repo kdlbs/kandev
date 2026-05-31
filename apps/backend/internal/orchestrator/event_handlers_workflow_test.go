@@ -95,8 +95,12 @@ func TestPublishSessionWaitingEvent(t *testing.T) {
 		if data["new_state"] != string(models.TaskSessionStateWaitingForInput) {
 			t.Errorf("expected new_state %q, got %q", models.TaskSessionStateWaitingForInput, data["new_state"])
 		}
-		if data["updated_at"] == "" {
-			t.Fatal("expected updated_at for state ordering")
+		session, err = repo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("GetTaskSession: %v", err)
+		}
+		if data["updated_at"] != session.UpdatedAt.UTC().Format(time.RFC3339Nano) {
+			t.Errorf("expected updated_at %q, got %q", session.UpdatedAt.UTC().Format(time.RFC3339Nano), data["updated_at"])
 		}
 		if data["agent_profile_id"] != "profile-auggie" {
 			t.Errorf("expected agent_profile_id %q, got %v", "profile-auggie", data["agent_profile_id"])
@@ -164,7 +168,11 @@ func TestPublishSessionCreatedEventIncludesUpdatedAt(t *testing.T) {
 	if data["new_state"] != string(models.TaskSessionStateCreated) {
 		t.Errorf("expected new_state %q, got %q", models.TaskSessionStateCreated, data["new_state"])
 	}
-	if data["updated_at"] == "" {
-		t.Fatal("expected updated_at for state ordering")
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if data["updated_at"] != session.UpdatedAt.UTC().Format(time.RFC3339Nano) {
+		t.Errorf("expected updated_at %q, got %q", session.UpdatedAt.UTC().Format(time.RFC3339Nano), data["updated_at"])
 	}
 }

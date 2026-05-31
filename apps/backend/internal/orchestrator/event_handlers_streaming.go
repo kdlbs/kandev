@@ -376,6 +376,8 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 // check, same-state check). This is an optimistic fast-path: between load and check another
 // goroutine may have changed the state in the DB. The guards are best-effort to avoid
 // unnecessary writes; the DB update via UpdateTaskSessionState is the atomic source of truth.
+// Returns the session row after a successful write (refreshed from DB when possible); callers
+// that need authoritative UpdatedAt should use the return value, not the preloaded input.
 func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID string, nextState models.TaskSessionState, errorMessage string, allowWakeFromWaiting bool, preloadedSession ...*models.TaskSession) *models.TaskSession {
 	var session *models.TaskSession
 	if len(preloadedSession) > 0 && preloadedSession[0] != nil {
@@ -398,7 +400,6 @@ func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID 
 	if session.State == nextState {
 		return session
 	}
-	stateUpdatedAt := time.Now().UTC()
 	if err := s.repo.UpdateTaskSessionState(ctx, sessionID, nextState, errorMessage); err != nil {
 		s.logger.Error("failed to update task session state",
 			zap.String("session_id", sessionID),
@@ -406,16 +407,20 @@ func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID 
 			zap.Error(err))
 		return session
 	}
+	var authoritativeUpdatedAt *time.Time
 	if refreshed, err := s.repo.GetTaskSession(ctx, sessionID); err == nil && refreshed != nil {
 		session = refreshed
-		stateUpdatedAt = refreshed.UpdatedAt.UTC()
+		if !refreshed.UpdatedAt.IsZero() {
+			t := refreshed.UpdatedAt.UTC()
+			authoritativeUpdatedAt = &t
+		}
 	}
 	s.logger.Debug("task session state updated",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
 		zap.String("old_state", string(oldState)),
 		zap.String("new_state", string(nextState)))
-	s.publishTaskSessionStateChanged(ctx, taskID, sessionID, oldState, nextState, errorMessage, stateUpdatedAt, session)
+	s.publishTaskSessionStateChanged(ctx, taskID, sessionID, oldState, nextState, errorMessage, authoritativeUpdatedAt, session)
 
 	// Auto-promote another session to primary when the current primary enters a terminal state
 	s.maybePromotePrimary(ctx, taskID, sessionID, nextState)
@@ -427,7 +432,7 @@ func (s *Service) publishTaskSessionStateChanged(
 	taskID, sessionID string,
 	oldState, nextState models.TaskSessionState,
 	errorMessage string,
-	stateUpdatedAt time.Time,
+	stateUpdatedAt *time.Time,
 	session *models.TaskSession,
 ) {
 	if s.eventBus == nil || session == nil {
@@ -444,11 +449,13 @@ func (s *Service) publishTaskSessionStateChanged(
 		metaKeySessionID:         sessionID,
 		"old_state":              string(oldState),
 		metaKeyNewState:          string(nextState),
-		metaKeyUpdatedAt:         stateUpdatedAt.Format(time.RFC3339Nano),
 		"error_message":          errorMessage,
 		metaKeyAgentProfileID:    agentProfileID,
 		"agent_profile_snapshot": session.AgentProfileSnapshot,
 		"is_passthrough":         session.IsPassthrough,
+	}
+	if stateUpdatedAt != nil && !stateUpdatedAt.IsZero() {
+		eventData[metaKeyUpdatedAt] = stateUpdatedAt.Format(time.RFC3339Nano)
 	}
 	if session.ReviewStatus != models.ReviewStatusNone {
 		eventData["review_status"] = string(session.ReviewStatus)

@@ -132,6 +132,10 @@ describe("session.state_changed handler", () => {
 });
 
 describe("session.state_changed stale guard", () => {
+  let store: ReturnType<typeof makeStore>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let handler: (msg: any) => void;
+
   it("ignores older state events before upserting the session", () => {
     const upsertTaskSessionFromEvent = vi.fn();
     store = makeStore({
