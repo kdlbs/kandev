@@ -131,12 +131,14 @@ func (s *Service) applyBatchedNumberedWatch(
 func (s *Service) applyBatchedSearchingWatch(
 	ctx context.Context, w *PRWatch, statusByKey map[string]*PRStatus, now time.Time,
 ) PRWatchSyncResult {
+	// Timestamps get bumped on both the "no PR found" and "PR detected"
+	// paths, so hoist the single call above the branch to make that
+	// invariant obvious.
+	_ = s.store.UpdatePRWatchTimestamps(ctx, w.ID, now, nil, "", "")
 	status, ok := statusByKey[graphqlBranchKey(w.Owner, w.Repo, w.Branch)]
 	if !ok || status == nil || status.PR == nil {
-		_ = s.store.UpdatePRWatchTimestamps(ctx, w.ID, now, nil, "", "")
 		return PRWatchSyncResult{Watch: w}
 	}
-	_ = s.store.UpdatePRWatchTimestamps(ctx, w.ID, now, nil, "", "")
 	if err := s.store.UpdatePRWatchPRNumber(ctx, w.ID, status.PR.Number); err != nil {
 		s.logger.Error("failed to update PR watch with detected PR",
 			zap.String("watch_id", w.ID), zap.Int("pr_number", status.PR.Number), zap.Error(err))

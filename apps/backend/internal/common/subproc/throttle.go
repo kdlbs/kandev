@@ -94,6 +94,15 @@ func (t *Throttle) Acquire(ctx context.Context) (release func(), err error) {
 	// overhead. Only the contended path below has to bump the waiter gauge.
 	select {
 	case sem <- struct{}{}:
+		// Re-check ctx after the send: between the pre-check above and
+		// here, ctx may have been cancelled by another goroutine. Without
+		// this, a cancelled caller would silently acquire a slot and the
+		// downstream exec.CommandContext would fail late while holding
+		// it. Bounce the slot back so the next waiter can use it.
+		if err := ctx.Err(); err != nil {
+			<-sem
+			return noopRelease, err
+		}
 		t.incAcquire(0)
 		t.incInflight(1)
 		return t.releaseFunc(sem), nil
@@ -107,6 +116,14 @@ func (t *Throttle) Acquire(ctx context.Context) (release func(), err error) {
 	defer t.incWaiters(-1)
 	select {
 	case sem <- struct{}{}:
+		// Same race as the fast path: when both sem<- and ctx.Done() are
+		// ready, Go's select picks randomly, so a cancelled caller can
+		// still land in this branch. Re-check and bounce on cancellation.
+		if err := ctx.Err(); err != nil {
+			<-sem
+			t.incAcquire(time.Since(start))
+			return noopRelease, err
+		}
 		t.incAcquire(time.Since(start))
 		t.incInflight(1)
 		return t.releaseFunc(sem), nil

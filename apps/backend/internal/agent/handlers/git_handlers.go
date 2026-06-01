@@ -18,6 +18,15 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
+// singleflightComputeTimeout bounds the detached context used for the
+// shared body of session.git.commits / session.cumulative_diff. The body
+// runs in a goroutine spawned by singleflight that is NOT tied to any
+// single waiter's request ctx — see wsGitCommits — so it needs its own
+// timeout floor. Generous enough to survive a slow agentctl round-trip
+// under git-pool contention, short enough that a wedged execution can't
+// pin the singleflight slot indefinitely.
+const singleflightComputeTimeout = 60 * time.Second
+
 // PRCreatedCallback is called after a PR is successfully created. `repo` is
 // the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
 // The callback uses it to scope the resulting TaskPR / PRWatch rows to the
@@ -702,6 +711,12 @@ type GitCommitsRequest struct {
 // single in-flight computeGitCommits call via singleflight; each waiter
 // still wraps the shared payload in its own ws.Response using its own
 // msg.ID so the WS layer sees N replies for N requests.
+//
+// The shared body uses a detached, bounded context — NOT the per-request
+// ctx — so a single waiter's WS disconnect or timeout doesn't cancel the
+// in-flight computation for the other waiters. Each caller still selects
+// on its own ctx via DoChan so an individual waiter can give up without
+// blocking on the shared result.
 func (h *GitHandlers) wsGitCommits(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req GitCommitsRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -711,13 +726,20 @@ func (h *GitHandlers) wsGitCommits(ctx context.Context, msg *ws.Message) (*ws.Me
 		return nil, fmt.Errorf("session_id is required")
 	}
 	key := req.SessionID + ":" + strconv.Itoa(req.Limit)
-	v, err, _ := h.commitsGroup.Do(key, func() (interface{}, error) {
-		return h.computeGitCommits(ctx, &req)
+	ch := h.commitsGroup.DoChan(key, func() (interface{}, error) {
+		detached, cancel := context.WithTimeout(context.Background(), singleflightComputeTimeout)
+		defer cancel()
+		return h.computeGitCommits(detached, &req)
 	})
-	if err != nil {
-		return nil, err
+	select {
+	case r := <-ch:
+		if r.Err != nil {
+			return nil, r.Err
+		}
+		return ws.NewResponse(msg.ID, msg.Action, r.Val)
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
-	return ws.NewResponse(msg.ID, msg.Action, v)
 }
 
 // computeGitCommits is the singleflight body for wsGitCommits. Returns
@@ -769,7 +791,8 @@ type CumulativeDiffRequest struct {
 
 // wsCumulativeDiff handles session.cumulative_diff action.
 // The base commit SHA is always looked up from the session metadata in the database.
-// Concurrent identical requests collapse via singleflight — see wsGitCommits.
+// Concurrent identical requests collapse via singleflight — see wsGitCommits
+// for the detached-ctx / DoChan rationale.
 func (h *GitHandlers) wsCumulativeDiff(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req CumulativeDiffRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -778,13 +801,20 @@ func (h *GitHandlers) wsCumulativeDiff(ctx context.Context, msg *ws.Message) (*w
 	if req.SessionID == "" {
 		return nil, fmt.Errorf("session_id is required")
 	}
-	v, err, _ := h.diffGroup.Do(req.SessionID, func() (interface{}, error) {
-		return h.computeCumulativeDiff(ctx, &req)
+	ch := h.diffGroup.DoChan(req.SessionID, func() (interface{}, error) {
+		detached, cancel := context.WithTimeout(context.Background(), singleflightComputeTimeout)
+		defer cancel()
+		return h.computeCumulativeDiff(detached, &req)
 	})
-	if err != nil {
-		return nil, err
+	select {
+	case r := <-ch:
+		if r.Err != nil {
+			return nil, r.Err
+		}
+		return ws.NewResponse(msg.ID, msg.Action, r.Val)
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
-	return ws.NewResponse(msg.ID, msg.Action, v)
 }
 
 // computeCumulativeDiff is the singleflight body for wsCumulativeDiff.
