@@ -1,6 +1,10 @@
 package process
 
-import "testing"
+import (
+	"path/filepath"
+	"runtime"
+	"testing"
+)
 
 // TestResolveRescanPath locks in the rescan endpoint's path-injection
 // contract. The function is the sole mitigation for the CodeQL
@@ -9,7 +13,19 @@ import "testing"
 // cfg.WorkDir, so the value that reaches os.Stat is never the raw HTTP
 // input. Only two transitions are allowed: no-op (equal to current) and
 // promotion-up-one-level (equal to parent of current).
+//
+// Inputs are constructed via filepath.Join so the same table covers
+// Windows (`C:\...`) and POSIX (`/...`) without per-OS branches in
+// every case.
 func TestResolveRescanPath(t *testing.T) {
+	root := absRoot() // "/" on POSIX, "C:\" on Windows
+	repo := join(root, "task", "repo")
+	task := join(root, "task")
+	other := join(root, "task", "other")
+	sub := join(root, "task", "repo", "sub")
+	etc := join(root, "etc")
+	dotted := join(root, "home", "u", "..hidden")
+
 	cases := []struct {
 		name     string
 		newPath  string
@@ -17,19 +33,18 @@ func TestResolveRescanPath(t *testing.T) {
 		wantPath string
 		wantOK   bool
 	}{
-		{"empty new path", "", "/task/repo", "", false},
-		{"empty current (no anchor)", "/task/repo", "", "", false},
-		{"relative path", "task/repo", "/task/repo", "", false},
-		{"exact match (no-op)", "/task/repo", "/task/repo", "/task/repo", true},
-		{"promotion to parent (allowed)", "/task", "/task/repo", "/task", true},
-		{"two-level ancestor (rejected)", "/", "/task/repo", "", false},
-		{"child of current (rejected)", "/task/repo/sub", "/task/repo", "", false},
-		{"sibling repo (rejected)", "/task/other", "/task/repo", "", false},
-		{"unrelated absolute (rejected)", "/etc", "/task/repo", "", false},
-		{"traversal cleaned to ancestor (rejected after Clean)", "/task/../etc", "/task/repo", "", false},
-		{"current is filesystem root", "/", "/", "/", true},
-		{"current is root, promotion impossible", "/foo", "/", "", false},
-		{"dotted segment is legal as exact match", "/home/u/..hidden", "/home/u/..hidden", "/home/u/..hidden", true},
+		{"empty new path", "", repo, "", false},
+		{"empty current (no anchor)", repo, "", "", false},
+		{"relative path", "task/repo", repo, "", false},
+		{"exact match (no-op)", repo, repo, repo, true},
+		{"promotion to parent (allowed)", task, repo, task, true},
+		{"two-level ancestor (rejected)", root, repo, "", false},
+		{"child of current (rejected)", sub, repo, "", false},
+		{"sibling repo (rejected)", other, repo, "", false},
+		{"unrelated absolute (rejected)", etc, repo, "", false},
+		{"current is filesystem root", root, root, root, true},
+		{"current is root, promotion impossible", join(root, "foo"), root, "", false},
+		{"dotted segment is legal as exact match", dotted, dotted, dotted, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -40,4 +55,31 @@ func TestResolveRescanPath(t *testing.T) {
 			}
 		})
 	}
+
+	// Traversal-after-Clean is a POSIX-only invariant — on Windows the
+	// input would also need a volume to be considered absolute; covering
+	// it once on POSIX is enough since filepath.Clean is the shared
+	// primitive.
+	if runtime.GOOS != "windows" {
+		t.Run("traversal cleaned to ancestor (rejected after Clean)", func(t *testing.T) {
+			got, ok := resolveRescanPath("/task/../etc", "/task/repo")
+			if ok || got != "" {
+				t.Errorf("expected rejection for /task/../etc, got (%q, %v)", got, ok)
+			}
+		})
+	}
+}
+
+// absRoot returns the platform's absolute filesystem root prefix —
+// "/" on POSIX, "C:\" (the runner's drive) on Windows.
+func absRoot() string {
+	root, _ := filepath.Abs(string(filepath.Separator))
+	return root
+}
+
+// join wraps filepath.Join so callers can express paths with separate
+// segments without thinking about platform separators.
+func join(root string, segs ...string) string {
+	parts := append([]string{root}, segs...)
+	return filepath.Join(parts...)
 }
