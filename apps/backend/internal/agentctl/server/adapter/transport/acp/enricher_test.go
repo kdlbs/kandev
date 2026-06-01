@@ -144,6 +144,18 @@ func TestAgentEnrichment_GoldenFixtures(t *testing.T) {
 	})
 }
 
+func TestCodexParsedCmdSearch(t *testing.T) {
+	query, path := codexParsedCmdSearch(map[string]any{
+		"parsed_cmd": []any{
+			map[string]any{"type": "grep", "query": "first", "path": "a/"},
+			map[string]any{"type": "grep", "query": "second", "path": "b/"},
+		},
+	})
+	if query != "first" || path != "a/" {
+		t.Fatalf("codexParsedCmdSearch() = (%q, %q), want (first, a/)", query, path)
+	}
+}
+
 func TestCodexCanonicalChange(t *testing.T) {
 	path, diff := codexCanonicalChange(map[string]any{
 		"z.go": map[string]any{"unified_diff": "diff-z"},

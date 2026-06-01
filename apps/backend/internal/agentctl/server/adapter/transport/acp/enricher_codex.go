@@ -103,14 +103,13 @@ func codexParsedCmdSearch(rawInput map[string]any) (query, path string) {
 		if cmdType != toolKindSearch && cmdType != toolKindGrep {
 			continue
 		}
-		if q, _ := cmd["query"].(string); q != "" {
-			query = q
-		}
-		if p, _ := cmd["path"].(string); p != "" {
-			path = p
+		q, _ := cmd["query"].(string)
+		p, _ := cmd["path"].(string)
+		if q != "" || p != "" {
+			return q, p
 		}
 	}
-	return query, path
+	return "", ""
 }
 
 func codexParsedCommands(rawInput map[string]any) []map[string]any {
