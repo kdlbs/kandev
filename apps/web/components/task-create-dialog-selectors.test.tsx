@@ -72,12 +72,70 @@ function renderTaskFormInputs(initial: string) {
   return { ...utils, textarea, ref };
 }
 
-describe("TaskFormInputs voice-input wiring", () => {
+describe("TaskFormInputs voice-input wiring — rendering", () => {
   it("renders the voice button inside the prompt toolbar", () => {
     renderTaskFormInputs("");
     expect(screen.getByTestId("voice-input-button")).toBeTruthy();
   });
 
+  it("renders the voice button in session mode too", () => {
+    const ref = createRef<TaskFormInputsHandle>();
+    render(
+      <TaskFormInputs
+        isSessionMode
+        autoFocus={false}
+        initialDescription=""
+        onDescriptionChange={() => {}}
+        onKeyDown={() => {}}
+        descriptionValueRef={ref}
+      />,
+      { wrapper: Wrapper },
+    );
+    expect(screen.getByTestId("voice-input-button")).toBeTruthy();
+    expect(lastVoiceProps()).toBeTruthy();
+  });
+
+  it("forwards onVoiceAutoSend to the voice button", () => {
+    const onVoiceAutoSend = vi.fn();
+    const ref = createRef<TaskFormInputsHandle>();
+    render(
+      <TaskFormInputs
+        isSessionMode={false}
+        autoFocus={false}
+        initialDescription=""
+        onDescriptionChange={() => {}}
+        onKeyDown={() => {}}
+        descriptionValueRef={ref}
+        onVoiceAutoSend={onVoiceAutoSend}
+      />,
+      { wrapper: Wrapper },
+    );
+
+    const { onAutoSend } = lastVoiceProps();
+    onAutoSend?.();
+    expect(onVoiceAutoSend).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables the voice button when the form is disabled", () => {
+    const ref = createRef<TaskFormInputsHandle>();
+    render(
+      <TaskFormInputs
+        isSessionMode={false}
+        autoFocus={false}
+        initialDescription=""
+        onDescriptionChange={() => {}}
+        onKeyDown={() => {}}
+        descriptionValueRef={ref}
+        disabled
+      />,
+      { wrapper: Wrapper },
+    );
+
+    expect(lastVoiceProps().disabled).toBe(true);
+  });
+});
+
+describe("TaskFormInputs voice-input wiring — at-cursor splice", () => {
   it("splices the transcript at the caret with a leading space after a word", () => {
     const { textarea } = renderTaskFormInputs("hello world");
     textarea.focus();
@@ -121,42 +179,36 @@ describe("TaskFormInputs voice-input wiring", () => {
     expect(textarea.value).toBe("hello");
   });
 
-  it("forwards onVoiceAutoSend to the voice button", () => {
-    const onVoiceAutoSend = vi.fn();
-    const ref = createRef<TaskFormInputsHandle>();
-    render(
-      <TaskFormInputs
-        isSessionMode={false}
-        autoFocus={false}
-        initialDescription=""
-        onDescriptionChange={() => {}}
-        onKeyDown={() => {}}
-        descriptionValueRef={ref}
-        onVoiceAutoSend={onVoiceAutoSend}
-      />,
-      { wrapper: Wrapper },
-    );
+  it("inserts the transcript into a multi-line description at the line caret", () => {
+    const { textarea } = renderTaskFormInputs("line one\nline two");
+    textarea.focus();
+    // Caret right after "line one" on the first line — char-before is "e",
+    // non-whitespace, so a leading space is prepended.
+    textarea.setSelectionRange(8, 8);
 
-    const { onAutoSend } = lastVoiceProps();
-    onAutoSend?.();
-    expect(onVoiceAutoSend).toHaveBeenCalledTimes(1);
+    act(() => lastVoiceProps().onTranscript("added"));
+
+    expect(textarea.value).toBe("line one added\nline two");
+    expect(textarea.selectionStart).toBe(14);
   });
 
-  it("disables the voice button when the form is disabled", () => {
-    const ref = createRef<TaskFormInputsHandle>();
-    render(
-      <TaskFormInputs
-        isSessionMode={false}
-        autoFocus={false}
-        initialDescription=""
-        onDescriptionChange={() => {}}
-        onKeyDown={() => {}}
-        descriptionValueRef={ref}
-        disabled
-      />,
-      { wrapper: Wrapper },
-    );
+  it("preserves internal newlines from the transcript", () => {
+    const { textarea } = renderTaskFormInputs("");
+    textarea.focus();
+    textarea.setSelectionRange(0, 0);
 
-    expect(lastVoiceProps().disabled).toBe(true);
+    act(() => lastVoiceProps().onTranscript("first\nsecond"));
+
+    expect(textarea.value).toBe("first\nsecond");
+  });
+
+  it("treats existing tabs / newlines before the caret as whitespace (no extra space)", () => {
+    const { textarea } = renderTaskFormInputs("line\n");
+    textarea.focus();
+    textarea.setSelectionRange(5, 5);
+
+    act(() => lastVoiceProps().onTranscript("two"));
+
+    expect(textarea.value).toBe("line\ntwo");
   });
 });
