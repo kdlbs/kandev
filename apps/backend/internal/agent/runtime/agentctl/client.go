@@ -38,10 +38,24 @@ type Client struct {
 	// WebSocket connections for streaming
 	agentStreamConn     *websocket.Conn
 	workspaceStreamConn *websocket.Conn
-	mu                  sync.RWMutex
+	// workspaceStream is the most-recent workspace stream returned by
+	// StreamWorkspace, retained so Client.Close can wait for its read/write
+	// goroutines to drain. Cleared by readWorkspaceStream's defer once the
+	// stream tears down.
+	workspaceStream *WorkspaceStream
+	// closed flips to true on Client.Close and prevents new StreamUpdates /
+	// StreamWorkspace dials from leaking goroutines past the close barrier.
+	closed bool
+	mu     sync.RWMutex
 
 	// Shared write mutex for agent stream (used by StreamUpdates and sendStreamRequest)
 	streamWriteMu sync.Mutex
+
+	// streamWG tracks every stream goroutine spawned by this client
+	// (readUpdatesStream and, transitively via WorkspaceStream.wg, the
+	// workspace read/write loops). Close waits on it so callers get a true
+	// drain barrier instead of a fire-and-forget conn.Close.
+	streamWG sync.WaitGroup
 
 	// Pending request/response tracking for agent stream
 	pendingRequests map[string]chan *ws.Message
@@ -656,10 +670,32 @@ type (
 	ProcessStatusUpdate         = types.ProcessStatusUpdate
 )
 
-// Close closes all connections and releases resources
+// Close closes all connections and releases resources. It is a drain
+// barrier: when Close returns, every goroutine the client spawned
+// (readUpdatesStream + workspace read/write loops) has fully exited and
+// future StreamUpdates / StreamWorkspace calls return immediately with an
+// error. This is what lets `defer client.Close()` keep goleak green even
+// when a dial races against teardown.
 func (c *Client) Close() {
+	c.mu.Lock()
+	c.closed = true
+	ws := c.workspaceStream
+	c.mu.Unlock()
+
 	c.CloseUpdatesStream()
 	c.CloseWorkspaceStream()
+
+	// Wait for the workspace stream's read/write goroutines (closeOnce makes
+	// Close idempotent; the read goroutine's defer already calls it on conn
+	// EOF, so this just blocks until both unwind).
+	if ws != nil {
+		ws.Close()
+		ws.Wait()
+	}
+
+	// Block until every client-owned stream goroutine has exited.
+	c.streamWG.Wait()
+
 	if c.httpClient != nil {
 		c.httpClient.CloseIdleConnections()
 	}

@@ -294,6 +294,13 @@ type MCPHandler interface {
 // If mcpHandler is provided, MCP requests from agentctl will be dispatched to it and responses sent back.
 // If onDisconnect is provided, it is called when the WebSocket read goroutine exits (e.g., on error or close).
 func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent), mcpHandler MCPHandler, onDisconnect func(err error)) error {
+	c.mu.RLock()
+	if c.closed {
+		c.mu.RUnlock()
+		return fmt.Errorf("agentctl client closed")
+	}
+	c.mu.RUnlock()
+
 	wsURL := "ws" + c.baseURL[4:] + "/api/v1/agent/stream"
 
 	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, c.wsAuthHeaders())
@@ -301,8 +308,16 @@ func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent), mc
 		return fmt.Errorf("failed to connect to updates stream: %w", err)
 	}
 
+	// Close raced the dial — drop the new conn instead of spawning a read loop
+	// that nobody will ever drain.
 	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		_ = conn.Close()
+		return fmt.Errorf("agentctl client closed during updates stream dial")
+	}
 	c.agentStreamConn = conn
+	c.streamWG.Add(1)
 	c.mu.Unlock()
 
 	c.logger.Info("connected to updates stream", zap.String("url", wsURL))
@@ -314,7 +329,10 @@ func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent), mc
 		return conn.WriteMessage(websocket.TextMessage, data)
 	}
 
-	go c.readUpdatesStream(ctx, conn, handler, mcpHandler, onDisconnect, writeMessage)
+	go func() {
+		defer c.streamWG.Done()
+		c.readUpdatesStream(ctx, conn, handler, mcpHandler, onDisconnect, writeMessage)
+	}()
 
 	return nil
 }

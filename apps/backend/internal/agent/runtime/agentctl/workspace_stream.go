@@ -45,6 +45,10 @@ type WorkspaceStream struct {
 // StreamWorkspace opens a unified WebSocket connection for all workspace events
 func (c *Client) StreamWorkspace(ctx context.Context, callbacks WorkspaceStreamCallbacks) (*WorkspaceStream, error) {
 	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return nil, fmt.Errorf("agentctl client closed")
+	}
 	if c.workspaceStreamConn != nil {
 		c.mu.Unlock()
 		return nil, fmt.Errorf("workspace stream already connected")
@@ -57,18 +61,27 @@ func (c *Client) StreamWorkspace(ctx context.Context, callbacks WorkspaceStreamC
 		return nil, fmt.Errorf("failed to connect to workspace stream: %w", err)
 	}
 
-	c.mu.Lock()
-	c.workspaceStreamConn = conn
-	c.mu.Unlock()
-
-	c.logger.Info("connected to workspace stream", zap.String("url", wsURL))
-
 	stream := &WorkspaceStream{
 		conn:    conn,
 		inputCh: make(chan types.WorkspaceStreamMessage, 64),
 		closeCh: make(chan struct{}),
 		logger:  c.logger,
 	}
+
+	// Race: Close may have fired between the dial returning and us re-acquiring
+	// the lock. Drop the new conn + stream instead of leaking the read/write
+	// goroutines past Client.Close's drain barrier.
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		_ = conn.Close()
+		return nil, fmt.Errorf("agentctl client closed during workspace stream dial")
+	}
+	c.workspaceStreamConn = conn
+	c.workspaceStream = stream
+	c.mu.Unlock()
+
+	c.logger.Info("connected to workspace stream", zap.String("url", wsURL))
 
 	// Track both goroutines on the per-stream wg so WorkspaceStream.Wait can
 	// block until they have fully unwound. The workspace read loop only invokes
@@ -105,6 +118,9 @@ func (c *Client) readWorkspaceStream(conn *websocket.Conn, stream *WorkspaceStre
 	defer func() {
 		c.mu.Lock()
 		c.workspaceStreamConn = nil
+		if c.workspaceStream == stream {
+			c.workspaceStream = nil
+		}
 		c.mu.Unlock()
 		stream.Close()
 	}()

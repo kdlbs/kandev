@@ -575,8 +575,13 @@ func (m *Manager) RestartAgentProcess(ctx context.Context, executionID string) e
 		return fmt.Errorf("failed to get agent config for restart: %w", err)
 	}
 
-	// 1. Close WebSocket streams (updates + workspace)
-	execution.agentctl.Close()
+	// 1. Close WebSocket streams (updates + workspace). Use per-stream Close
+	// methods rather than client.Close — the latter is a terminal drain
+	// barrier that flips the client into a closed state and would block
+	// every StreamUpdates/StreamWorkspace call that this same restart path
+	// makes a few lines below.
+	execution.agentctl.CloseUpdatesStream()
+	execution.agentctl.CloseWorkspaceStream()
 
 	// 2. Stop the agent subprocess via agentctl (keeps agentctl server alive)
 	if err := execution.agentctl.Stop(ctx); err != nil {
