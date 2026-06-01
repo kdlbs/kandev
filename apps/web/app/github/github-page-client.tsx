@@ -17,6 +17,7 @@ import {
   PresetsSidebar,
   type SidebarSelection,
 } from "@/components/github/my-github/presets-sidebar";
+import { PresetsScopeBar } from "@/components/github/my-github/presets-scope-bar";
 import {
   PR_PRESETS,
   ISSUE_PRESETS,
@@ -310,58 +311,52 @@ function AuthenticatedLayout({
   const prKeyToTasks = usePRKeyToTasks(workspaceId ?? null);
   useAllWorkflowSnapshots(workspaceId ?? null);
   return (
-    <div className="flex-1 flex min-h-0">
-      <aside
-        className="hidden md:flex md:flex-col w-60 border-r overflow-y-auto shrink-0"
-        data-testid="github-presets-sidebar-inline"
-      >
-        <PresetsSidebar
-          selected={selection}
-          onSelect={state.onSelect}
-          savedPresets={state.savedPresets}
-          onDeleteSaved={state.onDeleteSaved}
-          canSaveCurrent={state.canSaveCurrent}
-          onSaveCurrent={state.onOpenSaveDialog}
-          prPresets={state.resolvedPrPresets}
-          issuePresets={state.resolvedIssuePresets}
-        />
-      </aside>
-      <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <ListToolbar
-          title={title}
-          count={search.total}
+    <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+      <PresetsScopeBar
+        className="hidden md:flex"
+        selected={selection}
+        onSelect={state.onSelect}
+        savedPresets={state.savedPresets}
+        onDeleteSaved={state.onDeleteSaved}
+        canSaveCurrent={state.canSaveCurrent}
+        onSaveCurrent={state.onOpenSaveDialog}
+        prPresets={state.resolvedPrPresets}
+        issuePresets={state.resolvedIssuePresets}
+      />
+      <ListToolbar
+        title={title}
+        count={search.total}
+        loading={search.loading}
+        lastFetchedAt={search.lastFetchedAt}
+        customQuery={state.customQuery}
+        committedQuery={state.committedQuery}
+        onCustomQueryChange={state.setCustomQuery}
+        onCommitCustomQuery={state.commitCustomQuery}
+        repoFilter={state.repoFilter}
+        onRepoFilterChange={state.setRepoFilter}
+        repoOptions={repoOptions}
+        onRefresh={search.refresh}
+      />
+      {!workspaceId && <NoWorkspaceNotice />}
+      <div className="flex-1 overflow-auto px-6 py-4">
+        <ResultsList
+          selection={selection}
+          items={search.items}
           loading={search.loading}
-          lastFetchedAt={search.lastFetchedAt}
-          customQuery={state.customQuery}
-          committedQuery={state.committedQuery}
-          onCustomQueryChange={state.setCustomQuery}
-          onCommitCustomQuery={state.commitCustomQuery}
-          repoFilter={state.repoFilter}
-          onRepoFilterChange={state.setRepoFilter}
-          repoOptions={repoOptions}
-          onRefresh={search.refresh}
+          error={search.error}
+          prPresets={prPresets}
+          issuePresets={issuePresets}
+          onStartTask={onStartTask}
+          prKeyToTasks={prKeyToTasks}
         />
-        {!workspaceId && <NoWorkspaceNotice />}
-        <div className="flex-1 overflow-auto px-6 py-4">
-          <ResultsList
-            selection={selection}
-            items={search.items}
-            loading={search.loading}
-            error={search.error}
-            prPresets={prPresets}
-            issuePresets={issuePresets}
-            onStartTask={onStartTask}
-            prKeyToTasks={prKeyToTasks}
-          />
-        </div>
-        <ResultsPagination
-          page={search.page}
-          pageSize={search.pageSize}
-          total={search.total}
-          onPageChange={search.setPage}
-        />
-      </main>
-    </div>
+      </div>
+      <ResultsPagination
+        page={search.page}
+        pageSize={search.pageSize}
+        total={search.total}
+        onPageChange={search.setPage}
+      />
+    </main>
   );
 }
 

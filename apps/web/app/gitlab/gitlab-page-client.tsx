@@ -15,6 +15,7 @@ import {
   PresetsSidebar,
   type SidebarSelection,
 } from "@/components/gitlab/my-gitlab/presets-sidebar";
+import { PresetsScopeBar } from "@/components/gitlab/my-gitlab/presets-scope-bar";
 import { MR_PRESETS, ISSUE_PRESETS } from "@/components/gitlab/my-gitlab/presets";
 import { useGitLabSearch } from "@/components/gitlab/my-gitlab/use-gitlab-search";
 import { useSavedPresets, type SavedPreset } from "@/components/gitlab/my-gitlab/use-saved-presets";
@@ -230,51 +231,45 @@ function AuthenticatedLayout({ state }: { state: GitLabPageState }) {
   // later pages that may contain more matches.
   const displayedCount = state.projectFilter ? search.items.length : search.total;
   return (
-    <div className="flex-1 flex min-h-0">
-      <aside
-        className="hidden md:flex md:flex-col w-60 border-r overflow-y-auto shrink-0"
-        data-testid="gitlab-presets-sidebar-inline"
-      >
-        <PresetsSidebar
-          selected={selection}
-          onSelect={state.onSelect}
-          savedPresets={state.savedPresets}
-          onDeleteSaved={state.onDeleteSaved}
-          canSaveCurrent={state.canSaveCurrent}
-          onSaveCurrent={state.onOpenSaveDialog}
-        />
-      </aside>
-      <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <ListToolbar
-          title={title}
-          count={displayedCount}
+    <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+      <PresetsScopeBar
+        className="hidden md:flex"
+        selected={selection}
+        onSelect={state.onSelect}
+        savedPresets={state.savedPresets}
+        onDeleteSaved={state.onDeleteSaved}
+        canSaveCurrent={state.canSaveCurrent}
+        onSaveCurrent={state.onOpenSaveDialog}
+      />
+      <ListToolbar
+        title={title}
+        count={displayedCount}
+        loading={search.loading}
+        lastFetchedAt={search.lastFetchedAt}
+        customQuery={state.customQuery}
+        committedQuery={state.committedQuery}
+        onCustomQueryChange={state.setCustomQuery}
+        onCommitCustomQuery={state.commitCustomQuery}
+        projectFilter={state.projectFilter}
+        onProjectFilterChange={state.setProjectFilter}
+        projectOptions={projectOptions}
+        onRefresh={search.refresh}
+      />
+      <div className="flex-1 overflow-auto px-6 py-4">
+        <ResultsList
+          selection={selection}
+          items={search.items}
           loading={search.loading}
-          lastFetchedAt={search.lastFetchedAt}
-          customQuery={state.customQuery}
-          committedQuery={state.committedQuery}
-          onCustomQueryChange={state.setCustomQuery}
-          onCommitCustomQuery={state.commitCustomQuery}
-          projectFilter={state.projectFilter}
-          onProjectFilterChange={state.setProjectFilter}
-          projectOptions={projectOptions}
-          onRefresh={search.refresh}
+          error={search.error}
         />
-        <div className="flex-1 overflow-auto px-6 py-4">
-          <ResultsList
-            selection={selection}
-            items={search.items}
-            loading={search.loading}
-            error={search.error}
-          />
-        </div>
-        <ResultsPagination
-          page={search.page}
-          pageSize={search.pageSize}
-          total={search.total}
-          onPageChange={search.setPage}
-        />
-      </main>
-    </div>
+      </div>
+      <ResultsPagination
+        page={search.page}
+        pageSize={search.pageSize}
+        total={search.total}
+        onPageChange={search.setPage}
+      />
+    </main>
   );
 }
 

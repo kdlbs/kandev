@@ -9,7 +9,9 @@ export class MobileGitHubPage {
   constructor(private page: Page) {
     this.mobileMenuButton = page.getByTestId("github-mobile-menu-button");
     this.mobileSidebar = page.getByTestId("github-mobile-sidebar");
-    this.inlineSidebar = page.getByTestId("github-presets-sidebar-inline");
+    // Desktop scope bar (replaces the old inline presets rail). Hidden on
+    // mobile, where the presets live in the hamburger sheet instead.
+    this.inlineSidebar = page.getByTestId("github-presets-scope-bar");
     this.toolbarTitle = page.getByTestId("github-list-toolbar-title");
   }
 
