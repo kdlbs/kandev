@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback } from "react";
+import { FormEvent, useCallback, useRef } from "react";
 import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
 import { Dialog, DialogContent, DialogHeader, DialogFooter } from "@kandev/ui/dialog";
@@ -168,6 +168,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
         aboveDescriptionSlot={props.aboveDescriptionSlot}
         extraFormSlot={props.extraFormSlot}
         autoFocusDescription={!isTaskStarted && !(showTaskName && taskNameAutoFocus)}
+        onVoiceAutoSend={props.onVoiceAutoSend}
       />
       <CreateModeSelectors
         isTaskStarted={isTaskStarted}
@@ -201,6 +202,7 @@ function SessionModeBody(props: DialogFormBodyProps) {
         enhance={props.enhance}
         workspaceId={props.workspaceId}
         onJiraImport={props.onJiraImport}
+        onVoiceAutoSend={props.onVoiceAutoSend}
       />
       <SessionSelectors
         agentProfileOptions={props.agentProfileOptions}
@@ -471,6 +473,14 @@ function useGuardedSubmit(
 
 export function TaskCreateDialog(props: TaskCreateDialogProps) {
   const setup = useTaskCreateDialogSetup(props);
+  const formRef = useRef<HTMLFormElement>(null);
+  // Voice auto-send fires the form's native submit so every existing gate
+  // (missing title/repo/branch/agent, `submitBlockedReason`, in-flight create)
+  // still applies — the disabled submit button silently no-ops if any gate
+  // is unmet, matching the chat composer's voice auto-send behaviour.
+  const handleVoiceAutoSend = useCallback(() => {
+    formRef.current?.requestSubmit();
+  }, []);
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogContent
@@ -485,8 +495,15 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
             initialTitle={props.initialValues?.title}
           />
         </DialogHeader>
-        <form onSubmit={setup.guardedHandleSubmit} className="flex flex-col gap-4 overflow-hidden">
-          <DialogFormBody {...buildDialogFormBodyProps(setup, props)} />
+        <form
+          ref={formRef}
+          onSubmit={setup.guardedHandleSubmit}
+          className="flex flex-col gap-4 overflow-hidden"
+        >
+          <DialogFormBody
+            {...buildDialogFormBodyProps(setup, props)}
+            onVoiceAutoSend={handleVoiceAutoSend}
+          />
           <DialogFooter className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2">
             <TaskCreateDialogFooter {...buildDialogFooterProps(setup, props)} />
           </DialogFooter>

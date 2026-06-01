@@ -1,7 +1,7 @@
 /* eslint-disable max-lines -- groups all create-dialog selector subcomponents; splitting per-selector files is a separate refactor. */
 "use client";
 
-import { useEffect, useRef, useState, memo, useCallback, useMemo } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, memo, useCallback, useMemo } from "react";
 import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconPaperclip } from "@tabler/icons-react";
@@ -22,6 +22,7 @@ import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types
 import { EnhancePromptButton } from "@/components/enhance-prompt-button";
 import { JiraImportBar } from "@/components/jira/jira-import-bar";
 import { LinearImportBar } from "@/components/linear/linear-import-bar";
+import { VoiceInputButton } from "@/components/task/chat/voice-input-button";
 import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
 import { useTaskCreatePromptMention } from "@/hooks/use-task-create-prompt-mention";
@@ -297,6 +298,12 @@ type TaskFormInputsProps = {
     disabled?: boolean;
     onImport: (issue: LinearIssue) => void;
   };
+  /**
+   * Called after a non-empty voice transcript was inserted into the description
+   * when the user has voice auto-send enabled. The dialog wires this to a
+   * programmatic form submit so dictation can create the task hands-free.
+   */
+  onVoiceAutoSend?: () => void;
 };
 
 function useFileAttachments() {
@@ -461,6 +468,10 @@ function useDescriptionInput(
 ) {
   const [description, setDescription] = useState(initialDescription);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Caret offset to restore after a non-typed value mutation (e.g. voice
+  // transcript splice). Consumed inside useLayoutEffect so the cursor lands
+  // before the next paint and the user sees no jump.
+  const pendingCursorRef = useRef<number | null>(null);
 
   useEffect(() => {
     const ref = descriptionValueRef as React.MutableRefObject<TaskFormInputsHandle | null>;
@@ -483,6 +494,16 @@ function useDescriptionInput(
     textarea.style.height = `${textarea.scrollHeight}px`;
   }, [description]);
 
+  useLayoutEffect(() => {
+    const pos = pendingCursorRef.current;
+    if (pos === null) return;
+    pendingCursorRef.current = null;
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.focus();
+    textarea.setSelectionRange(pos, pos);
+  }, [description]);
+
   useEffect(() => {
     if (!autoFocus) return;
     const textarea = textareaRef.current;
@@ -501,7 +522,24 @@ function useDescriptionInput(
     [description, onDescriptionChange],
   );
 
-  return { description, textareaRef, setDescriptionValue };
+  const insertAtCursor = useCallback(
+    (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      const textarea = textareaRef.current;
+      const start = textarea?.selectionStart ?? description.length;
+      const end = textarea?.selectionEnd ?? description.length;
+      const charBefore = start > 0 ? description.charAt(start - 1) : "";
+      const needsLeadingSpace = charBefore !== "" && !/\s/.test(charBefore);
+      const insert = needsLeadingSpace ? ` ${trimmed}` : trimmed;
+      const next = description.slice(0, start) + insert + description.slice(end);
+      pendingCursorRef.current = start + insert.length;
+      setDescriptionValue(next);
+    },
+    [description, setDescriptionValue],
+  );
+
+  return { description, textareaRef, setDescriptionValue, insertAtCursor };
 }
 
 type FormInputsToolbarProps = {
@@ -512,6 +550,10 @@ type FormInputsToolbarProps = {
   isUtilityConfigured?: boolean;
   jiraImport?: TaskFormInputsProps["jiraImport"];
   linearImport?: TaskFormInputsProps["linearImport"];
+  voice?: {
+    onTranscript: (text: string) => void;
+    onAutoSend?: () => void;
+  };
 };
 
 function FormInputsToolbar({
@@ -522,6 +564,7 @@ function FormInputsToolbar({
   isUtilityConfigured,
   jiraImport,
   linearImport,
+  voice,
 }: FormInputsToolbarProps) {
   return (
     <div className="flex items-center px-1 pb-1">
@@ -546,6 +589,15 @@ function FormInputsToolbar({
           disabled={linearImport.disabled}
           onImport={linearImport.onImport}
         />
+      )}
+      {voice && (
+        <div className="ml-auto flex items-center">
+          <VoiceInputButton
+            onTranscript={voice.onTranscript}
+            onAutoSend={voice.onAutoSend}
+            disabled={disabled}
+          />
+        </div>
       )}
     </div>
   );
@@ -647,6 +699,7 @@ export const TaskFormInputs = memo(function TaskFormInputs({
   isUtilityConfigured,
   jiraImport,
   linearImport,
+  onVoiceAutoSend,
 }: TaskFormInputsProps) {
   const { attachments, isDragging, setIsDragging, addFiles, handleRemoveAttachment } =
     useFileAttachments();
@@ -659,7 +712,7 @@ export const TaskFormInputs = memo(function TaskFormInputs({
     () => toContextItems(attachments, handleRemoveAttachment),
     [attachments, handleRemoveAttachment],
   );
-  const { description, textareaRef, setDescriptionValue } = useDescriptionInput(
+  const { description, textareaRef, setDescriptionValue, insertAtCursor } = useDescriptionInput(
     initialDescription,
     autoFocus,
     descriptionValueRef,
@@ -673,6 +726,10 @@ export const TaskFormInputs = memo(function TaskFormInputs({
   });
   const { handleChange, handleKeyDown } = useTextareaHandlers(mention, onKeyDown);
   const { fileInputRef, handleAttachClick, handleFileInputChange } = useFileInputClick(addFiles);
+  const voiceBinding = useMemo(
+    () => ({ onTranscript: insertAtCursor, onAutoSend: onVoiceAutoSend }),
+    [insertAtCursor, onVoiceAutoSend],
+  );
 
   return (
     <div
@@ -711,6 +768,7 @@ export const TaskFormInputs = memo(function TaskFormInputs({
           isUtilityConfigured={isUtilityConfigured}
           jiraImport={jiraImport}
           linearImport={linearImport}
+          voice={voiceBinding}
         />
         <HiddenFileInput inputRef={fileInputRef} onChange={handleFileInputChange} />
       </div>

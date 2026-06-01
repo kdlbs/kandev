@@ -190,6 +190,24 @@ describe("DialogPromptSection (CLI-mode parity)", () => {
     expect((last.jiraImport as { disabled: boolean } | undefined)?.disabled).toBe(false);
     expect((last.linearImport as { disabled: boolean } | undefined)?.disabled).toBe(false);
   });
+
+  it("forwards onVoiceAutoSend to TaskFormInputs", () => {
+    taskFormInputsCalls.length = 0;
+    const onVoiceAutoSend = () => {};
+    render(
+      <DialogPromptSection
+        isSessionMode={false}
+        isTaskStarted={false}
+        initialDescription=""
+        fs={makeFs()}
+        handleKeyDown={(() => {}) as never}
+        onVoiceAutoSend={onVoiceAutoSend}
+      />,
+    );
+
+    const last = taskFormInputsCalls.at(-1)!;
+    expect(last.onVoiceAutoSend).toBe(onVoiceAutoSend);
+  });
 });
 
 describe("CreateEditSelectors", () => {
