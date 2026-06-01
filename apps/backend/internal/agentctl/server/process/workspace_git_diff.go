@@ -122,9 +122,12 @@ func capDiffOutput(ctx context.Context, workDir string, args ...string) (string,
 		_ = stdout.Close()
 		return "", false
 	}
+	// release() is idempotent (sync.Once inside the throttle), so a defer
+	// covers every return path — including ones added later between Start
+	// and the explicit end-of-function release.
+	defer release()
 	if err := cmd.Start(); err != nil {
 		_ = stdout.Close()
-		release()
 		return "", false
 	}
 
@@ -138,7 +141,6 @@ func capDiffOutput(ctx context.Context, workDir string, args ...string) (string,
 	// Drain remaining stdout so the process doesn't hang on a full pipe.
 	_, _ = io.Copy(io.Discard, stdout)
 	_ = cmd.Wait()
-	release()
 
 	return string(data), truncated
 }

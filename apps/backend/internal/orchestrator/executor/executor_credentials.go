@@ -219,12 +219,19 @@ func (e *Executor) resolveGHCLIToken(req *LaunchAgentRequest, metadata map[strin
 }
 
 // detectGHToken runs `gh auth token` to extract the GitHub token from the local gh CLI.
+//
+// acquireCtx (30s) bounds the gh-throttle wait; execCtx (5s) bounds the
+// subprocess itself. Sharing a single 5s ctx for both would let a saturated
+// gh pool eat the budget in queue and silently skip GITHUB_TOKEN injection
+// for the launched agent.
 func detectGHToken() (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	acquireCtx, cancelAcquire := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelAcquire()
+	execCtx, cancelExec := context.WithTimeout(acquireCtx, 5*time.Second)
+	defer cancelExec()
 
-	cmd := exec.CommandContext(ctx, "gh", "auth", "token")
-	out, err := subproc.RunGHOutput(ctx, cmd)
+	cmd := exec.CommandContext(execCtx, "gh", "auth", "token")
+	out, err := subproc.RunGHOutput(acquireCtx, cmd)
 	if err != nil {
 		return "", err
 	}

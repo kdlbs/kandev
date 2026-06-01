@@ -341,6 +341,9 @@ func (m *Manager) fetchBranchToLocal(ctx context.Context, repoPath, branch strin
 		zap.String("repo_path", repoPath))
 
 	// Try to fetch from origin to get the latest version.
+	// fetchCtx bounds the git subprocess itself; the throttle Acquire uses
+	// the parent ctx so a saturated git pool can't eat the fetch budget
+	// before the subprocess even starts.
 	fetchCtx, cancelFetch := context.WithTimeout(ctx, m.fetchTimeout)
 	defer cancelFetch()
 
@@ -349,7 +352,7 @@ func (m *Manager) fetchBranchToLocal(ctx context.Context, repoPath, branch strin
 		refspec = fmt.Sprintf("pull/%d/head:%s", prNumber, branch)
 	}
 	fetchCmd := m.newNonInteractiveGitCmd(fetchCtx, repoPath, "fetch", gitNoTags, "origin", refspec)
-	output, err := runGitCmdCombinedOutput(fetchCtx, fetchCmd)
+	output, err := runGitCmdCombinedOutput(ctx, fetchCmd)
 	if err == nil {
 		return &FetchBranchResult{}, nil
 	}

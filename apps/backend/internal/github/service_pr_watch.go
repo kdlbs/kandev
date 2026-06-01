@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -408,11 +409,26 @@ func (s *Service) refreshStaleWorkspaceWatches(workspaceID string, staleTasks ma
 // when SyncWatchesBatched can't be used (e.g. NoopClient). Kept small —
 // the global gh subprocess semaphore in gh_throttle.go is what actually
 // caps fan-out now, the worker pool here just bounds goroutine count.
+//
+// Blocks until every spawned goroutine returns. The caller relies on this
+// to keep `inflightWorkspaceRefreshes` from being cleared while
+// TriggerPRSyncAll is still writing PR-watch state — otherwise a follow-up
+// refresh for the same workspace could race the still-running fallback.
 func (s *Service) refreshStaleTasksPerTask(ctx context.Context, staleTasks map[string]struct{}) {
 	sem := make(chan struct{}, 5)
+	var wg sync.WaitGroup
 	for taskID := range staleTasks {
-		sem <- struct{}{}
+		// Honor ctx so shutdown / parent-timeout stops queuing new tasks
+		// instead of waiting on a busy semaphore slot.
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			wg.Wait()
+			return
+		}
+		wg.Add(1)
 		go func(id string) {
+			defer wg.Done()
 			defer func() { <-sem }()
 			if _, syncErr := s.TriggerPRSyncAll(ctx, id); syncErr != nil {
 				s.logger.Debug("background PR sync failed",
@@ -420,6 +436,7 @@ func (s *Service) refreshStaleTasksPerTask(ctx context.Context, staleTasks map[s
 			}
 		}(taskID)
 	}
+	wg.Wait()
 }
 
 // findTaskPRForStatus locates the TaskPR row matching the (task, owner, repo,

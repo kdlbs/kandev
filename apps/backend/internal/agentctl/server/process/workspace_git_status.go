@@ -205,7 +205,7 @@ func (wt *WorkspaceTracker) parseGitStatusOutput(ctx context.Context, update *ty
 	// GIT_OPTIONAL_LOCKS=0 (via pollingGitCommand) prevents the background poll loop from taking
 	// .git/index.lock, which would race with concurrent user-initiated git operations.
 	statusCmd := wt.pollingGitCommand(ctx, "status", "--porcelain", "--untracked-files=all")
-	statusOut, err := statusCmd.Output()
+	statusOut, err := subproc.RunGitOutput(ctx, statusCmd)
 	if err != nil {
 		return err
 	}

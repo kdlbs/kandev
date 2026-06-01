@@ -144,15 +144,18 @@ func (p *LocalPreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, onP
 // the workspace_path may be a worktree pointer file or a submodule, both of
 // which git resolves correctly while a manual HEAD read would not.
 func readCurrentBranchForLocal(workDir string) string {
-	// `git symbolic-ref` is a cheap local-only call; we use a short
-	// timeout context here so the throttle's ctx-aware Acquire can
-	// fail-fast if the pool is saturated, rather than blocking the
-	// caller (which has no ctx of its own).
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", "symbolic-ref", "--short", "HEAD")
+	// `git symbolic-ref` is a cheap local-only call. acquireCtx (30s) bounds
+	// the throttle wait so a saturated git pool can't poison the result by
+	// timing out before the subprocess starts; execCtx (5s) bounds the
+	// subprocess itself. Conflating the two would let throttle saturation
+	// fall through to a same-branch-checkout that touches the working tree.
+	acquireCtx, cancelAcquire := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelAcquire()
+	execCtx, cancelExec := context.WithTimeout(acquireCtx, 5*time.Second)
+	defer cancelExec()
+	cmd := exec.CommandContext(execCtx, "git", "symbolic-ref", "--short", "HEAD")
 	cmd.Dir = workDir
-	out, err := subproc.RunGitOutput(ctx, cmd)
+	out, err := subproc.RunGitOutput(acquireCtx, cmd)
 	if err != nil {
 		return ""
 	}

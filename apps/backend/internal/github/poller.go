@@ -202,6 +202,12 @@ func (p *Poller) tryBatchedPRWatchCheck(ctx context.Context, watches []*PRWatch)
 		if !r.Found || r.Status == nil {
 			continue
 		}
+		// Skip publish when the underlying SyncTaskPR failed — the task_pr
+		// row is still stale, so emitting a "PR merged" / "checks changed"
+		// event would put the frontend ahead of the DB until the next poll.
+		if r.SyncFailed {
+			continue
+		}
 		// Publish PRFeedback event when the watch was previously numbered and
 		// either the PR transitioned to merged/closed or check/review state
 		// changed. Searching watches (PRNumber==0) that just got promoted

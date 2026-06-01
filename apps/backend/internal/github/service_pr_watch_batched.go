@@ -12,10 +12,11 @@ import (
 // Callers (poller, on-demand sync) can post-process — e.g. publish
 // PRFeedback events — without re-fetching from GitHub.
 type PRWatchSyncResult struct {
-	Watch   *PRWatch
-	Status  *PRStatus // nil when no PR was found for a searching watch, or alias missing
-	Found   bool      // true when status applied (PR data exists)
-	Changed bool      // numbered watches only: true if checks/review state moved
+	Watch      *PRWatch
+	Status     *PRStatus // nil when no PR was found for a searching watch, or alias missing
+	Found      bool      // true when status applied (PR data exists)
+	Changed    bool      // numbered watches only: true if checks/review state moved
+	SyncFailed bool      // true when SyncTaskPR returned an error — callers must NOT publish events
 }
 
 // SyncWatchesBatched runs the batched GraphQL queries for the supplied
@@ -109,7 +110,10 @@ func (s *Service) applyBatchedNumberedWatch(
 	}
 	if syncErr := s.SyncTaskPR(ctx, w.TaskID, status); syncErr != nil {
 		s.logger.Error("failed to sync task PR", zap.String("task_id", w.TaskID), zap.Error(syncErr))
-		return PRWatchSyncResult{Watch: w, Status: status, Found: true, Changed: changed}
+		// SyncFailed=true so poller skips publishing PR feedback while the
+		// task_pr row is still stale — old applyPRStatus path early-returned
+		// on this error for the same reason.
+		return PRWatchSyncResult{Watch: w, Status: status, Found: true, SyncFailed: true}
 	}
 	// Reset to "searching" when the PR is merged/closed so a follow-up PR on the
 	// same branch can be detected without manual intervention.

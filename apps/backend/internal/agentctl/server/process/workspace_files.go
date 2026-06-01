@@ -382,6 +382,12 @@ func (wt *WorkspaceTracker) ApplyFileDiff(ctx context.Context, reqPath, unifiedD
 
 	output, err := subproc.RunGitCombinedOutput(ctx, cmd)
 	if err != nil {
+		// Treat caller cancellation / deadline as a transient failure and
+		// propagate rather than overwriting the file from desiredContent —
+		// the user pressing cancel must NOT silently clobber what's on disk.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return "", "", fmt.Errorf("git apply cancelled: %w", err)
+		}
 		if desiredContent != nil {
 			return wt.writeDesiredContent(safePath, cleanWorkDir, reqPath, *desiredContent, currentHash)
 		}
