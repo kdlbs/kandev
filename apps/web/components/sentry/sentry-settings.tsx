@@ -542,9 +542,10 @@ export function SentryConnectionSection() {
               {(s.orgsError || s.projectsError) && (
                 <Alert variant="destructive">
                   <AlertDescription>
-                    Couldn&apos;t load organizations or projects from Sentry. The auth token is
-                    valid but likely missing the <code>org:read</code> / <code>project:read</code>{" "}
-                    scopes — recreate it with those scopes (see the ⓘ next to Auth token).
+                    Couldn&apos;t load organizations or projects from Sentry:{" "}
+                    <span className="font-mono text-xs">{s.orgsError || s.projectsError}</span>. If
+                    this is a permissions error, check the token has the <code>org:read</code> /{" "}
+                    <code>project:read</code> scopes (see the ⓘ next to Auth token).
                   </AlertDescription>
                 </Alert>
               )}
