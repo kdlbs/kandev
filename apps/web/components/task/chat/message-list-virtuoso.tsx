@@ -507,6 +507,7 @@ export const VirtuosoMessageList = memo(function VirtuosoMessageList(props: Mess
           messagesLoading={messagesLoading}
           isInitialLoading={isInitialLoading}
           messagesCount={messages.length}
+          onLoadMore={loadMore}
         />
         <AgentStatus sessionState={sessionState} sessionId={sessionId} messages={messages} />
         {footerActions.map((msg) => (

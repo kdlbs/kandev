@@ -24,8 +24,10 @@ import { seedMessagesDescription } from "../search/shared";
 // (which the chat renders verbatim) so the only on-screen occurrence is the
 // paginated message itself.
 const INITIAL_PROMPT = "INITIAL-PROMPT-MARKER-7Q2X";
-// Enough filler to require multiple pages beyond the initial 100-message load.
-const FILLER_COUNT = 150;
+// Enough filler to require multiple lazy-load pages beyond the initial 100, while
+// keeping sequential seeding (one round-trip per message) off the test budget:
+// 120 + the marker leaves ~20+ messages older than the initial window.
+const FILLER_COUNT = 120;
 
 /** Boot an idle session, seed the marker, then bury it under FILLER_COUNT messages. */
 async function seedBigConversation(apiClient: ApiClient, seedData: SeedData): Promise<string> {
