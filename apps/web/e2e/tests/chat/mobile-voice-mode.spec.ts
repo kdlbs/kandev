@@ -8,12 +8,11 @@ import { SessionPage } from "../../pages/session-page";
 // the `mobile-chrome` Playwright project picks it up.
 //
 // Two assertions:
-// 1. The Voice Mode settings page is reachable on mobile via the sidebar
-//    trigger and every card on the page renders at mobile width — guards
-//    against the "setting missing" symptom.
-// 2. The mic button is mounted on the mobile chat composer with the
-//    coarse-pointer effective-mode override, so a user with stored
-//    `voiceMode.mode = "hold"` still gets working toggle behaviour.
+// 1. The Voice Mode settings page renders all cards at mobile width when
+//    navigated to directly — guards against the "setting missing" symptom.
+// 2. The mic button mounts on the mobile chat composer with the coarse-pointer
+//    override: a user with stored `voiceMode.mode = "hold"` gets toggle
+//    behaviour (data-effective-mode = "toggle") and a 40px touch target.
 
 async function seedTask(apiClient: ApiClient, seedData: SeedData, title: string) {
   return apiClient.createTaskWithAgent(seedData.workspaceId, title, seedData.agentProfileId, {
@@ -27,9 +26,7 @@ async function seedTask(apiClient: ApiClient, seedData: SeedData, title: string)
 test.describe("Mobile voice mode", () => {
   test.describe.configure({ retries: 1, timeout: 60_000 });
 
-  test("Voice Mode settings page is reachable from the mobile sidebar and renders every card", async ({
-    testPage,
-  }) => {
+  test("Voice Mode settings page renders every card at mobile width", async ({ testPage }) => {
     await testPage.goto("/settings/voice-mode");
 
     // Page header confirms route resolved to the right shell. The page title
@@ -58,6 +55,20 @@ test.describe("Mobile voice mode", () => {
     apiClient,
     seedData,
   }) => {
+    // Seed hold mode so the coarse-pointer override assertion is non-vacuous:
+    // data-mode="hold" (stored pref) vs data-effective-mode="toggle" (override)
+    // proves the coarse-pointer branch fired, not that the default was toggle.
+    await apiClient.saveUserSettings({
+      voice_mode: {
+        enabled: true,
+        engine: "auto",
+        language: "auto",
+        mode: "hold",
+        auto_send: false,
+        whisper_web_model: "base",
+      },
+    });
+
     const task = await seedTask(apiClient, seedData, "Mobile voice button");
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
@@ -66,12 +77,12 @@ test.describe("Mobile voice mode", () => {
     const micButton = testPage.getByTestId("voice-input-button");
     await expect(micButton).toBeVisible({ timeout: 15_000 });
 
-    // Pixel 5 advertises `(pointer: coarse)`. Two signals that the coarse-
-    // pointer override fired (rather than the test simply riding on the
-    // default stored mode being "toggle"):
-    //   - data-effective-mode resolves to "toggle"
-    //   - the touch-target class swap produces `h-10 w-10`, which is only
-    //     reached when `useIsCoarsePointer()` returned true
+    // Pixel 5 advertises `(pointer: coarse)`. Three signals that the coarse-
+    // pointer override fired:
+    //   - data-mode="hold" (the stored user preference)
+    //   - data-effective-mode="toggle" (the override: hold→toggle on coarse)
+    //   - h-10 w-10 (40px touch target, only set when isCoarsePointer=true)
+    await expect(micButton).toHaveAttribute("data-mode", "hold");
     await expect(micButton).toHaveAttribute("data-effective-mode", "toggle");
     await expect(micButton).toHaveClass(/(^|\s)h-10(\s|$)/);
     await expect(micButton).toHaveClass(/(^|\s)w-10(\s|$)/);

@@ -7,6 +7,7 @@ import type {
   TaskSessionState,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile } from "../../lib/types/http-agents";
+import type { VoiceModeSettings } from "../../lib/types/http-voice";
 import type {
   SSHAgentReadinessResponse,
   SSHProbeShellsResponse,
@@ -609,6 +610,7 @@ export class ApiClient {
     default_utility_model?: string;
     sidebar_views?: unknown[];
     kanban_view_mode?: string;
+    voice_mode?: VoiceModeSettings;
   }): Promise<void> {
     await this.request("PATCH", "/api/v1/user/settings", settings);
   }
