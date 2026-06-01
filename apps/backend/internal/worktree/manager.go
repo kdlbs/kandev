@@ -21,7 +21,7 @@ const (
 	// fork+exec is intercepted by syspolicyd so a single spawn can take
 	// 1–3s under load. 30s gives ~100x headroom over normal operation
 	// while still surfacing true hangs (credential prompts, stuck
-	// filters, filesystem stalls) in a reasonable window. See PR #1216.
+	// filters, filesystem stalls) in a reasonable window.
 	defaultGitInspectTimeout = 30 * time.Second
 	gitNoTags                = "--no-tags"
 )

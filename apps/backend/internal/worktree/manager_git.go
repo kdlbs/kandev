@@ -40,11 +40,11 @@ func (m *Manager) isGitRepo(path string) bool {
 func (m *Manager) branchExists(ctx context.Context, repoPath, branch string) (bool, error) {
 	// Acquire the throttle slot FIRST, then start the inspectTimeout
 	// timer. Building inspectCtx before Acquire (as we did originally)
-	// let throttle queue time eat through the 10s budget under load —
-	// see the 70s-lock-held / signal:killed cascade investigated in
-	// PR #1216. With this ordering the 10s timer starts the moment git
-	// is about to run, so we get an accurate "could not tell" only when
-	// the inspect itself is the slow part.
+	// let throttle queue time eat through the 10s budget under load,
+	// producing 70s-lock-held / signal:killed cascades under git-pool
+	// contention. With this ordering the 10s timer starts the moment
+	// git is about to run, so we get an accurate "could not tell" only
+	// when the inspect itself is the slow part.
 	release, err := subproc.Git().Acquire(ctx)
 	if err != nil {
 		m.logger.Warn("branchExists bounded by context",
@@ -144,7 +144,7 @@ func (m *Manager) pullBaseBranch(ctx context.Context, repoPath, baseBranch strin
 	// Order matters: the previous "build fetchCtx, then runGitCmd" shape
 	// let throttle queue time burn the fetch budget while we waited for a
 	// slot, and the cmd was killed with `signal: killed` the moment it
-	// got one — see the 70s-lock-held trace in PR #1216.
+	// got one (70s-lock-held trace under contention).
 	fetchArgs := []string{"fetch", gitNoTags, "origin"}
 	if localBranch != "" {
 		fetchArgs = append(fetchArgs, localBranch)
@@ -233,7 +233,8 @@ func (m *Manager) pullCurrentBranchOrFallback(
 // then constructs a child context with execTimeout and runs the
 // non-interactive git command with CombinedOutput. The exec timer
 // starts only AFTER Acquire returns so throttle queue time cannot
-// burn the budget — see PR #1216 for the failure mode this prevents.
+// burn the budget (otherwise the cmd gets killed with `signal: killed`
+// the moment it acquires a slot under contention).
 // Returns (combined output, run error, exec-ctx error). The exec-ctx
 // error lets callers tell a context-driven kill (timeout) from a
 // regular git failure when classifying fallbacks.
