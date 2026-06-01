@@ -53,7 +53,7 @@ test.describe("Mobile voice mode", () => {
     await expect(sidebarTrigger).toBeVisible();
   });
 
-  test("voice input mic button mounts on the mobile chat composer with toggle as the effective mode", async ({
+  test("voice input mic button mounts on the mobile chat composer with the coarse-pointer touch target and effective toggle mode", async ({
     testPage,
     apiClient,
     seedData,
@@ -66,10 +66,14 @@ test.describe("Mobile voice mode", () => {
     const micButton = testPage.getByTestId("voice-input-button");
     await expect(micButton).toBeVisible({ timeout: 15_000 });
 
-    // On Pixel 5 the device descriptor exposes `(pointer: coarse)`, so the
-    // stored hold preference (default in fresh user settings is "toggle",
-    // but the override still applies even if the user opted into hold)
-    // should resolve to the effective toggle handler.
+    // Pixel 5 advertises `(pointer: coarse)`. Two signals that the coarse-
+    // pointer override fired (rather than the test simply riding on the
+    // default stored mode being "toggle"):
+    //   - data-effective-mode resolves to "toggle"
+    //   - the touch-target class swap produces `h-10 w-10`, which is only
+    //     reached when `useIsCoarsePointer()` returned true
     await expect(micButton).toHaveAttribute("data-effective-mode", "toggle");
+    await expect(micButton).toHaveClass(/(^|\s)h-10(\s|$)/);
+    await expect(micButton).toHaveClass(/(^|\s)w-10(\s|$)/);
   });
 });
