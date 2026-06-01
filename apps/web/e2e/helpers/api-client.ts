@@ -1373,7 +1373,7 @@ export class ApiClient {
   // --- Sentry Mock Control ---
 
   async mockSentryReset(): Promise<void> {
-    await this.request("POST", "/api/v1/sentry/mock/reset");
+    await this.request("DELETE", "/api/v1/sentry/mock/reset");
   }
 
   async mockSentrySetAuthResult(result: {
