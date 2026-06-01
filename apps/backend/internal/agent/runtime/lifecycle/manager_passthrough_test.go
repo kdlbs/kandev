@@ -557,7 +557,7 @@ func TestGetPassthroughMCPEnvDecodesRestartShapes(t *testing.T) {
 }
 
 func TestWritePassthroughMCPFilesUnionTrackingOnRelaunch(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	exec := &AgentExecution{Metadata: map[string]interface{}{}}
 	path := filepath.Join(t.TempDir(), "cfg.json")
 	file := mcpconfig.PassthroughConfigFile{Path: path, Content: []byte("{}\n")}
@@ -684,7 +684,7 @@ func TestRedactPassthroughArgsRedactsCodexSecrets(t *testing.T) {
 }
 
 func TestWritePassthroughMCPFilesSkipsDanglingLeafSymlink(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	ws := t.TempDir()
 	outside := t.TempDir()
 	outsideTarget := filepath.Join(outside, "target.json") // intentionally never created
