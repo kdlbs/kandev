@@ -21,6 +21,46 @@ type mockExecutionLookup struct {
 	ensureErr error
 }
 
+// blockingExecutionLookup is a counted, blocking ExecutionLookup used by the
+// singleflight dedup tests. Each GetOrEnsureExecution call bumps a counter,
+// signals on `entered` (non-blocking), then blocks on `release` so the test
+// can fire N concurrent requests and assert exactly one ever runs the inner
+// work. Returns `err` once released — set to ErrSessionWorkspaceNotReady so
+// the handler returns the graceful not-ready envelope rather than failing.
+type blockingExecutionLookup struct {
+	mu      sync.Mutex
+	calls   int
+	entered chan struct{}
+	release chan struct{}
+	err     error
+}
+
+func (b *blockingExecutionLookup) GetExecutionBySessionID(_ string) (*lifecycle.AgentExecution, bool) {
+	return nil, false
+}
+
+func (b *blockingExecutionLookup) GetOrEnsureExecution(ctx context.Context, _ string) (*lifecycle.AgentExecution, error) {
+	b.mu.Lock()
+	b.calls++
+	b.mu.Unlock()
+	select {
+	case b.entered <- struct{}{}:
+	default:
+	}
+	select {
+	case <-b.release:
+		return nil, b.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (b *blockingExecutionLookup) callCount() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.calls
+}
+
 func (m *mockExecutionLookup) GetExecutionBySessionID(sessionID string) (*lifecycle.AgentExecution, bool) {
 	if m.executions == nil {
 		return nil, false
@@ -611,5 +651,193 @@ func TestWsGitCommits_WrappedWorkspaceNotReadyError(t *testing.T) {
 	}
 	if ready, ok := payload["ready"].(bool); !ok || ready {
 		t.Errorf("expected ready=false, got %v", payload["ready"])
+	}
+}
+
+// TestWsGitCommits_SingleflightDedupesConcurrentRequests verifies that N
+// concurrent identical (sessionID, limit) requests collapse onto a single
+// computeGitCommits invocation. Without dedup, a frontend re-render storm
+// fans out into N agentctl HTTP calls under the per-process throttle —
+// the regression that motivated the singleflight guard in PR #1216.
+func TestWsGitCommits_SingleflightDedupesConcurrentRequests(t *testing.T) {
+	log := newTestLogger()
+	lookup := &blockingExecutionLookup{
+		entered: make(chan struct{}, 1),
+		release: make(chan struct{}),
+		err:     lifecycle.ErrSessionWorkspaceNotReady,
+	}
+	h := NewGitHandlers(lookup, nil, log)
+
+	const N = 8
+	type result struct {
+		resp *ws.Message
+		err  error
+	}
+	results := make(chan result, N)
+	for i := 0; i < N; i++ {
+		go func() {
+			msg, _ := ws.NewRequest("test", ws.ActionSessionGitCommits, GitCommitsRequest{SessionID: "session-1", Limit: 50})
+			r, err := h.wsGitCommits(context.Background(), msg)
+			results <- result{r, err}
+		}()
+	}
+
+	select {
+	case <-lookup.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("compute body never entered")
+	}
+	// Settle window so any buggy parallel callers have time to start
+	// their own GetOrEnsureExecution before we release.
+	time.Sleep(50 * time.Millisecond)
+	close(lookup.release)
+
+	for i := 0; i < N; i++ {
+		select {
+		case r := <-results:
+			if r.err != nil {
+				t.Fatalf("waiter got error: %v", r.err)
+			}
+			if r.resp == nil {
+				t.Fatal("waiter got nil response")
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("waiter %d never received result", i)
+		}
+	}
+
+	if got := lookup.callCount(); got != 1 {
+		t.Fatalf("expected exactly 1 compute call, got %d — singleflight dedup broken", got)
+	}
+}
+
+// TestWsGitCommits_SingleflightWaiterCancellationDoesNotPoisonOthers verifies
+// that cancelling one waiter's request ctx does NOT cancel the shared
+// computation or affect other waiters. The shared work runs on a detached
+// 60s ctx; individual waiters select on their own ctx via DoChan.
+func TestWsGitCommits_SingleflightWaiterCancellationDoesNotPoisonOthers(t *testing.T) {
+	log := newTestLogger()
+	lookup := &blockingExecutionLookup{
+		entered: make(chan struct{}, 1),
+		release: make(chan struct{}),
+		err:     lifecycle.ErrSessionWorkspaceNotReady,
+	}
+	h := NewGitHandlers(lookup, nil, log)
+
+	const N = 4
+	type result struct {
+		resp *ws.Message
+		err  error
+	}
+	results := make([]chan result, N)
+	ctxs := make([]context.Context, N)
+	cancels := make([]context.CancelFunc, N)
+	for i := 0; i < N; i++ {
+		results[i] = make(chan result, 1)
+		ctxs[i], cancels[i] = context.WithCancel(context.Background())
+	}
+	defer func() {
+		for _, c := range cancels {
+			c()
+		}
+	}()
+
+	for i := 0; i < N; i++ {
+		go func(idx int) {
+			msg, _ := ws.NewRequest("test", ws.ActionSessionGitCommits, GitCommitsRequest{SessionID: "session-1", Limit: 50})
+			r, err := h.wsGitCommits(ctxs[idx], msg)
+			results[idx] <- result{r, err}
+		}(i)
+	}
+
+	select {
+	case <-lookup.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("compute body never entered")
+	}
+
+	// Cancel waiter 0 while the shared work is still in flight.
+	cancels[0]()
+	select {
+	case r := <-results[0]:
+		if !errors.Is(r.err, context.Canceled) {
+			t.Fatalf("waiter 0 expected context.Canceled, got: %v", r.err)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatalf("waiter 0 never observed its ctx cancellation")
+	}
+
+	// Release the shared computation — the remaining N-1 waiters must
+	// still receive a non-error response.
+	close(lookup.release)
+	for i := 1; i < N; i++ {
+		select {
+		case r := <-results[i]:
+			if r.err != nil {
+				t.Fatalf("waiter %d got unexpected error after peer cancelled: %v", i, r.err)
+			}
+			if r.resp == nil {
+				t.Fatalf("waiter %d got nil response", i)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("waiter %d never received result", i)
+		}
+	}
+
+	if got := lookup.callCount(); got != 1 {
+		t.Fatalf("expected exactly 1 compute call despite cancellation, got %d", got)
+	}
+}
+
+// TestWsCumulativeDiff_SingleflightDedupesConcurrentRequests mirrors the
+// commits test for the cumulative-diff handler, which uses the same DoChan
+// + detached-ctx pattern on diffGroup.
+func TestWsCumulativeDiff_SingleflightDedupesConcurrentRequests(t *testing.T) {
+	log := newTestLogger()
+	lookup := &blockingExecutionLookup{
+		entered: make(chan struct{}, 1),
+		release: make(chan struct{}),
+		err:     lifecycle.ErrSessionWorkspaceNotReady,
+	}
+	h := NewGitHandlers(lookup, nil, log)
+
+	const N = 6
+	type result struct {
+		resp *ws.Message
+		err  error
+	}
+	results := make(chan result, N)
+	for i := 0; i < N; i++ {
+		go func() {
+			msg, _ := ws.NewRequest("test", ws.ActionSessionCumulativeDiff, CumulativeDiffRequest{SessionID: "session-1"})
+			r, err := h.wsCumulativeDiff(context.Background(), msg)
+			results <- result{r, err}
+		}()
+	}
+
+	select {
+	case <-lookup.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("compute body never entered")
+	}
+	time.Sleep(50 * time.Millisecond)
+	close(lookup.release)
+
+	for i := 0; i < N; i++ {
+		select {
+		case r := <-results:
+			if r.err != nil {
+				t.Fatalf("waiter got error: %v", r.err)
+			}
+			if r.resp == nil {
+				t.Fatal("waiter got nil response")
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("waiter %d never received result", i)
+		}
+	}
+
+	if got := lookup.callCount(); got != 1 {
+		t.Fatalf("expected exactly 1 compute call, got %d — singleflight dedup broken on diffGroup", got)
 	}
 }
