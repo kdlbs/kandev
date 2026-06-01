@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { SessionPanelContent } from "@kandev/ui/pannel-session";
 import type { RenderItem } from "@/hooks/use-processed-messages";
+import type { Message, TaskSessionState } from "@/lib/types/http";
 import { AgentStatus } from "@/components/task/chat/messages/agent-status";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
@@ -388,6 +389,68 @@ function useVisibleScrollParent() {
   return { scrollParent, setScrollRef };
 }
 
+type HeaderFooterArgs = {
+  isLoadingMore: boolean;
+  hasMore: boolean;
+  showLoadingState: boolean;
+  messagesLoading: boolean;
+  isInitialLoading: boolean;
+  messages: Message[];
+  loadMore: () => Promise<number>;
+  sessionState?: TaskSessionState;
+  sessionId: string | null;
+  footerActionMessages?: Message[];
+};
+
+/** Memoized Virtuoso Header (load-more status) and Footer (agent status + actions). */
+function useVirtuosoHeaderFooter(args: HeaderFooterArgs) {
+  const { isLoadingMore, hasMore, showLoadingState, messagesLoading, isInitialLoading } = args;
+  const { messages, loadMore, sessionState, sessionId, footerActionMessages } = args;
+  const footerActions = useMemo(() => footerActionMessages ?? [], [footerActionMessages]);
+
+  const Header = useCallback(
+    () => (
+      <MessageListStatus
+        isLoadingMore={isLoadingMore}
+        hasMore={hasMore}
+        showLoadingState={showLoadingState}
+        messagesLoading={messagesLoading}
+        isInitialLoading={isInitialLoading}
+        messagesCount={messages.length}
+        onLoadMore={loadMore}
+      />
+    ),
+    [
+      isLoadingMore,
+      hasMore,
+      showLoadingState,
+      messagesLoading,
+      isInitialLoading,
+      messages.length,
+      loadMore,
+    ],
+  );
+
+  const Footer = useCallback(
+    () => (
+      <>
+        <AgentStatus sessionState={sessionState} sessionId={sessionId} messages={messages} />
+        {footerActions.map((msg) => (
+          <MessageRenderer
+            key={msg.id}
+            comment={msg}
+            isTaskDescription={false}
+            sessionState={sessionState}
+          />
+        ))}
+      </>
+    ),
+    [sessionId, sessionState, messages, footerActions],
+  );
+
+  return { Header, Footer, footerActions };
+}
+
 export const VirtuosoMessageList = memo(function VirtuosoMessageList(props: MessageListProps) {
   const {
     items,
@@ -421,38 +484,18 @@ export const VirtuosoMessageList = memo(function VirtuosoMessageList(props: Mess
     sessionState,
   });
 
-  const Header = useCallback(
-    () => (
-      <MessageListStatus
-        isLoadingMore={isLoadingMore}
-        hasMore={hasMore}
-        showLoadingState={showLoadingState}
-        messagesLoading={messagesLoading}
-        isInitialLoading={isInitialLoading}
-        messagesCount={messages.length}
-      />
-    ),
-    [isLoadingMore, hasMore, showLoadingState, messagesLoading, isInitialLoading, messages.length],
-  );
-
-  const footerActions = useMemo(() => footerActionMessages ?? [], [footerActionMessages]);
-
-  const Footer = useCallback(
-    () => (
-      <>
-        <AgentStatus sessionState={sessionState} sessionId={sessionId} messages={messages} />
-        {footerActions.map((msg) => (
-          <MessageRenderer
-            key={msg.id}
-            comment={msg}
-            isTaskDescription={false}
-            sessionState={sessionState}
-          />
-        ))}
-      </>
-    ),
-    [sessionId, sessionState, messages, footerActions],
-  );
+  const { Header, Footer, footerActions } = useVirtuosoHeaderFooter({
+    isLoadingMore,
+    hasMore,
+    showLoadingState,
+    messagesLoading,
+    isInitialLoading,
+    messages,
+    loadMore,
+    sessionState,
+    sessionId,
+    footerActionMessages,
+  });
 
   if (isInitialLoading || items.length === 0) {
     return (

@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@kandev/ui/button";
 import { GridSpinner } from "@/components/grid-spinner";
 import type { Message, TaskSessionState, TaskState } from "@/lib/types/http";
 import type { RenderItem } from "@/hooks/use-processed-messages";
@@ -48,6 +49,7 @@ export function MessageListStatus({
   messagesLoading,
   isInitialLoading,
   messagesCount,
+  onLoadMore,
 }: {
   isLoadingMore: boolean;
   hasMore: boolean;
@@ -55,12 +57,32 @@ export function MessageListStatus({
   messagesLoading: boolean;
   isInitialLoading: boolean;
   messagesCount: number;
+  /**
+   * Explicitly load the previous page of older messages. Rendered as a button so
+   * older history is always reachable even when the scroll-up IntersectionObserver
+   * fails to re-arm (e.g. pinned at the very top with the sentinel always in view).
+   */
+  onLoadMore?: () => void;
 }) {
   return (
     <>
       {isLoadingMore && hasMore && (
         <div className="text-center text-xs text-muted-foreground py-2">
           Loading older messages...
+        </div>
+      )}
+      {hasMore && !isLoadingMore && onLoadMore && (
+        <div className="flex justify-center py-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="cursor-pointer text-xs text-muted-foreground"
+            data-testid="load-older-messages"
+            onClick={onLoadMore}
+          >
+            Load older messages
+          </Button>
         </div>
       )}
       {showLoadingState && (

@@ -769,6 +769,25 @@ export class ApiClient {
     }
   }
 
+  /**
+   * Seed `count` agent text messages (type "message"), oldest-to-newest.
+   * Unlike `seedToolCallMessages`, these are `message`-type rows so the chat's
+   * newest-window fetch contains a user/agent message and does not trigger the
+   * auto-backfill that would otherwise pull older pages on its own.
+   */
+  async seedAgentMessages(
+    sessionId: string,
+    count: number,
+    prefix = "filler message",
+  ): Promise<void> {
+    for (let i = 0; i < count; i++) {
+      await this.seedSessionMessage(sessionId, {
+        type: "message",
+        content: `${prefix} ${i + 1}`,
+      });
+    }
+  }
+
   async testHarnessHealth(): Promise<{ ok: boolean }> {
     return this.request("GET", "/api/v1/_test/health");
   }
