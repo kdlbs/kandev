@@ -1,6 +1,7 @@
 import type {
   SentryIssueWatch,
   SentryLevel,
+  SentryProject,
   SentrySearchFilter,
   SentryStatus,
 } from "@/lib/types/sentry";
@@ -74,6 +75,60 @@ export function formStateFromWatch(w: SentryIssueWatch): FormState {
     enabled: w.enabled,
     pollInterval: w.pollIntervalSeconds,
   };
+}
+
+// WatchDefaults carries the install-wide default org/project from the Sentry
+// settings so the watcher can offer a "Use default" shortcut in each selector.
+export type WatchDefaults = { orgSlug: string; projectSlug: string };
+
+// USE_DEFAULT is the sentinel value for the "Use default" option. Selecting it
+// resolves to the configured default slug (watches store a concrete org/project
+// — the backend requires both, so there is no runtime fallback to defer to).
+export const USE_DEFAULT = "__use_default__";
+
+export type SelectItemSpec = { id: string; label: string };
+
+export function orgSelectItems(
+  orgs: string[],
+  current: string,
+  defaultOrgSlug: string,
+): SelectItemSpec[] {
+  const items: SelectItemSpec[] = [];
+  if (defaultOrgSlug) {
+    items.push({ id: USE_DEFAULT, label: `Use default (${defaultOrgSlug})` });
+  }
+  const seen = new Set<string>();
+  // Include the current value even if the token can no longer see it (editing an
+  // old watch) so the Select still shows the saved org.
+  for (const slug of [current, ...orgs]) {
+    if (!slug || seen.has(slug)) continue;
+    seen.add(slug);
+    items.push({ id: slug, label: slug });
+  }
+  return items;
+}
+
+export function projectSelectItems(
+  projects: SentryProject[],
+  current: string,
+  defaultProjectSlug: string,
+): SelectItemSpec[] {
+  const items: SelectItemSpec[] = [];
+  // Only offer the default project when it actually belongs to the selected org
+  // (projects is already filtered by org) — otherwise it would point out of org.
+  if (defaultProjectSlug && projects.some((p) => p.slug === defaultProjectSlug)) {
+    items.push({ id: USE_DEFAULT, label: `Use default (${defaultProjectSlug})` });
+  }
+  const seen = new Set<string>();
+  for (const p of projects) {
+    if (seen.has(p.slug)) continue;
+    seen.add(p.slug);
+    items.push({ id: p.slug, label: `${p.name} (${p.slug})` });
+  }
+  if (current && !seen.has(current)) {
+    items.push({ id: current, label: current });
+  }
+  return items;
 }
 
 export function buildFilterPayload(form: FormState): SentrySearchFilter {

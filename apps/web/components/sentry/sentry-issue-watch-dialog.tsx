@@ -6,7 +6,6 @@ import { Separator } from "@kandev/ui/separator";
 import { Switch } from "@kandev/ui/switch";
 import { Label } from "@kandev/ui/label";
 import { Input } from "@kandev/ui/input";
-import { Badge } from "@kandev/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -26,14 +25,20 @@ import {
   ScriptEditor,
   computeEditorHeight,
 } from "@/components/settings/profile-edit/script-editor";
-import { listSentryProjects, fetchSentryConfig } from "@/lib/api/domains/sentry-api";
-import { SENTRY_ISSUE_WATCH_PLACEHOLDERS } from "./sentry-issue-watch-placeholders";
-import { levelBadgeClass, statusBadgeClass } from "./sentry-issue-common";
 import {
-  LEVEL_OPTIONS,
-  STATUS_OPTIONS,
+  listSentryProjects,
+  listSentryOrganizations,
+  fetchSentryConfig,
+} from "@/lib/api/domains/sentry-api";
+import { SENTRY_ISSUE_WATCH_PLACEHOLDERS } from "./sentry-issue-watch-placeholders";
+import { LevelMultiSelect, StatusMultiSelect } from "./sentry-issue-watch-multiselect";
+import {
   STATS_PERIOD_OPTIONS,
   type FormState,
+  type WatchDefaults,
+  USE_DEFAULT,
+  orgSelectItems,
+  projectSelectItems,
   buildFilterPayload,
   formStateFromWatch,
   makeEmptyForm,
@@ -139,100 +144,66 @@ function SelectField(props: {
 
 type FormSetter = React.Dispatch<React.SetStateAction<FormState>>;
 
-function LevelMultiSelect({
-  selected,
-  onToggle,
-}: {
-  selected: SentryLevel[];
-  onToggle: (level: SentryLevel) => void;
-}) {
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {LEVEL_OPTIONS.map((level) => {
-        const active = selected.includes(level);
-        const colorClass = active ? levelBadgeClass(level) : "";
-        return (
-          <button
-            key={level}
-            type="button"
-            onClick={() => onToggle(level)}
-            aria-pressed={active}
-            className="cursor-pointer"
-          >
-            <Badge variant="outline" className={`uppercase ${colorClass}`}>
-              {level}
-            </Badge>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function StatusMultiSelect({
-  selected,
-  onToggle,
-}: {
-  selected: SentryStatus[];
-  onToggle: (status: SentryStatus) => void;
-}) {
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {STATUS_OPTIONS.map((status) => {
-        const active = selected.includes(status);
-        const colorClass = active ? statusBadgeClass(status) : "";
-        return (
-          <button
-            key={status}
-            type="button"
-            onClick={() => onToggle(status)}
-            aria-pressed={active}
-            className="cursor-pointer"
-          >
-            <Badge variant="outline" className={`uppercase ${colorClass}`}>
-              {status}
-            </Badge>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 function OrgProjectRow({
   form,
   setForm,
   projects,
+  orgs,
+  defaults,
 }: {
   form: FormState;
   setForm: FormSetter;
   projects: SentryProject[];
+  orgs: string[];
+  defaults: WatchDefaults;
 }) {
+  const onOrgChange = (v: string) => {
+    const slug = v === USE_DEFAULT ? defaults.orgSlug : v;
+    // The selected project may belong to a different org — clear it so the
+    // project dropdown re-picks within the new org.
+    setForm((p) => ({ ...p, orgSlug: slug, projectSlug: "" }));
+  };
+  const onProjectChange = (v: string) => {
+    const slug = v === USE_DEFAULT ? defaults.projectSlug : v;
+    setForm((p) => ({ ...p, projectSlug: slug }));
+  };
+  const orgItems = orgSelectItems(orgs, form.orgSlug, defaults.orgSlug);
+  const projectItems = projectSelectItems(projects, form.projectSlug, defaults.projectSlug);
   return (
     <div className="grid grid-cols-2 gap-4">
-      <div className="space-y-1.5">
-        <Label>Organization slug</Label>
-        <p className="text-xs text-muted-foreground">Required — the Sentry org to poll.</p>
-        <Input
-          value={form.orgSlug}
-          onChange={(e) => setForm((p) => ({ ...p, orgSlug: e.target.value, projectSlug: "" }))}
-          placeholder="my-org"
-        />
-      </div>
+      <SelectField
+        label="Organization slug"
+        description="Required — the Sentry org to poll."
+        value={form.orgSlug}
+        onChange={onOrgChange}
+        placeholder={orgItems.length === 0 ? "No organizations available" : "Select organization"}
+        items={orgItems}
+        disabled={orgItems.length === 0}
+      />
       <SelectField
         label="Project slug"
         description="Required — pick a project visible to the saved auth token."
         value={form.projectSlug}
-        onChange={(v) => setForm((p) => ({ ...p, projectSlug: v }))}
-        placeholder={projects.length === 0 ? "No projects available" : "Select project"}
-        items={projects.map((p) => ({ id: p.slug, label: `${p.name} (${p.slug})` }))}
-        disabled={projects.length === 0}
+        onChange={onProjectChange}
+        placeholder={projectItems.length === 0 ? "No projects available" : "Select project"}
+        items={projectItems}
+        disabled={projectItems.length === 0}
       />
     </div>
   );
 }
 
-function FilterFields({ form, setForm }: { form: FormState; setForm: FormSetter }) {
+function FilterFields({
+  form,
+  setForm,
+  orgs,
+  defaults,
+}: {
+  form: FormState;
+  setForm: FormSetter;
+  orgs: string[];
+  defaults: WatchDefaults;
+}) {
   const projects = useSentryProjects(form.orgSlug);
   const toggleLevel = useCallback(
     (level: SentryLevel) =>
@@ -256,7 +227,13 @@ function FilterFields({ form, setForm }: { form: FormState; setForm: FormSetter 
   );
   return (
     <>
-      <OrgProjectRow form={form} setForm={setForm} projects={projects} />
+      <OrgProjectRow
+        form={form}
+        setForm={setForm}
+        projects={projects}
+        orgs={orgs}
+        defaults={defaults}
+      />
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
           <Label>Environment</Label>
@@ -455,15 +432,29 @@ function savingLabel(saving: boolean, isEdit: boolean): string {
   return isEdit ? "Update" : "Create";
 }
 
-// Prefill the form on first open with the default org/project from the
-// install-wide Sentry config — saves the user from re-typing the same slugs.
-function useConfigDefaults(open: boolean, hasWatch: boolean, setForm: FormSetter) {
+// useWatchSelectorData loads the org list (for the org dropdown) and the
+// install-wide default org/project from the Sentry config. On a fresh create it
+// also prefills the form with those defaults so the user need not re-type the
+// same slugs. A single config fetch serves both the prefill and the "Use
+// default" options.
+function useWatchSelectorData(open: boolean, hasWatch: boolean, setForm: FormSetter) {
+  const [orgs, setOrgs] = useState<string[]>([]);
+  const [defaults, setDefaults] = useState<WatchDefaults>({ orgSlug: "", projectSlug: "" });
   useEffect(() => {
-    if (!open || hasWatch) return;
+    if (!open) return;
     let cancelled = false;
+    listSentryOrganizations()
+      .then((res) => {
+        if (!cancelled) setOrgs((res.organizations ?? []).map((o) => o.slug));
+      })
+      .catch(() => {
+        if (!cancelled) setOrgs([]);
+      });
     fetchSentryConfig()
       .then((cfg) => {
         if (cancelled || !cfg) return;
+        setDefaults({ orgSlug: cfg.defaultOrgSlug, projectSlug: cfg.defaultProjectSlug });
+        if (hasWatch) return;
         setForm((p) => ({
           ...p,
           orgSlug: p.orgSlug || cfg.defaultOrgSlug,
@@ -471,12 +462,13 @@ function useConfigDefaults(open: boolean, hasWatch: boolean, setForm: FormSetter
         }));
       })
       .catch(() => {
-        /* fall through — user can fill in manually */
+        /* fall through — user can still pick from the org dropdown */
       });
     return () => {
       cancelled = true;
     };
   }, [open, hasWatch, setForm]);
+  return { orgs, defaults };
 }
 
 export function SentryIssueWatchDialog({
@@ -499,7 +491,7 @@ export function SentryIssueWatchDialog({
     }
   }, [watch, open, workspaceId, activeWorkspaceId]);
 
-  useConfigDefaults(open, !!watch, setForm);
+  const { orgs, defaults } = useWatchSelectorData(open, !!watch, setForm);
 
   const workspaceLocked = !!watch || !!workspaceId;
 
@@ -560,7 +552,7 @@ export function SentryIssueWatchDialog({
             disabled={workspaceLocked}
           />
           <Separator />
-          <FilterFields form={form} setForm={setForm} />
+          <FilterFields form={form} setForm={setForm} orgs={orgs} defaults={defaults} />
           <Separator />
           <AutomationFields form={form} setForm={setForm} />
           <Separator />
