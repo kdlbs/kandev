@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -353,8 +354,7 @@ func (s *Service) ListWorkspaceTaskPRs(ctx context.Context, workspaceID string) 
 	}
 
 	// Collect stale task IDs for background refresh. A task is considered stale
-	// if any of its PRs are stale; the sync is per-task so we only need to
-	// queue each task once.
+	// if any of its PRs are stale.
 	staleTasks := make(map[string]struct{})
 	for taskID, prs := range result {
 		for _, tp := range prs {
@@ -364,30 +364,95 @@ func (s *Service) ListWorkspaceTaskPRs(ctx context.Context, workspaceID string) 
 			}
 		}
 	}
-	staleTaskIDs := make([]string, 0, len(staleTasks))
-	for id := range staleTasks {
-		staleTaskIDs = append(staleTaskIDs, id)
+	if len(staleTasks) > 0 {
+		s.refreshStaleWorkspaceWatches(workspaceID, staleTasks)
 	}
-
-	// Background refresh with bounded concurrency
-	if len(staleTaskIDs) > 0 {
-		go func() {
-			sem := make(chan struct{}, 5)
-			for _, taskID := range staleTaskIDs {
-				sem <- struct{}{}
-				go func(id string) {
-					defer func() { <-sem }()
-					syncCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-					defer cancel()
-					if _, syncErr := s.TriggerPRSyncAll(syncCtx, id); syncErr != nil {
-						s.logger.Debug("background PR sync failed", zap.String("task_id", id), zap.Error(syncErr))
-					}
-				}(taskID)
-			}
-		}()
-	}
-
 	return result, nil
+}
+
+// refreshStaleWorkspaceWatches fans in all stale watches across the stale
+// tasks and runs ONE batched GraphQL sync, so a 40-watch workspace fires
+// ~2 gh subprocess calls instead of 40 (one per_task * five concurrent).
+// Best-effort: errors are logged at Debug and the cached result is still
+// returned to the caller. Background goroutine so the WS handler returns
+// immediately.
+//
+// Coalesces overlapping refreshes for the same workspace: if a refresh is
+// already in flight, subsequent calls drop their stale set on the floor
+// and let the running goroutine finish. Without this, the frontend's 5s
+// poll (or a burst of workspace events) would stack goroutines that each
+// fire a batched GraphQL request, defeating the per-process throttle
+// once the cap is small enough to start queueing.
+func (s *Service) refreshStaleWorkspaceWatches(workspaceID string, staleTasks map[string]struct{}) {
+	if _, inflight := s.inflightWorkspaceRefreshes.LoadOrStore(workspaceID, struct{}{}); inflight {
+		return
+	}
+	// Track the goroutine on the service WaitGroup so Stop() drains it,
+	// and derive syncCtx from s.stopCtx so shutdown cancels the in-flight
+	// sync instead of letting it run past process teardown. See
+	// apps/backend/AGENTS.md "Goroutine ownership and leak testing".
+	s.bgWG.Add(1)
+	go func() {
+		defer s.bgWG.Done()
+		defer s.inflightWorkspaceRefreshes.Delete(workspaceID)
+		syncCtx, cancel := context.WithTimeout(s.stopCtx, 60*time.Second)
+		defer cancel()
+		var allWatches []*PRWatch
+		for taskID := range staleTasks {
+			watches, err := s.store.ListPRWatchesByTask(syncCtx, taskID)
+			if err != nil {
+				s.logger.Debug("list PR watches for refresh failed",
+					zap.String("task_id", taskID), zap.Error(err))
+				continue
+			}
+			allWatches = append(allWatches, watches...)
+		}
+		if len(allWatches) == 0 {
+			return
+		}
+		if _, err := s.SyncWatchesBatched(syncCtx, allWatches); err != nil {
+			// Batched fetch failed (noop client, auth blip, GraphQL error).
+			// Fall back to per-task sync with bounded concurrency so we
+			// don't spawn one gh per watch in lockstep.
+			s.logger.Debug("batched workspace PR sync failed; falling back per-task",
+				zap.Int("watches", len(allWatches)), zap.Error(err))
+			s.refreshStaleTasksPerTask(syncCtx, staleTasks)
+		}
+	}()
+}
+
+// refreshStaleTasksPerTask is the legacy bounded-concurrency fallback for
+// when SyncWatchesBatched can't be used (e.g. NoopClient). Kept small —
+// the global gh subprocess semaphore in gh_throttle.go is what actually
+// caps fan-out now, the worker pool here just bounds goroutine count.
+//
+// Blocks until every spawned goroutine returns. The caller relies on this
+// to keep `inflightWorkspaceRefreshes` from being cleared while
+// TriggerPRSyncAll is still writing PR-watch state — otherwise a follow-up
+// refresh for the same workspace could race the still-running fallback.
+func (s *Service) refreshStaleTasksPerTask(ctx context.Context, staleTasks map[string]struct{}) {
+	sem := make(chan struct{}, 5)
+	var wg sync.WaitGroup
+	for taskID := range staleTasks {
+		// Honor ctx so shutdown / parent-timeout stops queuing new tasks
+		// instead of waiting on a busy semaphore slot.
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			wg.Wait()
+			return
+		}
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			if _, syncErr := s.TriggerPRSyncAll(ctx, id); syncErr != nil {
+				s.logger.Debug("background PR sync failed",
+					zap.String("task_id", id), zap.Error(syncErr))
+			}
+		}(taskID)
+	}
+	wg.Wait()
 }
 
 // findTaskPRForStatus locates the TaskPR row matching the (task, owner, repo,
@@ -547,6 +612,12 @@ func (s *Service) TriggerPRSync(ctx context.Context, taskID string) (*TaskPR, er
 // touches the most recently updated watch and silently leaves the other
 // repos' PRs stale. Returns an empty slice (not nil) when the task has no
 // watches.
+//
+// When the client supports GraphQL (the production path) all of the task's
+// watches are fetched in 1-2 batched gh subprocess calls. The per-watch
+// fallback below is reached only for the NoopClient (auth disabled) or
+// when the batched fetch itself fails; in those cases we fan out one
+// subprocess per watch as before.
 func (s *Service) TriggerPRSyncAll(ctx context.Context, taskID string) ([]*TaskPR, error) {
 	watches, err := s.store.ListPRWatchesByTask(ctx, taskID)
 	if err != nil {
@@ -562,6 +633,21 @@ func (s *Service) TriggerPRSyncAll(ctx context.Context, taskID string) ([]*TaskP
 		}
 		return existing, nil
 	}
+	if _, batchErr := s.SyncWatchesBatched(ctx, watches); batchErr != nil {
+		s.logger.Debug("batched PR sync failed; falling back to per-watch",
+			zap.String("task_id", taskID), zap.Error(batchErr))
+		return s.triggerPRSyncAllPerWatch(ctx, taskID, watches)
+	}
+	// Batched path applied all DB updates inline; reload so the WS caller
+	// sees the freshest TaskPR rows.
+	return s.store.ListTaskPRsByTask(ctx, taskID)
+}
+
+// triggerPRSyncAllPerWatch is the legacy fan-out path: one gh subprocess
+// per watch. Kept as a fallback for the NoopClient and for the rare case
+// where the batched GraphQL call fails (auth glitch, network blip) so a
+// single bad cycle doesn't leave the UI staring at stale data.
+func (s *Service) triggerPRSyncAllPerWatch(ctx context.Context, taskID string, watches []*PRWatch) ([]*TaskPR, error) {
 	results := make([]*TaskPR, 0, len(watches))
 	for _, w := range watches {
 		var tp *TaskPR

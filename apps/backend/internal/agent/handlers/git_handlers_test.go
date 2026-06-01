@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
@@ -19,6 +20,46 @@ type mockExecutionLookup struct {
 	executions map[string]*lifecycle.AgentExecution
 	// ensureErr allows tests to inject specific errors from GetOrEnsureExecution
 	ensureErr error
+}
+
+// blockingExecutionLookup is a counted, blocking ExecutionLookup used by the
+// singleflight dedup tests. Each GetOrEnsureExecution call bumps a counter,
+// signals on `entered` (non-blocking), then blocks on `release` so the test
+// can fire N concurrent requests and assert exactly one ever runs the inner
+// work. Returns `err` once released — set to ErrSessionWorkspaceNotReady so
+// the handler returns the graceful not-ready envelope rather than failing.
+type blockingExecutionLookup struct {
+	mu      sync.Mutex
+	calls   int
+	entered chan struct{}
+	release chan struct{}
+	err     error
+}
+
+func (b *blockingExecutionLookup) GetExecutionBySessionID(_ string) (*lifecycle.AgentExecution, bool) {
+	return nil, false
+}
+
+func (b *blockingExecutionLookup) GetOrEnsureExecution(ctx context.Context, _ string) (*lifecycle.AgentExecution, error) {
+	b.mu.Lock()
+	b.calls++
+	b.mu.Unlock()
+	select {
+	case b.entered <- struct{}{}:
+	default:
+	}
+	select {
+	case <-b.release:
+		return nil, b.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (b *blockingExecutionLookup) callCount() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.calls
 }
 
 func (m *mockExecutionLookup) GetExecutionBySessionID(sessionID string) (*lifecycle.AgentExecution, bool) {
@@ -612,4 +653,201 @@ func TestWsGitCommits_WrappedWorkspaceNotReadyError(t *testing.T) {
 	if ready, ok := payload["ready"].(bool); !ok || ready {
 		t.Errorf("expected ready=false, got %v", payload["ready"])
 	}
+}
+
+// TestWsGitCommits_SingleflightDedupesConcurrentRequests verifies that N
+// concurrent identical (sessionID, limit) requests collapse onto a single
+// computeGitCommits invocation. Without dedup, a frontend re-render storm
+// fans out into N agentctl HTTP calls under the per-process throttle.
+//
+// Runs inside synctest so the assertion fires only after all N waiters
+// have called DoChan and the singleflight body has parked — eliminating
+// the wall-clock window where a late waiter could miss the dedup and
+// trigger a second body invocation.
+func TestWsGitCommits_SingleflightDedupesConcurrentRequests(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		log := newTestLogger()
+		lookup := &blockingExecutionLookup{
+			entered: make(chan struct{}, 1),
+			release: make(chan struct{}),
+			err:     lifecycle.ErrSessionWorkspaceNotReady,
+		}
+		h := NewGitHandlers(lookup, nil, log)
+
+		const N = 8
+		type result struct {
+			resp *ws.Message
+			err  error
+		}
+		results := make(chan result, N)
+		for i := 0; i < N; i++ {
+			go func() {
+				msg, _ := ws.NewRequest("test", ws.ActionSessionGitCommits, GitCommitsRequest{SessionID: "session-1", Limit: 50})
+				r, err := h.wsGitCommits(context.Background(), msg)
+				results <- result{r, err}
+			}()
+		}
+
+		// Wait until every waiter has parked on its singleflight ch and
+		// the body has parked on release. After this, callCount must be
+		// exactly 1: any value > 1 means a waiter raced past the dedup.
+		synctest.Wait()
+		if got := lookup.callCount(); got != 1 {
+			t.Fatalf("expected exactly 1 compute call before release, got %d — singleflight dedup broken", got)
+		}
+		close(lookup.release)
+		synctest.Wait()
+
+		for i := 0; i < N; i++ {
+			r := <-results
+			if r.err != nil {
+				t.Fatalf("waiter %d got error: %v", i, r.err)
+			}
+			if r.resp == nil {
+				t.Fatalf("waiter %d got nil response", i)
+			}
+		}
+
+		if got := lookup.callCount(); got != 1 {
+			t.Fatalf("expected exactly 1 compute call, got %d — singleflight dedup broken", got)
+		}
+	})
+}
+
+// TestWsGitCommits_SingleflightWaiterCancellationDoesNotPoisonOthers verifies
+// that cancelling one waiter's request ctx does NOT cancel the shared
+// computation or affect other waiters. The shared work runs on a detached
+// 60s ctx; individual waiters select on their own ctx via DoChan.
+//
+// Runs inside synctest so the cancel happens only after every waiter has
+// joined the same singleflight call. Without that guarantee, a late waiter
+// could race past dedup on slow CI and spawn a second body invocation.
+func TestWsGitCommits_SingleflightWaiterCancellationDoesNotPoisonOthers(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		log := newTestLogger()
+		lookup := &blockingExecutionLookup{
+			entered: make(chan struct{}, 1),
+			release: make(chan struct{}),
+			err:     lifecycle.ErrSessionWorkspaceNotReady,
+		}
+		h := NewGitHandlers(lookup, nil, log)
+
+		const N = 4
+		type result struct {
+			resp *ws.Message
+			err  error
+		}
+		results := make([]chan result, N)
+		ctxs := make([]context.Context, N)
+		cancels := make([]context.CancelFunc, N)
+		for i := 0; i < N; i++ {
+			results[i] = make(chan result, 1)
+			ctxs[i], cancels[i] = context.WithCancel(context.Background())
+		}
+		defer func() {
+			for _, c := range cancels {
+				c()
+			}
+		}()
+
+		for i := 0; i < N; i++ {
+			go func(idx int) {
+				msg, _ := ws.NewRequest("test", ws.ActionSessionGitCommits, GitCommitsRequest{SessionID: "session-1", Limit: 50})
+				r, err := h.wsGitCommits(ctxs[idx], msg)
+				results[idx] <- result{r, err}
+			}(i)
+		}
+
+		// Block until every waiter has parked on its singleflight ch and
+		// the shared body has parked on release. After this returns, all
+		// N waiters share the same in-flight call.
+		synctest.Wait()
+		if got := lookup.callCount(); got != 1 {
+			t.Fatalf("expected exactly 1 compute call before cancellation, got %d", got)
+		}
+
+		// Cancel waiter 0 while the shared work is still in flight.
+		cancels[0]()
+		synctest.Wait()
+		select {
+		case r := <-results[0]:
+			if !errors.Is(r.err, context.Canceled) {
+				t.Fatalf("waiter 0 expected context.Canceled, got: %v", r.err)
+			}
+		default:
+			t.Fatalf("waiter 0 never observed its ctx cancellation")
+		}
+
+		// Release the shared computation — the remaining N-1 waiters must
+		// still receive a non-error response.
+		close(lookup.release)
+		synctest.Wait()
+		for i := 1; i < N; i++ {
+			select {
+			case r := <-results[i]:
+				if r.err != nil {
+					t.Fatalf("waiter %d got unexpected error after peer cancelled: %v", i, r.err)
+				}
+				if r.resp == nil {
+					t.Fatalf("waiter %d got nil response", i)
+				}
+			default:
+				t.Fatalf("waiter %d never received result", i)
+			}
+		}
+
+		if got := lookup.callCount(); got != 1 {
+			t.Fatalf("expected exactly 1 compute call despite cancellation, got %d", got)
+		}
+	})
+}
+
+// TestWsCumulativeDiff_SingleflightDedupesConcurrentRequests mirrors the
+// commits test for the cumulative-diff handler, which uses the same DoChan
+// + detached-ctx pattern on diffGroup.
+func TestWsCumulativeDiff_SingleflightDedupesConcurrentRequests(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		log := newTestLogger()
+		lookup := &blockingExecutionLookup{
+			entered: make(chan struct{}, 1),
+			release: make(chan struct{}),
+			err:     lifecycle.ErrSessionWorkspaceNotReady,
+		}
+		h := NewGitHandlers(lookup, nil, log)
+
+		const N = 6
+		type result struct {
+			resp *ws.Message
+			err  error
+		}
+		results := make(chan result, N)
+		for i := 0; i < N; i++ {
+			go func() {
+				msg, _ := ws.NewRequest("test", ws.ActionSessionCumulativeDiff, CumulativeDiffRequest{SessionID: "session-1"})
+				r, err := h.wsCumulativeDiff(context.Background(), msg)
+				results <- result{r, err}
+			}()
+		}
+
+		synctest.Wait()
+		if got := lookup.callCount(); got != 1 {
+			t.Fatalf("expected exactly 1 compute call before release, got %d — singleflight dedup broken on diffGroup", got)
+		}
+		close(lookup.release)
+		synctest.Wait()
+
+		for i := 0; i < N; i++ {
+			r := <-results
+			if r.err != nil {
+				t.Fatalf("waiter %d got error: %v", i, r.err)
+			}
+			if r.resp == nil {
+				t.Fatalf("waiter %d got nil response", i)
+			}
+		}
+
+		if got := lookup.callCount(); got != 1 {
+			t.Fatalf("expected exactly 1 compute call, got %d — singleflight dedup broken on diffGroup", got)
+		}
+	})
 }

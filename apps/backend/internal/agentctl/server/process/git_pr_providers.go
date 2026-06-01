@@ -13,6 +13,8 @@ import (
 	"strings"
 
 	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 type prProvider string
@@ -355,7 +357,19 @@ func (g *GitOperator) runRepositoryCommand(ctx context.Context, name string, arg
 		zap.Strings("args", sanitizeRepositoryArgs(args)),
 		zap.String("workDir", g.workDir))
 
-	err := cmd.Run()
+	// Route through the matching subproc throttle so PR-creation execs
+	// (gh / git) count against the same process-wide cap as the rest of
+	// the codebase. Unknown binaries (e.g. az) skip throttling — those
+	// aren't part of the fork-storm pattern.
+	var err error
+	switch name {
+	case "gh":
+		err = subproc.RunGH(ctx, cmd)
+	case "git":
+		err = subproc.RunGit(ctx, cmd)
+	default:
+		err = cmd.Run()
+	}
 	stdoutOutput := strings.TrimSpace(stdout.String())
 	stderrOutput := strings.TrimSpace(stderr.String())
 	if err != nil {

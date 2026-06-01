@@ -341,11 +341,11 @@ func (m *Manager) setUpstreamIfExists(ctx context.Context, worktreePath, localBr
 	// Verify the remote-tracking ref exists. Use the non-interactive helper so
 	// this cannot hang on a credential prompt while Create holds repoLock.
 	verifyCmd := m.newNonInteractiveGitCmd(ctx, worktreePath, "rev-parse", "--verify", upstream)
-	if err := verifyCmd.Run(); err != nil {
+	if err := runGitCmd(ctx, verifyCmd); err != nil {
 		return
 	}
 	cmd := m.newNonInteractiveGitCmd(ctx, worktreePath, "branch", "--set-upstream-to="+upstream, localBranch)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := runGitCmdCombinedOutput(ctx, cmd); err != nil {
 		m.logger.Debug("failed to set upstream (non-fatal)",
 			zap.String("branch", localBranch),
 			zap.String("upstream", upstream),
@@ -377,16 +377,18 @@ func (m *Manager) fetchBranchToLocal(ctx context.Context, repoPath, branch strin
 		zap.Int("pr_number", prNumber),
 		zap.String("repo_path", repoPath))
 
-	// Try to fetch from origin to get the latest version.
-	fetchCtx, cancelFetch := context.WithTimeout(ctx, m.fetchTimeout)
-	defer cancelFetch()
-
+	// Acquire the throttle slot FIRST, then build fetchCtx with the
+	// full m.fetchTimeout budget. The previous shape (build fetchCtx,
+	// then call runGitCmdCombinedOutput which Acquires internally) let
+	// throttle queue time burn the fetch budget — same failure mode as
+	// the manager_git.go probes fixed in PR #1216 (70s lock-held trace,
+	// signal:killed). With this ordering the budget only counts actual
+	// git execution time.
 	refspec := branch + ":" + branch
 	if prNumber > 0 {
 		refspec = fmt.Sprintf("pull/%d/head:%s", prNumber, branch)
 	}
-	fetchCmd := m.newNonInteractiveGitCmd(fetchCtx, repoPath, "fetch", gitNoTags, "origin", refspec)
-	output, err := fetchCmd.CombinedOutput()
+	output, err, fetchCtxErr := m.runGitCombinedAfterAcquire(ctx, m.fetchTimeout, repoPath, "fetch", gitNoTags, "origin", refspec)
 	if err == nil {
 		return &FetchBranchResult{}, nil
 	}
@@ -396,7 +398,7 @@ func (m *Manager) fetchBranchToLocal(ctx context.Context, repoPath, branch strin
 	// the local ref. Retry by fetching only the remote-tracking ref (origin/branch),
 	// which is always safe regardless of worktree state.
 	if isFetchRefusedCheckedOut(outputStr) {
-		if result := m.retryFetchAsRemoteTrackingRef(fetchCtx, repoPath, branch, prNumber); result != nil {
+		if result := m.retryFetchAsRemoteTrackingRef(ctx, repoPath, branch, prNumber); result != nil {
 			return result, nil
 		}
 	}
@@ -415,7 +417,7 @@ func (m *Manager) fetchBranchToLocal(ctx context.Context, repoPath, branch strin
 		return nil, fmt.Errorf("branch %q not found locally or on remote: %s", branch, outputStr)
 	}
 
-	reason := classifyGitFallbackReason(err, outputStr, fetchCtx.Err())
+	reason := classifyGitFallbackReason(err, outputStr, fetchCtxErr)
 	warning := fmt.Sprintf("Could not fetch latest from origin (%s). Using local version of branch %q which may be outdated.", reason, branch)
 	m.logger.Info("using local branch (fetch failed)",
 		zap.String("branch", branch),
@@ -431,13 +433,16 @@ func (m *Manager) fetchBranchToLocal(ctx context.Context, repoPath, branch strin
 // fails when that branch is already checked out in another worktree. Returns
 // nil if the retry also failed and the caller should fall back to the local
 // branch path.
-func (m *Manager) retryFetchAsRemoteTrackingRef(fetchCtx context.Context, repoPath, branch string, prNumber int) *FetchBranchResult {
+//
+// Uses ctx (not the original fetchCtx) and a fresh m.fetchTimeout budget via
+// runGitCombinedAfterAcquire — the parent's fetchCtx is already consumed by
+// the first attempt, so reusing it would leave no room for the retry.
+func (m *Manager) retryFetchAsRemoteTrackingRef(ctx context.Context, repoPath, branch string, prNumber int) *FetchBranchResult {
 	retryRef := branch
 	if prNumber > 0 {
 		retryRef = fmt.Sprintf("pull/%d/head", prNumber)
 	}
-	retryCmd := m.newNonInteractiveGitCmd(fetchCtx, repoPath, "fetch", gitNoTags, "origin", retryRef)
-	if _, retryErr := retryCmd.CombinedOutput(); retryErr != nil {
+	if _, retryErr, _ := m.runGitCombinedAfterAcquire(ctx, m.fetchTimeout, repoPath, "fetch", gitNoTags, "origin", retryRef); retryErr != nil {
 		return nil
 	}
 	m.logger.Info("fetched via remote-tracking ref (branch checked out elsewhere)",
@@ -470,7 +475,7 @@ func (m *Manager) gitAddWorktreeExisting(ctx context.Context, repoPath, branchNa
 
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = repoPath
-	output, err := cmd.CombinedOutput()
+	output, err := runGitCmdCombinedOutput(ctx, cmd)
 	if err == nil {
 		if usesGitCrypt {
 			if unlockErr := m.unlockGitCryptAndCheckout(ctx, worktreePath); unlockErr != nil {
@@ -520,7 +525,7 @@ func (m *Manager) retryWorktreeExisting(ctx context.Context, repoPath, branchNam
 
 	retryCmd := exec.CommandContext(ctx, "git", args...)
 	retryCmd.Dir = repoPath
-	retryOutput, retryErr := retryCmd.CombinedOutput()
+	retryOutput, retryErr := runGitCmdCombinedOutput(ctx, retryCmd)
 	if retryErr != nil {
 		retryOutStr := string(retryOutput)
 		if isBranchCheckedOutError(retryOutStr) {
@@ -551,7 +556,7 @@ func (m *Manager) gitAddWorktreeExistingWithGitCrypt(ctx context.Context, repoPa
 
 	cmd := exec.CommandContext(ctx, "git", "worktree", "add", "--no-checkout", worktreePath, branchName)
 	cmd.Dir = repoPath
-	output, err := cmd.CombinedOutput()
+	output, err := runGitCmdCombinedOutput(ctx, cmd)
 	if err != nil {
 		outStr := string(output)
 		if isBranchCheckedOutError(outStr) {
@@ -595,7 +600,7 @@ func (m *Manager) tryRecoverCheckedOutBranch(ctx context.Context, repoPath, bran
 
 	pruneCmd := exec.CommandContext(ctx, "git", "worktree", "prune")
 	pruneCmd.Dir = repoPath
-	if output, err := pruneCmd.CombinedOutput(); err != nil {
+	if output, err := runGitCmdCombinedOutput(ctx, pruneCmd); err != nil {
 		m.logger.Error("git worktree prune failed",
 			zap.String("output", string(output)),
 			zap.Error(err))
@@ -657,7 +662,7 @@ func (m *Manager) gitAddWorktree(ctx context.Context, repoPath, branchName, work
 
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = repoPath
-	output, err := cmd.CombinedOutput()
+	output, err := runGitCmdCombinedOutput(ctx, cmd)
 	if err != nil {
 		outStr := string(output)
 		// Check if this is a git-crypt error we didn't anticipate
@@ -703,7 +708,7 @@ func (m *Manager) gitAddWorktreeWithGitCrypt(ctx context.Context, repoPath, bran
 		worktreePath,
 		baseRef)
 	cmd.Dir = repoPath
-	output, err := cmd.CombinedOutput()
+	output, err := runGitCmdCombinedOutput(ctx, cmd)
 	if err != nil {
 		m.logger.Error("git worktree add (--no-checkout) failed",
 			zap.String("output", string(output)),
@@ -734,7 +739,7 @@ func (m *Manager) gitAddWorktreeForRecreate(ctx context.Context, repoPath, branc
 
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = repoPath
-	output, err := cmd.CombinedOutput()
+	output, err := runGitCmdCombinedOutput(ctx, cmd)
 	if err == nil {
 		return usesGitCrypt, nil
 	}
@@ -744,7 +749,7 @@ func (m *Manager) gitAddWorktreeForRecreate(ctx context.Context, repoPath, branc
 			zap.String("output", outStr))
 		retryCmd := exec.CommandContext(ctx, "git", "worktree", "add", "--no-checkout", worktreePath, branch)
 		retryCmd.Dir = repoPath
-		if retryOutput, retryErr := retryCmd.CombinedOutput(); retryErr != nil {
+		if retryOutput, retryErr := runGitCmdCombinedOutput(ctx, retryCmd); retryErr != nil {
 			m.logger.Error("failed to recreate worktree (--no-checkout)",
 				zap.String("output", string(retryOutput)),
 				zap.Error(retryErr))
@@ -810,7 +815,7 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 	// Remove from git worktree list
 	cmd := exec.CommandContext(ctx, "git", "worktree", "prune")
 	cmd.Dir = req.RepositoryPath
-	if err := cmd.Run(); err != nil {
+	if err := runGitCmd(ctx, cmd); err != nil {
 		m.logger.Debug("git worktree prune failed", zap.Error(err))
 	}
 

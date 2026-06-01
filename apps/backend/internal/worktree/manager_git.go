@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 // isGitRepo checks if a path is a Git repository.
@@ -36,6 +38,22 @@ func (m *Manager) isGitRepo(path string) bool {
 //     "missing branch" from a "could not tell" and avoid surfacing a
 //     misleading ErrInvalidBaseBranch.
 func (m *Manager) branchExists(ctx context.Context, repoPath, branch string) (bool, error) {
+	// Acquire the throttle slot FIRST, then start the inspectTimeout
+	// timer. Building inspectCtx before Acquire (as we did originally)
+	// let throttle queue time eat through the 10s budget under load,
+	// producing 70s-lock-held / signal:killed cascades under git-pool
+	// contention. With this ordering the 10s timer starts the moment
+	// git is about to run, so we get an accurate "could not tell" only
+	// when the inspect itself is the slow part.
+	release, err := subproc.Git().Acquire(ctx)
+	if err != nil {
+		m.logger.Warn("branchExists bounded by context",
+			zap.String("repository_path", repoPath),
+			zap.String("branch", branch),
+			zap.Error(err))
+		return false, fmt.Errorf("branch check timed out for %q before throttle acquire: %w", branch, err)
+	}
+	defer release()
 	inspectCtx, cancel := context.WithTimeout(ctx, m.inspectTimeout)
 	defer cancel()
 	cmd := m.newNonInteractiveGitCmd(inspectCtx, repoPath, "rev-parse", "--verify", branch)
@@ -74,11 +92,17 @@ func (m *Manager) checkoutBranchExistsAnywhere(ctx context.Context, repoPath, br
 }
 
 func (m *Manager) currentBranch(ctx context.Context, repoPath string) string {
+	// Same Acquire-then-build-execCtx ordering as branchExists.
+	release, err := subproc.Git().Acquire(ctx)
+	if err != nil {
+		return ""
+	}
+	defer release()
 	inspectCtx, cancel := context.WithTimeout(ctx, m.inspectTimeout)
 	defer cancel()
 	cmd := m.newNonInteractiveGitCmd(inspectCtx, repoPath, "rev-parse", "--abbrev-ref", "HEAD")
-	output, err := cmd.Output()
-	if err != nil {
+	output, runErr := cmd.Output()
+	if runErr != nil {
 		if ctxErr := inspectCtx.Err(); ctxErr != nil {
 			m.logger.Warn("currentBranch bounded by context",
 				zap.String("repository_path", repoPath),
@@ -137,17 +161,18 @@ func (m *Manager) pullBaseBranch(ctx context.Context, repoPath, baseBranch strin
 		Output:   fmt.Sprintf("Fetching latest changes for %s", baseBranch),
 	})
 
-	// Fetch branch from origin in non-interactive mode.
-	fetchCtx, cancelFetch := context.WithTimeout(ctx, m.fetchTimeout)
-	defer cancelFetch()
-
+	// Acquire the git throttle slot first, then start the fetch timer.
+	// Order matters: the previous "build fetchCtx, then runGitCmd" shape
+	// let throttle queue time burn the fetch budget while we waited for a
+	// slot, and the cmd was killed with `signal: killed` the moment it
+	// got one (70s-lock-held trace under contention).
 	fetchArgs := []string{"fetch", gitNoTags, "origin"}
 	if localBranch != "" {
 		fetchArgs = append(fetchArgs, localBranch)
 	}
-	fetchCmd := m.newNonInteractiveGitCmd(fetchCtx, repoPath, fetchArgs...)
-	if output, err := fetchCmd.CombinedOutput(); err != nil {
-		return m.handleFetchFallback(baseBranch, stepName, onProgress, fetchCtx.Err(), output, err)
+	output, err, execCtxErr := m.runGitCombinedAfterAcquire(ctx, m.fetchTimeout, repoPath, fetchArgs...)
+	if err != nil {
+		return m.handleFetchFallback(baseBranch, stepName, onProgress, execCtxErr, output, err)
 	}
 
 	if isRemoteRef {
@@ -208,12 +233,10 @@ func (m *Manager) pullCurrentBranchOrFallback(
 	ctx context.Context, repoPath, baseBranch, remoteRef, stepName string,
 	onProgress SyncProgressCallback,
 ) string {
-	pullCtx, cancelPull := context.WithTimeout(ctx, m.pullTimeout)
-	defer cancelPull()
-
-	pullCmd := m.newNonInteractiveGitCmd(pullCtx, repoPath, "pull", "--ff-only", "origin", baseBranch)
-	if output, err := pullCmd.CombinedOutput(); err != nil {
-		reason := classifyGitFallbackReason(err, string(output), pullCtx.Err())
+	// Same Acquire-then-build-execCtx ordering as the fetch path.
+	output, err, execCtxErr := m.runGitCombinedAfterAcquire(ctx, m.pullTimeout, repoPath, "pull", "--ff-only", "origin", baseBranch)
+	if err != nil {
+		reason := classifyGitFallbackReason(err, string(output), execCtxErr)
 		m.logger.Warn("git pull failed before worktree creation; continuing with remote ref",
 			zap.String("branch", baseBranch),
 			zap.String("reason", reason),
@@ -225,4 +248,28 @@ func (m *Manager) pullCurrentBranchOrFallback(
 	}
 	m.reportSyncCompleted(stepName, onProgress, fmt.Sprintf("Synced and using %s", baseBranch), "")
 	return baseBranch
+}
+
+// runGitCombinedAfterAcquire acquires the backend git throttle slot,
+// then constructs a child context with execTimeout and runs the
+// non-interactive git command with CombinedOutput. The exec timer
+// starts only AFTER Acquire returns so throttle queue time cannot
+// burn the budget (otherwise the cmd gets killed with `signal: killed`
+// the moment it acquires a slot under contention).
+// Returns (combined output, run error, exec-ctx error). The exec-ctx
+// error lets callers tell a context-driven kill (timeout) from a
+// regular git failure when classifying fallbacks.
+func (m *Manager) runGitCombinedAfterAcquire(
+	ctx context.Context, execTimeout time.Duration, repoPath string, args ...string,
+) ([]byte, error, error) {
+	release, err := subproc.Git().Acquire(ctx)
+	if err != nil {
+		return nil, err, ctx.Err()
+	}
+	defer release()
+	execCtx, cancel := context.WithTimeout(ctx, execTimeout)
+	defer cancel()
+	cmd := m.newNonInteractiveGitCmd(execCtx, repoPath, args...)
+	out, runErr := cmd.CombinedOutput()
+	return out, runErr, execCtx.Err()
 }

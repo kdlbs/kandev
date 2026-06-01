@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 )
 
@@ -211,7 +212,21 @@ func resolveGitIndexPath(workDir string) string {
 	if !workDirHasOwnGitEntry(workDir) {
 		return ""
 	}
-	cmd := exec.Command("git", "rev-parse", "--git-dir")
+	// One-shot probe at workspace setup. Acquire the throttle slot first
+	// (30s budget), then start the 5s exec timer — otherwise a busy git
+	// pool would burn through the exec budget queueing and return "",
+	// which the caller treats as "not a git repo" and permanently
+	// disables polling for the workspace.
+	acquireCtx, cancelAcquire := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelAcquire()
+	release, err := subproc.Git().Acquire(acquireCtx)
+	if err != nil {
+		return ""
+	}
+	defer release()
+	execCtx, cancelExec := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelExec()
+	cmd := exec.CommandContext(execCtx, "git", "rev-parse", "--git-dir")
 	cmd.Dir = workDir
 	out, err := cmd.Output()
 	if err != nil {

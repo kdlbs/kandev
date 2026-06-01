@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 // ghCredentialHelper is the git credential helper command that delegates to gh CLI.
@@ -126,7 +127,7 @@ func (c *Cloner) gitCmd(ctx context.Context, args ...string) *exec.Cmd {
 func (c *Cloner) fetch(ctx context.Context, repoPath string) {
 	c.logger.Debug("repository already cloned, fetching", zap.String("path", repoPath))
 	cmd := c.gitCmd(ctx, "-C", repoPath, "fetch", "--all", "--prune", "--force", gitNoTags)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := subproc.RunGitCombinedOutput(ctx, cmd); err != nil {
 		c.logger.Warn("git fetch failed (non-fatal)",
 			zap.String("path", repoPath),
 			zap.String("output", string(out)),
@@ -157,7 +158,7 @@ func (c *Cloner) clone(ctx context.Context, cloneURL, targetPath, owner, name st
 
 	// Fallback: git clone with credential helper.
 	cmd := c.gitCmd(ctx, "clone", "--filter=blob:none", gitNoTags, cloneURL, targetPath)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := subproc.RunGitCombinedOutput(ctx, cmd); err != nil {
 		return fmt.Errorf("git clone failed: %s: %w", string(out), err)
 	}
 	return nil
@@ -169,7 +170,7 @@ func (c *Cloner) ghClone(ctx context.Context, owner, name, targetPath string) er
 	nwo := owner + "/" + name
 	cmd := exec.CommandContext(ctx, "gh", "repo", "clone", nwo, targetPath, "--", "--filter=blob:none", gitNoTags)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	out, err := cmd.CombinedOutput()
+	out, err := subproc.RunGHCombinedOutput(ctx, cmd)
 	if err != nil {
 		c.logger.Debug("gh repo clone failed, falling back to git clone",
 			zap.String("repo", nwo),

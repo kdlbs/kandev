@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/securityutil"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 )
 
@@ -149,7 +150,7 @@ func (g *GitOperator) runGitCommand(ctx context.Context, args ...string) (string
 
 	g.logger.Debug("executing git command", zap.Strings("args", args))
 
-	err := cmd.Run()
+	err := subproc.RunGit(ctx, cmd)
 	output := stdout.String()
 	if stderr.Len() > 0 {
 		if output != "" {

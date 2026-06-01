@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 // GitHubInfo exposes the authenticated user's login, write-access status,
@@ -77,7 +79,7 @@ func runGH(ctx context.Context, args ...string) (string, error) {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	if err := subproc.RunGH(ctx, cmd); err != nil {
 		return stdout.String(), fmt.Errorf("gh %s: %w: %s", args[0], err, stderr.String())
 	}
 	return stdout.String(), nil
