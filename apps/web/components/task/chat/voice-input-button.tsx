@@ -267,7 +267,7 @@ function EnabledVoiceInputButton({ onTranscript, onAutoSend, disabled }: VoiceIn
         </TooltipTrigger>
         <TooltipContent>
           {modelLoad.state === "loading"
-            ? `Loading model… ${Math.round(modelLoad.progress * 100)}%`
+            ? `Downloading ${modelLabel}… ${Math.round(modelLoad.progress * 100)}%`
             : `${TOOLTIP_BY_STATE[state]}${holdMode && state === "idle" ? " (hold)" : ""}`}
         </TooltipContent>
       </Tooltip>

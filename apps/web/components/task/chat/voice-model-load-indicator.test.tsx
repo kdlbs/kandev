@@ -40,7 +40,7 @@ describe("VoiceModelLoadIndicator", () => {
     render(<VoiceModelLoadIndicator state="error" progress={0} modelLabel={MODEL_LABEL} />);
     const root = getIndicator();
     expect(root.getAttribute("data-state")).toBe("error");
-    expect(root.textContent).toContain("Voice model failed to load");
+    expect(root.textContent).toContain(`${MODEL_LABEL} failed to load`);
   });
 
   it("clamps percent to 0–100 when progress is out of range", () => {

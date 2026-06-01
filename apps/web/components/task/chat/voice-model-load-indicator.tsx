@@ -25,38 +25,47 @@ export function VoiceModelLoadIndicator({
 }: VoiceModelLoadIndicatorProps) {
   if (state === "idle" || state === "ready") return null;
 
-  if (state === "error") {
-    return (
-      <div
-        data-testid="voice-model-load-indicator"
-        data-state="error"
-        className="flex items-center gap-1 text-xs text-destructive"
-        role="status"
-        aria-live="polite"
-        aria-label={`${modelLabel} failed to load`}
-      >
-        <IconAlertTriangle className="h-3.5 w-3.5 shrink-0" />
-        <span className="hidden sm:inline">Voice model failed to load</span>
-      </div>
-    );
-  }
-
   const pct = clampPercent(progress);
+
+  // Single stable role="status" wrapper so AT announces the loading→error
+  // transition (a newly-inserted live region would be silently ignored).
+  // The inner progressbar role handles numeric progress without announcing
+  // every percent tick.
   return (
     <div
       data-testid="voice-model-load-indicator"
-      data-state="loading"
-      className="flex items-center gap-1.5 w-32"
+      data-state={state}
       role="status"
-      aria-live="polite"
-      aria-label={`Downloading ${modelLabel}, ${pct} percent`}
+      aria-label={
+        state === "error"
+          ? `${modelLabel} failed to load`
+          : `Downloading ${modelLabel}, ${pct} percent`
+      }
+      className={
+        state === "error"
+          ? "flex items-center gap-1 text-xs text-destructive"
+          : "flex items-center gap-1.5 w-32"
+      }
     >
-      <div className="flex flex-col gap-0.5 min-w-0 flex-1">
-        <span className="hidden sm:inline text-[10px] leading-none text-muted-foreground truncate">
-          Downloading {modelLabel}… {pct}%
-        </span>
-        <Progress value={pct} className="h-1" />
-      </div>
+      {state === "error" ? (
+        <>
+          <IconAlertTriangle className="h-3.5 w-3.5 shrink-0" />
+          <span className="hidden sm:inline">{modelLabel} failed to load</span>
+        </>
+      ) : (
+        <div
+          role="progressbar"
+          aria-valuenow={pct}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          className="flex flex-col gap-0.5 min-w-0 flex-1"
+        >
+          <span className="hidden sm:inline text-[10px] leading-none text-muted-foreground truncate">
+            Downloading {modelLabel}… {pct}%
+          </span>
+          <Progress value={pct} className="h-1" />
+        </div>
+      )}
     </div>
   );
 }
