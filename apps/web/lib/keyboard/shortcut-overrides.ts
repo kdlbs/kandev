@@ -11,6 +11,7 @@ export type ConfigurableShortcutId =
   | "FOCUS_INPUT"
   | "TOGGLE_PLAN_MODE"
   | "TASK_SWITCHER"
+  | "TASK_SWITCHER_REVERSE"
   | "VOICE_INPUT_TOGGLE";
 
 export type StoredShortcutOverrides = Record<
@@ -32,6 +33,10 @@ export const CONFIGURABLE_SHORTCUTS: Record<
   FOCUS_INPUT: { label: "Focus Chat Input", default: SHORTCUTS.FOCUS_INPUT },
   TOGGLE_PLAN_MODE: { label: "Toggle Plan Mode", default: SHORTCUTS.TOGGLE_PLAN_MODE },
   TASK_SWITCHER: { label: "Recent Task Switcher", default: SHORTCUTS.TASK_SWITCHER },
+  TASK_SWITCHER_REVERSE: {
+    label: "Recent Task Switcher (Backward)",
+    default: SHORTCUTS.TASK_SWITCHER_REVERSE,
+  },
   VOICE_INPUT_TOGGLE: { label: "Voice Input", default: SHORTCUTS.VOICE_INPUT_TOGGLE },
 };
 

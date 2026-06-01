@@ -27,12 +27,16 @@ import {
 import {
   buildRecentTaskDisplayItems,
   buildRecentTaskEntry,
+  getInitialReverseSelectionIndex,
   getInitialSelectionIndex,
   getNextSelectionIndex,
   getPreviousSelectionIndex,
   type RecentTaskBuildContext,
   type RecentTaskDisplayItem,
 } from "./recent-task-switcher-model";
+
+/** Direction the switcher cycles through recent tasks. */
+type CycleDirection = "forward" | "backward";
 import {
   hasHoldModifier,
   isCommitReleaseEvent,
@@ -46,6 +50,7 @@ export type RecentTaskSwitcherController = {
   selectedIndex: number;
   setSelectedIndex: (index: number) => void;
   shortcutLabel: string;
+  reverseShortcutLabel: string;
   selectItem: (item: RecentTaskDisplayItem | undefined) => void;
   handleKeyDown: (event: ReactKeyboardEvent) => void;
 };
@@ -58,14 +63,15 @@ type SwitcherRefs = {
   itemsRef: MutableRefObject<RecentTaskDisplayItem[]>;
   activeTaskIdRef: MutableRefObject<string | null>;
   shortcutRef: MutableRefObject<KeyboardShortcut>;
+  reverseShortcutRef: MutableRefObject<KeyboardShortcut>;
 };
 
 type SwitcherActions = {
   setOpen: (open: boolean) => void;
   setSelectedIndex: (index: number) => void;
   selectItem: (item: RecentTaskDisplayItem | undefined) => void;
-  openSwitcher: (commitOnRelease: boolean) => void;
-  cycleSwitcher: (commitOnRelease: boolean) => void;
+  openSwitcher: (commitOnRelease: boolean, direction?: CycleDirection) => void;
+  cycleSwitcher: (commitOnRelease: boolean, direction?: CycleDirection) => void;
   cancelSwitcher: () => void;
   selectCurrentItem: () => void;
 };
@@ -182,13 +188,21 @@ function useLatestRef<T>(value: T) {
   return ref;
 }
 
-function useSwitcherRefs(
-  open: boolean,
-  selectedIndex: number,
-  items: RecentTaskDisplayItem[],
-  activeTaskId: string | null,
-  shortcut: KeyboardShortcut,
-): SwitcherRefs {
+function useSwitcherRefs({
+  open,
+  selectedIndex,
+  items,
+  activeTaskId,
+  shortcut,
+  reverseShortcut,
+}: {
+  open: boolean;
+  selectedIndex: number;
+  items: RecentTaskDisplayItem[];
+  activeTaskId: string | null;
+  shortcut: KeyboardShortcut;
+  reverseShortcut: KeyboardShortcut;
+}): SwitcherRefs {
   const openRef = useRef(open);
   const selectedIndexRef = useRef(selectedIndex);
   const commitOnReleaseRef = useRef(false);
@@ -196,6 +210,7 @@ function useSwitcherRefs(
   const itemsRef = useLatestRef(items);
   const activeTaskIdRef = useLatestRef(activeTaskId);
   const shortcutRef = useLatestRef(shortcut);
+  const reverseShortcutRef = useLatestRef(reverseShortcut);
 
   useEffect(() => {
     openRef.current = open;
@@ -210,6 +225,7 @@ function useSwitcherRefs(
     itemsRef,
     activeTaskIdRef,
     shortcutRef,
+    reverseShortcutRef,
   };
 }
 
@@ -277,12 +293,16 @@ function useSwitcherActions({
   );
 
   const openSwitcher = useCallback(
-    (commitOnRelease: boolean) => {
+    (commitOnRelease: boolean, direction: CycleDirection = "forward") => {
       setCommandPanelOpen(false);
       cancelledRef.current = false;
       commitOnReleaseRef.current = commitOnRelease;
       openRef.current = true;
-      setSelectedIndex(getInitialSelectionIndex(itemsRef.current, activeTaskIdRef.current));
+      const initialIndex =
+        direction === "backward"
+          ? getInitialReverseSelectionIndex(itemsRef.current, activeTaskIdRef.current)
+          : getInitialSelectionIndex(itemsRef.current, activeTaskIdRef.current);
+      setSelectedIndex(initialIndex);
       setOpenState(true);
     },
     [
@@ -298,13 +318,18 @@ function useSwitcherActions({
   );
 
   const cycleSwitcher = useCallback(
-    (commitOnRelease: boolean) => {
+    (commitOnRelease: boolean, direction: CycleDirection = "forward") => {
       if (!openRef.current) {
-        openSwitcher(commitOnRelease);
+        openSwitcher(commitOnRelease, direction);
         return;
       }
       if (commitOnRelease) commitOnReleaseRef.current = true;
-      setSelectedIndex(getNextSelectionIndex(selectedIndexRef.current, itemsRef.current.length));
+      const count = itemsRef.current.length;
+      const nextIndex =
+        direction === "backward"
+          ? getPreviousSelectionIndex(selectedIndexRef.current, count)
+          : getNextSelectionIndex(selectedIndexRef.current, count);
+      setSelectedIndex(nextIndex);
     },
     [commitOnReleaseRef, itemsRef, openRef, openSwitcher, selectedIndexRef, setSelectedIndex],
   );
@@ -342,7 +367,7 @@ function useRecentTaskSwitcherCommand(shortcut: KeyboardShortcut, openSwitcher: 
 }
 
 function useSwitcherGlobalKeyboard(refs: SwitcherRefs, actions: SwitcherActions) {
-  const { cancelledRef, commitOnReleaseRef, openRef, shortcutRef } = refs;
+  const { cancelledRef, commitOnReleaseRef, openRef, reverseShortcutRef, shortcutRef } = refs;
   const { cancelSwitcher, cycleSwitcher, selectCurrentItem } = actions;
 
   useEffect(() => {
@@ -354,18 +379,33 @@ function useSwitcherGlobalKeyboard(refs: SwitcherRefs, actions: SwitcherActions)
         return;
       }
 
+      // Check the reverse shortcut first: it carries an extra modifier (Shift),
+      // so it is the more specific match and the forward shortcut never matches
+      // a Shift-held event anyway.
+      const reverseShortcut = reverseShortcutRef.current;
+      if (isCycleShortcutEvent(event, reverseShortcut)) {
+        event.preventDefault();
+        event.stopPropagation();
+        cycleSwitcher(hasHoldModifier(reverseShortcut), "backward");
+        return;
+      }
+
       const currentShortcut = shortcutRef.current;
       if (!isCycleShortcutEvent(event, currentShortcut)) return;
 
       event.preventDefault();
       event.stopPropagation();
-      cycleSwitcher(hasHoldModifier(currentShortcut));
+      cycleSwitcher(hasHoldModifier(currentShortcut), "forward");
     };
 
     const handleKeyUp = (event: KeyboardEvent) => {
-      const currentShortcut = shortcutRef.current;
       if (!openRef.current || !commitOnReleaseRef.current) return;
-      if (!isCommitReleaseEvent(event, currentShortcut)) return;
+      // Commit when the hold modifier of either direction is released. Both
+      // default to Ctrl/Cmd, but custom bindings may differ.
+      const released =
+        isCommitReleaseEvent(event, shortcutRef.current) ||
+        isCommitReleaseEvent(event, reverseShortcutRef.current);
+      if (!released) return;
 
       event.preventDefault();
       event.stopPropagation();
@@ -401,6 +441,7 @@ function useSwitcherGlobalKeyboard(refs: SwitcherRefs, actions: SwitcherActions)
     commitOnReleaseRef,
     cycleSwitcher,
     openRef,
+    reverseShortcutRef,
     selectCurrentItem,
     shortcutRef,
   ]);
@@ -451,12 +492,20 @@ export function useRecentTaskSwitcherController(): RecentTaskSwitcherController 
   const { setOpen: setCommandPanelOpen } = useCommandPanelOpen();
   const keyboardShortcuts = useAppStore((state) => state.userSettings.keyboardShortcuts);
   const shortcut = getShortcut("TASK_SWITCHER", keyboardShortcuts);
+  const reverseShortcut = getShortcut("TASK_SWITCHER_REVERSE", keyboardShortcuts);
   const context = useRecentTaskBuildContext();
   useRecordActiveTask(context);
 
   const items = useMemo(() => buildRecentTaskDisplayItems(entries, context), [entries, context]);
   const selectedIndex = getResolvedSelectionIndex(rawSelectedIndex, items, context.activeTaskId);
-  const refs = useSwitcherRefs(open, selectedIndex, items, context.activeTaskId, shortcut);
+  const refs = useSwitcherRefs({
+    open,
+    selectedIndex,
+    items,
+    activeTaskId: context.activeTaskId,
+    shortcut,
+    reverseShortcut,
+  });
   const setSelectedIndex = useSelectedIndexSetter(refs, setRawSelectedIndex);
   const routeToTask = useCallback((taskId: string) => router.push(linkToTask(taskId)), [router]);
   const actions = useSwitcherActions({
@@ -479,6 +528,7 @@ export function useRecentTaskSwitcherController(): RecentTaskSwitcherController 
     selectedIndex,
     setSelectedIndex,
     shortcutLabel: formatShortcut(shortcut),
+    reverseShortcutLabel: formatShortcut(reverseShortcut),
     selectItem: actions.selectItem,
     handleKeyDown,
   };

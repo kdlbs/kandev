@@ -145,6 +145,12 @@ export const SHORTCUTS = {
     key: KEYS.SPACE,
     modifiers: { ctrlOrCmd: true },
   },
+  // Cycle the recent-task switcher backward (most-recent -> oldest). Shift
+  // distinguishes it from TASK_SWITCHER so both can be held together.
+  TASK_SWITCHER_REVERSE: {
+    key: KEYS.SPACE,
+    modifiers: { ctrlOrCmd: true, shift: true },
+  },
   BOTTOM_TERMINAL: {
     key: KEYS.J,
     modifiers: { ctrlOrCmd: true },

@@ -20,8 +20,9 @@ describe("CONFIGURABLE_SHORTCUTS", () => {
     expect(ids).toContain("FOCUS_INPUT");
     expect(ids).toContain("TOGGLE_PLAN_MODE");
     expect(ids).toContain("TASK_SWITCHER");
+    expect(ids).toContain("TASK_SWITCHER_REVERSE");
     expect(ids).toContain("VOICE_INPUT_TOGGLE");
-    expect(ids).toHaveLength(11);
+    expect(ids).toHaveLength(12);
   });
 
   it("each entry has a label and default matching SHORTCUTS", () => {
@@ -45,6 +46,13 @@ describe("CONFIGURABLE_SHORTCUTS", () => {
 
     expect(CONFIGURABLE_SHORTCUTS.TASK_SWITCHER.label).toBe("Recent Task Switcher");
     expect(CONFIGURABLE_SHORTCUTS.TASK_SWITCHER.default).toBe(SHORTCUTS.TASK_SWITCHER);
+
+    expect(CONFIGURABLE_SHORTCUTS.TASK_SWITCHER_REVERSE.label).toBe(
+      "Recent Task Switcher (Backward)",
+    );
+    expect(CONFIGURABLE_SHORTCUTS.TASK_SWITCHER_REVERSE.default).toBe(
+      SHORTCUTS.TASK_SWITCHER_REVERSE,
+    );
   });
 });
 

@@ -68,6 +68,58 @@ test.describe("Recent task switcher", () => {
     await expect(testPage).toHaveURL(new RegExp(`/t/${first.id}`), { timeout: 10_000 });
   });
 
+  test("reverse shortcut cycles backward through recent tasks", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const first = await apiClient.createTask(seedData.workspaceId, "Reverse Switcher One", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+    const second = await apiClient.createTask(seedData.workspaceId, "Reverse Switcher Two", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+    const third = await apiClient.createTask(seedData.workspaceId, "Reverse Switcher Three", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    // Visit oldest -> newest so the recent list is [third(current), second, first].
+    for (const task of [first, second, third]) {
+      await testPage.goto(`/t/${task.id}`);
+      await expect(testPage.getByText(`Reverse Switcher`, { exact: false }).first()).toBeVisible({
+        timeout: 15_000,
+      });
+    }
+
+    const modifier = taskSwitcherModifier();
+    await testPage.keyboard.down(modifier);
+    await testPage.keyboard.down("Shift");
+    await testPage.keyboard.press("Space");
+
+    const switcher = testPage.getByTestId("recent-task-switcher");
+    await expect(switcher).toBeVisible({ timeout: 5_000 });
+
+    // Reverse opens on the oldest non-current task (first).
+    const firstRow = switcher.getByTestId(`recent-task-switcher-item-${first.id}`);
+    const secondRow = switcher.getByTestId(`recent-task-switcher-item-${second.id}`);
+    await expect(firstRow).toHaveAttribute("data-selected", "true");
+
+    // Another reverse step moves selection backward to the newer "second" task.
+    await testPage.keyboard.press("Space");
+    await expect(secondRow).toHaveAttribute("data-selected", "true");
+
+    await testPage.keyboard.up("Shift");
+    await testPage.keyboard.up(modifier);
+    await expect(switcher).not.toBeVisible({ timeout: 5_000 });
+    await expect(testPage).toHaveURL(new RegExp(`/t/${second.id}`), { timeout: 10_000 });
+  });
+
   test("escape cancels the held switcher without routing on release", async ({
     testPage,
     apiClient,

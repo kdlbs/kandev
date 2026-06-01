@@ -362,6 +362,17 @@ export function getInitialSelectionIndex(
   return firstNonCurrent === -1 ? 0 : firstNonCurrent;
 }
 
+export function getInitialReverseSelectionIndex(
+  items: Array<{ taskId: string }>,
+  currentTaskId: string | null,
+): number {
+  if (items.length === 0) return -1;
+  for (let index = items.length - 1; index >= 0; index--) {
+    if (items[index].taskId !== currentTaskId) return index;
+  }
+  return items.length - 1;
+}
+
 export function getNextSelectionIndex(currentIndex: number, itemCount: number): number {
   if (itemCount === 0) return -1;
   if (currentIndex < 0) return 0;
