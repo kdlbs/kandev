@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -103,7 +104,9 @@ func (s *Service) prepareBranchAdd(ctx context.Context, req *AddBranchToTaskRequ
 		return nil, nil, fmt.Errorf("get task: %w", err)
 	}
 	if task == nil {
-		return nil, nil, fmt.Errorf("task not found: %s", req.TaskID)
+		// Wrap the repo-tier sentinel so handlers can classify via errors.Is
+		// rather than substring-matching the formatted UUID.
+		return nil, nil, fmt.Errorf("%w: %s", taskrepo.ErrTaskNotFound, req.TaskID)
 	}
 	if err := s.requireWorktreeExecutorForBranchAdd(ctx, req.TaskID); err != nil {
 		return nil, nil, err
@@ -177,7 +180,11 @@ func scanForBranchAddDuplicate(
 			tr.CheckoutBranch == checkoutBranch {
 			return 0, branchAddDuplicateError(repo, repositoryID, baseBranch, checkoutBranch)
 		}
-		if tr.RepositoryID == repositoryID && tr.BaseBranch == baseBranch &&
+		// Slug-collision check is NOT scoped by base_branch — worktree path
+		// derivation (TaskWorktreePath) uses only repo + slug, so two rows
+		// on the same repo with sibling slugs would land on the same on-disk
+		// directory regardless of which base_branch they were cut from.
+		if tr.RepositoryID == repositoryID &&
 			checkoutBranch != "" && tr.CheckoutBranch != "" &&
 			tr.CheckoutBranch != checkoutBranch &&
 			worktree.SanitizeBranchSlug(tr.CheckoutBranch) == newSlug && newSlug != "" {

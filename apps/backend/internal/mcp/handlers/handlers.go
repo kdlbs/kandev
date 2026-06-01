@@ -774,10 +774,12 @@ func classifyAddBranchError(err error) string {
 	if err == nil {
 		return ws.ErrorCodeInternalError
 	}
+	if errors.Is(err, taskrepo.ErrTaskNotFound) {
+		return ws.ErrorCodeNotFound
+	}
 	msg := err.Error()
 	switch {
-	case strings.Contains(msg, "task not found"),
-		strings.Contains(msg, "does not belong to task's workspace"):
+	case strings.Contains(msg, "does not belong to task's workspace"):
 		return ws.ErrorCodeNotFound
 	case strings.Contains(msg, "is already attached"),
 		strings.Contains(msg, "conflicts with existing branch"):
