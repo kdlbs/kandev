@@ -39,6 +39,7 @@ import {
   USE_DEFAULT,
   orgSelectItems,
   projectSelectItems,
+  resolveSlugSelection,
   buildFilterPayload,
   formStateFromWatch,
   makeEmptyForm,
@@ -157,37 +158,29 @@ function OrgProjectRow({
   orgs: string[];
   defaults: WatchDefaults;
 }) {
-  const onOrgChange = (v: string) => {
-    const slug = v === USE_DEFAULT ? defaults.orgSlug : v;
+  const onOrgChange = (v: string) =>
     // The selected project may belong to a different org — clear it so the
     // project dropdown re-picks within the new org.
-    setForm((p) => ({ ...p, orgSlug: slug, projectSlug: "" }));
-  };
-  const onProjectChange = (v: string) => {
-    const slug = v === USE_DEFAULT ? defaults.projectSlug : v;
-    setForm((p) => ({ ...p, projectSlug: slug }));
-  };
-  const orgItems = orgSelectItems(orgs, form.orgSlug, defaults.orgSlug);
-  const projectItems = projectSelectItems(projects, form.projectSlug, defaults.projectSlug);
+    setForm((p) => ({ ...p, orgSlug: resolveSlugSelection(v), projectSlug: "" }));
+  const onProjectChange = (v: string) =>
+    setForm((p) => ({ ...p, projectSlug: resolveSlugSelection(v) }));
   return (
     <div className="grid grid-cols-2 gap-4">
       <SelectField
         label="Organization slug"
-        description="Required — the Sentry org to poll."
-        value={form.orgSlug}
+        description="The Sentry org to poll. Leave on “Use default” to follow the integration default."
+        value={form.orgSlug || USE_DEFAULT}
         onChange={onOrgChange}
-        placeholder={orgItems.length === 0 ? "No organizations available" : "Select organization"}
-        items={orgItems}
-        disabled={orgItems.length === 0}
+        placeholder="Use default"
+        items={orgSelectItems(orgs, form.orgSlug, defaults.orgSlug)}
       />
       <SelectField
         label="Project slug"
-        description="Required — pick a project visible to the saved auth token."
-        value={form.projectSlug}
+        description="Pick a project, or “Use default” to follow the integration default."
+        value={form.projectSlug || USE_DEFAULT}
         onChange={onProjectChange}
-        placeholder={projectItems.length === 0 ? "No projects available" : "Select project"}
-        items={projectItems}
-        disabled={projectItems.length === 0}
+        placeholder="Use default"
+        items={projectSelectItems(projects, form.projectSlug, defaults.projectSlug)}
       />
     </div>
   );
@@ -433,11 +426,11 @@ function savingLabel(saving: boolean, isEdit: boolean): string {
 }
 
 // useWatchSelectorData loads the org list (for the org dropdown) and the
-// install-wide default org/project from the Sentry config. On a fresh create it
-// also prefills the form with those defaults so the user need not re-type the
-// same slugs. A single config fetch serves both the prefill and the "Use
-// default" options.
-function useWatchSelectorData(open: boolean, hasWatch: boolean, setForm: FormSetter) {
+// install-wide default org/project from the Sentry config. The defaults only
+// label the "Use default" option — the form keeps "" so the watch follows the
+// integration default dynamically (resolved server-side on each poll) rather
+// than freezing today's slug.
+function useWatchSelectorData(open: boolean) {
   const [orgs, setOrgs] = useState<string[]>([]);
   const [defaults, setDefaults] = useState<WatchDefaults>({ orgSlug: "", projectSlug: "" });
   useEffect(() => {
@@ -454,12 +447,6 @@ function useWatchSelectorData(open: boolean, hasWatch: boolean, setForm: FormSet
       .then((cfg) => {
         if (cancelled || !cfg) return;
         setDefaults({ orgSlug: cfg.defaultOrgSlug, projectSlug: cfg.defaultProjectSlug });
-        if (hasWatch) return;
-        setForm((p) => ({
-          ...p,
-          orgSlug: p.orgSlug || cfg.defaultOrgSlug,
-          projectSlug: p.projectSlug || cfg.defaultProjectSlug,
-        }));
       })
       .catch(() => {
         /* fall through — user can still pick from the org dropdown */
@@ -467,7 +454,7 @@ function useWatchSelectorData(open: boolean, hasWatch: boolean, setForm: FormSet
     return () => {
       cancelled = true;
     };
-  }, [open, hasWatch, setForm]);
+  }, [open]);
   return { orgs, defaults };
 }
 
@@ -491,14 +478,17 @@ export function SentryIssueWatchDialog({
     }
   }, [watch, open, workspaceId, activeWorkspaceId]);
 
-  const { orgs, defaults } = useWatchSelectorData(open, !!watch, setForm);
+  const { orgs, defaults } = useWatchSelectorData(open);
 
   const workspaceLocked = !!watch || !!workspaceId;
 
+  // Org/project are not required here: an empty value means "use the integration
+  // default". Guard only that an org can actually be resolved — either picked
+  // explicitly or available as the install-wide default — so we never save a
+  // watch that can never poll.
   const canSave =
     !!form.workspaceId &&
-    !!form.orgSlug.trim() &&
-    !!form.projectSlug.trim() &&
+    !!(form.orgSlug.trim() || defaults.orgSlug) &&
     !!form.workflowId &&
     !!form.workflowStepId &&
     !!form.prompt.trim() &&

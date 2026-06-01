@@ -80,9 +80,6 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 		return nil, err
 	}
 	applyIssueWatchPatch(w, req)
-	if err := validateFilter(w.Filter); err != nil {
-		return nil, err
-	}
 	if w.WorkflowID == "" || w.WorkflowStepID == "" {
 		return nil, fmt.Errorf("%w: workflowId and workflowStepId cannot be empty", ErrInvalidConfig)
 	}
@@ -118,7 +115,7 @@ func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*Sentry
 	// invariant, matching the Linear/Jira watchers). SearchIssues sorts results
 	// by first-seen descending (sort=new) so newly created issues reliably land
 	// on page one and are not missed by the single-page read.
-	res, err := client.SearchIssues(ctx, w.Filter, "")
+	res, err := client.SearchIssues(ctx, s.resolveWatchFilter(ctx, w.Filter), "")
 	if err != nil {
 		return nil, err
 	}
@@ -202,9 +199,9 @@ func validateIssueWatchCreate(req *CreateIssueWatchRequest) error {
 	if req.WorkflowID == "" || req.WorkflowStepID == "" {
 		return fmt.Errorf("%w: workflowId and workflowStepId required", ErrInvalidConfig)
 	}
-	if err := validateFilter(normalizeFilter(req.Filter)); err != nil {
-		return err
-	}
+	// The filter's org/project are intentionally not required: an empty value
+	// means "use the install-wide default" (resolved at poll time by
+	// resolveWatchFilter), mirroring the "(use step default)" profile options.
 	if req.PollIntervalSeconds != 0 {
 		if err := validatePollInterval(req.PollIntervalSeconds); err != nil {
 			return err
@@ -213,17 +210,27 @@ func validateIssueWatchCreate(req *CreateIssueWatchRequest) error {
 	return nil
 }
 
-// validateFilter requires the minimum identity for a Sentry search (org +
-// project). Other fields (environment, levels, statuses, query, statsPeriod)
-// are optional.
-func validateFilter(f SearchFilter) error {
+// resolveWatchFilter fills an empty org/project on the watch filter from the
+// install-wide Sentry config defaults. A watch saved with "use default" (empty
+// org and/or project) therefore follows whatever the integration is configured
+// to use, resolved fresh on every poll — the same idea as the "(use step
+// default)" agent/executor profile options. A concrete value on the filter
+// always wins; the config is only read when something is missing.
+func (s *Service) resolveWatchFilter(ctx context.Context, f SearchFilter) SearchFilter {
+	if f.OrgSlug != "" && f.ProjectSlug != "" {
+		return f
+	}
+	cfg, err := s.store.GetConfig(ctx)
+	if err != nil || cfg == nil {
+		return f
+	}
 	if f.OrgSlug == "" {
-		return fmt.Errorf("%w: filter.orgSlug is required", ErrInvalidConfig)
+		f.OrgSlug = cfg.DefaultOrgSlug
 	}
 	if f.ProjectSlug == "" {
-		return fmt.Errorf("%w: filter.projectSlug is required", ErrInvalidConfig)
+		f.ProjectSlug = cfg.DefaultProjectSlug
 	}
-	return nil
+	return f
 }
 
 func validatePollInterval(seconds int) error {

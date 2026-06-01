@@ -23,33 +23,29 @@ func TestService_CreateIssueWatch_DefaultsAndValidation(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
 
-	// Missing org/project is rejected.
+	// Workspace/workflow/step are still required.
 	if _, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
-		WorkspaceID:    "ws-1",
-		WorkflowID:     "wf",
-		WorkflowStepID: "step",
+		WorkspaceID: "ws-1",
 	}); !errors.Is(err, ErrInvalidConfig) {
-		t.Errorf("expected ErrInvalidConfig for empty filter, got %v", err)
+		t.Errorf("expected ErrInvalidConfig for missing workflow, got %v", err)
 	}
 
-	// orgSlug only (no project) is rejected.
-	if _, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
-		WorkspaceID:    "ws-1",
-		WorkflowID:     "wf",
-		WorkflowStepID: "step",
-		Filter:         SearchFilter{OrgSlug: "acme"},
-	}); !errors.Is(err, ErrInvalidConfig) {
-		t.Errorf("expected ErrInvalidConfig for missing projectSlug, got %v", err)
-	}
-
-	// Whitespace-only org is treated as empty after normalize.
-	if _, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
-		WorkspaceID:    "ws-1",
-		WorkflowID:     "wf",
-		WorkflowStepID: "step",
-		Filter:         SearchFilter{OrgSlug: "   ", ProjectSlug: "frontend"},
-	}); !errors.Is(err, ErrInvalidConfig) {
-		t.Errorf("expected ErrInvalidConfig for whitespace-only orgSlug, got %v", err)
+	// An empty filter is now ALLOWED — empty org/project means "use the
+	// install-wide default", resolved at poll time. The whitespace org is
+	// normalized to empty and accepted the same way.
+	for name, filter := range map[string]SearchFilter{
+		"empty":          {},
+		"org only":       {OrgSlug: "acme"},
+		"whitespace org": {OrgSlug: "   ", ProjectSlug: "frontend"},
+	} {
+		if _, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+			WorkspaceID:    "ws-1",
+			WorkflowID:     "wf",
+			WorkflowStepID: "step",
+			Filter:         filter,
+		}); err != nil {
+			t.Errorf("%s filter should be accepted (use-default), got %v", name, err)
+		}
 	}
 
 	// Happy path assigns ID + defaults Enabled=true.
@@ -103,10 +99,40 @@ func TestService_UpdateIssueWatch_PartialPatch(t *testing.T) {
 		t.Errorf("unexpected mutation of unset fields: %+v", updated)
 	}
 
-	// Patching filter to something empty is rejected to keep watch rows valid.
+	// Patching the filter to empty is allowed: it switches the watch back to
+	// "use the install-wide default" org/project (resolved at poll time).
 	empty := SearchFilter{}
-	if _, err := f.svc.UpdateIssueWatch(ctx, created.ID, &UpdateIssueWatchRequest{Filter: &empty}); !errors.Is(err, ErrInvalidConfig) {
-		t.Errorf("expected ErrInvalidConfig for empty filter patch, got %v", err)
+	cleared, err := f.svc.UpdateIssueWatch(ctx, created.ID, &UpdateIssueWatchRequest{Filter: &empty})
+	if err != nil {
+		t.Fatalf("clearing filter to use-default should succeed, got %v", err)
+	}
+	if cleared.Filter.OrgSlug != "" || cleared.Filter.ProjectSlug != "" {
+		t.Errorf("expected empty filter after clear, got %+v", cleared.Filter)
+	}
+}
+
+func TestService_ResolveWatchFilter_FallsBackToConfigDefaults(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+
+	if err := f.store.UpsertConfig(ctx, &SentryConfig{
+		AuthMethod:         AuthMethodAuthToken,
+		DefaultOrgSlug:     "default-org",
+		DefaultProjectSlug: "default-proj",
+	}); err != nil {
+		t.Fatalf("upsert config: %v", err)
+	}
+
+	// Empty org/project resolve to the config defaults.
+	got := f.svc.resolveWatchFilter(ctx, SearchFilter{})
+	if got.OrgSlug != "default-org" || got.ProjectSlug != "default-proj" {
+		t.Errorf("expected config defaults, got %+v", got)
+	}
+
+	// A concrete value on the filter always wins over the default.
+	got = f.svc.resolveWatchFilter(ctx, SearchFilter{OrgSlug: "explicit-org"})
+	if got.OrgSlug != "explicit-org" || got.ProjectSlug != "default-proj" {
+		t.Errorf("explicit org should win, project should fall back: %+v", got)
 	}
 }
 

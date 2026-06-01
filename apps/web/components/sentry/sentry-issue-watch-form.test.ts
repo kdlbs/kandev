@@ -3,6 +3,7 @@ import {
   USE_DEFAULT,
   orgSelectItems,
   projectSelectItems,
+  resolveSlugSelection,
   buildFilterPayload,
   makeEmptyForm,
 } from "./sentry-issue-watch-form";
@@ -15,60 +16,71 @@ const proj = (slug: string, name: string, orgSlug = "acme"): SentryProject => ({
   orgSlug,
 });
 
+describe("resolveSlugSelection", () => {
+  it("collapses the Use default sentinel to an empty string", () => {
+    expect(resolveSlugSelection(USE_DEFAULT)).toBe("");
+  });
+
+  it("passes a concrete slug through unchanged", () => {
+    expect(resolveSlugSelection("acme")).toBe("acme");
+  });
+});
+
 describe("orgSelectItems", () => {
-  it("prepends a Use default option when a default org is configured", () => {
+  it("always leads with a Use default option, labelled with the configured default", () => {
     const items = orgSelectItems(["acme", "globex"], "", "acme");
     expect(items[0]).toEqual({ id: USE_DEFAULT, label: "Use default (acme)" });
     expect(items.map((i) => i.id)).toEqual([USE_DEFAULT, "acme", "globex"]);
   });
 
-  it("omits the Use default option when no default is configured", () => {
+  it("keeps the Use default option even when no default is configured", () => {
     const items = orgSelectItems(["acme"], "", "");
-    expect(items.some((i) => i.id === USE_DEFAULT)).toBe(false);
-    expect(items.map((i) => i.id)).toEqual(["acme"]);
+    expect(items[0]).toEqual({ id: USE_DEFAULT, label: "Use default" });
+    expect(items.map((i) => i.id)).toEqual([USE_DEFAULT, "acme"]);
   });
 
   it("keeps the current value even if the token can no longer see it", () => {
     const items = orgSelectItems(["acme"], "legacy-org", "");
-    expect(items.map((i) => i.id)).toEqual(["legacy-org", "acme"]);
+    expect(items.map((i) => i.id)).toEqual([USE_DEFAULT, "legacy-org", "acme"]);
   });
 
   it("does not duplicate the current value when it is also in the list", () => {
     const items = orgSelectItems(["acme", "globex"], "acme", "");
-    expect(items.map((i) => i.id)).toEqual(["acme", "globex"]);
+    expect(items.map((i) => i.id)).toEqual([USE_DEFAULT, "acme", "globex"]);
   });
 });
 
 describe("projectSelectItems", () => {
   const projects = [proj("frontend", "Frontend"), proj("api", "API")];
 
-  it("labels projects as 'name (slug)'", () => {
-    const items = projectSelectItems(projects, "", "");
+  it("always leads with Use default, then labels projects as 'name (slug)'", () => {
+    const items = projectSelectItems(projects, "", "frontend");
     expect(items).toEqual([
+      { id: USE_DEFAULT, label: "Use default (frontend)" },
       { id: "frontend", label: "Frontend (frontend)" },
       { id: "api", label: "API (api)" },
     ]);
   });
 
-  it("offers Use default only when the default project is in the visible list", () => {
-    const inOrg = projectSelectItems(projects, "", "frontend");
-    expect(inOrg[0]).toEqual({ id: USE_DEFAULT, label: "Use default (frontend)" });
-
-    const outOfOrg = projectSelectItems(projects, "", "billing");
-    expect(outOfOrg.some((i) => i.id === USE_DEFAULT)).toBe(false);
-  });
-
-  it("keeps a current project not present in the visible list", () => {
+  it("keeps the current project even if not in the visible list", () => {
     const items = projectSelectItems(projects, "archived", "");
+    expect(items[0].id).toBe(USE_DEFAULT);
     expect(items.map((i) => i.id)).toContain("archived");
   });
 });
 
 describe("buildFilterPayload", () => {
-  it("trims the org slug and drops an empty project slug", () => {
-    const form = { ...makeEmptyForm("ws-1"), orgSlug: "  acme  ", projectSlug: "" };
+  it("emits an empty org slug for 'use default' and drops an empty project slug", () => {
+    const form = { ...makeEmptyForm("ws-1"), orgSlug: "", projectSlug: "" };
+    const filter = buildFilterPayload(form);
+    expect(filter.orgSlug).toBe("");
+    expect(filter.projectSlug).toBeUndefined();
+  });
+
+  it("trims a concrete org slug", () => {
+    const form = { ...makeEmptyForm("ws-1"), orgSlug: "  acme  ", projectSlug: "web" };
     const filter = buildFilterPayload(form);
     expect(filter.orgSlug).toBe("acme");
-    expect(filter.projectSlug).toBeUndefined();
+    expect(filter.projectSlug).toBe("web");
   });
 });

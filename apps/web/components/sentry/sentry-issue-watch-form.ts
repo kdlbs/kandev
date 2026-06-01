@@ -78,25 +78,36 @@ export function formStateFromWatch(w: SentryIssueWatch): FormState {
 }
 
 // WatchDefaults carries the install-wide default org/project from the Sentry
-// settings so the watcher can offer a "Use default" shortcut in each selector.
+// settings, used to label the always-present "Use default" option.
 export type WatchDefaults = { orgSlug: string; projectSlug: string };
 
-// USE_DEFAULT is the sentinel value for the "Use default" option. Selecting it
-// resolves to the configured default slug (watches store a concrete org/project
-// — the backend requires both, so there is no runtime fallback to defer to).
+// USE_DEFAULT is the sentinel for the "Use default" option, mirroring
+// STEP_DEFAULT for the profile selects. The form stores "" to mean "follow the
+// install-wide default org/project"; the backend resolves "" fresh on every
+// poll (resolveWatchFilter). Radix disallows <SelectItem value="">, so the
+// dropdown item carries this sentinel and maps back to "" on change.
 export const USE_DEFAULT = "__use_default__";
 
 export type SelectItemSpec = { id: string; label: string };
+
+// defaultSelectItem builds the "Use default" row, always present so the option
+// exists even before an install-wide default has been configured.
+function defaultSelectItem(defaultSlug: string): SelectItemSpec {
+  return { id: USE_DEFAULT, label: defaultSlug ? `Use default (${defaultSlug})` : "Use default" };
+}
+
+// resolveSlugSelection maps a select value back to the stored slug, collapsing
+// the sentinel to "" so the payload keeps signalling "use default".
+export function resolveSlugSelection(value: string): string {
+  return value === USE_DEFAULT ? "" : value;
+}
 
 export function orgSelectItems(
   orgs: string[],
   current: string,
   defaultOrgSlug: string,
 ): SelectItemSpec[] {
-  const items: SelectItemSpec[] = [];
-  if (defaultOrgSlug) {
-    items.push({ id: USE_DEFAULT, label: `Use default (${defaultOrgSlug})` });
-  }
+  const items: SelectItemSpec[] = [defaultSelectItem(defaultOrgSlug)];
   const seen = new Set<string>();
   // Include the current value even if the token can no longer see it (editing an
   // old watch) so the Select still shows the saved org.
@@ -113,12 +124,7 @@ export function projectSelectItems(
   current: string,
   defaultProjectSlug: string,
 ): SelectItemSpec[] {
-  const items: SelectItemSpec[] = [];
-  // Only offer the default project when it actually belongs to the selected org
-  // (projects is already filtered by org) — otherwise it would point out of org.
-  if (defaultProjectSlug && projects.some((p) => p.slug === defaultProjectSlug)) {
-    items.push({ id: USE_DEFAULT, label: `Use default (${defaultProjectSlug})` });
-  }
+  const items: SelectItemSpec[] = [defaultSelectItem(defaultProjectSlug)];
   const seen = new Set<string>();
   for (const p of projects) {
     if (seen.has(p.slug)) continue;
