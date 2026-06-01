@@ -338,7 +338,7 @@ function VoiceMicButton({
       {isRecording && (
         <span
           aria-hidden
-          className="absolute inset-0 rounded-md ring-2 ring-destructive/40 animate-pulse"
+          className="absolute inset-0 rounded-[inherit] ring-2 ring-destructive/40 animate-pulse"
         />
       )}
     </Button>
