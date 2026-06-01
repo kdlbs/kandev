@@ -110,6 +110,10 @@ type Handlers struct {
 	// Wires the list_related_tasks_kandev / *_task_document_kandev
 	// MCP tools introduced in office task handoffs phase 2.
 	handoffSvc *service.HandoffService
+
+	// Optional PR lister (set via SetTaskPRLister) used to enrich
+	// task-listing responses with associated pull requests.
+	taskPRLister TaskPRLister
 }
 
 // NewHandlers creates new MCP handlers.
@@ -352,6 +356,7 @@ func (h *Handlers) handleListTasks(ctx context.Context, msg *ws.Message) (*ws.Me
 			for _, t := range tasks {
 				dtos = append(dtos, dto.FromTask(t))
 			}
+			h.enrichTasksWithPRs(ctx, dtos)
 			return dto.ListTasksResponse{Tasks: dtos, Total: len(dtos)}, nil
 		})
 }

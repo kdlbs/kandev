@@ -11,6 +11,7 @@ import (
 	orchmodels "github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // Workspace-mode and ordering constants used across handoff plumbing.
@@ -137,14 +138,15 @@ func (p WorkspacePolicy) NeedsAttachment() bool {
 // list_related_tasks_kandev MCP tool. Document keys are precomputed so an
 // agent can decide what to fetch without a follow-up list call.
 type RelatedTask struct {
-	ID            string   `json:"id"`
-	Identifier    string   `json:"identifier,omitempty"`
-	Title         string   `json:"title"`
-	State         string   `json:"state"`
-	WorkspaceID   string   `json:"workspace_id"`
-	ParentID      string   `json:"parent_id,omitempty"`
-	AssigneeLabel string   `json:"assignee_label,omitempty"`
-	DocumentKeys  []string `json:"document_keys,omitempty"`
+	ID            string             `json:"id"`
+	Identifier    string             `json:"identifier,omitempty"`
+	Title         string             `json:"title"`
+	State         string             `json:"state"`
+	WorkspaceID   string             `json:"workspace_id"`
+	ParentID      string             `json:"parent_id,omitempty"`
+	AssigneeLabel string             `json:"assignee_label,omitempty"`
+	DocumentKeys  []string           `json:"document_keys,omitempty"`
+	PRs           []v1.TaskPRSummary `json:"prs,omitempty"`
 }
 
 // RelatedTasks bundles every relation surface for a single task.

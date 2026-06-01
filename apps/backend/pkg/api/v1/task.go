@@ -18,6 +18,16 @@ const (
 	TaskStateCancelled       TaskState = "CANCELLED"
 )
 
+// TaskPRSummary is a compact view of a GitHub pull request associated with a
+// task. Surfaced through the task-listing MCP tools so agents can reason about
+// PR status. State is one of "open", "closed", "merged".
+type TaskPRSummary struct {
+	Number int    `json:"number"`
+	URL    string `json:"url"`
+	Title  string `json:"title,omitempty"`
+	State  string `json:"state"`
+}
+
 // TaskSessionState represents the state of an agent session.
 type TaskSessionState string
 
