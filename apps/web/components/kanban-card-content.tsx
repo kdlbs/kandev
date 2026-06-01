@@ -14,7 +14,7 @@ import {
   KanbanCardDropdownMenuItems,
   type KanbanCardMenuEntry,
 } from "@/components/kanban-card-menu-items";
-import { useAppStore } from "@/components/state-provider";
+import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
 import { useTaskPendingClarification } from "@/hooks/use-task-pending-clarification";
 import {
@@ -135,28 +135,30 @@ export function KanbanCardBody({
   );
 }
 
+function ParentTaskBadge({ parentTaskId }: { parentTaskId: string }) {
+  const parentTask = useTaskById(parentTaskId);
+  const parentTitle = parentTask?.title ?? null;
+  return (
+    <Badge variant="outline" className="text-xs h-5 gap-1 max-w-[160px] min-w-0">
+      <IconSubtask className="h-3 w-3 shrink-0" />
+      <span className="truncate">{parentTitle ?? "Subtask"}</span>
+    </Badge>
+  );
+}
+
+function shouldShowBadgesRow(task: Task): boolean {
+  if (task.parentTaskId) return true;
+  if (task.sessionCount && task.sessionCount > 1) return true;
+  if (task.reviewStatus === "changes_requested") return true;
+  if (task.reviewStatus === "pending") return true;
+  return false;
+}
+
 function KanbanCardBadges({ task }: { task: Task }) {
-  const parentTitle = useAppStore((s) => {
-    if (!task.parentTaskId) return null;
-    return s.kanban.tasks.find((t) => t.id === task.parentTaskId)?.title ?? null;
-  });
-
-  const showRow =
-    (task.sessionCount && task.sessionCount > 1) ||
-    task.reviewStatus === "changes_requested" ||
-    task.reviewStatus === "pending" ||
-    task.parentTaskId;
-
-  if (!showRow) return null;
-
+  if (!shouldShowBadgesRow(task)) return null;
   return (
     <div className="flex flex-wrap items-center justify-end gap-2 mt-1 min-w-0">
-      {task.parentTaskId && (
-        <Badge variant="outline" className="text-xs h-5 gap-1 max-w-[160px] min-w-0">
-          <IconSubtask className="h-3 w-3 shrink-0" />
-          <span className="truncate">{parentTitle ?? "Subtask"}</span>
-        </Badge>
-      )}
+      {task.parentTaskId && <ParentTaskBadge parentTaskId={task.parentTaskId} />}
       {task.sessionCount && task.sessionCount > 1 && (
         <Badge variant="secondary" className="text-xs h-5">
           {task.sessionCount} sessions

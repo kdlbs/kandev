@@ -1,8 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { useAppStore } from "@/components/state-provider";
-import { getProviderHealth } from "@/lib/api/domains/office-extended-api";
+import { useQuery } from "@tanstack/react-query";
+import { officeQueryOptions } from "@/lib/query/query-options/office";
 import type { ProviderHealth } from "@/lib/state/slices/office/types";
 
 export type UseProviderHealthResult = {
@@ -15,35 +14,22 @@ export type UseProviderHealthResult = {
 const EMPTY_HEALTH: ProviderHealth[] = [];
 
 export function useProviderHealth(workspaceName: string | null): UseProviderHealthResult {
-  const health = useAppStore((s) =>
-    workspaceName
-      ? (s.office.providerHealth.byWorkspace[workspaceName] ?? EMPTY_HEALTH)
-      : EMPTY_HEALTH,
-  );
-  const setProviderHealth = useAppStore((s) => s.setProviderHealth);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [fetched, setFetched] = useState(false);
+  const { data, isLoading, error, refetch } = useQuery({
+    ...officeQueryOptions.providerHealth(workspaceName ?? ""),
+    enabled: !!workspaceName,
+  });
 
-  const refresh = useCallback(async () => {
-    if (!workspaceName) return;
-    setIsLoading(true);
-    setError(null);
-    try {
-      const res = await getProviderHealth(workspaceName);
-      setProviderHealth(workspaceName, res.health ?? []);
-      setFetched(true);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load provider health");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [workspaceName, setProviderHealth]);
+  function toErrorMessage(e: unknown): string | null {
+    if (!e) return null;
+    return e instanceof Error ? e.message : "Failed to load provider health";
+  }
 
-  useEffect(() => {
-    if (!workspaceName || fetched) return;
-    void refresh();
-  }, [workspaceName, fetched, refresh]);
-
-  return { health, isLoading, error, refresh };
+  return {
+    health: data ?? EMPTY_HEALTH,
+    isLoading,
+    error: toErrorMessage(error),
+    refresh: async () => {
+      await refetch();
+    },
+  };
 }

@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Textarea } from "@kandev/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
-import { useAppStore } from "@/components/state-provider";
+import { officeQueryOptions } from "@/lib/query/query-options/office";
 import type { SkillSourceType } from "@/lib/state/slices/office/types";
 
 const FALLBACK_SOURCE_TYPES = [
@@ -26,7 +27,7 @@ type CreateSkillFormProps = {
 };
 
 export function CreateSkillForm({ onCreate, onCancel }: CreateSkillFormProps) {
-  const meta = useAppStore((s) => s.office.meta);
+  const { data: meta } = useQuery(officeQueryOptions.metaGlobal());
   // Only show creatable (non-read-only) source types, plus exclude skills_sh from creation
   const sourceTypes = meta
     ? meta.skillSourceTypes.filter((s) => !s.readOnly).map((s) => ({ id: s.id, label: s.label }))

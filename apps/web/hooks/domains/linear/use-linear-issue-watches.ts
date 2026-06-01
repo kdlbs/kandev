@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback, useRef } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   listLinearIssueWatches,
   createLinearIssueWatch,
@@ -8,7 +8,7 @@ import {
   deleteLinearIssueWatch,
   triggerLinearIssueWatch,
 } from "@/lib/api/domains/linear-api";
-import { useAppStore } from "@/components/state-provider";
+import { qk } from "@/lib/query/keys";
 import type { CreateLinearIssueWatchInput, UpdateLinearIssueWatchInput } from "@/lib/types/linear";
 
 /**
@@ -20,81 +20,76 @@ import type { CreateLinearIssueWatchInput, UpdateLinearIssueWatchInput } from "@
  *                              against the watch's stored workspace as an IDOR guard)
  *   - workspaceId: null      → don't fetch
  *
- * Mirrors `useJiraIssueWatches`. Workspace changes reset the cached list so
- * the user doesn't see the previous workspace's stale rows during the swap.
+ * Mirrors `useJiraIssueWatches` and the Zustand-backed predecessor — same
+ * public API surface so no callers need updating.
  */
 export function useLinearIssueWatches(workspaceId?: string | null) {
-  const items = useAppStore((s) => s.linearIssueWatches.items);
-  const loaded = useAppStore((s) => s.linearIssueWatches.loaded);
-  const loading = useAppStore((s) => s.linearIssueWatches.loading);
-  const setWatches = useAppStore((s) => s.setLinearIssueWatches);
-  const resetWatches = useAppStore((s) => s.resetLinearIssueWatches);
-  const setLoading = useAppStore((s) => s.setLinearIssueWatchesLoading);
-  const addWatch = useAppStore((s) => s.addLinearIssueWatch);
-  const updateWatch = useAppStore((s) => s.updateLinearIssueWatch);
-  const removeWatch = useAppStore((s) => s.removeLinearIssueWatch);
+  const qc = useQueryClient();
 
-  const lastScope = useRef<string | null | undefined>(undefined);
-  const scope: string | null = workspaceId ?? null;
+  // null → skip fetching; undefined → all-workspace listing; string → scoped.
+  // TQ enabled flag handles the null case; key encodes undefined vs string.
+  const queryKey = qk.linear.watches(workspaceId !== null ? (workspaceId ?? null) : null);
 
-  useEffect(() => {
-    if (workspaceId === null) return;
-    if (lastScope.current !== undefined && lastScope.current !== scope) {
-      resetWatches();
-    }
-    lastScope.current = scope;
-  }, [workspaceId, scope, resetWatches]);
+  const { data, isLoading, isFetching } = useQuery({
+    queryKey,
+    queryFn: () => listLinearIssueWatches(workspaceId ?? undefined, { cache: "no-store" }),
+    enabled: workspaceId !== null,
+  });
 
-  useEffect(() => {
-    if (workspaceId === null || loaded || loading) return;
-    setLoading(true);
-    listLinearIssueWatches(workspaceId ?? undefined, { cache: "no-store" })
-      .then((res) => setWatches(res ?? []))
-      .catch(() => setWatches([]))
-      .finally(() => setLoading(false));
-  }, [workspaceId, loaded, loading, setWatches, setLoading]);
+  const items = data ?? [];
+  // loaded: true when we have data (even an empty array) and are not on the
+  // initial loading pass. Preserves the old contract callers depend on.
+  const loaded = !isLoading && workspaceId !== null;
+  const loading = isFetching && items.length === 0;
 
-  const create = useCallback(
-    async (req: CreateLinearIssueWatchInput) => {
-      const watch = await createLinearIssueWatch(req);
-      addWatch(watch);
-      return watch;
-    },
-    [addWatch],
-  );
+  const invalidate = () => qc.invalidateQueries({ queryKey });
 
-  // Per-row mutations require the row's own workspace_id to satisfy the
-  // backend's IDOR guard. Callers pass it explicitly when the hook itself
-  // wasn't bound to a single workspace (the install-wide listing case).
-  const update = useCallback(
-    async (id: string, req: UpdateLinearIssueWatchInput, rowWorkspaceId?: string) => {
-      const ws = rowWorkspaceId ?? workspaceId;
-      if (!ws) throw new Error("workspaceId required");
-      const watch = await updateLinearIssueWatch(ws, id, req);
-      updateWatch(watch);
-      return watch;
-    },
-    [workspaceId, updateWatch],
-  );
+  // --- mutations ---
 
-  const remove = useCallback(
-    async (id: string, rowWorkspaceId?: string) => {
-      const ws = rowWorkspaceId ?? workspaceId;
-      if (!ws) throw new Error("workspaceId required");
-      await deleteLinearIssueWatch(ws, id);
-      removeWatch(id);
-    },
-    [workspaceId, removeWatch],
-  );
+  const createMutation = useMutation({
+    mutationFn: (req: CreateLinearIssueWatchInput) => createLinearIssueWatch(req),
+    onSuccess: () => invalidate(),
+  });
 
-  const trigger = useCallback(
-    async (id: string, rowWorkspaceId?: string) => {
-      const ws = rowWorkspaceId ?? workspaceId;
-      if (!ws) throw new Error("workspaceId required");
-      return triggerLinearIssueWatch(ws, id);
-    },
-    [workspaceId],
-  );
+  const updateMutation = useMutation({
+    mutationFn: ({ id, ws, req }: { id: string; ws: string; req: UpdateLinearIssueWatchInput }) =>
+      updateLinearIssueWatch(ws, id, req),
+    onSuccess: () => invalidate(),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: ({ id, ws }: { id: string; ws: string }) => deleteLinearIssueWatch(ws, id),
+    onSuccess: () => invalidate(),
+  });
+
+  const triggerMutation = useMutation({
+    mutationFn: ({ id, ws }: { id: string; ws: string }) => triggerLinearIssueWatch(ws, id),
+    // Trigger does not modify the list — no cache invalidation needed.
+  });
+
+  // --- stable callback helpers (mirror old Zustand-hook API surface) ---
+
+  function create(req: CreateLinearIssueWatchInput) {
+    return createMutation.mutateAsync(req);
+  }
+
+  function update(id: string, req: UpdateLinearIssueWatchInput, rowWorkspaceId?: string) {
+    const ws = rowWorkspaceId ?? workspaceId;
+    if (!ws) throw new Error("workspaceId required");
+    return updateMutation.mutateAsync({ id, ws, req });
+  }
+
+  function remove(id: string, rowWorkspaceId?: string) {
+    const ws = rowWorkspaceId ?? workspaceId;
+    if (!ws) throw new Error("workspaceId required");
+    return deleteMutation.mutateAsync({ id, ws });
+  }
+
+  function trigger(id: string, rowWorkspaceId?: string) {
+    const ws = rowWorkspaceId ?? workspaceId;
+    if (!ws) throw new Error("workspaceId required");
+    return triggerMutation.mutateAsync({ id, ws });
+  }
 
   return { items, loaded, loading, create, update, remove, trigger };
 }

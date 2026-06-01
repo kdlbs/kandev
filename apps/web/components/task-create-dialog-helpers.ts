@@ -1,6 +1,6 @@
 import type { useRouter } from "next/navigation";
 import type { Task, Branch, LocalRepository, Repository } from "@/lib/types/http";
-import type { AgentProfileOption } from "@/lib/state/slices";
+import type { AgentProfileOption } from "@/lib/types/settings";
 import type { AppState } from "@/lib/state/store";
 import type {
   StepType,

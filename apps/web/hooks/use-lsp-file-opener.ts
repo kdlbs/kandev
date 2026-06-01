@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useAppStore } from "@/components/state-provider";
+import { useTaskSessionById } from "@/hooks/domains/session/use-task-session-by-id";
 import {
   useFileEditors,
   setPendingCursorPosition,
@@ -50,12 +51,8 @@ function scrollEditorIfMounted(
 export function useLspFileOpener() {
   const { openFile } = useFileEditors();
 
-  const worktreePath = useAppStore((state) => {
-    const sessionId = state.tasks.activeSessionId;
-    if (!sessionId) return null;
-    const session = state.taskSessions.items[sessionId];
-    return session?.worktree_path ?? null;
-  });
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const worktreePath = useTaskSessionById(activeSessionId)?.worktree_path ?? null;
 
   useEffect(() => {
     const opener = async (uri: string, line?: number, column?: number) => {

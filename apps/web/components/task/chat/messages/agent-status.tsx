@@ -3,8 +3,11 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { IconAlertCircle, IconAlertTriangle, IconChevronDown } from "@tabler/icons-react";
 import type { Message, TaskSessionState } from "@/lib/types/http";
+import { useQuery } from "@tanstack/react-query";
 import { useSessionTurn } from "@/hooks/domains/session/use-session-turn";
-import { useAppStore } from "@/components/state-provider";
+import { sessionTurnsQueryOptions } from "@/lib/query/query-options/session";
+import { useTaskSessionById } from "@/hooks/domains/session/use-task-session-by-id";
+import { useAgentProfiles } from "@/hooks/domains/settings/use-settings-reads";
 import { GridSpinner } from "@/components/grid-spinner";
 import { resolveAgentErrorLabel } from "./agent-error-label";
 
@@ -118,14 +121,19 @@ function useRunningTimer(isRunning: boolean, turnStartedAt: string | null) {
 }
 
 function useActiveTurn(sessionId: string | null) {
-  const turns = useAppStore((state) => (sessionId ? state.turns.bySession[sessionId] : undefined));
-  const activeTurnId = useAppStore((state) =>
-    sessionId ? state.turns.activeBySession[sessionId] : null,
-  );
+  // Read turns from the TanStack Query cache (canonical post-migration). The
+  // queryFn derives activeTurnId from the fetched turns, so the active turn is
+  // known on a fresh load / session switch without waiting for a live WS event.
+  const { data } = useQuery({
+    ...sessionTurnsQueryOptions(sessionId ?? ""),
+    enabled: !!sessionId,
+  });
   return useMemo(() => {
+    const turns = data?.turns;
+    const activeTurnId = data?.activeTurnId;
     if (!turns || !activeTurnId) return null;
     return turns.find((t) => t.id === activeTurnId) ?? null;
-  }, [turns, activeTurnId]);
+  }, [data]);
 }
 
 function AgentErrorStatus({
@@ -135,11 +143,7 @@ function AgentErrorStatus({
   config: { label: string };
   sessionId: string | null;
 }) {
-  const errorMessage = useAppStore((state) =>
-    sessionId
-      ? (state.taskSessions.items[sessionId]?.error_message as string | undefined)
-      : undefined,
-  );
+  const errorMessage = useTaskSessionById(sessionId)?.error_message as string | undefined;
   const [userCollapsed, setUserCollapsed] = useState(false);
   const expanded = !!errorMessage && !userCollapsed;
   const toggle = useCallback(() => setUserCollapsed((v) => !v), []);
@@ -250,10 +254,8 @@ function renderActiveStatus(
 }
 
 function useAgentLabel(sessionId: string | null, dynamicLabel?: boolean): string | null {
-  const agentProfileId = useAppStore((state) =>
-    sessionId ? state.taskSessions.items[sessionId]?.agent_profile_id : undefined,
-  ) as string | undefined;
-  const agentProfiles = useAppStore((state) => state.agentProfiles.items);
+  const agentProfileId = useTaskSessionById(sessionId)?.agent_profile_id as string | undefined;
+  const agentProfiles = useAgentProfiles();
   if (!dynamicLabel || !agentProfileId) return null;
   const profile = agentProfiles.find((p) => p.id === agentProfileId);
   return profile ? profile.label.split(" \u2022 ")[0] : null;

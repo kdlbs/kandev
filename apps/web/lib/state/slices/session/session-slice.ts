@@ -1,11 +1,6 @@
 import type { StateCreator } from "zustand";
 import type { TaskSession } from "@/lib/types/http";
 import type { SessionSlice, SessionSliceState } from "./types";
-import { migrateEnvKeyedData } from "@/lib/state/slices/session-runtime/session-runtime-slice";
-import { prepareResultToSessionState } from "@/lib/state/slices/session-runtime/prepare-result";
-import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
-
-const debugEnv = createDebugLogger("session:env-mapping");
 
 /** Ensure message metadata exists for a session, initializing with defaults if needed. */
 function ensureMessageMeta(
@@ -42,51 +37,10 @@ function mergeMessageFields(target: Record<string, unknown>, source: Record<stri
   }
 }
 
-/** Eagerly populate session→environment mapping and migrate any data stored under the fallback key.
- *  `draft` must be the combined store state (SessionSlice + SessionRuntimeSlice). */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function syncEnvironmentMapping(draft: any, sessionId: string, environmentId: string | undefined) {
-  if (!environmentId) return;
-  const previous = draft.environmentIdBySessionId[sessionId];
-  if (IS_DEBUG) {
-    debugEnv("syncEnvironmentMapping", {
-      sessionId,
-      environmentId,
-      previous: previous ?? null,
-      changed: previous !== environmentId,
-      fallbackGitStatusFileCount: Object.keys(
-        draft.gitStatus?.byEnvironmentId?.[sessionId]?.files ?? {},
-      ).length,
-      targetGitStatusFileCount: Object.keys(
-        draft.gitStatus?.byEnvironmentId?.[environmentId]?.files ?? {},
-      ).length,
-    });
-  }
-  draft.environmentIdBySessionId[sessionId] = environmentId;
-  migrateEnvKeyedData(draft, sessionId, environmentId);
-}
-
-/**
- * Backfill the prepare-progress slice from a session's `metadata.prepare_result`
- * when sessions are loaded from the API (e.g. switching tasks client-side).
- *
- * Without this, prepare progress only ever arrives via SSR hydration or live WS
- * events, so switching to a task whose prepare already completed (common for
- * remote executors) showed an empty "Environment prepared" row until a full
- * page reload re-ran SSR. Only populates when no entry exists yet so we never
- * clobber live WS progress for an in-flight prepare.
- *
- * `draft` must be the combined store state (SessionSlice + SessionRuntimeSlice).
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function syncPrepareProgress(draft: any, session: TaskSession) {
-  if (draft.prepareProgress.bySessionId[session.id]) return;
-  const prepareState = prepareResultToSessionState(session.id, session.metadata);
-  if (prepareState) draft.prepareProgress.bySessionId[session.id] = prepareState;
-}
-
-/** Merge an incoming session update with an existing session, preserving nullable fields. */
-function mergeTaskSession(existing: TaskSession, incoming: TaskSession): TaskSession {
+/** Merge an incoming session update with an existing session, preserving nullable fields.
+ *  Exported so the TanStack Query session-state bridge applies identical merge
+ *  semantics to its by-id / by-task caches (keeps Zustand and TQ in lockstep). */
+export function mergeTaskSession(existing: TaskSession, incoming: TaskSession): TaskSession {
   return {
     ...existing,
     ...incoming,
@@ -106,21 +60,10 @@ export const defaultSessionState: SessionSliceState = {
     bySession: {},
     activeBySession: {},
   },
-  taskSessions: { items: {} },
-  taskSessionsByTask: { itemsByTaskId: {}, loadingByTaskId: {}, loadedByTaskId: {} },
-  sessionAgentctl: { itemsBySessionId: {} },
-  worktrees: { items: {} },
-  sessionWorktreesBySessionId: { itemsBySessionId: {} },
   pendingModel: { bySessionId: {} },
   activeModel: { bySessionId: {} },
   taskPlans: {
-    byTaskId: {},
-    loadingByTaskId: {},
-    loadedByTaskId: {},
     savingByTaskId: {},
-    revisionsByTaskId: {},
-    revisionsLoadingByTaskId: {},
-    revisionsLoadedByTaskId: {},
     revisionContentCache: {},
     previewRevisionIdByTaskId: {},
     comparePairByTaskId: {},
@@ -207,79 +150,26 @@ function buildMessageActions(set: ImmerSet) {
 
 function buildTaskPlanActions(set: ImmerSet) {
   return {
-    setTaskPlan: (taskId: string, plan: Parameters<SessionSlice["setTaskPlan"]>[1]) =>
-      set((draft) => {
-        draft.taskPlans.byTaskId[taskId] = plan;
-        draft.taskPlans.loadingByTaskId[taskId] = false;
-        draft.taskPlans.loadedByTaskId[taskId] = true;
-      }),
-    setTaskPlanLoading: (taskId: string, loading: boolean) =>
-      set((draft) => {
-        draft.taskPlans.loadingByTaskId[taskId] = loading;
-      }),
     setTaskPlanSaving: (taskId: string, saving: boolean) =>
       set((draft) => {
         draft.taskPlans.savingByTaskId[taskId] = saving;
       }),
+    // Clears the per-task CLIENT-only state. The plan/revisions server data
+    // lives in the TanStack Query cache and is dropped via query invalidation,
+    // not here. revisionContentCache is keyed by revisionId (not taskId) so it
+    // is left untouched — stale entries are evicted on the next preview refetch.
     clearTaskPlan: (taskId: string) =>
       set((draft) => {
-        // revisionContentCache is keyed by revisionId, so pick the IDs for this
-        // task before deleting the revisions list and drop their cache entries.
-        const revs = draft.taskPlans.revisionsByTaskId[taskId];
-        if (revs) {
-          for (const r of revs) {
-            delete draft.taskPlans.revisionContentCache[r.id];
-          }
-        }
-        delete draft.taskPlans.byTaskId[taskId];
-        delete draft.taskPlans.loadingByTaskId[taskId];
-        delete draft.taskPlans.loadedByTaskId[taskId];
         delete draft.taskPlans.savingByTaskId[taskId];
-        delete draft.taskPlans.revisionsByTaskId[taskId];
-        delete draft.taskPlans.revisionsLoadingByTaskId[taskId];
-        delete draft.taskPlans.revisionsLoadedByTaskId[taskId];
         delete draft.taskPlans.previewRevisionIdByTaskId[taskId];
         delete draft.taskPlans.comparePairByTaskId[taskId];
         delete draft.taskPlans.lastSeenUpdatedAtByTaskId[taskId];
       }),
-    markTaskPlanSeen: (taskId: string) =>
+    // The plan itself now lives in the TanStack Query cache; callers pass the
+    // current `updated_at` (or "" / undefined for a missing plan) explicitly.
+    markTaskPlanSeen: (taskId: string, updatedAt?: string | null) =>
       set((draft) => {
-        const plan = draft.taskPlans.byTaskId[taskId];
-        draft.taskPlans.lastSeenUpdatedAtByTaskId[taskId] = plan?.updated_at ?? "";
-      }),
-    setPlanRevisions: (
-      taskId: string,
-      revisions: Parameters<SessionSlice["setPlanRevisions"]>[1],
-    ) =>
-      set((draft) => {
-        draft.taskPlans.revisionsByTaskId[taskId] = [...revisions].sort(
-          (a, b) => b.revision_number - a.revision_number,
-        );
-        draft.taskPlans.revisionsLoadedByTaskId[taskId] = true;
-        draft.taskPlans.revisionsLoadingByTaskId[taskId] = false;
-      }),
-    upsertPlanRevision: (
-      taskId: string,
-      revision: Parameters<SessionSlice["upsertPlanRevision"]>[1],
-    ) =>
-      set((draft) => {
-        const list = draft.taskPlans.revisionsByTaskId[taskId] ?? [];
-        const idx = list.findIndex((r) => r.id === revision.id);
-        if (idx === -1) {
-          list.unshift(revision);
-        } else {
-          list[idx] = { ...list[idx], ...revision };
-          // Coalesced writes update an existing revision's content on the
-          // backend, but the WS payload carries metadata only — drop any
-          // cached content so the next preview refetches.
-          delete draft.taskPlans.revisionContentCache[revision.id];
-        }
-        list.sort((a, b) => b.revision_number - a.revision_number);
-        draft.taskPlans.revisionsByTaskId[taskId] = list;
-      }),
-    setPlanRevisionsLoading: (taskId: string, loading: boolean) =>
-      set((draft) => {
-        draft.taskPlans.revisionsLoadingByTaskId[taskId] = loading;
+        draft.taskPlans.lastSeenUpdatedAtByTaskId[taskId] = updatedAt ?? "";
       }),
     cachePlanRevisionContent: (revisionId: string, content: string) =>
       set((draft) => {
@@ -327,80 +217,6 @@ function nextPair(
   return [current[1], revisionId];
 }
 
-function buildTaskSessionActions(set: ImmerSet) {
-  return {
-    setTaskSession: (session: Parameters<SessionSlice["setTaskSession"]>[0]) =>
-      set((draft) => {
-        const existingSession = draft.taskSessions.items[session.id];
-        const mergedSession = existingSession
-          ? mergeTaskSession(existingSession, session)
-          : session;
-        draft.taskSessions.items[session.id] = mergedSession;
-        const sessionsByTask = draft.taskSessionsByTask.itemsByTaskId[session.task_id];
-        if (sessionsByTask) {
-          const sessionIndex = sessionsByTask.findIndex((s) => s.id === session.id);
-          if (sessionIndex >= 0) sessionsByTask[sessionIndex] = mergedSession;
-        }
-        syncEnvironmentMapping(draft, session.id, mergedSession.task_environment_id);
-      }),
-    removeTaskSession: (taskId: string, sessionId: string) =>
-      set((draft) => {
-        delete draft.taskSessions.items[sessionId];
-        const sessionsByTask = draft.taskSessionsByTask.itemsByTaskId[taskId];
-        if (sessionsByTask) {
-          draft.taskSessionsByTask.itemsByTaskId[taskId] = sessionsByTask.filter(
-            (s) => s.id !== sessionId,
-          );
-        }
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        delete (draft as any).environmentIdBySessionId[sessionId];
-      }),
-    setTaskSessionsForTask: (
-      taskId: string,
-      sessions: Parameters<SessionSlice["setTaskSessionsForTask"]>[1],
-    ) =>
-      set((draft) => {
-        const merged = sessions.map((session) => {
-          const existing = draft.taskSessions.items[session.id];
-          return existing ? mergeTaskSession(existing, session) : session;
-        });
-        draft.taskSessionsByTask.itemsByTaskId[taskId] = merged;
-        draft.taskSessionsByTask.loadingByTaskId[taskId] = false;
-        draft.taskSessionsByTask.loadedByTaskId[taskId] = true;
-        for (const session of merged) {
-          draft.taskSessions.items[session.id] = session;
-          syncEnvironmentMapping(draft, session.id, session.task_environment_id);
-          syncPrepareProgress(draft, session);
-        }
-      }),
-    // Upsert a session from a WS event without flipping the per-task `loadedByTaskId`
-    // flag — partial event-driven records must not gate the API hydration that
-    // fills in fields like agent_profile_id / repository_id / worktree_path.
-    upsertTaskSessionFromEvent: (
-      taskId: string,
-      session: Parameters<SessionSlice["upsertTaskSessionFromEvent"]>[1],
-    ) =>
-      set((draft) => {
-        const existing = draft.taskSessions.items[session.id];
-        const merged = existing ? mergeTaskSession(existing, session) : session;
-        draft.taskSessions.items[session.id] = merged;
-        const list = draft.taskSessionsByTask.itemsByTaskId[taskId];
-        if (list) {
-          const idx = list.findIndex((s) => s.id === session.id);
-          if (idx >= 0) list[idx] = merged;
-          else list.push(merged);
-        } else {
-          draft.taskSessionsByTask.itemsByTaskId[taskId] = [merged];
-        }
-        syncEnvironmentMapping(draft, session.id, merged.task_environment_id);
-      }),
-    setTaskSessionsLoading: (taskId: string, loading: boolean) =>
-      set((draft) => {
-        draft.taskSessionsByTask.loadingByTaskId[taskId] = loading;
-      }),
-  };
-}
-
 export const createSessionSlice: StateCreator<
   SessionSlice,
   [["zustand/immer", never]],
@@ -425,19 +241,6 @@ export const createSessionSlice: StateCreator<
   setActiveTurn: (sessionId, turnId) =>
     set((draft) => {
       draft.turns.activeBySession[sessionId] = turnId;
-    }),
-  ...buildTaskSessionActions(set),
-  setSessionAgentctlStatus: (sessionId, status) =>
-    set((draft) => {
-      draft.sessionAgentctl.itemsBySessionId[sessionId] = status;
-    }),
-  setWorktree: (worktree) =>
-    set((draft) => {
-      draft.worktrees.items[worktree.id] = worktree;
-    }),
-  setSessionWorktrees: (sessionId, worktreeIds) =>
-    set((draft) => {
-      draft.sessionWorktreesBySessionId.itemsBySessionId[sessionId] = worktreeIds;
     }),
   setPendingModel: (sessionId, modelId) =>
     set((draft) => {

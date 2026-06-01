@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { useUserSettings } from "@/hooks/domains/settings/use-user-settings";
 import { IconChevronDown, IconCode, IconLoader2 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
@@ -12,7 +13,6 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useEditors } from "@/hooks/domains/settings/use-editors";
 import { useOpenSessionInEditor } from "@/hooks/use-open-session-in-editor";
-import { useAppStore } from "@/components/state-provider";
 import type { EditorOption } from "@/lib/types/http";
 
 type EditorsMenuProps = {
@@ -22,7 +22,7 @@ type EditorsMenuProps = {
 export function EditorsMenu({ activeSessionId }: EditorsMenuProps) {
   const openEditor = useOpenSessionInEditor(activeSessionId ?? null);
   const { editors } = useEditors();
-  const defaultEditorId = useAppStore((state) => state.userSettings.defaultEditorId);
+  const defaultEditorId = useUserSettings().data?.defaultEditorId ?? null;
 
   const enabledEditors = useMemo(
     () =>

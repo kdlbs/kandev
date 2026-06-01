@@ -11,6 +11,7 @@ import { EnhancePromptButton } from "@/components/enhance-prompt-button";
 import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import { useAppStore } from "@/components/state-provider";
+import { useAgentName } from "@/hooks/domains/office/use-office-agents";
 import { selectCommandCount } from "@/lib/state/slices/session/selectors";
 import { createComment } from "@/lib/api/domains/office-api";
 import { formatRelativeTime } from "@/lib/utils";
@@ -73,6 +74,16 @@ function formatDuration(ms: number): string {
   return `${minutes}m ${remaining}s`;
 }
 
+// Resolves an agent comment's display name: the live office-agents query
+// name wins (renames flow through), then the comment's own author name,
+// then a generic "Agent" fallback for session-bridged comments.
+function resolveAgentDisplayName(
+  resolvedName: string | undefined,
+  authorName: string | undefined,
+): string {
+  return resolvedName ?? authorName ?? "Agent";
+}
+
 function CommentEntry({
   comment,
   taskId,
@@ -85,17 +96,13 @@ function CommentEntry({
   hasLaterAgentReply?: boolean;
 }) {
   const isAgent = comment.authorType === "agent";
-  // Resolve the agent name from the office agents store so renames
+  // Resolve the agent name from the office agents query so renames
   // flow through automatically. Backend session-bridged comments don't
   // carry a name; the mapper leaves authorName empty for agents.
-  const resolvedAgentName = useAppStore((s) =>
-    isAgent
-      ? (s.office.agentProfiles.find((a) => a.id === comment.authorId)?.name ??
-        comment.authorName ??
-        "Agent")
-      : "",
-  );
-  const displayName = isAgent ? resolvedAgentName : "You";
+  const resolvedAgentName = useAgentName(isAgent ? comment.authorId : null);
+  const displayName = isAgent
+    ? resolveAgentDisplayName(resolvedAgentName, comment.authorName)
+    : "You";
   return (
     <div
       id={`comment-${comment.id}`}

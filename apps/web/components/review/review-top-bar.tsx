@@ -19,7 +19,8 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Checkbox } from "@kandev/ui/checkbox";
 import type { DiffComment } from "@/lib/diff/types";
-import { useAppStore } from "@/components/state-provider";
+import { useUserSettings, useSetUserSettings } from "@/hooks/domains/settings/use-user-settings";
+import { DEFAULT_USER_SETTINGS } from "@/lib/types/settings";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { updateUserSettings } from "@/lib/api";
 import { VcsSplitButton } from "@/components/vcs-split-button";
@@ -115,9 +116,9 @@ export const ReviewTopBar = memo(function ReviewTopBar({
   getPendingComments,
   markCommentsSent,
 }: ReviewTopBarProps) {
-  const reviewAutoMarkOnScroll = useAppStore((state) => state.userSettings.reviewAutoMarkOnScroll);
-  const setUserSettings = useAppStore((state) => state.setUserSettings);
-  const userSettings = useAppStore((state) => state.userSettings);
+  const userSettings = useUserSettings().data ?? DEFAULT_USER_SETTINGS;
+  const reviewAutoMarkOnScroll = userSettings.reviewAutoMarkOnScroll;
+  const setUserSettings = useSetUserSettings();
 
   const handleFixComments = useCallback(() => {
     const comments = getPendingComments();

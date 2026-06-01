@@ -1,46 +1,27 @@
-import { useCallback, useEffect } from "react";
-import { useAppStore } from "@/components/state-provider";
-import { listTaskSessions } from "@/lib/api";
-import type { TaskSession } from "@/lib/types/http";
-
-const EMPTY_SESSIONS: TaskSession[] = [];
+import { useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useTaskSessionsByTask } from "@/hooks/domains/session/use-task-session-by-id";
+import { taskSessionsQueryOptions } from "@/lib/query/query-options/session";
 
 export function useTaskSessions(taskId: string | null) {
-  const sessions = useAppStore((state) =>
-    taskId ? (state.taskSessionsByTask.itemsByTaskId[taskId] ?? EMPTY_SESSIONS) : EMPTY_SESSIONS,
-  );
-  const isLoading = useAppStore((state) =>
-    taskId ? (state.taskSessionsByTask.loadingByTaskId[taskId] ?? false) : false,
-  );
-  const isLoaded = useAppStore((state) =>
-    taskId ? (state.taskSessionsByTask.loadedByTaskId[taskId] ?? false) : false,
-  );
-  const setTaskSessionsForTask = useAppStore((state) => state.setTaskSessionsForTask);
-  const setTaskSessionsLoading = useAppStore((state) => state.setTaskSessionsLoading);
+  const queryClient = useQueryClient();
+  const { sessions, isLoading, isLoaded } = useTaskSessionsByTask(taskId);
 
+  // Force a refetch of the per-task session list. The TQ query owns the fetch
+  // (the byTask queryFn calls listTaskSessions); refetchQueries re-runs it and
+  // the useTaskSessionsByTask hook seeds each session into its by-id slot.
   const loadSessions = useCallback(
     async (force = false) => {
       if (!taskId) return;
-      if (!force && (isLoading || isLoaded)) return;
-      setTaskSessionsLoading(taskId, true);
-      try {
-        const response = await listTaskSessions(taskId, { cache: "no-store" });
-        const sessions = response.sessions ?? [];
-        setTaskSessionsForTask(taskId, sessions);
-      } catch {
-        setTaskSessionsForTask(taskId, []);
-      } finally {
-        setTaskSessionsLoading(taskId, false);
+      const key = taskSessionsQueryOptions(taskId).queryKey;
+      if (force) {
+        await queryClient.refetchQueries({ queryKey: key });
+      } else {
+        await queryClient.ensureQueryData(taskSessionsQueryOptions(taskId));
       }
     },
-    [isLoaded, isLoading, setTaskSessionsForTask, setTaskSessionsLoading, taskId],
+    [queryClient, taskId],
   );
-
-  useEffect(() => {
-    if (!taskId) return;
-    if (isLoaded || isLoading) return;
-    loadSessions();
-  }, [isLoaded, isLoading, loadSessions, taskId]);
 
   return { sessions, isLoading, isLoaded, loadSessions };
 }

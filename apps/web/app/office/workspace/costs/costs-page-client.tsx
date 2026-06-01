@@ -1,26 +1,13 @@
 "use client";
 
-import { useEffect } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@kandev/ui/tabs";
 import { useAppStore } from "@/components/state-provider";
-import type { CostSummary } from "@/lib/state/slices/office/types";
 import { CostOverview } from "./cost-overview";
 import { BudgetsTab } from "./budgets-tab";
 import { PageHeader } from "../../components/shared/page-header";
 
-type CostsPageClientProps = {
-  initialCostSummary: CostSummary | null;
-};
-
-export function CostsPageClient({ initialCostSummary }: CostsPageClientProps) {
+export function CostsPageClient() {
   const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
-  const setCostSummary = useAppStore((s) => s.setCostSummary);
-
-  useEffect(() => {
-    if (initialCostSummary) {
-      setCostSummary(initialCostSummary);
-    }
-  }, [initialCostSummary, setCostSummary]);
 
   if (!activeWorkspaceId) {
     return (

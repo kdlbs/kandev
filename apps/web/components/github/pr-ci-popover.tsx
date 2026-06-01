@@ -512,10 +512,10 @@ export function PRCIPopover({
   enabled: boolean;
   onOpenDetailPanel?: () => void;
 }) {
-  const ghStatus = useAppStore((s) => s.githubStatus.status);
+  // Read from the TQ-backed hook directly — the Zustand `githubStatus.status`
+  // mirror is no longer populated after the wave-2 github migration.
+  const { status: ghStatus } = useGitHubStatus();
   const authLost = ghStatus !== null && !ghStatus.authenticated;
-  // Trigger an initial status load from the same hook the rest of the app uses.
-  useGitHubStatus();
   const { feedback, isFetching, lastUpdatedAt, refetch } = usePRCIPopover(pr, enabled && !authLost);
   const onAddAsContext = useAddCheckToContext(pr);
 

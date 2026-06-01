@@ -37,7 +37,10 @@ import type {
   PermissionSetting,
   PassthroughConfig,
 } from "@/lib/types/http";
-import { useAppStore } from "@/components/state-provider";
+import {
+  useSettingsAgents,
+  useSetAgentsAndProfiles,
+} from "@/hooks/domains/settings/use-settings-reads";
 import { AgentLogo } from "@/components/agent-logo";
 import { ProfileMcpConfigCard } from "@/app/settings/agents/[agentId]/profile-mcp-config-card";
 import { CommandPreviewCard } from "@/app/settings/agents/[agentId]/profiles/[profileId]/command-preview-card";
@@ -173,22 +176,7 @@ function ProfileSettingsCard({
 }
 
 function useSyncAgentsToStore() {
-  const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
-  const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
-  return (nextAgents: Agent[]) => {
-    setSettingsAgents(nextAgents);
-    setAgentProfiles(
-      nextAgents.flatMap((agentItem) =>
-        agentItem.profiles.map((agentProfile) => ({
-          id: agentProfile.id,
-          label: `${agentProfile.agentDisplayName ?? ""} • ${agentProfile.name}`,
-          agent_id: agentItem.id,
-          agent_name: agentItem.name,
-          cli_passthrough: agentProfile.cliPassthrough ?? false,
-        })),
-      ),
-    );
-  };
+  return useSetAgentsAndProfiles();
 }
 
 function useProfileEditorState(profile: AgentProfile) {
@@ -454,7 +442,7 @@ function ProfileEditor({
   initialMcpConfig,
 }: ProfileEditorProps) {
   const { toast } = useToast();
-  const settingsAgents = useAppStore((state) => state.settingsAgents.items);
+  const settingsAgents = useSettingsAgents();
   const syncAgentsToStore = useSyncAgentsToStore();
   const { items: secrets } = useSecrets();
   const { draft, setDraft, savedProfile, setSavedProfile, saveStatus, setSaveStatus, isDirty } =

@@ -1,7 +1,6 @@
 // Export slice creators
 export { createKanbanSlice, defaultKanbanState } from "./kanban/kanban-slice";
 export { createWorkspaceSlice, defaultWorkspaceState } from "./workspace/workspace-slice";
-export { createSettingsSlice, defaultSettingsState } from "./settings/settings-slice";
 export { createSessionSlice, defaultSessionState } from "./session/session-slice";
 export {
   createSessionRuntimeSlice,
@@ -10,17 +9,12 @@ export {
 export { createUISlice, defaultUIState } from "./ui/ui-slice";
 export { createGitHubSlice, defaultGitHubState } from "./github/github-slice";
 export { createGitLabSlice, defaultGitLabState } from "./gitlab/gitlab-slice";
-export { createJiraSlice, defaultJiraState } from "./jira/jira-slice";
 export { createLinearSlice, defaultLinearState } from "./linear/linear-slice";
-export { createOfficeSlice, defaultOfficeState } from "./office/office-slice";
-export { createFeaturesSlice, defaultFeaturesState } from "./features/features-slice";
-export { createAutomationsSlice, defaultAutomationsState } from "./automations/automations-slice";
 export { createSystemSlice, defaultSystemState } from "./system/system-slice";
 
 // Export types
 export type { KanbanSlice, KanbanSliceState, KanbanSliceActions } from "./kanban/types";
 export type { WorkspaceSlice, WorkspaceSliceState, WorkspaceSliceActions } from "./workspace/types";
-export type { SettingsSlice, SettingsSliceState, SettingsSliceActions } from "./settings/types";
 export type { SessionSlice, SessionSliceState, SessionSliceActions } from "./session/types";
 export type {
   SessionRuntimeSlice,
@@ -36,32 +30,12 @@ export type {
   TaskMRsState,
 } from "./gitlab/types";
 export type {
-  JiraSlice,
-  JiraSliceState,
-  JiraSliceActions,
-  JiraIssueWatchesState,
-} from "./jira/types";
-export type {
   LinearSlice,
   LinearSliceState,
   LinearSliceActions,
   LinearIssueWatchesState,
 } from "./linear/types";
-export type { OfficeSlice, OfficeSliceState, OfficeSliceActions } from "./office/types";
-export type {
-  FeaturesSlice,
-  FeaturesSliceState,
-  FeaturesSliceActions,
-  FeatureFlags,
-  FeatureName,
-} from "./features/types";
-export type {
-  AutomationsSlice,
-  AutomationsSliceState,
-  AutomationsSliceActions,
-  AutomationsState,
-  AutomationRunsState,
-} from "./automations/types";
+export type { FeatureFlags, FeatureName } from "@/lib/features";
 export type {
   SystemSlice,
   SystemSliceState,
@@ -79,36 +53,11 @@ export type {
   WorkflowsState,
   TaskState,
 } from "./kanban/types";
-export type {
-  WorkspaceState,
-  RepositoriesState,
-  RepositoryBranchesState,
-  RepositoryScriptsState,
-} from "./workspace/types";
-export type {
-  ExecutorsState,
-  SettingsAgentsState,
-  AgentDiscoveryState,
-  AvailableAgentsState,
-  AgentProfileOption,
-  AgentProfilesState,
-  EditorsState,
-  PromptsState,
-  SecretsState,
-  NotificationProvidersState,
-  SettingsDataState,
-  UserSettingsState,
-} from "./settings/types";
+export type { WorkspaceState } from "./workspace/types";
 export type {
   MessagesState,
   TurnsState,
-  TaskSessionsState,
-  TaskSessionsByTaskState,
-  SessionAgentctlStatus,
-  SessionAgentctlState,
   Worktree,
-  WorktreesState,
-  SessionWorktreesState,
   PendingModelState,
   ActiveModelState,
   TaskPlansState,
@@ -123,7 +72,6 @@ export type {
   ProcessState,
   FileInfo,
   GitStatusEntry,
-  GitStatusState,
   SessionCommit,
   CumulativeDiff,
   SessionCommitsState,
@@ -156,13 +104,6 @@ export type {
   DocumentPanelState,
   SystemHealthState,
 } from "./ui/types";
-export type {
-  GitHubStatusState,
-  TaskPRsState,
-  PRWatchesState,
-  ReviewWatchesState,
-  IssueWatchesState,
-} from "./github/types";
 export type {
   AgentProfile,
   Skill,

@@ -4,7 +4,7 @@ import { use, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
-import { useAppStore } from "@/components/state-provider";
+import { useExecutors, useSetExecutors } from "@/hooks/domains/settings/use-settings-reads";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import {
   updateExecutorProfile,
@@ -50,11 +50,8 @@ import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
 const EXECUTORS_ROUTE = "/settings/executors";
 const SPRITES_TOKEN_KEY = "SPRITES_API_TOKEN";
 function useProfileFromStore(profileId: string) {
-  const executor = useAppStore(
-    (state) =>
-      state.executors.items.find((e: Executor) => e.profiles?.some((p) => p.id === profileId)) ??
-      null,
-  );
+  const executor =
+    useExecutors().find((e: Executor) => e.profiles?.some((p) => p.id === profileId)) ?? null;
   const profile = executor?.profiles?.find((p: ExecutorProfile) => p.id === profileId) ?? null;
   return executor && profile ? { executor, profile } : null;
 }
@@ -208,8 +205,8 @@ export default function ProfileEditPage({ params }: { params: Promise<{ profileI
 function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
   const router = useRouter();
   const { toast } = useToast();
-  const executors = useAppStore((state) => state.executors.items);
-  const setExecutors = useAppStore((state) => state.setExecutors);
+  const executors = useExecutors();
+  const setExecutors = useSetExecutors();
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);

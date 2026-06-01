@@ -8,6 +8,8 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { useAppStore } from "@/components/state-provider";
 import { useRepositoryScripts } from "@/hooks/domains/workspace/use-repository-scripts";
+import { useAllRepositories } from "@/hooks/domains/workspace/use-all-repositories";
+import { useTaskSessionById } from "@/hooks/domains/session/use-task-session-by-id";
 
 /**
  * Returns the trimmed dev_script command of the active session's repository,
@@ -15,15 +17,13 @@ import { useRepositoryScripts } from "@/hooks/domains/workspace/use-repository-s
  * truthiness; callers that need the command itself can use it directly.
  */
 export function useActiveSessionDevScript(): string {
-  return useAppStore((state) => {
-    const sessionId = state.tasks.activeSessionId;
-    if (!sessionId) return "";
-    const repoId = state.taskSessions.items[sessionId]?.repository_id;
-    if (!repoId) return "";
-    const allRepos = Object.values(state.repositories.itemsByWorkspaceId).flat();
-    const repo = allRepos.find((r) => r.id === repoId);
-    return repo?.dev_script?.trim() ?? "";
-  });
+  const sessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const repoId = useTaskSessionById(sessionId)?.repository_id ?? null;
+  // Observe cached repo lists (no fetch) to find the dev_script for repoId.
+  const { repositories } = useAllRepositories(false);
+  if (!repoId) return "";
+  const repo = repositories.find((r) => r.id === repoId);
+  return repo?.dev_script?.trim() ?? "";
 }
 
 /**
@@ -38,11 +38,8 @@ export function RepositoryScriptsMenuItems({
   onRunScript: (scriptId: string) => void;
   onRunDevScript: () => void;
 }) {
-  const repositoryId = useAppStore((s) => {
-    const sessionId = s.tasks.activeSessionId;
-    if (!sessionId) return null;
-    return s.taskSessions.items[sessionId]?.repository_id ?? null;
-  });
+  const sessionId = useAppStore((s) => s.tasks.activeSessionId);
+  const repositoryId = useTaskSessionById(sessionId)?.repository_id ?? null;
   const { scripts } = useRepositoryScripts(repositoryId);
   const devScript = useActiveSessionDevScript();
 

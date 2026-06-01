@@ -24,6 +24,7 @@ import { useGitWithFeedback } from "@/hooks/use-git-with-feedback";
 import { usePanelActions } from "@/hooks/use-panel-actions";
 import { useVcsDialogs } from "@/components/vcs/vcs-dialogs";
 import { useAppStore } from "@/components/state-provider";
+import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { createFile } from "@/lib/ws/workspace-files";
 import { useDockviewStore } from "@/lib/state/dockview-store";
@@ -247,11 +248,8 @@ export function SessionCommands({
   const gitWithFeedback = useGitWithFeedback();
 
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
-  const activeTaskTitle = useAppStore((s) => {
-    const id = s.tasks.activeTaskId;
-    if (!id) return "";
-    return s.kanban.tasks.find((t: { id: string }) => t.id === id)?.title ?? "";
-  });
+  const activeTask = useTaskById(activeTaskId);
+  const activeTaskTitle = activeTask?.title ?? "";
 
   const [showNewAgentDialog, setShowNewAgentDialog] = useState(false);
   const [showSubtaskDialog, setShowSubtaskDialog] = useState(false);

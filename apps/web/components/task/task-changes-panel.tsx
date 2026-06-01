@@ -4,6 +4,8 @@ import { memo, useMemo, useCallback, createRef, useState, useEffect, useRef } fr
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { useToast } from "@/components/toast-provider";
 import { useAppStore } from "@/components/state-provider";
+import { useUserSettings, useSetUserSettings } from "@/hooks/domains/settings/use-user-settings";
+import { DEFAULT_USER_SETTINGS } from "@/lib/types/settings";
 import { useReviewSources, type ReviewSource } from "@/hooks/domains/session/use-review-sources";
 import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { useGitOperations } from "@/hooks/use-git-operations";
@@ -171,9 +173,9 @@ function useChangesActions(
   defaultWordWrap = false,
 ) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
-  const autoMarkOnScroll = useAppStore((s) => s.userSettings.reviewAutoMarkOnScroll);
-  const setUserSettings = useAppStore((state) => state.setUserSettings);
-  const userSettings = useAppStore((state) => state.userSettings);
+  const userSettings = useUserSettings().data ?? DEFAULT_USER_SETTINGS;
+  const autoMarkOnScroll = userSettings.reviewAutoMarkOnScroll;
+  const setUserSettings = useSetUserSettings();
   const { discard } = useGitOperations(activeSessionId ?? null);
   const { markReviewed, markUnreviewed } = useSessionFileReviews(activeSessionId ?? null);
   const getPendingComments = useCommentsStore((s) => s.getPendingComments);

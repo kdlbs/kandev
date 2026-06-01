@@ -17,6 +17,7 @@ import { useKanbanLayout } from "@/hooks/use-kanban-layout";
 import { useTaskSession } from "@/hooks/use-task-session";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
+import { useAllKanbanTasks, useKanbanSnapshots } from "@/hooks/domains/kanban/use-kanban-tasks";
 import { Task } from "./kanban-card";
 import type { KanbanState } from "@/lib/state/slices";
 import { PREVIEW_PANEL } from "@/lib/settings/constants";
@@ -154,9 +155,11 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
   const router = useRouter();
   const { isMobile } = useResponsiveBreakpoint();
 
-  // Get tasks from the kanban store
-  const kanbanTasks = useAppStore((state) => state.kanban.tasks);
-  const kanbanMultiSnapshots = useAppStore((state) => state.kanbanMulti.snapshots);
+  // Read kanban data from TanStack Query (single source of truth) so WS-driven
+  // task updates surface in the preview without a hard refresh. The Zustand
+  // slice is a transitional mirror that lags behind for cross-workflow tasks.
+  const kanbanTasks = useAllKanbanTasks();
+  const kanbanMultiSnapshots = useKanbanSnapshots();
   const setKanbanPreviewedTaskId = useAppStore((state) => state.setKanbanPreviewedTaskId);
 
   const { selectedTaskId, isOpen, previewWidthPx, open, close, updatePreviewWidth } =

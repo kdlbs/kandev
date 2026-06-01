@@ -1,12 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { useEffect, type ReactNode } from "react";
-import { StateProvider, useAppStore } from "@/components/state-provider";
+import type { ReactNode } from "react";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { StateProvider } from "@/components/state-provider";
 import { TaskOptimisticContextProvider } from "@/hooks/use-optimistic-task-mutation";
+import { createTestQueryClient } from "@/test-utils/render-with-query";
 import { ApiError } from "@/lib/api/client";
 import type { OfficeTask } from "@/lib/state/slices/office/types";
 import { BlockersPicker, formatBlockerCycleMessage } from "./blockers-picker";
 import type { Task } from "@/app/office/tasks/[id]/types";
+
+const WS_ID = "ws-1";
 
 // Hoisted mocks so the API module is replaced before the component imports it.
 const addBlockerMock = vi.hoisted(() => vi.fn());
@@ -62,16 +66,6 @@ const baseTask: Task = {
   updatedAt: "2026-05-01T00:00:00Z",
 };
 
-// SeedTasks pre-populates the office store so the picker has a candidate
-// without needing to hit the searchTasks fallback fetch.
-function SeedTasks({ tasks }: { tasks: OfficeTask[] }) {
-  const setTasks = useAppStore((s) => s.setTasks);
-  useEffect(() => {
-    setTasks(tasks);
-  }, [setTasks, tasks]);
-  return null;
-}
-
 function Wrapper({
   children,
   applyPatch,
@@ -84,11 +78,18 @@ function Wrapper({
   candidates: OfficeTask[];
 }) {
   const ctx = { task: baseTask, applyPatch, restore };
+  // The picker reads candidate tasks from TanStack Query (useTaskCandidates,
+  // keyed ["office", wsId, "taskCandidates"]) scoped to the active
+  // workspace. Seed that cache + active workspace so the candidate is
+  // available without hitting the searchTasks fetch.
+  const client = createTestQueryClient();
+  client.setQueryData(["office", WS_ID, "taskCandidates"], candidates);
   return (
-    <StateProvider>
-      <SeedTasks tasks={candidates} />
-      <TaskOptimisticContextProvider value={ctx}>{children}</TaskOptimisticContextProvider>
-    </StateProvider>
+    <QueryClientProvider client={client}>
+      <StateProvider initialState={{ workspaces: { activeId: WS_ID } }}>
+        <TaskOptimisticContextProvider value={ctx}>{children}</TaskOptimisticContextProvider>
+      </StateProvider>
+    </QueryClientProvider>
   );
 }
 

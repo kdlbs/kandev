@@ -722,6 +722,47 @@ export class ApiClient {
     });
   }
 
+  /**
+   * Read the backend's per-connection log of WS events it has stamped and
+   * sent. Paired with `window.__kandev_ws_account__()` on the FE side, this
+   * lets the test fixture diff "sent" vs "received" and surface dropped
+   * events (see `e2e/helpers/ws-account.ts`).
+   *
+   * Returns 404 from the backend when the connection_id is unknown — caller
+   * should treat that as "nothing to verify" rather than a hard failure, so
+   * old bundles (no seq stamping) and stale connections don't synthesize
+   * spurious test failures during the Phase 1 rollout.
+   */
+  async getWsSent(
+    connectionId: string,
+    sinceSeq?: number,
+    sessionId?: string,
+  ): Promise<{
+    connection_id: string;
+    events: Array<{
+      seq: number;
+      session_seq?: number;
+      session_id?: string;
+      type: string;
+      action: string;
+      sent_at: string;
+    }>;
+    max_seq: number;
+  }> {
+    const params = new URLSearchParams({ connection_id: connectionId });
+    if (sinceSeq !== undefined && sinceSeq > 0) {
+      params.set("since_seq", String(sinceSeq));
+    }
+    // Optional per-session filter (Workstream 1): the backend returns only
+    // entries stamped for the given session, sorted by session_seq ascending,
+    // and `max_seq` carries the max session_seq for that (connection,
+    // session) pair instead of the per-connection max.
+    if (sessionId !== undefined && sessionId !== "") {
+      params.set("session_id", sessionId);
+    }
+    return this.request("GET", `/api/v1/e2e/ws-sent?${params.toString()}`);
+  }
+
   // --- E2E Mock Harness (KANDEV_E2E_MOCK=true) ---
   // These routes are mounted only when the backend was started with the
   // env var set. They write directly to task_sessions / messages so the

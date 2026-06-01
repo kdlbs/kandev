@@ -1,14 +1,19 @@
 import { useEffect, useCallback, useState, useRef } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import {
-  getTaskPlan,
   createTaskPlan,
   updateTaskPlan,
   deleteTaskPlan,
-  listPlanRevisions,
   getPlanRevision,
   revertPlanRevision,
 } from "@/lib/api/domains/plan-api";
+import {
+  taskPlanQueryOptions,
+  taskPlanRevisionsQueryOptions,
+} from "@/lib/query/query-options/session";
+import { qk } from "@/lib/query/keys";
+import type { TaskPlanData } from "@/lib/query/query-options/session";
 import type { TaskPlan, TaskPlanRevision } from "@/lib/types/http";
 
 const EMPTY_REVISIONS: readonly TaskPlanRevision[] = Object.freeze([]);
@@ -22,49 +27,49 @@ const EMPTY_REVISIONS: readonly TaskPlanRevision[] = Object.freeze([]);
 export function useTaskPlan(taskId: string | null, options?: { visible?: boolean }) {
   const { visible = true } = options ?? {};
   const prevVisibleRef = useRef(visible);
-  const plan = useAppStore((state) => (taskId ? state.taskPlans.byTaskId[taskId] : undefined));
-  const isLoading = useAppStore((state) =>
-    taskId ? (state.taskPlans.loadingByTaskId[taskId] ?? false) : false,
-  );
-  const isLoaded = useAppStore((state) =>
-    taskId ? (state.taskPlans.loadedByTaskId[taskId] ?? false) : false,
-  );
+  const queryClient = useQueryClient();
+
+  // Server state (plan + loading) now comes from TanStack Query; the bridge
+  // keeps it live from WS events. Disable the query when there is no task.
+  const planQuery = useQuery({ ...taskPlanQueryOptions(taskId ?? ""), enabled: !!taskId });
+  const plan = planQuery.data?.plan ?? null;
+  const isLoading = !!taskId && planQuery.isLoading;
+  const isLoaded = !!taskId && planQuery.isSuccess;
+
   const isSaving = useAppStore((state) =>
     taskId ? (state.taskPlans.savingByTaskId[taskId] ?? false) : false,
   );
-  const setTaskPlan = useAppStore((state) => state.setTaskPlan);
-  const setTaskPlanLoading = useAppStore((state) => state.setTaskPlanLoading);
   const setTaskPlanSaving = useAppStore((state) => state.setTaskPlanSaving);
-  const markTaskPlanSeen = useAppStore((state) => state.markTaskPlanSeen);
-  const connectionStatus = useAppStore((state) => state.connection.status);
 
   const [error, setError] = useState<string | null>(null);
 
-  const fetchPlan = useCallback(async () => {
-    if (!taskId) return;
+  // NOTE: this hook intentionally does NOT mark the plan "seen" on load.
+  //
+  // Seen-state (the Plan tab's unseen-update dot) is owned exclusively by the
+  // tab UIs that know whether the user is actually looking at the plan:
+  //   - desktop:  `PlanTab` marks seen on dockview tab activation
+  //               (`api.onDidActiveChange` / `api.isActive`).
+  //   - reload:   `usePlanPanelAutoOpen` marks an already-restored panel's plan
+  //               seen only when there is no recorded last-seen value.
+  //   - mobile:   the plan-panel badge persists last-seen to localStorage.
+  //
+  // `useTaskPlan` mounts inside the Plan panel, which dockview keeps mounted
+  // even while its tab is inactive — and it only mounts *after* the agent's
+  // plan is already in the cache (auto-open is what reveals the panel). So a
+  // seen-mark here can never distinguish "already acknowledged" from "fresh
+  // unseen agent write"; it would mark every agent write seen the instant the
+  // panel mounts, suppressing the indicator entirely.
 
-    setTaskPlanLoading(taskId, true);
+  const refetch = useCallback(async () => {
+    if (!taskId) return;
     setError(null);
     try {
-      const fetchedPlan = await getTaskPlan(taskId);
-      setTaskPlan(taskId, fetchedPlan);
-      // Initial fetch is not a notification — mark as seen so no indicator flashes.
-      markTaskPlanSeen(taskId);
+      await planQuery.refetch();
     } catch (err) {
       console.error("Failed to fetch task plan:", err);
       setError(err instanceof Error ? err.message : "Failed to fetch plan");
-    } finally {
-      setTaskPlanLoading(taskId, false);
     }
-  }, [taskId, setTaskPlan, setTaskPlanLoading, markTaskPlanSeen]);
-
-  // Fetch plan on mount or when taskId changes
-  useEffect(() => {
-    if (connectionStatus !== "connected") return;
-    if (taskId && !isLoaded && !isLoading) {
-      fetchPlan();
-    }
-  }, [taskId, isLoaded, isLoading, fetchPlan, connectionStatus]);
+  }, [taskId, planQuery]);
 
   // Refetch when becoming visible (e.g., tab switch)
   useEffect(() => {
@@ -73,10 +78,21 @@ export function useTaskPlan(taskId: string | null, options?: { visible?: boolean
     prevVisibleRef.current = visible;
 
     // Only refetch when transitioning from hidden to visible
-    if (wasHidden && isNowVisible && connectionStatus === "connected" && taskId) {
-      fetchPlan();
+    if (wasHidden && isNowVisible && taskId) {
+      void refetch();
     }
-  }, [visible, connectionStatus, taskId, fetchPlan]);
+  }, [visible, taskId, refetch]);
+
+  const writePlanToCache = useCallback(
+    (savedPlan: TaskPlan | null) => {
+      if (!taskId) return;
+      queryClient.setQueryData<TaskPlanData>(qk.taskSession.plans(taskId), (prev) => ({
+        plan: savedPlan,
+        lastSeenUpdatedAt: prev?.lastSeenUpdatedAt ?? null,
+      }));
+    },
+    [taskId, queryClient],
+  );
 
   const savePlan = useCallback(
     async (content: string, title?: string): Promise<TaskPlan | null> => {
@@ -85,15 +101,10 @@ export function useTaskPlan(taskId: string | null, options?: { visible?: boolean
       setTaskPlanSaving(taskId, true);
       setError(null);
       try {
-        let savedPlan: TaskPlan;
-        if (plan) {
-          // Update existing plan
-          savedPlan = await updateTaskPlan(taskId, content, title);
-        } else {
-          // Create new plan
-          savedPlan = await createTaskPlan(taskId, content, title);
-        }
-        setTaskPlan(taskId, savedPlan);
+        const savedPlan: TaskPlan = plan
+          ? await updateTaskPlan(taskId, content, title)
+          : await createTaskPlan(taskId, content, title);
+        writePlanToCache(savedPlan);
         return savedPlan;
       } catch (err) {
         console.error("Failed to save task plan:", err);
@@ -103,7 +114,7 @@ export function useTaskPlan(taskId: string | null, options?: { visible?: boolean
         setTaskPlanSaving(taskId, false);
       }
     },
-    [taskId, plan, setTaskPlan, setTaskPlanSaving],
+    [taskId, plan, writePlanToCache, setTaskPlanSaving],
   );
 
   const removePlan = useCallback(async (): Promise<boolean> => {
@@ -113,7 +124,7 @@ export function useTaskPlan(taskId: string | null, options?: { visible?: boolean
     setError(null);
     try {
       await deleteTaskPlan(taskId);
-      setTaskPlan(taskId, null);
+      writePlanToCache(null);
       return true;
     } catch (err) {
       console.error("Failed to delete task plan:", err);
@@ -122,18 +133,19 @@ export function useTaskPlan(taskId: string | null, options?: { visible?: boolean
     } finally {
       setTaskPlanSaving(taskId, false);
     }
-  }, [taskId, setTaskPlan, setTaskPlanSaving]);
+  }, [taskId, writePlanToCache, setTaskPlanSaving]);
 
   const revisionsBundle = useTaskPlanRevisions(taskId, setTaskPlanSaving, setError);
 
   return {
-    plan: plan ?? null,
+    plan,
     isLoading,
+    isLoaded,
     isSaving,
     error,
     savePlan,
     deletePlan: removePlan,
-    refetch: fetchPlan,
+    refetch,
     ...revisionsBundle,
   };
 }
@@ -148,41 +160,28 @@ function useTaskPlanRevisions(
   setTaskPlanSaving: (taskId: string, saving: boolean) => void,
   setError: (err: string | null) => void,
 ) {
-  const revisions = useAppStore((state) =>
-    taskId ? (state.taskPlans.revisionsByTaskId[taskId] ?? EMPTY_REVISIONS) : EMPTY_REVISIONS,
-  ) as TaskPlanRevision[];
-  const isLoadingRevisions = useAppStore((state) =>
-    taskId ? (state.taskPlans.revisionsLoadingByTaskId[taskId] ?? false) : false,
-  );
-  const isRevisionsLoaded = useAppStore((state) =>
-    taskId ? (state.taskPlans.revisionsLoadedByTaskId[taskId] ?? false) : false,
-  );
-  const connectionStatus = useAppStore((state) => state.connection.status);
+  // Revisions list (metadata-only) now comes from TanStack Query; the bridge
+  // upserts new revisions from WS events. The query backfills the full list on
+  // mount / cache miss, replacing the old "load once when connected" effect.
+  const revisionsQuery = useQuery({
+    ...taskPlanRevisionsQueryOptions(taskId ?? ""),
+    enabled: !!taskId,
+  });
+  const revisions = (revisionsQuery.data?.revisions ?? EMPTY_REVISIONS) as TaskPlanRevision[];
+  const isLoadingRevisions = !!taskId && revisionsQuery.isLoading;
   const storeApi = useAppStoreApi();
-  const setPlanRevisions = useAppStore((state) => state.setPlanRevisions);
-  const setPlanRevisionsLoading = useAppStore((state) => state.setPlanRevisionsLoading);
   const cachePlanRevisionContent = useAppStore((state) => state.cachePlanRevisionContent);
 
   const loadRevisions = useCallback(async () => {
     if (!taskId) return;
-    setPlanRevisionsLoading(taskId, true);
+    setError(null);
     try {
-      const list = await listPlanRevisions(taskId);
-      setPlanRevisions(taskId, list);
+      await revisionsQuery.refetch();
     } catch (err) {
       console.error("Failed to load plan revisions:", err);
       setError(err instanceof Error ? err.message : "Failed to load revisions");
-    } finally {
-      setPlanRevisionsLoading(taskId, false);
     }
-  }, [taskId, setPlanRevisions, setPlanRevisionsLoading, setError]);
-
-  // Load revisions once on mount — events may have fired before the WS connected.
-  useEffect(() => {
-    if (connectionStatus !== "connected") return;
-    if (!taskId || isRevisionsLoaded || isLoadingRevisions) return;
-    loadRevisions();
-  }, [taskId, connectionStatus, isRevisionsLoaded, isLoadingRevisions, loadRevisions]);
+  }, [taskId, revisionsQuery, setError]);
 
   const loadRevisionContent = useCallback(
     async (revisionId: string): Promise<string> => {

@@ -2,6 +2,21 @@ import type { BackendMessageMap, BackendMessageType } from "@/lib/types/backend"
 import type { ConnectionStatus } from "@/lib/types/connection";
 import { generateUUID } from "@/lib/utils";
 import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+import { WsAccount, type WsAccountSnapshot } from "./ws-account";
+
+// Static gate for WS event accounting (Phase 1). Next.js inlines
+// `NEXT_PUBLIC_*` at build time so when this is false the whole
+// accounting branch + window assignments fold to dead code in the
+// production bundle.
+const WS_ACCOUNT_ENABLED =
+  typeof process !== "undefined" && process.env.NEXT_PUBLIC_KANDEV_E2E_MOCK === "true";
+
+declare global {
+  interface Window {
+    __kandev_ws_account__?: () => WsAccountSnapshot;
+    __kandev_ws_account_clear__?: () => void;
+  }
+}
 
 const debugDispatch = createDebugLogger("ws:dispatch");
 
@@ -64,6 +79,7 @@ export class WebSocketClient {
   private sessionFocusCounts = new Map<string, number>();
   private userSubscriptionCount = 0;
   private runSubscriptions = new Map<string, number>();
+  private wsAccount: WsAccount | null = WS_ACCOUNT_ENABLED ? new WsAccount() : null;
 
   constructor(
     private url: string,
@@ -71,6 +87,11 @@ export class WebSocketClient {
     reconnectOptions?: ReconnectOptions,
   ) {
     this.reconnectOptions = { ...DEFAULT_RECONNECT_OPTIONS, ...reconnectOptions };
+    if (WS_ACCOUNT_ENABLED && this.wsAccount && typeof window !== "undefined") {
+      const account = this.wsAccount;
+      window.__kandev_ws_account__ = () => account.snapshot();
+      window.__kandev_ws_account_clear__ = () => account.clear();
+    }
   }
 
   getStatus() {
@@ -389,7 +410,38 @@ export class WebSocketClient {
     });
   }
 
+  private recordAccounting(message: BackendMessageMap[BackendMessageType]) {
+    if (!WS_ACCOUNT_ENABLED || !this.wsAccount) return;
+    const envelope = message as {
+      seq?: number;
+      session_seq?: number;
+      connection_id?: string;
+      type?: string;
+      action?: string;
+      payload?: { session_id?: string };
+    };
+    if (typeof envelope.seq !== "number") return;
+    const sessionId =
+      typeof envelope.payload?.session_id === "string" ? envelope.payload.session_id : null;
+    const sessionSeq =
+      typeof envelope.session_seq === "number" && envelope.session_seq > 0
+        ? envelope.session_seq
+        : undefined;
+    this.wsAccount.record(
+      {
+        seq: envelope.seq,
+        sessionSeq,
+        type: envelope.type ?? "",
+        action: envelope.action ?? "",
+        sessionId,
+        receivedAt: Date.now(),
+      },
+      envelope.connection_id,
+    );
+  }
+
   private handleParsedMessage(message: BackendMessageMap[BackendMessageType]) {
+    this.recordAccounting(message);
     const msgWithId = message as { id?: string; type: string };
 
     if (msgWithId.type === "response" && msgWithId.id) {

@@ -18,7 +18,8 @@ import { Badge } from "@kandev/ui/badge";
 import { getTaskStateIcon } from "@/lib/ui/state-icons";
 import { needsAction } from "@/lib/utils/needs-action";
 import { useTaskActions } from "@/hooks/use-task-actions";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useAppStore } from "@/components/state-provider";
+import { useKanbanSnapshotMutator } from "@/hooks/domains/kanban/use-kanban-snapshots";
 import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
 import type { MoveTaskError } from "@/hooks/use-drag-and-drop";
@@ -129,7 +130,7 @@ async function moveTaskAcrossSwimlaneSteps({
   taskId,
   targetColumnId,
   workflowId,
-  store,
+  mutator,
   moveTaskById,
   onMoveError,
 }: {
@@ -137,12 +138,12 @@ async function moveTaskAcrossSwimlaneSteps({
   taskId: string;
   targetColumnId: string;
   workflowId: string;
-  store: ReturnType<typeof useAppStoreApi>;
+  mutator: ReturnType<typeof useKanbanSnapshotMutator>;
   moveTaskById: ReturnType<typeof useTaskActions>["moveTaskById"];
   onMoveError?: (error: MoveTaskError) => void;
 }) {
-  const state = store.getState();
-  const snapshot = state.kanbanMulti.snapshots[workflowId];
+  const { getSnapshot, setSnapshot } = mutator;
+  const snapshot = getSnapshot(workflowId);
   if (!snapshot) return;
 
   const targetTasks = snapshot.tasks
@@ -155,7 +156,7 @@ async function moveTaskAcrossSwimlaneSteps({
   const nextPosition = targetTasks.length;
   const originalTasks = snapshot.tasks;
 
-  state.setWorkflowSnapshot(workflowId, {
+  setSnapshot(workflowId, {
     ...snapshot,
     tasks: snapshot.tasks.map((t: KanbanState["tasks"][number]) =>
       t.id === taskId ? { ...t, workflowStepId: targetColumnId, position: nextPosition } : t,
@@ -171,11 +172,9 @@ async function moveTaskAcrossSwimlaneSteps({
     // Backend handles on_enter actions (auto_start_agent, plan_mode, etc.)
     // via the task.moved event → orchestrator processOnEnter()
   } catch (error) {
-    const currentSnapshot = store.getState().kanbanMulti.snapshots[workflowId];
+    const currentSnapshot = getSnapshot(workflowId);
     if (currentSnapshot) {
-      store
-        .getState()
-        .setWorkflowSnapshot(workflowId, { ...currentSnapshot, tasks: originalTasks });
+      setSnapshot(workflowId, { ...currentSnapshot, tasks: originalTasks });
     }
     const message = error instanceof Error ? error.message : "Failed to move task";
     onMoveError?.({ message, taskId, sessionId: task.primarySessionId ?? null });
@@ -183,7 +182,7 @@ async function moveTaskAcrossSwimlaneSteps({
 }
 
 function useSwimlaneGraphDnd({ tasks, steps, workflowId, onMoveError }: SwimlaneGraphDndOptions) {
-  const store = useAppStoreApi();
+  const mutator = useKanbanSnapshotMutator();
   const { moveTaskById } = useTaskActions();
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
 
@@ -237,12 +236,12 @@ function useSwimlaneGraphDnd({ tasks, steps, workflowId, onMoveError }: Swimlane
         taskId,
         targetColumnId,
         workflowId,
-        store,
+        mutator,
         moveTaskById,
         onMoveError,
       });
     },
-    [tasks, workflowId, store, moveTaskById, adjacentSteps, onMoveError],
+    [tasks, workflowId, mutator, moveTaskById, adjacentSteps, onMoveError],
   );
 
   const handleDragCancel = useCallback(() => {

@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
-import { useAppStore } from "@/components/state-provider";
+import { useExecutors, useAgentProfiles } from "@/hooks/domains/settings/use-settings-reads";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useWorkflows } from "@/hooks/use-workflows";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
@@ -161,13 +161,12 @@ export function ConfigSection({
   onExecutionModeChange,
 }: ConfigSectionProps) {
   useSettingsData(true);
-  useWorkflows(workspaceId, true);
+  const { workflows } = useWorkflows(workspaceId, true);
   const { repositories } = useRepositories(workspaceId, true);
   const discoveredRepos = useDiscoveredRepositories(workspaceId);
 
-  const workflows = useAppStore((state) => state.workflows.items);
-  const agentProfiles = useAppStore((state) => state.agentProfiles.items);
-  const executors = useAppStore((state) => state.executors.items);
+  const agentProfiles = useAgentProfiles();
+  const executors = useExecutors();
   const steps = useWorkflowSteps(workflowId);
 
   const filteredAgentProfiles = useMemo(

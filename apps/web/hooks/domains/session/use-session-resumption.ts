@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { launchSession } from "@/lib/services/session-launch-service";
 import {
@@ -6,11 +7,15 @@ import {
   buildRestoreWorkspaceRequest,
 } from "@/lib/services/session-launch-helpers";
 import { useAppStore } from "@/components/state-provider";
+import { useTaskSessionById } from "@/hooks/domains/session/use-task-session-by-id";
+import { mergeTaskSessionIntoCache } from "@/lib/query/cache/task-session-cache";
+import { writeAgentctlStatus } from "@/lib/query/agentctl-status";
 import {
   sessionId as toSessionId,
   taskId as toTaskId,
   type SessionId,
   type TaskId,
+  type TaskSession,
   type TaskSessionState,
 } from "@/lib/types/http";
 
@@ -417,19 +422,21 @@ export function useSessionResumption(
   const [worktreePath, setWorktreePath] = useState<string | null>(null);
   const [worktreeBranch, setWorktreeBranch] = useState<string | null>(null);
   const connectionStatus = useAppStore((state) => state.connection.status);
-  const session = useAppStore((state) =>
-    sessionId ? (state.taskSessions.items[sessionId] ?? null) : null,
+  const session = useTaskSessionById(sessionId);
+  const queryClient = useQueryClient();
+  const setTaskSession = useCallback<ResumeStateSetter["setTaskSession"]>(
+    (s) => {
+      mergeTaskSessionIntoCache(queryClient, s as TaskSession);
+    },
+    [queryClient],
   );
-  const setTaskSession = useAppStore((state) => state.setTaskSession);
-  const setSessionAgentctlStatus = useAppStore((state) => state.setSessionAgentctlStatus);
-
   const setters: ResumeStateSetter = {
     setResumptionState,
     setError,
     setWorktreePath,
     setWorktreeBranch,
     setTaskSession,
-    setAgentctlReady: (sid: string) => setSessionAgentctlStatus(sid, { status: "ready" }),
+    setAgentctlReady: (sid: string) => writeAgentctlStatus(queryClient, sid, { status: "ready" }),
   };
 
   const { sessionStatus } = useSessionResetAndCheck(

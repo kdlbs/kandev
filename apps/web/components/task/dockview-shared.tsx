@@ -8,6 +8,9 @@ import {
 } from "dockview-react";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useAppStore } from "@/components/state-provider";
+import { useAgentProfiles } from "@/hooks/domains/settings/use-settings-reads";
+import { useTaskSessionById } from "@/hooks/domains/session/use-task-session-by-id";
+import { useWorkspace } from "@/hooks/domains/workspace/use-workspaces";
 import { useFileEditors } from "@/hooks/use-file-editors";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
@@ -150,10 +153,7 @@ export { ContextMenuTab };
 function SidebarContent({ panelId }: { panelId: string }) {
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const workflowId = useAppStore((state) => state.workflows.activeId);
-  const workspaceName = useAppStore((state) => {
-    const ws = state.workspaces.items.find((w: { id: string }) => w.id === workspaceId);
-    return ws?.name ?? "Workspace";
-  });
+  const workspaceName = useWorkspace(workspaceId)?.name ?? "Workspace";
 
   useEffect(() => {
     setPanelTitle(panelId, workspaceName);
@@ -163,17 +163,15 @@ function SidebarContent({ panelId }: { panelId: string }) {
 }
 
 function useChatSessionTitle(panelId: string, sessionId: string | null, isSessionTab: boolean) {
-  const agentLabel = useAppStore((state) => {
-    if (!sessionId) return null;
-    const session = state.taskSessions.items[sessionId];
-    if (!session?.agent_profile_id) return null;
-    const profile = state.agentProfiles.items.find(
-      (p: { id: string }) => p.id === session.agent_profile_id,
-    );
+  const agentProfiles = useAgentProfiles();
+  const profileId = useTaskSessionById(sessionId)?.agent_profile_id ?? null;
+  const agentLabel = (() => {
+    if (!profileId) return null;
+    const profile = agentProfiles.find((p) => p.id === profileId);
     if (!profile) return null;
     const parts = profile.label.split(" \u2022 ");
     return parts[1] || parts[0] || profile.label;
-  });
+  })();
   useEffect(() => {
     let label = "Agent";
     if (isSessionTab && agentLabel) {
@@ -187,16 +185,11 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
   const paramSessionId = params?.sessionId as string | undefined;
   const storeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const sessionId = paramSessionId ?? storeSessionId;
-  const taskId = useAppStore((state) => {
-    if (sessionId) {
-      return state.taskSessions.items[sessionId]?.task_id ?? state.tasks.activeTaskId;
-    }
-    return state.tasks.activeTaskId;
-  });
+  const session = useTaskSessionById(sessionId);
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const taskId = (sessionId ? session?.task_id : null) ?? activeTaskId;
   const { openFile } = useFileEditors();
-  const isPassthrough = useAppStore((state) =>
-    sessionId ? state.taskSessions.items[sessionId]?.is_passthrough === true : false,
-  );
+  const isPassthrough = session?.is_passthrough === true;
   useChatSessionTitle(panelId, sessionId, !!paramSessionId);
 
   if (isPassthrough) {

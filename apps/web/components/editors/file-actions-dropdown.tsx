@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useCallback } from "react";
+import { useUserSettings } from "@/hooks/domains/settings/use-user-settings";
 import { IconExternalLink, IconCopy, IconFolderShare } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
@@ -15,6 +16,7 @@ import { useEditors } from "@/hooks/domains/settings/use-editors";
 import { useOpenSessionInEditor } from "@/hooks/use-open-session-in-editor";
 import { useOpenSessionFolder } from "@/hooks/use-open-session-folder";
 import { useAppStore } from "@/components/state-provider";
+import { useTaskSessionById } from "@/hooks/domains/session/use-task-session-by-id";
 import type { EditorOption } from "@/lib/types/http";
 
 type FileActionsDropdownProps = {
@@ -36,15 +38,12 @@ export function FileActionsDropdown({
 }: FileActionsDropdownProps) {
   const storeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const sessionId = sessionIdProp ?? storeSessionId ?? null;
-  const worktreePath = useAppStore((state) => {
-    if (!sessionId) return undefined;
-    return state.taskSessions.items[sessionId]?.worktree_path;
-  });
+  const worktreePath = useTaskSessionById(sessionId)?.worktree_path;
 
   const openEditor = useOpenSessionInEditor(sessionId);
   const openFolder = useOpenSessionFolder(sessionId);
   const { editors } = useEditors();
-  const defaultEditorId = useAppStore((state) => state.userSettings.defaultEditorId);
+  const defaultEditorId = useUserSettings().data?.defaultEditorId ?? null;
 
   const enabledEditors = useMemo(
     () =>

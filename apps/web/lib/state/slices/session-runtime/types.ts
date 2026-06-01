@@ -80,19 +80,9 @@ export type GitStatusEntry = {
   repository_name?: string;
 };
 
-export type GitStatusState = {
-  /** Git status keyed by environment ID (shared across sessions in the same environment).
-   *  Falls back to session ID when no environment exists.
-   *  For multi-repo workspaces this holds the most recently received status
-   *  (whichever repo emitted last); per-repo state lives in byEnvironmentRepo.
-   */
-  byEnvironmentId: Record<string, GitStatusEntry>;
-  /**
-   * Per-repository git status for multi-repo task workspaces, keyed by
-   * environment ID then repository name. Empty for single-repo workspaces.
-   */
-  byEnvironmentRepo: Record<string, Record<string, GitStatusEntry>>;
-};
+// NOTE: GitStatusState removed — git status now lives in the TanStack Query
+// cache (qk.session.git(envKey), see gitStatusQueryOptions). The GitStatusData
+// shape in query-options/session-runtime.ts is the canonical store.
 
 // Git Snapshot types for historical tracking
 export type SessionCommit = {
@@ -173,15 +163,9 @@ export type SessionModeEntry = {
   description?: string;
 };
 
-export type SessionModeState = {
-  bySessionId: Record<
-    string,
-    {
-      currentModeId: string;
-      availableModes: SessionModeEntry[];
-    }
-  >;
-};
+// NOTE: SessionModeState removed — session mode now lives in the TanStack
+// Query cache (qk.session.mode(sessionId), see sessionModeQueryOptions /
+// SessionModeData in query-options/session-runtime.ts).
 
 export type AuthMethodEntry = {
   id: string;
@@ -227,16 +211,9 @@ export type AgentCapabilitiesState = {
   bySessionId: Record<string, AgentCapabilitiesEntry>;
 };
 
-export type SessionModelsState = {
-  bySessionId: Record<
-    string,
-    {
-      currentModelId: string;
-      models: SessionModelEntry[];
-      configOptions: ConfigOptionEntry[];
-    }
-  >;
-};
+// NOTE: SessionModelsState removed — session models now live in the TanStack
+// Query cache (qk.session.models(sessionId), see sessionModelsQueryOptions /
+// SessionModelsData in query-options/session-runtime.ts).
 
 export type PromptUsageState = {
   bySessionId: Record<string, PromptUsageEntry>;
@@ -316,35 +293,34 @@ export type TodoEntry = {
   priority?: string;
 };
 
-export type SessionTodosState = {
-  bySessionId: Record<string, TodoEntry[]>;
-};
+// NOTE: SessionTodosState removed — session todos now live in the TanStack
+// Query cache (qk.session.todos(sessionId), see sessionTodosQueryOptions).
 
 export type SessionPollMode = "fast" | "slow" | "paused";
 
-export type SessionPollModeState = {
-  bySessionId: Record<string, SessionPollMode>;
-};
+// NOTE: SessionPollModeState removed — poll mode now lives in the TanStack
+// Query cache (qk.session.pollMode(sessionId), see sessionPollModeQueryOptions).
 
 export type SessionRuntimeSliceState = {
   terminal: TerminalState;
   shell: ShellState;
   processes: ProcessState;
-  gitStatus: GitStatusState;
+  // gitStatus, sessionMode, sessionModels, sessionTodos, sessionPollMode
+  // removed — these server fields now live in the TanStack Query cache
+  // (qk.session.*, see query-options/session-runtime.ts + bridge/session-runtime.ts).
   /** Maps sessionId → environmentId for workspace state sharing. */
   environmentIdBySessionId: Record<string, string>;
   sessionCommits: SessionCommitsState;
   contextWindow: ContextWindowState;
   agents: AgentState;
   availableCommands: AvailableCommandsState;
-  sessionMode: SessionModeState;
   agentCapabilities: AgentCapabilitiesState;
-  sessionModels: SessionModelsState;
   promptUsage: PromptUsageState;
-  sessionTodos: SessionTodosState;
   userShells: UserShellsState;
-  prepareProgress: PrepareProgressState;
-  sessionPollMode: SessionPollModeState;
+  // prepareProgress removed — prepare progress now lives in the TanStack Query
+  // cache (qk.session.prepareProgress(sessionId), see prepareProgressQueryOptions
+  // + bridge/session-runtime.ts). PrepareProgressState/SessionPrepareState/
+  // PrepareStepInfo types are still exported (used by the query-options + bridge).
 };
 
 export type SessionRuntimeSliceActions = {
@@ -359,8 +335,6 @@ export type SessionRuntimeSliceActions = {
   upsertProcessStatus: (status: ProcessStatusEntry) => void;
   clearProcessOutput: (processId: string) => void;
   setActiveProcess: (sessionId: string, processId: string) => void;
-  setGitStatus: (sessionId: string, gitStatus: GitStatusEntry) => void;
-  clearGitStatus: (sessionId: string) => void;
   registerSessionEnvironment: (sessionId: string, environmentId: string) => void;
   setContextWindow: (sessionId: string, contextWindow: ContextWindowEntry) => void;
   // Session commit actions
@@ -378,24 +352,10 @@ export type SessionRuntimeSliceActions = {
   // Available commands actions
   setAvailableCommands: (sessionId: string, commands: AvailableCommand[]) => void;
   clearAvailableCommands: (sessionId: string) => void;
-  // Session mode actions
-  setSessionMode: (sessionId: string, modeId: string, availableModes?: SessionModeEntry[]) => void;
-  clearSessionMode: (sessionId: string) => void;
   // Agent capabilities actions
   setAgentCapabilities: (sessionId: string, caps: AgentCapabilitiesEntry) => void;
-  // Session models actions
-  setSessionModels: (
-    sessionId: string,
-    data: {
-      currentModelId: string;
-      models: SessionModelEntry[];
-      configOptions: ConfigOptionEntry[];
-    },
-  ) => void;
   // Prompt usage actions
   setPromptUsage: (sessionId: string, usage: PromptUsageEntry) => void;
-  // Session todos actions
-  setSessionTodos: (sessionId: string, entries: TodoEntry[]) => void;
   // User shells actions — env-scoped (sessions in the same task share one shell list)
   setUserShells: (environmentId: string, shells: UserShellInfo[]) => void;
   setUserShellsLoading: (environmentId: string, loading: boolean) => void;
@@ -409,7 +369,6 @@ export type SessionRuntimeSliceActions = {
     // entry. `Omit` removes it from the patch surface.
     patch: Partial<Omit<UserShellInfo, "terminalId">>,
   ) => void;
-  setSessionPollMode: (sessionId: string, mode: SessionPollMode) => void;
 };
 
 export type SessionRuntimeSlice = SessionRuntimeSliceState & SessionRuntimeSliceActions;

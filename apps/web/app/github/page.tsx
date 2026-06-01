@@ -15,7 +15,7 @@ import type {
   Workspace,
   UserSettingsResponse,
 } from "@/lib/types/http";
-import type { AppState } from "@/lib/state/store";
+import type { SsrInitialState } from "@/lib/ssr/initial-state";
 
 export default async function GitHubPage() {
   let workspaces: Workspace[] = [];
@@ -52,7 +52,7 @@ export default async function GitHubPage() {
 
   const mappedUserSettings = mapUserSettingsResponse(userSettingsResponse);
 
-  const initialState: Partial<AppState> = {
+  const initialState: SsrInitialState = {
     workspaces: { items: workspaces, activeId: workspaceId ?? null },
     workflows: {
       items: workflows.map((w) => ({

@@ -1,8 +1,11 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { useAppStore } from "@/components/state-provider";
+import { useQueryClient } from "@tanstack/react-query";
+import { qk } from "@/lib/query/keys";
 import { useEditors } from "@/hooks/domains/settings/use-editors";
+import { useUserSettings, useSetUserSettings } from "@/hooks/domains/settings/use-user-settings";
+import { DEFAULT_USER_SETTINGS } from "@/lib/types/settings";
 import { createEditor, deleteEditor, updateEditor, updateUserSettings } from "@/lib/api";
 import { useRequest } from "@/lib/http/use-request";
 import type { EditorOption } from "@/lib/types/http";
@@ -20,9 +23,15 @@ import {
 import { Badge } from "@kandev/ui/badge";
 
 export function useEditorsSettingsState() {
-  const setEditors = useAppStore((state) => state.setEditors);
-  const setUserSettings = useAppStore((state) => state.setUserSettings);
-  const currentUserSettings = useAppStore((state) => state.userSettings);
+  const qc = useQueryClient();
+  const setEditors = useCallback(
+    (next: EditorOption[]) => {
+      qc.setQueryData<EditorOption[]>(qk.settings.editors(), next);
+    },
+    [qc],
+  );
+  const setUserSettings = useSetUserSettings();
+  const currentUserSettings = useUserSettings().data ?? DEFAULT_USER_SETTINGS;
   const { editors: storeEditors } = useEditors();
   const [editors, setEditorItems] = useState<EditorOption[]>(() => storeEditors ?? []);
   const initialDefaultId = resolveDefaultEditorId(

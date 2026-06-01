@@ -49,6 +49,11 @@ vi.mock("@/components/state-provider", () => ({
     }),
 }));
 
+vi.mock("@/hooks/domains/session/use-task-session-by-id", () => ({
+  useTaskSessionById: (id: string | null) =>
+    id === SESSION_ID && mockSessionState ? { id: SESSION_ID, state: mockSessionState } : null,
+}));
+
 vi.mock("@/components/toast-provider", () => ({
   useToast: () => ({ toast: mockToast }),
 }));

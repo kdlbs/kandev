@@ -7,6 +7,7 @@ import Link from "next/link";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
+import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
 
 const GRADIENTS = [
   "linear-gradient(135deg, #6366f1, #8b5cf6)",
@@ -50,12 +51,13 @@ export function WorkspaceRail({
   activeWorkspaceId: ssrActiveId,
 }: WorkspaceRailProps) {
   const router = useRouter();
-  const storeWorkspaces = useAppStore((s) => s.workspaces);
+  const { workspaces: tqWorkspaces } = useWorkspaces();
+  const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
   const setActiveWorkspace = useAppStore((s) => s.setActiveWorkspace);
 
-  // Use store if hydrated, fall back to SSR props
-  const items = storeWorkspaces.items.length > 0 ? storeWorkspaces.items : ssrWorkspaces;
-  const activeId = storeWorkspaces.activeId ?? ssrActiveId;
+  // Use TQ data if hydrated, fall back to SSR props
+  const items = tqWorkspaces.length > 0 ? tqWorkspaces : ssrWorkspaces;
+  const activeId = activeWorkspaceId ?? ssrActiveId;
 
   const handleSelect = useCallback(
     (id: string) => {

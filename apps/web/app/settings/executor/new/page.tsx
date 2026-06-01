@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@kandev/ui/separator";
 import { createExecutorAction } from "@/app/actions/executors";
 import { getWebSocketClient } from "@/lib/ws/connection";
-import { useAppStore } from "@/components/state-provider";
+import { useExecutors, useSetExecutors } from "@/hooks/domains/settings/use-settings-reads";
 import type { Executor } from "@/lib/types/http";
 
 const EXECUTOR_TYPES = ["local_docker", "remote_docker"] as const;
@@ -217,8 +217,8 @@ function ExecutorCreatePageContent() {
   const [dockerCertPath, setDockerCertPath] = useState("");
   const [gitToken, setGitToken] = useState("");
   const [isCreating, setIsCreating] = useState(false);
-  const executors = useAppStore((state) => state.executors.items);
-  const setExecutors = useAppStore((state) => state.setExecutors);
+  const executors = useExecutors();
+  const setExecutors = useSetExecutors();
 
   const handleTypeChange = (value: ExecutorType) => {
     setType(value);

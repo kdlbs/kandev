@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
+import { useTaskSessionById } from "@/hooks/domains/session/use-task-session-by-id";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { ContextWindowEntry } from "@/lib/state/store";
 
@@ -33,9 +34,7 @@ export function useSessionContextWindow(sessionId: string | null): ContextWindow
     };
   }, [size, used, remaining, efficiency, timestamp]);
 
-  const session = useAppStore((state) =>
-    sessionId ? state.taskSessions.items[sessionId] : undefined,
-  );
+  const session = useTaskSessionById(sessionId);
   const setContextWindow = useAppStore((state) => state.setContextWindow);
   const connectionStatus = useAppStore((state) => state.connection.status);
 

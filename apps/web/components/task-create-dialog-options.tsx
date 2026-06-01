@@ -11,7 +11,7 @@ import type {
   Executor,
   ExecutorProfile,
 } from "@/lib/types/http";
-import type { AgentProfileOption } from "@/lib/state/slices";
+import type { AgentProfileOption } from "@/lib/types/settings";
 import { formatUserHomePath, truncateRepoPath } from "@/lib/utils";
 import { getExecutorIcon } from "@/lib/executor-icons";
 import { AgentLogo } from "@/components/agent-logo";

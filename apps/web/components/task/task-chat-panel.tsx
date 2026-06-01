@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, memo, type RefObject } from "react";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
+import { useAgentProfiles } from "@/hooks/domains/settings/use-settings-reads";
 import { type ChatInputContainerHandle } from "@/components/task/chat/chat-input-container";
 import { MessageList } from "@/components/task/chat/message-list";
 import { useIsTaskArchived } from "./task-archived-context";
@@ -16,7 +17,7 @@ import { SessionSearchHits } from "@/components/task/chat/session-search-hits";
 import { usePanelSearch } from "@/hooks/use-panel-search";
 import { useSessionSearch } from "@/hooks/domains/session/use-session-search";
 import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
-import { useAppStore } from "@/components/state-provider";
+import { useTaskSessionById } from "@/hooks/domains/session/use-task-session-by-id";
 import type { Message } from "@/lib/types/http";
 
 function useClarificationKey(agentMessageCount: number) {
@@ -86,14 +87,9 @@ function SessionSearchOverlay({
  * primitive profile id to avoid getSnapshot-cache errors from returning
  * fresh objects on every selector call. */
 function useSessionAgentProfile(sessionId: string | null | undefined) {
-  const profileId = useAppStore((state) =>
-    sessionId ? (state.taskSessions.items[sessionId]?.agent_profile_id ?? null) : null,
-  );
-  return useAppStore((state) =>
-    profileId
-      ? (state.agentProfiles.items.find((p: { id: string }) => p.id === profileId) ?? null)
-      : null,
-  );
+  const profileId = useTaskSessionById(sessionId)?.agent_profile_id ?? null;
+  const agentProfiles = useAgentProfiles();
+  return profileId ? (agentProfiles.find((p) => p.id === profileId) ?? null) : null;
 }
 
 /** Resolves the agent profile name + registry slug for the given session.

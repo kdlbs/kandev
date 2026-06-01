@@ -17,6 +17,8 @@ import { replaceTaskUrl } from "@/lib/links";
 import { launchSession } from "@/lib/services/session-launch-service";
 import { buildPrepareRequest } from "@/lib/services/session-launch-helpers";
 import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+import { getBrowserQueryClient } from "@/lib/query/client";
+import { readTaskPRsFromCache } from "@/hooks/domains/github/use-task-pr";
 
 const debug = createDebugLogger("dockview:task-select");
 
@@ -127,7 +129,7 @@ export async function prepareAndSwitchTask(
       // switchEnvLayout would call saveOutgoingEnv(envA) a second time and
       // overwrite envA's correctly-persisted layout with the default.
       switchToSession(taskId, resp.session_id, null);
-      if ((store.getState().taskPRs.byTaskId[taskId]?.length ?? 0) > 0) {
+      if (readTaskPRsFromCache(getBrowserQueryClient(), taskId).length > 0) {
         const { api, buildDefaultLayout } = useDockviewStore.getState();
         if (api) buildDefaultLayout(api, INTENT_PR_REVIEW);
       }

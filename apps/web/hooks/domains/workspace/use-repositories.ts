@@ -1,57 +1,25 @@
-import { useEffect, useRef } from "react";
-import { useAppStore } from "@/components/state-provider";
+import { useQuery } from "@tanstack/react-query";
 import type { Repository } from "@/lib/types/http";
-import { listRepositories } from "@/lib/api";
+import { workspaceQueryOptions } from "@/lib/query/query-options/workspace";
 
 const EMPTY_REPOSITORIES: Repository[] = [];
 
+/**
+ * Returns repositories for the given workspace.
+ *
+ * Delegates to TanStack Query; dedup, caching, and stale-while-revalidate
+ * are handled automatically — no inFlightRef or manual loading flags needed.
+ *
+ * Signature-compatible with the old Zustand-backed hook.
+ */
 export function useRepositories(workspaceId: string | null, enabled = true) {
-  const repositories = useAppStore((state) =>
-    workspaceId
-      ? (state.repositories.itemsByWorkspaceId[workspaceId] ?? EMPTY_REPOSITORIES)
-      : EMPTY_REPOSITORIES,
-  );
-  const isLoading = useAppStore((state) =>
-    workspaceId ? (state.repositories.loadingByWorkspaceId[workspaceId] ?? false) : false,
-  );
-  const isLoaded = useAppStore((state) =>
-    workspaceId ? (state.repositories.loadedByWorkspaceId[workspaceId] ?? false) : false,
-  );
-  const setRepositories = useAppStore((state) => state.setRepositories);
-  const setRepositoriesLoading = useAppStore((state) => state.setRepositoriesLoading);
-  const inFlightRef = useRef(false);
+  const { data, isLoading } = useQuery({
+    ...workspaceQueryOptions.repos(workspaceId ?? ""),
+    enabled: !!workspaceId && enabled,
+  });
 
-  useEffect(() => {
-    if (!enabled || !workspaceId) return;
-    if (isLoaded && isLoading) {
-      setRepositoriesLoading(workspaceId, false);
-    }
-  }, [enabled, isLoaded, isLoading, setRepositoriesLoading, workspaceId]);
-
-  useEffect(() => {
-    if (!enabled || !workspaceId) return;
-    if (isLoaded || inFlightRef.current) return;
-    let cancelled = false;
-    inFlightRef.current = true;
-    setRepositoriesLoading(workspaceId, true);
-    listRepositories(workspaceId, undefined, { cache: "no-store" })
-      .then((response) => {
-        if (cancelled) return;
-        setRepositories(workspaceId, response.repositories);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setRepositories(workspaceId, []);
-      })
-      .finally(() => {
-        inFlightRef.current = false;
-        if (cancelled) return;
-        setRepositoriesLoading(workspaceId, false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [enabled, isLoaded, setRepositories, setRepositoriesLoading, workspaceId]);
-
-  return { repositories, isLoading };
+  return {
+    repositories: data?.repositories ?? EMPTY_REPOSITORIES,
+    isLoading,
+  };
 }

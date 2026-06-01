@@ -1,7 +1,22 @@
+import { useQuery } from "@tanstack/react-query";
+
 import { useAppStore } from "@/components/state-provider";
 import { useSession } from "@/hooks/domains/session/use-session";
+import { useTaskSessionById } from "@/hooks/domains/session/use-task-session-by-id";
 import { useTask } from "@/hooks/use-task";
+import { prepareProgressQueryOptions } from "@/lib/query/query-options/session-runtime";
 import type { TaskSession } from "@/lib/types/http";
+
+// Observe-only read of the prepare-progress TQ cache — fed by the
+// session-runtime bridge (live) + the SSR seed, never fetched here. Extracted
+// so useSessionState stays under the complexity limit.
+function usePrepareStatus(sessionId: string | null): string | undefined {
+  const { data } = useQuery({
+    ...prepareProgressQueryOptions(sessionId ?? ""),
+    enabled: false,
+  });
+  return data?.status;
+}
 
 function deriveSessionFlags(state: TaskSession["state"] | undefined, errorMessage?: string) {
   const isStarting = state === "STARTING";
@@ -20,9 +35,7 @@ export function useSessionState(sessionId: string | null) {
   // This prevents showing messages from an unrelated session when navigating
   // to a task that has no sessions yet (activeSessionId may still hold the
   // old session from the previous task).
-  const activeSessionData = useAppStore((state) =>
-    activeSessionId ? (state.taskSessions.items[activeSessionId] ?? null) : null,
-  );
+  const activeSessionData = useTaskSessionById(activeSessionId);
   const validatedActiveSessionId =
     activeSessionData && activeSessionData.task_id === activeTaskId ? activeSessionId : null;
 
@@ -30,9 +43,7 @@ export function useSessionState(sessionId: string | null) {
 
   const { session } = useSession(resolvedSessionId);
   const task = useTask(session?.task_id ?? null);
-  const prepareStatus = useAppStore((state) =>
-    resolvedSessionId ? state.prepareProgress.bySessionId[resolvedSessionId]?.status : undefined,
-  );
+  const prepareStatus = usePrepareStatus(resolvedSessionId);
 
   const taskId = session?.task_id ?? null;
   const taskDescription = task?.description ?? null;

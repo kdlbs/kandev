@@ -18,14 +18,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@kandev/ui/dialog";
+import { useQueryClient } from "@tanstack/react-query";
 import { updateWorkspaceAction, deleteWorkspaceAction } from "@/app/actions/workspaces";
-import type { Executor } from "@/lib/types/http";
-import type { AgentProfileOption, WorkspaceState } from "@/lib/state/slices";
-
-type Workspace = WorkspaceState["items"][number];
+import type { Executor, Workspace } from "@/lib/types/http";
+import type { AgentProfileOption } from "@/lib/types/settings";
 import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
-import { useAppStore } from "@/components/state-provider";
+import { useExecutors, useAgentProfiles } from "@/hooks/domains/settings/use-settings-reads";
+import { useWorkspace } from "@/hooks/domains/workspace/use-workspaces";
+import { qk } from "@/lib/query/keys";
 import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
 
 type WorkspaceEditClientProps = {
@@ -33,9 +34,7 @@ type WorkspaceEditClientProps = {
 };
 
 export function WorkspaceEditClient({ workspaceId }: WorkspaceEditClientProps) {
-  const workspace = useAppStore(
-    (state) => state.workspaces.items.find((item: Workspace) => item.id === workspaceId) ?? null,
-  );
+  const workspace = useWorkspace(workspaceId);
 
   if (!workspace) {
     return (
@@ -336,8 +335,7 @@ type WorkspaceSaveHandlerOptions = {
   isDirty: boolean;
   setSavedState: (s: SavedState) => void;
   setCurrentWorkspace: (fn: (prev: Workspace) => Workspace) => void;
-  workspaces: Workspace[];
-  setWorkspaces: (items: Workspace[]) => void;
+  invalidateWorkspaces: () => Promise<void>;
   saveWorkspaceRequest: SaveRequestLike;
   toast: ReturnType<typeof useToast>["toast"];
 };
@@ -349,8 +347,7 @@ function buildSaveHandler({
   isDirty,
   setSavedState,
   setCurrentWorkspace,
-  workspaces,
-  setWorkspaces,
+  invalidateWorkspaces,
   saveWorkspaceRequest,
   toast,
 }: WorkspaceSaveHandlerOptions) {
@@ -372,19 +369,9 @@ function buildSaveHandler({
         executorId: updated.default_executor_id ?? "",
         agentProfileId: updated.default_agent_profile_id ?? "",
       });
-      setWorkspaces(
-        workspaces.map((ws: Workspace) =>
-          ws.id === updated.id
-            ? {
-                ...ws,
-                name: updated.name,
-                default_executor_id: updated.default_executor_id ?? null,
-                default_environment_id: updated.default_environment_id ?? null,
-                default_agent_profile_id: updated.default_agent_profile_id ?? null,
-              }
-            : ws,
-        ),
-      );
+      // The workspace.updated WS event also writes the TQ cache; invalidate
+      // here so the list reflects the change immediately.
+      await invalidateWorkspaces();
     } catch (error) {
       toast({
         title: "Failed to save workspace",
@@ -412,10 +399,11 @@ function useWorkspaceEditForm(workspace: Workspace) {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
 
-  const executors = useAppStore((state) => state.executors.items);
-  const agentProfiles = useAppStore((state) => state.agentProfiles.items);
-  const workspaces = useAppStore((state) => state.workspaces.items);
-  const setWorkspaces = useAppStore((state) => state.setWorkspaces);
+  const executors = useExecutors();
+  const agentProfiles = useAgentProfiles();
+  const queryClient = useQueryClient();
+  const invalidateWorkspaces = () =>
+    queryClient.invalidateQueries({ queryKey: qk.workspaces.all() });
 
   const saveWorkspaceRequest = useRequest(updateWorkspaceAction);
   const deleteWorkspaceRequest = useRequest(deleteWorkspaceAction);
@@ -433,8 +421,7 @@ function useWorkspaceEditForm(workspace: Workspace) {
     isDirty,
     setSavedState,
     setCurrentWorkspace,
-    workspaces,
-    setWorkspaces,
+    invalidateWorkspaces,
     saveWorkspaceRequest,
     toast,
   });
@@ -443,7 +430,7 @@ function useWorkspaceEditForm(workspace: Workspace) {
     if (deleteConfirmText !== currentWorkspace.name) return;
     try {
       await deleteWorkspaceRequest.run(currentWorkspace.id, currentWorkspace.name);
-      setWorkspaces(workspaces.filter((ws: Workspace) => ws.id !== currentWorkspace.id));
+      await invalidateWorkspaces();
       router.push("/settings/workspace");
     } catch (error) {
       toast({

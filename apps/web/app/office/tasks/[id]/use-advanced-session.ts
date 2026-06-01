@@ -4,26 +4,25 @@ import { useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useSession } from "@/hooks/domains/session/use-session";
 import { useTaskFocus } from "@/hooks/domains/session/use-task-focus";
-import type { TaskSession, TaskSessionState } from "@/lib/types/http";
-
-const EMPTY_SESSIONS: TaskSession[] = [];
+import {
+  useTaskSessionById,
+  useTaskSessionsByTask,
+} from "@/hooks/domains/session/use-task-session-by-id";
+import type { TaskSessionState } from "@/lib/types/http";
 
 const TERMINAL_STATES = new Set<TaskSessionState>(["COMPLETED", "FAILED", "CANCELLED"]);
 
 /**
  * Resolves the active ACP session for a task in the office advanced view.
- * Reads from the global store (populated by WS handlers) and subscribes to
+ * Reads the per-task session list + the active session from the TQ cache
+ * (populated by the session-state bridge + the by-task fetch) and subscribes to
  * real-time updates via useSession + useTaskFocus.
  */
 export function useAdvancedSession(taskId: string) {
-  const sessionsForTask = useAppStore((state) =>
-    taskId ? (state.taskSessionsByTask.itemsByTaskId[taskId] ?? EMPTY_SESSIONS) : EMPTY_SESSIONS,
-  );
+  const { sessions: sessionsForTask } = useTaskSessionsByTask(taskId);
 
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const activeSession = useAppStore((state) =>
-    activeSessionId ? (state.taskSessions.items[activeSessionId] ?? null) : null,
-  );
+  const activeSession = useTaskSessionById(activeSessionId);
 
   // Prefer the globally active session if it belongs to this task, otherwise
   // pick the newest non-terminal session for the task.

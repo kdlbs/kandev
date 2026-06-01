@@ -7,6 +7,7 @@ import { Button } from "@kandev/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/ui/dropdown-menu";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useAppStore } from "@/components/state-provider";
+import { useTaskSessionById } from "@/hooks/domains/session/use-task-session-by-id";
 import { useEnvironmentId } from "@/hooks/use-environment-session-id";
 import { useUserShells } from "@/hooks/domains/session/use-user-shells";
 import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
@@ -87,10 +88,7 @@ function useWatermarkMenuState(
   taskID: string | null,
 ) {
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
-  const isPassthrough = useAppStore((s) => {
-    if (!activeSessionId) return false;
-    return s.taskSessions.items[activeSessionId]?.is_passthrough === true;
-  });
+  const isPassthrough = useTaskSessionById(activeSessionId)?.is_passthrough === true;
   const { prs } = useTaskPR(taskID);
   return useMemo(
     () => ({

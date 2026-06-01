@@ -1,15 +1,14 @@
 "use client";
 
-import { useAppStore } from "@/components/state-provider";
+import { useQuery } from "@tanstack/react-query";
+import { settingsQueryOptions } from "@/lib/query/query-options/settings";
 
 export function useShellSettings() {
-  const preferredShell = useAppStore((state) => state.userSettings.preferredShell);
-  const shellOptions = useAppStore((state) => state.userSettings.shellOptions);
-  const loaded = useAppStore((state) => state.userSettings.loaded);
+  const query = useQuery(settingsQueryOptions.userSettings());
 
   return {
-    preferredShell,
-    shellOptions,
-    loaded,
+    preferredShell: query.data?.preferredShell ?? null,
+    shellOptions: query.data?.shellOptions ?? [],
+    loaded: query.isSuccess,
   };
 }

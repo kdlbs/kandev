@@ -1,8 +1,9 @@
 import type { Draft } from "immer";
 import type { AppState } from "../store";
+import type { SsrInitialState } from "@/lib/ssr/initial-state";
 import { migrateView } from "../slices/ui/ui-slice";
 import { getStoredQuickChatNames } from "@/lib/local-storage";
-import { deepMerge, mergeSessionMap, mergeLoadingState } from "./merge-strategies";
+import { deepMerge, mergeSessionMap } from "./merge-strategies";
 
 /**
  * Hydration options for controlling merge behavior
@@ -16,79 +17,32 @@ export type HydrationOptions = {
   forceMergeSessionId?: string | null;
 };
 
-/** Deep-merge a field with optional loading state preservation. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function mergeWithLoading(draft: any, source: any | undefined): void {
-  if (!source) return;
-  deepMerge(draft, source);
-  mergeLoadingState(draft, source);
-}
-
-/** Merge kanban tasks by ID, keeping the version with the newer updatedAt timestamp. */
-function mergeKanbanTasks(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  draft: Draft<any>,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  source: any[] | undefined,
-): void {
-  if (!source || source.length === 0) return;
-  const draftTasks = draft.tasks as Array<{ id: string; updatedAt?: string }>;
-  const existingById = new Map(draftTasks.map((t) => [t.id, t]));
-
-  for (const incoming of source) {
-    const existing = existingById.get(incoming.id);
-    if (!existing) {
-      draftTasks.push(incoming);
-    } else {
-      const existingTime = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
-      const incomingTime = incoming.updatedAt ? new Date(incoming.updatedAt).getTime() : 0;
-      if (incomingTime >= existingTime) {
-        const idx = draftTasks.findIndex((t) => t.id === incoming.id);
-        if (idx >= 0) draftTasks[idx] = incoming;
-      }
-    }
+/**
+ * Hydrate the client-only kanban + workspace selection slices. Server kanban
+ * data (single/multi snapshots, workflows list) is seeded into the TanStack
+ * Query cache by `StateHydrator`, NOT Zustand — so only the active-workflow
+ * selection and active task/session selection are merged here. `workflows.items`
+ * from the SSR payload is intentionally ignored (it lives in TQ).
+ */
+function hydrateKanbanAndWorkspace(draft: Draft<AppState>, state: SsrInitialState): void {
+  if (state.workflows?.activeId !== undefined) {
+    draft.workflows.activeId = state.workflows.activeId ?? null;
   }
-}
-
-/** Hydrate kanban and workspace slices. */
-function hydrateKanbanAndWorkspace(draft: Draft<AppState>, state: Partial<AppState>): void {
-  if (state.kanban) {
-    // Merge tasks by ID with timestamp comparison to avoid overwriting fresher WS data
-    const { tasks, ...kanbanRest } = state.kanban;
-    if (Object.keys(kanbanRest).length > 0) deepMerge(draft.kanban, kanbanRest);
-    mergeKanbanTasks(draft.kanban, tasks);
-  }
-  if (state.kanbanMulti) deepMerge(draft.kanbanMulti, state.kanbanMulti);
-  if (state.workflows) deepMerge(draft.workflows, state.workflows);
   if (state.tasks) deepMerge(draft.tasks, state.tasks);
-  if (state.workspaces) deepMerge(draft.workspaces, state.workspaces);
-  if (state.repositories) deepMerge(draft.repositories, state.repositories);
-  if (state.repositoryBranches) deepMerge(draft.repositoryBranches, state.repositoryBranches);
-}
-
-/** Hydrate settings slices, preserving loading states. */
-function hydrateSettings(draft: Draft<AppState>, state: Partial<AppState>): void {
-  if (state.executors) deepMerge(draft.executors, state.executors);
-  if (state.settingsAgents) deepMerge(draft.settingsAgents, state.settingsAgents);
-  if (state.agentDiscovery) deepMerge(draft.agentDiscovery, state.agentDiscovery);
-  mergeWithLoading(draft.availableAgents, state.availableAgents);
-  if (state.agentProfiles) deepMerge(draft.agentProfiles, state.agentProfiles);
-  mergeWithLoading(draft.editors, state.editors);
-  mergeWithLoading(draft.prompts, state.prompts);
-  mergeWithLoading(draft.notificationProviders, state.notificationProviders);
-  if (state.settingsData) deepMerge(draft.settingsData, state.settingsData);
-  if (state.userSettings && !draft.userSettings.loaded) {
-    deepMerge(draft.userSettings, state.userSettings);
-    bridgeSidebarViewsFromUserSettings(draft, state.userSettings);
+  if (state.workspaces?.activeId !== undefined) {
+    draft.workspaces.activeId = state.workspaces.activeId ?? null;
   }
 }
 
-function bridgeSidebarViewsFromUserSettings(
-  draft: Draft<AppState>,
-  userSettings: Partial<AppState["userSettings"]>,
-): void {
-  const serverViews = userSettings.sidebarViews;
-  if (!serverViews || serverViews.length === 0) return;
+/**
+ * Bridge the server-provided sidebar views (now seeded into the TanStack Query
+ * `userSettings` cache, not a Zustand slice) into the client-only `sidebarViews`
+ * UI slice. The rest of user settings lives in TQ and is read via
+ * `useUserSettings`.
+ */
+function hydrateSidebarViews(draft: Draft<AppState>, state: SsrInitialState): void {
+  const serverViews = state.userSettings?.sidebarViews;
+  if (!state.userSettings?.loaded || !serverViews || serverViews.length === 0) return;
   const normalized = serverViews.map(migrateView);
   draft.sidebarViews.views = normalized;
   if (!normalized.some((v) => v.id === draft.sidebarViews.activeViewId)) {
@@ -99,7 +53,7 @@ function bridgeSidebarViewsFromUserSettings(
 /** Hydrate session slices, protecting active sessions. */
 function hydrateSession(
   draft: Draft<AppState>,
-  state: Partial<AppState>,
+  state: SsrInitialState,
   activeSessionId: string | null,
   forceMergeSessionId: string | null,
 ): void {
@@ -135,19 +89,6 @@ function hydrateSession(
         forceMergeSessionId,
       );
   }
-  if (state.taskSessions) deepMerge(draft.taskSessions, state.taskSessions);
-  if (state.taskSessionsByTask) deepMerge(draft.taskSessionsByTask, state.taskSessionsByTask);
-  if (state.sessionAgentctl) {
-    mergeSessionMap(
-      draft.sessionAgentctl.itemsBySessionId,
-      state.sessionAgentctl?.itemsBySessionId,
-      activeSessionId,
-      forceMergeSessionId,
-    );
-  }
-  if (state.worktrees) deepMerge(draft.worktrees, state.worktrees);
-  if (state.sessionWorktreesBySessionId)
-    deepMerge(draft.sessionWorktreesBySessionId, state.sessionWorktreesBySessionId);
   if (state.pendingModel) deepMerge(draft.pendingModel, state.pendingModel);
   if (state.activeModel) deepMerge(draft.activeModel, state.activeModel);
 }
@@ -155,7 +96,7 @@ function hydrateSession(
 /** Hydrate session runtime slices (volatile state). */
 function hydrateSessionRuntime(
   draft: Draft<AppState>,
-  state: Partial<AppState>,
+  state: SsrInitialState,
   activeSessionId: string | null,
   forceMergeSessionId: string | null,
 ): void {
@@ -175,14 +116,8 @@ function hydrateSessionRuntime(
     );
   }
   if (state.processes) deepMerge(draft.processes, state.processes);
-  if (state.gitStatus) {
-    mergeSessionMap(
-      draft.gitStatus.byEnvironmentId,
-      state.gitStatus?.byEnvironmentId,
-      activeSessionId,
-      forceMergeSessionId,
-    );
-  }
+  // gitStatus is now hydrated into the TanStack Query cache (see StateHydrator),
+  // not the Zustand mirror.
   if (state.contextWindow) {
     mergeSessionMap(
       draft.contextWindow.bySessionId,
@@ -195,18 +130,13 @@ function hydrateSessionRuntime(
     Object.assign(draft.environmentIdBySessionId, state.environmentIdBySessionId);
   }
   if (state.agents) deepMerge(draft.agents, state.agents);
-  if (state.prepareProgress) {
-    mergeSessionMap(
-      draft.prepareProgress.bySessionId,
-      state.prepareProgress?.bySessionId,
-      activeSessionId,
-      forceMergeSessionId,
-    );
-  }
+  // prepareProgress removed from Zustand — now seeded into the TanStack Query
+  // cache from SSR by StateHydrator (seedPrepareProgressQueries) and fed live by
+  // bridge/session-runtime.ts.
 }
 
 /** Hydrate UI slices without overwriting active connection state. */
-export function hydrateUI(draft: Draft<AppState>, state: Partial<AppState>): void {
+export function hydrateUI(draft: Draft<AppState>, state: SsrInitialState): void {
   if (state.previewPanel) deepMerge(draft.previewPanel, state.previewPanel);
   if (state.rightPanel) deepMerge(draft.rightPanel, state.rightPanel);
   if (state.diffs) deepMerge(draft.diffs, state.diffs);
@@ -253,7 +183,7 @@ export function hydrateUI(draft: Draft<AppState>, state: Partial<AppState>): voi
  */
 export function hydrateState(
   draft: Draft<AppState>,
-  state: Partial<AppState>,
+  state: SsrInitialState,
   options: HydrationOptions = {},
 ): void {
   const {
@@ -263,32 +193,12 @@ export function hydrateState(
   } = options;
 
   hydrateKanbanAndWorkspace(draft, state);
-  hydrateSettings(draft, state);
+  hydrateSidebarViews(draft, state);
   hydrateSession(draft, state, activeSessionId, forceMergeSessionId);
 
   if (!skipSessionRuntime) {
     hydrateSessionRuntime(draft, state, activeSessionId, forceMergeSessionId);
   }
 
-  hydrateGitHub(draft, state);
   hydrateUI(draft, state);
-
-  // Office slice — shallow merge SSR-provided data into the store.
-  if (state.office) {
-    Object.assign(draft.office, state.office);
-  }
-
-  // Feature flags — overwrite whole map. SSR is authoritative; the backend
-  // is the only source of truth for what's enabled in this deployment.
-  if (state.features) {
-    Object.assign(draft.features, state.features);
-  }
-}
-
-/** Hydrate GitHub slices, preserving loading states. */
-function hydrateGitHub(draft: Draft<AppState>, state: Partial<AppState>): void {
-  if (state.githubStatus) mergeWithLoading(draft.githubStatus, state.githubStatus);
-  if (state.taskPRs) deepMerge(draft.taskPRs, state.taskPRs);
-  if (state.prWatches) mergeWithLoading(draft.prWatches, state.prWatches);
-  if (state.reviewWatches) mergeWithLoading(draft.reviewWatches, state.reviewWatches);
 }

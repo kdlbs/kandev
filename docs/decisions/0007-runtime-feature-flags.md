@@ -79,8 +79,8 @@ A self-hoster setting `KANDEV_FEATURES_OFFICE=true` in their k8s manifest beats 
 ### Frontend wiring (feature flags only)
 
 - `GET /api/v1/features` returns the feature-flag map as JSON. Public, unauthenticated.
-- A `features` slice in the Zustand store mirrors the response.
-- The root layout (`apps/web/app/layout.tsx`) SSR-fetches the flags once per request and seeds `StateProvider` initialState, so the first paint reflects the deployment's flags. No flash of feature UI.
+- `apps/web/lib/query/query-options/features.ts` defines the TanStack Query options for the features endpoint; `apps/web/lib/query/bridge/features.ts` subscribes to WS and keeps the cache current.
+- The root layout (`apps/web/app/layout.tsx`) SSR-fetches the flags once per request and dehydrates them into the TanStack Query cache via `<HydrationBoundary>`, so the first paint reflects the deployment's flags. No flash of feature UI.
 - `useFeature(name)` reads a single flag.
 - Page-level gating uses Next.js `notFound()` from a server-side layout (e.g. `apps/web/app/office/layout.tsx`); nav entries use `useFeature` and render `null` when off.
 
@@ -118,9 +118,8 @@ A self-hoster setting `KANDEV_FEATURES_OFFICE=true` in their k8s manifest beats 
 2. Add the matching `bool` field to `FeaturesConfig` in `apps/backend/internal/common/config/config.go`. (No `v.SetDefault` needed — `profiles.FeatureFlagDefaults()` seeds it automatically.)
 3. Gate backend construction at the relevant init call site (`cmd/kandev/main.go` typically).
 4. Update `/api/v1/features` handler in `cmd/kandev/helpers.go` to include the new key.
-5. Add the field to `FeatureFlags` in `apps/web/lib/state/slices/features/types.ts` and the default in `features-slice.ts`.
-6. Update `apps/web/app/actions/features.ts` to normalize the new key.
-7. Gate frontend nav with `useFeature("<name>")` and page subtrees with `notFound()` in the relevant server-side layout.
+5. Add the field to `FeatureFlags` and its default to `defaultFeatureFlags` in `apps/web/lib/features.ts` (shared type consumed by the query layer). `normalizeFlags` in `apps/web/app/actions/features.ts` iterates over `defaultFeatureFlags` keys automatically — no edit needed there.
+6. Gate frontend nav with `useFeature("<name>")` and page subtrees with `notFound()` in the relevant server-side layout.
 
 ## How to enable a feature for all users
 
@@ -140,7 +139,9 @@ Same pattern — pick the section that matches the knob's purpose (`mocks`, `deb
 - `apps/backend/cmd/kandev/helpers.go` — `GET /api/v1/features` handler
 - `apps/backend/cmd/kandev/main.go` — `initOfficeServices` early-return on `cfg.Features.Office`
 - `apps/web/app/layout.tsx` — SSR-fetch + StateProvider seeding
-- `apps/web/lib/state/slices/features/` — Zustand slice
+- `apps/web/lib/features.ts` — `FeatureFlags` type + `defaultFeatureFlags`
+- `apps/web/lib/query/query-options/features.ts` — TanStack Query options
+- `apps/web/lib/query/bridge/features.ts` — WS bridge (keeps cache current on flag changes)
 - `apps/web/hooks/domains/features/use-feature.ts` — client hook
 - `apps/web/app/office/layout.tsx` — page-level `notFound()` gating
 - `apps/cli/src/dev.ts` — sets only the `KANDEV_DEBUG_DEV_MODE` selector

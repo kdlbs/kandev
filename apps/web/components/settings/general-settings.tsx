@@ -29,7 +29,12 @@ import { SettingsSection } from "@/components/settings/settings-section";
 import { ShellSettingsCard } from "@/components/settings/shell-settings-card";
 import { KeyboardShortcutsCard } from "@/components/settings/keyboard-shortcuts-card";
 import { getBackendConfig } from "@/lib/config";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import {
+  useUserSettings,
+  useSetUserSettings,
+  useUserSettingsController,
+} from "@/hooks/domains/settings/use-user-settings";
+import { DEFAULT_USER_SETTINGS } from "@/lib/types/settings";
 import { updateUserSettings } from "@/lib/api";
 import { TERMINAL_FONT_PRESETS } from "@/lib/terminal/terminal-font";
 import type { FontCategory } from "@/lib/terminal/terminal-font";
@@ -63,8 +68,8 @@ function ThemeSettingsCard() {
 }
 
 function ChatSubmitKeyCard() {
-  const userSettings = useAppStore((state) => state.userSettings);
-  const setUserSettings = useAppStore((state) => state.setUserSettings);
+  const userSettings = useUserSettings().data ?? DEFAULT_USER_SETTINGS;
+  const setUserSettings = useSetUserSettings();
   const [isSavingSubmitKey, setIsSavingSubmitKey] = useState(false);
 
   const handleChatSubmitKeyChange = async (value: "enter" | "cmd_enter") => {
@@ -118,15 +123,13 @@ function ChatSubmitKeyCard() {
 }
 
 function ChangesPanelLayoutCard() {
-  const userSettings = useAppStore((state) => state.userSettings);
-  const setUserSettings = useAppStore((state) => state.setUserSettings);
-  const storeApi = useAppStoreApi();
+  const { userSettings, setUserSettings, getLatest } = useUserSettingsController();
   const [isSaving, setIsSaving] = useState(false);
 
   const handleChange = async (value: "flat" | "tree") => {
     if (isSaving) return;
     setIsSaving(true);
-    const current = storeApi.getState().userSettings;
+    const current = getLatest();
     const previous = current.changesPanelLayout;
     try {
       setUserSettings({ ...current, changesPanelLayout: value });
@@ -136,7 +139,7 @@ function ChangesPanelLayoutCard() {
         changes_panel_layout: value,
       });
     } catch {
-      setUserSettings({ ...storeApi.getState().userSettings, changesPanelLayout: previous });
+      setUserSettings({ ...getLatest(), changesPanelLayout: previous });
     } finally {
       setIsSaving(false);
     }
@@ -177,15 +180,13 @@ function ChangesPanelLayoutCard() {
 }
 
 function TerminalLinksCard() {
-  const userSettings = useAppStore((state) => state.userSettings);
-  const setUserSettings = useAppStore((state) => state.setUserSettings);
-  const storeApi = useAppStoreApi();
+  const { userSettings, setUserSettings, getLatest } = useUserSettingsController();
   const [isSaving, setIsSaving] = useState(false);
 
   const handleChange = async (value: "new_tab" | "browser_panel") => {
     if (isSaving) return;
     setIsSaving(true);
-    const current = storeApi.getState().userSettings;
+    const current = getLatest();
     const previous = current.terminalLinkBehavior;
     try {
       setUserSettings({ ...current, terminalLinkBehavior: value });
@@ -196,7 +197,7 @@ function TerminalLinksCard() {
       });
     } catch {
       setUserSettings({
-        ...storeApi.getState().userSettings,
+        ...getLatest(),
         terminalLinkBehavior: previous,
       });
     } finally {
@@ -272,9 +273,7 @@ function FontGroupOptions() {
 }
 
 function TerminalFontSizeCard() {
-  const storeApi = useAppStoreApi();
-  const userSettings = useAppStore((state) => state.userSettings);
-  const setUserSettings = useAppStore((state) => state.setUserSettings);
+  const { userSettings, setUserSettings, getLatest } = useUserSettingsController();
   const [isSaving, setIsSaving] = useState(false);
   const [fontSize, setFontSize] = useState(() => userSettings.terminalFontSize ?? 13);
 
@@ -282,7 +281,7 @@ function TerminalFontSizeCard() {
     if (isSaving) return;
     if (value < 8 || value > 24) return;
     setIsSaving(true);
-    const current = storeApi.getState().userSettings;
+    const current = getLatest();
     const previous = current.terminalFontSize;
     try {
       setUserSettings({ ...current, terminalFontSize: value });
@@ -292,7 +291,7 @@ function TerminalFontSizeCard() {
         terminal_font_size: value,
       });
     } catch {
-      setUserSettings({ ...storeApi.getState().userSettings, terminalFontSize: previous });
+      setUserSettings({ ...getLatest(), terminalFontSize: previous });
     } finally {
       setIsSaving(false);
     }
@@ -340,9 +339,7 @@ function TerminalFontSizeCard() {
 }
 
 function TerminalFontCard() {
-  const storeApi = useAppStoreApi();
-  const userSettings = useAppStore((state) => state.userSettings);
-  const setUserSettings = useAppStore((state) => state.setUserSettings);
+  const { userSettings, setUserSettings, getLatest } = useUserSettingsController();
   const [isSaving, setIsSaving] = useState(false);
   const [isCustom, setIsCustom] = useState(() => {
     const current = userSettings.terminalFontFamily;
@@ -356,7 +353,7 @@ function TerminalFontCard() {
   const saveFontFamily = async (value: string) => {
     if (isSaving) return;
     setIsSaving(true);
-    const current = storeApi.getState().userSettings;
+    const current = getLatest();
     const previous = current.terminalFontFamily;
     try {
       setUserSettings({ ...current, terminalFontFamily: value || null });
@@ -367,7 +364,7 @@ function TerminalFontCard() {
       });
     } catch {
       setUserSettings({
-        ...storeApi.getState().userSettings,
+        ...getLatest(),
         terminalFontFamily: previous,
       });
     } finally {

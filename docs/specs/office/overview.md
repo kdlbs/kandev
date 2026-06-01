@@ -246,7 +246,7 @@ The `fsWorkspaces` field only includes workspaces on disk that are not already i
 
 ### Frontend architecture
 
-A new Zustand slice `office` in `lib/state/slices/office/` holds agent instances, projects, routines, approvals, activity log, cost summaries, and wakeup queue status. The slice follows the existing pattern: SSR fetch -> hydrate store -> components read store -> hooks subscribe via WS. WS subscriptions use the existing gateway with new event types for office-specific events.
+Office server state is managed by TanStack Query (ADR-0010). Query options live in `lib/query/query-options/office.ts`; the office bridge (`lib/query/bridge/office.ts`) subscribes to the WS client and calls `setQueryData` / `invalidateQueries` on incoming office events. SSR dehydrates the query cache via `<HydrationBoundary>`; components read via `useQuery`. The Zustand `office` slice in `lib/state/slices/office/` remains as a transitional mirror until all consumers have been redirected to queries. WS subscriptions use the existing gateway with new event types for office-specific events.
 
 ### Agent API authentication
 

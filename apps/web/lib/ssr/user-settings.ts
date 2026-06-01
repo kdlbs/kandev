@@ -1,8 +1,9 @@
 import { fromApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
 import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
-import { DEFAULT_VOICE_MODE_STATE, type VoiceModeState } from "@/lib/state/slices/settings/types";
 import type { SavedLayout, UserSettingsResponse } from "@/lib/types/http";
 import type { VoiceModeSettings } from "@/lib/types/http-voice";
+import { DEFAULT_VOICE_MODE_STATE, type VoiceModeState } from "@/lib/types/settings";
+import type { UserSettingsState } from "@/lib/types/settings";
 
 export type UserSettingsData = NonNullable<UserSettingsResponse["settings"]>;
 
@@ -92,7 +93,7 @@ export function buildLspFields(s: UserSettingsData | undefined) {
  * Maps a `fetchUserSettings()` API response into the shape expected by `AppState["userSettings"]`.
  * Use in SSR pages to build `initialState.userSettings`.
  */
-export function mapUserSettingsResponse(response: UserSettingsResponse | null) {
+export function mapUserSettingsResponse(response: UserSettingsResponse | null): UserSettingsState {
   const s = response?.settings;
   const shellOptions = response?.shell_options ?? [];
   if (!s) {

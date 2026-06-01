@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
@@ -18,8 +19,12 @@ import { buildDefaultPermissions } from "@/lib/agent-permissions";
 import { seedDefaultCLIFlags } from "@/lib/cli-flags";
 import { generateUUID } from "@/lib/utils";
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
-import { useAppStore } from "@/components/state-provider";
+import { qk } from "@/lib/query/keys";
+import { settingsQueryOptions } from "@/lib/query/query-options/settings";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
+import { useAgentDiscovery } from "@/hooks/domains/settings/use-agent-discovery";
+import type { AgentProfileOption } from "@/lib/types/settings";
+import { toAgentProfileOption } from "@/lib/types/settings";
 import { deleteAgentAction } from "@/app/actions/agents";
 import { saveNewAgent, saveExistingAgent, isProfileDirty } from "./agent-save-helpers";
 import type { DraftProfile, DraftAgent } from "./agent-save-helpers";
@@ -147,21 +152,15 @@ function useAgentFormState(
 }
 
 function useAgentStoreSync() {
-  const settingsAgents = useAppStore((state) => state.settingsAgents.items);
-  const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
-  const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
+  const qc = useQueryClient();
+  const { data: settingsAgents = [] } = useQuery({ ...settingsQueryOptions.agents() });
 
   const syncAgentsToStore = (nextAgents: Agent[]) => {
-    setSettingsAgents(nextAgents);
-    setAgentProfiles(
+    qc.setQueryData<Agent[]>(qk.settings.agents(), nextAgents);
+    qc.setQueryData<AgentProfileOption[]>(
+      qk.settings.agentProfiles(),
       nextAgents.flatMap((agent) =>
-        agent.profiles.map((profile) => ({
-          id: profile.id,
-          label: `${profile.agentDisplayName ?? ""} • ${profile.name}`,
-          agent_id: agent.id,
-          agent_name: agent.name,
-          cli_passthrough: profile.cliPassthrough ?? false,
-        })),
+        agent.profiles.map((profile) => toAgentProfileOption(agent, profile)),
       ),
     );
   };
@@ -439,8 +438,8 @@ export default function AgentSetupPage() {
   const isCreateMode = searchParams.get("mode") === "create";
   const agentKey = Array.isArray(params.agentId) ? params.agentId[0] : params.agentId;
   const decodedKey = decodeURIComponent(agentKey ?? "");
-  const discoveryAgents = useAppStore((state) => state.agentDiscovery.items);
-  const savedAgents = useAppStore((state) => state.settingsAgents.items);
+  const { items: discoveryAgents } = useAgentDiscovery();
+  const { data: savedAgents = [] } = useQuery({ ...settingsQueryOptions.agents() });
   const availableAgents = useAvailableAgents().items;
 
   const discoveryAgent = useMemo(

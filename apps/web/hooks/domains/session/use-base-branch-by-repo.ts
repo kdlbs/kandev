@@ -1,8 +1,9 @@
 "use client";
 
 import { useMemo } from "react";
-import { useAppStore } from "@/components/state-provider";
-import { repositoryId, type Repository } from "@/lib/types/http";
+import { useAllKanbanTasks } from "@/hooks/domains/kanban/use-kanban-tasks";
+import { useAllRepositories } from "@/hooks/domains/workspace/use-all-repositories";
+import { repositoryId } from "@/lib/types/http";
 
 /**
  * Returns a map from `repository_name` to its task base_branch for the active
@@ -14,19 +15,18 @@ import { repositoryId, type Repository } from "@/lib/types/http";
  * baseBranchDisplay) and for tasks not yet hydrated.
  */
 export function useBaseBranchByRepo(activeTaskId: string | null): Record<string, string> {
-  const tasks = useAppStore((s) => s.kanban.tasks);
-  const reposByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
+  const tasks = useAllKanbanTasks();
+  const { repositories } = useAllRepositories(false);
   return useMemo(() => {
     if (!activeTaskId) return {};
     const task = tasks.find((t) => t.id === activeTaskId);
     if (!task?.repositories?.length) return {};
-    const allRepos = Object.values(reposByWorkspace).flat() as Repository[];
-    const repoNameById = new Map(allRepos.map((r) => [r.id, r.name]));
+    const repoNameById = new Map(repositories.map((r) => [r.id, r.name]));
     const out: Record<string, string> = {};
     for (const link of task.repositories) {
       const name = repoNameById.get(repositoryId(link.repository_id));
       if (name && link.base_branch) out[name] = link.base_branch;
     }
     return out;
-  }, [activeTaskId, tasks, reposByWorkspace]);
+  }, [activeTaskId, tasks, repositories]);
 }

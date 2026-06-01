@@ -73,6 +73,18 @@ function getWorkflowName(workflowId: string | undefined, ctx: RecentTaskBuildCon
 }
 
 function findLiveTask(taskId: string, ctx: RecentTaskBuildContext): LiveTask | null {
+  // Prefer the snapshot that actually owns the task: it carries the correct
+  // per-task workflowId + name. `ctx.kanbanTasks` aggregates tasks across every
+  // workspace snapshot, but `ctx.kanbanWorkflowId` is the homepage *filter*
+  // selection (null on the task page / "All Workflows"), so attributing every
+  // kanban task to it mislabels — or, when null, blanks — the workflow badge.
+  for (const snapshot of Object.values(ctx.snapshots)) {
+    const task = snapshot.tasks.find((item) => item.id === taskId);
+    if (task) {
+      return { task, workflowId: snapshot.workflowId, workflowName: snapshot.workflowName };
+    }
+  }
+
   const kanbanTask = ctx.kanbanTasks.find((task) => task.id === taskId);
   if (kanbanTask) {
     return {
@@ -82,12 +94,6 @@ function findLiveTask(taskId: string, ctx: RecentTaskBuildContext): LiveTask | n
     };
   }
 
-  for (const snapshot of Object.values(ctx.snapshots)) {
-    const task = snapshot.tasks.find((item) => item.id === taskId);
-    if (task) {
-      return { task, workflowId: snapshot.workflowId, workflowName: snapshot.workflowName };
-    }
-  }
   return null;
 }
 

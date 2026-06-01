@@ -35,9 +35,9 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Badge } from "@kandev/ui/badge";
 import { useDockviewStore, type BuiltInPreset } from "@/lib/state/dockview-store";
-import { useAppStore } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
 import type { SavedLayout } from "@/lib/types/http";
+import { useUserSettings } from "@/hooks/domains/settings/use-user-settings";
 
 type PresetOption = {
   id: BuiltInPreset;
@@ -45,6 +45,10 @@ type PresetOption = {
   description: string;
   icon: React.ElementType;
 };
+
+// Stable empty fallback so the savedLayouts read keeps a constant reference
+// when user settings are absent (avoids re-firing dependent callbacks).
+const EMPTY_SAVED_LAYOUTS: SavedLayout[] = [];
 
 const BUILT_IN_PRESETS: PresetOption[] = [
   {
@@ -84,7 +88,7 @@ function SaveLayoutDialog({
   const [isDefault, setIsDefault] = useState(false);
   const [saving, setSaving] = useState(false);
   const captureCurrentLayout = useDockviewStore((s) => s.captureCurrentLayout);
-  const savedLayouts = useAppStore((s) => s.userSettings.savedLayouts);
+  const savedLayouts = useUserSettings().data?.savedLayouts ?? EMPTY_SAVED_LAYOUTS;
 
   const handleSave = useCallback(async () => {
     const trimmed = name.trim();
@@ -238,7 +242,7 @@ export function LayoutPresetSelector() {
   const recentlyClosedRef = useRef(false);
   const applyBuiltInPreset = useDockviewStore((s) => s.applyBuiltInPreset);
   const applyCustomLayout = useDockviewStore((s) => s.applyCustomLayout);
-  const savedLayouts = useAppStore((s) => s.userSettings.savedLayouts);
+  const savedLayouts = useUserSettings().data?.savedLayouts ?? EMPTY_SAVED_LAYOUTS;
 
   const handleApplyCustom = useCallback(
     (layout: SavedLayout) =>

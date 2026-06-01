@@ -23,6 +23,7 @@ import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
 import { useAppStore } from "@/components/state-provider";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import type { CommandItem } from "@/lib/commands/types";
+import { useUserSettings } from "@/hooks/domains/settings/use-user-settings";
 
 type PushFn = ReturnType<typeof useRouter>["push"];
 
@@ -176,7 +177,7 @@ export function GlobalCommands() {
     startNewConfigChat,
   ]);
 
-  const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
+  const keyboardShortcuts = useUserSettings().data?.keyboardShortcuts ?? {};
   const quickChatShortcut = getShortcut("QUICK_CHAT", keyboardShortcuts);
 
   const quickChatCommand: CommandItem = useMemo(

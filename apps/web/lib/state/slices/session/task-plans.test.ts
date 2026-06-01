@@ -3,7 +3,6 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { createSessionSlice } from "./session-slice";
 import type { SessionSlice } from "./types";
-import type { TaskPlan } from "@/lib/types/http";
 
 function makeStore() {
   return create<SessionSlice>()(immer(createSessionSlice));
@@ -12,32 +11,17 @@ function makeStore() {
 const TASK_ID = "task-1";
 const TS_EPOCH = "2026-04-20T00:00:00Z";
 const TS_LATER = "2026-04-20T01:00:00Z";
-const TS_LATEST = "2026-04-20T02:00:00Z";
 
-function makePlan(overrides: Partial<TaskPlan> = {}): TaskPlan {
-  return {
-    id: "plan-1",
-    task_id: TASK_ID,
-    title: "Plan",
-    content: "# Plan",
-    created_by: "agent",
-    created_at: TS_EPOCH,
-    updated_at: TS_EPOCH,
-    ...overrides,
-  };
-}
-
-describe("task plan slice", () => {
-  it("markTaskPlanSeen writes the current plan updated_at", () => {
+describe("task plan client-state slice", () => {
+  it("markTaskPlanSeen writes the supplied updated_at", () => {
     const store = makeStore();
-    store.getState().setTaskPlan(TASK_ID, makePlan({ updated_at: TS_LATER }));
 
-    store.getState().markTaskPlanSeen(TASK_ID);
+    store.getState().markTaskPlanSeen(TASK_ID, TS_LATER);
 
     expect(store.getState().taskPlans.lastSeenUpdatedAtByTaskId[TASK_ID]).toBe(TS_LATER);
   });
 
-  it("markTaskPlanSeen with no plan writes an empty-string sentinel", () => {
+  it("markTaskPlanSeen with no updated_at writes an empty-string sentinel", () => {
     const store = makeStore();
 
     store.getState().markTaskPlanSeen("task-missing");
@@ -45,25 +29,22 @@ describe("task plan slice", () => {
     expect(store.getState().taskPlans.lastSeenUpdatedAtByTaskId["task-missing"]).toBe("");
   });
 
-  it("setTaskPlan does not change lastSeenUpdatedAtByTaskId", () => {
+  it("markTaskPlanSeen only advances when called with a new value", () => {
     const store = makeStore();
-    store.getState().setTaskPlan(TASK_ID, makePlan({ updated_at: TS_EPOCH }));
-    store.getState().markTaskPlanSeen(TASK_ID);
+    store.getState().markTaskPlanSeen(TASK_ID, TS_EPOCH);
 
-    // New update arrives — seen should NOT advance automatically
-    store.getState().setTaskPlan(TASK_ID, makePlan({ updated_at: TS_LATEST }));
-
+    // No second mark — seen should NOT advance automatically
     expect(store.getState().taskPlans.lastSeenUpdatedAtByTaskId[TASK_ID]).toBe(TS_EPOCH);
   });
 
-  it("clearTaskPlan removes the lastSeen entry", () => {
+  it("clearTaskPlan removes the per-task client entries", () => {
     const store = makeStore();
-    store.getState().setTaskPlan(TASK_ID, makePlan());
-    store.getState().markTaskPlanSeen(TASK_ID);
+    store.getState().markTaskPlanSeen(TASK_ID, TS_EPOCH);
+    store.getState().setTaskPlanSaving(TASK_ID, true);
 
     store.getState().clearTaskPlan(TASK_ID);
 
     expect(store.getState().taskPlans.lastSeenUpdatedAtByTaskId[TASK_ID]).toBeUndefined();
-    expect(store.getState().taskPlans.byTaskId[TASK_ID]).toBeUndefined();
+    expect(store.getState().taskPlans.savingByTaskId[TASK_ID]).toBeUndefined();
   });
 });

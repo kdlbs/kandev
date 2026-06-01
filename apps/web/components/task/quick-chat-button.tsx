@@ -5,8 +5,8 @@ import { Button } from "@kandev/ui/button";
 import { KeyboardShortcutTooltip } from "@/components/keyboard-shortcut-tooltip";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
-import { useAppStore } from "@/components/state-provider";
 import type { ComponentProps } from "react";
+import { useUserSettings } from "@/hooks/domains/settings/use-user-settings";
 
 type QuickChatButtonProps = {
   workspaceId?: string | null;
@@ -21,7 +21,7 @@ export function QuickChatButton({
   compact = false,
 }: QuickChatButtonProps) {
   const handleOpenQuickChat = useQuickChatLauncher(workspaceId);
-  const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
+  const keyboardShortcuts = useUserSettings().data?.keyboardShortcuts ?? {};
   const quickChatShortcut = getShortcut("QUICK_CHAT", keyboardShortcuts);
 
   if (!workspaceId) return null;

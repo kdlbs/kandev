@@ -9,8 +9,16 @@ import type {
 import { useBranchesByURL } from "@/hooks/domains/github/use-branches-by-url";
 import { usePRInfoByURL } from "@/hooks/domains/github/use-pr-info-by-url";
 import { useAppStore } from "@/components/state-provider";
+import { useExecutors, useAgentProfiles } from "@/hooks/domains/settings/use-settings-reads";
+import { useAllKanbanTasks, useKanbanSnapshots } from "@/hooks/domains/kanban/use-kanban-tasks";
+import { useWorkflowItems } from "@/hooks/domains/kanban/use-kanban-snapshots";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
+import { useAllRepositories } from "@/hooks/domains/workspace/use-all-repositories";
+import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
+import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
+import { useQuery } from "@tanstack/react-query";
+import { settingsQueryOptions } from "@/lib/query/query-options/settings";
 import { getTaskCreateDraft, setTaskCreateDraft, removeTaskCreateDraft } from "@/lib/local-storage";
 import type {
   StepType,
@@ -511,19 +519,15 @@ export { useDialogComputed } from "@/components/task-create-dialog-computed";
 
 export function useSessionRepoName(isSessionMode: boolean) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
-  const kanbanTasks = useAppStore((state) => state.kanban.tasks);
-  const reposByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
+  const kanbanTasks = useAllKanbanTasks();
+  const { repositories } = useAllRepositories(false);
   return useMemo(() => {
     if (!isSessionMode) return undefined;
     const activeTask = activeTaskId ? kanbanTasks.find((t) => t.id === activeTaskId) : null;
     const repoId = activeTask?.repositoryId;
     if (!repoId) return undefined;
-    for (const repos of Object.values(reposByWorkspace)) {
-      const repo = repos.find((r) => r.id === repoId);
-      if (repo) return repo.name;
-    }
-    return undefined;
-  }, [isSessionMode, activeTaskId, kanbanTasks, reposByWorkspace]);
+    return repositories.find((r) => r.id === repoId)?.name;
+  }, [isSessionMode, activeTaskId, kanbanTasks, repositories]);
 }
 
 export function useTaskCreateDialogData(
@@ -533,13 +537,17 @@ export function useTaskCreateDialogData(
   defaultStepId: string | null,
   fs: DialogFormState,
 ) {
-  const workflows = useAppStore((state) => state.workflows.items);
-  const workspaces = useAppStore((state) => state.workspaces.items);
-  const agentProfiles = useAppStore((state) => state.agentProfiles.items);
-  const executors = useAppStore((state) => state.executors.items);
-  const settingsData = useAppStore((state) => state.settingsData);
-  const availableAgentsLoaded = useAppStore((state) => state.availableAgents.loaded);
-  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
+  const workflows = useWorkflowItems(workspaceId);
+  const { workspaces } = useWorkspaces();
+  const agentProfiles = useAgentProfiles();
+  const executors = useExecutors();
+  const agentsLoaded = useQuery({ ...settingsQueryOptions.agents(), enabled: open }).isSuccess;
+  const executorsLoaded = useQuery({
+    ...settingsQueryOptions.executors(),
+    enabled: open,
+  }).isSuccess;
+  const availableAgentsLoaded = useAvailableAgents(open).loaded;
+  const snapshots = useKanbanSnapshots();
 
   useSettingsData(open);
   const { repositories, isLoading: repositoriesLoading } = useRepositories(workspaceId, open);
@@ -554,8 +562,8 @@ export function useTaskCreateDialogData(
     workflowId,
     defaultStepId,
     settingsData: {
-      agentsLoaded: settingsData.agentsLoaded,
-      executorsLoaded: settingsData.executorsLoaded,
+      agentsLoaded,
+      executorsLoaded,
       capabilitiesLoaded: availableAgentsLoaded,
     },
     agentProfiles,

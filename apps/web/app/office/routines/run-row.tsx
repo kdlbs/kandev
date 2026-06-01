@@ -1,7 +1,8 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import { Badge } from "@kandev/ui/badge";
-import { useAppStore } from "@/components/state-provider";
+import { officeQueryOptions } from "@/lib/query/query-options/office";
 import type { RoutineRun } from "@/lib/state/slices/office/types";
 
 const FALLBACK_COLORS: Record<string, string> = {
@@ -28,7 +29,7 @@ type RunRowProps = {
 };
 
 export function RunRow({ run }: RunRowProps) {
-  const meta = useAppStore((s) => s.office.meta);
+  const { data: meta } = useQuery(officeQueryOptions.metaGlobal());
   const metaStatus = meta?.routineRunStatuses.find((s) => s.id === run.status);
   const colorClass = metaStatus?.color ?? FALLBACK_COLORS[run.status] ?? "";
   const label = metaStatus?.label ?? formatLabel(run.status);

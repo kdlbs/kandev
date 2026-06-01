@@ -5,7 +5,7 @@ import { IconTrash, IconArchive, IconChevronRight, IconX } from "@tabler/icons-r
 import { Button } from "@kandev/ui/button";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
 import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
-import { useAppStore } from "@/components/state-provider";
+import { useKanbanSnapshots } from "@/hooks/domains/kanban/use-kanban-tasks";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import {
   DropdownMenu,
@@ -28,14 +28,10 @@ interface TaskMultiSelectToolbarProps {
 }
 
 function useBulkExecutorTypes(taskIds: string[]): Array<string | null | undefined> {
-  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
-  const fallbackTasks = useAppStore((state) => state.kanban.tasks);
+  const snapshots = useKanbanSnapshots();
   return useMemo(
-    () =>
-      taskIds.map(
-        (id) => findTaskInSnapshots(id, snapshots, fallbackTasks)?.primaryExecutorType ?? null,
-      ),
-    [taskIds, snapshots, fallbackTasks],
+    () => taskIds.map((id) => findTaskInSnapshots(id, snapshots)?.primaryExecutorType ?? null),
+    [taskIds, snapshots],
   );
 }
 

@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { StateProvider } from "@/components/state-provider";
 import { ChatMessage } from "./chat-message";
+import { qk } from "@/lib/query/keys";
+import type { KanbanMultiData } from "@/lib/query/query-options/kanban";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
 
 const SENDER_TASK_ID = "task-sender";
@@ -32,26 +35,35 @@ function userMessage(overrides: Partial<Message>): Message {
 
 function wrapper(tasks: Array<{ id: string; title: string }> = []) {
   return function Wrapper({ children }: { children: ReactNode }) {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    // Seed the TanStack Query kanban multi cache so useTaskById can resolve
+    // sender tasks for live-title resolution; tests that exercise the
+    // deleted-sender fallback simply omit the sender from this list. Only
+    // id+title are required by useTaskById.
+    qc.setQueryData<KanbanMultiData>(qk.kanban.multi(), {
+      snapshots: {
+        "wf-test": {
+          workflowId: "wf-test",
+          workflowName: "Test",
+          steps: [],
+          tasks: tasks.map(
+            (t) =>
+              ({
+                id: t.id,
+                title: t.title,
+                workflowStepId: "",
+                position: 0,
+              }) as KanbanMultiData["snapshots"][string]["tasks"][number],
+          ),
+        },
+      },
+    });
     return (
-      <StateProvider
-        initialState={{
-          // Seed the kanban slice so useTaskById can resolve sender tasks for
-          // live-title resolution; tests that exercise the deleted-sender
-          // fallback simply omit the sender from this list.
-          // The full Task shape isn't required by useTaskById — only id+title.
-          kanban: {
-            tasks: tasks.map((t) => ({
-              id: t.id,
-              title: t.title,
-              workflow_step_id: "",
-              priority: 0,
-              parent_id: undefined,
-            })),
-          } as unknown as never,
-        }}
-      >
-        {children}
-      </StateProvider>
+      <QueryClientProvider client={qc}>
+        <StateProvider initialState={{ workspaces: { activeId: "ws-test" } }}>
+          {children}
+        </StateProvider>
+      </QueryClientProvider>
     );
   };
 }

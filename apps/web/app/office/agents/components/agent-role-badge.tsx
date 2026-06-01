@@ -1,7 +1,8 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import { Badge } from "@kandev/ui/badge";
-import { useAppStore } from "@/components/state-provider";
+import { officeQueryOptions } from "@/lib/query/query-options/office";
 import type { AgentRole } from "@/lib/state/slices/office/types";
 
 const FALLBACK_COLORS: Record<AgentRole, string> = {
@@ -19,7 +20,7 @@ type AgentRoleBadgeProps = {
 };
 
 export function AgentRoleBadge({ role }: AgentRoleBadgeProps) {
-  const meta = useAppStore((s) => s.office.meta);
+  const { data: meta } = useQuery(officeQueryOptions.metaGlobal());
   const metaRole = meta?.roles.find((r) => r.id === role);
   const colorClass = metaRole?.color ?? FALLBACK_COLORS[role] ?? "";
   const label = metaRole?.label ?? role;

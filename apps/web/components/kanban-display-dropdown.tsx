@@ -12,11 +12,11 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { IconAdjustmentsHorizontal } from "@tabler/icons-react";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
-import type { Repository } from "@/lib/types/http";
-import type { WorkflowsState, WorkspaceState } from "@/lib/state/slices";
-
-type WorkspaceItem = WorkspaceState["items"][number];
+import type { Repository, Workspace } from "@/lib/types/http";
+import type { WorkflowsState } from "@/lib/state/slices";
 import type { ComponentProps } from "react";
+
+type WorkspaceItem = Workspace;
 
 type KanbanDisplayDropdownProps = {
   triggerSize?: ComponentProps<typeof Button>["size"];

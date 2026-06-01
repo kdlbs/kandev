@@ -4,11 +4,11 @@ import { memo, useMemo, useState } from "react";
 import { IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
-import { useAppStore } from "@/components/state-provider";
 import { useRegisterCommands } from "@/hooks/use-register-commands";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import type { CommandItem } from "@/lib/commands/types";
 import type { Task } from "@/lib/types/http";
+import { useUserSettings } from "@/hooks/domains/settings/use-user-settings";
 
 type NewTaskButtonProps = {
   workspaceId: string | null;
@@ -37,7 +37,7 @@ export const NewTaskButton = memo(function NewTaskButton({
 }: NewTaskButtonProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
 
-  const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
+  const keyboardShortcuts = useUserSettings().data?.keyboardShortcuts ?? {};
   const newTaskShortcut = getShortcut("NEW_TASK", keyboardShortcuts);
   const commands = useMemo<CommandItem[]>(
     () => [

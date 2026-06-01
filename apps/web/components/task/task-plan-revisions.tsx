@@ -18,6 +18,7 @@ import type { TaskPlanRevision } from "@/lib/types/http";
 import { formatPreciseTime } from "@/lib/utils";
 import { AgentLogo } from "@/components/agent-logo";
 import { useAppStore } from "@/components/state-provider";
+import { useTaskSessionById } from "@/hooks/domains/session/use-task-session-by-id";
 import { PlanRevisionPreviewDialog } from "./task-plan-preview-dialog";
 import { PlanRevisionDiffDialog } from "./task-plan-diff-dialog";
 
@@ -314,9 +315,7 @@ function authorLabel(revision: TaskPlanRevision): string {
  * there is no active session or its snapshot doesn't carry an agent_name. */
 function useActiveAgentBackendName(): string | null {
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const snapshot = useAppStore((state) =>
-    activeSessionId ? state.taskSessions.items[activeSessionId]?.agent_profile_snapshot : null,
-  );
+  const snapshot = useTaskSessionById(activeSessionId)?.agent_profile_snapshot ?? null;
   return useMemo(() => {
     const name = (snapshot as { agent_name?: unknown } | null | undefined)?.agent_name;
     return typeof name === "string" && name.length > 0 ? name : null;

@@ -1,4 +1,4 @@
-import type { Message, TaskSession, Turn, TaskPlan, TaskPlanRevision } from "@/lib/types/http";
+import type { Message, Turn } from "@/lib/types/http";
 
 export type MessagesState = {
   bySession: Record<string, Message[]>;
@@ -17,41 +17,17 @@ export type TurnsState = {
   activeBySession: Record<string, string | null>; // sessionId -> active turnId
 };
 
-export type TaskSessionsState = {
-  items: Record<string, TaskSession>;
-};
-
-export type TaskSessionsByTaskState = {
-  itemsByTaskId: Record<string, TaskSession[]>;
-  loadingByTaskId: Record<string, boolean>;
-  loadedByTaskId: Record<string, boolean>;
-};
-
-export type SessionAgentctlStatus = {
-  status: "starting" | "ready" | "error";
-  errorMessage?: string;
-  agentExecutionId?: string;
-  updatedAt?: string;
-};
-
-export type SessionAgentctlState = {
-  itemsBySessionId: Record<string, SessionAgentctlStatus>;
-};
-
+/**
+ * Worktree view-model derived from a TaskSession's worktree_* fields. No longer
+ * a Zustand slice — built on demand by useSessionWorktrees / useWorktree from
+ * the canonical TaskSession TQ cache (qk.taskSession.byId / .byTask).
+ */
 export type Worktree = {
   id: string;
   sessionId: string;
   repositoryId?: string;
   path?: string;
   branch?: string;
-};
-
-export type WorktreesState = {
-  items: Record<string, Worktree>;
-};
-
-export type SessionWorktreesState = {
-  itemsBySessionId: Record<string, string[]>;
 };
 
 export type PendingModelState = {
@@ -66,14 +42,11 @@ export type ActiveModelState = {
  * null. Reducers enforce a 2-slot cap and reject duplicates. */
 export type ComparePair = [string | null, string | null];
 
+// CLIENT-only task-plan state. The plan + revisions list (server data) now
+// live in the TanStack Query cache (qk.taskSession.plans / plansRevisions);
+// only these client-owned fields remain in Zustand.
 export type TaskPlansState = {
-  byTaskId: Record<string, TaskPlan | null>;
-  loadingByTaskId: Record<string, boolean>;
-  loadedByTaskId: Record<string, boolean>;
   savingByTaskId: Record<string, boolean>;
-  revisionsByTaskId: Record<string, TaskPlanRevision[]>;
-  revisionsLoadingByTaskId: Record<string, boolean>;
-  revisionsLoadedByTaskId: Record<string, boolean>;
   revisionContentCache: Record<string, string>; // revisionId -> content
   // Phase 6: preview + compare state
   previewRevisionIdByTaskId: Record<string, string | null>;
@@ -131,11 +104,6 @@ export type QueueState = {
 export type SessionSliceState = {
   messages: MessagesState;
   turns: TurnsState;
-  taskSessions: TaskSessionsState;
-  taskSessionsByTask: TaskSessionsByTaskState;
-  sessionAgentctl: SessionAgentctlState;
-  worktrees: WorktreesState;
-  sessionWorktreesBySessionId: SessionWorktreesState;
   pendingModel: PendingModelState;
   activeModel: ActiveModelState;
   taskPlans: TaskPlansState;
@@ -163,27 +131,14 @@ export type SessionSliceActions = {
   addTurn: (turn: Turn) => void;
   completeTurn: (sessionId: string, turnId: string, completedAt: string) => void;
   setActiveTurn: (sessionId: string, turnId: string | null) => void;
-  setTaskSession: (session: TaskSession) => void;
-  removeTaskSession: (taskId: string, sessionId: string) => void;
-  setTaskSessionsForTask: (taskId: string, sessions: TaskSession[]) => void;
-  upsertTaskSessionFromEvent: (taskId: string, session: TaskSession) => void;
-  setTaskSessionsLoading: (taskId: string, loading: boolean) => void;
-  setSessionAgentctlStatus: (sessionId: string, status: SessionAgentctlStatus) => void;
-  setWorktree: (worktree: Worktree) => void;
-  setSessionWorktrees: (sessionId: string, worktreeIds: string[]) => void;
   setPendingModel: (sessionId: string, modelId: string) => void;
   clearPendingModel: (sessionId: string) => void;
   setActiveModel: (sessionId: string, modelId: string) => void;
-  // Task plan actions
-  setTaskPlan: (taskId: string, plan: TaskPlan | null) => void;
-  setTaskPlanLoading: (taskId: string, loading: boolean) => void;
+  // Task plan client-state actions (server data lives in TanStack Query)
   setTaskPlanSaving: (taskId: string, saving: boolean) => void;
   clearTaskPlan: (taskId: string) => void;
-  markTaskPlanSeen: (taskId: string) => void;
-  // Revision actions
-  setPlanRevisions: (taskId: string, revisions: TaskPlanRevision[]) => void;
-  upsertPlanRevision: (taskId: string, revision: TaskPlanRevision) => void;
-  setPlanRevisionsLoading: (taskId: string, loading: boolean) => void;
+  markTaskPlanSeen: (taskId: string, updatedAt?: string | null) => void;
+  // Revision client-state actions
   cachePlanRevisionContent: (revisionId: string, content: string) => void;
   // Phase 6: preview + compare actions
   setPreviewRevision: (taskId: string, revisionId: string | null) => void;

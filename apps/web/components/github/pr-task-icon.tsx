@@ -3,7 +3,7 @@
 import { IconGitPullRequest } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { useAppStore } from "@/components/state-provider";
+import { useTaskPRs } from "@/hooks/domains/github/use-task-pr";
 import type { TaskPR } from "@/lib/types/github";
 
 const STATUS_RANK: Record<string, number> = {
@@ -107,7 +107,7 @@ export function aggregatePRStatusColor(prs: TaskPR[]): string {
 }
 
 export function PRTaskIcon({ taskId }: { taskId: string }) {
-  const prs = useAppStore((state) => state.taskPRs.byTaskId[taskId] ?? null);
+  const prs = useTaskPRs(taskId);
 
   // Defensive: an upstream payload may briefly seed byTaskId[taskId] with a
   // non-array value (e.g. an empty object from a partial hydration). Bail

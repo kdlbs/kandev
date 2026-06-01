@@ -1,14 +1,20 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import { Badge } from "@kandev/ui/badge";
 import { useAppStore } from "@/components/state-provider";
+import { officeQueryOptions } from "@/lib/query/query-options/office";
 import { SidebarCollapsibleSection } from "./sidebar-collapsible-section";
 import { cn } from "@/lib/utils";
 
 export function SidebarProjectsList() {
   const router = useRouter();
-  const projects = useAppStore((s) => s.office.projects);
+  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const { data: projects = [] } = useQuery({
+    ...officeQueryOptions.projects(workspaceId ?? ""),
+    enabled: !!workspaceId,
+  });
   const activeProjects = projects.filter((p) => p.status !== "archived");
 
   return (

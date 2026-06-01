@@ -6,8 +6,22 @@ import { useDockviewStore } from "@/lib/state/dockview-store";
 import { focusOrAddPanel } from "@/lib/state/dockview-layout-builders";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { wasPRPanelOffered, markPRPanelOffered } from "@/lib/local-storage";
+import { useTaskPRs } from "@/hooks/domains/github/use-task-pr";
+import { useTaskSessionsByTaskFromCache } from "@/hooks/domains/session/use-task-session-by-id";
 import { sessionId as toSessionId } from "@/lib/types/ids";
+import { getBrowserQueryClient } from "@/lib/query/client";
+import { qk } from "@/lib/query/keys";
+import type { TaskSession, TaskSessionsResponse } from "@/lib/types/http";
 import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+
+/** Read a task's session list from the TQ by-task cache (non-render paths). */
+function sessionsForTaskFromCache(taskId: string | null | undefined): TaskSession[] {
+  if (!taskId) return [];
+  return (
+    getBrowserQueryClient().getQueryData<TaskSessionsResponse>(qk.taskSession.byTask(taskId))
+      ?.sessions ?? []
+  );
+}
 
 const debug = createDebugLogger("dockview:session-tabs");
 
@@ -88,9 +102,7 @@ export function setupChatPanelSafetyNet(
         // Don't recreate a panel for a session that no longer exists in the
         // store — this guards against handleDelete racing with the safety net.
         const activeTaskId = appStore.getState().tasks.activeTaskId;
-        const knownSessions = activeTaskId
-          ? (appStore.getState().taskSessionsByTask.itemsByTaskId[activeTaskId] ?? [])
-          : [];
+        const knownSessions = sessionsForTaskFromCache(activeTaskId);
         if (!knownSessions.some((s) => s.id === activeSessionId)) {
           if (IS_DEBUG) {
             debug("setupChatPanelSafetyNet: skip recreate (session not in store)", {
@@ -173,10 +185,8 @@ export function resolvePRPanelTargetGroup(
 export function useAutoPRPanel() {
   const taskId = useAppStore((s) => s.tasks.activeTaskId);
   const sessionId = useAppStore((s) => s.tasks.activeSessionId);
-  const hasPR = useAppStore((s) => {
-    const tid = s.tasks.activeTaskId;
-    return tid ? (s.taskPRs.byTaskId[tid]?.length ?? 0) > 0 : false;
-  });
+  const activeTaskPRs = useTaskPRs(taskId);
+  const hasPR = activeTaskPRs.length > 0;
   const hasApi = useDockviewStore((s) => !!s.api);
 
   useEffect(() => {
@@ -468,9 +478,7 @@ function resolveCurrentSessionIds(appStore: ReturnType<typeof useAppStoreApi>): 
   currentSessionIds: string[];
 } {
   const tid = appStore.getState().tasks.activeTaskId;
-  const currentSessions = tid
-    ? (appStore.getState().taskSessionsByTask.itemsByTaskId[tid] ?? [])
-    : [];
+  const currentSessions = sessionsForTaskFromCache(tid);
   return { tid: tid ?? null, currentSessionIds: currentSessions.map((s) => s.id) };
 }
 
@@ -624,14 +632,13 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
 
   // Key-based dependency so the effect re-runs when the task's session list
   // changes (add/remove). Inside the effect we re-read the real array from
-  // the store so we don't capture a stale reference.
-  const sessionIdsKey = useAppStore((s) => {
-    const tid = s.tasks.activeTaskId;
-    if (!tid) return EMPTY_SESSION_IDS_KEY;
-    const list = s.taskSessionsByTask.itemsByTaskId[tid];
-    if (!list || list.length === 0) return EMPTY_SESSION_IDS_KEY;
-    return list.map((ss) => ss.id).join(",");
-  });
+  // the TQ cache so we don't capture a stale reference.
+  const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
+  const sessionsForTask = useTaskSessionsByTaskFromCache(activeTaskId);
+  const sessionIdsKey =
+    sessionsForTask.length === 0
+      ? EMPTY_SESSION_IDS_KEY
+      : sessionsForTask.map((ss) => ss.id).join(",");
 
   useEffect(() => {
     runAutoSessionTabEffect(effectiveSessionId, appStore, {

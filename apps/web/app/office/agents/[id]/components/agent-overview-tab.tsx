@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
@@ -10,6 +11,8 @@ import { IconRefresh } from "@tabler/icons-react";
 import { toast } from "sonner";
 import { useAppStore } from "@/components/state-provider";
 import { updateAgentProfile, getAgentUtilization } from "@/lib/api/domains/office-api";
+import { officeQueryOptions } from "@/lib/query/query-options/office";
+import { qk } from "@/lib/query/keys";
 import type { AgentProfile, AgentRole, ProviderUsage } from "@/lib/state/slices/office/types";
 import { UtilizationBars } from "@/app/office/components/utilization-bars";
 
@@ -217,9 +220,13 @@ const FALLBACK_EXECUTOR_TYPES = [
 ];
 
 export function AgentOverviewTab({ agent }: AgentOverviewTabProps) {
-  const agents = useAppStore((s) => s.office.agentProfiles);
-  const meta = useAppStore((s) => s.office.meta);
-  const updateStore = useAppStore((s) => s.updateOfficeAgentProfile);
+  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const qc = useQueryClient();
+  const { data: agents = [] } = useQuery({
+    ...officeQueryOptions.agents(workspaceId ?? ""),
+    enabled: !!workspaceId,
+  });
+  const { data: meta } = useQuery(officeQueryOptions.metaGlobal());
 
   const roles = meta?.roles.map((r) => ({ id: r.id, label: r.label })) ?? FALLBACK_ROLES;
   const executorTypes =
@@ -245,13 +252,7 @@ export function AgentOverviewTab({ agent }: AgentOverviewTabProps) {
         maxConcurrentSessions: maxConcurrent,
         executorPreference: executorType ? { type: executorType } : undefined,
       } as Partial<AgentProfile>);
-      updateStore(agent.id, {
-        name,
-        role,
-        budgetMonthlyCents: Math.round(budget * 100),
-        maxConcurrentSessions: maxConcurrent,
-        executorPreference: executorType ? { type: executorType } : undefined,
-      });
+      if (workspaceId) void qc.invalidateQueries({ queryKey: qk.office.agents(workspaceId) });
       setDirty(false);
       toast.success("Agent updated");
     } catch (err) {
@@ -259,7 +260,7 @@ export function AgentOverviewTab({ agent }: AgentOverviewTabProps) {
     } finally {
       setSaving(false);
     }
-  }, [agent.id, name, role, budget, maxConcurrent, executorType, updateStore]);
+  }, [agent.id, name, role, budget, maxConcurrent, executorType, workspaceId, qc]);
 
   const reportsToAgent = agents.find((a) => a.id === agent.reportsTo);
 

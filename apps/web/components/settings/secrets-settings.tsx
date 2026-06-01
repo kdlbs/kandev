@@ -15,7 +15,8 @@ import { Input } from "@kandev/ui/input";
 import { Textarea } from "@kandev/ui/textarea";
 import { SettingsPageTemplate } from "@/components/settings/settings-page-template";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
-import { useAppStore } from "@/components/state-provider";
+import { useQueryClient } from "@tanstack/react-query";
+import { qk } from "@/lib/query/keys";
 import {
   createSecret,
   updateSecret,
@@ -230,11 +231,33 @@ function DeleteSecretDialog({ target, onClose, onConfirm, isBusy }: DeleteSecret
 /* ------------------------------------------------------------------ */
 
 function useSecretsState() {
-  const { loaded } = useSecrets();
-  const items = useAppStore((s) => s.secrets.items);
-  const addSecret = useAppStore((s) => s.addSecret);
-  const updateSecretInStore = useAppStore((s) => s.updateSecret);
-  const removeSecret = useAppStore((s) => s.removeSecret);
+  const { loaded, items } = useSecrets();
+  const qc = useQueryClient();
+  const addSecret = useCallback(
+    (item: SecretListItem) => {
+      qc.setQueryData<SecretListItem[]>(qk.settings.secrets(), (prev) => {
+        const list = prev ?? [];
+        return [...list.filter((s) => s.id !== item.id), item];
+      });
+    },
+    [qc],
+  );
+  const updateSecretInStore = useCallback(
+    (item: SecretListItem) => {
+      qc.setQueryData<SecretListItem[]>(qk.settings.secrets(), (prev) =>
+        prev ? prev.map((s) => (s.id === item.id ? { ...s, ...item } : s)) : prev,
+      );
+    },
+    [qc],
+  );
+  const removeSecret = useCallback(
+    (id: string) => {
+      qc.setQueryData<SecretListItem[]>(qk.settings.secrets(), (prev) =>
+        prev ? prev.filter((s) => s.id !== id) : prev,
+      );
+    },
+    [qc],
+  );
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);

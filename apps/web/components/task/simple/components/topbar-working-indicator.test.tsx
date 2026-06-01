@@ -1,12 +1,15 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import type { ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { StateProvider } from "@/components/state-provider";
+import { qk } from "@/lib/query/keys";
 import {
   agentProfileId as toAgentProfileId,
   sessionId as toSessionId,
   taskId as toTaskId,
   type TaskSession,
+  type TaskSessionsResponse,
 } from "@/lib/types/http";
 import { TopbarWorkingIndicator } from "./topbar-working-indicator";
 import { ActiveSessionRefProvider, useActiveSessionRef } from "./active-session-ref-context";
@@ -27,11 +30,29 @@ function liveSession(taskIdStr: string, id = "s-1"): TaskSession {
   };
 }
 
+// The component now reads sessions from the TanStack Query by-task cache
+// (`useAllTaskSessions`), so seed that cache (grouped by task_id) instead of
+// the deleted Zustand taskSessions mirror.
 function wrap(node: ReactNode, sessions: Record<string, TaskSession>) {
+  const queryClient = new QueryClient();
+  const byTask = new Map<string, TaskSession[]>();
+  for (const session of Object.values(sessions)) {
+    const list = byTask.get(session.task_id) ?? [];
+    list.push(session);
+    byTask.set(session.task_id, list);
+  }
+  for (const [taskIdStr, list] of byTask) {
+    queryClient.setQueryData<TaskSessionsResponse>(qk.taskSession.byTask(taskIdStr), {
+      sessions: list,
+      total: list.length,
+    });
+  }
   return (
-    <StateProvider initialState={{ taskSessions: { items: sessions } }}>
-      <ActiveSessionRefProvider>{node}</ActiveSessionRefProvider>
-    </StateProvider>
+    <QueryClientProvider client={queryClient}>
+      <StateProvider initialState={{}}>
+        <ActiveSessionRefProvider>{node}</ActiveSessionRefProvider>
+      </StateProvider>
+    </QueryClientProvider>
   );
 }
 

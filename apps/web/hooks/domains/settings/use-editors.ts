@@ -1,53 +1,69 @@
 "use client";
 
 import { useEffect } from "react";
-import { fetchUserSettings, listEditors } from "@/lib/api";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { settingsQueryOptions } from "@/lib/query/query-options/settings";
+import { qk } from "@/lib/query/keys";
+import {
+  createEditor,
+  updateEditor as updateEditorApi,
+  deleteEditor,
+} from "@/lib/api/domains/settings-api";
+import type { EditorOption } from "@/lib/types/http";
 import { getWebSocketClient } from "@/lib/ws/connection";
-import { useAppStore } from "@/components/state-provider";
-import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 
 export function useEditors() {
-  const editors = useAppStore((state) => state.editors.items);
-  const loaded = useAppStore((state) => state.editors.loaded);
-  const loading = useAppStore((state) => state.editors.loading);
-  const setEditors = useAppStore((state) => state.setEditors);
-  const setEditorsLoading = useAppStore((state) => state.setEditorsLoading);
-  const userSettingsLoaded = useAppStore((state) => state.userSettings.loaded);
-  const setUserSettings = useAppStore((state) => state.setUserSettings);
-
+  // Subscribe to user WS events so editor changes from other sessions are
+  // reflected (mirrors the effect that was in the old Zustand hook).
   useEffect(() => {
     const client = getWebSocketClient();
-    if (client) {
-      client.subscribeUser();
-    }
+    if (client) client.subscribeUser();
   }, []);
 
-  useEffect(() => {
-    if (loaded || loading) return;
-    setEditorsLoading(true);
-    listEditors({ cache: "no-store" })
-      .then((response) => {
-        setEditors(response.editors ?? []);
-      })
-      .catch(() => {
-        setEditors([]);
-      })
-      .finally(() => {
-        setEditorsLoading(false);
-      });
-  }, [loaded, loading, setEditors, setEditorsLoading]);
+  const query = useQuery(settingsQueryOptions.editors());
+  return {
+    editors: query.data ?? [],
+    loaded: query.isSuccess,
+    loading: query.isFetching,
+  };
+}
 
-  useEffect(() => {
-    if (userSettingsLoaded) return;
-    fetchUserSettings({ cache: "no-store" })
-      .then((data) => {
-        if (!data?.settings) return;
-        setUserSettings(mapUserSettingsResponse(data));
-      })
-      .catch(() => {
-        // Ignore settings fetch errors for now.
+export function useCreateEditor() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: Parameters<typeof createEditor>[0]) => createEditor(payload),
+    onSuccess: (item) => {
+      qc.setQueryData(qk.settings.editors(), (prev: EditorOption[] | undefined) => {
+        const items = prev ?? [];
+        return [...items.filter((e) => e.id !== item.id), item];
       });
-  }, [setUserSettings, userSettingsLoaded]);
+    },
+  });
+}
 
-  return { editors, loaded, loading };
+export function useUpdateEditor() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: Parameters<typeof updateEditorApi>[1] }) =>
+      updateEditorApi(id, payload),
+    onSuccess: (item) => {
+      qc.setQueryData(qk.settings.editors(), (prev: EditorOption[] | undefined) => {
+        if (!prev) return prev;
+        return prev.map((e) => (e.id === item.id ? { ...e, ...item } : e));
+      });
+    },
+  });
+}
+
+export function useDeleteEditor() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => deleteEditor(id),
+    onSuccess: (_result, id) => {
+      qc.setQueryData(qk.settings.editors(), (prev: EditorOption[] | undefined) => {
+        if (!prev) return prev;
+        return prev.filter((e) => e.id !== id);
+      });
+    },
+  });
 }

@@ -25,6 +25,19 @@ vi.mock("@/components/state-provider", () => ({
   useAppStoreApi: () => ({ getState: () => mockStoreState }),
 }));
 
+// The hook now reads the session from the TQ by-id cache via useQueryClient.
+// getQueryData is keyed ["session", "byId", sessionId]; serve it from the same
+// taskSessions.items the test seeds so existing assertions keep working.
+vi.mock("@tanstack/react-query", () => ({
+  useQueryClient: () => ({
+    getQueryData: (key: readonly unknown[]) => {
+      const items = (mockStoreState as { taskSessions?: { items?: Record<string, unknown> } })
+        .taskSessions?.items;
+      return key[0] === "session" && key[1] === "byId" ? (items?.[key[2] as string] ?? null) : null;
+    },
+  }),
+}));
+
 vi.mock("@/lib/state/slices/comments", () => ({
   useCommentsStore: (selector: (s: Record<string, unknown>) => unknown) =>
     selector({ markCommentsSent: mockMarkCommentsSent }),

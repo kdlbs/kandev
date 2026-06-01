@@ -24,7 +24,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@kandev/ui/breadcrumb";
-import { useAppStore } from "@/components/state-provider";
+import { useAllTaskSessions } from "@/hooks/domains/session/use-task-session-by-id";
 import { selectLiveSessionForTask } from "@/lib/state/slices/session/selectors";
 import { TaskProperties } from "./task-properties";
 import { ChatActivityTabs } from "./chat-activity-tabs";
@@ -421,7 +421,7 @@ function useTaskTreePreview(taskId: string) {
 // Kanban / quick-chat keeps the legacy "finished tasks are read-only"
 // behaviour: once the last session terminates the input goes away.
 function useChatReadOnly(task: Task, sessions: TaskSession[]): boolean {
-  const liveSession = useAppStore((s) => selectLiveSessionForTask(s, task.id));
+  const liveSession = selectLiveSessionForTask(useAllTaskSessions(), task.id);
   if (isOfficeTask(task)) return false;
   if (liveSession) return false;
   if (sessions.length === 0) return false;

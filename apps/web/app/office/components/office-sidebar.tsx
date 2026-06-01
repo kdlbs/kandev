@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   IconSquarePlus,
   IconLayoutDashboard,
@@ -20,7 +21,10 @@ import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useAppStore } from "@/components/state-provider";
+import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
+import { officeQueryOptions } from "@/lib/query/query-options/office";
 import { selectTotalLiveSessions } from "@/lib/state/slices/session/selectors";
+import { useAllTaskSessions } from "@/hooks/domains/session/use-task-session-by-id";
 import { SidebarNavItem } from "./sidebar-nav-item";
 import { SidebarSection } from "./sidebar-section";
 import { SidebarAgentsList } from "./sidebar-agents-list";
@@ -31,23 +35,91 @@ interface OfficeSidebarProps {
   workspaceName?: string;
 }
 
-export function OfficeSidebar({ workspaceName: ssrName }: OfficeSidebarProps) {
-  const workspaces = useAppStore((s) => s.workspaces);
-  const inboxCount = useAppStore((s) => s.office.inboxCount);
-  const totalLiveSessions = useAppStore(selectTotalLiveSessions);
-  const dashboard = useAppStore((s) => s.office.dashboard);
-  const taskCount = dashboard?.task_count ?? 0;
-  const skillCount = dashboard?.skill_count ?? 0;
-  const routineCount = dashboard?.routine_count ?? 0;
-  const [newTaskOpen, setNewTaskOpen] = useState(false);
+type SidebarNavCounts = {
+  inboxCount: number;
+  taskCount: number;
+  skillCount: number;
+  routineCount: number;
+  totalLiveSessions: number;
+};
 
-  // Use store if hydrated, fall back to SSR prop
-  const activeWorkspace = workspaces.items.find((w) => w.id === workspaces.activeId);
+function SidebarNav({ counts, onNewTask }: { counts: SidebarNavCounts; onNewTask: () => void }) {
+  const { inboxCount, taskCount, skillCount, routineCount, totalLiveSessions } = counts;
+  return (
+    <nav className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-4 px-3 py-2">
+      <div className="flex flex-col gap-0.5">
+        <SidebarNavItem
+          icon={IconSquarePlus}
+          label="New Task"
+          href="/office/tasks"
+          onClick={onNewTask}
+        />
+        <SidebarNavItem
+          icon={IconLayoutDashboard}
+          label="Dashboard"
+          href="/office"
+          liveCount={totalLiveSessions}
+        />
+        <SidebarNavItem icon={IconInbox} label="Inbox" href="/office/inbox" badge={inboxCount} />
+      </div>
+      <SidebarSection label="Work">
+        <SidebarNavItem
+          icon={IconCircleDot}
+          label="Tasks"
+          href="/office/tasks"
+          badge={taskCount > 0 ? taskCount : undefined}
+        />
+        <SidebarNavItem
+          icon={IconRepeat}
+          label="Routines"
+          href="/office/routines"
+          badge={routineCount > 0 ? routineCount : undefined}
+        />
+      </SidebarSection>
+      <SidebarProjectsList />
+      <SidebarAgentsList />
+      <SidebarSection label="Workspace">
+        <SidebarNavItem icon={IconSitemap} label="Org" href="/office/workspace/org" />
+        <SidebarNavItem
+          icon={IconBoxMultiple}
+          label="Skills"
+          href="/office/workspace/skills"
+          badge={skillCount > 0 ? skillCount : undefined}
+        />
+        <SidebarNavItem icon={IconCurrencyDollar} label="Costs" href="/office/workspace/costs" />
+        <SidebarNavItem icon={IconHistory} label="Activity" href="/office/workspace/activity" />
+        <SidebarNavItem icon={IconRoute} label="Routing" href="/office/workspace/routing" />
+        <SidebarNavItem icon={IconSettings} label="Settings" href="/office/workspace/settings" />
+      </SidebarSection>
+    </nav>
+  );
+}
+
+export function OfficeSidebar({ workspaceName: ssrName }: OfficeSidebarProps) {
+  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const { workspaces } = useWorkspaces();
+  const totalLiveSessions = selectTotalLiveSessions(useAllTaskSessions());
+  const { data: inbox } = useQuery({
+    ...officeQueryOptions.inbox(workspaceId ?? ""),
+    enabled: !!workspaceId,
+  });
+  const { data: dashboard } = useQuery({
+    ...officeQueryOptions.dashboard(workspaceId ?? ""),
+    enabled: !!workspaceId,
+  });
+  const [newTaskOpen, setNewTaskOpen] = useState(false);
+  const activeWorkspace = workspaces.find((w) => w.id === workspaceId);
   const workspaceName = activeWorkspace?.name || ssrName || "Workspace";
+  const counts: SidebarNavCounts = {
+    inboxCount: inbox?.total_count ?? 0,
+    taskCount: dashboard?.task_count ?? 0,
+    skillCount: dashboard?.skill_count ?? 0,
+    routineCount: dashboard?.routine_count ?? 0,
+    totalLiveSessions,
+  };
 
   return (
     <aside className="w-60 h-full min-h-0 border-r border-border bg-background flex flex-col">
-      {/* Top: workspace name + search */}
       <div className="flex items-center gap-1 px-3 h-12 border-b border-border">
         <span className="flex-1 min-w-0 text-sm font-bold truncate">{workspaceName}</span>
         <Tooltip>
@@ -59,65 +131,7 @@ export function OfficeSidebar({ workspaceName: ssrName }: OfficeSidebarProps) {
           <TooltipContent>Search</TooltipContent>
         </Tooltip>
       </div>
-
-      {/* Nav: scrollable */}
-      <nav className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-4 px-3 py-2">
-        {/* Top actions */}
-        <div className="flex flex-col gap-0.5">
-          <SidebarNavItem
-            icon={IconSquarePlus}
-            label="New Task"
-            href="/office/tasks"
-            onClick={() => setNewTaskOpen(true)}
-          />
-          <SidebarNavItem
-            icon={IconLayoutDashboard}
-            label="Dashboard"
-            href="/office"
-            liveCount={totalLiveSessions}
-          />
-          <SidebarNavItem icon={IconInbox} label="Inbox" href="/office/inbox" badge={inboxCount} />
-        </div>
-
-        {/* Work section */}
-        <SidebarSection label="Work">
-          <SidebarNavItem
-            icon={IconCircleDot}
-            label="Tasks"
-            href="/office/tasks"
-            badge={taskCount > 0 ? taskCount : undefined}
-          />
-          <SidebarNavItem
-            icon={IconRepeat}
-            label="Routines"
-            href="/office/routines"
-            badge={routineCount > 0 ? routineCount : undefined}
-          />
-        </SidebarSection>
-
-        {/* Projects section (collapsible) */}
-        <SidebarProjectsList />
-
-        {/* Agents section (collapsible) */}
-        <SidebarAgentsList />
-
-        {/* Company section */}
-        <SidebarSection label="Workspace">
-          <SidebarNavItem icon={IconSitemap} label="Org" href="/office/workspace/org" />
-          <SidebarNavItem
-            icon={IconBoxMultiple}
-            label="Skills"
-            href="/office/workspace/skills"
-            badge={skillCount > 0 ? skillCount : undefined}
-          />
-          <SidebarNavItem icon={IconCurrencyDollar} label="Costs" href="/office/workspace/costs" />
-          <SidebarNavItem icon={IconHistory} label="Activity" href="/office/workspace/activity" />
-          <SidebarNavItem icon={IconRoute} label="Routing" href="/office/workspace/routing" />
-          <SidebarNavItem icon={IconSettings} label="Settings" href="/office/workspace/settings" />
-        </SidebarSection>
-      </nav>
-
-      {/* Bottom bar */}
+      <SidebarNav counts={counts} onNewTask={() => setNewTaskOpen(true)} />
       <div className="flex items-center justify-end gap-1 px-3 h-10 border-t border-border shrink-0">
         <Tooltip>
           <TooltipTrigger asChild>
@@ -131,7 +145,6 @@ export function OfficeSidebar({ workspaceName: ssrName }: OfficeSidebarProps) {
         </Tooltip>
         <ThemeToggle />
       </div>
-
       <NewTaskDialog open={newTaskOpen} onOpenChange={setNewTaskOpen} />
     </aside>
   );

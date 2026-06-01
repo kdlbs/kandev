@@ -7,7 +7,7 @@ import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { SettingsSection } from "@/components/settings/settings-section";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useUserSettingsController } from "@/hooks/domains/settings/use-user-settings";
 import { useShellSettings } from "@/hooks/domains/settings/use-shell-settings";
 import { updateUserSettings } from "@/lib/api";
 import { useRequest } from "@/lib/http/use-request";
@@ -94,8 +94,7 @@ function ShellSelect({
 }
 
 export function ShellSettingsCard() {
-  const setUserSettings = useAppStore((state) => state.setUserSettings);
-  const storeApi = useAppStoreApi();
+  const { setUserSettings, getLatest } = useUserSettingsController();
   const shellSettings = useShellSettings();
   const initialShellValue = shellSettings.preferredShell ?? "";
   const initialShellOptions = shellSettings.shellOptions ?? [];
@@ -109,7 +108,7 @@ export function ShellSettingsCard() {
 
   const saveShellRequest = useRequest(async () => {
     const trimmed = preferredShell.trim();
-    const currentSettings = storeApi.getState().userSettings;
+    const currentSettings = getLatest();
     await updateUserSettings({
       workspace_id: currentSettings.workspaceId ?? "",
       repository_ids: currentSettings.repositoryIds,

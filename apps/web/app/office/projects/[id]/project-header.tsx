@@ -8,7 +8,7 @@ import { Textarea } from "@kandev/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { toast } from "sonner";
 import { updateProject } from "@/lib/api/domains/office-api";
-import { useAppStore } from "@/components/state-provider";
+import { usePatchProjectCache } from "@/hooks/domains/office/use-patch-project-cache";
 import type { Project, ProjectStatus } from "@/lib/state/slices/office/types";
 
 const STATUS_OPTIONS: { value: ProjectStatus; label: string }[] = [
@@ -23,7 +23,7 @@ type ProjectHeaderProps = {
 };
 
 export function ProjectHeader({ project }: ProjectHeaderProps) {
-  const updateProjectStore = useAppStore((s) => s.updateProject);
+  const updateProjectStore = usePatchProjectCache();
 
   const [name, setName] = useState(project.name);
   const [description, setDescription] = useState(project.description ?? "");

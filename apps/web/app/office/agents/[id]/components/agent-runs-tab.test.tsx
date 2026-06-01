@@ -1,16 +1,30 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { StateProvider } from "@/components/state-provider";
+import { createTestQueryClient } from "@/test-utils/render-with-query";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
 import { AgentRunsTab } from "./agent-runs-tab";
 
-// Hoisted mock so the listRuns import is replaced before the component
-// imports it. Tests configure the mock per-case.
+function renderTab(agent: AgentProfile) {
+  const client = createTestQueryClient();
+  return render(
+    <QueryClientProvider client={client}>
+      <StateProvider initialState={{ workspaces: { activeId: "ws-1" } }}>
+        <AgentRunsTab agent={agent} />
+      </StateProvider>
+    </QueryClientProvider>,
+  );
+}
+
+// Hoisted mock so the listRuns import is replaced before the query options
+// module imports it. Tests configure the mock per-case. The runs query
+// (officeQueryOptions.runs) calls listRuns from office-runs-api.
 const listRunsMock = vi.hoisted(() => vi.fn());
 
-vi.mock("@/lib/api/domains/office-api", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/api/domains/office-api")>(
-    "@/lib/api/domains/office-api",
+vi.mock("@/lib/api/domains/office-runs-api", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/api/domains/office-runs-api")>(
+    "@/lib/api/domains/office-runs-api",
   );
   return {
     ...actual,
@@ -64,11 +78,7 @@ describe("AgentRunsTab", () => {
       ],
     });
 
-    render(
-      <StateProvider initialState={{ workspaces: { activeId: "ws-1", items: [] } }}>
-        <AgentRunsTab agent={ceo} />
-      </StateProvider>,
-    );
+    renderTab(ceo);
 
     // The CEO's run should appear; the other agent's run should not.
     await waitFor(() => {
@@ -82,11 +92,7 @@ describe("AgentRunsTab", () => {
   it("renders the empty state when no runs match the agent", async () => {
     listRunsMock.mockResolvedValueOnce({ runs: [] });
 
-    render(
-      <StateProvider initialState={{ workspaces: { activeId: "ws-1", items: [] } }}>
-        <AgentRunsTab agent={ceo} />
-      </StateProvider>,
-    );
+    renderTab(ceo);
 
     await waitFor(() => {
       expect(screen.getByText(/no runs yet/i)).toBeTruthy();

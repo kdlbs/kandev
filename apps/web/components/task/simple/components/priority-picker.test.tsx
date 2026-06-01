@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { StateProvider } from "@/components/state-provider";
 import { TaskOptimisticContextProvider } from "@/hooks/use-optimistic-task-mutation";
+import { createTestQueryClient } from "@/test-utils/render-with-query";
 import { PriorityPicker } from "./priority-picker";
 import type { Task } from "@/app/office/tasks/[id]/types";
 
@@ -48,10 +50,14 @@ function Wrapper({ children }: { children: ReactNode }) {
     applyPatch: vi.fn(),
     restore: vi.fn(),
   };
+  // The picker mutates via useOptimisticTaskMutation, which patches the
+  // office tasks TQ cache — so a QueryClient must be present.
   return (
-    <StateProvider>
-      <TaskOptimisticContextProvider value={ctx}>{children}</TaskOptimisticContextProvider>
-    </StateProvider>
+    <QueryClientProvider client={createTestQueryClient()}>
+      <StateProvider>
+        <TaskOptimisticContextProvider value={ctx}>{children}</TaskOptimisticContextProvider>
+      </StateProvider>
+    </QueryClientProvider>
   );
 }
 

@@ -15,13 +15,19 @@ import {
   IconSparkles,
 } from "@tabler/icons-react";
 import { useSprites } from "@/hooks/domains/settings/use-sprites";
-import { useAppStore } from "@/components/state-provider";
+import { useQueryClient } from "@tanstack/react-query";
+import { qk } from "@/lib/query/keys";
 import {
   testSpritesConnection,
   destroySprite,
   destroyAllSprites,
 } from "@/lib/api/domains/sprites-api";
-import type { SpritesInstance, SpritesTestResult, SpritesTestStep } from "@/lib/types/http-sprites";
+import type {
+  SpritesInstance,
+  SpritesStatus,
+  SpritesTestResult,
+  SpritesTestStep,
+} from "@/lib/types/http-sprites";
 
 export function SpritesConnectionCard({ secretId }: { secretId?: string }) {
   const { status } = useSprites(secretId);
@@ -157,7 +163,24 @@ function StepRow({ step }: { step: SpritesTestStep }) {
 
 export function SpritesInstancesCard({ secretId }: { secretId?: string }) {
   const { instances, loading } = useSprites(secretId);
-  const removeSpritesInstance = useAppStore((state) => state.removeSpritesInstance);
+  const qc = useQueryClient();
+  const removeSpritesInstance = useCallback(
+    (name: string) => {
+      qc.setQueryData<{ status: SpritesStatus | null; instances: SpritesInstance[] }>(
+        qk.settings.sprites(secretId),
+        (prev) => {
+          if (!prev) return prev;
+          const next = prev.instances.filter((i) => i.name !== name);
+          return {
+            ...prev,
+            instances: next,
+            status: prev.status ? { ...prev.status, instance_count: next.length } : prev.status,
+          };
+        },
+      );
+    },
+    [qc, secretId],
+  );
   const [destroying, setDestroying] = useState<string | null>(null);
   const [destroyingAll, setDestroyingAll] = useState(false);
 

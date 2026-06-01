@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useAppStore } from "@/components/state-provider";
+import { useSettingsAgents } from "@/hooks/domains/settings/use-settings-reads";
 import { getAgentProfileMcpConfigAction } from "@/app/actions/agents";
 
 const EMPTY_SERVERS: string[] = [];
@@ -12,7 +12,7 @@ const DEFAULT_KANDEV: string[] = ["kandev"];
  * Returns whether the agent supports MCP and the list of active MCP server names.
  */
 export function useSessionMcp(agentProfileId: string | null | undefined) {
-  const settingsAgents = useAppStore((state) => state.settingsAgents.items);
+  const settingsAgents = useSettingsAgents();
   // Track which profileId the fetched servers belong to, so stale results are ignored
   const [fetchResult, setFetchResult] = useState<{
     profileId: string;

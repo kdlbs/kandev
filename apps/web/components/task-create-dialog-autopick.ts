@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import type { AgentProfileOption } from "@/lib/state/slices";
+import type { AgentProfileOption } from "@/lib/types/settings";
 import { getLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
 import { createDebugLogger } from "@/lib/debug/log";

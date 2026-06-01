@@ -7,7 +7,8 @@ import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
 import { IconTerminal2 } from "@tabler/icons-react";
-import { useAppStoreApi } from "@/components/state-provider";
+import { useQueryClient } from "@tanstack/react-query";
+import { qk } from "@/lib/query/keys";
 import { fetchExecutor, listExecutors, updateExecutor } from "@/lib/api/domains/settings-api";
 import { SSHConnectionCard } from "@/components/settings/ssh-connection-card";
 import type { SSHExecutorConfig } from "@/components/settings/ssh-connection-card";
@@ -168,32 +169,31 @@ function useRunningSessionCount(executorId: string): number {
 }
 
 function useSaveExecutor(executorId: string, onSaved: () => void | Promise<void>) {
-  const store = useAppStoreApi();
+  const qc = useQueryClient();
 
   return useCallback(
     async (cfg: SSHExecutorConfig) => {
       const config = buildSSHExecutorConfig(cfg);
       await updateExecutor(executorId, { name: cfg.name, config });
-      // Refresh the store so the executor list reflects the new name + config.
+      // Refresh the TQ cache so the executor list reflects the new name + config.
       try {
         const fresh = await listExecutors();
-        store.getState().setExecutors(fresh.executors);
+        qc.setQueryData<Executor[]>(qk.settings.executors(), fresh.executors);
       } catch {
         // Non-fatal: the local view still reloads via onSaved(). Read the
         // current snapshot at write time so a WS event that updated the
         // executor list mid-flight doesn't get overwritten with a stale
         // captured copy.
-        const current = store.getState().executors.items;
-        store
-          .getState()
-          .setExecutors(
-            current.map((e: Executor) =>
-              e.id === executorId ? { ...e, name: cfg.name, config } : e,
-            ),
-          );
+        const current = qc.getQueryData<Executor[]>(qk.settings.executors()) ?? [];
+        qc.setQueryData<Executor[]>(
+          qk.settings.executors(),
+          current.map((e: Executor) =>
+            e.id === executorId ? { ...e, name: cfg.name, config } : e,
+          ),
+        );
       }
       await onSaved();
     },
-    [executorId, store, onSaved],
+    [executorId, qc, onSaved],
   );
 }

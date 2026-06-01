@@ -1,24 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { cleanup, renderHook } from "@testing-library/react";
-
-const mockRequest = vi.fn();
-const mockSetMessages = vi.fn();
+import { QueryClient } from "@tanstack/react-query";
 
 vi.mock("@/lib/ws/connection", () => ({
-  getWebSocketClient: () => ({ request: mockRequest }),
+  getWebSocketClient: () => null,
 }));
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: () => null,
-  useAppStoreApi: () => ({
-    getState: () => ({
-      messages: { bySession: {} },
-      setMessages: mockSetMessages,
-    }),
-  }),
+  useAppStoreApi: () => null,
 }));
 
 import { useVisibilityBackfill } from "./use-session-messages";
+import { qk } from "@/lib/query/keys";
 
 function setVisibility(value: "visible" | "hidden") {
   Object.defineProperty(document, "visibilityState", { configurable: true, value });
@@ -26,68 +20,57 @@ function setVisibility(value: "visible" | "hidden") {
 }
 
 describe("useVisibilityBackfill", () => {
-  let store: { getState: () => unknown };
+  let queryClient: QueryClient;
+  let invalidateSpy: ReturnType<typeof vi.fn<unknown[], unknown>>;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockRequest.mockResolvedValue({ messages: [], has_more: false });
-    store = {
-      getState: () => ({ messages: { bySession: {} }, setMessages: mockSetMessages }),
-    };
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    invalidateSpy = vi.fn<unknown[], unknown>(() => Promise.resolve());
+    queryClient.invalidateQueries =
+      invalidateSpy as unknown as typeof queryClient.invalidateQueries;
   });
 
   afterEach(() => {
     cleanup();
   });
 
-  it("fetches when the tab becomes visible", () => {
-    renderHook(() => useVisibilityBackfill("sess-1", store as never));
+  it("invalidates the messages query when the tab becomes visible", () => {
+    renderHook(() => useVisibilityBackfill("sess-1", queryClient));
     setVisibility("visible");
-    expect(mockRequest).toHaveBeenCalledTimes(1);
-    expect(mockRequest).toHaveBeenCalledWith(
-      "message.list",
-      expect.objectContaining({ session_id: "sess-1" }),
-      expect.any(Number),
-    );
+    expect(invalidateSpy).toHaveBeenCalledTimes(1);
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: qk.session.messages("sess-1") });
   });
 
-  it("does not fetch when the tab becomes hidden", () => {
-    renderHook(() => useVisibilityBackfill("sess-1", store as never));
+  it("does not invalidate when the tab becomes hidden", () => {
+    renderHook(() => useVisibilityBackfill("sess-1", queryClient));
     setVisibility("hidden");
-    expect(mockRequest).not.toHaveBeenCalled();
+    expect(invalidateSpy).not.toHaveBeenCalled();
   });
 
   it("does nothing when sessionId is null", () => {
-    renderHook(() => useVisibilityBackfill(null, store as never));
+    renderHook(() => useVisibilityBackfill(null, queryClient));
     setVisibility("visible");
-    expect(mockRequest).not.toHaveBeenCalled();
+    expect(invalidateSpy).not.toHaveBeenCalled();
   });
 
   it("removes the listener on unmount", () => {
-    const { unmount } = renderHook(() => useVisibilityBackfill("sess-1", store as never));
+    const { unmount } = renderHook(() => useVisibilityBackfill("sess-1", queryClient));
     unmount();
     setVisibility("visible");
-    expect(mockRequest).not.toHaveBeenCalled();
+    expect(invalidateSpy).not.toHaveBeenCalled();
   });
 
   it("re-registers when sessionId changes", () => {
     const { rerender } = renderHook(
-      ({ id }: { id: string | null }) => useVisibilityBackfill(id, store as never),
+      ({ id }: { id: string | null }) => useVisibilityBackfill(id, queryClient),
       { initialProps: { id: "sess-1" } },
     );
     setVisibility("visible");
-    expect(mockRequest).toHaveBeenLastCalledWith(
-      "message.list",
-      expect.objectContaining({ session_id: "sess-1" }),
-      expect.any(Number),
-    );
+    expect(invalidateSpy).toHaveBeenLastCalledWith({ queryKey: qk.session.messages("sess-1") });
 
     rerender({ id: "sess-2" });
     setVisibility("visible");
-    expect(mockRequest).toHaveBeenLastCalledWith(
-      "message.list",
-      expect.objectContaining({ session_id: "sess-2" }),
-      expect.any(Number),
-    );
+    expect(invalidateSpy).toHaveBeenLastCalledWith({ queryKey: qk.session.messages("sess-2") });
   });
 });

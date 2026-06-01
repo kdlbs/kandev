@@ -20,7 +20,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/
 import { Input } from "@kandev/ui/input";
 import { Spinner } from "@kandev/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { useAppStore } from "@/components/state-provider";
+import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import { useToast } from "@/components/toast-provider";
 import { configureGitHubToken, clearGitHubToken } from "@/lib/api/domains/github-api";
@@ -148,9 +148,8 @@ function NotConnectedView({
 }) {
   // gh installed → CLI sign-in is the recommended path (browser-driven OAuth,
   // no PAT to manage). When it's missing we drop to PAT-only.
-  const ghInstalled = useAppStore((state) =>
-    state.availableAgents.tools.some((t) => t.name === "gh" && t.available),
-  );
+  const { tools } = useAvailableAgents();
+  const ghInstalled = tools.some((t) => t.name === "gh" && t.available);
   const [tokenOpen, setTokenOpen] = useState(false);
   const [diagOpen, setDiagOpen] = useState(false);
 

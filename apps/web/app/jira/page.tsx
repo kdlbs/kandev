@@ -8,7 +8,7 @@ import { StateHydrator } from "@/components/state-hydrator";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { JiraPageClient } from "./jira-page-client";
 import type { Workflow, WorkflowStep, Workspace, UserSettingsResponse } from "@/lib/types/http";
-import type { AppState } from "@/lib/state/store";
+import type { SsrInitialState } from "@/lib/ssr/initial-state";
 
 export default async function JiraPage() {
   let workspaces: Workspace[] = [];
@@ -40,7 +40,7 @@ export default async function JiraPage() {
 
   const mappedUserSettings = mapUserSettingsResponse(userSettingsResponse);
 
-  const initialState: Partial<AppState> = {
+  const initialState: SsrInitialState = {
     workspaces: { items: workspaces, activeId: workspaceId ?? null },
     workflows: {
       items: workflows.map((w) => ({

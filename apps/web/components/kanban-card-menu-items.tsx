@@ -24,7 +24,10 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
 } from "@kandev/ui/dropdown-menu";
-import { useAppStore } from "@/components/state-provider";
+import {
+  useKanbanMultiSnapshots,
+  useWorkflowItems,
+} from "@/hooks/domains/kanban/use-kanban-snapshots";
 import type { WorkflowStep } from "@/components/kanban-card";
 import {
   stepHasAutoStart,
@@ -293,8 +296,8 @@ export function useKanbanCardMoveTargets(
   taskId: string,
   steps?: WorkflowStep[],
 ): KanbanCardMoveTargets {
-  const workflows = useAppStore((state) => state.workflows.items);
-  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
+  const workflows = useWorkflowItems();
+  const { snapshots } = useKanbanMultiSnapshots({ enabled: false });
 
   const currentWorkflowId = useMemo(() => {
     for (const [workflowId, snapshot] of Object.entries(snapshots)) {

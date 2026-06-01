@@ -12,7 +12,8 @@ import {
   type VoiceInputState,
   type VoiceModelLoadState,
 } from "@/hooks/use-voice-input";
-import { useAppStore } from "@/components/state-provider";
+import { useUserSettings } from "@/hooks/domains/settings/use-user-settings";
+import { DEFAULT_VOICE_MODE_STATE } from "@/lib/types/settings";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
 import { useToast } from "@/components/toast-provider";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
@@ -184,7 +185,7 @@ function useVoiceShortcut(
   start: () => Promise<void>,
   stop: () => Promise<void>,
 ) {
-  const overrides = useAppStore((s) => s.userSettings.keyboardShortcuts);
+  const overrides = useUserSettings().data?.keyboardShortcuts ?? {};
   const shortcut = getShortcut("VOICE_INPUT_TOGGLE", overrides);
   const stateRef = useRef(state);
   useEffect(() => {
@@ -240,8 +241,13 @@ function UnsupportedVoiceButton({ disabled }: { disabled?: boolean }) {
 
 // ── Component ────────────────────────────────────────────────────────────
 
+/** Reads the mapped voiceMode settings from the TQ user-settings cache. */
+function useVoiceModePrefs() {
+  return useUserSettings().data?.voiceMode ?? DEFAULT_VOICE_MODE_STATE;
+}
+
 export function VoiceInputButton({ onTranscript, onAutoSend, disabled }: VoiceInputButtonProps) {
-  const enabled = useAppStore((s) => s.userSettings.voiceMode.enabled);
+  const enabled = useVoiceModePrefs().enabled;
   // Render nothing — including no hook subscriptions — when the user has
   // disabled the feature in settings. Distinct from `!supported` (browser
   // limitation) which shows a tappable greyed icon. Done as a sub-component
@@ -347,7 +353,7 @@ function VoiceMicButton({
 
 function EnabledVoiceInputButton({ onTranscript, onAutoSend, disabled }: VoiceInputButtonProps) {
   const { toast } = useToast();
-  const voiceMode = useAppStore((s) => s.userSettings.voiceMode);
+  const voiceMode = useVoiceModePrefs();
   const handleError = useCallback((err: VoiceError) => toastForError(toast, err), [toast]);
   const wrappedTranscript = useAutoSendOnTranscript(onTranscript, onAutoSend, voiceMode.autoSend);
   const isCoarsePointer = useIsCoarsePointer();

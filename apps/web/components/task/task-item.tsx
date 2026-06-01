@@ -12,8 +12,10 @@ import {
   IconShieldQuestion,
 } from "@tabler/icons-react";
 import { PRTaskIcon } from "@/components/github/pr-task-icon";
+import { useTaskPRs } from "@/hooks/domains/github/use-task-pr";
 import { IssueTaskIcon } from "@/components/github/issue-task-icon";
-import { useAppStore } from "@/components/state-provider";
+import { useQuery } from "@tanstack/react-query";
+import { sessionPollModeQueryOptions } from "@/lib/query/query-options/session-runtime";
 import { cn } from "@/lib/utils";
 import { computeRowIndent, resolveRowDepth } from "@/lib/sidebar/row-indent";
 import { DEBUG_UI } from "@/lib/config";
@@ -170,9 +172,11 @@ function TaskItemStatsRow({
   prInfo?: { number: number; state: string };
   primarySessionId?: string | null;
 }) {
-  const pollMode = useAppStore((s) =>
-    DEBUG_UI && primarySessionId ? (s.sessionPollMode.bySessionId[primarySessionId] ?? null) : null,
-  );
+  const { data: pollModeData } = useQuery({
+    ...sessionPollModeQueryOptions(primarySessionId ?? ""),
+    enabled: false,
+  });
+  const pollMode = DEBUG_UI && primarySessionId ? (pollModeData ?? null) : null;
 
   if (!updatedAt && !prInfo && !pollMode) return null;
 
@@ -222,7 +226,8 @@ function TaskPRIcon({
   taskId?: string;
   prInfo?: { number: number; state: string };
 }) {
-  const hasStorePR = useAppStore((s) => !!taskId && (s.taskPRs.byTaskId[taskId]?.length ?? 0) > 0);
+  const taskPRs = useTaskPRs(taskId ?? null);
+  const hasStorePR = !!taskId && taskPRs.length > 0;
   if (hasStorePR) return <PRTaskIcon taskId={taskId!} />;
   if (!prInfo) return null;
   const state = prInfo.state.toLowerCase();

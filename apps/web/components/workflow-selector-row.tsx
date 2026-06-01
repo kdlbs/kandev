@@ -6,7 +6,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kande
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Button } from "@kandev/ui/button";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
-import type { AgentProfileOption } from "@/lib/state/slices";
+import type { AgentProfileOption } from "@/lib/types/settings";
 import { AgentLogo } from "@/components/agent-logo";
 
 type StepItem = {

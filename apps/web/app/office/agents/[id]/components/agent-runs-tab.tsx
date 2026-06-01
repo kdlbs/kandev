@@ -1,11 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { IconClock, IconRun } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { useAppStore } from "@/components/state-provider";
-import { useOfficeRefetch } from "@/hooks/use-office-refetch";
-import { listRuns } from "@/lib/api/domains/office-api";
+import { officeQueryOptions } from "@/lib/query/query-options/office";
 import type { AgentProfile, Run } from "@/lib/state/slices/office/types";
 import { timeAgo } from "@/lib/utils/time";
 
@@ -56,31 +56,19 @@ function CancelReasonBadge({ reason }: { reason: string }) {
 
 export function AgentRunsTab({ agent }: AgentRunsTabProps) {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const [runs, setRuns] = useState<Run[]>([]);
-  const [loading, setLoading] = useState(true);
 
-  const fetchRuns = useCallback(async () => {
-    if (!workspaceId) return;
-    try {
-      const res = await listRuns(workspaceId);
-      const agentRuns = (res.runs ?? []).filter((w) => w.agent_profile_id === agent.id);
-      setRuns(agentRuns);
-    } catch {
-      // Silently handle - empty state will show
-    } finally {
-      setLoading(false);
-    }
-  }, [workspaceId, agent.id]);
-
-  useEffect(() => {
-    void fetchRuns();
-  }, [fetchRuns]);
-
-  // Refresh runs reactively when runs change. The office WS handler
-  // triggers "runs" on office.run.queued and the agent-session
-  // path triggers "agents" on session.state_changed.
-  useOfficeRefetch("runs", fetchRuns);
-  useOfficeRefetch("agents", fetchRuns);
+  // Runs come from TanStack Query; the office WS bridge invalidates
+  // `qk.office.runs(wsId)` on office.run.queued / office.run.processed so
+  // this list refreshes reactively without a manual refetch trigger.
+  const { data: allRuns = [], isPending } = useQuery({
+    ...officeQueryOptions.runs(workspaceId ?? ""),
+    enabled: !!workspaceId,
+  });
+  const runs = useMemo<Run[]>(
+    () => allRuns.filter((w) => w.agent_profile_id === agent.id),
+    [allRuns, agent.id],
+  );
+  const loading = isPending && !!workspaceId;
 
   if (loading) {
     return (

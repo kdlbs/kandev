@@ -1,6 +1,6 @@
 "use client";
 
-import { useAppStore } from "@/components/state-provider";
+import { useAgentName } from "@/hooks/domains/office/use-office-agents";
 import { formatRelativeTime } from "@/lib/utils";
 import { AgentAvatar } from "@/app/office/components/agent-avatar";
 import type { TaskActivityEntry } from "@/app/office/tasks/[id]/types";
@@ -11,14 +11,10 @@ type TaskActivityProps = {
 };
 
 function ActivityRow({ entry }: { entry: TaskActivityEntry }) {
-  const agentName = useAppStore((s) =>
-    entry.actorType === "agent"
-      ? (s.office.agentProfiles.find((a) => a.id === entry.actorId)?.name ?? "Agent")
-      : "",
-  );
+  const resolvedAgentName = useAgentName(entry.actorType === "agent" ? entry.actorId : null);
   let actorName = "System";
   if (entry.actorType === "user") actorName = "You";
-  else if (entry.actorType === "agent") actorName = agentName;
+  else if (entry.actorType === "agent") actorName = resolvedAgentName ?? "Agent";
 
   return (
     <div className="flex items-start gap-3 px-0 py-2 text-sm">

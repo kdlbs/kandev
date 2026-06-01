@@ -1,6 +1,8 @@
-import type { AppState, KanbanState } from "@/lib/state/store";
+import type { AppState } from "@/lib/state/store";
+import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import { primaryTaskRepository } from "@/lib/types/http";
 import type { WorkflowSnapshot, Message, Task } from "@/lib/types/http";
+import type { SsrInitialState } from "@/lib/ssr/initial-state";
 import {
   isPRReviewFromMetadata,
   isIssueWatchFromMetadata,
@@ -9,7 +11,12 @@ import {
 
 type KanbanTask = KanbanState["tasks"][number];
 
-export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
+/**
+ * Maps a workflow snapshot into the SSR `kanban` payload. This is server data —
+ * the hydrator seeds it into the TanStack Query `qk.kanban.multi()` cache (not a
+ * Zustand slice). Returned under the `kanban` key of {@link SsrInitialState}.
+ */
+export function snapshotToState(snapshot: WorkflowSnapshot): Pick<SsrInitialState, "kanban"> {
   // Handle empty snapshot (ephemeral tasks have no workflow)
   if (!snapshot.workflow) {
     return {

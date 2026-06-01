@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import {
   IconRobot,
@@ -11,8 +11,7 @@ import {
 } from "@tabler/icons-react";
 import { Card } from "@kandev/ui/card";
 import { useAppStore } from "@/components/state-provider";
-import { useOfficeRefetch } from "@/hooks/use-office-refetch";
-import * as officeApi from "@/lib/api/domains/office-api";
+import { officeQueryOptions } from "@/lib/query/query-options/office";
 import { normalizeActivityEntry } from "@/lib/api/domains/office-activity-normalize";
 import { StatusIcon } from "./tasks/status-icon";
 import type { DashboardData, AgentProfile, RecentTask } from "@/lib/state/slices/office/types";
@@ -34,6 +33,8 @@ function formatMonthSpend(subcents: number): string {
 }
 
 type OfficePageClientProps = {
+  // initialDashboard prop retained for callers that still pass it but is no
+  // longer used — data comes from TQ instead.
   initialDashboard?: DashboardData | null;
 };
 
@@ -212,35 +213,18 @@ function SubscriptionUsageCard({ agents }: { agents: AgentProfile[] }) {
   );
 }
 
-export function OfficePageClient({ initialDashboard }: OfficePageClientProps) {
+export function OfficePageClient({ initialDashboard: _initialDashboard }: OfficePageClientProps) {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const dashboard = useAppStore((s) => s.office.dashboard);
-  const agents = useAppStore((s) => s.office.agentProfiles);
-  const setDashboard = useAppStore((s) => s.setDashboard);
+  const { data: dashboard } = useQuery({
+    ...officeQueryOptions.dashboard(workspaceId ?? ""),
+    enabled: !!workspaceId,
+  });
+  const { data: agents = [] } = useQuery({
+    ...officeQueryOptions.agents(workspaceId ?? ""),
+    enabled: !!workspaceId,
+  });
 
-  // Hydrate from SSR exactly once on first mount; subsequent updates flow
-  // through the WS-driven refetch below. Skipping the unconditional mount
-  // fetch removes a redundant round-trip when SSR data is already in the
-  // store (Stream G of office optimization).
-  useEffect(() => {
-    if (initialDashboard) {
-      setDashboard(initialDashboard);
-    }
-  }, [initialDashboard, setDashboard]);
-
-  const fetchDashboard = useCallback(async () => {
-    if (!workspaceId) return;
-    const data = await officeApi.getDashboard(workspaceId);
-    setDashboard(data);
-  }, [workspaceId, setDashboard]);
-
-  // Refetch dashboard on any office event that affects metrics. The
-  // dashboard payload now includes per-agent summaries so a single fetch
-  // refreshes both the metric cards and the agent cards panel.
-  useOfficeRefetch("dashboard", fetchDashboard);
-  useOfficeRefetch("agents", fetchDashboard);
-
-  const metrics = extractMetrics(dashboard);
+  const metrics = extractMetrics(dashboard ?? null);
   const topUtilization = maxUtilization(agents);
   const quotaLabel = topUtilization > 0 ? `${Math.round(topUtilization)}%` : "—";
   const hasSubscriptionAgents = agents.some((a) => a.billingType === "subscription");

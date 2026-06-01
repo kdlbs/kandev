@@ -1,15 +1,19 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { useEffect } from "react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@kandev/ui/tooltip";
-import { StateProvider, useAppStore } from "@/components/state-provider";
+import { StateProvider } from "@/components/state-provider";
 import { TaskOptimisticContextProvider } from "@/hooks/use-optimistic-task-mutation";
+import { createTestQueryClient } from "@/test-utils/render-with-query";
+import { qk } from "@/lib/query/keys";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
 import { agentProfileId as toAgentProfileId, workspaceId as toWorkspaceId } from "@/lib/types/ids";
 import { ApproversPicker } from "./approvers-picker";
 import { buildDecisionLookup } from "./agents-multi-picker";
 import type { Task, TaskDecision } from "@/app/office/tasks/[id]/types";
+
+const WS_ID = "ws-1";
 
 afterEach(() => cleanup());
 
@@ -44,12 +48,6 @@ function makeAgent(id: string, name: string): AgentProfile {
   };
 }
 
-function SeedAgents({ agents }: { agents: AgentProfile[] }) {
-  const setAgents = useAppStore((s) => s.setOfficeAgentProfiles);
-  useEffect(() => setAgents(agents), [setAgents, agents]);
-  return null;
-}
-
 function Wrapper({
   children,
   task,
@@ -60,13 +58,19 @@ function Wrapper({
   agents: AgentProfile[];
 }) {
   const ctx = { task, applyPatch: () => {}, restore: () => {} };
+  // The picker reads agents from TanStack Query (officeQueryOptions.agents)
+  // scoped to the active workspace, so seed the cache + set the active
+  // workspace instead of the (removed) Zustand agentProfiles mirror.
+  const client = createTestQueryClient();
+  client.setQueryData(qk.office.agents(WS_ID), agents);
   return (
-    <StateProvider>
-      <TooltipProvider>
-        <SeedAgents agents={agents} />
-        <TaskOptimisticContextProvider value={ctx}>{children}</TaskOptimisticContextProvider>
-      </TooltipProvider>
-    </StateProvider>
+    <QueryClientProvider client={client}>
+      <StateProvider initialState={{ workspaces: { activeId: WS_ID } }}>
+        <TooltipProvider>
+          <TaskOptimisticContextProvider value={ctx}>{children}</TaskOptimisticContextProvider>
+        </TooltipProvider>
+      </StateProvider>
+    </QueryClientProvider>
   );
 }
 

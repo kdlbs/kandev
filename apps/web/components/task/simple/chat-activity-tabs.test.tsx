@@ -1,7 +1,9 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import type { ReactNode } from "react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { StateProvider } from "@/components/state-provider";
+import { createTestQueryClient } from "@/test-utils/render-with-query";
 import type { Task, TaskSession } from "@/app/office/tasks/[id]/types";
 
 // Stub heavy descendants so the test stays focused on the tabs and the
@@ -34,7 +36,14 @@ const T_11 = "2026-05-01T11:00:00Z";
 const T_12 = "2026-05-01T12:00:00Z";
 
 function wrap(node: ReactNode) {
-  return <StateProvider>{node}</StateProvider>;
+  // AgentTabTrigger resolves the agent display name via useAgentProfile
+  // (TanStack Query); with no seeded cache it falls back to the session's
+  // agentName, which these tests assert on. A QueryClient must be present.
+  return (
+    <QueryClientProvider client={createTestQueryClient()}>
+      <StateProvider>{node}</StateProvider>
+    </QueryClientProvider>
+  );
 }
 
 function makeTask(partial: Partial<Task> = {}): Task {

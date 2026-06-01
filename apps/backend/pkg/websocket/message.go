@@ -16,14 +16,28 @@ const (
 	MessageTypeError        MessageType = "error"
 )
 
-// Message is the base envelope for all WebSocket messages
+// Message is the base envelope for all WebSocket messages.
+//
+// Seq and ConnectionID are populated by the gateway at write time (per-connection
+// monotonic counter starting at 1, plus the connection ID). They are purely
+// additive — older clients that don't know about them simply ignore the fields.
+// E2E tests use them to detect dropped WS events: any seq gap is a regression.
+//
+// SessionSeq is a per-session monotonic counter stamped at write time for
+// session-routed events (BroadcastToSession). It is absent (zero) on
+// connection-wide notifications and on task/run-routed broadcasts whose
+// routing key isn't a session. Phase 2 of the WS accounting work uses it to
+// detect cross-session misrouting that per-connection seq cannot see.
 type Message struct {
-	ID        string            `json:"id,omitempty"`
-	Type      MessageType       `json:"type"`
-	Action    string            `json:"action"`
-	Payload   json.RawMessage   `json:"payload"`
-	Timestamp time.Time         `json:"timestamp"`
-	Metadata  map[string]string `json:"metadata,omitempty"`
+	ID           string            `json:"id,omitempty"`
+	Type         MessageType       `json:"type"`
+	Action       string            `json:"action"`
+	Payload      json.RawMessage   `json:"payload"`
+	Timestamp    time.Time         `json:"timestamp"`
+	Metadata     map[string]string `json:"metadata,omitempty"`
+	Seq          int64             `json:"seq,omitempty"`
+	SessionSeq   int64             `json:"session_seq,omitempty"`
+	ConnectionID string            `json:"connection_id,omitempty"`
 }
 
 // EnsureMetadata lazily initializes and returns the Metadata map.

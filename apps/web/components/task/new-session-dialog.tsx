@@ -5,6 +5,9 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Button } from "@kandev/ui/button";
 import { Textarea } from "@kandev/ui/textarea";
 import { useAppStore } from "@/components/state-provider";
+import { useExecutors, useAgentProfiles } from "@/hooks/domains/settings/use-settings-reads";
+import { useTaskSessionById } from "@/hooks/domains/session/use-task-session-by-id";
+import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
 import { useToast } from "@/components/toast-provider";
 import { launchSession } from "@/lib/services/session-launch-service";
 import { buildStartRequest } from "@/lib/services/session-launch-helpers";
@@ -19,7 +22,7 @@ import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { useRemoteAuthSpecs } from "@/hooks/domains/settings/use-remote-auth-specs";
 import { isAgentConfiguredOnExecutor } from "@/lib/agent-executor-compat";
 import { fetchTaskEnvironment } from "@/lib/api/domains/task-environment-api";
-import type { AgentProfileOption } from "@/lib/state/slices";
+import type { AgentProfileOption } from "@/lib/types/settings";
 import type { ExecutorProfile } from "@/lib/types/http";
 import { IconLoader2 } from "@tabler/icons-react";
 import { EnhancePromptButton } from "@/components/enhance-prompt-button";
@@ -42,7 +45,7 @@ type NewSessionDialogProps = {
 };
 
 function useTaskExecutorProfile(taskId: string, open: boolean): ExecutorProfile | null {
-  const executors = useAppStore((state) => state.executors.items);
+  const executors = useExecutors();
   const [profile, setProfile] = useState<ExecutorProfile | null>(null);
 
   useEffect(() => {
@@ -73,24 +76,14 @@ function useTaskExecutorProfile(taskId: string, open: boolean): ExecutorProfile 
 }
 
 function useNewSessionDialogState(taskId: string) {
-  const taskTitle = useAppStore((state) => {
-    const task = state.kanban.tasks.find((t: { id: string }) => t.id === taskId);
-    return task?.title ?? "Task";
-  });
-  const agentProfiles = useAppStore((state) => state.agentProfiles.items);
+  const taskForTitle = useTaskById(taskId);
+  const taskTitle = taskForTitle?.title ?? "Task";
+  const agentProfiles = useAgentProfiles();
+  const executors = useExecutors();
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const currentSession = useAppStore((state) => {
-    return activeSessionId ? (state.taskSessions.items[activeSessionId] ?? null) : null;
-  });
-  const worktreeBranch = useAppStore((state) => {
-    if (!activeSessionId) return null;
-    const wtIds = state.sessionWorktreesBySessionId.itemsBySessionId[activeSessionId];
-    if (wtIds?.length) {
-      const wt = state.worktrees.items[wtIds[0]];
-      if (wt?.branch) return wt.branch;
-    }
-    return currentSession?.worktree_branch ?? null;
-  });
+  const currentSession = useTaskSessionById(activeSessionId);
+  // Worktree branch is derived from the canonical TaskSession TQ cache.
+  const worktreeBranch = currentSession?.worktree_branch ?? null;
   const initialPrompt = useAppStore((state) => {
     if (!activeSessionId) return null;
     const msgs = state.messages.bySession[activeSessionId];
@@ -98,13 +91,11 @@ function useNewSessionDialogState(taskId: string) {
     const first = msgs.find((m: { author_type?: string }) => m.author_type === "user");
     return first ? ((first as { content?: string }).content ?? null) : null;
   });
-  const executorLabel = useAppStore((state) => {
+  const executorLabel = (() => {
     if (!currentSession?.executor_id) return null;
-    const executor = state.executors.items.find(
-      (e: { id: string }) => e.id === currentSession.executor_id,
-    );
+    const executor = executors.find((e) => e.id === currentSession.executor_id);
     return executor?.name ?? null;
-  });
+  })();
 
   const sessionProfileId = currentSession?.agent_profile_id ?? "";
   const profileIsValid = agentProfiles.some((p: { id: string }) => p.id === sessionProfileId);
@@ -140,7 +131,7 @@ function activateNewSession(
 
 function useSessionOptions(taskId: string) {
   const { sessions, loadSessions } = useTaskSessions(taskId);
-  const agentProfiles = useAppStore((s) => s.agentProfiles.items);
+  const agentProfiles = useAgentProfiles();
   useEffect(() => {
     loadSessions(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps

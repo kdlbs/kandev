@@ -5,7 +5,6 @@ import { createSessionRuntimeSlice } from "./session-runtime-slice";
 import { createSessionSlice } from "../session/session-slice";
 import type { SessionCommit, SessionRuntimeSlice } from "./types";
 import type { SessionSlice } from "../session/types";
-import { sessionId as toSessionId, taskId as toTaskId } from "@/lib/types/ids";
 
 function makeStore() {
   return create<SessionRuntimeSlice>()(immer(createSessionRuntimeSlice));
@@ -66,7 +65,6 @@ describe("registerSessionEnvironment — migrateEnvKeyedData", () => {
 
     // Simulate data arriving under the fallback sessionId key
     store.getState().setSessionCommits("sess-1", [{ commit_sha: "abc" } as never]);
-    store.getState().setGitStatus("sess-1", { branch: "main" } as never);
     store.getState().appendShellOutput("sess-1", "hello");
 
     // Register the environment mapping
@@ -75,11 +73,9 @@ describe("registerSessionEnvironment — migrateEnvKeyedData", () => {
     const state = store.getState();
     // Data should now live under the environmentId key
     expect(state.sessionCommits.byEnvironmentId["env-1"]).toEqual([{ commit_sha: "abc" }]);
-    expect(state.gitStatus.byEnvironmentId["env-1"]).toEqual({ branch: "main" });
     expect(state.shell.outputs["env-1"]).toBe("hello");
     // sessionId key should be cleaned up
     expect(state.sessionCommits.byEnvironmentId["sess-1"]).toBeUndefined();
-    expect(state.gitStatus.byEnvironmentId["sess-1"]).toBeUndefined();
     expect(state.shell.outputs["sess-1"]).toBeUndefined();
   });
 
@@ -91,7 +87,7 @@ describe("registerSessionEnvironment — migrateEnvKeyedData", () => {
     store.getState().setSessionCommits("other-sess", [{ commit_sha: "existing" } as never]);
 
     // Stale data under sessionId from before mapping was known
-    store.getState().setGitStatus("sess-2", { branch: "stale" } as never);
+    store.getState().appendShellOutput("sess-2", "stale");
 
     // A different session wrote commits under its own fallback key
     store.setState((draft) => {
@@ -105,9 +101,9 @@ describe("registerSessionEnvironment — migrateEnvKeyedData", () => {
     // Commits: pre-existing env-1 data preserved, orphaned sess-2 key deleted
     expect(state.sessionCommits.byEnvironmentId["env-1"]).toEqual([{ commit_sha: "existing" }]);
     expect(state.sessionCommits.byEnvironmentId["sess-2"]).toBeUndefined();
-    // Git status: no env-1 data existed, so sess-2 data migrated
-    expect(state.gitStatus.byEnvironmentId["env-1"]).toEqual({ branch: "stale" });
-    expect(state.gitStatus.byEnvironmentId["sess-2"]).toBeUndefined();
+    // Shell output: no env-1 data existed, so sess-2 data migrated
+    expect(state.shell.outputs["env-1"]).toBe("stale");
+    expect(state.shell.outputs["sess-2"]).toBeUndefined();
   });
 
   it("no-ops when sessionId equals environmentId", () => {
@@ -144,114 +140,58 @@ describe("registerSessionEnvironment — migrateEnvKeyedData", () => {
   });
 });
 
-describe("setGitStatus", () => {
-  it("updates cached status when only branch diff totals change", () => {
-    const store = makeStore();
+// NOTE: the standalone setGitStatus tests were removed — git status no longer
+// lives in this Zustand slice. The TQ-cache write + same-status/diff-totals
+// guard is covered by the session-runtime bridge test
+// (lib/query/bridge/__tests__/session-runtime.test.ts).
 
-    store.getState().setGitStatus("sess-1", {
-      branch: "feature",
-      remote_branch: "",
-      ahead: 0,
-      behind: 0,
-      files: {},
-      timestamp: "same-timestamp",
-      branch_additions: 0,
-      branch_deletions: 0,
-    } as never);
-
-    store.getState().setGitStatus("sess-1", {
-      branch: "feature",
-      remote_branch: "",
-      ahead: 0,
-      behind: 0,
-      files: {},
-      timestamp: "same-timestamp",
-      branch_additions: 3,
-      branch_deletions: 1,
-    } as never);
-
-    expect(store.getState().gitStatus.byEnvironmentId["sess-1"]).toMatchObject({
-      branch_additions: 3,
-      branch_deletions: 1,
-    });
-  });
-});
-
-describe("setTaskSession — cross-slice migration", () => {
+// The env-keyed-data migration used to be triggered by the deleted Zustand
+// `setTaskSession` / `setTaskSessionsForTask` setters. The session-state TQ
+// bridge now drives it through `registerSessionEnvironment` (its `setEnvMapping`
+// dep), so the migration is exercised here through that setter directly.
+describe("registerSessionEnvironment — cross-slice migration", () => {
   it("migrates env-keyed data when task_environment_id is set", () => {
     const store = makeCombinedStore();
 
     // Data arrives under fallback sessionId key before the mapping is known
-    store.getState().setGitStatus("sess-1", { branch: "main" } as never);
+    store.getState().appendShellOutput("sess-1", "main");
     store.getState().setSessionCommits("sess-1", [{ commit_sha: "abc" } as never]);
 
-    // Session update arrives with task_environment_id
-    store.getState().setTaskSession({
-      id: toSessionId("sess-1"),
-      task_id: toTaskId("task-1"),
-      state: "RUNNING",
-      task_environment_id: "env-1",
-      started_at: "",
-      updated_at: "",
-    });
+    // Env mapping arrives (the bridge calls this with the session's
+    // task_environment_id).
+    store.getState().registerSessionEnvironment("sess-1", "env-1");
 
     const state = store.getState();
     expect(state.environmentIdBySessionId["sess-1"]).toBe("env-1");
-    expect(state.gitStatus.byEnvironmentId["env-1"]).toEqual({ branch: "main" });
-    expect(state.gitStatus.byEnvironmentId["sess-1"]).toBeUndefined();
+    expect(state.shell.outputs["env-1"]).toBe("main");
+    expect(state.shell.outputs["sess-1"]).toBeUndefined();
     expect(state.sessionCommits.byEnvironmentId["env-1"]).toEqual([{ commit_sha: "abc" }]);
     expect(state.sessionCommits.byEnvironmentId["sess-1"]).toBeUndefined();
   });
 
-  it("does not migrate when task_environment_id is absent", () => {
+  it("does not migrate when no env mapping is registered", () => {
     const store = makeCombinedStore();
 
-    store.getState().setGitStatus("sess-2", { branch: "dev" } as never);
-
-    store.getState().setTaskSession({
-      id: toSessionId("sess-2"),
-      task_id: toTaskId("task-2"),
-      state: "RUNNING",
-      started_at: "",
-      updated_at: "",
-    });
+    store.getState().appendShellOutput("sess-2", "dev");
 
     const state = store.getState();
     expect(state.environmentIdBySessionId["sess-2"]).toBeUndefined();
-    expect(state.gitStatus.byEnvironmentId["sess-2"]).toEqual({ branch: "dev" });
+    expect(state.shell.outputs["sess-2"]).toBe("dev");
   });
-});
 
-describe("setTaskSessionsForTask — bulk cross-slice migration", () => {
-  it("migrates env-keyed data for all sessions with task_environment_id", () => {
+  it("migrates env-keyed data for multiple sessions", () => {
     const store = makeCombinedStore();
 
     // Data under fallback keys
-    store.getState().setGitStatus("sess-a", { branch: "a" } as never);
+    store.getState().setSessionCommits("sess-a", [{ commit_sha: "a" } as never]);
     store.getState().appendShellOutput("sess-b", "hello");
 
-    store.getState().setTaskSessionsForTask("task-1", [
-      {
-        id: toSessionId("sess-a"),
-        task_id: toTaskId("task-1"),
-        state: "COMPLETED",
-        task_environment_id: "env-x",
-        started_at: "",
-        updated_at: "",
-      },
-      {
-        id: toSessionId("sess-b"),
-        task_id: toTaskId("task-1"),
-        state: "RUNNING",
-        task_environment_id: "env-y",
-        started_at: "",
-        updated_at: "",
-      },
-    ]);
+    store.getState().registerSessionEnvironment("sess-a", "env-x");
+    store.getState().registerSessionEnvironment("sess-b", "env-y");
 
     const state = store.getState();
-    expect(state.gitStatus.byEnvironmentId["env-x"]).toEqual({ branch: "a" });
-    expect(state.gitStatus.byEnvironmentId["sess-a"]).toBeUndefined();
+    expect(state.sessionCommits.byEnvironmentId["env-x"]).toEqual([{ commit_sha: "a" }]);
+    expect(state.sessionCommits.byEnvironmentId["sess-a"]).toBeUndefined();
     expect(state.shell.outputs["env-y"]).toBe("hello");
     expect(state.shell.outputs["sess-b"]).toBeUndefined();
   });

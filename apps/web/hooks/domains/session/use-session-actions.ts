@@ -1,10 +1,13 @@
 "use client";
 
 import { useCallback } from "react";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useQueryClient } from "@tanstack/react-query";
+import { useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
-import type { TaskSessionState } from "@/lib/types/http";
+import { qk } from "@/lib/query/keys";
+import { removeTaskSessionFromCache } from "@/lib/query/cache/task-session-cache";
+import type { TaskSessionState, TaskSessionsResponse } from "@/lib/types/http";
 
 export function isSessionStoppable(s: TaskSessionState): boolean {
   return s === "RUNNING" || s === "STARTING" || s === "WAITING_FOR_INPUT";
@@ -58,8 +61,8 @@ function useWsAction(): WsActionFn {
  */
 export function useSessionActions({ sessionId, taskId, onDeleted }: SessionActionsArgs) {
   const wsAction = useWsAction();
-  const removeTaskSession = useAppStore((state) => state.removeTaskSession);
   const appStoreApi = useAppStoreApi();
+  const queryClient = useQueryClient();
 
   const setPrimary = useCallback(
     () => sessionId && wsAction("session.set_primary", "Set primary", { session_id: sessionId }),
@@ -93,7 +96,9 @@ export function useSessionActions({ sessionId, taskId, onDeleted }: SessionActio
     // observing activeSessionId don't briefly point at a deleted session.
     const state = appStoreApi.getState();
     if (state.tasks.activeSessionId === sessionId) {
-      const sessions = state.taskSessionsByTask.itemsByTaskId[taskId] ?? [];
+      const sessions =
+        queryClient.getQueryData<TaskSessionsResponse>(qk.taskSession.byTask(taskId))?.sessions ??
+        [];
       const remaining = sessions
         .filter((s) => s.id !== sessionId)
         .sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime());
@@ -104,9 +109,9 @@ export function useSessionActions({ sessionId, taskId, onDeleted }: SessionActio
       }
     }
 
-    removeTaskSession(taskId, sessionId);
+    removeTaskSessionFromCache(queryClient, taskId, sessionId);
     onDeleted?.();
-  }, [sessionId, taskId, wsAction, removeTaskSession, appStoreApi, onDeleted]);
+  }, [sessionId, taskId, wsAction, appStoreApi, queryClient, onDeleted]);
 
   return { setPrimary, stop, resume, remove };
 }

@@ -211,7 +211,7 @@ The inbox listing itself is a **computed view** — `office_inbox` does not exis
   - `review:<task_id>:<viewer_agent_id>` for review-request rows.
   - Inbox row IDs for failed runs / paused agents are the `run_id` / `agent_id` from the source row, so dismissals key against stable identifiers.
 - WS notifications fired by `notifications.HandleInboxItem` for `office.inbox_item` events are at-most-once: if a delivery worker is mid-flight when kandev restarts, the in-flight delivery is lost. The inbox item itself is still discoverable on next dashboard fetch because the underlying source row persists.
-- The frontend Zustand inbox slice hydrates from the SSR fetch; it holds no durable client-side state beyond what the server returns. A hard reload reseeds from the server.
+- The office TanStack Query cache is the read path for inbox data; the SSR fetch dehydrates the query cache via `<HydrationBoundary>` so the first paint is already populated. The Zustand `office` slice exists as a transitional mirror until all consumers read from the query. A hard reload reseeds from the server.
 - Per-agent inbox views (`GetAgentInboxItems`) are computed on demand for agent wakeups; agents do not hold inbox state between sessions.
 
 There is no retention policy or archival job: dismissed/decided rows accumulate in their respective tables indefinitely. Out-of-scope for this iteration (see Out of scope).

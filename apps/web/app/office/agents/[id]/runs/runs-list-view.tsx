@@ -12,7 +12,8 @@ import {
 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
-import { useAppStore } from "@/components/state-provider";
+import { useTaskCandidates } from "@/hooks/domains/office/use-task-candidates";
+import { useOfficeRoutines } from "@/hooks/domains/office/use-office-routines";
 import {
   listAgentRuns,
   type AgentRunsListPage,
@@ -156,12 +157,10 @@ function RunRow({ run, agentId }: { run: AgentRunSummary; agentId: string }) {
  * origin (legacy rows, scheduled wakeups without a task).
  */
 function LinkedEntity({ run }: { run: AgentRunSummary }) {
-  const task = useAppStore((s) =>
-    run.task_id ? s.office.tasks.items.find((t) => t.id === run.task_id) : undefined,
-  );
-  const routine = useAppStore((s) =>
-    run.routine_id ? s.office.routines.find((r) => r.id === run.routine_id) : undefined,
-  );
+  const candidates = useTaskCandidates();
+  const routines = useOfficeRoutines();
+  const task = run.task_id ? candidates.find((t) => t.id === run.task_id) : undefined;
+  const routine = run.routine_id ? routines.find((r) => r.id === run.routine_id) : undefined;
 
   if (run.routine_id) {
     const label = routine?.name ?? "Routine";

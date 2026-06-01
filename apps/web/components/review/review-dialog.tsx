@@ -8,7 +8,7 @@ import type { PRDiffFile } from "@/lib/types/github";
 import { useCommentsStore, isDiffComment } from "@/lib/state/slices/comments";
 import { useSessionFileReviews } from "@/hooks/use-session-file-reviews";
 import { useGitOperations } from "@/hooks/use-git-operations";
-import { useAppStore } from "@/components/state-provider";
+import { useAllRepositories } from "@/hooks/domains/workspace/use-all-repositories";
 import { useToast } from "@/components/toast-provider";
 import { ReviewTopBar } from "./review-top-bar";
 import { ReviewFileTree } from "./review-file-tree";
@@ -20,6 +20,7 @@ import {
   reviewFileKey,
   splitReviewFileKey as splitFileKey,
 } from "./types";
+import { useUserSettings } from "@/hooks/domains/settings/use-user-settings";
 
 /**
  * Multi-repo dedup: keying ReviewFile entries by `path` only collapses
@@ -317,7 +318,7 @@ function useReviewDialogState(props: ReviewDialogProps) {
     typeof window === "undefined" ? false : localStorage.getItem("diff-view-mode") === "split",
   );
   const [wordWrap, setWordWrap] = useState(false);
-  const autoMarkOnScroll = useAppStore((s) => s.userSettings.reviewAutoMarkOnScroll);
+  const autoMarkOnScroll = useUserSettings().data?.reviewAutoMarkOnScroll ?? true;
   const { reviews, markReviewed, markUnreviewed } = useSessionFileReviews(sessionId);
   const byId = useCommentsStore((s) => s.byId);
   const sessionCommentIds = useCommentsStore((s) => s.bySession[sessionId]);
@@ -346,14 +347,12 @@ function useReviewDialogState(props: ReviewDialogProps) {
   // `repository_name` (e.g. "kandev"); the dialog needs both to scope the
   // per-repo comment counts. Falls back to an empty map (legacy single-repo
   // counts by path only).
-  const reposByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
+  const { repositories } = useAllRepositories(false);
   const repositoryNameToId = useMemo(() => {
     const m = new Map<string, string>();
-    for (const list of Object.values(reposByWorkspace)) {
-      for (const r of list) m.set(r.name, r.id);
-    }
+    for (const r of repositories) m.set(r.name, r.id);
     return m;
-  }, [reposByWorkspace]);
+  }, [repositories]);
   const commentCountByFile = useMemo(
     () => computeCommentCounts(byId, sessionCommentIds, allFiles, repositoryNameToId),
     [byId, sessionCommentIds, allFiles, repositoryNameToId],

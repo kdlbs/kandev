@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { StateProvider } from "@/components/state-provider";
+import { createTestQueryClient } from "@/test-utils/render-with-query";
 import { ActionMessage } from "./action-message";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
 
@@ -53,7 +55,14 @@ function retryMessage(overrides: Partial<Message> = {}): Message {
 }
 
 function Wrapper({ children }: { children: ReactNode }) {
-  return <StateProvider initialState={{}}>{children}</StateProvider>;
+  // ActionMessage → useTaskRemoval now reads task sessions from the TanStack
+  // Query cache (post-migration), so it calls useQueryClient and needs a
+  // QueryClientProvider in addition to the Zustand StateProvider.
+  return (
+    <QueryClientProvider client={createTestQueryClient()}>
+      <StateProvider initialState={{}}>{children}</StateProvider>
+    </QueryClientProvider>
+  );
 }
 
 describe("ActionMessage — transient retry (warning variant)", () => {

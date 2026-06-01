@@ -1,5 +1,5 @@
 import type { TaskSession, TaskSessionState } from "@/lib/types/http";
-import type { AgentProfileOption } from "@/lib/state/slices";
+import type { AgentProfileOption } from "@/lib/types/settings";
 
 const STATUS_ORDER: Record<TaskSessionState, number> = {
   RUNNING: 1,

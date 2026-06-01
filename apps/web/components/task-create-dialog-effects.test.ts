@@ -6,7 +6,7 @@ import {
   useWorkflowAgentProfileEffect,
 } from "./task-create-dialog-effects";
 import type { DialogFormState, StoreSelections } from "@/components/task-create-dialog-types";
-import type { AgentProfileOption } from "@/lib/state/slices";
+import type { AgentProfileOption } from "@/lib/types/settings";
 import type { Workspace } from "@/lib/types/http";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
 

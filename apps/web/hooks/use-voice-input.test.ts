@@ -13,10 +13,15 @@ const voicePrefs = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("@/components/state-provider", () => ({
-  useAppStore: (
-    selector: (state: { userSettings: { voiceMode: typeof voicePrefs.value } }) => unknown,
-  ) => selector({ userSettings: { voiceMode: voicePrefs.value } }),
+// The hook reads voiceMode from the TanStack Query user-settings cache via
+// `useUserSettings`. Mock that read so the test can drive the prefs directly
+// without spinning up a QueryClientProvider.
+vi.mock("@/hooks/domains/settings/use-user-settings", () => ({
+  useUserSettings: () => ({
+    data: { voiceMode: voicePrefs.value },
+    loaded: true,
+    loading: false,
+  }),
 }));
 
 const transcribeAudio = vi.hoisted(() => vi.fn());

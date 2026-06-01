@@ -2,10 +2,10 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockRequest = vi.fn();
-const mockSetTaskSession = vi.fn();
-const mockSetSessionAgentctlStatus = vi.fn();
+const mockMergeTaskSession = vi.fn();
 let mockConnectionStatus = "connected";
-let mockSessionItems: Record<string, { started_at?: string; updated_at?: string }> = {};
+// The TaskSession the migrated hook reads via useTaskSessionById (TQ-backed).
+let mockSession: { started_at?: string; updated_at?: string } | null = null;
 
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => ({ request: mockRequest }),
@@ -13,12 +13,21 @@ vi.mock("@/lib/ws/connection", () => ({
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
-    selector({
-      connection: { status: mockConnectionStatus },
-      taskSessions: { items: mockSessionItems },
-      setTaskSession: mockSetTaskSession,
-      setSessionAgentctlStatus: mockSetSessionAgentctlStatus,
-    }),
+    selector({ connection: { status: mockConnectionStatus } }),
+}));
+
+// The migrated hook reads the session from the TQ by-id cache and writes
+// resumed state back through mergeTaskSessionIntoCache (not the Zustand slice).
+vi.mock("@/hooks/domains/session/use-task-session-by-id", () => ({
+  useTaskSessionById: () => mockSession,
+}));
+
+vi.mock("@/lib/query/cache/task-session-cache", () => ({
+  mergeTaskSessionIntoCache: (...args: unknown[]) => mockMergeTaskSession(...args),
+}));
+
+vi.mock("@tanstack/react-query", () => ({
+  useQueryClient: () => ({}),
 }));
 
 import {
@@ -69,7 +78,7 @@ describe("resumeWithSilentFallback", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockConnectionStatus = "connected";
-    mockSessionItems = {};
+    mockSession = null;
     // tryLaunch logs caught errors via console.error; silence in tests so the
     // expected error paths don't pollute the test output.
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -215,10 +224,8 @@ describe("useSessionResumption", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockConnectionStatus = "connected";
-    mockSessionItems = {
-      s1: {
-        started_at: "2026-01-01T00:00:00.000Z",
-      },
+    mockSession = {
+      started_at: "2026-01-01T00:00:00.000Z",
     };
   });
 
@@ -234,7 +241,11 @@ describe("useSessionResumption", () => {
 
     renderHook(() => useSessionResumption("t1", "s1"));
 
-    await waitFor(() => expect(mockSetTaskSession).toHaveBeenCalled());
-    expect(mockSetTaskSession).toHaveBeenCalledWith(expect.objectContaining({ updated_at: "" }));
+    // The migrated hook writes resumed state via mergeTaskSessionIntoCache(qc, session).
+    await waitFor(() => expect(mockMergeTaskSession).toHaveBeenCalled());
+    expect(mockMergeTaskSession).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ updated_at: "" }),
+    );
   });
 });

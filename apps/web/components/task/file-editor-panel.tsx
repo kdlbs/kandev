@@ -9,6 +9,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useDockviewStore, type FileEditorState } from "@/lib/state/dockview-store";
 import { useFileEditors } from "@/hooks/use-file-editors";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
+import { useTaskSessionById } from "@/hooks/domains/session/use-task-session-by-id";
 import { getFileCategory } from "@/lib/utils/file-types";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { requestFileContent } from "@/lib/ws/workspace-files";
@@ -163,9 +164,7 @@ export const FileEditorPanel = memo(function FileEditorPanel({
   const updateFileState = useDockviewStore((s) => s.updateFileState);
 
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const activeSession = useAppStore((state) =>
-    activeSessionId ? (state.taskSessions.items[activeSessionId] ?? null) : null,
-  );
+  const activeSession = useTaskSessionById(activeSessionId);
   const gitStatus = useSessionGitStatus(activeSessionId);
   const vcsDiff = gitStatus?.files?.[path]?.diff;
   const { savingFiles, handleFileChange, saveFile, deleteFile, applyRemoteUpdate } =

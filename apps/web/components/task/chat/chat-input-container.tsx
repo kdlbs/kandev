@@ -5,7 +5,8 @@ import { IconAlertTriangle, IconPlayerPlay, IconRefresh } from "@tabler/icons-re
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { NewSessionDialog } from "@/components/task/new-session-dialog";
-import { useAppStore } from "@/components/state-provider";
+import { useTaskSessionById } from "@/hooks/domains/session/use-task-session-by-id";
+import { useAgentProfiles } from "@/hooks/domains/settings/use-settings-reads";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { Message } from "@/lib/types/http";
 import type { DiffComment } from "@/lib/diff/types";
@@ -133,14 +134,9 @@ function FailedSessionBanner({
   const [isResuming, setIsResuming] = useState(false);
   const [isStartingFresh, setIsStartingFresh] = useState(false);
 
-  const agentProfileId = useAppStore((s) =>
-    sessionId ? (s.taskSessions.items[sessionId]?.agent_profile_id ?? "") : "",
-  );
-  const profileExists = useAppStore(
-    (s) =>
-      agentProfileId !== "" &&
-      s.agentProfiles.items.some((p: { id: string }) => p.id === agentProfileId),
-  );
+  const agentProfileId = useTaskSessionById(sessionId)?.agent_profile_id ?? "";
+  const agentProfiles = useAgentProfiles();
+  const profileExists = agentProfileId !== "" && agentProfiles.some((p) => p.id === agentProfileId);
 
   const handleRecover = useCallback(
     async (action: "resume" | "fresh_start") => {

@@ -1,38 +1,19 @@
 "use client";
 
-import { useEffect } from "react";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { getTaskPlan } from "@/lib/api/domains/plan-api";
+import { useQuery } from "@tanstack/react-query";
+import { taskPlanQueryOptions } from "@/lib/query/query-options/session";
 
 type LazyPlanPreviewProps = {
   taskId: string | null;
 };
 
 export function LazyPlanPreview({ taskId }: LazyPlanPreviewProps) {
-  const plan = useAppStore((state) => (taskId ? (state.taskPlans.byTaskId[taskId] ?? null) : null));
-  const loaded = useAppStore((state) =>
-    taskId ? (state.taskPlans.loadedByTaskId[taskId] ?? false) : false,
-  );
-  const loading = useAppStore((state) =>
-    taskId ? (state.taskPlans.loadingByTaskId[taskId] ?? false) : false,
-  );
-
-  const storeApi = useAppStoreApi();
-
-  useEffect(() => {
-    if (!taskId || loaded || loading) return;
-
-    const { setTaskPlanLoading } = storeApi.getState();
-    setTaskPlanLoading(taskId, true);
-
-    getTaskPlan(taskId)
-      .then((result) => {
-        storeApi.getState().setTaskPlan(taskId, result);
-      })
-      .catch(() => {
-        storeApi.getState().setTaskPlanLoading(taskId, false);
-      });
-  }, [taskId, loaded, loading, storeApi]);
+  // Plan + loading now come from TanStack Query; the bridge keeps the cache
+  // live from WS events and the query backfills on cache miss.
+  const planQuery = useQuery({ ...taskPlanQueryOptions(taskId ?? ""), enabled: !!taskId });
+  const plan = planQuery.data?.plan ?? null;
+  const loading = !!taskId && planQuery.isLoading;
+  const loaded = !!taskId && planQuery.isSuccess;
 
   if (!taskId) {
     return <div className="text-xs text-muted-foreground">No task selected</div>;

@@ -1,8 +1,11 @@
 "use client";
 
 import { useCallback } from "react";
+import { useUserSettings } from "@/hooks/domains/settings/use-user-settings";
 import { useAppStore } from "@/components/state-provider";
 import { useUserDisplaySettings } from "@/hooks/use-user-display-settings";
+import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
+import { useWorkflowItems } from "@/hooks/domains/kanban/use-kanban-snapshots";
 import type { WorkflowsState } from "@/lib/state/slices";
 
 type UserSettingsFields = {
@@ -27,9 +30,9 @@ function baseSettingsPayload(settings: UserSettingsFields): UserSettingsFields {
  */
 export function useKanbanDisplaySettings() {
   // Access store directly
-  const workspaces = useAppStore((state) => state.workspaces.items);
+  const { workspaces } = useWorkspaces();
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
-  const workflows = useAppStore((state) => state.workflows.items);
+  const workflows = useWorkflowItems(activeWorkspaceId);
   const activeWorkflowId = useAppStore((state) => state.workflows.activeId);
   const setActiveWorkspace = useAppStore((state) => state.setActiveWorkspace);
   const setActiveWorkflow = useAppStore((state) => state.setActiveWorkflow);
@@ -47,7 +50,7 @@ export function useKanbanDisplaySettings() {
   });
 
   // Get preview setting from store
-  const enablePreviewOnClick = useAppStore((state) => state.userSettings.enablePreviewOnClick);
+  const enablePreviewOnClick = useUserSettings().data?.enablePreviewOnClick ?? false;
 
   // Use pushState instead of router.push to avoid triggering SSR re-fetches.
   // Filter changes only update client state; all data is already available.

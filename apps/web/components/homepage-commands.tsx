@@ -7,8 +7,8 @@ import { useRegisterCommands } from "@/hooks/use-register-commands";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { linkToTasks } from "@/lib/links";
 import type { CommandItem } from "@/lib/commands/types";
-import { useAppStore } from "@/components/state-provider";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
+import { useUserSettings } from "@/hooks/domains/settings/use-user-settings";
 
 type HomepageCommandsProps = {
   onCreateTask: () => void;
@@ -17,7 +17,7 @@ type HomepageCommandsProps = {
 export function HomepageCommands({ onCreateTask }: HomepageCommandsProps) {
   const router = useRouter();
   const { onViewModeChange } = useKanbanDisplaySettings();
-  const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
+  const keyboardShortcuts = useUserSettings().data?.keyboardShortcuts ?? {};
   const newTaskShortcut = getShortcut("NEW_TASK", keyboardShortcuts);
 
   const commands = useMemo<CommandItem[]>(

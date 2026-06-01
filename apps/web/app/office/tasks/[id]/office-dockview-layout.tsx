@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { DockviewReact, type DockviewReadyEvent } from "dockview-react";
 import { themeKandev } from "@/lib/layout/dockview-theme";
 import { useDockviewStore } from "@/lib/state/dockview-store";
@@ -20,6 +21,10 @@ import { DockviewWatermark } from "@/components/task/dockview-watermark";
 
 import { VcsDialogsProvider } from "@/components/vcs/vcs-dialogs";
 import { ensureTaskSession } from "@/lib/services/session-launch-service";
+import { qk } from "@/lib/query/keys";
+import { mergeTaskSessionIntoCache } from "@/lib/query/cache/task-session-cache";
+import { writeAgentctlStatus } from "@/lib/query/agentctl-status";
+import type { TaskSession } from "@/lib/types/http";
 
 import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
 import { PanelPortalHost } from "@/lib/layout/panel-portal-host";
@@ -74,8 +79,7 @@ export function OfficeDockviewLayout({ taskId, sessionId }: OfficeDockviewLayout
     }
   }, [taskId, sessionId, setActiveSession, setActiveTask]);
 
-  const setAgentctlStatus = useAppStore((s) => s.setSessionAgentctlStatus);
-  const setTaskSession = useAppStore((s) => s.setTaskSession);
+  const queryClient = useQueryClient();
 
   // Ensure the execution (agentctl) is running so file/terminal/changes panels work.
   // Office tasks are one-off — the execution may have been torn down after completion.
@@ -86,16 +90,21 @@ export function OfficeDockviewLayout({ taskId, sessionId }: OfficeDockviewLayout
     ensureTaskSession(taskId, { ensureExecution: true })
       .then((resp) => {
         if (resp.session_id) {
-          setAgentctlStatus(resp.session_id, {
+          writeAgentctlStatus(queryClient, resp.session_id, {
             status: "ready",
             updatedAt: new Date().toISOString(),
           });
           // Populate worktree_path from workspace_path for quick-chat sessions
           // so the file browser shows the workspace path instead of a skeleton.
           if (resp.workspace_path) {
-            const existing = appStore.getState().taskSessions.items[resp.session_id];
+            const existing = queryClient.getQueryData<TaskSession | null>(
+              qk.taskSession.byId(resp.session_id),
+            );
             if (existing && !existing.worktree_path) {
-              setTaskSession({ ...existing, worktree_path: resp.workspace_path });
+              mergeTaskSessionIntoCache(queryClient, {
+                ...existing,
+                worktree_path: resp.workspace_path,
+              });
             }
           }
         }
@@ -103,7 +112,7 @@ export function OfficeDockviewLayout({ taskId, sessionId }: OfficeDockviewLayout
       .catch(() => {
         // Non-fatal: panels will show appropriate empty/retry states.
       });
-  }, [taskId, setAgentctlStatus, setTaskSession, appStore]);
+  }, [taskId, queryClient]);
 
   // Clean up on unmount — release portals and clear active session.
   useEffect(() => {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { useAppStore } from "@/components/state-provider";
+import { useTaskSessionsByTask } from "@/hooks/domains/session/use-task-session-by-id";
 import { getWebSocketClient } from "@/lib/ws/connection";
 
 /**
@@ -12,9 +12,7 @@ import { getWebSocketClient } from "@/lib/ws/connection";
  * @returns Object with sessionId, hasSession flag, and isLoading state
  */
 export function useTaskSession(taskId: string | null) {
-  const sessionsFromStore = useAppStore((state) =>
-    taskId ? state.taskSessionsByTask.itemsByTaskId[taskId] : null,
-  );
+  const { sessions: sessionsFromStore } = useTaskSessionsByTask(taskId);
 
   const [fetchedSessionId, setFetchedSessionId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);

@@ -25,6 +25,7 @@ const CURRENT_TASK_ID = "task-current";
 const PREVIOUS_TASK_ID = "task-previous";
 const WF_MAIN = "wf-1";
 const WF_REVIEW = "wf-2";
+const REVIEW_FLOW_NAME = "Review Flow";
 
 function recent(taskId: string, title: string): RecentTaskEntry {
   return {
@@ -94,7 +95,7 @@ function buildContext(): RecentTaskBuildContext {
     snapshots: {
       [WF_REVIEW]: {
         workflowId: WF_REVIEW,
-        workflowName: "Review Flow",
+        workflowName: REVIEW_FLOW_NAME,
         steps: [{ id: "step-2", title: "Review", color: "bg-green-500", position: 0 }],
         tasks: [
           {
@@ -112,7 +113,7 @@ function buildContext(): RecentTaskBuildContext {
     },
     workflows: [
       { id: WF_MAIN, workspaceId: WORKSPACE_ID, name: "Main Flow" },
-      { id: WF_REVIEW, workspaceId: WORKSPACE_ID, name: "Review Flow" },
+      { id: WF_REVIEW, workspaceId: WORKSPACE_ID, name: REVIEW_FLOW_NAME },
     ],
     repositoriesByWorkspace: { [WORKSPACE_ID]: [repository] },
     sessionsByTaskId: { [CURRENT_TASK_ID]: [session(CURRENT_TASK_ID, "RUNNING")] },
@@ -181,8 +182,30 @@ describe("recent task switcher model", () => {
       title: "Previous live title",
       isCurrent: false,
       repositoryPath: "kdlbs/kandev",
-      workflowName: "Review Flow",
+      workflowName: REVIEW_FLOW_NAME,
       workflowStepTitle: "Review",
+    });
+  });
+
+  it("resolves the workflow from the owning snapshot, not the (null) homepage filter", () => {
+    // On the task page the active workflow *filter* (`kanbanWorkflowId`) is null
+    // ("All Workflows"), while `kanbanTasks` aggregates tasks across every
+    // snapshot. The badge must read the workflow from the snapshot that owns the
+    // task, not blank out because the filter is null.
+    const ctx = buildContext();
+    const taskInSnapshot = ctx.snapshots[WF_REVIEW].tasks[0];
+    const display = buildRecentTaskDisplayItems([recent(PREVIOUS_TASK_ID, "Stored previous")], {
+      ...ctx,
+      kanbanWorkflowId: null,
+      // Aggregated kanban tasks also contain the snapshot's task (as on the task
+      // page, where `useAllKanbanTasks` flattens every snapshot).
+      kanbanTasks: [...ctx.kanbanTasks, taskInSnapshot],
+    });
+
+    expect(display[0]).toMatchObject({
+      taskId: PREVIOUS_TASK_ID,
+      workflowId: WF_REVIEW,
+      workflowName: REVIEW_FLOW_NAME,
     });
   });
 

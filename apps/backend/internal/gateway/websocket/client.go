@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -42,6 +43,15 @@ type Client struct {
 	mu                   sync.RWMutex
 	closed               bool
 	logger               *logger.Logger
+
+	// seqCounter is the per-connection monotonic counter stamped onto every
+	// outbound envelope. First message has seq=1; zero means "unstamped" and
+	// is reserved for raw byte writes (which shouldn't happen in practice).
+	seqCounter atomic.Int64
+	// sentLog records recent outbound envelopes for E2E gap detection. The
+	// FE compares its received-seq list to this server-side log to surface
+	// any dropped frames as real WS regressions instead of silent UI bugs.
+	sentLog *wsSentLog
 }
 
 // NewClient creates a new WebSocket client
@@ -57,6 +67,7 @@ func NewClient(id string, conn *websocket.Conn, hub *Hub, log *logger.Logger) *C
 		userSubscriptions:    make(map[string]bool),
 		runSubscriptions:     make(map[string]bool),
 		logger:               log.WithFields(zap.String("client_id", id)),
+		sentLog:              newWsSentLog(),
 	}
 }
 
@@ -450,14 +461,81 @@ func (c *Client) handleSessionUnfocus(msg *ws.Message) {
 	c.sendMessage(resp)
 }
 
-// sendMessage sends a message to the client
-func (c *Client) sendMessage(msg *ws.Message) {
+// sendMessage stamps the envelope with a monotonic per-connection seq and the
+// connection ID, records it in the ring buffer, then enqueues it for the write
+// pump. This is the single seam every outbound envelope MUST go through —
+// missing one path means E2E tests see false-positive gaps.
+//
+// Mutates msg.Seq and msg.ConnectionID. For broadcasts that fan a single
+// envelope to many clients, use sendStampedCopy instead so each client gets
+// its own stamped envelope without clobbering the shared input.
+func (c *Client) sendMessage(msg *ws.Message) bool {
+	return c.sendMessageForSession("", msg)
+}
+
+// sendMessageForSession is sendMessage that additionally stamps a per-session
+// monotonic SessionSeq using the hub's session-seq counter for the given
+// sessionID. Pass "" to stamp only the per-connection seq (handshake,
+// connection-wide notifications, task-routed and run-routed broadcasts whose
+// routing key isn't a session).
+func (c *Client) sendMessageForSession(sessionID string, msg *ws.Message) bool {
+	data, ok := c.stampAndMarshalForSession(sessionID, msg)
+	if !ok {
+		return false
+	}
+	return c.sendBytes(data)
+}
+
+// sendStampedCopy clones the envelope, stamps the copy with this connection's
+// seq + ID, and sends it. Used by Hub broadcast helpers (BroadcastToTask,
+// BroadcastToUser, BroadcastToRun, broadcastMessage) so a single input
+// *ws.Message fanned to N clients yields N distinct seq stamps without races
+// on the shared envelope. Does NOT stamp SessionSeq — use
+// sendStampedCopyForSession for session-routed broadcasts.
+func (c *Client) sendStampedCopy(msg *ws.Message) bool {
+	return c.sendStampedCopyForSession("", msg)
+}
+
+// sendStampedCopyForSession clones the envelope and stamps it with both the
+// per-connection seq and the per-session SessionSeq for sessionID. Used by
+// BroadcastToSession so cross-session misrouting (event for A delivered to
+// B's handler) is detectable as a per-session-seq gap on the receiver.
+func (c *Client) sendStampedCopyForSession(sessionID string, msg *ws.Message) bool {
+	if msg == nil {
+		return false
+	}
+	clone := *msg
+	return c.sendMessageForSession(sessionID, &clone)
+}
+
+// stampAndMarshalForSession increments the per-connection seq counter, mutates
+// the envelope to carry (seq, connection_id), optionally stamps a per-session
+// SessionSeq, appends the entry to the ring buffer, and marshals to JSON.
+// Returns the bytes plus a marshal-ok flag; caller drops on !ok. When sessionID
+// is "" the per-session counter is skipped and SessionSeq stays zero (omitted
+// from the JSON wire format).
+//
+// We stamp BEFORE Append so the ring buffer's max_seq matches what the client
+// will actually see on the wire. Order: per-connection then per-session, so the
+// ring buffer and the wire frame agree on both seqs.
+func (c *Client) stampAndMarshalForSession(sessionID string, msg *ws.Message) ([]byte, bool) {
+	seq := c.seqCounter.Add(1)
+	msg.Seq = seq
+	msg.ConnectionID = c.ID
+	var sessionSeq int64
+	if sessionID != "" && c.hub != nil {
+		sessionSeq = c.hub.nextSessionSeq(sessionID)
+		msg.SessionSeq = sessionSeq
+	}
 	data, err := json.Marshal(msg)
 	if err != nil {
 		c.logger.Error("Failed to marshal message", zap.Error(err))
-		return
+		return nil, false
 	}
-	c.sendBytes(data)
+	if c.sentLog != nil {
+		c.sentLog.Append(seq, sessionSeq, sessionID, string(msg.Type), msg.Action, time.Now().UTC())
+	}
+	return data, true
 }
 
 func (c *Client) sendBytes(data []byte) bool {

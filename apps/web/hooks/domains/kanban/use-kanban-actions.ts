@@ -2,87 +2,90 @@
 
 import { useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { useAppStoreApi } from "@/components/state-provider";
+import { useQueryClient } from "@tanstack/react-query";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useTaskCRUD } from "@/hooks/use-task-crud";
+import { qk } from "@/lib/query/keys";
+import { toKanbanTask } from "@/lib/kanban/map-task";
 import type { Task as BackendTask } from "@/lib/types/http";
-import type { KanbanState, WorkspaceState, WorkflowsState } from "@/lib/state/slices";
+import type { KanbanMultiData } from "@/lib/query/query-options/kanban";
+import type { WorkflowsState } from "@/lib/state/slices";
 
 type UseKanbanActionsOptions = {
-  workspaceState: WorkspaceState;
+  workspaceState: { activeId: string | null };
   workflowsState: WorkflowsState;
 };
 
-type KanbanTask = KanbanState["tasks"][number];
+// ---------------------------------------------------------------------------
+// Cache writers (update TQ multi-cache for immediate UI response)
+// ---------------------------------------------------------------------------
 
-/** Handle creating a new task in the kanban board, merging with any WS-provided data. */
-function hydrateCreatedTask(
-  store: ReturnType<typeof useAppStoreApi>,
+/**
+ * Upserts a newly-created task into every workflow snapshot in the TQ cache
+ * where the task's workflowId matches. Falls back gracefully when the snapshot
+ * for the target workflow hasn't loaded yet.
+ */
+function upsertCreatedTask(
+  queryClient: ReturnType<typeof useQueryClient>,
   task: BackendTask,
-  currentKanban: KanbanState,
-) {
+): void {
   const repoId = task.repositories?.[0]?.repository_id ?? undefined;
-  const existing = currentKanban.tasks.find((t: KanbanTask) => t.id === task.id);
-  if (existing) {
-    if (repoId && !existing.repositoryId) {
-      store.getState().hydrate({
-        kanban: {
-          ...currentKanban,
-          tasks: currentKanban.tasks.map((t: KanbanTask) =>
-            t.id === task.id ? { ...t, repositoryId: repoId } : t,
-          ),
-        },
-      });
-    }
-  } else {
-    store.getState().hydrate({
-      kanban: {
-        ...currentKanban,
-        tasks: [
-          ...currentKanban.tasks,
-          {
-            id: task.id,
-            workflowStepId: task.workflow_step_id,
-            title: task.title,
-            description: task.description ?? undefined,
-            position: task.position ?? 0,
-            state: task.state,
-            repositoryId: repoId,
-          },
-        ],
-      },
-    });
-  }
-  if (task.workspace_id) {
-    store.getState().invalidateRepositories(task.workspace_id);
-  }
-}
+  const kanbanTask = toKanbanTask({ ...task, repository_id: repoId });
+  const wfId = task.workflow_id;
 
-/** Handle editing an existing task - only update dialog-editable fields. */
-function hydrateEditedTask(
-  store: ReturnType<typeof useAppStoreApi>,
-  task: BackendTask,
-  currentKanban: KanbanState,
-) {
-  store.getState().hydrate({
-    kanban: {
-      ...currentKanban,
-      tasks: currentKanban.tasks.map((item: KanbanTask) =>
-        item.id === task.id
-          ? {
-              ...item,
-              title: task.title,
-              description: task.description ?? undefined,
-              repositoryId: task.repositories?.[0]?.repository_id ?? item.repositoryId,
-            }
-          : item,
-      ),
-    },
+  queryClient.setQueryData<KanbanMultiData>(qk.kanban.multi(), (prev) => {
+    if (!prev) return prev;
+    const snap = prev.snapshots[wfId];
+    if (!snap) return prev;
+    const exists = snap.tasks.some((t) => t.id === task.id);
+    const tasks = exists
+      ? snap.tasks.map((t) => (t.id === task.id ? { ...t, repositoryId: repoId } : t))
+      : [...snap.tasks, kanbanTask];
+    return {
+      ...prev,
+      snapshots: { ...prev.snapshots, [wfId]: { ...snap, tasks } },
+    };
   });
 }
+
+/**
+ * Patches an edited task's dialog-editable fields (title, description,
+ * repositoryId) in the TQ multi cache.
+ */
+function patchEditedTask(queryClient: ReturnType<typeof useQueryClient>, task: BackendTask): void {
+  const repoId = task.repositories?.[0]?.repository_id ?? undefined;
+  const wfId = task.workflow_id;
+
+  queryClient.setQueryData<KanbanMultiData>(qk.kanban.multi(), (prev) => {
+    if (!prev) return prev;
+    const snap = prev.snapshots[wfId];
+    if (!snap) return prev;
+    const tasks = snap.tasks.map((t) =>
+      t.id === task.id
+        ? {
+            ...t,
+            title: task.title,
+            description: task.description ?? undefined,
+            repositoryId: repoId ?? t.repositoryId,
+          }
+        : t,
+    );
+    return {
+      ...prev,
+      snapshots: { ...prev.snapshots, [wfId]: { ...snap, tasks } },
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Hook
+// ---------------------------------------------------------------------------
 
 export function useKanbanActions({ workspaceState, workflowsState }: UseKanbanActionsOptions) {
   const router = useRouter();
   const store = useAppStoreApi();
+  const queryClient = useQueryClient();
+  const activeWorkspaceId = workspaceState.activeId;
 
   // CRUD operations from existing hook
   const {
@@ -100,26 +103,26 @@ export function useKanbanActions({ workspaceState, workflowsState }: UseKanbanAc
   } = useTaskCRUD();
 
   // Handle task dialog success (create/update)
-  // Read current kanban state at call time (not from closure) to avoid
-  // overwriting WebSocket-driven updates that arrived while the dialog was open.
   const handleDialogSuccess = useCallback(
     (task: BackendTask, mode: "create" | "edit") => {
-      const currentKanban = store.getState().kanban;
       if (mode === "create") {
-        hydrateCreatedTask(store, task, currentKanban);
-        return;
+        upsertCreatedTask(queryClient, task);
+        if (task.workspace_id) {
+          void queryClient.invalidateQueries({
+            queryKey: qk.workspaces.repos(task.workspace_id),
+          });
+        }
+      } else {
+        patchEditedTask(queryClient, task);
       }
-      hydrateEditedTask(store, task, currentKanban);
     },
-    [store],
+    [queryClient],
   );
 
   // Handle workspace change with navigation
   const handleWorkspaceChange = useCallback(
     (nextWorkspaceId: string | null) => {
-      if (nextWorkspaceId === workspaceState.activeId) {
-        return;
-      }
+      if (nextWorkspaceId === activeWorkspaceId) return;
       store.getState().setActiveWorkspace(nextWorkspaceId);
       if (nextWorkspaceId) {
         router.push(`/?workspaceId=${nextWorkspaceId}`);
@@ -127,15 +130,13 @@ export function useKanbanActions({ workspaceState, workflowsState }: UseKanbanAc
         router.push("/");
       }
     },
-    [router, store, workspaceState.activeId],
+    [router, store, activeWorkspaceId],
   );
 
   // Handle workflow change with navigation
   const handleWorkflowChange = useCallback(
     (nextWorkflowId: string | null) => {
-      if (nextWorkflowId === workflowsState.activeId) {
-        return;
-      }
+      if (nextWorkflowId === workflowsState.activeId) return;
       store.getState().setActiveWorkflow(nextWorkflowId);
       if (nextWorkflowId) {
         const workspaceId = workflowsState.items.find(
@@ -169,4 +170,9 @@ export function useKanbanActions({ workspaceState, workflowsState }: UseKanbanAc
     handleWorkspaceChange,
     handleWorkflowChange,
   };
+}
+
+// Re-export useActiveWorkspaceId for consumers
+export function useActiveWorkspaceId() {
+  return useAppStore((s) => s.workspaces.activeId);
 }

@@ -19,6 +19,10 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { useDockviewStore, performLayoutSwitch } from "@/lib/state/dockview-store";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useAllRepositories } from "@/hooks/domains/workspace/use-all-repositories";
+import { useTaskSessionById } from "@/hooks/domains/session/use-task-session-by-id";
+import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
+import { useActiveTaskWorkflow } from "@/hooks/domains/kanban/use-kanban-snapshots";
 import { useEnvironmentId } from "@/hooks/use-environment-session-id";
 import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { startProcess } from "@/lib/api";
@@ -65,10 +69,7 @@ function useLeftHeaderState(
   const centerGroupId = useDockviewStore((s) => s.centerGroupId);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const taskId = useAppStore((state) => state.tasks.activeTaskId);
-  const isPassthrough = useAppStore((state) => {
-    if (!activeSessionId) return false;
-    return state.taskSessions.items[activeSessionId]?.is_passthrough === true;
-  });
+  const isPassthrough = useTaskSessionById(activeSessionId)?.is_passthrough === true;
   const { prs } = useTaskPR(taskId);
   const hasChanges = Boolean(
     containerApi.getPanel("changes") ?? containerApi.getPanel("diff-files"),
@@ -292,19 +293,16 @@ export function RightHeaderActions(props: IDockviewHeaderActionsProps) {
 
 function SidebarRightActions() {
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
-  const kanban = useAppStore((state) => state.kanban);
-  // Use kanban.workflowId (task context) not workflows.activeId so "All Workflows" isn't clobbered when viewing a task.
-  const workflowId = kanban.workflowId;
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
-  const activeTaskTitle = useAppStore((state) => {
-    const id = state.tasks.activeTaskId;
-    if (!id) return "";
-    return state.kanban.tasks.find((t: { id: string }) => t.id === id)?.title ?? "";
-  });
+  // Use the active task's snapshot workflow (task context) not workflows.activeId
+  // so "All Workflows" isn't clobbered when viewing a task.
+  const { workflowId, steps: workflowSteps } = useActiveTaskWorkflow(activeTaskId);
+  const activeTask = useTaskById(activeTaskId);
+  const activeTaskTitle = activeTask?.title ?? "";
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const appStore = useAppStoreApi();
-  const steps = (kanban?.steps ?? []).map(
+  const steps = workflowSteps.map(
     (s: {
       id: string;
       title: string;
@@ -372,15 +370,10 @@ function RightTopGroupActions() {
 
 function CenterRightActions() {
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const repository = useAppStore((state) => {
-    if (!activeSessionId) return null;
-    const session = state.taskSessions.items[activeSessionId];
-    if (!session) return null;
-    const repoId = session.repository_id;
-    if (!repoId) return null;
-    const allRepos = Object.values(state.repositories.itemsByWorkspaceId).flat();
-    return allRepos.find((r) => r.id === repoId) ?? null;
-  });
+  const repoId = useTaskSessionById(activeSessionId)?.repository_id ?? null;
+  // Observe cached repo lists (no fetch) to find dev_script for the repo.
+  const { repositories } = useAllRepositories(false);
+  const repository = repoId ? (repositories.find((r) => r.id === repoId) ?? null) : null;
   const hasDevScript = Boolean(repository?.dev_script?.trim());
 
   const addBrowserPanel = useDockviewStore((s) => s.addBrowserPanel);
@@ -423,11 +416,8 @@ function CenterRightActions() {
 
 function TerminalGroupRightActions() {
   const environmentId = useEnvironmentId();
-  const repositoryId = useAppStore((state) => {
-    const sessionId = state.tasks.activeSessionId;
-    if (!sessionId) return null;
-    return state.taskSessions.items[sessionId]?.repository_id ?? null;
-  });
+  const sessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const repositoryId = useTaskSessionById(sessionId)?.repository_id ?? null;
   const hasDevScript = Boolean(useActiveSessionDevScript());
   const { scripts } = useRepositoryScripts(repositoryId);
   const rightBottomGroupId = useDockviewStore((s) => s.rightBottomGroupId);

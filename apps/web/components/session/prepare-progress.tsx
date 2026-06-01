@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   IconCheck,
   IconX,
@@ -10,12 +10,18 @@ import {
   IconFolder,
   IconGitBranch,
 } from "@tabler/icons-react";
-import { useAppStore } from "@/components/state-provider";
+import { useQuery } from "@tanstack/react-query";
+import {
+  prepareProgressQueryOptions,
+  sessionAgentctlQueryOptions,
+} from "@/lib/query/query-options/session-runtime";
+import { useTaskSessionById } from "@/hooks/domains/session/use-task-session-by-id";
 import { ExpandableRow } from "@/components/task/chat/messages/expandable-row";
 import { isFallbackNoticeStep } from "@/lib/prepare/summarize";
 import { cn } from "@/lib/utils";
 import { stripAnsi } from "@/lib/utils/ansi";
 import { isSetupScriptMessage } from "@/hooks/use-processed-messages";
+import { useMessagesBySessionFromCache } from "@/hooks/domains/session/use-messages-by-session-cache";
 import type { Message } from "@/lib/types/http";
 import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
 import type {
@@ -208,11 +214,9 @@ function deriveStatus(input: DeriveStatusInput): EffectiveStatus {
 }
 
 function usePrepareStatus(sessionId: string) {
-  const prepareState = useAppStore((state) => state.prepareProgress.bySessionId[sessionId] ?? null);
-  const sessionState = useAppStore((state) => state.taskSessions.items[sessionId]?.state);
-  const agentctlStatus = useAppStore(
-    (state) => state.sessionAgentctl.itemsBySessionId[sessionId]?.status,
-  );
+  const prepareState = useQuery(prepareProgressQueryOptions(sessionId)).data ?? null;
+  const sessionState = useTaskSessionById(sessionId)?.state;
+  const agentctlStatus = useQuery(sessionAgentctlQueryOptions(sessionId)).data?.status;
 
   if (!prepareState) {
     // No live or hydrated prepare state. If the session has moved past the
@@ -370,13 +374,19 @@ function setupScriptMessageToStep(message: Message): PrepareStepInfo {
 }
 
 function useSetupScriptSteps(sessionId: string): PrepareStepInfo[] {
-  const messages = useAppStore((state) => state.messages.bySession[sessionId]);
+  // Read messages from the TanStack Query cache (canonical post-migration), not
+  // the Zustand mirror — the latter only holds live WS deltas + lazy older-page
+  // backfill, never the initial/current fetched window. On a fresh load of a
+  // session whose prepare already emitted setup-script messages, the Zustand
+  // mirror is empty and the step rows silently vanish. See use-messages-by-session-cache.
+  const messagesBySession = useMessagesBySessionFromCache(useMemo(() => [sessionId], [sessionId]));
+  const messages = messagesBySession[sessionId];
   if (!messages || messages.length === 0) return [];
   return messages.filter(isSetupScriptMessage).map(setupScriptMessageToStep);
 }
 
 function SessionInfo({ sessionId }: { sessionId: string }) {
-  const session = useAppStore((state) => state.taskSessions.items[sessionId]);
+  const session = useTaskSessionById(sessionId);
   if (!session) return null;
 
   const { worktree_id, worktree_path, worktree_branch, base_branch } = session;
@@ -454,7 +464,7 @@ function logPrepareSnapshotChange(
 
 export function PrepareProgress({ sessionId }: PrepareProgressProps) {
   const { status, prepareState } = usePrepareStatus(sessionId);
-  const session = useAppStore((state) => state.taskSessions.items[sessionId]);
+  const session = useTaskSessionById(sessionId);
   const setupScriptSteps = useSetupScriptSteps(sessionId);
   // Only the clean-success status auto-collapses. Anything with running/error/
   // warning context stays open by default so the user sees what's happening.

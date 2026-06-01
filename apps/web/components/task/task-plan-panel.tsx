@@ -8,6 +8,7 @@ import { IconLoader2, IconFileText, IconRobot, IconMessage, IconClick } from "@t
 import { cn } from "@/lib/utils";
 import { useTaskPlan } from "@/hooks/domains/session/use-task-plan";
 import { useAppStore } from "@/components/state-provider";
+import { useTaskSessionById } from "@/hooks/domains/session/use-task-session-by-id";
 import { PlanSelectionPopover } from "./plan-selection-popover";
 import { usePlanComments } from "@/hooks/domains/comments/use-plan-comments";
 import { useRunComment } from "@/hooks/domains/comments/use-run-comment";
@@ -61,9 +62,7 @@ function useTaskPlanPanelState(taskId: string | null, visible: boolean) {
     clearComparePair,
   } = useTaskPlan(taskId, { visible });
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const activeSession = useAppStore((state) =>
-    activeSessionId ? (state.taskSessions.items[activeSessionId] ?? null) : null,
-  );
+  const activeSession = useTaskSessionById(activeSessionId);
   const sessionState = activeSession?.state;
   const isAgentBusy = sessionState === "STARTING" || sessionState === "RUNNING";
 

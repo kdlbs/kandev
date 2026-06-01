@@ -16,7 +16,7 @@ import { useToast } from "@/components/toast-provider";
 import { PRStatusChip } from "@/components/github/pr-status-chip";
 import { PassthroughComposer } from "./passthrough-composer";
 import { PRMergedBanner } from "./chat/chat-input-area";
-import { useAppStore } from "@/components/state-provider";
+import { useTaskSessionById } from "@/hooks/domains/session/use-task-session-by-id";
 import { useNextWorkflowStep } from "@/hooks/domains/kanban/use-plan-actions";
 import { usePendingDiffCommentsByFile } from "@/hooks/domains/comments/use-diff-comments";
 import { useCommentsStore } from "@/lib/state/slices/comments/comments-store";
@@ -50,9 +50,7 @@ export function PassthroughToolbar({
   const [composerOpen, setComposerOpen] = useState(false);
   const [commentsOpenState, setCommentsOpen] = useState(false);
 
-  const sessionState = useAppStore((state) =>
-    sessionId ? (state.taskSessions.items[sessionId]?.state ?? null) : null,
-  );
+  const sessionState = useTaskSessionById(sessionId)?.state ?? null;
   const isAgentBusy = sessionState === "RUNNING" || sessionState === "STARTING";
 
   const nextStep = useNextWorkflowStep(taskId);

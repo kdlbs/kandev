@@ -4,11 +4,19 @@ import {
   isKnownCommand,
   emptyTurnNoticeText,
   computeEmptyTurnNotice,
+  emitEmptyTurnNoticeIntoCache,
   type EmptyTurnNoticeInput,
 } from "./empty-turn-notice";
+import { qk } from "@/lib/query/keys";
+import type { MessagesData } from "@/lib/query/query-options/session";
+import { createTestQueryClient } from "@/test-utils/render-with-query";
+import type { TurnEventPayload } from "@/lib/types/backend";
 import type { AvailableCommand } from "@/lib/state/slices/session-runtime/types";
 import type { Message } from "@/lib/types/http";
 import { sessionId, taskId } from "@/lib/types/http";
+
+const CREATED_AT = "2026-05-30T00:00:00Z";
+const NOTICE_ID = "empty-turn-turn-1";
 
 function userMessage(turnId: string, content: string): Message {
   return {
@@ -19,7 +27,7 @@ function userMessage(turnId: string, content: string): Message {
     author_type: "user",
     content,
     type: "message",
-    created_at: "2026-05-30T00:00:00Z",
+    created_at: CREATED_AT,
   };
 }
 
@@ -104,14 +112,14 @@ describe("computeEmptyTurnNotice", () => {
 
   it("returns null when a notice already exists for this turn (once per turn)", () => {
     const existing: Message = {
-      id: "empty-turn-turn-1",
+      id: NOTICE_ID,
       session_id: sessionId("sess-1"),
       task_id: taskId("task-1"),
       turn_id: "turn-1",
       author_type: "agent",
       content: "x",
       type: "status",
-      created_at: "2026-05-30T00:00:00Z",
+      created_at: CREATED_AT,
     };
     const input = baseInput({ messages: [userMessage("turn-1", "/pr-fixup"), existing] });
     expect(computeEmptyTurnNotice(input)).toBeNull();
@@ -122,7 +130,7 @@ describe("computeEmptyTurnNotice", () => {
       baseInput({ messages: [userMessage("turn-1", "do the thing")] }),
     );
     expect(notice).not.toBeNull();
-    expect(notice?.id).toBe("empty-turn-turn-1");
+    expect(notice?.id).toBe(NOTICE_ID);
     expect(notice?.type).toBe("status");
     expect(notice?.author_type).toBe("agent");
     expect(notice?.turn_id).toBe("turn-1");
@@ -157,5 +165,88 @@ describe("computeEmptyTurnNotice", () => {
       }),
     );
     expect(notice?.content).toContain("`/deploy`");
+  });
+});
+
+describe("emitEmptyTurnNoticeIntoCache", () => {
+  const SID = "sess-1";
+
+  function turnPayload(overrides: Partial<TurnEventPayload> = {}): TurnEventPayload {
+    return {
+      id: "turn-1",
+      session_id: SID,
+      task_id: "task-1",
+      started_at: CREATED_AT,
+      completed_at: "2026-05-30T00:00:01Z",
+      had_output: false,
+      created_at: CREATED_AT,
+      updated_at: "2026-05-30T00:00:01Z",
+      ...overrides,
+    };
+  }
+
+  function seedMessages(qc: ReturnType<typeof createTestQueryClient>, messages: Message[]): void {
+    qc.setQueryData<MessagesData>(qk.session.messages(SID), {
+      messages,
+      hasMore: false,
+      oldestCursor: messages[0]?.id ?? null,
+    });
+  }
+
+  it("appends the notice into the TQ messages cache when the turn had no output", () => {
+    const qc = createTestQueryClient();
+    seedMessages(qc, [userMessage("turn-1", "/deploy")]);
+
+    emitEmptyTurnNoticeIntoCache(qc, turnPayload(), false, "2026-05-30T00:00:02Z");
+
+    const cached = qc.getQueryData<MessagesData>(qk.session.messages(SID));
+    const notice = cached?.messages.find((m) => m.id === NOTICE_ID);
+    expect(notice).toBeDefined();
+    expect(notice?.metadata?.empty_turn).toBe(true);
+    expect(notice?.content).toContain("`/deploy`");
+  });
+
+  it("reads agent commands from the availableCommands cache for the known-command variant", () => {
+    const qc = createTestQueryClient();
+    seedMessages(qc, [userMessage("turn-1", "/deploy")]);
+    qc.setQueryData<AvailableCommand[]>(qk.session.availableCommands(SID), [{ name: "deploy" }]);
+
+    emitEmptyTurnNoticeIntoCache(qc, turnPayload(), false);
+
+    const cached = qc.getQueryData<MessagesData>(qk.session.messages(SID));
+    const notice = cached?.messages.find((m) => m.id === NOTICE_ID);
+    expect(notice?.content).toContain("ran but produced no output");
+  });
+
+  it("does not write a notice when the turn produced output", () => {
+    const qc = createTestQueryClient();
+    seedMessages(qc, [userMessage("turn-1", "/deploy")]);
+
+    emitEmptyTurnNoticeIntoCache(qc, turnPayload({ had_output: true }), false);
+
+    const cached = qc.getQueryData<MessagesData>(qk.session.messages(SID));
+    expect(cached?.messages.some((m) => m.id === NOTICE_ID)).toBe(false);
+  });
+
+  it("does not write a notice on an ephemeral surface", () => {
+    const qc = createTestQueryClient();
+    seedMessages(qc, [userMessage("turn-1", "/deploy")]);
+
+    emitEmptyTurnNoticeIntoCache(qc, turnPayload(), true);
+
+    const cached = qc.getQueryData<MessagesData>(qk.session.messages(SID));
+    expect(cached?.messages.some((m) => m.id === NOTICE_ID)).toBe(false);
+  });
+
+  it("is idempotent — does not duplicate the notice on repeat events", () => {
+    const qc = createTestQueryClient();
+    seedMessages(qc, [userMessage("turn-1", "/deploy")]);
+
+    emitEmptyTurnNoticeIntoCache(qc, turnPayload(), false);
+    emitEmptyTurnNoticeIntoCache(qc, turnPayload(), false);
+
+    const cached = qc.getQueryData<MessagesData>(qk.session.messages(SID));
+    const count = cached?.messages.filter((m) => m.id === NOTICE_ID).length;
+    expect(count).toBe(1);
   });
 });

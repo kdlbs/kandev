@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
-import { useAppStore } from "@/components/state-provider";
 import { lspClientManager, toLspLanguage, type LspStatus } from "@/lib/lsp/lsp-client-manager";
+import { useUserSettings } from "@/hooks/domains/settings/use-user-settings";
+import { DEFAULT_USER_SETTINGS } from "@/lib/types/settings";
 
 const DISABLED: LspStatus = { state: "disabled" };
 
@@ -12,8 +13,9 @@ export function useLsp(
   lspLanguage: string | null;
   toggle: () => void;
 } {
-  const lspAutoStartLanguages = useAppStore((s) => s.userSettings.lspAutoStartLanguages);
-  const lspServerConfigs = useAppStore((s) => s.userSettings.lspServerConfigs);
+  const userSettings = useUserSettings().data ?? DEFAULT_USER_SETTINGS;
+  const lspAutoStartLanguages = userSettings.lspAutoStartLanguages;
+  const lspServerConfigs = userSettings.lspServerConfigs;
   const lspLanguage = toLspLanguage(monacoLanguage);
   const shouldAutoStart = lspLanguage ? lspAutoStartLanguages.includes(lspLanguage) : false;
 

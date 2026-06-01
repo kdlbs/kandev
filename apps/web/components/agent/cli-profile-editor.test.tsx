@@ -1,8 +1,33 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { StateProvider } from "@/components/state-provider";
 import { CliProfileEditor } from "./cli-profile-editor";
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
+import { createTestQueryClient } from "@/test-utils/render-with-query";
+import { qk } from "@/lib/query/keys";
+
+type AvailableAgentSeed = {
+  items: unknown[];
+  tools?: unknown[];
+};
+
+function renderWithAgents(
+  ui: React.ReactElement,
+  seed: AvailableAgentSeed,
+  initialState: Parameters<typeof StateProvider>[0]["initialState"] = {},
+) {
+  const client = createTestQueryClient();
+  client.setQueryData(qk.settings.availableAgents(), {
+    agents: seed.items,
+    tools: seed.tools ?? [],
+  });
+  return render(
+    <QueryClientProvider client={client}>
+      <StateProvider initialState={initialState}>{ui}</StateProvider>
+    </QueryClientProvider>,
+  );
+}
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
@@ -66,20 +91,9 @@ const agentWithRecommendedFlag = {
 
 describe("CliProfileEditor", () => {
   it("renders the create form with the CLI client picker, profile name, and model selector", () => {
-    render(
-      <StateProvider
-        initialState={{
-          settingsAgents: { items: [] },
-          availableAgents: {
-            items: [baseAvailableAgent],
-            tools: [],
-            loaded: true,
-            loading: false,
-          },
-        }}
-      >
-        <CliProfileEditor mode="create" defaultProfileName="default" onSaved={vi.fn()} />
-      </StateProvider>,
+    renderWithAgents(
+      <CliProfileEditor mode="create" defaultProfileName="default" onSaved={vi.fn()} />,
+      { items: [baseAvailableAgent] },
     );
 
     expect(screen.getByLabelText("Profile name")).toBeTruthy();
@@ -100,21 +114,9 @@ describe("CliProfileEditor", () => {
       createdAt: CREATED_AT,
       updatedAt: CREATED_AT,
     };
-    render(
-      <StateProvider
-        initialState={{
-          settingsAgents: { items: [] },
-          availableAgents: {
-            items: [baseAvailableAgent],
-            tools: [],
-            loaded: true,
-            loading: false,
-          },
-        }}
-      >
-        <CliProfileEditor mode="edit" profile={profile} onSaved={vi.fn()} />
-      </StateProvider>,
-    );
+    renderWithAgents(<CliProfileEditor mode="edit" profile={profile} onSaved={vi.fn()} />, {
+      items: [baseAvailableAgent],
+    });
 
     const nameInput = screen.getByLabelText("Profile name") as HTMLInputElement;
     expect(nameInput.value).toBe("default");
@@ -123,21 +125,9 @@ describe("CliProfileEditor", () => {
 
   it("invokes onCancel when the Cancel button is clicked", () => {
     const onCancel = vi.fn();
-    render(
-      <StateProvider
-        initialState={{
-          settingsAgents: { items: [] },
-          availableAgents: {
-            items: [baseAvailableAgent],
-            tools: [],
-            loaded: true,
-            loading: false,
-          },
-        }}
-      >
-        <CliProfileEditor mode="create" onSaved={vi.fn()} onCancel={onCancel} />
-      </StateProvider>,
-    );
+    renderWithAgents(<CliProfileEditor mode="create" onSaved={vi.fn()} onCancel={onCancel} />, {
+      items: [baseAvailableAgent],
+    });
 
     fireEvent.click(screen.getByText("Cancel"));
     expect(onCancel).toHaveBeenCalled();
@@ -146,25 +136,9 @@ describe("CliProfileEditor", () => {
 
 describe("CliProfileEditor recommended flags", () => {
   it("can hide passthrough while showing recommended CLI flags", () => {
-    render(
-      <StateProvider
-        initialState={{
-          settingsAgents: { items: [] },
-          availableAgents: {
-            items: [agentWithRecommendedFlag],
-            tools: [],
-            loaded: true,
-            loading: false,
-          },
-        }}
-      >
-        <CliProfileEditor
-          mode="create"
-          showAdvanced
-          allowCliPassthrough={false}
-          onSaved={vi.fn()}
-        />
-      </StateProvider>,
+    renderWithAgents(
+      <CliProfileEditor mode="create" showAdvanced allowCliPassthrough={false} onSaved={vi.fn()} />,
+      { items: [agentWithRecommendedFlag] },
     );
 
     expect(screen.queryByText("CLI passthrough")).toBeNull();
@@ -189,20 +163,9 @@ describe("CliProfileEditor recommended flags", () => {
       ],
     });
 
-    render(
-      <StateProvider
-        initialState={{
-          settingsAgents: { items: [] },
-          availableAgents: {
-            items: [agentWithRecommendedFlag],
-            tools: [],
-            loaded: true,
-            loading: false,
-          },
-        }}
-      >
-        <CliProfileEditor mode="create" defaultProfileName="default" onSaved={vi.fn()} />
-      </StateProvider>,
+    renderWithAgents(
+      <CliProfileEditor mode="create" defaultProfileName="default" onSaved={vi.fn()} />,
+      { items: [agentWithRecommendedFlag] },
     );
 
     fireEvent.click(screen.getByText("Create profile"));

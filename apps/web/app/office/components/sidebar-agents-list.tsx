@@ -1,14 +1,16 @@
 "use client";
 
-import { useCallback, useEffect } from "react";
+import { useMemo } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
-import { useOfficeRefetch } from "@/hooks/use-office-refetch";
-import { listAgentProfiles } from "@/lib/api/domains/office-api";
+import { officeQueryOptions } from "@/lib/query/query-options/office";
+import { useOfficeInboxItems } from "@/hooks/domains/office/use-office-inbox";
 import { cn } from "@/lib/utils";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
 import { selectActiveSessionsForAgent } from "@/lib/state/slices/session/selectors";
+import { useAllTaskSessions } from "@/hooks/domains/session/use-task-session-by-id";
 import { SidebarCollapsibleSection } from "./sidebar-collapsible-section";
 import { AgentAvatar } from "./agent-avatar";
 import { AgentStatusDot } from "../agents/components/agent-status-dot";
@@ -16,25 +18,11 @@ import { LiveAgentIndicator } from "../agents/components/live-agent-indicator";
 
 export function SidebarAgentsList() {
   const router = useRouter();
-  const agents = useAppStore((s) => s.office.agentProfiles);
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const setOfficeAgentProfiles = useAppStore((s) => s.setOfficeAgentProfiles);
-
-  // Refetch agents on mount and on WS "agents" events. This ensures the
-  // sidebar (and any page that reads agentProfiles from the store, such
-  // as the org chart and agent detail layout) recovers from stale SSR
-  // hydration without waiting for a user action or WS event to arrive.
-  const refetchAgents = useCallback(async () => {
-    if (!workspaceId) return;
-    const res = await listAgentProfiles(workspaceId).catch(() => ({ agents: [] }));
-    setOfficeAgentProfiles(res.agents ?? []);
-  }, [workspaceId, setOfficeAgentProfiles]);
-
-  useEffect(() => {
-    refetchAgents();
-  }, [refetchAgents]);
-
-  useOfficeRefetch("agents", refetchAgents);
+  const { data: agents = [] } = useQuery({
+    ...officeQueryOptions.agents(workspaceId ?? ""),
+    enabled: !!workspaceId,
+  });
 
   return (
     <SidebarCollapsibleSection label="Agents" onAdd={() => router.push("/office/agents")}>
@@ -56,14 +44,17 @@ function SidebarAgentRow({ agent }: { agent: AgentProfile }) {
   const pathname = usePathname();
   const href = `/office/agents/${agent.id}`;
   const isActive = pathname === href;
-  const liveCount = useAppStore((s) => selectActiveSessionsForAgent(s, agent.id));
-  const errorCount = useAppStore((s) =>
-    s.office.inboxItems.reduce((acc, item) => {
-      if (item.type !== "agent_run_failed") return acc;
-      const payloadAgent =
-        typeof item.payload?.agent_profile_id === "string" ? item.payload.agent_profile_id : "";
-      return payloadAgent === agent.id ? acc + 1 : acc;
-    }, 0),
+  const liveCount = selectActiveSessionsForAgent(useAllTaskSessions(), agent.id);
+  const inboxItems = useOfficeInboxItems();
+  const errorCount = useMemo(
+    () =>
+      inboxItems.reduce((acc, item) => {
+        if (item.type !== "agent_run_failed") return acc;
+        const payloadAgent =
+          typeof item.payload?.agent_profile_id === "string" ? item.payload.agent_profile_id : "";
+        return payloadAgent === agent.id ? acc + 1 : acc;
+      }, 0),
+    [inboxItems, agent.id],
   );
   const isAutoPaused = (agent.pauseReason ?? "").startsWith("Auto-paused:");
 

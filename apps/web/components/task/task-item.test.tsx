@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { ComponentProps } from "react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { StateProvider } from "@/components/state-provider";
+import { createTestQueryClient } from "@/test-utils/render-with-query";
 import { TaskItem } from "./task-item";
 
 const REVIEW_ICON_TEST_ID = "task-state-review";
@@ -11,10 +13,13 @@ const PENDING_PERMISSION_ICON_TEST_ID = "task-state-pending-permission";
 afterEach(() => cleanup());
 
 function renderTaskItem(props: Partial<ComponentProps<typeof TaskItem>> = {}) {
+  // TaskItem renders TaskPRIcon, which reads task PRs from TanStack Query.
   return render(
-    <StateProvider>
-      <TaskItem title="Needs answer" state="REVIEW" {...props} />
-    </StateProvider>,
+    <QueryClientProvider client={createTestQueryClient()}>
+      <StateProvider>
+        <TaskItem title="Needs answer" state="REVIEW" {...props} />
+      </StateProvider>
+    </QueryClientProvider>,
   );
 }
 

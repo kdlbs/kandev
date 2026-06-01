@@ -2,9 +2,13 @@
 
 import { useCallback, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useQueryClient } from "@tanstack/react-query";
+import { useAppStore } from "@/components/state-provider";
 import { startConfigChat } from "@/lib/api/domains/workspace-api";
 import { updateWorkspaceAction } from "@/app/actions/workspaces";
+import { useWorkspace } from "@/hooks/domains/workspace/use-workspaces";
+import { qk } from "@/lib/query/keys";
+import { mergeTaskSessionIntoCache } from "@/lib/query/cache/task-session-cache";
 import {
   agentProfileId as toAgentProfileId,
   sessionId as toSessionId,
@@ -28,25 +32,14 @@ function useConfigChatStore() {
   );
 }
 
-function useUpdateWorkspaceInStore() {
-  const storeApi = useAppStoreApi();
-  return (workspaceId: string, updates: Record<string, unknown>) => {
-    const { workspaces, setWorkspaces } = storeApi.getState();
-    setWorkspaces(workspaces.items.map((w) => (w.id === workspaceId ? { ...w, ...updates } : w)));
-  };
-}
-
 export function useConfigChat(workspaceId: string) {
   const store = useConfigChatStore();
-  const storeApi = useAppStoreApi();
+  const queryClient = useQueryClient();
   const [isStarting, setIsStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
-  const updateWorkspaceInStore = useUpdateWorkspaceInStore();
 
-  const workspace = useAppStore(
-    (s) => s.workspaces.items.find((w) => w.id === workspaceId) ?? null,
-  );
+  const workspace = useWorkspace(workspaceId);
 
   const defaultProfileId =
     workspace?.default_config_agent_profile_id ?? workspace?.default_agent_profile_id ?? undefined;
@@ -73,9 +66,9 @@ export function useConfigChat(workspaceId: string) {
           agent_profile_id: agentProfileId,
         });
 
-        // Seed the task session in the main store so QuickChatContent can find it
+        // Seed the task session in the TQ cache so QuickChatContent can find it
         // immediately. The WS event will merge on top when it arrives.
-        storeApi.getState().setTaskSession({
+        mergeTaskSessionIntoCache(queryClient, {
           id: toSessionId(response.session_id),
           task_id: toTaskId(response.task_id),
           state: "CREATED",
@@ -96,9 +89,8 @@ export function useConfigChat(workspaceId: string) {
             await updateWorkspaceAction(workspaceId, {
               default_config_agent_profile_id: agentProfileId,
             });
-            updateWorkspaceInStore(workspaceId, {
-              default_config_agent_profile_id: agentProfileId,
-            });
+            // workspace.updated WS event also writes TQ; invalidate to be safe.
+            await queryClient.invalidateQueries({ queryKey: qk.workspaces.all() });
           } catch {
             // Non-critical — don't fail the chat start for this
           }
@@ -110,14 +102,7 @@ export function useConfigChat(workspaceId: string) {
         setIsStarting(false);
       }
     },
-    [
-      workspaceId,
-      isStarting,
-      store,
-      storeApi,
-      workspace?.default_config_agent_profile_id,
-      updateWorkspaceInStore,
-    ],
+    [workspaceId, isStarting, store, workspace?.default_config_agent_profile_id, queryClient],
   );
 
   const close = useCallback(() => {

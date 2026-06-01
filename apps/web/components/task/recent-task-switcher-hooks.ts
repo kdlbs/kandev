@@ -11,6 +11,17 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import { useAppStore } from "@/components/state-provider";
+import { useUserSettings } from "@/hooks/domains/settings/use-user-settings";
+import { useAllRepositories } from "@/hooks/domains/workspace/use-all-repositories";
+import {
+  useActiveWorkflowSteps,
+  useAllKanbanTasks,
+  useKanbanSnapshots,
+} from "@/hooks/domains/kanban/use-kanban-tasks";
+import { useWorkflowItems } from "@/hooks/domains/kanban/use-kanban-snapshots";
+import { useAllTaskSessionsByTaskFromCache } from "@/hooks/domains/session/use-task-session-by-id";
+import { useStablePrimarySessionIds } from "@/hooks/domains/session/use-messages-by-session-cache";
+import { useGitStatusByEnvFromCache } from "@/hooks/domains/session/use-git-status-cache";
 import { useCommandPanelOpen } from "@/lib/commands/command-registry";
 import { useRegisterCommands } from "@/hooks/use-register-commands";
 import type { KeyboardShortcut } from "@/lib/keyboard/constants";
@@ -96,15 +107,20 @@ function useRecentTaskEntries() {
 function useRecentTaskBuildContext(): RecentTaskBuildContext {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
-  const kanbanWorkflowId = useAppStore((state) => state.kanban.workflowId);
-  const kanbanTasks = useAppStore((state) => state.kanban.tasks);
-  const kanbanSteps = useAppStore((state) => state.kanban.steps);
-  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
-  const workflows = useAppStore((state) => state.workflows.items);
-  const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
-  const sessionsByTaskId = useAppStore((state) => state.taskSessionsByTask.itemsByTaskId);
-  const gitStatusByEnvId = useAppStore((state) => state.gitStatus.byEnvironmentId);
+  // The active workflow selection is client-only; its steps come from the TQ
+  // snapshot cache via useActiveWorkflowSteps.
+  const kanbanWorkflowId = useAppStore((state) => state.workflows.activeId);
+  const kanbanTasks = useAllKanbanTasks();
+  const kanbanSteps = useActiveWorkflowSteps();
+  const snapshots = useKanbanSnapshots();
+  const workflows = useWorkflowItems(activeWorkspaceId);
+  const { byWorkspaceId: repositoriesByWorkspace } = useAllRepositories(false);
+  const sessionsByTaskId = useAllTaskSessionsByTaskFromCache();
   const environmentIdBySessionId = useAppStore((state) => state.environmentIdBySessionId);
+  // Git indicators read the TQ git cache keyed by environment (bridge-populated),
+  // resolved per primary session of the known kanban tasks. Observe-only.
+  const recentPrimarySessionIds = useStablePrimarySessionIds(kanbanTasks);
+  const gitStatusByEnvId = useGitStatusByEnvFromCache(recentPrimarySessionIds);
 
   return useMemo(
     () => ({
@@ -449,7 +465,7 @@ export function useRecentTaskSwitcherController(): RecentTaskSwitcherController 
   const [open, setOpenState] = useState(false);
   const [rawSelectedIndex, setRawSelectedIndex] = useState(-1);
   const { setOpen: setCommandPanelOpen } = useCommandPanelOpen();
-  const keyboardShortcuts = useAppStore((state) => state.userSettings.keyboardShortcuts);
+  const keyboardShortcuts = useUserSettings().data?.keyboardShortcuts ?? {};
   const shortcut = getShortcut("TASK_SWITCHER", keyboardShortcuts);
   const context = useRecentTaskBuildContext();
   useRecordActiveTask(context);

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import { cleanup, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 
 vi.mock("next/navigation", () => ({
@@ -12,10 +13,13 @@ import { PRRowTaskIndicator } from "./pr-row-task-indicator";
 import type { TaskPR } from "@/lib/types/github";
 
 function renderWithStore(ui: ReactNode) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <StateProvider>
-      <TooltipProvider>{ui}</TooltipProvider>
-    </StateProvider>,
+    <QueryClientProvider client={qc}>
+      <StateProvider>
+        <TooltipProvider>{ui}</TooltipProvider>
+      </StateProvider>
+    </QueryClientProvider>,
   );
 }
 

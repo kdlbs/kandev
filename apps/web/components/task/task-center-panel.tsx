@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useCallback, useState, useEffect, useMemo } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { IconCheck, IconChevronDown, IconX } from "@tabler/icons-react";
 import { TabsContent } from "@kandev/ui/tabs";
 import { Button } from "@kandev/ui/button";
@@ -18,6 +19,7 @@ import { FileTabContent } from "./file-tab-content";
 import { PassthroughToolbar } from "./passthrough-toolbar";
 import type { OpenFileTab, FileContentResponse } from "@/lib/types/backend";
 import { useAppStore } from "@/components/state-provider";
+import { useTaskSessionById } from "@/hooks/domains/session/use-task-session-by-id";
 import { SessionTabs, type SessionTab } from "@/components/session-tabs";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { executeApprove } from "@/lib/services/session-approve";
@@ -48,10 +50,8 @@ type TaskCenterPanelProps = {
 };
 
 function useSessionApprove(activeSessionId: string | null, activeTaskId: string | null) {
-  const activeSession = useAppStore((state) =>
-    activeSessionId ? (state.taskSessions.items[activeSessionId] ?? null) : null,
-  );
-  const setTaskSession = useAppStore((state) => state.setTaskSession);
+  const activeSession = useTaskSessionById(activeSessionId);
+  const queryClient = useQueryClient();
   const isAgentWorking = activeSession?.state === "STARTING" || activeSession?.state === "RUNNING";
   const isPassthroughMode = useMemo(() => isPassthroughSession(activeSession), [activeSession]);
   const showApproveButton =
@@ -59,11 +59,11 @@ function useSessionApprove(activeSessionId: string | null, activeTaskId: string 
   const handleApprove = useCallback(async () => {
     if (!activeSessionId || !activeTaskId) return;
     try {
-      await executeApprove(activeSessionId, activeTaskId, setTaskSession);
+      await executeApprove(activeSessionId, activeTaskId, queryClient);
     } catch (error) {
       console.error("Failed to approve session:", error);
     }
-  }, [activeSessionId, activeTaskId, setTaskSession]);
+  }, [activeSessionId, activeTaskId, queryClient]);
   return { activeSession, isPassthroughMode, showApproveButton, handleApprove };
 }
 

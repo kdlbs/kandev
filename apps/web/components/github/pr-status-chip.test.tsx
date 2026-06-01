@@ -1,12 +1,35 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
+import { createTestQueryClient } from "@/test-utils/render-with-query";
+import { qk } from "@/lib/query/keys";
 import { PRStatusChip } from "./pr-status-chip";
 import type { AppState } from "@/lib/state/store";
 import type { TaskPR } from "@/lib/types/github";
+
+const WS_ID = "ws-1";
+
+// PRTaskIcon/PRStatusChip read taskPRs from the TanStack Query cache for the
+// active workspace, so seed that cache + the active workspace id (client-only).
+function renderWithPRs(prsByTaskId: Record<string, TaskPR[]> | undefined, ui: ReactNode) {
+  const queryClient = createTestQueryClient();
+  if (prsByTaskId) {
+    queryClient.setQueryData(qk.github.prs(WS_ID), { task_prs: prsByTaskId });
+  }
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <StateProvider initialState={{ workspaces: { activeId: WS_ID } } as Partial<AppState>}>
+        <ToastProvider>
+          <TooltipProvider>{ui}</TooltipProvider>
+        </ToastProvider>
+      </StateProvider>
+    </QueryClientProvider>,
+  );
+}
 
 const isMobileMock = vi.fn(() => false);
 vi.mock("@/hooks/use-mobile", () => ({
@@ -25,16 +48,6 @@ vi.mock("@/lib/api/domains/github-api", async (importOriginal) => {
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: vi.fn(() => null),
 }));
-
-function renderWithStore(initialState: Partial<AppState> | undefined, ui: ReactNode) {
-  return render(
-    <StateProvider initialState={initialState}>
-      <ToastProvider>
-        <TooltipProvider>{ui}</TooltipProvider>
-      </ToastProvider>
-    </StateProvider>,
-  );
-}
 
 function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
   return {
@@ -79,29 +92,21 @@ afterEach(() => {
 });
 
 const CHIP_TESTID = "pr-status-chip";
-const seededState: Partial<AppState> = {
-  taskPRs: { byTaskId: { "task-1": [makePR()] } },
-};
+const seededPRs: Record<string, TaskPR[]> = { "task-1": [makePR()] };
 
 describe("PRStatusChip", () => {
   it("returns null when the task has no PR", () => {
-    renderWithStore(undefined, <PRStatusChip taskId="missing" />);
+    renderWithPRs(undefined, <PRStatusChip taskId="missing" />);
     expect(screen.queryByTestId(CHIP_TESTID)).toBeNull();
   });
 
   it("returns null when the PR has been merged (terminal state)", () => {
-    renderWithStore(
-      { taskPRs: { byTaskId: { "task-1": [makePR({ state: "merged" })] } } },
-      <PRStatusChip taskId="task-1" />,
-    );
+    renderWithPRs({ "task-1": [makePR({ state: "merged" })] }, <PRStatusChip taskId="task-1" />);
     expect(screen.queryByTestId(CHIP_TESTID)).toBeNull();
   });
 
   it("returns null when the PR has been closed (terminal state)", () => {
-    renderWithStore(
-      { taskPRs: { byTaskId: { "task-1": [makePR({ state: "closed" })] } } },
-      <PRStatusChip taskId="task-1" />,
-    );
+    renderWithPRs({ "task-1": [makePR({ state: "closed" })] }, <PRStatusChip taskId="task-1" />);
     expect(screen.queryByTestId(CHIP_TESTID)).toBeNull();
   });
 
@@ -109,7 +114,7 @@ describe("PRStatusChip", () => {
     beforeEach(() => isMobileMock.mockReturnValue(false));
 
     it("renders the chip button without a Drawer", () => {
-      renderWithStore(seededState, <PRStatusChip taskId="task-1" />);
+      renderWithPRs(seededPRs, <PRStatusChip taskId="task-1" />);
       const chip = screen.getByTestId(CHIP_TESTID);
       expect(chip).toBeTruthy();
       // The chip's HoverCard popover is hover-only on desktop; clicking the
@@ -121,7 +126,7 @@ describe("PRStatusChip", () => {
     });
 
     it("exposes the canonical data attributes that desktop tests rely on", () => {
-      renderWithStore(seededState, <PRStatusChip taskId="task-1" />);
+      renderWithPRs(seededPRs, <PRStatusChip taskId="task-1" />);
       const chip = screen.getByTestId(CHIP_TESTID);
       expect(chip.getAttribute("data-pr-number")).toBe("42");
       expect(chip.getAttribute("data-pr-state")).toBe("open");
@@ -134,7 +139,7 @@ describe("PRStatusChip", () => {
     beforeEach(() => isMobileMock.mockReturnValue(true));
 
     it("renders the chip closed and opens the drawer on click", () => {
-      renderWithStore(seededState, <PRStatusChip taskId="task-1" />);
+      renderWithPRs(seededPRs, <PRStatusChip taskId="task-1" />);
       // Drawer must not be in the DOM before the user taps the chip — relied
       // on by the e2e spec's `toHaveCount(0)` precondition.
       expect(document.querySelector("[data-testid='pr-status-chip-drawer']")).toBeNull();
@@ -152,7 +157,7 @@ describe("PRStatusChip", () => {
     });
 
     it("preserves the same data attributes as the desktop chip", () => {
-      renderWithStore(seededState, <PRStatusChip taskId="task-1" />);
+      renderWithPRs(seededPRs, <PRStatusChip taskId="task-1" />);
       const chip = screen.getByTestId(CHIP_TESTID);
       expect(chip.getAttribute("data-pr-number")).toBe("42");
       expect(chip.getAttribute("data-pr-state")).toBe("open");
@@ -161,8 +166,8 @@ describe("PRStatusChip", () => {
     });
 
     it("reflects a failed PR with data-status='failed'", () => {
-      renderWithStore(
-        { taskPRs: { byTaskId: { "task-1": [makePR({ checks_state: "failure" })] } } },
+      renderWithPRs(
+        { "task-1": [makePR({ checks_state: "failure" })] },
         <PRStatusChip taskId="task-1" />,
       );
       expect(screen.getByTestId(CHIP_TESTID).getAttribute("data-status")).toBe("failed");
@@ -173,28 +178,27 @@ describe("PRStatusChip", () => {
     // The mobile-pr-ci-chip.spec.ts e2e covers close-button dismissal in a
     // real browser.
 
-    it("renders the no-checks empty state in the drawer when the PR has no checks", () => {
-      renderWithStore(
+    it("renders the no-checks empty state in the drawer when the PR has no checks", async () => {
+      renderWithPRs(
         {
-          taskPRs: {
-            byTaskId: {
-              "task-1": [
-                makePR({
-                  checks_state: "",
-                  checks_total: 0,
-                  checks_passing: 0,
-                  review_state: "",
-                  mergeable_state: "",
-                }),
-              ],
-            },
-          },
+          "task-1": [
+            makePR({
+              checks_state: "",
+              checks_total: 0,
+              checks_passing: 0,
+              review_state: "",
+              mergeable_state: "",
+            }),
+          ],
         },
         <PRStatusChip taskId="task-1" />,
       );
       act(() => {
         fireEvent.click(screen.getByTestId(CHIP_TESTID));
       });
+      // The feedback fetch is now TanStack Query-backed; let the (mocked-null)
+      // request settle before asserting the empty state renders.
+      await screen.findByTestId("pr-checks-empty");
       expect(document.querySelector("[data-testid='pr-checks-empty']")).not.toBeNull();
     });
   });

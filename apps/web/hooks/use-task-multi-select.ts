@@ -2,57 +2,36 @@
 
 import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, type RefObject } from "react";
 import { useTaskActions } from "@/hooks/use-task-actions";
-import { useAppStoreApi } from "@/components/state-provider";
+import { useKanbanSnapshotMutator } from "@/hooks/domains/kanban/use-kanban-snapshots";
 import type { KanbanState } from "@/lib/state/slices";
 
 function useTaskMultiSelectStore() {
-  const store = useAppStoreApi();
+  const { getSnapshots, setSnapshot } = useKanbanSnapshotMutator();
 
   const removeTasksFromStore = useCallback(
     (ids: Set<string>) => {
-      const state = store.getState();
-      // Remove from single-workflow view
-      const currentKanban = state.kanban;
-      state.hydrate({
-        kanban: {
-          ...currentKanban,
-          tasks: currentKanban.tasks.filter((t: KanbanState["tasks"][number]) => !ids.has(t.id)),
-        },
-      });
-      // Remove from multi-workflow snapshots
-      for (const [wfId, snapshot] of Object.entries(state.kanbanMulti.snapshots)) {
+      // Remove from the TQ multi-workflow snapshots cache.
+      for (const [wfId, snapshot] of Object.entries(getSnapshots())) {
         const affected = snapshot.tasks.some((t: KanbanState["tasks"][number]) => ids.has(t.id));
         if (affected) {
-          state.setWorkflowSnapshot(wfId, {
+          setSnapshot(wfId, {
             ...snapshot,
             tasks: snapshot.tasks.filter((t: KanbanState["tasks"][number]) => !ids.has(t.id)),
           });
         }
       }
     },
-    [store],
+    [getSnapshots, setSnapshot],
   );
 
   const applyMoveInStore = useCallback(
     (succeededIds: Set<string>, targetStepId: string) => {
-      const state = store.getState();
-      // Update single-workflow view
-      const currentKanban = state.kanban;
-      state.hydrate({
-        kanban: {
-          ...currentKanban,
-          tasks: currentKanban.tasks.map((t: KanbanState["tasks"][number]) =>
-            succeededIds.has(t.id) ? { ...t, workflowStepId: targetStepId } : t,
-          ),
-        },
-      });
-      // Update multi-workflow snapshots
-      for (const [wfId, snapshot] of Object.entries(state.kanbanMulti.snapshots)) {
-        const affected = snapshot.tasks.filter((t: KanbanState["tasks"][number]) =>
+      for (const [wfId, snapshot] of Object.entries(getSnapshots())) {
+        const affected = snapshot.tasks.some((t: KanbanState["tasks"][number]) =>
           succeededIds.has(t.id),
         );
-        if (affected.length > 0) {
-          state.setWorkflowSnapshot(wfId, {
+        if (affected) {
+          setSnapshot(wfId, {
             ...snapshot,
             tasks: snapshot.tasks.map((t: KanbanState["tasks"][number]) =>
               succeededIds.has(t.id) ? { ...t, workflowStepId: targetStepId } : t,
@@ -61,20 +40,19 @@ function useTaskMultiSelectStore() {
         }
       }
     },
-    [store],
+    [getSnapshots, setSnapshot],
   );
 
   const getWorkflowIdForTask = useCallback(
     (taskId: string): string | null => {
-      const snapshots = store.getState().kanbanMulti.snapshots;
-      for (const [wfId, snapshot] of Object.entries(snapshots)) {
+      for (const [wfId, snapshot] of Object.entries(getSnapshots())) {
         if (snapshot.tasks.some((t: KanbanState["tasks"][number]) => t.id === taskId)) {
           return wfId;
         }
       }
-      return store.getState().kanban.workflowId;
+      return null;
     },
-    [store],
+    [getSnapshots],
   );
 
   return { removeTasksFromStore, applyMoveInStore, getWorkflowIdForTask };

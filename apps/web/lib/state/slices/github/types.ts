@@ -1,25 +1,3 @@
-import type {
-  GitHubStatus,
-  GitHubRateLimitUpdate,
-  TaskPR,
-  PRWatch,
-  ReviewWatch,
-  IssueWatch,
-  GitHubActionPresets,
-  PRFeedback,
-} from "@/lib/types/github";
-
-export type GitHubStatusState = {
-  status: GitHubStatus | null;
-  loaded: boolean;
-  loading: boolean;
-};
-
-export type TaskPRsState = {
-  /** Each task may have multiple PRs (one per repository for multi-repo tasks). */
-  byTaskId: Record<string, TaskPR[]>;
-};
-
 export type PendingPrUrlsState = {
   /**
    * Client-only PR URLs after Create PR succeeds before TaskPR sync (e.g. Azure Repos).
@@ -28,74 +6,14 @@ export type PendingPrUrlsState = {
   byTaskId: Record<string, Record<string, string>>;
 };
 
-export type PRWatchesState = {
-  items: PRWatch[];
-  loaded: boolean;
-  loading: boolean;
-};
-
-export type ReviewWatchesState = {
-  items: ReviewWatch[];
-  loaded: boolean;
-  loading: boolean;
-};
-
-export type IssueWatchesState = {
-  items: IssueWatch[];
-  loaded: boolean;
-  loading: boolean;
-};
-
-export type ActionPresetsState = {
-  byWorkspaceId: Record<string, GitHubActionPresets>;
-  loading: Record<string, boolean>;
-};
-
-export type PRFeedbackCacheEntry = {
-  feedback: PRFeedback;
-  lastUpdatedAt: number;
-};
-
-export type PRFeedbackCacheState = {
-  /** Keyed by `${owner}/${repo}#${pr_number}` so multi-PR tasks coexist. */
-  byKey: Record<string, PRFeedbackCacheEntry>;
-};
-
 export type GitHubSliceState = {
-  githubStatus: GitHubStatusState;
-  taskPRs: TaskPRsState;
   pendingPrUrlByTaskId: PendingPrUrlsState;
-  prWatches: PRWatchesState;
-  reviewWatches: ReviewWatchesState;
-  issueWatches: IssueWatchesState;
-  actionPresets: ActionPresetsState;
-  prFeedbackCache: PRFeedbackCacheState;
 };
 
 export type GitHubSliceActions = {
-  setGitHubStatus: (status: GitHubStatus | null) => void;
-  setGitHubStatusLoading: (loading: boolean) => void;
-  setTaskPRs: (prs: Record<string, TaskPR[]>) => void;
-  setTaskPR: (taskId: string, pr: TaskPR) => void;
   setPendingPrUrlForTask: (taskId: string, repoKey: string, prUrl: string) => void;
-  setPRWatches: (watches: PRWatch[]) => void;
-  setPRWatchesLoading: (loading: boolean) => void;
-  removePRWatch: (id: string) => void;
-  setReviewWatches: (watches: ReviewWatch[]) => void;
-  setReviewWatchesLoading: (loading: boolean) => void;
-  addReviewWatch: (watch: ReviewWatch) => void;
-  updateReviewWatch: (watch: ReviewWatch) => void;
-  removeReviewWatch: (id: string) => void;
-  setIssueWatches: (watches: IssueWatch[]) => void;
-  setIssueWatchesLoading: (loading: boolean) => void;
-  addIssueWatch: (watch: IssueWatch) => void;
-  updateIssueWatch: (watch: IssueWatch) => void;
-  removeIssueWatch: (id: string) => void;
-  setActionPresets: (workspaceId: string, presets: GitHubActionPresets) => void;
-  setActionPresetsLoading: (workspaceId: string, loading: boolean) => void;
-  applyGitHubRateLimitUpdate: (update: GitHubRateLimitUpdate) => void;
-  setPRFeedbackCacheEntry: (key: string, feedback: PRFeedback) => void;
-  removePRFeedbackCacheEntry: (key: string) => void;
+  /** Clear pending URLs once their repos' real TaskPRs land in the TQ cache. */
+  reconcilePendingPrUrls: (taskId: string, prs: import("@/lib/types/github").TaskPR[]) => void;
 };
 
 export type GitHubSlice = GitHubSliceState & GitHubSliceActions;

@@ -11,7 +11,7 @@ import {
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { useAppStore } from "@/components/state-provider";
+import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { AgentLoginDialog } from "@/components/settings/agent-login-dialog";
 import { HostShellDialog } from "@/components/settings/host-shell-dialog";
 
@@ -113,9 +113,8 @@ export function NoAuthPanel({
   // LoginCommand we open the dedicated login dialog (pre-fills the command);
   // otherwise we drop the user into a plain host shell so they can explore
   // (e.g. `<agent> --help`) and run whatever sign-in flow the CLI documents.
-  const loginCommand = useAppStore((state) =>
-    state.availableAgents.items.find((a) => a.name === agentName),
-  )?.login_command;
+  const { items: availableAgents } = useAvailableAgents();
+  const loginCommand = availableAgents.find((a) => a.name === agentName)?.login_command;
   const canLogin = isAuth && Boolean(loginCommand);
   const showTerminal = isAuth;
   const hint = noAuthHint({ isAuth, canLogin });

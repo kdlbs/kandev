@@ -6,12 +6,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
 import { Separator } from "@kandev/ui/separator";
 import { Switch } from "@kandev/ui/switch";
-import { useAppStore } from "@/components/state-provider";
+import { useUserSettings, useSetUserSettings } from "@/hooks/domains/settings/use-user-settings";
+import { DEFAULT_USER_SETTINGS } from "@/lib/types/settings";
 import { updateUserSettings } from "@/lib/api";
 
 export function ChangelogNotificationCard() {
-  const userSettings = useAppStore((state) => state.userSettings);
-  const setUserSettings = useAppStore((state) => state.setUserSettings);
+  const userSettings = useUserSettings().data ?? DEFAULT_USER_SETTINGS;
+  const setUserSettings = useSetUserSettings();
   const [isSaving, setIsSaving] = useState(false);
 
   const handleToggle = async (checked: boolean) => {

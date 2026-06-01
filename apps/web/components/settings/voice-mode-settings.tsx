@@ -16,13 +16,16 @@ import {
   SelectValue,
 } from "@kandev/ui/select";
 import { Switch } from "@kandev/ui/switch";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import {
+  useUserSettings,
+  useUserSettingsController,
+} from "@/hooks/domains/settings/use-user-settings";
+import { DEFAULT_VOICE_MODE_STATE, type VoiceModeState } from "@/lib/types/settings";
 import { useToast } from "@/components/toast-provider";
 import { updateUserSettings } from "@/lib/api";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { ShortcutRecorder } from "@/components/settings/keyboard-shortcuts-card";
 import { detectVoiceCapabilities, type VoiceCapabilities } from "@/lib/voice/capabilities";
-import type { VoiceModeState } from "@/lib/state/slices/settings/types";
 import type { KeyboardShortcut } from "@/lib/keyboard/constants";
 import {
   CONFIGURABLE_SHORTCUTS,
@@ -75,22 +78,28 @@ function toWire(state: VoiceModeState): VoiceModeWire {
   };
 }
 
+// ── Read helper ──────────────────────────────────────────────────────────
+
+/** Reads the mapped voiceMode settings from the TQ user-settings cache. */
+function useVoiceModePrefs(): VoiceModeState {
+  return useUserSettings().data?.voiceMode ?? DEFAULT_VOICE_MODE_STATE;
+}
+
 // ── Save hook ────────────────────────────────────────────────────────────
 
 function useVoiceModeSaver() {
-  // Read userSettings via the store API (not as a React selector) so the
-  // async save handler reads the latest snapshot at invocation time instead
+  // Read userSettings via the TQ cache (getLatest) — not a React selector — so
+  // the async save handler reads the latest snapshot at invocation time instead
   // of capturing a stale closure. Without this, concurrent settings updates
   // racing with this save (or a rejection rolling back to a stale snapshot)
   // can silently overwrite unrelated fields.
-  const storeApi = useAppStoreApi();
-  const setUserSettings = useAppStore((s) => s.setUserSettings);
+  const { setUserSettings, getLatest } = useUserSettingsController();
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
 
   const save = useCallback(
     async (patch: Partial<VoiceModeState>) => {
-      const current = storeApi.getState().userSettings;
+      const current = getLatest();
       const previous = current.voiceMode;
       const next = { ...previous, ...patch };
       setUserSettings({ ...current, voiceMode: next });
@@ -102,7 +111,7 @@ function useVoiceModeSaver() {
         // value still matches what we optimistically wrote. If a newer save
         // for the same key landed first, that's now the truth — reverting
         // would silently roll back the user's later edit.
-        const latest = storeApi.getState().userSettings;
+        const latest = getLatest();
         const reverted: Partial<VoiceModeState> = {};
         for (const key of Object.keys(patch) as Array<keyof VoiceModeState>) {
           if (latest.voiceMode[key] !== next[key]) continue;
@@ -118,7 +127,7 @@ function useVoiceModeSaver() {
         setSaving(false);
       }
     },
-    [storeApi, setUserSettings, toast],
+    [getLatest, setUserSettings, toast],
   );
 
   return { save, saving };
@@ -171,7 +180,7 @@ function buildEngineOptions(caps: VoiceCapabilities): EngineOption[] {
 }
 
 function EngineCard({ caps }: { caps: VoiceCapabilities }) {
-  const voiceMode = useAppStore((s) => s.userSettings.voiceMode);
+  const voiceMode = useVoiceModePrefs();
   const { save, saving } = useVoiceModeSaver();
   const options = useMemo(() => buildEngineOptions(caps), [caps]);
 
@@ -219,7 +228,7 @@ function EngineCard({ caps }: { caps: VoiceCapabilities }) {
 // ── Behavior card (language + mode + auto-send) ──────────────────────────
 
 function LanguageRow() {
-  const voiceMode = useAppStore((s) => s.userSettings.voiceMode);
+  const voiceMode = useVoiceModePrefs();
   const { save, saving } = useVoiceModeSaver();
   return (
     <div className="space-y-2">
@@ -252,7 +261,7 @@ function LanguageRow() {
 }
 
 function ModeRow() {
-  const voiceMode = useAppStore((s) => s.userSettings.voiceMode);
+  const voiceMode = useVoiceModePrefs();
   const { save, saving } = useVoiceModeSaver();
   return (
     <div className="space-y-2">
@@ -277,7 +286,7 @@ function ModeRow() {
 }
 
 function AutoSendRow() {
-  const voiceMode = useAppStore((s) => s.userSettings.voiceMode);
+  const voiceMode = useVoiceModePrefs();
   const { save, saving } = useVoiceModeSaver();
   return (
     <div className="flex items-center justify-between">
@@ -317,7 +326,7 @@ function BehaviorCard() {
 // ── Whisper Web model card ───────────────────────────────────────────────
 
 function WhisperModelCard() {
-  const voiceMode = useAppStore((s) => s.userSettings.voiceMode);
+  const voiceMode = useVoiceModePrefs();
   const { save, saving } = useVoiceModeSaver();
 
   return (
@@ -360,7 +369,7 @@ function WhisperModelCard() {
 // ── Enable card (top-level on/off) ───────────────────────────────────────
 
 function EnableCard() {
-  const voiceMode = useAppStore((s) => s.userSettings.voiceMode);
+  const voiceMode = useVoiceModePrefs();
   const { save, saving } = useVoiceModeSaver();
   return (
     <Card>
@@ -419,19 +428,18 @@ function useShortcutSaver() {
   // Same stale-closure protection as useVoiceModeSaver — read live store
   // state at call time so a concurrent keyboard-shortcut change from another
   // settings card isn't clobbered by this card's optimistic update / rollback.
-  const storeApi = useAppStoreApi();
-  const setUserSettings = useAppStore((s) => s.setUserSettings);
+  const { setUserSettings, getLatest } = useUserSettingsController();
   const { toast } = useToast();
   return useCallback(
     (next: StoredShortcutOverrides) => {
-      const current = storeApi.getState().userSettings;
+      const current = getLatest();
       const previous = current.keyboardShortcuts;
       setUserSettings({ ...current, keyboardShortcuts: next });
       updateUserSettings({ keyboard_shortcuts: next }).catch(() => {
         // Rollback only the keys this request changed AND only when the live
         // value still matches what we optimistically wrote. Skip otherwise so
         // a newer successful save to the same key isn't reverted.
-        const latest = storeApi.getState().userSettings;
+        const latest = getLatest();
         const restored: StoredShortcutOverrides = { ...latest.keyboardShortcuts };
         const changedKeys = new Set([...Object.keys(previous), ...Object.keys(next)]);
         for (const key of changedKeys) {
@@ -444,12 +452,13 @@ function useShortcutSaver() {
         toast({ title: "Failed to save shortcut", variant: "error" });
       });
     },
-    [storeApi, setUserSettings, toast],
+    [getLatest, setUserSettings, toast],
   );
 }
 
 function VoiceShortcutCard() {
-  const overrides = useAppStore((s) => s.userSettings.keyboardShortcuts);
+  const storedOverrides = useUserSettings().data?.keyboardShortcuts;
+  const overrides = useMemo(() => storedOverrides ?? {}, [storedOverrides]);
   const persist = useShortcutSaver();
   const current = getShortcut("VOICE_INPUT_TOGGLE", overrides);
 
@@ -491,7 +500,7 @@ function VoiceShortcutCard() {
 
 export function VoiceModeSettings() {
   const caps = useMemo(() => detectVoiceCapabilities(), []);
-  const enabled = useAppStore((s) => s.userSettings.voiceMode.enabled);
+  const enabled = useVoiceModePrefs().enabled;
   return (
     <SettingsSection
       icon={<IconMicrophone className="h-5 w-5" />}

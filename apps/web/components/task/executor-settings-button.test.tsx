@@ -1,5 +1,8 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { createTestQueryClient } from "@/test-utils/render-with-query";
+import { qk } from "@/lib/query/keys";
 import type { SessionPrepareState } from "@/lib/state/slices/session-runtime/types";
 
 // Constants declared *above* the vi.mock factories so the mocks can reference
@@ -21,15 +24,32 @@ let mockEnv: { executor_type: string; sandbox_id?: string; container_id?: string
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
-      prepareProgress: {
-        bySessionId: mockPrepareState ? { [mockPrepareState.sessionId]: mockPrepareState } : {},
-      },
       taskSessions: {
         items: mockSessionState
           ? { [SESSION_ID]: { id: SESSION_ID, state: mockSessionState } }
           : {},
       },
     }),
+}));
+
+// prepare-progress is read from the TanStack Query cache via usePrepareSummary
+// now; seed it from mockPrepareState and wrap each render in a
+// QueryClientProvider.
+function renderButton() {
+  const client = createTestQueryClient();
+  if (mockPrepareState) {
+    client.setQueryData(qk.session.prepareProgress(mockPrepareState.sessionId), mockPrepareState);
+  }
+  return render(
+    <QueryClientProvider client={client}>
+      <ExecutorSettingsButton taskId={TASK_ID} sessionId={SESSION_ID} />
+    </QueryClientProvider>,
+  );
+}
+
+vi.mock("@/hooks/domains/session/use-task-session-by-id", () => ({
+  useTaskSessionById: (id: string | null) =>
+    id === SESSION_ID && mockSessionState ? { id: SESSION_ID, state: mockSessionState } : null,
 }));
 
 vi.mock("@/lib/api/domains/task-environment-api", () => ({
@@ -57,7 +77,7 @@ describe("ExecutorSettingsButton", () => {
   it("shows the cloud icon when the executor type is sprites", async () => {
     mockEnv = { executor_type: "sprites", sandbox_id: "kandev-abc" };
 
-    render(<ExecutorSettingsButton taskId={TASK_ID} sessionId={SESSION_ID} />);
+    renderButton();
 
     // Wait a tick for the live fetch to resolve.
     await Promise.resolve();
@@ -68,7 +88,7 @@ describe("ExecutorSettingsButton", () => {
   it("shows the container icon for both docker variants", async () => {
     mockEnv = { executor_type: "local_docker", container_id: "abcdef" };
 
-    render(<ExecutorSettingsButton taskId={TASK_ID} sessionId={SESSION_ID} />);
+    renderButton();
 
     await Promise.resolve();
     expect(await screen.findByTestId("executor-status-container-icon")).toBeTruthy();
@@ -82,7 +102,7 @@ describe("ExecutorSettingsButton", () => {
       steps: [{ name: STEP_CREATE_SANDBOX, status: "running" }],
     };
 
-    render(<ExecutorSettingsButton taskId={TASK_ID} sessionId={SESSION_ID} />);
+    renderButton();
 
     expect(screen.getByTestId("executor-settings-button-spinner")).toBeTruthy();
     expect(screen.queryByTestId("executor-status-cloud-icon")).toBeNull();
@@ -99,7 +119,7 @@ describe("ExecutorSettingsButton", () => {
       ],
     };
 
-    render(<ExecutorSettingsButton taskId={TASK_ID} sessionId={SESSION_ID} />);
+    renderButton();
 
     // Open the hover card by hovering the trigger (not clicking — it's a
     // borderless info surface, not a button).
@@ -127,7 +147,7 @@ describe("ExecutorSettingsButton", () => {
       ],
     };
 
-    render(<ExecutorSettingsButton taskId={TASK_ID} sessionId={SESSION_ID} />);
+    renderButton();
     fireEvent.pointerEnter(screen.getByTestId(SETTINGS_BUTTON_TESTID));
 
     const status = await screen.findByTestId(PREPARE_STATUS_TESTID);
@@ -138,7 +158,7 @@ describe("ExecutorSettingsButton", () => {
   it("renders the Resuming session row when session is STARTING with no prepare events", async () => {
     mockSessionState = "STARTING";
 
-    render(<ExecutorSettingsButton taskId={TASK_ID} sessionId={SESSION_ID} />);
+    renderButton();
 
     expect(screen.getByTestId("executor-settings-button-spinner")).toBeTruthy();
     fireEvent.pointerEnter(screen.getByTestId(SETTINGS_BUTTON_TESTID));
@@ -159,7 +179,7 @@ describe("ExecutorSettingsButton", () => {
       durationMs: 12500,
     };
 
-    render(<ExecutorSettingsButton taskId={TASK_ID} sessionId={SESSION_ID} />);
+    renderButton();
     fireEvent.pointerEnter(screen.getByTestId(SETTINGS_BUTTON_TESTID));
 
     expect(screen.queryByTestId(PREPARE_STATUS_TESTID)).toBeNull();

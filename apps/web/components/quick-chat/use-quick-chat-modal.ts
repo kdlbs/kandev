@@ -2,9 +2,13 @@
 
 import { useCallback, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
+import { useAgentProfiles } from "@/hooks/domains/settings/use-settings-reads";
 import { useToast } from "@/components/toast-provider";
+import { qk } from "@/lib/query/keys";
 import { startQuickChat } from "@/lib/api/domains/workspace-api";
+import type { TaskSession } from "@/lib/types/http";
 
 async function deleteQuickChatTask(taskId: string) {
   const { deleteTask } = await import("@/lib/api/domains/kanban-api");
@@ -12,7 +16,8 @@ async function deleteQuickChatTask(taskId: string) {
 }
 
 function useQuickChatStore() {
-  return useAppStore(
+  const agentProfiles = useAgentProfiles();
+  const storeState = useAppStore(
     useShallow((s) => ({
       isOpen: s.quickChat.isOpen,
       sessions: s.quickChat.sessions,
@@ -22,10 +27,9 @@ function useQuickChatStore() {
       setActiveQuickChatSession: s.setActiveQuickChatSession,
       renameQuickChatSession: s.renameQuickChatSession,
       openQuickChat: s.openQuickChat,
-      agentProfiles: s.agentProfiles.items ?? [],
-      taskSessions: s.taskSessions.items || {},
     })),
   );
+  return { ...storeState, agentProfiles };
 }
 
 type QuickChatStore = ReturnType<typeof useQuickChatStore>;
@@ -103,6 +107,7 @@ export function useAgentSelection(workspaceId: string, store: QuickChatStore) {
 
 export function useQuickChatModal(workspaceId: string) {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const store = useQuickChatStore();
   const [showAgentPicker, setShowAgentPicker] = useState(false);
   const [sessionToClose, setSessionToClose] = useState<string | null>(null);
@@ -167,7 +172,9 @@ export function useQuickChatModal(workspaceId: string) {
     if (!sessionToClose) return;
     const sessionId = sessionToClose;
     setSessionToClose(null);
-    const taskId = store.taskSessions[sessionId]?.task_id;
+    const taskId = queryClient.getQueryData<TaskSession | null>(
+      qk.taskSession.byId(sessionId),
+    )?.task_id;
     store.closeQuickChatSession(sessionId);
     if (!taskId) return;
     try {
@@ -180,7 +187,7 @@ export function useQuickChatModal(workspaceId: string) {
         variant: "error",
       });
     }
-  }, [sessionToClose, store, toast]);
+  }, [sessionToClose, store, toast, queryClient]);
 
   return {
     isOpen: store.isOpen,

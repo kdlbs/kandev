@@ -2,14 +2,18 @@
 
 import { createContext, useCallback, useContext } from "react";
 import { toast } from "sonner";
-import { useAppStoreApi } from "@/components/state-provider";
+import { useQueryClient, type InfiniteData } from "@tanstack/react-query";
+import { useAppStore } from "@/components/state-provider";
+import { qk } from "@/lib/query/keys";
+import type { ListTasksResponse } from "@/lib/api/domains/office-tasks-api";
 import type { Task } from "@/app/office/tasks/[id]/types";
 import type { OfficeTask } from "@/lib/state/slices/office/types";
 
 /**
- * Context for the local (page-level) task representation. The office store
- * holds the canonical OfficeTask but the detail page maintains a richer
- * Task object with extra fields (reviewers, approvers, blockedBy, etc.).
+ * Context for the local (page-level) task representation. The TanStack
+ * Query cache holds the canonical OfficeTask list but the detail page
+ * maintains a richer Task object with extra fields (reviewers, approvers,
+ * blockedBy, etc.).
  *
  * Pickers live inside <TaskOptimisticProvider> on the detail page; the
  * provider exposes a way to patch / restore the local task state so
@@ -35,14 +39,16 @@ export function useTaskOptimisticContext(): TaskOptimisticContextValue {
 
 /**
  * Returns a function that performs an optimistic mutation on the current
- * task. Snapshots the local + store state, applies the patch immediately,
- * runs the API call, and rolls back + toasts on failure. On success the
- * optimistic patch is left in place; the canonical reconciliation happens
- * via the `office.task.updated` WS handler (re-fetches the task DTO).
+ * task. Snapshots the local + TQ-cache state, applies the patch
+ * immediately, runs the API call, and rolls back + toasts on failure. On
+ * success the optimistic patch is left in place; the canonical
+ * reconciliation happens via the office TQ bridge (`office.task.updated`
+ * patches/invalidates the tasks caches).
  */
 export function useOptimisticTaskMutation() {
   const ctx = useTaskOptimisticContext();
-  const storeApi = useAppStoreApi();
+  const qc = useQueryClient();
+  const workspaceId = useAppStore((s) => s.workspaces.activeId);
 
   return useCallback(
     async (
@@ -52,29 +58,71 @@ export function useOptimisticTaskMutation() {
     ): Promise<void> => {
       const snapshot = ctx.task;
       const storePatch = toOfficeTaskPatch(patch);
-      const storeSnapshot = storeApi.getState().office.tasks.items.find((t) => t.id === taskId);
 
-      // Apply optimistic patches (local + store).
+      // Apply optimistic patches: the local detail-page state and the TQ
+      // tasks caches (flat + infinite) the list views read from.
       ctx.applyPatch(patch);
-      if (storeSnapshot) {
-        storeApi.getState().patchTaskInStore(taskId, storePatch);
-      }
+      const rollbackCaches = patchTaskCaches(qc, workspaceId, taskId, storePatch);
 
       try {
         await apiCall();
       } catch (err) {
         // Rollback both layers.
         ctx.restore(snapshot);
-        if (storeSnapshot) {
-          storeApi.getState().patchTaskInStore(taskId, storeSnapshot);
-        }
+        rollbackCaches();
         const message = err instanceof Error ? err.message : "Update failed";
         toast.error(message);
         throw err;
       }
     },
-    [ctx, storeApi],
+    [ctx, qc, workspaceId],
   );
+}
+
+type QueryClient = ReturnType<typeof useQueryClient>;
+
+/**
+ * Optimistically patches a task in both the flat (`qk.office.tasks`) and
+ * paginated (`qk.office.tasksPaginated`) TQ caches for the workspace, and
+ * returns a rollback that restores the pre-patch snapshots. Mirrors the
+ * office bridge's `patchTask` updater so the list reflects the change
+ * instantly, before the WS round-trip reconciles it.
+ */
+function patchTaskCaches(
+  qc: QueryClient,
+  workspaceId: string | null | undefined,
+  taskId: string,
+  patch: Partial<OfficeTask>,
+): () => void {
+  if (!workspaceId) return () => {};
+
+  const flatKey = qk.office.tasks(workspaceId);
+  const paginatedKey = qk.office.tasksPaginated(workspaceId);
+
+  const flatSnapshots = qc.getQueriesData<OfficeTask[]>({ queryKey: flatKey });
+  const paginatedSnapshots = qc.getQueriesData<InfiniteData<ListTasksResponse>>({
+    queryKey: paginatedKey,
+  });
+
+  qc.setQueriesData<OfficeTask[]>({ queryKey: flatKey }, (prev) =>
+    prev?.map((t) => (t.id === taskId ? { ...t, ...patch } : t)),
+  );
+  qc.setQueriesData<InfiniteData<ListTasksResponse>>({ queryKey: paginatedKey }, (prev) =>
+    prev
+      ? {
+          ...prev,
+          pages: prev.pages.map((page) => ({
+            ...page,
+            tasks: page.tasks.map((t) => (t.id === taskId ? { ...t, ...patch } : t)),
+          })),
+        }
+      : prev,
+  );
+
+  return () => {
+    for (const [key, data] of flatSnapshots) qc.setQueryData(key, data);
+    for (const [key, data] of paginatedSnapshots) qc.setQueryData(key, data);
+  };
 }
 
 /**
