@@ -154,16 +154,88 @@ describe("useSessionCommits", () => {
   });
 });
 
-// Helper: seed store with one existing commit and a deferred request so we
-// can observe the store mid-refetch (stale-while-revalidate test).
+// Lives in its own describe so the outer block stays under the 100-line
+// max-lines-per-function limit.
+describe("useSessionCommits — authoritative snapshot on mount", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setStore();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("fetches a snapshot on mount even when commits were prefilled by live events", async () => {
+    // Regression: a `commit_created` WS event can populate the commits list
+    // before the hook mounts (e.g. session already running when the panel
+    // opens). If the live event carried stale/zero stats — possible during
+    // stream reconnect / replay — the panel displays them forever unless
+    // the authoritative `git log --shortstat` snapshot also runs. The
+    // pre-existing `commits === undefined` gate skipped that fetch.
+    storeState.sessionCommits = {
+      byEnvironmentId: {
+        "sess-1": [
+          {
+            commit_sha: "older",
+            commit_message: "feat: x",
+            parent_sha: "base",
+            files_changed: 0,
+            insertions: 0,
+            deletions: 0,
+          },
+        ],
+      },
+      loading: {},
+      refetchTrigger: {},
+    };
+    mockRequest.mockResolvedValueOnce({
+      commits: [
+        {
+          commit_sha: "older",
+          commit_message: "feat: x",
+          parent_sha: "base",
+          files_changed: 60,
+          insertions: 3443,
+          deletions: 227,
+        },
+      ],
+      ready: true,
+    });
+
+    renderHook(() => useSessionCommits("sess-1"));
+
+    await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(1));
+    await waitFor(() => {
+      expect(mockSetSessionCommits).toHaveBeenCalledWith(
+        "sess-1",
+        [
+          expect.objectContaining({
+            commit_sha: "older",
+            files_changed: 60,
+            insertions: 3443,
+            deletions: 227,
+          }),
+        ],
+        undefined,
+      );
+    });
+  });
+});
+
+// Helper: seed store with one existing commit, resolve the mount-time
+// snapshot fetch with that same data, and return a deferred resolver for
+// the trigger-bump refetch so the test can observe the store mid-refetch.
 async function seedAndDeferRefetch(sessionId: string) {
+  const seeded = [{ commit_sha: "old", insertions: 1, deletions: 0 }];
   storeState.sessionCommits = {
-    byEnvironmentId: {
-      [sessionId]: [{ commit_sha: "old", insertions: 1, deletions: 0 }],
-    },
+    byEnvironmentId: { [sessionId]: seeded },
     loading: {},
     refetchTrigger: { [sessionId]: 0 },
   };
+  // The mount-time snapshot fetch resolves immediately with the seeded
+  // data (no-op write), so we can isolate the trigger-bump refetch below.
+  mockRequest.mockResolvedValueOnce({ commits: seeded, ready: true });
   let resolveRequest!: (value: unknown) => void;
   mockRequest.mockReturnValueOnce(
     new Promise((resolve) => {
@@ -194,12 +266,13 @@ describe("useSessionCommits — stale-while-revalidate on trigger bump", () => {
   it("refetches when refetchTrigger bumps without nulling the visible list", async () => {
     const resolveRequest = await seedAndDeferRefetch("sess-1");
     const { rerender } = renderHook(() => useSessionCommits("sess-1"));
-    expect(mockRequest).not.toHaveBeenCalled();
+    // The mount-time snapshot fetch fires once with the seeded data.
+    await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(1));
 
     bumpTrigger("sess-1", 1);
     rerender();
 
-    await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(2));
     // During mid-refetch the store must still hold the OLD commits.
     const midRefetch = (storeState.sessionCommits as { byEnvironmentId: Record<string, unknown> })
       .byEnvironmentId;
@@ -217,23 +290,26 @@ describe("useSessionCommits — stale-while-revalidate on trigger bump", () => {
     // After a `git reset`, the refetch legitimately returns []. Without
     // `allowEmpty: true`, the default guard in `setSessionCommits` would
     // silently drop that response and the panel would keep showing stale data.
+    const seeded = [
+      { commit_sha: "a", insertions: 0, deletions: 0 },
+      { commit_sha: "b", insertions: 0, deletions: 0 },
+    ];
     storeState.sessionCommits = {
-      byEnvironmentId: {
-        "sess-1": [
-          { commit_sha: "a", insertions: 0, deletions: 0 },
-          { commit_sha: "b", insertions: 0, deletions: 0 },
-        ],
-      },
+      byEnvironmentId: { "sess-1": seeded },
       loading: {},
       refetchTrigger: { "sess-1": 0 },
     };
+    // Mount-time snapshot fetch returns the seeded data (no-op write).
+    mockRequest.mockResolvedValueOnce({ commits: seeded, ready: true });
+    // Trigger-bump fetch returns the authoritative empty list.
     mockRequest.mockResolvedValueOnce({ commits: [], ready: true });
 
     const { rerender } = renderHook(() => useSessionCommits("sess-1"));
+    await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(1));
     bumpTrigger("sess-1", 1);
     rerender();
 
-    await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(2));
     await waitFor(() => {
       expect(mockSetSessionCommits).toHaveBeenCalledWith("sess-1", [], { allowEmpty: true });
     });
@@ -245,11 +321,15 @@ describe("useSessionCommits — stale-while-revalidate on trigger bump", () => {
   });
 
   it("drops a stale response when a newer fetch already started", async () => {
+    const seeded = [{ commit_sha: "initial" }];
     storeState.sessionCommits = {
-      byEnvironmentId: { "sess-1": [{ commit_sha: "initial" }] },
+      byEnvironmentId: { "sess-1": seeded },
       loading: {},
       refetchTrigger: { "sess-1": 0 },
     };
+    // Mount-time snapshot fetch — resolves immediately with the seeded data
+    // so the stale-vs-fresh race below only involves the trigger-bump fetches.
+    mockRequest.mockResolvedValueOnce({ commits: seeded, ready: true });
     let resolveFirst!: (value: unknown) => void;
     let resolveSecond!: (value: unknown) => void;
     mockRequest
@@ -265,14 +345,15 @@ describe("useSessionCommits — stale-while-revalidate on trigger bump", () => {
       );
 
     const { rerender } = renderHook(() => useSessionCommits("sess-1"));
+    await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(1));
 
     bumpTrigger("sess-1", 1);
     rerender();
-    await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(2));
 
     bumpTrigger("sess-1", 2);
     rerender();
-    await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(3));
 
     resolveFirst({ commits: [{ commit_sha: "stale" }], ready: true });
     resolveSecond({ commits: [{ commit_sha: "fresh" }], ready: true });
@@ -283,9 +364,16 @@ describe("useSessionCommits — stale-while-revalidate on trigger bump", () => {
       expect(after["sess-1"]).toEqual([{ commit_sha: "fresh" }]);
     });
 
-    const winningCalls = mockSetSessionCommits.mock.calls.filter(
-      ([, commits]) => Array.isArray(commits) && commits.length > 0,
-    );
-    expect(winningCalls).toHaveLength(1);
+    // The mount-fetch write (seeded data) and the fresh write should land;
+    // the stale write must be dropped by the request-version guard.
+    const writtenSHAs = mockSetSessionCommits.mock.calls
+      .map(([, commits]) =>
+        Array.isArray(commits) && commits.length > 0
+          ? (commits[0] as { commit_sha: string }).commit_sha
+          : null,
+      )
+      .filter((sha): sha is string => sha !== null);
+    expect(writtenSHAs).not.toContain("stale");
+    expect(writtenSHAs).toContain("fresh");
   });
 });
