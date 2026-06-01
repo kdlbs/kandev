@@ -362,40 +362,54 @@ function useSettingsActions({ form, setConfig, setForm, setTestResult }: Setting
 
 function useProjectsLoader(hasSecret: boolean | undefined, lastOk: boolean | undefined) {
   const [projects, setProjects] = useState<SentryProject[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     if (!hasSecret) return;
     let cancelled = false;
     listSentryProjects()
       .then((res) => {
-        if (!cancelled) setProjects(res.projects ?? []);
+        if (cancelled) return;
+        setProjects(res.projects ?? []);
+        setError(null);
       })
-      .catch(() => {
-        if (!cancelled) setProjects([]);
+      .catch((err) => {
+        if (cancelled) return;
+        setProjects([]);
+        setError(String(err));
       });
     return () => {
       cancelled = true;
     };
   }, [hasSecret, lastOk]);
-  return { projects: projects ?? [], loadingProjects: projects === null && !!hasSecret };
+  return {
+    projects: projects ?? [],
+    loadingProjects: projects === null && !!hasSecret,
+    projectsError: error,
+  };
 }
 
 function useOrgsLoader(hasSecret: boolean | undefined, lastOk: boolean | undefined) {
   const [organizations, setOrganizations] = useState<SentryOrganization[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     if (!hasSecret) return;
     let cancelled = false;
     listSentryOrganizations()
       .then((res) => {
-        if (!cancelled) setOrganizations(res.organizations ?? []);
+        if (cancelled) return;
+        setOrganizations(res.organizations ?? []);
+        setError(null);
       })
-      .catch(() => {
-        if (!cancelled) setOrganizations([]);
+      .catch((err) => {
+        if (cancelled) return;
+        setOrganizations([]);
+        setError(String(err));
       });
     return () => {
       cancelled = true;
     };
   }, [hasSecret, lastOk]);
-  return { organizations: organizations ?? [] };
+  return { organizations: organizations ?? [], orgsError: error };
 }
 
 function useSentrySettings() {
@@ -405,8 +419,11 @@ function useSentrySettings() {
   const [loading, setLoading] = useState(true);
   const [testResult, setTestResult] = useState<TestSentryConnectionResult | null>(null);
   const health = configToHealth(config);
-  const { projects, loadingProjects } = useProjectsLoader(config?.hasSecret, config?.lastOk);
-  const { organizations } = useOrgsLoader(config?.hasSecret, config?.lastOk);
+  const { projects, loadingProjects, projectsError } = useProjectsLoader(
+    config?.hasSecret,
+    config?.lastOk,
+  );
+  const { organizations, orgsError } = useOrgsLoader(config?.hasSecret, config?.lastOk);
   // Organizations the token can see, fetched from the backend. The saved org is
   // kept in the list so it stays selectable even if it is not currently
   // returned (e.g. the token's org membership changed).
@@ -468,6 +485,8 @@ function useSentrySettings() {
     projects,
     orgs,
     loadingProjects,
+    orgsError,
+    projectsError,
     update,
     handleTest,
     handleSave,
@@ -520,6 +539,15 @@ export function SentryConnectionSection() {
           />
           {validated && (
             <>
+              {(s.orgsError || s.projectsError) && (
+                <Alert variant="destructive">
+                  <AlertDescription>
+                    Couldn&apos;t load organizations or projects from Sentry. The auth token is
+                    valid but likely missing the <code>org:read</code> / <code>project:read</code>{" "}
+                    scopes — recreate it with those scopes (see the ⓘ next to Auth token).
+                  </AlertDescription>
+                </Alert>
+              )}
               <OrgField
                 form={s.form}
                 loading={s.loading}
