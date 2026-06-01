@@ -16,6 +16,8 @@ import { useAppStore } from "@/components/state-provider";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
 import { useToast } from "@/components/toast-provider";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
+import { whisperModelConfig } from "@/lib/voice/whisper-web-models";
+import { VoiceModelLoadIndicator } from "./voice-model-load-indicator";
 
 type VoiceInputButtonProps = {
   /** Inserts the recognized transcript at the current cursor position. */
@@ -222,44 +224,53 @@ function EnabledVoiceInputButton({ onTranscript, onAutoSend, disabled }: VoiceIn
   const pointerHandlers = holdMode ? buildHoldHandlers(start, stop) : {};
   const onClick = holdMode ? undefined : buildToggleHandler(state, start, stop);
 
+  const modelLabel = whisperModelConfig(voiceMode.whisperWebModel).label;
+
   // Styled to mirror SubmitButton (h-7 w-7 rounded-full primary fill) so the
   // two prominent input actions read as a pair on the right of the toolbar.
   // Recording flips to a destructive fill with a pulsing ring so the active
   // state is unmistakable even on mobile.
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          type="button"
-          variant="default"
-          size="icon"
-          aria-label={ARIA_BY_STATE[state]}
-          aria-pressed={isRecording}
-          data-testid="voice-input-button"
-          data-state={state}
-          data-mode={voiceMode.mode}
-          disabled={!!disabled || (isBusy && state !== "recording")}
-          onClick={onClick}
-          {...pointerHandlers}
-          className={cn(
-            "h-7 w-7 rounded-full cursor-pointer relative select-none",
-            isRecording && "bg-destructive text-destructive-foreground hover:bg-destructive/90",
-          )}
-        >
-          <ButtonIcon state={state} modelLoad={modelLoad} />
-          {isRecording && (
-            <span
-              aria-hidden
-              className="absolute inset-0 rounded-full ring-2 ring-destructive/40 animate-pulse"
-            />
-          )}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>
-        {modelLoad.state === "loading"
-          ? `Loading model… ${Math.round(modelLoad.progress * 100)}%`
-          : `${TOOLTIP_BY_STATE[state]}${holdMode && state === "idle" ? " (hold)" : ""}`}
-      </TooltipContent>
-    </Tooltip>
+    <div className="flex items-center gap-1.5">
+      <VoiceModelLoadIndicator
+        state={modelLoad.state}
+        progress={modelLoad.progress}
+        modelLabel={modelLabel}
+      />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="button"
+            variant="default"
+            size="icon"
+            aria-label={ARIA_BY_STATE[state]}
+            aria-pressed={isRecording}
+            data-testid="voice-input-button"
+            data-state={state}
+            data-mode={voiceMode.mode}
+            disabled={!!disabled || (isBusy && state !== "recording")}
+            onClick={onClick}
+            {...pointerHandlers}
+            className={cn(
+              "h-7 w-7 rounded-full cursor-pointer relative select-none",
+              isRecording && "bg-destructive text-destructive-foreground hover:bg-destructive/90",
+            )}
+          >
+            <ButtonIcon state={state} modelLoad={modelLoad} />
+            {isRecording && (
+              <span
+                aria-hidden
+                className="absolute inset-0 rounded-full ring-2 ring-destructive/40 animate-pulse"
+              />
+            )}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>
+          {modelLoad.state === "loading"
+            ? `Loading model… ${Math.round(modelLoad.progress * 100)}%`
+            : `${TOOLTIP_BY_STATE[state]}${holdMode && state === "idle" ? " (hold)" : ""}`}
+        </TooltipContent>
+      </Tooltip>
+    </div>
   );
 }
