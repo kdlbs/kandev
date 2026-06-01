@@ -29,18 +29,14 @@ export function VoiceModelLoadIndicator({
 
   // Single stable role="status" wrapper so AT announces the loading→error
   // transition (a newly-inserted live region would be silently ignored).
-  // The inner progressbar role handles numeric progress without announcing
-  // every percent tick.
+  // <Progress> (Radix) already renders its own role="progressbar" — the
+  // wrapper div intentionally has no role to avoid nested progressbar nodes.
   return (
     <div
       data-testid="voice-model-load-indicator"
       data-state={state}
       role="status"
-      aria-label={
-        state === "error"
-          ? `${modelLabel} failed to load`
-          : `Downloading ${modelLabel}, ${pct} percent`
-      }
+      aria-label={state === "error" ? `${modelLabel} failed to load` : undefined}
       className={
         state === "error"
           ? "flex items-center gap-1 text-xs text-destructive"
@@ -53,17 +49,15 @@ export function VoiceModelLoadIndicator({
           <span className="hidden sm:inline">{modelLabel} failed to load</span>
         </>
       ) : (
-        <div
-          role="progressbar"
-          aria-valuenow={pct}
-          aria-valuemin={0}
-          aria-valuemax={100}
-          className="flex flex-col gap-0.5 min-w-0 flex-1"
-        >
+        <div className="flex flex-col gap-0.5 min-w-0 flex-1">
           <span className="hidden sm:inline text-[10px] leading-none text-muted-foreground truncate">
             Downloading {modelLabel}… {pct}%
           </span>
-          <Progress value={pct} className="h-1" />
+          <Progress
+            value={pct}
+            className="h-1"
+            aria-label={`Downloading ${modelLabel}, ${pct} percent`}
+          />
         </div>
       )}
     </div>

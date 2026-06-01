@@ -33,7 +33,9 @@ describe("VoiceModelLoadIndicator", () => {
     const root = getIndicator();
     expect(root.getAttribute("data-state")).toBe("loading");
     expect(root.textContent).toContain("Downloading Whisper Base… 42%");
-    expect(root.getAttribute("aria-label")).toBe("Downloading Whisper Base, 42 percent");
+    expect(screen.getByRole("progressbar").getAttribute("aria-label")).toBe(
+      "Downloading Whisper Base, 42 percent",
+    );
   });
 
   it("renders an error label when state is error", () => {
