@@ -3,6 +3,8 @@ package process
 import (
 	"context"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -43,8 +45,16 @@ func (m *Manager) RescanRepositories(ctx context.Context, newWorkDir string) {
 	m.repoTrackersMu.RLock()
 	candidate := m.cfg.WorkDir
 	if newWorkDir != "" && newWorkDir != candidate {
-		if info, err := os.Stat(newWorkDir); err == nil && info.IsDir() {
-			candidate = newWorkDir
+		validated, ok := validateRescanPath(newWorkDir, candidate)
+		if !ok {
+			m.repoTrackersMu.RUnlock()
+			m.logger.Warn("workspace rescan: ignoring invalid work_dir",
+				zap.String("work_dir", newWorkDir),
+				zap.String("current_work_dir", candidate))
+			return
+		}
+		if info, err := os.Stat(validated); err == nil && info.IsDir() {
+			candidate = validated
 		} else {
 			m.repoTrackersMu.RUnlock()
 			m.logger.Warn("workspace rescan: ignoring invalid work_dir",
@@ -154,6 +164,46 @@ func (m *Manager) appendNewRepoTrackers(ctx context.Context, children []reposito
 	m.repoTrackersMu.Lock()
 	m.repoTrackers = append(m.repoTrackers, newTrackers...)
 	m.repoTrackersMu.Unlock()
+}
+
+// validateRescanPath sanitizes an externally-supplied workspace path so the
+// agentctl rescan endpoint can't be coerced into watching an arbitrary host
+// directory. The legitimate caller (kandev backend's branch materializer)
+// only promotes the workdir from a child worktree to the task root, so the
+// new path must be the same as, or an ancestor of, the current workdir.
+//
+// Path-injection defense applies even though agentctl binds to localhost:
+// any process colocated with agentctl could otherwise direct it at /etc or
+// the user's home directory by POSTing /api/v1/workspace/rescan.
+//
+// Returns the cleaned absolute path on success, or ("", false) on rejection.
+func validateRescanPath(newPath, currentWorkDir string) (string, bool) {
+	if newPath == "" {
+		return "", false
+	}
+	clean := filepath.Clean(newPath)
+	if !filepath.IsAbs(clean) {
+		return "", false
+	}
+	if strings.Contains(clean, "..") {
+		return "", false
+	}
+	if currentWorkDir == "" {
+		// No anchor to compare against — accept the cleaned absolute path.
+		// This only fires at first launch before cfg.WorkDir is set.
+		return clean, true
+	}
+	currentClean := filepath.Clean(currentWorkDir)
+	if clean == currentClean {
+		return clean, true
+	}
+	// Allow promotion to an ancestor (sibling-layout multi-branch case:
+	// <task>/<repo>/ ⇒ <task>/). Reject anything else.
+	rel, err := filepath.Rel(clean, currentClean)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		return "", false
+	}
+	return clean, true
 }
 
 // snapshotSubscribers returns a copy of the current workspace-stream
