@@ -124,12 +124,6 @@ func (c *RESTClient) TestAuth(ctx context.Context) (*TestConnectionResult, error
 
 // --- organizations ---
 
-type orgNode struct {
-	ID   string `json:"id"`
-	Slug string `json:"slug"`
-	Name string `json:"name"`
-}
-
 // listOrganizationsMaxPages bounds the pagination loop so a misbehaving API or
 // an enormous account can't spin forever. 100 pages × 100/page = 10k orgs.
 const listOrganizationsMaxPages = 100
@@ -137,6 +131,8 @@ const listOrganizationsMaxPages = 100
 // ListOrganizations returns all organizations the token can access, following
 // Sentry's Link-header cursor pagination (the endpoint returns ~100 per page).
 // The settings dropdown uses these to populate the default-org selector.
+// SentryOrganization's json tags match the API payload, so the response decodes
+// straight into it.
 func (c *RESTClient) ListOrganizations(ctx context.Context) ([]SentryOrganization, error) {
 	out := make([]SentryOrganization, 0, 32)
 	cursor := ""
@@ -145,18 +141,12 @@ func (c *RESTClient) ListOrganizations(ctx context.Context) ([]SentryOrganizatio
 		if cursor != "" {
 			q.Set("cursor", cursor)
 		}
-		var nodes []orgNode
+		var nodes []SentryOrganization
 		resp, err := c.do(ctx, "/organizations/", q, &nodes)
 		if err != nil {
 			return nil, err
 		}
-		for _, n := range nodes {
-			out = append(out, SentryOrganization{
-				ID:   n.ID,
-				Slug: n.Slug,
-				Name: n.Name,
-			})
-		}
+		out = append(out, nodes...)
 		next, hasNext := parseNextCursor(resp.Header.Get("Link"))
 		if !hasNext {
 			break
