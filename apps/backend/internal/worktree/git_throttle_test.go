@@ -30,12 +30,15 @@ func TestRunGitCmd_SaturatedThrottleBlocks(t *testing.T) {
 	// Saturate the pool out-of-band so the next runGitCmd is forced to
 	// wait. Holding the slots via gitThrottle.Acquire (the same pool
 	// runGitCmd uses) is the cleanest way to set this up without timing
-	// against a real subprocess.
+	// against a real subprocess. Capture each release so the slots are
+	// returned to the pool when the test ends — keeps the package-wide
+	// gitThrottle clean for any subsequent test in the same run.
 	for i := 0; i < cap; i++ {
-		_, err := subproc.Git().Acquire(context.Background())
+		release, err := subproc.Git().Acquire(context.Background())
 		if err != nil {
 			t.Fatalf("pre-saturate acquire %d: %v", i, err)
 		}
+		defer release()
 	}
 
 	// A runGitCmd call with a short-deadline ctx must surface the

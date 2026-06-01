@@ -6,93 +6,102 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
 func TestThrottle_BlocksPastCap(t *testing.T) {
-	tt := NewThrottle(2)
-	ctx := context.Background()
+	synctest.Test(t, func(t *testing.T) {
+		tt := NewThrottle(2)
+		ctx := context.Background()
 
-	rA, err := tt.Acquire(ctx)
-	if err != nil {
-		t.Fatalf("acquire A: %v", err)
-	}
-	rB, err := tt.Acquire(ctx)
-	if err != nil {
-		t.Fatalf("acquire B: %v", err)
-	}
+		rA, err := tt.Acquire(ctx)
+		if err != nil {
+			t.Fatalf("acquire A: %v", err)
+		}
+		rB, err := tt.Acquire(ctx)
+		if err != nil {
+			t.Fatalf("acquire B: %v", err)
+		}
 
-	blocked := make(chan struct{})
-	go func() {
-		r, _ := tt.Acquire(ctx)
-		defer r()
-		close(blocked)
-	}()
-	select {
-	case <-blocked:
-		t.Errorf("third acquire returned without waiting — throttle did not block")
-	case <-time.After(50 * time.Millisecond):
-	}
-	rA()
-	<-blocked
-	rB()
+		blocked := make(chan struct{})
+		go func() {
+			r, _ := tt.Acquire(ctx)
+			defer r()
+			close(blocked)
+		}()
+		// Wait until every goroutine in the bubble is durably blocked.
+		// If the third Acquire ran (cap not honoured) `blocked` would be
+		// closed by now.
+		synctest.Wait()
+		select {
+		case <-blocked:
+			t.Errorf("third acquire returned without waiting — throttle did not block")
+		default:
+		}
+		rA()
+		<-blocked
+		rB()
+	})
 }
 
 func TestThrottle_ContextCancelWhileQueued(t *testing.T) {
-	tt := NewThrottle(1)
-	ctx := context.Background()
-	r, err := tt.Acquire(ctx)
-	if err != nil {
-		t.Fatalf("acquire: %v", err)
-	}
-	defer r()
+	synctest.Test(t, func(t *testing.T) {
+		tt := NewThrottle(1)
+		ctx := context.Background()
+		r, err := tt.Acquire(ctx)
+		if err != nil {
+			t.Fatalf("acquire: %v", err)
+		}
+		defer r()
 
-	cctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() {
-		_, err := tt.Acquire(cctx)
-		done <- err
-	}()
-	time.Sleep(20 * time.Millisecond)
-	cancel()
-	select {
-	case got := <-done:
+		cctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() {
+			_, err := tt.Acquire(cctx)
+			done <- err
+		}()
+		// Wait for the queued Acquire to register as a waiter.
+		synctest.Wait()
+		cancel()
+		got := <-done
 		if !errors.Is(got, context.Canceled) {
 			t.Errorf("err = %v, want context.Canceled", got)
 		}
-	case <-time.After(time.Second):
-		t.Fatalf("acquire never returned after cancel")
-	}
+	})
 }
 
 func TestThrottle_DoubleReleaseIsNoOp(t *testing.T) {
-	tt := NewThrottle(2)
-	ctx := context.Background()
-	rA, _ := tt.Acquire(ctx)
-	rB, _ := tt.Acquire(ctx)
+	synctest.Test(t, func(t *testing.T) {
+		tt := NewThrottle(2)
+		ctx := context.Background()
+		rA, _ := tt.Acquire(ctx)
+		rB, _ := tt.Acquire(ctx)
 
-	rA()
-	rA() // double release must be a no-op
+		rA()
+		rA() // double release must be a no-op
 
-	rC, err := tt.Acquire(ctx)
-	if err != nil {
-		t.Fatalf("acquire after double release: %v", err)
-	}
-	defer rC()
+		rC, err := tt.Acquire(ctx)
+		if err != nil {
+			t.Fatalf("acquire after double release: %v", err)
+		}
+		defer rC()
 
-	blocked := make(chan struct{})
-	go func() {
-		r, _ := tt.Acquire(ctx)
-		defer r()
-		close(blocked)
-	}()
-	select {
-	case <-blocked:
-		t.Errorf("4th acquire ran — double release leaked a slot")
-	case <-time.After(50 * time.Millisecond):
-	}
-	rB()
-	<-blocked
+		blocked := make(chan struct{})
+		go func() {
+			r, _ := tt.Acquire(ctx)
+			defer r()
+			close(blocked)
+		}()
+		synctest.Wait()
+		select {
+		case <-blocked:
+			t.Errorf("4th acquire ran — double release leaked a slot")
+		default:
+		}
+		rB()
+		<-blocked
+	})
 }
 
 func TestThrottle_PeakConcurrencyHonoured(t *testing.T) {

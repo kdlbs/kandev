@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 	"testing"
-	"time"
+	"testing/synctest"
 )
 
 // TestThrottle_MetricsPublishedForNamedPool covers the happy path where
@@ -52,50 +52,45 @@ func TestThrottle_MetricsPublishedForNamedPool(t *testing.T) {
 // to see waiters > 0 so an operator inspecting /debug/vars knows the
 // queue, not the operation itself, is the bottleneck.
 func TestThrottle_WaitersGaugeReflectsQueueDepth(t *testing.T) {
-	name := "test-pool-waiters-" + t.Name()
-	tt := NewNamedThrottle(name, 1)
+	synctest.Test(t, func(t *testing.T) {
+		name := "test-pool-waiters-" + t.Name()
+		tt := NewNamedThrottle(name, 1)
 
-	hold, err := tt.Acquire(context.Background())
-	if err != nil {
-		t.Fatalf("initial acquire: %v", err)
-	}
-	defer hold()
-
-	var wg sync.WaitGroup
-	wg.Add(3)
-	releases := make(chan func(), 3)
-	for i := 0; i < 3; i++ {
-		go func() {
-			defer wg.Done()
-			r, _ := tt.Acquire(context.Background())
-			releases <- r
-		}()
-	}
-	// Give the goroutines time to register as waiters. We can't use
-	// synctest here because the production code calls time.Now under
-	// the hood; a short real wait is acceptable for this assertion.
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		if metricInt(subprocWaiters, name) == 3 {
-			break
+		hold, err := tt.Acquire(context.Background())
+		if err != nil {
+			t.Fatalf("initial acquire: %v", err)
 		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	if got := metricInt(subprocWaiters, name); got != 3 {
-		t.Fatalf("waiters gauge = %d, want 3", got)
-	}
+		defer hold()
 
-	hold()
-	r1 := <-releases
-	r1()
-	r2 := <-releases
-	r2()
-	r3 := <-releases
-	r3()
-	wg.Wait()
-	if got := metricInt(subprocWaiters, name); got != 0 {
-		t.Fatalf("waiters after drain = %d, want 0", got)
-	}
+		var wg sync.WaitGroup
+		wg.Add(3)
+		releases := make(chan func(), 3)
+		for i := 0; i < 3; i++ {
+			go func() {
+				defer wg.Done()
+				r, _ := tt.Acquire(context.Background())
+				releases <- r
+			}()
+		}
+		// All three goroutines registered as waiters once they're
+		// durably blocked on the semaphore send.
+		synctest.Wait()
+		if got := metricInt(subprocWaiters, name); got != 3 {
+			t.Fatalf("waiters gauge = %d, want 3", got)
+		}
+
+		hold()
+		r1 := <-releases
+		r1()
+		r2 := <-releases
+		r2()
+		r3 := <-releases
+		r3()
+		wg.Wait()
+		if got := metricInt(subprocWaiters, name); got != 0 {
+			t.Fatalf("waiters after drain = %d, want 0", got)
+		}
+	})
 }
 
 // TestThrottle_UnnamedThrottleSkipsMetrics keeps the metrics surface
