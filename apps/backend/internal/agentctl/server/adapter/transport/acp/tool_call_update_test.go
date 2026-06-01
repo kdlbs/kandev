@@ -121,6 +121,46 @@ func TestConvertToolCallResultUpdate_FullyEmptyUpdateKeepsEmptyStatus(t *testing
 	}
 }
 
+func TestConvertToolCallResultUpdate_StatusLessLocationsOnlyBecomesInProgress(t *testing.T) {
+	a := newTestAdapter()
+	seedReadToolCall(t, a, "tc-read-loc")
+
+	tcu := &acp.SessionToolCallUpdate{
+		ToolCallId: "tc-read-loc",
+		Locations: []acp.ToolCallLocation{
+			{Path: "/workspace/README.md"},
+		},
+	}
+
+	ev := a.convertToolCallResultUpdate("session-1", tcu)
+	if ev == nil {
+		t.Fatal("expected event, got nil")
+	}
+	if ev.ToolStatus != "in_progress" {
+		t.Errorf("ToolStatus = %q, want %q (locations-only updates must route through orchestrator)", ev.ToolStatus, "in_progress")
+	}
+	if ev.NormalizedPayload == nil || ev.NormalizedPayload.ReadFile() == nil {
+		t.Fatalf("expected ReadFile payload, got %+v", ev.NormalizedPayload)
+	}
+	if got := ev.NormalizedPayload.ReadFile().FilePath; got != "/workspace/README.md" {
+		t.Errorf("ReadFile.FilePath = %q, want /workspace/README.md", got)
+	}
+}
+
+func seedReadToolCall(t *testing.T, a *Adapter, toolCallID string) {
+	t.Helper()
+	tc := &acp.SessionUpdateToolCall{
+		ToolCallId: acp.ToolCallId(toolCallID),
+		Title:      "Read",
+		Status:     acp.ToolCallStatus("pending"),
+		Kind:       acp.ToolKind("read"),
+		RawInput:   map[string]any{},
+	}
+	if ev := a.convertToolCallUpdate("session-1", tc); ev == nil {
+		t.Fatalf("seed: convertToolCallUpdate returned nil")
+	}
+}
+
 func TestConvertToolCallResultUpdate_ExplicitCompletedStatusUnchanged(t *testing.T) {
 	a := newTestAdapter()
 	seedExecuteToolCall(t, a, "tc-5")

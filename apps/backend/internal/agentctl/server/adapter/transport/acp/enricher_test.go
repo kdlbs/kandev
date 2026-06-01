@@ -119,6 +119,40 @@ func TestAgentEnrichment_GoldenFixtures(t *testing.T) {
 		}
 	})
 
+	t.Run("claude modify synthesises unified diff from old_string/new_string", func(t *testing.T) {
+		n := NewNormalizer("claude-acp")
+		payload := n.NormalizeToolCall("edit", map[string]any{"kind": "edit"})
+		n.EnrichFromToolCallUpdate(payload, nil, nil, map[string]any{
+			"file_path":  "/workspace/main.go",
+			"old_string": "foo",
+			"new_string": "bar",
+		}, nil)
+		mf := payload.ModifyFile()
+		if mf.FilePath != "/workspace/main.go" {
+			t.Fatalf("FilePath = %q, want /workspace/main.go", mf.FilePath)
+		}
+		if len(mf.Mutations) == 0 || mf.Mutations[0].Diff == "" {
+			t.Fatal("expected non-empty diff from claude enricher")
+		}
+	})
+
+	t.Run("opencode modify synthesises unified diff from oldString/newString", func(t *testing.T) {
+		n := NewNormalizer("opencode-acp")
+		payload := n.NormalizeToolCall("edit", map[string]any{"kind": "edit"})
+		n.EnrichFromToolCallUpdate(payload, nil, nil, map[string]any{
+			"filePath":  "/workspace/main.go",
+			"oldString": "foo",
+			"newString": "bar",
+		}, nil)
+		mf := payload.ModifyFile()
+		if mf.FilePath != "/workspace/main.go" {
+			t.Fatalf("FilePath = %q, want /workspace/main.go", mf.FilePath)
+		}
+		if len(mf.Mutations) == 0 || mf.Mutations[0].Diff == "" {
+			t.Fatal("expected non-empty diff from opencode enricher")
+		}
+	})
+
 	t.Run("cursor read does not infer path from generic title", func(t *testing.T) {
 		n := NewNormalizer("cursor-acp")
 		payload := n.NormalizeToolCall("read", map[string]any{

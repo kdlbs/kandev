@@ -156,7 +156,7 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	// with a known status, so without a synthesized "in_progress" here those
 	// fields are silently dropped and the message stays on the placeholder
 	// "Terminal" title from the initial pending tool_call.
-	if status == "" && (tcu.Title != nil || tcu.RawInput != nil || len(tcu.Content) > 0) {
+	if status == "" && (tcu.Title != nil || tcu.RawInput != nil || len(tcu.Content) > 0 || len(tcu.Locations) > 0) {
 		status = toolStatusInProgress
 	}
 
