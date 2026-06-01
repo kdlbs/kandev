@@ -19,6 +19,11 @@ import (
 const (
 	defaultWorkflowQueueWatchdogInterval  = 60 * time.Second
 	defaultWorkflowQueueWatchdogOrphanAge = 90 * time.Second
+	// workflowQueueWatchdogSweepLimit caps the per-tick row scan so a backlog
+	// after an outage (thousands of stale entries) can't balloon memory on
+	// one sweep. Dedupe by session_id means realistic recovery per tick is
+	// bounded by distinct sessions, so this cap rarely bites in practice.
+	workflowQueueWatchdogSweepLimit = 500
 )
 
 // workflowQueueWatchdog scans the message queue periodically for stale
@@ -92,7 +97,7 @@ func (w *workflowQueueWatchdog) sweep(ctx context.Context) {
 		return
 	}
 	cutoff := time.Now().Add(-w.orphanAge)
-	stale, err := w.svc.messageQueue.ListStaleByQueuedBy(ctx, messagequeue.QueuedByWorkflow, cutoff)
+	stale, err := w.svc.messageQueue.ListStaleByQueuedBy(ctx, messagequeue.QueuedByWorkflow, cutoff, workflowQueueWatchdogSweepLimit)
 	if err != nil {
 		w.svc.logger.Warn("workflow queue watchdog: list stale failed", zap.Error(err))
 		return

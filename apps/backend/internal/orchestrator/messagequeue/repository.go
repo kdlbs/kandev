@@ -21,11 +21,11 @@ type Repository interface {
 	// ListBySession returns all entries for a session ordered by position ascending.
 	ListBySession(ctx context.Context, sessionID string) ([]QueuedMessage, error)
 
-	// ListStaleByQueuedBy returns entries whose queued_by matches AND whose
-	// queued_at < olderThan, ordered by queued_at ASC. Used by the orchestrator's
-	// workflow-queue watchdog to find orphaned auto-start prompts that no inline
-	// drain path picked up.
-	ListStaleByQueuedBy(ctx context.Context, queuedBy string, olderThan time.Time) ([]QueuedMessage, error)
+	// ListStaleByQueuedBy returns at most `limit` entries whose queued_by matches
+	// AND whose queued_at < olderThan, ordered by queued_at ASC. Used by the
+	// orchestrator's workflow-queue watchdog to find orphaned auto-start prompts
+	// that no inline drain path picked up. `limit <= 0` is treated as no cap.
+	ListStaleByQueuedBy(ctx context.Context, queuedBy string, olderThan time.Time, limit int) ([]QueuedMessage, error)
 
 	// CountBySession returns the number of entries for a session.
 	CountBySession(ctx context.Context, sessionID string) (int, error)

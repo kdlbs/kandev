@@ -157,11 +157,12 @@ func (s *Service) CancelAll(ctx context.Context, sessionID string) (int, error) 
 	return n, nil
 }
 
-// ListStaleByQueuedBy returns entries with the given queued_by tag whose
-// queued_at predates olderThan. Used by the orchestrator workflow-queue
-// watchdog to find orphaned workflow auto-start prompts.
-func (s *Service) ListStaleByQueuedBy(ctx context.Context, queuedBy string, olderThan time.Time) ([]QueuedMessage, error) {
-	return s.repo.ListStaleByQueuedBy(ctx, queuedBy, olderThan)
+// ListStaleByQueuedBy returns up to `limit` entries with the given queued_by
+// tag whose queued_at predates olderThan, ordered by queued_at ASC. Used by
+// the orchestrator workflow-queue watchdog to find orphaned workflow
+// auto-start prompts. `limit <= 0` returns every match (no cap).
+func (s *Service) ListStaleByQueuedBy(ctx context.Context, queuedBy string, olderThan time.Time, limit int) ([]QueuedMessage, error) {
+	return s.repo.ListStaleByQueuedBy(ctx, queuedBy, olderThan, limit)
 }
 
 // GetStatus returns the full pending list and capacity info for a session.

@@ -98,7 +98,7 @@ func (r *memoryRepository) ListBySession(_ context.Context, sessionID string) ([
 	return out, nil
 }
 
-func (r *memoryRepository) ListStaleByQueuedBy(_ context.Context, queuedBy string, olderThan time.Time) ([]QueuedMessage, error) {
+func (r *memoryRepository) ListStaleByQueuedBy(_ context.Context, queuedBy string, olderThan time.Time, limit int) ([]QueuedMessage, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var out []QueuedMessage
@@ -114,6 +114,9 @@ func (r *memoryRepository) ListStaleByQueuedBy(_ context.Context, queuedBy strin
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].QueuedAt.Before(out[j].QueuedAt) })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
 	return out, nil
 }
 

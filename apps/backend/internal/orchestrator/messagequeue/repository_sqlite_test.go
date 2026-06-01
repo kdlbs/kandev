@@ -343,7 +343,7 @@ func TestSQLiteRepository_ListStaleByQueuedBy(t *testing.T) {
 	mustInsert("s2", QueuedByUser, stale)     // wrong queued_by
 	staleWorkflowS3 := mustInsert("s3", QueuedByWorkflow, stale.Add(-1*time.Minute))
 
-	got, err := repo.ListStaleByQueuedBy(ctx, QueuedByWorkflow, cutoff)
+	got, err := repo.ListStaleByQueuedBy(ctx, QueuedByWorkflow, cutoff, 0)
 	if err != nil {
 		t.Fatalf("list stale: %v", err)
 	}
@@ -356,8 +356,20 @@ func TestSQLiteRepository_ListStaleByQueuedBy(t *testing.T) {
 			got[0].ID, got[1].ID, staleWorkflowS3, staleWorkflow)
 	}
 
+	// Limit caps the result to the oldest entries.
+	capped, err := repo.ListStaleByQueuedBy(ctx, QueuedByWorkflow, cutoff, 1)
+	if err != nil {
+		t.Fatalf("list stale capped: %v", err)
+	}
+	if len(capped) != 1 {
+		t.Fatalf("expected 1 entry under limit=1, got %d", len(capped))
+	}
+	if capped[0].ID != staleWorkflowS3 {
+		t.Errorf("limited result should hold the oldest entry, got %s", capped[0].ID)
+	}
+
 	// Empty result when cutoff predates everything.
-	empty, err := repo.ListStaleByQueuedBy(ctx, QueuedByWorkflow, stale.Add(-2*time.Hour))
+	empty, err := repo.ListStaleByQueuedBy(ctx, QueuedByWorkflow, stale.Add(-2*time.Hour), 0)
 	if err != nil {
 		t.Fatalf("list stale empty: %v", err)
 	}

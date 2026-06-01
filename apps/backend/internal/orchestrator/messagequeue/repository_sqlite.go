@@ -208,14 +208,19 @@ func (r *sqliteRepository) ListBySession(ctx context.Context, sessionID string) 
 	return out, rows.Err()
 }
 
-func (r *sqliteRepository) ListStaleByQueuedBy(ctx context.Context, queuedBy string, olderThan time.Time) ([]QueuedMessage, error) {
-	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
+func (r *sqliteRepository) ListStaleByQueuedBy(ctx context.Context, queuedBy string, olderThan time.Time, limit int) ([]QueuedMessage, error) {
+	query := `
 		SELECT id, session_id, task_id, position, content, model, plan_mode,
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
 		WHERE queued_by = ? AND queued_at < ?
-		ORDER BY queued_at ASC
-	`), queuedBy, olderThan)
+		ORDER BY queued_at ASC`
+	args := []any{queuedBy, olderThan}
+	if limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, limit)
+	}
+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(query), args...)
 	if err != nil {
 		return nil, fmt.Errorf("list stale queued: %w", err)
 	}

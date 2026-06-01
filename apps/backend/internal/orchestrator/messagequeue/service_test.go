@@ -454,7 +454,7 @@ func TestService_ListStaleByQueuedBy(t *testing.T) {
 	}
 	mem.mu.Unlock()
 
-	got, err := svc.ListStaleByQueuedBy(ctx, QueuedByWorkflow, cutoff)
+	got, err := svc.ListStaleByQueuedBy(ctx, QueuedByWorkflow, cutoff, 0)
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	assert.Equal(t, stale.ID, got[0].ID)

@@ -1598,6 +1598,15 @@ func (s *Service) maybeRecoverOrphanedWorkflowQueue(ctx context.Context, session
 	// IsAgentRunningForSession just told us the process is dead, but the
 	// in-memory store may still hold a stale record. Drive tryEnsureExecution
 	// directly so the resume happens even when the store is out of sync.
+	//
+	// Escalation risk: tryEnsureExecution → ensureSessionRunning → ResumeSession
+	// will mark the session FAILED via updateTaskSessionState if the resume
+	// itself errors (disk full, ErrNoAgentProfileID, container won't start,
+	// etc.). The watchdog inherits this from the inline auto-resume path —
+	// a stuck-but-otherwise-recoverable session can flip to terminal if its
+	// underlying executor environment is broken. That's the right escalation
+	// (the orphan can never drain anyway) but worth flagging for future
+	// maintainers: the watchdog is "best-effort recover OR fail loudly".
 	go s.tryEnsureExecution(context.WithoutCancel(ctx), sessionID)
 }
 
