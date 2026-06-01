@@ -91,7 +91,14 @@ type Manager struct {
 	// Each tracker stamps RepositoryName onto its emitted events and shares
 	// subscriber channels with the root via the Manager fan-out.
 	// Empty for single-repo workspaces.
-	repoTrackers []*WorkspaceTracker
+	//
+	// Mutated post-launch by RescanRepositories (multi-branch add) while other
+	// goroutines (gateway subscribe/unsubscribe, poll-mode updates) iterate
+	// the slice — every read and write must go through repoTrackersMu.
+	// workspaceTracker is also guarded by the same lock because rescan can
+	// swap it when transitioning single→multi mode.
+	repoTrackers   []*WorkspaceTracker
+	repoTrackersMu sync.RWMutex
 	// workspaceTrackersBySubpath caches per-subpath trackers for multi-repo
 	// task roots. Key is the cleaned subpath (relative to cfg.WorkDir). The
 	// root tracker lives in workspaceTracker above.
@@ -238,25 +245,40 @@ func (m *Manager) ExitError() error {
 
 // GetWorkspaceTracker returns the workspace tracker for git status and file monitoring
 func (m *Manager) GetWorkspaceTracker() *WorkspaceTracker {
+	m.repoTrackersMu.RLock()
+	defer m.repoTrackersMu.RUnlock()
 	return m.workspaceTracker
+}
+
+// snapshotTrackers returns the current root + per-repo trackers under
+// repoTrackersMu so callers can iterate without holding the lock. Concurrent
+// rescan writes can't observably mutate either while a snapshot is in flight.
+func (m *Manager) snapshotTrackers() (*WorkspaceTracker, []*WorkspaceTracker) {
+	m.repoTrackersMu.RLock()
+	defer m.repoTrackersMu.RUnlock()
+	repos := make([]*WorkspaceTracker, len(m.repoTrackers))
+	copy(repos, m.repoTrackers)
+	return m.workspaceTracker, repos
 }
 
 // StartAllWorkspaceTrackers starts root + per-repo trackers (idempotent) so file-change events fire in passthrough mode.
 func (m *Manager) StartAllWorkspaceTrackers(ctx context.Context) {
-	if m.workspaceTracker != nil {
-		m.workspaceTracker.Start(ctx)
+	root, trackers := m.snapshotTrackers()
+	if root != nil {
+		root.Start(ctx)
 	}
-	for _, t := range m.repoTrackers {
+	for _, t := range trackers {
 		t.Start(ctx)
 	}
 }
 
 // stopWorkspaceTrackers stops root + per-repo trackers (idempotent via sync.Once).
 func (m *Manager) stopWorkspaceTrackers() {
-	if m.workspaceTracker != nil {
-		m.workspaceTracker.Stop()
+	root, trackers := m.snapshotTrackers()
+	if root != nil {
+		root.Stop()
 	}
-	for _, t := range m.repoTrackers {
+	for _, t := range trackers {
 		t.Stop()
 	}
 }
@@ -277,8 +299,9 @@ func (m *Manager) SubscribeWorkspaceStream() types.WorkspaceStreamSubscriber {
 	}
 	m.streamSubscribers[sub] = struct{}{}
 	m.streamSubscribersMu.Unlock()
-	m.workspaceTracker.AttachWorkspaceStreamSubscriber(sub)
-	for _, t := range m.repoTrackers {
+	root, trackers := m.snapshotTrackers()
+	root.AttachWorkspaceStreamSubscriber(sub)
+	for _, t := range trackers {
 		t.AttachWorkspaceStreamSubscriber(sub)
 	}
 	return sub
@@ -290,8 +313,9 @@ func (m *Manager) UnsubscribeWorkspaceStream(sub types.WorkspaceStreamSubscriber
 	m.streamSubscribersMu.Lock()
 	delete(m.streamSubscribers, sub)
 	m.streamSubscribersMu.Unlock()
-	m.workspaceTracker.DetachWorkspaceStreamSubscriber(sub)
-	for _, t := range m.repoTrackers {
+	root, trackers := m.snapshotTrackers()
+	root.DetachWorkspaceStreamSubscriber(sub)
+	for _, t := range trackers {
 		t.DetachWorkspaceStreamSubscriber(sub)
 	}
 	close(sub)
@@ -365,8 +389,9 @@ func (m *Manager) ListProcesses(sessionID string) []ProcessInfo {
 // per-repo tracker discovered at construction time. Empty for single-repo
 // workspaces. Used by callers that want to fan an op out across repos.
 func (m *Manager) RepoSubpaths() []string {
-	out := make([]string, 0, len(m.repoTrackers))
-	for _, t := range m.repoTrackers {
+	_, trackers := m.snapshotTrackers()
+	out := make([]string, 0, len(trackers))
+	for _, t := range trackers {
 		if t.repositoryName != "" {
 			out = append(out, t.repositoryName)
 		}
@@ -382,21 +407,16 @@ func (m *Manager) RepoSubpaths() []string {
 // after a focus event, since the agent's initial pushes happen at boot and
 // no replay path exists for clients that subscribe later.
 func (m *Manager) SetWorkspacePollMode(ctx context.Context, mode PollMode) {
-	m.workspaceTracker.SetPollMode(mode)
-	for _, t := range m.repoTrackers {
+	root, trackers := m.snapshotTrackers()
+	root.SetPollMode(mode)
+	for _, t := range trackers {
 		t.SetPollMode(mode)
 	}
 	if mode == PollModePaused {
 		return
 	}
-	// Snapshot the tracker slice before launching the goroutine so a
-	// concurrent Stop()/teardown that mutates m.repoTrackers can't race or
-	// nil-deref the iteration. Refresh in background — RefreshGitStatus
-	// blocks on git commands which can take seconds on large repos; the
-	// HTTP caller shouldn't wait.
-	root := m.workspaceTracker
-	trackers := make([]*WorkspaceTracker, len(m.repoTrackers))
-	copy(trackers, m.repoTrackers)
+	// Refresh in background — RefreshGitStatus blocks on git commands which
+	// can take seconds on large repos; the HTTP caller shouldn't wait.
 	go func() {
 		root.RefreshGitStatus(ctx)
 		for _, t := range trackers {
@@ -592,8 +612,9 @@ func (m *Manager) Start(ctx context.Context) error {
 	go m.forwardUpdates()
 
 	// Start workspace tracker with background context (not tied to HTTP request)
-	m.workspaceTracker.Start(context.Background())
-	for _, t := range m.repoTrackers {
+	root, trackers := m.snapshotTrackers()
+	root.Start(context.Background())
+	for _, t := range trackers {
 		t.Start(context.Background())
 	}
 
@@ -617,8 +638,9 @@ func (m *Manager) startOneShot() error {
 	go m.forwardUpdates()
 
 	// Start workspace tracker with background context (not tied to HTTP request)
-	m.workspaceTracker.Start(context.Background())
-	for _, t := range m.repoTrackers {
+	root, trackers := m.snapshotTrackers()
+	root.Start(context.Background())
+	for _, t := range trackers {
 		t.Start(context.Background())
 	}
 

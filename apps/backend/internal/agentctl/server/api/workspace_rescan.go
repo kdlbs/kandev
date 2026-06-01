@@ -7,6 +7,10 @@ import (
 	"go.uber.org/zap"
 )
 
+// errKey is the JSON field name for error responses on this handler. Hoisted
+// out to satisfy goconst's repeated-string rule across the api package.
+const errKey = "error"
+
 // RescanWorkspaceRequest is the body for POST /api/v1/workspace/rescan.
 //
 // work_dir is optional. When supplied, the manager updates its tracking
@@ -28,10 +32,15 @@ type RescanWorkspaceRequest struct {
 // can ping unconditionally rather than computing diffs client-side.
 func (s *Server) handleRescanWorkspace(c *gin.Context) {
 	var req RescanWorkspaceRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		// Allow empty bodies: when no work_dir is supplied the manager
-		// rescans cfg.WorkDir in place.
-		req = RescanWorkspaceRequest{}
+	// Empty bodies are legal — rescan cfg.WorkDir in place. Malformed JSON
+	// is NOT: silently treating it as an empty rescan returned 200 to a
+	// caller who never got the work_dir promotion they asked for.
+	if c.Request.ContentLength != 0 && c.Request.Body != http.NoBody {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			s.logger.Warn("workspace rescan request rejected: malformed json", zap.Error(err))
+			c.JSON(http.StatusBadRequest, gin.H{errKey: "invalid JSON body"})
+			return
+		}
 	}
 	s.procMgr.RescanRepositories(c.Request.Context(), req.WorkDir)
 	s.logger.Debug("workspace rescan completed", zap.String("work_dir", req.WorkDir))

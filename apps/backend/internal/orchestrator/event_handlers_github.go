@@ -490,22 +490,47 @@ func (s *Service) resolvePushRepo(
 	if err != nil {
 		return "", "", ""
 	}
+	// Two passes: exact name first so a repo whose name is a prefix of a
+	// sibling (e.g. "backend" vs "backend-admin") doesn't swallow a push
+	// tagged with the longer name via isMultiBranchSubdir.
+	if owner, repo, id := matchPushRepo(ctx, s, store, links, repositoryName, true); id != "" {
+		return owner, repo, id
+	}
+	return matchPushRepo(ctx, s, store, links, repositoryName, false)
+}
+
+// matchPushRepo walks links once and returns the first matching repo. When
+// exactOnly is true only Name == repositoryName matches; otherwise the
+// multi-branch subdir prefix is also accepted.
+func matchPushRepo(
+	ctx context.Context,
+	s *Service,
+	store repoStore,
+	links []*models.TaskRepository,
+	repositoryName string,
+	exactOnly bool,
+) (owner, repo, repositoryID string) {
 	for _, link := range links {
 		repoObj, err := store.GetRepository(ctx, link.RepositoryID)
 		if err != nil || repoObj == nil {
 			continue
 		}
-		if repoObj.Name == repositoryName || isMultiBranchSubdir(repositoryName, repoObj.Name) {
-			if repoObj.ProviderOwner == "" && repoObj.LocalPath != "" {
-				if p, o, n := service.ResolveGitRemoteProvider(repoObj.LocalPath); o != "" {
-					repoObj.Provider = p
-					repoObj.ProviderOwner = o
-					repoObj.ProviderName = n
-					go s.backfillRepoProvider(store, repoObj)
-				}
-			}
-			return repoObj.ProviderOwner, repoObj.ProviderName, link.RepositoryID
+		matched := repoObj.Name == repositoryName
+		if !matched && !exactOnly {
+			matched = isMultiBranchSubdir(repositoryName, repoObj.Name)
 		}
+		if !matched {
+			continue
+		}
+		if repoObj.ProviderOwner == "" && repoObj.LocalPath != "" {
+			if p, o, n := service.ResolveGitRemoteProvider(repoObj.LocalPath); o != "" {
+				repoObj.Provider = p
+				repoObj.ProviderOwner = o
+				repoObj.ProviderName = n
+				go s.backfillRepoProvider(store, repoObj)
+			}
+		}
+		return repoObj.ProviderOwner, repoObj.ProviderName, link.RepositoryID
 	}
 	return "", "", ""
 }

@@ -96,6 +96,9 @@ function formatRepoLabel(
   knownRepoNames: string[],
 ): string | undefined {
   if (!repositoryName) return primaryName || undefined;
+  // Exact match first so a bare hyphenated repo (e.g. `kandev-cli`) isn't
+  // split by a shorter known prefix (`kandev-`) into `kandev · cli`.
+  if (knownRepoNames.includes(repositoryName)) return repositoryName;
   for (const known of knownRepoNames) {
     const prefix = known + "-";
     if (repositoryName.length > prefix.length && repositoryName.startsWith(prefix)) {

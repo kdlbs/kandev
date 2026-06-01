@@ -366,8 +366,10 @@ func TestServerModeExternal_ToolCount(t *testing.T) {
 
 	s := New(backend, "", "", 0, log, "", true, ModeExternal)
 	tools := getRegisteredToolNames(s)
-	// 12 workflow (incl. list_repositories + import_workflow) + 4 agent + 4 mcp + 5 executor + 6 task + 1 create_task + 1 add_branch_to_task = 33
-	assert.Equal(t, 33, len(tools))
+	// 12 workflow (incl. list_repositories + import_workflow) + 4 agent + 4 mcp + 5 executor + 6 task + 1 create_task = 32.
+	// add_branch_to_task_kandev is task-mode only — external coding agents have no live session to attach a worktree to.
+	assert.Equal(t, 32, len(tools))
+	assert.NotContains(t, tools, "add_branch_to_task_kandev")
 }
 
 func TestNewExternal_Constructs(t *testing.T) {

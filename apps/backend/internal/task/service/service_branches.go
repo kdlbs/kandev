@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 // AddBranchToTaskRequest carries the parameters for adding a new branch
@@ -164,11 +165,26 @@ func scanForBranchAddDuplicate(
 	repositoryID, baseBranch, checkoutBranch string,
 	repo *models.Repository,
 ) (nextPosition int, dupErr error) {
+	// Branches whose names differ only in unsafe characters (e.g. "feat/a" vs
+	// "feat-a") sanitize to the same on-disk slug and would collide at
+	// `git worktree add`. SanitizeBranchSlug documents that the service layer
+	// must reject those duplicates — the exact-string check below would let
+	// both rows land in task_repositories.
+	newSlug := worktree.SanitizeBranchSlug(checkoutBranch)
 	for _, tr := range existing {
 		if tr.RepositoryID == repositoryID &&
 			tr.BaseBranch == baseBranch &&
 			tr.CheckoutBranch == checkoutBranch {
 			return 0, branchAddDuplicateError(repo, repositoryID, baseBranch, checkoutBranch)
+		}
+		if tr.RepositoryID == repositoryID && tr.BaseBranch == baseBranch &&
+			checkoutBranch != "" && tr.CheckoutBranch != "" &&
+			tr.CheckoutBranch != checkoutBranch &&
+			worktree.SanitizeBranchSlug(tr.CheckoutBranch) == newSlug && newSlug != "" {
+			return 0, fmt.Errorf(
+				"checkout branch %q conflicts with existing branch %q on this task (both resolve to the same worktree path)",
+				checkoutBranch, tr.CheckoutBranch,
+			)
 		}
 		if tr.Position >= nextPosition {
 			nextPosition = tr.Position + 1

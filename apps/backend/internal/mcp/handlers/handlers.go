@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
@@ -752,7 +753,8 @@ func (h *Handlers) handleAddBranchToTask(ctx context.Context, msg *ws.Message) (
 	})
 	if err != nil {
 		h.logger.Error("failed to add branch to task", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to add branch: "+err.Error(), nil)
+		code := classifyAddBranchError(err)
+		return ws.NewError(msg.ID, msg.Action, code, "Failed to add branch: "+err.Error(), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		"id":              taskRepo.ID,
@@ -762,6 +764,30 @@ func (h *Handlers) handleAddBranchToTask(ctx context.Context, msg *ws.Message) (
 		keyCheckoutBranch: taskRepo.CheckoutBranch,
 		keyPosition:       taskRepo.Position,
 	})
+}
+
+// classifyAddBranchError maps service-layer add_branch failures to ws error
+// codes so MCP agents can react to user-fixable input mistakes (missing
+// task, duplicate branch, wrong executor) instead of treating them as
+// backend faults.
+func classifyAddBranchError(err error) string {
+	if err == nil {
+		return ws.ErrorCodeInternalError
+	}
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "task not found"),
+		strings.Contains(msg, "does not belong to task's workspace"):
+		return ws.ErrorCodeNotFound
+	case strings.Contains(msg, "is already attached"),
+		strings.Contains(msg, "conflicts with existing branch"):
+		return ws.ErrorCodeConflict
+	case strings.Contains(msg, "repository_id is required"),
+		strings.Contains(msg, "only supported on the worktree executor"),
+		strings.Contains(msg, "task_id is required"):
+		return ws.ErrorCodeValidation
+	}
+	return ws.ErrorCodeInternalError
 }
 
 // handleMessageTask sends a prompt to an existing task on behalf of an agent

@@ -41,8 +41,13 @@ function useChangesPanelStoreData() {
   const existingPrUrl = useAppStore((state) => {
     const taskId = state.tasks.activeTaskId;
     if (!taskId) return undefined;
-    const fromTaskPR = state.taskPRs.byTaskId[taskId]?.[0]?.pr_url;
-    if (fromTaskPR) return fromTaskPR;
+    // Multi-branch tasks hold N PRs per task. The panel-header "View PR"
+    // button is a single-URL surface, so collapse only when there's exactly
+    // one PR — otherwise the per-repo buttons (prByRepo) take over and the
+    // generic button is hidden to avoid silently linking to a sibling.
+    const taskPRs = state.taskPRs.byTaskId[taskId];
+    if (Array.isArray(taskPRs) && taskPRs.length === 1) return taskPRs[0]?.pr_url;
+    if (Array.isArray(taskPRs) && taskPRs.length > 1) return undefined;
     return state.pendingPrUrlByTaskId.byTaskId[taskId]?.[""];
   });
   return { activeTaskId, activeSessionId, taskTitle, baseBranch, existingPrUrl };

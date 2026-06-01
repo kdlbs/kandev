@@ -77,8 +77,11 @@ func isDuplicateColumnError(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := err.Error()
-	return strings.Contains(msg, "duplicate column name") || strings.Contains(msg, "already exists")
+	// SQLite emits "duplicate column name: <col>" for ALTER TABLE ADD COLUMN
+	// against an existing column. The broader "already exists" substring also
+	// matches unrelated DDL errors (e.g. "table X already exists"), which
+	// would silently swallow real schema failures — keep the match narrow.
+	return strings.Contains(err.Error(), "duplicate column name")
 }
 
 // CreateWorktree persists a new worktree record.

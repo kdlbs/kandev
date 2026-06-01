@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"os"
 
 	"go.uber.org/zap"
 
@@ -35,10 +36,29 @@ import (
 //
 // Idempotent: a rescan with no on-disk changes is a no-op.
 func (m *Manager) RescanRepositories(ctx context.Context, newWorkDir string) {
-	if newWorkDir != "" && newWorkDir != m.cfg.WorkDir {
-		m.cfg.WorkDir = newWorkDir
+	// Resolve the candidate workDir and prove it's a readable directory
+	// BEFORE committing cfg.WorkDir. If newWorkDir is bogus, leaving the
+	// manager pointing at the existing root keeps path-based handlers
+	// (vscode, git, files) consistent with the trackers that never moved.
+	m.repoTrackersMu.RLock()
+	candidate := m.cfg.WorkDir
+	if newWorkDir != "" && newWorkDir != candidate {
+		if info, err := os.Stat(newWorkDir); err == nil && info.IsDir() {
+			candidate = newWorkDir
+		} else {
+			m.repoTrackersMu.RUnlock()
+			m.logger.Warn("workspace rescan: ignoring invalid work_dir",
+				zap.String("work_dir", newWorkDir), zap.Error(err))
+			return
+		}
 	}
+	existingTrackers := len(m.repoTrackers)
+	m.repoTrackersMu.RUnlock()
+
+	m.repoTrackersMu.Lock()
+	m.cfg.WorkDir = candidate
 	workDir := m.cfg.WorkDir
+	m.repoTrackersMu.Unlock()
 
 	children := scanRepositorySubdirs(workDir)
 	subs := m.snapshotSubscribers()
@@ -46,7 +66,7 @@ func (m *Manager) RescanRepositories(ctx context.Context, newWorkDir string) {
 	m.logger.Info("workspace rescan started",
 		zap.String("work_dir", workDir),
 		zap.Int("children_found", len(children)),
-		zap.Int("existing_repo_trackers", len(m.repoTrackers)),
+		zap.Int("existing_repo_trackers", existingTrackers),
 		zap.Int("subscribers", len(subs)))
 
 	if len(children) < 2 {
@@ -56,7 +76,7 @@ func (m *Manager) RescanRepositories(ctx context.Context, newWorkDir string) {
 		return
 	}
 
-	if len(m.repoTrackers) == 0 {
+	if existingTrackers == 0 {
 		m.transitionToMultiRepoMode(ctx, workDir, children, subs)
 		return
 	}
@@ -72,28 +92,33 @@ func (m *Manager) transitionToMultiRepoMode(ctx context.Context, workDir string,
 		zap.String("work_dir", workDir),
 		zap.Int("children", len(children)))
 
-	old := m.workspaceTracker
-	if old != nil {
-		for _, sub := range subs {
-			old.DetachWorkspaceStreamSubscriber(sub)
-		}
-		old.Stop()
-	}
-
 	bareRoot := NewWorkspaceTrackerForRepo(workDir, "", m.logger)
 	bareRoot.Start(ctx)
 	for _, sub := range subs {
 		bareRoot.AttachWorkspaceStreamSubscriber(sub)
 	}
-	m.workspaceTracker = bareRoot
 
+	newRepoTrackers := make([]*WorkspaceTracker, 0, len(children))
 	for _, child := range children {
 		tracker := NewWorkspaceTrackerForRepo(child.path, child.name, m.logger)
 		tracker.Start(ctx)
 		for _, sub := range subs {
 			tracker.AttachWorkspaceStreamSubscriber(sub)
 		}
-		m.repoTrackers = append(m.repoTrackers, tracker)
+		newRepoTrackers = append(newRepoTrackers, tracker)
+	}
+
+	m.repoTrackersMu.Lock()
+	old := m.workspaceTracker
+	m.workspaceTracker = bareRoot
+	m.repoTrackers = append(m.repoTrackers, newRepoTrackers...)
+	m.repoTrackersMu.Unlock()
+
+	if old != nil {
+		for _, sub := range subs {
+			old.DetachWorkspaceStreamSubscriber(sub)
+		}
+		old.Stop()
 	}
 }
 
@@ -101,10 +126,14 @@ func (m *Manager) transitionToMultiRepoMode(ctx context.Context, workDir string,
 // have one. Existing trackers (matched by RepositoryName) are left running
 // so their cached git state and subscriber wiring stay intact.
 func (m *Manager) appendNewRepoTrackers(ctx context.Context, children []repositorySubdir, subs []types.WorkspaceStreamSubscriber) {
+	m.repoTrackersMu.RLock()
 	existing := make(map[string]bool, len(m.repoTrackers))
 	for _, t := range m.repoTrackers {
 		existing[t.RepositoryName()] = true
 	}
+	m.repoTrackersMu.RUnlock()
+
+	var newTrackers []*WorkspaceTracker
 	for _, child := range children {
 		if existing[child.name] {
 			continue
@@ -117,8 +146,14 @@ func (m *Manager) appendNewRepoTrackers(ctx context.Context, children []reposito
 		for _, sub := range subs {
 			tracker.AttachWorkspaceStreamSubscriber(sub)
 		}
-		m.repoTrackers = append(m.repoTrackers, tracker)
+		newTrackers = append(newTrackers, tracker)
 	}
+	if len(newTrackers) == 0 {
+		return
+	}
+	m.repoTrackersMu.Lock()
+	m.repoTrackers = append(m.repoTrackers, newTrackers...)
+	m.repoTrackersMu.Unlock()
 }
 
 // snapshotSubscribers returns a copy of the current workspace-stream

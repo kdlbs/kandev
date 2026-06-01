@@ -353,6 +353,10 @@ func (s *Server) registerTools() {
 		count += 4
 		s.registerRelatedTasksTool()
 		count++
+		// Task-mode only: requires a live session to attach the new
+		// (repository, branch) to. External mode has no such context.
+		s.registerAddBranchToTaskTool()
+		count++
 	}
 	s.logger.Info("registered MCP tools",
 		zap.String("mode", s.mode),
@@ -538,7 +542,13 @@ IMPORTANT:
 		),
 		s.wrapHandler("create_task_kandev", s.createTaskHandler()),
 	)
+}
 
+// registerAddBranchToTaskTool registers add_branch_to_task_kandev. Scoped to
+// task mode only — external coding agents have no live session context to
+// attach the new worktree to, and shipping this tool through the shared
+// create-task path would silently widen the external surface.
+func (s *Server) registerAddBranchToTaskTool() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("add_branch_to_task_kandev",
 			mcp.WithDescription(`Attach an additional (repository, branch) worktree to an existing task.

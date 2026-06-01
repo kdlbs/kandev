@@ -39,10 +39,13 @@ func (m *Manager) persistAndCacheWorktree(ctx context.Context, wt *Worktree, req
 	}
 
 	// Update cache keyed by (sessionID, repositoryID, branchSlug) so
-	// multi-repo and multi-branch sessions can hold multiple entries.
+	// multi-repo and multi-branch sessions can hold multiple entries. Use
+	// wt.BranchSlug (already sanitized) so the read side via
+	// GetBySessionAndRepo / tryReuseExisting, which calls
+	// SanitizeBranchSlug on its input, lands on the same key.
 	if req.SessionID != "" {
 		m.mu.Lock()
-		m.worktrees[cacheKey(req.SessionID, req.RepositoryID, req.BranchSlug)] = wt
+		m.worktrees[cacheKey(req.SessionID, req.RepositoryID, wt.BranchSlug)] = wt
 		m.mu.Unlock()
 	}
 	return nil

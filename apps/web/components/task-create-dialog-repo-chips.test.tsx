@@ -218,7 +218,11 @@ describe("RepoChipsRow", () => {
     expect(screen.getByText(/loading…/i)).toBeTruthy();
   });
 
-  it("disables Add when no more repositories are available", () => {
+  it("keeps Add enabled when all repos are selected (multi-branch: same repo + different branch is valid)", () => {
+    // With multi-branch support, the same repo can appear on multiple rows as long
+    // as each row uses a different branch. Therefore Add is always enabled when
+    // any workspace repos exist — the user can always add another branch of an
+    // existing repo.
     renderInProvider(
       <RepoChipsRow
         fs={makeFs({
@@ -235,7 +239,7 @@ describe("RepoChipsRow", () => {
       />,
     );
     const btn = screen.getByTestId("add-repository") as HTMLButtonElement;
-    expect(btn.disabled).toBe(true);
+    expect(btn.disabled).toBe(false);
   });
 
   it("calls fs.addRepository when the + button is clicked", () => {

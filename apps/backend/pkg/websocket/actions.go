@@ -499,5 +499,6 @@ const (
 	ErrorCodeUnauthorized  = "UNAUTHORIZED"
 	ErrorCodeForbidden     = "FORBIDDEN"
 	ErrorCodeValidation    = "VALIDATION_ERROR"
+	ErrorCodeConflict      = "CONFLICT"
 	ErrorCodeUnknownAction = "UNKNOWN_ACTION"
 )

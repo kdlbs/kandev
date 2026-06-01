@@ -25,6 +25,14 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 		return nil, err
 	}
 
+	// Reject an invalid explicit slug up-front. If req.BranchSlug is non-empty
+	// but normalizes to "", the reuse lookup downstream would silently match
+	// the bare-slug worktree (or none) and createInTaskDir would later fail
+	// with a less obvious error.
+	if req.BranchSlug != "" && SanitizeBranchSlug(req.BranchSlug) == "" {
+		return nil, ErrInvalidBranchSlug
+	}
+
 	if wt, handled, err := m.tryReuseExisting(ctx, req); handled {
 		return wt, err
 	}

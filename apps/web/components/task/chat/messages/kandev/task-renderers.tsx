@@ -19,10 +19,11 @@ function RepoChips({ repos }: { repos: Repository[] }) {
   return (
     <div className="flex flex-wrap gap-1">
       {repos.map((r, i) => {
-        // Include checkout_branch in the React key so multi-branch tasks (same
-        // repository_id, different branches) render distinct chips instead of
-        // collapsing to one.
-        const key = `${r.repository_id ?? r.local_path ?? i}::${r.checkout_branch ?? ""}`;
+        // Include both branch fields in the React key so multi-branch tasks
+        // (same repository_id, different branch pairs) render distinct chips
+        // instead of collapsing. The backend identity for task_repositories
+        // includes (base_branch, checkout_branch) — mirror that here.
+        const key = `${r.repository_id ?? r.local_path ?? i}::${r.base_branch ?? ""}::${r.checkout_branch ?? ""}`;
         const branchLabel = r.checkout_branch || r.base_branch;
         return (
           <Badge key={key} variant="outline" className="text-[10px]">

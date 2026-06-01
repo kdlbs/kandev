@@ -719,7 +719,7 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 			repoCounts[info.RepositoryID]++
 		}
 	}
-	seenRepo := make(map[string]bool, len(allRepos))
+	seenCount := make(map[string]int, len(allRepos))
 	out := make([]RepoSpec, 0, len(allRepos))
 	for _, info := range allRepos {
 		spec := RepoSpec{
@@ -745,14 +745,21 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 				spec.RepositoryURL = u
 			}
 		}
-		if repoCounts[info.RepositoryID] > 1 && seenRepo[info.RepositoryID] {
+		if repoCounts[info.RepositoryID] > 1 && seenCount[info.RepositoryID] > 0 {
 			slug := worktree.SanitizeBranchSlug(info.CheckoutBranch)
 			if slug == "" {
 				slug = worktree.SanitizeBranchSlug(info.BaseBranch)
 			}
+			// Branches whose names sanitize to "" (or two duplicate rows
+			// without explicit branch names) would otherwise collapse onto
+			// the same on-disk path as the first row. Fall back to a
+			// position-derived slug so siblings get distinct directories.
+			if slug == "" {
+				slug = fmt.Sprintf("branch-%d", seenCount[info.RepositoryID]+1)
+			}
 			spec.BranchSlug = slug
 		}
-		seenRepo[info.RepositoryID] = true
+		seenCount[info.RepositoryID]++
 		out = append(out, spec)
 	}
 	return out

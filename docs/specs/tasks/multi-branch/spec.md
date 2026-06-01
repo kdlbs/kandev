@@ -24,7 +24,7 @@ Workarounds (sibling tasks, manually managing two worktrees) lost shared context
 
 ### Backend API
 
-- **`Service.AddBranchToTask(task_id, repository_id, base_branch?, checkout_branch?)`** — appends a new `task_repositories` row to a live task. Enforces uniqueness on `(task_id, repository_id, checkout_branch)`.
+- **`Service.AddBranchToTask(task_id, repository_id, base_branch?, checkout_branch?)`** — appends a new `task_repositories` row to a live task. Enforces uniqueness on the canonical 4-column key `(task_id, repository_id, base_branch, checkout_branch)` so both branch fields disambiguate siblings.
 - **`Service.CreateTask`** — already accepted `[]TaskRepositoryInput`; now accepts duplicate `repository_id` entries when `checkout_branch` differs.
 - **`task_repositories.UNIQUE(task_id, repository_id, base_branch, checkout_branch)`** — relaxed from the legacy `UNIQUE(task_id, repository_id)` via the `migrateTaskRepositoriesAllowMultiBranch` migration. Both branch columns participate because the worktree executor anchors the branch in `base_branch` (leaving `checkout_branch` empty) while the local executor inverts the split. Either column alone would miss one of the two shapes.
 
