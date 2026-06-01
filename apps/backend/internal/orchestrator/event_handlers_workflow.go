@@ -1556,12 +1556,20 @@ func (s *Service) scheduleAutoResumeForWorkflowQueue(ctx context.Context, sessio
 // recovery log line.
 func (s *Service) maybeRecoverOrphanedWorkflowQueue(ctx context.Context, sessionID string, queuedAt time.Time) {
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
-	if err != nil || session == nil {
-		s.svcDropOrphanedWorkflowQueue(ctx, sessionID, "session_missing")
+	if err != nil {
+		// Transient DB read failure — leave the queue alone and let the
+		// next tick retry. Don't conflate this with "session truly gone".
+		s.logger.Debug("workflow queue watchdog: skip session load failed",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	if session == nil {
+		s.dropOrphanedWorkflowQueue(ctx, sessionID, "session_missing")
 		return
 	}
 	if isTerminalSessionState(session.State) {
-		s.svcDropOrphanedWorkflowQueue(ctx, sessionID, "terminal_session")
+		s.dropOrphanedWorkflowQueue(ctx, sessionID, "terminal_session")
 		return
 	}
 	if _, hasActiveTurn := s.activeTurns.Load(sessionID); hasActiveTurn {
@@ -1570,14 +1578,14 @@ func (s *Service) maybeRecoverOrphanedWorkflowQueue(ctx context.Context, session
 	if s.isSessionResetInProgress(sessionID) || s.isCancelInFlight(sessionID) {
 		return
 	}
-	if s.executor == nil {
+	if s.executor == nil || s.agentManager == nil {
 		return
 	}
 	// Skip when the agent process is genuinely alive — handleAgentReady (or
 	// the inline drain on the next turn end) will pick up the queue. The
 	// agentManager probe is authoritative; the executor's in-memory store
 	// can lag a dying process.
-	if s.agentManager != nil && s.agentManager.IsAgentRunningForSession(ctx, sessionID) {
+	if s.agentManager.IsAgentRunningForSession(ctx, sessionID) {
 		return
 	}
 	ageSec := int(time.Since(queuedAt) / time.Second)
@@ -1593,10 +1601,10 @@ func (s *Service) maybeRecoverOrphanedWorkflowQueue(ctx context.Context, session
 	go s.tryEnsureExecution(context.WithoutCancel(ctx), sessionID)
 }
 
-// svcDropOrphanedWorkflowQueue removes every workflow-tagged queued entry for
+// dropOrphanedWorkflowQueue removes every workflow-tagged queued entry for
 // a session whose agent is gone for good. User and agent entries are left
 // alone — only the workflow auto-start prompts the watchdog owns are dropped.
-func (s *Service) svcDropOrphanedWorkflowQueue(ctx context.Context, sessionID, reason string) {
+func (s *Service) dropOrphanedWorkflowQueue(ctx context.Context, sessionID, reason string) {
 	if s.messageQueue == nil {
 		return
 	}

@@ -51,9 +51,9 @@ func (s *Service) newWorkflowQueueWatchdog() *workflowQueueWatchdog {
 	}
 }
 
-// Start spawns the watchdog loop. Idempotent: callers that invoke Start more
-// than once on the same instance will spawn additional goroutines, so this
-// must be called exactly once per watchdog. Stop must be called to drain.
+// Start spawns the watchdog loop. NOT idempotent — repeated calls on the
+// same instance spawn additional goroutines that all close the same doneCh
+// and panic. Call exactly once per watchdog; Stop must follow to drain.
 func (w *workflowQueueWatchdog) Start(ctx context.Context) {
 	go w.run(ctx)
 }
