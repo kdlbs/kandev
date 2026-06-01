@@ -98,9 +98,12 @@ func (t *Throttle) Acquire(ctx context.Context) (release func(), err error) {
 		// here, ctx may have been cancelled by another goroutine. Without
 		// this, a cancelled caller would silently acquire a slot and the
 		// downstream exec.CommandContext would fail late while holding
-		// it. Bounce the slot back so the next waiter can use it.
+		// it. Bounce the slot back so the next waiter can use it. Record
+		// the acquire with 0 wait so cancellation accounting matches the
+		// slow-path cancel branch below.
 		if err := ctx.Err(); err != nil {
 			<-sem
+			t.incAcquire(0)
 			return noopRelease, err
 		}
 		t.incAcquire(0)
