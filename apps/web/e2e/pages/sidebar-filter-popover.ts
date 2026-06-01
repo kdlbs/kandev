@@ -118,7 +118,9 @@ export class SidebarFilterPopoverPage {
   async setClauseEnumValue(index: number, optionLabel: string): Promise<void> {
     const trigger = this.clauseRow(index).getByTestId("filter-value-select");
     await trigger.click();
-    await this.page.getByRole("option", { name: optionLabel, exact: true }).first().click();
+    // No .first(): exact:true + unique slugs mean a single match, so Playwright's
+    // strict mode surfaces a duplicate-option regression instead of masking it.
+    await this.page.getByRole("option", { name: optionLabel, exact: true }).click();
   }
 
   async removeClause(index: number): Promise<void> {
