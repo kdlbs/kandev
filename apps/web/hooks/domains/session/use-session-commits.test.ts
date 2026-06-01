@@ -221,6 +221,23 @@ describe("useSessionCommits — authoritative snapshot on mount", () => {
       );
     });
   });
+
+  it("re-fetches after sessionId cycles null → same id (post-teardown reselect)", async () => {
+    // Greptile P2: if the hook stays mounted while sessionId goes null and the
+    // store's commits are cleared via clearSessionCommits, then when the same
+    // sessionId returns the ref still equals it — so no fetch fires and the
+    // panel stays blank. Clearing the ref in the early-return path fixes it.
+    mockRequest.mockResolvedValue({ commits: [{ commit_sha: "a" }], ready: true });
+
+    const { rerender } = renderHook(({ id }) => useSessionCommits(id), {
+      initialProps: { id: "sess-1" as string | null },
+    });
+    await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(1));
+
+    rerender({ id: null });
+    rerender({ id: "sess-1" });
+    await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(2));
+  });
 });
 
 // Helper: seed store with one existing commit, resolve the mount-time

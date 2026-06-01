@@ -145,7 +145,14 @@ export function useSessionCommits(sessionId: string | null) {
   // useCumulativeDiff works).
   useEffect(() => {
     if (connectionStatus !== "connected") return;
-    if (!sessionId) return;
+    if (!sessionId) {
+      // Clear the ref so reselecting the same sessionId after a teardown
+      // (e.g. clearSessionCommits ran while sessionId was null) triggers a
+      // fresh snapshot — otherwise `fetchedSessionRef.current === sessionId`
+      // stays true on reselect and the panel never repopulates.
+      fetchedSessionRef.current = null;
+      return;
+    }
 
     const triggerBumped = refetchTrigger !== prevRefetchTriggerRef.current;
     const sessionChanged = fetchedSessionRef.current !== sessionId;
