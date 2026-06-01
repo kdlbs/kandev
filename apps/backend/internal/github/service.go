@@ -103,10 +103,23 @@ type Service struct {
 	// here because keys are unbounded and short-lived and the hot path is a
 	// LoadOrStore guard, not iteration.
 	inflightWorkspaceRefreshes sync.Map
+
+	// stopCtx / stopCancel / bgWG own the lifecycle of background goroutines
+	// the service spawns lazily (currently refreshStaleWorkspaceWatches).
+	// Stop() cancels stopCtx and waits for bgWG to drain, satisfying the
+	// "long-running goroutine has a single owner with explicit start/stop"
+	// convention in apps/backend/AGENTS.md. stopOnce makes Stop idempotent
+	// so the Provide cleanup func can be invoked from any number of
+	// shutdown paths.
+	stopCtx    context.Context
+	stopCancel context.CancelFunc
+	bgWG       sync.WaitGroup
+	stopOnce   sync.Once
 }
 
 // NewService creates a new GitHub service.
 func NewService(client Client, authMethod string, secrets SecretProvider, store *Store, eventBus bus.EventBus, log *logger.Logger) *Service {
+	stopCtx, stopCancel := context.WithCancel(context.Background())
 	return &Service{
 		client:               client,
 		authMethod:           authMethod,
@@ -121,7 +134,23 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 		protectionCache:      newBranchProtectionCache(),
 		rateTracker:          NewRateTracker(eventBus, log),
 		cleanupFailureCounts: make(map[string]int),
+		stopCtx:              stopCtx,
+		stopCancel:           stopCancel,
 	}
+}
+
+// Stop cancels in-flight background goroutines (currently the
+// per-workspace stale-PR refreshes spawned by refreshStaleWorkspaceWatches)
+// and waits for them to drain. Idempotent: safe to call from the Provide
+// cleanup func and any other shutdown path.
+func (s *Service) Stop() {
+	if s == nil {
+		return
+	}
+	s.stopOnce.Do(func() {
+		s.stopCancel()
+		s.bgWG.Wait()
+	})
 }
 
 // RateTracker exposes the service's rate-limit tracker so factory callers

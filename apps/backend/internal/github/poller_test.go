@@ -918,6 +918,59 @@ func TestRefreshStaleWorkspaceWatches_CoalescesConcurrentCalls(t *testing.T) {
 	close(release2)
 }
 
+// TestServiceStop_DrainsRefreshGoroutine verifies that Service.Stop() blocks
+// until an in-flight refreshStaleWorkspaceWatches goroutine completes and
+// cancels its syncCtx so it stops doing work. Without this, process
+// shutdown could race a goroutine that is mid-DB-write or mid-gh-spawn.
+func TestServiceStop_DrainsRefreshGoroutine(t *testing.T) {
+	_, svc, gh, store := setupBatchedPollerTest(t)
+	ctx := context.Background()
+
+	w := &PRWatch{SessionID: "s1", TaskID: "t1", Owner: "o", Repo: "r", PRNumber: 0, Branch: "br-1"}
+	if err := store.CreatePRWatch(ctx, w); err != nil {
+		t.Fatalf("create watch: %v", err)
+	}
+
+	gh.branchResponses = []string{`{"data":{"b0":{"pullRequests":{"nodes":[]}}}}`}
+
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	gh.onExecute = func() {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		<-release
+	}
+
+	svc.refreshStaleWorkspaceWatches("ws1", map[string]struct{}{"t1": {}})
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("refresh goroutine never entered ExecuteGraphQL")
+	}
+
+	stopped := make(chan struct{})
+	go func() {
+		svc.Stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+		t.Fatalf("Stop() returned while refresh goroutine was still blocked — drain skipped")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("Stop() did not return after refresh goroutine released")
+	}
+
+	// Second Stop is a no-op.
+	svc.Stop()
+}
+
 func TestWaitForRateLimit_SkipsWhenHealthy(t *testing.T) {
 	poller, _, _, _ := setupPollerTest(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)

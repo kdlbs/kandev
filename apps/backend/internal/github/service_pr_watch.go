@@ -377,9 +377,15 @@ func (s *Service) refreshStaleWorkspaceWatches(workspaceID string, staleTasks ma
 	if _, inflight := s.inflightWorkspaceRefreshes.LoadOrStore(workspaceID, struct{}{}); inflight {
 		return
 	}
+	// Track the goroutine on the service WaitGroup so Stop() drains it,
+	// and derive syncCtx from s.stopCtx so shutdown cancels the in-flight
+	// sync instead of letting it run past process teardown. See
+	// apps/backend/AGENTS.md "Goroutine ownership and leak testing".
+	s.bgWG.Add(1)
 	go func() {
+		defer s.bgWG.Done()
 		defer s.inflightWorkspaceRefreshes.Delete(workspaceID)
-		syncCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		syncCtx, cancel := context.WithTimeout(s.stopCtx, 60*time.Second)
 		defer cancel()
 		var allWatches []*PRWatch
 		for taskID := range staleTasks {
