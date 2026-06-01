@@ -102,6 +102,65 @@ func nextOverloadedAttempt(sid acp.SessionId) int {
 	return next
 }
 
+// bulkCmdRe matches `/bulk` or `/e2e:bulk`, optionally followed by `:N` or ` N`
+// — the number of agent messages to emit (default 120, capped at 1000). Used to
+// populate a long chat history for manually testing scrollback and the "Load
+// older messages" pagination in dev/preview.
+var bulkCmdRe = regexp.MustCompile(`(?i)^/(?:e2e:)?bulk(?:[: ]+(\d+))?$`)
+
+const (
+	bulkDefaultCount = 120
+	bulkMaxCount     = 1000
+	// Tool-input/output map keys, shared to avoid repeating the literals.
+	toolKeyFilePath = "file_path"
+	toolKeyContent  = "content"
+)
+
+// parseBulkCmd reports whether the prompt is the /bulk command and, if so, how
+// many messages to emit (default 120, capped at 1000). Returns ok=false for any
+// other prompt.
+func parseBulkCmd(prompt string) (count int, ok bool) {
+	cmd := stripKandevSystem(strings.TrimSpace(prompt))
+	m := bulkCmdRe.FindStringSubmatch(cmd)
+	if m == nil {
+		return 0, false
+	}
+	count = bulkDefaultCount
+	if m[1] != "" {
+		if n, err := strconv.Atoi(m[1]); err == nil && n > 0 {
+			count = n
+		}
+	}
+	if count > bulkMaxCount {
+		count = bulkMaxCount
+	}
+	return count, true
+}
+
+// emitBulk emits `count` short agent messages, each followed by a lightweight
+// completed tool call. The tool-call boundary flushes the buffered text above
+// into its own message row — consecutive agent text chunks otherwise coalesce
+// into a single message — so the result is a long, paginated conversation. Handy
+// for manually exercising chat scrollback and the "Load older messages" button
+// in dev/preview without a real agent. Usage: `/bulk`, `/bulk:300`, `/bulk 300`.
+func emitBulk(e *emitter, count int) {
+	e.text(fmt.Sprintf("Generating %d messages to populate the chat history…", count))
+	for i := 1; i <= count; i++ {
+		e.text(fmt.Sprintf(
+			"Bulk message %d of %d — filler content for testing chat pagination and the load-older button.",
+			i, count))
+		// The tool-call start flushes the text above into its own message row.
+		toolID := nextToolID()
+		e.startTool(toolID, fmt.Sprintf("Read file-%d.txt", i), acp.ToolKindRead,
+			map[string]any{toolKeyFilePath: fmt.Sprintf("/tmp/bulk/file-%d.txt", i)})
+		e.completeTool(toolID, map[string]any{toolKeyContent: fmt.Sprintf("contents of file %d", i)})
+		fixedDelay(8)
+	}
+	e.text(fmt.Sprintf(
+		"Done — emitted %d messages. Scroll up and use “Load older messages” to page through them.",
+		count))
+}
+
 // delayRange returns min/max delay in milliseconds based on model name.
 func delayRange(model string) (int, int) {
 	switch model {
@@ -146,6 +205,14 @@ func handlePrompt(e *emitter, prompt, model string) {
 	// Script mode: each line is a command (e2e:message, e2e:mcp:*, etc.)
 	if isScriptMode(cmd) {
 		executeScript(e, prompt, cmd)
+		return
+	}
+
+	// Bulk mode: emit many messages to populate a long, paginated chat history.
+	// Handled before the switch so `/e2e:bulk` doesn't fall into the generic
+	// `/e2e:<scenario>` branch.
+	if count, ok := parseBulkCmd(prompt); ok {
+		emitBulk(e, count)
 		return
 	}
 

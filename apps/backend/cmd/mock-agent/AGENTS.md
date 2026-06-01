@@ -8,7 +8,9 @@ Scoped guidance for `apps/backend/cmd/mock-agent/`. The mock agent satisfies the
 
 `handler.go` routes any prompt starting with `/e2e:` to `emitPredefinedScenario(e, name)`, which looks `name` up in `scenarioRegistry` (`scenarios.go`). The registry is the single source of truth for scenario names — to add a scenario, add one map entry and one `scenario<Name>(e *emitter)` function.
 
-Friendly aliases live in `handler.go` next to the dispatcher: `/ask-single`, `/ask-multiple`, `/crash`, `/todo`, `/mermaid`, `/markdown`, `/sleep [n]`, `/tool:<name>`, `/subagent`, `/subtask`.
+Friendly aliases live in `handler.go` next to the dispatcher: `/ask-single`, `/ask-multiple`, `/crash`, `/todo`, `/mermaid`, `/markdown`, `/sleep [n]`, `/tool:<name>`, `/subagent`, `/subtask`, `/bulk[:N]`.
+
+`/bulk` (default 120, e.g. `/bulk:300`) emits N short agent messages, each followed by a tiny tool call. The tool-call boundary flushes the buffered text into its own message row — consecutive agent text chunks otherwise coalesce into a single message (`manager_streaming.flushMessageBuffer` only fires on a tool-call/turn boundary) — so the result is a long, paginated conversation. Use it to manually exercise chat scrollback and the "Load older messages" pagination in dev/preview.
 
 **2. Inline scripts — `e2e:<directive>(...)`**
 
