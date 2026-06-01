@@ -168,7 +168,7 @@ function OrgProjectRow({
     <div className="grid grid-cols-2 gap-4">
       <SelectField
         label="Organization slug"
-        description="The Sentry org to poll. Leave on “Use default” to follow the integration default."
+        description="The Sentry org to poll."
         value={form.orgSlug || USE_DEFAULT}
         onChange={onOrgChange}
         placeholder="Use default"
@@ -176,7 +176,7 @@ function OrgProjectRow({
       />
       <SelectField
         label="Project slug"
-        description="Pick a project, or “Use default” to follow the integration default."
+        description="The Sentry project to poll."
         value={form.projectSlug || USE_DEFAULT}
         onChange={onProjectChange}
         placeholder="Use default"
