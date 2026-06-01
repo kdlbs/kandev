@@ -15,7 +15,7 @@ import { StepTask } from "./step-task";
 import { StepReview } from "./step-review";
 import { WizardFooter } from "./wizard-footer";
 import { CloseButton } from "./close-button";
-import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
+import type { AgentProfileOption } from "@/lib/types/settings";
 import type { Tier } from "@/lib/state/slices/office/types";
 
 type SetupWizardProps = {

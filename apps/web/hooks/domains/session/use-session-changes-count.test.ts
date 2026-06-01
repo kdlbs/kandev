@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { cleanup, renderHook } from "@testing-library/react";
+import { createElement, type ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { qk } from "@/lib/query/keys";
+import type { GitStatusData } from "@/lib/query/query-options/session-runtime";
 
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => null,
@@ -21,17 +25,18 @@ type StatusEntry = {
   repository_name?: string;
 };
 
+let queryClient: QueryClient;
+
+function wrapper({ children }: { children: ReactNode }) {
+  return createElement(QueryClientProvider, { client: queryClient }, children);
+}
+
 function setStore(opts: {
   envBySession?: Record<string, string>;
-  byEnvironmentRepo?: Record<string, Record<string, StatusEntry>>;
   commitsByEnvironmentId?: Record<string, unknown[]>;
 }) {
   storeState = {
     environmentIdBySessionId: opts.envBySession ?? {},
-    gitStatus: {
-      byEnvironmentId: {} as Record<string, StatusEntry>,
-      byEnvironmentRepo: opts.byEnvironmentRepo ?? {},
-    },
     sessionCommits: {
       byEnvironmentId: opts.commitsByEnvironmentId ?? {},
       loading: {} as Record<string, boolean>,
@@ -41,6 +46,14 @@ function setStore(opts: {
     setSessionCommits: vi.fn(),
     setSessionCommitsLoading: vi.fn(),
   };
+}
+
+/** Seed the TanStack Query git cache (qk.session.git(envKey)) for an env. */
+function seedGit(envKey: string, byEnvironmentRepo: Record<string, StatusEntry>) {
+  queryClient.setQueryData<GitStatusData>(qk.session.git(envKey), {
+    byEnvironmentId: undefined,
+    byEnvironmentRepo: byEnvironmentRepo as unknown as GitStatusData["byEnvironmentRepo"],
+  });
 }
 
 function file(path: string): FileEntry {
@@ -60,29 +73,31 @@ function status(files: string[], repository_name?: string): StatusEntry {
 
 describe("useSessionChangesCount", () => {
   beforeEach(() => {
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: Infinity } },
+    });
     setStore({});
   });
 
   afterEach(() => {
     cleanup();
+    queryClient.clear();
   });
 
   it("returns 0 when the session has no gitStatus and no commits yet", () => {
-    const { result } = renderHook(() => useSessionChangesCount("sess-new"));
+    const { result } = renderHook(() => useSessionChangesCount("sess-new"), { wrapper });
     expect(result.current).toBe(0);
   });
 
   it("returns 0 for null session id", () => {
-    const { result } = renderHook(() => useSessionChangesCount(null));
+    const { result } = renderHook(() => useSessionChangesCount(null), { wrapper });
     expect(result.current).toBe(0);
   });
 
   it("counts files from a single-repo workspace via the empty repo key", () => {
-    setStore({
-      envBySession: { "sess-1": "env-1" },
-      byEnvironmentRepo: { "env-1": { "": status(["a.ts", "b.ts"]) } },
-    });
-    const { result } = renderHook(() => useSessionChangesCount("sess-1"));
+    setStore({ envBySession: { "sess-1": "env-1" } });
+    seedGit("env-1", { "": status(["a.ts", "b.ts"]) });
+    const { result } = renderHook(() => useSessionChangesCount("sess-1"), { wrapper });
     expect(result.current).toBe(2);
   });
 
@@ -90,34 +105,29 @@ describe("useSessionChangesCount", () => {
     // Reproduces the reported bug shape: useSessionGitStatus alone would
     // report only the last-arriving repo's files (1), masking changes in
     // sibling repos. The aggregated count must show the true total.
-    setStore({
-      envBySession: { "sess-1": "env-1" },
-      byEnvironmentRepo: {
-        "env-1": {
-          frontend: status(["app.tsx", "page.tsx"], "frontend"),
-          backend: status(["server.go"], "backend"),
-        },
-      },
+    setStore({ envBySession: { "sess-1": "env-1" } });
+    seedGit("env-1", {
+      frontend: status(["app.tsx", "page.tsx"], "frontend"),
+      backend: status(["server.go"], "backend"),
     });
-    const { result } = renderHook(() => useSessionChangesCount("sess-1"));
+    const { result } = renderHook(() => useSessionChangesCount("sess-1"), { wrapper });
     expect(result.current).toBe(3);
   });
 
   it("includes commits in the total count", () => {
     setStore({
       envBySession: { "sess-1": "env-1" },
-      byEnvironmentRepo: { "env-1": { "": status(["a.ts"]) } },
       commitsByEnvironmentId: { "env-1": [{ commit_sha: "x" }, { commit_sha: "y" }] },
     });
-    const { result } = renderHook(() => useSessionChangesCount("sess-1"));
+    seedGit("env-1", { "": status(["a.ts"]) });
+    const { result } = renderHook(() => useSessionChangesCount("sess-1"), { wrapper });
     expect(result.current).toBe(3);
   });
 
   it("falls back to sessionId when no environment mapping is registered yet", () => {
-    setStore({
-      byEnvironmentRepo: { "sess-pending": { "": status(["only.ts"]) } },
-    });
-    const { result } = renderHook(() => useSessionChangesCount("sess-pending"));
+    setStore({});
+    seedGit("sess-pending", { "": status(["only.ts"]) });
+    const { result } = renderHook(() => useSessionChangesCount("sess-pending"), { wrapper });
     expect(result.current).toBe(1);
   });
 
@@ -127,10 +137,10 @@ describe("useSessionChangesCount", () => {
     // map. The selector keys strictly by envKey resolved from sessionId.
     setStore({
       envBySession: { "sess-old": "env-old", "sess-new": "env-new" },
-      byEnvironmentRepo: { "env-old": { "": status(["leak.ts", "leak2.ts"]) } },
       commitsByEnvironmentId: { "env-old": [{ commit_sha: "old" }] },
     });
-    const { result } = renderHook(() => useSessionChangesCount("sess-new"));
+    seedGit("env-old", { "": status(["leak.ts", "leak2.ts"]) });
+    const { result } = renderHook(() => useSessionChangesCount("sess-new"), { wrapper });
     expect(result.current).toBe(0);
   });
 });

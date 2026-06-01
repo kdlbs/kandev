@@ -20,6 +20,7 @@ import { TerminalSearchBar } from "./terminal-search-bar";
 import { usePanelSearch } from "@/hooks/use-panel-search";
 import { suppressIOSKeyboardAssists } from "@/lib/terminal/suppress-ios-keyboard-assists";
 import { sendShellInput } from "@/lib/terminal/send-shell-input";
+import { useUserSettings } from "@/hooks/domains/settings/use-user-settings";
 
 type ShellTerminalProps = {
   sessionId?: string;
@@ -432,8 +433,8 @@ export function ShellTerminal({
   }, []);
 
   const linkHandler = useTerminalLinkHandler();
-  const terminalFontFamily = useAppStore((s) => s.userSettings.terminalFontFamily);
-  const terminalFontSize = useAppStore((s) => s.userSettings.terminalFontSize);
+  const terminalFontFamily = useUserSettings().data?.terminalFontFamily ?? null;
+  const terminalFontSize = useUserSettings().data?.terminalFontSize ?? null;
   const refs: TerminalRefs = { terminalRef, xtermRef, fitAddonRef, lastOutputLengthRef, outputRef };
   const [isTerminalReady, setIsTerminalReady] = useState(false);
   const onTerminalReady = useCallback(() => setIsTerminalReady(true), []);

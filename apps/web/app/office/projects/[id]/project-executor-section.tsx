@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { IconDeviceFloppy } from "@tabler/icons-react";
 import { toast } from "sonner";
 import { updateProject } from "@/lib/api/domains/office-api";
-import { useAppStore } from "@/components/state-provider";
+import { usePatchProjectCache } from "@/hooks/domains/office/use-patch-project-cache";
 import type { Project } from "@/lib/state/slices/office/types";
 
 type ProjectExecutorSectionProps = {
@@ -95,7 +95,7 @@ function ContainerFields({
 }
 
 export function ProjectExecutorSection({ project }: ProjectExecutorSectionProps) {
-  const updateProjectStore = useAppStore((s) => s.updateProject);
+  const updateProjectStore = usePatchProjectCache();
   const config = project.executorConfig ?? {};
 
   const [executorType, setExecutorType] = useState((config.type as string) ?? "");

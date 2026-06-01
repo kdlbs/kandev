@@ -26,9 +26,10 @@ import {
   type RepositoryScript,
   type Workspace,
 } from "@/lib/types/http";
+import { useQueryClient } from "@tanstack/react-query";
 import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
-import { useAppStore } from "@/components/state-provider";
+import { qk } from "@/lib/query/keys";
 import {
   DiscoverRepoDialog,
   type ManualValidation,
@@ -396,7 +397,12 @@ function useWorkspaceRepositoriesPage(
 ) {
   const router = useRouter();
   const { toast } = useToast();
-  const clearRepositoryScripts = useAppStore((state) => state.clearRepositoryScripts);
+  const queryClient = useQueryClient();
+  // Invalidate the per-repo scripts query so the next reader refetches the
+  // freshly-saved scripts (replaces the old Zustand clearRepositoryScripts).
+  const clearRepositoryScripts = (repoId: string) => {
+    void queryClient.invalidateQueries({ queryKey: qk.workspaces.scripts(repoId) });
+  };
   const [repositoryItems, setRepositoryItems] = useState<RepositoryItem[]>(repositories);
   const [savedRepositoryItems, setSavedRepositoryItems] =
     useState<RepositoryWithScripts[]>(repositories);

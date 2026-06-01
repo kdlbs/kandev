@@ -23,7 +23,6 @@ import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { KeyboardShortcutTooltip } from "@/components/keyboard-shortcut-tooltip";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import { formatShortcut } from "@/lib/keyboard/utils";
-import { useAppStore } from "@/components/state-provider";
 import { TokenUsageDisplay } from "@/components/task/chat/token-usage-display";
 import { SessionsDropdown } from "@/components/task/sessions-dropdown";
 import { ModelSelector } from "@/components/task/model-selector";
@@ -33,6 +32,7 @@ import { ResetContextButton } from "./reset-context-button";
 import { ImplementPlanButton } from "./implement-plan-button";
 import { VoiceInputButton } from "./voice-input-button";
 import type { ContextFile } from "@/lib/state/context-files-store";
+import { useUserSettings } from "@/hooks/domains/settings/use-user-settings";
 
 export type ChatInputToolbarProps = {
   planModeEnabled: boolean;
@@ -213,7 +213,7 @@ function PlanToggleButton({
   planModeAvailable: boolean;
   onPlanModeChange: (enabled: boolean) => void;
 }) {
-  const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
+  const keyboardShortcuts = useUserSettings().data?.keyboardShortcuts ?? {};
   const planModeShortcutLabel = formatShortcut(getShortcut("TOGGLE_PLAN_MODE", keyboardShortcuts));
   const tooltip = planModeAvailable
     ? `Toggle plan mode (${planModeShortcutLabel}) — Agent collaborates on the plan without implementing changes`

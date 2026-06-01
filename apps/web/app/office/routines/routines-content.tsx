@@ -1,13 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@kandev/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@kandev/ui/tabs";
 import { IconPlus } from "@tabler/icons-react";
 import { toast } from "sonner";
 import { useAppStore } from "@/components/state-provider";
+import { officeQueryOptions } from "@/lib/query/query-options/office";
+import { qk } from "@/lib/query/keys";
 import {
-  listRoutines,
   createRoutine,
   updateRoutine,
   deleteRoutine,
@@ -117,17 +119,19 @@ function useRoutineActions(workspaceId: string | null, fetchRoutines: () => Prom
 // fetcher is referentially stable (depends on workspaceId only) so the
 // effects don't re-fire on unrelated re-renders.
 function useRoutinesData(workspaceId: string | null) {
-  const routines = useAppStore((s) => s.office.routines);
-  const setRoutines = useAppStore((s) => s.setRoutines);
+  const qc = useQueryClient();
+  const { data: routines = [] } = useQuery({
+    ...officeQueryOptions.routines(workspaceId ?? ""),
+    enabled: !!workspaceId,
+  });
 
   const [runs, setRuns] = useState<RoutineRun[]>([]);
   const [triggersByRoutine, setTriggersByRoutine] = useState<Record<string, RoutineTrigger[]>>({});
 
   const fetchRoutines = useCallback(async () => {
     if (!workspaceId) return;
-    const res = await listRoutines(workspaceId);
-    setRoutines(res.routines ?? []);
-  }, [workspaceId, setRoutines]);
+    await qc.invalidateQueries({ queryKey: qk.office.routines(workspaceId ?? "") });
+  }, [workspaceId, qc]);
 
   const fetchRuns = useCallback(async () => {
     if (!workspaceId) return [] as RoutineRun[];
@@ -151,14 +155,13 @@ function useRoutinesData(workspaceId: string | null) {
 
   useEffect(() => {
     let cancelled = false;
-    void fetchRoutines();
     fetchRuns().then((next) => {
       if (!cancelled) setRuns(next);
     });
     return () => {
       cancelled = true;
     };
-  }, [fetchRoutines, fetchRuns]);
+  }, [fetchRuns]);
 
   useEffect(() => {
     let cancelled = false;
@@ -183,7 +186,10 @@ function useRoutinesData(workspaceId: string | null) {
 
 export function RoutinesContent() {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const agents = useAppStore((s) => s.office.agentProfiles);
+  const { data: agents = [] } = useQuery({
+    ...officeQueryOptions.agents(workspaceId ?? ""),
+    enabled: !!workspaceId,
+  });
   const [showCreate, setShowCreate] = useState(false);
   const { routines, runs, setRuns, triggersByRoutine, fetchRoutines, fetchRuns } =
     useRoutinesData(workspaceId);

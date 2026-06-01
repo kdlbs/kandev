@@ -22,6 +22,8 @@ import {
 } from "@kandev/ui/alert-dialog";
 import { AgentLogo } from "@/components/agent-logo";
 import { useAppStore } from "@/components/state-provider";
+import { useAgentProfiles } from "@/hooks/domains/settings/use-settings-reads";
+import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import {
   useSessionActions,
@@ -34,7 +36,7 @@ import { MobilePillButton } from "./mobile-pill-button";
 import { MobilePickerSheet } from "./mobile-picker-sheet";
 import { formatTaskSessionStateLabel } from "@/lib/ui/state-labels";
 import type { TaskSession, TaskSessionState } from "@/lib/types/http";
-import type { AgentProfileOption } from "@/lib/state/slices";
+import type { AgentProfileOption } from "@/lib/types/settings";
 
 type SessionRow = {
   id: string;
@@ -262,12 +264,9 @@ function SessionRowItem({
 }
 
 function useSessionRows(taskId: string | null) {
-  const agentProfiles = useAppStore((s) => s.agentProfiles.items);
-  const primarySessionId = useAppStore((s) => {
-    if (!taskId) return null;
-    const task = s.kanban.tasks.find((t: { id: string }) => t.id === taskId);
-    return task?.primarySessionId ?? null;
-  });
+  const agentProfiles = useAgentProfiles();
+  const taskForPrimary = useTaskById(taskId);
+  const primarySessionId = taskForPrimary?.primarySessionId ?? null;
   const { sessions, isLoading } = useTaskSessions(taskId);
   const rows = useMemo(
     () => buildSessionRows(sessions, agentProfiles, primarySessionId),

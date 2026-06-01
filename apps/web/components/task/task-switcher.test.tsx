@@ -1,17 +1,24 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
+import { createTestQueryClient } from "@/test-utils/render-with-query";
 import { TaskSwitcher, type TaskSwitcherItem } from "./task-switcher";
 import type { GroupedSidebarList } from "@/lib/sidebar/apply-view";
 
 afterEach(() => cleanup());
 
+// TaskItem now reads PR state from TanStack Query (TaskPRIcon → useTaskPRs), so
+// the switcher needs a QueryClientProvider in scope to render. The query is
+// `enabled: false` here, so the icon degrades gracefully to no PR data.
 function Providers({ children }: { children: React.ReactNode }) {
   return (
-    <StateProvider>
-      <ToastProvider>{children}</ToastProvider>
-    </StateProvider>
+    <QueryClientProvider client={createTestQueryClient()}>
+      <StateProvider>
+        <ToastProvider>{children}</ToastProvider>
+      </StateProvider>
+    </QueryClientProvider>
   );
 }
 

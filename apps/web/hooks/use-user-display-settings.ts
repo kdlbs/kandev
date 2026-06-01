@@ -2,14 +2,15 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { fetchUserSettings, updateUserSettings } from "@/lib/api";
 import { mapSelectedRepositoryIds } from "@/lib/kanban/filters";
-import { useAppStore } from "@/components/state-provider";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
+import { useUserSettings, useSetUserSettings } from "@/hooks/domains/settings/use-user-settings";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { repositoryId, type Repository } from "@/lib/types/http";
 import {
+  DEFAULT_USER_SETTINGS,
   DEFAULT_VOICE_MODE_STATE,
   type UserSettingsState,
-} from "@/lib/state/slices/settings/types";
+} from "@/lib/types/settings";
 
 type DisplaySettings = UserSettingsState;
 
@@ -179,8 +180,8 @@ export function useUserDisplaySettings({
   onWorkspaceChange,
   onWorkflowChange,
 }: UseUserDisplaySettingsInput) {
-  const userSettings = useAppStore((state) => state.userSettings);
-  const setUserSettings = useAppStore((state) => state.setUserSettings);
+  const userSettings = useUserSettings().data ?? DEFAULT_USER_SETTINGS;
+  const setUserSettings = useSetUserSettings();
   const { repositories, isLoading: repositoriesLoading } = useRepositories(workspaceId, true);
   const userSettingsRef = useUserSettingsRef(userSettings);
 

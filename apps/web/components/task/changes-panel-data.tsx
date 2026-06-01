@@ -1,9 +1,12 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
+import { useAllRepositories } from "@/hooks/domains/workspace/use-all-repositories";
+import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
 import { useSessionGit } from "@/hooks/domains/session/use-session-git";
 import { useSessionFileReviews } from "@/hooks/use-session-file-reviews";
+import { useTaskSessionById } from "@/hooks/domains/session/use-task-session-by-id";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import { useToast } from "@/components/toast-provider";
 import { useVcsDialogs } from "@/components/vcs/vcs-dialogs";
@@ -12,7 +15,7 @@ import type { PRDiffFile } from "@/lib/types/github";
 import { useChangesGitHandlers, useChangesDialogHandlers } from "./changes-panel-hooks";
 import { useRepoDisplayName } from "@/hooks/domains/session/use-repo-display-name";
 import { useBaseBranchByRepo } from "@/hooks/domains/session/use-base-branch-by-repo";
-import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
+import { useActiveTaskPR, useTaskPRs } from "@/hooks/domains/github/use-task-pr";
 import { useActiveTaskPRsWithFiles } from "@/hooks/domains/github/use-active-task-pr-files";
 import { usePRCommits } from "@/hooks/domains/github/use-pr-commits";
 import {
@@ -31,26 +34,28 @@ import type { OpenDiffOptions } from "./changes-diff-target";
 function useChangesPanelStoreData() {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useEnvironmentSessionId();
-  const taskTitle = useAppStore((state) => {
-    if (!state.tasks.activeTaskId) return undefined;
-    return state.kanban.tasks.find((t: { id: string }) => t.id === state.tasks.activeTaskId)?.title;
-  });
-  const baseBranch = useAppStore((state) =>
-    activeSessionId ? state.taskSessions.items[activeSessionId]?.base_branch : undefined,
+  const activeTask = useTaskById(activeTaskId);
+  const taskTitle = activeTask?.title;
+  const baseBranch = useTaskSessionById(activeSessionId)?.base_branch;
+  const activeTaskPRs = useTaskPRs(activeTaskId);
+  const pendingPrUrl = useAppStore((state) =>
+    activeTaskId ? state.pendingPrUrlByTaskId.byTaskId[activeTaskId]?.[""] : undefined,
   );
-  const existingPrUrl = useAppStore((state) => {
-    const taskId = state.tasks.activeTaskId;
-    if (!taskId) return undefined;
-    // Multi-branch tasks hold N PRs per task. The panel-header "View PR"
-    // button is a single-URL surface, so collapse only when there's exactly
-    // one PR — otherwise the per-repo buttons (prByRepo) take over and the
-    // generic button is hidden to avoid silently linking to a sibling.
-    const taskPRs = state.taskPRs.byTaskId[taskId];
-    if (Array.isArray(taskPRs) && taskPRs.length === 1) return taskPRs[0]?.pr_url;
-    if (Array.isArray(taskPRs) && taskPRs.length > 1) return undefined;
-    return state.pendingPrUrlByTaskId.byTaskId[taskId]?.[""];
-  });
+  const existingPrUrl = resolveExistingPrUrl(activeTaskPRs, pendingPrUrl);
   return { activeTaskId, activeSessionId, taskTitle, baseBranch, existingPrUrl };
+}
+
+// Multi-branch tasks hold N PRs per task. The panel-header "View PR" button is
+// a single-URL surface, so collapse only when there's exactly one PR —
+// otherwise the per-repo buttons (prByRepo) take over and the generic button is
+// hidden to avoid silently linking to a sibling.
+function resolveExistingPrUrl(
+  taskPRs: ReturnType<typeof useTaskPRs>,
+  pendingPrUrl: string | undefined,
+): string | undefined {
+  if (taskPRs.length === 1) return taskPRs[0]?.pr_url;
+  if (taskPRs.length > 1) return undefined;
+  return pendingPrUrl;
 }
 
 type DialogsType = ReturnType<typeof useChangesDialogHandlers> & ReturnType<typeof useVcsDialogs>;
@@ -150,14 +155,11 @@ function usePerRepoCallbacks(
 
 function useChangesPanelPRData() {
   const { prs, filesByPRKey } = useActiveTaskPRsWithFiles();
-  const reposByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
+  const { byWorkspaceId: reposByWorkspace } = useAllRepositories(false);
   const repoNameById = useMemo(() => buildRepoNameById(reposByWorkspace), [reposByWorkspace]);
-  const taskHasMultipleRepos = useAppStore((s) => {
-    const taskId = s.tasks.activeTaskId;
-    if (!taskId) return false;
-    const task = s.kanban.tasks.find((t: { id: string }) => t.id === taskId);
-    return (task?.repositories?.length ?? 0) > 1;
-  });
+  const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
+  const taskForRepos = useTaskById(activeTaskId);
+  const taskHasMultipleRepos = (taskForRepos?.repositories?.length ?? 0) > 1;
   const taskPR = useActiveTaskPR();
   const refreshKey = taskPR?.last_synced_at ?? null;
   const { commits: prCommitsList } = usePRCommits(
@@ -230,14 +232,20 @@ export function useChangesPanelData() {
   const dialogs = { ...localDialogs, ...vcsDialogs };
   const repoCallbacks = usePerRepoCallbacks(git, vcsDialogs, gitHandlers);
   const repoDisplayName = useRepoDisplayName(activeSessionId);
-  const taskPRsForMap = useAppStore((state) =>
-    activeTaskId ? state.taskPRs.byTaskId[activeTaskId] : undefined,
-  );
-  const reposByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
+  const taskPRsForMap = useTaskPRs(activeTaskId);
+  const { byWorkspaceId: reposByWorkspace } = useAllRepositories(false);
   const repoNameById = useMemo(() => buildRepoNameById(reposByWorkspace), [reposByWorkspace]);
   const pendingByRepo = useAppStore((state) =>
     activeTaskId ? state.pendingPrUrlByTaskId.byTaskId[activeTaskId] : undefined,
   );
+  const reconcilePendingPrUrls = useAppStore((s) => s.reconcilePendingPrUrls);
+  // Once the real TaskPRs land in the TQ cache, drop the optimistic pending
+  // URLs they supersede so the slice doesn't accumulate stale entries.
+  useEffect(() => {
+    if (activeTaskId && pendingByRepo && taskPRsForMap.length > 0) {
+      reconcilePendingPrUrls(activeTaskId, taskPRsForMap);
+    }
+  }, [activeTaskId, pendingByRepo, taskPRsForMap, reconcilePendingPrUrls]);
   const prByRepo = useMemo(
     () => buildPrByRepoMap(taskPRsForMap, repoNameById, pendingByRepo),
     [taskPRsForMap, repoNameById, pendingByRepo],

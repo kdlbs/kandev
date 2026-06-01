@@ -3,7 +3,6 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { createWorkspaceSlice } from "./workspace-slice";
 import type { WorkspaceSlice } from "./types";
-import type { Branch } from "@/lib/types/http";
 
 function makeStore() {
   return create<WorkspaceSlice>()(
@@ -12,67 +11,29 @@ function makeStore() {
   );
 }
 
-const REPO = "repo-1";
-const BRANCHES: Branch[] = [{ name: "main", type: "local" }];
-const FETCHED_AT = "2026-04-30T10:00:00Z";
-
-describe("setRepositoryBranches", () => {
-  it("stores branches and marks loaded without meta", () => {
+// The workspace slice is now client-only: it tracks the active workspace
+// selection. All server data moved to TanStack Query (see use-workspaces,
+// use-repositories, use-repository-branches).
+describe("workspace slice (client-only active selection)", () => {
+  it("defaults to no active workspace", () => {
     const s = makeStore();
-    s.getState().setRepositoryBranches(REPO, BRANCHES);
-    const state = s.getState().repositoryBranches;
-    expect(state.itemsByRepositoryId[REPO]).toEqual(BRANCHES);
-    expect(state.loadedByRepositoryId[REPO]).toBe(true);
-    expect(state.loadingByRepositoryId[REPO]).toBe(false);
-    expect(state.fetchedAtByRepositoryId[REPO]).toBeUndefined();
-    expect(state.fetchErrorByRepositoryId[REPO]).toBeUndefined();
+    expect(s.getState().workspaces.activeId).toBeNull();
   });
 
-  it("records fetchedAt + clears prior fetchError on success", () => {
+  it("setActiveWorkspace updates the active id", () => {
     const s = makeStore();
-    s.getState().setRepositoryBranches(REPO, BRANCHES, { fetchError: "boom" });
-    expect(s.getState().repositoryBranches.fetchErrorByRepositoryId[REPO]).toBe("boom");
-    s.getState().setRepositoryBranches(REPO, BRANCHES, { fetchedAt: FETCHED_AT });
-    const state = s.getState().repositoryBranches;
-    expect(state.fetchedAtByRepositoryId[REPO]).toBe(FETCHED_AT);
-    expect(state.fetchErrorByRepositoryId[REPO]).toBeUndefined();
+    s.getState().setActiveWorkspace("ws-1");
+    expect(s.getState().workspaces.activeId).toBe("ws-1");
+    s.getState().setActiveWorkspace(null);
+    expect(s.getState().workspaces.activeId).toBeNull();
   });
 
-  it("preserves the prior fetchedAt when meta omits it", () => {
+  it("setActiveWorkspace is a no-op when the id is unchanged", () => {
     const s = makeStore();
-    s.getState().setRepositoryBranches(REPO, BRANCHES, { fetchedAt: FETCHED_AT });
-    s.getState().setRepositoryBranches(REPO, BRANCHES);
-    expect(s.getState().repositoryBranches.fetchedAtByRepositoryId[REPO]).toBe(FETCHED_AT);
-  });
-});
-
-describe("setRepositoryBranchesLoading", () => {
-  it("toggles only the loading flag", () => {
-    const s = makeStore();
-    s.getState().setRepositoryBranchesLoading(REPO, true);
-    expect(s.getState().repositoryBranches.loadingByRepositoryId[REPO]).toBe(true);
-    s.getState().setRepositoryBranchesLoading(REPO, false);
-    expect(s.getState().repositoryBranches.loadingByRepositoryId[REPO]).toBe(false);
-  });
-});
-
-describe("setRepositoryBranchesFetchError", () => {
-  it("records the error without touching cached branches", () => {
-    const s = makeStore();
-    s.getState().setRepositoryBranches(REPO, BRANCHES, { fetchedAt: FETCHED_AT });
-    s.getState().setRepositoryBranchesFetchError(REPO, "network down");
-    const state = s.getState().repositoryBranches;
-    expect(state.fetchErrorByRepositoryId[REPO]).toBe("network down");
-    // Cached branches and fetchedAt are preserved so the dropdown stays usable
-    // (stale-while-revalidate semantics).
-    expect(state.itemsByRepositoryId[REPO]).toEqual(BRANCHES);
-    expect(state.fetchedAtByRepositoryId[REPO]).toBe(FETCHED_AT);
-  });
-
-  it("clears the error when called with undefined", () => {
-    const s = makeStore();
-    s.getState().setRepositoryBranchesFetchError(REPO, "boom");
-    s.getState().setRepositoryBranchesFetchError(REPO, undefined);
-    expect(s.getState().repositoryBranches.fetchErrorByRepositoryId[REPO]).toBeUndefined();
+    s.getState().setActiveWorkspace("ws-1");
+    const before = s.getState().workspaces;
+    s.getState().setActiveWorkspace("ws-1");
+    // Same reference: the slice short-circuits identical updates.
+    expect(s.getState().workspaces).toBe(before);
   });
 });

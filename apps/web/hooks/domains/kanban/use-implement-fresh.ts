@@ -1,6 +1,7 @@
 import type React from "react";
 import { useCallback } from "react";
 import { useAppStore } from "@/components/state-provider";
+import { useTaskSessionById } from "@/hooks/domains/session/use-task-session-by-id";
 import { useToast } from "@/components/toast-provider";
 import { setChatDraftContent } from "@/lib/local-storage";
 import { launchSession } from "@/lib/services/session-launch-service";
@@ -41,9 +42,7 @@ export function useImplementFresh(
   taskId: string | null,
   chatInputRef: React.RefObject<ChatInputContainerHandle | null>,
 ) {
-  const planningSession = useAppStore((s) =>
-    resolvedSessionId ? s.taskSessions.items[resolvedSessionId] : undefined,
-  );
+  const planningSession = useTaskSessionById(resolvedSessionId);
   const setActiveSession = useAppStore((s) => s.setActiveSession);
   const { toast } = useToast();
 

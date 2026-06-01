@@ -1,12 +1,13 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import { IconFilter } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Separator } from "@kandev/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { useAppStore } from "@/components/state-provider";
+import { officeQueryOptions } from "@/lib/query/query-options/office";
 import type {
   TaskFilterState,
   OfficeTaskStatus,
@@ -42,7 +43,7 @@ function toggleInArray<T>(arr: T[], value: T): T[] {
 }
 
 export function TaskFilters({ filters, onFilterChange }: IssueFiltersProps) {
-  const meta = useAppStore((s) => s.office.meta);
+  const { data: meta } = useQuery(officeQueryOptions.metaGlobal());
   const STATUSES = meta
     ? meta.statuses.map((s) => ({ value: s.id as OfficeTaskStatus, label: s.label }))
     : FALLBACK_STATUSES;

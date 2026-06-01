@@ -1,5 +1,6 @@
 import { useMemo } from "react";
-import { useAppStore } from "@/components/state-provider";
+import { useQuery } from "@tanstack/react-query";
+import { officeQueryOptions } from "@/lib/query/query-options/office";
 import type {
   OfficeTask,
   OfficeTaskStatus,
@@ -94,7 +95,7 @@ export type UseIssuesTreeOptions = {
 
 export function useIssuesTree(opts: UseIssuesTreeOptions): FlatTaskNode[] {
   const { tasks, filters, sortField, sortDir, nestingEnabled, expandedIds } = opts;
-  const meta = useAppStore((s) => s.office.meta);
+  const { data: meta } = useQuery(officeQueryOptions.metaGlobal());
 
   const STATUS_ORDER = useMemo(() => {
     if (!meta) return FALLBACK_STATUS_ORDER;

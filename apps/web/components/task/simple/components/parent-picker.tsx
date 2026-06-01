@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Combobox, type ComboboxOption } from "@/components/combobox";
-import { useAppStore } from "@/components/state-provider";
-import { searchTasks, updateTask } from "@/lib/api/domains/office-extended-api";
+import { updateTask } from "@/lib/api/domains/office-extended-api";
 import { useOptimisticTaskMutation } from "@/hooks/use-optimistic-task-mutation";
+import { useTaskCandidates } from "@/hooks/domains/office/use-task-candidates";
 import type { OfficeTask } from "@/lib/state/slices/office/types";
 import type { Task } from "@/app/office/tasks/[id]/types";
 
@@ -38,28 +38,8 @@ function buildOptions(candidates: OfficeTask[], currentTaskId: string): Combobox
 }
 
 export function ParentPicker({ task }: ParentPickerProps) {
-  const storeTasks = useAppStore((s) => s.office.tasks.items);
-  const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const [fetched, setFetched] = useState<OfficeTask[]>([]);
+  const candidates = useTaskCandidates();
   const mutate = useOptimisticTaskMutation();
-
-  // If the store doesn't already have tasks for the workspace, lazily fetch.
-  useEffect(() => {
-    if (!workspaceId || storeTasks.length > 0) return;
-    let cancelled = false;
-    searchTasks(workspaceId, "", 50)
-      .then((res) => {
-        if (!cancelled) setFetched(res.tasks ?? []);
-      })
-      .catch(() => {
-        if (!cancelled) setFetched([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceId, storeTasks.length]);
-
-  const candidates = storeTasks.length > 0 ? storeTasks : fetched;
 
   const options = useMemo(() => buildOptions(candidates, task.id), [candidates, task.id]);
 

@@ -1,27 +1,35 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createElement, type ReactNode } from "react";
-import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import { StateProvider, useAppStore } from "@/components/state-provider";
-import type { GitLabStatus, TaskMR } from "@/lib/types/gitlab";
+import { cleanup, waitFor } from "@testing-library/react";
+import { renderHookWithQueryClient } from "@/test-utils/render-with-query";
+import type { GitLabStatus, TaskMR, TaskMRsResponse } from "@/lib/types/gitlab";
+import { qk } from "@/lib/query/keys";
 
+// --- API mocks ---
+const listWorkspaceTaskMRsMock = vi.fn<[string], Promise<TaskMRsResponse | null>>();
 const fetchGitLabStatusMock = vi.fn<[], Promise<GitLabStatus | null>>();
-const listWorkspaceTaskMRsMock = vi.fn<
-  [string],
-  Promise<{ task_mrs: Record<string, TaskMR[]> } | null>
->();
 
 vi.mock("@/lib/api/domains/gitlab-api", () => ({
-  fetchGitLabStatus: () => fetchGitLabStatusMock(),
   listWorkspaceTaskMRs: (workspaceId: string) => listWorkspaceTaskMRsMock(workspaceId),
+  fetchGitLabStatus: () => fetchGitLabStatusMock(),
 }));
 
-import { useGitLabAvailable, useTaskMRs, useWorkspaceMRs } from "./use-task-mr";
+// useTaskMRs reads workspaces.activeId from Zustand — mock the store selector.
+const activeIdMock = vi.fn<[], string | null>(() => "ws-1");
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (selector: (s: { workspaces: { activeId: string | null } }) => unknown) =>
+    selector({ workspaces: { activeId: activeIdMock() } }),
+}));
 
-function wrapper({ children }: { children: ReactNode }) {
-  return createElement(StateProvider, null, children);
-}
+import {
+  useWorkspaceMRs,
+  useTaskMRs,
+  useGitLabAvailable,
+} from "@/hooks/domains/gitlab/use-task-mr";
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
 
 function makeMR(overrides: Partial<TaskMR> = {}): TaskMR {
   return {
@@ -62,125 +70,102 @@ function makeStatus(overrides: Partial<GitLabStatus> = {}): GitLabStatus {
   };
 }
 
+// ---------------------------------------------------------------------------
+// useWorkspaceMRs
+// ---------------------------------------------------------------------------
 describe("useWorkspaceMRs", () => {
   beforeEach(() => {
     listWorkspaceTaskMRsMock.mockReset();
   });
 
-  it("hydrates the store with the workspace's task MRs", async () => {
+  it("fetches MRs for the given workspace and populates the cache", async () => {
     const mr = makeMR({ task_id: "task-1" });
     listWorkspaceTaskMRsMock.mockResolvedValueOnce({ task_mrs: { "task-1": [mr] } });
 
-    const { result } = renderHook(
-      () => {
-        useWorkspaceMRs("ws-1");
-        return useAppStore((s) => s.taskMRs.byTaskId);
-      },
-      { wrapper },
-    );
+    const { client } = renderHookWithQueryClient(() => useWorkspaceMRs("ws-1"));
 
-    await waitFor(() => expect(result.current["task-1"]).toEqual([mr]));
+    await waitFor(() =>
+      expect(client.getQueryData(qk.gitlab.mrs("ws-1"))).toEqual({
+        task_mrs: { "task-1": [mr] },
+      }),
+    );
     expect(listWorkspaceTaskMRsMock).toHaveBeenCalledWith("ws-1");
   });
 
-  it("does not refetch when the workspace id stays the same", async () => {
+  it("is disabled (no fetch) when workspaceId is null", () => {
     listWorkspaceTaskMRsMock.mockResolvedValue({ task_mrs: {} });
-    const { rerender } = renderHook(({ ws }: { ws: string | null }) => useWorkspaceMRs(ws), {
-      wrapper,
-      initialProps: { ws: "ws-1" },
-    });
+    renderHookWithQueryClient(() => useWorkspaceMRs(null));
+    expect(listWorkspaceTaskMRsMock).not.toHaveBeenCalled();
+  });
 
-    await waitFor(() => expect(listWorkspaceTaskMRsMock).toHaveBeenCalledTimes(1));
-    rerender({ ws: "ws-1" });
-    rerender({ ws: "ws-1" });
+  it("deduplicates concurrent fetches for the same workspace", async () => {
+    listWorkspaceTaskMRsMock.mockResolvedValue({ task_mrs: {} });
+    const { client } = renderHookWithQueryClient(() => {
+      useWorkspaceMRs("ws-1");
+      useWorkspaceMRs("ws-1");
+    });
+    await waitFor(() => expect(client.getQueryData(qk.gitlab.mrs("ws-1"))).toBeDefined());
     expect(listWorkspaceTaskMRsMock).toHaveBeenCalledTimes(1);
   });
-
-  it("clears MRs and invalidates in-flight requests when workspace becomes null", async () => {
-    // First fetch is slow — we will switch to null before it resolves to
-    // verify the in-flight result is dropped by the request-id guard.
-    let resolveFirst: (v: { task_mrs: Record<string, TaskMR[]> }) => void = () => {};
-    const firstPromise = new Promise<{ task_mrs: Record<string, TaskMR[]> }>((res) => {
-      resolveFirst = res;
-    });
-    listWorkspaceTaskMRsMock.mockReturnValueOnce(firstPromise);
-
-    const { result, rerender } = renderHook(
-      ({ ws }: { ws: string | null }) => {
-        useWorkspaceMRs(ws);
-        return useAppStore((s) => s.taskMRs.byTaskId);
-      },
-      { wrapper, initialProps: { ws: "ws-1" as string | null } },
-    );
-
-    // Pre-populate the store so we can observe it being cleared.
-    const setInitial = renderHook(() => useAppStore((s) => s.setTaskMRs), { wrapper });
-    act(() => {
-      setInitial.result.current({ "task-1": [makeMR()] });
-    });
-
-    rerender({ ws: null });
-    await waitFor(() => expect(result.current).toEqual({}));
-
-    // The first fetch resolves *after* the null switch — its data must
-    // NOT land in the store.
-    const mr = makeMR({ task_id: "task-1" });
-    await act(async () => {
-      resolveFirst({ task_mrs: { "task-1": [mr] } });
-    });
-    await new Promise((r) => setTimeout(r, 10));
-    expect(result.current).toEqual({});
-  });
-
-  it("clears fetchedRef on failure so a workspace switch can retry that id later", async () => {
-    listWorkspaceTaskMRsMock.mockRejectedValueOnce(new Error("boom"));
-    const { rerender } = renderHook(({ ws }: { ws: string | null }) => useWorkspaceMRs(ws), {
-      wrapper,
-      initialProps: { ws: "ws-1" },
-    });
-    await waitFor(() => expect(listWorkspaceTaskMRsMock).toHaveBeenCalledTimes(1));
-
-    // Bounce through another workspace and back to ws-1. Without the
-    // failure-path reset of fetchedRef, the second visit to ws-1 would
-    // be a no-op because the hook would still think the fetch succeeded.
-    listWorkspaceTaskMRsMock.mockResolvedValueOnce({ task_mrs: {} });
-    rerender({ ws: "ws-2" });
-    await waitFor(() => expect(listWorkspaceTaskMRsMock).toHaveBeenCalledTimes(2));
-
-    listWorkspaceTaskMRsMock.mockResolvedValueOnce({ task_mrs: {} });
-    rerender({ ws: "ws-1" });
-    await waitFor(() => expect(listWorkspaceTaskMRsMock).toHaveBeenCalledTimes(3));
-  });
 });
 
+// ---------------------------------------------------------------------------
+// useTaskMRs
+// ---------------------------------------------------------------------------
 describe("useTaskMRs", () => {
-  it("returns the same array reference across renders when empty", () => {
-    const { result, rerender } = renderHook(() => useTaskMRs("task-empty"), { wrapper });
-    const first = result.current;
-    rerender();
-    rerender();
-    // If we returned `[]` literal each call, this would fail and the
-    // zustand selector would loop forever.
-    expect(result.current).toBe(first);
+  beforeEach(() => {
+    listWorkspaceTaskMRsMock.mockReset();
+    activeIdMock.mockReturnValue("ws-1");
   });
 
-  it("reads the task's MRs from the store", async () => {
+  it("returns the task's MRs from the cache", async () => {
     const mr = makeMR({ task_id: "task-1" });
-    const { result } = renderHook(
-      () => {
-        const setTaskMRs = useAppStore((s) => s.setTaskMRs);
-        const mrs = useTaskMRs("task-1");
-        return { setTaskMRs, mrs };
-      },
-      { wrapper },
-    );
-    act(() => {
-      result.current.setTaskMRs({ "task-1": [mr] });
-    });
-    expect(result.current.mrs).toEqual([mr]);
+    listWorkspaceTaskMRsMock.mockResolvedValueOnce({ task_mrs: { "task-1": [mr] } });
+
+    const { result } = renderHookWithQueryClient(() => useTaskMRs("task-1"));
+
+    await waitFor(() => expect(result.current).toEqual([mr]));
+  });
+
+  it("returns a stable empty array for unknown task ids", async () => {
+    listWorkspaceTaskMRsMock.mockResolvedValue({ task_mrs: {} });
+    const { result } = renderHookWithQueryClient(() => useTaskMRs("task-unknown"));
+    const first = result.current;
+    await waitFor(() => expect(listWorkspaceTaskMRsMock).toHaveBeenCalled());
+    expect(result.current).toBe(first); // referentially stable
+  });
+
+  it("returns empty array when taskId is null", async () => {
+    listWorkspaceTaskMRsMock.mockResolvedValue({ task_mrs: {} });
+    const { result } = renderHookWithQueryClient(() => useTaskMRs(null));
+    expect(result.current).toEqual([]);
+  });
+
+  it("returns empty array when no active workspace", async () => {
+    activeIdMock.mockReturnValue(null);
+    const { result } = renderHookWithQueryClient(() => useTaskMRs("task-1"));
+    expect(result.current).toEqual([]);
+    expect(listWorkspaceTaskMRsMock).not.toHaveBeenCalled();
+  });
+
+  it("pre-seeded cache is returned synchronously without a fetch", async () => {
+    const mr = makeMR({ task_id: "task-seeded" });
+    listWorkspaceTaskMRsMock.mockResolvedValue({ task_mrs: { "task-seeded": [mr] } });
+
+    // Seed the cache before rendering the hook so the data is available.
+    const client = renderHookWithQueryClient(() => null).client;
+    client.setQueryData(qk.gitlab.mrs("ws-1"), { task_mrs: { "task-seeded": [mr] } });
+
+    const { result } = renderHookWithQueryClient(() => useTaskMRs("task-seeded"), { client });
+    await waitFor(() => expect(result.current).toEqual([mr]));
+    // Pre-seeded data is within staleTime — no network request should be made.
+    expect(listWorkspaceTaskMRsMock).not.toHaveBeenCalled();
   });
 });
 
+// ---------------------------------------------------------------------------
+// useGitLabAvailable
+// ---------------------------------------------------------------------------
 describe("useGitLabAvailable", () => {
   beforeEach(() => {
     fetchGitLabStatusMock.mockReset();
@@ -188,17 +173,15 @@ describe("useGitLabAvailable", () => {
 
   it("returns true when GitLab is authenticated", async () => {
     fetchGitLabStatusMock.mockResolvedValue(makeStatus({ authenticated: true }));
-    const { result } = renderHook(() => useGitLabAvailable(), { wrapper });
+    const { result } = renderHookWithQueryClient(() => useGitLabAvailable());
     await waitFor(() => expect(result.current).toBe(true));
   });
 
-  it("returns true when a token is configured but probe says unauthenticated", async () => {
-    // token_configured is a softer signal — the integration is set up but
-    // the probe might be stale. We want the integration to appear in menus.
+  it("returns true when a token is configured but unauthenticated", async () => {
     fetchGitLabStatusMock.mockResolvedValue(
       makeStatus({ authenticated: false, token_configured: true }),
     );
-    const { result } = renderHook(() => useGitLabAvailable(), { wrapper });
+    const { result } = renderHookWithQueryClient(() => useGitLabAvailable());
     await waitFor(() => expect(result.current).toBe(true));
   });
 
@@ -206,26 +189,15 @@ describe("useGitLabAvailable", () => {
     fetchGitLabStatusMock.mockResolvedValue(
       makeStatus({ authenticated: false, token_configured: false }),
     );
-    const { result } = renderHook(() => useGitLabAvailable(), { wrapper });
-    // The probe runs once on mount — give it a tick to land.
+    const { result } = renderHookWithQueryClient(() => useGitLabAvailable());
     await waitFor(() => expect(fetchGitLabStatusMock).toHaveBeenCalled());
     expect(result.current).toBe(false);
   });
 
-  it("returns false when the probe rejects (offline / no client)", async () => {
+  it("returns false when the probe rejects", async () => {
     fetchGitLabStatusMock.mockRejectedValue(new Error("network down"));
-    const { result } = renderHook(() => useGitLabAvailable(), { wrapper });
+    const { result } = renderHookWithQueryClient(() => useGitLabAvailable());
     await waitFor(() => expect(fetchGitLabStatusMock).toHaveBeenCalled());
     expect(result.current).toBe(false);
-  });
-
-  it("re-probes when the window regains focus", async () => {
-    fetchGitLabStatusMock.mockResolvedValue(makeStatus());
-    renderHook(() => useGitLabAvailable(), { wrapper });
-    await waitFor(() => expect(fetchGitLabStatusMock).toHaveBeenCalledTimes(1));
-    act(() => {
-      window.dispatchEvent(new Event("focus"));
-    });
-    await waitFor(() => expect(fetchGitLabStatusMock).toHaveBeenCalledTimes(2));
   });
 });

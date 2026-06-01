@@ -1,28 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
-import { useAppStore } from "@/components/state-provider";
-import { listBranches, listRepositoryBranches } from "@/lib/api";
-import type { Branch } from "@/lib/types/http";
-
-const EMPTY_BRANCHES: Branch[] = [];
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import type { Branch, RepositoryBranchesResponse } from "@/lib/types/http";
+import { listBranches, listRepositoryBranches } from "@/lib/api/domains/workspace-api";
+import { workspaceQueryOptions } from "@/lib/query/query-options/workspace";
 
 /**
  * Source of branches for a row: either a workspace repo (by id) or an
  * on-machine folder (by path). Both routes go through one backend endpoint
- * (`/workspaces/:id/branches`) and share one Zustand cache slice — id-based
- * entries are keyed by the repo id, path-based entries get a synthetic key.
+ * (`/workspaces/:id/branches`) and share one TQ cache — id-based entries
+ * are keyed by qk.workspaces.branches(), path-based entries use a synthetic key.
  *
  * `workspaceId` is always required because the route segment needs it.
  */
 export type BranchSource =
   | { kind: "id"; workspaceId: string; repositoryId: string }
   | { kind: "path"; workspaceId: string; path: string };
-
-function cacheKeyFor(source: BranchSource | null): string {
-  if (!source) return "";
-  return source.kind === "id" ? source.repositoryId : `path::${source.workspaceId}::${source.path}`;
-}
 
 /**
  * Loads git branches for a workspace repo or an on-machine path. One hook,
@@ -41,64 +34,91 @@ export type UseBranchesResult = {
   refresh?: () => Promise<void>;
 };
 
-export function useBranches(source: BranchSource | null, enabled = true): UseBranchesResult {
-  const key = cacheKeyFor(source);
-  const branches = useAppStore((state) =>
-    key ? (state.repositoryBranches.itemsByRepositoryId[key] ?? EMPTY_BRANCHES) : EMPTY_BRANCHES,
-  );
-  const isLoaded = useAppStore((state) =>
-    key ? (state.repositoryBranches.loadedByRepositoryId[key] ?? false) : false,
-  );
-  const isLoading = useAppStore((state) =>
-    key ? (state.repositoryBranches.loadingByRepositoryId[key] ?? false) : false,
-  );
-  const setRepositoryBranches = useAppStore((state) => state.setRepositoryBranches);
-  const setRepositoryBranchesLoading = useAppStore((state) => state.setRepositoryBranchesLoading);
-  const inFlightRef = useRef(false);
+const EMPTY_BRANCHES: Branch[] = [];
 
-  useEffect(() => {
-    if (!enabled || !source) return;
-    if (isLoaded || inFlightRef.current) return;
-    inFlightRef.current = true;
-    setRepositoryBranchesLoading(key, true);
+/** Extracts the arguments for useBranchesById given the current source. */
+function idArgs(
+  source: BranchSource | null,
+  enabled: boolean,
+): [wsId: string, repoId: string, on: boolean] {
+  if (source?.kind !== "id") return ["", "", false];
+  return [source.workspaceId, source.repositoryId, enabled];
+}
 
-    const promise =
-      source.kind === "id"
-        ? listBranches(source.workspaceId, { repositoryId: source.repositoryId })
-        : listBranches(source.workspaceId, { path: source.path });
+/** Extracts the arguments for useBranchesByPath given the current source. */
+function pathArgs(
+  source: BranchSource | null,
+  enabled: boolean,
+): [wsId: string, path: string, on: boolean] {
+  if (source?.kind !== "path") return ["", "", false];
+  return [source.workspaceId, source.path, enabled];
+}
 
-    promise
-      .then((response) => setRepositoryBranches(key, response.branches))
-      .catch(() => setRepositoryBranches(key, []))
-      .finally(() => {
-        inFlightRef.current = false;
-        setRepositoryBranchesLoading(key, false);
-      });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- key encodes source identity; listing every field re-fires on every render
-  }, [enabled, isLoaded, key, setRepositoryBranches, setRepositoryBranchesLoading]);
-
-  const refresh = useCallback(async () => {
-    if (!source) return;
-    setRepositoryBranchesLoading(key, true);
-    try {
-      const response =
-        source.kind === "id"
-          ? await listRepositoryBranches(source.repositoryId, { refresh: true })
-          : await listBranches(source.workspaceId, { path: source.path });
-      setRepositoryBranches(key, response.branches);
-    } catch {
-      // Refresh failures leave the existing branch list in place; the user
-      // can retry manually. Errors are surfaced via the BranchRefreshButton's
-      // tooltip when wired with `fetchError`, but the hook does not own
-      // error state today.
-    } finally {
-      setRepositoryBranchesLoading(key, false);
+/** Makes a refresh function that force-fetches branches and writes into TQ cache. */
+function makeRefresh(
+  source: BranchSource,
+  queryClient: ReturnType<typeof useQueryClient>,
+  cacheKey: ReturnType<typeof workspaceQueryOptions.branches>["queryKey"],
+): () => Promise<void> {
+  return async () => {
+    let result: RepositoryBranchesResponse;
+    if (source.kind === "id") {
+      // Triggers git fetch on the backend before returning branches.
+      result = await listRepositoryBranches(source.repositoryId, { refresh: true });
+    } else {
+      // Re-reads local branches without a fetch (no git fetch for unimported folders).
+      result = await listBranches(source.workspaceId, { path: source.path });
     }
-  }, [source, key, setRepositoryBranches, setRepositoryBranchesLoading]);
+    // Write back into the canonical cache key so consumers re-render immediately.
+    queryClient.setQueryData(cacheKey, result);
+  };
+}
+
+type QueryResult = { data?: { branches: Branch[] } | undefined; isLoading: boolean };
+
+/** Returns the active query result based on the source kind. */
+function pickActive(
+  source: BranchSource | null,
+  byId: QueryResult,
+  byPath: QueryResult,
+): QueryResult | null {
+  if (source?.kind === "id") return byId;
+  if (source?.kind === "path") return byPath;
+  return null;
+}
+
+function useBranchesById(wsId: string, repoId: string, on: boolean) {
+  return useQuery({ ...workspaceQueryOptions.branchesById(wsId, repoId), enabled: on });
+}
+
+function useBranchesByPath(wsId: string, path: string, on: boolean) {
+  return useQuery({ ...workspaceQueryOptions.branchesByPath(wsId, path), enabled: on });
+}
+
+/**
+ * Returns git branches for the given source (workspace repo or local path).
+ *
+ * The old inFlightRef dedup pattern is deleted — TanStack Query handles
+ * request deduplication natively. The staleTime controls when a background
+ * refetch fires.
+ *
+ * Signature-compatible with the old Zustand-backed hook.
+ */
+export function useBranches(source: BranchSource | null, enabled = true): UseBranchesResult {
+  const queryClient = useQueryClient();
+
+  // Both useQuery calls are always executed (stable hook call order).
+  // Only the relevant one is "enabled"; the other stays inert.
+  const byId = useBranchesById(...idArgs(source, enabled));
+  const byPath = useBranchesByPath(...pathArgs(source, enabled));
+
+  const active = pickActive(source, byId, byPath);
+  const opts = workspaceQueryOptions.branches(source);
+  const refresh = source ? makeRefresh(source, queryClient, opts.queryKey) : undefined;
 
   return {
-    branches,
-    isLoading,
-    refresh: source ? refresh : undefined,
+    branches: active?.data?.branches ?? EMPTY_BRANCHES,
+    isLoading: active?.isLoading ?? false,
+    refresh,
   };
 }

@@ -1,45 +1,24 @@
 "use client";
 
-import { useEffect, useCallback, useState, useRef } from "react";
+import { useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { qk } from "@/lib/query/keys";
 import type { PRDiffFile } from "@/lib/types/github";
 
-type PRDiffState = {
-  files: PRDiffFile[];
-  loading: boolean;
-  error: string | null;
-};
-
-const INITIAL_STATE: PRDiffState = {
-  files: [],
-  loading: false,
-  error: null,
-};
-
-async function fetchPRFiles(
+async function fetchPRDiffFiles(
   owner: string,
   repo: string,
   prNumber: number,
-  setState: (s: PRDiffState) => void,
-) {
+): Promise<PRDiffFile[]> {
   const client = getWebSocketClient();
-  if (!client) return;
-
-  setState({ files: [], loading: true, error: null });
-  try {
-    const response = await client.request<{ files?: PRDiffFile[] }>("github.pr_files.get", {
-      owner,
-      repo,
-      number: prNumber,
-    });
-    setState({ files: response?.files ?? [], loading: false, error: null });
-  } catch (err) {
-    setState({
-      files: [],
-      loading: false,
-      error: err instanceof Error ? err.message : "Failed to fetch PR files",
-    });
-  }
+  if (!client) return [];
+  const response = await client.request<{ files?: PRDiffFile[] }>("github.pr_files.get", {
+    owner,
+    repo,
+    number: prNumber,
+  });
+  return response?.files ?? [];
 }
 
 /**
@@ -52,36 +31,43 @@ export function usePRDiff(
   prNumber: number | null,
   refreshKey?: string | null,
 ) {
-  const [state, setState] = useState<PRDiffState>(INITIAL_STATE);
-  const hasParams = !!owner && !!repo && !!prNumber;
-  const paramsKeyRef = useRef<string>("");
-  const requestIdRef = useRef(0);
+  const hasParams = !!(owner && repo && prNumber);
+  // Incorporate refreshKey into the cache key so callers can force a refetch
+  // when last_synced_at advances.
+  const cacheKey = hasParams
+    ? qk.github.prFiles(owner!, repo!, prNumber!, refreshKey)
+    : (["github", "pr-files", null] as const);
+
+  const {
+    data: files = [],
+    isLoading,
+    error,
+    refetch,
+  } = useQuery({
+    queryKey: cacheKey,
+    queryFn: () => fetchPRDiffFiles(owner!, repo!, prNumber!),
+    enabled: hasParams,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+  });
 
   const refresh = useCallback(() => {
-    if (!owner || !repo || !prNumber) return;
-    const requestId = ++requestIdRef.current;
-    void fetchPRFiles(owner, repo, prNumber, (next) => {
-      if (requestId !== requestIdRef.current) return;
-      setState(next);
-    });
-  }, [owner, repo, prNumber]);
+    if (!hasParams) return;
+    void refetch();
+  }, [hasParams, refetch]);
 
-  useEffect(() => {
-    const key = hasParams ? `${owner}/${repo}/${prNumber}/${refreshKey ?? ""}` : "";
-    if (key === paramsKeyRef.current) return;
-    paramsKeyRef.current = key;
-    if (!owner || !repo || !prNumber) {
-      requestIdRef.current++; // invalidate in-flight responses
-      return;
-    }
-    const requestId = ++requestIdRef.current;
-    void fetchPRFiles(owner, repo, prNumber, (next) => {
-      if (requestId !== requestIdRef.current) return;
-      setState(next);
-    });
-  }, [owner, repo, prNumber, hasParams, refreshKey]);
+  if (!hasParams) {
+    return { files: [] as PRDiffFile[], loading: false, error: null, refresh };
+  }
 
-  // Return initial state when params are null to clear stale data
-  if (!hasParams) return { ...INITIAL_STATE, refresh };
-  return { ...state, refresh };
+  let errorMessage: string | null = null;
+  if (error instanceof Error) errorMessage = error.message;
+  else if (error) errorMessage = String(error);
+
+  return {
+    files,
+    loading: isLoading,
+    error: errorMessage,
+    refresh,
+  };
 }

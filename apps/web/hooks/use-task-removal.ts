@@ -1,11 +1,18 @@
 import { useCallback } from "react";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { KanbanState } from "@/lib/state/slices";
 import type { TaskSession } from "@/lib/types/http";
 import { replaceTaskUrl } from "@/lib/links";
 import { listTaskSessions } from "@/lib/api";
+import { qk } from "@/lib/query/keys";
+import type { KanbanMultiData } from "@/lib/query/query-options/kanban";
 import { performLayoutSwitch } from "@/lib/state/dockview-store";
+
+function getMultiSnapshots(queryClient: QueryClient): KanbanMultiData["snapshots"] {
+  return queryClient.getQueryData<KanbanMultiData>(qk.kanban.multi())?.snapshots ?? {};
+}
 
 type TaskRemovalOptions = {
   store: StoreApi<AppState>;
@@ -24,67 +31,82 @@ type RemoveFromBoardOptions = {
   wasActiveSessionId?: string | null;
 };
 
-function cachedSessionsHaveEnvIds(sessions: TaskSession[]): boolean {
-  return sessions.length === 0 || sessions.every((session) => !!session.task_environment_id);
+/**
+ * Whether a cached by-task session list is a complete REST snapshot safe to
+ * reuse without a fresh fetch.
+ *
+ * Two failure modes make a cached entry unsafe:
+ *  - missing `task_environment_id` — the env-keyed layout switch needs it.
+ *  - a bridge-synthesized PARTIAL record — the session-state bridge upserts a
+ *    by-task entry from agentctl WS events (which DO carry env IDs but OMIT
+ *    list-only fields like `is_passthrough`). Such a partial passes the env-ID
+ *    check yet lacks `is_passthrough`, so reusing it seeds the by-id observe
+ *    cache with `is_passthrough: undefined`. A client-side task switch then
+ *    reads a passthrough session as non-passthrough and renders chat instead of
+ *    the PTY terminal. `is_passthrough` is a non-omitempty bool in the REST DTO
+ *    (always present in a real list response, undefined only in bridge
+ *    partials), so requiring it defined rejects partials and forces a fetch.
+ */
+export function cachedSessionsAreFullyHydrated(sessions: TaskSession[]): boolean {
+  return (
+    sessions.length === 0 ||
+    sessions.every(
+      (session) => !!session.task_environment_id && session.is_passthrough !== undefined,
+    )
+  );
 }
 
 async function loadTaskSessionsForTaskFromStore(
-  store: StoreApi<AppState>,
+  queryClient: QueryClient,
   taskId: string,
 ): Promise<TaskSession[]> {
-  const state = store.getState();
-  const cachedSessions = state.taskSessionsByTask.itemsByTaskId[taskId] ?? [];
-  if (state.taskSessionsByTask.loadedByTaskId[taskId]) {
-    if (cachedSessionsHaveEnvIds(cachedSessions)) return cachedSessions;
-  }
-  if (state.taskSessionsByTask.loadingByTaskId[taskId]) {
+  const key = qk.taskSession.byTask(taskId);
+  const cachedSessions = queryClient.getQueryData<{ sessions: TaskSession[] }>(key)?.sessions ?? [];
+  // Reuse the cache only when it's a complete REST snapshot (env IDs present and
+  // not a bridge-synthesized partial); otherwise force a fresh fetch so the
+  // env-keyed layout switch AND the passthrough gating both have full records.
+  if (cachedSessions.length > 0 && cachedSessionsAreFullyHydrated(cachedSessions)) {
     return cachedSessions;
   }
-  store.getState().setTaskSessionsLoading(taskId, true);
   try {
     const response = await listTaskSessions(taskId, { cache: "no-store" });
-    store.getState().setTaskSessionsForTask(taskId, response.sessions ?? []);
-    return response.sessions ?? [];
+    const sessions = response.sessions ?? [];
+    queryClient.setQueryData<{ sessions: TaskSession[]; total: number }>(key, {
+      sessions,
+      total: sessions.length,
+    });
+    return sessions;
   } catch (error) {
     console.error("Failed to load task sessions:", error);
-    store.getState().setTaskSessionsForTask(taskId, []);
     return [];
-  } finally {
-    store.getState().setTaskSessionsLoading(taskId, false);
   }
 }
 
-function removeTaskFromSnapshots(store: StoreApi<AppState>, taskId: string): void {
-  const currentSnapshots = store.getState().kanbanMulti.snapshots;
-  for (const [wfId, snapshot] of Object.entries(currentSnapshots)) {
-    const hadTask = snapshot.tasks.some((t: KanbanState["tasks"][number]) => t.id === taskId);
-    if (hadTask) {
-      store.getState().setWorkflowSnapshot(wfId, {
-        ...snapshot,
-        tasks: snapshot.tasks.filter((t: KanbanState["tasks"][number]) => t.id !== taskId),
-      });
+function removeTaskFromSnapshots(queryClient: QueryClient, taskId: string): void {
+  queryClient.setQueryData<KanbanMultiData>(qk.kanban.multi(), (prev) => {
+    if (!prev) return prev;
+    let changed = false;
+    const snapshots: KanbanMultiData["snapshots"] = {};
+    for (const [wfId, snapshot] of Object.entries(prev.snapshots)) {
+      const hadTask = snapshot.tasks.some((t: KanbanState["tasks"][number]) => t.id === taskId);
+      if (hadTask) {
+        changed = true;
+        snapshots[wfId] = {
+          ...snapshot,
+          tasks: snapshot.tasks.filter((t: KanbanState["tasks"][number]) => t.id !== taskId),
+        };
+      } else {
+        snapshots[wfId] = snapshot;
+      }
     }
-  }
-
-  const currentKanbanTasks = store.getState().kanban.tasks;
-  if (currentKanbanTasks.some((t: KanbanState["tasks"][number]) => t.id === taskId)) {
-    store.setState((state) => ({
-      ...state,
-      kanban: {
-        ...state.kanban,
-        tasks: state.kanban.tasks.filter((t: KanbanState["tasks"][number]) => t.id !== taskId),
-      },
-    }));
-  }
+    return changed ? { ...prev, snapshots } : prev;
+  });
 }
 
-function collectRemainingTasks(store: StoreApi<AppState>): KanbanState["tasks"] {
+function collectRemainingTasks(queryClient: QueryClient): KanbanState["tasks"] {
   const allRemainingTasks: KanbanState["tasks"] = [];
-  for (const snapshot of Object.values(store.getState().kanbanMulti.snapshots)) {
+  for (const snapshot of Object.values(getMultiSnapshots(queryClient))) {
     allRemainingTasks.push(...snapshot.tasks);
-  }
-  if (allRemainingTasks.length === 0) {
-    allRemainingTasks.push(...store.getState().kanban.tasks);
   }
   return allRemainingTasks;
 }
@@ -160,9 +182,10 @@ function resolveActiveTaskId(
  * Used by both TaskSessionSidebar and SessionTaskSwitcherSheet.
  */
 export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOptions) {
+  const queryClient = useQueryClient();
   const loadTaskSessionsForTask = useCallback(
-    (taskId: string) => loadTaskSessionsForTaskFromStore(store, taskId),
-    [store],
+    (taskId: string) => loadTaskSessionsForTaskFromStore(queryClient, taskId),
+    [queryClient],
   );
 
   /**
@@ -175,8 +198,8 @@ export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOp
    */
   const removeTaskFromBoard = useCallback(
     async (taskId: string, opts?: RemoveFromBoardOptions) => {
-      removeTaskFromSnapshots(store, taskId);
-      const allRemainingTasks = collectRemainingTasks(store);
+      removeTaskFromSnapshots(queryClient, taskId);
+      const allRemainingTasks = collectRemainingTasks(queryClient);
 
       // Use the caller-provided active task ID (captured before the async API
       // call) to avoid the race with the WS handler that may have already
@@ -198,7 +221,7 @@ export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOp
         window.location.href = "/";
       }
     },
-    [store, useLayoutSwitch, loadTaskSessionsForTask],
+    [store, queryClient, useLayoutSwitch, loadTaskSessionsForTask],
   );
 
   return { removeTaskFromBoard, loadTaskSessionsForTask };

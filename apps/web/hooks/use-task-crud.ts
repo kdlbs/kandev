@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { useAppStoreApi } from "@/components/state-provider";
 import { useTaskActions } from "@/hooks/use-task-actions";
+import { useKanbanSnapshotMutator } from "@/hooks/domains/kanban/use-kanban-snapshots";
 import type { Task } from "@/components/kanban-card";
 import type { KanbanState } from "@/lib/state/slices";
 
@@ -18,7 +18,22 @@ export function useTaskCRUD() {
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
   const [archivingTaskId, setArchivingTaskId] = useState<string | null>(null);
   const { deleteTaskById, archiveTaskById } = useTaskActions();
-  const store = useAppStoreApi();
+  const { getSnapshots, setSnapshot } = useKanbanSnapshotMutator();
+
+  // Optimistically drop a task from every workflow snapshot in the TQ cache.
+  const removeTaskFromCache = useCallback(
+    (taskId: string) => {
+      for (const [wfId, snapshot] of Object.entries(getSnapshots())) {
+        if (snapshot.tasks.some((t: KanbanState["tasks"][number]) => t.id === taskId)) {
+          setSnapshot(wfId, {
+            ...snapshot,
+            tasks: snapshot.tasks.filter((t: KanbanState["tasks"][number]) => t.id !== taskId),
+          });
+        }
+      }
+    },
+    [getSnapshots, setSnapshot],
+  );
 
   const handleCreate = useCallback(() => {
     setEditingTask(null);
@@ -35,21 +50,12 @@ export function useTaskCRUD() {
       setDeletingTaskId(task.id);
       try {
         await deleteTaskById(task.id, opts);
-
-        // Update UI AFTER successful delete
-        store.getState().hydrate({
-          kanban: {
-            ...store.getState().kanban,
-            tasks: store
-              .getState()
-              .kanban.tasks.filter((item: KanbanState["tasks"][number]) => item.id !== task.id),
-          },
-        });
+        removeTaskFromCache(task.id); // Update UI AFTER successful delete
       } finally {
         setDeletingTaskId(null);
       }
     },
-    [deleteTaskById, store],
+    [deleteTaskById, removeTaskFromCache],
   );
 
   const handleArchive = useCallback(
@@ -57,21 +63,12 @@ export function useTaskCRUD() {
       setArchivingTaskId(task.id);
       try {
         await archiveTaskById(task.id, opts);
-
-        // Update UI AFTER successful archive - remove from kanban view
-        store.getState().hydrate({
-          kanban: {
-            ...store.getState().kanban,
-            tasks: store
-              .getState()
-              .kanban.tasks.filter((item: KanbanState["tasks"][number]) => item.id !== task.id),
-          },
-        });
+        removeTaskFromCache(task.id); // Remove from kanban view AFTER successful archive
       } finally {
         setArchivingTaskId(null);
       }
     },
-    [archiveTaskById, store],
+    [archiveTaskById, removeTaskFromCache],
   );
 
   const handleDialogOpenChange = useCallback((open: boolean) => {

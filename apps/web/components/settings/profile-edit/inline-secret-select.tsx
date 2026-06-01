@@ -8,7 +8,8 @@ import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Textarea } from "@kandev/ui/textarea";
 import { createSecret } from "@/lib/api/domains/secrets-api";
-import { useAppStore } from "@/components/state-provider";
+import { useQueryClient } from "@tanstack/react-query";
+import { qk } from "@/lib/query/keys";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 
 const NONE_VALUE = "__none__";
@@ -81,7 +82,16 @@ function InlineCreateForm({
   onCreated: (item: SecretListItem) => void;
   onCancel: () => void;
 }) {
-  const addSecret = useAppStore((state) => state.addSecret);
+  const qc = useQueryClient();
+  const addSecret = useCallback(
+    (item: SecretListItem) => {
+      qc.setQueryData<SecretListItem[]>(qk.settings.secrets(), (prev) => {
+        const list = prev ?? [];
+        return [...list.filter((s) => s.id !== item.id), item];
+      });
+    },
+    [qc],
+  );
   const [name, setName] = useState("");
   const [value, setValue] = useState("");
   const [saving, setSaving] = useState(false);

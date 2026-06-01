@@ -1,45 +1,24 @@
 "use client";
 
-import { useEffect, useCallback, useState, useRef } from "react";
+import { useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { qk } from "@/lib/query/keys";
 import type { PRCommitInfo } from "@/lib/types/github";
 
-type PRCommitsState = {
-  commits: PRCommitInfo[];
-  loading: boolean;
-  error: string | null;
-};
-
-const INITIAL_STATE: PRCommitsState = {
-  commits: [],
-  loading: false,
-  error: null,
-};
-
-async function fetchPRCommits(
+async function fetchPRCommitsList(
   owner: string,
   repo: string,
   prNumber: number,
-  setState: (s: PRCommitsState) => void,
-) {
+): Promise<PRCommitInfo[]> {
   const client = getWebSocketClient();
-  if (!client) return;
-
-  setState({ commits: [], loading: true, error: null });
-  try {
-    const response = await client.request<{ commits?: PRCommitInfo[] }>("github.pr_commits.get", {
-      owner,
-      repo,
-      number: prNumber,
-    });
-    setState({ commits: response?.commits ?? [], loading: false, error: null });
-  } catch (err) {
-    setState({
-      commits: [],
-      loading: false,
-      error: err instanceof Error ? err.message : "Failed to fetch PR commits",
-    });
-  }
+  if (!client) return [];
+  const response = await client.request<{ commits?: PRCommitInfo[] }>("github.pr_commits.get", {
+    owner,
+    repo,
+    number: prNumber,
+  });
+  return response?.commits ?? [];
 }
 
 /**
@@ -52,36 +31,42 @@ export function usePRCommits(
   prNumber: number | null,
   refreshKey?: string | null,
 ) {
-  const [state, setState] = useState<PRCommitsState>(INITIAL_STATE);
-  const hasParams = !!owner && !!repo && !!prNumber;
-  const paramsKeyRef = useRef<string>("");
-  const requestIdRef = useRef(0);
+  const hasParams = !!(owner && repo && prNumber);
+  // Incorporate refreshKey so callers can force a refetch.
+  const cacheKey = hasParams
+    ? [...qk.github.prCommits(owner!, repo!, prNumber!), refreshKey ?? ""]
+    : (["github", "pr-commits", null] as const);
+
+  const {
+    data: commits = [],
+    isLoading,
+    error,
+    refetch,
+  } = useQuery({
+    queryKey: cacheKey,
+    queryFn: () => fetchPRCommitsList(owner!, repo!, prNumber!),
+    enabled: hasParams,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+  });
 
   const refresh = useCallback(() => {
-    if (!owner || !repo || !prNumber) return;
-    const requestId = ++requestIdRef.current;
-    void fetchPRCommits(owner, repo, prNumber, (next) => {
-      if (requestId !== requestIdRef.current) return;
-      setState(next);
-    });
-  }, [owner, repo, prNumber]);
+    if (!hasParams) return;
+    void refetch();
+  }, [hasParams, refetch]);
 
-  useEffect(() => {
-    const key = hasParams ? `${owner}/${repo}/${prNumber}/${refreshKey ?? ""}` : "";
-    if (key === paramsKeyRef.current) return;
-    paramsKeyRef.current = key;
-    if (!owner || !repo || !prNumber) {
-      requestIdRef.current++; // invalidate in-flight responses
-      return;
-    }
-    const requestId = ++requestIdRef.current;
-    void fetchPRCommits(owner, repo, prNumber, (next) => {
-      if (requestId !== requestIdRef.current) return;
-      setState(next);
-    });
-  }, [owner, repo, prNumber, hasParams, refreshKey]);
+  if (!hasParams) {
+    return { commits: [] as PRCommitInfo[], loading: false, error: null, refresh };
+  }
 
-  // Return initial state when params are null to clear stale data
-  if (!hasParams) return { ...INITIAL_STATE, refresh };
-  return { ...state, refresh };
+  let errorMessage: string | null = null;
+  if (error instanceof Error) errorMessage = error.message;
+  else if (error) errorMessage = String(error);
+
+  return {
+    commits,
+    loading: isLoading,
+    error: errorMessage,
+    refresh,
+  };
 }

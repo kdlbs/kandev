@@ -4,7 +4,7 @@ import { StateHydrator } from "@/components/state-hydrator";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { GitLabPageClient } from "./gitlab-page-client";
 import type { Workspace, UserSettingsResponse } from "@/lib/types/http";
-import type { AppState } from "@/lib/state/store";
+import type { SsrInitialState } from "@/lib/ssr/initial-state";
 
 // Minimal SSR entrypoint for /gitlab. v1 surface: list the current user's
 // open MRs + issues and let them click through to GitLab. The browse-and-
@@ -29,7 +29,7 @@ export default async function GitLabPage() {
 
   const mappedUserSettings = mapUserSettingsResponse(userSettingsResponse);
 
-  const initialState: Partial<AppState> = {
+  const initialState: SsrInitialState = {
     workspaces: { items: workspaces, activeId: workspaceId ?? null },
     userSettings: { ...mappedUserSettings, workspaceId: workspaceId ?? null },
   };

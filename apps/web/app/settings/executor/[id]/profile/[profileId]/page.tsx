@@ -17,7 +17,7 @@ import {
   DialogTitle,
 } from "@kandev/ui/dialog";
 import { IconPlus, IconTrash } from "@tabler/icons-react";
-import { useAppStore } from "@/components/state-provider";
+import { useExecutors, useSetExecutors } from "@/hooks/domains/settings/use-settings-reads";
 import { RequestIndicator } from "@/components/request-indicator";
 import { useToast } from "@/components/toast-provider";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
@@ -74,9 +74,7 @@ export default function ProfileDetailPage({
 }) {
   const { id: executorId, profileId } = use(params);
   const router = useRouter();
-  const executor = useAppStore(
-    (state) => state.executors.items.find((e: Executor) => e.id === executorId) ?? null,
-  );
+  const executor = useExecutors().find((e: Executor) => e.id === executorId) ?? null;
   const profile = executor?.profiles?.find((p: ExecutorProfile) => p.id === profileId) ?? null;
 
   if (!executor || !profile) {
@@ -322,8 +320,8 @@ function DeleteProfileDialog({
 function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
   const router = useRouter();
   const { toast } = useToast();
-  const executors = useAppStore((state) => state.executors.items);
-  const setExecutors = useAppStore((state) => state.setExecutors);
+  const executors = useExecutors();
+  const setExecutors = useSetExecutors();
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);

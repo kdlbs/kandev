@@ -19,6 +19,9 @@ import {
   setupSashDragCapToggle,
 } from "./dockview-layout-setup";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useTaskSessionById } from "@/hooks/domains/session/use-task-session-by-id";
+import { useAgentProfiles } from "@/hooks/domains/settings/use-settings-reads";
+import { useWorkspace } from "@/hooks/domains/workspace/use-workspaces";
 import { useFileEditors } from "@/hooks/use-file-editors";
 import { useLspFileOpener } from "@/hooks/use-lsp-file-opener";
 import { useEditorKeybinds } from "@/hooks/use-editor-keybinds";
@@ -26,6 +29,7 @@ import { usePlanPanelAutoOpen } from "@/hooks/use-plan-panel-auto-open";
 import { useSessionChangesCount } from "@/hooks/domains/session/use-session-changes-count";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import { useActiveTaskHasRepos } from "@/hooks/domains/kanban/use-active-task-has-repos";
+import { useActiveTaskWorkflow } from "@/hooks/domains/kanban/use-kanban-snapshots";
 
 // Panel components (rendered via portals, not directly by dockview)
 import { TaskSessionSidebar } from "./task-session-sidebar";
@@ -75,6 +79,8 @@ import type { Terminal } from "@/hooks/domains/session/use-terminals";
 import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import { PanelPortalHost, usePortalSlot } from "@/lib/layout/panel-portal-host";
 import { ENV_SCOPED_DOCKVIEW_COMPONENTS } from "@/lib/state/dockview-env-scoped-components";
+import { useUserSettings } from "@/hooks/domains/settings/use-user-settings";
+import type { SavedLayout } from "@/lib/types/http";
 
 // ---------------------------------------------------------------------------
 // PORTAL SLOT — generic dockview component that adopts a persistent portal
@@ -112,6 +118,10 @@ import { ENV_SCOPED_DOCKVIEW_COMPONENTS } from "@/lib/state/dockview-env-scoped-
  *  - plan     — reads `activeTaskId` from the store
  */
 const ENV_SCOPED_COMPONENTS = ENV_SCOPED_DOCKVIEW_COMPONENTS;
+
+// Stable empty fallback so the savedLayouts read doesn't produce a new array
+// reference each render (which would re-fire effects depending on it).
+const EMPTY_SAVED_LAYOUTS: SavedLayout[] = [];
 
 /**
  * Every entry in the dockview `components` map uses this wrapper.
@@ -169,7 +179,7 @@ function PermanentTab(props: IDockviewPanelHeaderProps) {
 
 /** Sync the user's default saved layout from settings into the dockview store. */
 function useSyncUserDefaultLayout() {
-  const savedLayouts = useAppStore((s) => s.userSettings.savedLayouts);
+  const savedLayouts = useUserSettings().data?.savedLayouts ?? EMPTY_SAVED_LAYOUTS;
   const setUserDefaultLayout = useDockviewStore((s) => s.setUserDefaultLayout);
   useEffect(() => {
     const defaultLayout = savedLayouts.find((l) => l.is_default);
@@ -201,12 +211,11 @@ const tabComponents: Record<string, React.FunctionComponent<IDockviewPanelHeader
 
 function SidebarContent({ panelId }: { panelId: string }) {
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
-  // Read kanban.workflowId (task snapshot), not workflows.activeId (homepage filter), to preserve "All Workflows" across task navigation.
-  const workflowId = useAppStore((state) => state.kanban.workflowId);
-  const workspaceName = useAppStore((state) => {
-    const ws = state.workspaces.items.find((w: { id: string }) => w.id === workspaceId);
-    return ws?.name ?? "Workspace";
-  });
+  // Use the active task's snapshot workflow (task context), not workflows.activeId
+  // (homepage filter), to preserve "All Workflows" across task navigation.
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const { workflowId } = useActiveTaskWorkflow(activeTaskId);
+  const workspaceName = useWorkspace(workspaceId)?.name ?? "Workspace";
 
   useEffect(() => {
     setPanelTitle(panelId, workspaceName);
@@ -222,17 +231,15 @@ export function resolveChatPanelTitle(agentLabel: string | null | undefined): st
 }
 
 function useChatSessionTitle(panelId: string, sessionId: string | null) {
-  const agentLabel = useAppStore((state) => {
-    if (!sessionId) return null;
-    const session = state.taskSessions.items[sessionId];
-    if (!session?.agent_profile_id) return null;
-    const profile = state.agentProfiles.items.find(
-      (p: { id: string }) => p.id === session.agent_profile_id,
-    );
+  const agentProfiles = useAgentProfiles();
+  const profileId = useTaskSessionById(sessionId)?.agent_profile_id ?? null;
+  const agentLabel = (() => {
+    if (!profileId) return null;
+    const profile = agentProfiles.find((p) => p.id === profileId);
     if (!profile) return null;
     const parts = profile.label.split(" \u2022 ");
     return parts[1] || parts[0] || profile.label;
-  });
+  })();
   useEffect(() => {
     setPanelTitle(panelId, resolveChatPanelTitle(agentLabel));
   }, [panelId, agentLabel]);
@@ -244,9 +251,7 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
   const sessionId = paramSessionId ?? storeSessionId;
   const taskId = useAppStore((state) => state.tasks.activeTaskId);
   const { openFile } = useFileEditors();
-  const isPassthrough = useAppStore((state) =>
-    sessionId ? state.taskSessions.items[sessionId]?.is_passthrough === true : false,
-  );
+  const isPassthrough = useTaskSessionById(sessionId)?.is_passthrough === true;
   useChatSessionTitle(panelId, sessionId);
 
   if (isPassthrough) {

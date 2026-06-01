@@ -1,15 +1,19 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
-import { useAppStore } from "@/components/state-provider";
+import { officeQueryOptions } from "@/lib/query/query-options/office";
+import { settingsQueryOptions } from "@/lib/query/query-options/settings";
+import { useUpsertAgentProfileOption } from "@/hooks/domains/settings/use-settings-reads";
 import { AgentSelector } from "@/components/task-create-dialog-selectors";
 import { useAgentProfileOptions } from "@/components/task-create-dialog-options";
-import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
-import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
+import type { AgentProfile } from "@/lib/types/agent-profile";
+import type { AgentProfileOption } from "@/lib/types/settings";
+import { toAgentProfileOption } from "@/lib/types/settings";
 import { getCapabilityWarning } from "@/lib/capability-warning";
 import { CliProfileEditor } from "@/components/agent/cli-profile-editor";
 import { Combobox, type ComboboxOption } from "@/components/combobox";
@@ -64,11 +68,10 @@ export function StepAgent({
   onChange,
   onAgentProfilesChange,
 }: StepAgentProps) {
-  const meta = useAppStore((s) => s.office.meta);
+  const { data: meta } = useQuery(officeQueryOptions.metaGlobal());
   const executorOptions = meta?.executorTypes ?? FALLBACK_EXECUTOR_OPTIONS;
-  const settingsAgents = useAppStore((s) => s.settingsAgents.items);
-  const setAgentProfiles = useAppStore((s) => s.setAgentProfiles);
-  const agentProfilesState = useAppStore((s) => s.agentProfiles.items);
+  const { data: settingsAgents = [] } = useQuery({ ...settingsQueryOptions.agents() });
+  const upsertAgentProfile = useUpsertAgentProfileOption();
 
   const sortedProfiles = useMemo(() => sortProfiles(agentProfiles), [agentProfiles]);
   const baseOptions = useAgentProfileOptions(sortedProfiles);
@@ -124,10 +127,9 @@ export function StepAgent({
           {showCreate ? (
             <CreateProfilePanel
               settingsAgents={settingsAgents}
-              storeProfiles={agentProfilesState}
               wizardProfiles={agentProfiles}
               canCancel={profileOptions.length > 0}
-              setAgentProfiles={setAgentProfiles}
+              upsertAgentProfile={upsertAgentProfile}
               onAgentProfilesChange={onAgentProfilesChange}
               onChange={onChange}
               onClose={() => setShowCreate(false)}
@@ -200,19 +202,17 @@ function TierIndicator({
 
 function CreateProfilePanel({
   settingsAgents,
-  storeProfiles,
   wizardProfiles,
   canCancel,
-  setAgentProfiles,
+  upsertAgentProfile,
   onAgentProfilesChange,
   onChange,
   onClose,
 }: {
   settingsAgents: { id: string; name: string }[];
-  storeProfiles: AgentProfileOption[];
   wizardProfiles: AgentProfileOption[];
   canCancel: boolean;
-  setAgentProfiles: (profiles: AgentProfileOption[]) => void;
+  upsertAgentProfile: (saved: AgentProfile) => void;
   onAgentProfilesChange?: (profiles: AgentProfileOption[]) => void;
   onChange: StepAgentProps["onChange"];
   onClose: () => void;
@@ -225,12 +225,12 @@ function CreateProfilePanel({
         showAdvanced
         allowCliPassthrough={false}
         onSaved={(saved) => {
+          upsertAgentProfile(saved);
           const agentForProfile = settingsAgents.find((a) => a.id === saved.agentId) ?? {
             id: saved.agentId ?? "",
             name: saved.agentId ?? "",
           };
           const option = toAgentProfileOption(agentForProfile, saved);
-          setAgentProfiles([...storeProfiles.filter((p) => p.id !== option.id), option]);
           onAgentProfilesChange?.([...wizardProfiles.filter((p) => p.id !== option.id), option]);
           onChange({ agentProfileId: saved.id });
           onClose();

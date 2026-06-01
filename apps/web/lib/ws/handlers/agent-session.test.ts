@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { QueryClient } from "@tanstack/react-query";
 import { registerTaskSessionHandlers } from "./agent-session";
+import { qk } from "@/lib/query/keys";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
+import type { TaskSession } from "@/lib/types/http";
 
 function makeStore(overrides: Record<string, unknown> = {}) {
   const state: Record<string, unknown> = {
@@ -11,11 +14,6 @@ function makeStore(overrides: Record<string, unknown> = {}) {
       pinnedSessionId: null,
       lastSessionByTaskId: {},
     },
-    taskSessions: { items: {} },
-    taskSessionsByTask: { itemsByTaskId: {} },
-    setTaskSession: vi.fn(),
-    setTaskSessionsForTask: vi.fn(),
-    upsertTaskSessionFromEvent: vi.fn(),
     setActiveSession: vi.fn(),
     setActiveSessionAuto: vi.fn(),
     setSessionFailureNotification: vi.fn(),
@@ -31,6 +29,30 @@ function makeStore(overrides: Record<string, unknown> = {}) {
   } as unknown as StoreApi<AppState>;
 }
 
+/** Seed the TQ by-id cache (the TaskSession record the bridge owns). */
+function seedById(qc: QueryClient, session: Record<string, unknown> & { id: string }): void {
+  qc.setQueryData(qk.taskSession.byId(session.id), session as unknown as TaskSession);
+}
+
+/** Read the agentctl status from the TQ cache (where it now lives). */
+function readAgentctl(qc: QueryClient, sessionId: string) {
+  return qc.getQueryData(qk.session.agentctl(sessionId)) as
+    | { status: string; agentExecutionId?: string }
+    | undefined;
+}
+
+/** Seed the TQ per-task list cache. */
+function seedByTask(
+  qc: QueryClient,
+  taskId: string,
+  sessions: Array<Record<string, unknown>>,
+): void {
+  qc.setQueryData(qk.taskSession.byTask(taskId), {
+    sessions: sessions as unknown as TaskSession[],
+    total: sessions.length,
+  });
+}
+
 const STATE_CHANGED_EVENT = "session.state_changed";
 
 function makeMessage(payload: Record<string, unknown>) {
@@ -39,20 +61,19 @@ function makeMessage(payload: Record<string, unknown>) {
 
 describe("session.state_changed handler", () => {
   let store: ReturnType<typeof makeStore>;
+  let qc: QueryClient;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let handler: (msg: any) => void;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    qc = new QueryClient();
   });
 
   it("sets failure notification on first FAILED event", () => {
-    store = makeStore({
-      taskSessions: {
-        items: { "s-1": { id: "s-1", task_id: "t-1", state: "STARTING" } },
-      },
-    });
-    handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+    store = makeStore();
+    seedById(qc, { id: "s-1", task_id: "t-1", state: "STARTING" });
+    handler = registerTaskSessionHandlers(store, qc)[STATE_CHANGED_EVENT]!;
 
     handler(
       makeMessage({
@@ -71,12 +92,9 @@ describe("session.state_changed handler", () => {
   });
 
   it("does not set failure notification when session is already FAILED", () => {
-    store = makeStore({
-      taskSessions: {
-        items: { "s-1": { id: "s-1", task_id: "t-1", state: "FAILED" } },
-      },
-    });
-    handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+    store = makeStore();
+    seedById(qc, { id: "s-1", task_id: "t-1", state: "FAILED" });
+    handler = registerTaskSessionHandlers(store, qc)[STATE_CHANGED_EVENT]!;
 
     handler(
       makeMessage({
@@ -95,7 +113,7 @@ describe("session.state_changed handler", () => {
     // store for the first time already in FAILED state. This is not a real
     // transition we just observed, so no toast should fire.
     store = makeStore();
-    handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+    handler = registerTaskSessionHandlers(store, qc)[STATE_CHANGED_EVENT]!;
 
     handler(
       makeMessage({
@@ -110,12 +128,9 @@ describe("session.state_changed handler", () => {
   });
 
   it("respects suppress_toast flag", () => {
-    store = makeStore({
-      taskSessions: {
-        items: { "s-1": { id: "s-1", task_id: "t-1", state: "STARTING" } },
-      },
-    });
-    handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+    store = makeStore();
+    seedById(qc, { id: "s-1", task_id: "t-1", state: "STARTING" });
+    handler = registerTaskSessionHandlers(store, qc)[STATE_CHANGED_EVENT]!;
 
     handler(
       makeMessage({
@@ -132,26 +147,33 @@ describe("session.state_changed handler", () => {
 });
 
 describe("session.state_changed stale guard", () => {
-  let store: ReturnType<typeof makeStore>;
+  let qc: QueryClient;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let handler: (msg: any) => void;
+  beforeEach(() => {
+    vi.clearAllMocks();
+    qc = new QueryClient();
+  });
 
-  it("ignores older state events before upserting the session", () => {
-    const upsertTaskSessionFromEvent = vi.fn();
-    store = makeStore({
-      taskSessions: {
-        items: {
-          "s-1": {
-            id: "s-1",
-            task_id: "t-1",
-            state: "WAITING_FOR_INPUT",
-            updated_at: "2026-01-02T00:00:00.000Z",
-          },
-        },
+  // A subscribe snapshot read before a newer state landed (older updated_at)
+  // must not drive the adoption / agentctl-promotion logic — that would let a
+  // stale STARTING snapshot stomp a live WAITING_FOR_INPUT and block idle input.
+  it("ignores older state events: no adoption or agentctl promotion", () => {
+    const store = makeStore({
+      tasks: {
+        activeTaskId: "t-1",
+        activeSessionId: "s-1",
+        pinnedSessionId: null,
+        lastSessionByTaskId: {},
       },
-      upsertTaskSessionFromEvent,
     });
-    handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+    seedById(qc, {
+      id: "s-1",
+      task_id: "t-1",
+      state: "WAITING_FOR_INPUT",
+      updated_at: "2026-01-02T00:00:00.000Z",
+    });
+    handler = registerTaskSessionHandlers(store, qc)[STATE_CHANGED_EVENT]!;
 
     handler(
       makeMessage({
@@ -162,13 +184,38 @@ describe("session.state_changed stale guard", () => {
       }),
     );
 
-    expect(upsertTaskSessionFromEvent).not.toHaveBeenCalled();
+    expect(store.getState().setActiveSessionAuto).not.toHaveBeenCalled();
+    expect(readAgentctl(qc, "s-1")).toBeUndefined();
+  });
+
+  it("applies newer state events (not stale): agentctl promoted", () => {
+    const store = makeStore();
+    seedById(qc, {
+      id: "s-1",
+      task_id: "t-1",
+      state: "STARTING",
+      updated_at: "2026-01-01T00:00:00.000Z",
+    });
+    handler = registerTaskSessionHandlers(store, qc)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        new_state: "RUNNING",
+        updated_at: "2026-01-02T00:00:00.000Z",
+      }),
+    );
+
+    expect(readAgentctl(qc, "s-1")).toMatchObject({ status: "ready" });
   });
 });
 
 describe("session.state_changed → active session switching", () => {
+  let qc: QueryClient;
   beforeEach(() => {
     vi.clearAllMocks();
+    qc = new QueryClient();
   });
 
   it("adopts a newly-created session for the active task", () => {
@@ -180,7 +227,7 @@ describe("session.state_changed → active session switching", () => {
         lastSessionByTaskId: {},
       },
     });
-    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+    const handler = registerTaskSessionHandlers(store, qc)[STATE_CHANGED_EVENT]!;
 
     handler({
       id: "m",
@@ -202,7 +249,7 @@ describe("session.state_changed → active session switching", () => {
         lastSessionByTaskId: {},
       },
     });
-    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+    const handler = registerTaskSessionHandlers(store, qc)[STATE_CHANGED_EVENT]!;
 
     handler({
       id: "m",
@@ -222,11 +269,9 @@ describe("session.state_changed → active session switching", () => {
         pinnedSessionId: null,
         lastSessionByTaskId: {},
       },
-      taskSessions: {
-        items: { "s-old": { id: "s-old", task_id: "t-1", state: "RUNNING" } },
-      },
     });
-    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+    seedById(qc, { id: "s-old", task_id: "t-1", state: "RUNNING" });
+    const handler = registerTaskSessionHandlers(store, qc)[STATE_CHANGED_EVENT]!;
 
     handler({
       id: "m",
@@ -253,11 +298,9 @@ describe("session.state_changed → active session switching", () => {
         pinnedSessionId: "s-old",
         lastSessionByTaskId: {},
       },
-      taskSessions: {
-        items: { "s-old": { id: "s-old", task_id: "t-1", state: "COMPLETED" } },
-      },
     });
-    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+    seedById(qc, { id: "s-old", task_id: "t-1", state: "COMPLETED" });
+    const handler = registerTaskSessionHandlers(store, qc)[STATE_CHANGED_EVENT]!;
 
     handler({
       id: "m",
@@ -271,8 +314,10 @@ describe("session.state_changed → active session switching", () => {
 });
 
 describe("session.state_changed → active session handoff on terminal", () => {
+  let qc: QueryClient;
   beforeEach(() => {
     vi.clearAllMocks();
+    qc = new QueryClient();
   });
 
   it("hands off when the current active session transitions to terminal", () => {
@@ -283,19 +328,13 @@ describe("session.state_changed → active session handoff on terminal", () => {
         pinnedSessionId: null,
         lastSessionByTaskId: {},
       },
-      taskSessions: {
-        items: { "s-old": { id: "s-old", task_id: "t-1", state: "RUNNING" } },
-      },
-      taskSessionsByTask: {
-        itemsByTaskId: {
-          "t-1": [
-            { id: "s-old", task_id: "t-1", state: "RUNNING", started_at: "", updated_at: "" },
-            { id: "s-new", task_id: "t-1", state: "STARTING", started_at: "", updated_at: "" },
-          ],
-        },
-      },
     });
-    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+    seedById(qc, { id: "s-old", task_id: "t-1", state: "RUNNING" });
+    seedByTask(qc, "t-1", [
+      { id: "s-old", task_id: "t-1", state: "RUNNING", started_at: "", updated_at: "" },
+      { id: "s-new", task_id: "t-1", state: "STARTING", started_at: "", updated_at: "" },
+    ]);
+    const handler = registerTaskSessionHandlers(store, qc)[STATE_CHANGED_EVENT]!;
 
     handler({
       id: "m",
@@ -320,18 +359,12 @@ describe("session.state_changed → active session handoff on terminal", () => {
         pinnedSessionId: null,
         lastSessionByTaskId: {},
       },
-      taskSessions: {
-        items: { "s-old": { id: "s-old", task_id: "t-1", state: "RUNNING" } },
-      },
-      taskSessionsByTask: {
-        itemsByTaskId: {
-          "t-1": [
-            { id: "s-old", task_id: "t-1", state: "RUNNING", started_at: "", updated_at: "" },
-          ],
-        },
-      },
     });
-    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+    seedById(qc, { id: "s-old", task_id: "t-1", state: "RUNNING" });
+    seedByTask(qc, "t-1", [
+      { id: "s-old", task_id: "t-1", state: "RUNNING", started_at: "", updated_at: "" },
+    ]);
+    const handler = registerTaskSessionHandlers(store, qc)[STATE_CHANGED_EVENT]!;
 
     handler({
       id: "m",
@@ -351,19 +384,13 @@ describe("session.state_changed → active session handoff on terminal", () => {
         pinnedSessionId: null,
         lastSessionByTaskId: {},
       },
-      taskSessions: {
-        items: { "s-old": { id: "s-old", task_id: "t-1", state: "RUNNING" } },
-      },
-      taskSessionsByTask: {
-        itemsByTaskId: {
-          "t-1": [
-            { id: "s-done", task_id: "t-1", state: "COMPLETED", started_at: "", updated_at: "" },
-            { id: "s-old", task_id: "t-1", state: "RUNNING", started_at: "", updated_at: "" },
-          ],
-        },
-      },
     });
-    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+    seedById(qc, { id: "s-old", task_id: "t-1", state: "RUNNING" });
+    seedByTask(qc, "t-1", [
+      { id: "s-done", task_id: "t-1", state: "COMPLETED", started_at: "", updated_at: "" },
+      { id: "s-old", task_id: "t-1", state: "RUNNING", started_at: "", updated_at: "" },
+    ]);
+    const handler = registerTaskSessionHandlers(store, qc)[STATE_CHANGED_EVENT]!;
 
     handler({
       id: "m",
@@ -377,8 +404,10 @@ describe("session.state_changed → active session handoff on terminal", () => {
 });
 
 describe("session.state_changed → respects user-pinned session", () => {
+  let qc: QueryClient;
   beforeEach(() => {
     vi.clearAllMocks();
+    qc = new QueryClient();
   });
 
   it("does NOT hand off when the user pinned the session that just terminated", () => {
@@ -391,19 +420,13 @@ describe("session.state_changed → respects user-pinned session", () => {
         pinnedSessionId: "s-old",
         lastSessionByTaskId: {},
       },
-      taskSessions: {
-        items: { "s-old": { id: "s-old", task_id: "t-1", state: "RUNNING" } },
-      },
-      taskSessionsByTask: {
-        itemsByTaskId: {
-          "t-1": [
-            { id: "s-old", task_id: "t-1", state: "RUNNING", started_at: "", updated_at: "" },
-            { id: "s-new", task_id: "t-1", state: "STARTING", started_at: "", updated_at: "" },
-          ],
-        },
-      },
     });
-    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+    seedById(qc, { id: "s-old", task_id: "t-1", state: "RUNNING" });
+    seedByTask(qc, "t-1", [
+      { id: "s-old", task_id: "t-1", state: "RUNNING", started_at: "", updated_at: "" },
+      { id: "s-new", task_id: "t-1", state: "STARTING", started_at: "", updated_at: "" },
+    ]);
+    const handler = registerTaskSessionHandlers(store, qc)[STATE_CHANGED_EVENT]!;
 
     handler({
       id: "m",
@@ -417,23 +440,19 @@ describe("session.state_changed → respects user-pinned session", () => {
   });
 });
 
-// eslint-disable-next-line max-lines-per-function -- test describe block, splitting hurts readability
 describe("session.state_changed → agentctl ready fallback", () => {
   const TS = "2026-05-04T00:00:00Z";
+  let qc: QueryClient;
   beforeEach(() => {
     vi.clearAllMocks();
+    qc = new QueryClient();
   });
 
   it("promotes agentctl status to 'ready' when session enters RUNNING and ready event was missed", () => {
-    const setSessionAgentctlStatus = vi.fn();
-    const store = makeStore({
-      taskSessions: {
-        items: { "s-1": { id: "s-1", task_id: "t-1", state: "STARTING" } },
-      },
-      sessionAgentctl: { itemsBySessionId: { "s-1": { status: "starting" } } },
-      setSessionAgentctlStatus,
-    });
-    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+    const store = makeStore();
+    qc.setQueryData(qk.session.agentctl("s-1"), { status: "starting" });
+    seedById(qc, { id: "s-1", task_id: "t-1", state: "STARTING" });
+    const handler = registerTaskSessionHandlers(store, qc)[STATE_CHANGED_EVENT]!;
 
     handler({
       id: "m",
@@ -443,22 +462,13 @@ describe("session.state_changed → agentctl ready fallback", () => {
       payload: { task_id: "t-1", session_id: "s-1", new_state: "RUNNING" },
     });
 
-    expect(setSessionAgentctlStatus).toHaveBeenCalledWith(
-      "s-1",
-      expect.objectContaining({ status: "ready" }),
-    );
+    expect(readAgentctl(qc, "s-1")).toMatchObject({ status: "ready" });
   });
 
   it("promotes agentctl status to 'ready' on WAITING_FOR_INPUT even when no prior entry exists", () => {
-    const setSessionAgentctlStatus = vi.fn();
-    const store = makeStore({
-      taskSessions: {
-        items: { "s-1": { id: "s-1", task_id: "t-1", state: "STARTING" } },
-      },
-      sessionAgentctl: { itemsBySessionId: {} },
-      setSessionAgentctlStatus,
-    });
-    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+    const store = makeStore();
+    seedById(qc, { id: "s-1", task_id: "t-1", state: "STARTING" });
+    const handler = registerTaskSessionHandlers(store, qc)[STATE_CHANGED_EVENT]!;
 
     handler({
       id: "m",
@@ -468,22 +478,14 @@ describe("session.state_changed → agentctl ready fallback", () => {
       payload: { task_id: "t-1", session_id: "s-1", new_state: "WAITING_FOR_INPUT" },
     });
 
-    expect(setSessionAgentctlStatus).toHaveBeenCalledWith(
-      "s-1",
-      expect.objectContaining({ status: "ready" }),
-    );
+    expect(readAgentctl(qc, "s-1")).toMatchObject({ status: "ready" });
   });
 
   it("does not re-set 'ready' when the session is already ready", () => {
-    const setSessionAgentctlStatus = vi.fn();
-    const store = makeStore({
-      taskSessions: {
-        items: { "s-1": { id: "s-1", task_id: "t-1", state: "RUNNING" } },
-      },
-      sessionAgentctl: { itemsBySessionId: { "s-1": { status: "ready" } } },
-      setSessionAgentctlStatus,
-    });
-    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+    const store = makeStore();
+    qc.setQueryData(qk.session.agentctl("s-1"), { status: "ready", agentExecutionId: "ae-keep" });
+    seedById(qc, { id: "s-1", task_id: "t-1", state: "RUNNING" });
+    const handler = registerTaskSessionHandlers(store, qc)[STATE_CHANGED_EVENT]!;
 
     handler({
       id: "m",
@@ -493,103 +495,19 @@ describe("session.state_changed → agentctl ready fallback", () => {
       payload: { task_id: "t-1", session_id: "s-1", new_state: "WAITING_FOR_INPUT" },
     });
 
-    expect(setSessionAgentctlStatus).not.toHaveBeenCalled();
+    // Unchanged: the existing ready entry (with its agentExecutionId) is preserved.
+    expect(readAgentctl(qc, "s-1")).toMatchObject({ status: "ready", agentExecutionId: "ae-keep" });
   });
 
-  it("seeds env mapping from agentctl_starting payload via upsertTaskSessionFromEvent", () => {
-    const upsertTaskSessionFromEvent = vi.fn();
-    const store = makeStore({
-      taskSessions: {
-        items: { "s-1": { id: "s-1", task_id: "t-1", state: "CREATED" } },
-      },
-      sessionAgentctl: { itemsBySessionId: {} },
-      setSessionAgentctlStatus: vi.fn(),
-      upsertTaskSessionFromEvent,
-    });
-    const handler = registerTaskSessionHandlers(store)["session.agentctl_starting"]!;
-
-    handler({
-      id: "m",
-      type: "notification",
-      action: "session.agentctl_starting",
-      timestamp: TS,
-      payload: {
-        task_id: "t-1",
-        session_id: "s-1",
-        agent_execution_id: "ae-1",
-        task_environment_id: "env-1",
-      },
-    });
-
-    expect(upsertTaskSessionFromEvent).toHaveBeenCalledWith(
-      "t-1",
-      expect.objectContaining({ id: "s-1", task_environment_id: "env-1" }),
-    );
-  });
-
-  it("seeds env mapping from agentctl_ready payload", () => {
-    const upsertTaskSessionFromEvent = vi.fn();
-    const store = makeStore({
-      taskSessions: { items: {} },
-      sessionAgentctl: { itemsBySessionId: {} },
-      setSessionAgentctlStatus: vi.fn(),
-      upsertTaskSessionFromEvent,
-      setWorktree: vi.fn(),
-      sessionWorktreesBySessionId: { itemsBySessionId: {} },
-      setSessionWorktrees: vi.fn(),
-    });
-    const handler = registerTaskSessionHandlers(store)["session.agentctl_ready"]!;
-
-    handler({
-      id: "m",
-      type: "notification",
-      action: "session.agentctl_ready",
-      timestamp: TS,
-      payload: {
-        task_id: "t-1",
-        session_id: "s-1",
-        agent_execution_id: "ae-1",
-        task_environment_id: "env-1",
-      },
-    });
-
-    expect(upsertTaskSessionFromEvent).toHaveBeenCalledWith(
-      "t-1",
-      expect.objectContaining({ id: "s-1", task_environment_id: "env-1" }),
-    );
-  });
-
-  it("does not call upsertTaskSessionFromEvent when agentctl payload omits task_environment_id", () => {
-    const upsertTaskSessionFromEvent = vi.fn();
-    const store = makeStore({
-      taskSessions: { items: {} },
-      sessionAgentctl: { itemsBySessionId: {} },
-      setSessionAgentctlStatus: vi.fn(),
-      upsertTaskSessionFromEvent,
-    });
-    const handler = registerTaskSessionHandlers(store)["session.agentctl_starting"]!;
-
-    handler({
-      id: "m",
-      type: "notification",
-      action: "session.agentctl_starting",
-      timestamp: TS,
-      payload: { task_id: "t-1", session_id: "s-1", agent_execution_id: "ae-1" },
-    });
-
-    expect(upsertTaskSessionFromEvent).not.toHaveBeenCalled();
-  });
+  // NOTE: agentctl_ready worktree indexing now lives entirely in the
+  // session-state bridge (worktree_* fields → TaskSession TQ cache); the Zustand
+  // worktree mirror was removed. See lib/query/bridge/session-state.test.ts
+  // ("session.agentctl_ready merges worktree fields ...").
 
   it("does not promote on non-live states (STARTING, COMPLETED, FAILED)", () => {
-    const setSessionAgentctlStatus = vi.fn();
-    const store = makeStore({
-      taskSessions: {
-        items: { "s-1": { id: "s-1", task_id: "t-1", state: "CREATED" } },
-      },
-      sessionAgentctl: { itemsBySessionId: {} },
-      setSessionAgentctlStatus,
-    });
-    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+    const store = makeStore();
+    seedById(qc, { id: "s-1", task_id: "t-1", state: "CREATED" });
+    const handler = registerTaskSessionHandlers(store, qc)[STATE_CHANGED_EVENT]!;
 
     for (const newState of ["STARTING", "COMPLETED", "FAILED", "CANCELLED"]) {
       handler({
@@ -601,6 +519,6 @@ describe("session.state_changed → agentctl ready fallback", () => {
       });
     }
 
-    expect(setSessionAgentctlStatus).not.toHaveBeenCalled();
+    expect(readAgentctl(qc, "s-1")).toBeUndefined();
   });
 });

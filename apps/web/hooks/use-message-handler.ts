@@ -1,6 +1,9 @@
 import { useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useAppStoreApi } from "@/components/state-provider";
+import { qk } from "@/lib/query/keys";
+import type { KanbanMultiData } from "@/lib/query/query-options/kanban";
 import { useQueue } from "./domains/session/use-queue";
 import type { MessageAttachment } from "@/components/task/chat/chat-input-container";
 import type { ActiveDocument } from "@/lib/state/slices/ui/types";
@@ -9,7 +12,7 @@ import { toBlockquote } from "@/lib/state/slices/comments/format";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { CustomPrompt, Message } from "@/lib/types/http";
 import type { TaskMentionData } from "@/hooks/use-inline-mention";
-import type { AppState } from "@/lib/state/store";
+import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 
 function buildDocumentContext(
   activeDocument: ActiveDocument | null,
@@ -40,10 +43,10 @@ function buildDocumentContext(
   return `\n\n<kandev-system>\nACTIVE DOCUMENT: The user is editing "${activeDocument.name}" (${activeDocument.path}) side-by-side with this chat.\nRead this file to understand the context before responding.\n</kandev-system>`;
 }
 
-function resolveStepTitle(stepId: string, state: AppState): string {
-  const step = state.kanban.steps.find((s) => s.id === stepId);
-  if (step) return step.title;
-  for (const snap of Object.values(state.kanbanMulti.snapshots)) {
+type KanbanSnapshots = Record<string, WorkflowSnapshotData>;
+
+function resolveStepTitle(stepId: string, snapshots: KanbanSnapshots): string {
+  for (const snap of Object.values(snapshots)) {
     const found = (snap.steps ?? []).find((s) => s.id === stepId);
     if (found) return found.title;
   }
@@ -58,10 +61,13 @@ function sanitizeForPrompt(value: string): string {
   return value.replace(/[\r\n<>]/g, " ");
 }
 
-export function buildTaskMentionsContext(tasks: TaskMentionData[], state: AppState): string {
+export function buildTaskMentionsContext(
+  tasks: TaskMentionData[],
+  snapshots: KanbanSnapshots,
+): string {
   if (tasks.length === 0) return "";
   const lines = tasks.map((t) => {
-    const stepTitle = resolveStepTitle(t.workflowStepId, state);
+    const stepTitle = resolveStepTitle(t.workflowStepId, snapshots);
     const title = sanitizeForPrompt(t.title);
     const taskId = sanitizeForPrompt(t.taskId);
     const workflowId = sanitizeForPrompt(t.workflowId);
@@ -179,21 +185,24 @@ export function useMessageHandler({
 }: UseMessageHandlerParams) {
   const { queue } = useQueue(resolvedSessionId);
   const storeApi = useAppStoreApi();
+  const queryClient = useQueryClient();
 
   const buildFinalMessage = useCallback(
     (message: string, inlineMentions?: ContextFile[], inlineTaskMentions?: TaskMentionData[]) => {
       const allContextFiles = [...contextFiles, ...(inlineMentions || [])];
       const documentContext = buildDocumentContext(activeDocument, planModeEnabled, planComments);
       const contextFilesContext = buildContextFilesContext(allContextFiles, prompts);
+      const snapshots =
+        queryClient.getQueryData<KanbanMultiData>(qk.kanban.multi())?.snapshots ?? {};
       const taskMentionsContext = inlineTaskMentions?.length
-        ? buildTaskMentionsContext(inlineTaskMentions, storeApi.getState())
+        ? buildTaskMentionsContext(inlineTaskMentions, snapshots)
         : "";
       return {
         finalMessage: message.trim() + documentContext + contextFilesContext + taskMentionsContext,
         allContextFiles,
       };
     },
-    [contextFiles, activeDocument, planModeEnabled, planComments, prompts, storeApi],
+    [contextFiles, activeDocument, planModeEnabled, planComments, prompts, queryClient],
   );
 
   const handleSendMessage = useCallback(

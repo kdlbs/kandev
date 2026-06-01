@@ -4,7 +4,7 @@ import { fetchUserSettings, listAgents } from "@/lib/api/domains/settings-api";
 import { listWorkspaces } from "@/lib/api/domains/workspace-api";
 import { SetupWizard } from "./setup-wizard";
 import type { Agent } from "@/lib/types/http";
-import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
+import { toAgentProfileOption } from "@/lib/types/settings";
 
 export default async function SetupPage({
   searchParams,

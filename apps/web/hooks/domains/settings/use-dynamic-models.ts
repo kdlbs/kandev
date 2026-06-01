@@ -1,4 +1,7 @@
-import { useState, useEffect, useCallback } from "react";
+"use client";
+
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { qk } from "@/lib/query/keys";
 import { fetchDynamicModels } from "@/lib/api/domains/settings-api";
 import type {
   CommandEntry,
@@ -19,6 +22,35 @@ type UseAgentCapabilitiesState = {
   refresh: () => Promise<void>;
 };
 
+function buildStaticInitialData(initial: ModelConfig): DynamicModelsResponse {
+  return {
+    models: initial.available_models,
+    modes: initial.available_modes ?? [],
+    commands: initial.available_commands ?? [],
+    current_model_id: initial.current_model_id,
+    current_mode_id: initial.current_mode_id,
+  } as DynamicModelsResponse;
+}
+
+function buildCapabilitiesState(
+  data: DynamicModelsResponse | undefined,
+  initial: ModelConfig,
+  isLoading: boolean,
+  errorMessage: string | null,
+  refresh: () => Promise<void>,
+): UseAgentCapabilitiesState {
+  return {
+    models: data?.models ?? initial.available_models,
+    modes: data?.modes ?? initial.available_modes ?? [],
+    commands: data?.commands ?? initial.available_commands ?? [],
+    currentModelId: data?.current_model_id ?? initial.current_model_id,
+    currentModeId: data?.current_mode_id ?? initial.current_mode_id,
+    isLoading,
+    error: errorMessage,
+    refresh,
+  };
+}
+
 /**
  * useAgentCapabilities fetches the full ACP probe cache for an agent
  * (models, modes, current defaults) and keeps it in sync. Refresh triggers
@@ -31,52 +63,24 @@ export function useAgentCapabilities(
   initial: ModelConfig,
 ): UseAgentCapabilitiesState {
   const supportsDynamicModels = initial.supports_dynamic_models;
-  const [models, setModels] = useState<ModelEntry[]>(initial.available_models);
-  const [modes, setModes] = useState<ModeEntry[]>(initial.available_modes ?? []);
-  const [commands, setCommands] = useState<CommandEntry[]>(initial.available_commands ?? []);
-  const [currentModelId, setCurrentModelId] = useState<string | undefined>(
-    initial.current_model_id,
-  );
-  const [currentModeId, setCurrentModeId] = useState<string | undefined>(initial.current_mode_id);
-  const [isLoading, setIsLoading] = useState(supportsDynamicModels && !!agentName);
-  const [error, setError] = useState<string | null>(null);
+  const qc = useQueryClient();
 
-  const fetchCaps = useCallback(
-    async (forceRefresh: boolean) => {
-      if (!agentName || !supportsDynamicModels) {
-        return;
-      }
-      setIsLoading(true);
-      setError(null);
-      try {
-        const response: DynamicModelsResponse = await fetchDynamicModels(agentName, {
-          refresh: forceRefresh,
-        });
-        if (response.error) {
-          setError(response.error);
-          return;
-        }
-        setModels(response.models ?? []);
-        setModes(response.modes ?? []);
-        setCommands(response.commands ?? []);
-        setCurrentModelId(response.current_model_id);
-        setCurrentModeId(response.current_mode_id);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to fetch capabilities");
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    [agentName, supportsDynamicModels],
-  );
+  const query = useQuery({
+    queryKey: qk.settings.dynamicModels(agentName ?? ""),
+    queryFn: () => fetchDynamicModels(agentName!, { refresh: false }),
+    enabled: !!agentName && !!supportsDynamicModels,
+    initialData: supportsDynamicModels ? undefined : buildStaticInitialData(initial),
+    staleTime: 5 * 60_000,
+  });
 
-  useEffect(() => {
-    if (supportsDynamicModels && agentName) {
-      void fetchCaps(false);
-    }
-  }, [agentName, supportsDynamicModels, fetchCaps]);
+  const refresh = async () => {
+    if (!agentName || !supportsDynamicModels) return;
+    await qc.fetchQuery({
+      queryKey: qk.settings.dynamicModels(agentName),
+      queryFn: () => fetchDynamicModels(agentName, { refresh: true }),
+    });
+  };
 
-  const refresh = useCallback(() => fetchCaps(true), [fetchCaps]);
-
-  return { models, modes, commands, currentModelId, currentModeId, isLoading, error, refresh };
+  const errorMessage = query.data?.error ?? query.error?.message ?? null;
+  return buildCapabilitiesState(query.data, initial, query.isFetching, errorMessage, refresh);
 }

@@ -22,6 +22,9 @@ import { useSessionResumption } from "@/hooks/domains/session/use-session-resump
 import { useSessionAgentctl } from "@/hooks/domains/session/use-session-agentctl";
 import { useTaskFocus } from "@/hooks/domains/session/use-task-focus";
 import { useAppStore } from "@/components/state-provider";
+import { useTaskSessionById } from "@/hooks/domains/session/use-task-session-by-id";
+import { useActiveWorkflowSteps } from "@/hooks/domains/kanban/use-kanban-tasks";
+import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
 import { useEnsureTaskSession } from "@/hooks/domains/session/use-ensure-task-session";
 import { fetchTask } from "@/lib/api";
 import { useTasks } from "@/hooks/use-tasks";
@@ -106,7 +109,7 @@ function buildTaskFromKanban(
 }
 
 function useWorkflowStepsMapped() {
-  const kanbanSteps = useAppStore((state) => state.kanban.steps);
+  const kanbanSteps = useActiveWorkflowSteps();
   return useMemo(
     () =>
       kanbanSteps.map((s) => ({
@@ -125,24 +128,16 @@ function useWorkflowStepsMapped() {
 }
 
 function useSessionPanelState(effectiveSessionId: string | null | undefined) {
-  const storeSessionState = useAppStore((state) =>
-    effectiveSessionId ? (state.taskSessions.items[effectiveSessionId]?.state ?? null) : null,
-  );
-  const isSessionPassthrough = useAppStore((state) =>
-    effectiveSessionId
-      ? state.taskSessions.items[effectiveSessionId]?.is_passthrough === true
-      : false,
-  );
+  const session = useTaskSessionById(effectiveSessionId);
+  const storeSessionState = session?.state ?? null;
+  const isSessionPassthrough = session?.is_passthrough === true;
   // Use the task-level workflow step for the top-bar stepper. Individual sessions
   // may lag behind (e.g. a completed session stays at its old step), but the
   // task's step reflects the current workflow position and stays stable across
   // tab switches within the same task.
-  const sessionWorkflowStepId = useAppStore((state) => {
-    const taskId = state.tasks.activeTaskId;
-    if (!taskId) return null;
-    const task = state.kanban.tasks.find((t: { id: string }) => t.id === taskId);
-    return (task?.workflowStepId as string) ?? null;
-  });
+  const taskIdForStep = useAppStore((state) => state.tasks.activeTaskId);
+  const taskForStep = useTaskById(taskIdForStep);
+  const sessionWorkflowStepId = (taskForStep?.workflowStepId as string | undefined) ?? null;
   const previewOpen = useAppStore((state) =>
     effectiveSessionId ? (state.previewPanel.openBySessionId[effectiveSessionId] ?? false) : false,
   );
@@ -458,13 +453,7 @@ function syncActiveTaskSession(params: {
 
 function useTaskDetails(activeTaskId: string | null, initialTask: Task | null) {
   const [taskDetails, setTaskDetails] = useState<Task | null>(initialTask);
-  const kanbanTask = useAppStore((state) =>
-    activeTaskId
-      ? (state.kanban.tasks.find(
-          (item: KanbanState["tasks"][number]) => item.id === activeTaskId,
-        ) ?? null)
-      : null,
-  );
+  const kanbanTask = useTaskById(activeTaskId);
   const effectiveTaskId = activeTaskId ?? initialTask?.id ?? null;
   const task = useMemo(
     () => resolveEffectiveTask(taskDetails, initialTask, kanbanTask, effectiveTaskId),
@@ -501,12 +490,12 @@ function useTaskPageData(
 
   // Validate that activeSessionId belongs to activeTaskId to prevent showing
   // messages from an unrelated session when navigating to a task without sessions.
-  const validatedActiveSessionId = useAppStore((state) => {
-    const sid = state.tasks.activeSessionId;
-    if (!sid || !activeTaskId) return null;
-    const session = state.taskSessions.items[sid];
-    return session?.task_id === activeTaskId ? sid : null;
-  });
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const activeSessionRecord = useTaskSessionById(activeSessionId);
+  const validatedActiveSessionId =
+    activeSessionId && activeTaskId && activeSessionRecord?.task_id === activeTaskId
+      ? activeSessionId
+      : null;
 
   const { task } = useTaskDetails(activeTaskId, initialTask);
 

@@ -2,8 +2,11 @@
 
 import { use, useState, useEffect, useRef, useCallback, useMemo, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
-import { useOfficeRefetch } from "@/hooks/use-office-refetch";
+import { useTaskSessionsByTaskFromCache } from "@/hooks/domains/session/use-task-session-by-id";
+import { setTaskSessionsForTaskInCache } from "@/lib/query/cache/task-session-cache";
+import { useOfficeWsEffect } from "@/hooks/domains/office/use-office-ws-effect";
 import { TaskOptimisticContextProvider } from "@/hooks/use-optimistic-task-mutation";
 import {
   getTask,
@@ -214,11 +217,15 @@ function useSessionLiveSync({
   onTaskRefetch,
   onCommentsRefetch,
 }: LiveSyncParams) {
-  // Join to a stable string to avoid infinite re-renders from array reference changes.
-  const sessionStatesKey = useAppStore((s) => {
-    const items = s.taskSessions?.items ?? {};
-    return baseSessions.map((sess) => items[sess.id]?.state ?? sess.state).join(",");
-  });
+  // Read live session states from the TQ by-task cache (populated by the
+  // session-state bridge + the by-task fetch), falling back to the snapshot
+  // state. Join to a stable string to avoid infinite re-renders from array
+  // reference changes.
+  const cachedSessions = useTaskSessionsByTaskFromCache(task?.id ?? null);
+  const sessionStatesKey = useMemo(() => {
+    const stateById = new Map<string, string>(cachedSessions.map((s) => [s.id, s.state]));
+    return baseSessions.map((sess) => stateById.get(sess.id) ?? sess.state).join(",");
+  }, [cachedSessions, baseSessions]);
   const sessionStoreStates = useMemo(
     () => (sessionStatesKey ? sessionStatesKey.split(",") : []),
     [sessionStatesKey],
@@ -278,9 +285,17 @@ function useTaskOptimisticHelpers(
       /* swallow — next user action will retry */
     }
   }, [id, setTask, setTimeline]);
-  useOfficeRefetch(`task:${id}`, () => {
-    void refetchTask();
-  });
+  // Refetch the task DTO when the backend broadcasts a change to THIS task.
+  // Mirrors the legacy `task:${id}` refetch trigger: the WS handler fired it
+  // on these three events; here we subscribe to them directly and filter by
+  // task id.
+  useOfficeWsEffect(
+    ["office.task.updated", "office.task.decision_recorded", "office.task.review_requested"],
+    (message) => {
+      const updatedTaskId = (message.payload.task_id ?? message.payload.id) as string | undefined;
+      if (updatedTaskId === id) void refetchTask();
+    },
+  );
 
   const applyTaskPatch = useCallback(
     (patch: Partial<Task>) => {
@@ -304,17 +319,16 @@ function useTaskOptimisticHelpers(
 // ---------------------------------------------------------------------------
 
 function useIssueData(id: string) {
-  const storeIssues = useAppStore((s) => s.office.tasks.items);
-  const setTaskSessionsForTask = useAppStore((s) => s.setTaskSessionsForTask);
-  // Snapshot storeIssues in a ref so the load effect can seed `task` from
-  // the store without re-running on every store update. Re-running the GET
-  // on store changes would race with in-flight optimistic mutations (the
-  // WS-driven refetch in useTaskOptimisticHelpers handles canonical
-  // refresh after a property mutation commits).
-  const storeIssuesRef = useRef(storeIssues);
+  const qc = useQueryClient();
+  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  // Peek into the TQ tasks cache to pre-seed the task while the API call is
+  // in flight. We use a ref so the load effect doesn't re-run on cache changes.
+  const cachedTasksRef = useRef<OfficeTask[] | null>(null);
   useEffect(() => {
-    storeIssuesRef.current = storeIssues;
-  }, [storeIssues]);
+    if (!workspaceId) return;
+    const cached = qc.getQueryData<OfficeTask[]>(["office", workspaceId, "tasks"]);
+    cachedTasksRef.current = cached ?? null;
+  }, [qc, workspaceId]);
 
   const [task, setTask] = useState<Task | null>(null);
   const [comments, setComments] = useState<TaskComment[]>([]);
@@ -328,10 +342,10 @@ function useIssueData(id: string) {
     (detail: IssueDetailData) => {
       if (detail.activity) setActivity(detail.activity);
       if (detail.sessions) setBaseSessions(detail.sessions);
-      if (detail.rawSessions) setTaskSessionsForTask(id, detail.rawSessions);
+      if (detail.rawSessions) setTaskSessionsForTaskInCache(qc, id, detail.rawSessions);
       if (detail.comments) setComments(detail.comments);
     },
-    [id, setTaskSessionsForTask],
+    [id, qc],
   );
 
   useEffect(() => {
@@ -340,7 +354,7 @@ function useIssueData(id: string) {
     async function load() {
       setLoading(true);
       setError(null);
-      const fromStore = storeIssuesRef.current.find((i) => i.id === id);
+      const fromStore = (cachedTasksRef.current ?? []).find((i) => i.id === id);
       if (fromStore && !cancelled) setTask(mapOfficeTaskToTask(fromStore));
 
       try {
@@ -393,8 +407,21 @@ function useIssueData(id: string) {
     [baseSessions, sessionStoreStates],
   );
 
-  // Refetch comments when a new comment is created via office WS event
-  useOfficeRefetch("comments", fetchComments);
+  // Refetch comments for this task when a comment is created OR when a run
+  // for this task is queued/processed (TQ-native replacement for the Zustand
+  // `comments:<taskId>` refetch trigger). A queued/processed run flips the
+  // user-comment run badge (absent → Queued, then claimed → finished/failed/
+  // cancelled), and that lifecycle rides on the comment's `runStatus`, so the
+  // comments list must refetch on these run events too — otherwise the badge
+  // only updates on a page reload. The old `office.run.{queued,processed}`
+  // Zustand handlers fired `comments:<taskId>`; mirror that here.
+  useOfficeWsEffect(
+    ["office.comment.created", "office.run.queued", "office.run.processed"],
+    (message) => {
+      const eventTaskId = message.payload.task_id;
+      if (!eventTaskId || eventTaskId === id) void fetchComments();
+    },
+  );
 
   const { applyTaskPatch, restoreTask } = useTaskOptimisticHelpers(id, setTask, setTimeline);
 

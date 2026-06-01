@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Switch } from "@kandev/ui/switch";
 import { Label } from "@kandev/ui/label";
@@ -10,6 +11,8 @@ import { Button } from "@kandev/ui/button";
 import { toast } from "sonner";
 import { useAppStore } from "@/components/state-provider";
 import { updateAgentProfile } from "@/lib/api/domains/office-api";
+import { officeQueryOptions } from "@/lib/query/query-options/office";
+import { qk } from "@/lib/query/keys";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
 
 type AgentPermissionsTabProps = {
@@ -17,8 +20,9 @@ type AgentPermissionsTabProps = {
 };
 
 export function AgentPermissionsTab({ agent }: AgentPermissionsTabProps) {
-  const meta = useAppStore((s) => s.office.meta);
-  const updateStore = useAppStore((s) => s.updateOfficeAgentProfile);
+  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const qc = useQueryClient();
+  const { data: meta } = useQuery(officeQueryOptions.metaGlobal());
 
   const permDefs = meta?.permissions ?? [];
   const roleDefaults = meta?.permissionDefaults?.[agent.role] ?? {};
@@ -40,7 +44,7 @@ export function AgentPermissionsTab({ agent }: AgentPermissionsTabProps) {
       await updateAgentProfile(agent.id, {
         permissions: perms,
       } as Partial<AgentProfile>);
-      updateStore(agent.id, { permissions: perms });
+      if (workspaceId) void qc.invalidateQueries({ queryKey: qk.office.agents(workspaceId) });
       setDirty(false);
       toast.success("Permissions updated");
     } catch (err) {
@@ -48,7 +52,7 @@ export function AgentPermissionsTab({ agent }: AgentPermissionsTabProps) {
     } finally {
       setSaving(false);
     }
-  }, [agent.id, perms, updateStore]);
+  }, [agent.id, perms, workspaceId, qc]);
 
   const isDefault = (key: string) => {
     const current = perms[key];

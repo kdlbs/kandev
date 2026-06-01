@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@kandev/ui/tabs";
-import { useAppStore } from "@/components/state-provider";
+import { useAgentProfile } from "@/hooks/domains/office/use-office-agents";
 import { agentTint } from "@/app/office/components/agent-avatar";
 import { TaskChat } from "./task-chat";
 import { TaskActivity } from "./task-activity";
@@ -36,9 +36,7 @@ function AgentTabTrigger({ group }: { group: SessionGroup }) {
   // rename flows through automatically and we never fall back to the
   // UUID that lands in `session.agentName` when the session's profile
   // snapshot is empty.
-  const resolved = useAppStore((s) =>
-    agentProfileId ? s.office.agentProfiles.find((a) => a.id === agentProfileId) : undefined,
-  );
+  const resolved = useAgentProfile(agentProfileId);
   const label = resolved?.name || group.representative.agentName || "Agent";
   // Apply the per-agent tint only when the tab is active, so the
   // selected state reads clearly. Inactive tabs inherit shadcn's muted

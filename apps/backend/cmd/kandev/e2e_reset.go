@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -11,9 +12,19 @@ import (
 
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/common/logger"
+	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
+
+// errorField is the JSON key for error responses across every E2E endpoint.
+// Extracted to satisfy goconst; the value is part of the public contract with
+// the FE test harness so don't rename without updating the consumers.
+const errorField = "error"
+
+// errUnknownConnection is the 404 message body for connection-id lookups
+// against the WS gateway's ring buffer. Extracted to satisfy goconst.
+const errUnknownConnection = "unknown connection_id"
 
 // registerE2EResetRoutes registers the E2E test-only endpoints.
 // The endpoints are available when KANDEV_MOCK_AGENT is "true" or "only" (dev/E2E modes).
@@ -22,6 +33,7 @@ func registerE2EResetRoutes(
 	repo *sqliterepo.Repository,
 	taskSvc *taskservice.Service,
 	automationSvc *automation.Service,
+	hub *gateways.Hub,
 	log *logger.Logger,
 ) {
 	mockMode := os.Getenv("KANDEV_MOCK_AGENT")
@@ -35,8 +47,77 @@ func registerE2EResetRoutes(
 	// workflow path (e.g. improve-kandev) without depending on the real
 	// bootstrap endpoint, which clones from GitHub and shells out to gh.
 	api.POST("/hidden-workflow", handleE2ECreateHiddenWorkflow(taskSvc, log))
+	// WS send-log inspector: lets E2E tests diff what the BE sent vs what
+	// the FE received per WS connection. Gaps in the FE-side seq sequence
+	// against this server-of-record indicate a real WS regression rather
+	// than a noisy UI test.
+	api.GET("/ws-sent", handleE2EWsSent(hub))
 
 	log.Info("registered E2E endpoints (test-only)")
+}
+
+// e2eWsSentResponse matches the contract the FE-side accountant consumes.
+// Keep field names stable — changes here require a matching FE update.
+type e2eWsSentResponse struct {
+	ConnectionID string                 `json:"connection_id"`
+	Events       []gateways.WsSentEvent `json:"events"`
+	MaxSeq       int64                  `json:"max_seq"`
+}
+
+func handleE2EWsSent(hub *gateways.Hub) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		connectionID := c.Query("connection_id")
+		if connectionID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{errorField: "connection_id is required"})
+			return
+		}
+		var sinceSeq int64
+		if raw := c.Query("since_seq"); raw != "" {
+			parsed, err := strconv.ParseInt(raw, 10, 64)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{errorField: "since_seq must be an integer"})
+				return
+			}
+			sinceSeq = parsed
+		}
+
+		// Optional per-session filter (Workstream 1): when set, returns only
+		// entries whose stamped SessionID matches, sorted by SessionSeq
+		// ascending. MaxSeq in the response then carries the max SessionSeq
+		// for the filter (the per-session counter, not per-connection). The
+		// FE per-session diff uses this to catch cross-session misrouting
+		// that per-connection seq alone cannot detect.
+		if sessionID := c.Query("session_id"); sessionID != "" {
+			events, maxSessionSeq, ok := hub.GetSentEventsForSession(connectionID, sessionID)
+			if !ok {
+				c.JSON(http.StatusNotFound, gin.H{errorField: errUnknownConnection})
+				return
+			}
+			if events == nil {
+				events = []gateways.WsSentEvent{}
+			}
+			c.JSON(http.StatusOK, e2eWsSentResponse{
+				ConnectionID: connectionID,
+				Events:       events,
+				MaxSeq:       maxSessionSeq,
+			})
+			return
+		}
+
+		events, maxSeq, ok := hub.GetSentEventsFor(connectionID, sinceSeq)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{errorField: errUnknownConnection})
+			return
+		}
+		if events == nil {
+			events = []gateways.WsSentEvent{}
+		}
+		c.JSON(http.StatusOK, e2eWsSentResponse{
+			ConnectionID: connectionID,
+			Events:       events,
+			MaxSeq:       maxSeq,
+		})
+	}
 }
 
 func handleE2EReset(
@@ -96,7 +177,7 @@ func handleE2EReset(
 		tasks, total, err := repo.ListTasksByWorkspace(ctx, workspaceID, "", "", "", 1, resetPageSize, true, true, false, false)
 		if err != nil {
 			log.Error("e2e reset: failed to list tasks", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{errorField: err.Error()})
 			return
 		}
 		if total > resetPageSize {
@@ -116,7 +197,7 @@ func handleE2EReset(
 				// would create orphan rows visible to subsequent tests.
 				log.Error("e2e reset: failed to delete task",
 					zap.String("task_id", t.ID), zap.Error(err))
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				c.JSON(http.StatusInternalServerError, gin.H{errorField: err.Error()})
 				return
 			}
 			deletedTasks++
@@ -125,14 +206,14 @@ func handleE2EReset(
 		deletedWorkflows, err := repo.DeleteWorkflowsByWorkspace(ctx, workspaceID, keepWorkflowIDs)
 		if err != nil {
 			log.Error("e2e reset: failed to delete workflows", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{errorField: err.Error()})
 			return
 		}
 
 		deletedAutomations, autoErr := deleteAutomationsForReset(ctx, automationSvc, workspaceID)
 		if autoErr != nil {
 			log.Error("e2e reset: failed to delete automations", zap.Error(autoErr))
-			c.JSON(http.StatusInternalServerError, gin.H{"error": autoErr.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{errorField: autoErr.Error()})
 			return
 		}
 
@@ -164,7 +245,7 @@ func handleE2ECreateHiddenWorkflow(taskSvc *taskservice.Service, log *logger.Log
 	return func(c *gin.Context) {
 		var body e2eHiddenWorkflowRequest
 		if err := c.ShouldBindJSON(&body); err != nil || body.WorkspaceID == "" || body.Name == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id and name are required"})
+			c.JSON(http.StatusBadRequest, gin.H{errorField: "workspace_id and name are required"})
 			return
 		}
 		workflow, err := taskSvc.CreateWorkflow(c.Request.Context(), &taskservice.CreateWorkflowRequest{
@@ -174,7 +255,7 @@ func handleE2ECreateHiddenWorkflow(taskSvc *taskservice.Service, log *logger.Log
 		})
 		if err != nil {
 			log.Error("e2e: failed to create hidden workflow", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{errorField: err.Error()})
 			return
 		}
 		c.JSON(http.StatusCreated, gin.H{

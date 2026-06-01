@@ -6,7 +6,20 @@ import { backendFixture, type BackendContext } from "./backend";
 import { ApiClient } from "../helpers/api-client";
 import { PrAssetCapture } from "../helpers/pr-asset-capture";
 import { makeGitEnv } from "../helpers/git-helper";
+import {
+  computeBridgeAuditDrops,
+  computeWsDrops,
+  formatDroppedEvents,
+  formatHandlerSideDrops,
+} from "../helpers/ws-account";
 import type { WorkflowStep } from "../../lib/types/http";
+
+// Phase 1 WS event accounting rollout knob. When unset, drops are computed
+// and logged but the test still passes — that's the migration window where
+// we surface issues without painting the whole suite red. Flip to "1" on a
+// per-spec basis (test.use({ ... })) or globally (CI env) to turn drops into
+// hard failures. See `e2e/helpers/ws-account.ts` for the helper contract.
+const WS_ASSERT_ENABLED = process.env.KANDEV_E2E_WS_ASSERT === "1";
 
 export type SeedData = {
   workspaceId: string;
@@ -150,7 +163,7 @@ export const test = backendFixture.extend<
   // Resets user settings to the E2E workspace/workflow before each test so that
   // SSR always resolves to the correct workspace regardless of what commitSettings
   // may have written during previous tests.
-  testPage: async ({ browser, backend, apiClient, seedData }, use) => {
+  testPage: async ({ browser, backend, apiClient, seedData }, use, testInfo) => {
     // Clean up tasks, test-created workflows, and extra agent profiles from
     // previous tests in this worker. Keep the seeded workflow and the seed
     // agent profile so the worker-scoped seedData fixture remains valid.
@@ -180,6 +193,14 @@ export const test = backendFixture.extend<
     }
     await setupPage(page, backend, seedData);
     await use(page);
+    // WS event-drop check — Phase 1 + Phase 2 rollout. Runs after the test
+    // body. Skip when the test already failed (no point adding noise to the
+    // report) and when the page got closed mid-test. The helpers handle
+    // bundles without the FE hooks gracefully (return []).
+    if (testInfo.status === testInfo.expectedStatus && !page.isClosed()) {
+      await runWsAccountCheck(page, apiClient, testInfo.title);
+      await runBridgeAuditCheck(page, testInfo.title);
+    }
     await context.close();
   },
 
@@ -223,6 +244,68 @@ test.beforeEach(async ({ apiClient, seedData }) => {
 });
 
 export { expect } from "@playwright/test";
+
+// Re-run a drop computation until it comes back clean or a cap is hit.
+//
+// The drop diff compares "what the backend stamped onto the wire" against
+// "what the FE has processed". At test teardown the last few events the test
+// triggered can still be in flight — stamped by the backend but not yet
+// drained off the FE's WS receive queue, especially under parallel-worker CPU
+// contention. Those are NOT real drops; they land within a few hundred ms.
+//
+// So we poll: a transient (in-flight) drop clears on a subsequent read; a real
+// drop (event the FE never receives) persists for the whole window and is then
+// reported. This defines the measurement point as "did the FE eventually
+// receive everything" rather than sampling at an arbitrary mid-flight instant.
+// It is NOT a blanket wait — a clean first read (the common case) returns
+// immediately with zero added latency.
+async function settleDrops<T>(fn: () => Promise<T[]>): Promise<T[]> {
+  const TRIES = 12;
+  const INTERVAL_MS = 200;
+  let last = await fn();
+  for (let i = 0; i < TRIES && last.length > 0; i++) {
+    await new Promise((r) => setTimeout(r, INTERVAL_MS));
+    last = await fn();
+  }
+  return last;
+}
+
+async function runWsAccountCheck(
+  page: Page,
+  apiClient: ApiClient,
+  testTitle: string,
+): Promise<void> {
+  try {
+    const drops = await settleDrops(() => computeWsDrops(page, apiClient));
+    if (drops.length === 0) return;
+    const msg = formatDroppedEvents(drops);
+    if (WS_ASSERT_ENABLED) {
+      throw new Error(`WS event accounting found drops:\n${msg}`);
+    }
+    console.warn(`[ws-account] ${testTitle}: ${msg}`);
+  } catch (err) {
+    if (WS_ASSERT_ENABLED) throw err;
+    console.warn(`[ws-account] check failed (non-fatal): ${String(err)}`);
+  }
+}
+
+// Phase 2 second pass: WS receipt without a TQ-cache mutation. Gated by the
+// same WS_ASSERT_ENABLED knob — warn by default during the rollout, throw
+// once the audit hook + per-domain bridges are all in.
+async function runBridgeAuditCheck(page: Page, testTitle: string): Promise<void> {
+  try {
+    const handlerDrops = await settleDrops(() => computeBridgeAuditDrops(page));
+    if (handlerDrops.length === 0) return;
+    const msg = formatHandlerSideDrops(handlerDrops);
+    if (WS_ASSERT_ENABLED) {
+      throw new Error(`WS event accounting (bridge audit) found drops:\n${msg}`);
+    }
+    console.warn(`[ws-account:bridge] ${testTitle}: ${msg}`);
+  } catch (err) {
+    if (WS_ASSERT_ENABLED) throw err;
+    console.warn(`[ws-account:bridge] check failed (non-fatal): ${String(err)}`);
+  }
+}
 
 async function setupPage(page: Page, backend: BackendContext, seedData: SeedData): Promise<void> {
   await page.addInitScript(

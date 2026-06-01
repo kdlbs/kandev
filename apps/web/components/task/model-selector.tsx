@@ -1,10 +1,14 @@
 "use client";
 
 import { memo, useCallback, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
+import { settingsQueryOptions } from "@/lib/query/query-options/settings";
+import { sessionModelsQueryOptions } from "@/lib/query/query-options/session-runtime";
 import { Combobox, type ComboboxOption } from "@/components/combobox";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
+import { useTaskSessionById } from "@/hooks/domains/session/use-task-session-by-id";
 import type { Agent, AgentProfile, AvailableAgent } from "@/lib/types/http";
 import { setSessionModel } from "@/lib/api/domains/session-api";
 import type { SessionModelEntry } from "@/lib/state/slices/session-runtime/types";
@@ -100,16 +104,16 @@ function resolveCurrentModel(
 function useModelSelectorState(sessionId: string | null) {
   useSettingsData(true);
 
-  const settingsAgents = useAppStore((state) => state.settingsAgents.items);
-  const taskSessions = useAppStore((state) => state.taskSessions.items);
+  const { data: settingsAgents = [] } = useQuery({ ...settingsQueryOptions.agents() });
+  const session = useTaskSessionById(sessionId);
   const activeModels = useAppStore((state) => state.activeModel.bySessionId);
   const setActiveModel = useAppStore((state) => state.setActiveModel);
   const { items: availableAgents } = useAvailableAgents();
-  const sessionModelsData = useAppStore((state) =>
-    sessionId ? state.sessionModels.bySessionId[sessionId] : undefined,
-  );
+  const { data: sessionModelsData } = useQuery({
+    ...sessionModelsQueryOptions(sessionId ?? ""),
+    enabled: false,
+  });
 
-  const session = sessionId ? (taskSessions[sessionId] ?? null) : null;
   const snapshotModel = resolveSnapshotModel(session?.agent_profile_snapshot);
   const profileModel = useMemo(
     () => resolveProfileModel(session?.agent_profile_id, settingsAgents as Agent[]),

@@ -19,42 +19,32 @@ import { SidebarDialogs } from "./task-session-sidebar-dialogs";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useWorkspaceSidebarTasks } from "@/hooks/domains/kanban/use-workspace-sidebar-tasks";
+import {
+  useMessagesBySessionFromCache,
+  useStablePrimarySessionIds,
+} from "@/hooks/domains/session/use-messages-by-session-cache";
+import { useGitStatusByEnvFromCache } from "@/hooks/domains/session/use-git-status-cache";
+import { repositorySlug } from "@/lib/repository-slug";
+import {
+  useAllTaskSessionsByTaskFromCache,
+  useTaskSessionById,
+} from "@/hooks/domains/session/use-task-session-by-id";
 import { useEffectiveSidebarView } from "@/hooks/domains/sidebar/use-effective-sidebar-view";
 import { useSidebarTaskPrefs } from "@/hooks/domains/sidebar/use-sidebar-task-prefs";
 import { useTaskActions, useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
-import { repositorySlug } from "@/lib/repository-slug";
+import { useKanbanSnapshotMutator } from "@/hooks/domains/kanban/use-kanban-snapshots";
 import { buildSwitchToSession, selectTaskWithLayout } from "./task-select-helpers";
 import { getSessionInfoForTask } from "@/lib/utils/session-info";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useArchivedTaskState } from "./task-archived-context";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
-import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
+import { useWorkspacePRs, useTaskPRsByTaskId } from "@/hooks/domains/github/use-task-pr";
 import {
   hasPendingClarificationForSession,
   hasPendingPermissionForSession,
 } from "@/lib/utils/pending-clarification";
-
-/**
- * Stabilize a derived array of primary session IDs so the reference only
- * changes when the actual contents change. This prevents the bulk-subscribe
- * effect from tearing down and recreating all subscriptions on every kanban
- * snapshot update.
- */
-function useStablePrimarySessionIds(
-  allTasks: Array<{ primarySessionId?: string | null }>,
-): string[] {
-  const key = useMemo(
-    () =>
-      allTasks
-        .map((t) => t.primarySessionId)
-        .filter((id): id is string => id != null)
-        .join("\0"),
-    [allTasks],
-  );
-  return useMemo(() => (key ? key.split("\0") : []), [key]);
-}
 
 /** Look up git status directly via primarySessionId, bypassing the session list. */
 function getGitStatusForTask(
@@ -96,7 +86,7 @@ type SidebarCtx = {
   envIdBySessionId: Record<string, string>;
   repositorySlugById: Map<string, string | undefined>;
   taskPRsByTaskId: Record<string, TaskPR[] | undefined>;
-  messagesBySession: Record<string, Message[]>;
+  messagesBySession: Record<string, readonly Message[] | undefined>;
   titleById: Map<string, string>;
   workflowNameById: Map<string, string>;
   stepTitleById: Map<string, string>;
@@ -215,19 +205,19 @@ function buildArchivedItem(s: ReturnType<typeof useArchivedTaskState>): SidebarI
 function useSidebarData(workspaceId: string | null) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const sessionsById = useAppStore((state) => state.taskSessions.items);
-  const sessionsByTaskId = useAppStore((state) => state.taskSessionsByTask.itemsByTaskId);
-  const gitStatusByEnvId = useAppStore((state) => state.gitStatus.byEnvironmentId);
+  const activeSession = useTaskSessionById(activeSessionId);
+  const sessionsByTaskId = useAllTaskSessionsByTaskFromCache();
   const envIdBySessionId = useAppStore((state) => state.environmentIdBySessionId);
-  const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
-  const taskPRsByTaskId = useAppStore((state) => state.taskPRs.byTaskId);
-  const messagesBySession = useAppStore((state) => state.messages.bySession);
+  // Observe-only: repos for the active workspace come from the TQ cache
+  // (seeded by SSR / fetched by the board), no per-sidebar fetch.
+  const { repositories: workspaceRepositories } = useRepositories(workspaceId, false);
+  const taskPRsByTaskId = useTaskPRsByTaskId(workspaceId);
   const archivedState = useArchivedTaskState();
 
   const selectedTaskId = useMemo(() => {
-    if (activeSessionId) return sessionsById[activeSessionId]?.task_id ?? activeTaskId;
+    if (activeSessionId) return activeSession?.task_id ?? activeTaskId;
     return activeTaskId;
-  }, [activeSessionId, activeTaskId, sessionsById]);
+  }, [activeSessionId, activeTaskId, activeSession]);
 
   const {
     allTasks,
@@ -237,8 +227,21 @@ function useSidebarData(workspaceId: string | null) {
     isLoading: isLoadingWorkflow,
   } = useWorkspaceSidebarTasks(workspaceId);
 
+  // Stable list of primary session IDs — drives both the bulk-subscribe effect
+  // and the TQ message-cache read below. Derived from kanban tasks (always
+  // available) rather than sessionsByTaskId (loaded on-demand).
+  const primarySessionIds = useStablePrimarySessionIds(allTasks);
+
+  // Pending-permission / pending-clarification indicators read messages from
+  // the TanStack Query cache (canonical post-migration), not the Zustand mirror
+  // which no longer holds fetched history. See use-messages-by-session-cache.
+  const messagesBySession = useMessagesBySessionFromCache(primarySessionIds);
+  // Git indicators read the TQ git cache (qk.session.git) keyed by environment,
+  // resolved per primary session. Observe-only; the bridge populates it.
+  const gitStatusByEnvId = useGitStatusByEnvFromCache(primarySessionIds);
+
   const tasksWithRepositories = useMemo(() => {
-    const repositories = workspaceId ? (repositoriesByWorkspace[workspaceId] ?? []) : [];
+    const repositories = workspaceRepositories;
     const repositorySlugById = new Map(
       repositories.map((repo: Repository) => [repo.id, repositorySlug(repo)]),
     );
@@ -266,11 +269,10 @@ function useSidebarData(workspaceId: string | null) {
     }
     return items;
   }, [
-    repositoriesByWorkspace,
+    workspaceRepositories,
     allTasks,
     allSteps,
     workflows,
-    workspaceId,
     sessionsByTaskId,
     gitStatusByEnvId,
     envIdBySessionId,
@@ -278,10 +280,6 @@ function useSidebarData(workspaceId: string | null) {
     messagesBySession,
     archivedState,
   ]);
-
-  // Stable list of primary session IDs for the bulk-subscribe effect.
-  // Derived from kanban tasks (always available) rather than sessionsByTaskId (loaded on-demand).
-  const primarySessionIds = useStablePrimarySessionIds(allTasks);
 
   return {
     activeTaskId,
@@ -297,13 +295,13 @@ function useSidebarData(workspaceId: string | null) {
 
 type StoreApi = ReturnType<typeof useAppStoreApi>;
 
-function useMoveToStep(store: StoreApi) {
+function useMoveToStep() {
   const { moveTaskById } = useTaskActions();
+  const { getSnapshot, setSnapshot } = useKanbanSnapshotMutator();
 
   return useCallback(
     async (taskId: string, workflowId: string, targetStepId: string) => {
-      const state = store.getState();
-      const snapshot = state.kanbanMulti.snapshots[workflowId];
+      const snapshot = getSnapshot(workflowId);
       if (!snapshot) return;
 
       const originalTask = snapshot.tasks.find((t) => t.id === taskId);
@@ -315,7 +313,7 @@ function useMoveToStep(store: StoreApi) {
       const nextPosition = targetTasks.length;
 
       // Optimistic update
-      state.setWorkflowSnapshot(workflowId, {
+      setSnapshot(workflowId, {
         ...snapshot,
         tasks: snapshot.tasks.map((t) =>
           t.id === taskId ? { ...t, workflowStepId: targetStepId, position: nextPosition } : t,
@@ -330,10 +328,10 @@ function useMoveToStep(store: StoreApi) {
         });
       } catch (error) {
         // Rollback only the moved task, and only if it still has the optimistic values
-        const cur = store.getState().kanbanMulti.snapshots[workflowId];
+        const cur = getSnapshot(workflowId);
         const curTask = cur?.tasks.find((t) => t.id === taskId);
         if (cur && curTask?.workflowStepId === targetStepId && curTask.position === nextPosition) {
-          store.getState().setWorkflowSnapshot(workflowId, {
+          setSnapshot(workflowId, {
             ...cur,
             tasks: cur.tasks.map((t) =>
               t.id === taskId
@@ -349,12 +347,13 @@ function useMoveToStep(store: StoreApi) {
         console.error("Failed to move task:", error);
       }
     },
-    [store, moveTaskById],
+    [getSnapshot, setSnapshot, moveTaskById],
   );
 }
 
-function useArchiveActions(store: StoreApi) {
+function useArchiveActions() {
   const archiveAndSwitch = useArchiveAndSwitchTask({ useLayoutSwitch: true });
+  const { getSnapshots } = useKanbanSnapshotMutator();
   const [archivingTask, setArchivingTask] = useState<{
     id: string;
     title: string;
@@ -364,15 +363,14 @@ function useArchiveActions(store: StoreApi) {
 
   const handleArchiveTask = useCallback(
     (taskId: string) => {
-      const state = store.getState();
-      const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
+      const task = findTaskInSnapshots(taskId, getSnapshots());
       setArchivingTask({
         id: taskId,
         title: task?.title ?? "this task",
         executorType: task?.primaryExecutorType,
       });
     },
-    [store],
+    [getSnapshots],
   );
 
   const handleArchiveConfirm = useCallback(
@@ -395,10 +393,11 @@ function useArchiveActions(store: StoreApi) {
 }
 
 function useDeleteActions(
-  store: StoreApi,
   removeTaskFromBoard: ReturnType<typeof useTaskRemoval>["removeTaskFromBoard"],
 ) {
+  const store = useAppStoreApi();
   const { deleteTaskById } = useTaskActions();
+  const { getSnapshots } = useKanbanSnapshotMutator();
   const [deletingTask, setDeletingTask] = useState<{
     id: string;
     title: string;
@@ -408,15 +407,14 @@ function useDeleteActions(
 
   const handleDeleteTask = useCallback(
     (taskId: string) => {
-      const state = store.getState();
-      const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
+      const task = findTaskInSnapshots(taskId, getSnapshots());
       setDeletingTask({
         id: taskId,
         title: task?.title ?? "this task",
         executorType: task?.primaryExecutorType,
       });
     },
-    [store],
+    [getSnapshots],
   );
 
   const handleDeleteConfirm = useCallback(
@@ -454,6 +452,7 @@ function useDeleteActions(
 function useSidebarActions(store: StoreApi) {
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
+  const { getSnapshots } = useKanbanSnapshotMutator();
   const [preparingTaskId, setPreparingTaskId] = useState<string | null>(null);
   const { renameTaskById } = useTaskActions();
   const { removeTaskFromBoard, loadTaskSessionsForTask } = useTaskRemoval({
@@ -468,8 +467,7 @@ function useSidebarActions(store: StoreApi) {
 
   const handleSelectTask = useCallback(
     (taskId: string) => {
-      const state = store.getState();
-      const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
+      const task = findTaskInSnapshots(taskId, getSnapshots());
       selectTaskWithLayout({
         taskId,
         task: task ?? undefined,
@@ -480,11 +478,11 @@ function useSidebarActions(store: StoreApi) {
         setPreparingTaskId,
       });
     },
-    [loadTaskSessionsForTask, switchToSession, setActiveTask, store],
+    [getSnapshots, loadTaskSessionsForTask, switchToSession, setActiveTask, store],
   );
 
-  const archiveActions = useArchiveActions(store);
-  const deleteActions = useDeleteActions(store, removeTaskFromBoard);
+  const archiveActions = useArchiveActions();
+  const deleteActions = useDeleteActions(removeTaskFromBoard);
 
   const [renamingTask, setRenamingTask] = useState<{ id: string; title: string } | null>(null);
 
@@ -505,7 +503,7 @@ function useSidebarActions(store: StoreApi) {
     [renamingTask, renameTaskById],
   );
 
-  const handleMoveToStep = useMoveToStep(store);
+  const handleMoveToStep = useMoveToStep();
 
   return {
     preparingTaskId,

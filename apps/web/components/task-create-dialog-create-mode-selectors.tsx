@@ -1,6 +1,6 @@
 "use client";
 
-import type { AgentProfileOption } from "@/lib/state/slices";
+import type { AgentProfileOption } from "@/lib/types/settings";
 import type { DialogFormState } from "@/components/task-create-dialog-types";
 import { CreateEditSelectors } from "@/components/task-create-dialog-form-body";
 import { AgentSelector, ExecutorProfileSelector } from "@/components/task-create-dialog-selectors";

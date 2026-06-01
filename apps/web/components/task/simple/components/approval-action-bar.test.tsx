@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { StateProvider } from "@/components/state-provider";
 import { TaskOptimisticContextProvider } from "@/hooks/use-optimistic-task-mutation";
+import { createTestQueryClient } from "@/test-utils/render-with-query";
 import { ApprovalActionBar } from "./approval-action-bar";
 import type { Task, TaskDecision } from "@/app/office/tasks/[id]/types";
 
@@ -64,9 +66,11 @@ function Wrapper({ children, task }: { children: ReactNode; task: Task }) {
     restore: vi.fn(),
   };
   return (
-    <StateProvider>
-      <TaskOptimisticContextProvider value={ctx}>{children}</TaskOptimisticContextProvider>
-    </StateProvider>
+    <QueryClientProvider client={createTestQueryClient()}>
+      <StateProvider>
+        <TaskOptimisticContextProvider value={ctx}>{children}</TaskOptimisticContextProvider>
+      </StateProvider>
+    </QueryClientProvider>
   );
 }
 

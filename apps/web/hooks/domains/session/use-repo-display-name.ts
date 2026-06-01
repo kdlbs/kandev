@@ -1,7 +1,9 @@
 "use client";
 
 import { useMemo } from "react";
-import { useAppStore } from "@/components/state-provider";
+import { useAllKanbanTasks } from "@/hooks/domains/kanban/use-kanban-tasks";
+import { useTaskSessionById } from "@/hooks/domains/session/use-task-session-by-id";
+import { useAllRepositories } from "@/hooks/domains/workspace/use-all-repositories";
 
 /**
  * Resolves the workspace's primary single-repo name from the active task and
@@ -54,10 +56,14 @@ function resolvePrimaryRepoName(
  * — consistent visual language across both sections.
  */
 export function useRepoDisplayName(sessionId: string | null | undefined) {
-  const session = useAppStore((state) => (sessionId ? state.taskSessions.items[sessionId] : null));
+  const session = useTaskSessionById(sessionId);
   const taskId = session?.task_id ?? null;
-  const tasks = useAppStore((state) => state.kanban.tasks);
-  const reposByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
+  const tasks = useAllKanbanTasks();
+  // Observe cached repo lists across workspaces (no fetch — populated by SSR
+  // seed + the task-create dialog / kanban data hooks).
+  const { byWorkspaceId: reposByWorkspace } = useAllRepositories(false);
+  // Resolve to a single primitive (or undefined) so the returned closure is
+  // memoized cleanly without React Compiler bailing on a branched return.
   const primaryName = useMemo(
     () =>
       resolvePrimaryRepoName(

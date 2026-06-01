@@ -9,7 +9,7 @@ import {
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
-import { useAppStore } from "@/components/state-provider";
+import { useAgentName } from "@/hooks/domains/office/use-office-agents";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { formatRelativeTime } from "@/lib/utils";
 import { AgentAvatar } from "@/app/office/components/agent-avatar";
@@ -29,11 +29,7 @@ type RunErrorEntryProps = {
  * request so the recovery semantics are unchanged.
  */
 export function RunErrorEntry({ taskId, error }: RunErrorEntryProps) {
-  const agentName = useAppStore((s) =>
-    error.agentProfileId
-      ? (s.office.agentProfiles.find((a) => a.id === error.agentProfileId)?.name ?? "Agent")
-      : "Agent",
-  );
+  const agentName = useAgentName(error.agentProfileId) ?? "Agent";
   const [showDetails, setShowDetails] = useState(false);
 
   const handleRecover = async (action: "resume" | "fresh_start") => {

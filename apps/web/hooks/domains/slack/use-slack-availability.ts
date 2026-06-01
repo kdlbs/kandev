@@ -21,11 +21,12 @@ async function fetchSlackStatus(): Promise<IntegrationConfigStatus | null> {
 }
 
 export function useSlackAuthed(): boolean {
-  return useIntegrationAuthed(fetchSlackStatus);
+  return useIntegrationAuthed("slack", fetchSlackStatus);
 }
 
 export function useSlackAvailable(): boolean {
   return useIntegrationAvailable({
+    kind: "slack",
     useEnabled: useSlackEnabled,
     fetchConfig: fetchSlackStatus,
   });

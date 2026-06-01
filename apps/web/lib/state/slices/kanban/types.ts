@@ -114,17 +114,19 @@ export type TaskState = {
   lastSessionByTaskId: Record<string, string>;
 };
 
+/**
+ * Client-only slice of the kanban domain. The server-owned `kanban` (active
+ * single-workflow snapshot), `kanbanMulti` (all snapshots) and `workflows.items`
+ * (workflow list) now live in the TanStack Query cache (`qk.kanban.*`); only the
+ * active-workflow selection and active task/session selection remain here.
+ */
 export type KanbanSliceState = {
-  kanban: KanbanState;
-  kanbanMulti: KanbanMultiState;
-  workflows: WorkflowsState;
+  workflows: { activeId: string | null };
   tasks: TaskState;
 };
 
 export type KanbanSliceActions = {
   setActiveWorkflow: (workflowId: string | null) => void;
-  setWorkflows: (workflows: WorkflowsState["items"]) => void;
-  reorderWorkflowItems: (workflowIds: string[]) => void;
   setActiveTask: (taskId: string) => void;
   setActiveSession: (taskId: string, sessionId: string) => void;
   // setActiveSessionAuto is the same as setActiveSession but doesn't update
@@ -132,11 +134,6 @@ export type KanbanSliceActions = {
   // switches without overriding a user's manual selection.
   setActiveSessionAuto: (taskId: string, sessionId: string) => void;
   clearActiveSession: () => void;
-  setWorkflowSnapshot: (workflowId: string, data: WorkflowSnapshotData) => void;
-  setKanbanMultiLoading: (loading: boolean) => void;
-  clearKanbanMulti: () => void;
-  updateMultiTask: (workflowId: string, task: KanbanState["tasks"][number]) => void;
-  removeMultiTask: (workflowId: string, taskId: string) => void;
 };
 
 export type KanbanSlice = KanbanSliceState & KanbanSliceActions;

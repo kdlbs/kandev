@@ -2,6 +2,7 @@
 
 import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { IconCheck, IconChevronDown } from "@tabler/icons-react";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@kandev/ui/button";
 import {
   DropdownMenu,
@@ -11,9 +12,11 @@ import {
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { useAppStore } from "@/components/state-provider";
+import { settingsQueryOptions } from "@/lib/query/query-options/settings";
+import { sessionModeQueryOptions } from "@/lib/query/query-options/session-runtime";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
+import { useTaskSessionById } from "@/hooks/domains/session/use-task-session-by-id";
 import { setSessionMode } from "@/lib/api/domains/session-api";
 import type { Agent, AgentProfile, AvailableAgent } from "@/lib/types/http";
 
@@ -92,14 +95,14 @@ function buildModeState(
 function useModeSelectorState(sessionId: string | null) {
   useSettingsData(true);
 
-  const liveModeState = useAppStore((state) =>
-    sessionId ? state.sessionMode.bySessionId[sessionId] : undefined,
-  );
-  const settingsAgents = useAppStore((state) => state.settingsAgents.items);
-  const taskSessions = useAppStore((state) => state.taskSessions.items);
+  const { data: liveModeState } = useQuery({
+    ...sessionModeQueryOptions(sessionId ?? ""),
+    enabled: false,
+  });
+  const { data: settingsAgents = [] } = useQuery({ ...settingsQueryOptions.agents() });
+  const session = useTaskSessionById(sessionId);
   const { items: availableAgents } = useAvailableAgents();
 
-  const session = sessionId ? (taskSessions[sessionId] ?? null) : null;
   const snapshotMode = resolveSnapshotMode(session?.agent_profile_snapshot);
   const profileMode = useMemo(
     () => resolveProfileMode(session?.agent_profile_id, settingsAgents as Agent[]),

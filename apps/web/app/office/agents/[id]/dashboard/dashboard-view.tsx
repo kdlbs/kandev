@@ -1,8 +1,7 @@
 "use client";
 
-import { useCallback, useState } from "react";
-import { useOfficeRefetch } from "@/hooks/use-office-refetch";
-import { getAgentSummary, type AgentSummaryResponse } from "@/lib/api/domains/office-extended-api";
+import { useAgentSummary } from "@/hooks/domains/office/use-agent-summary";
+import type { AgentSummaryResponse } from "@/lib/api/domains/office-runs-api";
 import { LatestRunCard } from "./components/latest-run-card";
 import { RunActivityChart } from "./components/run-activity-chart";
 import { TasksByPriorityChart } from "./components/tasks-by-priority-chart";
@@ -19,10 +18,11 @@ type Props = {
 };
 
 /**
- * Client-side shell for the agent dashboard. Holds the SSR snapshot
- * in `useState` and refetches via WebSocket-driven triggers (the
- * `agents` and `tasks` channels both impact the dashboard) — matching
- * the project's reactive-only convention.
+ * Client-side shell for the agent dashboard. The summary is read from
+ * TanStack Query (seeded from the SSR snapshot via `initialData`) and
+ * stays reactive via `useAgentSummary`, which subscribes to the office
+ * WS events that affect the dashboard and invalidates its own key —
+ * matching the project's reactive-only convention.
  *
  * The chart components are pure SSR-safe presentational pieces; this
  * shell exists so a future "Refresh" / "Date range" UI has somewhere
@@ -30,23 +30,7 @@ type Props = {
  * Server Component and therefore can't hold state).
  */
 export function DashboardView({ agentId, initial, days }: Props) {
-  const [summary, setSummary] = useState<AgentSummaryResponse>(initial);
-
-  const refresh = useCallback(async () => {
-    try {
-      const next = await getAgentSummary(agentId, days);
-      setSummary(next);
-    } catch {
-      // Silent; the snapshot stays useful even if the refetch fails.
-      // A stale-data badge could surface this in a follow-up.
-    }
-  }, [agentId, days]);
-
-  // The dashboard derives from runs, activity_log, cost_events, and
-  // tasks — every WS event in those domains can change the values, so
-  // we subscribe to both `agents` and `tasks` triggers.
-  useOfficeRefetch("agents", refresh);
-  useOfficeRefetch("tasks", refresh);
+  const { summary } = useAgentSummary(agentId, initial, days);
 
   return (
     <div className="space-y-6" data-testid="agent-dashboard-view">

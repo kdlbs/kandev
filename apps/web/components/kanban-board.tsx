@@ -4,7 +4,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Task } from "./kanban-card";
 import { TaskCreateDialog } from "./task-create-dialog";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useAppStore } from "@/components/state-provider";
+import {
+  useKanbanMultiSnapshots,
+  useWorkflowItems,
+} from "@/hooks/domains/kanban/use-kanban-snapshots";
 import type { Task as BackendTask } from "@/lib/types/http";
 import type { WorkflowsState } from "@/lib/state/slices";
 import { type MoveTaskError } from "@/hooks/use-drag-and-drop";
@@ -15,6 +19,7 @@ import { MobileSearchBar } from "./kanban/mobile-search-bar";
 import { MobileTaskSheet } from "./kanban/mobile-task-sheet";
 import { TaskMultiSelectToolbar } from "./kanban/task-multi-select-toolbar";
 import { useKanbanData, useKanbanActions, useKanbanNavigation } from "@/hooks/domains/kanban";
+import { useUserSettings } from "@/hooks/domains/settings/use-user-settings";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 import { resolveDesiredWorkflowId } from "@/lib/kanban/resolve-workflow";
 import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
@@ -36,21 +41,17 @@ import {
 import { IconAlertTriangle } from "@tabler/icons-react";
 
 function useWorkflowSelection({
-  store,
   userSettings,
   workspaceState,
   workflowsState,
   commitSettings,
   setActiveWorkflow,
-  setWorkflows,
 }: {
-  store: ReturnType<typeof useAppStoreApi>;
   userSettings: { workflowId?: string | null };
   workspaceState: { activeId: string | null };
   workflowsState: WorkflowsState;
   commitSettings: unknown;
   setActiveWorkflow: (id: string | null) => void;
-  setWorkflows: (workflows: WorkflowsState["items"]) => void;
 }) {
   const userSettingsRef = useRef(userSettings);
   useEffect(() => {
@@ -60,10 +61,7 @@ function useWorkflowSelection({
   useEffect(() => {
     const workspaceId = workspaceState.activeId;
     if (!workspaceId) {
-      if (workflowsState.items.length || workflowsState.activeId) {
-        setWorkflows([]);
-        setActiveWorkflow(null);
-      }
+      if (workflowsState.activeId) setActiveWorkflow(null);
       return;
     }
     const settings = userSettingsRef.current;
@@ -77,18 +75,11 @@ function useWorkflowSelection({
       workspaceWorkflows,
     });
     setActiveWorkflow(desiredWorkflowId);
-    if (!desiredWorkflowId) {
-      store.getState().hydrate({
-        kanban: { workflowId: null, steps: [], tasks: [] },
-      });
-    }
   }, [
     workflowsState.activeId,
     workflowsState.items,
     commitSettings,
     setActiveWorkflow,
-    setWorkflows,
-    store,
     workspaceState.activeId,
   ]);
 }
@@ -116,21 +107,21 @@ function useMoveErrorState(router: ReturnType<typeof useRouter>) {
 }
 
 function useKanbanBoardStore() {
-  const store = useAppStoreApi();
-  const kanbanViewMode = useAppStore((state) => state.userSettings.kanbanViewMode);
-  const kanban = useAppStore((state) => state.kanban);
+  const kanbanViewMode = useUserSettings().data?.kanbanViewMode ?? null;
   const workspaceState = useAppStore((state) => state.workspaces);
-  const workflowsState = useAppStore((state) => state.workflows);
+  const activeWorkflowId = useAppStore((state) => state.workflows.activeId);
+  const workflowItems = useWorkflowItems(workspaceState.activeId);
+  const workflowsState = useMemo<WorkflowsState>(
+    () => ({ items: workflowItems, activeId: activeWorkflowId }),
+    [workflowItems, activeWorkflowId],
+  );
   const setActiveWorkflow = useAppStore((state) => state.setActiveWorkflow);
-  const setWorkflows = useAppStore((state) => state.setWorkflows);
   return {
-    store,
     kanbanViewMode,
-    kanban,
+    workflowId: activeWorkflowId,
     workspaceState,
     workflowsState,
     setActiveWorkflow,
-    setWorkflows,
   };
 }
 
@@ -235,15 +226,8 @@ function useKanbanBoardSetup(
   const router = useRouter();
   const { isMobile } = useResponsiveBreakpoint();
   const [searchQuery, setSearchQuery] = useState("");
-  const {
-    store,
-    kanbanViewMode,
-    kanban,
-    workspaceState,
-    workflowsState,
-    setActiveWorkflow,
-    setWorkflows,
-  } = useKanbanBoardStore();
+  const { kanbanViewMode, workflowId, workspaceState, workflowsState, setActiveWorkflow } =
+    useKanbanBoardStore();
 
   useAllWorkflowSnapshots(workspaceState.activeId);
   useWorkspacePRs(workspaceState.activeId);
@@ -266,9 +250,9 @@ function useKanbanBoardSetup(
     [onBeforeEdit, handleEdit],
   );
 
-  const multiSelect = useTaskMultiSelect(kanban.workflowId);
+  const multiSelect = useTaskMultiSelect(workflowId);
   const { isMultiSelectMode, toggleSelect } = multiSelect;
-  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
+  const { snapshots } = useKanbanMultiSnapshots({ enabled: false });
   const { isMixedWorkflowSelection, multiSelectSteps } = useMultiSelectDerived(
     multiSelect.selectedIds,
     snapshots,
@@ -295,19 +279,17 @@ function useKanbanBoardSetup(
   const automation = useMoveErrorState(router);
 
   useWorkflowSelection({
-    store,
     userSettings: hooks.userSettings,
     workspaceState,
     workflowsState,
     commitSettings: hooks.commitSettings,
     setActiveWorkflow,
-    setWorkflows,
   });
 
   return {
     isMobile,
     kanbanViewMode,
-    kanban,
+    workflowId,
     workspaceState,
     workflowsState,
     searchQuery,
@@ -360,7 +342,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask, onBeforeEdit }: KanbanB
         isDialogOpen={s.isDialogOpen}
         handleDialogOpenChange={s.handleDialogOpenChange}
         workspaceId={s.workspaceState.activeId}
-        workflowId={s.kanban.workflowId}
+        workflowId={s.workflowId}
         defaultStepId={s.activeSteps[0]?.id ?? null}
         stepOptions={stepOptions}
         editingTask={s.editingTask}

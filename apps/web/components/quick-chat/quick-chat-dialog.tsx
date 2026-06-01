@@ -7,10 +7,12 @@ import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { IconX, IconRocket } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
+import { useAgentProfiles } from "@/hooks/domains/settings/use-settings-reads";
 import { useToast } from "@/components/toast-provider";
+import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { startQuickChat } from "@/lib/api/domains/workspace-api";
 import type { Repository } from "@/lib/types/http";
-import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
+import type { AgentProfileOption } from "@/lib/types/settings";
 
 type QuickChatPickerDialogProps = {
   open: boolean;
@@ -29,8 +31,8 @@ type FormState = {
 
 const NONE_VALUE = "__none__";
 
-function QuickChatFormBody({ state }: { state: FormState }) {
-  const { selectedRepoId, setSelectedRepoId, selectedAgentId, setSelectedAgentId } = state;
+function QuickChatFormBody({ form }: { form: FormState }) {
+  const { selectedRepoId, setSelectedRepoId, selectedAgentId, setSelectedAgentId } = form;
   return (
     <div className="p-4 space-y-4">
       <p className="text-sm text-muted-foreground">
@@ -47,7 +49,7 @@ function QuickChatFormBody({ state }: { state: FormState }) {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={NONE_VALUE}>No repository</SelectItem>
-            {state.repositories.map((repo) => (
+            {form.repositories.map((repo) => (
               <SelectItem key={repo.id} value={repo.id}>
                 {repo.name}
               </SelectItem>
@@ -66,7 +68,7 @@ function QuickChatFormBody({ state }: { state: FormState }) {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={NONE_VALUE}>Use workspace default</SelectItem>
-            {state.agentProfiles.map((profile) => (
+            {form.agentProfiles.map((profile) => (
               <SelectItem key={profile.id} value={profile.id}>
                 {profile.label}
               </SelectItem>
@@ -89,8 +91,8 @@ export const QuickChatPickerDialog = memo(function QuickChatPickerDialog({
   const [isStarting, setIsStarting] = useState(false);
   const [selectedRepoId, setSelectedRepoId] = useState<string>("");
   const [selectedAgentId, setSelectedAgentId] = useState<string>("");
-  const repositories = useAppStore((s) => s.repositories.itemsByWorkspaceId?.[workspaceId] ?? []);
-  const agentProfiles = useAppStore((s) => s.agentProfiles.items ?? []);
+  const { repositories } = useRepositories(workspaceId, open);
+  const agentProfiles = useAgentProfiles();
 
   const handleStart = useCallback(async () => {
     if (isStarting) return;
@@ -150,7 +152,7 @@ export const QuickChatPickerDialog = memo(function QuickChatPickerDialog({
             <IconX className="h-4 w-4" />
           </Button>
         </div>
-        <QuickChatFormBody state={formState} />
+        <QuickChatFormBody form={formState} />
         <div className="flex justify-end gap-2 px-4 py-3 border-t bg-muted/30">
           <Button variant="outline" onClick={() => onOpenChange(false)} className="cursor-pointer">
             Cancel

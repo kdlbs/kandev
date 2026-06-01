@@ -1,19 +1,24 @@
 import { useMemo } from "react";
-import { useWorkflowSnapshot } from "@/hooks/use-workflow-snapshot";
-import { useAppStore } from "@/components/state-provider";
+import {
+  useEnsureWorkflowSnapshot,
+  useKanbanMultiSnapshots,
+} from "@/hooks/domains/kanban/use-kanban-snapshots";
 
 export function useTasks(workflowId: string | null) {
-  useWorkflowSnapshot(workflowId);
+  // Ensure the active task's workflow snapshot is in the TanStack Query
+  // `qk.kanban.multi()` cache (fetches just this workflow if absent). On the home
+  // page `useAllWorkflowSnapshots` already populates every workflow.
+  const { isLoading: ensureLoading } = useEnsureWorkflowSnapshot(workflowId);
 
-  const kanbanWorkflowId = useAppStore((state) => state.kanban.workflowId);
-  const kanbanIsLoading = useAppStore((state) => state.kanban.isLoading ?? false);
-  const tasks = useAppStore((state) => state.kanban.tasks);
+  // Observe the multi cache without triggering the full workspace fetch — the
+  // single-workflow ensure above (or the home page) owns the fetch.
+  const { snapshots } = useKanbanMultiSnapshots({ enabled: false });
 
-  const matchesActive = !!workflowId && kanbanWorkflowId === workflowId;
-  const workflowTasks = useMemo(() => (matchesActive ? tasks : []), [matchesActive, tasks]);
+  const tasks = useMemo(
+    () => (workflowId ? (snapshots[workflowId]?.tasks ?? []) : []),
+    [workflowId, snapshots],
+  );
+  const isLoading = !!workflowId && ensureLoading && !snapshots[workflowId];
 
-  // Loading only while a snapshot fetch is in-flight; settles to false on success/error to avoid an infinite skeleton.
-  const isLoading = !!workflowId && kanbanIsLoading;
-
-  return { tasks: workflowTasks, isLoading };
+  return { tasks, isLoading };
 }

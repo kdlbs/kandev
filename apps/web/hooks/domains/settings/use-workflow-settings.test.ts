@@ -12,20 +12,22 @@ type StoreWorkflow = {
   name: string;
   description?: string | null;
   hidden?: boolean;
+  style?: "kanban" | "office" | "custom";
 };
 
-type MockState = { workflows: { items: StoreWorkflow[] } };
+let mockWorkflowItems: StoreWorkflow[] = [];
 
-let mockState: MockState = { workflows: { items: [] } };
-
-vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (s: MockState) => unknown) => selector(mockState),
+// The workflows list now lives in the TanStack Query cache, read via
+// useWorkflowItems. Mock it to return the simulated workspace-scoped list (the
+// hook still applies its own workspace + hidden filtering on top).
+vi.mock("@/hooks/domains/kanban/use-kanban-snapshots", () => ({
+  useWorkflowItems: () => mockWorkflowItems,
 }));
 
 import { useWorkflowSettings } from "./use-workflow-settings";
 
 function setStore(items: StoreWorkflow[]) {
-  mockState = { workflows: { items } };
+  mockWorkflowItems = items;
 }
 
 const wf = (id: string, wsId: string, name: string): Workflow => ({
@@ -181,5 +183,54 @@ describe("useWorkflowSettings", () => {
 
     // Once scoped to B, A's workflow is dropped
     expect(result.current.workflowItems.map((w) => w.id)).toEqual(["wf-b1"]);
+  });
+});
+
+describe("useWorkflowSettings office-style exclusion", () => {
+  beforeEach(() => {
+    setStore([]);
+  });
+
+  it("excludes office-style workflows from the settings list", () => {
+    // Office workflows are managed from the Office surface and are not
+    // importable/exportable here (ADR-0004). The WS bridge populates the
+    // workflows-list cache with office entries too, so the settings hook must
+    // filter them out — otherwise Export All would enumerate them (issue #1109).
+    const OFFICE: StoreWorkflow = {
+      id: "wf-office",
+      workspaceId: "ws-b",
+      name: "Office Only Workflow",
+      style: "office",
+    };
+    setStore([STORE_B1, OFFICE]);
+
+    const { result } = renderHook(() => useWorkflowSettings([], "ws-b"));
+
+    expect(result.current.workflowItems.map((w) => w.id)).toEqual(["wf-b1"]);
+    expect(result.current.savedWorkflowItems.map((w) => w.id)).toEqual(["wf-b1"]);
+  });
+
+  it("drops a workflow from the settings list once it becomes office-style", () => {
+    const initial = [wf("wf-b1", "ws-b", NAME_B1)];
+    const kanbanB1: StoreWorkflow = { ...STORE_B1, style: "kanban" };
+    const officeB1: StoreWorkflow = { ...STORE_B1, style: "office" };
+    setStore([kanbanB1]);
+
+    const { result, rerender } = renderHook(
+      ({ store }: { store: StoreWorkflow[] }) => {
+        setStore(store);
+        return useWorkflowSettings(initial, "ws-b");
+      },
+      { initialProps: { store: [kanbanB1] } },
+    );
+
+    expect(result.current.workflowItems.map((w) => w.id)).toEqual(["wf-b1"]);
+
+    // Backend reclassifies the workflow as office-style via a workflow.updated WS event.
+    act(() => {
+      rerender({ store: [officeB1] });
+    });
+
+    expect(result.current.workflowItems.map((w) => w.id)).toEqual([]);
   });
 });

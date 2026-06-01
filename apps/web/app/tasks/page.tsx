@@ -18,7 +18,7 @@ import type {
   Workspace,
   UserSettingsResponse,
 } from "@/lib/types/http";
-import type { AppState } from "@/lib/state/store";
+import type { SsrInitialState } from "@/lib/ssr/initial-state";
 
 type WorkspaceData = {
   workflows: Workflow[];
@@ -115,7 +115,7 @@ export default async function TasksPage({
 
   const mappedUserSettings = mapUserSettingsResponse(userSettingsResponse);
 
-  const initialState: Partial<AppState> = {
+  const initialState: SsrInitialState = {
     workspaces: {
       items: workspaces,
       activeId: workspaceId ?? null,

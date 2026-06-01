@@ -1,5 +1,8 @@
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { createTestQueryClient } from "@/test-utils/render-with-query";
+import { qk } from "@/lib/query/keys";
 import type { Message } from "@/lib/types/http";
 import type { PrepareStepInfo } from "@/lib/state/slices/session-runtime/types";
 
@@ -8,38 +11,33 @@ let mockPrepareStatus: "preparing" | "completed" | "failed" = "preparing";
 let mockSessionState: string = "STARTING";
 let mockMessages: Message[] = [];
 
-vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
-    selector({
-      prepareProgress: {
-        bySessionId: {
-          "session-1": {
-            sessionId: "session-1",
-            status: mockPrepareStatus,
-            steps: mockSteps,
-          },
-        },
-      },
-      taskSessions: {
-        items: {
-          "session-1": {
-            id: "session-1",
-            state: mockSessionState,
-          },
-        },
-      },
-      sessionAgentctl: {
-        itemsBySessionId: {},
-      },
-      messages: {
-        bySession: {
-          "session-1": mockMessages,
-        },
-      },
-    }),
-}));
-
 import { PrepareProgress } from "./prepare-progress";
+
+// prepare-progress + the TaskSession + setup-script messages all come from the
+// TanStack Query cache now (the component reads via useQuery), so seed those
+// queries and wrap in a QueryClientProvider.
+function renderPrepare() {
+  const client = createTestQueryClient();
+  client.setQueryData(qk.session.prepareProgress("session-1"), {
+    sessionId: "session-1",
+    status: mockPrepareStatus,
+    steps: mockSteps,
+  });
+  client.setQueryData(qk.taskSession.byId("session-1"), {
+    id: "session-1",
+    state: mockSessionState,
+  });
+  client.setQueryData(qk.session.messages("session-1"), {
+    messages: mockMessages,
+    hasMore: false,
+    oldestCursor: null,
+  });
+  return render(
+    <QueryClientProvider client={client}>
+      <PrepareProgress sessionId="session-1" />
+    </QueryClientProvider>,
+  );
+}
 
 describe("PrepareProgress", () => {
   afterEach(() => {
@@ -61,7 +59,7 @@ describe("PrepareProgress", () => {
       },
     ];
 
-    render(<PrepareProgress sessionId="session-1" />);
+    renderPrepare();
 
     expect(screen.queryByText("Uploading credentials")).toBeNull();
     expect(screen.getByText("Waiting for agent controller")).toBeTruthy();
@@ -81,7 +79,7 @@ describe("PrepareProgress", () => {
       },
     ];
 
-    render(<PrepareProgress sessionId="session-1" />);
+    renderPrepare();
 
     expect(screen.getByText("Reconnecting cloud sandbox")).toBeTruthy();
     expect(
@@ -105,7 +103,7 @@ describe("PrepareProgress", () => {
       { name: "Waiting for agent controller", status: "completed" },
     ];
 
-    render(<PrepareProgress sessionId="session-1" />);
+    renderPrepare();
 
     expect(screen.getByText("Environment prepared on a fresh sandbox")).toBeTruthy();
     expect(screen.queryByText("Environment prepared with warnings")).toBeNull();
@@ -122,7 +120,7 @@ describe("PrepareProgress", () => {
       },
     ];
 
-    render(<PrepareProgress sessionId="session-1" />);
+    renderPrepare();
 
     expect(screen.getByText("Environment prepared with warnings")).toBeTruthy();
     expect(screen.queryByText("Environment prepared on a fresh sandbox")).toBeNull();
@@ -166,7 +164,7 @@ describe("PrepareProgress per-repo setup script", () => {
     ];
     mockMessages = [makeSetupScriptMessage()];
 
-    render(<PrepareProgress sessionId="session-1" />);
+    renderPrepare();
 
     expect(screen.getByText("Run repository setup script")).toBeTruthy();
     expect(screen.getByText("make install")).toBeTruthy();
@@ -179,7 +177,7 @@ describe("PrepareProgress per-repo setup script", () => {
     mockSteps = [{ name: "Create worktree", status: "completed" }];
     mockMessages = [makeSetupScriptMessage({ exit_code: 2 })];
 
-    render(<PrepareProgress sessionId="session-1" />);
+    renderPrepare();
 
     expect(screen.getByText("Script exited with code 2")).toBeTruthy();
   });

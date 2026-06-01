@@ -26,6 +26,11 @@ vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: typeof mockStoreState) => unknown) => selector(mockStoreState),
 }));
 
+vi.mock("@/hooks/domains/session/use-task-session-by-id", () => ({
+  useTaskSessionById: (id: string | null) =>
+    id ? (mockStoreState.taskSessions.items[id] ?? null) : null,
+}));
+
 vi.mock("@/components/toast-provider", () => ({
   useToast: () => ({ toast: mockToast }),
 }));

@@ -9,4 +9,8 @@ export type BackendMessage<T extends string, P> = {
   action: T;
   payload: P;
   timestamp?: string;
+  // Phase 1 WS event accounting (see lib/ws/ws-account.ts). Optional so
+  // backward-compat messages without them don't break the type.
+  seq?: number;
+  connection_id?: string;
 };

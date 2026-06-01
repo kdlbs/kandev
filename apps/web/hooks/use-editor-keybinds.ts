@@ -2,7 +2,10 @@
 
 import { useEffect, useRef } from "react";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { useQueryClient } from "@tanstack/react-query";
+import { qk } from "@/lib/query/keys";
 import { useAppStoreApi } from "@/components/state-provider";
+import type { UserSettingsState } from "@/lib/types/settings";
 import { createUserShell } from "@/lib/api/domains/user-shell-api";
 import { matchesShortcut } from "@/lib/keyboard/utils";
 import { getShortcut, type StoredShortcutOverrides } from "@/lib/keyboard/shortcut-overrides";
@@ -152,13 +155,15 @@ export function useEditorKeybinds() {
   const previousPanelIdRef = useRef<string | null>(null);
   const previousFocusRef = useRef<Element | null>(null);
   const appStore = useAppStoreApi();
+  const qc = useQueryClient();
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const api = useDockviewStore.getState().api;
       if (!api) return;
 
-      const overrides = appStore.getState().userSettings.keyboardShortcuts;
+      const overrides =
+        qc.getQueryData<UserSettingsState>(qk.settings.userSettings())?.keyboardShortcuts ?? {};
 
       const isTabNav =
         (e.metaKey || e.ctrlKey) &&
@@ -194,5 +199,5 @@ export function useEditorKeybinds() {
     // Use capture phase so we receive events before xterm.js
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [appStore]);
+  }, [appStore, qc]);
 }

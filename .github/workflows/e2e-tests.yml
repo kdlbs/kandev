@@ -69,6 +69,12 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build backend and web
+        # NEXT_PUBLIC_KANDEV_E2E_MOCK=true bakes the WS event-accounting hook
+        # into the FE bundle (see lib/ws/client.ts). Next.js inlines NEXT_PUBLIC_*
+        # at build time, so without this flag the hook dead-eliminates and the
+        # fixture's WS-drop check has nothing to read.
+        env:
+          NEXT_PUBLIC_KANDEV_E2E_MOCK: "true"
         run: make build-backend build-web
 
       # Linux/amd64 helper binaries (agentctl + mock-agent) bind-mounted into
@@ -133,6 +139,13 @@ jobs:
     # previously ran on.
     env:
       NODE_OPTIONS: --dns-result-order=ipv4first
+      # Enforce WS event accounting: any event the backend sent that the FE
+      # never processed (per-connection or per-session seq gap), and any
+      # session-routed event a bridge handler failed to apply to the TQ cache,
+      # fails the test that observed it. Requires the FE bundle built with
+      # NEXT_PUBLIC_KANDEV_E2E_MOCK=true (see the build job) so the accounting
+      # hooks are present. See docs/specs/ws-event-accounting/plan.md.
+      KANDEV_E2E_WS_ASSERT: "1"
     strategy:
       fail-fast: false
       matrix:

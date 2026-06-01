@@ -3,6 +3,7 @@
 import { memo, useCallback } from "react";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { useAppStore } from "@/components/state-provider";
+import { useTaskSessionById } from "@/hooks/domains/session/use-task-session-by-id";
 import { useFileOperations } from "@/hooks/use-file-operations";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { FileBrowser } from "@/components/task/file-browser";
@@ -18,13 +19,10 @@ const FilesPanel = memo(function FilesPanel({ onOpenFile }: FilesPanelProps) {
   // Use environment-stable sessionId so the file browser doesn't re-fetch
   // when switching between sessions in the same environment.
   const activeSessionId = useEnvironmentSessionId();
+  const sessionEnvId = useTaskSessionById(activeSessionId)?.task_environment_id ?? null;
   const environmentId = useAppStore((state) => {
     if (!activeSessionId) return null;
-    return (
-      state.environmentIdBySessionId[activeSessionId] ??
-      state.taskSessions.items[activeSessionId]?.task_environment_id ??
-      null
-    );
+    return state.environmentIdBySessionId[activeSessionId] ?? sessionEnvId;
   });
   const activeFilePath = useDockviewStore((s) => s.activeFilePath);
   const isArchived = useIsTaskArchived();

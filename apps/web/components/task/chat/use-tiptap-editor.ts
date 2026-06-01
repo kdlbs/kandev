@@ -17,13 +17,13 @@ import Code from "@tiptap/extension-code";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import { common, createLowlight } from "lowlight";
 import { cn } from "@/lib/utils";
-import { useAppStore } from "@/components/state-provider";
 import { getChatDraftContent, setChatDraftContent } from "@/lib/local-storage";
 import { getMarkdownText, textToHtml, handleEditorPaste } from "./tiptap-helpers";
 import { CodeBlockView } from "./tiptap-code-block-view";
 import { ContextMention } from "./tiptap-mention-extension";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { TaskMentionData } from "@/hooks/use-inline-mention";
+import { useUserSettings } from "@/hooks/domains/settings/use-user-settings";
 
 export type TipTapInputHandle = {
   focus: () => void;
@@ -134,7 +134,7 @@ function useTipTapRefs(opts: UseTipTapEditorOptions) {
   const planModeEnabledRef = useRef(opts.planModeEnabled);
   const onPlanModeChangeRef = useRef(opts.onPlanModeChange);
   const isSuggestionMenuOpenRef = useRef(opts.isSuggestionMenuOpen);
-  const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
+  const keyboardShortcuts = useUserSettings().data?.keyboardShortcuts ?? {};
   const keyboardShortcutsRef = useRef(keyboardShortcuts);
   useLayoutEffect(() => {
     onSubmitRef.current = opts.onSubmit;

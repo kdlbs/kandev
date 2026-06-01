@@ -1,13 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { StateProvider, useAppStoreApi } from "@/components/state-provider";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { StateProvider } from "@/components/state-provider";
+import { qk } from "@/lib/query/keys";
 import {
   TaskOptimisticContextProvider,
   useOptimisticTaskMutation,
 } from "./use-optimistic-task-mutation";
 import type { Task } from "@/app/office/tasks/[id]/types";
 import type { OfficeTask } from "@/lib/state/slices/office/types";
+
+const WS_ID = "ws-1";
 
 vi.mock("sonner", () => ({
   toast: {
@@ -72,23 +76,27 @@ function makeHarness(initialTask: Task, initialOffice: OfficeTask | null) {
       state.task = snapshot;
     },
   };
-  function StoreSeed({ children }: { children: ReactNode }) {
-    const api = useAppStoreApi();
-    if (initialOffice) {
-      api.getState().setTasks([initialOffice]);
-    }
-    return <>{children}</>;
+  // Seed the office tasks TQ cache (the list view's source) so the
+  // optimistic patch has a task to update. Mutation patches the flat
+  // `qk.office.tasks(wsId)` cache. gcTime is non-zero here so the
+  // observer-less cache entry survives long enough to assert on after the
+  // mutation settles.
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  if (initialOffice) {
+    client.setQueryData(qk.office.tasks(WS_ID), [initialOffice]);
   }
   function Wrapper({ children }: { children: ReactNode }) {
     return (
-      <StateProvider>
-        <StoreSeed>
+      <QueryClientProvider client={client}>
+        <StateProvider initialState={{ workspaces: { activeId: WS_ID } }}>
           <TaskOptimisticContextProvider value={ctxValue}>{children}</TaskOptimisticContextProvider>
-        </StoreSeed>
-      </StateProvider>
+        </StateProvider>
+      </QueryClientProvider>
     );
   }
-  return { Wrapper, state };
+  return { Wrapper, state, client };
 }
 
 function HookProbe({
@@ -103,7 +111,7 @@ function HookProbe({
 
 describe("useOptimisticTaskMutation", () => {
   it("applies the patch and keeps it on success", async () => {
-    const { Wrapper, state } = makeHarness(baseTask, baseOfficeTask);
+    const { Wrapper, state, client } = makeHarness(baseTask, baseOfficeTask);
     let mutate: ReturnType<typeof useOptimisticTaskMutation> | null = null;
     render(
       <Wrapper>
@@ -119,10 +127,13 @@ describe("useOptimisticTaskMutation", () => {
     expect(state.patches).toEqual([{ priority: "high" }]);
     expect(state.restored).toHaveLength(0);
     expect(state.task.priority).toBe("high");
+    // The office tasks TQ cache was patched optimistically.
+    const cached = client.getQueryData<OfficeTask[]>(qk.office.tasks(WS_ID));
+    expect(cached?.[0]?.priority).toBe("high");
   });
 
-  it("rolls back local state and toasts on api failure", async () => {
-    const { Wrapper, state } = makeHarness(baseTask, baseOfficeTask);
+  it("rolls back local + cache state and toasts on api failure", async () => {
+    const { Wrapper, state, client } = makeHarness(baseTask, baseOfficeTask);
     let mutate: ReturnType<typeof useOptimisticTaskMutation> | null = null;
     render(
       <Wrapper>
@@ -137,6 +148,9 @@ describe("useOptimisticTaskMutation", () => {
     expect(state.restored).toHaveLength(1);
     expect(state.restored[0]).toEqual(baseTask);
     expect(toast.error).toHaveBeenCalledWith("nope");
+    // The optimistic cache patch was rolled back to the original priority.
+    const cached = client.getQueryData<OfficeTask[]>(qk.office.tasks(WS_ID));
+    expect(cached?.[0]?.priority).toBe("medium");
   });
 
   it("uses a generic error message when the rejection isn't an Error", async () => {

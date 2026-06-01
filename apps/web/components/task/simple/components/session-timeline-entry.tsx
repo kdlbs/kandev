@@ -4,6 +4,7 @@ import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
 import { IconChevronDown, IconLoader2 } from "@tabler/icons-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
 import { useAppStore } from "@/components/state-provider";
+import { useAgentName } from "@/hooks/domains/office/use-office-agents";
 import { selectCommandCount } from "@/lib/state/slices/session/selectors";
 import { AdvancedChatPanel } from "@/app/office/tasks/[id]/advanced-panels/chat-panel";
 import { useActiveSessionRef } from "./active-session-ref-context";
@@ -250,11 +251,7 @@ export const SessionTimelineEntry = forwardRef<HTMLDivElement, SessionTimelineEn
     // the per-session snapshot can be empty (then `agentName` defaults
     // to the raw profile id, which renders as a UUID in the header).
     const agentProfileId = session.agentProfileId;
-    const resolvedAgentName = useAppStore((s) =>
-      agentProfileId
-        ? s.office.agentProfiles.find((a) => a.id === agentProfileId)?.name
-        : undefined,
-    );
+    const resolvedAgentName = useAgentName(agentProfileId);
     const displayAgentName =
       resolvedAgentName ||
       (session.agentName !== agentProfileId ? session.agentName : null) ||

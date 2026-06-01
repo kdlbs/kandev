@@ -1,8 +1,9 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { ScrollArea } from "@kandev/ui/scroll-area";
-import { useAppStore } from "@/components/state-provider";
+import { officeQueryOptions } from "@/lib/query/query-options/office";
 import type { OfficeTask, OfficeTaskStatus } from "@/lib/state/slices/office/types";
 import { StatusIcon } from "./status-icon";
 
@@ -68,7 +69,7 @@ function BoardColumn({
 }
 
 export function TaskBoard({ tasks }: TaskBoardProps) {
-  const meta = useAppStore((s) => s.office.meta);
+  const { data: meta } = useQuery(officeQueryOptions.metaGlobal());
   const columns = meta
     ? meta.statuses.map((s) => ({ status: s.id as OfficeTaskStatus, label: s.label }))
     : FALLBACK_COLUMNS;

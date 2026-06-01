@@ -1,8 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo } from "react";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { useAppStore } from "@/components/state-provider";
-import { listTasks, type ListTasksParams } from "@/lib/api/domains/office-extended-api";
-import type { TaskFilterState, TaskSortDir, TaskSortField } from "@/lib/state/slices/office/types";
+import type { ListTasksParams } from "@/lib/api/domains/office-extended-api";
+import { flattenTasksPaginated, officeQueryOptions } from "@/lib/query/query-options/office";
+import type {
+  OfficeTask,
+  TaskFilterState,
+  TaskSortDir,
+  TaskSortField,
+} from "@/lib/state/slices/office/types";
 import { canonicalStatusesToBackend } from "./normalize-status";
 
 const DEFAULT_PAGE_LIMIT = 200;
@@ -51,6 +57,8 @@ function buildParams(
 }
 
 export type UsePaginatedTasksResult = {
+  tasks: OfficeTask[];
+  isLoading: boolean;
   loadMore: () => void;
   hasMore: boolean;
   isLoadingMore: boolean;
@@ -61,117 +69,55 @@ export type UsePaginatedTasksResult = {
  * Owns the lifecycle of the office tasks list: server-side filter / sort /
  * keyset pagination via the Stream-E `/workspaces/:wsId/tasks?...` endpoint.
  *
- * Resets the cursor and replaces the list whenever the workspace, filters
- * or sort change. Exposes loadMore() to fetch the next page (appending to
- * the store) and refetch() for WS-driven invalidations.
+ * Backed by TanStack Query's `useInfiniteQuery` against
+ * `officeQueryOptions.tasksPaginated`. WS-driven updates flow in via the
+ * office bridge (`apps/web/lib/query/bridge/office.ts`), which invalidates
+ * the paginated cache key on task lifecycle events so every page refetches.
+ *
+ * Accepts filters / sort as explicit params (rather than reading from
+ * Zustand) so callers can keep UI state in local React state per the TQ
+ * migration plan.
  */
 export function usePaginatedTasks(
   workspaceId: string | null,
   includeSystem: boolean,
+  filters: TaskFilterState,
+  sortField: TaskSortField,
+  sortDir: TaskSortDir,
 ): UsePaginatedTasksResult {
-  const setTasks = useAppStore((s) => s.setTasks);
-  const appendTasks = useAppStore((s) => s.appendTasks);
-  const setTasksLoading = useAppStore((s) => s.setTasksLoading);
-  const filters = useAppStore((s) => s.office.tasks.filters);
-  const sortField = useAppStore((s) => s.office.tasks.sortField);
-  const sortDir = useAppStore((s) => s.office.tasks.sortDir);
-
-  // Cursor + the params snapshot that produced it, kept atomically so a
-  // stale cursor from a previous filter set can't be used for loadMore.
-  const [page, setPage] = useState<{
-    cursor?: string;
-    id?: string;
-    key: string;
-  }>({ key: "" });
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
-
-  // Derive the live params + key from filter/sort state so render and
-  // event handlers see a consistent snapshot without ref reads.
   const params = useMemo(
     () => buildParams(filters, sortField, sortDir, DEFAULT_PAGE_LIMIT, includeSystem),
     [filters, sortField, sortDir, includeSystem],
   );
-  const paramsKey = useMemo(
-    () => JSON.stringify(params) + ":" + (workspaceId ?? ""),
-    [params, workspaceId],
-  );
-  // Mirror the latest snapshot into a ref for refetch() callers (WS
-  // events) so they don't pull from a stale closure.
-  const paramsRef = useRef<ListTasksParams>(params);
-  useEffect(() => {
-    paramsRef.current = params;
-  }, [params]);
 
-  // Initial fetch + refetch on workspace / filter / sort change. Cursor
-  // reset is rolled into the same setPage call as the fetch result to
-  // avoid a separate setState pass inside the effect body. `params` and
-  // `paramsKey` derive from the dependencies, so they need not be listed.
-  useEffect(() => {
-    if (!workspaceId) return;
-    let cancelled = false;
-    setTasksLoading(true);
-    const key = paramsKey;
-    listTasks(workspaceId, params)
-      .then((res) => {
-        if (cancelled) return;
-        setTasks(res.tasks ?? []);
-        setPage({ cursor: res.next_cursor || undefined, id: res.next_id || undefined, key });
-      })
-      .catch((err) => {
-        if (!cancelled) toast.error(err instanceof Error ? err.message : "Failed to load tasks");
-      })
-      .finally(() => {
-        if (!cancelled) setTasksLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceId, params, paramsKey, setTasks, setTasksLoading]);
+  const query = useInfiniteQuery({
+    ...officeQueryOptions.tasksPaginated(workspaceId ?? "", params),
+    enabled: !!workspaceId,
+  });
+
+  const tasks = useMemo(() => flattenTasksPaginated(query.data), [query.data]);
 
   const loadMore = useCallback(() => {
-    // Only paginate when the cursor matches the current params snapshot.
-    if (!workspaceId || !page.cursor || isLoadingMore) return;
-    if (page.key !== paramsKey) return;
-    setIsLoadingMore(true);
-    const next: ListTasksParams = { ...params, cursor: page.cursor, cursor_id: page.id };
-    listTasks(workspaceId, next)
-      .then((res) => {
-        appendTasks(res.tasks ?? []);
-        setPage({
-          cursor: res.next_cursor || undefined,
-          id: res.next_id || undefined,
-          key: page.key,
-        });
-      })
-      .catch((err) => {
-        toast.error(err instanceof Error ? err.message : "Failed to load more tasks");
-      })
-      .finally(() => setIsLoadingMore(false));
-  }, [workspaceId, page, paramsKey, params, isLoadingMore, appendTasks]);
+    if (!query.hasNextPage || query.isFetchingNextPage) return;
+    void query.fetchNextPage().catch((err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to load more tasks");
+    });
+  }, [query]);
 
   const refetch = useCallback(async () => {
-    if (!workspaceId) return;
-    // Use the latest params snapshot via ref so a stale closure from a
-    // long-lived WS subscription doesn't post old filters.
-    const liveParams = paramsRef.current;
-    const liveKey = JSON.stringify(liveParams) + ":" + workspaceId;
     try {
-      const res = await listTasks(workspaceId, liveParams);
-      setTasks(res.tasks ?? []);
-      setPage({
-        cursor: res.next_cursor || undefined,
-        id: res.next_id || undefined,
-        key: liveKey,
-      });
+      await query.refetch();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to refresh tasks");
     }
-  }, [workspaceId, setTasks]);
+  }, [query]);
 
   return {
+    tasks,
+    isLoading: query.isPending && !!workspaceId,
     loadMore,
-    hasMore: !!page.cursor && page.key === paramsKey,
-    isLoadingMore,
+    hasMore: !!query.hasNextPage,
+    isLoadingMore: query.isFetchingNextPage,
     refetch,
   };
 }

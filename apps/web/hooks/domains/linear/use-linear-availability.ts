@@ -10,11 +10,12 @@ import { useLinearEnabled } from "./use-linear-enabled";
 const fetchLinearConfig = () => getLinearConfig();
 
 export function useLinearAuthed(): boolean {
-  return useIntegrationAuthed(fetchLinearConfig);
+  return useIntegrationAuthed("linear", fetchLinearConfig);
 }
 
 export function useLinearAvailable(): boolean {
   return useIntegrationAvailable({
+    kind: "linear",
     useEnabled: useLinearEnabled,
     fetchConfig: fetchLinearConfig,
   });

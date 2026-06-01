@@ -193,7 +193,7 @@ The dashboard is a thin projection over durable office tables. Nothing the dashb
 
 - Per-agent cards `status` (`live` / `finished` / `never_run`), the sort order, `recent_sessions`, and `command_count` are computed live by `GetAgentSummaries` from `office_agents` + `task_sessions` + `messages` at request time. There is no cached cards payload; a kandev restart serves identical content from the first fetch onward.
 - Inbox is a computed view (see `inbox.md` Persistence guarantees) — no `office_inbox` table exists. The badge count and the listing both recompute on every fetch.
-- Frontend store hydration: SSR fetches dashboard data once on page load and hydrates the Zustand store. Live updates are WS-driven (`live-updates.md`); on hard reload the SSR fetch reseeds the store. WS subscriptions are not durable — the gateway re-subscribes on reconnect.
+- Frontend cache hydration: SSR fetches dashboard data once on page load and dehydrates it into the TanStack Query cache via `<HydrationBoundary>`. Live updates are WS-driven via the office bridge (`lib/query/bridge/office.ts`), which calls `invalidateQueries` on matching WS events so the query refetches automatically. On hard reload the SSR fetch reseeds the cache. WS subscriptions are not durable — the gateway re-subscribes on reconnect.
 - The dashboard does NOT cache anything backend-side beyond the request lifetime; there is no Redis/in-memory dashboard cache. Adding one would require explicit invalidation hooks and is intentionally not implemented.
 
 ## Scenarios

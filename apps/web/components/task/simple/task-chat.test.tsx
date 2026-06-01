@@ -1,7 +1,9 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { render, screen, cleanup, fireEvent, within } from "@testing-library/react";
 import type { ReactNode } from "react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { StateProvider } from "@/components/state-provider";
+import { createTestQueryClient } from "@/test-utils/render-with-query";
 import type {
   TaskComment,
   TaskDecision,
@@ -116,10 +118,15 @@ function makeSession(id: string, startedAt: string, state: TaskSession["state"])
 }
 
 function wrap(node: ReactNode) {
+  // TaskChat / RunErrorEntry resolve agent names via useAgentName
+  // (TanStack Query); with no seeded cache they fall back to the comment /
+  // session agent name. A QueryClient must be present.
   return (
-    <StateProvider>
-      <ActiveSessionRefProvider>{node}</ActiveSessionRefProvider>
-    </StateProvider>
+    <QueryClientProvider client={createTestQueryClient()}>
+      <StateProvider>
+        <ActiveSessionRefProvider>{node}</ActiveSessionRefProvider>
+      </StateProvider>
+    </QueryClientProvider>
   );
 }
 

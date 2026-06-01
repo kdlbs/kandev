@@ -1,16 +1,19 @@
 "use client";
 
 import { useCallback, useState, type ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { IconArrowRight, IconGitMerge, IconGitPullRequestClosed, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { TodoIndicator } from "./todo-indicator";
 import { PRStatusChip } from "@/components/github/pr-status-chip";
+import { useTaskPRs } from "@/hooks/domains/github/use-task-pr";
 import { ShareButton, shareableSessionStateClient } from "@/components/task/share/share-button";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
 import { useMessageHandler, buildTaskMentionsContext } from "@/hooks/use-message-handler";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { qk } from "@/lib/query/keys";
+import type { KanbanMultiData } from "@/lib/query/query-options/kanban";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import { type ContextFile } from "@/lib/state/context-files-store";
 import type { TaskMentionData } from "@/hooks/use-inline-mention";
@@ -37,6 +40,7 @@ import {
 } from "@/lib/local-storage";
 import type { DiffComment } from "@/lib/diff/types";
 import type { useChatPanelState } from "./use-chat-panel-state";
+import { useUserSettings } from "@/hooks/domains/settings/use-user-settings";
 
 const PLAN_CONTEXT_PATH = "plan:context";
 
@@ -99,12 +103,22 @@ function pickInputPlaceholder(a: PlaceholderArgs): string {
   );
 }
 
+/** Builds the <kandev-system> task-mentions block for the onSend bypass path. */
+function onSendTaskContext(
+  queryClient: ReturnType<typeof useQueryClient>,
+  inlineTaskMentions: TaskMentionData[] | undefined,
+): string {
+  if (!inlineTaskMentions?.length) return "";
+  const snapshots = queryClient.getQueryData<KanbanMultiData>(qk.kanban.multi())?.snapshots ?? {};
+  return buildTaskMentionsContext(inlineTaskMentions, snapshots);
+}
+
 export function useSubmitHandler(
   panelState: ReturnType<typeof useChatPanelState>,
   onSend?: (message: string) => void,
 ) {
   const [isSending, setIsSending] = useState(false);
-  const storeApi = useAppStoreApi();
+  const queryClient = useQueryClient();
   const {
     resolvedSessionId,
     sessionModel,
@@ -157,9 +171,7 @@ export function useSubmitHandler(
           // The onSend path bypasses useMessageHandler.buildFinalMessage, so
           // expand task mentions here — otherwise the task chips show in the
           // editor but the agent never receives the <kandev-system> block.
-          const taskCtx = inlineTaskMentions?.length
-            ? buildTaskMentionsContext(inlineTaskMentions, storeApi.getState())
-            : "";
+          const taskCtx = onSendTaskContext(queryClient, inlineTaskMentions);
           await onSend(finalMessage + taskCtx);
         } else {
           await handleSendMessage(
@@ -188,7 +200,7 @@ export function useSubmitHandler(
     [
       isSending,
       onSend,
-      storeApi,
+      queryClient,
       handleSendMessage,
       markCommentsSent,
       planComments,
@@ -220,7 +232,7 @@ export function useChatPanelHandlers(
     }
   }, [resolvedSessionId]);
 
-  const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
+  const keyboardShortcuts = useUserSettings().data?.keyboardShortcuts ?? {};
   useKeyboardShortcut(
     getShortcut("FOCUS_INPUT", keyboardShortcuts),
     useCallback(
@@ -308,7 +320,7 @@ function ArchiveDismissBanner({
 }
 
 export function PRMergedBanner({ taskId }: { taskId: string }) {
-  const taskPRs = useAppStore((state) => state.taskPRs.byTaskId[taskId]);
+  const taskPRs = useTaskPRs(taskId);
   const [dismissed, setDismissed] = useState(() => wasPRMergedBannerDismissed(taskId));
   const handleArchive = useArchiveTaskAction(taskId);
 
@@ -342,7 +354,7 @@ export function PRMergedBanner({ taskId }: { taskId: string }) {
 }
 
 export function PRClosedBanner({ taskId }: { taskId: string }) {
-  const taskPRs = useAppStore((state) => state.taskPRs.byTaskId[taskId]);
+  const taskPRs = useTaskPRs(taskId);
   const [dismissed, setDismissed] = useState(() => wasPRClosedBannerDismissed(taskId));
   const handleArchive = useArchiveTaskAction(taskId);
 

@@ -9,8 +9,9 @@ import {
   listTaskSessions,
   listWorkspaces,
 } from "@/lib/api";
-import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
+import { toAgentProfileOption } from "@/lib/types/settings";
 import { listSessionTurns } from "@/lib/api/domains/session-api";
+import { deriveActiveTurnId } from "@/lib/query/query-options/session";
 import { fetchTerminals } from "@/lib/api/domains/user-shell-api";
 import type {
   ListMessagesResponse,
@@ -22,34 +23,7 @@ import type {
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 import { snapshotToState, taskToState } from "@/lib/ssr/mapper";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
-import { prepareResultToSessionState } from "@/lib/state/slices/session-runtime/prepare-result";
-import type { SessionPrepareState } from "@/lib/state/slices/session-runtime/types";
-import type { AppState } from "@/lib/state/store";
-
-function buildWorktreeState(allSessions: TaskSession[]) {
-  const sessionsWithWorktrees = allSessions.filter((s) => s.worktree_id);
-  return {
-    worktrees: {
-      items: Object.fromEntries(
-        sessionsWithWorktrees.map((s) => [
-          s.worktree_id,
-          {
-            id: s.worktree_id!,
-            sessionId: s.id,
-            repositoryId: s.repository_id ?? undefined,
-            path: s.worktree_path ?? undefined,
-            branch: s.worktree_branch ?? undefined,
-          },
-        ]),
-      ),
-    },
-    sessionWorktreesBySessionId: {
-      itemsBySessionId: Object.fromEntries(
-        sessionsWithWorktrees.map((s) => [s.id, [s.worktree_id!]]),
-      ),
-    },
-  };
-}
+import type { SsrInitialState } from "@/lib/ssr/initial-state";
 
 type BuildSessionPageStateParams = {
   task: Task;
@@ -66,7 +40,7 @@ type BuildSessionPageStateParams = {
 };
 
 function buildSessionPageState(p: BuildSessionPageStateParams) {
-  const { task, sessionId, snapshot, agents, allSessions, messagesResponse } = p;
+  const { task, sessionId, snapshot, agents, messagesResponse } = p;
   const messages = messagesResponse?.messages ? [...messagesResponse.messages].reverse() : [];
   const taskState = taskToState(task, sessionId, {
     items: messages,
@@ -79,10 +53,9 @@ function buildSessionPageState(p: BuildSessionPageStateParams) {
     ...taskState,
     ...buildResourceState(p),
     ...buildSessionState(p),
-    ...buildWorktreeState(allSessions),
-    ...buildPrepareProgressState(allSessions),
+    // Settings-domain server data: seeded into the TanStack Query cache by
+    // StateHydrator (no longer hydrated into a Zustand slice).
     settingsAgents: { items: agents.agents },
-    settingsData: { agentsLoaded: true, executorsLoaded: false },
     userSettings: mapUserSettingsResponse(p.userSettingsResponse),
   };
 }
@@ -107,16 +80,24 @@ function buildResourceState(p: BuildSessionPageStateParams) {
       })),
       activeId: task.workspace_id,
     },
-    // Don't write activeId — null means "All Workflows"; task context lives in kanban.workflowId.
+    // Server data — seeded into the TQ workflows-list cache by the hydrator.
+    // No activeId here — null means "All Workflows"; task context comes from the
+    // seeded kanban snapshot, not a homepage filter selection.
     workflows: {
+      // Full server shape (matches workflowsFromResponse) so the TQ
+      // workflows-list seed in StateHydrator isn't under-populated — a missing
+      // agent_profile_id silently breaks the create-task workflow agent lock.
       items: workflows.map((w) => ({
         id: w.id as string,
         workspaceId: w.workspace_id as string,
         name: w.name,
+        description: w.description,
+        sortOrder: w.sort_order ?? 0,
+        agent_profile_id: w.agent_profile_id,
         hidden: w.hidden,
         style: w.style,
       })),
-    } as Partial<AppState>["workflows"],
+    } satisfies SsrInitialState["workflows"],
     repositories: {
       itemsByWorkspaceId: { [task.workspace_id]: repositories },
       loadingByWorkspaceId: { [task.workspace_id]: false },
@@ -144,14 +125,12 @@ function buildSessionState(p: BuildSessionPageStateParams) {
     taskSessions: { items: Object.fromEntries(allSessions.map((s) => [s.id, s])) },
     taskSessionsByTask: {
       itemsByTaskId: { [task.id]: allSessions },
-      loadingByTaskId: { [task.id]: false },
-      loadedByTaskId: { [task.id]: true },
     },
     turns: sessionId
       ? {
           bySession: { [sessionId]: turns },
           activeBySession: {
-            [sessionId]: turns.filter((t) => !t.completed_at).pop()?.id ?? null,
+            [sessionId]: deriveActiveTurnId(turns),
           },
         }
       : { bySession: {}, activeBySession: {} },
@@ -161,22 +140,10 @@ function buildSessionState(p: BuildSessionPageStateParams) {
   };
 }
 
-function buildPrepareProgressState(allSessions: TaskSession[]) {
-  const bySessionId: Record<string, SessionPrepareState> = {};
-
-  for (const session of allSessions) {
-    const prepareState = prepareResultToSessionState(session.id, session.metadata);
-    if (prepareState) bySessionId[session.id] = prepareState;
-  }
-
-  if (Object.keys(bySessionId).length === 0) return {};
-  return { prepareProgress: { bySessionId } };
-}
-
 export type FetchedSessionData = {
   task: Task;
   sessionId: string | null;
-  initialState: ReturnType<typeof taskToState>;
+  initialState: ReturnType<typeof buildSessionPageState>;
   initialTerminals: Terminal[];
 };
 

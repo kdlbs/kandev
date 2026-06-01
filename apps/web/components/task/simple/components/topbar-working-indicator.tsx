@@ -1,8 +1,8 @@
 "use client";
 
 import { IconLoader2 } from "@tabler/icons-react";
-import { useAppStore } from "@/components/state-provider";
 import { selectLiveSessionForTask } from "@/lib/state/slices/session/selectors";
+import { useAllTaskSessions } from "@/hooks/domains/session/use-task-session-by-id";
 import { useActiveSessionRef } from "./active-session-ref-context";
 
 type TopbarWorkingIndicatorProps = {
@@ -17,7 +17,7 @@ type TopbarWorkingIndicatorProps = {
  * Click scrolls the active session's timeline entry into view.
  */
 export function TopbarWorkingIndicator({ taskId }: TopbarWorkingIndicatorProps) {
-  const liveSession = useAppStore((s) => selectLiveSessionForTask(s, taskId));
+  const liveSession = selectLiveSessionForTask(useAllTaskSessions(), taskId);
   const { getActiveNode } = useActiveSessionRef();
 
   if (!liveSession) return null;

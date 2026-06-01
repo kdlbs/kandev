@@ -13,6 +13,7 @@ import { usePRDiff } from "@/hooks/domains/github/use-pr-diff";
 import { formatReviewCommentsAsMarkdown } from "@/components/task/chat/messages/review-comments-attachment";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useToast } from "@/components/toast-provider";
+import { useTaskSessionById } from "@/hooks/domains/session/use-task-session-by-id";
 import type { DiffComment } from "@/lib/diff/types";
 import type { FileInfo } from "@/lib/state/slices/session-runtime/types";
 
@@ -44,10 +45,7 @@ export function useReviewDialog(effectiveSessionId: string | null) {
   const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
   const { toast } = useToast();
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
-  const baseBranch = useAppStore((state) => {
-    if (!effectiveSessionId) return undefined;
-    return state.taskSessions.items[effectiveSessionId]?.base_branch;
-  });
+  const baseBranch = useTaskSessionById(effectiveSessionId)?.base_branch;
   const reviewGitStatusFiles = useReviewGitStatusFiles(effectiveSessionId);
   const { diff: reviewCumulativeDiff } = useCumulativeDiff(effectiveSessionId);
   const { openFile: reviewOpenFile } = useFileEditors();

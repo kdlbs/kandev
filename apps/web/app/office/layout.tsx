@@ -12,10 +12,12 @@ import {
   listProjects,
 } from "@/lib/api/domains/office-api";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
-import type { AppState } from "@/lib/state/store";
+import type { SsrInitialState } from "@/lib/ssr/initial-state";
+import type { AgentProfile, Project, InboxItem } from "@/lib/state/slices/office/types";
 import { WorkspaceRail } from "./components/workspace-rail";
 import { OfficeSidebar } from "./components/office-sidebar";
 import { OfficeTopbar } from "./components/office-topbar";
+import { OfficeTqSeeder } from "./components/office-tq-seeder";
 
 function resolveActiveOfficeWorkspaceId(
   workspaceItems: { id: string }[],
@@ -118,7 +120,7 @@ export default async function OfficeLayout({ children }: { children: React.React
       ])
     : [{ agents: [] }, { projects: [] }, { items: [], total_count: 0 }];
 
-  const initialState: Partial<AppState> = {
+  const initialState: SsrInitialState = {
     workspaces: {
       items: workspaceItems,
       activeId: activeWorkspaceId,
@@ -127,42 +129,23 @@ export default async function OfficeLayout({ children }: { children: React.React
       ...mapUserSettingsResponse(userSettingsResponse),
       workspaceId: activeWorkspaceId,
     },
-    office: {
-      agentProfiles: agentsResponse.agents as AppState["office"]["agentProfiles"],
-      skills: [],
-      projects: projectsResponse.projects as AppState["office"]["projects"],
-      approvals: [],
-      activity: [],
-      costSummary: null,
-      budgetPolicies: [],
-      routines: [],
-      inboxItems: inboxResponse.items as AppState["office"]["inboxItems"],
-      inboxCount: inboxResponse.total_count,
-      runs: [],
-      dashboard: null,
-      tasks: {
-        items: [],
-        filters: { statuses: [], priorities: [], assigneeIds: [], projectIds: [], search: "" },
-        viewMode: "list",
-        sortField: "updated",
-        sortDir: "desc",
-        groupBy: "none",
-        nestingEnabled: true,
-        isLoading: false,
-      },
-      meta: metaResponse,
-      isLoading: false,
-      refetchTrigger: null,
-      routing: { byWorkspace: {}, knownProviders: [], preview: { byWorkspace: {} } },
-      providerHealth: { byWorkspace: {} },
-      runAttempts: { byRunId: {} },
-      agentRouting: { byAgentId: {} },
-    },
+  };
+
+  // Office server data is read via TanStack Query (no Zustand mirror), so
+  // seed the TQ caches from the SSR snapshot instead of hydrating a slice.
+  const officeSnapshot = {
+    workspaceId: activeWorkspaceId,
+    agents: agentsResponse.agents as AgentProfile[],
+    projects: projectsResponse.projects as Project[],
+    inboxItems: inboxResponse.items as InboxItem[],
+    inboxCount: inboxResponse.total_count,
+    meta: metaResponse,
   };
 
   return (
     <TooltipProvider>
       <StateHydrator initialState={initialState} />
+      <OfficeTqSeeder snapshot={officeSnapshot} />
       <div className="flex h-screen">
         <WorkspaceRail workspaces={workspaceItems} activeWorkspaceId={activeWorkspaceId} />
         <OfficeSidebar

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
-import { useAppStore } from "@/components/state-provider";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { useUserSettings } from "@/hooks/domains/settings/use-user-settings";
 
 /**
  * Returns a stable callback for handling terminal link clicks.
@@ -9,7 +9,7 @@ import { useDockviewStore } from "@/lib/state/dockview-store";
  */
 export function useTerminalLinkHandler(): (event: MouseEvent, uri: string) => void {
   const behaviorRef = useRef<"new_tab" | "browser_panel">("new_tab");
-  const behavior = useAppStore((s) => s.userSettings.terminalLinkBehavior);
+  const behavior = useUserSettings().data?.terminalLinkBehavior ?? "new_tab";
 
   useEffect(() => {
     behaviorRef.current = behavior;

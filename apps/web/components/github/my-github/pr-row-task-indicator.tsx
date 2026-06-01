@@ -12,10 +12,10 @@ import {
 import { Badge } from "@kandev/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
+import { useKanbanSnapshots } from "@/hooks/domains/kanban/use-kanban-tasks";
 import { cn } from "@/lib/utils";
 import { linkToTask } from "@/lib/links";
 import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
-import type { KanbanState } from "@/lib/state/slices";
 import type { TaskPR } from "@/lib/types/github";
 
 type PRRowTaskIndicatorProps = {
@@ -23,18 +23,13 @@ type PRRowTaskIndicatorProps = {
 };
 
 function useTaskStepTitle(workflowStepId: string | undefined): string | null {
-  return useAppStore((state) => {
-    if (!workflowStepId) return null;
-    const findIn = (steps: KanbanState["steps"]) =>
-      steps.find((s) => s.id === workflowStepId)?.title ?? null;
-    const fromActive = findIn(state.kanban.steps);
-    if (fromActive) return fromActive;
-    for (const snap of Object.values(state.kanbanMulti.snapshots)) {
-      const t = findIn(snap.steps);
-      if (t) return t;
-    }
-    return null;
-  });
+  const snapshots = useKanbanSnapshots();
+  if (!workflowStepId) return null;
+  for (const snap of Object.values(snapshots)) {
+    const found = snap.steps.find((s) => s.id === workflowStepId);
+    if (found) return found.title;
+  }
+  return null;
 }
 
 function truncateTitle(title: string): string {

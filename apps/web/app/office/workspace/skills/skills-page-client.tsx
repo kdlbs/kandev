@@ -1,20 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { IconBoxMultiple } from "@tabler/icons-react";
 import { toast } from "sonner";
 import { useAppStore } from "@/components/state-provider";
 import * as officeApi from "@/lib/api/domains/office-api";
+import * as skillsApi from "@/lib/api/domains/office-skills-api";
+import { officeQueryOptions } from "@/lib/query/query-options/office";
 import type { Skill } from "@/lib/state/slices/office/types";
 import { SkillList } from "./skill-list";
 import { SkillDetail } from "./skill-detail";
 import { CreateSkillForm } from "./create-skill-form";
 
 type ViewMode = "view" | "create";
-
-type SkillsPageClientProps = {
-  initialSkills: Skill[];
-};
 
 function useSkillActions(
   activeWorkspaceId: string | null,
@@ -23,16 +22,22 @@ function useSkillActions(
   setViewMode: (mode: ViewMode) => void,
   skills: Skill[],
 ) {
-  const addSkill = useAppStore((s) => s.addSkill);
-  const updateSkillInStore = useAppStore((s) => s.updateSkill);
-  const removeSkillFromStore = useAppStore((s) => s.removeSkill);
+  const qc = useQueryClient();
+
+  function invalidate() {
+    if (activeWorkspaceId) {
+      void qc.invalidateQueries({
+        queryKey: ["office", activeWorkspaceId, "skills"],
+      });
+    }
+  }
 
   const handleCreate = useCallback(
     async (data: Partial<Skill>) => {
       if (!activeWorkspaceId) return;
       try {
-        const res = await officeApi.createSkill(activeWorkspaceId, data);
-        addSkill(res.skill);
+        const res = await skillsApi.createSkill(activeWorkspaceId, data);
+        invalidate();
         setSelectedId(res.skill.id);
         setViewMode("view");
       } catch (err) {
@@ -44,72 +49,59 @@ function useSkillActions(
         }
       }
     },
-    [activeWorkspaceId, addSkill, setSelectedId, setViewMode],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeWorkspaceId, qc, setSelectedId, setViewMode],
   );
 
   const handleSave = useCallback(
     async (id: string, patch: Partial<Skill>) => {
-      await officeApi.updateSkill(id, patch);
-      updateSkillInStore(id, patch);
+      await skillsApi.updateSkill(id, patch);
+      invalidate();
     },
-    [updateSkillInStore],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeWorkspaceId, qc],
   );
 
   const handleDelete = useCallback(
     async (id: string) => {
-      await officeApi.deleteSkill(id);
-      removeSkillFromStore(id);
+      await skillsApi.deleteSkill(id);
+      invalidate();
       if (selectedId === id) {
         const remaining = skills.filter((s) => s.id !== id);
         setSelectedId(remaining[0]?.id ?? null);
       }
     },
-    [removeSkillFromStore, selectedId, skills, setSelectedId],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeWorkspaceId, qc, selectedId, skills, setSelectedId],
   );
 
   const handleImport = useCallback(
     async (source: string) => {
       if (!activeWorkspaceId) return;
       const res = await officeApi.importSkill(activeWorkspaceId, source);
-      for (const skill of res.skills) {
-        addSkill(skill);
-      }
+      invalidate();
       if (res.skills.length > 0) {
         setSelectedId(res.skills[0].id);
         setViewMode("view");
       }
     },
-    [activeWorkspaceId, addSkill, setSelectedId, setViewMode],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeWorkspaceId, qc, setSelectedId, setViewMode],
   );
 
   return { handleCreate, handleSave, handleDelete, handleImport };
 }
 
-export function SkillsPageClient({ initialSkills }: SkillsPageClientProps) {
-  const skills = useAppStore((s) => s.office.skills);
-  const setSkills = useAppStore((s) => s.setSkills);
+export function SkillsPageClient() {
+  const qc = useQueryClient();
   const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
+  const { data: skills = [] } = useQuery({
+    ...officeQueryOptions.skills(activeWorkspaceId ?? ""),
+    enabled: !!activeWorkspaceId,
+  });
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("view");
-
-  useEffect(() => {
-    if (initialSkills.length > 0) {
-      setSkills(initialSkills);
-    }
-  }, [initialSkills, setSkills]);
-
-  const fetchSkills = useCallback(() => {
-    if (!activeWorkspaceId) return;
-    officeApi
-      .listSkills(activeWorkspaceId)
-      .then((res) => {
-        if (res.skills && res.skills.length > 0) {
-          setSkills(res.skills);
-        }
-      })
-      .catch(() => {});
-  }, [activeWorkspaceId, setSkills]);
 
   const selectedSkill = skills.find((s) => s.id === selectedId) ?? null;
   const { handleCreate, handleSave, handleDelete, handleImport } = useSkillActions(
@@ -119,6 +111,12 @@ export function SkillsPageClient({ initialSkills }: SkillsPageClientProps) {
     setViewMode,
     skills,
   );
+
+  function handleRefresh() {
+    if (activeWorkspaceId) {
+      void qc.invalidateQueries({ queryKey: ["office", activeWorkspaceId, "skills"] });
+    }
+  }
 
   return (
     <div className="flex h-full">
@@ -133,7 +131,7 @@ export function SkillsPageClient({ initialSkills }: SkillsPageClientProps) {
           setSelectedId(null);
           setViewMode("create");
         }}
-        onRefresh={fetchSkills}
+        onRefresh={handleRefresh}
         onImport={handleImport}
       />
       <div className="flex-1 p-6 overflow-y-auto">

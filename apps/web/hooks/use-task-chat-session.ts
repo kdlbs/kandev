@@ -1,8 +1,6 @@
 import { useMemo } from "react";
-import { useAppStore } from "@/components/state-provider";
-import type { TaskSessionState, TaskSession } from "@/lib/types/http";
-
-const EMPTY_SESSIONS: TaskSession[] = [];
+import { useTaskSessionsByTask } from "@/hooks/domains/session/use-task-session-by-id";
+import type { TaskSessionState } from "@/lib/types/http";
 
 type UseTaskChatSessionReturn = {
   taskSessionId: string | null;
@@ -11,9 +9,7 @@ type UseTaskChatSessionReturn = {
 };
 
 export function useTaskChatSession(taskId: string | null): UseTaskChatSessionReturn {
-  const sessionsForTask = useAppStore((state) =>
-    taskId ? (state.taskSessionsByTask.itemsByTaskId[taskId] ?? EMPTY_SESSIONS) : EMPTY_SESSIONS,
-  );
+  const { sessions: sessionsForTask } = useTaskSessionsByTask(taskId);
 
   // Prefer the primary session, fall back to the first (most recent)
   const currentSession = useMemo(() => {

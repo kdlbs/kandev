@@ -23,6 +23,12 @@ import {
   AlertDialogTitle,
 } from "@kandev/ui/alert-dialog";
 import { useAppStore } from "@/components/state-provider";
+import { useAgentProfiles } from "@/hooks/domains/settings/use-settings-reads";
+import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
+import {
+  useTaskSessionById,
+  useTaskSessionsByTaskFromCache,
+} from "@/hooks/domains/session/use-task-session-by-id";
 import {
   useSessionActions,
   isSessionStoppable as isStoppable,
@@ -36,57 +42,40 @@ import { isSessionActive } from "./session-sort";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
 
 function useSessionTabState(sessionId: string | undefined) {
-  const isPrimary = useAppStore((state) => {
-    const activeTaskId = state.tasks.activeTaskId;
-    if (!activeTaskId || !sessionId) return false;
-    const task = state.kanban.tasks.find((t: { id: string }) => t.id === activeTaskId);
-    if (task?.primarySessionId) return task.primarySessionId === sessionId;
-    return state.taskSessions.items[sessionId]?.is_primary === true;
-  });
-  const sessionState = useAppStore((state) => {
-    if (!sessionId) return null;
-    return state.taskSessions.items[sessionId]?.state ?? null;
-  }) as TaskSessionState | null;
-  const taskId = useAppStore((state) => state.tasks.activeTaskId);
-  const agentLabel = useAppStore((state) => {
-    if (!sessionId) return null;
-    const session = state.taskSessions.items[sessionId];
-    if (!session?.agent_profile_id) return null;
-    const profile = state.agentProfiles.items.find(
-      (p: { id: string }) => p.id === session.agent_profile_id,
-    );
-    if (!profile) return null;
-    const parts = profile.label.split(" \u2022 ");
-    return parts[1] || parts[0] || profile.label;
-  });
-  const agentName = useAppStore((state) => {
-    if (!sessionId) return null;
-    const session = state.taskSessions.items[sessionId];
-    if (!session?.agent_profile_id) return null;
-    return (
-      state.agentProfiles.items.find((p: { id: string }) => p.id === session.agent_profile_id)
-        ?.agent_name ?? null
-    );
-  });
-  const sessionNumber = useAppStore((state) => {
-    if (!sessionId) return null;
-    const activeTaskId = state.tasks.activeTaskId;
-    const sessions = activeTaskId ? state.taskSessionsByTask.itemsByTaskId[activeTaskId] : null;
-    if (!sessions) return null;
+  const activeTaskIdForPrimary = useAppStore((state) => state.tasks.activeTaskId);
+  const taskForPrimary = useTaskById(activeTaskIdForPrimary);
+  const session = useTaskSessionById(sessionId);
+  const sessionIsPrimaryFlag = session?.is_primary ?? false;
+  const isPrimary = (() => {
+    if (!activeTaskIdForPrimary || !sessionId) return false;
+    if (taskForPrimary?.primarySessionId) return taskForPrimary.primarySessionId === sessionId;
+    return sessionIsPrimaryFlag === true;
+  })();
+  const sessionState = (session?.state ?? null) as TaskSessionState | null;
+  const taskId = activeTaskIdForPrimary;
+  const agentProfiles = useAgentProfiles();
+  const sessionProfileId = session?.agent_profile_id ?? null;
+  const sessionProfile = sessionProfileId
+    ? (agentProfiles.find((p) => p.id === sessionProfileId) ?? null)
+    : null;
+  const agentLabel = (() => {
+    if (!sessionProfile) return null;
+    const parts = sessionProfile.label.split(" \u2022 ");
+    return parts[1] || parts[0] || sessionProfile.label;
+  })();
+  const agentName = sessionProfile?.agent_name ?? null;
+  const sessionsForTask = useTaskSessionsByTaskFromCache(activeTaskIdForPrimary);
+  const sessionNumber = (() => {
+    if (!sessionId || sessionsForTask.length === 0) return null;
     // Sort chronologically (oldest first) so indexes are stable regardless of
     // which session is primary or the backend's default DESC ordering.
-    const sorted = [...sessions].sort(
-      (a: { started_at: string }, b: { started_at: string }) =>
-        new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
+    const sorted = [...sessionsForTask].sort(
+      (a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
     );
-    const idx = sorted.findIndex((s: { id: string }) => s.id === sessionId);
+    const idx = sorted.findIndex((s) => s.id === sessionId);
     return idx >= 0 ? idx + 1 : null;
-  });
-  const sessionCount = useAppStore((state) => {
-    const activeTaskId = state.tasks.activeTaskId;
-    if (!activeTaskId) return 0;
-    return state.taskSessionsByTask.itemsByTaskId[activeTaskId]?.length ?? 0;
-  });
+  })();
+  const sessionCount = sessionsForTask.length;
   return { isPrimary, sessionState, taskId, agentLabel, agentName, sessionNumber, sessionCount };
 }
 

@@ -4,6 +4,8 @@ import Link from "next/link";
 import { Badge } from "@kandev/ui/badge";
 import { Card, CardContent } from "@kandev/ui/card";
 import { useAppStore } from "@/components/state-provider";
+import { useWorkspaceRouting } from "@/hooks/domains/office/use-workspace-routing";
+import { useRoutingPreview } from "@/hooks/domains/office/use-routing-preview";
 import type { AgentProfile, AgentRoutePreview } from "@/lib/state/slices/office/types";
 import { AgentAvatar } from "../../components/agent-avatar";
 // (path from /agents/components/ → /office/components/ resolves correctly)
@@ -19,16 +21,10 @@ type AgentCardProps = {
 export function AgentCard({ agent }: AgentCardProps) {
   const isPending = agent.status === "pending_approval";
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const routingEnabled = useAppStore(
-    (s) => s.office.routing.byWorkspace[workspaceId ?? ""]?.enabled ?? false,
-  );
-  const preview = useAppStore((s) =>
-    workspaceId
-      ? (s.office.routing.preview.byWorkspace[workspaceId] ?? []).find(
-          (p) => p.agent_id === agent.id,
-        )
-      : undefined,
-  );
+  const { config } = useWorkspaceRouting(workspaceId ?? null);
+  const { agents: routePreviews } = useRoutingPreview(workspaceId ?? null);
+  const routingEnabled = config?.enabled ?? false;
+  const preview = routePreviews.find((p) => p.agent_id === agent.id);
   return (
     <Link href={`/office/agents/${agent.id}`} className="cursor-pointer">
       <Card

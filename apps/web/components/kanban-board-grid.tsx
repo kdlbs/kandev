@@ -20,6 +20,7 @@ import { MobileDropTargets } from "./kanban/mobile-drop-targets";
 import { MobileFab } from "./kanban/mobile-fab";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
+import { useKanbanMultiSnapshots } from "@/hooks/domains/kanban/use-kanban-snapshots";
 import { getKanbanColumnGridTemplate } from "./kanban/kanban-grid-template";
 
 export type KanbanBoardGridProps = {
@@ -258,11 +259,14 @@ function DesktopLayout({
 
 function useShowLoading(isLoading: boolean | undefined, stepsLength: number) {
   const workflowsActiveId = useAppStore((state) => state.workflows.activeId);
-  const kanbanWorkflowId = useAppStore((state) => state.kanban.workflowId);
+  const { snapshots } = useKanbanMultiSnapshots({ enabled: false });
+  // The single-workflow snapshot is "loaded" once the active workflow appears
+  // in the multi cache (the SSR seed / `useAllWorkflowSnapshots` populate it).
+  const activeSnapshotLoaded = !!(workflowsActiveId && snapshots[workflowsActiveId]);
 
   return (
     isLoading === true ||
-    (workflowsActiveId && !kanbanWorkflowId) ||
+    (workflowsActiveId && !activeSnapshotLoaded) ||
     (isLoading === undefined && stepsLength === 0 && !workflowsActiveId)
   );
 }

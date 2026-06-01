@@ -1,73 +1,51 @@
 import type { StoreApi } from "zustand";
+import type { QueryClient } from "@tanstack/react-query";
 import type { AppState } from "@/lib/state/store";
 import type { BackendMessageMap } from "@/lib/types/backend";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
-import type { TaskPlanRevision } from "@/lib/types/http";
+import { qk } from "@/lib/query/keys";
+import type { TaskPlanData } from "@/lib/query/query-options/session";
 
 type PlanMessage = BackendMessageMap["task.plan.created"] | BackendMessageMap["task.plan.updated"];
-type RevisionMessage =
-  | BackendMessageMap["task.plan.revision.created"]
-  | BackendMessageMap["task.plan.reverted"];
 
-function handlePlanUpsert(store: StoreApi<AppState>, message: PlanMessage) {
-  const { task_id, id, title, content, created_by, created_at, updated_at } = message.payload;
-  const prevPlan = store.getState().taskPlans.byTaskId[task_id];
-  store.getState().setTaskPlan(task_id, {
-    id,
-    task_id,
-    title,
-    content,
-    created_by,
-    created_at,
-    updated_at,
-  });
+/**
+ * Task-plan WS handler. The plan + revisions server data is mirrored into the
+ * TanStack Query cache by bridge/session.ts; this Zustand handler is retained
+ * ONLY for the client-only "seen" indicator (lastSeenUpdatedAtByTaskId), which
+ * stays in Zustand. It reads the previous plan from the TQ cache (the bridge
+ * runs alongside this handler) to decide whether a user-authored write changed
+ * the content.
+ */
+function handlePlanUpsert(store: StoreApi<AppState>, qc: QueryClient, message: PlanMessage) {
+  const { task_id, content, created_by, updated_at } = message.payload;
 
   // User-authored writes mark the plan as seen — but only when the content
   // actually changed. The plan editor's auto-save on mount can emit a
   // user-authored update with unchanged content (TipTap markdown round-trip
   // normalises whitespace), which would otherwise wipe an unseen agent
   // indicator the moment the panel opens.
-  if (created_by === "user" && prevPlan?.content !== content) {
-    store.getState().markTaskPlanSeen(task_id);
+  if (created_by === "user") {
+    const prev = qc.getQueryData<TaskPlanData>(qk.taskSession.plans(task_id));
+    if (prev?.plan?.content !== content) {
+      store.getState().markTaskPlanSeen(task_id, updated_at);
+    }
   }
 }
 
-function handleRevisionPush(store: StoreApi<AppState>, message: RevisionMessage) {
-  const p = message.payload;
-  const rev: TaskPlanRevision = {
-    id: p.id,
-    task_id: p.task_id,
-    revision_number: p.revision_number,
-    title: p.title,
-    author_kind: p.author_kind,
-    author_name: p.author_name,
-    revert_of_revision_id: p.revert_of_revision_id ?? null,
-    created_at: p.created_at,
-    updated_at: p.updated_at,
-  };
-  store.getState().upsertPlanRevision(p.task_id, rev);
-}
-
-export function registerTaskPlansHandlers(store: StoreApi<AppState>): WsHandlers {
+export function registerTaskPlansHandlers(store: StoreApi<AppState>, qc: QueryClient): WsHandlers {
   return {
-    "task.plan.created": (message) => handlePlanUpsert(store, message),
-    "task.plan.updated": (message) => handlePlanUpsert(store, message),
+    "task.plan.created": (message) => handlePlanUpsert(store, qc, message),
+    "task.plan.updated": (message) => handlePlanUpsert(store, qc, message),
     "task.plan.deleted": (message) => {
       const { task_id } = message.payload;
-      // Intentionally NOT clearTaskPlan: setTaskPlan(null) preserves
-      // loadedByTaskId[taskId] = true so useTaskPlan doesn't see !isLoaded
-      // and refetch a plan that was just deleted. clearTaskPlan would drop
-      // that flag and trigger a wasted HTTP round-trip.
-      store.getState().setTaskPlan(task_id, null);
-      store.getState().markTaskPlanSeen(task_id);
+      // Plan removed — mark seen so no stale indicator lingers on the deleted
+      // task. The TQ cache is cleared by the bridge.
+      store.getState().markTaskPlanSeen(task_id, "");
     },
-    "task.plan.revision.created": (message) => handleRevisionPush(store, message),
-    // `task.plan.reverted` is published alongside `task.plan.revision.created`
-    // for the same row by the backend RevertPlan path. Re-running the upsert
-    // on this event would be a no-op against the list (same id, same data)
-    // but would needlessly evict the revisionContentCache entry and trigger
-    // an extra Zustand update. Treat this event as a notification-only signal
-    // — register no-op so the dispatcher doesn't warn about an unhandled type.
+    // task.plan.revision.created / task.plan.reverted carry no client-only
+    // state — the bridge owns the revisions cache. Register no-ops so the
+    // dispatcher doesn't warn about an unhandled type.
+    "task.plan.revision.created": () => {},
     "task.plan.reverted": () => {},
   };
 }

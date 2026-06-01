@@ -16,8 +16,9 @@ import { Input } from "@kandev/ui/input";
 import { Textarea } from "@kandev/ui/textarea";
 import { SettingsPageTemplate } from "@/components/settings/settings-page-template";
 import { useToast } from "@/components/toast-provider";
+import { useQueryClient } from "@tanstack/react-query";
 import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
-import { useAppStore } from "@/components/state-provider";
+import { qk } from "@/lib/query/keys";
 import { createPrompt, deletePrompt, updatePrompt } from "@/lib/api";
 import { useRequest } from "@/lib/http/use-request";
 import type { CustomPrompt } from "@/lib/types/http";
@@ -298,9 +299,14 @@ function DeletePromptDialog({ deleteTarget, onClose, onConfirm, isBusy }: Delete
 }
 
 function usePromptsState() {
-  const { loaded: promptsLoaded } = useCustomPrompts();
-  const prompts = useAppStore((state) => state.prompts.items);
-  const setPrompts = useAppStore((state) => state.setPrompts);
+  const { prompts, loaded: promptsLoaded } = useCustomPrompts();
+  const qc = useQueryClient();
+  const setPrompts = useCallback(
+    (next: CustomPrompt[]) => {
+      qc.setQueryData<CustomPrompt[]>(qk.settings.prompts(), next);
+    },
+    [qc],
+  );
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [formState, setFormState] = useState(defaultFormState);

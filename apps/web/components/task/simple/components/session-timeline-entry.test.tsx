@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import type { ReactNode } from "react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { StateProvider } from "@/components/state-provider";
+import { createTestQueryClient } from "@/test-utils/render-with-query";
 import type { TaskSession } from "@/app/office/tasks/[id]/types";
 
 // Provide a simple in-memory localStorage mock so the tests are not sensitive
@@ -93,10 +95,15 @@ function makeSession(overrides: Partial<TaskSession> = {}): TaskSession {
 }
 
 function wrap(node: ReactNode) {
+  // The entry resolves the agent name via useAgentName (TanStack Query);
+  // with no seeded cache it falls back to the session's agentName. A
+  // QueryClient must be present.
   return (
-    <StateProvider>
-      <ActiveSessionRefProvider>{node}</ActiveSessionRefProvider>
-    </StateProvider>
+    <QueryClientProvider client={createTestQueryClient()}>
+      <StateProvider>
+        <ActiveSessionRefProvider>{node}</ActiveSessionRefProvider>
+      </StateProvider>
+    </QueryClientProvider>
   );
 }
 

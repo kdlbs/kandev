@@ -1,5 +1,6 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import { IconDotsVertical, IconEye, IconCircleCheck } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
@@ -11,6 +12,7 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
+import { officeQueryOptions } from "@/lib/query/query-options/office";
 import type { AgentProfile, Project } from "@/lib/state/slices/office/types";
 import type { IssueDraft } from "./new-task-draft";
 import { ParticipantRow } from "./new-task-participant-row";
@@ -107,8 +109,15 @@ function ProjectPickerPopover({
 }
 
 export function NewTaskSelectorRow({ draft, onUpdate }: Props) {
-  const agents = useAppStore((s) => s.office.agentProfiles);
-  const projects = useAppStore((s) => s.office.projects);
+  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const { data: agents = [] } = useQuery({
+    ...officeQueryOptions.agents(workspaceId ?? ""),
+    enabled: !!workspaceId,
+  });
+  const { data: projects = [] } = useQuery({
+    ...officeQueryOptions.projects(workspaceId ?? ""),
+    enabled: !!workspaceId,
+  });
 
   return (
     <div className="space-y-2">

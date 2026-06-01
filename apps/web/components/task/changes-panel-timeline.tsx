@@ -7,7 +7,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { FileInfo } from "@/lib/state/store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
-import { useAppStore } from "@/components/state-provider";
 import { FileRow, BulkActionBar } from "./changes-panel-file-row";
 import { ChangesTree, RepoTreeGroup } from "./changes-panel-tree";
 import type { ChangedFile } from "./changes-panel-helpers";
@@ -21,6 +20,7 @@ import {
 } from "./changes-panel-repo-groups";
 import { PRFilesGroupedList } from "./changes-panel-pr-files";
 import type { OpenDiffOptions } from "./changes-diff-target";
+import { useUserSettings } from "@/hooks/domains/settings/use-user-settings";
 
 // --- Timeline visual components ---
 
@@ -290,7 +290,7 @@ function FileListBody(props: FileListBodyProps) {
   // in two repos will light up both rows. Matches existing routing limit noted
   // in FileRowProps comments.
   const activeFilePath = useDockviewStore((s) => s.activeFilePath);
-  const layout = useAppStore((s) => s.userSettings.changesPanelLayout);
+  const layout = useUserSettings().data?.changesPanelLayout ?? "flat";
   const groups = useMemo(() => groupByRepositoryName(files, (f) => f.repositoryName), [files]);
   // Per-repo collapsed state: keyed by repositoryName. Default expanded;
   // setting an entry to true collapses that group. Persists across re-renders

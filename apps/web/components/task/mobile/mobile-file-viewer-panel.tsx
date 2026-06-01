@@ -9,7 +9,7 @@ import { MarkdownPreviewContent } from "../markdown-preview-content";
 import { FileImageViewer } from "../file-image-viewer";
 import { FileBinaryViewer } from "../file-binary-viewer";
 import { getFileCategory } from "@/lib/utils/file-types";
-import { useAppStore } from "@/components/state-provider";
+import { useTaskSessionById } from "@/hooks/domains/session/use-task-session-by-id";
 import type { OpenFileTab } from "@/lib/types/backend";
 
 type MobileFileViewerPanelProps = {
@@ -29,9 +29,7 @@ function resolveViewerKind(file: OpenFileTab): "image" | "binary" | "text" {
 }
 
 export function MobileFileViewerPanel({ file, sessionId, onClose }: MobileFileViewerPanelProps) {
-  const activeSession = useAppStore((state) =>
-    sessionId ? (state.taskSessions.items[sessionId] ?? null) : null,
-  );
+  const activeSession = useTaskSessionById(sessionId);
   const worktreePath = activeSession?.worktree_path ?? undefined;
   const viewerKind = useMemo(() => resolveViewerKind(file), [file]);
   const markdownFile = isMarkdownFile(file.path);

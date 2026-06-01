@@ -10,11 +10,12 @@ import { useJiraEnabled } from "./use-jira-enabled";
 const fetchJiraConfig = () => getJiraConfig();
 
 export function useJiraAuthed(): boolean {
-  return useIntegrationAuthed(fetchJiraConfig);
+  return useIntegrationAuthed("jira", fetchJiraConfig);
 }
 
 export function useJiraAvailable(): boolean {
   return useIntegrationAvailable({
+    kind: "jira",
     useEnabled: useJiraEnabled,
     fetchConfig: fetchJiraConfig,
   });

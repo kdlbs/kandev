@@ -38,7 +38,6 @@ function makeStore(overrides: Partial<MockStore> = {}): MockStore {
       { id: "agent-a", label: "Agent A", agent_id: "a", agent_name: "Agent A" },
       { id: "agent-b", label: "Agent B", agent_id: "b", agent_name: "Agent B" },
     ] as MockStore["agentProfiles"],
-    taskSessions: {},
     ...overrides,
   };
 }

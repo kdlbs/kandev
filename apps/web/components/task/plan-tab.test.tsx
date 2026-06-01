@@ -13,7 +13,6 @@ vi.mock("@/components/state-provider", () => ({
     selector({
       tasks: { activeTaskId: mockActiveTaskId },
       taskPlans: {
-        byTaskId: mockActiveTaskId && mockPlan ? { [mockActiveTaskId]: mockPlan } : {},
         lastSeenUpdatedAtByTaskId:
           mockActiveTaskId && mockLastSeen !== undefined
             ? { [mockActiveTaskId]: mockLastSeen }
@@ -21,6 +20,16 @@ vi.mock("@/components/state-provider", () => ({
       },
       markTaskPlanSeen: mockMarkTaskPlanSeen,
     }),
+}));
+
+// Plan now lives in the TanStack Query cache; the component reads it via
+// useQuery and re-reads the fresh updated_at via queryClient.getQueryData.
+vi.mock("@tanstack/react-query", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tanstack/react-query")>()),
+  useQuery: () => ({ data: mockPlan ? { plan: mockPlan, lastSeenUpdatedAt: null } : undefined }),
+  useQueryClient: () => ({
+    getQueryData: () => (mockPlan ? { plan: mockPlan, lastSeenUpdatedAt: null } : undefined),
+  }),
 }));
 
 vi.mock("dockview-react", () => ({
@@ -112,7 +121,7 @@ describe("PlanTab", () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       <PlanTab {...({ api: makeApi(true) } as any)} />,
     );
-    expect(mockMarkTaskPlanSeen).toHaveBeenCalledWith("task-1");
+    expect(mockMarkTaskPlanSeen).toHaveBeenCalledWith("task-1", TS);
   });
 
   it("marks seen synchronously when an update lands while the tab is already active", () => {
@@ -132,7 +141,7 @@ describe("PlanTab", () => {
     );
 
     // useLayoutEffect must have fired markTaskPlanSeen — keeps the dot from flashing.
-    expect(mockMarkTaskPlanSeen).toHaveBeenCalledWith("task-1");
+    expect(mockMarkTaskPlanSeen).toHaveBeenCalledWith("task-1", TS_LATER);
   });
 
   it("does not mark seen on update when the tab is not active", () => {

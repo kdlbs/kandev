@@ -1,7 +1,10 @@
 import { useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { appendToQueue } from "@/lib/api/domains/queue-api";
 import { useAppStoreApi } from "@/components/state-provider";
+import { qk } from "@/lib/query/keys";
+import type { TaskSession } from "@/lib/types/http";
 import { useCommentsStore } from "@/lib/state/slices/comments";
 import {
   formatReviewCommentsAsMarkdown,
@@ -106,6 +109,7 @@ function buildMessagePayload(
 export function useRunComment({ sessionId, taskId }: UseRunCommentParams) {
   const markCommentsSent = useCommentsStore((s) => s.markCommentsSent);
   const storeApi = useAppStoreApi();
+  const queryClient = useQueryClient();
 
   const runComment = useCallback(
     async (comment: Comment): Promise<{ queued: boolean }> => {
@@ -115,7 +119,8 @@ export function useRunComment({ sessionId, taskId }: UseRunCommentParams) {
       // stale closures that could cause incorrect behavior (e.g. queuing
       // comments when the agent is idle, or sending with wrong plan mode).
       const state = storeApi.getState();
-      const activeSession = state.taskSessions.items[sessionId] ?? null;
+      const activeSession =
+        queryClient.getQueryData<TaskSession | null>(qk.taskSession.byId(sessionId)) ?? null;
       const isAgentBusy = activeSession?.state === "STARTING" || activeSession?.state === "RUNNING";
       const planModeEnabled = state.chatInput.planModeBySessionId[sessionId] ?? false;
       const content = formatSingleComment(comment);
@@ -146,7 +151,7 @@ export function useRunComment({ sessionId, taskId }: UseRunCommentParams) {
         throw error;
       }
     },
-    [sessionId, taskId, storeApi, markCommentsSent],
+    [sessionId, taskId, storeApi, queryClient, markCommentsSent],
   );
 
   return { runComment };

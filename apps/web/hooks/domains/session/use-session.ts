@@ -1,5 +1,8 @@
 import { useEffect, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
+import { useTaskSessionById } from "@/hooks/domains/session/use-task-session-by-id";
+import { sessionAgentctlQueryOptions } from "@/lib/query/query-options/session-runtime";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { TaskSession } from "@/lib/types/http";
 
@@ -11,13 +14,10 @@ type UseSessionResult = {
 };
 
 export function useSession(sessionId: string | null): UseSessionResult {
-  const session = useAppStore((state) =>
-    sessionId ? (state.taskSessions.items[sessionId] ?? null) : null,
-  );
+  const session = useTaskSessionById(sessionId);
   const connectionStatus = useAppStore((state) => state.connection.status);
-  const agentctlReady = useAppStore((state) =>
-    sessionId ? state.sessionAgentctl.itemsBySessionId[sessionId]?.status === "ready" : false,
-  );
+  const agentctlReady =
+    useQuery(sessionAgentctlQueryOptions(sessionId ?? "")).data?.status === "ready";
 
   const isActive = useMemo(() => {
     if (!session?.state) return false;

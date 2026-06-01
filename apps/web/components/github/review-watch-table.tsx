@@ -6,7 +6,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useToast } from "@/components/toast-provider";
-import { useAppStore } from "@/components/state-provider";
+import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
 import type { ReviewWatch } from "@/lib/types/github";
 
 type ReviewWatchTableProps = {
@@ -114,7 +114,7 @@ export function ReviewWatchTable({
   onTrigger,
   onToggleEnabled,
 }: ReviewWatchTableProps) {
-  const workspaces = useAppStore((s) => s.workspaces.items);
+  const { workspaces } = useWorkspaces();
   const workspaceName = (id: string) => workspaces.find((w) => w.id === id)?.name ?? id;
 
   if (watches.length === 0) {

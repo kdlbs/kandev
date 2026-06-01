@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { DEFAULT_VIEW_ID } from "@/lib/state/slices/ui/sidebar-view-builtins";
+import { useUserSettings } from "@/hooks/domains/settings/use-user-settings";
 
 /**
  * Runs one-time migration of locally-stored sidebar views to the backend and
@@ -12,7 +13,7 @@ import { DEFAULT_VIEW_ID } from "@/lib/state/slices/ui/sidebar-view-builtins";
 export function useSidebarViewsSync() {
   const views = useAppStore((s) => s.sidebarViews.views);
   const syncError = useAppStore((s) => s.sidebarViews.syncError);
-  const userSettingsLoaded = useAppStore((s) => s.userSettings.loaded);
+  const userSettingsLoaded = useUserSettings().loaded;
   const migrate = useAppStore((s) => s.migrateLocalViewsToBackend);
   const clearError = useAppStore((s) => s.clearSidebarSyncError);
   const { toast } = useToast();

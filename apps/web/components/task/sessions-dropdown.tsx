@@ -19,6 +19,8 @@ import { Badge } from "@kandev/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { TaskCreateDialog } from "../task-create-dialog";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useAgentProfiles } from "@/hooks/domains/settings/use-settings-reads";
+import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
 
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { performLayoutSwitch } from "@/lib/state/dockview-store";
@@ -170,7 +172,7 @@ function useSessionLifecycleActions(
 }
 
 function useSessionsDropdownState(taskId: string | null) {
-  const agentProfiles = useAppStore((state) => state.agentProfiles.items);
+  const agentProfiles = useAgentProfiles();
   const { sessions, loadSessions } = useTaskSessions(taskId);
   const currentTime = useRunningSessionsClock(sessions);
 
@@ -192,12 +194,9 @@ export const SessionsDropdown = memo(function SessionsDropdown({
 }: SessionsDropdownProps) {
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
   const [open, setOpen] = useState(false);
-  const storePrimarySessionId = useAppStore((state) => {
-    const activeTaskId = state.tasks.activeTaskId;
-    if (!activeTaskId) return null;
-    const task = state.kanban.tasks.find((t: { id: string }) => t.id === activeTaskId);
-    return task?.primarySessionId ?? null;
-  });
+  const activeTaskIdForPrimary = useAppStore((state) => state.tasks.activeTaskId);
+  const taskForPrimary = useTaskById(activeTaskIdForPrimary);
+  const storePrimarySessionId = taskForPrimary?.primarySessionId ?? null;
   const primarySessionId = primarySessionIdProp ?? storePrimarySessionId;
   const { sortedSessions, currentTime, loadSessions, resolveAgentLabel } =
     useSessionsDropdownState(taskId);

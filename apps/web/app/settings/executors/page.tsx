@@ -15,7 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@kandev/ui/dialog";
-import { useAppStore } from "@/components/state-provider";
+import { useExecutors, useSetExecutors } from "@/hooks/domains/settings/use-settings-reads";
 import { deleteExecutorProfile } from "@/lib/api/domains/settings-api";
 import { EXECUTOR_ICON_MAP, getExecutorLabel } from "@/lib/executor-icons";
 import type { Executor, ExecutorProfile } from "@/lib/types/http";
@@ -27,7 +27,7 @@ type ProfileWithExecutor = ExecutorProfile & {
 };
 
 function useAllProfiles(): ProfileWithExecutor[] {
-  const executors = useAppStore((state) => state.executors.items);
+  const executors = useExecutors();
   return useMemo(
     () =>
       executors.flatMap((e: Executor) =>
@@ -177,8 +177,8 @@ function DeleteProfileDialog({
 export default function ExecutorsHubPage() {
   const router = useRouter();
   const allProfiles = useAllProfiles();
-  const executors = useAppStore((state) => state.executors.items);
-  const setExecutors = useAppStore((state) => state.setExecutors);
+  const executors = useExecutors();
+  const setExecutors = useSetExecutors();
   const [deleteProfileId, setDeleteProfileId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 

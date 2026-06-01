@@ -4,8 +4,11 @@ import { createContext, useContext, useEffect, useState } from "react";
 import type { StoreApi } from "zustand";
 import { useStore } from "zustand";
 import { IS_DEBUG, registerSessionTaskResolver } from "@/lib/debug/log";
+import { getBrowserQueryClient } from "@/lib/query/client";
+import { qk } from "@/lib/query/keys";
 import type { AppState, StoreProviderProps } from "@/lib/state/store";
 import { createAppStore } from "@/lib/state/store";
+import type { TaskSession } from "@/lib/types/http";
 
 const StoreContext = createContext<StoreApi<AppState> | null>(null);
 
@@ -29,10 +32,15 @@ export function StateProvider({ children, initialState }: StoreProviderProps) {
   // a single task (see lib/debug/log.ts). No-op in production.
   useEffect(() => {
     if (!IS_DEBUG) return;
+    // Server "taskSessions" state now lives in the TanStack Query cache (the
+    // Zustand mirror was removed in the TQ migration). Read the by-id slot the
+    // session-state bridge writes (qk.taskSession.byId) to resolve task_id.
     return registerSessionTaskResolver(
-      (sessionId) => store.getState().taskSessions.items[sessionId]?.task_id,
+      (sessionId) =>
+        getBrowserQueryClient().getQueryData<TaskSession | null>(qk.taskSession.byId(sessionId))
+          ?.task_id,
     );
-  }, [store]);
+  }, []);
 
   return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;
 }

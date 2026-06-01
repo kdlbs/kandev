@@ -13,7 +13,8 @@ import {
   type ConfigurableShortcutId,
   type StoredShortcutOverrides,
 } from "@/lib/keyboard/shortcut-overrides";
-import { useAppStore } from "@/components/state-provider";
+import { useUserSettings, useSetUserSettings } from "@/hooks/domains/settings/use-user-settings";
+import { DEFAULT_USER_SETTINGS } from "@/lib/types/settings";
 import { useToast } from "@/components/toast-provider";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
 
@@ -108,9 +109,9 @@ export function ShortcutRecorder({
 }
 
 export function KeyboardShortcutsCard() {
-  const storeOverrides = useAppStore((s) => s.userSettings.keyboardShortcuts);
-  const setUserSettings = useAppStore((s) => s.setUserSettings);
-  const userSettings = useAppStore((s) => s.userSettings);
+  const userSettings = useUserSettings().data ?? DEFAULT_USER_SETTINGS;
+  const setUserSettings = useSetUserSettings();
+  const storeOverrides = userSettings.keyboardShortcuts;
   const shortcuts = resolveAllShortcuts(storeOverrides);
   const { toast } = useToast();
 

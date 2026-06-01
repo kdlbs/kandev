@@ -40,10 +40,10 @@ function makeSession(
   };
 }
 
-function stateWithSessions(sessions: TaskSession[]): AppState {
-  const items: Record<string, TaskSession> = {};
-  for (const s of sessions) items[s.id] = s;
-  return { taskSessions: { items }, messages: { bySession: {} } } as unknown as AppState;
+// The taskSessions selectors now operate over a flat session list (read from
+// the TanStack Query by-task cache via `useAllTaskSessions`), not AppState.
+function stateWithSessions(sessions: TaskSession[]): TaskSession[] {
+  return sessions;
 }
 
 function makeMessage(id: string, sessionId: string, type: Message["type"]): Message {

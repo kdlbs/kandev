@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
@@ -9,6 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import { useAppStore } from "@/components/state-provider";
 import { createAgentProfile } from "@/lib/api/domains/office-api";
+import { officeQueryOptions } from "@/lib/query/query-options/office";
+import { qk } from "@/lib/query/keys";
 import type { AgentRole, AgentProfile } from "@/lib/state/slices/office/types";
 
 type CreateAgentDialogProps = {
@@ -208,9 +211,12 @@ const FALLBACK_EXECUTOR_TYPES = [
 
 export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps) {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const agents = useAppStore((s) => s.office.agentProfiles);
-  const meta = useAppStore((s) => s.office.meta);
-  const addOfficeAgentProfile = useAppStore((s) => s.addOfficeAgentProfile);
+  const qc = useQueryClient();
+  const { data: agents = [] } = useQuery({
+    ...officeQueryOptions.agents(workspaceId ?? ""),
+    enabled: !!workspaceId,
+  });
+  const { data: meta } = useQuery(officeQueryOptions.metaGlobal());
 
   const roles = meta?.roles.map((r) => ({ id: r.id, label: r.label })) ?? FALLBACK_ROLES;
   const executorTypes =
@@ -236,8 +242,8 @@ export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps
         maxConcurrentSessions: state.maxConcurrent,
         executorPreference: state.executorPref ? { type: state.executorPref } : undefined,
       } as Partial<AgentProfile>);
-      if (result) {
-        addOfficeAgentProfile(result);
+      if (result && workspaceId) {
+        void qc.invalidateQueries({ queryKey: qk.office.agents(workspaceId) });
       }
       setState(INITIAL_STATE);
       onOpenChange(false);
@@ -249,7 +255,7 @@ export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps
     } finally {
       setSubmitting(false);
     }
-  }, [state, workspaceId, addOfficeAgentProfile, onOpenChange]);
+  }, [state, workspaceId, qc, onOpenChange]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

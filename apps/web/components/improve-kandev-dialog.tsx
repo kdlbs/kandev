@@ -6,8 +6,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@kandev/ui/dia
 import { Button } from "@kandev/ui/button";
 import { IconAlertTriangle, IconStethoscope, IconCheck } from "@tabler/icons-react";
 
+import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/components/toast-provider";
-import { useAppStore } from "@/components/state-provider";
+import { qk } from "@/lib/query/keys";
 import { bootstrapImproveKandev } from "@/lib/api/domains/improve-kandev-api";
 import { listRepositories } from "@/lib/api/domains/workspace-api";
 import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
@@ -142,7 +143,7 @@ function useBootstrapKandev(
   setBootstrap: (s: BootstrapState) => void,
 ) {
   const { toast } = useToast();
-  const setRepositories = useAppStore((state) => state.setRepositories);
+  const queryClient = useQueryClient();
   useEffect(() => {
     if (mode !== "create" || !workspaceId) return;
     let cancelled = false;
@@ -172,7 +173,9 @@ function useBootstrapKandev(
           listRepositories(workspaceId, undefined, { cache: "no-store" }),
         ]);
         if (cancelled) return;
-        setRepositories(workspaceId, reposRes.repositories);
+        // Seed the TQ repos cache so the locked repo dropdown can resolve a
+        // label for the freshly-bootstrapped repository_id.
+        queryClient.setQueryData(qk.workspaces.repos(workspaceId), reposRes);
         setBootstrap({ kind: "ready", data, steps: stepsRes.steps });
       } catch (err) {
         if (cancelled) return;
@@ -188,7 +191,7 @@ function useBootstrapKandev(
     return () => {
       cancelled = true;
     };
-  }, [mode, workspaceId, setBootstrap, setRepositories, toast]);
+  }, [mode, workspaceId, setBootstrap, queryClient, toast]);
 }
 
 function IntroBody({

@@ -7,7 +7,7 @@ import {
   listExecutors,
   listWorkspaces,
 } from "@/lib/api";
-import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
+import { toAgentProfileOption } from "@/lib/types/settings";
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
   return <SettingsLayoutServer>{children}</SettingsLayoutServer>;
@@ -51,18 +51,10 @@ async function SettingsLayoutServer({ children }: { children: React.ReactNode })
       },
       agentDiscovery: {
         items: discovery.agents,
-        loading: false,
-        loaded: true,
       },
       availableAgents: {
         items: available.agents,
         tools: available.tools ?? [],
-        loading: false,
-        loaded: true,
-      },
-      settingsData: {
-        executorsLoaded: true,
-        agentsLoaded: true,
       },
     };
   } catch {

@@ -1,85 +1,111 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  listReviewWatches,
   createReviewWatch,
   updateReviewWatch,
   deleteReviewWatch,
   triggerReviewWatch,
   triggerAllReviewWatches,
 } from "@/lib/api/domains/github-api";
-import { useAppStore } from "@/components/state-provider";
-import type { CreateReviewWatchRequest, UpdateReviewWatchRequest } from "@/lib/types/github";
+import { githubQueryOptions } from "@/lib/query/query-options/github";
+import { qk } from "@/lib/query/keys";
+import type {
+  ReviewWatch,
+  CreateReviewWatchRequest,
+  UpdateReviewWatchRequest,
+} from "@/lib/types/github";
 
 // useReviewWatches has three modes:
 //   - workspaceId: string         → fetch watches scoped to one workspace
 //   - workspaceId: undefined      → fetch watches across all workspaces
 //   - workspaceId: null           → don't fetch (caller hasn't resolved a workspace yet)
 export function useReviewWatches(workspaceId?: string | null) {
-  const items = useAppStore((state) => state.reviewWatches.items);
-  const loaded = useAppStore((state) => state.reviewWatches.loaded);
-  const loading = useAppStore((state) => state.reviewWatches.loading);
-  const setReviewWatches = useAppStore((state) => state.setReviewWatches);
-  const setReviewWatchesLoading = useAppStore((state) => state.setReviewWatchesLoading);
-  const addWatch = useAppStore((state) => state.addReviewWatch);
-  const updateWatch = useAppStore((state) => state.updateReviewWatch);
-  const removeWatch = useAppStore((state) => state.removeReviewWatch);
+  const qc = useQueryClient();
+  const cacheKey =
+    workspaceId !== null
+      ? qk.github.reviewWatches(workspaceId ?? undefined)
+      : qk.github.reviewWatches();
 
-  useEffect(() => {
-    if (workspaceId === null || loaded || loading) return;
-    setReviewWatchesLoading(true);
-    listReviewWatches(workspaceId ?? undefined, { cache: "no-store" })
-      .then((response) => {
-        setReviewWatches(response?.watches ?? []);
-      })
-      .catch(() => {
-        setReviewWatches([]);
-      })
-      .finally(() => {
-        setReviewWatchesLoading(false);
+  const { data, isLoading, isSuccess } = useQuery(githubQueryOptions.reviewWatches(workspaceId));
+
+  const createMutation = useMutation({
+    mutationFn: (req: CreateReviewWatchRequest) => createReviewWatch(req),
+    onSuccess: (watch) => {
+      qc.setQueryData<{ watches: ReviewWatch[] }>(cacheKey, (prev) => {
+        if (!prev) return { watches: [watch] };
+        return {
+          ...prev,
+          watches: [...prev.watches.filter((w) => w.id !== watch.id), watch],
+        };
       });
-  }, [workspaceId, loaded, loading, setReviewWatches, setReviewWatchesLoading]);
-
-  const create = useCallback(
-    async (req: CreateReviewWatchRequest) => {
-      const watch = await createReviewWatch(req);
-      addWatch(watch);
-      return watch;
     },
-    [addWatch],
-  );
-
-  const update = useCallback(
-    async (id: string, req: UpdateReviewWatchRequest) => {
-      const watch = await updateReviewWatch(id, req);
-      updateWatch(watch);
-      return watch;
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: cacheKey });
     },
-    [updateWatch],
-  );
+  });
 
-  const remove = useCallback(
-    async (id: string) => {
-      await deleteReviewWatch(id);
-      removeWatch(id);
+  const updateMutation = useMutation({
+    mutationFn: ({ id, req }: { id: string; req: UpdateReviewWatchRequest }) =>
+      updateReviewWatch(id, req),
+    onSuccess: (watch) => {
+      qc.setQueryData<{ watches: ReviewWatch[] }>(cacheKey, (prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          watches: prev.watches.map((w) => (w.id === watch.id ? watch : w)),
+        };
+      });
     },
-    [removeWatch],
-  );
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: cacheKey });
+    },
+  });
 
-  const trigger = useCallback(async (id: string) => {
+  const removeMutation = useMutation({
+    mutationFn: (id: string) => deleteReviewWatch(id),
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: cacheKey });
+      const prev = qc.getQueryData<{ watches: ReviewWatch[] }>(cacheKey);
+      qc.setQueryData<{ watches: ReviewWatch[] }>(cacheKey, (old) => {
+        if (!old) return old;
+        return { ...old, watches: old.watches.filter((w) => w.id !== id) };
+      });
+      return { prev };
+    },
+    onError: (_err, _id, ctx) => {
+      if (ctx?.prev !== undefined) qc.setQueryData(cacheKey, ctx.prev);
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: cacheKey });
+    },
+  });
+
+  async function create(req: CreateReviewWatchRequest) {
+    return createMutation.mutateAsync(req);
+  }
+
+  async function update(id: string, req: UpdateReviewWatchRequest) {
+    return updateMutation.mutateAsync({ id, req });
+  }
+
+  async function remove(id: string) {
+    return removeMutation.mutateAsync(id);
+  }
+
+  async function trigger(id: string) {
     return triggerReviewWatch(id);
-  }, []);
+  }
 
-  const triggerAll = useCallback(async () => {
+  async function triggerAll() {
     if (!workspaceId) return null;
     return triggerAllReviewWatches(workspaceId);
-  }, [workspaceId]);
+  }
 
   return {
-    items,
-    loaded,
-    loading,
+    items: data?.watches ?? [],
+    loaded: isSuccess,
+    loading: isLoading,
     create,
     update,
     remove,

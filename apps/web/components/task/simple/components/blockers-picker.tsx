@@ -1,15 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { IconX } from "@tabler/icons-react";
-import { useAppStore } from "@/components/state-provider";
-import {
-  addTaskBlocker,
-  removeTaskBlocker,
-  searchTasks,
-} from "@/lib/api/domains/office-extended-api";
+import { addTaskBlocker, removeTaskBlocker } from "@/lib/api/domains/office-extended-api";
 import { ApiError } from "@/lib/api/client";
 import { useOptimisticTaskMutation } from "@/hooks/use-optimistic-task-mutation";
+import { useTaskCandidates } from "@/hooks/domains/office/use-task-candidates";
 import type { OfficeTask } from "@/lib/state/slices/office/types";
 import type { Task } from "@/app/office/tasks/[id]/types";
 import { MultiSelectPopover, type MultiSelectItem } from "./multi-select-popover";
@@ -76,27 +72,9 @@ function buildItems(candidates: OfficeTask[], currentTaskId: string): BlockerIte
 }
 
 export function BlockersPicker({ task }: BlockersPickerProps) {
-  const storeTasks = useAppStore((s) => s.office.tasks.items);
-  const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const [fetched, setFetched] = useState<OfficeTask[]>([]);
+  const candidates = useTaskCandidates();
   const mutate = useOptimisticTaskMutation();
 
-  useEffect(() => {
-    if (!workspaceId || storeTasks.length > 0) return;
-    let cancelled = false;
-    searchTasks(workspaceId, "", 50)
-      .then((res) => {
-        if (!cancelled) setFetched(res.tasks ?? []);
-      })
-      .catch(() => {
-        if (!cancelled) setFetched([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceId, storeTasks.length]);
-
-  const candidates = storeTasks.length > 0 ? storeTasks : fetched;
   const items = useMemo(() => buildItems(candidates, task.id), [candidates, task.id]);
 
   const handleAdd = async (id: string) => {
@@ -154,8 +132,6 @@ export function BlockersPicker({ task }: BlockersPickerProps) {
       <span className="truncate">{item.title}</span>
     </span>
   );
-
-  void workspaceId;
 
   return (
     <MultiSelectPopover

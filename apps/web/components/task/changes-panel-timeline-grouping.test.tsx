@@ -25,10 +25,12 @@ vi.mock("@/hooks/use-multi-select", () => ({
   }),
 }));
 
-vi.mock("@/components/state-provider", () => ({
-  useAppStore: (
-    selector: (state: { userSettings: { changesPanelLayout: "flat" | "tree" } }) => unknown,
-  ) => selector({ userSettings: { changesPanelLayout: "flat" } }),
+vi.mock("@/hooks/domains/settings/use-user-settings", () => ({
+  useUserSettings: () => ({
+    data: { changesPanelLayout: "flat" as const },
+    loaded: true,
+    loading: false,
+  }),
 }));
 
 import { FileListSection, CommitsSection, PRFilesSection } from "./changes-panel-timeline";

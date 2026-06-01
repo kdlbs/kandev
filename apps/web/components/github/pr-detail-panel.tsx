@@ -16,7 +16,12 @@ import { Separator } from "@kandev/ui/separator";
 import { ScrollArea } from "@kandev/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
-import { useActiveTaskPR, useTaskPR } from "@/hooks/domains/github/use-task-pr";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  useActiveTaskPR,
+  useTaskPR,
+  upsertTaskPRIntoCaches,
+} from "@/hooks/domains/github/use-task-pr";
 import { prPanelLabel } from "@/components/github/pr-utils";
 import { usePRFeedback } from "@/hooks/domains/github/use-pr-feedback";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
@@ -116,7 +121,7 @@ function useAddPRFeedbackAsContext(sessionId: string, prNumber: number) {
 // Guard: never regress the store to a less-terminal state (e.g. merged → open)
 // because the feedback fetch may return stale data from before a backend poll update.
 function useSyncLivePRState(taskPR: TaskPR, feedback: PRFeedback | null) {
-  const setTaskPR = useAppStore((s) => s.setTaskPR);
+  const qc = useQueryClient();
   const prState = taskPR.state;
   const prMergedAt = taskPR.merged_at ?? null;
   const prClosedAt = taskPR.closed_at ?? null;
@@ -146,8 +151,9 @@ function useSyncLivePRState(taskPR: TaskPR, feedback: PRFeedback | null) {
       livePR.deletions !== prDeletions ||
       effectiveMergeableState !== prMergeableState
     ) {
-      setTaskPR(prTaskId, {
+      upsertTaskPRIntoCaches(qc, {
         ...taskPR,
+        task_id: prTaskId,
         state: effectiveState as TaskPR["state"],
         additions: livePR.additions,
         deletions: livePR.deletions,
@@ -166,7 +172,7 @@ function useSyncLivePRState(taskPR: TaskPR, feedback: PRFeedback | null) {
     prDeletions,
     prMergeableState,
     prTaskId,
-    setTaskPR,
+    qc,
   ]);
 }
 

@@ -5,7 +5,11 @@ import { getReleaseNotes, hasReleaseNotes } from "@/lib/release-notes";
 import { getChangelog, type ChangelogEntry } from "@/lib/changelog";
 import { updateUserSettings } from "@/lib/api";
 import { getWebSocketClient } from "@/lib/ws/connection";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import {
+  useUserSettings,
+  useUserSettingsController,
+} from "@/hooks/domains/settings/use-user-settings";
+import { DEFAULT_USER_SETTINGS } from "@/lib/types/settings";
 
 const LEGACY_STORAGE_KEY = "kandev.releaseNotes.lastSeenVersion";
 
@@ -39,10 +43,11 @@ function persistLastSeenVersion(version: string) {
 
 export function useReleaseNotes() {
   const latestRelease = getReleaseNotes();
-  const showReleaseNotification = useAppStore((s) => s.userSettings.showReleaseNotification);
-  const lastSeenVersion = useAppStore((s) => s.userSettings.releaseNotesLastSeenVersion);
-  const settingsLoaded = useAppStore((s) => s.userSettings.loaded);
-  const storeApi = useAppStoreApi();
+  const userSettings = useUserSettings().data ?? DEFAULT_USER_SETTINGS;
+  const showReleaseNotification = userSettings.showReleaseNotification;
+  const lastSeenVersion = userSettings.releaseNotesLastSeenVersion;
+  const settingsLoaded = userSettings.loaded;
+  const { setUserSettings, getLatest } = useUserSettingsController();
 
   const changelog = useMemo(() => getChangelog(), []);
   const unseenEntries = useMemo(
@@ -63,14 +68,13 @@ export function useReleaseNotes() {
       if (!raw) return;
       const parsed = JSON.parse(raw) as string;
       if (!parsed) return;
-      const { userSettings, setUserSettings } = storeApi.getState();
-      setUserSettings({ ...userSettings, releaseNotesLastSeenVersion: parsed });
+      setUserSettings({ ...getLatest(), releaseNotesLastSeenVersion: parsed });
       persistLastSeenVersion(parsed);
       localStorage.removeItem(LEGACY_STORAGE_KEY);
     } catch {
       // Ignore migration errors
     }
-  }, [settingsLoaded, lastSeenVersion, storeApi]);
+  }, [settingsLoaded, lastSeenVersion, setUserSettings, getLatest]);
 
   const markAsSeen = useCallback(() => {
     // Mark against the newest version in the full changelog rather than the
@@ -80,10 +84,9 @@ export function useReleaseNotes() {
     // marked against the build version, getUnseenEntries would still see the
     // backfilled entries as newer and the topbar dot would never clear.
     const version = changelog[0]?.version ?? latestRelease.version;
-    const { userSettings, setUserSettings } = storeApi.getState();
-    setUserSettings({ ...userSettings, releaseNotesLastSeenVersion: version });
+    setUserSettings({ ...getLatest(), releaseNotesLastSeenVersion: version });
     persistLastSeenVersion(version);
-  }, [changelog, latestRelease.version, storeApi]);
+  }, [changelog, latestRelease.version, setUserSettings, getLatest]);
 
   const openDialog = useCallback(() => {
     setDialogEntries(unseenEntries);

@@ -7,7 +7,7 @@ import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { useAppStore } from "@/components/state-provider";
+import { useExecutors, useSetExecutors } from "@/hooks/domains/settings/use-settings-reads";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import {
   createExecutorProfile,
@@ -418,8 +418,8 @@ function useCreateProfileSave(
   executorId: string,
 ) {
   const router = useRouter();
-  const executors = useAppStore((state) => state.executors.items);
-  const setExecutors = useAppStore((state) => state.setExecutors);
+  const executors = useExecutors();
+  const setExecutors = useSetExecutors();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

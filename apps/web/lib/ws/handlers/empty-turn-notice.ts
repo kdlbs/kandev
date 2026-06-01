@@ -1,6 +1,7 @@
-import type { StoreApi } from "zustand";
-import type { AppState } from "@/lib/state/store";
+import type { QueryClient } from "@tanstack/react-query";
 import type { AvailableCommand } from "@/lib/state/slices/session-runtime/types";
+import { qk } from "@/lib/query/keys";
+import type { MessagesData } from "@/lib/query/query-options/session";
 import type { TurnEventPayload } from "@/lib/types/backend";
 import type { Message } from "@/lib/types/http";
 import { sessionId, taskId } from "@/lib/types/http";
@@ -103,19 +104,22 @@ export function computeEmptyTurnNotice(input: EmptyTurnNoticeInput): Message | n
 }
 
 /**
- * Reads the store, computes the empty-turn notice for a completed turn, and
- * injects it into the chat when warranted.
+ * Computes the empty-turn notice for a completed turn from the TanStack Query
+ * caches and appends it to the session's messages cache when warranted. This is
+ * the canonical path: the chat UI reads from `qk.session.messages(sid)`, so the
+ * notice must land there to be rendered.
+ *
+ * `isEphemeralSurface` is resolved by the caller from Zustand (quick-chat /
+ * config-chat membership remains client-only state).
  */
-export function maybeEmitEmptyTurnNotice(
-  store: StoreApi<AppState>,
+export function emitEmptyTurnNoticeIntoCache(
+  qc: QueryClient,
   payload: TurnEventPayload,
+  isEphemeralSurface: boolean,
   now: string = new Date().toISOString(),
 ): void {
-  const state = store.getState();
   const sid = payload.session_id;
-  const isEphemeralSurface =
-    state.quickChat.sessions.some((s) => s.sessionId === sid) ||
-    state.configChat.sessions.some((s) => s.sessionId === sid);
+  const messagesData = qc.getQueryData<MessagesData>(qk.session.messages(sid));
 
   const notice = computeEmptyTurnNotice({
     sessionId: sid,
@@ -123,10 +127,16 @@ export function maybeEmitEmptyTurnNotice(
     turnId: payload.id,
     hadOutput: payload.had_output,
     isEphemeralSurface,
-    messages: state.messages.bySession[sid],
-    availableCommands: state.availableCommands.bySessionId[sid],
+    messages: messagesData?.messages,
+    availableCommands: qc.getQueryData<AvailableCommand[]>(qk.session.availableCommands(sid)),
     now,
   });
+  if (!notice) return;
 
-  if (notice) store.getState().addMessage(notice);
+  qc.setQueryData<MessagesData>(qk.session.messages(sid), (prev) => {
+    if (!prev) {
+      return { messages: [notice], hasMore: false, oldestCursor: notice.id };
+    }
+    return { ...prev, messages: [...prev.messages, notice] };
+  });
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { IconPlus, IconX } from "@tabler/icons-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@kandev/ui/dialog";
@@ -10,8 +11,8 @@ import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Textarea } from "@kandev/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
-import { useAppStore } from "@/components/state-provider";
 import { createProject } from "@/lib/api/domains/office-api";
+import { officeQueryOptions } from "@/lib/query/query-options/office";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
 
 const COLOR_OPTIONS = [
@@ -193,7 +194,7 @@ const INITIAL_PROJECT_STATE: ProjectFormState = {
 };
 
 function useProjectForm(workspaceId: string, onClose: () => void) {
-  const addProject = useAppStore((s) => s.addProject);
+  const qc = useQueryClient();
   const [form, setForm] = useState<ProjectFormState>(INITIAL_PROJECT_STATE);
   const [submitting, setSubmitting] = useState(false);
 
@@ -228,7 +229,9 @@ function useProjectForm(workspaceId: string, onClose: () => void) {
           ? { type: form.executorType, image: form.dockerImage || undefined }
           : undefined,
       });
-      if (result) addProject(result);
+      if (result) {
+        void qc.invalidateQueries({ queryKey: ["office", workspaceId, "projects"] });
+      }
       onClose();
       setForm(INITIAL_PROJECT_STATE);
       toast.success("Project created");
@@ -237,7 +240,7 @@ function useProjectForm(workspaceId: string, onClose: () => void) {
     } finally {
       setSubmitting(false);
     }
-  }, [form, workspaceId, addProject, onClose]);
+  }, [form, workspaceId, qc, onClose]);
 
   return { form, update, submitting, handleAddRepo, handleRemoveRepo, handleCreate };
 }
@@ -320,8 +323,11 @@ function ProjectFormBody({
 }
 
 export function CreateProjectDialog({ open, onOpenChange, workspaceId }: CreateProjectDialogProps) {
-  const agents = useAppStore((s) => s.office.agentProfiles);
-  const meta = useAppStore((s) => s.office.meta);
+  const { data: agents = [] } = useQuery({
+    ...officeQueryOptions.agents(workspaceId),
+    enabled: !!workspaceId,
+  });
+  const { data: meta } = useQuery(officeQueryOptions.metaGlobal());
   const executorTypes =
     meta?.executorTypes.map((e) => ({ id: e.id, label: e.label })) ?? FALLBACK_EXECUTOR_TYPES;
   const { form, update, submitting, handleAddRepo, handleRemoveRepo, handleCreate } =

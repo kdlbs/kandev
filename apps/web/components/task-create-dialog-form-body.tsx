@@ -2,7 +2,7 @@
 
 import { memo, useCallback, useState } from "react";
 import Link from "next/link";
-import type { AgentProfileOption } from "@/lib/state/slices";
+import type { AgentProfileOption } from "@/lib/types/settings";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 import { WorkflowSelectorRow } from "@/components/workflow-selector-row";
 import { AgentLogo } from "@/components/agent-logo";

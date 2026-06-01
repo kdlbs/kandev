@@ -1,5 +1,7 @@
 import { useMemo } from "react";
-import { useAppStore } from "@/components/state-provider";
+import { useQuery } from "@tanstack/react-query";
+import { useTaskSessionById } from "@/hooks/domains/session/use-task-session-by-id";
+import { sessionTurnsQueryOptions } from "@/lib/query/query-options/session";
 import type { Turn } from "@/lib/types/http";
 
 /**
@@ -30,11 +32,15 @@ function formatDuration(seconds: number): string {
  * @returns The last completed turn with its duration and model
  */
 export function useSessionTurn(sessionId: string | null) {
-  const turns = useAppStore((state) => (sessionId ? state.turns.bySession[sessionId] : undefined));
-  const activeTurnId = useAppStore((state) =>
-    sessionId ? state.turns.activeBySession[sessionId] : null,
-  );
-  const session = useAppStore((state) => (sessionId ? state.taskSessions.items[sessionId] : null));
+  // Turns come from the TanStack Query cache (canonical post-migration); the
+  // queryFn derives activeTurnId so isActive is correct on load/session-switch.
+  const { data } = useQuery({
+    ...sessionTurnsQueryOptions(sessionId ?? ""),
+    enabled: !!sessionId,
+  });
+  const turns = data?.turns;
+  const activeTurnId = data?.activeTurnId ?? null;
+  const session = useTaskSessionById(sessionId);
 
   // Get model from session's agent_profile_snapshot
   const sessionModel = useMemo(() => {

@@ -41,6 +41,17 @@ vi.mock("@/components/state-provider", () => ({
     }),
 }));
 
+// Post-migration the component reads voiceMode/keyboardShortcuts from the TQ
+// user-settings cache via useUserSettings() (useQuery). Mock it so tests don't
+// need a QueryClientProvider; the hoisted `voicePrefs.value` stays the control.
+vi.mock("@/hooks/domains/settings/use-user-settings", () => ({
+  useUserSettings: () => ({
+    data: { voiceMode: voicePrefs.value, keyboardShortcuts: {} },
+    loaded: true,
+    loading: false,
+  }),
+}));
+
 vi.mock("@/hooks/use-voice-input", () => ({
   useVoiceInput: () => voiceInputResult,
 }));

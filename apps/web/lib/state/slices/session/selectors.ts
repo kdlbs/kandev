@@ -28,13 +28,17 @@ function isLiveSession(session: TaskSession): boolean {
  * "actively working" state. See `isLiveSession` for the office vs kanban
  * gating.
  *
- * Driven exclusively by the existing `taskSessions` store, which is kept
- * fresh by `session.state_changed` WS events. No polling, no extra fetches.
+ * Operates over a flat session list read from the TanStack Query by-task
+ * cache (see `useAllTaskSessions`), kept fresh by `session.state_changed`
+ * WS events. No polling, no extra fetches.
  */
-export function selectActiveSessionsForAgent(state: AppState, agentProfileId: string): number {
+export function selectActiveSessionsForAgent(
+  sessions: readonly TaskSession[],
+  agentProfileId: string,
+): number {
   if (!agentProfileId) return 0;
   let count = 0;
-  for (const session of Object.values(state.taskSessions.items)) {
+  for (const session of sessions) {
     if (session.agent_profile_id !== agentProfileId) continue;
     if (isLiveSession(session)) count++;
   }
@@ -46,13 +50,16 @@ export function selectActiveSessionsForAgent(state: AppState, agentProfileId: st
  * "live" state. "Most recent" is determined by `started_at` (lexicographic
  * ISO compare). Returns null if none.
  *
- * Reads from `taskSessions.items` (kept fresh by `session.state_changed`
- * WS events). No fetches.
+ * Operates over a flat session list read from the TanStack Query by-task
+ * cache (kept fresh by `session.state_changed` WS events). No fetches.
  */
-export function selectLiveSessionForTask(state: AppState, taskId: string): TaskSession | null {
+export function selectLiveSessionForTask(
+  sessions: readonly TaskSession[],
+  taskId: string,
+): TaskSession | null {
   if (!taskId) return null;
   let best: TaskSession | null = null;
-  for (const session of Object.values(state.taskSessions.items)) {
+  for (const session of sessions) {
     if (session.task_id !== taskId) continue;
     if (!isLiveSession(session)) continue;
     if (!best || (session.started_at ?? "") > (best.started_at ?? "")) {
@@ -66,10 +73,13 @@ export function selectLiveSessionForTask(state: AppState, taskId: string): TaskS
  * Returns all sessions for the given task, sorted by `started_at` ascending.
  * Empty array if none.
  */
-export function selectAllSessionsForTask(state: AppState, taskId: string): TaskSession[] {
+export function selectAllSessionsForTask(
+  sessions: readonly TaskSession[],
+  taskId: string,
+): TaskSession[] {
   if (!taskId) return [];
   const list: TaskSession[] = [];
-  for (const session of Object.values(state.taskSessions.items)) {
+  for (const session of sessions) {
     if (session.task_id === taskId) list.push(session);
   }
   list.sort((a, b) => (a.started_at ?? "").localeCompare(b.started_at ?? ""));
@@ -87,12 +97,12 @@ export function selectAllSessionsForTask(state: AppState, taskId: string): TaskS
  * descending so callers can iterate without re-sorting.
  */
 export function selectSessionsByAgentForTask(
-  state: AppState,
+  sessions: readonly TaskSession[],
   taskId: string,
 ): Map<string, TaskSession[]> {
   if (!taskId) return new Map();
   const buckets = new Map<string, TaskSession[]>();
-  for (const session of Object.values(state.taskSessions.items)) {
+  for (const session of sessions) {
     if (session.task_id !== taskId) continue;
     const key = session.agent_profile_id ?? "";
     const list = buckets.get(key);
@@ -118,9 +128,9 @@ export function selectSessionsByAgentForTask(
  * Workspace-wide total of sessions in a "live" state. Drives the sidebar
  * Dashboard live badge. Office vs kanban gating lives in `isLiveSession`.
  */
-export function selectTotalLiveSessions(state: AppState): number {
+export function selectTotalLiveSessions(sessions: readonly TaskSession[]): number {
   let count = 0;
-  for (const session of Object.values(state.taskSessions.items)) {
+  for (const session of sessions) {
     if (isLiveSession(session)) count++;
   }
   return count;

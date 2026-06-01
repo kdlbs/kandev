@@ -8,6 +8,8 @@ import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
 import { useAppStore } from "@/components/state-provider";
+import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
+import { useActiveWorkflowSteps } from "@/hooks/domains/kanban/use-kanban-tasks";
 
 import { listTasksByWorkspace } from "@/lib/api";
 import { linkToTask } from "@/lib/links";
@@ -22,6 +24,7 @@ import {
   getFileResultValue,
   getTaskResultValue,
 } from "@/components/command-panel-footer";
+import { useUserSettings } from "@/hooks/domains/settings/use-user-settings";
 
 function getFileName(filePath: string) {
   return filePath.split("/").pop() ?? filePath;
@@ -428,11 +431,11 @@ function useCommandPanelHandlers(
 export function CommandPanel() {
   const { open, setOpen } = useCommandPanelOpen();
   const commands = useCommands();
-  const kanbanSteps = useAppStore((state) => state.kanban.steps);
+  const kanbanSteps = useActiveWorkflowSteps();
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
-  const reposByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
-  const repositories = workspaceId ? (reposByWorkspace[workspaceId] ?? []) : [];
+  // Observe-only repos for the active workspace (no fetch on command-panel open).
+  const { repositories } = useRepositories(workspaceId, false);
 
   const state = useCommandPanelState();
   const {
@@ -468,7 +471,7 @@ export function CommandPanel() {
     }
   }, [setOpen, state]);
 
-  const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
+  const keyboardShortcuts = useUserSettings().data?.keyboardShortcuts ?? {};
   const searchShortcut = getShortcut("SEARCH", keyboardShortcuts);
   const fileSearchShortcut = getShortcut("FILE_SEARCH", keyboardShortcuts);
 

@@ -5,7 +5,8 @@ import { ApiError } from "@/lib/api/client";
 import { transcribeAudio } from "@/lib/api/domains/voice-api";
 import { detectVoiceCapabilities, resolveActiveEngine } from "@/lib/voice/capabilities";
 import { WhisperWebClient, type WhisperWebProgress } from "@/lib/voice/whisper-web-client";
-import { useAppStore } from "@/components/state-provider";
+import { useUserSettings } from "@/hooks/domains/settings/use-user-settings";
+import { DEFAULT_VOICE_MODE_STATE } from "@/lib/types/settings";
 import type { VoiceInputEngine, WhisperWebModelSize } from "@/lib/types/http-voice";
 
 // ── Public types ────────────────────────────────────────────────────────
@@ -367,7 +368,7 @@ async function ensureWhisperClient(h: FinishCaptureHandlers): Promise<WhisperWeb
 // ── Hook helpers ────────────────────────────────────────────────────────
 
 function useVoiceModePrefs() {
-  return useAppStore((s) => s.userSettings.voiceMode);
+  return useUserSettings().data?.voiceMode ?? DEFAULT_VOICE_MODE_STATE;
 }
 
 function useCallbackRefs(opts: UseVoiceInputOptions) {

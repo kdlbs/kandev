@@ -3,7 +3,6 @@ import { createDebugLogger } from "@/lib/debug/log";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import { sessionId, taskId } from "@/lib/types/http";
-import { maybeEmitEmptyTurnNotice } from "@/lib/ws/handlers/empty-turn-notice";
 
 const debug = createDebugLogger("session:turns");
 
@@ -50,8 +49,9 @@ export function registerTurnsHandlers(store: StoreApi<AppState>): WsHandlers {
           payload.id,
           payload.completed_at || new Date().toISOString(),
         );
-      // Surface a notice when the turn finished with no agent output.
-      maybeEmitEmptyTurnNotice(store, payload);
+      // The empty-turn notice is emitted into the TanStack Query messages cache
+      // by the session bridge (lib/query/bridge/session.ts), since the chat UI
+      // reads from there — not this Zustand mirror.
       // Clear the active turn when it completes
       store.getState().setActiveTurn(payload.session_id, null);
 

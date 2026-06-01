@@ -8,7 +8,7 @@ import { Input } from "@kandev/ui/input";
 import { useSessionMessages } from "@/hooks/domains/session/use-session-messages";
 import { useSession } from "@/hooks/domains/session/use-session";
 import { useSessionLaunch } from "@/hooks/domains/session/use-session-launch";
-import { useAppStore } from "@/components/state-provider";
+import { useAgentProfiles } from "@/hooks/domains/settings/use-settings-reads";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { buildStartRequest } from "@/lib/services/session-launch-helpers";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
@@ -137,7 +137,7 @@ export function AdvancedChatPanel({ taskId, sessionId, hideInput }: AdvancedChat
 
   const { session } = useSession(sessionId);
   const { messages, isLoading } = useSessionMessages(sessionId);
-  const agentProfiles = useAppStore((s) => s.agentProfiles.items ?? []);
+  const agentProfiles = useAgentProfiles();
   const defaultProfile = agentProfiles[0] ?? null;
 
   const { launch, isLoading: isLaunching } = useSessionLaunch();

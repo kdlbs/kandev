@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { IconDownload } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
+import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
 import * as officeApi from "@/lib/api/domains/office-api";
 import { ExportFileTree } from "./export-file-tree";
 import { ExportFilePreview } from "./export-file-preview";
@@ -12,8 +13,8 @@ import type { ExportFile } from "./export-types";
 
 export function ExportPreview() {
   const activeWorkspaceId = useAppStore((s) => s.workspaces?.activeId ?? "");
-  const workspaces = useAppStore((s) => s.workspaces);
-  const activeWorkspace = workspaces.items.find((w) => w.id === workspaces.activeId);
+  const { workspaces } = useWorkspaces();
+  const activeWorkspace = workspaces.find((w) => w.id === activeWorkspaceId);
   const workspaceName = activeWorkspace?.name || "Workspace";
 
   const [files, setFiles] = useState<ExportFile[]>([]);

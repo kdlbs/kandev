@@ -11,7 +11,7 @@ import {
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
-import { useAppStore } from "@/components/state-provider";
+import { useTaskSessionById } from "@/hooks/domains/session/use-task-session-by-id";
 import type { Message } from "@/lib/types/http";
 
 const ACTION_BUTTON_SIZE = "h-5 w-5 p-1";
@@ -39,12 +39,12 @@ function useMessageModel(message: Message, showModel: boolean) {
   const messageModel = showModel
     ? (message.metadata as { model?: string } | undefined)?.model
     : undefined;
-  const sessionModel = useAppStore((state) => {
+  const session = useTaskSessionById(sessionId);
+  const sessionModel = (() => {
     if (!showModel || messageModel || !sessionId) return null;
-    const session = state.taskSessions.items[sessionId];
     const snapshot = session?.agent_profile_snapshot as { model?: string } | null | undefined;
     return snapshot?.model ?? null;
-  });
+  })();
   return messageModel ?? sessionModel;
 }
 

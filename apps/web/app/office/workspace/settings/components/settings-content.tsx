@@ -9,7 +9,8 @@ import { Switch } from "@kandev/ui/switch";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
 import { updateWorkspaceSettings, getWorkspaceSettings } from "@/lib/api/domains/office-api";
-import type { WorkspaceState } from "@/lib/state/slices/workspace/types";
+import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
+import type { Workspace } from "@/lib/types/http";
 import { ConfigSection } from "./config-section";
 import { DangerZoneSection } from "./danger-zone-section";
 import { GitSection } from "./git-section";
@@ -245,8 +246,6 @@ function RecoverySection({
   );
 }
 
-type Workspace = WorkspaceState["items"][number];
-
 function useRecoveryState(activeWorkspace: Workspace | undefined) {
   const [lookbackHours, setLookbackHours] = useState(24);
   const [origLookbackHours, setOrigLookbackHours] = useState(24);
@@ -398,10 +397,10 @@ function useSettingsState(activeWorkspace: Workspace | undefined) {
 }
 
 export function SettingsContent() {
-  const workspaces = useAppStore((s) => s.workspaces);
-  const setWorkspaces = useAppStore((s) => s.setWorkspaces);
+  const { workspaces } = useWorkspaces();
+  const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
   const setActiveWorkspace = useAppStore((s) => s.setActiveWorkspace);
-  const activeWorkspace = workspaces.items.find((w) => w.id === workspaces.activeId);
+  const activeWorkspace = workspaces.find((w) => w.id === activeWorkspaceId);
   const s = useSettingsState(activeWorkspace);
   const initial = (s.name || "W").charAt(0).toUpperCase();
 
@@ -469,8 +468,7 @@ export function SettingsContent() {
           <SectionHeader>Danger Zone</SectionHeader>
           <DangerZoneSection
             workspace={activeWorkspace}
-            workspaces={workspaces.items}
-            setWorkspaces={setWorkspaces}
+            workspaces={workspaces}
             setActiveWorkspace={setActiveWorkspace}
           />
         </div>

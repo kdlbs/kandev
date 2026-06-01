@@ -1,5 +1,5 @@
 import { fetchJson, type ApiRequestOptions } from "../client";
-import type { FeatureFlags } from "@/lib/state/slices/features/types";
+import type { FeatureFlags } from "@/lib/features";
 
 // Mirrors the backend response shape from
 // apps/backend/cmd/kandev/helpers.go GET /api/v1/features.

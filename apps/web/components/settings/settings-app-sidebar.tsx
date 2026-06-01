@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import {
   IconSettings,
   IconFolder,
@@ -49,16 +50,17 @@ import {
 } from "@kandev/ui/sidebar";
 import { ScrollArea } from "@kandev/ui/scroll-area";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
-import { useAppStore } from "@/components/state-provider";
+import { useExecutors } from "@/hooks/domains/settings/use-settings-reads";
+import { settingsQueryOptions } from "@/lib/query/query-options/settings";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 
 import { AgentLogo } from "@/components/agent-logo";
 import { getExecutorIcon } from "@/lib/executor-icons";
 import { getCapabilityWarning } from "@/lib/capability-warning";
-import type { Agent, AgentProfile, Executor } from "@/lib/types/http";
-import type { WorkspaceState } from "@/lib/state/slices";
+import type { Agent, AgentProfile, Executor, Workspace } from "@/lib/types/http";
+import { useWorkspaces } from "@/hooks/domains/workspace/use-workspaces";
 
-type WorkspaceItem = WorkspaceState["items"][number];
+type WorkspaceItem = Workspace;
 
 type GeneralSidebarSectionProps = {
   pathname: string;
@@ -373,9 +375,9 @@ function SecretsSidebarSection({ pathname }: { pathname: string }) {
 export function SettingsAppSidebar() {
   const pathname = usePathname();
   const { setOpenMobile, isMobile } = useSidebar();
-  const workspaces = useAppStore((state) => state.workspaces.items);
-  const executors = useAppStore((state) => state.executors.items);
-  const agents = useAppStore((state) => state.settingsAgents.items);
+  const { workspaces } = useWorkspaces();
+  const executors = useExecutors();
+  const { data: agents = [] } = useQuery({ ...settingsQueryOptions.agents() });
   useAvailableAgents();
 
   // Close mobile sidebar when navigating to a new page

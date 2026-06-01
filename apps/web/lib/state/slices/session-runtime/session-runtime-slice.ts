@@ -1,151 +1,7 @@
 import type { StateCreator } from "zustand";
-import type {
-  SessionRuntimeSlice,
-  SessionRuntimeSliceState,
-  SessionPollMode,
-  GitStatusEntry,
-  FileInfo,
-} from "./types";
-import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
-
-const debugGit = createDebugLogger("git-status:store");
+import type { SessionRuntimeSlice, SessionRuntimeSliceState } from "./types";
 
 const maxProcessOutputBytes = 2 * 1024 * 1024;
-
-/** Compute total additions/deletions across all files. */
-function computeFileStats(files: Record<string, FileInfo> | undefined): {
-  additions: number;
-  deletions: number;
-} {
-  if (!files) return { additions: 0, deletions: 0 };
-  let additions = 0;
-  let deletions = 0;
-  for (const f of Object.values(files)) {
-    additions += f.additions || 0;
-    deletions += f.deletions || 0;
-  }
-  return { additions, deletions };
-}
-
-function sameStringList(existing: string[] | undefined, incoming: string[] | undefined): boolean {
-  const a = existing ?? [];
-  const b = incoming ?? [];
-  if (a.length !== b.length) return false;
-  const sortedA = [...a].sort();
-  const sortedB = [...b].sort();
-  return sortedA.every((value, index) => value === sortedB[index]);
-}
-
-const COMPARABLE_FILE_FIELDS = [
-  "path",
-  "status",
-  "staged",
-  "additions",
-  "deletions",
-  "old_path",
-  "diff",
-  "diff_skip_reason",
-  "repository_name",
-] as const;
-
-function comparableFileInfo(file: FileInfo) {
-  return {
-    path: file.path,
-    status: file.status,
-    staged: file.staged,
-    additions: file.additions ?? 0,
-    deletions: file.deletions ?? 0,
-    old_path: file.old_path ?? "",
-    diff: file.diff ?? "",
-    diff_skip_reason: file.diff_skip_reason ?? "",
-    repository_name: file.repository_name ?? "",
-  };
-}
-
-function sameFileInfo(existing: FileInfo | undefined, incoming: FileInfo | undefined): boolean {
-  if (!existing || !incoming) return existing === incoming;
-  const a = comparableFileInfo(existing);
-  const b = comparableFileInfo(incoming);
-  return COMPARABLE_FILE_FIELDS.every((field) => a[field] === b[field]);
-}
-
-function sameFiles(
-  existingFiles: Record<string, FileInfo> | undefined,
-  newFiles: Record<string, FileInfo> | undefined,
-): boolean {
-  if (!existingFiles || !newFiles) return existingFiles === newFiles;
-  const existingFileKeys = Object.keys(existingFiles).sort();
-  const newFileKeys = Object.keys(newFiles).sort();
-  if (existingFileKeys.length !== newFileKeys.length) return false;
-  for (let i = 0; i < existingFileKeys.length; i += 1) {
-    const key = existingFileKeys[i];
-    if (key !== newFileKeys[i]) return false;
-    if (!sameFileInfo(existingFiles[key], newFiles[key])) return false;
-  }
-  return true;
-}
-
-function hasBranchSummaryChanged(existing: GitStatusEntry, incoming: GitStatusEntry): boolean {
-  return (
-    existing.branch !== incoming.branch ||
-    existing.remote_branch !== incoming.remote_branch ||
-    existing.ahead !== incoming.ahead ||
-    existing.behind !== incoming.behind ||
-    (existing.repository_name ?? "") !== (incoming.repository_name ?? "") ||
-    existing.branch_additions !== incoming.branch_additions ||
-    existing.branch_deletions !== incoming.branch_deletions
-  );
-}
-
-function hasFileListsChanged(existing: GitStatusEntry, incoming: GitStatusEntry): boolean {
-  return (
-    !sameStringList(existing.modified, incoming.modified) ||
-    !sameStringList(existing.added, incoming.added) ||
-    !sameStringList(existing.deleted, incoming.deleted) ||
-    !sameStringList(existing.untracked, incoming.untracked) ||
-    !sameStringList(existing.renamed, incoming.renamed)
-  );
-}
-
-function hasFileStatsChanged(existing: GitStatusEntry, incoming: GitStatusEntry): boolean {
-  // Fast early-exit: aggregate totals differ → sameFiles would also return false,
-  // but this avoids the per-file deep comparison when the gross numbers differ.
-  const existingTotal = computeFileStats(existing.files);
-  const newTotal = computeFileStats(incoming.files);
-  return (
-    existingTotal.additions !== newTotal.additions || existingTotal.deletions !== newTotal.deletions
-  );
-}
-
-/** True when setGitStatus would write at least one map entry for this update. */
-export function gitStatusWouldMutate(
-  gitStatusState: SessionRuntimeSliceState["gitStatus"],
-  envKey: string,
-  gitStatus: GitStatusEntry,
-): boolean {
-  const repoName = gitStatus.repository_name ?? "";
-  const existingEnv = gitStatusState.byEnvironmentId[envKey];
-  const existingRepo = gitStatusState.byEnvironmentRepo[envKey]?.[repoName];
-  const repoChanged = !existingRepo || hasGitStatusChanged(existingRepo, gitStatus);
-  if (repoName !== "") {
-    return repoChanged;
-  }
-  const envChanged = !existingEnv || hasGitStatusChanged(existingEnv, gitStatus);
-  return envChanged || repoChanged;
-}
-
-/** Compare two git status entries to determine if a meaningful change occurred. */
-export function hasGitStatusChanged(existing: GitStatusEntry, incoming: GitStatusEntry): boolean {
-  // The backend also emits fresh snapshots for focus/startup/poll events. Those
-  // can carry a new timestamp for identical git data, so timestamp alone must
-  // not force a store update or diff-cache invalidation.
-  return (
-    hasBranchSummaryChanged(existing, incoming) ||
-    hasFileListsChanged(existing, incoming) ||
-    hasFileStatsChanged(existing, incoming) ||
-    !sameFiles(existing.files, incoming.files)
-  );
-}
 
 function trimProcessOutput(value: string) {
   if (value.length <= maxProcessOutputBytes) {
@@ -164,20 +20,14 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
     activeProcessBySessionId: {},
     devProcessBySessionId: {},
   },
-  gitStatus: { byEnvironmentId: {}, byEnvironmentRepo: {} },
   environmentIdBySessionId: {},
   sessionCommits: { byEnvironmentId: {}, loading: {}, refetchTrigger: {} },
   contextWindow: { bySessionId: {} },
   agents: { agents: [] },
   availableCommands: { bySessionId: {} },
-  sessionMode: { bySessionId: {} },
   agentCapabilities: { bySessionId: {} },
-  sessionModels: { bySessionId: {} },
   promptUsage: { bySessionId: {} },
-  sessionTodos: { bySessionId: {} },
   userShells: { byEnvironmentId: {}, loading: {}, loaded: {} },
-  prepareProgress: { bySessionId: {} },
-  sessionPollMode: { bySessionId: {} },
 };
 
 type ImmerSet = Parameters<typeof createSessionRuntimeSlice>[0];
@@ -344,10 +194,6 @@ function buildUserShellActions(set: ImmerSet) {
           s.terminalId === terminalId ? { ...s, ...patch } : s,
         );
       }),
-    setSessionPollMode: (sessionId: string, mode: SessionPollMode) =>
-      set((draft) => {
-        draft.sessionPollMode.bySessionId[sessionId] = mode;
-      }),
   };
 }
 
@@ -371,10 +217,8 @@ export function migrateEnvKeyedData(
     }
   };
   migrate(draft.sessionCommits.byEnvironmentId);
-  migrate(draft.gitStatus.byEnvironmentRepo);
   migrate(draft.sessionCommits.loading);
   migrate(draft.sessionCommits.refetchTrigger);
-  migrate(draft.gitStatus.byEnvironmentId);
   migrate(draft.shell.outputs);
   migrate(draft.shell.statuses);
   migrate(draft.userShells.byEnvironmentId);
@@ -390,48 +234,6 @@ export const createSessionRuntimeSlice: StateCreator<
 > = (set) => ({
   ...defaultSessionRuntimeState,
   ...buildTerminalShellProcessActions(set),
-  setGitStatus: (sessionId, gitStatus) =>
-    set((draft) => {
-      const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
-      // Multi-repo: when the update is tagged with repository_name, route it
-      // into the per-repo map. Single-repo updates (no name) keep the legacy
-      // single-status path; the per-repo map mirrors the same entry under an
-      // empty key so consumers using only byEnvironmentRepo still see it.
-      const repoName = gitStatus.repository_name ?? "";
-      const repoMap = (draft.gitStatus.byEnvironmentRepo[envKey] ??= {});
-      const existingRepo = repoMap[repoName];
-      const repoChanged = !existingRepo || hasGitStatusChanged(existingRepo, gitStatus);
-      if (IS_DEBUG) {
-        debugGit("setGitStatus", {
-          sessionId,
-          envKey,
-          usingFallbackKey: envKey === sessionId,
-          repoName,
-          prevFileCount: Object.keys(existingRepo?.files ?? {}).length,
-          nextFileCount: Object.keys(gitStatus.files ?? {}).length,
-          prevRepoKeys: Object.keys(repoMap),
-          willMutate: gitStatusWouldMutate(draft.gitStatus, envKey, gitStatus),
-        });
-      }
-      if (repoChanged) {
-        repoMap[repoName] = gitStatus;
-      }
-      if (repoName === "") {
-        const existing = draft.gitStatus.byEnvironmentId[envKey];
-        if (!existing || hasGitStatusChanged(existing, gitStatus)) {
-          draft.gitStatus.byEnvironmentId[envKey] = gitStatus;
-        }
-      } else if (repoChanged) {
-        // Multi-repo: only mirror into the legacy map when this repo's entry changed.
-        draft.gitStatus.byEnvironmentId[envKey] = gitStatus;
-      }
-    }),
-  clearGitStatus: (sessionId) =>
-    set((draft) => {
-      const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
-      delete draft.gitStatus.byEnvironmentId[envKey];
-      delete draft.gitStatus.byEnvironmentRepo[envKey];
-    }),
   registerSessionEnvironment: (sessionId, environmentId) =>
     set((draft) => {
       draft.environmentIdBySessionId[sessionId] = environmentId;
@@ -450,33 +252,13 @@ export const createSessionRuntimeSlice: StateCreator<
     set((draft) => {
       delete draft.availableCommands.bySessionId[sessionId];
     }),
-  setSessionMode: (sessionId, modeId, availableModes) =>
-    set((draft) => {
-      const existing = draft.sessionMode.bySessionId[sessionId];
-      draft.sessionMode.bySessionId[sessionId] = {
-        currentModeId: modeId,
-        availableModes: availableModes ?? existing?.availableModes ?? [],
-      };
-    }),
-  clearSessionMode: (sessionId) =>
-    set((draft) => {
-      delete draft.sessionMode.bySessionId[sessionId];
-    }),
   setAgentCapabilities: (sessionId, caps) =>
     set((draft) => {
       draft.agentCapabilities.bySessionId[sessionId] = caps;
     }),
-  setSessionModels: (sessionId, data) =>
-    set((draft) => {
-      draft.sessionModels.bySessionId[sessionId] = data;
-    }),
   setPromptUsage: (sessionId, usage) =>
     set((draft) => {
       draft.promptUsage.bySessionId[sessionId] = usage;
-    }),
-  setSessionTodos: (sessionId, entries) =>
-    set((draft) => {
-      draft.sessionTodos.bySessionId[sessionId] = entries;
     }),
   ...buildUserShellActions(set),
 });

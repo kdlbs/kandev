@@ -1,29 +1,20 @@
-import { useEffect } from "react";
-import { useAppStore } from "@/components/state-provider";
-import { listWorkflows } from "@/lib/api";
+"use client";
 
+import { useQuery } from "@tanstack/react-query";
+import { workflowsListQueryOptions } from "@/lib/query/query-options/kanban";
+
+/**
+ * Reads the workspace-scoped workflows list from the TanStack Query cache
+ * (`qk.kanban.workflowsList`). Fetching is gated by `enabled` and a non-null
+ * workspaceId. The kanban bridge keeps the cache fresh via workflow.* WS events.
+ *
+ * Returns `{ workflows }` (the workflow metadata list) — empty array while the
+ * query is disabled or still loading.
+ */
 export function useWorkflows(workspaceId: string | null, enabled = true) {
-  const workflows = useAppStore((state) => state.workflows.items);
-  const setWorkflows = useAppStore((state) => state.setWorkflows);
-
-  useEffect(() => {
-    if (!enabled || !workspaceId) return;
-    listWorkflows(workspaceId, { cache: "no-store", includeHidden: true })
-      .then((response) => {
-        const mapped = response.workflows.map((workflow) => ({
-          id: workflow.id,
-          workspaceId: workflow.workspace_id,
-          name: workflow.name,
-          description: workflow.description,
-          sortOrder: workflow.sort_order ?? 0,
-          agent_profile_id: workflow.agent_profile_id,
-          hidden: workflow.hidden,
-          style: workflow.style,
-        }));
-        setWorkflows(mapped);
-      })
-      .catch(() => setWorkflows([]));
-  }, [enabled, setWorkflows, workspaceId]);
-
-  return { workflows };
+  const { data } = useQuery({
+    ...workflowsListQueryOptions(workspaceId ?? ""),
+    enabled: enabled && !!workspaceId,
+  });
+  return { workflows: data ?? [] };
 }

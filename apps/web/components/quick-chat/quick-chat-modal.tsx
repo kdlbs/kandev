@@ -1,11 +1,12 @@
 "use client";
 
 import { memo } from "react";
-import { useShallow } from "zustand/react/shallow";
 import { Dialog, DialogContent, DialogTitle } from "@kandev/ui/dialog";
 import { Button } from "@kandev/ui/button";
 import { IconLoader2, IconMessageCircle, IconPlus } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
+import { useTaskSessionById } from "@/hooks/domains/session/use-task-session-by-id";
+import { useAgentProfiles } from "@/hooks/domains/settings/use-settings-reads";
 import { PassthroughTerminal } from "@/components/task/passthrough-terminal";
 import { QuickChatContent } from "./quick-chat-content";
 import { QuickChatDeleteDialog } from "./quick-chat-delete-dialog";
@@ -66,17 +67,15 @@ function QuickChatTabs({
 }
 
 function useIsQuickChatPassthrough(sessionId: string) {
-  return useAppStore(
-    useShallow((s) => {
-      const session = s.taskSessions.items[sessionId];
-      if (typeof session?.is_passthrough === "boolean") return session.is_passthrough;
-      const profileId =
-        session?.agent_profile_id ??
-        s.quickChat.sessions.find((qs) => qs.sessionId === sessionId)?.agentProfileId;
-      if (!profileId) return false;
-      return s.agentProfiles.items.find((p) => p.id === profileId)?.cli_passthrough === true;
-    }),
+  const agentProfiles = useAgentProfiles();
+  const session = useTaskSessionById(sessionId);
+  const quickChatProfileId = useAppStore(
+    (s) => s.quickChat.sessions.find((qs) => qs.sessionId === sessionId)?.agentProfileId ?? null,
   );
+  if (typeof session?.is_passthrough === "boolean") return session.is_passthrough;
+  const profileId = session?.agent_profile_id ?? quickChatProfileId;
+  if (!profileId) return false;
+  return agentProfiles.find((p) => p.id === profileId)?.cli_passthrough === true;
 }
 
 function QuickChatSessionView({ sessionId }: { sessionId: string }) {
@@ -98,7 +97,7 @@ function AgentPickerView({
   onSelectAgent: (agentId: string) => void;
   pendingAgentId: string | null;
 }) {
-  const agentProfiles = useAppStore((s) => s.agentProfiles.items) ?? [];
+  const agentProfiles = useAgentProfiles();
   const isLoading = pendingAgentId !== null;
 
   return (

@@ -1,8 +1,9 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import { Badge } from "@kandev/ui/badge";
 import { Card } from "@kandev/ui/card";
-import { useAppStore } from "@/components/state-provider";
+import { officeQueryOptions } from "@/lib/query/query-options/office";
 
 type StepReviewProps = {
   workspaceName: string;
@@ -28,7 +29,7 @@ export function StepReview({
   executorPreference,
   taskTitle,
 }: StepReviewProps) {
-  const meta = useAppStore((s) => s.office.meta);
+  const { data: meta } = useQuery(officeQueryOptions.metaGlobal());
 
   const executorLabel =
     meta?.executorTypes.find((e) => e.id === executorPreference)?.label ??

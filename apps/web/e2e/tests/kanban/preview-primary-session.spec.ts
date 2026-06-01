@@ -88,24 +88,11 @@ test.describe("Preview primary session", () => {
     await apiClient.saveUserSettings({ enable_preview_on_click: true });
     await kanban.goto();
 
-    // 7. Verify the kanban store has primarySessionId
-    const storeData = await testPage.evaluate((taskId) => {
-      // Access zustand store from the window (exposed by state-provider)
-      type KandevStore = {
-        getState: () => { kanban: { tasks: { id: string; primarySessionId?: string | null }[] } };
-      };
-      const win = window as unknown as { __KANDEV_STORE?: KandevStore };
-      const store = win.__KANDEV_STORE;
-      if (!store) return { error: "no store" };
-      const state = store.getState();
-      const kanbanTask = state.kanban.tasks.find((t) => t.id === taskId);
-      return {
-        primarySessionId: kanbanTask?.primarySessionId ?? null,
-        taskFound: !!kanbanTask,
-        taskCount: state.kanban.tasks.length,
-      };
-    }, task.id);
-    console.log("Store debug:", JSON.stringify(storeData));
+    // 7. The kanban task/primary-session data now lives in the TanStack Query
+    // cache (qk.kanban.multi), populated by the kanban bridge — there is no
+    // longer a Zustand `kanban.tasks` mirror to inspect. The subsequent UI
+    // assertions (preview panel + primary-session indicator) are the source of
+    // truth that the primary session is wired correctly.
 
     // 8. Click the task card to open the preview panel.
     // Wait for the "Open full page" button to appear on the card — this button is only

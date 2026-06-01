@@ -3,6 +3,9 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import { IconFolder } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
+import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
+import { useTaskById } from "@/hooks/domains/kanban/use-task-by-id";
+import { useTaskSessionById } from "@/hooks/domains/session/use-task-session-by-id";
 import { MobilePillButton } from "./mobile-pill-button";
 import { MobilePickerSheet } from "./mobile-picker-sheet";
 import { MobileReposSection, useTaskRepoCount } from "./mobile-repos-section";
@@ -23,18 +26,11 @@ function useIsCompactViewport(): boolean {
 }
 
 function useTaskActiveRepoName(taskId: string | null, workspaceId: string | null): string | null {
-  const workspaceRepos = useAppStore((s) =>
-    workspaceId ? (s.repositories.itemsByWorkspaceId[workspaceId] ?? []) : [],
-  );
+  const { repositories: workspaceRepos } = useRepositories(workspaceId, false);
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
-  const activeRepoId = useAppStore((s) =>
-    activeSessionId ? (s.taskSessions.items[activeSessionId]?.repository_id ?? null) : null,
-  );
-  const taskRepos = useAppStore((s) => {
-    if (!taskId) return undefined;
-    const task = s.kanban.tasks.find((t: { id: string }) => t.id === taskId);
-    return task?.repositories;
-  });
+  const activeRepoId = useTaskSessionById(activeSessionId)?.repository_id ?? null;
+  const taskForRepos = useTaskById(taskId);
+  const taskRepos = taskForRepos?.repositories;
   return useMemo(() => {
     if (!activeRepoId) {
       // Fallback to the position-primary task repo when no session is active

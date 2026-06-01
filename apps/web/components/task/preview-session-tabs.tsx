@@ -6,12 +6,12 @@ import { AgentLogo } from "@/components/agent-logo";
 import { GridSpinner } from "@/components/grid-spinner";
 import { PanelLoadingState } from "@/components/panel-loading-state";
 import { SessionTabs, type SessionTab } from "@/components/session-tabs";
-import { useAppStore } from "@/components/state-provider";
+import { useAgentProfiles } from "@/hooks/domains/settings/use-settings-reads";
 import { useToast } from "@/components/toast-provider";
 import { useSessionResumption } from "@/hooks/domains/session/use-session-resumption";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import type { UseEnsureTaskSessionResult } from "@/hooks/domains/session/use-ensure-task-session";
-import type { AgentProfileOption } from "@/lib/state/slices";
+import type { AgentProfileOption } from "@/lib/types/settings";
 import type { TaskSession } from "@/lib/types/http";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { PassthroughToolbar } from "./passthrough-toolbar";
@@ -46,7 +46,7 @@ export function PreviewSessionTabs({
   onSessionChange,
 }: PreviewSessionTabsProps) {
   const { sessions, isLoaded } = useTaskSessions(taskId);
-  const agentProfiles = useAppStore((state) => state.agentProfiles.items);
+  const agentProfiles = useAgentProfiles();
 
   const sortedSessions = useMemo(() => sortSessions(sessions), [sessions]);
   const agentLabelsById = useMemo(() => buildAgentLabelsById(agentProfiles), [agentProfiles]);

@@ -7,7 +7,8 @@ import type { Message, TaskSessionState, TaskState } from "@/lib/types/http";
 import type { ToolCallMetadata } from "@/components/task/chat/types";
 import { launchSession } from "@/lib/services/session-launch-service";
 import { buildStartCreatedRequest } from "@/lib/services/session-launch-helpers";
-import { useAppStore } from "@/components/state-provider";
+import { useQuery } from "@tanstack/react-query";
+import { prepareProgressQueryOptions } from "@/lib/query/query-options/session-runtime";
 import { ChatMessage } from "@/components/task/chat/messages/chat-message";
 import { PermissionRequestMessage } from "@/components/task/chat/messages/permission-request-message";
 import { StatusMessage } from "@/components/task/chat/messages/status-message";
@@ -45,9 +46,7 @@ type AdapterContext = {
 
 function TaskDescriptionStartButton({ taskId, sessionId }: { taskId: string; sessionId: string }) {
   const [isStarting, setIsStarting] = useState(false);
-  const prepareStatus = useAppStore(
-    (state) => state.prepareProgress.bySessionId[sessionId]?.status ?? null,
-  );
+  const prepareStatus = useQuery(prepareProgressQueryOptions(sessionId)).data?.status ?? null;
 
   const handleStart = useCallback(async () => {
     setIsStarting(true);

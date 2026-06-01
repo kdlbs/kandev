@@ -20,10 +20,10 @@ import { MobileIntegrationsSection } from "@/components/integrations/integration
 import { TaskSearchInput } from "./task-search-input";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { linkToTasks } from "@/lib/links";
-import type { Repository } from "@/lib/types/http";
-import type { WorkflowsState, WorkspaceState } from "@/lib/state/slices";
+import type { Repository, Workspace } from "@/lib/types/http";
+import type { WorkflowsState } from "@/lib/state/slices";
 
-type WorkspaceItem = WorkspaceState["items"][number];
+type WorkspaceItem = Workspace;
 
 type MobileMenuSheetProps = {
   open: boolean;

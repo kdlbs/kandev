@@ -10,8 +10,11 @@ import {
   useMemo,
 } from "react";
 import { EditorContent } from "@tiptap/react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { qk } from "@/lib/query/keys";
+import type { KanbanMultiData, WorkflowsListData } from "@/lib/query/query-options/kanban";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { searchWorkspaceFiles } from "@/lib/ws/workspace-files";
 import { EditorContextProvider } from "./editor-context";
@@ -122,6 +125,7 @@ async function fetchFileResults(
 function useMentionItems(sessionId: string | null, taskId: string | null) {
   const { prompts } = useCustomPrompts();
   const storeApi = useAppStoreApi();
+  const queryClient = useQueryClient();
   const promptsRef = useRef(prompts);
   const sessionIdRef = useRef(sessionId);
   const taskIdRef = useRef(taskId);
@@ -138,7 +142,13 @@ function useMentionItems(sessionId: string | null, taskId: string | null) {
   return useCallback(
     async (query: string): Promise<MentionItem[]> => {
       const allItems: MentionItem[] = [];
-      allItems.push(...buildTaskMentionItems(storeApi.getState(), taskIdRef.current));
+      const workspaceId = storeApi.getState().workspaces.activeId;
+      const snapshots =
+        queryClient.getQueryData<KanbanMultiData>(qk.kanban.multi())?.snapshots ?? {};
+      const workflows = workspaceId
+        ? (queryClient.getQueryData<WorkflowsListData>(qk.kanban.workflowsList(workspaceId)) ?? [])
+        : [];
+      allItems.push(...buildTaskMentionItems({ snapshots, workflows }, taskIdRef.current));
       allItems.push({
         id: "__plan__",
         kind: "plan",
@@ -174,7 +184,7 @@ function useMentionItems(sessionId: string | null, taskId: string | null) {
       }
       return filterItems(allItems, query);
     },
-    [storeApi],
+    [storeApi, queryClient],
   );
 }
 

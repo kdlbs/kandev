@@ -4,8 +4,8 @@ import { useRouter } from "next/navigation";
 import { IconChevronRight, IconLoader2 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils";
-import { useAppStore } from "@/components/state-provider";
 import { selectLiveSessionForTask } from "@/lib/state/slices/session/selectors";
+import { useAllTaskSessions } from "@/hooks/domains/session/use-task-session-by-id";
 import type { OfficeTask } from "@/lib/state/slices/office/types";
 import { StatusIcon } from "./status-icon";
 import { ExecutionIndicator } from "../components/execution-indicator";
@@ -31,7 +31,7 @@ export function TaskRow({
   // Show an animated yellow spinner instead of the static status icon
   // while any session for this task is RUNNING. Drives the "this task
   // is being worked on right now" affordance in the task list.
-  const isRunning = useAppStore((s) => selectLiveSessionForTask(s, task.id) !== null);
+  const isRunning = selectLiveSessionForTask(useAllTaskSessions(), task.id) !== null;
 
   const handleClick = () => {
     router.push(`/office/tasks/${task.id}`);

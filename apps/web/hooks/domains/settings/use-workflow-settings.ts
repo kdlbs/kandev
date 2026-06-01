@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useAppStore } from "@/components/state-provider";
+import { useWorkflowItems } from "@/hooks/domains/kanban/use-kanban-snapshots";
 import { workflowId, workspaceId as toWorkspaceId, type Workflow } from "@/lib/types/http";
 
 /**
@@ -13,14 +13,19 @@ import { workflowId, workspaceId as toWorkspaceId, type Workflow } from "@/lib/t
  * Zustand store) don't leak into another workspace's settings page.
  */
 export function useWorkflowSettings(initialWorkflows: Workflow[], workspaceId?: string) {
-  const storeWorkflows = useAppStore((state) => state.workflows.items);
+  const storeWorkflows = useWorkflowItems(workspaceId ?? null);
   // Hidden workflows (e.g. the system "Improve Kandev" template) are loaded
   // into the global store with `includeHidden: true` so the kanban can resolve
   // them when a task references one, but they must never surface in the
-  // settings management UI. Filter them out at the store boundary so all
-  // downstream merging logic remains hidden-agnostic.
+  // settings management UI. Office-style workflows are likewise managed from the
+  // Office surface and are not importable/exportable here (ADR-0004) — the WS
+  // bridge that populates the `workflowsList` cache can't know the consuming
+  // context, so it writes office workflows in too. Filter both out at the store
+  // boundary so all downstream merging logic (and Export All, which enumerates
+  // these items) stays kanban-only. `storeItemToWorkflow` drops the `style`
+  // field, so this must happen here while `style` is still available.
   const scopedStoreWorkflows = useMemo(() => {
-    const visible = storeWorkflows.filter((w) => !w.hidden);
+    const visible = storeWorkflows.filter((w) => !w.hidden && w.style !== "office");
     return workspaceId ? visible.filter((w) => w.workspaceId === workspaceId) : visible;
   }, [storeWorkflows, workspaceId]);
   const [workflowItems, setWorkflowItems] = useState<Workflow[]>(initialWorkflows);

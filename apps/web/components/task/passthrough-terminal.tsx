@@ -24,10 +24,12 @@ import {
 } from "./use-passthrough-terminal";
 import { useTouchScroll } from "./use-touch-scroll";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
+import { useTerminalBusyTracking } from "./use-terminal-busy-tracking";
 import { useTerminalSearch } from "./use-terminal-search";
 import { TerminalSearchBar } from "./terminal-search-bar";
 import { usePanelSearch } from "@/hooks/use-panel-search";
-import { useTerminalBusyTracking } from "./use-terminal-busy-tracking";
+import { useUserSettings } from "@/hooks/domains/settings/use-user-settings";
+import { DEFAULT_USER_SETTINGS } from "@/lib/types/settings";
 
 type BaseProps = {
   autoFocus?: boolean;
@@ -190,8 +192,9 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
   }, [connectionID]);
 
   const linkHandler = useTerminalLinkHandler();
-  const terminalFontFamily = useAppStore((s) => s.userSettings.terminalFontFamily);
-  const terminalFontSize = useAppStore((s) => s.userSettings.terminalFontSize);
+  const userSettings = useUserSettings().data ?? DEFAULT_USER_SETTINGS;
+  const terminalFontFamily = userSettings.terminalFontFamily;
+  const terminalFontSize = userSettings.terminalFontSize;
   const sendResize = useSendResize(wsRef);
   const fitAndResize = useFitAndResize({
     xtermRef: refs.xtermRef,
@@ -203,7 +206,7 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
 
   const sendInput = useSendInput(wsRef);
   const toggleBottomTerminal = useAppStore((s) => s.toggleBottomTerminal);
-  const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
+  const keyboardShortcuts = userSettings.keyboardShortcuts;
   const keyboardShortcutsRef = useRef(keyboardShortcuts);
   useEffect(() => {
     keyboardShortcutsRef.current = keyboardShortcuts;

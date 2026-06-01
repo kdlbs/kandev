@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import type { StoreApi } from "zustand";
+import { useQueryClient } from "@tanstack/react-query";
 import { WebSocketClient } from "@/lib/ws/client";
 import { registerWsHandlers } from "@/lib/ws/router";
 import type { AppState } from "@/lib/state/store";
@@ -12,6 +13,7 @@ const debug = createDebugLogger("ws:connection");
 
 export function useWebSocket(store: StoreApi<AppState>, url: string) {
   const clientRef = useRef<WebSocketClient | null>(null);
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     debug("WS hook mounting", { url });
@@ -38,19 +40,26 @@ export function useWebSocket(store: StoreApi<AppState>, url: string) {
     );
     clientRef.current = client;
     client.connect();
-    setWebSocketClient(client);
 
-    const handlers = registerWsHandlers(store);
+    // Register the Zustand-side WS handlers BEFORE publishing the client via
+    // setWebSocketClient. Publishing fires the QueryBridge subscriber, which
+    // registers the session-state bridge handlers. The agent-session handler
+    // must read the TaskSession by-id TQ cache (adoption / failure-toast
+    // branch on the *prior* record) before the bridge overwrites it, and WS
+    // handlers fire in registration order — so ours must be added first.
+    const handlers = registerWsHandlers(store, queryClient);
     const unsubscribers = Object.entries(handlers).map(([type, handler]) =>
       client.on(type as keyof typeof handlers, handler as never),
     );
+
+    setWebSocketClient(client);
 
     return () => {
       unsubscribers.forEach((unsubscribe) => unsubscribe());
       client.disconnect();
       setWebSocketClient(null);
     };
-  }, [store, url]);
+  }, [store, url, queryClient]);
 
   return clientRef;
 }

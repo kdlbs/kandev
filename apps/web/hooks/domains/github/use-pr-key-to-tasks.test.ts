@@ -1,15 +1,25 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createElement, type ReactNode } from "react";
-import { act, renderHook, cleanup } from "@testing-library/react";
-import { StateProvider, useAppStore } from "@/components/state-provider";
+import { createElement, type ComponentProps, type ReactNode } from "react";
+import { renderHook, cleanup } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { StateProvider } from "@/components/state-provider";
+import { createTestQueryClient } from "@/test-utils/render-with-query";
+import { qk } from "@/lib/query/keys";
 import { prKey, usePRKeyToTasks } from "./use-pr-key-to-tasks";
+import type { AppState } from "@/lib/state/store";
 import type { TaskPR } from "@/lib/types/github";
 
-vi.mock("./use-task-pr", () => ({
-  // The hook is fire-and-forget side-effect; mocking it keeps the test
-  // focused on the inversion logic and avoids a real network call.
-  useWorkspacePRs: () => undefined,
-}));
+const WS_ID = "ws-1";
+
+vi.mock("./use-task-pr", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./use-task-pr")>();
+  return {
+    ...actual,
+    // The fetch is fire-and-forget; mock it so the test reads only from the
+    // seeded TQ cache (no real network call).
+    useWorkspacePRs: () => undefined,
+  };
+});
 
 afterEach(() => cleanup());
 
@@ -46,21 +56,29 @@ function makeTaskPR(overrides: Partial<TaskPR> = {}): TaskPR {
   };
 }
 
-function wrapper({ children }: { children: ReactNode }) {
-  return createElement(StateProvider, null, children);
+const INITIAL_STATE = { workspaces: { activeId: WS_ID } } as Partial<AppState>;
+
+function makeWrapper(queryClient: QueryClient) {
+  return function wrapper({ children }: { children: ReactNode }) {
+    return createElement(
+      QueryClientProvider,
+      { client: queryClient },
+      createElement(
+        StateProvider,
+        { initialState: INITIAL_STATE } as ComponentProps<typeof StateProvider>,
+        children,
+      ),
+    );
+  };
 }
 
-// Render usePRKeyToTasks alongside the store's setTaskPRs action so tests can
-// seed the store and re-read the inverted map within the same render tree.
-function renderUsePRKeyToTasks() {
-  return renderHook(
-    () => {
-      const setTaskPRs = useAppStore((s) => s.setTaskPRs);
-      const map = usePRKeyToTasks("ws-1");
-      return { setTaskPRs, map };
-    },
-    { wrapper },
-  );
+// Seed the workspace PR TQ cache, then read the inverted map via the hook.
+function renderUsePRKeyToTasks(taskPRs?: Record<string, unknown>) {
+  const queryClient = createTestQueryClient();
+  if (taskPRs) {
+    queryClient.setQueryData(qk.github.prs(WS_ID), { task_prs: taskPRs });
+  }
+  return renderHook(() => usePRKeyToTasks(WS_ID), { wrapper: makeWrapper(queryClient) });
 }
 
 describe("prKey", () => {
@@ -88,54 +106,44 @@ describe("prKey", () => {
 describe("usePRKeyToTasks", () => {
   it("returns an empty map when no task PRs are loaded", () => {
     const { result } = renderUsePRKeyToTasks();
-    expect(result.current.map.size).toBe(0);
+    expect(result.current.size).toBe(0);
   });
 
   it("groups distinct tasks linked to the same PR under one key", () => {
-    const { result } = renderUsePRKeyToTasks();
-    act(() => {
-      result.current.setTaskPRs({
-        "task-a": [
-          makeTaskPR({ id: "row-1", task_id: "task-a", owner: "o", repo: "r", pr_number: 7 }),
-        ],
-        "task-b": [
-          makeTaskPR({ id: "row-2", task_id: "task-b", owner: "o", repo: "r", pr_number: 7 }),
-        ],
-      });
+    const { result } = renderUsePRKeyToTasks({
+      "task-a": [
+        makeTaskPR({ id: "row-1", task_id: "task-a", owner: "o", repo: "r", pr_number: 7 }),
+      ],
+      "task-b": [
+        makeTaskPR({ id: "row-2", task_id: "task-b", owner: "o", repo: "r", pr_number: 7 }),
+      ],
     });
-    const entries = result.current.map.get("o/r#7");
+    const entries = result.current.get("o/r#7");
     expect(entries?.length).toBe(2);
     expect(entries?.map((e) => e.task_id).sort()).toEqual(["task-a", "task-b"]);
   });
 
   it("keeps PRs that belong to different keys separate", () => {
-    const { result } = renderUsePRKeyToTasks();
-    act(() => {
-      result.current.setTaskPRs({
-        "task-a": [
-          makeTaskPR({ id: "row-1", task_id: "task-a", owner: "o", repo: "r", pr_number: 1 }),
-          makeTaskPR({ id: "row-2", task_id: "task-a", owner: "o", repo: "r", pr_number: 2 }),
-        ],
-      });
+    const { result } = renderUsePRKeyToTasks({
+      "task-a": [
+        makeTaskPR({ id: "row-1", task_id: "task-a", owner: "o", repo: "r", pr_number: 1 }),
+        makeTaskPR({ id: "row-2", task_id: "task-a", owner: "o", repo: "r", pr_number: 2 }),
+      ],
     });
-    expect(result.current.map.get("o/r#1")?.length).toBe(1);
-    expect(result.current.map.get("o/r#2")?.length).toBe(1);
+    expect(result.current.get("o/r#1")?.length).toBe(1);
+    expect(result.current.get("o/r#2")?.length).toBe(1);
   });
 
   it("skips entries whose value is not an array (defensive against partial hydration)", () => {
-    const { result } = renderUsePRKeyToTasks();
-    act(() => {
-      result.current.setTaskPRs({
-        "task-a": [
-          makeTaskPR({ id: "row-1", task_id: "task-a", owner: "o", repo: "r", pr_number: 1 }),
-        ],
-        // Partial hydration may briefly seed byTaskId[task] with a non-array
-        // (e.g. an empty object). The hook should ignore those rows instead of
-        // throwing.
-        "task-bad": {} as unknown as TaskPR[],
-      });
+    const { result } = renderUsePRKeyToTasks({
+      "task-a": [
+        makeTaskPR({ id: "row-1", task_id: "task-a", owner: "o", repo: "r", pr_number: 1 }),
+      ],
+      // Partial hydration may briefly seed task_prs[task] with a non-array
+      // (e.g. an empty object). The hook should ignore those rows.
+      "task-bad": {} as unknown as TaskPR[],
     });
-    expect(result.current.map.get("o/r#1")?.length).toBe(1);
-    expect(result.current.map.size).toBe(1);
+    expect(result.current.get("o/r#1")?.length).toBe(1);
+    expect(result.current.size).toBe(1);
   });
 });
