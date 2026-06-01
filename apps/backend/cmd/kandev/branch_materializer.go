@@ -166,39 +166,45 @@ func (b *branchMaterializer) finalizeMaterialize(
 	b.notifyAgentctlRescan(ctx, session, taskRoot)
 	if b.rescanner != nil {
 		b.rescanner.NotifyWorktreeMaterialized(ctx, lifecycle.MaterializedWorktree{
-			TaskID:         taskID,
-			SessionID:      session.ID,
-			WorktreeID:     wt.ID,
-			WorktreePath:   wt.Path,
-			WorktreeBranch: wt.Branch,
-			RepositoryID:   repositoryID,
-			BranchSlug:     slug,
+			TaskID:            taskID,
+			SessionID:         session.ID,
+			WorktreeID:        wt.ID,
+			WorktreePath:      wt.Path,
+			WorktreeBranch:    wt.Branch,
+			RepositoryID:      repositoryID,
+			BranchSlug:        slug,
+			TaskWorkspacePath: taskRoot,
 		})
 	}
 }
 
 // promoteWorkspacePathIfNeeded switches task_environments.workspace_path
-// from the primary worktree to the task root when the new worktree lives
-// as a sibling (e.g. <task>/<repo>-<slug>/). The agent process's CWD does
-// not change — that's set at launch time — but later session relaunches
-// pick up multi-repo mode via prepareMultiRepo because workspace_path is
-// now the parent of all repo dirs. Returns the resolved task-root path so
-// the caller can pass it to the agentctl rescan.
+// to the task root that contains the newly-created worktree, so subsequent
+// session relaunches pick up multi-repo mode via prepareMultiRepo. The
+// agent process's CWD does not change — that's set at launch time.
+// Returns the resolved task-root path so the caller can pass it to the
+// agentctl rescan.
 //
-// Sibling layout: <task-root>/<repo>/ and <task-root>/<repo>-<slug>/ both
-// have filepath.Dir == <task-root>. The check compares parents to confirm
-// the new worktree is actually a sibling of the env's workspace_path
-// before mutating the row — otherwise an unrelated path would silently
-// repoint the env at the wrong dir.
+// Anchors the task root in env.TaskDirName rather than env.WorkspacePath:
+// a few historical envs landed with workspace_path pointing at the source
+// repo's local_path (the orchestrator's computeWorkspacePath fallback)
+// instead of the primary worktree. Comparing against env.WorkspacePath
+// alone would refuse to promote those envs because the source repo isn't
+// a sibling of the new worktree — but the task root we want IS still
+// `filepath.Dir(newWorktreePath)` and its basename matches env.TaskDirName,
+// which is a reliable cross-check that the worktree landed under the right
+// task root and not somewhere unrelated.
 func (b *branchMaterializer) promoteWorkspacePathIfNeeded(ctx context.Context, env *models.TaskEnvironment, newWorktreePath string) string {
 	taskRoot := filepath.Dir(newWorktreePath)
 	if env.WorkspacePath == taskRoot {
 		return taskRoot
 	}
-	if filepath.Dir(env.WorkspacePath) != taskRoot {
-		b.logger.Warn("skip workspace_path promotion: new worktree is not a sibling of env workspace_path",
+	if env.TaskDirName == "" || filepath.Base(taskRoot) != env.TaskDirName {
+		b.logger.Warn("skip workspace_path promotion: new worktree parent does not match env.task_dir_name",
 			zap.String("env_workspace_path", env.WorkspacePath),
-			zap.String("new_worktree_path", newWorktreePath))
+			zap.String("env_task_dir_name", env.TaskDirName),
+			zap.String("new_worktree_path", newWorktreePath),
+			zap.String("derived_task_root", taskRoot))
 		return env.WorkspacePath
 	}
 	prev := env.WorkspacePath

@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"go.uber.org/zap"
 
@@ -307,30 +306,39 @@ func hasRowForRepoBase(existing []*models.TaskRepository, repositoryID, baseBran
 	return false
 }
 
-// autoBranchName picks a fresh `branch-N` style name for a new
+// autoBranchName picks a fresh `branch-<random>` name for a new
 // task_repositories row when the caller didn't specify checkout_branch.
-// N is one more than the highest matching suffix already attached for the
-// same (repo, base), so repeated calls produce branch-2, branch-3, ...
-// without scanning git refs — collisions on disk are handled by the
-// worktree manager's "treat as new branch" path, which suffixes anyway.
+// Uses a short random suffix instead of a sequential counter so the name
+// is unpredictable — predictable names like `branch-2` invite collisions
+// when concurrent agents add branches simultaneously and leak ordering
+// information into the worktree path on disk.
+//
+// On the astronomically unlikely event of a collision with an existing
+// row for the same (repo, base), retry up to a few times before giving
+// up and letting the caller surface the duplicate-name error.
 //
 // The naming intentionally avoids encoding the base branch name to keep
 // the slug-derived directory short and stable across base renames.
 func autoBranchName(existing []*models.TaskRepository, repositoryID, baseBranch string) string {
-	n := 2
-	for _, tr := range existing {
-		if tr.RepositoryID != repositoryID || tr.BaseBranch != baseBranch {
-			continue
-		}
-		if !strings.HasPrefix(tr.CheckoutBranch, "branch-") {
-			continue
-		}
-		var idx int
-		if _, err := fmt.Sscanf(tr.CheckoutBranch, "branch-%d", &idx); err == nil && idx >= n {
-			n = idx + 1
+	for range 5 {
+		candidate := "branch-" + worktree.SmallSuffix(3)
+		if !branchNameExistsForRepoBase(existing, repositoryID, baseBranch, candidate) {
+			return candidate
 		}
 	}
-	return fmt.Sprintf("branch-%d", n)
+	return "branch-" + worktree.SmallSuffix(3)
+}
+
+// branchNameExistsForRepoBase reports whether `existing` already has a row
+// for the given (repo, base, checkout) triple — used by autoBranchName to
+// reject random candidates that collide with prior rows.
+func branchNameExistsForRepoBase(existing []*models.TaskRepository, repositoryID, baseBranch, checkoutBranch string) bool {
+	for _, tr := range existing {
+		if tr.RepositoryID == repositoryID && tr.BaseBranch == baseBranch && tr.CheckoutBranch == checkoutBranch {
+			return true
+		}
+	}
+	return false
 }
 
 // repoLabelOrID returns a human-readable repository label for error messages,

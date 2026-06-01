@@ -31,6 +31,12 @@ type AgentctlEventPayload struct {
 	WorktreeID        string `json:"worktree_id,omitempty"`
 	WorktreePath      string `json:"worktree_path,omitempty"`
 	WorktreeBranch    string `json:"worktree_branch,omitempty"`
+	// TaskWorkspacePath is the task root that contains every per-repo
+	// worktree as a sibling subdir, populated when the event signals a
+	// sibling worktree being added (multi-branch add_branch flow) rather
+	// than the initial session ready. The frontend uses this to repoint the
+	// file browser at the task root once the task becomes multi-branch.
+	TaskWorkspacePath string `json:"task_workspace_path,omitempty"`
 }
 
 // ACPSessionCreatedPayload is the payload when an ACP session is created.

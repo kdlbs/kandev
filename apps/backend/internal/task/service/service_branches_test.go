@@ -274,7 +274,8 @@ func TestAddBranchToTask_AllowsBeforeLaunch(t *testing.T) {
 // TestAddBranchToTask_AutoGeneratesNameWhenWouldCollide exercises the
 // no-args agent flow: "add a branch" with no checkout_branch should produce
 // a fresh row instead of erroring out because the primary already occupies
-// the (repo, base, "") triple. Generated name follows branch-N.
+// the (repo, base, "") triple. Generated name follows `branch-<random>` so
+// concurrent adders don't clash on a predictable counter.
 func TestAddBranchToTask_AutoGeneratesNameWhenWouldCollide(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
@@ -302,8 +303,8 @@ func TestAddBranchToTask_AutoGeneratesNameWhenWouldCollide(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddBranchToTask: %v", err)
 	}
-	if added.CheckoutBranch != "branch-2" {
-		t.Errorf("expected auto-name branch-2, got %q", added.CheckoutBranch)
+	if !strings.HasPrefix(added.CheckoutBranch, "branch-") || len(added.CheckoutBranch) != len("branch-")+3 {
+		t.Errorf("expected auto-name branch-<3 random chars>, got %q", added.CheckoutBranch)
 	}
 
 	added2, err := svc.AddBranchToTask(ctx, AddBranchToTaskRequest{
@@ -312,8 +313,11 @@ func TestAddBranchToTask_AutoGeneratesNameWhenWouldCollide(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddBranchToTask (second auto): %v", err)
 	}
-	if added2.CheckoutBranch != "branch-3" {
-		t.Errorf("expected auto-name branch-3, got %q", added2.CheckoutBranch)
+	if !strings.HasPrefix(added2.CheckoutBranch, "branch-") || len(added2.CheckoutBranch) != len("branch-")+3 {
+		t.Errorf("expected auto-name branch-<3 random chars>, got %q", added2.CheckoutBranch)
+	}
+	if added2.CheckoutBranch == added.CheckoutBranch {
+		t.Errorf("expected distinct auto-names, both got %q", added.CheckoutBranch)
 	}
 }
 

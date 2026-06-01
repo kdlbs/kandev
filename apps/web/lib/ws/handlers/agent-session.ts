@@ -264,34 +264,87 @@ function syncEnvFromAgentctlPayload(
   });
 }
 
-/** Handle the agentctl_ready event: update session worktree info. */
+/** Builds the partial-session patch applied for an agentctl_ready event.
+ *  On sibling materialize we repoint worktree_path to the task root and keep
+ *  the primary's id/branch; the initial ready event sets id/path/branch
+ *  straight from the payload. */
+function buildAgentctlReadySessionUpdate(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload: any,
+  isSibling: boolean,
+): Record<string, unknown> {
+  const update: Record<string, unknown> = {};
+  if (isSibling) {
+    if (payload.task_workspace_path) update.worktree_path = payload.task_workspace_path;
+    return update;
+  }
+  if (payload.worktree_id) update.worktree_id = payload.worktree_id;
+  if (payload.worktree_path) update.worktree_path = payload.worktree_path;
+  if (payload.worktree_branch) update.worktree_branch = payload.worktree_branch;
+  return update;
+}
+
+/** Adds the materialized worktree to the worktrees map + the per-session list. */
+function recordAgentctlReadyWorktree(
+  store: StoreApi<AppState>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload: any,
+  existingSession: { repository_id?: string; worktree_path?: string; worktree_branch?: string },
+): void {
+  if (!payload.worktree_id) return;
+  store.getState().setWorktree({
+    id: payload.worktree_id,
+    sessionId: payload.session_id,
+    repositoryId: existingSession.repository_id ?? undefined,
+    path: payload.worktree_path ?? existingSession.worktree_path ?? undefined,
+    branch: payload.worktree_branch ?? existingSession.worktree_branch ?? undefined,
+  });
+  const existing =
+    store.getState().sessionWorktreesBySessionId.itemsBySessionId[payload.session_id] ?? [];
+  if (!existing.includes(payload.worktree_id)) {
+    store.getState().setSessionWorktrees(payload.session_id, [...existing, payload.worktree_id]);
+  }
+}
+
+/** Handle the agentctl_ready event: update session worktree info.
+ *
+ *  Two shapes share this event:
+ *    1. Initial session ready — payload describes the session's primary
+ *       worktree; we set worktree_id/path/branch on the session row.
+ *    2. Sibling materialized (multi-branch add_branch flow) — payload
+ *       describes a NEW worktree being added alongside the primary. The
+ *       primary's worktree_id/branch must NOT be clobbered (they still own
+ *       the chat/agent process); only worktree_path moves to the task root
+ *       so the file browser repoints from "primary worktree" to "task root
+ *       containing both worktree siblings". A commits refetch is bumped so
+ *       the Commits panel re-queries with the new multi-repo subpaths
+ *       (each commit then carries its repo/branch slug for grouping).
+ */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function handleAgentctlReady(store: StoreApi<AppState>, payload: any): void {
   const existingSession = store.getState().taskSessions.items[payload.session_id];
   if (!existingSession) return;
 
-  const sessionUpdate: Record<string, unknown> = {};
-  if (payload.worktree_id) sessionUpdate.worktree_id = payload.worktree_id;
-  if (payload.worktree_path) sessionUpdate.worktree_path = payload.worktree_path;
-  if (payload.worktree_branch) sessionUpdate.worktree_branch = payload.worktree_branch;
+  const isSibling =
+    !!payload.worktree_id &&
+    !!existingSession.worktree_id &&
+    payload.worktree_id !== existingSession.worktree_id;
 
+  const sessionUpdate = buildAgentctlReadySessionUpdate(payload, isSibling);
   if (Object.keys(sessionUpdate).length > 0) {
     store.getState().setTaskSession({ ...existingSession, ...sessionUpdate });
   }
 
-  if (payload.worktree_id) {
-    store.getState().setWorktree({
-      id: payload.worktree_id,
-      sessionId: payload.session_id,
-      repositoryId: existingSession.repository_id ?? undefined,
-      path: payload.worktree_path ?? existingSession.worktree_path ?? undefined,
-      branch: payload.worktree_branch ?? existingSession.worktree_branch ?? undefined,
-    });
-    const existing =
-      store.getState().sessionWorktreesBySessionId.itemsBySessionId[payload.session_id] ?? [];
-    if (!existing.includes(payload.worktree_id)) {
-      store.getState().setSessionWorktrees(payload.session_id, [...existing, payload.worktree_id]);
-    }
+  recordAgentctlReadyWorktree(store, payload, existingSession);
+
+  if (isSibling) {
+    // Drop the pre-multi-repo git-status snapshot — the backend just
+    // transitioned this session from single-repo to multi-repo and the legacy
+    // (empty-repo-name) tracker is gone. Without this the Changes panel keeps
+    // surfacing the frozen snapshot until the user reloads the tab, masking
+    // the per-repo updates streaming in for both the primary and the sibling.
+    store.getState().clearLegacyGitStatusEntry(payload.session_id);
+    store.getState().bumpSessionCommitsRefetch(payload.session_id);
   }
 }
 

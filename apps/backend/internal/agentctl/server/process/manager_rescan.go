@@ -201,40 +201,48 @@ func (m *Manager) appendNewRepoTrackers(ctx context.Context, children []reposito
 }
 
 // resolveRescanPath maps an externally-supplied workspace path to a known-good
-// path derived from the manager's existing cfg.WorkDir, breaking the taint
-// flow from the HTTP body into os.Stat / downstream tracker paths. The only
-// legitimate caller (kandev backend's branch materializer) promotes the
-// workdir up exactly one level — from <task>/<repo>/ to <task>/ — so the
-// allowed transitions are:
+// path. The legitimate caller (kandev backend's branch materializer) promotes
+// the workdir to the task root that contains the per-repo worktrees as
+// siblings. Allowed transitions are:
 //   - newPath equals currentWorkDir   → no-op (return current)
 //   - newPath equals parent of current → return derived parent
+//   - newPath is a different absolute directory that actually holds >=1 git
+//     repo subdir → return cleaned newPath (recovery path: covers envs whose
+//     workspace_path landed on the source repo's local_path instead of the
+//     primary worktree, so the parent-only check would otherwise refuse to
+//     ever switch the manager away from the wrong root)
 //
-// Critically, the returned path is ALWAYS derived from currentWorkDir
-// (which originates in trusted manager config), never from newPath itself.
-// CodeQL's go/path-injection taint analysis cleared once the sink stopped
-// receiving the HTTP-supplied string directly.
+// The third branch reintroduces the HTTP-supplied path as a Stat sink, but
+// the endpoint is already authenticated via the bearer-token middleware and
+// the manager verifies the path resolves to a real directory before
+// committing — taint here is gated by auth, not path-shape.
 //
 // Returns ("", false) for any other input — first-launch case (currentWorkDir
 // empty) is handled by the caller falling back to the existing workdir.
 func resolveRescanPath(newPath, currentWorkDir string) (string, bool) {
-	if newPath == "" || currentWorkDir == "" {
+	if newPath == "" {
 		return "", false
 	}
 	clean := filepath.Clean(newPath)
 	if !filepath.IsAbs(clean) {
 		return "", false
 	}
-	currentClean := filepath.Clean(currentWorkDir)
-	if clean == currentClean {
-		return currentClean, true
+	if currentWorkDir != "" {
+		currentClean := filepath.Clean(currentWorkDir)
+		if clean == currentClean {
+			return currentClean, true
+		}
+		parent := filepath.Dir(currentClean)
+		if parent != currentClean && clean == parent {
+			return parent, true
+		}
 	}
-	parent := filepath.Dir(currentClean)
-	if parent == currentClean {
-		// currentWorkDir is already filesystem root; no promotion possible.
-		return "", false
-	}
-	if clean == parent {
-		return parent, true
+	// Recovery path: accept any absolute directory that actually contains git
+	// repo subdirs. scanRepositorySubdirs reads the directory and validates
+	// each child has a working .git entry, so a hostile or empty path returns
+	// nil and the rescan stays a no-op below.
+	if children := scanRepositorySubdirs(clean); len(children) >= 1 {
+		return clean, true
 	}
 	return "", false
 }

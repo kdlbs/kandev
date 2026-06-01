@@ -22,6 +22,10 @@ type MaterializedWorktree struct {
 	WorktreeBranch string
 	RepositoryID   string
 	BranchSlug     string
+	// TaskWorkspacePath is the task root after sibling promotion (env's
+	// promoted workspace_path). The frontend reads this to repoint the file
+	// browser to the task root when the task becomes multi-branch.
+	TaskWorkspacePath string
 }
 
 // NotifyWorktreeMaterialized publishes an AgentctlReady-shaped event so
@@ -52,6 +56,7 @@ func (m *Manager) NotifyWorktreeMaterialized(ctx context.Context, wt Materialize
 		WorktreeID:        wt.WorktreeID,
 		WorktreePath:      wt.WorktreePath,
 		WorktreeBranch:    wt.WorktreeBranch,
+		TaskWorkspacePath: wt.TaskWorkspacePath,
 	}
 	event := bus.NewEvent(events.AgentctlReady, "branch-materializer", payload)
 	if err := m.eventPublisher.eventBus.Publish(ctx, events.AgentctlReady, event); err != nil {
