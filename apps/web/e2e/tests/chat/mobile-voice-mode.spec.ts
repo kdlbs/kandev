@@ -1,4 +1,3 @@
-import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
@@ -16,7 +15,7 @@ import { SessionPage } from "../../pages/session-page";
 //    coarse-pointer effective-mode override, so a user with stored
 //    `voiceMode.mode = "hold"` still gets working toggle behaviour.
 
-async function seedTask(testPage: Page, apiClient: ApiClient, seedData: SeedData, title: string) {
+async function seedTask(apiClient: ApiClient, seedData: SeedData, title: string) {
   return apiClient.createTaskWithAgent(seedData.workspaceId, title, seedData.agentProfileId, {
     description: "/e2e:simple-message",
     workflow_id: seedData.workflowId,
@@ -59,7 +58,7 @@ test.describe("Mobile voice mode", () => {
     apiClient,
     seedData,
   }) => {
-    const task = await seedTask(testPage, apiClient, seedData, "Mobile voice button");
+    const task = await seedTask(apiClient, seedData, "Mobile voice button");
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
