@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useRef } from "react";
+import { FormEvent, useCallback } from "react";
 import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
 import { Dialog, DialogContent, DialogHeader, DialogFooter } from "@kandev/ui/dialog";
@@ -471,16 +471,24 @@ function useGuardedSubmit(
   );
 }
 
+// Synthetic submit event used by the voice auto-send path. Calling the form
+// handler directly (instead of `form.requestSubmit()`) matches the chat
+// composer's pattern and avoids the Safari < 16 gap where `requestSubmit` is
+// missing on `HTMLFormElement`. `guardedHandleSubmit` only reads
+// `preventDefault` off the event, so a stubbed shape is sufficient.
+const VOICE_SUBMIT_EVENT = { preventDefault: () => {} } as unknown as FormEvent;
+
 export function TaskCreateDialog(props: TaskCreateDialogProps) {
   const setup = useTaskCreateDialogSetup(props);
-  const formRef = useRef<HTMLFormElement>(null);
-  // Voice auto-send fires the form's native submit so every existing gate
-  // (missing title/repo/branch/agent, `submitBlockedReason`, in-flight create)
-  // still applies — the disabled submit button silently no-ops if any gate
-  // is unmet, matching the chat composer's voice auto-send behaviour.
+  const { guardedHandleSubmit } = setup;
+  // Voice auto-send invokes the same submit handler as the in-form Submit
+  // button. Every existing validation gate (missing title/repo/branch/agent,
+  // `submitBlockedReason`, in-flight create) still applies because they live
+  // inside `handleSubmit` itself, so a dictation with incomplete fields
+  // silently no-ops rather than creating a malformed task.
   const handleVoiceAutoSend = useCallback(() => {
-    formRef.current?.requestSubmit();
-  }, []);
+    guardedHandleSubmit(VOICE_SUBMIT_EVENT);
+  }, [guardedHandleSubmit]);
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogContent
@@ -495,11 +503,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
             initialTitle={props.initialValues?.title}
           />
         </DialogHeader>
-        <form
-          ref={formRef}
-          onSubmit={setup.guardedHandleSubmit}
-          className="flex flex-col gap-4 overflow-hidden"
-        >
+        <form onSubmit={guardedHandleSubmit} className="flex flex-col gap-4 overflow-hidden">
           <DialogFormBody
             {...buildDialogFormBodyProps(setup, props)}
             onVoiceAutoSend={handleVoiceAutoSend}
