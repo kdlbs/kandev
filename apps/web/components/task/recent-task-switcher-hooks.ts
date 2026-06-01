@@ -34,14 +34,14 @@ import {
   type RecentTaskBuildContext,
   type RecentTaskDisplayItem,
 } from "./recent-task-switcher-model";
-
-/** Direction the switcher cycles through recent tasks. */
-type CycleDirection = "forward" | "backward";
 import {
   hasHoldModifier,
   isCommitReleaseEvent,
   isCycleShortcutEvent,
 } from "./recent-task-switcher-keys";
+
+/** Direction the switcher cycles through recent tasks. */
+type CycleDirection = "forward" | "backward";
 
 export type RecentTaskSwitcherController = {
   open: boolean;
@@ -64,6 +64,10 @@ type SwitcherRefs = {
   activeTaskIdRef: MutableRefObject<string | null>;
   shortcutRef: MutableRefObject<KeyboardShortcut>;
   reverseShortcutRef: MutableRefObject<KeyboardShortcut>;
+  // The binding whose hold-modifier release should commit — set to the shortcut
+  // of the direction that opened/last drove the switcher, so a divergent custom
+  // binding for the other direction can't commit early.
+  activeCommitShortcutRef: MutableRefObject<KeyboardShortcut | null>;
 };
 
 type SwitcherActions = {
@@ -211,6 +215,7 @@ function useSwitcherRefs({
   const activeTaskIdRef = useLatestRef(activeTaskId);
   const shortcutRef = useLatestRef(shortcut);
   const reverseShortcutRef = useLatestRef(reverseShortcut);
+  const activeCommitShortcutRef = useRef<KeyboardShortcut | null>(null);
 
   useEffect(() => {
     openRef.current = open;
@@ -226,6 +231,7 @@ function useSwitcherRefs({
     activeTaskIdRef,
     shortcutRef,
     reverseShortcutRef,
+    activeCommitShortcutRef,
   };
 }
 
@@ -244,6 +250,95 @@ function useSelectedIndexSetter(refs: SwitcherRefs, setRawSelectedIndex: (index:
   );
 }
 
+type SwitcherCycleActions = Pick<SwitcherActions, "openSwitcher" | "cycleSwitcher">;
+
+function useSwitcherCycleActions({
+  refs,
+  setCommandPanelOpen,
+  setOpenState,
+  setSelectedIndex,
+}: {
+  refs: SwitcherRefs;
+  setCommandPanelOpen: (open: boolean) => void;
+  setOpenState: (open: boolean) => void;
+  setSelectedIndex: (index: number) => void;
+}): SwitcherCycleActions {
+  const {
+    activeCommitShortcutRef,
+    activeTaskIdRef,
+    cancelledRef,
+    commitOnReleaseRef,
+    itemsRef,
+    openRef,
+    reverseShortcutRef,
+    selectedIndexRef,
+    shortcutRef,
+  } = refs;
+
+  const commitShortcutForDirection = useCallback(
+    (direction: CycleDirection) =>
+      direction === "backward" ? reverseShortcutRef.current : shortcutRef.current,
+    [reverseShortcutRef, shortcutRef],
+  );
+
+  const openSwitcher = useCallback(
+    (commitOnRelease: boolean, direction: CycleDirection = "forward") => {
+      setCommandPanelOpen(false);
+      cancelledRef.current = false;
+      commitOnReleaseRef.current = commitOnRelease;
+      activeCommitShortcutRef.current = commitShortcutForDirection(direction);
+      openRef.current = true;
+      const initialIndex =
+        direction === "backward"
+          ? getInitialReverseSelectionIndex(itemsRef.current, activeTaskIdRef.current)
+          : getInitialSelectionIndex(itemsRef.current, activeTaskIdRef.current);
+      setSelectedIndex(initialIndex);
+      setOpenState(true);
+    },
+    [
+      activeCommitShortcutRef,
+      activeTaskIdRef,
+      cancelledRef,
+      commitOnReleaseRef,
+      commitShortcutForDirection,
+      itemsRef,
+      openRef,
+      setCommandPanelOpen,
+      setOpenState,
+      setSelectedIndex,
+    ],
+  );
+
+  const cycleSwitcher = useCallback(
+    (commitOnRelease: boolean, direction: CycleDirection = "forward") => {
+      if (!openRef.current) {
+        openSwitcher(commitOnRelease, direction);
+        return;
+      }
+      if (commitOnRelease) commitOnReleaseRef.current = true;
+      activeCommitShortcutRef.current = commitShortcutForDirection(direction);
+      const count = itemsRef.current.length;
+      const nextIndex =
+        direction === "backward"
+          ? getPreviousSelectionIndex(selectedIndexRef.current, count)
+          : getNextSelectionIndex(selectedIndexRef.current, count);
+      setSelectedIndex(nextIndex);
+    },
+    [
+      activeCommitShortcutRef,
+      commitOnReleaseRef,
+      commitShortcutForDirection,
+      itemsRef,
+      openRef,
+      openSwitcher,
+      selectedIndexRef,
+      setSelectedIndex,
+    ],
+  );
+
+  return { openSwitcher, cycleSwitcher };
+}
+
 function useSwitcherActions({
   refs,
   routeToTask,
@@ -257,14 +352,27 @@ function useSwitcherActions({
   setOpenState: (open: boolean) => void;
   setSelectedIndex: (index: number) => void;
 }): SwitcherActions {
-  const { activeTaskIdRef, cancelledRef, commitOnReleaseRef, itemsRef, openRef, selectedIndexRef } =
-    refs;
+  const {
+    activeCommitShortcutRef,
+    cancelledRef,
+    commitOnReleaseRef,
+    itemsRef,
+    openRef,
+    selectedIndexRef,
+  } = refs;
+  const { openSwitcher, cycleSwitcher } = useSwitcherCycleActions({
+    refs,
+    setCommandPanelOpen,
+    setOpenState,
+    setSelectedIndex,
+  });
 
   const closeSwitcher = useCallback(() => {
     openRef.current = false;
     commitOnReleaseRef.current = false;
+    activeCommitShortcutRef.current = null;
     setOpenState(false);
-  }, [commitOnReleaseRef, openRef, setOpenState]);
+  }, [activeCommitShortcutRef, commitOnReleaseRef, openRef, setOpenState]);
 
   const cancelSwitcher = useCallback(() => {
     cancelledRef.current = true;
@@ -290,48 +398,6 @@ function useSwitcherActions({
       if (item) routeToTask(item.taskId);
     },
     [closeSwitcher, routeToTask],
-  );
-
-  const openSwitcher = useCallback(
-    (commitOnRelease: boolean, direction: CycleDirection = "forward") => {
-      setCommandPanelOpen(false);
-      cancelledRef.current = false;
-      commitOnReleaseRef.current = commitOnRelease;
-      openRef.current = true;
-      const initialIndex =
-        direction === "backward"
-          ? getInitialReverseSelectionIndex(itemsRef.current, activeTaskIdRef.current)
-          : getInitialSelectionIndex(itemsRef.current, activeTaskIdRef.current);
-      setSelectedIndex(initialIndex);
-      setOpenState(true);
-    },
-    [
-      activeTaskIdRef,
-      cancelledRef,
-      commitOnReleaseRef,
-      itemsRef,
-      openRef,
-      setCommandPanelOpen,
-      setOpenState,
-      setSelectedIndex,
-    ],
-  );
-
-  const cycleSwitcher = useCallback(
-    (commitOnRelease: boolean, direction: CycleDirection = "forward") => {
-      if (!openRef.current) {
-        openSwitcher(commitOnRelease, direction);
-        return;
-      }
-      if (commitOnRelease) commitOnReleaseRef.current = true;
-      const count = itemsRef.current.length;
-      const nextIndex =
-        direction === "backward"
-          ? getPreviousSelectionIndex(selectedIndexRef.current, count)
-          : getNextSelectionIndex(selectedIndexRef.current, count);
-      setSelectedIndex(nextIndex);
-    },
-    [commitOnReleaseRef, itemsRef, openRef, openSwitcher, selectedIndexRef, setSelectedIndex],
   );
 
   const selectCurrentItem = useCallback(() => {
@@ -367,7 +433,14 @@ function useRecentTaskSwitcherCommand(shortcut: KeyboardShortcut, openSwitcher: 
 }
 
 function useSwitcherGlobalKeyboard(refs: SwitcherRefs, actions: SwitcherActions) {
-  const { cancelledRef, commitOnReleaseRef, openRef, reverseShortcutRef, shortcutRef } = refs;
+  const {
+    activeCommitShortcutRef,
+    cancelledRef,
+    commitOnReleaseRef,
+    openRef,
+    reverseShortcutRef,
+    shortcutRef,
+  } = refs;
   const { cancelSwitcher, cycleSwitcher, selectCurrentItem } = actions;
 
   useEffect(() => {
@@ -400,12 +473,12 @@ function useSwitcherGlobalKeyboard(refs: SwitcherRefs, actions: SwitcherActions)
 
     const handleKeyUp = (event: KeyboardEvent) => {
       if (!openRef.current || !commitOnReleaseRef.current) return;
-      // Commit when the hold modifier of either direction is released. Both
-      // default to Ctrl/Cmd, but custom bindings may differ.
-      const released =
-        isCommitReleaseEvent(event, shortcutRef.current) ||
-        isCommitReleaseEvent(event, reverseShortcutRef.current);
-      if (!released) return;
+      // Commit only when the hold modifier of the binding that drove the
+      // switcher is released. Both directions default to Ctrl/Cmd, but custom
+      // bindings may differ — releasing the other direction's modifier must not
+      // commit early.
+      const activeShortcut = activeCommitShortcutRef.current;
+      if (!activeShortcut || !isCommitReleaseEvent(event, activeShortcut)) return;
 
       event.preventDefault();
       event.stopPropagation();
@@ -436,6 +509,7 @@ function useSwitcherGlobalKeyboard(refs: SwitcherRefs, actions: SwitcherActions)
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [
+    activeCommitShortcutRef,
     cancelSwitcher,
     cancelledRef,
     commitOnReleaseRef,

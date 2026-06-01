@@ -90,11 +90,16 @@ test.describe("Recent task switcher", () => {
     });
 
     // Visit oldest -> newest so the recent list is [third(current), second, first].
+    const titleByTask = new Map([
+      [first.id, "Reverse Switcher One"],
+      [second.id, "Reverse Switcher Two"],
+      [third.id, "Reverse Switcher Three"],
+    ]);
     for (const task of [first, second, third]) {
       await testPage.goto(`/t/${task.id}`);
-      await expect(testPage.getByText(`Reverse Switcher`, { exact: false }).first()).toBeVisible({
-        timeout: 15_000,
-      });
+      await expect(
+        testPage.getByText(titleByTask.get(task.id)!, { exact: true }).first(),
+      ).toBeVisible({ timeout: 15_000 });
     }
 
     const modifier = taskSwitcherModifier();
