@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import { IconLoader2, IconMicrophone, IconPlayerStopFilled } from "@tabler/icons-react";
 
 import { Button } from "@kandev/ui/button";
@@ -68,18 +68,58 @@ function toastForError(toast: ReturnType<typeof useToast>["toast"], err: VoiceEr
 
 // ── Activation handlers ──────────────────────────────────────────────────
 
+// Hold mode survives finger drift by claiming the pointer with
+// setPointerCapture on pointerdown. Without capture, any movement that crosses
+// the button's bounds (a common occurrence on touch — small finger shift,
+// soft-keyboard reflow, OS gesture handoff) fires pointerleave and would stop
+// recording mid-utterance. pointerleave is intentionally NOT wired here for
+// the same reason. Capture is released on pointerup/pointercancel; both also
+// trigger stop().
+function safePointerCapture(target: Element, pointerId: number): void {
+  try {
+    target.setPointerCapture(pointerId);
+  } catch {
+    // setPointerCapture can throw InvalidPointerId on browsers that have
+    // already released the implicit capture (older WebKit). Safe to ignore —
+    // the worst case is the prior behaviour where hold could stop on drift.
+  }
+}
+
+function safePointerRelease(target: Element, pointerId: number): void {
+  try {
+    if (
+      typeof (target as Element & { hasPointerCapture?: (id: number) => boolean })
+        .hasPointerCapture === "function"
+    ) {
+      if (
+        !(target as Element & { hasPointerCapture: (id: number) => boolean }).hasPointerCapture(
+          pointerId,
+        )
+      )
+        return;
+    }
+    target.releasePointerCapture(pointerId);
+  } catch {
+    // ignore — Safari can throw if capture was already released.
+  }
+}
+
 function buildHoldHandlers(start: () => Promise<void>, stop: () => Promise<void>) {
   return {
     onPointerDown: (e: React.PointerEvent) => {
       e.preventDefault();
+      safePointerCapture(e.currentTarget, e.pointerId);
       void start();
     },
     onPointerUp: (e: React.PointerEvent) => {
       e.preventDefault();
+      safePointerRelease(e.currentTarget, e.pointerId);
       void stop();
     },
-    onPointerLeave: () => void stop(),
-    onPointerCancel: () => void stop(),
+    onPointerCancel: (e: React.PointerEvent) => {
+      safePointerRelease(e.currentTarget, e.pointerId);
+      void stop();
+    },
   };
 }
 
@@ -111,6 +151,34 @@ function useAutoSendOnTranscript(
       if (enabled && onAutoSend) requestAnimationFrame(onAutoSend);
     },
     [baseOnTranscript, onAutoSend, enabled],
+  );
+}
+
+// Subscribes to `(pointer: coarse)` so the component re-renders when the user
+// docks/undocks an external pointer (Surface, iPad with Magic Keyboard). SSR
+// returns false, matching desktop default — mobile-first hydration corrects on
+// first client paint. Pattern mirrors `useResponsiveBreakpoint`.
+function subscribeCoarsePointer(callback: () => void): () => void {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return () => {};
+  const mql = window.matchMedia("(pointer: coarse)");
+  mql.addEventListener("change", callback);
+  return () => mql.removeEventListener("change", callback);
+}
+
+function getCoarsePointerSnapshot(): boolean {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
+  return window.matchMedia("(pointer: coarse)").matches;
+}
+
+function getCoarsePointerServerSnapshot(): boolean {
+  return false;
+}
+
+function useIsCoarsePointer(): boolean {
+  return useSyncExternalStore(
+    subscribeCoarsePointer,
+    getCoarsePointerSnapshot,
+    getCoarsePointerServerSnapshot,
   );
 }
 
@@ -192,11 +260,99 @@ export function VoiceInputButton({ onTranscript, onAutoSend, disabled }: VoiceIn
   );
 }
 
+// Hold-to-talk is unreliable on touch even with pointer capture: the platform
+// reclaims the pointer for system gestures (back swipes, scroll-chains) and the
+// user's stored preference becomes a trap. Coarse-pointer devices silently get
+// toggle behaviour; persisted `voiceMode.mode` is left alone so docking a
+// keyboard restores the user's choice without a save.
+function resolveEffectiveMode(
+  prefMode: "hold" | "toggle",
+  isCoarsePointer: boolean,
+): "hold" | "toggle" {
+  return prefMode === "hold" && !isCoarsePointer ? "hold" : "toggle";
+}
+
+function resolveTooltip(args: {
+  modelLoad: VoiceModelLoadState;
+  modelLabel: string;
+  state: VoiceInputState;
+  holdMode: boolean;
+}): string {
+  const { modelLoad, modelLabel, state, holdMode } = args;
+  if (modelLoad.state === "loading") {
+    const pct = Number.isFinite(modelLoad.progress)
+      ? Math.min(100, Math.max(0, Math.round(modelLoad.progress * 100)))
+      : 0;
+    return `Downloading ${modelLabel}… ${pct}%`;
+  }
+  return `${TOOLTIP_BY_STATE[state]}${holdMode && state === "idle" ? " (hold)" : ""}`;
+}
+
+type VoiceMicButtonProps = {
+  state: VoiceInputState;
+  modelLoad: VoiceModelLoadState;
+  disabled?: boolean;
+  storedMode: "hold" | "toggle";
+  effectiveMode: "hold" | "toggle";
+  isCoarsePointer: boolean;
+  pointerHandlers: ReturnType<typeof buildHoldHandlers> | Record<string, never>;
+  onClick: (() => void) | undefined;
+};
+
+// Styled to mirror SubmitButton (h-7 w-7 rounded-full primary fill) so the two
+// prominent input actions read as a pair on the right of the toolbar.
+// Recording flips to a destructive fill with a pulsing ring so the active
+// state is unmistakable even on mobile. Touch-input sizing bumps to 10×10
+// (40px) for an easier finger target without disturbing the desktop pair.
+function VoiceMicButton({
+  state,
+  modelLoad,
+  disabled,
+  storedMode,
+  effectiveMode,
+  isCoarsePointer,
+  pointerHandlers,
+  onClick,
+}: VoiceMicButtonProps) {
+  const isRecording = state === "recording";
+  const isBusy = state === "requesting" || state === "processing" || modelLoad.state === "loading";
+  return (
+    <Button
+      type="button"
+      variant="default"
+      size="icon"
+      aria-label={ARIA_BY_STATE[state]}
+      aria-pressed={isRecording}
+      data-testid="voice-input-button"
+      data-state={state}
+      data-mode={storedMode}
+      data-effective-mode={effectiveMode}
+      disabled={!!disabled || (isBusy && state !== "recording")}
+      onClick={onClick}
+      {...pointerHandlers}
+      className={cn(
+        "rounded-full cursor-pointer relative select-none",
+        isCoarsePointer ? "h-10 w-10" : "h-7 w-7",
+        isRecording && "bg-destructive text-destructive-foreground hover:bg-destructive/90",
+      )}
+    >
+      <ButtonIcon state={state} modelLoad={modelLoad} />
+      {isRecording && (
+        <span
+          aria-hidden
+          className="absolute inset-0 rounded-full ring-2 ring-destructive/40 animate-pulse"
+        />
+      )}
+    </Button>
+  );
+}
+
 function EnabledVoiceInputButton({ onTranscript, onAutoSend, disabled }: VoiceInputButtonProps) {
   const { toast } = useToast();
   const voiceMode = useAppStore((s) => s.userSettings.voiceMode);
   const handleError = useCallback((err: VoiceError) => toastForError(toast, err), [toast]);
   const wrappedTranscript = useAutoSendOnTranscript(onTranscript, onAutoSend, voiceMode.autoSend);
+  const isCoarsePointer = useIsCoarsePointer();
 
   const { supported, state, modelLoad, start, stop, cancel } = useVoiceInput({
     onTranscript: wrappedTranscript,
@@ -217,19 +373,13 @@ function EnabledVoiceInputButton({ onTranscript, onAutoSend, disabled }: VoiceIn
   // the button silently left mobile users with no discoverable feedback.
   if (!supported) return <UnsupportedVoiceButton disabled={disabled} />;
 
-  const isRecording = state === "recording";
-  const isBusy = state === "requesting" || state === "processing" || modelLoad.state === "loading";
-  const holdMode = voiceMode.mode === "hold";
-
+  const effectiveMode = resolveEffectiveMode(voiceMode.mode, isCoarsePointer);
+  const holdMode = effectiveMode === "hold";
   const pointerHandlers = holdMode ? buildHoldHandlers(start, stop) : {};
   const onClick = holdMode ? undefined : buildToggleHandler(state, start, stop);
-
   const modelLabel = whisperModelConfig(voiceMode.whisperWebModel).label;
+  const tooltipText = resolveTooltip({ modelLoad, modelLabel, state, holdMode });
 
-  // Styled to mirror SubmitButton (h-7 w-7 rounded-full primary fill) so the
-  // two prominent input actions read as a pair on the right of the toolbar.
-  // Recording flips to a destructive fill with a pulsing ring so the active
-  // state is unmistakable even on mobile.
   return (
     <div className="flex items-center gap-1.5">
       <VoiceModelLoadIndicator
@@ -239,37 +389,18 @@ function EnabledVoiceInputButton({ onTranscript, onAutoSend, disabled }: VoiceIn
       />
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button
-            type="button"
-            variant="default"
-            size="icon"
-            aria-label={ARIA_BY_STATE[state]}
-            aria-pressed={isRecording}
-            data-testid="voice-input-button"
-            data-state={state}
-            data-mode={voiceMode.mode}
-            disabled={!!disabled || (isBusy && state !== "recording")}
+          <VoiceMicButton
+            state={state}
+            modelLoad={modelLoad}
+            disabled={disabled}
+            storedMode={voiceMode.mode}
+            effectiveMode={effectiveMode}
+            isCoarsePointer={isCoarsePointer}
+            pointerHandlers={pointerHandlers}
             onClick={onClick}
-            {...pointerHandlers}
-            className={cn(
-              "h-7 w-7 rounded-full cursor-pointer relative select-none",
-              isRecording && "bg-destructive text-destructive-foreground hover:bg-destructive/90",
-            )}
-          >
-            <ButtonIcon state={state} modelLoad={modelLoad} />
-            {isRecording && (
-              <span
-                aria-hidden
-                className="absolute inset-0 rounded-full ring-2 ring-destructive/40 animate-pulse"
-              />
-            )}
-          </Button>
+          />
         </TooltipTrigger>
-        <TooltipContent>
-          {modelLoad.state === "loading"
-            ? `Downloading ${modelLabel}… ${Number.isFinite(modelLoad.progress) ? Math.min(100, Math.max(0, Math.round(modelLoad.progress * 100))) : 0}%`
-            : `${TOOLTIP_BY_STATE[state]}${holdMode && state === "idle" ? " (hold)" : ""}`}
-        </TooltipContent>
+        <TooltipContent>{tooltipText}</TooltipContent>
       </Tooltip>
     </div>
   );
