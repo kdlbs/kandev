@@ -70,17 +70,22 @@ func UploadCredentialFiles(
 
 // DetectGHToken runs `gh auth token` locally and returns the GitHub OAuth token.
 //
-// Uses two contexts so a saturated gh throttle can't silently disable token
-// injection: acquireCtx (30s) bounds waiting for a slot; execCtx (5s) bounds
-// the gh subprocess itself. Without this split, a busy gh pool would
-// consume the 5s budget queueing and `gh auth token` would never start.
+// Splits the throttle wait (30s) from the exec budget (5s) so a busy gh pool
+// can't silently disable token injection. Critically the exec context is
+// built AFTER Acquire returns — otherwise its 5s deadline would already be
+// ticking down while we waited in the throttle queue.
 func DetectGHToken() (string, error) {
 	acquireCtx, cancelAcquire := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancelAcquire()
-	execCtx, cancelExec := context.WithTimeout(acquireCtx, 5*time.Second)
+	release, err := subproc.GH().Acquire(acquireCtx)
+	if err != nil {
+		return "", fmt.Errorf("gh throttle acquire: %w", err)
+	}
+	defer release()
+	execCtx, cancelExec := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelExec()
 	cmd := exec.CommandContext(execCtx, "gh", "auth", "token")
-	out, err := subproc.RunGHOutput(acquireCtx, cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("gh auth token failed: %w", err)
 	}

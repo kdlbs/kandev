@@ -204,18 +204,23 @@ func resolveGitIndexPath(workDir string) string {
 	if !workDirHasOwnGitEntry(workDir) {
 		return ""
 	}
-	// One-shot probe at workspace setup. acquireCtx (30s) bounds the
-	// throttle wait; execCtx (5s) bounds the git subprocess. Without the
-	// split, throttle saturation here would return "" and permanently
-	// disable git polling for this workspace (the caller treats "" as
-	// "not a git repo"), even though workDirHasOwnGitEntry confirmed it is.
+	// One-shot probe at workspace setup. Acquire the throttle slot first
+	// (30s budget), then start the 5s exec timer — otherwise a busy git
+	// pool would burn through the exec budget queueing and return "",
+	// which the caller treats as "not a git repo" and permanently
+	// disables polling for the workspace.
 	acquireCtx, cancelAcquire := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancelAcquire()
-	execCtx, cancelExec := context.WithTimeout(acquireCtx, 5*time.Second)
+	release, err := subproc.Git().Acquire(acquireCtx)
+	if err != nil {
+		return ""
+	}
+	defer release()
+	execCtx, cancelExec := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelExec()
 	cmd := exec.CommandContext(execCtx, "git", "rev-parse", "--git-dir")
 	cmd.Dir = workDir
-	out, err := subproc.RunGitOutput(acquireCtx, cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return ""
 	}
