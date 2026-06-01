@@ -2,7 +2,6 @@
 
 import { IconAlertTriangle } from "@tabler/icons-react";
 import { Progress } from "@kandev/ui/progress";
-import { cn } from "@/lib/utils";
 
 export type VoiceModelLoadIndicatorProps = {
   state: "idle" | "loading" | "ready" | "error";
@@ -34,6 +33,7 @@ export function VoiceModelLoadIndicator({
         className="flex items-center gap-1 text-xs text-destructive"
         role="status"
         aria-live="polite"
+        aria-label={`${modelLabel} failed to load`}
       >
         <IconAlertTriangle className="h-3.5 w-3.5 shrink-0" />
         <span className="hidden sm:inline">Voice model failed to load</span>
@@ -46,7 +46,7 @@ export function VoiceModelLoadIndicator({
     <div
       data-testid="voice-model-load-indicator"
       data-state="loading"
-      className={cn("flex items-center gap-1.5 w-32 max-w-[8rem]")}
+      className="flex items-center gap-1.5 w-32"
       role="status"
       aria-live="polite"
       aria-label={`Downloading ${modelLabel}, ${pct} percent`}
