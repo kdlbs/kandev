@@ -31,8 +31,13 @@ const (
 )
 
 var (
-	ghThrottle  = NewThrottle(resolveCap(ghMaxConcurrentEnv, defaultGHMaxConcurrent))
-	gitThrottle = NewThrottle(resolveCap(gitMaxConcurrentEnv, defaultGitMaxConcurrent))
+	// Names ("gh", "git") double as the expvar.Map keys under
+	// /debug/vars (subproc_cap, subproc_inflight, subproc_waiters,
+	// subproc_acquire_total, subproc_acquire_wait_millis_total). Unit
+	// tests that swap the pool via SetCapForTest reuse the same names
+	// so the published gauges stay coherent across cap changes.
+	ghThrottle  = NewNamedThrottle("gh", resolveCap(ghMaxConcurrentEnv, defaultGHMaxConcurrent))
+	gitThrottle = NewNamedThrottle("git", resolveCap(gitMaxConcurrentEnv, defaultGitMaxConcurrent))
 )
 
 // GH returns the process-wide throttle gating gh subprocess execs.

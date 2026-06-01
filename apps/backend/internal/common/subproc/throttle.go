@@ -20,28 +20,48 @@ package subproc
 import (
 	"context"
 	"sync"
+	"time"
 )
 
 // Throttle caps concurrent users of a resource via a fixed-size slot pool.
-// Zero value is unusable — construct via NewThrottle.
+// Zero value is unusable — construct via NewThrottle or NewNamedThrottle.
 //
 // Throttle is safe for concurrent use. The slot pool can be hot-swapped via
 // SetCapForTest so unit tests can drive the semaphore at small caps without
 // affecting other tests in the same binary.
+//
+// When name != "" the Throttle publishes inflight / waiters / acquire / wait
+// counters into the package-level expvar maps (see metrics.go) so /debug/vars
+// reports queue depth and saturation per pool (gh, git, ...). Unnamed
+// throttles stay silent — tests and ad-hoc pools don't pollute /debug/vars.
 type Throttle struct {
-	mu  sync.RWMutex
-	sem chan struct{}
+	mu   sync.RWMutex
+	sem  chan struct{}
+	name string
 }
 
-// NewThrottle returns a Throttle with the given cap. cap <= 0 disables
-// throttling (Acquire returns a no-op release immediately); use this when
-// callers want to opt out under a test or in environments where the OS
-// does not exhibit the fork/exec serialization problem.
+// NewThrottle returns a Throttle with the given cap and no name. cap <= 0
+// disables throttling (Acquire returns a no-op release immediately).
+//
+// Production code that wants the throttle's metrics published under
+// /debug/vars should use NewNamedThrottle. NewThrottle stays in place for
+// tests and for any caller that intentionally wants an unobservable pool.
 func NewThrottle(cap int) *Throttle {
-	if cap <= 0 {
-		return &Throttle{}
+	return NewNamedThrottle("", cap)
+}
+
+// NewNamedThrottle returns a Throttle that publishes inflight / waiters /
+// acquire-count / acquire-wait-millis under the package-level expvar maps
+// using name as the label key. Use this for process-wide singletons (gh,
+// git) so saturation is observable from /debug/vars without a separate
+// metrics pipeline.
+func NewNamedThrottle(name string, cap int) *Throttle {
+	t := &Throttle{name: name}
+	if cap > 0 {
+		t.sem = make(chan struct{}, cap)
 	}
-	return &Throttle{sem: make(chan struct{}, cap)}
+	t.publishCap(cap)
+	return t
 }
 
 // Acquire blocks until a slot is available or ctx is cancelled. The
@@ -64,27 +84,55 @@ func (t *Throttle) Acquire(ctx context.Context) (release func(), err error) {
 	sem := t.currentSem()
 	if sem == nil {
 		// Throttle disabled (cap<=0) or swapped out by a test teardown.
+		// Still bump the acquire counter for visibility but don't record
+		// a wait — there's nothing to queue behind.
+		t.incAcquire(0)
 		return noopRelease, nil
 	}
+	// Fast path: try to grab a slot without registering as a waiter.
+	// Most acquires under normal load hit this branch and add zero metric
+	// overhead. Only the contended path below has to bump the waiter gauge.
 	select {
 	case sem <- struct{}{}:
-		// sync.Once makes the release idempotent. Without it, a double
-		// release (deferred + early-return path in a future refactor)
-		// would drain a slot belonging to another in-flight caller,
-		// slowly leaking the pool's effective cap to zero.
-		var once sync.Once
-		return func() {
-			once.Do(func() {
-				select {
-				case <-sem:
-				default:
-					// Pool was swapped out from under us (test teardown).
-					// Releasing a slot we never held is a no-op.
-				}
-			})
-		}, nil
+		t.incAcquire(0)
+		t.incInflight(1)
+		return t.releaseFunc(sem), nil
+	default:
+	}
+	// Slow path: register as a waiter so /debug/vars reflects current
+	// queue depth, then block on the select. The deferred dec ensures we
+	// drop the waiter count whether we acquire, get cancelled, or panic.
+	t.incWaiters(1)
+	start := time.Now()
+	defer t.incWaiters(-1)
+	select {
+	case sem <- struct{}{}:
+		t.incAcquire(time.Since(start))
+		t.incInflight(1)
+		return t.releaseFunc(sem), nil
 	case <-ctx.Done():
+		t.incAcquire(time.Since(start))
 		return noopRelease, ctx.Err()
+	}
+}
+
+// releaseFunc returns an idempotent release closure that decrements the
+// inflight gauge and frees a slot. sync.Once protects against a double
+// release (deferred + early-return path in a future refactor) draining a
+// slot belonging to another in-flight caller — without it the pool's
+// effective cap would slowly leak to zero.
+func (t *Throttle) releaseFunc(sem chan struct{}) func() {
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			select {
+			case <-sem:
+				t.incInflight(-1)
+			default:
+				// Pool was swapped out from under us (test teardown).
+				// Releasing a slot we never held is a no-op.
+			}
+		})
 	}
 }
 
@@ -103,18 +151,24 @@ func (t *Throttle) currentSem() chan struct{} {
 //
 // Restore is idempotent in the sense that the previous pool is captured
 // at the call site; nested test setups stack via the returned closure.
-func (t *Throttle) SetCapForTest(cap int) func() {
+func (t *Throttle) SetCapForTest(newCap int) func() {
 	t.mu.Lock()
 	prev := t.sem
-	if cap <= 0 {
+	prevCap := 0
+	if prev != nil {
+		prevCap = cap(prev)
+	}
+	if newCap <= 0 {
 		t.sem = nil
 	} else {
-		t.sem = make(chan struct{}, cap)
+		t.sem = make(chan struct{}, newCap)
 	}
 	t.mu.Unlock()
+	t.publishCap(newCap)
 	return func() {
 		t.mu.Lock()
 		t.sem = prev
 		t.mu.Unlock()
+		t.publishCap(prevCap)
 	}
 }
