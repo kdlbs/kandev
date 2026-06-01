@@ -62,20 +62,38 @@ func TestRESTClient_TestAuth_Unauthorized(t *testing.T) {
 	}
 }
 
+// TestRESTClient_ListProjects locks in that projects are gathered per-org via
+// the org-scoped endpoint (not the user-scoped /projects/, which hides projects
+// from org owners not on any team). It also covers the OrgSlug fallback: the
+// second org's project node omits the nested organization object, so OrgSlug
+// must come from the queried org slug.
 func TestRESTClient_ListProjects(t *testing.T) {
 	ts := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/projects/" {
-			t.Errorf("expected /projects/, got %q", r.URL.Path)
+		switch r.URL.Path {
+		case "/organizations/":
+			_, _ = w.Write([]byte(`[{"id":"10","slug":"acme","name":"Acme"},{"id":"11","slug":"globex","name":"Globex"}]`))
+		case "/organizations/acme/projects/":
+			_, _ = w.Write([]byte(`[{"id":"1","slug":"frontend","name":"Frontend","organization":{"slug":"acme","name":"Acme"}}]`))
+		case "/organizations/globex/projects/":
+			// No nested organization object — exercises the OrgSlug fallback.
+			_, _ = w.Write([]byte(`[{"id":"2","slug":"api","name":"API"}]`))
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
 		}
-		_, _ = w.Write([]byte(`[{"id":"1","slug":"frontend","name":"Frontend","organization":{"slug":"acme","name":"Acme"}}]`))
 	})
 	c := pointTo(NewRESTClient(&SentryConfig{}, "tok"), ts.URL)
 	projects, err := c.ListProjects(context.Background())
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if len(projects) != 1 || projects[0].Slug != "frontend" || projects[0].OrgSlug != "acme" {
-		t.Errorf("projects = %+v", projects)
+	if len(projects) != 2 {
+		t.Fatalf("expected 2 projects, got %+v", projects)
+	}
+	if projects[0].Slug != "frontend" || projects[0].OrgSlug != "acme" {
+		t.Errorf("project[0] = %+v", projects[0])
+	}
+	if projects[1].Slug != "api" || projects[1].OrgSlug != "globex" {
+		t.Errorf("project[1] OrgSlug fallback failed: %+v", projects[1])
 	}
 }
 

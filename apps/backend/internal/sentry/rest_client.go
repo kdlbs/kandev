@@ -173,11 +173,39 @@ type projectNode struct {
 const listProjectsMaxPages = 100
 
 // ListProjects returns all projects the token can access, across every
-// organization, following Sentry's Link-header cursor pagination (the endpoint
-// returns ~100 per page). The settings dropdown filters client-side by
-// DefaultOrgSlug.
+// organization. It enumerates the token's organizations first, then lists each
+// org's projects via the org-scoped /organizations/{org}/projects/ endpoint.
+//
+// The user-scoped /projects/ endpoint only returns projects whose teams the
+// token's user belongs to, so an org owner who is not a member of any team sees
+// an empty list there. The org-scoped endpoint returns every project in the
+// org, which is what the settings dropdown needs. The dropdown then filters
+// client-side by DefaultOrgSlug.
 func (c *RESTClient) ListProjects(ctx context.Context) ([]SentryProject, error) {
+	orgs, err := c.ListOrganizations(ctx)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]SentryProject, 0, 32)
+	for i := range orgs {
+		orgSlug := orgs[i].Slug
+		if orgSlug == "" {
+			continue
+		}
+		projects, err := c.listOrgProjects(ctx, orgSlug)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, projects...)
+	}
+	return out, nil
+}
+
+// listOrgProjects pages through one organization's projects via the org-scoped
+// endpoint, following Sentry's Link-header cursor pagination (~100 per page).
+func (c *RESTClient) listOrgProjects(ctx context.Context, orgSlug string) ([]SentryProject, error) {
+	out := make([]SentryProject, 0, 32)
+	path := "/organizations/" + url.PathEscape(orgSlug) + "/projects/"
 	cursor := ""
 	for page := 0; page < listProjectsMaxPages; page++ {
 		q := url.Values{}
@@ -185,16 +213,22 @@ func (c *RESTClient) ListProjects(ctx context.Context) ([]SentryProject, error) 
 			q.Set("cursor", cursor)
 		}
 		var nodes []projectNode
-		resp, err := c.do(ctx, "/projects/", q, &nodes)
+		resp, err := c.do(ctx, path, q, &nodes)
 		if err != nil {
 			return nil, err
 		}
 		for _, n := range nodes {
+			// The org-scoped endpoint may omit the nested organization object;
+			// fall back to the org slug we queried so OrgSlug is never empty.
+			projOrg := n.Organization.Slug
+			if projOrg == "" {
+				projOrg = orgSlug
+			}
 			out = append(out, SentryProject{
 				ID:      n.ID,
 				Slug:    n.Slug,
 				Name:    n.Name,
-				OrgSlug: n.Organization.Slug,
+				OrgSlug: projOrg,
 			})
 		}
 		next, hasNext := parseNextCursor(resp.Header.Get("Link"))
