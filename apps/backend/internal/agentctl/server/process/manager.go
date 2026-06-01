@@ -99,6 +99,12 @@ type Manager struct {
 	// swap it when transitioning single→multi mode.
 	repoTrackers   []*WorkspaceTracker
 	repoTrackersMu sync.RWMutex
+	// rescanMu serializes RescanRepositories calls so two concurrent
+	// rescans can't both observe an empty tracker set and double-bootstrap
+	// (or both append duplicate trackers for the same new child). The
+	// per-field repoTrackersMu still allows concurrent subscribe/unsubscribe
+	// readers while a rescan is in flight.
+	rescanMu sync.Mutex
 	// workspaceTrackersBySubpath caches per-subpath trackers for multi-repo
 	// task roots. Key is the cleaned subpath (relative to cfg.WorkDir). The
 	// root tracker lives in workspaceTracker above.

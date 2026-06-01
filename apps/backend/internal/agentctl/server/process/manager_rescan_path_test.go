@@ -25,6 +25,7 @@ func TestResolveRescanPath(t *testing.T) {
 	sub := join(root, "task", "repo", "sub")
 	etc := join(root, "etc")
 	dotted := join(root, "home", "u", "..hidden")
+	dottedRepo := join(dotted, "repo")
 
 	cases := []struct {
 		name     string
@@ -45,6 +46,7 @@ func TestResolveRescanPath(t *testing.T) {
 		{"current is filesystem root", root, root, root, true},
 		{"current is root, promotion impossible", join(root, "foo"), root, "", false},
 		{"dotted segment is legal as exact match", dotted, dotted, dotted, true},
+		{"dotted segment is legal as promotion", dotted, dottedRepo, dotted, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

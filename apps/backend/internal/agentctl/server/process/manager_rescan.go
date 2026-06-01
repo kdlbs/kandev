@@ -37,6 +37,13 @@ import (
 //
 // Idempotent: a rescan with no on-disk changes is a no-op.
 func (m *Manager) RescanRepositories(ctx context.Context, newWorkDir string) {
+	// Serialize the whole rescan body. Two concurrent calls could otherwise
+	// both observe existingTrackers == 0 between the write-lock snapshot
+	// and the bootstrap branch, both calling transitionToMultiRepoMode and
+	// leaking a duplicate bare-root tracker + duplicate per-repo trackers.
+	m.rescanMu.Lock()
+	defer m.rescanMu.Unlock()
+
 	// Resolve the candidate workDir and prove it's a readable directory
 	// BEFORE committing cfg.WorkDir. If newWorkDir is bogus, leaving the
 	// manager pointing at the existing root keeps path-based handlers
@@ -164,9 +171,33 @@ func (m *Manager) appendNewRepoTrackers(ctx context.Context, children []reposito
 	if len(newTrackers) == 0 {
 		return
 	}
+	// Re-check membership inside the write-lock as a defense-in-depth
+	// guard. rescanMu already serializes RescanRepositories callers, but
+	// the explicit check here makes the invariant local: any tracker
+	// already in the slice by name is dropped before append, so even if
+	// the invariant moved, duplicates would still be rejected.
 	m.repoTrackersMu.Lock()
-	m.repoTrackers = append(m.repoTrackers, newTrackers...)
+	stillExisting := make(map[string]bool, len(m.repoTrackers))
+	for _, t := range m.repoTrackers {
+		stillExisting[t.RepositoryName()] = true
+	}
+	var dropped []*WorkspaceTracker
+	for _, t := range newTrackers {
+		if stillExisting[t.RepositoryName()] {
+			dropped = append(dropped, t)
+			continue
+		}
+		m.repoTrackers = append(m.repoTrackers, t)
+	}
 	m.repoTrackersMu.Unlock()
+	// Stop + detach any dropped trackers outside the lock so we don't block
+	// readers on potentially-slow Stop() teardown.
+	for _, t := range dropped {
+		for _, sub := range subs {
+			t.DetachWorkspaceStreamSubscriber(sub)
+		}
+		t.Stop()
+	}
 }
 
 // resolveRescanPath maps an externally-supplied workspace path to a known-good
