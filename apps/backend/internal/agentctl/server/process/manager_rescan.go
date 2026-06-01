@@ -44,10 +44,10 @@ func (m *Manager) RescanRepositories(ctx context.Context, newWorkDir string) {
 	// (vscode, git, files) consistent with the trackers that never moved.
 	m.repoTrackersMu.RLock()
 	candidate := m.cfg.WorkDir
+	m.repoTrackersMu.RUnlock()
 	if newWorkDir != "" && newWorkDir != candidate {
 		validated, ok := validateRescanPath(newWorkDir, candidate)
 		if !ok {
-			m.repoTrackersMu.RUnlock()
 			m.logger.Warn("workspace rescan: ignoring invalid work_dir",
 				zap.String("work_dir", newWorkDir),
 				zap.String("current_work_dir", candidate))
@@ -56,18 +56,19 @@ func (m *Manager) RescanRepositories(ctx context.Context, newWorkDir string) {
 		if info, err := os.Stat(validated); err == nil && info.IsDir() {
 			candidate = validated
 		} else {
-			m.repoTrackersMu.RUnlock()
 			m.logger.Warn("workspace rescan: ignoring invalid work_dir",
 				zap.String("work_dir", newWorkDir), zap.Error(err))
 			return
 		}
 	}
-	existingTrackers := len(m.repoTrackers)
-	m.repoTrackersMu.RUnlock()
 
+	// Read existingTrackers under the same write-lock that commits the new
+	// cfg.WorkDir so two concurrent rescans don't both observe 0 trackers
+	// and double-bootstrap the multi-repo set.
 	m.repoTrackersMu.Lock()
 	m.cfg.WorkDir = candidate
 	workDir := m.cfg.WorkDir
+	existingTrackers := len(m.repoTrackers)
 	m.repoTrackersMu.Unlock()
 
 	children := scanRepositorySubdirs(workDir)
@@ -185,9 +186,6 @@ func validateRescanPath(newPath, currentWorkDir string) (string, bool) {
 	if !filepath.IsAbs(clean) {
 		return "", false
 	}
-	if strings.Contains(clean, "..") {
-		return "", false
-	}
 	if currentWorkDir == "" {
 		// No anchor to compare against — accept the cleaned absolute path.
 		// This only fires at first launch before cfg.WorkDir is set.
@@ -199,8 +197,11 @@ func validateRescanPath(newPath, currentWorkDir string) (string, bool) {
 	}
 	// Allow promotion to an ancestor (sibling-layout multi-branch case:
 	// <task>/<repo>/ ⇒ <task>/). Reject anything else.
+	// filepath.Rel returns "." only when the two paths are identical, which
+	// the equality check above already handled — so the only rejection
+	// signal here is a ".." prefix (target is below or beside current).
 	rel, err := filepath.Rel(clean, currentClean)
-	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+	if err != nil || strings.HasPrefix(rel, "..") {
 		return "", false
 	}
 	return clean, true
