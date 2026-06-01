@@ -12,7 +12,11 @@
  *   - Draft semantics + discard
  *   - Last-view deletion guard
  */
+import path from "node:path";
+import fs from "node:fs";
+import { execSync } from "node:child_process";
 import { test, expect } from "../../fixtures/test-base";
+import { makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 import { SidebarFilterPopoverPage } from "../../pages/sidebar-filter-popover";
 
@@ -301,6 +305,67 @@ test.describe("Sidebar filter — saved views CRUD", () => {
     const { filters } = await openWithSeed(testPage, apiClient, seedData, ["Last View Task"]);
     await filters.open();
     await expect(filters.popover.getByTestId("view-delete-button")).toHaveCount(0);
+  });
+});
+
+test.describe("Sidebar filter — repository dimension (#1213)", () => {
+  test("filtering by a repository keeps only that repo's tasks (not an empty board)", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    // The default seeded repo is a LOCAL repo (no GitHub provider), named
+    // "E2E Repo". Regression for #1213: a local repo's filter option value used
+    // to be its full local_path while each task carried the repo *name*, so a
+    // saved repository clause matched nothing and the board went empty.
+
+    // A second, distinct local repo so we can prove the clause keeps matches and
+    // drops non-matches.
+    const repoBName = "Second E2E Repo";
+    const repoBDir = path.join(backend.tmpDir, "repos", "e2e-repo-filter-b");
+    fs.mkdirSync(repoBDir, { recursive: true });
+    const gitEnv = makeGitEnv(backend.tmpDir);
+    execSync("git init -b main", { cwd: repoBDir, env: gitEnv });
+    execSync('git commit --allow-empty -m "init"', { cwd: repoBDir, env: gitEnv });
+    const repoB = await apiClient.createRepository(seedData.workspaceId, repoBDir, "main", {
+      name: repoBName,
+    });
+
+    await apiClient.createTask(seedData.workspaceId, "Task in repo A", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+    await apiClient.createTask(seedData.workspaceId, "Task in repo B", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [repoB.id],
+    });
+
+    const navTask = await apiClient.createTask(seedData.workspaceId, "Repo Filter Nav", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    await testPage.goto(`/t/${navTask.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await expect(session.sidebar).toBeVisible({ timeout: 10_000 });
+    const filters = new SidebarFilterPopoverPage(testPage);
+    await expect(filters.bar).toBeVisible();
+
+    // Both tasks visible before filtering.
+    await expect(session.sidebar.getByText("Task in repo A")).toBeVisible();
+    await expect(session.sidebar.getByText("Task in repo B")).toBeVisible();
+
+    await filters.addFilterRow();
+    await filters.setClauseDimension(0, "Repository");
+    await filters.setClauseEnumValue(0, "E2E Repo");
+    await filters.close();
+
+    // Repo A's task survives (this was empty before the fix); repo B's is hidden.
+    await expect(session.sidebar.getByText("Task in repo A")).toBeVisible();
+    await expect(session.sidebar.getByText("Task in repo B")).toHaveCount(0);
   });
 });
 

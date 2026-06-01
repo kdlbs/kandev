@@ -24,6 +24,7 @@ import { useSidebarTaskPrefs } from "@/hooks/domains/sidebar/use-sidebar-task-pr
 import { useTaskActions, useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
+import { repositorySlug } from "@/lib/repository-slug";
 import { buildSwitchToSession, selectTaskWithLayout } from "./task-select-helpers";
 import { getSessionInfoForTask } from "@/lib/utils/session-info";
 import { getWebSocketClient } from "@/lib/ws/connection";
@@ -239,12 +240,7 @@ function useSidebarData(workspaceId: string | null) {
   const tasksWithRepositories = useMemo(() => {
     const repositories = workspaceId ? (repositoriesByWorkspace[workspaceId] ?? []) : [];
     const repositorySlugById = new Map(
-      repositories.map((repo: Repository) => [
-        repo.id,
-        repo.provider_owner && repo.provider_name
-          ? `${repo.provider_owner}/${repo.provider_name}`
-          : repo.name || repo.local_path?.split("/").filter(Boolean).pop() || repo.local_path,
-      ]),
+      repositories.map((repo: Repository) => [repo.id, repositorySlug(repo)]),
     );
     const titleById = new Map(allTasks.map((t) => [t.id, t.title]));
     const workflowNameById = new Map(workflows.map((w) => [w.id, w.name]));

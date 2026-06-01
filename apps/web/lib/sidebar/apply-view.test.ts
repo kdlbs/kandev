@@ -3,6 +3,8 @@ import type { TaskSwitcherItem } from "@/components/task/task-switcher";
 import { applyFilters, applyGroup, applySort, applyView, mergeGroupOrder } from "./apply-view";
 import type { FilterClause, SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
 import { DEFAULT_VIEW } from "@/lib/state/slices/ui/sidebar-view-builtins";
+import type { Repository } from "@/lib/types/http";
+import { repositorySlug } from "@/lib/repository-slug";
 
 function task(overrides: Partial<TaskSwitcherItem>): TaskSwitcherItem {
   return {
@@ -144,6 +146,38 @@ describe("applyFilters — per-dimension", () => {
     expect(withDiff.map((t) => t.id)).toEqual(["a"]);
     const noDiff = applyFilters(tasks, [C({ dimension: "hasDiff", op: "is", value: false })]);
     expect(noDiff.map((t) => t.id).sort()).toEqual(["b", "c"]);
+  });
+});
+
+describe("applyFilters — repository (#1213)", () => {
+  // The saved clause value is the filter option value, and the board sets each
+  // task's repositoryPath — BOTH via repositorySlug. For a local repo the slug
+  // is the repo name (not the full local_path). The bug was that the option
+  // value used local_path while the board used the name, so the clause matched
+  // nothing and the board went empty.
+  it("filters by a local repository (option value matches the board task field)", () => {
+    const localRepo = {
+      id: "r1",
+      workspace_id: "w1",
+      name: "kandev",
+      source_type: "local",
+      local_path: "/home/carlos/Projects/kandev",
+      provider: "",
+      provider_repo_id: "",
+      provider_owner: "",
+      provider_name: "",
+      default_branch: "main",
+    } as Repository;
+    const optionValue = repositorySlug(localRepo);
+    // The option value is the repo name, never the full filesystem path.
+    expect(optionValue).toBe("kandev");
+    expect(optionValue).not.toBe(localRepo.local_path);
+    const tasks = [
+      task({ id: "a", repositoryPath: repositorySlug(localRepo) }),
+      task({ id: "b", repositoryPath: "org/other" }),
+    ];
+    const out = applyFilters(tasks, [C({ dimension: "repository", op: "is", value: optionValue })]);
+    expect(out.map((t) => t.id)).toEqual(["a"]);
   });
 });
 

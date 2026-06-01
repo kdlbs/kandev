@@ -114,6 +114,13 @@ export class SidebarFilterPopoverPage {
     await this.clauseRow(index).getByTestId("filter-value-input").fill(value);
   }
 
+  /** Pick a single-select enum clause value (e.g. repository) by its option label. */
+  async setClauseEnumValue(index: number, optionLabel: string): Promise<void> {
+    const trigger = this.clauseRow(index).getByTestId("filter-value-select");
+    await trigger.click();
+    await this.page.getByRole("option", { name: optionLabel, exact: true }).first().click();
+  }
+
   async removeClause(index: number): Promise<void> {
     await this.clauseRow(index).getByTestId("filter-clause-remove").click();
   }

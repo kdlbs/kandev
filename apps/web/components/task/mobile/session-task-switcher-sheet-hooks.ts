@@ -24,6 +24,7 @@ import {
 } from "@/lib/types/http";
 import type { KanbanState } from "@/lib/state/slices";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
+import { repositorySlug } from "@/lib/repository-slug";
 import { resolvePreferredSessionId } from "../task-select-helpers";
 
 // Map workflow snapshot to kanban state on workspace switch.
@@ -162,7 +163,7 @@ export function useSheetData(workspaceId: string | null) {
     const repositories = workspaceId ? (repositoriesByWorkspace[workspaceId] ?? []) : [];
     const ctx: SheetItemCtx = {
       repositoryPathsById: new Map(
-        repositories.map((repo: Repository) => [repo.id, repo.local_path]),
+        repositories.map((repo: Repository) => [repo.id, repositorySlug(repo)]),
       ),
       workflowNameById: new Map(workflows.map((w) => [w.id, w.name])),
       stepTitleById: new Map(allSteps.map((s) => [s.id, s.title])),
