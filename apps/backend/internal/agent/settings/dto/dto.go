@@ -151,6 +151,11 @@ type PassthroughConfigDTO struct {
 	Description      string `json:"description"`
 	AutoInjectPrompt bool   `json:"auto_inject_prompt"`
 	SubmitSequence   string `json:"submit_sequence"`
+	// MCPInjection is a short human-readable phrase describing how kandev
+	// injects MCP servers into this agent's CLI in passthrough mode (e.g.
+	// "an MCP config file passed via the --mcp-config flag"). Empty when the
+	// agent declares no MCP strategy.
+	MCPInjection string `json:"mcp_injection,omitempty"`
 }
 
 type ToolStatusDTO struct {

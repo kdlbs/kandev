@@ -163,6 +163,12 @@ export type PassthroughConfig = {
   description: string;
   auto_inject_prompt?: boolean;
   submit_sequence?: string;
+  /**
+   * Short human-readable phrase describing how kandev injects MCP servers into
+   * this agent's CLI in passthrough mode (e.g. "an MCP config file passed via
+   * the --mcp-config flag"). Absent when the agent declares no MCP strategy.
+   */
+  mcp_injection?: string;
 };
 
 export type ToolStatus = {

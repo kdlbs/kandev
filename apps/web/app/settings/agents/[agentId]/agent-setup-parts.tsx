@@ -146,6 +146,8 @@ export function ProfileCardItem({
         <ProfileMcpConfigCard
           profileId={profile.id}
           supportsMcp={draftAgent.supports_mcp}
+          cliPassthrough={profile.cliPassthrough ?? false}
+          mcpInjection={passthroughConfig?.mcp_injection}
           draftState={profile.id.startsWith("draft-") ? profile.mcp_config : undefined}
           onDraftStateChange={(patch) => onProfileMcpChange(profile.id, patch)}
           onToastError={onToastError}

@@ -333,3 +333,27 @@ func TestStrategiesImplementInterface(t *testing.T) {
 	var _ PassthroughMCPStrategy = CursorStrategy{}
 	var _ PassthroughMCPStrategy = OpenCodeStrategy{}
 }
+
+// Each strategy reports a non-empty, distinct human-readable injection mechanism.
+func TestStrategiesDescribe(t *testing.T) {
+	cases := map[string]struct {
+		strategy PassthroughMCPStrategy
+		want     string
+	}{
+		"claude":   {ClaudeStrategy{}, "an MCP config file passed via the --mcp-config flag"},
+		"codex":    {CodexStrategy{}, "repeated -c mcp_servers.* command-line overrides"},
+		"cursor":   {CursorStrategy{}, "a project-local .cursor/mcp.json file (merged into an existing one)"},
+		"opencode": {OpenCodeStrategy{}, "a temp MCP config file referenced by the OPENCODE_CONFIG env var"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := tc.strategy.Describe()
+			if got == "" {
+				t.Fatalf("%s: Describe() returned empty string", name)
+			}
+			if got != tc.want {
+				t.Errorf("%s: Describe() = %q, want %q", name, got, tc.want)
+			}
+		})
+	}
+}

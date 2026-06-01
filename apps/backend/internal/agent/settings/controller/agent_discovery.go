@@ -125,6 +125,9 @@ func (c *Controller) buildAvailableAgentDTO(ctx context.Context, ag agents.Agent
 			AutoInjectPrompt: pt.AutoInjectPrompt,
 			SubmitSequence:   pt.SubmitSequence,
 		}
+		if pt.MCPStrategy != nil {
+			passthroughConfig.MCPInjection = pt.MCPStrategy.Describe()
+		}
 	}
 
 	loginCommand := buildLoginCommandDTO(ag)

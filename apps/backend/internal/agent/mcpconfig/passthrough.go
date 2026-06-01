@@ -47,6 +47,10 @@ type PassthroughArtifacts struct {
 // declares the strategy that matches how its CLI loads MCP servers.
 type PassthroughMCPStrategy interface {
 	BuildPassthroughMCP(servers []types.McpServer, paths PassthroughPaths) (PassthroughArtifacts, error)
+	// Describe returns a short, human-readable phrase naming the mechanism this
+	// strategy uses to inject MCP servers into the CLI (surfaced in the UI so
+	// users understand how kandev wires MCP for a passthrough agent).
+	Describe() string
 }
 
 // isStdioServer reports whether the server is a stdio (command-based) server.
@@ -130,6 +134,10 @@ func (s ClaudeStrategy) BuildPassthroughMCP(servers []types.McpServer, paths Pas
 	}, nil
 }
 
+func (ClaudeStrategy) Describe() string {
+	return "an MCP config file passed via the --mcp-config flag"
+}
+
 func claudeServerEntryFromServer(srv types.McpServer) claudeServerEntry {
 	if isStdioServer(srv) {
 		return claudeServerEntry{Type: string(ServerTypeStdio), Command: srv.Command, Args: srv.Args, Env: srv.Env}
@@ -176,6 +184,10 @@ func (CodexStrategy) BuildPassthroughMCP(servers []types.McpServer, _ Passthroug
 		return PassthroughArtifacts{}, nil
 	}
 	return PassthroughArtifacts{Args: args}, nil
+}
+
+func (CodexStrategy) Describe() string {
+	return "repeated -c mcp_servers.* command-line overrides"
 }
 
 // codexServerArgs returns the flat ["-c", "key=json", ...] tokens for one server.
@@ -305,6 +317,10 @@ func (CursorStrategy) BuildPassthroughMCP(servers []types.McpServer, paths Passt
 	}, nil
 }
 
+func (CursorStrategy) Describe() string {
+	return "a project-local .cursor/mcp.json file (merged into an existing one)"
+}
+
 // --- OpenCode ----------------------------------------------------------------
 
 const (
@@ -364,6 +380,10 @@ func (OpenCodeStrategy) BuildPassthroughMCP(servers []types.McpServer, paths Pas
 		Files: []PassthroughConfigFile{{Path: paths.TempConfigPath, Content: content}},
 		Env:   map[string]string{opencodeConfigEnvVar: paths.TempConfigPath},
 	}, nil
+}
+
+func (OpenCodeStrategy) Describe() string {
+	return "a temp MCP config file referenced by the OPENCODE_CONFIG env var"
 }
 
 // --- Merge helper ------------------------------------------------------------
