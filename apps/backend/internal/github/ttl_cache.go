@@ -68,6 +68,24 @@ func newAccessibleReposCache() *ttlCache {
 	return c
 }
 
+// newPRFeedbackCache backs Service.GetPRFeedback (reviews + comments + checks,
+// 4 sequential GitHub REST calls per miss). Its job is to collapse the
+// render/mount bursts the task page produces — a single PR getting fetched
+// dozens of times in a couple of seconds — without those duplicates each
+// re-hammering GitHub and tripping its secondary rate limits.
+//
+// The TTL is deliberately shorter than the 30s status cache: feedback is the
+// "fresh, on-demand" surface behind the PR popover/detail panel and the manual
+// Refresh button, so staling it for 30s would make legitimate updates lag.
+// 8s is long enough to cover a burst's tail (the singleflight in doOrFetch
+// already coalesces the concurrent in-flight fetches) while keeping the worst-
+// case staleness small.
+func newPRFeedbackCache() *ttlCache {
+	c := newTTLCache()
+	c.ttl = 8 * time.Second
+	return c
+}
+
 func (c *ttlCache) get(key string) (any, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

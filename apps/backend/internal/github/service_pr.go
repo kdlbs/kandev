@@ -107,12 +107,24 @@ func (s *Service) GetPR(ctx context.Context, owner, repo string, number int) (*P
 	return s.client.GetPR(ctx, owner, repo, number)
 }
 
-// GetPRFeedback fetches live PR feedback from GitHub.
+// GetPRFeedback fetches live PR feedback from GitHub. Cached briefly with
+// singleflight coalescing: the task page fires this for the same PR many times
+// in quick succession (chat-bar CI chip, detail panel, hover popover — each on
+// its own render/mount triggers), and each miss is 4 sequential GitHub REST
+// calls. Without this, a burst fanned out into dozens of slow, rate-limited
+// duplicate requests. The returned pointer is shared — callers must not mutate it.
 func (s *Service) GetPRFeedback(ctx context.Context, owner, repo string, number int) (*PRFeedback, error) {
 	if s.client == nil {
 		return nil, fmt.Errorf("github client not available")
 	}
-	return s.client.GetPRFeedback(ctx, owner, repo, number)
+	key := prStatusCacheKey(owner, repo, number)
+	v, err := s.prFeedbackCache.doOrFetch(key, func() (any, error) {
+		return s.client.GetPRFeedback(ctx, owner, repo, number)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.(*PRFeedback), nil
 }
 
 // GetPRStatus fetches lightweight PR status (review + checks + mergeable).

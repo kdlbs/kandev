@@ -84,6 +84,7 @@ type Service struct {
 	taskEventSubs        []bus.Subscription
 	searchCache          *ttlCache
 	prStatusCache        *ttlCache
+	prFeedbackCache      *ttlCache
 	mergeMethodsCache    *ttlCache
 	accessibleReposCache *ttlCache
 	protectionCache      *branchProtectionCache
@@ -129,6 +130,7 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 		logger:               log,
 		searchCache:          newTTLCache(),
 		prStatusCache:        newTTLCache(),
+		prFeedbackCache:      newPRFeedbackCache(),
 		mergeMethodsCache:    newMergeMethodsCache(),
 		accessibleReposCache: newAccessibleReposCache(),
 		protectionCache:      newBranchProtectionCache(),
