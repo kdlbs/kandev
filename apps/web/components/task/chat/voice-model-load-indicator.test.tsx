@@ -43,6 +43,7 @@ describe("VoiceModelLoadIndicator", () => {
     const root = getIndicator();
     expect(root.getAttribute("data-state")).toBe("error");
     expect(root.textContent).toContain(`${MODEL_LABEL} failed to load`);
+    expect(root.getAttribute("aria-label")).toBe(`${MODEL_LABEL} failed to load`);
   });
 
   it("clamps percent to 0–100 when progress is out of range", () => {
