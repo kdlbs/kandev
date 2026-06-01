@@ -62,6 +62,8 @@ This project used to be named `docker`. It was renamed to `containers` once SSH 
 
 ## Commands
 
+`e2e`, `e2e:run`, and `e2e:ui` are defined only in `apps/web/package.json`. Run them from `apps/web` (or `pnpm --filter @kandev/web e2e:run` from elsewhere). From the repo root you get `ERR_PNPM_NO_IMPORTER_MANIFEST_FOUND`.
+
 | Command                            | What it does                                     |
 | ---------------------------------- | ------------------------------------------------ |
 | `pnpm e2e`                         | Run the default (chromium) project headless.     |

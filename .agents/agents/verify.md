@@ -53,6 +53,7 @@ Run the full verification pipeline for the monorepo, then fix any issues found.
      - **Lint — unused imports**: remove them
      - **Lint — duplicate strings**: extract to a constant
      - **Test failures**: read the test, understand the assertion, fix the code (not the test) unless the test is outdated
+     - **Test failures — goleak (package passes, TestMain fails):** loop the failing package with race to match CI: `go test -race -count=10 ./internal/<pkg>/...`. If stack traces mention `sleepOrStop` / `connectWorkspaceStream`, fix test cleanup (see backend AGENTS.md leak-testing section).
    - After fixing, re-run **only** the failed command via `scripts/run-quiet` to confirm the fix. Do not re-run the whole pipeline on every iteration.
 
 5. **Repeat** steps 3-4 until all commands pass. If a fix introduces new issues, address those too.

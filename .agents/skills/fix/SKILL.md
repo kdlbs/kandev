@@ -31,13 +31,33 @@ A bug fix does **not** produce a spec. Specs describe product features; bugs are
 
 Create these tasks immediately (use your task/todo tracking tool if available):
 
+0. **Read the issue + view attachments** — When the bug originates from an issue tracker, fetch the canonical issue and view every image attachment before hypothesizing
 1. **Reproduce the bug** — Write a test or find a reliable reproduction case
 2. **Find the root cause** — Trace the code path, narrow the scope, state the cause clearly
 3. **Fix with TDD** — Minimal fix with regression test, no surrounding refactors
 4. **Verify** — Run full verification, check for similar patterns elsewhere
 5. **Record** — Save any architectural decisions or insights, AND update the related feature spec if the bug exposed a requirement gap
 
-Then start with task 1. Mark each task in_progress when you begin it and completed when you finish it. Do not skip ahead — fixing without reproducing leads to patches that don't address the real problem. Fixing without understanding the root cause leads to whack-a-mole.
+Then start with task 0 when the bug is issue-sourced, otherwise task 1. Mark each task in_progress when you begin it and completed when you finish it. Do not skip ahead — fixing without reading the source issue (when one exists) or reproducing leads to patches that don't address the real problem. Fixing without understanding the root cause leads to whack-a-mole.
+
+---
+
+## Phase 0: Read the issue + view attachments
+
+Mark task 0 as in_progress (skip this phase if there is no issue tracker source — e.g. a locally discovered bug with no linked issue).
+
+When the bug originates from an issue tracker, fetch the **canonical issue** and view **every image attachment** before hypothesizing. Handed-down restatements (Kandev task/subtask text, Slack paste, PR description) are leads only — verify against the source.
+
+```bash
+gh issue view <N> --repo <owner/repo> --json title,body --comments
+curl -sL "https://github.com/user-attachments/assets/<id>" -o /tmp/issue-<N>-<n>.png   # then Read the local file
+```
+
+- **Transcribe exact strings from screenshots** into the repro (paths, error messages, UI labels). Screenshots often hold details missing from the text summary.
+- **Mine structured issue-template fields** (OS, install mode, clean-state, version) to constrain repro conditions.
+- **Video attachments** cannot be Read as stills — note their presence and rely on the issue text/comments for motion-specific details.
+
+Mark task 0 as completed.
 
 ---
 
