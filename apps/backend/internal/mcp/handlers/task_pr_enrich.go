@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -14,10 +15,11 @@ import (
 // MCP task-listing handlers. The cmd wiring adapts *github.Service.TaskPR into
 // this shape so this package does not depend on internal/github.
 type TaskPRInfo struct {
-	Number int
-	URL    string
-	Title  string
-	State  string // open, closed, merged
+	Number   int
+	URL      string
+	Title    string
+	State    string // open, closed, merged
+	MergedAt *time.Time
 }
 
 // TaskPRLister returns PR associations grouped by task ID. Backed by
@@ -54,10 +56,11 @@ func (h *Handlers) prsByTaskID(ctx context.Context, taskIDs []string) map[string
 		summaries := make([]v1.TaskPRSummary, 0, len(prs))
 		for _, pr := range prs {
 			summaries = append(summaries, v1.TaskPRSummary{
-				Number: pr.Number,
-				URL:    pr.URL,
-				Title:  pr.Title,
-				State:  pr.State,
+				Number:   pr.Number,
+				URL:      pr.URL,
+				Title:    pr.Title,
+				State:    pr.State,
+				MergedAt: pr.MergedAt,
 			})
 		}
 		out[taskID] = summaries
@@ -96,11 +99,20 @@ func (h *Handlers) enrichRelatedTasksWithPRs(ctx context.Context, related *servi
 	nodes = append(nodes, related.Blockers...)
 	nodes = append(nodes, related.BlockedBy...)
 
+	// A task can appear in more than one relation group (e.g. both a sibling
+	// and a blocker), so dedup IDs before the lookup to avoid sending the same
+	// value twice to the lister's WHERE id IN (...) query.
 	ids := make([]string, 0, len(nodes))
+	seen := make(map[string]struct{}, len(nodes))
 	for _, n := range nodes {
-		if n != nil {
-			ids = append(ids, n.ID)
+		if n == nil {
+			continue
 		}
+		if _, dup := seen[n.ID]; dup {
+			continue
+		}
+		seen[n.ID] = struct{}{}
+		ids = append(ids, n.ID)
 	}
 	byTask := h.prsByTaskID(ctx, ids)
 	if byTask == nil {

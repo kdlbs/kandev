@@ -920,10 +920,11 @@ func (a mcpTaskPRListerAdapter) ListTaskPRsByTaskIDs(
 				continue
 			}
 			infos = append(infos, mcphandlers.TaskPRInfo{
-				Number: pr.PRNumber,
-				URL:    pr.PRURL,
-				Title:  pr.PRTitle,
-				State:  pr.State,
+				Number:   pr.PRNumber,
+				URL:      pr.PRURL,
+				Title:    pr.PRTitle,
+				State:    pr.State,
+				MergedAt: pr.MergedAt,
 			})
 		}
 		if len(infos) > 0 {

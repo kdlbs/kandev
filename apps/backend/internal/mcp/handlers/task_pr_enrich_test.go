@@ -94,6 +94,41 @@ func TestHandleListTasks_IncludesAssociatedPRs(t *testing.T) {
 	assert.Equal(t, "https://github.com/o/r/pull/7", payload.Tasks[0].PRs[0].URL)
 }
 
+func TestHandleListRelatedTasks_IncludesAssociatedPRs(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{
+		ID: "ws-rel", Name: "Rel WS", CreatedAt: now, UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{
+		ID: "task-rel", WorkspaceID: "ws-rel", WorkflowID: "wf-rel",
+		Title: "Self", State: v1.TaskStateReview, CreatedAt: now, UpdatedAt: now,
+	}))
+
+	merged := now
+	h := &Handlers{
+		taskSvc:    svc,
+		handoffSvc: service.NewHandoffService(repo, nil, nil, nil, nil, testLogger(t)),
+		logger:     testLogger(t).WithFields(),
+		taskPRLister: &fakeTaskPRLister{byTask: map[string][]TaskPRInfo{
+			"task-rel": {{Number: 99, URL: "https://github.com/o/r/pull/99", Title: "Fix", State: "merged", MergedAt: &merged}},
+		}},
+	}
+
+	msg := makeWSMessage(t, ws.ActionMCPListRelatedTasks, map[string]any{"task_id": "task-rel"})
+	resp, err := h.handleListRelatedTasks(ctx, msg)
+	require.NoError(t, err)
+
+	var payload service.RelatedTasks
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	require.Len(t, payload.Task.PRs, 1)
+	assert.Equal(t, 99, payload.Task.PRs[0].Number)
+	assert.Equal(t, "merged", payload.Task.PRs[0].State)
+	require.NotNil(t, payload.Task.PRs[0].MergedAt, "merged_at should be surfaced")
+}
+
 func TestEnrichRelatedTasksWithPRs(t *testing.T) {
 	lister := &fakeTaskPRLister{byTask: map[string][]TaskPRInfo{
 		"self":   {{Number: 1, URL: "u1", State: "open"}},
