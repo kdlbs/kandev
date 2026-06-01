@@ -90,6 +90,7 @@ export interface SentryIssueWatch {
   prompt: string;
   enabled: boolean;
   pollIntervalSeconds: number;
+  maxInflightTasks?: number | null;
   lastPolledAt?: string;
   createdAt: string;
   updatedAt: string;
@@ -104,6 +105,7 @@ export interface CreateSentryIssueWatchRequest {
   executorProfileId: string;
   prompt: string;
   pollIntervalSeconds: number;
+  maxInflightTasks?: number | null;
   enabled?: boolean;
 }
 
@@ -116,4 +118,5 @@ export interface UpdateSentryIssueWatchRequest {
   prompt?: string;
   enabled?: boolean;
   pollIntervalSeconds?: number;
+  maxInflightTasks?: number | null;
 }

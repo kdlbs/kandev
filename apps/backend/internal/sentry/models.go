@@ -3,7 +3,11 @@
 // and the HTTP handlers that expose these capabilities to the frontend.
 package sentry
 
-import "time"
+import (
+	"time"
+
+	"github.com/kandev/kandev/internal/integrations/optional"
+)
 
 // AuthMethodAuthToken is the only auth method Sentry supports in Phase 1: a
 // user or organization auth token sent as `Authorization: Bearer <token>`.
@@ -134,9 +138,12 @@ type IssueWatch struct {
 	Prompt              string       `json:"prompt" db:"prompt"`
 	Enabled             bool         `json:"enabled" db:"enabled"`
 	PollIntervalSeconds int          `json:"pollIntervalSeconds" db:"poll_interval_seconds"`
-	LastPolledAt        *time.Time   `json:"lastPolledAt,omitempty" db:"last_polled_at"`
-	CreatedAt           time.Time    `json:"createdAt" db:"created_at"`
-	UpdatedAt           time.Time    `json:"updatedAt" db:"updated_at"`
+	// MaxInflightTasks caps how many open watcher-created tasks this watch can
+	// hold at once. nil = uncapped. Values <= 0 are rejected at the API layer.
+	MaxInflightTasks *int       `json:"maxInflightTasks,omitempty" db:"max_inflight_tasks"`
+	LastPolledAt     *time.Time `json:"lastPolledAt,omitempty" db:"last_polled_at"`
+	CreatedAt        time.Time  `json:"createdAt" db:"created_at"`
+	UpdatedAt        time.Time  `json:"updatedAt" db:"updated_at"`
 }
 
 // IssueWatchTask deduplicates task creation per (watch, issue) tuple. Keyed on
@@ -155,14 +162,18 @@ type IssueWatchTask struct {
 // issue matching a watch that has no existing dedup row. The orchestrator
 // consumes this to create (and optionally auto-start) a Kandev task.
 type NewSentryIssueEvent struct {
-	IssueWatchID      string       `json:"issueWatchId"`
-	WorkspaceID       string       `json:"workspaceId"`
-	WorkflowID        string       `json:"workflowId"`
-	WorkflowStepID    string       `json:"workflowStepId"`
-	AgentProfileID    string       `json:"agentProfileId"`
-	ExecutorProfileID string       `json:"executorProfileId"`
-	Prompt            string       `json:"prompt"`
-	Issue             *SentryIssue `json:"issue"`
+	IssueWatchID      string `json:"issueWatchId"`
+	WorkspaceID       string `json:"workspaceId"`
+	WorkflowID        string `json:"workflowId"`
+	WorkflowStepID    string `json:"workflowStepId"`
+	AgentProfileID    string `json:"agentProfileId"`
+	ExecutorProfileID string `json:"executorProfileId"`
+	Prompt            string `json:"prompt"`
+	// MaxInflightTasks mirrors the watch row's per-watcher throttle cap so the
+	// orchestrator's gate can read it without loading the row again. nil =
+	// uncapped.
+	MaxInflightTasks *int         `json:"maxInflightTasks,omitempty"`
+	Issue            *SentryIssue `json:"issue"`
 }
 
 // CreateIssueWatchRequest is the payload for POST /api/v1/sentry/watches/issue.
@@ -175,6 +186,7 @@ type CreateIssueWatchRequest struct {
 	ExecutorProfileID   string       `json:"executorProfileId"`
 	Prompt              string       `json:"prompt"`
 	PollIntervalSeconds int          `json:"pollIntervalSeconds"`
+	MaxInflightTasks    *int         `json:"maxInflightTasks,omitempty"`
 	Enabled             *bool        `json:"enabled,omitempty"`
 }
 
@@ -189,4 +201,8 @@ type UpdateIssueWatchRequest struct {
 	Prompt              *string       `json:"prompt,omitempty"`
 	Enabled             *bool         `json:"enabled,omitempty"`
 	PollIntervalSeconds *int          `json:"pollIntervalSeconds,omitempty"`
+	// MaxInflightTasks is tri-state so a partial PATCH that omits the field
+	// leaves the cap unchanged. Absent = unchanged, null = uncapped, positive
+	// int = cap.
+	MaxInflightTasks optional.Int `json:"maxInflightTasks"`
 }

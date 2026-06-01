@@ -32,6 +32,7 @@ import {
 } from "@/lib/api/domains/sentry-api";
 import { SENTRY_ISSUE_WATCH_PLACEHOLDERS } from "./sentry-issue-watch-placeholders";
 import { LevelMultiSelect, StatusMultiSelect } from "./sentry-issue-watch-multiselect";
+import { MaxInflightTasksField } from "./sentry-issue-watch-throttle-field";
 import {
   STATS_PERIOD_OPTIONS,
   type FormState,
@@ -40,6 +41,7 @@ import {
   orgSelectItems,
   projectSelectItems,
   resolveSlugSelection,
+  parseMaxInflightTasks,
   buildFilterPayload,
   formStateFromWatch,
   makeEmptyForm,
@@ -405,6 +407,7 @@ function SettingsFields({ form, setForm }: { form: FormState; setForm: FormSette
           max={3600}
         />
       </div>
+      <MaxInflightTasksField form={form} setForm={setForm} />
       <div className="flex items-center justify-between">
         <div>
           <Label>Enabled</Label>
@@ -494,9 +497,12 @@ export function SentryIssueWatchDialog({
     !!form.prompt.trim() &&
     Number.isInteger(form.pollInterval) &&
     form.pollInterval >= 60 &&
-    form.pollInterval <= 3600;
+    form.pollInterval <= 3600 &&
+    parseMaxInflightTasks(form.maxInflightTasks) !== "invalid";
 
   const handleSave = useCallback(async () => {
+    const maxInflight = parseMaxInflightTasks(form.maxInflightTasks);
+    if (maxInflight === "invalid") return;
     setSaving(true);
     try {
       const filter = buildFilterPayload(form);
@@ -509,6 +515,7 @@ export function SentryIssueWatchDialog({
         prompt: form.prompt,
         enabled: form.enabled,
         pollIntervalSeconds: form.pollInterval,
+        maxInflightTasks: maxInflight,
       };
       if (watch) {
         await onUpdate(watch.id, watch.workspaceId, payload);

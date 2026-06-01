@@ -4,6 +4,8 @@ import {
   orgSelectItems,
   projectSelectItems,
   resolveSlugSelection,
+  maxInflightTasksString,
+  parseMaxInflightTasks,
   buildFilterPayload,
   makeEmptyForm,
 } from "./sentry-issue-watch-form";
@@ -66,6 +68,38 @@ describe("projectSelectItems", () => {
     const items = projectSelectItems(projects, "archived", "");
     expect(items[0].id).toBe(USE_DEFAULT);
     expect(items.map((i) => i.id)).toContain("archived");
+  });
+});
+
+describe("maxInflightTasksString", () => {
+  it("renders nil / non-positive caps as blank (uncapped)", () => {
+    expect(maxInflightTasksString(null)).toBe("");
+    expect(maxInflightTasksString(undefined)).toBe("");
+    expect(maxInflightTasksString(0)).toBe("");
+    expect(maxInflightTasksString(-3)).toBe("");
+  });
+
+  it("renders a positive cap as its string form", () => {
+    expect(maxInflightTasksString(5)).toBe("5");
+  });
+});
+
+describe("parseMaxInflightTasks", () => {
+  it("maps blank to null (uncapped)", () => {
+    expect(parseMaxInflightTasks("")).toBeNull();
+    expect(parseMaxInflightTasks("   ")).toBeNull();
+  });
+
+  it("parses a positive whole number", () => {
+    expect(parseMaxInflightTasks("5")).toBe(5);
+    expect(parseMaxInflightTasks(" 12 ")).toBe(12);
+  });
+
+  it("flags non-positive or non-integer input as invalid", () => {
+    expect(parseMaxInflightTasks("0")).toBe("invalid");
+    expect(parseMaxInflightTasks("-1")).toBe("invalid");
+    expect(parseMaxInflightTasks("1.5")).toBe("invalid");
+    expect(parseMaxInflightTasks("abc")).toBe("invalid");
   });
 });
 

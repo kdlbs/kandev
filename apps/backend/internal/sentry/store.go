@@ -50,6 +50,7 @@ const createTablesSQL = `
 		prompt TEXT NOT NULL DEFAULT '',
 		enabled BOOLEAN NOT NULL DEFAULT 1,
 		poll_interval_seconds INTEGER NOT NULL DEFAULT 300,
+		max_inflight_tasks INTEGER DEFAULT 5,
 		last_polled_at DATETIME,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
@@ -73,8 +74,57 @@ const createTablesSQL = `
 const singletonID = "singleton"
 
 func (s *Store) initSchema() error {
-	_, err := s.db.Exec(createTablesSQL)
-	return err
+	if _, err := s.db.Exec(createTablesSQL); err != nil {
+		return err
+	}
+	return s.addMaxInflightTasksColumn()
+}
+
+// addMaxInflightTasksColumn brings older databases up to the current schema by
+// adding the max_inflight_tasks column to sentry_issue_watches when missing.
+// Existing rows backfill to the default (5). A fresh install hits the
+// column-already-present branch since createTablesSQL declares the column.
+func (s *Store) addMaxInflightTasksColumn() error {
+	cols, err := s.tableColumns("sentry_issue_watches")
+	if err != nil {
+		return err
+	}
+	if len(cols) == 0 {
+		return nil
+	}
+	if _, ok := cols["max_inflight_tasks"]; ok {
+		return nil
+	}
+	if _, err := s.db.Exec(`ALTER TABLE sentry_issue_watches ADD COLUMN max_inflight_tasks INTEGER DEFAULT 5`); err != nil {
+		return fmt.Errorf("add max_inflight_tasks column: %w", err)
+	}
+	return nil
+}
+
+// tableColumns returns the set of column names for a table via PRAGMA
+// table_info, used by the lightweight ADD COLUMN migrations above.
+func (s *Store) tableColumns(table string) (map[string]struct{}, error) {
+	rows, err := s.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	cols := make(map[string]struct{})
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			ctype   string
+			notnull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return nil, err
+		}
+		cols[name] = struct{}{}
+	}
+	return cols, rows.Err()
 }
 
 const selectConfigColumns = `auth_method, default_org_slug, default_project_slug,

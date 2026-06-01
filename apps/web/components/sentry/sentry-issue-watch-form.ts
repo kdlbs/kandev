@@ -34,6 +34,7 @@ export interface FormState {
   prompt: string;
   enabled: boolean;
   pollInterval: number;
+  maxInflightTasks: string;
 }
 
 export function makeEmptyForm(workspaceId: string): FormState {
@@ -53,6 +54,7 @@ export function makeEmptyForm(workspaceId: string): FormState {
     prompt: DEFAULT_SENTRY_ISSUE_WATCH_PROMPT,
     enabled: true,
     pollInterval: 300,
+    maxInflightTasks: "5",
   };
 }
 
@@ -74,7 +76,33 @@ export function formStateFromWatch(w: SentryIssueWatch): FormState {
     prompt: w.prompt || DEFAULT_SENTRY_ISSUE_WATCH_PROMPT,
     enabled: w.enabled,
     pollInterval: w.pollIntervalSeconds,
+    maxInflightTasks: maxInflightTasksString(w.maxInflightTasks),
   };
+}
+
+/**
+ * Formats the throttle cap for the input. nil/undefined and non-positive
+ * (from a stale row) collapse to "" — an empty box reads as "no cap", and
+ * showing "0" would falsely imply a cap was enforced.
+ */
+export function maxInflightTasksString(v: number | null | undefined): string {
+  if (v === undefined || v === null) return "";
+  if (!Number.isFinite(v) || v <= 0) return "";
+  return String(v);
+}
+
+/**
+ * Parses the throttle-cap input back into a payload value. Returns `null` for
+ * blank (uncapped), the integer for a positive whole number, or "invalid" when
+ * the input is non-empty but unparseable / non-positive so the dialog can show
+ * an inline error before submit.
+ */
+export function parseMaxInflightTasks(raw: string): number | null | "invalid" {
+  const t = raw.trim();
+  if (t === "") return null;
+  const n = Number(t);
+  if (!Number.isInteger(n) || n <= 0) return "invalid";
+  return n;
 }
 
 // WatchDefaults carries the install-wide default org/project from the Sentry

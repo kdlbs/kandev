@@ -39,6 +39,7 @@ func (s *Service) CreateIssueWatch(ctx context.Context, req *CreateIssueWatchReq
 		ExecutorProfileID:   req.ExecutorProfileID,
 		Prompt:              req.Prompt,
 		PollIntervalSeconds: req.PollIntervalSeconds,
+		MaxInflightTasks:    req.MaxInflightTasks,
 		Enabled:             true,
 	}
 	if req.Enabled != nil {
@@ -82,6 +83,9 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 	applyIssueWatchPatch(w, req)
 	if w.WorkflowID == "" || w.WorkflowStepID == "" {
 		return nil, fmt.Errorf("%w: workflowId and workflowStepId cannot be empty", ErrInvalidConfig)
+	}
+	if err := validateMaxInflightTasks(w.MaxInflightTasks); err != nil {
+		return nil, err
 	}
 	if err := validatePollInterval(w.PollIntervalSeconds); err != nil {
 		return nil, err
@@ -184,6 +188,7 @@ func (s *Service) publishNewSentryIssueEvent(ctx context.Context, w *IssueWatch,
 		AgentProfileID:    w.AgentProfileID,
 		ExecutorProfileID: w.ExecutorProfileID,
 		Prompt:            w.Prompt,
+		MaxInflightTasks:  w.MaxInflightTasks,
 		Issue:             issue,
 	})
 	if err := eb.Publish(ctx, events.SentryNewIssue, evt); err != nil {
@@ -202,10 +207,25 @@ func validateIssueWatchCreate(req *CreateIssueWatchRequest) error {
 	// The filter's org/project are intentionally not required: an empty value
 	// means "use the install-wide default" (resolved at poll time by
 	// resolveWatchFilter), mirroring the "(use step default)" profile options.
+	if err := validateMaxInflightTasks(req.MaxInflightTasks); err != nil {
+		return err
+	}
 	if req.PollIntervalSeconds != 0 {
 		if err := validatePollInterval(req.PollIntervalSeconds); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// validateMaxInflightTasks rejects non-positive caps. A nil pointer is
+// "uncapped" and explicitly allowed.
+func validateMaxInflightTasks(v *int) error {
+	if v == nil {
+		return nil
+	}
+	if *v <= 0 {
+		return fmt.Errorf("%w: maxInflightTasks must be a positive integer", ErrInvalidConfig)
 	}
 	return nil
 }
@@ -291,5 +311,11 @@ func applyIssueWatchPatch(w *IssueWatch, req *UpdateIssueWatchRequest) {
 	}
 	if req.PollIntervalSeconds != nil {
 		w.PollIntervalSeconds = *req.PollIntervalSeconds
+	}
+	// MaxInflightTasks is tri-state (optional.Int): only apply it when the
+	// field was present in the payload. Absent leaves the cap unchanged; null
+	// clears it to uncapped; a value sets the cap.
+	if req.MaxInflightTasks.Present {
+		w.MaxInflightTasks = req.MaxInflightTasks.Value
 	}
 }

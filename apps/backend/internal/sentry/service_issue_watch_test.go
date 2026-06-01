@@ -4,7 +4,11 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/kandev/kandev/internal/integrations/optional"
 )
+
+func intPtr(v int) *int { return &v }
 
 // withSearchResults returns a fakeClient that always returns the given issues
 // for SearchIssues, ignoring the filter.
@@ -108,6 +112,68 @@ func TestService_UpdateIssueWatch_PartialPatch(t *testing.T) {
 	}
 	if cleared.Filter.OrgSlug != "" || cleared.Filter.ProjectSlug != "" {
 		t.Errorf("expected empty filter after clear, got %+v", cleared.Filter)
+	}
+}
+
+func TestService_IssueWatch_MaxInflightTasks(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+
+	// A non-positive cap is rejected at create.
+	if _, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID:      "ws-1",
+		WorkflowID:       "wf",
+		WorkflowStepID:   "step",
+		Filter:           validFilter(),
+		MaxInflightTasks: intPtr(0),
+	}); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("expected ErrInvalidConfig for non-positive cap, got %v", err)
+	}
+
+	// A positive cap round-trips through the store.
+	created, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID:      "ws-1",
+		WorkflowID:       "wf",
+		WorkflowStepID:   "step",
+		Filter:           validFilter(),
+		MaxInflightTasks: intPtr(3),
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	reloaded, err := f.svc.GetIssueWatch(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if reloaded.MaxInflightTasks == nil || *reloaded.MaxInflightTasks != 3 {
+		t.Fatalf("expected cap 3 persisted, got %v", reloaded.MaxInflightTasks)
+	}
+
+	// PATCH tri-state: omitted leaves the cap unchanged.
+	unchanged, err := f.svc.UpdateIssueWatch(ctx, created.ID, &UpdateIssueWatchRequest{})
+	if err != nil {
+		t.Fatalf("patch (omit): %v", err)
+	}
+	if unchanged.MaxInflightTasks == nil || *unchanged.MaxInflightTasks != 3 {
+		t.Errorf("omitted cap should stay 3, got %v", unchanged.MaxInflightTasks)
+	}
+
+	// PATCH tri-state: explicit null clears the cap to uncapped.
+	uncapped, err := f.svc.UpdateIssueWatch(ctx, created.ID, &UpdateIssueWatchRequest{
+		MaxInflightTasks: optional.Int{Present: true, Value: nil},
+	})
+	if err != nil {
+		t.Fatalf("patch (null): %v", err)
+	}
+	if uncapped.MaxInflightTasks != nil {
+		t.Errorf("null cap should clear to uncapped, got %v", *uncapped.MaxInflightTasks)
+	}
+
+	// PATCH tri-state: a non-positive value is rejected.
+	if _, err := f.svc.UpdateIssueWatch(ctx, created.ID, &UpdateIssueWatchRequest{
+		MaxInflightTasks: optional.Int{Present: true, Value: intPtr(-1)},
+	}); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("expected ErrInvalidConfig for negative cap patch, got %v", err)
 	}
 }
 

@@ -119,10 +119,13 @@ func (s *SentryWatcherSource) WatchID(evt any) string {
 	return e.IssueWatchID
 }
 
-// MaxInflightTasks reports the per-watch cap on open watcher-created tasks.
-// Sentry issue-watch events carry no per-watch override, so this always
-// returns nil and the coordinator applies its default cap (mirrors the
-// Linear/Jira sources' nil path).
+// MaxInflightTasks reports the per-watch cap on open watcher-created tasks,
+// carried on the issue event from the watch row. nil = uncapped, letting the
+// coordinator apply its default (mirrors the Linear source).
 func (s *SentryWatcherSource) MaxInflightTasks(evt any) *int {
-	return nil
+	e, ok := evt.(*sentry.NewSentryIssueEvent)
+	if !ok || e == nil {
+		return nil
+	}
+	return e.MaxInflightTasks
 }
