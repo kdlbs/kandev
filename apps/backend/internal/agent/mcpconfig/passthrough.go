@@ -2,6 +2,7 @@ package mcpconfig
 
 import (
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -24,9 +25,13 @@ type PassthroughPaths struct {
 type PassthroughConfigFile struct {
 	Path    string
 	Content []byte
-	// SkipIfExists, when true, means the file must NOT be written if a file
-	// already exists at Path (Cursor: never clobber a user's existing mcp.json).
-	SkipIfExists bool
+	// MergeKey, when non-empty, means: if a file already exists at Path, merge
+	// Content's object at this top-level JSON key into the existing file's same
+	// key (our entries win on name collision, all other user keys preserved)
+	// rather than overwriting the whole file. Used by Cursor to append kandev's
+	// servers to a user's existing .cursor/mcp.json instead of clobbering it.
+	// When the file does not exist, Content is written as-is.
+	MergeKey string
 }
 
 // PassthroughArtifacts is what a strategy produces for a single passthrough launch.
@@ -251,8 +256,9 @@ func isTOMLBareKey(s string) bool {
 // CursorStrategy writes a project-local .cursor/mcp.json into the workspace.
 // cursor-agent auto-discovers it from the working directory. cursor-agent has no
 // MCP-config flag and no reliable MCP env var, so a project file is the only
-// non-global mechanism. The file is created only when absent — an existing user
-// file is never overwritten (when one exists, kandev injects nothing for Cursor).
+// non-global mechanism. When the file already exists, kandev's servers are
+// merged into the existing `mcpServers` object (user entries preserved) via
+// MergeKey rather than overwriting; when absent it is created.
 type CursorStrategy struct{}
 
 type cursorMCPFile struct {
@@ -292,9 +298,9 @@ func (CursorStrategy) BuildPassthroughMCP(servers []types.McpServer, paths Passt
 	}
 	return PassthroughArtifacts{
 		Files: []PassthroughConfigFile{{
-			Path:         filepath.Join(paths.WorkspaceDir, ".cursor", "mcp.json"),
-			Content:      content,
-			SkipIfExists: true,
+			Path:     filepath.Join(paths.WorkspaceDir, ".cursor", "mcp.json"),
+			Content:  content,
+			MergeKey: "mcpServers",
 		}},
 	}, nil
 }
@@ -358,4 +364,48 @@ func (OpenCodeStrategy) BuildPassthroughMCP(servers []types.McpServer, paths Pas
 		Files: []PassthroughConfigFile{{Path: paths.TempConfigPath, Content: content}},
 		Env:   map[string]string{opencodeConfigEnvVar: paths.TempConfigPath},
 	}, nil
+}
+
+// --- Merge helper ------------------------------------------------------------
+
+// MergeJSONUnderKey merges the object at `key` from `ours` into the same key of
+// `existing`, returning the updated `existing` document. All other top-level
+// keys in `existing` are preserved; within `key`, every other entry is
+// preserved and our entries win on name collision. Both inputs must be JSON
+// objects, and `existing[key]` (if present) must be an object — otherwise an
+// error is returned so the caller can leave the user's file untouched rather
+// than clobber malformed content. Output is pretty-printed with a trailing
+// newline to match the other writers.
+func MergeJSONUnderKey(existing, ours []byte, key string) ([]byte, error) {
+	existingDoc := map[string]json.RawMessage{}
+	if err := json.Unmarshal(existing, &existingDoc); err != nil {
+		return nil, fmt.Errorf("existing config is not a JSON object: %w", err)
+	}
+	oursDoc := map[string]json.RawMessage{}
+	if err := json.Unmarshal(ours, &oursDoc); err != nil {
+		return nil, fmt.Errorf("generated config is not a JSON object: %w", err)
+	}
+
+	entries := map[string]json.RawMessage{}
+	if raw, ok := existingDoc[key]; ok {
+		if err := json.Unmarshal(raw, &entries); err != nil {
+			return nil, fmt.Errorf("existing %q is not an object: %w", key, err)
+		}
+	}
+	ourEntries := map[string]json.RawMessage{}
+	if raw, ok := oursDoc[key]; ok {
+		if err := json.Unmarshal(raw, &ourEntries); err != nil {
+			return nil, fmt.Errorf("generated %q is not an object: %w", key, err)
+		}
+	}
+	for name, entry := range ourEntries {
+		entries[name] = entry
+	}
+
+	mergedKey, err := json.Marshal(entries)
+	if err != nil {
+		return nil, err
+	}
+	existingDoc[key] = mergedKey
+	return marshalMCPFile(existingDoc)
 }

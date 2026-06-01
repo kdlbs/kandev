@@ -379,9 +379,10 @@ func (m *Manager) passthroughMCPPaths(execution *AgentExecution) mcpconfig.Passt
 	}
 }
 
-// writePassthroughMCPFiles materializes the strategy's config files, honoring
-// SkipIfExists (Cursor must never overwrite a user's existing mcp.json), and
-// records every file kandev wrote (unioned with prior launches) for cleanup.
+// writePassthroughMCPFiles materializes the strategy's config files and records
+// every file kandev OWNS (created or overwrote) for cleanup. Files merged into a
+// pre-existing user file (Cursor) are not tracked — kandev must not delete the
+// user's file on teardown.
 func (m *Manager) writePassthroughMCPFiles(execution *AgentExecution, files []mcpconfig.PassthroughConfigFile) error {
 	written := getPassthroughMCPFiles(execution)
 	for _, f := range files {
@@ -400,22 +401,14 @@ func (m *Manager) writePassthroughMCPFiles(execution *AgentExecution, files []mc
 	return nil
 }
 
-// materializePassthroughFile writes one config file and reports whether it was
-// actually written (false = skipped). For SkipIfExists files (Cursor) it probes
-// with Lstat — so an existing leaf, including a symlink (even a dangling one a
-// malicious repo committed), is treated as present and never written through —
-// guards against a symlinked parent escaping the worktree, and writes with
-// O_EXCL so a symlink racing in after the probe can't redirect the write either.
+// materializePassthroughFile writes one config file and reports whether kandev
+// OWNS the result (true = track for cleanup). It refuses to write through an
+// existing symlink (a malicious repo could point it outside the worktree),
+// guards against a symlinked parent escaping the worktree, and creates new files
+// with O_EXCL. For MergeKey files (Cursor) that already exist, kandev's servers
+// are merged into the user's file (preserving their entries) and the file is NOT
+// tracked for cleanup since it is the user's.
 func (m *Manager) materializePassthroughFile(execution *AgentExecution, f mcpconfig.PassthroughConfigFile) (bool, error) {
-	if f.SkipIfExists {
-		if _, err := os.Lstat(f.Path); err == nil {
-			m.logger.Info("passthrough MCP config already exists; leaving user file untouched",
-				zap.String("path", f.Path))
-			return false, nil
-		} else if !os.IsNotExist(err) {
-			return false, fmt.Errorf("lstat passthrough MCP config: %w", err)
-		}
-	}
 	if escapes, err := workspacePathEscapes(execution.WorkspacePath, f.Path); err != nil {
 		return false, fmt.Errorf("validate passthrough MCP config path: %w", err)
 	} else if escapes {
@@ -423,16 +416,57 @@ func (m *Manager) materializePassthroughFile(execution *AgentExecution, f mcpcon
 			zap.String("path", f.Path))
 		return false, nil
 	}
-	if err := os.MkdirAll(filepath.Dir(f.Path), 0o700); err != nil {
-		return false, fmt.Errorf("create passthrough MCP config dir: %w", err)
-	}
-	if f.SkipIfExists {
+
+	info, statErr := os.Lstat(f.Path)
+	switch {
+	case statErr == nil && info.Mode()&os.ModeSymlink != 0:
+		// Never write through an existing symlink — it could redirect the write
+		// outside the worktree. Applies to both merge and create.
+		m.logger.Warn("passthrough MCP config is a symlink; leaving it untouched",
+			zap.String("path", f.Path))
+		return false, nil
+	case statErr == nil && f.MergeKey != "":
+		// Merge kandev's servers into the user's existing regular file. Not
+		// tracked — it's the user's file; we only appended our entries.
+		return false, m.mergePassthroughConfig(f)
+	case statErr == nil:
+		// Existing kandev-owned temp file (Claude/OpenCode) — overwrite it.
+		if err := os.WriteFile(f.Path, f.Content, 0o600); err != nil {
+			return false, fmt.Errorf("write passthrough MCP config: %w", err)
+		}
+		return true, nil
+	case !os.IsNotExist(statErr):
+		return false, fmt.Errorf("lstat passthrough MCP config: %w", statErr)
+	default:
+		if err := os.MkdirAll(filepath.Dir(f.Path), 0o700); err != nil {
+			return false, fmt.Errorf("create passthrough MCP config dir: %w", err)
+		}
 		return m.writeFileNoFollow(f.Path, f.Content)
 	}
-	if err := os.WriteFile(f.Path, f.Content, 0o600); err != nil {
-		return false, fmt.Errorf("write passthrough MCP config: %w", err)
+}
+
+// mergePassthroughConfig merges kandev's servers (f.Content's f.MergeKey object)
+// into the existing regular file at f.Path, preserving the user's other entries.
+// A malformed or unreadable existing file is left untouched (logged), never
+// clobbered. The file is confirmed to be a regular file (not a symlink) by the
+// caller before this runs.
+func (m *Manager) mergePassthroughConfig(f mcpconfig.PassthroughConfigFile) error {
+	existing, err := os.ReadFile(f.Path)
+	if err != nil {
+		m.logger.Warn("cannot read existing MCP config to merge; leaving it untouched",
+			zap.String("path", f.Path), zap.Error(err))
+		return nil
 	}
-	return true, nil
+	merged, err := mcpconfig.MergeJSONUnderKey(existing, f.Content, f.MergeKey)
+	if err != nil {
+		m.logger.Warn("cannot merge into existing MCP config; leaving it untouched",
+			zap.String("path", f.Path), zap.Error(err))
+		return nil
+	}
+	if err := os.WriteFile(f.Path, merged, 0o600); err != nil {
+		return fmt.Errorf("write merged passthrough MCP config: %w", err)
+	}
+	return nil
 }
 
 // writeFileNoFollow creates path with O_EXCL so it never follows or overwrites

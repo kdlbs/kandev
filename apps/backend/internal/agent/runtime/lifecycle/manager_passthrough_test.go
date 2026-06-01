@@ -458,32 +458,49 @@ func TestPassthroughCursorWritesProjectFile(t *testing.T) {
 	}
 }
 
-func TestPassthroughCursorLeavesExistingProjectFileUntouched(t *testing.T) {
+func TestPassthroughCursorMergesIntoExistingProjectFile(t *testing.T) {
 	mgr, execution, profile := newPassthroughMCPTestManager(t, "cursor-acp")
 	cursorPath := filepath.Join(execution.WorkspacePath, ".cursor", "mcp.json")
 	if err := os.MkdirAll(filepath.Dir(cursorPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	userContent := `{"user":"config"}`
+	// A user file with their own top-level key AND an existing MCP server.
+	userContent := `{"user":"config","mcpServers":{"user-srv":{"url":"https://user"}}}`
 	if err := os.WriteFile(cursorPath, []byte(userContent), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	_, _, _, _, err := mgr.passthroughAgentCommand(context.Background(), execution, profile)
-	if err != nil {
+	if _, _, _, _, err := mgr.passthroughAgentCommand(context.Background(), execution, profile); err != nil {
 		t.Fatalf("passthroughAgentCommand returned error: %v", err)
 	}
 
-	got, err := os.ReadFile(cursorPath)
+	data, err := os.ReadFile(cursorPath)
 	if err != nil {
 		t.Fatalf("read cursor mcp.json: %v", err)
 	}
-	if string(got) != userContent {
-		t.Fatalf("cursor overwrote user's mcp.json: %s", got)
+	var merged struct {
+		User       string `json:"user"`
+		MCPServers map[string]struct {
+			Type string `json:"type"`
+			URL  string `json:"url"`
+		} `json:"mcpServers"`
 	}
-	// A skipped file must not be tracked for cleanup (it is the user's, not ours).
+	if err := json.Unmarshal(data, &merged); err != nil {
+		t.Fatalf("merged file not JSON: %v\n%s", err, data)
+	}
+	if merged.User != "config" {
+		t.Errorf("user top-level key lost: %s", data)
+	}
+	if merged.MCPServers["user-srv"].URL != "https://user" {
+		t.Errorf("user's existing server dropped: %s", data)
+	}
+	// Cursor emits remote servers as {url, headers} with no type field.
+	if merged.MCPServers[kandevMCPServerName].URL != "http://localhost:45678/mcp" {
+		t.Errorf("kandev server not merged in: %s", data)
+	}
+	// A file merged into the user's must NOT be tracked for cleanup (it's theirs).
 	if files := getPassthroughMCPFiles(execution); len(files) != 0 {
-		t.Fatalf("skipped cursor file must not be tracked for cleanup, got %v", files)
+		t.Fatalf("merged user file must not be tracked for cleanup, got %v", files)
 	}
 }
 
@@ -682,12 +699,13 @@ func TestWritePassthroughMCPFilesSkipsDanglingLeafSymlink(t *testing.T) {
 
 	execution := &AgentExecution{WorkspacePath: ws, Metadata: map[string]interface{}{}}
 	if err := mgr.writePassthroughMCPFiles(execution, []mcpconfig.PassthroughConfigFile{
-		{Path: leaf, Content: []byte(`{"secret":"x"}`), SkipIfExists: true},
+		{Path: leaf, Content: []byte(`{"mcpServers":{}}`), MergeKey: "mcpServers"},
 	}); err != nil {
 		t.Fatalf("writePassthroughMCPFiles: %v", err)
 	}
 
-	// The write must NOT have followed the dangling symlink to create the outside file.
+	// The write must NOT have followed the symlink to create the outside file
+	// (neither the merge-read nor the write may traverse it).
 	if _, err := os.Stat(outsideTarget); !os.IsNotExist(err) {
 		t.Fatalf("write followed dangling symlink to outside target (err=%v)", err)
 	}

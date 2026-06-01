@@ -26,8 +26,8 @@ func TestClaudeStrategy_FileAndFlags(t *testing.T) {
 	if len(art.Files) != 1 || art.Files[0].Path != "/tmp/cfg.json" {
 		t.Fatalf("expected one file at /tmp/cfg.json, got %+v", art.Files)
 	}
-	if art.Files[0].SkipIfExists {
-		t.Error("claude temp file should overwrite, not SkipIfExists")
+	if art.Files[0].MergeKey != "" {
+		t.Error("claude temp file should overwrite, not merge")
 	}
 	wantArgs := []string{"--mcp-config", "/tmp/cfg.json"}
 	if !reflect.DeepEqual(art.Args, wantArgs) {
@@ -177,7 +177,7 @@ func TestCodexStrategy_QuotesServerNamesWithDots(t *testing.T) {
 
 // --- Cursor ------------------------------------------------------------------
 
-func TestCursorStrategy_ProjectFileSkipIfExists(t *testing.T) {
+func TestCursorStrategy_ProjectFileMerge(t *testing.T) {
 	art, err := CursorStrategy{}.BuildPassthroughMCP(sampleServers, PassthroughPaths{WorkspaceDir: "/work"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -192,8 +192,8 @@ func TestCursorStrategy_ProjectFileSkipIfExists(t *testing.T) {
 	if f.Path != filepath.Join("/work", ".cursor", "mcp.json") {
 		t.Errorf("Path = %q", f.Path)
 	}
-	if !f.SkipIfExists {
-		t.Error("cursor file must be SkipIfExists (never clobber user's file)")
+	if f.MergeKey != "mcpServers" {
+		t.Errorf("cursor file must merge under mcpServers, got MergeKey=%q", f.MergeKey)
 	}
 	var got cursorMCPFile
 	if err := json.Unmarshal(f.Content, &got); err != nil {
@@ -211,6 +211,54 @@ func TestCursorStrategy_ProjectFileSkipIfExists(t *testing.T) {
 func TestCursorStrategy_NoWorkspace(t *testing.T) {
 	if art, _ := (CursorStrategy{}).BuildPassthroughMCP(sampleServers, PassthroughPaths{}); len(art.Files) != 0 {
 		t.Error("no workspace dir should produce no artifacts")
+	}
+}
+
+func TestMergeJSONUnderKey(t *testing.T) {
+	existing := []byte(`{"mcpServers":{"user-srv":{"url":"https://user"}},"otherTop":"keep"}`)
+	ours := []byte(`{"mcpServers":{"kandev":{"type":"http","url":"http://localhost:1/mcp"}}}`)
+
+	merged, err := MergeJSONUnderKey(existing, ours, "mcpServers")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var got map[string]json.RawMessage
+	if err := json.Unmarshal(merged, &got); err != nil {
+		t.Fatalf("merged output not JSON: %v", err)
+	}
+	if string(got["otherTop"]) != `"keep"` {
+		t.Errorf("top-level user key not preserved: %s", merged)
+	}
+	var servers map[string]map[string]string
+	if err := json.Unmarshal(got["mcpServers"], &servers); err != nil {
+		t.Fatalf("mcpServers not an object: %v", err)
+	}
+	if servers["user-srv"]["url"] != "https://user" {
+		t.Errorf("user server dropped: %s", merged)
+	}
+	if servers["kandev"]["url"] != "http://localhost:1/mcp" {
+		t.Errorf("kandev server not merged in: %s", merged)
+	}
+}
+
+func TestMergeJSONUnderKey_OursWinOnCollision(t *testing.T) {
+	existing := []byte(`{"mcpServers":{"kandev":{"url":"http://stale"}}}`)
+	ours := []byte(`{"mcpServers":{"kandev":{"url":"http://fresh"}}}`)
+	merged, err := MergeJSONUnderKey(existing, ours, "mcpServers")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(string(merged), "http://fresh") || strings.Contains(string(merged), "http://stale") {
+		t.Errorf("our entry must win on name collision: %s", merged)
+	}
+}
+
+func TestMergeJSONUnderKey_MalformedExistingErrors(t *testing.T) {
+	if _, err := MergeJSONUnderKey([]byte(`not json`), []byte(`{"mcpServers":{}}`), "mcpServers"); err == nil {
+		t.Error("expected error for malformed existing JSON")
+	}
+	if _, err := MergeJSONUnderKey([]byte(`{"mcpServers":[]}`), []byte(`{"mcpServers":{}}`), "mcpServers"); err == nil {
+		t.Error("expected error when existing mcpServers is not an object")
 	}
 }
 
