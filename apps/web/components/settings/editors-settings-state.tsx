@@ -7,7 +7,7 @@ import { createEditor, deleteEditor, updateEditor, updateUserSettings } from "@/
 import { useRequest } from "@/lib/http/use-request";
 import type { EditorOption } from "@/lib/types/http";
 import { type ComboboxOption } from "@/components/combobox";
-import { parseTerminalLinkBehavior } from "@/lib/ssr/user-settings";
+import { parseTerminalLinkBehavior, parseVoiceMode } from "@/lib/ssr/user-settings";
 import { fromApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
 import {
   type EditorFormState,
@@ -245,6 +245,7 @@ function buildUserSettingsFromResponse(
     terminalFontFamily: s.terminal_font_family || null,
     terminalFontSize: s.terminal_font_size || null,
     changesPanelLayout: s.changes_panel_layout === "tree" ? ("tree" as const) : ("flat" as const),
+    voiceMode: parseVoiceMode(s.voice_mode),
     ...mapEditorSettingsFields(s),
   };
 }

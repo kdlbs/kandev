@@ -31,6 +31,7 @@ import { ModeSelector } from "@/components/task/mode-selector";
 import { ContextPopover } from "./context-popover";
 import { ResetContextButton } from "./reset-context-button";
 import { ImplementPlanButton } from "./implement-plan-button";
+import { VoiceInputButton } from "./voice-input-button";
 import type { ContextFile } from "@/lib/state/context-files-store";
 
 export type ChatInputToolbarProps = {
@@ -67,6 +68,12 @@ export type ChatInputToolbarProps = {
   isUtilityConfigured?: boolean;
   /** Callback to open file picker for attaching files */
   onAttachFiles?: () => void;
+  /** Callback to insert a transcribed voice utterance into the editor. When
+   *  omitted, the voice button is hidden — keeps quick-chat / read-only
+   *  variants free of a button they can't wire. */
+  onVoiceTranscript?: (text: string) => void;
+  /** Optional auto-send hook fired after a voice transcript is inserted. */
+  onVoiceAutoSend?: () => void;
   /** Hide the sessions dropdown (for quick chat) */
   hideSessionsDropdown?: boolean;
   /** When true, only render the submit/cancel button — no other controls */
@@ -308,6 +315,8 @@ function ToolbarRightSection({
   onCancel,
   onSubmit,
   submitShortcut,
+  onVoiceTranscript,
+  onVoiceAutoSend,
 }: {
   showCollapsed: boolean;
   rightItems: ToolbarItemConfig[];
@@ -322,6 +331,8 @@ function ToolbarRightSection({
   onCancel: () => void;
   onSubmit: () => void;
   submitShortcut: (typeof SHORTCUTS)[keyof typeof SHORTCUTS];
+  onVoiceTranscript?: (text: string) => void;
+  onVoiceAutoSend?: () => void;
 }) {
   return (
     <div className="flex items-center gap-0.5 shrink-0">
@@ -330,7 +341,14 @@ function ToolbarRightSection({
       {planModeEnabled && !isAgentBusy && onImplementPlan && (
         <ImplementPlanButton onClick={onImplementPlan} />
       )}
-      <div className="ml-1">
+      <div className="ml-1 flex items-center gap-1">
+        {onVoiceTranscript && (
+          <VoiceInputButton
+            onTranscript={onVoiceTranscript}
+            onAutoSend={onVoiceAutoSend}
+            disabled={isDisabled}
+          />
+        )}
         <SubmitButton
           isAgentBusy={isAgentBusy}
           hasContent={hasContent}
@@ -588,6 +606,8 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
         onCancel={props.onCancel}
         onSubmit={props.onSubmit}
         submitShortcut={submitShortcut}
+        onVoiceTranscript={props.onVoiceTranscript}
+        onVoiceAutoSend={props.onVoiceAutoSend}
       />
     </div>
   );

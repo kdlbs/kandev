@@ -188,7 +188,7 @@ func closeStopChOnce(stopCh chan struct{}) {
 func cleanupManagerStopCh(t *testing.T, mgr *Manager) {
 	t.Helper()
 	t.Cleanup(func() {
-		closeStopChOnce(mgr.stopCh)
+		mgr.closeStopCh()
 		if mgr.streamManager != nil {
 			mgr.streamManager.Wait()
 		}
@@ -223,19 +223,24 @@ func (m *MockProfileResolver) ResolveProfile(ctx context.Context, profileID stri
 	}, nil
 }
 
-// newTestManager creates a Manager for testing with mock dependencies
-func newTestManager() *Manager {
+// newTestManager creates a Manager for testing with mock dependencies.
+// Registers t.Cleanup to close stopCh and drain StreamManager goroutines so
+// goleak.VerifyTestMain stays green when tests trigger ConnectWorkspaceStream.
+func newTestManager(t *testing.T) *Manager {
+	t.Helper()
 	log := newTestLogger()
 	reg := newTestRegistry()
 	eventBus := &MockEventBus{}
 	credsMgr := &MockCredentialsManager{}
 	profileResolver := &MockProfileResolver{}
 	// Pass nil for runtime - tests don't need them
-	return NewManager(reg, eventBus, nil, credsMgr, profileResolver, nil, ExecutorFallbackWarn, "", log)
+	mgr := NewManager(reg, eventBus, nil, credsMgr, profileResolver, nil, ExecutorFallbackWarn, "", log)
+	cleanupManagerStopCh(t, mgr)
+	return mgr
 }
 
 func TestNewManager(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 
 	if mgr == nil {
 		t.Fatal("expected non-nil manager")
@@ -246,14 +251,14 @@ func TestNewManager(t *testing.T) {
 }
 
 func TestNewManager_WiresRemediateNpxCacheDefault(t *testing.T) {
-	m := newTestManager()
+	m := newTestManager(t)
 	if m.remediateNpxCache == nil {
 		t.Fatal("NewManager must wire default remediateNpxCache")
 	}
 }
 
 func TestManager_GetExecution(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 
 	// Manually add an execution for testing
 	execution := &AgentExecution{
@@ -284,7 +289,7 @@ func TestManager_GetExecution(t *testing.T) {
 }
 
 func TestManager_GetExecutionBySessionID(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 
 	execution := &AgentExecution{
 		ID:             "test-execution-id",
@@ -315,7 +320,7 @@ func TestManager_GetExecutionBySessionID(t *testing.T) {
 }
 
 func TestManager_ListExecutions(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 
 	// Empty list
 	list := mgr.ListExecutions()
@@ -334,7 +339,7 @@ func TestManager_ListExecutions(t *testing.T) {
 }
 
 func TestManager_UpdateStatus(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 
 	execution := &AgentExecution{
 		ID:     "test-execution-id",

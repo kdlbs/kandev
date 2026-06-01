@@ -1,5 +1,5 @@
 import type { StateCreator } from "zustand";
-import type { SettingsSlice, SettingsSliceState } from "./types";
+import { DEFAULT_VOICE_MODE_STATE, type SettingsSlice, type SettingsSliceState } from "./types";
 
 export const defaultSettingsState: SettingsSliceState = {
   executors: { items: [] },
@@ -44,6 +44,7 @@ export const defaultSettingsState: SettingsSliceState = {
     terminalFontFamily: null,
     terminalFontSize: null,
     changesPanelLayout: "flat",
+    voiceMode: { ...DEFAULT_VOICE_MODE_STATE },
     loaded: false,
   },
 };

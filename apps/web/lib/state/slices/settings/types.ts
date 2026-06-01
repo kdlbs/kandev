@@ -11,6 +11,11 @@ import type {
   SavedLayout,
   ToolStatus,
 } from "@/lib/types/http";
+import type {
+  VoiceInputActivationMode,
+  VoiceInputEngine,
+  WhisperWebModelSize,
+} from "@/lib/types/http-voice";
 import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { SpritesStatus, SpritesInstance } from "@/lib/types/http-sprites";
@@ -156,7 +161,27 @@ export type UserSettingsState = {
   terminalFontFamily: string | null;
   terminalFontSize: number | null;
   changesPanelLayout: "flat" | "tree";
+  voiceMode: VoiceModeState;
   loaded: boolean;
+};
+
+export type VoiceModeState = {
+  enabled: boolean;
+  engine: VoiceInputEngine;
+  language: string;
+  mode: VoiceInputActivationMode;
+  autoSend: boolean;
+  whisperWebModel: WhisperWebModelSize;
+};
+
+/** Default values used by the slice init and by SSR hydration fallback. */
+export const DEFAULT_VOICE_MODE_STATE: VoiceModeState = {
+  enabled: true,
+  engine: "auto",
+  language: "auto",
+  mode: "toggle",
+  autoSend: false,
+  whisperWebModel: "base",
 };
 
 export type SettingsSliceState = {

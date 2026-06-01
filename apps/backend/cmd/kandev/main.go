@@ -1524,6 +1524,7 @@ func buildHTTPServer(
 		devMode:                 cfg.Debug.DevMode || cfg.Debug.PprofEnabled,
 		httpPort:                port,
 		features:                cfg.Features,
+		voice:                   cfg.Voice,
 		log:                     log,
 	})
 

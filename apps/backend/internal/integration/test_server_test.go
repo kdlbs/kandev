@@ -67,6 +67,12 @@ func (a *taskRepositoryAdapter) UpdateTaskState(ctx context.Context, taskID stri
 	return err
 }
 
+func (a *taskRepositoryAdapter) UpdateTaskStateIfCurrentIn(
+	ctx context.Context, taskID string, state v1.TaskState, allowed []v1.TaskState,
+) (bool, error) {
+	return a.svc.UpdateTaskStateIfCurrentIn(ctx, taskID, state, allowed)
+}
+
 // testMessageCreatorAdapter adapts the task service to the orchestrator.MessageCreator interface for tests
 type testMessageCreatorAdapter struct {
 	svc *taskservice.Service

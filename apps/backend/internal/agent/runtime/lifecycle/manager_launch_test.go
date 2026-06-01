@@ -42,7 +42,7 @@ func (a *resumeTestAgent) Runtime() *agents.RuntimeConfig {
 }
 
 func TestBuildAgentCommand_ResumeFlag(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	canRecoverTrue := true
 	canRecoverFalse := false
 
@@ -91,7 +91,7 @@ func (a *cliFlagTestAgent) BuildCommand(_ agents.CommandOptions) agents.Command 
 }
 
 func TestBuildAgentCommand_CLIFlagsAppended(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	ag := &cliFlagTestAgent{}
 
 	t.Run("enabled entries reach argv, disabled do not", func(t *testing.T) {
@@ -142,7 +142,7 @@ func TestBuildEnvForExecution_ResolvesSecretBackedProfileEnv(t *testing.T) {
 		t.Fatalf("seed secret: %v", err)
 	}
 
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	mgr.secretStore = store
 	profileInfo := &AgentProfileInfo{
 		EnvVars: []settingsmodels.ProfileEnvVar{{Key: "FROM_SECRET", SecretID: "sec-1"}},
@@ -161,7 +161,7 @@ func TestBuildEnvForExecution_ResolvesSecretBackedProfileEnv(t *testing.T) {
 }
 
 func TestSetExecutionEnv_DoesNotSnapshotProfileEnvVars(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	mgr.profileResolver = &mockPassthroughProfileResolver{
 		envVars: []settingsmodels.ProfileEnvVar{{Key: "PROFILE_ONLY", Value: "new-value"}},
 	}
@@ -299,7 +299,7 @@ func requirePrepareStep(t *testing.T, steps []PrepareStep, name string) {
 }
 
 func TestRunEnvironmentPreparer_CalledOnFreshLaunch(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	preparer := &trackingPreparer{}
 	mgr.preparerRegistry = NewPreparerRegistry(mgr.logger)
 	mgr.preparerRegistry.Register(models.ExecutorTypeLocal, preparer)
@@ -318,7 +318,7 @@ func TestRunEnvironmentPreparer_CalledOnFreshLaunch(t *testing.T) {
 }
 
 func TestRunEnvironmentPreparer_SkippedWithoutRepoPath(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	preparer := &trackingPreparer{}
 	mgr.preparerRegistry = NewPreparerRegistry(mgr.logger)
 	mgr.preparerRegistry.Register(models.ExecutorTypeLocal, preparer)
@@ -336,7 +336,7 @@ func TestRunEnvironmentPreparer_SkippedWithoutRepoPath(t *testing.T) {
 }
 
 func TestLaunchResolveWorkspacePath_EphemeralCreatesQuickChatDir(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	mgr.dataDir = t.TempDir()
 
 	req := &LaunchRequest{
@@ -351,7 +351,7 @@ func TestLaunchResolveWorkspacePath_EphemeralCreatesQuickChatDir(t *testing.T) {
 }
 
 func TestLaunchResolveWorkspacePath_NonEphemeralRepoLessGetsScratchDir(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	mgr.dataDir = t.TempDir()
 
 	req := &LaunchRequest{
@@ -369,7 +369,7 @@ func TestLaunchResolveWorkspacePath_NonEphemeralRepoLessGetsScratchDir(t *testin
 }
 
 func TestLaunchResolveWorkspacePath_NonEphemeralWithoutWorkspaceIDReturnsEmpty(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	mgr.dataDir = t.TempDir()
 
 	// Non-ephemeral repo-less task missing workspace_id should not get a path
@@ -385,7 +385,7 @@ func TestLaunchResolveWorkspacePath_NonEphemeralWithoutWorkspaceIDReturnsEmpty(t
 }
 
 func TestLaunchResolveWorkspacePath_PickedFolderUsedDirectly(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	mgr.dataDir = t.TempDir()
 	picked := t.TempDir() // some existing folder the user picked
 
@@ -399,7 +399,7 @@ func TestLaunchResolveWorkspacePath_PickedFolderUsedDirectly(t *testing.T) {
 }
 
 func TestLaunchResolveWorkspacePath_WorktreeWithoutRepoFallsBackToScratch(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	mgr.dataDir = t.TempDir()
 
 	// UseWorktree=true but no RepositoryPath — should not return empty,
@@ -425,7 +425,7 @@ func TestLaunchResolveWorkspacePath_WorktreeWithoutRepoFallsBackToScratch(t *tes
 // backend restart, where a workspace-only execution was returned to the resume
 // path and StartAgentProcess() then failed with "no agent command configured".
 func TestLaunch_PromotesWorkspaceOnlyExecution(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 
 	// Inject a workspace-only execution: AgentCommand is intentionally empty,
 	// matching what createExecution produces when called from
@@ -458,7 +458,7 @@ func TestLaunch_PromotesWorkspaceOnlyExecution(t *testing.T) {
 // an agent running" guard still fires when the existing execution is a real
 // agent-equipped one (AgentCommand populated), preventing duplicate launches.
 func TestLaunch_RejectsWhenAgentAlreadyRunning(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 
 	existing := &AgentExecution{
 		ID:             "exec-running",

@@ -95,8 +95,10 @@ test.describe("Toolbar overflow menu", () => {
     // Context badge should be hidden when collapsed to avoid clipping
     await expect(contextBadge).not.toBeVisible();
 
-    // Submit button should remain visible (always-visible item)
-    const submitBtn = toolbar.locator("button.rounded-full");
+    // Submit button should remain visible (always-visible item). Target the
+    // submit testid specifically — the voice input button is also round, so a
+    // bare `button.rounded-full` locator now matches both and fails strict mode.
+    const submitBtn = toolbar.getByTestId("submit-message-button");
     await expect(submitBtn).toBeVisible();
 
     // Click expand toggle — items appear inline (scrollable)

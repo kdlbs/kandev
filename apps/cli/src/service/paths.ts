@@ -34,7 +34,7 @@ export function macosSystemPlistPath(): string {
   return path.join(MACOS_SYSTEM_DAEMON_DIR, `${LAUNCHD_LABEL}.plist`);
 }
 
-export type LauncherKind = "homebrew" | "npm" | "unknown";
+export type LauncherKind = "homebrew" | "npm" | "npx" | "unknown";
 
 export type LauncherInfo = {
   /** Absolute path to node executable (process.execPath at install time). */
@@ -87,8 +87,8 @@ export function homebrewShimPath(cliEntry: string): string | undefined {
  *
  * The unit file hard-codes absolute paths because systemd/launchd start with an
  * empty PATH and may not see the user's `node` or `kandev` shim. By recording
- * `process.execPath` (node) and `process.argv[1]` (cli.js) at install time we
- * avoid any PATH lookups at service-run time.
+ * `process.execPath` (node) and the resolved CLI entry at install time we avoid
+ * any PATH lookups at service-run time.
  */
 export function captureLauncher(): LauncherInfo {
   const nodePath = process.execPath;
@@ -97,9 +97,11 @@ export function captureLauncher(): LauncherInfo {
   const version = process.env.KANDEV_VERSION;
   const kind: LauncherKind = bundleDir
     ? "homebrew"
-    : cliEntry.includes(`${path.sep}node_modules${path.sep}`)
-      ? "npm"
-      : "unknown";
+    : looksLikeNpxEntry(cliEntry)
+      ? "npx"
+      : cliEntry.includes(`${path.sep}node_modules${path.sep}`)
+        ? "npm"
+        : "unknown";
   // For Homebrew installs, prefer the floating bin shim so the unit survives
   // `brew upgrade` (which deletes the versioned Cellar dir baked into nodePath
   // /cliEntry). Only adopt it when the shim actually exists on disk; otherwise
@@ -112,10 +114,14 @@ export function captureLauncher(): LauncherInfo {
   return { nodePath, cliEntry, kind, bundleDir, version, shimPath };
 }
 
+function looksLikeNpxEntry(cliEntry: string): boolean {
+  return cliEntry.includes(`${path.sep}_npx${path.sep}`);
+}
+
 function resolveCliEntry(): string {
   const argvEntry = process.argv[1];
   if (argvEntry && fs.existsSync(argvEntry)) {
-    return path.resolve(argvEntry);
+    return path.resolve(fs.realpathSync(argvEntry));
   }
   throw new Error(
     "could not resolve the kandev CLI entry path from process.argv[1]; " +

@@ -11,7 +11,7 @@ import (
 )
 
 func TestManager_MarkCompleted_Success(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 
 	execution := &AgentExecution{
 		ID:             "test-execution-id",
@@ -43,7 +43,7 @@ func TestManager_MarkCompleted_Success(t *testing.T) {
 }
 
 func TestManager_MarkCompleted_Failure(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 
 	execution := &AgentExecution{
 		ID:             "test-execution-id",
@@ -75,7 +75,7 @@ func TestManager_MarkCompleted_Failure(t *testing.T) {
 }
 
 func TestManager_MarkCompleted_Idempotent(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 
 	execution := &AgentExecution{
 		ID:             "test-execution-id",
@@ -103,7 +103,7 @@ func TestManager_MarkCompleted_Idempotent(t *testing.T) {
 }
 
 func TestManager_MarkCompleted_NotFound(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 
 	err := mgr.MarkCompleted("non-existent", 0, "")
 	if err == nil {
@@ -112,7 +112,7 @@ func TestManager_MarkCompleted_NotFound(t *testing.T) {
 }
 
 func TestManager_RemoveExecution(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 
 	execution := &AgentExecution{
 		ID:          "test-execution-id",
@@ -179,7 +179,7 @@ func TestManager_CleanupStaleExecution_StopsRuntimeInstance(t *testing.T) {
 }
 
 func TestManager_CleanupStaleExecution_NoopForMissingSession(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 
 	err := mgr.CleanupStaleExecutionBySessionID(context.Background(), "non-existent")
 	if err != nil {
@@ -188,7 +188,7 @@ func TestManager_CleanupStaleExecution_NoopForMissingSession(t *testing.T) {
 }
 
 func TestManager_CleanupStaleExecution_SkipsStopWhenNoRuntime(t *testing.T) {
-	mgr := newTestManager() // no executor registry
+	mgr := newTestManager(t) // no executor registry
 
 	execution := &AgentExecution{
 		ID:          "exec-1",
@@ -238,7 +238,7 @@ func (m *mockStopTracker) ShouldApplyPreferredShell() bool { return false }
 func (m *mockStopTracker) IsAlwaysResumable() bool         { return false }
 
 func TestManager_StartStop(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 
 	ctx := context.Background()
 

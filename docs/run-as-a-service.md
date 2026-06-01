@@ -1,6 +1,6 @@
 # Run Kandev as a Service
 
-Install Kandev as an OS-managed service (systemd on Linux, launchd on macOS) so it auto-starts and stays running. Updates remain manual: `npm i -g kandev@latest` or `brew upgrade kandev`, then re-run `kandev service install`.
+Install Kandev as an OS-managed service (systemd on Linux, launchd on macOS) so it auto-starts and stays running. User-mode services installed by `kandev service install` can self-update from the System → Updates page. Non-service installs and `--system` services still update manually: `npm i -g kandev@latest` or `brew upgrade kandev`, then re-run `kandev service install`.
 
 This guide assumes you've already installed kandev via [Homebrew or npm](../apps/cli/README.md#quick-start) and that `kandev` works when run interactively.
 
@@ -65,9 +65,11 @@ kandev service config [--system]
 
 ## After an Upgrade
 
-Both `npm` and Homebrew install kandev under a versioned directory (e.g. `node_modules/kandev/0.49.0/`, `Cellar/kandev/0.49.0/`). When you upgrade, the old version directory is removed and replaced — but the unit file you installed earlier still hard-codes the old absolute path.
+If Kandev is running as a user-mode service installed by `kandev service install`, open **Settings → System → Updates** and use **Apply update** when it appears. The button is shown only when the backend can prove it is running from a kandev-managed service unit/plist with valid service metadata.
 
-**Fix:** re-run install. It's idempotent.
+Both `npm` and Homebrew install kandev under a versioned directory (e.g. `node_modules/kandev/0.49.0/`, `Cellar/kandev/0.49.0/`). Manual upgrades replace those paths, so the unit file must be refreshed afterward.
+
+**Manual fix:** re-run install. It's idempotent.
 
 ```bash
 npm i -g kandev@latest          # or: brew upgrade kandev
@@ -75,6 +77,8 @@ kandev service install          # rewrites the unit with the new paths
 ```
 
 If you launch `kandev` interactively after an upgrade, it will detect a stale unit and print a one-line reminder. You can also check with `kandev service config` — the `cli entry:` and `node path:` lines tell you the paths that *would* be baked in by the next install.
+
+System services (`kandev service install --system`) do not expose UI self-update. Update them from a privileged shell, then re-run `sudo kandev service install --system`.
 
 ## Linux Boot-Start (`loginctl enable-linger`)
 
@@ -110,6 +114,11 @@ ExecStart=/usr/local/bin/node /usr/local/lib/node_modules/kandev/bin/cli.js --he
 Environment=KANDEV_HOME_DIR=/home/alice/.kandev
 Environment=KANDEV_LOG_LEVEL=info
 Environment=PATH=/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin
+Environment=KANDEV_RUNNING_AS_SERVICE=true
+Environment=KANDEV_SERVICE_MODE=user
+Environment=KANDEV_SERVICE_MANAGER=systemd
+Environment=KANDEV_INSTALL_KIND=npm
+Environment=KANDEV_SERVICE_METADATA=/home/alice/.kandev/service/install.json
 Restart=on-failure
 RestartSec=5s
 KillMode=mixed
@@ -119,7 +128,7 @@ TimeoutStopSec=30s
 WantedBy=default.target
 ```
 
-The `--headless` flag tells the CLI not to open a browser (you'll connect to it remotely or via `localhost`).
+The `--headless` flag tells the CLI not to open a browser (you'll connect to it remotely or via `localhost`). The `KANDEV_SERVICE_*` variables and `<home>/service/install.json` metadata let the backend verify that UI self-update is safe before it shows the Apply button.
 
 ## Troubleshooting
 
@@ -151,11 +160,15 @@ This happens with `--system` if `SUDO_USER` isn't set (e.g. you logged in as roo
 
 ### After upgrading, the service silently keeps running the old version
 
-The OS service manager keeps running whatever `ExecStart` it has — it doesn't know about npm/brew upgrades. **Always re-run `kandev service install` after an upgrade** so the unit picks up the new paths, then `kandev service restart` to pick up new code.
+The OS service manager keeps running whatever `ExecStart` it has — it doesn't know about npm/brew upgrades. For managed user services, use **Apply update** on the Updates page. Otherwise, **always re-run `kandev service install` after an upgrade** so the unit picks up the new paths, then `kandev service restart` to pick up new code.
 
 ## Updating: TL;DR
 
 ```bash
+# Option A: managed user service
+# Use Settings -> System -> Updates -> Apply update
+
+# Option B: manual / system service
 # 1. Update the binary
 npm i -g kandev@latest          # or: brew upgrade kandev
 

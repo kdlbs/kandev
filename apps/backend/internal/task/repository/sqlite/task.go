@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -785,6 +786,60 @@ func (r *Repository) UpdateTaskState(ctx context.Context, id string, state v1.Ta
 		return fmt.Errorf("%w: %s", ErrTaskNotFound, id)
 	}
 	return nil
+}
+
+// UpdateTaskStateIfCurrentIn transitions state inside a transaction, re-checking
+// the current state on write so concurrent handlers cannot clobber a task that
+// moved out of allowed between read and update.
+func (r *Repository) UpdateTaskStateIfCurrentIn(
+	ctx context.Context, id string, state v1.TaskState, allowed []v1.TaskState,
+) (v1.TaskState, bool, error) {
+	if len(allowed) == 0 {
+		return "", false, nil
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var currentState v1.TaskState
+	err = tx.QueryRowContext(ctx, r.db.Rebind(`SELECT state FROM tasks WHERE id = ?`), id).Scan(&currentState)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", false, fmt.Errorf("%w: %s", ErrTaskNotFound, id)
+		}
+		return "", false, err
+	}
+	if !taskStateInSet(currentState, allowed) {
+		return currentState, false, nil
+	}
+
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks SET state = ?, updated_at = ?
+		WHERE id = ? AND state = ?
+	`), state, time.Now().UTC(), id, currentState)
+	if err != nil {
+		return "", false, err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return currentState, false, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return "", false, err
+	}
+	return currentState, true, nil
+}
+
+func taskStateInSet(state v1.TaskState, allowed []v1.TaskState) bool {
+	for _, candidate := range allowed {
+		if state == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 // ListTasksByProject returns all non-archived, non-ephemeral tasks for a project.

@@ -124,6 +124,23 @@ describe("renderSystemdUnit", () => {
     expect(unit).toContain("Environment=KANDEV_SERVER_PORT=9000");
   });
 
+  it("bakes service-state env when metadata path is set", () => {
+    const unit = renderSystemdUnit({
+      launcher: NPM_LAUNCHER,
+      homeDir: "/home/alice/.kandev",
+      logDir: "/home/alice/.kandev/logs",
+      mode: "user",
+      serviceMetadataPath: "/home/alice/.kandev/service/install.json",
+    } as Parameters<typeof renderSystemdUnit>[0]);
+    expect(unit).toContain("Environment=KANDEV_RUNNING_AS_SERVICE=true");
+    expect(unit).toContain("Environment=KANDEV_SERVICE_MODE=user");
+    expect(unit).toContain("Environment=KANDEV_SERVICE_MANAGER=systemd");
+    expect(unit).toContain("Environment=KANDEV_INSTALL_KIND=npm");
+    expect(unit).toContain(
+      "Environment=KANDEV_SERVICE_METADATA=/home/alice/.kandev/service/install.json",
+    );
+  });
+
   it("prepends launcher node bin dir to PATH so npx-based agents resolve under fnm/nvm/asdf/volta/mise", () => {
     const unit = renderSystemdUnit({
       launcher: FNM_LAUNCHER,
@@ -407,6 +424,26 @@ describe("renderLaunchdPlist", () => {
     expect(plist).toContain("KANDEV_BUNDLE_DIR");
     expect(plist).toContain("/opt/homebrew/opt/kandev/libexec");
     expect(plist).toContain("KANDEV_VERSION");
+  });
+
+  it("bakes service-state env when metadata path is set", () => {
+    const plist = renderLaunchdPlist({
+      launcher: NPM_LAUNCHER,
+      homeDir: "/Users/alice/.kandev",
+      logDir: "/Users/alice/.kandev/logs",
+      mode: "user",
+      serviceMetadataPath: "/Users/alice/.kandev/service/install.json",
+    } as Parameters<typeof renderLaunchdPlist>[0]);
+    expect(plist).toContain("<key>KANDEV_RUNNING_AS_SERVICE</key>");
+    expect(plist).toContain("<string>true</string>");
+    expect(plist).toContain("<key>KANDEV_SERVICE_MODE</key>");
+    expect(plist).toContain("<string>user</string>");
+    expect(plist).toContain("<key>KANDEV_SERVICE_MANAGER</key>");
+    expect(plist).toContain("<string>launchd</string>");
+    expect(plist).toContain("<key>KANDEV_INSTALL_KIND</key>");
+    expect(plist).toContain("<string>npm</string>");
+    expect(plist).toContain("<key>KANDEV_SERVICE_METADATA</key>");
+    expect(plist).toContain("<string>/Users/alice/.kandev/service/install.json</string>");
   });
 
   it("quotes Environment= lines when value contains a space (greptile P1 regression)", () => {

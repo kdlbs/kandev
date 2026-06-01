@@ -1272,6 +1272,7 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 	}
 
 	resp.State = string(session.State)
+	resp.UpdatedAt = session.UpdatedAt.UTC().Format(time.RFC3339Nano)
 	resp.AgentProfileID = session.AgentProfileID
 	s.populateExecutorStatusInfo(ctx, session, &resp)
 
@@ -1297,6 +1298,9 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 		if refreshErr == nil && refreshedSession != nil {
 			session = refreshedSession
 			resp.State = string(session.State)
+			if !session.UpdatedAt.IsZero() {
+				resp.UpdatedAt = session.UpdatedAt.UTC().Format(time.RFC3339Nano)
+			}
 		}
 	}
 
@@ -2289,6 +2293,7 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 	// Transition to WAITING_FOR_INPUT so the user can send a new prompt
 	if session != nil {
 		s.updateTaskSessionState(ctx, session.TaskID, sessionID, models.TaskSessionStateWaitingForInput, "", true, session)
+		s.writeTaskWaitingForInputState(ctx, session.TaskID)
 	}
 
 	// Record cancellation in the message history

@@ -3,13 +3,15 @@
 import { Badge } from "@kandev/ui/badge";
 import { Spinner } from "@kandev/ui/spinner";
 import { IconCheck, IconAlertTriangle } from "@tabler/icons-react";
-import { useSystemJobs } from "@/hooks/domains/system/use-system-jobs";
+import { useSystemJob, useSystemJobs } from "@/hooks/domains/system/use-system-jobs";
 import type { SystemJob, SystemJobKind } from "@/lib/types/system";
 
 type JobProgressIndicatorProps = {
   kind: SystemJobKind;
   /** When provided, only the matching job id is rendered (ignores all others). */
   jobId?: string;
+  /** Label shown when the job has succeeded. */
+  successLabel?: string;
   /** Testid suffix; default "system-job-<kind>". */
   testId?: string;
 };
@@ -47,9 +49,15 @@ function stateLabel(state: SystemJob["state"]): string {
   }
 }
 
-export function JobProgressIndicator({ kind, jobId, testId }: JobProgressIndicatorProps) {
+export function JobProgressIndicator({
+  kind,
+  jobId,
+  successLabel,
+  testId,
+}: JobProgressIndicatorProps) {
+  const pinnedJob = useSystemJob(jobId);
   const jobs = useSystemJobs(kind);
-  const job = pickJob(jobs, jobId);
+  const job = jobId ? (pinnedJob ?? pickJob(jobs, jobId)) : pickJob(jobs);
   if (!job) return null;
 
   const tid = testId ?? `system-job-${kind}`;
@@ -67,7 +75,7 @@ export function JobProgressIndicator({ kind, jobId, testId }: JobProgressIndicat
       {isSuccess && <IconCheck className="size-3.5 text-emerald-500" />}
       {isFailed && <IconAlertTriangle className="size-3.5 text-red-500" />}
       <Badge variant={badgeVariant(job.state)} className="text-[10px]">
-        {stateLabel(job.state)}
+        {isSuccess && successLabel ? successLabel : stateLabel(job.state)}
       </Badge>
       {job.message && <span className="truncate max-w-[24rem]">{job.message}</span>}
     </div>

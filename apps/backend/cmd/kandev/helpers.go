@@ -73,6 +73,8 @@ import (
 	userhandlers "github.com/kandev/kandev/internal/user/handlers"
 	utilitycontroller "github.com/kandev/kandev/internal/utility/controller"
 	utilityhandlers "github.com/kandev/kandev/internal/utility/handlers"
+	voicehandlers "github.com/kandev/kandev/internal/voice/handlers"
+	"github.com/kandev/kandev/internal/voice/transcribe"
 	workflowcontroller "github.com/kandev/kandev/internal/workflow/controller"
 	workflowhandlers "github.com/kandev/kandev/internal/workflow/handlers"
 	"github.com/kandev/kandev/internal/worktree"
@@ -101,6 +103,9 @@ func buildSessionDataProvider(taskRepo *sqliterepo.Repository, lifecycleMgr *lif
 }
 
 const sessionIDPayloadKey = "session_id"
+const taskIDPayloadKey = "task_id"
+const newStatePayloadKey = "new_state"
+const sessionUpdatedAtPayloadKey = "updated_at"
 
 // appendAgentctlStatusMessage snapshots the current agentctl readiness for a
 // session so late-subscribing clients (page reload, task switch, WS reconnect)
@@ -159,9 +164,10 @@ func appendAgentctlStatusMessage(
 // — without it, env-routed shell terminals stall on "Connecting terminal...".
 func appendSessionStateMessage(sessionID string, session *models.TaskSession, result []*ws.Message) []*ws.Message {
 	payload := map[string]interface{}{
-		"session_id": sessionID,
-		"task_id":    session.TaskID,
-		"new_state":  string(session.State),
+		sessionIDPayloadKey:        sessionID,
+		taskIDPayloadKey:           session.TaskID,
+		newStatePayloadKey:         string(session.State),
+		sessionUpdatedAtPayloadKey: session.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	}
 	if session.ReviewStatus != models.ReviewStatusNone {
 		payload["review_status"] = string(session.ReviewStatus)
@@ -343,7 +349,6 @@ func appendContextWindowMessage(sessionID string, session *models.TaskSession, r
 	notification, err := ws.NewNotification(ws.ActionSessionStateChanged, map[string]interface{}{
 		"session_id": sessionID,
 		"task_id":    session.TaskID,
-		"new_state":  string(session.State),
 		"metadata": map[string]interface{}{
 			"context_window": contextWindow,
 		},
@@ -451,6 +456,7 @@ type routeParams struct {
 	devMode                 bool
 	httpPort                int
 	features                config.FeaturesConfig
+	voice                   config.VoiceConfig
 	log                     *logger.Logger
 }
 
@@ -700,6 +706,11 @@ func registerSecondaryRoutes(
 
 	utilityhandlers.RegisterRoutes(p.router, p.utilityCtrl, p.lifecycleMgr, p.hostUtilityMgr, p.services.User, p.log)
 	p.log.Debug("Registered Utility Agents handlers (HTTP)")
+
+	// Voice transcription fallback. The route always mounts, but returns 503
+	// when no API key is configured so the frontend can hide the path.
+	voicehandlers.RegisterRoutes(p.router, transcribe.New(p.voice.OpenAIAPIKey), p.log)
+	p.log.Debug("Registered Voice handlers (HTTP)")
 
 	agentcapabilities.RegisterRoutes(p.router, p.hostUtilityMgr, p.log)
 	p.log.Debug("Registered Agent Capabilities handlers (HTTP)")

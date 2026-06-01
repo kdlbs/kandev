@@ -129,6 +129,56 @@ func TestSQLiteRepository_UpdateTaskStateNotFound(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepository_UpdateTaskStateIfCurrentIn(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	workflow := &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Test Workflow"}
+	_ = repo.CreateWorkflow(ctx, workflow)
+	task := &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test", State: v1.TaskStateInProgress}
+	_ = repo.CreateTask(ctx, task)
+
+	oldState, updated, err := repo.UpdateTaskStateIfCurrentIn(
+		ctx, "task-123", v1.TaskStateWaitingForInput,
+		[]v1.TaskState{v1.TaskStateInProgress, v1.TaskStateScheduling},
+	)
+	if err != nil {
+		t.Fatalf("conditional update failed: %v", err)
+	}
+	if !updated {
+		t.Fatal("expected update from IN_PROGRESS")
+	}
+	if oldState != v1.TaskStateInProgress {
+		t.Fatalf("old state = %q, want IN_PROGRESS", oldState)
+	}
+
+	retrieved, _ := repo.GetTask(ctx, "task-123")
+	if retrieved.State != v1.TaskStateWaitingForInput {
+		t.Fatalf("expected WAITING_FOR_INPUT, got %s", retrieved.State)
+	}
+
+	_, updated, err = repo.UpdateTaskStateIfCurrentIn(
+		ctx, "task-123", v1.TaskStateWaitingForInput,
+		[]v1.TaskState{v1.TaskStateInProgress, v1.TaskStateScheduling},
+	)
+	if err != nil {
+		t.Fatalf("second conditional update failed: %v", err)
+	}
+	if updated {
+		t.Fatal("expected no update when current state is not allowed")
+	}
+
+	_, updated, err = repo.UpdateTaskStateIfCurrentIn(ctx, "missing", v1.TaskStateReview, []v1.TaskState{v1.TaskStateInProgress})
+	if err == nil {
+		t.Fatal("expected error for missing task")
+	}
+	if updated {
+		t.Fatal("expected no update for missing task")
+	}
+}
+
 func TestSQLiteRepository_ListTasks(t *testing.T) {
 	repo, cleanup := createTestSQLiteRepo(t)
 	defer cleanup()

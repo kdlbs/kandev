@@ -372,6 +372,73 @@ func TestCancelAgent_DeduplicatesConcurrentCalls(t *testing.T) {
 	}
 }
 
+// TestCancelAgent_TaskStateReconcile ensures cancel writes tasks.state for active
+// kanban tasks only. Office tasks and tasks already out of IN_PROGRESS /
+// SCHEDULING must be left untouched.
+func TestCancelAgent_TaskStateReconcile(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct {
+		name            string
+		taskState       v1.TaskState
+		office          bool
+		wantStateUpdate bool
+	}{
+		{name: "in_progress", taskState: v1.TaskStateInProgress, wantStateUpdate: true},
+		{name: "scheduling", taskState: v1.TaskStateScheduling, wantStateUpdate: true},
+		{name: "review", taskState: v1.TaskStateReview},
+		{name: "office", taskState: v1.TaskStateInProgress, office: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := setupTestRepo(t)
+			taskRepo := newMockTaskRepo()
+			agentMgr := &mockAgentManager{isAgentRunning: true}
+			svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+			taskID := "task-" + tc.name
+			sessionID := "session-" + tc.name
+
+			if tc.office {
+				seedOfficeSession(t, repo, taskID, sessionID, "")
+				// Seed the mock so a missing office guard would fail the test: without
+				// AssigneeAgentProfileID early-return, UpdateTaskStateIfCurrentIn would
+				// run against this IN_PROGRESS row and write updatedStates.
+				taskRepo.tasks[taskID] = &v1.Task{ID: taskID, State: tc.taskState}
+			} else {
+				seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+				task, err := repo.GetTask(ctx, taskID)
+				if err != nil {
+					t.Fatalf("get task: %v", err)
+				}
+				task.State = tc.taskState
+				if err := repo.UpdateTask(ctx, task); err != nil {
+					t.Fatalf("update task state: %v", err)
+				}
+				taskRepo.tasks[taskID] = &v1.Task{ID: taskID, State: tc.taskState}
+			}
+
+			if err := svc.CancelAgent(ctx, sessionID); err != nil {
+				t.Fatalf("cancel agent: %v", err)
+			}
+
+			got, ok := taskRepo.updatedStates[taskID]
+			if tc.wantStateUpdate {
+				if !ok {
+					t.Fatal("expected tasks.state to be updated on cancel")
+				}
+				if got != v1.TaskStateWaitingForInput {
+					t.Fatalf("expected task state %q, got %q", v1.TaskStateWaitingForInput, got)
+				}
+				return
+			}
+			if ok {
+				t.Fatalf("expected tasks.state to remain unchanged, got %q", got)
+			}
+		})
+	}
+}
+
 func TestCancelAgent_LeavesQueuedMessageForManualDrain(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -1069,6 +1136,15 @@ func (c *ctxAwareTaskRepo) UpdateTaskState(ctx context.Context, taskID string, s
 	return c.inner.UpdateTaskState(ctx, taskID, state)
 }
 
+func (c *ctxAwareTaskRepo) UpdateTaskStateIfCurrentIn(
+	ctx context.Context, taskID string, state v1.TaskState, allowed []v1.TaskState,
+) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	return c.inner.UpdateTaskStateIfCurrentIn(ctx, taskID, state, allowed)
+}
+
 // TestResumeTaskSession_FailedStateWriteSurvivesCancelledCallerCtx verifies the
 // fix for the WS-disconnect cascade: when the caller's ctx was already
 // cancelled (e.g. the user navigated away mid-resume) and the launch then
@@ -1294,6 +1370,9 @@ func TestGetTaskSessionStatus_HealsStuckStartingSession(t *testing.T) {
 	}
 	if updated.State != models.TaskSessionStateWaitingForInput {
 		t.Fatalf("expected persisted session state %q, got %q", models.TaskSessionStateWaitingForInput, updated.State)
+	}
+	if resp.UpdatedAt != updated.UpdatedAt.UTC().Format(time.RFC3339Nano) {
+		t.Fatalf("expected response updated_at %q, got %q", updated.UpdatedAt.UTC().Format(time.RFC3339Nano), resp.UpdatedAt)
 	}
 	if state, ok := taskRepo.updatedStates["task1"]; !ok || state != v1.TaskStateReview {
 		t.Fatalf("expected task state %q, got %q (ok=%v)", v1.TaskStateReview, state, ok)

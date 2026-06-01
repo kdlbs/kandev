@@ -1514,7 +1514,29 @@ func (s *Service) queueAutoStartPrompt(
 		return fmt.Errorf("failed to queue workflow auto-start prompt: %w", err)
 	}
 	s.publishQueueStatusEvent(ctx, sessionID)
+	s.scheduleAutoResumeForWorkflowQueue(ctx, sessionID)
 	return nil
+}
+
+// scheduleAutoResumeForWorkflowQueue kicks off a background resume when a
+// workflow auto-start prompt was just queued but no live agent process exists
+// to drain it. No-op when the agent is already running — handleAgentReady
+// will drain on the next turn end. Uses the same tryEnsureExecution path as
+// EnsureSession (office panels), which drives ResumeSession → agent.boot_ready
+// → handleAgentBootReady → drainQueuedMessageAfterTransition.
+//
+// Covers the case where the execution is dead at queue time (e.g. agent
+// crashed just before the on_enter transition). If the agent is alive when
+// the queue is written but dies later, the queue is drained by the next
+// handleAgentBootReady (manual or automatic resume).
+func (s *Service) scheduleAutoResumeForWorkflowQueue(ctx context.Context, sessionID string) {
+	if s.executor == nil {
+		return
+	}
+	if exec, ok := s.executor.GetExecutionBySession(sessionID); ok && exec != nil {
+		return
+	}
+	go s.tryEnsureExecution(context.WithoutCancel(ctx), sessionID)
 }
 
 // flipStaleRunningToWaiting flips the session to WAITING_FOR_INPUT when its
@@ -1788,10 +1810,10 @@ func (s *Service) publishSessionWaitingEvent(ctx context.Context, taskID, sessio
 		return
 	}
 	eventData := map[string]interface{}{
-		"task_id":          taskID,
-		"session_id":       sessionID,
+		metaKeyTaskID:      taskID,
+		metaKeySessionID:   sessionID,
 		"workflow_step_id": stepID,
-		"new_state":        string(models.TaskSessionStateWaitingForInput),
+		metaKeyNewState:    string(models.TaskSessionStateWaitingForInput),
 	}
 	// Include agent_profile_id and session metadata so the frontend can
 	// identify the agent (e.g. MCP support) without waiting for SSR hydration.
@@ -1802,6 +1824,9 @@ func (s *Service) publishSessionWaitingEvent(ctx context.Context, taskID, sessio
 		session = s
 	}
 	if session != nil {
+		if !session.UpdatedAt.IsZero() {
+			eventData[metaKeyUpdatedAt] = session.UpdatedAt.UTC().Format(time.RFC3339Nano)
+		}
 		if session.AgentProfileID != "" {
 			eventData["agent_profile_id"] = session.AgentProfileID
 		}
@@ -1831,14 +1856,17 @@ func (s *Service) publishSessionCreatedEvent(ctx context.Context, taskID, sessio
 		return
 	}
 	eventData := map[string]interface{}{
-		"task_id":    taskID,
-		"session_id": sessionID,
-		"new_state":  string(models.TaskSessionStateCreated),
+		metaKeyTaskID:    taskID,
+		metaKeySessionID: sessionID,
+		metaKeyNewState:  string(models.TaskSessionStateCreated),
 	}
 	if stepID != "" {
 		eventData["workflow_step_id"] = stepID
 	}
 	if session, err := s.repo.GetTaskSession(ctx, sessionID); err == nil && session != nil {
+		if !session.UpdatedAt.IsZero() {
+			eventData[metaKeyUpdatedAt] = session.UpdatedAt.UTC().Format(time.RFC3339Nano)
+		}
 		if session.AgentProfileID != "" {
 			eventData["agent_profile_id"] = session.AgentProfileID
 		}

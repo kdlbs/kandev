@@ -107,33 +107,49 @@ export class SessionPage {
    * never renders. SSR picks up the right state on the next page load, so
    * one targeted reload-and-retry is enough to recover.
    *
+   * After a backend restart, auto-resume can briefly surface the recovery
+   * prompt ("Environment setup failed"); click through it when visible.
+   *
    * This is the same race the office agent-run-live spec rides out with
    * `expect.poll`-based re-seeding.
    */
-  // opts.timeout is a soft cap on the *post-attempt* wait, not a hard cap
-  // on total elapsed time. Worst-case wall-clock is roughly
-  //   attemptTimeout + reload + activeChat-wait + remaining
-  // where `remaining` is at least `attemptTimeout` so the second wait isn't
-  // starved when `timeout - attemptTimeout` is too small. The race we're
-  // covering resolves on the reload's SSR, so the second wait normally
-  // returns in well under a second; the generous floor exists for the
-  // pathological "page didn't fully load yet" cases.
   async waitForChatIdle(opts: { timeout?: number; attemptTimeout?: number } = {}) {
     const softTotalTimeout = opts.timeout ?? 45_000;
-    const attemptTimeout = opts.attemptTimeout ?? 15_000;
+    const attemptTimeout =
+      opts.attemptTimeout ?? Math.min(15_000, Math.max(5_000, Math.floor(softTotalTimeout / 3)));
+    const pollSlice = 1_500;
     const idle = this.idleInput();
-    try {
-      await idle.waitFor({ state: "visible", timeout: attemptTimeout });
-      return;
-    } catch {
-      // Reload once to re-SSR with the latest session state, then wait the
-      // remaining budget. If the placeholder still doesn't appear after a
-      // reload, fall through to the original error semantics.
+    const start = Date.now();
+    let reloaded = false;
+
+    while (Date.now() - start < softTotalTimeout) {
+      if (await idle.isVisible()) return;
+
+      if (await this.recoveryResumeButton().isVisible()) {
+        await this.recoveryResumeButton().click();
+        await this.recoveryResumeButton()
+          .waitFor({ state: "hidden", timeout: pollSlice })
+          .catch(() => undefined);
+        continue;
+      }
+
+      const elapsed = Date.now() - start;
+      if (!reloaded && elapsed >= attemptTimeout) {
+        reloaded = true;
+        await this.page.reload();
+        await this.activeChat()
+          .waitFor({ state: "visible", timeout: attemptTimeout })
+          .catch(() => undefined);
+        continue;
+      }
+
+      const remaining = softTotalTimeout - elapsed;
+      await idle
+        .waitFor({ state: "visible", timeout: Math.min(pollSlice, remaining) })
+        .catch(() => undefined);
     }
-    await this.page.reload();
-    await this.activeChat().waitFor({ state: "visible", timeout: attemptTimeout });
-    const remaining = Math.max(attemptTimeout, softTotalTimeout - attemptTimeout);
-    await idle.waitFor({ state: "visible", timeout: remaining });
+
+    await idle.waitFor({ state: "visible", timeout: 1_000 });
   }
 
   /** Wait for the passthrough terminal to be visible (for TUI/passthrough sessions). */

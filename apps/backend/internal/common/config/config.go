@@ -41,6 +41,7 @@ type Config struct {
 	RepoClone           RepoCloneConfig           `mapstructure:"repoClone"`
 	Debug               DebugConfig               `mapstructure:"debug"`
 	Office              OfficeConfig              `mapstructure:"office"`
+	Voice               VoiceConfig               `mapstructure:"voice"`
 	Features            FeaturesConfig            `mapstructure:"features"`
 }
 
@@ -145,6 +146,20 @@ type OfficeConfig struct {
 	// means every restart invalidates outstanding agent tokens. Production
 	// deployments should set a stable value (e.g. via KANDEV_OFFICE_JWTSIGNINGKEY).
 	JWTSigningKey string `mapstructure:"jwtSigningKey"`
+}
+
+// VoiceConfig holds configuration for the chat voice-input transcription
+// fallback. The primary voice-input engine runs entirely in the browser
+// (Web Speech API); this server-side fallback is only used when the browser
+// has no SpeechRecognition support (e.g. Firefox).
+//
+// When OpenAIAPIKey is empty the /api/v1/transcribe endpoint returns 503
+// and the frontend hides the fallback path, so the feature is safe to
+// ship un-configured.
+type VoiceConfig struct {
+	// OpenAIAPIKey is the API key used to call OpenAI's Whisper transcription
+	// endpoint. Set via KANDEV_VOICE_OPENAI_API_KEY.
+	OpenAIAPIKey string `mapstructure:"openAIApiKey"`
 }
 
 // FeaturesConfig is the central registry of runtime feature flags. Every flag
@@ -312,6 +327,9 @@ func setDefaults(v *viper.Viper) {
 	// Office defaults
 	v.SetDefault("office.jwtSigningKey", "")
 
+	// Voice defaults
+	v.SetDefault("voice.openAIApiKey", "")
+
 	// Feature-flag defaults live in ./features.yaml (symlinked to
 	// apps/backend/internal/features/features.yaml). LoadWithPath applies
 	// them via features.ApplyDefaults after this function returns so the
@@ -428,6 +446,7 @@ func LoadWithPath(configPath string) (*Config, error) {
 	_ = v.BindEnv("events.namespace", "KANDEV_EVENTS_NAMESPACE")
 	_ = v.BindEnv("debug.devMode", "KANDEV_DEBUG_DEV_MODE")
 	_ = v.BindEnv("debug.pprofEnabled", "KANDEV_DEBUG_PPROF_ENABLED")
+	_ = v.BindEnv("voice.openAIApiKey", "KANDEV_VOICE_OPENAI_API_KEY")
 
 	// Configure config file
 	v.SetConfigName("config")

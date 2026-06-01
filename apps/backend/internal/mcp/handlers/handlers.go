@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
@@ -1208,6 +1209,7 @@ func (h *Handlers) setSessionRunning(ctx context.Context, taskID, sessionID stri
 		h.logger.Warn("failed to update session state to RUNNING",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
+		return
 	}
 	if taskID != "" {
 		if err := h.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {
@@ -1224,6 +1226,13 @@ func (h *Handlers) setSessionRunning(ctx context.Context, taskID, sessionID stri
 			"session_id": sessionID,
 			"new_state":  string(models.TaskSessionStateRunning),
 		}
+		if updatedAt, ok := h.sessionUpdatedAtForStateEvent(ctx, sessionID); ok {
+			eventData["updated_at"] = updatedAt
+		} else {
+			h.logger.Warn("skipping session state_changed publish; could not load authoritative updated_at",
+				zap.String("session_id", sessionID))
+			return
+		}
 		_ = h.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
 			events.TaskSessionStateChanged,
 			"mcp-handlers",
@@ -1239,6 +1248,7 @@ func (h *Handlers) setSessionWaitingForInput(ctx context.Context, taskID, sessio
 		h.logger.Warn("failed to update session state to WAITING_FOR_INPUT",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
+		return
 	}
 
 	// Update task state to REVIEW
@@ -1257,12 +1267,26 @@ func (h *Handlers) setSessionWaitingForInput(ctx context.Context, taskID, sessio
 			"session_id": sessionID,
 			"new_state":  string(models.TaskSessionStateWaitingForInput),
 		}
+		if updatedAt, ok := h.sessionUpdatedAtForStateEvent(ctx, sessionID); ok {
+			eventData["updated_at"] = updatedAt
+		} else {
+			h.logger.Warn("skipping session state_changed publish; could not load authoritative updated_at",
+				zap.String("session_id", sessionID))
+			return
+		}
 		_ = h.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
 			events.TaskSessionStateChanged,
 			"mcp-handlers",
 			eventData,
 		))
 	}
+}
+
+func (h *Handlers) sessionUpdatedAtForStateEvent(ctx context.Context, sessionID string) (string, bool) {
+	if session, err := h.sessionRepo.GetTaskSession(ctx, sessionID); err == nil && session != nil && !session.UpdatedAt.IsZero() {
+		return session.UpdatedAt.UTC().Format(time.RFC3339Nano), true
+	}
+	return "", false
 }
 
 // handleCreateTaskPlan creates a new task plan.

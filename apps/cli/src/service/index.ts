@@ -2,6 +2,7 @@ import { parseServiceArgs } from "./args";
 import { printServiceConfig } from "./config";
 import { runLinuxService } from "./linux";
 import { runMacosService } from "./macos";
+import { runSelfUpdateCommand } from "./self_update";
 
 export function printServiceHelp(): void {
   console.log(`kandev service — install kandev as an OS-managed service
@@ -47,6 +48,12 @@ export async function runServiceCommand(argv: string[]): Promise<void> {
   // don't need to duplicate it in both linux.ts and macos.ts.
   if (args.action === "config") {
     printServiceConfig(args);
+    return;
+  }
+  // Hidden helper entrypoint used by the backend self-update endpoint. It is
+  // intentionally absent from help output.
+  if (args.action === "self-update") {
+    runSelfUpdateCommand(args);
     return;
   }
   switch (process.platform) {

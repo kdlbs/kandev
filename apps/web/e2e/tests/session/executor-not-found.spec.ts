@@ -48,7 +48,7 @@ test.describe("Executor not found after backend restart", () => {
     await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
       timeout: 30_000,
     });
-    await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
+    await session.waitForChatIdle({ timeout: 15_000 });
 
     // 3. Restart the backend — clears in-memory execution store,
     //    but DB still has the old AgentExecutionID
@@ -59,7 +59,7 @@ test.describe("Executor not found after backend restart", () => {
     await session.waitForLoad();
 
     // 5. Wait for auto-resume to complete (workspace restoration)
-    await expect(session.idleInput()).toBeVisible({ timeout: 60_000 });
+    await session.waitForChatIdle({ timeout: 60_000 });
 
     // 6. Send a NEW prompt — this triggers LaunchPreparedSession which
     //    reads the stale AgentExecutionID from DB and calls

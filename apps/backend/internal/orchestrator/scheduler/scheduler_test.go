@@ -208,6 +208,25 @@ func (r *testTaskRepository) UpdateTaskState(ctx context.Context, taskID string,
 	return nil
 }
 
+func (r *testTaskRepository) UpdateTaskStateIfCurrentIn(
+	_ context.Context, taskID string, state v1.TaskState, allowed []v1.TaskState,
+) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	task, exists := r.tasks[taskID]
+	if !exists {
+		return false, fmt.Errorf("%w: %s", taskrepo.ErrTaskNotFound, taskID)
+	}
+	for _, candidate := range allowed {
+		if task.State != candidate {
+			continue
+		}
+		task.State = state
+		return true, nil
+	}
+	return false, nil
+}
+
 func createTestLogger() *logger.Logger {
 	log, _ := logger.NewLogger(logger.LoggingConfig{
 		Level:  "error", // Suppress logs during tests
