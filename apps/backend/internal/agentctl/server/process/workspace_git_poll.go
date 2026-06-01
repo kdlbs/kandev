@@ -348,11 +348,15 @@ func (wt *WorkspaceTracker) getBaseCommitForBranch(ctx context.Context, branch, 
 	var baseBranch string
 
 	// Try integration branch candidates first (origin/main, origin/master, main, master)
-	// This ensures we get the branch-off point from the main development line
+	// This ensures we get the branch-off point from the main development line.
+	// Routed through subproc.RunGit so each rev-parse counts against the global
+	// git semaphore — handleBranchSwitch can invoke this on every detected
+	// branch change, so an unthrottled burst here was the exact pattern the
+	// throttle is meant to prevent on CrowdStrike-instrumented macOS.
 	for _, candidate := range []string{"origin/main", "origin/master", "main", "master"} {
 		checkCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", candidate)
 		checkCmd.Dir = wt.workDir
-		if err := checkCmd.Run(); err == nil {
+		if err := subproc.RunGit(ctx, checkCmd); err == nil {
 			baseBranch = candidate
 			break
 		}
@@ -362,7 +366,7 @@ func (wt *WorkspaceTracker) getBaseCommitForBranch(ctx context.Context, branch, 
 	if baseBranch == "" {
 		upstreamCmd := exec.CommandContext(ctx, "git", "rev-parse", "--abbrev-ref", branch+"@{upstream}")
 		upstreamCmd.Dir = wt.workDir
-		upstreamOut, err := upstreamCmd.Output()
+		upstreamOut, err := subproc.RunGitOutput(ctx, upstreamCmd)
 		if err == nil && len(upstreamOut) > 0 {
 			baseBranch = strings.TrimSpace(string(upstreamOut))
 		}
@@ -373,7 +377,7 @@ func (wt *WorkspaceTracker) getBaseCommitForBranch(ctx context.Context, branch, 
 	if baseBranch != "" && head != "" {
 		mergeBaseCmd := exec.CommandContext(ctx, "git", "merge-base", baseBranch, head)
 		mergeBaseCmd.Dir = wt.workDir
-		if mergeBaseOut, err := mergeBaseCmd.Output(); err == nil {
+		if mergeBaseOut, err := subproc.RunGitOutput(ctx, mergeBaseCmd); err == nil {
 			return strings.TrimSpace(string(mergeBaseOut))
 		}
 	}
