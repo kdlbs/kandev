@@ -221,16 +221,16 @@ function UnsupportedVoiceButton({ disabled }: { disabled?: boolean }) {
       <TooltipTrigger asChild>
         <Button
           type="button"
-          variant="secondary"
+          variant="ghost"
           size="icon"
           aria-label="Voice input unavailable"
           data-testid="voice-input-button"
           data-state="unsupported"
           disabled={!!disabled}
           onClick={handleClick}
-          className="h-7 w-7 rounded-full cursor-pointer text-muted-foreground/60"
+          className="h-7 w-7 cursor-pointer text-muted-foreground/40 hover:text-muted-foreground"
         >
-          <IconMicrophone className="h-3.5 w-3.5" />
+          <IconMicrophone className="h-4 w-4" />
         </Button>
       </TooltipTrigger>
       <TooltipContent>Voice input unavailable — tap for details</TooltipContent>
@@ -295,11 +295,12 @@ type VoiceMicButtonProps = {
   onClick: (() => void) | undefined;
 };
 
-// Styled to mirror SubmitButton (h-7 w-7 rounded-full primary fill) so the two
-// prominent input actions read as a pair on the right of the toolbar.
-// Recording flips to a destructive fill with a pulsing ring so the active
-// state is unmistakable even on mobile. Touch-input sizing bumps to 10×10
-// (40px) for an easier finger target without disturbing the desktop pair.
+// Ghost styled to match the other toolbar actions (attach, enhance) — voice
+// is one secondary input action among several, not a co-primary alongside
+// Submit. Recording flips to a tinted destructive look + pulsing ring so the
+// active state stays unmistakable without shouting from a primary fill.
+// Touch-input sizing bumps to 10×10 (40px) for an easier finger target
+// without disturbing the desktop layout.
 function VoiceMicButton({
   state,
   modelLoad,
@@ -315,7 +316,7 @@ function VoiceMicButton({
   return (
     <Button
       type="button"
-      variant="default"
+      variant="ghost"
       size="icon"
       aria-label={ARIA_BY_STATE[state]}
       aria-pressed={isRecording}
@@ -327,16 +328,17 @@ function VoiceMicButton({
       onClick={onClick}
       {...pointerHandlers}
       className={cn(
-        "rounded-full cursor-pointer relative select-none",
+        "cursor-pointer relative select-none text-muted-foreground hover:text-foreground hover:bg-muted/40",
         isCoarsePointer ? "h-10 w-10" : "h-7 w-7",
-        isRecording && "bg-destructive text-destructive-foreground hover:bg-destructive/90",
+        isRecording &&
+          "bg-destructive/15 text-destructive hover:bg-destructive/20 hover:text-destructive",
       )}
     >
       <ButtonIcon state={state} modelLoad={modelLoad} />
       {isRecording && (
         <span
           aria-hidden
-          className="absolute inset-0 rounded-full ring-2 ring-destructive/40 animate-pulse"
+          className="absolute inset-0 rounded-md ring-2 ring-destructive/40 animate-pulse"
         />
       )}
     </Button>
