@@ -304,11 +304,11 @@ func (m *Manager) setUpstreamIfExists(ctx context.Context, worktreePath, localBr
 	// Verify the remote-tracking ref exists. Use the non-interactive helper so
 	// this cannot hang on a credential prompt while Create holds repoLock.
 	verifyCmd := m.newNonInteractiveGitCmd(ctx, worktreePath, "rev-parse", "--verify", upstream)
-	if err := verifyCmd.Run(); err != nil {
+	if err := runGitCmd(ctx, verifyCmd); err != nil {
 		return
 	}
 	cmd := m.newNonInteractiveGitCmd(ctx, worktreePath, "branch", "--set-upstream-to="+upstream, localBranch)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := runGitCmdCombinedOutput(ctx, cmd); err != nil {
 		m.logger.Debug("failed to set upstream (non-fatal)",
 			zap.String("branch", localBranch),
 			zap.String("upstream", upstream),
@@ -349,7 +349,7 @@ func (m *Manager) fetchBranchToLocal(ctx context.Context, repoPath, branch strin
 		refspec = fmt.Sprintf("pull/%d/head:%s", prNumber, branch)
 	}
 	fetchCmd := m.newNonInteractiveGitCmd(fetchCtx, repoPath, "fetch", gitNoTags, "origin", refspec)
-	output, err := fetchCmd.CombinedOutput()
+	output, err := runGitCmdCombinedOutput(fetchCtx, fetchCmd)
 	if err == nil {
 		return &FetchBranchResult{}, nil
 	}
@@ -400,7 +400,7 @@ func (m *Manager) retryFetchAsRemoteTrackingRef(fetchCtx context.Context, repoPa
 		retryRef = fmt.Sprintf("pull/%d/head", prNumber)
 	}
 	retryCmd := m.newNonInteractiveGitCmd(fetchCtx, repoPath, "fetch", gitNoTags, "origin", retryRef)
-	if _, retryErr := retryCmd.CombinedOutput(); retryErr != nil {
+	if _, retryErr := runGitCmdCombinedOutput(fetchCtx, retryCmd); retryErr != nil {
 		return nil
 	}
 	m.logger.Info("fetched via remote-tracking ref (branch checked out elsewhere)",
@@ -433,7 +433,7 @@ func (m *Manager) gitAddWorktreeExisting(ctx context.Context, repoPath, branchNa
 
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = repoPath
-	output, err := cmd.CombinedOutput()
+	output, err := runGitCmdCombinedOutput(ctx, cmd)
 	if err == nil {
 		if usesGitCrypt {
 			if unlockErr := m.unlockGitCryptAndCheckout(ctx, worktreePath); unlockErr != nil {
@@ -483,7 +483,7 @@ func (m *Manager) retryWorktreeExisting(ctx context.Context, repoPath, branchNam
 
 	retryCmd := exec.CommandContext(ctx, "git", args...)
 	retryCmd.Dir = repoPath
-	retryOutput, retryErr := retryCmd.CombinedOutput()
+	retryOutput, retryErr := runGitCmdCombinedOutput(ctx, retryCmd)
 	if retryErr != nil {
 		retryOutStr := string(retryOutput)
 		if isBranchCheckedOutError(retryOutStr) {
@@ -514,7 +514,7 @@ func (m *Manager) gitAddWorktreeExistingWithGitCrypt(ctx context.Context, repoPa
 
 	cmd := exec.CommandContext(ctx, "git", "worktree", "add", "--no-checkout", worktreePath, branchName)
 	cmd.Dir = repoPath
-	output, err := cmd.CombinedOutput()
+	output, err := runGitCmdCombinedOutput(ctx, cmd)
 	if err != nil {
 		outStr := string(output)
 		if isBranchCheckedOutError(outStr) {
@@ -558,7 +558,7 @@ func (m *Manager) tryRecoverCheckedOutBranch(ctx context.Context, repoPath, bran
 
 	pruneCmd := exec.CommandContext(ctx, "git", "worktree", "prune")
 	pruneCmd.Dir = repoPath
-	if output, err := pruneCmd.CombinedOutput(); err != nil {
+	if output, err := runGitCmdCombinedOutput(ctx, pruneCmd); err != nil {
 		m.logger.Error("git worktree prune failed",
 			zap.String("output", string(output)),
 			zap.Error(err))
@@ -620,7 +620,7 @@ func (m *Manager) gitAddWorktree(ctx context.Context, repoPath, branchName, work
 
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = repoPath
-	output, err := cmd.CombinedOutput()
+	output, err := runGitCmdCombinedOutput(ctx, cmd)
 	if err != nil {
 		outStr := string(output)
 		// Check if this is a git-crypt error we didn't anticipate
@@ -666,7 +666,7 @@ func (m *Manager) gitAddWorktreeWithGitCrypt(ctx context.Context, repoPath, bran
 		worktreePath,
 		baseRef)
 	cmd.Dir = repoPath
-	output, err := cmd.CombinedOutput()
+	output, err := runGitCmdCombinedOutput(ctx, cmd)
 	if err != nil {
 		m.logger.Error("git worktree add (--no-checkout) failed",
 			zap.String("output", string(output)),
@@ -697,7 +697,7 @@ func (m *Manager) gitAddWorktreeForRecreate(ctx context.Context, repoPath, branc
 
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = repoPath
-	output, err := cmd.CombinedOutput()
+	output, err := runGitCmdCombinedOutput(ctx, cmd)
 	if err == nil {
 		return usesGitCrypt, nil
 	}
@@ -707,7 +707,7 @@ func (m *Manager) gitAddWorktreeForRecreate(ctx context.Context, repoPath, branc
 			zap.String("output", outStr))
 		retryCmd := exec.CommandContext(ctx, "git", "worktree", "add", "--no-checkout", worktreePath, branch)
 		retryCmd.Dir = repoPath
-		if retryOutput, retryErr := retryCmd.CombinedOutput(); retryErr != nil {
+		if retryOutput, retryErr := runGitCmdCombinedOutput(ctx, retryCmd); retryErr != nil {
 			m.logger.Error("failed to recreate worktree (--no-checkout)",
 				zap.String("output", string(retryOutput)),
 				zap.Error(retryErr))
@@ -773,7 +773,7 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 	// Remove from git worktree list
 	cmd := exec.CommandContext(ctx, "git", "worktree", "prune")
 	cmd.Dir = req.RepositoryPath
-	if err := cmd.Run(); err != nil {
+	if err := runGitCmd(ctx, cmd); err != nil {
 		m.logger.Debug("git worktree prune failed", zap.Error(err))
 	}
 

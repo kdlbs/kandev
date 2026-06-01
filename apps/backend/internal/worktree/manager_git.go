@@ -39,7 +39,7 @@ func (m *Manager) branchExists(ctx context.Context, repoPath, branch string) (bo
 	inspectCtx, cancel := context.WithTimeout(ctx, m.inspectTimeout)
 	defer cancel()
 	cmd := m.newNonInteractiveGitCmd(inspectCtx, repoPath, "rev-parse", "--verify", branch)
-	if err := cmd.Run(); err != nil {
+	if err := runGitCmd(inspectCtx, cmd); err != nil {
 		if ctxErr := inspectCtx.Err(); ctxErr != nil {
 			m.logger.Warn("branchExists bounded by context",
 				zap.String("repository_path", repoPath),
@@ -56,7 +56,7 @@ func (m *Manager) currentBranch(ctx context.Context, repoPath string) string {
 	inspectCtx, cancel := context.WithTimeout(ctx, m.inspectTimeout)
 	defer cancel()
 	cmd := m.newNonInteractiveGitCmd(inspectCtx, repoPath, "rev-parse", "--abbrev-ref", "HEAD")
-	output, err := cmd.Output()
+	output, err := runGitCmdOutput(inspectCtx, cmd)
 	if err != nil {
 		if ctxErr := inspectCtx.Err(); ctxErr != nil {
 			m.logger.Warn("currentBranch bounded by context",
@@ -125,7 +125,7 @@ func (m *Manager) pullBaseBranch(ctx context.Context, repoPath, baseBranch strin
 		fetchArgs = append(fetchArgs, localBranch)
 	}
 	fetchCmd := m.newNonInteractiveGitCmd(fetchCtx, repoPath, fetchArgs...)
-	if output, err := fetchCmd.CombinedOutput(); err != nil {
+	if output, err := runGitCmdCombinedOutput(fetchCtx, fetchCmd); err != nil {
 		return m.handleFetchFallback(baseBranch, stepName, onProgress, fetchCtx.Err(), output, err)
 	}
 
@@ -191,7 +191,7 @@ func (m *Manager) pullCurrentBranchOrFallback(
 	defer cancelPull()
 
 	pullCmd := m.newNonInteractiveGitCmd(pullCtx, repoPath, "pull", "--ff-only", "origin", baseBranch)
-	if output, err := pullCmd.CombinedOutput(); err != nil {
+	if output, err := runGitCmdCombinedOutput(pullCtx, pullCmd); err != nil {
 		reason := classifyGitFallbackReason(err, string(output), pullCtx.Err())
 		m.logger.Warn("git pull failed before worktree creation; continuing with remote ref",
 			zap.String("branch", baseBranch),

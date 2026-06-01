@@ -19,6 +19,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 )
 
@@ -58,7 +59,7 @@ func (wt *WorkspaceTracker) getFileList(ctx context.Context) (types.FileListUpda
 	// --exclude-standard: respect .gitignore
 	cmd := exec.CommandContext(ctx, "git", "ls-files", "--cached", "--others", "--exclude-standard")
 	cmd.Dir = wt.workDir
-	out, err := cmd.Output()
+	out, err := subproc.RunGitOutput(ctx, cmd)
 	if err != nil {
 		return update, err
 	}
@@ -338,7 +339,7 @@ func (wt *WorkspaceTracker) resolveSymlinkRelPath(reqPath string) string {
 // When desiredContent is provided and the diff cannot be applied (hash conflict),
 // the file is overwritten with the desired content as a fallback.
 // Returns the new hash and a resolution string ("applied" or "overwritten").
-func (wt *WorkspaceTracker) ApplyFileDiff(reqPath, unifiedDiff, originalHash string, desiredContent *string) (string, string, error) {
+func (wt *WorkspaceTracker) ApplyFileDiff(ctx context.Context, reqPath, unifiedDiff, originalHash string, desiredContent *string) (string, string, error) {
 	safePath, err := wt.resolveSafePath(reqPath)
 	if err != nil {
 		return "", "", err
@@ -376,10 +377,10 @@ func (wt *WorkspaceTracker) ApplyFileDiff(reqPath, unifiedDiff, originalHash str
 	}()
 
 	// Use git apply to apply the patch directly to the file
-	cmd := exec.Command("git", "apply", "-p0", "--unidiff-zero", "--whitespace=nowarn", patchFile)
+	cmd := exec.CommandContext(ctx, "git", "apply", "-p0", "--unidiff-zero", "--whitespace=nowarn", patchFile)
 	cmd.Dir = wt.workDir
 
-	output, err := cmd.CombinedOutput()
+	output, err := subproc.RunGitCombinedOutput(ctx, cmd)
 	if err != nil {
 		if desiredContent != nil {
 			return wt.writeDesiredContent(safePath, cleanWorkDir, reqPath, *desiredContent, currentHash)
@@ -671,7 +672,7 @@ func (wt *WorkspaceTracker) GetFileContentAtRef(ctx context.Context, reqPath str
 	sizeCmd := exec.CommandContext(ctx, "git", "cat-file", "-s", gitRef)
 	sizeCmd.Dir = wt.workDir
 	sizeCmd.Env = append(os.Environ(), "LC_ALL=C")
-	sizeOut, err := sizeCmd.CombinedOutput()
+	sizeOut, err := subproc.RunGitCombinedOutput(ctx, sizeCmd)
 	if err != nil {
 		output := string(sizeOut)
 		if strings.Contains(output, "does not exist") ||
@@ -693,7 +694,7 @@ func (wt *WorkspaceTracker) GetFileContentAtRef(ctx context.Context, reqPath str
 	cmd := exec.CommandContext(ctx, "git", "show", gitRef)
 	cmd.Dir = wt.workDir
 
-	content, err := cmd.Output()
+	content, err := subproc.RunGitOutput(ctx, cmd)
 	if err != nil {
 		return "", 0, false, fmt.Errorf("failed to get file at ref: %w", err)
 	}

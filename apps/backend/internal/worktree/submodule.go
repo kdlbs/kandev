@@ -14,7 +14,7 @@ import (
 func getSubmodulePaths(ctx context.Context, dir string) ([]string, error) {
 	cmd := exec.CommandContext(ctx, "git", "ls-tree", "-r", "HEAD")
 	cmd.Dir = dir
-	output, err := cmd.Output()
+	output, err := runGitCmdOutput(ctx, cmd)
 	if err != nil {
 		return nil, err
 	}
@@ -41,7 +41,7 @@ func getSubmodulePaths(ctx context.Context, dir string) ([]string, error) {
 func (m *Manager) initSubmodules(ctx context.Context, dir string) {
 	cmd := exec.CommandContext(ctx, "git", "submodule", "update", "--init", "--recursive")
 	cmd.Dir = dir
-	output, err := cmd.CombinedOutput()
+	output, err := runGitCmdCombinedOutput(ctx, cmd)
 	if err != nil {
 		m.logger.Warn("git submodule update --init failed (non-fatal)",
 			zap.String("dir", dir),

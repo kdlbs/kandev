@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 )
 
@@ -122,7 +123,7 @@ func (wt *WorkspaceTracker) getGitBranchInfo(ctx context.Context, update *types.
 	// Get current branch
 	branchCmd := exec.CommandContext(ctx, "git", "rev-parse", "--abbrev-ref", "HEAD")
 	branchCmd.Dir = wt.workDir
-	branchOut, err := branchCmd.Output()
+	branchOut, err := subproc.RunGitOutput(ctx, branchCmd)
 	if err != nil {
 		return err
 	}
@@ -131,14 +132,14 @@ func (wt *WorkspaceTracker) getGitBranchInfo(ctx context.Context, update *types.
 	// Get remote branch
 	remoteCmd := exec.CommandContext(ctx, "git", "rev-parse", "--abbrev-ref", "@{upstream}")
 	remoteCmd.Dir = wt.workDir
-	if remoteOut, err := remoteCmd.Output(); err == nil {
+	if remoteOut, err := subproc.RunGitOutput(ctx, remoteCmd); err == nil {
 		update.RemoteBranch = strings.TrimSpace(string(remoteOut))
 	}
 
 	// Get current HEAD commit SHA
 	headCmd := exec.CommandContext(ctx, "git", "rev-parse", "HEAD")
 	headCmd.Dir = wt.workDir
-	if headOut, err := headCmd.Output(); err == nil {
+	if headOut, err := subproc.RunGitOutput(ctx, headCmd); err == nil {
 		update.HeadCommit = strings.TrimSpace(string(headOut))
 	}
 
@@ -149,7 +150,7 @@ func (wt *WorkspaceTracker) getGitBranchInfo(ctx context.Context, update *types.
 	for _, candidate := range []string{"origin/main", "origin/master", "main", "master"} {
 		checkCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", candidate)
 		checkCmd.Dir = wt.workDir
-		if err := checkCmd.Run(); err == nil {
+		if err := subproc.RunGit(ctx, checkCmd); err == nil {
 			baseBranch = candidate
 			break
 		}
@@ -159,7 +160,7 @@ func (wt *WorkspaceTracker) getGitBranchInfo(ctx context.Context, update *types.
 		// This is correct even when the branch has diverged from main.
 		mergeBaseCmd := exec.CommandContext(ctx, "git", "merge-base", baseBranch, "HEAD")
 		mergeBaseCmd.Dir = wt.workDir
-		if mergeBaseOut, err := mergeBaseCmd.Output(); err == nil {
+		if mergeBaseOut, err := subproc.RunGitOutput(ctx, mergeBaseCmd); err == nil {
 			update.BaseCommit = strings.TrimSpace(string(mergeBaseOut))
 		}
 	}
@@ -179,7 +180,7 @@ func (wt *WorkspaceTracker) getAheadBehindCounts(ctx context.Context, update *ty
 	for _, candidate := range []string{"origin/main", "origin/master"} {
 		checkCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", candidate)
 		checkCmd.Dir = wt.workDir
-		if err := checkCmd.Run(); err == nil {
+		if err := subproc.RunGit(ctx, checkCmd); err == nil {
 			compareRef = candidate
 			break
 		}
@@ -189,7 +190,7 @@ func (wt *WorkspaceTracker) getAheadBehindCounts(ctx context.Context, update *ty
 	}
 	countCmd := exec.CommandContext(ctx, "git", "rev-list", "--left-right", "--count", update.Branch+"..."+compareRef)
 	countCmd.Dir = wt.workDir
-	if countOut, err := countCmd.Output(); err == nil {
+	if countOut, err := subproc.RunGitOutput(ctx, countCmd); err == nil {
 		parts := strings.Fields(string(countOut))
 		if len(parts) == 2 {
 			update.Ahead, _ = strconv.Atoi(parts[0])

@@ -120,7 +120,7 @@ func (m *Manager) unlockGitCryptAndCheckout(ctx context.Context, worktreePath st
 
 	checkoutCmd := exec.CommandContext(ctx, "git", checkoutArgs...)
 	checkoutCmd.Dir = worktreePath
-	if output, err := checkoutCmd.CombinedOutput(); err != nil {
+	if output, err := runGitCmdCombinedOutput(ctx, checkoutCmd); err != nil {
 		m.logger.Error("git checkout failed after git-crypt setup",
 			zap.String("worktree_path", worktreePath),
 			zap.String("output", string(output)),
@@ -138,7 +138,7 @@ func (m *Manager) unlockGitCryptAndCheckout(ctx context.Context, worktreePath st
 	for _, sp := range submodulePaths {
 		resetCmd := exec.CommandContext(ctx, "git", "reset", "HEAD", "--", sp)
 		resetCmd.Dir = worktreePath
-		if output, err := resetCmd.CombinedOutput(); err != nil {
+		if output, err := runGitCmdCombinedOutput(ctx, resetCmd); err != nil {
 			m.logger.Debug("failed to reset submodule index entry",
 				zap.String("path", sp),
 				zap.String("output", string(output)),
@@ -164,7 +164,7 @@ func (m *Manager) unlockGitCryptAndCheckout(ctx context.Context, worktreePath st
 func resolveGitDir(ctx context.Context, worktreePath, flag string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", "rev-parse", flag)
 	cmd.Dir = worktreePath
-	out, err := cmd.Output()
+	out, err := runGitCmdOutput(ctx, cmd)
 	if err != nil {
 		return "", fmt.Errorf("git rev-parse %s: %w", flag, err)
 	}
@@ -206,7 +206,7 @@ func isGitCryptUnlocked(gitCryptDir string) bool {
 func enableWorktreeConfig(ctx context.Context, worktreePath string) error {
 	cmd := exec.CommandContext(ctx, "git", "config", "extensions.worktreeConfig", "true")
 	cmd.Dir = worktreePath
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := runGitCmdCombinedOutput(ctx, cmd); err != nil {
 		return fmt.Errorf("git config extensions.worktreeConfig: %s: %w", string(out), err)
 	}
 	return nil
@@ -228,7 +228,7 @@ func configureGitCryptFilters(ctx context.Context, worktreePath string) error {
 	for _, kv := range configs {
 		cmd := exec.CommandContext(ctx, "git", "config", "--worktree", kv[0], kv[1])
 		cmd.Dir = worktreePath
-		if out, err := cmd.CombinedOutput(); err != nil {
+		if out, err := runGitCmdCombinedOutput(ctx, cmd); err != nil {
 			return fmt.Errorf("git config %s: %s: %w", kv[0], string(out), err)
 		}
 	}
@@ -262,7 +262,7 @@ func disableGitCryptFilters(ctx context.Context, worktreePath string) error {
 	for _, kv := range configs {
 		cmd := exec.CommandContext(ctx, "git", "config", kv[0], kv[1])
 		cmd.Dir = worktreePath
-		if out, err := cmd.CombinedOutput(); err != nil {
+		if out, err := runGitCmdCombinedOutput(ctx, cmd); err != nil {
 			return fmt.Errorf("git config %s: %s: %w", kv[0], string(out), err)
 		}
 	}

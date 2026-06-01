@@ -94,6 +94,15 @@ type Service struct {
 	// in different goroutines, and the map is shared between them.
 	cleanupFailureMu     sync.Mutex
 	cleanupFailureCounts map[string]int
+
+	// inflightWorkspaceRefreshes tracks workspaces whose stale-PR background
+	// refresh is currently running, so overlapping ListWorkspaceTaskPRs polls
+	// from the frontend coalesce instead of stacking goroutines (each of
+	// which fires its own batched GraphQL request). Keys are workspaceID;
+	// presence means "a refresh is in flight". sync.Map is the right shape
+	// here because keys are unbounded and short-lived and the hot path is a
+	// LoadOrStore guard, not iteration.
+	inflightWorkspaceRefreshes sync.Map
 }
 
 // NewService creates a new GitHub service.

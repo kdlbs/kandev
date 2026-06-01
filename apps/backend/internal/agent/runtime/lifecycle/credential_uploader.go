@@ -13,6 +13,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/remoteauth"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 // FileUploader abstracts writing files to a remote environment. Used by
@@ -72,7 +73,7 @@ func DetectGHToken() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "gh", "auth", "token")
-	out, err := cmd.Output()
+	out, err := subproc.RunGHOutput(ctx, cmd)
 	if err != nil {
 		return "", fmt.Errorf("gh auth token failed: %w", err)
 	}

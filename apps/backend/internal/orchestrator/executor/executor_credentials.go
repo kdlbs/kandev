@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 const (
@@ -222,7 +224,7 @@ func detectGHToken() (string, error) {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "gh", "auth", "token")
-	out, err := cmd.Output()
+	out, err := subproc.RunGHOutput(ctx, cmd)
 	if err != nil {
 		return "", err
 	}

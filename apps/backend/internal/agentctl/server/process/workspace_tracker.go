@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 )
 
@@ -203,9 +204,13 @@ func resolveGitIndexPath(workDir string) string {
 	if !workDirHasOwnGitEntry(workDir) {
 		return ""
 	}
-	cmd := exec.Command("git", "rev-parse", "--git-dir")
+	// One-shot probe at workspace setup; use a small timeout so a saturated
+	// throttle returns quickly rather than blocking workspace registration.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--git-dir")
 	cmd.Dir = workDir
-	out, err := cmd.Output()
+	out, err := subproc.RunGitOutput(ctx, cmd)
 	if err != nil {
 		return ""
 	}

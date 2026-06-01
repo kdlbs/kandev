@@ -198,7 +198,7 @@ func (s *Server) handleFileUpdate(c *gin.Context) {
 	}
 
 	// Apply the diff
-	newHash, resolution, err := s.procMgr.GetWorkspaceTracker().ApplyFileDiff(scopedPath, req.Diff, req.OriginalHash, req.DesiredContent)
+	newHash, resolution, err := s.procMgr.GetWorkspaceTracker().ApplyFileDiff(c.Request.Context(), scopedPath, req.Diff, req.OriginalHash, req.DesiredContent)
 	if err != nil {
 		c.JSON(400, streams.FileUpdateResponse{
 			Path:    req.Path,
