@@ -37,7 +37,9 @@ describe("repositorySlug", () => {
     );
   });
 
-  it("falls back to the full local_path when nothing else is available", () => {
-    expect(repositorySlug(repo({ name: "", local_path: "kandev" }))).toBe("kandev");
+  it("falls back to the full local_path when no path segment is available", () => {
+    // "/" collapses to an empty array after split/filter, so the final
+    // `|| repo.local_path` branch is the one actually exercised here.
+    expect(repositorySlug(repo({ name: "", local_path: "/" }))).toBe("/");
   });
 });
