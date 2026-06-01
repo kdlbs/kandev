@@ -755,6 +755,12 @@ func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentE
 
 	if m.streamManager != nil && execution.agentctl != nil {
 		m.streamManager.ConnectWorkspaceStream(execution, nil)
+		// Also open the agent updates stream so the agentctl instance can proxy
+		// kandev MCP tool calls to the backend (passthrough has no ACP stream
+		// otherwise, so MCP tool calls would hang).
+		if !execution.agentctl.HasAgentStream() {
+			m.streamManager.ConnectMCPStream(execution)
+		}
 	}
 
 	go m.autoInjectInitialPrompt(execution, pt)
@@ -975,6 +981,10 @@ func (m *Manager) ResumePassthroughSession(ctx context.Context, sessionID string
 	// Only connect if not already connected (process restart reuses the same agentctl).
 	if m.streamManager != nil && execution.agentctl != nil && execution.GetWorkspaceStream() == nil {
 		m.streamManager.ConnectWorkspaceStream(execution, nil)
+	}
+	// Re-open the MCP proxy stream too (drains kandev MCP tool calls).
+	if m.streamManager != nil && execution.agentctl != nil && !execution.agentctl.HasAgentStream() {
+		m.streamManager.ConnectMCPStream(execution)
 	}
 
 	return nil
@@ -1247,6 +1257,9 @@ func (m *Manager) attemptResumeFallback(execution *AgentExecution, runner *proce
 	m.startPassthroughShell(ctx, execution, "failed to start shell after passthrough resume fallback")
 	if m.streamManager != nil && execution.agentctl != nil && execution.GetWorkspaceStream() == nil {
 		m.streamManager.ConnectWorkspaceStream(execution, nil)
+	}
+	if m.streamManager != nil && execution.agentctl != nil && !execution.agentctl.HasAgentStream() {
+		m.streamManager.ConnectMCPStream(execution)
 	}
 
 	// Fallback path is a fresh session (no --resume) — re-inject the prompt.

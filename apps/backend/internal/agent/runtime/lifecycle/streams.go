@@ -104,6 +104,14 @@ func (sm *StreamManager) ConnectWorkspaceStream(execution *AgentExecution, ready
 	}
 }
 
+// ConnectMCPStream opens the passthrough MCP proxy stream under goroutine
+// tracking so it drains cleanly on shutdown (mirrors ConnectWorkspaceStream).
+func (sm *StreamManager) ConnectMCPStream(execution *AgentExecution) {
+	sm.start(func() {
+		sm.connectMCPStream(execution)
+	})
+}
+
 // Wait blocks until all StreamManager-owned stream goroutines have exited.
 func (sm *StreamManager) Wait() {
 	sm.wgMu.Lock()
@@ -223,6 +231,30 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 	if err != nil {
 		sm.logger.Error("failed to connect to updates stream",
 			zap.String("instance_id", execution.ID),
+			zap.Error(err))
+	}
+}
+
+// connectMCPStream opens the agent updates WebSocket for a PASSTHROUGH session
+// purely to drain the MCP request channel: the agentctl instance serves /mcp and
+// proxies tool calls to the backend over this stream, so without it kandev MCP
+// tool calls hang. Passthrough agents don't speak ACP, so no agent events arrive
+// here (the PTY drives the UI). On disconnect it only logs — it must NOT signal
+// promptDoneCh or OnStreamDisconnect (which would mark the execution failed);
+// passthrough completion is detected via PTY idle, and a normal session end
+// closing this stream is expected, not an error.
+func (sm *StreamManager) connectMCPStream(execution *AgentExecution) {
+	ctx := sm.streamContext(execution)
+	err := execution.agentctl.StreamUpdates(ctx, func(agentctl.AgentEvent) {}, sm.mcpHandler, func(disconnectErr error) {
+		if disconnectErr != nil {
+			sm.logger.Debug("passthrough MCP stream disconnected",
+				zap.String("execution_id", execution.ID),
+				zap.Error(disconnectErr))
+		}
+	})
+	if err != nil {
+		sm.logger.Error("failed to connect passthrough MCP stream",
+			zap.String("execution_id", execution.ID),
 			zap.Error(err))
 	}
 }
