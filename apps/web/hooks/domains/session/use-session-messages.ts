@@ -7,6 +7,8 @@ import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
 
 const INITIAL_FETCH_LIMIT = 100;
 const BACKFILL_PAGE_LIMIT = 100;
+const RUNNING_BACKFILL_INITIAL_DELAY_MS = 1200;
+const RUNNING_BACKFILL_INTERVAL_MS = 3000;
 export const MAX_AUTO_BACKFILL_PAGES = 10;
 
 export function hasUserOrAgentMessage(messages: Message[]): boolean {
@@ -43,6 +45,26 @@ export function isTurnSettleTransition(
 ): boolean {
   if (prev === null || next === null) return false;
   return ACTIVE_SESSION_STATES.has(prev) && SETTLED_SESSION_STATES.has(next);
+}
+
+export function hasUserPromptInActiveTurn(messages: Message[], activeTurnId: string | null) {
+  if (!activeTurnId) return false;
+  return messages.some(
+    (m) => m.turn_id === activeTurnId && m.type === "message" && m.author_type === "user",
+  );
+}
+
+export function shouldRunMessageBackfill(params: {
+  taskSessionState: TaskSessionState | null;
+  connectionStatus: string;
+  activeTurnId: string | null;
+  messages: Message[];
+}) {
+  return (
+    params.connectionStatus === "connected" &&
+    params.taskSessionState === "RUNNING" &&
+    hasUserPromptInActiveTurn(params.messages, params.activeTurnId)
+  );
 }
 
 const debug = createDebugLogger("messages:fetch");
@@ -420,8 +442,62 @@ function useResyncOnTurnSettle(
   }, [taskSessionId, taskSessionState, connectionStatus, store]);
 }
 
-export function useSessionMessages(taskSessionId: string | null): UseSessionMessagesReturn {
-  const store = useAppStoreApi();
+function useRunningMessageBackfill(
+  taskSessionId: string | null,
+  shouldBackfill: boolean,
+  store: ReturnType<typeof useAppStoreApi>,
+) {
+  useEffect(() => {
+    if (!taskSessionId || !shouldBackfill) return;
+
+    let inFlight = false;
+    const sync = () => {
+      if (inFlight) return;
+      inFlight = true;
+      debug("running backfill", { sessionId: taskSessionId });
+      fetchAndStoreMessages(taskSessionId, store)
+        .catch((err) => {
+          debug("running backfill failed", { sessionId: taskSessionId, err });
+        })
+        .finally(() => {
+          inFlight = false;
+        });
+    };
+    const initial = window.setTimeout(sync, RUNNING_BACKFILL_INITIAL_DELAY_MS);
+    const interval = window.setInterval(sync, RUNNING_BACKFILL_INTERVAL_MS);
+    return () => {
+      window.clearTimeout(initial);
+      window.clearInterval(interval);
+    };
+  }, [taskSessionId, shouldBackfill, store]);
+}
+
+function useMessageFetchState(store: ReturnType<typeof useAppStoreApi>) {
+  const [isLoading, setIsLoading] = useState(false);
+  const [isWaitingForInitialMessages, setIsWaitingForInitialMessages] = useState(false);
+  const initialFetchStartRef = useRef<number | null>(null);
+  const lastFetchedSessionIdRef = useRef<string | null>(null);
+  const refs = useMemo(
+    () => ({
+      store,
+      setIsLoading,
+      setIsWaitingForInitialMessages,
+      initialFetchStartRef,
+      lastFetchedSessionIdRef,
+    }),
+    [store],
+  );
+  return {
+    isLoading,
+    isWaitingForInitialMessages,
+    setIsWaitingForInitialMessages,
+    initialFetchStartRef,
+    lastFetchedSessionIdRef,
+    refs,
+  };
+}
+
+function useSessionMessageInputs(taskSessionId: string | null) {
   const messages = useAppStore((state) =>
     taskSessionId ? (state.messages.bySession[taskSessionId] ?? EMPTY_MESSAGES) : EMPTY_MESSAGES,
   );
@@ -431,22 +507,40 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
   const taskSessionState = useAppStore((state) =>
     taskSessionId ? (state.taskSessions.items[taskSessionId]?.state ?? null) : null,
   );
+  const activeTurnId = useAppStore((state) =>
+    taskSessionId ? (state.turns.activeBySession[taskSessionId] ?? null) : null,
+  );
   const connectionStatus = useAppStore((state) => state.connection.status);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isWaitingForInitialMessages, setIsWaitingForInitialMessages] = useState(false);
-  const initialFetchStartRef = useRef<number | null>(null);
-  const lastFetchedSessionIdRef = useRef<string | null>(null);
+  return { messages, messagesMeta, taskSessionState, activeTurnId, connectionStatus };
+}
+
+export function useSessionMessages(taskSessionId: string | null): UseSessionMessagesReturn {
+  const store = useAppStoreApi();
+  const { messages, messagesMeta, taskSessionState, activeTurnId, connectionStatus } =
+    useSessionMessageInputs(taskSessionId);
   const prevSessionIdRef = useRef<string | null>(null);
   const hasAgentMessage = messages.some((message: Message) => message.author_type === "agent");
+  const {
+    isLoading,
+    isWaitingForInitialMessages,
+    setIsWaitingForInitialMessages,
+    initialFetchStartRef,
+    lastFetchedSessionIdRef,
+    refs: fetchRefs,
+  } = useMessageFetchState(store);
 
-  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!taskSessionId) {
       initialFetchStartRef.current = null;
       lastFetchedSessionIdRef.current = null;
       setIsWaitingForInitialMessages(false);
     }
-  }, [taskSessionId, store]);
+  }, [
+    taskSessionId,
+    initialFetchStartRef,
+    lastFetchedSessionIdRef,
+    setIsWaitingForInitialMessages,
+  ]);
 
   useEffect(() => {
     if (!taskSessionId) return;
@@ -458,8 +552,7 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
       initialFetchStartRef.current = Date.now();
       setIsWaitingForInitialMessages(true);
     }
-  }, [taskSessionId, messages.length]);
-  /* eslint-enable react-hooks/set-state-in-effect */
+  }, [taskSessionId, messages.length, initialFetchStartRef, setIsWaitingForInitialMessages]);
 
   useEffect(() => {
     if (!taskSessionId || connectionStatus !== "connected") return;
@@ -476,7 +569,6 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
     // Normal re-render with cached messages — skip fetch
     if (messages.length > 0 && !sessionChanged && !isFreshMount) {
       lastFetchedSessionIdRef.current = taskSessionId;
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setIsWaitingForInitialMessages(false);
       return;
     }
@@ -493,13 +585,17 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
 
     void doFetchMessages({
       taskSessionId,
-      store,
-      setIsLoading,
-      setIsWaitingForInitialMessages,
-      initialFetchStartRef,
-      lastFetchedSessionIdRef,
+      ...fetchRefs,
     });
-  }, [taskSessionId, connectionStatus, messages.length, store]);
+  }, [
+    taskSessionId,
+    connectionStatus,
+    messages.length,
+    store,
+    lastFetchedSessionIdRef,
+    setIsWaitingForInitialMessages,
+    fetchRefs,
+  ]);
 
   // Bool flips exactly once when a freshly-adopted session leaves STARTING,
   // so the subscription effect re-runs then (covering the backend race where
@@ -509,19 +605,19 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
 
   useSessionSubscription(taskSessionId, connectionStatus, isSessionStartingOrUnknown, store);
   useResyncOnTurnSettle(taskSessionId, taskSessionState, connectionStatus, store);
+  useRunningMessageBackfill(
+    taskSessionId,
+    shouldRunMessageBackfill({
+      taskSessionState,
+      connectionStatus,
+      activeTurnId,
+      messages,
+    }),
+    store,
+  );
   useVisibilityBackfill(taskSessionId, store);
 
-  const terminalFetchRefs = useMemo(
-    () => ({
-      store,
-      setIsLoading,
-      setIsWaitingForInitialMessages,
-      initialFetchStartRef,
-      lastFetchedSessionIdRef,
-    }),
-    [store],
-  );
-  useTerminalStateFetch(taskSessionId, taskSessionState, hasAgentMessage, terminalFetchRefs);
+  useTerminalStateFetch(taskSessionId, taskSessionState, hasAgentMessage, fetchRefs);
 
   return {
     isLoading: isLoading || isWaitingForInitialMessages || messagesMeta.isLoading,

@@ -27,6 +27,7 @@ import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import { useTerminalSearch } from "./use-terminal-search";
 import { TerminalSearchBar } from "./terminal-search-bar";
 import { usePanelSearch } from "@/hooks/use-panel-search";
+import { useTerminalBusyTracking } from "./use-terminal-busy-tracking";
 
 type BaseProps = {
   autoFocus?: boolean;
@@ -232,6 +233,7 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     keyboardShortcutsRef,
     onFindInPanelRef,
   });
+  useTerminalBusyTracking(terminalId, xtermRef, mode === "shell", isTerminalReady);
 
   useTouchScroll({
     terminalRef: refs.terminalRef,

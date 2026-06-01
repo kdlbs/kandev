@@ -94,7 +94,7 @@ describe("buildPrByRepoMap", () => {
   });
 });
 
-import { firstVisibleSection } from "./changes-panel-helpers";
+import { firstVisibleSection, PR_CHANGES_AUTO_EXPAND_MAX_FILES } from "./changes-panel-helpers";
 
 describe("firstVisibleSection", () => {
   const flags = (over: Partial<Parameters<typeof firstVisibleSection>[0]>) => ({
@@ -109,8 +109,39 @@ describe("firstVisibleSection", () => {
     expect(firstVisibleSection(flags({}))).toBeNull();
   });
 
-  it("review mode: PR is first when there are no local changes", () => {
-    expect(firstVisibleSection(flags({ hasPRFiles: true, showCommitsList: true }))).toBe("pr");
+  it("review mode: PR is first when there are no local changes and few files", () => {
+    expect(
+      firstVisibleSection(
+        flags({
+          hasPRFiles: true,
+          showCommitsList: true,
+          prFileCount: PR_CHANGES_AUTO_EXPAND_MAX_FILES,
+        }),
+      ),
+    ).toBe("pr");
+  });
+
+  it("review mode: commits expand instead of PR when diff exceeds file threshold", () => {
+    expect(
+      firstVisibleSection(
+        flags({
+          hasPRFiles: true,
+          showCommitsList: true,
+          prFileCount: PR_CHANGES_AUTO_EXPAND_MAX_FILES + 1,
+        }),
+      ),
+    ).toBe("commits");
+  });
+
+  it("review mode: large PR with no commits list auto-expands nothing", () => {
+    expect(
+      firstVisibleSection(
+        flags({
+          hasPRFiles: true,
+          prFileCount: PR_CHANGES_AUTO_EXPAND_MAX_FILES + 1,
+        }),
+      ),
+    ).toBeNull();
   });
 
   it("commits is first when it is the only section", () => {

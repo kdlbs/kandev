@@ -216,6 +216,31 @@ export class ApiClient {
     });
   }
 
+  /**
+   * Seed a task row directly via the test harness, bypassing the service-layer
+   * subtask-depth guard. Use this (not `createTask`) to build nested chains
+   * deeper than one level — `createTask` rejects depth > 1 for kanban tasks.
+   */
+  async seedTask(
+    workspaceId: string,
+    title: string,
+    opts?: {
+      workflow_id?: string;
+      workflow_step_id?: string;
+      parent_id?: string;
+      state?: string;
+    },
+  ): Promise<{ task_id: string }> {
+    return this.request("POST", "/api/v1/_test/tasks", {
+      workspace_id: workspaceId,
+      title,
+      workflow_id: opts?.workflow_id ?? "",
+      workflow_step_id: opts?.workflow_step_id ?? "",
+      parent_id: opts?.parent_id ?? "",
+      state: opts?.state ?? "",
+    });
+  }
+
   async reorderWorkflows(
     workspaceId: string,
     workflowIds: string[],

@@ -31,6 +31,7 @@ import {
   JIRA_ISSUE_WATCH_PLACEHOLDERS,
   DEFAULT_JIRA_ISSUE_WATCH_PROMPT,
 } from "@/components/jira/jira-issue-watch-placeholders";
+import { STEP_DEFAULT, STEP_DEFAULT_LABEL, resolveProfileId } from "@/lib/watcher-profile-default";
 import type {
   CreateJiraIssueWatchInput,
   JiraIssueWatch,
@@ -326,22 +327,28 @@ function AutomationFields({
         <SelectField
           label="Agent Profile"
           description="Optional — falls back to step default."
-          value={form.agentProfileId}
-          onChange={(v) => setForm((p) => ({ ...p, agentProfileId: v }))}
-          placeholder="(use step default)"
-          items={agentProfiles.map((p) => ({
-            id: p.id,
-            label: p.label,
-            icon: p.cli_passthrough ? <CliModeIcon /> : undefined,
-          }))}
+          value={form.agentProfileId || STEP_DEFAULT}
+          onChange={(v) => setForm((p) => ({ ...p, agentProfileId: resolveProfileId(v) }))}
+          placeholder={STEP_DEFAULT_LABEL}
+          items={[
+            { id: STEP_DEFAULT, label: STEP_DEFAULT_LABEL },
+            ...agentProfiles.map((p) => ({
+              id: p.id,
+              label: p.label,
+              icon: p.cli_passthrough ? <CliModeIcon /> : undefined,
+            })),
+          ]}
         />
         <SelectField
           label="Executor Profile"
           description="Optional — falls back to step default."
-          value={form.executorProfileId}
-          onChange={(v) => setForm((p) => ({ ...p, executorProfileId: v }))}
-          placeholder="(use step default)"
-          items={allExecutorProfiles.map((p) => ({ id: p.id, label: p.name }))}
+          value={form.executorProfileId || STEP_DEFAULT}
+          onChange={(v) => setForm((p) => ({ ...p, executorProfileId: resolveProfileId(v) }))}
+          placeholder={STEP_DEFAULT_LABEL}
+          items={[
+            { id: STEP_DEFAULT, label: STEP_DEFAULT_LABEL },
+            ...allExecutorProfiles.map((p) => ({ id: p.id, label: p.name })),
+          ]}
         />
       </div>
     </>

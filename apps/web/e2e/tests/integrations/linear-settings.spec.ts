@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { LinearSettingsPage } from "../../pages/linear-settings-page";
+import { assertWatcherAgentProfileResetsToStepDefault } from "./watcher-profile-default-flow";
 
 test.describe("Linear settings", () => {
   test("empty workspace shows form with disabled save/test until secret is filled", async ({
@@ -134,5 +135,9 @@ test.describe("Linear settings", () => {
     // the dialog) for the option. Substring match on the profile name handles
     // the "<agent> • <profile>" label format.
     await expect(testPage.getByRole("option", { name: new RegExp(passthroughName) })).toBeVisible();
+  });
+
+  test("watcher dialog resets the agent profile back to the step default", async ({ testPage }) => {
+    await assertWatcherAgentProfileResetsToStepDefault(testPage);
   });
 });

@@ -2,6 +2,81 @@
 
 All notable changes to Kandev.
 
+## 0.54.0 - 2026-05-31
+
+### Features
+
+- show relative commit time on hover in changes panel ([#1199](https://github.com/kdlbs/kandev/pull/1199))
+- add "(use step default)" reset to watcher profile selects ([#1124](https://github.com/kdlbs/kandev/pull/1124)) by @nlenepveu
+- add PR link to CI status popover header ([#1200](https://github.com/kdlbs/kandev/pull/1200))
+- bubble subtask state to parent in sidebar state sort ([#1194](https://github.com/kdlbs/kandev/pull/1194))
+- add OS inotify resource limits health check ([#1195](https://github.com/kdlbs/kandev/pull/1195))
+- surface subagent task tool calls as cards in task chat ([#1132](https://github.com/kdlbs/kandev/pull/1132))
+- add set_session_mode action and preserve mode across reset ([#1188](https://github.com/kdlbs/kandev/pull/1188))
+- expose task delete and archive tools to kanban agents ([#1178](https://github.com/kdlbs/kandev/pull/1178))
+- expose workflow import tool ([#1177](https://github.com/kdlbs/kandev/pull/1177))
+- surface an inline notice when an agent turn produces no output ([#1179](https://github.com/kdlbs/kandev/pull/1179))
+- throttle issue-watcher task fan-out (per-watcher cap) ([#1113](https://github.com/kdlbs/kandev/pull/1113)) by @nlenepveu
+- confirm session delete when closing multi-session agent tab ([#1174](https://github.com/kdlbs/kandev/pull/1174))
+- retry transient provider 529 errors with visible backoff ([#1173](https://github.com/kdlbs/kandev/pull/1173))
+- per-session ACP debug logs with rotation and retention ([#1172](https://github.com/kdlbs/kandev/pull/1172))
+- auto-expand the first group in the changes panel ([#1169](https://github.com/kdlbs/kandev/pull/1169))
+- remote tab in task-create dialog — multi-row GitHub repo picker ([#1116](https://github.com/kdlbs/kandev/pull/1116))
+- annotate debug logs with task_id for per-task filtering ([#1168](https://github.com/kdlbs/kandev/pull/1168))
+- add PR closed banner and hide CI chip on terminal state ([#1161](https://github.com/kdlbs/kandev/pull/1161))
+- collapse mobile task search into a topbar icon ([#1157](https://github.com/kdlbs/kandev/pull/1157))
+- showcase merge conflicts in the PR panel ([#1151](https://github.com/kdlbs/kandev/pull/1151))
+- allow custom prompts in task creation input ([#1155](https://github.com/kdlbs/kandev/pull/1155))
+- unify panel loading states with grid spinner ([#1142](https://github.com/kdlbs/kandev/pull/1142))
+- surface agent errors and recover corrupted resume sessions ([#1144](https://github.com/kdlbs/kandev/pull/1144))
+- show relative times in remote cloud status tooltip ([#1146](https://github.com/kdlbs/kandev/pull/1146))
+
+### Bug Fixes
+
+- move CI checks link beside popover title ([#1207](https://github.com/kdlbs/kandev/pull/1207))
+- collapse large PR Changes and expand Commits by default ([#1206](https://github.com/kdlbs/kandev/pull/1206))
+- render multi-level subtasks in sidebar task tree ([#1204](https://github.com/kdlbs/kandev/pull/1204))
+- serialize wakeup prompts to prevent turn misalignment ([#1202](https://github.com/kdlbs/kandev/pull/1202))
+- remove agent id from subagent metadata chips ([#1205](https://github.com/kdlbs/kandev/pull/1205))
+- stop right pane width from drifting across tasks ([#1201](https://github.com/kdlbs/kandev/pull/1201))
+- stop changes panel flicker and restore planning chat streaming ([#1197](https://github.com/kdlbs/kandev/pull/1197))
+- disambiguate message_task task-not-found vs no-session error ([#1186](https://github.com/kdlbs/kandev/pull/1186))
+- add Cursor auto-approve and always-allow permission UI ([#1198](https://github.com/kdlbs/kandev/pull/1198))
+- write ACP debug logs under KANDEV_HOME_DIR ([#1196](https://github.com/kdlbs/kandev/pull/1196))
+- prevent nested subtask creation for kanban tasks (depth > 1) ([#1192](https://github.com/kdlbs/kandev/pull/1192))
+- deliver session broadcasts to focused clients during resume ([#1193](https://github.com/kdlbs/kandev/pull/1193))
+- track OS PIDs and clean up shells on task archive/delete ([#1191](https://github.com/kdlbs/kandev/pull/1191))
+- portal inline-code tooltip to body to prevent clipping ([#1187](https://github.com/kdlbs/kandev/pull/1187))
+- close clarification overlay after agent MCP timeout and dedup retried questions ([#1185](https://github.com/kdlbs/kandev/pull/1185))
+- preserve whitespace in acp message chunks ([#1190](https://github.com/kdlbs/kandev/pull/1190))
+- detect fork PRs by branch ([#1182](https://github.com/kdlbs/kandev/pull/1182))
+- manually drain queued chat messages after cancel ([#1166](https://github.com/kdlbs/kandev/pull/1166))
+- keep env prep out of partial tool history ([#1189](https://github.com/kdlbs/kandev/pull/1189))
+- exclude office workflows from settings export ([#1184](https://github.com/kdlbs/kandev/pull/1184))
+- generate brew-upgrade-resilient systemd unit ([#1180](https://github.com/kdlbs/kandev/pull/1180))
+- show CLI-passthrough profiles in watcher dialogs (closes #1107) ([#1108](https://github.com/kdlbs/kandev/pull/1108)) by @nlenepveu
+- add ~/.bun/bin to service PATH ([#1175](https://github.com/kdlbs/kandev/pull/1175))
+- make left sidebar width global + steady monitor-switch settling ([#1140](https://github.com/kdlbs/kandev/pull/1140))
+- forward profile env vars on lazy-recovery createExecution ([#1138](https://github.com/kdlbs/kandev/pull/1138)) by @irium
+- dockview/editor restore races, office rebroadcast, and flaky tests ([#1171](https://github.com/kdlbs/kandev/pull/1171))
+- make repository setup script failures non-fatal ([#1153](https://github.com/kdlbs/kandev/pull/1153))
+- send confirm_name when deleting a workspace from settings ([#1154](https://github.com/kdlbs/kandev/pull/1154))
+- keep markdown table headers readable on narrow content ([#1122](https://github.com/kdlbs/kandev/pull/1122))
+- stop duplicating workflow auto-start prompt on boot-ready drain ([#1160](https://github.com/kdlbs/kandev/pull/1160))
+- pass HTTP MCP servers to ACP agents via AssumeMcpHttp ([#1152](https://github.com/kdlbs/kandev/pull/1152))
+- throttle PR branch-detection probes to stop log flood ([#1135](https://github.com/kdlbs/kandev/pull/1135))
+- complete Create worktree step before setup script runs ([#1143](https://github.com/kdlbs/kandev/pull/1143))
+- backfill task_sessions cost columns for legacy DBs ([#1145](https://github.com/kdlbs/kandev/pull/1145))
+- populate prepare progress when switching tasks client-side ([#1150](https://github.com/kdlbs/kandev/pull/1150))
+
+### Refactoring
+
+- move workspace policy params from MCP to agentctl CLI ([#1181](https://github.com/kdlbs/kandev/pull/1181))
+
+### Documentation
+
+- document portable workflow import/export YAML format ([#1176](https://github.com/kdlbs/kandev/pull/1176))
+
 ## 0.53.0 - 2026-05-29
 
 ### Features

@@ -3,20 +3,12 @@
 import { memo, useCallback, useState } from "react";
 import { IconPlus, IconTerminal2, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@kandev/ui/alert-dialog";
 import { useAppStore } from "@/components/state-provider";
 import { stopUserShell } from "@/lib/api/domains/user-shell-api";
+import { shouldConfirmTerminalClose } from "@/lib/terminal/terminal-busy-registry";
 import { useUserShells } from "@/hooks/domains/session/use-user-shells";
 import { releaseAutoCreatedEnvironment } from "@/hooks/domains/session/use-mobile-terminals";
+import { CloseTerminalConfirmDialog } from "../close-terminal-confirm-dialog";
 import { MobilePillButton } from "./mobile-pill-button";
 import { MobilePickerSheet } from "./mobile-picker-sheet";
 import { useMobileTerminalsContext } from "./mobile-terminals-context";
@@ -76,44 +68,10 @@ function TerminalRow({
   );
 }
 
-function CloseTerminalConfirmDialog({
-  terminal,
-  onOpenChange,
-  onConfirm,
-}: {
-  terminal: Terminal | null;
-  onOpenChange: (open: boolean) => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <AlertDialog open={terminal !== null} onOpenChange={onOpenChange}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Close terminal?</AlertDialogTitle>
-          <AlertDialogDescription>
-            {`This stops the “${terminal?.label ?? ""}” shell and any process it's running.`}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
-          <AlertDialogAction
-            onClick={() => {
-              onOpenChange(false);
-              onConfirm();
-            }}
-            className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
-          >
-            Close terminal
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
-}
-
 type CloseHandlerArgs = {
   sessionId: string | null;
   environmentId: string | null;
+  taskId: string | null;
   terminals: Terminal[];
   terminalTabValue: string;
   removeTerminal: (id: string) => void;
@@ -123,6 +81,7 @@ type CloseHandlerArgs = {
 function useTerminalCloseHandler({
   sessionId,
   environmentId,
+  taskId,
   terminals,
   terminalTabValue,
   removeTerminal,
@@ -130,42 +89,41 @@ function useTerminalCloseHandler({
 }: CloseHandlerArgs) {
   const [pendingClose, setPendingClose] = useState<Terminal | null>(null);
 
-  const handleConfirmClose = useCallback(async () => {
-    const t = pendingClose;
-    if (!t || !sessionId) return;
-    try {
-      // Stop the remote shell first; only mutate UI on success so a failed
-      // stop doesn't orphan the shell server-side while the picker hides it.
-      if (environmentId) await stopUserShell(environmentId, t.id);
-      // If the closed terminal was active, advance the active tab to a
-      // remaining one so the picker doesn't leave terminalTabValue pointing
-      // at a deleted id (which would render every row as inactive).
-      if (terminalTabValue === t.id) {
-        const next = terminals.find((row) => row.id !== t.id);
-        if (next) setRightPanelActiveTab(sessionId, next.id);
+  const closeTerminal = useCallback(
+    async (t: Terminal) => {
+      if (!sessionId) return;
+      try {
+        if (environmentId) await stopUserShell(environmentId, t.id, taskId ?? undefined);
+        if (terminalTabValue === t.id) {
+          const next = terminals.find((row) => row.id !== t.id);
+          if (next) setRightPanelActiveTab(sessionId, next.id);
+        }
+        removeTerminal(t.id);
+        if (environmentId && terminals.length <= 1) {
+          releaseAutoCreatedEnvironment(environmentId);
+        }
+        setPendingClose(null);
+      } catch (err) {
+        console.error("Failed to stop terminal:", err);
       }
-      removeTerminal(t.id);
-      // If this was the last terminal, release the auto-create guard so the
-      // pane recreates a default shell on next render instead of getting
-      // stuck on the "Starting terminal…" placeholder forever.
-      if (environmentId && terminals.length <= 1) {
-        releaseAutoCreatedEnvironment(environmentId);
-      }
-      setPendingClose(null);
-    } catch (err) {
-      console.error("Failed to stop terminal:", err);
-    }
-  }, [
-    pendingClose,
-    sessionId,
-    environmentId,
-    terminals,
-    terminalTabValue,
-    removeTerminal,
-    setRightPanelActiveTab,
-  ]);
+    },
+    [
+      sessionId,
+      environmentId,
+      taskId,
+      terminals,
+      terminalTabValue,
+      removeTerminal,
+      setRightPanelActiveTab,
+    ],
+  );
 
-  return { pendingClose, setPendingClose, handleConfirmClose };
+  const handleConfirmClose = useCallback(async () => {
+    if (!pendingClose) return;
+    await closeTerminal(pendingClose);
+  }, [pendingClose, closeTerminal]);
+
+  return { pendingClose, setPendingClose, handleConfirmClose, closeTerminal };
 }
 
 const MobileTerminalsList = memo(function MobileTerminalsList({
@@ -177,16 +135,19 @@ const MobileTerminalsList = memo(function MobileTerminalsList({
 }) {
   const { terminals, terminalTabValue, addTerminal, removeTerminal, environmentId } =
     useMobileTerminalsContext();
-  const { shells } = useUserShells(environmentId);
   const setRightPanelActiveTab = useAppStore((s) => s.setRightPanelActiveTab);
-  const { pendingClose, setPendingClose, handleConfirmClose } = useTerminalCloseHandler({
-    sessionId,
-    environmentId,
-    terminals,
-    terminalTabValue,
-    removeTerminal,
-    setRightPanelActiveTab,
-  });
+  const taskId = useAppStore((s) => s.tasks?.activeTaskId ?? null);
+  const { shells } = useUserShells(environmentId, taskId);
+  const { pendingClose, setPendingClose, handleConfirmClose, closeTerminal } =
+    useTerminalCloseHandler({
+      sessionId,
+      environmentId,
+      taskId,
+      terminals,
+      terminalTabValue,
+      removeTerminal,
+      setRightPanelActiveTab,
+    });
 
   const isShellRunning = useCallback(
     (id: string) => shells.find((s) => s.terminalId === id)?.running ?? false,
@@ -202,8 +163,18 @@ const MobileTerminalsList = memo(function MobileTerminalsList({
   );
 
   const handleAskClose = useCallback(
-    (terminal: Terminal) => setPendingClose(terminal),
-    [setPendingClose],
+    (terminal: Terminal) => {
+      const needsConfirm = shouldConfirmTerminalClose(terminal.id, {
+        type: terminal.type,
+        kind: terminal.kind,
+      });
+      if (needsConfirm) {
+        setPendingClose(terminal);
+        return;
+      }
+      void closeTerminal(terminal);
+    },
+    [closeTerminal, setPendingClose],
   );
 
   if (!sessionId) {
@@ -247,7 +218,8 @@ const MobileTerminalsList = memo(function MobileTerminalsList({
         ))}
       </div>
       <CloseTerminalConfirmDialog
-        terminal={pendingClose}
+        open={pendingClose !== null}
+        terminalName={pendingClose?.label || "Terminal"}
         onOpenChange={(open) => {
           if (!open) setPendingClose(null);
         }}

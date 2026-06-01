@@ -27,8 +27,10 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 import {
+  hasUserPromptInActiveTurn,
   hasUserOrAgentMessage,
   isTurnSettleTransition,
+  shouldRunMessageBackfill,
   runBackfillRound,
   autoBackfillUntilUserMessage,
   MAX_AUTO_BACKFILL_PAGES,
@@ -152,6 +154,68 @@ describe("isTurnSettleTransition", () => {
 
   it("is false when the next state is unknown", () => {
     expect(isTurnSettleTransition("RUNNING", null)).toBe(false);
+  });
+});
+
+describe("running message backfill guards", () => {
+  it("detects a user prompt in the active turn", () => {
+    expect(
+      hasUserPromptInActiveTurn(
+        [makeMessage({ id: "u1", turn_id: "turn-1", author_type: "user" })],
+        "turn-1",
+      ),
+    ).toBe(true);
+  });
+
+  it("ignores script output and old-turn prompts", () => {
+    expect(
+      hasUserPromptInActiveTurn(
+        [makeMessage({ id: "s1", turn_id: "turn-1", type: "script_execution" })],
+        "turn-1",
+      ),
+    ).toBe(false);
+    expect(
+      hasUserPromptInActiveTurn(
+        [makeMessage({ id: "u1", turn_id: "old-turn", author_type: "user" })],
+        "turn-1",
+      ),
+    ).toBe(false);
+  });
+
+  it("runs only for a connected RUNNING session with an active-turn user prompt", () => {
+    const messages = [makeMessage({ id: "u1", turn_id: "turn-1", author_type: "user" })];
+    expect(
+      shouldRunMessageBackfill({
+        taskSessionState: "RUNNING",
+        connectionStatus: "connected",
+        activeTurnId: "turn-1",
+        messages,
+      }),
+    ).toBe(true);
+    expect(
+      shouldRunMessageBackfill({
+        taskSessionState: "WAITING_FOR_INPUT",
+        connectionStatus: "connected",
+        activeTurnId: "turn-1",
+        messages,
+      }),
+    ).toBe(false);
+    expect(
+      shouldRunMessageBackfill({
+        taskSessionState: "RUNNING",
+        connectionStatus: "connecting",
+        activeTurnId: "turn-1",
+        messages,
+      }),
+    ).toBe(false);
+    expect(
+      shouldRunMessageBackfill({
+        taskSessionState: "RUNNING",
+        connectionStatus: "connected",
+        activeTurnId: null,
+        messages,
+      }),
+    ).toBe(false);
   });
 });
 

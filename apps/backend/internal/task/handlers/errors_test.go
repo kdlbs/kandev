@@ -17,10 +17,11 @@ import (
 // status mapping survives downstream wrap/unwrap changes.
 func TestErrorsAreClassifiable(t *testing.T) {
 	notFoundSentinels := map[string]error{
-		"taskrepo.ErrTaskNotFound":    taskrepo.ErrTaskNotFound,
-		"service.ErrDocumentNotFound": service.ErrDocumentNotFound,
-		"service.ErrTaskPlanNotFound": service.ErrTaskPlanNotFound,
-		"service.ErrRevisionNotFound": service.ErrRevisionNotFound,
+		"taskrepo.ErrTaskNotFound":     taskrepo.ErrTaskNotFound,
+		"taskrepo.ErrNoPrimarySession": taskrepo.ErrNoPrimarySession,
+		"service.ErrDocumentNotFound":  service.ErrDocumentNotFound,
+		"service.ErrTaskPlanNotFound":  service.ErrTaskPlanNotFound,
+		"service.ErrRevisionNotFound":  service.ErrRevisionNotFound,
 	}
 	for name, sentinel := range notFoundSentinels {
 		t.Run("isNotFound recognizes "+name, func(t *testing.T) {

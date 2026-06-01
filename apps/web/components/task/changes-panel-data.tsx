@@ -76,6 +76,7 @@ export type ChangesPanelBodyProps = {
     insertions: number;
     deletions: number;
     pushed?: boolean;
+    committed_at?: string;
   }[];
   pendingStageFiles: Set<string>;
   reviewedCount: number;

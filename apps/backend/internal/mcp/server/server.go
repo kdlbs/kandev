@@ -445,7 +445,7 @@ Behaviour by session state:
 - Failed/cancelled: an error is returned (use create_task_kandev to start fresh).
 
 Returns the dispatch status: "queued", "sent", or "started".`),
-			mcp.WithString("task_id", mcp.Required(), mcp.Description("The target task ID")),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The target task's full UUID (not a truncated prefix)")),
 			mcp.WithString("prompt", mcp.Required(), mcp.Description("The message to deliver to the task's agent")),
 		),
 		s.wrapHandler("message_task_kandev", s.messageTaskHandler()),

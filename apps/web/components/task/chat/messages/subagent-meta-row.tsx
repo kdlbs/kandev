@@ -3,7 +3,7 @@ import type { SubagentTaskPayload } from "@/components/task/chat/types";
 import { subagentMetaChips } from "@/components/task/chat/messages/subagent-meta";
 
 /**
- * Compact row of metadata chips (duration, tokens, tools, model, ids) rendered
+ * Compact row of metadata chips (duration, tokens, tools, model, session) rendered
  * under a completed subagent's header. Renders nothing when no metric fields
  * are present, so the card degrades gracefully across agents.
  */

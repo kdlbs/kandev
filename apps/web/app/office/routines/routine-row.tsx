@@ -19,7 +19,7 @@ import {
 import Link from "next/link";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { Routine, AgentProfile, RoutineTrigger } from "@/lib/state/slices/office/types";
-import { timeAgo } from "../components/shared/time-ago";
+import { timeAgo } from "@/lib/utils/time";
 
 type RoutineRowProps = {
   routine: Routine;

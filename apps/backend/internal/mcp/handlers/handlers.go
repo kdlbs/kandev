@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	workflowctrl "github.com/kandev/kandev/internal/workflow/controller"
 	workflowsvc "github.com/kandev/kandev/internal/workflow/service"
@@ -768,12 +769,28 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "sender task not found", nil)
 	}
 
+	// Verify the target task exists before looking up its session, so a bad
+	// task_id (e.g. a truncated UUID prefix) reports "task not found" instead
+	// of the misleading "no primary session" error from the session lookup.
+	// This is purely an existence check — GetTask returns a wrapped
+	// ErrTaskNotFound on no-rows, never (nil, nil).
+	if _, err := h.taskSvc.GetTask(ctx, req.TaskID); err != nil {
+		if errors.Is(err, taskrepo.ErrTaskNotFound) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound,
+				"target task not found: "+req.TaskID+" (pass the full task UUID, not a truncated prefix)", nil)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+			"failed to look up target task: "+err.Error(), nil)
+	}
+
 	session, err := h.taskSvc.GetPrimarySession(ctx, req.TaskID)
 	if err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task not found or has no session: "+err.Error(), nil)
-	}
-	if session == nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task has no active session — use create_task_kandev to start one", nil)
+		if errors.Is(err, taskrepo.ErrNoPrimarySession) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound,
+				"target task exists but has no active session", nil)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+			"failed to get session for task: "+err.Error(), nil)
 	}
 
 	wrappedPrompt, senderMeta := wrapAgentMessage(req.Prompt, senderTask, req.SenderSessionID)

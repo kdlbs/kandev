@@ -31,6 +31,7 @@ import {
   DEFAULT_ISSUE_WATCH_PROMPT,
 } from "@/components/github/issue-watch-placeholders";
 import { RepoFilterSelector } from "@/components/github/repo-filter-selector";
+import { STEP_DEFAULT, STEP_DEFAULT_LABEL, resolveProfileId } from "@/lib/watcher-profile-default";
 import type {
   RepoFilter,
   IssueWatch,
@@ -300,23 +301,29 @@ function IssueAutomationFields({
       <div className="grid grid-cols-2 gap-4">
         <SelectField
           label="Agent Profile"
-          description="The agent configuration for the task."
-          value={form.agentProfileId}
-          onChange={(v) => setForm((prev) => ({ ...prev, agentProfileId: v }))}
-          placeholder="Select agent profile"
-          items={agentProfiles.map((p) => ({
-            id: p.id,
-            label: p.label,
-            icon: p.cli_passthrough ? <CliModeIcon /> : undefined,
-          }))}
+          description="Optional — falls back to step default."
+          value={form.agentProfileId || STEP_DEFAULT}
+          onChange={(v) => setForm((prev) => ({ ...prev, agentProfileId: resolveProfileId(v) }))}
+          placeholder={STEP_DEFAULT_LABEL}
+          items={[
+            { id: STEP_DEFAULT, label: STEP_DEFAULT_LABEL },
+            ...agentProfiles.map((p) => ({
+              id: p.id,
+              label: p.label,
+              icon: p.cli_passthrough ? <CliModeIcon /> : undefined,
+            })),
+          ]}
         />
         <SelectField
           label="Executor Profile"
-          description="The executor environment for the agent."
-          value={form.executorProfileId}
-          onChange={(v) => setForm((prev) => ({ ...prev, executorProfileId: v }))}
-          placeholder="Select executor profile"
-          items={allExecutorProfiles.map((p) => ({ id: p.id, label: p.name }))}
+          description="Optional — falls back to step default."
+          value={form.executorProfileId || STEP_DEFAULT}
+          onChange={(v) => setForm((prev) => ({ ...prev, executorProfileId: resolveProfileId(v) }))}
+          placeholder={STEP_DEFAULT_LABEL}
+          items={[
+            { id: STEP_DEFAULT, label: STEP_DEFAULT_LABEL },
+            ...allExecutorProfiles.map((p) => ({ id: p.id, label: p.name })),
+          ]}
         />
       </div>
       <div className="space-y-1.5">

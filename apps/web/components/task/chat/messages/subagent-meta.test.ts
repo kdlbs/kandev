@@ -25,7 +25,6 @@ describe("subagentMetaChips", () => {
       { label: "duration", value: "2.2s" },
       { label: "tokens", value: "9,987 tokens" },
       { label: "tools", value: "0 tools" },
-      { label: "agent", value: "agent_012345…" },
     ]);
   });
 
@@ -55,7 +54,9 @@ describe("subagentMetaChips", () => {
     expect(subagentMetaChips(payload)).toEqual([{ label: "tools", value: "0 tools" }]);
   });
 
-  it("does not truncate short ids", () => {
-    expect(subagentMetaChips({ agent_id: "short" })).toEqual([{ label: "agent", value: "short" }]);
+  it("does not truncate short session ids", () => {
+    expect(subagentMetaChips({ child_session_id: "short" })).toEqual([
+      { label: "session", value: "short" },
+    ]);
   });
 });
