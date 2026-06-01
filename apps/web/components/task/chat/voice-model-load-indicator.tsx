@@ -39,7 +39,7 @@ export function VoiceModelLoadIndicator({
       aria-label={state === "error" ? `${modelLabel} failed to load` : undefined}
       className={
         state === "error"
-          ? "flex items-center gap-1 text-xs text-destructive"
+          ? "flex items-center gap-1 text-xs text-destructive w-32"
           : "flex items-center gap-1.5 w-32"
       }
     >
