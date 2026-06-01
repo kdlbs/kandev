@@ -45,14 +45,19 @@ function resolvePrimaryRepoName(
  * human-readable label for the UI. Non-empty inputs pass through unchanged;
  * empty inputs fall back to the workspace's primary repo name when safely
  * resolvable, otherwise undefined (callers render a neutral "Repository").
+ *
+ * Multi-branch tasks: agentctl tags per-repo tracker events with the
+ * subdir name (e.g. `kandev-branch-2` for a sibling worktree), which is
+ * fine on disk but ugly in the UI. When the subdir matches `<repoName>-<slug>`
+ * of a repo known to this workspace, the resolver formats it as
+ * `<repoName> · <slug>` to match how PR CHANGES labels the same groups
+ * — consistent visual language across both sections.
  */
 export function useRepoDisplayName(sessionId: string | null | undefined) {
   const session = useAppStore((state) => (sessionId ? state.taskSessions.items[sessionId] : null));
   const taskId = session?.task_id ?? null;
   const tasks = useAppStore((state) => state.kanban.tasks);
   const reposByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
-  // Resolve to a single primitive (or undefined) so the returned closure is
-  // memoized cleanly without React Compiler bailing on a branched return.
   const primaryName = useMemo(
     () =>
       resolvePrimaryRepoName(
@@ -62,8 +67,40 @@ export function useRepoDisplayName(sessionId: string | null | undefined) {
       ),
     [taskId, tasks, reposByWorkspace],
   );
+  // Flattened, sorted list of known repo names — long names first so
+  // `kandev-foo` matches `kandev-foo` before it matches `kandev`.
+  const knownRepoNames = useMemo(() => {
+    const set = new Set<string>();
+    for (const list of Object.values(reposByWorkspace as Record<string, RepoEntry[]>)) {
+      for (const r of list) {
+        if (r.name) set.add(r.name);
+      }
+    }
+    return Array.from(set).sort((a, b) => b.length - a.length);
+  }, [reposByWorkspace]);
   return useMemo(
-    () => (repositoryName: string) => repositoryName || primaryName || undefined,
-    [primaryName],
+    () => (repositoryName: string) => formatRepoLabel(repositoryName, primaryName, knownRepoNames),
+    [primaryName, knownRepoNames],
   );
+}
+
+/**
+ * formatRepoLabel produces the UI label for a repository_name reported by
+ * agentctl. Multi-branch subdir tags (`<repo>-<slug>`) get unified with the
+ * PR CHANGES `<repo> · <slug>` formatting so commits and PR groups render
+ * with the same visual structure.
+ */
+function formatRepoLabel(
+  repositoryName: string,
+  primaryName: string | undefined,
+  knownRepoNames: string[],
+): string | undefined {
+  if (!repositoryName) return primaryName || undefined;
+  for (const known of knownRepoNames) {
+    const prefix = known + "-";
+    if (repositoryName.length > prefix.length && repositoryName.startsWith(prefix)) {
+      return `${known} · ${repositoryName.slice(prefix.length)}`;
+    }
+  }
+  return repositoryName;
 }
