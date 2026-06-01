@@ -189,7 +189,7 @@ func TestExtractSubagentResult_Empty(t *testing.T) {
 // --- Subagent (Task) normalization ---
 
 func TestNormalizeToolCall_ClaudeSubagent(t *testing.T) {
-	n := NewNormalizer()
+	n := NewNormalizer("")
 	args := map[string]any{
 		"meta": map[string]any{"claudeCode": map[string]any{"toolName": "Agent"}},
 	}
@@ -200,7 +200,7 @@ func TestNormalizeToolCall_ClaudeSubagent(t *testing.T) {
 }
 
 func TestNormalizeToolCall_OpenCodeSubagent(t *testing.T) {
-	n := NewNormalizer()
+	n := NewNormalizer("")
 	args := map[string]any{"title": "task"}
 	payload := n.NormalizeToolCall("", args)
 	if payload.Kind() != streams.ToolKindSubagentTask {
@@ -209,7 +209,7 @@ func TestNormalizeToolCall_OpenCodeSubagent(t *testing.T) {
 }
 
 func TestNormalizeToolCall_CursorSubagent(t *testing.T) {
-	n := NewNormalizer()
+	n := NewNormalizer("")
 	args := map[string]any{
 		"title":     "Task: Subagent task",
 		"raw_input": map[string]any{"_toolName": "task"},
@@ -221,7 +221,7 @@ func TestNormalizeToolCall_CursorSubagent(t *testing.T) {
 }
 
 func TestNormalizeToolCall_PlainBashNotSubagent(t *testing.T) {
-	n := NewNormalizer()
+	n := NewNormalizer("")
 	args := map[string]any{
 		"meta":      map[string]any{"claudeCode": map[string]any{"toolName": "Bash"}},
 		"raw_input": map[string]any{"command": "ls"},
@@ -233,13 +233,13 @@ func TestNormalizeToolCall_PlainBashNotSubagent(t *testing.T) {
 }
 
 func TestUpdatePayloadInput_FillsSubagentFields(t *testing.T) {
-	n := NewNormalizer()
+	n := NewNormalizer("")
 	payload := streams.NewSubagentTask("", "", "")
 	n.UpdatePayloadInput(payload, map[string]any{
 		"description":   "Investigate flaky test",
 		"prompt":        "Find the root cause",
 		"subagent_type": "general-purpose",
-	})
+	}, nil)
 	sa := payload.SubagentTask()
 	if sa.Description != "Investigate flaky test" {
 		t.Errorf("Description = %q", sa.Description)
@@ -273,7 +273,7 @@ func TestParentToolUseID(t *testing.T) {
 }
 
 func TestEnrichSubagentResult_Claude(t *testing.T) {
-	n := NewNormalizer()
+	n := NewNormalizer("")
 	payload := streams.NewSubagentTask("Investigate", "do it", "")
 	meta := map[string]any{"claudeCode": map[string]any{"toolResponse": map[string]any{
 		"agentId":           "agent_abc",
@@ -303,7 +303,7 @@ func TestEnrichSubagentResult_Claude(t *testing.T) {
 // (not drop it), so the UI can render the "0 tools" chip. Regression test for
 // the omitempty + non-zero-guard bug.
 func TestEnrichSubagentResult_ClaudeZeroToolUses(t *testing.T) {
-	n := NewNormalizer()
+	n := NewNormalizer("")
 	payload := streams.NewSubagentTask("Investigate", "do it", "")
 	meta := map[string]any{"claudeCode": map[string]any{"toolResponse": map[string]any{
 		"status":            "completed",
@@ -326,7 +326,7 @@ func TestEnrichSubagentResult_ClaudeZeroToolUses(t *testing.T) {
 // Agents that don't report a tool count (OpenCode/Cursor) must leave the field
 // omitted, not emit a misleading "0 tools".
 func TestEnrichSubagentResult_OmitsUnknownToolUseCount(t *testing.T) {
-	n := NewNormalizer()
+	n := NewNormalizer("")
 	payload := streams.NewSubagentTask("Investigate", "do it", "general-purpose")
 	out := map[string]any{"metadata": map[string]any{"sessionId": "child_1"}}
 	n.EnrichSubagentResult(payload, nil, out)
@@ -343,7 +343,7 @@ func TestEnrichSubagentResult_OmitsUnknownToolUseCount(t *testing.T) {
 }
 
 func TestEnrichSubagentResult_OpenCode(t *testing.T) {
-	n := NewNormalizer()
+	n := NewNormalizer("")
 	payload := streams.NewSubagentTask("Investigate", "do it", "general-purpose")
 	rawOutput := map[string]any{"metadata": map[string]any{
 		"sessionId":       "ses_child",
@@ -371,7 +371,7 @@ func TestEnrichSubagentResult_OpenCodePartialModel(t *testing.T) {
 		{"both", "opencode", "big-pickle", "opencode/big-pickle"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			n := NewNormalizer()
+			n := NewNormalizer("")
 			payload := streams.NewSubagentTask("d", "p", "general-purpose")
 			rawOutput := map[string]any{"metadata": map[string]any{
 				"model": map[string]any{"providerID": tc.provider, "modelID": tc.modelID},
@@ -385,7 +385,7 @@ func TestEnrichSubagentResult_OpenCodePartialModel(t *testing.T) {
 }
 
 func TestEnrichSubagentResult_Cursor(t *testing.T) {
-	n := NewNormalizer()
+	n := NewNormalizer("")
 	payload := streams.NewSubagentTask("", "", "")
 	n.EnrichSubagentResult(payload, nil, map[string]any{"durationMs": float64(4200), "isBackground": false})
 	if payload.SubagentTask().DurationMs != 4200 {

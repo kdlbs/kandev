@@ -30,8 +30,14 @@ const (
 
 	// args map keys the adapter stashes so the normalizer can detect subagent
 	// (Task) tool calls without changing NormalizeToolCall's signature.
-	argKeyTitle = "title"
-	argKeyMeta  = "meta"
+	argKeyTitle  = "title"
+	argKeyMeta   = "meta"
+	keyLocations = "locations"
+	keyPath      = "path"
+
+	readTypeDirectory  = "directory"
+	genericLabelFile   = "file"
+	genericLabelFolder = "folder"
 )
 
 // DetectToolOperationType determines the specific tool operation type from ACP tool data.
@@ -45,7 +51,7 @@ func DetectToolOperationType(toolKind string, args map[string]any) string {
 		case toolKindRead:
 			// Check if this is a directory read (file listing)
 			if rawInput, ok := args["raw_input"].(map[string]any); ok {
-				if readType, ok := rawInput["type"].(string); ok && readType == "directory" {
+				if readType, ok := rawInput["type"].(string); ok && readType == readTypeDirectory {
 					return toolTypeSearch
 				}
 			}
@@ -71,11 +77,14 @@ func DetectToolOperationType(toolKind string, args map[string]any) string {
 }
 
 // Normalizer converts ACP protocol tool data to NormalizedPayload.
-type Normalizer struct{}
+type Normalizer struct {
+	agentID string
+}
 
-// NewNormalizer creates a new ACP normalizer.
-func NewNormalizer() *Normalizer {
-	return &Normalizer{}
+// NewNormalizer creates a new ACP normalizer. agentID selects per-agent enrichers
+// (e.g. "codex-acp"); pass "" for common-layer-only normalization in tests.
+func NewNormalizer(agentID string) *Normalizer {
+	return &Normalizer{agentID: agentID}
 }
 
 // NormalizeToolCall converts ACP tool call data to NormalizedPayload.
@@ -92,18 +101,21 @@ func (n *Normalizer) NormalizeToolCall(toolName string, args map[string]any) *st
 		kind = toolName
 	}
 
+	var payload *streams.NormalizedPayload
 	switch strings.ToLower(kind) {
 	case toolKindEdit:
-		return n.normalizeEdit(args)
+		payload = n.normalizeEdit(args)
 	case toolKindRead, "view":
-		return n.normalizeRead(args)
+		payload = n.normalizeRead(args)
 	case toolKindExecute, "bash", "run", "shell":
-		return n.normalizeExecute(args)
+		payload = n.normalizeExecute(args)
 	case toolKindGlob, toolKindGrep, toolKindSearch:
-		return n.normalizeCodeSearch(toolName, args)
+		payload = n.normalizeCodeSearch(toolName, args)
 	default:
-		return n.normalizeGeneric(toolName, args)
+		payload = n.normalizeGeneric(toolName, args)
 	}
+	applyAgentEnrichment(n.agentID, payload, enrichFrameFromArgs(args))
+	return payload
 }
 
 // NormalizeToolResult updates the payload with tool result data.
@@ -246,50 +258,102 @@ func parseShellOutput(output string) (exitCode int, stdout, stderr string) {
 
 // UpdatePayloadInput updates a stored NormalizedPayload with new rawInput data.
 // This handles agents (e.g. Claude Code) that send rawInput incrementally
-// via tool_call_update events after the initial tool_call.
-func (n *Normalizer) UpdatePayloadInput(payload *streams.NormalizedPayload, rawInput any) {
+// via tool_call_update events after the initial tool_call. supplemental may
+// carry update-only fields such as locations (OpenCode tool_call_update).
+func (n *Normalizer) UpdatePayloadInput(payload *streams.NormalizedPayload, rawInput any, supplemental map[string]any) {
+	if payload == nil {
+		return
+	}
 	inputMap, ok := rawInput.(map[string]any)
-	if !ok || payload == nil {
+	if rawInput != nil && !ok {
+		return
+	}
+	if inputMap == nil {
+		inputMap = map[string]any{}
+	}
+	if len(inputMap) == 0 && supplemental == nil {
 		return
 	}
 
-	if shellExec := payload.ShellExec(); shellExec != nil {
-		if cmd := shared.GetString(inputMap, "command"); cmd != "" && shellExec.Command == "" {
-			shellExec.Command = cmd
-		}
-		if cwd := shared.GetString(inputMap, "cwd"); cwd != "" && shellExec.WorkDir == "" {
-			shellExec.WorkDir = cwd
-		}
-		if desc := shared.GetString(inputMap, "description"); desc != "" && shellExec.Description == "" {
-			shellExec.Description = desc
-		}
+	if se := payload.ShellExec(); se != nil {
+		updateShellExecInput(se, inputMap)
 	}
-
-	// Claude ACP sends file_path in incremental rawInput updates
+	// Claude ACP sends file_path in incremental rawInput updates; OpenCode uses filePath.
 	if mf := payload.ModifyFile(); mf != nil {
-		if path := shared.GetString(inputMap, "file_path"); path != "" && mf.FilePath == "" {
-			mf.FilePath = path
-		}
+		updateModifyFileInput(mf, supplemental, inputMap)
 	}
 	if rf := payload.ReadFile(); rf != nil {
-		if path := shared.GetString(inputMap, "file_path"); path != "" && rf.FilePath == "" {
-			rf.FilePath = path
-		}
+		updateReadFileInput(rf, supplemental, inputMap)
 	}
-
+	if cs := payload.CodeSearch(); cs != nil {
+		updateCodeSearchInput(cs, supplemental, inputMap)
+	}
 	// Subagent (Task) calls send description/prompt/subagent_type in a later
 	// tool_call_update rawInput (Claude/OpenCode); fill empty fields only.
 	if sa := payload.SubagentTask(); sa != nil {
-		if v := shared.GetString(inputMap, subagentKeyDescription); v != "" && sa.Description == "" {
-			sa.Description = v
-		}
-		if v := shared.GetString(inputMap, subagentKeyPrompt); v != "" && sa.Prompt == "" {
-			sa.Prompt = v
-		}
-		if v := shared.GetString(inputMap, subagentKeySubagentType); v != "" && sa.SubagentType == "" {
-			sa.SubagentType = v
-		}
+		updateSubagentTaskInput(sa, inputMap)
 	}
+}
+
+func updateShellExecInput(se *streams.ShellExecPayload, inputMap map[string]any) {
+	if cmd := shared.GetString(inputMap, "command"); cmd != "" && se.Command == "" {
+		se.Command = cmd
+	}
+	if cwd := shared.GetString(inputMap, "cwd"); cwd != "" && se.WorkDir == "" {
+		se.WorkDir = cwd
+	}
+	if desc := shared.GetString(inputMap, "description"); desc != "" && se.Description == "" {
+		se.Description = desc
+	}
+}
+
+func updateModifyFileInput(mf *streams.ModifyFilePayload, supplemental, inputMap map[string]any) {
+	if path := pathFromArgs(supplemental, inputMap); path != "" && mf.FilePath == "" {
+		mf.FilePath = path
+	}
+}
+
+func updateReadFileInput(rf *streams.ReadFilePayload, supplemental, inputMap map[string]any) {
+	if path := pathFromArgs(supplemental, inputMap); path != "" && rf.FilePath == "" {
+		rf.FilePath = path
+	}
+}
+
+func updateCodeSearchInput(cs *streams.CodeSearchPayload, supplemental, inputMap map[string]any) {
+	if v := stringFromMap(inputMap, "query", "pattern", "search_term"); v != "" && cs.Query == "" {
+		cs.Query = v
+	}
+	if v := stringFromMap(inputMap, "pattern", "glob", "glob_pattern"); v != "" && cs.Pattern == "" && cs.Glob == "" {
+		cs.Pattern = v
+	}
+	if path := pathFromArgs(supplemental, inputMap); path != "" && cs.Path == "" {
+		cs.Path = path
+	}
+}
+
+func updateSubagentTaskInput(sa *streams.SubagentTaskPayload, inputMap map[string]any) {
+	if v := shared.GetString(inputMap, subagentKeyDescription); v != "" && sa.Description == "" {
+		sa.Description = v
+	}
+	if v := shared.GetString(inputMap, subagentKeyPrompt); v != "" && sa.Prompt == "" {
+		sa.Prompt = v
+	}
+	if v := shared.GetString(inputMap, subagentKeySubagentType); v != "" && sa.SubagentType == "" {
+		sa.SubagentType = v
+	}
+}
+
+// EnrichFromToolCallUpdate applies agent-specific enrichment from a tool_call_update
+// frame (title, meta, rawInput, supplemental locations). Safe to call after
+// UpdatePayloadInput; only fills empty normalized fields.
+func (n *Normalizer) EnrichFromToolCallUpdate(
+	payload *streams.NormalizedPayload,
+	title *string,
+	meta map[string]any,
+	rawInput any,
+	supplemental map[string]any,
+) {
+	applyAgentEnrichment(n.agentID, payload, enrichFrameFromUpdate(title, meta, rawInput, supplemental))
 }
 
 // normalizeEdit converts ACP edit tool data.
@@ -299,11 +363,7 @@ func (n *Normalizer) normalizeEdit(args map[string]any) *streams.NormalizedPaylo
 		rawInput = args
 	}
 
-	// Get path from raw_input or locations
-	path := shared.GetString(rawInput, "path")
-	if path == "" {
-		path = extractPathFromLocations(args)
-	}
+	path := pathFromArgs(args, rawInput)
 
 	var mutations []streams.FileMutation
 
@@ -351,13 +411,10 @@ func (n *Normalizer) normalizeRead(args map[string]any) *streams.NormalizedPaylo
 		rawInput = args
 	}
 
-	path := shared.GetString(rawInput, "path")
-	if path == "" {
-		path = extractPathFromLocations(args)
-	}
+	path := pathFromArgs(args, rawInput)
 
 	// Check if this is a directory read - treat as code search (file listing)
-	if readType := shared.GetString(rawInput, "type"); readType == "directory" {
+	if readType := shared.GetString(rawInput, "type"); readType == readTypeDirectory {
 		return streams.NewCodeSearch("", "", path, "")
 	}
 
@@ -391,15 +448,18 @@ func (n *Normalizer) normalizeCodeSearch(toolName string, args map[string]any) *
 		rawInput = args
 	}
 
-	path := shared.GetString(rawInput, "path")
-	pattern := shared.GetString(rawInput, "pattern")
+	path := pathFromArgs(args, rawInput)
+	pattern := stringFromMap(rawInput, "pattern", "glob", "glob_pattern")
 
 	var query, glob string
 	switch strings.ToLower(toolName) {
 	case toolKindGlob:
 		glob = pattern
+		if glob == "" {
+			glob = stringFromMap(rawInput, "query", "search_term")
+		}
 	case toolKindGrep, toolKindSearch:
-		query = shared.GetString(rawInput, "query")
+		query = stringFromMap(rawInput, "query", "pattern", "search_term", "regex")
 	}
 
 	return streams.NewCodeSearch(query, pattern, path, glob)
@@ -451,15 +511,61 @@ func (n *Normalizer) EnrichSubagentResult(payload *streams.NormalizedPayload, me
 
 // --- Helper functions ---
 
+func stringFromMap(m map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if v := shared.GetString(m, key); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// pathFromArgs resolves a file path from structured ACP fields only (raw_input
+// path/file_path/filePath, top-level path, locations).
+func pathFromArgs(args, rawInput map[string]any) string {
+	if rawInput != nil {
+		if p := stringFromMap(rawInput, "path", "file_path", "filePath"); p != "" {
+			return p
+		}
+	}
+	if args != nil {
+		if p := shared.GetString(args, "path"); p != "" {
+			return p
+		}
+		return extractPathFromLocations(args)
+	}
+	return ""
+}
+
 func extractPathFromLocations(args map[string]any) string {
-	locations, ok := args["locations"].([]any)
-	if !ok || len(locations) == 0 {
+	if args == nil {
 		return ""
 	}
-	loc, ok := locations[0].(map[string]any)
-	if !ok {
+	return pathFromLocationSlice(args[keyLocations])
+}
+
+// pathFromLocationSlice reads the first path from ACP locations. The adapter
+// builds []any on initial tool_call frames and []map[string]any on
+// tool_call_update supplemental maps — accept both.
+func pathFromLocationSlice(locationsRaw any) string {
+	switch locations := locationsRaw.(type) {
+	case []any:
+		if len(locations) == 0 {
+			return ""
+		}
+		loc, ok := locations[0].(map[string]any)
+		if !ok {
+			return ""
+		}
+		path, _ := loc["path"].(string)
+		return path
+	case []map[string]any:
+		if len(locations) == 0 {
+			return ""
+		}
+		path, _ := locations[0]["path"].(string)
+		return path
+	default:
 		return ""
 	}
-	path, _ := loc["path"].(string)
-	return path
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 )
 
@@ -20,7 +21,7 @@ func (wt *WorkspaceTracker) getCommitsSince(ctx context.Context, baseCommit stri
 		"--shortstat",
 		baseCommit+"..HEAD")
 	cmd.Dir = wt.workDir
-	out, err := cmd.Output()
+	out, err := subproc.RunGitOutput(ctx, cmd)
 	if err != nil {
 		wt.logger.Debug("failed to get commits since base",
 			zap.String("base", baseCommit),

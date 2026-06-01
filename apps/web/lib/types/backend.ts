@@ -298,6 +298,11 @@ export type TaskSessionAgentctlPayload = {
   worktree_id?: string;
   worktree_path?: string;
   worktree_branch?: string;
+  /** Task root that contains every per-repo worktree as a sibling subdir.
+   *  Set only when the event signals a sibling worktree addition (multi-branch
+   *  add_branch flow) — the frontend repoints the file browser to it instead of
+   *  staying on the original primary worktree. */
+  task_workspace_path?: string;
 };
 
 export type FileInfo = {

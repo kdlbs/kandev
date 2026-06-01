@@ -38,6 +38,9 @@ type RepoPrepareSpec struct {
 	WorktreeBranchPrefix string
 	PullBeforeWorktree   bool
 	RepoSetupScript      string
+	// BranchSlug, when set, nests the worktree path under {RepoName}/{BranchSlug}/
+	// so two specs sharing a RepositoryID don't collide on disk.
+	BranchSlug string
 }
 
 // EnvPrepareRequest contains the parameters for environment preparation.
@@ -65,6 +68,7 @@ type EnvPrepareRequest struct {
 
 	TaskDirName string // Per-task directory name within the workspace (e.g. "task-abc123")
 	RepoName    string // Repository slug used with TaskDirName to locate checkouts
+	BranchSlug  string // Optional branch subdir for multi-branch tasks (legacy single-repo path)
 
 	// Repositories carries one entry per repository when the request is
 	// multi-repo. When non-empty it is the source of truth; the legacy
@@ -99,6 +103,7 @@ func (r *EnvPrepareRequest) RepoSpecs() []RepoPrepareSpec {
 		WorktreeBranchPrefix: r.WorktreeBranchPrefix,
 		PullBeforeWorktree:   r.PullBeforeWorktree,
 		RepoSetupScript:      r.RepoSetupScript,
+		BranchSlug:           r.BranchSlug,
 	}}
 }
 

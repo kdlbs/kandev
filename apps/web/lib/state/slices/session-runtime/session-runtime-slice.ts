@@ -432,6 +432,21 @@ export const createSessionRuntimeSlice: StateCreator<
       delete draft.gitStatus.byEnvironmentId[envKey];
       delete draft.gitStatus.byEnvironmentRepo[envKey];
     }),
+  clearLegacyGitStatusEntry: (sessionId) =>
+    set((draft) => {
+      // Drops the single-repo (empty-repo-name) entries so a session that just
+      // transitioned to multi-repo via add_branch_to_task stops surfacing the
+      // pre-transition snapshot — its workspace tracker was replaced on the
+      // backend and will never emit another update under the empty key. The
+      // per-repo entries (real repo names) are intentionally left in place;
+      // they continue to receive fresh status updates from the new trackers.
+      const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
+      const repoMap = draft.gitStatus.byEnvironmentRepo[envKey];
+      if (repoMap && "" in repoMap) {
+        delete repoMap[""];
+      }
+      delete draft.gitStatus.byEnvironmentId[envKey];
+    }),
   registerSessionEnvironment: (sessionId, environmentId) =>
     set((draft) => {
       draft.environmentIdBySessionId[sessionId] = environmentId;

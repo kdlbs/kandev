@@ -310,18 +310,27 @@ func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceI
 		if repositoryID == "" {
 			return fmt.Errorf("repository_id is required")
 		}
-		// Multi-repo validation: each repository may appear at most once per task.
-		// Without this guard the unique (task_id, repository_id) constraint on
-		// task_repositories would surface as an opaque DB error mid-loop, leaving
-		// some rows already inserted. Name the repository (owner/name) instead of
-		// the raw UUID so the create-task dialog's error toast is human-readable —
-		// two PR URLs of the same repo (e.g. /pull/1116 and /pull/1117) collapse
-		// to the same repositoryID and hit this path.
-		if seen[repositoryID] {
+		// Multi-branch validation: the same repository may appear multiple
+		// times in a task on different branches. Identity is
+		// (repository_id, base_branch, checkout_branch) — base_branch matters
+		// because the worktree executor anchors the branch there while
+		// checkout_branch stays empty, and the local-executor flow puts the
+		// branch in checkout_branch with base_branch anchored to default_branch.
+		// Both shapes must dedup; matching DB key is UNIQUE(task_id,
+		// repository_id, base_branch, checkout_branch).
+		dedupKey := repositoryID + "\x00" + baseBranch + "\x00" + repoInput.CheckoutBranch
+		if seen[dedupKey] {
 			label := s.repoDisplayLabel(ctx, repoInput, repositoryID)
-			return fmt.Errorf("repository %q is listed more than once for this task", label)
+			branchLabel := repoInput.CheckoutBranch
+			if branchLabel == "" {
+				branchLabel = baseBranch
+			}
+			if branchLabel == "" {
+				return fmt.Errorf("repository %q is listed more than once for this task", label)
+			}
+			return fmt.Errorf("repository %q on branch %q is listed more than once for this task", label, branchLabel)
 		}
-		seen[repositoryID] = true
+		seen[dedupKey] = true
 		metadata := make(map[string]interface{})
 		if prNum := resolvePRNumber(repoInput); prNum > 0 {
 			metadata["pr_number"] = prNum

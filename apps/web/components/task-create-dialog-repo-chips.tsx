@@ -132,14 +132,15 @@ export function RepoChipsRow({
   // Other executors: branch is fully editable (no special pre-fill).
   const branchLocked = false;
   // No early returns above hooks. URL mode and started-state checks happen below.
-  const usedIds = useMemo(() => collectUsedRepoIds(fs.repositories), [fs.repositories]);
   if (isTaskStarted) return null;
 
-  const remainingCount = repositories.filter((r) => !usedIds.has(r.id)).length;
-  // Add stays enabled when no workspace repos are left, since users can also
-  // pick from discovered on-machine paths.
+  // Multi-branch support: the same repo can appear multiple times on a task
+  // when each row picks a different branch. Uniqueness is enforced on the
+  // (repository_id, checkout_branch) pair at submit time by the backend, so
+  // the dropdown never filters repos out — picking "frontend" twice and
+  // assigning two different branches is a supported flow.
   const hasDiscovered = fs.discoveredRepositories.length > 0;
-  const canAddMore = remainingCount > 0 || hasDiscovered;
+  const canAddMore = repositories.length > 0 || hasDiscovered;
   const addHint = computeAddHint(canAddMore, repositories.length);
 
   return (
@@ -280,7 +281,11 @@ function ChipsList({
           workspaceId={workspaceId}
           repositories={repositories}
           discoveredRepositories={fs.discoveredRepositories}
-          excludedRepoIds={collectUsedRepoIds(fs.repositories, row.key)}
+          // Multi-branch: the same repository may be reused across rows when
+          // each row picks a different branch. Only exclude rows that hold
+          // the exact (repo, branch) pair this row would clash with on the
+          // backend — empty-branch rows can't collide yet, so they pass.
+          excludedRepoIds={collectExactDuplicateRepoIds(fs.repositories, row)}
           branchLocked={branchLocked}
           // For local-executor rows, seed row.branch with the workspace's
           // current branch via this prop. Non-local rows leave it undefined
@@ -371,11 +376,24 @@ function computeAddHint(canAddMore: boolean, workspaceRepoCount: number): string
   return "All workspace repositories are already added";
 }
 
-/** Build the set of repo identifiers (workspace id or path) currently in use. */
-function collectUsedRepoIds(rows: TaskRepoRow[], exceptKey?: string): Set<string> {
+/**
+ * Returns the set of repo ids/paths that would create a literal duplicate
+ * (same repo + same branch) of an *existing* row if `currentRow` adopted
+ * them — used to hide already-claimed pairings from the repo dropdown.
+ *
+ * Multi-branch tasks are supported: the same repo can appear across multiple
+ * rows as long as each row's branch differs. Rows with empty branches don't
+ * collide yet, so they don't contribute to the exclusion set.
+ *
+ * Same-row entries are skipped so the current row's own pick remains
+ * selectable; without that, after the user pairs (repo, branch) the chip
+ * would suddenly render its current repo as unavailable.
+ */
+function collectExactDuplicateRepoIds(rows: TaskRepoRow[], currentRow: TaskRepoRow): Set<string> {
   const ids = new Set<string>();
   for (const r of rows) {
-    if (r.key === exceptKey) continue;
+    if (r.key === currentRow.key) continue;
+    if (!r.branch || r.branch !== currentRow.branch) continue;
     if (r.repositoryId) ids.add(r.repositoryId);
     if (r.localPath) ids.add(r.localPath);
   }

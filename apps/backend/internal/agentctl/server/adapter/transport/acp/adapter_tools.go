@@ -1,8 +1,6 @@
 package acp
 
 import (
-	"strings"
-
 	"github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -88,16 +86,9 @@ func (a *Adapter) convertToolCallUpdate(sessionID string, tc *acp.SessionUpdateT
 	}
 
 	if len(tc.Locations) > 0 {
-		locations := make([]map[string]any, len(tc.Locations))
-		for i, loc := range tc.Locations {
-			locMap := map[string]any{"path": loc.Path}
-			if loc.Line != nil {
-				locMap["line"] = *loc.Line
-			}
-			locations[i] = locMap
+		for k, v := range locationsArgsFromACP(tc.Locations) {
+			args[k] = v
 		}
-		args["locations"] = locations
-		args["path"] = tc.Locations[0].Path
 	}
 
 	if tc.RawInput != nil {
@@ -165,7 +156,7 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	// with a known status, so without a synthesized "in_progress" here those
 	// fields are silently dropped and the message stays on the placeholder
 	// "Terminal" title from the initial pending tool_call.
-	if status == "" && (tcu.Title != nil || tcu.RawInput != nil || len(tcu.Content) > 0) {
+	if status == "" && (tcu.Title != nil || tcu.RawInput != nil || len(tcu.Content) > 0 || len(tcu.Locations) > 0) {
 		status = toolStatusInProgress
 	}
 
@@ -198,9 +189,14 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	payload := a.activeToolCalls[toolCallID]
 
 	// Update stored payload with incremental rawInput (e.g. Claude Code sends
-	// command/cwd in a tool_call_update after the initial empty tool_call)
-	if tcu.RawInput != nil && payload != nil {
-		a.normalizer.UpdatePayloadInput(payload, tcu.RawInput)
+	// command/cwd in a tool_call_update after the initial empty tool_call).
+	// OpenCode may send filePath/locations on the update frame only.
+	supplemental := toolCallUpdateSupplemental(tcu)
+	if payload != nil && (tcu.RawInput != nil || len(tcu.Locations) > 0) {
+		a.normalizer.UpdatePayloadInput(payload, tcu.RawInput, supplemental)
+	}
+	if payload != nil && (tcu.Title != nil || tcu.Meta != nil || tcu.RawInput != nil || supplemental != nil) {
+		a.normalizer.EnrichFromToolCallUpdate(payload, tcu.Title, tcu.Meta, tcu.RawInput, supplemental)
 	}
 
 	// Update stored payload with tool result output. Skip for tracked-Monitor
@@ -237,13 +233,6 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	if payload != nil && payload.Kind() == streams.ToolKindModifyFile {
 		if mf := payload.ModifyFile(); mf != nil {
 			enrichModifyFileFromContents(mf, tcu.Content)
-		}
-	}
-
-	// Enrich read_file payload path from title if still empty.
-	if payload != nil && payload.Kind() == streams.ToolKindReadFile {
-		if rf := payload.ReadFile(); rf != nil && rf.FilePath == "" && tcu.Title != nil {
-			rf.FilePath = extractPathFromTitle(*tcu.Title)
 		}
 	}
 
@@ -327,12 +316,26 @@ func enrichModifyFileFromContents(mf *streams.ModifyFilePayload, contents []acp.
 	}
 }
 
-// extractPathFromTitle extracts a file path from tool titles like "Read /path/to/file".
-func extractPathFromTitle(title string) string {
-	for _, prefix := range []string{"Read ", "Write ", "Edit "} {
-		if strings.HasPrefix(title, prefix) {
-			return strings.TrimPrefix(title, prefix)
-		}
+func toolCallUpdateSupplemental(tcu *acp.SessionToolCallUpdate) map[string]any {
+	return locationsArgsFromACP(tcu.Locations)
+}
+
+// locationsArgsFromACP builds the locations/path args map shared by initial tool_call
+// frames and tool_call_update supplemental maps.
+func locationsArgsFromACP(locations []acp.ToolCallLocation) map[string]any {
+	if len(locations) == 0 {
+		return nil
 	}
-	return ""
+	locMaps := make([]map[string]any, len(locations))
+	for i, loc := range locations {
+		locMap := map[string]any{keyPath: loc.Path}
+		if loc.Line != nil {
+			locMap["line"] = *loc.Line
+		}
+		locMaps[i] = locMap
+	}
+	return map[string]any{
+		keyLocations: locMaps,
+		keyPath:      locations[0].Path,
+	}
 }

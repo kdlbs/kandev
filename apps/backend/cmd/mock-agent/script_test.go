@@ -691,3 +691,58 @@ func hasMonitorMeta(meta map[string]any) bool {
 	name, _ := cc["toolName"].(string)
 	return name == "Monitor"
 }
+
+// --- /bulk command tests ---
+
+// TestParseBulkCmd verifies the /bulk command parsing and count defaulting/capping.
+func TestParseBulkCmd(t *testing.T) {
+	tests := []struct {
+		prompt    string
+		wantCount int
+		wantOK    bool
+	}{
+		{"/bulk", bulkDefaultCount, true},
+		{"/bulk:5", 5, true},
+		{"/bulk 5", 5, true},
+		{"/e2e:bulk:42", 42, true},
+		{"/BULK:7", 7, true},
+		{"/bulk:99999", bulkMaxCount, true}, // capped
+		{"/bulk:0", bulkDefaultCount, true}, // non-positive falls back to default
+		{"/bulkish", 0, false},
+		{"hello", 0, false},
+		{"", 0, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.prompt, func(t *testing.T) {
+			count, ok := parseBulkCmd(tt.prompt)
+			if ok != tt.wantOK || count != tt.wantCount {
+				t.Errorf("parseBulkCmd(%q) = (%d, %v), want (%d, %v)",
+					tt.prompt, count, ok, tt.wantCount, tt.wantOK)
+			}
+		})
+	}
+}
+
+// TestEmitBulk verifies emitBulk emits count+2 text messages (intro + N + outro)
+// and one tool call per message (each flushing its text into a distinct row).
+func TestEmitBulk(t *testing.T) {
+	e, mock := newTestEmitter()
+	const count = 4
+	emitBulk(e, count)
+
+	var texts, toolCalls int
+	for _, u := range mock.getUpdates() {
+		switch {
+		case isTextUpdate(u):
+			texts++
+		case isToolCallUpdate(u):
+			toolCalls++
+		}
+	}
+	if texts != count+2 {
+		t.Errorf("text updates = %d, want %d (intro + %d + outro)", texts, count+2, count)
+	}
+	if toolCalls != count {
+		t.Errorf("tool calls = %d, want %d", toolCalls, count)
+	}
+}

@@ -7,6 +7,7 @@ import type {
   TaskSessionState,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile } from "../../lib/types/http-agents";
+import type { VoiceModeSettings } from "../../lib/types/http-voice";
 import type {
   SSHAgentReadinessResponse,
   SSHProbeShellsResponse,
@@ -609,6 +610,7 @@ export class ApiClient {
     default_utility_model?: string;
     sidebar_views?: unknown[];
     kanban_view_mode?: string;
+    voice_mode?: VoiceModeSettings;
   }): Promise<void> {
     await this.request("PATCH", "/api/v1/user/settings", settings);
   }
@@ -765,6 +767,25 @@ export class ApiClient {
       await this.seedSessionMessage(sessionId, {
         type: "tool_call",
         content: `synthetic tool call ${i + 1}`,
+      });
+    }
+  }
+
+  /**
+   * Seed `count` agent text messages (type "message"), oldest-to-newest.
+   * Unlike `seedToolCallMessages`, these are `message`-type rows so the chat's
+   * newest-window fetch contains a user/agent message and does not trigger the
+   * auto-backfill that would otherwise pull older pages on its own.
+   */
+  async seedAgentMessages(
+    sessionId: string,
+    count: number,
+    prefix = "filler message",
+  ): Promise<void> {
+    for (let i = 0; i < count; i++) {
+      await this.seedSessionMessage(sessionId, {
+        type: "message",
+        content: `${prefix} ${i + 1}`,
       });
     }
   }

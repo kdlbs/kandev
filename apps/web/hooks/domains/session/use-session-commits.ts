@@ -46,6 +46,15 @@ export function useSessionCommits(sessionId: string | null) {
   // still drives an initial refetch — otherwise prevRef would equal the live
   // value and `triggerBumped` would silently be false on first render.
   const prevRefetchTriggerRef = useRef<number>(REFETCH_TRIGGER_INIT);
+  // Tracks which sessionId we've already run an authoritative snapshot fetch
+  // for. Without this, the initial-fetch gate fires only when `commits` is
+  // undefined — but commits can be populated by a live `commit_created`
+  // event that arrived before mount, and a replayed/raced event can carry
+  // zero stats. The bad stats then stick because the snapshot (which would
+  // overwrite with correct stats from `git log --shortstat`) never runs.
+  // Anchoring to sessionId guarantees a snapshot per session regardless of
+  // how `commits` got populated.
+  const fetchedSessionRef = useRef<string | null>(null);
   // Retry timer for the not-ready case — agentctl recovers asynchronously
   // after a backend restart, so the first fetch may land before the workspace
   // execution has been ensured. Without a retry the store would be stuck on
@@ -125,33 +134,43 @@ export function useSessionCommits(sessionId: string | null) {
   );
 
   // Fetch commits when:
-  //  1. commits is undefined (initial load — clearSessionCommits is still
-  //     called by callers that genuinely want to drop the list, e.g. session
-  //     teardown).
-  //  2. the refetch trigger was bumped (commits_reset / branch_switched).
+  //  1. The hook mounts (or sessionId changes) — runs an authoritative
+  //     snapshot once per session so live `commit_created` events that
+  //     populated the store with stale/zero stats get overwritten by the
+  //     real `git log --shortstat` data.
+  //  2. The refetch trigger was bumped (commits_reset / branch_switched).
   //
-  // The trigger path replaces the old "clear then refetch from undefined"
-  // pattern: it keeps the previous commits in the store so the Changes panel
-  // doesn't flicker through its empty state while the refetch is in flight
-  // (stale-while-revalidate, matching how useCumulativeDiff works).
+  // The trigger path keeps the previous commits in the store while the
+  // refetch is in flight (stale-while-revalidate, matching how
+  // useCumulativeDiff works).
   useEffect(() => {
+    // !sessionId clears the ref BEFORE the connection check so a teardown
+    // during a disconnect still resets the gate — otherwise the ref would
+    // retain the old id, and a same-id reselect after reconnect would skip
+    // the snapshot fetch ("session teardown during disconnect can still
+    // block the next snapshot fetch for the same session").
+    if (!sessionId) {
+      fetchedSessionRef.current = null;
+      return;
+    }
     if (connectionStatus !== "connected") return;
-    if (!sessionId) return;
 
-    const needsInitialFetch = commits === undefined;
     const triggerBumped = refetchTrigger !== prevRefetchTriggerRef.current;
+    const sessionChanged = fetchedSessionRef.current !== sessionId;
 
     if (triggerBumped) {
       // Trigger-bump path: the backend already mutated state (reset / branch
       // switch). An empty response is authoritative — bypass the default
       // anti-race guard so the panel reflects the actual post-reset state.
       fetchCommits({ allowEmpty: true });
-    } else if (needsInitialFetch) {
+      fetchedSessionRef.current = sessionId;
+    } else if (sessionChanged) {
       fetchCommits();
+      fetchedSessionRef.current = sessionId;
     }
 
     prevRefetchTriggerRef.current = refetchTrigger;
-  }, [sessionId, commits, refetchTrigger, fetchCommits, connectionStatus]);
+  }, [sessionId, refetchTrigger, fetchCommits, connectionStatus]);
 
   // Cancel any in-flight retry on unmount, when the session changes, or when
   // the WS disconnects — a retry firing against a disconnected client would

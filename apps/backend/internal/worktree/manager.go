@@ -13,9 +13,16 @@ import (
 )
 
 const (
-	defaultGitFetchTimeout   = 90 * time.Second
-	defaultGitPullTimeout    = 60 * time.Second
-	defaultGitInspectTimeout = 10 * time.Second
+	defaultGitFetchTimeout = 90 * time.Second
+	defaultGitPullTimeout  = 60 * time.Second
+	// defaultGitInspectTimeout bounds cheap local git ref-inspection
+	// commands (rev-parse --verify, rev-parse --abbrev-ref HEAD).
+	// Normally <100ms, but on CrowdStrike-instrumented macOS every
+	// fork+exec is intercepted by syspolicyd so a single spawn can take
+	// 1–3s under load. 30s gives ~100x headroom over normal operation
+	// while still surfacing true hangs (credential prompts, stuck
+	// filters, filesystem stalls) in a reasonable window.
+	defaultGitInspectTimeout = 30 * time.Second
 	gitNoTags                = "--no-tags"
 )
 
@@ -91,8 +98,10 @@ type MultiRepoStore interface {
 	// GetWorktreesBySessionID returns all active worktrees for the session.
 	GetWorktreesBySessionID(ctx context.Context, sessionID string) ([]*Worktree, error)
 	// GetWorktreeBySessionAndRepository returns the active worktree for the
-	// given (session, repository) pair, or nil if none exists.
-	GetWorktreeBySessionAndRepository(ctx context.Context, sessionID, repositoryID string) (*Worktree, error)
+	// given (session, repository, branchSlug) triple, or nil if none exists.
+	// branchSlug scopes the lookup for multi-branch tasks; empty matches the
+	// legacy single-branch persistence shape.
+	GetWorktreeBySessionAndRepository(ctx context.Context, sessionID, repositoryID, branchSlug string) (*Worktree, error)
 }
 
 // NewManager creates a new worktree manager.

@@ -706,7 +706,20 @@ func (e *Executor) applyContainerCredentials(ctx context.Context, req *LaunchAge
 
 // buildRepoSpecs converts resolved repoInfos into per-repo launch specs for
 // the lifecycle layer. Used only when the task has more than one repository.
+// When the same RepositoryID appears more than once, the FIRST occurrence
+// keeps the flat layout (<task>/<repo>/) and subsequent occurrences nest
+// under <task>/<repo>/<branch-slug>/. This preserves the legacy single-
+// branch path for any worktree that already exists on disk, so a task
+// upgraded from single-branch to multi-branch doesn't orphan its primary
+// worktree directory.
 func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
+	repoCounts := make(map[string]int, len(allRepos))
+	for _, info := range allRepos {
+		if info.RepositoryID != "" {
+			repoCounts[info.RepositoryID]++
+		}
+	}
+	seenCount := make(map[string]int, len(allRepos))
 	out := make([]RepoSpec, 0, len(allRepos))
 	for _, info := range allRepos {
 		spec := RepoSpec{
@@ -732,6 +745,21 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 				spec.RepositoryURL = u
 			}
 		}
+		if repoCounts[info.RepositoryID] > 1 && seenCount[info.RepositoryID] > 0 {
+			slug := worktree.SanitizeBranchSlug(info.CheckoutBranch)
+			if slug == "" {
+				slug = worktree.SanitizeBranchSlug(info.BaseBranch)
+			}
+			// Branches whose names sanitize to "" (or two duplicate rows
+			// without explicit branch names) would otherwise collapse onto
+			// the same on-disk path as the first row. Fall back to a
+			// position-derived slug so siblings get distinct directories.
+			if slug == "" {
+				slug = fmt.Sprintf("branch-%d", seenCount[info.RepositoryID]+1)
+			}
+			spec.BranchSlug = slug
+		}
+		seenCount[info.RepositoryID]++
 		out = append(out, spec)
 	}
 	return out

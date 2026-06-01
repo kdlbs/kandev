@@ -126,6 +126,15 @@ func (c *GHClient) IsAuthenticated(ctx context.Context) (bool, error) {
 func (c *GHClient) RunAuthDiagnostics(ctx context.Context) *AuthDiagnostics {
 	ctx, cancel := withDefaultGHTimeout(ctx)
 	defer cancel()
+	release, err := acquireGHSlot(ctx)
+	if err != nil {
+		return &AuthDiagnostics{
+			Command:  "gh auth status --hostname github.com",
+			Output:   err.Error(),
+			ExitCode: -1,
+		}
+	}
+	defer release()
 	cmd := exec.CommandContext(ctx, "gh", "auth", "status", "--hostname", "github.com")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -851,6 +860,11 @@ func withDefaultGHTimeout(ctx context.Context) (context.Context, context.CancelF
 func (c *GHClient) run(ctx context.Context, args ...string) (string, error) {
 	ctx, cancel := withDefaultGHTimeout(ctx)
 	defer cancel()
+	release, err := acquireGHSlot(ctx)
+	if err != nil {
+		return "", fmt.Errorf("gh %s: %w", firstArg(args), err)
+	}
+	defer release()
 	cmd := exec.CommandContext(ctx, "gh", args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -867,6 +881,11 @@ func (c *GHClient) run(ctx context.Context, args ...string) (string, error) {
 func (c *GHClient) runWithStdin(ctx context.Context, stdin []byte, args ...string) (string, error) {
 	ctx, cancel := withDefaultGHTimeout(ctx)
 	defer cancel()
+	release, err := acquireGHSlot(ctx)
+	if err != nil {
+		return "", fmt.Errorf("gh %s: %w", firstArg(args), err)
+	}
+	defer release()
 	cmd := exec.CommandContext(ctx, "gh", args...)
 	cmd.Stdin = bytes.NewReader(stdin)
 	var stdout, stderr bytes.Buffer
@@ -877,6 +896,15 @@ func (c *GHClient) runWithStdin(ctx context.Context, stdin []byte, args ...strin
 		return stdout.String(), fmt.Errorf("gh %s: %w: %s", args[0], err, stderr.String())
 	}
 	return stdout.String(), nil
+}
+
+// firstArg returns args[0] when present, else "<no-args>". Used for error
+// messages when the semaphore acquisition fails before we even exec gh.
+func firstArg(args []string) string {
+	if len(args) == 0 {
+		return "<no-args>"
+	}
+	return args[0]
 }
 
 // ghRateLimitResponse mirrors the GET /rate_limit JSON shape so we can seed

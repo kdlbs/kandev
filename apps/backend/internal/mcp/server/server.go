@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/common/logger"
+	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"go.uber.org/zap"
@@ -37,6 +38,16 @@ const (
 	// ModeOffice registers plan and interaction tools for office agents.
 	// Kanban tools are excluded because office agents use CLI commands instead.
 	ModeOffice = "office"
+)
+
+// MCP payload keys reused across tool registrations. Extracted so a future
+// wire-protocol rename touches every tool in one place AND so goconst
+// doesn't flag the literals as repeated string occurrences.
+const (
+	mcpKeyTaskID         = "task_id"
+	mcpKeyRepositoryID   = "repository_id"
+	mcpKeyBaseBranch     = "base_branch"
+	mcpKeyCheckoutBranch = "checkout_branch"
 )
 
 // normalizeMode returns a valid MCP mode, defaulting unknown values to ModeTask.
@@ -342,6 +353,10 @@ func (s *Server) registerTools() {
 		count += 4
 		s.registerRelatedTasksTool()
 		count++
+		// Task-mode only: requires a live session to attach the new
+		// (repository, branch) to. External mode has no such context.
+		s.registerAddBranchToTaskTool()
+		count++
 	}
 	s.logger.Info("registered MCP tools",
 		zap.String("mode", s.mode),
@@ -527,6 +542,57 @@ IMPORTANT:
 		),
 		s.wrapHandler("create_task_kandev", s.createTaskHandler()),
 	)
+}
+
+// registerAddBranchToTaskTool registers add_branch_to_task_kandev. Scoped to
+// task mode only — external coding agents have no live session context to
+// attach the new worktree to, and shipping this tool through the shared
+// create-task path would silently widen the external surface.
+func (s *Server) registerAddBranchToTaskTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("add_branch_to_task_kandev",
+			mcp.WithDescription(`Attach an additional (repository, branch) worktree to an existing task.
+
+Use this when the task should open more than one PR — same repo with different branches, or a second repository entirely. The new branch gets its own worktree under the task directory and behaves like any other multi-repo entry for changes, PRs, and review surfaces.
+
+IMPORTANT:
+- Only works on tasks running the WORKTREE executor. Tasks on docker / sprites / local-pc / SSH / remote_docker reject this tool because sibling worktrees are a git-worktree-specific layout — other executors bind one workspace path per task and the new branch would silently never appear on disk.
+- task_id defaults to your CURRENT task when omitted — pass it explicitly only to target a different task.
+- repository_id is OPTIONAL when the task has a single repository attached (the common case). The service auto-resolves to that repo. Multi-repo tasks must pass it explicitly.
+- checkout_branch is the branch the new worktree will check out. Leave empty to create a fresh feature branch from base_branch.
+- base_branch is optional; defaults to the repository's default_branch.
+- The (task_id, repository_id, base_branch, checkout_branch) tuple must be unique on the task — re-adding the same combination is an error, not a no-op.`),
+			mcp.WithString("task_id", mcp.Description("The task to attach the branch to. Defaults to the current task when omitted.")),
+			mcp.WithString("repository_id", mcp.Description("Repository to attach. Optional for single-repo tasks (auto-resolved). Required for multi-repo tasks.")),
+			mcp.WithString("checkout_branch", mcp.Description("Existing branch to check out in the new worktree (e.g. a PR head branch). Empty to create a fresh feature branch from base_branch.")),
+			mcp.WithString("base_branch", mcp.Description("Branch to base the worktree on. Defaults to the repository's default_branch.")),
+		),
+		s.wrapHandler("add_branch_to_task_kandev", s.addBranchToTaskHandler()),
+	)
+}
+
+func (s *Server) addBranchToTaskHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID := req.GetString(mcpKeyTaskID, "")
+		if taskID == "" {
+			taskID = s.taskID
+		}
+		if taskID == "" {
+			return mcp.NewToolResultError("task_id is required (no current task context to default to)"), nil
+		}
+		payload := map[string]interface{}{
+			mcpKeyTaskID:         taskID,
+			mcpKeyRepositoryID:   req.GetString(mcpKeyRepositoryID, ""),
+			mcpKeyCheckoutBranch: req.GetString(mcpKeyCheckoutBranch, ""),
+			mcpKeyBaseBranch:     req.GetString(mcpKeyBaseBranch, ""),
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPAddBranchToTask, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
 }
 
 func (s *Server) registerInteractionTools() {

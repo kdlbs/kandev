@@ -194,7 +194,7 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		cfg:             cfg,
 		logger:          l,
 		agentID:         cfg.AgentID,
-		normalizer:      NewNormalizer(),
+		normalizer:      NewNormalizer(cfg.AgentID),
 		updatesCh:       make(chan AgentEvent, 100),
 		activeToolCalls: make(map[string]*streams.NormalizedPayload),
 		activeMonitors:  make(map[string]map[string]string),

@@ -243,13 +243,14 @@ func (r *Repository) initTaskSchema() error {
 		task_id TEXT NOT NULL,
 		repository_id TEXT NOT NULL,
 		base_branch TEXT DEFAULT '',
+		checkout_branch TEXT DEFAULT '',
 		position INTEGER DEFAULT 0,
 		metadata TEXT DEFAULT '{}',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
 		FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE,
-		UNIQUE(task_id, repository_id)
+		UNIQUE(task_id, repository_id, base_branch, checkout_branch)
 	);
 
 	CREATE TABLE IF NOT EXISTS repositories (

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,6 +28,10 @@ func NewSQLiteStore(writer, reader *sqlx.DB) (*SQLiteStore, error) {
 }
 
 // initSchema creates the task_session_worktrees table if it doesn't exist.
+// `branch_slug` is required for multi-branch tasks (same repo, multiple
+// branches): without it, reuse lookups by (session_id, repository_id)
+// silently collapse two distinct worktrees into one, which then trickles
+// down to a single on-disk directory shared between rows.
 func (s *SQLiteStore) initSchema() error {
 	schema := `
 	CREATE TABLE IF NOT EXISTS task_session_worktrees (
@@ -34,6 +39,7 @@ func (s *SQLiteStore) initSchema() error {
 		session_id TEXT NOT NULL,
 		worktree_id TEXT NOT NULL,
 		repository_id TEXT NOT NULL,
+		branch_slug TEXT NOT NULL DEFAULT '',
 		position INTEGER DEFAULT 0,
 		worktree_path TEXT DEFAULT '',
 		worktree_branch TEXT DEFAULT '',
@@ -52,8 +58,30 @@ func (s *SQLiteStore) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_task_session_worktrees_status ON task_session_worktrees(status);
 	`
 
-	_, err := s.db.Exec(schema)
-	return err
+	if _, err := s.db.Exec(schema); err != nil {
+		return err
+	}
+	// Idempotent ALTER for upgrades. Pre-existing rows get branch_slug='' which
+	// matches the legacy single-branch identity exactly.
+	if _, err := s.db.Exec(`ALTER TABLE task_session_worktrees ADD COLUMN branch_slug TEXT NOT NULL DEFAULT ''`); err != nil {
+		// SQLite returns "duplicate column name" when the column already exists;
+		// treat that as success so the migration is replay-safe.
+		if !isDuplicateColumnError(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+func isDuplicateColumnError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// SQLite emits "duplicate column name: <col>" for ALTER TABLE ADD COLUMN
+	// against an existing column. The broader "already exists" substring also
+	// matches unrelated DDL errors (e.g. "table X already exists"), which
+	// would silently swallow real schema failures — keep the match narrow.
+	return strings.Contains(err.Error(), "duplicate column name")
 }
 
 // CreateWorktree persists a new worktree record.
@@ -77,19 +105,20 @@ func (s *SQLiteStore) CreateWorktree(ctx context.Context, wt *Worktree) error {
 
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO task_session_worktrees (
-			id, session_id, worktree_id, repository_id, position,
+			id, session_id, worktree_id, repository_id, branch_slug, position,
 			worktree_path, worktree_branch, status,
 			created_at, updated_at, merged_at, deleted_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(session_id, worktree_id) DO UPDATE SET
 			repository_id = excluded.repository_id,
+			branch_slug = excluded.branch_slug,
 			worktree_path = excluded.worktree_path,
 			worktree_branch = excluded.worktree_branch,
 			status = excluded.status,
 			updated_at = excluded.updated_at,
 			merged_at = excluded.merged_at,
 			deleted_at = excluded.deleted_at
-	`), uuid.New().String(), wt.SessionID, wt.ID, wt.RepositoryID, 0,
+	`), uuid.New().String(), wt.SessionID, wt.ID, wt.RepositoryID, wt.BranchSlug, 0,
 		wt.Path, wt.Branch, wt.Status,
 		wt.CreatedAt, wt.UpdatedAt, wt.MergedAt, wt.DeletedAt)
 
@@ -111,6 +140,7 @@ func (s *SQLiteStore) GetWorktreeByID(ctx context.Context, id string) (*Worktree
 			r.local_path,
 			tsw.worktree_path,
 			tsw.worktree_branch,
+			COALESCE(tsw.branch_slug, ''),
 			s.base_branch,
 			tsw.status,
 			tsw.created_at,
@@ -129,6 +159,7 @@ func (s *SQLiteStore) GetWorktreeByID(ctx context.Context, id string) (*Worktree
 		&repositoryPath,
 		&wt.Path,
 		&wt.Branch,
+		&wt.BranchSlug,
 		&baseBranch,
 		&wt.Status,
 		&wt.CreatedAt,
@@ -173,6 +204,7 @@ func scanWorktreeRow(row *sql.Row) (*Worktree, error) {
 		&repositoryPath,
 		&wt.Path,
 		&wt.Branch,
+		&wt.BranchSlug,
 		&baseBranch,
 		&wt.Status,
 		&wt.CreatedAt,
@@ -214,6 +246,7 @@ func (s *SQLiteStore) GetWorktreeBySessionID(ctx context.Context, sessionID stri
 			r.local_path,
 			tsw.worktree_path,
 			tsw.worktree_branch,
+			COALESCE(tsw.branch_slug, ''),
 			s.base_branch,
 			tsw.status,
 			tsw.created_at,
@@ -240,6 +273,7 @@ func (s *SQLiteStore) GetWorktreeByTaskID(ctx context.Context, taskID string) (*
 			r.local_path,
 			tsw.worktree_path,
 			tsw.worktree_branch,
+			COALESCE(tsw.branch_slug, ''),
 			s.base_branch,
 			tsw.status,
 			tsw.created_at,
@@ -266,6 +300,7 @@ func (s *SQLiteStore) GetWorktreesByTaskID(ctx context.Context, taskID string) (
 			r.local_path,
 			tsw.worktree_path,
 			tsw.worktree_branch,
+			COALESCE(tsw.branch_slug, ''),
 			s.base_branch,
 			tsw.status,
 			tsw.created_at,
@@ -296,6 +331,7 @@ func (s *SQLiteStore) GetWorktreesByRepositoryID(ctx context.Context, repoID str
 			r.local_path,
 			tsw.worktree_path,
 			tsw.worktree_branch,
+			COALESCE(tsw.branch_slug, ''),
 			s.base_branch,
 			tsw.status,
 			tsw.created_at,
@@ -377,6 +413,7 @@ func (s *SQLiteStore) ListActiveWorktrees(ctx context.Context) ([]*Worktree, err
 			r.local_path,
 			tsw.worktree_path,
 			tsw.worktree_branch,
+			COALESCE(tsw.branch_slug, ''),
 			s.base_branch,
 			tsw.status,
 			tsw.created_at,
@@ -441,6 +478,7 @@ func (s *SQLiteStore) scanWorktrees(rows *sql.Rows) ([]*Worktree, error) {
 			&repositoryPath,
 			&wt.Path,
 			&wt.Branch,
+			&wt.BranchSlug,
 			&baseBranch,
 			&wt.Status,
 			&wt.CreatedAt,
@@ -482,6 +520,7 @@ func (s *SQLiteStore) GetWorktreesBySessionID(ctx context.Context, sessionID str
 			r.local_path,
 			tsw.worktree_path,
 			tsw.worktree_branch,
+			COALESCE(tsw.branch_slug, ''),
 			s.base_branch,
 			tsw.status,
 			tsw.created_at,
@@ -503,9 +542,12 @@ func (s *SQLiteStore) GetWorktreesBySessionID(ctx context.Context, sessionID str
 }
 
 // GetWorktreeBySessionAndRepository returns the active worktree for the
-// given (session, repository) pair, or nil if none exists.
-// Implements MultiRepoStore.
-func (s *SQLiteStore) GetWorktreeBySessionAndRepository(ctx context.Context, sessionID, repositoryID string) (*Worktree, error) {
+// given (session, repository, branchSlug) triple, or nil if none exists.
+// branchSlug scopes the lookup so multi-branch tasks (same repo, multiple
+// branches) don't collapse — an empty slug matches the legacy
+// single-branch persistence shape, so single-branch callers remain
+// unchanged. Implements MultiRepoStore.
+func (s *SQLiteStore) GetWorktreeBySessionAndRepository(ctx context.Context, sessionID, repositoryID, branchSlug string) (*Worktree, error) {
 	row := s.ro.QueryRowContext(ctx, s.ro.Rebind(`
 		SELECT
 			tsw.worktree_id,
@@ -515,6 +557,7 @@ func (s *SQLiteStore) GetWorktreeBySessionAndRepository(ctx context.Context, ses
 			r.local_path,
 			tsw.worktree_path,
 			tsw.worktree_branch,
+			COALESCE(tsw.branch_slug, ''),
 			s.base_branch,
 			tsw.status,
 			tsw.created_at,
@@ -524,9 +567,11 @@ func (s *SQLiteStore) GetWorktreeBySessionAndRepository(ctx context.Context, ses
 		FROM task_session_worktrees tsw
 		INNER JOIN task_sessions s ON tsw.session_id = s.id
 		LEFT JOIN repositories r ON tsw.repository_id = r.id
-		WHERE tsw.session_id = ? AND tsw.repository_id = ? AND tsw.status = ?
+		WHERE tsw.session_id = ? AND tsw.repository_id = ?
+		  AND COALESCE(tsw.branch_slug, '') = ?
+		  AND tsw.status = ?
 		LIMIT 1
-	`), sessionID, repositoryID, StatusActive)
+	`), sessionID, repositoryID, branchSlug, StatusActive)
 	return scanWorktreeRow(row)
 }
 

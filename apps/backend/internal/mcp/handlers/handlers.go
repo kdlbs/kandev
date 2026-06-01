@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
@@ -164,6 +165,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPListTasks, h.handleListTasks)
 	d.RegisterFunc(ws.ActionMCPCreateTask, h.handleCreateTask)
 	d.RegisterFunc(ws.ActionMCPUpdateTask, h.handleUpdateTask)
+	d.RegisterFunc(ws.ActionMCPAddBranchToTask, h.handleAddBranchToTask)
 	d.RegisterFunc(ws.ActionMCPMessageTask, h.handleMessageTask)
 	d.RegisterFunc(ws.ActionMCPGetTaskConversation, h.handleGetTaskConversation)
 	d.RegisterFunc(ws.ActionMCPAskUserQuestion, h.handleAskUserQuestion)
@@ -172,7 +174,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPUpdateTaskPlan, h.handleUpdateTaskPlan)
 	d.RegisterFunc(ws.ActionMCPDeleteTaskPlan, h.handleDeleteTaskPlan)
 	d.RegisterFunc(ws.ActionMCPClarificationTimeout, h.handleClarificationTimeout)
-	count := 14
+	count := 15
 
 	// Config-mode handlers (registered when config deps are set)
 	if h.workflowSvc != nil {
@@ -723,6 +725,73 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
 }
 
+// handleAddBranchToTask attaches a new (repository, checkout_branch) pair to
+// an existing task. Mirrors create-time multi-repo attachment but additive:
+// the same repository may be added on a different branch, materializing a
+// second worktree under the task's directory.
+func (h *Handlers) handleAddBranchToTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		TaskID         string `json:"task_id"`
+		RepositoryID   string `json:"repository_id"`
+		BaseBranch     string `json:"base_branch"`
+		CheckoutBranch string `json:"checkout_branch"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.TaskID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	}
+	// repository_id is optional: the service defaults to the task's only
+	// repository (or its primary row) when omitted. Multi-repo tasks force
+	// the agent to pass one explicitly via the service-level error.
+	taskRepo, err := h.taskSvc.AddBranchToTask(ctx, service.AddBranchToTaskRequest{
+		TaskID:         req.TaskID,
+		RepositoryID:   req.RepositoryID,
+		BaseBranch:     req.BaseBranch,
+		CheckoutBranch: req.CheckoutBranch,
+	})
+	if err != nil {
+		h.logger.Error("failed to add branch to task", zap.Error(err))
+		code := classifyAddBranchError(err)
+		return ws.NewError(msg.ID, msg.Action, code, "Failed to add branch: "+err.Error(), nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"id":              taskRepo.ID,
+		keyTaskID:         taskRepo.TaskID,
+		keyRepositoryID:   taskRepo.RepositoryID,
+		keyBaseBranch:     taskRepo.BaseBranch,
+		keyCheckoutBranch: taskRepo.CheckoutBranch,
+		keyPosition:       taskRepo.Position,
+	})
+}
+
+// classifyAddBranchError maps service-layer add_branch failures to ws error
+// codes so MCP agents can react to user-fixable input mistakes (missing
+// task, duplicate branch, wrong executor) instead of treating them as
+// backend faults.
+func classifyAddBranchError(err error) string {
+	if err == nil {
+		return ws.ErrorCodeInternalError
+	}
+	if errors.Is(err, taskrepo.ErrTaskNotFound) {
+		return ws.ErrorCodeNotFound
+	}
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "does not belong to task's workspace"):
+		return ws.ErrorCodeNotFound
+	case strings.Contains(msg, "is already attached"),
+		strings.Contains(msg, "conflicts with existing branch"):
+		return ws.ErrorCodeConflict
+	case strings.Contains(msg, "repository_id is required"),
+		strings.Contains(msg, "only supported on the worktree executor"),
+		strings.Contains(msg, "task_id is required"):
+		return ws.ErrorCodeValidation
+	}
+	return ws.ErrorCodeInternalError
+}
+
 // handleMessageTask sends a prompt to an existing task on behalf of an agent
 // in another task. The MCP server (agentctl) injects the sender's task_id and
 // session_id into the payload; this handler validates the sender, looks up its
@@ -983,6 +1052,17 @@ func (e *queueFullDispatchError) toPayload() map[string]interface{} {
 // errorField names the well-known structured details key used to surface error
 // codes in MCP tool responses (extracted to satisfy goconst's repeated-string rule).
 const errorField = "error"
+
+// MCP payload / response keys reused across multiple handlers. Extracted so
+// goconst doesn't flag the literals as repeated, and so a future rename of
+// a wire-protocol key updates every handler in one place.
+const (
+	keyTaskID         = "task_id"
+	keyRepositoryID   = "repository_id"
+	keyBaseBranch     = "base_branch"
+	keyCheckoutBranch = "checkout_branch"
+	keyPosition       = "position"
+)
 
 // dispatchTaskMessage routes a message to the right delivery path based on session state.
 // Returns the action taken: "queued", "sent", or "started".

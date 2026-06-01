@@ -361,6 +361,10 @@ export type SessionRuntimeSliceActions = {
   setActiveProcess: (sessionId: string, processId: string) => void;
   setGitStatus: (sessionId: string, gitStatus: GitStatusEntry) => void;
   clearGitStatus: (sessionId: string) => void;
+  /** Drops the pre-multi-repo (empty-repo-name) git-status entries so a
+   *  freshly-multi-branch session doesn't surface a stale snapshot from the
+   *  workspace tracker that was replaced on the backend during rescan. */
+  clearLegacyGitStatusEntry: (sessionId: string) => void;
   registerSessionEnvironment: (sessionId: string, environmentId: string) => void;
   setContextWindow: (sessionId: string, contextWindow: ContextWindowEntry) => void;
   // Session commit actions

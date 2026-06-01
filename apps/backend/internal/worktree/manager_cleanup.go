@@ -48,7 +48,7 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 
 		cmd := exec.CommandContext(ctx, "git", "branch", "-D", wt.Branch)
 		cmd.Dir = wt.RepositoryPath
-		if output, err := cmd.CombinedOutput(); err != nil {
+		if output, err := runGitCmdCombinedOutput(ctx, cmd); err != nil {
 			m.logger.Warn("failed to delete branch from main repository",
 				zap.String("branch", wt.Branch),
 				zap.String("repository_path", wt.RepositoryPath),
@@ -80,7 +80,7 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 	// affects its own repo; siblings on other repos must remain cached.
 	m.mu.Lock()
 	if wt.SessionID != "" {
-		delete(m.worktrees, cacheKey(wt.SessionID, wt.RepositoryID))
+		delete(m.worktrees, cacheKey(wt.SessionID, wt.RepositoryID, wt.BranchSlug))
 	}
 	m.mu.Unlock()
 
@@ -204,7 +204,7 @@ func (m *Manager) CleanupWorktrees(ctx context.Context, worktrees []*Worktree) e
 			continue
 		}
 		if wt.SessionID != "" {
-			delete(m.worktrees, cacheKey(wt.SessionID, wt.RepositoryID))
+			delete(m.worktrees, cacheKey(wt.SessionID, wt.RepositoryID, wt.BranchSlug))
 		}
 	}
 	m.mu.Unlock()
@@ -228,7 +228,7 @@ func (m *Manager) removeWorktreeDir(ctx context.Context, worktreePath, repoPath 
 	// First try git worktree remove
 	cmd := exec.CommandContext(ctx, "git", "worktree", "remove", "--force", worktreePath)
 	cmd.Dir = repoPath
-	if output, err := cmd.CombinedOutput(); err != nil {
+	if output, err := runGitCmdCombinedOutput(ctx, cmd); err != nil {
 		m.logger.Debug("git worktree remove failed, falling back to rm",
 			zap.String("output", string(output)),
 			zap.Error(err))
@@ -240,7 +240,7 @@ func (m *Manager) removeWorktreeDir(ctx context.Context, worktreePath, repoPath 
 		// Prune stale worktree entries
 		pruneCmd := exec.CommandContext(ctx, "git", "worktree", "prune")
 		pruneCmd.Dir = repoPath
-		if err := pruneCmd.Run(); err != nil {
+		if err := runGitCmd(ctx, pruneCmd); err != nil {
 			m.logger.Debug("git worktree prune failed", zap.Error(err))
 		}
 	}

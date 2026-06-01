@@ -24,6 +24,7 @@ type ReadFilePayload = {
 
 type ToolReadMetadata = {
   tool_call_id?: string;
+  title?: string;
   status?: "pending" | "running" | "complete" | "error";
   normalized?: { read_file?: ReadFilePayload };
 };

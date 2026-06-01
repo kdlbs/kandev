@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 // ProtocolSSH is the SSH git protocol.
@@ -20,7 +22,7 @@ const ProtocolHTTPS = "https"
 func DetectGitProtocol() string {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "gh", "config", "get", "git_protocol").Output()
+	out, err := subproc.RunGHOutput(ctx, exec.CommandContext(ctx, "gh", "config", "get", "git_protocol"))
 	if err == nil {
 		if strings.TrimSpace(string(out)) == ProtocolHTTPS {
 			return ProtocolHTTPS

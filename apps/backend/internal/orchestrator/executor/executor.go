@@ -337,6 +337,11 @@ type RepoSpec struct {
 	RepoSetupScript      string
 	RepoCleanupScript    string
 	CopyFiles            string
+	// BranchSlug, when non-empty, nests the worktree under the repo dir so
+	// the same repo can host multiple branches within one task. Set by the
+	// orchestrator when buildRepoSpecs detects multiple rows sharing a
+	// RepositoryID; empty otherwise to preserve the single-branch layout.
+	BranchSlug string
 }
 
 // McpModeConfig activates config-mode MCP tools (workflow steps, agents, MCP

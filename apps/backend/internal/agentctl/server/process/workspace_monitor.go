@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 )
 
@@ -231,7 +232,7 @@ func (wt *WorkspaceTracker) getWorkspaceState(ctx context.Context) (workspaceSta
 	cmd := wt.pollingGitCommand(gitCtx, "diff-files", "--name-only")
 	var stderrBuf bytes.Buffer
 	cmd.Stderr = &stderrBuf
-	out, err := cmd.Output()
+	out, err := subproc.RunGitOutput(gitCtx, cmd)
 	if err != nil {
 		return state, fmt.Errorf("git diff-files in %s: %w (stderr: %s)",
 			wt.workDir, err, strings.TrimSpace(stderrBuf.String()))
@@ -284,7 +285,7 @@ func (wt *WorkspaceTracker) getUntrackedFilesID(ctx context.Context) (string, er
 	cmd := wt.pollingGitCommand(ctx, "ls-files", "--others", "--exclude-standard")
 	var stderrBuf bytes.Buffer
 	cmd.Stderr = &stderrBuf
-	out, err := cmd.Output()
+	out, err := subproc.RunGitOutput(ctx, cmd)
 	if err != nil {
 		return "", fmt.Errorf("git ls-files in %s: %w (stderr: %s)",
 			wt.workDir, err, strings.TrimSpace(stderrBuf.String()))

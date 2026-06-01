@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -15,17 +16,18 @@ import (
 
 // --- PR Watch operations ---
 
-// CreatePRWatch creates a new PR watch for a (session, repository) pair.
-// `repositoryID` may be empty for legacy single-repo callers; multi-repo
-// callers must pass the per-task repository_id so each repo gets its own
-// watch row.
+// CreatePRWatch creates a new PR watch for a (session, repository, branch)
+// triple. `repositoryID` may be empty for legacy single-repo callers;
+// multi-repo callers must pass the per-task repository_id so each repo gets
+// its own watch row. Multi-branch tasks store one watch per branch so a
+// secondary branch's push isn't lost behind the primary's existing watch.
 func (s *Service) CreatePRWatch(ctx context.Context, sessionID, taskID, repositoryID, owner, repo string, prNumber int, branch string) (*PRWatch, error) {
-	existing, err := s.store.GetPRWatchBySessionAndRepo(ctx, sessionID, repositoryID)
+	existing, err := s.store.GetPRWatchBySessionRepoAndBranch(ctx, sessionID, repositoryID, branch)
 	if err != nil {
 		return nil, err
 	}
 	if existing != nil {
-		return existing, nil // already watching this (session, repo)
+		return existing, nil // already watching this (session, repo, branch)
 	}
 	w := &PRWatch{
 		SessionID:    sessionID,
@@ -42,6 +44,7 @@ func (s *Service) CreatePRWatch(ctx context.Context, sessionID, taskID, reposito
 	s.logger.Info("created PR watch",
 		zap.String("session_id", sessionID),
 		zap.String("repository_id", repositoryID),
+		zap.String("branch", branch),
 		zap.Int("pr_number", prNumber))
 	return w, nil
 }
@@ -56,6 +59,13 @@ func (s *Service) GetPRWatchBySession(ctx context.Context, sessionID string) (*P
 // GetPRWatchBySessionAndRepo returns the PR watch for a (session, repo) pair.
 func (s *Service) GetPRWatchBySessionAndRepo(ctx context.Context, sessionID, repositoryID string) (*PRWatch, error) {
 	return s.store.GetPRWatchBySessionAndRepo(ctx, sessionID, repositoryID)
+}
+
+// GetPRWatchBySessionRepoAndBranch returns the PR watch for a precise
+// (session, repository, branch) triple — used by push detection in
+// multi-branch tasks so each branch's push lands on its own watch row.
+func (s *Service) GetPRWatchBySessionRepoAndBranch(ctx context.Context, sessionID, repositoryID, branch string) (*PRWatch, error) {
+	return s.store.GetPRWatchBySessionRepoAndBranch(ctx, sessionID, repositoryID, branch)
 }
 
 // ListPRWatchesBySession returns every PR watch for a session.
@@ -116,14 +126,15 @@ func (s *Service) CheckPRWatch(ctx context.Context, watch *PRWatch) (*PRStatus, 
 	return status, hasNew, nil
 }
 
-// EnsurePRWatch creates a PRWatch with pr_number=0 for a (session, repo) pair
-// if one doesn't already exist. The poller will detect the PR by searching
-// for the branch on GitHub. `repositoryID` is empty for legacy single-repo
-// callers; multi-repo callers MUST pass the per-task repository_id so each
-// repo gets its own watch (the table's UNIQUE(session_id, repository_id) used
-// to be UNIQUE(session_id), which silently dropped second-repo watches).
+// EnsurePRWatch creates a PRWatch with pr_number=0 for a
+// (session, repo, branch) triple if one doesn't already exist. The poller
+// will detect the PR by searching for the branch on GitHub. `repositoryID`
+// is empty for legacy single-repo callers; multi-repo / multi-branch
+// callers MUST pass the per-task repository_id and the worktree's branch
+// so each branch gets its own watch — keying on (session, repo) alone
+// drops secondary branches' watches behind the primary's existing row.
 func (s *Service) EnsurePRWatch(ctx context.Context, sessionID, taskID, repositoryID, owner, repo, branch string) (*PRWatch, error) {
-	existing, err := s.store.GetPRWatchBySessionAndRepo(ctx, sessionID, repositoryID)
+	existing, err := s.store.GetPRWatchBySessionRepoAndBranch(ctx, sessionID, repositoryID, branch)
 	if err != nil {
 		return nil, err
 	}
@@ -157,14 +168,18 @@ func (s *Service) EnsurePRWatch(ctx context.Context, sessionID, taskID, reposito
 // callers MUST pass it — empty causes ReplaceTaskPR to wipe the entire task's
 // PR rows (legacy "delete all" branch), which is what older code relied on.
 func (s *Service) AssociatePRWithTask(ctx context.Context, taskID, repositoryID string, pr *PR) (*TaskPR, error) {
-	// Check for an existing PR for this exact (task, repo). Multi-repo callers
-	// must scope by repository_id so the same PR number in two repos doesn't
-	// short-circuit the second association.
-	existing, err := s.store.GetTaskPRByRepository(ctx, taskID, repositoryID)
+	// Multi-branch: scope the "already-current" short-circuit by exact
+	// pr_number too. A task can hold multiple PR rows per (task, repo) on
+	// different branches; the legacy by-repo lookup returns whichever row
+	// was most recently updated, which would make Associate think the
+	// secondary PR is already there (wrong PR number) and skip the insert
+	// — or worse, fall through to ReplaceTaskPR which used to delete the
+	// sibling row.
+	existing, err := s.store.GetTaskPRByRepoAndNumber(ctx, taskID, repositoryID, pr.Number)
 	if err != nil {
 		return nil, err
 	}
-	if existing != nil && existing.PRNumber == pr.Number {
+	if existing != nil {
 		return existing, nil
 	}
 	tp := &TaskPR{
@@ -185,19 +200,15 @@ func (s *Service) AssociatePRWithTask(ctx context.Context, taskID, repositoryID 
 		MergedAt:     pr.MergedAt,
 		ClosedAt:     pr.ClosedAt,
 	}
-	// ReplaceTaskPR atomically deletes any existing association for the
-	// (task, repository) pair and inserts the new row inside one transaction.
-	// Scoping by repository_id keeps multi-repo tasks intact; legacy callers
-	// (repositoryID == "") still get the "delete all" semantics.
+	// ReplaceTaskPR upserts the row matching (task, repository, pr_number).
+	// Multi-branch tasks may already hold sibling rows for the SAME
+	// (task, repository) on different PR numbers — ReplaceTaskPR no longer
+	// touches them. The early-return above guarantees we only reach this
+	// line when no row for the exact pr_number exists yet, so this is a
+	// straight insert in steady state; the delete-then-insert form is
+	// retained so a retry that races a partial write resolves cleanly.
 	if err := s.store.ReplaceTaskPR(ctx, tp); err != nil {
 		return nil, fmt.Errorf("replace task PR: %w", err)
-	}
-	if existing != nil {
-		s.logger.Info("replaced stale task PR association",
-			zap.String("task_id", taskID),
-			zap.String("repository_id", repositoryID),
-			zap.Int("old_pr_number", existing.PRNumber),
-			zap.Int("new_pr_number", pr.Number))
 	}
 
 	// Publish event for UI
@@ -343,8 +354,7 @@ func (s *Service) ListWorkspaceTaskPRs(ctx context.Context, workspaceID string) 
 	}
 
 	// Collect stale task IDs for background refresh. A task is considered stale
-	// if any of its PRs are stale; the sync is per-task so we only need to
-	// queue each task once.
+	// if any of its PRs are stale.
 	staleTasks := make(map[string]struct{})
 	for taskID, prs := range result {
 		for _, tp := range prs {
@@ -354,30 +364,95 @@ func (s *Service) ListWorkspaceTaskPRs(ctx context.Context, workspaceID string) 
 			}
 		}
 	}
-	staleTaskIDs := make([]string, 0, len(staleTasks))
-	for id := range staleTasks {
-		staleTaskIDs = append(staleTaskIDs, id)
+	if len(staleTasks) > 0 {
+		s.refreshStaleWorkspaceWatches(workspaceID, staleTasks)
 	}
-
-	// Background refresh with bounded concurrency
-	if len(staleTaskIDs) > 0 {
-		go func() {
-			sem := make(chan struct{}, 5)
-			for _, taskID := range staleTaskIDs {
-				sem <- struct{}{}
-				go func(id string) {
-					defer func() { <-sem }()
-					syncCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-					defer cancel()
-					if _, syncErr := s.TriggerPRSyncAll(syncCtx, id); syncErr != nil {
-						s.logger.Debug("background PR sync failed", zap.String("task_id", id), zap.Error(syncErr))
-					}
-				}(taskID)
-			}
-		}()
-	}
-
 	return result, nil
+}
+
+// refreshStaleWorkspaceWatches fans in all stale watches across the stale
+// tasks and runs ONE batched GraphQL sync, so a 40-watch workspace fires
+// ~2 gh subprocess calls instead of 40 (one per_task * five concurrent).
+// Best-effort: errors are logged at Debug and the cached result is still
+// returned to the caller. Background goroutine so the WS handler returns
+// immediately.
+//
+// Coalesces overlapping refreshes for the same workspace: if a refresh is
+// already in flight, subsequent calls drop their stale set on the floor
+// and let the running goroutine finish. Without this, the frontend's 5s
+// poll (or a burst of workspace events) would stack goroutines that each
+// fire a batched GraphQL request, defeating the per-process throttle
+// once the cap is small enough to start queueing.
+func (s *Service) refreshStaleWorkspaceWatches(workspaceID string, staleTasks map[string]struct{}) {
+	if _, inflight := s.inflightWorkspaceRefreshes.LoadOrStore(workspaceID, struct{}{}); inflight {
+		return
+	}
+	// Track the goroutine on the service WaitGroup so Stop() drains it,
+	// and derive syncCtx from s.stopCtx so shutdown cancels the in-flight
+	// sync instead of letting it run past process teardown. See
+	// apps/backend/AGENTS.md "Goroutine ownership and leak testing".
+	s.bgWG.Add(1)
+	go func() {
+		defer s.bgWG.Done()
+		defer s.inflightWorkspaceRefreshes.Delete(workspaceID)
+		syncCtx, cancel := context.WithTimeout(s.stopCtx, 60*time.Second)
+		defer cancel()
+		var allWatches []*PRWatch
+		for taskID := range staleTasks {
+			watches, err := s.store.ListPRWatchesByTask(syncCtx, taskID)
+			if err != nil {
+				s.logger.Debug("list PR watches for refresh failed",
+					zap.String("task_id", taskID), zap.Error(err))
+				continue
+			}
+			allWatches = append(allWatches, watches...)
+		}
+		if len(allWatches) == 0 {
+			return
+		}
+		if _, err := s.SyncWatchesBatched(syncCtx, allWatches); err != nil {
+			// Batched fetch failed (noop client, auth blip, GraphQL error).
+			// Fall back to per-task sync with bounded concurrency so we
+			// don't spawn one gh per watch in lockstep.
+			s.logger.Debug("batched workspace PR sync failed; falling back per-task",
+				zap.Int("watches", len(allWatches)), zap.Error(err))
+			s.refreshStaleTasksPerTask(syncCtx, staleTasks)
+		}
+	}()
+}
+
+// refreshStaleTasksPerTask is the legacy bounded-concurrency fallback for
+// when SyncWatchesBatched can't be used (e.g. NoopClient). Kept small —
+// the global gh subprocess semaphore in gh_throttle.go is what actually
+// caps fan-out now, the worker pool here just bounds goroutine count.
+//
+// Blocks until every spawned goroutine returns. The caller relies on this
+// to keep `inflightWorkspaceRefreshes` from being cleared while
+// TriggerPRSyncAll is still writing PR-watch state — otherwise a follow-up
+// refresh for the same workspace could race the still-running fallback.
+func (s *Service) refreshStaleTasksPerTask(ctx context.Context, staleTasks map[string]struct{}) {
+	sem := make(chan struct{}, 5)
+	var wg sync.WaitGroup
+	for taskID := range staleTasks {
+		// Honor ctx so shutdown / parent-timeout stops queuing new tasks
+		// instead of waiting on a busy semaphore slot.
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			wg.Wait()
+			return
+		}
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			if _, syncErr := s.TriggerPRSyncAll(ctx, id); syncErr != nil {
+				s.logger.Debug("background PR sync failed",
+					zap.String("task_id", id), zap.Error(syncErr))
+			}
+		}(taskID)
+	}
+	wg.Wait()
 }
 
 // findTaskPRForStatus locates the TaskPR row matching the (task, owner, repo,
@@ -537,6 +612,12 @@ func (s *Service) TriggerPRSync(ctx context.Context, taskID string) (*TaskPR, er
 // touches the most recently updated watch and silently leaves the other
 // repos' PRs stale. Returns an empty slice (not nil) when the task has no
 // watches.
+//
+// When the client supports GraphQL (the production path) all of the task's
+// watches are fetched in 1-2 batched gh subprocess calls. The per-watch
+// fallback below is reached only for the NoopClient (auth disabled) or
+// when the batched fetch itself fails; in those cases we fan out one
+// subprocess per watch as before.
 func (s *Service) TriggerPRSyncAll(ctx context.Context, taskID string) ([]*TaskPR, error) {
 	watches, err := s.store.ListPRWatchesByTask(ctx, taskID)
 	if err != nil {
@@ -552,6 +633,21 @@ func (s *Service) TriggerPRSyncAll(ctx context.Context, taskID string) ([]*TaskP
 		}
 		return existing, nil
 	}
+	if _, batchErr := s.SyncWatchesBatched(ctx, watches); batchErr != nil {
+		s.logger.Debug("batched PR sync failed; falling back to per-watch",
+			zap.String("task_id", taskID), zap.Error(batchErr))
+		return s.triggerPRSyncAllPerWatch(ctx, taskID, watches)
+	}
+	// Batched path applied all DB updates inline; reload so the WS caller
+	// sees the freshest TaskPR rows.
+	return s.store.ListTaskPRsByTask(ctx, taskID)
+}
+
+// triggerPRSyncAllPerWatch is the legacy fan-out path: one gh subprocess
+// per watch. Kept as a fallback for the NoopClient and for the rare case
+// where the batched GraphQL call fails (auth glitch, network blip) so a
+// single bad cycle doesn't leave the UI staring at stale data.
+func (s *Service) triggerPRSyncAllPerWatch(ctx context.Context, taskID string, watches []*PRWatch) ([]*TaskPR, error) {
 	results := make([]*TaskPR, 0, len(watches))
 	for _, w := range watches {
 		var tp *TaskPR

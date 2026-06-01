@@ -89,6 +89,10 @@ type WorkspacePolicy struct {
 	// ParentOrdering is the ordering policy resolved from the parent
 	// task's metadata. Drives whether AttachWorkspacePolicy adds a
 	// blocker chain on the new task. Empty means parallel (no chain).
+	// Note: the resulting blocker edges gate execution only in office
+	// workflows (released via the on_blocker_resolved trigger). In plain
+	// kanban nothing consults them at auto-start time — they drive the
+	// subtask-stepper UI / ordering display, not execution order.
 	ParentOrdering string
 }
 

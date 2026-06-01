@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 )
 
@@ -58,7 +59,7 @@ func (wt *WorkspaceTracker) enrichWithBranchDiff(ctx context.Context, update *ty
 	// git diff --numstat <merge-base> covers committed + staged + unstaged changes.
 	numstatCmd := exec.CommandContext(ctx, "git", "diff", "--numstat", update.BaseCommit)
 	numstatCmd.Dir = wt.workDir
-	numstatOut, err := numstatCmd.Output()
+	numstatOut, err := subproc.RunGitOutput(ctx, numstatCmd)
 	if err != nil {
 		wt.logger.Debug("enrichWithBranchDiff: numstat failed", zap.Error(err))
 		return
@@ -102,6 +103,12 @@ func totalDiffBytes(update *types.GitStatusUpdate) int64 {
 
 // capDiffOutput runs a git diff command and returns at most maxDiffOutputSize bytes.
 // Returns the output string and whether it was truncated.
+//
+// Holds a git throttle slot for the full Start → Wait lifetime so streaming
+// diffs count against the same global cap as Output/CombinedOutput callers
+// — otherwise the throttle could be silently bypassed by switching to
+// pipe-based reads. Slot is acquired before Start; if Start fails we
+// release immediately, else release runs after Wait.
 func capDiffOutput(ctx context.Context, workDir string, args ...string) (string, bool) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = workDir
@@ -110,6 +117,15 @@ func capDiffOutput(ctx context.Context, workDir string, args ...string) (string,
 	if err != nil {
 		return "", false
 	}
+	release, err := subproc.Git().Acquire(ctx)
+	if err != nil {
+		_ = stdout.Close()
+		return "", false
+	}
+	// release() is idempotent (sync.Once inside the throttle), so a defer
+	// covers every return path — including ones added later between Start
+	// and the explicit end-of-function release.
+	defer release()
 	if err := cmd.Start(); err != nil {
 		_ = stdout.Close()
 		return "", false
@@ -157,7 +173,7 @@ func resolveNumstatPath(numstatPath string) string {
 func (wt *WorkspaceTracker) enrichWithUnstagedDiff(ctx context.Context, update *types.GitStatusUpdate, baseRef string) {
 	numstatCmd := exec.CommandContext(ctx, "git", "diff", "--numstat", baseRef)
 	numstatCmd.Dir = wt.workDir
-	numstatOut, err := numstatCmd.Output()
+	numstatOut, err := subproc.RunGitOutput(ctx, numstatCmd)
 	if err != nil {
 		wt.logger.Debug("failed to get numstat", zap.Error(err))
 		return
@@ -219,7 +235,7 @@ func (wt *WorkspaceTracker) enrichWithStagedDiff(ctx context.Context, update *ty
 	// and has no additional unstaged changes, its diff won't appear there.
 	stagedCmd := exec.CommandContext(ctx, "git", "diff", "--cached", "--numstat", baseRef)
 	stagedCmd.Dir = wt.workDir
-	stagedOut, err := stagedCmd.Output()
+	stagedOut, err := subproc.RunGitOutput(ctx, stagedCmd)
 	if err != nil {
 		return
 	}
