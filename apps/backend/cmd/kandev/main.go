@@ -372,6 +372,8 @@ func startAgentInfrastructure(
 	log.Info("Worktree Manager initialized",
 		zap.Bool("enabled", cfg.Worktree.Enabled))
 
+	services.Task.SetBranchMaterializer(newBranchMaterializer(repos.Task, worktreeMgr, lifecycleMgr, log))
+
 	lifecycleMgr.SetWorkspaceInfoProvider(services.Task)
 	log.Info("Workspace info provider configured for session recovery")
 

@@ -91,8 +91,10 @@ type MultiRepoStore interface {
 	// GetWorktreesBySessionID returns all active worktrees for the session.
 	GetWorktreesBySessionID(ctx context.Context, sessionID string) ([]*Worktree, error)
 	// GetWorktreeBySessionAndRepository returns the active worktree for the
-	// given (session, repository) pair, or nil if none exists.
-	GetWorktreeBySessionAndRepository(ctx context.Context, sessionID, repositoryID string) (*Worktree, error)
+	// given (session, repository, branchSlug) triple, or nil if none exists.
+	// branchSlug scopes the lookup for multi-branch tasks; empty matches the
+	// legacy single-branch persistence shape.
+	GetWorktreeBySessionAndRepository(ctx context.Context, sessionID, repositoryID, branchSlug string) (*Worktree, error)
 }
 
 // NewManager creates a new worktree manager.

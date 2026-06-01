@@ -164,6 +164,27 @@ describe("setTaskPR", () => {
     expect(list.find((p) => p.repository_id === "repo-b")?.id).toBe("b");
   });
 
+  it("keeps multi-branch PRs as siblings (same repo, different pr_number)", () => {
+    const store = makeStore();
+    const pr1 = makePR({ id: "p1", repository_id: "repo-a", pr_number: 1221 });
+    const pr2 = makePR({ id: "p2", repository_id: "repo-a", pr_number: 1222 });
+    const pr1Updated = makePR({
+      id: "p1",
+      repository_id: "repo-a",
+      pr_number: 1221,
+      additions: 99,
+    });
+
+    store.getState().setTaskPR("task-1", pr1);
+    store.getState().setTaskPR("task-1", pr2);
+    store.getState().setTaskPR("task-1", pr1Updated);
+
+    const list = store.getState().taskPRs.byTaskId["task-1"];
+    expect(list).toHaveLength(2);
+    expect(list.find((p) => p.pr_number === 1221)?.additions).toBe(99);
+    expect(list.find((p) => p.pr_number === 1222)?.id).toBe("p2");
+  });
+
   it("heals a corrupted non-array entry instead of throwing", () => {
     // Simulates a stray payload landing in byTaskId[taskId] as something other
     // than an array (e.g. a partial hydration). The next setTaskPR call must

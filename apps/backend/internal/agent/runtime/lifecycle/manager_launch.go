@@ -603,6 +603,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 		PullBeforeWorktree:   req.PullBeforeWorktree,
 		TaskDirName:          req.TaskDirName,
 		RepoName:             req.RepoName,
+		BranchSlug:           req.BranchSlug,
 		Env:                  req.Env,
 	}
 	// Multi-repo: forward the repo list when the launch request carries one.
@@ -627,6 +628,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 				WorktreeBranchPrefix: r.WorktreeBranchPrefix,
 				PullBeforeWorktree:   r.PullBeforeWorktree,
 				RepoSetupScript:      setup,
+				BranchSlug:           r.BranchSlug,
 			})
 		}
 		prepReq.Repositories = specs

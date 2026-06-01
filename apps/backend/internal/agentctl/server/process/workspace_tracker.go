@@ -103,6 +103,14 @@ func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 	return newWorkspaceTracker(resolvedWorkDir, "", log)
 }
 
+// RepositoryName returns the repository name tag applied to events emitted by
+// this tracker. Empty for the bare task-root / single-repo tracker; non-empty
+// for per-repo trackers built via NewWorkspaceTrackerForRepo. Used by the
+// rescan path to decide whether a discovered subdir already has a tracker.
+func (wt *WorkspaceTracker) RepositoryName() string {
+	return wt.repositoryName
+}
+
 // NewWorkspaceTrackerForRepo creates a tracker scoped to a specific repository
 // subdirectory. The repositoryName is stamped onto every emitted event so the
 // frontend can route updates per repo for multi-repo task roots.

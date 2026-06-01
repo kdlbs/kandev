@@ -210,9 +210,9 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
 	tools := getRegisteredToolNames(s)
-	// 13 kanban (incl. delete + archive task) + 1 interaction + 4 plan
-	// + 1 related-tasks = 19. Task-document tools (list/get/write) are office-only.
-	assert.Equal(t, 19, len(tools))
+	// 13 kanban (incl. delete + archive task) + 1 add_branch_to_task + 1 interaction
+	// + 4 plan + 1 related-tasks = 20. Task-document tools (list/get/write) are office-only.
+	assert.Equal(t, 20, len(tools))
 }
 
 func TestServerModeConfig_ToolCount(t *testing.T) {
@@ -366,8 +366,8 @@ func TestServerModeExternal_ToolCount(t *testing.T) {
 
 	s := New(backend, "", "", 0, log, "", true, ModeExternal)
 	tools := getRegisteredToolNames(s)
-	// 12 workflow (incl. list_repositories + import_workflow) + 4 agent + 4 mcp + 5 executor + 6 task + 1 create_task = 32
-	assert.Equal(t, 32, len(tools))
+	// 12 workflow (incl. list_repositories + import_workflow) + 4 agent + 4 mcp + 5 executor + 6 task + 1 create_task + 1 add_branch_to_task = 33
+	assert.Equal(t, 33, len(tools))
 }
 
 func TestNewExternal_Constructs(t *testing.T) {

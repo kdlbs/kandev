@@ -98,6 +98,15 @@ type Manager struct {
 	workspaceTrackersBySubpath map[string]*WorkspaceTracker
 	workspaceTrackersMu        sync.Mutex
 
+	// streamSubscribers tracks every workspace-stream subscriber attached
+	// via SubscribeWorkspaceStream so RescanRepositories can wire new
+	// per-repo trackers into the same channels without re-subscription. The
+	// gateway only subscribes once per session; without this list, trackers
+	// added post-launch (multi-branch transition) would emit events that
+	// never reach the UI.
+	streamSubscribers   map[types.WorkspaceStreamSubscriber]struct{}
+	streamSubscribersMu sync.Mutex
+
 	// Script/process runner (dev server, setup, cleanup, custom)
 	processRunner *ProcessRunner
 
@@ -262,6 +271,12 @@ func (m *Manager) stopWorkspaceTrackers() {
 // empty and only the root tracker fires events.
 func (m *Manager) SubscribeWorkspaceStream() types.WorkspaceStreamSubscriber {
 	sub := make(types.WorkspaceStreamSubscriber, 100)
+	m.streamSubscribersMu.Lock()
+	if m.streamSubscribers == nil {
+		m.streamSubscribers = make(map[types.WorkspaceStreamSubscriber]struct{})
+	}
+	m.streamSubscribers[sub] = struct{}{}
+	m.streamSubscribersMu.Unlock()
 	m.workspaceTracker.AttachWorkspaceStreamSubscriber(sub)
 	for _, t := range m.repoTrackers {
 		t.AttachWorkspaceStreamSubscriber(sub)
@@ -272,6 +287,9 @@ func (m *Manager) SubscribeWorkspaceStream() types.WorkspaceStreamSubscriber {
 // UnsubscribeWorkspaceStream detaches the subscriber from every tracker and
 // closes the channel exactly once.
 func (m *Manager) UnsubscribeWorkspaceStream(sub types.WorkspaceStreamSubscriber) {
+	m.streamSubscribersMu.Lock()
+	delete(m.streamSubscribers, sub)
+	m.streamSubscribersMu.Unlock()
 	m.workspaceTracker.DetachWorkspaceStreamSubscriber(sub)
 	for _, t := range m.repoTrackers {
 		t.DetachWorkspaceStreamSubscriber(sub)

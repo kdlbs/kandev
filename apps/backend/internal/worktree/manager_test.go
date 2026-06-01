@@ -125,9 +125,9 @@ func (s *mockStore) GetWorktreesBySessionID(_ context.Context, sessionID string)
 }
 
 // GetWorktreeBySessionAndRepository — MultiRepoStore.
-func (s *mockStore) GetWorktreeBySessionAndRepository(_ context.Context, sessionID, repoID string) (*Worktree, error) {
+func (s *mockStore) GetWorktreeBySessionAndRepository(_ context.Context, sessionID, repoID, branchSlug string) (*Worktree, error) {
 	for _, wt := range s.worktrees {
-		if wt.SessionID == sessionID && wt.RepositoryID == repoID && wt.Status == StatusActive {
+		if wt.SessionID == sessionID && wt.RepositoryID == repoID && wt.BranchSlug == branchSlug && wt.Status == StatusActive {
 			return wt, nil
 		}
 	}

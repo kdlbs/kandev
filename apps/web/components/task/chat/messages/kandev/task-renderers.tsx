@@ -11,18 +11,26 @@ type Repository = {
   local_path?: string;
   github_url?: string;
   base_branch?: string;
+  checkout_branch?: string;
 };
 
 function RepoChips({ repos }: { repos: Repository[] }) {
   if (repos.length === 0) return null;
   return (
     <div className="flex flex-wrap gap-1">
-      {repos.map((r, i) => (
-        <Badge key={r.repository_id ?? r.local_path ?? i} variant="outline" className="text-[10px]">
-          {r.local_path ?? r.github_url ?? r.repository_id}
-          {r.base_branch ? ` @ ${r.base_branch}` : ""}
-        </Badge>
-      ))}
+      {repos.map((r, i) => {
+        // Include checkout_branch in the React key so multi-branch tasks (same
+        // repository_id, different branches) render distinct chips instead of
+        // collapsing to one.
+        const key = `${r.repository_id ?? r.local_path ?? i}::${r.checkout_branch ?? ""}`;
+        const branchLabel = r.checkout_branch || r.base_branch;
+        return (
+          <Badge key={key} variant="outline" className="text-[10px]">
+            {r.local_path ?? r.github_url ?? r.repository_id}
+            {branchLabel ? ` @ ${branchLabel}` : ""}
+          </Badge>
+        );
+      })}
     </div>
   );
 }

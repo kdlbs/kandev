@@ -66,6 +66,9 @@ func (m *mockGitHubService) GetPRWatchBySession(_ context.Context, _ string) (*g
 func (m *mockGitHubService) GetPRWatchBySessionAndRepo(_ context.Context, _, _ string) (*github.PRWatch, error) {
 	return m.prWatch, nil
 }
+func (m *mockGitHubService) GetPRWatchBySessionRepoAndBranch(_ context.Context, _, _, _ string) (*github.PRWatch, error) {
+	return m.prWatch, nil
+}
 func (m *mockGitHubService) CreatePRWatch(_ context.Context, _, _, repositoryID, _, _ string, _ int, branch string) (*github.PRWatch, error) {
 	m.createWatchCalls++
 	m.createWatchBranch = branch

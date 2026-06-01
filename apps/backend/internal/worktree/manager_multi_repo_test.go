@@ -61,7 +61,7 @@ func TestManager_GetBySessionAndRepo_PicksTheRightOne(t *testing.T) {
 	seedWorktree(store, "sess-1", "repo-front", "wt-1")
 	seedWorktree(store, "sess-1", "repo-back", "wt-2")
 
-	got, err := mgr.GetBySessionAndRepo(context.Background(), "sess-1", "repo-back")
+	got, err := mgr.GetBySessionAndRepo(context.Background(), "sess-1", "repo-back", "")
 	if err != nil {
 		t.Fatalf("GetBySessionAndRepo: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestManager_GetBySessionAndRepo_NotFoundForUnknownRepo(t *testing.T) {
 	mgr, store := newMultiRepoTestManager(t)
 	seedWorktree(store, "sess-1", "repo-front", "wt-1")
 
-	_, err := mgr.GetBySessionAndRepo(context.Background(), "sess-1", "nope")
+	_, err := mgr.GetBySessionAndRepo(context.Background(), "sess-1", "nope", "")
 	if err == nil {
 		t.Fatal("expected ErrWorktreeNotFound for unknown repo")
 	}
@@ -100,16 +100,39 @@ func TestManager_CacheKey_SeparatesReposPerSession(t *testing.T) {
 	wtA := &Worktree{ID: "wt-A", SessionID: "s", RepositoryID: "rA", Path: "/a", Status: StatusActive}
 	wtB := &Worktree{ID: "wt-B", SessionID: "s", RepositoryID: "rB", Path: "/b", Status: StatusActive}
 	mgr.mu.Lock()
-	mgr.worktrees[cacheKey("s", "rA")] = wtA
-	mgr.worktrees[cacheKey("s", "rB")] = wtB
+	mgr.worktrees[cacheKey("s", "rA", "")] = wtA
+	mgr.worktrees[cacheKey("s", "rB", "")] = wtB
 	mgr.mu.Unlock()
 
-	gotA, err := mgr.GetBySessionAndRepo(context.Background(), "s", "rA")
+	gotA, err := mgr.GetBySessionAndRepo(context.Background(), "s", "rA", "")
 	if err != nil || gotA.ID != "wt-A" {
 		t.Errorf("expected wt-A from cache; got %v err=%v", gotA, err)
 	}
-	gotB, err := mgr.GetBySessionAndRepo(context.Background(), "s", "rB")
+	gotB, err := mgr.GetBySessionAndRepo(context.Background(), "s", "rB", "")
 	if err != nil || gotB.ID != "wt-B" {
 		t.Errorf("expected wt-B from cache; got %v err=%v", gotB, err)
+	}
+}
+
+// TestManager_GetBySessionAndRepo_DisambiguatesByBranchSlug guards the
+// multi-branch identity: two worktrees on the same repo but different
+// branches must coexist in the cache and round-trip through the lookup
+// without collapsing onto one record.
+func TestManager_GetBySessionAndRepo_DisambiguatesByBranchSlug(t *testing.T) {
+	mgr, _ := newMultiRepoTestManager(t)
+	wtMain := &Worktree{ID: "wt-main", SessionID: "s", RepositoryID: "r", BranchSlug: "main", Path: "/m", Status: StatusActive}
+	wtFeat := &Worktree{ID: "wt-feat", SessionID: "s", RepositoryID: "r", BranchSlug: "feature-x", Path: "/f", Status: StatusActive}
+	mgr.mu.Lock()
+	mgr.worktrees[cacheKey("s", "r", "main")] = wtMain
+	mgr.worktrees[cacheKey("s", "r", "feature-x")] = wtFeat
+	mgr.mu.Unlock()
+
+	got, err := mgr.GetBySessionAndRepo(context.Background(), "s", "r", "main")
+	if err != nil || got.ID != "wt-main" {
+		t.Errorf("expected wt-main; got %v err=%v", got, err)
+	}
+	got, err = mgr.GetBySessionAndRepo(context.Background(), "s", "r", "feature-x")
+	if err != nil || got.ID != "wt-feat" {
+		t.Errorf("expected wt-feat; got %v err=%v", got, err)
 	}
 }

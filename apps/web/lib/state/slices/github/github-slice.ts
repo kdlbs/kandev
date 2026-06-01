@@ -68,13 +68,19 @@ function createTaskPRActions(
       }),
     setTaskPR: (taskId, pr) =>
       set((draft) => {
-        // Upsert by repository_id so multi-repo PRs coexist for the same task.
-        // For legacy rows without a repository_id, match on the empty key (one
-        // such row per task max), preserving prior single-PR semantics.
+        // Upsert by (repository_id, pr_number) so multi-branch tasks can
+        // hold N PRs on the same repo as siblings. Keying on
+        // repository_id alone collapses every PR for that repo onto one
+        // slot — the second WS event silently overwrites the first and
+        // the UI shows only the most-recent PR. Legacy rows without a
+        // repository_id match on the empty key + pr_number, preserving
+        // prior single-PR semantics for single-repo tasks.
         const current = draft.taskPRs.byTaskId[taskId];
         const existing = Array.isArray(current) ? current : [];
         const repoKey = pr.repository_id ?? "";
-        const idx = existing.findIndex((p) => (p.repository_id ?? "") === repoKey);
+        const idx = existing.findIndex(
+          (p) => (p.repository_id ?? "") === repoKey && p.pr_number === pr.pr_number,
+        );
         if (idx >= 0) existing[idx] = pr;
         else existing.push(pr);
         draft.taskPRs.byTaskId[taskId] = existing;

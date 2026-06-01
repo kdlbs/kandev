@@ -18,3 +18,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 0010 | [Worktree copy-files — per-repo, idempotent, host-local](0010-worktree-copy-files.md) | accepted | backend, frontend | 2026-05-19 |
 | 0011 | [Transient provider errors (529 Overloaded) auto-retry with visible backoff](0011-transient-provider-error-retry.md) | accepted | backend, frontend | 2026-05-30 |
 | 0012 | [Service-only UI self-update](0012-service-only-self-update.md) | accepted | backend, frontend, cli | 2026-05-29 |
+| 0013 | [Multi-branch task support — N (repo, branch) pairs per task](0013-multi-branch-tasks.md) | accepted | backend, frontend | 2026-06-01 |

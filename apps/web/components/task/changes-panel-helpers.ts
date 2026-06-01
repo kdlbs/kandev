@@ -16,6 +16,35 @@ export type ChangedFile = {
   repositoryName?: string;
 };
 
+/**
+ * Picks the group label stamped onto each PR's files so the changes panel
+ * can show one section per PR for multi-branch tasks.
+ *
+ * Rules:
+ * - Only one PR on the task -> no stamp (the section header is enough).
+ * - Multi-repo, one PR per repo -> stamp the repo name (legacy behavior).
+ * - Any repo has multiple PRs -> append the branch / PR number so the
+ *   group label disambiguates which PR each file belongs to.
+ */
+export function computePRGroupStamp(args: {
+  needsStamp: boolean;
+  taskHasMultipleRepos: boolean;
+  anyRepoMultiPR: boolean;
+  repoName: string;
+  branch: string;
+  prNumber: number;
+}): string {
+  if (!args.needsStamp) return "";
+  const label = args.branch || `PR #${args.prNumber}`;
+  if (args.anyRepoMultiPR && args.taskHasMultipleRepos) {
+    return `${args.repoName} · ${label}`;
+  }
+  if (args.anyRepoMultiPR) {
+    return label;
+  }
+  return args.repoName;
+}
+
 export function mapToChangedFiles(files: FileInfo[]): ChangedFile[] {
   return files.map((file) => ({
     path: file.path,

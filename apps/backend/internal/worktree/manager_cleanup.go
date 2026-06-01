@@ -80,7 +80,7 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 	// affects its own repo; siblings on other repos must remain cached.
 	m.mu.Lock()
 	if wt.SessionID != "" {
-		delete(m.worktrees, cacheKey(wt.SessionID, wt.RepositoryID))
+		delete(m.worktrees, cacheKey(wt.SessionID, wt.RepositoryID, wt.BranchSlug))
 	}
 	m.mu.Unlock()
 
@@ -204,7 +204,7 @@ func (m *Manager) CleanupWorktrees(ctx context.Context, worktrees []*Worktree) e
 			continue
 		}
 		if wt.SessionID != "" {
-			delete(m.worktrees, cacheKey(wt.SessionID, wt.RepositoryID))
+			delete(m.worktrees, cacheKey(wt.SessionID, wt.RepositoryID, wt.BranchSlug))
 		}
 	}
 	m.mu.Unlock()

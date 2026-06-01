@@ -706,7 +706,20 @@ func (e *Executor) applyContainerCredentials(ctx context.Context, req *LaunchAge
 
 // buildRepoSpecs converts resolved repoInfos into per-repo launch specs for
 // the lifecycle layer. Used only when the task has more than one repository.
+// When the same RepositoryID appears more than once, the FIRST occurrence
+// keeps the flat layout (<task>/<repo>/) and subsequent occurrences nest
+// under <task>/<repo>/<branch-slug>/. This preserves the legacy single-
+// branch path for any worktree that already exists on disk, so a task
+// upgraded from single-branch to multi-branch doesn't orphan its primary
+// worktree directory.
 func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
+	repoCounts := make(map[string]int, len(allRepos))
+	for _, info := range allRepos {
+		if info.RepositoryID != "" {
+			repoCounts[info.RepositoryID]++
+		}
+	}
+	seenRepo := make(map[string]bool, len(allRepos))
 	out := make([]RepoSpec, 0, len(allRepos))
 	for _, info := range allRepos {
 		spec := RepoSpec{
@@ -732,6 +745,14 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 				spec.RepositoryURL = u
 			}
 		}
+		if repoCounts[info.RepositoryID] > 1 && seenRepo[info.RepositoryID] {
+			slug := worktree.SanitizeBranchSlug(info.CheckoutBranch)
+			if slug == "" {
+				slug = worktree.SanitizeBranchSlug(info.BaseBranch)
+			}
+			spec.BranchSlug = slug
+		}
+		seenRepo[info.RepositoryID] = true
 		out = append(out, spec)
 	}
 	return out

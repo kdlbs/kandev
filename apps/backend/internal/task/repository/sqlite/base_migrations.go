@@ -46,6 +46,12 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("executors_running.metadata", `ALTER TABLE executors_running ADD COLUMN metadata TEXT DEFAULT '{}'`)
 	r.migrate.Apply("tasks.is_ephemeral", `ALTER TABLE tasks ADD COLUMN is_ephemeral INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("task_repositories.checkout_branch", `ALTER TABLE task_repositories ADD COLUMN checkout_branch TEXT DEFAULT ''`)
+	// Multi-branch support: drop the old UNIQUE(task_id, repository_id) and
+	// replace it with UNIQUE(task_id, repository_id, checkout_branch) so the
+	// same repo can appear multiple times in a task on different branches.
+	if err := r.migrateTaskRepositoriesAllowMultiBranch(); err != nil {
+		return err
+	}
 	r.migrate.Apply("task_sessions.base_commit_sha", `ALTER TABLE task_sessions ADD COLUMN base_commit_sha TEXT DEFAULT ''`)
 	r.migrate.Apply("workspaces.default_config_agent_profile_id", `ALTER TABLE workspaces ADD COLUMN default_config_agent_profile_id TEXT DEFAULT ''`)
 	r.migrate.Apply("task_sessions.task_environment_id", `ALTER TABLE task_sessions ADD COLUMN task_environment_id TEXT DEFAULT ''`)
@@ -367,6 +373,55 @@ func (r *Repository) migrateTaskEnvironmentsRemoveAgentExecutionID() error {
 		// AFTER healDuplicateTaskEnvironments collapses any pre-existing duplicates.
 		// Creating it here would fail on databases that still have duplicate task_id rows.
 	})
+}
+
+// migrateTaskRepositoriesAllowMultiBranch swaps the legacy
+// UNIQUE(task_id, repository_id) constraint on task_repositories for
+// UNIQUE(task_id, repository_id, base_branch, checkout_branch). The wider
+// key lets the same repo coexist on N branches per task, including the
+// worktree-executor case where the branch lives in base_branch and
+// checkout_branch is empty. The trigger phrase matches both the legacy
+// two-column constraint and the intermediate three-column variant added in
+// the first multi-branch landing; the recreate becomes a no-op once the
+// four-column constraint is in place.
+func (r *Repository) migrateTaskRepositoriesAllowMultiBranch() error {
+	if err := r.recreateTaskRepositoriesForMultiBranch("UNIQUE(task_id, repository_id)\n"); err != nil {
+		return err
+	}
+	return r.recreateTaskRepositoriesForMultiBranch("UNIQUE(task_id, repository_id, checkout_branch)")
+}
+
+func (r *Repository) recreateTaskRepositoriesForMultiBranch(trigger string) error {
+	return r.recreateTableNamed(
+		"task_repositories.recreate_allow_multi_branch",
+		"task_repositories",
+		trigger,
+		[]string{
+			`CREATE TABLE task_repositories_new (
+				id TEXT PRIMARY KEY,
+				task_id TEXT NOT NULL,
+				repository_id TEXT NOT NULL,
+				base_branch TEXT DEFAULT '',
+				checkout_branch TEXT DEFAULT '',
+				position INTEGER DEFAULT 0,
+				metadata TEXT DEFAULT '{}',
+				created_at TIMESTAMP NOT NULL,
+				updated_at TIMESTAMP NOT NULL,
+				FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+				FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE,
+				UNIQUE(task_id, repository_id, base_branch, checkout_branch)
+			)`,
+			`INSERT INTO task_repositories_new SELECT
+				id, task_id, repository_id, base_branch,
+				COALESCE(checkout_branch, ''),
+				position, metadata, created_at, updated_at
+			FROM task_repositories`,
+			`DROP TABLE task_repositories`,
+			`ALTER TABLE task_repositories_new RENAME TO task_repositories`,
+			`CREATE INDEX IF NOT EXISTS idx_task_repositories_task_id ON task_repositories(task_id)`,
+			`CREATE INDEX IF NOT EXISTS idx_task_repositories_repository_id ON task_repositories(repository_id)`,
+		},
+	)
 }
 
 // migrateSessionsRemoveWorkflowStepID removes the deprecated workflow_step_id column

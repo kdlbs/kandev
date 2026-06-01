@@ -69,12 +69,15 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 // (caller should return immediately). Returns (nil, false, nil) when no reuse
 // candidate matched and the caller should proceed to create a new worktree.
 func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Worktree, bool, error) {
-	// First, check if a worktree already exists for this (session, repository) pair.
-	// Multi-repo sessions can host multiple worktrees concurrently, so we must
-	// scope the lookup by RepositoryID rather than session alone — otherwise
-	// the second repo's Create would return the first repo's worktree.
+	// First, check if a worktree already exists for this
+	// (session, repository, branchSlug) triple. Multi-repo + multi-branch
+	// sessions can host multiple worktrees concurrently, so we must scope the
+	// lookup by RepositoryID AND BranchSlug — otherwise the second branch's
+	// Create would return the first branch's worktree, silently collapsing
+	// two distinct worktrees into one on-disk directory.
+	reuseSlug := SanitizeBranchSlug(req.BranchSlug)
 	if req.SessionID != "" {
-		existing, err := m.GetBySessionAndRepo(ctx, req.SessionID, req.RepositoryID)
+		existing, err := m.GetBySessionAndRepo(ctx, req.SessionID, req.RepositoryID, reuseSlug)
 		if err == nil && existing != nil {
 			if m.IsValid(existing.Path) {
 				m.logger.Debug("reusing existing worktree by session+repo",
@@ -193,7 +196,11 @@ func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRe
 	if repoDir == "" {
 		return nil, ErrInvalidRepoName
 	}
-	worktreePath, err := m.config.TaskWorktreePath(req.TaskDirName, repoDir)
+	branchSlug := SanitizeBranchSlug(req.BranchSlug)
+	if req.BranchSlug != "" && branchSlug == "" {
+		return nil, ErrInvalidBranchSlug
+	}
+	worktreePath, err := m.config.TaskWorktreePath(req.TaskDirName, repoDir, branchSlug)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get task worktree path: %w", err)
 	}
@@ -208,19 +215,41 @@ func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRe
 	startPoint := baseRef
 
 	var fetchResult *FetchBranchResult
+	checkoutMode := req
 	if req.CheckoutBranch != "" {
-		fetchResult, err = m.fetchBranchToLocal(ctx, req.RepositoryPath, req.CheckoutBranch, req.PRNumber)
-		if err != nil {
-			return nil, err
-		}
-		if fetchResult.StartPoint != "" {
-			startPoint = fetchResult.StartPoint
+		// PRNumber != 0 means the caller wants the refs/pull/<N>/head ref;
+		// fork PR branches don't exist as plain refs locally or under
+		// origin/<branch>, so the existence probe must be skipped and the
+		// fetch path always runs.
+		//
+		// When PRNumber == 0 and the named branch is absent locally and on
+		// origin, the caller's intent is "create a new branch with this
+		// name" rather than "fetch this existing ref" — the historical
+		// fetch-then-check-out path errored ("not found locally or on
+		// remote") in that case and rolled back. We drop CheckoutBranch
+		// from the request copy and pass the desired name as the fallback
+		// (new) branch name so gitAddWorktree creates it from baseRef.
+		if req.PRNumber == 0 && !m.checkoutBranchExistsAnywhere(ctx, req.RepositoryPath, req.CheckoutBranch) {
+			m.logger.Info("checkout branch missing locally and on origin; creating new branch with this name",
+				zap.String("repository_path", req.RepositoryPath),
+				zap.String("requested_branch", req.CheckoutBranch),
+				zap.String("base_ref", baseRef))
+			branchName = req.CheckoutBranch
+			checkoutMode.CheckoutBranch = ""
 		} else {
-			startPoint = req.CheckoutBranch
+			fetchResult, err = m.fetchBranchToLocal(ctx, req.RepositoryPath, req.CheckoutBranch, req.PRNumber)
+			if err != nil {
+				return nil, err
+			}
+			if fetchResult.StartPoint != "" {
+				startPoint = fetchResult.StartPoint
+			} else {
+				startPoint = req.CheckoutBranch
+			}
 		}
 	}
 
-	worktreeID, branchName, err := m.addWorktreeForBranch(ctx, req, worktreePath, branchName, startPoint, baseRef)
+	worktreeID, branchName, err := m.addWorktreeForBranch(ctx, checkoutMode, worktreePath, branchName, startPoint, baseRef)
 	if err != nil {
 		return nil, err
 	}
@@ -820,10 +849,10 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 		}
 	}
 
-	// Update cache keyed by (sessionID, repositoryID).
+	// Update cache keyed by (sessionID, repositoryID, branchSlug).
 	if req.SessionID != "" {
 		m.mu.Lock()
-		m.worktrees[cacheKey(req.SessionID, req.RepositoryID)] = existing
+		m.worktrees[cacheKey(req.SessionID, req.RepositoryID, existing.BranchSlug)] = existing
 		m.mu.Unlock()
 	}
 

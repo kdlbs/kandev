@@ -42,6 +42,23 @@ type TaskExecutionStopper interface {
 	StopExecution(ctx context.Context, executionID, reason string, force bool) error
 }
 
+// BranchMaterializer creates a worktree on disk and persists a
+// task_session_worktrees row for a newly added task_repository row, without
+// restarting the agent. Used by AddBranchToTask so MCP-driven "add a branch
+// to this task" actually surfaces the new worktree in the UI on the next
+// poll, rather than waiting for a session relaunch.
+//
+// The implementation lives in cmd/kandev (it needs worktree.Manager, the
+// session/env repos, and the repository entity layer) — the service layer
+// only knows the abstract capability.
+type BranchMaterializer interface {
+	// MaterializeBranch creates the worktree for a freshly inserted
+	// task_repositories row. Best-effort: when no active session exists yet
+	// the implementation may choose to no-op and let the next session launch
+	// create the worktree via the standard multi-repo prepare path.
+	MaterializeBranch(ctx context.Context, taskID, taskRepositoryID string) error
+}
+
 // GitArchiveCapture captures git state (commits, cumulative diff) when a task is archived.
 // This allows preserving the final git state of a session for historical purposes.
 type GitArchiveCapture interface {
@@ -130,6 +147,7 @@ type Service struct {
 	discoveryConfig       RepositoryDiscoveryConfig
 	worktreeCleanup       WorktreeCleanup
 	executionStopper      TaskExecutionStopper
+	branchMaterializer    BranchMaterializer
 	gitArchiveCapture     GitArchiveCapture
 	workflowStepCreator   WorkflowStepCreator
 	workflowStepGetter    WorkflowStepGetter
@@ -170,6 +188,13 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 // SetWorktreeCleanup sets the worktree cleanup handler for task deletion.
 func (s *Service) SetWorktreeCleanup(cleanup WorktreeCleanup) {
 	s.worktreeCleanup = cleanup
+}
+
+// SetBranchMaterializer wires the mid-session worktree materializer for
+// AddBranchToTask. Optional — when unset, MCP add_branch only inserts the
+// task_repositories row and the worktree appears on next session launch.
+func (s *Service) SetBranchMaterializer(m BranchMaterializer) {
+	s.branchMaterializer = m
 }
 
 // SetExecutionStopper wires the task execution stopper (orchestrator).

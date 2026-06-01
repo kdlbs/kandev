@@ -324,6 +324,7 @@ const (
 	ActionMCPListTasks            = "mcp.list_tasks"
 	ActionMCPCreateTask           = "mcp.create_task"
 	ActionMCPUpdateTask           = "mcp.update_task"
+	ActionMCPAddBranchToTask      = "mcp.add_branch_to_task"
 	ActionMCPAskUserQuestion      = "mcp.ask_user_question"
 	ActionMCPCreateTaskPlan       = "mcp.create_task_plan"
 	ActionMCPGetTaskPlan          = "mcp.get_task_plan"

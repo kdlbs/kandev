@@ -36,6 +36,12 @@ type Worktree struct {
 	// RepositoryID is the ID of the repository this worktree belongs to.
 	RepositoryID string `json:"repository_id"`
 
+	// BranchSlug, when set, disambiguates two worktrees that share a
+	// (SessionID, RepositoryID) pair on different branches. Stored on
+	// task_session_worktrees so reuse lookups can scope by branch and not
+	// collapse multi-branch tasks down to a single worktree.
+	BranchSlug string `json:"branch_slug,omitempty"`
+
 	// RepositoryPath is the local filesystem path to the main repository.
 	// Stored for recreation if the worktree directory is lost.
 	RepositoryPath string `json:"repository_path"`
@@ -170,6 +176,12 @@ type CreateRequest struct {
 	// RepoName is the repository name used as subdirectory inside the task directory.
 	// Only used when TaskDirName is also set.
 	RepoName string
+
+	// BranchSlug, when non-empty, nests the worktree under the repo dir so the
+	// same repo can host multiple branches inside one task. Path becomes
+	// ~/.kandev/tasks/{TaskDirName}/{RepoName}/{BranchSlug}/. Callers must
+	// derive a deterministic, filesystem-safe slug (see SanitizeBranchSlug).
+	BranchSlug string
 
 	// OnSyncProgress receives progress updates for pre-worktree branch sync.
 	OnSyncProgress SyncProgressCallback

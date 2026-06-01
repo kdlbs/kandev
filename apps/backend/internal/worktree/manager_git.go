@@ -52,6 +52,27 @@ func (m *Manager) branchExists(ctx context.Context, repoPath, branch string) (bo
 	return true, nil
 }
 
+// checkoutBranchExistsAnywhere returns true when the named branch is present
+// either locally or as origin/<branch>. Used by createInTaskDir to decide
+// whether to treat req.CheckoutBranch as "fetch this existing ref" or as
+// "create a new branch with this name". A timeout / fs stall counts as
+// "present" so we don't accidentally clobber a working branch by creating a
+// duplicate when the probe couldn't complete.
+func (m *Manager) checkoutBranchExistsAnywhere(ctx context.Context, repoPath, branch string) bool {
+	local, err := m.branchExists(ctx, repoPath, branch)
+	if err != nil {
+		return true
+	}
+	if local {
+		return true
+	}
+	remote, err := m.branchExists(ctx, repoPath, "refs/remotes/origin/"+branch)
+	if err != nil {
+		return true
+	}
+	return remote
+}
+
 func (m *Manager) currentBranch(ctx context.Context, repoPath string) string {
 	inspectCtx, cancel := context.WithTimeout(ctx, m.inspectTimeout)
 	defer cancel()

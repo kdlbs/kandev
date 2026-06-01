@@ -17,6 +17,7 @@ import { useActiveTaskPRsWithFiles } from "@/hooks/domains/github/use-active-tas
 import { usePRCommits } from "@/hooks/domains/github/use-pr-commits";
 import {
   type ChangedFile,
+  computePRGroupStamp,
   computeReviewProgress,
   computeStagedStats,
   getBaseBranchDisplay,
@@ -163,11 +164,36 @@ function useChangesPanelPRData() {
   const { prFiles, prDiffFiles } = useMemo(() => {
     const merged: PRChangedFile[] = [];
     const flat: PRDiffFile[] = [];
+    // Multi-branch tasks open multiple PRs on the same repo — files must
+    // split by PR so the agent's two branches don't get conflated under one
+    // "kandev" header. We stamp each row with a label unique per PR.
+    //
+    //  - 1 PR total            → no stamp (single section header is enough)
+    //  - Multi-repo, 1 PR/repo → stamp = repo name (legacy behavior)
+    //  - Multi-PR per repo     → stamp = "<repo> · <head_branch>" so the
+    //                            group label still names the repo but
+    //                            disambiguates the branch the PR is on
+    //  - Single repo + N PRs   → stamp = head_branch (repo is redundant)
+    const prCountByRepoID = new Map<string, number>();
+    for (const pr of prs) {
+      const key = pr.repository_id ?? "";
+      prCountByRepoID.set(key, (prCountByRepoID.get(key) ?? 0) + 1);
+    }
+    const anyRepoMultiPR = Array.from(prCountByRepoID.values()).some((n) => n > 1);
+    const needsStamp = prs.length > 1;
     for (const pr of prs) {
       const key = `${pr.owner}/${pr.repo}/${pr.pr_number}/${pr.last_synced_at ?? ""}`;
       const files = filesByPRKey[key] ?? [];
       const repoName = pr.repository_id ? (repoNameById[pr.repository_id] ?? "") : "";
-      const stamp = taskHasMultipleRepos ? repoName || `${pr.owner}/${pr.repo}` : "";
+      const branch = pr.head_branch ?? "";
+      const stamp = computePRGroupStamp({
+        needsStamp,
+        taskHasMultipleRepos,
+        anyRepoMultiPR,
+        repoName: repoName || `${pr.owner}/${pr.repo}`,
+        branch,
+        prNumber: pr.pr_number,
+      });
       merged.push(...mapPRFilesToChangedFiles(files, stamp));
       flat.push(...files);
     }
