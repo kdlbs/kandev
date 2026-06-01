@@ -198,6 +198,36 @@ describe("VoiceInputButton — coarse-pointer override", () => {
   });
 });
 
+describe("VoiceInputButton — stored toggle mode is unaffected by pointer kind", () => {
+  it("renders effective toggle and ignores pointer events when stored mode is toggle", () => {
+    voicePrefs.value = { ...voicePrefs.value, mode: "toggle" };
+    coarsePointer.value = false;
+    renderButton();
+    const button = screen.getByTestId(BUTTON_TESTID);
+    expect(button.getAttribute("data-mode")).toBe("toggle");
+    expect(button.getAttribute("data-effective-mode")).toBe("toggle");
+
+    // Pointer handlers must not be attached in toggle mode; pointerdown alone
+    // should not start a recording. Click is what drives toggle.
+    fireEvent.pointerDown(button, { pointerId: 4 });
+    expect(voiceInputResult.start).not.toHaveBeenCalled();
+    fireEvent.click(button);
+    expect(voiceInputResult.start).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("VoiceInputButton — recording-state stop transition", () => {
+  it("invokes stop() on click when state is recording (toggle path)", () => {
+    voicePrefs.value = { ...voicePrefs.value, mode: "toggle" };
+    voiceInputResult.state = "recording";
+    renderButton();
+    const button = screen.getByTestId(BUTTON_TESTID);
+    fireEvent.click(button);
+    expect(voiceInputResult.stop).toHaveBeenCalledTimes(1);
+    expect(voiceInputResult.start).not.toHaveBeenCalled();
+  });
+});
+
 describe("VoiceInputButton — disabled feature & unsupported fallback", () => {
   it("renders nothing when voice mode is disabled in settings", () => {
     voicePrefs.value = { ...voicePrefs.value, enabled: false };
