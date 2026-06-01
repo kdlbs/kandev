@@ -87,16 +87,12 @@ function safePointerCapture(target: Element, pointerId: number): void {
 
 function safePointerRelease(target: Element, pointerId: number): void {
   try {
-    if (
-      typeof (target as Element & { hasPointerCapture?: (id: number) => boolean })
-        .hasPointerCapture === "function"
-    ) {
-      if (
-        !(target as Element & { hasPointerCapture: (id: number) => boolean }).hasPointerCapture(
-          pointerId,
-        )
-      )
-        return;
+    // `hasPointerCapture` is in lib.dom but the runtime check guards against
+    // ancient/headless environments that strip it (some jsdom + happy-dom
+    // versions). If the method is present and reports no capture, skip the
+    // release to avoid the no-op throw Safari occasionally fires.
+    if (typeof target.hasPointerCapture === "function" && !target.hasPointerCapture(pointerId)) {
+      return;
     }
     target.releasePointerCapture(pointerId);
   } catch {
