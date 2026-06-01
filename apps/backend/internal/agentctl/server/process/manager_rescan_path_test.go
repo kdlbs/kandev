@@ -2,12 +2,14 @@ package process
 
 import "testing"
 
-// TestValidateRescanPath locks in the rescan endpoint's path-injection
+// TestResolveRescanPath locks in the rescan endpoint's path-injection
 // contract. The function is the sole mitigation for the CodeQL
-// go/path-injection finding on /api/v1/workspace/rescan; its rejection
-// paths (relative input, sibling/child of current workdir, empty input)
-// are the security boundary, so they get explicit coverage here.
-func TestValidateRescanPath(t *testing.T) {
+// go/path-injection finding on /api/v1/workspace/rescan: it maps the
+// HTTP-supplied work_dir to a path DERIVED from the manager's existing
+// cfg.WorkDir, so the value that reaches os.Stat is never the raw HTTP
+// input. Only two transitions are allowed: no-op (equal to current) and
+// promotion-up-one-level (equal to parent of current).
+func TestResolveRescanPath(t *testing.T) {
 	cases := []struct {
 		name     string
 		newPath  string
@@ -16,22 +18,24 @@ func TestValidateRescanPath(t *testing.T) {
 		wantOK   bool
 	}{
 		{"empty new path", "", "/task/repo", "", false},
+		{"empty current (no anchor)", "/task/repo", "", "", false},
 		{"relative path", "task/repo", "/task/repo", "", false},
-		{"exact match", "/task/repo", "/task/repo", "/task/repo", true},
-		{"valid ancestor (promotion)", "/task", "/task/repo", "/task", true},
-		{"deeper ancestor", "/", "/task/repo", "/", true},
-		{"child (not ancestor)", "/task/repo/sub", "/task/repo", "", false},
-		{"sibling repo", "/task/other", "/task/repo", "", false},
-		{"unrelated absolute", "/etc", "/task/repo", "", false},
-		{"traversal cleaned to ancestor", "/task/../etc", "/task/repo", "", false},
-		{"no current workdir (first launch)", "/task/repo", "", "/task/repo", true},
-		{"dotted segment is legal (not traversal)", "/home/u/..hidden", "/home/u/..hidden/repo", "/home/u/..hidden", true},
+		{"exact match (no-op)", "/task/repo", "/task/repo", "/task/repo", true},
+		{"promotion to parent (allowed)", "/task", "/task/repo", "/task", true},
+		{"two-level ancestor (rejected)", "/", "/task/repo", "", false},
+		{"child of current (rejected)", "/task/repo/sub", "/task/repo", "", false},
+		{"sibling repo (rejected)", "/task/other", "/task/repo", "", false},
+		{"unrelated absolute (rejected)", "/etc", "/task/repo", "", false},
+		{"traversal cleaned to ancestor (rejected after Clean)", "/task/../etc", "/task/repo", "", false},
+		{"current is filesystem root", "/", "/", "/", true},
+		{"current is root, promotion impossible", "/foo", "/", "", false},
+		{"dotted segment is legal as exact match", "/home/u/..hidden", "/home/u/..hidden", "/home/u/..hidden", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, ok := validateRescanPath(tc.newPath, tc.current)
+			got, ok := resolveRescanPath(tc.newPath, tc.current)
 			if ok != tc.wantOK || got != tc.wantPath {
-				t.Errorf("validateRescanPath(%q, %q) = (%q, %v); want (%q, %v)",
+				t.Errorf("resolveRescanPath(%q, %q) = (%q, %v); want (%q, %v)",
 					tc.newPath, tc.current, got, ok, tc.wantPath, tc.wantOK)
 			}
 		})

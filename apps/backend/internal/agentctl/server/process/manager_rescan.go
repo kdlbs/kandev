@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"go.uber.org/zap"
 
@@ -46,15 +45,18 @@ func (m *Manager) RescanRepositories(ctx context.Context, newWorkDir string) {
 	candidate := m.cfg.WorkDir
 	m.repoTrackersMu.RUnlock()
 	if newWorkDir != "" && newWorkDir != candidate {
-		validated, ok := validateRescanPath(newWorkDir, candidate)
+		resolved, ok := resolveRescanPath(newWorkDir, candidate)
 		if !ok {
 			m.logger.Warn("workspace rescan: ignoring invalid work_dir",
 				zap.String("work_dir", newWorkDir),
 				zap.String("current_work_dir", candidate))
 			return
 		}
-		if info, err := os.Stat(validated); err == nil && info.IsDir() {
-			candidate = validated
+		// resolved is derived from currentWorkDir (trusted manager config),
+		// not from newWorkDir, so os.Stat here doesn't see HTTP-supplied
+		// input. CodeQL's path-injection trace ends at resolveRescanPath.
+		if info, err := os.Stat(resolved); err == nil && info.IsDir() {
+			candidate = resolved
 		} else {
 			m.logger.Warn("workspace rescan: ignoring invalid work_dir",
 				zap.String("work_dir", newWorkDir), zap.Error(err))
@@ -167,44 +169,43 @@ func (m *Manager) appendNewRepoTrackers(ctx context.Context, children []reposito
 	m.repoTrackersMu.Unlock()
 }
 
-// validateRescanPath sanitizes an externally-supplied workspace path so the
-// agentctl rescan endpoint can't be coerced into watching an arbitrary host
-// directory. The legitimate caller (kandev backend's branch materializer)
-// only promotes the workdir from a child worktree to the task root, so the
-// new path must be the same as, or an ancestor of, the current workdir.
+// resolveRescanPath maps an externally-supplied workspace path to a known-good
+// path derived from the manager's existing cfg.WorkDir, breaking the taint
+// flow from the HTTP body into os.Stat / downstream tracker paths. The only
+// legitimate caller (kandev backend's branch materializer) promotes the
+// workdir up exactly one level — from <task>/<repo>/ to <task>/ — so the
+// allowed transitions are:
+//   - newPath equals currentWorkDir   → no-op (return current)
+//   - newPath equals parent of current → return derived parent
 //
-// Path-injection defense applies even though agentctl binds to localhost:
-// any process colocated with agentctl could otherwise direct it at /etc or
-// the user's home directory by POSTing /api/v1/workspace/rescan.
+// Critically, the returned path is ALWAYS derived from currentWorkDir
+// (which originates in trusted manager config), never from newPath itself.
+// CodeQL's go/path-injection taint analysis cleared once the sink stopped
+// receiving the HTTP-supplied string directly.
 //
-// Returns the cleaned absolute path on success, or ("", false) on rejection.
-func validateRescanPath(newPath, currentWorkDir string) (string, bool) {
-	if newPath == "" {
+// Returns ("", false) for any other input — first-launch case (currentWorkDir
+// empty) is handled by the caller falling back to the existing workdir.
+func resolveRescanPath(newPath, currentWorkDir string) (string, bool) {
+	if newPath == "" || currentWorkDir == "" {
 		return "", false
 	}
 	clean := filepath.Clean(newPath)
 	if !filepath.IsAbs(clean) {
 		return "", false
 	}
-	if currentWorkDir == "" {
-		// No anchor to compare against — accept the cleaned absolute path.
-		// This only fires at first launch before cfg.WorkDir is set.
-		return clean, true
-	}
 	currentClean := filepath.Clean(currentWorkDir)
 	if clean == currentClean {
-		return clean, true
+		return currentClean, true
 	}
-	// Allow promotion to an ancestor (sibling-layout multi-branch case:
-	// <task>/<repo>/ ⇒ <task>/). Reject anything else.
-	// filepath.Rel returns "." only when the two paths are identical, which
-	// the equality check above already handled — so the only rejection
-	// signal here is a ".." prefix (target is below or beside current).
-	rel, err := filepath.Rel(clean, currentClean)
-	if err != nil || strings.HasPrefix(rel, "..") {
+	parent := filepath.Dir(currentClean)
+	if parent == currentClean {
+		// currentWorkDir is already filesystem root; no promotion possible.
 		return "", false
 	}
-	return clean, true
+	if clean == parent {
+		return parent, true
+	}
+	return "", false
 }
 
 // snapshotSubscribers returns a copy of the current workspace-stream
