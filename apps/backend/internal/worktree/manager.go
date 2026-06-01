@@ -13,9 +13,16 @@ import (
 )
 
 const (
-	defaultGitFetchTimeout   = 90 * time.Second
-	defaultGitPullTimeout    = 60 * time.Second
-	defaultGitInspectTimeout = 10 * time.Second
+	defaultGitFetchTimeout = 90 * time.Second
+	defaultGitPullTimeout  = 60 * time.Second
+	// defaultGitInspectTimeout bounds cheap local git ref-inspection
+	// commands (rev-parse --verify, rev-parse --abbrev-ref HEAD).
+	// Normally <100ms, but on CrowdStrike-instrumented macOS every
+	// fork+exec is intercepted by syspolicyd so a single spawn can take
+	// 1–3s under load. 30s gives ~100x headroom over normal operation
+	// while still surfacing true hangs (credential prompts, stuck
+	// filters, filesystem stalls) in a reasonable window. See PR #1216.
+	defaultGitInspectTimeout = 30 * time.Second
 	gitNoTags                = "--no-tags"
 )
 

@@ -340,19 +340,18 @@ func (m *Manager) fetchBranchToLocal(ctx context.Context, repoPath, branch strin
 		zap.Int("pr_number", prNumber),
 		zap.String("repo_path", repoPath))
 
-	// Try to fetch from origin to get the latest version.
-	// fetchCtx bounds the git subprocess itself; the throttle Acquire uses
-	// the parent ctx so a saturated git pool can't eat the fetch budget
-	// before the subprocess even starts.
-	fetchCtx, cancelFetch := context.WithTimeout(ctx, m.fetchTimeout)
-	defer cancelFetch()
-
+	// Acquire the throttle slot FIRST, then build fetchCtx with the
+	// full m.fetchTimeout budget. The previous shape (build fetchCtx,
+	// then call runGitCmdCombinedOutput which Acquires internally) let
+	// throttle queue time burn the fetch budget — same failure mode as
+	// the manager_git.go probes fixed in PR #1216 (70s lock-held trace,
+	// signal:killed). With this ordering the budget only counts actual
+	// git execution time.
 	refspec := branch + ":" + branch
 	if prNumber > 0 {
 		refspec = fmt.Sprintf("pull/%d/head:%s", prNumber, branch)
 	}
-	fetchCmd := m.newNonInteractiveGitCmd(fetchCtx, repoPath, "fetch", gitNoTags, "origin", refspec)
-	output, err := runGitCmdCombinedOutput(ctx, fetchCmd)
+	output, err, fetchCtxErr := m.runGitCombinedAfterAcquire(ctx, m.fetchTimeout, repoPath, "fetch", gitNoTags, "origin", refspec)
 	if err == nil {
 		return &FetchBranchResult{}, nil
 	}
@@ -362,7 +361,7 @@ func (m *Manager) fetchBranchToLocal(ctx context.Context, repoPath, branch strin
 	// the local ref. Retry by fetching only the remote-tracking ref (origin/branch),
 	// which is always safe regardless of worktree state.
 	if isFetchRefusedCheckedOut(outputStr) {
-		if result := m.retryFetchAsRemoteTrackingRef(fetchCtx, repoPath, branch, prNumber); result != nil {
+		if result := m.retryFetchAsRemoteTrackingRef(ctx, repoPath, branch, prNumber); result != nil {
 			return result, nil
 		}
 	}
@@ -381,7 +380,7 @@ func (m *Manager) fetchBranchToLocal(ctx context.Context, repoPath, branch strin
 		return nil, fmt.Errorf("branch %q not found locally or on remote: %s", branch, outputStr)
 	}
 
-	reason := classifyGitFallbackReason(err, outputStr, fetchCtx.Err())
+	reason := classifyGitFallbackReason(err, outputStr, fetchCtxErr)
 	warning := fmt.Sprintf("Could not fetch latest from origin (%s). Using local version of branch %q which may be outdated.", reason, branch)
 	m.logger.Info("using local branch (fetch failed)",
 		zap.String("branch", branch),
@@ -397,13 +396,16 @@ func (m *Manager) fetchBranchToLocal(ctx context.Context, repoPath, branch strin
 // fails when that branch is already checked out in another worktree. Returns
 // nil if the retry also failed and the caller should fall back to the local
 // branch path.
-func (m *Manager) retryFetchAsRemoteTrackingRef(fetchCtx context.Context, repoPath, branch string, prNumber int) *FetchBranchResult {
+//
+// Uses ctx (not the original fetchCtx) and a fresh m.fetchTimeout budget via
+// runGitCombinedAfterAcquire — the parent's fetchCtx is already consumed by
+// the first attempt, so reusing it would leave no room for the retry.
+func (m *Manager) retryFetchAsRemoteTrackingRef(ctx context.Context, repoPath, branch string, prNumber int) *FetchBranchResult {
 	retryRef := branch
 	if prNumber > 0 {
 		retryRef = fmt.Sprintf("pull/%d/head", prNumber)
 	}
-	retryCmd := m.newNonInteractiveGitCmd(fetchCtx, repoPath, "fetch", gitNoTags, "origin", retryRef)
-	if _, retryErr := runGitCmdCombinedOutput(fetchCtx, retryCmd); retryErr != nil {
+	if _, retryErr, _ := m.runGitCombinedAfterAcquire(ctx, m.fetchTimeout, repoPath, "fetch", gitNoTags, "origin", retryRef); retryErr != nil {
 		return nil
 	}
 	m.logger.Info("fetched via remote-tracking ref (branch checked out elsewhere)",
