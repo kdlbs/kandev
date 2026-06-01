@@ -144,15 +144,16 @@ export function useSessionCommits(sessionId: string | null) {
   // refetch is in flight (stale-while-revalidate, matching how
   // useCumulativeDiff works).
   useEffect(() => {
-    if (connectionStatus !== "connected") return;
+    // !sessionId clears the ref BEFORE the connection check so a teardown
+    // during a disconnect still resets the gate — otherwise the ref would
+    // retain the old id, and a same-id reselect after reconnect would skip
+    // the snapshot fetch ("session teardown during disconnect can still
+    // block the next snapshot fetch for the same session").
     if (!sessionId) {
-      // Clear the ref so reselecting the same sessionId after a teardown
-      // (e.g. clearSessionCommits ran while sessionId was null) triggers a
-      // fresh snapshot — otherwise `fetchedSessionRef.current === sessionId`
-      // stays true on reselect and the panel never repopulates.
       fetchedSessionRef.current = null;
       return;
     }
+    if (connectionStatus !== "connected") return;
 
     const triggerBumped = refetchTrigger !== prevRefetchTriggerRef.current;
     const sessionChanged = fetchedSessionRef.current !== sessionId;
