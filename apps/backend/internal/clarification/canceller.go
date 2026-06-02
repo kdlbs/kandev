@@ -45,6 +45,7 @@ func isTerminalStatus(status string) bool {
 // interactive: status stays pending and agent_disconnected is set so the UI
 // can route a late answer through the event fallback path.
 func (c *Canceller) markMessagesDetached(ctx context.Context, msgs []*taskmodels.Message, pendingID string) {
+	writeCtx := context.WithoutCancel(ctx)
 	for _, msg := range msgs {
 		if msg.Metadata == nil {
 			msg.Metadata = map[string]any{}
@@ -53,7 +54,7 @@ func (c *Canceller) markMessagesDetached(ctx context.Context, msgs []*taskmodels
 			continue
 		}
 		msg.Metadata["agent_disconnected"] = true
-		if err := c.repo.UpdateMessage(ctx, msg); err != nil {
+		if err := c.repo.UpdateMessage(writeCtx, msg); err != nil {
 			c.logger.Warn("failed to update message with detached status",
 				zap.String("pending_id", pendingID),
 				zap.String("message_id", msg.ID),
@@ -68,6 +69,7 @@ func (c *Canceller) markMessagesDetached(ctx context.Context, msgs []*taskmodels
 // a message.updated event for each one. It is idempotent: already-terminal
 // messages are skipped.
 func (c *Canceller) markMessagesExpired(ctx context.Context, msgs []*taskmodels.Message, pendingID string) {
+	writeCtx := context.WithoutCancel(ctx)
 	for _, msg := range msgs {
 		if msg.Metadata == nil {
 			msg.Metadata = map[string]any{}
@@ -77,7 +79,7 @@ func (c *Canceller) markMessagesExpired(ctx context.Context, msgs []*taskmodels.
 		}
 		msg.Metadata["agent_disconnected"] = true
 		msg.Metadata["status"] = string(StatusExpired)
-		if err := c.repo.UpdateMessage(ctx, msg); err != nil {
+		if err := c.repo.UpdateMessage(writeCtx, msg); err != nil {
 			c.logger.Warn("failed to update message with expired status",
 				zap.String("pending_id", pendingID),
 				zap.String("message_id", msg.ID),
