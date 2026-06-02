@@ -377,6 +377,7 @@ func TestAddBranchToTask_ForwardsLocalPath(t *testing.T) {
 	assert.False(t, result.IsError)
 	payload, ok := backend.lastPayload.(map[string]interface{})
 	require.True(t, ok)
+	assert.Equal(t, "task-current", payload["task_id"], "task_id should default to current task")
 	assert.Equal(t, "/Users/me/projects/sibling", payload["local_path"])
 	assert.Equal(t, "feature/y", payload["checkout_branch"])
 	assert.Equal(t, "", payload["repository_id"])
