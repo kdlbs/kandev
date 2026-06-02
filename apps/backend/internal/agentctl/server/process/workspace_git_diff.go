@@ -147,6 +147,13 @@ func carryForwardFileDiffs(update *types.GitStatusUpdate, prior types.GitStatusU
 		if fi.Diff != "" {
 			continue
 		}
+		// A skip reason set this poll (budget_exceeded, too_large, binary)
+		// is an intentional decision to not surface diff content; restoring
+		// a prior diff would defeat that skip and could show stale content
+		// for a file that has since grown past the size or budget cap.
+		if fi.DiffSkipReason != "" {
+			continue
+		}
 		priorFi, ok := prior.Files[path]
 		if !ok || priorFi.Diff == "" {
 			continue

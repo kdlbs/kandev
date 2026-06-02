@@ -422,6 +422,38 @@ func TestCarryForwardFileDiffs(t *testing.T) {
 			t.Errorf("counts overwritten; got %d/%d, want 1/0", got.Additions, got.Deletions)
 		}
 	})
+
+	t.Run("respects skip reason set this poll", func(t *testing.T) {
+		skipReasons := []string{
+			diffSkipReasonBudgetExceeded,
+			diffSkipReasonTooLarge,
+			diffSkipReasonBinary,
+		}
+		for _, reason := range skipReasons {
+			t.Run(reason, func(t *testing.T) {
+				prior := streams.GitStatusUpdate{
+					HeadCommit: head,
+					Files: map[string]streams.FileInfo{
+						"foo.go": {Path: "foo.go", Diff: priorDiff, Additions: 5, Deletions: 2},
+					},
+				}
+				update := &streams.GitStatusUpdate{
+					HeadCommit: head,
+					Files: map[string]streams.FileInfo{
+						"foo.go": {Path: "foo.go", DiffSkipReason: reason},
+					},
+				}
+				carryForwardFileDiffs(update, prior)
+				got := update.Files["foo.go"]
+				if got.Diff != "" {
+					t.Errorf("Diff carried forward despite skip reason %q; got %q", reason, got.Diff)
+				}
+				if got.DiffSkipReason != reason {
+					t.Errorf("DiffSkipReason = %q, want %q", got.DiffSkipReason, reason)
+				}
+			})
+		}
+	})
 }
 
 func TestCarryForwardFileDiff(t *testing.T) {
