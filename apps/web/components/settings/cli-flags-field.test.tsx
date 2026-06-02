@@ -40,14 +40,14 @@ describe("CLIFlagsField — curated toggles", () => {
       cli_flag: "-c",
       cli_flag_value: "approval_policy=never",
     };
-    render(
+    const { getByText } = render(
       <CLIFlagsField
         flags={[]}
         onChange={() => {}}
         permissionSettings={{ config_approval_policy_never: setting }}
       />,
     );
-    expect(screen.getByText("-c approval_policy=never")).toBeInTheDocument();
+    expect(getByText("-c approval_policy=never")).toBeTruthy();
   });
   it("renders curated switch as checked when no entry exists and default is true", () => {
     const { getByTestId } = render(
