@@ -25,23 +25,17 @@ import {
   ScriptEditor,
   computeEditorHeight,
 } from "@/components/settings/profile-edit/script-editor";
-import {
-  listSentryProjects,
-  listSentryOrganizations,
-  fetchSentryConfig,
-} from "@/lib/api/domains/sentry-api";
+import { listSentryProjects, listSentryOrganizations } from "@/lib/api/domains/sentry-api";
 import { SENTRY_ISSUE_WATCH_PLACEHOLDERS } from "./sentry-issue-watch-placeholders";
 import { LevelMultiSelect, StatusMultiSelect } from "./sentry-issue-watch-multiselect";
 import { MaxInflightTasksField } from "./sentry-issue-watch-throttle-field";
 import {
   STATS_PERIOD_OPTIONS,
   type FormState,
-  type WatchDefaults,
-  USE_DEFAULT,
   orgSelectItems,
   projectSelectItems,
-  resolveSlugSelection,
   parseMaxInflightTasks,
+  isWatchFormReady,
   buildFilterPayload,
   formStateFromWatch,
   makeEmptyForm,
@@ -152,37 +146,38 @@ function OrgProjectRow({
   setForm,
   projects,
   orgs,
-  defaults,
 }: {
   form: FormState;
   setForm: FormSetter;
   projects: SentryProject[];
   orgs: string[];
-  defaults: WatchDefaults;
 }) {
   const onOrgChange = (v: string) =>
     // The selected project may belong to a different org — clear it so the
     // project dropdown re-picks within the new org.
-    setForm((p) => ({ ...p, orgSlug: resolveSlugSelection(v), projectSlug: "" }));
-  const onProjectChange = (v: string) =>
-    setForm((p) => ({ ...p, projectSlug: resolveSlugSelection(v) }));
+    setForm((p) => ({ ...p, orgSlug: v, projectSlug: "" }));
+  const onProjectChange = (v: string) => setForm((p) => ({ ...p, projectSlug: v }));
+  const orgItems = orgSelectItems(orgs, form.orgSlug);
+  const projectItems = projectSelectItems(projects, form.projectSlug);
   return (
     <div className="grid grid-cols-2 gap-4">
       <SelectField
         label="Organization slug"
         description="The Sentry org to poll."
-        value={form.orgSlug || USE_DEFAULT}
+        value={form.orgSlug}
         onChange={onOrgChange}
-        placeholder="Use default"
-        items={orgSelectItems(orgs, form.orgSlug, defaults.orgSlug)}
+        placeholder={orgItems.length === 0 ? "No organizations available" : "Select organization"}
+        items={orgItems}
+        disabled={orgItems.length === 0}
       />
       <SelectField
         label="Project slug"
         description="The Sentry project to poll."
-        value={form.projectSlug || USE_DEFAULT}
+        value={form.projectSlug}
         onChange={onProjectChange}
-        placeholder="Use default"
-        items={projectSelectItems(projects, form.projectSlug, defaults.projectSlug)}
+        placeholder={projectItems.length === 0 ? "No projects available" : "Select project"}
+        items={projectItems}
+        disabled={projectItems.length === 0}
       />
     </div>
   );
@@ -192,12 +187,10 @@ function FilterFields({
   form,
   setForm,
   orgs,
-  defaults,
 }: {
   form: FormState;
   setForm: FormSetter;
   orgs: string[];
-  defaults: WatchDefaults;
 }) {
   const projects = useSentryProjects(form.orgSlug);
   const toggleLevel = useCallback(
@@ -222,13 +215,7 @@ function FilterFields({
   );
   return (
     <>
-      <OrgProjectRow
-        form={form}
-        setForm={setForm}
-        projects={projects}
-        orgs={orgs}
-        defaults={defaults}
-      />
+      <OrgProjectRow form={form} setForm={setForm} projects={projects} orgs={orgs} />
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
           <Label>Environment</Label>
@@ -428,14 +415,10 @@ function savingLabel(saving: boolean, isEdit: boolean): string {
   return isEdit ? "Update" : "Create";
 }
 
-// useWatchSelectorData loads the org list (for the org dropdown) and the
-// install-wide default org/project from the Sentry config. The defaults only
-// label the "Use default" option — the form keeps "" so the watch follows the
-// integration default dynamically (resolved server-side on each poll) rather
-// than freezing today's slug.
-function useWatchSelectorData(open: boolean) {
+// useWatchOrgs loads the org list for the org dropdown and auto-selects the
+// sole org on a fresh create (with one choice there is nothing to pick).
+function useWatchOrgs(open: boolean, hasWatch: boolean, setForm: FormSetter) {
   const [orgs, setOrgs] = useState<string[]>([]);
-  const [defaults, setDefaults] = useState<WatchDefaults>({ orgSlug: "", projectSlug: "" });
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
@@ -446,19 +429,15 @@ function useWatchSelectorData(open: boolean) {
       .catch(() => {
         if (!cancelled) setOrgs([]);
       });
-    fetchSentryConfig()
-      .then((cfg) => {
-        if (cancelled || !cfg) return;
-        setDefaults({ orgSlug: cfg.defaultOrgSlug, projectSlug: cfg.defaultProjectSlug });
-      })
-      .catch(() => {
-        /* fall through — user can still pick from the org dropdown */
-      });
     return () => {
       cancelled = true;
     };
   }, [open]);
-  return { orgs, defaults };
+  useEffect(() => {
+    if (hasWatch || orgs.length !== 1) return;
+    setForm((p) => (p.orgSlug ? p : { ...p, orgSlug: orgs[0] }));
+  }, [hasWatch, orgs, setForm]);
+  return orgs;
 }
 
 export function SentryIssueWatchDialog({
@@ -481,24 +460,11 @@ export function SentryIssueWatchDialog({
     }
   }, [watch, open, workspaceId, activeWorkspaceId]);
 
-  const { orgs, defaults } = useWatchSelectorData(open);
+  const orgs = useWatchOrgs(open, !!watch, setForm);
 
   const workspaceLocked = !!watch || !!workspaceId;
 
-  // Org/project are not required here: an empty value means "use the integration
-  // default". Guard only that an org can actually be resolved — either picked
-  // explicitly or available as the install-wide default — so we never save a
-  // watch that can never poll.
-  const canSave =
-    !!form.workspaceId &&
-    !!(form.orgSlug.trim() || defaults.orgSlug) &&
-    !!form.workflowId &&
-    !!form.workflowStepId &&
-    !!form.prompt.trim() &&
-    Number.isInteger(form.pollInterval) &&
-    form.pollInterval >= 60 &&
-    form.pollInterval <= 3600 &&
-    parseMaxInflightTasks(form.maxInflightTasks) !== "invalid";
+  const canSave = isWatchFormReady(form);
 
   const handleSave = useCallback(async () => {
     const maxInflight = parseMaxInflightTasks(form.maxInflightTasks);
@@ -549,7 +515,7 @@ export function SentryIssueWatchDialog({
             disabled={workspaceLocked}
           />
           <Separator />
-          <FilterFields form={form} setForm={setForm} orgs={orgs} defaults={defaults} />
+          <FilterFields form={form} setForm={setForm} orgs={orgs} />
           <Separator />
           <AutomationFields form={form} setForm={setForm} />
           <Separator />

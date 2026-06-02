@@ -105,37 +105,10 @@ export function parseMaxInflightTasks(raw: string): number | null | "invalid" {
   return n;
 }
 
-// WatchDefaults carries the install-wide default org/project from the Sentry
-// settings, used to label the always-present "Use default" option.
-export type WatchDefaults = { orgSlug: string; projectSlug: string };
-
-// USE_DEFAULT is the sentinel for the "Use default" option, mirroring
-// STEP_DEFAULT for the profile selects. The form stores "" to mean "follow the
-// install-wide default org/project"; the backend resolves "" fresh on every
-// poll (resolveWatchFilter). Radix disallows <SelectItem value="">, so the
-// dropdown item carries this sentinel and maps back to "" on change.
-export const USE_DEFAULT = "__use_default__";
-
 export type SelectItemSpec = { id: string; label: string };
 
-// defaultSelectItem builds the "Use default" row, always present so the option
-// exists even before an install-wide default has been configured.
-function defaultSelectItem(defaultSlug: string): SelectItemSpec {
-  return { id: USE_DEFAULT, label: defaultSlug ? `Use default (${defaultSlug})` : "Use default" };
-}
-
-// resolveSlugSelection maps a select value back to the stored slug, collapsing
-// the sentinel to "" so the payload keeps signalling "use default".
-export function resolveSlugSelection(value: string): string {
-  return value === USE_DEFAULT ? "" : value;
-}
-
-export function orgSelectItems(
-  orgs: string[],
-  current: string,
-  defaultOrgSlug: string,
-): SelectItemSpec[] {
-  const items: SelectItemSpec[] = [defaultSelectItem(defaultOrgSlug)];
+export function orgSelectItems(orgs: string[], current: string): SelectItemSpec[] {
+  const items: SelectItemSpec[] = [];
   const seen = new Set<string>();
   // Include the current value even if the token can no longer see it (editing an
   // old watch) so the Select still shows the saved org.
@@ -147,12 +120,8 @@ export function orgSelectItems(
   return items;
 }
 
-export function projectSelectItems(
-  projects: SentryProject[],
-  current: string,
-  defaultProjectSlug: string,
-): SelectItemSpec[] {
-  const items: SelectItemSpec[] = [defaultSelectItem(defaultProjectSlug)];
+export function projectSelectItems(projects: SentryProject[], current: string): SelectItemSpec[] {
+  const items: SelectItemSpec[] = [];
   const seen = new Set<string>();
   for (const p of projects) {
     if (seen.has(p.slug)) continue;
@@ -163,6 +132,23 @@ export function projectSelectItems(
     items.push({ id: current, label: current });
   }
   return items;
+}
+
+// isWatchFormReady aggregates the dialog's "can Save enable?" rule. Kept here
+// so the rule has one named home and the dialog stays under its line limit.
+export function isWatchFormReady(form: FormState): boolean {
+  return (
+    !!form.workspaceId &&
+    !!form.orgSlug.trim() &&
+    !!form.projectSlug.trim() &&
+    !!form.workflowId &&
+    !!form.workflowStepId &&
+    !!form.prompt.trim() &&
+    Number.isInteger(form.pollInterval) &&
+    form.pollInterval >= 60 &&
+    form.pollInterval <= 3600 &&
+    parseMaxInflightTasks(form.maxInflightTasks) !== "invalid"
+  );
 }
 
 export function buildFilterPayload(form: FormState): SentrySearchFilter {

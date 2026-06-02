@@ -6,8 +6,6 @@ export class SentrySettingsPage {
   readonly saveButton: Locator;
   readonly deleteButton: Locator;
   readonly statusBanner: Locator;
-  readonly orgSelect: Locator;
-  readonly projectSelect: Locator;
 
   constructor(private page: Page) {
     this.secretInput = page.getByTestId("sentry-secret-input");
@@ -15,9 +13,6 @@ export class SentrySettingsPage {
     this.saveButton = page.getByTestId("sentry-save-button");
     this.deleteButton = page.getByTestId("sentry-delete-button");
     this.statusBanner = page.getByTestId("integration-auth-status-banner");
-    this.orgSelect = page.getByTestId("sentry-org-input");
-    // The project Select trigger has no testid; it is reachable by its id.
-    this.projectSelect = page.locator("#sentry-project");
   }
 
   async goto() {

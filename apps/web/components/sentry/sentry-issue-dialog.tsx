@@ -8,11 +8,7 @@ import { Dialog, DialogContent, DialogTitle } from "@kandev/ui/dialog";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
-import {
-  fetchSentryConfig,
-  listSentryProjects,
-  searchSentryIssues,
-} from "@/lib/api/domains/sentry-api";
+import { listSentryProjects, searchSentryIssues } from "@/lib/api/domains/sentry-api";
 import type {
   SentryIssue,
   SentryLevel,
@@ -83,7 +79,7 @@ function useDialogState(open: boolean) {
   const [error, setError] = useState<string | null>(null);
   const [configLoaded, setConfigLoaded] = useState(false);
 
-  useDefaultsFromConfig(open, configLoaded, setFilter, setConfigLoaded, setProjects);
+  useBrowseProjects(open, configLoaded, setFilter, setConfigLoaded, setProjects);
 
   const updateFilter = useCallback(
     <K extends keyof FilterState>(key: K, value: FilterState[K]) =>
@@ -141,45 +137,44 @@ function toSearchFilter(filter: FilterState): SentrySearchFilter {
   };
 }
 
-function useDefaultsFromConfig(
+function useBrowseProjects(
   open: boolean,
-  configLoaded: boolean,
+  loaded: boolean,
   setFilter: (f: (prev: FilterState) => FilterState) => void,
-  setConfigLoaded: (v: boolean) => void,
+  setLoaded: (v: boolean) => void,
   setProjects: (p: SentryProject[]) => void,
 ) {
   useEffect(() => {
     // Reset when the dialog closes so reopening (component stays mounted)
-    // refetches config + projects rather than showing a stale snapshot.
+    // refetches projects rather than showing a stale snapshot.
     if (!open) {
-      setConfigLoaded(false);
+      setLoaded(false);
       return;
     }
-    if (configLoaded) return;
+    if (loaded) return;
     let cancelled = false;
     (async () => {
       try {
-        const [cfg, projectsRes] = await Promise.all([
-          fetchSentryConfig().catch(() => undefined),
-          listSentryProjects().catch(() => ({ projects: [] as SentryProject[] })),
-        ]);
+        const res = await listSentryProjects().catch(() => ({
+          projects: [] as SentryProject[],
+        }));
         if (cancelled) return;
-        if (cfg) {
-          setFilter((prev) => ({
-            ...prev,
-            orgSlug: prev.orgSlug || cfg.defaultOrgSlug,
-            projectSlug: prev.projectSlug || cfg.defaultProjectSlug,
-          }));
+        const projects = res.projects ?? [];
+        setProjects(projects);
+        // Auto-select the sole org so the required org field is pre-filled when
+        // the token only sees one organization.
+        const orgs = Array.from(new Set(projects.map((p) => p.orgSlug).filter(Boolean)));
+        if (orgs.length === 1) {
+          setFilter((prev) => (prev.orgSlug ? prev : { ...prev, orgSlug: orgs[0] }));
         }
-        setProjects(projectsRes.projects ?? []);
       } finally {
-        if (!cancelled) setConfigLoaded(true);
+        if (!cancelled) setLoaded(true);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [open, configLoaded, setFilter, setConfigLoaded, setProjects]);
+  }, [open, loaded, setFilter, setLoaded, setProjects]);
 }
 
 function FiltersBar({ state }: { state: DialogState }) {

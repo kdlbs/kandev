@@ -36,7 +36,7 @@ func seedConfig(t *testing.T, ctrl *Controller) {
 	t.Helper()
 	ctx := context.Background()
 	if err := ctrl.service.store.UpsertConfig(ctx, &SentryConfig{
-		AuthMethod: AuthMethodAuthToken, DefaultOrgSlug: "acme",
+		AuthMethod: AuthMethodAuthToken,
 	}); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestHTTPGetConfig_ReturnsConfig(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if cfg.DefaultOrgSlug != "acme" || !cfg.HasSecret {
+	if cfg.AuthMethod != AuthMethodAuthToken || !cfg.HasSecret {
 		t.Errorf("config = %+v", cfg)
 	}
 }

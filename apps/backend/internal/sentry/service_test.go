@@ -67,11 +67,11 @@ func (f *fakeSecretStore) Exists(_ context.Context, id string) (bool, error) {
 
 // fakeClient is an in-memory Client for verifying service plumbing.
 type fakeClient struct {
-	testAuthFn     func() (*TestConnectionResult, error)
-	getIssueFn     func(id string) (*SentryIssue, error)
+	testAuthFn          func() (*TestConnectionResult, error)
+	getIssueFn          func(id string) (*SentryIssue, error)
 	listOrganizationsFn func() ([]SentryOrganization, error)
-	listProjectsFn func() ([]SentryProject, error)
-	searchIssuesFn func(filter SearchFilter, cursor string) (*SearchResult, error)
+	listProjectsFn      func() ([]SentryProject, error)
+	searchIssuesFn      func(filter SearchFilter, cursor string) (*SearchResult, error)
 }
 
 func (c *fakeClient) TestAuth(context.Context) (*TestConnectionResult, error) {
@@ -158,15 +158,13 @@ func TestService_SetConfig_PersistsAndStoresSecret(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
 	cfg, err := f.svc.SetConfig(ctx, &SetConfigRequest{
-		AuthMethod:         AuthMethodAuthToken,
-		DefaultOrgSlug:     "acme",
-		DefaultProjectSlug: "frontend",
-		Secret:             "sntrys_xyz",
+		AuthMethod: AuthMethodAuthToken,
+		Secret:     "sntrys_xyz",
 	})
 	if err != nil {
 		t.Fatalf("set: %v", err)
 	}
-	if cfg.DefaultOrgSlug != "acme" || cfg.DefaultProjectSlug != "frontend" {
+	if cfg.AuthMethod != AuthMethodAuthToken {
 		t.Errorf("config not stored: %+v", cfg)
 	}
 	if !cfg.HasSecret {
@@ -204,7 +202,7 @@ func TestService_SetConfig_EmptySecret_KeepsExisting(t *testing.T) {
 		t.Fatalf("initial: %v", err)
 	}
 	if _, err := f.svc.SetConfig(ctx, &SetConfigRequest{
-		AuthMethod: AuthMethodAuthToken, DefaultOrgSlug: "acme",
+		AuthMethod: AuthMethodAuthToken,
 	}); err != nil {
 		t.Fatalf("update: %v", err)
 	}
@@ -298,11 +296,11 @@ func TestService_TestConnection_NoStoredSecret_ReturnsFailure(t *testing.T) {
 	}
 }
 
-func TestService_SearchIssues_FallsBackToDefaultOrg(t *testing.T) {
+func TestService_SearchIssues_PassesFilterThrough(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
 	if _, err := f.svc.SetConfig(ctx, &SetConfigRequest{
-		AuthMethod: AuthMethodAuthToken, DefaultOrgSlug: "acme", Secret: "t",
+		AuthMethod: AuthMethodAuthToken, Secret: "t",
 	}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
@@ -312,11 +310,11 @@ func TestService_SearchIssues_FallsBackToDefaultOrg(t *testing.T) {
 		seenOrg = filter.OrgSlug
 		return &SearchResult{IsLast: true}, nil
 	}
-	if _, err := f.svc.SearchIssues(ctx, SearchFilter{}, ""); err != nil {
+	if _, err := f.svc.SearchIssues(ctx, SearchFilter{OrgSlug: "acme"}, ""); err != nil {
 		t.Fatalf("search: %v", err)
 	}
 	if seenOrg != "acme" {
-		t.Errorf("expected default org injected, got %q", seenOrg)
+		t.Errorf("expected org passed through, got %q", seenOrg)
 	}
 }
 
@@ -359,7 +357,7 @@ func TestService_ClientFor_InvalidateDuringBuild(t *testing.T) {
 	ctx := context.Background()
 	// Seed a config row so clientFor gets past the nil-config check.
 	if err := store.UpsertConfig(ctx, &SentryConfig{
-		AuthMethod: AuthMethodAuthToken, DefaultOrgSlug: "acme",
+		AuthMethod: AuthMethodAuthToken,
 	}); err != nil {
 		t.Fatalf("seed config: %v", err)
 	}

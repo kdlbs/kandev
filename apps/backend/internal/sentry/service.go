@@ -102,11 +102,7 @@ func (s *Service) SetConfig(ctx context.Context, req *SetConfigRequest) (*Sentry
 	if err := validateConfigRequest(req); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidConfig, err.Error())
 	}
-	cfg := &SentryConfig{
-		AuthMethod:         req.AuthMethod,
-		DefaultOrgSlug:     req.DefaultOrgSlug,
-		DefaultProjectSlug: req.DefaultProjectSlug,
-	}
+	cfg := &SentryConfig{AuthMethod: req.AuthMethod}
 	if err := s.store.UpsertConfig(ctx, cfg); err != nil {
 		return nil, fmt.Errorf("upsert sentry config: %w", err)
 	}
@@ -218,14 +214,12 @@ func (s *Service) ListProjects(ctx context.Context) ([]SentryProject, error) {
 	return client.ListProjects(ctx)
 }
 
-// SearchIssues runs a filtered search.
+// SearchIssues runs a filtered search. The caller supplies the org/project to
+// search — there is no install-wide default to fall back on.
 func (s *Service) SearchIssues(ctx context.Context, filter SearchFilter, cursor string) (*SearchResult, error) {
 	client, err := s.clientFor(ctx)
 	if err != nil {
 		return nil, err
-	}
-	if filter.OrgSlug == "" {
-		filter.OrgSlug = s.defaultOrgSlug(ctx)
 	}
 	return client.SearchIssues(ctx, filter, cursor)
 }
@@ -237,15 +231,6 @@ func (s *Service) GetIssue(ctx context.Context, idOrShortID string) (*SentryIssu
 		return nil, err
 	}
 	return client.GetIssue(ctx, idOrShortID)
-}
-
-// defaultOrgSlug reads the stored DefaultOrgSlug so search callers can omit it.
-func (s *Service) defaultOrgSlug(ctx context.Context) string {
-	cfg, err := s.store.GetConfig(ctx)
-	if err != nil || cfg == nil {
-		return ""
-	}
-	return cfg.DefaultOrgSlug
 }
 
 // clientFor returns the cached client, creating it if needed.
@@ -311,11 +296,7 @@ func (s *Service) invalidateClient() {
 // resolveCredentials picks credentials for a test: inline if the request
 // carries a secret, otherwise the stored secret.
 func (s *Service) resolveCredentials(ctx context.Context, req *SetConfigRequest) (*SentryConfig, string, error) {
-	cfg := &SentryConfig{
-		AuthMethod:         req.AuthMethod,
-		DefaultOrgSlug:     req.DefaultOrgSlug,
-		DefaultProjectSlug: req.DefaultProjectSlug,
-	}
+	cfg := &SentryConfig{AuthMethod: req.AuthMethod}
 	if req.Secret != "" {
 		return cfg, req.Secret, nil
 	}

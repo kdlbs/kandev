@@ -30,8 +30,6 @@ const createTablesSQL = `
 	CREATE TABLE IF NOT EXISTS sentry_configs (
 		id TEXT PRIMARY KEY CHECK(id = 'singleton'),
 		auth_method TEXT NOT NULL,
-		default_org_slug TEXT NOT NULL DEFAULT '',
-		default_project_slug TEXT NOT NULL DEFAULT '',
 		last_checked_at DATETIME,
 		last_ok INTEGER NOT NULL DEFAULT 0,
 		last_error TEXT NOT NULL DEFAULT '',
@@ -127,7 +125,7 @@ func (s *Store) tableColumns(table string) (map[string]struct{}, error) {
 	return cols, rows.Err()
 }
 
-const selectConfigColumns = `auth_method, default_org_slug, default_project_slug,
+const selectConfigColumns = `auth_method,
 		last_checked_at, last_ok, last_error, created_at, updated_at`
 
 // GetConfig returns the singleton Sentry config, or nil when no row exists.
@@ -153,15 +151,12 @@ func (s *Store) UpsertConfig(ctx context.Context, cfg *SentryConfig) error {
 	}
 	cfg.UpdatedAt = now
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO sentry_configs (id, auth_method, default_org_slug, default_project_slug, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)
+		INSERT INTO sentry_configs (id, auth_method, created_at, updated_at)
+		VALUES (?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			auth_method = excluded.auth_method,
-			default_org_slug = excluded.default_org_slug,
-			default_project_slug = excluded.default_project_slug,
 			updated_at = excluded.updated_at`,
-		singletonID, cfg.AuthMethod, cfg.DefaultOrgSlug, cfg.DefaultProjectSlug,
-		cfg.CreatedAt, cfg.UpdatedAt)
+		singletonID, cfg.AuthMethod, cfg.CreatedAt, cfg.UpdatedAt)
 	return err
 }
 

@@ -179,8 +179,8 @@ const listProjectsMaxPages = 100
 // The user-scoped /projects/ endpoint only returns projects whose teams the
 // token's user belongs to, so an org owner who is not a member of any team sees
 // an empty list there. The org-scoped endpoint returns every project in the
-// org, which is what the settings dropdown needs. The dropdown then filters
-// client-side by DefaultOrgSlug.
+// org, which is what the watcher/browse project dropdowns need. They filter
+// client-side by the selected org.
 func (c *RESTClient) ListProjects(ctx context.Context) ([]SentryProject, error) {
 	orgs, err := c.ListOrganizations(ctx)
 	if err != nil {

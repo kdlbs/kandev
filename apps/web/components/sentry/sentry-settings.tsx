@@ -8,7 +8,6 @@ import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Separator } from "@kandev/ui/separator";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Switch } from "@kandev/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useToast } from "@/components/toast-provider";
@@ -24,33 +23,24 @@ import {
   saveSentryConfig,
   deleteSentryConfig,
   testSentryConnection,
-  listSentryOrganizations,
-  listSentryProjects,
 } from "@/lib/api/domains/sentry-api";
 import {
   SENTRY_AUTH_METHOD,
   type SentryConfig,
-  type SentryOrganization,
-  type SentryProject,
   type TestSentryConnectionResult,
 } from "@/lib/types/sentry";
 import { SentryIssueWatchersSection } from "./sentry-issue-watchers-section";
 
 type FormState = {
-  defaultOrgSlug: string;
-  defaultProjectSlug: string;
   secret: string;
 };
 
-const emptyForm: FormState = { defaultOrgSlug: "", defaultProjectSlug: "", secret: "" };
+const emptyForm: FormState = { secret: "" };
 
-function configToForm(cfg: SentryConfig | null): FormState {
-  if (!cfg) return emptyForm;
-  return {
-    defaultOrgSlug: cfg.defaultOrgSlug,
-    defaultProjectSlug: cfg.defaultProjectSlug,
-    secret: "",
-  };
+function configToForm(_cfg: SentryConfig | null): FormState {
+  // Only the (write-only) secret is editable here; org/project are chosen
+  // per-watcher and per-browse, not stored install-wide.
+  return { secret: "" };
 }
 
 function saveLabel(saving: boolean, hasConfig: boolean): string {
@@ -137,91 +127,6 @@ function SecretField({ form, loading, update, hasSavedSecret }: SecretFieldProps
           sentry.io → Settings → Auth Tokens
         </a>
       </p>
-    </div>
-  );
-}
-
-type OrgFieldProps = {
-  form: FormState;
-  loading: boolean;
-  update: UpdateFn;
-  orgs: string[];
-  loadingProjects: boolean;
-};
-
-// OrgField is a dropdown populated from the API. It is only rendered once the
-// token is validated, so there is no free-text fallback — the options always
-// come from the org list the verified token can see.
-function OrgField({ form, loading, update, orgs, loadingProjects }: OrgFieldProps) {
-  return (
-    <div className="space-y-1.5">
-      <Label htmlFor="sentry-org">Default organization</Label>
-      <Select
-        value={form.defaultOrgSlug || "__none__"}
-        onValueChange={(v) => {
-          update("defaultOrgSlug", v === "__none__" ? "" : v);
-          // The selected project may belong to a different org — clear it so the
-          // project dropdown re-picks within the new org.
-          update("defaultProjectSlug", "");
-        }}
-        disabled={loading || loadingProjects}
-      >
-        <SelectTrigger id="sentry-org" data-testid="sentry-org-input" className="w-full">
-          <SelectValue placeholder="Choose an organization" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="__none__">No default</SelectItem>
-          {orgs.map((slug) => (
-            <SelectItem key={slug} value={slug}>
-              {slug}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
-  );
-}
-
-type ProjectSelectorProps = {
-  form: FormState;
-  loading: boolean;
-  update: UpdateFn;
-  projects: SentryProject[];
-  loadingProjects: boolean;
-};
-
-function ProjectSelector({
-  form,
-  loading,
-  update,
-  projects,
-  loadingProjects,
-}: ProjectSelectorProps) {
-  // Scope the list to the selected org so the dropdown only offers projects the
-  // chosen org actually contains.
-  const visibleProjects = form.defaultOrgSlug
-    ? projects.filter((p) => p.orgSlug === form.defaultOrgSlug)
-    : projects;
-  return (
-    <div className="space-y-1.5">
-      <Label htmlFor="sentry-project">Default project (optional)</Label>
-      <Select
-        value={form.defaultProjectSlug || "__none__"}
-        onValueChange={(v) => update("defaultProjectSlug", v === "__none__" ? "" : v)}
-        disabled={loading || loadingProjects}
-      >
-        <SelectTrigger id="sentry-project" className="w-full">
-          <SelectValue placeholder={loadingProjects ? "Loading projects…" : "Choose a project"} />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="__none__">No default</SelectItem>
-          {visibleProjects.map((p) => (
-            <SelectItem key={p.id} value={p.slug}>
-              {p.name} ({p.slug})
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
     </div>
   );
 }
@@ -329,8 +234,6 @@ function useSettingsActions({ form, setConfig, setForm, setTestResult }: Setting
     try {
       const saved = await saveSentryConfig({
         authMethod: SENTRY_AUTH_METHOD,
-        defaultOrgSlug: form.defaultOrgSlug,
-        defaultProjectSlug: form.defaultProjectSlug,
         secret: form.secret,
       });
       setConfig(saved);
@@ -360,58 +263,6 @@ function useSettingsActions({ form, setConfig, setForm, setTestResult }: Setting
   return { saving, testing, handleTest, handleSave, handleDelete };
 }
 
-function useProjectsLoader(hasSecret: boolean | undefined, lastOk: boolean | undefined) {
-  const [projects, setProjects] = useState<SentryProject[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    if (!hasSecret) return;
-    let cancelled = false;
-    listSentryProjects()
-      .then((res) => {
-        if (cancelled) return;
-        setProjects(res.projects ?? []);
-        setError(null);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setProjects([]);
-        setError(String(err));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [hasSecret, lastOk]);
-  return {
-    projects: projects ?? [],
-    loadingProjects: projects === null && !!hasSecret,
-    projectsError: error,
-  };
-}
-
-function useOrgsLoader(hasSecret: boolean | undefined, lastOk: boolean | undefined) {
-  const [organizations, setOrganizations] = useState<SentryOrganization[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    if (!hasSecret) return;
-    let cancelled = false;
-    listSentryOrganizations()
-      .then((res) => {
-        if (cancelled) return;
-        setOrganizations(res.organizations ?? []);
-        setError(null);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setOrganizations([]);
-        setError(String(err));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [hasSecret, lastOk]);
-  return { organizations: organizations ?? [], orgsError: error };
-}
-
 function useSentrySettings() {
   const { toast } = useToast();
   const [config, setConfig] = useState<SentryConfig | null>(null);
@@ -419,19 +270,6 @@ function useSentrySettings() {
   const [loading, setLoading] = useState(true);
   const [testResult, setTestResult] = useState<TestSentryConnectionResult | null>(null);
   const health = configToHealth(config);
-  const { projects, loadingProjects, projectsError } = useProjectsLoader(
-    config?.hasSecret,
-    config?.lastOk,
-  );
-  const { organizations, orgsError } = useOrgsLoader(config?.hasSecret, config?.lastOk);
-  // Organizations the token can see, fetched from the backend. The saved org is
-  // kept in the list so it stays selectable even if it is not currently
-  // returned (e.g. the token's org membership changed).
-  const orgs = (() => {
-    const set = new Set(organizations.map((o) => o.slug).filter(Boolean));
-    if (form.defaultOrgSlug) set.add(form.defaultOrgSlug);
-    return Array.from(set).sort();
-  })();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -482,11 +320,6 @@ function useSentrySettings() {
     testing,
     testResult,
     health,
-    projects,
-    orgs,
-    loadingProjects,
-    orgsError,
-    projectsError,
     update,
     handleTest,
     handleSave,
@@ -516,10 +349,6 @@ export function SentryConnectionSection() {
   const missingSecret = !s.config?.hasSecret && !s.form.secret;
   const disableSave = s.saving || missingSecret;
   const disableTest = missingSecret;
-  // Org/project selectors only make sense once the token is validated (saved
-  // and the auth-health probe passed) — before that they'd be empty, so we hide
-  // them entirely rather than show an unusable free-text input.
-  const validated = !!s.config?.hasSecret && !!s.config?.lastOk;
 
   return (
     <SettingsSection
@@ -537,34 +366,6 @@ export function SentryConnectionSection() {
             update={s.update}
             hasSavedSecret={!!s.config?.hasSecret}
           />
-          {validated && (
-            <>
-              {(s.orgsError || s.projectsError) && (
-                <Alert variant="destructive">
-                  <AlertDescription>
-                    Couldn&apos;t load organizations or projects from Sentry:{" "}
-                    <span className="font-mono text-xs">{s.orgsError || s.projectsError}</span>. If
-                    this is a permissions error, check the token has the <code>org:read</code> /{" "}
-                    <code>project:read</code> scopes (see the ⓘ next to Auth token).
-                  </AlertDescription>
-                </Alert>
-              )}
-              <OrgField
-                form={s.form}
-                loading={s.loading}
-                update={s.update}
-                orgs={s.orgs}
-                loadingProjects={s.loadingProjects}
-              />
-              <ProjectSelector
-                form={s.form}
-                loading={s.loading}
-                update={s.update}
-                projects={s.projects}
-                loadingProjects={s.loadingProjects}
-              />
-            </>
-          )}
           <TestResultAlert result={s.testResult} />
           <Separator />
           <ActionBar

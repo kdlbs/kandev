@@ -19,10 +19,8 @@ const SecretKey = "sentry:singleton:token"
 // SentryConfig is the install-wide configuration for the Sentry integration.
 // The token is stored separately in the encrypted secret store under SecretKey.
 type SentryConfig struct {
-	AuthMethod         string `json:"authMethod" db:"auth_method"`
-	DefaultOrgSlug     string `json:"defaultOrgSlug" db:"default_org_slug"`
-	DefaultProjectSlug string `json:"defaultProjectSlug" db:"default_project_slug"`
-	HasSecret          bool   `json:"hasSecret" db:"-"`
+	AuthMethod string `json:"authMethod" db:"auth_method"`
+	HasSecret  bool   `json:"hasSecret" db:"-"`
 	// LastCheckedAt / LastOk / LastError are written by the background auth
 	// poller so the UI can render a "connected/disconnected + checked Xs ago"
 	// indicator without doing its own probing.
@@ -37,10 +35,8 @@ type SentryConfig struct {
 // Sentry configuration. When Secret is empty on update, the existing secret
 // is retained; when non-empty it replaces the stored value.
 type SetConfigRequest struct {
-	AuthMethod         string `json:"authMethod"`
-	DefaultOrgSlug     string `json:"defaultOrgSlug"`
-	DefaultProjectSlug string `json:"defaultProjectSlug"`
-	Secret             string `json:"secret"`
+	AuthMethod string `json:"authMethod"`
+	Secret     string `json:"secret"`
 }
 
 // TestConnectionResult reports what the backend learned when pinging Sentry

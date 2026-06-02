@@ -31,11 +31,7 @@ func TestStore_UpsertGetDelete(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
-	cfg := &SentryConfig{
-		AuthMethod:         AuthMethodAuthToken,
-		DefaultOrgSlug:     "acme",
-		DefaultProjectSlug: "frontend",
-	}
+	cfg := &SentryConfig{AuthMethod: AuthMethodAuthToken}
 	if err := store.UpsertConfig(ctx, cfg); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
@@ -47,22 +43,16 @@ func TestStore_UpsertGetDelete(t *testing.T) {
 	if got == nil {
 		t.Fatal("expected config, got nil")
 	}
-	if got.AuthMethod != cfg.AuthMethod || got.DefaultOrgSlug != cfg.DefaultOrgSlug ||
-		got.DefaultProjectSlug != cfg.DefaultProjectSlug {
+	if got.AuthMethod != cfg.AuthMethod {
 		t.Errorf("round-trip mismatch: %+v vs %+v", got, cfg)
 	}
 	if got.CreatedAt.IsZero() || got.UpdatedAt.IsZero() {
 		t.Error("timestamps not set")
 	}
 
-	// Idempotent upsert updates the project slug without duplicating rows.
-	cfg.DefaultProjectSlug = "backend"
+	// Idempotent upsert does not duplicate rows.
 	if err := store.UpsertConfig(ctx, cfg); err != nil {
 		t.Fatalf("update upsert: %v", err)
-	}
-	got2, _ := store.GetConfig(ctx)
-	if got2.DefaultProjectSlug != "backend" {
-		t.Errorf("expected project update, got %q", got2.DefaultProjectSlug)
 	}
 
 	if err := store.DeleteConfig(ctx); err != nil {
