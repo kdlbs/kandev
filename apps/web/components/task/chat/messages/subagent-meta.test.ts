@@ -59,4 +59,23 @@ describe("subagentMetaChips", () => {
       { label: "session", value: "short" },
     ]);
   });
+
+  // Pins the fix for the "main agent finished, subagent backgrounded" race:
+  // claude-acp's Task tool with run_in_background=true returns
+  // is_async=true + status=async_launched. The card must surface a "background"
+  // chip so users see this isn't a normal completion.
+  it("adds a background chip when is_async is true", () => {
+    const payload: SubagentTaskPayload = {
+      subagent_type: "general-purpose",
+      is_async: true,
+      status: "async_launched",
+      output_file: "/tmp/tasks/abc.output",
+    };
+    expect(subagentMetaChips(payload)).toEqual([{ label: "background", value: "background" }]);
+  });
+
+  it("adds a background chip when status is async_launched even without is_async", () => {
+    const payload: SubagentTaskPayload = { status: "async_launched" };
+    expect(subagentMetaChips(payload)).toEqual([{ label: "background", value: "background" }]);
+  });
 });

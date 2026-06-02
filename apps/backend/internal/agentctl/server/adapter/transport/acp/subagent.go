@@ -40,6 +40,38 @@ type SubagentTaskResult struct {
 	// ToolUseCountKnown distinguishes a reported zero from "not reported" — the
 	// agent supplied totalToolUseCount (possibly 0) vs the field being absent.
 	ToolUseCountKnown bool
+
+	// IsAsync / OutputFile / CanReadOutputFile carry the async-launched
+	// envelope Claude Code emits when the Task tool dispatches a background
+	// subagent. The dispatch is terminal for the Task tool itself; the
+	// subagent runs out-of-band and writes its result to OutputFile.
+	IsAsync           bool
+	OutputFile        string
+	CanReadOutputFile bool
+}
+
+// subagentAsyncLaunchedStatus is the Claude Code marker that the Task tool
+// dispatched a background subagent. It appears at
+// `_meta.claudeCode.toolResponse.status` with `_meta.claudeCode.toolResponse.isAsync:true`.
+const subagentAsyncLaunchedStatus = "async_launched"
+
+// isSubagentAsyncLaunched reports whether a tool_call_update meta carries the
+// claude-acp async-launched envelope. Defensive over untyped maps so it can be
+// called on any meta payload.
+func isSubagentAsyncLaunched(meta map[string]any) bool {
+	if meta == nil {
+		return false
+	}
+	cc, ok := meta["claudeCode"].(map[string]any)
+	if !ok {
+		return false
+	}
+	resp, ok := cc["toolResponse"].(map[string]any)
+	if !ok {
+		return false
+	}
+	status, _ := resp["status"].(string)
+	return status == subagentAsyncLaunchedStatus
 }
 
 // recognizeSubagent reports whether a tool call spawns a subagent (Task) and
@@ -167,6 +199,9 @@ func claudeSubagentResponse(meta map[string]any, res *SubagentTaskResult) bool {
 		res.ToolUseCount = int(asInt64(count))
 		res.ToolUseCountKnown = true
 	}
+	res.IsAsync, _ = resp["isAsync"].(bool)
+	res.OutputFile, _ = resp["outputFile"].(string)
+	res.CanReadOutputFile, _ = resp["canReadOutputFile"].(bool)
 	return true
 }
 
@@ -256,5 +291,14 @@ func applySubagentResult(p *streams.SubagentTaskPayload, res SubagentTaskResult)
 	if res.ToolUseCountKnown {
 		count := res.ToolUseCount
 		p.ToolUseCount = &count
+	}
+	if res.IsAsync {
+		p.IsAsync = true
+	}
+	if res.OutputFile != "" {
+		p.OutputFile = res.OutputFile
+	}
+	if res.CanReadOutputFile {
+		p.CanReadOutputFile = true
 	}
 }

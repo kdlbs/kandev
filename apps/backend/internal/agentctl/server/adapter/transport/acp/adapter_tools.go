@@ -183,6 +183,17 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	// the view as ended instead.
 	isTrackedMonitorTerminal := !isMonitorRegistration && isMonitorMeta(tcu.Meta) && a.isTrackedMonitor(sessionID, toolCallID)
 
+	// Recognize claude-acp's async-launched subagent envelope: top-level status
+	// is null but `_meta.claudeCode.toolResponse.status == "async_launched"`
+	// signals the Task tool successfully dispatched a background subagent. The
+	// dispatch IS terminal for the Task tool itself — the subagent runs
+	// out-of-band and writes its result to OutputFile. Without this override
+	// the card stays "in_progress" forever because no later tool_call_update
+	// arrives (the SDK never delivers terminal status for backgrounded subs).
+	if status == "" && isSubagentAsyncLaunched(tcu.Meta) {
+		status = toolStatusComplete
+	}
+
 	isTerminal := status == toolStatusComplete || status == toolStatusError || status == toolStatusCancelled
 
 	a.mu.Lock()

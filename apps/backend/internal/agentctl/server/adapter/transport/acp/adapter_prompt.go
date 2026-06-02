@@ -333,6 +333,13 @@ func (a *Adapter) Cancel(ctx context.Context) error {
 // or sweepMonitorsOnReplayEnd) which uses the appropriate status and a
 // payload snapshot. Without this skip the Monitor would receive two
 // terminal events with conflicting states.
+//
+// Subagent (Task) tool calls are also preserved: the Claude Agent SDK can
+// return session/prompt with stop_reason while the subagent is still running
+// (anthropics/claude-code#47936). Cancelling the card here would mark it
+// terminated even though the SDK keeps streaming its real tool_call_update
+// when the subagent finishes seconds later. Leaving the entry in
+// activeToolCalls lets that authoritative terminal update land naturally.
 func (a *Adapter) cancelActiveToolCalls(sessionID string) {
 	a.mu.Lock()
 	monitorToolCallIDs := make(map[string]bool)
@@ -342,9 +349,12 @@ func (a *Adapter) cancelActiveToolCalls(sessionID string) {
 	toCancel := make(map[string]*streams.NormalizedPayload)
 	preserved := make(map[string]*streams.NormalizedPayload)
 	for tcID, payload := range a.activeToolCalls {
-		if monitorToolCallIDs[tcID] {
+		switch {
+		case monitorToolCallIDs[tcID]:
 			preserved[tcID] = payload
-		} else {
+		case payload != nil && payload.Kind() == streams.ToolKindSubagentTask:
+			preserved[tcID] = payload
+		default:
 			toCancel[tcID] = payload
 		}
 	}
