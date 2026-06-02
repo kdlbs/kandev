@@ -20,9 +20,19 @@ import (
 // causing "too many open files" errors in large workspaces.
 const DefaultFilePollInterval = 2 * time.Second
 
-// gitCommandTimeout is the maximum time to wait for git commands during polling.
-// This prevents the monitor loop from hanging if git is blocked (e.g., index lock).
-const gitCommandTimeout = 10 * time.Second
+// gitCommandTimeout is the maximum time to wait for any single git subprocess
+// the workspace tracker spawns (monitor loop quick-status, full status refresh,
+// diff enrichment). Without a per-command bound, a wedged invocation (FS hang,
+// index lock, EDR scan) would inherit only the tracker's lifetime ctx and pin
+// its gitThrottle slot for the lifetime of the session, blocking subsequent
+// poll cycles and producing the "empty changes panel after freeze" symptom.
+// 10s is generous for normal completion (typical poll commands finish in
+// <100ms) while still freeing the slot in time for the next poll cycle.
+//
+// A var (not const) so the regression test in workspace_git_cmd_test.go can
+// shrink it to milliseconds and prove that timed-out invocations release
+// their gitThrottle slot. Production code must not mutate it.
+var gitCommandTimeout = 10 * time.Second
 
 // maxConsecutiveGitFailures is the number of consecutive git command failures
 // before the polling loop gives up and stops. At 2-second intervals, 5 failures

@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/kandev/kandev/internal/agentctl/types"
 )
 
 func TestUnquoteGitPath(t *testing.T) {
@@ -207,4 +209,50 @@ func mapKeys[V any](m map[string]V) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// TestCarryAheadBehind covers the carry-forward fallback used when the
+// ahead/behind git command fails (timeout, missing upstream). The contract:
+// preserve prior counts when HEAD is unchanged, leave them zero when HEAD
+// moved (the prior counts are stale by definition) or when prior is empty.
+func TestCarryAheadBehind(t *testing.T) {
+	head := "abc123"
+	tests := []struct {
+		name       string
+		prior      types.GitStatusUpdate
+		updateHead string
+		wantAhead  int
+		wantBehind int
+	}{
+		{
+			name:       "same head preserves counts",
+			prior:      types.GitStatusUpdate{HeadCommit: head, Ahead: 1, Behind: 3},
+			updateHead: head,
+			wantAhead:  1,
+			wantBehind: 3,
+		},
+		{
+			name:       "different head drops counts",
+			prior:      types.GitStatusUpdate{HeadCommit: head, Ahead: 1, Behind: 3},
+			updateHead: "def456",
+			wantAhead:  0,
+			wantBehind: 0,
+		},
+		{
+			name:       "empty prior head no-op",
+			prior:      types.GitStatusUpdate{Ahead: 9, Behind: 9},
+			updateHead: head,
+			wantAhead:  0,
+			wantBehind: 0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			update := &types.GitStatusUpdate{HeadCommit: tt.updateHead}
+			carryAheadBehind(update, tt.prior)
+			if update.Ahead != tt.wantAhead || update.Behind != tt.wantBehind {
+				t.Errorf("ahead/behind = %d/%d, want %d/%d", update.Ahead, update.Behind, tt.wantAhead, tt.wantBehind)
+			}
+		})
+	}
 }

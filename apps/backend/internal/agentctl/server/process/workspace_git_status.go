@@ -2,13 +2,11 @@ package process
 
 import (
 	"context"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
-	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 )
 
@@ -76,7 +74,12 @@ func (wt *WorkspaceTracker) GetGitStatus(ctx context.Context, fresh bool) (types
 	return status, nil
 }
 
-// getGitStatus retrieves the current git status
+// getGitStatus retrieves the current git status. Secondary commands
+// (ahead/behind counts, diff enrichment) that fail or time out carry their
+// values forward from the prior cached status rather than overwriting them
+// with zero. The two primary commands (branch info and `git status
+// --porcelain`) still propagate errors upward; on those, updateGitStatus
+// skips the cache write entirely so the prior state stays visible to the UI.
 func (wt *WorkspaceTracker) getGitStatus(ctx context.Context) (types.GitStatusUpdate, error) {
 	update := types.GitStatusUpdate{
 		Timestamp:      time.Now(),
@@ -99,47 +102,50 @@ func (wt *WorkspaceTracker) getGitStatus(ctx context.Context) (types.GitStatusUp
 		return update, nil
 	}
 
+	// Snapshot the prior cache once so per-command carry-forward sees a
+	// consistent view even if a concurrent RefreshGitStatus replaces
+	// currentStatus mid-poll.
+	wt.mu.RLock()
+	prior := wt.currentStatus
+	wt.mu.RUnlock()
+
 	if err := wt.getGitBranchInfo(ctx, &update); err != nil {
 		return update, err
 	}
 
-	wt.getAheadBehindCounts(ctx, &update)
+	wt.getAheadBehindCounts(ctx, &update, prior)
 
 	if err := wt.parseGitStatusOutput(ctx, &update); err != nil {
 		return update, err
 	}
 
 	// Enrich file info with diff data (additions, deletions, and actual diff content)
-	wt.enrichWithDiffData(ctx, &update)
+	wt.enrichWithDiffData(ctx, &update, prior)
 
 	// Compute full branch totals vs merge-base (committed + staged + unstaged + untracked)
-	wt.enrichWithBranchDiff(ctx, &update)
+	wt.enrichWithBranchDiff(ctx, &update, prior)
 
 	return update, nil
 }
 
 // getGitBranchInfo populates branch, remote branch, head commit, and base commit fields.
+// Each command runs under a per-command timeout via the runGit* helpers so a
+// single wedged git invocation cannot pin the shared throttle slot.
 func (wt *WorkspaceTracker) getGitBranchInfo(ctx context.Context, update *types.GitStatusUpdate) error {
 	// Get current branch
-	branchCmd := exec.CommandContext(ctx, "git", "rev-parse", "--abbrev-ref", "HEAD")
-	branchCmd.Dir = wt.workDir
-	branchOut, err := subproc.RunGitOutput(ctx, branchCmd)
+	branchOut, err := wt.runGitOutput(ctx, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
 		return err
 	}
 	update.Branch = strings.TrimSpace(string(branchOut))
 
 	// Get remote branch
-	remoteCmd := exec.CommandContext(ctx, "git", "rev-parse", "--abbrev-ref", "@{upstream}")
-	remoteCmd.Dir = wt.workDir
-	if remoteOut, err := subproc.RunGitOutput(ctx, remoteCmd); err == nil {
+	if remoteOut, err := wt.runGitOutput(ctx, "rev-parse", "--abbrev-ref", "@{upstream}"); err == nil {
 		update.RemoteBranch = strings.TrimSpace(string(remoteOut))
 	}
 
 	// Get current HEAD commit SHA
-	headCmd := exec.CommandContext(ctx, "git", "rev-parse", "HEAD")
-	headCmd.Dir = wt.workDir
-	if headOut, err := subproc.RunGitOutput(ctx, headCmd); err == nil {
+	if headOut, err := wt.runGitOutput(ctx, "rev-parse", "HEAD"); err == nil {
 		update.HeadCommit = strings.TrimSpace(string(headOut))
 	}
 
@@ -148,9 +154,7 @@ func (wt *WorkspaceTracker) getGitBranchInfo(ctx context.Context, update *types.
 	// so we show all changes this branch introduces compared to the main development line.
 	var baseBranch string
 	for _, candidate := range []string{"origin/main", "origin/master", "main", "master"} {
-		checkCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", candidate)
-		checkCmd.Dir = wt.workDir
-		if err := subproc.RunGit(ctx, checkCmd); err == nil {
+		if err := wt.runGit(ctx, "rev-parse", "--verify", candidate); err == nil {
 			baseBranch = candidate
 			break
 		}
@@ -158,9 +162,7 @@ func (wt *WorkspaceTracker) getGitBranchInfo(ctx context.Context, update *types.
 	if baseBranch != "" {
 		// Use merge-base to find common ancestor between current branch and base branch.
 		// This is correct even when the branch has diverged from main.
-		mergeBaseCmd := exec.CommandContext(ctx, "git", "merge-base", baseBranch, "HEAD")
-		mergeBaseCmd.Dir = wt.workDir
-		if mergeBaseOut, err := subproc.RunGitOutput(ctx, mergeBaseCmd); err == nil {
+		if mergeBaseOut, err := wt.runGitOutput(ctx, "merge-base", baseBranch, "HEAD"); err == nil {
 			update.BaseCommit = strings.TrimSpace(string(mergeBaseOut))
 		}
 	}
@@ -168,44 +170,63 @@ func (wt *WorkspaceTracker) getGitBranchInfo(ctx context.Context, update *types.
 	return nil
 }
 
-// getAheadBehindCounts populates the Ahead/Behind fields relative to the base branch
-// (origin/main or origin/master). Always compares against the base branch rather than
-// the remote tracking branch, because after a rebase the tracking branch has stale
-// commit SHAs that produce inflated counts.
-func (wt *WorkspaceTracker) getAheadBehindCounts(ctx context.Context, update *types.GitStatusUpdate) {
+// getAheadBehindCounts populates the Ahead/Behind fields relative to the base
+// branch (origin/main or origin/master). Always compares against the base
+// branch rather than the remote tracking branch, because after a rebase the
+// tracking branch has stale commit SHAs that produce inflated counts.
+//
+// If either the compareRef lookup or the count command fails (e.g. timeout
+// under throttle saturation, transient FS hang), Ahead/Behind are carried
+// forward from prior when HEAD hasn't moved. Otherwise a single bad poll
+// would silently overwrite the cached counts with 0/0 and hide a legitimate
+// "Pull N" / "Push N" indicator in the UI.
+func (wt *WorkspaceTracker) getAheadBehindCounts(ctx context.Context, update *types.GitStatusUpdate, prior types.GitStatusUpdate) {
 	// Always compare against the base branch (origin/main or origin/master).
 	// Using the remote tracking branch (origin/<feature-branch>) gives wrong counts
 	// after rebase because rebased commits have new SHAs.
 	var compareRef string
 	for _, candidate := range []string{"origin/main", "origin/master"} {
-		checkCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", candidate)
-		checkCmd.Dir = wt.workDir
-		if err := subproc.RunGit(ctx, checkCmd); err == nil {
+		if err := wt.runGit(ctx, "rev-parse", "--verify", candidate); err == nil {
 			compareRef = candidate
 			break
 		}
 	}
 	if compareRef == "" {
+		carryAheadBehind(update, prior)
 		return
 	}
-	countCmd := exec.CommandContext(ctx, "git", "rev-list", "--left-right", "--count", update.Branch+"..."+compareRef)
-	countCmd.Dir = wt.workDir
-	if countOut, err := subproc.RunGitOutput(ctx, countCmd); err == nil {
-		parts := strings.Fields(string(countOut))
-		if len(parts) == 2 {
-			update.Ahead, _ = strconv.Atoi(parts[0])
-			update.Behind, _ = strconv.Atoi(parts[1])
-		}
+	countOut, err := wt.runGitOutput(ctx, "rev-list", "--left-right", "--count", update.Branch+"..."+compareRef)
+	if err != nil {
+		wt.logger.Debug("getAheadBehindCounts: rev-list failed, carrying forward", zap.Error(err))
+		carryAheadBehind(update, prior)
+		return
 	}
+	parts := strings.Fields(string(countOut))
+	if len(parts) != 2 {
+		carryAheadBehind(update, prior)
+		return
+	}
+	update.Ahead, _ = strconv.Atoi(parts[0])
+	update.Behind, _ = strconv.Atoi(parts[1])
+}
+
+// carryAheadBehind copies prior.Ahead/Behind onto update when HEAD hasn't
+// moved. A new HEAD invalidates prior counts (the user committed, pulled, or
+// reset), so we leave update zeroed in that case.
+func carryAheadBehind(update *types.GitStatusUpdate, prior types.GitStatusUpdate) {
+	if prior.HeadCommit == "" || prior.HeadCommit != update.HeadCommit {
+		return
+	}
+	update.Ahead = prior.Ahead
+	update.Behind = prior.Behind
 }
 
 // parseGitStatusOutput runs git status --porcelain and populates the file lists and map.
 func (wt *WorkspaceTracker) parseGitStatusOutput(ctx context.Context, update *types.GitStatusUpdate) error {
 	// --untracked-files=all shows all files in untracked directories, not just the directory name.
-	// GIT_OPTIONAL_LOCKS=0 (via pollingGitCommand) prevents the background poll loop from taking
-	// .git/index.lock, which would race with concurrent user-initiated git operations.
-	statusCmd := wt.pollingGitCommand(ctx, "status", "--porcelain", "--untracked-files=all")
-	statusOut, err := subproc.RunGitOutput(ctx, statusCmd)
+	// GIT_OPTIONAL_LOCKS=0 (via runPollingGitOutput) prevents the background poll loop from
+	// taking .git/index.lock, which would race with concurrent user-initiated git operations.
+	statusOut, err := wt.runPollingGitOutput(ctx, "status", "--porcelain", "--untracked-files=all")
 	if err != nil {
 		return err
 	}
