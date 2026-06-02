@@ -119,7 +119,11 @@ test.describe("Recent task switcher", () => {
     await testPage.keyboard.press("Space");
     await expect(secondRow).toHaveAttribute("data-selected", "true");
 
+    // Releasing Shift alone must not commit — only the hold modifier does.
     await testPage.keyboard.up("Shift");
+    await expect(switcher).toBeVisible();
+    await expect(secondRow).toHaveAttribute("data-selected", "true");
+
     await testPage.keyboard.up(modifier);
     await expect(switcher).not.toBeVisible({ timeout: 5_000 });
     await expect(testPage).toHaveURL(new RegExp(`/t/${second.id}`), { timeout: 10_000 });
