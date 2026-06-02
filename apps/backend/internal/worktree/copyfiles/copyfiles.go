@@ -53,11 +53,13 @@ type Entry struct {
 
 // Parse splits a comma-separated user spec into trimmed, deduplicated,
 // non-empty patterns. Order is preserved (first occurrence wins on dedupe).
+// Commas inside `{...}` are treated as part of the pattern (brace alternation),
+// so `config/{local,dev}.yml` is parsed as a single pattern.
 func Parse(spec string) []string {
 	if spec == "" {
 		return nil
 	}
-	parts := strings.Split(spec, ",")
+	parts := splitTopLevelCommas(spec)
 	out := make([]string, 0, len(parts))
 	seen := make(map[string]struct{}, len(parts))
 	for _, p := range parts {
@@ -74,6 +76,32 @@ func Parse(spec string) []string {
 	if len(out) == 0 {
 		return nil
 	}
+	return out
+}
+
+// splitTopLevelCommas splits s on commas that sit outside any `{...}` group,
+// so brace alternation patterns like `config/{local,dev}.yml` survive intact.
+// Nested braces are tracked; an unbalanced `}` is treated as a literal.
+func splitTopLevelCommas(s string) []string {
+	out := make([]string, 0, 4)
+	depth := 0
+	start := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '{':
+			depth++
+		case '}':
+			if depth > 0 {
+				depth--
+			}
+		case ',':
+			if depth == 0 {
+				out = append(out, s[start:i])
+				start = i + 1
+			}
+		}
+	}
+	out = append(out, s[start:])
 	return out
 }
 

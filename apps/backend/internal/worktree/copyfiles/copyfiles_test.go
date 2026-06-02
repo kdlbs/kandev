@@ -25,6 +25,13 @@ func TestParse(t *testing.T) {
 		{"two", ".env,.env.local", []string{".env", ".env.local"}},
 		{"dedupe", ".env, .env, .env.local", []string{".env", ".env.local"}},
 		{"empties dropped", " .env , , .env.local ", []string{".env", ".env.local"}},
+		{"brace keeps comma", "config/{local,dev}.yml", []string{"config/{local,dev}.yml"}},
+		{
+			"brace with siblings",
+			".env, config/{local,dev}.yml, .env.local",
+			[]string{".env", "config/{local,dev}.yml", ".env.local"},
+		},
+		{"nested braces", "{a,{b,c}}.txt", []string{"{a,{b,c}}.txt"}},
 	}
 
 	for _, tc := range cases {
@@ -270,6 +277,41 @@ func TestCopy_BraceAlternation(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dst, ".envrc")); !os.IsNotExist(err) {
 		t.Fatalf(".envrc should not be copied, err=%v", err)
+	}
+}
+
+// TestCopy_ParseBraceRoundTrip exercises the real ingestion path: a
+// comma-separated user spec containing a brace pattern with an internal comma
+// must survive Parse and reach the glob engine intact.
+func TestCopy_ParseBraceRoundTrip(t *testing.T) {
+	t.Parallel()
+	src := t.TempDir()
+	dst := t.TempDir()
+
+	writeFile(t, filepath.Join(src, ".env"), "E", 0o644)
+	writeFile(t, filepath.Join(src, "config", "local.yml"), "L", 0o644)
+	writeFile(t, filepath.Join(src, "config", "dev.yml"), "D", 0o644)
+	writeFile(t, filepath.Join(src, "config", "prod.yml"), "P", 0o644)
+
+	patterns := Parse(".env, config/{local,dev}.yml")
+	_, warnings, err := Copy(context.Background(), src, dst, patterns, nil)
+	if err != nil {
+		t.Fatalf("Copy err: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings: %v", warnings)
+	}
+	if readFile(t, filepath.Join(dst, ".env")) != "E" {
+		t.Fatalf(".env missing")
+	}
+	if readFile(t, filepath.Join(dst, "config", "local.yml")) != "L" {
+		t.Fatalf("config/local.yml missing")
+	}
+	if readFile(t, filepath.Join(dst, "config", "dev.yml")) != "D" {
+		t.Fatalf("config/dev.yml missing")
+	}
+	if _, err := os.Stat(filepath.Join(dst, "config", "prod.yml")); !os.IsNotExist(err) {
+		t.Fatalf("config/prod.yml should not be copied, err=%v", err)
 	}
 }
 
@@ -546,6 +588,45 @@ func TestPlan_HappyPath(t *testing.T) {
 	}
 	if string(got["config/local.yml"].Content) != "y" {
 		t.Errorf("config/local.yml content = %q, want %q", got["config/local.yml"].Content, "y")
+	}
+}
+
+// TestPlan_DoubleStarRecursive mirrors TestCopy_DoubleStarRecursive but goes
+// through Plan to guard against future regressions in the planMode branch.
+func TestPlan_DoubleStarRecursive(t *testing.T) {
+	t.Parallel()
+	src := t.TempDir()
+
+	writeFile(t, filepath.Join(src, ".env"), "root", 0o644)
+	writeFile(t, filepath.Join(src, "apps", "web", ".env"), "web", 0o644)
+	writeFile(t, filepath.Join(src, "apps", "backend", ".env"), "backend", 0o644)
+	writeFile(t, filepath.Join(src, "apps", "backend", "nested", ".env"), "nested", 0o644)
+	writeFile(t, filepath.Join(src, "README.md"), "readme", 0o644)
+
+	entries, warnings, err := Plan(context.Background(), src, []string{"**/.env"}, nil)
+	if err != nil {
+		t.Fatalf("Plan err: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %v", warnings)
+	}
+	got := map[string]string{}
+	for _, e := range entries {
+		got[e.RelPath] = string(e.Content)
+	}
+	want := map[string]string{
+		".env":                     "root",
+		"apps/web/.env":            "web",
+		"apps/backend/.env":        "backend",
+		"apps/backend/nested/.env": "nested",
+	}
+	for rel, content := range want {
+		if got[rel] != content {
+			t.Errorf("entry %q = %q, want %q", rel, got[rel], content)
+		}
+	}
+	if _, ok := got["README.md"]; ok {
+		t.Errorf("README.md should not be planned")
 	}
 }
 

@@ -62,7 +62,10 @@ function CopyFilesHelpTip() {
               e.g. <code className="px-1 py-0.5 bg-muted rounded">.env{"{,.local}"}</code>
             </li>
           </ul>
-          <p className="text-muted-foreground">Files over 5 MiB are skipped on remote executors.</p>
+          <p className="text-muted-foreground">
+            Files over 5 MiB are skipped when copying to remote executors. Local worktrees copy them
+            without a size cap.
+          </p>
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
