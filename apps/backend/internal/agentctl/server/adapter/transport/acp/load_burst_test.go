@@ -148,7 +148,12 @@ func TestLoadReplayBurst_HandlesLargeReplay(t *testing.T) {
 	a.isLoadingSession = true
 	a.mu.Unlock()
 
-	clientConn, agentConn := newBurstPair(t, a.handleACPUpdate)
+	// Exercise the production path: SDK → enqueueACPUpdate → notifQueue →
+	// runUpdateWorker → handleACPUpdate. NewAdapter starts the worker; we
+	// just rely on Close to drain it.
+	t.Cleanup(func() { _ = a.Close() })
+
+	clientConn, agentConn := newBurstPair(t, a.enqueueACPUpdate)
 
 	const sessionID = "burst-session"
 
@@ -327,5 +332,79 @@ func BenchmarkHandleACPUpdate_NormalPath(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		a.handleACPUpdate(notes[i%len(notes)])
+	}
+}
+
+// TestUpdateWorker_FIFOAndDrainOnClose verifies the SDK-decoupling worker:
+//  1. enqueueACPUpdate hands notifications to a single worker that processes
+//     them in FIFO order (preserving the SDK's serial-delivery contract);
+//  2. Close cancels the worker via lifetimeCtx, workerWg.Wait returns, and
+//     updatesCh is then safely closed — no goroutine leak, no panic.
+//
+// We don't poll the queue length directly; the contract we care about is
+// "the events arrive on updatesCh in order, and Close completes".
+func TestUpdateWorker_FIFOAndDrainOnClose(t *testing.T) {
+	const burst = 32
+
+	a := newTestAdapter()
+
+	// Push a burst of AvailableCommands notifications (one-shot events that
+	// land on updatesCh and carry an identifier we can assert order on).
+	for i := 0; i < burst; i++ {
+		a.enqueueACPUpdate(acp.SessionNotification{
+			SessionId: acp.SessionId("s1"),
+			Update: acp.SessionUpdate{
+				AvailableCommandsUpdate: &acp.SessionAvailableCommandsUpdate{
+					AvailableCommands: []acp.AvailableCommand{
+						{Name: fmt.Sprintf("cmd-%d", i)},
+					},
+				},
+			},
+		})
+	}
+
+	// Drain updatesCh until we've seen the full ordered burst.
+	deadline := time.After(5 * time.Second)
+	for i := 0; i < burst; i++ {
+		select {
+		case ev := <-a.updatesCh:
+			if ev.Type != streams.EventTypeAvailableCommands {
+				t.Fatalf("event %d: unexpected type %q", i, ev.Type)
+			}
+			if len(ev.AvailableCommands) != 1 {
+				t.Fatalf("event %d: expected 1 command, got %d", i, len(ev.AvailableCommands))
+			}
+			want := fmt.Sprintf("cmd-%d", i)
+			if got := ev.AvailableCommands[0].Name; got != want {
+				t.Fatalf("event %d: out-of-order: got %q want %q (worker is supposed to be FIFO)", i, got, want)
+			}
+		case <-deadline:
+			t.Fatalf("timeout after %d/%d events — worker stalled", i, burst)
+		}
+	}
+
+	// Close must return quickly and the worker goroutine must exit.
+	closed := make(chan error, 1)
+	go func() { closed <- a.Close() }()
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatalf("Close returned error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close did not return — worker likely leaked")
+	}
+
+	// Post-Close enqueues are no-ops (lifetimeCtx is cancelled). Must not
+	// block, must not panic.
+	done := make(chan struct{})
+	go func() {
+		a.enqueueACPUpdate(acp.SessionNotification{SessionId: "s1"})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("enqueueACPUpdate blocked after Close — lifetimeCtx guard missing")
 	}
 }

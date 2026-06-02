@@ -10,7 +10,57 @@ import (
 	"go.uber.org/zap"
 )
 
+// enqueueACPUpdate is the SDK-facing notification handler. It pushes the
+// notification onto notifQueue and returns immediately, so the ACP SDK's
+// receive loop is never blocked by our per-item processing (json.Marshal,
+// debug log I/O, monitor capture, downstream sendUpdate). The actual work
+// runs on runUpdateWorker.
+//
+// The select honours lifetimeCtx so a Close in flight unblocks any sender
+// that would otherwise stall on a full queue. Sending blocks (rather than
+// dropping) when the queue is full: with the handleACPUpdate fast path the
+// worker drains in nanoseconds-to-microseconds, so a full 4096-slot queue
+// means we're in a catastrophic stall and slowing the SDK is preferable to
+// silently losing notifications.
+func (a *Adapter) enqueueACPUpdate(n acp.SessionNotification) {
+	select {
+	case <-a.lifetimeCtx.Done():
+		return
+	case a.notifQueue <- n:
+	}
+}
+
+// startUpdateWorker spawns the goroutine that drains notifQueue and calls
+// handleACPUpdate for each notification. Called exactly once from
+// NewAdapter so the queue always has a consumer for the adapter's
+// lifetime — do not call again (a second invocation would Add(1) to
+// workerWg and spawn a second reader, breaking the single-worker FIFO
+// guarantee). Close waits for the worker to exit via workerWg before
+// closing updatesCh.
+func (a *Adapter) startUpdateWorker() {
+	a.workerWg.Add(1)
+	go a.runUpdateWorker()
+}
+
+// runUpdateWorker is the worker loop. It exits when lifetimeCtx is cancelled
+// (by Close). A single worker preserves FIFO ordering across notifications,
+// matching the SDK's own serial delivery contract.
+func (a *Adapter) runUpdateWorker() {
+	defer a.workerWg.Done()
+	for {
+		select {
+		case <-a.lifetimeCtx.Done():
+			return
+		case n := <-a.notifQueue:
+			a.handleACPUpdate(n)
+		}
+	}
+}
+
 // handleACPUpdate converts ACP SessionNotification to protocol-agnostic AgentEvent.
+// Runs synchronously on the update worker goroutine; do not call from the SDK's
+// notification path (use enqueueACPUpdate instead). Unit tests invoke this
+// directly to exercise the conversion logic without spinning up the worker.
 func (a *Adapter) handleACPUpdate(n acp.SessionNotification) {
 	// Fast path during session/load: history-replay notifications can arrive as
 	// a burst large enough to overflow the ACP SDK's 1024-deep notification

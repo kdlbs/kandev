@@ -47,6 +47,14 @@ const (
 // allow rather than a tight RPC deadline.
 const wakeupPromptTimeout = 30 * time.Minute
 
+// notifQueueCapacity sizes the buffered channel that feeds the update
+// worker. 4096 covers any realistic session/load replay burst (the failure
+// case that motivated this was ~5-10k notifications spread over several
+// seconds, well within the worker's sub-microsecond drain rate). Set big
+// enough that the SDK's 1024-slot upstream queue stays near-empty under
+// burst, small enough that worst-case memory is bounded.
+const notifQueueCapacity = 4096
+
 // AgentInfo contains information about the connected agent.
 type AgentInfo struct {
 	Name    string `json:"name"`
@@ -82,6 +90,21 @@ type Adapter struct {
 
 	// Update channel
 	updatesCh chan AgentEvent
+
+	// notifQueue decouples the ACP SDK's notification goroutine from the
+	// per-notification processing we do in handleACPUpdate. The SDK's inbound
+	// channel is a 1024-slot non-blocking send — if our handler ever stalls
+	// (slow disk, GC, downstream backpressure on updatesCh), the SDK closes
+	// the connection. By front-loading a buffered channel + dedicated worker,
+	// the SDK only ever sees nanosecond-scale enqueues. workerWg lets Close
+	// wait for in-flight notifications to drain before tearing down updatesCh.
+	//
+	// Drained-by-cancel, not by close: Close cancels lifetimeCtx (which the
+	// worker selects on) but never closes notifQueue, so any items queued
+	// after Close are dropped on the floor rather than re-delivered. Close
+	// is terminal — fine for shutdown but worth knowing when reading the loop.
+	notifQueue chan acp.SessionNotification
+	workerWg   sync.WaitGroup
 
 	// Permission handler
 	permissionHandler PermissionHandler
@@ -196,6 +219,7 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		agentID:         cfg.AgentID,
 		normalizer:      NewNormalizer(cfg.AgentID),
 		updatesCh:       make(chan AgentEvent, 100),
+		notifQueue:      make(chan acp.SessionNotification, notifQueueCapacity),
 		activeToolCalls: make(map[string]*streams.NormalizedPayload),
 		activeMonitors:  make(map[string]map[string]string),
 		pendingWakeups:  make(map[string]*pendingWakeup),
@@ -206,6 +230,12 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		lifetimeCancel:  cancel,
 	}
 	a.wakeup = newWakeupScheduler(l, a.fireWakeup)
+	// Start the update worker before returning so any caller that connects
+	// the SDK (Initialize, or any future direct wiring) always has a live
+	// consumer for notifQueue. Moving this out of Initialize closes a latent
+	// footgun where a future caller bypassing Initialize would silently fill
+	// the queue and lose notifications.
+	a.startUpdateWorker()
 	return a
 }
 
@@ -241,11 +271,11 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	a.logger.Info("initializing ACP adapter",
 		zap.String("workdir", a.cfg.WorkDir))
 
-	// Create ACP client with update handler that converts to AgentEvent
+	// Create ACP client with update handler that enqueues for the worker.
 	a.acpClient = acpclient.NewClient(
 		acpclient.WithLogger(a.logger.Zap()),
 		acpclient.WithWorkspaceRoot(a.cfg.WorkDir),
-		acpclient.WithUpdateHandler(a.handleACPUpdate),
+		acpclient.WithUpdateHandler(a.enqueueACPUpdate),
 		acpclient.WithPermissionHandler(a.handlePermissionRequest),
 	)
 
@@ -367,23 +397,31 @@ func (a *Adapter) sendUpdate(event AgentEvent) {
 // Close releases resources held by the adapter.
 func (a *Adapter) Close() error {
 	a.mu.Lock()
-	defer a.mu.Unlock()
-
 	if a.closed {
+		a.mu.Unlock()
 		return nil
 	}
 	a.closed = true
+	a.mu.Unlock()
 
 	a.logger.Info("closing ACP adapter")
 
 	// Stop any pending ScheduleWakeup timer so it doesn't fire after close,
 	// and cancel the lifetime context so any in-flight wakeup prompt aborts.
+	// Cancelling lifetimeCtx also unblocks enqueueACPUpdate senders and
+	// signals the update worker to exit.
 	if a.wakeup != nil {
 		a.wakeup.cancel()
 	}
 	if a.lifetimeCancel != nil {
 		a.lifetimeCancel()
 	}
+
+	// Wait for the update worker to exit before closing updatesCh.
+	// handleACPUpdate may call sendUpdate, so updatesCh must remain open
+	// until the worker is gone. Wait is a no-op when Initialize was never
+	// called (workerWg has no counter).
+	a.workerWg.Wait()
 
 	// Clean up any saved attachments
 	a.attachMgr.Cleanup()
