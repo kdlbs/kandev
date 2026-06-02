@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -127,6 +128,51 @@ type graphQLError struct {
 	Path    []string `json:"path"`
 }
 
+// repoRef is a minimal (owner, repo) pair used by the batched GraphQL
+// helpers to surface which repositories the response flagged as
+// unresolvable. Service.SyncWatchesBatched feeds these into the negative
+// cache so subsequent polls short-circuit the dead-repo storm.
+type repoRef struct {
+	Owner string
+	Repo  string
+}
+
+// batchedMissingReposErr is the typed error runBatchedPRQuery /
+// runBatchedBranchQuery returns when the GraphQL response carried one or
+// more "Could not resolve to a Repository" entries. Callers use
+// errors.As to extract Repos and populate Service.repoErrorCache. When
+// Inner is nil, the response contained ONLY resolution failures and
+// the partial-decode result returned alongside the error is still safe
+// to consume for the repos that did resolve; when Inner is non-nil,
+// other (non-resolution) errors were also present and the caller should
+// treat the whole batch as failed for those.
+type batchedMissingReposErr struct {
+	Repos []repoRef
+	Inner error
+}
+
+func (e *batchedMissingReposErr) Error() string {
+	if e.Inner != nil {
+		return e.Inner.Error()
+	}
+	parts := make([]string, len(e.Repos))
+	for i, r := range e.Repos {
+		parts[i] = r.Owner + "/" + r.Repo
+	}
+	return "github: repositories not resolvable: " + strings.Join(parts, ", ")
+}
+
+// Is lets callers errors.Is(err, ErrRepoNotResolvable) without having to
+// type-assert. The sentinel is the canonical "stop hammering this repo"
+// signal across the package.
+func (e *batchedMissingReposErr) Is(target error) bool {
+	return target == ErrRepoNotResolvable
+}
+
+// Unwrap exposes the composite non-resolution error (if any) so callers
+// can errors.As / errors.Is past the batched-missing wrapper.
+func (e *batchedMissingReposErr) Unwrap() error { return e.Inner }
+
 // graphQLErrorsToErr returns a non-nil error when the GraphQL response carries
 // a top-level "errors" array. The first message is included so logs are
 // actionable; the count is appended when there are multiple.
@@ -138,6 +184,82 @@ func graphQLErrorsToErr(errs []graphQLError) error {
 		return fmt.Errorf("graphql error: %s", errs[0].Message)
 	}
 	return fmt.Errorf("graphql error: %s (and %d more)", errs[0].Message, len(errs)-1)
+}
+
+// classifyBatchedErrors splits the GraphQL errors[] array into "this
+// repo is permanently unresolvable" and "everything else", mapping each
+// resolution error's path-prefix alias back to the (owner, repo) it
+// referred to via aliasToRepo. The caller (runBatchedPRQuery /
+// runBatchedBranchQuery) lifts the resolution misses into the typed
+// batchedMissingReposErr; the residual non-resolution errors are
+// collapsed via graphQLErrorsToErr exactly as before so the storm-fix
+// doesn't change behavior for unrelated GraphQL failures.
+func classifyBatchedErrors(errs []graphQLError, aliasToRepo map[string]repoRef) (missing []repoRef, residual []graphQLError) {
+	seen := map[string]bool{}
+	for _, e := range errs {
+		if isRepoNotResolvableErr(errors.New(e.Message)) && len(e.Path) > 0 {
+			ref, ok := aliasToRepo[e.Path[0]]
+			if ok {
+				key := ref.Owner + "/" + ref.Repo
+				if !seen[key] {
+					seen[key] = true
+					missing = append(missing, ref)
+				}
+				continue
+			}
+		}
+		residual = append(residual, e)
+	}
+	return missing, residual
+}
+
+// aliasMapForPRRefs returns alias -> repoRef for the
+// owner/repo-sorted ordering buildBatchedPRQuery applies. A
+// resolution-failure error's path[0] is always the outer repository
+// alias ("repo0", "repo1", ...).
+func aliasMapForPRRefs(refs []graphQLPRRef) map[string]repoRef {
+	byKey := map[string]repoRef{}
+	var keys []string
+	for _, r := range refs {
+		k := r.Owner + "/" + r.Repo
+		if _, ok := byKey[k]; !ok {
+			byKey[k] = repoRef{Owner: r.Owner, Repo: r.Repo}
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	out := make(map[string]repoRef, len(keys))
+	for i, k := range keys {
+		out[fmt.Sprintf("repo%d", i)] = byKey[k]
+	}
+	return out
+}
+
+// aliasMapForBranchRefs returns alias -> repoRef for the input-order
+// b0, b1, ... aliases buildBatchedBranchQuery applies.
+func aliasMapForBranchRefs(refs []graphQLBranchRef) map[string]repoRef {
+	out := make(map[string]repoRef, len(refs))
+	for i, r := range refs {
+		out[fmt.Sprintf("b%d", i)] = repoRef{Owner: r.Owner, Repo: r.Repo}
+	}
+	return out
+}
+
+// wrapBatchedErrors composes a classifyBatchedErrors result into the
+// (result, error) shape runBatchedPRQuery / runBatchedBranchQuery
+// already return. Behaviour:
+//   - no resolution misses, no residual errors → (nil): caller continues
+//   - no resolution misses, residual errors only → return composite err
+//     unchanged (pre-storm-fix semantics)
+//   - resolution misses present → return *batchedMissingReposErr; Inner
+//     is nil iff there were no residuals so callers can keep the
+//     partial decode, otherwise Inner carries the composite
+func wrapBatchedErrors(missing []repoRef, residual []graphQLError) error {
+	residualErr := graphQLErrorsToErr(residual)
+	if len(missing) == 0 {
+		return residualErr
+	}
+	return &batchedMissingReposErr{Repos: missing, Inner: residualErr}
 }
 
 // graphQLRateLimit mirrors GitHub's top-level rateLimit field, the most
@@ -421,13 +543,23 @@ func runBatchedPRQuery(ctx context.Context, exec GraphQLExecutor, refs []graphQL
 			return nil, err
 		}
 		// GitHub returns HTTP 200 with a top-level "errors" array for partial
-		// auth failures, schema mismatches, or per-alias errors. Surface them
-		// as an error so the caller falls back to per-watch checks instead of
-		// silently absorbing the failure.
-		if err := graphQLErrorsToErr(resp.Errors); err != nil {
+		// auth failures, schema mismatches, or per-alias errors. Split out
+		// "Could not resolve to a Repository" entries via classifyBatchedErrors
+		// so SyncWatchesBatched can negative-cache the dead repos and keep
+		// partial results for the ones that resolved; non-resolution errors
+		// still bubble up so the caller falls back to per-watch checks.
+		missing, residual := classifyBatchedErrors(resp.Errors, aliasMapForPRRefs(chunk))
+		if err := decodeBatchedPRChunk(chunk, resp.Data, result); err != nil {
 			return nil, err
 		}
-		if err := decodeBatchedPRChunk(chunk, resp.Data, result); err != nil {
+		if err := wrapBatchedErrors(missing, residual); err != nil {
+			// When the error is purely "missing repos", partial Statuses for the
+			// other refs in this chunk are still in `result`; surface them to
+			// the caller alongside the typed error so it can populate the
+			// negative cache without dropping the good data.
+			if len(missing) > 0 && len(residual) == 0 {
+				return result, err
+			}
 			return nil, err
 		}
 	}
@@ -508,10 +640,14 @@ func runBatchedBranchQuery(ctx context.Context, exec GraphQLExecutor, refs []gra
 		if err := exec.ExecuteGraphQL(ctx, query, vars, &resp); err != nil {
 			return nil, err
 		}
-		if err := graphQLErrorsToErr(resp.Errors); err != nil {
+		missing, residual := classifyBatchedErrors(resp.Errors, aliasMapForBranchRefs(chunk))
+		if err := decodeBatchedBranchChunk(chunk, resp.Data, result); err != nil {
 			return nil, err
 		}
-		if err := decodeBatchedBranchChunk(chunk, resp.Data, result); err != nil {
+		if err := wrapBatchedErrors(missing, residual); err != nil {
+			if len(missing) > 0 && len(residual) == 0 {
+				return result, err
+			}
 			return nil, err
 		}
 	}

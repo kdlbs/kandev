@@ -2,6 +2,7 @@ package github
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -178,6 +179,59 @@ func (c *ttlCache) evictLocked() {
 	}
 }
 
+// del removes a single key from the cache. Used by Service.evictRepoNegative
+// to drop a negative entry when a repository is (re)linked to a workspace
+// or its watch is recreated, so a freshly-linked repo gets probed
+// immediately instead of waiting out the 10-min TTL.
+func (c *ttlCache) del(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.entries, key)
+}
+
+// cachedErr wraps an error stored in a ttlCache by doOrFetchClassified, so
+// that a deterministic upstream failure (e.g. ErrRepoNotResolvable) can be
+// negative-cached alongside the cache's normal success-value entries.
+type cachedErr struct{ err error }
+
+// doOrFetchClassified is doOrFetch with an optional error-classifier that
+// lets callers negative-cache deterministic failures. When fetch() returns
+// an error and shouldCache(err) is true, the error is stored under `key`
+// (subsequent hits within the TTL return the same error). Transient errors
+// (shouldCache=false) are NOT cached, matching doOrFetch's "errors are not
+// cached" contract. Used by Service.repoErrorCache to collapse the
+// SyncWatchesBatched storm against missing/unauthorized repos to one
+// upstream gh call per 10 minutes per repo. Singleflight coalesces
+// concurrent first-time misses on the same key into one fetch.
+func (c *ttlCache) doOrFetchClassified(key string, fetch func() (any, error), shouldCache func(err error) bool) (any, error) {
+	if v, ok := c.get(key); ok {
+		if ce, ok := v.(cachedErr); ok {
+			return nil, ce.err
+		}
+		return v, nil
+	}
+	gen := c.generation()
+	sfKey := fmt.Sprintf("%d|%s", gen, key)
+	v, err, _ := c.sf.Do(sfKey, func() (any, error) {
+		if v, ok := c.get(key); ok {
+			if ce, ok := v.(cachedErr); ok {
+				return nil, ce.err
+			}
+			return v, nil
+		}
+		out, ferr := fetch()
+		if ferr != nil {
+			if shouldCache != nil && shouldCache(ferr) {
+				c.setIfCurrentGeneration(key, cachedErr{err: ferr}, gen)
+			}
+			return nil, ferr
+		}
+		c.setIfCurrentGeneration(key, out, gen)
+		return out, nil
+	})
+	return v, err
+}
+
 // doOrFetch returns a cached value when fresh; otherwise runs fetch under a
 // singleflight guard, caches the result, and returns it. Errors are not
 // cached. The returned value is shared — callers must not mutate it.
@@ -222,4 +276,28 @@ func searchCacheKey(kind, filter, customQuery string, page, perPage int) string 
 
 func prStatusCacheKey(owner, repo string, number int) string {
 	return fmt.Sprintf("%s/%s#%d", owner, repo, number)
+}
+
+// newRepoErrorCache backs Service.repoErrorCache. It negative-caches
+// deterministic "repository not resolvable" failures (see
+// isRepoNotResolvableErr) so the SyncWatchesBatched storm against
+// missing/unauthorized repos collapses to one upstream call per 10
+// minutes per repo instead of one per 5s frontend poll. The TTL is
+// deliberately longer than the status / feedback caches because the
+// failure mode is "this repo doesn't exist or we can't see it" — a
+// state that flips back only via an explicit re-link or token swap,
+// both of which evict the entry directly.
+func newRepoErrorCache() *ttlCache {
+	c := newTTLCache()
+	c.ttl = 10 * time.Minute
+	return c
+}
+
+// repoErrorCacheKey is the case-insensitive (owner, repo) key for
+// Service.repoErrorCache. GitHub's repository names are case-insensitive
+// at the API surface, so "NBCUDTC/Bff" and "nbcudtc/bff" reach the same
+// upstream resource; normalising the cache key prevents the negative
+// entry from being bypassed by a caller that capitalises differently.
+func repoErrorCacheKey(owner, repo string) string {
+	return strings.ToLower(owner) + "/" + strings.ToLower(repo)
 }

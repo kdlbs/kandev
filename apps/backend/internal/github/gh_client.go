@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 // ghSearchReposPath is the GitHub REST search-repositories path that gh CLI
@@ -124,24 +126,16 @@ func (c *GHClient) IsAuthenticated(ctx context.Context) (bool, error) {
 
 // RunAuthDiagnostics executes gh auth status and captures the raw output for troubleshooting.
 func (c *GHClient) RunAuthDiagnostics(ctx context.Context) *AuthDiagnostics {
-	ctx, cancel := withDefaultGHTimeout(ctx)
-	defer cancel()
-	release, err := acquireGHSlot(ctx)
-	if err != nil {
-		return &AuthDiagnostics{
-			Command:  "gh auth status --hostname github.com",
-			Output:   err.Error(),
-			ExitCode: -1,
-		}
-	}
-	defer release()
-	cmd := exec.CommandContext(ctx, "gh", "auth", "status", "--hostname", "github.com")
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	runErr, _ := subproc.RunGHAfterAcquire(ctx, resolveGHExecTimeout(ctx), func(execCtx context.Context) *exec.Cmd {
+		cmd := exec.CommandContext(execCtx, "gh", "auth", "status", "--hostname", "github.com")
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		return cmd
+	})
 	exitCode := 0
-	if err := cmd.Run(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+	if runErr != nil {
+		if exitErr, ok := runErr.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		} else {
 			exitCode = -1
@@ -846,54 +840,67 @@ func (c *GHClient) DeleteGist(ctx context.Context, gistID string) error {
 
 const ghCLITimeout = 30 * time.Second
 
-// withDefaultGHTimeout applies a 30s timeout if the context has no deadline.
-func withDefaultGHTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
-	if _, ok := ctx.Deadline(); ok {
-		return ctx, func() {}
+// resolveGHExecTimeout returns the per-command exec budget used by
+// run / runWithStdin. Honours the caller's ctx deadline when set (so a
+// short-lived WS request stays bounded by the request deadline), but
+// caps the budget at ghCLITimeout when the deadline is further out or
+// absent. Used by the acquire-then-derive-timeout path so a queued
+// waiter's exec timer starts AFTER it gets the throttle slot.
+func resolveGHExecTimeout(ctx context.Context) time.Duration {
+	if dl, ok := ctx.Deadline(); ok {
+		remaining := time.Until(dl)
+		if remaining < ghCLITimeout {
+			return remaining
+		}
 	}
-	return context.WithTimeout(ctx, ghCLITimeout)
+	return ghCLITimeout
 }
 
 // run executes a gh CLI command and returns its stdout output.
 // Stderr is captured separately to avoid contaminating JSON output.
-// A default 30s timeout is applied if the context has no deadline.
+// A 30s per-command exec timeout is applied AFTER the gh throttle slot
+// is acquired (acquire-then-derive-timeout). Pre-fix the timer started
+// before Acquire, so a queued waiter inherited a deadline that had
+// already partly elapsed against throttle queue time — producing the
+// `signal: killed` + `context deadline exceeded` cascade in the
+// SyncWatchesBatched storm logs.
 func (c *GHClient) run(ctx context.Context, args ...string) (string, error) {
-	ctx, cancel := withDefaultGHTimeout(ctx)
-	defer cancel()
-	release, err := acquireGHSlot(ctx)
-	if err != nil {
-		return "", fmt.Errorf("gh %s: %w", firstArg(args), err)
-	}
-	defer release()
-	cmd := exec.CommandContext(ctx, "gh", args...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		c.inspectRateStderr(args, stderr.String())
-		return stdout.String(), fmt.Errorf("gh %s: %w: %s", args[0], err, stderr.String())
-	}
-	return stdout.String(), nil
+	return c.runGH(ctx, nil, args...)
 }
 
 // runWithStdin is like run but pipes stdin into the gh CLI process.
 // Useful for `gh api --input -` calls where the body comes from JSON.
 func (c *GHClient) runWithStdin(ctx context.Context, stdin []byte, args ...string) (string, error) {
-	ctx, cancel := withDefaultGHTimeout(ctx)
-	defer cancel()
-	release, err := acquireGHSlot(ctx)
-	if err != nil {
-		return "", fmt.Errorf("gh %s: %w", firstArg(args), err)
-	}
-	defer release()
-	cmd := exec.CommandContext(ctx, "gh", args...)
-	cmd.Stdin = bytes.NewReader(stdin)
+	return c.runGH(ctx, stdin, args...)
+}
+
+// runGH is the shared body of run / runWithStdin — both apply the same
+// acquire-then-derive-timeout ordering, the same stderr/rate-limit
+// inspection, and the same error wrap. The only delta is whether stdin
+// is wired (`stdin != nil`).
+func (c *GHClient) runGH(ctx context.Context, stdin []byte, args ...string) (string, error) {
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	execTimeout := resolveGHExecTimeout(ctx)
+	runErr, execCtxErr := subproc.RunGHAfterAcquire(ctx, execTimeout, func(execCtx context.Context) *exec.Cmd {
+		cmd := exec.CommandContext(execCtx, "gh", args...)
+		if stdin != nil {
+			cmd.Stdin = bytes.NewReader(stdin)
+		}
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		return cmd
+	})
+	if runErr != nil {
+		// Surface execCtx timeouts as the canonical context error so
+		// callers (FetchRateLimit, IsAuthenticated, share.IsAlreadyGone)
+		// can still errors.Is(err, context.DeadlineExceeded). Without
+		// this remap, the runErr is `signal: killed` which loses the
+		// classifier signal that pre-fix code relied on.
+		if execCtxErr != nil && errors.Is(execCtxErr, context.DeadlineExceeded) {
+			return stdout.String(), fmt.Errorf("gh %s: %w", firstArg(args), execCtxErr)
+		}
 		c.inspectRateStderr(args, stderr.String())
-		return stdout.String(), fmt.Errorf("gh %s: %w: %s", args[0], err, stderr.String())
+		return stdout.String(), fmt.Errorf("gh %s: %w: %s", firstArg(args), runErr, stderr.String())
 	}
 	return stdout.String(), nil
 }

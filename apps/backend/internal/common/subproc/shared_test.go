@@ -1,6 +1,13 @@
 package subproc
 
-import "testing"
+import (
+	"context"
+	"os/exec"
+	"runtime"
+	"sync"
+	"testing"
+	"time"
+)
 
 func TestResolveCap(t *testing.T) {
 	const env = "KANDEV_SUBPROC_CAP_TEST"
@@ -67,5 +74,69 @@ func TestResolveGitMaxConcurrent(t *testing.T) {
 func TestGHGitAreDistinctThrottles(t *testing.T) {
 	if GH() == Git() {
 		t.Fatal("GH() and Git() returned the same throttle instance")
+	}
+}
+
+// TestRunGHCombinedAfterAcquire_ExecTimeoutSurvivesAcquireWait is the
+// regression test for the killed (192×) / context-deadline-exceeded
+// (96×) cascade in the SyncWatchesBatched storm: when a queued waiter
+// finally gets a throttle slot, its per-command exec budget MUST start
+// fresh from that moment, not be eaten by the queue wait.
+//
+// Setup: pin the gh throttle to cap=1 and hold the slot for the
+// acquireWait window. The second caller invokes
+// RunGHCombinedAfterAcquire with a build closure that just records the
+// execCtx deadline relative to the current wallclock. Pre-fix (timer
+// started before Acquire) the recorded deadline would be in the past
+// the moment Acquire returns; post-fix the deadline is acquireWait
+// ahead of the AfterFunc fire, i.e. ~execTimeout ahead of now.
+func TestRunGHCombinedAfterAcquire_ExecTimeoutSurvivesAcquireWait(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses POSIX `true` binary as a no-op subprocess")
+	}
+	restore := GH().SetCapForTest(1)
+	defer restore()
+
+	ctx := context.Background()
+	holdRelease, err := GH().Acquire(ctx)
+	if err != nil {
+		t.Fatalf("acquire holder: %v", err)
+	}
+
+	// Sized so a pre-fix regression (timer starts BEFORE acquire) yields
+	// a NEGATIVE remaining budget at the build callback, while a correct
+	// after-acquire timer yields a budget within (~50%, 100%] of
+	// execTimeout. The exact fraction depends on scheduler latency
+	// between AfterFunc firing and the second goroutine resuming, so the
+	// lower bound is generous.
+	const acquireWait = 200 * time.Millisecond
+	const execTimeout = 500 * time.Millisecond
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	var (
+		gotRemaining time.Duration
+		gotRunErr    error
+	)
+	go func() {
+		defer wg.Done()
+		_, gotRunErr, _ = RunGHCombinedAfterAcquire(ctx, execTimeout, func(execCtx context.Context) *exec.Cmd {
+			if dl, ok := execCtx.Deadline(); ok {
+				gotRemaining = time.Until(dl)
+			}
+			return exec.CommandContext(execCtx, "true")
+		})
+	}()
+	time.AfterFunc(acquireWait, holdRelease)
+	wg.Wait()
+
+	// Pre-fix: gotRemaining would be roughly execTimeout - acquireWait,
+	// or negative if acquireWait > execTimeout. Post-fix: gotRemaining
+	// should land in (execTimeout/2, execTimeout].
+	if gotRemaining <= execTimeout/2 {
+		t.Errorf("execCtx deadline was only %v from now (execTimeout=%v); acquire wait burned through the budget", gotRemaining, execTimeout)
+	}
+	if gotRunErr != nil {
+		t.Logf("`true` runErr=%v (informational; deadline budget is the assertion)", gotRunErr)
 	}
 }

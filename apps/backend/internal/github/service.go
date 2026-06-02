@@ -87,6 +87,7 @@ type Service struct {
 	prFeedbackCache      *ttlCache
 	mergeMethodsCache    *ttlCache
 	accessibleReposCache *ttlCache
+	repoErrorCache       *ttlCache
 	protectionCache      *branchProtectionCache
 	rateTracker          *RateTracker
 
@@ -133,6 +134,7 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 		prFeedbackCache:      newPRFeedbackCache(),
 		mergeMethodsCache:    newMergeMethodsCache(),
 		accessibleReposCache: newAccessibleReposCache(),
+		repoErrorCache:       newRepoErrorCache(),
 		protectionCache:      newBranchProtectionCache(),
 		rateTracker:          NewRateTracker(eventBus, log),
 		cleanupFailureCounts: make(map[string]int),
@@ -216,4 +218,57 @@ func (s *Service) IsAuthenticated() bool {
 // AuthMethod returns the authentication method ("gh_cli", "pat", or "none").
 func (s *Service) AuthMethod() string {
 	return s.authMethod
+}
+
+// isRepoCachedAsMissing reports whether the (owner, repo) tuple is in the
+// 10-min negative cache. Called from SyncWatchesBatched and per-watch
+// probes before acquiring the gh throttle, so the storm against
+// missing/unauthorized repos short-circuits without burning a slot.
+func (s *Service) isRepoCachedAsMissing(owner, repo string) bool {
+	if s == nil || s.repoErrorCache == nil {
+		return false
+	}
+	v, ok := s.repoErrorCache.get(repoErrorCacheKey(owner, repo))
+	if !ok {
+		return false
+	}
+	_, isErr := v.(cachedErr)
+	return isErr
+}
+
+// markRepoAsMissing stores ErrRepoNotResolvable for (owner, repo) in the
+// negative cache. Called after a per-watch or batched probe deterministically
+// classifies the repo as missing/unauthorized (see isRepoNotResolvableErr).
+// Idempotent; a repeat call refreshes the 10-min TTL window.
+func (s *Service) markRepoAsMissing(owner, repo string) {
+	if s == nil || s.repoErrorCache == nil {
+		return
+	}
+	s.repoErrorCache.set(repoErrorCacheKey(owner, repo), cachedErr{err: ErrRepoNotResolvable})
+}
+
+// evictRepoNegative drops any negative-cache entry for (owner, repo). Called
+// from the PR watch (re)create paths and AssociatePRByURL so a freshly
+// linked or re-linked repository is probed immediately on the next sync,
+// without waiting out the 10-min TTL.
+func (s *Service) evictRepoNegative(owner, repo string) {
+	if s == nil || s.repoErrorCache == nil {
+		return
+	}
+	s.repoErrorCache.del(repoErrorCacheKey(owner, repo))
+}
+
+// ClearRepoErrorCache drops every entry from the negative repo-resolution
+// cache. Called from ConfigureToken / ClearToken so a token swap or clear
+// invalidates classifications that were made under the prior identity —
+// without this, a repo that the old token couldn't see would stay
+// "permanent: true" for up to 10 minutes after the user fixes auth, and
+// the frontend retry loop would stop early on stale data. Nil-guards the
+// cache because tests construct Service literals without going through
+// NewService.
+func (s *Service) ClearRepoErrorCache() {
+	if s == nil || s.repoErrorCache == nil {
+		return
+	}
+	s.repoErrorCache.clear()
 }

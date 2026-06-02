@@ -33,6 +33,7 @@ func newTestService(client Client) *Service {
 		prStatusCache:        newTTLCache(),
 		prFeedbackCache:      newPRFeedbackCache(),
 		accessibleReposCache: newAccessibleReposCache(),
+		repoErrorCache:       newRepoErrorCache(),
 	}
 }
 

@@ -205,8 +205,12 @@ func (s *Service) ConfigureToken(ctx context.Context, token string) error {
 	// Drop user-scoped caches — the previous token's user/orgs and merged
 	// repo list are no longer valid under the new identity. Without this,
 	// the picker would surface the prior user's repos for up to 60s after
-	// a token swap.
+	// a token swap, and a repo classified as unresolvable under the old
+	// credentials would stay "permanent: true" for up to 10 minutes after
+	// the user fixes auth (stopping the frontend retry loop on stale
+	// classifications).
 	s.ClearAccessibleReposCaches()
+	s.ClearRepoErrorCache()
 
 	return nil
 }
@@ -235,6 +239,7 @@ func (s *Service) ClearToken(ctx context.Context) error {
 
 	// Drop user-scoped caches — see ConfigureToken for rationale.
 	s.ClearAccessibleReposCaches()
+	s.ClearRepoErrorCache()
 
 	// Try to re-establish connection via other methods
 	s.retryClientCreation(ctx)

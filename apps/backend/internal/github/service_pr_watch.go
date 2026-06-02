@@ -41,6 +41,9 @@ func (s *Service) CreatePRWatch(ctx context.Context, sessionID, taskID, reposito
 	if err := s.store.CreatePRWatch(ctx, w); err != nil {
 		return nil, fmt.Errorf("create PR watch: %w", err)
 	}
+	// Evict any negative-cache entry so a freshly-linked repo is probed
+	// immediately on the next sync instead of waiting out the 10-min TTL.
+	s.evictRepoNegative(owner, repo)
 	s.logger.Info("created PR watch",
 		zap.String("session_id", sessionID),
 		zap.String("repository_id", repositoryID),
@@ -153,6 +156,10 @@ func (s *Service) EnsurePRWatch(ctx context.Context, sessionID, taskID, reposito
 	if err := s.store.CreatePRWatch(ctx, w); err != nil {
 		return nil, fmt.Errorf("ensure PR watch: %w", err)
 	}
+	// Same eviction as CreatePRWatch — a re-linked repo should be probed
+	// immediately rather than inheriting the previous incarnation's
+	// "missing" verdict from the negative cache.
+	s.evictRepoNegative(owner, repo)
 	s.logger.Info("created PR watch for session (will search for PR)",
 		zap.String("session_id", sessionID),
 		zap.String("repository_id", repositoryID),
@@ -619,20 +626,46 @@ func (s *Service) TriggerPRSync(ctx context.Context, taskID string) (*TaskPR, er
 // when the batched fetch itself fails; in those cases we fan out one
 // subprocess per watch as before.
 func (s *Service) TriggerPRSyncAll(ctx context.Context, taskID string) ([]*TaskPR, error) {
+	prs, _, err := s.triggerPRSyncAllPermanent(ctx, taskID)
+	return prs, err
+}
+
+// TriggerPRSyncAllPermanent extends TriggerPRSyncAll with a "permanent"
+// flag: true iff the task has at least one PR watch and every one of
+// those watches is currently in the 10-min negative cache (or its repo
+// is otherwise classified as unresolvable). The WS handler uses this to
+// tell the frontend to stop the 5s sync-retry interval, so a task
+// pointing at a deleted repo doesn't keep hammering the gh throttle for
+// the lifetime of the task.
+func (s *Service) TriggerPRSyncAllPermanent(ctx context.Context, taskID string) ([]*TaskPR, bool, error) {
+	return s.triggerPRSyncAllPermanent(ctx, taskID)
+}
+
+func (s *Service) triggerPRSyncAllPermanent(ctx context.Context, taskID string) ([]*TaskPR, bool, error) {
 	watches, err := s.store.ListPRWatchesByTask(ctx, taskID)
 	if err != nil {
-		return nil, fmt.Errorf("list PR watches: %w", err)
+		return nil, false, fmt.Errorf("list PR watches: %w", err)
 	}
 	if len(watches) == 0 {
 		// No watches — fall back to whatever TaskPRs already exist (e.g.
 		// PRs imported via task-create-from-PR-URL where the watch is
-		// optional). Empty slice if none.
+		// optional). Empty slice if none. permanent=false (the task can
+		// still acquire a watch later via push detection).
 		existing, listErr := s.store.ListTaskPRsByTask(ctx, taskID)
 		if listErr != nil {
-			return nil, fmt.Errorf("list task PRs: %w", listErr)
+			return nil, false, fmt.Errorf("list task PRs: %w", listErr)
 		}
-		return existing, nil
+		return existing, false, nil
 	}
+	prs, syncErr := s.runBatchedOrPerWatchSync(ctx, taskID, watches)
+	return prs, s.areAllWatchesPermanentlyMissing(watches), syncErr
+}
+
+// runBatchedOrPerWatchSync is the shared "try batched, fall back to
+// per-watch" body of triggerPRSyncAllPermanent. Split out so the
+// permanent-flag computation can wrap the result without duplicating
+// the batched / fallback branches inline.
+func (s *Service) runBatchedOrPerWatchSync(ctx context.Context, taskID string, watches []*PRWatch) ([]*TaskPR, error) {
 	if _, batchErr := s.SyncWatchesBatched(ctx, watches); batchErr != nil {
 		s.logger.Debug("batched PR sync failed; falling back to per-watch",
 			zap.String("task_id", taskID), zap.Error(batchErr))
@@ -641,6 +674,24 @@ func (s *Service) TriggerPRSyncAll(ctx context.Context, taskID string) ([]*TaskP
 	// Batched path applied all DB updates inline; reload so the WS caller
 	// sees the freshest TaskPR rows.
 	return s.store.ListTaskPRsByTask(ctx, taskID)
+}
+
+// areAllWatchesPermanentlyMissing reports whether every supplied watch's
+// (owner, repo) is currently in the 10-min negative cache. Used to set
+// the permanent flag on wsSyncTaskPR's response so the frontend stops
+// retrying when a task points only at deleted/inaccessible repositories.
+// Returns false when the input is empty so an empty task doesn't get
+// classified as permanently missing.
+func (s *Service) areAllWatchesPermanentlyMissing(watches []*PRWatch) bool {
+	if len(watches) == 0 {
+		return false
+	}
+	for _, w := range watches {
+		if !s.isRepoCachedAsMissing(w.Owner, w.Repo) {
+			return false
+		}
+	}
+	return true
 }
 
 // triggerPRSyncAllPerWatch is the legacy fan-out path: one gh subprocess
@@ -706,6 +757,13 @@ func (s *Service) triggerPRDetection(ctx context.Context, watch *PRWatch, taskID
 // searching (pr_number=0) watch. It runs inside triggerPRDetection's
 // singleflight so only one probe per watch is in flight at a time.
 func (s *Service) detectPRForWatchOnce(ctx context.Context, watch *PRWatch, taskID string) (*TaskPR, error) {
+	// Short-circuit when this repo is already in the 10-min negative
+	// cache. Without this, an unresolvable repo gets a fresh per-watch
+	// probe every 5s (the frontend retry cadence) until the freshness
+	// timestamp below stamps in — multiplied by every watch the task has.
+	if s.isRepoCachedAsMissing(watch.Owner, watch.Repo) {
+		return nil, ErrRepoNotResolvable
+	}
 	// Throttle branch-detection probes. A watch still searching for its PR
 	// (pr_number=0) has no TaskPR row yet, so triggerPRStatusSync's freshness
 	// check can't gate it — we gate on the watch's own last_checked_at instead.
@@ -717,6 +775,13 @@ func (s *Service) detectPRForWatchOnce(ctx context.Context, watch *PRWatch, task
 	}
 
 	pr, err := s.client.FindPRByBranch(ctx, watch.Owner, watch.Repo, watch.Branch)
+	if err != nil && isRepoNotResolvableErr(err) {
+		s.markRepoAsMissing(watch.Owner, watch.Repo)
+		// Wrap so wsSyncTaskPR can errors.Is(err, ErrRepoNotResolvable)
+		// to flag the WS response as permanent without re-running the
+		// classifier on the raw upstream error string.
+		err = fmt.Errorf("%w: %w", ErrRepoNotResolvable, err)
+	}
 	// Stamp last_checked_at regardless of outcome — including on error. The
 	// flood this fixes IS the error path (an unresolvable repo makes `gh` exit
 	// non-zero), so stamping only on success would leave the bug unfixed. The
@@ -775,6 +840,13 @@ func (s *Service) triggerPRStatusSync(ctx context.Context, watch *PRWatch, taskI
 		}
 	}
 
+	// Short-circuit on negative cache so a 5s frontend retry against a
+	// dead repo doesn't burn the gh throttle. Eviction happens on watch
+	// (re)create paths, so a freshly linked repo is probed immediately.
+	if s.isRepoCachedAsMissing(watch.Owner, watch.Repo) {
+		return nil, ErrRepoNotResolvable
+	}
+
 	// Coalesce concurrent syncs for the same PR
 	key := fmt.Sprintf("%s/%s/%d", watch.Owner, watch.Repo, watch.PRNumber)
 	v, err, _ := s.syncGroup.Do(key, func() (interface{}, error) {
@@ -782,6 +854,10 @@ func (s *Service) triggerPRStatusSync(ctx context.Context, watch *PRWatch, taskI
 		defer cancel()
 		status, _, checkErr := s.CheckPRWatch(bgCtx, watch)
 		if checkErr != nil {
+			if isRepoNotResolvableErr(checkErr) {
+				s.markRepoAsMissing(watch.Owner, watch.Repo)
+				return nil, fmt.Errorf("%w: %w", ErrRepoNotResolvable, checkErr)
+			}
 			return nil, checkErr
 		}
 		if status == nil {
