@@ -208,9 +208,11 @@ func (s *Service) ConfigureToken(ctx context.Context, token string) error {
 	// a token swap, and a repo classified as unresolvable under the old
 	// credentials would stay "permanent: true" for up to 10 minutes after
 	// the user fixes auth (stopping the frontend retry loop on stale
-	// classifications).
+	// classifications). PR status/feedback caches are also dropped because
+	// review visibility differs across identities.
 	s.ClearAccessibleReposCaches()
 	s.ClearRepoErrorCache()
+	s.ClearPRCaches()
 
 	return nil
 }
@@ -240,6 +242,7 @@ func (s *Service) ClearToken(ctx context.Context) error {
 	// Drop user-scoped caches — see ConfigureToken for rationale.
 	s.ClearAccessibleReposCaches()
 	s.ClearRepoErrorCache()
+	s.ClearPRCaches()
 
 	// Try to re-establish connection via other methods
 	s.retryClientCreation(ctx)

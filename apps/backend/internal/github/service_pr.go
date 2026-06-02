@@ -117,9 +117,14 @@ func (s *Service) GetPRFeedback(ctx context.Context, owner, repo string, number 
 	if s.client == nil {
 		return nil, fmt.Errorf("github client not available")
 	}
+	// Detach the upstream call's context from the singleflight leader: a
+	// cancelled leader (user closes the tab) would otherwise return its
+	// context error to all co-waiters, cascading a single client disconnect
+	// into a burst of transient failures across concurrent callers.
+	fetchCtx := context.WithoutCancel(ctx)
 	key := prStatusCacheKey(owner, repo, number)
 	v, err := s.prFeedbackCache.doOrFetch(key, func() (any, error) {
-		return s.client.GetPRFeedback(ctx, owner, repo, number)
+		return s.client.GetPRFeedback(fetchCtx, owner, repo, number)
 	})
 	if err != nil {
 		return nil, err
@@ -135,9 +140,12 @@ func (s *Service) GetPRStatus(ctx context.Context, owner, repo string, number in
 	if s.client == nil {
 		return nil, fmt.Errorf("github client not available")
 	}
+	// Detach the upstream call from the singleflight leader's context; see
+	// GetPRFeedback for the cascading-cancel rationale.
+	fetchCtx := context.WithoutCancel(ctx)
 	key := prStatusCacheKey(owner, repo, number)
 	v, err := s.prStatusCache.doOrFetch(key, func() (any, error) {
-		return s.client.GetPRStatus(ctx, owner, repo, number)
+		return s.client.GetPRStatus(fetchCtx, owner, repo, number)
 	})
 	if err != nil {
 		return nil, err

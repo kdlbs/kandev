@@ -272,3 +272,20 @@ func (s *Service) ClearRepoErrorCache() {
 	}
 	s.repoErrorCache.clear()
 }
+
+// ClearPRCaches drops the PR status and PR feedback caches. Called from
+// the token-swap path because review visibility differs across identities
+// (a PR readable to the old token may not be readable to the new one, and
+// vice versa); without this, the new identity could see stale review /
+// check / comment data for up to one TTL after the swap.
+func (s *Service) ClearPRCaches() {
+	if s == nil {
+		return
+	}
+	if s.prStatusCache != nil {
+		s.prStatusCache.clear()
+	}
+	if s.prFeedbackCache != nil {
+		s.prFeedbackCache.clear()
+	}
+}

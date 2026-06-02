@@ -127,7 +127,7 @@ func (c *GHClient) IsAuthenticated(ctx context.Context) (bool, error) {
 // RunAuthDiagnostics executes gh auth status and captures the raw output for troubleshooting.
 func (c *GHClient) RunAuthDiagnostics(ctx context.Context) *AuthDiagnostics {
 	var stdout, stderr bytes.Buffer
-	runErr, _ := subproc.RunGHAfterAcquire(ctx, resolveGHExecTimeout(ctx), func(execCtx context.Context) *exec.Cmd {
+	runErr, execCtxErr := subproc.RunGHAfterAcquire(ctx, resolveGHExecTimeout(ctx), func(execCtx context.Context) *exec.Cmd {
 		cmd := exec.CommandContext(execCtx, "gh", "auth", "status", "--hostname", "github.com")
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
@@ -144,6 +144,17 @@ func (c *GHClient) RunAuthDiagnostics(ctx context.Context) *AuthDiagnostics {
 	output := stderr.String()
 	if output == "" {
 		output = stdout.String()
+	}
+	// When acquire/context fails before gh runs (or the exec is killed by
+	// the per-command deadline), both buffers can be empty. Surface the
+	// underlying error so the diagnostics panel doesn't show a blank
+	// "command failed with exit code -1" with no explanation.
+	if output == "" && runErr != nil {
+		if execCtxErr != nil {
+			output = fmt.Sprintf("gh auth status did not run: %v (context: %v)", runErr, execCtxErr)
+		} else {
+			output = fmt.Sprintf("gh auth status did not run: %v", runErr)
+		}
 	}
 	return &AuthDiagnostics{
 		Command:  "gh auth status --hostname github.com",
@@ -891,12 +902,12 @@ func (c *GHClient) runGH(ctx context.Context, stdin []byte, args ...string) (str
 		return cmd
 	})
 	if runErr != nil {
-		// Surface execCtx timeouts as the canonical context error so
-		// callers (FetchRateLimit, IsAuthenticated, share.IsAlreadyGone)
-		// can still errors.Is(err, context.DeadlineExceeded). Without
-		// this remap, the runErr is `signal: killed` which loses the
-		// classifier signal that pre-fix code relied on.
-		if execCtxErr != nil && errors.Is(execCtxErr, context.DeadlineExceeded) {
+		// Surface execCtx timeouts AND cancellations as the canonical
+		// context error so callers (FetchRateLimit, IsAuthenticated,
+		// share.IsAlreadyGone) can still errors.Is(err, context.X). The
+		// runErr from cmd.Run on a killed child is `signal: killed`,
+		// which loses both classifier signals that pre-fix code relied on.
+		if execCtxErr != nil && (errors.Is(execCtxErr, context.DeadlineExceeded) || errors.Is(execCtxErr, context.Canceled)) {
 			return stdout.String(), fmt.Errorf("gh %s: %w", firstArg(args), execCtxErr)
 		}
 		c.inspectRateStderr(args, stderr.String())

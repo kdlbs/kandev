@@ -145,7 +145,7 @@ func RunGHCombinedOutput(ctx context.Context, cmd *exec.Cmd) ([]byte, error) {
 	return cmd.CombinedOutput()
 }
 
-// RunGHAfterAcquire / RunGHCombinedOutputAfterAcquire mirror the git
+// RunGHAfterAcquire / RunGHCombinedAfterAcquire mirror the git
 // helper runGitCombinedAfterAcquire in apps/backend/internal/worktree:
 // the exec timer starts only AFTER the throttle slot is acquired so
 // throttle queue time can't burn the per-command budget. Without this

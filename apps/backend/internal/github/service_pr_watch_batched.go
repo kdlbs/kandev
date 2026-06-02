@@ -99,11 +99,13 @@ func (s *Service) fetchBatchedWatchStatuses(
 }
 
 // batchedFetchSingleflightKey builds a deterministic key from the sorted
-// ref tuples in (numbered, searching). Casing matches repoErrorCacheKey
-// (lowercase) so two callers that disagree on repo casing still share
-// the in-flight slot — the upstream resource is the same. Distinct
-// "n:"/"b:" prefixes prevent a numbered ref colliding with a branch ref
-// that happens to render the same string.
+// ref tuples in (numbered, searching). Sorting ensures ordering doesn't
+// split equivalent calls into separate slots, and lowercasing matches
+// repoErrorCacheKey so the in-flight key is stable regardless of caller
+// casing (watches from the DB always have consistent casing in practice,
+// but it costs nothing to make the key insensitive). Distinct "n:"/"b:"
+// prefixes prevent a numbered ref colliding with a branch ref that
+// happens to render the same string.
 func batchedFetchSingleflightKey(numbered, searching []*PRWatch) string {
 	parts := make([]string, 0, len(numbered)+len(searching))
 	for _, w := range numbered {

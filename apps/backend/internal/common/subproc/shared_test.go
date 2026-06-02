@@ -117,9 +117,17 @@ func TestRunGHCombinedAfterAcquire_ExecTimeoutSurvivesAcquireWait(t *testing.T) 
 	var (
 		gotRemaining time.Duration
 		gotRunErr    error
+		queued       = make(chan struct{})
 	)
 	go func() {
 		defer wg.Done()
+		// Signal once the goroutine is about to call into the throttle —
+		// at that point it WILL be a waiter (cap=1, the slot is held).
+		// Pre-fix used time.AfterFunc(acquireWait, ...) to "give the
+		// waiter time to queue", which was non-deterministic across CI
+		// schedulers and could miss the very regression it's meant to
+		// catch.
+		close(queued)
 		_, gotRunErr, _ = RunGHCombinedAfterAcquire(ctx, execTimeout, func(execCtx context.Context) *exec.Cmd {
 			if dl, ok := execCtx.Deadline(); ok {
 				gotRemaining = time.Until(dl)
@@ -127,7 +135,19 @@ func TestRunGHCombinedAfterAcquire_ExecTimeoutSurvivesAcquireWait(t *testing.T) 
 			return exec.CommandContext(execCtx, "true")
 		})
 	}()
-	time.AfterFunc(acquireWait, holdRelease)
+	// Wait for the goroutine to be ready to call Acquire, then yield
+	// until the throttle records the queue depth (waiters >= 1). This
+	// replaces the prior time.AfterFunc-based barrier, which fired on a
+	// scheduler timer rather than on the actual queue state and could
+	// miss the regression on slow CI hosts. After that, sleep for
+	// acquireWait so the pre-fix regression (timer starts BEFORE
+	// Acquire) would have its deadline burned by the wall-clock delay.
+	<-queued
+	for metricInt(subprocWaiters, "gh") < 1 {
+		runtime.Gosched()
+	}
+	time.Sleep(acquireWait)
+	holdRelease()
 	wg.Wait()
 
 	// Pre-fix: gotRemaining would be roughly execTimeout - acquireWait,

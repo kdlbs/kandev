@@ -3,11 +3,11 @@ package github
 import (
 	"context"
 	"errors"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 )
 
 // TestSyncWatchesBatched_NegativeCache_ShortCircuits is the regression
@@ -162,19 +162,20 @@ func TestSyncWatchesBatched_FirstMissCoalesces(t *testing.T) {
 	}
 
 	// Block the first in-flight ExecuteGraphQL so concurrent callers
-	// have time to join the singleflight before any response lands.
+	// have time to join the singleflight before any response lands. The
+	// `joined` counter is the deterministic barrier: every caller that
+	// joins the singleflight bumps it before the leader's fetch returns,
+	// so we can wait for "all n callers are inside the singleflight"
+	// without a timing-sensitive sleep.
 	release := make(chan struct{})
 	var gotFirstInFlight sync.WaitGroup
 	gotFirstInFlight.Add(1)
-	firstSignaled := false
-	var firstMu sync.Mutex
+	var firstSignaled atomic.Bool
+	var joined atomic.Int32
 	gh.onExecute = func() {
-		firstMu.Lock()
-		if !firstSignaled {
-			firstSignaled = true
+		if firstSignaled.CompareAndSwap(false, true) {
 			gotFirstInFlight.Done()
 		}
-		firstMu.Unlock()
 		<-release
 	}
 	gh.prResponses = []string{`{
@@ -189,19 +190,21 @@ func TestSyncWatchesBatched_FirstMissCoalesces(t *testing.T) {
 	for i := 0; i < n; i++ {
 		go func() {
 			defer wg.Done()
+			joined.Add(1)
 			if _, err := svc.SyncWatchesBatched(context.Background(), []*PRWatch{w}); err != nil {
 				errs <- err
 			}
 		}()
 	}
-	// Wait until the first caller is inside ExecuteGraphQL, then let
-	// concurrent callers settle into the singleflight join. The brief
-	// sleep is a deliberate barrier: without it, the second caller
-	// might arrive AFTER the first has already returned (releasing the
-	// singleflight slot), which would still produce coalescing in the
-	// happy case but wouldn't be testing what we mean to test.
+	// Wait until the leader is inside ExecuteGraphQL, then wait until
+	// every co-waiter has reached the singleflight join before releasing.
+	// Pre-fix this used a fixed 50ms sleep, which violated the backend's
+	// no-Sleep-in-pure-in-memory-tests convention and was prone to CI
+	// scheduler variance.
 	gotFirstInFlight.Wait()
-	time.Sleep(50 * time.Millisecond)
+	for joined.Load() < int32(n) {
+		runtime.Gosched()
+	}
 	close(release)
 	wg.Wait()
 	close(errs)

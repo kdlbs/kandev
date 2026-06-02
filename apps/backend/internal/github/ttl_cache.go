@@ -182,11 +182,16 @@ func (c *ttlCache) evictLocked() {
 // del removes a single key from the cache. Used by Service.evictRepoNegative
 // to drop a negative entry when a repository is (re)linked to a workspace
 // or its watch is recreated, so a freshly-linked repo gets probed
-// immediately instead of waiting out the 10-min TTL.
+// immediately instead of waiting out the 10-min TTL. Bumps `gen` so any
+// classifier fetch that was in flight at the time of the del (e.g. the
+// one whose result triggered the relink) cannot reinsert the just-evicted
+// key via setIfCurrentGeneration — its post-fetch write becomes a no-op
+// and the next ensure() re-probes under the new generation.
 func (c *ttlCache) del(key string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.entries, key)
+	c.gen++
 }
 
 // cachedErr wraps an error stored in a ttlCache by doOrFetchClassified, so

@@ -264,8 +264,12 @@ func wsSyncTaskPR(svc *Service, _ *logger.Logger) func(ctx context.Context, msg 
 			return nil, err
 		}
 		// Return an envelope so the frontend always gets a deterministic
-		// shape even on empty results (`{prs: []}`); a bare `nil` would
-		// confuse the WS handler's success/error branching.
+		// shape even on empty results (`{prs: []}`); a bare `nil` slice
+		// would serialize to `prs: null` and confuse the WS handler's
+		// success/error branching, so normalize to an empty slice here.
+		if prs == nil {
+			prs = []*TaskPR{}
+		}
 		return map[string]interface{}{"prs": prs, "permanent": permanent}, nil
 	})
 }
