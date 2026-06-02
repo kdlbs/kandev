@@ -75,6 +75,10 @@ import type { Terminal } from "@/hooks/domains/session/use-terminals";
 import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import { PanelPortalHost, usePortalSlot } from "@/lib/layout/panel-portal-host";
 import { ENV_SCOPED_DOCKVIEW_COMPONENTS } from "@/lib/state/dockview-env-scoped-components";
+import type { AppState } from "@/lib/state/store";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
+
+const debugChangesVisibility = createDebugLogger("changes:visibility");
 
 // ---------------------------------------------------------------------------
 // PORTAL SLOT — generic dockview component that adopts a persistent portal
@@ -301,11 +305,44 @@ function DiffViewerContent({
   );
 }
 
+function describeTaskRepositoriesForDebug(state: AppState, taskId: string | null) {
+  if (!taskId) return { source: "none", repositoryId: "-", repoCount: -1, repoIds: "-" };
+  const task = state.kanban.tasks.find((item) => item.id === taskId);
+  if (task) {
+    return {
+      source: "kanban",
+      repositoryId: task.repositoryId ?? "-",
+      repoCount: task.repositories?.length ?? -1,
+      repoIds: task.repositories?.map((repo) => repo.repository_id).join(",") || "-",
+    };
+  }
+  for (const [workflowId, snapshot] of Object.entries(state.kanbanMulti.snapshots)) {
+    const snapshotTask = snapshot.tasks.find((item) => item.id === taskId);
+    if (!snapshotTask) continue;
+    return {
+      source: `kanbanMulti:${workflowId}`,
+      repositoryId: snapshotTask.repositoryId ?? "-",
+      repoCount: snapshotTask.repositories?.length ?? -1,
+      repoIds: snapshotTask.repositories?.map((repo) => repo.repository_id).join(",") || "-",
+    };
+  }
+  return { source: "missing", repositoryId: "-", repoCount: -1, repoIds: "-" };
+}
+
+function resolveChangesVisibilityAction(
+  taskHasRepos: boolean | null,
+  panelExists: boolean,
+): string {
+  if (taskHasRepos !== false) return "keep";
+  return panelExists ? "remove" : "remove-missing-panel";
+}
+
 function ChangesContent({ panelId }: { panelId: string }) {
   const addDiffViewerPanel = useDockviewStore((s) => s.addDiffViewerPanel);
   const addFileDiffPanel = useDockviewStore((s) => s.addFileDiffPanel);
   const addCommitDetailPanel = useDockviewStore((s) => s.addCommitDetailPanel);
   const { openFile } = useFileEditors();
+  const appStore = useAppStoreApi();
 
   // Dynamic title with file count — use environment-stable sessionId so the
   // tab title doesn't re-fetch on same-environment session tab switches.
@@ -318,11 +355,28 @@ function ChangesContent({ panelId }: { panelId: string }) {
   // that window is unrecoverable in the same session.
   const taskHasRepos = useActiveTaskHasRepos();
   useEffect(() => {
-    if (taskHasRepos !== false) return;
     const dockApi = useDockviewStore.getState().api;
     const panel = dockApi?.getPanel(panelId);
+    if (isDebug()) {
+      const state = appStore.getState();
+      const activeTaskId = state.tasks.activeTaskId;
+      const repoDebug = describeTaskRepositoriesForDebug(state, activeTaskId);
+      debugChangesVisibility("auto-close decision", {
+        panelId,
+        taskHasRepos: taskHasRepos === null ? "unknown" : String(taskHasRepos),
+        action: resolveChangesVisibilityAction(taskHasRepos, Boolean(panel)),
+        activeTaskId: activeTaskId ?? "-",
+        sessionId: state.tasks.activeSessionId ?? "-",
+        taskSource: repoDebug.source,
+        repositoryId: repoDebug.repositoryId,
+        repoCount: repoDebug.repoCount,
+        repoIds: repoDebug.repoIds,
+        livePanelIds: dockApi?.panels.map((p) => p.id).join(",") ?? "-",
+      });
+    }
+    if (taskHasRepos !== false) return;
     if (dockApi && panel) dockApi.removePanel(panel);
-  }, [taskHasRepos, panelId]);
+  }, [taskHasRepos, panelId, appStore]);
 
   useEffect(() => {
     const title = totalCount > 0 ? `Changes (${totalCount})` : "Changes";

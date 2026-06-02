@@ -107,6 +107,54 @@ describe("kanban.update handler — primarySessionId preservation", () => {
   });
 });
 
+describe("kanban.update handler — repository preservation", () => {
+  it("preserves existing repositories when kanban.update omits repo metadata", () => {
+    const store = makeStore({
+      kanban: {
+        workflowId: "wf1",
+        steps: [],
+        tasks: [
+          {
+            id: "t1",
+            workflowStepId: "s1",
+            title: "T1",
+            position: 0,
+            repositoryId: "repo-a",
+            repositories: [
+              {
+                id: "link-a",
+                repository_id: "repo-a",
+                base_branch: "main",
+                checkout_branch: "feature/x",
+                position: 0,
+              },
+            ],
+          },
+        ],
+      },
+    } as Partial<AppState>);
+
+    const handler = registerKanbanHandlers(store)["kanban.update"]!;
+    handler(
+      makeUpdateMessage("wf1", [
+        { id: "t1", workflowStepId: "s1", title: "T1 updated", position: 0, state: "CREATED" },
+      ]),
+    );
+
+    const task = store.getState().kanban.tasks.find((t) => t.id === "t1");
+    expect(task?.repositoryId).toBe("repo-a");
+    expect(task?.repositories).toEqual([
+      {
+        id: "link-a",
+        repository_id: "repo-a",
+        base_branch: "main",
+        checkout_branch: "feature/x",
+        position: 0,
+      },
+    ]);
+  });
+});
+
 describe("kanban.update handler — explicit-null primary preservation", () => {
   it("does not restore stale snapshot value when primarySessionId is explicitly cleared", () => {
     // Repro for the multi-snapshot null-preservation bug: when task.updated

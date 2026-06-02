@@ -48,6 +48,9 @@
  * when adding new loggers — it's the cheat-sheet for triage):
  *
  *   Git / Changes panel pipeline (bug: stale until refresh)
+ *     [changes:visibility]   Changes tab auto-close/keep decision:
+ *                            taskHasRepos, source task object, repositoryId,
+ *                            repoCount, repoIds, and live Dockview panel IDs.
  *     [git-status:subscribe]  useSessionGitStatus subscribe/unsubscribe cycle
  *     [ws:dispatch]           every WS message — inbound notifications and
  *                             outbound sends (`message="send"`). Streaming
