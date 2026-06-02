@@ -420,7 +420,7 @@ export const ReviewDialog = memo(function ReviewDialog(props: ReviewDialogProps)
   const { open, onOpenChange, sessionId, baseBranch, onOpenFile } = props;
   const s = useReviewDialogState(props);
   const splitRowRef = useRef<HTMLDivElement>(null);
-  const sidebar = useReviewSidebarResize(splitRowRef);
+  const sidebar = useReviewSidebarResize(splitRowRef, open);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

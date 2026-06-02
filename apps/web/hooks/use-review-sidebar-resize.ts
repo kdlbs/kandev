@@ -50,7 +50,10 @@ function restoreBodyStyles() {
   document.body.style.userSelect = "";
 }
 
-export function useReviewSidebarResize(containerRef?: React.RefObject<HTMLElement | null>) {
+export function useReviewSidebarResize(
+  containerRef?: React.RefObject<HTMLElement | null>,
+  open = true,
+) {
   const [width, setWidth] = useState<number>(readStoredWidth);
   const isDragging = useRef(false);
   const startX = useRef(0);
@@ -58,8 +61,13 @@ export function useReviewSidebarResize(containerRef?: React.RefObject<HTMLElemen
 
   // Re-clamp when the container becomes available or resizes so a stored
   // width carried over from a wider viewport gets pulled down on a narrower
-  // one (rather than overflowing the dialog).
+  // one (rather than overflowing the dialog). `open` is in the dep array
+  // because the container element only exists once Radix mounts the
+  // DialogContent portal — on the closed → open transition, `containerRef`
+  // (a stable ref *object*) doesn't change identity, so the effect needs
+  // `open` to re-fire and pick up the now-populated `current`.
   useEffect(() => {
+    if (!open) return;
     const el = containerRef?.current;
     if (!el) return;
     const reclamp = () => {
@@ -71,7 +79,7 @@ export function useReviewSidebarResize(containerRef?: React.RefObject<HTMLElemen
     const ro = new ResizeObserver(reclamp);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [containerRef]);
+  }, [containerRef, open]);
 
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {

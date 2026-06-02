@@ -159,4 +159,26 @@ describe("useReviewSidebarResize", () => {
     // 600 - 320 = 280 → stored 500 should be clamped down to 280
     expect(result.current.width).toBe(600 - REVIEW_SIDEBAR_LIMITS.minDiffPaneWidth);
   });
+
+  it("reclamps when the dialog transitions from closed to open", () => {
+    // Mirrors the real lifecycle: Radix doesn't mount the DialogContent
+    // portal while open=false, so containerRef.current is null on first
+    // effect run. When open flips to true, the effect must re-fire and
+    // pick up the now-populated element.
+    window.sessionStorage.setItem(REVIEW_SIDEBAR_LIMITS.storageKey, "500");
+    const ref = { current: null } as React.MutableRefObject<HTMLDivElement | null>;
+    const { result, rerender } = renderHook(({ open }) => useReviewSidebarResize(ref, open), {
+      initialProps: { open: false },
+    });
+    // Closed → stored width returned unclamped by container (since no el).
+    expect(result.current.width).toBe(500);
+
+    // Dialog opens: portal mounts, ref populates with a 600px container.
+    const fakeEl = { getBoundingClientRect: () => ({ width: 600 }) as DOMRect };
+    ref.current = fakeEl as unknown as HTMLDivElement;
+    rerender({ open: true });
+
+    // Effect must re-run and reclamp to 600 - 320 = 280.
+    expect(result.current.width).toBe(600 - REVIEW_SIDEBAR_LIMITS.minDiffPaneWidth);
+  });
 });
