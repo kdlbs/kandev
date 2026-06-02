@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 
@@ -9,6 +10,16 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"go.uber.org/zap"
 )
+
+// notifWork is the item type carried on notifQueue. Exactly one of the two
+// fields is populated: notif for a real SDK notification (the common case),
+// sync for a barrier posted by syncNotifQueue. The worker closes sync when
+// it pops the barrier off the queue, releasing the waiter once everything
+// queued ahead of it has been processed.
+type notifWork struct {
+	notif acp.SessionNotification
+	sync  chan struct{}
+}
 
 // enqueueACPUpdate is the SDK-facing notification handler. It pushes the
 // notification onto notifQueue and returns immediately, so the ACP SDK's
@@ -26,7 +37,34 @@ func (a *Adapter) enqueueACPUpdate(n acp.SessionNotification) {
 	select {
 	case <-a.lifetimeCtx.Done():
 		return
-	case a.notifQueue <- n:
+	case a.notifQueue <- notifWork{notif: n}:
+	}
+}
+
+// syncNotifQueue blocks until every notifWork enqueued before this call has
+// been processed by the worker. It works by posting a barrier item onto the
+// same FIFO queue and waiting for the worker to close it.
+//
+// Motivation: the worker is async, so after conn.Prompt() returns the final
+// text chunks emitted by the agent right before the prompt response may
+// still be sitting in notifQueue. If sendPrompt emits EventTypeComplete
+// immediately, the downstream "turn complete" handler flushes the message
+// buffer before those chunks land, the agent's text is dropped, and the
+// turn persists as had_output=false. Calling this before the complete emit
+// guarantees the chunks are delivered to updatesCh first.
+func (a *Adapter) syncNotifQueue(ctx context.Context) {
+	ch := make(chan struct{})
+	select {
+	case <-a.lifetimeCtx.Done():
+		return
+	case <-ctx.Done():
+		return
+	case a.notifQueue <- notifWork{sync: ch}:
+	}
+	select {
+	case <-a.lifetimeCtx.Done():
+	case <-ctx.Done():
+	case <-ch:
 	}
 }
 
@@ -51,8 +89,12 @@ func (a *Adapter) runUpdateWorker() {
 		select {
 		case <-a.lifetimeCtx.Done():
 			return
-		case n := <-a.notifQueue:
-			a.handleACPUpdate(n)
+		case item := <-a.notifQueue:
+			if item.sync != nil {
+				close(item.sync)
+				continue
+			}
+			a.handleACPUpdate(item.notif)
 		}
 	}
 }

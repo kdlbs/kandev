@@ -150,6 +150,21 @@ func (a *Adapter) sendPrompt(ctx context.Context, message string, attachments []
 		return err
 	}
 
+	// Drain queued ACP notifications before running the post-prompt sweeps and
+	// the complete event. The worker (now async) may still hold final frames
+	// the agent emitted right before its prompt response — the final text
+	// chunk, the terminal monitor_end tool_call_update, the registration
+	// frame for a Monitor whose events haven't yet been routed. Without this
+	// barrier:
+	//   - cancelActiveToolCalls / sweepMonitorsOnPromptEnd race the worker
+	//     for activeToolCalls and activeMonitors. If the worker hasn't added
+	//     a Monitor yet when the sweep takes the map, subsequent monitor_event
+	//     text frames find no tracking and drop their events on the floor.
+	//   - The complete event emitted to updatesCh outruns the final text chunk,
+	//     so the downstream buffer flush yields empty and the turn persists as
+	//     had_output=false even when the agent did produce text.
+	a.syncNotifQueue(ctx)
+
 	// Cancel any tool calls still in-flight (e.g. a denied permission leaves the
 	// tool_call without a terminal status update from the agent).
 	a.cancelActiveToolCalls(sessionID)

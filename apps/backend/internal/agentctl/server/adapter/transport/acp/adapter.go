@@ -99,11 +99,16 @@ type Adapter struct {
 	// the SDK only ever sees nanosecond-scale enqueues. workerWg lets Close
 	// wait for in-flight notifications to drain before tearing down updatesCh.
 	//
+	// Items are notifWork so the queue can also carry barrier-sync requests
+	// from syncNotifQueue — the worker closes the barrier's channel in FIFO
+	// order, which lets sendPrompt wait for queued text chunks before it
+	// emits EventTypeComplete.
+	//
 	// Drained-by-cancel, not by close: Close cancels lifetimeCtx (which the
 	// worker selects on) but never closes notifQueue, so any items queued
 	// after Close are dropped on the floor rather than re-delivered. Close
 	// is terminal — fine for shutdown but worth knowing when reading the loop.
-	notifQueue chan acp.SessionNotification
+	notifQueue chan notifWork
 	workerWg   sync.WaitGroup
 
 	// Permission handler
@@ -219,7 +224,7 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		agentID:         cfg.AgentID,
 		normalizer:      NewNormalizer(cfg.AgentID),
 		updatesCh:       make(chan AgentEvent, 100),
-		notifQueue:      make(chan acp.SessionNotification, notifQueueCapacity),
+		notifQueue:      make(chan notifWork, notifQueueCapacity),
 		activeToolCalls: make(map[string]*streams.NormalizedPayload),
 		activeMonitors:  make(map[string]map[string]string),
 		pendingWakeups:  make(map[string]*pendingWakeup),
