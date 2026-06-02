@@ -1,10 +1,11 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
+import { REVIEW_SIDEBAR_LIMITS } from "../../../hooks/use-review-sidebar-resize";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import type { Page, Locator } from "@playwright/test";
 
-const STORAGE_KEY = "review-dialog-sidebar-width";
+const STORAGE_KEY = REVIEW_SIDEBAR_LIMITS.storageKey;
 
 async function seedReviewTask(testPage: Page, apiClient: ApiClient, seedData: SeedData) {
   const task = await apiClient.createTaskWithAgent(

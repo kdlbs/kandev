@@ -101,11 +101,11 @@ export function useReviewSidebarResize(containerRef?: React.RefObject<HTMLElemen
         return current;
       });
     };
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
     return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
       if (isDragging.current) {
         isDragging.current = false;
         restoreBodyStyles();

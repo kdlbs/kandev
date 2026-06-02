@@ -8,11 +8,11 @@ import {
 } from "./use-review-sidebar-resize";
 
 function mouseMove(clientX: number) {
-  window.dispatchEvent(new MouseEvent("mousemove", { clientX, bubbles: true }));
+  document.dispatchEvent(new MouseEvent("mousemove", { clientX, bubbles: true }));
 }
 
 function mouseUp() {
-  window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+  document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
 }
 
 function reactMouse(clientX: number) {
