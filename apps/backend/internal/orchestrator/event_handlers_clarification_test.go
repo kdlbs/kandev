@@ -93,8 +93,31 @@ func TestHandleClarificationStaleDismissed(t *testing.T) {
 
 	t.Run("skips on_turn_complete while clarification still pending", func(t *testing.T) {
 		repo := setupTestRepo(t)
-		svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
-		seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateWaitingForInput)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+			ID: "step1", WorkflowID: "wf1", Name: "Plan", Position: 0,
+			Events: wfmodels.StepEvents{
+				OnTurnComplete: []wfmodels.OnTurnCompleteAction{
+					{Type: wfmodels.OnTurnCompleteMoveToNext},
+				},
+			},
+		}
+		stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+			ID: "step2", WorkflowID: "wf1", Name: "Implement", Position: 1,
+		}
+		svc := createEngineService(t, repo, stepGetter, &mockAgentManager{})
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("get session: %v", err)
+		}
+		session.State = models.TaskSessionStateWaitingForInput
+		if err := repo.UpdateTaskSession(ctx, session); err != nil {
+			t.Fatalf("set session waiting: %v", err)
+		}
+
 		now := time.Now().UTC()
 		requireNoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "turn-1", TaskSessionID: "s1", TaskID: "t1", StartedAt: now}))
 		requireNoError(t, repo.CreateMessage(ctx, &models.Message{
@@ -110,6 +133,14 @@ func TestHandleClarificationStaleDismissed(t *testing.T) {
 		})
 		if err := svc.handleClarificationStaleDismissed(ctx, event); err != nil {
 			t.Fatalf("unexpected error: %v", err)
+		}
+
+		task, err := repo.GetTask(ctx, "t1")
+		if err != nil {
+			t.Fatalf("get task: %v", err)
+		}
+		if task.WorkflowStepID != "step1" {
+			t.Fatalf("expected step to remain step1 while clarification pending, got %q", task.WorkflowStepID)
 		}
 	})
 

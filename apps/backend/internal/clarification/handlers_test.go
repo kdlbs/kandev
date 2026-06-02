@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
@@ -95,15 +96,29 @@ func TestHttpRespond_RejectedAfterTimeout_NoNewTurn(t *testing.T) {
 			t.Errorf("expected no %s event; got events: %v", events.ClarificationAnswered, eventBus.events)
 		}
 	}
-	gotStaleDismissed := false
+	var staleEv *bus.Event
 	for _, ev := range eventBus.events {
 		if ev.Type == events.ClarificationStaleDismissed {
-			gotStaleDismissed = true
+			staleEv = ev
+			break
 		}
 	}
-	if !gotStaleDismissed {
-		t.Errorf("expected %s event for session cleanup; got events: %v",
+	if staleEv == nil {
+		t.Fatalf("expected %s event for session cleanup; got events: %v",
 			events.ClarificationStaleDismissed, eventBus.events)
+	}
+	data, ok := staleEv.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map event data, got %T", staleEv.Data)
+	}
+	if got, want := data["session_id"], "s1"; got != want {
+		t.Fatalf("session_id: got %v, want %v", got, want)
+	}
+	if got, want := data["task_id"], "t1"; got != want {
+		t.Fatalf("task_id: got %v, want %v", got, want)
+	}
+	if got, want := data["pending_id"], "pending-123"; got != want {
+		t.Fatalf("pending_id: got %v, want %v", got, want)
 	}
 
 	if len(messageCreator.updates) != 1 {
