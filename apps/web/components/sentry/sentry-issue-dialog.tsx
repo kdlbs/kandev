@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconRefresh, IconSearch } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
@@ -78,6 +78,9 @@ function useDialogState(open: boolean) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [configLoaded, setConfigLoaded] = useState(false);
+  // Monotonic request id: only the most recent search may write results, so an
+  // out-of-order response from a superseded search can't clobber the list.
+  const searchSeq = useRef(0);
 
   useBrowseProjects(open, configLoaded, setFilter, setConfigLoaded, setProjects);
 
@@ -93,20 +96,24 @@ function useDialogState(open: boolean) {
         setError("Organization slug is required");
         return;
       }
+      const seq = ++searchSeq.current;
       setLoading(true);
       setError(null);
       try {
         const payload = toSearchFilter(filter);
         const res = await searchSentryIssues(payload, nextCursorValue);
+        // A newer search started while this one was in flight — drop the result.
+        if (seq !== searchSeq.current) return;
         const page = res.issues ?? [];
         // nextCursorValue set => "Load more": append. Empty => fresh search: replace.
         setIssues((prev) => (nextCursorValue ? [...prev, ...page] : page));
         setNextCursor(res.nextPageToken);
         setIsLast(res.isLast);
       } catch (err) {
+        if (seq !== searchSeq.current) return;
         setError(err instanceof Error ? err.message : String(err));
       } finally {
-        setLoading(false);
+        if (seq === searchSeq.current) setLoading(false);
       }
     },
     [filter],

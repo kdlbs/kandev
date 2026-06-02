@@ -42,9 +42,12 @@ export function useSentryIssueWatches(workspaceId?: string | null) {
   }, [scope]);
 
   useEffect(() => {
-    if (workspaceId === null || loaded || loading) return;
-    // ignore guards against a stale response landing after workspaceId changed
-    // mid-flight — otherwise it would set loaded=true and block the new scope.
+    if (workspaceId === null || loaded) return;
+    // `loading` is intentionally NOT a dependency: setLoading(true) below would
+    // otherwise re-run this effect, whose cleanup sets ignore=true on the
+    // in-flight request, so its .finally skips setLoading(false) and the hook
+    // sticks at loading=true forever. The `loaded` guard already prevents a
+    // duplicate fetch, and `ignore` handles a workspaceId change mid-flight.
     let ignore = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- starting external fetch
     setLoading(true);
@@ -65,7 +68,7 @@ export function useSentryIssueWatches(workspaceId?: string | null) {
     return () => {
       ignore = true;
     };
-  }, [workspaceId, loaded, loading]);
+  }, [workspaceId, loaded]);
 
   const create = useCallback(async (req: CreateSentryIssueWatchRequest) => {
     const watch = await createSentryIssueWatch(req);

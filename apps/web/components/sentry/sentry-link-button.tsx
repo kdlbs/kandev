@@ -28,7 +28,10 @@ export function SentryLinkButton({ taskId, workspaceId, taskTitle }: SentryLinkB
     [taskTitle],
   );
 
-  if (!available || !taskId || !workspaceId) return null;
+  // Require taskTitle to be loaded (== null catches null + undefined but allows
+  // an empty string): otherwise linking would overwrite the real title with
+  // just the Sentry key while the title is still in flight.
+  if (!available || !taskId || !workspaceId || taskTitle == null) return null;
 
   return (
     <ValidatedPopover
