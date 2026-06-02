@@ -253,6 +253,7 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		return
 	}
 
+	// Explicit agent-requested moves (move_task_kandev) take precedence over pending clarifications.
 	if s.sessionHasPendingClarification(ctx, data.SessionID) {
 		s.logger.Info("deferring on_turn_complete while clarification is pending",
 			zap.String("task_id", data.TaskID),
@@ -489,8 +490,9 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 			zap.String("session_id", data.SessionID))
 		s.setSessionWaitingForInput(ctx, data.TaskID, data.SessionID, session)
 		go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
-		// captureGitStatusSnapshot and finalizeAutomationRunIfEphemeral run on the
-		// next agent turn that completes without a pending clarification.
+		// captureGitStatusSnapshot and finalizeAutomationRunIfEphemeral are deferred
+		// until a later agent turn completes without pending clarifications, or the
+		// user dismisses a stale overlay (clarification.stale_dismissed).
 		return
 	}
 

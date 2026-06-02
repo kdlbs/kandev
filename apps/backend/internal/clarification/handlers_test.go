@@ -95,6 +95,16 @@ func TestHttpRespond_RejectedAfterTimeout_NoNewTurn(t *testing.T) {
 			t.Errorf("expected no %s event; got events: %v", events.ClarificationAnswered, eventBus.events)
 		}
 	}
+	gotStaleDismissed := false
+	for _, ev := range eventBus.events {
+		if ev.Type == events.ClarificationStaleDismissed {
+			gotStaleDismissed = true
+		}
+	}
+	if !gotStaleDismissed {
+		t.Errorf("expected %s event for session cleanup; got events: %v",
+			events.ClarificationStaleDismissed, eventBus.events)
+	}
 
 	if len(messageCreator.updates) != 1 {
 		t.Fatalf("expected one message update to clear the durable pending guard, got %d: %+v",

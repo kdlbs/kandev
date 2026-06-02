@@ -160,6 +160,7 @@ const (
 	ClarificationAnswered        = "clarification.answered"         // User answered agent's clarification question (fallback/new turn)
 	ClarificationPrimaryAnswered = "clarification.primary_answered" // User answered while agent is still waiting (same turn)
 	ClarificationCancelled       = "clarification.cancelled"        // User cancelled a pending clarification question
+	ClarificationStaleDismissed  = "clarification.stale_dismissed"  // User dismissed a detached overlay without resuming the agent
 )
 
 // Event types for workspace/git status

@@ -77,6 +77,42 @@ func TestHandleClarificationAnswered(t *testing.T) {
 	})
 }
 
+func TestHandleClarificationStaleDismissed(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("returns nil on missing session_id", func(t *testing.T) {
+		svc := &Service{logger: testLogger()}
+		event := bus.NewEvent("clarification.stale_dismissed", "test", map[string]any{
+			"task_id": "t1",
+		})
+		if err := svc.handleClarificationStaleDismissed(ctx, event); err != nil {
+			t.Fatalf("expected nil error, got: %v", err)
+		}
+	})
+
+	t.Run("skips on_turn_complete while clarification still pending", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+		seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateWaitingForInput)
+		now := time.Now().UTC()
+		requireNoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "turn-1", TaskSessionID: "s1", TaskID: "t1", StartedAt: now}))
+		requireNoError(t, repo.CreateMessage(ctx, &models.Message{
+			ID: "clarify-1", TaskSessionID: "s1", TaskID: "t1", TurnID: "turn-1",
+			AuthorType: models.MessageAuthorAgent, Type: "clarification_request", Content: "Q?",
+			CreatedAt: now, Metadata: map[string]interface{}{"pending_id": "pending-1", "status": "pending"},
+		}))
+
+		event := bus.NewEvent("clarification.stale_dismissed", "test", map[string]any{
+			"session_id": "s1",
+			"task_id":    "t1",
+			"pending_id": "pending-1",
+		})
+		if err := svc.handleClarificationStaleDismissed(ctx, event); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+}
+
 func TestBuildClarificationPrompt(t *testing.T) {
 	t.Run("builds accepted prompt with question and answer", func(t *testing.T) {
 		data := clarificationAnsweredData{
