@@ -165,4 +165,11 @@ export const SHORTCUTS = {
     key: KEYS.M,
     modifiers: { ctrlOrCmd: true, shift: true },
   },
+  // Ctrl+R opens the bash-style reverse-i-search overlay on the chat composer.
+  // Defaults to plain Ctrl (not ctrlOrCmd) so the Mac browser refresh shortcut
+  // Cmd+R keeps working out of the box.
+  REVERSE_SEARCH: {
+    key: KEYS.R,
+    modifiers: { ctrl: true },
+  },
 } as const;

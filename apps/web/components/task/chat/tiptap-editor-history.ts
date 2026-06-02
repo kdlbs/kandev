@@ -3,6 +3,8 @@ import type { useEditor } from "@tiptap/react";
 import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Node as ProseMirrorNode } from "@tiptap/pm/model";
+import { matchesShortcut } from "@/lib/keyboard/utils";
+import { getShortcut, type StoredShortcutOverrides } from "@/lib/keyboard/shortcut-overrides";
 import { navigateHistory, type HistoryState } from "./message-history";
 import { getMarkdownText, textToHtml } from "./tiptap-helpers";
 
@@ -46,6 +48,7 @@ export type HistoryKeymapRefs = {
   getHistoryRef: React.RefObject<() => readonly string[]>;
   onOpenReverseSearchRef: React.RefObject<(() => void) | undefined>;
   onChangeRef: React.RefObject<(value: string) => void>;
+  keyboardShortcutsRef: React.RefObject<StoredShortcutOverrides | undefined>;
 };
 
 export type HistoryNavController = {
@@ -129,7 +132,8 @@ function reverseSearchPlugin(state: HistoryRuntimeState, refs: HistoryKeymapRefs
     props: {
       handleKeyDown: (_view, event) => {
         if (refs.disabledRef.current) return false;
-        if (event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === "r") {
+        const shortcut = getShortcut("REVERSE_SEARCH", refs.keyboardShortcutsRef.current);
+        if (matchesShortcut(event, shortcut)) {
           event.preventDefault();
           refs.onOpenReverseSearchRef.current?.();
           return true;

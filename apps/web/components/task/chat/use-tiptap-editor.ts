@@ -265,6 +265,7 @@ export function useTipTapEditor(opts: UseTipTapEditorOptions) {
     getHistoryRef: refs.getHistoryRef,
     onOpenReverseSearchRef: refs.onOpenReverseSearchRef,
     onChangeRef: refs.onChangeRef,
+    keyboardShortcutsRef: refs.keyboardShortcutsRef,
   });
   const isSyncingRef = useRef(false);
   const initialSyncDoneRef = useRef(false);
