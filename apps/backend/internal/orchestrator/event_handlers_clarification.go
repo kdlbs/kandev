@@ -56,12 +56,13 @@ func (s *Service) handleClarificationStaleDismissed(ctx context.Context, event *
 	}
 
 	writeCtx := context.WithoutCancel(ctx)
-	s.captureGitStatusSnapshot(writeCtx, data.SessionID)
-	s.finalizeAutomationRunIfEphemeral(writeCtx, data.TaskID, data.SessionID, true, "")
-
 	if s.sessionHasPendingClarification(writeCtx, data.SessionID) {
 		return nil
 	}
+
+	s.captureGitStatusSnapshot(writeCtx, data.SessionID)
+	s.finalizeAutomationRunIfEphemeral(writeCtx, data.TaskID, data.SessionID, true, "")
+
 	session, err := s.repo.GetTaskSession(writeCtx, data.SessionID)
 	if err != nil {
 		s.logger.Warn("failed to load session for stale-dismissed clarification cleanup",

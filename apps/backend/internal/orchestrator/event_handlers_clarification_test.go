@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
 func TestHandleClarificationAnswered(t *testing.T) {
@@ -109,6 +110,51 @@ func TestHandleClarificationStaleDismissed(t *testing.T) {
 		})
 		if err := svc.handleClarificationStaleDismissed(ctx, event); err != nil {
 			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("advances workflow when no clarification is pending after dismiss", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+			ID: "step1", WorkflowID: "wf1", Name: "Plan", Position: 0,
+			Events: wfmodels.StepEvents{
+				OnTurnComplete: []wfmodels.OnTurnCompleteAction{
+					{Type: wfmodels.OnTurnCompleteMoveToNext},
+				},
+			},
+		}
+		stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+			ID: "step2", WorkflowID: "wf1", Name: "Implement", Position: 1,
+		}
+		svc := createEngineService(t, repo, stepGetter, &mockAgentManager{})
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("get session: %v", err)
+		}
+		session.State = models.TaskSessionStateWaitingForInput
+		if err := repo.UpdateTaskSession(ctx, session); err != nil {
+			t.Fatalf("set session waiting: %v", err)
+		}
+
+		event := bus.NewEvent("clarification.stale_dismissed", "test", map[string]any{
+			"session_id": "s1",
+			"task_id":    "t1",
+			"pending_id": "pending-1",
+		})
+		if err := svc.handleClarificationStaleDismissed(ctx, event); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		task, err := repo.GetTask(ctx, "t1")
+		if err != nil {
+			t.Fatalf("get task: %v", err)
+		}
+		if task.WorkflowStepID != "step2" {
+			t.Fatalf("expected workflow step step2 after deferred on_turn_complete, got %q", task.WorkflowStepID)
 		}
 	})
 }
