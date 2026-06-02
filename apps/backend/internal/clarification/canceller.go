@@ -61,7 +61,7 @@ func (c *Canceller) markMessagesDetached(ctx context.Context, msgs []*taskmodels
 				zap.Error(err))
 			continue
 		}
-		c.publishMessageUpdated(ctx, msg)
+		c.publishMessageUpdated(writeCtx, msg)
 	}
 }
 
@@ -86,7 +86,7 @@ func (c *Canceller) markMessagesExpired(ctx context.Context, msgs []*taskmodels.
 				zap.Error(err))
 			continue
 		}
-		c.publishMessageUpdated(ctx, msg)
+		c.publishMessageUpdated(writeCtx, msg)
 	}
 }
 

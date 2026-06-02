@@ -483,12 +483,14 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 	}
 
 	if s.sessionHasPendingClarification(ctx, data.SessionID) {
-		s.completeTurnForSession(ctx, data.SessionID)
+		s.completeTurnForSession(context.WithoutCancel(ctx), data.SessionID)
 		s.logger.Info("deferring on_turn_complete on agent.completed while clarification is pending",
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID))
 		s.setSessionWaitingForInput(ctx, data.TaskID, data.SessionID, session)
 		go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
+		// captureGitStatusSnapshot and finalizeAutomationRunIfEphemeral run on the
+		// next agent turn that completes without a pending clarification.
 		return
 	}
 

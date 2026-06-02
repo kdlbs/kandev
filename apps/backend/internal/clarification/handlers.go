@@ -446,6 +446,8 @@ func (h *Handlers) applyAnswersToMessages(c *gin.Context, pendingID string, reje
 	if h.messageCreator == nil {
 		return
 	}
+	// Durable status writes must complete even if the HTTP request context is canceled.
+	writeCtx := context.WithoutCancel(c.Request.Context())
 	sessionID := h.lookupSessionForPending(c, pendingID)
 
 	if rejected {
@@ -455,7 +457,7 @@ func (h *Handlers) applyAnswersToMessages(c *gin.Context, pendingID string, reje
 		if h.repo == nil {
 			return
 		}
-		msgs, err := h.repo.FindMessagesByPendingID(c.Request.Context(), pendingID)
+		msgs, err := h.repo.FindMessagesByPendingID(writeCtx, pendingID)
 		if err != nil || len(msgs) == 0 {
 			h.logger.Debug("rejected clarification: no messages to update",
 				zap.String("pending_id", pendingID),
@@ -467,7 +469,7 @@ func (h *Handlers) applyAnswersToMessages(c *gin.Context, pendingID string, reje
 			if questionID == "" {
 				continue
 			}
-			if err := h.messageCreator.UpdateClarificationMessage(c.Request.Context(), sessionID, pendingID, questionID, "rejected", nil); err != nil {
+			if err := h.messageCreator.UpdateClarificationMessage(writeCtx, sessionID, pendingID, questionID, "rejected", nil); err != nil {
 				h.logger.Warn("failed to mark clarification question rejected",
 					zap.String("pending_id", pendingID),
 					zap.String("question_id", questionID),
@@ -482,7 +484,7 @@ func (h *Handlers) applyAnswersToMessages(c *gin.Context, pendingID string, reje
 		if ans.QuestionID == "" {
 			continue
 		}
-		if err := h.messageCreator.UpdateClarificationMessage(c.Request.Context(), sessionID, pendingID, ans.QuestionID, "answered", &ans); err != nil {
+		if err := h.messageCreator.UpdateClarificationMessage(writeCtx, sessionID, pendingID, ans.QuestionID, "answered", &ans); err != nil {
 			h.logger.Warn("failed to update clarification question",
 				zap.String("pending_id", pendingID),
 				zap.String("question_id", ans.QuestionID),
