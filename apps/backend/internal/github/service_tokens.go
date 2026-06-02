@@ -196,23 +196,23 @@ func (s *Service) ConfigureToken(ctx context.Context, token string) error {
 		s.logger.Info("created GitHub token secret", zap.String("id", newID))
 	}
 
-	// Drop identity-scoped caches BEFORE publishing the new client.
-	// Order matters: if we published the new client first, a concurrent
-	// goroutine could snap s.client (new identity) but be served stale
-	// cached data from the prior identity in the brief window before
-	// the Clear* calls fire. Without this, the picker would surface
-	// the prior user's repos for up to 60s after a token swap, a repo
-	// classified as unresolvable under the old credentials would stay
-	// "permanent: true" for up to 10 minutes, and stale PR review /
-	// check data could leak across identities.
-	s.ClearAccessibleReposCaches()
-	s.ClearRepoErrorCache()
-	s.ClearPRCaches()
-
-	// Refresh the client to use the new token
+	// Swap the client AND drop identity-scoped caches atomically under
+	// s.mu. Clearing OUTSIDE the lock (either before or after the swap)
+	// opens a race window: clear-before-swap lets an old-identity fetch
+	// completing in the gap repopulate the just-cleared cache; clear-
+	// after-swap lets a new-identity caller hit the still-stale cache
+	// in the gap. Holding the same lock for both publishes a coherent
+	// (new client, empty caches) state to any goroutine that takes
+	// s.mu after this. The cache.clear() calls take their own locks
+	// (not s.mu), so this is fine to nest. The generation bump inside
+	// each clear() also catches any in-flight fetch that started under
+	// the old client and tries to write after the lock is released.
 	s.mu.Lock()
 	s.client = testClient
 	s.authMethod = AuthMethodPAT
+	s.ClearAccessibleReposCaches()
+	s.ClearRepoErrorCache()
+	s.ClearPRCaches()
 	s.mu.Unlock()
 
 	return nil
@@ -234,16 +234,14 @@ func (s *Service) ClearToken(ctx context.Context) error {
 	}
 	s.logger.Info("cleared GitHub token secret", zap.String("id", existingID))
 
-	// Drop identity-scoped caches BEFORE clearing the client field —
-	// see ConfigureToken for the publish-order rationale.
-	s.ClearAccessibleReposCaches()
-	s.ClearRepoErrorCache()
-	s.ClearPRCaches()
-
-	// Reset to try gh CLI or other methods
+	// Reset client + drop identity-scoped caches atomically under s.mu;
+	// see ConfigureToken for the rationale.
 	s.mu.Lock()
 	s.client = nil
 	s.authMethod = AuthMethodNone
+	s.ClearAccessibleReposCaches()
+	s.ClearRepoErrorCache()
+	s.ClearPRCaches()
 	s.mu.Unlock()
 
 	// Try to re-establish connection via other methods
