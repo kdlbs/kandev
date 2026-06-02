@@ -170,6 +170,7 @@ function normalizeAgent(raw: unknown): AgentProfile {
     model: stringField(agent, "model", "model"),
     mode: (rawField(agent, "mode", "mode") as string | undefined) ?? undefined,
     allowIndexing: boolField(agent, "allowIndexing", "allow_indexing"),
+    autoApprove: boolField(agent, "autoApprove", "auto_approve"),
     cliFlags: parseJSONField<CLIFlag[]>(rawField(agent, "cliFlags", "cli_flags"), []),
     cliPassthrough: boolField(agent, "cliPassthrough", "cli_passthrough"),
     userModified: rawField(agent, "userModified", "user_modified") as boolean | undefined,

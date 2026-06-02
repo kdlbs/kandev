@@ -26,6 +26,7 @@ function makeAgent(id: string, name: string, reportsTo?: string): AgentProfile {
     agentDisplayName: "Claude",
     model: "claude-sonnet-4-5",
     allowIndexing: false,
+    autoApprove: false,
     cliFlags: [],
     cliPassthrough: false,
     createdAt: "2026-01-01T00:00:00Z",

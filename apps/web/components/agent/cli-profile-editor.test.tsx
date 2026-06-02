@@ -184,6 +184,7 @@ describe("CliProfileEditor recommended flags", () => {
           cliFlags: [],
           cliPassthrough: false,
           allowIndexing: false,
+          autoApprove: false,
           createdAt: CREATED_AT,
           updatedAt: CREATED_AT,
         },
