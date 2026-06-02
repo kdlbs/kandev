@@ -176,11 +176,6 @@ export function isDebug(): boolean {
   return debugCached;
 }
 
-/** @internal testing helper */
-export function resetDebugForTests(): void {
-  debugCached = undefined;
-}
-
 const BARE_VALUE_RE = /^[A-Za-z0-9_\-:./@+]+$/;
 
 function formatValue(value: unknown): string {

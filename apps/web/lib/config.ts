@@ -16,11 +16,6 @@ export function isDebugUI(): boolean {
   return debugUiCached;
 }
 
-/** @internal testing helper */
-export function resetDebugUIForTests(): void {
-  debugUiCached = undefined;
-}
-
 export function getBackendConfig(): AppConfig {
   // Server-side: use env vars or localhost defaults (SSR runs on same machine as backend)
   if (typeof window === "undefined") {

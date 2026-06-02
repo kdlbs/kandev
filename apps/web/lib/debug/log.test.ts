@@ -164,8 +164,7 @@ describe("registerSessionTaskResolver", () => {
 
 describe("isDebug", () => {
   // Module re-imports are required because isDebug memoizes its result.
-  // resetModules + resetDebugForTests forces re-evaluation with the
-  // current env / globals each time.
+  // resetModules forces a fresh module (and cache) on each test.
 
   beforeEach(() => {
     vi.resetModules();
