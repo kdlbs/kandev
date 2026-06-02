@@ -52,6 +52,15 @@ export default async function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <head>
         <meta name="apple-mobile-web-app-title" content="Kandev" />
+        {/* Preload the Seti icon webfont so file-tree glyphs (review dialog,
+            file browser) don't flash blank on first render. */}
+        <link
+          rel="preload"
+          href="/fonts/seti/seti.woff"
+          as="font"
+          type="font/woff"
+          crossOrigin="anonymous"
+        />
       </head>
       <body className="antialiased font-sans">
         {apiPort || debugMode ? (
