@@ -71,9 +71,9 @@ func TestMcpStdioValidationError(t *testing.T) {
 			expect: "ok",
 		},
 		{
-			name:   "empty command skips validation",
+			name:   "empty command and empty URL fails",
 			mcp:    McpServerConfig{Name: "x"},
-			expect: "ok",
+			expect: "error",
 		},
 		{
 			name:   "missing absolute path fails",
@@ -83,6 +83,16 @@ func TestMcpStdioValidationError(t *testing.T) {
 		{
 			name:   "missing PATH binary fails",
 			mcp:    McpServerConfig{Name: "x", Command: "definitely-not-a-real-binary-1247"},
+			expect: "error",
+		},
+		{
+			name:   "compound command first token resolves",
+			mcp:    McpServerConfig{Name: "x", Command: "sh -c 'echo hi'"},
+			expect: "ok",
+		},
+		{
+			name:   "compound command with missing first token fails",
+			mcp:    McpServerConfig{Name: "x", Command: "definitely-not-a-real-binary-1247 -m mcp_server"},
 			expect: "error",
 		},
 	}

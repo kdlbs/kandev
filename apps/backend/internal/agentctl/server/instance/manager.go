@@ -36,9 +36,13 @@ type Manager struct {
 	mu            sync.RWMutex
 
 	// reaperStop is closed by Shutdown to signal the idle reaper to exit.
+	// reaperStopOnce serializes the close so concurrent Shutdown calls can't
+	// double-close; sync.Once is used instead of m.mu because m.mu guards
+	// the instances map and shouldn't gate a one-shot lifecycle signal.
 	// reaperWG waits for the reaper goroutine to finish before Shutdown returns.
-	reaperStop chan struct{}
-	reaperWG   sync.WaitGroup
+	reaperStop     chan struct{}
+	reaperStopOnce sync.Once
+	reaperWG       sync.WaitGroup
 }
 
 // NewManager creates a new instance manager.
@@ -228,6 +232,16 @@ func (m *Manager) buildMcpServerConfigs(mcpServers []McpServerConfig) []config.M
 // mcpStdioValidationError returns an empty string when the MCP entry is
 // either non-stdio (URL transport) or its stdio Command resolves on PATH.
 // Otherwise it returns a human-readable reason the entry should be dropped.
+//
+// Caveat: PATH is resolved against the agentctl process's environment.
+// In Docker and SSH executor modes the agent may launch in a different
+// environment than agentctl, so a binary that lives only inside the
+// container/remote host but not on the agentctl host will be dropped
+// here even though it would have worked at agent runtime. For Standalone
+// and Sprites this is unambiguously correct; for Docker/SSH it's an
+// acceptable false positive — surfacing the warn log is better than
+// spawning a permanently broken child every session (the `/snap/bin/brave`
+// repro in GH issue #1247).
 func mcpStdioValidationError(mcp McpServerConfig) string {
 	// Non-stdio transports (sse, http, streamable_http) carry their endpoint
 	// in URL — nothing to validate locally.
@@ -235,9 +249,18 @@ func mcpStdioValidationError(mcp McpServerConfig) string {
 		return ""
 	}
 	if mcp.Command == "" {
-		return ""
+		return "stdio MCP entry has neither URL nor Command"
 	}
-	if _, err := exec.LookPath(mcp.Command); err != nil {
+	// Tolerate a compound `Command` string like "python3 -m mcp_server"
+	// where the user collapsed Command+Args into Command. The first token
+	// is the actual binary to look up; everything else is argv that the
+	// agent will splice in later. This is more permissive than the
+	// schema strictly allows, but it matches what real configs look like.
+	bin := mcp.Command
+	if i := strings.IndexAny(bin, " \t"); i > 0 {
+		bin = bin[:i]
+	}
+	if _, err := exec.LookPath(bin); err != nil {
 		return err.Error()
 	}
 	return ""
@@ -373,16 +396,17 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 
 // stopReaperOnce closes the reaper stop channel exactly once and waits for
 // the reaper goroutine to drain. Safe to call multiple times.
+//
+// Note: reaperWG.Wait() blocks until the reaper finishes whatever sweep
+// is currently in flight. Each instance in that sweep gets its own bounded
+// context (idleReaperShutdownTimeout) independent of any caller deadline,
+// so a Shutdown(ctx) caller with a tight deadline can find that the
+// reaper drain consumed it before the main shutdown loop starts. The
+// reaper polls reaperStop between instances, so the worst-case drain is
+// one StopInstance round (15s), not N×timeout.
 func (m *Manager) stopReaperOnce() {
-	m.mu.Lock()
-	select {
-	case <-m.reaperStop:
-		// Already closed.
-		m.mu.Unlock()
-		return
-	default:
+	m.reaperStopOnce.Do(func() {
 		close(m.reaperStop)
-	}
-	m.mu.Unlock()
+	})
 	m.reaperWG.Wait()
 }

@@ -82,7 +82,7 @@ The signal flows agent → adapter → process manager via a single bool:
 3. `instance.Manager` stores it on `config.InstanceConfig.RequiresProcessKill`.
 4. `process.Manager.buildAdapterConfig` forwards it into `adapter.Config` → `shared.Config`.
 5. `acp.Adapter.RequiresProcessKill()` returns `cfg.RequiresProcessKill`.
-6. On shutdown, `process.Manager.killProcessGroupIfRequired` consults the adapter and, when true, sends SIGTERM to the whole pgid. The timeout fallback in `waitForProcessExit` *always* kills the pgid (not just the leader) — belt-and-braces for any future ACP CLI that decides to ignore stdin close.
+6. On shutdown, `process.Manager.killProcessGroupIfRequired` consults the adapter and, when true, sends SIGKILL to the whole pgid via `killProcessGroup` (`syscall.Kill(-pid, SIGKILL)` on Unix). If `Stop(ctx)` further times out before the process exits, `waitForProcessExit`'s `ctx.Done` branch re-runs the pgid SIGKILL (falling back to a leader-only kill if the group call errors) — belt-and-braces for any future ACP CLI that decides to ignore stdin close.
 
 To add another agent that needs this: set `RequiresProcessKill: true` in its `Runtime()` config — that's all.
 

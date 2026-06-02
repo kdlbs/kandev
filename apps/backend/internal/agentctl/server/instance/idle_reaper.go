@@ -66,21 +66,36 @@ func (m *Manager) runIdleReaper(timeout, interval time.Duration) {
 // reapIdleInstances identifies and stops every instance that has been idle
 // for at least the configured timeout. The scan is snapshotted under the
 // instances lock; StopInstance is called outside the lock so a slow
-// teardown can't block other Manager operations.
+// teardown can't block other Manager operations. The reaper-stop signal
+// is polled between each StopInstance so Shutdown doesn't wait for an
+// entire idle sweep to drain when callers are trying to exit.
 func (m *Manager) reapIdleInstances(timeout time.Duration) {
 	now := time.Now()
 	idle := m.snapshotIdleInstances(now, timeout)
 	for _, id := range idle {
+		select {
+		case <-m.reaperStop:
+			return
+		default:
+		}
 		m.logger.Info("reaping idle agent instance",
 			zap.String("instance_id", id),
 			zap.Duration("idle_timeout", timeout))
-		ctx, cancel := context.WithTimeout(context.Background(), idleReaperShutdownTimeout)
-		if err := m.StopInstance(ctx, id); err != nil {
-			m.logger.Warn("idle reaper: failed to stop instance",
-				zap.String("instance_id", id),
-				zap.Error(err))
-		}
-		cancel()
+		m.reapSingleIdleInstance(id)
+	}
+}
+
+// reapSingleIdleInstance wraps StopInstance with a bounded context and
+// guarantees cancel() runs even on panic. Kept separate so the timeout
+// scope is obvious and `defer cancel()` doesn't pin context lifetimes to
+// the whole sweep.
+func (m *Manager) reapSingleIdleInstance(id string) {
+	ctx, cancel := context.WithTimeout(context.Background(), idleReaperShutdownTimeout)
+	defer cancel()
+	if err := m.StopInstance(ctx, id); err != nil {
+		m.logger.Warn("idle reaper: failed to stop instance",
+			zap.String("instance_id", id),
+			zap.Error(err))
 	}
 }
 

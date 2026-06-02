@@ -4,8 +4,10 @@ package process
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -68,11 +70,15 @@ func TestWaitForProcessExit_KillsProcessGroupOnTimeout(t *testing.T) {
 	m.waitForProcessExit(ctx)
 
 	// Both parent and child must be reaped within a short window. We waited
-	// the parent ourselves; for the child we poll /proc (Linux) or use
-	// signal-0 probe (portable).
+	// the parent ourselves; for the child we treat both "process gone" and
+	// "process exists in zombie state" as success — in CI the orphan
+	// re-parents to a container's PID 1 (tini-style) that may take longer
+	// than the kill itself to harvest the zombie, but for our purposes the
+	// SIGKILL has already done its job once the kernel marks the task as
+	// dead. 15s window covers slow CI runners on Linux.
 	require.Eventually(t, func() bool {
 		return !processAlive(childPID)
-	}, 5*time.Second, 50*time.Millisecond,
+	}, 15*time.Second, 50*time.Millisecond,
 		"child process %d should be killed by process-group reap", childPID)
 }
 
@@ -96,11 +102,34 @@ func waitForChildPID(t *testing.T, pidFile string, timeout time.Duration) int {
 	}
 }
 
-// processAlive reports whether a PID exists and can receive a signal.
-// On Unix, sending signal 0 returns nil for live processes and ESRCH for dead.
+// processAlive reports whether a PID exists, is not a zombie, and can
+// receive a signal. A zombie is treated as dead — the task has already
+// been killed; we're just waiting for the parent (or init) to harvest the
+// exit status, which is irrelevant to the regression we're testing for.
+//
+// On Linux we consult /proc/<pid>/stat to detect zombie state (field 3,
+// `R` running, `S` sleeping, `D` uninterruptible, `Z` zombie, `T` stopped).
+// On other Unix platforms we fall back to signal(0), which still catches
+// the leak case in the bug report — opencode acp processes live with
+// state 'S' on Linux until killed.
 func processAlive(pid int) bool {
 	if pid <= 0 {
 		return false
+	}
+	if runtime.GOOS == "linux" {
+		raw, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+		if err != nil {
+			return false // /proc entry gone => process gone
+		}
+		// Format: `<pid> (<comm>) <state> ...`. comm may contain spaces,
+		// so anchor on the trailing ")" before the state field.
+		s := string(raw)
+		idx := strings.LastIndex(s, ") ")
+		if idx == -1 || idx+2 >= len(s) {
+			return false
+		}
+		state := s[idx+2]
+		return state != 'Z'
 	}
 	proc, err := os.FindProcess(pid)
 	if err != nil {
