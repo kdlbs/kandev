@@ -439,6 +439,104 @@ func TestCreateTask_AllowsSameRepoDifferentBaseBranches(t *testing.T) {
 	}
 }
 
+// TestAddBranchToTask_ResolvesGitHubURL exercises the agent-ergonomic path
+// where the caller knows the GitHub URL but not the repository UUID. The
+// service must find-or-create the repository in the task's workspace and
+// attach the new branch row against the resolved id.
+func TestAddBranchToTask_ResolvesGitHubURL(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "WS"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
+	// Seed the target repo with provider info so FindOrCreateRepository
+	// returns the existing row instead of creating a duplicate.
+	_ = repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-target", WorkspaceID: "ws-1", Name: "acme/widgets",
+		Provider: "github", ProviderOwner: "acme", ProviderName: "widgets",
+		DefaultBranch: "main",
+	})
+	_ = repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-primary", WorkspaceID: "ws-1", Name: "primary", DefaultBranch: "main",
+	})
+
+	// Multi-repo task — auto-default would fail, so URL resolution must
+	// supply the repository_id.
+	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID:    "ws-1",
+		WorkflowID:     "wf-1",
+		WorkflowStepID: "step-1",
+		Title:          "Multi-repo task",
+		Repositories: []TaskRepositoryInput{
+			{RepositoryID: "repo-primary", BaseBranch: "main"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	added, err := svc.AddBranchToTask(ctx, AddBranchToTaskRequest{
+		TaskID:         task.ID,
+		GitHubURL:      "https://github.com/acme/widgets",
+		CheckoutBranch: "feature/x",
+	})
+	if err != nil {
+		t.Fatalf("AddBranchToTask with github_url: %v", err)
+	}
+	if added.RepositoryID != "repo-target" {
+		t.Errorf("expected resolved repository_id=repo-target, got %q", added.RepositoryID)
+	}
+	if added.BaseBranch != "main" {
+		t.Errorf("expected base_branch defaulted to repo default (main), got %q", added.BaseBranch)
+	}
+}
+
+// TestAddBranchToTask_ResolvesLocalPath exercises the local-worktree flow:
+// caller supplies the on-disk folder path, the service finds the matching
+// repository row in the task's workspace and attaches against it.
+func TestAddBranchToTask_ResolvesLocalPath(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "WS"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
+	_ = repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-primary", WorkspaceID: "ws-1", Name: "primary", DefaultBranch: "main",
+	})
+	_ = repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-by-path", WorkspaceID: "ws-1", Name: "sibling",
+		LocalPath: "/tmp/sibling", DefaultBranch: "develop",
+	})
+
+	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID:    "ws-1",
+		WorkflowID:     "wf-1",
+		WorkflowStepID: "step-1",
+		Title:          "Multi-repo task",
+		Repositories: []TaskRepositoryInput{
+			{RepositoryID: "repo-primary", BaseBranch: "main"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	added, err := svc.AddBranchToTask(ctx, AddBranchToTaskRequest{
+		TaskID:         task.ID,
+		LocalPath:      "/tmp/sibling",
+		CheckoutBranch: "feature/y",
+	})
+	if err != nil {
+		t.Fatalf("AddBranchToTask with local_path: %v", err)
+	}
+	if added.RepositoryID != "repo-by-path" {
+		t.Errorf("expected resolved repository_id=repo-by-path, got %q", added.RepositoryID)
+	}
+	if added.BaseBranch != "develop" {
+		t.Errorf("expected base_branch defaulted to repo default (develop), got %q", added.BaseBranch)
+	}
+}
+
 // TestCreateTask_RejectsSameRepoSameBranch verifies the dedup guard still
 // fires when the exact (repo, branch) pair is duplicated in the create
 // payload — the migration-layer constraint mirrors the in-memory guard.

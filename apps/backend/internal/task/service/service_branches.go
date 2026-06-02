@@ -15,9 +15,18 @@ import (
 // AddBranchToTaskRequest carries the parameters for adding a new branch
 // (worktree) to an existing task. The (RepositoryID, CheckoutBranch) pair
 // must not already exist on the task.
+//
+// RepositoryID, LocalPath, and GitHubURL are alternative ways to identify the
+// target repository — mirrors the create_task input shape. When RepositoryID
+// is empty and either LocalPath or GitHubURL is set, the service resolves to
+// (or creates) the matching repository in the task's workspace. Pure
+// RepositoryID is the fast path; the other two are agent-ergonomic
+// alternatives so callers don't have to look up the UUID first.
 type AddBranchToTaskRequest struct {
 	TaskID         string
 	RepositoryID   string
+	LocalPath      string
+	GitHubURL      string
 	BaseBranch     string
 	CheckoutBranch string
 }
@@ -106,6 +115,25 @@ func (s *Service) prepareBranchAdd(ctx context.Context, req *AddBranchToTaskRequ
 		// Wrap the repo-tier sentinel so handlers can classify via errors.Is
 		// rather than substring-matching the formatted UUID.
 		return nil, nil, fmt.Errorf("%w: %s", taskrepo.ErrTaskNotFound, req.TaskID)
+	}
+	// Resolve LocalPath / GitHubURL to a concrete RepositoryID up front so the
+	// rest of the flow (executor check, duplicate scan, row insert) operates
+	// on a stable UUID. Skipped when RepositoryID is already set or neither
+	// alternative identifier was supplied (the single-repo task default
+	// applies after the existing-rows lookup).
+	if req.RepositoryID == "" && (req.LocalPath != "" || req.GitHubURL != "") {
+		resolvedID, resolvedBranch, resolveErr := s.ResolveRepositoryRef(ctx, task.WorkspaceID, TaskRepositoryInput{
+			LocalPath:  req.LocalPath,
+			GitHubURL:  req.GitHubURL,
+			BaseBranch: req.BaseBranch,
+		})
+		if resolveErr != nil {
+			return nil, nil, fmt.Errorf("resolve repository: %w", resolveErr)
+		}
+		req.RepositoryID = resolvedID
+		if req.BaseBranch == "" {
+			req.BaseBranch = resolvedBranch
+		}
 	}
 	if err := s.requireWorktreeExecutorForBranchAdd(ctx, req.TaskID); err != nil {
 		return nil, nil, err

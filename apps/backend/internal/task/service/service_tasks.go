@@ -373,6 +373,34 @@ func (s *Service) repoDisplayLabel(ctx context.Context, repoInput TaskRepository
 	return repositoryID
 }
 
+// ResolveRepositoryRef resolves a single TaskRepositoryInput to a
+// (repositoryID, baseBranch) pair within the given workspace, creating the
+// repository if necessary. Mirrors the resolution used during task creation
+// (`createTaskRepositories`), but builds the local-path lookup map on demand
+// so callers that only resolve one input (e.g. add_branch) don't need to
+// thread the map themselves.
+//
+// Accepts inputs identified by RepositoryID, GitHubURL, or LocalPath. Returns
+// an empty repositoryID with no error when none of those are set, letting
+// callers decide whether to fall back to other defaults.
+func (s *Service) ResolveRepositoryRef(ctx context.Context, workspaceID string, repoInput TaskRepositoryInput) (repositoryID, baseBranch string, err error) {
+	var repoByPath map[string]*models.Repository
+	if repoInput.RepositoryID == "" && repoInput.LocalPath != "" {
+		repos, listErr := s.repoEntities.ListRepositories(ctx, workspaceID)
+		if listErr != nil {
+			return "", "", listErr
+		}
+		repoByPath = make(map[string]*models.Repository, len(repos))
+		for _, repo := range repos {
+			if repo.LocalPath == "" {
+				continue
+			}
+			repoByPath[repo.LocalPath] = repo
+		}
+	}
+	return s.resolveRepoInput(ctx, workspaceID, repoInput, repoByPath)
+}
+
 // resolveRepoInput resolves a RepositoryInput to a repositoryID and baseBranch,
 // creating the repository if it doesn't exist yet.
 func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repoInput TaskRepositoryInput, repoByPath map[string]*models.Repository) (repositoryID, baseBranch string, err error) {

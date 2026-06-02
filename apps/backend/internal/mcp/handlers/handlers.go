@@ -738,6 +738,8 @@ func (h *Handlers) handleAddBranchToTask(ctx context.Context, msg *ws.Message) (
 	var req struct {
 		TaskID         string `json:"task_id"`
 		RepositoryID   string `json:"repository_id"`
+		LocalPath      string `json:"local_path"`
+		GitHubURL      string `json:"github_url"`
 		BaseBranch     string `json:"base_branch"`
 		CheckoutBranch string `json:"checkout_branch"`
 	}
@@ -750,9 +752,14 @@ func (h *Handlers) handleAddBranchToTask(ctx context.Context, msg *ws.Message) (
 	// repository_id is optional: the service defaults to the task's only
 	// repository (or its primary row) when omitted. Multi-repo tasks force
 	// the agent to pass one explicitly via the service-level error.
+	// local_path and github_url are agent-ergonomic alternatives — when
+	// supplied without repository_id the service resolves them through the
+	// same workspace-scoped find-or-create path used by create_task.
 	taskRepo, err := h.taskSvc.AddBranchToTask(ctx, service.AddBranchToTaskRequest{
 		TaskID:         req.TaskID,
 		RepositoryID:   req.RepositoryID,
+		LocalPath:      req.LocalPath,
+		GitHubURL:      req.GitHubURL,
 		BaseBranch:     req.BaseBranch,
 		CheckoutBranch: req.CheckoutBranch,
 	})
