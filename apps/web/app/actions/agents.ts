@@ -129,6 +129,7 @@ export async function updateAgentProfileAction(
     model?: string;
     mode?: string;
     allow_indexing?: boolean;
+    auto_approve?: boolean;
     cli_passthrough?: boolean;
     cli_flags?: CLIFlag[];
     env_vars?: ProfileEnvVar[];

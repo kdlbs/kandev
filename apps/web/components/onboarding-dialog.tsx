@@ -87,7 +87,10 @@ function buildAgentSettings(
     const profile = dbAgent?.profiles?.[0];
     if (profile) {
       const perms = profileToPermissionsMap(
-        { allow_indexing: profile.allowIndexing },
+        {
+          allowIndexing: profile.allowIndexing,
+          autoApprove: profile.autoApprove,
+        },
         aa.permission_settings ?? {},
       );
       settings[aa.name] = {

@@ -12,6 +12,11 @@ import { Separator } from "@kandev/ui/separator";
 import { useToast } from "@/components/toast-provider";
 import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
 import { ProfileFormFields, type ProfileFormData } from "@/components/settings/profile-form-fields";
+import {
+  arePermissionsDirty,
+  permissionsToProfilePatch,
+  profilePermissionValues,
+} from "@/lib/agent-permissions";
 import { toAgentProfilePatch } from "@/app/settings/agents/[agentId]/agent-save-helpers";
 import { deleteAgentProfileAction, updateAgentProfileAction } from "@/app/actions/agents";
 import type { ActiveSessionInfo } from "@/lib/types/agent-profile-errors";
@@ -140,6 +145,7 @@ function ProfileSettingsCard({
   const handleFormChange = (patch: Partial<ProfileFormData>) => {
     onDraftChange(toAgentProfilePatch(patch));
   };
+  const permissionValues = profilePermissionValues(draft, permissionSettings);
 
   return (
     <Card>
@@ -155,7 +161,8 @@ function ProfileSettingsCard({
             name: draft.name,
             model: draft.model,
             mode: draft.mode ?? "",
-            allow_indexing: draft.allowIndexing,
+            auto_approve: permissionValues.auto_approve,
+            allow_indexing: permissionValues.allow_indexing,
             cli_passthrough: draft.cliPassthrough,
             cli_flags: draft.cliFlags ?? [],
           }}
@@ -201,7 +208,7 @@ function useProfileEditorState(profile: AgentProfile) {
       draft.name !== savedProfile.name ||
       draft.model !== savedProfile.model ||
       (draft.mode ?? "") !== (savedProfile.mode ?? "") ||
-      draft.allowIndexing !== savedProfile.allowIndexing ||
+      arePermissionsDirty(draft, savedProfile, permissionSettings) ||
       draft.cliPassthrough !== savedProfile.cliPassthrough ||
       !areCLIFlagsEqual(draft.cliFlags ?? [], savedProfile.cliFlags ?? []) ||
       !areEnvVarsEqual(draft.envVars, savedProfile.envVars),
@@ -255,7 +262,7 @@ function useProfileSave({
         name: draft.name,
         model: draft.model,
         mode: draft.mode,
-        allow_indexing: draft.allowIndexing,
+        ...permissionsToProfilePatch(draft),
         cli_passthrough: draft.cliPassthrough,
         cli_flags: draft.cliFlags,
         env_vars: draft.envVars ?? [],

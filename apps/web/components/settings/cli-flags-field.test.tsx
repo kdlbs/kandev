@@ -30,6 +30,25 @@ afterEach(() => {
 });
 
 describe("CLIFlagsField — curated toggles", () => {
+  it("joins cli_flag and cli_flag_value for codex -c overrides", () => {
+    const setting: PermissionSetting = {
+      supported: true,
+      default: false,
+      label: "Skip approval prompts (config)",
+      description: "test",
+      apply_method: "cli_flag",
+      cli_flag: "-c",
+      cli_flag_value: "approval_policy=never",
+    };
+    render(
+      <CLIFlagsField
+        flags={[]}
+        onChange={() => {}}
+        permissionSettings={{ config_approval_policy_never: setting }}
+      />,
+    );
+    expect(screen.getByText("-c approval_policy=never")).toBeInTheDocument();
+  });
   it("renders curated switch as checked when no entry exists and default is true", () => {
     const { getByTestId } = render(
       <CLIFlagsField

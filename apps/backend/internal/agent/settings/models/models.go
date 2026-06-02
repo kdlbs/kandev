@@ -80,7 +80,7 @@ type AgentProfile struct {
 	// Deprecated legacy permission fields: retained in the DB schema so rows
 	// load cleanly, but no longer read by the launch path. ACP session modes
 	// and interactive permission_request prompts replace them.
-	AutoApprove                bool `json:"-" db:"auto_approve"`
+	AutoApprove                bool `json:"auto_approve" db:"auto_approve"`
 	DangerouslySkipPermissions bool `json:"-" db:"dangerously_skip_permissions"`
 
 	UserModified bool       `json:"user_modified" db:"user_modified"`

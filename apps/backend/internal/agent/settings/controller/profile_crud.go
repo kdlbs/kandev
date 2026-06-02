@@ -20,6 +20,7 @@ type CreateProfileRequest struct {
 	Model          string
 	Mode           string
 	AllowIndexing  bool
+	AutoApprove    bool
 	CLIPassthrough bool
 	// CLIFlags is the explicit list to persist. When nil, the profile is
 	// seeded from the agent's curated PermissionSettings() list so a fresh
@@ -61,6 +62,7 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		Model:            req.Model,
 		Mode:             req.Mode,
 		AllowIndexing:    req.AllowIndexing,
+		AutoApprove:      req.AutoApprove,
 		CLIPassthrough:   req.CLIPassthrough,
 		CLIFlags:         cliFlags,
 		EnvVars:          envVarsFromDTO(req.EnvVars),
@@ -78,7 +80,7 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 // CLI flag are included; per-flag metadata (description, flag text, default
 // enabled) is copied into the row so the profile is self-contained.
 func seedCLIFlags(agent agents.Agent) []models.CLIFlag {
-	settings := agent.PermissionSettings()
+	settings := agents.CatalogPermissionSettings(agent)
 	flags := make([]models.CLIFlag, 0, len(settings))
 	for _, s := range settings {
 		if !s.Supported || s.ApplyMethod != agents.PermissionApplyMethodCLIFlag || s.CLIFlag == "" {
@@ -111,6 +113,7 @@ type UpdateProfileRequest struct {
 	Model          *string
 	Mode           *string
 	AllowIndexing  *bool
+	AutoApprove    *bool
 	CLIPassthrough *bool
 	// CLIFlags replaces the entire list when non-nil. Nil means "leave
 	// unchanged" — the UI always sends the full desired list on save.
@@ -140,6 +143,9 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 	}
 	if req.AllowIndexing != nil {
 		profile.AllowIndexing = *req.AllowIndexing
+	}
+	if req.AutoApprove != nil {
+		profile.AutoApprove = *req.AutoApprove
 	}
 	if req.CLIPassthrough != nil {
 		profile.CLIPassthrough = *req.CLIPassthrough
@@ -289,6 +295,7 @@ func toProfileDTO(profile *models.AgentProfile) dto.AgentProfileDTO {
 		Model:            profile.Model,
 		Mode:             profile.Mode,
 		AllowIndexing:    profile.AllowIndexing,
+		AutoApprove:      profile.AutoApprove,
 		CLIFlags:         cliFlagsToDTO(profile.CLIFlags),
 		EnvVars:          envVarsToDTO(profile.EnvVars),
 		CLIPassthrough:   profile.CLIPassthrough,

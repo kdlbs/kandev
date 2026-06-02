@@ -22,27 +22,47 @@ func TestCursorACPRemoteAuth(t *testing.T) {
 	}
 }
 
-func TestCursorACPPermissionSettingsAutoApprove(t *testing.T) {
+func TestCursorACPPermissionSettingsCursorForce(t *testing.T) {
 	settings := NewCursorACP().PermissionSettings()
-	setting, ok := settings[PermissionKeyAutoApprove]
+	setting, ok := settings[PermissionKeyCursorForce]
 	if !ok {
-		t.Fatal("PermissionSettings() missing auto_approve; cursor must expose an approval-bypass toggle")
+		t.Fatal("PermissionSettings() missing cursor_force")
+	}
+	if _, hasAuto := settings[PermissionKeyAutoApprove]; hasAuto {
+		t.Fatal("PermissionSettings() must not include auto_approve; that is agentctl-only in the catalog")
 	}
 	if !setting.Supported {
-		t.Error("auto_approve must be Supported")
+		t.Error("cursor_force must be Supported")
 	}
 	if setting.ApplyMethod != PermissionApplyMethodCLIFlag {
 		t.Errorf("ApplyMethod = %q, want %q", setting.ApplyMethod, PermissionApplyMethodCLIFlag)
 	}
 	if setting.CLIFlag != "--force" {
-		t.Errorf("CLIFlag = %q, want --force (the only flag that bypasses Cursor's ACP allowlist)", setting.CLIFlag)
+		t.Errorf("CLIFlag = %q, want --force", setting.CLIFlag)
 	}
 }
 
-func TestCursorACPBuildCommandAutoApprove(t *testing.T) {
+func TestCursorACPCatalogSeparatesAgentctlAutoApprove(t *testing.T) {
+	catalog := CatalogPermissionSettings(NewCursorACP())
+	auto, ok := catalog[PermissionKeyAutoApprove]
+	if !ok {
+		t.Fatal("catalog missing auto_approve")
+	}
+	if auto.ApplyMethod != PermissionApplyMethodAgentctlAutoApprove {
+		t.Fatalf("auto_approve ApplyMethod = %q, want %q", auto.ApplyMethod, PermissionApplyMethodAgentctlAutoApprove)
+	}
+	force, ok := catalog[PermissionKeyCursorForce]
+	if !ok {
+		t.Fatal("catalog missing cursor_force")
+	}
+	if force.ApplyMethod != PermissionApplyMethodCLIFlag {
+		t.Fatalf("cursor_force ApplyMethod = %q, want cli_flag", force.ApplyMethod)
+	}
+}
+
+func TestCursorACPBuildCommand(t *testing.T) {
 	c := NewCursorACP()
 
-	// Default: a bare `cursor-agent acp`, so Cursor keeps prompting per command.
 	plain := strings.Join(c.BuildCommand(CommandOptions{}).Args(), " ")
 	if plain != "cursor-agent acp" {
 		t.Fatalf("default BuildCommand = %q, want %q", plain, "cursor-agent acp")
@@ -51,14 +71,12 @@ func TestCursorACPBuildCommandAutoApprove(t *testing.T) {
 		t.Error("default command must not include --force")
 	}
 
-	// auto_approve enabled: --force is appended so Cursor stops sending a
-	// session/request_permission for every non-allowlisted command.
-	approved := strings.Join(
+	withAutoApprove := strings.Join(
 		c.BuildCommand(CommandOptions{PermissionValues: map[string]bool{PermissionKeyAutoApprove: true}}).Args(),
 		" ",
 	)
-	if !strings.Contains(approved, "--force") {
-		t.Errorf("auto_approve BuildCommand = %q, want it to contain --force", approved)
+	if strings.Contains(withAutoApprove, "--force") {
+		t.Errorf("auto_approve PermissionValues must not add --force, got %q", withAutoApprove)
 	}
 }
 
@@ -67,8 +85,6 @@ func TestCursorACPInstallScriptIsNativeInstaller(t *testing.T) {
 	if !strings.Contains(script, "cursor.com/install") {
 		t.Errorf("InstallScript must reference the cursor.com installer, got: %q", script)
 	}
-	// Ensure ~/.local/bin gets onto PATH so the cursor-agent binary is
-	// discoverable for subsequent prepare-script steps and shells.
 	if !strings.Contains(script, "$HOME/.local/bin") {
 		t.Errorf("InstallScript must add $HOME/.local/bin to PATH, got: %q", script)
 	}

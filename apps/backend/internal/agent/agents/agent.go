@@ -226,11 +226,19 @@ func (c SessionConfig) SupportsRecovery() bool {
 // filter chain across agents, so the literal lives in exactly one place.
 const PermissionApplyMethodCLIFlag = "cli_flag"
 
+// PermissionApplyMethodAgentctlAutoApprove maps the profile auto_approve column
+// to AGENTCTL_AUTO_APPROVE_PERMISSIONS at launch (all ACP agents).
+const PermissionApplyMethodAgentctlAutoApprove = "agentctl_auto_approve"
+
 // PermissionKeyAutoApprove is the PermissionSettings map key wired to the
 // profile "Auto approve" toggle (see PermissionValues in buildAgentCommand).
 // Centralised for the same reason as PermissionApplyMethodCLIFlag: a typo in
 // any one agent silently disables its auto-approve flag.
 const PermissionKeyAutoApprove = "auto_approve"
+
+// PermissionKeyCursorForce is the Cursor-specific CLI --force toggle (unsandboxed
+// run-everything). Separate from PermissionKeyAutoApprove (agentctl ACP approval).
+const PermissionKeyCursorForce = "cursor_force"
 
 // PermissionSetting defines metadata for a permission setting option.
 type PermissionSetting struct {

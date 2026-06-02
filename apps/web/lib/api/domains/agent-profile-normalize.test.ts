@@ -14,6 +14,7 @@ describe("normalizeAgentProfile", () => {
       model: "claude-sonnet-4-5",
       mode: "acp",
       allow_indexing: true,
+      auto_approve: false,
       cli_flags: [{ flag: "--verbose", description: "v", enabled: true }],
       env_vars: [sampleEnvVar],
       cli_passthrough: false,
@@ -30,6 +31,7 @@ describe("normalizeAgentProfile", () => {
       model: "claude-sonnet-4-5",
       mode: "acp",
       allowIndexing: true,
+      autoApprove: false,
       cliFlags: [{ flag: "--verbose", description: "v", enabled: true }],
       envVars: [sampleEnvVar],
       cliPassthrough: false,
@@ -45,6 +47,7 @@ describe("normalizeAgentProfile", () => {
     expect(result.envVars).toEqual([]);
     expect(result.cliPassthrough).toBe(false);
     expect(result.allowIndexing).toBe(false);
+    expect(result.autoApprove).toBe(false);
     expect(result.agentDisplayName).toBe("");
   });
 

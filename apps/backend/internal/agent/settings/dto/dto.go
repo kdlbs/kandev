@@ -14,6 +14,7 @@ type AgentProfileDTO struct {
 	Model            string             `json:"model"`
 	Mode             string             `json:"mode,omitempty"`
 	AllowIndexing    bool               `json:"allow_indexing"` // Deprecated: use CLIFlags. Retained for legacy clients.
+	AutoApprove      bool               `json:"auto_approve"`
 	CLIFlags         []CLIFlagDTO       `json:"cli_flags"`
 	EnvVars          []ProfileEnvVarDTO `json:"env_vars,omitempty"`
 	CLIPassthrough   bool               `json:"cli_passthrough"`
