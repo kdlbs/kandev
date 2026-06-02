@@ -34,9 +34,15 @@ export function useSentryIssueWatches(workspaceId?: string | null) {
 
   useEffect(() => {
     if (lastScope.current !== undefined && lastScope.current !== scope) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- resetting cached list when scope changes (incl. → null)
+      // Reset cached list on scope change (incl. → null). Also clear `loading`:
+      // a fetch from the old scope can no longer complete into the new one (its
+      // .finally is gated by `ignore`), and a → null scope starts no replacement
+      // fetch, so without this the hook would stay stuck at loading=true.
+      /* eslint-disable react-hooks/set-state-in-effect -- resetting cached state when scope changes */
       setItems([]);
       setLoaded(false);
+      setLoading(false);
+      /* eslint-enable react-hooks/set-state-in-effect */
     }
     lastScope.current = scope;
   }, [scope]);
