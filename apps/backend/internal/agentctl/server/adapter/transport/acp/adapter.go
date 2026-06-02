@@ -419,8 +419,7 @@ func (a *Adapter) Close() error {
 
 	// Wait for the update worker to exit before closing updatesCh.
 	// handleACPUpdate may call sendUpdate, so updatesCh must remain open
-	// until the worker is gone. Wait is a no-op when Initialize was never
-	// called (workerWg has no counter).
+	// until the worker is gone.
 	a.workerWg.Wait()
 
 	// Clean up any saved attachments
