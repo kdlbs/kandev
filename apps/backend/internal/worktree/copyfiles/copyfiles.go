@@ -4,6 +4,13 @@
 // seeds a new worktree with environment / config files that are normally
 // gitignored.
 //
+// Pattern syntax (via github.com/bmatcuk/doublestar):
+//   - `*` matches any run of non-separator characters
+//   - `?` matches a single non-separator character
+//   - `[abc]` / `[a-z]` character classes
+//   - `**` matches zero or more path segments (e.g. `**/.env` or `apps/**/config.yml`)
+//   - `{a,b}` brace alternation
+//
 // Two entry points:
 //
 //   - Copy: host-side, streams files directly to disk. Used by the worktree
@@ -24,6 +31,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"go.uber.org/zap"
 )
 
@@ -378,6 +386,8 @@ func (s *copyState) debug(msg string, fields ...zap.Field) {
 }
 
 // expandPattern handles literal files, literal directories, and globs.
+// Globs use doublestar syntax — see the package doc for the full grammar
+// (notably `**` for recursive descent and `{a,b}` for alternation).
 func (s *copyState) expandPattern(pattern string) error {
 	joined := pattern
 	if !filepath.IsAbs(pattern) {
@@ -389,7 +399,7 @@ func (s *copyState) expandPattern(pattern string) error {
 		return s.handleMatch(joined, pattern)
 	}
 
-	matches, err := filepath.Glob(joined)
+	matches, err := doublestar.FilepathGlob(joined)
 	if err != nil {
 		s.warn("invalid pattern %q: %v", pattern, err)
 		return nil

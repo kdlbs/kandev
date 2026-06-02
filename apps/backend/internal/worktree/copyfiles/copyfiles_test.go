@@ -184,6 +184,95 @@ func TestCopy_MissingPattern(t *testing.T) {
 	}
 }
 
+func TestCopy_DoubleStarRecursive(t *testing.T) {
+	t.Parallel()
+	src := t.TempDir()
+	dst := t.TempDir()
+
+	writeFile(t, filepath.Join(src, ".env"), "ROOT", 0o644)
+	writeFile(t, filepath.Join(src, "apps", "web", ".env"), "WEB", 0o644)
+	writeFile(t, filepath.Join(src, "apps", "backend", ".env"), "BACK", 0o644)
+	writeFile(t, filepath.Join(src, "apps", "backend", "nested", ".env"), "DEEP", 0o644)
+	writeFile(t, filepath.Join(src, "apps", "web", "ignore.txt"), "IGN", 0o644)
+
+	_, warnings, err := Copy(context.Background(), src, dst, []string{"**/.env"}, nil)
+	if err != nil {
+		t.Fatalf("Copy err: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings: %v", warnings)
+	}
+	cases := map[string]string{
+		".env":                     "ROOT",
+		"apps/web/.env":            "WEB",
+		"apps/backend/.env":        "BACK",
+		"apps/backend/nested/.env": "DEEP",
+	}
+	for rel, want := range cases {
+		got := readFile(t, filepath.Join(dst, filepath.FromSlash(rel)))
+		if got != want {
+			t.Fatalf("%s = %q, want %q", rel, got, want)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dst, "apps", "web", "ignore.txt")); !os.IsNotExist(err) {
+		t.Fatalf("ignore.txt should not exist, err=%v", err)
+	}
+}
+
+func TestCopy_DoubleStarScoped(t *testing.T) {
+	t.Parallel()
+	src := t.TempDir()
+	dst := t.TempDir()
+
+	writeFile(t, filepath.Join(src, "apps", "web", "config.yml"), "WEB", 0o644)
+	writeFile(t, filepath.Join(src, "apps", "backend", "deep", "config.yml"), "BACK", 0o644)
+	writeFile(t, filepath.Join(src, "services", "config.yml"), "SVC", 0o644)
+
+	_, warnings, err := Copy(context.Background(), src, dst, []string{"apps/**/config.yml"}, nil)
+	if err != nil {
+		t.Fatalf("Copy err: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings: %v", warnings)
+	}
+	if readFile(t, filepath.Join(dst, "apps", "web", "config.yml")) != "WEB" {
+		t.Fatalf("apps/web/config.yml missing")
+	}
+	if readFile(t, filepath.Join(dst, "apps", "backend", "deep", "config.yml")) != "BACK" {
+		t.Fatalf("apps/backend/deep/config.yml missing")
+	}
+	if _, err := os.Stat(filepath.Join(dst, "services", "config.yml")); !os.IsNotExist(err) {
+		t.Fatalf("services/config.yml should not exist, err=%v", err)
+	}
+}
+
+func TestCopy_BraceAlternation(t *testing.T) {
+	t.Parallel()
+	src := t.TempDir()
+	dst := t.TempDir()
+
+	writeFile(t, filepath.Join(src, ".env"), "E", 0o644)
+	writeFile(t, filepath.Join(src, ".env.local"), "L", 0o644)
+	writeFile(t, filepath.Join(src, ".envrc"), "R", 0o644)
+
+	_, warnings, err := Copy(context.Background(), src, dst, []string{".env{,.local}"}, nil)
+	if err != nil {
+		t.Fatalf("Copy err: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings: %v", warnings)
+	}
+	if readFile(t, filepath.Join(dst, ".env")) != "E" {
+		t.Fatalf(".env missing")
+	}
+	if readFile(t, filepath.Join(dst, ".env.local")) != "L" {
+		t.Fatalf(".env.local missing")
+	}
+	if _, err := os.Stat(filepath.Join(dst, ".envrc")); !os.IsNotExist(err) {
+		t.Fatalf(".envrc should not be copied, err=%v", err)
+	}
+}
+
 func TestCopy_GlobNoMatch(t *testing.T) {
 	t.Parallel()
 	src := t.TempDir()
