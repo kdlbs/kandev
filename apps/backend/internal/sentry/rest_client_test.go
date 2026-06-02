@@ -192,12 +192,42 @@ func TestRESTClient_SearchIssues_AllProjectsUsesOrgEndpoint(t *testing.T) {
 	}
 }
 
-func TestRESTClient_GetIssue(t *testing.T) {
+// TestRESTClient_GetIssue_NumericID locks in that a numeric internal id hits
+// the /issues/{id}/ endpoint directly (no org needed).
+func TestRESTClient_GetIssue_NumericID(t *testing.T) {
 	ts := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/issues/PROJ-7/" {
-			t.Errorf("expected /issues/PROJ-7/, got %q", r.URL.Path)
+		if r.URL.Path != "/issues/99/" {
+			t.Errorf("expected /issues/99/, got %q", r.URL.Path)
 		}
 		_, _ = w.Write([]byte(`{"id":"99","shortId":"PROJ-7","title":"Crash","level":"fatal","status":"unresolved","project":{"slug":"frontend"}}`))
+	})
+	c := pointTo(NewRESTClient(&SentryConfig{}, "tok"), ts.URL)
+	issue, err := c.GetIssue(context.Background(), "99")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if issue.ID != "99" || issue.ShortID != "PROJ-7" || issue.Level != "fatal" {
+		t.Errorf("issue = %+v", issue)
+	}
+}
+
+// TestRESTClient_GetIssue_ShortID locks in that a human-facing short id is
+// resolved via the org-scoped shortids endpoint (the /issues/{id}/ endpoint
+// rejects short ids), skipping past an org that returns 404 to the one that
+// owns the project.
+func TestRESTClient_GetIssue_ShortID(t *testing.T) {
+	ts := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/organizations/":
+			_, _ = w.Write([]byte(`[{"id":"1","slug":"globex","name":"Globex"},{"id":"2","slug":"acme","name":"Acme"}]`))
+		case "/organizations/globex/shortids/PROJ-7/":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"detail":"not found"}`))
+		case "/organizations/acme/shortids/PROJ-7/":
+			_, _ = w.Write([]byte(`{"shortId":"PROJ-7","group":{"id":"99","shortId":"PROJ-7","title":"Crash","level":"fatal","status":"unresolved","project":{"slug":"frontend"}}}`))
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
 	})
 	c := pointTo(NewRESTClient(&SentryConfig{}, "tok"), ts.URL)
 	issue, err := c.GetIssue(context.Background(), "PROJ-7")

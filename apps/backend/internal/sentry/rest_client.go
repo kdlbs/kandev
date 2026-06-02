@@ -396,15 +396,71 @@ func parseNextCursor(link string) (string, bool) {
 	return cursor, true
 }
 
+// shortIDResolveResponse is the payload from the org-scoped shortids resolver;
+// its `group` field carries the full issue.
+type shortIDResolveResponse struct {
+	Group issueNode `json:"group"`
+}
+
+// numericIssueID reports whether s is Sentry's internal numeric issue id (all
+// digits) rather than a human-facing short id like "PROJ-123".
+func numericIssueID(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // GetIssue loads a single issue by numeric ID or short ID (e.g. "PROJ-123").
+// The /issues/{id}/ endpoint only accepts the numeric internal id, so a short
+// id is resolved through the org-scoped shortids endpoint instead.
 func (c *RESTClient) GetIssue(ctx context.Context, idOrShortID string) (*SentryIssue, error) {
 	if idOrShortID == "" {
 		return nil, fmt.Errorf("idOrShortID required")
 	}
+	if numericIssueID(idOrShortID) {
+		return c.getIssueByID(ctx, idOrShortID)
+	}
+	return c.resolveShortID(ctx, idOrShortID)
+}
+
+func (c *RESTClient) getIssueByID(ctx context.Context, id string) (*SentryIssue, error) {
 	var n issueNode
-	if _, err := c.do(ctx, "/issues/"+url.PathEscape(idOrShortID)+"/", nil, &n); err != nil {
+	if _, err := c.do(ctx, "/issues/"+url.PathEscape(id)+"/", nil, &n); err != nil {
 		return nil, err
 	}
 	issue := issueNodeToIssue(&n)
 	return &issue, nil
+}
+
+// resolveShortID looks a short id up via each accessible org's shortids
+// resolver until one matches. Short ids carry no org, and the same id can only
+// resolve in the org that owns the project, so a 404 just means "try the next".
+func (c *RESTClient) resolveShortID(ctx context.Context, shortID string) (*SentryIssue, error) {
+	orgs, err := c.ListOrganizations(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range orgs {
+		if orgs[i].Slug == "" {
+			continue
+		}
+		var resp shortIDResolveResponse
+		path := "/organizations/" + url.PathEscape(orgs[i].Slug) + "/shortids/" + url.PathEscape(shortID) + "/"
+		if _, err := c.do(ctx, path, nil, &resp); err != nil {
+			var apiErr *APIError
+			if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
+				continue
+			}
+			return nil, err
+		}
+		issue := issueNodeToIssue(&resp.Group)
+		return &issue, nil
+	}
+	return nil, &APIError{StatusCode: http.StatusNotFound, Message: "short id not found: " + shortID}
 }

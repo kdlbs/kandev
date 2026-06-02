@@ -171,8 +171,10 @@ func materializeWatches(rows []issueWatchRow) ([]*IssueWatch, error) {
 }
 
 // UpdateIssueWatch overwrites the mutable fields of an existing watch row.
-// updated_at is bumped automatically; last_polled_at is preserved unless the
-// caller explicitly sets it.
+// updated_at is bumped automatically. last_polled_at is deliberately NOT in the
+// UPDATE: that column is owned exclusively by UpdateIssueWatchLastPolled, so a
+// concurrent poller stamp can't be clobbered by a load-modify-write edit that
+// carried a stale (often nil) pre-fetch value.
 func (s *Store) UpdateIssueWatch(ctx context.Context, w *IssueWatch) error {
 	w.UpdatedAt = time.Now().UTC()
 	if w.PollIntervalSeconds <= 0 {
@@ -185,11 +187,11 @@ func (s *Store) UpdateIssueWatch(ctx context.Context, w *IssueWatch) error {
 	_, err = s.db.ExecContext(ctx, `
 		UPDATE sentry_issue_watches SET workflow_id = ?, workflow_step_id = ?, filter_json = ?,
 			agent_profile_id = ?, executor_profile_id = ?, prompt = ?,
-			enabled = ?, poll_interval_seconds = ?, max_inflight_tasks = ?, last_polled_at = ?, updated_at = ?
+			enabled = ?, poll_interval_seconds = ?, max_inflight_tasks = ?, updated_at = ?
 		WHERE id = ?`,
 		w.WorkflowID, w.WorkflowStepID, filterJSON,
 		w.AgentProfileID, w.ExecutorProfileID, w.Prompt,
-		w.Enabled, w.PollIntervalSeconds, nullableInt(w.MaxInflightTasks), w.LastPolledAt, w.UpdatedAt, w.ID)
+		w.Enabled, w.PollIntervalSeconds, nullableInt(w.MaxInflightTasks), w.UpdatedAt, w.ID)
 	return err
 }
 

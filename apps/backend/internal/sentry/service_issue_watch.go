@@ -128,9 +128,10 @@ func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*Sentry
 	}
 	seen, err := s.store.ListSeenIssueShortIDs(ctx, w.ID)
 	if err != nil {
-		s.log.Warn("sentry: dedup set fetch failed",
-			zap.String("watch_id", w.ID), zap.Error(err))
-		seen = nil
+		// Skip this tick rather than treat a failed dedup read as "nothing seen":
+		// a nil map would let the whole page (up to 100 issues) publish as events.
+		// The next tick retries with a working dedup set.
+		return nil, fmt.Errorf("load dedup set for watch %s: %w", w.ID, err)
 	}
 	out := make([]*SentryIssue, 0, len(res.Issues))
 	for i := range res.Issues {

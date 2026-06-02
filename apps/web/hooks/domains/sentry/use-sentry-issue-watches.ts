@@ -29,11 +29,14 @@ export function useSentryIssueWatches(workspaceId?: string | null) {
   const [loaded, setLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const lastScope = useRef<string | null | undefined>(undefined);
-  const scope: string | null = workspaceId ?? null;
+  // Track the raw workspaceId (not `?? null`) so the three scopes stay distinct:
+  // undefined = fetch all, null = don't fetch, string = one workspace. Collapsing
+  // undefined→null would hide an "all → none" transition and leave stale data.
+  const initialized = useRef(false);
+  const lastWorkspaceId = useRef<string | null | undefined>(undefined);
 
   useEffect(() => {
-    if (lastScope.current !== undefined && lastScope.current !== scope) {
+    if (initialized.current && lastWorkspaceId.current !== workspaceId) {
       // Reset cached list on scope change (incl. → null). Also clear `loading`:
       // a fetch from the old scope can no longer complete into the new one (its
       // .finally is gated by `ignore`), and a → null scope starts no replacement
@@ -44,8 +47,9 @@ export function useSentryIssueWatches(workspaceId?: string | null) {
       setLoading(false);
       /* eslint-enable react-hooks/set-state-in-effect */
     }
-    lastScope.current = scope;
-  }, [scope]);
+    initialized.current = true;
+    lastWorkspaceId.current = workspaceId;
+  }, [workspaceId]);
 
   useEffect(() => {
     if (workspaceId === null || loaded) return;
