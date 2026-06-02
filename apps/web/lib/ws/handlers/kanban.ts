@@ -86,14 +86,20 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
           const existingMultiById = new Map(snapshot.tasks.map((t) => [t.id, t]));
           const multiTasks = tasks.map((t) => {
             const fallback = existingMultiById.get(t.id);
+            const repositoryId =
+              t.repositoryId === undefined ? fallback?.repositoryId : t.repositoryId;
+            const repositories =
+              t.repositories !== undefined || repositoryId !== fallback?.repositoryId
+                ? t.repositories
+                : fallback?.repositories;
             // Fall back to the multi-snapshot's own value only when the main
             // kanban lookup returned `undefined` (task absent from kanban.tasks).
             // An explicit `null` means the primary was intentionally cleared
             // and must NOT be replaced by a stale snapshot value.
             return {
               ...t,
-              repositoryId: t.repositoryId === undefined ? fallback?.repositoryId : t.repositoryId,
-              repositories: t.repositories === undefined ? fallback?.repositories : t.repositories,
+              repositoryId,
+              repositories,
               primarySessionId:
                 t.primarySessionId === undefined ? fallback?.primarySessionId : t.primarySessionId,
               primarySessionState:

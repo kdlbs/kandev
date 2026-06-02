@@ -329,14 +329,6 @@ function describeTaskRepositoriesForDebug(state: AppState, taskId: string | null
   return { source: "missing", repositoryId: "-", repoCount: -1, repoIds: "-" };
 }
 
-function resolveChangesVisibilityAction(
-  taskHasRepos: boolean | null,
-  panelExists: boolean,
-): string {
-  if (taskHasRepos !== false) return "keep";
-  return panelExists ? "remove" : "remove-missing-panel";
-}
-
 function ChangesContent({ panelId }: { panelId: string }) {
   const addDiffViewerPanel = useDockviewStore((s) => s.addDiffViewerPanel);
   const addFileDiffPanel = useDockviewStore((s) => s.addFileDiffPanel);
@@ -361,10 +353,14 @@ function ChangesContent({ panelId }: { panelId: string }) {
       const state = appStore.getState();
       const activeTaskId = state.tasks.activeTaskId;
       const repoDebug = describeTaskRepositoriesForDebug(state, activeTaskId);
+      let action = "keep";
+      if (taskHasRepos === false) {
+        action = panel ? "remove" : "remove-missing-panel";
+      }
       debugChangesVisibility("auto-close decision", {
         panelId,
         taskHasRepos: taskHasRepos === null ? "unknown" : String(taskHasRepos),
-        action: resolveChangesVisibilityAction(taskHasRepos, Boolean(panel)),
+        action,
         activeTaskId: activeTaskId ?? "-",
         sessionId: state.tasks.activeSessionId ?? "-",
         taskSource: repoDebug.source,
