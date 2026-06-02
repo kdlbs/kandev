@@ -105,10 +105,12 @@ export function useTaskPR(taskId: string | null) {
       .request<SyncResponse>("github.task_pr.sync", { task_id: requestedTaskId })
       .then((result) => {
         // Drop responses that aren't the latest in-flight request for
-        // this hook instance, or whose taskId no longer matches the
-        // active one — they'd otherwise corrupt permanentRef/retryRef
-        // for whatever task the user is now viewing.
-        if (requestRef.current !== requestId || requestedTaskId !== taskId) return;
+        // this hook instance — they'd otherwise corrupt permanentRef /
+        // retryRef for whatever task the user is now viewing. The
+        // taskId-change effect below bumps requestRef.current too, so
+        // requestId alone covers both stale-by-sequence and
+        // stale-by-task-change.
+        if (requestRef.current !== requestId) return;
         const envelope = (result ?? {}) as { permanent?: boolean };
         if (envelope.permanent) {
           permanentRef.current = true;

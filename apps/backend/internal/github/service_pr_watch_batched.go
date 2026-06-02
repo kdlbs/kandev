@@ -75,10 +75,18 @@ func (s *Service) SyncWatchesBatched(ctx context.Context, watches []*PRWatch) ([
 // seeds the negative cache — exactly the storm this change is trying to
 // calm. The shared-result map is read-only at the call sites (only
 // map lookups in applyBatched*), so it's safe to share.
+//
+// The upstream fetch detaches from the leader's cancellation via
+// derivedFetchContext so one caller (WS) disconnecting mid-flight
+// doesn't cascade context.Canceled to all co-waiters — same pattern as
+// GetPRFeedback / GetPRStatus. The leader's deadline is preserved so
+// the fetch can't outlive the request budget.
 func (s *Service) fetchBatchedWatchStatuses(
 	ctx context.Context, exec GraphQLExecutor, numbered, searching []*PRWatch,
 ) (map[string]*PRStatus, error) {
 	key := batchedFetchSingleflightKey(numbered, searching)
+	fetchCtx, cancelFetch := derivedFetchContext(ctx)
+	defer cancelFetch()
 	v, err, _ := s.syncGroup.Do(key, func() (interface{}, error) {
 		// Snapshot the negative-cache generation BEFORE the batched
 		// fetch so an eviction (relink / clear) firing while the
@@ -86,10 +94,10 @@ func (s *Service) fetchBatchedWatchStatuses(
 		// markRepoAsMissing writes — see Service.markRepoAsMissing.
 		repoErrGen := s.repoErrorGenSnapshot()
 		combined := make(map[string]*PRStatus, len(numbered)+len(searching))
-		if err := s.fetchBatchedPRStatuses(ctx, exec, numbered, combined, repoErrGen); err != nil {
+		if err := s.fetchBatchedPRStatuses(fetchCtx, exec, numbered, combined, repoErrGen); err != nil {
 			return nil, err
 		}
-		if err := s.fetchBatchedBranchStatuses(ctx, exec, searching, combined, repoErrGen); err != nil {
+		if err := s.fetchBatchedBranchStatuses(fetchCtx, exec, searching, combined, repoErrGen); err != nil {
 			return nil, err
 		}
 		return combined, nil
