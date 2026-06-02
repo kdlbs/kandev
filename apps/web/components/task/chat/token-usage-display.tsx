@@ -47,13 +47,13 @@ export const TokenUsageDisplay = memo(function TokenUsageDisplay({
 
   if (!contextWindow) return null;
 
-  const { size, used, efficiency } = contextWindow;
+  const { size, used } = contextWindow;
 
   // Hide when there's no data yet (size 0) or the report is impossible
   // (used > size) — see isContextWindowReliable.
   if (!isContextWindowReliable(size, used)) return null;
 
-  const usagePercent = Math.min(efficiency, 100);
+  const usagePercent = (used / size) * 100;
   const progress = usagePercent / 100;
 
   // SVG circle parameters
@@ -89,7 +89,7 @@ export const TokenUsageDisplay = memo(function TokenUsageDisplay({
                 strokeLinecap="round"
                 strokeDasharray={circumference}
                 strokeDashoffset={strokeDashoffset}
-                className={cn(getCircleColor(efficiency), "transition-all duration-300 ease-out")}
+                className={cn(getCircleColor(usagePercent), "transition-all duration-300 ease-out")}
               />
             </svg>
           </div>
@@ -98,7 +98,7 @@ export const TokenUsageDisplay = memo(function TokenUsageDisplay({
       <TooltipContent side="top">
         <div className="text-xs space-y-1">
           <div className="font-medium">
-            {efficiency.toFixed(0)}% ({formatNumber(used)} / {formatNumber(size)})
+            {usagePercent.toFixed(0)}% ({formatNumber(used)} / {formatNumber(size)})
           </div>
         </div>
       </TooltipContent>

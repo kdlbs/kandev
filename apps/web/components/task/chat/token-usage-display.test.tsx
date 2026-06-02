@@ -45,7 +45,7 @@ describe("TokenUsageDisplay", () => {
     vi.mocked(useSessionContextWindow).mockReturnValue({
       size: 200_000,
       used: 233_900,
-      remaining: 0,
+      remaining: -33_900,
       efficiency: 117,
     });
 
