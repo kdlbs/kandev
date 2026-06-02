@@ -2,7 +2,6 @@ package github
 
 import (
 	"context"
-	"errors"
 	"runtime"
 	"strings"
 	"sync"
@@ -27,7 +26,7 @@ func TestSyncWatchesBatched_NegativeCache_ShortCircuits(t *testing.T) {
 	}
 	// CreatePRWatch evicts the negative cache, so prime it AFTER the
 	// watch is in place.
-	svc.markRepoAsMissing(w.Owner, w.Repo)
+	svc.markRepoAsMissing(w.Owner, w.Repo, svc.repoErrorGenSnapshot())
 
 	// No canned responses — if anything reaches gh the test fails fast
 	// with "no canned PR response" / "no canned branch response".
@@ -118,9 +117,9 @@ func TestSyncWatchesBatched_NegativeCache_CoalescesConcurrentCalls(t *testing.T)
 	// Prime the negative cache directly — the test then asserts that
 	// every concurrent caller short-circuits without queueing on
 	// ExecuteGraphQL. (Coalescing-via-singleflight inside the cache is
-	// covered by TestTTLCache_DoOrFetchClassified; here we just need to
-	// confirm SyncWatchesBatched honors the cache under concurrency.)
-	svc.markRepoAsMissing(w.Owner, w.Repo)
+	// covered by lower-level cache tests; here we just need to confirm
+	// SyncWatchesBatched honors the cache under concurrency.)
+	svc.markRepoAsMissing(w.Owner, w.Repo, svc.repoErrorGenSnapshot())
 
 	blocker := &blockingExec{graphQLMockClient: gh, release: make(chan struct{})}
 	svc.client = blocker
@@ -228,8 +227,9 @@ func TestSyncWatchesBatched_FirstMissCoalesces(t *testing.T) {
 func TestService_ClearRepoErrorCache(t *testing.T) {
 	_, svc, _, _ := setupBatchedPollerTest(t)
 
-	svc.markRepoAsMissing("Dead1", "Repo")
-	svc.markRepoAsMissing("Dead2", "Repo")
+	gen := svc.repoErrorGenSnapshot()
+	svc.markRepoAsMissing("Dead1", "Repo", gen)
+	svc.markRepoAsMissing("Dead2", "Repo", gen)
 	if !svc.isRepoCachedAsMissing("Dead1", "Repo") || !svc.isRepoCachedAsMissing("Dead2", "Repo") {
 		t.Fatalf("priming failed")
 	}
@@ -252,7 +252,7 @@ func TestService_EvictRepoNegative_OnWatchCreate(t *testing.T) {
 	_, svc, _, store := setupBatchedPollerTest(t)
 	ctx := context.Background()
 
-	svc.markRepoAsMissing("Dead", "Repo")
+	svc.markRepoAsMissing("Dead", "Repo", svc.repoErrorGenSnapshot())
 	if !svc.isRepoCachedAsMissing("Dead", "Repo") {
 		t.Fatalf("priming failed; cache=%v", svc.repoErrorCache.entries)
 	}
@@ -283,7 +283,7 @@ func TestService_TriggerPRSyncAllPermanent_FlagsDeadRepos(t *testing.T) {
 	if err := store.CreatePRWatch(ctx, w1); err != nil {
 		t.Fatalf("create w1: %v", err)
 	}
-	svc.markRepoAsMissing(w1.Owner, w1.Repo)
+	svc.markRepoAsMissing(w1.Owner, w1.Repo, svc.repoErrorGenSnapshot())
 	// No canned responses needed — the cache short-circuits both watches.
 
 	_, permanent, err := svc.TriggerPRSyncAllPermanent(ctx, "t1")
@@ -318,50 +318,5 @@ func TestService_TriggerPRSyncAllPermanent_FlagsDeadRepos(t *testing.T) {
 		if strings.Contains(q, w1.Owner) {
 			t.Errorf("dead repo leaked into branch query: %q", q)
 		}
-	}
-}
-
-// TestTTLCache_DoOrFetchClassified_SingleflightCoalesces is the lower
-// level coalescing test for the new cache helper: concurrent callers
-// on the same key see exactly ONE fetch invocation. Mirrors the shape
-// of TestService_GetPRFeedback_CoalescesConcurrentCalls but exercises
-// the negative-caching branch.
-func TestTTLCache_DoOrFetchClassified_SingleflightCoalesces(t *testing.T) {
-	c := newRepoErrorCache()
-	release := make(chan struct{})
-	var calls atomic.Int32
-	const n = 16
-	var launched, done sync.WaitGroup
-	launched.Add(n)
-	done.Add(n)
-	for i := 0; i < n; i++ {
-		go func() {
-			defer done.Done()
-			launched.Done()
-			_, _ = c.doOrFetchClassified("k1", func() (any, error) {
-				calls.Add(1)
-				<-release
-				return nil, errors.New("Could not resolve to a Repository")
-			}, isRepoNotResolvableErr)
-		}()
-	}
-	launched.Wait()
-	close(release)
-	done.Wait()
-
-	if got := calls.Load(); got != 1 {
-		t.Fatalf("expected concurrent doOrFetchClassified calls to coalesce to 1 fetch, got %d", got)
-	}
-	// And the negative entry stuck so a follow-up caller short-circuits.
-	calls.Store(0)
-	_, err := c.doOrFetchClassified("k1", func() (any, error) {
-		calls.Add(1)
-		return nil, nil
-	}, func(err error) bool { return false })
-	if err == nil {
-		t.Errorf("expected cached error to surface on the post-coalesce call, got nil")
-	}
-	if got := calls.Load(); got != 0 {
-		t.Errorf("expected post-coalesce call to short-circuit (0 fetch), got %d", got)
 	}
 }

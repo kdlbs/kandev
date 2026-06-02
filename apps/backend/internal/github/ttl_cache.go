@@ -194,48 +194,12 @@ func (c *ttlCache) del(key string) {
 	c.gen++
 }
 
-// cachedErr wraps an error stored in a ttlCache by doOrFetchClassified, so
-// that a deterministic upstream failure (e.g. ErrRepoNotResolvable) can be
-// negative-cached alongside the cache's normal success-value entries.
+// cachedErr wraps an error stored in a ttlCache so that a deterministic
+// upstream failure (e.g. ErrRepoNotResolvable) can be negative-cached
+// alongside the cache's normal success-value entries. Currently used by
+// Service.repoErrorCache via the lower-level get / setIfCurrentGeneration
+// primitives (see Service.isRepoCachedAsMissing / markRepoAsMissing).
 type cachedErr struct{ err error }
-
-// doOrFetchClassified is doOrFetch with an optional error-classifier that
-// lets callers negative-cache deterministic failures. When fetch() returns
-// an error and shouldCache(err) is true, the error is stored under `key`
-// (subsequent hits within the TTL return the same error). Transient errors
-// (shouldCache=false) are NOT cached, matching doOrFetch's "errors are not
-// cached" contract. Used by Service.repoErrorCache to collapse the
-// SyncWatchesBatched storm against missing/unauthorized repos to one
-// upstream gh call per 10 minutes per repo. Singleflight coalesces
-// concurrent first-time misses on the same key into one fetch.
-func (c *ttlCache) doOrFetchClassified(key string, fetch func() (any, error), shouldCache func(err error) bool) (any, error) {
-	if v, ok := c.get(key); ok {
-		if ce, ok := v.(cachedErr); ok {
-			return nil, ce.err
-		}
-		return v, nil
-	}
-	gen := c.generation()
-	sfKey := fmt.Sprintf("%d|%s", gen, key)
-	v, err, _ := c.sf.Do(sfKey, func() (any, error) {
-		if v, ok := c.get(key); ok {
-			if ce, ok := v.(cachedErr); ok {
-				return nil, ce.err
-			}
-			return v, nil
-		}
-		out, ferr := fetch()
-		if ferr != nil {
-			if shouldCache != nil && shouldCache(ferr) {
-				c.setIfCurrentGeneration(key, cachedErr{err: ferr}, gen)
-			}
-			return nil, ferr
-		}
-		c.setIfCurrentGeneration(key, out, gen)
-		return out, nil
-	})
-	return v, err
-}
 
 // doOrFetch returns a cached value when fresh; otherwise runs fetch under a
 // singleflight guard, caches the result, and returns it. Errors are not

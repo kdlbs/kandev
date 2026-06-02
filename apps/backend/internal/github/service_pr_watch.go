@@ -777,9 +777,14 @@ func (s *Service) detectPRForWatchOnce(ctx context.Context, watch *PRWatch, task
 		return s.store.GetTaskPRByRepository(ctx, taskID, watch.RepositoryID)
 	}
 
+	// Snapshot the negative-cache generation BEFORE the fetch so an
+	// eviction (CreatePRWatch / EnsurePRWatch / explicit clear) that
+	// fires WHILE FindPRByBranch is running wins over our post-fetch
+	// classification — see Service.markRepoAsMissing for the rationale.
+	repoErrGen := s.repoErrorGenSnapshot()
 	pr, err := s.client.FindPRByBranch(ctx, watch.Owner, watch.Repo, watch.Branch)
 	if err != nil && isRepoNotResolvableErr(err) {
-		s.markRepoAsMissing(watch.Owner, watch.Repo)
+		s.markRepoAsMissing(watch.Owner, watch.Repo, repoErrGen)
 		// Wrap so wsSyncTaskPR can errors.Is(err, ErrRepoNotResolvable)
 		// to flag the WS response as permanent without re-running the
 		// classifier on the raw upstream error string.
@@ -855,10 +860,13 @@ func (s *Service) triggerPRStatusSync(ctx context.Context, watch *PRWatch, taskI
 	v, err, _ := s.syncGroup.Do(key, func() (interface{}, error) {
 		bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
+		// Snapshot cache generation BEFORE the per-watch probe so a
+		// concurrent eviction wins; see Service.markRepoAsMissing.
+		repoErrGen := s.repoErrorGenSnapshot()
 		status, _, checkErr := s.CheckPRWatch(bgCtx, watch)
 		if checkErr != nil {
 			if isRepoNotResolvableErr(checkErr) {
-				s.markRepoAsMissing(watch.Owner, watch.Repo)
+				s.markRepoAsMissing(watch.Owner, watch.Repo, repoErrGen)
 				return nil, fmt.Errorf("%w: %w", ErrRepoNotResolvable, checkErr)
 			}
 			return nil, checkErr

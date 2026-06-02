@@ -236,21 +236,34 @@ func (s *Service) isRepoCachedAsMissing(owner, repo string) bool {
 	return isErr
 }
 
+// repoErrorGenSnapshot returns the current cache generation. Callers
+// snapshot this BEFORE issuing the fetch that may classify a repo as
+// missing, and pass the snapshot to markRepoAsMissing — that way an
+// evictRepoNegative / ClearRepoErrorCache that fires DURING the fetch
+// (bumping gen) causes the post-fetch write to be dropped, and the
+// negative cache reflects the user's latest intent rather than the
+// stale classifier result.
+func (s *Service) repoErrorGenSnapshot() uint64 {
+	if s == nil || s.repoErrorCache == nil {
+		return 0
+	}
+	return s.repoErrorCache.generation()
+}
+
 // markRepoAsMissing stores ErrRepoNotResolvable for (owner, repo) in the
 // negative cache. Called after a per-watch or batched probe deterministically
 // classifies the repo as missing/unauthorized (see isRepoNotResolvableErr).
-// Idempotent; a repeat call refreshes the 10-min TTL window.
-//
-// Generation guard: snapshot the cache generation BEFORE the write and use
-// setIfCurrentGeneration so a concurrent evictRepoNegative / ClearRepoErrorCache
-// (which both bump gen) wins the race. Without this, a fetch that was already
-// classifying the repo as missing when the user re-linked it would re-insert
-// the just-evicted entry, keeping permanent: true for up to 10 more minutes.
-func (s *Service) markRepoAsMissing(owner, repo string) {
+// `gen` must be a snapshot taken via repoErrorGenSnapshot BEFORE the fetch
+// — passing the current generation at write time would defeat the guard:
+// a concurrent del() / clear() that bumped gen between the fetch start and
+// the write would still be present at write time, so a write-time snapshot
+// would land in the new generation and the just-evicted entry would be
+// reinserted. The fetch-start snapshot turns the write into a no-op when
+// any eviction has fired since the fetch began.
+func (s *Service) markRepoAsMissing(owner, repo string, gen uint64) {
 	if s == nil || s.repoErrorCache == nil {
 		return
 	}
-	gen := s.repoErrorCache.generation()
 	s.repoErrorCache.setIfCurrentGeneration(
 		repoErrorCacheKey(owner, repo), cachedErr{err: ErrRepoNotResolvable}, gen)
 }

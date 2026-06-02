@@ -80,11 +80,16 @@ func (s *Service) fetchBatchedWatchStatuses(
 ) (map[string]*PRStatus, error) {
 	key := batchedFetchSingleflightKey(numbered, searching)
 	v, err, _ := s.syncGroup.Do(key, func() (interface{}, error) {
+		// Snapshot the negative-cache generation BEFORE the batched
+		// fetch so an eviction (relink / clear) firing while the
+		// GraphQL call is in flight wins over the post-fetch
+		// markRepoAsMissing writes — see Service.markRepoAsMissing.
+		repoErrGen := s.repoErrorGenSnapshot()
 		combined := make(map[string]*PRStatus, len(numbered)+len(searching))
-		if err := s.fetchBatchedPRStatuses(ctx, exec, numbered, combined); err != nil {
+		if err := s.fetchBatchedPRStatuses(ctx, exec, numbered, combined, repoErrGen); err != nil {
 			return nil, err
 		}
-		if err := s.fetchBatchedBranchStatuses(ctx, exec, searching, combined); err != nil {
+		if err := s.fetchBatchedBranchStatuses(ctx, exec, searching, combined, repoErrGen); err != nil {
 			return nil, err
 		}
 		return combined, nil
@@ -128,6 +133,7 @@ func batchedFetchSingleflightKey(numbered, searching []*PRWatch) string {
 // into `combined`.
 func (s *Service) fetchBatchedPRStatuses(
 	ctx context.Context, exec GraphQLExecutor, numbered []*PRWatch, combined map[string]*PRStatus,
+	repoErrGen uint64,
 ) error {
 	refs := make([]graphQLPRRef, 0, len(numbered))
 	for _, w := range numbered {
@@ -140,7 +146,7 @@ func (s *Service) fetchBatchedPRStatuses(
 		return nil
 	}
 	out, err := runBatchedPRQuery(ctx, exec, refs)
-	out, err = s.absorbMissingReposErr(out, err)
+	out, err = s.absorbMissingReposErr(out, err, repoErrGen)
 	if err != nil {
 		return fmt.Errorf("batched PR query: %w", err)
 	}
@@ -154,6 +160,7 @@ func (s *Service) fetchBatchedPRStatuses(
 // negative-cache filter and missing-repo absorption as the numbered path.
 func (s *Service) fetchBatchedBranchStatuses(
 	ctx context.Context, exec GraphQLExecutor, searching []*PRWatch, combined map[string]*PRStatus,
+	repoErrGen uint64,
 ) error {
 	refs := make([]graphQLBranchRef, 0, len(searching))
 	for _, w := range searching {
@@ -166,7 +173,7 @@ func (s *Service) fetchBatchedBranchStatuses(
 		return nil
 	}
 	out, err := runBatchedBranchQuery(ctx, exec, refs)
-	out, err = s.absorbMissingReposErr(out, err)
+	out, err = s.absorbMissingReposErr(out, err, repoErrGen)
 	if err != nil {
 		return fmt.Errorf("batched branch query: %w", err)
 	}
@@ -182,8 +189,9 @@ func (s *Service) fetchBatchedBranchStatuses(
 // partial decode is preserved and a nil error is returned so the caller
 // can use the resolved repos' data. When other errors were also
 // present, the inner error is returned unchanged so the caller falls
-// back to per-watch checks.
-func (s *Service) absorbMissingReposErr(out map[string]*PRStatus, err error) (map[string]*PRStatus, error) {
+// back to per-watch checks. `repoErrGen` is the negative-cache generation
+// snapshot taken BEFORE the fetch so a concurrent eviction wins.
+func (s *Service) absorbMissingReposErr(out map[string]*PRStatus, err error, repoErrGen uint64) (map[string]*PRStatus, error) {
 	if err == nil {
 		return out, nil
 	}
@@ -192,7 +200,7 @@ func (s *Service) absorbMissingReposErr(out map[string]*PRStatus, err error) (ma
 		return nil, err
 	}
 	for _, r := range missingErr.Repos {
-		s.markRepoAsMissing(r.Owner, r.Repo)
+		s.markRepoAsMissing(r.Owner, r.Repo, repoErrGen)
 		s.logger.Debug("repo not resolvable; negative-cached",
 			zap.String("owner", r.Owner), zap.String("repo", r.Repo))
 	}

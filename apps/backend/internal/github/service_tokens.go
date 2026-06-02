@@ -196,23 +196,24 @@ func (s *Service) ConfigureToken(ctx context.Context, token string) error {
 		s.logger.Info("created GitHub token secret", zap.String("id", newID))
 	}
 
+	// Drop identity-scoped caches BEFORE publishing the new client.
+	// Order matters: if we published the new client first, a concurrent
+	// goroutine could snap s.client (new identity) but be served stale
+	// cached data from the prior identity in the brief window before
+	// the Clear* calls fire. Without this, the picker would surface
+	// the prior user's repos for up to 60s after a token swap, a repo
+	// classified as unresolvable under the old credentials would stay
+	// "permanent: true" for up to 10 minutes, and stale PR review /
+	// check data could leak across identities.
+	s.ClearAccessibleReposCaches()
+	s.ClearRepoErrorCache()
+	s.ClearPRCaches()
+
 	// Refresh the client to use the new token
 	s.mu.Lock()
 	s.client = testClient
 	s.authMethod = AuthMethodPAT
 	s.mu.Unlock()
-
-	// Drop user-scoped caches — the previous token's user/orgs and merged
-	// repo list are no longer valid under the new identity. Without this,
-	// the picker would surface the prior user's repos for up to 60s after
-	// a token swap, and a repo classified as unresolvable under the old
-	// credentials would stay "permanent: true" for up to 10 minutes after
-	// the user fixes auth (stopping the frontend retry loop on stale
-	// classifications). PR status/feedback caches are also dropped because
-	// review visibility differs across identities.
-	s.ClearAccessibleReposCaches()
-	s.ClearRepoErrorCache()
-	s.ClearPRCaches()
 
 	return nil
 }
@@ -233,16 +234,17 @@ func (s *Service) ClearToken(ctx context.Context) error {
 	}
 	s.logger.Info("cleared GitHub token secret", zap.String("id", existingID))
 
+	// Drop identity-scoped caches BEFORE clearing the client field —
+	// see ConfigureToken for the publish-order rationale.
+	s.ClearAccessibleReposCaches()
+	s.ClearRepoErrorCache()
+	s.ClearPRCaches()
+
 	// Reset to try gh CLI or other methods
 	s.mu.Lock()
 	s.client = nil
 	s.authMethod = AuthMethodNone
 	s.mu.Unlock()
-
-	// Drop user-scoped caches — see ConfigureToken for rationale.
-	s.ClearAccessibleReposCaches()
-	s.ClearRepoErrorCache()
-	s.ClearPRCaches()
 
 	// Try to re-establish connection via other methods
 	s.retryClientCreation(ctx)
