@@ -1,10 +1,8 @@
 package acp
 
 import (
-	"context"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -33,9 +31,7 @@ func TestSyncNotifQueue_BlocksUntilQueueDrained(t *testing.T) {
 		})
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	a.syncNotifQueue(ctx)
+	a.syncNotifQueue()
 
 	events := drainEvents(a)
 	if len(events) != burst {

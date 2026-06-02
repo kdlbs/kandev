@@ -1,7 +1,6 @@
 package acp
 
 import (
-	"context"
 	"encoding/json"
 	"strings"
 
@@ -52,18 +51,20 @@ func (a *Adapter) enqueueACPUpdate(n acp.SessionNotification) {
 // buffer before those chunks land, the agent's text is dropped, and the
 // turn persists as had_output=false. Calling this before the complete emit
 // guarantees the chunks are delivered to updatesCh first.
-func (a *Adapter) syncNotifQueue(ctx context.Context) {
+//
+// No caller-context honored: returning before the barrier closes would
+// reintroduce the very race this primitive exists to prevent (sweeps and
+// EventTypeComplete running while the worker still has queued frames).
+// Only adapter shutdown via lifetimeCtx can release the wait early.
+func (a *Adapter) syncNotifQueue() {
 	ch := make(chan struct{})
 	select {
 	case <-a.lifetimeCtx.Done():
-		return
-	case <-ctx.Done():
 		return
 	case a.notifQueue <- notifWork{sync: ch}:
 	}
 	select {
 	case <-a.lifetimeCtx.Done():
-	case <-ctx.Done():
 	case <-ch:
 	}
 }

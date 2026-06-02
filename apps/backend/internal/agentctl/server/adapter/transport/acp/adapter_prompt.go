@@ -163,7 +163,7 @@ func (a *Adapter) sendPrompt(ctx context.Context, message string, attachments []
 	//   - The complete event emitted to updatesCh outruns the final text chunk,
 	//     so the downstream buffer flush yields empty and the turn persists as
 	//     had_output=false even when the agent did produce text.
-	a.syncNotifQueue(ctx)
+	a.syncNotifQueue()
 
 	// Cancel any tool calls still in-flight (e.g. a denied permission leaves the
 	// tool_call without a terminal status update from the agent).

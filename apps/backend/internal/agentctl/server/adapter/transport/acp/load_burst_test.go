@@ -259,6 +259,7 @@ func makeReplayNotification(sessionID string, i int) acp.SessionNotification {
 // LogRawEvent on every notification before being short-circuited.
 func BenchmarkHandleACPUpdate_LoadSuppressed(b *testing.B) {
 	a := newTestAdapter()
+	b.Cleanup(func() { _ = a.Close() })
 	a.mu.Lock()
 	a.isLoadingSession = true
 	a.mu.Unlock()
@@ -280,6 +281,7 @@ func BenchmarkHandleACPUpdate_LoadSuppressed(b *testing.B) {
 // stall on the unbuffered/buffered send.
 func BenchmarkHandleACPUpdate_NormalPath(b *testing.B) {
 	a := newTestAdapter()
+	b.Cleanup(func() { _ = a.Close() })
 
 	done := make(chan struct{})
 	go func() {
