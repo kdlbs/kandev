@@ -100,6 +100,24 @@ func (b *mcpRecordingEventBus) Publish(_ context.Context, _ string, event *bus.E
 	return nil
 }
 
+// TestHandleAddBranchToTask_RejectsMultipleLocators pins the mutual-exclusion
+// check at the WS handler tier: supplying two of repository_id /
+// repository_url / local_path is an agent mistake that previously got
+// silently resolved by the resolveRepoInput precedence chain. Now it
+// surfaces as a validation error so the agent sees the contradiction.
+func TestHandleAddBranchToTask_RejectsMultipleLocators(t *testing.T) {
+	h := &Handlers{}
+	msg := makeWSMessage(t, ws.ActionMCPAddBranchToTask, map[string]interface{}{
+		"task_id":    "task-1",
+		"local_path": "/tmp/x",
+		"github_url": "https://github.com/acme/widgets",
+	})
+
+	resp, err := h.handleAddBranchToTask(context.Background(), msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+}
+
 func TestHandleCreateTask_MissingTitle(t *testing.T) {
 	h := &Handlers{}
 	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{

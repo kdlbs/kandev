@@ -749,12 +749,22 @@ func (h *Handlers) handleAddBranchToTask(ctx context.Context, msg *ws.Message) (
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
-	// repository_id is optional: the service defaults to the task's only
-	// repository (or its primary row) when omitted. Multi-repo tasks force
-	// the agent to pass one explicitly via the service-level error.
-	// local_path and github_url are agent-ergonomic alternatives — when
-	// supplied without repository_id the service resolves them through the
-	// same workspace-scoped find-or-create path used by create_task.
+	// Mutual exclusion across the three repo identifiers. resolveRepoInput
+	// applies a silent precedence (repository_id > github_url > local_path),
+	// so an agent that accidentally passes two of them gets a behaviour
+	// change with no signal. Reject early instead so the agent sees the
+	// mistake.
+	if locatorCount := boolCount(req.RepositoryID != "", req.LocalPath != "", req.GitHubURL != ""); locatorCount > 1 {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+			"pass at most one of repository_id, repository_url, local_path", nil)
+	}
+	// repository_id / local_path / github_url are all optional: the service
+	// defaults to the task's only repository (or its primary row) when none
+	// is supplied. Multi-repo tasks force the agent to pass one explicitly
+	// via the service-level error. local_path and github_url are
+	// agent-ergonomic alternatives — when supplied the service resolves
+	// them through the same workspace-scoped find-or-create path used by
+	// create_task.
 	taskRepo, err := h.taskSvc.AddBranchToTask(ctx, service.AddBranchToTaskRequest{
 		TaskID:         req.TaskID,
 		RepositoryID:   req.RepositoryID,
@@ -776,6 +786,19 @@ func (h *Handlers) handleAddBranchToTask(ctx context.Context, msg *ws.Message) (
 		keyCheckoutBranch: taskRepo.CheckoutBranch,
 		keyPosition:       taskRepo.Position,
 	})
+}
+
+// boolCount returns how many of the supplied boolean flags are true. Used
+// to enforce mutual exclusion across optional input fields without a chain
+// of nested ifs.
+func boolCount(flags ...bool) int {
+	n := 0
+	for _, b := range flags {
+		if b {
+			n++
+		}
+	}
+	return n
 }
 
 // classifyAddBranchError maps service-layer add_branch failures to ws error

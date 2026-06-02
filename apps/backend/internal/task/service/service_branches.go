@@ -40,16 +40,20 @@ type AddBranchToTaskRequest struct {
 //
 // Constraints:
 //   - TaskID is required.
-//   - RepositoryID is optional. When omitted, the service defaults to the
-//     task's existing repository (the only one for single-repo tasks; the
-//     primary by lowest position otherwise). Multi-repo tasks must pass an
-//     explicit RepositoryID — defaulting would be ambiguous.
+//   - RepositoryID, LocalPath, and GitHubURL are alternative ways to identify
+//     the target repository. All three are optional: when none is supplied
+//     the service defaults to the task's existing repository (the only one
+//     for single-repo tasks; the primary by lowest position otherwise).
+//     Multi-repo tasks must pass one explicitly — defaulting would be
+//     ambiguous. LocalPath and GitHubURL are resolved (find-or-create)
+//     through the same workspace-scoped path used by create_task.
 //   - The (TaskID, RepositoryID, BaseBranch, CheckoutBranch) tuple must be
 //     unique on the task — duplicates surface as a typed error so callers
 //     can render a user-friendly message instead of a raw DB error.
-//   - The repository must belong to the task's workspace; the caller is
-//     responsible for that check (service_tasks.resolveRepoInput enforces it
-//     during create, this method assumes the same upstream gating).
+//   - The repository must belong to the task's workspace. The resolution
+//     path (ResolveRepositoryRef → resolveRepoInput) enforces this for the
+//     LocalPath / GitHubURL flows; for the RepositoryID fast path the
+//     workspace-membership check happens in resolveBranchRepo below.
 func (s *Service) AddBranchToTask(ctx context.Context, req AddBranchToTaskRequest) (*models.TaskRepository, error) {
 	task, existing, err := s.prepareBranchAdd(ctx, &req)
 	if err != nil {
