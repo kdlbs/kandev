@@ -60,9 +60,6 @@ func (s *Service) handleClarificationStaleDismissed(ctx context.Context, event *
 		return nil
 	}
 
-	s.captureGitStatusSnapshot(writeCtx, data.SessionID)
-	s.finalizeAutomationRunIfEphemeral(writeCtx, data.TaskID, data.SessionID, true, "")
-
 	session, err := s.repo.GetTaskSession(writeCtx, data.SessionID)
 	if err != nil {
 		s.logger.Warn("failed to load session for stale-dismissed clarification cleanup",
@@ -70,6 +67,16 @@ func (s *Service) handleClarificationStaleDismissed(ctx context.Context, event *
 			zap.Error(err))
 		return nil
 	}
+	if isTerminalSessionState(session.State) {
+		s.logger.Debug("ignoring stale-dismissed clarification for terminal session",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("session_state", string(session.State)))
+		return nil
+	}
+
+	s.captureGitStatusSnapshot(writeCtx, data.SessionID)
+	s.finalizeAutomationRunIfEphemeral(writeCtx, data.TaskID, data.SessionID, true, "")
 	s.processOnTurnCompleteViaEngine(writeCtx, data.TaskID, session)
 	return nil
 }
