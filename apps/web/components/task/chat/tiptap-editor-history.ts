@@ -71,14 +71,17 @@ function writeHistoryContent(
 ): void {
   if (!editor) return;
   state.isApplying = true;
-  if (text === "") {
-    editor.chain().focus().clearContent().run();
-  } else {
-    editor.chain().focus().setContent(textToHtml(text)).run();
-    editor.commands.focus("end");
+  try {
+    if (text === "") {
+      editor.chain().focus().clearContent().run();
+    } else {
+      editor.chain().focus().setContent(textToHtml(text)).run();
+      editor.commands.focus("end");
+    }
+    onChange(getMarkdownText(editor));
+  } finally {
+    state.isApplying = false;
   }
-  state.isApplying = false;
-  onChange(getMarkdownText(editor));
 }
 
 function caretAtBoundary(editor: Editor, direction: "up" | "down"): boolean {

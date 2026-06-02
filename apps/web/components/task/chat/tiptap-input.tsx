@@ -502,7 +502,7 @@ function useChatHistory(sessionId: string | null) {
     historyRef.current = history;
   });
   const getHistory = useCallback(() => historyRef.current, []);
-  return { history, getHistory, historyRef };
+  return { history, getHistory };
 }
 
 function useReverseSearchOverlay(sessionId: string | null) {
@@ -519,6 +519,18 @@ function useReverseSearchOverlay(sessionId: string | null) {
     setIsReverseSearchOpen(true);
   }, []);
   const closeReverseSearch = useCallback(() => setIsReverseSearchOpen(false), []);
+  // The anchor rect is captured once at open time; dismiss on viewport
+  // changes rather than recompute, matching how the project's other
+  // fixed-position popups behave on resize/scroll.
+  useEffect(() => {
+    if (!isReverseSearchOpen) return;
+    window.addEventListener("resize", closeReverseSearch);
+    window.addEventListener("scroll", closeReverseSearch, true);
+    return () => {
+      window.removeEventListener("resize", closeReverseSearch);
+      window.removeEventListener("scroll", closeReverseSearch, true);
+    };
+  }, [isReverseSearchOpen, closeReverseSearch]);
   return {
     editorWrapperRef,
     reverseSearchAnchor,
