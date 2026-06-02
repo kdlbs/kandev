@@ -23,7 +23,7 @@ func TestCodexACP_CLIFlagTokenise(t *testing.T) {
 		{
 			name: "sandbox_permissions",
 			raw:  CodexACPSandboxDiskFullReadCLIFlag,
-			want: []string{"-c", `sandbox_permissions=[disk-full-read-access]`},
+			want: []string{"-c", `sandbox_permissions=["disk-full-read-access"]`},
 		},
 	}
 	for _, tc := range cases {

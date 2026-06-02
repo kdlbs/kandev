@@ -37,6 +37,7 @@ const agentInstanceColumns = `
 	name,
 	COALESCE(agent_display_name, '')        AS agent_display_name,
 	COALESCE(model, '')                     AS model,
+	COALESCE(auto_approve, 0)               AS auto_approve,
 	COALESCE(allow_indexing, 0)             AS allow_indexing,
 	COALESCE(cli_passthrough, 0)            AS cli_passthrough,
 	COALESCE(role, '')                      AS role,
@@ -253,14 +254,18 @@ func (r *Repository) UpdateAgentInstance(ctx context.Context, agent *models.Agen
 			max_concurrent_sessions = ?, cooldown_sec = ?, skip_idle_runs = ?,
 			last_run_finished_at = ?,
 			skill_ids = ?, desired_skills = ?, executor_preference = ?,
-			pause_reason = ?, failure_threshold = ?, settings = ?, updated_at = ?
+			pause_reason = ?, failure_threshold = ?, settings = ?,
+			auto_approve = ?, allow_indexing = ?, cli_passthrough = ?,
+			model = ?, mode = ?, updated_at = ?
 		WHERE id = ? AND `+agentInstanceFilter+`
 	`), agent.Name, string(agent.Role), agent.Icon, status,
 		agent.ReportsTo, permissions, agent.BudgetMonthlyCents,
 		agent.MaxConcurrentSessions, agent.CooldownSec, boolToInt(agent.SkipIdleRuns),
 		agent.LastRunFinishedAt,
 		skillIDs, desiredSkills, agent.ExecutorPreference,
-		agent.PauseReason, threshold, settings, agent.UpdatedAt, agent.ID)
+		agent.PauseReason, threshold, settings,
+		boolToInt(agent.AutoApprove), boolToInt(agent.AllowIndexing), boolToInt(agent.CLIPassthrough),
+		agent.Model, agent.Mode, agent.UpdatedAt, agent.ID)
 	return err
 }
 

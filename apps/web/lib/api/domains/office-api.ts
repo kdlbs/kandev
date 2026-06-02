@@ -186,7 +186,7 @@ function stringifyJSONField(value: unknown): string | undefined {
 }
 
 function agentPayload(data: Partial<AgentProfile>): Record<string, unknown> {
-  return {
+  const payload: Record<string, unknown> = {
     name: data.name,
     agent_profile_id: data.agentProfileId,
     role: data.role,
@@ -199,6 +199,25 @@ function agentPayload(data: Partial<AgentProfile>): Record<string, unknown> {
     executor_preference: stringifyJSONField(data.executorPreference),
     skill_ids: stringifyJSONField(data.skillIds),
   };
+  if (data.autoApprove !== undefined) {
+    payload.auto_approve = data.autoApprove;
+  }
+  if (data.allowIndexing !== undefined) {
+    payload.allow_indexing = data.allowIndexing;
+  }
+  if (data.cliPassthrough !== undefined) {
+    payload.cli_passthrough = data.cliPassthrough;
+  }
+  if (data.cliFlags !== undefined) {
+    payload.cli_flags = data.cliFlags;
+  }
+  if (data.model !== undefined) {
+    payload.model = data.model;
+  }
+  if (data.mode !== undefined) {
+    payload.mode = data.mode;
+  }
+  return payload;
 }
 
 // --- Agent Instances ---

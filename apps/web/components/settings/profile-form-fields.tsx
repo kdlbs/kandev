@@ -105,6 +105,7 @@ function PermissionToggleRow({
   const switchSize = compact ? ("sm" as const) : ("default" as const);
   const labelCls = compact ? "text-xs" : undefined;
   const wrapperCls = permissionToggleWrapperClass(isDanger, compact);
+  const switchId = `permission-toggle-${settingKey}`;
 
   return (
     <div
@@ -113,7 +114,7 @@ function PermissionToggleRow({
       data-testid={isDanger ? "permission-auto-approve-danger" : `permission-toggle-${settingKey}`}
     >
       <div className={`flex-1 min-w-0 ${compact && !isDanger ? "space-y-0.5" : "space-y-1"}`}>
-        <Label className={`flex items-center gap-1.5 ${labelCls ?? ""}`}>
+        <Label htmlFor={switchId} className={`flex items-center gap-1.5 ${labelCls ?? ""}`}>
           {isDanger && <IconAlertTriangle className="size-4 shrink-0 text-destructive" />}
           {setting.label}
         </Label>
@@ -127,7 +128,7 @@ function PermissionToggleRow({
           {setting.description}
         </p>
       </div>
-      <Switch size={switchSize} checked={checked} onCheckedChange={onCheckedChange} />
+      <Switch id={switchId} size={switchSize} checked={checked} onCheckedChange={onCheckedChange} />
     </div>
   );
 }
