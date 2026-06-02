@@ -6,7 +6,6 @@ import { searchHistory, type SearchHit } from "./message-history";
 import { HitRow } from "./message-history-search-row";
 
 type MessageHistorySearchProps = {
-  isOpen: boolean;
   /** Newest-first list of the user's previous messages for this session. */
   history: readonly string[];
   /** True while older messages are still being paginated in from the backend
@@ -109,7 +108,6 @@ function computeStyle(anchorRect: DOMRect | null): React.CSSProperties | null {
 }
 
 export function MessageHistorySearch({
-  isOpen,
   history,
   isLoadingOlder = false,
   anchorRect,
@@ -139,7 +137,6 @@ export function MessageHistorySearch({
 
   useScrollSelectedIntoView(selectedIndex, listRef);
 
-  if (!isOpen) return null;
   if (typeof document === "undefined") return null;
   const style = computeStyle(anchorRect);
   if (!style) return null;

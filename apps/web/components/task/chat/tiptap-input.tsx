@@ -478,7 +478,6 @@ function TipTapPopups({
       />
       {overlay.isReverseSearchOpen && (
         <MessageHistorySearch
-          isOpen
           history={history}
           isLoadingOlder={isDraining}
           anchorRect={overlay.reverseSearchAnchor}
@@ -521,14 +520,17 @@ function useReverseSearchOverlay(sessionId: string | null) {
   const closeReverseSearch = useCallback(() => setIsReverseSearchOpen(false), []);
   // The anchor rect is captured once at open time; dismiss on viewport
   // changes rather than recompute, matching how the project's other
-  // fixed-position popups behave on resize/scroll.
+  // fixed-position popups behave on resize/scroll. Bubbling-phase scroll
+  // only — capture-phase would also catch the overlay's own list scroll
+  // (e.g. from scrollIntoView during keyboard navigation), which would
+  // dismiss the overlay mid-browse.
   useEffect(() => {
     if (!isReverseSearchOpen) return;
     window.addEventListener("resize", closeReverseSearch);
-    window.addEventListener("scroll", closeReverseSearch, true);
+    window.addEventListener("scroll", closeReverseSearch);
     return () => {
       window.removeEventListener("resize", closeReverseSearch);
-      window.removeEventListener("scroll", closeReverseSearch, true);
+      window.removeEventListener("scroll", closeReverseSearch);
     };
   }, [isReverseSearchOpen, closeReverseSearch]);
   return {
