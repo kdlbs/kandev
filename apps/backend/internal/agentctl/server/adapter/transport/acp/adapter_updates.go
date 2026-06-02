@@ -12,18 +12,12 @@ import (
 
 // handleACPUpdate converts ACP SessionNotification to protocol-agnostic AgentEvent.
 func (a *Adapter) handleACPUpdate(n acp.SessionNotification) {
-	// Marshal once for both debug logging and tracing
-	rawData, _ := json.Marshal(n)
-
-	// Log raw event for debugging
-	if len(rawData) > 0 {
-		shared.LogRawEvent(shared.ProtocolACP, a.agentID, string(n.SessionId), "session_notification", rawData)
-	}
-
-	// During session/load, suppress history replay notifications.
-	// ACP agents stream the entire conversation history during load, which should not
-	// be emitted as new message events to avoid duplicating messages in the UI.
-	// We suppress: message chunks, thinking chunks, tool calls, and tool updates.
+	// Fast path during session/load: history-replay notifications can arrive as
+	// a burst large enough to overflow the ACP SDK's 1024-deep notification
+	// queue if the per-item handler is slow. Check the loading flag first and
+	// skip json.Marshal + LogRawEvent for replay notifications we'd suppress
+	// anyway. We still capture the Plan + Monitor state needed to reconcile
+	// after replay.
 	a.mu.RLock()
 	isLoading := a.isLoadingSession
 	a.mu.RUnlock()
@@ -51,10 +45,14 @@ func (a *Adapter) handleACPUpdate(n acp.SessionNotification) {
 		if u.AgentMessageChunk != nil || u.UserMessageChunk != nil || u.AgentThoughtChunk != nil ||
 			u.ToolCall != nil || u.ToolCallUpdate != nil ||
 			u.Plan != nil || u.CurrentModeUpdate != nil || u.ConfigOptionUpdate != nil {
-			a.logger.Debug("suppressing history replay notification during session load",
-				zap.String("session_id", string(n.SessionId)))
 			return
 		}
+	}
+
+	// Marshal once for both debug logging and tracing.
+	rawData, _ := json.Marshal(n)
+	if len(rawData) > 0 {
+		shared.LogRawEvent(shared.ProtocolACP, a.agentID, string(n.SessionId), "session_notification", rawData)
 	}
 
 	sessionID := string(n.SessionId)
