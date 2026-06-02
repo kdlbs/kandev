@@ -68,6 +68,7 @@ type DraftMcpConfig = {
  */
 export type DraftProfile = AgentProfile & {
   allow_indexing?: boolean;
+  auto_approve?: boolean;
   isNew?: boolean;
   mcp_config?: DraftMcpConfig;
 };

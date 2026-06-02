@@ -95,6 +95,7 @@ describe("CliProfileEditor", () => {
       model: MODEL_ID,
       mode: "",
       allowIndexing: false,
+      autoApprove: false,
       cliFlags: [],
       cliPassthrough: false,
       createdAt: CREATED_AT,

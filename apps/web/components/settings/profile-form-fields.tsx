@@ -78,6 +78,16 @@ type PermissionToggleProps = {
   lockPassthrough?: boolean;
 };
 
+function permissionToggleWrapperClass(isDanger: boolean, compact: boolean): string {
+  if (isDanger) {
+    return "flex items-center justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/5 p-3";
+  }
+  if (compact) {
+    return "flex items-center justify-between gap-2";
+  }
+  return "flex items-center justify-between rounded-md border p-3";
+}
+
 function PermissionToggleRow({
   settingKey,
   setting,
@@ -94,11 +104,7 @@ function PermissionToggleRow({
   const isDanger = setting.apply_method === PERMISSION_APPLY_AGENTCTL_AUTO_APPROVE;
   const switchSize = compact ? ("sm" as const) : ("default" as const);
   const labelCls = compact ? "text-xs" : undefined;
-  const wrapperCls = isDanger
-    ? "flex items-center justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/5 p-3"
-    : compact
-      ? "flex items-center justify-between gap-2"
-      : "flex items-center justify-between rounded-md border p-3";
+  const wrapperCls = permissionToggleWrapperClass(isDanger, compact);
 
   return (
     <div

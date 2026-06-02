@@ -17,8 +17,8 @@ var codexACPLogoDark []byte
 
 const codexACPPkg = "@zed-industries/codex-acp"
 
-// CodexACPSandboxDiskFullReadCLIFlag is the seeded cli_flags token for disk-full-read sandbox access.
-const CodexACPSandboxDiskFullReadCLIFlag = `-c 'sandbox_permissions=["disk-full-read-access"]'`
+// CodexACPSandboxDiskFullReadCLIFlag is the seeded cli_flags text for disk-full-read sandbox access.
+const CodexACPSandboxDiskFullReadCLIFlag = `-c sandbox_permissions=["disk-full-read-access"]`
 
 var (
 	_ Agent            = (*CodexACP)(nil)
@@ -47,12 +47,13 @@ var codexACPPermSettings = map[string]PermissionSetting{
 		CLIFlagValue: "approval_policy=never",
 	},
 	"config_sandbox_disk_full_read": {
-		Supported:   true,
-		Default:     false,
-		Label:       "Disk full read access (config)",
-		Description: `-c sandbox_permissions=["disk-full-read-access"] (legacy list; prefer sandbox_mode in config.toml)`,
-		ApplyMethod: PermissionApplyMethodCLIFlag,
-		CLIFlag:     CodexACPSandboxDiskFullReadCLIFlag,
+		Supported:    true,
+		Default:      false,
+		Label:        "Disk full read access (config)",
+		Description:  `-c sandbox_permissions=["disk-full-read-access"] (legacy list; prefer sandbox_mode in config.toml)`,
+		ApplyMethod:  PermissionApplyMethodCLIFlag,
+		CLIFlag:      "-c",
+		CLIFlagValue: `sandbox_permissions=["disk-full-read-access"]`,
 	},
 }
 

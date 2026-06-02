@@ -18,7 +18,10 @@ import {
 } from "@/app/actions/agents";
 import type { Agent, AgentProfile, AvailableAgent, CLIFlag } from "@/lib/types/http";
 import { seedDefaultCLIFlags } from "@/lib/cli-flags";
-import { PERMISSION_APPLY_AGENTCTL_AUTO_APPROVE } from "@/lib/agent-permissions";
+import {
+  buildDefaultPermissions,
+  PERMISSION_APPLY_AGENTCTL_AUTO_APPROVE,
+} from "@/lib/agent-permissions";
 
 export type CliProfileEditorMode = "create" | "edit";
 
@@ -76,16 +79,16 @@ function fromDefaultAgent(
   defaultAgent: AvailableAgent | undefined,
 ): FormState {
   const cfg = defaultAgent?.model_config;
-  const allowIndex = defaultAgent?.permission_settings?.allow_indexing?.default ?? false;
+  const permissionSettings = defaultAgent?.permission_settings ?? {};
+  const defaults = buildDefaultPermissions(permissionSettings);
   return {
     agentName: defaultAgent?.name ?? "",
     profileName: defaultName,
     model: cfg?.default_model ?? "",
     mode: cfg?.current_mode_id ?? "",
-    cliFlags: seedDefaultCLIFlags(defaultAgent?.permission_settings ?? {}),
+    cliFlags: seedDefaultCLIFlags(permissionSettings),
     cliPassthrough: false,
-    allowIndexing: allowIndex,
-    autoApprove: defaultAgent?.permission_settings?.auto_approve?.default ?? false,
+    ...defaults,
   };
 }
 

@@ -198,7 +198,10 @@ function useSyncAgentsToStore() {
   };
 }
 
-function useProfileEditorState(profile: AgentProfile) {
+function useProfileEditorState(
+  profile: AgentProfile,
+  permissionSettings: Record<string, PermissionSetting>,
+) {
   const [draft, setDraft] = useState<AgentProfile>({ ...profile });
   const [savedProfile, setSavedProfile] = useState<AgentProfile>(profile);
   const [saveStatus, setSaveStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
@@ -212,7 +215,7 @@ function useProfileEditorState(profile: AgentProfile) {
       draft.cliPassthrough !== savedProfile.cliPassthrough ||
       !areCLIFlagsEqual(draft.cliFlags ?? [], savedProfile.cliFlags ?? []) ||
       !areEnvVarsEqual(draft.envVars, savedProfile.envVars),
-    [draft, savedProfile],
+    [draft, savedProfile, permissionSettings],
   );
 
   return { draft, setDraft, savedProfile, setSavedProfile, saveStatus, setSaveStatus, isDirty };
@@ -465,7 +468,7 @@ function ProfileEditor({
   const syncAgentsToStore = useSyncAgentsToStore();
   const { items: secrets } = useSecrets();
   const { draft, setDraft, savedProfile, setSavedProfile, saveStatus, setSaveStatus, isDirty } =
-    useProfileEditorState(profile);
+    useProfileEditorState(profile, permissionSettings);
   const updateDraft = useCallback(
     (patch: Partial<AgentProfile>) => {
       setDraft((current) => {

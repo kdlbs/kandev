@@ -77,9 +77,9 @@ type AgentProfile struct {
 	// Stored as a JSON-encoded TEXT column; settings repo handles conversion.
 	EnvVars []ProfileEnvVar `json:"env_vars,omitempty" db:"-"`
 
-	// Deprecated legacy permission fields: retained in the DB schema so rows
-	// load cleanly, but no longer read by the launch path. ACP session modes
-	// and interactive permission_request prompts replace them.
+	// AutoApprove enables Kandev agentctl-side ACP permission auto-approval at
+	// launch (AGENTCTL_AUTO_APPROVE_PERMISSIONS). DangerouslySkipPermissions is
+	// a deprecated legacy column retained so existing rows load cleanly.
 	AutoApprove                bool `json:"auto_approve" db:"auto_approve"`
 	DangerouslySkipPermissions bool `json:"-" db:"dangerously_skip_permissions"`
 

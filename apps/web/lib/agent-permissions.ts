@@ -71,9 +71,10 @@ export function permissionsToProfilePatch(
 }
 
 /** Canonical camelCase defaults for new AgentProfile / DraftProfile rows. */
-export function buildDefaultPermissions(
-  permissionSettings: Record<string, PermissionSetting>,
-): Pick<PermissionProfileInput, "autoApprove" | "allowIndexing"> {
+export function buildDefaultPermissions(permissionSettings: Record<string, PermissionSetting>): {
+  autoApprove: boolean;
+  allowIndexing: boolean;
+} {
   const perms = profilePermissionValues({}, permissionSettings);
   return {
     autoApprove: perms.auto_approve,

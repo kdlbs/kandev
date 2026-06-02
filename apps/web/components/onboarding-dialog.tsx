@@ -29,7 +29,7 @@ import {
 } from "@tabler/icons-react";
 import { Kbd } from "@kandev/ui/kbd";
 import { type ProfileFormData } from "@/components/settings/profile-form-fields";
-import { profileToPermissionsMap, permissionsToProfilePatch } from "@/lib/agent-permissions";
+import { permissionsToProfilePatch, profilePermissionValues } from "@/lib/agent-permissions";
 import { listAvailableAgents, listWorkflowTemplates } from "@/lib/api";
 import { listAgentsAction, updateAgentProfileAction } from "@/app/actions/agents";
 import { StepAgents, type AgentSetting } from "@/components/onboarding/step-agents";
@@ -86,7 +86,7 @@ function buildAgentSettings(
     const dbAgent = saved.find((a) => a.name === aa.name);
     const profile = dbAgent?.profiles?.[0];
     if (profile) {
-      const perms = profileToPermissionsMap(
+      const perms = profilePermissionValues(
         {
           allowIndexing: profile.allowIndexing,
           autoApprove: profile.autoApprove,
