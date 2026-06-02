@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
+	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -92,7 +93,7 @@ func (m *Manager) PromptAgent(ctx context.Context, executionID string, prompt st
 }
 
 // cancelWaitTimeout bounds how long CancelAgent waits for the in-flight SendPrompt
-// to exit after the ACP cancel was acknowledged by the agent.
+// to exit after the in-flight session/prompt RPC has ended (cancel acknowledged).
 // Exposed as a var (not const) so tests can shorten it without fake clocks.
 var cancelWaitTimeout = 10 * time.Second
 
@@ -125,11 +126,12 @@ func (m *Manager) CancelAgent(ctx context.Context, executionID string) error {
 		zap.String("task_id", execution.TaskID),
 		zap.String("session_id", execution.SessionID))
 
-	if err := execution.agentctl.Cancel(ctx); err != nil {
+	cancelErr := execution.agentctl.Cancel(ctx)
+	if cancelErr != nil && !errors.Is(cancelErr, agentctlclient.ErrTurnCancelNotAcknowledged) {
 		m.logger.Error("failed to cancel agent turn",
 			zap.String("execution_id", executionID),
-			zap.Error(err))
-		return fmt.Errorf("failed to cancel agent: %w", err)
+			zap.Error(cancelErr))
+		return fmt.Errorf("failed to cancel agent: %w", cancelErr)
 	}
 
 	// Don't clear buffers or mark ready here.
@@ -137,11 +139,6 @@ func (m *Manager) CancelAgent(ctx context.Context, executionID string) error {
 	// which triggers handleCompleteEvent() to properly flush buffers and mark state.
 	// Clearing here would race with in-flight notifications and lose content.
 
-	m.logger.Info("agent cancel sent, waiting for turn completion",
-		zap.String("execution_id", executionID))
-
-	// Wait for the in-flight SendPrompt to finish processing the cancel completion.
-	// Without this, a follow-up PromptAgent races on promptDoneCh with two readers.
 	execution.promptFinishedMu.Lock()
 	ch := execution.promptFinished
 	execution.promptFinishedMu.Unlock()
@@ -150,6 +147,21 @@ func (m *Manager) CancelAgent(ctx context.Context, executionID string) error {
 		return nil
 	}
 
+	// The agent did not end the in-flight session/prompt RPC after cancel (e.g. it
+	// does not implement session/cancel). Escalate immediately so SendPrompt and the
+	// prompt gate are reconciled instead of waiting the full cancelWaitTimeout.
+	if errors.Is(cancelErr, agentctlclient.ErrTurnCancelNotAcknowledged) {
+		m.logger.Warn("agent cancel not acknowledged; escalating immediately",
+			zap.String("execution_id", executionID),
+			zap.Error(cancelErr))
+		return m.escalateStuckCancel(ctx, execution, ch)
+	}
+
+	m.logger.Info("agent cancel sent, waiting for turn completion",
+		zap.String("execution_id", executionID))
+
+	// Wait for the in-flight SendPrompt to finish processing the cancel completion.
+	// Without this, a follow-up PromptAgent races on promptDoneCh with two readers.
 	select {
 	case <-ch:
 		m.logger.Debug("in-flight prompt finished after cancel",

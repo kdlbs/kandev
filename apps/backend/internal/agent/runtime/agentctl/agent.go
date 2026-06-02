@@ -497,8 +497,9 @@ func (c *Client) CloseUpdatesStream() {
 
 // CancelResponse is the response from the agentctl cancel endpoint.
 type CancelResponse struct {
-	Success bool   `json:"success"`
-	Error   string `json:"error,omitempty"`
+	Success         bool   `json:"success"`
+	Error           string `json:"error,omitempty"`
+	NotAcknowledged bool   `json:"not_acknowledged,omitempty"`
 }
 
 // Cancel interrupts the current agent turn via the agent WebSocket stream.
@@ -521,6 +522,9 @@ func (c *Client) Cancel(ctx context.Context) error {
 		return fmt.Errorf("failed to parse cancel response: %w", err)
 	}
 	if !result.Success {
+		if result.NotAcknowledged {
+			return fmt.Errorf("%w: %s", ErrTurnCancelNotAcknowledged, result.Error)
+		}
 		return fmt.Errorf("cancel failed: %s", result.Error)
 	}
 	return nil
