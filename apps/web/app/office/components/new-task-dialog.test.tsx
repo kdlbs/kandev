@@ -26,28 +26,47 @@ function renderButton(draft: Partial<IssueDraft>) {
   );
 }
 
+const TEST_ID = "new-task-create-button";
+
+function getButton() {
+  return screen.getByTestId(TEST_ID) as HTMLButtonElement;
+}
+
 afterEach(() => cleanup());
 
 describe("CreateTaskButton", () => {
   it("disables the button and labels missing project when no project selected", () => {
     renderButton({ title: "do thing" });
-    const button = screen.getByTestId("new-task-create-button") as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
+    expect(getButton().disabled).toBe(true);
     // The tooltip content is rendered as accessible-name on the wrapper.
     expect(screen.getByLabelText(/select a project to create a task/i)).toBeTruthy();
   });
 
   it("disables the button and labels missing title when title empty", () => {
     renderButton({ projectId: "proj-1" });
-    const button = screen.getByTestId("new-task-create-button") as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
+    expect(getButton().disabled).toBe(true);
     expect(screen.getByLabelText(/add a title to create a task/i)).toBeTruthy();
   });
 
   it("enables the button without a tooltip when both title and project are set", () => {
     renderButton({ title: "do thing", projectId: "proj-1" });
-    const button = screen.getByTestId("new-task-create-button") as HTMLButtonElement;
-    expect(button.disabled).toBe(false);
+    expect(getButton().disabled).toBe(false);
+    expect(screen.queryByLabelText(/create a task/i)).toBeNull();
+  });
+
+  it("disables the button and shows 'Creating...' while submitting", () => {
+    render(
+      <TooltipProvider>
+        <CreateTaskButton
+          draft={{ ...BASE_DRAFT, title: "do thing", projectId: "proj-1" }}
+          submitting={true}
+          onCreate={vi.fn()}
+        />
+      </TooltipProvider>,
+    );
+    const button = getButton();
+    expect(button.disabled).toBe(true);
+    expect(button.textContent).toBe("Creating...");
     expect(screen.queryByLabelText(/create a task/i)).toBeNull();
   });
 });
