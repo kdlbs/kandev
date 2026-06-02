@@ -311,7 +311,10 @@ func (h *Handlers) httpRespond(c *gin.Context) {
 	// surprise them by resuming the agent with "User declined to answer".
 	// The overlay is already detached (agent_disconnected, still pending), so
 	// dismissing it must not resume the agent with "User declined to answer".
+	// We still need to mark the bundle rejected in the DB; otherwise the durable
+	// pending-clarification guard would keep blocking future workflow transitions.
 	if body.Rejected {
+		h.applyAnswersToMessages(c, pendingID, true, nil)
 		h.logger.Info("clarification rejected after agent moved on; no-op",
 			zap.String("pending_id", pendingID))
 		c.JSON(http.StatusOK, gin.H{"success": true})

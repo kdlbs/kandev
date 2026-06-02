@@ -483,6 +483,7 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 	}
 
 	if s.sessionHasPendingClarification(ctx, data.SessionID) {
+		s.completeTurnForSession(ctx, data.SessionID)
 		s.logger.Info("deferring on_turn_complete on agent.completed while clarification is pending",
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID))

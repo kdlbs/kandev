@@ -912,12 +912,12 @@ func TestHandleClarificationTimeout_DetachesMessages(t *testing.T) {
 	require.Equal(t, true, msgs[0].Metadata["agent_disconnected"])
 }
 
-func TestHandleClarificationTimeout_WithoutCanceller_ReturnsZero(t *testing.T) {
+func TestHandleClarificationTimeout_WithoutCanceller_ReturnsError(t *testing.T) {
 	h := &Handlers{sessionCanceller: nil, logger: testLogger(t).WithFields()}
 	msg := makeWSMessage(t, ws.ActionMCPClarificationTimeout, map[string]interface{}{"session_id": "s1"})
 	resp, err := h.handleClarificationTimeout(context.Background(), msg)
 	require.NoError(t, err)
-	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+	assertWSError(t, resp, ws.ErrorCodeInternalError)
 }
 
 func TestHandleAskUserQuestion_Dedup_CreatesOnePendingBundle(t *testing.T) {

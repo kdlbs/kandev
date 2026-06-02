@@ -1511,10 +1511,10 @@ func (h *Handlers) handleClarificationTimeout(ctx context.Context, msg *ws.Messa
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
 
-	cancelled := 0
-	if h.sessionCanceller != nil {
-		cancelled = h.sessionCanceller.DetachSessionAndNotify(ctx, req.SessionID)
+	if h.sessionCanceller == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "sessionCanceller is required", nil)
 	}
+	cancelled := h.sessionCanceller.DetachSessionAndNotify(ctx, req.SessionID)
 	h.logger.Info("detached pending clarifications on agent MCP timeout",
 		zap.String("session_id", req.SessionID),
 		zap.Int("count", cancelled))

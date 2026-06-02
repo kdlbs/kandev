@@ -64,14 +64,14 @@ func setupTestHandler(t *testing.T, msgs map[string][]*taskmodels.Message) (*Han
 // just dismissing a stale overlay; resuming the agent with "User declined
 // to answer" is surprising and wastes a turn.
 func TestHttpRespond_RejectedAfterTimeout_NoNewTurn(t *testing.T) {
-	// Message exists in DB (agent already moved on; canceller ran).
+	// Message exists in DB (agent already moved on; canceller detached it).
 	msgs := map[string][]*taskmodels.Message{
 		"pending-123": {{
 			ID:            "m1",
 			TaskID:        "t1",
 			TaskSessionID: "s1",
 			Metadata: map[string]any{
-				"status":             "expired",
+				"status":             "pending",
 				"agent_disconnected": true,
 				"pending_id":         "pending-123",
 				"question_id":        "q1",
@@ -96,12 +96,12 @@ func TestHttpRespond_RejectedAfterTimeout_NoNewTurn(t *testing.T) {
 		}
 	}
 
-	// The message is already "expired" (set by the canceller). The no-op path
-	// must NOT re-update the status — otherwise a stale X click would overwrite
-	// "expired" with "rejected" and the history entry would look wrong.
-	if len(messageCreator.updates) != 0 {
-		t.Errorf("expected no message updates in rejected no-op path, got %d: %+v",
+	if len(messageCreator.updates) != 1 {
+		t.Fatalf("expected one message update to clear the durable pending guard, got %d: %+v",
 			len(messageCreator.updates), messageCreator.updates)
+	}
+	if got := messageCreator.updates[0].status; got != "rejected" {
+		t.Fatalf("expected rejected status update, got %q", got)
 	}
 }
 
