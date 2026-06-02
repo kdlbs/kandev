@@ -270,6 +270,11 @@ type acpUsageUpdate struct {
 type usageTracker struct {
 	lastUsed         int64
 	lastCostSubcents int64
+	// maxSize is the largest context-window size reported for this session.
+	// claude-acp's default model emits a 200K turn-start frame and a 1M
+	// turn-end frame; sticky-max prevents the stale 200K from shrinking
+	// the displayed window after the authoritative 1M frame lands.
+	maxSize int64
 }
 
 // recordUsageDelta updates the per-session tracker. Returns the
@@ -280,16 +285,49 @@ type usageTracker struct {
 func (a *Adapter) recordUsageDelta(sessionID string, used int64, costSubcents int64) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	tr := a.ensureUsageTracker(sessionID)
+	if used > tr.lastUsed {
+		tr.lastUsed = used
+	}
+	if costSubcents > 0 {
+		tr.lastCostSubcents = costSubcents
+	}
+}
+
+func (a *Adapter) ensureUsageTracker(sessionID string) *usageTracker {
 	tr := a.usageBySession[sessionID]
 	if tr == nil {
 		tr = &usageTracker{}
 		a.usageBySession[sessionID] = tr
+	}
+	return tr
+}
+
+// recordUsageAndMaxSize updates per-session usage/cost tracking and returns
+// the sticky-max context window size for the session.
+func (a *Adapter) recordUsageAndMaxSize(sessionID string, size, used, costSubcents int64) int64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	tr := a.ensureUsageTracker(sessionID)
+	if size > tr.maxSize {
+		tr.maxSize = size
 	}
 	if used > tr.lastUsed {
 		tr.lastUsed = used
 	}
 	if costSubcents > 0 {
 		tr.lastCostSubcents = costSubcents
+	}
+	return tr.maxSize
+}
+
+// resetContextWindowMaxSize clears the sticky-max window for a session so the
+// next usage_update can establish the new model's window after SetModel.
+func (a *Adapter) resetContextWindowMaxSize(sessionID string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if tr := a.usageBySession[sessionID]; tr != nil {
+		tr.maxSize = 0
 	}
 }
 
@@ -339,16 +377,16 @@ func (a *Adapter) tryConvertUntypedUpdate(rawNotification []byte, sessionID stri
 	if usage.Cost != nil {
 		costSubcents = int64(usage.Cost.Amount * 10000)
 	}
-	a.recordUsageDelta(sessionID, usage.Used, costSubcents)
+	effectiveSize := a.recordUsageAndMaxSize(sessionID, usage.Size, usage.Used, costSubcents)
 
-	remaining := max(usage.Size-usage.Used, 0)
+	remaining := max(effectiveSize-usage.Used, 0)
 	return &AgentEvent{
 		Type:                   streams.EventTypeContextWindow,
 		SessionID:              sessionID,
-		ContextWindowSize:      usage.Size,
+		ContextWindowSize:      effectiveSize,
 		ContextWindowUsed:      usage.Used,
 		ContextWindowRemaining: remaining,
-		ContextEfficiency:      float64(usage.Used) / float64(usage.Size) * 100,
+		ContextEfficiency:      float64(usage.Used) / float64(effectiveSize) * 100,
 	}
 }
 
