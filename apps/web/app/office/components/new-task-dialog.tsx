@@ -56,7 +56,7 @@ export function NewTaskDialog({
   );
 
   const handleCreate = useCallback(async () => {
-    if (!draft.title.trim() || !workspaceId) return;
+    if (!draft.title.trim() || !draft.projectId || !workspaceId) return;
     setSubmitting(true);
     try {
       const executionPolicy = buildExecutionPolicy(stages);
@@ -175,7 +175,7 @@ function NewIssueDialogBody({
   );
 }
 
-function CreateTaskButton({
+export function CreateTaskButton({
   draft,
   submitting,
   onCreate,
@@ -207,7 +207,9 @@ function CreateTaskButton({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span tabIndex={0}>{button}</span>
+        <span tabIndex={0} aria-label={reason}>
+          {button}
+        </span>
       </TooltipTrigger>
       <TooltipContent>{reason}</TooltipContent>
     </Tooltip>
