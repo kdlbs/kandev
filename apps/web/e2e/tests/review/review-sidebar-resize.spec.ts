@@ -127,13 +127,22 @@ test.describe("Review dialog sidebar resize", () => {
     apiClient,
     seedData,
   }) => {
+    // Pre-seed sessionStorage via addInitScript so the value is written
+    // before any page script runs. The ReviewDialog is mounted as soon as
+    // the session layout renders (see dockview-desktop-layout.tsx) — well
+    // before this test could `page.evaluate` after navigation — so the
+    // hook's useState initializer reads the seeded value on first mount.
+    await testPage.addInitScript(
+      ({ key, val }) => {
+        try {
+          sessionStorage.setItem(key, val);
+        } catch {
+          // sessionStorage may be unavailable in some contexts; ignore.
+        }
+      },
+      { key: STORAGE_KEY, val: "340" },
+    );
     await seedReviewTask(testPage, apiClient, seedData);
-
-    // Pre-seed sessionStorage so the dialog mounts with the saved width.
-    await testPage.evaluate(({ key, val }) => window.sessionStorage.setItem(key, val), {
-      key: STORAGE_KEY,
-      val: "340",
-    });
 
     const dialog = await openDialogWithChanges(testPage);
     const sidebar = dialog.getByTestId("review-dialog-sidebar");
