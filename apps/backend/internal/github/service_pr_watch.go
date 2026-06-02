@@ -22,6 +22,12 @@ import (
 // its own watch row. Multi-branch tasks store one watch per branch so a
 // secondary branch's push isn't lost behind the primary's existing watch.
 func (s *Service) CreatePRWatch(ctx context.Context, sessionID, taskID, repositoryID, owner, repo string, prNumber int, branch string) (*PRWatch, error) {
+	// Evict any negative-cache entry up front. Caller intent on either
+	// branch (creating a new watch or re-finding an existing one) is "I
+	// want this repo watched", which means a stale "missing" verdict
+	// from a prior auth failure should be re-probed immediately rather
+	// than held for the rest of the 10-min TTL.
+	s.evictRepoNegative(owner, repo)
 	existing, err := s.store.GetPRWatchBySessionRepoAndBranch(ctx, sessionID, repositoryID, branch)
 	if err != nil {
 		return nil, err
@@ -41,9 +47,6 @@ func (s *Service) CreatePRWatch(ctx context.Context, sessionID, taskID, reposito
 	if err := s.store.CreatePRWatch(ctx, w); err != nil {
 		return nil, fmt.Errorf("create PR watch: %w", err)
 	}
-	// Evict any negative-cache entry so a freshly-linked repo is probed
-	// immediately on the next sync instead of waiting out the 10-min TTL.
-	s.evictRepoNegative(owner, repo)
 	s.logger.Info("created PR watch",
 		zap.String("session_id", sessionID),
 		zap.String("repository_id", repositoryID),
@@ -137,6 +140,10 @@ func (s *Service) CheckPRWatch(ctx context.Context, watch *PRWatch) (*PRStatus, 
 // so each branch gets its own watch — keying on (session, repo) alone
 // drops secondary branches' watches behind the primary's existing row.
 func (s *Service) EnsurePRWatch(ctx context.Context, sessionID, taskID, repositoryID, owner, repo, branch string) (*PRWatch, error) {
+	// Same up-front eviction as CreatePRWatch — see that function for the
+	// rationale. The existing-watch early-return path must not inherit a
+	// stale "missing" verdict from a prior incarnation.
+	s.evictRepoNegative(owner, repo)
 	existing, err := s.store.GetPRWatchBySessionRepoAndBranch(ctx, sessionID, repositoryID, branch)
 	if err != nil {
 		return nil, err
@@ -156,10 +163,6 @@ func (s *Service) EnsurePRWatch(ctx context.Context, sessionID, taskID, reposito
 	if err := s.store.CreatePRWatch(ctx, w); err != nil {
 		return nil, fmt.Errorf("ensure PR watch: %w", err)
 	}
-	// Same eviction as CreatePRWatch — a re-linked repo should be probed
-	// immediately rather than inheriting the previous incarnation's
-	// "missing" verdict from the negative cache.
-	s.evictRepoNegative(owner, repo)
 	s.logger.Info("created PR watch for session (will search for PR)",
 		zap.String("session_id", sessionID),
 		zap.String("repository_id", repositoryID),

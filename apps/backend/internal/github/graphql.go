@@ -533,6 +533,14 @@ func runBatchedPRQuery(ctx context.Context, exec GraphQLExecutor, refs []graphQL
 		return nil, nil
 	}
 	result := make(map[string]*PRStatus, len(refs))
+	// Accumulate missing / residual errors across all chunks so a chunk
+	// of purely-dead repos doesn't short-circuit the loop and drop the
+	// good data in later chunks. Pre-fix, a workspace with >50 watches
+	// where the first 50 happened to be dead would silently skip the
+	// remaining watches on every poll cycle until the first batch's
+	// repos landed in the negative cache.
+	var allMissing []repoRef
+	var allResidual []graphQLError
 	for _, chunk := range chunkedRefs(refs) {
 		query, vars := buildBatchedPRQuery(chunk)
 		var resp struct {
@@ -552,16 +560,18 @@ func runBatchedPRQuery(ctx context.Context, exec GraphQLExecutor, refs []graphQL
 		if err := decodeBatchedPRChunk(chunk, resp.Data, result); err != nil {
 			return nil, err
 		}
-		if err := wrapBatchedErrors(missing, residual); err != nil {
-			// When the error is purely "missing repos", partial Statuses for the
-			// other refs in this chunk are still in `result`; surface them to
-			// the caller alongside the typed error so it can populate the
-			// negative cache without dropping the good data.
-			if len(missing) > 0 && len(residual) == 0 {
-				return result, err
-			}
-			return nil, err
+		allMissing = append(allMissing, missing...)
+		allResidual = append(allResidual, residual...)
+	}
+	if err := wrapBatchedErrors(allMissing, allResidual); err != nil {
+		// When the error is purely "missing repos" across all chunks,
+		// partial Statuses for the other refs are still in `result`;
+		// surface them to the caller alongside the typed error so it
+		// can populate the negative cache without dropping the good data.
+		if len(allMissing) > 0 && len(allResidual) == 0 {
+			return result, err
 		}
+		return nil, err
 	}
 	return result, nil
 }
@@ -631,6 +641,10 @@ func runBatchedBranchQuery(ctx context.Context, exec GraphQLExecutor, refs []gra
 		return nil, nil
 	}
 	result := make(map[string]*PRStatus, len(refs))
+	// Same accumulation pattern as runBatchedPRQuery — see that function
+	// for the rationale (one dead-repo chunk must not drop later chunks).
+	var allMissing []repoRef
+	var allResidual []graphQLError
 	for _, chunk := range chunkedRefs(refs) {
 		query, vars := buildBatchedBranchQuery(chunk)
 		var resp struct {
@@ -644,12 +658,14 @@ func runBatchedBranchQuery(ctx context.Context, exec GraphQLExecutor, refs []gra
 		if err := decodeBatchedBranchChunk(chunk, resp.Data, result); err != nil {
 			return nil, err
 		}
-		if err := wrapBatchedErrors(missing, residual); err != nil {
-			if len(missing) > 0 && len(residual) == 0 {
-				return result, err
-			}
-			return nil, err
+		allMissing = append(allMissing, missing...)
+		allResidual = append(allResidual, residual...)
+	}
+	if err := wrapBatchedErrors(allMissing, allResidual); err != nil {
+		if len(allMissing) > 0 && len(allResidual) == 0 {
+			return result, err
 		}
+		return nil, err
 	}
 	return result, nil
 }

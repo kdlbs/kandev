@@ -121,7 +121,12 @@ func (s *Service) GetPRFeedback(ctx context.Context, owner, repo string, number 
 	// cancelled leader (user closes the tab) would otherwise return its
 	// context error to all co-waiters, cascading a single client disconnect
 	// into a burst of transient failures across concurrent callers.
-	fetchCtx := context.WithoutCancel(ctx)
+	// context.WithoutCancel strips the deadline too, so re-attach the
+	// parent deadline explicitly — without this, a still-active caller's
+	// timeout wouldn't bound the shared fetch and quota could keep being
+	// consumed past the deadline.
+	fetchCtx, cancelFetch := derivedFetchContext(ctx)
+	defer cancelFetch()
 	key := prStatusCacheKey(owner, repo, number)
 	v, err := s.prFeedbackCache.doOrFetch(key, func() (any, error) {
 		return s.client.GetPRFeedback(fetchCtx, owner, repo, number)
@@ -141,8 +146,9 @@ func (s *Service) GetPRStatus(ctx context.Context, owner, repo string, number in
 		return nil, fmt.Errorf("github client not available")
 	}
 	// Detach the upstream call from the singleflight leader's context; see
-	// GetPRFeedback for the cascading-cancel rationale.
-	fetchCtx := context.WithoutCancel(ctx)
+	// GetPRFeedback for the cascading-cancel + deadline-preserve rationale.
+	fetchCtx, cancelFetch := derivedFetchContext(ctx)
+	defer cancelFetch()
 	key := prStatusCacheKey(owner, repo, number)
 	v, err := s.prStatusCache.doOrFetch(key, func() (any, error) {
 		return s.client.GetPRStatus(fetchCtx, owner, repo, number)
@@ -151,6 +157,22 @@ func (s *Service) GetPRStatus(ctx context.Context, owner, repo string, number in
 		return nil, err
 	}
 	return v.(*PRStatus), nil
+}
+
+// derivedFetchContext builds the upstream-fetch context used by the
+// singleflight-cached GetPRFeedback / GetPRStatus paths. It strips the
+// caller's cancellation via context.WithoutCancel so a single client
+// disconnect doesn't cascade the same error to all co-waiters, but
+// preserves the caller's deadline (when present) so the fetch can't
+// outlive the request budget and keep consuming GitHub quota past it.
+// Returns the derived context and a cancel func the caller must defer
+// to release resources promptly.
+func derivedFetchContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	fetchCtx := context.WithoutCancel(ctx)
+	if deadline, ok := ctx.Deadline(); ok {
+		return context.WithDeadline(fetchCtx, deadline)
+	}
+	return fetchCtx, func() {}
 }
 
 // PRRef identifies a pull request by owner/repo/number.

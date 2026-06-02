@@ -240,11 +240,19 @@ func (s *Service) isRepoCachedAsMissing(owner, repo string) bool {
 // negative cache. Called after a per-watch or batched probe deterministically
 // classifies the repo as missing/unauthorized (see isRepoNotResolvableErr).
 // Idempotent; a repeat call refreshes the 10-min TTL window.
+//
+// Generation guard: snapshot the cache generation BEFORE the write and use
+// setIfCurrentGeneration so a concurrent evictRepoNegative / ClearRepoErrorCache
+// (which both bump gen) wins the race. Without this, a fetch that was already
+// classifying the repo as missing when the user re-linked it would re-insert
+// the just-evicted entry, keeping permanent: true for up to 10 more minutes.
 func (s *Service) markRepoAsMissing(owner, repo string) {
 	if s == nil || s.repoErrorCache == nil {
 		return
 	}
-	s.repoErrorCache.set(repoErrorCacheKey(owner, repo), cachedErr{err: ErrRepoNotResolvable})
+	gen := s.repoErrorCache.generation()
+	s.repoErrorCache.setIfCurrentGeneration(
+		repoErrorCacheKey(owner, repo), cachedErr{err: ErrRepoNotResolvable}, gen)
 }
 
 // evictRepoNegative drops any negative-cache entry for (owner, repo). Called
