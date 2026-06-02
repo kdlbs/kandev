@@ -53,12 +53,12 @@ The `claude_summary` line carries the **latest** Claude summary's structured fin
 
    a. **CI status:**
       ```bash
-      gh pr checks <num> --json name,status,conclusion,detailsUrl
+      gh pr checks <num> --json name,workflow,status,conclusion,detailsUrl
       ```
       - `status` ∈ `{queued, in_progress, completed}`
       - `completed` + `conclusion=success` → passing
       - `completed` + `conclusion∈{failure,timed_out}` → failed
-      - `completed` + `conclusion=cancelled` → **check for supersession first**: if a newer run of the **same workflow** exists for the same head SHA (`gh run list --workflow "<name>" --json headSha,conclusion,databaseId,createdAt`), the cancelled one is a concurrency-superseded duplicate — exclude it from `ci_failed` (report it as `conclusion=cancelled (superseded)` at most). Only treat a cancelled run as failed when it is the newest run for that SHA.
+      - `completed` + `conclusion=cancelled` → **check for supersession first**: if a newer run of the **same workflow** exists for the same head SHA (`gh run list --workflow "<workflow>" --json headSha,conclusion,databaseId,createdAt` — use the check's `workflow` field, not `name`; `name` is the job name e.g. `ci/build`, `workflow` is e.g. `CI`), the cancelled one is a concurrency-superseded duplicate — exclude it from `ci_failed` (report it as `conclusion=cancelled (superseded)` at most). Only treat a cancelled run as failed when it is the newest run for that SHA.
       - anything else → pending
 
    b. **Bot reviews** (terminal conditions):

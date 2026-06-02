@@ -219,7 +219,7 @@ Run `scripts/pr-resolve list <PR>` — output must be empty.
 Or confirm via GraphQL that unresolved thread count is 0:
 
 ```bash
-gh api graphql -f query='query { repository(owner:"kdlbs", name:"kandev") { pullRequest(number:<PR>) { reviewThreads(first:30) { nodes { isResolved } } } } }' --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length'
+gh api graphql -f query='query { repository(owner:"kdlbs", name:"kandev") { pullRequest(number:<PR>) { reviewThreads(first:100) { nodes { isResolved } } } } }' --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length'
 ```
 
 Informational threads (acknowledged, no code change) still need `scripts/pr-resolve reply` + resolve — skipping them leaves the PR blocked.

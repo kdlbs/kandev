@@ -49,7 +49,7 @@ Mark task 0 as in_progress (skip this phase if there is no issue tracker source 
 When the bug originates from an issue tracker, fetch the **canonical issue** and view **every image attachment** before hypothesizing. Handed-down restatements (Kandev task/subtask text, Slack paste, PR description) are leads only — verify against the source.
 
 ```bash
-gh issue view <N> --repo <owner/repo> --json title,body --comments
+gh issue view <N> --repo <owner/repo> --json title,body,comments
 curl -sL "https://github.com/user-attachments/assets/<id>" -o /tmp/issue-<N>-<n>.png   # then Read the local file
 ```
 

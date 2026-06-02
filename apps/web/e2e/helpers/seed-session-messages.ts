@@ -6,8 +6,9 @@
  * flushMessageBuffer), and e2e:delay does not flush. So N lines render as one
  * growing bubble, not N rows (search specs tolerate this with N>=1 hits).
  * To seed many DISTINCT rows (e.g. for pagination tests), use the test harness
- * instead: apiClient.seedAgentMessages / seedToolCallMessages / seedSessionMessage,
- * which write separate rows directly. Used as the `description` of a task created
+ * instead: apiClient.seedToolCallMessages / seedSessionMessage (called repeatedly
+ * with type "text" for each row), which write separate rows directly. Used as the
+ * `description` of a task created
  * via `apiClient.createTaskWithAgent` so the session boots with pre-seeded history.
  */
 export function multiMessageScript(lines: string[], delayMs = 10): string {
