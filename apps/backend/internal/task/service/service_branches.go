@@ -116,11 +116,19 @@ func (s *Service) prepareBranchAdd(ctx context.Context, req *AddBranchToTaskRequ
 		// rather than substring-matching the formatted UUID.
 		return nil, nil, fmt.Errorf("%w: %s", taskrepo.ErrTaskNotFound, req.TaskID)
 	}
+	// Executor gate runs BEFORE repository resolution so a rejection on a
+	// non-worktree executor can't leak an orphan Repository row into the
+	// workspace via FindOrCreateRepository / CreateRepository inside
+	// ResolveRepositoryRef. Mirrors the "keeps the DB clean" invariant
+	// documented on requireWorktreeExecutorForBranchAdd itself.
+	if err := s.requireWorktreeExecutorForBranchAdd(ctx, req.TaskID); err != nil {
+		return nil, nil, err
+	}
 	// Resolve LocalPath / GitHubURL to a concrete RepositoryID up front so the
-	// rest of the flow (executor check, duplicate scan, row insert) operates
-	// on a stable UUID. Skipped when RepositoryID is already set or neither
-	// alternative identifier was supplied (the single-repo task default
-	// applies after the existing-rows lookup).
+	// rest of the flow (duplicate scan, row insert) operates on a stable UUID.
+	// Skipped when RepositoryID is already set or neither alternative
+	// identifier was supplied (the single-repo task default applies after
+	// the existing-rows lookup).
 	if req.RepositoryID == "" && (req.LocalPath != "" || req.GitHubURL != "") {
 		resolvedID, resolvedBranch, resolveErr := s.ResolveRepositoryRef(ctx, task.WorkspaceID, TaskRepositoryInput{
 			LocalPath:  req.LocalPath,
@@ -134,9 +142,6 @@ func (s *Service) prepareBranchAdd(ctx context.Context, req *AddBranchToTaskRequ
 		if req.BaseBranch == "" {
 			req.BaseBranch = resolvedBranch
 		}
-	}
-	if err := s.requireWorktreeExecutorForBranchAdd(ctx, req.TaskID); err != nil {
-		return nil, nil, err
 	}
 	existing, err := s.taskRepos.ListTaskRepositories(ctx, req.TaskID)
 	if err != nil {
