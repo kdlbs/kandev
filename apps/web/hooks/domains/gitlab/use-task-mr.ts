@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { fetchGitLabStatus, listWorkspaceTaskMRs } from "@/lib/api/domains/gitlab-api";
+import { useEffect, useRef } from "react";
+import { listWorkspaceTaskMRs } from "@/lib/api/domains/gitlab-api";
 import { useAppStore } from "@/components/state-provider";
 import type { TaskMR } from "@/lib/types/gitlab";
+import { useGitLabStatus } from "./use-gitlab-status";
 
 /**
  * Hydrate the gitlab task-MRs slice for a workspace. Fetches once per
@@ -58,30 +59,11 @@ export function useTaskMRs(taskId: string | null): TaskMR[] {
 /**
  * Returns whether GitLab is configured enough to surface in the integrations
  * menu. Token-configured or authenticated counts as "available" — same bar
- * as useGitHubStatus's `ready` flag. Probes /status on mount + after window
- * regains focus so settings changes propagate without a hard reload.
+ * as useGitHubStatus's `ready` flag. Backed by the store-cached
+ * useGitLabStatus hook, so multiple consumers share a single fetch and the
+ * status doesn't re-probe on every window focus.
  */
 export function useGitLabAvailable(): boolean {
-  const [available, setAvailable] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    const probe = () => {
-      // `cache` MUST be top-level — fetchJson reads options.cache directly
-      // and overwrites init.cache with undefined. See lib/api/client.ts.
-      fetchGitLabStatus({ cache: "no-store" })
-        .then((s) => {
-          if (!cancelled) setAvailable(Boolean(s?.authenticated || s?.token_configured));
-        })
-        .catch(() => {
-          if (!cancelled) setAvailable(false);
-        });
-    };
-    probe();
-    window.addEventListener("focus", probe);
-    return () => {
-      cancelled = true;
-      window.removeEventListener("focus", probe);
-    };
-  }, []);
-  return available;
+  const { status } = useGitLabStatus();
+  return Boolean(status?.authenticated || status?.token_configured);
 }
