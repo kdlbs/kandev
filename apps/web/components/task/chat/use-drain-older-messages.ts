@@ -16,18 +16,23 @@ export function useDrainOlderMessages(sessionId: string | null, active: boolean)
   useEffect(() => {
     if (!active || !sessionId) return;
     let cancelled = false;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsDraining(true);
     void (async () => {
-      for (let i = 0; i < MAX_DRAIN_BATCHES; i++) {
-        if (cancelled) return;
-        const fetched = await loadMore();
-        if (fetched === 0) break;
+      try {
+        for (let i = 0; i < MAX_DRAIN_BATCHES; i++) {
+          if (cancelled) return;
+          const fetched = await loadMore();
+          if (fetched === 0) break;
+        }
+      } catch (error) {
+        console.error("[useDrainOlderMessages] drain failed:", error);
+      } finally {
+        if (!cancelled) setIsDraining(false);
       }
-      if (!cancelled) setIsDraining(false);
     })();
     return () => {
       cancelled = true;
+      setIsDraining(false);
     };
   }, [active, sessionId, loadMore]);
   return { isDraining };

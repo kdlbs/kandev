@@ -168,9 +168,10 @@ export function MessageHistorySearch({
 
   useScrollSelectedIntoView(selectedIndex, listRef);
 
-  const style = computeStyle(anchorRect);
-  if (!isOpen || !style) return null;
+  if (!isOpen) return null;
   if (typeof document === "undefined") return null;
+  const style = computeStyle(anchorRect);
+  if (!style) return null;
 
   const overlay = (
     <div
@@ -214,7 +215,7 @@ export function MessageHistorySearch({
         ) : (
           hits.map((hit, rowIndex) => (
             <HitRow
-              key={`${hit.index}-${rowIndex}`}
+              key={hit.index}
               hit={hit}
               isSelected={rowIndex === selectedIndex}
               rowIndex={rowIndex}

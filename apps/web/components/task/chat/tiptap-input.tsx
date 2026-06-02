@@ -385,7 +385,7 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     (menu.mentionMenu.isOpen && menu.mentionMenu.items.length > 0) ||
     (menu.slashMenu.isOpen && menu.slashMenu.items.length > 0);
   const { history, getHistory } = useChatHistory(sessionId);
-  const { editorWrapperRef, ...overlay } = useReverseSearchOverlay(history.length);
+  const { editorWrapperRef, ...overlay } = useReverseSearchOverlay(sessionId);
   const { isDraining } = useDrainOlderMessages(sessionId, overlay.isReverseSearchOpen);
   const { editor, applyHistoryEntry } = useTipTapEditor({
     value,
@@ -409,13 +409,14 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     isReverseSearchOpen: overlay.isReverseSearchOpen,
     ref,
   });
+  const { closeReverseSearch } = overlay;
   const handleReverseSearchSelect = useCallback(
     (index: number) => {
       applyHistoryEntry(index);
-      overlay.closeReverseSearch();
+      closeReverseSearch();
       editor?.commands.focus("end");
     },
-    [applyHistoryEntry, overlay, editor],
+    [applyHistoryEntry, closeReverseSearch, editor],
   );
   return (
     <>
@@ -504,16 +505,16 @@ function useChatHistory(sessionId: string | null) {
   return { history, getHistory, historyRef };
 }
 
-function useReverseSearchOverlay(historyLength: number) {
+function useReverseSearchOverlay(sessionId: string | null) {
   const editorWrapperRef = useRef<HTMLDivElement>(null);
   const [reverseSearchAnchor, setReverseSearchAnchor] = useState<DOMRect | null>(null);
   const [isReverseSearchOpen, setIsReverseSearchOpen] = useState(false);
-  const historyLengthRef = useRef(historyLength);
+  const sessionIdRef = useRef(sessionId);
   useLayoutEffect(() => {
-    historyLengthRef.current = historyLength;
+    sessionIdRef.current = sessionId;
   });
   const openReverseSearch = useCallback(() => {
-    if (historyLengthRef.current === 0) return;
+    if (!sessionIdRef.current) return;
     setReverseSearchAnchor(editorWrapperRef.current?.getBoundingClientRect() ?? null);
     setIsReverseSearchOpen(true);
   }, []);

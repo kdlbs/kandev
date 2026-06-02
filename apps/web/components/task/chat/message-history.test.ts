@@ -77,6 +77,16 @@ describe("extractUserHistory", () => {
     expect(extractUserHistory(messages)).toEqual(["a", "b", "a"]);
   });
 
+  it("keeps duplicates separated by agent/tool turns (adjacency is in original stream)", () => {
+    const messages: Message[] = [
+      msg({ id: "1", content: "fix bug" }),
+      msg({ id: "2", content: "working on it", author_type: "agent" }),
+      msg({ id: "3", content: "ran cmd", type: "tool_execute" }),
+      msg({ id: "4", content: "fix bug" }),
+    ];
+    expect(extractUserHistory(messages)).toEqual(["fix bug", "fix bug"]);
+  });
+
   it("returns empty for empty input", () => {
     expect(extractUserHistory([])).toEqual([]);
   });

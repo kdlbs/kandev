@@ -1,9 +1,10 @@
 import type { Message } from "@/lib/types/http";
 
 /** Extract the user's previously sent text messages for a session, newest-first.
- *  Consecutive duplicates are collapsed so pressing ArrowUp moves through
- *  distinct entries (mirrors shell history). Empty/whitespace-only messages
- *  are skipped. */
+ *  Consecutive duplicates *in the original message stream* are collapsed —
+ *  duplicates separated by an assistant or tool turn stay, since the user
+ *  meaningfully repeated themselves and should be able to recall the older
+ *  one from history. Empty/whitespace-only messages are skipped. */
 export function extractUserHistory(messages: readonly Message[]): string[] {
   const out: string[] = [];
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -11,7 +12,12 @@ export function extractUserHistory(messages: readonly Message[]): string[] {
     if (m.author_type !== "user" || m.type !== "message") continue;
     const content = m.content ?? "";
     if (!content.trim()) continue;
-    if (out.length > 0 && out[out.length - 1] === content) continue;
+    const newer = messages[i + 1];
+    const isAdjacentUserDuplicate =
+      newer?.author_type === "user" &&
+      newer.type === "message" &&
+      (newer.content ?? "") === content;
+    if (isAdjacentUserDuplicate) continue;
     out.push(content);
   }
   return out;
