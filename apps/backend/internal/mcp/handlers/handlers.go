@@ -823,6 +823,12 @@ func classifyAddBranchError(err error) string {
 		strings.Contains(msg, "only supported on the worktree executor"),
 		strings.Contains(msg, "task_id is required"):
 		return ws.ErrorCodeValidation
+	case strings.HasPrefix(msg, "resolve repository: "):
+		// All ResolveRepositoryRef failures are user-fixable input mistakes
+		// (malformed URL, unknown local_path, cross-workspace repository_id).
+		// The wrapped message preserves the specific reason; only the code
+		// changes from InternalError to Validation.
+		return ws.ErrorCodeValidation
 	}
 	return ws.ErrorCodeInternalError
 }
