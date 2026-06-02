@@ -277,23 +277,8 @@ type usageTracker struct {
 	maxSize int64
 }
 
-// recordUsageDelta updates the per-session tracker. Returns the
-// integer delta against the previous `used` snapshot — the next prompt
-// complete call consumes this via consumeUsageDelta. Cost is forwarded
-// as the latest value (claude-acp emits a per-turn cumulative cost; we
-// treat the most recent value as the turn's cost).
-func (a *Adapter) recordUsageDelta(sessionID string, used int64, costSubcents int64) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	tr := a.ensureUsageTracker(sessionID)
-	if used > tr.lastUsed {
-		tr.lastUsed = used
-	}
-	if costSubcents > 0 {
-		tr.lastCostSubcents = costSubcents
-	}
-}
-
+// ensureUsageTracker returns the per-session usage tracker, creating it if
+// needed. Callers must hold a.mu (write lock).
 func (a *Adapter) ensureUsageTracker(sessionID string) *usageTracker {
 	tr := a.usageBySession[sessionID]
 	if tr == nil {

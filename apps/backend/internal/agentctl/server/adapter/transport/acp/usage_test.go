@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/coder/acp-go-sdk"
@@ -156,16 +157,17 @@ func TestExtractUsage(t *testing.T) {
 }
 
 // TestUsageTracker_CumulativeDelta asserts the codex-acp fallback path:
-// usage_update updates the cumulative used counter; consumeUsageDelta
-// returns the running total and resets to zero so the next turn starts
-// fresh. Cost (when present) is forwarded as the latest snapshot.
+// usage_update updates the cumulative used counter via tryConvertUntypedUpdate;
+// consumeUsageDelta returns the running total and resets to zero so the next
+// turn starts fresh.
 func TestUsageTracker_CumulativeDelta(t *testing.T) {
 	a := newTestAdapter()
+	const sess = "sess-codex"
 
-	a.recordUsageDelta("sess-codex", 100, 0)
-	a.recordUsageDelta("sess-codex", 350, 0)
+	a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 100), sess)
+	a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 350), sess)
 
-	delta, cost := a.consumeUsageDelta("sess-codex")
+	delta, cost := a.consumeUsageDelta(sess)
 	if delta != 350 {
 		t.Errorf("first consume delta = %d, want 350", delta)
 	}
@@ -173,9 +175,8 @@ func TestUsageTracker_CumulativeDelta(t *testing.T) {
 		t.Errorf("first consume cost = %d, want 0 (no cost reported)", cost)
 	}
 
-	// After consume the tracker resets; new turn starts from 0.
-	a.recordUsageDelta("sess-codex", 200, 0)
-	delta, _ = a.consumeUsageDelta("sess-codex")
+	a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 200), sess)
+	delta, _ = a.consumeUsageDelta(sess)
 	if delta != 200 {
 		t.Errorf("second consume delta = %d, want 200 (reset baseline)", delta)
 	}
@@ -186,18 +187,25 @@ func TestUsageTracker_CumulativeDelta(t *testing.T) {
 // recent value; consume returns it and resets.
 func TestUsageTracker_ForwardsCost(t *testing.T) {
 	a := newTestAdapter()
+	const sess = "sess-claude"
 
-	a.recordUsageDelta("sess-claude", 25068, 615) // 0.06156125 USD -> 616 (rounded)
-	_, cost := a.consumeUsageDelta("sess-claude")
+	a.tryConvertUntypedUpdate(usageUpdateCostRaw(200_000, 25_068, 0.06156125), sess)
+	_, cost := a.consumeUsageDelta(sess)
 	if cost != 615 {
 		t.Errorf("cost = %d, want 615 (subcents)", cost)
 	}
 
-	// Second consume after no updates returns zero (reset).
-	_, cost = a.consumeUsageDelta("sess-claude")
+	_, cost = a.consumeUsageDelta(sess)
 	if cost != 0 {
 		t.Errorf("second consume cost = %d, want 0", cost)
 	}
+}
+
+func usageUpdateCostRaw(size, used int64, costUSD float64) []byte {
+	return []byte(fmt.Sprintf(
+		`{"sessionId":"s1","update":{"sessionUpdate":"usage_update","size":%d,"used":%d,"cost":{"amount":%g,"currency":"USD"}}}`,
+		size, used, costUSD,
+	))
 }
 
 // TestConsumeUsageDelta_UnknownSession returns zero for sessions that
