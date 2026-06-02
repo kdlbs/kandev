@@ -183,6 +183,12 @@ type RuntimeConfig struct {
 	AssumeMcpHttp   bool   // Override: assume agent supports HTTP MCP servers even if not advertised
 	ProjectSkillDir string // CWD-relative path for project-level skills (e.g. ".claude/skills")
 	UserSkillDir    string // home-relative path for user-level skills (e.g. ".claude/skills")
+	// RequiresProcessKill is true for agents whose subprocess does not exit
+	// when stdin is closed (e.g. OpenCode's ACP runtime, which keeps its HTTP
+	// server and MCP child tree alive). When true, the agentctl process
+	// manager kills the whole process group on shutdown so MCP children
+	// don't leak.
+	RequiresProcessKill bool
 }
 
 // MountTemplate defines a mount with template variables.

@@ -357,14 +357,15 @@ func (r *SpritesExecutor) createAgentInstance(
 	req *ExecutorCreateRequest,
 ) (int, error) {
 	instanceReq := agentctl.CreateInstanceRequest{
-		ID:            req.InstanceID,
-		WorkspacePath: spritesWorkspacePath,
-		SessionID:     req.SessionID,
-		TaskID:        req.TaskID,
-		Protocol:      req.Protocol,
-		AgentType:     agentTypeFromReq(req),
-		McpServers:    req.McpServers,
-		McpMode:       req.McpMode,
+		ID:                  req.InstanceID,
+		WorkspacePath:       spritesWorkspacePath,
+		SessionID:           req.SessionID,
+		TaskID:              req.TaskID,
+		Protocol:            req.Protocol,
+		AgentType:           agentTypeFromReq(req),
+		McpServers:          req.McpServers,
+		McpMode:             req.McpMode,
+		RequiresProcessKill: requiresProcessKillFromReq(req),
 	}
 	reqJSON, err := json.Marshal(instanceReq)
 	if err != nil {
@@ -467,6 +468,19 @@ func agentTypeFromReq(req *ExecutorCreateRequest) string {
 		return req.AgentConfig.ID()
 	}
 	return ""
+}
+
+// requiresProcessKillFromReq returns the agent's RequiresProcessKill setting
+// from its RuntimeConfig (false when unset).
+func requiresProcessKillFromReq(req *ExecutorCreateRequest) bool {
+	if req == nil || req.AgentConfig == nil {
+		return false
+	}
+	rt := req.AgentConfig.Runtime()
+	if rt == nil {
+		return false
+	}
+	return rt.RequiresProcessKill
 }
 
 func (r *SpritesExecutor) waitForHealth(ctx context.Context, sprite *sprites.Sprite) error {

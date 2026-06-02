@@ -674,13 +674,14 @@ func (m *Manager) buildAdapterConfig() error {
 		}
 	}
 	m.adapterCfg = &adapter.Config{
-		WorkDir:        m.cfg.WorkDir,
-		AutoApprove:    m.cfg.AutoApprovePermissions,
-		ApprovalPolicy: m.cfg.ApprovalPolicy,
-		McpServers:     mcpServers,
-		AgentID:        m.cfg.AgentType, // From registry (e.g., "auggie", "amp", "claude-code")
-		AssumeMcpSse:   m.cfg.AssumeMcpSse,
-		AssumeMcpHttp:  m.cfg.AssumeMcpHttp,
+		WorkDir:             m.cfg.WorkDir,
+		AutoApprove:         m.cfg.AutoApprovePermissions,
+		ApprovalPolicy:      m.cfg.ApprovalPolicy,
+		McpServers:          mcpServers,
+		AgentID:             m.cfg.AgentType, // From registry (e.g., "auggie", "amp", "claude-code")
+		AssumeMcpSse:        m.cfg.AssumeMcpSse,
+		AssumeMcpHttp:       m.cfg.AssumeMcpHttp,
+		RequiresProcessKill: m.cfg.RequiresProcessKill,
 	}
 
 	// Configure one-shot mode when a continue command is provided.
@@ -1119,6 +1120,12 @@ func (m *Manager) killProcessGroupIfRequired() {
 }
 
 // waitForProcessExit waits for all goroutines to finish, force-killing on context timeout.
+//
+// On timeout the entire process group is killed (not just the leader) so that
+// child processes — most importantly MCP servers spawned by the agent — don't
+// re-parent to init and leak. setProcGroup at command-build time puts the
+// agent in its own pgid; here we deliver SIGKILL to that pgid. Falls back to
+// a single-process kill only if the process-group call fails.
 func (m *Manager) waitForProcessExit(ctx context.Context) {
 	m.logger.Debug("waiting for process to exit")
 	done := make(chan struct{})
@@ -1131,8 +1138,14 @@ func (m *Manager) waitForProcessExit(ctx context.Context) {
 	case <-done:
 		m.logger.Info("agent process stopped gracefully")
 	case <-ctx.Done():
-		if m.cmd != nil && m.cmd.Process != nil {
-			m.logger.Warn("force killing agent process")
+		if m.cmd == nil || m.cmd.Process == nil {
+			return
+		}
+		pid := m.cmd.Process.Pid
+		m.logger.Warn("force killing agent process group", zap.Int("pgid", pid))
+		if err := killProcessGroup(pid); err != nil {
+			m.logger.Warn("failed to kill agent process group, falling back to single-process kill",
+				zap.Error(err))
 			if err := m.cmd.Process.Kill(); err != nil {
 				m.logger.Warn("failed to kill agent process", zap.Error(err))
 			}

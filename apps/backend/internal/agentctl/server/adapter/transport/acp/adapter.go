@@ -397,9 +397,14 @@ func (a *Adapter) Close() error {
 	return nil
 }
 
-// RequiresProcessKill returns false because ACP agents exit when stdin is closed.
+// RequiresProcessKill reports whether the agent's process group must be killed
+// on shutdown. Most ACP agents exit cleanly when stdin closes, but some (notably
+// opencode acp) keep an HTTP server and MCP child tree alive after EOF —
+// those agents set cfg.RequiresProcessKill so the process manager reaps the
+// entire group instead of waiting for a graceful exit that never comes.
+// See GH issue #1247.
 func (a *Adapter) RequiresProcessKill() bool {
-	return false
+	return a.cfg != nil && a.cfg.RequiresProcessKill
 }
 
 // getPromptTraceCtx returns the current prompt span context for child-span linking.
