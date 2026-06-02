@@ -164,34 +164,7 @@ func TestLoadReplayBurst_HandlesLargeReplay(t *testing.T) {
 	// by the adapter (AgentMessageChunk + ToolCall + Plan are on the suppress
 	// list) — the point is whether the SDK's 1024-deep queue stays drained.
 	for i := 0; i < notificationBurstSize; i++ {
-		var update acp.SessionUpdate
-		switch i % 3 {
-		case 0:
-			update = acp.SessionUpdate{
-				AgentMessageChunk: &acp.SessionUpdateAgentMessageChunk{
-					Content: acp.TextBlock(fmt.Sprintf("replay chunk %d", i)),
-				},
-			}
-		case 1:
-			update = acp.SessionUpdate{
-				ToolCall: &acp.SessionUpdateToolCall{
-					ToolCallId: acp.ToolCallId(fmt.Sprintf("tc-%d", i)),
-					Title:      "replay tool call",
-				},
-			}
-		case 2:
-			update = acp.SessionUpdate{
-				Plan: &acp.SessionUpdatePlan{
-					Entries: []acp.PlanEntry{
-						{Content: fmt.Sprintf("plan entry %d", i), Status: "in_progress"},
-					},
-				},
-			}
-		}
-		if err := agentConn.SessionUpdate(ctx, acp.SessionNotification{
-			SessionId: acp.SessionId(sessionID),
-			Update:    update,
-		}); err != nil {
+		if err := agentConn.SessionUpdate(ctx, makeReplayNotification(sessionID, i)); err != nil {
 			t.Fatalf("SessionUpdate at i=%d failed: %v", i, err)
 		}
 	}
@@ -211,14 +184,10 @@ func TestLoadReplayBurst_HandlesLargeReplay(t *testing.T) {
 		t.Fatalf("sentinel SessionUpdate failed: %v", err)
 	}
 
-	// The connection must NOT have been closed by the SDK's overflow path.
-	select {
-	case <-clientConn.Done():
-		t.Fatal("client connection closed during replay burst — likely notification queue overflow")
-	case <-agentConn.Done():
-		t.Fatal("agent connection closed during replay burst — likely notification queue overflow")
-	default:
-	}
+	// The sentinel-wait loop below is the authoritative overflow check: the
+	// SDK tears down both sides if its inbound queue ever stalls, so a closed
+	// Done() observed there proves overflow. A non-blocking peek here would
+	// race the async teardown and could produce a false PASS.
 
 	// Wait for the sentinel to flow through to the adapter's updates channel.
 	deadline := time.After(15 * time.Second)

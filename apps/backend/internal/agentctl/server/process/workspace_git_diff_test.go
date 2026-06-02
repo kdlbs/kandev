@@ -289,31 +289,43 @@ func TestEnrichStagedDiff_RenamedFile(t *testing.T) {
 // timeout would clear the sidebar's branch-totals count.
 func TestCarryBranchDiff(t *testing.T) {
 	head := "abc123"
+	base := "base000"
 	tests := []struct {
 		name          string
 		prior         streams.GitStatusUpdate
 		updateHead    string
+		updateBase    string
 		wantAdditions int
 		wantDeletions int
 	}{
 		{
-			name:          "same head preserves totals",
-			prior:         streams.GitStatusUpdate{HeadCommit: head, BranchAdditions: 42, BranchDeletions: 7},
+			name:          "same head and base preserves totals",
+			prior:         streams.GitStatusUpdate{HeadCommit: head, BaseCommit: base, BranchAdditions: 42, BranchDeletions: 7},
 			updateHead:    head,
+			updateBase:    base,
 			wantAdditions: 42,
 			wantDeletions: 7,
 		},
 		{
 			name:          "different head drops totals",
-			prior:         streams.GitStatusUpdate{HeadCommit: head, BranchAdditions: 42, BranchDeletions: 7},
+			prior:         streams.GitStatusUpdate{HeadCommit: head, BaseCommit: base, BranchAdditions: 42, BranchDeletions: 7},
 			updateHead:    "def456",
+			updateBase:    base,
+			wantAdditions: 0,
+			wantDeletions: 0,
+		},
+		{
+			name:          "different base drops totals",
+			prior:         streams.GitStatusUpdate{HeadCommit: head, BaseCommit: base, BranchAdditions: 42, BranchDeletions: 7},
+			updateHead:    head,
+			updateBase:    "newbase",
 			wantAdditions: 0,
 			wantDeletions: 0,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			update := &streams.GitStatusUpdate{HeadCommit: tt.updateHead}
+			update := &streams.GitStatusUpdate{HeadCommit: tt.updateHead, BaseCommit: tt.updateBase}
 			carryBranchDiff(update, tt.prior)
 			if update.BranchAdditions != tt.wantAdditions || update.BranchDeletions != tt.wantDeletions {
 				t.Errorf("additions/deletions = %d/%d, want %d/%d",
