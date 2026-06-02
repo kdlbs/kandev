@@ -3,7 +3,7 @@ import type { TaskSession } from "@/lib/types/http";
 import type { SessionSlice, SessionSliceState } from "./types";
 import { migrateEnvKeyedData } from "@/lib/state/slices/session-runtime/session-runtime-slice";
 import { prepareResultToSessionState } from "@/lib/state/slices/session-runtime/prepare-result";
-import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
 const debugEnv = createDebugLogger("session:env-mapping");
 
@@ -48,7 +48,7 @@ function mergeMessageFields(target: Record<string, unknown>, source: Record<stri
 function syncEnvironmentMapping(draft: any, sessionId: string, environmentId: string | undefined) {
   if (!environmentId) return;
   const previous = draft.environmentIdBySessionId[sessionId];
-  if (IS_DEBUG) {
+  if (isDebug()) {
     debugEnv("syncEnvironmentMapping", {
       sessionId,
       environmentId,

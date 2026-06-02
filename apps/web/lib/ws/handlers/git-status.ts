@@ -11,7 +11,7 @@ import type {
   GitBranchSwitchedEvent,
 } from "@/lib/types/git-events";
 import { invalidateCumulativeDiffCache } from "@/hooks/domains/session/use-cumulative-diff";
-import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
 const debug = createDebugLogger("git-status:ws");
 
@@ -63,7 +63,7 @@ const gitEventHandlers: GitEventHandlers = {
   status_update: (store, event) => {
     const gitStatus = buildGitStatusEntry(event);
     const changed = statusUpdateChangesGitState(store, event.session_id, gitStatus);
-    if (IS_DEBUG) {
+    if (isDebug()) {
       debug("status_update", {
         sessionId: event.session_id,
         repositoryName: event.status.repository_name ?? null,
@@ -87,7 +87,7 @@ const gitEventHandlers: GitEventHandlers = {
   },
 
   commit_created: (store, event) => {
-    if (IS_DEBUG) {
+    if (isDebug()) {
       debug("commit_created", {
         sessionId: event.session_id,
         sha: event.commit.commit_sha,
@@ -116,7 +116,7 @@ const gitEventHandlers: GitEventHandlers = {
   },
 
   commits_reset: (store, event) => {
-    if (IS_DEBUG) debug("commits_reset", { sessionId: event.session_id });
+    if (isDebug()) debug("commits_reset", { sessionId: event.session_id });
     // Trigger a refetch without clearing the visible commits — the Changes
     // panel would otherwise flicker through its empty state ("Your changed
     // files will appear here") while the refetch is in flight, because
@@ -128,7 +128,7 @@ const gitEventHandlers: GitEventHandlers = {
   },
 
   branch_switched: (store, event) => {
-    if (IS_DEBUG) debug("branch_switched", { sessionId: event.session_id });
+    if (isDebug()) debug("branch_switched", { sessionId: event.session_id });
     // Stale-while-revalidate (see commits_reset above): refetch with the new
     // base commit but keep the old list visible until the new one arrives.
     store.getState().bumpSessionCommitsRefetch(event.session_id);

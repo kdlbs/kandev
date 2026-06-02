@@ -20,7 +20,7 @@
  */
 import type { DockviewApi } from "dockview-react";
 import { getRootSplitview, getPinnedTarget, computeSidebarMaxPx } from "./layout-manager";
-import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
 const debugWidths = createDebugLogger("dockview:widths");
 
@@ -47,7 +47,7 @@ function restoreColumnToTarget(sv: any, idx: number, target: number | undefined)
   if (target === undefined) return;
   const cur = sv.getViewSize(idx);
   if (Math.abs(cur - target) <= 1) return;
-  if (IS_DEBUG) {
+  if (isDebug()) {
     debugWidths(`enforce-restore idx=${idx} cur=${Math.round(cur)} target=${Math.round(target)}`);
   }
   try {

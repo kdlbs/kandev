@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import type { StoreApi } from "zustand";
 import { useStore } from "zustand";
-import { IS_DEBUG, registerSessionTaskResolver } from "@/lib/debug/log";
+import { isDebug, registerSessionTaskResolver } from "@/lib/debug/log";
 import type { AppState, StoreProviderProps } from "@/lib/state/store";
 import { createAppStore } from "@/lib/state/store";
 
@@ -28,7 +28,7 @@ export function StateProvider({ children, initialState }: StoreProviderProps) {
   // carries a sessionId with `task_id=<...>` so console/log filters can scope to
   // a single task (see lib/debug/log.ts). No-op in production.
   useEffect(() => {
-    if (!IS_DEBUG) return;
+    if (!isDebug()) return;
     return registerSessionTaskResolver(
       (sessionId) => store.getState().taskSessions.items[sessionId]?.task_id,
     );

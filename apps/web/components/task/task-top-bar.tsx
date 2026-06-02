@@ -41,7 +41,7 @@ import {
   type TopbarOverflowItem,
 } from "@/components/task/topbar-action-overflow";
 import { IntegrationsMenu } from "@/components/integrations/integrations-menu";
-import { DEBUG_UI } from "@/lib/config";
+import { isDebugUI } from "@/lib/config";
 
 type TaskTopBarProps = {
   taskId?: string | null;
@@ -234,7 +234,7 @@ function MoreToolsMenu({
   showDebugOverlay?: boolean;
   onToggleDebugOverlay?: () => void;
 }) {
-  const showDebugItem = DEBUG_UI && onToggleDebugOverlay;
+  const showDebugItem = isDebugUI() && onToggleDebugOverlay;
   const debugLabel = showDebugOverlay ? "Hide Debug Info" : "Show Debug Info";
 
   return (
@@ -341,7 +341,7 @@ function TopbarToolsGroup({
   onToggleDebugOverlay?: () => void;
   isArchived?: boolean;
 }) {
-  const showDebugMenu = DEBUG_UI && onToggleDebugOverlay;
+  const showDebugMenu = isDebugUI() && onToggleDebugOverlay;
 
   return (
     <TopbarCluster label="Task tools" className="[&_button]:h-8 [&_button]:text-xs">

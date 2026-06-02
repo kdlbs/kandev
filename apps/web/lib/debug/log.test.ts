@@ -162,9 +162,9 @@ describe("registerSessionTaskResolver", () => {
   });
 });
 
-describe("IS_DEBUG", () => {
-  // Module re-imports are required because IS_DEBUG is a module-level constant
-  // evaluated at import time. resetModules forces re-evaluation with the
+describe("isDebug", () => {
+  // Module re-imports are required because isDebug memoizes its result.
+  // resetModules + resetDebugForTests forces re-evaluation with the
   // current env / globals each time.
 
   beforeEach(() => {
@@ -181,23 +181,23 @@ describe("IS_DEBUG", () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("NEXT_PUBLIC_KANDEV_DEBUG", "");
     vi.stubGlobal("window", { __KANDEV_DEBUG: true });
-    const { IS_DEBUG } = await import("./log");
-    expect(IS_DEBUG).toBe(true);
+    const { isDebug } = await import("./log");
+    expect(isDebug()).toBe(true);
   });
 
   it("is false in a production build with no flag set", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("NEXT_PUBLIC_KANDEV_DEBUG", "");
     vi.stubGlobal("window", {});
-    const { IS_DEBUG } = await import("./log");
-    expect(IS_DEBUG).toBe(false);
+    const { isDebug } = await import("./log");
+    expect(isDebug()).toBe(false);
   });
 
   it("is true when NEXT_PUBLIC_KANDEV_DEBUG=true at build time", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("NEXT_PUBLIC_KANDEV_DEBUG", "true");
     vi.stubGlobal("window", {});
-    const { IS_DEBUG } = await import("./log");
-    expect(IS_DEBUG).toBe(true);
+    const { isDebug } = await import("./log");
+    expect(isDebug()).toBe(true);
   });
 });

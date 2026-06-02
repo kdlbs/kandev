@@ -7,7 +7,7 @@ import { focusOrAddPanel } from "@/lib/state/dockview-layout-builders";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { wasPRPanelOffered, markPRPanelOffered } from "@/lib/local-storage";
 import { sessionId as toSessionId } from "@/lib/types/ids";
-import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
 const debug = createDebugLogger("dockview:session-tabs");
 
@@ -21,7 +21,7 @@ export function setupSessionTabSync(api: DockviewReadyEvent["api"], appStore: St
   return api.onDidActivePanelChange((panel) => {
     if (!panel) return;
     const isRestoring = useDockviewStore.getState().isRestoringLayout;
-    if (IS_DEBUG) {
+    if (isDebug()) {
       debug("setupSessionTabSync: onDidActivePanelChange", {
         panelId: panel.id,
         isRestoring,
@@ -36,7 +36,7 @@ export function setupSessionTabSync(api: DockviewReadyEvent["api"], appStore: St
     if (sid && sid !== appStore.getState().tasks.activeSessionId) {
       const taskId = appStore.getState().tasks.activeTaskId;
       if (taskId) {
-        if (IS_DEBUG) {
+        if (isDebug()) {
           debug("setupSessionTabSync: setActiveSession", { taskId, newSessionId: sid });
         }
         appStore.getState().setActiveSession(taskId, sid);
@@ -60,7 +60,7 @@ export function setupChatPanelSafetyNet(
     if (useDockviewStore.getState().isRestoringLayout) return;
     const isChatPanel = panel.id === "chat" || panel.id.startsWith("session:");
     if (!isChatPanel) return;
-    if (IS_DEBUG) {
+    if (isDebug()) {
       debug("setupChatPanelSafetyNet: chat panel removed", {
         removedPanelId: panel.id,
         livePanelIds: api.panels.map((p) => p.id),
@@ -82,7 +82,7 @@ export function setupChatPanelSafetyNet(
         // If all sessions were deleted, leave the layout empty — the user
         // can create a new session via the "+" menu.
         if (!activeSessionId) {
-          if (IS_DEBUG) debug("setupChatPanelSafetyNet: skip recreate (no active session)");
+          if (isDebug()) debug("setupChatPanelSafetyNet: skip recreate (no active session)");
           return;
         }
         // Don't recreate a panel for a session that no longer exists in the
@@ -92,7 +92,7 @@ export function setupChatPanelSafetyNet(
           ? (appStore.getState().taskSessionsByTask.itemsByTaskId[activeTaskId] ?? [])
           : [];
         if (!knownSessions.some((s) => s.id === activeSessionId)) {
-          if (IS_DEBUG) {
+          if (isDebug()) {
             debug("setupChatPanelSafetyNet: skip recreate (session not in store)", {
               activeSessionId,
               activeTaskId,
@@ -101,7 +101,7 @@ export function setupChatPanelSafetyNet(
           }
           return;
         }
-        if (IS_DEBUG) {
+        if (isDebug()) {
           debug("setupChatPanelSafetyNet: recreating session panel", {
             activeSessionId,
             activeTaskId,
@@ -325,7 +325,7 @@ export function reconcileRemovedSessionPanels(
     }
     createdSet.delete(sid);
   }
-  if (IS_DEBUG) {
+  if (isDebug()) {
     const sessionPanels = api.panels.filter((p) => p.id.startsWith("session:"));
     debug("reconcileRemovedSessionPanels", {
       keepSessionId,
@@ -425,7 +425,7 @@ function activateSessionPanel(
     currentTaskId: tid,
     currentSessionId: effectiveSessionId,
   });
-  if (IS_DEBUG) {
+  if (isDebug()) {
     debug("useAutoSessionTab: activation decision", {
       effectiveSessionId,
       shouldActivate,
@@ -456,7 +456,7 @@ function ensureSiblingPanels(
   const created: string[] = [];
   for (const sid of currentSessionIds) {
     if (sid === effectiveSessionId) continue;
-    if (IS_DEBUG && !api.getPanel(`session:${sid}`)) created.push(sid);
+    if (isDebug() && !api.getPanel(`session:${sid}`)) created.push(sid);
     ensureSessionPanel(api, sid, siblingAnchor, true, createdSet);
   }
   return created;
@@ -485,7 +485,7 @@ function shouldSkipPanelEnsure(
   createdSet: Set<string>,
 ): boolean {
   if (!currentSessionIds.includes(toSessionId(effectiveSessionId))) {
-    if (IS_DEBUG) {
+    if (isDebug()) {
       debug("useAutoSessionTab: skip (session not in store yet)", {
         effectiveSessionId,
         currentSessionIds,
@@ -494,7 +494,7 @@ function shouldSkipPanelEnsure(
     return true;
   }
   if (!prepareLayoutForSessionPanels(api)) {
-    if (IS_DEBUG)
+    if (isDebug())
       debug("useAutoSessionTab: skip body (maximized - panels suppressed)", { effectiveSessionId });
     createdSet.add(effectiveSessionId);
     return true;
@@ -516,7 +516,7 @@ function runAutoSessionTabEffect(
 
   const { tid, currentSessionIds } = resolveCurrentSessionIds(appStore);
 
-  if (IS_DEBUG) {
+  if (isDebug()) {
     debug("useAutoSessionTab: effect entry", {
       effectiveSessionId,
       activeTaskId: tid,
@@ -536,7 +536,7 @@ function runAutoSessionTabEffect(
   );
 
   if (!effectiveSessionId) {
-    if (IS_DEBUG) debug("useAutoSessionTab: no effectiveSessionId, returning");
+    if (isDebug()) debug("useAutoSessionTab: no effectiveSessionId, returning");
     return;
   }
 
@@ -554,7 +554,7 @@ function runAutoSessionTabEffect(
   const initialPosition = resolveInitialPosition(api);
   const sessionPanelExistedBefore = !!api.getPanel(`session:${effectiveSessionId}`);
 
-  if (IS_DEBUG) {
+  if (isDebug()) {
     debug("useAutoSessionTab: ensuring active session panel", {
       effectiveSessionId,
       sessionPanelExistedBefore,
@@ -590,7 +590,7 @@ function runAutoSessionTabEffect(
     refs.sessionTabCreatedRef.current,
   );
 
-  if (IS_DEBUG) {
+  if (isDebug()) {
     debug("useAutoSessionTab: effect exit", {
       effectiveSessionId,
       siblingsCreated,

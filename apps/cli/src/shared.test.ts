@@ -64,7 +64,9 @@ describe("buildWebEnv", () => {
 
   it("enables debug flag when requested", () => {
     expect(buildWebEnv({ ports, debug: true }).NEXT_PUBLIC_KANDEV_DEBUG).toBe("true");
+    expect(buildWebEnv({ ports, debug: true }).KANDEV_DEBUG).toBe("true");
     expect(buildWebEnv({ ports }).NEXT_PUBLIC_KANDEV_DEBUG).toBeUndefined();
+    expect(buildWebEnv({ ports }).KANDEV_DEBUG).toBeUndefined();
   });
 });
 

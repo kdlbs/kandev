@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 import { stripAnsi } from "@/lib/utils/ansi";
 import { isSetupScriptMessage } from "@/hooks/use-processed-messages";
 import type { Message } from "@/lib/types/http";
-import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import type {
   PrepareStepInfo,
   SessionPrepareState,
@@ -466,7 +466,7 @@ export function PrepareProgress({ sessionId }: PrepareProgressProps) {
   // env is still "preparing" combined with a Virtuoso initial-scroll race.
   const prevSnapshotRef = useRef<PrepareSnapshot | null>(null);
   useEffect(() => {
-    if (!IS_DEBUG) return;
+    if (!isDebug()) return;
     const snapshot: PrepareSnapshot = {
       status,
       autoExpand,

@@ -46,7 +46,7 @@ import {
 import { preserveChatScrollDuringLayout } from "./dockview-scroll-preserve";
 import { measureDockviewContainer } from "./dockview-measure";
 import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
-import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { snapshotColumnWidths, formatWidthsSnapshot } from "./dockview-widths-debug";
 
 const debugSwitch = createDebugLogger("dockview:store-switch");
@@ -261,7 +261,7 @@ function syncPinnedWidthsFromApi(api: DockviewApi, set: StoreSet): void {
       rightPanelsVisible,
     });
     if (updates.size > 0) {
-      if (IS_DEBUG) {
+      if (isDebug()) {
         const pairs = Array.from(updates.entries())
           .map(([k, v]) => `${k}=${Math.round(v)}`)
           .join(",");
@@ -508,7 +508,7 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
         resetWidths,
       );
       const ids = applyLayout(api, state, cleanedWidths, safeWidth, safeHeight);
-      if (IS_DEBUG) {
+      if (isDebug()) {
         const applied =
           [...cleanedWidths].map(([k, v]) => `${k}:${Math.round(v)}`).join(",") || "-";
         debugWidths(
@@ -524,7 +524,7 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
       });
       requestAnimationFrame(() => {
         api.layout(safeWidth, safeHeight);
-        if (IS_DEBUG) {
+        if (isDebug()) {
           debugWidths(
             `preset-post-layout preset=${preset} ${formatWidthsSnapshot(snapshotColumnWidths(api))}`,
           );
@@ -618,7 +618,7 @@ function saveOutgoingEnv(
     debugSave("saveOutgoingEnv: skip (no oldEnvId)");
     return;
   }
-  if (IS_DEBUG) {
+  if (isDebug()) {
     debugSave("saveOutgoingEnv: entry", {
       oldEnvId,
       livePanelIds: api.panels.map((p) => p.id),
@@ -672,7 +672,7 @@ function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
       debugSwitch("envSwitch: skip (no api)", { oldEnvId, newEnvId, activeSessionId });
       return;
     }
-    if (IS_DEBUG) {
+    if (isDebug()) {
       debugSwitch("envSwitch: entry", {
         oldEnvId,
         newEnvId,
@@ -724,7 +724,7 @@ function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
       set(ids);
       enforceFromStore(api, get);
       set({ isRestoringLayout: false });
-      if (IS_DEBUG) {
+      if (isDebug()) {
         debugWidths(
           `env-switch-done old=${effectiveOld ?? "-"} new=${newEnvId} ` +
             `${formatWidthsSnapshot(snapshotColumnWidths(api))}`,
@@ -820,7 +820,7 @@ function performBuildDefault(
   // Capture dimensions before layout change — api.width can become stale
   // after fromJSON inside applyLayout
   const { width: safeWidth, height: safeHeight } = measureDockviewContainer(api);
-  if (IS_DEBUG) {
+  if (isDebug()) {
     debugWidths(
       `build-default-entry intent=${intentName ?? "-"} ` +
         `measured=${safeWidth}x${safeHeight} ` +
@@ -856,7 +856,7 @@ function performBuildDefault(
     api.layout(safeWidth, safeHeight);
     enforceFromStore(api, get);
     syncPinnedWidthsFromApi(api, set);
-    if (IS_DEBUG) {
+    if (isDebug()) {
       debugWidths(`build-default-done ${formatWidthsSnapshot(snapshotColumnWidths(api))}`);
     }
     set({ isRestoringLayout: false });

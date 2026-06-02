@@ -5,7 +5,7 @@ import { useSessionGitStatus, useSessionGitStatusByRepo } from "./use-session-gi
 import { useSessionCommits } from "./use-session-commits";
 import { useCumulativeDiff } from "./use-cumulative-diff";
 import { useGitOperations } from "@/hooks/use-git-operations";
-import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import type {
   FileInfo,
   SessionCommit,
@@ -600,7 +600,7 @@ function useFileDerivations(
     [statusByRepo, gitStatus],
   );
   useEffect(() => {
-    if (!IS_DEBUG) return;
+    if (!isDebug()) return;
     debugDeriv("aggregate", {
       path: statusByRepo.length > 0 ? "multi-repo" : "single-repo-fallback",
       statusByRepoEntries: statusByRepo.map((s) => ({
