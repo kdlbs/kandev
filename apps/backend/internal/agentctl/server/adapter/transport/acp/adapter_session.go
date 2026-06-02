@@ -525,6 +525,7 @@ func (a *Adapter) SetModel(ctx context.Context, modelID string) error {
 	if err != nil {
 		return fmt.Errorf("set session model failed: %w", err)
 	}
+	a.resetContextWindowMaxSize(sessionID)
 	a.emitSetModelEvent(sessionID, modelID, available, cachedConfig)
 	return nil
 }
