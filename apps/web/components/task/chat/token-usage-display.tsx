@@ -10,6 +10,18 @@ type TokenUsageDisplayProps = {
   className?: string;
 };
 
+/**
+ * A context-window report is only trustworthy when we have a positive window
+ * size and usage that does not exceed it. `used > size` is impossible for a
+ * real window, so it means the agent (via the ACP bridge) reported a stale or
+ * wrong `size` (e.g. 200K for a model actually running on the 1M beta window).
+ * In that case we hide the indicator instead of showing a confusing >100%.
+ * `used === size` (exactly full) is valid and still renders.
+ */
+export function isContextWindowReliable(size: number, used: number): boolean {
+  return size > 0 && used <= size;
+}
+
 function formatNumber(num: number): string {
   if (num >= 1_000_000) {
     return `${(num / 1_000_000).toFixed(1)}M`;
@@ -33,9 +45,13 @@ export const TokenUsageDisplay = memo(function TokenUsageDisplay({
 }: TokenUsageDisplayProps) {
   const contextWindow = useSessionContextWindow(sessionId);
 
-  if (!contextWindow || contextWindow.size === 0) return null;
+  if (!contextWindow) return null;
 
   const { size, used, efficiency } = contextWindow;
+
+  // Hide when there's no data yet (size 0) or the report is impossible
+  // (used > size) — see isContextWindowReliable.
+  if (!isContextWindowReliable(size, used)) return null;
 
   const usagePercent = Math.min(efficiency, 100);
   const progress = usagePercent / 100;
