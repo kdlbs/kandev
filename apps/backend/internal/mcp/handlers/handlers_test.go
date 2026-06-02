@@ -854,7 +854,7 @@ func TestHandleCreateTask_BlockedBy_Accepted(t *testing.T) {
 	assertWSError(t, resp, ws.ErrorCodeValidation)
 }
 
-func TestHandleClarificationTimeout_MarksMessagesExpired(t *testing.T) {
+func TestHandleClarificationTimeout_DetachesMessages(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	ctx := context.Background()
 
@@ -908,7 +908,8 @@ func TestHandleClarificationTimeout_MarksMessagesExpired(t *testing.T) {
 
 	msgs, err := repo.FindPendingClarificationMessagesBySessionID(ctx, sess.ID)
 	require.NoError(t, err)
-	require.Empty(t, msgs, "all clarification messages should be expired")
+	require.Len(t, msgs, 1, "clarification should stay pending for deferred answer")
+	require.Equal(t, true, msgs[0].Metadata["agent_disconnected"])
 }
 
 func TestHandleClarificationTimeout_WithoutCanceller_ReturnsZero(t *testing.T) {

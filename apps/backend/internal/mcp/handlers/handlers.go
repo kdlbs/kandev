@@ -39,10 +39,10 @@ type ClarificationService interface {
 	CancelRequest(pendingID string) bool
 }
 
-// SessionCanceller cancels all pending clarifications for a session and marks
-// the related chat messages as expired. Used by the MCP-timeout handler.
+// SessionCanceller detaches in-memory clarification waiters while keeping DB
+// messages pending. Used by the MCP-timeout handler.
 type SessionCanceller interface {
-	CancelSessionAndNotify(ctx context.Context, sessionID string) int
+	DetachSessionAndNotify(ctx context.Context, sessionID string) int
 }
 
 // MessageCreator creates messages for clarification requests.
@@ -1513,9 +1513,9 @@ func (h *Handlers) handleClarificationTimeout(ctx context.Context, msg *ws.Messa
 
 	cancelled := 0
 	if h.sessionCanceller != nil {
-		cancelled = h.sessionCanceller.CancelSessionAndNotify(ctx, req.SessionID)
+		cancelled = h.sessionCanceller.DetachSessionAndNotify(ctx, req.SessionID)
 	}
-	h.logger.Info("cancelled pending clarifications on agent MCP timeout",
+	h.logger.Info("detached pending clarifications on agent MCP timeout",
 		zap.String("session_id", req.SessionID),
 		zap.Int("count", cancelled))
 

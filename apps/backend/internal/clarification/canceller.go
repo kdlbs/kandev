@@ -41,6 +41,29 @@ func isTerminalStatus(status string) bool {
 	return false
 }
 
+// markMessagesDetached unblocks WaitForResponse and keeps the clarification
+// interactive: status stays pending and agent_disconnected is set so the UI
+// can route a late answer through the event fallback path.
+func (c *Canceller) markMessagesDetached(ctx context.Context, msgs []*taskmodels.Message, pendingID string) {
+	for _, msg := range msgs {
+		if msg.Metadata == nil {
+			msg.Metadata = map[string]any{}
+		}
+		if current, _ := msg.Metadata["status"].(string); isTerminalStatus(current) {
+			continue
+		}
+		msg.Metadata["agent_disconnected"] = true
+		if err := c.repo.UpdateMessage(ctx, msg); err != nil {
+			c.logger.Warn("failed to update message with detached status",
+				zap.String("pending_id", pendingID),
+				zap.String("message_id", msg.ID),
+				zap.Error(err))
+			continue
+		}
+		c.publishMessageUpdated(ctx, msg)
+	}
+}
+
 // markMessagesExpired updates the given messages to status=expired and publishes
 // a message.updated event for each one. It is idempotent: already-terminal
 // messages are skipped.
@@ -65,35 +88,68 @@ func (c *Canceller) markMessagesExpired(ctx context.Context, msgs []*taskmodels.
 	}
 }
 
-// CancelSessionAndNotify cancels all pending clarifications for a session,
-// unblocking WaitForResponse callers, and marks the database messages
-// as expired (with agent_disconnected=true for context) so the frontend
-// closes the interactive overlay and renders a "Timed out" history entry.
-// Returns the number of cancelled clarifications.
-//
-// Setting status=expired also prevents a UX bug where clicking the overlay's
-// X button after the agent moved on would trigger a new turn via the
-// respond handler's event fallback path (rejected responses were being
-// forwarded to the orchestrator as "User declined to answer").
-func (c *Canceller) CancelSessionAndNotify(ctx context.Context, sessionID string) int {
+func (c *Canceller) detachSessionBundles(ctx context.Context, sessionID string) int {
 	pendingIDs := c.store.CancelSession(sessionID)
 
 	handled := make(map[string]bool, len(pendingIDs))
 	for _, id := range pendingIDs {
 		msgs, err := c.repo.FindMessagesByPendingID(ctx, id)
 		if err != nil || len(msgs) == 0 {
-			c.logger.Debug("messages not found for cancelled clarification",
+			c.logger.Debug("messages not found for detached clarification",
 				zap.String("pending_id", id),
 				zap.Error(err))
+			continue
+		}
+		c.markMessagesDetached(ctx, msgs, id)
+		handled[id] = true
+	}
+
+	msgs, err := c.repo.FindPendingClarificationMessagesBySessionID(ctx, sessionID)
+	if err != nil || len(msgs) == 0 {
+		return len(pendingIDs)
+	}
+
+	byPendingID := make(map[string][]*taskmodels.Message)
+	for _, msg := range msgs {
+		pid := stringFromMetadata(msg.Metadata, "pending_id")
+		if pid == "" || handled[pid] {
+			continue
+		}
+		byPendingID[pid] = append(byPendingID[pid], msg)
+	}
+	for pid, bundle := range byPendingID {
+		c.markMessagesDetached(ctx, bundle, pid)
+	}
+	return len(pendingIDs) + len(byPendingID)
+}
+
+// DetachSessionAndNotify cancels in-memory WaitForResponse waiters for a session
+// and marks DB clarification messages as pending with agent_disconnected=true.
+// The overlay stays interactive; a late answer uses the event fallback path.
+func (c *Canceller) DetachSessionAndNotify(ctx context.Context, sessionID string) int {
+	return c.detachSessionBundles(ctx, sessionID)
+}
+
+// CancelSessionAndNotify is an alias for DetachSessionAndNotify.
+func (c *Canceller) CancelSessionAndNotify(ctx context.Context, sessionID string) int {
+	return c.DetachSessionAndNotify(ctx, sessionID)
+}
+
+// ExpireSessionAndNotify cancels in-memory waiters and marks clarification
+// messages expired so the overlay closes and history shows a timed-out entry.
+func (c *Canceller) ExpireSessionAndNotify(ctx context.Context, sessionID string) int {
+	pendingIDs := c.store.CancelSession(sessionID)
+
+	handled := make(map[string]bool, len(pendingIDs))
+	for _, id := range pendingIDs {
+		msgs, err := c.repo.FindMessagesByPendingID(ctx, id)
+		if err != nil || len(msgs) == 0 {
 			continue
 		}
 		c.markMessagesExpired(ctx, msgs, id)
 		handled[id] = true
 	}
 
-	// Defense-in-depth: also find any still-pending clarification messages in
-	// the DB whose in-memory store entry was already removed (e.g. by a racing
-	// timeout path). Group by pending_id and mark each bundle expired.
 	msgs, err := c.repo.FindPendingClarificationMessagesBySessionID(ctx, sessionID)
 	if err != nil || len(msgs) == 0 {
 		return len(pendingIDs)

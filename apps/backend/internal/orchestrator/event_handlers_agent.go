@@ -253,6 +253,14 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		return
 	}
 
+	if s.sessionHasPendingClarification(ctx, data.SessionID) {
+		s.logger.Info("deferring on_turn_complete while clarification is pending",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID))
+		s.setSessionWaitingForInput(ctx, data.TaskID, data.SessionID, session)
+		return
+	}
+
 	// Check for workflow transition based on session's current step.
 	// Uses the engine when available; falls back to legacy evaluation.
 	// The ViaEngine method handles setSessionWaitingForInput internally when no transition occurs.
@@ -470,6 +478,15 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID),
 			zap.String("session_state", string(session.State)))
+		go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
+		return
+	}
+
+	if s.sessionHasPendingClarification(ctx, data.SessionID) {
+		s.logger.Info("deferring on_turn_complete on agent.completed while clarification is pending",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID))
+		s.setSessionWaitingForInput(ctx, data.TaskID, data.SessionID, session)
 		go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
 		return
 	}

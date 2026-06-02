@@ -184,6 +184,8 @@ type sessionExecutorStore interface {
 	// Messages — used by resume to backfill the initial user prompt when a
 	// prior launch failed before recordInitialMessage ran.
 	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
+	// Pending clarification rows — durable guard for on_turn_complete while the user is answering.
+	FindPendingClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*models.Message, error)
 	// Workspace
 	GetWorkspace(ctx context.Context, id string) (*models.Workspace, error)
 	// Task environment
@@ -549,9 +551,10 @@ func (s *Service) SetWorkflowStepGetter(getter WorkflowStepGetter) {
 	s.initWorkflowEngine()
 }
 
-// ClarificationCanceller cancels pending clarifications when an agent's turn completes.
+// ClarificationCanceller detaches in-memory clarification waiters when an agent's
+// turn completes while questions are still pending in the DB.
 type ClarificationCanceller interface {
-	CancelSessionAndNotify(ctx context.Context, sessionID string) int
+	DetachSessionAndNotify(ctx context.Context, sessionID string) int
 }
 
 // SetClarificationCanceller sets the canceller for cleaning up pending clarifications on turn complete.

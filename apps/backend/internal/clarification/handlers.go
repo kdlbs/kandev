@@ -309,8 +309,8 @@ func (h *Handlers) httpRespond(c *gin.Context) {
 	// If the user rejected (clicked X to dismiss), they're discarding a stale
 	// overlay — not continuing the conversation. Treat as a no-op so we don't
 	// surprise them by resuming the agent with "User declined to answer".
-	// The message status is already "expired" (set by the canceller), so the
-	// chat history will keep rendering the "Timed out" entry.
+	// The overlay is already detached (agent_disconnected, still pending), so
+	// dismissing it must not resume the agent with "User declined to answer".
 	if body.Rejected {
 		h.logger.Info("clarification rejected after agent moved on; no-op",
 			zap.String("pending_id", pendingID))

@@ -724,11 +724,11 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 	// complete time.
 	s.publishAgentTurnComplete(ctx, payload)
 
-	// Cancel any pending clarifications for this session so WaitForResponse
-	// unblocks and later user responses go through the event fallback path.
+	// Detach any pending clarifications so WaitForResponse unblocks while the
+	// overlay stays interactive for a deferred answer via the event fallback path.
 	if s.clarificationCanceller != nil && payload.SessionID != "" {
-		if n := s.clarificationCanceller.CancelSessionAndNotify(ctx, payload.SessionID); n > 0 {
-			s.logger.Info("cancelled pending clarifications on turn complete",
+		if n := s.clarificationCanceller.DetachSessionAndNotify(ctx, payload.SessionID); n > 0 {
+			s.logger.Info("detached pending clarifications on turn complete",
 				zap.String("session_id", payload.SessionID),
 				zap.Int("count", n))
 		}
