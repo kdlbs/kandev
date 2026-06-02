@@ -1,5 +1,6 @@
 "use client";
 
+import { useId } from "react";
 import {
   IconAlertCircle,
   IconAlertTriangle,
@@ -105,7 +106,8 @@ function PermissionToggleRow({
   const switchSize = compact ? ("sm" as const) : ("default" as const);
   const labelCls = compact ? "text-xs" : undefined;
   const wrapperCls = permissionToggleWrapperClass(isDanger, compact);
-  const switchId = `permission-toggle-${settingKey}`;
+  const instanceId = useId();
+  const switchId = `${instanceId}-permission-toggle-${settingKey}`;
 
   return (
     <div

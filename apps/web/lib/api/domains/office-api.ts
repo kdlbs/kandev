@@ -208,15 +208,6 @@ function agentPayload(data: Partial<AgentProfile>): Record<string, unknown> {
   if (data.cliPassthrough !== undefined) {
     payload.cli_passthrough = data.cliPassthrough;
   }
-  if (data.cliFlags !== undefined) {
-    payload.cli_flags = data.cliFlags;
-  }
-  if (data.model !== undefined) {
-    payload.model = data.model;
-  }
-  if (data.mode !== undefined) {
-    payload.mode = data.mode;
-  }
   return payload;
 }
 

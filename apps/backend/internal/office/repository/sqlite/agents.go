@@ -256,7 +256,7 @@ func (r *Repository) UpdateAgentInstance(ctx context.Context, agent *models.Agen
 			skill_ids = ?, desired_skills = ?, executor_preference = ?,
 			pause_reason = ?, failure_threshold = ?, settings = ?,
 			auto_approve = ?, allow_indexing = ?, cli_passthrough = ?,
-			model = ?, mode = ?, updated_at = ?
+			updated_at = ?
 		WHERE id = ? AND `+agentInstanceFilter+`
 	`), agent.Name, string(agent.Role), agent.Icon, status,
 		agent.ReportsTo, permissions, agent.BudgetMonthlyCents,
@@ -265,7 +265,7 @@ func (r *Repository) UpdateAgentInstance(ctx context.Context, agent *models.Agen
 		skillIDs, desiredSkills, agent.ExecutorPreference,
 		agent.PauseReason, threshold, settings,
 		boolToInt(agent.AutoApprove), boolToInt(agent.AllowIndexing), boolToInt(agent.CLIPassthrough),
-		agent.Model, agent.Mode, agent.UpdatedAt, agent.ID)
+		agent.UpdatedAt, agent.ID)
 	return err
 }
 
