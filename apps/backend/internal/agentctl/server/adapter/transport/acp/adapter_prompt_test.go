@@ -231,6 +231,95 @@ func TestConvertToolCallResultUpdate_AsyncLaunched_TerminalComplete(t *testing.T
 	}
 }
 
+// TestConvertToolCallResultUpdate_AsyncLaunched_NonSubagentNotTerminated guards
+// the kind gate: a non-Task tool whose meta happens to carry
+// `claudeCode.toolResponse.status == "async_launched"` (hypothetical future
+// claude-acp tool reusing the literal) must NOT be marked complete by the
+// override. Only subagent_task payloads earn the dispatch-is-terminal treatment.
+func TestConvertToolCallResultUpdate_AsyncLaunched_NonSubagentNotTerminated(t *testing.T) {
+	a := newTestAdapter()
+
+	// Seed a non-Task tool call (a Bash) into activeToolCalls.
+	initial := &acp.SessionUpdateToolCall{
+		ToolCallId: "bash-x",
+		Title:      "Bash",
+		Kind:       acp.ToolKind("execute"),
+		Meta:       map[string]any{"claudeCode": map[string]any{"toolName": "Bash"}},
+		RawInput:   map[string]any{"command": "ls"},
+	}
+	if ev := a.convertToolCallUpdate("s1", initial); ev == nil {
+		t.Fatalf("seed: convertToolCallUpdate returned nil")
+	}
+	_ = drainEvents(a)
+
+	// Update frame carries async_launched but the underlying payload is shell_exec.
+	tcu := &acp.SessionToolCallUpdate{
+		ToolCallId: "bash-x",
+		Status:     nil,
+		Meta: map[string]any{"claudeCode": map[string]any{"toolResponse": map[string]any{
+			"status":  "async_launched",
+			"isAsync": true,
+		}}},
+	}
+	ev := a.convertToolCallResultUpdate("s1", tcu)
+	if ev == nil {
+		t.Fatal("expected event")
+	}
+	if ev.ToolStatus == toolStatusComplete {
+		t.Errorf("ToolStatus = %q, want non-complete (kind gate must reject non-subagent tools)", ev.ToolStatus)
+	}
+
+	// Card must remain in activeToolCalls (not deleted as a terminal update).
+	a.mu.RLock()
+	_, stillTracked := a.activeToolCalls["bash-x"]
+	a.mu.RUnlock()
+	if !stillTracked {
+		t.Error("non-subagent tool must NOT be removed from activeToolCalls on async_launched envelope")
+	}
+}
+
+// TestConvertToolCallResultUpdate_AsyncLaunched_OverridesInProgress guards the
+// removal of the `status == ""` guard. If a future SDK version adds Title or
+// RawInput to the async_launched frame, the earlier in_progress synthesis
+// (line ~159) would set status="in_progress" and a gated override would never
+// fire — leaving the card stuck. The unconditional override prevents that.
+func TestConvertToolCallResultUpdate_AsyncLaunched_OverridesInProgress(t *testing.T) {
+	a := newTestAdapter()
+
+	initial := &acp.SessionUpdateToolCall{
+		ToolCallId: "toolu_async_2",
+		Title:      "Task",
+		Kind:       acp.ToolKind("think"),
+		Meta:       map[string]any{"claudeCode": map[string]any{"toolName": "Agent"}},
+	}
+	if ev := a.convertToolCallUpdate("s1", initial); ev == nil {
+		t.Fatalf("seed: nil")
+	}
+	_ = drainEvents(a)
+
+	// Simulate a hypothetical future SDK frame: async_launched envelope plus a
+	// Title that triggers the in_progress synthesis. The override must still win.
+	newTitle := "Task: backgrounded"
+	tcu := &acp.SessionToolCallUpdate{
+		ToolCallId: "toolu_async_2",
+		Status:     nil,
+		Title:      &newTitle,
+		Meta: map[string]any{"claudeCode": map[string]any{"toolResponse": map[string]any{
+			"status":     "async_launched",
+			"isAsync":    true,
+			"outputFile": "/tmp/x.output",
+		}}},
+	}
+	ev := a.convertToolCallResultUpdate("s1", tcu)
+	if ev == nil {
+		t.Fatal("expected event")
+	}
+	if ev.ToolStatus != toolStatusComplete {
+		t.Errorf("ToolStatus = %q, want %q — async_launched override must beat the in_progress synthesis even when Title is set",
+			ev.ToolStatus, toolStatusComplete)
+	}
+}
+
 // TestCancelActiveToolCalls_NestedBashCancelledSubagentPreserved verifies the
 // realistic claude-acp shape: a subagent (Agent tool) has a child Bash tool_call
 // tagged with parentToolUseId. On early prompt return, the child Bash must be
