@@ -7,7 +7,7 @@ import (
 
 func TestClaudeACPPermissionSettingsSkipPermissions(t *testing.T) {
 	settings := NewClaudeACP().PermissionSettings()
-	setting, ok := settings["dangerously_skip_permissions"]
+	setting, ok := settings[PermissionKeyDangerouslySkipPermissions]
 	if !ok {
 		t.Fatal("PermissionSettings() missing dangerously_skip_permissions")
 	}
@@ -35,7 +35,7 @@ func TestClaudeACPBuildPassthroughCommandSkipPermissions(t *testing.T) {
 
 	with := strings.Join(
 		c.BuildPassthroughCommand(PassthroughOptions{
-			PermissionValues: map[string]bool{"dangerously_skip_permissions": true},
+			PermissionValues: map[string]bool{PermissionKeyDangerouslySkipPermissions: true},
 		}).Args(),
 		" ",
 	)
