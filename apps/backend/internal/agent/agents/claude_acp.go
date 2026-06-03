@@ -18,6 +18,21 @@ var claudeACPLogoDark []byte
 
 const claudeACPPkg = "@agentclientprotocol/claude-agent-acp"
 
+// claudeACPPermSettings maps the profile DangerouslySkipPermissions toggle to
+// the Claude Code CLI's --dangerously-skip-permissions flag in passthrough mode.
+// ACP (non-passthrough) Claude does not consume this flag; permission bypass
+// there goes through agentctl's auto-approve channel.
+var claudeACPPermSettings = map[string]PermissionSetting{
+	PermissionKeyDangerouslySkipPermissions: {
+		Supported:   true,
+		Default:     false,
+		Label:       "Skip permission prompts",
+		Description: "Pass --dangerously-skip-permissions so Claude Code does not prompt for tool approvals.",
+		ApplyMethod: PermissionApplyMethodCLIFlag,
+		CLIFlag:     "--dangerously-skip-permissions",
+	},
+}
+
 var (
 	_ Agent            = (*ClaudeACP)(nil)
 	_ PassthroughAgent = (*ClaudeACP)(nil)
@@ -34,7 +49,7 @@ type ClaudeACP struct {
 func NewClaudeACP() *ClaudeACP {
 	return &ClaudeACP{
 		StandardPassthrough: StandardPassthrough{
-			PermSettings: emptyPermSettings,
+			PermSettings: claudeACPPermSettings,
 			Cfg: PassthroughConfig{
 				Supported:             true,
 				Label:                 "CLI Passthrough",
@@ -160,7 +175,7 @@ func (a *ClaudeACP) InstallScript() string {
 func (a *ClaudeACP) BillingType() usage.BillingType { return claudeBillingType() }
 
 func (a *ClaudeACP) PermissionSettings() map[string]PermissionSetting {
-	return emptyPermSettings
+	return claudeACPPermSettings
 }
 
 // InferenceConfig returns configuration for one-shot inference using ACP.

@@ -82,8 +82,15 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 func seedCLIFlags(agent agents.Agent) []models.CLIFlag {
 	settings := agents.CatalogPermissionSettings(agent)
 	flags := make([]models.CLIFlag, 0, len(settings))
-	for _, s := range settings {
+	for key, s := range settings {
 		if !s.Supported || s.ApplyMethod != agents.PermissionApplyMethodCLIFlag || s.CLIFlag == "" {
+			continue
+		}
+		// dangerously_skip_permissions is wired to the profile's dedicated
+		// DangerouslySkipPermissions column; the passthrough launch path emits
+		// the flag via PermissionValues. Seeding it as a curated cli_flag too
+		// would surface a duplicate toggle in the UI and double-emit the flag.
+		if key == agents.PermissionKeyDangerouslySkipPermissions {
 			continue
 		}
 		flagText := s.CLIFlag

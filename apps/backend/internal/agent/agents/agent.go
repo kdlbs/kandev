@@ -250,6 +250,15 @@ const PermissionKeyAutoApprove = "auto_approve"
 // run-everything). Separate from PermissionKeyAutoApprove (agentctl ACP approval).
 const PermissionKeyCursorForce = "cursor_force"
 
+// PermissionKeyDangerouslySkipPermissions is wired to the profile's
+// DangerouslySkipPermissions column (a dedicated bool, not the cli_flags list).
+// Agents whose CLI accepts --dangerously-skip-permissions (or equivalent)
+// declare a PermissionSetting under this key with ApplyMethod=cli_flag so the
+// passthrough Settings() pass emits the flag from the profile bool. The
+// catalog seeder excludes this key to avoid duplicating the toggle into the
+// curated cli_flags list (which would also double-emit the flag at launch).
+const PermissionKeyDangerouslySkipPermissions = "dangerously_skip_permissions"
+
 // PermissionSetting defines metadata for a permission setting option.
 type PermissionSetting struct {
 	Supported    bool   `json:"supported"`
