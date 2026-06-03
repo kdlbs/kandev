@@ -438,9 +438,17 @@ func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repo
 		// a real default_branch from the start — no orphan rows on failure.
 		// Probe errors fall through (defaultBranch stays empty); the
 		// AddBranchToTask gate rejects with an actionable message.
+		//
+		// Skip the probe when the workspace already has the repo registered
+		// with a non-empty default_branch — the existing value wins via the
+		// repo.DefaultBranch fallback below, so the remote round-trip is
+		// pure waste.
 		if defaultBranch == "" && repoInput.ResolveProviderDefaults && s.providerProber != nil {
-			if probed, probeErr := s.providerProber.ProbeDefaultBranch(ctx, "github", owner, name); probeErr == nil && probed != "" {
-				defaultBranch = probed
+			existing, _ := s.repoEntities.GetRepositoryByProviderInfo(ctx, workspaceID, "github", owner, name)
+			if existing == nil || existing.DefaultBranch == "" {
+				if probed, probeErr := s.providerProber.ProbeDefaultBranch(ctx, "github", owner, name); probeErr == nil && probed != "" {
+					defaultBranch = probed
+				}
 			}
 		}
 		repo, createErr := s.FindOrCreateRepository(ctx, &FindOrCreateRepositoryRequest{
