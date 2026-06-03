@@ -161,4 +161,37 @@ func TestListTasksByWorkspace_PRMatchRespectsArchivedFilter(t *testing.T) {
 	}
 }
 
+func TestListTasksByWorkspace_PRMatchSkippedOnLaterPagesAndScopedSearches(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct {
+		name       string
+		page       int
+		workflowID string
+		repoID     string
+	}{
+		{name: "page 2", page: 2},
+		{name: "workflow-scoped", page: 1, workflowID: "wf-1"},
+		{name: "repository-scoped", page: 1, repoID: "repo-x"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _, repo := createTestService(t)
+			seedPRSearchTasks(t, repo)
+			resolver := &fakePRResolver{byPR: map[int][]string{1243: {"task-pr"}}}
+			svc.SetPRTaskResolver(resolver)
+
+			tasks, _, err := svc.ListTasksByWorkspace(ctx, "ws-1", tc.workflowID, tc.repoID, "#1243", tc.page, 5, true, false, false, false)
+			if err != nil {
+				t.Fatalf("search: %v", err)
+			}
+			if resolver.called {
+				t.Error("resolver should not be consulted for later pages or scoped searches")
+			}
+			if taskIDSet(tasks)["task-pr"] {
+				t.Errorf("task-pr should not be augmented for %s, got %v", tc.name, taskIDSet(tasks))
+			}
+		})
+	}
+}
+
 var _ PRTaskResolver = (*fakePRResolver)(nil)

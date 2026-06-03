@@ -1077,7 +1077,10 @@ func (s *Service) ListTasksByWorkspace(ctx context.Context, workspaceID, workflo
 
 	tasks, total = s.augmentWithPRMatches(ctx, tasks, total, prSearchOptions{
 		workspaceID:      workspaceID,
+		workflowID:       workflowID,
+		repositoryID:     repositoryID,
 		query:            query,
+		page:             page,
 		pageSize:         pageSize,
 		includeArchived:  includeArchived,
 		includeEphemeral: includeEphemeral,
@@ -1094,7 +1097,10 @@ func (s *Service) ListTasksByWorkspace(ctx context.Context, workspaceID, workflo
 
 type prSearchOptions struct {
 	workspaceID      string
+	workflowID       string
+	repositoryID     string
 	query            string
+	page             int
 	pageSize         int
 	includeArchived  bool
 	includeEphemeral bool
@@ -1136,7 +1142,17 @@ func isConfigTask(task *models.Task) bool {
 // search query looks like one. PR matches are prepended (most relevant) and
 // deduped against the existing results; `total` grows by the net-new count.
 // Best-effort: a missing resolver or a lookup error leaves results unchanged.
+//
+// Augmentation only applies to the first page of an unscoped search. It is
+// skipped for page > 1 (the prepend+truncate only makes sense against page 1,
+// otherwise a PR match would re-appear on every page and push out a real
+// result) and when a workflow or repository filter is set (a PR-matched task
+// isn't guaranteed to satisfy those filters, and the only caller that searches
+// by PR number — the Cmd+K command panel — sets neither).
 func (s *Service) augmentWithPRMatches(ctx context.Context, tasks []*models.Task, total int, opts prSearchOptions) ([]*models.Task, int) {
+	if opts.page > 1 || opts.workflowID != "" || opts.repositoryID != "" {
+		return tasks, total
+	}
 	prNum, ok := parsePRQuery(opts.query)
 	if !ok || s.prTaskResolver == nil {
 		return tasks, total
@@ -1158,7 +1174,12 @@ func (s *Service) augmentWithPRMatches(ctx context.Context, tasks []*models.Task
 			continue
 		}
 		task, gErr := s.tasks.GetTask(ctx, id)
-		if gErr != nil || task == nil || s.prMatchFilteredOut(task, opts) {
+		if gErr != nil {
+			s.logger.Warn("PR-match task fetch failed; skipping",
+				zap.String("task_id", id), zap.Error(gErr))
+			continue
+		}
+		if task == nil || s.prMatchFilteredOut(task, opts) {
 			continue
 		}
 		existing[id] = struct{}{}

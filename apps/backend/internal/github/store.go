@@ -191,6 +191,10 @@ func (s *Store) initSchema() error {
 	if err := s.backfillPRWatchesRepositoryID(); err != nil {
 		return fmt.Errorf("backfill github_pr_watches.repository_id: %w", err)
 	}
+	// pr_number is the 3rd column of UNIQUE(task_id, repository_id, pr_number),
+	// so SQLite can't use that index for the PR-number task search. Add a
+	// dedicated leading-key index so lookups by PR number stay index-backed.
+	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_github_task_prs_pr_number ON github_task_prs (pr_number)`)
 	return nil
 }
 
