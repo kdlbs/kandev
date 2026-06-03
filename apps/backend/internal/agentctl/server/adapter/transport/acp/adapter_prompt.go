@@ -349,6 +349,11 @@ func (a *Adapter) Cancel(ctx context.Context) error {
 		SessionId: acp.SessionId(sessionID),
 	}); err != nil {
 		span.RecordError(err)
+		// Still wake the in-flight prompt waiter so sendPrompt can exit within
+		// promptCancelJoinTimeout rather than blocking the gate forever. The
+		// timeout branch in waitForPromptRPCAfterUserCancel will cancel
+		// promptCtx if the agent never acknowledges.
+		a.signalPromptTurnAbort()
 		return err
 	}
 
