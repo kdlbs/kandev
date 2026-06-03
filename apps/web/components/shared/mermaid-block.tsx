@@ -55,7 +55,14 @@ function useMermaidRender(code: string, resolvedTheme: string | undefined, toast
   const svgRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!code.trim()) return;
+    if (!code.trim()) {
+      // Source went blank (e.g. a streaming chunk emptied this block) — drop
+      // the previous diagram so we don't keep the stale SVG on screen.
+      svgRef.current = null;
+      setSvg(null);
+      setError(null);
+      return;
+    }
 
     let cancelled = false;
     const theme = resolvedTheme === "dark" ? "dark" : "default";
@@ -116,7 +123,11 @@ export function MermaidBlock({ code }: MermaidBlockProps) {
   useLayoutEffect(() => {
     if (svg && containerRef.current) {
       setSvgSize(getSvgDimensions(containerRef.current));
+      return;
     }
+    // svg reset back to null — drop the stale footprint so the wrapper
+    // doesn't reserve space for a diagram that's no longer rendered.
+    setSvgSize(null);
   }, [svg]);
 
   const zoomIn = useCallback(() => setScale((s) => Math.min(s + SCALE_STEP, MAX_SCALE)), []);

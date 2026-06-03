@@ -396,8 +396,16 @@ func TestWaitForResponse_Broadcast_MultipleWaiters(t *testing.T) {
 			done <- resp
 		}()
 	}
-	<-entered
-	<-entered
+	for i := 0; i < 2; i++ {
+		select {
+		case gotID := <-entered:
+			if gotID != id {
+				t.Fatalf("onWaitEntered id = %q, want %q", gotID, id)
+			}
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("WaitForResponse did not reach the parked wait state")
+		}
+	}
 
 	if err := s.Respond(id, &Response{Answers: []Answer{{CustomText: "hello"}}}); err != nil {
 		t.Fatalf("unexpected respond error: %v", err)
