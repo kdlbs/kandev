@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -224,6 +225,10 @@ func (m *Manager) OnTaskDeleted(ctx context.Context, taskID string) error {
 }
 
 // removeWorktreeDir removes a worktree directory using git worktree remove.
+// After the inner directory is gone it tries to rmdir the parent task
+// directory left behind by the nested {tasksBase}/{taskDirName}/{repoName}
+// layout (see issue #1266). The rmdir is a best-effort no-op if the parent
+// still has siblings or contains workspace-scoped content.
 func (m *Manager) removeWorktreeDir(ctx context.Context, worktreePath, repoPath string) error {
 	// First try git worktree remove
 	cmd := exec.CommandContext(ctx, "git", "worktree", "remove", "--force", worktreePath)
@@ -244,7 +249,29 @@ func (m *Manager) removeWorktreeDir(ctx context.Context, worktreePath, repoPath 
 			m.logger.Debug("git worktree prune failed", zap.Error(err))
 		}
 	}
+	m.tryRemoveEmptyTaskDir(worktreePath)
 	return nil
+}
+
+// tryRemoveEmptyTaskDir rmdirs the parent of a removed worktree if that
+// parent is an immediate child of TasksBasePath (i.e. a per-task container
+// directory) and is now empty. Silently skips otherwise.
+func (m *Manager) tryRemoveEmptyTaskDir(worktreePath string) {
+	tasksBase, err := m.config.ExpandedTasksBasePath()
+	if err != nil || tasksBase == "" {
+		return
+	}
+	parent := filepath.Dir(worktreePath)
+	// Guard: only act on direct children of tasksBase. Never touch
+	// tasksBase itself or any deeper / unrelated location.
+	if filepath.Dir(parent) != tasksBase {
+		return
+	}
+	if err := os.Remove(parent); err != nil && !os.IsNotExist(err) {
+		m.logger.Debug("task dir not removed (likely non-empty)",
+			zap.String("path", parent),
+			zap.Error(err))
+	}
 }
 
 // forceRemoveDir removes a directory, retrying on transient failures.
