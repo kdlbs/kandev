@@ -54,11 +54,17 @@ type StreamManager struct {
 // guarantees that happens at teardown time.
 //
 // We keep merge spawn behind a sync.Once so repeated Done() calls (the runtime
-// re-asks every select tick) don't pile up goroutines.
+// re-asks every select tick) don't pile up goroutines. The optional wg field
+// lets a StreamManager track the merge goroutine so sm.wg.Wait remains a true
+// drain barrier even when the outer stream goroutine returns first (the
+// connectUpdatesStream path returns immediately after the dial, so without
+// this the merge goroutine could outlive sm.wg.Wait and trip goleak).
 type stopChannelContext struct {
 	context.Context
 	primary   <-chan struct{}
 	secondary <-chan struct{}
+
+	wg *sync.WaitGroup
 
 	once   sync.Once
 	merged chan struct{}
@@ -70,6 +76,9 @@ func (c *stopChannelContext) Done() <-chan struct{} {
 	}
 	c.once.Do(func() {
 		c.merged = make(chan struct{})
+		if c.wg != nil {
+			c.wg.Add(1)
+		}
 		go c.mergeStops()
 	})
 	return c.merged
@@ -77,6 +86,9 @@ func (c *stopChannelContext) Done() <-chan struct{} {
 
 func (c *stopChannelContext) mergeStops() {
 	defer close(c.merged)
+	if c.wg != nil {
+		defer c.wg.Done()
+	}
 	switch {
 	case c.primary != nil && c.secondary != nil:
 		select {
@@ -258,6 +270,7 @@ func (sm *StreamManager) streamContext(execution *AgentExecution) context.Contex
 		Context:   execution.SessionTraceContext(),
 		primary:   sm.stopCh,
 		secondary: sm.waitCh,
+		wg:        &sm.wg,
 	}
 }
 

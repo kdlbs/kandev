@@ -77,6 +77,14 @@ func (c *Client) StreamWorkspace(ctx context.Context, callbacks WorkspaceStreamC
 		_ = conn.Close()
 		return nil, fmt.Errorf("agentctl client closed during workspace stream dial")
 	}
+	// Re-check after dial: two concurrent StreamWorkspace callers can both pass
+	// the pre-dial guard and race here. The later one would orphan the first
+	// conn and its goroutines without this check.
+	if c.workspaceStreamConn != nil {
+		c.mu.Unlock()
+		_ = conn.Close()
+		return nil, fmt.Errorf("workspace stream already connected")
+	}
 	c.workspaceStreamConn = conn
 	c.workspaceStream = stream
 	c.mu.Unlock()
@@ -117,7 +125,11 @@ var workspaceTracedTypes = map[types.WorkspaceMessageType]bool{
 func (c *Client) readWorkspaceStream(conn *websocket.Conn, stream *WorkspaceStream, callbacks WorkspaceStreamCallbacks) {
 	defer func() {
 		c.mu.Lock()
-		c.workspaceStreamConn = nil
+		// Guard both resets by identity — a concurrent StreamWorkspace caller
+		// may have replaced the conn/stream pointers since this read loop started.
+		if c.workspaceStreamConn == conn {
+			c.workspaceStreamConn = nil
+		}
 		if c.workspaceStream == stream {
 			c.workspaceStream = nil
 		}

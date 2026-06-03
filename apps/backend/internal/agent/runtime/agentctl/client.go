@@ -51,10 +51,9 @@ type Client struct {
 	// Shared write mutex for agent stream (used by StreamUpdates and sendStreamRequest)
 	streamWriteMu sync.Mutex
 
-	// streamWG tracks every stream goroutine spawned by this client
-	// (readUpdatesStream and, transitively via WorkspaceStream.wg, the
-	// workspace read/write loops). Close waits on it so callers get a true
-	// drain barrier instead of a fire-and-forget conn.Close.
+	// streamWG tracks the updates-stream goroutine (readUpdatesStream)
+	// spawned by this client. Workspace read/write loops are tracked on
+	// each WorkspaceStream's own wg and drained via ws.Wait() in Close().
 	streamWG sync.WaitGroup
 
 	// Pending request/response tracking for agent stream
@@ -683,11 +682,13 @@ func (c *Client) Close() {
 	c.mu.Unlock()
 
 	c.CloseUpdatesStream()
+	// CloseWorkspaceStream closes the raw conn to wake the blocked read loop.
+	// ws.Close (below) is needed to close the writeLoop's closeCh; closeOnce
+	// makes ws.Close idempotent so the duplicate conn.Close it issues just
+	// logs at Debug. Both calls together wake both goroutines deterministically.
 	c.CloseWorkspaceStream()
 
-	// Wait for the workspace stream's read/write goroutines (closeOnce makes
-	// Close idempotent; the read goroutine's defer already calls it on conn
-	// EOF, so this just blocks until both unwind).
+	// Wait for the workspace stream's read/write goroutines to fully unwind.
 	if ws != nil {
 		ws.Close()
 		ws.Wait()

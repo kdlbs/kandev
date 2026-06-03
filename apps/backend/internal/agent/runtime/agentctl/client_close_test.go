@@ -100,8 +100,12 @@ func TestClientClose_DrainsStreamGoroutines(t *testing.T) {
 		t.Fatal("nil WorkspaceStream")
 	}
 
-	// Wait for both server-side WS handlers to register so we know the
-	// goroutines we're testing the drain of are actually live.
+	// Belt-and-suspenders: both client-side goroutines are already started
+	// (StreamUpdates and StreamWorkspace returned successfully), and stream.wg
+	// + streamWG were incremented before they launched. mock.connected uses
+	// sync.Once so it fires on the first WS accept — this only confirms the
+	// read side of one socket is live before we call Close. The Close drain
+	// barrier covers both regardless.
 	select {
 	case <-mock.connected:
 	case <-time.After(2 * time.Second):
