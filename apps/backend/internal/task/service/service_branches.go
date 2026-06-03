@@ -108,7 +108,12 @@ func (s *Service) AddBranchToTask(ctx context.Context, req AddBranchToTaskReques
 		// leave a dangling association the user can't see on disk. Pre-launch
 		// tasks short-circuit inside materializeBranch and never reach this
 		// branch — their worktree is built at next session launch.
-		if delErr := s.taskRepos.DeleteTaskRepository(ctx, taskRepo.ID); delErr != nil {
+		//
+		// Detach from ctx via WithoutCancel: a caller-side timeout or cancel
+		// can fire mid-materialize, and the rollback must still run on the
+		// now-dead ctx or we'd leak the row we tried to delete.
+		rollbackCtx := context.WithoutCancel(ctx)
+		if delErr := s.taskRepos.DeleteTaskRepository(rollbackCtx, taskRepo.ID); delErr != nil {
 			s.logger.Error("AddBranchToTask: failed to roll back task repository after materialize failure",
 				zap.String("task_repository_id", taskRepo.ID),
 				zap.Error(delErr))
@@ -493,7 +498,13 @@ func (s *Service) resolveBranchAddRepoRef(
 		// repository.created in CreateRepository, and skipping the
 		// delete event would leave WS subscribers / frontend caches
 		// holding a phantom row.
-		if delErr := s.DeleteRepository(ctx, createdID); delErr != nil {
+		//
+		// Detach from the captured ctx via WithoutCancel: the rollback
+		// often runs precisely because the caller's ctx was cancelled
+		// (timeout, client disconnect), and reusing it would also kill
+		// the cleanup query and orphan the row we just created.
+		rollbackCtx := context.WithoutCancel(ctx)
+		if delErr := s.DeleteRepository(rollbackCtx, createdID); delErr != nil {
 			s.logger.Warn("AddBranchToTask: failed to roll back created repository",
 				zap.String("repository_id", createdID),
 				zap.Error(delErr))

@@ -444,8 +444,18 @@ func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repo
 		// repo.DefaultBranch fallback below, so the remote round-trip is
 		// pure waste.
 		if defaultBranch == "" && repoInput.ResolveProviderDefaults && s.providerProber != nil {
-			existing, _ := s.repoEntities.GetRepositoryByProviderInfo(ctx, workspaceID, "github", owner, name)
-			if existing == nil || existing.DefaultBranch == "" {
+			existing, lookupErr := s.repoEntities.GetRepositoryByProviderInfo(ctx, workspaceID, "github", owner, name)
+			switch {
+			case lookupErr != nil:
+				// DB lookup failed — don't burn a network round-trip on the probe;
+				// FindOrCreateRepository below will hit the same DB and surface
+				// the real cause. Log so the unexpected error doesn't disappear.
+				s.logger.Warn("resolveRepoInput: failed to look up existing repo before probe",
+					zap.String("provider", "github"),
+					zap.String("owner", owner),
+					zap.String("name", name),
+					zap.Error(lookupErr))
+			case existing == nil || existing.DefaultBranch == "":
 				if probed, probeErr := s.providerProber.ProbeDefaultBranch(ctx, "github", owner, name); probeErr == nil && probed != "" {
 					defaultBranch = probed
 				}
