@@ -129,6 +129,7 @@ export async function updateAgentProfileAction(
     model?: string;
     mode?: string;
     allow_indexing?: boolean;
+    auto_approve?: boolean;
     cli_passthrough?: boolean;
     cli_flags?: CLIFlag[];
     env_vars?: ProfileEnvVar[];
@@ -141,11 +142,15 @@ export async function updateAgentProfileAction(
   return normalizeAgentProfile(raw);
 }
 
-import type { ActiveSessionInfo } from "@/lib/types/agent-profile-errors";
+import type { ActiveSessionInfo, WatcherReference } from "@/lib/types/agent-profile-errors";
 
 export type DeleteProfileResult =
   | { status: "ok" }
-  | { status: "conflict"; activeSessions: ActiveSessionInfo[] }
+  | {
+      status: "conflict";
+      activeSessions: ActiveSessionInfo[];
+      watchers: WatcherReference[];
+    }
   | { status: "error"; message: string };
 
 export async function deleteAgentProfileAction(
@@ -160,8 +165,15 @@ export async function deleteAgentProfileAction(
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    if (response.status === 409 && body.active_sessions) {
-      return { status: "conflict", activeSessions: body.active_sessions };
+    // A 409 is either active-sessions, referencing watchers, or both.
+    // Treat any non-empty list as the conflict signal — a watcher-only
+    // conflict (the new self-heal path) must still pop the dialog.
+    if (response.status === 409 && (body.active_sessions || body.watchers)) {
+      return {
+        status: "conflict",
+        activeSessions: body.active_sessions ?? [],
+        watchers: body.watchers ?? [],
+      };
     }
     return {
       status: "error",

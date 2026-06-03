@@ -2,6 +2,57 @@
 
 All notable changes to Kandev.
 
+## 0.55.0 - 2026-06-02
+
+### Features
+
+- inject MCP servers in CLI passthrough mode per agent ([#1158](https://github.com/kdlbs/kandev/pull/1158))
+- make chat reverse-i-search shortcut configurable ([#1255](https://github.com/kdlbs/kandev/pull/1255))
+- full GitLab integration — parity with GitHub ([#1120](https://github.com/kdlbs/kandev/pull/1120))
+- support ** and brace globs in copy_files patterns ([#1248](https://github.com/kdlbs/kandev/pull/1248))
+- resizable review dialog sidebar with persistence ([#1245](https://github.com/kdlbs/kandev/pull/1245))
+- chat history nav with ArrowUp/Down and Ctrl+R fuzzy search ([#1246](https://github.com/kdlbs/kandev/pull/1246))
+- include associated PRs in task-listing tools ([#1236](https://github.com/kdlbs/kandev/pull/1236))
+- add reverse direction to recent task switcher ([#1241](https://github.com/kdlbs/kandev/pull/1241))
+- multi-branch tasks — N (repo, branch) pairs per task ([#1226](https://github.com/kdlbs/kandev/pull/1226))
+- add voice mode to task create dialog ([#1230](https://github.com/kdlbs/kandev/pull/1230))
+- service-managed UI self-update ([#1210](https://github.com/kdlbs/kandev/pull/1210))
+- show inline download progress for Whisper Web model ([#1228](https://github.com/kdlbs/kandev/pull/1228))
+- add voice mode for chat input ([#1159](https://github.com/kdlbs/kandev/pull/1159))
+
+### Bug Fixes
+
+- preserve repo metadata in kanban.update and check legacy repositoryId ([#1258](https://github.com/kdlbs/kandev/pull/1258))
+- block workflow advance during pending clarifications ([#1251](https://github.com/kdlbs/kandev/pull/1251))
+- stop refetching GitLab status on every tab refocus ([#1257](https://github.com/kdlbs/kandev/pull/1257))
+- self-heal orphaned watchers when agent profile is soft-deleted ([#1094](https://github.com/kdlbs/kandev/pull/1094)) by @nlenepveu
+- split codex acp flags from agentctl auto-approve ([#1253](https://github.com/kdlbs/kandev/pull/1253))
+- sticky-max context window size with reset on model switch ([#1254](https://github.com/kdlbs/kandev/pull/1254))
+- restore debug UI on make start-debug ([#1252](https://github.com/kdlbs/kandev/pull/1252))
+- reap disconnected ACP sessions + MCP child trees ([#1249](https://github.com/kdlbs/kandev/pull/1249))
+- hide token usage when context window report is unreliable ([#1250](https://github.com/kdlbs/kandev/pull/1250))
+- stabilize ACP session resume and workspace git poll under contention ([#1242](https://github.com/kdlbs/kandev/pull/1242))
+- cache & singleflight live PR feedback fetches ([#1237](https://github.com/kdlbs/kandev/pull/1237))
+- handle claude-acp async_launched subagents end-to-end ([#1244](https://github.com/kdlbs/kandev/pull/1244))
+- disable create button until project + title set ([#1243](https://github.com/kdlbs/kandev/pull/1243))
+- harden multi-branch add_branch and surface it in UI ([#1239](https://github.com/kdlbs/kandev/pull/1239))
+- refresh commits panel snapshot on mount ([#1232](https://github.com/kdlbs/kandev/pull/1232))
+- subdue voice input button to ghost style ([#1233](https://github.com/kdlbs/kandev/pull/1233))
+- cap gh/git fork concurrency via shared subproc throttles ([#1216](https://github.com/kdlbs/kandev/pull/1216))
+- add button to load older chat messages reliably ([#1223](https://github.com/kdlbs/kandev/pull/1223))
+- enrich tool call metadata per agent with structured ACP fields ([#1212](https://github.com/kdlbs/kandev/pull/1212))
+- fix hold-to-talk on mobile and add coarse-pointer toggle fallback ([#1231](https://github.com/kdlbs/kandev/pull/1231))
+- apply repository filter correctly on task board ([#1215](https://github.com/kdlbs/kandev/pull/1215))
+- auto-resume dormant sessions after workflow queue ([#1163](https://github.com/kdlbs/kandev/pull/1163))
+- reconcile task state when user cancels turn ([#1209](https://github.com/kdlbs/kandev/pull/1209))
+- ignore stale session state snapshots blocking idle input ([#1208](https://github.com/kdlbs/kandev/pull/1208))
+- destroy terminal shells on tab close with busy confirmation ([#1203](https://github.com/kdlbs/kandev/pull/1203))
+
+### Documentation
+
+- improve agent harness guidance for tests, PR fixup, and debugging ([#1235](https://github.com/kdlbs/kandev/pull/1235))
+- clarify default_child_ordering is not enforced outside office ([#1214](https://github.com/kdlbs/kandev/pull/1214))
+
 ## 0.54.0 - 2026-05-31
 
 ### Features

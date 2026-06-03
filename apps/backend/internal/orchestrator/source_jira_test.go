@@ -13,9 +13,11 @@ type fakeJiraService struct {
 	reserveErr error
 	assignErr  error
 	releaseErr error
+	disableErr error
 	gotReserve []string
 	gotAssign  []string
 	gotRelease []string
+	gotDisable []string
 }
 
 func (f *fakeJiraService) ReserveIssueWatchTask(_ context.Context, watchID, key, _ string) (bool, error) {
@@ -31,6 +33,11 @@ func (f *fakeJiraService) AssignIssueWatchTaskID(_ context.Context, watchID, key
 func (f *fakeJiraService) ReleaseIssueWatchTask(_ context.Context, watchID, key string) error {
 	f.gotRelease = append(f.gotRelease, watchID+":"+key)
 	return f.releaseErr
+}
+
+func (f *fakeJiraService) DisableIssueWatchWithError(_ context.Context, watchID, cause string) error {
+	f.gotDisable = append(f.gotDisable, watchID+":"+cause)
+	return f.disableErr
 }
 
 func sampleJiraEvent() *jira.NewJiraIssueEvent {

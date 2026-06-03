@@ -96,6 +96,13 @@ func (s *Service) ListAllReviewWatches(ctx context.Context) ([]*ReviewWatch, err
 	return s.store.ListAllReviewWatches(ctx)
 }
 
+// ListEnabledReviewWatches returns the live (enabled = 1) subset. Used by
+// the profile-delete dependency check so self-healed (already-disabled)
+// watchers do not inflate the count and trigger spurious 409 confirmations.
+func (s *Service) ListEnabledReviewWatches(ctx context.Context) ([]*ReviewWatch, error) {
+	return s.store.ListEnabledReviewWatches(ctx)
+}
+
 // UpdateReviewWatch updates a review watch.
 func (s *Service) UpdateReviewWatch(ctx context.Context, id string, req *UpdateReviewWatchRequest) error {
 	rw, err := s.store.GetReviewWatch(ctx, id)
@@ -597,6 +604,12 @@ func (s *Service) AssignReviewPRTaskID(ctx context.Context, watchID, repoOwner, 
 // later poll can retry this PR instead of it being blocked by an orphan row.
 func (s *Service) ReleaseReviewPRTask(ctx context.Context, watchID, repoOwner, repoName string, prNumber int) error {
 	return s.store.ReleaseReviewPRTask(ctx, watchID, repoOwner, repoName, prNumber)
+}
+
+// DisableReviewWatchWithError mirrors DisableIssueWatchWithError for the
+// PR review watcher.
+func (s *Service) DisableReviewWatchWithError(ctx context.Context, watchID, cause string) error {
+	return s.store.DisableReviewWatchWithError(ctx, watchID, cause)
 }
 
 // TriggerAllReviewChecks triggers all review watches for a workspace.

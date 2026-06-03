@@ -40,7 +40,8 @@ export default async function RootLayout({
   // In production single-port mode, this is not needed — the client uses
   // window.location.origin (same-origin, works for any domain / reverse proxy).
   const apiPort = process.env.NEXT_PUBLIC_KANDEV_API_PORT ?? null;
-  const debugMode = process.env.NEXT_PUBLIC_KANDEV_DEBUG === "true";
+  const debugMode =
+    process.env.KANDEV_DEBUG === "true" || process.env.NEXT_PUBLIC_KANDEV_DEBUG === "true";
 
   // SSR-fetch the deployment's feature flags so the entire client tree
   // (including the sidebar nav and gated routes) renders with the correct
@@ -48,24 +49,36 @@ export default async function RootLayout({
   // is unreachable. See docs/decisions/0007-runtime-feature-flags.md.
   const features = await getFeatureFlagsAction();
 
+  const runtimeConfigScript =
+    apiPort || debugMode
+      ? [
+          apiPort ? `window.__KANDEV_API_PORT = ${JSON.stringify(apiPort)};` : "",
+          debugMode ? `window.__KANDEV_DEBUG = true;` : "",
+        ]
+          .filter(Boolean)
+          .join("\n")
+      : null;
+
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
         <meta name="apple-mobile-web-app-title" content="Kandev" />
+        {/* Inject runtime config before Next.js async chunks so debug UI flags
+            are visible when client modules first evaluate. */}
+        {runtimeConfigScript ? (
+          <script dangerouslySetInnerHTML={{ __html: runtimeConfigScript }} />
+        ) : null}
+        {/* Preload the Seti icon webfont so file-tree glyphs (review dialog,
+            file browser) don't flash blank on first render. */}
+        <link
+          rel="preload"
+          href="/fonts/seti/seti.woff"
+          as="font"
+          type="font/woff"
+          crossOrigin="anonymous"
+        />
       </head>
       <body className="antialiased font-sans">
-        {apiPort || debugMode ? (
-          <script
-            dangerouslySetInnerHTML={{
-              __html: [
-                apiPort ? `window.__KANDEV_API_PORT = ${JSON.stringify(apiPort)};` : "",
-                debugMode ? `window.__KANDEV_DEBUG = true;` : "",
-              ]
-                .filter(Boolean)
-                .join("\n"),
-            }}
-          />
-        ) : null}
         <StateProvider initialState={{ features }}>
           <ThemeProvider>
             <DiffWorkerPoolProvider>

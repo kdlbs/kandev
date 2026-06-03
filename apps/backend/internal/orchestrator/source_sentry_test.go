@@ -15,9 +15,11 @@ type fakeSentryService struct {
 	reserveErr error
 	assignErr  error
 	releaseErr error
+	disableErr error
 	gotReserve []string
 	gotAssign  []string
 	gotRelease []string
+	gotDisable []string
 }
 
 func (f *fakeSentryService) ReserveIssueWatchTask(_ context.Context, watchID, id, _ string) (bool, error) {
@@ -33,6 +35,11 @@ func (f *fakeSentryService) AssignIssueWatchTaskID(_ context.Context, watchID, i
 func (f *fakeSentryService) ReleaseIssueWatchTask(_ context.Context, watchID, id string) error {
 	f.gotRelease = append(f.gotRelease, watchID+":"+id)
 	return f.releaseErr
+}
+
+func (f *fakeSentryService) DisableIssueWatchWithError(_ context.Context, watchID, cause string) error {
+	f.gotDisable = append(f.gotDisable, watchID+":"+cause)
+	return f.disableErr
 }
 
 func sampleSentryEvent() *sentry.NewSentryIssueEvent {
@@ -205,5 +212,44 @@ func TestSentrySource_AutoStartParams(t *testing.T) {
 	}
 	if p.WorkflowStepID != "step-1" {
 		t.Errorf("step id wrong: %q", p.WorkflowStepID)
+	}
+}
+
+func TestSentrySource_AgentProfileID(t *testing.T) {
+	src := &SentryWatcherSource{}
+	if got := src.AgentProfileID(sampleSentryEvent()); got != "agent-1" {
+		t.Fatalf("AgentProfileID = %q, want agent-1", got)
+	}
+	if got := src.AgentProfileID("not an event"); got != "" {
+		t.Errorf("AgentProfileID for wrong type = %q, want empty", got)
+	}
+}
+
+func TestSentrySource_SelfHeal_Passthrough(t *testing.T) {
+	svc := &fakeSentryService{}
+	src := &SentryWatcherSource{service: svc}
+	if err := src.SelfHeal(context.Background(), sampleSentryEvent(), "agent profile deleted"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(svc.gotDisable) != 1 || svc.gotDisable[0] != "watch-1:agent profile deleted" {
+		t.Fatalf("unexpected disable args: %v", svc.gotDisable)
+	}
+}
+
+func TestSentrySource_SelfHeal_NilServiceNoop(t *testing.T) {
+	src := &SentryWatcherSource{service: nil}
+	if err := src.SelfHeal(context.Background(), sampleSentryEvent(), "cause"); err != nil {
+		t.Fatalf("expected nil service to no-op, got %v", err)
+	}
+}
+
+func TestSentrySource_SelfHeal_WrongType(t *testing.T) {
+	svc := &fakeSentryService{}
+	src := &SentryWatcherSource{service: svc}
+	if err := src.SelfHeal(context.Background(), "not an event", "cause"); err != nil {
+		t.Fatalf("expected wrong type to no-op, got %v", err)
+	}
+	if len(svc.gotDisable) != 0 {
+		t.Fatalf("expected no disable call for wrong type, got %v", svc.gotDisable)
 	}
 }

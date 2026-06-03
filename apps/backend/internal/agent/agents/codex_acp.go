@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
 )
@@ -16,6 +17,10 @@ var codexACPLogoLight []byte
 var codexACPLogoDark []byte
 
 const codexACPPkg = "@zed-industries/codex-acp"
+
+// CodexACPSandboxDiskFullReadCLIFlag is the seeded cli_flags text for disk-full-read sandbox access.
+// Single quotes preserve inner JSON double-quotes through cliflags.Tokenise.
+const CodexACPSandboxDiskFullReadCLIFlag = `-c 'sandbox_permissions=["disk-full-read-access"]'`
 
 var (
 	_ Agent            = (*CodexACP)(nil)
@@ -30,7 +35,33 @@ type CodexACP struct {
 	StandardPassthrough
 }
 
-// codexPassthroughPermSettings maps profile toggles to @openai/codex CLI flags.
+// codexACPPermSettings seeds profile cli_flags for @zed-industries/codex-acp.
+// Values are passed as -c key=value overrides (see codex-acp --help and
+// https://developers.openai.com/codex/config-reference). Toggles default off;
+var codexACPPermSettings = map[string]PermissionSetting{
+	"config_approval_policy_never": {
+		Supported:    true,
+		Default:      false,
+		Label:        "Skip approval prompts (config)",
+		Description:  "-c approval_policy=never (allowed: untrusted, on-request, never, granular)",
+		ApplyMethod:  PermissionApplyMethodCLIFlag,
+		CLIFlag:      "-c",
+		CLIFlagValue: "approval_policy=never",
+	},
+	"config_sandbox_disk_full_read": {
+		Supported:    true,
+		Default:      false,
+		Label:        "Disk full read access (config)",
+		Description:  `-c sandbox_permissions=["disk-full-read-access"] (legacy list; prefer sandbox_mode in config.toml)`,
+		ApplyMethod:  PermissionApplyMethodCLIFlag,
+		CLIFlag:      "-c",
+		CLIFlagValue: `'sandbox_permissions=["disk-full-read-access"]'`,
+	},
+}
+
+// codexPassthroughPermSettings maps passthrough-only toggles to @openai/codex CLI
+// flags. Not returned from PermissionSettings(): @zed-industries/codex-acp only
+// accepts -c/--config overrides; ACP auto-approve uses agentctl approval_policy.
 // The legacy --full-auto flag was removed; auto_approve uses --ask-for-approval never.
 var codexPassthroughPermSettings = map[string]PermissionSetting{
 	PermissionKeyAutoApprove: {
@@ -56,6 +87,7 @@ func NewCodexACP() *CodexACP {
 				ModelFlag:        NewParam("--model", "{model}"),
 				IdleTimeout:      3 * time.Second,
 				BufferMaxBytes:   DefaultBufferMaxBytes,
+				MCPStrategy:      mcpconfig.CodexStrategy{},
 				AutoInjectPrompt: true,
 				SubmitSequence:   "\r",
 			},
@@ -165,7 +197,7 @@ func (a *CodexACP) InstallScript() string {
 func (a *CodexACP) BillingType() usage.BillingType { return codexBillingType() }
 
 func (a *CodexACP) PermissionSettings() map[string]PermissionSetting {
-	return codexPassthroughPermSettings
+	return codexACPPermSettings
 }
 
 // InferenceConfig returns configuration for one-shot inference using ACP.

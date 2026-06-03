@@ -23,6 +23,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/gitlab"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
@@ -184,6 +185,8 @@ type sessionExecutorStore interface {
 	// Messages — used by resume to backfill the initial user prompt when a
 	// prior launch failed before recordInitialMessage ran.
 	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
+	// Pending clarification rows — durable guard for on_turn_complete while the user is answering.
+	FindPendingClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*models.Message, error)
 	// Workspace
 	GetWorkspace(ctx context.Context, id string) (*models.Workspace, error)
 	// Task environment
@@ -281,6 +284,11 @@ type Service struct {
 	// "cap cleared") only once per transition instead of every event.
 	watcherSaturated map[string]bool
 
+	// profileLookup answers "is this agent profile still live?" for the
+	// dispatch pre-flight. Set via SetProfileLookup from main; nil-safe so
+	// the legacy code path (and tests without profile wiring) keep working.
+	profileLookup ProfileLookup
+
 	// Jira service for issue watch dedup operations
 	jiraService JiraService
 	// jiraSource adapts jiraService onto WatcherSource. Built once in
@@ -298,6 +306,13 @@ type Service struct {
 	// sentrySource adapts sentryService onto WatcherSource. Built once in
 	// SetSentryService so handlers don't allocate per bus event.
 	sentrySource *SentryWatcherSource
+	// GitLab service + task creators for auto-creating tasks from review /
+	// issue watch events. When the task creators are nil the events are
+	// logged but no tasks are created — matches the GitHub flow when a
+	// workspace has no task creator wired.
+	gitlabService           *gitlab.Service
+	gitlabReviewTaskCreator GitLabReviewTaskCreator
+	gitlabIssueTaskCreator  GitLabIssueTaskCreator
 
 	// Repository resolver for cloning + finding/creating repos for review tasks
 	repositoryResolver RepositoryResolver
@@ -555,9 +570,10 @@ func (s *Service) SetWorkflowStepGetter(getter WorkflowStepGetter) {
 	s.initWorkflowEngine()
 }
 
-// ClarificationCanceller cancels pending clarifications when an agent's turn completes.
+// ClarificationCanceller detaches in-memory clarification waiters when an agent's
+// turn completes while questions are still pending in the DB.
 type ClarificationCanceller interface {
-	CancelSessionAndNotify(ctx context.Context, sessionID string) int
+	DetachSessionAndNotify(ctx context.Context, sessionID string) int
 }
 
 // SetClarificationCanceller sets the canceller for cleaning up pending clarifications on turn complete.
@@ -826,6 +842,9 @@ func (s *Service) Start(ctx context.Context) error {
 
 	// Subscribe to GitHub integration events
 	s.subscribeGitHubEvents()
+
+	// Subscribe to GitLab integration events
+	s.subscribeGitLabEvents()
 
 	// Subscribe to JIRA integration events
 	s.subscribeJiraEvents()

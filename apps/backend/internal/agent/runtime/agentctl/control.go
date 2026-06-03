@@ -54,6 +54,11 @@ type CreateInstanceRequest struct {
 	AssumeMcpSse       bool              `json:"assume_mcp_sse,omitempty"`       // Assume agent supports SSE MCP servers
 	AssumeMcpHttp      bool              `json:"assume_mcp_http,omitempty"`      // Assume agent supports HTTP MCP servers
 	McpMode            string            `json:"mcp_mode,omitempty"`             // MCP tool mode: "task" (default) or "config"
+	// RequiresProcessKill forces agentctl to kill the agent's process group
+	// (not just close stdin) on shutdown. Required for agents whose runtime
+	// keeps child processes (e.g. MCP servers) alive when stdin closes —
+	// notably opencode acp.
+	RequiresProcessKill bool `json:"requires_process_kill,omitempty"`
 }
 
 // CreateInstanceResponse contains the result of creating a new agent instance.

@@ -58,6 +58,8 @@ Invoke the `pr-poller` subagent with the PR number (or let it resolve via `gh pr
 - `bots.<name>` — `done` / `rate_limited` / `pending` / `timeout`. Anything in `done` or `rate_limited` has had its chance; treat the rest as missing data, not a blocker.
 - `unresolved_review_threads` and `issue_comments_from_bots` — drive steps 3-4. If both are 0 and `ci_failed` is empty, skip to step 5 (still run verify + push if you have fixes from earlier).
 
+**E2E CI outlasts the poller.** The pr-poller caps at ~20 minutes. The E2E matrix (10 shards × 2 projects) often runs longer. If the report shows `ci_pending` with only E2E/lint jobs and `ci_failed` is empty, re-invoke pr-poller once those jobs finish — do not spin a manual `gh pr checks` loop in the parent. If the cap hits with E2E still pending, report "CI in progress" to the user instead of blocking.
+
 **Do not fetch poll output yourself** — that is what burns context. The report is the only thing that enters your context.
 
 Mark task 1 as completed.
@@ -84,6 +86,8 @@ gh run list --branch <branch> --workflow "<workflow name>" --limit 10 --json con
 ```
 
 On long-lived PRs that get rebased/squashed, prior SHAs on the same branch often passed the same workflow. A `passing → failing` boundary tells you the regression is isolated to the most recent rework — diff against the last passing SHA (`git diff <last-passing-sha>..HEAD`) instead of against `main` to narrow the search dramatically.
+
+**Recognize a cancelled concurrency-duplicate before reading any logs.** A required check with `conclusion=cancelled` — often annotated *"Canceling since a higher priority waiting request … exists"*, with 0s job durations and **unexpanded** `${{ matrix.* }}` job names (a "Merge reports" job may exit 1 for missing blobs) — is a concurrency-group artifact from a superseded run, **not a real failure**. GitHub re-triggers PR workflows when the base branch moves (e.g. a release lands on main), cancelling the in-flight run. Confirm the *non-cancelled* run for the **same head SHA** passed (`gh run list --workflow "<name>" --json headSha,conclusion,databaseId`), then trigger a single clean run (rebase onto main + force-push, or `gh run rerun <id>`) instead of debugging code.
 
 **E2E test failures require special handling:**
 
@@ -208,6 +212,18 @@ for TID in "${!CAT[@]}"; do
 done
 ```
 
+### Verify resolution before moving on
+
+Run `scripts/pr-resolve list <PR>` — output must be empty.
+
+Or confirm via GraphQL that unresolved thread count is 0:
+
+```bash
+gh api graphql -f query='query { repository(owner:"kdlbs", name:"kandev") { pullRequest(number:<PR>) { reviewThreads(first:100) { nodes { isResolved } } } } }' --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length'
+```
+
+Informational threads (acknowledged, no code change) still need `scripts/pr-resolve reply` + resolve — skipping them leaves the PR blocked.
+
 Mark task 4 as completed.
 
 ### 5. Verify, commit, and push
@@ -244,6 +260,10 @@ After the push, CI restarts and bots may re-review. Delegate to `pr-poller` agai
 Cap re-check loops at **3 iterations** to prevent runaway sessions. After 3, surface the remaining state to the user and stop.
 
 Mark task 6 as completed.
+
+### Multi-round bot reviews
+
+**Expect new threads after every push.** CodeRabbit, Greptile, Claude, and cubic often re-review the latest commit and open fresh inline threads even when earlier ones were resolved. On cross-cutting changes (backend event payloads + frontend WS handlers + E2E), plan for 2–3 fixup rounds. After each push, always run `scripts/pr-resolve list <PR>` before declaring done — do not rely on the prior round's zero count.
 
 ### 7. Summary
 

@@ -10,7 +10,7 @@ import type { LayoutState } from "@/lib/state/layout-manager";
 import { setPinnedTarget } from "@/lib/state/layout-manager";
 import type { AppState } from "@/lib/state/store";
 import { getEnvLayout, getEnvMaximizeState, removeEnvMaximizeState } from "@/lib/local-storage";
-import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
 const debug = createDebugLogger("dockview:restore");
 
@@ -46,7 +46,7 @@ function logSanitizeOutcome(
   validPanels: Record<string, any>,
   invalidIds: Set<string>,
 ): void {
-  if (!IS_DEBUG) return;
+  if (!isDebug()) return;
   debug("sanitizeLayout", {
     mode: describeSanitizeMode(options),
     excludeSessionCount: options.excludeSessionIds?.size ?? 0,
@@ -224,7 +224,7 @@ function tryRestoreEnvLayout(
     debug("tryRestoreEnvLayout: no saved layout for env", { envId });
     return false;
   }
-  if (IS_DEBUG) {
+  if (isDebug()) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const rawPanelIds = Object.keys((envLayout as any).panels ?? {});
     debug("tryRestoreEnvLayout: loaded saved layout", {
@@ -241,7 +241,7 @@ function tryRestoreEnvLayout(
     debug("tryRestoreEnvLayout: sanitize returned null", { envId });
     return false;
   }
-  if (IS_DEBUG) {
+  if (isDebug()) {
     debug("tryRestoreEnvLayout: calling api.fromJSON", {
       envId,
       sanitizedPanelIds: Object.keys(sanitized.panels),
@@ -306,7 +306,7 @@ export function restoreEnvLayout(
   validComponents: Set<string>,
 ): boolean {
   const phantoms = envId ? collectPhantomSessionIdsForEnv(appStore.getState(), envId) : undefined;
-  if (IS_DEBUG) {
+  if (isDebug()) {
     debug("restoreEnvLayout: entry", {
       envId,
       phantomCount: phantoms?.size ?? 0,
@@ -315,7 +315,7 @@ export function restoreEnvLayout(
     });
   }
   const result = tryRestoreLayout(api, envId, validComponents, phantoms);
-  if (IS_DEBUG) {
+  if (isDebug()) {
     debug("restoreEnvLayout: result", {
       envId,
       restored: result,

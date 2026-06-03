@@ -14,7 +14,7 @@ import {
 } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 import type { KanbanState } from "@/lib/state/slices";
-import { DEBUG_UI } from "@/lib/config";
+import { isDebugUI } from "@/lib/config";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useSessionAgent } from "@/hooks/domains/session/use-session-agent";
@@ -382,7 +382,7 @@ function TaskPageInner({
   const taskProps = resolveTaskProps(task, repository);
   const remote = resolveRemoteExecutor(resumption.sessionStatus as RemoteExecutorStatus | null);
   const debugEntries = maybeBuildDebugEntries({
-    isVisible: DEBUG_UI && showDebugOverlay,
+    isVisible: isDebugUI() && showDebugOverlay,
     connectionStatus,
     task,
     effectiveSessionId,

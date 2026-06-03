@@ -16,7 +16,7 @@
  * before the call — so callers that compute expensive values (O(n) maps,
  * `.reduce()`, spread of large objects) must guard with the exported constant:
  *
- *   if (IS_DEBUG) { debug(...); }
+ *   if (isDebug()) { debug(...); }
  *
  * In a production build with no flag set, both `process.env` checks fold to
  * `false` and the `window` check short-circuits at runtime, so the guarded
@@ -48,6 +48,9 @@
  * when adding new loggers — it's the cheat-sheet for triage):
  *
  *   Git / Changes panel pipeline (bug: stale until refresh)
+ *     [changes:visibility]   Changes tab auto-close/keep decision:
+ *                            taskHasRepos, source task object, repositoryId,
+ *                            repoCount, repoIds, and live Dockview panel IDs.
  *     [git-status:subscribe]  useSessionGitStatus subscribe/unsubscribe cycle
  *     [ws:dispatch]           every WS message — inbound notifications and
  *                             outbound sends (`message="send"`). Streaming
@@ -164,12 +167,17 @@
 
 export type DebugLogger = (...args: unknown[]) => void;
 
-export const IS_DEBUG =
-  process.env.NODE_ENV !== "production" ||
-  process.env.NEXT_PUBLIC_KANDEV_DEBUG === "true" ||
-  (typeof window !== "undefined" && window.__KANDEV_DEBUG === true);
+let debugCached: boolean | undefined;
 
-const NOOP: DebugLogger = () => {};
+/** Whether namespaced debug logging is active. Evaluated lazily so production start-debug works. */
+export function isDebug(): boolean {
+  if (debugCached !== undefined) return debugCached;
+  debugCached =
+    process.env.NODE_ENV !== "production" ||
+    process.env.NEXT_PUBLIC_KANDEV_DEBUG === "true" ||
+    (typeof window !== "undefined" && window.__KANDEV_DEBUG === true);
+  return debugCached;
+}
 
 const BARE_VALUE_RE = /^[A-Za-z0-9_\-:./@+]+$/;
 
@@ -240,8 +248,8 @@ let sessionTaskResolverToken = 0;
  * clears it when this registration is still the active one: during HMR or a
  * provider swap the new provider mounts (and registers) before the old one's
  * cleanup runs, and an unconditional null-clear would silently kill annotation
- * until a full reload. Calls are no-ops in production because
- * `createDebugLogger` returns `NOOP`.
+ * until a full reload. Calls are no-ops in production because `isDebug()` is
+ * false and `createDebugLogger` skips output.
  */
 export function registerSessionTaskResolver(resolver: SessionTaskResolver | null): () => void {
   const token = ++sessionTaskResolverToken;
@@ -286,9 +294,9 @@ function resolveTaskAnnotation(args: unknown[]): string {
 }
 
 export function createDebugLogger(namespace: string): DebugLogger {
-  if (!IS_DEBUG) return NOOP;
   const prefix = `[${namespace}]`;
   return (...args: unknown[]) => {
+    if (!isDebug()) return;
     console.debug(`${prefix} ${flattenArgs(args)}${resolveTaskAnnotation(args)}`);
   };
 }

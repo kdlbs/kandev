@@ -20,6 +20,10 @@ type SentryService interface {
 	ReserveIssueWatchTask(ctx context.Context, watchID, shortID, issueURL string) (bool, error)
 	AssignIssueWatchTaskID(ctx context.Context, watchID, shortID, taskID string) error
 	ReleaseIssueWatchTask(ctx context.Context, watchID, shortID string) error
+	// DisableIssueWatchWithError is invoked by the dispatch coordinator's
+	// self-heal flow when the watcher's bound agent profile has been
+	// soft-deleted.
+	DisableIssueWatchWithError(ctx context.Context, watchID, cause string) error
 }
 
 // SetSentryService wires the Sentry dedup helpers into the orchestrator so

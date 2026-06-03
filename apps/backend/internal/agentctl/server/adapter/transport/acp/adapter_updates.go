@@ -10,20 +10,107 @@ import (
 	"go.uber.org/zap"
 )
 
-// handleACPUpdate converts ACP SessionNotification to protocol-agnostic AgentEvent.
-func (a *Adapter) handleACPUpdate(n acp.SessionNotification) {
-	// Marshal once for both debug logging and tracing
-	rawData, _ := json.Marshal(n)
+// notifWork is the item type carried on notifQueue. Exactly one of the two
+// fields is populated: notif for a real SDK notification (the common case),
+// sync for a barrier posted by syncNotifQueue. The worker closes sync when
+// it pops the barrier off the queue, releasing the waiter once everything
+// queued ahead of it has been processed.
+type notifWork struct {
+	notif acp.SessionNotification
+	sync  chan struct{}
+}
 
-	// Log raw event for debugging
-	if len(rawData) > 0 {
-		shared.LogRawEvent(shared.ProtocolACP, a.agentID, string(n.SessionId), "session_notification", rawData)
+// enqueueACPUpdate is the SDK-facing notification handler. It pushes the
+// notification onto notifQueue and returns immediately, so the ACP SDK's
+// receive loop is never blocked by our per-item processing (json.Marshal,
+// debug log I/O, monitor capture, downstream sendUpdate). The actual work
+// runs on runUpdateWorker.
+//
+// The select honours lifetimeCtx so a Close in flight unblocks any sender
+// that would otherwise stall on a full queue. Sending blocks (rather than
+// dropping) when the queue is full: with the handleACPUpdate fast path the
+// worker drains in nanoseconds-to-microseconds, so a full 4096-slot queue
+// means we're in a catastrophic stall and slowing the SDK is preferable to
+// silently losing notifications.
+func (a *Adapter) enqueueACPUpdate(n acp.SessionNotification) {
+	select {
+	case <-a.lifetimeCtx.Done():
+		return
+	case a.notifQueue <- notifWork{notif: n}:
 	}
+}
 
-	// During session/load, suppress history replay notifications.
-	// ACP agents stream the entire conversation history during load, which should not
-	// be emitted as new message events to avoid duplicating messages in the UI.
-	// We suppress: message chunks, thinking chunks, tool calls, and tool updates.
+// syncNotifQueue blocks until every notifWork enqueued before this call has
+// been processed by the worker. It works by posting a barrier item onto the
+// same FIFO queue and waiting for the worker to close it.
+//
+// Motivation: the worker is async, so after conn.Prompt() returns the final
+// text chunks emitted by the agent right before the prompt response may
+// still be sitting in notifQueue. If sendPrompt emits EventTypeComplete
+// immediately, the downstream "turn complete" handler flushes the message
+// buffer before those chunks land, the agent's text is dropped, and the
+// turn persists as had_output=false. Calling this before the complete emit
+// guarantees the chunks are delivered to updatesCh first.
+//
+// No caller-context honored: returning before the barrier closes would
+// reintroduce the very race this primitive exists to prevent (sweeps and
+// EventTypeComplete running while the worker still has queued frames).
+// Only adapter shutdown via lifetimeCtx can release the wait early.
+func (a *Adapter) syncNotifQueue() {
+	ch := make(chan struct{})
+	select {
+	case <-a.lifetimeCtx.Done():
+		return
+	case a.notifQueue <- notifWork{sync: ch}:
+	}
+	select {
+	case <-a.lifetimeCtx.Done():
+	case <-ch:
+	}
+}
+
+// startUpdateWorker spawns the goroutine that drains notifQueue and calls
+// handleACPUpdate for each notification. Called exactly once from
+// NewAdapter so the queue always has a consumer for the adapter's
+// lifetime — do not call again (a second invocation would Add(1) to
+// workerWg and spawn a second reader, breaking the single-worker FIFO
+// guarantee). Close waits for the worker to exit via workerWg before
+// closing updatesCh.
+func (a *Adapter) startUpdateWorker() {
+	a.workerWg.Add(1)
+	go a.runUpdateWorker()
+}
+
+// runUpdateWorker is the worker loop. It exits when lifetimeCtx is cancelled
+// (by Close). A single worker preserves FIFO ordering across notifications,
+// matching the SDK's own serial delivery contract.
+func (a *Adapter) runUpdateWorker() {
+	defer a.workerWg.Done()
+	for {
+		select {
+		case <-a.lifetimeCtx.Done():
+			return
+		case item := <-a.notifQueue:
+			if item.sync != nil {
+				close(item.sync)
+				continue
+			}
+			a.handleACPUpdate(item.notif)
+		}
+	}
+}
+
+// handleACPUpdate converts ACP SessionNotification to protocol-agnostic AgentEvent.
+// Runs synchronously on the update worker goroutine; do not call from the SDK's
+// notification path (use enqueueACPUpdate instead). Unit tests invoke this
+// directly to exercise the conversion logic without spinning up the worker.
+func (a *Adapter) handleACPUpdate(n acp.SessionNotification) {
+	// Fast path during session/load: history-replay notifications can arrive as
+	// a burst large enough to overflow the ACP SDK's 1024-deep notification
+	// queue if the per-item handler is slow. Check the loading flag first and
+	// skip json.Marshal + LogRawEvent for replay notifications we'd suppress
+	// anyway. We still capture the Plan + Monitor state needed to reconcile
+	// after replay.
 	a.mu.RLock()
 	isLoading := a.isLoadingSession
 	a.mu.RUnlock()
@@ -51,10 +138,14 @@ func (a *Adapter) handleACPUpdate(n acp.SessionNotification) {
 		if u.AgentMessageChunk != nil || u.UserMessageChunk != nil || u.AgentThoughtChunk != nil ||
 			u.ToolCall != nil || u.ToolCallUpdate != nil ||
 			u.Plan != nil || u.CurrentModeUpdate != nil || u.ConfigOptionUpdate != nil {
-			a.logger.Debug("suppressing history replay notification during session load",
-				zap.String("session_id", string(n.SessionId)))
 			return
 		}
+	}
+
+	// Marshal once for both debug logging and tracing.
+	rawData, _ := json.Marshal(n)
+	if len(rawData) > 0 {
+		shared.LogRawEvent(shared.ProtocolACP, a.agentID, string(n.SessionId), "session_notification", rawData)
 	}
 
 	sessionID := string(n.SessionId)
@@ -179,26 +270,49 @@ type acpUsageUpdate struct {
 type usageTracker struct {
 	lastUsed         int64
 	lastCostSubcents int64
+	// maxSize is the largest context-window size reported for this session.
+	// claude-acp's default model emits a 200K turn-start frame and a 1M
+	// turn-end frame; sticky-max prevents the stale 200K from shrinking
+	// the displayed window after the authoritative 1M frame lands.
+	maxSize int64
 }
 
-// recordUsageDelta updates the per-session tracker. Returns the
-// integer delta against the previous `used` snapshot — the next prompt
-// complete call consumes this via consumeUsageDelta. Cost is forwarded
-// as the latest value (claude-acp emits a per-turn cumulative cost; we
-// treat the most recent value as the turn's cost).
-func (a *Adapter) recordUsageDelta(sessionID string, used int64, costSubcents int64) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+// ensureUsageTracker returns the per-session usage tracker, creating it if
+// needed. Callers must hold a.mu (write lock).
+func (a *Adapter) ensureUsageTracker(sessionID string) *usageTracker {
 	tr := a.usageBySession[sessionID]
 	if tr == nil {
 		tr = &usageTracker{}
 		a.usageBySession[sessionID] = tr
+	}
+	return tr
+}
+
+// recordUsageAndMaxSize updates per-session usage/cost tracking and returns
+// the sticky-max context window size for the session.
+func (a *Adapter) recordUsageAndMaxSize(sessionID string, size, used, costSubcents int64) int64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	tr := a.ensureUsageTracker(sessionID)
+	if size > tr.maxSize {
+		tr.maxSize = size
 	}
 	if used > tr.lastUsed {
 		tr.lastUsed = used
 	}
 	if costSubcents > 0 {
 		tr.lastCostSubcents = costSubcents
+	}
+	return tr.maxSize
+}
+
+// resetContextWindowMaxSize clears the sticky-max window for a session so the
+// next usage_update can establish the new model's window after SetModel.
+func (a *Adapter) resetContextWindowMaxSize(sessionID string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if tr := a.usageBySession[sessionID]; tr != nil {
+		tr.maxSize = 0
 	}
 }
 
@@ -248,16 +362,16 @@ func (a *Adapter) tryConvertUntypedUpdate(rawNotification []byte, sessionID stri
 	if usage.Cost != nil {
 		costSubcents = int64(usage.Cost.Amount * 10000)
 	}
-	a.recordUsageDelta(sessionID, usage.Used, costSubcents)
+	effectiveSize := a.recordUsageAndMaxSize(sessionID, usage.Size, usage.Used, costSubcents)
 
-	remaining := max(usage.Size-usage.Used, 0)
+	remaining := max(effectiveSize-usage.Used, 0)
 	return &AgentEvent{
 		Type:                   streams.EventTypeContextWindow,
 		SessionID:              sessionID,
-		ContextWindowSize:      usage.Size,
+		ContextWindowSize:      effectiveSize,
 		ContextWindowUsed:      usage.Used,
 		ContextWindowRemaining: remaining,
-		ContextEfficiency:      float64(usage.Used) / float64(usage.Size) * 100,
+		ContextEfficiency:      float64(usage.Used) / float64(effectiveSize) * 100,
 	}
 }
 

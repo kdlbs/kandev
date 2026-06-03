@@ -38,6 +38,12 @@ export function subagentMetaChips(payload: SubagentTaskPayload | undefined): Sub
 
   const chips: SubagentMetaChip[] = [];
 
+  // Claude Code's Task with run_in_background=true: the dispatch is terminal,
+  // but the subagent runs out-of-band and writes its result to output_file.
+  // Surface a "background" chip so the UI doesn't look like a normal completion.
+  if (payload.is_async || payload.status === "async_launched") {
+    chips.push({ label: "background", value: "background" });
+  }
   if (typeof payload.duration_ms === "number" && payload.duration_ms > 0) {
     chips.push({ label: "duration", value: formatDuration(payload.duration_ms) });
   }

@@ -5,7 +5,15 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"time"
 )
+
+// defaultGHExecTimeout is the per-command exec budget the
+// Run*AfterAcquire helpers apply after the throttle slot is acquired.
+// 30s matches the gh client's default WithTimeout for plain `gh api`
+// calls; callers needing more (paginated REST calls) or less (cheap
+// `gh auth status`) pass an explicit value.
+const defaultGHExecTimeout = 30 * time.Second
 
 // Shared throttle singletons.
 //
@@ -135,4 +143,65 @@ func RunGHCombinedOutput(ctx context.Context, cmd *exec.Cmd) ([]byte, error) {
 	}
 	defer release()
 	return cmd.CombinedOutput()
+}
+
+// RunGHAfterAcquire / RunGHCombinedAfterAcquire mirror the git
+// helper runGitCombinedAfterAcquire in apps/backend/internal/worktree:
+// the exec timer starts only AFTER the throttle slot is acquired so
+// throttle queue time can't burn the per-command budget. Without this
+// ordering, a queued waiter inherits its parent's WS-bound deadline,
+// gets a slot just before the deadline fires, and is killed with
+// `signal: killed` the moment it execs — producing the killed (192×) /
+// context deadline exceeded (96×) cascade in the SyncWatchesBatched
+// storm logs.
+//
+// Returns (out, runErr, execCtxErr). The exec-ctx error lets callers
+// tell a context-driven kill (timeout) from a regular gh failure when
+// classifying fallbacks — see worktree.classifyGitFallbackReason for the
+// pattern. The caller is expected to build `cmd` lazily (typically
+// `exec.CommandContext(execCtx, "gh", args...)`) via the supplied
+// builder closure so the exec context attaches to the right command.
+// `execTimeout <= 0` falls back to defaultGHExecTimeout.
+func RunGHCombinedAfterAcquire(
+	ctx context.Context, execTimeout time.Duration, build func(execCtx context.Context) *exec.Cmd,
+) ([]byte, error, error) {
+	release, err := ghThrottle.Acquire(ctx)
+	if err != nil {
+		return nil, err, ctx.Err()
+	}
+	defer release()
+	execCtx, cancel := withExecTimeout(ctx, execTimeout)
+	defer cancel()
+	cmd := build(execCtx)
+	out, runErr := cmd.CombinedOutput()
+	return out, runErr, execCtx.Err()
+}
+
+// RunGHAfterAcquire is RunGHCombinedAfterAcquire's plain `cmd.Run` sibling.
+// Caller owns Stdout/Stderr wiring on the returned `cmd` (build closure
+// runs synchronously inside the throttle slot so wiring happens after
+// acquire, never before).
+func RunGHAfterAcquire(
+	ctx context.Context, execTimeout time.Duration, build func(execCtx context.Context) *exec.Cmd,
+) (error, error) {
+	release, err := ghThrottle.Acquire(ctx)
+	if err != nil {
+		return err, ctx.Err()
+	}
+	defer release()
+	execCtx, cancel := withExecTimeout(ctx, execTimeout)
+	defer cancel()
+	cmd := build(execCtx)
+	runErr := cmd.Run()
+	return runErr, execCtx.Err()
+}
+
+// withExecTimeout returns a child context bounded by execTimeout
+// (defaultGHExecTimeout when execTimeout<=0). Centralised so the two
+// AfterAcquire helpers can't drift on default-timeout behaviour.
+func withExecTimeout(ctx context.Context, execTimeout time.Duration) (context.Context, context.CancelFunc) {
+	if execTimeout <= 0 {
+		execTimeout = defaultGHExecTimeout
+	}
+	return context.WithTimeout(ctx, execTimeout)
 }

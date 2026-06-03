@@ -16,7 +16,7 @@ import { IssueTaskIcon } from "@/components/github/issue-task-icon";
 import { useAppStore } from "@/components/state-provider";
 import { cn } from "@/lib/utils";
 import { computeRowIndent, resolveRowDepth } from "@/lib/sidebar/row-indent";
-import { DEBUG_UI } from "@/lib/config";
+import { isDebugUI } from "@/lib/config";
 import { useTaskColor } from "@/hooks/use-task-color";
 import { TASK_COLOR_BAR_CLASS, type TaskColor } from "@/lib/task-colors";
 import type { TaskState, TaskSessionState } from "@/lib/types/http";
@@ -171,7 +171,9 @@ function TaskItemStatsRow({
   primarySessionId?: string | null;
 }) {
   const pollMode = useAppStore((s) =>
-    DEBUG_UI && primarySessionId ? (s.sessionPollMode.bySessionId[primarySessionId] ?? null) : null,
+    isDebugUI() && primarySessionId
+      ? (s.sessionPollMode.bySessionId[primarySessionId] ?? null)
+      : null,
   );
 
   if (!updatedAt && !prInfo && !pollMode) return null;

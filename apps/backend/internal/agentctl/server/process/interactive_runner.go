@@ -22,6 +22,7 @@ import (
 type InteractiveStartRequest struct {
 	SessionID            string            `json:"session_id"`                       // Required: Agent session owning this process
 	Command              []string          `json:"command"`                          // Required: Command and args to execute
+	LogCommand           []string          `json:"log_command,omitempty"`            // Optional: redacted copy of Command for logging (e.g. MCP `-c` overrides with tokens); falls back to Command when unset
 	WorkingDir           string            `json:"working_dir"`                      // Working directory
 	ScopeID              string            `json:"scope_id,omitempty"`               // User-shell scope (task environment ID) when applicable
 	TerminalID           string            `json:"terminal_id,omitempty"`            // User-shell terminal ID when applicable
@@ -39,6 +40,15 @@ type InteractiveStartRequest struct {
 	InitialCommand       string            `json:"initial_command,omitempty"`        // Command to write to stdin after shell starts (for script terminals)
 	DisableTurnDetection bool              `json:"disable_turn_detection,omitempty"` // Disable idle timer and turn detection (for user shell terminals)
 	IsUserShell          bool              `json:"is_user_shell,omitempty"`          // Mark as user shell process (excluded from session-level lookups)
+}
+
+// commandForLog returns the command to log: the redacted LogCommand when the
+// caller supplied one, otherwise the raw Command.
+func (r InteractiveStartRequest) commandForLog() []string {
+	if len(r.LogCommand) > 0 {
+		return r.LogCommand
+	}
+	return r.Command
 }
 
 // InteractiveProcessInfo represents the state of an interactive process.

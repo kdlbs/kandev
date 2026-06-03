@@ -49,6 +49,14 @@ type mockGitHubService struct {
 	issueAssignCalls   int
 	issueAssignedID    string
 	issueReleaseCalls  int
+
+	// Self-heal tracking (soft-deleted-profile pre-flight).
+	disableIssueWatchCalls   int
+	lastDisableIssueWatchID  string
+	lastDisableIssueCause    string
+	disableReviewWatchCalls  int
+	lastDisableReviewWatchID string
+	lastDisableReviewCause   string
 }
 
 func (m *mockGitHubService) Client() github.Client { return m.client }
@@ -122,6 +130,23 @@ func (m *mockGitHubService) AssignIssueWatchTaskID(_ context.Context, _, _, _ st
 }
 func (m *mockGitHubService) ReleaseIssueWatchTask(_ context.Context, _, _, _ string, _ int) error {
 	m.issueReleaseCalls++
+	return nil
+}
+
+// disableIssueWatchCalls / disableReviewWatchCalls track self-heal invocations
+// triggered by the soft-deleted-profile pre-flight in createIssueTask /
+// createReviewTask.
+func (m *mockGitHubService) DisableIssueWatchWithError(_ context.Context, watchID, cause string) error {
+	m.disableIssueWatchCalls++
+	m.lastDisableIssueWatchID = watchID
+	m.lastDisableIssueCause = cause
+	return nil
+}
+
+func (m *mockGitHubService) DisableReviewWatchWithError(_ context.Context, watchID, cause string) error {
+	m.disableReviewWatchCalls++
+	m.lastDisableReviewWatchID = watchID
+	m.lastDisableReviewCause = cause
 	return nil
 }
 

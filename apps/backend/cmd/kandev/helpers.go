@@ -748,8 +748,9 @@ func registerSecondaryRoutes(
 	}
 
 	if p.services.GitLab != nil {
-		gitlab.RegisterRoutes(p.router, p.services.GitLab, p.log)
-		p.log.Debug("Registered GitLab handlers (HTTP)")
+		gitlab.RegisterRoutesWithDispatcher(p.router, p.gateway.Dispatcher, p.services.GitLab, p.log)
+		gitlab.RegisterMockRoutes(p.router, p.services.GitLab, p.log)
+		p.log.Debug("Registered GitLab handlers (HTTP + WebSocket)")
 	}
 
 	if p.services.Jira != nil {
@@ -902,6 +903,45 @@ func (a githubRateLimitAdapter) ExhaustedRateLimits() []health.GitHubRateLimitSt
 	return out
 }
 
+// mcpTaskPRListerAdapter adapts *github.Service to the MCP handlers'
+// TaskPRLister interface so list_tasks responses can carry per-task PR
+// summaries. Returns an empty map when the github service is nil.
+type mcpTaskPRListerAdapter struct {
+	gh *github.Service
+}
+
+func (a mcpTaskPRListerAdapter) ListTaskPRsByTaskIDs(
+	ctx context.Context, taskIDs []string,
+) (map[string][]mcphandlers.TaskPRInfo, error) {
+	out := make(map[string][]mcphandlers.TaskPRInfo)
+	if a.gh == nil || len(taskIDs) == 0 {
+		return out, nil
+	}
+	prs, err := a.gh.ListTaskPRsByTaskIDs(ctx, taskIDs)
+	if err != nil {
+		return nil, err
+	}
+	for taskID, list := range prs {
+		infos := make([]mcphandlers.TaskPRInfo, 0, len(list))
+		for _, pr := range list {
+			if pr == nil {
+				continue
+			}
+			infos = append(infos, mcphandlers.TaskPRInfo{
+				Number:   pr.PRNumber,
+				URL:      pr.PRURL,
+				Title:    pr.PRTitle,
+				State:    pr.State,
+				MergedAt: pr.MergedAt,
+			})
+		}
+		if len(infos) > 0 {
+			out[taskID] = infos
+		}
+	}
+	return out, nil
+}
+
 // registerMCPAndDebugRoutes registers MCP and debug routes and wires the MCP handler.
 func registerMCPAndDebugRoutes(
 	p routeParams,
@@ -917,6 +957,12 @@ func registerMCPAndDebugRoutes(
 	)
 	// Wire config-mode dependencies for agent-native configuration
 	mcpHandlers.SetConfigDeps(p.services.Workflow, p.agentSettingsController, p.mcpConfigSvc)
+
+	// Enrich list_tasks responses with associated GitHub PRs (link, title,
+	// number, state) when the github service is available.
+	if p.services.GitHub != nil {
+		mcpHandlers.SetTaskPRLister(mcpTaskPRListerAdapter{gh: p.services.GitHub})
+	}
 
 	// Reuse the cross-task handoff service constructed in registerRoutes —
 	// the same instance backs the MCP path and the HTTP Kanban path so

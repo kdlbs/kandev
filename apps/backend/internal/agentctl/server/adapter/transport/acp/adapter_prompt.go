@@ -150,6 +150,21 @@ func (a *Adapter) sendPrompt(ctx context.Context, message string, attachments []
 		return err
 	}
 
+	// Drain queued ACP notifications before running the post-prompt sweeps and
+	// the complete event. The worker (now async) may still hold final frames
+	// the agent emitted right before its prompt response — the final text
+	// chunk, the terminal monitor_end tool_call_update, the registration
+	// frame for a Monitor whose events haven't yet been routed. Without this
+	// barrier:
+	//   - cancelActiveToolCalls / sweepMonitorsOnPromptEnd race the worker
+	//     for activeToolCalls and activeMonitors. If the worker hasn't added
+	//     a Monitor yet when the sweep takes the map, subsequent monitor_event
+	//     text frames find no tracking and drop their events on the floor.
+	//   - The complete event emitted to updatesCh outruns the final text chunk,
+	//     so the downstream buffer flush yields empty and the turn persists as
+	//     had_output=false even when the agent did produce text.
+	a.syncNotifQueue()
+
 	// Cancel any tool calls still in-flight (e.g. a denied permission leaves the
 	// tool_call without a terminal status update from the agent).
 	a.cancelActiveToolCalls(sessionID)
@@ -333,6 +348,13 @@ func (a *Adapter) Cancel(ctx context.Context) error {
 // or sweepMonitorsOnReplayEnd) which uses the appropriate status and a
 // payload snapshot. Without this skip the Monitor would receive two
 // terminal events with conflicting states.
+//
+// Subagent (Task) tool calls are also preserved: the Claude Agent SDK can
+// return session/prompt with stop_reason while the subagent is still running
+// (anthropics/claude-code#47936). Cancelling the card here would mark it
+// terminated even though the SDK keeps streaming its real tool_call_update
+// when the subagent finishes seconds later. Leaving the entry in
+// activeToolCalls lets that authoritative terminal update land naturally.
 func (a *Adapter) cancelActiveToolCalls(sessionID string) {
 	a.mu.Lock()
 	monitorToolCallIDs := make(map[string]bool)
@@ -342,9 +364,12 @@ func (a *Adapter) cancelActiveToolCalls(sessionID string) {
 	toCancel := make(map[string]*streams.NormalizedPayload)
 	preserved := make(map[string]*streams.NormalizedPayload)
 	for tcID, payload := range a.activeToolCalls {
-		if monitorToolCallIDs[tcID] {
+		switch {
+		case monitorToolCallIDs[tcID]:
 			preserved[tcID] = payload
-		} else {
+		case payload != nil && payload.Kind() == streams.ToolKindSubagentTask:
+			preserved[tcID] = payload
+		default:
 			toCancel[tcID] = payload
 		}
 	}

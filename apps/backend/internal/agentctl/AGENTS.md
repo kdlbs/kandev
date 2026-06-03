@@ -71,6 +71,35 @@ Kandev renders subagents (the `Task` tool) as cards and *wants* to nest each sub
 
 Claude is the one that works today: `claude-agent-acp` (since PR #341) sets `_meta.claudeCode.parentToolUseId` on a subagent's internal calls, and its value already equals the parent Task tool_call id — so it maps straight onto our `parent_tool_call_id`. Cursor exposes nothing to nest. OpenCode needs a kandev-side child-session merge. (Top-level `parentToolCallId` is NOT in the ACP schema — `_meta` is the spec-compliant carrier.)
 
+## Process-group kill for HTTP-server agents (`RequiresProcessKill`)
+
+Most ACP agents (Claude Code, Codex, Cursor, …) exit cleanly when stdin is closed. Some agents — notably `opencode acp` — keep their HTTP server and an MCP child tree alive after stdin EOF. For those agents, closing stdin on shutdown is not enough; the process group has to be SIGKILLed so the MCP children don't re-parent to init and leak (GH issue #1247).
+
+The signal flows agent → adapter → process manager via a single bool:
+
+1. `agents.RuntimeConfig.RequiresProcessKill` (set `true` on `OpenCodeACP`).
+2. The lifecycle executors copy it into `agentctl.CreateInstanceRequest.RequiresProcessKill`.
+3. `instance.Manager` stores it on `config.InstanceConfig.RequiresProcessKill`.
+4. `process.Manager.buildAdapterConfig` forwards it into `adapter.Config` → `shared.Config`.
+5. `acp.Adapter.RequiresProcessKill()` returns `cfg.RequiresProcessKill`.
+6. On shutdown, `process.Manager.killProcessGroupIfRequired` consults the adapter and, when true, sends SIGKILL to the whole pgid via `killProcessGroup` (`syscall.Kill(-pid, SIGKILL)` on Unix). If `Stop(ctx)` further times out before the process exits, `waitForProcessExit`'s `ctx.Done` branch re-runs the pgid SIGKILL (falling back to a leader-only kill if the group call errors) — belt-and-braces for any future ACP CLI that decides to ignore stdin close.
+
+To add another agent that needs this: set `RequiresProcessKill: true` in its `Runtime()` config — that's all.
+
+## Idle-instance reaper (`KANDEV_ACP_IDLE_TIMEOUT`)
+
+`instance.Manager` runs a background goroutine that reaps instances whose owning kandev backend appears to be gone. An instance is "idle" when it has zero in-flight HTTP requests *and* its most recent observed activity is older than the configured timeout. Activity is tracked by a middleware on the per-instance handler that bumps a counter on every request entry/exit, so a long-lived `/agent/stream` WebSocket keeps the instance "active" for as long as the stream is open.
+
+Env knobs:
+- `KANDEV_ACP_IDLE_TIMEOUT` (default `1h`, `0` to disable)
+- `KANDEV_ACP_IDLE_REAPER_INTERVAL` (default `1m`)
+
+Both accept any value `time.ParseDuration` accepts (`30m`, `2h`, `500ms`, …). Disabled mode is intended for tests and edge cases — production should keep the reaper on.
+
+## MCP stdio command validation
+
+`instance.Manager.buildMcpServerConfigs` calls `exec.LookPath` on every stdio MCP `Command` before passing the list to the agent. Entries whose command can't be resolved are dropped with a warn log (URL-transport MCPs always pass through). This prevents the `/snap/bin/brave` repro in GH issue #1247 — an MCP whose binary was uninstalled after config save no longer causes a permanently broken child process to be spawned every session.
+
 ## Further scoped notes
 
 - `server/api/AGENTS.md` — reverse-proxy body rewriting (`Accept-Encoding`) and iframe-blocking header stripping.

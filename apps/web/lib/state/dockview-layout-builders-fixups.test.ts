@@ -12,7 +12,7 @@ const RIGHT_CAP = 1029;
 
 vi.mock("@/lib/debug/log", () => ({
   createDebugLogger: () => () => {},
-  IS_DEBUG: false,
+  isDebug: () => false,
 }));
 
 vi.mock("@/lib/local-storage", () => ({

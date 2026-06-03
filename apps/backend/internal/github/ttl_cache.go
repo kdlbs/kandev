@@ -2,6 +2,7 @@ package github
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -65,6 +66,24 @@ func newMergeMethodsCache() *ttlCache {
 func newAccessibleReposCache() *ttlCache {
 	c := newTTLCache()
 	c.ttl = 60 * time.Second
+	return c
+}
+
+// newPRFeedbackCache backs Service.GetPRFeedback (reviews + comments + checks,
+// 4 sequential GitHub REST calls per miss). Its job is to collapse the
+// render/mount bursts the task page produces — a single PR getting fetched
+// dozens of times in a couple of seconds — without those duplicates each
+// re-hammering GitHub and tripping its secondary rate limits.
+//
+// The TTL is deliberately shorter than the 30s status cache: feedback is the
+// "fresh, on-demand" surface behind the PR popover/detail panel and the manual
+// Refresh button, so staling it for 30s would make legitimate updates lag.
+// 8s is long enough to cover a burst's tail (the singleflight in doOrFetch
+// already coalesces the concurrent in-flight fetches) while keeping the worst-
+// case staleness small.
+func newPRFeedbackCache() *ttlCache {
+	c := newTTLCache()
+	c.ttl = 8 * time.Second
 	return c
 }
 
@@ -160,6 +179,28 @@ func (c *ttlCache) evictLocked() {
 	}
 }
 
+// del removes a single key from the cache. Used by Service.evictRepoNegative
+// to drop a negative entry when a repository is (re)linked to a workspace
+// or its watch is recreated, so a freshly-linked repo gets probed
+// immediately instead of waiting out the 10-min TTL. Bumps `gen` so any
+// classifier fetch that was in flight at the time of the del (e.g. the
+// one whose result triggered the relink) cannot reinsert the just-evicted
+// key via setIfCurrentGeneration — its post-fetch write becomes a no-op
+// and the next ensure() re-probes under the new generation.
+func (c *ttlCache) del(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.entries, key)
+	c.gen++
+}
+
+// cachedErr wraps an error stored in a ttlCache so that a deterministic
+// upstream failure (e.g. ErrRepoNotResolvable) can be negative-cached
+// alongside the cache's normal success-value entries. Currently used by
+// Service.repoErrorCache via the lower-level get / setIfCurrentGeneration
+// primitives (see Service.isRepoCachedAsMissing / markRepoAsMissing).
+type cachedErr struct{ err error }
+
 // doOrFetch returns a cached value when fresh; otherwise runs fetch under a
 // singleflight guard, caches the result, and returns it. Errors are not
 // cached. The returned value is shared — callers must not mutate it.
@@ -204,4 +245,28 @@ func searchCacheKey(kind, filter, customQuery string, page, perPage int) string 
 
 func prStatusCacheKey(owner, repo string, number int) string {
 	return fmt.Sprintf("%s/%s#%d", owner, repo, number)
+}
+
+// newRepoErrorCache backs Service.repoErrorCache. It negative-caches
+// deterministic "repository not resolvable" failures (see
+// isRepoNotResolvableErr) so the SyncWatchesBatched storm against
+// missing/unauthorized repos collapses to one upstream call per 10
+// minutes per repo instead of one per 5s frontend poll. The TTL is
+// deliberately longer than the status / feedback caches because the
+// failure mode is "this repo doesn't exist or we can't see it" — a
+// state that flips back only via an explicit re-link or token swap,
+// both of which evict the entry directly.
+func newRepoErrorCache() *ttlCache {
+	c := newTTLCache()
+	c.ttl = 10 * time.Minute
+	return c
+}
+
+// repoErrorCacheKey is the case-insensitive (owner, repo) key for
+// Service.repoErrorCache. GitHub's repository names are case-insensitive
+// at the API surface, so "NBCUDTC/Bff" and "nbcudtc/bff" reach the same
+// upstream resource; normalising the cache key prevents the negative
+// entry from being bypassed by a caller that capitalises differently.
+func repoErrorCacheKey(owner, repo string) string {
+	return strings.ToLower(owner) + "/" + strings.ToLower(repo)
 }

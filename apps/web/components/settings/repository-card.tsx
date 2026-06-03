@@ -14,6 +14,7 @@ import { useToast } from "@/components/toast-provider";
 import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
 import { EditableCard } from "@/components/settings/editable-card";
 import { DeleteRepositoryDialog } from "@/components/settings/repository-delete-dialog";
+import { CopyFilesField } from "@/components/settings/repository-copy-files-help";
 import { getRepositoryActiveSessionCountAction } from "@/app/actions/workspaces";
 import type { Repository, RepositoryScript } from "@/lib/types/http";
 
@@ -165,17 +166,7 @@ function RepositoryScriptFields({
         </p>
       </div>
 
-      <div className="space-y-2">
-        <Label>Copy Files</Label>
-        <Textarea
-          value={copyFiles}
-          onChange={(e) => onUpdate(repositoryId, { copy_files: e.target.value })}
-          placeholder=".env, .env.local, config/local.yml"
-          rows={2}
-          className="font-mono text-sm"
-        />
-        <p className="text-xs text-muted-foreground">Gitignored paths copied into new worktrees.</p>
-      </div>
+      <CopyFilesField repositoryId={repositoryId} copyFiles={copyFiles} onUpdate={onUpdate} />
     </>
   );
 }

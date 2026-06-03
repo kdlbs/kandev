@@ -19,7 +19,7 @@ import { sortVersionsDesc } from "./version";
 import { pickAvailablePort } from "./ports";
 import { createProcessSupervisor } from "./process";
 import { resolveRuntime, validateBundle } from "./runtime";
-import { attachBackendExitHandler, logStartupInfo } from "./shared";
+import { attachBackendExitHandler, buildBackendEnv, buildWebEnv, logStartupInfo } from "./shared";
 import { launchWebApp, openBrowser } from "./web";
 
 export type RunOptions = {
@@ -195,23 +195,30 @@ async function prepareBundleForLaunch({
 
   const backendBin = path.join(bundleDir, "bin", getBinaryName("kandev"));
 
-  const backendEnv: NodeJS.ProcessEnv = {
-    ...process.env,
-    KANDEV_SERVER_PORT: String(actualBackendPort),
-    KANDEV_WEB_INTERNAL_URL: `http://localhost:${actualWebPort}`,
-    KANDEV_AGENT_STANDALONE_PORT: String(agentctlPort),
-    KANDEV_DATABASE_PATH: dbPath,
-    KANDEV_LOG_LEVEL: logLevel,
-    ...(debug ? { KANDEV_DEBUG_AGENT_MESSAGES: "true", KANDEV_DEBUG_PPROF_ENABLED: "true" } : {}),
-  };
+  const backendEnv = buildBackendEnv({
+    ports: {
+      backendPort: actualBackendPort,
+      webPort: actualWebPort,
+      agentctlPort,
+      backendUrl,
+    },
+    logLevel,
+    extra: {
+      KANDEV_DATABASE_PATH: dbPath,
+      ...(debug ? { KANDEV_DEBUG_AGENT_MESSAGES: "true", KANDEV_DEBUG_PPROF_ENABLED: "true" } : {}),
+    },
+  });
 
-  const webEnv: NodeJS.ProcessEnv = {
-    ...process.env,
-    KANDEV_API_BASE_URL: backendUrl,
-    PORT: String(actualWebPort),
-    HOSTNAME: "127.0.0.1",
-  };
-  (webEnv as Record<string, string>).NODE_ENV = "production";
+  const webEnv = buildWebEnv({
+    ports: {
+      backendPort: actualBackendPort,
+      webPort: actualWebPort,
+      agentctlPort,
+      backendUrl,
+    },
+    production: true,
+    debug,
+  });
 
   return {
     bundleDir,

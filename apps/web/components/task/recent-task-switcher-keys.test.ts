@@ -24,6 +24,11 @@ const taskSwitcherShortcut: KeyboardShortcut = {
   modifiers: { ctrlOrCmd: true },
 };
 
+const taskSwitcherReverseShortcut: KeyboardShortcut = {
+  key: KEYS.SPACE,
+  modifiers: { ctrlOrCmd: true, shift: true },
+};
+
 function platform(platform: Platform): Platform {
   return platform;
 }
@@ -68,6 +73,30 @@ describe("recent task switcher key helpers", () => {
       true,
     );
     expect(isCycleShortcutEvent(event({ key: "y", ctrlKey: true }), shortcut)).toBe(false);
+  });
+
+  it("separates forward and reverse switcher shortcuts by the Shift modifier", () => {
+    const forwardEvent = event({ key: KEYS.SPACE, ctrlKey: true });
+    const reverseEvent = event({ key: KEYS.SPACE, ctrlKey: true, shiftKey: true });
+
+    // Forward fires only without Shift; reverse fires only with Shift.
+    expect(isCycleShortcutEvent(forwardEvent, taskSwitcherShortcut)).toBe(true);
+    expect(isCycleShortcutEvent(forwardEvent, taskSwitcherReverseShortcut)).toBe(false);
+    expect(isCycleShortcutEvent(reverseEvent, taskSwitcherShortcut)).toBe(false);
+    expect(isCycleShortcutEvent(reverseEvent, taskSwitcherReverseShortcut)).toBe(true);
+  });
+
+  it("commits the reverse shortcut on Ctrl/Cmd release, not Shift release", () => {
+    expect(
+      isCommitReleaseEvent(
+        event({ key: "Control" }),
+        taskSwitcherReverseShortcut,
+        platform("linux"),
+      ),
+    ).toBe(true);
+    expect(
+      isCommitReleaseEvent(event({ key: "Shift" }), taskSwitcherReverseShortcut, platform("linux")),
+    ).toBe(false);
   });
 
   it("matches the hold modifier release, not secondary modifier release", () => {

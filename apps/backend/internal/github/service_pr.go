@@ -107,12 +107,34 @@ func (s *Service) GetPR(ctx context.Context, owner, repo string, number int) (*P
 	return s.client.GetPR(ctx, owner, repo, number)
 }
 
-// GetPRFeedback fetches live PR feedback from GitHub.
+// GetPRFeedback fetches live PR feedback from GitHub. Cached briefly with
+// singleflight coalescing: the task page fires this for the same PR many times
+// in quick succession (chat-bar CI chip, detail panel, hover popover — each on
+// its own render/mount triggers), and each miss is 4 sequential GitHub REST
+// calls. Without this, a burst fanned out into dozens of slow, rate-limited
+// duplicate requests. The returned pointer is shared — callers must not mutate it.
 func (s *Service) GetPRFeedback(ctx context.Context, owner, repo string, number int) (*PRFeedback, error) {
 	if s.client == nil {
 		return nil, fmt.Errorf("github client not available")
 	}
-	return s.client.GetPRFeedback(ctx, owner, repo, number)
+	// Detach the upstream call's context from the singleflight leader: a
+	// cancelled leader (user closes the tab) would otherwise return its
+	// context error to all co-waiters, cascading a single client disconnect
+	// into a burst of transient failures across concurrent callers.
+	// context.WithoutCancel strips the deadline too, so re-attach the
+	// parent deadline explicitly — without this, a still-active caller's
+	// timeout wouldn't bound the shared fetch and quota could keep being
+	// consumed past the deadline.
+	fetchCtx, cancelFetch := derivedFetchContext(ctx)
+	defer cancelFetch()
+	key := prStatusCacheKey(owner, repo, number)
+	v, err := s.prFeedbackCache.doOrFetch(key, func() (any, error) {
+		return s.client.GetPRFeedback(fetchCtx, owner, repo, number)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.(*PRFeedback), nil
 }
 
 // GetPRStatus fetches lightweight PR status (review + checks + mergeable).
@@ -123,14 +145,34 @@ func (s *Service) GetPRStatus(ctx context.Context, owner, repo string, number in
 	if s.client == nil {
 		return nil, fmt.Errorf("github client not available")
 	}
+	// Detach the upstream call from the singleflight leader's context; see
+	// GetPRFeedback for the cascading-cancel + deadline-preserve rationale.
+	fetchCtx, cancelFetch := derivedFetchContext(ctx)
+	defer cancelFetch()
 	key := prStatusCacheKey(owner, repo, number)
 	v, err := s.prStatusCache.doOrFetch(key, func() (any, error) {
-		return s.client.GetPRStatus(ctx, owner, repo, number)
+		return s.client.GetPRStatus(fetchCtx, owner, repo, number)
 	})
 	if err != nil {
 		return nil, err
 	}
 	return v.(*PRStatus), nil
+}
+
+// derivedFetchContext builds the upstream-fetch context used by the
+// singleflight-cached GetPRFeedback / GetPRStatus paths. It strips the
+// caller's cancellation via context.WithoutCancel so a single client
+// disconnect doesn't cascade the same error to all co-waiters, but
+// preserves the caller's deadline (when present) so the fetch can't
+// outlive the request budget and keep consuming GitHub quota past it.
+// Returns the derived context and a cancel func the caller must defer
+// to release resources promptly.
+func derivedFetchContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	fetchCtx := context.WithoutCancel(ctx)
+	if deadline, ok := ctx.Deadline(); ok {
+		return context.WithDeadline(fetchCtx, deadline)
+	}
+	return fetchCtx, func() {}
 }
 
 // PRRef identifies a pull request by owner/repo/number.

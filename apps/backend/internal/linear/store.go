@@ -68,6 +68,8 @@ const createTablesSQL = `
 		-- the API layer. See docs/specs/throttle-watcher-fanout/.
 		max_inflight_tasks INTEGER DEFAULT 5,
 		last_polled_at DATETIME,
+		last_error TEXT NOT NULL DEFAULT '',
+		last_error_at DATETIME,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
 	);
@@ -99,6 +101,9 @@ func (s *Store) initSchema() error {
 	if err := s.addMaxInflightTasksColumn(); err != nil {
 		return err
 	}
+	if err := s.addIssueWatchLastErrorColumns(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -119,6 +124,29 @@ func (s *Store) addMaxInflightTasksColumn() error {
 	}
 	if _, err := s.db.Exec(`ALTER TABLE linear_issue_watches ADD COLUMN max_inflight_tasks INTEGER DEFAULT 5`); err != nil {
 		return fmt.Errorf("add max_inflight_tasks column: %w", err)
+	}
+	return nil
+}
+
+// addIssueWatchLastErrorColumns brings older databases up to the current
+// schema by appending last_error / last_error_at to linear_issue_watches when
+// missing. Fresh installs hit the column-already-present branch since
+// createTablesSQL declares both columns. Idempotent — column lookup before
+// each ALTER avoids the "duplicate column name" error.
+func (s *Store) addIssueWatchLastErrorColumns() error {
+	cols, err := s.tableColumns("linear_issue_watches")
+	if err != nil {
+		return err
+	}
+	if _, ok := cols["last_error"]; !ok {
+		if _, err := s.db.Exec(`ALTER TABLE linear_issue_watches ADD COLUMN last_error TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add last_error column: %w", err)
+		}
+	}
+	if _, ok := cols["last_error_at"]; !ok {
+		if _, err := s.db.Exec(`ALTER TABLE linear_issue_watches ADD COLUMN last_error_at DATETIME`); err != nil {
+			return fmt.Errorf("add last_error_at column: %w", err)
+		}
 	}
 	return nil
 }

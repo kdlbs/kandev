@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
 )
@@ -18,18 +19,17 @@ var cursorACPLogoDark []byte
 
 const cursorACPBin = "cursor-agent"
 
-// cursorPermSettings maps the profile "Auto approve" toggle to cursor-agent's
-// --force flag. In ACP mode Cursor emits a session/request_permission for every
-// command not on its internal allowlist; --force ("Run Everything") suppresses
-// those prompts entirely. Empirically --force is the only flag that bypasses
-// the allowlist over ACP — --yolo and --sandbox still prompt. Default off
-// because --force runs everything unsandboxed.
+// cursorPermSettings maps a curated CLI flag to cursor-agent's --force switch.
+// In ACP mode Cursor emits session/request_permission for commands off its
+// allowlist; --force ("Run Everything") suppresses those prompts. Default off
+// because --force runs everything unsandboxed. Universal agentctl auto-approve
+// (PermissionKeyAutoApprove) is added by CatalogPermissionSettings, not here.
 var cursorPermSettings = map[string]PermissionSetting{
-	PermissionKeyAutoApprove: {
+	PermissionKeyCursorForce: {
 		Supported:   true,
 		Default:     false,
-		Label:       "Auto approve",
-		Description: "Run all commands without approval prompts (cursor-agent --force)",
+		Label:       "Cursor run everything (--force)",
+		Description: "Append cursor-agent --force so the CLI stops prompting for non-allowlisted commands (unsandboxed).",
 		ApplyMethod: PermissionApplyMethodCLIFlag,
 		CLIFlag:     "--force",
 	},
@@ -60,6 +60,9 @@ func NewCursorACP() *CursorACP {
 				ModelFlag:      NewParam("--model", "{model}"),
 				IdleTimeout:    3 * time.Second,
 				BufferMaxBytes: DefaultBufferMaxBytes,
+				// cursor-agent has no MCP flag/env; write a project-local
+				// .cursor/mcp.json into the worktree (only if absent).
+				MCPStrategy: mcpconfig.CursorStrategy{},
 			},
 		},
 	}
@@ -94,9 +97,9 @@ func (a *CursorACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 }
 
 func (a *CursorACP) BuildCommand(opts CommandOptions) Command {
-	return Cmd(cursorACPBin, "acp").
-		Settings(a.PermissionSettings(), opts.PermissionValues).
-		Build()
+	// --force is applied via profile cli_flags (seeded from cursor_force), not
+	// PermissionValues, so auto_approve stays agentctl-only.
+	return Cmd(cursorACPBin, "acp").Build()
 }
 
 func (a *CursorACP) Runtime() *RuntimeConfig {

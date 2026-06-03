@@ -72,12 +72,10 @@ func newTestCanceller(t *testing.T, msgs map[string][]*taskmodels.Message) (*Can
 	return NewCanceller(store, repo, eventBus, logger.Default()), repo, eventBus
 }
 
-// TestCanceller_MarksStatusExpiredOnDisconnect verifies that when the agent's
-// turn ends with a pending clarification, the message is marked status=expired.
-// This is what causes the frontend overlay to close — without it, the overlay
-// stays interactive and a user clicking X triggers an unintended new turn via
-// the event fallback path in the respond handler.
-func TestCanceller_MarksStatusExpiredOnDisconnect(t *testing.T) {
+// TestCanceller_MarksDetachedOnDisconnect verifies that when the agent's turn
+// ends with a pending clarification, the message stays pending with
+// agent_disconnected so the overlay remains interactive for a deferred answer.
+func TestCanceller_MarksDetachedOnDisconnect(t *testing.T) {
 	msgs := map[string][]*taskmodels.Message{}
 	c, repo, _ := newTestCanceller(t, msgs)
 
@@ -102,6 +100,34 @@ func TestCanceller_MarksStatusExpiredOnDisconnect(t *testing.T) {
 	if got, _ := updated.Metadata["agent_disconnected"].(bool); !got {
 		t.Errorf("expected agent_disconnected=true, got %v", updated.Metadata["agent_disconnected"])
 	}
+	if got, _ := updated.Metadata["status"].(string); got != "pending" {
+		t.Errorf("expected status=pending, got %q", got)
+	}
+}
+
+// TestCanceller_ExpireSessionAndNotify_MarksExpired verifies the explicit expiry
+// path closes the overlay and records a timed-out history entry.
+func TestCanceller_ExpireSessionAndNotify_MarksExpired(t *testing.T) {
+	msgs := map[string][]*taskmodels.Message{}
+	c, repo, _ := newTestCanceller(t, msgs)
+
+	pendingID, _ := c.store.CreateRequest(&Request{SessionID: "s1"})
+	msgs[pendingID] = []*taskmodels.Message{{
+		ID:            "m1",
+		TaskSessionID: "s1",
+		Metadata: map[string]any{
+			"status": "pending",
+		},
+	}}
+
+	cancelled := c.ExpireSessionAndNotify(context.Background(), "s1")
+	if cancelled != 1 {
+		t.Fatalf("expected 1 cancelled, got %d", cancelled)
+	}
+	if len(repo.updated) != 1 {
+		t.Fatalf("expected 1 message update, got %d", len(repo.updated))
+	}
+	updated := repo.updated[0]
 	if got, _ := updated.Metadata["status"].(string); got != "expired" {
 		t.Errorf("expected status=expired, got %q", got)
 	}
@@ -140,10 +166,9 @@ func TestCanceller_PublishesMessageUpdatedEvent(t *testing.T) {
 	}
 }
 
-// TestCanceller_MultiQuestion_MarksAllMessagesExpired confirms a multi-question
-// bundle has every message marked expired (and emits one update event each)
-// so the frontend overlay closes for the whole stack on agent timeout.
-func TestCanceller_MultiQuestion_MarksAllMessagesExpired(t *testing.T) {
+// TestCanceller_MultiQuestion_MarksAllMessagesDetached confirms a multi-question
+// bundle has every message marked agent_disconnected while staying pending.
+func TestCanceller_MultiQuestion_MarksAllMessagesDetached(t *testing.T) {
 	msgs := map[string][]*taskmodels.Message{}
 	c, _, eventBus := newTestCanceller(t, msgs)
 
@@ -163,10 +188,10 @@ func TestCanceller_MultiQuestion_MarksAllMessagesExpired(t *testing.T) {
 	}
 }
 
-// TestCanceller_MarksExpiredWhenStoreAlreadyDrained verifies that even when
+// TestCanceller_MarksDetachedWhenStoreAlreadyDrained verifies that even when
 // the in-memory store entry has already been removed (racing MCP-timeout path),
-// CancelSessionAndNotify still finds and marks the DB messages expired.
-func TestCanceller_MarksExpiredWhenStoreAlreadyDrained(t *testing.T) {
+// DetachSessionAndNotify still finds and marks the DB messages detached.
+func TestCanceller_MarksDetachedWhenStoreAlreadyDrained(t *testing.T) {
 	msgs := map[string][]*taskmodels.Message{}
 	c, repo, _ := newTestCanceller(t, msgs)
 
@@ -180,7 +205,7 @@ func TestCanceller_MarksExpiredWhenStoreAlreadyDrained(t *testing.T) {
 		},
 	}}
 
-	cancelled := c.CancelSessionAndNotify(context.Background(), "s1")
+	cancelled := c.DetachSessionAndNotify(context.Background(), "s1")
 	if cancelled != 1 {
 		t.Fatalf("expected 1 cancelled bundle from DB fallback, got %d", cancelled)
 	}
@@ -188,8 +213,11 @@ func TestCanceller_MarksExpiredWhenStoreAlreadyDrained(t *testing.T) {
 		t.Fatalf("expected 1 message update, got %d", len(repo.updated))
 	}
 	updated := repo.updated[0]
-	if got, _ := updated.Metadata["status"].(string); got != "expired" {
-		t.Errorf("expected status=expired, got %q", got)
+	if got, _ := updated.Metadata["status"].(string); got != "pending" {
+		t.Errorf("expected status=pending, got %q", got)
+	}
+	if got, _ := updated.Metadata["agent_disconnected"].(bool); !got {
+		t.Errorf("expected agent_disconnected=true")
 	}
 }
 

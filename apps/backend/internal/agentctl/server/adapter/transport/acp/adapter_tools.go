@@ -183,10 +183,28 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	// the view as ended instead.
 	isTrackedMonitorTerminal := !isMonitorRegistration && isMonitorMeta(tcu.Meta) && a.isTrackedMonitor(sessionID, toolCallID)
 
-	isTerminal := status == toolStatusComplete || status == toolStatusError || status == toolStatusCancelled
+	// Cheap pre-lock inspection of the meta envelope. The override itself runs
+	// under the lock so it can gate on payload kind (subagent_task only).
+	isAsyncLaunchedSub := isSubagentAsyncLaunched(tcu.Meta)
 
 	a.mu.Lock()
 	payload := a.activeToolCalls[toolCallID]
+
+	// Recognize claude-acp's async-launched subagent envelope: the Task tool
+	// successfully dispatched a background subagent. The dispatch IS terminal
+	// for the Task tool itself — the subagent runs out-of-band and writes its
+	// result to OutputFile, and no later tool_call_update arrives for it.
+	// Override unconditionally (not gated on status == "") so a future SDK
+	// version that adds Title/RawInput/Content to the async_launched frame
+	// can't leave the card stuck after the earlier in_progress synthesis
+	// kicked in. Gated on subagent_task payload kind so an unrelated
+	// claudeCode-namespaced tool that happens to use the same status literal
+	// can't accidentally terminate.
+	if isAsyncLaunchedSub && payload != nil && payload.Kind() == streams.ToolKindSubagentTask {
+		status = toolStatusComplete
+	}
+
+	isTerminal := status == toolStatusComplete || status == toolStatusError || status == toolStatusCancelled
 
 	// Update stored payload with incremental rawInput (e.g. Claude Code sends
 	// command/cwd in a tool_call_update after the initial empty tool_call).

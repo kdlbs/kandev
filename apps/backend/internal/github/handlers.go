@@ -250,16 +250,27 @@ func wsGetTaskPR(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *
 // PR yet"); multi-repo callers iterate and call setTaskPR for each so the
 // per-repo PR icon stays in sync. The legacy single-PR shape would have
 // silently dropped every repo's PR except the most-recently-updated one.
+//
+// permanent=true on the response signals the frontend's 5s retry loop to
+// stop. It's set when every watch on the task points at a repository
+// classified as unresolvable (missing, deleted, or inaccessible to the
+// authenticated principal) — without this, the frontend keeps re-polling
+// dead repos every 5s for the lifetime of the task, which was the
+// dominant signal in the production SyncWatchesBatched storm.
 func wsSyncTaskPR(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return wsWithField("task_id", func(ctx context.Context, taskID string) (interface{}, error) {
-		prs, err := svc.TriggerPRSyncAll(ctx, taskID)
+		prs, permanent, err := svc.TriggerPRSyncAllPermanent(ctx, taskID)
 		if err != nil {
 			return nil, err
 		}
 		// Return an envelope so the frontend always gets a deterministic
-		// shape even on empty results (`{prs: []}`); a bare `nil` would
-		// confuse the WS handler's success/error branching.
-		return map[string]interface{}{"prs": prs}, nil
+		// shape even on empty results (`{prs: []}`); a bare `nil` slice
+		// would serialize to `prs: null` and confuse the WS handler's
+		// success/error branching, so normalize to an empty slice here.
+		if prs == nil {
+			prs = []*TaskPR{}
+		}
+		return map[string]interface{}{"prs": prs, "permanent": permanent}, nil
 	})
 }
 

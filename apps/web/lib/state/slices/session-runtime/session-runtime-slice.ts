@@ -6,7 +6,7 @@ import type {
   GitStatusEntry,
   FileInfo,
 } from "./types";
-import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
 const debugGit = createDebugLogger("git-status:store");
 
@@ -401,7 +401,7 @@ export const createSessionRuntimeSlice: StateCreator<
       const repoMap = (draft.gitStatus.byEnvironmentRepo[envKey] ??= {});
       const existingRepo = repoMap[repoName];
       const repoChanged = !existingRepo || hasGitStatusChanged(existingRepo, gitStatus);
-      if (IS_DEBUG) {
+      if (isDebug()) {
         debugGit("setGitStatus", {
           sessionId,
           envKey,

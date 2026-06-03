@@ -84,8 +84,10 @@ type Service struct {
 	taskEventSubs        []bus.Subscription
 	searchCache          *ttlCache
 	prStatusCache        *ttlCache
+	prFeedbackCache      *ttlCache
 	mergeMethodsCache    *ttlCache
 	accessibleReposCache *ttlCache
+	repoErrorCache       *ttlCache
 	protectionCache      *branchProtectionCache
 	rateTracker          *RateTracker
 
@@ -129,8 +131,10 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 		logger:               log,
 		searchCache:          newTTLCache(),
 		prStatusCache:        newTTLCache(),
+		prFeedbackCache:      newPRFeedbackCache(),
 		mergeMethodsCache:    newMergeMethodsCache(),
 		accessibleReposCache: newAccessibleReposCache(),
+		repoErrorCache:       newRepoErrorCache(),
 		protectionCache:      newBranchProtectionCache(),
 		rateTracker:          NewRateTracker(eventBus, log),
 		cleanupFailureCounts: make(map[string]int),
@@ -214,4 +218,95 @@ func (s *Service) IsAuthenticated() bool {
 // AuthMethod returns the authentication method ("gh_cli", "pat", or "none").
 func (s *Service) AuthMethod() string {
 	return s.authMethod
+}
+
+// isRepoCachedAsMissing reports whether the (owner, repo) tuple is in the
+// 10-min negative cache. Called from SyncWatchesBatched and per-watch
+// probes before acquiring the gh throttle, so the storm against
+// missing/unauthorized repos short-circuits without burning a slot.
+func (s *Service) isRepoCachedAsMissing(owner, repo string) bool {
+	if s == nil || s.repoErrorCache == nil {
+		return false
+	}
+	v, ok := s.repoErrorCache.get(repoErrorCacheKey(owner, repo))
+	if !ok {
+		return false
+	}
+	_, isErr := v.(cachedErr)
+	return isErr
+}
+
+// repoErrorGenSnapshot returns the current cache generation. Callers
+// snapshot this BEFORE issuing the fetch that may classify a repo as
+// missing, and pass the snapshot to markRepoAsMissing — that way an
+// evictRepoNegative / ClearRepoErrorCache that fires DURING the fetch
+// (bumping gen) causes the post-fetch write to be dropped, and the
+// negative cache reflects the user's latest intent rather than the
+// stale classifier result.
+func (s *Service) repoErrorGenSnapshot() uint64 {
+	if s == nil || s.repoErrorCache == nil {
+		return 0
+	}
+	return s.repoErrorCache.generation()
+}
+
+// markRepoAsMissing stores ErrRepoNotResolvable for (owner, repo) in the
+// negative cache. Called after a per-watch or batched probe deterministically
+// classifies the repo as missing/unauthorized (see isRepoNotResolvableErr).
+// `gen` must be a snapshot taken via repoErrorGenSnapshot BEFORE the fetch
+// — passing the current generation at write time would defeat the guard:
+// a concurrent del() / clear() that bumped gen between the fetch start and
+// the write would still be present at write time, so a write-time snapshot
+// would land in the new generation and the just-evicted entry would be
+// reinserted. The fetch-start snapshot turns the write into a no-op when
+// any eviction has fired since the fetch began.
+func (s *Service) markRepoAsMissing(owner, repo string, gen uint64) {
+	if s == nil || s.repoErrorCache == nil {
+		return
+	}
+	s.repoErrorCache.setIfCurrentGeneration(
+		repoErrorCacheKey(owner, repo), cachedErr{err: ErrRepoNotResolvable}, gen)
+}
+
+// evictRepoNegative drops any negative-cache entry for (owner, repo). Called
+// from the PR watch (re)create paths and AssociatePRByURL so a freshly
+// linked or re-linked repository is probed immediately on the next sync,
+// without waiting out the 10-min TTL.
+func (s *Service) evictRepoNegative(owner, repo string) {
+	if s == nil || s.repoErrorCache == nil {
+		return
+	}
+	s.repoErrorCache.del(repoErrorCacheKey(owner, repo))
+}
+
+// ClearRepoErrorCache drops every entry from the negative repo-resolution
+// cache. Called from ConfigureToken / ClearToken so a token swap or clear
+// invalidates classifications that were made under the prior identity —
+// without this, a repo that the old token couldn't see would stay
+// "permanent: true" for up to 10 minutes after the user fixes auth, and
+// the frontend retry loop would stop early on stale data. Nil-guards the
+// cache because tests construct Service literals without going through
+// NewService.
+func (s *Service) ClearRepoErrorCache() {
+	if s == nil || s.repoErrorCache == nil {
+		return
+	}
+	s.repoErrorCache.clear()
+}
+
+// ClearPRCaches drops the PR status and PR feedback caches. Called from
+// the token-swap path because review visibility differs across identities
+// (a PR readable to the old token may not be readable to the new one, and
+// vice versa); without this, the new identity could see stale review /
+// check / comment data for up to one TTL after the swap.
+func (s *Service) ClearPRCaches() {
+	if s == nil {
+		return
+	}
+	if s.prStatusCache != nil {
+		s.prStatusCache.clear()
+	}
+	if s.prFeedbackCache != nil {
+		s.prFeedbackCache.clear()
+	}
 }

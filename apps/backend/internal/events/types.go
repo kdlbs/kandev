@@ -160,6 +160,7 @@ const (
 	ClarificationAnswered        = "clarification.answered"         // User answered agent's clarification question (fallback/new turn)
 	ClarificationPrimaryAnswered = "clarification.primary_answered" // User answered while agent is still waiting (same turn)
 	ClarificationCancelled       = "clarification.cancelled"        // User cancelled a pending clarification question
+	ClarificationStaleDismissed  = "clarification.stale_dismissed"  // User dismissed a detached overlay without resuming the agent
 )
 
 // Event types for workspace/git status
@@ -226,6 +227,16 @@ const (
 	GitHubTaskPRUpdated    = "github.task_pr.updated"    // TaskPR record updated (for UI refresh)
 	GitHubWatchEvent       = "github.watch.event"        // Watch created/deleted
 	GitHubRateLimitUpdated = "github.rate_limit.updated" // GitHub API rate-limit snapshot changed
+)
+
+// Event types for GitLab integration
+const (
+	GitLabMRFeedback     = "gitlab.mr_feedback"      // MR has new feedback (UI notification only)
+	GitLabMRStateChanged = "gitlab.mr_state_changed" // MR state changed (merged, closed, etc.)
+	GitLabNewReviewMR    = "gitlab.new_mr_to_review" // New MR found needing review
+	GitLabNewIssue       = "gitlab.new_issue"        // New issue found matching issue watch
+	GitLabTaskMRUpdated  = "gitlab.task_mr.updated"  // TaskMR record updated (for UI refresh)
+	GitLabWatchEvent     = "gitlab.watch.event"      // Watch created/deleted
 )
 
 // Event types for Jira integration

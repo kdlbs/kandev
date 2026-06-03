@@ -15,9 +15,18 @@ import (
 // AddBranchToTaskRequest carries the parameters for adding a new branch
 // (worktree) to an existing task. The (RepositoryID, CheckoutBranch) pair
 // must not already exist on the task.
+//
+// RepositoryID, LocalPath, and GitHubURL are alternative ways to identify the
+// target repository — mirrors the create_task input shape. When RepositoryID
+// is empty and either LocalPath or GitHubURL is set, the service resolves to
+// (or creates) the matching repository in the task's workspace. Pure
+// RepositoryID is the fast path; the other two are agent-ergonomic
+// alternatives so callers don't have to look up the UUID first.
 type AddBranchToTaskRequest struct {
 	TaskID         string
 	RepositoryID   string
+	LocalPath      string
+	GitHubURL      string
 	BaseBranch     string
 	CheckoutBranch string
 }
@@ -31,16 +40,20 @@ type AddBranchToTaskRequest struct {
 //
 // Constraints:
 //   - TaskID is required.
-//   - RepositoryID is optional. When omitted, the service defaults to the
-//     task's existing repository (the only one for single-repo tasks; the
-//     primary by lowest position otherwise). Multi-repo tasks must pass an
-//     explicit RepositoryID — defaulting would be ambiguous.
+//   - RepositoryID, LocalPath, and GitHubURL are alternative ways to identify
+//     the target repository. All three are optional: when none is supplied
+//     the service defaults to the task's existing repository (the only one
+//     for single-repo tasks; the primary by lowest position otherwise).
+//     Multi-repo tasks must pass one explicitly — defaulting would be
+//     ambiguous. LocalPath and GitHubURL are resolved (find-or-create)
+//     through the same workspace-scoped path used by create_task.
 //   - The (TaskID, RepositoryID, BaseBranch, CheckoutBranch) tuple must be
 //     unique on the task — duplicates surface as a typed error so callers
 //     can render a user-friendly message instead of a raw DB error.
-//   - The repository must belong to the task's workspace; the caller is
-//     responsible for that check (service_tasks.resolveRepoInput enforces it
-//     during create, this method assumes the same upstream gating).
+//   - The repository must belong to the task's workspace. The resolution
+//     path (ResolveRepositoryRef → resolveRepoInput) enforces this for the
+//     LocalPath / GitHubURL flows; for the RepositoryID fast path the
+//     workspace-membership check happens in resolveBranchRepo below.
 func (s *Service) AddBranchToTask(ctx context.Context, req AddBranchToTaskRequest) (*models.TaskRepository, error) {
 	task, existing, err := s.prepareBranchAdd(ctx, &req)
 	if err != nil {
@@ -107,8 +120,32 @@ func (s *Service) prepareBranchAdd(ctx context.Context, req *AddBranchToTaskRequ
 		// rather than substring-matching the formatted UUID.
 		return nil, nil, fmt.Errorf("%w: %s", taskrepo.ErrTaskNotFound, req.TaskID)
 	}
+	// Executor gate runs BEFORE repository resolution so a rejection on a
+	// non-worktree executor can't leak an orphan Repository row into the
+	// workspace via FindOrCreateRepository / CreateRepository inside
+	// ResolveRepositoryRef. Mirrors the "keeps the DB clean" invariant
+	// documented on requireWorktreeExecutorForBranchAdd itself.
 	if err := s.requireWorktreeExecutorForBranchAdd(ctx, req.TaskID); err != nil {
 		return nil, nil, err
+	}
+	// Resolve LocalPath / GitHubURL to a concrete RepositoryID up front so the
+	// rest of the flow (duplicate scan, row insert) operates on a stable UUID.
+	// Skipped when RepositoryID is already set or neither alternative
+	// identifier was supplied (the single-repo task default applies after
+	// the existing-rows lookup).
+	if req.RepositoryID == "" && (req.LocalPath != "" || req.GitHubURL != "") {
+		resolvedID, resolvedBranch, resolveErr := s.ResolveRepositoryRef(ctx, task.WorkspaceID, TaskRepositoryInput{
+			LocalPath:  req.LocalPath,
+			GitHubURL:  req.GitHubURL,
+			BaseBranch: req.BaseBranch,
+		})
+		if resolveErr != nil {
+			return nil, nil, fmt.Errorf("resolve repository: %w", resolveErr)
+		}
+		req.RepositoryID = resolvedID
+		if req.BaseBranch == "" {
+			req.BaseBranch = resolvedBranch
+		}
 	}
 	existing, err := s.taskRepos.ListTaskRepositories(ctx, req.TaskID)
 	if err != nil {

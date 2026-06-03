@@ -63,6 +63,21 @@ function findLastUserMessage(messages: Message[], turnId: string): Message | und
   return undefined;
 }
 
+// hasSubagentTaskMessage returns true when the turn contains a Task (subagent)
+// tool call message. Guards against the empty-turn race when a parent agent
+// dispatches a subagent: the Claude Agent SDK may return session/prompt with
+// stop_reason while the subagent still runs (anthropics/claude-code#47936), so
+// the backend's had_output snapshot can be false even though the turn dispatched
+// real work and the subagent's nested events will land seconds later.
+function hasSubagentTaskMessage(messages: Message[], turnId: string): boolean {
+  for (const m of messages) {
+    if (m.turn_id !== turnId || m.author_type !== "agent") continue;
+    const meta = m.metadata as { normalized?: { kind?: string } } | undefined;
+    if (meta?.normalized?.kind === "subagent_task") return true;
+  }
+  return false;
+}
+
 /**
  * Decides whether an empty-turn notice should be shown and, if so, returns the
  * synthetic status Message to inject. Pure: all store reads are passed in.
@@ -83,6 +98,8 @@ export function computeEmptyTurnNotice(input: EmptyTurnNoticeInput): Message | n
   const messages = input.messages ?? [];
   const id = noticeId(input.turnId);
   if (messages.some((m) => m.id === id)) return null;
+
+  if (hasSubagentTaskMessage(messages, input.turnId)) return null;
 
   const userMessage = findLastUserMessage(messages, input.turnId);
   const command = parseSlashCommand(userMessage?.content);

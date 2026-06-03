@@ -16,8 +16,11 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import { searchWorkspaceFiles } from "@/lib/ws/workspace-files";
 import { EditorContextProvider } from "./editor-context";
 import { MentionMenu } from "./mention-menu";
+import { MessageHistorySearch } from "./message-history-search";
 import { SlashCommandMenu } from "./slash-command-menu";
 import { buildTaskMentionItems } from "./task-mention-items";
+import { extractUserHistory } from "./message-history";
+import { useDrainOlderMessages } from "./use-drain-older-messages";
 import {
   createMentionSuggestion,
   createSlashSuggestion,
@@ -368,38 +371,23 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
   },
   ref,
 ) {
-  const {
-    mentionMenu,
-    setMentionMenu,
-    slashMenu,
-    setSlashMenu,
-    mentionSelectedIndex,
-    setMentionSelectedIndex,
-    slashSelectedIndex,
-    setSlashSelectedIndex,
-    onMentionKeyDown,
-    onSlashKeyDown,
-    handleMentionSelect,
-    handleMentionClose,
-    handleSlashSelect,
-    handleSlashClose,
-  } = useMenuHandlers();
-
+  const menu = useMenuHandlers();
   const { mentionSuggestion, slashSuggestion } = useSuggestionConfigs({
     sessionId,
     taskId: taskId ?? null,
     onAgentCommand,
-    onMentionKeyDown,
-    onSlashKeyDown,
-    setMentionMenu,
-    setSlashMenu,
+    onMentionKeyDown: menu.onMentionKeyDown,
+    onSlashKeyDown: menu.onSlashKeyDown,
+    setMentionMenu: menu.setMentionMenu,
+    setSlashMenu: menu.setSlashMenu,
   });
-
   const isSuggestionMenuOpen =
-    (mentionMenu.isOpen && mentionMenu.items.length > 0) ||
-    (slashMenu.isOpen && slashMenu.items.length > 0);
-
-  const editor = useTipTapEditor({
+    (menu.mentionMenu.isOpen && menu.mentionMenu.items.length > 0) ||
+    (menu.slashMenu.isOpen && menu.slashMenu.items.length > 0);
+  const { history, getHistory } = useChatHistory(sessionId);
+  const { editorWrapperRef, ...overlay } = useReverseSearchOverlay(sessionId);
+  const { isDraining } = useDrainOlderMessages(sessionId, overlay.isReverseSearchOpen);
+  const { editor, applyHistoryEntry } = useTipTapEditor({
     value,
     onChange,
     onSubmit,
@@ -416,37 +404,140 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     mentionSuggestion,
     slashSuggestion,
     isSuggestionMenuOpen,
+    getHistory,
+    onOpenReverseSearch: overlay.openReverseSearch,
+    isReverseSearchOpen: overlay.isReverseSearchOpen,
     ref,
   });
-
+  const { closeReverseSearch } = overlay;
+  const handleReverseSearchSelect = useCallback(
+    (index: number) => {
+      applyHistoryEntry(index);
+      closeReverseSearch();
+      editor?.commands.focus("end");
+    },
+    [applyHistoryEntry, closeReverseSearch, editor],
+  );
   return (
     <>
-      <MentionMenu
-        isOpen={mentionMenu.isOpen}
-        isLoading={false}
-        clientRect={mentionMenu.clientRect}
-        items={mentionMenu.items}
-        query={mentionMenu.query}
-        selectedIndex={mentionSelectedIndex}
-        onSelect={handleMentionSelect}
-        onClose={handleMentionClose}
-        setSelectedIndex={setMentionSelectedIndex}
-      />
-      <SlashCommandMenu
-        isOpen={slashMenu.isOpen}
-        clientRect={slashMenu.clientRect}
-        commands={slashMenu.items}
-        selectedIndex={slashSelectedIndex}
-        onSelect={handleSlashSelect}
-        onClose={handleSlashClose}
-        setSelectedIndex={setSlashSelectedIndex}
+      <TipTapPopups
+        menu={menu}
+        overlay={overlay}
+        history={history}
+        isDraining={isDraining}
+        onReverseSearchSelect={handleReverseSearchSelect}
       />
       <EditorContextProvider value={{ sessionId, taskId: taskId ?? null }}>
-        <EditorContent
-          editor={editor}
-          className="h-full [&_.tiptap]:h-full [&_.tiptap]:outline-none"
-        />
+        <div ref={editorWrapperRef} className="h-full">
+          <EditorContent
+            editor={editor}
+            className="h-full [&_.tiptap]:h-full [&_.tiptap]:outline-none"
+          />
+        </div>
       </EditorContextProvider>
     </>
   );
 });
+
+type TipTapPopupsProps = {
+  menu: ReturnType<typeof useMenuHandlers>;
+  overlay: Omit<ReturnType<typeof useReverseSearchOverlay>, "editorWrapperRef">;
+  history: readonly string[];
+  isDraining: boolean;
+  onReverseSearchSelect: (index: number) => void;
+};
+
+function TipTapPopups({
+  menu,
+  overlay,
+  history,
+  isDraining,
+  onReverseSearchSelect,
+}: TipTapPopupsProps) {
+  return (
+    <>
+      <MentionMenu
+        isOpen={menu.mentionMenu.isOpen}
+        isLoading={false}
+        clientRect={menu.mentionMenu.clientRect}
+        items={menu.mentionMenu.items}
+        query={menu.mentionMenu.query}
+        selectedIndex={menu.mentionSelectedIndex}
+        onSelect={menu.handleMentionSelect}
+        onClose={menu.handleMentionClose}
+        setSelectedIndex={menu.setMentionSelectedIndex}
+      />
+      <SlashCommandMenu
+        isOpen={menu.slashMenu.isOpen}
+        clientRect={menu.slashMenu.clientRect}
+        commands={menu.slashMenu.items}
+        selectedIndex={menu.slashSelectedIndex}
+        onSelect={menu.handleSlashSelect}
+        onClose={menu.handleSlashClose}
+        setSelectedIndex={menu.setSlashSelectedIndex}
+      />
+      {overlay.isReverseSearchOpen && (
+        <MessageHistorySearch
+          history={history}
+          isLoadingOlder={isDraining}
+          anchorRect={overlay.reverseSearchAnchor}
+          onClose={overlay.closeReverseSearch}
+          onSelect={onReverseSearchSelect}
+        />
+      )}
+    </>
+  );
+}
+
+function useMessageHistoryForSession(sessionId: string | null): string[] {
+  const messages = useAppStore((s) => (sessionId ? s.messages.bySession[sessionId] : undefined));
+  return useMemo(() => extractUserHistory(messages ?? []), [messages]);
+}
+
+function useChatHistory(sessionId: string | null) {
+  const history = useMessageHistoryForSession(sessionId);
+  const historyRef = useRef(history);
+  useLayoutEffect(() => {
+    historyRef.current = history;
+  });
+  const getHistory = useCallback(() => historyRef.current, []);
+  return { history, getHistory };
+}
+
+function useReverseSearchOverlay(sessionId: string | null) {
+  const editorWrapperRef = useRef<HTMLDivElement>(null);
+  const [reverseSearchAnchor, setReverseSearchAnchor] = useState<DOMRect | null>(null);
+  const [isReverseSearchOpen, setIsReverseSearchOpen] = useState(false);
+  const sessionIdRef = useRef(sessionId);
+  useLayoutEffect(() => {
+    sessionIdRef.current = sessionId;
+  });
+  const openReverseSearch = useCallback(() => {
+    if (!sessionIdRef.current) return;
+    setReverseSearchAnchor(editorWrapperRef.current?.getBoundingClientRect() ?? null);
+    setIsReverseSearchOpen(true);
+  }, []);
+  const closeReverseSearch = useCallback(() => setIsReverseSearchOpen(false), []);
+  // The anchor rect is captured once at open time; dismiss on viewport
+  // changes rather than recompute, matching how the project's other
+  // fixed-position popups behave on resize/scroll. Bubbling-phase scroll
+  // only — capture-phase would also catch the overlay's own list scroll
+  // (e.g. from scrollIntoView during keyboard navigation), which would
+  // dismiss the overlay mid-browse.
+  useEffect(() => {
+    if (!isReverseSearchOpen) return;
+    window.addEventListener("resize", closeReverseSearch);
+    window.addEventListener("scroll", closeReverseSearch);
+    return () => {
+      window.removeEventListener("resize", closeReverseSearch);
+      window.removeEventListener("scroll", closeReverseSearch);
+    };
+  }, [isReverseSearchOpen, closeReverseSearch]);
+  return {
+    editorWrapperRef,
+    reverseSearchAnchor,
+    isReverseSearchOpen,
+    openReverseSearch,
+    closeReverseSearch,
+  };
+}

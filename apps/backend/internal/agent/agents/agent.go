@@ -9,6 +9,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/pkg/agent"
@@ -157,7 +158,10 @@ type PassthroughOptions struct {
 	Resume           bool            // generic "continue last session" (e.g. -c, --resume latest)
 	PermissionValues map[string]bool // e.g. {"auto_approve": true}
 	WorkDir          string
-	MCPConfigPath    string // path to generated MCP config file for passthrough CLIs that support it
+	// MCPArgs are extra argv tokens produced by the agent's MCP passthrough
+	// strategy (e.g. claude's "--mcp-config <path>", codex's repeated "-c
+	// mcp_servers.…" overrides). Appended to the built command.
+	MCPArgs []string
 	// CLIFlagTokens are user-configured CLI flag argv tokens derived from
 	// AgentProfile.CLIFlags (only Enabled entries, shell-tokenised). Appended
 	// verbatim to the built passthrough command, mirroring CommandOptions.
@@ -183,6 +187,12 @@ type RuntimeConfig struct {
 	AssumeMcpHttp   bool   // Override: assume agent supports HTTP MCP servers even if not advertised
 	ProjectSkillDir string // CWD-relative path for project-level skills (e.g. ".claude/skills")
 	UserSkillDir    string // home-relative path for user-level skills (e.g. ".claude/skills")
+	// RequiresProcessKill is true for agents whose subprocess does not exit
+	// when stdin is closed (e.g. OpenCode's ACP runtime, which keeps its HTTP
+	// server and MCP child tree alive). When true, the agentctl process
+	// manager kills the whole process group on shutdown so MCP children
+	// don't leak.
+	RequiresProcessKill bool
 }
 
 // MountTemplate defines a mount with template variables.
@@ -226,11 +236,28 @@ func (c SessionConfig) SupportsRecovery() bool {
 // filter chain across agents, so the literal lives in exactly one place.
 const PermissionApplyMethodCLIFlag = "cli_flag"
 
+// PermissionApplyMethodAgentctlAutoApprove maps the profile auto_approve column
+// to AGENTCTL_AUTO_APPROVE_PERMISSIONS at launch (all ACP agents).
+const PermissionApplyMethodAgentctlAutoApprove = "agentctl_auto_approve"
+
 // PermissionKeyAutoApprove is the PermissionSettings map key wired to the
 // profile "Auto approve" toggle (see PermissionValues in buildAgentCommand).
 // Centralised for the same reason as PermissionApplyMethodCLIFlag: a typo in
 // any one agent silently disables its auto-approve flag.
 const PermissionKeyAutoApprove = "auto_approve"
+
+// PermissionKeyCursorForce is the Cursor-specific CLI --force toggle (unsandboxed
+// run-everything). Separate from PermissionKeyAutoApprove (agentctl ACP approval).
+const PermissionKeyCursorForce = "cursor_force"
+
+// PermissionKeyDangerouslySkipPermissions is wired to the profile's
+// DangerouslySkipPermissions column (a dedicated bool, not the cli_flags list).
+// Agents whose CLI accepts --dangerously-skip-permissions (or equivalent)
+// declare a PermissionSetting under this key with ApplyMethod=cli_flag so the
+// passthrough Settings() pass emits the flag from the profile bool. The
+// catalog seeder excludes this key to avoid duplicating the toggle into the
+// curated cli_flags list (which would also double-emit the flag at launch).
+const PermissionKeyDangerouslySkipPermissions = "dangerously_skip_permissions"
 
 // PermissionSetting defines metadata for a permission setting option.
 type PermissionSetting struct {
@@ -259,8 +286,11 @@ type PassthroughConfig struct {
 	StabilityWindow   time.Duration
 	ResumeFlag        Param // generic "continue last session" (e.g. NewParam("-c"), NewParam("--resume", "latest"))
 	SessionResumeFlag Param // resume a specific session by ID (e.g. NewParam("--resume"))
-	MCPConfigFlag     Param // flag used to load an MCP config file, e.g. NewParam("--mcp-config", "{mcp_config}")
-	WaitForTerminal   bool
+	// MCPStrategy materializes resolved MCP servers into this CLI's passthrough
+	// shape (config file + flag, repeated -c overrides, project file, or env var)
+	// without touching the user's global config. Nil means no MCP injection.
+	MCPStrategy     mcpconfig.PassthroughMCPStrategy
+	WaitForTerminal bool
 	// AutoInjectPrompt enables writing the task description to the PTY stdin
 	// after the first idle window. Default false preserves today's behavior.
 	AutoInjectPrompt bool

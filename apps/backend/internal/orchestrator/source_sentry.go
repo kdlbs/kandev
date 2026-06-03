@@ -43,6 +43,25 @@ func NewSentryWatcherSource(svc SentryService, log *logger.Logger) *SentryWatche
 
 func (s *SentryWatcherSource) Name() string { return "sentry" }
 
+func (s *SentryWatcherSource) AgentProfileID(evt any) string {
+	e, ok := evt.(*sentry.NewSentryIssueEvent)
+	if !ok || e == nil {
+		return ""
+	}
+	return e.AgentProfileID
+}
+
+// SelfHeal disables the sentry_issue_watches row that produced this event.
+// Nil-safe: with no SentryService wired the call is silently dropped — same
+// pattern as Reserve / Release.
+func (s *SentryWatcherSource) SelfHeal(ctx context.Context, evt any, cause string) error {
+	e, ok := evt.(*sentry.NewSentryIssueEvent)
+	if !ok || e == nil || s.service == nil {
+		return nil
+	}
+	return s.service.DisableIssueWatchWithError(ctx, e.IssueWatchID, cause)
+}
+
 func (s *SentryWatcherSource) Reserve(ctx context.Context, evt any) (bool, error) {
 	e, ok := evt.(*sentry.NewSentryIssueEvent)
 	if !ok || e == nil || e.Issue == nil {

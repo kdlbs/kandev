@@ -85,6 +85,33 @@ func runFixture(spec string) {
 			os.Exit(2)
 		}
 		time.Sleep(time.Duration(secs) * time.Second)
+	case "sleep-with-child":
+		// Forks a child copy of this fixture binary (also sleeping <secs>),
+		// writes the child PID to <pidfile>, then sleeps itself. Used by the
+		// process group kill regression test: when the parent's process
+		// group is reaped, the child must die too. Both processes ignore
+		// stdin so close-stdin-then-wait can't reach them on its own.
+		if len(parts) != 3 {
+			fmt.Fprintln(os.Stderr, "fixture: sleep-with-child takes 2 args")
+			os.Exit(2)
+		}
+		pidFile := parts[1]
+		secs, err := strconv.Atoi(parts[2])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fixture: sleep-with-child: bad seconds %q\n", parts[2])
+			os.Exit(2)
+		}
+		childCmd := exec.Command(os.Args[0])
+		childCmd.Env = append(os.Environ(), kandevTestFixtureEnv+"=sleep "+strconv.Itoa(secs))
+		if err := childCmd.Start(); err != nil {
+			fmt.Fprintf(os.Stderr, "fixture: sleep-with-child: spawn child: %v\n", err)
+			os.Exit(2)
+		}
+		if err := os.WriteFile(pidFile, []byte(strconv.Itoa(childCmd.Process.Pid)), 0o600); err != nil {
+			fmt.Fprintf(os.Stderr, "fixture: sleep-with-child: write pidfile: %v\n", err)
+			os.Exit(2)
+		}
+		time.Sleep(time.Duration(secs) * time.Second)
 	default:
 		fmt.Fprintf(os.Stderr, "fixture: unknown command %q\n", parts[0])
 		os.Exit(2)

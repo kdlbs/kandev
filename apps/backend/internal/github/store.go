@@ -104,6 +104,8 @@ const createTablesSQL = `
 		poll_interval_seconds INTEGER DEFAULT 300,
 		cleanup_policy TEXT NOT NULL DEFAULT 'auto',
 		last_polled_at DATETIME,
+		last_error TEXT NOT NULL DEFAULT '',
+		last_error_at DATETIME,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
 	);
@@ -135,6 +137,8 @@ const createTablesSQL = `
 		poll_interval_seconds INTEGER DEFAULT 300,
 		cleanup_policy TEXT NOT NULL DEFAULT 'auto',
 		last_polled_at DATETIME,
+		last_error TEXT NOT NULL DEFAULT '',
+		last_error_at DATETIME,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
 	);
@@ -182,6 +186,18 @@ func (s *Store) initSchema() error {
 	// engaged), 'always' (delete on terminal state), 'never' (manual only).
 	_, _ = s.db.Exec(`ALTER TABLE github_review_watches ADD COLUMN cleanup_policy TEXT NOT NULL DEFAULT 'auto'`)
 	_, _ = s.db.Exec(`ALTER TABLE github_issue_watches ADD COLUMN cleanup_policy TEXT NOT NULL DEFAULT 'auto'`)
+	// Watcher self-heal columns: when the dispatch pipeline detects an
+	// orphaned watcher (e.g. its agent profile has been soft-deleted), it
+	// disables the row and stamps a human-readable cause + timestamp here
+	// for the settings page to surface. Unlike the cleanup_policy column
+	// above, the readers (IssueWatch.LastError / LastErrorAt) scan these
+	// columns unconditionally — a driver-level ALTER failure here would
+	// turn into a confusing scan panic on the next poll instead of a
+	// clear boot error. Use the same fail-loud column-precheck idiom the
+	// sibling jira/linear stores already use.
+	if err := s.addWatchSelfHealColumns(); err != nil {
+		return err
+	}
 	if err := s.migratePRTablesForMultiRepo(); err != nil {
 		return fmt.Errorf("migrate PR tables for multi-repo: %w", err)
 	}
@@ -307,6 +323,60 @@ func (s *Store) backfillPRWatchesRepositoryID() error {
 		return fmt.Errorf("backfill PR watch repository_id: %w", err)
 	}
 	return nil
+}
+
+// addWatchSelfHealColumns adds last_error / last_error_at to the issue and
+// review watch tables using a column-precheck (mirroring the jira and linear
+// stores). Unlike the cleanup_policy ALTER above, the readers
+// (IssueWatch.LastError / LastErrorAt) scan these columns unconditionally,
+// so a driver-level failure must bubble up at boot rather than turn into
+// a scan panic on the next poll.
+func (s *Store) addWatchSelfHealColumns() error {
+	for _, table := range []string{"github_review_watches", "github_issue_watches"} {
+		cols, err := s.tableColumns(table)
+		if err != nil {
+			return fmt.Errorf("read %s columns: %w", table, err)
+		}
+		if _, ok := cols["last_error"]; !ok {
+			if _, err := s.db.Exec("ALTER TABLE " + table + " ADD COLUMN last_error TEXT NOT NULL DEFAULT ''"); err != nil {
+				return fmt.Errorf("add %s.last_error: %w", table, err)
+			}
+		}
+		if _, ok := cols["last_error_at"]; !ok {
+			if _, err := s.db.Exec("ALTER TABLE " + table + " ADD COLUMN last_error_at DATETIME"); err != nil {
+				return fmt.Errorf("add %s.last_error_at: %w", table, err)
+			}
+		}
+	}
+	return nil
+}
+
+// tableColumns returns the set of column names declared on `table`. Cheap
+// SQLite PRAGMA lookup; used by addWatchSelfHealColumns to skip ALTERs on a
+// fresh install whose createTablesSQL already includes the columns. Mirrors
+// the helper in jira/store.go.
+func (s *Store) tableColumns(table string) (map[string]struct{}, error) {
+	rows, err := s.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	cols := make(map[string]struct{})
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			ctype   string
+			notnull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return nil, err
+		}
+		cols[name] = struct{}{}
+	}
+	return cols, rows.Err()
 }
 
 // tableExists returns true when the named table is present in sqlite_master.
@@ -967,6 +1037,20 @@ func (s *Store) DeleteReviewWatch(ctx context.Context, id string) error {
 	return tx.Commit()
 }
 
+// DisableReviewWatchWithError is the self-heal write: it disables the watch
+// and stamps a human-readable cause + timestamp so the settings UI can show
+// a "disabled because ..." banner. Called by the orchestrator when the
+// watcher's bound agent profile is detected as soft-deleted.
+func (s *Store) DisableReviewWatchWithError(ctx context.Context, id, cause string) error {
+	now := time.Now().UTC()
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE github_review_watches
+		   SET enabled = 0, last_error = ?, last_error_at = ?, updated_at = ?
+		 WHERE id = ?`,
+		cause, now, now, id)
+	return err
+}
+
 // --- Review PR Task deduplication ---
 
 // CreateReviewPRTask records that a task was created for a review PR.
@@ -1334,6 +1418,20 @@ func (s *Store) DeleteIssueWatch(ctx context.Context, id string) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+// DisableIssueWatchWithError is the self-heal write: disables the watch and
+// stamps a human-readable cause + timestamp. Symmetric with
+// DisableReviewWatchWithError; called by the orchestrator when the
+// watcher's bound agent profile is detected as soft-deleted.
+func (s *Store) DisableIssueWatchWithError(ctx context.Context, id, cause string) error {
+	now := time.Now().UTC()
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE github_issue_watches
+		   SET enabled = 0, last_error = ?, last_error_at = ?, updated_at = ?
+		 WHERE id = ?`,
+		cause, now, now, id)
+	return err
 }
 
 // --- Issue Watch Task deduplication ---

@@ -196,17 +196,24 @@ func (s *Service) ConfigureToken(ctx context.Context, token string) error {
 		s.logger.Info("created GitHub token secret", zap.String("id", newID))
 	}
 
-	// Refresh the client to use the new token
+	// Swap the client AND drop identity-scoped caches atomically under
+	// s.mu. Clearing OUTSIDE the lock (either before or after the swap)
+	// opens a race window: clear-before-swap lets an old-identity fetch
+	// completing in the gap repopulate the just-cleared cache; clear-
+	// after-swap lets a new-identity caller hit the still-stale cache
+	// in the gap. Holding the same lock for both publishes a coherent
+	// (new client, empty caches) state to any goroutine that takes
+	// s.mu after this. The cache.clear() calls take their own locks
+	// (not s.mu), so this is fine to nest. The generation bump inside
+	// each clear() also catches any in-flight fetch that started under
+	// the old client and tries to write after the lock is released.
 	s.mu.Lock()
 	s.client = testClient
 	s.authMethod = AuthMethodPAT
-	s.mu.Unlock()
-
-	// Drop user-scoped caches — the previous token's user/orgs and merged
-	// repo list are no longer valid under the new identity. Without this,
-	// the picker would surface the prior user's repos for up to 60s after
-	// a token swap.
 	s.ClearAccessibleReposCaches()
+	s.ClearRepoErrorCache()
+	s.ClearPRCaches()
+	s.mu.Unlock()
 
 	return nil
 }
@@ -227,14 +234,15 @@ func (s *Service) ClearToken(ctx context.Context) error {
 	}
 	s.logger.Info("cleared GitHub token secret", zap.String("id", existingID))
 
-	// Reset to try gh CLI or other methods
+	// Reset client + drop identity-scoped caches atomically under s.mu;
+	// see ConfigureToken for the rationale.
 	s.mu.Lock()
 	s.client = nil
 	s.authMethod = AuthMethodNone
-	s.mu.Unlock()
-
-	// Drop user-scoped caches — see ConfigureToken for rationale.
 	s.ClearAccessibleReposCaches()
+	s.ClearRepoErrorCache()
+	s.ClearPRCaches()
+	s.mu.Unlock()
 
 	// Try to re-establish connection via other methods
 	s.retryClientCreation(ctx)

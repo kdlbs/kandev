@@ -5,6 +5,7 @@ package instance
 
 import (
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/server/process"
@@ -39,6 +40,55 @@ type Instance struct {
 
 	// server is the HTTP server for this instance's API (unexported)
 	server *http.Server
+
+	// lastActivityNanos is the unix-nano timestamp of the most recently
+	// observed HTTP request on this instance's port. Used by the idle reaper
+	// to detect disconnected sessions. Bumped on request entry and exit by
+	// the activity middleware installed in instance.Manager.CreateInstance.
+	lastActivityNanos atomic.Int64
+
+	// inflightRequests counts HTTP requests currently being served on this
+	// instance's port. Long-lived requests (WebSocket upgrades for
+	// /agent/stream, /workspace/stream, etc.) keep this above zero for the
+	// full duration of the connection, so the idle reaper treats an
+	// instance with an open WS as active even when no new HTTP request
+	// arrives. Maintained by the activity middleware.
+	inflightRequests atomic.Int32
+}
+
+// MarkActivity stamps the current time as the most recent activity on this
+// instance. Called by the activity middleware on every request entry and exit.
+func (i *Instance) MarkActivity() {
+	i.lastActivityNanos.Store(time.Now().UnixNano())
+}
+
+// LastActivity returns the timestamp of the most recent observed activity on
+// this instance. Zero if no activity has been recorded yet.
+func (i *Instance) LastActivity() time.Time {
+	v := i.lastActivityNanos.Load()
+	if v == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, v)
+}
+
+// IsIdle reports whether the instance has been idle for at least `timeout`.
+// An instance with any in-flight HTTP request (notably an open WebSocket
+// stream) is never considered idle.
+func (i *Instance) IsIdle(now time.Time, timeout time.Duration) bool {
+	if i.inflightRequests.Load() > 0 {
+		return false
+	}
+	last := i.LastActivity()
+	if last.IsZero() {
+		// No activity observed since creation — fall back to CreatedAt so a
+		// never-touched instance still gets reaped after timeout.
+		last = i.CreatedAt
+	}
+	if last.IsZero() {
+		return false
+	}
+	return now.Sub(last) >= timeout
 }
 
 // McpServerConfig holds configuration for an MCP server.
@@ -100,6 +150,12 @@ type CreateRequest struct {
 
 	// McpMode controls which MCP tools are registered: "task" (default) or "config".
 	McpMode string `json:"mcp_mode,omitempty"`
+
+	// RequiresProcessKill forces the agent's process group to be killed on
+	// shutdown instead of relying on stdin close. Required for agents whose
+	// runtime keeps child processes alive when stdin closes (notably
+	// opencode acp, which spawns MCP server children that leak otherwise).
+	RequiresProcessKill bool `json:"requires_process_kill,omitempty"`
 }
 
 // CreateResponse contains the result of creating a new agent instance.

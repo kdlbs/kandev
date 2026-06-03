@@ -121,6 +121,7 @@ export function buildWebEnv(options: WebEnvOptions): NodeJS.ProcessEnv {
   }
 
   if (debug) {
+    env.KANDEV_DEBUG = "true";
     env.NEXT_PUBLIC_KANDEV_DEBUG = "true";
   }
 

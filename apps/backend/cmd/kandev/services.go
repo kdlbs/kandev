@@ -93,7 +93,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	)
 
 	githubSvc := initGitHubService(dbPool, eventBus, repos.Secrets, log)
-	gitlabSvc := initGitLabService(dbPool, repos.Secrets, log)
+	gitlabSvc := initGitLabService(dbPool, eventBus, repos.Secrets, log)
 	jiraSvc := initJiraService(dbPool, eventBus, repos.Secrets, log)
 	linearSvc := initLinearService(dbPool, eventBus, repos.Secrets, log)
 	sentrySvc := initSentryService(dbPool, eventBus, repos.Secrets, log)
@@ -310,19 +310,15 @@ func (a *gitlabSecretAdapter) Delete(ctx context.Context, id string) error {
 
 // initGitLabService wires up the GitLab integration. Failures are non-fatal:
 // the rest of the backend still boots without GitLab configured.
-func initGitLabService(dbPool *db.Pool, secretsStore secrets.SecretStore, log *logger.Logger) *gitlab.Service {
+func initGitLabService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secrets.SecretStore, log *logger.Logger) *gitlab.Service {
 	adapter := &gitlabSecretAdapter{store: secretsStore}
-	// Host persistence (per-workspace gitlab_host) is deferred to a
-	// follow-up; v1 reads from DefaultHost on every boot.
 	svc, _, err := gitlab.Provide(context.Background(), adapter, nil, log)
 	if err != nil {
 		log.Warn("GitLab service initialization failed (non-fatal)", zap.Error(err))
 	}
 	if svc != nil {
 		svc.SetSecretManager(adapter)
-		// Task↔MR association store backs the topbar review surface.
-		// Non-fatal: if the table fails to create the rest of the
-		// integration (status, configure, MR feedback) still works.
+		svc.SetEventBus(eventBus)
 		if store, storeErr := gitlab.NewStore(dbPool.Writer(), dbPool.Reader()); storeErr == nil {
 			svc.SetStore(store)
 		} else {

@@ -27,7 +27,11 @@ func (p *StandardPassthrough) BuildPassthroughCommand(opts PassthroughOptions) C
 	case opts.Prompt != "":
 		b.Prompt(p.Cfg.PromptFlag, opts.Prompt)
 	}
-	b.MCPConfig(p.Cfg.MCPConfigFlag, opts.MCPConfigPath)
+
+	// MCP injection args go last so Claude Code's variadic --mcp-config does not
+	// swallow a positional prompt as an extra config path. Codex's `-c` overrides
+	// are order-insensitive, so trailing placement is safe for them too.
+	b.Flag(opts.MCPArgs...)
 
 	return b.Build()
 }

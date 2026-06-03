@@ -1,8 +1,15 @@
 /**
  * Build a mock-agent script that emits N messages with a small delay between
- * them. Each entry becomes one agent text event, producing one distinct message
- * row in the chat panel. Used as the `description` of a task created via
- * `apiClient.createTaskWithAgent` so the session boots with pre-seeded history.
+ * them. Each entry becomes one agent text event. NOTE: consecutive agent-text
+ * chunks COALESCE into a single chat message — the backend only flushes a
+ * distinct message row on a tool-call/turn boundary (manager_streaming.
+ * flushMessageBuffer), and e2e:delay does not flush. So N lines render as one
+ * growing bubble, not N rows (search specs tolerate this with N>=1 hits).
+ * To seed many DISTINCT rows (e.g. for pagination tests), use the test harness
+ * instead: apiClient.seedToolCallMessages / seedSessionMessage (called repeatedly
+ * with type "text" for each row), which write separate rows directly. Used as the
+ * `description` of a task created
+ * via `apiClient.createTaskWithAgent` so the session boots with pre-seeded history.
  */
 export function multiMessageScript(lines: string[], delayMs = 10): string {
   const parts: string[] = [];

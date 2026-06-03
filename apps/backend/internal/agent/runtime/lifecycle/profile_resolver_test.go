@@ -2,8 +2,10 @@ package lifecycle
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/settings/models"
@@ -15,11 +17,12 @@ import (
 
 // MockRepository implements store.Repository for testing
 type MockRepository struct {
-	GetAgentFn          func(ctx context.Context, id string) (*models.Agent, error)
-	GetAgentByNameFn    func(ctx context.Context, name string) (*models.Agent, error)
-	GetAgentProfileFn   func(ctx context.Context, id string) (*models.AgentProfile, error)
-	ListAgentsFn        func(ctx context.Context) ([]*models.Agent, error)
-	ListAgentProfilesFn func(ctx context.Context, agentID string) ([]*models.AgentProfile, error)
+	GetAgentFn                        func(ctx context.Context, id string) (*models.Agent, error)
+	GetAgentByNameFn                  func(ctx context.Context, name string) (*models.Agent, error)
+	GetAgentProfileFn                 func(ctx context.Context, id string) (*models.AgentProfile, error)
+	GetAgentProfileIncludingDeletedFn func(ctx context.Context, id string) (*models.AgentProfile, error)
+	ListAgentsFn                      func(ctx context.Context) ([]*models.Agent, error)
+	ListAgentProfilesFn               func(ctx context.Context, agentID string) ([]*models.AgentProfile, error)
 }
 
 var _ store.Repository = (*MockRepository)(nil)
@@ -80,6 +83,13 @@ func (m *MockRepository) DeleteAgentProfile(ctx context.Context, id string) erro
 func (m *MockRepository) GetAgentProfile(ctx context.Context, id string) (*models.AgentProfile, error) {
 	if m.GetAgentProfileFn != nil {
 		return m.GetAgentProfileFn(ctx, id)
+	}
+	return nil, errors.New("profile not found")
+}
+
+func (m *MockRepository) GetAgentProfileIncludingDeleted(ctx context.Context, id string) (*models.AgentProfile, error) {
+	if m.GetAgentProfileIncludingDeletedFn != nil {
+		return m.GetAgentProfileIncludingDeletedFn(ctx, id)
 	}
 	return nil, errors.New("profile not found")
 }
@@ -163,6 +173,44 @@ func TestStoreProfileResolver_ResolveProfile_Success(t *testing.T) {
 	}
 	if info.DangerouslySkipPermissions != false {
 		t.Error("expected DangerouslySkipPermissions to be false")
+	}
+}
+
+func TestStoreProfileResolver_ResolveProfile_SoftDeletedReturnsTypedError(t *testing.T) {
+	deletedAt := time.Date(2026, 5, 22, 21, 28, 12, 0, time.UTC)
+	mockRepo := &MockRepository{
+		GetAgentProfileFn: func(ctx context.Context, id string) (*models.AgentProfile, error) {
+			return nil, sql.ErrNoRows
+		},
+		GetAgentProfileIncludingDeletedFn: func(ctx context.Context, id string) (*models.AgentProfile, error) {
+			return &models.AgentProfile{
+				ID:        "deleted-profile",
+				AgentID:   "agent-456",
+				Name:      "Removed Kilo Profile",
+				DeletedAt: &deletedAt,
+			}, nil
+		},
+	}
+
+	resolver := NewStoreProfileResolver(mockRepo, nil)
+
+	info, err := resolver.ResolveProfile(context.Background(), "deleted-profile")
+
+	if info != nil {
+		t.Fatalf("expected nil profile info, got %+v", info)
+	}
+	if !errors.Is(err, store.ErrAgentProfileDeleted) {
+		t.Fatalf("expected ErrAgentProfileDeleted, got %v", err)
+	}
+	var detail *DeletedProfileError
+	if !errors.As(err, &detail) {
+		t.Fatalf("expected DeletedProfileError detail, got %T: %v", err, err)
+	}
+	if detail.ProfileID != "deleted-profile" {
+		t.Errorf("expected ProfileID 'deleted-profile', got %q", detail.ProfileID)
+	}
+	if detail.ProfileName != "Removed Kilo Profile" {
+		t.Errorf("expected ProfileName 'Removed Kilo Profile', got %q", detail.ProfileName)
 	}
 }
 

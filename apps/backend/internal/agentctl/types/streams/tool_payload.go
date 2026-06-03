@@ -257,6 +257,15 @@ type SubagentTaskPayload struct {
 	// subagent) serializes, while agents that don't report it (OpenCode,
 	// Cursor) stay omitted rather than surfacing a misleading "0 tools" chip.
 	ToolUseCount *int `json:"tool_use_count,omitempty"`
+
+	// Async/backgrounded subagent fields. Claude Code's Task tool with
+	// `run_in_background: true` returns `_meta.claudeCode.toolResponse.status:
+	// "async_launched"` and includes `isAsync`, `outputFile`,
+	// `canReadOutputFile`. The dispatch IS terminal for the Task tool — the
+	// subagent runs in the SDK's background and writes its result to OutputFile.
+	IsAsync           bool   `json:"is_async,omitempty"`
+	OutputFile        string `json:"output_file,omitempty"`
+	CanReadOutputFile bool   `json:"can_read_output_file,omitempty"`
 }
 
 // ShowPlanPayload contains normalized data for plan display operations.

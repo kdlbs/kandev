@@ -52,6 +52,13 @@ type Config struct {
 
 	// AssumeMcpHttp overrides MCP capability filtering to assume HTTP support.
 	AssumeMcpHttp bool
+
+	// RequiresProcessKill is returned verbatim from the adapter's
+	// RequiresProcessKill() method. Set true for agents whose subprocess does
+	// not exit on stdin close (opencode acp). The process manager uses the
+	// adapter's return value to decide whether to kill the entire process
+	// group on shutdown so MCP child processes don't leak.
+	RequiresProcessKill bool
 }
 
 // GetPermissionTimeout returns the configured permission timeout or the default.

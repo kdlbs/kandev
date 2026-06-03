@@ -40,6 +40,7 @@ func (h *Handlers) handleListRelatedTasks(ctx context.Context, msg *ws.Message) 
 		h.logger.Error("list related tasks", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
+	h.enrichRelatedTasksWithPRs(ctx, related)
 	return ws.NewResponse(msg.ID, msg.Action, related)
 }
 

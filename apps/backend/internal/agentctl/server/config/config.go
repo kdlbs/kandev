@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/kandev/kandev/pkg/agent"
 )
@@ -56,6 +57,18 @@ type Config struct {
 	// at startup and exposes POST /auth/handshake for the backend to retrieve it.
 	// The nonce is burned after a single successful handshake.
 	BootstrapNonce string
+
+	// IdleTimeout is the duration after which an instance with no in-flight
+	// requests and no recent HTTP activity is reaped by the instance
+	// manager. Sourced from KANDEV_ACP_IDLE_TIMEOUT (default 1h).
+	// Setting it to 0 disables the reaper.
+	IdleTimeout time.Duration
+
+	// IdleReaperInterval is how often the idle reaper scans for stale
+	// instances. Sourced from KANDEV_ACP_IDLE_REAPER_INTERVAL (default 1m).
+	// Only the test suite needs to override this; production code should
+	// rely on the default.
+	IdleReaperInterval time.Duration
 
 	// mu protects BootstrapNonce from concurrent access during handshake.
 	mu sync.Mutex
@@ -202,6 +215,11 @@ type InstanceConfig struct {
 	// AuthToken is a shared secret for authenticating requests.
 	// Inherited from the parent Config at instance creation time.
 	AuthToken string
+
+	// RequiresProcessKill forces the agent's process group to be killed on
+	// shutdown instead of relying on stdin close. Required for agents whose
+	// runtime keeps child processes alive when stdin closes (opencode acp).
+	RequiresProcessKill bool
 }
 
 // Load loads the configuration from environment variables.
@@ -221,11 +239,13 @@ func Load() *Config {
 			HealthCheckInterval:    getEnvInt("AGENTCTL_HEALTH_CHECK_INTERVAL", 5),
 			ProcessBufferMaxBytes:  getEnvInt64("AGENTCTL_PROCESS_BUFFER_MAX_BYTES", 2*1024*1024),
 		},
-		ShellEnabled:  getEnvBool("AGENTCTL_SHELL_ENABLED", true),
-		LogLevel:      getEnvWithFallback("AGENTCTL_LOG_LEVEL", "KANDEV_LOG_LEVEL", "info"),
-		LogFormat:     getEnv("AGENTCTL_LOG_FORMAT", "json"),
-		McpLogFile:    getEnv("KANDEV_MCP_LOG_FILE", ""),
-		VscodeCommand: getEnv("AGENTCTL_VSCODE_COMMAND", "code-server"),
+		ShellEnabled:       getEnvBool("AGENTCTL_SHELL_ENABLED", true),
+		LogLevel:           getEnvWithFallback("AGENTCTL_LOG_LEVEL", "KANDEV_LOG_LEVEL", "info"),
+		LogFormat:          getEnv("AGENTCTL_LOG_FORMAT", "json"),
+		McpLogFile:         getEnv("KANDEV_MCP_LOG_FILE", ""),
+		VscodeCommand:      getEnv("AGENTCTL_VSCODE_COMMAND", "code-server"),
+		IdleTimeout:        getEnvDuration("KANDEV_ACP_IDLE_TIMEOUT", time.Hour),
+		IdleReaperInterval: getEnvDuration("KANDEV_ACP_IDLE_REAPER_INTERVAL", time.Minute),
 	}
 
 	// Bootstrap nonce mode: agentctl generates its own token and the backend
@@ -357,25 +377,29 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.McpMode != "" {
 		cfg.McpMode = overrides.McpMode
 	}
+	if overrides.RequiresProcessKill {
+		cfg.RequiresProcessKill = true
+	}
 }
 
 // InstanceOverrides allows overriding default values when creating an instance
 type InstanceOverrides struct {
-	InstanceID         string
-	Protocol           agent.Protocol
-	AgentCommand       string
-	WorkDir            string
-	AutoStart          *bool
-	Env                []string
-	ApprovalPolicy     string
-	AgentType          string
-	McpServers         []McpServerConfig
-	SessionID          string
-	TaskID             string
-	DisableAskQuestion bool
-	AssumeMcpSse       bool
-	AssumeMcpHttp      bool
-	McpMode            string
+	InstanceID          string
+	Protocol            agent.Protocol
+	AgentCommand        string
+	WorkDir             string
+	AutoStart           *bool
+	Env                 []string
+	ApprovalPolicy      string
+	AgentType           string
+	McpServers          []McpServerConfig
+	SessionID           string
+	TaskID              string
+	DisableAskQuestion  bool
+	AssumeMcpSse        bool
+	AssumeMcpHttp       bool
+	McpMode             string
+	RequiresProcessKill bool
 }
 
 // ParseCommand splits a command string into arguments
@@ -464,6 +488,21 @@ func getEnvBool(key string, defaultValue bool) bool {
 		return strings.ToLower(value) == "true" || value == "1"
 	}
 	return defaultValue
+}
+
+// getEnvDuration parses a duration value from an env var. Accepts any value
+// time.ParseDuration accepts (e.g. "1h", "30m", "500ms"). "0" disables the
+// feature. Invalid or missing values return defaultValue.
+func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+	d, err := time.ParseDuration(value)
+	if err != nil {
+		return defaultValue
+	}
+	return d
 }
 
 // kandevMcpServerName is the name used for the local kandev MCP server.

@@ -46,9 +46,26 @@ const (
 const (
 	mcpKeyTaskID         = "task_id"
 	mcpKeyRepositoryID   = "repository_id"
+	mcpKeyRepositoryURL  = "repository_url"
+	mcpKeyLocalPath      = "local_path"
+	mcpKeyGitHubURL      = "github_url"
 	mcpKeyBaseBranch     = "base_branch"
 	mcpKeyCheckoutBranch = "checkout_branch"
 )
+
+// locatorCount returns how many of the supplied repository-locator strings
+// are non-empty. Used by add_branch / create_task mutual-exclusion checks
+// so a chain of `if a != "" && b != "" { ... }` doesn't repeat at each call
+// site.
+func locatorCount(locators ...string) int {
+	n := 0
+	for _, s := range locators {
+		if s != "" {
+			n++
+		}
+	}
+	return n
+}
 
 // normalizeMode returns a valid MCP mode, defaulting unknown values to ModeTask.
 func normalizeMode(mode string) string {
@@ -392,7 +409,7 @@ func (s *Server) registerKanbanTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_tasks_kandev",
-			mcp.WithDescription("List all tasks in a workflow."),
+			mcp.WithDescription("List all tasks in a workflow. Each task includes its associated GitHub pull requests (number, url, title, state) under the \"prs\" field when any exist — use the PR state (open/closed/merged) to find tasks whose work has landed."),
 			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID")),
 		),
 		s.wrapHandler("list_tasks_kandev", s.listTasksHandler()),
@@ -558,12 +575,14 @@ Use this when the task should open more than one PR — same repo with different
 IMPORTANT:
 - Only works on tasks running the WORKTREE executor. Tasks on docker / sprites / local-pc / SSH / remote_docker reject this tool because sibling worktrees are a git-worktree-specific layout — other executors bind one workspace path per task and the new branch would silently never appear on disk.
 - task_id defaults to your CURRENT task when omitted — pass it explicitly only to target a different task.
-- repository_id is OPTIONAL when the task has a single repository attached (the common case). The service auto-resolves to that repo. Multi-repo tasks must pass it explicitly.
+- Repository selection (matches create_task_kandev): pass exactly one of repository_id / repository_url / local_path. For single-repo tasks all three are optional — the service auto-resolves to the task's only repository. Multi-repo tasks must identify the target repo explicitly.
 - checkout_branch is the branch the new worktree will check out. Leave empty to create a fresh feature branch from base_branch.
 - base_branch is optional; defaults to the repository's default_branch.
 - The (task_id, repository_id, base_branch, checkout_branch) tuple must be unique on the task — re-adding the same combination is an error, not a no-op.`),
 			mcp.WithString("task_id", mcp.Description("The task to attach the branch to. Defaults to the current task when omitted.")),
-			mcp.WithString("repository_id", mcp.Description("Repository to attach. Optional for single-repo tasks (auto-resolved). Required for multi-repo tasks.")),
+			mcp.WithString("repository_id", mcp.Description("Repository UUID. Optional for single-repo tasks (auto-resolved). Required for multi-repo tasks unless repository_url or local_path is supplied.")),
+			mcp.WithString("repository_url", mcp.Description("GitHub repository URL (e.g. 'https://github.com/owner/repo'). Alternative to repository_id when you don't have the UUID handy. The repository is found-or-created in the task's workspace.")),
+			mcp.WithString("local_path", mcp.Description("Local repository folder path (e.g. '/Users/me/projects/myrepo'). Alternative to repository_id for the local worktree flow. The repository is found-or-created in the task's workspace.")),
 			mcp.WithString("checkout_branch", mcp.Description("Existing branch to check out in the new worktree (e.g. a PR head branch). Empty to create a fresh feature branch from base_branch.")),
 			mcp.WithString("base_branch", mcp.Description("Branch to base the worktree on. Defaults to the repository's default_branch.")),
 		),
@@ -580,9 +599,24 @@ func (s *Server) addBranchToTaskHandler() server.ToolHandlerFunc {
 		if taskID == "" {
 			return mcp.NewToolResultError("task_id is required (no current task context to default to)"), nil
 		}
+		// Mutual-exclusion gate at the MCP tier so the error names the
+		// agent-facing alias (repository_url) instead of the WS wire field
+		// (github_url). The WS handler still re-validates for direct WS
+		// callers that don't go through this tool.
+		repositoryID := req.GetString(mcpKeyRepositoryID, "")
+		repositoryURL := req.GetString(mcpKeyRepositoryURL, "")
+		localPath := req.GetString(mcpKeyLocalPath, "")
+		if locatorCount(repositoryID, repositoryURL, localPath) > 1 {
+			return mcp.NewToolResultError("pass at most one of repository_id, repository_url, local_path"), nil
+		}
+		// repository_url is the tool-facing alias used by create_task_kandev;
+		// translate to github_url on the wire so the WS handler can reuse the
+		// same field name as the rest of the multi-repo payloads.
 		payload := map[string]interface{}{
 			mcpKeyTaskID:         taskID,
-			mcpKeyRepositoryID:   req.GetString(mcpKeyRepositoryID, ""),
+			mcpKeyRepositoryID:   repositoryID,
+			mcpKeyLocalPath:      localPath,
+			mcpKeyGitHubURL:      repositoryURL,
 			mcpKeyCheckoutBranch: req.GetString(mcpKeyCheckoutBranch, ""),
 			mcpKeyBaseBranch:     req.GetString(mcpKeyBaseBranch, ""),
 		}

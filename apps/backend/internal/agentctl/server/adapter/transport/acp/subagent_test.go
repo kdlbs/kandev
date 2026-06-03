@@ -180,6 +180,56 @@ func TestExtractSubagentResult_Cursor(t *testing.T) {
 	}
 }
 
+// TestExtractSubagentResult_ClaudeAsyncLaunched covers the claude-acp
+// envelope for `run_in_background: true`: status=async_launched plus the
+// isAsync/outputFile/canReadOutputFile fields.
+func TestExtractSubagentResult_ClaudeAsyncLaunched(t *testing.T) {
+	meta := map[string]any{"claudeCode": map[string]any{"toolResponse": map[string]any{
+		"agentId":           "agent_async_1",
+		"description":       "Run sleep",
+		"isAsync":           true,
+		"outputFile":        "/tmp/tasks/abc.output",
+		"canReadOutputFile": true,
+		"status":            "async_launched",
+	}}}
+	res, ok := extractSubagentResult(meta, nil)
+	if !ok {
+		t.Fatal("expected extraction to succeed")
+	}
+	if res.Status != "async_launched" {
+		t.Errorf("Status = %q, want async_launched", res.Status)
+	}
+	if !res.IsAsync {
+		t.Error("IsAsync = false, want true")
+	}
+	if res.OutputFile != "/tmp/tasks/abc.output" {
+		t.Errorf("OutputFile = %q", res.OutputFile)
+	}
+	if !res.CanReadOutputFile {
+		t.Error("CanReadOutputFile = false, want true")
+	}
+}
+
+func TestIsSubagentAsyncLaunched(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		meta map[string]any
+		want bool
+	}{
+		{"async_launched", map[string]any{"claudeCode": map[string]any{"toolResponse": map[string]any{"status": "async_launched"}}}, true},
+		{"completed", map[string]any{"claudeCode": map[string]any{"toolResponse": map[string]any{"status": "completed"}}}, false},
+		{"nil meta", nil, false},
+		{"no claudeCode", map[string]any{"other": 1}, false},
+		{"no toolResponse", map[string]any{"claudeCode": map[string]any{"toolName": "Agent"}}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isSubagentAsyncLaunched(tc.meta); got != tc.want {
+				t.Errorf("isSubagentAsyncLaunched = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestExtractSubagentResult_Empty(t *testing.T) {
 	if _, ok := extractSubagentResult(nil, nil); ok {
 		t.Error("expected no result from empty inputs")

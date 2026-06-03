@@ -9,6 +9,8 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 func TestHandleClarificationAnswered(t *testing.T) {
@@ -73,6 +75,198 @@ func TestHandleClarificationAnswered(t *testing.T) {
 		err := svc.handleClarificationAnswered(ctx, event)
 		if err != nil {
 			t.Fatalf("expected nil error, got: %v", err)
+		}
+	})
+}
+
+func TestHandleClarificationStaleDismissed(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("returns nil on missing session_id", func(t *testing.T) {
+		svc := &Service{logger: testLogger()}
+		event := bus.NewEvent("clarification.stale_dismissed", "test", map[string]any{
+			"task_id": "t1",
+		})
+		if err := svc.handleClarificationStaleDismissed(ctx, event); err != nil {
+			t.Fatalf("expected nil error, got: %v", err)
+		}
+	})
+
+	t.Run("skips on_turn_complete while clarification still pending", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+			ID: "step1", WorkflowID: "wf1", Name: "Plan", Position: 0,
+			Events: wfmodels.StepEvents{
+				OnTurnComplete: []wfmodels.OnTurnCompleteAction{
+					{Type: wfmodels.OnTurnCompleteMoveToNext},
+				},
+			},
+		}
+		stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+			ID: "step2", WorkflowID: "wf1", Name: "Implement", Position: 1,
+		}
+		svc := createEngineService(t, repo, stepGetter, &mockAgentManager{})
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("get session: %v", err)
+		}
+		session.State = models.TaskSessionStateWaitingForInput
+		if err := repo.UpdateTaskSession(ctx, session); err != nil {
+			t.Fatalf("set session waiting: %v", err)
+		}
+
+		now := time.Now().UTC()
+		requireNoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "turn-1", TaskSessionID: "s1", TaskID: "t1", StartedAt: now}))
+		requireNoError(t, repo.CreateMessage(ctx, &models.Message{
+			ID: "clarify-1", TaskSessionID: "s1", TaskID: "t1", TurnID: "turn-1",
+			AuthorType: models.MessageAuthorAgent, Type: "clarification_request", Content: "Q?",
+			CreatedAt: now, Metadata: map[string]interface{}{"pending_id": "pending-1", "status": "pending"},
+		}))
+
+		event := bus.NewEvent("clarification.stale_dismissed", "test", map[string]any{
+			"session_id": "s1",
+			"task_id":    "t1",
+			"pending_id": "pending-1",
+		})
+		if err := svc.handleClarificationStaleDismissed(ctx, event); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		task, err := repo.GetTask(ctx, "t1")
+		if err != nil {
+			t.Fatalf("get task: %v", err)
+		}
+		if task.WorkflowStepID != "step1" {
+			t.Fatalf("expected step to remain step1 while clarification pending, got %q", task.WorkflowStepID)
+		}
+	})
+
+	t.Run("skips cleanup for terminal session state", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+			ID: "step1", WorkflowID: "wf1", Name: "Plan", Position: 0,
+			Events: wfmodels.StepEvents{
+				OnTurnComplete: []wfmodels.OnTurnCompleteAction{
+					{Type: wfmodels.OnTurnCompleteMoveToNext},
+				},
+			},
+		}
+		stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+			ID: "step2", WorkflowID: "wf1", Name: "Implement", Position: 1,
+		}
+		svc := createEngineService(t, repo, stepGetter, &mockAgentManager{})
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("get session: %v", err)
+		}
+		session.State = models.TaskSessionStateCancelled
+		if err := repo.UpdateTaskSession(ctx, session); err != nil {
+			t.Fatalf("set session cancelled: %v", err)
+		}
+
+		event := bus.NewEvent("clarification.stale_dismissed", "test", map[string]any{
+			"session_id": "s1",
+			"task_id":    "t1",
+			"pending_id": "pending-1",
+		})
+		if err := svc.handleClarificationStaleDismissed(ctx, event); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		task, err := repo.GetTask(ctx, "t1")
+		if err != nil {
+			t.Fatalf("get task: %v", err)
+		}
+		if task.WorkflowStepID != "step1" {
+			t.Fatalf("expected step to remain step1 for terminal session, got %q", task.WorkflowStepID)
+		}
+	})
+
+	t.Run("advances workflow when no clarification is pending after dismiss", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+			ID: "step1", WorkflowID: "wf1", Name: "Plan", Position: 0,
+			Events: wfmodels.StepEvents{
+				OnTurnComplete: []wfmodels.OnTurnCompleteAction{
+					{Type: wfmodels.OnTurnCompleteMoveToNext},
+				},
+			},
+		}
+		stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+			ID: "step2", WorkflowID: "wf1", Name: "Implement", Position: 1,
+		}
+		svc := createEngineService(t, repo, stepGetter, &mockAgentManager{})
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("get session: %v", err)
+		}
+		session.State = models.TaskSessionStateWaitingForInput
+		if err := repo.UpdateTaskSession(ctx, session); err != nil {
+			t.Fatalf("set session waiting: %v", err)
+		}
+
+		event := bus.NewEvent("clarification.stale_dismissed", "test", map[string]any{
+			"session_id": "s1",
+			"task_id":    "t1",
+			"pending_id": "pending-1",
+		})
+		if err := svc.handleClarificationStaleDismissed(ctx, event); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		task, err := repo.GetTask(ctx, "t1")
+		if err != nil {
+			t.Fatalf("get task: %v", err)
+		}
+		if task.WorkflowStepID != "step2" {
+			t.Fatalf("expected workflow step step2 after deferred on_turn_complete, got %q", task.WorkflowStepID)
+		}
+	})
+
+	t.Run("moves task to REVIEW when no workflow transition fires", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+			ID: "step1", WorkflowID: "wf1", Name: "Plan", Position: 0,
+		}
+		taskRepo := newMockTaskRepo()
+		svc := createEngineService(t, repo, stepGetter, &mockAgentManager{})
+		svc.taskRepo = taskRepo
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("get session: %v", err)
+		}
+		session.State = models.TaskSessionStateWaitingForInput
+		if err := repo.UpdateTaskSession(ctx, session); err != nil {
+			t.Fatalf("set session waiting: %v", err)
+		}
+
+		event := bus.NewEvent("clarification.stale_dismissed", "test", map[string]any{
+			"session_id": "s1",
+			"task_id":    "t1",
+			"pending_id": "pending-1",
+		})
+		if err := svc.handleClarificationStaleDismissed(ctx, event); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if state, ok := taskRepo.updatedStates["t1"]; !ok || state != v1.TaskStateReview {
+			t.Fatalf("expected task state %q, got %q (ok=%v)", v1.TaskStateReview, state, ok)
 		}
 	})
 }

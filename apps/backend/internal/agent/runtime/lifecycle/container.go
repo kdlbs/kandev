@@ -203,26 +203,29 @@ func (cm *ContainerManager) createInstanceAndClient(
 	disableAskQuestion := agents.IsPassthroughOnly(config.AgentConfig)
 	assumeMcpSse := false
 	assumeMcpHttp := false
+	requiresProcessKill := false
 	if config.AgentConfig != nil {
 		if rt := config.AgentConfig.Runtime(); rt != nil {
 			assumeMcpSse = rt.AssumeMcpSse
 			assumeMcpHttp = rt.AssumeMcpHttp
+			requiresProcessKill = rt.RequiresProcessKill
 		}
 	}
 
 	createReq := &agentctl.CreateInstanceRequest{
-		ID:                 config.InstanceID,
-		WorkspacePath:      "/workspace",
-		AgentCommand:       "",
-		AgentType:          agentType,
-		Env:                config.Credentials,
-		AutoStart:          false,
-		McpServers:         config.McpServers,
-		SessionID:          config.SessionID,
-		DisableAskQuestion: disableAskQuestion,
-		AssumeMcpSse:       assumeMcpSse,
-		AssumeMcpHttp:      assumeMcpHttp,
-		McpMode:            config.McpMode,
+		ID:                  config.InstanceID,
+		WorkspacePath:       "/workspace",
+		AgentCommand:        "",
+		AgentType:           agentType,
+		Env:                 config.Credentials,
+		AutoStart:           false,
+		McpServers:          config.McpServers,
+		SessionID:           config.SessionID,
+		DisableAskQuestion:  disableAskQuestion,
+		AssumeMcpSse:        assumeMcpSse,
+		AssumeMcpHttp:       assumeMcpHttp,
+		McpMode:             config.McpMode,
+		RequiresProcessKill: requiresProcessKill,
 	}
 
 	resp, err := ctl.CreateInstance(ctx, createReq)

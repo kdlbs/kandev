@@ -1,7 +1,7 @@
 import type { BackendMessageMap, BackendMessageType } from "@/lib/types/backend";
 import type { ConnectionStatus } from "@/lib/types/connection";
 import { generateUUID } from "@/lib/utils";
-import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
 const debugDispatch = createDebugLogger("ws:dispatch");
 
@@ -128,7 +128,7 @@ export class WebSocketClient {
 
   send(payload: unknown) {
     const data = JSON.stringify(payload);
-    if (IS_DEBUG) {
+    if (isDebug()) {
       const p = payload as { action?: string; id?: string; type?: string } | null;
       const action = p?.action ?? "?";
       if (!DISPATCH_LOG_DENYLIST.has(action)) {
@@ -380,7 +380,7 @@ export class WebSocketClient {
   }
 
   private debugNotification(action: BackendMessageType, payload: unknown, handlerCount: number) {
-    if (!IS_DEBUG || DISPATCH_LOG_DENYLIST.has(action)) return;
+    if (!isDebug() || DISPATCH_LOG_DENYLIST.has(action)) return;
     const payloadSessionId = (payload as { session_id?: string } | undefined)?.session_id;
     debugDispatch("notification", {
       action,
@@ -393,12 +393,12 @@ export class WebSocketClient {
     const msgWithId = message as { id?: string; type: string };
 
     if (msgWithId.type === "response" && msgWithId.id) {
-      if (IS_DEBUG) debugDispatch("response", { id: msgWithId.id });
+      if (isDebug()) debugDispatch("response", { id: msgWithId.id });
       this.resolvePendingRequest(msgWithId.id, message.payload);
       return;
     }
     if (msgWithId.type === "error" && msgWithId.id) {
-      if (IS_DEBUG) debugDispatch("error-response", { id: msgWithId.id });
+      if (isDebug()) debugDispatch("error-response", { id: msgWithId.id });
       this.rejectPendingRequest(msgWithId.id, message.payload);
       return;
     }

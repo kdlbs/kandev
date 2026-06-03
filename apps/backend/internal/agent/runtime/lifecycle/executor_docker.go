@@ -444,27 +444,30 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 	disableAskQuestion := false
 	assumeMcpSse := false
 	assumeMcpHttp := false
+	requiresProcessKill := false
 	if req.AgentConfig != nil {
 		agentType = req.AgentConfig.ID()
 		disableAskQuestion = agents.IsPassthroughOnly(req.AgentConfig)
 		if rt := req.AgentConfig.Runtime(); rt != nil {
 			assumeMcpSse = rt.AssumeMcpSse
 			assumeMcpHttp = rt.AssumeMcpHttp
+			requiresProcessKill = rt.RequiresProcessKill
 		}
 	}
 	return &agentctl.CreateInstanceRequest{
-		ID:                 instanceID,
-		WorkspacePath:      dockerWorkspacePath,
-		AgentType:          agentType,
-		Env:                req.Env,
-		AutoStart:          false,
-		McpServers:         req.McpServers,
-		SessionID:          req.SessionID,
-		TaskID:             req.TaskID,
-		DisableAskQuestion: disableAskQuestion,
-		AssumeMcpSse:       assumeMcpSse,
-		AssumeMcpHttp:      assumeMcpHttp,
-		McpMode:            req.McpMode,
+		ID:                  instanceID,
+		WorkspacePath:       dockerWorkspacePath,
+		AgentType:           agentType,
+		Env:                 req.Env,
+		AutoStart:           false,
+		McpServers:          req.McpServers,
+		SessionID:           req.SessionID,
+		TaskID:              req.TaskID,
+		DisableAskQuestion:  disableAskQuestion,
+		AssumeMcpSse:        assumeMcpSse,
+		AssumeMcpHttp:       assumeMcpHttp,
+		McpMode:             req.McpMode,
+		RequiresProcessKill: requiresProcessKill,
 	}
 }
 

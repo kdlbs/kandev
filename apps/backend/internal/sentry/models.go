@@ -138,8 +138,14 @@ type IssueWatch struct {
 	// hold at once. nil = uncapped. Values <= 0 are rejected at the API layer.
 	MaxInflightTasks *int       `json:"maxInflightTasks,omitempty" db:"max_inflight_tasks"`
 	LastPolledAt     *time.Time `json:"lastPolledAt,omitempty" db:"last_polled_at"`
-	CreatedAt        time.Time  `json:"createdAt" db:"created_at"`
-	UpdatedAt        time.Time  `json:"updatedAt" db:"updated_at"`
+	// LastError / LastErrorAt are stamped when the dispatch coordinator
+	// self-heals an orphaned watch (e.g. its bound agent profile was
+	// deleted). Surfaced to the settings UI so the user sees why a watch
+	// was disabled. Empty string / nil when the watch is healthy.
+	LastError   string     `json:"lastError,omitempty" db:"last_error"`
+	LastErrorAt *time.Time `json:"lastErrorAt,omitempty" db:"last_error_at"`
+	CreatedAt   time.Time  `json:"createdAt" db:"created_at"`
+	UpdatedAt   time.Time  `json:"updatedAt" db:"updated_at"`
 }
 
 // IssueWatchTask deduplicates task creation per (watch, issue) tuple. Keyed on

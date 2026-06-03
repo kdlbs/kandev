@@ -273,7 +273,7 @@ func TestEnrichStagedDiff_RenamedFile(t *testing.T) {
 		},
 	}
 
-	wt.enrichWithStagedDiff(context.Background(), update, "HEAD")
+	wt.enrichWithStagedDiff(context.Background(), update, "HEAD", streams.GitStatusUpdate{})
 
 	fi := update.Files["renamed.txt"]
 	if fi.Diff == "" {
@@ -282,4 +282,272 @@ func TestEnrichStagedDiff_RenamedFile(t *testing.T) {
 	if fi.Additions == 0 && fi.Deletions == 0 {
 		t.Error("expected non-zero additions or deletions for renamed+modified file")
 	}
+}
+
+// TestCarryBranchDiff covers carry-forward of branch additions/deletions when
+// the `git diff --numstat <merge-base>` call fails — without it, a transient
+// timeout would clear the sidebar's branch-totals count.
+func TestCarryBranchDiff(t *testing.T) {
+	head := "abc123"
+	base := "base000"
+	tests := []struct {
+		name          string
+		prior         streams.GitStatusUpdate
+		updateHead    string
+		updateBase    string
+		wantAdditions int
+		wantDeletions int
+	}{
+		{
+			name:          "same head and base preserves totals",
+			prior:         streams.GitStatusUpdate{HeadCommit: head, BaseCommit: base, BranchAdditions: 42, BranchDeletions: 7},
+			updateHead:    head,
+			updateBase:    base,
+			wantAdditions: 42,
+			wantDeletions: 7,
+		},
+		{
+			name:          "different head drops totals",
+			prior:         streams.GitStatusUpdate{HeadCommit: head, BaseCommit: base, BranchAdditions: 42, BranchDeletions: 7},
+			updateHead:    "def456",
+			updateBase:    base,
+			wantAdditions: 0,
+			wantDeletions: 0,
+		},
+		{
+			name:          "different base drops totals",
+			prior:         streams.GitStatusUpdate{HeadCommit: head, BaseCommit: base, BranchAdditions: 42, BranchDeletions: 7},
+			updateHead:    head,
+			updateBase:    "newbase",
+			wantAdditions: 0,
+			wantDeletions: 0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			update := &streams.GitStatusUpdate{HeadCommit: tt.updateHead, BaseCommit: tt.updateBase}
+			carryBranchDiff(update, tt.prior)
+			if update.BranchAdditions != tt.wantAdditions || update.BranchDeletions != tt.wantDeletions {
+				t.Errorf("additions/deletions = %d/%d, want %d/%d",
+					update.BranchAdditions, update.BranchDeletions, tt.wantAdditions, tt.wantDeletions)
+			}
+		})
+	}
+}
+
+// TestCarryForwardFileDiffs covers per-file diff carry-forward. The numstat
+// command is the gate that drives per-file enrichment; when it fails we keep
+// the prior diff content visible (as long as HEAD hasn't moved) instead of
+// clearing the diff panel on a transient timeout.
+func TestCarryForwardFileDiffs(t *testing.T) {
+	head := "abc123"
+	priorDiff := "diff --git a/foo b/foo\n+new line\n"
+
+	t.Run("preserves diff additions deletions when head matches", func(t *testing.T) {
+		prior := streams.GitStatusUpdate{
+			HeadCommit: head,
+			Files: map[string]streams.FileInfo{
+				"foo.go": {Path: "foo.go", Diff: priorDiff, Additions: 5, Deletions: 2, DiffSkipReason: ""},
+			},
+		}
+		update := &streams.GitStatusUpdate{
+			HeadCommit: head,
+			Files: map[string]streams.FileInfo{
+				"foo.go": {Path: "foo.go"},
+			},
+		}
+		carryForwardFileDiffs(update, prior)
+		got := update.Files["foo.go"]
+		if got.Diff != priorDiff {
+			t.Errorf("Diff = %q, want %q", got.Diff, priorDiff)
+		}
+		if got.Additions != 5 || got.Deletions != 2 {
+			t.Errorf("Additions/Deletions = %d/%d, want 5/2", got.Additions, got.Deletions)
+		}
+	})
+
+	t.Run("skips when head moved", func(t *testing.T) {
+		prior := streams.GitStatusUpdate{
+			HeadCommit: head,
+			Files: map[string]streams.FileInfo{
+				"foo.go": {Path: "foo.go", Diff: priorDiff, Additions: 5, Deletions: 2},
+			},
+		}
+		update := &streams.GitStatusUpdate{
+			HeadCommit: "different",
+			Files: map[string]streams.FileInfo{
+				"foo.go": {Path: "foo.go"},
+			},
+		}
+		carryForwardFileDiffs(update, prior)
+		got := update.Files["foo.go"]
+		if got.Diff != "" || got.Additions != 0 || got.Deletions != 0 {
+			t.Errorf("expected zeroed FileInfo on head mismatch, got %+v", got)
+		}
+	})
+
+	t.Run("skips files not in prior", func(t *testing.T) {
+		prior := streams.GitStatusUpdate{HeadCommit: head, Files: map[string]streams.FileInfo{}}
+		update := &streams.GitStatusUpdate{
+			HeadCommit: head,
+			Files:      map[string]streams.FileInfo{"new.go": {Path: "new.go"}},
+		}
+		carryForwardFileDiffs(update, prior)
+		got := update.Files["new.go"]
+		if got.Diff != "" {
+			t.Errorf("expected no carry-forward for new file, got Diff=%q", got.Diff)
+		}
+	})
+
+	t.Run("does not overwrite already-populated update entry", func(t *testing.T) {
+		newDiff := "diff --git a/foo b/foo\n+brand new\n"
+		prior := streams.GitStatusUpdate{
+			HeadCommit: head,
+			Files: map[string]streams.FileInfo{
+				"foo.go": {Path: "foo.go", Diff: priorDiff, Additions: 5, Deletions: 2},
+			},
+		}
+		update := &streams.GitStatusUpdate{
+			HeadCommit: head,
+			Files: map[string]streams.FileInfo{
+				"foo.go": {Path: "foo.go", Diff: newDiff, Additions: 1, Deletions: 0},
+			},
+		}
+		carryForwardFileDiffs(update, prior)
+		got := update.Files["foo.go"]
+		if got.Diff != newDiff {
+			t.Errorf("Diff overwritten; got %q, want %q", got.Diff, newDiff)
+		}
+		if got.Additions != 1 || got.Deletions != 0 {
+			t.Errorf("counts overwritten; got %d/%d, want 1/0", got.Additions, got.Deletions)
+		}
+	})
+
+	t.Run("respects skip reason set this poll", func(t *testing.T) {
+		skipReasons := []string{
+			diffSkipReasonBudgetExceeded,
+			diffSkipReasonTooLarge,
+			diffSkipReasonBinary,
+		}
+		for _, reason := range skipReasons {
+			t.Run(reason, func(t *testing.T) {
+				prior := streams.GitStatusUpdate{
+					HeadCommit: head,
+					Files: map[string]streams.FileInfo{
+						"foo.go": {Path: "foo.go", Diff: priorDiff, Additions: 5, Deletions: 2},
+					},
+				}
+				update := &streams.GitStatusUpdate{
+					HeadCommit: head,
+					Files: map[string]streams.FileInfo{
+						"foo.go": {Path: "foo.go", DiffSkipReason: reason},
+					},
+				}
+				carryForwardFileDiffs(update, prior)
+				got := update.Files["foo.go"]
+				if got.Diff != "" {
+					t.Errorf("Diff carried forward despite skip reason %q; got %q", reason, got.Diff)
+				}
+				if got.DiffSkipReason != reason {
+					t.Errorf("DiffSkipReason = %q, want %q", got.DiffSkipReason, reason)
+				}
+			})
+		}
+	})
+}
+
+func TestCarryForwardFileDiff(t *testing.T) {
+	head := "abc123"
+	priorDiff := "diff --git a/foo b/foo\n+kept line\n"
+
+	t.Run("fills empty Diff from prior when head matches", func(t *testing.T) {
+		prior := streams.GitStatusUpdate{
+			HeadCommit: head,
+			Files: map[string]streams.FileInfo{
+				"foo.go": {Path: "foo.go", Diff: priorDiff, DiffSkipReason: "truncated"},
+			},
+		}
+		update := &streams.GitStatusUpdate{
+			HeadCommit: head,
+			Files: map[string]streams.FileInfo{
+				// numstat already populated additions/deletions; capDiffOutput then returned "".
+				"foo.go": {Path: "foo.go", Additions: 7, Deletions: 3},
+			},
+		}
+		fi := update.Files["foo.go"]
+		fi = carryForwardFileDiff(fi, "foo.go", update, prior)
+		if fi.Diff != priorDiff {
+			t.Errorf("Diff = %q, want %q", fi.Diff, priorDiff)
+		}
+		if fi.DiffSkipReason != "truncated" {
+			t.Errorf("DiffSkipReason = %q, want %q", fi.DiffSkipReason, "truncated")
+		}
+		if fi.Additions != 7 || fi.Deletions != 3 {
+			t.Errorf("counts should be untouched, got %d/%d, want 7/3", fi.Additions, fi.Deletions)
+		}
+	})
+
+	t.Run("no-op when head moved", func(t *testing.T) {
+		prior := streams.GitStatusUpdate{
+			HeadCommit: head,
+			Files: map[string]streams.FileInfo{
+				"foo.go": {Path: "foo.go", Diff: priorDiff},
+			},
+		}
+		update := &streams.GitStatusUpdate{
+			HeadCommit: "different",
+			Files: map[string]streams.FileInfo{
+				"foo.go": {Path: "foo.go"},
+			},
+		}
+		fi := carryForwardFileDiff(update.Files["foo.go"], "foo.go", update, prior)
+		if fi.Diff != "" {
+			t.Errorf("expected no carry-forward on head mismatch, got Diff=%q", fi.Diff)
+		}
+	})
+
+	t.Run("no-op when file absent from prior", func(t *testing.T) {
+		prior := streams.GitStatusUpdate{HeadCommit: head, Files: map[string]streams.FileInfo{}}
+		update := &streams.GitStatusUpdate{
+			HeadCommit: head,
+			Files:      map[string]streams.FileInfo{"new.go": {Path: "new.go"}},
+		}
+		fi := carryForwardFileDiff(update.Files["new.go"], "new.go", update, prior)
+		if fi.Diff != "" {
+			t.Errorf("expected no carry-forward for new file, got Diff=%q", fi.Diff)
+		}
+	})
+
+	t.Run("no-op when prior diff empty", func(t *testing.T) {
+		prior := streams.GitStatusUpdate{
+			HeadCommit: head,
+			Files: map[string]streams.FileInfo{
+				"foo.go": {Path: "foo.go", Additions: 1, Deletions: 1},
+			},
+		}
+		update := &streams.GitStatusUpdate{
+			HeadCommit: head,
+			Files:      map[string]streams.FileInfo{"foo.go": {Path: "foo.go"}},
+		}
+		fi := carryForwardFileDiff(update.Files["foo.go"], "foo.go", update, prior)
+		if fi.Diff != "" || fi.DiffSkipReason != "" {
+			t.Errorf("expected no carry-forward when prior Diff empty, got %+v", fi)
+		}
+	})
+
+	t.Run("no-op when prior head empty", func(t *testing.T) {
+		prior := streams.GitStatusUpdate{
+			Files: map[string]streams.FileInfo{
+				"foo.go": {Path: "foo.go", Diff: priorDiff},
+			},
+		}
+		update := &streams.GitStatusUpdate{
+			HeadCommit: head,
+			Files:      map[string]streams.FileInfo{"foo.go": {Path: "foo.go"}},
+		}
+		fi := carryForwardFileDiff(update.Files["foo.go"], "foo.go", update, prior)
+		if fi.Diff != "" {
+			t.Errorf("expected no carry-forward on empty prior head, got Diff=%q", fi.Diff)
+		}
+	})
 }

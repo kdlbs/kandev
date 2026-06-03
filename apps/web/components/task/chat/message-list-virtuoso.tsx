@@ -17,7 +17,7 @@ import {
   getSessionRunningState,
   getLastTurnGroupId,
 } from "./message-list-shared";
-import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
 const FIRST_INDEX_BASE = 100_000;
 
@@ -62,7 +62,7 @@ function useStableFirstItemIndex(items: RenderItem[]) {
 
   const [state, setState] = useState<IndexState>(() => {
     const firstItemIndex = FIRST_INDEX_BASE - keys.length + 1;
-    if (IS_DEBUG) {
+    if (isDebug()) {
       debugFirstIndex("init", {
         keyCount: keys.length,
         firstItemIndex,
@@ -75,7 +75,7 @@ function useStableFirstItemIndex(items: RenderItem[]) {
 
   if (keys !== state.keys) {
     const nextIndex = computeFirstItemIndex(state.keys, state.firstItemIndex, keys);
-    if (IS_DEBUG) {
+    if (isDebug()) {
       debugFirstIndex("transition", {
         prevKeyCount: state.keys.length,
         nextKeyCount: keys.length,
@@ -204,7 +204,7 @@ function VirtuosoBody(props: VirtuosoBodyProps) {
   // anchored on for that lifecycle.
   const mountSnapshotRef = useRef<{ itemCount: number; firstItemIndex: number } | null>(null);
   useEffect(() => {
-    if (!IS_DEBUG) return;
+    if (!isDebug()) return;
     if (mountSnapshotRef.current) return;
     mountSnapshotRef.current = { itemCount, firstItemIndex };
     debugVirtuoso("mount", {
@@ -308,7 +308,7 @@ function useVirtuosoDebugSnapshot({
 }: UseVirtuosoDebugSnapshotArgs) {
   const prevSnapshotRef = useRef<VirtuosoSnapshot | null>(null);
   useEffect(() => {
-    if (!IS_DEBUG) return;
+    if (!isDebug()) return;
     const snapshot: VirtuosoSnapshot = {
       branch: isInitialLoading || items.length === 0 ? "fallback" : "virtuoso",
       itemCount: items.length,
@@ -346,14 +346,14 @@ function useVisibleScrollParent() {
   const setScrollRef = useCallback((node: HTMLDivElement | null) => {
     nodeRef.current = node;
     if (node && node.offsetHeight > 0) {
-      if (IS_DEBUG) {
+      if (isDebug()) {
         debugScrollParent("ref-callback-ready", {
           offsetHeight: node.offsetHeight,
           path: "synchronous",
         });
       }
       setScrollParent(node);
-    } else if (IS_DEBUG) {
+    } else if (isDebug()) {
       debugScrollParent("ref-callback-defer", {
         hasNode: Boolean(node),
         offsetHeight: node?.offsetHeight ?? null,
@@ -364,7 +364,7 @@ function useVisibleScrollParent() {
   useEffect(() => {
     const node = nodeRef.current;
     if (!node || scrollParent) return;
-    if (IS_DEBUG) {
+    if (isDebug()) {
       debugScrollParent("ro-attach", {
         initialHeight: node.offsetHeight,
       });
@@ -372,7 +372,7 @@ function useVisibleScrollParent() {
     const ro = new ResizeObserver((entries) => {
       for (const entry of entries) {
         if (entry.contentRect.height > 0) {
-          if (IS_DEBUG) {
+          if (isDebug()) {
             debugScrollParent("ro-ready", {
               height: entry.contentRect.height,
             });

@@ -67,6 +67,8 @@ export type AgentProfile = {
   mode?: string;
   /** @deprecated Use cliFlags. Retained for legacy clients. */
   allowIndexing: boolean;
+  /** Kandev agentctl auto-approves ACP permission_request prompts when true. */
+  autoApprove: boolean;
   /** User-configurable CLI flags passed to the agent subprocess. */
   cliFlags: CLIFlag[];
   /** Environment variables injected when this profile starts an agent session. */
@@ -137,6 +139,7 @@ export type AgentProfilePayload = {
   model: string;
   mode?: string;
   allow_indexing: boolean;
+  auto_approve: boolean;
   cli_flags: CLIFlag[];
   env_vars?: ProfileEnvVar[];
   cli_passthrough: boolean;

@@ -27,6 +27,8 @@ type issueWatchRow struct {
 	PollIntervalSeconds int           `db:"poll_interval_seconds"`
 	MaxInflightTasks    sql.NullInt64 `db:"max_inflight_tasks"`
 	LastPolledAt        *time.Time    `db:"last_polled_at"`
+	LastError           string        `db:"last_error"`
+	LastErrorAt         *time.Time    `db:"last_error_at"`
 	CreatedAt           time.Time     `db:"created_at"`
 	UpdatedAt           time.Time     `db:"updated_at"`
 }
@@ -56,6 +58,8 @@ func (r *issueWatchRow) toIssueWatch() (*IssueWatch, error) {
 		PollIntervalSeconds: r.PollIntervalSeconds,
 		MaxInflightTasks:    maxInflight,
 		LastPolledAt:        r.LastPolledAt,
+		LastError:           r.LastError,
+		LastErrorAt:         r.LastErrorAt,
 		CreatedAt:           r.CreatedAt,
 		UpdatedAt:           r.UpdatedAt,
 	}, nil
@@ -79,9 +83,21 @@ func encodeFilter(f SearchFilter) (string, error) {
 	return string(b), nil
 }
 
-const issueWatchColumns = `id, workspace_id, workflow_id, workflow_step_id, filter_json,
+// issueWatchInsertColumns lists the writable column names in row-insert order.
+// SELECTs use issueWatchSelectColumns which wraps the nullable last_error in
+// COALESCE so older databases (pre-self-heal migration) read back as empty
+// strings rather than NULL.
+const issueWatchInsertColumns = `id, workspace_id, workflow_id, workflow_step_id, filter_json,
 	agent_profile_id, executor_profile_id, prompt, enabled,
-	poll_interval_seconds, max_inflight_tasks, last_polled_at, created_at, updated_at`
+	poll_interval_seconds, max_inflight_tasks, last_polled_at,
+	last_error, last_error_at,
+	created_at, updated_at`
+
+const issueWatchSelectColumns = `id, workspace_id, workflow_id, workflow_step_id, filter_json,
+	agent_profile_id, executor_profile_id, prompt, enabled,
+	poll_interval_seconds, max_inflight_tasks, last_polled_at,
+	COALESCE(last_error, '') AS last_error, last_error_at,
+	created_at, updated_at`
 
 // CreateIssueWatch persists a new issue watch row. ID and timestamps are
 // assigned here so callers can pass a partially-populated struct.
@@ -100,11 +116,13 @@ func (s *Store) CreateIssueWatch(ctx context.Context, w *IssueWatch) error {
 		return err
 	}
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO sentry_issue_watches (`+issueWatchColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO sentry_issue_watches (`+issueWatchInsertColumns+`)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		w.ID, w.WorkspaceID, w.WorkflowID, w.WorkflowStepID, filterJSON,
 		w.AgentProfileID, w.ExecutorProfileID, w.Prompt, w.Enabled,
-		w.PollIntervalSeconds, nullableInt(w.MaxInflightTasks), w.LastPolledAt, w.CreatedAt, w.UpdatedAt)
+		w.PollIntervalSeconds, nullableInt(w.MaxInflightTasks), w.LastPolledAt,
+		w.LastError, w.LastErrorAt,
+		w.CreatedAt, w.UpdatedAt)
 	return err
 }
 
@@ -112,7 +130,7 @@ func (s *Store) CreateIssueWatch(ctx context.Context, w *IssueWatch) error {
 func (s *Store) GetIssueWatch(ctx context.Context, id string) (*IssueWatch, error) {
 	var row issueWatchRow
 	err := s.ro.GetContext(ctx, &row,
-		`SELECT `+issueWatchColumns+` FROM sentry_issue_watches WHERE id = ?`, id)
+		`SELECT `+issueWatchSelectColumns+` FROM sentry_issue_watches WHERE id = ?`, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -126,7 +144,7 @@ func (s *Store) GetIssueWatch(ctx context.Context, id string) (*IssueWatch, erro
 func (s *Store) ListIssueWatches(ctx context.Context, workspaceID string) ([]*IssueWatch, error) {
 	var rows []issueWatchRow
 	err := s.ro.SelectContext(ctx, &rows,
-		`SELECT `+issueWatchColumns+` FROM sentry_issue_watches
+		`SELECT `+issueWatchSelectColumns+` FROM sentry_issue_watches
 		 WHERE workspace_id = ? ORDER BY created_at`, workspaceID)
 	if err != nil {
 		return nil, err
@@ -138,7 +156,7 @@ func (s *Store) ListIssueWatches(ctx context.Context, workspaceID string) ([]*Is
 func (s *Store) ListAllIssueWatches(ctx context.Context) ([]*IssueWatch, error) {
 	var rows []issueWatchRow
 	err := s.ro.SelectContext(ctx, &rows,
-		`SELECT `+issueWatchColumns+` FROM sentry_issue_watches ORDER BY workspace_id, created_at`)
+		`SELECT `+issueWatchSelectColumns+` FROM sentry_issue_watches ORDER BY workspace_id, created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +168,7 @@ func (s *Store) ListAllIssueWatches(ctx context.Context) ([]*IssueWatch, error) 
 func (s *Store) ListEnabledIssueWatches(ctx context.Context) ([]*IssueWatch, error) {
 	var rows []issueWatchRow
 	err := s.ro.SelectContext(ctx, &rows,
-		`SELECT `+issueWatchColumns+` FROM sentry_issue_watches
+		`SELECT `+issueWatchSelectColumns+` FROM sentry_issue_watches
 		 WHERE enabled = 1 ORDER BY created_at`)
 	if err != nil {
 		return nil, err
@@ -201,6 +219,20 @@ func (s *Store) UpdateIssueWatchLastPolled(ctx context.Context, id string, t tim
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE sentry_issue_watches SET last_polled_at = ?, updated_at = ? WHERE id = ?`,
 		t, time.Now().UTC(), id)
+	return err
+}
+
+// DisableIssueWatchWithError flips a watch to disabled and stamps a
+// human-readable cause. Called by the dispatch coordinator's self-heal path
+// when the watch's bound agent profile has been soft-deleted, so the settings
+// UI can explain why the watch stopped firing. Mirrors the Linear/Jira stores.
+func (s *Store) DisableIssueWatchWithError(ctx context.Context, id, cause string) error {
+	now := time.Now().UTC()
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE sentry_issue_watches
+		   SET enabled = 0, last_error = ?, last_error_at = ?, updated_at = ?
+		 WHERE id = ?`,
+		cause, now, now, id)
 	return err
 }
 

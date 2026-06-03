@@ -15,7 +15,7 @@ import {
 } from "./layout-manager";
 import type { LayoutGroupIds } from "./layout-manager";
 import { getGlobalSidebarWidth } from "@/lib/local-storage";
-import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
 // Re-export for consumers that import from this module
 export { getRootSplitview } from "./layout-manager";
@@ -32,7 +32,7 @@ function layoutWidth(api: DockviewApi): number | undefined {
 /** Best-effort caller chain for the fixups-capture debug log: pull the first
  *  few stack frames above `applyLayoutFixups` so we can see WHICH layout path
  *  (env-switch / restore / custom-layout / maximize) recorded a given target.
- *  Debug-only — never called when IS_DEBUG is false. */
+ *  Debug-only — never called when isDebug() is false. */
 const CALLER_CHAIN_SKIP = new Set(["captureCallerChain", "applyLayoutFixups", "logFixupsCapture"]);
 
 function captureCallerChain(): string {
@@ -200,7 +200,7 @@ function captureRightTarget(api: DockviewApi, sv: any, savedRightWidth?: number)
  *  to keep that function under the complexity limit; no-op in prod. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function logFixupsCapture(api: DockviewApi, sv: any): void {
-  if (!IS_DEBUG) return;
+  if (!isDebug()) return;
   // Decisive fields: `sidebarOverCap=true` means the recorded target exceeds
   // the cap that enforcement clamps the column to — i.e. an unreachable target
   // that makes `enforcePinnedTargets` spin forever. `cols` shows whether the

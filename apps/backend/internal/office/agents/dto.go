@@ -35,6 +35,9 @@ type UpdateAgentRequest struct {
 	SkillIDs              *string `json:"skill_ids,omitempty"`
 	ExecutorPreference    *string `json:"executor_preference,omitempty"`
 	PauseReason           *string `json:"pause_reason,omitempty"`
+	AutoApprove           *bool   `json:"auto_approve,omitempty"`
+	AllowIndexing         *bool   `json:"allow_indexing,omitempty"`
+	CLIPassthrough        *bool   `json:"cli_passthrough,omitempty"`
 	// Routing carries an optional provider-routing override blob. When
 	// non-nil it replaces the agent's stored override entirely; a zero
 	// AgentOverrides clears the overrides.

@@ -50,6 +50,8 @@ const createTablesSQL = `
 		poll_interval_seconds INTEGER NOT NULL DEFAULT 300,
 		max_inflight_tasks INTEGER DEFAULT 5,
 		last_polled_at DATETIME,
+		last_error TEXT NOT NULL DEFAULT '',
+		last_error_at DATETIME,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
 	);
@@ -75,7 +77,10 @@ func (s *Store) initSchema() error {
 	if _, err := s.db.Exec(createTablesSQL); err != nil {
 		return err
 	}
-	return s.addMaxInflightTasksColumn()
+	if err := s.addMaxInflightTasksColumn(); err != nil {
+		return err
+	}
+	return s.addIssueWatchLastErrorColumns()
 }
 
 // addMaxInflightTasksColumn brings older databases up to the current schema by
@@ -95,6 +100,32 @@ func (s *Store) addMaxInflightTasksColumn() error {
 	}
 	if _, err := s.db.Exec(`ALTER TABLE sentry_issue_watches ADD COLUMN max_inflight_tasks INTEGER DEFAULT 5`); err != nil {
 		return fmt.Errorf("add max_inflight_tasks column: %w", err)
+	}
+	return nil
+}
+
+// addIssueWatchLastErrorColumns brings older databases up to the current
+// schema by appending last_error / last_error_at to sentry_issue_watches when
+// missing. Fresh installs hit the column-already-present branch since
+// createTablesSQL declares both columns. Idempotent — column lookup before
+// each ALTER avoids the "duplicate column name" error.
+func (s *Store) addIssueWatchLastErrorColumns() error {
+	cols, err := s.tableColumns("sentry_issue_watches")
+	if err != nil {
+		return err
+	}
+	if len(cols) == 0 {
+		return nil
+	}
+	if _, ok := cols["last_error"]; !ok {
+		if _, err := s.db.Exec(`ALTER TABLE sentry_issue_watches ADD COLUMN last_error TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add last_error column: %w", err)
+		}
+	}
+	if _, ok := cols["last_error_at"]; !ok {
+		if _, err := s.db.Exec(`ALTER TABLE sentry_issue_watches ADD COLUMN last_error_at DATETIME`); err != nil {
+			return fmt.Errorf("add last_error_at column: %w", err)
+		}
 	}
 	return nil
 }

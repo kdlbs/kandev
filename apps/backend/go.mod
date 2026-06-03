@@ -4,6 +4,7 @@ go 1.26.0
 
 require (
 	github.com/UserExistsError/conpty v0.1.4
+	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/coder/acp-go-sdk v0.13.0
 	github.com/creack/pty v1.1.21
 	github.com/docker/docker v28.5.2+incompatible

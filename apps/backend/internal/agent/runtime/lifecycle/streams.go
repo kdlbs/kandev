@@ -31,36 +31,100 @@ type StreamManager struct {
 	logger     *logger.Logger
 	callbacks  StreamCallbacks
 	mcpHandler agentctl.MCPHandler
-	// stopCh is the Manager-owned shutdown signal. SessionTraceContext is
-	// deliberately uncancellable (it carries a long-lived span), so the
-	// reconnect/backoff loops below select on stopCh to drain on Manager.Stop.
-	// nil is treated as "no shutdown signal" and falls back to the prior
-	// uncancellable behaviour (compat with constructors used by isolated tests).
-	stopCh  <-chan struct{}
-	wg      sync.WaitGroup
-	wgMu    sync.Mutex
-	stopped bool
+	// stopCh is the Manager-owned shutdown signal. The retry/backoff and
+	// connected `<-ws.Done() / <-stop>` select read from it so they drain on
+	// Manager.Stop. May be nil when isolated tests don't care about external
+	// shutdown; waitCh below covers Wait-driven drains in that case.
+	stopCh <-chan struct{}
+	// waitCh is closed by Wait() so retry/backoff and the connected select
+	// drain even when the external stopCh isn't closed by the caller (or is
+	// nil). Together with stopCh this makes Wait an absolute drain barrier,
+	// which goleak.VerifyTestMain depends on under CI load.
+	waitCh     chan struct{}
+	waitChOnce sync.Once
+	wg         sync.WaitGroup
+	wgMu       sync.Mutex
+	stopped    bool
 }
 
+// stopChannelContext wraps a parent ctx with two auxiliary stop channels.
+// Done() returns a per-instance merged channel that closes when any of
+// parent.Done(), primary or secondary fires. The merge goroutine spawned by
+// Done() exits as soon as any signal fires, and Wait()'s waitCh close
+// guarantees that happens at teardown time.
+//
+// We keep merge spawn behind a sync.Once so repeated Done() calls (the runtime
+// re-asks every select tick) don't pile up goroutines. The optional wg field
+// lets a StreamManager track the merge goroutine so sm.wg.Wait remains a true
+// drain barrier even when the outer stream goroutine returns first (the
+// connectUpdatesStream path returns immediately after the dial, so without
+// this the merge goroutine could outlive sm.wg.Wait and trip goleak).
 type stopChannelContext struct {
 	context.Context
-	stopCh <-chan struct{}
+	primary   <-chan struct{}
+	secondary <-chan struct{}
+
+	wg *sync.WaitGroup
+
+	once   sync.Once
+	merged chan struct{}
 }
 
-func (c stopChannelContext) Done() <-chan struct{} {
-	if c.stopCh == nil {
+func (c *stopChannelContext) Done() <-chan struct{} {
+	if c.primary == nil && c.secondary == nil {
 		return c.Context.Done()
 	}
-	return c.stopCh
+	c.once.Do(func() {
+		c.merged = make(chan struct{})
+		if c.wg != nil {
+			c.wg.Add(1)
+		}
+		go c.mergeStops()
+	})
+	return c.merged
 }
 
-func (c stopChannelContext) Err() error {
-	select {
-	case <-c.stopCh:
-		return context.Canceled
-	default:
-		return c.Context.Err()
+func (c *stopChannelContext) mergeStops() {
+	defer close(c.merged)
+	if c.wg != nil {
+		defer c.wg.Done()
 	}
+	switch {
+	case c.primary != nil && c.secondary != nil:
+		select {
+		case <-c.primary:
+		case <-c.secondary:
+		case <-c.Context.Done():
+		}
+	case c.primary != nil:
+		select {
+		case <-c.primary:
+		case <-c.Context.Done():
+		}
+	default:
+		select {
+		case <-c.secondary:
+		case <-c.Context.Done():
+		}
+	}
+}
+
+func (c *stopChannelContext) Err() error {
+	if c.primary != nil {
+		select {
+		case <-c.primary:
+			return context.Canceled
+		default:
+		}
+	}
+	if c.secondary != nil {
+		select {
+		case <-c.secondary:
+			return context.Canceled
+		default:
+		}
+	}
+	return c.Context.Err()
 }
 
 // NewStreamManager creates a new StreamManager.
@@ -68,12 +132,15 @@ func (c stopChannelContext) Err() error {
 // stopCh is the Manager-owned shutdown signal used by the workspace-stream
 // retry backoff to drain cleanly. Pass nil from tests that exercise the
 // manager in isolation; production callers wire it from Manager.stopCh.
+// Either way, Wait() closes a per-StreamManager internal channel that the
+// same drain sites observe — so Wait remains an absolute drain barrier.
 func NewStreamManager(log *logger.Logger, callbacks StreamCallbacks, mcpHandler agentctl.MCPHandler, stopCh <-chan struct{}) *StreamManager {
 	return &StreamManager{
 		logger:     log.WithFields(zap.String("component", "stream-manager")),
 		callbacks:  callbacks,
 		mcpHandler: mcpHandler,
 		stopCh:     stopCh,
+		waitCh:     make(chan struct{}),
 	}
 }
 
@@ -104,11 +171,23 @@ func (sm *StreamManager) ConnectWorkspaceStream(execution *AgentExecution, ready
 	}
 }
 
+// ConnectMCPStream opens the passthrough MCP proxy stream under goroutine
+// tracking so it drains cleanly on shutdown (mirrors ConnectWorkspaceStream).
+func (sm *StreamManager) ConnectMCPStream(execution *AgentExecution) {
+	sm.start(func() {
+		sm.connectMCPStream(execution)
+	})
+}
+
 // Wait blocks until all StreamManager-owned stream goroutines have exited.
+// Closes the internal waitCh first so any goroutine still parked in the retry
+// backoff or the connected `<-ws.Done() / <-stop>` select drains without
+// depending on the caller having closed the external stopCh.
 func (sm *StreamManager) Wait() {
 	sm.wgMu.Lock()
 	sm.stopped = true
 	sm.wgMu.Unlock()
+	sm.waitChOnce.Do(func() { close(sm.waitCh) })
 	sm.wg.Wait()
 }
 
@@ -160,31 +239,39 @@ func (sm *StreamManager) ReconnectAll(execution *AgentExecution) {
 }
 
 // sleepOrStop blocks for d or until the Manager begins shutting down.
-// Returns true when the timer fires, false when stopCh closes first.
-// A nil stopCh degrades to time.Sleep semantics (always returns true).
+// Returns true when the timer fires, false when either the external stopCh
+// or the internal Wait-driven waitCh fires first.
 func (sm *StreamManager) sleepOrStop(d time.Duration) bool {
-	if sm.stopCh == nil {
-		time.Sleep(d)
-		return true
-	}
 	timer := time.NewTimer(d)
 	defer timer.Stop()
+	if sm.stopCh == nil {
+		select {
+		case <-timer.C:
+			return true
+		case <-sm.waitCh:
+			return false
+		}
+	}
 	select {
 	case <-timer.C:
 		return true
 	case <-sm.stopCh:
 		return false
+	case <-sm.waitCh:
+		return false
 	}
 }
 
 // streamContext preserves the execution's session trace values while making
-// in-flight WebSocket dials cancellable by the manager shutdown signal.
+// in-flight WebSocket dials cancellable by either the external Manager
+// shutdown signal or StreamManager.Wait's internal drain signal.
 func (sm *StreamManager) streamContext(execution *AgentExecution) context.Context {
-	ctx := execution.SessionTraceContext()
-	if sm.stopCh == nil {
-		return ctx
+	return &stopChannelContext{
+		Context:   execution.SessionTraceContext(),
+		primary:   sm.stopCh,
+		secondary: sm.waitCh,
+		wg:        &sm.wg,
 	}
-	return stopChannelContext{Context: ctx, stopCh: sm.stopCh}
 }
 
 // connectUpdatesStream handles the updates WebSocket stream with ready signaling
@@ -223,6 +310,30 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 	if err != nil {
 		sm.logger.Error("failed to connect to updates stream",
 			zap.String("instance_id", execution.ID),
+			zap.Error(err))
+	}
+}
+
+// connectMCPStream opens the agent updates WebSocket for a PASSTHROUGH session
+// purely to drain the MCP request channel: the agentctl instance serves /mcp and
+// proxies tool calls to the backend over this stream, so without it kandev MCP
+// tool calls hang. Passthrough agents don't speak ACP, so no agent events arrive
+// here (the PTY drives the UI). On disconnect it only logs — it must NOT signal
+// promptDoneCh or OnStreamDisconnect (which would mark the execution failed);
+// passthrough completion is detected via PTY idle, and a normal session end
+// closing this stream is expected, not an error.
+func (sm *StreamManager) connectMCPStream(execution *AgentExecution) {
+	ctx := sm.streamContext(execution)
+	err := execution.agentctl.StreamUpdates(ctx, func(agentctl.AgentEvent) {}, sm.mcpHandler, func(disconnectErr error) {
+		if disconnectErr != nil {
+			sm.logger.Debug("passthrough MCP stream disconnected",
+				zap.String("execution_id", execution.ID),
+				zap.Error(disconnectErr))
+		}
+	})
+	if err != nil {
+		sm.logger.Error("failed to connect passthrough MCP stream",
+			zap.String("execution_id", execution.ID),
 			zap.Error(err))
 	}
 }
@@ -355,16 +466,31 @@ func (sm *StreamManager) connectWorkspaceStream(execution *AgentExecution, ready
 		// Signal that workspace stream is ready
 		signalReady()
 
-		// Wait for the stream to close. Also exits on Manager shutdown so the
-		// goroutine drains when the remote end keeps the connection open —
-		// in that case we close ws ourselves so the underlying WS read/write
-		// loops in agentctl.WorkspaceStream also exit. ws.Close is idempotent
-		// via closeOnce. A nil stopCh (isolated tests) blocks on the nil
-		// channel forever, which degrades to plain <-ws.Done() semantics.
-		select {
-		case <-ws.Done():
-		case <-sm.stopCh:
+		// Wait for the stream to close. Also exits on Manager shutdown / Wait
+		// so the goroutine drains when the remote end keeps the connection
+		// open — in that case we close ws ourselves so the underlying WS
+		// read/write loops in agentctl.WorkspaceStream also exit. ws.Close
+		// is idempotent via closeOnce. The waitCh branch covers the case
+		// where the caller never closes external stopCh (or stopCh is nil)
+		// but still calls Wait — without it, isolated tests that triggered
+		// this select would leak under CI scheduling.
+		shutdown := func() {
 			ws.Close()
+		}
+		if sm.stopCh == nil {
+			select {
+			case <-ws.Done():
+			case <-sm.waitCh:
+				shutdown()
+			}
+		} else {
+			select {
+			case <-ws.Done():
+			case <-sm.stopCh:
+				shutdown()
+			case <-sm.waitCh:
+				shutdown()
+			}
 		}
 		// Block until the stream's read/write goroutines have fully unwound
 		// before returning. Done()/Close only signal shutdown, so without this

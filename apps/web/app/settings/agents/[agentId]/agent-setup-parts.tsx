@@ -20,6 +20,7 @@ import { ProfileEnvVarsSection } from "@/components/settings/agent-profile-page"
 import { CustomCLIFlagsCard } from "@/components/settings/cli-flags-field";
 import type { Agent, ModelConfig, PermissionSetting, PassthroughConfig } from "@/lib/types/http";
 import { ProfileMcpConfigCard } from "./profile-mcp-config-card";
+import { profilePermissionValues } from "@/lib/agent-permissions";
 import { toAgentProfilePatch, type DraftProfile, type DraftAgent } from "./agent-save-helpers";
 
 export type AgentHeaderProps = {
@@ -109,6 +110,7 @@ export function ProfileCardItem({
   onRemoveProfile,
   onToastError,
 }: ProfileCardItemProps) {
+  const permissionValues = profilePermissionValues(profile, permissionSettings);
   return (
     <Card
       id={`profile-card-${profile.id}`}
@@ -120,7 +122,8 @@ export function ProfileCardItem({
             name: profile.name,
             model: profile.model,
             mode: profile.mode ?? "",
-            allow_indexing: profile.allow_indexing ?? profile.allowIndexing ?? false,
+            auto_approve: permissionValues.auto_approve,
+            allow_indexing: permissionValues.allow_indexing,
             cli_passthrough: profile.cliPassthrough ?? false,
             cli_flags: profile.cliFlags ?? [],
           }}
@@ -146,6 +149,8 @@ export function ProfileCardItem({
         <ProfileMcpConfigCard
           profileId={profile.id}
           supportsMcp={draftAgent.supports_mcp}
+          cliPassthrough={profile.cliPassthrough ?? false}
+          mcpInjection={passthroughConfig?.mcp_injection}
           draftState={profile.id.startsWith("draft-") ? profile.mcp_config : undefined}
           onDraftStateChange={(patch) => onProfileMcpChange(profile.id, patch)}
           onToastError={onToastError}

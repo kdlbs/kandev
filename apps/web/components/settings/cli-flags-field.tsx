@@ -167,18 +167,27 @@ export function CLIFlagsField({
   );
 }
 
+function permissionSettingFlagText(s: PermissionSetting): string {
+  const flag = s.cli_flag?.trim() ?? "";
+  const value = s.cli_flag_value?.trim() ?? "";
+  if (!flag) return "";
+  return value ? `${flag} ${value}` : flag;
+}
+
 function extractCuratedSettings(
   permissionSettings?: Record<string, PermissionSetting>,
 ): CuratedSetting[] {
   if (!permissionSettings) return [];
   const out: CuratedSetting[] = [];
   for (const [key, s] of Object.entries(permissionSettings)) {
-    if (!s.supported || s.apply_method !== "cli_flag" || !s.cli_flag) continue;
+    if (!s.supported || s.apply_method !== "cli_flag") continue;
+    const flag = permissionSettingFlagText(s);
+    if (!flag) continue;
     out.push({
       key,
       label: s.label,
       description: s.description,
-      flag: s.cli_flag,
+      flag,
       default: s.default,
     });
   }

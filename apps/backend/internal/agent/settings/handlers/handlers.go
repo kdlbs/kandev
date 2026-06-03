@@ -360,6 +360,7 @@ type createProfileRequest struct {
 	Model          string                 `json:"model"`
 	Mode           string                 `json:"mode,omitempty"`
 	AllowIndexing  bool                   `json:"allow_indexing"`
+	AutoApprove    bool                   `json:"auto_approve"`
 	CLIPassthrough bool                   `json:"cli_passthrough"`
 	CLIFlags       []dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
 	EnvVars        []dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
@@ -381,6 +382,7 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 		Model:          body.Model,
 		Mode:           body.Mode,
 		AllowIndexing:  body.AllowIndexing,
+		AutoApprove:    body.AutoApprove,
 		CLIPassthrough: body.CLIPassthrough,
 		CLIFlags:       body.CLIFlags,
 		EnvVars:        body.EnvVars,
@@ -408,6 +410,7 @@ type updateProfileRequest struct {
 	Model          *string                 `json:"model,omitempty"`
 	Mode           *string                 `json:"mode,omitempty"`
 	AllowIndexing  *bool                   `json:"allow_indexing,omitempty"`
+	AutoApprove    *bool                   `json:"auto_approve,omitempty"`
 	CLIPassthrough *bool                   `json:"cli_passthrough,omitempty"`
 	CLIFlags       *[]dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
 	EnvVars        *[]dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
@@ -429,6 +432,7 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 		Model:          body.Model,
 		Mode:           body.Mode,
 		AllowIndexing:  body.AllowIndexing,
+		AutoApprove:    body.AutoApprove,
 		CLIPassthrough: body.CLIPassthrough,
 		CLIFlags:       body.CLIFlags,
 		EnvVars:        body.EnvVars,
@@ -466,8 +470,9 @@ func (h *Handlers) httpDeleteProfile(c *gin.Context) {
 		var inUseErr *controller.ErrProfileInUseDetail
 		if errors.As(err, &inUseErr) {
 			c.JSON(http.StatusConflict, gin.H{
-				"error":           "agent profile is used by active session(s)",
+				"error":           "agent profile is used by active session(s) or watcher(s)",
 				"active_sessions": inUseErr.ActiveSessions,
+				"watchers":        inUseErr.Watchers,
 			})
 			return
 		}

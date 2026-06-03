@@ -100,7 +100,7 @@ func (c *Controller) buildAvailableAgentDTO(ctx context.Context, ag agents.Agent
 	}
 
 	var permissionSettings map[string]dto.PermissionSettingDTO
-	if permSettings := ag.PermissionSettings(); permSettings != nil {
+	if permSettings := agents.CatalogPermissionSettings(ag); permSettings != nil {
 		permissionSettings = make(map[string]dto.PermissionSettingDTO, len(permSettings))
 		for key, setting := range permSettings {
 			permissionSettings[key] = dto.PermissionSettingDTO{
@@ -124,6 +124,9 @@ func (c *Controller) buildAvailableAgentDTO(ctx context.Context, ag agents.Agent
 			Description:      pt.Description,
 			AutoInjectPrompt: pt.AutoInjectPrompt,
 			SubmitSequence:   pt.SubmitSequence,
+		}
+		if pt.MCPStrategy != nil {
+			passthroughConfig.MCPInjection = pt.MCPStrategy.Describe()
 		}
 	}
 
@@ -345,7 +348,7 @@ func (c *Controller) buildProfileSyncParams(
 	_, displayName, defaultModel string,
 	isPassthroughOnly bool,
 ) profileSyncParams {
-	autoApprove, allowIndexing, skipPermissions := resolvePermissionDefaults(agentConfig.PermissionSettings())
+	autoApprove, allowIndexing, skipPermissions := resolvePermissionDefaults(agents.CatalogPermissionSettings(agentConfig))
 	return profileSyncParams{
 		displayName:     displayName,
 		defaultModel:    defaultModel,

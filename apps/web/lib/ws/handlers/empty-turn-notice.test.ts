@@ -158,4 +158,25 @@ describe("computeEmptyTurnNotice", () => {
     );
     expect(notice?.content).toContain("`/deploy`");
   });
+
+  // Pins the fix for the "main agent finished, subagent still working" race:
+  // backend had_output snapshots before the subagent's nested events land, but
+  // the Task tool_call itself is real output for this turn — suppress the notice.
+  it("returns null when the turn contains a subagent_task tool call (in any status)", () => {
+    const subagentMsg: Message = {
+      id: "tool-1",
+      session_id: sessionId("sess-1"),
+      task_id: taskId("task-1"),
+      turn_id: "turn-1",
+      author_type: "agent",
+      content: "Investigate",
+      type: "tool_call",
+      metadata: { normalized: { kind: "subagent_task" }, status: "running" },
+      created_at: "2026-05-30T00:00:00Z",
+    };
+    const input = baseInput({
+      messages: [userMessage("turn-1", "spawn a subagent"), subagentMsg],
+    });
+    expect(computeEmptyTurnNotice(input)).toBeNull();
+  });
 });

@@ -319,6 +319,14 @@ func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent), mc
 	return nil
 }
 
+// HasAgentStream reports whether the agent updates WebSocket is currently
+// connected. Used to avoid opening a second stream on resume/restart.
+func (c *Client) HasAgentStream() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.agentStreamConn != nil
+}
+
 // readUpdatesStream is the read loop for the agent updates WebSocket stream.
 func (c *Client) readUpdatesStream(
 	ctx context.Context,

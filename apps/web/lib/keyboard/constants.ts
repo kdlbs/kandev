@@ -145,6 +145,12 @@ export const SHORTCUTS = {
     key: KEYS.SPACE,
     modifiers: { ctrlOrCmd: true },
   },
+  // Cycle the recent-task switcher backward (oldest -> most-recent). Shift
+  // distinguishes it from TASK_SWITCHER so both can be held together.
+  TASK_SWITCHER_REVERSE: {
+    key: KEYS.SPACE,
+    modifiers: { ctrlOrCmd: true, shift: true },
+  },
   BOTTOM_TERMINAL: {
     key: KEYS.J,
     modifiers: { ctrlOrCmd: true },
@@ -158,5 +164,12 @@ export const SHORTCUTS = {
   VOICE_INPUT_TOGGLE: {
     key: KEYS.M,
     modifiers: { ctrlOrCmd: true, shift: true },
+  },
+  // Ctrl+R opens the bash-style reverse-i-search overlay on the chat composer.
+  // Defaults to plain Ctrl (not ctrlOrCmd) so the Mac browser refresh shortcut
+  // Cmd+R keeps working out of the box.
+  REVERSE_SEARCH: {
+    key: KEYS.R,
+    modifiers: { ctrl: true },
   },
 } as const;

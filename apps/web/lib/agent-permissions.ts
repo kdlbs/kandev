@@ -1,61 +1,97 @@
 import type { PermissionSetting } from "@/lib/types/http";
 
 /**
- * Permission keys retained on the frontend. After the ACP-first migration the
- * only surviving CLI-flag-driven permission is auggie's `allow_indexing` — all
- * other agents express permission stance through ACP session modes (rendered
- * as a separate Mode picker) and the interactive permission_request message UI.
+ * Profile permission keys (snake_case) mirrored from backend PermissionSettings.
  *
- * Keys are kept in **snake_case wire format** because they pass straight
- * through to backend permission-payload bodies and the `permissionSettings`
- * map keyed by snake_case agent metadata.
+ * - `auto_approve`: Kandev agentctl auto-allows ACP permission_request frames
+ *   (all agents via CatalogPermissionSettings).
+ * - `allow_indexing`: legacy auggie CLI flag still exposed on its profile form.
  */
-export const PERMISSION_KEYS = ["allow_indexing"] as const;
+export const PERMISSION_KEYS = ["auto_approve", "allow_indexing"] as const;
+
+/** apply_method sentinel for the universal agentctl auto-approve toggle. */
+export const PERMISSION_APPLY_AGENTCTL_AUTO_APPROVE = "agentctl_auto_approve";
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
 
-/** Extract permission booleans from a profile-like (snake_case) object. */
-export function profileToPermissionsMap(
-  profile: Partial<Record<PermissionKey, boolean>>,
-  permissionSettings: Record<string, PermissionSetting>,
-): Record<PermissionKey, boolean> {
-  const result = {} as Record<PermissionKey, boolean>;
-  for (const key of PERMISSION_KEYS) {
-    const setting = permissionSettings[key];
-    result[key] = profile[key] ?? setting?.default ?? false;
-  }
-  return result;
-}
+/** Profile-shaped input that may carry permissions in snake_case or camelCase. */
+export type PermissionProfileInput = Partial<Record<PermissionKey, boolean>> & {
+  autoApprove?: boolean;
+  allowIndexing?: boolean;
+};
 
-/** Convert an object containing permission keys to a typed patch for API calls. */
-export function permissionsToProfilePatch(
-  perms: Partial<Record<PermissionKey, boolean>>,
-): Record<PermissionKey, boolean> {
-  const result = {} as Record<PermissionKey, boolean>;
-  for (const key of PERMISSION_KEYS) {
-    result[key] = perms[key] ?? false;
-  }
-  return result;
-}
+const CAMEL_BY_KEY: Record<PermissionKey, "autoApprove" | "allowIndexing"> = {
+  auto_approve: "autoApprove",
+  allow_indexing: "allowIndexing",
+};
 
-/** Create default permission values from backend metadata. */
-export function buildDefaultPermissions(
-  permissionSettings: Record<string, PermissionSetting>,
-): Record<PermissionKey, boolean> {
-  const result = {} as Record<PermissionKey, boolean>;
-  for (const key of PERMISSION_KEYS) {
-    result[key] = permissionSettings[key]?.default ?? false;
-  }
-  return result;
-}
-
-/** Compare permission fields between two snake_case permission-bearing objects. */
-export function arePermissionsDirty(
-  draft: Partial<Record<PermissionKey, boolean>>,
-  saved: Partial<Record<PermissionKey, boolean>>,
+/**
+ * Read one permission boolean, preferring camelCase (canonical AgentProfile)
+ * over snake_case (form wire keys) so toggles never lose to stale defaults.
+ */
+export function readPermissionValue(
+  profile: PermissionProfileInput,
+  key: PermissionKey,
+  permissionSettings: Record<string, PermissionSetting> = {},
 ): boolean {
+  const camelKey = CAMEL_BY_KEY[key];
+  const camelVal = profile[camelKey];
+  if (typeof camelVal === "boolean") return camelVal;
+  const snakeVal = profile[key];
+  if (typeof snakeVal === "boolean") return snakeVal;
+  return permissionSettings[key]?.default ?? false;
+}
+
+/** Normalized snake_case permission map for forms and API payloads. */
+export function profilePermissionValues(
+  profile: PermissionProfileInput,
+  permissionSettings: Record<string, PermissionSetting> = {},
+): Record<PermissionKey, boolean> {
+  const result = {} as Record<PermissionKey, boolean>;
   for (const key of PERMISSION_KEYS) {
-    if (draft[key] !== saved[key]) return true;
+    result[key] = readPermissionValue(profile, key, permissionSettings);
+  }
+  return result;
+}
+
+/** @deprecated Use profilePermissionValues — kept for call-site compatibility. */
+export function profileToPermissionsMap(
+  profile: PermissionProfileInput,
+  permissionSettings: Record<string, PermissionSetting>,
+): Record<PermissionKey, boolean> {
+  return profilePermissionValues(profile, permissionSettings);
+}
+
+/** Snake_case permission fields for create/update profile API bodies. */
+export function permissionsToProfilePatch(
+  profile: PermissionProfileInput,
+  permissionSettings: Record<string, PermissionSetting> = {},
+): Record<PermissionKey, boolean> {
+  return profilePermissionValues(profile, permissionSettings);
+}
+
+/** Canonical camelCase defaults for new AgentProfile / DraftProfile rows. */
+export function buildDefaultPermissions(permissionSettings: Record<string, PermissionSetting>): {
+  autoApprove: boolean;
+  allowIndexing: boolean;
+} {
+  const perms = profilePermissionValues({}, permissionSettings);
+  return {
+    autoApprove: perms.auto_approve,
+    allowIndexing: perms.allow_indexing,
+  };
+}
+
+/** Compare permission fields between two profile-shaped objects. */
+export function arePermissionsDirty(
+  draft: PermissionProfileInput,
+  saved: PermissionProfileInput,
+  permissionSettings: Record<string, PermissionSetting> = {},
+): boolean {
+  const draftPerms = profilePermissionValues(draft, permissionSettings);
+  const savedPerms = profilePermissionValues(saved, permissionSettings);
+  for (const key of PERMISSION_KEYS) {
+    if (draftPerms[key] !== savedPerms[key]) return true;
   }
   return false;
 }

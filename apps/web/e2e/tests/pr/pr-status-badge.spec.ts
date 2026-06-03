@@ -161,7 +161,9 @@ test.describe("PR status badge", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await expect(session.prTopbarButton()).toBeVisible({ timeout: 15_000 });
-    await expect(session.prTopbarButton()).toHaveAttribute("data-pr-ready-to-merge", "true");
+    await expect(session.prTopbarButton()).toHaveAttribute("data-pr-ready-to-merge", "true", {
+      timeout: 15_000,
+    });
   });
 
   /**

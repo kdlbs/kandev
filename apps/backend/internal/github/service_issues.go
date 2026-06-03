@@ -87,6 +87,13 @@ func (s *Service) ListAllIssueWatches(ctx context.Context) ([]*IssueWatch, error
 	return s.store.ListAllIssueWatches(ctx)
 }
 
+// ListEnabledIssueWatches returns the live (enabled = 1) subset. Used by
+// the profile-delete dependency check so self-healed (already-disabled)
+// watchers do not inflate the count and trigger spurious 409 confirmations.
+func (s *Service) ListEnabledIssueWatches(ctx context.Context) ([]*IssueWatch, error) {
+	return s.store.ListEnabledIssueWatches(ctx)
+}
+
 // UpdateIssueWatch updates an issue watch.
 //
 //nolint:dupl,cyclop // mirrors UpdateReviewWatch — different types, same structure; field-by-field nil-pointer apply
@@ -294,6 +301,12 @@ func (s *Service) AssignIssueWatchTaskID(ctx context.Context, watchID, repoOwner
 // ReleaseIssueWatchTask removes a reservation when task creation fails.
 func (s *Service) ReleaseIssueWatchTask(ctx context.Context, watchID, repoOwner, repoName string, issueNumber int) error {
 	return s.store.ReleaseIssueWatchTask(ctx, watchID, repoOwner, repoName, issueNumber)
+}
+
+// DisableIssueWatchWithError is invoked by the orchestrator's self-heal flow
+// when the watcher's bound agent profile has been soft-deleted.
+func (s *Service) DisableIssueWatchWithError(ctx context.Context, watchID, cause string) error {
+	return s.store.DisableIssueWatchWithError(ctx, watchID, cause)
 }
 
 // TriggerAllIssueChecks triggers all issue watches for a workspace.

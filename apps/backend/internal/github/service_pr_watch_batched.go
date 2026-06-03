@@ -2,7 +2,10 @@ package github
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -59,38 +62,160 @@ func (s *Service) SyncWatchesBatched(ctx context.Context, watches []*PRWatch) ([
 
 // fetchBatchedWatchStatuses runs the numbered- and branch-keyed GraphQL
 // queries and merges their results. Returns an error when either query
-// fails so the caller can fall back to per-watch checks.
+// fails so the caller can fall back to per-watch checks. Watches whose
+// (owner, repo) is already cached as missing are filtered out before
+// hitting GraphQL, and any newly-discovered missing repos in the
+// response are fed into the negative cache so subsequent polls
+// short-circuit before acquiring the gh throttle.
+//
+// The full fetch is gated by a service-level singleflight keyed by the
+// sorted ref set. Without it, a burst of concurrent SyncWatchesBatched
+// calls (poller racing the WS sync racing the workspace background
+// refresh) all hit GraphQL during the window before the first caller
+// seeds the negative cache — exactly the storm this change is trying to
+// calm. The shared-result map is read-only at the call sites (only
+// map lookups in applyBatched*), so it's safe to share.
+//
+// The upstream fetch detaches from the leader's cancellation via
+// derivedFetchContext so one caller (WS) disconnecting mid-flight
+// doesn't cascade context.Canceled to all co-waiters — same pattern as
+// GetPRFeedback / GetPRStatus. The leader's deadline is preserved so
+// the fetch can't outlive the request budget.
 func (s *Service) fetchBatchedWatchStatuses(
 	ctx context.Context, exec GraphQLExecutor, numbered, searching []*PRWatch,
 ) (map[string]*PRStatus, error) {
-	combined := make(map[string]*PRStatus, len(numbered)+len(searching))
-	if len(numbered) > 0 {
-		refs := make([]graphQLPRRef, 0, len(numbered))
-		for _, w := range numbered {
-			refs = append(refs, graphQLPRRef{Owner: w.Owner, Repo: w.Repo, Number: w.PRNumber})
+	key := batchedFetchSingleflightKey(numbered, searching)
+	fetchCtx, cancelFetch := derivedFetchContext(ctx)
+	defer cancelFetch()
+	v, err, _ := s.syncGroup.Do(key, func() (interface{}, error) {
+		// Snapshot the negative-cache generation BEFORE the batched
+		// fetch so an eviction (relink / clear) firing while the
+		// GraphQL call is in flight wins over the post-fetch
+		// markRepoAsMissing writes — see Service.markRepoAsMissing.
+		repoErrGen := s.repoErrorGenSnapshot()
+		combined := make(map[string]*PRStatus, len(numbered)+len(searching))
+		if err := s.fetchBatchedPRStatuses(fetchCtx, exec, numbered, combined, repoErrGen); err != nil {
+			return nil, err
 		}
-		out, err := runBatchedPRQuery(ctx, exec, refs)
-		if err != nil {
-			return nil, fmt.Errorf("batched PR query: %w", err)
+		if err := s.fetchBatchedBranchStatuses(fetchCtx, exec, searching, combined, repoErrGen); err != nil {
+			return nil, err
 		}
-		for k, v := range out {
-			combined[k] = v
-		}
+		return combined, nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	if len(searching) > 0 {
-		refs := make([]graphQLBranchRef, 0, len(searching))
-		for _, w := range searching {
-			refs = append(refs, graphQLBranchRef{Owner: w.Owner, Repo: w.Repo, Branch: w.Branch})
-		}
-		out, err := runBatchedBranchQuery(ctx, exec, refs)
-		if err != nil {
-			return nil, fmt.Errorf("batched branch query: %w", err)
-		}
-		for k, v := range out {
-			combined[k] = v
-		}
+	if v == nil {
+		return nil, nil
 	}
-	return combined, nil
+	return v.(map[string]*PRStatus), nil
+}
+
+// batchedFetchSingleflightKey builds a deterministic key from the sorted
+// ref tuples in (numbered, searching). Sorting ensures ordering doesn't
+// split equivalent calls into separate slots, and lowercasing matches
+// repoErrorCacheKey so the in-flight key is stable regardless of caller
+// casing (watches from the DB always have consistent casing in practice,
+// but it costs nothing to make the key insensitive). Distinct "n:"/"b:"
+// prefixes prevent a numbered ref colliding with a branch ref that
+// happens to render the same string.
+func batchedFetchSingleflightKey(numbered, searching []*PRWatch) string {
+	parts := make([]string, 0, len(numbered)+len(searching))
+	for _, w := range numbered {
+		parts = append(parts, fmt.Sprintf("n:%s/%s#%d",
+			strings.ToLower(w.Owner), strings.ToLower(w.Repo), w.PRNumber))
+	}
+	for _, w := range searching {
+		parts = append(parts, fmt.Sprintf("b:%s/%s@%s",
+			strings.ToLower(w.Owner), strings.ToLower(w.Repo), w.Branch))
+	}
+	sort.Strings(parts)
+	return "batched-fetch:" + strings.Join(parts, "|")
+}
+
+// fetchBatchedPRStatuses runs the numbered-watch (PR-number-keyed) batch.
+// Watches whose repo is in the negative cache are dropped before building
+// the GraphQL refs so the dead-repo storm doesn't burn gh throttle slots.
+// Missing repos surfaced by the response are negative-cached for the next
+// 10 minutes; partial results for the repos that did resolve are merged
+// into `combined`.
+func (s *Service) fetchBatchedPRStatuses(
+	ctx context.Context, exec GraphQLExecutor, numbered []*PRWatch, combined map[string]*PRStatus,
+	repoErrGen uint64,
+) error {
+	refs := make([]graphQLPRRef, 0, len(numbered))
+	for _, w := range numbered {
+		if s.isRepoCachedAsMissing(w.Owner, w.Repo) {
+			continue
+		}
+		refs = append(refs, graphQLPRRef{Owner: w.Owner, Repo: w.Repo, Number: w.PRNumber})
+	}
+	if len(refs) == 0 {
+		return nil
+	}
+	out, err := runBatchedPRQuery(ctx, exec, refs)
+	out, err = s.absorbMissingReposErr(out, err, repoErrGen)
+	if err != nil {
+		return fmt.Errorf("batched PR query: %w", err)
+	}
+	for k, v := range out {
+		combined[k] = v
+	}
+	return nil
+}
+
+// fetchBatchedBranchStatuses runs the branch-keyed batch with the same
+// negative-cache filter and missing-repo absorption as the numbered path.
+func (s *Service) fetchBatchedBranchStatuses(
+	ctx context.Context, exec GraphQLExecutor, searching []*PRWatch, combined map[string]*PRStatus,
+	repoErrGen uint64,
+) error {
+	refs := make([]graphQLBranchRef, 0, len(searching))
+	for _, w := range searching {
+		if s.isRepoCachedAsMissing(w.Owner, w.Repo) {
+			continue
+		}
+		refs = append(refs, graphQLBranchRef{Owner: w.Owner, Repo: w.Repo, Branch: w.Branch})
+	}
+	if len(refs) == 0 {
+		return nil
+	}
+	out, err := runBatchedBranchQuery(ctx, exec, refs)
+	out, err = s.absorbMissingReposErr(out, err, repoErrGen)
+	if err != nil {
+		return fmt.Errorf("batched branch query: %w", err)
+	}
+	for k, v := range out {
+		combined[k] = v
+	}
+	return nil
+}
+
+// absorbMissingReposErr extracts the negative-cacheable repos from a
+// runBatched* result and seeds the cache, then returns (partial,
+// remaining-err). When the error was PURELY missing-repo errors, the
+// partial decode is preserved and a nil error is returned so the caller
+// can use the resolved repos' data. When other errors were also
+// present, the inner error is returned unchanged so the caller falls
+// back to per-watch checks. `repoErrGen` is the negative-cache generation
+// snapshot taken BEFORE the fetch so a concurrent eviction wins.
+func (s *Service) absorbMissingReposErr(out map[string]*PRStatus, err error, repoErrGen uint64) (map[string]*PRStatus, error) {
+	if err == nil {
+		return out, nil
+	}
+	var missingErr *batchedMissingReposErr
+	if !errors.As(err, &missingErr) {
+		return nil, err
+	}
+	for _, r := range missingErr.Repos {
+		s.markRepoAsMissing(r.Owner, r.Repo, repoErrGen)
+		s.logger.Debug("repo not resolvable; negative-cached",
+			zap.String("owner", r.Owner), zap.String("repo", r.Repo))
+	}
+	if missingErr.Inner != nil {
+		return nil, missingErr.Inner
+	}
+	return out, nil
 }
 
 // applyBatchedNumberedWatch mirrors Poller.applyPRStatus on the service
@@ -98,6 +223,14 @@ func (s *Service) fetchBatchedWatchStatuses(
 func (s *Service) applyBatchedNumberedWatch(
 	ctx context.Context, w *PRWatch, statusByKey map[string]*PRStatus, now time.Time,
 ) PRWatchSyncResult {
+	// Repo is in the 10-min negative cache — the fetch path didn't include
+	// it in the GraphQL batch, so the apply path can't probe upstream either.
+	// Bump last_checked_at to suppress retry storms and surface SyncFailed
+	// so the WS handler can flag the result as permanent for the frontend.
+	if s.isRepoCachedAsMissing(w.Owner, w.Repo) {
+		_ = s.store.UpdatePRWatchTimestamps(ctx, w.ID, now, nil, "", "")
+		return PRWatchSyncResult{Watch: w, SyncFailed: true}
+	}
 	status, ok := statusByKey[prStatusCacheKey(w.Owner, w.Repo, w.PRNumber)]
 	if !ok || status == nil {
 		// Alias missing — best-effort liveness bump so we don't immediately re-probe.
@@ -135,6 +268,9 @@ func (s *Service) applyBatchedSearchingWatch(
 	// paths, so hoist the single call above the branch to make that
 	// invariant obvious.
 	_ = s.store.UpdatePRWatchTimestamps(ctx, w.ID, now, nil, "", "")
+	if s.isRepoCachedAsMissing(w.Owner, w.Repo) {
+		return PRWatchSyncResult{Watch: w, SyncFailed: true}
+	}
 	status, ok := statusByKey[graphqlBranchKey(w.Owner, w.Repo, w.Branch)]
 	if !ok || status == nil || status.PR == nil {
 		return PRWatchSyncResult{Watch: w}

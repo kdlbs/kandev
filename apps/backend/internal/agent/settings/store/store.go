@@ -22,6 +22,11 @@ type Repository interface {
 	UpdateAgentProfile(ctx context.Context, profile *models.AgentProfile) error
 	DeleteAgentProfile(ctx context.Context, id string) error
 	GetAgentProfile(ctx context.Context, id string) (*models.AgentProfile, error)
+	// GetAgentProfileIncludingDeleted returns the row even when soft-deleted.
+	// Check profile.DeletedAt != nil to detect orphaned references (watchers,
+	// automations) pointing at removed profiles. ErrAgentProfileDeleted is
+	// only used by callers of ProfileResolver, which wraps this method.
+	GetAgentProfileIncludingDeleted(ctx context.Context, id string) (*models.AgentProfile, error)
 	ListAgentProfiles(ctx context.Context, agentID string) ([]*models.AgentProfile, error)
 
 	Close() error

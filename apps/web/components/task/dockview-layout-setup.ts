@@ -15,7 +15,7 @@ import { setEnvLayout, setGlobalSidebarWidth } from "@/lib/local-storage";
 import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
 import { stopVscode } from "@/lib/api/domains/vscode-api";
 import { stopUserShell } from "@/lib/api/domains/user-shell-api";
-import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { snapshotColumnWidths, formatWidthsSnapshot } from "@/lib/state/dockview-widths-debug";
 import { enforcePinnedTargets, setSashDragging } from "@/lib/state/dockview-pinned-enforce";
 
@@ -133,7 +133,7 @@ export function setupSashDragCapToggle(api: DockviewReadyEvent["api"]): () => vo
         store.setPinnedWidth("sidebar", sidebarW);
       }
       if (store.rightPanelsVisible) setPinnedTarget("right", sv.getViewSize(sv.length - 1));
-      if (IS_DEBUG) {
+      if (isDebug()) {
         debugWidths(`sash-drag-end ${formatWidthsSnapshot(snapshotColumnWidths(api))}`);
       }
     });
@@ -175,7 +175,7 @@ export function setupContainerResizeSync(api: DockviewReadyEvent["api"]): () => 
     const h = parent.clientHeight;
     if (w <= 0 || h <= 0) return;
     if (w === api.width && h === api.height) return;
-    if (IS_DEBUG) {
+    if (isDebug()) {
       debugWidths(
         `container-resize prev=${api.width}x${api.height} next=${w}x${h} ` +
           `pre=${formatWidthsSnapshot(snapshotColumnWidths(api))}`,

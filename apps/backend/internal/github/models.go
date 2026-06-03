@@ -261,8 +261,12 @@ type ReviewWatch struct {
 	PollIntervalSeconds int          `json:"poll_interval_seconds" db:"poll_interval_seconds"`
 	CleanupPolicy       string       `json:"cleanup_policy" db:"cleanup_policy"`
 	LastPolledAt        *time.Time   `json:"last_polled_at,omitempty" db:"last_polled_at"`
-	CreatedAt           time.Time    `json:"created_at" db:"created_at"`
-	UpdatedAt           time.Time    `json:"updated_at" db:"updated_at"`
+	// LastError / LastErrorAt are stamped when the dispatch pipeline self-
+	// heals the watcher (e.g. the bound agent profile was soft-deleted).
+	LastError   string     `json:"last_error,omitempty" db:"last_error"`
+	LastErrorAt *time.Time `json:"last_error_at,omitempty" db:"last_error_at"`
+	CreatedAt   time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at" db:"updated_at"`
 }
 
 // ReviewPRTask records which PRs have already had tasks created (deduplication).
@@ -485,8 +489,12 @@ type IssueWatch struct {
 	PollIntervalSeconds int          `json:"poll_interval_seconds" db:"poll_interval_seconds"`
 	CleanupPolicy       string       `json:"cleanup_policy" db:"cleanup_policy"`
 	LastPolledAt        *time.Time   `json:"last_polled_at,omitempty" db:"last_polled_at"`
-	CreatedAt           time.Time    `json:"created_at" db:"created_at"`
-	UpdatedAt           time.Time    `json:"updated_at" db:"updated_at"`
+	// LastError / LastErrorAt are stamped when the dispatch pipeline self-
+	// heals the watcher (e.g. the bound agent profile was soft-deleted).
+	LastError   string     `json:"last_error,omitempty" db:"last_error"`
+	LastErrorAt *time.Time `json:"last_error_at,omitempty" db:"last_error_at"`
+	CreatedAt   time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at" db:"updated_at"`
 }
 
 // IssueWatchTask records which issues have already had tasks created (deduplication).
