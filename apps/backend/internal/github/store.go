@@ -744,6 +744,21 @@ func (s *Store) ListTaskPRsByWorkspaceID(ctx context.Context, workspaceID string
 	return groupTaskPRsByTask(prs), nil
 }
 
+// ListTaskIDsByPRNumber returns the IDs of tasks in a workspace that have a PR
+// association with the given PR number. Workspace-scoped via the JOIN on tasks
+// so a PR number shared across workspaces never leaks results. A task with
+// multiple PR rows for the same number (multi-repo) is returned once.
+func (s *Store) ListTaskIDsByPRNumber(ctx context.Context, workspaceID string, prNumber int) ([]string, error) {
+	var ids []string
+	if err := s.ro.SelectContext(ctx, &ids,
+		`SELECT DISTINCT gtp.task_id FROM github_task_prs gtp
+		 INNER JOIN tasks t ON gtp.task_id = t.id
+		 WHERE t.workspace_id = ? AND gtp.pr_number = ?`, workspaceID, prNumber); err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
 func groupTaskPRsByTask(prs []TaskPR) map[string][]*TaskPR {
 	result := make(map[string][]*TaskPR)
 	for i := range prs {

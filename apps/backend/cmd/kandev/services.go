@@ -104,6 +104,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	// inside their own container).
 	if githubSvc != nil {
 		taskSvc.SetRemoteBranchLister(githubBranchListerAdapter{svc: githubSvc})
+		taskSvc.SetPRTaskResolver(githubSvc)
 	}
 
 	// Initialize Automation service
