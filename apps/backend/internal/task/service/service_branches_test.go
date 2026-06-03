@@ -706,7 +706,7 @@ func seedWorktreeTaskEnv(t *testing.T, repo interface {
 // orphan rows behind — neither task_repositories nor a freshly-created
 // Repository row.
 func TestAddBranchToTask_RejectsProviderURLWithUnresolvableBaseBranch(t *testing.T) {
-	svc, _, repo := createTestService(t)
+	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()
 
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "WS"})
@@ -749,6 +749,22 @@ func TestAddBranchToTask_RejectsProviderURLWithUnresolvableBaseBranch(t *testing
 	afterRows, _ := repo.ListTaskRepositories(ctx, task.ID)
 	if len(afterRows) != len(beforeRows) {
 		t.Errorf("expected no task_repositories row insert; before=%d after=%d", len(beforeRows), len(afterRows))
+	}
+
+	// Repository.created + repository.deleted must be symmetric on the
+	// rollback path so WS subscribers / frontend caches don't keep a
+	// phantom row after the resolve-then-fail sequence.
+	var created, deleted int
+	for _, evt := range eventBus.GetPublishedEvents() {
+		switch evt.Type {
+		case events.RepositoryCreated:
+			created++
+		case events.RepositoryDeleted:
+			deleted++
+		}
+	}
+	if created != deleted {
+		t.Errorf("repository create/delete events not symmetric: created=%d deleted=%d", created, deleted)
 	}
 }
 

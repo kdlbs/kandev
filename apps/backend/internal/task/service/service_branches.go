@@ -488,7 +488,12 @@ func (s *Service) resolveBranchAddRepoRef(
 	}
 	createdID := resolvedID
 	cleanup := func() {
-		if delErr := s.repoEntities.DeleteRepository(ctx, createdID); delErr != nil {
+		// Route through Service.DeleteRepository so the matching
+		// repository.deleted event fires; the create path published
+		// repository.created in CreateRepository, and skipping the
+		// delete event would leave WS subscribers / frontend caches
+		// holding a phantom row.
+		if delErr := s.DeleteRepository(ctx, createdID); delErr != nil {
 			s.logger.Warn("AddBranchToTask: failed to roll back created repository",
 				zap.String("repository_id", createdID),
 				zap.Error(delErr))
