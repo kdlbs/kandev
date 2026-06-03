@@ -207,7 +207,14 @@ func (r *CreateRequest) Validate() error {
 		return ErrRepoNotGit
 	}
 	if r.BaseBranch == "" {
-		return ErrInvalidBaseBranch
+		// Defence-in-depth: prefer the explicit FallbackBaseBranch (typically
+		// the repository's default_branch carried by the caller) over an
+		// outright rejection. The manager's branchExists check still verifies
+		// the resulting ref before any git work runs.
+		if r.FallbackBaseBranch == "" {
+			return ErrInvalidBaseBranch
+		}
+		r.BaseBranch = r.FallbackBaseBranch
 	}
 	return nil
 }
