@@ -756,7 +756,7 @@ func (h *Handlers) handleAddBranchToTask(ctx context.Context, msg *ws.Message) (
 	// mistake.
 	if locatorCount := boolCount(req.RepositoryID != "", req.LocalPath != "", req.GitHubURL != ""); locatorCount > 1 {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
-			"pass at most one of repository_id, repository_url, local_path", nil)
+			"pass at most one of repository_id, github_url, local_path", nil)
 	}
 	// repository_id / local_path / github_url are all optional: the service
 	// defaults to the task's only repository (or its primary row) when none
@@ -823,11 +823,14 @@ func classifyAddBranchError(err error) string {
 		strings.Contains(msg, "only supported on the worktree executor"),
 		strings.Contains(msg, "task_id is required"):
 		return ws.ErrorCodeValidation
-	case strings.HasPrefix(msg, "resolve repository: "):
-		// All ResolveRepositoryRef failures are user-fixable input mistakes
-		// (malformed URL, unknown local_path, cross-workspace repository_id).
-		// The wrapped message preserves the specific reason; only the code
-		// changes from InternalError to Validation.
+	case strings.Contains(msg, "GitHub URL"),
+		strings.Contains(msg, "github.com/owner/repo"),
+		strings.Contains(msg, "does not belong to workspace"):
+		// User-fixable failures from ResolveRepositoryRef / parseGitHubRepoURL:
+		// malformed URL, non-github host, cross-workspace repository_id.
+		// Narrow patterns (not a broad "resolve repository:" prefix) so
+		// downstream DB / system errors from CreateRepository / ListRepositories
+		// still classify as InternalError.
 		return ws.ErrorCodeValidation
 	}
 	return ws.ErrorCodeInternalError
