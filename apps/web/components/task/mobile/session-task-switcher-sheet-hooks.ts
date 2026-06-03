@@ -505,12 +505,13 @@ export function useSheetActions(workspaceId: string | null, onOpenChange: (open:
       const state = store.getState();
       const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
       if (task?.primarySessionId) {
-        const targetSessionId = resolvePreferredSessionId(
+        const targetSessionId = resolvePreferredSessionId({
           taskId,
-          task.primarySessionId,
-          state.tasks.lastSessionByTaskId,
-          state.environmentIdBySessionId,
-        );
+          primarySessionId: task.primarySessionId,
+          lastSessionByTaskId: state.tasks.lastSessionByTaskId,
+          environmentIdBySessionId: state.environmentIdBySessionId,
+          taskSessionsById: state.taskSessions.items,
+        });
         setActiveSession(taskId, targetSessionId);
         loadTaskSessionsForTask(taskId);
         replaceTaskUrl(taskId);

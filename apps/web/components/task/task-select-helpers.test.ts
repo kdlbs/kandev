@@ -185,6 +185,9 @@ describe("buildSwitchToSession", () => {
  * re-entry, as long as the session still has a known environment.
  */
 describe("selectTaskWithLayout — last-selected session preference", () => {
+  const TASK_ID = "task-A";
+  const PRIMARY = "sess-primary";
+
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -193,7 +196,12 @@ describe("selectTaskWithLayout — last-selected session preference", () => {
     activeSessionId: string | null;
     envIds: Record<string, string>;
     lastSessionByTaskId?: Record<string, string>;
+    sessionTaskIds?: Record<string, string>;
   }): StoreApi<AppState> {
+    const items: Record<string, { id: string; task_id: string }> = {};
+    for (const [sid, tid] of Object.entries(args.sessionTaskIds ?? {})) {
+      items[sid] = { id: sid, task_id: tid };
+    }
     const state = {
       tasks: {
         activeSessionId: args.activeSessionId,
@@ -201,6 +209,7 @@ describe("selectTaskWithLayout — last-selected session preference", () => {
       },
       taskPRs: { byTaskId: {} as Record<string, unknown[]> },
       environmentIdBySessionId: args.envIds,
+      taskSessions: { items },
     };
     return {
       getState: () => state as unknown as AppState,
@@ -209,21 +218,8 @@ describe("selectTaskWithLayout — last-selected session preference", () => {
     } as unknown as StoreApi<AppState>;
   }
 
-  it("prefers the user's last-selected session over primarySessionId on re-entry", () => {
-    const TASK_ID = "task-A";
-    const PRIMARY = "sess-primary";
-    const LAST = "sess-gpt";
-    const store = makeKanbanStore({
-      activeSessionId: "sess-other-task",
-      envIds: {
-        "sess-other-task": "env-B",
-        [PRIMARY]: "env-A",
-        [LAST]: "env-A",
-      },
-      lastSessionByTaskId: { [TASK_ID]: LAST },
-    });
+  function runSelect(store: StoreApi<AppState>) {
     const switchToSession = vi.fn();
-
     selectTaskWithLayout({
       taskId: TASK_ID,
       task: { primarySessionId: PRIMARY },
@@ -233,53 +229,65 @@ describe("selectTaskWithLayout — last-selected session preference", () => {
       setActiveTask: vi.fn(),
       setPreparingTaskId: vi.fn(),
     });
+    return switchToSession;
+  }
+
+  it("prefers the user's last-selected session over primarySessionId on re-entry", () => {
+    const LAST = "sess-gpt";
+    const switchToSession = runSelect(
+      makeKanbanStore({
+        activeSessionId: "sess-other-task",
+        envIds: { "sess-other-task": "env-B", [PRIMARY]: "env-A", [LAST]: "env-A" },
+        lastSessionByTaskId: { [TASK_ID]: LAST },
+      }),
+    );
 
     expect(switchToSession).toHaveBeenCalledWith(TASK_ID, LAST, "sess-other-task");
   });
 
   it("falls back to primarySessionId when the remembered session has no env mapping", () => {
-    const TASK_ID = "task-A";
-    const PRIMARY = "sess-primary";
-    const LAST = "sess-stale";
-    const store = makeKanbanStore({
-      activeSessionId: null,
-      envIds: { [PRIMARY]: "env-A" },
-      lastSessionByTaskId: { [TASK_ID]: LAST },
-    });
-    const switchToSession = vi.fn();
-
-    selectTaskWithLayout({
-      taskId: TASK_ID,
-      task: { primarySessionId: PRIMARY },
-      store,
-      switchToSession,
-      loadTaskSessionsForTask: vi.fn(async () => []),
-      setActiveTask: vi.fn(),
-      setPreparingTaskId: vi.fn(),
-    });
+    const switchToSession = runSelect(
+      makeKanbanStore({
+        activeSessionId: null,
+        envIds: { [PRIMARY]: "env-A" },
+        lastSessionByTaskId: { [TASK_ID]: "sess-stale" },
+      }),
+    );
 
     expect(switchToSession).toHaveBeenCalledWith(TASK_ID, PRIMARY, null);
   });
 
   it("uses primarySessionId when no last-selected session is recorded for the task", () => {
-    const TASK_ID = "task-A";
-    const PRIMARY = "sess-primary";
-    const store = makeKanbanStore({
-      activeSessionId: null,
-      envIds: { [PRIMARY]: "env-A" },
-      lastSessionByTaskId: {},
-    });
-    const switchToSession = vi.fn();
+    const switchToSession = runSelect(
+      makeKanbanStore({
+        activeSessionId: null,
+        envIds: { [PRIMARY]: "env-A" },
+        lastSessionByTaskId: {},
+      }),
+    );
 
-    selectTaskWithLayout({
-      taskId: TASK_ID,
-      task: { primarySessionId: PRIMARY },
-      store,
-      switchToSession,
-      loadTaskSessionsForTask: vi.fn(async () => []),
-      setActiveTask: vi.fn(),
-      setPreparingTaskId: vi.fn(),
-    });
+    expect(switchToSession).toHaveBeenCalledWith(TASK_ID, PRIMARY, null);
+  });
+
+  /**
+   * Regression for a layout-leak observed when creating a new task: the
+   * dockview tab-sync listener can fire `setActiveSession(newTaskId, oldSid)`
+   * during a task switch (stale panel still live), which writes
+   * `lastSessionByTaskId[newTaskId] = oldSid` even though `oldSid` belongs to
+   * a different task. Without this guard, re-entering the new task would
+   * resolve to that cross-task session, restoring the previous task's
+   * env-scoped panels (files/changes) instead of the new task's primary.
+   */
+  it("falls back to primarySessionId when the remembered session belongs to a different task", () => {
+    const POISONED = "sess-belongs-to-task-B";
+    const switchToSession = runSelect(
+      makeKanbanStore({
+        activeSessionId: null,
+        envIds: { [PRIMARY]: "env-A", [POISONED]: "env-B" },
+        lastSessionByTaskId: { [TASK_ID]: POISONED },
+        sessionTaskIds: { [POISONED]: "task-B", [PRIMARY]: TASK_ID },
+      }),
+    );
 
     expect(switchToSession).toHaveBeenCalledWith(TASK_ID, PRIMARY, null);
   });

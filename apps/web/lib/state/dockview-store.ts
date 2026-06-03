@@ -994,6 +994,13 @@ export function performLayoutSwitch(
  * that has no session (and prepare failed to launch one). Without this the
  * dockview keeps the outgoing env's panels live but disconnected from any
  * active session, and the corrupted state can be persisted on the next save.
+ *
+ * Flipping `isRestoringLayout` around `buildDefaultLayout(api)` mirrors what
+ * `performEnvSwitch` does and suppresses `setupSessionTabSync` from firing
+ * during the teardown. Without this, dockview can synchronously activate a
+ * stale `session:<sid>` panel (still mounted from the outgoing env) while we
+ * rebuild defaults — poisoning `lastSessionByTaskId[newTaskId]` with the
+ * previous task's session id.
  */
 export function releaseLayoutToDefault(oldEnvId: string | null): void {
   const { api, currentLayoutEnvId, preMaximizeLayout, buildDefaultLayout, pinnedWidths } =
@@ -1005,6 +1012,11 @@ export function releaseLayoutToDefault(oldEnvId: string | null): void {
     preMaximizeLayout: null,
     maximizedGroupId: null,
     currentLayoutEnvId: null,
+    isRestoringLayout: true,
   });
-  buildDefaultLayout(api);
+  try {
+    buildDefaultLayout(api);
+  } finally {
+    useDockviewStore.setState({ isRestoringLayout: false });
+  }
 }

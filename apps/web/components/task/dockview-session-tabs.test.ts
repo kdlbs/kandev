@@ -1,6 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
 import type { DockviewApi } from "dockview-react";
-import { findSessionAnchorGroupId, reconcileRemovedSessionPanels } from "./dockview-session-tabs";
+import type { TaskSession } from "@/lib/types/http";
+import {
+  findSessionAnchorGroupId,
+  reconcileRemovedSessionPanels,
+  resolveSessionTabSyncTarget,
+} from "./dockview-session-tabs";
 
 type FakePanel = {
   id: string;
@@ -184,5 +189,127 @@ describe("findSessionAnchorGroupId", () => {
     const api = makeApiWithPanels([]);
 
     expect(findSessionAnchorGroupId(api)).toBeNull();
+  });
+});
+
+describe("resolveSessionTabSyncTarget", () => {
+  function makeSession(id: string, taskId: string): TaskSession {
+    return { id, task_id: taskId } as unknown as TaskSession;
+  }
+
+  it("returns the (activeTaskId, sid) pair for a session that belongs to the active task", () => {
+    const target = resolveSessionTabSyncTarget({
+      panelId: "session:s-new",
+      activeTaskId: "task-A",
+      activeSessionId: "s-old",
+      taskSessionsById: { "s-new": makeSession("s-new", "task-A") },
+      environmentIdBySessionId: { "s-new": "env-A" },
+    });
+
+    expect(target).toEqual({ taskId: "task-A", sessionId: "s-new" });
+  });
+
+  it("returns null for non-session panels (sidebar, files, terminal, ...)", () => {
+    for (const panelId of ["sidebar", "files", "changes", "terminal:default", "pr-detail"]) {
+      expect(
+        resolveSessionTabSyncTarget({
+          panelId,
+          activeTaskId: "task-A",
+          activeSessionId: null,
+          taskSessionsById: {},
+          environmentIdBySessionId: {},
+        }),
+      ).toBeNull();
+    }
+  });
+
+  it("returns null when the activated session matches activeSessionId (no-op)", () => {
+    const target = resolveSessionTabSyncTarget({
+      panelId: "session:s-current",
+      activeTaskId: "task-A",
+      activeSessionId: "s-current",
+      taskSessionsById: { "s-current": makeSession("s-current", "task-A") },
+      environmentIdBySessionId: { "s-current": "env-A" },
+    });
+
+    expect(target).toBeNull();
+  });
+
+  /**
+   * Regression for a layout-leak observed when creating a new task: during
+   * the task switch dockview can briefly fire `onDidActivePanelChange` for a
+   * stale `session:<oldSid>` panel that still belongs to the previous task.
+   * If we wrote `setActiveSession(newTaskId, oldSid)`, that would poison
+   * `lastSessionByTaskId[newTaskId]` and the next re-entry to the new task
+   * would resolve to the cross-task session, restoring the wrong layout
+   * (e.g. the previous task's files/changes panels).
+   */
+  it("returns null when the activated session belongs to a different task than activeTaskId", () => {
+    const target = resolveSessionTabSyncTarget({
+      panelId: "session:s-belongs-to-B",
+      activeTaskId: "task-A",
+      activeSessionId: null,
+      taskSessionsById: { "s-belongs-to-B": makeSession("s-belongs-to-B", "task-B") },
+      environmentIdBySessionId: { "s-belongs-to-B": "env-B" },
+    });
+
+    expect(target).toBeNull();
+  });
+
+  it("accepts a session that has an env mapping but isn't yet hydrated into taskSessions.items", () => {
+    // The listener can fire before `session.state_changed` lands the new
+    // session in the items map. The env mapping is what guarantees the session
+    // exists at all — once that's present we trust the active task.
+    const target = resolveSessionTabSyncTarget({
+      panelId: "session:s-pending-hydration",
+      activeTaskId: "task-A",
+      activeSessionId: null,
+      taskSessionsById: {},
+      environmentIdBySessionId: { "s-pending-hydration": "env-A" },
+    });
+
+    expect(target).toEqual({ taskId: "task-A", sessionId: "s-pending-hydration" });
+  });
+
+  /**
+   * Regression for a one-frame UI glitch: `removeTaskSession` clears
+   * `taskSessions.items[sid]` and `environmentIdBySessionId[sid]` atomically.
+   * A dying panel firing activation between the clear and unmount must not
+   * write `activeSessionId = <deletedSid>` — the env-mapping gate catches it.
+   */
+  it("returns null when the activated session has no env mapping (deleted or stale)", () => {
+    const target = resolveSessionTabSyncTarget({
+      panelId: "session:s-deleted",
+      activeTaskId: "task-A",
+      activeSessionId: null,
+      taskSessionsById: {},
+      environmentIdBySessionId: {},
+    });
+
+    expect(target).toBeNull();
+  });
+
+  it("returns null when there is no active task", () => {
+    const target = resolveSessionTabSyncTarget({
+      panelId: "session:s",
+      activeTaskId: null,
+      activeSessionId: null,
+      taskSessionsById: {},
+      environmentIdBySessionId: { s: "env-A" },
+    });
+
+    expect(target).toBeNull();
+  });
+
+  it("returns null for a malformed session:<empty> panel id", () => {
+    const target = resolveSessionTabSyncTarget({
+      panelId: "session:",
+      activeTaskId: "task-A",
+      activeSessionId: null,
+      taskSessionsById: {},
+      environmentIdBySessionId: {},
+    });
+
+    expect(target).toBeNull();
   });
 });

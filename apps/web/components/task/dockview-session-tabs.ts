@@ -8,8 +8,50 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { wasPRPanelOffered, markPRPanelOffered } from "@/lib/local-storage";
 import { sessionId as toSessionId } from "@/lib/types/ids";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
+import type { TaskSession } from "@/lib/types/http";
 
 const debug = createDebugLogger("dockview:session-tabs");
+
+/**
+ * Decide whether `onDidActivePanelChange` should write `setActiveSession`.
+ *
+ * The activated session must belong to the currently-active task. During a
+ * task switch dockview can briefly fire activation for a stale `session:<sid>`
+ * panel that still belongs to the previous task (panels are torn down async).
+ * Writing it would poison `lastSessionByTaskId[newTaskId]` with a session from
+ * a different task, which the next task-re-entry then prefers over the
+ * primary session, restoring the wrong layout.
+ *
+ * Two ownership gates:
+ * 1. Reject when the session is hydrated and known to belong to a different
+ *    task (the primary leak path).
+ * 2. Reject when the session has no `environmentIdBySessionId` entry. The
+ *    session slice clears `taskSessions.items[sid]` and
+ *    `environmentIdBySessionId[sid]` together on `removeTaskSession`, so a
+ *    missing env mapping means the session has been deleted or never existed.
+ *    Writing `activeSessionId = sid` in that window briefly points every
+ *    activeSessionId-consumer (chat / file editor / shell / pr-detail / ...)
+ *    at a dead session.
+ */
+export function resolveSessionTabSyncTarget(args: {
+  panelId: string;
+  activeTaskId: string | null;
+  activeSessionId: string | null;
+  taskSessionsById: Record<string, TaskSession>;
+  environmentIdBySessionId: Record<string, string>;
+}): { taskId: string; sessionId: string } | null {
+  const { panelId, activeTaskId, activeSessionId, taskSessionsById, environmentIdBySessionId } =
+    args;
+  if (!panelId.startsWith("session:")) return null;
+  const sid = panelId.slice("session:".length);
+  if (!sid) return null;
+  if (sid === activeSessionId) return null;
+  if (!activeTaskId) return null;
+  if (!environmentIdBySessionId[sid]) return null;
+  const sessionTaskId = taskSessionsById[sid]?.task_id;
+  if (sessionTaskId && sessionTaskId !== activeTaskId) return null;
+  return { taskId: activeTaskId, sessionId: sid };
+}
 
 /**
  * Sync `activeSessionId` in the store when the user clicks a session tab.
@@ -31,17 +73,30 @@ export function setupSessionTabSync(api: DockviewReadyEvent["api"], appStore: St
       });
     }
     if (isRestoring) return;
-    if (!panel.id.startsWith("session:")) return;
-    const sid = panel.id.slice("session:".length);
-    if (sid && sid !== appStore.getState().tasks.activeSessionId) {
-      const taskId = appStore.getState().tasks.activeTaskId;
-      if (taskId) {
-        if (isDebug()) {
-          debug("setupSessionTabSync: setActiveSession", { taskId, newSessionId: sid });
-        }
-        appStore.getState().setActiveSession(taskId, sid);
+    const state = appStore.getState();
+    const target = resolveSessionTabSyncTarget({
+      panelId: panel.id,
+      activeTaskId: state.tasks.activeTaskId,
+      activeSessionId: state.tasks.activeSessionId,
+      taskSessionsById: state.taskSessions.items,
+      environmentIdBySessionId: state.environmentIdBySessionId,
+    });
+    if (!target) {
+      if (isDebug() && panel.id.startsWith("session:")) {
+        debug("setupSessionTabSync: skip (stale or cross-task panel)", {
+          panelId: panel.id,
+          activeTaskId: state.tasks.activeTaskId,
+        });
       }
+      return;
     }
+    if (isDebug()) {
+      debug("setupSessionTabSync: setActiveSession", {
+        taskId: target.taskId,
+        newSessionId: target.sessionId,
+      });
+    }
+    state.setActiveSession(target.taskId, target.sessionId);
   });
 }
 
