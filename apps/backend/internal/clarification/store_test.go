@@ -372,28 +372,23 @@ func TestCreateRequest_NoDedup_DifferentQuestions(t *testing.T) {
 	}
 }
 
-// testStore wraps Store so WaitForResponse can signal that it has passed the
-// initial lookup and is about to block. This eliminates the race where
-// Respond fires before a late goroutine even enters WaitForResponse.
-type testStore struct {
-	*Store
-	entered chan string
-}
-
-func (ts *testStore) WaitForResponse(ctx context.Context, id string) (*Response, error) {
-	ts.entered <- id
-	return ts.Store.WaitForResponse(ctx, id)
-}
-
+// TestWaitForResponse_Broadcast_MultipleWaiters verifies that close(done) in
+// Respond unblocks every parked waiter. The onWaitEntered hook lets the test
+// observe each goroutine after it has captured a *PendingClarification pointer
+// but before it parks on the select, so Respond can fire only once both
+// waiters are guaranteed to see the broadcast. Signalling before the lookup
+// (the previous shape) raced with the first-reader-deletes path inside
+// WaitForResponse and was flaky under the Linux scheduler in CI.
 func TestWaitForResponse_Broadcast_MultipleWaiters(t *testing.T) {
 	s := NewStore(time.Minute)
-	ts := &testStore{Store: s, entered: make(chan string, 2)}
+	entered := make(chan string, 2)
+	s.onWaitEntered = func(id string) { entered <- id }
 	id, _ := s.CreateRequest(&Request{SessionID: "s1", Questions: []Question{{Prompt: "test?", Options: []Option{{ID: "o1", Label: "A"}}}}})
 
 	done := make(chan *Response, 2)
 	for i := 0; i < 2; i++ {
 		go func() {
-			resp, err := ts.WaitForResponse(context.Background(), id)
+			resp, err := s.WaitForResponse(context.Background(), id)
 			if err != nil {
 				done <- nil
 				return
@@ -401,8 +396,8 @@ func TestWaitForResponse_Broadcast_MultipleWaiters(t *testing.T) {
 			done <- resp
 		}()
 	}
-	<-ts.entered
-	<-ts.entered
+	<-entered
+	<-entered
 
 	if err := s.Respond(id, &Response{Answers: []Answer{{CustomText: "hello"}}}); err != nil {
 		t.Fatalf("unexpected respond error: %v", err)

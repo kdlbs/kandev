@@ -23,6 +23,12 @@ type Store struct {
 	mu      sync.RWMutex
 	pending map[string]*PendingClarification
 	timeout time.Duration
+
+	// onWaitEntered, if non-nil, is invoked inside WaitForResponse after the
+	// initial pending lookup and before the select blocks. Tests use it to
+	// coordinate multi-waiter scenarios deterministically; always nil in
+	// production.
+	onWaitEntered func(pendingID string)
 }
 
 // NewStore creates a new clarification store.
@@ -89,7 +95,12 @@ func (s *Store) GetRequest(pendingID string) (*Request, bool) {
 func (s *Store) WaitForResponse(ctx context.Context, pendingID string) (*Response, error) {
 	s.mu.RLock()
 	pending, ok := s.pending[pendingID]
+	hook := s.onWaitEntered
 	s.mu.RUnlock()
+
+	if hook != nil {
+		hook(pendingID)
+	}
 
 	if !ok {
 		return nil, fmt.Errorf("clarification request not found: %s", pendingID)
