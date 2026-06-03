@@ -103,9 +103,6 @@ func (s *Service) AddBranchToTask(ctx context.Context, req AddBranchToTaskReques
 		return nil, fmt.Errorf("create task repository: %w", err)
 	}
 
-	// Publish task.updated so the kanban / sidebar re-render with the new row.
-	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
-
 	if err := s.materializeBranch(ctx, req.TaskID, taskRepo.ID); err != nil {
 		// Roll back the task_repositories row so a failed materialize doesn't
 		// leave a dangling association the user can't see on disk. Pre-launch
@@ -119,6 +116,12 @@ func (s *Service) AddBranchToTask(ctx context.Context, req AddBranchToTaskReques
 		cleanupOrphanRepo()
 		return nil, err
 	}
+
+	// Publish task.updated only after the row is durable AND the worktree
+	// materialized. Emitting before materialize would push a phantom row to
+	// WS clients on the rollback path; emitting after keeps event truthiness
+	// aligned with persisted state.
+	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
 	return taskRepo, nil
 }
 

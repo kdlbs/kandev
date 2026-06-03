@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -648,17 +649,17 @@ func TestCreateTask_RejectsSameRepoSameBranch(t *testing.T) {
 // preset branch (which may be empty to simulate probe failure) and records
 // the call so tests can assert it ran.
 type stubProber struct {
-	branch     string
-	err        error
-	calls      int
-	lastOwner  string
-	lastName   string
-	lastProvid string
+	branch          string
+	err             error
+	calls           int
+	lastProviderArg string
+	lastOwner       string
+	lastName        string
 }
 
 func (p *stubProber) ProbeDefaultBranch(_ context.Context, provider, owner, name string) (string, error) {
 	p.calls++
-	p.lastProvid = provider
+	p.lastProviderArg = provider
 	p.lastOwner = owner
 	p.lastName = name
 	return p.branch, p.err
@@ -790,7 +791,7 @@ func TestAddBranchToTask_ProviderURLResolvesDefaultBranchAndPersists(t *testing.
 	if prober.calls != 1 {
 		t.Errorf("expected probe to run once, got %d calls", prober.calls)
 	}
-	if prober.lastProvid != "github" || prober.lastOwner != "acme" || prober.lastName != "widgets" {
+	if prober.lastProviderArg != "github" || prober.lastOwner != "acme" || prober.lastName != "widgets" {
 		t.Errorf("unexpected probe args: %+v", prober)
 	}
 	if added.BaseBranch != "main" {
@@ -811,9 +812,11 @@ func TestAddBranchToTask_ProviderURLResolvesDefaultBranchAndPersists(t *testing.
 // TestAddBranchToTask_MaterializeFailureRollsBackOnLiveTask covers the
 // materialize-failure path on an already-launched worktree task: the
 // task_repositories row must be deleted and the error must propagate to the
-// caller rather than being swallowed.
+// caller rather than being swallowed. Also pins that no task.updated event
+// is published on the rollback path — emitting one would push a phantom row
+// to WS clients and require a second event to undo it.
 func TestAddBranchToTask_MaterializeFailureRollsBackOnLiveTask(t *testing.T) {
-	svc, _, repo := createTestService(t)
+	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()
 
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "WS"})
@@ -837,6 +840,7 @@ func TestAddBranchToTask_MaterializeFailureRollsBackOnLiveTask(t *testing.T) {
 	svc.SetBranchMaterializer(mat)
 
 	beforeRows, _ := repo.ListTaskRepositories(ctx, task.ID)
+	eventBus.ClearEvents()
 	_, err = svc.AddBranchToTask(ctx, AddBranchToTaskRequest{
 		TaskID:         task.ID,
 		RepositoryID:   "repo-1",
@@ -855,6 +859,11 @@ func TestAddBranchToTask_MaterializeFailureRollsBackOnLiveTask(t *testing.T) {
 	afterRows, _ := repo.ListTaskRepositories(ctx, task.ID)
 	if len(afterRows) != len(beforeRows) {
 		t.Errorf("expected task_repositories row rolled back; before=%d after=%d", len(beforeRows), len(afterRows))
+	}
+	for _, evt := range eventBus.GetPublishedEvents() {
+		if evt.Type == events.TaskUpdated {
+			t.Errorf("did not expect task.updated on rollback path; got %+v", evt)
+		}
 	}
 }
 
