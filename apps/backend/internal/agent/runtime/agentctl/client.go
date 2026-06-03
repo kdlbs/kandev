@@ -43,18 +43,16 @@ type Client struct {
 	// goroutines to drain. Cleared by readWorkspaceStream's defer once the
 	// stream tears down.
 	workspaceStream *WorkspaceStream
-	// closed flips to true on Client.Close and prevents new StreamUpdates /
-	// StreamWorkspace dials from leaking goroutines past the close barrier.
+	// closed flips to true on Client.Close and prevents new StreamWorkspace
+	// dials from leaking goroutines past the close barrier. Agent (updates)
+	// stream is not gated on this flag because the cascade flow legitimately
+	// stops + restarts the agent stream on the same client; gating it would
+	// strand workflow step transitions on a closed client.
 	closed bool
 	mu     sync.RWMutex
 
 	// Shared write mutex for agent stream (used by StreamUpdates and sendStreamRequest)
 	streamWriteMu sync.Mutex
-
-	// streamWG tracks the updates-stream goroutine (readUpdatesStream)
-	// spawned by this client. Workspace read/write loops are tracked on
-	// each WorkspaceStream's own wg and drained via ws.Wait() in Close().
-	streamWG sync.WaitGroup
 
 	// Pending request/response tracking for agent stream
 	pendingRequests map[string]chan *ws.Message
@@ -670,11 +668,12 @@ type (
 )
 
 // Close closes all connections and releases resources. It is a drain
-// barrier: when Close returns, every goroutine the client spawned
-// (readUpdatesStream + workspace read/write loops) has fully exited and
-// future StreamUpdates / StreamWorkspace calls return immediately with an
-// error. This is what lets `defer client.Close()` keep goleak green even
-// when a dial races against teardown.
+// barrier for workspace stream goroutines: when Close returns, the workspace
+// read/write loops have fully exited and future StreamWorkspace calls return
+// immediately with an error. The agent (updates) stream is closed but not
+// drained synchronously — the cascade flow legitimately calls Close on a
+// client whose updates stream is still mid-event, and blocking would stall
+// workflow step transitions.
 func (c *Client) Close() {
 	c.mu.Lock()
 	c.closed = true
@@ -693,9 +692,6 @@ func (c *Client) Close() {
 		ws.Close()
 		ws.Wait()
 	}
-
-	// Block until every client-owned stream goroutine has exited.
-	c.streamWG.Wait()
 
 	if c.httpClient != nil {
 		c.httpClient.CloseIdleConnections()

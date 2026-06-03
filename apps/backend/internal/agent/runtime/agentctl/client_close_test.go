@@ -76,22 +76,20 @@ func newCloseBarrierTestClient(t *testing.T, serverURL string) *Client {
 	return NewClient(host, port, log)
 }
 
-// TestClientClose_DrainsStreamGoroutines is the regression test for the
-// CI-only goleak flake described in issue/PR around StreamManager and
-// WorkspaceStream goroutines surviving Close. After Close returns, every
-// read/write loop the client spawned (updates stream + workspace stream)
-// must have fully unwound — otherwise tests with `defer client.Close()`
-// see lingering goroutines and goleak.VerifyTestMain fails.
-func TestClientClose_DrainsStreamGoroutines(t *testing.T) {
+// TestClientClose_DrainsWorkspaceStream is the regression test for the
+// CI-only goleak flake around StreamManager and WorkspaceStream goroutines
+// surviving Close. After Close returns, the workspace read/write loops must
+// have fully unwound — otherwise tests with `defer client.Close()` see
+// lingering goroutines and goleak.VerifyTestMain fails. The agent (updates)
+// stream is closed but not drained synchronously: the cascade flow legitimately
+// stops + restarts the updates stream on the same client.
+func TestClientClose_DrainsWorkspaceStream(t *testing.T) {
 	mock := newCloseBarrierMockServer(t)
 	client := newCloseBarrierTestClient(t, mock.server.URL)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	if err := client.StreamUpdates(ctx, func(AgentEvent) {}, nil, nil); err != nil {
-		t.Fatalf("StreamUpdates failed: %v", err)
-	}
 	ws, err := client.StreamWorkspace(ctx, WorkspaceStreamCallbacks{})
 	if err != nil {
 		t.Fatalf("StreamWorkspace failed: %v", err)
@@ -100,21 +98,15 @@ func TestClientClose_DrainsStreamGoroutines(t *testing.T) {
 		t.Fatal("nil WorkspaceStream")
 	}
 
-	// Belt-and-suspenders: both client-side goroutines are already started
-	// (StreamUpdates and StreamWorkspace returned successfully), and stream.wg
-	// + streamWG were incremented before they launched. mock.connected uses
-	// sync.Once so it fires on the first WS accept — this only confirms the
-	// read side of one socket is live before we call Close. The Close drain
-	// barrier covers both regardless.
 	select {
 	case <-mock.connected:
 	case <-time.After(2 * time.Second):
 		t.Fatal("mock server never observed a WS connection")
 	}
 
-	// Close must return promptly and have drained both streams. A hung
-	// goroutine here would block Close forever (or, pre-fix, return early
-	// and leave the goroutine running past goleak's check).
+	// Close must return promptly and have drained the workspace stream. A hung
+	// goroutine here would block Close forever (or, pre-fix, return early and
+	// leave the goroutine running past goleak's check).
 	done := make(chan struct{})
 	go func() {
 		client.Close()
@@ -123,14 +115,11 @@ func TestClientClose_DrainsStreamGoroutines(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("Client.Close did not return within 2s — goroutine drain is stuck")
+		t.Fatal("Client.Close did not return within 2s — workspace drain is stuck")
 	}
 
-	// Post-Close, Stream* calls must error so a racy second close path
+	// Post-Close, StreamWorkspace must error so a racy second close path
 	// doesn't strand a new dial past the barrier.
-	if err := client.StreamUpdates(context.Background(), func(AgentEvent) {}, nil, nil); err == nil {
-		t.Error("StreamUpdates after Close should return error, got nil")
-	}
 	if _, err := client.StreamWorkspace(context.Background(), WorkspaceStreamCallbacks{}); err == nil {
 		t.Error("StreamWorkspace after Close should return error, got nil")
 	}
