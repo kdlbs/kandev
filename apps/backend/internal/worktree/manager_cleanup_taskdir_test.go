@@ -56,7 +56,10 @@ func TestCleanupWorktrees_RemovesEmptyTaskDir(t *testing.T) {
 	}
 
 	// TasksBasePath itself must NOT be removed.
-	expandedBase, _ := cfg.ExpandedTasksBasePath()
+	expandedBase, err := cfg.ExpandedTasksBasePath()
+	if err != nil {
+		t.Fatalf("ExpandedTasksBasePath: %v", err)
+	}
 	if _, err := os.Stat(expandedBase); err != nil {
 		t.Errorf("TasksBasePath %s must survive cleanup: %v", expandedBase, err)
 	}
