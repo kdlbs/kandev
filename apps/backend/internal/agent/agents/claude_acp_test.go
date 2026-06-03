@@ -9,7 +9,7 @@ func TestClaudeACPPermissionSettingsSkipPermissions(t *testing.T) {
 	settings := NewClaudeACP().PermissionSettings()
 	setting, ok := settings[PermissionKeyDangerouslySkipPermissions]
 	if !ok {
-		t.Fatal("PermissionSettings() missing dangerously_skip_permissions")
+		t.Fatalf("PermissionSettings() missing key %q", PermissionKeyDangerouslySkipPermissions)
 	}
 	if !setting.Supported {
 		t.Error("dangerously_skip_permissions must be Supported")
