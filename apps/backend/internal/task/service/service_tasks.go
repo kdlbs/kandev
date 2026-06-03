@@ -303,7 +303,7 @@ func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceI
 
 	seen := make(map[string]bool, len(repositories))
 	for i, repoInput := range repositories {
-		repositoryID, baseBranch, err := s.resolveRepoInput(ctx, workspaceID, repoInput, repoByPath)
+		repositoryID, baseBranch, _, err := s.resolveRepoInput(ctx, workspaceID, repoInput, repoByPath)
 		if err != nil {
 			return err
 		}
@@ -383,12 +383,12 @@ func (s *Service) repoDisplayLabel(ctx context.Context, repoInput TaskRepository
 // Accepts inputs identified by RepositoryID, GitHubURL, or LocalPath. Returns
 // an empty repositoryID with no error when none of those are set, letting
 // callers decide whether to fall back to other defaults.
-func (s *Service) ResolveRepositoryRef(ctx context.Context, workspaceID string, repoInput TaskRepositoryInput) (repositoryID, baseBranch string, err error) {
+func (s *Service) ResolveRepositoryRef(ctx context.Context, workspaceID string, repoInput TaskRepositoryInput) (repositoryID, baseBranch string, created bool, err error) {
 	var repoByPath map[string]*models.Repository
 	if repoInput.RepositoryID == "" && repoInput.LocalPath != "" {
 		repos, listErr := s.repoEntities.ListRepositories(ctx, workspaceID)
 		if listErr != nil {
-			return "", "", listErr
+			return "", "", false, listErr
 		}
 		repoByPath = make(map[string]*models.Repository, len(repos))
 		for _, repo := range repos {
@@ -402,8 +402,11 @@ func (s *Service) ResolveRepositoryRef(ctx context.Context, workspaceID string, 
 }
 
 // resolveRepoInput resolves a RepositoryInput to a repositoryID and baseBranch,
-// creating the repository if it doesn't exist yet.
-func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repoInput TaskRepositoryInput, repoByPath map[string]*models.Repository) (repositoryID, baseBranch string, err error) {
+// creating the repository if it doesn't exist yet. Returns created=true only
+// when this call inserted a new Repository row (GitHub-URL miss → CreateRepository
+// or LocalPath miss → CreateRepository); callers that want to roll back a fresh
+// row on a later failure key off this flag.
+func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repoInput TaskRepositoryInput, repoByPath map[string]*models.Repository) (repositoryID, baseBranch string, created bool, err error) {
 	repositoryID = repoInput.RepositoryID
 	baseBranch = repoInput.BaseBranch
 	if repositoryID != "" {
@@ -414,74 +417,35 @@ func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repo
 		// scope through FindOrCreateRepository, which is workspace-bound).
 		repo, lookupErr := s.repoEntities.GetRepository(ctx, repositoryID)
 		if lookupErr != nil {
-			return "", "", fmt.Errorf("looking up repository %q: %w", repositoryID, lookupErr)
+			return "", "", false, fmt.Errorf("looking up repository %q: %w", repositoryID, lookupErr)
 		}
 		if repo == nil || repo.WorkspaceID != workspaceID {
-			return "", "", fmt.Errorf("repository %q does not belong to workspace %q", repositoryID, workspaceID)
+			return "", "", false, fmt.Errorf("repository %q does not belong to workspace %q", repositoryID, workspaceID)
 		}
-		return repositoryID, baseBranch, nil
+		return repositoryID, baseBranch, false, nil
 	}
 
 	// Handle GitHub URL: parse owner/name and use FindOrCreateRepository
 	if repoInput.GitHubURL != "" {
-		owner, name, parseErr := parseGitHubRepoURL(repoInput.GitHubURL)
-		if parseErr != nil {
-			return "", "", parseErr
-		}
-		defaultBranch := repoInput.DefaultBranch
-		if defaultBranch == "" {
-			defaultBranch = repoInput.BaseBranch
-		}
-		// Opt-in synchronous probe for callers without a downstream backfill
-		// path (add_branch_to_task on a live worktree-executor task). Probed
-		// before FindOrCreateRepository so the persisted Repository row gets
-		// a real default_branch from the start — no orphan rows on failure.
-		// Probe errors fall through (defaultBranch stays empty); the
-		// AddBranchToTask gate rejects with an actionable message.
-		//
-		// Skip the probe when the workspace already has the repo registered
-		// with a non-empty default_branch — the existing value wins via the
-		// repo.DefaultBranch fallback below, so the remote round-trip is
-		// pure waste.
-		if defaultBranch == "" && repoInput.ResolveProviderDefaults && s.providerProber != nil {
-			existing, lookupErr := s.repoEntities.GetRepositoryByProviderInfo(ctx, workspaceID, "github", owner, name)
-			switch {
-			case lookupErr != nil:
-				// DB lookup failed — don't burn a network round-trip on the probe;
-				// FindOrCreateRepository below will hit the same DB and surface
-				// the real cause. Log so the unexpected error doesn't disappear.
-				s.logger.Warn("resolveRepoInput: failed to look up existing repo before probe",
-					zap.String("provider", "github"),
-					zap.String("owner", owner),
-					zap.String("name", name),
-					zap.Error(lookupErr))
-			case existing == nil || existing.DefaultBranch == "":
-				if probed, probeErr := s.providerProber.ProbeDefaultBranch(ctx, "github", owner, name); probeErr == nil && probed != "" {
-					defaultBranch = probed
-				}
-			}
-		}
-		repo, createErr := s.FindOrCreateRepository(ctx, &FindOrCreateRepositoryRequest{
-			WorkspaceID:   workspaceID,
-			Provider:      "github",
-			ProviderOwner: owner,
-			ProviderName:  name,
-			DefaultBranch: defaultBranch,
-		})
-		if createErr != nil {
-			return "", "", createErr
-		}
-		repositoryID = repo.ID
-		if baseBranch == "" {
-			baseBranch = repo.DefaultBranch
-		}
-		return repositoryID, baseBranch, nil
+		return s.resolveRepoInputGitHub(ctx, workspaceID, repoInput, baseBranch)
 	}
 
 	if repoInput.LocalPath == "" {
-		return repositoryID, baseBranch, nil
+		return repositoryID, baseBranch, false, nil
 	}
+	return s.resolveRepoInputLocal(ctx, workspaceID, repoInput, repoByPath, baseBranch)
+}
+
+// resolveRepoInputLocal handles the LocalPath branch of resolveRepoInput.
+// Looks the path up in the workspace snapshot; on miss, calls
+// CreateRepository (and reports created=true). Extracted to keep
+// resolveRepoInput inside the cyclomatic-complexity budget.
+func (s *Service) resolveRepoInputLocal(
+	ctx context.Context, workspaceID string, repoInput TaskRepositoryInput,
+	repoByPath map[string]*models.Repository, baseBranch string,
+) (string, string, bool, error) {
 	repo := repoByPath[repoInput.LocalPath]
+	created := false
 	if repo == nil {
 		name := strings.TrimSpace(repoInput.Name)
 		if name == "" {
@@ -507,7 +471,7 @@ func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repo
 				}
 			}
 		}
-		created, createErr := s.CreateRepository(ctx, &CreateRepositoryRequest{
+		createdRepo, createErr := s.CreateRepository(ctx, &CreateRepositoryRequest{
 			WorkspaceID:   workspaceID,
 			Name:          name,
 			SourceType:    "local",
@@ -515,18 +479,83 @@ func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repo
 			DefaultBranch: defaultBranch,
 		})
 		if createErr != nil {
-			return "", "", createErr
+			return "", "", false, createErr
 		}
-		repo = created
+		repo = createdRepo
 		if repoByPath != nil {
 			repoByPath[repoInput.LocalPath] = repo
 		}
+		created = true
 	}
-	repositoryID = repo.ID
 	if baseBranch == "" {
 		baseBranch = repo.DefaultBranch
 	}
-	return repositoryID, baseBranch, nil
+	return repo.ID, baseBranch, created, nil
+}
+
+// resolveRepoInputGitHub handles the GitHub-URL branch of resolveRepoInput:
+// parse owner/name, optionally probe the provider for default_branch, then
+// FindOrCreateRepository. Extracted so resolveRepoInput stays under the
+// cognitive-complexity budget after adding the probe-skip and probe-error
+// arms.
+func (s *Service) resolveRepoInputGitHub(
+	ctx context.Context, workspaceID string, repoInput TaskRepositoryInput, baseBranch string,
+) (string, string, bool, error) {
+	owner, name, parseErr := parseGitHubRepoURL(repoInput.GitHubURL)
+	if parseErr != nil {
+		return "", "", false, parseErr
+	}
+	defaultBranch := repoInput.DefaultBranch
+	if defaultBranch == "" {
+		defaultBranch = repoInput.BaseBranch
+	}
+	if defaultBranch == "" && repoInput.ResolveProviderDefaults && s.providerProber != nil {
+		defaultBranch = s.probeProviderDefaultBranchIfMissing(ctx, workspaceID, "github", owner, name)
+	}
+	repo, repoCreated, createErr := s.FindOrCreateRepository(ctx, &FindOrCreateRepositoryRequest{
+		WorkspaceID:   workspaceID,
+		Provider:      "github",
+		ProviderOwner: owner,
+		ProviderName:  name,
+		DefaultBranch: defaultBranch,
+	})
+	if createErr != nil {
+		return "", "", false, createErr
+	}
+	if baseBranch == "" {
+		baseBranch = repo.DefaultBranch
+	}
+	return repo.ID, baseBranch, repoCreated, nil
+}
+
+// probeProviderDefaultBranchIfMissing returns a default_branch resolved via
+// the provider prober, but only when the workspace doesn't already hold the
+// repo with a non-empty default_branch (the existing value wins downstream,
+// so the remote round-trip would be pure waste). A DB lookup error skips
+// the probe entirely — FindOrCreateRepository will hit the same DB and
+// surface the real cause; we log the lookup failure for observability.
+// Probe errors fall through to "" so the AddBranchToTask gate surfaces an
+// actionable validation rejection rather than a silent orphan.
+func (s *Service) probeProviderDefaultBranchIfMissing(
+	ctx context.Context, workspaceID, provider, owner, name string,
+) string {
+	existing, lookupErr := s.repoEntities.GetRepositoryByProviderInfo(ctx, workspaceID, provider, owner, name)
+	if lookupErr != nil {
+		s.logger.Warn("resolveRepoInput: failed to look up existing repo before probe",
+			zap.String("provider", provider),
+			zap.String("owner", owner),
+			zap.String("name", name),
+			zap.Error(lookupErr))
+		return ""
+	}
+	if existing != nil && existing.DefaultBranch != "" {
+		return ""
+	}
+	probed, probeErr := s.providerProber.ProbeDefaultBranch(ctx, provider, owner, name)
+	if probeErr != nil {
+		return ""
+	}
+	return probed
 }
 
 // parseGitHubRepoURL parses a GitHub repository URL into owner and name.

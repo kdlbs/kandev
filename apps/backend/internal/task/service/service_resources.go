@@ -318,10 +318,17 @@ func (s *Service) GetRepositoryByProviderInfo(ctx context.Context, workspaceID, 
 
 // FindOrCreateRepository looks up a repository by provider info, creating one if not found.
 // If the repository exists but has no LocalPath and the request provides one, updates LocalPath.
-func (s *Service) FindOrCreateRepository(ctx context.Context, req *FindOrCreateRepositoryRequest) (*models.Repository, error) {
+//
+// Returns created=true only when CreateRepository was invoked by this call.
+// Callers that register cleanup on the new row (e.g. add_branch_to_task's
+// orphan-rollback path) must gate it on that flag instead of inferring
+// ownership from a workspace snapshot — a concurrent request can win the
+// create race between snapshot and lookup, so a snapshot-miss does NOT
+// mean this call created the row.
+func (s *Service) FindOrCreateRepository(ctx context.Context, req *FindOrCreateRepositoryRequest) (*models.Repository, bool, error) {
 	existing, err := s.repoEntities.GetRepositoryByProviderInfo(ctx, req.WorkspaceID, req.Provider, req.ProviderOwner, req.ProviderName)
 	if err != nil {
-		return nil, fmt.Errorf("lookup repository: %w", err)
+		return nil, false, fmt.Errorf("lookup repository: %w", err)
 	}
 	if existing != nil {
 		dirty := false
@@ -343,11 +350,11 @@ func (s *Service) FindOrCreateRepository(ctx context.Context, req *FindOrCreateR
 					zap.String("repository_id", existing.ID), zap.Error(updateErr))
 			}
 		}
-		return existing, nil
+		return existing, false, nil
 	}
 
 	name := fmt.Sprintf("%s/%s", req.ProviderOwner, req.ProviderName)
-	return s.CreateRepository(ctx, &CreateRepositoryRequest{
+	created, createErr := s.CreateRepository(ctx, &CreateRepositoryRequest{
 		WorkspaceID:   req.WorkspaceID,
 		Name:          name,
 		SourceType:    "provider",
@@ -357,6 +364,10 @@ func (s *Service) FindOrCreateRepository(ctx context.Context, req *FindOrCreateR
 		ProviderName:  req.ProviderName,
 		DefaultBranch: req.DefaultBranch,
 	})
+	if createErr != nil {
+		return nil, false, createErr
+	}
+	return created, true, nil
 }
 
 func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRepositoryRequest) (*models.Repository, error) {

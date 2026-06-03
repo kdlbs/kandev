@@ -297,8 +297,16 @@ func (s *Service) materializeBranch(ctx context.Context, taskID, taskRepositoryI
 	if s.branchMaterializer == nil {
 		return nil
 	}
+	// Snapshot launch state BEFORE MaterializeBranch so a caller-side cancel
+	// during materialize can't poison the post-failure check: launch state
+	// cannot change during the synchronous materialize call, but the DB
+	// query in taskAlreadyLaunched would fail with a context error if we
+	// asked after the fact — and that would silently demote a live-task
+	// rollback to a best-effort no-op, leaving the orphan row the PR exists
+	// to prevent.
+	alreadyLaunched := s.taskAlreadyLaunched(ctx, taskID)
 	if err := s.branchMaterializer.MaterializeBranch(ctx, taskID, taskRepositoryID); err != nil {
-		if !s.taskAlreadyLaunched(ctx, taskID) {
+		if !alreadyLaunched {
 			s.logger.Warn("branch materialization failed; worktree will be created on next session launch",
 				zap.String("task_id", taskID),
 				zap.String("task_repository_id", taskRepositoryID),
@@ -467,15 +475,7 @@ func (s *Service) resolveBranchAddRepoRef(
 	if req.RepositoryID != "" || (req.LocalPath == "" && req.GitHubURL == "") {
 		return noopCleanup, nil
 	}
-	preExisting, listErr := s.repoEntities.ListRepositories(ctx, task.WorkspaceID)
-	if listErr != nil {
-		return noopCleanup, fmt.Errorf("list workspace repositories: %w", listErr)
-	}
-	preExistingIDs := make(map[string]bool, len(preExisting))
-	for _, r := range preExisting {
-		preExistingIDs[r.ID] = true
-	}
-	resolvedID, resolvedBranch, resolveErr := s.ResolveRepositoryRef(ctx, task.WorkspaceID, TaskRepositoryInput{
+	resolvedID, resolvedBranch, createdByUs, resolveErr := s.ResolveRepositoryRef(ctx, task.WorkspaceID, TaskRepositoryInput{
 		LocalPath:               req.LocalPath,
 		GitHubURL:               req.GitHubURL,
 		BaseBranch:              req.BaseBranch,
@@ -488,7 +488,14 @@ func (s *Service) resolveBranchAddRepoRef(
 	if req.BaseBranch == "" {
 		req.BaseBranch = resolvedBranch
 	}
-	if resolvedID == "" || preExistingIDs[resolvedID] {
+	// Register cleanup only when this call actually inserted the Repository
+	// row. The previous heuristic (workspace pre-list snapshot vs resolvedID)
+	// had a TOCTOU race: a concurrent add_branch for the same GitHub URL
+	// could create the row between the snapshot and FindOrCreateRepository,
+	// then we'd register cleanup against another request's data and delete
+	// it on any later failure here. createdByUs is set by FindOrCreateRepository
+	// / CreateRepository themselves and can't be spoofed by concurrency.
+	if resolvedID == "" || !createdByUs {
 		return noopCleanup, nil
 	}
 	createdID := resolvedID
