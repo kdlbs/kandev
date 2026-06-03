@@ -53,6 +53,20 @@ const (
 	mcpKeyCheckoutBranch = "checkout_branch"
 )
 
+// locatorCount returns how many of the supplied repository-locator strings
+// are non-empty. Used by add_branch / create_task mutual-exclusion checks
+// so a chain of `if a != "" && b != "" { ... }` doesn't repeat at each call
+// site.
+func locatorCount(locators ...string) int {
+	n := 0
+	for _, s := range locators {
+		if s != "" {
+			n++
+		}
+	}
+	return n
+}
+
 // normalizeMode returns a valid MCP mode, defaulting unknown values to ModeTask.
 func normalizeMode(mode string) string {
 	switch mode {
@@ -585,14 +599,24 @@ func (s *Server) addBranchToTaskHandler() server.ToolHandlerFunc {
 		if taskID == "" {
 			return mcp.NewToolResultError("task_id is required (no current task context to default to)"), nil
 		}
+		// Mutual-exclusion gate at the MCP tier so the error names the
+		// agent-facing alias (repository_url) instead of the WS wire field
+		// (github_url). The WS handler still re-validates for direct WS
+		// callers that don't go through this tool.
+		repositoryID := req.GetString(mcpKeyRepositoryID, "")
+		repositoryURL := req.GetString(mcpKeyRepositoryURL, "")
+		localPath := req.GetString(mcpKeyLocalPath, "")
+		if locatorCount(repositoryID, repositoryURL, localPath) > 1 {
+			return mcp.NewToolResultError("pass at most one of repository_id, repository_url, local_path"), nil
+		}
 		// repository_url is the tool-facing alias used by create_task_kandev;
 		// translate to github_url on the wire so the WS handler can reuse the
 		// same field name as the rest of the multi-repo payloads.
 		payload := map[string]interface{}{
 			mcpKeyTaskID:         taskID,
-			mcpKeyRepositoryID:   req.GetString(mcpKeyRepositoryID, ""),
-			mcpKeyLocalPath:      req.GetString(mcpKeyLocalPath, ""),
-			mcpKeyGitHubURL:      req.GetString(mcpKeyRepositoryURL, ""),
+			mcpKeyRepositoryID:   repositoryID,
+			mcpKeyLocalPath:      localPath,
+			mcpKeyGitHubURL:      repositoryURL,
 			mcpKeyCheckoutBranch: req.GetString(mcpKeyCheckoutBranch, ""),
 			mcpKeyBaseBranch:     req.GetString(mcpKeyBaseBranch, ""),
 		}

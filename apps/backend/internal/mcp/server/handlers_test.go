@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	ws "github.com/kandev/kandev/pkg/websocket"
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -381,6 +382,28 @@ func TestAddBranchToTask_ForwardsLocalPath(t *testing.T) {
 	assert.Equal(t, "/Users/me/projects/sibling", payload["local_path"])
 	assert.Equal(t, "feature/y", payload["checkout_branch"])
 	assert.Equal(t, "", payload["repository_id"])
+}
+
+// TestAddBranchToTask_RejectsMultipleLocators verifies the MCP-tier
+// mutual-exclusion check fires before the request hits the WS handler, so
+// the error names the agent-facing alias (repository_url) instead of the
+// wire field (github_url).
+func TestAddBranchToTask_RejectsMultipleLocators(t *testing.T) {
+	backend := &testBackend{}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "add_branch_to_task_kandev", map[string]interface{}{
+		"repository_url": "https://github.com/acme/widgets",
+		"local_path":     "/Users/me/projects/sibling",
+	})
+
+	assert.True(t, result.IsError, "passing both repository_url and local_path should error at the MCP tier")
+	require.NotEmpty(t, result.Content)
+	text, ok := result.Content[0].(mcp.TextContent)
+	require.True(t, ok)
+	assert.Contains(t, text.Text, "repository_url",
+		"MCP-tier error should name the agent-facing alias, not the wire key")
+	assert.Nil(t, backend.lastPayload, "request must not be forwarded to the backend")
 }
 
 func TestMessageTask_ForwardsToBackend(t *testing.T) {
