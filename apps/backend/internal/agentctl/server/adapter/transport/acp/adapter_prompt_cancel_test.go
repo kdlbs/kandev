@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -49,23 +50,36 @@ func TestWaitForPromptRPCAfterUserCancel_AbortReleasesWhenRPCStuck(t *testing.T)
 }
 
 func TestWaitForPromptRPCAfterUserCancel_CompletesAfterAbort(t *testing.T) {
-	a := newTestAdapter()
-	turn := &promptTurnState{
-		endTurn: func(error) {},
-		rpcDone: make(chan struct{}),
-		abortCh: make(chan struct{}),
-	}
-	a.promptTurn = turn
+	// synctest lets us deterministically exercise the abort path: close abortCh
+	// first, run waitForPromptRPCAfterUserCancel in a goroutine, synctest.Wait
+	// until it blocks inside the inner select on rpcDone, then close rpcDone.
+	// Without synctest there's no way to deterministically distinguish the
+	// "outer select picked abort, then inner picked rpcDone" path from the
+	// "outer select picked rpcDone directly" path when both channels are ready.
+	synctest.Test(t, func(t *testing.T) {
+		a := newTestAdapter()
+		defer func() { _ = a.Close() }() // drain the update worker before synctest exits
+		turn := &promptTurnState{
+			endTurn: func(error) {},
+			rpcDone: make(chan struct{}),
+			abortCh: make(chan struct{}),
+		}
+		a.promptTurn = turn
+		close(turn.abortCh)
 
-	// Abort fires first, RPC completes before the inner timeout. Both channels
-	// are closed up front so the inner select picks rpcDone deterministically
-	// without needing a sleep-based scheduling delay.
-	close(turn.abortCh)
-	close(turn.rpcDone)
+		done := make(chan error, 1)
+		go func() {
+			done <- a.waitForPromptRPCAfterUserCancel(turn)
+		}()
 
-	if err := a.waitForPromptRPCAfterUserCancel(turn); err != nil {
-		t.Fatalf("expected nil after rpc completed, got %v", err)
-	}
+		// Wait until the goroutine is blocked inside the inner select.
+		synctest.Wait()
+		close(turn.rpcDone)
+
+		if err := <-done; err != nil {
+			t.Fatalf("expected nil after rpc completed, got %v", err)
+		}
+	})
 }
 
 func TestRegisterPromptTurn_CancelCause(t *testing.T) {
@@ -120,6 +134,28 @@ func TestWaitForPromptRPCAfterUserCancel_CancelsPromptCtxOnTimeout(t *testing.T)
 	close(turn.abortCh)
 	if err := a.waitForPromptRPCAfterUserCancel(turn); !errors.Is(err, errPromptAbandonedAfterCancel) {
 		t.Fatalf("expected errPromptAbandonedAfterCancel, got %v", err)
+	}
+	if !errors.Is(context.Cause(ctx), ErrTurnCancelNotAcknowledged) {
+		t.Fatalf("expected promptCtx cancelled with ErrTurnCancelNotAcknowledged on timeout, got %v",
+			context.Cause(ctx))
+	}
+}
+
+// Symmetric to TestWaitForPromptRPCAfterUserCancel_CancelsPromptCtxOnTimeout —
+// guards against future edits dropping the endTurn call from
+// waitForPromptRPCAfterCancel's timeout branch (the Cancel() caller-side path).
+func TestWaitForPromptRPCAfterCancel_CancelsPromptCtxOnTimeout(t *testing.T) {
+	prev := promptCancelJoinTimeout
+	promptCancelJoinTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { promptCancelJoinTimeout = prev })
+
+	a := newTestAdapter()
+	ctx, turn := a.registerPromptTurn(context.Background())
+	defer a.clearPromptTurn(turn)
+	turn.rpcDone = make(chan struct{})
+
+	if err := waitForPromptRPCAfterCancel(turn); !errors.Is(err, ErrTurnCancelNotAcknowledged) {
+		t.Fatalf("expected ErrTurnCancelNotAcknowledged, got %v", err)
 	}
 	if !errors.Is(context.Cause(ctx), ErrTurnCancelNotAcknowledged) {
 		t.Fatalf("expected promptCtx cancelled with ErrTurnCancelNotAcknowledged on timeout, got %v",
