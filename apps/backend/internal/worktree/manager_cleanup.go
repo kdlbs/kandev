@@ -261,6 +261,10 @@ func (m *Manager) tryRemoveEmptyTaskDir(worktreePath string) {
 	if err != nil || tasksBase == "" {
 		return
 	}
+	// Normalize both sides: ExpandedTasksBasePath returns the configured
+	// value verbatim for absolute paths (incl. trailing slashes or doubled
+	// separators), while filepath.Dir always yields a cleaned form.
+	tasksBase = filepath.Clean(tasksBase)
 	parent := filepath.Dir(worktreePath)
 	// Guard: only act on direct children of tasksBase. Never touch
 	// tasksBase itself or any deeper / unrelated location.

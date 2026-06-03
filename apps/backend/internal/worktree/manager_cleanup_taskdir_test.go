@@ -56,8 +56,9 @@ func TestCleanupWorktrees_RemovesEmptyTaskDir(t *testing.T) {
 	}
 
 	// TasksBasePath itself must NOT be removed.
-	if _, err := os.Stat(cfg.TasksBasePath); err != nil {
-		t.Errorf("TasksBasePath %s must survive cleanup: %v", cfg.TasksBasePath, err)
+	expandedBase, _ := cfg.ExpandedTasksBasePath()
+	if _, err := os.Stat(expandedBase); err != nil {
+		t.Errorf("TasksBasePath %s must survive cleanup: %v", expandedBase, err)
 	}
 }
 
@@ -107,5 +108,115 @@ func TestCleanupWorktrees_PreservesNonEmptyTaskDir(t *testing.T) {
 	}
 	if _, err := os.Stat(leftover); err != nil {
 		t.Errorf("leftover file %s must survive: %v", leftover, err)
+	}
+}
+
+// TestCleanupWorktrees_MultiBranchSiblingPreservesParent covers the
+// multi-branch task layout: two worktrees for the same task live as
+// siblings under {taskDir}. Removing one must keep {taskDir} alive
+// (the other sibling is still there). Removing both must clear it.
+func TestCleanupWorktrees_MultiBranchSiblingPreservesParent(t *testing.T) {
+	cfg := newTestConfig(t)
+	store := newMockStore()
+	mgr, err := NewManager(cfg, store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+
+	repoPath := initGitRepoWithRemote(t)
+
+	primary, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID:         "task-multi",
+		SessionID:      "session-multi",
+		TaskTitle:      "Multi Branch",
+		RepositoryID:   "repo-multi",
+		RepositoryPath: repoPath,
+		BaseBranch:     "main",
+		TaskDirName:    "task-multi_aaa",
+		RepoName:       "repo-multi",
+	})
+	if err != nil {
+		t.Fatalf("Create primary: %v", err)
+	}
+
+	sibling, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID:         "task-multi",
+		SessionID:      "session-multi",
+		TaskTitle:      "Multi Branch",
+		RepositoryID:   "repo-multi",
+		RepositoryPath: repoPath,
+		BaseBranch:     "main",
+		CheckoutBranch: "feature/pr-branch",
+		TaskDirName:    "task-multi_aaa",
+		RepoName:       "repo-multi",
+		BranchSlug:     "pr",
+	})
+	if err != nil {
+		t.Fatalf("Create sibling: %v", err)
+	}
+
+	taskDir := filepath.Dir(primary.Path)
+	if filepath.Dir(sibling.Path) != taskDir {
+		t.Fatalf("siblings must share parent: primary=%s sibling=%s", primary.Path, sibling.Path)
+	}
+
+	// Remove primary first — sibling still occupies taskDir, parent must survive.
+	if err := mgr.CleanupWorktrees(context.Background(), []*Worktree{primary}); err != nil {
+		t.Fatalf("CleanupWorktrees primary: %v", err)
+	}
+	if _, err := os.Stat(primary.Path); !os.IsNotExist(err) {
+		t.Errorf("primary worktree %s should be gone; stat err=%v", primary.Path, err)
+	}
+	if _, err := os.Stat(taskDir); err != nil {
+		t.Errorf("task dir %s must survive while sibling is present: %v", taskDir, err)
+	}
+	if _, err := os.Stat(sibling.Path); err != nil {
+		t.Errorf("sibling worktree %s must survive: %v", sibling.Path, err)
+	}
+
+	// Remove sibling — parent should now be cleared.
+	if err := mgr.CleanupWorktrees(context.Background(), []*Worktree{sibling}); err != nil {
+		t.Fatalf("CleanupWorktrees sibling: %v", err)
+	}
+	if _, err := os.Stat(taskDir); !os.IsNotExist(err) {
+		t.Errorf("task dir %s should be removed after last sibling cleared; stat err=%v", taskDir, err)
+	}
+}
+
+// TestCleanupWorktrees_RemovesEmptyTaskDir_TrailingSlashTasksBase guards
+// the path-normalization guard in tryRemoveEmptyTaskDir: a configured
+// TasksBasePath with a trailing separator must still match the cleaned
+// parent path computed via filepath.Dir.
+func TestCleanupWorktrees_RemovesEmptyTaskDir_TrailingSlashTasksBase(t *testing.T) {
+	cfg := newTestConfig(t)
+	cfg.TasksBasePath += string(filepath.Separator)
+	store := newMockStore()
+	mgr, err := NewManager(cfg, store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+
+	repoPath := initGitRepoWithRemote(t)
+
+	wt, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID:         "task-slash",
+		SessionID:      "session-slash",
+		TaskTitle:      "Trailing Slash",
+		RepositoryID:   "repo-slash",
+		RepositoryPath: repoPath,
+		BaseBranch:     "main",
+		TaskDirName:    "task-slash_aaa",
+		RepoName:       "repo-slash",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	taskDir := filepath.Dir(wt.Path)
+	if err := mgr.CleanupWorktrees(context.Background(), []*Worktree{wt}); err != nil {
+		t.Fatalf("CleanupWorktrees: %v", err)
+	}
+	if _, err := os.Stat(taskDir); !os.IsNotExist(err) {
+		t.Errorf("task dir %s should be removed despite trailing slash in TasksBasePath; stat err=%v", taskDir, err)
 	}
 }
