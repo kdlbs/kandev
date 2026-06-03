@@ -88,7 +88,7 @@ export function SentryIssueRow({ issue }: { issue: SentryIssue }) {
 function SentryIssueMeta({ issue, lastSeen }: { issue: SentryIssue; lastSeen: string }) {
   return (
     <div className="flex items-center gap-3 text-xs text-muted-foreground">
-      {issue.count && <span>events {issue.count}</span>}
+      {issue.count != null && issue.count !== "" && <span>events {issue.count}</span>}
       {typeof issue.userCount === "number" && <span>users {issue.userCount}</span>}
       {lastSeen && <span title={issue.lastSeen}>Last seen {lastSeen}</span>}
     </div>

@@ -63,8 +63,8 @@ export interface SentrySearchFilter {
   orgSlug: string;
   projectSlug?: string;
   environment?: string;
-  levels?: string[];
-  statuses?: string[];
+  levels?: SentryLevel[];
+  statuses?: SentryStatus[];
   query?: string;
   statsPeriod?: string;
 }
