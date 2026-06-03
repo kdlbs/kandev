@@ -2091,9 +2091,10 @@ func (s *Service) handlePromptError(ctx context.Context, taskID, sessionID strin
 	// wake transition; the flag only matters when going WAITING_FOR_INPUT → RUNNING.
 	s.updateTaskSessionState(ctx, taskID, sessionID, previousSessionState, "", false)
 	// ErrCancelEscalated means the user cancelled and the lifecycle manager had to
-	// force-unblock a hung agent. That is not a "review this failure" condition —
-	// Service.CancelAgent reconciles DB state (WAITING_FOR_INPUT, cancel message,
-	// complete turn) already.
+	// force-unblock a hung agent. Service.CancelAgent owns the cancel reconcile
+	// (session → WAITING_FOR_INPUT, task → REVIEW, cancel message, complete
+	// turn); skip the REVIEW write here so we don't race that path with a
+	// duplicate update.
 	// A transient provider error (529 Overloaded) is owned by the async
 	// retry-with-backoff path (handleTransientFailure), which keeps the task
 	// in progress while it retries — so don't flap it to REVIEW here.
@@ -2290,10 +2291,13 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 		}
 	}
 
-	// Transition to WAITING_FOR_INPUT so the user can send a new prompt
+	// Transition session to WAITING_FOR_INPUT so the user can send a new
+	// prompt, and reconcile the task row to REVIEW so the sidebar shows the
+	// green check rather than the yellow "needs input" question icon — a
+	// cancelled turn is treated as finished work the user may want to review.
 	if session != nil {
 		s.updateTaskSessionState(ctx, session.TaskID, sessionID, models.TaskSessionStateWaitingForInput, "", true, session)
-		s.writeTaskWaitingForInputState(ctx, session.TaskID)
+		s.writeTaskReviewStateOnCancel(ctx, session.TaskID)
 	}
 
 	// Record cancellation in the message history

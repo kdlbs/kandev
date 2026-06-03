@@ -372,9 +372,10 @@ func TestCancelAgent_DeduplicatesConcurrentCalls(t *testing.T) {
 	}
 }
 
-// TestCancelAgent_TaskStateReconcile ensures cancel writes tasks.state for active
-// kanban tasks only. Office tasks and tasks already out of IN_PROGRESS /
-// SCHEDULING must be left untouched.
+// TestCancelAgent_TaskStateReconcile ensures cancel lands actively-working
+// kanban tasks in REVIEW (treated as finished work the user may want to
+// review). Office tasks and tasks already out of IN_PROGRESS / SCHEDULING
+// must be left untouched.
 func TestCancelAgent_TaskStateReconcile(t *testing.T) {
 	ctx := context.Background()
 	cases := []struct {
@@ -427,8 +428,8 @@ func TestCancelAgent_TaskStateReconcile(t *testing.T) {
 				if !ok {
 					t.Fatal("expected tasks.state to be updated on cancel")
 				}
-				if got != v1.TaskStateWaitingForInput {
-					t.Fatalf("expected task state %q, got %q", v1.TaskStateWaitingForInput, got)
+				if got != v1.TaskStateReview {
+					t.Fatalf("expected task state %q, got %q", v1.TaskStateReview, got)
 				}
 				return
 			}
