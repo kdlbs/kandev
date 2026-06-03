@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react";
 import { useTheme } from "next-themes";
 import { IconZoomIn, IconZoomOut, IconCode } from "@tabler/icons-react";
 import {
@@ -26,12 +26,22 @@ function getMermaid(): Promise<MermaidAPI> {
   return mermaidPromise;
 }
 
+/**
+ * Streaming-aware debounce window. Chat messages stream in chunk by chunk and
+ * each intermediate prefix of a mermaid block is almost always invalid
+ * (`subgraph` without `end`, `loop` without `end`, etc). Waiting until the
+ * code prop has been stable for this long collapses the streaming chunks into
+ * a single render attempt so we don't toast on every partial parse error.
+ */
+const RENDER_DEBOUNCE_MS = 300;
+
 type MermaidBlockProps = {
   code: string;
 };
 
 export function MermaidBlock({ code }: MermaidBlockProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [scale, setScale] = useState(DEFAULT_SCALE);
   const [svgSize, setSvgSize] = useState<{ w: number; h: number } | null>(null);
@@ -44,42 +54,54 @@ export function MermaidBlock({ code }: MermaidBlockProps) {
 
     let cancelled = false;
     const theme = resolvedTheme === "dark" ? "dark" : "default";
-    const id = `mermaid-md-${++mermaidIdCounter}`;
-
     const sanitizedCode = sanitizeMermaidCode(code);
 
-    getMermaid()
-      .then((mermaid) => {
-        mermaid.initialize({ startOnLoad: false, theme, securityLevel: "loose" });
-        return mermaid.render(id, sanitizedCode);
-      })
-      .then(({ svg }) => {
-        cleanupMermaidOrphans(id);
-        if (!cancelled && containerRef.current) {
-          containerRef.current.innerHTML = svg;
-          setSvgSize(getSvgDimensions(containerRef.current));
+    const timer = setTimeout(() => {
+      const id = `mermaid-md-${++mermaidIdCounter}`;
+      getMermaid()
+        .then((mermaid) => {
+          mermaid.initialize({ startOnLoad: false, theme, securityLevel: "loose" });
+          return mermaid.render(id, sanitizedCode);
+        })
+        .then(({ svg: rendered }) => {
+          cleanupMermaidOrphans(id);
+          if (cancelled) return;
+          setSvg(rendered);
           setError(null);
-        }
-      })
-      .catch((err: Error) => {
-        cleanupMermaidOrphans(id);
-        if (!cancelled) {
+        })
+        .catch((err: Error) => {
+          cleanupMermaidOrphans(id);
+          if (cancelled) return;
           setError(err.message);
           toast({ title: "Failed to render diagram", description: err.message, variant: "error" });
-        }
-      });
+        });
+    }, RENDER_DEBOUNCE_MS);
 
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
   }, [code, resolvedTheme, toast]);
+
+  // Read intrinsic SVG dimensions once the rendered markup is in the DOM so
+  // the zoom transform scales the correct box. Runs after every successful
+  // render (svg state change).
+  useLayoutEffect(() => {
+    if (svg && containerRef.current) {
+      setSvgSize(getSvgDimensions(containerRef.current));
+    }
+  }, [svg]);
 
   const zoomIn = useCallback(() => setScale((s) => Math.min(s + SCALE_STEP, MAX_SCALE)), []);
   const zoomOut = useCallback(() => setScale((s) => Math.max(s - SCALE_STEP, MIN_SCALE)), []);
   const zoomReset = useCallback(() => setScale(DEFAULT_SCALE), []);
   const toggleCode = useCallback(() => setShowCode((v) => !v), []);
 
-  if (error) {
+  // Surface the error only when we have no previously-rendered svg to fall
+  // back to. Once a successful render lands, that svg stays visible even if a
+  // later code change fails to parse — better than flashing a red banner over
+  // a diagram that was working a moment ago.
+  if (error !== null && svg === null) {
     return (
       <div className="my-3 rounded-md border border-destructive/30 bg-destructive/5 p-3">
         <p className="text-xs text-destructive mb-2">Failed to render diagram</p>
@@ -105,7 +127,11 @@ export function MermaidBlock({ code }: MermaidBlockProps) {
         style={{ display: showCode ? "none" : undefined }}
       >
         <div style={wrapperStyle}>
-          <div ref={containerRef} style={containerStyle} />
+          <div
+            ref={containerRef}
+            style={containerStyle}
+            dangerouslySetInnerHTML={{ __html: svg ?? "" }}
+          />
         </div>
       </div>
       {showCode && (
