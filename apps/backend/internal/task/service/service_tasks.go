@@ -432,6 +432,17 @@ func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repo
 		if defaultBranch == "" {
 			defaultBranch = repoInput.BaseBranch
 		}
+		// Opt-in synchronous probe for callers without a downstream backfill
+		// path (add_branch_to_task on a live worktree-executor task). Probed
+		// before FindOrCreateRepository so the persisted Repository row gets
+		// a real default_branch from the start — no orphan rows on failure.
+		// Probe errors fall through (defaultBranch stays empty); the
+		// AddBranchToTask gate rejects with an actionable message.
+		if defaultBranch == "" && repoInput.ResolveProviderDefaults && s.providerProber != nil {
+			if probed, probeErr := s.providerProber.ProbeDefaultBranch(ctx, "github", owner, name); probeErr == nil && probed != "" {
+				defaultBranch = probed
+			}
+		}
 		repo, createErr := s.FindOrCreateRepository(ctx, &FindOrCreateRepositoryRequest{
 			WorkspaceID:   workspaceID,
 			Provider:      "github",
