@@ -100,6 +100,18 @@ func (b *mcpRecordingEventBus) Publish(_ context.Context, _ string, event *bus.E
 	return nil
 }
 
+// TestClassifyAddBranchError_UnresolvedBaseBranchIsValidation pins the
+// classifier's handling of the new "cannot resolve base_branch" sentinel
+// emitted by AddBranchToTask when neither base_branch nor a probed
+// default_branch is available. Surface as ErrorCodeValidation so MCP agents
+// see a user-fixable input issue instead of an internal error.
+func TestClassifyAddBranchError_UnresolvedBaseBranchIsValidation(t *testing.T) {
+	err := errors.New(`cannot resolve base_branch for repository "acme/widgets": pass base_branch explicitly`)
+	if got := classifyAddBranchError(err); got != ws.ErrorCodeValidation {
+		t.Errorf("expected ErrorCodeValidation, got %q", got)
+	}
+}
+
 // TestHandleAddBranchToTask_RejectsMultipleLocators pins the mutual-exclusion
 // check at the WS handler tier: supplying two of repository_id /
 // repository_url / local_path is an agent mistake that previously got
