@@ -68,6 +68,8 @@ async function flush(ms: number) {
   });
 }
 
+const VALID_DIAGRAM = "flowchart LR\n  A --> B";
+
 describe("MermaidBlock streaming behaviour", () => {
   it("debounces rapid prop changes to a single render of the final code", async () => {
     const { rerender } = render(<MermaidBlock code={"sequenceDiagram"} />);
@@ -97,11 +99,11 @@ describe("MermaidBlock streaming behaviour", () => {
       rerender(<MermaidBlock code={`flowchart LR\n  subgraph wave${i}`} />);
       await flush(50);
     }
-    rerender(<MermaidBlock code={"flowchart LR\n  A --> B"} />);
+    rerender(<MermaidBlock code={VALID_DIAGRAM} />);
 
     await flush(500);
     expect(renderCalls).toHaveLength(1);
-    expect(renderCalls[0]).toBe("flowchart LR\n  A --> B");
+    expect(renderCalls[0]).toBe(VALID_DIAGRAM);
     expect(mockToast).not.toHaveBeenCalled();
   });
 
@@ -118,11 +120,34 @@ describe("MermaidBlock streaming behaviour", () => {
     // (this is the regression — previously the success path was gated on
     // containerRef which had been unmounted by the error branch).
     nextResult = { kind: "ok", svg: "<svg data-test='recovered'></svg>" };
-    rerender(<MermaidBlock code={"flowchart LR\n  A --> B"} />);
+    rerender(<MermaidBlock code={VALID_DIAGRAM} />);
     await flush(500);
 
     expect(renderCalls).toHaveLength(2);
     expect(container.textContent).not.toContain("Failed to render diagram");
     expect(container.innerHTML).toContain('data-test="recovered"');
+  });
+
+  it("does not toast for a failed render when a prior successful svg is still visible", async () => {
+    // First attempt: succeed and pin a stable SVG on screen.
+    nextResult = { kind: "ok", svg: "<svg data-test='first'></svg>" };
+    const { rerender, container } = render(<MermaidBlock code={VALID_DIAGRAM} />);
+    await flush(500);
+    expect(renderCalls).toHaveLength(1);
+    expect(mockToast).not.toHaveBeenCalled();
+    expect(container.innerHTML).toContain('data-test="first"');
+
+    // Second attempt with newly-invalid code (e.g. streaming resumed with a
+    // malformed suffix): the error banner is suppressed because a prior SVG
+    // is still showing, so the toast must be suppressed too — otherwise the
+    // user sees "Failed to render diagram" while the diagram keeps rendering.
+    nextResult = { kind: "fail", message: "Parse error on line 5" };
+    rerender(<MermaidBlock code={`${VALID_DIAGRAM}\n  subgraph`} />);
+    await flush(500);
+
+    expect(renderCalls).toHaveLength(2);
+    expect(mockToast).not.toHaveBeenCalled();
+    expect(container.textContent).not.toContain("Failed to render diagram");
+    expect(container.innerHTML).toContain('data-test="first"');
   });
 });

@@ -39,15 +39,20 @@ type MermaidBlockProps = {
   code: string;
 };
 
-export function MermaidBlock({ code }: MermaidBlockProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
+type ToastFn = ReturnType<typeof useToast>["toast"];
+
+/**
+ * Debounced mermaid render. Owns the timer, the in-flight cancellation flag,
+ * and the toast-suppression rule (no toast while a previously-rendered svg is
+ * still visible). Returns the rendered svg and the last error so the caller
+ * can decide what to show.
+ */
+function useMermaidRender(code: string, resolvedTheme: string | undefined, toast: ToastFn) {
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [scale, setScale] = useState(DEFAULT_SCALE);
-  const [svgSize, setSvgSize] = useState<{ w: number; h: number } | null>(null);
-  const [showCode, setShowCode] = useState(false);
-  const { resolvedTheme } = useTheme();
-  const { toast } = useToast();
+  // Synchronous mirror of `svg` so the render closure can decide whether to
+  // toast without re-running the debounce effect on every successful render.
+  const svgRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!code.trim()) return;
@@ -66,6 +71,7 @@ export function MermaidBlock({ code }: MermaidBlockProps) {
         .then(({ svg: rendered }) => {
           cleanupMermaidOrphans(id);
           if (cancelled) return;
+          svgRef.current = rendered;
           setSvg(rendered);
           setError(null);
         })
@@ -73,7 +79,16 @@ export function MermaidBlock({ code }: MermaidBlockProps) {
           cleanupMermaidOrphans(id);
           if (cancelled) return;
           setError(err.message);
-          toast({ title: "Failed to render diagram", description: err.message, variant: "error" });
+          // Suppress the toast when a previously-rendered SVG is still on
+          // screen — the error banner is also suppressed in that case, so a
+          // toast here would surface a failure the user never sees in the UI.
+          if (svgRef.current === null) {
+            toast({
+              title: "Failed to render diagram",
+              description: err.message,
+              variant: "error",
+            });
+          }
         });
     }, RENDER_DEBOUNCE_MS);
 
@@ -82,6 +97,18 @@ export function MermaidBlock({ code }: MermaidBlockProps) {
       clearTimeout(timer);
     };
   }, [code, resolvedTheme, toast]);
+
+  return { svg, error };
+}
+
+export function MermaidBlock({ code }: MermaidBlockProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(DEFAULT_SCALE);
+  const [svgSize, setSvgSize] = useState<{ w: number; h: number } | null>(null);
+  const [showCode, setShowCode] = useState(false);
+  const { resolvedTheme } = useTheme();
+  const { toast } = useToast();
+  const { svg, error } = useMermaidRender(code, resolvedTheme, toast);
 
   // Read intrinsic SVG dimensions once the rendered markup is in the DOM so
   // the zoom transform scales the correct box. Runs after every successful
