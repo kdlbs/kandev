@@ -2,38 +2,14 @@ package github
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/jmoiron/sqlx"
-
-	"github.com/kandev/kandev/internal/db"
 )
 
-// newTestStoreWithWorkspaces builds a store whose `tasks` table carries
-// workspace_id, so the workspace-scoped PR-number lookup can be exercised.
-func newTestStoreWithWorkspaces(t *testing.T) *Store {
-	t.Helper()
-	tmp := t.TempDir()
-	dbConn, err := db.OpenSQLite(filepath.Join(tmp, "github.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
-	t.Cleanup(func() { _ = sqlxDB.Close() })
-	if _, err := sqlxDB.Exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, workspace_id TEXT, archived_at DATETIME)`); err != nil {
-		t.Fatalf("create tasks table: %v", err)
-	}
-	store, err := NewStore(sqlxDB, sqlxDB)
-	if err != nil {
-		t.Fatalf("new store: %v", err)
-	}
-	return store
-}
-
 func TestListTaskIDsByPRNumber(t *testing.T) {
-	store := newTestStoreWithWorkspaces(t)
+	// newTestStore's tasks table carries workspace_id, which the
+	// workspace-scoped PR-number lookup needs.
+	store := newTestStore(t)
 	ctx := context.Background()
 	now := time.Now().UTC()
 
