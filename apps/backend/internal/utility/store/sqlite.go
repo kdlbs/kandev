@@ -99,12 +99,14 @@ func (r *sqliteRepository) initSchema() error {
 		  AND agent_id <> '' AND model <> ''
 		  AND updated_at = created_at`)
 
-	// Migration: rewrite the legacy "claude-code" identifier to the registered
-	// inference agent ID "claude-acp". The Claude agent was renamed during the
-	// ACP migration (#566) but the utility schema default and existing rows
-	// kept the old string, which broke the model dropdown (no agent matched).
+	// Migration: rewrite the legacy "claude-code" identifier and built-in
+	// rows seeded with an empty agent_id to the registered inference agent
+	// ID "claude-acp". The Claude agent was renamed during the ACP migration
+	// (#566) but the utility schema default kept the old string, and
+	// seedBuiltinAgents() inserts rows with agent_id = "" and never updates
+	// them (ON CONFLICT(id) DO NOTHING), so both classes need a backfill.
 	_, _ = r.db.Exec(`UPDATE utility_agents SET agent_id = 'claude-acp'
-		WHERE agent_id = 'claude-code'`)
+		WHERE agent_id IN ('claude-code', '')`)
 
 	// Seed built-in agents
 	if err := r.seedBuiltinAgents(); err != nil {
