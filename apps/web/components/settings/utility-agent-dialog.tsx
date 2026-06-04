@@ -39,7 +39,7 @@ const defaultFormState: FormState = {
   name: "",
   description: "",
   prompt: "",
-  agent_id: "claude-code",
+  agent_id: "claude-acp",
   model: "",
 };
 
@@ -209,7 +209,7 @@ export function UtilityAgentDialog({ open, onOpenChange, agent, onSuccess }: Pro
         name: agent.name,
         description: agent.description,
         prompt: agent.prompt,
-        agent_id: agent.agent_id || "claude-code",
+        agent_id: agent.agent_id || "claude-acp",
         model: agent.model || "",
       });
     } else {

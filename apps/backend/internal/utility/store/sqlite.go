@@ -47,7 +47,7 @@ func (r *sqliteRepository) initSchema() error {
 			name TEXT NOT NULL UNIQUE,
 			description TEXT NOT NULL DEFAULT '',
 			prompt TEXT NOT NULL,
-			agent_id TEXT NOT NULL DEFAULT 'claude-code',
+			agent_id TEXT NOT NULL DEFAULT 'claude-acp',
 			model TEXT NOT NULL DEFAULT '',
 			builtin INTEGER NOT NULL DEFAULT 0,
 			enabled INTEGER NOT NULL DEFAULT 1,
@@ -98,6 +98,13 @@ func (r *sqliteRepository) initSchema() error {
 		WHERE builtin = 0 AND enabled = 0
 		  AND agent_id <> '' AND model <> ''
 		  AND updated_at = created_at`)
+
+	// Migration: rewrite the legacy "claude-code" identifier to the registered
+	// inference agent ID "claude-acp". The Claude agent was renamed during the
+	// ACP migration (#566) but the utility schema default and existing rows
+	// kept the old string, which broke the model dropdown (no agent matched).
+	_, _ = r.db.Exec(`UPDATE utility_agents SET agent_id = 'claude-acp'
+		WHERE agent_id = 'claude-code'`)
 
 	// Seed built-in agents
 	if err := r.seedBuiltinAgents(); err != nil {
