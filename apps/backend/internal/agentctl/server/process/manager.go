@@ -454,16 +454,39 @@ func (m *Manager) UpdateBaseBranches(ctx context.Context, branches map[string]st
 	}
 	m.workspaceTrackersMu.Unlock()
 
+	// Stamp the new baseBranch on each tracker synchronously so the field is
+	// visible to the next poll, but kick the RefreshGitStatus probes
+	// (which can each spawn 3–5 git subprocesses) onto a background
+	// goroutine. The HTTP handler that called us doesn't need to block on
+	// per-tracker git work; the picker UI re-fetches via the existing WS
+	// stream once Refresh emits a new GitStatusUpdate. Detach from the
+	// caller's ctx so an HTTP request cancel after the field stores
+	// can't strand half the trackers without their refresh.
 	if root != nil {
 		root.SetBaseBranch(lookupBaseBranch(branches, root.RepositoryName()))
-		root.RefreshGitStatus(ctx)
 	}
 	for _, t := range trackers {
 		t.SetBaseBranch(lookupBaseBranch(branches, t.RepositoryName()))
-		t.RefreshGitStatus(ctx)
 	}
 	for subpath, t := range bySubpath {
 		t.SetBaseBranch(lookupBaseBranch(branches, subpath))
+	}
+	go m.refreshTrackersDetached(root, trackers, bySubpath)
+}
+
+// refreshTrackersDetached runs RefreshGitStatus on every supplied tracker
+// using a background context. Spawned as a goroutine by UpdateBaseBranches
+// so the per-tracker git subprocesses don't block the HTTP handler that
+// drove the picker-save.
+func (m *Manager) refreshTrackersDetached(root *WorkspaceTracker, trackers []*WorkspaceTracker, bySubpath map[string]*WorkspaceTracker) {
+	ctx := context.Background()
+	if root != nil {
+		root.RefreshGitStatus(ctx)
+	}
+	for _, t := range trackers {
+		t.RefreshGitStatus(ctx)
+	}
+	for _, t := range bySubpath {
 		t.RefreshGitStatus(ctx)
 	}
 }

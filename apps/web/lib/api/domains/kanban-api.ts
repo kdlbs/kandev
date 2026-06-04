@@ -127,9 +127,9 @@ export async function updateTaskRepositoryBaseBranch(
   }>(`/api/v1/tasks/${taskId}/repositories/${taskRepositoryId}`, {
     ...options,
     init: {
+      ...(options?.init ?? {}),
       method: "PATCH",
       body: JSON.stringify({ base_branch: baseBranch }),
-      ...(options?.init ?? {}),
     },
   });
 }
