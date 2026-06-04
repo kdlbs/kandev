@@ -681,7 +681,7 @@ func (a *repositoryResolverAdapter) ResolveForReview(
 		return "", "", fmt.Errorf("clone repository: %w", err)
 	}
 
-	repo, err := a.taskSvc.FindOrCreateRepository(ctx, &taskservice.FindOrCreateRepositoryRequest{
+	repo, _, err := a.taskSvc.FindOrCreateRepository(ctx, &taskservice.FindOrCreateRepositoryRequest{
 		WorkspaceID:   workspaceID,
 		Provider:      provider,
 		ProviderOwner: owner,

@@ -585,11 +585,14 @@ func (s *Service) writeTaskReviewState(ctx context.Context, taskID string) {
 		zap.String("task_id", taskID))
 }
 
-// writeTaskWaitingForInputState clears the kanban "actively working" task states
-// when the user cancels a turn mid-flight. Normal turn completion lands on
-// REVIEW via setSessionWaitingForInput; cancel bypasses that path and must
-// reconcile tasks.state explicitly or the card stays IN_PROGRESS.
-func (s *Service) writeTaskWaitingForInputState(ctx context.Context, taskID string) {
+// writeTaskReviewStateOnCancel clears the kanban "actively working" task
+// states when the user cancels a turn mid-flight by landing the task in
+// REVIEW — the same bucket a normal turn completion uses, so the sidebar
+// shows the green check rather than the yellow "needs input" question icon.
+// Office task status reflects workflow position, not runtime cancel, so those
+// tasks are left alone. Only actively-working tasks are reconciled; tasks
+// already past IN_PROGRESS / SCHEDULING keep their state.
+func (s *Service) writeTaskReviewStateOnCancel(ctx context.Context, taskID string) {
 	dbTask, err := s.repo.GetTask(ctx, taskID)
 	if err != nil || dbTask == nil {
 		if err != nil {
@@ -599,7 +602,6 @@ func (s *Service) writeTaskWaitingForInputState(ctx context.Context, taskID stri
 		}
 		return
 	}
-	// Office task status reflects workflow position, not runtime cancel.
 	if dbTask.AssigneeAgentProfileID != "" {
 		return
 	}
@@ -607,11 +609,11 @@ func (s *Service) writeTaskWaitingForInputState(ctx context.Context, taskID stri
 	updated, err := s.taskRepo.UpdateTaskStateIfCurrentIn(
 		ctx,
 		taskID,
-		v1.TaskStateWaitingForInput,
+		v1.TaskStateReview,
 		[]v1.TaskState{v1.TaskStateInProgress, v1.TaskStateScheduling},
 	)
 	if err != nil {
-		s.logger.Error("failed to update task state to WAITING_FOR_INPUT",
+		s.logger.Error("failed to update task state to REVIEW",
 			zap.String("task_id", taskID),
 			zap.Error(err))
 		return
@@ -619,7 +621,7 @@ func (s *Service) writeTaskWaitingForInputState(ctx context.Context, taskID stri
 	if !updated {
 		return
 	}
-	s.logger.Info("task moved to WAITING_FOR_INPUT state after turn cancel",
+	s.logger.Info("task moved to REVIEW state after turn cancel",
 		zap.String("task_id", taskID))
 }
 

@@ -55,12 +55,13 @@ type AddBranchToTaskRequest struct {
 //     LocalPath / GitHubURL flows; for the RepositoryID fast path the
 //     workspace-membership check happens in resolveBranchRepo below.
 func (s *Service) AddBranchToTask(ctx context.Context, req AddBranchToTaskRequest) (*models.TaskRepository, error) {
-	task, existing, err := s.prepareBranchAdd(ctx, &req)
+	task, existing, cleanupOrphanRepo, err := s.prepareBranchAdd(ctx, &req)
 	if err != nil {
 		return nil, err
 	}
 	repo, err := s.resolveBranchRepo(ctx, task, req.RepositoryID)
 	if err != nil {
+		cleanupOrphanRepo()
 		return nil, err
 	}
 
@@ -68,10 +69,19 @@ func (s *Service) AddBranchToTask(ctx context.Context, req AddBranchToTaskReques
 	if baseBranch == "" {
 		baseBranch = repo.DefaultBranch
 	}
+	// Gate before any task_repositories write: with no resolvable base branch
+	// the materialize step can only fail, leaving an orphan row + (worse) an
+	// orphan provider repository_url Repository row. Fail loud so the MCP
+	// caller can supply base_branch explicitly or pre-register the repo.
+	if baseBranch == "" {
+		cleanupOrphanRepo()
+		return nil, fmt.Errorf("cannot resolve base_branch for repository %q: pass base_branch explicitly", repoLabelOrID(repo, req.RepositoryID))
+	}
 	checkoutBranch := resolveCheckoutBranchOrAutoName(req.CheckoutBranch, existing, req.RepositoryID, baseBranch)
 
 	nextPosition, dupErr := scanForBranchAddDuplicate(existing, req.RepositoryID, baseBranch, checkoutBranch, repo)
 	if dupErr != nil {
+		cleanupOrphanRepo()
 		return nil, dupErr
 	}
 
@@ -89,13 +99,34 @@ func (s *Service) AddBranchToTask(ctx context.Context, req AddBranchToTaskReques
 			zap.String("repository_id", req.RepositoryID),
 			zap.String("checkout_branch", req.CheckoutBranch),
 			zap.Error(err))
+		cleanupOrphanRepo()
 		return nil, fmt.Errorf("create task repository: %w", err)
 	}
 
-	// Publish task.updated so the kanban / sidebar re-render with the new row.
-	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
+	if err := s.materializeBranch(ctx, req.TaskID, taskRepo.ID); err != nil {
+		// Roll back the task_repositories row so a failed materialize doesn't
+		// leave a dangling association the user can't see on disk. Pre-launch
+		// tasks short-circuit inside materializeBranch and never reach this
+		// branch — their worktree is built at next session launch.
+		//
+		// Detach from ctx via WithoutCancel: a caller-side timeout or cancel
+		// can fire mid-materialize, and the rollback must still run on the
+		// now-dead ctx or we'd leak the row we tried to delete.
+		rollbackCtx := context.WithoutCancel(ctx)
+		if delErr := s.taskRepos.DeleteTaskRepository(rollbackCtx, taskRepo.ID); delErr != nil {
+			s.logger.Error("AddBranchToTask: failed to roll back task repository after materialize failure",
+				zap.String("task_repository_id", taskRepo.ID),
+				zap.Error(delErr))
+		}
+		cleanupOrphanRepo()
+		return nil, err
+	}
 
-	s.materializeBranchBestEffort(ctx, req.TaskID, taskRepo.ID)
+	// Publish task.updated only after the row is durable AND the worktree
+	// materialized. Emitting before materialize would push a phantom row to
+	// WS clients on the rollback path; emitting after keeps event truthiness
+	// aligned with persisted state.
+	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
 	return taskRepo, nil
 }
 
@@ -107,18 +138,27 @@ func (s *Service) AddBranchToTask(ctx context.Context, req AddBranchToTaskReques
 // Mutates req.RepositoryID when it was omitted and a single-repo default
 // applies; multi-repo tasks return an error here instead of silently
 // guessing the wrong repo.
-func (s *Service) prepareBranchAdd(ctx context.Context, req *AddBranchToTaskRequest) (*models.Task, []*models.TaskRepository, error) {
+//
+// Also returns a cleanupOrphanRepo callback that the caller invokes on any
+// error path AFTER prepareBranchAdd returns successfully: when this call
+// created a fresh Repository row via the GitHubURL/LocalPath
+// find-or-create path, the callback deletes it so a later validation or
+// materialize failure does not leave an orphan provider row in the DB. The
+// callback is never nil and is safe to call on the happy path (no-op when
+// nothing was created here).
+func (s *Service) prepareBranchAdd(ctx context.Context, req *AddBranchToTaskRequest) (*models.Task, []*models.TaskRepository, func(), error) {
+	noopCleanup := func() {}
 	if req.TaskID == "" {
-		return nil, nil, fmt.Errorf("task_id is required")
+		return nil, nil, noopCleanup, fmt.Errorf("task_id is required")
 	}
 	task, err := s.tasks.GetTask(ctx, req.TaskID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("get task: %w", err)
+		return nil, nil, noopCleanup, fmt.Errorf("get task: %w", err)
 	}
 	if task == nil {
 		// Wrap the repo-tier sentinel so handlers can classify via errors.Is
 		// rather than substring-matching the formatted UUID.
-		return nil, nil, fmt.Errorf("%w: %s", taskrepo.ErrTaskNotFound, req.TaskID)
+		return nil, nil, noopCleanup, fmt.Errorf("%w: %s", taskrepo.ErrTaskNotFound, req.TaskID)
 	}
 	// Executor gate runs BEFORE repository resolution so a rejection on a
 	// non-worktree executor can't leak an orphan Repository row into the
@@ -126,38 +166,25 @@ func (s *Service) prepareBranchAdd(ctx context.Context, req *AddBranchToTaskRequ
 	// ResolveRepositoryRef. Mirrors the "keeps the DB clean" invariant
 	// documented on requireWorktreeExecutorForBranchAdd itself.
 	if err := s.requireWorktreeExecutorForBranchAdd(ctx, req.TaskID); err != nil {
-		return nil, nil, err
+		return nil, nil, noopCleanup, err
 	}
-	// Resolve LocalPath / GitHubURL to a concrete RepositoryID up front so the
-	// rest of the flow (duplicate scan, row insert) operates on a stable UUID.
-	// Skipped when RepositoryID is already set or neither alternative
-	// identifier was supplied (the single-repo task default applies after
-	// the existing-rows lookup).
-	if req.RepositoryID == "" && (req.LocalPath != "" || req.GitHubURL != "") {
-		resolvedID, resolvedBranch, resolveErr := s.ResolveRepositoryRef(ctx, task.WorkspaceID, TaskRepositoryInput{
-			LocalPath:  req.LocalPath,
-			GitHubURL:  req.GitHubURL,
-			BaseBranch: req.BaseBranch,
-		})
-		if resolveErr != nil {
-			return nil, nil, fmt.Errorf("resolve repository: %w", resolveErr)
-		}
-		req.RepositoryID = resolvedID
-		if req.BaseBranch == "" {
-			req.BaseBranch = resolvedBranch
-		}
+	cleanupOrphanRepo, err := s.resolveBranchAddRepoRef(ctx, task, req, noopCleanup)
+	if err != nil {
+		return nil, nil, noopCleanup, err
 	}
 	existing, err := s.taskRepos.ListTaskRepositories(ctx, req.TaskID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("list existing branches: %w", err)
+		cleanupOrphanRepo()
+		return nil, nil, noopCleanup, fmt.Errorf("list existing branches: %w", err)
 	}
 	if req.RepositoryID == "" {
 		req.RepositoryID, err = s.defaultRepositoryIDForTask(existing)
 		if err != nil {
-			return nil, nil, err
+			cleanupOrphanRepo()
+			return nil, nil, noopCleanup, err
 		}
 	}
-	return task, existing, nil
+	return task, existing, cleanupOrphanRepo, nil
 }
 
 // resolveBranchRepo loads the Repository for req.RepositoryID and verifies
@@ -254,20 +281,61 @@ func branchAddDuplicateError(
 	return fmt.Errorf("repository %q on branch %q is already attached to this task", label, branchLabel)
 }
 
-// materializeBranchBestEffort triggers the worktree manager + agentctl
-// rescan asynchronously-ish. Failures are logged but don't unwind the DB
-// write — the next session launch will pick the worktree up via
-// prepareMultiRepo, so a transient rescan failure is recoverable.
-func (s *Service) materializeBranchBestEffort(ctx context.Context, taskID, taskRepositoryID string) {
+// materializeBranch triggers the worktree manager + agentctl rescan.
+//
+// Pre-launch tasks (no task_environments row, or no materializer wired) keep
+// the legacy best-effort behaviour: failures are logged and the next session
+// launch will pick the worktree up via prepareMultiRepo. Returns nil in both
+// of those cases so the task_repositories row sticks around for the launcher
+// to act on.
+//
+// Live worktree-executor tasks (already launched) surface the materialize
+// failure to the caller so AddBranchToTask can roll back the dangling
+// task_repositories row — leaving it in place produced the silent-success
+// orphan that the original bug report describes.
+func (s *Service) materializeBranch(ctx context.Context, taskID, taskRepositoryID string) error {
 	if s.branchMaterializer == nil {
-		return
+		return nil
 	}
+	// Snapshot launch state BEFORE MaterializeBranch so a caller-side cancel
+	// during materialize can't poison the post-failure check: launch state
+	// cannot change during the synchronous materialize call, but the DB
+	// query in taskAlreadyLaunched would fail with a context error if we
+	// asked after the fact — and that would silently demote a live-task
+	// rollback to a best-effort no-op, leaving the orphan row the PR exists
+	// to prevent.
+	alreadyLaunched := s.taskAlreadyLaunched(ctx, taskID)
 	if err := s.branchMaterializer.MaterializeBranch(ctx, taskID, taskRepositoryID); err != nil {
-		s.logger.Warn("branch materialization failed; worktree will be created on next session launch",
+		if !alreadyLaunched {
+			s.logger.Warn("branch materialization failed; worktree will be created on next session launch",
+				zap.String("task_id", taskID),
+				zap.String("task_repository_id", taskRepositoryID),
+				zap.Error(err))
+			return nil
+		}
+		s.logger.Error("branch materialization failed on a live task; rolling back",
 			zap.String("task_id", taskID),
 			zap.String("task_repository_id", taskRepositoryID),
 			zap.Error(err))
+		return fmt.Errorf("materialize branch: %w", err)
 	}
+	return nil
+}
+
+// taskAlreadyLaunched reports whether the task already has a task_environments
+// row whose executor type is fixed — the signal that an executor backend is
+// running and won't replay prepareMultiRepo for the new branch on its own.
+// Pre-launch tasks (no row, or no executor type yet) return false so a
+// materialize failure stays best-effort.
+func (s *Service) taskAlreadyLaunched(ctx context.Context, taskID string) bool {
+	if s.taskEnvironments == nil {
+		return false
+	}
+	env, err := s.taskEnvironments.GetTaskEnvironmentByTaskID(ctx, taskID)
+	if err != nil || env == nil {
+		return false
+	}
+	return env.ExecutorType != ""
 }
 
 // defaultRepositoryIDForTask resolves the implicit repository to use when
@@ -391,4 +459,63 @@ func repoLabelOrID(repo *models.Repository, repositoryID string) string {
 		return repo.Name
 	}
 	return repositoryID
+}
+
+// resolveBranchAddRepoRef resolves LocalPath / GitHubURL on the add_branch
+// request to a concrete RepositoryID up front so the rest of the flow
+// (duplicate scan, row insert) operates on a stable UUID. Returns a cleanup
+// callback that the caller must invoke on any error path between resolution
+// and a successful task_repositories insert — when the call created a fresh
+// Repository row, the callback deletes it so workspace state doesn't accrue
+// dangling provider rows. Pure no-op when RepositoryID was already set or
+// neither alternative identifier was supplied.
+func (s *Service) resolveBranchAddRepoRef(
+	ctx context.Context, task *models.Task, req *AddBranchToTaskRequest, noopCleanup func(),
+) (func(), error) {
+	if req.RepositoryID != "" || (req.LocalPath == "" && req.GitHubURL == "") {
+		return noopCleanup, nil
+	}
+	resolvedID, resolvedBranch, createdByUs, resolveErr := s.ResolveRepositoryRef(ctx, task.WorkspaceID, TaskRepositoryInput{
+		LocalPath:               req.LocalPath,
+		GitHubURL:               req.GitHubURL,
+		BaseBranch:              req.BaseBranch,
+		ResolveProviderDefaults: true,
+	})
+	if resolveErr != nil {
+		return noopCleanup, fmt.Errorf("resolve repository: %w", resolveErr)
+	}
+	req.RepositoryID = resolvedID
+	if req.BaseBranch == "" {
+		req.BaseBranch = resolvedBranch
+	}
+	// Register cleanup only when this call actually inserted the Repository
+	// row. The previous heuristic (workspace pre-list snapshot vs resolvedID)
+	// had a TOCTOU race: a concurrent add_branch for the same GitHub URL
+	// could create the row between the snapshot and FindOrCreateRepository,
+	// then we'd register cleanup against another request's data and delete
+	// it on any later failure here. createdByUs is set by FindOrCreateRepository
+	// / CreateRepository themselves and can't be spoofed by concurrency.
+	if resolvedID == "" || !createdByUs {
+		return noopCleanup, nil
+	}
+	createdID := resolvedID
+	cleanup := func() {
+		// Route through Service.DeleteRepository so the matching
+		// repository.deleted event fires; the create path published
+		// repository.created in CreateRepository, and skipping the
+		// delete event would leave WS subscribers / frontend caches
+		// holding a phantom row.
+		//
+		// Detach from the captured ctx via WithoutCancel: the rollback
+		// often runs precisely because the caller's ctx was cancelled
+		// (timeout, client disconnect), and reusing it would also kill
+		// the cleanup query and orphan the row we just created.
+		rollbackCtx := context.WithoutCancel(ctx)
+		if delErr := s.DeleteRepository(rollbackCtx, createdID); delErr != nil {
+			s.logger.Warn("AddBranchToTask: failed to roll back created repository",
+				zap.String("repository_id", createdID),
+				zap.Error(delErr))
+		}
+	}
+	return cleanup, nil
 }

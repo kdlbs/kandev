@@ -42,6 +42,21 @@ type TaskExecutionStopper interface {
 	StopExecution(ctx context.Context, executionID, reason string, force bool) error
 }
 
+// ProviderDefaultBranchProber resolves a provider repo's default branch
+// (e.g. "main" / "master") without requiring a local clone. Used by
+// AddBranchToTask to satisfy the worktree-create precondition synchronously,
+// since add_branch does not trigger the executor-side backfillRepoDefaultBranch
+// path. Default implementation (cmd/kandev) shells out to
+// `git ls-remote --symref`; tests inject a stub via SetProviderDefaultBranchProber.
+//
+// Implementations MUST honour ctx cancellation so a slow / hung remote does not
+// stall the calling MCP tool. Returns ("", error) on probe failure — callers
+// fall through to the explicit "cannot resolve base_branch" rejection rather
+// than persisting an empty-default row.
+type ProviderDefaultBranchProber interface {
+	ProbeDefaultBranch(ctx context.Context, provider, owner, name string) (string, error)
+}
+
 // BranchMaterializer creates a worktree on disk and persists a
 // task_session_worktrees row for a newly added task_repository row, without
 // restarting the agent. Used by AddBranchToTask so MCP-driven "add a branch
@@ -148,6 +163,7 @@ type Service struct {
 	worktreeCleanup       WorktreeCleanup
 	executionStopper      TaskExecutionStopper
 	branchMaterializer    BranchMaterializer
+	providerProber        ProviderDefaultBranchProber
 	gitArchiveCapture     GitArchiveCapture
 	workflowStepCreator   WorkflowStepCreator
 	workflowStepGetter    WorkflowStepGetter
@@ -195,6 +211,14 @@ func (s *Service) SetWorktreeCleanup(cleanup WorktreeCleanup) {
 // task_repositories row and the worktree appears on next session launch.
 func (s *Service) SetBranchMaterializer(m BranchMaterializer) {
 	s.branchMaterializer = m
+}
+
+// SetProviderDefaultBranchProber wires the synchronous default-branch probe
+// used by AddBranchToTask's GitHub-URL resolution. Optional — when unset,
+// add_branch with a provider URL and no base_branch falls through to the
+// "cannot resolve base_branch" rejection instead of persisting an empty row.
+func (s *Service) SetProviderDefaultBranchProber(p ProviderDefaultBranchProber) {
+	s.providerProber = p
 }
 
 // SetExecutionStopper wires the task execution stopper (orchestrator).

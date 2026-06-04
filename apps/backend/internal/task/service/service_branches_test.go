@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -640,5 +642,289 @@ func TestCreateTask_RejectsSameRepoSameBranch(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "more than once") {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// stubProber implements ProviderDefaultBranchProber for tests; returns the
+// preset branch (which may be empty to simulate probe failure) and records
+// the call so tests can assert it ran.
+type stubProber struct {
+	branch          string
+	err             error
+	calls           int
+	lastProviderArg string
+	lastOwner       string
+	lastName        string
+}
+
+func (p *stubProber) ProbeDefaultBranch(_ context.Context, provider, owner, name string) (string, error) {
+	p.calls++
+	p.lastProviderArg = provider
+	p.lastOwner = owner
+	p.lastName = name
+	return p.branch, p.err
+}
+
+// stubMaterializer implements BranchMaterializer for tests; the err field
+// controls whether the materialize step succeeds.
+type stubMaterializer struct {
+	err   error
+	calls int
+}
+
+func (m *stubMaterializer) MaterializeBranch(_ context.Context, _ string, _ string) error {
+	m.calls++
+	return m.err
+}
+
+// seedWorktreeTaskEnv attaches a worktree-executor task_environments row so
+// requireWorktreeExecutorForBranchAdd permits the call and taskAlreadyLaunched
+// reports the task as live.
+func seedWorktreeTaskEnv(t *testing.T, repo interface {
+	CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
+}, taskID, id string,
+) {
+	t.Helper()
+	now := time.Now().UTC()
+	if err := repo.CreateTaskEnvironment(context.Background(), &models.TaskEnvironment{
+		ID:            id,
+		TaskID:        taskID,
+		ExecutorType:  string(models.ExecutorTypeWorktree),
+		WorkspacePath: "/tmp/task-env",
+		Status:        "ready",
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+}
+
+// TestAddBranchToTask_RejectsProviderURLWithUnresolvableBaseBranch pins the
+// bug fix: an add_branch call with repository_url for a repo that has no
+// resolvable default branch (probe returns empty, no existing repo row in
+// workspace) must return a "cannot resolve base_branch" error and leave no
+// orphan rows behind — neither task_repositories nor a freshly-created
+// Repository row.
+func TestAddBranchToTask_RejectsProviderURLWithUnresolvableBaseBranch(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "WS"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
+	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "frontend", DefaultBranch: "main"})
+
+	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID:    "ws-1",
+		WorkflowID:     "wf-1",
+		WorkflowStepID: "step-1",
+		Title:          "Provider URL",
+		Repositories: []TaskRepositoryInput{
+			{RepositoryID: "repo-1", BaseBranch: "main"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	seedWorktreeTaskEnv(t, repo, task.ID, "env-1")
+	svc.SetProviderDefaultBranchProber(&stubProber{branch: ""}) // probe fails
+
+	beforeRepos, _ := repo.ListRepositories(ctx, "ws-1")
+	beforeRows, _ := repo.ListTaskRepositories(ctx, task.ID)
+
+	_, err = svc.AddBranchToTask(ctx, AddBranchToTaskRequest{
+		TaskID:    task.ID,
+		GitHubURL: "https://github.com/acme/never-seen",
+	})
+	if err == nil {
+		t.Fatal("expected error for unresolvable base_branch")
+	}
+	if !strings.Contains(err.Error(), "cannot resolve base_branch") {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	afterRepos, _ := repo.ListRepositories(ctx, "ws-1")
+	if len(afterRepos) != len(beforeRepos) {
+		t.Errorf("expected no orphan repositories row; before=%d after=%d", len(beforeRepos), len(afterRepos))
+	}
+	afterRows, _ := repo.ListTaskRepositories(ctx, task.ID)
+	if len(afterRows) != len(beforeRows) {
+		t.Errorf("expected no task_repositories row insert; before=%d after=%d", len(beforeRows), len(afterRows))
+	}
+
+	// Repository.created + repository.deleted must be symmetric on the
+	// rollback path so WS subscribers / frontend caches don't keep a
+	// phantom row after the resolve-then-fail sequence.
+	var created, deleted int
+	for _, evt := range eventBus.GetPublishedEvents() {
+		switch evt.Type {
+		case events.RepositoryCreated:
+			created++
+		case events.RepositoryDeleted:
+			deleted++
+		}
+	}
+	if created != deleted {
+		t.Errorf("repository create/delete events not symmetric: created=%d deleted=%d", created, deleted)
+	}
+}
+
+// TestAddBranchToTask_ProviderURLResolvesDefaultBranchAndPersists exercises
+// the happy provider-URL path: the synchronous probe returns "main", which
+// must populate both the new Repository's default_branch and the
+// task_repositories row's base_branch.
+func TestAddBranchToTask_ProviderURLResolvesDefaultBranchAndPersists(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "WS"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
+	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "frontend", DefaultBranch: "main"})
+
+	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID:    "ws-1",
+		WorkflowID:     "wf-1",
+		WorkflowStepID: "step-1",
+		Title:          "Provider URL happy",
+		Repositories: []TaskRepositoryInput{
+			{RepositoryID: "repo-1", BaseBranch: "main"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	// No task_environments row — exercises the pre-launch path so we don't
+	// also need a materializer for the happy persist assertion.
+	prober := &stubProber{branch: "main"}
+	svc.SetProviderDefaultBranchProber(prober)
+
+	added, err := svc.AddBranchToTask(ctx, AddBranchToTaskRequest{
+		TaskID:    task.ID,
+		GitHubURL: "https://github.com/acme/widgets",
+	})
+	if err != nil {
+		t.Fatalf("AddBranchToTask: %v", err)
+	}
+	if prober.calls != 1 {
+		t.Errorf("expected probe to run once, got %d calls", prober.calls)
+	}
+	if prober.lastProviderArg != "github" || prober.lastOwner != "acme" || prober.lastName != "widgets" {
+		t.Errorf("unexpected probe args: %+v", prober)
+	}
+	if added.BaseBranch != "main" {
+		t.Errorf("expected task_repositories.base_branch=main, got %q", added.BaseBranch)
+	}
+	created, err := svc.GetRepository(ctx, added.RepositoryID)
+	if err != nil || created == nil {
+		t.Fatalf("GetRepository: %v", err)
+	}
+	if created.DefaultBranch != "main" {
+		t.Errorf("expected repositories.default_branch=main, got %q", created.DefaultBranch)
+	}
+	if created.ProviderOwner != "acme" || created.ProviderName != "widgets" {
+		t.Errorf("unexpected provider info: %+v", created)
+	}
+}
+
+// TestAddBranchToTask_MaterializeFailureRollsBackOnLiveTask covers the
+// materialize-failure path on an already-launched worktree task: the
+// task_repositories row must be deleted and the error must propagate to the
+// caller rather than being swallowed. Also pins that no task.updated event
+// is published on the rollback path — emitting one would push a phantom row
+// to WS clients and require a second event to undo it.
+func TestAddBranchToTask_MaterializeFailureRollsBackOnLiveTask(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "WS"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
+	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "frontend", DefaultBranch: "main"})
+
+	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID:    "ws-1",
+		WorkflowID:     "wf-1",
+		WorkflowStepID: "step-1",
+		Title:          "Live task",
+		Repositories: []TaskRepositoryInput{
+			{RepositoryID: "repo-1", BaseBranch: "main"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	seedWorktreeTaskEnv(t, repo, task.ID, "env-1")
+	mat := &stubMaterializer{err: fmt.Errorf("simulated git failure")}
+	svc.SetBranchMaterializer(mat)
+
+	beforeRows, _ := repo.ListTaskRepositories(ctx, task.ID)
+	eventBus.ClearEvents()
+	_, err = svc.AddBranchToTask(ctx, AddBranchToTaskRequest{
+		TaskID:         task.ID,
+		RepositoryID:   "repo-1",
+		BaseBranch:     "main",
+		CheckoutBranch: "feature/x",
+	})
+	if err == nil {
+		t.Fatal("expected materialize failure to propagate")
+	}
+	if !strings.Contains(err.Error(), "simulated git failure") {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if mat.calls != 1 {
+		t.Errorf("expected materializer to be called once, got %d", mat.calls)
+	}
+	afterRows, _ := repo.ListTaskRepositories(ctx, task.ID)
+	if len(afterRows) != len(beforeRows) {
+		t.Errorf("expected task_repositories row rolled back; before=%d after=%d", len(beforeRows), len(afterRows))
+	}
+	for _, evt := range eventBus.GetPublishedEvents() {
+		if evt.Type == events.TaskUpdated {
+			t.Errorf("did not expect task.updated on rollback path; got %+v", evt)
+		}
+	}
+}
+
+// TestAddBranchToTask_MaterializeSkippedPreLaunchStillSucceeds preserves the
+// legacy best-effort behaviour for pre-launch tasks: materializer failure on
+// a task with no task_environments row is logged-and-continued, and the
+// task_repositories row stays for the launcher to pick up.
+func TestAddBranchToTask_MaterializeSkippedPreLaunchStillSucceeds(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "WS"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
+	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "frontend", DefaultBranch: "main"})
+
+	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID:    "ws-1",
+		WorkflowID:     "wf-1",
+		WorkflowStepID: "step-1",
+		Title:          "Pre-launch",
+		Repositories: []TaskRepositoryInput{
+			{RepositoryID: "repo-1", BaseBranch: "main"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	// No task_environments row → taskAlreadyLaunched reports false.
+	mat := &stubMaterializer{err: fmt.Errorf("ignored on pre-launch tasks")}
+	svc.SetBranchMaterializer(mat)
+
+	added, err := svc.AddBranchToTask(ctx, AddBranchToTaskRequest{
+		TaskID:         task.ID,
+		RepositoryID:   "repo-1",
+		BaseBranch:     "main",
+		CheckoutBranch: "feature/x",
+	})
+	if err != nil {
+		t.Fatalf("AddBranchToTask should not surface materialize error pre-launch: %v", err)
+	}
+	if added.CheckoutBranch != "feature/x" {
+		t.Errorf("unexpected row: %+v", added)
+	}
+	rows, _ := repo.ListTaskRepositories(ctx, task.ID)
+	if len(rows) != 2 {
+		t.Errorf("expected row to remain after pre-launch materialize failure; got %d rows", len(rows))
 	}
 }

@@ -45,19 +45,30 @@ export function resolveLoadedSessionId(
  * `lastSessionByTaskId`) over `primarySessionId`, so opening a non-primary
  * tab then bouncing through another task does not silently snap the user
  * back to primary. Falls back to `primarySessionId` when the remembered
- * session is unknown / missing an env mapping (e.g. it was deleted).
+ * session is unknown / missing an env mapping (e.g. it was deleted), OR
+ * when it belongs to a different task — the latter guards against a poisoned
+ * `lastSessionByTaskId` entry written by a stale dockview panel-activation
+ * during a task switch (see `setupSessionTabSync`).
  */
-export function resolvePreferredSessionId(
-  taskId: string,
-  primarySessionId: string,
-  lastSessionByTaskId: Record<string, string>,
-  environmentIdBySessionId: Record<string, string>,
-): string {
+export function resolvePreferredSessionId(args: {
+  taskId: string;
+  primarySessionId: string;
+  lastSessionByTaskId: Record<string, string>;
+  environmentIdBySessionId: Record<string, string>;
+  taskSessionsById: Record<string, TaskSession>;
+}): string {
+  const {
+    taskId,
+    primarySessionId,
+    lastSessionByTaskId,
+    environmentIdBySessionId,
+    taskSessionsById,
+  } = args;
   const last = lastSessionByTaskId[taskId];
-  if (last && environmentIdBySessionId[last]) {
-    return last;
-  }
-  return primarySessionId;
+  if (!last || !environmentIdBySessionId[last]) return primarySessionId;
+  const lastTaskId = taskSessionsById[last]?.task_id;
+  if (lastTaskId && lastTaskId !== taskId) return primarySessionId;
+  return last;
 }
 
 export function buildSwitchToSession(
@@ -162,12 +173,13 @@ export function selectTaskWithLayout(params: {
     });
   }
   if (task?.primarySessionId) {
-    const targetSessionId = resolvePreferredSessionId(
+    const targetSessionId = resolvePreferredSessionId({
       taskId,
-      task.primarySessionId,
-      state.tasks.lastSessionByTaskId,
-      state.environmentIdBySessionId,
-    );
+      primarySessionId: task.primarySessionId,
+      lastSessionByTaskId: state.tasks.lastSessionByTaskId,
+      environmentIdBySessionId: state.environmentIdBySessionId,
+      taskSessionsById: state.taskSessions.items,
+    });
     const hasEnvId = !!state.environmentIdBySessionId[targetSessionId];
     if (hasEnvId) {
       switchToSession(taskId, targetSessionId, oldSessionId);

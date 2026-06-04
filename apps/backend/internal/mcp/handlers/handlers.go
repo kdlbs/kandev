@@ -821,7 +821,8 @@ func classifyAddBranchError(err error) string {
 		return ws.ErrorCodeConflict
 	case strings.Contains(msg, "repository_id is required"),
 		strings.Contains(msg, "only supported on the worktree executor"),
-		strings.Contains(msg, "task_id is required"):
+		strings.Contains(msg, "task_id is required"),
+		strings.Contains(msg, "cannot resolve base_branch"):
 		return ws.ErrorCodeValidation
 	case strings.Contains(msg, "GitHub URL"),
 		strings.Contains(msg, "github.com/owner/repo"),

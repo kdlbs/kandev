@@ -105,12 +105,14 @@ func (a *Adapter) sendPrompt(ctx context.Context, message string, attachments []
 	}
 
 	// Start prompt span — notification spans become children via getPromptTraceCtx()
-	promptCtx, promptSpan := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "prompt")
+	traceCtx, promptSpan := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "prompt")
 	promptSpan.SetAttributes(
 		attribute.String("session_id", sessionID),
 		attribute.Int("prompt_length", len(finalMessage)),
 		attribute.Int("image_count", len(attachments)),
 	)
+	promptCtx, turn := a.registerPromptTurn(traceCtx)
+	defer a.clearPromptTurn(turn)
 	a.setPromptTraceCtx(promptCtx)
 
 	// Clear the loading flag before sending the prompt.
@@ -130,10 +132,22 @@ func (a *Adapter) sendPrompt(ctx context.Context, message string, attachments []
 		zap.Int("content_blocks", len(contentBlocks)),
 		zap.Int("image_attachments", len(attachments)))
 
-	resp, err := conn.Prompt(promptCtx, acp.PromptRequest{
-		SessionId: acp.SessionId(sessionID),
-		Prompt:    contentBlocks,
-	})
+	var resp acp.PromptResponse
+	var err error
+	go func() {
+		defer close(turn.rpcDone)
+		resp, err = conn.Prompt(promptCtx, acp.PromptRequest{
+			SessionId: acp.SessionId(sessionID),
+			Prompt:    contentBlocks,
+		})
+	}()
+
+	if waitErr := a.waitForPromptRPCAfterUserCancel(turn); waitErr != nil {
+		promptSpan.RecordError(waitErr)
+		promptSpan.End()
+		a.clearPromptTraceCtx()
+		return waitErr
+	}
 
 	// Clear prompt context and end span regardless of outcome
 	a.clearPromptTraceCtx()
@@ -331,13 +345,30 @@ func (a *Adapter) Cancel(ctx context.Context) error {
 	// Mark all active tool calls as cancelled before sending cancel to agent.
 	a.cancelActiveToolCalls(sessionID)
 
-	err := conn.Cancel(ctx, acp.CancelNotification{
+	if err := conn.Cancel(ctx, acp.CancelNotification{
 		SessionId: acp.SessionId(sessionID),
-	})
-	if err != nil {
+	}); err != nil {
 		span.RecordError(err)
+		// Still wake the in-flight prompt waiter so sendPrompt can exit within
+		// promptCancelJoinTimeout rather than blocking the gate forever. The
+		// timeout branch in waitForPromptRPCAfterUserCancel will cancel
+		// promptCtx if the agent never acknowledges.
+		a.signalPromptTurnAbort()
+		return err
 	}
-	return err
+
+	turn := a.signalPromptTurnAbort()
+	if err := waitForPromptRPCAfterCancel(turn); err != nil {
+		span.RecordError(err)
+		a.logger.Warn("session/cancel sent but in-flight prompt did not end",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return err
+	}
+
+	a.logger.Info("cancel acknowledged by in-flight prompt",
+		zap.String("session_id", sessionID))
+	return nil
 }
 
 // cancelActiveToolCalls emits cancelled tool_update events for all in-flight tool calls

@@ -192,6 +192,11 @@ type Adapter struct {
 	mu     sync.RWMutex
 	closed bool
 
+	// promptTurn tracks the in-flight session/prompt RPC so Cancel can interrupt it
+	// and wait for acknowledgment before reporting success.
+	promptTurnMu sync.Mutex
+	promptTurn   *promptTurnState
+
 	// promptGate is a 1-slot semaphore that serializes session/prompt calls so
 	// at most one is in flight against the bridge at a time. The ScheduleWakeup
 	// path injects a synthetic prompt via fireWakeup; without this gate it can
@@ -211,6 +216,17 @@ type Adapter struct {
 	lifetimeCtx    context.Context
 	lifetimeCancel context.CancelFunc
 }
+
+// promptTurnState holds synchronization for one in-flight session/prompt RPC.
+type promptTurnState struct {
+	endTurn context.CancelCauseFunc
+	rpcDone chan struct{}
+	abortCh chan struct{}
+}
+
+// promptCancelJoinTimeout bounds how long Cancel and sendPrompt wait for a stuck
+// session/prompt RPC to end after a user cancel. Exposed as a var for tests.
+var promptCancelJoinTimeout = 3 * time.Second
 
 // NewAdapter creates a new ACP protocol adapter.
 // Call Connect() after starting the subprocess to wire up stdin/stdout.
