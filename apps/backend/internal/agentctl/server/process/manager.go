@@ -183,18 +183,41 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 		// Multi-repo: root tracker bound to the bare task root (no fallback,
 		// no events), plus one tracker per repo subdir.
 		m.workspaceTracker = NewWorkspaceTrackerForRepo(cfg.WorkDir, "", log)
+		m.workspaceTracker.SetBaseBranch(lookupBaseBranch(cfg.BaseBranches, ""))
 		for _, child := range repoChildren {
-			m.repoTrackers = append(m.repoTrackers,
-				NewWorkspaceTrackerForRepo(child.path, child.name, log))
+			tr := NewWorkspaceTrackerForRepo(child.path, child.name, log)
+			tr.SetBaseBranch(lookupBaseBranch(cfg.BaseBranches, child.name))
+			m.repoTrackers = append(m.repoTrackers, tr)
 		}
 	} else {
 		m.workspaceTracker = NewWorkspaceTracker(cfg.WorkDir, log)
+		m.workspaceTracker.SetBaseBranch(lookupBaseBranch(cfg.BaseBranches, ""))
 	}
 	m.processRunner = NewProcessRunner(m.workspaceTracker, log, cfg.ProcessBufferMaxBytes)
 	m.shellMgr = shell.NewManager(cfg.WorkDir, log)
 	m.status.Store(StatusStopped)
 	m.exitCode.Store(-1)
 	return m
+}
+
+// lookupBaseBranch reads the task's recorded base branch for a given
+// repository name from the per-instance map. The empty key "" addresses the
+// single-repo / root tracker. Falls back to the empty-key entry when the
+// per-repo entry is missing — preserves single-repo behavior for tasks
+// that record only one base branch under the legacy unkeyed slot.
+func lookupBaseBranch(branches map[string]string, repoName string) string {
+	if len(branches) == 0 {
+		return ""
+	}
+	if v, ok := branches[repoName]; ok && v != "" {
+		return v
+	}
+	if repoName != "" {
+		if v, ok := branches[""]; ok && v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // repositorySubdir is one git-repo child of a multi-repo task root.
@@ -355,8 +378,49 @@ func (m *Manager) GetWorkspaceTrackerFor(subpath string) (*WorkspaceTracker, err
 		return t, nil
 	}
 	t := NewWorkspaceTracker(full, m.logger)
+	t.SetBaseBranch(lookupBaseBranch(m.cfg.BaseBranches, cleaned))
 	m.workspaceTrackersBySubpath[cleaned] = t
 	return t, nil
+}
+
+// UpdateBaseBranches replaces the per-repo base-branch map and re-stamps every
+// active tracker with the new value for its repositoryName, then triggers a
+// non-blocking RefreshGitStatus on each so the UI sees the new
+// BaseCommit/Ahead/Behind without waiting for the next poll tick. Idempotent
+// for unchanged values (RefreshGitStatus is cheap — it's the same call the
+// frontend already makes after stage/unstage).
+//
+// Newly-spawned trackers (rescan path, lazy subpath lookup) read the updated
+// map via lookupBaseBranch — no second push needed for them.
+func (m *Manager) UpdateBaseBranches(ctx context.Context, branches map[string]string) {
+	m.repoTrackersMu.Lock()
+	if m.cfg != nil {
+		m.cfg.BaseBranches = branches
+	}
+	root := m.workspaceTracker
+	trackers := make([]*WorkspaceTracker, len(m.repoTrackers))
+	copy(trackers, m.repoTrackers)
+	m.repoTrackersMu.Unlock()
+
+	m.workspaceTrackersMu.Lock()
+	bySubpath := make(map[string]*WorkspaceTracker, len(m.workspaceTrackersBySubpath))
+	for k, v := range m.workspaceTrackersBySubpath {
+		bySubpath[k] = v
+	}
+	m.workspaceTrackersMu.Unlock()
+
+	if root != nil {
+		root.SetBaseBranch(lookupBaseBranch(branches, root.RepositoryName()))
+		root.RefreshGitStatus(ctx)
+	}
+	for _, t := range trackers {
+		t.SetBaseBranch(lookupBaseBranch(branches, t.RepositoryName()))
+		t.RefreshGitStatus(ctx)
+	}
+	for subpath, t := range bySubpath {
+		t.SetBaseBranch(lookupBaseBranch(branches, subpath))
+		t.RefreshGitStatus(ctx)
+	}
 }
 
 // StartProcess runs a script/process with isolated stdout/stderr.

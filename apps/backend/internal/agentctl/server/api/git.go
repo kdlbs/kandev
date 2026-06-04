@@ -705,13 +705,25 @@ func (s *Server) runGitLogForRepo(
 	baseCommit := req.Since
 	if req.TargetBranch != "" {
 		mergeBase, err := s.computeMergeBase(c.Request.Context(), gitOp, req.TargetBranch)
-		if err != nil {
-			s.logger.Warn("failed to compute merge-base, falling back to since",
-				zap.String("target_branch", req.TargetBranch),
-				zap.String("repo", repo),
-				zap.Error(err))
-		} else if mergeBase != "" {
+		if err == nil && mergeBase != "" {
 			baseCommit = mergeBase
+		} else {
+			// merge-base failed (typically unrelated histories) — fall back
+			// to the branch tip so GetLog gets a real anchor and runs
+			// `git log <tip>..HEAD` instead of dropping into its open-ended
+			// "last N commits" path. Without this, picking a base that
+			// shares no history with HEAD silently turns the commits panel
+			// into the workspace's full HEAD history, mismatching the
+			// numstat-driven stats which fall through cleanly to per-file
+			// sums in the same scenario.
+			if tip, tipErr := gitOp.GetRevParse(c.Request.Context(), req.TargetBranch); tipErr == nil && tip != "" {
+				baseCommit = tip
+			} else if err != nil {
+				s.logger.Warn("failed to compute merge-base and branch tip, falling back to since",
+					zap.String("target_branch", req.TargetBranch),
+					zap.String("repo", repo),
+					zap.Error(err))
+			}
 		}
 	}
 

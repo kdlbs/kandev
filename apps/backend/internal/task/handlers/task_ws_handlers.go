@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/kandev/kandev/internal/orchestrator"
@@ -355,6 +356,43 @@ func (h *TaskHandlers) wsMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 type wsUpdateTaskStateRequest struct {
 	ID    string `json:"id"`
 	State string `json:"state"`
+}
+
+// wsUpdateTaskRepositoryRequest is the body of task.repository.update. Today
+// it only mutates base_branch; future per-row fields can be added under
+// optional pointer types without breaking older clients.
+type wsUpdateTaskRepositoryRequest struct {
+	TaskID           string `json:"task_id"`
+	TaskRepositoryID string `json:"task_repository_id"`
+	BaseBranch       string `json:"base_branch"`
+}
+
+// wsUpdateTaskRepository handles task.repository.update. Mirrors the MCP
+// path through the same service method so both surfaces stay in sync.
+func (h *TaskHandlers) wsUpdateTaskRepository(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsUpdateTaskRepositoryRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.TaskID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	}
+	if req.TaskRepositoryID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_repository_id is required", nil)
+	}
+	taskRepo, err := h.service.UpdateRepositoryBaseBranch(ctx, service.UpdateRepositoryBaseBranchRequest{
+		TaskID:           req.TaskID,
+		TaskRepositoryID: req.TaskRepositoryID,
+		BaseBranch:       req.BaseBranch,
+	})
+	if err != nil {
+		h.logger.Error("failed to update task repository", zap.Error(err))
+		if errors.Is(err, service.ErrTaskRepositoryNotFound) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, err.Error(), nil)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update task repository: "+err.Error(), nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, taskRepo)
 }
 
 func (h *TaskHandlers) wsUpdateTaskState(ctx context.Context, msg *ws.Message) (*ws.Message, error) {

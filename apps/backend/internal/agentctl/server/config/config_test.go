@@ -115,3 +115,32 @@ func TestInjectKandevMcpServer_HttpFirst(t *testing.T) {
 		t.Errorf("expected upstream 'other' entry last, got %+v", got[2])
 	}
 }
+
+// TestApplyOverrides_BaseBranches verifies the per-instance per-repo base
+// branch map flows from the HTTP-request-driven InstanceOverrides onto the
+// InstanceConfig the process manager consumes. Empty/nil overrides must NOT
+// clobber a previously-set value — applyOverrides is a one-shot merge.
+func TestApplyOverrides_BaseBranches(t *testing.T) {
+	t.Run("non-empty overrides populate cfg", func(t *testing.T) {
+		cfg := &InstanceConfig{}
+		applyOverrides(cfg, &InstanceOverrides{
+			BaseBranches: map[string]string{"repo-a": "main", "repo-b": "develop"},
+		})
+		if got := cfg.BaseBranches["repo-a"]; got != "main" {
+			t.Errorf("BaseBranches[repo-a] = %q, want main", got)
+		}
+		if got := cfg.BaseBranches["repo-b"]; got != "develop" {
+			t.Errorf("BaseBranches[repo-b] = %q, want develop", got)
+		}
+	})
+
+	t.Run("empty overrides preserve existing", func(t *testing.T) {
+		cfg := &InstanceConfig{
+			BaseBranches: map[string]string{"repo-a": "main"},
+		}
+		applyOverrides(cfg, &InstanceOverrides{BaseBranches: nil})
+		if got := cfg.BaseBranches["repo-a"]; got != "main" {
+			t.Errorf("empty overrides clobbered existing value; got %q", got)
+		}
+	})
+}

@@ -117,6 +117,7 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		AssumeMcpHttp:       req.AssumeMcpHttp,
 		McpMode:             req.McpMode,
 		RequiresProcessKill: req.RequiresProcessKill,
+		BaseBranches:        req.BaseBranches,
 	}
 
 	m.logger.Info("CreateInstance: applying overrides",

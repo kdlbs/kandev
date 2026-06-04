@@ -44,13 +44,14 @@ const (
 // wire-protocol rename touches every tool in one place AND so goconst
 // doesn't flag the literals as repeated string occurrences.
 const (
-	mcpKeyTaskID         = "task_id"
-	mcpKeyRepositoryID   = "repository_id"
-	mcpKeyRepositoryURL  = "repository_url"
-	mcpKeyLocalPath      = "local_path"
-	mcpKeyGitHubURL      = "github_url"
-	mcpKeyBaseBranch     = "base_branch"
-	mcpKeyCheckoutBranch = "checkout_branch"
+	mcpKeyTaskID           = "task_id"
+	mcpKeyRepositoryID     = "repository_id"
+	mcpKeyTaskRepositoryID = "task_repository_id"
+	mcpKeyRepositoryURL    = "repository_url"
+	mcpKeyLocalPath        = "local_path"
+	mcpKeyGitHubURL        = "github_url"
+	mcpKeyBaseBranch       = "base_branch"
+	mcpKeyCheckoutBranch   = "checkout_branch"
 )
 
 // locatorCount returns how many of the supplied repository-locator strings
@@ -373,6 +374,7 @@ func (s *Server) registerTools() {
 		// Task-mode only: requires a live session to attach the new
 		// (repository, branch) to. External mode has no such context.
 		s.registerAddBranchToTaskTool()
+		s.registerUpdateRepositoryBaseBranchTool()
 		count++
 	}
 	s.logger.Info("registered MCP tools",
@@ -622,6 +624,60 @@ func (s *Server) addBranchToTaskHandler() server.ToolHandlerFunc {
 		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPAddBranchToTask, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+// registerUpdateRepositoryBaseBranchTool registers
+// update_repository_base_branch_kandev. Lets an agent or the UI change the
+// base branch used for diff stats / changes panel comparison after a task
+// has already been created — used by promotion-chain users who branched
+// from a release branch instead of `main`.
+func (s *Server) registerUpdateRepositoryBaseBranchTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("update_repository_base_branch_kandev",
+			mcp.WithDescription(`Change the base branch used by a task repository for diff stats and the Changes panel.
+
+Use when a task was created against the wrong base (e.g. picked up `+"`main`"+` when the work was forked from a release / QA / staging branch). The Changes panel and per-task +/- counts compare HEAD against this branch.
+
+The new base branch ALSO becomes the PR target on push for this repo — picking a base = picking the promote-up target. If you want decoupled "diff against" vs "PR against" semantics, do not use this tool; that distinction is not yet supported.
+
+The agentctl tracker is updated live: a successful call refreshes BaseCommit / Ahead / Behind without needing a session restart.`),
+			mcp.WithString("task_id", mcp.Description("The task whose repository to update. Defaults to the current task when omitted.")),
+			mcp.WithString("task_repository_id", mcp.Description("UUID of the task_repositories row to update. Required — disambiguates multi-repo tasks. Find it via list_tasks_kandev's repositories[] field.")),
+			mcp.WithString("base_branch", mcp.Description("New base branch name (e.g. 'staging', 'release/v2.4'). Required.")),
+		),
+		s.wrapHandler("update_repository_base_branch_kandev", s.updateRepositoryBaseBranchHandler()),
+	)
+}
+
+func (s *Server) updateRepositoryBaseBranchHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID := req.GetString(mcpKeyTaskID, "")
+		if taskID == "" {
+			taskID = s.taskID
+		}
+		if taskID == "" {
+			return mcp.NewToolResultError("task_id is required (no current task context to default to)"), nil
+		}
+		taskRepositoryID := req.GetString(mcpKeyTaskRepositoryID, "")
+		if taskRepositoryID == "" {
+			return mcp.NewToolResultError("task_repository_id is required"), nil
+		}
+		baseBranch := req.GetString(mcpKeyBaseBranch, "")
+		if baseBranch == "" {
+			return mcp.NewToolResultError("base_branch is required"), nil
+		}
+		payload := map[string]interface{}{
+			mcpKeyTaskID:           taskID,
+			mcpKeyTaskRepositoryID: taskRepositoryID,
+			mcpKeyBaseBranch:       baseBranch,
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPUpdateRepositoryBaseBranch, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")

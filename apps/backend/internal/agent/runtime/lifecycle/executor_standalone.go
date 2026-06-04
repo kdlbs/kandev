@@ -122,6 +122,7 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 		AssumeMcpHttp:       assumeMcpHttp,
 		McpMode:             req.McpMode,
 		RequiresProcessKill: requiresProcessKill,
+		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 	}
 
 	r.logger.Info("CreateInstance: sending request to agentctl",

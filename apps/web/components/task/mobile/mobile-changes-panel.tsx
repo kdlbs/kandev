@@ -106,6 +106,7 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
           onRepoRebase={data.repoCallbacks.onRepoRebase}
           onRepoMerge={data.repoCallbacks.onRepoMerge}
           repoDisplayName={data.repoDisplayName}
+          taskId={data.activeTaskId}
         />
         <ChangesPanelBody {...bodyProps} />
       </PanelRoot>

@@ -220,6 +220,13 @@ type InstanceConfig struct {
 	// shutdown instead of relying on stdin close. Required for agents whose
 	// runtime keeps child processes alive when stdin closes (opencode acp).
 	RequiresProcessKill bool
+
+	// BaseBranches maps RepositoryName → base branch ref for per-repo diff
+	// stats. The empty key "" applies to the root / single-repo tracker.
+	// process.Manager reads this at construction and stamps each
+	// WorkspaceTracker's baseBranch. Empty falls back to the hardcoded
+	// origin/main → master priority list inside workspace_git_status.go.
+	BaseBranches map[string]string
 }
 
 // Load loads the configuration from environment variables.
@@ -380,6 +387,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.RequiresProcessKill {
 		cfg.RequiresProcessKill = true
 	}
+	if len(overrides.BaseBranches) > 0 {
+		cfg.BaseBranches = overrides.BaseBranches
+	}
 }
 
 // InstanceOverrides allows overriding default values when creating an instance
@@ -400,6 +410,7 @@ type InstanceOverrides struct {
 	AssumeMcpHttp       bool
 	McpMode             string
 	RequiresProcessKill bool
+	BaseBranches        map[string]string
 }
 
 // ParseCommand splits a command string into arguments

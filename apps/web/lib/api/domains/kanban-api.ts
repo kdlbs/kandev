@@ -111,6 +111,29 @@ export async function updateTask(
   });
 }
 
+export async function updateTaskRepositoryBaseBranch(
+  taskId: string,
+  taskRepositoryId: string,
+  baseBranch: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<{
+    id: string;
+    task_id: string;
+    repository_id: string;
+    base_branch: string;
+    checkout_branch?: string;
+    position?: number;
+  }>(`/api/v1/tasks/${taskId}/repositories/${taskRepositoryId}`, {
+    ...options,
+    init: {
+      method: "PATCH",
+      body: JSON.stringify({ base_branch: baseBranch }),
+      ...(options?.init ?? {}),
+    },
+  });
+}
+
 export async function deleteTask(
   taskId: string,
   params?: { cascade?: boolean },

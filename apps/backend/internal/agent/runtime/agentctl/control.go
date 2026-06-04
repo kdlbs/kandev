@@ -59,6 +59,12 @@ type CreateInstanceRequest struct {
 	// keeps child processes (e.g. MCP servers) alive when stdin closes —
 	// notably opencode acp.
 	RequiresProcessKill bool `json:"requires_process_kill,omitempty"`
+
+	// BaseBranches maps RepositoryName → base branch ref for the task's
+	// per-repo diff stats. The empty key "" applies to the root /
+	// single-repo tracker. Empty map disables the override and falls back
+	// to the hardcoded origin/main → master priority list inside agentctl.
+	BaseBranches map[string]string `json:"base_branches,omitempty"`
 }
 
 // CreateInstanceResponse contains the result of creating a new agent instance.

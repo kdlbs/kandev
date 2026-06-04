@@ -156,6 +156,13 @@ type CreateRequest struct {
 	// runtime keeps child processes alive when stdin closes (notably
 	// opencode acp, which spawns MCP server children that leak otherwise).
 	RequiresProcessKill bool `json:"requires_process_kill,omitempty"`
+
+	// BaseBranches maps RepositoryName → base branch ref for per-repo diff
+	// stats. The empty key "" applies to the root / single-repo tracker.
+	// Each WorkspaceTracker reads its entry at startup and uses it as the
+	// first candidate when resolving BaseCommit / Ahead / Behind. Empty
+	// disables the override.
+	BaseBranches map[string]string `json:"base_branches,omitempty"`
 }
 
 // CreateResponse contains the result of creating a new agent instance.

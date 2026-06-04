@@ -34,6 +34,39 @@ func getMetadataString(metadata map[string]interface{}, key string) string {
 	return ""
 }
 
+// getMetadataStringMap extracts a map[string]string at key from metadata. The
+// value may have been deserialized as map[string]interface{} (e.g. when the
+// metadata round-tripped through JSON for a remote executor) or kept as a
+// concrete map; both are handled. Returns nil when the key is absent or the
+// value is not a string-keyed map of strings.
+func getMetadataStringMap(metadata map[string]interface{}, key string) map[string]string {
+	if metadata == nil {
+		return nil
+	}
+	switch v := metadata[key].(type) {
+	case map[string]string:
+		if len(v) == 0 {
+			return nil
+		}
+		return v
+	case map[string]interface{}:
+		if len(v) == 0 {
+			return nil
+		}
+		out := make(map[string]string, len(v))
+		for k, raw := range v {
+			if s, ok := raw.(string); ok {
+				out[k] = s
+			}
+		}
+		if len(out) == 0 {
+			return nil
+		}
+		return out
+	}
+	return nil
+}
+
 // DockerExecutor implements Runtime for Docker-based agent execution.
 // The Docker client is created lazily on first use (not at startup).
 type DockerExecutor struct {
@@ -208,6 +241,7 @@ func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) 
 		PrepareScript:     r.resolvePrepareScript(req),
 		ImageTagOverride:  getMetadataString(req.Metadata, MetadataKeyImageTagOverride),
 		LocalClonePath:    localCloneMountPath(req.Metadata),
+		BaseBranches:      getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 	}
 }
 
@@ -468,6 +502,7 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 		AssumeMcpHttp:       assumeMcpHttp,
 		McpMode:             req.McpMode,
 		RequiresProcessKill: requiresProcessKill,
+		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 	}
 }
 

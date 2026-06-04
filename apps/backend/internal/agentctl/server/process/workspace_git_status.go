@@ -149,25 +149,44 @@ func (wt *WorkspaceTracker) getGitBranchInfo(ctx context.Context, update *types.
 		update.HeadCommit = strings.TrimSpace(string(headOut))
 	}
 
-	// Get base commit SHA using merge-base between current branch and the integration branch.
-	// Always use the integration branch (origin/main, etc.) rather than the tracking branch,
-	// so we show all changes this branch introduces compared to the main development line.
-	var baseBranch string
-	for _, candidate := range []string{"origin/main", "origin/master", "main", "master"} {
-		if err := wt.runGit(ctx, "rev-parse", "--verify", candidate); err == nil {
-			baseBranch = candidate
-			break
-		}
-	}
+	// Get base commit SHA using merge-base between current branch and the
+	// integration branch. The task's recorded base_branch (if any) wins;
+	// otherwise fall back to the integration branch (origin/main, etc.)
+	// rather than the tracking branch, so we show all changes this branch
+	// introduces compared to the main development line. The stored ref may
+	// be absent in the local clone (e.g. a feature branch never fetched);
+	// `git rev-parse --verify` filters those automatically.
+	//
+	// When `git merge-base` fails (typically because the branches share no
+	// history — local backups, freshly imported repos, etc.) we fall back
+	// to the branch tip itself. This keeps the diff/log range anchored
+	// against the ref the user actually picked instead of going empty,
+	// which the agentctl git-log handler used to silently translate into
+	// "last N commits of HEAD" (the symptom in the no-merge-base repro:
+	// `+1 -0` on the card vs. 100 unrelated commits in the panel).
+	baseBranch := wt.resolveBaseBranch(ctx)
 	if baseBranch != "" {
-		// Use merge-base to find common ancestor between current branch and base branch.
-		// This is correct even when the branch has diverged from main.
-		if mergeBaseOut, err := wt.runGitOutput(ctx, "merge-base", baseBranch, "HEAD"); err == nil {
-			update.BaseCommit = strings.TrimSpace(string(mergeBaseOut))
-		}
+		update.BaseCommit = wt.computeBaseCommit(ctx, baseBranch)
 	}
 
 	return nil
+}
+
+// computeBaseCommit resolves the SHA the workspace_git_diff numstat command
+// uses as its diff anchor. Prefers merge-base(baseBranch, HEAD) because that
+// matches "changes this branch introduces"; falls back to the tip of
+// baseBranch when no merge-base exists so we still produce a stable anchor
+// for unrelated-history cases. Returns "" only if both lookups fail.
+func (wt *WorkspaceTracker) computeBaseCommit(ctx context.Context, baseBranch string) string {
+	if out, err := wt.runGitOutput(ctx, "merge-base", baseBranch, "HEAD"); err == nil {
+		if sha := strings.TrimSpace(string(out)); sha != "" {
+			return sha
+		}
+	}
+	if out, err := wt.runGitOutput(ctx, "rev-parse", baseBranch); err == nil {
+		return strings.TrimSpace(string(out))
+	}
+	return ""
 }
 
 // getAheadBehindCounts populates the Ahead/Behind fields relative to the base
@@ -181,16 +200,11 @@ func (wt *WorkspaceTracker) getGitBranchInfo(ctx context.Context, update *types.
 // would silently overwrite the cached counts with 0/0 and hide a legitimate
 // "Pull N" / "Push N" indicator in the UI.
 func (wt *WorkspaceTracker) getAheadBehindCounts(ctx context.Context, update *types.GitStatusUpdate, prior types.GitStatusUpdate) {
-	// Always compare against the base branch (origin/main or origin/master).
-	// Using the remote tracking branch (origin/<feature-branch>) gives wrong counts
-	// after rebase because rebased commits have new SHAs.
-	var compareRef string
-	for _, candidate := range []string{"origin/main", "origin/master"} {
-		if err := wt.runGit(ctx, "rev-parse", "--verify", candidate); err == nil {
-			compareRef = candidate
-			break
-		}
-	}
+	// Always compare against the base branch (task-stored value if set,
+	// otherwise origin/main / origin/master). Using the remote tracking
+	// branch (origin/<feature-branch>) gives wrong counts after rebase
+	// because rebased commits have new SHAs.
+	compareRef := wt.resolveAheadBehindRef(ctx)
 	if compareRef == "" {
 		carryAheadBehind(update, prior)
 		return
@@ -208,6 +222,87 @@ func (wt *WorkspaceTracker) getAheadBehindCounts(ctx context.Context, update *ty
 	}
 	update.Ahead, _ = strconv.Atoi(parts[0])
 	update.Behind, _ = strconv.Atoi(parts[1])
+}
+
+// branchDiffCandidates is the integration-branch priority list used when the
+// task has no recorded base_branch (legacy tasks / external branches). Kept
+// in sync between base-commit and ahead/behind resolution.
+var branchDiffCandidates = []string{"origin/main", "origin/master", "main", "master"}
+
+// aheadBehindFallbackCandidates is the subset of branchDiffCandidates used by
+// ahead/behind counts. Local main/master are intentionally excluded — the
+// counts are meant to reflect divergence from the remote integration line,
+// and falling back to a local branch can show stale, in-progress work.
+var aheadBehindFallbackCandidates = []string{"origin/main", "origin/master"}
+
+// resolveBaseBranch picks the ref that workspace_git_diff uses as the
+// merge-base for BranchAdditions/BranchDeletions. Prefers the task's
+// recorded base_branch (set by the process manager from
+// task_repositories.base_branch); when that's missing or no longer exists
+// in git, falls back to the integration-branch priority list.
+//
+// For each candidate the upstream remote ref (`origin/<name>`) is tried
+// before the bare local ref — matches computeMergeBase in
+// agentctl/server/api/git.go so the task-card stats and the commits panel
+// land on the same merge-base. Without this alignment the picker case
+// shows e.g. `+1 -0` against the local branch tip while the commits panel
+// shows the full 100-commit range against a stale upstream — a confusing
+// stats/commits mismatch even though both sides are computing correctly
+// for the ref name they happened to resolve first.
+func (wt *WorkspaceTracker) resolveBaseBranch(ctx context.Context) string {
+	if stored := wt.BaseBranch(); stored != "" {
+		if ref := wt.resolveStoredRef(ctx, stored); ref != "" {
+			return ref
+		}
+	}
+	for _, candidate := range branchDiffCandidates {
+		if err := wt.runGit(ctx, "rev-parse", "--verify", candidate); err == nil {
+			return candidate
+		}
+	}
+	return ""
+}
+
+// resolveAheadBehindRef is the ahead/behind variant of resolveBaseBranch.
+// It uses the stored base_branch first, then the smaller
+// aheadBehindFallbackCandidates list — local main/master are excluded
+// because they can show stale, in-progress work for divergence counts.
+func (wt *WorkspaceTracker) resolveAheadBehindRef(ctx context.Context) string {
+	if stored := wt.BaseBranch(); stored != "" {
+		if ref := wt.resolveStoredRef(ctx, stored); ref != "" {
+			return ref
+		}
+	}
+	for _, candidate := range aheadBehindFallbackCandidates {
+		if err := wt.runGit(ctx, "rev-parse", "--verify", candidate); err == nil {
+			return candidate
+		}
+	}
+	return ""
+}
+
+// resolveStoredRef expands a task-stored base_branch into the actual ref
+// the merge-base / diff commands should use. Tries `origin/<name>` first
+// (the upstream source of truth — local refs can lag arbitrarily far behind
+// on long-lived worktrees), then the bare name as a fallback for refs that
+// only live locally. Refs that already carry the `origin/` prefix are
+// passed through unchanged so callers can opt out of the remote-first
+// behavior by storing the full `origin/<name>` value.
+func (wt *WorkspaceTracker) resolveStoredRef(ctx context.Context, stored string) string {
+	if strings.HasPrefix(stored, "origin/") {
+		if err := wt.runGit(ctx, "rev-parse", "--verify", stored); err == nil {
+			return stored
+		}
+		return ""
+	}
+	origin := "origin/" + stored
+	if err := wt.runGit(ctx, "rev-parse", "--verify", origin); err == nil {
+		return origin
+	}
+	if err := wt.runGit(ctx, "rev-parse", "--verify", stored); err == nil {
+		return stored
+	}
+	return ""
 }
 
 // carryAheadBehind copies prior.Ahead/Behind onto update when HEAD hasn't

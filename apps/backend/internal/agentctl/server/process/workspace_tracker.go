@@ -38,6 +38,13 @@ type WorkspaceTracker struct {
 	// Empty for the single-repo case.
 	repositoryName string
 
+	// baseBranch is the task-specific base branch used to compute diff stats
+	// (BaseCommit, Ahead/Behind). When set, it takes precedence over the
+	// hardcoded origin/main → master fallback list in workspace_git_status.go.
+	// Sourced from task_repositories.base_branch on the kandev backend.
+	// Empty for legacy tasks or external branches with no recorded base.
+	baseBranch string
+
 	// Current state
 	currentStatus types.GitStatusUpdate
 	currentFiles  types.FileListUpdate
@@ -110,6 +117,25 @@ func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 // rescan path to decide whether a discovered subdir already has a tracker.
 func (wt *WorkspaceTracker) RepositoryName() string {
 	return wt.repositoryName
+}
+
+// SetBaseBranch records the task's stored base branch for this repository.
+// Called once after construction by the process manager; subsequent git
+// status updates use this value as the first candidate when resolving
+// BaseCommit / Ahead / Behind. Empty disables the override and falls back
+// to the hardcoded origin/main → master priority list.
+func (wt *WorkspaceTracker) SetBaseBranch(baseBranch string) {
+	wt.mu.Lock()
+	defer wt.mu.Unlock()
+	wt.baseBranch = baseBranch
+}
+
+// BaseBranch returns the recorded base branch override, if any. Exposed for
+// tests; production callers read it indirectly through the git-status loops.
+func (wt *WorkspaceTracker) BaseBranch() string {
+	wt.mu.RLock()
+	defer wt.mu.RUnlock()
+	return wt.baseBranch
 }
 
 // NewWorkspaceTrackerForRepo creates a tracker scoped to a specific repository

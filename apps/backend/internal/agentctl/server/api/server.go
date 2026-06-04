@@ -110,6 +110,13 @@ func (s *Server) setupRoutes() {
 		// events reach the UI without a session restart.
 		api.POST("/workspace/rescan", s.handleRescanWorkspace)
 
+		// Per-task base-branch map update: kandev backend hits this when
+		// the user picks a different "Compare against" branch via the
+		// changes-panel dropdown. Mutates the manager's BaseBranches map
+		// and triggers a fresh git-status emit so the UI updates without
+		// waiting for the next poll tick.
+		api.POST("/workspace/base-branches", s.handleSetBaseBranches)
+
 		// Workspace file operations (simple HTTP)
 		api.GET("/workspace/tree", s.handleFileTree)
 		api.GET("/workspace/file/content", s.handleFileContent)

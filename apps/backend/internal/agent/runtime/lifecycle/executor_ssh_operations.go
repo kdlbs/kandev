@@ -480,6 +480,7 @@ func createRemoteAgentInstance(
 		McpServers:          req.McpServers,
 		McpMode:             req.McpMode,
 		RequiresProcessKill: requiresProcessKillFromReq(req),
+		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 	})
 	if err != nil {
 		return 0, fmt.Errorf("ssh: marshal create-instance: %w", err)

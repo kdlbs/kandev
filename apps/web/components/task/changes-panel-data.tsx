@@ -243,6 +243,7 @@ export function useChangesPanelData() {
     [taskPRsForMap, repoNameById, pendingByRepo],
   );
   return {
+    activeTaskId,
     git,
     baseBranchDisplay,
     baseBranchByRepo,

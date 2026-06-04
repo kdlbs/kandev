@@ -134,7 +134,38 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 	if req.BaseBranch != "" {
 		metadata[MetadataKeyBaseBranch] = req.BaseBranch
 	}
+	if branches := collectBaseBranches(req); len(branches) > 0 {
+		metadata[MetadataKeyBaseBranches] = branches
+	}
 	return metadata
+}
+
+// collectBaseBranches builds the per-repo {RepositoryName → base_branch}
+// map that agentctl reads to scope diff stats. Single-repo legacy launches
+// are recorded under the empty key "" so single-repo trackers (which have
+// no repositoryName) still find their value. Repos missing a base_branch
+// are skipped so the existing fallback list applies to them.
+func collectBaseBranches(req *LaunchRequest) map[string]string {
+	specs := req.RepoSpecs()
+	if len(specs) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(specs)+1)
+	for _, spec := range specs {
+		if spec.BaseBranch == "" {
+			continue
+		}
+		out[spec.RepoName] = spec.BaseBranch
+	}
+	if req.BaseBranch != "" {
+		if _, ok := out[""]; !ok {
+			out[""] = req.BaseBranch
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // agentCommands holds the initial and continue command strings for an agent execution.

@@ -611,6 +611,42 @@ func (r *Repository) UpdateTaskSessionBaseCommit(ctx context.Context, id string,
 	return nil
 }
 
+// ResetTaskSessionBasesForRepository rewrites base_branch and clears
+// base_commit_sha on every task_session belonging to (taskID, repositoryID).
+// Used by service.UpdateRepositoryBaseBranch after the changes-panel
+// "Compare against" picker changes the recorded base.
+//
+// Clearing base_commit_sha matters because git_handlers.computeGitCommits and
+// computeCumulativeDiff read it first and only fall back to the live
+// agentctl GetGitStatus().BaseCommit (which now resolves against the new
+// base_branch via Phase 1) when the column is empty. Without this reset the
+// task-card stat counts would refresh against the new base while the
+// commits panel + cumulative diff would keep filtering against the OLD
+// commit snapshot — visible to users as "Commits section disappeared
+// after I changed the base".
+//
+// Returns the number of sessions touched so callers can log / no-op when
+// the task has no sessions yet.
+func (r *Repository) ResetTaskSessionBasesForRepository(ctx context.Context, taskID, repositoryID, baseBranch string) (int64, error) {
+	if taskID == "" {
+		return 0, fmt.Errorf("task_id is required")
+	}
+	if repositoryID == "" {
+		return 0, fmt.Errorf("repository_id is required")
+	}
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_sessions
+		SET base_branch = ?, base_commit_sha = '', updated_at = ?
+		WHERE task_id = ? AND repository_id = ?
+	`), baseBranch, now, taskID, repositoryID)
+	if err != nil {
+		return 0, err
+	}
+	rows, _ := result.RowsAffected()
+	return rows, nil
+}
+
 // ListTaskSessions returns all agent sessions for a task
 func (r *Repository) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
 	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTaskSessions")

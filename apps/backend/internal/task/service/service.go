@@ -66,6 +66,15 @@ type ProviderDefaultBranchProber interface {
 // The implementation lives in cmd/kandev (it needs worktree.Manager, the
 // session/env repos, and the repository entity layer) — the service layer
 // only knows the abstract capability.
+// AgentBaseBranchPusher pushes an updated per-repo base-branch map to the
+// agentctl instance(s) of any running execution for a task. Used by
+// UpdateRepositoryBaseBranch so the changes-panel "Compare against" picker
+// updates BaseCommit / Ahead / Behind live, not just at next session start.
+// Implementations must be no-op-safe when the task has no running execution.
+type AgentBaseBranchPusher interface {
+	PushBaseBranchesForTask(ctx context.Context, taskID string, branches map[string]string)
+}
+
 type BranchMaterializer interface {
 	// MaterializeBranch creates the worktree for a freshly inserted
 	// task_repositories row. Best-effort: when no active session exists yet
@@ -176,6 +185,7 @@ type Service struct {
 	repoCloneLocation     RepoCloneLocation
 	blockers              BlockerRepository
 	comments              CommentRepository
+	baseBranchPusher      AgentBaseBranchPusher
 }
 
 // NewService creates a new task service
@@ -211,6 +221,14 @@ func (s *Service) SetWorktreeCleanup(cleanup WorktreeCleanup) {
 // task_repositories row and the worktree appears on next session launch.
 func (s *Service) SetBranchMaterializer(m BranchMaterializer) {
 	s.branchMaterializer = m
+}
+
+// SetAgentBaseBranchPusher wires the live-update push for
+// UpdateRepositoryBaseBranch. Optional — when unset, the persisted DB value
+// is the source of truth and the new base branch takes effect at next
+// session launch.
+func (s *Service) SetAgentBaseBranchPusher(p AgentBaseBranchPusher) {
+	s.baseBranchPusher = p
 }
 
 // SetProviderDefaultBranchProber wires the synchronous default-branch probe

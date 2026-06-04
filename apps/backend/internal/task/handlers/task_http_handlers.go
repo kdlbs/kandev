@@ -909,6 +909,36 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 	c.JSON(http.StatusOK, dto.FromTask(task))
 }
 
+type httpUpdateTaskRepositoryRequest struct {
+	BaseBranch string `json:"base_branch"`
+}
+
+// httpUpdateTaskRepository handles PATCH /tasks/:id/repositories/:repo_id.
+// Today it only mutates base_branch; future per-row fields can be added on
+// httpUpdateTaskRepositoryRequest. Mirrors the WS / MCP paths through the
+// same service method so all three surfaces stay in sync.
+func (h *TaskHandlers) httpUpdateTaskRepository(c *gin.Context) {
+	var body httpUpdateTaskRepositoryRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	taskRepo, err := h.service.UpdateRepositoryBaseBranch(c.Request.Context(), service.UpdateRepositoryBaseBranchRequest{
+		TaskID:           c.Param("id"),
+		TaskRepositoryID: c.Param("repo_id"),
+		BaseBranch:       body.BaseBranch,
+	})
+	if err != nil {
+		if errors.Is(err, service.ErrTaskRepositoryNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, taskRepo)
+}
+
 type httpMoveTaskRequest struct {
 	WorkflowID     string `json:"workflow_id"`
 	WorkflowStepID string `json:"workflow_step_id"`

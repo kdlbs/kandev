@@ -43,6 +43,7 @@ const ChangesPanel = memo(function ChangesPanel(props: ChangesPanelProps) {
         onRepoRebase={data.repoCallbacks.onRepoRebase}
         onRepoMerge={data.repoCallbacks.onRepoMerge}
         repoDisplayName={data.repoDisplayName}
+        taskId={data.activeTaskId}
       />
       <ChangesPanelBody {...buildChangesPanelBodyProps(data, props)} />
     </PanelRoot>
