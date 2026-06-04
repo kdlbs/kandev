@@ -52,6 +52,9 @@ func (m *mockRepository) CreateTask(ctx context.Context, task *models.Task) erro
 func (m *mockRepository) GetTask(ctx context.Context, id string) (*models.Task, error) {
 	return nil, nil
 }
+func (m *mockRepository) GetTasksByIDs(ctx context.Context, ids []string) ([]*models.Task, error) {
+	return nil, nil
+}
 func (m *mockRepository) UpdateTask(ctx context.Context, task *models.Task) error {
 	return nil
 }

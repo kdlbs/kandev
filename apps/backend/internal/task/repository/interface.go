@@ -22,6 +22,7 @@ type WorkspaceRepository interface {
 type TaskRepository interface {
 	CreateTask(ctx context.Context, task *models.Task) error
 	GetTask(ctx context.Context, id string) (*models.Task, error)
+	GetTasksByIDs(ctx context.Context, ids []string) ([]*models.Task, error)
 	UpdateTask(ctx context.Context, task *models.Task) error
 	DeleteTask(ctx context.Context, id string) error
 	ListTasks(ctx context.Context, workflowID string) ([]*models.Task, error)

@@ -1163,28 +1163,7 @@ func (s *Service) augmentWithPRMatches(ctx context.Context, tasks []*models.Task
 		return tasks, total
 	}
 
-	existing := make(map[string]struct{}, len(tasks))
-	for _, t := range tasks {
-		existing[t.ID] = struct{}{}
-	}
-
-	var matched []*models.Task
-	for _, id := range ids {
-		if _, seen := existing[id]; seen {
-			continue
-		}
-		task, gErr := s.tasks.GetTask(ctx, id)
-		if gErr != nil {
-			s.logger.Warn("PR-match task fetch failed; skipping",
-				zap.String("task_id", id), zap.Error(gErr))
-			continue
-		}
-		if task == nil || s.prMatchFilteredOut(task, opts) {
-			continue
-		}
-		existing[id] = struct{}{}
-		matched = append(matched, task)
-	}
+	matched := s.fetchPRMatchedTasks(ctx, ids, tasks, opts)
 	if len(matched) == 0 {
 		return tasks, total
 	}
@@ -1197,6 +1176,44 @@ func (s *Service) augmentWithPRMatches(ctx context.Context, tasks []*models.Task
 		merged = merged[:opts.pageSize]
 	}
 	return merged, total
+}
+
+// fetchPRMatchedTasks batch-loads the resolver's task IDs that aren't already in
+// `existing`, applies the same visibility filters as the repository search, and
+// returns the survivors in resolver order. The resolver returns distinct IDs,
+// so excluding the already-present ones is enough to keep the result deduped.
+func (s *Service) fetchPRMatchedTasks(ctx context.Context, ids []string, existing []*models.Task, opts prSearchOptions) []*models.Task {
+	seen := make(map[string]struct{}, len(existing))
+	for _, t := range existing {
+		seen[t.ID] = struct{}{}
+	}
+	var fetchIDs []string
+	for _, id := range ids {
+		if _, ok := seen[id]; !ok {
+			fetchIDs = append(fetchIDs, id)
+		}
+	}
+	if len(fetchIDs) == 0 {
+		return nil
+	}
+	fetched, err := s.tasks.GetTasksByIDs(ctx, fetchIDs)
+	if err != nil {
+		s.logger.Warn("PR-match task fetch failed", zap.Error(err))
+		return nil
+	}
+	byID := make(map[string]*models.Task, len(fetched))
+	for _, t := range fetched {
+		byID[t.ID] = t
+	}
+	var matched []*models.Task
+	for _, id := range fetchIDs {
+		task := byID[id]
+		if task == nil || s.prMatchFilteredOut(task, opts) {
+			continue
+		}
+		matched = append(matched, task)
+	}
+	return matched
 }
 
 // prMatchFilteredOut applies the same visibility filters the repository search
