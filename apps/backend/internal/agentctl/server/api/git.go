@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -12,9 +13,14 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
-	"github.com/kandev/kandev/internal/common/securityutil"
 	"go.uber.org/zap"
 )
+
+// safeBranchRefPattern mirrors the one in workspace_git_status.go so the
+// HTTP handlers can perform an inline allowlist check at the request
+// boundary without the extra hop through a helper that would obscure the
+// barrier from CodeQL's `go/command-injection` taint tracker.
+var safeBranchRefPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._/-]*$`)
 
 // queryParamTrue is the string value used to indicate a true boolean in query parameters.
 const queryParamTrue = "true"
@@ -712,11 +718,11 @@ func (s *Server) runGitLogForRepo(
 	// subprocess invocation. `origin/<name>` refs are split so the
 	// underlying validator (which disallows "/" as the first character)
 	// can validate the branch component.
-	if rest, ok := strings.CutPrefix(req.TargetBranch, "origin/"); ok {
-		if !securityutil.IsValidBranchName(rest) {
-			req.TargetBranch = ""
-		}
-	} else if !securityutil.IsValidBranchName(req.TargetBranch) {
+	check, hasOriginPrefix := strings.CutPrefix(req.TargetBranch, "origin/")
+	if !hasOriginPrefix {
+		check = req.TargetBranch
+	}
+	if !safeBranchRefPattern.MatchString(check) || strings.Contains(check, "..") || strings.HasSuffix(check, ".lock") {
 		req.TargetBranch = ""
 	}
 	if req.TargetBranch != "" {
@@ -892,11 +898,11 @@ func (s *Server) handleGitCumulativeDiff(c *gin.Context) {
 	// securityutil.IsValidBranchName check at the sink so static analysis
 	// sees the regex barrier in the same function as the downstream
 	// subprocess call paths.
-	if rest, ok := strings.CutPrefix(req.TargetBranch, "origin/"); ok {
-		if !securityutil.IsValidBranchName(rest) {
-			req.TargetBranch = ""
-		}
-	} else if !securityutil.IsValidBranchName(req.TargetBranch) {
+	check, hasOriginPrefix := strings.CutPrefix(req.TargetBranch, "origin/")
+	if !hasOriginPrefix {
+		check = req.TargetBranch
+	}
+	if !safeBranchRefPattern.MatchString(check) || strings.Contains(check, "..") || strings.HasSuffix(check, ".lock") {
 		req.TargetBranch = ""
 	}
 

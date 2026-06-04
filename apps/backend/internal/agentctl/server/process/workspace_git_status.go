@@ -2,14 +2,23 @@ package process
 
 import (
 	"context"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
-	"github.com/kandev/kandev/internal/common/securityutil"
 	"go.uber.org/zap"
 )
+
+// safeBranchRefPattern is the inline allowlist used by the git-status
+// sinks below. Declared at package scope so each sink site reads as a
+// direct `regexp.MatchString` call — CodeQL's `go/command-injection`
+// taint tracker treats that pattern as a sanitiser barrier in a way it
+// did not recognise when the same check sat behind a helper function.
+// Matches the regex `securityutil.IsValidBranchName` uses; behaviour is
+// unchanged.
+var safeBranchRefPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._/-]*$`)
 
 // updateGitStatus updates the git status. Callers must coordinate access
 // via updateMu — use tryUpdateGitStatus for polling loops, RefreshGitStatus
@@ -182,15 +191,14 @@ func (wt *WorkspaceTracker) getGitBranchInfo(ctx context.Context, update *types.
 // baseBranch is treated as user-controlled and re-sanitised here so static
 // analysis sees the regex barrier inline with the `git` invocation.
 func (wt *WorkspaceTracker) computeBaseCommit(ctx context.Context, baseBranch string) string {
-	// Same inline sanitiser pattern as resolveStoredRef. Inline so
-	// CodeQL's taint-tracker sees the regex barrier in the same function
-	// as the `git` subprocess call instead of behind a helper wrapper.
+	// Same inline regex barrier as resolveStoredRef so CodeQL's
+	// taint-tracker sees it co-located with the `git` subprocess call.
 	rest, hasOriginPrefix := strings.CutPrefix(baseBranch, "origin/")
+	check := baseBranch
 	if hasOriginPrefix {
-		if !securityutil.IsValidBranchName(rest) {
-			return ""
-		}
-	} else if !securityutil.IsValidBranchName(baseBranch) {
+		check = rest
+	}
+	if !safeBranchRefPattern.MatchString(check) || strings.Contains(check, "..") || strings.HasSuffix(check, ".lock") {
 		return ""
 	}
 	if out, err := wt.runGitOutput(ctx, "merge-base", baseBranch, "HEAD"); err == nil {
@@ -220,13 +228,14 @@ func (wt *WorkspaceTracker) getAheadBehindCounts(ctx context.Context, update *ty
 	// branch (origin/<feature-branch>) gives wrong counts after rebase
 	// because rebased commits have new SHAs.
 	compareRef := wt.resolveAheadBehindRef(ctx)
-	// Inline allowlist check so the sanitiser barrier sits in the same
+	// Inline regex allowlist so the sanitiser barrier sits in the same
 	// function as the `git rev-list` invocation below.
-	if rest, ok := strings.CutPrefix(compareRef, "origin/"); ok {
-		if !securityutil.IsValidBranchName(rest) {
-			compareRef = ""
-		}
-	} else if !securityutil.IsValidBranchName(compareRef) {
+	rest, hasOriginPrefix := strings.CutPrefix(compareRef, "origin/")
+	check := compareRef
+	if hasOriginPrefix {
+		check = rest
+	}
+	if !safeBranchRefPattern.MatchString(check) || strings.Contains(check, "..") || strings.HasSuffix(check, ".lock") {
 		compareRef = ""
 	}
 	if compareRef == "" {
@@ -319,22 +328,22 @@ func (wt *WorkspaceTracker) resolveAheadBehindRef(ctx context.Context) string {
 // fresh sanitiser barrier right at the call site — even though
 // SetBaseBranch already rejected unsafe values when the field was stored.
 func (wt *WorkspaceTracker) resolveStoredRef(ctx context.Context, stored string) string {
-	// Inline `securityutil.IsValidBranchName` check at the call site rather
-	// than wrapping it in a helper so CodeQL's `go/command-injection` taint
-	// tracker sees the sanitiser barrier in the same function as the
-	// downstream `wt.runGit` invocations. The shared allowlist regex
-	// matches the one Rebase / Merge use without being flagged.
+	// Inline regexp.MatchString call at the call site so CodeQL's
+	// `go/command-injection` taint tracker sees the allowlist barrier in
+	// the same function as the `wt.runGit` invocations below. The pattern
+	// matches `securityutil.IsValidBranchName`'s allowlist.
 	rest, hasOriginPrefix := strings.CutPrefix(stored, "origin/")
+	check := stored
 	if hasOriginPrefix {
-		if !securityutil.IsValidBranchName(rest) {
-			return ""
-		}
+		check = rest
+	}
+	if !safeBranchRefPattern.MatchString(check) || strings.Contains(check, "..") || strings.HasSuffix(check, ".lock") {
+		return ""
+	}
+	if hasOriginPrefix {
 		if err := wt.runGit(ctx, "rev-parse", "--verify", stored); err == nil {
 			return stored
 		}
-		return ""
-	}
-	if !securityutil.IsValidBranchName(stored) {
 		return ""
 	}
 	origin := "origin/" + stored

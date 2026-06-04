@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/kandev/kandev/internal/common/securityutil"
 	"go.uber.org/zap"
 )
 
@@ -42,13 +41,14 @@ func (s *Server) handleSetBaseBranches(c *gin.Context) {
 	// and the downstream `git` subprocess args.
 	safe := make(map[string]string, len(req.BaseBranches))
 	for k, v := range req.BaseBranches {
-		rest, hasOriginPrefix := strings.CutPrefix(v, "origin/")
-		switch {
-		case hasOriginPrefix && securityutil.IsValidBranchName(rest):
-			safe[k] = v
-		case !hasOriginPrefix && securityutil.IsValidBranchName(v):
-			safe[k] = v
+		check, hasOriginPrefix := strings.CutPrefix(v, "origin/")
+		if !hasOriginPrefix {
+			check = v
 		}
+		if !safeBranchRefPattern.MatchString(check) || strings.Contains(check, "..") || strings.HasSuffix(check, ".lock") {
+			continue
+		}
+		safe[k] = v
 	}
 	s.procMgr.UpdateBaseBranches(c.Request.Context(), safe)
 	s.logger.Debug("base branches updated", zap.Int("entries", len(req.BaseBranches)))
