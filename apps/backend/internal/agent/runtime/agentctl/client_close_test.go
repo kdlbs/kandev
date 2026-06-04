@@ -124,3 +124,57 @@ func TestClientClose_DrainsWorkspaceStream(t *testing.T) {
 		t.Error("StreamWorkspace after Close should return error, got nil")
 	}
 }
+
+// TestClientClose_StreamWorkspaceAddWaitRace exercises the window where one
+// goroutine has just published c.workspaceStream from StreamWorkspace and is
+// about to call stream.wg.Add(2), while another goroutine fires Close —
+// captures the same pointer and calls ws.Wait(). Pre-fix, the race detector
+// flagged Add(2) vs Wait() on the same WaitGroup because Add ran after the
+// publication unlock. With Add moved under the publication lock, the
+// unlock/lock pair carries the Add into Close's view.
+//
+// The test waits for the mock server to observe the WS upgrade before
+// firing Close — that is the same window the failing CI traces showed
+// (test code observes the connection, returns, deferred Close runs while
+// the StreamWorkspace goroutine has not yet reached Add(2)).
+func TestClientClose_StreamWorkspaceAddWaitRace(t *testing.T) {
+	const iterations = 100
+	for i := 0; i < iterations; i++ {
+		mock := newCloseBarrierMockServer(t)
+		client := newCloseBarrierTestClient(t, mock.server.URL)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+
+		streamErr := make(chan error, 1)
+		go func() {
+			_, err := client.StreamWorkspace(ctx, WorkspaceStreamCallbacks{})
+			streamErr <- err
+		}()
+
+		// Wait until the server side has observed the upgrade — at this point
+		// the client has either just unlocked after publishing the stream or
+		// is about to. Firing Close immediately maximises the chance of
+		// landing in the Add(2)-vs-Wait window.
+		select {
+		case <-mock.connected:
+		case <-time.After(2 * time.Second):
+			cancel()
+			t.Fatalf("iteration %d: mock never observed WS upgrade", i)
+		}
+
+		closeDone := make(chan struct{})
+		go func() {
+			client.Close()
+			close(closeDone)
+		}()
+
+		select {
+		case <-closeDone:
+		case <-time.After(3 * time.Second):
+			cancel()
+			t.Fatalf("iteration %d: Close did not return within 3s", i)
+		}
+		<-streamErr
+		cancel()
+	}
+}

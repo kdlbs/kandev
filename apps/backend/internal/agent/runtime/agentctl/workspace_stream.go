@@ -85,17 +85,20 @@ func (c *Client) StreamWorkspace(ctx context.Context, callbacks WorkspaceStreamC
 		_ = conn.Close()
 		return nil, fmt.Errorf("workspace stream already connected")
 	}
+	// Track both goroutines on the per-stream wg so WorkspaceStream.Wait can
+	// block until they have fully unwound. Add(2) must happen-before the
+	// stream pointer is published to c.workspaceStream: otherwise a concurrent
+	// Client.Close captures the new stream, calls ws.Wait() at counter 0, and
+	// races the subsequent Add(2). The read loop only invokes data callbacks
+	// (shell/git/process) and self-closes on exit — it never re-enters manager
+	// teardown — so draining it is side-effect-free.
+	stream.wg.Add(2)
 	c.workspaceStreamConn = conn
 	c.workspaceStream = stream
 	c.mu.Unlock()
 
 	c.logger.Info("connected to workspace stream", zap.String("url", wsURL))
 
-	// Track both goroutines on the per-stream wg so WorkspaceStream.Wait can
-	// block until they have fully unwound. The workspace read loop only invokes
-	// data callbacks (shell/git/process) and self-closes on exit — it never
-	// re-enters manager teardown — so draining it is side-effect-free.
-	stream.wg.Add(2)
 	go func() {
 		defer stream.wg.Done()
 		c.readWorkspaceStream(conn, stream, callbacks)
