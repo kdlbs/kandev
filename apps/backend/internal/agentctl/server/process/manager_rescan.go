@@ -113,7 +113,7 @@ func (m *Manager) transitionToMultiRepoMode(ctx context.Context, workDir string,
 		zap.Int("children", len(children)))
 
 	bareRoot := NewWorkspaceTrackerForRepo(workDir, "", m.logger)
-	bareRoot.SetBaseBranch(lookupBaseBranch(m.cfg.BaseBranches, ""))
+	bareRoot.SetBaseBranch(lookupBaseBranch(m.getBaseBranches(), ""))
 	bareRoot.Start(ctx)
 	for _, sub := range subs {
 		bareRoot.AttachWorkspaceStreamSubscriber(sub)
@@ -122,7 +122,7 @@ func (m *Manager) transitionToMultiRepoMode(ctx context.Context, workDir string,
 	newRepoTrackers := make([]*WorkspaceTracker, 0, len(children))
 	for _, child := range children {
 		tracker := NewWorkspaceTrackerForRepo(child.path, child.name, m.logger)
-		tracker.SetBaseBranch(lookupBaseBranch(m.cfg.BaseBranches, child.name))
+		tracker.SetBaseBranch(lookupBaseBranch(m.getBaseBranches(), child.name))
 		tracker.Start(ctx)
 		for _, sub := range subs {
 			tracker.AttachWorkspaceStreamSubscriber(sub)
@@ -164,7 +164,7 @@ func (m *Manager) appendNewRepoTrackers(ctx context.Context, children []reposito
 			zap.String("repository_name", child.name),
 			zap.String("path", child.path))
 		tracker := NewWorkspaceTrackerForRepo(child.path, child.name, m.logger)
-		tracker.SetBaseBranch(lookupBaseBranch(m.cfg.BaseBranches, child.name))
+		tracker.SetBaseBranch(lookupBaseBranch(m.getBaseBranches(), child.name))
 		tracker.Start(ctx)
 		for _, sub := range subs {
 			tracker.AttachWorkspaceStreamSubscriber(sub)

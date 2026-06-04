@@ -933,7 +933,16 @@ func (h *TaskHandlers) httpUpdateTaskRepository(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		// Distinguish caller-fixable validation failures (required field
+		// missing, unsafe ref name, …) from server-side faults (DB write
+		// errors propagated up from the service). Anything that matches a
+		// known validation message stays at 400; everything else escalates
+		// to 500 so client retries don't mask backend regressions.
+		if isValidationError(err) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, taskRepo)

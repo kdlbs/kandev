@@ -111,6 +111,16 @@ type Manager struct {
 	workspaceTrackersBySubpath map[string]*WorkspaceTracker
 	workspaceTrackersMu        sync.Mutex
 
+	// baseBranchesMu guards mutations to cfg.BaseBranches so the
+	// UpdateBaseBranches writer doesn't race with the rescan-path and
+	// lazy-subpath readers that look up per-repo overrides via
+	// lookupBaseBranch. Two existing mutexes already cover the trackers
+	// themselves (repoTrackersMu, workspaceTrackersMu) but each guards a
+	// different field — without this dedicated lock the writer could
+	// publish a new map under repoTrackersMu while a reader walked the
+	// same map under workspaceTrackersMu.
+	baseBranchesMu sync.RWMutex
+
 	// streamSubscribers tracks every workspace-stream subscriber attached
 	// via SubscribeWorkspaceStream so RescanRepositories can wire new
 	// per-repo trackers into the same channels without re-subscription. The
@@ -198,6 +208,35 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 	m.status.Store(StatusStopped)
 	m.exitCode.Store(-1)
 	return m
+}
+
+// getBaseBranches returns a snapshot of cfg.BaseBranches under the
+// dedicated baseBranchesMu so callers (rescan, lazy-subpath, the
+// UpdateBaseBranches re-stamp loop) read a consistent map even when a
+// concurrent UpdateBaseBranches writer is publishing a replacement.
+func (m *Manager) getBaseBranches() map[string]string {
+	m.baseBranchesMu.RLock()
+	defer m.baseBranchesMu.RUnlock()
+	if m.cfg == nil || m.cfg.BaseBranches == nil {
+		return nil
+	}
+	out := make(map[string]string, len(m.cfg.BaseBranches))
+	for k, v := range m.cfg.BaseBranches {
+		out[k] = v
+	}
+	return out
+}
+
+// setBaseBranches replaces cfg.BaseBranches under baseBranchesMu so the
+// write is serialized with every getBaseBranches reader. UpdateBaseBranches
+// uses this to publish the new map after sanitizing it at the HTTP edge.
+func (m *Manager) setBaseBranches(branches map[string]string) {
+	m.baseBranchesMu.Lock()
+	defer m.baseBranchesMu.Unlock()
+	if m.cfg == nil {
+		return
+	}
+	m.cfg.BaseBranches = branches
 }
 
 // lookupBaseBranch reads the task's recorded base branch for a given
@@ -378,7 +417,7 @@ func (m *Manager) GetWorkspaceTrackerFor(subpath string) (*WorkspaceTracker, err
 		return t, nil
 	}
 	t := NewWorkspaceTracker(full, m.logger)
-	t.SetBaseBranch(lookupBaseBranch(m.cfg.BaseBranches, cleaned))
+	t.SetBaseBranch(lookupBaseBranch(m.getBaseBranches(), cleaned))
 	m.workspaceTrackersBySubpath[cleaned] = t
 	return t, nil
 }
@@ -393,14 +432,13 @@ func (m *Manager) GetWorkspaceTrackerFor(subpath string) (*WorkspaceTracker, err
 // Newly-spawned trackers (rescan path, lazy subpath lookup) read the updated
 // map via lookupBaseBranch — no second push needed for them.
 func (m *Manager) UpdateBaseBranches(ctx context.Context, branches map[string]string) {
-	m.repoTrackersMu.Lock()
-	if m.cfg != nil {
-		m.cfg.BaseBranches = branches
-	}
+	m.setBaseBranches(branches)
+
+	m.repoTrackersMu.RLock()
 	root := m.workspaceTracker
 	trackers := make([]*WorkspaceTracker, len(m.repoTrackers))
 	copy(trackers, m.repoTrackers)
-	m.repoTrackersMu.Unlock()
+	m.repoTrackersMu.RUnlock()
 
 	m.workspaceTrackersMu.Lock()
 	bySubpath := make(map[string]*WorkspaceTracker, len(m.workspaceTrackersBySubpath))

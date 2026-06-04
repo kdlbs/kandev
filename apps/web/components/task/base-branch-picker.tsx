@@ -82,7 +82,11 @@ function usePickerLogic(taskId: string | null, repositoryName: string, fallbackB
   const currentBase = resolved?.storedBase || fallbackBaseBranch;
 
   const handleSelect = async (branch: string) => {
-    if (!resolved || !taskId || branch === resolved.storedBase) {
+    // currentBase falls back to fallbackBaseBranch when storedBase is empty
+    // (legacy task before any picker change). Compare against currentBase so
+    // selecting the displayed value is treated as a no-op instead of saving
+    // a spurious update.
+    if (!resolved || !taskId || branch === currentBase) {
       setOpen(false);
       return;
     }

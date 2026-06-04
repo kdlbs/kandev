@@ -643,7 +643,7 @@ func (s *Server) registerUpdateRepositoryBaseBranchTool() {
 
 Use when a task was created against the wrong base (e.g. picked up `+"`main`"+` when the work was forked from a release / QA / staging branch). The Changes panel and per-task +/- counts compare HEAD against this branch.
 
-The new base branch ALSO becomes the PR target on push for this repo — picking a base = picking the promote-up target. If you want decoupled "diff against" vs "PR against" semantics, do not use this tool; that distinction is not yet supported.
+Scope: this updates the value the WorkspaceTracker uses for diff comparison (BaseCommit / Ahead / Behind / cumulative diff). It does NOT auto-set the PR target on push; the PR target is whatever value the caller passes to the create-PR endpoint at push time. Callers that want both to move together should pass the new base_branch on the next PR-create call.
 
 The agentctl tracker is updated live: a successful call refreshes BaseCommit / Ahead / Behind without needing a session restart.`),
 			mcp.WithString("task_id", mcp.Description("The task whose repository to update. Defaults to the current task when omitted.")),

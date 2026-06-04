@@ -43,15 +43,12 @@ func TestManagerUpdateBaseBranches_PersistsToCfg(t *testing.T) {
 	mgr := NewManager(&config.InstanceConfig{WorkDir: repoDir}, newTestLogger(t))
 	mgr.UpdateBaseBranches(context.Background(), map[string]string{"alpha": "main", "beta": "develop"})
 
-	cfg := mgr.cfg
-	if cfg == nil {
-		t.Fatal("expected cfg on manager")
+	branches := mgr.getBaseBranches()
+	if got := branches["alpha"]; got != "main" {
+		t.Errorf("getBaseBranches()[alpha] = %q, want main", got)
 	}
-	if got := cfg.BaseBranches["alpha"]; got != "main" {
-		t.Errorf("cfg.BaseBranches[alpha] = %q, want main", got)
-	}
-	if got := cfg.BaseBranches["beta"]; got != "develop" {
-		t.Errorf("cfg.BaseBranches[beta] = %q, want develop", got)
+	if got := branches["beta"]; got != "develop" {
+		t.Errorf("getBaseBranches()[beta] = %q, want develop", got)
 	}
 }
 

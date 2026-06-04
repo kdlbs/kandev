@@ -44,39 +44,14 @@ var ErrTaskRepositoryNotFound = errors.New("task repository not found")
 //
 // Returns the updated TaskRepository on success.
 func (s *Service) UpdateRepositoryBaseBranch(ctx context.Context, req UpdateRepositoryBaseBranchRequest) (*models.TaskRepository, error) {
-	if req.TaskID == "" {
-		return nil, fmt.Errorf("task_id is required")
-	}
-	if req.TaskRepositoryID == "" {
-		return nil, fmt.Errorf("task_repository_id is required")
-	}
-	baseBranch := strings.TrimSpace(req.BaseBranch)
-	if baseBranch == "" {
-		return nil, fmt.Errorf("base_branch is required")
-	}
-	// Reject values that would be unsafe to splice into a `git` argument
-	// list downstream (the picker payload is user-controlled and reaches
-	// `exec.Command("git", …, baseBranch)` via the agentctl workspace
-	// tracker). Mirrors process.IsSafeGitRef in the agentctl side; kept
-	// independent here so the service stays self-contained.
-	if !isSafeBaseBranchRef(baseBranch) {
-		return nil, fmt.Errorf("base_branch contains characters not allowed in a git ref name")
-	}
-
-	taskRepo, err := s.taskRepos.GetTaskRepository(ctx, req.TaskRepositoryID)
+	baseBranch, err := validateUpdateRepositoryBaseBranchRequest(req)
 	if err != nil {
-		// Repo-tier "task repository not found" is a formatted string, not
-		// a typed error today; fold any missing-row outcome into
-		// ErrTaskRepositoryNotFound for the caller's error class.
-		if strings.Contains(err.Error(), "task repository not found") {
-			return nil, ErrTaskRepositoryNotFound
-		}
-		return nil, fmt.Errorf("get task repository: %w", err)
+		return nil, err
 	}
-	if taskRepo == nil || taskRepo.TaskID != req.TaskID {
-		return nil, ErrTaskRepositoryNotFound
+	taskRepo, err := s.loadTaskRepositoryForUpdate(ctx, req.TaskID, req.TaskRepositoryID)
+	if err != nil {
+		return nil, err
 	}
-
 	if taskRepo.BaseBranch == baseBranch {
 		return taskRepo, nil
 	}
@@ -86,35 +61,78 @@ func (s *Service) UpdateRepositoryBaseBranch(ctx context.Context, req UpdateRepo
 		return nil, fmt.Errorf("update task repository: %w", err)
 	}
 
-	// Rewrite per-session base_branch + clear the cached base_commit_sha so
-	// session.git.commits and session.cumulative_diff stop filtering against
-	// the SHA captured at the OLD base. Without this the task-card stats
-	// (live BaseCommit, Phase 1) and the commits panel (cached SHA) drift
-	// out of sync — visible as "commits disappear after switching base".
-	if _, err := s.sessions.ResetTaskSessionBasesForRepository(ctx, req.TaskID, taskRepo.RepositoryID, baseBranch); err != nil {
+	s.applyBaseBranchSideEffects(ctx, req.TaskID, taskRepo.RepositoryID, baseBranch)
+	return taskRepo, nil
+}
+
+// validateUpdateRepositoryBaseBranchRequest checks required fields and
+// returns the trimmed + sanitized base_branch. Pulled out so the main
+// service method stays under the cyclomatic-complexity lint cap.
+func validateUpdateRepositoryBaseBranchRequest(req UpdateRepositoryBaseBranchRequest) (string, error) {
+	if req.TaskID == "" {
+		return "", fmt.Errorf("task_id is required")
+	}
+	if req.TaskRepositoryID == "" {
+		return "", fmt.Errorf("task_repository_id is required")
+	}
+	baseBranch := strings.TrimSpace(req.BaseBranch)
+	if baseBranch == "" {
+		return "", fmt.Errorf("base_branch is required")
+	}
+	// Reject values that would be unsafe to splice into a `git` argument
+	// list downstream (the picker payload is user-controlled and reaches
+	// `exec.Command("git", …, baseBranch)` via the agentctl workspace
+	// tracker). Mirrors process.IsSafeGitRef in the agentctl side; kept
+	// independent here so the service stays self-contained.
+	if !isSafeBaseBranchRef(baseBranch) {
+		return "", fmt.Errorf("base_branch contains characters not allowed in a git ref name")
+	}
+	return baseBranch, nil
+}
+
+// loadTaskRepositoryForUpdate fetches the row and validates it belongs to
+// the supplied task. Folds the repo-tier "not found" string error into
+// ErrTaskRepositoryNotFound for stable caller-side classification.
+func (s *Service) loadTaskRepositoryForUpdate(ctx context.Context, taskID, taskRepositoryID string) (*models.TaskRepository, error) {
+	taskRepo, err := s.taskRepos.GetTaskRepository(ctx, taskRepositoryID)
+	if err != nil {
+		if strings.Contains(err.Error(), "task repository not found") {
+			return nil, ErrTaskRepositoryNotFound
+		}
+		return nil, fmt.Errorf("get task repository: %w", err)
+	}
+	if taskRepo == nil || taskRepo.TaskID != taskID {
+		return nil, ErrTaskRepositoryNotFound
+	}
+	return taskRepo, nil
+}
+
+// applyBaseBranchSideEffects runs the post-write fan-out that keeps the
+// commits panel, cumulative diff, WS-driven UIs, and the running agentctl
+// instance aligned with the new base. Each step is best-effort: failures
+// here don't roll back the DB because the persisted task_repositories
+// row is the authoritative source for the next session launch.
+func (s *Service) applyBaseBranchSideEffects(ctx context.Context, taskID, repositoryID, baseBranch string) {
+	if _, err := s.sessions.ResetTaskSessionBasesForRepository(ctx, taskID, repositoryID, baseBranch); err != nil {
 		s.logger.Warn("UpdateRepositoryBaseBranch: failed to reset session bases",
-			zap.String("task_id", req.TaskID),
-			zap.String("repository_id", taskRepo.RepositoryID),
+			zap.String("task_id", taskID),
+			zap.String("repository_id", repositoryID),
 			zap.Error(err))
 	}
-
-	task, err := s.tasks.GetTask(ctx, req.TaskID)
-	if err == nil && task != nil {
+	if task, err := s.tasks.GetTask(ctx, taskID); err == nil && task != nil {
 		s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
 	}
-
-	if s.baseBranchPusher != nil {
-		branches, mapErr := s.collectTaskBaseBranches(ctx, req.TaskID)
-		if mapErr != nil {
-			s.logger.Warn("UpdateRepositoryBaseBranch: failed to collect base branches for live push",
-				zap.String("task_id", req.TaskID),
-				zap.Error(mapErr))
-		} else {
-			s.baseBranchPusher.PushBaseBranchesForTask(ctx, req.TaskID, branches)
-		}
+	if s.baseBranchPusher == nil {
+		return
 	}
-
-	return taskRepo, nil
+	branches, mapErr := s.collectTaskBaseBranches(ctx, taskID)
+	if mapErr != nil {
+		s.logger.Warn("UpdateRepositoryBaseBranch: failed to collect base branches for live push",
+			zap.String("task_id", taskID),
+			zap.Error(mapErr))
+		return
+	}
+	s.baseBranchPusher.PushBaseBranchesForTask(ctx, taskID, branches)
 }
 
 // isSafeBaseBranchRef applies the same subset-of-`git check-ref-format`

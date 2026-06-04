@@ -74,5 +74,6 @@ func isValidationError(err error) bool {
 	return strings.Contains(msg, "pending approval") ||
 		strings.Contains(msg, "validation") ||
 		strings.Contains(msg, "required") ||
-		strings.Contains(msg, "invalid")
+		strings.Contains(msg, "invalid") ||
+		strings.Contains(msg, "not allowed in a git ref name")
 }
