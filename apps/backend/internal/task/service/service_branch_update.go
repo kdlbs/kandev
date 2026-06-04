@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -149,33 +150,21 @@ func (s *Service) applyBaseBranchSideEffects(ctx context.Context, taskID, reposi
 	s.baseBranchPusher.PushBaseBranchesForTask(ctx, taskID, branches)
 }
 
-// isSafeBaseBranchRef applies the same subset-of-`git check-ref-format`
-// rules that process.IsSafeGitRef enforces on the agentctl side. Kept here
-// so the service layer can reject a malicious picker payload before it
-// reaches the DB or the live agentctl push — and so static analysis sees a
-// sanitizer between the HTTP/WS handler input and any downstream `git`
-// invocation. Empty input returns false (callers gate on len > 0 first).
+// isSafeBaseBranchRef delegates to the shared
+// `securityutil.IsValidBranchName` allowlist so the service-tier rejection
+// rules track agentctl's exactly. Without this, a value like
+// `feature/@2024` would pass here, persist to task_repositories, then get
+// dropped by the agentctl-side sanitiser at push time — silently wiping
+// every tracker's override. Sharing one allowlist keeps the DB write and
+// the live push agreeing on what counts as a valid ref name.
+//
+// `origin/<name>` refs are split before validation because the underlying
+// regex disallows "/" as the first character.
 func isSafeBaseBranchRef(ref string) bool {
-	if ref == "" || len(ref) > 255 {
-		return false
+	if rest, ok := strings.CutPrefix(ref, "origin/"); ok {
+		return securityutil.IsValidBranchName(rest)
 	}
-	if ref[0] == '-' || ref[0] == '/' || ref[len(ref)-1] == '/' {
-		return false
-	}
-	if strings.Contains(ref, "..") || strings.Contains(ref, "@{") {
-		return false
-	}
-	for i := 0; i < len(ref); i++ {
-		c := ref[i]
-		if c < 0x20 || c == 0x7f {
-			return false
-		}
-		switch c {
-		case ' ', '~', '^', ':', '?', '*', '[', '\\', '`', ';', '|', '&', '$', '(', ')', '\'', '"':
-			return false
-		}
-	}
-	return true
+	return securityutil.IsValidBranchName(ref)
 }
 
 // collectTaskBaseBranches builds the per-repo {RepositoryName → base_branch}

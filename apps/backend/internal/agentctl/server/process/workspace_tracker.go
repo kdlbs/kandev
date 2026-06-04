@@ -5,13 +5,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 )
@@ -142,45 +142,42 @@ func (wt *WorkspaceTracker) SetBaseBranch(baseBranch string) {
 	wt.baseBranch = baseBranch
 }
 
-// safeGitRefPattern is the allowlist used by IsSafeGitRef. Restricted to
-// `[A-Za-z0-9_./-]` so the function reads as a clean regex sanitiser to
-// static analysis (CodeQL `go/command-injection`) and so the first
-// character can never be `-` (which git would reinterpret as a flag) or
-// `/` / `.`. Stricter than `git check-ref-format` on purpose — these
-// values are user-controlled and end up as positional `git` arguments.
-var safeGitRefPattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_./-]*$`)
-
-// IsSafeGitRef reports whether ref would be safe to splice into a `git`
+// IsSafeGitRef reports whether ref is safe to splice into a `git`
 // subprocess argument list. Empty input returns true so callers can treat
-// "" as "no override" without an extra branch. Implemented as a thin
-// wrapper over SanitizeGitRef so the predicate and the transformer share
-// the same regex-backed allowlist.
+// "" as "no override" without an extra branch. Delegates to the
+// `securityutil.IsValidBranchName` sanitiser that the rest of the agentctl
+// git operations (Rebase, Merge, RenameBranch, …) already use — keeps one
+// canonical allowlist across the package and inherits the CodeQL
+// taint-tracking recognition that pattern carries.
+//
+// `origin/<name>` refs are split before the underlying check because the
+// shared validator rejects "/" in the first character class.
 func IsSafeGitRef(ref string) bool {
-	return ref == "" || SanitizeGitRef(ref) != ""
+	if ref == "" {
+		return true
+	}
+	return SanitizeGitRef(ref) != ""
 }
 
-// SanitizeGitRef returns the regex-matched ref name when it passes the
-// allowlist, else the empty string. The return value comes from
-// `safeGitRefPattern.FindString` rather than the original parameter so the
-// flow looks like "input → regex match → sanitised string" to CodeQL's
-// taint-tracker — an identity passthrough wrapped around a bool guard was
-// not recognised on the previous attempt at clearing the
-// `go/command-injection` alert.
+// SanitizeGitRef returns ref when securityutil.IsValidBranchName accepts
+// it (after handling the `origin/<name>` prefix), else the empty string.
+// Use this at the call site immediately before passing a user-controlled
+// ref name into a `git` subprocess argument so the sanitiser barrier sits
+// inline with the sink.
 func SanitizeGitRef(ref string) string {
-	if len(ref) > 255 {
+	if ref == "" || ref[len(ref)-1] == '/' {
 		return ""
 	}
-	sanitised := safeGitRefPattern.FindString(ref)
-	if sanitised == "" || sanitised != ref {
+	if rest, ok := strings.CutPrefix(ref, "origin/"); ok {
+		if securityutil.IsValidBranchName(rest) {
+			return ref
+		}
 		return ""
 	}
-	if strings.Contains(sanitised, "..") || strings.Contains(sanitised, "@{") {
-		return ""
+	if securityutil.IsValidBranchName(ref) {
+		return ref
 	}
-	if sanitised[len(sanitised)-1] == '/' {
-		return ""
-	}
-	return sanitised
+	return ""
 }
 
 // BaseBranch returns the recorded base branch override, if any. Exposed for

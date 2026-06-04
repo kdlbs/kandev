@@ -390,7 +390,14 @@ func (h *TaskHandlers) wsUpdateTaskRepository(ctx context.Context, msg *ws.Messa
 		if errors.Is(err, service.ErrTaskRepositoryNotFound) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, err.Error(), nil)
 		}
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update task repository: "+err.Error(), nil)
+		// Validation errors (required-field, invalid ref name) surface to
+		// the caller verbatim; opaque internal errors are reported as a
+		// generic 500-style message so DB or downstream-fault details
+		// don't leak across the WS boundary.
+		if isValidationError(err) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update task repository", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, taskRepo)
 }

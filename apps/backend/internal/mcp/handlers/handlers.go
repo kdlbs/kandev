@@ -818,7 +818,13 @@ func (h *Handlers) handleUpdateRepositoryBaseBranch(ctx context.Context, msg *ws
 		if errors.Is(err, service.ErrTaskRepositoryNotFound) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, err.Error(), nil)
 		}
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update base branch: "+err.Error(), nil)
+		// Caller-facing validation messages (required-field, invalid ref
+		// name) pass through verbatim so MCP agents can react; internal
+		// faults stay opaque so DB-level details don't leak.
+		if isValidationError(err) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update base branch", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		"id":              taskRepo.ID,
@@ -841,6 +847,20 @@ func boolCount(flags ...bool) int {
 		}
 	}
 	return n
+}
+
+// isValidationError matches the user-facing fragments emitted by the
+// service-layer validators (required fields, invalid ref names). Shared by
+// every MCP write handler so service-side message tweaks need only one
+// place to flow through to the MCP error classification.
+func isValidationError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "is required") ||
+		strings.Contains(msg, "not allowed in a git ref name") ||
+		strings.Contains(msg, "invalid")
 }
 
 // classifyAddBranchError maps service-layer add_branch failures to ws error
