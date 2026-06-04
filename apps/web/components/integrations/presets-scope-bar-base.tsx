@@ -151,7 +151,7 @@ function SavedMenu<K extends string>({
                   e.stopPropagation();
                   onDeleteSaved(s.id);
                 }}
-                className="cursor-pointer text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/saved:opacity-100"
+                className="pointer-events-none cursor-pointer text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/saved:pointer-events-auto group-hover/saved:opacity-100"
                 title="Delete saved query"
               >
                 <IconX className="h-3.5 w-3.5" />
