@@ -385,3 +385,73 @@ func TestCountActiveTaskSessionsByRepository_RequiresJoinRow(t *testing.T) {
 		t.Errorf("expected only the linked session to be counted, got %d", count)
 	}
 }
+
+// archiveTask marks a seeded task as archived so the repo-delete guard tests
+// can exercise the archived_at exclusion.
+func archiveTask(t *testing.T, repo *Repository, taskID string) {
+	t.Helper()
+	if _, err := repo.db.Exec(repo.db.Rebind(
+		`UPDATE tasks SET archived_at = ? WHERE id = ?`), time.Now().UTC(), taskID); err != nil {
+		t.Fatalf("archive task %s: %v", taskID, err)
+	}
+}
+
+// TestCountActiveTaskSessionsByRepository_ExcludesArchivedTasks verifies that an
+// active session belonging to an archived task is not counted, so archived tasks
+// never block repository deletion, while a live task's active session still is.
+func TestCountActiveTaskSessionsByRepository_ExcludesArchivedTasks(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+
+	// Active session on an archived task — must NOT count.
+	seedRepoLink(t, repo, "ws-x", "repo-x", "task-x1", "sess-x1", "WAITING_FOR_INPUT")
+	archiveTask(t, repo, "task-x1")
+
+	count, err := repo.CountActiveTaskSessionsByRepository(ctx, "repo-x")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("archived task must not block deletion, got %d active sessions", count)
+	}
+
+	// A live (non-archived) task with an active session on the same repo still
+	// counts — pins that the archived_at filter did not over-broaden.
+	seedRepoLink(t, repo, "ws-x", "repo-x", "task-x2", "sess-x2", "RUNNING")
+	count, err = repo.CountActiveTaskSessionsByRepository(ctx, "repo-x")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("live task session must still count, got %d", count)
+	}
+}
+
+// TestHasActiveTaskSessionsByRepository_ExcludesArchivedTasks verifies the
+// boolean delete guard mirrors the count: an archived task's active session
+// does not report the repository as in use, but a live task's does.
+func TestHasActiveTaskSessionsByRepository_ExcludesArchivedTasks(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+
+	seedRepoLink(t, repo, "ws-h", "repo-h", "task-h1", "sess-h1", "WAITING_FOR_INPUT")
+	archiveTask(t, repo, "task-h1")
+
+	active, err := repo.HasActiveTaskSessionsByRepository(ctx, "repo-h")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if active {
+		t.Error("archived task must not mark repository as having active sessions")
+	}
+
+	// Add a live task on the same repo — now it must report active.
+	seedRepoLink(t, repo, "ws-h", "repo-h", "task-h2", "sess-h2", "RUNNING")
+	active, err = repo.HasActiveTaskSessionsByRepository(ctx, "repo-h")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !active {
+		t.Error("live task session must mark repository as active")
+	}
+}
