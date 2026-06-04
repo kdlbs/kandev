@@ -124,10 +124,58 @@ func (wt *WorkspaceTracker) RepositoryName() string {
 // status updates use this value as the first candidate when resolving
 // BaseCommit / Ahead / Behind. Empty disables the override and falls back
 // to the hardcoded origin/main → master priority list.
+//
+// Unsafe ref names (leading "-", whitespace, shell metacharacters, ".." or
+// other format violations) are rejected at this boundary because the value
+// is interpolated into `exec.Command("git", …, baseBranch)` downstream and
+// git itself interprets leading "-" as a flag. Rejection downgrades to the
+// no-override fallback rather than erroring — keeps the tracker functional
+// when an untrusted caller supplies garbage.
 func (wt *WorkspaceTracker) SetBaseBranch(baseBranch string) {
 	wt.mu.Lock()
 	defer wt.mu.Unlock()
+	if !IsSafeGitRef(baseBranch) {
+		wt.baseBranch = ""
+		return
+	}
 	wt.baseBranch = baseBranch
+}
+
+// IsSafeGitRef rejects ref names that would be unsafe to splice into a
+// `git` subprocess argument list. Empty input returns true so callers can
+// treat "" as "no override" without an extra branch.
+//
+// Rules (subset of `git check-ref-format`):
+//   - no leading "-" (git would parse it as a flag)
+//   - no control chars, whitespace, or characters git disallows in
+//     ref names: \x00 SPACE ~ ^ : ? * [ \ ` ; | & $ ( ) ' "
+//   - no ".." or "@{" sequences
+//   - no leading/trailing "/"
+//   - length capped so a pathological value can't bloat exec args
+func IsSafeGitRef(ref string) bool {
+	if ref == "" {
+		return true
+	}
+	if len(ref) > 255 {
+		return false
+	}
+	if ref[0] == '-' || ref[0] == '/' || ref[len(ref)-1] == '/' {
+		return false
+	}
+	if strings.Contains(ref, "..") || strings.Contains(ref, "@{") {
+		return false
+	}
+	for i := 0; i < len(ref); i++ {
+		c := ref[i]
+		if c < 0x20 || c == 0x7f {
+			return false
+		}
+		switch c {
+		case ' ', '~', '^', ':', '?', '*', '[', '\\', '`', ';', '|', '&', '$', '(', ')', '\'', '"':
+			return false
+		}
+	}
+	return true
 }
 
 // BaseBranch returns the recorded base branch override, if any. Exposed for

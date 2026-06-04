@@ -181,6 +181,61 @@ func TestGetGitBranchInfo_StoredBaseDrivesBaseCommit(t *testing.T) {
 	}
 }
 
+// TestIsSafeGitRef_RejectsCommandInjectionShapes documents the unsafe-input
+// boundary the SetBaseBranch / HTTP handlers rely on. The picker map is
+// user-controlled and ends up in `exec.Command("git", …, ref)`; ref names
+// starting with "-" or carrying shell metacharacters would be reinterpreted
+// by git itself (`git --upload-pack=…`) or by the surrounding shell on
+// non-CommandContext call sites.
+func TestIsSafeGitRef_RejectsCommandInjectionShapes(t *testing.T) {
+	safe := []string{"", "main", "origin/main", "feature/x", "release-1.2", "a_b.c", "v0.55.0"}
+	unsafe := []string{
+		"-upload-pack=evilcmd",
+		"--exec=evil",
+		"/leading-slash",
+		"trailing-slash/",
+		"with space",
+		"semi;rm -rf",
+		"pipe|cat",
+		"back`ticks",
+		"dollar$sign",
+		"dot..dot",
+		"ref@{0}",
+		"new\nline",
+		"tab\there",
+	}
+	for _, ref := range safe {
+		if !IsSafeGitRef(ref) {
+			t.Errorf("IsSafeGitRef(%q) = false, want true (safe input)", ref)
+		}
+	}
+	for _, ref := range unsafe {
+		if IsSafeGitRef(ref) {
+			t.Errorf("IsSafeGitRef(%q) = true, want false (unsafe input)", ref)
+		}
+	}
+}
+
+// TestSetBaseBranch_RejectsUnsafeRefs confirms unsafe values downgrade to
+// the no-override fallback at the boundary instead of being stored. Keeps
+// the workspace-tracker contract honest even when a misbehaving caller
+// (or an attacker who reached the agentctl HTTP surface) skipped the
+// upstream sanitizer.
+func TestSetBaseBranch_RejectsUnsafeRefs(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
+	wt.SetBaseBranch("-upload-pack=evil")
+	if got := wt.BaseBranch(); got != "" {
+		t.Errorf("BaseBranch after unsafe SetBaseBranch = %q, want empty", got)
+	}
+	wt.SetBaseBranch("main")
+	if got := wt.BaseBranch(); got != "main" {
+		t.Errorf("BaseBranch after safe SetBaseBranch = %q, want %q", got, "main")
+	}
+}
+
 // TestLookupBaseBranch_FallbackToEmptyKey covers the map lookup the process
 // manager uses to hand each tracker its base branch. Per-repo entry wins;
 // missing per-repo falls back to the empty-key (single-repo) entry; legacy

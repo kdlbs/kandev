@@ -54,6 +54,14 @@ func (s *Service) UpdateRepositoryBaseBranch(ctx context.Context, req UpdateRepo
 	if baseBranch == "" {
 		return nil, fmt.Errorf("base_branch is required")
 	}
+	// Reject values that would be unsafe to splice into a `git` argument
+	// list downstream (the picker payload is user-controlled and reaches
+	// `exec.Command("git", …, baseBranch)` via the agentctl workspace
+	// tracker). Mirrors process.IsSafeGitRef in the agentctl side; kept
+	// independent here so the service stays self-contained.
+	if !isSafeBaseBranchRef(baseBranch) {
+		return nil, fmt.Errorf("base_branch contains characters not allowed in a git ref name")
+	}
 
 	taskRepo, err := s.taskRepos.GetTaskRepository(ctx, req.TaskRepositoryID)
 	if err != nil {
@@ -107,6 +115,35 @@ func (s *Service) UpdateRepositoryBaseBranch(ctx context.Context, req UpdateRepo
 	}
 
 	return taskRepo, nil
+}
+
+// isSafeBaseBranchRef applies the same subset-of-`git check-ref-format`
+// rules that process.IsSafeGitRef enforces on the agentctl side. Kept here
+// so the service layer can reject a malicious picker payload before it
+// reaches the DB or the live agentctl push — and so static analysis sees a
+// sanitizer between the HTTP/WS handler input and any downstream `git`
+// invocation. Empty input returns false (callers gate on len > 0 first).
+func isSafeBaseBranchRef(ref string) bool {
+	if ref == "" || len(ref) > 255 {
+		return false
+	}
+	if ref[0] == '-' || ref[0] == '/' || ref[len(ref)-1] == '/' {
+		return false
+	}
+	if strings.Contains(ref, "..") || strings.Contains(ref, "@{") {
+		return false
+	}
+	for i := 0; i < len(ref); i++ {
+		c := ref[i]
+		if c < 0x20 || c == 0x7f {
+			return false
+		}
+		switch c {
+		case ' ', '~', '^', ':', '?', '*', '[', '\\', '`', ';', '|', '&', '$', '(', ')', '\'', '"':
+			return false
+		}
+	}
+	return true
 }
 
 // collectTaskBaseBranches builds the per-repo {RepositoryName → base_branch}

@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"go.uber.org/zap"
 )
 
@@ -32,7 +33,17 @@ func (s *Server) handleSetBaseBranches(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{errKey: "invalid JSON body"})
 		return
 	}
-	s.procMgr.UpdateBaseBranches(c.Request.Context(), req.BaseBranches)
+	// Sanitize incoming refs at the HTTP boundary. WorkspaceTracker
+	// SetBaseBranch already rejects unsafe values, but stripping them
+	// here makes the safety contract explicit to readers and to static
+	// analysis: anything that survives is `IsSafeGitRef`-clean.
+	safe := make(map[string]string, len(req.BaseBranches))
+	for k, v := range req.BaseBranches {
+		if process.IsSafeGitRef(v) {
+			safe[k] = v
+		}
+	}
+	s.procMgr.UpdateBaseBranches(c.Request.Context(), safe)
 	s.logger.Debug("base branches updated", zap.Int("entries", len(req.BaseBranches)))
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }

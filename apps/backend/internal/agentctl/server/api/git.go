@@ -703,6 +703,14 @@ func (s *Server) runGitLogForRepo(
 	}
 
 	baseCommit := req.Since
+	// TargetBranch reaches this handler over HTTP and is interpolated into
+	// `git` arg lists below — reject unsafe ref names (leading "-", shell
+	// metacharacters, …) so a malicious caller can't smuggle a flag like
+	// "-upload-pack=…" into the subprocess. Falling through to the
+	// since-only path keeps the endpoint functional rather than erroring.
+	if !process.IsSafeGitRef(req.TargetBranch) {
+		req.TargetBranch = ""
+	}
 	if req.TargetBranch != "" {
 		mergeBase, err := s.computeMergeBase(c.Request.Context(), gitOp, req.TargetBranch)
 		if err == nil && mergeBase != "" {
@@ -870,6 +878,13 @@ func (s *Server) handleGitCumulativeDiff(c *gin.Context) {
 			Error:   "invalid request: " + err.Error(),
 		})
 		return
+	}
+
+	// Same untrusted-ref guard as handleGitLog: silence target_branch when
+	// it's not a safe git ref so the downstream merge-base/rev-parse paths
+	// can't be tricked into running `git --some-flag` via a malicious value.
+	if !process.IsSafeGitRef(req.TargetBranch) {
+		req.TargetBranch = ""
 	}
 
 	if req.Repo == "" {

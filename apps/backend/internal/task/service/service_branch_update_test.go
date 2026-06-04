@@ -215,6 +215,41 @@ func TestUpdateRepositoryBaseBranch_NoChangeSkipsWork(t *testing.T) {
 	}
 }
 
+// TestUpdateRepositoryBaseBranch_RejectsUnsafeRefs ensures unsafe ref
+// names (leading "-", shell metacharacters, …) are rejected at the
+// service boundary before reaching the DB or the live agentctl push. The
+// picker payload is user-controlled and ultimately interpolated into a
+// `git` argument list inside agentctl — letting through "-upload-pack="
+// would risk command-flag injection.
+func TestUpdateRepositoryBaseBranch_RejectsUnsafeRefs(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	pusher := &fakeBaseBranchPusher{}
+	svc.SetAgentBaseBranchPusher(pusher)
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "WS"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
+	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "frontend", DefaultBranch: "main"})
+
+	task, _ := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "T",
+		Repositories: []TaskRepositoryInput{{RepositoryID: "repo-1", BaseBranch: "main"}},
+	})
+	rows, _ := repo.ListTaskRepositories(ctx, task.ID)
+
+	for _, bad := range []string{"-upload-pack=evil", "main;rm -rf", "branch with space", "/leading-slash"} {
+		_, err := svc.UpdateRepositoryBaseBranch(ctx, UpdateRepositoryBaseBranchRequest{
+			TaskID: task.ID, TaskRepositoryID: rows[0].ID, BaseBranch: bad,
+		})
+		if err == nil {
+			t.Errorf("UpdateRepositoryBaseBranch(%q): expected error, got nil", bad)
+		}
+	}
+	if len(pusher.snapshot()) != 0 {
+		t.Errorf("unsafe inputs should not trigger pusher; got %d calls", len(pusher.snapshot()))
+	}
+}
+
 // TestUpdateRepositoryBaseBranch_NotFound covers the two missing-row cases:
 // unknown task_repository_id, and a row that exists but belongs to a
 // different task than the caller claimed. Both fold into the typed
