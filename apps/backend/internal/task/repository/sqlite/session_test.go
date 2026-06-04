@@ -455,3 +455,115 @@ func TestHasActiveTaskSessionsByRepository_ExcludesArchivedTasks(t *testing.T) {
 		t.Error("live task session must mark repository as active")
 	}
 }
+
+// insertSession inserts a task_session row in the given state directly, for
+// seeding multiple sessions on a single task (seedRepoLink can only create one
+// session per task because its task_repositories PK is keyed on task+repo).
+func insertSession(t *testing.T, repo *Repository, sessionID, taskID, state string) {
+	t.Helper()
+	now := time.Now().UTC()
+	if _, err := repo.db.Exec(repo.db.Rebind(`
+		INSERT INTO task_sessions (id, task_id, state, started_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+	`), sessionID, taskID, state, now, now); err != nil {
+		t.Fatalf("seed session %s: %v", sessionID, err)
+	}
+}
+
+func sessionState(t *testing.T, repo *Repository, sessionID string) string {
+	t.Helper()
+	var state string
+	if err := repo.ro.QueryRowx(repo.ro.Rebind(
+		`SELECT state FROM task_sessions WHERE id = ?`), sessionID).Scan(&state); err != nil {
+		t.Fatalf("read state for %s: %v", sessionID, err)
+	}
+	return state
+}
+
+func sessionCancellationMetadata(t *testing.T, repo *Repository, sessionID string) (string, sql.NullTime, time.Time) {
+	t.Helper()
+	var errorMessage string
+	var completedAt sql.NullTime
+	var updatedAt time.Time
+	if err := repo.ro.QueryRowx(repo.ro.Rebind(
+		`SELECT error_message, completed_at, updated_at FROM task_sessions WHERE id = ?`),
+		sessionID,
+	).Scan(&errorMessage, &completedAt, &updatedAt); err != nil {
+		t.Fatalf("read cancellation metadata for %s: %v", sessionID, err)
+	}
+	return errorMessage, completedAt, updatedAt
+}
+
+func assertReapedSession(t *testing.T, repo *Repository, sessionID string, reapedAfter time.Time) {
+	t.Helper()
+	if got := sessionState(t, repo, sessionID); got != "CANCELLED" {
+		t.Errorf("%s = %q, want CANCELLED", sessionID, got)
+	}
+	errorMessage, completedAt, updatedAt := sessionCancellationMetadata(t, repo, sessionID)
+	if errorMessage != "task archived" {
+		t.Errorf("%s error_message = %q, want task archived", sessionID, errorMessage)
+	}
+	if !completedAt.Valid {
+		t.Errorf("%s completed_at should be set", sessionID)
+	}
+	if updatedAt.Before(reapedAfter) {
+		t.Errorf("%s updated_at = %s, want >= %s", sessionID, updatedAt, reapedAfter)
+	}
+}
+
+// TestCancelActiveTaskSessionsByTaskID verifies the archive reaper transitions
+// only the target task's still-active sessions to CANCELLED, leaves terminal
+// sessions and other tasks untouched, and reports the rows changed. It also
+// confirms the repo-delete guard reports the repository as free afterward —
+// the end-to-end purpose of the reap.
+func TestCancelActiveTaskSessionsByTaskID(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+
+	// Target task: one active session via the link helper, plus a second active
+	// session, two pre-run sessions, and an already-terminal session inserted directly.
+	seedRepoLink(t, repo, "ws-r", "repo-r", "task-r", "sess-r1", "WAITING_FOR_INPUT")
+	insertSession(t, repo, "sess-r2", "task-r", "RUNNING")
+	insertSession(t, repo, "sess-r3", "task-r", "CREATED")
+	insertSession(t, repo, "sess-r4", "task-r", "STARTING")
+	insertSession(t, repo, "sess-r5", "task-r", "COMPLETED")
+	// A different task on a different repo — must be untouched.
+	seedRepoLink(t, repo, "ws-r", "repo-other", "task-other", "sess-o1", "RUNNING")
+
+	reapedAfter := time.Now().UTC()
+	reaped, err := repo.CancelActiveTaskSessionsByTaskID(ctx, "task-r", "task archived")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if reaped != 4 {
+		t.Errorf("expected 4 active sessions reaped, got %d", reaped)
+	}
+	for _, sessionID := range []string{"sess-r1", "sess-r2", "sess-r3", "sess-r4"} {
+		assertReapedSession(t, repo, sessionID, reapedAfter)
+	}
+	if got := sessionState(t, repo, "sess-r5"); got != "COMPLETED" {
+		t.Errorf("sess-r5 (terminal) = %q, want unchanged COMPLETED", got)
+	}
+	if got := sessionState(t, repo, "sess-o1"); got != "RUNNING" {
+		t.Errorf("sess-o1 (other task) = %q, want unchanged RUNNING", got)
+	}
+
+	// End-to-end: the repository that only the reaped task referenced is now
+	// reported as free by the delete guard.
+	active, err := repo.HasActiveTaskSessionsByRepository(ctx, "repo-r")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if active {
+		t.Error("repo-r should have no active sessions after reaping its task")
+	}
+
+	// Idempotent: a second call changes nothing.
+	reaped, err = repo.CancelActiveTaskSessionsByTaskID(ctx, "task-r", "task archived")
+	if err != nil {
+		t.Fatalf("unexpected error on second call: %v", err)
+	}
+	if reaped != 0 {
+		t.Errorf("expected 0 rows on idempotent re-run, got %d", reaped)
+	}
+}

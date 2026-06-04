@@ -788,6 +788,19 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 		return err
 	}
 
+	// 3b. Finalize active sessions in the DB. The async cleanup below tears down
+	// the agent processes; this records the terminal session state, which
+	// process teardown does not persist on its own.
+	if reaped, rerr := s.sessions.CancelActiveTaskSessionsByTaskID(ctx, id, "task archived"); rerr != nil {
+		s.logger.Warn("failed to reap active sessions on archive",
+			zap.String("task_id", id),
+			zap.Error(rerr))
+	} else if reaped > 0 {
+		s.logger.Info("reaped active sessions on archive",
+			zap.String("task_id", id),
+			zap.Int64("count", reaped))
+	}
+
 	// 4. Re-read task for updated archived_at field
 	task, err = s.tasks.GetTask(ctx, id)
 	if err != nil {
