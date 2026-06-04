@@ -941,32 +941,9 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "summary is required", nil)
 	}
 
-	session, err := h.sessionRepo.GetTaskSession(ctx, req.SessionID)
-	if err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "session not found: "+err.Error(), nil)
-	}
-	if session.TaskID != req.TaskID {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session does not belong to task", nil)
-	}
-	// Terminal sessions cannot consume a signal: the orchestrator's
-	// out-of-band subscriber short-circuits on every state other than
-	// WAITING_FOR_INPUT, and no future turn-end will fire on a closed
-	// session. Reject up front so the agent gets a clear error instead of
-	// `accepted: true` followed by silent no-op.
-	switch session.State {
-	case models.TaskSessionStateCompleted,
-		models.TaskSessionStateFailed,
-		models.TaskSessionStateCancelled:
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
-			"cannot signal completion for a terminal session (state: "+string(session.State)+")", nil)
-	}
-
-	task, err := h.taskSvc.GetTask(ctx, req.TaskID)
-	if err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task not found: "+err.Error(), nil)
-	}
-	if task.WorkflowStepID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task has no current workflow step", nil)
+	session, task, errMsg, err := h.resolveStepCompleteTarget(ctx, msg, req.TaskID, req.SessionID)
+	if errMsg != nil {
+		return errMsg, err
 	}
 
 	// Idempotency: if a pending signal exists for the current step, return
@@ -996,30 +973,8 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to record signal", nil)
 	}
 
-	// Publish for the out-of-band subscriber so a signal that arrives after
-	// turn-end still drives the transition. If publish fails, the bag is
-	// persisted but the subscriber will not fire — surface the error to the
-	// agent so it can retry. The idempotency guard above guarantees the
-	// retry hits the same `accepted: true` outcome (or short-circuits with
-	// `already_signaled` if the publish was actually delivered).
-	if h.eventBus != nil {
-		if err := h.eventBus.Publish(ctx, events.WorkflowStepCompletionSignaled, bus.NewEvent(
-			events.WorkflowStepCompletionSignaled, "mcp-handlers",
-			map[string]interface{}{
-				"task_id":     req.TaskID,
-				"session_id":  req.SessionID,
-				"step_id":     task.WorkflowStepID,
-				"source":      signal.Source,
-				"summary":     signal.Summary,
-				"signaled_at": signal.SignaledAt,
-			},
-		)); err != nil {
-			h.logger.Error("failed to publish step-completion signal",
-				zap.String("task_id", req.TaskID),
-				zap.String("session_id", req.SessionID),
-				zap.Error(err))
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to notify orchestrator (signal persisted; retry)", nil)
-		}
+	if errMsg, err := h.publishStepCompletionEvent(ctx, msg, req.TaskID, req.SessionID, task.WorkflowStepID, signal); errMsg != nil {
+		return errMsg, err
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
@@ -1027,6 +982,101 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		"step_id":     task.WorkflowStepID,
 		"signaled_at": signal.SignaledAt,
 	})
+}
+
+// resolveStepCompleteTarget loads the session + task the signal applies to
+// and runs the up-front validation (ownership, terminal-state guard,
+// workflow-step presence). Returns a populated session+task pair on success,
+// or a ready-to-send WS error envelope (and its marshal error if any) on
+// any failed precondition.
+func (h *Handlers) resolveStepCompleteTarget(
+	ctx context.Context, msg *ws.Message, taskID, sessionID string,
+) (*models.TaskSession, *models.Task, *ws.Message, error) {
+	session, err := h.sessionRepo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		// Session repo has no exported not-found sentinel; classify by
+		// substring and treat anything else as transient so the agent
+		// retries instead of abandoning the session.
+		if strings.Contains(err.Error(), "not found") {
+			errMsg, mErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "session not found", nil)
+			return nil, nil, errMsg, mErr
+		}
+		h.logger.Error("step_complete: failed to load session",
+			zap.String("session_id", sessionID), zap.Error(err))
+		errMsg, mErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to load session", nil)
+		return nil, nil, errMsg, mErr
+	}
+	if session.TaskID != taskID {
+		errMsg, mErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session does not belong to task", nil)
+		return nil, nil, errMsg, mErr
+	}
+	// Terminal sessions cannot consume a signal: the orchestrator's
+	// out-of-band subscriber short-circuits on every state other than
+	// WAITING_FOR_INPUT, and no future turn-end will fire on a closed
+	// session. Reject up front so the agent gets a clear error instead of
+	// `accepted: true` followed by silent no-op.
+	switch session.State {
+	case models.TaskSessionStateCompleted,
+		models.TaskSessionStateFailed,
+		models.TaskSessionStateCancelled:
+		errMsg, mErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+			"cannot signal completion for a terminal session (state: "+string(session.State)+")", nil)
+		return nil, nil, errMsg, mErr
+	}
+
+	task, err := h.taskSvc.GetTask(ctx, taskID)
+	if err != nil {
+		// Task repo exports ErrTaskNotFound; anything else is a transient
+		// load failure that the agent should retry rather than interpret
+		// as "task gone".
+		if errors.Is(err, taskrepo.ErrTaskNotFound) {
+			errMsg, mErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task not found", nil)
+			return nil, nil, errMsg, mErr
+		}
+		h.logger.Error("step_complete: failed to load task",
+			zap.String("task_id", taskID), zap.Error(err))
+		errMsg, mErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to load task", nil)
+		return nil, nil, errMsg, mErr
+	}
+	if task.WorkflowStepID == "" {
+		errMsg, mErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task has no current workflow step", nil)
+		return nil, nil, errMsg, mErr
+	}
+	return session, task, nil, nil
+}
+
+// publishStepCompletionEvent emits the bus event the orchestrator's
+// out-of-band subscriber listens for. If publish fails the bag is already
+// persisted but the subscriber will not fire — surface the error to the
+// agent so it can retry. The handler-level idempotency guard guarantees the
+// retry either succeeds end-to-end or short-circuits with `already_signaled`
+// once the publish lands. Returns (nil, nil) on success or when no bus is wired.
+func (h *Handlers) publishStepCompletionEvent(
+	ctx context.Context, msg *ws.Message, taskID, sessionID, stepID string,
+	signal models.PendingStepCompletionSignal,
+) (*ws.Message, error) {
+	if h.eventBus == nil {
+		return nil, nil
+	}
+	if err := h.eventBus.Publish(ctx, events.WorkflowStepCompletionSignaled, bus.NewEvent(
+		events.WorkflowStepCompletionSignaled, "mcp-handlers",
+		map[string]interface{}{
+			"task_id":     taskID,
+			"session_id":  sessionID,
+			"step_id":     stepID,
+			"source":      signal.Source,
+			"summary":     signal.Summary,
+			"signaled_at": signal.SignaledAt,
+		},
+	)); err != nil {
+		h.logger.Error("failed to publish step-completion signal",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+			"failed to notify orchestrator (signal persisted; retry)", nil)
+	}
+	return nil, nil
 }
 
 // handleMessageTask sends a prompt to an existing task on behalf of an agent
