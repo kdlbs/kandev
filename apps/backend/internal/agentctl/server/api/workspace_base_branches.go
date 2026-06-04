@@ -34,13 +34,16 @@ func (s *Server) handleSetBaseBranches(c *gin.Context) {
 		return
 	}
 	// Sanitize incoming refs at the HTTP boundary. WorkspaceTracker
-	// SetBaseBranch already rejects unsafe values, but stripping them
-	// here makes the safety contract explicit to readers and to static
-	// analysis: anything that survives is `IsSafeGitRef`-clean.
+	// SetBaseBranch already rejects unsafe values, but transforming each
+	// value through SanitizeGitRef (rather than a bool guard) here makes
+	// the safety contract explicit to static analysis — CodeQL recognises
+	// the regex-backed transformer as a sanitiser barrier between the
+	// untrusted request body and the downstream `git` subprocess args,
+	// where a bool check before a verbatim copy is not recognised.
 	safe := make(map[string]string, len(req.BaseBranches))
 	for k, v := range req.BaseBranches {
-		if process.IsSafeGitRef(v) {
-			safe[k] = v
+		if sanitised := process.SanitizeGitRef(v); sanitised != "" {
+			safe[k] = sanitised
 		}
 	}
 	s.procMgr.UpdateBaseBranches(c.Request.Context(), safe)

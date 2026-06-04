@@ -244,16 +244,23 @@ func (m *Manager) setBaseBranches(branches map[string]string) {
 // single-repo / root tracker. Falls back to the empty-key entry when the
 // per-repo entry is missing — preserves single-repo behavior for tasks
 // that record only one base branch under the legacy unkeyed slot.
+//
+// Each value is re-sanitised through SanitizeGitRef before it leaves the
+// function. The map was sanitised at the HTTP boundary and again on
+// SetBaseBranch, but static analysis (CodeQL `go/command-injection`)
+// loses the sanitised state across map writes and field stores —
+// transforming the value at every read point keeps the source→sink path
+// covered no matter which entry point the analyser walks.
 func lookupBaseBranch(branches map[string]string, repoName string) string {
 	if len(branches) == 0 {
 		return ""
 	}
 	if v, ok := branches[repoName]; ok && v != "" {
-		return v
+		return SanitizeGitRef(v)
 	}
 	if repoName != "" {
 		if v, ok := branches[""]; ok && v != "" {
-			return v
+			return SanitizeGitRef(v)
 		}
 	}
 	return ""
