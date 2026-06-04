@@ -2,9 +2,10 @@ package api
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/common/securityutil"
 	"go.uber.org/zap"
 )
 
@@ -33,17 +34,20 @@ func (s *Server) handleSetBaseBranches(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{errKey: "invalid JSON body"})
 		return
 	}
-	// Sanitize incoming refs at the HTTP boundary. WorkspaceTracker
-	// SetBaseBranch already rejects unsafe values, but transforming each
-	// value through SanitizeGitRef (rather than a bool guard) here makes
-	// the safety contract explicit to static analysis — CodeQL recognises
-	// the regex-backed transformer as a sanitiser barrier between the
-	// untrusted request body and the downstream `git` subprocess args,
-	// where a bool check before a verbatim copy is not recognised.
+	// Sanitize incoming refs at the HTTP boundary. The inline
+	// securityutil.IsValidBranchName allowlist check mirrors agentctl's
+	// existing Rebase / Merge handlers — sharing the canonical helper
+	// (rather than wrapping it in a passthrough) is what CodeQL's taint
+	// tracker recognises as a sanitiser barrier between this request body
+	// and the downstream `git` subprocess args.
 	safe := make(map[string]string, len(req.BaseBranches))
 	for k, v := range req.BaseBranches {
-		if sanitised := process.SanitizeGitRef(v); sanitised != "" {
-			safe[k] = sanitised
+		rest, hasOriginPrefix := strings.CutPrefix(v, "origin/")
+		switch {
+		case hasOriginPrefix && securityutil.IsValidBranchName(rest):
+			safe[k] = v
+		case !hasOriginPrefix && securityutil.IsValidBranchName(v):
+			safe[k] = v
 		}
 	}
 	s.procMgr.UpdateBaseBranches(c.Request.Context(), safe)

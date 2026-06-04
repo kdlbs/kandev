@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/common/securityutil"
 	"go.uber.org/zap"
 )
 
@@ -704,12 +706,19 @@ func (s *Server) runGitLogForRepo(
 
 	baseCommit := req.Since
 	// TargetBranch reaches this handler over HTTP and is interpolated into
-	// `git` arg lists below — re-apply the regex sanitiser at the sink so
-	// CodeQL's `go/command-injection` taint tracker sees the barrier
-	// immediately before the subprocess call (the handler already filtered
-	// at the boundary, but inline sanitising here makes the source→sink
-	// flow obvious to static analysis).
-	req.TargetBranch = process.SanitizeGitRef(req.TargetBranch)
+	// `git` arg lists below. Inline the securityutil.IsValidBranchName
+	// allowlist check at the sink call site so CodeQL's taint tracker
+	// sees the regex sanitiser barrier in the same function as the
+	// subprocess invocation. `origin/<name>` refs are split so the
+	// underlying validator (which disallows "/" as the first character)
+	// can validate the branch component.
+	if rest, ok := strings.CutPrefix(req.TargetBranch, "origin/"); ok {
+		if !securityutil.IsValidBranchName(rest) {
+			req.TargetBranch = ""
+		}
+	} else if !securityutil.IsValidBranchName(req.TargetBranch) {
+		req.TargetBranch = ""
+	}
 	if req.TargetBranch != "" {
 		mergeBase, err := s.computeMergeBase(c.Request.Context(), gitOp, req.TargetBranch)
 		if err == nil && mergeBase != "" {
@@ -879,10 +888,17 @@ func (s *Server) handleGitCumulativeDiff(c *gin.Context) {
 		return
 	}
 
-	// Same untrusted-ref guard as handleGitLog: re-apply the regex
-	// sanitiser at the sink so static analysis sees the barrier inline
-	// with the subprocess call paths downstream.
-	req.TargetBranch = process.SanitizeGitRef(req.TargetBranch)
+	// Same untrusted-ref guard as handleGitLog: inline the
+	// securityutil.IsValidBranchName check at the sink so static analysis
+	// sees the regex barrier in the same function as the downstream
+	// subprocess call paths.
+	if rest, ok := strings.CutPrefix(req.TargetBranch, "origin/"); ok {
+		if !securityutil.IsValidBranchName(rest) {
+			req.TargetBranch = ""
+		}
+	} else if !securityutil.IsValidBranchName(req.TargetBranch) {
+		req.TargetBranch = ""
+	}
 
 	if req.Repo == "" {
 		if subs := s.procMgr.RepoSubpaths(); len(subs) > 0 {
