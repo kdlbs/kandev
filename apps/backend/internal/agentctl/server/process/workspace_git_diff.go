@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -14,6 +15,15 @@ import (
 	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 )
+
+// sha1HexPattern matches a full-length git SHA-1 (40 lowercase or
+// uppercase hex characters). Used inline at the few sinks that consume
+// `update.BaseCommit` so CodeQL's `go/command-injection` taint tracker
+// sees the allowlist barrier co-located with the subprocess call — the
+// taint flowed in through the merge-base/rev-parse call upstream whose
+// argument list contained a (sanitised) user-controlled branch ref, and
+// the analyser otherwise treats that command's output as still tainted.
+var sha1HexPattern = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
 
 const (
 	// maxDiffFileSize is the maximum file size for which we generate diffs.
@@ -66,6 +76,17 @@ func (wt *WorkspaceTracker) enrichWithDiffData(ctx context.Context, update *type
 // getGitStatus to avoid a transient git timeout clearing the sidebar count.
 func (wt *WorkspaceTracker) enrichWithBranchDiff(ctx context.Context, update *types.GitStatusUpdate, prior types.GitStatusUpdate) {
 	if update.BaseCommit == "" {
+		return
+	}
+
+	// BaseCommit was produced by an earlier `git merge-base / rev-parse`
+	// call whose argument list contained a user-controlled branch ref —
+	// CodeQL's `go/command-injection` taint tracker treats the output of
+	// such a command as still tainted. Inline a SHA-shape allowlist check
+	// here so the sanitiser barrier sits in the same function as the
+	// downstream `wt.runGitOutput` call and the value flowing into the
+	// next `git` invocation is provably a hex SHA, not user input.
+	if !sha1HexPattern.MatchString(update.BaseCommit) {
 		return
 	}
 
