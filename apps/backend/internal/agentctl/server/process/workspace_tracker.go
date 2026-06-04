@@ -150,40 +150,37 @@ func (wt *WorkspaceTracker) SetBaseBranch(baseBranch string) {
 // values are user-controlled and end up as positional `git` arguments.
 var safeGitRefPattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_./-]*$`)
 
-// IsSafeGitRef rejects ref names that would be unsafe to splice into a
-// `git` subprocess argument list. Empty input returns true so callers can
-// treat "" as "no override" without an extra branch. Anything outside the
-// allowlist regex is rejected even when it would be a valid
-// `git check-ref-format` ref.
+// IsSafeGitRef reports whether ref would be safe to splice into a `git`
+// subprocess argument list. Empty input returns true so callers can treat
+// "" as "no override" without an extra branch. Implemented as a thin
+// wrapper over SanitizeGitRef so the predicate and the transformer share
+// the same regex-backed allowlist.
 func IsSafeGitRef(ref string) bool {
-	if ref == "" {
-		return true
-	}
-	if len(ref) > 255 {
-		return false
-	}
-	if !safeGitRefPattern.MatchString(ref) {
-		return false
-	}
-	if strings.Contains(ref, "..") || strings.Contains(ref, "@{") {
-		return false
-	}
-	if ref[len(ref)-1] == '/' {
-		return false
-	}
-	return true
+	return ref == "" || SanitizeGitRef(ref) != ""
 }
 
-// SanitizeGitRef returns ref unchanged when IsSafeGitRef accepts it, else
-// the empty string. Use this at the call site immediately before passing
-// a user-controlled ref name into a `git` subprocess argument; placing the
-// sanitiser barrier at the sink (rather than only on the field store)
-// helps static analysis recognise it on the source→sink path.
+// SanitizeGitRef returns the regex-matched ref name when it passes the
+// allowlist, else the empty string. The return value comes from
+// `safeGitRefPattern.FindString` rather than the original parameter so the
+// flow looks like "input → regex match → sanitised string" to CodeQL's
+// taint-tracker — an identity passthrough wrapped around a bool guard was
+// not recognised on the previous attempt at clearing the
+// `go/command-injection` alert.
 func SanitizeGitRef(ref string) string {
-	if IsSafeGitRef(ref) {
-		return ref
+	if len(ref) > 255 {
+		return ""
 	}
-	return ""
+	sanitised := safeGitRefPattern.FindString(ref)
+	if sanitised == "" || sanitised != ref {
+		return ""
+	}
+	if strings.Contains(sanitised, "..") || strings.Contains(sanitised, "@{") {
+		return ""
+	}
+	if sanitised[len(sanitised)-1] == '/' {
+		return ""
+	}
+	return sanitised
 }
 
 // BaseBranch returns the recorded base branch override, if any. Exposed for

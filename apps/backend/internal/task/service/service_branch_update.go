@@ -61,7 +61,13 @@ func (s *Service) UpdateRepositoryBaseBranch(ctx context.Context, req UpdateRepo
 		return nil, fmt.Errorf("update task repository: %w", err)
 	}
 
-	s.applyBaseBranchSideEffects(ctx, req.TaskID, taskRepo.RepositoryID, baseBranch)
+	// Detach from the caller's ctx for post-commit fan-out: the DB row is
+	// already persisted, so if the HTTP / WS request gets cancelled mid-
+	// response we must still clear session.base_commit_sha and push to
+	// agentctl — otherwise the persisted task_repositories row would
+	// disagree with the cached session SHA + live tracker map until the
+	// next session launch.
+	s.applyBaseBranchSideEffects(context.WithoutCancel(ctx), req.TaskID, taskRepo.RepositoryID, baseBranch)
 	return taskRepo, nil
 }
 
@@ -130,6 +136,14 @@ func (s *Service) applyBaseBranchSideEffects(ctx context.Context, taskID, reposi
 		s.logger.Warn("UpdateRepositoryBaseBranch: failed to collect base branches for live push",
 			zap.String("task_id", taskID),
 			zap.Error(mapErr))
+		return
+	}
+	// Empty map = task currently has no recorded base_branches. Pushing
+	// nil to agentctl would call Manager.UpdateBaseBranches(nil) and wipe
+	// every tracker's override, including ones the caller didn't touch.
+	// Skip the push instead — the DB row we just updated is the source of
+	// truth for the next session launch.
+	if len(branches) == 0 {
 		return
 	}
 	s.baseBranchPusher.PushBaseBranchesForTask(ctx, taskID, branches)
