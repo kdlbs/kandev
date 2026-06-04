@@ -139,11 +139,12 @@ func TestClientClose_DrainsWorkspaceStream(t *testing.T) {
 // the StreamWorkspace goroutine has not yet reached Add(2)).
 func TestClientClose_StreamWorkspaceAddWaitRace(t *testing.T) {
 	const iterations = 100
-	for i := 0; i < iterations; i++ {
+	runIter := func(i int) {
 		mock := newCloseBarrierMockServer(t)
 		client := newCloseBarrierTestClient(t, mock.server.URL)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
 
 		streamErr := make(chan error, 1)
 		go func() {
@@ -158,7 +159,6 @@ func TestClientClose_StreamWorkspaceAddWaitRace(t *testing.T) {
 		select {
 		case <-mock.connected:
 		case <-time.After(2 * time.Second):
-			cancel()
 			t.Fatalf("iteration %d: mock never observed WS upgrade", i)
 		}
 
@@ -171,10 +171,11 @@ func TestClientClose_StreamWorkspaceAddWaitRace(t *testing.T) {
 		select {
 		case <-closeDone:
 		case <-time.After(3 * time.Second):
-			cancel()
 			t.Fatalf("iteration %d: Close did not return within 3s", i)
 		}
 		<-streamErr
-		cancel()
+	}
+	for i := 0; i < iterations; i++ {
+		runIter(i)
 	}
 }
