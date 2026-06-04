@@ -249,6 +249,41 @@ export function TurnCompleteSelect({
           <HelpTip text="Turn off plan mode after the agent finishes this step." />
         </div>
       )}
+      {transitionType !== "none" && (
+        <ExplicitCompletionToggle step={step} onUpdate={onUpdate} readOnly={readOnly} />
+      )}
+    </div>
+  );
+}
+
+// ExplicitCompletionToggle gates a step's auto-advance on the agent calling
+// `step_complete_kandev` (ADR 0015). Rendered as a sibling checkbox under the
+// On Turn Complete picker so users only see it when a transition action is
+// actually configured.
+function ExplicitCompletionToggle({
+  step,
+  onUpdate,
+  readOnly,
+}: {
+  step: WorkflowStep;
+  onUpdate: (updates: Partial<WorkflowStep>) => void;
+  readOnly: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-2 pt-1">
+      <Checkbox
+        id={`${step.id}-explicit-completion`}
+        checked={step.auto_advance_requires_signal === true}
+        onCheckedChange={(checked) => {
+          if (readOnly) return;
+          onUpdate({ auto_advance_requires_signal: checked === true });
+        }}
+        disabled={readOnly}
+      />
+      <Label htmlFor={`${step.id}-explicit-completion`} className="text-sm">
+        Wait for agent completion signal
+      </Label>
+      <HelpTip text="When enabled, the agent must call step_complete_kandev to advance. Halting without the signal leaves the step paused for the user (ADR 0015)." />
     </div>
   );
 }

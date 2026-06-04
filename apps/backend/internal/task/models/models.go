@@ -76,6 +76,34 @@ const (
 // SSR reload, alongside the in-memory re-apply on context reset. See issue #1183.
 const SessionMetaKeySessionMode = "session_mode"
 
+// SessionMetaKeyPendingStepCompletion stores the agent's (or manual fallback's)
+// step-complete signal under TaskSession.Metadata. ADR 0015: the orchestrator
+// reads this on turn-end for steps with AutoAdvanceRequiresSignal=true and
+// only fires on_turn_complete transitions when a matching signal is present.
+// Cleared on successful transition, on user reply before transition, or any
+// other step change.
+const SessionMetaKeyPendingStepCompletion = "pending_step_completion_signal"
+
+// PendingStepCompletionSignal source values.
+const (
+	StepCompletionSourceAgent          = "agent"
+	StepCompletionSourceManualFallback = "manual_fallback"
+)
+
+// PendingStepCompletionSignal is the JSON shape persisted under
+// TaskSession.Metadata[SessionMetaKeyPendingStepCompletion]. It records an
+// agent-emitted (or user-emitted via the fallback button) completion signal
+// that the orchestrator should consume to drive a workflow step transition.
+// See ADR 0015 for the lifecycle (set → read → clear).
+type PendingStepCompletionSignal struct {
+	StepID     string    `json:"step_id"`
+	Source     string    `json:"source"`
+	Summary    string    `json:"summary"`
+	Handoff    string    `json:"handoff,omitempty"`
+	Blockers   string    `json:"blockers,omitempty"`
+	SignaledAt time.Time `json:"signaled_at"`
+}
+
 // Task origin values for the Origin field.
 const (
 	TaskOriginManual        = "manual"

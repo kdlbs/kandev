@@ -54,6 +54,10 @@ type MessageCreator interface {
 type SessionRepository interface {
 	UpdateTaskSessionState(ctx context.Context, sessionID string, state models.TaskSessionState, errorMessage string) error
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
+	// SetSessionMetadataKey is used by handleStepComplete (ADR 0015) to
+	// atomically write the pending-completion bag without clobbering other
+	// metadata keys.
+	SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error
 }
 
 // TaskRepository interface for updating task state.
@@ -171,6 +175,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPUpdateTask, h.handleUpdateTask)
 	d.RegisterFunc(ws.ActionMCPAddBranchToTask, h.handleAddBranchToTask)
 	d.RegisterFunc(ws.ActionMCPUpdateRepositoryBaseBranch, h.handleUpdateRepositoryBaseBranch)
+	d.RegisterFunc(ws.ActionMCPStepComplete, h.handleStepComplete)
 	d.RegisterFunc(ws.ActionMCPMessageTask, h.handleMessageTask)
 	d.RegisterFunc(ws.ActionMCPGetTaskConversation, h.handleGetTaskConversation)
 	d.RegisterFunc(ws.ActionMCPAskUserQuestion, h.handleAskUserQuestion)
@@ -179,7 +184,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPUpdateTaskPlan, h.handleUpdateTaskPlan)
 	d.RegisterFunc(ws.ActionMCPDeleteTaskPlan, h.handleDeleteTaskPlan)
 	d.RegisterFunc(ws.ActionMCPClarificationTimeout, h.handleClarificationTimeout)
-	count := 15
+	count := 17
 
 	// Config-mode handlers (registered when config deps are set)
 	if h.workflowSvc != nil {
@@ -898,6 +903,149 @@ func classifyAddBranchError(err error) string {
 		return ws.ErrorCodeValidation
 	}
 	return ws.ErrorCodeInternalError
+}
+
+// handleStepComplete records the agent's explicit step-completion signal
+// (ADR 0015). The handler:
+//
+//   - Loads the session and the task to identify the current workflow step.
+//   - Dedupes: if a pending signal already exists for the same step, returns
+//     {accepted: false, reason: "already_signaled"} without overwriting.
+//   - Otherwise writes a PendingStepCompletionSignal blob under
+//     TaskSession.Metadata[SessionMetaKeyPendingStepCompletion] via
+//     SetSessionMetadataKey (json_set — preserves other metadata keys).
+//   - Publishes events.WorkflowStepCompletionSignaled so the orchestrator
+//     subscriber can drive the on_turn_complete transition. The transition
+//     itself only fires when the step's AutoAdvanceRequiresSignal is true
+//     AND the feature flag is on; otherwise the signal is recorded as a
+//     no-op audit entry.
+//
+// Idempotency is intentionally lossy — a second call within the same step
+// silently keeps the first signal's payload (summary/handoff/blockers). The
+// orchestrator treats the first signal as authoritative.
+func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		TaskID    string `json:"task_id"`
+		SessionID string `json:"session_id"`
+		Summary   string `json:"summary"`
+		Handoff   string `json:"handoff"`
+		Blockers  string `json:"blockers"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.TaskID == "" || req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id and session_id are required", nil)
+	}
+	if strings.TrimSpace(req.Summary) == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "summary is required", nil)
+	}
+
+	session, err := h.sessionRepo.GetTaskSession(ctx, req.SessionID)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "session not found: "+err.Error(), nil)
+	}
+	if session.TaskID != req.TaskID {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session does not belong to task", nil)
+	}
+
+	task, err := h.taskSvc.GetTask(ctx, req.TaskID)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task not found: "+err.Error(), nil)
+	}
+	if task.WorkflowStepID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task has no current workflow step", nil)
+	}
+
+	// Idempotency: if a pending signal exists for the current step, return
+	// without overwriting. A stale signal for a different step (left over
+	// from a transition that hasn't yet cleared the bag) is treated as
+	// absent and overwritten — the new step's signal supersedes.
+	if existing, ok := loadPendingStepSignal(session.Metadata); ok && existing.StepID == task.WorkflowStepID {
+		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+			"accepted": false,
+			"reason":   "already_signaled",
+		})
+	}
+
+	signal := models.PendingStepCompletionSignal{
+		StepID:     task.WorkflowStepID,
+		Source:     models.StepCompletionSourceAgent,
+		Summary:    strings.TrimSpace(req.Summary),
+		Handoff:    strings.TrimSpace(req.Handoff),
+		Blockers:   strings.TrimSpace(req.Blockers),
+		SignaledAt: time.Now().UTC(),
+	}
+	if err := h.sessionRepo.SetSessionMetadataKey(ctx, req.SessionID, models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
+		h.logger.Error("failed to persist step-completion signal",
+			zap.String("task_id", req.TaskID),
+			zap.String("session_id", req.SessionID),
+			zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to record signal", nil)
+	}
+
+	// Publish for the orchestrator subscriber. Best-effort: if the bus
+	// publish fails, the bag is still in place and the next turn-end will
+	// pick it up — so log and continue rather than failing the MCP call.
+	if h.eventBus != nil {
+		_ = h.eventBus.Publish(ctx, events.WorkflowStepCompletionSignaled, bus.NewEvent(
+			events.WorkflowStepCompletionSignaled, "mcp-handlers",
+			map[string]interface{}{
+				"task_id":     req.TaskID,
+				"session_id":  req.SessionID,
+				"step_id":     task.WorkflowStepID,
+				"source":      signal.Source,
+				"summary":     signal.Summary,
+				"signaled_at": signal.SignaledAt,
+			},
+		))
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"accepted":    true,
+		"step_id":     task.WorkflowStepID,
+		"signaled_at": signal.SignaledAt,
+	})
+}
+
+// loadPendingStepSignal decodes the pending-completion bag entry from a
+// session's metadata. Survives both the in-memory shape (set by the
+// orchestrator within a process) and the JSON-rehydrated shape (loaded from
+// the DB after a restart) — they round-trip through the same key.
+func loadPendingStepSignal(metadata map[string]interface{}) (models.PendingStepCompletionSignal, bool) {
+	if metadata == nil {
+		return models.PendingStepCompletionSignal{}, false
+	}
+	raw, ok := metadata[models.SessionMetaKeyPendingStepCompletion]
+	if !ok || raw == nil {
+		return models.PendingStepCompletionSignal{}, false
+	}
+	switch v := raw.(type) {
+	case models.PendingStepCompletionSignal:
+		return v, true
+	case map[string]interface{}:
+		out := models.PendingStepCompletionSignal{
+			StepID:   stringFromAny(v["step_id"]),
+			Source:   stringFromAny(v["source"]),
+			Summary:  stringFromAny(v["summary"]),
+			Handoff:  stringFromAny(v["handoff"]),
+			Blockers: stringFromAny(v["blockers"]),
+		}
+		if ts, ok := v["signaled_at"].(string); ok {
+			if parsed, err := time.Parse(time.RFC3339Nano, ts); err == nil {
+				out.SignaledAt = parsed
+			}
+		}
+		return out, out.StepID != ""
+	}
+	return models.PendingStepCompletionSignal{}, false
+}
+
+func stringFromAny(v interface{}) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
 }
 
 // handleMessageTask sends a prompt to an existing task on behalf of an agent
