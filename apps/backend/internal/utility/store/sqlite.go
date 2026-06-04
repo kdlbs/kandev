@@ -99,12 +99,14 @@ func (r *sqliteRepository) initSchema() error {
 		  AND agent_id <> '' AND model <> ''
 		  AND updated_at = created_at`)
 
-	// Migration: rewrite the legacy "claude-code" identifier and built-in
-	// rows seeded with an empty agent_id to the registered inference agent
-	// ID "claude-acp". The Claude agent was renamed during the ACP migration
-	// (#566) but the utility schema default kept the old string, and
-	// seedBuiltinAgents() inserts rows with agent_id = "" and never updates
-	// them (ON CONFLICT(id) DO NOTHING), so both classes need a backfill.
+	// Legacy-data backfill: rewrite the old "claude-code" identifier and any
+	// pre-fix builtin rows that were persisted with an empty agent_id to the
+	// registered inference agent ID "claude-acp". The Claude agent was
+	// renamed during the ACP migration (#566), and seedBuiltinAgents()
+	// historically inserted rows with agent_id = "" — combined with its
+	// ON CONFLICT(id) DO NOTHING contract, those stale rows survived
+	// untouched on every restart. Current seeds now use builtinSeedAgentID
+	// (see builtins.go), so this migration only repairs existing deployments.
 	_, _ = r.db.Exec(`UPDATE utility_agents SET agent_id = 'claude-acp'
 		WHERE agent_id IN ('claude-code', '')`)
 

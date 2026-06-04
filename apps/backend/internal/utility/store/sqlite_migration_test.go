@@ -110,6 +110,9 @@ func TestSeedBuiltinAgents_UsesClaudeACP(t *testing.T) {
 			t.Errorf("builtin %s: agent_id = %q, want %q", id, agentID, "claude-acp")
 		}
 	}
+	if err := rowsxDB.Err(); err != nil {
+		t.Fatalf("rows iteration error: %v", err)
+	}
 	if count == 0 {
 		t.Fatalf("expected at least one built-in row, found 0")
 	}
