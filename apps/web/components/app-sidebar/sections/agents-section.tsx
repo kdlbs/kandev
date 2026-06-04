@@ -55,6 +55,7 @@ export function AgentsSection({ collapsed }: AgentsSectionProps) {
           variant="ghost"
           size="icon"
           className="h-5 w-5 cursor-pointer"
+          aria-label="Add agent"
           onClick={() => router.push("/office/agents")}
         >
           <IconPlus className="h-3 w-3 text-muted-foreground/60" />

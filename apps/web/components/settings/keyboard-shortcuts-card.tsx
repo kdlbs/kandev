@@ -101,6 +101,7 @@ function ShortcutRecorder({
             size="icon"
             className="h-8 w-8 cursor-pointer"
             onClick={() => onClear(shortcutId)}
+            aria-label="Clear shortcut"
             title="Clear shortcut"
           >
             <IconX className="size-3.5" />
@@ -112,6 +113,7 @@ function ShortcutRecorder({
             size="icon"
             className="h-8 w-8 cursor-pointer"
             onClick={() => onReset(shortcutId)}
+            aria-label={defaultIsUnbound ? "Reset (clear shortcut)" : "Reset to default"}
             title={defaultIsUnbound ? "Reset (clear shortcut)" : "Reset to default"}
           >
             <IconRotate className="size-3.5" />

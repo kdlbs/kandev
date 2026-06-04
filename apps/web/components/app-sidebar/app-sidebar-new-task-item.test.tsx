@@ -78,11 +78,12 @@ describe("AppSidebarNewTaskItem", () => {
     expect(screen.queryByTestId(OFFICE_DIALOG_TESTID)).toBeNull();
   });
 
-  it("uses the office new-issue dialog when inside an office route", () => {
+  it("uses the office new-issue dialog when inside an office route", async () => {
     officeEnabled = true;
     pathname = "/office";
     renderItem(false);
-    expect(screen.getByTestId(OFFICE_DIALOG_TESTID)).toBeTruthy();
+    // NewTaskDialog is lazy-loaded (next/dynamic), so it resolves asynchronously.
+    expect(await screen.findByTestId(OFFICE_DIALOG_TESTID)).toBeTruthy();
     expect(screen.queryByTestId(REGULAR_DIALOG_TESTID)).toBeNull();
   });
 
@@ -106,14 +107,14 @@ describe("AppSidebarNewTaskItem", () => {
     expect(screen.queryByTestId(SUBTASK_TESTID)).toBeNull();
   });
 
-  it("offers the subtask affordance in office mode too (compact subtask dialog)", () => {
+  it("offers the subtask affordance in office mode too (compact subtask dialog)", async () => {
     officeEnabled = true;
     pathname = "/office";
     state.tasks.activeTaskId = "t-1";
     renderItem(false);
-    // Primary New Task uses the office dialog, but subtasks still go through
-    // the compact NewSubtaskDialog regardless of mode.
-    expect(screen.getByTestId(OFFICE_DIALOG_TESTID)).toBeTruthy();
+    // Primary New Task uses the office dialog (lazy-loaded), but subtasks still
+    // go through the compact NewSubtaskDialog regardless of mode.
+    expect(await screen.findByTestId(OFFICE_DIALOG_TESTID)).toBeTruthy();
     expect(screen.getByTestId(SUBTASK_TESTID)).toBeTruthy();
     expect(screen.getByTestId("new-subtask-dialog")).toBeTruthy();
   });

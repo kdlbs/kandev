@@ -10,14 +10,7 @@ import {
   IconTicket,
 } from "@tabler/icons-react";
 import type { Icon as TablerIcon } from "@tabler/icons-react";
-import { useJiraAvailable } from "@/hooks/domains/jira/use-jira-availability";
-import { useLinearAvailable } from "@/hooks/domains/linear/use-linear-availability";
-import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
-import { useGitLabAvailable } from "@/hooks/domains/gitlab/use-task-mr";
-import {
-  getAvailableIntegrationLinks,
-  getGitHubIntegrationStatus,
-} from "@/components/integrations/integrations-menu";
+import { useConfiguredIntegrationLinks } from "@/components/integrations/integrations-menu";
 import { cn } from "@/lib/utils";
 import {
   APP_SIDEBAR_SECTION_IDS,
@@ -39,18 +32,7 @@ const INTEGRATION_ICONS: Record<string, TablerIcon> = {
 
 export function IntegrationsSection({ collapsed }: IntegrationsSectionProps) {
   const pathname = usePathname();
-  const { status: githubStatusRaw, loading: githubLoading } = useGitHubStatus();
-  const gitlabAvailable = useGitLabAvailable();
-  const jiraAvailable = useJiraAvailable();
-  const linearAvailable = useLinearAvailable();
-  const githubStatus = getGitHubIntegrationStatus(githubStatusRaw, githubLoading);
-
-  const links = getAvailableIntegrationLinks({
-    githubReady: githubStatus.ready,
-    gitlabReady: gitlabAvailable,
-    jiraAvailable,
-    linearAvailable,
-  });
+  const links = useConfiguredIntegrationLinks();
 
   if (links.length === 0) return null;
 

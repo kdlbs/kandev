@@ -51,7 +51,7 @@ export function TasksViewPicker() {
             return (
               <DropdownMenuItem
                 key={view.id}
-                onClick={() => setActiveView(view.id)}
+                onSelect={() => setActiveView(view.id)}
                 data-testid="sidebar-view-chip"
                 data-view-id={view.id}
                 data-active={isActive}

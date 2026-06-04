@@ -83,7 +83,7 @@ export function getGitHubIntegrationStatus(status: GitHubStatus | null, loading:
   return { ready: false, label: getStatusLabel(loading) };
 }
 
-function useConfiguredIntegrationLinks(): IntegrationLink[] {
+export function useConfiguredIntegrationLinks(): IntegrationLink[] {
   const { status, loading } = useGitHubStatus();
   const gitlabAvailable = useGitLabAvailable();
   const jiraAvailable = useJiraAvailable();

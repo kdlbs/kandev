@@ -1,12 +1,20 @@
 "use client";
 
 import { useState } from "react";
+import dynamic from "next/dynamic";
 import { IconSquarePlus, IconSubtask } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import { useInOffice } from "@/hooks/use-in-office";
-import { NewTaskDialog } from "@/app/office/components/new-task-dialog";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
+
+// The Office "New issue" dialog only renders on `/office` routes, but this item
+// lives in the global sidebar (every page). Lazy-load it so its office-only
+// dependencies aren't shipped in the bundle for non-office routes.
+const NewTaskDialog = dynamic(
+  () => import("@/app/office/components/new-task-dialog").then((m) => m.NewTaskDialog),
+  { ssr: false },
+);
 import { NewSubtaskDialog } from "@/components/task/new-subtask-dialog";
 import { AppSidebarNavItem } from "./app-sidebar-nav-item";
 

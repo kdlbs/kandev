@@ -290,10 +290,10 @@ export function setEnvLayout(envId: string, layout: object): void {
 }
 
 // --- Dockview per-env maximize state (sessionStorage) ---
-// v2: bumped alongside DOCKVIEW_ENV_LAYOUT_PREFIX. The maximize blob
+// v3: bumped in lockstep with DOCKVIEW_ENV_LAYOUT_PREFIX. The maximize blob
 // references the pre-maximize layout, which can carry the same oversized
 // widths as the env layout.
-const DOCKVIEW_ENV_MAXIMIZE_PREFIX = "kandev.dockview.env-maximize-v2.";
+const DOCKVIEW_ENV_MAXIMIZE_PREFIX = "kandev.dockview.env-maximize-v3.";
 
 export type EnvMaximizeState = {
   /** The pre-maximize (normal) layout to restore on exit-maximize. */

@@ -1505,6 +1505,7 @@
   animation: sidebar-section-collapse 160ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 @media (prefers-reduced-motion: reduce) {
+  .sidebar-fade-in,
   .sidebar-section-content[data-state="open"],
   .sidebar-section-content[data-state="closed"] {
     animation: none;

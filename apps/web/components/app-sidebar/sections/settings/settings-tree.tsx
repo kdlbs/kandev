@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import {
   IconBolt,
-  IconCode,
   IconKey,
   IconMessageCircle,
   IconPlugConnected,
@@ -20,7 +19,6 @@ import { WorkspacesGroup } from "./workspaces-group";
 const AUTOMATIONS_HREF = "/settings/automations";
 const PROMPTS_HREF = "/settings/prompts";
 const UTILITY_HREF = "/settings/utility-agents";
-const EDITORS_HREF = "/settings/general/editors";
 const SECRETS_HREF = "/settings/general/secrets";
 const EXT_MCP_HREF = "/settings/external-mcp";
 
@@ -88,12 +86,7 @@ export function SettingsTree({ pathname }: { pathname: string }) {
         isActive={pathname === UTILITY_HREF}
       />
       <ExecutorsGroup pathname={pathname} {...groupProps("executors")} />
-      <SettingsLeaf
-        href={EDITORS_HREF}
-        label="Editors"
-        icon={IconCode}
-        isActive={pathname === EDITORS_HREF}
-      />
+      {/* Editors lives under General (see GeneralGroup) — no duplicate top-level leaf. */}
       <SettingsLeaf
         href={SECRETS_HREF}
         label="Secrets"

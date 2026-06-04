@@ -38,7 +38,7 @@ export function SystemGroup({ pathname, expanded, onToggle }: SystemGroupProps) 
       label="System"
       icon={IconServerCog}
       href={DEFAULT_HREF}
-      isActive={pathname === DEFAULT_HREF}
+      isActive={pathname.startsWith(ROOT_HREF)}
       expanded={expanded}
       onToggle={onToggle}
     >

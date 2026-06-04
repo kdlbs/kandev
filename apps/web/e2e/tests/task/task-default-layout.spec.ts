@@ -31,9 +31,10 @@ test.describe("Task default layout shape", () => {
     await session.waitForDockviewReady();
     await testPage.waitForTimeout(500); // let the session-tab swap settle
 
-    const containerW = await testPage
-      .getByTestId("dockview-task-layout")
-      .evaluate((el) => el.getBoundingClientRect().width);
+    const container = await testPage.getByTestId("dockview-task-layout").evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return { left: r.x, width: r.width };
+    });
 
     const groups = await testPage.evaluate(() => {
       const els = Array.from(document.querySelectorAll(".dv-groupview")) as HTMLElement[];
@@ -46,10 +47,12 @@ test.describe("Task default layout shape", () => {
     // The right column (files/changes + terminal) must sit beside chat — i.e.
     // at least one group starts in the right portion of the layout. If the
     // layout collapsed to a vertical stack, every group shares the same left x.
-    const rightColumnGroups = groups.filter((g) => g.x > containerW * 0.4);
+    // Normalise each group's viewport x by the container's left edge so the
+    // sidebar width doesn't skew the comparison against the container width.
+    const rightColumnGroups = groups.filter((g) => g.x - container.left > container.width * 0.4);
     expect(
       rightColumnGroups.length,
-      `expected a right-side column; groups=${JSON.stringify(groups)} containerW=${containerW}`,
+      `expected a right-side column; groups=${JSON.stringify(groups)} container=${JSON.stringify(container)}`,
     ).toBeGreaterThan(0);
   });
 });

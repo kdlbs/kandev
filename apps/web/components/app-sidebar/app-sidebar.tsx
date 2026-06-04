@@ -22,7 +22,7 @@ import { TasksSection } from "./sections/tasks-section";
 const SECTION_ROUTE_MAP: Array<{ id: string; matches: (path: string) => boolean }> = [
   {
     id: APP_SIDEBAR_SECTION_IDS.tasks,
-    matches: (p) => p.startsWith("/office/tasks") || p.startsWith("/task/"),
+    matches: (p) => p.startsWith("/office/tasks") || p.startsWith("/t/"),
   },
   { id: APP_SIDEBAR_SECTION_IDS.projects, matches: (p) => p.startsWith("/office/projects") },
   { id: APP_SIDEBAR_SECTION_IDS.agents, matches: (p) => p.startsWith("/office/agents") },
