@@ -177,7 +177,14 @@ func (wt *WorkspaceTracker) getGitBranchInfo(ctx context.Context, update *types.
 // matches "changes this branch introduces"; falls back to the tip of
 // baseBranch when no merge-base exists so we still produce a stable anchor
 // for unrelated-history cases. Returns "" only if both lookups fail.
+//
+// baseBranch is treated as user-controlled and re-sanitised here so static
+// analysis sees the regex barrier inline with the `git` invocation.
 func (wt *WorkspaceTracker) computeBaseCommit(ctx context.Context, baseBranch string) string {
+	baseBranch = SanitizeGitRef(baseBranch)
+	if baseBranch == "" {
+		return ""
+	}
 	if out, err := wt.runGitOutput(ctx, "merge-base", baseBranch, "HEAD"); err == nil {
 		if sha := strings.TrimSpace(string(out)); sha != "" {
 			return sha
@@ -204,7 +211,7 @@ func (wt *WorkspaceTracker) getAheadBehindCounts(ctx context.Context, update *ty
 	// otherwise origin/main / origin/master). Using the remote tracking
 	// branch (origin/<feature-branch>) gives wrong counts after rebase
 	// because rebased commits have new SHAs.
-	compareRef := wt.resolveAheadBehindRef(ctx)
+	compareRef := SanitizeGitRef(wt.resolveAheadBehindRef(ctx))
 	if compareRef == "" {
 		carryAheadBehind(update, prior)
 		return
@@ -288,7 +295,17 @@ func (wt *WorkspaceTracker) resolveAheadBehindRef(ctx context.Context) string {
 // only live locally. Refs that already carry the `origin/` prefix are
 // passed through unchanged so callers can opt out of the remote-first
 // behavior by storing the full `origin/<name>` value.
+//
+// `stored` originates from user-controlled input (the picker payload or a
+// task_repositories row). It is regex-sanitised here BEFORE flowing into
+// any `git` arg so CodeQL's `go/command-injection` taint tracker sees a
+// fresh sanitiser barrier right at the call site — even though
+// SetBaseBranch already rejected unsafe values when the field was stored.
 func (wt *WorkspaceTracker) resolveStoredRef(ctx context.Context, stored string) string {
+	stored = SanitizeGitRef(stored)
+	if stored == "" {
+		return ""
+	}
 	if strings.HasPrefix(stored, "origin/") {
 		if err := wt.runGit(ctx, "rev-parse", "--verify", stored); err == nil {
 			return stored

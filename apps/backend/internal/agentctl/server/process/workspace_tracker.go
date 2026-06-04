@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -141,17 +142,19 @@ func (wt *WorkspaceTracker) SetBaseBranch(baseBranch string) {
 	wt.baseBranch = baseBranch
 }
 
+// safeGitRefPattern is the allowlist used by IsSafeGitRef. Restricted to
+// `[A-Za-z0-9_./-]` so the function reads as a clean regex sanitiser to
+// static analysis (CodeQL `go/command-injection`) and so the first
+// character can never be `-` (which git would reinterpret as a flag) or
+// `/` / `.`. Stricter than `git check-ref-format` on purpose — these
+// values are user-controlled and end up as positional `git` arguments.
+var safeGitRefPattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_./-]*$`)
+
 // IsSafeGitRef rejects ref names that would be unsafe to splice into a
 // `git` subprocess argument list. Empty input returns true so callers can
-// treat "" as "no override" without an extra branch.
-//
-// Rules (subset of `git check-ref-format`):
-//   - no leading "-" (git would parse it as a flag)
-//   - no control chars, whitespace, or characters git disallows in
-//     ref names: \x00 SPACE ~ ^ : ? * [ \ ` ; | & $ ( ) ' "
-//   - no ".." or "@{" sequences
-//   - no leading/trailing "/"
-//   - length capped so a pathological value can't bloat exec args
+// treat "" as "no override" without an extra branch. Anything outside the
+// allowlist regex is rejected even when it would be a valid
+// `git check-ref-format` ref.
 func IsSafeGitRef(ref string) bool {
 	if ref == "" {
 		return true
@@ -159,23 +162,28 @@ func IsSafeGitRef(ref string) bool {
 	if len(ref) > 255 {
 		return false
 	}
-	if ref[0] == '-' || ref[0] == '/' || ref[len(ref)-1] == '/' {
+	if !safeGitRefPattern.MatchString(ref) {
 		return false
 	}
 	if strings.Contains(ref, "..") || strings.Contains(ref, "@{") {
 		return false
 	}
-	for i := 0; i < len(ref); i++ {
-		c := ref[i]
-		if c < 0x20 || c == 0x7f {
-			return false
-		}
-		switch c {
-		case ' ', '~', '^', ':', '?', '*', '[', '\\', '`', ';', '|', '&', '$', '(', ')', '\'', '"':
-			return false
-		}
+	if ref[len(ref)-1] == '/' {
+		return false
 	}
 	return true
+}
+
+// SanitizeGitRef returns ref unchanged when IsSafeGitRef accepts it, else
+// the empty string. Use this at the call site immediately before passing
+// a user-controlled ref name into a `git` subprocess argument; placing the
+// sanitiser barrier at the sink (rather than only on the field store)
+// helps static analysis recognise it on the source→sink path.
+func SanitizeGitRef(ref string) string {
+	if IsSafeGitRef(ref) {
+		return ref
+	}
+	return ""
 }
 
 // BaseBranch returns the recorded base branch override, if any. Exposed for
