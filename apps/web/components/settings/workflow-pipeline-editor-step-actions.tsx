@@ -270,20 +270,25 @@ function ExplicitCompletionToggle({
   readOnly: boolean;
 }) {
   return (
-    <div className="flex items-center gap-2 pt-1">
-      <Checkbox
-        id={`${step.id}-explicit-completion`}
-        checked={step.auto_advance_requires_signal === true}
-        onCheckedChange={(checked) => {
-          if (readOnly) return;
-          onUpdate({ auto_advance_requires_signal: checked === true });
-        }}
-        disabled={readOnly}
-      />
-      <Label htmlFor={`${step.id}-explicit-completion`} className="text-sm">
-        Wait for agent completion signal
-      </Label>
-      <HelpTip text="When enabled, the agent must call step_complete_kandev to advance. Halting without the signal leaves the step paused for the user (ADR 0015)." />
+    <div className="flex flex-col gap-1 pt-1">
+      <div className="flex items-center gap-2">
+        <Checkbox
+          id={`${step.id}-explicit-completion`}
+          checked={step.auto_advance_requires_signal === true}
+          onCheckedChange={(checked) => {
+            if (readOnly) return;
+            onUpdate({ auto_advance_requires_signal: checked === true });
+          }}
+          disabled={readOnly}
+        />
+        <Label htmlFor={`${step.id}-explicit-completion`} className="text-sm">
+          Wait for agent completion signal
+        </Label>
+      </div>
+      <p className="text-muted-foreground pl-6 text-xs leading-snug">
+        Agent must call <code>step_complete_kandev</code> to advance. Halting without the signal
+        leaves the step paused for the user.
+      </p>
     </div>
   );
 }

@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -32,40 +31,9 @@ func (s *Service) handleStepCompletionSignaled(ctx context.Context, event *bus.E
 	return nil
 }
 
-// loadPendingStepSignal decodes the pending-completion bag entry stored at
-// TaskSession.Metadata[SessionMetaKeyPendingStepCompletion]. The bag is
-// written either directly (in-memory shape) by the MCP handler within the
-// same process, or rehydrated from JSON when the session is reloaded after
-// a backend restart. Both shapes round-trip through this decoder.
-func loadPendingStepSignal(metadata map[string]interface{}) (models.PendingStepCompletionSignal, bool) {
-	if metadata == nil {
-		return models.PendingStepCompletionSignal{}, false
-	}
-	raw, ok := metadata[models.SessionMetaKeyPendingStepCompletion]
-	if !ok || raw == nil {
-		return models.PendingStepCompletionSignal{}, false
-	}
-	switch v := raw.(type) {
-	case models.PendingStepCompletionSignal:
-		return v, true
-	case map[string]interface{}:
-		out := models.PendingStepCompletionSignal{
-			StepID:   stringFromAny(v["step_id"]),
-			Source:   stringFromAny(v["source"]),
-			Summary:  stringFromAny(v["summary"]),
-			Handoff:  stringFromAny(v["handoff"]),
-			Blockers: stringFromAny(v["blockers"]),
-		}
-		if ts, ok := v["signaled_at"].(string); ok {
-			if parsed, err := time.Parse(time.RFC3339Nano, ts); err == nil {
-				out.SignaledAt = parsed
-			}
-		}
-		return out, out.StepID != ""
-	}
-	return models.PendingStepCompletionSignal{}, false
-}
-
+// stringFromAny narrows an `interface{}` slot to a string, returning "" when
+// the value is absent or of a different type. Used to decode event-payload
+// scalars (which always arrive typed as `map[string]interface{}`).
 func stringFromAny(v interface{}) string {
 	if s, ok := v.(string); ok {
 		return s
@@ -144,6 +112,25 @@ func (s *Service) onStepCompletionSignaled(ctx context.Context, event *bus.Event
 		s.logger.Debug("onStepCompletionSignaled: signal stale (step changed)",
 			zap.String("signal_step", stepID), zap.String("current_step", task.WorkflowStepID))
 		s.clearPendingStepSignal(ctx, session)
+		return
+	}
+
+	// Steps that don't opt in to signal-gating do not transition out-of-band
+	// from a signal. Without this guard `step_complete_kandev` becomes an
+	// unintended manual-advance path for every signalless step — exactly
+	// the legacy "any turn-end advances" behaviour we replaced.
+	if s.workflowStepGetter == nil {
+		return
+	}
+	currentStep, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
+	if err != nil || currentStep == nil {
+		s.logger.Debug("onStepCompletionSignaled: cannot load current step, skipping",
+			zap.String("step_id", task.WorkflowStepID), zap.Error(err))
+		return
+	}
+	if !currentStep.AutoAdvanceRequiresSignal {
+		s.logger.Debug("onStepCompletionSignaled: step is not signal-gated, ignoring",
+			zap.String("step_id", currentStep.ID))
 		return
 	}
 

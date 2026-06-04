@@ -948,6 +948,18 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 	if session.TaskID != req.TaskID {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session does not belong to task", nil)
 	}
+	// Terminal sessions cannot consume a signal: the orchestrator's
+	// out-of-band subscriber short-circuits on every state other than
+	// WAITING_FOR_INPUT, and no future turn-end will fire on a closed
+	// session. Reject up front so the agent gets a clear error instead of
+	// `accepted: true` followed by silent no-op.
+	switch session.State {
+	case models.TaskSessionStateCompleted,
+		models.TaskSessionStateFailed,
+		models.TaskSessionStateCancelled:
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+			"cannot signal completion for a terminal session (state: "+string(session.State)+")", nil)
+	}
 
 	task, err := h.taskSvc.GetTask(ctx, req.TaskID)
 	if err != nil {
@@ -961,7 +973,7 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 	// without overwriting. A stale signal for a different step (left over
 	// from a transition that hasn't yet cleared the bag) is treated as
 	// absent and overwritten — the new step's signal supersedes.
-	if existing, ok := loadPendingStepSignal(session.Metadata); ok && existing.StepID == task.WorkflowStepID {
+	if existing, ok := models.LoadPendingStepSignal(session.Metadata); ok && existing.StepID == task.WorkflowStepID {
 		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 			"accepted": false,
 			"reason":   "already_signaled",
@@ -984,11 +996,14 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to record signal", nil)
 	}
 
-	// Publish for the orchestrator subscriber. Best-effort: if the bus
-	// publish fails, the bag is still in place and the next turn-end will
-	// pick it up — so log and continue rather than failing the MCP call.
+	// Publish for the out-of-band subscriber so a signal that arrives after
+	// turn-end still drives the transition. If publish fails, the bag is
+	// persisted but the subscriber will not fire — surface the error to the
+	// agent so it can retry. The idempotency guard above guarantees the
+	// retry hits the same `accepted: true` outcome (or short-circuits with
+	// `already_signaled` if the publish was actually delivered).
 	if h.eventBus != nil {
-		_ = h.eventBus.Publish(ctx, events.WorkflowStepCompletionSignaled, bus.NewEvent(
+		if err := h.eventBus.Publish(ctx, events.WorkflowStepCompletionSignaled, bus.NewEvent(
 			events.WorkflowStepCompletionSignaled, "mcp-handlers",
 			map[string]interface{}{
 				"task_id":     req.TaskID,
@@ -998,7 +1013,13 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 				"summary":     signal.Summary,
 				"signaled_at": signal.SignaledAt,
 			},
-		))
+		)); err != nil {
+			h.logger.Error("failed to publish step-completion signal",
+				zap.String("task_id", req.TaskID),
+				zap.String("session_id", req.SessionID),
+				zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to notify orchestrator (signal persisted; retry)", nil)
+		}
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
@@ -1006,46 +1027,6 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		"step_id":     task.WorkflowStepID,
 		"signaled_at": signal.SignaledAt,
 	})
-}
-
-// loadPendingStepSignal decodes the pending-completion bag entry from a
-// session's metadata. Survives both the in-memory shape (set by the
-// orchestrator within a process) and the JSON-rehydrated shape (loaded from
-// the DB after a restart) — they round-trip through the same key.
-func loadPendingStepSignal(metadata map[string]interface{}) (models.PendingStepCompletionSignal, bool) {
-	if metadata == nil {
-		return models.PendingStepCompletionSignal{}, false
-	}
-	raw, ok := metadata[models.SessionMetaKeyPendingStepCompletion]
-	if !ok || raw == nil {
-		return models.PendingStepCompletionSignal{}, false
-	}
-	switch v := raw.(type) {
-	case models.PendingStepCompletionSignal:
-		return v, true
-	case map[string]interface{}:
-		out := models.PendingStepCompletionSignal{
-			StepID:   stringFromAny(v["step_id"]),
-			Source:   stringFromAny(v["source"]),
-			Summary:  stringFromAny(v["summary"]),
-			Handoff:  stringFromAny(v["handoff"]),
-			Blockers: stringFromAny(v["blockers"]),
-		}
-		if ts, ok := v["signaled_at"].(string); ok {
-			if parsed, err := time.Parse(time.RFC3339Nano, ts); err == nil {
-				out.SignaledAt = parsed
-			}
-		}
-		return out, out.StepID != ""
-	}
-	return models.PendingStepCompletionSignal{}, false
-}
-
-func stringFromAny(v interface{}) string {
-	if s, ok := v.(string); ok {
-		return s
-	}
-	return ""
 }
 
 // handleMessageTask sends a prompt to an existing task on behalf of an agent

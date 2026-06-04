@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
@@ -117,7 +118,7 @@ func TestLoadPendingStepSignal_RoundTrip(t *testing.T) {
 		meta := map[string]interface{}{
 			models.SessionMetaKeyPendingStepCompletion: want,
 		}
-		got, ok := loadPendingStepSignal(meta)
+		got, ok := models.LoadPendingStepSignal(meta)
 		if !ok || got.StepID != "step-1" || got.Source != "agent" {
 			t.Errorf("typed struct round-trip failed: ok=%v got=%+v", ok, got)
 		}
@@ -132,9 +133,9 @@ func TestLoadPendingStepSignal_RoundTrip(t *testing.T) {
 				"signaled_at": "2026-06-04T12:00:00Z",
 			},
 		}
-		got, ok := loadPendingStepSignal(meta)
+		got, ok := models.LoadPendingStepSignal(meta)
 		if !ok {
-			t.Fatal("expected loadPendingStepSignal to recognise map shape")
+			t.Fatal("expected models.LoadPendingStepSignal to recognise map shape")
 		}
 		if got.StepID != "step-2" || got.Source != "manual_fallback" || got.Summary != "user marked complete" {
 			t.Errorf("map round-trip mismatch: %+v", got)
@@ -142,16 +143,174 @@ func TestLoadPendingStepSignal_RoundTrip(t *testing.T) {
 	})
 
 	t.Run("absent key returns false", func(t *testing.T) {
-		_, ok := loadPendingStepSignal(map[string]interface{}{})
+		_, ok := models.LoadPendingStepSignal(map[string]interface{}{})
 		if ok {
 			t.Error("expected ok=false on empty metadata")
 		}
 	})
 
 	t.Run("nil metadata returns false", func(t *testing.T) {
-		_, ok := loadPendingStepSignal(nil)
+		_, ok := models.LoadPendingStepSignal(nil)
 		if ok {
 			t.Error("expected ok=false on nil metadata")
+		}
+	})
+}
+
+// TestOnStepCompletionSignaled covers the out-of-band subscriber that
+// drives a step transition when a `step_complete_kandev` signal arrives
+// AFTER the turn has already ended. The three branches:
+//
+//   - session still RUNNING (turn in flight): no-op, inline path will handle it.
+//   - session WAITING + step matches + step gated: re-runs transition pipeline.
+//   - signal stale (step has changed under us): clear the bag, no transition.
+//   - step not signal-gated: do not advance (signal is not a manual-advance trigger).
+func TestOnStepCompletionSignaled(t *testing.T) {
+	ctx := context.Background()
+
+	buildEvent := func(taskID, sessionID, stepID string) *bus.Event {
+		return bus.NewEvent("workflow.step_completion_signaled", "test", map[string]interface{}{
+			"task_id":    taskID,
+			"session_id": sessionID,
+			"step_id":    stepID,
+		})
+	}
+
+	t.Run("session still RUNNING — subscriber is a no-op", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		// seedSession leaves the session in RUNNING; that's what we want.
+
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+			ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+			AutoAdvanceRequiresSignal: true,
+			Events: wfmodels.StepEvents{
+				OnTurnComplete: []wfmodels.OnTurnCompleteAction{
+					{Type: wfmodels.OnTurnCompleteMoveToNext},
+				},
+			},
+		}
+		stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+			ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
+		}
+		svc := createTestService(repo, stepGetter, newMockTaskRepo())
+
+		svc.onStepCompletionSignaled(ctx, buildEvent("t1", "s1", "step1"))
+
+		updated, _ := repo.GetTask(ctx, "t1")
+		if updated.WorkflowStepID != "step1" {
+			t.Errorf("expected to stay on step1 (turn in flight), got %q", updated.WorkflowStepID)
+		}
+	})
+
+	t.Run("WAITING + matching step + gated → transition fires", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		// Flip session to WAITING_FOR_INPUT (the only state the subscriber acts on).
+		if err := repo.UpdateTaskSessionState(ctx, "s1", models.TaskSessionStateWaitingForInput, ""); err != nil {
+			t.Fatalf("flip session waiting: %v", err)
+		}
+		// Pre-write the signal in the bag — the subscriber re-runs the
+		// inline turn-end path, which reads the bag for gating.
+		signal := models.PendingStepCompletionSignal{
+			StepID:     "step1",
+			Source:     models.StepCompletionSourceAgent,
+			Summary:    "ok",
+			SignaledAt: time.Now().UTC(),
+		}
+		if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
+			t.Fatalf("seed bag: %v", err)
+		}
+
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+			ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+			AutoAdvanceRequiresSignal: true,
+			Events: wfmodels.StepEvents{
+				OnTurnComplete: []wfmodels.OnTurnCompleteAction{
+					{Type: wfmodels.OnTurnCompleteMoveToNext},
+				},
+			},
+		}
+		stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+			ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
+		}
+		svc := createTestService(repo, stepGetter, newMockTaskRepo())
+
+		svc.onStepCompletionSignaled(ctx, buildEvent("t1", "s1", "step1"))
+
+		updated, _ := repo.GetTask(ctx, "t1")
+		if updated.WorkflowStepID != "step2" {
+			t.Errorf("expected transition to step2, got %q", updated.WorkflowStepID)
+		}
+	})
+
+	t.Run("stale step → bag cleared, no transition", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step_current")
+		if err := repo.UpdateTaskSessionState(ctx, "s1", models.TaskSessionStateWaitingForInput, ""); err != nil {
+			t.Fatalf("flip session waiting: %v", err)
+		}
+		// Stale signal: written when step was "step_old", but the task has
+		// already moved on to "step_current" via some other path.
+		stale := models.PendingStepCompletionSignal{
+			StepID:     "step_old",
+			Source:     models.StepCompletionSourceAgent,
+			Summary:    "stale",
+			SignaledAt: time.Now().UTC(),
+		}
+		if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, stale); err != nil {
+			t.Fatalf("seed stale signal: %v", err)
+		}
+
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step_current"] = &wfmodels.WorkflowStep{
+			ID: "step_current", WorkflowID: "wf1", Name: "Current", Position: 5,
+		}
+		svc := createTestService(repo, stepGetter, newMockTaskRepo())
+
+		svc.onStepCompletionSignaled(ctx, buildEvent("t1", "s1", "step_old"))
+
+		updatedSession, _ := repo.GetTaskSession(ctx, "s1")
+		if _, hasBag := models.LoadPendingStepSignal(updatedSession.Metadata); hasBag {
+			t.Error("expected stale bag entry to be cleared")
+		}
+		updatedTask, _ := repo.GetTask(ctx, "t1")
+		if updatedTask.WorkflowStepID != "step_current" {
+			t.Errorf("expected no transition (stale signal), got %q", updatedTask.WorkflowStepID)
+		}
+	})
+
+	t.Run("step not signal-gated → subscriber ignores", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		if err := repo.UpdateTaskSessionState(ctx, "s1", models.TaskSessionStateWaitingForInput, ""); err != nil {
+			t.Fatalf("flip session waiting: %v", err)
+		}
+
+		// Step explicitly NOT gated on the signal — even though one was
+		// written and matches, the subscriber must not advance.
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+			ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+			AutoAdvanceRequiresSignal: false,
+			Events: wfmodels.StepEvents{
+				OnTurnComplete: []wfmodels.OnTurnCompleteAction{
+					{Type: wfmodels.OnTurnCompleteMoveToNext},
+				},
+			},
+		}
+		stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+			ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
+		}
+		svc := createTestService(repo, stepGetter, newMockTaskRepo())
+
+		svc.onStepCompletionSignaled(ctx, buildEvent("t1", "s1", "step1"))
+
+		updated, _ := repo.GetTask(ctx, "t1")
+		if updated.WorkflowStepID != "step1" {
+			t.Errorf("expected no transition for un-gated step, got %q", updated.WorkflowStepID)
 		}
 	})
 }

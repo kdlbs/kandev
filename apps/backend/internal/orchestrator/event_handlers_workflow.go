@@ -61,7 +61,7 @@ func (s *Service) processOnTurnComplete(ctx context.Context, task *models.Task, 
 	// `auto_advance_requires_signal=true` wait for a step_complete_kandev
 	// signal before evaluating their transition actions.
 	if currentStep.AutoAdvanceRequiresSignal {
-		signal, has := loadPendingStepSignal(session.Metadata)
+		signal, has := models.LoadPendingStepSignal(session.Metadata)
 		if !has || signal.StepID != currentStep.ID {
 			s.logger.Debug("on_turn_complete gated on explicit signal (legacy path)",
 				zap.String("step_id", currentStep.ID))
@@ -2013,9 +2013,23 @@ func (s *Service) processOnTurnCompleteViaEngine(ctx context.Context, taskID str
 	// On gate-fail we set the session to WAITING_FOR_INPUT and bail —
 	// either the user replies (clearing the bag) or a later
 	// step_complete_kandev call triggers the out-of-band subscriber.
+	//
+	// Fail closed on step-load errors: a missing/broken step record must
+	// not silently bypass the gate (which would let a signal-required step
+	// auto-advance whenever the loader hiccups). Block the transition and
+	// let the next turn re-evaluate after the underlying error clears.
 	currentStep, stepErr := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
-	if stepErr == nil && currentStep != nil && currentStep.AutoAdvanceRequiresSignal {
-		signal, has := loadPendingStepSignal(session.Metadata)
+	if stepErr != nil || currentStep == nil {
+		s.logger.Warn("on_turn_complete: failed to load current step for signal gating, blocking transition",
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID),
+			zap.String("step_id", task.WorkflowStepID),
+			zap.Error(stepErr))
+		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
+		return false
+	}
+	if currentStep.AutoAdvanceRequiresSignal {
+		signal, has := models.LoadPendingStepSignal(session.Metadata)
 		if !has || signal.StepID != task.WorkflowStepID {
 			s.logger.Debug("on_turn_complete gated on explicit signal (none received yet)",
 				zap.String("task_id", taskID),

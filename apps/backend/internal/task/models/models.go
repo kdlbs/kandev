@@ -104,6 +104,48 @@ type PendingStepCompletionSignal struct {
 	SignaledAt time.Time `json:"signaled_at"`
 }
 
+// LoadPendingStepSignal decodes the pending-completion bag entry from a
+// session's metadata. Single source of truth shared by the MCP handler
+// (write site, idempotency check) and the orchestrator (read site, gating).
+// Survives both the in-process typed shape and the JSON-rehydrated
+// `map[string]interface{}` shape produced when the row is loaded fresh from
+// SQLite after a backend restart.
+func LoadPendingStepSignal(metadata map[string]interface{}) (PendingStepCompletionSignal, bool) {
+	if metadata == nil {
+		return PendingStepCompletionSignal{}, false
+	}
+	raw, ok := metadata[SessionMetaKeyPendingStepCompletion]
+	if !ok || raw == nil {
+		return PendingStepCompletionSignal{}, false
+	}
+	switch v := raw.(type) {
+	case PendingStepCompletionSignal:
+		return v, true
+	case map[string]interface{}:
+		out := PendingStepCompletionSignal{
+			StepID:   pendingSignalString(v["step_id"]),
+			Source:   pendingSignalString(v["source"]),
+			Summary:  pendingSignalString(v["summary"]),
+			Handoff:  pendingSignalString(v["handoff"]),
+			Blockers: pendingSignalString(v["blockers"]),
+		}
+		if ts, ok := v["signaled_at"].(string); ok {
+			if parsed, err := time.Parse(time.RFC3339Nano, ts); err == nil {
+				out.SignaledAt = parsed
+			}
+		}
+		return out, out.StepID != ""
+	}
+	return PendingStepCompletionSignal{}, false
+}
+
+func pendingSignalString(v interface{}) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
+}
+
 // Task origin values for the Origin field.
 const (
 	TaskOriginManual        = "manual"
