@@ -201,6 +201,40 @@ func TestSQLiteRepository_ListTasks(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepository_GetTasksByIDs(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
+	for _, id := range []string{"task-1", "task-2", "task-3"} {
+		_ = repo.CreateTask(ctx, &models.Task{ID: id, WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: id})
+	}
+
+	// Empty input returns no tasks and no error.
+	none, err := repo.GetTasksByIDs(ctx, nil)
+	if err != nil {
+		t.Fatalf("GetTasksByIDs(nil): %v", err)
+	}
+	if len(none) != 0 {
+		t.Errorf("expected 0 tasks for empty input, got %d", len(none))
+	}
+
+	// Existing + missing IDs: only the existing ones come back.
+	got, err := repo.GetTasksByIDs(ctx, []string{"task-1", "task-3", "missing"})
+	if err != nil {
+		t.Fatalf("GetTasksByIDs: %v", err)
+	}
+	ids := map[string]bool{}
+	for _, tk := range got {
+		ids[tk.ID] = true
+	}
+	if len(got) != 2 || !ids["task-1"] || !ids["task-3"] {
+		t.Errorf("expected [task-1 task-3], got %v", ids)
+	}
+}
+
 func TestSQLiteRepository_ListTasksByWorkflowStep(t *testing.T) {
 	repo, cleanup := createTestSQLiteRepo(t)
 	defer cleanup()

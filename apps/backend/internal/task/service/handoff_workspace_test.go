@@ -225,6 +225,18 @@ func (f *fakeTaskRepo) GetTask(_ context.Context, id string) (*models.Task, erro
 	return f.tasks[id], nil
 }
 
+func (f *fakeTaskRepo) GetTasksByIDs(_ context.Context, ids []string) ([]*models.Task, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []*models.Task
+	for _, id := range ids {
+		if t, ok := f.tasks[id]; ok {
+			out = append(out, t)
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeTaskRepo) ListChildren(_ context.Context, parentID string) ([]*models.Task, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -290,6 +302,9 @@ type phase4TaskRepo struct {
 
 func (r *phase4TaskRepo) GetTask(ctx context.Context, id string) (*models.Task, error) {
 	return r.base.GetTask(ctx, id)
+}
+func (r *phase4TaskRepo) GetTasksByIDs(ctx context.Context, ids []string) ([]*models.Task, error) {
+	return r.base.GetTasksByIDs(ctx, ids)
 }
 func (r *phase4TaskRepo) ListChildren(ctx context.Context, parentID string) ([]*models.Task, error) {
 	return r.base.ListChildren(ctx, parentID)

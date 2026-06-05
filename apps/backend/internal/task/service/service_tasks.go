@@ -1161,11 +1161,163 @@ func (s *Service) ListTasksByWorkspace(ctx context.Context, workspaceID, workflo
 		return nil, 0, err
 	}
 
+	tasks, total = s.augmentWithPRMatches(ctx, tasks, total, prSearchOptions{
+		workspaceID:      workspaceID,
+		workflowID:       workflowID,
+		repositoryID:     repositoryID,
+		query:            query,
+		page:             page,
+		pageSize:         pageSize,
+		includeArchived:  includeArchived,
+		includeEphemeral: includeEphemeral,
+		onlyEphemeral:    onlyEphemeral,
+		excludeConfig:    excludeConfig,
+	})
+
 	if err := s.loadTaskRepositoriesBatch(ctx, tasks); err != nil {
 		s.logger.Error("failed to batch-load task repositories", zap.Error(err))
 	}
 
 	return tasks, total, nil
+}
+
+type prSearchOptions struct {
+	workspaceID      string
+	workflowID       string
+	repositoryID     string
+	query            string
+	page             int
+	pageSize         int
+	includeArchived  bool
+	includeEphemeral bool
+	onlyEphemeral    bool
+	excludeConfig    bool
+}
+
+// parsePRQuery extracts a positive PR number from a search query, accepting an
+// optional leading '#'. Returns (0, false) when the query is not a PR number.
+func parsePRQuery(query string) (int, bool) {
+	trimmed := strings.TrimPrefix(strings.TrimSpace(query), "#")
+	if trimmed == "" {
+		return 0, false
+	}
+	n, err := strconv.Atoi(trimmed)
+	if err != nil || n <= 0 {
+		return 0, false
+	}
+	return n, true
+}
+
+// isConfigTask reports whether a task is a config-mode task (mirrors the SQL
+// `json_extract(metadata, '$.config_mode') IS NOT 1` filter). JSON-decoded
+// numbers arrive as float64, so accept both numeric 1 and bool true.
+func isConfigTask(task *models.Task) bool {
+	switch v := task.Metadata["config_mode"].(type) {
+	case float64:
+		return v == 1
+	case int:
+		return v == 1
+	case bool:
+		return v
+	default:
+		return false
+	}
+}
+
+// augmentWithPRMatches surfaces tasks associated with a PR number when the
+// search query looks like one. PR matches are prepended (most relevant) and
+// deduped against the existing results; `total` grows by the net-new count.
+// Best-effort: a missing resolver or a lookup error leaves results unchanged.
+//
+// Augmentation only applies to the first page of an unscoped search. It is
+// skipped for page > 1 (the prepend+truncate only makes sense against page 1,
+// otherwise a PR match would re-appear on every page and push out a real
+// result) and when a workflow or repository filter is set (a PR-matched task
+// isn't guaranteed to satisfy those filters, and the only caller that searches
+// by PR number — the Cmd+K command panel — sets neither).
+func (s *Service) augmentWithPRMatches(ctx context.Context, tasks []*models.Task, total int, opts prSearchOptions) ([]*models.Task, int) {
+	if opts.page > 1 || opts.workflowID != "" || opts.repositoryID != "" {
+		return tasks, total
+	}
+	prNum, ok := parsePRQuery(opts.query)
+	if !ok || s.prTaskResolver == nil {
+		return tasks, total
+	}
+	ids, err := s.prTaskResolver.FindTaskIDsByPRNumber(ctx, opts.workspaceID, prNum)
+	if err != nil {
+		s.logger.Warn("PR-number task lookup failed", zap.Int("pr_number", prNum), zap.Error(err))
+		return tasks, total
+	}
+
+	matched := s.fetchPRMatchedTasks(ctx, ids, tasks, opts)
+	if len(matched) == 0 {
+		return tasks, total
+	}
+
+	merged := make([]*models.Task, 0, len(matched)+len(tasks))
+	merged = append(merged, matched...)
+	merged = append(merged, tasks...)
+	total += len(matched)
+	if len(merged) > opts.pageSize {
+		merged = merged[:opts.pageSize]
+	}
+	return merged, total
+}
+
+// fetchPRMatchedTasks batch-loads the resolver's task IDs that aren't already in
+// `existing`, applies the same visibility filters as the repository search, and
+// returns the survivors in resolver order. The resolver returns distinct IDs,
+// so excluding the already-present ones is enough to keep the result deduped.
+func (s *Service) fetchPRMatchedTasks(ctx context.Context, ids []string, existing []*models.Task, opts prSearchOptions) []*models.Task {
+	seen := make(map[string]struct{}, len(existing))
+	for _, t := range existing {
+		seen[t.ID] = struct{}{}
+	}
+	var fetchIDs []string
+	for _, id := range ids {
+		if _, ok := seen[id]; !ok {
+			fetchIDs = append(fetchIDs, id)
+		}
+	}
+	if len(fetchIDs) == 0 {
+		return nil
+	}
+	fetched, err := s.tasks.GetTasksByIDs(ctx, fetchIDs)
+	if err != nil {
+		s.logger.Warn("PR-match task fetch failed", zap.Error(err))
+		return nil
+	}
+	byID := make(map[string]*models.Task, len(fetched))
+	for _, t := range fetched {
+		byID[t.ID] = t
+	}
+	var matched []*models.Task
+	for _, id := range fetchIDs {
+		task := byID[id]
+		if task == nil || s.prMatchFilteredOut(task, opts) {
+			continue
+		}
+		matched = append(matched, task)
+	}
+	return matched
+}
+
+// prMatchFilteredOut applies the same visibility filters the repository search
+// uses, so a PR-matched task respects includeArchived / ephemeral / config flags.
+func (s *Service) prMatchFilteredOut(task *models.Task, opts prSearchOptions) bool {
+	if !opts.includeArchived && task.ArchivedAt != nil {
+		return true
+	}
+	if opts.onlyEphemeral && !task.IsEphemeral {
+		return true
+	}
+	if !opts.includeEphemeral && !opts.onlyEphemeral && task.IsEphemeral {
+		return true
+	}
+	if opts.excludeConfig && isConfigTask(task) {
+		return true
+	}
+	return false
 }
 
 // loadTaskRepositoriesBatch loads repositories for multiple tasks in a single query.

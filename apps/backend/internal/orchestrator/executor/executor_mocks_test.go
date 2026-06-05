@@ -394,6 +394,15 @@ func (m *mockRepository) GetTask(ctx context.Context, id string) (*models.Task, 
 	}
 	return nil, nil
 }
+func (m *mockRepository) GetTasksByIDs(ctx context.Context, ids []string) ([]*models.Task, error) {
+	var out []*models.Task
+	for _, id := range ids {
+		if task, ok := m.tasks[id]; ok {
+			out = append(out, task)
+		}
+	}
+	return out, nil
+}
 func (m *mockRepository) UpdateTask(ctx context.Context, task *models.Task) error { return nil }
 func (m *mockRepository) DeleteTask(ctx context.Context, id string) error         { return nil }
 func (m *mockRepository) ListTasks(ctx context.Context, workflowID string) ([]*models.Task, error) {

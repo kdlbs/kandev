@@ -104,6 +104,13 @@ type WorkflowStepGetter interface {
 	GetNextStepByPosition(ctx context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error)
 }
 
+// PRTaskResolver resolves which tasks are associated with a GitHub PR number.
+// Implemented by the github service; injected so the task service can surface a
+// task by its PR number in search without coupling to the github schema.
+type PRTaskResolver interface {
+	FindTaskIDsByPRNumber(ctx context.Context, workspaceID string, prNumber int) ([]string, error)
+}
+
 // StartStepResolver resolves the starting step for a workflow.
 type StartStepResolver interface {
 	ResolveStartStep(ctx context.Context, workflowID string) (string, error)
@@ -177,6 +184,7 @@ type Service struct {
 	workflowStepCreator   WorkflowStepCreator
 	workflowStepGetter    WorkflowStepGetter
 	startStepResolver     StartStepResolver
+	prTaskResolver        PRTaskResolver
 	quickChatDir          string // Directory for quick-chat workspaces (e.g., ~/.kandev/quick-chat)
 	branchFetcher         *branchFetcher
 	envDestroyer          EnvironmentDestroyer
@@ -262,6 +270,12 @@ func (s *Service) SetWorkflowStepGetter(getter WorkflowStepGetter) {
 // SetStartStepResolver wires the start step resolver for CreateTask.
 func (s *Service) SetStartStepResolver(resolver StartStepResolver) {
 	s.startStepResolver = resolver
+}
+
+// SetPRTaskResolver wires the GitHub PR→task resolver for PR-number search.
+// Optional — when unset, search by PR number is a no-op.
+func (s *Service) SetPRTaskResolver(resolver PRTaskResolver) {
+	s.prTaskResolver = resolver
 }
 
 // SetQuickChatDir sets the directory for quick-chat workspaces.

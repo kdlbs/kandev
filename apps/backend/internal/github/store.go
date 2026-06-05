@@ -207,6 +207,10 @@ func (s *Store) initSchema() error {
 	if err := s.backfillPRWatchesRepositoryID(); err != nil {
 		return fmt.Errorf("backfill github_pr_watches.repository_id: %w", err)
 	}
+	// pr_number is the 3rd column of UNIQUE(task_id, repository_id, pr_number),
+	// so SQLite can't use that index for the PR-number task search. Add a
+	// dedicated leading-key index so lookups by PR number stay index-backed.
+	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_github_task_prs_pr_number ON github_task_prs (pr_number)`)
 	return nil
 }
 
@@ -812,6 +816,21 @@ func (s *Store) ListTaskPRsByWorkspaceID(ctx context.Context, workspaceID string
 		return nil, err
 	}
 	return groupTaskPRsByTask(prs), nil
+}
+
+// ListTaskIDsByPRNumber returns the IDs of tasks in a workspace that have a PR
+// association with the given PR number. Workspace-scoped via the JOIN on tasks
+// so a PR number shared across workspaces never leaks results. A task with
+// multiple PR rows for the same number (multi-repo) is returned once.
+func (s *Store) ListTaskIDsByPRNumber(ctx context.Context, workspaceID string, prNumber int) ([]string, error) {
+	var ids []string
+	if err := s.ro.SelectContext(ctx, &ids,
+		`SELECT DISTINCT gtp.task_id FROM github_task_prs gtp
+		 INNER JOIN tasks t ON gtp.task_id = t.id
+		 WHERE t.workspace_id = ? AND gtp.pr_number = ?`, workspaceID, prNumber); err != nil {
+		return nil, err
+	}
+	return ids, nil
 }
 
 func groupTaskPRsByTask(prs []TaskPR) map[string][]*TaskPR {

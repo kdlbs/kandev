@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -651,6 +652,29 @@ func (r *Repository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 		result = append(result, task)
 	}
 	return result, rows.Err()
+}
+
+// GetTasksByIDs fetches multiple tasks in a single query. Missing IDs are
+// silently omitted; result order is not guaranteed, so callers that need a
+// specific order should reorder by ID themselves.
+func (r *Repository) GetTasksByIDs(ctx context.Context, ids []string) ([]*models.Task, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	query := fmt.Sprintf(`SELECT %s FROM tasks t WHERE t.id IN (%s)`,
+		taskSelectColumns("t"), strings.Join(placeholders, ","))
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return r.scanTasks(rows)
 }
 
 // ArchiveTask sets the archived_at timestamp on a task
