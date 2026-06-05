@@ -195,10 +195,9 @@ type WorkflowStep struct {
 	StageType StageType `json:"stage_type,omitempty"`
 	// AutoAdvanceRequiresSignal gates on_turn_complete transitions on an
 	// explicit `step_complete_kandev` MCP signal from the agent (ADR 0015).
-	// When true and the feature flag is enabled, bare turn-end does NOT
-	// trigger the step's transition actions; instead the orchestrator waits
-	// for the agent (or a manual UI fallback) to write the pending-signal
-	// bag on TaskSession.Metadata.
+	// When true, bare turn-end does NOT trigger the step's transition
+	// actions; instead the orchestrator waits for the agent (or a manual
+	// UI fallback) to write the pending-signal bag on TaskSession.Metadata.
 	AutoAdvanceRequiresSignal bool      `json:"auto_advance_requires_signal,omitempty"`
 	CreatedAt                 time.Time `json:"created_at"`
 	UpdatedAt                 time.Time `json:"updated_at"`

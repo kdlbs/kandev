@@ -53,8 +53,8 @@ Today, a workflow step's `on_turn_complete` actions (most commonly `move_to_next
    - **Read** by `processOnTurnComplete` and by the `onStepCompletionSignaled` subscriber. Stale entries whose `StepID` no longer matches the session's current step are treated as absent and cleared on read.
    - **Cleared** on (a) successful transition, (b) user message arriving before the transition runs (re-open semantics), (c) any other step change.
    - **Idempotent.** Repeated calls within the same step are no-ops: if `existing != nil && existing.StepID == currentStepID`, the MCP tool returns `{accepted: false, reason: "already_signaled"}` without overwriting.
-   - **Audit** of *consumed* signals lives on the transition row: `SessionStepHistory.Metadata["signal_source"]` (`"agent" | "manual_fallback"`) and `Metadata["signal_summary"]` are set when `executeStepTransition` fires off a pending signal. Cancelled signals are not retained — the bag is overwritten and that's deliberate (the user already saw what they needed in chat).
-   - **Chat visibility.** On insert, the orchestrator emits a system message of type `step_complete_signaled` into the existing message stream. The message is decoration; the bag is the truth source.
+   - **Audit (deferred).** Persisting consumed-signal context on the transition row (`SessionStepHistory.Metadata["signal_source"]` ∈ {`"agent"`, `"manual_fallback"`} plus `Metadata["signal_summary"]`) is the planned audit shape but is not yet implemented. Today the bag is cleared on transition and the only history is the chat transcript. Cancelled signals (overwritten by user reply) are deliberately not retained.
+   - **Chat visibility (deferred).** Surfacing a `step_complete_signaled` system message in the existing message stream is planned but not yet emitted. Today the only user-visible cue is the next-step transition itself; the bag remains the only truth source.
 
 3. **System-prompt injection.** When `auto_advance_requires_signal` is true on the current workflow step, `internal/sysprompt/` prepends a short instruction block to the agent's system prompt at launch / resume time, in the same path that already injects MCP tool descriptions. The text is fixed, terse, and points at the tool by name:
 
@@ -84,7 +84,7 @@ Today, a workflow step's `on_turn_complete` actions (most commonly `move_to_next
 - **`step_complete_kandev` is fire-and-forget once it returns.** The MCP call only returns after the bag write + bus publish complete, but the actual transition runs asynchronously in the bus subscriber. An agent that calls the tool then immediately continues working may have trailing tokens race with the transition. Mitigation today is behavioural: the tool description in `kandev-context.md` instructs the agent to "call this as the LAST action of the step." The manual fallback button and re-open semantics are the safety nets if the agent gets it wrong.
 - **Idempotency.** Multiple calls within the same step are deduped at the bag-write site (first call wins, subsequent calls return `{accepted: false, reason: "already_signaled"}` without error). Cross-step re-entry is allowed — a fresh step's `currentStepID` no longer matches the stale bag entry, so the next call writes through.
 - **No new schema for the signal itself.** Storage piggybacks on the existing `task_sessions.metadata` JSON column. Audit of *consumed* signals piggybacks on the existing `session_step_history.metadata` JSON column. Cancelled signals (overwritten by a user reply) are not retained — chat already surfaces what the user needs.
-- **Telemetry.** Adds two `expvar` counters under `workflow_*`: `step_completion_signal_received_total`, `step_completion_signal_fallback_used_total`. Their ratio is the headline metric for "is the explicit-signal flow working" — we should aim for fallback-used / received ≤ 10% per agent type before flipping the prod profile flag.
+- **Telemetry (deferred).** The plan is two `expvar` counters under `workflow_*` — `step_completion_signal_received_total` and `step_completion_signal_fallback_used_total` — whose ratio (fallback-used / received ≤ 10% per agent type) becomes the headline "is the explicit-signal flow working" metric. Neither counter exists yet; ship in a follow-up alongside the manual fallback button so both halves of the ratio can be measured at once.
 - **No data-model coupling to `task_repositories` or `task_prs`.** The signal is per-session, per-step; it does not interact with the multi-branch work in ADR 0013.
 
 ## Alternatives considered
@@ -115,7 +115,7 @@ Backend:
 - `apps/backend/internal/orchestrator/event_handlers_workflow.go` *(gating in `processOnTurnComplete`; read/clear bag entry)*
 - `apps/backend/internal/orchestrator/event_handlers_step_completion.go` *(new — `onStepCompletionSignaled` subscriber: write bag + drive transition)*
 - `apps/backend/config/prompts/kandev-context.md` *(unconditional tool description)*
-- `apps/backend/internal/workflow/models/` *(`AutoAdvanceRequiresSignal bool`; `SessionStepHistory.Metadata` key constants for `signal_source` / `signal_summary`)*
+- `apps/backend/internal/workflow/models/` *(`AutoAdvanceRequiresSignal bool`; `SessionStepHistory.Metadata` key constants for `signal_source` / `signal_summary` — deferred)*
 - `apps/backend/internal/workflow/repository/sqlite/` *(idempotent migration for `workflow_steps.auto_advance_requires_signal` only — no new tables)*
 
 Frontend:

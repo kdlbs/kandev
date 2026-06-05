@@ -274,18 +274,16 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		zap.String("to_step", targetStep.Name),
 		zap.Bool("trigger_on_enter", triggerOnEnter))
 
-	// ADR 0015 — clear any pending completion-signal bag for the step we
-	// just left. Only on_turn_complete transitions trigger gating, so the
-	// triggerOnEnter=true branch is the only one that could have consumed
-	// a signal; on_turn_start moves leave the bag alone (it's still tied
-	// to an unsignaled step we have not left). The session struct isn't
-	// used after this point, so skip the extra GetTaskSession round-trip
-	// and write straight to the DB by session_id.
 	if triggerOnEnter {
+		// ADR 0015 — clear any pending completion-signal bag for the
+		// step we just left. Only on_turn_complete transitions trigger
+		// gating, so the triggerOnEnter=true branch is the only one
+		// that could have consumed a signal; on_turn_start moves leave
+		// the bag alone (it's still tied to an unsignaled step we have
+		// not left). The session struct isn't used after this point,
+		// so skip the extra GetTaskSession round-trip and write
+		// straight to the DB by session_id.
 		s.clearPendingStepSignalByID(ctx, sessionID)
-	}
-
-	if triggerOnEnter {
 		// Automated transitions always clear review: the agent just completed
 		// a turn, so any pending review from a prior step is stale regardless
 		// of whether the new step has auto_start_agent.

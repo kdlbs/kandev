@@ -121,7 +121,14 @@ func (s *Service) onStepCompletionSignaled(ctx context.Context, event *bus.Event
 	if task.WorkflowStepID != stepID {
 		s.logger.Debug("onStepCompletionSignaled: signal stale (step changed)",
 			zap.String("signal_step", stepID), zap.String("current_step", task.WorkflowStepID))
-		s.clearPendingStepSignal(ctx, session)
+		// Only clear the bag when its current contents are themselves
+		// stale (matching THIS subscriber's stepID). Without this guard
+		// we'd destroy a freshly-written valid signal for the new step
+		// if the session was reused across steps and the new step's
+		// agent signalled before this stale subscriber ran.
+		if existing, ok := models.LoadPendingStepSignal(session.Metadata); ok && existing.StepID == stepID {
+			s.clearPendingStepSignal(ctx, session)
+		}
 		return
 	}
 
