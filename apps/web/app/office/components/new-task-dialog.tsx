@@ -5,6 +5,7 @@ import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import { Textarea } from "@kandev/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle } from "@kandev/ui/dialog";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { toast } from "sonner";
 import { useAppStore } from "@/components/state-provider";
 import { createTask } from "@/lib/api/domains/kanban-api";
@@ -55,7 +56,7 @@ export function NewTaskDialog({
   );
 
   const handleCreate = useCallback(async () => {
-    if (!draft.title.trim() || !workspaceId) return;
+    if (!draft.title.trim() || !draft.projectId || !workspaceId) return;
     setSubmitting(true);
     try {
       const executionPolicy = buildExecutionPolicy(stages);
@@ -171,14 +172,49 @@ function NewIssueDialogBody({
         >
           Discard Draft
         </Button>
-        <Button
-          onClick={onCreate}
-          disabled={!draft.title.trim() || submitting}
-          className="cursor-pointer"
-        >
-          {submitting ? "Creating..." : "Create Task"}
-        </Button>
+        <CreateTaskButton draft={draft} submitting={submitting} onCreate={onCreate} />
       </DialogFooter>
     </>
+  );
+}
+
+export function CreateTaskButton({
+  draft,
+  submitting,
+  onCreate,
+}: {
+  draft: IssueDraft;
+  submitting: boolean;
+  onCreate: () => void;
+}) {
+  const missingTitle = !draft.title.trim();
+  const missingProject = !draft.projectId;
+  const disabled = missingTitle || missingProject || submitting;
+  let reason: string | null = null;
+  if (missingProject) reason = "Select a project to create a task";
+  else if (missingTitle) reason = "Add a title to create a task";
+
+  const button = (
+    <Button
+      onClick={onCreate}
+      disabled={disabled}
+      className="cursor-pointer"
+      data-testid="new-task-create-button"
+    >
+      {submitting ? "Creating..." : "Create Task"}
+    </Button>
+  );
+
+  if (!reason) return button;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span tabIndex={0} aria-label={reason}>
+          {button}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{reason}</TooltipContent>
+    </Tooltip>
   );
 }

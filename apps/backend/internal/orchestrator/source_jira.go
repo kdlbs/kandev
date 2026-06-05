@@ -82,6 +82,22 @@ func (s *JiraWatcherSource) AttachTaskID(ctx context.Context, evt any, taskID st
 	return s.service.AssignIssueWatchTaskID(ctx, e.IssueWatchID, e.Issue.Key, taskID)
 }
 
+func (s *JiraWatcherSource) WatchID(evt any) string {
+	e, ok := evt.(*jira.NewJiraIssueEvent)
+	if !ok || e == nil {
+		return ""
+	}
+	return e.IssueWatchID
+}
+
+func (s *JiraWatcherSource) MaxInflightTasks(evt any) *int {
+	e, ok := evt.(*jira.NewJiraIssueEvent)
+	if !ok || e == nil {
+		return nil
+	}
+	return e.MaxInflightTasks
+}
+
 func (s *JiraWatcherSource) AutoStartParams(evt any) AutoStartParams {
 	e, ok := evt.(*jira.NewJiraIssueEvent)
 	if !ok || e == nil {
@@ -92,4 +108,24 @@ func (s *JiraWatcherSource) AutoStartParams(evt any) AutoStartParams {
 		ExecutorProfileID: e.ExecutorProfileID,
 		WorkflowStepID:    e.WorkflowStepID,
 	}
+}
+
+// AgentProfileID returns the watcher's bound profile id, or "" when the
+// event payload is malformed. Pre-flight uses "" as the skip-check signal.
+func (s *JiraWatcherSource) AgentProfileID(evt any) string {
+	e, ok := evt.(*jira.NewJiraIssueEvent)
+	if !ok || e == nil {
+		return ""
+	}
+	return e.AgentProfileID
+}
+
+// SelfHeal disables the jira_issue_watches row that produced this event.
+// Symmetric with LinearWatcherSource.SelfHeal; nil-safe.
+func (s *JiraWatcherSource) SelfHeal(ctx context.Context, evt any, cause string) error {
+	e, ok := evt.(*jira.NewJiraIssueEvent)
+	if !ok || e == nil || s.service == nil {
+		return nil
+	}
+	return s.service.DisableIssueWatchWithError(ctx, e.IssueWatchID, cause)
 }

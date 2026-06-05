@@ -12,6 +12,17 @@ import type { AgentProfileMcpConfig } from "@/lib/types/http";
 type ProfileMcpConfigCardProps = {
   profileId: string;
   supportsMcp: boolean;
+  /**
+   * Whether the profile is in CLI passthrough mode. When true (and
+   * mcpInjection is set), the card explains how kandev injects MCP servers
+   * into the agent's CLI.
+   */
+  cliPassthrough?: boolean;
+  /**
+   * Human-readable phrase describing the passthrough MCP injection mechanism
+   * (from PassthroughConfig.mcp_injection). Only rendered when cliPassthrough.
+   */
+  mcpInjection?: string;
   initialConfig?: AgentProfileMcpConfig | null;
   draftState?: {
     enabled: boolean;
@@ -131,12 +142,29 @@ function validateDraftServers(value: string): string | null {
   return null;
 }
 
+function PassthroughMcpInjectionHint({
+  cliPassthrough,
+  mcpInjection,
+}: {
+  cliPassthrough?: boolean;
+  mcpInjection?: string;
+}) {
+  if (!cliPassthrough || !mcpInjection) return null;
+  return (
+    <p className="text-xs text-muted-foreground">
+      In CLI passthrough mode, kandev injects these MCP servers via {mcpInjection}.
+    </p>
+  );
+}
+
 type McpServersEditorProps = {
   profileId: string;
   currentServers: string;
   currentError: string | null;
   isDraft: boolean;
   isEditableProfile: boolean;
+  cliPassthrough?: boolean;
+  mcpInjection?: string;
   onDraftStateChange?: (next: { servers?: string; dirty?: boolean; error?: string | null }) => void;
   handleMcpServersChange: (value: string) => void;
 };
@@ -147,6 +175,8 @@ function McpServersEditor({
   currentError,
   isDraft,
   isEditableProfile,
+  cliPassthrough,
+  mcpInjection,
   onDraftStateChange,
   handleMcpServersChange,
 }: McpServersEditorProps) {
@@ -186,6 +216,7 @@ function McpServersEditor({
         MCP definitions are stored in the database and resolved per executor at runtime. This does
         not override your local agent config.
       </p>
+      <PassthroughMcpInjectionHint cliPassthrough={cliPassthrough} mcpInjection={mcpInjection} />
       <p className="text-xs font-medium text-muted-foreground">Built-in</p>
       <div className="flex flex-wrap gap-2 mb-2">
         <Tooltip>
@@ -314,6 +345,8 @@ function McpProfileHint({
 export function ProfileMcpConfigCard({
   profileId,
   supportsMcp,
+  cliPassthrough,
+  mcpInjection,
   initialConfig,
   draftState,
   onDraftStateChange,
@@ -364,6 +397,8 @@ export function ProfileMcpConfigCard({
           currentError={state.currentError}
           isDraft={state.isDraft}
           isEditableProfile={state.isEditableProfile}
+          cliPassthrough={cliPassthrough}
+          mcpInjection={mcpInjection}
           onDraftStateChange={onDraftStateChange}
           handleMcpServersChange={handleMcpServersChange}
         />

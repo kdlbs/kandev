@@ -121,34 +121,9 @@ else
   endif
 endif
 
-# Idempotent: wires the pre-commit framework into git's hook system
-# (.pre-commit-config.yaml at the repo root drives it). Runs as a
-# dependency of `dev` so every fresh clone / worktree picks up the
-# format + lint hooks the first time a contributor starts the dev
-# server, without anyone having to remember a setup step.
-#
-# Silent unless pre-commit is missing — in that case it prints a
-# one-line note instead of failing, because `make dev` should not
-# block on an optional tool. CI still runs the real linters.
-#
-# Quirks handled:
-#   - pre-commit refuses to install when core.hooksPath is set, even
-#     when it's set to the default location (a leftover from a stale
-#     setup). Detect that exact case and unset it before installing.
-#   - core.hooksPath is shared between the main repo and every
-#     worktree, so a single install covers all of them.
 .PHONY: doctor
 doctor:
-	@if ! command -v pre-commit >/dev/null 2>&1; then \
-		echo "⚠  pre-commit not found on PATH — install with 'pip install pre-commit' to enable hook-based format/lint on commit."; \
-		exit 0; \
-	fi; \
-	default_hooks="$$(git rev-parse --git-common-dir)/hooks"; \
-	current="$$(git config --get core.hooksPath 2>/dev/null || true)"; \
-	if [ -n "$$current" ] && [ "$$current" = "$$default_hooks" ]; then \
-		git config --unset core.hooksPath 2>/dev/null || true; \
-	fi; \
-	pre-commit install -t pre-commit -t commit-msg --overwrite >/dev/null 2>&1 || true
+	@scripts/doctor
 
 .PHONY: dev
 dev: doctor
@@ -167,7 +142,6 @@ endif
 dev-prod-db: export KANDEV_DATABASE_PATH := $(HOME)/.kandev/data/kandev.db
 dev-prod-db:
 	@echo "⚠  dev mode against PRODUCTION db at $(KANDEV_DATABASE_PATH)"
-	@echo "   back it up first; dev binary may run unmigrated schema changes"
 	@$(MAKE) dev
 
 .PHONY: dev-backend

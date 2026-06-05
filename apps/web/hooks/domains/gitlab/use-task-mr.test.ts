@@ -219,13 +219,17 @@ describe("useGitLabAvailable", () => {
     expect(result.current).toBe(false);
   });
 
-  it("re-probes when the window regains focus", async () => {
+  it("does not re-probe when the window regains focus", async () => {
+    // Regression guard: previously the hook re-fetched on every focus event,
+    // which hammered GET /api/v1/gitlab/status on every browser tab switch.
     fetchGitLabStatusMock.mockResolvedValue(makeStatus());
     renderHook(() => useGitLabAvailable(), { wrapper });
     await waitFor(() => expect(fetchGitLabStatusMock).toHaveBeenCalledTimes(1));
     act(() => {
       window.dispatchEvent(new Event("focus"));
+      window.dispatchEvent(new Event("focus"));
     });
-    await waitFor(() => expect(fetchGitLabStatusMock).toHaveBeenCalledTimes(2));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(fetchGitLabStatusMock).toHaveBeenCalledTimes(1);
   });
 });

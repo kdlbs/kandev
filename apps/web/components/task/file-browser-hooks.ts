@@ -9,7 +9,7 @@ import { getFilesPanelExpandedPaths, setFilesPanelExpandedPaths } from "@/lib/lo
 import { useTree, type VisibleRow } from "@/hooks/use-tree";
 import { mergeTreeNodes } from "./file-browser-parts";
 import { compareTreeNodes, sortRootChildren } from "./file-tree-utils";
-import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
 const debugLoad = createDebugLogger("file-browser:load");
 const debugChanges = createDebugLogger("file-browser:changes");
@@ -141,7 +141,7 @@ export function applyFileChanges(ctx: {
     if (p === "" || expandedPaths.has(p)) foldersToRefresh.add(p);
   }
   if (foldersToRefresh.size === 0) {
-    if (IS_DEBUG)
+    if (isDebug())
       debugChanges("no-folders-to-refresh", {
         sessionId,
         candidates: changes.length,
@@ -149,7 +149,7 @@ export function applyFileChanges(ctx: {
       });
     return;
   }
-  if (IS_DEBUG)
+  if (isDebug())
     debugChanges("refresh", {
       sessionId,
       folders: Array.from(foldersToRefresh).slice(0, 5),
@@ -245,9 +245,9 @@ type TreeLoaderContext = {
   setLoadError: React.Dispatch<React.SetStateAction<string | null>>;
 };
 
-// Thin wrapper so loadTree callers don't each pay a complexity point for IS_DEBUG.
+// Thin wrapper so loadTree callers don't each pay a complexity point for isDebug().
 function logLoad(event: string, data: Record<string, unknown>) {
-  if (IS_DEBUG) debugLoad(event, data);
+  if (isDebug()) debugLoad(event, data);
 }
 
 function useTreeLoader(ctx: TreeLoaderContext) {
@@ -442,10 +442,10 @@ function useFileChangeSubscription({
     return client.on("session.workspace.file.changes", (msg) => {
       const changes = msg.payload?.changes;
       if (!changes || changes.length === 0) {
-        if (IS_DEBUG) debugChanges("event-empty", { sessionId: sessionIdRef.current });
+        if (isDebug()) debugChanges("event-empty", { sessionId: sessionIdRef.current });
         return;
       }
-      if (IS_DEBUG)
+      if (isDebug())
         debugChanges("event", {
           sessionId: sessionIdRef.current,
           count: changes.length,

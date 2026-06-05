@@ -1,10 +1,10 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
-import { IconLoader2 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { AgentLogo } from "@/components/agent-logo";
 import { GridSpinner } from "@/components/grid-spinner";
+import { PanelLoadingState } from "@/components/panel-loading-state";
 import { SessionTabs, type SessionTab } from "@/components/session-tabs";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
@@ -177,15 +177,7 @@ function RunningSpinner() {
 }
 
 function PreviewLoadingState({ label }: { label: string }) {
-  return (
-    <div
-      className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground"
-      data-testid="preview-loading-state"
-    >
-      <IconLoader2 className="h-4 w-4 animate-spin" />
-      {label}
-    </div>
-  );
+  return <PanelLoadingState testId="preview-loading-state" label={label} />;
 }
 
 function PreviewEmptyState() {

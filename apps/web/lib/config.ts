@@ -5,9 +5,16 @@ export type AppConfig = {
 // Server-side default (used during SSR - always localhost since SSR runs on same machine)
 const DEFAULT_API_BASE_URL = "http://localhost:38429";
 
-export const DEBUG_UI =
-  process.env.NEXT_PUBLIC_KANDEV_DEBUG === "true" ||
-  (typeof window !== "undefined" && window.__KANDEV_DEBUG === true);
+let debugUiCached: boolean | undefined;
+
+/** Whether debug-only UI (poll badges, debug overlay) should render. */
+export function isDebugUI(): boolean {
+  if (debugUiCached !== undefined) return debugUiCached;
+  debugUiCached =
+    process.env.NEXT_PUBLIC_KANDEV_DEBUG === "true" ||
+    (typeof window !== "undefined" && window.__KANDEV_DEBUG === true);
+  return debugUiCached;
+}
 
 export function getBackendConfig(): AppConfig {
   // Server-side: use env vars or localhost defaults (SSR runs on same machine as backend)

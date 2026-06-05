@@ -26,11 +26,14 @@ func (c *countingSearchClient) ListIssuesPaged(ctx context.Context, filter, cust
 
 func newTestService(client Client) *Service {
 	return &Service{
-		client:        client,
-		authMethod:    AuthMethodPAT,
-		logger:        logger.Default(),
-		searchCache:   newTTLCache(),
-		prStatusCache: newTTLCache(),
+		client:               client,
+		authMethod:           AuthMethodPAT,
+		logger:               logger.Default(),
+		searchCache:          newTTLCache(),
+		prStatusCache:        newTTLCache(),
+		prFeedbackCache:      newPRFeedbackCache(),
+		accessibleReposCache: newAccessibleReposCache(),
+		repoErrorCache:       newRepoErrorCache(),
 	}
 }
 

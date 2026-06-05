@@ -1,6 +1,7 @@
 package updates
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -20,6 +21,7 @@ func newRouter(svc *Service) *gin.Engine {
 	api := r.Group("/api/v1/system")
 	api.GET("/updates", HandleGet(svc))
 	api.POST("/updates/check", HandleCheck(svc))
+	api.POST("/updates/apply", HandleApply(svc))
 	return r
 }
 
@@ -44,6 +46,34 @@ func TestHandleGet_ReturnsZeroValues(t *testing.T) {
 	}
 	if resp.UpdateAvailable {
 		t.Errorf("expected UpdateAvailable=false")
+	}
+}
+
+func TestHandleGet_IncludesNonServiceInstallState(t *testing.T) {
+	pool := newTestPool(t)
+	svc := NewService(pool, "v1.0.0", nil, logger.Default())
+	r := newRouter(svc)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/system/updates", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	var body map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	install, ok := body["install"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("install state missing from response: %s", w.Body.String())
+	}
+	if got := install["running_as_service"]; got != false {
+		t.Errorf("running_as_service=%v want false", got)
+	}
+	if got := body["apply_supported"]; got != false {
+		t.Errorf("apply_supported=%v want false", got)
 	}
 }
 
@@ -125,6 +155,91 @@ func TestHandleCheck_GitHubFailureReturns502(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadGateway {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleApply_RejectsCrossOrigin(t *testing.T) {
+	pool := newTestPool(t)
+	svc := NewService(pool, "v1.0.0", nil, logger.Default())
+	r := newRouter(svc)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/system/updates/apply", bytes.NewBufferString(`{"confirm":"UPDATE"}`))
+	req.Host = "kandev.local"
+	req.Header.Set("Origin", "https://evil.example")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleApply_WrongConfirmReturns400(t *testing.T) {
+	pool := newTestPool(t)
+	svc := NewService(pool, "v1.0.0", nil, logger.Default())
+	r := newRouter(svc)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/system/updates/apply", bytes.NewBufferString(`{"confirm":"NOPE"}`))
+	req.Host = "localhost:38429"
+	req.Header.Set("Origin", "http://localhost:38429")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleApply_RejectsCrossScheme(t *testing.T) {
+	pool := newTestPool(t)
+	svc := NewService(pool, "v1.0.0", nil, logger.Default())
+	r := newRouter(svc)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/system/updates/apply", bytes.NewBufferString(`{"confirm":"UPDATE"}`))
+	req.Host = "localhost:38429"
+	// Server was reached over plain http (no TLS); an https Origin is cross-scheme.
+	req.Header.Set("Origin", "https://localhost:38429")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status=%d body=%s want 403", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleApply_HonorsForwardedProtoForScheme(t *testing.T) {
+	pool := newTestPool(t)
+	svc := NewService(pool, "v1.0.0", nil, logger.Default())
+	r := newRouter(svc)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/system/updates/apply", bytes.NewBufferString(`{"confirm":"UPDATE"}`))
+	req.Host = "localhost:38429"
+	req.Header.Set("Origin", "https://localhost:38429")
+	// A reverse proxy terminated TLS upstream, so the https Origin is same-origin.
+	req.Header.Set("X-Forwarded-Proto", "https")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	// Passes the same-origin gate, so it proceeds to the install-state check and
+	// is refused there (409) rather than blocked as cross-origin (403).
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status=%d body=%s want 409 (not 403)", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleApply_RejectsLoopbackDifferentPort(t *testing.T) {
+	pool := newTestPool(t)
+	svc := NewService(pool, "v1.0.0", nil, logger.Default())
+	r := newRouter(svc)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/system/updates/apply", bytes.NewBufferString(`{"confirm":"UPDATE"}`))
+	req.Host = "localhost:38429"
+	req.Header.Set("Origin", "http://localhost:37429")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
 }

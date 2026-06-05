@@ -34,8 +34,13 @@ async function focusPanel(page: Page, kind: PanelKind): Promise<void> {
     return;
   }
   if (kind === "plan") {
+    // ProseMirror's focus dispatch after a click is async on contenteditable —
+    // pressing Ctrl+F before document.activeElement settles inside the editor
+    // makes the panel-search hook see body/another panel as the focused node
+    // and silently no-op. Gate the keypress on the focus actually landing here.
     const editor = page.getByTestId("plan-panel").locator(".ProseMirror").first();
     await editor.click();
+    await expect(editor).toBeFocused();
     return;
   }
   // terminal: click the xterm canvas area so xterm captures keydown

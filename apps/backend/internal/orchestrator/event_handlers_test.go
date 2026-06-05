@@ -115,13 +115,41 @@ func (m *mockTaskRepo) UpdateTaskState(_ context.Context, taskID string, state v
 	defer m.mu.Unlock()
 	m.updatedStates[taskID] = state
 	m.stateWrites[taskID]++
+	if t, ok := m.tasks[taskID]; ok {
+		t.State = state
+	}
 	return nil
+}
+
+func (m *mockTaskRepo) UpdateTaskStateIfCurrentIn(
+	_ context.Context, taskID string, state v1.TaskState, allowed []v1.TaskState,
+) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t, ok := m.tasks[taskID]
+	if !ok {
+		return false, fmt.Errorf("%w: %s", sqliterepo.ErrTaskNotFound, taskID)
+	}
+	for _, candidate := range allowed {
+		if t.State != candidate {
+			continue
+		}
+		m.updatedStates[taskID] = state
+		m.stateWrites[taskID]++
+		t.State = state
+		return true, nil
+	}
+	return false, nil
 }
 
 // mockAgentManager is a minimal mock of executor.AgentManagerClient for testing.
 type mockAgentManager struct {
-	isPassthrough       bool
-	isAgentRunning      bool
+	isPassthrough  bool
+	isAgentRunning bool
+	// isAgentRunningFn, when non-nil, overrides isAgentRunning for
+	// IsAgentRunningForSession. Lets tests model state changes mid-sequence
+	// (e.g. stream disconnect between PromptAgent call and queue write).
+	isAgentRunningFn    func(context.Context, string) bool
 	resolveProfileErr   error
 	restartProcessCalls []string // tracks execution IDs passed to RestartAgentProcess
 	restartProcessErr   error
@@ -174,6 +202,17 @@ type mockAgentManager struct {
 	cancelAgentCalls   atomic.Int32
 	cancelAgentBlock   chan struct{}
 	cancelAgentEntered chan struct{}
+
+	// set_session_mode tracking (issue #1183). Records (sessionID, modeID) for
+	// every SetSessionModeBySessionID call. setSessionModeErr, when set, is
+	// returned to simulate "no running agent".
+	setSessionModeCalls []sessionModeCall
+	setSessionModeErr   error
+}
+
+type sessionModeCall struct {
+	SessionID string
+	ModeID    string
 }
 
 type stopAgentCall struct {
@@ -252,7 +291,10 @@ func (m *mockAgentManager) CancelAgent(_ context.Context, _ string) error {
 func (m *mockAgentManager) RespondToPermissionBySessionID(_ context.Context, _, _, _ string, _ bool) error {
 	return nil
 }
-func (m *mockAgentManager) IsAgentRunningForSession(_ context.Context, _ string) bool {
+func (m *mockAgentManager) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
+	if m.isAgentRunningFn != nil {
+		return m.isAgentRunningFn(ctx, sessionID)
+	}
 	return m.isAgentRunning
 }
 func (m *mockAgentManager) ResolveAgentProfile(_ context.Context, _ string) (*executor.AgentProfileInfo, error) {
@@ -281,6 +323,12 @@ func (m *mockAgentManager) SetExecutionEnv(_ context.Context, _ string, _ map[st
 }
 func (m *mockAgentManager) SetSessionModelBySessionID(_ context.Context, _, _ string) error {
 	return fmt.Errorf("not supported")
+}
+func (m *mockAgentManager) SetSessionModeBySessionID(_ context.Context, sessionID, modeID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.setSessionModeCalls = append(m.setSessionModeCalls, sessionModeCall{SessionID: sessionID, ModeID: modeID})
+	return m.setSessionModeErr
 }
 func (m *mockAgentManager) SetMcpMode(_ context.Context, _ string, _ string) error {
 	return nil
@@ -613,6 +661,34 @@ func TestHandleAgentReadyGuards(t *testing.T) {
 		status := svc.messageQueue.GetStatus(ctx, "s1")
 		if status.Count == 0 {
 			t.Fatalf("expected queued message to remain queued")
+		}
+	})
+
+	t.Run("ignores ready while cancel is in flight", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+			ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+		}
+		agentMgr := &mockAgentManager{isAgentRunning: true}
+		svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), agentMgr)
+
+		if _, err := svc.messageQueue.QueueMessage(ctx, "s1", "t1", "queued", "", messagequeue.QueuedByUser, false, nil); err != nil {
+			t.Fatalf("failed to queue message: %v", err)
+		}
+		svc.cancelInFlight.Store("s1", struct{}{})
+		defer svc.cancelInFlight.Delete("s1")
+
+		svc.handleAgentReady(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
+
+		status := svc.messageQueue.GetStatus(ctx, "s1")
+		if status.Count != 1 {
+			t.Fatalf("expected queued message to remain parked during cancel, count=%d entries=%+v", status.Count, status.Entries)
+		}
+		if len(agentMgr.capturedPrompts) != 0 {
+			t.Fatalf("expected no queued prompt dispatch during cancel, got %d prompts", len(agentMgr.capturedPrompts))
 		}
 	})
 

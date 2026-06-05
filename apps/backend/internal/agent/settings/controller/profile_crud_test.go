@@ -61,6 +61,51 @@ func TestSeedCLIFlags_EmptyForAgentWithNoCurated(t *testing.T) {
 	}
 }
 
+// TestSeedCLIFlags_FromCodexACP seeds codex-acp -c config overrides (off by
+// default) and never @openai/codex passthrough flags like --ask-for-approval.
+func TestSeedCLIFlags_FromCodexACP(t *testing.T) {
+	flags := seedCLIFlags(agents.NewCodexACP())
+
+	want := map[string]bool{
+		"-c approval_policy=never":                false,
+		agents.CodexACPSandboxDiskFullReadCLIFlag: false,
+	}
+	if len(flags) != len(want) {
+		t.Fatalf("expected %d seeded flags, got %d: %+v", len(want), len(flags), flags)
+	}
+	for _, f := range flags {
+		enabled, ok := want[f.Flag]
+		if !ok {
+			t.Errorf("unexpected seeded flag: %q", f.Flag)
+			continue
+		}
+		if f.Enabled != enabled {
+			t.Errorf("%q: Enabled=%v, want %v", f.Flag, f.Enabled, enabled)
+		}
+		if f.Description == "" {
+			t.Errorf("%q: missing Description", f.Flag)
+		}
+	}
+}
+
+func TestSeedCLIFlags_FromCursorACP(t *testing.T) {
+	flags := seedCLIFlags(agents.NewCursorACP())
+	want := map[string]bool{"--force": false}
+	if len(flags) != len(want) {
+		t.Fatalf("expected %d seeded flags, got %d: %+v", len(want), len(flags), flags)
+	}
+	for _, f := range flags {
+		enabled, ok := want[f.Flag]
+		if !ok {
+			t.Errorf("unexpected seeded flag: %q", f.Flag)
+			continue
+		}
+		if f.Enabled != enabled {
+			t.Errorf("%q: Enabled=%v, want %v", f.Flag, f.Enabled, enabled)
+		}
+	}
+}
+
 // TestValidateCLIFlagDTOs rejects entries whose flag text is empty or
 // whitespace only. Empty descriptions are allowed (custom flags often
 // don't have one).

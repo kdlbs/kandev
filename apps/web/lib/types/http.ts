@@ -82,6 +82,14 @@ export type WorkflowStep = {
    * frontend uses it to choose presentation (review/approval styling, etc).
    */
   stage_type?: "work" | "review" | "approval" | "custom";
+  /**
+   * ADR 0015: gate on_turn_complete transitions on an explicit
+   * `step_complete_kandev` MCP signal from the agent. When true, the
+   * step's auto-advance only fires once the agent (or the manual
+   * fallback button) signals completion. Default false preserves
+   * legacy "any turn-end advances" behaviour.
+   */
+  auto_advance_requires_signal?: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -406,6 +414,8 @@ export type SidebarViewApi = {
   collapsed_groups: string[];
 };
 
+import type { VoiceModeSettings } from "./http-voice";
+
 export type UserSettings = {
   user_id: string;
   workspace_id: WorkspaceId;
@@ -432,6 +442,7 @@ export type UserSettings = {
   terminal_font_family?: string;
   terminal_font_size?: number;
   changes_panel_layout?: "flat" | "tree";
+  voice_mode?: VoiceModeSettings;
   updated_at: string;
 };
 

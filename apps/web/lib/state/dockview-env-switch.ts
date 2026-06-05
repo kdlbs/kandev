@@ -20,9 +20,12 @@ import {
   setPinnedTarget,
 } from "./layout-manager";
 import type { LayoutState, LayoutGroupIds } from "./layout-manager";
-import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+import { ENV_SCOPED_DOCKVIEW_COMPONENTS } from "./dockview-env-scoped-components";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
+import { snapshotColumnWidths, formatWidthsSnapshot } from "./dockview-widths-debug";
 
 const debug = createDebugLogger("dockview:env-switch");
+const debugWidths = createDebugLogger("dockview:widths");
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function snapshotGridShape(node: any, depth = 0): unknown {
@@ -45,14 +48,7 @@ function snapshotGridShape(node: any, depth = 0): unknown {
   return null;
 }
 
-const EPHEMERAL_COMPONENTS = new Set([
-  "file-editor",
-  "browser",
-  "vscode",
-  "commit-detail",
-  "diff-viewer",
-  "pr-detail",
-]);
+const EPHEMERAL_COMPONENTS = ENV_SCOPED_DOCKVIEW_COMPONENTS;
 
 /** Fetch the saved layout for an env, dropping it if its shape is corrupted. */
 function getHealthyEnvLayout(envId: string): object | null {
@@ -225,7 +221,7 @@ function replaceStaleSessionPanels(api: DockviewApi, keepSessionId: string | nul
     }
   }
 
-  if (IS_DEBUG) {
+  if (isDebug()) {
     debug("replaceStaleSessionPanels", {
       keepSessionId,
       livePanelIds: api.panels.map((p) => p.id),
@@ -279,7 +275,7 @@ function tryFastEnvSwitch(params: EnvSwitchParams): LayoutGroupIds | null {
   }
 
   if (!structuresMatch) {
-    if (IS_DEBUG) {
+    if (isDebug()) {
       debug("tryFastEnvSwitch: structures do not match, falling back to slow path", {
         newEnvId,
         hasSaved: !!saved,
@@ -294,7 +290,7 @@ function tryFastEnvSwitch(params: EnvSwitchParams): LayoutGroupIds | null {
     });
     return null;
   }
-  if (IS_DEBUG) {
+  if (isDebug()) {
     debug("tryFastEnvSwitch: taking fast path", {
       newEnvId,
       activeSessionId,
@@ -338,7 +334,22 @@ function tryFastEnvSwitch(params: EnvSwitchParams): LayoutGroupIds | null {
   applyPinnedColumnSizes(api, saved as SerializedDockview | null, params.safeWidth);
 
   api.layout(params.safeWidth, params.safeHeight);
-  return applyLayoutFixups(api);
+  return applyLayoutFixups(api, savedRightColumnWidth(saved as SerializedDockview | null));
+}
+
+/**
+ * The per-env saved width of the right column (the last grid-root child) for a
+ * default-preset layout, or undefined when the saved layout has no distinct
+ * right column. Forwarded to `applyLayoutFixups` so the fixups pass anchors the
+ * pinned right target to this stable saved width instead of dockview's
+ * transient post-`fromJSON` live size (the dockview-wrong-width drift).
+ */
+export function savedRightColumnWidth(saved: SerializedDockview | null): number | undefined {
+  if (!saved) return undefined;
+  const sizes = extractSavedColumnSizes(saved);
+  if (!sizes || sizes.length < 3) return undefined;
+  const w = sizes[sizes.length - 1];
+  return Number.isFinite(w) && w > 0 ? w : undefined;
 }
 
 /** Extract per-column sizes from a saved SerializedDockview grid root. */
@@ -378,16 +389,33 @@ function applyPinnedColumnSizes(
 
   const savedSizes = saved ? extractSavedColumnSizes(saved) : null;
   const liveLayout = fromDockviewApi(api);
+  if (isDebug()) {
+    const savedStr = savedSizes
+      ? savedSizes.map((n) => (Number.isFinite(n) ? String(Math.round(n)) : "-")).join(",")
+      : "-";
+    debugWidths(
+      `env-switch-resize totalWidth=${totalWidth} savedSizes=${savedStr} ` +
+        `pre=${formatWidthsSnapshot(snapshotColumnWidths(api))}`,
+    );
+  }
   for (let i = 0; i < liveLayout.columns.length && i < sv.length; i++) {
     const col = liveLayout.columns[i];
     if (col.id !== "sidebar" && col.id !== "right") continue;
-    const target = targetPinnedWidth(col, i, savedSizes, totalWidth);
+    // Sidebar uses the GLOBAL width pref (single source of truth across tasks),
+    // so it ignores this env's saved size. Right keeps per-env saved sizes.
+    const target =
+      col.id === "sidebar"
+        ? getPinnedWidth(col, totalWidth, undefined)
+        : targetPinnedWidth(col, i, savedSizes, totalWidth);
     if (typeof target !== "number" || target <= 0) continue;
     try {
       sv.resizeView(i, target);
       // Update the pinned-target so enforcement keeps the new env's width
       // through subsequent rebalances.
       setPinnedTarget(col.id, target);
+      if (isDebug()) {
+        debugWidths(`env-switch-resize-col col=${col.id} idx=${i} target=${Math.round(target)}`);
+      }
     } catch {
       /* dockview rejects out-of-range sizes — ignore */
     }
@@ -434,7 +462,7 @@ function addIncomingSessionPanel(
  */
 export function performEnvSwitch(params: EnvSwitchParams): LayoutGroupIds {
   const { api, oldEnvId, newEnvId, activeSessionId, safeWidth, safeHeight, buildDefault } = params;
-  if (IS_DEBUG) {
+  if (isDebug()) {
     debug("performEnvSwitch: entry", {
       oldEnvId,
       newEnvId,
@@ -445,7 +473,7 @@ export function performEnvSwitch(params: EnvSwitchParams): LayoutGroupIds {
 
   const fastResult = tryFastEnvSwitch(params);
   if (fastResult) {
-    if (IS_DEBUG) {
+    if (isDebug()) {
       debug("performEnvSwitch: completed via fast path", {
         newEnvId,
         livePanelIdsAfter: api.panels.map((p) => p.id),
@@ -457,7 +485,7 @@ export function performEnvSwitch(params: EnvSwitchParams): LayoutGroupIds {
   const saved = getHealthyEnvLayout(newEnvId);
   if (saved) {
     try {
-      if (IS_DEBUG) {
+      if (isDebug()) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const savedPanelIds = Object.keys((saved as any).panels ?? {});
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -478,13 +506,13 @@ export function performEnvSwitch(params: EnvSwitchParams): LayoutGroupIds {
       // useAutoSessionTab will still no-op if the panel was just added here.
       replaceStaleSessionPanels(api, activeSessionId);
       api.layout(safeWidth, safeHeight);
-      if (IS_DEBUG) {
+      if (isDebug()) {
         debug("performEnvSwitch: completed via slow path (fromJSON)", {
           newEnvId,
           livePanelIdsAfter: api.panels.map((p) => p.id),
         });
       }
-      return applyLayoutFixups(api);
+      return applyLayoutFixups(api, savedRightColumnWidth(saved as SerializedDockview));
     } catch (err) {
       console.warn("performEnvSwitch: fromJSON threw", err);
       debug("performEnvSwitch: fromJSON threw, falling through to default", { newEnvId, err });
@@ -494,7 +522,7 @@ export function performEnvSwitch(params: EnvSwitchParams): LayoutGroupIds {
   debug("performEnvSwitch: building default layout", { newEnvId, hasSaved: !!saved });
   buildDefault(api);
   api.layout(safeWidth, safeHeight);
-  if (IS_DEBUG) {
+  if (isDebug()) {
     debug("performEnvSwitch: completed via default build", {
       newEnvId,
       livePanelIdsAfter: api.panels.map((p) => p.id),

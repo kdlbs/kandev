@@ -1,6 +1,8 @@
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
+import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
+import { gitStatusWouldMutate } from "@/lib/state/slices/session-runtime/session-runtime-slice";
 import type {
   GitEventPayload,
   GitStatusUpdateEvent,
@@ -9,7 +11,7 @@ import type {
   GitBranchSwitchedEvent,
 } from "@/lib/types/git-events";
 import { invalidateCumulativeDiffCache } from "@/hooks/domains/session/use-cumulative-diff";
-import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
 const debug = createDebugLogger("git-status:ws");
 
@@ -26,9 +28,42 @@ function resolveEnvKey(store: StoreApi<AppState>, sessionId: string): string {
   return store.getState().environmentIdBySessionId[sessionId] ?? sessionId;
 }
 
+function buildGitStatusEntry(event: GitStatusUpdateEvent): GitStatusEntry {
+  return {
+    branch: event.status.branch,
+    remote_branch: event.status.remote_branch,
+    modified: event.status.modified,
+    added: event.status.added,
+    deleted: event.status.deleted,
+    untracked: event.status.untracked,
+    renamed: event.status.renamed,
+    ahead: event.status.ahead,
+    behind: event.status.behind,
+    files: event.status.files,
+    timestamp: event.timestamp,
+    branch_additions: event.status.branch_additions,
+    branch_deletions: event.status.branch_deletions,
+    // Multi-repo workspaces tag each status with the repository it belongs to;
+    // setGitStatus routes the entry into byEnvironmentRepo accordingly.
+    repository_name: event.status.repository_name,
+  };
+}
+
+function statusUpdateChangesGitState(
+  store: StoreApi<AppState>,
+  sessionId: string,
+  gitStatus: GitStatusEntry,
+): boolean {
+  const state = store.getState();
+  const envKey = resolveEnvKey(store, sessionId);
+  return gitStatusWouldMutate(state.gitStatus, envKey, gitStatus);
+}
+
 const gitEventHandlers: GitEventHandlers = {
   status_update: (store, event) => {
-    if (IS_DEBUG) {
+    const gitStatus = buildGitStatusEntry(event);
+    const changed = statusUpdateChangesGitState(store, event.session_id, gitStatus);
+    if (isDebug()) {
       debug("status_update", {
         sessionId: event.session_id,
         repositoryName: event.status.repository_name ?? null,
@@ -42,32 +77,17 @@ const gitEventHandlers: GitEventHandlers = {
         behind: event.status.behind,
         envKey: resolveEnvKey(store, event.session_id),
         envMapped: event.session_id in store.getState().environmentIdBySessionId,
+        changed,
       });
     }
-    store.getState().setGitStatus(event.session_id, {
-      branch: event.status.branch,
-      remote_branch: event.status.remote_branch,
-      modified: event.status.modified,
-      added: event.status.added,
-      deleted: event.status.deleted,
-      untracked: event.status.untracked,
-      renamed: event.status.renamed,
-      ahead: event.status.ahead,
-      behind: event.status.behind,
-      files: event.status.files,
-      timestamp: event.timestamp,
-      branch_additions: event.status.branch_additions,
-      branch_deletions: event.status.branch_deletions,
-      // Multi-repo workspaces tag each status with the repository it belongs to;
-      // setGitStatus routes the entry into byEnvironmentRepo accordingly.
-      repository_name: event.status.repository_name,
-    });
-    // Invalidate cumulative diff cache when files change
-    invalidateCumulativeDiffCache(resolveEnvKey(store, event.session_id));
+    store.getState().setGitStatus(event.session_id, gitStatus);
+    if (changed) {
+      invalidateCumulativeDiffCache(resolveEnvKey(store, event.session_id));
+    }
   },
 
   commit_created: (store, event) => {
-    if (IS_DEBUG) {
+    if (isDebug()) {
       debug("commit_created", {
         sessionId: event.session_id,
         sha: event.commit.commit_sha,
@@ -96,17 +116,22 @@ const gitEventHandlers: GitEventHandlers = {
   },
 
   commits_reset: (store, event) => {
-    if (IS_DEBUG) debug("commits_reset", { sessionId: event.session_id });
-    // Clear commits to trigger refetch in useSessionCommits hook
-    store.getState().clearSessionCommits(event.session_id);
+    if (isDebug()) debug("commits_reset", { sessionId: event.session_id });
+    // Trigger a refetch without clearing the visible commits — the Changes
+    // panel would otherwise flicker through its empty state ("Your changed
+    // files will appear here") while the refetch is in flight, because
+    // useSessionCommits returns `commits ?? []` and the panel's hasAnything
+    // gate flips to false the moment commits goes undefined.
+    store.getState().bumpSessionCommitsRefetch(event.session_id);
     // Invalidate cumulative diff cache when commits are reset
     invalidateCumulativeDiffCache(resolveEnvKey(store, event.session_id));
   },
 
   branch_switched: (store, event) => {
-    if (IS_DEBUG) debug("branch_switched", { sessionId: event.session_id });
-    // Clear commits to trigger refetch with new base commit
-    store.getState().clearSessionCommits(event.session_id);
+    if (isDebug()) debug("branch_switched", { sessionId: event.session_id });
+    // Stale-while-revalidate (see commits_reset above): refetch with the new
+    // base commit but keep the old list visible until the new one arrives.
+    store.getState().bumpSessionCommitsRefetch(event.session_id);
     // Invalidate cumulative diff cache when branch switches
     invalidateCumulativeDiffCache(resolveEnvKey(store, event.session_id));
   },

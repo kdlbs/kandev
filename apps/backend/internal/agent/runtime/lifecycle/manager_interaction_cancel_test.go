@@ -54,7 +54,7 @@ func TestManager_CancelAgent_EscalatesWhenAgentHangs(t *testing.T) {
 		t.Fatal("mock server did not see WS connection")
 	}
 
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 
 	promptFinished := make(chan struct{})
 	exec := &AgentExecution{
@@ -155,7 +155,7 @@ func TestManager_CancelAgent_EscalationCleanupSurvivesCtxCancel(t *testing.T) {
 		t.Fatal("mock server did not see WS connection")
 	}
 
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 
 	// promptFinished is deliberately never closed — simulates a SendPrompt that
 	// is blocked on something other than promptDoneCh (so escalation can't

@@ -91,12 +91,44 @@ type Manager struct {
 	// Each tracker stamps RepositoryName onto its emitted events and shares
 	// subscriber channels with the root via the Manager fan-out.
 	// Empty for single-repo workspaces.
-	repoTrackers []*WorkspaceTracker
+	//
+	// Mutated post-launch by RescanRepositories (multi-branch add) while other
+	// goroutines (gateway subscribe/unsubscribe, poll-mode updates) iterate
+	// the slice — every read and write must go through repoTrackersMu.
+	// workspaceTracker is also guarded by the same lock because rescan can
+	// swap it when transitioning single→multi mode.
+	repoTrackers   []*WorkspaceTracker
+	repoTrackersMu sync.RWMutex
+	// rescanMu serializes RescanRepositories calls so two concurrent
+	// rescans can't both observe an empty tracker set and double-bootstrap
+	// (or both append duplicate trackers for the same new child). The
+	// per-field repoTrackersMu still allows concurrent subscribe/unsubscribe
+	// readers while a rescan is in flight.
+	rescanMu sync.Mutex
 	// workspaceTrackersBySubpath caches per-subpath trackers for multi-repo
 	// task roots. Key is the cleaned subpath (relative to cfg.WorkDir). The
 	// root tracker lives in workspaceTracker above.
 	workspaceTrackersBySubpath map[string]*WorkspaceTracker
 	workspaceTrackersMu        sync.Mutex
+
+	// baseBranchesMu guards mutations to cfg.BaseBranches so the
+	// UpdateBaseBranches writer doesn't race with the rescan-path and
+	// lazy-subpath readers that look up per-repo overrides via
+	// lookupBaseBranch. Two existing mutexes already cover the trackers
+	// themselves (repoTrackersMu, workspaceTrackersMu) but each guards a
+	// different field — without this dedicated lock the writer could
+	// publish a new map under repoTrackersMu while a reader walked the
+	// same map under workspaceTrackersMu.
+	baseBranchesMu sync.RWMutex
+
+	// streamSubscribers tracks every workspace-stream subscriber attached
+	// via SubscribeWorkspaceStream so RescanRepositories can wire new
+	// per-repo trackers into the same channels without re-subscription. The
+	// gateway only subscribes once per session; without this list, trackers
+	// added post-launch (multi-branch transition) would emit events that
+	// never reach the UI.
+	streamSubscribers   map[types.WorkspaceStreamSubscriber]struct{}
+	streamSubscribersMu sync.Mutex
 
 	// Script/process runner (dev server, setup, cleanup, custom)
 	processRunner *ProcessRunner
@@ -161,18 +193,77 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 		// Multi-repo: root tracker bound to the bare task root (no fallback,
 		// no events), plus one tracker per repo subdir.
 		m.workspaceTracker = NewWorkspaceTrackerForRepo(cfg.WorkDir, "", log)
+		m.workspaceTracker.SetBaseBranch(lookupBaseBranch(cfg.BaseBranches, ""))
 		for _, child := range repoChildren {
-			m.repoTrackers = append(m.repoTrackers,
-				NewWorkspaceTrackerForRepo(child.path, child.name, log))
+			tr := NewWorkspaceTrackerForRepo(child.path, child.name, log)
+			tr.SetBaseBranch(lookupBaseBranch(cfg.BaseBranches, child.name))
+			m.repoTrackers = append(m.repoTrackers, tr)
 		}
 	} else {
 		m.workspaceTracker = NewWorkspaceTracker(cfg.WorkDir, log)
+		m.workspaceTracker.SetBaseBranch(lookupBaseBranch(cfg.BaseBranches, ""))
 	}
 	m.processRunner = NewProcessRunner(m.workspaceTracker, log, cfg.ProcessBufferMaxBytes)
 	m.shellMgr = shell.NewManager(cfg.WorkDir, log)
 	m.status.Store(StatusStopped)
 	m.exitCode.Store(-1)
 	return m
+}
+
+// getBaseBranches returns a snapshot of cfg.BaseBranches under the
+// dedicated baseBranchesMu so callers (rescan, lazy-subpath, the
+// UpdateBaseBranches re-stamp loop) read a consistent map even when a
+// concurrent UpdateBaseBranches writer is publishing a replacement.
+func (m *Manager) getBaseBranches() map[string]string {
+	m.baseBranchesMu.RLock()
+	defer m.baseBranchesMu.RUnlock()
+	if m.cfg == nil || m.cfg.BaseBranches == nil {
+		return nil
+	}
+	out := make(map[string]string, len(m.cfg.BaseBranches))
+	for k, v := range m.cfg.BaseBranches {
+		out[k] = v
+	}
+	return out
+}
+
+// setBaseBranches replaces cfg.BaseBranches under baseBranchesMu so the
+// write is serialized with every getBaseBranches reader. UpdateBaseBranches
+// uses this to publish the new map after sanitizing it at the HTTP edge.
+func (m *Manager) setBaseBranches(branches map[string]string) {
+	m.baseBranchesMu.Lock()
+	defer m.baseBranchesMu.Unlock()
+	if m.cfg == nil {
+		return
+	}
+	m.cfg.BaseBranches = branches
+}
+
+// lookupBaseBranch reads the task's recorded base branch for a given
+// repository name from the per-instance map. The empty key "" addresses the
+// single-repo / root tracker. Falls back to the empty-key entry when the
+// per-repo entry is missing — preserves single-repo behavior for tasks
+// that record only one base branch under the legacy unkeyed slot.
+//
+// Each value is re-sanitised through SanitizeGitRef before it leaves the
+// function. The map was sanitised at the HTTP boundary and again on
+// SetBaseBranch, but static analysis (CodeQL `go/command-injection`)
+// loses the sanitised state across map writes and field stores —
+// transforming the value at every read point keeps the source→sink path
+// covered no matter which entry point the analyser walks.
+func lookupBaseBranch(branches map[string]string, repoName string) string {
+	if len(branches) == 0 {
+		return ""
+	}
+	if v, ok := branches[repoName]; ok && v != "" {
+		return SanitizeGitRef(v)
+	}
+	if repoName != "" {
+		if v, ok := branches[""]; ok && v != "" {
+			return SanitizeGitRef(v)
+		}
+	}
+	return ""
 }
 
 // repositorySubdir is one git-repo child of a multi-repo task root.
@@ -229,25 +320,40 @@ func (m *Manager) ExitError() error {
 
 // GetWorkspaceTracker returns the workspace tracker for git status and file monitoring
 func (m *Manager) GetWorkspaceTracker() *WorkspaceTracker {
+	m.repoTrackersMu.RLock()
+	defer m.repoTrackersMu.RUnlock()
 	return m.workspaceTracker
+}
+
+// snapshotTrackers returns the current root + per-repo trackers under
+// repoTrackersMu so callers can iterate without holding the lock. Concurrent
+// rescan writes can't observably mutate either while a snapshot is in flight.
+func (m *Manager) snapshotTrackers() (*WorkspaceTracker, []*WorkspaceTracker) {
+	m.repoTrackersMu.RLock()
+	defer m.repoTrackersMu.RUnlock()
+	repos := make([]*WorkspaceTracker, len(m.repoTrackers))
+	copy(repos, m.repoTrackers)
+	return m.workspaceTracker, repos
 }
 
 // StartAllWorkspaceTrackers starts root + per-repo trackers (idempotent) so file-change events fire in passthrough mode.
 func (m *Manager) StartAllWorkspaceTrackers(ctx context.Context) {
-	if m.workspaceTracker != nil {
-		m.workspaceTracker.Start(ctx)
+	root, trackers := m.snapshotTrackers()
+	if root != nil {
+		root.Start(ctx)
 	}
-	for _, t := range m.repoTrackers {
+	for _, t := range trackers {
 		t.Start(ctx)
 	}
 }
 
 // stopWorkspaceTrackers stops root + per-repo trackers (idempotent via sync.Once).
 func (m *Manager) stopWorkspaceTrackers() {
-	if m.workspaceTracker != nil {
-		m.workspaceTracker.Stop()
+	root, trackers := m.snapshotTrackers()
+	if root != nil {
+		root.Stop()
 	}
-	for _, t := range m.repoTrackers {
+	for _, t := range trackers {
 		t.Stop()
 	}
 }
@@ -262,8 +368,15 @@ func (m *Manager) stopWorkspaceTrackers() {
 // empty and only the root tracker fires events.
 func (m *Manager) SubscribeWorkspaceStream() types.WorkspaceStreamSubscriber {
 	sub := make(types.WorkspaceStreamSubscriber, 100)
-	m.workspaceTracker.AttachWorkspaceStreamSubscriber(sub)
-	for _, t := range m.repoTrackers {
+	m.streamSubscribersMu.Lock()
+	if m.streamSubscribers == nil {
+		m.streamSubscribers = make(map[types.WorkspaceStreamSubscriber]struct{})
+	}
+	m.streamSubscribers[sub] = struct{}{}
+	m.streamSubscribersMu.Unlock()
+	root, trackers := m.snapshotTrackers()
+	root.AttachWorkspaceStreamSubscriber(sub)
+	for _, t := range trackers {
 		t.AttachWorkspaceStreamSubscriber(sub)
 	}
 	return sub
@@ -272,8 +385,12 @@ func (m *Manager) SubscribeWorkspaceStream() types.WorkspaceStreamSubscriber {
 // UnsubscribeWorkspaceStream detaches the subscriber from every tracker and
 // closes the channel exactly once.
 func (m *Manager) UnsubscribeWorkspaceStream(sub types.WorkspaceStreamSubscriber) {
-	m.workspaceTracker.DetachWorkspaceStreamSubscriber(sub)
-	for _, t := range m.repoTrackers {
+	m.streamSubscribersMu.Lock()
+	delete(m.streamSubscribers, sub)
+	m.streamSubscribersMu.Unlock()
+	root, trackers := m.snapshotTrackers()
+	root.DetachWorkspaceStreamSubscriber(sub)
+	for _, t := range trackers {
 		t.DetachWorkspaceStreamSubscriber(sub)
 	}
 	close(sub)
@@ -307,8 +424,71 @@ func (m *Manager) GetWorkspaceTrackerFor(subpath string) (*WorkspaceTracker, err
 		return t, nil
 	}
 	t := NewWorkspaceTracker(full, m.logger)
+	t.SetBaseBranch(lookupBaseBranch(m.getBaseBranches(), cleaned))
 	m.workspaceTrackersBySubpath[cleaned] = t
 	return t, nil
+}
+
+// UpdateBaseBranches replaces the per-repo base-branch map and re-stamps every
+// active tracker with the new value for its repositoryName, then triggers a
+// non-blocking RefreshGitStatus on each so the UI sees the new
+// BaseCommit/Ahead/Behind without waiting for the next poll tick. Idempotent
+// for unchanged values (RefreshGitStatus is cheap — it's the same call the
+// frontend already makes after stage/unstage).
+//
+// Newly-spawned trackers (rescan path, lazy subpath lookup) read the updated
+// map via lookupBaseBranch — no second push needed for them.
+func (m *Manager) UpdateBaseBranches(ctx context.Context, branches map[string]string) {
+	m.setBaseBranches(branches)
+
+	m.repoTrackersMu.RLock()
+	root := m.workspaceTracker
+	trackers := make([]*WorkspaceTracker, len(m.repoTrackers))
+	copy(trackers, m.repoTrackers)
+	m.repoTrackersMu.RUnlock()
+
+	m.workspaceTrackersMu.Lock()
+	bySubpath := make(map[string]*WorkspaceTracker, len(m.workspaceTrackersBySubpath))
+	for k, v := range m.workspaceTrackersBySubpath {
+		bySubpath[k] = v
+	}
+	m.workspaceTrackersMu.Unlock()
+
+	// Stamp the new baseBranch on each tracker synchronously so the field is
+	// visible to the next poll, but kick the RefreshGitStatus probes
+	// (which can each spawn 3–5 git subprocesses) onto a background
+	// goroutine. The HTTP handler that called us doesn't need to block on
+	// per-tracker git work; the picker UI re-fetches via the existing WS
+	// stream once Refresh emits a new GitStatusUpdate. Detach from the
+	// caller's ctx so an HTTP request cancel after the field stores
+	// can't strand half the trackers without their refresh.
+	if root != nil {
+		root.SetBaseBranch(lookupBaseBranch(branches, root.RepositoryName()))
+	}
+	for _, t := range trackers {
+		t.SetBaseBranch(lookupBaseBranch(branches, t.RepositoryName()))
+	}
+	for subpath, t := range bySubpath {
+		t.SetBaseBranch(lookupBaseBranch(branches, subpath))
+	}
+	go m.refreshTrackersDetached(root, trackers, bySubpath)
+}
+
+// refreshTrackersDetached runs RefreshGitStatus on every supplied tracker
+// using a background context. Spawned as a goroutine by UpdateBaseBranches
+// so the per-tracker git subprocesses don't block the HTTP handler that
+// drove the picker-save.
+func (m *Manager) refreshTrackersDetached(root *WorkspaceTracker, trackers []*WorkspaceTracker, bySubpath map[string]*WorkspaceTracker) {
+	ctx := context.Background()
+	if root != nil {
+		root.RefreshGitStatus(ctx)
+	}
+	for _, t := range trackers {
+		t.RefreshGitStatus(ctx)
+	}
+	for _, t := range bySubpath {
+		t.RefreshGitStatus(ctx)
+	}
 }
 
 // StartProcess runs a script/process with isolated stdout/stderr.
@@ -347,8 +527,9 @@ func (m *Manager) ListProcesses(sessionID string) []ProcessInfo {
 // per-repo tracker discovered at construction time. Empty for single-repo
 // workspaces. Used by callers that want to fan an op out across repos.
 func (m *Manager) RepoSubpaths() []string {
-	out := make([]string, 0, len(m.repoTrackers))
-	for _, t := range m.repoTrackers {
+	_, trackers := m.snapshotTrackers()
+	out := make([]string, 0, len(trackers))
+	for _, t := range trackers {
 		if t.repositoryName != "" {
 			out = append(out, t.repositoryName)
 		}
@@ -364,21 +545,16 @@ func (m *Manager) RepoSubpaths() []string {
 // after a focus event, since the agent's initial pushes happen at boot and
 // no replay path exists for clients that subscribe later.
 func (m *Manager) SetWorkspacePollMode(ctx context.Context, mode PollMode) {
-	m.workspaceTracker.SetPollMode(mode)
-	for _, t := range m.repoTrackers {
+	root, trackers := m.snapshotTrackers()
+	root.SetPollMode(mode)
+	for _, t := range trackers {
 		t.SetPollMode(mode)
 	}
 	if mode == PollModePaused {
 		return
 	}
-	// Snapshot the tracker slice before launching the goroutine so a
-	// concurrent Stop()/teardown that mutates m.repoTrackers can't race or
-	// nil-deref the iteration. Refresh in background — RefreshGitStatus
-	// blocks on git commands which can take seconds on large repos; the
-	// HTTP caller shouldn't wait.
-	root := m.workspaceTracker
-	trackers := make([]*WorkspaceTracker, len(m.repoTrackers))
-	copy(trackers, m.repoTrackers)
+	// Refresh in background — RefreshGitStatus blocks on git commands which
+	// can take seconds on large repos; the HTTP caller shouldn't wait.
 	go func() {
 		root.RefreshGitStatus(ctx)
 		for _, t := range trackers {
@@ -574,8 +750,9 @@ func (m *Manager) Start(ctx context.Context) error {
 	go m.forwardUpdates()
 
 	// Start workspace tracker with background context (not tied to HTTP request)
-	m.workspaceTracker.Start(context.Background())
-	for _, t := range m.repoTrackers {
+	root, trackers := m.snapshotTrackers()
+	root.Start(context.Background())
+	for _, t := range trackers {
 		t.Start(context.Background())
 	}
 
@@ -599,8 +776,9 @@ func (m *Manager) startOneShot() error {
 	go m.forwardUpdates()
 
 	// Start workspace tracker with background context (not tied to HTTP request)
-	m.workspaceTracker.Start(context.Background())
-	for _, t := range m.repoTrackers {
+	root, trackers := m.snapshotTrackers()
+	root.Start(context.Background())
+	for _, t := range trackers {
 		t.Start(context.Background())
 	}
 
@@ -628,12 +806,14 @@ func (m *Manager) buildAdapterConfig() error {
 		}
 	}
 	m.adapterCfg = &adapter.Config{
-		WorkDir:        m.cfg.WorkDir,
-		AutoApprove:    m.cfg.AutoApprovePermissions,
-		ApprovalPolicy: m.cfg.ApprovalPolicy,
-		McpServers:     mcpServers,
-		AgentID:        m.cfg.AgentType, // From registry (e.g., "auggie", "amp", "claude-code")
-		AssumeMcpSse:   m.cfg.AssumeMcpSse,
+		WorkDir:             m.cfg.WorkDir,
+		AutoApprove:         m.cfg.AutoApprovePermissions,
+		ApprovalPolicy:      m.cfg.ApprovalPolicy,
+		McpServers:          mcpServers,
+		AgentID:             m.cfg.AgentType, // From registry (e.g., "auggie", "amp", "claude-code")
+		AssumeMcpSse:        m.cfg.AssumeMcpSse,
+		AssumeMcpHttp:       m.cfg.AssumeMcpHttp,
+		RequiresProcessKill: m.cfg.RequiresProcessKill,
 	}
 
 	// Configure one-shot mode when a continue command is provided.
@@ -1072,6 +1252,12 @@ func (m *Manager) killProcessGroupIfRequired() {
 }
 
 // waitForProcessExit waits for all goroutines to finish, force-killing on context timeout.
+//
+// On timeout the entire process group is killed (not just the leader) so that
+// child processes — most importantly MCP servers spawned by the agent — don't
+// re-parent to init and leak. setProcGroup at command-build time puts the
+// agent in its own pgid; here we deliver SIGKILL to that pgid. Falls back to
+// a single-process kill only if the process-group call fails.
 func (m *Manager) waitForProcessExit(ctx context.Context) {
 	m.logger.Debug("waiting for process to exit")
 	done := make(chan struct{})
@@ -1084,8 +1270,14 @@ func (m *Manager) waitForProcessExit(ctx context.Context) {
 	case <-done:
 		m.logger.Info("agent process stopped gracefully")
 	case <-ctx.Done():
-		if m.cmd != nil && m.cmd.Process != nil {
-			m.logger.Warn("force killing agent process")
+		if m.cmd == nil || m.cmd.Process == nil {
+			return
+		}
+		pid := m.cmd.Process.Pid
+		m.logger.Warn("force killing agent process group", zap.Int("pgid", pid))
+		if err := killProcessGroup(pid); err != nil {
+			m.logger.Warn("failed to kill agent process group, falling back to single-process kill",
+				zap.Error(err))
 			if err := m.cmd.Process.Kill(); err != nil {
 				m.logger.Warn("failed to kill agent process", zap.Error(err))
 			}

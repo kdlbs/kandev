@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 const (
@@ -217,11 +219,23 @@ func (e *Executor) resolveGHCLIToken(req *LaunchAgentRequest, metadata map[strin
 }
 
 // detectGHToken runs `gh auth token` to extract the GitHub token from the local gh CLI.
+//
+// Throttle Acquire (30s budget) runs first; the 5s exec ctx is constructed
+// AFTER the slot is held so its deadline starts from when gh actually
+// begins running. Building it earlier would let throttle queue time eat
+// into the exec budget and silently skip GITHUB_TOKEN injection.
 func detectGHToken() (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	acquireCtx, cancelAcquire := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelAcquire()
+	release, err := subproc.GH().Acquire(acquireCtx)
+	if err != nil {
+		return "", fmt.Errorf("gh throttle acquire: %w", err)
+	}
+	defer release()
+	execCtx, cancelExec := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelExec()
 
-	cmd := exec.CommandContext(ctx, "gh", "auth", "token")
+	cmd := exec.CommandContext(execCtx, "gh", "auth", "token")
 	out, err := cmd.Output()
 	if err != nil {
 		return "", err

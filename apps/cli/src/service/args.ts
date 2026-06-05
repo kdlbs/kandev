@@ -8,7 +8,8 @@ export type ServiceAction =
   | "restart"
   | "status"
   | "logs"
-  | "config";
+  | "config"
+  | "self-update";
 
 export type ServiceArgs = {
   action: ServiceAction;
@@ -24,6 +25,10 @@ export type ServiceArgs = {
   follow?: boolean;
   /** Print help and exit. */
   showHelp?: boolean;
+  /** Intent JSON path consumed by the hidden self-update helper. */
+  intent?: string;
+  /** Print the self-update command plan without mutating the install. */
+  dryRun?: boolean;
 };
 
 const VALID_ACTIONS = new Set<ServiceAction>([
@@ -35,6 +40,7 @@ const VALID_ACTIONS = new Set<ServiceAction>([
   "status",
   "logs",
   "config",
+  "self-update",
 ]);
 
 export function parseServiceArgs(argv: string[]): ServiceArgs {
@@ -64,6 +70,21 @@ export function parseServiceArgs(argv: string[]): ServiceArgs {
     }
     if (arg === "-f" || arg === "--follow") {
       out.follow = true;
+      continue;
+    }
+    if (arg === "--dry-run") {
+      out.dryRun = true;
+      continue;
+    }
+    if (arg === "--intent") {
+      out.intent = takeValue(argv, i, "--intent");
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith("--intent=")) {
+      const value = arg.slice("--intent=".length);
+      if (value.length === 0) throw new ParseError("--intent requires a value");
+      out.intent = value;
       continue;
     }
     if (arg === "--port") {
@@ -101,6 +122,19 @@ export function parseServiceArgs(argv: string[]): ServiceArgs {
 function validateActionFlags(args: ServiceArgs): void {
   if (args.follow && args.action !== "logs") {
     throw new ParseError(`--follow only applies to 'kandev service logs', not '${args.action}'`);
+  }
+  if (args.dryRun && args.action !== "self-update") {
+    throw new ParseError(
+      `--dry-run only applies to 'kandev service self-update', not '${args.action}'`,
+    );
+  }
+  if (args.intent && args.action !== "self-update") {
+    throw new ParseError(
+      `--intent only applies to 'kandev service self-update', not '${args.action}'`,
+    );
+  }
+  if (args.action === "self-update" && !args.showHelp && !args.intent) {
+    throw new ParseError("kandev service self-update requires --intent <path>");
   }
   const installOnly: Array<keyof ServiceArgs> = ["port", "homeDir", "noBootStart"];
   if (args.action !== "install") {

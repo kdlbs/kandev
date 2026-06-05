@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"go.uber.org/goleak"
 )
 
 // kandevTestFixtureEnv activates fixture-binary mode in this test binary.
@@ -22,13 +24,15 @@ import (
 const kandevTestFixtureEnv = "KANDEV_TEST_FIXTURE"
 
 // TestMain branches into fixture-binary mode when the activation env var
-// is set; otherwise it runs the test suite normally.
+// is set; otherwise it runs the test suite normally — wrapped in goleak so
+// the per-process subprocess managers (workspace tracker, PTY pumps, poll
+// loops) surface goroutine leaks here.
 func TestMain(m *testing.M) {
 	if spec := os.Getenv(kandevTestFixtureEnv); spec != "" {
 		runFixture(spec)
 		return
 	}
-	os.Exit(m.Run())
+	goleak.VerifyTestMain(m)
 }
 
 // runFixture executes a whitespace-separated command spec and exits.
@@ -78,6 +82,33 @@ func runFixture(spec string) {
 		secs, err := strconv.Atoi(parts[2])
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "fixture: echo-then-sleep: bad seconds %q\n", parts[2])
+			os.Exit(2)
+		}
+		time.Sleep(time.Duration(secs) * time.Second)
+	case "sleep-with-child":
+		// Forks a child copy of this fixture binary (also sleeping <secs>),
+		// writes the child PID to <pidfile>, then sleeps itself. Used by the
+		// process group kill regression test: when the parent's process
+		// group is reaped, the child must die too. Both processes ignore
+		// stdin so close-stdin-then-wait can't reach them on its own.
+		if len(parts) != 3 {
+			fmt.Fprintln(os.Stderr, "fixture: sleep-with-child takes 2 args")
+			os.Exit(2)
+		}
+		pidFile := parts[1]
+		secs, err := strconv.Atoi(parts[2])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fixture: sleep-with-child: bad seconds %q\n", parts[2])
+			os.Exit(2)
+		}
+		childCmd := exec.Command(os.Args[0])
+		childCmd.Env = append(os.Environ(), kandevTestFixtureEnv+"=sleep "+strconv.Itoa(secs))
+		if err := childCmd.Start(); err != nil {
+			fmt.Fprintf(os.Stderr, "fixture: sleep-with-child: spawn child: %v\n", err)
+			os.Exit(2)
+		}
+		if err := os.WriteFile(pidFile, []byte(strconv.Itoa(childCmd.Process.Pid)), 0o600); err != nil {
+			fmt.Fprintf(os.Stderr, "fixture: sleep-with-child: write pidfile: %v\n", err)
 			os.Exit(2)
 		}
 		time.Sleep(time.Duration(secs) * time.Second)

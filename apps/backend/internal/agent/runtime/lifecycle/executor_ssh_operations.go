@@ -471,14 +471,16 @@ func createRemoteAgentInstance(
 	log *logger.Logger,
 ) (int, error) {
 	body, err := json.Marshal(agentctl.CreateInstanceRequest{
-		ID:            req.InstanceID,
-		WorkspacePath: workspacePath,
-		SessionID:     req.SessionID,
-		TaskID:        req.TaskID,
-		Protocol:      req.Protocol,
-		AgentType:     sshAgentTypeFromReq(req),
-		McpServers:    req.McpServers,
-		McpMode:       req.McpMode,
+		ID:                  req.InstanceID,
+		WorkspacePath:       workspacePath,
+		SessionID:           req.SessionID,
+		TaskID:              req.TaskID,
+		Protocol:            req.Protocol,
+		AgentType:           sshAgentTypeFromReq(req),
+		McpServers:          req.McpServers,
+		McpMode:             req.McpMode,
+		RequiresProcessKill: requiresProcessKillFromReq(req),
+		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 	})
 	if err != nil {
 		return 0, fmt.Errorf("ssh: marshal create-instance: %w", err)

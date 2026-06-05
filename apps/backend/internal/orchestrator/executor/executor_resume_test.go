@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -496,7 +497,7 @@ func TestApplyResumeRepoConfig_BaseBranchByExecutorType(t *testing.T) {
 				ExecutorType: tc.executorType,
 			}
 
-			if _, err := exec.applyResumeRepoConfig(context.Background(), task, session, req); err != nil {
+			if _, err := exec.applyResumeRepoConfig(context.Background(), task, session, req, nil); err != nil {
 				t.Fatalf("applyResumeRepoConfig: %v", err)
 			}
 
@@ -507,6 +508,200 @@ func TestApplyResumeRepoConfig_BaseBranchByExecutorType(t *testing.T) {
 				t.Fatalf("UseWorktree = %v, want %v", req.UseWorktree, tc.wantWorktreeApplied)
 			}
 		})
+	}
+}
+
+// TestApplyResumeRepoConfig_WorktreeStampsTaskDir locks in the fix for
+// resumes of single-repo worktree tasks: the lifecycle preparer hands the
+// request to worktree.Manager.Create, which rejects requests missing
+// TaskDirName or RepoName with ErrTaskDirRequired. The initial-launch path
+// (applyRepositoryConfig) sets both; the resume path must do the same, and
+// must also be able to regenerate TaskDirName when the original launch
+// failed before any task_environments row was stamped.
+func TestApplyResumeRepoConfig_WorktreeStampsTaskDir(t *testing.T) {
+	t.Run("reuses persisted TaskDirName when present", func(t *testing.T) {
+		repo := newMockRepository()
+		repo.repositories["repo-1"] = &models.Repository{
+			ID:        "repo-1",
+			Name:      "my-repo",
+			LocalPath: "/tmp/repo",
+		}
+		existingEnv := &models.TaskEnvironment{
+			ID:          "env-1",
+			TaskID:      "task-1",
+			TaskDirName: "previously-stamped_abc",
+		}
+		repo.taskEnvironments["env-1"] = existingEnv
+		repo.tasks["task-1"] = &models.Task{ID: "task-1"}
+		task := &v1.Task{ID: "task-1", Title: "Fix login bug"}
+		session := &models.TaskSession{
+			ID:           "sess-1",
+			TaskID:       "task-1",
+			RepositoryID: "repo-1",
+			BaseBranch:   "main",
+		}
+		exec := newTestExecutor(t, &mockAgentManager{}, repo)
+		req := &LaunchAgentRequest{TaskID: "task-1", SessionID: "sess-1", ExecutorType: "worktree"}
+
+		if _, err := exec.applyResumeRepoConfig(context.Background(), task, session, req, existingEnv); err != nil {
+			t.Fatalf("applyResumeRepoConfig: %v", err)
+		}
+
+		if req.TaskDirName != "previously-stamped_abc" {
+			t.Errorf("TaskDirName = %q, want %q", req.TaskDirName, "previously-stamped_abc")
+		}
+		if req.RepoName != "my-repo" {
+			t.Errorf("RepoName = %q, want %q", req.RepoName, "my-repo")
+		}
+	})
+
+	t.Run("regenerates TaskDirName when persisted value is empty", func(t *testing.T) {
+		// This is the failure mode from the bug report: the initial launch
+		// failed before stamping task_dir_name, so the env row exists with
+		// an empty TaskDirName. The resume must still be able to proceed.
+		repo := newMockRepository()
+		repo.repositories["repo-1"] = &models.Repository{
+			ID:        "repo-1",
+			Name:      "my-repo",
+			LocalPath: "/tmp/repo",
+		}
+		repo.tasks["task-1"] = &models.Task{ID: "task-1"}
+		task := &v1.Task{ID: "task-1", Title: "Fix login bug"}
+		session := &models.TaskSession{
+			ID:           "sess-1",
+			TaskID:       "task-1",
+			RepositoryID: "repo-1",
+			BaseBranch:   "main",
+		}
+		exec := newTestExecutor(t, &mockAgentManager{}, repo)
+		req := &LaunchAgentRequest{TaskID: "task-1", SessionID: "sess-1", ExecutorType: "worktree"}
+		existingEnv := &models.TaskEnvironment{
+			ID:          "env-1",
+			TaskID:      "task-1",
+			TaskDirName: "",
+		}
+
+		if _, err := exec.applyResumeRepoConfig(context.Background(), task, session, req, existingEnv); err != nil {
+			t.Fatalf("applyResumeRepoConfig: %v", err)
+		}
+
+		if req.TaskDirName == "" {
+			t.Error("TaskDirName must not be empty; worktree.Manager.Create would reject the request")
+		}
+		// Semantic name format: {sanitized-title}_{suffix}, suffix is 3 chars.
+		if !strings.HasPrefix(req.TaskDirName, "fix-login-bug_") {
+			t.Errorf("TaskDirName = %q, want prefix %q", req.TaskDirName, "fix-login-bug_")
+		}
+		if req.RepoName != "my-repo" {
+			t.Errorf("RepoName = %q, want %q", req.RepoName, "my-repo")
+		}
+	})
+
+	t.Run("regenerates TaskDirName when no env row exists", func(t *testing.T) {
+		repo := newMockRepository()
+		repo.repositories["repo-1"] = &models.Repository{
+			ID:        "repo-1",
+			Name:      "my-repo",
+			LocalPath: "/tmp/repo",
+		}
+		repo.tasks["task-1"] = &models.Task{ID: "task-1"}
+		task := &v1.Task{ID: "task-1", Title: "Fix login bug"}
+		session := &models.TaskSession{
+			ID:           "sess-1",
+			TaskID:       "task-1",
+			RepositoryID: "repo-1",
+			BaseBranch:   "main",
+		}
+		exec := newTestExecutor(t, &mockAgentManager{}, repo)
+		req := &LaunchAgentRequest{TaskID: "task-1", SessionID: "sess-1", ExecutorType: "worktree"}
+
+		if _, err := exec.applyResumeRepoConfig(context.Background(), task, session, req, nil); err != nil {
+			t.Fatalf("applyResumeRepoConfig: %v", err)
+		}
+
+		if req.TaskDirName == "" {
+			t.Error("TaskDirName must not be empty even without an env row")
+		}
+		if req.RepoName != "my-repo" {
+			t.Errorf("RepoName = %q, want %q", req.RepoName, "my-repo")
+		}
+	})
+}
+
+// TestResumeSession_RefreshesStaleEnvironmentRow locks in the fix for the
+// post-restart bug where a resume of a session that had previously failed mid-
+// launch left task_environments stuck at status=stopped with empty
+// task_dir_name / worktree_path. The frontend polls that row to decide
+// whether the chat input is enabled, so the stale state stranded the UI on
+// "Executor environment is unavailable (stopped)" even after the resume
+// successfully prepared a fresh worktree.
+func TestResumeSession_RefreshesStaleEnvironmentRow(t *testing.T) {
+	repo := newMockRepository()
+	taskID := "task-resume-env"
+	sessionID := "sess-resume-env"
+
+	repo.repositories["repo-1"] = &models.Repository{
+		ID: "repo-1", Name: "my-repo", LocalPath: "/repos/my-repo",
+	}
+	// Worktree executor: required for the resume to hit the worktree branch in
+	// applyResumeRepoConfig that stamps TaskDirName onto req.
+	repo.executors["exec-worktree"] = &models.Executor{
+		ID: "exec-worktree", Type: models.ExecutorTypeWorktree,
+	}
+	repo.tasks[taskID] = &models.Task{ID: taskID, Title: "Resume after failure"}
+	repo.sessions[sessionID] = &models.TaskSession{
+		ID:                sessionID,
+		TaskID:            taskID,
+		AgentProfileID:    "profile-1",
+		State:             models.TaskSessionStateFailed,
+		ExecutorID:        "exec-worktree",
+		RepositoryID:      "repo-1",
+		BaseBranch:        "main",
+		TaskEnvironmentID: "env-stale",
+	}
+	// Stale env row from the previous failed launch: status=stopped, no
+	// worktree_path, no task_dir_name. This is the exact shape produced when
+	// LaunchAgent fails before persistTaskEnvironment writes the worktree
+	// fields back.
+	repo.taskEnvironments["env-stale"] = &models.TaskEnvironment{
+		ID:           "env-stale",
+		TaskID:       taskID,
+		Status:       models.TaskEnvironmentStatusStopped,
+		WorktreePath: "",
+		TaskDirName:  "",
+	}
+
+	const newWorktreePath = "/home/u/.kandev/tasks/resume-after-failure_abc/my-repo"
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, _ *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			return &LaunchAgentResponse{
+				AgentExecutionID: "exec-new",
+				WorktreeID:       "wt-new",
+				WorktreePath:     newWorktreePath,
+				WorktreeBranch:   "kandev/resume-after-failure",
+				Status:           v1.AgentStatusStarting,
+			}, nil
+		},
+	}
+	exec := newTestExecutor(t, agentMgr, repo)
+
+	if _, err := exec.ResumeSession(context.Background(), repo.sessions[sessionID], true); err != nil {
+		t.Fatalf("ResumeSession: %v", err)
+	}
+
+	env := repo.taskEnvironments["env-stale"]
+	if env.Status != models.TaskEnvironmentStatusReady {
+		t.Errorf("env.Status = %q, want %q — without the refresh the frontend keeps showing the executor as unavailable",
+			env.Status, models.TaskEnvironmentStatusReady)
+	}
+	if env.WorktreePath != newWorktreePath {
+		t.Errorf("env.WorktreePath = %q, want %q", env.WorktreePath, newWorktreePath)
+	}
+	if env.WorktreeID != "wt-new" {
+		t.Errorf("env.WorktreeID = %q, want %q", env.WorktreeID, "wt-new")
+	}
+	if env.TaskDirName == "" {
+		t.Error("env.TaskDirName must not be empty after resume; the worktree manager needs it for the on-disk task root")
 	}
 }
 

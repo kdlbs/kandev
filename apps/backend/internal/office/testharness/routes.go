@@ -27,11 +27,25 @@ import (
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // EnvVar gates registration of the test routes. Must be the literal string
 // "true" to enable — matches the convention used by KANDEV_MOCK_JIRA etc.
 const EnvVar = "KANDEV_E2E_MOCK"
+
+// errInvalidJSONPrefix is the shared 400 message for malformed request bodies.
+const errInvalidJSONPrefix = "invalid JSON: "
+
+// respKeyError is the JSON key for error responses. Older handlers in this file
+// inline the literal; new code uses errJSON so the heavily-repeated key isn't
+// duplicated again.
+const respKeyError = "error"
+
+// errJSON writes a `{"error": msg}` body with the given status code.
+func errJSON(c *gin.Context, code int, msg string) {
+	c.JSON(code, gin.H{respKeyError: msg})
+}
 
 // Enabled reports whether KANDEV_E2E_MOCK is set to "true".
 func Enabled() bool {
@@ -74,8 +88,10 @@ func RegisterRoutes(
 	g.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
+	g.POST("/tasks", seedTaskHandler(repo, log))
 	g.POST("/task-sessions", seedTaskSessionHandler(repo, eventBus, log))
 	g.POST("/messages", seedMessageHandler(repo, eventBus, log))
+	g.POST("/workflows", seedWorkflowHandler(repo, log))
 	if officeRepo != nil {
 		g.POST("/comments", seedCommentHandler(officeRepo, eventBus, log))
 		g.POST("/agent-failures", seedAgentFailureHandler(officeRepo, eventBus, log))
@@ -91,6 +107,64 @@ func RegisterRoutes(
 	}
 	if agentSettings != nil {
 		g.POST("/agent-profiles/:id/desired-skills", setDesiredSkillsHandler(agentSettings, log))
+	}
+}
+
+type seedTaskRequest struct {
+	WorkspaceID    string `json:"workspace_id"`
+	WorkflowID     string `json:"workflow_id"`
+	WorkflowStepID string `json:"workflow_step_id"`
+	Title          string `json:"title"`
+	ParentID       string `json:"parent_id"`
+	State          string `json:"state"`
+}
+
+type seedTaskResponse struct {
+	TaskID string `json:"task_id"`
+}
+
+// seedTaskHandler creates a task row directly through the repository, which
+// bypasses the service-layer subtask-depth guard (validateSubtaskDepth runs in
+// Service.CreateTask only). This lets e2e tests build arbitrary parent_id
+// chains (depth >= 2) to exercise the sidebar's multi-level tree — production
+// CreateTask rejects depth > 1 for kanban tasks.
+func seedTaskHandler(repo *sqliterepo.Repository, log *logger.Logger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req seedTaskRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			errJSON(c, http.StatusBadRequest, errInvalidJSONPrefix+err.Error())
+			return
+		}
+		if req.WorkspaceID == "" || req.Title == "" {
+			errJSON(c, http.StatusBadRequest, "workspace_id and title are required")
+			return
+		}
+		ctx := c.Request.Context()
+		if req.ParentID != "" {
+			if _, err := repo.GetTask(ctx, req.ParentID); err != nil {
+				errJSON(c, http.StatusBadRequest, "parent_id not found: "+req.ParentID)
+				return
+			}
+		}
+		state := req.State
+		if state == "" {
+			state = string(v1.TaskStateCreated)
+		}
+		task := &models.Task{
+			ID:             uuid.New().String(),
+			WorkspaceID:    req.WorkspaceID,
+			WorkflowID:     req.WorkflowID,
+			WorkflowStepID: req.WorkflowStepID,
+			Title:          req.Title,
+			State:          v1.TaskState(state),
+			ParentID:       req.ParentID,
+		}
+		if err := repo.CreateTask(ctx, task); err != nil {
+			log.Error("test harness: create task failed", zap.Error(err))
+			errJSON(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+		c.JSON(http.StatusOK, seedTaskResponse{TaskID: task.ID})
 	}
 }
 
@@ -159,6 +233,47 @@ func seedTaskSessionHandler(repo *sqliterepo.Repository, eventBus bus.EventBus, 
 
 		publishSessionStateChanged(ctx, eventBus, session, log)
 		c.JSON(http.StatusOK, seedTaskSessionResponse{SessionID: session.ID})
+	}
+}
+
+type seedWorkflowRequest struct {
+	WorkspaceID string `json:"workspace_id"`
+	Name        string `json:"name"`
+	// Style is persisted as-is (kanban / office / custom). Production has no
+	// HTTP path that creates an office-style workflow — the normal create
+	// endpoint always normalises to kanban — so this seed route lets the
+	// Playwright suite stand up an office workflow to exercise the
+	// "exclude office from settings export" behaviour (issue #1109).
+	Style string `json:"style"`
+}
+
+type seedWorkflowResponse struct {
+	WorkflowID string `json:"workflow_id"`
+}
+
+func seedWorkflowHandler(repo *sqliterepo.Repository, log *logger.Logger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req seedWorkflowRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON: " + err.Error()})
+			return
+		}
+		if req.WorkspaceID == "" || req.Name == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id and name are required"})
+			return
+		}
+		workflow := &models.Workflow{
+			ID:          uuid.New().String(),
+			WorkspaceID: req.WorkspaceID,
+			Name:        req.Name,
+			Style:       req.Style,
+		}
+		if err := repo.CreateWorkflow(c.Request.Context(), workflow); err != nil {
+			log.Error("test harness: create workflow failed", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, seedWorkflowResponse{WorkflowID: workflow.ID})
 	}
 }
 
@@ -272,6 +387,7 @@ func publishSessionStateChanged(ctx context.Context, eventBus bus.EventBus, sess
 		"session_id":       session.ID,
 		"old_state":        "",
 		"new_state":        string(session.State),
+		"updated_at":       session.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		"agent_profile_id": session.AgentProfileID,
 	}
 	if session.Metadata != nil {

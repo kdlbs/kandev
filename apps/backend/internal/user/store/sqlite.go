@@ -162,6 +162,7 @@ func (r *sqliteRepository) UpsertUserSettings(ctx context.Context, settings *mod
 		"terminal_font_family":            settings.TerminalFontFamily,
 		"terminal_font_size":              settings.TerminalFontSize,
 		"changes_panel_layout":            settings.ChangesPanelLayout,
+		"voice_mode":                      settings.VoiceMode,
 	})
 	if err != nil {
 		return err
@@ -192,6 +193,58 @@ func scanUser(scanner interface{ Scan(dest ...any) error }) (*models.User, error
 	return user, nil
 }
 
+// defaultVoiceModeSettings returns the baseline VoiceMode configuration for
+// users with no saved preferences. Mirrored on the frontend; keep in sync.
+func defaultVoiceModeSettings() models.VoiceModeSettings {
+	return models.VoiceModeSettings{
+		Enabled:         true,
+		Engine:          "auto",
+		Language:        "auto",
+		Mode:            "toggle",
+		AutoSend:        false,
+		WhisperWebModel: "base",
+	}
+}
+
+// storedVoiceMode is the on-disk JSON shape — uses *bool for `enabled` so we
+// can distinguish "absent" (older rows written before the toggle existed —
+// must default to true) from "explicitly false" (user disabled the feature).
+type storedVoiceMode struct {
+	Enabled         *bool  `json:"enabled"`
+	Engine          string `json:"engine"`
+	Language        string `json:"language"`
+	Mode            string `json:"mode"`
+	AutoSend        bool   `json:"auto_send"`
+	WhisperWebModel string `json:"whisper_web_model"`
+}
+
+// mergeVoiceModeDefaults fills in zero/missing fields on a stored VoiceMode
+// payload so older user rows (written before VoiceMode existed) still produce
+// usable settings instead of empty strings the frontend would reject.
+func mergeVoiceModeDefaults(stored *storedVoiceMode) models.VoiceModeSettings {
+	out := defaultVoiceModeSettings()
+	if stored == nil {
+		return out
+	}
+	if stored.Enabled != nil {
+		out.Enabled = *stored.Enabled
+	}
+	if stored.Engine != "" {
+		out.Engine = stored.Engine
+	}
+	if stored.Language != "" {
+		out.Language = stored.Language
+	}
+	if stored.Mode != "" {
+		out.Mode = stored.Mode
+	}
+	if stored.WhisperWebModel != "" {
+		out.WhisperWebModel = stored.WhisperWebModel
+	}
+	out.AutoSend = stored.AutoSend
+	return out
+}
+
 func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID string) (*models.UserSettings, error) {
 	settings := &models.UserSettings{}
 	var settingsRaw string
@@ -208,6 +261,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		settings.TerminalLinkBehavior = "new_tab"
 		settings.ChangesPanelLayout = "flat"
 		settings.SidebarViews = []models.SidebarView{}
+		settings.VoiceMode = defaultVoiceModeSettings()
 		return settings, nil
 	}
 	var payload struct {
@@ -235,6 +289,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		TerminalFontFamily          string                            `json:"terminal_font_family"`
 		TerminalFontSize            int                               `json:"terminal_font_size"`
 		ChangesPanelLayout          string                            `json:"changes_panel_layout"`
+		VoiceMode                   *storedVoiceMode                  `json:"voice_mode"`
 	}
 	if err := json.Unmarshal([]byte(settingsRaw), &payload); err != nil {
 		return nil, err
@@ -294,6 +349,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	}
 	settings.TerminalFontFamily = payload.TerminalFontFamily
 	settings.TerminalFontSize = payload.TerminalFontSize
+	settings.VoiceMode = mergeVoiceModeDefaults(payload.VoiceMode)
 	if payload.ChangesPanelLayout == "tree" {
 		settings.ChangesPanelLayout = "tree"
 	} else {

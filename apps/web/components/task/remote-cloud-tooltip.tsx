@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { getExecutorStatusIcon } from "@/lib/executor-icons";
+import { formatRelativeTime } from "@/lib/utils";
 
 type RemoteStatusData = {
   remote_name?: string;
@@ -37,7 +38,7 @@ function formatTimestamp(value?: string): string | null {
   if (!value) return null;
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return null;
-  return d.toLocaleString();
+  return formatRelativeTime(value);
 }
 
 function RemoteCloudStatusContent({

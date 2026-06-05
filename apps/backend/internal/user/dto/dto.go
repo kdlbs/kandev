@@ -39,6 +39,7 @@ type UserSettingsDTO struct {
 	TerminalFontFamily          string                            `json:"terminal_font_family"`
 	TerminalFontSize            int                               `json:"terminal_font_size"`
 	ChangesPanelLayout          string                            `json:"changes_panel_layout"`
+	VoiceMode                   models.VoiceModeSettings          `json:"voice_mode"`
 	UpdatedAt                   string                            `json:"updated_at"`
 }
 
@@ -82,6 +83,7 @@ type UpdateUserSettingsRequest struct {
 	TerminalFontFamily          *string                            `json:"terminal_font_family,omitempty"`
 	TerminalFontSize            *int                               `json:"terminal_font_size,omitempty"`
 	ChangesPanelLayout          *string                            `json:"changes_panel_layout,omitempty"`
+	VoiceMode                   *models.VoiceModeSettings          `json:"voice_mode,omitempty"`
 }
 
 func FromUser(user *models.User) UserDTO {
@@ -120,6 +122,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		TerminalFontFamily:          settings.TerminalFontFamily,
 		TerminalFontSize:            settings.TerminalFontSize,
 		ChangesPanelLayout:          settings.ChangesPanelLayout,
+		VoiceMode:                   settings.VoiceMode,
 		UpdatedAt:                   settings.UpdatedAt.Format(time.RFC3339),
 	}
 }

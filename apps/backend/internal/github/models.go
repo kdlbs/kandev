@@ -261,8 +261,12 @@ type ReviewWatch struct {
 	PollIntervalSeconds int          `json:"poll_interval_seconds" db:"poll_interval_seconds"`
 	CleanupPolicy       string       `json:"cleanup_policy" db:"cleanup_policy"`
 	LastPolledAt        *time.Time   `json:"last_polled_at,omitempty" db:"last_polled_at"`
-	CreatedAt           time.Time    `json:"created_at" db:"created_at"`
-	UpdatedAt           time.Time    `json:"updated_at" db:"updated_at"`
+	// LastError / LastErrorAt are stamped when the dispatch pipeline self-
+	// heals the watcher (e.g. the bound agent profile was soft-deleted).
+	LastError   string     `json:"last_error,omitempty" db:"last_error"`
+	LastErrorAt *time.Time `json:"last_error_at,omitempty" db:"last_error_at"`
+	CreatedAt   time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at" db:"updated_at"`
 }
 
 // ReviewPRTask records which PRs have already had tasks created (deduplication).
@@ -284,11 +288,23 @@ type GitHubOrg struct {
 }
 
 // GitHubRepo represents a GitHub repository (lightweight, for autocomplete).
+// PushedAt is the timestamp of the latest push, used to sort the
+// list-accessible-repos result (most-recently-active first). It is a pointer
+// so `omitempty` actually drops it from JSON when unset — a zero `time.Time`
+// struct would otherwise serialize as `"0001-01-01T00:00:00Z"`.
+//
+// DefaultBranch lets the Remote picker pre-fill the row's branch immediately
+// on selection (skips the branch-list round-trip for the common case). The
+// GitHub API returns it on every repo, so it is required. Description is
+// omitempty because GitHub may return null/empty.
 type GitHubRepo struct {
-	FullName string `json:"full_name"`
-	Owner    string `json:"owner"`
-	Name     string `json:"name"`
-	Private  bool   `json:"private"`
+	FullName      string     `json:"full_name"`
+	Owner         string     `json:"owner"`
+	Name          string     `json:"name"`
+	Private       bool       `json:"private"`
+	DefaultBranch string     `json:"default_branch"`
+	Description   string     `json:"description,omitempty"`
+	PushedAt      *time.Time `json:"pushed_at,omitempty"`
 }
 
 // RepoBranch represents a branch in a GitHub repository.
@@ -473,8 +489,12 @@ type IssueWatch struct {
 	PollIntervalSeconds int          `json:"poll_interval_seconds" db:"poll_interval_seconds"`
 	CleanupPolicy       string       `json:"cleanup_policy" db:"cleanup_policy"`
 	LastPolledAt        *time.Time   `json:"last_polled_at,omitempty" db:"last_polled_at"`
-	CreatedAt           time.Time    `json:"created_at" db:"created_at"`
-	UpdatedAt           time.Time    `json:"updated_at" db:"updated_at"`
+	// LastError / LastErrorAt are stamped when the dispatch pipeline self-
+	// heals the watcher (e.g. the bound agent profile was soft-deleted).
+	LastError   string     `json:"last_error,omitempty" db:"last_error"`
+	LastErrorAt *time.Time `json:"last_error_at,omitempty" db:"last_error_at"`
+	CreatedAt   time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at" db:"updated_at"`
 }
 
 // IssueWatchTask records which issues have already had tasks created (deduplication).

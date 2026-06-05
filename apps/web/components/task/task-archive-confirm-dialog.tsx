@@ -14,6 +14,7 @@ import {
 } from "@kandev/ui/alert-dialog";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { useSubtaskCount } from "@/hooks/use-subtask-count";
+import { getCleanupSummary, getBulkCleanupSummary } from "./task-cleanup-summary";
 
 type TaskArchiveConfirmDialogProps = {
   open: boolean;
@@ -24,6 +25,10 @@ type TaskArchiveConfirmDialogProps = {
   isArchiving?: boolean;
   taskId?: string;
   taskIds?: string[];
+  /** Executor type of the task being archived (single). */
+  executorType?: string | null;
+  /** Executor types of the tasks being archived (bulk). */
+  executorTypes?: Array<string | null | undefined>;
   onConfirm: (opts: { cascade: boolean }) => void;
   confirmTestId?: string;
 };
@@ -37,6 +42,8 @@ export function TaskArchiveConfirmDialog({
   isArchiving,
   taskId,
   taskIds,
+  executorType,
+  executorTypes,
   onConfirm,
   confirmTestId,
 }: TaskArchiveConfirmDialogProps) {
@@ -46,6 +53,9 @@ export function TaskArchiveConfirmDialog({
   const firstLine = isBulkOperation
     ? `Are you sure you want to archive ${safeCount} ${label}?`
     : `Are you sure you want to archive "${taskTitle}"?`;
+  const cleanup = isBulkOperation
+    ? getBulkCleanupSummary(executorTypes ?? [])
+    : getCleanupSummary(executorType);
 
   const [cascade, setCascade] = useState(false);
   const subtaskCount = useSubtaskCount(open, taskId, taskIds);
@@ -63,9 +73,11 @@ export function TaskArchiveConfirmDialog({
           <AlertDialogDescription asChild>
             <div>
               <p>{firstLine}</p>
-              <p className="mt-2">
-                This will delete the task&apos;s worktree and stop any running agent sessions.
-              </p>
+              {cleanup.lines.map((line, i) => (
+                <p key={i} className="mt-2" data-testid="cleanup-line">
+                  {line}
+                </p>
+              ))}
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>

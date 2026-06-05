@@ -1,6 +1,12 @@
 "use client";
 
-import { IconAlertCircle, IconRefresh, IconTerminal2 } from "@tabler/icons-react";
+import { useId } from "react";
+import {
+  IconAlertCircle,
+  IconAlertTriangle,
+  IconRefresh,
+  IconTerminal2,
+} from "@tabler/icons-react";
 import { NoAuthPanel, ProbingPanel } from "@/components/settings/profile-status-panels";
 import { Button } from "@kandev/ui/button";
 import {
@@ -19,7 +25,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { ModeCombobox } from "@/components/settings/mode-combobox";
 import { ModelCombobox } from "@/components/settings/model-combobox";
 import { useAgentCapabilities } from "@/hooks/domains/settings/use-dynamic-models";
-import { PERMISSION_KEYS, type PermissionKey } from "@/lib/agent-permissions";
+import {
+  PERMISSION_APPLY_AGENTCTL_AUTO_APPROVE,
+  PERMISSION_KEYS,
+  readPermissionValue,
+  type PermissionKey,
+} from "@/lib/agent-permissions";
 import { CLIFlagsField } from "@/components/settings/cli-flags-field";
 import type {
   CLIFlag,
@@ -68,6 +79,62 @@ type PermissionToggleProps = {
   lockPassthrough?: boolean;
 };
 
+function permissionToggleWrapperClass(isDanger: boolean, compact: boolean): string {
+  if (isDanger) {
+    return "flex items-center justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/5 p-3";
+  }
+  if (compact) {
+    return "flex items-center justify-between gap-2";
+  }
+  return "flex items-center justify-between rounded-md border p-3";
+}
+
+function PermissionToggleRow({
+  settingKey,
+  setting,
+  checked,
+  onCheckedChange,
+  compact,
+}: {
+  settingKey: string;
+  setting: PermissionSetting;
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+  compact: boolean;
+}) {
+  const isDanger = setting.apply_method === PERMISSION_APPLY_AGENTCTL_AUTO_APPROVE;
+  const switchSize = compact ? ("sm" as const) : ("default" as const);
+  const labelCls = compact ? "text-xs" : undefined;
+  const wrapperCls = permissionToggleWrapperClass(isDanger, compact);
+  const instanceId = useId();
+  const switchId = `${instanceId}-permission-toggle-${settingKey}`;
+
+  return (
+    <div
+      key={settingKey}
+      className={wrapperCls}
+      data-testid={isDanger ? "permission-auto-approve-danger" : `permission-toggle-${settingKey}`}
+    >
+      <div className={`flex-1 min-w-0 ${compact && !isDanger ? "space-y-0.5" : "space-y-1"}`}>
+        <Label htmlFor={switchId} className={`flex items-center gap-1.5 ${labelCls ?? ""}`}>
+          {isDanger && <IconAlertTriangle className="size-4 shrink-0 text-destructive" />}
+          {setting.label}
+        </Label>
+        <p
+          className={
+            compact
+              ? "text-[10px] text-muted-foreground leading-tight"
+              : "text-xs text-muted-foreground"
+          }
+        >
+          {setting.description}
+        </p>
+      </div>
+      <Switch id={switchId} size={switchSize} checked={checked} onCheckedChange={onCheckedChange} />
+    </div>
+  );
+}
+
 function PermissionToggles({
   profile,
   onChange,
@@ -87,19 +154,14 @@ function PermissionToggles({
           if (!setting?.supported) return null;
           if (setting.apply_method === "cli_flag") return null;
           return (
-            <div key={key} className="flex items-center justify-between gap-2">
-              <div className="space-y-0.5">
-                <Label className="text-xs">{setting.label}</Label>
-                <p className="text-[10px] text-muted-foreground leading-tight">
-                  {setting.description}
-                </p>
-              </div>
-              <Switch
-                size={switchSize}
-                checked={profile[key]}
-                onCheckedChange={(checked) => onChange({ [key]: checked })}
-              />
-            </div>
+            <PermissionToggleRow
+              key={key}
+              settingKey={key}
+              setting={setting}
+              checked={readPermissionValue(profile, key, permissionSettings)}
+              onCheckedChange={(checked) => onChange({ [key]: checked })}
+              compact
+            />
           );
         })}
         {passthroughConfig?.supported && (
@@ -129,16 +191,14 @@ function PermissionToggles({
         if (!setting?.supported) return null;
         if (setting.apply_method === "cli_flag") return null;
         return (
-          <div key={key} className="flex items-center justify-between rounded-md border p-3">
-            <div className="space-y-1">
-              <Label>{setting.label}</Label>
-              <p className="text-xs text-muted-foreground">{setting.description}</p>
-            </div>
-            <Switch
-              checked={profile[key]}
-              onCheckedChange={(checked) => onChange({ [key]: checked })}
-            />
-          </div>
+          <PermissionToggleRow
+            key={key}
+            settingKey={key}
+            setting={setting}
+            checked={readPermissionValue(profile, key, permissionSettings)}
+            onCheckedChange={(checked) => onChange({ [key]: checked })}
+            compact={false}
+          />
         );
       })}
       {passthroughConfig?.supported && (

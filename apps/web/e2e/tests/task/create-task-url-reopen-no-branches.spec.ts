@@ -55,8 +55,13 @@ test.describe("Create-task URL flow - branches after reopen", () => {
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
 
-    await testPage.getByTestId("toggle-github-url").click();
-    await testPage.getByTestId("github-url-input").fill(`https://github.com/${repoFullName}`);
+    // Switch to Remote tab and paste via the chip popover (URL input moved
+    // inside the chip in Task 5/8).
+    await testPage.getByTestId("source-mode-remote").click();
+    await testPage.getByTestId("remote-repo-chip-trigger").first().click();
+    const pasteInput = testPage.getByTestId("remote-paste-url-input");
+    await pasteInput.fill(`https://github.com/${repoFullName}`);
+    await pasteInput.press("Enter");
 
     await testPage.getByTestId("task-title-input").fill(taskTitle);
     await testPage.getByTestId("task-description-input").fill("/e2e:simple-message");

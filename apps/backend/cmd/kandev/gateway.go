@@ -125,6 +125,9 @@ func provideGateway(
 			ptyBackend = terminalservice.NewInteractiveRunnerBackend(lifecycleMgr.GetInteractiveRunner())
 		}
 		terminalSvc = terminalservice.New(terminalRepo, ptyBackend, log)
+		if taskRepo != nil {
+			terminalSvc.SetTaskEnvironmentReader(taskRepo)
+		}
 	}
 
 	// Enable dedicated terminal WebSocket for passthrough mode
@@ -141,7 +144,7 @@ func provideGateway(
 	orchestratorHandlers.RegisterHandlers(gateway.Dispatcher)
 
 	// Register message queue handlers
-	queueHandlers := orchestratorhandlers.NewQueueHandlers(orchestratorSvc.GetMessageQueue(), orchestratorSvc.GetEventBus(), log)
+	queueHandlers := orchestratorhandlers.NewQueueHandlers(orchestratorSvc.GetMessageQueue(), orchestratorSvc.GetEventBus(), log, orchestratorSvc)
 	queueHandlers.RegisterHandlers(gateway.Dispatcher)
 
 	if lifecycleMgr != nil && agentRegistry != nil {
@@ -312,12 +315,22 @@ func subscribeTerminalCleanup(ctx context.Context, eventBus bus.EventBus, svc *t
 			// Plain update — only react on archive transitions.
 			return nil
 		}
-		if _, err := svc.CleanupTask(eventCtx, taskID); err != nil {
+		log.Info("terminal cleanup on task event started",
+			zap.String("task_id", taskID),
+			zap.String("event", event.Type),
+			zap.Bool("archived", archivedAt != ""))
+		deleted, err := svc.CleanupTask(eventCtx, taskID)
+		if err != nil {
 			log.Warn("terminal cleanup on task event",
 				zap.String("task_id", taskID),
 				zap.String("event", event.Type),
 				zap.Error(err))
+			return nil
 		}
+		log.Info("terminal cleanup on task event completed",
+			zap.String("task_id", taskID),
+			zap.String("event", event.Type),
+			zap.Int("deleted_terminal_rows", deleted))
 		return nil
 	}
 	if _, err := eventBus.Subscribe(events.TaskDeleted, handler); err != nil {

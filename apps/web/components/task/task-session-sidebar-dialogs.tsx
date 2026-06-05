@@ -4,7 +4,7 @@ import { TaskRenameDialog } from "./task-rename-dialog";
 import { TaskArchiveConfirmDialog } from "./task-archive-confirm-dialog";
 import { TaskDeleteConfirmDialog } from "./task-delete-confirm-dialog";
 
-type Target = { id: string; title: string } | null;
+type Target = { id: string; title: string; executorType?: string | null } | null;
 
 export type SidebarDialogsActions = {
   renamingTask: Target;
@@ -51,6 +51,7 @@ export function SidebarDialogs({ actions }: { actions: SidebarDialogsActions }) 
         }}
         taskTitle={archivingTask?.title ?? ""}
         taskId={archivingTask?.id}
+        executorType={archivingTask?.executorType}
         isArchiving={isArchiving}
         onConfirm={handleArchiveConfirm}
       />
@@ -61,6 +62,7 @@ export function SidebarDialogs({ actions }: { actions: SidebarDialogsActions }) 
         }}
         taskTitle={deletingTask?.title ?? ""}
         taskId={deletingTask?.id}
+        executorType={deletingTask?.executorType}
         isDeleting={isDeleting}
         onConfirm={handleDeleteConfirm}
       />

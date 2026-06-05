@@ -6,6 +6,11 @@ import type { ServiceArgs } from "./args";
 import { dumpJournalctlLogs, waitForServiceHealth } from "./health_check";
 import { commandExists, writeUnitFile } from "./install_helpers";
 import {
+  buildServiceInstallMetadata,
+  serviceMetadataPath,
+  writeServiceInstallMetadata,
+} from "./metadata";
+import {
   captureLauncher,
   currentUsername,
   linuxUserUnitDir,
@@ -59,6 +64,9 @@ export async function runLinuxService(args: ServiceArgs): Promise<void> {
     case "config":
       // Handled by the dispatcher in index.ts before reaching the platform layer.
       throw new Error("unreachable: config action handled in service/index.ts");
+    case "self-update":
+      // Handled by the dispatcher in index.ts before reaching the platform layer.
+      throw new Error("unreachable: self-update action handled in service/index.ts");
     default: {
       const _exhaustive: never = args.action;
       throw new Error(`unhandled service action: ${_exhaustive as string}`);
@@ -77,17 +85,34 @@ function installSync(ctx: Ctx): void {
   const launcher = captureLauncher();
   const homeDir = resolveHomeDir(ctx.args.homeDir, ctx.isSystem);
   const logDir = resolveLogDir(homeDir);
+  const metadataPath = serviceMetadataPath(homeDir);
+  const mode = ctx.isSystem ? "system" : "user";
+  const systemUser = ctx.isSystem ? resolveServiceUser(true) : undefined;
   const unit = renderSystemdUnit({
     launcher,
     homeDir,
     logDir,
     port: ctx.args.port,
-    systemUser: ctx.isSystem ? resolveServiceUser(true) : undefined,
-    mode: ctx.isSystem ? "system" : "user",
+    systemUser,
+    mode,
+    serviceMetadataPath: metadataPath,
   });
 
   fs.mkdirSync(path.dirname(ctx.unitPath), { recursive: true });
   const outcome = writeUnitFile(ctx.unitPath, unit);
+  writeServiceInstallMetadata(
+    metadataPath,
+    buildServiceInstallMetadata({
+      manager: "systemd",
+      mode,
+      launcher,
+      homeDir,
+      logDir,
+      servicePath: ctx.unitPath,
+      port: ctx.args.port,
+      systemUser,
+    }),
+  );
 
   runSystemctl(ctx, ["daemon-reload"]);
   // Always run enable --now so 'install' is fully idempotent: if the user

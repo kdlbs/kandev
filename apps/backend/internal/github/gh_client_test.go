@@ -2,6 +2,7 @@ package github
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -390,6 +391,139 @@ func TestResourceForGHArgs(t *testing.T) {
 	}
 }
 
+func TestBuildUserReposGHArgs(t *testing.T) {
+	cases := []struct {
+		name  string
+		login string
+		query string
+		limit int
+		wantQ string
+		wantP string
+	}{
+		{
+			name:  "empty query",
+			login: "alice",
+			query: "",
+			limit: 20,
+			wantQ: "q=user:alice",
+			wantP: "per_page=20",
+		},
+		{
+			name:  "with query",
+			login: "alice",
+			query: "language:go",
+			limit: 50,
+			wantQ: "q=user:alice language:go",
+			wantP: "per_page=50",
+		},
+		{
+			name:  "clamped limit at upper bound",
+			login: "bob",
+			query: "",
+			limit: 100,
+			wantQ: "q=user:bob",
+			wantP: "per_page=100",
+		},
+		{
+			name:  "default clamp value",
+			login: "bob",
+			query: "in:name foo",
+			limit: 20,
+			wantQ: "q=user:bob in:name foo",
+			wantP: "per_page=20",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			args := buildUserReposGHArgs(tc.login, tc.query, tc.limit)
+			// Sanity: first two args pin the gh subcommand to `api search/repositories`.
+			if len(args) < 2 || args[0] != "api" || args[1] != "search/repositories" {
+				t.Fatalf("args prefix = %v, want [api search/repositories ...]", args)
+			}
+			// Find -f q=... and -f per_page=... values without depending on
+			// exact positional layout (so future arg additions don't break the test).
+			gotQ, gotP := "", ""
+			for i := 0; i < len(args)-1; i++ {
+				if args[i] != "-f" {
+					continue
+				}
+				switch {
+				case strings.HasPrefix(args[i+1], "q="):
+					gotQ = args[i+1]
+				case strings.HasPrefix(args[i+1], "per_page="):
+					gotP = args[i+1]
+				}
+			}
+			if gotQ != tc.wantQ {
+				t.Errorf("q flag = %q, want %q", gotQ, tc.wantQ)
+			}
+			if gotP != tc.wantP {
+				t.Errorf("per_page flag = %q, want %q", gotP, tc.wantP)
+			}
+		})
+	}
+}
+
+func TestParseGHSearchRepos(t *testing.T) {
+	// Mixed payload: one public repo with a description and a default branch
+	// other than "main", one private repo with a `null` description that must
+	// decode to an empty string, and one repo with no pushed_at to verify the
+	// nil-pointer branch.
+	data := `[
+		{"full_name":"octocat/hello","owner":{"login":"octocat"},"name":"hello","private":false,"default_branch":"trunk","description":"Hello world","pushed_at":"2025-03-01T10:00:00Z"},
+		{"full_name":"octocat/secret","owner":{"login":"octocat"},"name":"secret","private":true,"default_branch":"main","description":null,"pushed_at":"2025-02-01T10:00:00Z"},
+		{"full_name":"octocat/new","owner":{"login":"octocat"},"name":"new","private":false,"default_branch":"main"}
+	]`
+	repos, err := parseGHSearchRepos(data)
+	if err != nil {
+		t.Fatalf("parseGHSearchRepos: %v", err)
+	}
+	if len(repos) != 3 {
+		t.Fatalf("len = %d, want 3", len(repos))
+	}
+	if repos[0].FullName != "octocat/hello" || repos[0].DefaultBranch != "trunk" || repos[0].Description != "Hello world" {
+		t.Errorf("repo[0] unexpected: %#v", repos[0])
+	}
+	if repos[0].PushedAt == nil {
+		t.Errorf("repo[0] PushedAt nil, want non-nil")
+	}
+	if !repos[1].Private || repos[1].DefaultBranch != "main" || repos[1].Description != "" {
+		t.Errorf("repo[1] unexpected: %#v", repos[1])
+	}
+	if repos[2].DefaultBranch != "main" || repos[2].PushedAt != nil {
+		t.Errorf("repo[2] unexpected: %#v", repos[2])
+	}
+}
+
+func TestBuildUserReposGHArgs_LimitClamping(t *testing.T) {
+	// Mirrors the PAT client test: ListUserRepos must clamp before calling
+	// buildUserReposGHArgs, so verify a full round-trip via clampRepoSearchLimit.
+	cases := []struct {
+		name        string
+		inLimit     int
+		wantPerPage string
+	}{
+		{"zero defaults to 20", 0, "per_page=20"},
+		{"negative defaults to 20", -5, "per_page=20"},
+		{"in range passes through", 42, "per_page=42"},
+		{"exceeds cap clamps to 100", 500, "per_page=100"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			args := buildUserReposGHArgs("alice", "", clampRepoSearchLimit(tc.inLimit))
+			gotP := ""
+			for i := 0; i < len(args)-1; i++ {
+				if args[i] == "-f" && strings.HasPrefix(args[i+1], "per_page=") {
+					gotP = args[i+1]
+				}
+			}
+			if gotP != tc.wantPerPage {
+				t.Errorf("per_page flag = %q, want %q", gotP, tc.wantPerPage)
+			}
+		})
+	}
+}
+
 // Regression: a 429 on `gh api repos/...` (REST) must mark Core, not GraphQL.
 // Previously this would pause the GraphQL PR monitor incorrectly.
 func TestGHClient_InspectRateStderr_RestEndpointMarksCore(t *testing.T) {
@@ -402,4 +536,96 @@ func TestGHClient_InspectRateStderr_RestEndpointMarksCore(t *testing.T) {
 	if tracker.IsExhausted(ResourceGraphQL) {
 		t.Errorf("REST 429 must not pause graphql bucket")
 	}
+}
+
+func TestBuildAccessibleReposGHArgs(t *testing.T) {
+	cases := []struct {
+		name     string
+		inLimit  int
+		wantPath string
+	}{
+		{"in range", 50, "/user/repos?affiliation=owner,collaborator,organization_member&sort=pushed&per_page=50"},
+		{"cap clamps to 100", 100, "/user/repos?affiliation=owner,collaborator,organization_member&sort=pushed&per_page=100"},
+		{"small page", 5, "/user/repos?affiliation=owner,collaborator,organization_member&sort=pushed&per_page=5"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			args := buildAccessibleReposGHArgs(clampRepoSearchLimit(tc.inLimit))
+			if len(args) != 2 || args[0] != "api" {
+				t.Fatalf("args = %v, want [api <path>]", args)
+			}
+			if args[1] != tc.wantPath {
+				t.Errorf("path = %q, want %q", args[1], tc.wantPath)
+			}
+			// Must NOT include --paginate: the picker wants a single page.
+			for _, a := range args {
+				if a == "--paginate" {
+					t.Errorf("args must not contain --paginate, got %v", args)
+				}
+			}
+		})
+	}
+}
+
+func TestBuildAccessibleReposGHArgs_ClampsPerPage(t *testing.T) {
+	cases := []struct {
+		name        string
+		inLimit     int
+		wantPerPage string
+	}{
+		{"zero defaults to 20", 0, "per_page=20"},
+		{"negative defaults to 20", -5, "per_page=20"},
+		{"exceeds cap clamps to 100", 500, "per_page=100"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			args := buildAccessibleReposGHArgs(clampRepoSearchLimit(tc.inLimit))
+			if !strings.Contains(args[1], tc.wantPerPage) {
+				t.Errorf("path %q must contain %q", args[1], tc.wantPerPage)
+			}
+		})
+	}
+}
+
+// TestParseGHSearchRepos_FlatArray confirms the flat /user/repos array shape
+// (used by ListAccessibleRepos) decodes correctly: happy path, empty, and a
+// null description mapping to empty string.
+func TestParseGHSearchRepos_FlatArray(t *testing.T) {
+	t.Run("happy", func(t *testing.T) {
+		data := `[
+			{"full_name":"kdlbs/kandev","owner":{"login":"kdlbs"},"name":"kandev","private":false,"default_branch":"main","description":"the app","pushed_at":"2025-05-01T10:00:00Z"}
+		]`
+		repos, err := parseGHSearchRepos(data)
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if len(repos) != 1 || repos[0].FullName != "kdlbs/kandev" || repos[0].Owner != "kdlbs" {
+			t.Fatalf("unexpected repos: %#v", repos)
+		}
+		if repos[0].PushedAt == nil {
+			t.Errorf("PushedAt nil, want non-nil")
+		}
+	})
+	t.Run("empty", func(t *testing.T) {
+		repos, err := parseGHSearchRepos(`[]`)
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if len(repos) != 0 {
+			t.Errorf("len = %d, want 0", len(repos))
+		}
+	})
+	t.Run("null description", func(t *testing.T) {
+		data := `[{"full_name":"o/r","owner":{"login":"o"},"name":"r","private":true,"default_branch":"main","description":null}]`
+		repos, err := parseGHSearchRepos(data)
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if repos[0].Description != "" {
+			t.Errorf("description = %q, want empty", repos[0].Description)
+		}
+		if repos[0].PushedAt != nil {
+			t.Errorf("PushedAt = %v, want nil", repos[0].PushedAt)
+		}
+	})
 }

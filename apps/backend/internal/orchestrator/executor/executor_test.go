@@ -473,6 +473,55 @@ func TestLaunchPreparedSession_WorkspaceOnly(t *testing.T) {
 	}
 }
 
+// TestLaunchPreparedSession_WorkspaceOnly_FlipsExecutorRunningStatus asserts
+// the prepare-only branch in finalizeLaunch updates executors_running.status
+// from the lifecycle-manager default "starting" to "prepared", so the row
+// doesn't look stuck mid-launch on a session that's actually ready by design.
+func TestLaunchPreparedSession_WorkspaceOnly_FlipsExecutorRunningStatus(t *testing.T) {
+	repo := newMockRepository()
+
+	session := &models.TaskSession{
+		ID:             "session-123",
+		TaskID:         "task-123",
+		AgentProfileID: "profile-123",
+		State:          models.TaskSessionStateCreated,
+		StartedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+	}
+	repo.sessions[session.ID] = session
+
+	// Seed the executors_running row the way production's lifecycle manager
+	// would after LaunchAgent — status="starting" until something flips it.
+	repo.executorsRunning[session.ID] = &models.ExecutorRunning{
+		SessionID: session.ID,
+		TaskID:    session.TaskID,
+		Status:    models.ExecutorRunningStatusStarting,
+	}
+
+	agentManager := &mockAgentManager{
+		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			return &LaunchAgentResponse{
+				AgentExecutionID: "exec-123",
+				ContainerID:      "container-123",
+				Status:           v1.AgentStatusStarting,
+			}, nil
+		},
+	}
+
+	executor := newTestExecutor(t, agentManager, repo)
+	task := &v1.Task{ID: "task-123", WorkspaceID: "workspace-123"}
+
+	_, err := executor.LaunchPreparedSession(context.Background(), task, "session-123", LaunchOptions{AgentProfileID: "profile-123", StartAgent: false})
+	if err != nil {
+		t.Fatalf("LaunchPreparedSession(startAgent=false) failed: %v", err)
+	}
+
+	got := repo.executorsRunning["session-123"].Status
+	if got != models.ExecutorRunningStatusPrepared {
+		t.Errorf("executors_running.status = %q, want %q", got, models.ExecutorRunningStatusPrepared)
+	}
+}
+
 func TestLaunchPreparedSession_ExistingWorkspace_StartAgent(t *testing.T) {
 	repo := newMockRepository()
 

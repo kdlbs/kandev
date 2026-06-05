@@ -19,6 +19,13 @@ const (
 	githubAPIVersion = "2022-11-28"
 )
 
+// accessibleReposAffiliation is the GitHub /user/repos affiliation filter that
+// returns every repo the authenticated user can reach in one call: their own
+// repos (owner), repos they collaborate on, and repos in orgs they belong to.
+// This replaces the per-org search/repositories fan-out (which burns the 30/min
+// search quota) with a single call on the 5000/min core quota.
+const accessibleReposAffiliation = "owner,collaborator,organization_member"
+
 // GitHubAPIError represents an error response from the GitHub API with a status code.
 type GitHubAPIError struct {
 	StatusCode int
@@ -159,16 +166,19 @@ func (c *PATClient) GetPR(ctx context.Context, owner, repo string, number int) (
 }
 
 func (c *PATClient) FindPRByBranch(ctx context.Context, owner, repo, branch string) (*PR, error) {
-	var raw []patPR
-	endpoint := fmt.Sprintf("/repos/%s/%s/pulls?head=%s:%s&state=open&per_page=1",
-		owner, repo, owner, branch)
-	if err := c.get(ctx, endpoint, &raw); err != nil {
-		return nil, fmt.Errorf("find PR by branch: %w", err)
+	statuses, err := runBatchedBranchQuery(ctx, c, []graphQLBranchRef{{
+		Owner:  owner,
+		Repo:   repo,
+		Branch: branch,
+	}})
+	if err != nil {
+		return nil, fmt.Errorf("find PR by branch %q: %w", branch, err)
 	}
-	if len(raw) == 0 {
+	status := statuses[graphqlBranchKey(owner, repo, branch)]
+	if status == nil {
 		return nil, nil
 	}
-	return convertPatPR(&raw[0], owner, repo), nil
+	return status.PR, nil
 }
 
 func (c *PATClient) ListAuthoredPRs(ctx context.Context, owner, repo string) ([]*PR, error) {
@@ -296,33 +306,157 @@ func (c *PATClient) SearchOrgRepos(ctx context.Context, org, query string, limit
 	if query != "" {
 		q += " " + query
 	}
-	if limit <= 0 {
-		limit = 20
+	limit = clampRepoSearchLimit(limit)
+	endpoint := fmt.Sprintf("/search/repositories?q=%s&per_page=%d", url.QueryEscape(q), limit)
+	repos, err := c.fetchRepoSearch(ctx, endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("search org repos: %w", err)
 	}
+	return repos, nil
+}
+
+func (c *PATClient) ListUserRepos(ctx context.Context, query string, limit int) ([]GitHubRepo, error) {
+	user, err := c.GetAuthenticatedUser(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list user repos: %w", err)
+	}
+	q := "user:" + user
+	if query != "" {
+		q += " " + query
+	}
+	limit = clampRepoSearchLimit(limit)
+	endpoint := fmt.Sprintf("/search/repositories?q=%s&per_page=%d", url.QueryEscape(q), limit)
+	repos, err := c.fetchRepoSearch(ctx, endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("list user repos: %w", err)
+	}
+	return repos, nil
+}
+
+// ListAccessibleRepos lists every repo the authenticated user can access via a
+// single GET /user/repos call on the core REST quota. The response is a flat
+// JSON array (not a search wrapper), so it decodes differently from
+// fetchRepoSearch.
+//
+// query is a BEST-EFFORT substring filter applied only over the first `limit`
+// repos returned by this single (un-paginated) page — a query matching a repo
+// beyond the cap returns nothing here. This is intentional: the picker fetches
+// limit=100 and the frontend performs the canonical, comprehensive client-side
+// filtering over that page, so the server filter is just an optional narrowing.
+// Do NOT rely on it for completeness, and do NOT add pagination to "fix" it
+// without revisiting the picker contract.
+func (c *PATClient) ListAccessibleRepos(ctx context.Context, query string, limit int) ([]GitHubRepo, error) {
+	limit = clampRepoSearchLimit(limit)
+	endpoint := fmt.Sprintf("/user/repos?affiliation=%s&sort=pushed&per_page=%d",
+		url.QueryEscape(accessibleReposAffiliation), limit)
+	var items []repoListItem
+	if err := c.get(ctx, endpoint, &items); err != nil {
+		return nil, fmt.Errorf("list accessible repos: %w", err)
+	}
+	return filterReposByQuery(convertRepoListItems(items), query), nil
+}
+
+// repoListItem is the per-repo JSON shape returned by the flat-array endpoints
+// (GET /user/repos). The search endpoints wrap the same fields under `.items`.
+type repoListItem struct {
+	FullName string `json:"full_name"`
+	Owner    struct {
+		Login string `json:"login"`
+	} `json:"owner"`
+	Name          string    `json:"name"`
+	Private       bool      `json:"private"`
+	DefaultBranch string    `json:"default_branch"`
+	Description   string    `json:"description"`
+	PushedAt      time.Time `json:"pushed_at"`
+}
+
+// convertRepoListItems maps the raw flat-array items into the lightweight
+// GitHubRepo shape, preserving PushedAt as a pointer so callers can sort by
+// recency (a zero pushed_at becomes nil).
+func convertRepoListItems(items []repoListItem) []GitHubRepo {
+	repos := make([]GitHubRepo, len(items))
+	for i, item := range items {
+		repos[i] = GitHubRepo{
+			FullName:      item.FullName,
+			Owner:         item.Owner.Login,
+			Name:          item.Name,
+			Private:       item.Private,
+			DefaultBranch: item.DefaultBranch,
+			Description:   item.Description,
+		}
+		if !item.PushedAt.IsZero() {
+			t := item.PushedAt
+			repos[i].PushedAt = &t
+		}
+	}
+	return repos
+}
+
+// filterReposByQuery returns the repos whose full_name contains query
+// (case-insensitive). An empty query returns the input unchanged. Best-effort:
+// it filters only the already-fetched (capped) slice — see ListAccessibleRepos.
+func filterReposByQuery(repos []GitHubRepo, query string) []GitHubRepo {
+	if query == "" {
+		return repos
+	}
+	needle := strings.ToLower(query)
+	filtered := make([]GitHubRepo, 0, len(repos))
+	for _, r := range repos {
+		if strings.Contains(strings.ToLower(r.FullName), needle) {
+			filtered = append(filtered, r)
+		}
+	}
+	return filtered
+}
+
+// fetchRepoSearch executes a /search/repositories request and decodes the
+// items into the lightweight GitHubRepo shape used for autocomplete and the
+// list-accessible-repos endpoint. PushedAt is captured so callers can sort
+// merged results by recency.
+func (c *PATClient) fetchRepoSearch(ctx context.Context, endpoint string) ([]GitHubRepo, error) {
 	var result struct {
 		Items []struct {
 			FullName string `json:"full_name"`
 			Owner    struct {
 				Login string `json:"login"`
 			} `json:"owner"`
-			Name    string `json:"name"`
-			Private bool   `json:"private"`
+			Name          string    `json:"name"`
+			Private       bool      `json:"private"`
+			DefaultBranch string    `json:"default_branch"`
+			Description   string    `json:"description"`
+			PushedAt      time.Time `json:"pushed_at"`
 		} `json:"items"`
 	}
-	endpoint := fmt.Sprintf("/search/repositories?q=%s&per_page=%d", url.QueryEscape(q), limit)
 	if err := c.get(ctx, endpoint, &result); err != nil {
-		return nil, fmt.Errorf("search org repos: %w", err)
+		return nil, err
 	}
 	repos := make([]GitHubRepo, len(result.Items))
 	for i, item := range result.Items {
 		repos[i] = GitHubRepo{
-			FullName: item.FullName,
-			Owner:    item.Owner.Login,
-			Name:     item.Name,
-			Private:  item.Private,
+			FullName:      item.FullName,
+			Owner:         item.Owner.Login,
+			Name:          item.Name,
+			Private:       item.Private,
+			DefaultBranch: item.DefaultBranch,
+			Description:   item.Description,
+		}
+		if !item.PushedAt.IsZero() {
+			t := item.PushedAt
+			repos[i].PushedAt = &t
 		}
 	}
 	return repos, nil
+}
+
+// clampRepoSearchLimit applies the default and GitHub's per_page=100 cap.
+func clampRepoSearchLimit(limit int) int {
+	if limit <= 0 {
+		return 20
+	}
+	if limit > 100 {
+		return 100
+	}
+	return limit
 }
 
 func (c *PATClient) ListPRReviews(ctx context.Context, owner, repo string, number int) ([]PRReview, error) {

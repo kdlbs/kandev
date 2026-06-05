@@ -46,6 +46,48 @@ func TestCompileStep_CompilesLegacyActionsToTypedActions(t *testing.T) {
 	}
 }
 
+func TestCompileStep_SetSessionMode(t *testing.T) {
+	t.Run("compiles set_session_mode with mode config", func(t *testing.T) {
+		step := &wfmodels.WorkflowStep{
+			ID:         "s1",
+			WorkflowID: "wf1",
+			Name:       "Implement",
+			Events: wfmodels.StepEvents{
+				OnEnter: []wfmodels.OnEnterAction{
+					{Type: wfmodels.OnEnterSetSessionMode, Config: map[string]any{"mode": "acceptEdits"}},
+				},
+			},
+		}
+
+		spec := CompileStep(step)
+		actions := spec.Events[TriggerOnEnter]
+		if len(actions) != 1 {
+			t.Fatalf("expected 1 on_enter action, got %d", len(actions))
+		}
+		if actions[0].Kind != ActionSetSessionMode {
+			t.Fatalf("unexpected action kind: %s", actions[0].Kind)
+		}
+		if actions[0].SetSessionMode == nil || actions[0].SetSessionMode.Mode != "acceptEdits" {
+			t.Fatalf("expected compiled set_session_mode mode=acceptEdits, got %+v", actions[0].SetSessionMode)
+		}
+	})
+
+	t.Run("skips set_session_mode with no mode", func(t *testing.T) {
+		step := &wfmodels.WorkflowStep{
+			ID: "s1",
+			Events: wfmodels.StepEvents{
+				OnEnter: []wfmodels.OnEnterAction{
+					{Type: wfmodels.OnEnterSetSessionMode},
+				},
+			},
+		}
+		spec := CompileStep(step)
+		if len(spec.Events[TriggerOnEnter]) != 0 {
+			t.Fatalf("expected set_session_mode with no mode to be skipped, got %d actions", len(spec.Events[TriggerOnEnter]))
+		}
+	})
+}
+
 func TestCompileStep_RequiresApproval(t *testing.T) {
 	step := &wfmodels.WorkflowStep{
 		ID:         "s1",

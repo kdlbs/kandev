@@ -64,11 +64,15 @@ const (
 	MetadataKeyWorktreeBranch = "worktree_branch"
 
 	// Remote executor metadata keys
-	MetadataKeyRepositoryPath   = "repository_path"
-	MetadataKeySetupScript      = "setup_script"
-	MetadataKeyCleanupScript    = "cleanup_script"
-	MetadataKeyRepoSetupScript  = "repository_setup_script"
-	MetadataKeyBaseBranch       = "base_branch"
+	MetadataKeyRepositoryPath  = "repository_path"
+	MetadataKeySetupScript     = "setup_script"
+	MetadataKeyCleanupScript   = "cleanup_script"
+	MetadataKeyRepoSetupScript = "repository_setup_script"
+	MetadataKeyBaseBranch      = "base_branch"
+	// MetadataKeyBaseBranches stores a map[string]string (RepositoryName →
+	// base branch ref) for per-repo diff-stat resolution inside agentctl.
+	// The empty key "" applies to the root / single-repo tracker.
+	MetadataKeyBaseBranches     = "base_branches"
 	MetadataKeyIsRemote         = "is_remote"
 	MetadataKeyRemoteAuthHome   = "remote_auth_target_home"
 	MetadataKeyGitUserName      = "git_user_name"
@@ -79,6 +83,11 @@ const (
 	MetadataKeySpriteState      = "sprite_state"
 	MetadataKeySpriteCreatedAt  = "sprite_created_at"
 	MetadataKeyLocalPort        = "local_port"
+
+	// MetadataKeyModelOverride holds a user-requested model that overrides the
+	// agent profile's configured model on the next launch. Set by SetSessionModel
+	// for passthrough sessions, which restart the PTY to apply the new --model.
+	MetadataKeyModelOverride = "model_override"
 
 	// Office metadata keys
 	MetadataKeySkillManifestJSON = "skill_manifest_json"

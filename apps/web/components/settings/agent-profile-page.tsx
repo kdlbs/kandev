@@ -12,12 +12,17 @@ import { Separator } from "@kandev/ui/separator";
 import { useToast } from "@/components/toast-provider";
 import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
 import { ProfileFormFields, type ProfileFormData } from "@/components/settings/profile-form-fields";
+import {
+  arePermissionsDirty,
+  permissionsToProfilePatch,
+  profilePermissionValues,
+} from "@/lib/agent-permissions";
 import { toAgentProfilePatch } from "@/app/settings/agents/[agentId]/agent-save-helpers";
 import { deleteAgentProfileAction, updateAgentProfileAction } from "@/app/actions/agents";
-import type { ActiveSessionInfo } from "@/lib/types/agent-profile-errors";
 import {
   AgentProfileDeleteConfirmDialog,
   AgentProfileDeleteConflictDialog,
+  type AgentProfileDeleteConflict,
 } from "@/components/settings/agent-profile-delete-dialog";
 import {
   ProfileEnvVarsSection,
@@ -140,6 +145,7 @@ function ProfileSettingsCard({
   const handleFormChange = (patch: Partial<ProfileFormData>) => {
     onDraftChange(toAgentProfilePatch(patch));
   };
+  const permissionValues = profilePermissionValues(draft, permissionSettings);
 
   return (
     <Card>
@@ -155,7 +161,8 @@ function ProfileSettingsCard({
             name: draft.name,
             model: draft.model,
             mode: draft.mode ?? "",
-            allow_indexing: draft.allowIndexing,
+            auto_approve: permissionValues.auto_approve,
+            allow_indexing: permissionValues.allow_indexing,
             cli_passthrough: draft.cliPassthrough,
             cli_flags: draft.cliFlags ?? [],
           }}
@@ -191,7 +198,10 @@ function useSyncAgentsToStore() {
   };
 }
 
-function useProfileEditorState(profile: AgentProfile) {
+function useProfileEditorState(
+  profile: AgentProfile,
+  permissionSettings: Record<string, PermissionSetting>,
+) {
   const [draft, setDraft] = useState<AgentProfile>({ ...profile });
   const [savedProfile, setSavedProfile] = useState<AgentProfile>(profile);
   const [saveStatus, setSaveStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
@@ -201,11 +211,11 @@ function useProfileEditorState(profile: AgentProfile) {
       draft.name !== savedProfile.name ||
       draft.model !== savedProfile.model ||
       (draft.mode ?? "") !== (savedProfile.mode ?? "") ||
-      draft.allowIndexing !== savedProfile.allowIndexing ||
+      arePermissionsDirty(draft, savedProfile, permissionSettings) ||
       draft.cliPassthrough !== savedProfile.cliPassthrough ||
       !areCLIFlagsEqual(draft.cliFlags ?? [], savedProfile.cliFlags ?? []) ||
       !areEnvVarsEqual(draft.envVars, savedProfile.envVars),
-    [draft, savedProfile],
+    [draft, savedProfile, permissionSettings],
   );
 
   return { draft, setDraft, savedProfile, setSavedProfile, saveStatus, setSaveStatus, isDirty };
@@ -255,7 +265,7 @@ function useProfileSave({
         name: draft.name,
         model: draft.model,
         mode: draft.mode,
-        allow_indexing: draft.allowIndexing,
+        ...permissionsToProfilePatch(draft),
         cli_passthrough: draft.cliPassthrough,
         cli_flags: draft.cliFlags,
         env_vars: draft.envVars ?? [],
@@ -293,7 +303,7 @@ function useProfileDelete(
   toast: ReturnType<typeof useToast>["toast"],
 ) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [conflictSessions, setConflictSessions] = useState<ActiveSessionInfo[] | null>(null);
+  const [conflict, setConflict] = useState<AgentProfileDeleteConflict | null>(null);
 
   const removeProfileFromStore = () => {
     const nextAgents = settingsAgents.map((agentItem: Agent) =>
@@ -318,7 +328,7 @@ function useProfileDelete(
     if (result.status === "ok") {
       removeProfileFromStore();
     } else if (result.status === "conflict") {
-      setConflictSessions(result.activeSessions);
+      setConflict({ activeSessions: result.activeSessions, watchers: result.watchers });
     } else {
       toast({ title: "Failed to delete profile", description: result.message, variant: "error" });
     }
@@ -326,7 +336,7 @@ function useProfileDelete(
 
   const handleForceDelete = async () => {
     const result = await deleteAgentProfileAction(draft.id, true);
-    setConflictSessions(null);
+    setConflict(null);
     if (result.status === "ok") {
       removeProfileFromStore();
     } else if (result.status === "error") {
@@ -339,8 +349,8 @@ function useProfileDelete(
     showDeleteConfirm,
     setShowDeleteConfirm,
     handleDeleteProfile,
-    conflictSessions,
-    setConflictSessions,
+    conflict,
+    setConflict,
     handleForceDelete,
   };
 }
@@ -349,8 +359,8 @@ type ProfileDeleteDialogsProps = {
   showDeleteConfirm: boolean;
   setShowDeleteConfirm: (open: boolean) => void;
   handleDeleteProfile: () => void;
-  conflictSessions: ActiveSessionInfo[] | null;
-  setConflictSessions: (sessions: ActiveSessionInfo[] | null) => void;
+  conflict: AgentProfileDeleteConflict | null;
+  setConflict: (c: AgentProfileDeleteConflict | null) => void;
   handleForceDelete: () => void;
 };
 
@@ -358,8 +368,8 @@ function ProfileDeleteDialogs({
   showDeleteConfirm,
   setShowDeleteConfirm,
   handleDeleteProfile,
-  conflictSessions,
-  setConflictSessions,
+  conflict,
+  setConflict,
   handleForceDelete,
 }: ProfileDeleteDialogsProps) {
   return (
@@ -373,9 +383,9 @@ function ProfileDeleteDialogs({
       />
 
       <AgentProfileDeleteConflictDialog
-        activeSessions={conflictSessions}
+        conflict={conflict}
         onOpenChange={(open) => {
-          if (!open) setConflictSessions(null);
+          if (!open) setConflict(null);
         }}
         onConfirm={handleForceDelete}
       />
@@ -438,6 +448,8 @@ function ProfileEditorBody({
       <ProfileMcpConfigCard
         profileId={draft.id}
         supportsMcp={agent.supports_mcp}
+        cliPassthrough={draft.cliPassthrough}
+        mcpInjection={passthroughConfig?.mcp_injection}
         initialConfig={initialMcpConfig}
         onToastError={onToastError}
       />
@@ -458,7 +470,7 @@ function ProfileEditor({
   const syncAgentsToStore = useSyncAgentsToStore();
   const { items: secrets } = useSecrets();
   const { draft, setDraft, savedProfile, setSavedProfile, saveStatus, setSaveStatus, isDirty } =
-    useProfileEditorState(profile);
+    useProfileEditorState(profile, permissionSettings);
   const updateDraft = useCallback(
     (patch: Partial<AgentProfile>) => {
       setDraft((current) => {
@@ -488,8 +500,8 @@ function ProfileEditor({
     showDeleteConfirm,
     setShowDeleteConfirm,
     handleDeleteProfile,
-    conflictSessions,
-    setConflictSessions,
+    conflict,
+    setConflict,
     handleForceDelete,
   } = useProfileDelete(agent, draft, settingsAgents, syncAgentsToStore, toast);
 
@@ -531,8 +543,8 @@ function ProfileEditor({
         showDeleteConfirm={showDeleteConfirm}
         setShowDeleteConfirm={setShowDeleteConfirm}
         handleDeleteProfile={handleDeleteProfile}
-        conflictSessions={conflictSessions}
-        setConflictSessions={setConflictSessions}
+        conflict={conflict}
+        setConflict={setConflict}
         handleForceDelete={handleForceDelete}
       />
     </div>

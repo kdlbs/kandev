@@ -112,6 +112,10 @@ func (r *Repository) initSchema() error {
 	// frontend ("work" | "review" | "approval" | "custom"). Backend code
 	// MUST NOT branch on it. Idempotent ALTER; default keeps existing rows at "custom".
 	r.migrate.Apply("workflow_steps.stage_type", `ALTER TABLE workflow_steps ADD COLUMN stage_type TEXT NOT NULL DEFAULT 'custom'`)
+	// ADR 0015 — gate auto-advance on an explicit `step_complete_kandev`
+	// MCP signal. Idempotent ALTER; existing rows keep today's behaviour
+	// (immediate transition on turn-end) until the column is set to 1.
+	r.migrate.Apply("workflow_steps.auto_advance_requires_signal", `ALTER TABLE workflow_steps ADD COLUMN auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0`)
 
 	// Phase 2 — multi-agent participation tables. Empty rows for a step
 	// preserve today's single-agent behaviour, so existing kanban
@@ -558,11 +562,11 @@ func (r *Repository) CreateStep(ctx context.Context, step *models.WorkflowStep) 
 	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO workflow_steps (
 			id, workflow_id, name, position, color,
-			prompt, events, allow_manual_move, is_start_step, show_in_command_panel, auto_archive_after_hours, agent_profile_id, stage_type, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			prompt, events, allow_manual_move, is_start_step, show_in_command_panel, auto_archive_after_hours, agent_profile_id, stage_type, auto_advance_requires_signal, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), step.ID, step.WorkflowID, step.Name, step.Position, step.Color,
 		step.Prompt, string(eventsJSON), dialect.BoolToInt(step.AllowManualMove),
-		dialect.BoolToInt(step.IsStartStep), dialect.BoolToInt(step.ShowInCommandPanel), step.AutoArchiveAfterHours, step.AgentProfileID, normalizeStageType(step.StageType), step.CreatedAt, step.UpdatedAt)
+		dialect.BoolToInt(step.IsStartStep), dialect.BoolToInt(step.ShowInCommandPanel), step.AutoArchiveAfterHours, step.AgentProfileID, normalizeStageType(step.StageType), dialect.BoolToInt(step.AutoAdvanceRequiresSignal), step.CreatedAt, step.UpdatedAt)
 
 	return err
 }
@@ -583,12 +587,12 @@ func (r *Repository) scanStep(row interface {
 	Scan(dest ...interface{}) error
 }) (*models.WorkflowStep, error) {
 	step := &models.WorkflowStep{}
-	var allowManualMove, isStartStep, showInCommandPanel int
+	var allowManualMove, isStartStep, showInCommandPanel, autoAdvanceRequiresSignal int
 	var autoArchiveAfterHours sql.NullInt64
 	var color, prompt, eventsJSON, agentProfileID, stageType sql.NullString
 
 	err := row.Scan(&step.ID, &step.WorkflowID, &step.Name, &step.Position, &color,
-		&prompt, &eventsJSON, &allowManualMove, &isStartStep, &showInCommandPanel, &autoArchiveAfterHours, &agentProfileID, &stageType, &step.CreatedAt, &step.UpdatedAt)
+		&prompt, &eventsJSON, &allowManualMove, &isStartStep, &showInCommandPanel, &autoArchiveAfterHours, &agentProfileID, &stageType, &autoAdvanceRequiresSignal, &step.CreatedAt, &step.UpdatedAt)
 
 	if err != nil {
 		return nil, err
@@ -597,6 +601,7 @@ func (r *Repository) scanStep(row interface {
 	step.AllowManualMove = allowManualMove == 1
 	step.IsStartStep = isStartStep == 1
 	step.ShowInCommandPanel = showInCommandPanel == 1
+	step.AutoAdvanceRequiresSignal = autoAdvanceRequiresSignal == 1
 	if autoArchiveAfterHours.Valid {
 		step.AutoArchiveAfterHours = int(autoArchiveAfterHours.Int64)
 	}
@@ -623,7 +628,7 @@ func (r *Repository) scanStep(row interface {
 	return step, nil
 }
 
-const stepSelectColumns = `id, workflow_id, name, position, color, prompt, events, allow_manual_move, is_start_step, show_in_command_panel, auto_archive_after_hours, agent_profile_id, stage_type, created_at, updated_at`
+const stepSelectColumns = `id, workflow_id, name, position, color, prompt, events, allow_manual_move, is_start_step, show_in_command_panel, auto_archive_after_hours, agent_profile_id, stage_type, auto_advance_requires_signal, created_at, updated_at`
 
 // GetStep retrieves a workflow step by ID.
 func (r *Repository) GetStep(ctx context.Context, id string) (*models.WorkflowStep, error) {
@@ -655,11 +660,11 @@ func (r *Repository) UpdateStep(ctx context.Context, step *models.WorkflowStep) 
 		UPDATE workflow_steps SET
 			name = ?, position = ?, color = ?,
 			prompt = ?, events = ?,
-			allow_manual_move = ?, is_start_step = ?, show_in_command_panel = ?, auto_archive_after_hours = ?, agent_profile_id = ?, stage_type = ?, updated_at = ?
+			allow_manual_move = ?, is_start_step = ?, show_in_command_panel = ?, auto_archive_after_hours = ?, agent_profile_id = ?, stage_type = ?, auto_advance_requires_signal = ?, updated_at = ?
 		WHERE id = ?
 	`), step.Name, step.Position, step.Color,
 		step.Prompt, string(eventsJSON),
-		dialect.BoolToInt(step.AllowManualMove), dialect.BoolToInt(step.IsStartStep), dialect.BoolToInt(step.ShowInCommandPanel), step.AutoArchiveAfterHours, step.AgentProfileID, normalizeStageType(step.StageType), step.UpdatedAt, step.ID)
+		dialect.BoolToInt(step.AllowManualMove), dialect.BoolToInt(step.IsStartStep), dialect.BoolToInt(step.ShowInCommandPanel), step.AutoArchiveAfterHours, step.AgentProfileID, normalizeStageType(step.StageType), dialect.BoolToInt(step.AutoAdvanceRequiresSignal), step.UpdatedAt, step.ID)
 	if err != nil {
 		return err
 	}
@@ -762,7 +767,7 @@ func (r *Repository) ListStepsByWorkflow(ctx context.Context, workflowID string)
 func (r *Repository) ListStepsByWorkspaceID(ctx context.Context, workspaceID string) ([]*models.WorkflowStep, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT ws.id, ws.workflow_id, ws.name, ws.position, ws.color, ws.prompt, ws.events,
-			ws.allow_manual_move, ws.is_start_step, ws.show_in_command_panel, ws.auto_archive_after_hours, ws.agent_profile_id, ws.stage_type, ws.created_at, ws.updated_at
+			ws.allow_manual_move, ws.is_start_step, ws.show_in_command_panel, ws.auto_archive_after_hours, ws.agent_profile_id, ws.stage_type, ws.auto_advance_requires_signal, ws.created_at, ws.updated_at
 		FROM workflow_steps ws
 		JOIN workflows w ON ws.workflow_id = w.id
 		WHERE w.workspace_id = ?

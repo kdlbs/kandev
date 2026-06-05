@@ -5,6 +5,8 @@ import (
 	"errors"
 	"math"
 	"testing"
+
+	"github.com/kandev/kandev/internal/integrations/optional"
 )
 
 func TestService_CreateIssueWatch_AcceptsRichFilters(t *testing.T) {
@@ -121,6 +123,102 @@ func TestService_UpdateIssueWatch_PartialPatch(t *testing.T) {
 	empty := SearchFilter{}
 	if _, err := f.svc.UpdateIssueWatch(ctx, created.ID, &UpdateIssueWatchRequest{Filter: &empty}); !errors.Is(err, ErrInvalidConfig) {
 		t.Errorf("expected ErrInvalidConfig for empty filter patch, got %v", err)
+	}
+}
+
+func TestService_IssueWatch_MaxInflightTasks(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+
+	// Default create (no cap supplied) persists NULL → reads back as nil
+	// (uncapped). The store column default of 5 must NOT leak through the
+	// INSERT path, which names the column explicitly with a NULL bind.
+	uncapped, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+		Filter: SearchFilter{TeamKey: "ENG"},
+	})
+	if err != nil {
+		t.Fatalf("create uncapped: %v", err)
+	}
+	if uncapped.MaxInflightTasks != nil {
+		t.Fatalf("expected nil (uncapped), got %v", *uncapped.MaxInflightTasks)
+	}
+	got, err := f.svc.GetIssueWatch(ctx, uncapped.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.MaxInflightTasks != nil {
+		t.Fatalf("uncapped did not round-trip as nil: %v", *got.MaxInflightTasks)
+	}
+
+	// Create with a positive cap round-trips through the nullable column.
+	cap5 := 5
+	capped, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+		Filter: SearchFilter{TeamKey: "ENG"}, MaxInflightTasks: &cap5,
+	})
+	if err != nil {
+		t.Fatalf("create capped: %v", err)
+	}
+	if capped.MaxInflightTasks == nil || *capped.MaxInflightTasks != 5 {
+		t.Fatalf("cap not persisted: %v", capped.MaxInflightTasks)
+	}
+
+	// Non-positive caps are rejected on create.
+	for _, bad := range []int{0, -1} {
+		b := bad
+		if _, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+			WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+			Filter: SearchFilter{TeamKey: "ENG"}, MaxInflightTasks: &b,
+		}); !errors.Is(err, ErrInvalidConfig) {
+			t.Errorf("expected ErrInvalidConfig for cap=%d, got %v", bad, err)
+		}
+	}
+
+	// PATCH is tri-state: present+int sets the cap, present+null clears it,
+	// absent leaves it unchanged. The absent case is the footgun greptile/the
+	// local reviewer flagged — a partial update must NOT silently drop the cap.
+	cap3 := 3
+	updated, err := f.svc.UpdateIssueWatch(ctx, capped.ID, &UpdateIssueWatchRequest{
+		MaxInflightTasks: optional.Int{Present: true, Value: &cap3},
+	})
+	if err != nil {
+		t.Fatalf("update set cap: %v", err)
+	}
+	if updated.MaxInflightTasks == nil || *updated.MaxInflightTasks != 3 {
+		t.Fatalf("cap not updated: %v", updated.MaxInflightTasks)
+	}
+
+	// Partial PATCH that omits MaxInflightTasks (Present=false) must preserve
+	// the existing cap of 3 — not reset it to uncapped.
+	newPrompt := "changed"
+	preserved, err := f.svc.UpdateIssueWatch(ctx, capped.ID, &UpdateIssueWatchRequest{
+		Prompt: &newPrompt,
+	})
+	if err != nil {
+		t.Fatalf("partial update: %v", err)
+	}
+	if preserved.MaxInflightTasks == nil || *preserved.MaxInflightTasks != 3 {
+		t.Fatalf("partial PATCH wrongly cleared the cap: %v", preserved.MaxInflightTasks)
+	}
+
+	// Explicit null clears the cap back to uncapped.
+	cleared, err := f.svc.UpdateIssueWatch(ctx, capped.ID, &UpdateIssueWatchRequest{
+		MaxInflightTasks: optional.Int{Present: true, Value: nil},
+	})
+	if err != nil {
+		t.Fatalf("update clear cap: %v", err)
+	}
+	if cleared.MaxInflightTasks != nil {
+		t.Fatalf("expected cap cleared to nil, got %v", *cleared.MaxInflightTasks)
+	}
+
+	// Non-positive cap is rejected on update too.
+	zero := 0
+	if _, err := f.svc.UpdateIssueWatch(ctx, capped.ID, &UpdateIssueWatchRequest{
+		MaxInflightTasks: optional.Int{Present: true, Value: &zero},
+	}); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("expected ErrInvalidConfig for update cap=0, got %v", err)
 	}
 }
 

@@ -570,6 +570,23 @@ func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *m
 
 	if startAgent {
 		e.startAgentProcessAsync(ctx, task.ID, sessionID, resp.AgentExecutionID)
+	} else {
+		// Prepare-only launch: the workspace + agentctl are up but the agent
+		// process is intentionally not being started. The lifecycle manager
+		// always writes status='starting' on row creation; flip it to
+		// 'prepared' so the row doesn't look stuck mid-launch. When the user
+		// later starts the agent (StartCreatedSession), Launch re-runs and
+		// rewrites the row with status='starting' via the usual path.
+		//
+		// Detach from the caller context so a client disconnect / WS timeout
+		// right after launch returns can't drop this write — that would leave
+		// the row stuck on "starting", which is the exact UX this fix closes.
+		statusCtx := context.WithoutCancel(ctx)
+		if err := e.repo.UpdateExecutorRunningStatus(statusCtx, sessionID, models.ExecutorRunningStatusPrepared); err != nil {
+			e.logger.Warn("failed to mark executors_running as prepared",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
 	}
 
 	e.logger.Info("agent launched for prepared session",
@@ -689,7 +706,20 @@ func (e *Executor) applyContainerCredentials(ctx context.Context, req *LaunchAge
 
 // buildRepoSpecs converts resolved repoInfos into per-repo launch specs for
 // the lifecycle layer. Used only when the task has more than one repository.
+// When the same RepositoryID appears more than once, the FIRST occurrence
+// keeps the flat layout (<task>/<repo>/) and subsequent occurrences nest
+// under <task>/<repo>/<branch-slug>/. This preserves the legacy single-
+// branch path for any worktree that already exists on disk, so a task
+// upgraded from single-branch to multi-branch doesn't orphan its primary
+// worktree directory.
 func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
+	repoCounts := make(map[string]int, len(allRepos))
+	for _, info := range allRepos {
+		if info.RepositoryID != "" {
+			repoCounts[info.RepositoryID]++
+		}
+	}
+	seenCount := make(map[string]int, len(allRepos))
 	out := make([]RepoSpec, 0, len(allRepos))
 	for _, info := range allRepos {
 		spec := RepoSpec{
@@ -715,6 +745,21 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 				spec.RepositoryURL = u
 			}
 		}
+		if repoCounts[info.RepositoryID] > 1 && seenCount[info.RepositoryID] > 0 {
+			slug := worktree.SanitizeBranchSlug(info.CheckoutBranch)
+			if slug == "" {
+				slug = worktree.SanitizeBranchSlug(info.BaseBranch)
+			}
+			// Branches whose names sanitize to "" (or two duplicate rows
+			// without explicit branch names) would otherwise collapse onto
+			// the same on-disk path as the first row. Fall back to a
+			// position-derived slug so siblings get distinct directories.
+			if slug == "" {
+				slug = fmt.Sprintf("branch-%d", seenCount[info.RepositoryID]+1)
+			}
+			spec.BranchSlug = slug
+		}
+		seenCount[info.RepositoryID]++
 		out = append(out, spec)
 	}
 	return out
@@ -1053,6 +1098,12 @@ func (e *Executor) persistTaskEnvironment(
 		}
 		if sandboxID := extractSandboxID(resp.Metadata); sandboxID != "" {
 			existingEnv.SandboxID = sandboxID
+		}
+		// Refresh TaskDirName when the request carries a new value — covers
+		// resume-after-failure where the original env row was stamped with an
+		// empty task_dir_name and the resume regenerates it.
+		if req.TaskDirName != "" {
+			existingEnv.TaskDirName = req.TaskDirName
 		}
 		if err := e.repo.UpdateTaskEnvironment(ctx, existingEnv); err != nil {
 			e.logger.Warn("failed to update task environment",

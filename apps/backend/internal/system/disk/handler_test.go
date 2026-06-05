@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -39,10 +40,23 @@ func TestHandleOpenFolder_NoHomeDirReturns503(t *testing.T) {
 }
 
 func TestHandleOpenFolder_ReturnsPathOnSupportedOS(t *testing.T) {
+	var opener string
 	switch runtime.GOOS {
-	case "linux", "darwin", "windows":
+	case "linux":
+		opener = "xdg-open"
+	case "darwin":
+		opener = "open"
+	case "windows":
+		opener = "explorer"
 	default:
 		t.Skipf("open-folder handler not exercised on %s", runtime.GOOS)
+	}
+	// The handler shells out to the platform's file-manager opener and only
+	// returns 200 when the binary is actually present on PATH. Minimal CI
+	// images (e.g. our `kandev-ci` container) omit `xdg-utils`, which makes
+	// the assertion impossible — skip rather than asserting a false-positive.
+	if _, err := exec.LookPath(opener); err != nil {
+		t.Skipf("%s not on PATH (%v); handler integration cannot be exercised here", opener, err)
 	}
 
 	home := t.TempDir()

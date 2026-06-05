@@ -22,7 +22,11 @@ import (
 type InteractiveStartRequest struct {
 	SessionID            string            `json:"session_id"`                       // Required: Agent session owning this process
 	Command              []string          `json:"command"`                          // Required: Command and args to execute
+	LogCommand           []string          `json:"log_command,omitempty"`            // Optional: redacted copy of Command for logging (e.g. MCP `-c` overrides with tokens); falls back to Command when unset
 	WorkingDir           string            `json:"working_dir"`                      // Working directory
+	ScopeID              string            `json:"scope_id,omitempty"`               // User-shell scope (task environment ID) when applicable
+	TerminalID           string            `json:"terminal_id,omitempty"`            // User-shell terminal ID when applicable
+	Label                string            `json:"label,omitempty"`                  // User-facing terminal label when applicable
 	Env                  map[string]string `json:"env,omitempty"`                    // Additional environment variables
 	PromptPattern        string            `json:"prompt_pattern,omitempty"`         // Regex pattern to detect agent prompt for turn completion
 	IdleTimeout          time.Duration     `json:"idle_timeout,omitempty"`           // Idle timeout for turn detection
@@ -38,12 +42,22 @@ type InteractiveStartRequest struct {
 	IsUserShell          bool              `json:"is_user_shell,omitempty"`          // Mark as user shell process (excluded from session-level lookups)
 }
 
+// commandForLog returns the command to log: the redacted LogCommand when the
+// caller supplied one, otherwise the raw Command.
+func (r InteractiveStartRequest) commandForLog() []string {
+	if len(r.LogCommand) > 0 {
+		return r.LogCommand
+	}
+	return r.Command
+}
+
 // InteractiveProcessInfo represents the state of an interactive process.
 type InteractiveProcessInfo struct {
 	ID         string               `json:"id"`
 	SessionID  string               `json:"session_id"`
 	Command    []string             `json:"command"`
 	WorkingDir string               `json:"working_dir"`
+	OSPID      int                  `json:"os_pid,omitempty"`
 	Status     types.ProcessStatus  `json:"status"`
 	ExitCode   *int                 `json:"exit_code,omitempty"`
 	StartedAt  time.Time            `json:"started_at"`

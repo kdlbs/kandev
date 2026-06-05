@@ -25,7 +25,7 @@ apps/
 
 ### Worktrees and commit hooks
 
-The commit-msg hook runs `cd apps && pnpm exec commitlint --edit "$1"`. A fresh git worktree shares `.git/` but **not** `apps/node_modules/`, so the first commit attempted in a worktree fails with `Command "commitlint" not found` / `ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL`. Run `pnpm install --frozen-lockfile` from `apps/` in the worktree once before the first commit; subsequent commits work normally.
+A fresh git worktree shares `.git/` but **not** `apps/node_modules/`. The missing install breaks not just the commit-msg hook (`pnpm exec commitlint` → `Command "commitlint" not found` / `ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL`) but any pnpm command — `vitest` fails with `Failed to resolve import "vitest"`, eslint similarly. Run `pnpm install --frozen-lockfile` from `apps/` once after creating the worktree, before running tests/lint/commits; subsequent pnpm commands work normally.
 
 ---
 

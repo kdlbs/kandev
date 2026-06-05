@@ -157,6 +157,12 @@ type TaskDTO struct {
 	// kanban-board tasks. Use this to gate office-only UI (e.g. the
 	// "Open in office view" topbar link).
 	IsFromOffice bool `json:"is_from_office,omitempty"`
+
+	// PRs lists the GitHub pull requests associated with this task, when the
+	// github service is wired and any association exists. Surfaced through the
+	// task-listing MCP tools so agents can reason about PR status (e.g. find
+	// tasks whose PRs are merged). Omitted when empty.
+	PRs []v1.TaskPRSummary `json:"prs,omitempty"`
 }
 
 type TaskRepositoryDTO struct {

@@ -4,6 +4,19 @@ export type SubagentTaskPayload = {
   description?: string;
   prompt?: string;
   subagent_type?: string;
+  status?: string; // result lifecycle, e.g. "complete" | "error" | "async_launched"
+  agent_id?: string; // Claude
+  model?: string; // OpenCode, e.g. "opencode/big-pickle"
+  child_session_id?: string; // OpenCode child session
+  duration_ms?: number; // Claude (totalDurationMs) + Cursor (durationMs)
+  total_tokens?: number; // Claude
+  tool_use_count?: number; // Claude
+  // Backgrounded subagent fields (Claude Code Task with run_in_background=true):
+  // the dispatch is terminal for the Task card, but the subagent itself keeps
+  // running and writes its result to output_file out-of-band.
+  is_async?: boolean;
+  output_file?: string;
+  can_read_output_file?: boolean;
 };
 
 export type GenericPayload = {
@@ -130,6 +143,12 @@ export type StatusMetadata = {
   message?: string;
   variant?: "default" | "warning" | "error";
   cancelled?: boolean;
+  // Transient provider-error (529 Overloaded) retry state. Present on the
+  // yellow "retrying" status message the orchestrator emits during backoff.
+  retrying?: boolean;
+  attempt?: number;
+  max_attempts?: number;
+  retry_in_seconds?: number;
 };
 
 export type RecoveryAuthMethod = {

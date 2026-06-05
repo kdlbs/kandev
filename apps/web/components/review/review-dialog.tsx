@@ -8,6 +8,7 @@ import type { PRDiffFile } from "@/lib/types/github";
 import { useCommentsStore, isDiffComment } from "@/lib/state/slices/comments";
 import { useSessionFileReviews } from "@/hooks/use-session-file-reviews";
 import { useGitOperations } from "@/hooks/use-git-operations";
+import { useReviewSidebarResize } from "@/hooks/use-review-sidebar-resize";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { ReviewTopBar } from "./review-top-bar";
@@ -418,13 +419,18 @@ function useReviewDialogState(props: ReviewDialogProps) {
 export const ReviewDialog = memo(function ReviewDialog(props: ReviewDialogProps) {
   const { open, onOpenChange, sessionId, baseBranch, onOpenFile } = props;
   const s = useReviewDialogState(props);
+  const splitRowRef = useRef<HTMLDivElement>(null);
+  const sidebar = useReviewSidebarResize(splitRowRef, open);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className="!max-w-[100vw] !w-[100vw] sm:!max-w-[80vw] sm:!w-[80vw] max-h-[85vh] h-[85vh] p-0 gap-0 flex flex-col shadow-2xl"
         showCloseButton={false}
-        overlayClassName="bg-transparent"
+        // Use a fixed black tint (not a theme token) so the backdrop reads
+        // as "a little dark" in both light and dark mode — `foreground/N`
+        // would invert to a light overlay in dark mode.
+        overlayClassName="bg-black/40"
       >
         <DialogTitle className="sr-only">Review Changes</DialogTitle>
         <ReviewTopBar
@@ -442,8 +448,12 @@ export const ReviewDialog = memo(function ReviewDialog(props: ReviewDialogProps)
           getPendingComments={s.getPendingComments}
           markCommentsSent={s.markCommentsSent}
         />
-        <div className="flex flex-1 min-h-0">
-          <div className="w-[280px] sm:w-[220px] min-w-[100px] border-r border-border flex-shrink-0 overflow-hidden hidden sm:flex flex-col">
+        <div ref={splitRowRef} className="flex flex-1 min-h-0">
+          <div
+            data-testid="review-dialog-sidebar"
+            className="border-r border-border flex-shrink-0 overflow-hidden hidden sm:flex flex-col"
+            style={{ width: `${sidebar.width}px` }}
+          >
             <ReviewFileTree
               files={s.filteredFiles}
               reviewedFiles={s.reviewedFiles}
@@ -456,6 +466,16 @@ export const ReviewDialog = memo(function ReviewDialog(props: ReviewDialogProps)
               onToggleReviewed={s.handleToggleReviewed}
             />
           </div>
+          <button
+            data-testid="review-dialog-sidebar-resize"
+            type="button"
+            tabIndex={-1}
+            aria-label="Resize file list"
+            className="hidden sm:block w-1 bg-border hover:bg-primary cursor-col-resize flex-shrink-0 relative group transition-colors p-0"
+            {...sidebar.resizeHandleProps}
+          >
+            <span className="absolute inset-y-0 -left-1 -right-1" />
+          </button>
           <div className="flex-1 min-w-0 overflow-hidden">
             {s.filteredFiles.length > 0 ? (
               <ReviewDiffList

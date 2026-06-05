@@ -64,6 +64,93 @@ const createTablesSQL = `
 		UNIQUE(task_id, repository_id, project_path, mr_iid)
 	);
 	CREATE INDEX IF NOT EXISTS idx_gitlab_task_mrs_task_id ON gitlab_task_mrs(task_id);
+
+	CREATE TABLE IF NOT EXISTS gitlab_mr_watches (
+		id TEXT PRIMARY KEY,
+		session_id TEXT NOT NULL,
+		task_id TEXT NOT NULL,
+		repository_id TEXT NOT NULL DEFAULT '',
+		project_path TEXT NOT NULL,
+		mr_iid INTEGER NOT NULL,
+		branch TEXT NOT NULL,
+		last_checked_at DATETIME,
+		last_note_at DATETIME,
+		last_pipeline_state TEXT DEFAULT '',
+		last_approval_state TEXT DEFAULT '',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL,
+		UNIQUE(session_id, repository_id)
+	);
+	CREATE INDEX IF NOT EXISTS idx_gitlab_mr_watches_task_id ON gitlab_mr_watches(task_id);
+
+	CREATE TABLE IF NOT EXISTS gitlab_review_watches (
+		id TEXT PRIMARY KEY,
+		workspace_id TEXT NOT NULL,
+		workflow_id TEXT NOT NULL,
+		workflow_step_id TEXT NOT NULL,
+		projects TEXT NOT NULL DEFAULT '[]',
+		agent_profile_id TEXT NOT NULL,
+		executor_profile_id TEXT NOT NULL,
+		prompt TEXT DEFAULT '',
+		review_scope TEXT NOT NULL DEFAULT 'user_and_teams',
+		custom_query TEXT NOT NULL DEFAULT '',
+		enabled BOOLEAN DEFAULT 1,
+		poll_interval_seconds INTEGER DEFAULT 300,
+		cleanup_policy TEXT NOT NULL DEFAULT 'auto',
+		last_polled_at DATETIME,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_gitlab_review_watches_workspace_id ON gitlab_review_watches(workspace_id);
+
+	CREATE TABLE IF NOT EXISTS gitlab_review_mr_tasks (
+		id TEXT PRIMARY KEY,
+		review_watch_id TEXT NOT NULL,
+		project_path TEXT NOT NULL DEFAULT '',
+		mr_iid INTEGER NOT NULL,
+		mr_url TEXT NOT NULL,
+		task_id TEXT NOT NULL,
+		created_at DATETIME NOT NULL,
+		UNIQUE(review_watch_id, project_path, mr_iid)
+	);
+
+	CREATE TABLE IF NOT EXISTS gitlab_issue_watches (
+		id TEXT PRIMARY KEY,
+		workspace_id TEXT NOT NULL,
+		workflow_id TEXT NOT NULL,
+		workflow_step_id TEXT NOT NULL,
+		projects TEXT NOT NULL DEFAULT '[]',
+		agent_profile_id TEXT NOT NULL,
+		executor_profile_id TEXT NOT NULL,
+		prompt TEXT DEFAULT '',
+		labels TEXT NOT NULL DEFAULT '[]',
+		custom_query TEXT NOT NULL DEFAULT '',
+		enabled BOOLEAN DEFAULT 1,
+		poll_interval_seconds INTEGER DEFAULT 300,
+		cleanup_policy TEXT NOT NULL DEFAULT 'auto',
+		last_polled_at DATETIME,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_gitlab_issue_watches_workspace_id ON gitlab_issue_watches(workspace_id);
+
+	CREATE TABLE IF NOT EXISTS gitlab_issue_watch_tasks (
+		id TEXT PRIMARY KEY,
+		issue_watch_id TEXT NOT NULL,
+		project_path TEXT NOT NULL DEFAULT '',
+		issue_iid INTEGER NOT NULL,
+		issue_url TEXT NOT NULL,
+		task_id TEXT NOT NULL,
+		created_at DATETIME NOT NULL,
+		UNIQUE(issue_watch_id, project_path, issue_iid)
+	);
+
+	CREATE TABLE IF NOT EXISTS gitlab_action_presets (
+		workspace_id TEXT PRIMARY KEY,
+		mr_presets TEXT NOT NULL DEFAULT '[]',
+		issue_presets TEXT NOT NULL DEFAULT '[]',
+		updated_at DATETIME NOT NULL
+	);
 `
 
 func (s *Store) createTables() error {

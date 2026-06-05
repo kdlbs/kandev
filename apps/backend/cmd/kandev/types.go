@@ -18,6 +18,7 @@ import (
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	promptstore "github.com/kandev/kandev/internal/prompts/store"
 	"github.com/kandev/kandev/internal/secrets"
+	"github.com/kandev/kandev/internal/sentry"
 	"github.com/kandev/kandev/internal/slack"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -60,6 +61,7 @@ type Services struct {
 	GitLab       *gitlab.Service
 	Jira         *jira.Service
 	Linear       *linear.Service
+	Sentry       *sentry.Service
 	Slack        *slack.Service
 	Share        *share.HTTPHandlers
 	Office       *officeservice.Service

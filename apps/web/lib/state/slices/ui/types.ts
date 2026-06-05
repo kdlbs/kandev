@@ -38,6 +38,7 @@ export type ConnectionState = {
 export type MobileKanbanState = {
   activeColumnIndex: number;
   isMenuOpen: boolean;
+  isSearchOpen: boolean;
 };
 
 export type MobileSessionPanel = "chat" | "plan" | "changes" | "files" | "terminal";
@@ -167,6 +168,7 @@ export type UISliceActions = {
   setConnectionStatus: (status: ConnectionState["status"], error?: string | null) => void;
   setMobileKanbanColumnIndex: (index: number) => void;
   setMobileKanbanMenuOpen: (open: boolean) => void;
+  setMobileKanbanSearchOpen: (open: boolean) => void;
   setMobileSessionPanel: (sessionId: string, panel: MobileSessionPanel) => void;
   setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
   setPlanMode: (sessionId: string, enabled: boolean) => void;

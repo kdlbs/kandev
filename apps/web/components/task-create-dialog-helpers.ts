@@ -2,7 +2,13 @@ import type { useRouter } from "next/navigation";
 import type { Task, Branch, LocalRepository, Repository } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { AppState } from "@/lib/state/store";
-import type { StepType, TaskRepoRow } from "@/components/task-create-dialog-types";
+import type {
+  StepType,
+  TaskRemoteRepoRow,
+  TaskRepoRow,
+} from "@/components/task-create-dialog-types";
+import type { UsePRInfoByURLResult } from "@/hooks/domains/github/use-pr-info-by-url";
+import { parseGitHubAnyUrl } from "@/hooks/domains/github/use-pr-info-by-url";
 import { selectPreferredBranch } from "@/lib/utils";
 import { getLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
@@ -142,14 +148,16 @@ export function validateCreateInputs(inputs: {
   effectiveWorkflowId: string | null;
   /** Unified repos list. The form is valid if any row has a repo set OR URL mode is filled. */
   repositories: TaskRepoRow[];
-  githubUrl?: string;
+  /** Remote URL rows. The form is valid when at least one has a non-empty URL. */
+  remoteRepos?: TaskRemoteRepoRow[];
   agentProfileId: string;
   noRepository?: boolean;
 }): boolean {
+  const hasRemoteRepo = (inputs.remoteRepos ?? []).some((r) => r.url.trim() !== "");
   const hasRepo =
     inputs.noRepository ||
     inputs.repositories.some((r) => r.repositoryId || r.localPath) ||
-    Boolean(inputs.githubUrl?.trim());
+    hasRemoteRepo;
   return Boolean(
     inputs.trimmedTitle &&
     inputs.workspaceId &&
@@ -157,6 +165,36 @@ export function validateCreateInputs(inputs: {
     inputs.agentProfileId &&
     hasRepo,
   );
+}
+
+/**
+ * Detects two remote-repo rows that resolve to the same GitHub `owner/repo`.
+ *
+ * Both plain repo URLs and PR URLs are parsed via `parseGitHubAnyUrl`, so two
+ * different PRs of the same repo (`/pull/1116` and `/pull/1117`) or the same
+ * PR URL pasted twice are caught — they all collapse to the same backend
+ * repository, which would otherwise surface as an opaque UUID-laden error.
+ *
+ * Rows with an empty URL, or a URL that can't be parsed to `owner/repo`
+ * (garbage), are skipped — only parseable rows participate in the comparison,
+ * which is case-insensitive on `owner/repo`.
+ *
+ * Returns the human-readable label (`owner/repo`, preserving the first row's
+ * casing) of the first duplicate found, or `null` when every parseable row is
+ * a distinct repo.
+ */
+export function findDuplicateRemoteRepo(remoteRepos: TaskRemoteRepoRow[]): string | null {
+  const seen = new Map<string, string>();
+  for (const row of remoteRepos) {
+    const parsed = parseGitHubAnyUrl(row.url ?? "");
+    if (!parsed) continue;
+    const label = `${parsed.owner}/${parsed.repo}`;
+    const key = label.toLowerCase();
+    const existing = seen.get(key);
+    if (existing) return existing;
+    seen.set(key, label);
+  }
+  return null;
 }
 
 /**
@@ -169,17 +207,18 @@ export function validateCreateInputs(inputs: {
  *   detection happens on the backend.
  */
 export function buildRepositoriesPayload(opts: {
-  useGitHubUrl: boolean;
-  githubUrl: string;
-  githubBranch: string;
-  githubPrHeadBranch: string | null;
+  /** True when the form is in GitHub Remote (URL) mode. */
+  useRemote: boolean;
+  /** Remote-URL rows; non-empty `url` rows are mapped 1:1 to payload entries. */
+  remoteRepos: TaskRemoteRepoRow[];
   /**
-   * PR's target branch from the GitHub API. When set and the displayed branch
-   * still matches the auto-selected PR head, this is sent as `base_branch`
-   * (so origin can resolve it for fork PRs). Optional to keep existing test
-   * fixtures and non-PR call sites compiling without a sentinel.
+   * Per-URL PR-info cache. Consulted for each remote row whose URL is a PR
+   * URL: if the row's branch equals the PR head (auto-fill or user-confirmed
+   * default), the payload anchors `base_branch` to the PR's actual target
+   * from the API so origin can resolve it even when the head only lives on
+   * a fork. Optional — non-Remote call sites can omit it.
    */
-  githubPrBaseBranch?: string | null;
+  prInfoByUrl?: Pick<UsePRInfoByURLResult, "info">;
   repositories: TaskRepoRow[];
   /** Used to look up `default_branch` for `localPath` rows. */
   discoveredRepositories: LocalRepository[];
@@ -201,26 +240,8 @@ export function buildRepositoriesPayload(opts: {
    */
   freshBranch?: { confirmDiscard: boolean; consentedDirtyFiles: string[] };
 }): NonNullable<CreateTaskParams["repositories"]> {
-  if (opts.useGitHubUrl && opts.githubUrl) {
-    // For PR URLs we display the PR head branch in the pill (so the user sees
-    // the branch they pasted). The displayed branch is NOT a valid base on
-    // origin for fork PRs — it only exists on the contributor's fork — so we
-    // anchor `base_branch` to the PR's actual target branch from the GitHub
-    // API and let `checkout_branch` carry the head ref. The backend materializes
-    // the head via the refs/pull/<N>/head refspec.
-    const isPrAutoSelection =
-      !!opts.githubPrHeadBranch && opts.githubBranch === opts.githubPrHeadBranch;
-    const baseBranch = isPrAutoSelection
-      ? opts.githubPrBaseBranch || undefined
-      : opts.githubBranch || undefined;
-    return [
-      {
-        repository_id: "",
-        base_branch: baseBranch,
-        checkout_branch: opts.githubPrHeadBranch || undefined,
-        github_url: opts.githubUrl.trim(),
-      },
-    ];
+  if (opts.useRemote) {
+    return buildRemoteRepoPayload(opts);
   }
   const fresh = opts.freshBranch
     ? {
@@ -262,6 +283,54 @@ export function buildRepositoriesPayload(opts: {
         ...fresh,
       };
     });
+}
+
+/**
+ * Builds the `repos: [{ github_url, branch }]` payload from the remote-URL
+ * rows. Rows with an empty URL are dropped silently — they're partially
+ * filled rows the user hasn't completed yet.
+ *
+ * Per-row PR-info inference: if a row's URL is a PR URL and the row's
+ * branch equals the PR's head branch (auto-selected by the chip or
+ * user-confirmed via "leave default"), the payload anchors `base_branch`
+ * to the PR's actual target from the GitHub API and surfaces the PR head
+ * as `checkout_branch`. This keeps fork PRs resolvable on `origin` (their
+ * head doesn't live there, but the base does). When the user overrides
+ * the branch to something other than the PR head, we treat their pick as
+ * the base and drop `checkout_branch`.
+ */
+function buildRemoteRepoPayload(opts: {
+  remoteRepos: TaskRemoteRepoRow[];
+  prInfoByUrl?: Pick<UsePRInfoByURLResult, "info">;
+}): NonNullable<CreateTaskParams["repositories"]> {
+  const nonEmpty = opts.remoteRepos.filter((r) => r.url.trim() !== "");
+  if (nonEmpty.length === 0) return [];
+  return nonEmpty.map((row) => {
+    const url = row.url.trim();
+    // The cache is keyed on the trimmed URL (ensure() also trims), so we
+    // must look it up with the trimmed value too. Passing `row.url` directly
+    // would miss the cache when the user has stray whitespace around their
+    // URL and silently lose the PR base-branch anchoring.
+    const prInfo = opts.prInfoByUrl?.info(url);
+    if (prInfo) {
+      const isPrAutoSelection = !!prInfo.prHeadBranch && row.branch === prInfo.prHeadBranch;
+      const baseBranch = isPrAutoSelection
+        ? prInfo.prBaseBranch || undefined
+        : row.branch || undefined;
+      return {
+        repository_id: "",
+        base_branch: baseBranch,
+        checkout_branch: isPrAutoSelection ? prInfo.prHeadBranch || undefined : undefined,
+        github_url: url,
+      };
+    }
+    return {
+      repository_id: "",
+      base_branch: row.branch || undefined,
+      checkout_branch: undefined,
+      github_url: url,
+    };
+  });
 }
 
 function resolveRowDefaultBranch(

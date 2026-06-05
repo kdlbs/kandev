@@ -24,10 +24,12 @@ type ShortcutRecorderProps = {
   current: KeyboardShortcut;
   onChange: (id: ConfigurableShortcutId, shortcut: KeyboardShortcut) => void;
   onReset: (id: ConfigurableShortcutId) => void;
-  onClear: (id: ConfigurableShortcutId) => void;
+  // Optional: callers that don't support an explicit "unbind" (e.g. the voice
+  // settings recorder) omit this, and the Clear button is hidden for them.
+  onClear?: (id: ConfigurableShortcutId) => void;
 };
 
-function ShortcutRecorder({
+export function ShortcutRecorder({
   shortcutId,
   current,
   onChange,
@@ -95,7 +97,7 @@ function ShortcutRecorder({
         >
           {renderRecorderLabel({ recording, current, isUnbound })}
         </button>
-        {!isUnbound && !defaultIsUnbound && (
+        {onClear && !isUnbound && !defaultIsUnbound && (
           <Button
             variant="ghost"
             size="icon"

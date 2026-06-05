@@ -228,6 +228,7 @@ export const NativeMessageList = memo(function NativeMessageList({
         messagesLoading={messagesLoading}
         isInitialLoading={isInitialLoading}
         messagesCount={messages.length}
+        onLoadMore={loadMore}
       />
 
       {items.map((item) => {

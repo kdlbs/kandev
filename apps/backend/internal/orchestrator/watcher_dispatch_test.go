@@ -33,6 +33,8 @@ type fakeWatcherSource struct {
 	buildErr         error
 	attachErr        error
 	autoStart        AutoStartParams
+	watchID          string
+	maxInflightTasks *int
 	recordedReserve  int
 	recordedRelease  int
 	recordedBuild    int
@@ -66,6 +68,16 @@ func (f *fakeWatcherSource) AutoStartParams(_ any) AutoStartParams {
 	f.recordedAutoArgs = &p
 	return p
 }
+
+func (f *fakeWatcherSource) WatchID(_ any) string { return f.watchID }
+
+func (f *fakeWatcherSource) MaxInflightTasks(_ any) *int { return f.maxInflightTasks }
+
+// AgentProfileID returns "" so the pre-flight check skips and behaviour
+// matches pre-self-heal semantics for tests that don't wire a ProfileLookup.
+func (f *fakeWatcherSource) AgentProfileID(_ any) string { return "" }
+
+func (f *fakeWatcherSource) SelfHeal(_ context.Context, _ any, _ string) error { return nil }
 
 // fakeTaskCreator captures the request and returns a canned task or error.
 type fakeTaskCreator struct {

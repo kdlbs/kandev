@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
@@ -21,6 +23,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	workflowctrl "github.com/kandev/kandev/internal/workflow/controller"
 	workflowsvc "github.com/kandev/kandev/internal/workflow/service"
@@ -31,10 +34,15 @@ import (
 
 // ClarificationService defines the interface for clarification operations.
 type ClarificationService interface {
-	CreateRequest(req *clarification.Request) string
+	CreateRequest(req *clarification.Request) (string, bool)
 	WaitForResponse(ctx context.Context, pendingID string) (*clarification.Response, error)
 	CancelRequest(pendingID string) bool
-	CancelSession(sessionID string) []string
+}
+
+// SessionCanceller detaches in-memory clarification waiters while keeping DB
+// messages pending. Used by the MCP-timeout handler.
+type SessionCanceller interface {
+	DetachSessionAndNotify(ctx context.Context, sessionID string) int
 }
 
 // MessageCreator creates messages for clarification requests.
@@ -46,6 +54,10 @@ type MessageCreator interface {
 type SessionRepository interface {
 	UpdateTaskSessionState(ctx context.Context, sessionID string, state models.TaskSessionState, errorMessage string) error
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
+	// SetSessionMetadataKey is used by handleStepComplete (ADR 0015) to
+	// atomically write the pending-completion bag without clobbering other
+	// metadata keys.
+	SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error
 }
 
 // TaskRepository interface for updating task state.
@@ -83,6 +95,7 @@ type Handlers struct {
 	taskSvc          *service.Service
 	workflowCtrl     *workflowctrl.Controller
 	clarificationSvc ClarificationService
+	sessionCanceller SessionCanceller
 	messageCreator   MessageCreator
 	sessionRepo      SessionRepository
 	taskRepo         TaskRepository
@@ -101,6 +114,10 @@ type Handlers struct {
 	// Wires the list_related_tasks_kandev / *_task_document_kandev
 	// MCP tools introduced in office task handoffs phase 2.
 	handoffSvc *service.HandoffService
+
+	// Optional PR lister (set via SetTaskPRLister) used to enrich
+	// task-listing responses with associated pull requests.
+	taskPRLister TaskPRLister
 }
 
 // NewHandlers creates new MCP handlers.
@@ -108,6 +125,7 @@ func NewHandlers(
 	taskSvc *service.Service,
 	workflowCtrl *workflowctrl.Controller,
 	clarificationSvc ClarificationService,
+	sessionCanceller SessionCanceller,
 	messageCreator MessageCreator,
 	sessionRepo SessionRepository,
 	taskRepo TaskRepository,
@@ -121,6 +139,7 @@ func NewHandlers(
 		taskSvc:          taskSvc,
 		workflowCtrl:     workflowCtrl,
 		clarificationSvc: clarificationSvc,
+		sessionCanceller: sessionCanceller,
 		messageCreator:   messageCreator,
 		sessionRepo:      sessionRepo,
 		taskRepo:         taskRepo,
@@ -154,6 +173,9 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPListTasks, h.handleListTasks)
 	d.RegisterFunc(ws.ActionMCPCreateTask, h.handleCreateTask)
 	d.RegisterFunc(ws.ActionMCPUpdateTask, h.handleUpdateTask)
+	d.RegisterFunc(ws.ActionMCPAddBranchToTask, h.handleAddBranchToTask)
+	d.RegisterFunc(ws.ActionMCPUpdateRepositoryBaseBranch, h.handleUpdateRepositoryBaseBranch)
+	d.RegisterFunc(ws.ActionMCPStepComplete, h.handleStepComplete)
 	d.RegisterFunc(ws.ActionMCPMessageTask, h.handleMessageTask)
 	d.RegisterFunc(ws.ActionMCPGetTaskConversation, h.handleGetTaskConversation)
 	d.RegisterFunc(ws.ActionMCPAskUserQuestion, h.handleAskUserQuestion)
@@ -162,18 +184,19 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPUpdateTaskPlan, h.handleUpdateTaskPlan)
 	d.RegisterFunc(ws.ActionMCPDeleteTaskPlan, h.handleDeleteTaskPlan)
 	d.RegisterFunc(ws.ActionMCPClarificationTimeout, h.handleClarificationTimeout)
-	count := 14
+	count := 17
 
 	// Config-mode handlers (registered when config deps are set)
 	if h.workflowSvc != nil {
 		d.RegisterFunc(ws.ActionMCPCreateWorkflow, h.handleCreateWorkflow)
 		d.RegisterFunc(ws.ActionMCPUpdateWorkflow, h.handleUpdateWorkflow)
 		d.RegisterFunc(ws.ActionMCPDeleteWorkflow, h.handleDeleteWorkflow)
+		d.RegisterFunc(ws.ActionMCPImportWorkflow, h.handleImportWorkflow)
 		d.RegisterFunc(ws.ActionMCPCreateWorkflowStep, h.handleCreateWorkflowStep)
 		d.RegisterFunc(ws.ActionMCPUpdateWorkflowStep, h.handleUpdateWorkflowStep)
 		d.RegisterFunc(ws.ActionMCPDeleteWorkflowStep, h.handleDeleteWorkflowStep)
 		d.RegisterFunc(ws.ActionMCPReorderWorkflowStep, h.handleReorderWorkflowSteps)
-		count += 7
+		count += 8
 	}
 	if h.agentSettingsCtrl != nil {
 		d.RegisterFunc(ws.ActionMCPListAgents, h.handleListAgents)
@@ -339,6 +362,7 @@ func (h *Handlers) handleListTasks(ctx context.Context, msg *ws.Message) (*ws.Me
 			for _, t := range tasks {
 				dtos = append(dtos, dto.FromTask(t))
 			}
+			h.enrichTasksWithPRs(ctx, dtos)
 			return dto.ListTasksResponse{Tasks: dtos, Total: len(dtos)}, nil
 		})
 }
@@ -369,11 +393,6 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		BaseBranch             string               `json:"base_branch"`               // top-level fallback applied to every resolved repo only when no per-repo entries are supplied; explicit per-repo BaseBranch is authoritative when Repositories is set
 		BlockedBy              []string             `json:"blocked_by"`                // task IDs that must complete before this task
 		AssigneeAgentProfileID string               `json:"assignee_agent_profile_id"` // agent instance to assign the task to
-		// Office task-handoffs phase 4 — workspace policy.
-		WorkspaceMode         string `json:"workspace_mode"`
-		WorkspaceGroupID      string `json:"workspace_group_id"`
-		DefaultChildWorkspace string `json:"default_child_workspace"`
-		DefaultChildOrdering  string `json:"default_child_ordering"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -437,16 +456,6 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_id is required", nil)
 	}
 
-	// Office task-handoffs phase 4: resolve effective workspace policy and
-	// build the metadata block that gets persisted on the new task.
-	wsPolicy, policyErr := h.resolveWorkspacePolicy(ctx, req.ParentID,
-		req.WorkspaceMode, req.WorkspaceGroupID,
-		req.DefaultChildWorkspace, req.DefaultChildOrdering)
-	if policyErr != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, policyErr.Error(), nil)
-	}
-	metadata := wsPolicy.MetadataBlock()
-
 	task, err := h.taskSvc.CreateTask(ctx, &service.CreateTaskRequest{
 		ParentID:               req.ParentID,
 		WorkspaceID:            req.WorkspaceID,
@@ -457,30 +466,15 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Repositories:           repos,
 		BlockedBy:              req.BlockedBy,
 		AssigneeAgentProfileID: req.AssigneeAgentProfileID,
-		Metadata:               metadata,
 	})
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create task", nil)
-	}
-
-	// Office task-handoffs phase 4: attach workspace-group membership and
-	// (if parent says sequential) add a blocker edge to the previous
-	// non-archived sibling. A failed attach leaves the task in a broken
-	// state — the metadata claims it belongs to a group it never joined.
-	// Compensate by deleting the just-created task so the caller gets a
-	// clean error and can retry (post-review #3).
-	if h.handoffSvc != nil && wsPolicy.NeedsAttachment() {
-		if err := h.handoffSvc.AttachWorkspacePolicy(ctx, task.ID, req.ParentID, wsPolicy); err != nil {
-			h.logger.Error("attach workspace policy; rolling back task creation",
-				zap.String("task_id", task.ID), zap.Error(err))
-			if delErr := h.taskSvc.DeleteTask(ctx, task.ID); delErr != nil {
-				h.logger.Error("rollback delete failed; task left in inconsistent state",
-					zap.String("task_id", task.ID), zap.Error(delErr))
-			}
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
-				"failed to attach workspace policy: "+err.Error(), nil)
+		// Defense-in-depth: resolveTaskRepositories already catches this for the
+		// MCP path, but non-MCP callers (UI, internal engine) reach here directly.
+		if errors.Is(err, service.ErrSubtaskDepthExceeded) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create task", nil)
 	}
 
 	// Auto-start agent session asynchronously only if requested
@@ -522,6 +516,9 @@ func (h *Handlers) resolveTaskRepositories(
 		}
 		if parent.IsEphemeral {
 			return taskRepoResult{}, fmt.Errorf("cannot create subtasks of an ephemeral task (quick chat); omit parent_id to create a top-level task")
+		}
+		if parent.ParentID != "" && !parent.IsFromOffice {
+			return taskRepoResult{}, service.ErrSubtaskDepthExceeded
 		}
 		repos := explicitRepos
 		if repos == nil {
@@ -739,6 +736,363 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
 }
 
+// handleAddBranchToTask attaches a new (repository, checkout_branch) pair to
+// an existing task. Mirrors create-time multi-repo attachment but additive:
+// the same repository may be added on a different branch, materializing a
+// second worktree under the task's directory.
+func (h *Handlers) handleAddBranchToTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		TaskID         string `json:"task_id"`
+		RepositoryID   string `json:"repository_id"`
+		LocalPath      string `json:"local_path"`
+		GitHubURL      string `json:"github_url"`
+		BaseBranch     string `json:"base_branch"`
+		CheckoutBranch string `json:"checkout_branch"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.TaskID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	}
+	// Mutual exclusion across the three repo identifiers. resolveRepoInput
+	// applies a silent precedence (repository_id > github_url > local_path),
+	// so an agent that accidentally passes two of them gets a behaviour
+	// change with no signal. Reject early instead so the agent sees the
+	// mistake.
+	if locatorCount := boolCount(req.RepositoryID != "", req.LocalPath != "", req.GitHubURL != ""); locatorCount > 1 {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+			"pass at most one of repository_id, github_url, local_path", nil)
+	}
+	// repository_id / local_path / github_url are all optional: the service
+	// defaults to the task's only repository (or its primary row) when none
+	// is supplied. Multi-repo tasks force the agent to pass one explicitly
+	// via the service-level error. local_path and github_url are
+	// agent-ergonomic alternatives — when supplied the service resolves
+	// them through the same workspace-scoped find-or-create path used by
+	// create_task.
+	taskRepo, err := h.taskSvc.AddBranchToTask(ctx, service.AddBranchToTaskRequest{
+		TaskID:         req.TaskID,
+		RepositoryID:   req.RepositoryID,
+		LocalPath:      req.LocalPath,
+		GitHubURL:      req.GitHubURL,
+		BaseBranch:     req.BaseBranch,
+		CheckoutBranch: req.CheckoutBranch,
+	})
+	if err != nil {
+		h.logger.Error("failed to add branch to task", zap.Error(err))
+		code := classifyAddBranchError(err)
+		return ws.NewError(msg.ID, msg.Action, code, "Failed to add branch: "+err.Error(), nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"id":              taskRepo.ID,
+		keyTaskID:         taskRepo.TaskID,
+		keyRepositoryID:   taskRepo.RepositoryID,
+		keyBaseBranch:     taskRepo.BaseBranch,
+		keyCheckoutBranch: taskRepo.CheckoutBranch,
+		keyPosition:       taskRepo.Position,
+	})
+}
+
+// handleUpdateRepositoryBaseBranch updates the base_branch on a single
+// task_repositories row. The agentctl side is notified live via the service's
+// AgentBaseBranchPusher hook so the changes-panel diff stats reflect the new
+// base immediately, not just at next session start.
+func (h *Handlers) handleUpdateRepositoryBaseBranch(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		TaskID           string `json:"task_id"`
+		TaskRepositoryID string `json:"task_repository_id"`
+		BaseBranch       string `json:"base_branch"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.TaskID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	}
+	if req.TaskRepositoryID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_repository_id is required", nil)
+	}
+	taskRepo, err := h.taskSvc.UpdateRepositoryBaseBranch(ctx, service.UpdateRepositoryBaseBranchRequest{
+		TaskID:           req.TaskID,
+		TaskRepositoryID: req.TaskRepositoryID,
+		BaseBranch:       req.BaseBranch,
+	})
+	if err != nil {
+		h.logger.Error("failed to update repository base branch", zap.Error(err))
+		if errors.Is(err, service.ErrTaskRepositoryNotFound) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, err.Error(), nil)
+		}
+		// Caller-facing validation messages (required-field, invalid ref
+		// name) pass through verbatim so MCP agents can react; internal
+		// faults stay opaque so DB-level details don't leak.
+		if isValidationError(err) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update base branch", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"id":              taskRepo.ID,
+		keyTaskID:         taskRepo.TaskID,
+		keyRepositoryID:   taskRepo.RepositoryID,
+		keyBaseBranch:     taskRepo.BaseBranch,
+		keyCheckoutBranch: taskRepo.CheckoutBranch,
+		keyPosition:       taskRepo.Position,
+	})
+}
+
+// boolCount returns how many of the supplied boolean flags are true. Used
+// to enforce mutual exclusion across optional input fields without a chain
+// of nested ifs.
+func boolCount(flags ...bool) int {
+	n := 0
+	for _, b := range flags {
+		if b {
+			n++
+		}
+	}
+	return n
+}
+
+// isValidationError matches the user-facing fragments emitted by the
+// service-layer validators (required fields, invalid ref names). Shared by
+// every MCP write handler so service-side message tweaks need only one
+// place to flow through to the MCP error classification. Kept narrow on
+// purpose — DB / IO failures often carry "invalid" in their message and
+// must surface as InternalError, not Validation.
+func isValidationError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "is required") ||
+		strings.Contains(msg, "not allowed in a git ref name")
+}
+
+// classifyAddBranchError maps service-layer add_branch failures to ws error
+// codes so MCP agents can react to user-fixable input mistakes (missing
+// task, duplicate branch, wrong executor) instead of treating them as
+// backend faults.
+func classifyAddBranchError(err error) string {
+	if err == nil {
+		return ws.ErrorCodeInternalError
+	}
+	if errors.Is(err, taskrepo.ErrTaskNotFound) {
+		return ws.ErrorCodeNotFound
+	}
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "does not belong to task's workspace"):
+		return ws.ErrorCodeNotFound
+	case strings.Contains(msg, "is already attached"),
+		strings.Contains(msg, "conflicts with existing branch"):
+		return ws.ErrorCodeConflict
+	case strings.Contains(msg, "repository_id is required"),
+		strings.Contains(msg, "only supported on the worktree executor"),
+		strings.Contains(msg, "task_id is required"),
+		strings.Contains(msg, "cannot resolve base_branch"):
+		return ws.ErrorCodeValidation
+	case strings.Contains(msg, "GitHub URL"),
+		strings.Contains(msg, "github.com/owner/repo"),
+		strings.Contains(msg, "does not belong to workspace"):
+		// User-fixable failures from ResolveRepositoryRef / parseGitHubRepoURL:
+		// malformed URL, non-github host, cross-workspace repository_id.
+		// Narrow patterns (not a broad "resolve repository:" prefix) so
+		// downstream DB / system errors from CreateRepository / ListRepositories
+		// still classify as InternalError.
+		return ws.ErrorCodeValidation
+	}
+	return ws.ErrorCodeInternalError
+}
+
+// handleStepComplete records the agent's explicit step-completion signal
+// (ADR 0015). The handler:
+//
+//   - Loads the session and the task to identify the current workflow step.
+//   - Dedupes: if a pending signal already exists for the same step, returns
+//     {accepted: false, reason: "already_signaled"} without overwriting.
+//     When the session is WAITING_FOR_INPUT, the bus event is re-published
+//     so a failed first-attempt publish can still drive the subscriber.
+//   - Otherwise writes a PendingStepCompletionSignal blob under
+//     TaskSession.Metadata[SessionMetaKeyPendingStepCompletion] via
+//     SetSessionMetadataKey (json_set — preserves other metadata keys).
+//   - Publishes events.WorkflowStepCompletionSignaled so the orchestrator
+//     subscriber can drive the on_turn_complete transition for steps with
+//     AutoAdvanceRequiresSignal=true. Steps that don't opt in ignore the
+//     signal entirely; the bag entry is cleared on the next turn start
+//     (no separate audit trail is persisted).
+//
+// Idempotency is intentionally lossy — a second call within the same step
+// silently keeps the first signal's payload (summary/handoff/blockers). The
+// orchestrator treats the first signal as authoritative.
+func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		TaskID    string `json:"task_id"`
+		SessionID string `json:"session_id"`
+		Summary   string `json:"summary"`
+		Handoff   string `json:"handoff"`
+		Blockers  string `json:"blockers"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.TaskID == "" || req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id and session_id are required", nil)
+	}
+	if strings.TrimSpace(req.Summary) == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "summary is required", nil)
+	}
+
+	session, task, errMsg, err := h.resolveStepCompleteTarget(ctx, msg, req.TaskID, req.SessionID)
+	if errMsg != nil {
+		return errMsg, err
+	}
+
+	// Idempotency: if a pending signal exists for the current step, return
+	// without overwriting. A stale signal for a different step (left over
+	// from a transition that hasn't yet cleared the bag) is treated as
+	// absent and overwritten — the new step's signal supersedes.
+	//
+	// Re-publish on the dedup path when the session is WAITING_FOR_INPUT.
+	// Without this, an agent's retry after a publish failure short-circuits
+	// to `already_signaled` without firing the out-of-band subscriber,
+	// leaving the session stuck until the user replies. Publish is
+	// idempotent on the subscriber side (it re-checks bag + step), so a
+	// double-fire when the first publish actually landed is harmless.
+	if existing, ok := models.LoadPendingStepSignal(session.Metadata); ok && existing.StepID == task.WorkflowStepID {
+		if session.State == models.TaskSessionStateWaitingForInput {
+			if errMsg, err := h.publishStepCompletionEvent(ctx, msg, req.TaskID, req.SessionID, task.WorkflowStepID, existing); errMsg != nil {
+				return errMsg, err
+			}
+		}
+		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+			"accepted": false,
+			"reason":   "already_signaled",
+		})
+	}
+
+	signal := models.PendingStepCompletionSignal{
+		StepID:     task.WorkflowStepID,
+		Source:     models.StepCompletionSourceAgent,
+		Summary:    strings.TrimSpace(req.Summary),
+		Handoff:    strings.TrimSpace(req.Handoff),
+		Blockers:   strings.TrimSpace(req.Blockers),
+		SignaledAt: time.Now().UTC(),
+	}
+	if err := h.sessionRepo.SetSessionMetadataKey(ctx, req.SessionID, models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
+		h.logger.Error("failed to persist step-completion signal",
+			zap.String("task_id", req.TaskID),
+			zap.String("session_id", req.SessionID),
+			zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to record signal", nil)
+	}
+
+	if errMsg, err := h.publishStepCompletionEvent(ctx, msg, req.TaskID, req.SessionID, task.WorkflowStepID, signal); errMsg != nil {
+		return errMsg, err
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"accepted":    true,
+		"step_id":     task.WorkflowStepID,
+		"signaled_at": signal.SignaledAt,
+	})
+}
+
+// resolveStepCompleteTarget loads the session + task the signal applies to
+// and runs the up-front validation (ownership, terminal-state guard,
+// workflow-step presence). Returns a populated session+task pair on success,
+// or a ready-to-send WS error envelope (and its marshal error if any) on
+// any failed precondition.
+func (h *Handlers) resolveStepCompleteTarget(
+	ctx context.Context, msg *ws.Message, taskID, sessionID string,
+) (*models.TaskSession, *models.Task, *ws.Message, error) {
+	session, err := h.sessionRepo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		// Session repo has no exported not-found sentinel; classify by
+		// substring and treat anything else as transient so the agent
+		// retries instead of abandoning the session.
+		if strings.Contains(err.Error(), "not found") {
+			errMsg, mErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "session not found", nil)
+			return nil, nil, errMsg, mErr
+		}
+		h.logger.Error("step_complete: failed to load session",
+			zap.String("session_id", sessionID), zap.Error(err))
+		errMsg, mErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to load session", nil)
+		return nil, nil, errMsg, mErr
+	}
+	if session.TaskID != taskID {
+		errMsg, mErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session does not belong to task", nil)
+		return nil, nil, errMsg, mErr
+	}
+	// Terminal sessions cannot consume a signal: the orchestrator's
+	// out-of-band subscriber short-circuits on every state other than
+	// WAITING_FOR_INPUT, and no future turn-end will fire on a closed
+	// session. Reject up front so the agent gets a clear error instead of
+	// `accepted: true` followed by silent no-op.
+	switch session.State {
+	case models.TaskSessionStateCompleted,
+		models.TaskSessionStateFailed,
+		models.TaskSessionStateCancelled:
+		errMsg, mErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+			"cannot signal completion for a terminal session (state: "+string(session.State)+")", nil)
+		return nil, nil, errMsg, mErr
+	}
+
+	task, err := h.taskSvc.GetTask(ctx, taskID)
+	if err != nil {
+		// Task repo exports ErrTaskNotFound; anything else is a transient
+		// load failure that the agent should retry rather than interpret
+		// as "task gone".
+		if errors.Is(err, taskrepo.ErrTaskNotFound) {
+			errMsg, mErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task not found", nil)
+			return nil, nil, errMsg, mErr
+		}
+		h.logger.Error("step_complete: failed to load task",
+			zap.String("task_id", taskID), zap.Error(err))
+		errMsg, mErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to load task", nil)
+		return nil, nil, errMsg, mErr
+	}
+	if task.WorkflowStepID == "" {
+		errMsg, mErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task has no current workflow step", nil)
+		return nil, nil, errMsg, mErr
+	}
+	return session, task, nil, nil
+}
+
+// publishStepCompletionEvent emits the bus event the orchestrator's
+// out-of-band subscriber listens for. If publish fails the bag is already
+// persisted but the subscriber will not fire — surface the error to the
+// agent so it can retry. The handler-level idempotency guard guarantees the
+// retry either succeeds end-to-end or short-circuits with `already_signaled`
+// once the publish lands. Returns (nil, nil) on success or when no bus is wired.
+func (h *Handlers) publishStepCompletionEvent(
+	ctx context.Context, msg *ws.Message, taskID, sessionID, stepID string,
+	signal models.PendingStepCompletionSignal,
+) (*ws.Message, error) {
+	if h.eventBus == nil {
+		return nil, nil
+	}
+	if err := h.eventBus.Publish(ctx, events.WorkflowStepCompletionSignaled, bus.NewEvent(
+		events.WorkflowStepCompletionSignaled, "mcp-handlers",
+		map[string]interface{}{
+			"task_id":     taskID,
+			"session_id":  sessionID,
+			"step_id":     stepID,
+			"source":      signal.Source,
+			"summary":     signal.Summary,
+			"signaled_at": signal.SignaledAt,
+		},
+	)); err != nil {
+		h.logger.Error("failed to publish step-completion signal",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+			"failed to notify orchestrator (signal persisted; retry)", nil)
+	}
+	return nil, nil
+}
+
 // handleMessageTask sends a prompt to an existing task on behalf of an agent
 // in another task. The MCP server (agentctl) injects the sender's task_id and
 // session_id into the payload; this handler validates the sender, looks up its
@@ -786,12 +1140,28 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "sender task not found", nil)
 	}
 
+	// Verify the target task exists before looking up its session, so a bad
+	// task_id (e.g. a truncated UUID prefix) reports "task not found" instead
+	// of the misleading "no primary session" error from the session lookup.
+	// This is purely an existence check — GetTask returns a wrapped
+	// ErrTaskNotFound on no-rows, never (nil, nil).
+	if _, err := h.taskSvc.GetTask(ctx, req.TaskID); err != nil {
+		if errors.Is(err, taskrepo.ErrTaskNotFound) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound,
+				"target task not found: "+req.TaskID+" (pass the full task UUID, not a truncated prefix)", nil)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+			"failed to look up target task: "+err.Error(), nil)
+	}
+
 	session, err := h.taskSvc.GetPrimarySession(ctx, req.TaskID)
 	if err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task not found or has no session: "+err.Error(), nil)
-	}
-	if session == nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task has no active session — use create_task_kandev to start one", nil)
+		if errors.Is(err, taskrepo.ErrNoPrimarySession) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound,
+				"target task exists but has no active session", nil)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+			"failed to get session for task: "+err.Error(), nil)
 	}
 
 	wrappedPrompt, senderMeta := wrapAgentMessage(req.Prompt, senderTask, req.SenderSessionID)
@@ -984,6 +1354,18 @@ func (e *queueFullDispatchError) toPayload() map[string]interface{} {
 // codes in MCP tool responses (extracted to satisfy goconst's repeated-string rule).
 const errorField = "error"
 
+// MCP payload / response keys reused across multiple handlers. Extracted so
+// goconst doesn't flag the literals as repeated, and so a future rename of
+// a wire-protocol key updates every handler in one place.
+const (
+	keyTaskID           = "task_id"
+	keyRepositoryID     = "repository_id"
+	keyTaskRepositoryID = "task_repository_id"
+	keyBaseBranch       = "base_branch"
+	keyCheckoutBranch   = "checkout_branch"
+	keyPosition         = "position"
+)
+
 // dispatchTaskMessage routes a message to the right delivery path based on session state.
 // Returns the action taken: "queued", "sent", or "started".
 //
@@ -1148,13 +1530,14 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 		Questions: req.Questions,
 		Context:   req.Context,
 	}
-	pendingID := h.clarificationSvc.CreateRequest(clarificationReq)
+	pendingID, isNew := h.clarificationSvc.CreateRequest(clarificationReq)
 
 	// Create one chat message per question (triggers WS events to frontend).
 	// If the create fails, the in-store pending entry must be cancelled too —
 	// otherwise the agent's WaitForResponse would block for the full 2-hour
 	// timeout while the user never sees clarification cards.
-	if h.messageCreator != nil {
+	// When dedup fires (isNew=false) the messages already exist, so skip creation.
+	if isNew && h.messageCreator != nil {
 		if _, err := h.messageCreator.CreateClarificationRequestMessages(
 			ctx, taskID, req.SessionID, pendingID, req.Questions, req.Context,
 		); err != nil {
@@ -1208,6 +1591,7 @@ func (h *Handlers) setSessionRunning(ctx context.Context, taskID, sessionID stri
 		h.logger.Warn("failed to update session state to RUNNING",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
+		return
 	}
 	if taskID != "" {
 		if err := h.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {
@@ -1224,6 +1608,13 @@ func (h *Handlers) setSessionRunning(ctx context.Context, taskID, sessionID stri
 			"session_id": sessionID,
 			"new_state":  string(models.TaskSessionStateRunning),
 		}
+		if updatedAt, ok := h.sessionUpdatedAtForStateEvent(ctx, sessionID); ok {
+			eventData["updated_at"] = updatedAt
+		} else {
+			h.logger.Warn("skipping session state_changed publish; could not load authoritative updated_at",
+				zap.String("session_id", sessionID))
+			return
+		}
 		_ = h.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
 			events.TaskSessionStateChanged,
 			"mcp-handlers",
@@ -1239,6 +1630,7 @@ func (h *Handlers) setSessionWaitingForInput(ctx context.Context, taskID, sessio
 		h.logger.Warn("failed to update session state to WAITING_FOR_INPUT",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
+		return
 	}
 
 	// Update task state to REVIEW
@@ -1257,12 +1649,26 @@ func (h *Handlers) setSessionWaitingForInput(ctx context.Context, taskID, sessio
 			"session_id": sessionID,
 			"new_state":  string(models.TaskSessionStateWaitingForInput),
 		}
+		if updatedAt, ok := h.sessionUpdatedAtForStateEvent(ctx, sessionID); ok {
+			eventData["updated_at"] = updatedAt
+		} else {
+			h.logger.Warn("skipping session state_changed publish; could not load authoritative updated_at",
+				zap.String("session_id", sessionID))
+			return
+		}
 		_ = h.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
 			events.TaskSessionStateChanged,
 			"mcp-handlers",
 			eventData,
 		))
 	}
+}
+
+func (h *Handlers) sessionUpdatedAtForStateEvent(ctx context.Context, sessionID string) (string, bool) {
+	if session, err := h.sessionRepo.GetTaskSession(ctx, sessionID); err == nil && session != nil && !session.UpdatedAt.IsZero() {
+		return session.UpdatedAt.UTC().Format(time.RFC3339Nano), true
+	}
+	return "", false
 }
 
 // handleCreateTaskPlan creates a new task plan.
@@ -1391,7 +1797,7 @@ func (h *Handlers) handleDeleteTaskPlan(ctx context.Context, msg *ws.Message) (*
 // disconnects while waiting for a clarification response. It cancels the pending
 // clarification so the user's eventual answer goes through the event fallback path
 // (new turn) instead of the primary path (which would be dropped).
-func (h *Handlers) handleClarificationTimeout(_ context.Context, msg *ws.Message) (*ws.Message, error) {
+func (h *Handlers) handleClarificationTimeout(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
 		SessionID string `json:"session_id"`
 	}
@@ -1402,10 +1808,13 @@ func (h *Handlers) handleClarificationTimeout(_ context.Context, msg *ws.Message
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
 
-	cancelled := h.clarificationSvc.CancelSession(req.SessionID)
-	h.logger.Info("cancelled pending clarifications on agent MCP timeout",
+	if h.sessionCanceller == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "sessionCanceller is required", nil)
+	}
+	cancelled := h.sessionCanceller.DetachSessionAndNotify(ctx, req.SessionID)
+	h.logger.Info("detached pending clarifications on agent MCP timeout",
 		zap.String("session_id", req.SessionID),
-		zap.Int("count", len(cancelled)))
+		zap.Int("count", cancelled))
 
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"ok": true, "cancelled": len(cancelled)})
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"ok": true, "cancelled": cancelled})
 }

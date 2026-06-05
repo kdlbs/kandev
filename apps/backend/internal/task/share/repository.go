@@ -56,9 +56,6 @@ func NewRepository(writer, reader *sqlx.DB, log *logger.Logger) (*Repository, er
 	return r, nil
 }
 
-// Close is a no-op; the database connections are not owned by this repo.
-func (r *Repository) Close() error { return nil }
-
 func (r *Repository) initSchema() error {
 	mig := db.NewMigrateLogger(r.writer, r.log)
 	mig.Apply("table.task_shares", `CREATE TABLE IF NOT EXISTS task_shares (

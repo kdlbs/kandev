@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { DockviewDefaultTab, type IDockviewPanelHeaderProps } from "dockview-react";
 import { IconStar } from "@tabler/icons-react";
 import { AgentLogo } from "@/components/agent-logo";
@@ -218,6 +218,70 @@ function SessionContextMenuItems({
   );
 }
 
+function SessionTabTriggerContent({
+  props,
+  sessionId,
+  isPrimary,
+  showMultiSessionBadges,
+  sessionNumber,
+  agentName,
+  sessionState,
+  isActive,
+  showDeleteOnClose,
+  onCloseTab,
+}: {
+  props: IDockviewPanelHeaderProps;
+  sessionId: string | undefined;
+  isPrimary: boolean;
+  showMultiSessionBadges: boolean;
+  sessionNumber: number | null;
+  agentName: string | null;
+  sessionState: TaskSessionState | null;
+  isActive: boolean;
+  showDeleteOnClose: boolean;
+  onCloseTab: () => void;
+}) {
+  const tabContentRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showDeleteOnClose || !sessionId) return;
+    const closeAction = tabContentRef.current?.querySelector(".dv-default-tab-action");
+    if (!closeAction) return;
+    closeAction.setAttribute("data-testid", `session-tab-close-${sessionId}`);
+    return () => closeAction.removeAttribute("data-testid");
+  }, [showDeleteOnClose, sessionId, isActive]); // isActive: re-run when tab activates so Dockview renders .dv-default-tab-action
+
+  return (
+    <div ref={tabContentRef} className="flex items-center">
+      {isPrimary && showMultiSessionBadges && (
+        <IconStar className="h-3 w-3 fill-foreground/50 stroke-0 shrink-0 ml-2" />
+      )}
+      {sessionNumber != null && showMultiSessionBadges && (
+        <span className="ml-1.5 text-[11px] font-medium leading-none text-muted-foreground bg-foreground/10 rounded px-1.5 py-0.5">
+          {sessionNumber}
+        </span>
+      )}
+      {agentName &&
+        (isSessionActive(sessionState) ? (
+          <GridSpinner
+            className={`ml-1.5 shrink-0 text-[14px] text-muted-foreground${isActive ? "" : " opacity-50"}`}
+          />
+        ) : (
+          <AgentLogo
+            agentName={agentName}
+            size={14}
+            className={`ml-1.5 shrink-0${isActive ? "" : " opacity-50"}`}
+          />
+        ))}
+      <DockviewDefaultTab
+        {...props}
+        hideClose={!showDeleteOnClose}
+        closeActionOverride={showDeleteOnClose ? onCloseTab : undefined}
+      />
+    </div>
+  );
+}
+
 /**
  * Custom dockview tab for session panels.
  * Shows agent logo, index badge, and star for primary; right-click for lifecycle actions.
@@ -244,6 +308,12 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
   }, [agentLabel, api]);
 
   const showMultiSessionBadges = sessionCount > 1;
+  // Multi-session tab close means delete, not hide-only. Running/starting sessions are
+  // not deletable, so we omit the X rather than reviving hide-only close behavior.
+  const showDeleteOnClose = showMultiSessionBadges && !!sessionState && isDeletable(sessionState);
+  const handleCloseTab = useCallback(() => {
+    setConfirmDelete(true);
+  }, []);
 
   return (
     <>
@@ -253,29 +323,18 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
           data-testid={sessionId ? `session-tab-${sessionId}` : undefined}
           onDoubleClick={onDoubleClick}
         >
-          <div className="flex items-center">
-            {isPrimary && showMultiSessionBadges && (
-              <IconStar className="h-3 w-3 fill-foreground/50 stroke-0 shrink-0 ml-2" />
-            )}
-            {sessionNumber != null && showMultiSessionBadges && (
-              <span className="ml-1.5 text-[11px] font-medium leading-none text-muted-foreground bg-foreground/10 rounded px-1.5 py-0.5">
-                {sessionNumber}
-              </span>
-            )}
-            {agentName &&
-              (isSessionActive(sessionState) ? (
-                <GridSpinner
-                  className={`ml-1.5 shrink-0 text-[14px] text-muted-foreground${isActive ? "" : " opacity-50"}`}
-                />
-              ) : (
-                <AgentLogo
-                  agentName={agentName}
-                  size={14}
-                  className={`ml-1.5 shrink-0${isActive ? "" : " opacity-50"}`}
-                />
-              ))}
-            <DockviewDefaultTab {...props} hideClose={sessionCount <= 1} />
-          </div>
+          <SessionTabTriggerContent
+            props={props}
+            sessionId={sessionId}
+            isPrimary={isPrimary}
+            showMultiSessionBadges={showMultiSessionBadges}
+            sessionNumber={sessionNumber}
+            agentName={agentName}
+            sessionState={sessionState}
+            isActive={isActive}
+            showDeleteOnClose={showDeleteOnClose}
+            onCloseTab={handleCloseTab}
+          />
         </ContextMenuTrigger>
         <SessionContextMenuItems
           sessionState={sessionState}

@@ -109,6 +109,52 @@ describe("FileRow truncation (regression: path overlaps diff stats in narrow pan
   });
 });
 
+describe("FileRow hover swap (stats <-> actions occupy same cell)", () => {
+  // Goal: hovering must not shift the file name. The stats group and the
+  // hover-actions group live in the same CSS grid cell — stats fade out and
+  // actions fade in, so the right cluster's width is stable.
+  it("stats container fades out on hover and never intercepts pointer events", () => {
+    const { container } = renderRow("file.go");
+    const li = container.querySelector("li") as HTMLElement;
+    const gridWrapper = li.children[1] as HTMLElement;
+    const statsLayer = gridWrapper.children[0] as HTMLElement;
+    expect(statsLayer.className).toContain("group-hover:opacity-0");
+    expect(statsLayer.className).toContain("transition-opacity");
+    // Defensive: stats has no interactive children today, but blocking pointer
+    // events on this always-non-interactive layer prevents a future regression
+    // if someone adds a clickable element here.
+    expect(statsLayer.className).toContain("pointer-events-none");
+  });
+
+  it("actions container fades in on hover and only accepts pointer/keyboard events while hovered", () => {
+    const { container } = renderRow("file.go");
+    const li = container.querySelector("li") as HTMLElement;
+    const gridWrapper = li.children[1] as HTMLElement;
+    const actionsLayer = gridWrapper.children[1] as HTMLElement;
+    expect(actionsLayer.className).toContain("opacity-0");
+    expect(actionsLayer.className).toContain("group-hover:opacity-100");
+    expect(actionsLayer.className).toContain("transition-opacity");
+    // Critical: the actions div is the top child in the same grid cell, so
+    // without pointer-events gating it would eat clicks aimed at the
+    // visually-shown stats. (Keyboard Tab focus is a separate concern — a
+    // pre-existing gap not closed by `pointer-events: none`, which only
+    // blocks mouse/touch.)
+    expect(actionsLayer.className).toContain("pointer-events-none");
+    expect(actionsLayer.className).toContain("group-hover:pointer-events-auto");
+  });
+
+  it("wrapper stacks both layers into one grid cell so width is max(stats, actions)", () => {
+    const { container } = renderRow("file.go");
+    const li = container.querySelector("li") as HTMLElement;
+    const gridWrapper = li.children[1] as HTMLElement;
+    expect(gridWrapper.className).toContain("grid");
+    // Arbitrary child selector pins every direct child to row 1 / col 1 so
+    // they overlap instead of laying out side-by-side.
+    expect(gridWrapper.className).toContain("col-start-1");
+    expect(gridWrapper.className).toContain("row-start-1");
+  });
+});
+
 describe("FileRow active-tab highlight", () => {
   it("renders data-active='true' and bg-accent/60 when isActive", () => {
     const { container } = render(

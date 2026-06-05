@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,6 +15,12 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"go.uber.org/zap"
 )
+
+// safeBranchRefPattern mirrors the one in workspace_git_status.go so the
+// HTTP handlers can perform an inline allowlist check at the request
+// boundary without the extra hop through a helper that would obscure the
+// barrier from CodeQL's `go/command-injection` taint tracker.
+var safeBranchRefPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._/-]*$`)
 
 // queryParamTrue is the string value used to indicate a true boolean in query parameters.
 const queryParamTrue = "true"
@@ -703,15 +711,41 @@ func (s *Server) runGitLogForRepo(
 	}
 
 	baseCommit := req.Since
+	// TargetBranch reaches this handler over HTTP and is interpolated into
+	// `git` arg lists below. Inline the securityutil.IsValidBranchName
+	// allowlist check at the sink call site so CodeQL's taint tracker
+	// sees the regex sanitiser barrier in the same function as the
+	// subprocess invocation. `origin/<name>` refs are split so the
+	// underlying validator (which disallows "/" as the first character)
+	// can validate the branch component.
+	check, hasOriginPrefix := strings.CutPrefix(req.TargetBranch, "origin/")
+	if !hasOriginPrefix {
+		check = req.TargetBranch
+	}
+	if !safeBranchRefPattern.MatchString(check) || strings.Contains(check, "..") || strings.HasSuffix(check, ".lock") {
+		req.TargetBranch = ""
+	}
 	if req.TargetBranch != "" {
 		mergeBase, err := s.computeMergeBase(c.Request.Context(), gitOp, req.TargetBranch)
-		if err != nil {
-			s.logger.Warn("failed to compute merge-base, falling back to since",
-				zap.String("target_branch", req.TargetBranch),
-				zap.String("repo", repo),
-				zap.Error(err))
-		} else if mergeBase != "" {
+		if err == nil && mergeBase != "" {
 			baseCommit = mergeBase
+		} else {
+			// merge-base failed (typically unrelated histories) — fall back
+			// to the branch tip so GetLog gets a real anchor and runs
+			// `git log <tip>..HEAD` instead of dropping into its open-ended
+			// "last N commits" path. Without this, picking a base that
+			// shares no history with HEAD silently turns the commits panel
+			// into the workspace's full HEAD history, mismatching the
+			// numstat-driven stats which fall through cleanly to per-file
+			// sums in the same scenario.
+			if tip, tipErr := gitOp.GetRevParse(c.Request.Context(), req.TargetBranch); tipErr == nil && tip != "" {
+				baseCommit = tip
+			} else if err != nil {
+				s.logger.Warn("failed to compute merge-base and branch tip, falling back to since",
+					zap.String("target_branch", req.TargetBranch),
+					zap.String("repo", repo),
+					zap.Error(err))
+			}
 		}
 	}
 
@@ -858,6 +892,18 @@ func (s *Server) handleGitCumulativeDiff(c *gin.Context) {
 			Error:   "invalid request: " + err.Error(),
 		})
 		return
+	}
+
+	// Same untrusted-ref guard as handleGitLog: inline the
+	// securityutil.IsValidBranchName check at the sink so static analysis
+	// sees the regex barrier in the same function as the downstream
+	// subprocess call paths.
+	check, hasOriginPrefix := strings.CutPrefix(req.TargetBranch, "origin/")
+	if !hasOriginPrefix {
+		check = req.TargetBranch
+	}
+	if !safeBranchRefPattern.MatchString(check) || strings.Contains(check, "..") || strings.HasSuffix(check, ".lock") {
+		req.TargetBranch = ""
 	}
 
 	if req.Repo == "" {

@@ -308,6 +308,9 @@ type RepoLaunchSpec struct {
 	RepoSetupScript      string // Repository-level setup script (optional)
 	RepoCleanupScript    string // Repository-level cleanup script (optional)
 	CopyFiles            string // Comma-separated paths/globs to copy from the source repo (gitignored .env / config files)
+	// BranchSlug, when set, nests the worktree under {RepoName}/{BranchSlug}/
+	// so multi-branch tasks (same repo, multiple branches) don't collide.
+	BranchSlug string
 }
 
 // RouteOverride carries a fully resolved provider profile for one
@@ -384,6 +387,7 @@ type LaunchRequest struct {
 	// Task directory mode: place worktree at ~/.kandev/tasks/{TaskDirName}/{RepoName}/
 	TaskDirName string // Semantic task directory name (e.g. "fix-bug_ab12")
 	RepoName    string // Repository name used as subdirectory inside the task directory
+	BranchSlug  string // Optional branch subdir for multi-branch tasks (legacy single-repo path)
 
 	// Repositories carries one entry per repository when the launch is multi-repo.
 	// When non-empty it is the source of truth; the legacy single-repo top-level
@@ -415,6 +419,7 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 		WorktreeBranchPrefix: r.WorktreeBranchPrefix,
 		PullBeforeWorktree:   r.PullBeforeWorktree,
 		CopyFiles:            r.CopyFiles,
+		BranchSlug:           r.BranchSlug,
 	}}
 }
 
@@ -490,6 +495,11 @@ type WorkspaceInfo struct {
 	AgentProfileID    string // Optional - agent profile for the task
 	AgentID           string // Agent type ID (e.g., "auggie", "codex") - required for runtime creation
 	ACPSessionID      string // Agent's session ID for conversation resumption (from session metadata)
+	// SessionMode is the persisted session permission mode (e.g. "acceptEdits")
+	// from session metadata, declared via the set_session_mode workflow action or
+	// a user toggle. Applied as a mode override at ACP session init so a fresh
+	// launch starts in the declared mode before the first prompt. See issue #1183.
+	SessionMode string
 
 	// Executor-aware fields for correct runtime selection and remote reconnection
 	ExecutorType     string                 // Executor type (e.g., "local_pc", "sprites")

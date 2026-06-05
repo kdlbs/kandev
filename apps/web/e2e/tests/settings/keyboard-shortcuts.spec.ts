@@ -19,6 +19,8 @@ test.describe("Keyboard Shortcuts Settings", () => {
     await expect(testPage.getByTestId("shortcut-recorder-FOCUS_INPUT")).toBeVisible();
     await expect(testPage.getByTestId("shortcut-recorder-TOGGLE_PLAN_MODE")).toBeVisible();
     await expect(testPage.getByTestId("shortcut-recorder-TASK_SWITCHER")).toBeVisible();
+    await expect(testPage.getByTestId("shortcut-recorder-TASK_SWITCHER_REVERSE")).toBeVisible();
+    await expect(testPage.getByTestId("shortcut-recorder-REVERSE_SEARCH")).toBeVisible();
   });
 
   test("can record a new shortcut and persist it", async ({ testPage, apiClient, seedData }) => {

@@ -1,7 +1,7 @@
 import type { BackendMessageMap, BackendMessageType } from "@/lib/types/backend";
 import type { ConnectionStatus } from "@/lib/types/connection";
 import { generateUUID } from "@/lib/utils";
-import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
 const debugDispatch = createDebugLogger("ws:dispatch");
 
@@ -128,7 +128,7 @@ export class WebSocketClient {
 
   send(payload: unknown) {
     const data = JSON.stringify(payload);
-    if (IS_DEBUG) {
+    if (isDebug()) {
       const p = payload as { action?: string; id?: string; type?: string } | null;
       const action = p?.action ?? "?";
       if (!DISPATCH_LOG_DENYLIST.has(action)) {
@@ -208,6 +208,34 @@ export class WebSocketClient {
       });
     }
     return () => this.unfocusSession(sessionId);
+  }
+
+  /**
+   * Re-send a `session.focus` frame for an already-focused session WITHOUT
+   * touching the focus ref-count. The backend's focus handler pushes a fresh
+   * live git-status snapshot as a side effect (see `handleSessionFocus` →
+   * `sendSessionData` → `appendLiveGitStatusMessage`, which forces a
+   * `GetGitStatusMultiFresh` query that bypasses the workspace poll cache).
+   *
+   * This is the deterministic recovery for the focus-gated polling race: the
+   * agent edits a file, but if the workspace is still in slow poll mode (the
+   * focus→fast push lost a race with agentctl startup) the next
+   * `session.git.event` may be up to 30s away. Components that become visible
+   * and need fresh diff data (the diff panel becoming the active tab) call
+   * this to pull the latest git status immediately.
+   *
+   * No-op when the session isn't currently focused (the regular focus frame,
+   * sent on 0→1, already pushed fresh data).
+   */
+  refreshSessionData(sessionId: string) {
+    if (this.status !== "connected") return;
+    if (!this.sessionFocusCounts.get(sessionId)) return;
+    this.send({
+      id: generateUUID(),
+      type: "request",
+      action: "session.focus",
+      payload: { session_id: sessionId },
+    });
   }
 
   unfocusSession(sessionId: string) {
@@ -352,7 +380,7 @@ export class WebSocketClient {
   }
 
   private debugNotification(action: BackendMessageType, payload: unknown, handlerCount: number) {
-    if (!IS_DEBUG || DISPATCH_LOG_DENYLIST.has(action)) return;
+    if (!isDebug() || DISPATCH_LOG_DENYLIST.has(action)) return;
     const payloadSessionId = (payload as { session_id?: string } | undefined)?.session_id;
     debugDispatch("notification", {
       action,
@@ -365,12 +393,12 @@ export class WebSocketClient {
     const msgWithId = message as { id?: string; type: string };
 
     if (msgWithId.type === "response" && msgWithId.id) {
-      if (IS_DEBUG) debugDispatch("response", { id: msgWithId.id });
+      if (isDebug()) debugDispatch("response", { id: msgWithId.id });
       this.resolvePendingRequest(msgWithId.id, message.payload);
       return;
     }
     if (msgWithId.type === "error" && msgWithId.id) {
-      if (IS_DEBUG) debugDispatch("error-response", { id: msgWithId.id });
+      if (isDebug()) debugDispatch("error-response", { id: msgWithId.id });
       this.rejectPendingRequest(msgWithId.id, message.payload);
       return;
     }

@@ -36,8 +36,15 @@ jobs:
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
+      # Push the built images to GHCR on any `push` to main (the default
+      # publish path) or on manual `workflow_dispatch` (used to seed new tag
+      # names from a feature branch before the consumer workflows on the same
+      # branch can pull them — otherwise we hit a chicken-and-egg loop where
+      # the PR that introduces a new tag can never go green).
       - name: Log in to GHCR
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: |
+          github.event_name == 'workflow_dispatch'
+          || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -60,28 +67,52 @@ jobs:
           echo "image_tag=${hash}" >> "$GITHUB_OUTPUT"
           echo "Computed content hash: sha-${hash}"
 
-      - name: Build and push
+      # Stage 1: runtime (Playwright + Node + pnpm + Docker CLI — no Go).
+      # Consumed by the `e2e` shards and `e2e-report`, where the smaller pull
+      # is the speedup that pays for the split.
+      - name: Build and push runtime
         uses: docker/build-push-action@v6
         with:
           context: .
           file: .github/docker/ci-base/Dockerfile
+          target: runtime
           platforms: linux/amd64
-          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          push: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+          cache-from: type=gha,scope=runtime
+          cache-to: type=gha,scope=runtime,mode=max
           tags: |
-            ${{ env.IMAGE_NAME }}:sha-${{ steps.tag.outputs.image_tag }}
-            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:runtime-sha-${{ steps.tag.outputs.image_tag }}
+            ${{ env.IMAGE_NAME }}:runtime-latest
+
+      # Stage 2: build (runtime + Go + golangci-lint + go-licenses).
+      # Consumed by the `build` job, `backend-tests`, and `frontend-tests`.
+      # `cache-from` includes the runtime scope so the shared lower layers
+      # only build once across both pushes.
+      - name: Build and push build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: .github/docker/ci-base/Dockerfile
+          target: build
+          platforms: linux/amd64
+          push: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+          cache-from: |
+            type=gha,scope=build
+            type=gha,scope=runtime
+          cache-to: type=gha,scope=build,mode=max
+          tags: |
+            ${{ env.IMAGE_NAME }}:build-sha-${{ steps.tag.outputs.image_tag }}
+            ${{ env.IMAGE_NAME }}:build-latest
 
       - name: Summarize
         run: |
           {
             echo "### Kandev CI base image"
             echo ""
-            echo "- image: \`${IMAGE_NAME}:sha-${IMAGE_TAG}\`"
-            echo "- latest: \`${IMAGE_NAME}:latest\`"
-            echo "- pushed: \`${PUSHED}\`"
+            echo "- runtime: \`${IMAGE_NAME}:runtime-sha-${IMAGE_TAG}\` / \`runtime-latest\`"
+            echo "- build:   \`${IMAGE_NAME}:build-sha-${IMAGE_TAG}\` / \`build-latest\`"
+            echo "- pushed:  \`${PUSHED}\`"
           } >> "$GITHUB_STEP_SUMMARY"
         env:
           IMAGE_TAG: ${{ steps.tag.outputs.image_tag }}
-          PUSHED: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          PUSHED: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}

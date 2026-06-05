@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { fetchSystemHealth } from "@/lib/api/domains/health-api";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+
+const HEALTH_POLL_INTERVAL_MS = 5 * 60 * 1000;
 
 export function useSystemHealth() {
   const issues = useAppStore((state) => state.systemHealth.issues);
@@ -12,9 +14,10 @@ export function useSystemHealth() {
   const loading = useAppStore((state) => state.systemHealth.loading);
   const setSystemHealth = useAppStore((state) => state.setSystemHealth);
   const setSystemHealthLoading = useAppStore((state) => state.setSystemHealthLoading);
+  const storeApi = useAppStoreApi();
 
-  useEffect(() => {
-    if (loaded || loading) return;
+  const fetchHealth = useCallback(() => {
+    if (storeApi.getState().systemHealth.loading) return;
     setSystemHealthLoading(true);
     fetchSystemHealth({ cache: "no-store" })
       .then((response) => {
@@ -26,7 +29,28 @@ export function useSystemHealth() {
       .finally(() => {
         setSystemHealthLoading(false);
       });
-  }, [loaded, loading, setSystemHealth, setSystemHealthLoading]);
+  }, [storeApi, setSystemHealth, setSystemHealthLoading]);
+
+  useEffect(() => {
+    if (!loaded && !loading) {
+      fetchHealth();
+    }
+  }, [loaded, loading, fetchHealth]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        fetchHealth();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    const id = setInterval(fetchHealth, HEALTH_POLL_INTERVAL_MS);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      clearInterval(id);
+    };
+  }, [loaded, fetchHealth]);
 
   return { issues, checks, healthy, loaded, loading };
 }

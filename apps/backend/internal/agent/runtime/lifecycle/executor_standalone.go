@@ -96,26 +96,33 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 	}
 	disableAskQuestion := agents.IsPassthroughOnly(req.AgentConfig)
 	assumeMcpSse := false
+	assumeMcpHttp := false
+	requiresProcessKill := false
 	if req.AgentConfig != nil {
 		if rt := req.AgentConfig.Runtime(); rt != nil {
 			assumeMcpSse = rt.AssumeMcpSse
+			assumeMcpHttp = rt.AssumeMcpHttp
+			requiresProcessKill = rt.RequiresProcessKill
 		}
 	}
 
 	createReq := &agentctl.CreateInstanceRequest{
-		ID:                 req.InstanceID,
-		WorkspacePath:      req.WorkspacePath,
-		AgentCommand:       "", // Agent command set via Configure endpoint
-		Protocol:           req.Protocol,
-		AgentType:          agentType,
-		Env:                env,
-		AutoStart:          false,
-		McpServers:         req.McpServers,
-		SessionID:          req.SessionID,
-		TaskID:             req.TaskID,
-		DisableAskQuestion: disableAskQuestion,
-		AssumeMcpSse:       assumeMcpSse,
-		McpMode:            req.McpMode,
+		ID:                  req.InstanceID,
+		WorkspacePath:       req.WorkspacePath,
+		AgentCommand:        "", // Agent command set via Configure endpoint
+		Protocol:            req.Protocol,
+		AgentType:           agentType,
+		Env:                 env,
+		AutoStart:           false,
+		McpServers:          req.McpServers,
+		SessionID:           req.SessionID,
+		TaskID:              req.TaskID,
+		DisableAskQuestion:  disableAskQuestion,
+		AssumeMcpSse:        assumeMcpSse,
+		AssumeMcpHttp:       assumeMcpHttp,
+		McpMode:             req.McpMode,
+		RequiresProcessKill: requiresProcessKill,
+		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 	}
 
 	r.logger.Info("CreateInstance: sending request to agentctl",

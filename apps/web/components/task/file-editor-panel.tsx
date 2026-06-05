@@ -13,6 +13,8 @@ import { getFileCategory } from "@/lib/utils/file-types";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { requestFileContent } from "@/lib/ws/workspace-files";
 import { calculateHash } from "@/lib/utils/file-diff";
+import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
+import { syncOpenFileFromWorkspace } from "@/hooks/file-editors-sync";
 
 type FileCategory = "image" | "binary" | "text";
 
@@ -83,12 +85,71 @@ function useFileLoader(
   }, [hasFile, activeSessionId, path, setFileState]);
 }
 
+/**
+ * Force a workspace sync whenever the panel becomes the active dockview tab.
+ *
+ * Background: `useOpenFileWorkspaceSync` (mounted at the parent useFileEditors
+ * level) refetches file content when gitStatus signatures change. That signal
+ * arrives via the backend's workspace_tracker poll loop, which can be in
+ * `PollModeSlow` (30s interval) until the gateway's focus signal upgrades it
+ * to `PollModeFast` — there are two documented races in
+ * `manager_subscription.go:FlushSessionMode` where the focus signal can miss
+ * the mode upgrade for a brief window. When the missed window lines up with a
+ * file edit, the editor shows stale content until the next slow-poll cycle.
+ *
+ * Tab activation is a deterministic, user-driven signal that the editor's
+ * content is about to be looked at. Forcing a sync on activation closes the
+ * WS-event-miss gap without depending on git polling cadence.
+ *
+ * Safe by construction: syncOpenFileFromWorkspace is dirty-buffer aware —
+ * clean buffers get their content replaced, dirty buffers surface a Reload
+ * affordance via `hasRemoteUpdate` rather than clobbering edits.
+ */
+function useResyncOnTabActivate(
+  panelId: string,
+  hasFile: boolean,
+  activeSessionId: string | null,
+  path: string,
+  updateFileState: (path: string, updates: Partial<FileEditorState>) => void,
+) {
+  useEffect(() => {
+    if (!hasFile || !activeSessionId) return;
+    // panelPortalManager.acquire() runs in usePortalSlot's mount effect (the
+    // dockview-side slot), which fires before child portals' effects, so the
+    // entry is virtually always present here. There is one acceptable miss:
+    // a fromJSON layout restore can swap `entry.api` for the same panelId
+    // without remounting this component, which would silently leave the
+    // subscription pointing at a disposed api. fromJSON is rare and
+    // `useOpenFileWorkspaceSync` still covers the common polling gap, so we
+    // accept that edge case rather than wiring a manager-level subscription.
+    const entry = panelPortalManager.get(panelId);
+    if (!entry?.api) return;
+    const syncNow = () => {
+      const client = getWebSocketClient();
+      if (!client) return;
+      void syncOpenFileFromWorkspace({ client, sessionId: activeSessionId, path, updateFileState });
+    };
+    // If the panel is already the active tab when this effect first runs,
+    // onDidActiveChange won't fire (no transition), but the user is already
+    // looking at the editor — sync immediately so the initial open path
+    // benefits from the same WS-event-miss recovery as later activations.
+    if (entry.api.isActive) syncNow();
+    const disposable = entry.api.onDidActiveChange((event) => {
+      if (event.isActive) syncNow();
+    });
+    return () => disposable.dispose();
+  }, [panelId, hasFile, activeSessionId, path, updateFileState]);
+}
+
 type FileEditorPanelProps = {
   panelId: string;
   params: Record<string, unknown>;
 };
 
-export const FileEditorPanel = memo(function FileEditorPanel({ params }: FileEditorPanelProps) {
+export const FileEditorPanel = memo(function FileEditorPanel({
+  panelId,
+  params,
+}: FileEditorPanelProps) {
   const path = params.path as string;
 
   const hasFile = useDockviewStore((s) => s.openFiles.has(path));
@@ -110,6 +171,7 @@ export const FileEditorPanel = memo(function FileEditorPanel({ params }: FileEdi
   const { savingFiles, handleFileChange, saveFile, deleteFile, applyRemoteUpdate } =
     useFileEditors();
   useFileLoader(hasFile, activeSessionId, path, setFileState);
+  useResyncOnTabActivate(panelId, hasFile, activeSessionId, path, updateFileState);
 
   const onChange = useCallback(
     (newContent: string) => handleFileChange(path, newContent),

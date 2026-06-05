@@ -66,6 +66,13 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	assert.NotContains(t, tools, "get_task_document_kandev")
 	assert.NotContains(t, tools, "write_task_document_kandev")
 
+	// Task mode exposes delete + archive so agents can clean up the tasks
+	// they fan out. Restore/unarchive is intentionally NOT exposed via MCP —
+	// it stays a user action in the UI.
+	assert.Contains(t, tools, "delete_task_kandev")
+	assert.Contains(t, tools, "archive_task_kandev")
+	assert.NotContains(t, tools, "restore_task_kandev")
+
 	// Task mode should NOT have config/mutation tools
 	assert.NotContains(t, tools, "create_workflow_kandev")
 	assert.NotContains(t, tools, "update_workflow_kandev")
@@ -79,8 +86,6 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	assert.NotContains(t, tools, "update_agent_profile_kandev")
 	assert.NotContains(t, tools, "get_mcp_config_kandev")
 	assert.NotContains(t, tools, "update_mcp_config_kandev")
-	assert.NotContains(t, tools, "delete_task_kandev")
-	assert.NotContains(t, tools, "archive_task_kandev")
 	assert.NotContains(t, tools, "list_executors_kandev")
 	assert.NotContains(t, tools, "create_executor_profile_kandev")
 	assert.NotContains(t, tools, "update_executor_profile_kandev")
@@ -107,6 +112,7 @@ func TestServerModeConfig_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, tools, "create_workflow_kandev")
 	assert.Contains(t, tools, "update_workflow_kandev")
 	assert.Contains(t, tools, "delete_workflow_kandev")
+	assert.Contains(t, tools, "import_workflow_kandev")
 	assert.Contains(t, tools, "list_workflow_steps_kandev")
 	assert.Contains(t, tools, "create_workflow_step_kandev")
 	assert.Contains(t, tools, "update_workflow_step_kandev")
@@ -204,9 +210,12 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
 	tools := getRegisteredToolNames(s)
-	// 11 kanban + 1 interaction + 4 plan + 1 related-tasks = 17.
-	// Task-document tools (list/get/write) are office-only.
-	assert.Equal(t, 17, len(tools))
+	// 13 kanban (incl. delete + archive task) + 1 add_branch_to_task +
+	// 1 update_repository_base_branch + 1 step_complete (ADR 0015) +
+	// 1 interaction + 4 plan + 1 related-tasks = 22. Task-document tools
+	// (list/get/write) are office-only.
+	assert.Contains(t, tools, "step_complete_kandev", "ADR 0015 explicit-completion signal must be registered in task mode")
+	assert.Equal(t, 22, len(tools))
 }
 
 func TestServerModeConfig_ToolCount(t *testing.T) {
@@ -216,8 +225,9 @@ func TestServerModeConfig_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeConfig)
 	tools := getRegisteredToolNames(s)
-	// 11 workflow (incl. list_repositories) + 4 agent + 4 mcp + 5 executor + 6 task + 1 interaction = 31
-	assert.Equal(t, 31, len(tools))
+	// 12 workflow (incl. list_repositories + import_workflow) + 4 agent + 4 mcp + 5 executor + 6 task + 1 interaction = 32
+	assert.NotContains(t, tools, "step_complete_kandev", "step_complete_kandev requires a live task session; must NOT register in config mode")
+	assert.Equal(t, 32, len(tools))
 }
 
 func TestServerModeConfig_ToolDescriptions(t *testing.T) {
@@ -289,6 +299,7 @@ func TestServerModeOffice_ToolCount(t *testing.T) {
 	tools := getRegisteredToolNames(s)
 	// 4 plan + 1 interaction + 1 related-tasks + 3 task-documents = 9
 	// (delegate_task_kandev retired in favour of `agentctl kandev task create …`).
+	assert.NotContains(t, tools, "step_complete_kandev", "step_complete_kandev is kanban-task-only; office mode advances tasks via its own approval surface")
 	assert.Equal(t, 9, len(tools))
 }
 
@@ -360,8 +371,10 @@ func TestServerModeExternal_ToolCount(t *testing.T) {
 
 	s := New(backend, "", "", 0, log, "", true, ModeExternal)
 	tools := getRegisteredToolNames(s)
-	// 11 workflow (incl. list_repositories) + 4 agent + 4 mcp + 5 executor + 6 task + 1 create_task = 31
-	assert.Equal(t, 31, len(tools))
+	// 12 workflow (incl. list_repositories + import_workflow) + 4 agent + 4 mcp + 5 executor + 6 task + 1 create_task = 32.
+	// add_branch_to_task_kandev is task-mode only — external coding agents have no live session to attach a worktree to.
+	assert.Equal(t, 32, len(tools))
+	assert.NotContains(t, tools, "add_branch_to_task_kandev")
 }
 
 func TestNewExternal_Constructs(t *testing.T) {

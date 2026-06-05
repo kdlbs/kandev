@@ -1,117 +1,242 @@
 ---
 name: debug-instance
-description: Debug a running kandev development instance. Use when the user reports a bug, unexpected behavior, or asks to investigate an issue while kandev is running via `make dev`. Fetches backend logs, analyzes errors, and optionally inspects the UI via an existing Playwright browser session.
-allowed-tools: Bash(curl:*) Bash(jq:*) Bash(playwright-cli:*)
+description: Debug a running kandev development instance. Use when the user reports a bug, unexpected behavior, or asks to investigate an issue while kandev is running via `make dev`. Triages the bug class first (backend-logic → Go test, live-instance → /debug/export, UI → browser), launches an ISOLATED parallel instance when a running app is needed, and tears down only what it started.
+allowed-tools: Bash(curl:*) Bash(jq:*) Bash(npx:*) Bash(scripts/kandev-instances:*) Bash(scripts/kandev-logs:*) Bash(scripts/dev-isolated:*) Bash(scripts/kandev-kill:*) Bash(go:*)
 ---
 
 # Debug Running Kandev Instance
 
-Diagnose issues in a running kandev development instance by fetching structured logs and optionally inspecting the UI via an existing Playwright browser session.
+Diagnose issues efficiently and safely. The two cardinal rules:
+
+1. **Triage the bug class BEFORE launching anything.** A browser is the slowest,
+   least faithful tool — reach for it last.
+2. **Never touch the user's live instance.** Launch your own isolated instance,
+   and tear down only what you started. Never `pkill kandev`.
 
 ## Immediately: Create Task Pipeline
 
-As soon as this skill is invoked, create a task list to track progress:
+As soon as this skill is invoked, create a task list:
 
-1. **Detect running instance** — probe health endpoint, determine ports
-2. **Fetch & analyze backend logs** — get debug export, summarize errors
-3. **Browser inspection** (if UI-related) — check for existing playwright session, inspect DOM/console
-4. **Diagnose & report** — correlate findings, present root cause hypothesis
+1. **Triage** — classify the bug (decision gate below) and pick the cheapest faithful path
+2. **Reproduce / gather evidence** — Go test, `/debug/export`, or browser (whichever the gate selects)
+3. **Diagnose & report** — correlate findings, present root cause + suggested fix
 
-Mark each task as `in_progress` when starting and `completed` when done. Skip task 3 if the issue is purely backend.
+Mark each `in_progress` when starting, `completed` when done.
 
 ---
 
-## Phase 1 — Detect Running Instance
+## Phase 0 — Decision Gate (do this first)
 
-1. Probe the default backend port:
-   ```bash
-   curl -sf http://localhost:38429/api/v1/system/health
-   ```
-2. If that fails, try ports 38430–38435 (kandev auto-assigns nearby ports if default is busy).
-3. If still not found, ask the user which port kandev is running on.
-4. Derive the web port: typically `backend_port - 1000` (e.g., 38429 → 37429).
+Classify the bug, then take the matching path. Most bugs are class A.
 
-## Phase 2 — Fetch & Analyze Logs
+### A) Backend-logic bug → targeted Go test (NO UI)
 
-**IMPORTANT**: The debug export returns raw JSON. If output appears schema-converted (types instead of values), the response is being compressed by a proxy tool — use `curl` directly or check tool configuration.
+Validation, dedup, data shaping, error mapping, identifier assignment, workflow
+routing — anything reproducible from inputs. Reproduce with a Go test against the
+**real service path**. This is dramatically faster and more faithful than a browser.
 
-1. Fetch the debug export:
-   ```bash
-   curl -s http://localhost:<backend_port>/api/v1/system/debug/export | jq .
-   ```
-2. Summarize findings:
-   - **Metadata**: uptime, version, goroutine count, memory usage
-   - **Errors**: count of error-level entries, most recent errors with stack traces
-   - **Warnings**: count and notable patterns
-3. Filter by level if needed:
-   ```bash
-   curl -s "http://localhost:<backend_port>/api/v1/system/debug/export?level=error" | jq .logs
-   ```
-4. Correlate errors with the user's reported issue.
+The office/task service has a ready-made harness (`setupOfficeTest` builds a real
+`Service` + SQLite repo). Write a throwaway `*_test.go` next to it that drives the
+real call and asserts the buggy behavior:
 
-## Phase 3 — Browser Interaction (conditional)
+```go
+func TestRepro_DuplicateTitleRejected(t *testing.T) {
+    svc, repo := setupOfficeTest(t)
+    ctx := context.Background()
+    _ = repo
 
-Only enter this phase if:
-- The issue is UI-related
-- The user explicitly asks to inspect the browser
-- Log analysis alone is insufficient
-
-### Check for existing Playwright session
-
-```bash
-playwright-cli list
+    // Drive the real service method the bug lives in.
+    task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+        WorkspaceID: "ws-1",
+        Title:       "Office Task",
+        ProjectID:   "proj-1",
+    })
+    if err != nil {
+        t.Fatalf("CreateTask: %v", err)
+    }
+    // Assert the behavior you expect — failure here IS the reproduction.
+    if task.Identifier == "" {
+        t.Fatalf("expected identifier to be assigned, got empty")
+    }
+}
 ```
 
-- **If a session exists**: use it directly. Do NOT open a new browser.
-- **If no session exists** and browser inspection is needed:
-  ```bash
-  playwright-cli open http://localhost:<web_port> --headed
-  ```
-
-### Browser debugging commands
+Run just that test:
 
 ```bash
-# Page state
-playwright-cli snapshot
+cd apps/backend && go test -tags fts5 -run TestRepro ./internal/task/service/ -v
+```
 
-# Console logs (frontend errors)
-playwright-cli console
-playwright-cli console error
+Once you understand the root cause, hand off to `/fix` or `/tdd` to turn the repro
+into a permanent regression test. **Do not launch the UI for class-A bugs.**
+
+### B) Live-instance bug → fetch logs, no relaunch
+
+Something is *already misbehaving in the user's running instance* and you need its
+state/logs. Don't relaunch anything — read the user's instance's debug export
+(read-only). Jump to **Phase 2**.
+
+### C) UI / interaction bug that needs a browser
+
+A rendering, layout, focus, WS-driven, or click-flow bug you genuinely can't
+reproduce from inputs. Only now launch an isolated instance (**Phase 1**) and drive
+a browser (**Phase 3**). Never drive a browser against the user's live instance —
+it mutates their data.
+
+---
+
+## Phase 1 — Identify instances & launch your own (isolated)
+
+### List what's running
+
+```bash
+scripts/kandev-instances
+```
+
+Columns: `PID  BACKEND_PORT  WEB_PORT  AGENTCTL_PORT  HOME_DIR  REPO_PATH`.
+
+The **user's** live instance is the one with `HOME_DIR=/home/<user>` (or a repo path
+under the user's home, typically backend port **38429**). **Never act on it.**
+
+### Launch an isolated parallel instance
+
+`dev-isolated` auto-picks non-colliding ports (never 38429/37429/39429), creates a
+throwaway `HOME` + fresh SQLite DB, builds the backend binaries a live instance
+actually needs (kandev + agentctl + mock-agent) if stale, waits for health, and
+prints the URLs, log paths, and the exact teardown command. On a **clean checkout**,
+pass `--install` (or run `make install` once) so `node_modules` + deps are present —
+the `--web` frontend needs them.
+
+```bash
+# Backend only (enough for class-A/B work and API probing):
+scripts/dev-isolated
+
+# Also start the Next.js frontend (only for class-C browser work):
+scripts/dev-isolated --web
+```
+
+It prints a `READY` block with the backend URL (e.g. `http://localhost:48429`), the
+pidfile, and:
+
+```text
+Teardown : scripts/kandev-kill --pidfile /tmp/kandev-dev-isolated-<port>.pid --yes
+```
+
+Note your instance's port — every command below uses it.
+
+---
+
+## Phase 2 — Fetch & analyze logs
+
+Use `kandev-logs` against the relevant port — **your** isolated port for class-C,
+or the **user's** port (read-only) for class-B.
+
+```bash
+# Full structured export (logs + runtime metadata), pretty-printed:
+scripts/kandev-logs <port> --export
+
+# Error-level only:
+scripts/kandev-logs <port> --export --level error
+
+# Tail the backend stderr log of an isolated instance you launched:
+scripts/kandev-logs <port> --tail --lines 120
+```
+
+> The export endpoint (`/api/v1/system/debug/export`) returns raw JSON. If output
+> looks schema-converted (types instead of values), a proxy is compressing it — the
+> script uses plain `curl`, so prefer the script over an MCP fetch tool.
+
+Summarize: uptime/version/goroutines/memory (metadata), error count + recent errors
+with stack traces, notable warning patterns. **Filter aggressively** — hundreds of
+entries is normal; lead with `--level error`. Correlate with the reported issue.
+
+---
+
+## Phase 3 — Browser interaction (class C only)
+
+Drive the browser with **`npx playwright-cli`** (there is no bare `playwright-cli`
+binary in this repo — `playwright-cli ...` alone fails). Confirm availability once:
+
+```bash
+npx --no-install playwright-cli --version
+# Discover commands if unsure:
+npx playwright-cli --help
+```
+
+### Reuse an existing session
+
+```bash
+npx playwright-cli list
+```
+
+- **If a session exists**, reuse it — do NOT open a new browser.
+- **If none exists**, open one against YOUR isolated web port (never the user's):
+
+```bash
+npx playwright-cli open http://localhost:<your_web_port>
+```
+
+### Common debugging commands
+
+```bash
+# Page state (accessibility snapshot with refs)
+npx playwright-cli snapshot
+npx playwright-cli snapshot "#main"
+npx playwright-cli snapshot --depth=4
+
+# Frontend console errors
+npx playwright-cli console
+npx playwright-cli console error
 
 # Network activity
-playwright-cli network
+npx playwright-cli network
 
-# Execute JS to extract frontend log buffer
-playwright-cli eval "JSON.stringify(window.__kandevLogBuffer?.snapshot?.() ?? [])"
+# Dump the frontend log buffer
+npx playwright-cli eval "JSON.stringify(window.__kandevLogBuffer?.snapshot?.() ?? [])"
 
 # Navigate to a specific page
-playwright-cli goto http://localhost:<web_port>/some/path
-
-# Inspect specific elements
-playwright-cli snapshot "#main"
-playwright-cli snapshot --depth=4
+npx playwright-cli goto http://localhost:<your_web_port>/some/path
 ```
 
 ### Correlate frontend + backend
 
-After gathering browser console errors or frontend log buffer entries, cross-reference with backend error timestamps to identify the full request lifecycle.
+Cross-reference browser console / frontend-log-buffer timestamps with backend error
+timestamps (`scripts/kandev-logs <your_port> --export --level error`) to trace the
+full request lifecycle.
 
-## Phase 4 — Diagnose & Report
+---
+
+## Phase 4 — Diagnose, report & TEAR DOWN
 
 1. Present a structured summary:
    - **Issue**: what was reported
-   - **Evidence**: relevant log entries, console errors, DOM state
-   - **Root cause hypothesis**: most likely cause based on evidence
-   - **Suggested fix**: what code to change (with file paths)
-2. If the fix is clear, offer to implement it (delegate to `/fix` or `/tdd`).
+   - **Evidence**: log entries, console errors, test failures, DOM state
+   - **Root cause hypothesis**: most likely cause from the evidence
+   - **Suggested fix**: file paths + change; offer to delegate to `/fix` or `/tdd`
+2. **Tear down ONLY your instance** using the command `dev-isolated` printed:
+
+```bash
+scripts/kandev-kill --pidfile /tmp/kandev-dev-isolated-<your_port>.pid --yes
+# or, by port:
+scripts/kandev-kill <your_port> --yes
+```
+
+   `kandev-kill` refuses port 38429 without `--force`, prints exactly what it will
+   kill, and cascades to the agentctl child + spawned agents. Remove any throwaway
+   `*_test.go` repro file you created.
+3. If you opened a browser, close it (`npx playwright-cli close`) unless the user
+   wants it left open.
 
 ---
 
 ## Rules
 
-- **Always probe health first** — never assume ports.
-- **Always check `playwright-cli list` before opening a browser** — reuse existing sessions.
-- **Present log summary before browser inspection** — logs are faster and often sufficient.
-- **Don't leave browsers open** — if you opened one, close it when done (unless user wants to keep it).
-- **Filter aggressively** — 2000 log entries is a lot; use `?level=error` or grep for keywords.
-- **Create the task pipeline immediately** — track progress from the start.
+- **Triage first** (Phase 0). Class-A bugs get a Go test, not a browser.
+- **Never touch the user's live instance** — identify it via `scripts/kandev-instances`,
+  launch your own with `scripts/dev-isolated`, and only ever `scripts/kandev-kill`
+  the port YOU launched. **Never `pkill kandev`. Never kill a port you didn't start.**
+- **Logs before browser** — `scripts/kandev-logs` is faster and often sufficient.
+- **Filter aggressively** — start with `--level error`.
+- **No orphans** — always tear down the instance you launched and delete throwaway repro files.
+- **`npx playwright-cli`, never bare `playwright-cli`.**
+- **Create the task pipeline immediately.**

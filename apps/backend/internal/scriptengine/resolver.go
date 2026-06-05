@@ -62,16 +62,3 @@ func (r *Resolver) mergedVars() map[string]string {
 	}
 	return merged
 }
-
-// ResolveScript is a convenience function that replaces {{key}} placeholders with values from vars.
-// Unknown placeholders are left as-is.
-func ResolveScript(script string, vars map[string]string) string {
-	if script == "" || len(vars) == 0 {
-		return script
-	}
-	result := script
-	for key, value := range vars {
-		result = strings.ReplaceAll(result, "{{"+key+"}}", value)
-	}
-	return result
-}

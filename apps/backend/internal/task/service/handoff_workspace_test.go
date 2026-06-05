@@ -225,6 +225,18 @@ func (f *fakeTaskRepo) GetTask(_ context.Context, id string) (*models.Task, erro
 	return f.tasks[id], nil
 }
 
+func (f *fakeTaskRepo) GetTasksByIDs(_ context.Context, ids []string) ([]*models.Task, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []*models.Task
+	for _, id := range ids {
+		if t, ok := f.tasks[id]; ok {
+			out = append(out, t)
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeTaskRepo) ListChildren(_ context.Context, parentID string) ([]*models.Task, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -291,6 +303,9 @@ type phase4TaskRepo struct {
 func (r *phase4TaskRepo) GetTask(ctx context.Context, id string) (*models.Task, error) {
 	return r.base.GetTask(ctx, id)
 }
+func (r *phase4TaskRepo) GetTasksByIDs(ctx context.Context, ids []string) ([]*models.Task, error) {
+	return r.base.GetTasksByIDs(ctx, ids)
+}
 func (r *phase4TaskRepo) ListChildren(ctx context.Context, parentID string) ([]*models.Task, error) {
 	return r.base.ListChildren(ctx, parentID)
 }
@@ -348,9 +363,17 @@ func (r *phase4TaskRepo) ListTasksForAutoArchive(context.Context) ([]*models.Tas
 	r.panicNotUsed("ListTasksForAutoArchive")
 	return nil, nil
 }
+func (r *phase4TaskRepo) CountOpenWatcherCreatedTasks(context.Context, string, string) (int, error) {
+	r.panicNotUsed("CountOpenWatcherCreatedTasks")
+	return 0, nil
+}
 func (r *phase4TaskRepo) UpdateTaskState(context.Context, string, v1.TaskState) error {
 	r.panicNotUsed("UpdateTaskState")
 	return nil
+}
+func (r *phase4TaskRepo) UpdateTaskStateIfCurrentIn(context.Context, string, v1.TaskState, []v1.TaskState) (v1.TaskState, bool, error) {
+	r.panicNotUsed("UpdateTaskStateIfCurrentIn")
+	return "", false, nil
 }
 func (r *phase4TaskRepo) CountTasksByWorkflow(context.Context, string) (int, error) {
 	r.panicNotUsed("CountTasksByWorkflow")

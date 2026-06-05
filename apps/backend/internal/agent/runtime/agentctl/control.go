@@ -52,7 +52,19 @@ type CreateInstanceRequest struct {
 	TaskID             string            `json:"task_id,omitempty"`              // Task ID for MCP plan tool calls (server-side injection)
 	DisableAskQuestion bool              `json:"disable_ask_question,omitempty"` // Disable ask_user_question MCP tool (TUI agents)
 	AssumeMcpSse       bool              `json:"assume_mcp_sse,omitempty"`       // Assume agent supports SSE MCP servers
+	AssumeMcpHttp      bool              `json:"assume_mcp_http,omitempty"`      // Assume agent supports HTTP MCP servers
 	McpMode            string            `json:"mcp_mode,omitempty"`             // MCP tool mode: "task" (default) or "config"
+	// RequiresProcessKill forces agentctl to kill the agent's process group
+	// (not just close stdin) on shutdown. Required for agents whose runtime
+	// keeps child processes (e.g. MCP servers) alive when stdin closes —
+	// notably opencode acp.
+	RequiresProcessKill bool `json:"requires_process_kill,omitempty"`
+
+	// BaseBranches maps RepositoryName → base branch ref for the task's
+	// per-repo diff stats. The empty key "" applies to the root /
+	// single-repo tracker. Empty map disables the override and falls back
+	// to the hardcoded origin/main → master priority list inside agentctl.
+	BaseBranches map[string]string `json:"base_branches,omitempty"`
 }
 
 // CreateInstanceResponse contains the result of creating a new agent instance.

@@ -47,6 +47,7 @@ export function normalizeAgentProfile(raw: unknown): AgentProfile {
     model: pickString(profile, "model", "model"),
     mode: (profile.mode as string | undefined) ?? undefined,
     allowIndexing: pickBool(profile, "allowIndexing", "allow_indexing"),
+    autoApprove: pickBool(profile, "autoApprove", "auto_approve"),
     cliFlags: pickFlags(profile),
     envVars: pickEnvVars(profile),
     cliPassthrough: pickBool(profile, "cliPassthrough", "cli_passthrough"),
@@ -71,6 +72,7 @@ export function toAgentProfilePayload(
   if (profile.model !== undefined) payload.model = profile.model;
   if (profile.mode !== undefined) payload.mode = profile.mode;
   if (profile.allowIndexing !== undefined) payload.allow_indexing = profile.allowIndexing;
+  if (profile.autoApprove !== undefined) payload.auto_approve = profile.autoApprove;
   if (profile.cliFlags !== undefined) payload.cli_flags = profile.cliFlags;
   if (profile.envVars !== undefined) payload.env_vars = profile.envVars;
   if (profile.cliPassthrough !== undefined) payload.cli_passthrough = profile.cliPassthrough;

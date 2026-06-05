@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // subscribeClarificationEvents subscribes to clarification-related events.
@@ -30,6 +31,62 @@ func (s *Service) subscribeClarificationEvents() {
 	if _, err := s.eventBus.Subscribe(events.ClarificationCancelled, s.handleClarificationAnswered); err != nil {
 		s.logger.Error("failed to subscribe to clarification.cancelled events", zap.Error(err))
 	}
+	if _, err := s.eventBus.Subscribe(events.ClarificationStaleDismissed, s.handleClarificationStaleDismissed); err != nil {
+		s.logger.Error("failed to subscribe to clarification.stale_dismissed events", zap.Error(err))
+	}
+}
+
+// handleClarificationStaleDismissed runs session cleanup when the user dismisses
+// a detached clarification overlay without starting a new agent turn.
+func (s *Service) handleClarificationStaleDismissed(ctx context.Context, event *bus.Event) error {
+	dataBytes, err := json.Marshal(event.Data)
+	if err != nil {
+		s.logger.Error("failed to marshal stale-dismissed clarification event data", zap.Error(err))
+		return nil
+	}
+	var data clarificationAnsweredData
+	if err := json.Unmarshal(dataBytes, &data); err != nil {
+		s.logger.Error("failed to parse stale-dismissed clarification event data", zap.Error(err))
+		return nil
+	}
+	if data.SessionID == "" || data.TaskID == "" {
+		s.logger.Warn("stale-dismissed clarification event missing session_id or task_id",
+			zap.String("session_id", data.SessionID),
+			zap.String("task_id", data.TaskID))
+		return nil
+	}
+
+	writeCtx := context.WithoutCancel(ctx)
+	if s.sessionHasPendingClarification(writeCtx, data.SessionID) {
+		return nil
+	}
+
+	session, err := s.repo.GetTaskSession(writeCtx, data.SessionID)
+	if err != nil {
+		s.logger.Warn("failed to load session for stale-dismissed clarification cleanup",
+			zap.String("session_id", data.SessionID),
+			zap.Error(err))
+		return nil
+	}
+	if isTerminalSessionState(session.State) {
+		s.logger.Debug("ignoring stale-dismissed clarification for terminal session",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("session_state", string(session.State)))
+		return nil
+	}
+
+	s.captureGitStatusSnapshot(writeCtx, data.SessionID)
+	s.finalizeAutomationRunIfEphemeral(writeCtx, data.TaskID, data.SessionID, true, "")
+	transitioned := s.processOnTurnCompleteViaEngine(writeCtx, data.TaskID, session)
+	if !transitioned {
+		if err := s.taskRepo.UpdateTaskState(writeCtx, data.TaskID, v1.TaskStateReview); err != nil {
+			s.logger.Error("failed to update task state to REVIEW after stale-dismiss",
+				zap.String("task_id", data.TaskID),
+				zap.Error(err))
+		}
+	}
+	return nil
 }
 
 // clarificationAnsweredData is the event payload for ClarificationAnswered events.

@@ -64,6 +64,7 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.POST("/cleanup/issue-tasks", c.httpCleanupIssueTasks)
 
 	api.GET("/orgs", c.httpListUserOrgs)
+	api.GET("/repos", c.httpListAccessibleRepos)
 	api.GET("/repos/search", c.httpSearchRepos)
 	api.GET("/repos/:owner/:repo/branches", c.httpListRepoBranches)
 	api.GET("/repos/:owner/:repo/merge-methods", c.httpGetRepoMergeMethods)
@@ -482,6 +483,44 @@ func (c *Controller) httpListUserOrgs(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"orgs": orgs})
+}
+
+// httpListAccessibleRepos returns the merged list of repos the authenticated
+// user can access (own repos + each org they belong to). Accepts:
+//   - q: optional GitHub search qualifier appended to the per-source query
+//   - limit: 1..100, defaults to 50 when missing / non-positive
+//
+// Returns 503 with `{"code":"github_not_configured"}` (matches every other
+// GitHub-not-configured 503 in this file) when GitHub is not configured /
+// not authenticated.
+func (c *Controller) httpListAccessibleRepos(ctx *gin.Context) {
+	query := ctx.Query("q")
+	limit, _ := strconv.Atoi(ctx.Query("limit"))
+	repos, err := c.service.ListAccessibleRepos(ctx.Request.Context(), query, limit)
+	if err != nil {
+		if errors.Is(err, ErrNoClient) {
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{
+				"error": "GitHub is not configured. Install the gh CLI and run 'gh auth login', or add a GITHUB_TOKEN secret.",
+				"code":  "github_not_configured",
+			})
+			return
+		}
+		// Preserve GitHub-side status codes (401 / 403 / 404) so the
+		// frontend can render the appropriate UX — auth re-prompt for 401,
+		// permission notice for 403, etc. — instead of collapsing every
+		// upstream failure into an opaque 500.
+		status := http.StatusInternalServerError
+		var apiErr *GitHubAPIError
+		if errors.As(err, &apiErr) {
+			switch apiErr.StatusCode {
+			case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
+				status = apiErr.StatusCode
+			}
+		}
+		ctx.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"repos": repos})
 }
 
 func (c *Controller) httpSearchRepos(ctx *gin.Context) {

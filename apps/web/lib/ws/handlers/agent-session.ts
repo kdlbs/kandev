@@ -1,4 +1,5 @@
 import type { StoreApi } from "zustand";
+import { createDebugLogger } from "@/lib/debug/log";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import {
@@ -9,6 +10,8 @@ import {
   type TaskSessionState,
 } from "@/lib/types/http";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
+
+const debug = createDebugLogger("session:state");
 
 const TERMINAL_SESSION_STATES: ReadonlySet<TaskSessionState> = new Set([
   "COMPLETED",
@@ -88,12 +91,25 @@ export function pickReplacementSessionId(state: AppState, taskId: string): strin
   return null;
 }
 
+/** Ignore subscribe snapshots that were read before a newer state landed. */
+export function isStaleSessionStateEvent(
+  existing: { updated_at?: string } | null | undefined,
+  payloadUpdatedAt: string | undefined,
+): boolean {
+  if (!payloadUpdatedAt || !existing?.updated_at) return false;
+  const payloadTime = Date.parse(payloadUpdatedAt);
+  const existingTime = Date.parse(existing.updated_at);
+  if (Number.isNaN(payloadTime) || Number.isNaN(existingTime)) return false;
+  // Strict less-than: equal timestamps are treated as not-stale so identical
+  // events upsert idempotently rather than being silently dropped.
+  return payloadTime < existingTime;
+}
+
 /** Build a session update object from the state_changed payload. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildSessionUpdate(payload: any): Record<string, unknown> {
   const update: Record<string, unknown> = {};
   if (payload.new_state) update.state = payload.new_state;
-  if (payload.agent_profile_id) update.agent_profile_id = payload.agent_profile_id;
   if (payload.agent_profile_id) update.agent_profile_id = payload.agent_profile_id;
   if (payload.review_status !== undefined) update.review_status = payload.review_status;
   if (payload.error_message !== undefined) update.error_message = payload.error_message;
@@ -102,6 +118,7 @@ function buildSessionUpdate(payload: any): Record<string, unknown> {
   if (payload.is_passthrough !== undefined) update.is_passthrough = payload.is_passthrough;
   if (payload.session_metadata !== undefined) update.metadata = payload.session_metadata;
   if (payload.task_environment_id) update.task_environment_id = payload.task_environment_id;
+  if (payload.updated_at) update.updated_at = payload.updated_at;
   return update;
 }
 
@@ -126,7 +143,7 @@ function upsertTaskSessionList(
     task_id: taskId,
     state: (newState ?? existing?.state) as TaskSessionState,
     started_at: existing?.started_at ?? "",
-    updated_at: existing?.updated_at ?? "",
+    updated_at: (sessionUpdate.updated_at as string | undefined) ?? existing?.updated_at ?? "",
     ...(payload.agent_profile_id ? { agent_profile_id: payload.agent_profile_id } : {}),
     ...sessionUpdate,
   });
@@ -247,34 +264,87 @@ function syncEnvFromAgentctlPayload(
   });
 }
 
-/** Handle the agentctl_ready event: update session worktree info. */
+/** Builds the partial-session patch applied for an agentctl_ready event.
+ *  On sibling materialize we repoint worktree_path to the task root and keep
+ *  the primary's id/branch; the initial ready event sets id/path/branch
+ *  straight from the payload. */
+function buildAgentctlReadySessionUpdate(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload: any,
+  isSibling: boolean,
+): Record<string, unknown> {
+  const update: Record<string, unknown> = {};
+  if (isSibling) {
+    if (payload.task_workspace_path) update.worktree_path = payload.task_workspace_path;
+    return update;
+  }
+  if (payload.worktree_id) update.worktree_id = payload.worktree_id;
+  if (payload.worktree_path) update.worktree_path = payload.worktree_path;
+  if (payload.worktree_branch) update.worktree_branch = payload.worktree_branch;
+  return update;
+}
+
+/** Adds the materialized worktree to the worktrees map + the per-session list. */
+function recordAgentctlReadyWorktree(
+  store: StoreApi<AppState>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload: any,
+  existingSession: { repository_id?: string; worktree_path?: string; worktree_branch?: string },
+): void {
+  if (!payload.worktree_id) return;
+  store.getState().setWorktree({
+    id: payload.worktree_id,
+    sessionId: payload.session_id,
+    repositoryId: existingSession.repository_id ?? undefined,
+    path: payload.worktree_path ?? existingSession.worktree_path ?? undefined,
+    branch: payload.worktree_branch ?? existingSession.worktree_branch ?? undefined,
+  });
+  const existing =
+    store.getState().sessionWorktreesBySessionId.itemsBySessionId[payload.session_id] ?? [];
+  if (!existing.includes(payload.worktree_id)) {
+    store.getState().setSessionWorktrees(payload.session_id, [...existing, payload.worktree_id]);
+  }
+}
+
+/** Handle the agentctl_ready event: update session worktree info.
+ *
+ *  Two shapes share this event:
+ *    1. Initial session ready — payload describes the session's primary
+ *       worktree; we set worktree_id/path/branch on the session row.
+ *    2. Sibling materialized (multi-branch add_branch flow) — payload
+ *       describes a NEW worktree being added alongside the primary. The
+ *       primary's worktree_id/branch must NOT be clobbered (they still own
+ *       the chat/agent process); only worktree_path moves to the task root
+ *       so the file browser repoints from "primary worktree" to "task root
+ *       containing both worktree siblings". A commits refetch is bumped so
+ *       the Commits panel re-queries with the new multi-repo subpaths
+ *       (each commit then carries its repo/branch slug for grouping).
+ */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function handleAgentctlReady(store: StoreApi<AppState>, payload: any): void {
   const existingSession = store.getState().taskSessions.items[payload.session_id];
   if (!existingSession) return;
 
-  const sessionUpdate: Record<string, unknown> = {};
-  if (payload.worktree_id) sessionUpdate.worktree_id = payload.worktree_id;
-  if (payload.worktree_path) sessionUpdate.worktree_path = payload.worktree_path;
-  if (payload.worktree_branch) sessionUpdate.worktree_branch = payload.worktree_branch;
+  const isSibling =
+    !!payload.worktree_id &&
+    !!existingSession.worktree_id &&
+    payload.worktree_id !== existingSession.worktree_id;
 
+  const sessionUpdate = buildAgentctlReadySessionUpdate(payload, isSibling);
   if (Object.keys(sessionUpdate).length > 0) {
     store.getState().setTaskSession({ ...existingSession, ...sessionUpdate });
   }
 
-  if (payload.worktree_id) {
-    store.getState().setWorktree({
-      id: payload.worktree_id,
-      sessionId: payload.session_id,
-      repositoryId: existingSession.repository_id ?? undefined,
-      path: payload.worktree_path ?? existingSession.worktree_path ?? undefined,
-      branch: payload.worktree_branch ?? existingSession.worktree_branch ?? undefined,
-    });
-    const existing =
-      store.getState().sessionWorktreesBySessionId.itemsBySessionId[payload.session_id] ?? [];
-    if (!existing.includes(payload.worktree_id)) {
-      store.getState().setSessionWorktrees(payload.session_id, [...existing, payload.worktree_id]);
-    }
+  recordAgentctlReadyWorktree(store, payload, existingSession);
+
+  if (isSibling) {
+    // Drop the pre-multi-repo git-status snapshot — the backend just
+    // transitioned this session from single-repo to multi-repo and the legacy
+    // (empty-repo-name) tracker is gone. Without this the Changes panel keeps
+    // surfacing the frozen snapshot until the user reloads the tab, masking
+    // the per-repo updates streaming in for both the primary and the sibling.
+    store.getState().clearLegacyGitStatusEntry(payload.session_id);
+    store.getState().bumpSessionCommitsRefetch(payload.session_id);
   }
 }
 
@@ -337,6 +407,28 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
 
       const sessionUpdate = buildSessionUpdate(payload);
       const existingSession = store.getState().taskSessions.items[sessionId];
+
+      if (isStaleSessionStateEvent(existingSession, payload.updated_at)) {
+        debug("state_changed ignored stale snapshot", {
+          sessionId,
+          task_id: taskId,
+          existingUpdatedAt: existingSession?.updated_at,
+          payloadUpdatedAt: payload.updated_at,
+          newState: newState ?? "-",
+        });
+        return;
+      }
+
+      debug("state_changed", {
+        sessionId,
+        // Logged before upsertTaskSessionList below, so on the first event for a
+        // session the store has no row yet and the auto-resolver can't map it —
+        // exactly the oldState="-" anchor line. taskId is already in scope, so
+        // pass it directly (rendered as task_id=, matching the auto-annotation).
+        task_id: taskId,
+        oldState: existingSession?.state ?? "-",
+        newState: newState ?? "-",
+      });
 
       upsertTaskSessionList(store, taskId, sessionId, payload, sessionUpdate);
       extractContextWindow(store, sessionId, payload);

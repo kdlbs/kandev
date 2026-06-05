@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events/bus"
 )
 
 // secretNameToken is the canonical secret-store name for the GitLab PAT.
@@ -37,20 +38,51 @@ type HostStore interface {
 	SetHost(ctx context.Context, host string) error
 }
 
-// Service coordinates GitLab integration operations. v1 surface is
-// deliberately small: status, token configure/clear, host configure, MR
-// feedback fetch, and MR discussion reply/resolve. Watches, presets, and
-// stats are intentionally deferred to a follow-up.
+// TaskDeleter deletes tasks by ID. Used for cleaning up merged MR tasks.
+type TaskDeleter interface {
+	DeleteTask(ctx context.Context, taskID string) error
+}
+
+// TaskSessionChecker checks whether the user genuinely engaged with a task.
+type TaskSessionChecker interface {
+	HasUserAuthoredMessage(ctx context.Context, taskID string) (bool, error)
+}
+
+// Service coordinates GitLab integration operations.
 type Service struct {
-	mu            sync.RWMutex
-	host          string
-	client        Client
-	authMethod    string
-	secrets       SecretProvider
-	secretManager SecretManager
-	hostStore     HostStore
-	store         *Store
-	logger        *logger.Logger
+	mu                 sync.RWMutex
+	host               string
+	client             Client
+	authMethod         string
+	secrets            SecretProvider
+	secretManager      SecretManager
+	hostStore          HostStore
+	store              *Store
+	eventBus           bus.EventBus
+	taskDeleter        TaskDeleter
+	taskSessionChecker TaskSessionChecker
+	logger             *logger.Logger
+}
+
+// SetEventBus wires the event bus for publishing review/issue/feedback events.
+func (s *Service) SetEventBus(b bus.EventBus) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.eventBus = b
+}
+
+// SetTaskDeleter wires the task-deletion dependency used by cleanup sweepers.
+func (s *Service) SetTaskDeleter(d TaskDeleter) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.taskDeleter = d
+}
+
+// SetTaskSessionChecker wires the user-engagement check used by cleanup.
+func (s *Service) SetTaskSessionChecker(c TaskSessionChecker) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.taskSessionChecker = c
 }
 
 // SetStore wires the task↔MR persistence layer. Optional — when nil the

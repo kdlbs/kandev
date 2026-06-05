@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -547,9 +548,16 @@ type graphQLMockClient struct {
 	branchErr       error    // returned for the next "Branches" call
 	prQueries       []string
 	branchQueries   []string
+	// onExecute, if set, is called at the top of every ExecuteGraphQL before
+	// canned responses are consumed. Used by the singleflight coalescing
+	// test to block the first in-flight call while a second one races.
+	onExecute func()
 }
 
 func (m *graphQLMockClient) ExecuteGraphQL(_ context.Context, query string, _ map[string]any, out any) error {
+	if m.onExecute != nil {
+		m.onExecute()
+	}
 	if strings.Contains(query, "query Branches") {
 		m.branchQueries = append(m.branchQueries, query)
 		if m.branchErr != nil {
@@ -641,19 +649,17 @@ func TestTryBatchedPRWatchCheck_SearchingWatch_DetectsPR(t *testing.T) {
 	gh.branchResponses = []string{`{
 		"data": {
 			"b0": {
-				"ref": {
-					"associatedPullRequests": {
-						"nodes": [{
-							"number": 7,
-							"state": "OPEN", "title": "branch PR", "url": "https://x/7",
-							"isDraft": false, "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
-							"headRefName": "feat", "baseRefName": "main", "headRefOid": "deadbeef",
-							"author": {"login": "alice"},
-							"createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
-							"reviews": {"nodes": []}, "reviewRequests": {"totalCount": 0},
-							"commits": {"nodes": []}
-						}]
-					}
+				"pullRequests": {
+					"nodes": [{
+						"number": 7,
+						"state": "OPEN", "title": "branch PR", "url": "https://x/7",
+						"isDraft": false, "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
+						"headRefName": "feat", "baseRefName": "main", "headRefOid": "deadbeef",
+						"author": {"login": "alice"},
+						"createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
+						"reviews": {"nodes": []}, "reviewRequests": {"totalCount": 0},
+						"commits": {"nodes": []}
+					}]
 				}
 			}
 		}
@@ -694,38 +700,94 @@ func TestTryBatchedPRWatchCheck_FallsBackOnUnsupportedClient(t *testing.T) {
 	}
 }
 
-func TestFetchBatchedStatuses_NumberedQueryError_ReturnsNilFalse(t *testing.T) {
-	poller, _, gh, _ := setupBatchedPollerTest(t)
+// TestSyncWatchesBatched_ManyWatches_TwoGraphQLCalls is the regression test
+// for the OS-freeze caused by per-watch gh subprocess fan-out. A workspace
+// with N numbered + M searching watches must fire exactly TWO GraphQL
+// queries (one numbered, one searching), regardless of N or M — that's
+// what keeps the gh subprocess burst bounded.
+func TestSyncWatchesBatched_ManyWatches_TwoGraphQLCalls(t *testing.T) {
+	_, svc, gh, store := setupBatchedPollerTest(t)
+	ctx := context.Background()
+
+	// Canned responses: one PR alias per numbered watch, one branch alias per
+	// searching watch. Hand-rolled minimal payloads so the assertion stays on
+	// "did we batch?" rather than on the field decoder.
+	gh.prResponses = []string{`{"data":{
+		"repo0":{"pr0":{"state":"OPEN","title":"a","url":"x","headRefName":"a","baseRefName":"main","headRefOid":"1","author":{"login":"x"},"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","reviews":{"nodes":[]},"reviewRequests":{"totalCount":0},"commits":{"nodes":[]}}},
+		"repo1":{"pr0":{"state":"OPEN","title":"b","url":"x","headRefName":"b","baseRefName":"main","headRefOid":"2","author":{"login":"x"},"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","reviews":{"nodes":[]},"reviewRequests":{"totalCount":0},"commits":{"nodes":[]}}},
+		"repo2":{"pr0":{"state":"OPEN","title":"c","url":"x","headRefName":"c","baseRefName":"main","headRefOid":"3","author":{"login":"x"},"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","reviews":{"nodes":[]},"reviewRequests":{"totalCount":0},"commits":{"nodes":[]}}}
+	}}`}
+	gh.branchResponses = []string{`{"data":{
+		"b0":{"pullRequests":{"nodes":[]}},
+		"b1":{"pullRequests":{"nodes":[]}},
+		"b2":{"pullRequests":{"nodes":[]}},
+		"b3":{"pullRequests":{"nodes":[]}}
+	}}`}
+
+	var watches []*PRWatch
+	for i := 0; i < 3; i++ {
+		w := &PRWatch{SessionID: "n" + string(rune('a'+i)), TaskID: "tn" + string(rune('a'+i)),
+			Owner: "o", Repo: "r", PRNumber: i + 1, Branch: "n"}
+		if err := store.CreatePRWatch(ctx, w); err != nil {
+			t.Fatalf("create numbered: %v", err)
+		}
+		watches = append(watches, w)
+	}
+	for i := 0; i < 4; i++ {
+		w := &PRWatch{SessionID: "s" + string(rune('a'+i)), TaskID: "ts" + string(rune('a'+i)),
+			Owner: "o", Repo: "r", PRNumber: 0, Branch: "s" + string(rune('a'+i))}
+		if err := store.CreatePRWatch(ctx, w); err != nil {
+			t.Fatalf("create searching: %v", err)
+		}
+		watches = append(watches, w)
+	}
+
+	if _, err := svc.SyncWatchesBatched(ctx, watches); err != nil {
+		t.Fatalf("SyncWatchesBatched: %v", err)
+	}
+
+	// THE assertion: 7 watches → exactly 1 numbered query + 1 branch query.
+	// Pre-fix this would have been 7 separate gh subprocess invocations.
+	if got := len(gh.prQueries); got != 1 {
+		t.Errorf("numbered GraphQL calls = %d, want 1 (all numbered watches must batch)", got)
+	}
+	if got := len(gh.branchQueries); got != 1 {
+		t.Errorf("branch GraphQL calls = %d, want 1 (all searching watches must batch)", got)
+	}
+}
+
+func TestSyncWatchesBatched_NumberedQueryError_ReturnsError(t *testing.T) {
+	_, svc, gh, _ := setupBatchedPollerTest(t)
 	ctx := context.Background()
 	gh.prErr = errors.New("graphql 500")
 
 	numbered := []*PRWatch{{Owner: "o", Repo: "r", PRNumber: 1}}
-	got, ok := poller.fetchBatchedStatuses(ctx, gh, numbered, nil)
-	if ok || got != nil {
-		t.Errorf("expected (nil, false) on numbered query error, got (%v, %v)", got, ok)
+	got, err := svc.SyncWatchesBatched(ctx, numbered)
+	if err == nil || got != nil {
+		t.Errorf("expected (nil, err) on numbered query error, got (%v, %v)", got, err)
 	}
 }
 
-func TestFetchBatchedStatuses_BranchQueryError_TriggersFallback(t *testing.T) {
-	// Greptile P2: when only branch query fails (no numbered watches), the
-	// previous return of an empty non-nil map silently absorbed the failure.
-	// The fix returns (nil, false) so the caller falls back per-watch.
-	poller, _, gh, _ := setupBatchedPollerTest(t)
+func TestSyncWatchesBatched_BranchQueryError_ReturnsError(t *testing.T) {
+	// Greptile P2 (preserved from previous fetchBatchedStatuses test): when only
+	// the branch query fails (no numbered watches), an empty non-nil map
+	// silently absorbed the failure. The fix returns a non-nil error so the
+	// caller falls back per-watch.
+	_, svc, gh, _ := setupBatchedPollerTest(t)
 	ctx := context.Background()
 	gh.branchErr = errors.New("graphql 500")
 
 	searching := []*PRWatch{{Owner: "o", Repo: "r", PRNumber: 0, Branch: "feat"}}
-	got, ok := poller.fetchBatchedStatuses(ctx, gh, nil, searching)
-	if ok || got != nil {
-		t.Errorf("expected (nil, false) on branch query error, got (%v, %v)", got, ok)
+	got, err := svc.SyncWatchesBatched(ctx, searching)
+	if err == nil || got != nil {
+		t.Errorf("expected (nil, err) on branch query error, got (%v, %v)", got, err)
 	}
 }
 
-func TestApplyPRStatus_MergedPR_ResetsWatch(t *testing.T) {
-	poller, _, _, store := setupPollerTest(t)
+func TestSyncWatchesBatched_MergedPR_ResetsWatch(t *testing.T) {
+	_, svc, gh, store := setupBatchedPollerTest(t)
 	ctx := context.Background()
 
-	mergedAt := time.Now().UTC().Add(-time.Hour)
 	watch := &PRWatch{
 		SessionID: "s1", TaskID: "t1", Owner: "o", Repo: "r", PRNumber: 99, Branch: "feat",
 	}
@@ -740,13 +802,30 @@ func TestApplyPRStatus_MergedPR_ResetsWatch(t *testing.T) {
 		t.Fatalf("create task PR: %v", err)
 	}
 
-	status := &PRStatus{
-		PR: &PR{
-			Number: 99, State: prStateMerged, RepoOwner: "o", RepoName: "r",
-			HeadBranch: "feat", BaseBranch: "main", MergedAt: &mergedAt, URL: "https://x/99", Title: "Merged PR",
-		},
+	// Canned merged-PR response — convertBatchedPRResult promotes state to
+	// "merged" whenever mergedAt is non-empty, which is what triggers the
+	// watch reset.
+	gh.prResponses = []string{`{
+		"data": {
+			"repo0": {
+				"pr0": {
+					"state": "MERGED", "title": "Merged PR", "url": "https://x/99",
+					"isDraft": false, "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
+					"headRefName": "feat", "baseRefName": "main", "headRefOid": "abc",
+					"author": {"login": "alice"},
+					"createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-02T00:00:00Z",
+					"mergedAt": "2026-01-02T00:00:00Z",
+					"reviews": {"nodes": []},
+					"reviewRequests": {"totalCount": 0},
+					"commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]}
+				}
+			}
+		}
+	}`}
+
+	if _, err := svc.SyncWatchesBatched(ctx, []*PRWatch{watch}); err != nil {
+		t.Fatalf("SyncWatchesBatched: %v", err)
 	}
-	poller.applyPRStatus(ctx, watch, status)
 
 	updated, err := store.GetPRWatchBySession(ctx, "s1")
 	if err != nil || updated == nil {
@@ -755,6 +834,156 @@ func TestApplyPRStatus_MergedPR_ResetsWatch(t *testing.T) {
 	if updated.PRNumber != 0 {
 		t.Errorf("expected watch reset to PRNumber=0 after merge, got %d", updated.PRNumber)
 	}
+}
+
+// TestRefreshStaleWorkspaceWatches_CoalescesConcurrentCalls regression-tests
+// the singleflight guard on per-workspace background refresh. Without it,
+// the frontend's repeated WS polls (every ~5s) stack background goroutines
+// that each fire a batched GraphQL request, defeating the per-process
+// throttle once the cap is small enough to queue.
+func TestRefreshStaleWorkspaceWatches_CoalescesConcurrentCalls(t *testing.T) {
+	_, svc, gh, store := setupBatchedPollerTest(t)
+	ctx := context.Background()
+
+	// Seed two tasks with one searching watch each. Searching (PRNumber=0)
+	// means refreshStaleWorkspaceWatches drives them through the branch
+	// query path, which is what onExecute will block on.
+	for _, id := range []string{"t1", "t2"} {
+		w := &PRWatch{SessionID: "sess-" + id, TaskID: id, Owner: "o", Repo: "r", PRNumber: 0, Branch: "br-" + id}
+		if err := store.CreatePRWatch(ctx, w); err != nil {
+			t.Fatalf("create watch: %v", err)
+		}
+	}
+
+	// Two canned branch responses so neither the first NOR a hypothetical
+	// duplicate refresh starves on missing data — we want the assertion to
+	// be "duplicate never ran", not "duplicate failed".
+	gh.branchResponses = []string{
+		`{"data":{"b0":{"pullRequests":{"nodes":[]}},"b1":{"pullRequests":{"nodes":[]}}}}`,
+		`{"data":{"b0":{"pullRequests":{"nodes":[]}},"b1":{"pullRequests":{"nodes":[]}}}}`,
+	}
+
+	started := make(chan struct{}, 4)
+	release := make(chan struct{})
+	gh.onExecute = func() {
+		started <- struct{}{}
+		<-release
+	}
+
+	staleTasks := map[string]struct{}{"t1": {}, "t2": {}}
+
+	// Kick off the first refresh and wait until it's actually inside ExecuteGraphQL.
+	svc.refreshStaleWorkspaceWatches("ws1", staleTasks)
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("first refresh never entered ExecuteGraphQL")
+	}
+
+	// Fire a second refresh for the SAME workspace while the first is blocked.
+	// The singleflight guard must drop it on the floor — no new goroutine, no
+	// new GraphQL call. A small grace period lets a buggy unguarded goroutine
+	// reach ExecuteGraphQL if it were going to.
+	svc.refreshStaleWorkspaceWatches("ws1", staleTasks)
+	select {
+	case <-started:
+		t.Fatalf("second refresh entered ExecuteGraphQL while first was in flight — coalescing broken")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	// Release the first and confirm post-completion refreshes work again.
+	close(release)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, busy := svc.inflightWorkspaceRefreshes.Load("ws1"); !busy {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if _, busy := svc.inflightWorkspaceRefreshes.Load("ws1"); busy {
+		t.Fatalf("inflight key for ws1 never cleared after refresh completion")
+	}
+
+	// A fresh refresh must start (key was cleared in the defer).
+	release2 := make(chan struct{})
+	gh.onExecute = func() {
+		started <- struct{}{}
+		<-release2
+	}
+	svc.refreshStaleWorkspaceWatches("ws1", staleTasks)
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("post-completion refresh never started — inflight key leaked")
+	}
+	close(release2)
+}
+
+// TestServiceStop_DrainsRefreshGoroutine verifies that Service.Stop() blocks
+// until an in-flight refreshStaleWorkspaceWatches goroutine completes and
+// cancels its syncCtx so it stops doing work. Without this, process
+// shutdown could race a goroutine that is mid-DB-write or mid-gh-spawn.
+//
+// Runs inside synctest so "Stop is parked on bgWG.Wait" is a structural
+// guarantee (synctest.Wait returns once every bubble goroutine is durably
+// blocked) rather than a wall-clock window that could yield false negatives
+// on a slow CI runner where Stop hasn't entered yet.
+func TestServiceStop_DrainsRefreshGoroutine(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		_, svc, gh, store := setupBatchedPollerTest(t)
+		ctx := context.Background()
+
+		w := &PRWatch{SessionID: "s1", TaskID: "t1", Owner: "o", Repo: "r", PRNumber: 0, Branch: "br-1"}
+		if err := store.CreatePRWatch(ctx, w); err != nil {
+			t.Fatalf("create watch: %v", err)
+		}
+
+		gh.branchResponses = []string{`{"data":{"b0":{"pullRequests":{"nodes":[]}}}}`}
+
+		started := make(chan struct{}, 1)
+		release := make(chan struct{})
+		gh.onExecute = func() {
+			select {
+			case started <- struct{}{}:
+			default:
+			}
+			<-release
+		}
+
+		svc.refreshStaleWorkspaceWatches("ws1", map[string]struct{}{"t1": {}})
+		// Wait until the refresh goroutine has parked on <-release.
+		synctest.Wait()
+		select {
+		case <-started:
+		default:
+			t.Fatalf("refresh goroutine never entered ExecuteGraphQL")
+		}
+
+		stopped := make(chan struct{})
+		go func() {
+			svc.Stop()
+			close(stopped)
+		}()
+		// Stop must park on bgWG.Wait() — the refresh goroutine still
+		// holds the only outstanding WaitGroup counter.
+		synctest.Wait()
+		select {
+		case <-stopped:
+			t.Fatalf("Stop() returned while refresh goroutine was still blocked — drain skipped")
+		default:
+		}
+
+		close(release)
+		synctest.Wait()
+		select {
+		case <-stopped:
+		default:
+			t.Fatalf("Stop() did not return after refresh goroutine released")
+		}
+
+		// Second Stop is a no-op.
+		svc.Stop()
+	})
 }
 
 func TestWaitForRateLimit_SkipsWhenHealthy(t *testing.T) {

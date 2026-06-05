@@ -159,6 +159,7 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
         }}
         taskTitle={actions.archivingTask?.title ?? ""}
         taskId={actions.archivingTask?.id}
+        executorType={actions.archivingTask?.executorType}
         isArchiving={actions.isArchiving}
         onConfirm={({ cascade }) => actions.handleArchiveConfirm({ cascade })}
       />
@@ -169,6 +170,7 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
         }}
         taskTitle={actions.deletingTask?.title ?? ""}
         taskId={actions.deletingTask?.id}
+        executorType={actions.deletingTask?.executorType}
         isDeleting={actions.isDeleting}
         onConfirm={({ cascade }) => actions.handleDeleteConfirm({ cascade })}
       />

@@ -44,6 +44,7 @@ func isNotFound(err error) bool {
 		return false
 	}
 	if errors.Is(err, taskrepo.ErrTaskNotFound) ||
+		errors.Is(err, taskrepo.ErrNoPrimarySession) ||
 		errors.Is(err, service.ErrDocumentNotFound) ||
 		errors.Is(err, service.ErrTaskPlanNotFound) ||
 		errors.Is(err, service.ErrRevisionNotFound) {
@@ -73,5 +74,6 @@ func isValidationError(err error) bool {
 	return strings.Contains(msg, "pending approval") ||
 		strings.Contains(msg, "validation") ||
 		strings.Contains(msg, "required") ||
-		strings.Contains(msg, "invalid")
+		strings.Contains(msg, "invalid") ||
+		strings.Contains(msg, "not allowed in a git ref name")
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -26,6 +27,17 @@ func newSessionTestLogger() *logger.Logger {
 		Format: "json",
 	})
 	return log
+}
+
+// newTestStopCh returns a stopCh shared with t.Cleanup so any background
+// StreamManager retry loop that races past the test body's return drains
+// cleanly. Closing on cleanup is what lets goleak.VerifyTestMain stay green
+// for tests that exercise connectWorkspaceStream's backoff.
+func newTestStopCh(t *testing.T) chan struct{} {
+	t.Helper()
+	stopCh := make(chan struct{})
+	t.Cleanup(func() { closeStopChOnce(stopCh) })
+	return stopCh
 }
 
 // mockAgentServer creates a test WebSocket server simulating agentctl.
@@ -196,12 +208,14 @@ func TestInitializeAndPrompt_StreamBeforeInitialize(t *testing.T) {
 	defer mock.Close()
 
 	log := newSessionTestLogger()
-	sm := NewSessionManager(log, make(chan struct{}))
+	stopCh := newTestStopCh(t)
+	sm := NewSessionManager(log, stopCh)
 
 	// Set up real stream manager with callbacks
 	streamMgr := NewStreamManager(log, StreamCallbacks{
 		OnAgentEvent: func(execution *AgentExecution, event agentctl.AgentEvent) {},
-	}, nil)
+	}, nil, stopCh)
+	cleanupStreamManager(t, stopCh, streamMgr)
 	sm.SetDependencies(nil, streamMgr, nil, nil)
 
 	client := createTestClient(t, mock.server.URL)
@@ -269,16 +283,27 @@ func TestInitializeAndPrompt_StreamTimeout(t *testing.T) {
 	// This test verifies that InitializeAndPrompt returns an error if
 	// the stream fails to connect within the timeout.
 	log := newSessionTestLogger()
-	sm := NewSessionManager(log, make(chan struct{}))
+	stopCh := newTestStopCh(t)
+	sm := NewSessionManager(log, stopCh)
 
 	// Create a stream manager that will try to connect to a server that doesn't exist
 	streamMgr := NewStreamManager(log, StreamCallbacks{
 		OnAgentEvent: func(execution *AgentExecution, event agentctl.AgentEvent) {},
-	}, nil)
+	}, nil, stopCh)
+	cleanupStreamManager(t, stopCh, streamMgr)
 	sm.SetDependencies(nil, streamMgr, nil, nil)
 
-	// Point client at a port that doesn't exist
-	badClient := agentctl.NewClient("127.0.0.1", 1, log)
+	// Bind to a random port and immediately close it so the port is guaranteed
+	// to be closed and returns connection refused quickly on every system.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	if cerr := ln.Close(); cerr != nil {
+		t.Fatalf("failed to close listener: %v", cerr)
+	}
+	badClient := agentctl.NewClient("127.0.0.1", port, log)
 	defer badClient.Close()
 
 	execution := &AgentExecution{
@@ -304,7 +329,7 @@ func TestInitializeAndPrompt_StreamTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil, func(executionID string) error {
+	err = sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil, func(executionID string) error {
 		return nil
 	}, "", "")
 
@@ -322,11 +347,13 @@ func TestInitializeAndPrompt_WithTaskDescription(t *testing.T) {
 	defer mock.Close()
 
 	log := newSessionTestLogger()
-	sm := NewSessionManager(log, make(chan struct{}))
+	stopCh := newTestStopCh(t)
+	sm := NewSessionManager(log, stopCh)
 
 	streamMgr := NewStreamManager(log, StreamCallbacks{
 		OnAgentEvent: func(execution *AgentExecution, event agentctl.AgentEvent) {},
-	}, nil)
+	}, nil, stopCh)
+	cleanupStreamManager(t, stopCh, streamMgr)
 	sm.SetDependencies(nil, streamMgr, nil, nil)
 
 	client := createTestClient(t, mock.server.URL)

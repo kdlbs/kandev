@@ -8,10 +8,13 @@ import { getColumns } from "./columns";
 import { archiveTask, deleteTask, listTasksByWorkspace } from "@/lib/api";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { KanbanHeader } from "@/components/kanban/kanban-header";
+import { MobileSearchBar } from "@/components/kanban/mobile-search-bar";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Label } from "@kandev/ui/label";
 import type { Task, Workspace, Workflow, WorkflowStep, Repository } from "@/lib/types/http";
 import { useToast } from "@/components/toast-provider";
+import { useAppStore } from "@/components/state-provider";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { useDebounce } from "@/hooks/use-debounce";
 
@@ -410,6 +413,13 @@ function useTasksPageSetup(props: TasksPageClientProps) {
 
 export function TasksPageClient(props: TasksPageClientProps) {
   const s = useTasksPageSetup(props);
+  const { isMobile } = useResponsiveBreakpoint();
+  const isMobileSearchOpen = useAppStore((state) => state.mobileKanban.isSearchOpen);
+  const setMobileSearchOpen = useAppStore((state) => state.setMobileKanbanSearchOpen);
+
+  // Collapse search on unmount so the global flag doesn't auto-open (and focus)
+  // the search bar after navigating to another route.
+  useEffect(() => () => setMobileSearchOpen(false), [setMobileSearchOpen]);
   return (
     <div className="h-screen w-full flex flex-col bg-background">
       <KanbanHeader
@@ -419,6 +429,9 @@ export function TasksPageClient(props: TasksPageClientProps) {
         onSearchChange={s.setSearchQuery}
         isSearchLoading={s.isLoading && !!s.debouncedQuery}
       />
+      {isMobile && isMobileSearchOpen && (
+        <MobileSearchBar searchQuery={s.searchQuery} onSearchChange={s.setSearchQuery} />
+      )}
       <TasksPageBody
         showArchived={s.showArchived}
         setShowArchived={s.setShowArchived}

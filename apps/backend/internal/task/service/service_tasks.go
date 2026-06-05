@@ -24,6 +24,11 @@ import (
 // Used when a caller omits priority so the DB CHECK constraint is satisfied.
 const defaultPriority = "medium"
 
+// ErrSubtaskDepthExceeded is returned when a caller tries to create a
+// subtask of a kanban subtask (nesting depth > 1). Office task trees are
+// intentionally exempt.
+var ErrSubtaskDepthExceeded = fmt.Errorf("cannot create a subtask of a subtask — maximum nesting depth is 1 for kanban tasks. Create a sibling task under the same parent or a top-level task instead")
+
 type taskStopTarget struct {
 	sessionID   string
 	executionID string
@@ -51,6 +56,17 @@ func isOfficeRequest(req *CreateTaskRequest) bool {
 // Ephemeral tasks (quick chat, config chat) must NOT have a workflow.
 func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*models.Task, error) {
 	if err := s.validateCreateTaskRequest(req); err != nil {
+		return nil, err
+	}
+	if err := s.validateSubtaskDepth(ctx, req); err != nil {
+		return nil, err
+	}
+
+	// Subtasks created without explicit repositories inherit the parent's, so
+	// an inherit_parent subtask resolves a repo at launch and can reuse the
+	// parent's worktree (the UI omits repositories expecting this). Mirrors the
+	// MCP create_task path so UI- and agent-created subtasks behave identically.
+	if err := s.inheritParentRepositories(ctx, req); err != nil {
 		return nil, err
 	}
 
@@ -101,6 +117,44 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 	return task, nil
 }
 
+// inheritParentRepositories fills req.Repositories from the parent task when a
+// subtask is created without explicit repositories. This applies to any
+// repo-less subtask (not only inherit_parent ones), matching the MCP
+// create_task path (mcp/handlers.inheritedRepoInputs) so UI- and agent-created
+// subtasks behave identically — the UI's new_workspace mode always sends repos,
+// so in practice only inherit_parent reaches here empty. RepositoryID and
+// BaseBranch carry over; CheckoutBranch is dropped on purpose because two
+// worktrees can't share a working branch, so the subtask branches off the same
+// base as the parent.
+//
+// A lookup failure is returned rather than swallowed: a subtask silently
+// created with no repositories can't establish a worktree, which would
+// reintroduce the exact fresh-worktree bug this inheritance is meant to fix —
+// failing fast surfaces the problem at creation time instead.
+func (s *Service) inheritParentRepositories(ctx context.Context, req *CreateTaskRequest) error {
+	if req.ParentID == "" || len(req.Repositories) > 0 {
+		return nil
+	}
+	parentRepos, err := s.taskRepos.ListTaskRepositories(ctx, req.ParentID)
+	if err != nil {
+		return fmt.Errorf("list parent repositories for subtask inheritance: %w", err)
+	}
+	inherited := make([]TaskRepositoryInput, 0, len(parentRepos))
+	for _, r := range parentRepos {
+		if r == nil || r.RepositoryID == "" {
+			continue
+		}
+		inherited = append(inherited, TaskRepositoryInput{
+			RepositoryID: r.RepositoryID,
+			BaseBranch:   r.BaseBranch,
+		})
+	}
+	if len(inherited) > 0 {
+		req.Repositories = inherited
+	}
+	return nil
+}
+
 // validateCreateTaskRequest validates constraints for task creation.
 func (s *Service) validateCreateTaskRequest(req *CreateTaskRequest) error {
 	isOffice := isOfficeRequest(req)
@@ -109,6 +163,22 @@ func (s *Service) validateCreateTaskRequest(req *CreateTaskRequest) error {
 	}
 	if req.IsEphemeral && req.WorkflowID != "" {
 		return fmt.Errorf("workflow_id must be empty for ephemeral tasks")
+	}
+	return nil
+}
+
+// validateSubtaskDepth prevents nesting deeper than one level for kanban
+// (non-office) tasks. Office task trees intentionally allow arbitrary depth.
+func (s *Service) validateSubtaskDepth(ctx context.Context, req *CreateTaskRequest) error {
+	if req.ParentID == "" {
+		return nil
+	}
+	parent, err := s.tasks.GetTask(ctx, req.ParentID)
+	if err != nil {
+		return fmt.Errorf("invalid parent_id: %w", err)
+	}
+	if parent.ParentID != "" && !parent.IsFromOffice {
+		return ErrSubtaskDepthExceeded
 	}
 	return nil
 }
@@ -233,21 +303,34 @@ func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceI
 
 	seen := make(map[string]bool, len(repositories))
 	for i, repoInput := range repositories {
-		repositoryID, baseBranch, err := s.resolveRepoInput(ctx, workspaceID, repoInput, repoByPath)
+		repositoryID, baseBranch, _, err := s.resolveRepoInput(ctx, workspaceID, repoInput, repoByPath)
 		if err != nil {
 			return err
 		}
 		if repositoryID == "" {
 			return fmt.Errorf("repository_id is required")
 		}
-		// Multi-repo validation: each repository may appear at most once per task.
-		// Without this guard the unique (task_id, repository_id) constraint on
-		// task_repositories would surface as an opaque DB error mid-loop, leaving
-		// some rows already inserted.
-		if seen[repositoryID] {
-			return fmt.Errorf("repository %q listed more than once for the task", repositoryID)
+		// Multi-branch validation: the same repository may appear multiple
+		// times in a task on different branches. Identity is
+		// (repository_id, base_branch, checkout_branch) — base_branch matters
+		// because the worktree executor anchors the branch there while
+		// checkout_branch stays empty, and the local-executor flow puts the
+		// branch in checkout_branch with base_branch anchored to default_branch.
+		// Both shapes must dedup; matching DB key is UNIQUE(task_id,
+		// repository_id, base_branch, checkout_branch).
+		dedupKey := repositoryID + "\x00" + baseBranch + "\x00" + repoInput.CheckoutBranch
+		if seen[dedupKey] {
+			label := s.repoDisplayLabel(ctx, repoInput, repositoryID)
+			branchLabel := repoInput.CheckoutBranch
+			if branchLabel == "" {
+				branchLabel = baseBranch
+			}
+			if branchLabel == "" {
+				return fmt.Errorf("repository %q is listed more than once for this task", label)
+			}
+			return fmt.Errorf("repository %q on branch %q is listed more than once for this task", label, branchLabel)
 		}
-		seen[repositoryID] = true
+		seen[dedupKey] = true
 		metadata := make(map[string]interface{})
 		if prNum := resolvePRNumber(repoInput); prNum > 0 {
 			metadata["pr_number"] = prNum
@@ -268,9 +351,62 @@ func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceI
 	return nil
 }
 
+// repoDisplayLabel returns a human-readable label for a repository to surface
+// in the duplicate-repository error. It prefers owner/name parsed from the
+// input's GitHub URL, then the resolved repo entity's owner/name (or bare
+// name), and finally falls back to the repositoryID so the message is never
+// empty. Best-effort: lookup failures degrade to the next fallback.
+func (s *Service) repoDisplayLabel(ctx context.Context, repoInput TaskRepositoryInput, repositoryID string) string {
+	if repoInput.GitHubURL != "" {
+		if owner, name, err := parseGitHubRepoURL(repoInput.GitHubURL); err == nil {
+			return owner + "/" + name
+		}
+	}
+	if repo, err := s.repoEntities.GetRepository(ctx, repositoryID); err == nil && repo != nil {
+		if repo.ProviderOwner != "" && repo.ProviderName != "" {
+			return repo.ProviderOwner + "/" + repo.ProviderName
+		}
+		if repo.Name != "" {
+			return repo.Name
+		}
+	}
+	return repositoryID
+}
+
+// ResolveRepositoryRef resolves a single TaskRepositoryInput to a
+// (repositoryID, baseBranch) pair within the given workspace, creating the
+// repository if necessary. Mirrors the resolution used during task creation
+// (`createTaskRepositories`), but builds the local-path lookup map on demand
+// so callers that only resolve one input (e.g. add_branch) don't need to
+// thread the map themselves.
+//
+// Accepts inputs identified by RepositoryID, GitHubURL, or LocalPath. Returns
+// an empty repositoryID with no error when none of those are set, letting
+// callers decide whether to fall back to other defaults.
+func (s *Service) ResolveRepositoryRef(ctx context.Context, workspaceID string, repoInput TaskRepositoryInput) (repositoryID, baseBranch string, created bool, err error) {
+	var repoByPath map[string]*models.Repository
+	if repoInput.RepositoryID == "" && repoInput.LocalPath != "" {
+		repos, listErr := s.repoEntities.ListRepositories(ctx, workspaceID)
+		if listErr != nil {
+			return "", "", false, listErr
+		}
+		repoByPath = make(map[string]*models.Repository, len(repos))
+		for _, repo := range repos {
+			if repo.LocalPath == "" {
+				continue
+			}
+			repoByPath[repo.LocalPath] = repo
+		}
+	}
+	return s.resolveRepoInput(ctx, workspaceID, repoInput, repoByPath)
+}
+
 // resolveRepoInput resolves a RepositoryInput to a repositoryID and baseBranch,
-// creating the repository if it doesn't exist yet.
-func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repoInput TaskRepositoryInput, repoByPath map[string]*models.Repository) (repositoryID, baseBranch string, err error) {
+// creating the repository if it doesn't exist yet. Returns created=true only
+// when this call inserted a new Repository row (GitHub-URL miss → CreateRepository
+// or LocalPath miss → CreateRepository); callers that want to roll back a fresh
+// row on a later failure key off this flag.
+func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repoInput TaskRepositoryInput, repoByPath map[string]*models.Repository) (repositoryID, baseBranch string, created bool, err error) {
 	repositoryID = repoInput.RepositoryID
 	baseBranch = repoInput.BaseBranch
 	if repositoryID != "" {
@@ -281,45 +417,35 @@ func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repo
 		// scope through FindOrCreateRepository, which is workspace-bound).
 		repo, lookupErr := s.repoEntities.GetRepository(ctx, repositoryID)
 		if lookupErr != nil {
-			return "", "", fmt.Errorf("looking up repository %q: %w", repositoryID, lookupErr)
+			return "", "", false, fmt.Errorf("looking up repository %q: %w", repositoryID, lookupErr)
 		}
 		if repo == nil || repo.WorkspaceID != workspaceID {
-			return "", "", fmt.Errorf("repository %q does not belong to workspace %q", repositoryID, workspaceID)
+			return "", "", false, fmt.Errorf("repository %q does not belong to workspace %q", repositoryID, workspaceID)
 		}
-		return repositoryID, baseBranch, nil
+		return repositoryID, baseBranch, false, nil
 	}
 
 	// Handle GitHub URL: parse owner/name and use FindOrCreateRepository
 	if repoInput.GitHubURL != "" {
-		owner, name, parseErr := parseGitHubRepoURL(repoInput.GitHubURL)
-		if parseErr != nil {
-			return "", "", parseErr
-		}
-		defaultBranch := repoInput.DefaultBranch
-		if defaultBranch == "" {
-			defaultBranch = repoInput.BaseBranch
-		}
-		repo, createErr := s.FindOrCreateRepository(ctx, &FindOrCreateRepositoryRequest{
-			WorkspaceID:   workspaceID,
-			Provider:      "github",
-			ProviderOwner: owner,
-			ProviderName:  name,
-			DefaultBranch: defaultBranch,
-		})
-		if createErr != nil {
-			return "", "", createErr
-		}
-		repositoryID = repo.ID
-		if baseBranch == "" {
-			baseBranch = repo.DefaultBranch
-		}
-		return repositoryID, baseBranch, nil
+		return s.resolveRepoInputGitHub(ctx, workspaceID, repoInput, baseBranch)
 	}
 
 	if repoInput.LocalPath == "" {
-		return repositoryID, baseBranch, nil
+		return repositoryID, baseBranch, false, nil
 	}
+	return s.resolveRepoInputLocal(ctx, workspaceID, repoInput, repoByPath, baseBranch)
+}
+
+// resolveRepoInputLocal handles the LocalPath branch of resolveRepoInput.
+// Looks the path up in the workspace snapshot; on miss, calls
+// CreateRepository (and reports created=true). Extracted to keep
+// resolveRepoInput inside the cyclomatic-complexity budget.
+func (s *Service) resolveRepoInputLocal(
+	ctx context.Context, workspaceID string, repoInput TaskRepositoryInput,
+	repoByPath map[string]*models.Repository, baseBranch string,
+) (string, string, bool, error) {
 	repo := repoByPath[repoInput.LocalPath]
+	created := false
 	if repo == nil {
 		name := strings.TrimSpace(repoInput.Name)
 		if name == "" {
@@ -345,7 +471,7 @@ func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repo
 				}
 			}
 		}
-		created, createErr := s.CreateRepository(ctx, &CreateRepositoryRequest{
+		createdRepo, createErr := s.CreateRepository(ctx, &CreateRepositoryRequest{
 			WorkspaceID:   workspaceID,
 			Name:          name,
 			SourceType:    "local",
@@ -353,18 +479,83 @@ func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repo
 			DefaultBranch: defaultBranch,
 		})
 		if createErr != nil {
-			return "", "", createErr
+			return "", "", false, createErr
 		}
-		repo = created
+		repo = createdRepo
 		if repoByPath != nil {
 			repoByPath[repoInput.LocalPath] = repo
 		}
+		created = true
 	}
-	repositoryID = repo.ID
 	if baseBranch == "" {
 		baseBranch = repo.DefaultBranch
 	}
-	return repositoryID, baseBranch, nil
+	return repo.ID, baseBranch, created, nil
+}
+
+// resolveRepoInputGitHub handles the GitHub-URL branch of resolveRepoInput:
+// parse owner/name, optionally probe the provider for default_branch, then
+// FindOrCreateRepository. Extracted so resolveRepoInput stays under the
+// cognitive-complexity budget after adding the probe-skip and probe-error
+// arms.
+func (s *Service) resolveRepoInputGitHub(
+	ctx context.Context, workspaceID string, repoInput TaskRepositoryInput, baseBranch string,
+) (string, string, bool, error) {
+	owner, name, parseErr := parseGitHubRepoURL(repoInput.GitHubURL)
+	if parseErr != nil {
+		return "", "", false, parseErr
+	}
+	defaultBranch := repoInput.DefaultBranch
+	if defaultBranch == "" {
+		defaultBranch = repoInput.BaseBranch
+	}
+	if defaultBranch == "" && repoInput.ResolveProviderDefaults && s.providerProber != nil {
+		defaultBranch = s.probeProviderDefaultBranchIfMissing(ctx, workspaceID, "github", owner, name)
+	}
+	repo, repoCreated, createErr := s.FindOrCreateRepository(ctx, &FindOrCreateRepositoryRequest{
+		WorkspaceID:   workspaceID,
+		Provider:      "github",
+		ProviderOwner: owner,
+		ProviderName:  name,
+		DefaultBranch: defaultBranch,
+	})
+	if createErr != nil {
+		return "", "", false, createErr
+	}
+	if baseBranch == "" {
+		baseBranch = repo.DefaultBranch
+	}
+	return repo.ID, baseBranch, repoCreated, nil
+}
+
+// probeProviderDefaultBranchIfMissing returns a default_branch resolved via
+// the provider prober, but only when the workspace doesn't already hold the
+// repo with a non-empty default_branch (the existing value wins downstream,
+// so the remote round-trip would be pure waste). A DB lookup error skips
+// the probe entirely — FindOrCreateRepository will hit the same DB and
+// surface the real cause; we log the lookup failure for observability.
+// Probe errors fall through to "" so the AddBranchToTask gate surfaces an
+// actionable validation rejection rather than a silent orphan.
+func (s *Service) probeProviderDefaultBranchIfMissing(
+	ctx context.Context, workspaceID, provider, owner, name string,
+) string {
+	existing, lookupErr := s.repoEntities.GetRepositoryByProviderInfo(ctx, workspaceID, provider, owner, name)
+	if lookupErr != nil {
+		s.logger.Warn("resolveRepoInput: failed to look up existing repo before probe",
+			zap.String("provider", provider),
+			zap.String("owner", owner),
+			zap.String("name", name),
+			zap.Error(lookupErr))
+		return ""
+	}
+	if existing != nil && existing.DefaultBranch != "" {
+		return ""
+	}
+	probed, probeErr := s.providerProber.ProbeDefaultBranch(ctx, provider, owner, name)
+	if probeErr != nil {
+		return ""
+	}
+	return probed
 }
 
 // parseGitHubRepoURL parses a GitHub repository URL into owner and name.
@@ -970,11 +1161,163 @@ func (s *Service) ListTasksByWorkspace(ctx context.Context, workspaceID, workflo
 		return nil, 0, err
 	}
 
+	tasks, total = s.augmentWithPRMatches(ctx, tasks, total, prSearchOptions{
+		workspaceID:      workspaceID,
+		workflowID:       workflowID,
+		repositoryID:     repositoryID,
+		query:            query,
+		page:             page,
+		pageSize:         pageSize,
+		includeArchived:  includeArchived,
+		includeEphemeral: includeEphemeral,
+		onlyEphemeral:    onlyEphemeral,
+		excludeConfig:    excludeConfig,
+	})
+
 	if err := s.loadTaskRepositoriesBatch(ctx, tasks); err != nil {
 		s.logger.Error("failed to batch-load task repositories", zap.Error(err))
 	}
 
 	return tasks, total, nil
+}
+
+type prSearchOptions struct {
+	workspaceID      string
+	workflowID       string
+	repositoryID     string
+	query            string
+	page             int
+	pageSize         int
+	includeArchived  bool
+	includeEphemeral bool
+	onlyEphemeral    bool
+	excludeConfig    bool
+}
+
+// parsePRQuery extracts a positive PR number from a search query, accepting an
+// optional leading '#'. Returns (0, false) when the query is not a PR number.
+func parsePRQuery(query string) (int, bool) {
+	trimmed := strings.TrimPrefix(strings.TrimSpace(query), "#")
+	if trimmed == "" {
+		return 0, false
+	}
+	n, err := strconv.Atoi(trimmed)
+	if err != nil || n <= 0 {
+		return 0, false
+	}
+	return n, true
+}
+
+// isConfigTask reports whether a task is a config-mode task (mirrors the SQL
+// `json_extract(metadata, '$.config_mode') IS NOT 1` filter). JSON-decoded
+// numbers arrive as float64, so accept both numeric 1 and bool true.
+func isConfigTask(task *models.Task) bool {
+	switch v := task.Metadata["config_mode"].(type) {
+	case float64:
+		return v == 1
+	case int:
+		return v == 1
+	case bool:
+		return v
+	default:
+		return false
+	}
+}
+
+// augmentWithPRMatches surfaces tasks associated with a PR number when the
+// search query looks like one. PR matches are prepended (most relevant) and
+// deduped against the existing results; `total` grows by the net-new count.
+// Best-effort: a missing resolver or a lookup error leaves results unchanged.
+//
+// Augmentation only applies to the first page of an unscoped search. It is
+// skipped for page > 1 (the prepend+truncate only makes sense against page 1,
+// otherwise a PR match would re-appear on every page and push out a real
+// result) and when a workflow or repository filter is set (a PR-matched task
+// isn't guaranteed to satisfy those filters, and the only caller that searches
+// by PR number — the Cmd+K command panel — sets neither).
+func (s *Service) augmentWithPRMatches(ctx context.Context, tasks []*models.Task, total int, opts prSearchOptions) ([]*models.Task, int) {
+	if opts.page > 1 || opts.workflowID != "" || opts.repositoryID != "" {
+		return tasks, total
+	}
+	prNum, ok := parsePRQuery(opts.query)
+	if !ok || s.prTaskResolver == nil {
+		return tasks, total
+	}
+	ids, err := s.prTaskResolver.FindTaskIDsByPRNumber(ctx, opts.workspaceID, prNum)
+	if err != nil {
+		s.logger.Warn("PR-number task lookup failed", zap.Int("pr_number", prNum), zap.Error(err))
+		return tasks, total
+	}
+
+	matched := s.fetchPRMatchedTasks(ctx, ids, tasks, opts)
+	if len(matched) == 0 {
+		return tasks, total
+	}
+
+	merged := make([]*models.Task, 0, len(matched)+len(tasks))
+	merged = append(merged, matched...)
+	merged = append(merged, tasks...)
+	total += len(matched)
+	if len(merged) > opts.pageSize {
+		merged = merged[:opts.pageSize]
+	}
+	return merged, total
+}
+
+// fetchPRMatchedTasks batch-loads the resolver's task IDs that aren't already in
+// `existing`, applies the same visibility filters as the repository search, and
+// returns the survivors in resolver order. The resolver returns distinct IDs,
+// so excluding the already-present ones is enough to keep the result deduped.
+func (s *Service) fetchPRMatchedTasks(ctx context.Context, ids []string, existing []*models.Task, opts prSearchOptions) []*models.Task {
+	seen := make(map[string]struct{}, len(existing))
+	for _, t := range existing {
+		seen[t.ID] = struct{}{}
+	}
+	var fetchIDs []string
+	for _, id := range ids {
+		if _, ok := seen[id]; !ok {
+			fetchIDs = append(fetchIDs, id)
+		}
+	}
+	if len(fetchIDs) == 0 {
+		return nil
+	}
+	fetched, err := s.tasks.GetTasksByIDs(ctx, fetchIDs)
+	if err != nil {
+		s.logger.Warn("PR-match task fetch failed", zap.Error(err))
+		return nil
+	}
+	byID := make(map[string]*models.Task, len(fetched))
+	for _, t := range fetched {
+		byID[t.ID] = t
+	}
+	var matched []*models.Task
+	for _, id := range fetchIDs {
+		task := byID[id]
+		if task == nil || s.prMatchFilteredOut(task, opts) {
+			continue
+		}
+		matched = append(matched, task)
+	}
+	return matched
+}
+
+// prMatchFilteredOut applies the same visibility filters the repository search
+// uses, so a PR-matched task respects includeArchived / ephemeral / config flags.
+func (s *Service) prMatchFilteredOut(task *models.Task, opts prSearchOptions) bool {
+	if !opts.includeArchived && task.ArchivedAt != nil {
+		return true
+	}
+	if opts.onlyEphemeral && !task.IsEphemeral {
+		return true
+	}
+	if !opts.includeEphemeral && !opts.onlyEphemeral && task.IsEphemeral {
+		return true
+	}
+	if opts.excludeConfig && isConfigTask(task) {
+		return true
+	}
+	return false
 }
 
 // loadTaskRepositoriesBatch loads repositories for multiple tasks in a single query.

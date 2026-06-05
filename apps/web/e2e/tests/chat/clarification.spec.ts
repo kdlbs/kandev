@@ -78,7 +78,7 @@ test.describe("Clarification flow", () => {
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
   });
 
-  test("timeout closes overlay and renders expired entry in history", async ({
+  test("timeout detaches clarification but keeps overlay for deferred answer", async ({
     testPage,
     apiClient,
     seedData,
@@ -92,11 +92,13 @@ test.describe("Clarification flow", () => {
     );
 
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
-    await expect(session.chat).toContainText("timed out", { timeout: 30_000 });
-    await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 10_000 });
-    await expect(session.clarificationDeferredNotice()).not.toBeVisible();
-    await expect(session.clarificationExpiredNotice()).toBeVisible();
-    await expect(session.idleInput()).toBeVisible({ timeout: 10_000 });
+    await expect(session.chat).toContainText("Question timed out", { timeout: 30_000 });
+    await expect(session.clarificationDeferredNotice()).toBeVisible({ timeout: 10_000 });
+    await expect(session.clarificationExpiredNotice()).not.toBeVisible();
+
+    // Agent moved on; a late answer goes through the event fallback as a new prompt.
+    await session.clarificationOption("PostgreSQL").click();
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
   });
 
   test("options render label and description on separate rows", async ({

@@ -30,12 +30,20 @@ vi.mock("./layout-manager", () => {
     savedLayoutMatchesLive: vi.fn(() => false),
     layoutStructuresMatch: vi.fn(() => true),
     getRootSplitview: vi.fn(),
-    getPinnedWidth: vi.fn(() => 350),
+    // Distinct per-column defaults so we can prove the sidebar branch ignores
+    // saved per-env sizes (it routes through getPinnedWidth, which honors the
+    // global pref) while the right branch keeps using saved sizes.
+    getPinnedWidth: vi.fn((col: { id: string }) => (col.id === "sidebar" ? 300 : 350)),
+    // Used by applyPinnedColumnSizes and (indirectly) by the
+    // formatWidthsSnapshot debug log it now emits.
+    setPinnedTarget: vi.fn(),
+    getPinnedTarget: vi.fn(() => undefined),
   };
 });
 
 import { getEnvLayout } from "@/lib/local-storage";
 import { getRootSplitview, savedLayoutMatchesLive } from "./layout-manager";
+import { applyLayoutFixups } from "./dockview-layout-builders";
 
 function makeMockApi(): EnvSwitchParams["api"] {
   return {
@@ -83,15 +91,16 @@ describe("performEnvSwitch — pinned column resize after fast-path", () => {
 
     performEnvSwitch(makeParams());
 
-    expect(resizeView).toHaveBeenCalledWith(0, 350);
-    expect(resizeView).toHaveBeenCalledWith(2, 350);
+    expect(resizeView).toHaveBeenCalledWith(0, 300); // sidebar default (global)
+    expect(resizeView).toHaveBeenCalledWith(2, 350); // right default
     // center column is at index 1 and is not pinned — must not be resized.
     expect(resizeView).not.toHaveBeenCalledWith(1, expect.anything());
   });
 
-  it("uses the saved layout's per-column sizes when present", () => {
-    // When a saved layout exists for the incoming env, its serialized
-    // grid.root.data[i].size wins over the ratio-based default.
+  it("ignores the saved sidebar size and uses the global width instead", () => {
+    // The sidebar is a GLOBAL pref shared across tasks, so the incoming env's
+    // saved sidebar size (420 below) must NOT win — it routes through
+    // getPinnedWidth (mocked to 300 for the sidebar).
     const savedLayout = {
       grid: {
         root: {
@@ -127,15 +136,12 @@ describe("performEnvSwitch — pinned column resize after fast-path", () => {
 
     performEnvSwitch(makeParams());
 
-    expect(resizeView).toHaveBeenCalledWith(0, 420);
-    // Only sidebar/right are resized; with 2 sv slots and 3 columns, the
-    // loop bound is min(3, 2) = 2, so center (index 1) is the last iterated
-    // but since columns[1] = "center" (not pinned), no resize fires. Right
-    // is at index 2 in the column list which exceeds sv.length so isn't
-    // hit; this scenario covers the saved-sidebar restoration path only.
+    // Saved sidebar size (420) is ignored; the global default (300) wins.
+    expect(resizeView).toHaveBeenCalledWith(0, 300);
+    expect(resizeView).not.toHaveBeenCalledWith(0, 420);
   });
 
-  it("applies saved widths to both sidebar AND right when sv.length matches", () => {
+  it("uses the saved size for RIGHT but the global width for the sidebar", () => {
     // Cover the 3-column saved-layout path so the right column's
     // saved-size branch is exercised. The previous test exits the loop
     // before reaching the right column because sv.length = 2.
@@ -177,10 +183,16 @@ describe("performEnvSwitch — pinned column resize after fast-path", () => {
 
     performEnvSwitch(makeParams());
 
-    // Both pinned columns get their saved size; center (index 1) is not
+    // Sidebar ignores its saved size (420) → global default 300; the right
+    // column still restores its saved size (420). Center (index 1) is not
     // pinned and is skipped.
-    expect(resizeView).toHaveBeenCalledWith(0, 420);
+    expect(resizeView).toHaveBeenCalledWith(0, 300);
     expect(resizeView).toHaveBeenCalledWith(2, 420);
     expect(resizeView).not.toHaveBeenCalledWith(1, expect.anything());
+
+    // The saved right width is also forwarded to applyLayoutFixups so the
+    // fixups pass anchors the right target to the per-env saved width (420)
+    // rather than re-capturing dockview's transient post-fromJSON live size.
+    expect(applyLayoutFixups).toHaveBeenCalledWith(expect.anything(), 420);
   });
 });

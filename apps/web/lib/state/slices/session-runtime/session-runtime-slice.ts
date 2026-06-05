@@ -6,7 +6,7 @@ import type {
   GitStatusEntry,
   FileInfo,
 } from "./types";
-import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
 const debugGit = createDebugLogger("git-status:store");
 
@@ -27,45 +27,124 @@ function computeFileStats(files: Record<string, FileInfo> | undefined): {
   return { additions, deletions };
 }
 
-/** Check if any file's staged status differs between two git statuses. */
-function hasStagedDifference(
+function sameStringList(existing: string[] | undefined, incoming: string[] | undefined): boolean {
+  const a = existing ?? [];
+  const b = incoming ?? [];
+  if (a.length !== b.length) return false;
+  const sortedA = [...a].sort();
+  const sortedB = [...b].sort();
+  return sortedA.every((value, index) => value === sortedB[index]);
+}
+
+const COMPARABLE_FILE_FIELDS = [
+  "path",
+  "status",
+  "staged",
+  "additions",
+  "deletions",
+  "old_path",
+  "diff",
+  "diff_skip_reason",
+  "repository_name",
+] as const;
+
+function comparableFileInfo(file: FileInfo) {
+  return {
+    path: file.path,
+    status: file.status,
+    staged: file.staged,
+    additions: file.additions ?? 0,
+    deletions: file.deletions ?? 0,
+    old_path: file.old_path ?? "",
+    diff: file.diff ?? "",
+    diff_skip_reason: file.diff_skip_reason ?? "",
+    repository_name: file.repository_name ?? "",
+  };
+}
+
+function sameFileInfo(existing: FileInfo | undefined, incoming: FileInfo | undefined): boolean {
+  if (!existing || !incoming) return existing === incoming;
+  const a = comparableFileInfo(existing);
+  const b = comparableFileInfo(incoming);
+  return COMPARABLE_FILE_FIELDS.every((field) => a[field] === b[field]);
+}
+
+function sameFiles(
   existingFiles: Record<string, FileInfo> | undefined,
   newFiles: Record<string, FileInfo> | undefined,
 ): boolean {
-  if (!existingFiles || !newFiles) return existingFiles !== newFiles;
-  for (const key of Object.keys(newFiles)) {
-    if (existingFiles[key]?.staged !== newFiles[key]?.staged) return true;
+  if (!existingFiles || !newFiles) return existingFiles === newFiles;
+  const existingFileKeys = Object.keys(existingFiles).sort();
+  const newFileKeys = Object.keys(newFiles).sort();
+  if (existingFileKeys.length !== newFileKeys.length) return false;
+  for (let i = 0; i < existingFileKeys.length; i += 1) {
+    const key = existingFileKeys[i];
+    if (key !== newFileKeys[i]) return false;
+    if (!sameFileInfo(existingFiles[key], newFiles[key])) return false;
   }
-  return false;
+  return true;
+}
+
+function hasBranchSummaryChanged(existing: GitStatusEntry, incoming: GitStatusEntry): boolean {
+  return (
+    existing.branch !== incoming.branch ||
+    existing.remote_branch !== incoming.remote_branch ||
+    existing.ahead !== incoming.ahead ||
+    existing.behind !== incoming.behind ||
+    (existing.repository_name ?? "") !== (incoming.repository_name ?? "") ||
+    existing.branch_additions !== incoming.branch_additions ||
+    existing.branch_deletions !== incoming.branch_deletions
+  );
+}
+
+function hasFileListsChanged(existing: GitStatusEntry, incoming: GitStatusEntry): boolean {
+  return (
+    !sameStringList(existing.modified, incoming.modified) ||
+    !sameStringList(existing.added, incoming.added) ||
+    !sameStringList(existing.deleted, incoming.deleted) ||
+    !sameStringList(existing.untracked, incoming.untracked) ||
+    !sameStringList(existing.renamed, incoming.renamed)
+  );
+}
+
+function hasFileStatsChanged(existing: GitStatusEntry, incoming: GitStatusEntry): boolean {
+  // Fast early-exit: aggregate totals differ → sameFiles would also return false,
+  // but this avoids the per-file deep comparison when the gross numbers differ.
+  const existingTotal = computeFileStats(existing.files);
+  const newTotal = computeFileStats(incoming.files);
+  return (
+    existingTotal.additions !== newTotal.additions || existingTotal.deletions !== newTotal.deletions
+  );
+}
+
+/** True when setGitStatus would write at least one map entry for this update. */
+export function gitStatusWouldMutate(
+  gitStatusState: SessionRuntimeSliceState["gitStatus"],
+  envKey: string,
+  gitStatus: GitStatusEntry,
+): boolean {
+  const repoName = gitStatus.repository_name ?? "";
+  const existingEnv = gitStatusState.byEnvironmentId[envKey];
+  const existingRepo = gitStatusState.byEnvironmentRepo[envKey]?.[repoName];
+  const repoChanged = !existingRepo || hasGitStatusChanged(existingRepo, gitStatus);
+  if (repoName !== "") {
+    return repoChanged;
+  }
+  const envChanged = !existingEnv || hasGitStatusChanged(existingEnv, gitStatus);
+  return envChanged || repoChanged;
 }
 
 /** Compare two git status entries to determine if a meaningful change occurred. */
-function hasGitStatusChanged(existing: GitStatusEntry, incoming: GitStatusEntry): boolean {
-  // Timestamp change means the backend detected a real change — always accept.
-  if (existing.timestamp !== incoming.timestamp) return true;
-
-  if (existing.branch !== incoming.branch || existing.remote_branch !== incoming.remote_branch)
-    return true;
-  if (existing.ahead !== incoming.ahead || existing.behind !== incoming.behind) return true;
-  if (
-    existing.branch_additions !== incoming.branch_additions ||
-    existing.branch_deletions !== incoming.branch_deletions
-  )
-    return true;
-
-  const existingFileKeys = existing.files ? Object.keys(existing.files).sort().join(",") : "";
-  const newFileKeys = incoming.files ? Object.keys(incoming.files).sort().join(",") : "";
-  if (existingFileKeys !== newFileKeys) return true;
-
-  const existingTotal = computeFileStats(existing.files);
-  const newTotal = computeFileStats(incoming.files);
-  if (
-    existingTotal.additions !== newTotal.additions ||
-    existingTotal.deletions !== newTotal.deletions
-  )
-    return true;
-
-  return hasStagedDifference(existing.files, incoming.files);
+export function hasGitStatusChanged(existing: GitStatusEntry, incoming: GitStatusEntry): boolean {
+  // The backend also emits fresh snapshots for focus/startup/poll events. Those
+  // can carry a new timestamp for identical git data, so timestamp alone must
+  // not force a store update or diff-cache invalidation.
+  return (
+    hasBranchSummaryChanged(existing, incoming) ||
+    hasFileListsChanged(existing, incoming) ||
+    hasFileStatsChanged(existing, incoming) ||
+    !sameFiles(existing.files, incoming.files)
+  );
 }
 
 function trimProcessOutput(value: string) {
@@ -87,7 +166,7 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
   },
   gitStatus: { byEnvironmentId: {}, byEnvironmentRepo: {} },
   environmentIdBySessionId: {},
-  sessionCommits: { byEnvironmentId: {}, loading: {} },
+  sessionCommits: { byEnvironmentId: {}, loading: {}, refetchTrigger: {} },
   contextWindow: { bySessionId: {} },
   agents: { agents: [] },
   availableCommands: { bySessionId: {} },
@@ -164,13 +243,20 @@ function buildSessionCommitActions(set: ImmerSet) {
     setSessionCommits: (
       sessionId: string,
       commits: Parameters<SessionRuntimeSlice["setSessionCommits"]>[1],
+      opts?: { allowEmpty?: boolean },
     ) =>
       set((draft) => {
         const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
         const existing = draft.sessionCommits.byEnvironmentId[envKey];
-        // Prevent a stale empty-array response from overwriting commits that
-        // arrived via incremental notifications while the request was in flight.
-        if (commits.length === 0 && existing && existing.length > 0) {
+        // Default guard: prevent a stale empty-array response from overwriting
+        // commits that arrived via incremental notifications while the request
+        // was in flight (race between fetch start and commit_created events).
+        //
+        // Under stale-while-revalidate, a `commits_reset` or `branch_switched`
+        // refetch can *legitimately* return [] — the backend actually has no
+        // commits. The caller must opt in to that path with `allowEmpty: true`
+        // so the panel stops showing the pre-reset list.
+        if (!opts?.allowEmpty && commits.length === 0 && existing && existing.length > 0) {
           return;
         }
         draft.sessionCommits.byEnvironmentId[envKey] = commits;
@@ -199,6 +285,12 @@ function buildSessionCommitActions(set: ImmerSet) {
       set((draft) => {
         const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
         delete draft.sessionCommits.byEnvironmentId[envKey];
+      }),
+    bumpSessionCommitsRefetch: (sessionId: string) =>
+      set((draft) => {
+        const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
+        const prev = draft.sessionCommits.refetchTrigger[envKey] ?? 0;
+        draft.sessionCommits.refetchTrigger[envKey] = prev + 1;
       }),
   };
 }
@@ -281,6 +373,7 @@ export function migrateEnvKeyedData(
   migrate(draft.sessionCommits.byEnvironmentId);
   migrate(draft.gitStatus.byEnvironmentRepo);
   migrate(draft.sessionCommits.loading);
+  migrate(draft.sessionCommits.refetchTrigger);
   migrate(draft.gitStatus.byEnvironmentId);
   migrate(draft.shell.outputs);
   migrate(draft.shell.statuses);
@@ -305,26 +398,32 @@ export const createSessionRuntimeSlice: StateCreator<
       // single-status path; the per-repo map mirrors the same entry under an
       // empty key so consumers using only byEnvironmentRepo still see it.
       const repoName = gitStatus.repository_name ?? "";
-      const existing = draft.gitStatus.byEnvironmentId[envKey];
-      if (IS_DEBUG) {
+      const repoMap = (draft.gitStatus.byEnvironmentRepo[envKey] ??= {});
+      const existingRepo = repoMap[repoName];
+      const repoChanged = !existingRepo || hasGitStatusChanged(existingRepo, gitStatus);
+      if (isDebug()) {
         debugGit("setGitStatus", {
           sessionId,
           envKey,
           usingFallbackKey: envKey === sessionId,
           repoName,
-          prevFileCount: Object.keys(existing?.files ?? {}).length,
+          prevFileCount: Object.keys(existingRepo?.files ?? {}).length,
           nextFileCount: Object.keys(gitStatus.files ?? {}).length,
-          prevRepoKeys: Object.keys(draft.gitStatus.byEnvironmentRepo[envKey] ?? {}),
-          willOverwriteByEnv: !existing || hasGitStatusChanged(existing, gitStatus),
+          prevRepoKeys: Object.keys(repoMap),
+          willMutate: gitStatusWouldMutate(draft.gitStatus, envKey, gitStatus),
         });
       }
-      if (!existing || hasGitStatusChanged(existing, gitStatus)) {
-        draft.gitStatus.byEnvironmentId[envKey] = gitStatus;
-      }
-      const repoMap = (draft.gitStatus.byEnvironmentRepo[envKey] ??= {});
-      const existingRepo = repoMap[repoName];
-      if (!existingRepo || hasGitStatusChanged(existingRepo, gitStatus)) {
+      if (repoChanged) {
         repoMap[repoName] = gitStatus;
+      }
+      if (repoName === "") {
+        const existing = draft.gitStatus.byEnvironmentId[envKey];
+        if (!existing || hasGitStatusChanged(existing, gitStatus)) {
+          draft.gitStatus.byEnvironmentId[envKey] = gitStatus;
+        }
+      } else if (repoChanged) {
+        // Multi-repo: only mirror into the legacy map when this repo's entry changed.
+        draft.gitStatus.byEnvironmentId[envKey] = gitStatus;
       }
     }),
   clearGitStatus: (sessionId) =>
@@ -332,6 +431,21 @@ export const createSessionRuntimeSlice: StateCreator<
       const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
       delete draft.gitStatus.byEnvironmentId[envKey];
       delete draft.gitStatus.byEnvironmentRepo[envKey];
+    }),
+  clearLegacyGitStatusEntry: (sessionId) =>
+    set((draft) => {
+      // Drops the single-repo (empty-repo-name) entries so a session that just
+      // transitioned to multi-repo via add_branch_to_task stops surfacing the
+      // pre-transition snapshot — its workspace tracker was replaced on the
+      // backend and will never emit another update under the empty key. The
+      // per-repo entries (real repo names) are intentionally left in place;
+      // they continue to receive fresh status updates from the new trackers.
+      const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
+      const repoMap = draft.gitStatus.byEnvironmentRepo[envKey];
+      if (repoMap && "" in repoMap) {
+        delete repoMap[""];
+      }
+      delete draft.gitStatus.byEnvironmentId[envKey];
     }),
   registerSessionEnvironment: (sessionId, environmentId) =>
     set((draft) => {

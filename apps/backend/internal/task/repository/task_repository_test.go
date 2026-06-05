@@ -129,6 +129,56 @@ func TestSQLiteRepository_UpdateTaskStateNotFound(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepository_UpdateTaskStateIfCurrentIn(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	workflow := &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Test Workflow"}
+	_ = repo.CreateWorkflow(ctx, workflow)
+	task := &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test", State: v1.TaskStateInProgress}
+	_ = repo.CreateTask(ctx, task)
+
+	oldState, updated, err := repo.UpdateTaskStateIfCurrentIn(
+		ctx, "task-123", v1.TaskStateWaitingForInput,
+		[]v1.TaskState{v1.TaskStateInProgress, v1.TaskStateScheduling},
+	)
+	if err != nil {
+		t.Fatalf("conditional update failed: %v", err)
+	}
+	if !updated {
+		t.Fatal("expected update from IN_PROGRESS")
+	}
+	if oldState != v1.TaskStateInProgress {
+		t.Fatalf("old state = %q, want IN_PROGRESS", oldState)
+	}
+
+	retrieved, _ := repo.GetTask(ctx, "task-123")
+	if retrieved.State != v1.TaskStateWaitingForInput {
+		t.Fatalf("expected WAITING_FOR_INPUT, got %s", retrieved.State)
+	}
+
+	_, updated, err = repo.UpdateTaskStateIfCurrentIn(
+		ctx, "task-123", v1.TaskStateWaitingForInput,
+		[]v1.TaskState{v1.TaskStateInProgress, v1.TaskStateScheduling},
+	)
+	if err != nil {
+		t.Fatalf("second conditional update failed: %v", err)
+	}
+	if updated {
+		t.Fatal("expected no update when current state is not allowed")
+	}
+
+	_, updated, err = repo.UpdateTaskStateIfCurrentIn(ctx, "missing", v1.TaskStateReview, []v1.TaskState{v1.TaskStateInProgress})
+	if err == nil {
+		t.Fatal("expected error for missing task")
+	}
+	if updated {
+		t.Fatal("expected no update for missing task")
+	}
+}
+
 func TestSQLiteRepository_ListTasks(t *testing.T) {
 	repo, cleanup := createTestSQLiteRepo(t)
 	defer cleanup()
@@ -148,6 +198,40 @@ func TestSQLiteRepository_ListTasks(t *testing.T) {
 	}
 	if len(tasks) != 2 {
 		t.Errorf("expected 2 tasks, got %d", len(tasks))
+	}
+}
+
+func TestSQLiteRepository_GetTasksByIDs(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
+	for _, id := range []string{"task-1", "task-2", "task-3"} {
+		_ = repo.CreateTask(ctx, &models.Task{ID: id, WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: id})
+	}
+
+	// Empty input returns no tasks and no error.
+	none, err := repo.GetTasksByIDs(ctx, nil)
+	if err != nil {
+		t.Fatalf("GetTasksByIDs(nil): %v", err)
+	}
+	if len(none) != 0 {
+		t.Errorf("expected 0 tasks for empty input, got %d", len(none))
+	}
+
+	// Existing + missing IDs: only the existing ones come back.
+	got, err := repo.GetTasksByIDs(ctx, []string{"task-1", "task-3", "missing"})
+	if err != nil {
+		t.Fatalf("GetTasksByIDs: %v", err)
+	}
+	ids := map[string]bool{}
+	for _, tk := range got {
+		ids[tk.ID] = true
+	}
+	if len(got) != 2 || !ids["task-1"] || !ids["task-3"] {
+		t.Errorf("expected [task-1 task-3], got %v", ids)
 	}
 }
 

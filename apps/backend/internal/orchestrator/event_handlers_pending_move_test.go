@@ -676,7 +676,7 @@ func TestHandleAgentBootReady_DrainsOrphanedQueuedMessage(t *testing.T) {
 				agentManager: agentMgr,
 				messageQueue: messagequeue.NewServiceMemory(log),
 				// Wire a real executor so the executeQueuedMessage goroutine
-				// spawned by drainQueuedMessageAfterTransition can safely call
+				// spawned by drainQueuedMessageForPromptableSession can safely call
 				// PromptTask -> executor.GetExecutionBySession without nil-derefing.
 				executor: executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}),
 			}
@@ -701,14 +701,22 @@ func TestHandleAgentBootReady_DrainsOrphanedQueuedMessage(t *testing.T) {
 				t.Errorf("queue count after boot ready = %d, want 0 (orphaned message must be drained)", got)
 			}
 
-			// Session must still end up WAITING_FOR_INPUT — the drain is
-			// additive, not a replacement for the existing flip behavior.
+			// The handler synchronously flips the session to WAITING_FOR_INPUT
+			// (line 173 of event_handlers_agent.go) and then spawns
+			// executeQueuedMessage in a goroutine; that goroutine calls
+			// PromptTask which immediately moves state to RUNNING. We can race
+			// with that goroutine on slow CI runners, so accept either
+			// WAITING_FOR_INPUT (goroutine hasn't transitioned yet) or RUNNING
+			// (goroutine got ahead of us). Either proves the boot-ready flip
+			// landed; the orphaned-message regression we guard against would
+			// leave state stuck on STARTING with the queue still full.
 			finalSess, err := repo.GetTaskSession(ctx, sessionID)
 			if err != nil {
 				t.Fatalf("load session: %v", err)
 			}
-			if finalSess.State != models.TaskSessionStateWaitingForInput {
-				t.Errorf("session.State = %q, want WAITING_FOR_INPUT", finalSess.State)
+			if finalSess.State != models.TaskSessionStateWaitingForInput &&
+				finalSess.State != models.TaskSessionStateRunning {
+				t.Errorf("session.State = %q, want WAITING_FOR_INPUT or RUNNING (post-flip, possibly post-goroutine)", finalSess.State)
 			}
 		})
 	}
@@ -770,5 +778,46 @@ func TestHandleAgentBootReady_DoesNotDrainForTerminalSession(t *testing.T) {
 
 	if got := svc.messageQueue.GetStatus(ctx, sessionID).Count; got != 1 {
 		t.Errorf("queue count after boot ready on terminal session = %d, want 1 (must not drain)", got)
+	}
+}
+
+func TestHandleAgentBootReady_DoesNotDrainWhileCancelInFlight(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
+
+	log := testLogger()
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+		promptDone:             make(chan struct{}),
+	}
+	svc := &Service{
+		logger:       log,
+		repo:         repo,
+		taskRepo:     newMockTaskRepo(),
+		agentManager: agentMgr,
+		messageQueue: messagequeue.NewServiceMemory(log),
+		executor:     executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}),
+	}
+
+	if _, err := svc.messageQueue.QueueMessage(
+		ctx, "s1", "t1", "queued after cancel", "",
+		messagequeue.QueuedByUser, false, nil,
+	); err != nil {
+		t.Fatalf("queue prompt: %v", err)
+	}
+	svc.cancelInFlight.Store("s1", struct{}{})
+	defer svc.cancelInFlight.Delete("s1")
+
+	svc.handleAgentBootReady(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
+
+	status := svc.messageQueue.GetStatus(ctx, "s1")
+	if status.Count != 1 {
+		t.Fatalf("queue count after boot ready during cancel = %d, want 1", status.Count)
+	}
+	if len(agentMgr.capturedPrompts) != 0 {
+		t.Fatalf("expected no queued prompt dispatch during cancel, got %d prompts", len(agentMgr.capturedPrompts))
 	}
 }

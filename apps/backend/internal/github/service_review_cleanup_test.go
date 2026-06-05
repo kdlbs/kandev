@@ -74,11 +74,14 @@ func TestCleanupMergedReviewTasks_TaskAlreadyDeleted(t *testing.T) {
 	}
 }
 
-// Regression: when a task already has a TaskPR row pointing to an old PR
-// (e.g. the first PR was closed and a second one opened on the same or a new
-// branch), AssociatePRWithTask must replace the stale row so downstream
-// consumers (UI, GetTaskPR) observe the current PR rather than the old one.
-func TestAssociatePRWithTask_ReplacesStaleAssociation(t *testing.T) {
+// Regression: when a task already has a TaskPR row pointing to PR #1 and
+// AssociatePRWithTask is called with a different PR #2 (e.g. first PR
+// closed, new PR opened — or a multi-branch task gaining a second PR on a
+// different branch), the new row must be inserted as a sibling without
+// touching the existing #1 row. Multi-branch tasks rely on this so two
+// PRs on the same (task, repo) coexist; the old "delete-then-insert"
+// behavior collapsed multi-branch tasks down to one PR row.
+func TestAssociatePRWithTask_AddsSecondPRAsSibling(t *testing.T) {
 	svc, store, _ := setupSyncTest(t)
 	ctx := context.Background()
 
@@ -97,7 +100,7 @@ func TestAssociatePRWithTask_ReplacesStaleAssociation(t *testing.T) {
 		t.Fatalf("seed TaskPR: %v", err)
 	}
 
-	// Associate a new PR #2 (could be on same or different branch).
+	// Associate a new PR #2 on a different branch.
 	newPR := &PR{
 		Number:      2,
 		Title:       "Second",
@@ -117,11 +120,18 @@ func TestAssociatePRWithTask_ReplacesStaleAssociation(t *testing.T) {
 		t.Errorf("returned TaskPR.PRNumber=%d, want 2", tp.PRNumber)
 	}
 
-	got, err := store.GetTaskPR(ctx, "t1")
+	all, err := store.ListTaskPRsByTask(ctx, "t1")
 	if err != nil {
-		t.Fatalf("GetTaskPR: %v", err)
+		t.Fatalf("ListTaskPRsByTask: %v", err)
 	}
-	if got == nil || got.PRNumber != 2 {
-		t.Errorf("GetTaskPR after replace = %+v, want PRNumber=2", got)
+	if len(all) != 2 {
+		t.Fatalf("expected 2 PR rows after associating second PR, got %d", len(all))
+	}
+	nums := map[int]bool{}
+	for _, r := range all {
+		nums[r.PRNumber] = true
+	}
+	if !nums[1] || !nums[2] {
+		t.Errorf("missing expected PR numbers: %v", nums)
 	}
 }

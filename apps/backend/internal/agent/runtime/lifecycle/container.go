@@ -47,6 +47,10 @@ type ContainerConfig struct {
 	LocalClonePath    string                 // Host path for file:// repository clone URLs; mounted read-only at the same path.
 	BootstrapNonce    string                 // one-time nonce for agentctl handshake (set internally)
 	Metadata          map[string]interface{} // Optional metadata (e.g., office runtime dir)
+	// BaseBranches maps RepositoryName → base branch ref; forwarded into
+	// agentctl's CreateInstanceRequest so each WorkspaceTracker resolves
+	// diff stats against the task-recorded base.
+	BaseBranches map[string]string
 }
 
 // ContainerManager handles Docker container lifecycle operations
@@ -202,24 +206,31 @@ func (cm *ContainerManager) createInstanceAndClient(
 	}
 	disableAskQuestion := agents.IsPassthroughOnly(config.AgentConfig)
 	assumeMcpSse := false
+	assumeMcpHttp := false
+	requiresProcessKill := false
 	if config.AgentConfig != nil {
 		if rt := config.AgentConfig.Runtime(); rt != nil {
 			assumeMcpSse = rt.AssumeMcpSse
+			assumeMcpHttp = rt.AssumeMcpHttp
+			requiresProcessKill = rt.RequiresProcessKill
 		}
 	}
 
 	createReq := &agentctl.CreateInstanceRequest{
-		ID:                 config.InstanceID,
-		WorkspacePath:      "/workspace",
-		AgentCommand:       "",
-		AgentType:          agentType,
-		Env:                config.Credentials,
-		AutoStart:          false,
-		McpServers:         config.McpServers,
-		SessionID:          config.SessionID,
-		DisableAskQuestion: disableAskQuestion,
-		AssumeMcpSse:       assumeMcpSse,
-		McpMode:            config.McpMode,
+		ID:                  config.InstanceID,
+		WorkspacePath:       "/workspace",
+		AgentCommand:        "",
+		AgentType:           agentType,
+		Env:                 config.Credentials,
+		AutoStart:           false,
+		McpServers:          config.McpServers,
+		SessionID:           config.SessionID,
+		DisableAskQuestion:  disableAskQuestion,
+		AssumeMcpSse:        assumeMcpSse,
+		AssumeMcpHttp:       assumeMcpHttp,
+		McpMode:             config.McpMode,
+		RequiresProcessKill: requiresProcessKill,
+		BaseBranches:        config.BaseBranches,
 	}
 
 	resp, err := ctl.CreateInstance(ctx, createReq)

@@ -37,6 +37,21 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"kandev-mcp-permission":   scenarioKandevMCPPermission,
 	"review-cumulative-setup": scenarioReviewCumulativeSetup,
 	"symlink-file-setup":      scenarioSymlinkFileSetup,
+	"markdown-table":          scenarioMarkdownTable,
+	"empty-turn":              scenarioEmptyTurn,
+}
+
+// scenarioEmptyTurn emits no content and no tool calls, so the turn ends
+// cleanly with no agent output. Reproduces the case where an agent treats a
+// prompt (e.g. an unsupported slash command) as a no-op and returns an empty
+// end_turn. Drives the frontend "empty turn" notice.
+func scenarioEmptyTurn(e *emitter) {
+	_ = e
+	// Stay "running" for a few seconds rather than returning instantly. The
+	// empty-turn notice is driven by the live turn.completed event, so the turn
+	// must outlast the client's initial WS subscribe (especially on mobile,
+	// where a fast auto-start turn can finish before the chat subscribes).
+	fixedDelay(3000)
 }
 
 // emitPredefinedScenario dispatches to a named e2e scenario.
@@ -189,22 +204,38 @@ func scenarioError(e *emitter) {
 	e.text("E2E test error: simulated failure")
 }
 
-// scenarioSubagent: subagent with child messages and fixed delays.
+// scenarioSubagent: a claude-style subagent (Task) tool call carrying the
+// `_meta.claudeCode` Agent marker and a toolResponse with full result metrics,
+// so the kandev adapter normalizes it to a subagent_task payload and the UI
+// renders the subagent card with metadata chips.
 func scenarioSubagent(e *emitter) {
 	taskToolID := nextToolID()
 	fixedDelay(50)
 
-	e.startTool(taskToolID, "E2E subagent test", acp.ToolKindOther,
-		map[string]any{
-			"description": "E2E subagent test",
-			"prompt":      "Run e2e subagent scenario",
-		})
+	e.startSubagentTool(taskToolID,
+		"Explore the codebase",
+		"Find all files and summarize the project structure",
+		"general-purpose")
 
 	fixedDelay(50)
 	e.text("Subagent working on the task...")
 
+	// A tool call the subagent runs internally, attributed to the Task via
+	// `_meta.claudeCode.parentToolUseId` so it nests under the subagent card.
+	childToolID := nextToolID()
+	e.startChildTool(childToolID, taskToolID, "sleep 30", acp.ToolKindExecute,
+		map[string]any{"command": "sleep 30"})
 	fixedDelay(50)
-	e.completeTool(taskToolID, map[string]any{"result": "E2E subagent completed"})
+	e.completeChildTool(childToolID, taskToolID, map[string]any{"output": ""})
+
+	fixedDelay(50)
+	e.completeSubagentTool(taskToolID, "E2E subagent completed", subagentResult{
+		agentID:      "agent_e2e_0001",
+		subagentType: "general-purpose",
+		durationMs:   2200,
+		totalTokens:  9987,
+		toolUseCount: 3,
+	})
 
 	fixedDelay(50)
 	e.text("Subagent scenario complete.")
@@ -812,4 +843,22 @@ func makeGitRunner(wd string) func(args ...string) error {
 // contextWithTimeout creates a context with timeout in seconds.
 func contextWithTimeout(seconds int) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), time.Duration(seconds)*time.Second)
+}
+
+// scenarioMarkdownTable: emits a dense label/value markdown table modeled on a
+// real agent bug-report summary. The table has narrow header labels in column 1
+// and long inline-code identifiers in column 2 — the shape that previously
+// caused header words to wrap character-by-character ("Failin g test") because
+// the value column starved the label column.
+func scenarioMarkdownTable(e *emitter) {
+	fixedDelay(100)
+	e.text("Pushed.\n\n" +
+		"## Summary\n\n" +
+		"| | |\n" +
+		"|---|---|\n" +
+		"| **Failing test** | `TestHandleAgentBootReady_DrainsOrphanedQueuedMessage/already_WAITING_FOR_INPUT_(boot_raced_persistResumeState)` |\n" +
+		"| **Symptom** | `session.State = \"RUNNING\", want WAITING_FOR_INPUT` |\n" +
+		"| **Root cause** | Pre-existing race, not introduced by this PR. `handleAgentBootReady` synchronously flips state to `WAITING_FOR_INPUT` then spawns a goroutine that calls `PromptTask` → flips state to `RUNNING`. The test asserted on `WAITING_FOR_INPUT` immediately after the handler returned — on faster CI scheduling the goroutine wins the race. The kandev-ci container apparently schedules tighter than the github-hosted ubuntu, so it loses where the previous env got lucky. |\n" +
+		"| **Fix** | Cherry-picked `b8d06ea8 test(backend): fix race in TestHandleAgentBootReady_DrainsOrphanedQueuedMessage` from `feature/subtask-with-repo-se-vhz` (a parallel branch that already addressed this). The test now accepts either `WAITING_FOR_INPUT` or `RUNNING` — both prove the boot-ready flip landed and rule out the original `STARTING + queue still full` regression. |\n" +
+		"| **Local verification** | `go test -race -count=5` → 5/5 PASS. |\n")
 }

@@ -4,9 +4,8 @@ import { SessionPage } from "../../pages/session-page";
 /**
  * Verifies the ACP-first profile editor:
  *
- * - Legacy permission toggles (`auto_approve`, `dangerously_skip_permissions`)
- *   are no longer rendered. They were removed when profile permission stance
- *   moved to ACP session modes + per-tool-call permission_request prompts.
+ * - Universal agentctl auto-approve toggle renders with danger styling.
+ * - Codex curated `-c` config toggles render (off by default).
  * - Profile name edits persist across reload (exercises the new AgentProfile
  *   DTO shape with `mode` / `migrated_from` columns).
  * - Mode picker renders when the agent's capability cache advertises modes.
@@ -15,7 +14,7 @@ import { SessionPage } from "../../pages/session-page";
  *   correct active mode after launching a task with a non-default profile mode.
  */
 test.describe("Agent profile — ACP-first", () => {
-  test("profile editor loads with model picker and without legacy permission toggles", async ({
+  test("profile editor loads with model picker and permission toggles", async ({
     testPage,
     apiClient,
   }) => {
@@ -30,14 +29,20 @@ test.describe("Agent profile — ACP-first", () => {
     // Profile name input is present (from the shared ProfileFormFields component).
     await expect(testPage.getByTestId("profile-name-input")).toBeVisible({ timeout: 15_000 });
 
-    // The old permission toggle labels must NOT render. These were backed by
-    // the removed AgentProfile.auto_approve and .dangerously_skip_permissions
-    // fields; the corresponding PermissionSetting entries are gone from the
-    // shared agents so the PermissionToggles iterator emits nothing for them.
-    await expect(testPage.getByText(/Auto-approve/i)).toHaveCount(0);
-    await expect(testPage.getByText(/YOLO/i)).toHaveCount(0);
+    await expect(testPage.getByTestId("permission-auto-approve-danger")).toBeVisible({
+      timeout: 10_000,
+    });
     await expect(testPage.getByText(/Skip Permissions/i)).toHaveCount(0);
     await expect(testPage.getByText(/dangerously skip/i)).toHaveCount(0);
+
+    if (agent.name === "codex-acp") {
+      await expect(
+        testPage.getByTestId("cli-flag-curated-config_approval_policy_never"),
+      ).toBeVisible();
+      await expect(
+        testPage.getByTestId("cli-flag-curated-config_sandbox_disk_full_read"),
+      ).toBeVisible();
+    }
 
     // The mock agent advertises modes, so the mode picker is rendered.
     await expect(testPage.getByTestId("profile-mode-field")).toBeVisible({ timeout: 10_000 });

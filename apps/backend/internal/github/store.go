@@ -53,7 +53,7 @@ const createTablesSQL = `
 		last_review_state TEXT DEFAULT '',
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL,
-		UNIQUE(session_id, repository_id)
+		UNIQUE(session_id, repository_id, branch)
 	);
 
 	CREATE TABLE IF NOT EXISTS github_task_prs (
@@ -104,6 +104,8 @@ const createTablesSQL = `
 		poll_interval_seconds INTEGER DEFAULT 300,
 		cleanup_policy TEXT NOT NULL DEFAULT 'auto',
 		last_polled_at DATETIME,
+		last_error TEXT NOT NULL DEFAULT '',
+		last_error_at DATETIME,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
 	);
@@ -135,6 +137,8 @@ const createTablesSQL = `
 		poll_interval_seconds INTEGER DEFAULT 300,
 		cleanup_policy TEXT NOT NULL DEFAULT 'auto',
 		last_polled_at DATETIME,
+		last_error TEXT NOT NULL DEFAULT '',
+		last_error_at DATETIME,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
 	);
@@ -182,6 +186,18 @@ func (s *Store) initSchema() error {
 	// engaged), 'always' (delete on terminal state), 'never' (manual only).
 	_, _ = s.db.Exec(`ALTER TABLE github_review_watches ADD COLUMN cleanup_policy TEXT NOT NULL DEFAULT 'auto'`)
 	_, _ = s.db.Exec(`ALTER TABLE github_issue_watches ADD COLUMN cleanup_policy TEXT NOT NULL DEFAULT 'auto'`)
+	// Watcher self-heal columns: when the dispatch pipeline detects an
+	// orphaned watcher (e.g. its agent profile has been soft-deleted), it
+	// disables the row and stamps a human-readable cause + timestamp here
+	// for the settings page to surface. Unlike the cleanup_policy column
+	// above, the readers (IssueWatch.LastError / LastErrorAt) scan these
+	// columns unconditionally — a driver-level ALTER failure here would
+	// turn into a confusing scan panic on the next poll instead of a
+	// clear boot error. Use the same fail-loud column-precheck idiom the
+	// sibling jira/linear stores already use.
+	if err := s.addWatchSelfHealColumns(); err != nil {
+		return err
+	}
 	if err := s.migratePRTablesForMultiRepo(); err != nil {
 		return fmt.Errorf("migrate PR tables for multi-repo: %w", err)
 	}
@@ -191,6 +207,10 @@ func (s *Store) initSchema() error {
 	if err := s.backfillPRWatchesRepositoryID(); err != nil {
 		return fmt.Errorf("backfill github_pr_watches.repository_id: %w", err)
 	}
+	// pr_number is the 3rd column of UNIQUE(task_id, repository_id, pr_number),
+	// so SQLite can't use that index for the PR-number task search. Add a
+	// dedicated leading-key index so lookups by PR number stay index-backed.
+	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_github_task_prs_pr_number ON github_task_prs (pr_number)`)
 	return nil
 }
 
@@ -309,6 +329,60 @@ func (s *Store) backfillPRWatchesRepositoryID() error {
 	return nil
 }
 
+// addWatchSelfHealColumns adds last_error / last_error_at to the issue and
+// review watch tables using a column-precheck (mirroring the jira and linear
+// stores). Unlike the cleanup_policy ALTER above, the readers
+// (IssueWatch.LastError / LastErrorAt) scan these columns unconditionally,
+// so a driver-level failure must bubble up at boot rather than turn into
+// a scan panic on the next poll.
+func (s *Store) addWatchSelfHealColumns() error {
+	for _, table := range []string{"github_review_watches", "github_issue_watches"} {
+		cols, err := s.tableColumns(table)
+		if err != nil {
+			return fmt.Errorf("read %s columns: %w", table, err)
+		}
+		if _, ok := cols["last_error"]; !ok {
+			if _, err := s.db.Exec("ALTER TABLE " + table + " ADD COLUMN last_error TEXT NOT NULL DEFAULT ''"); err != nil {
+				return fmt.Errorf("add %s.last_error: %w", table, err)
+			}
+		}
+		if _, ok := cols["last_error_at"]; !ok {
+			if _, err := s.db.Exec("ALTER TABLE " + table + " ADD COLUMN last_error_at DATETIME"); err != nil {
+				return fmt.Errorf("add %s.last_error_at: %w", table, err)
+			}
+		}
+	}
+	return nil
+}
+
+// tableColumns returns the set of column names declared on `table`. Cheap
+// SQLite PRAGMA lookup; used by addWatchSelfHealColumns to skip ALTERs on a
+// fresh install whose createTablesSQL already includes the columns. Mirrors
+// the helper in jira/store.go.
+func (s *Store) tableColumns(table string) (map[string]struct{}, error) {
+	rows, err := s.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	cols := make(map[string]struct{})
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			ctype   string
+			notnull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return nil, err
+		}
+		cols[name] = struct{}{}
+	}
+	return cols, rows.Err()
+}
+
 // tableExists returns true when the named table is present in sqlite_master.
 // Used by the multi-repo backfill to skip cross-package healing in unit
 // tests that don't bring up the task schema.
@@ -321,42 +395,50 @@ func (s *Store) tableExists(name string) bool {
 // migratePRTablesForMultiRepo rebuilds `github_pr_watches` and
 // `github_task_prs` to drop the legacy single-repo unique constraints
 // (`UNIQUE(session_id)` and `UNIQUE(task_id, pr_number)`) and replace them
-// with the multi-repo variants. SQLite can't ALTER TABLE DROP CONSTRAINT, so
-// each table is rebuilt via the recommended copy-and-rename pattern. The
-// migration is idempotent: it inspects `sqlite_master.sql` for the legacy
-// constraint string and only runs the rebuild when found.
+// with the multi-repo / multi-branch variants. SQLite can't ALTER TABLE
+// DROP CONSTRAINT, so each table is rebuilt via the recommended
+// copy-and-rename pattern. The migration is idempotent: it inspects
+// `sqlite_master.sql` for the legacy constraint string and only runs the
+// rebuild when found. The watch rebuild fires twice — once for the original
+// single-repo shape, once for the interim multi-repo shape — so DBs caught
+// in either state upgrade cleanly to the multi-branch shape.
 func (s *Store) migratePRTablesForMultiRepo() error {
-	if err := s.rebuildIfHasLegacyConstraint(
-		"github_pr_watches",
+	for _, trigger := range []string{
 		"session_id TEXT NOT NULL UNIQUE",
-		`CREATE TABLE github_pr_watches_new (
-			id TEXT PRIMARY KEY,
-			session_id TEXT NOT NULL,
-			task_id TEXT NOT NULL,
-			repository_id TEXT NOT NULL DEFAULT '',
-			owner TEXT NOT NULL,
-			repo TEXT NOT NULL,
-			pr_number INTEGER NOT NULL,
-			branch TEXT NOT NULL,
-			last_checked_at DATETIME,
-			last_comment_at DATETIME,
-			last_check_status TEXT DEFAULT '',
-			last_review_state TEXT DEFAULT '',
-			created_at DATETIME NOT NULL,
-			updated_at DATETIME NOT NULL,
-			UNIQUE(session_id, repository_id)
-		)`,
-		`INSERT INTO github_pr_watches_new (
-			id, session_id, task_id, repository_id, owner, repo, pr_number, branch,
-			last_checked_at, last_comment_at, last_check_status, last_review_state,
-			created_at, updated_at
-		) SELECT
-			id, session_id, task_id, COALESCE(repository_id, ''), owner, repo, pr_number, branch,
-			last_checked_at, last_comment_at, last_check_status, last_review_state,
-			created_at, updated_at
-		FROM github_pr_watches`,
-	); err != nil {
-		return err
+		"UNIQUE(session_id, repository_id)\n",
+	} {
+		if err := s.rebuildIfHasLegacyConstraint(
+			"github_pr_watches",
+			trigger,
+			`CREATE TABLE github_pr_watches_new (
+				id TEXT PRIMARY KEY,
+				session_id TEXT NOT NULL,
+				task_id TEXT NOT NULL,
+				repository_id TEXT NOT NULL DEFAULT '',
+				owner TEXT NOT NULL,
+				repo TEXT NOT NULL,
+				pr_number INTEGER NOT NULL,
+				branch TEXT NOT NULL,
+				last_checked_at DATETIME,
+				last_comment_at DATETIME,
+				last_check_status TEXT DEFAULT '',
+				last_review_state TEXT DEFAULT '',
+				created_at DATETIME NOT NULL,
+				updated_at DATETIME NOT NULL,
+				UNIQUE(session_id, repository_id, branch)
+			)`,
+			`INSERT INTO github_pr_watches_new (
+				id, session_id, task_id, repository_id, owner, repo, pr_number, branch,
+				last_checked_at, last_comment_at, last_check_status, last_review_state,
+				created_at, updated_at
+			) SELECT
+				id, session_id, task_id, COALESCE(repository_id, ''), owner, repo, pr_number, branch,
+				last_checked_at, last_comment_at, last_check_status, last_review_state,
+				created_at, updated_at
+			FROM github_pr_watches`,
+		); err != nil {
+			return err
+		}
 	}
 	return s.rebuildIfHasLegacyConstraint(
 		"github_task_prs",
@@ -477,11 +559,34 @@ func (s *Store) GetPRWatchBySession(ctx context.Context, sessionID string) (*PRW
 // GetPRWatchBySessionAndRepo returns the PR watch for a (session, repository)
 // pair, or nil. Used by per-repo branch-switch / commit handlers so each
 // repo's watch is reset independently.
+//
+// Multi-branch caveat: a task can hold multiple watches for the same
+// (session, repository) on different branches. This lookup returns the
+// most-recently-updated row — callers that need branch-specific lookup
+// must use GetPRWatchBySessionRepoAndBranch.
 func (s *Store) GetPRWatchBySessionAndRepo(ctx context.Context, sessionID, repositoryID string) (*PRWatch, error) {
 	var w PRWatch
 	err := s.ro.GetContext(ctx, &w,
-		`SELECT * FROM github_pr_watches WHERE session_id = ? AND repository_id = ? LIMIT 1`,
+		`SELECT * FROM github_pr_watches WHERE session_id = ? AND repository_id = ?
+		 ORDER BY updated_at DESC LIMIT 1`,
 		sessionID, repositoryID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return &w, err
+}
+
+// GetPRWatchBySessionRepoAndBranch returns the PR watch for the precise
+// (session, repository, branch) triple. Required for multi-branch tasks
+// where each branch needs its own watch — querying by (session, repo)
+// alone would collapse the secondary branch's push detection onto the
+// primary's watch and the secondary PR would never land in github_task_prs.
+func (s *Store) GetPRWatchBySessionRepoAndBranch(ctx context.Context, sessionID, repositoryID, branch string) (*PRWatch, error) {
+	var w PRWatch
+	err := s.ro.GetContext(ctx, &w,
+		`SELECT * FROM github_pr_watches
+		 WHERE session_id = ? AND repository_id = ? AND branch = ? LIMIT 1`,
+		sessionID, repositoryID, branch)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -627,11 +732,34 @@ func (s *Store) GetTaskPR(ctx context.Context, taskID string) (*TaskPR, error) {
 
 // GetTaskPRByRepository returns the PR association for a (task, repository)
 // pair, or nil if none. Use this for multi-repo tasks.
+//
+// Multi-branch caveat: a task can hold N rows per (task, repo) — one per
+// PR number. This lookup returns the most-recently-updated row so callers
+// that need a deterministic single value still get one. Callers that need
+// the row for a specific PR number must use GetTaskPRByRepoAndNumber.
 func (s *Store) GetTaskPRByRepository(ctx context.Context, taskID, repositoryID string) (*TaskPR, error) {
 	var tp TaskPR
 	err := s.ro.GetContext(ctx, &tp,
-		`SELECT * FROM github_task_prs WHERE task_id = ? AND repository_id = ? LIMIT 1`,
+		`SELECT * FROM github_task_prs WHERE task_id = ? AND repository_id = ?
+		 ORDER BY updated_at DESC LIMIT 1`,
 		taskID, repositoryID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return &tp, err
+}
+
+// GetTaskPRByRepoAndNumber returns the exact PR row matching the
+// (task, repository, pr_number) triple. Required for multi-branch tasks
+// where AssociatePRWithTask's "already-current" short-circuit must check
+// the same PR number, not a sibling PR that happens to be the first
+// row returned by the legacy by-repo query.
+func (s *Store) GetTaskPRByRepoAndNumber(ctx context.Context, taskID, repositoryID string, prNumber int) (*TaskPR, error) {
+	var tp TaskPR
+	err := s.ro.GetContext(ctx, &tp,
+		`SELECT * FROM github_task_prs
+		 WHERE task_id = ? AND repository_id = ? AND pr_number = ? LIMIT 1`,
+		taskID, repositoryID, prNumber)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -690,6 +818,21 @@ func (s *Store) ListTaskPRsByWorkspaceID(ctx context.Context, workspaceID string
 	return groupTaskPRsByTask(prs), nil
 }
 
+// ListTaskIDsByPRNumber returns the IDs of tasks in a workspace that have a PR
+// association with the given PR number. Workspace-scoped via the JOIN on tasks
+// so a PR number shared across workspaces never leaks results. A task with
+// multiple PR rows for the same number (multi-repo) is returned once.
+func (s *Store) ListTaskIDsByPRNumber(ctx context.Context, workspaceID string, prNumber int) ([]string, error) {
+	var ids []string
+	if err := s.ro.SelectContext(ctx, &ids,
+		`SELECT DISTINCT gtp.task_id FROM github_task_prs gtp
+		 INNER JOIN tasks t ON gtp.task_id = t.id
+		 WHERE t.workspace_id = ? AND gtp.pr_number = ?`, workspaceID, prNumber); err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
 func groupTaskPRsByTask(prs []TaskPR) map[string][]*TaskPR {
 	result := make(map[string][]*TaskPR)
 	for i := range prs {
@@ -699,11 +842,17 @@ func groupTaskPRsByTask(prs []TaskPR) map[string][]*TaskPR {
 	return result
 }
 
-// ReplaceTaskPR atomically replaces the task→PR association for a task: any
-// existing rows are deleted and the new row is inserted inside a single
-// transaction. The delete is scoped to (task_id, repository_id) so multi-repo
-// tasks only replace the row for the affected repo; for single-repo tasks
-// (RepositoryID == "") the legacy semantics are preserved (delete all).
+// ReplaceTaskPR atomically associates a PR with a task, replacing only the
+// row that matches the exact (task_id, repository_id, pr_number) triple.
+// Multi-branch tasks may hold multiple PR rows per (task, repo) — one per
+// branch — so the delete MUST NOT wipe sibling PR rows. Single-repo
+// callers (RepositoryID == "") only delete legacy untagged rows for the
+// same PR number.
+//
+// The DELETE+INSERT pair inside one transaction is the upsert form; an
+// ON CONFLICT would also work but the per-row delete pattern matches the
+// existing migration layout (rebuilds are easier to reason about) and
+// avoids leaking SQLite-specific syntax into the service layer.
 func (s *Store) ReplaceTaskPR(ctx context.Context, tp *TaskPR) error {
 	if tp.ID == "" {
 		tp.ID = uuid.New().String()
@@ -717,22 +866,18 @@ func (s *Store) ReplaceTaskPR(ctx context.Context, tp *TaskPR) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// Multi-repo: only delete the row for the same (task, repo) pair, leaving
-	// other repos' rows alone. Single-repo callers (RepositoryID == "")
-	// only delete legacy untagged rows so a multi-repo task's per-repo rows
-	// don't get wiped if a single-repo callsite slips in. The poller and
-	// service.AssociatePR* paths now always pass RepositoryID explicitly;
-	// any future caller that forgets does the safer thing (preserve tagged
-	// rows) instead of the old "nuke everything" behavior.
 	if tp.RepositoryID != "" {
 		if _, err := tx.ExecContext(ctx,
-			`DELETE FROM github_task_prs WHERE task_id = ? AND repository_id = ?`,
-			tp.TaskID, tp.RepositoryID); err != nil {
+			`DELETE FROM github_task_prs
+			 WHERE task_id = ? AND repository_id = ? AND pr_number = ?`,
+			tp.TaskID, tp.RepositoryID, tp.PRNumber); err != nil {
 			return err
 		}
 	} else {
 		if _, err := tx.ExecContext(ctx,
-			`DELETE FROM github_task_prs WHERE task_id = ? AND repository_id = ''`, tp.TaskID); err != nil {
+			`DELETE FROM github_task_prs
+			 WHERE task_id = ? AND repository_id = '' AND pr_number = ?`,
+			tp.TaskID, tp.PRNumber); err != nil {
 			return err
 		}
 	}
@@ -909,6 +1054,20 @@ func (s *Store) DeleteReviewWatch(ctx context.Context, id string) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+// DisableReviewWatchWithError is the self-heal write: it disables the watch
+// and stamps a human-readable cause + timestamp so the settings UI can show
+// a "disabled because ..." banner. Called by the orchestrator when the
+// watcher's bound agent profile is detected as soft-deleted.
+func (s *Store) DisableReviewWatchWithError(ctx context.Context, id, cause string) error {
+	now := time.Now().UTC()
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE github_review_watches
+		   SET enabled = 0, last_error = ?, last_error_at = ?, updated_at = ?
+		 WHERE id = ?`,
+		cause, now, now, id)
+	return err
 }
 
 // --- Review PR Task deduplication ---
@@ -1278,6 +1437,20 @@ func (s *Store) DeleteIssueWatch(ctx context.Context, id string) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+// DisableIssueWatchWithError is the self-heal write: disables the watch and
+// stamps a human-readable cause + timestamp. Symmetric with
+// DisableReviewWatchWithError; called by the orchestrator when the
+// watcher's bound agent profile is detected as soft-deleted.
+func (s *Store) DisableIssueWatchWithError(ctx context.Context, id, cause string) error {
+	now := time.Now().UTC()
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE github_issue_watches
+		   SET enabled = 0, last_error = ?, last_error_at = ?, updated_at = ?
+		 WHERE id = ?`,
+		cause, now, now, id)
+	return err
 }
 
 // --- Issue Watch Task deduplication ---

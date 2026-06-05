@@ -291,6 +291,125 @@ func TestSeedMessageRejectsUnknownSession(t *testing.T) {
 	}
 }
 
+// The depth-1 guard lives in the task SERVICE; the harness writes through the
+// repository so e2e tests can build arbitrary parent_id chains (depth >= 2),
+// which is the only way to exercise the sidebar's multi-level rendering.
+func TestSeedTaskAllowsArbitraryDepthChain(t *testing.T) {
+	repo, _ := newTestRepo(t)
+	r := newRouter(t, repo, nil)
+
+	create := func(title, parentID string) string {
+		body := mustJSON(t, map[string]interface{}{
+			"workspace_id":     "ws-1",
+			"workflow_id":      "wf-1",
+			"workflow_step_id": "step-1",
+			"title":            title,
+			"parent_id":        parentID,
+		})
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/_test/tasks", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200 creating %q, got %d: %s", title, w.Code, w.Body.String())
+		}
+		var resp struct {
+			TaskID string `json:"task_id"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		return resp.TaskID
+	}
+
+	root := create("Root", "")
+	child := create("Child", root)
+	grandchild := create("Grandchild", child) // depth 2 — would be rejected by the service guard
+
+	got, err := repo.GetTask(context.Background(), grandchild)
+	if err != nil {
+		t.Fatalf("get grandchild: %v", err)
+	}
+	if got.ParentID != child {
+		t.Fatalf("grandchild parent_id = %q, want %q (the child, i.e. depth 2)", got.ParentID, child)
+	}
+}
+
+func TestSeedTaskRejectsMissingFields(t *testing.T) {
+	repo, _ := newTestRepo(t)
+	r := newRouter(t, repo, nil)
+
+	body := mustJSON(t, map[string]interface{}{"workflow_id": "wf-1"})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/_test/tasks", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing workspace_id/title, got %d", w.Code)
+	}
+}
+
+func TestSeedTaskRejectsUnknownParent(t *testing.T) {
+	repo, _ := newTestRepo(t)
+	r := newRouter(t, repo, nil)
+
+	body := mustJSON(t, map[string]interface{}{
+		"workspace_id": "ws-1",
+		"title":        "Orphan",
+		"parent_id":    "does-not-exist",
+	})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/_test/tasks", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for unknown parent_id, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestSeedWorkflowPersistsStyle(t *testing.T) {
+	repo, _ := newTestRepo(t)
+	r := newRouter(t, repo, nil)
+
+	body := mustJSON(t, map[string]interface{}{
+		"workspace_id": "ws-1",
+		"name":         "Office Only Workflow",
+		"style":        models.WorkflowStyleOffice,
+	})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/_test/workflows", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	workflows, err := repo.ListWorkflows(context.Background(), "ws-1", true)
+	if err != nil {
+		t.Fatalf("list workflows: %v", err)
+	}
+	if len(workflows) != 1 {
+		t.Fatalf("expected 1 workflow, got %d", len(workflows))
+	}
+	if got := workflows[0].Style; got != models.WorkflowStyleOffice {
+		t.Fatalf("expected style %q, got %q", models.WorkflowStyleOffice, got)
+	}
+}
+
+func TestSeedWorkflowRejectsMissingFields(t *testing.T) {
+	repo, _ := newTestRepo(t)
+	r := newRouter(t, repo, nil)
+
+	body := mustJSON(t, map[string]interface{}{"style": "office"})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/_test/workflows", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing workspace_id/name, got %d", w.Code)
+	}
+}
+
 func mustJSON(t *testing.T, v interface{}) []byte {
 	t.Helper()
 	b, err := json.Marshal(v)

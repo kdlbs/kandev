@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -652,6 +654,29 @@ func (r *Repository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 	return result, rows.Err()
 }
 
+// GetTasksByIDs fetches multiple tasks in a single query. Missing IDs are
+// silently omitted; result order is not guaranteed, so callers that need a
+// specific order should reorder by ID themselves.
+func (r *Repository) GetTasksByIDs(ctx context.Context, ids []string) ([]*models.Task, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	query := fmt.Sprintf(`SELECT %s FROM tasks t WHERE t.id IN (%s)`,
+		taskSelectColumns("t"), strings.Join(placeholders, ","))
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return r.scanTasks(rows)
+}
+
 // ArchiveTask sets the archived_at timestamp on a task
 func (r *Repository) ArchiveTask(ctx context.Context, id string) error {
 	now := time.Now().UTC()
@@ -730,6 +755,49 @@ func (r *Repository) ListTasksForAutoArchive(ctx context.Context) ([]*models.Tas
 	return r.scanTasks(rows)
 }
 
+// watcherMetadataKeyByIntegration maps an integration name to the metadata key
+// that watcher-created tasks carry. Used by CountOpenWatcherCreatedTasks to
+// scope the COUNT to a single watcher. Returns "" for unknown integrations so
+// the count query returns 0 without erroring.
+func watcherMetadataKeyByIntegration(integration string) string {
+	switch integration {
+	case "linear":
+		return "linear_issue_watch_id"
+	case "jira":
+		return "jira_issue_watch_id"
+	default:
+		return ""
+	}
+}
+
+// CountOpenWatcherCreatedTasks returns the number of open watcher-created tasks
+// for a single (integration, watchID) pair. "Open" means non-archived AND not
+// in a terminal state (COMPLETED, FAILED, CANCELLED). Watcher-created tasks
+// are identified via the integration's JSON metadata key, scoped per
+// integration so a Linear and Jira watch with the same id don't collide.
+//
+// Unknown integrations return (0, nil) — the throttle gate falls open for
+// integrations not yet wired into the JSON predicate map.
+func (r *Repository) CountOpenWatcherCreatedTasks(ctx context.Context, integration, watchID string) (int, error) {
+	key := watcherMetadataKeyByIntegration(integration)
+	if key == "" || watchID == "" {
+		return 0, nil
+	}
+	query := r.ro.Rebind(`
+		SELECT COUNT(*) FROM tasks
+		WHERE archived_at IS NULL
+			AND state NOT IN (?, ?, ?)
+			AND json_extract(metadata, '$.` + key + `') = ?
+	`)
+	var n int
+	if err := r.ro.QueryRowxContext(ctx, query,
+		v1.TaskStateCompleted, v1.TaskStateFailed, v1.TaskStateCancelled, watchID,
+	).Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
 // UpdateTaskState updates the state of a task
 func (r *Repository) UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error {
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?`), state, time.Now().UTC(), id)
@@ -742,6 +810,60 @@ func (r *Repository) UpdateTaskState(ctx context.Context, id string, state v1.Ta
 		return fmt.Errorf("%w: %s", ErrTaskNotFound, id)
 	}
 	return nil
+}
+
+// UpdateTaskStateIfCurrentIn transitions state inside a transaction, re-checking
+// the current state on write so concurrent handlers cannot clobber a task that
+// moved out of allowed between read and update.
+func (r *Repository) UpdateTaskStateIfCurrentIn(
+	ctx context.Context, id string, state v1.TaskState, allowed []v1.TaskState,
+) (v1.TaskState, bool, error) {
+	if len(allowed) == 0 {
+		return "", false, nil
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var currentState v1.TaskState
+	err = tx.QueryRowContext(ctx, r.db.Rebind(`SELECT state FROM tasks WHERE id = ?`), id).Scan(&currentState)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", false, fmt.Errorf("%w: %s", ErrTaskNotFound, id)
+		}
+		return "", false, err
+	}
+	if !taskStateInSet(currentState, allowed) {
+		return currentState, false, nil
+	}
+
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks SET state = ?, updated_at = ?
+		WHERE id = ? AND state = ?
+	`), state, time.Now().UTC(), id, currentState)
+	if err != nil {
+		return "", false, err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return currentState, false, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return "", false, err
+	}
+	return currentState, true, nil
+}
+
+func taskStateInSet(state v1.TaskState, allowed []v1.TaskState) bool {
+	for _, candidate := range allowed {
+		if state == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 // ListTasksByProject returns all non-archived, non-ephemeral tasks for a project.

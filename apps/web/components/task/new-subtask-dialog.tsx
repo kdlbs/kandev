@@ -12,7 +12,7 @@ import {
 import { useDialogHandlers } from "@/components/task-create-dialog-handlers";
 import {
   useDiscoverReposEffect,
-  useGitHubUrlBranchesEffect,
+  useGitHubUrlErrorEffect,
 } from "@/components/task-create-dialog-effects";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
@@ -248,7 +248,7 @@ function NewSubtaskForm({
   useSeedParentRepository(fs, parentRepositoryId, baseBranch);
   useSeedAgentProfileId(fs, defaultProfileId);
   const handlers = useDialogHandlers(fs, availableRepositories);
-  useGitHubUrlBranchesEffect(fs, isOpen);
+  useGitHubUrlErrorEffect(fs, isOpen);
   useDiscoverReposEffect(fs, isOpen, workspaceId, false, toast);
   const profileOptions = useAgentProfileOptions(agentProfiles);
   const sessionOptions = useSessionOptions(parentTaskId);

@@ -42,6 +42,47 @@ type TaskExecutionStopper interface {
 	StopExecution(ctx context.Context, executionID, reason string, force bool) error
 }
 
+// ProviderDefaultBranchProber resolves a provider repo's default branch
+// (e.g. "main" / "master") without requiring a local clone. Used by
+// AddBranchToTask to satisfy the worktree-create precondition synchronously,
+// since add_branch does not trigger the executor-side backfillRepoDefaultBranch
+// path. Default implementation (cmd/kandev) shells out to
+// `git ls-remote --symref`; tests inject a stub via SetProviderDefaultBranchProber.
+//
+// Implementations MUST honour ctx cancellation so a slow / hung remote does not
+// stall the calling MCP tool. Returns ("", error) on probe failure — callers
+// fall through to the explicit "cannot resolve base_branch" rejection rather
+// than persisting an empty-default row.
+type ProviderDefaultBranchProber interface {
+	ProbeDefaultBranch(ctx context.Context, provider, owner, name string) (string, error)
+}
+
+// BranchMaterializer creates a worktree on disk and persists a
+// task_session_worktrees row for a newly added task_repository row, without
+// restarting the agent. Used by AddBranchToTask so MCP-driven "add a branch
+// to this task" actually surfaces the new worktree in the UI on the next
+// poll, rather than waiting for a session relaunch.
+//
+// The implementation lives in cmd/kandev (it needs worktree.Manager, the
+// session/env repos, and the repository entity layer) — the service layer
+// only knows the abstract capability.
+// AgentBaseBranchPusher pushes an updated per-repo base-branch map to the
+// agentctl instance(s) of any running execution for a task. Used by
+// UpdateRepositoryBaseBranch so the changes-panel "Compare against" picker
+// updates BaseCommit / Ahead / Behind live, not just at next session start.
+// Implementations must be no-op-safe when the task has no running execution.
+type AgentBaseBranchPusher interface {
+	PushBaseBranchesForTask(ctx context.Context, taskID string, branches map[string]string)
+}
+
+type BranchMaterializer interface {
+	// MaterializeBranch creates the worktree for a freshly inserted
+	// task_repositories row. Best-effort: when no active session exists yet
+	// the implementation may choose to no-op and let the next session launch
+	// create the worktree via the standard multi-repo prepare path.
+	MaterializeBranch(ctx context.Context, taskID, taskRepositoryID string) error
+}
+
 // GitArchiveCapture captures git state (commits, cumulative diff) when a task is archived.
 // This allows preserving the final git state of a session for historical purposes.
 type GitArchiveCapture interface {
@@ -61,6 +102,13 @@ type WorkflowStepGetter interface {
 	// GetNextStepByPosition returns the next step after the given position for a workflow.
 	// Returns nil if there is no next step (i.e., current step is the last one).
 	GetNextStepByPosition(ctx context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error)
+}
+
+// PRTaskResolver resolves which tasks are associated with a GitHub PR number.
+// Implemented by the github service; injected so the task service can surface a
+// task by its PR number in search without coupling to the github schema.
+type PRTaskResolver interface {
+	FindTaskIDsByPRNumber(ctx context.Context, workspaceID string, prNumber int) ([]string, error)
 }
 
 // StartStepResolver resolves the starting step for a workflow.
@@ -130,10 +178,13 @@ type Service struct {
 	discoveryConfig       RepositoryDiscoveryConfig
 	worktreeCleanup       WorktreeCleanup
 	executionStopper      TaskExecutionStopper
+	branchMaterializer    BranchMaterializer
+	providerProber        ProviderDefaultBranchProber
 	gitArchiveCapture     GitArchiveCapture
 	workflowStepCreator   WorkflowStepCreator
 	workflowStepGetter    WorkflowStepGetter
 	startStepResolver     StartStepResolver
+	prTaskResolver        PRTaskResolver
 	quickChatDir          string // Directory for quick-chat workspaces (e.g., ~/.kandev/quick-chat)
 	branchFetcher         *branchFetcher
 	envDestroyer          EnvironmentDestroyer
@@ -142,6 +193,7 @@ type Service struct {
 	repoCloneLocation     RepoCloneLocation
 	blockers              BlockerRepository
 	comments              CommentRepository
+	baseBranchPusher      AgentBaseBranchPusher
 }
 
 // NewService creates a new task service
@@ -172,6 +224,29 @@ func (s *Service) SetWorktreeCleanup(cleanup WorktreeCleanup) {
 	s.worktreeCleanup = cleanup
 }
 
+// SetBranchMaterializer wires the mid-session worktree materializer for
+// AddBranchToTask. Optional — when unset, MCP add_branch only inserts the
+// task_repositories row and the worktree appears on next session launch.
+func (s *Service) SetBranchMaterializer(m BranchMaterializer) {
+	s.branchMaterializer = m
+}
+
+// SetAgentBaseBranchPusher wires the live-update push for
+// UpdateRepositoryBaseBranch. Optional — when unset, the persisted DB value
+// is the source of truth and the new base branch takes effect at next
+// session launch.
+func (s *Service) SetAgentBaseBranchPusher(p AgentBaseBranchPusher) {
+	s.baseBranchPusher = p
+}
+
+// SetProviderDefaultBranchProber wires the synchronous default-branch probe
+// used by AddBranchToTask's GitHub-URL resolution. Optional — when unset,
+// add_branch with a provider URL and no base_branch falls through to the
+// "cannot resolve base_branch" rejection instead of persisting an empty row.
+func (s *Service) SetProviderDefaultBranchProber(p ProviderDefaultBranchProber) {
+	s.providerProber = p
+}
+
 // SetExecutionStopper wires the task execution stopper (orchestrator).
 func (s *Service) SetExecutionStopper(stopper TaskExecutionStopper) {
 	s.executionStopper = stopper
@@ -195,6 +270,12 @@ func (s *Service) SetWorkflowStepGetter(getter WorkflowStepGetter) {
 // SetStartStepResolver wires the start step resolver for CreateTask.
 func (s *Service) SetStartStepResolver(resolver StartStepResolver) {
 	s.startStepResolver = resolver
+}
+
+// SetPRTaskResolver wires the GitHub PR→task resolver for PR-number search.
+// Optional — when unset, search by PR number is a no-op.
+func (s *Service) SetPRTaskResolver(resolver PRTaskResolver) {
+	s.prTaskResolver = resolver
 }
 
 // SetQuickChatDir sets the directory for quick-chat workspaces.

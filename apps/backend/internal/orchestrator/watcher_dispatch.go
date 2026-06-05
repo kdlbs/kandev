@@ -31,7 +31,41 @@ type WatcherDispatchCoordinator struct {
 	taskCreator     IssueTaskCreator
 	startTask       taskStarter
 	shouldAutoStart func(ctx context.Context, workflowStepID string) bool
-	logger          *logger.Logger
+	// profileLookup pre-flight checks the watcher's bound agent profile.
+	// When the profile has been soft-deleted (reconciler-driven cleanup of an
+	// agent type that fell off the registry), the coordinator short-circuits
+	// before creating any task and asks the source to self-heal the watcher
+	// row. nil means "skip the check" — production wires this in; tests can
+	// leave it unset.
+	profileLookup ProfileLookup
+	logger        *logger.Logger
+}
+
+// ProfileLookup answers "is this agent profile still live, and what was its
+// display name?" — used by the watcher dispatch self-heal flow to detect
+// orphaned watchers (their agent profile was removed by the orchestrator's
+// reconciler when its agent type left the enabled registry).
+//
+// Returning (true, name, nil) means the row exists but has DeletedAt set;
+// (false, _, nil) means the row is live; a non-nil err is treated as
+// "couldn't tell" and the dispatch falls through (fail-open).
+type ProfileLookup interface {
+	LookupProfile(ctx context.Context, profileID string) (deleted bool, name string, err error)
+}
+
+// SetProfileLookup wires the pre-flight check into the coordinator. Safe to
+// call before or after task-creator wiring; nil-ok and pre-flight just
+// becomes a no-op until a real lookup is provided.
+func (c *WatcherDispatchCoordinator) SetProfileLookup(p ProfileLookup) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.profileLookup = p
+}
+
+func (c *WatcherDispatchCoordinator) getProfileLookup() ProfileLookup {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.profileLookup
 }
 
 // SetTaskCreator atomically updates the task creator the coordinator
@@ -75,6 +109,12 @@ type WatcherSource interface {
 	// metrics labels and log fields.
 	Name() string
 
+	// AgentProfileID returns the agent profile bound to the watcher that
+	// produced this event. The coordinator uses it for the soft-deleted-
+	// profile pre-flight check; empty means "no profile bound" (legacy
+	// rows) and the check is skipped.
+	AgentProfileID(evt any) string
+
 	// Reserve atomically claims the dedup slot for this event. Returns
 	// (false, nil) when another concurrent reserver already won the race —
 	// the coordinator treats that as "nothing to do".
@@ -96,11 +136,108 @@ type WatcherSource interface {
 	// AutoStartParams returns the parameters needed to kick the task off
 	// when its workflow step is configured for auto-start.
 	AutoStartParams(evt any) AutoStartParams
+
+	// WatchID extracts the per-integration watch identifier from the event
+	// payload. Used by the throttle gate to key the per-watch pending
+	// counter and look up the per-watch cap. Returns "" if the event has
+	// no watch (the gate then treats it as unthrottled).
+	WatchID(evt any) string
+
+	// MaxInflightTasks returns the per-watch cap on open watcher-created
+	// tasks, or nil when the watch is uncapped. The orchestrator gate uses
+	// this to decide whether to defer the event.
+	MaxInflightTasks(evt any) *int
+
+	// SelfHeal disables the watcher row that produced this event and stamps
+	// a human-readable cause so the settings UI can show "disabled because
+	// the bound agent profile was removed". Called by the coordinator
+	// (and the legacy GitHub createXTask paths) when the pre-flight check
+	// detects a soft-deleted profile.
+	SelfHeal(ctx context.Context, evt any, cause string) error
+}
+
+// preflightDeletedProfile returns true when the watcher's bound profile has
+// been soft-deleted (the production bug that orphans watchers via the
+// reconciler's cleanup of disabled agent types). On a true return the
+// coordinator MUST stop — SelfHeal has already been invoked.
+func (c *WatcherDispatchCoordinator) preflightDeletedProfile(ctx context.Context, src WatcherSource, evt any) bool {
+	lookup := c.getProfileLookup()
+	if lookup == nil {
+		return false
+	}
+	profileID := src.AgentProfileID(evt)
+	if profileID == "" {
+		return false
+	}
+	deleted, name, err := lookup.LookupProfile(ctx, profileID)
+	if err != nil {
+		if c.logger != nil {
+			c.logger.Warn("watcher dispatch: profile lookup failed, falling through",
+				zap.String("source", src.Name()),
+				zap.String("profile_id", profileID),
+				zap.Error(err))
+		}
+		return false
+	}
+	if !deleted {
+		return false
+	}
+	cause := formatDeletedProfileCause(profileID, name)
+	if c.logger != nil {
+		c.logger.Warn("watcher dispatch: agent profile soft-deleted, self-healing",
+			zap.String("source", src.Name()),
+			zap.String("profile_id", profileID),
+			zap.String("profile_name", name))
+	}
+	if err := src.SelfHeal(ctx, evt, cause); err != nil && c.logger != nil {
+		c.logger.Error("watcher dispatch: self-heal failed",
+			zap.String("source", src.Name()),
+			zap.String("profile_id", profileID),
+			zap.Error(err))
+	}
+	return true
+}
+
+// formatDeletedProfileCause renders the human-readable string stamped onto
+// the watcher's last_error column. Centralised so every integration uses
+// the same phrasing.
+//
+// profileName is user-typed in the settings UI with no DB-level length
+// constraint; truncate at the producer so an arbitrarily-long name does
+// not pollute last_error / the settings banner.
+func formatDeletedProfileCause(profileID, profileName string) string {
+	name := truncateProfileNameForCause(profileName)
+	if name != "" {
+		return "agent profile \"" + name + "\" (" + profileID + ") was removed"
+	}
+	return "agent profile " + profileID + " was removed"
+}
+
+// profileNameCauseMaxLen caps the rendered profile name in
+// formatDeletedProfileCause. 80 runes matches the watcher-label cap in
+// cmd/kandev — both end up in the same settings UI surface.
+const profileNameCauseMaxLen = 80
+
+func truncateProfileNameForCause(s string) string {
+	runes := []rune(s)
+	if len(runes) <= profileNameCauseMaxLen {
+		return s
+	}
+	return string(runes[:profileNameCauseMaxLen-1]) + "…"
 }
 
 // Dispatch runs one event through the full pipeline. Safe to call from a
 // goroutine; callers typically do so in the bus subscriber.
+//
+// Pre-flight: when a ProfileLookup is wired AND the source exposes a
+// non-empty AgentProfileID, the coordinator first checks that the profile is
+// not soft-deleted. A deleted profile short-circuits to SelfHeal — no task
+// is created, no dedup reservation is taken. A lookup error fails open: the
+// existing pipeline runs and any genuine error surfaces downstream.
 func (c *WatcherDispatchCoordinator) Dispatch(ctx context.Context, src WatcherSource, evt any) {
+	if c.preflightDeletedProfile(ctx, src, evt) {
+		return
+	}
 	reserved, err := src.Reserve(ctx, evt)
 	if err != nil {
 		c.logger.Error("watcher dispatch: reserve failed",

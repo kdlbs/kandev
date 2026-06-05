@@ -517,17 +517,19 @@ test.describe("Git Changes Panel", () => {
     await session.clickTab("Changes");
     await expect(session.changes).toBeVisible({ timeout: 10_000 });
 
-    // Wait for both commits to appear
+    // Wait for both commits to appear. The commits-section header renders as
+    // soon as the section mounts (no commits required), so asserting on the
+    // text alone races the WS git-status push that carries the actual commit
+    // list. Gate on the row count first — that's the signal that the FE
+    // received both commits — and only then check text content.
     await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 15_000 });
     await session.expandCommitsSection();
-    await expect(session.changes.getByText("First commit")).toBeVisible({ timeout: 10_000 });
-    await expect(session.changes.getByText("Second commit")).toBeVisible({ timeout: 10_000 });
-
-    // Verify both commits appear
     const commitsList = testPage.getByTestId("commits-list");
     await expect(commitsList.locator('[data-testid^="commit-row-"]')).toHaveCount(2, {
-      timeout: 5_000,
+      timeout: 15_000,
     });
+    await expect(session.changes.getByText("First commit")).toBeVisible({ timeout: 5_000 });
+    await expect(session.changes.getByText("Second commit")).toBeVisible({ timeout: 5_000 });
 
     // Find the first commit row (it's the second in the list, older commit)
     // The list shows newest first, so "Second commit" is at index 0, "First commit" at index 1

@@ -18,7 +18,7 @@ import {
   computeBranchPlaceholder,
   type PillOption,
 } from "@/components/task-create-dialog-pill";
-import { GitHubUrlSection } from "@/components/task-create-dialog-github-url";
+import { RemoteRepoChipsRow } from "@/components/task-create-dialog-remote-repo-chips";
 import { FolderPicker } from "@/components/folder-picker";
 import { SourceModeSwitch } from "@/components/task-create-dialog-source-mode";
 import {
@@ -61,8 +61,9 @@ function runAutoselect({
  * is no "primary" — and any row can hold either a workspace repo or a
  * discovered on-machine path.
  *
- * In GitHub URL mode the chips are replaced by an inline URL input pill;
- * the trailing toggle flips between the two modes.
+ * In Remote mode the chips are replaced by `RemoteRepoChipsRow`, which
+ * renders its own chip row backed by `fs.remoteRepos`; the trailing toggle
+ * flips between the two modes.
  */
 type RepoChipsRowProps = {
   fs: DialogFormState;
@@ -78,9 +79,8 @@ type RepoChipsRowProps = {
    */
   onRowRepositoryChange: (key: string, value: string) => void;
   onRowBranchChange: (key: string, value: string) => void;
-  /** GitHub URL flow lives alongside the chips so users can switch in place. */
-  onToggleGitHubUrl?: () => void;
-  onGitHubUrlChange?: (value: string) => void;
+  /** Toggles the Remote tab on/off. Remote-mode rows live in `fs.remoteRepos`. */
+  onToggleRemote?: () => void;
   /**
    * Fresh-branch toggle props. When `freshBranchAvailable` is true the toggle
    * renders inline at the right edge of the chip row so it sits next to the
@@ -111,8 +111,7 @@ export function RepoChipsRow({
   workspaceId,
   onRowRepositoryChange,
   onRowBranchChange,
-  onToggleGitHubUrl,
-  onGitHubUrlChange,
+  onToggleRemote,
   freshBranchAvailable,
   freshBranchEnabled,
   onToggleFreshBranch,
@@ -133,14 +132,15 @@ export function RepoChipsRow({
   // Other executors: branch is fully editable (no special pre-fill).
   const branchLocked = false;
   // No early returns above hooks. URL mode and started-state checks happen below.
-  const usedIds = useMemo(() => collectUsedRepoIds(fs.repositories), [fs.repositories]);
   if (isTaskStarted) return null;
 
-  const remainingCount = repositories.filter((r) => !usedIds.has(r.id)).length;
-  // Add stays enabled when no workspace repos are left, since users can also
-  // pick from discovered on-machine paths.
+  // Multi-branch support: the same repo can appear multiple times on a task
+  // when each row picks a different branch. Uniqueness is enforced on the
+  // (repository_id, checkout_branch) pair at submit time by the backend, so
+  // the dropdown never filters repos out — picking "frontend" twice and
+  // assigning two different branches is a supported flow.
   const hasDiscovered = fs.discoveredRepositories.length > 0;
-  const canAddMore = remainingCount > 0 || hasDiscovered;
+  const canAddMore = repositories.length > 0 || hasDiscovered;
   const addHint = computeAddHint(canAddMore, repositories.length);
 
   return (
@@ -161,14 +161,13 @@ export function RepoChipsRow({
         freshBranchEnabled={freshBranchEnabled}
         onRowRepositoryChange={onRowRepositoryChange}
         onRowBranchChange={onRowBranchChange}
-        onGitHubUrlChange={onGitHubUrlChange}
         onToggleFreshBranch={onToggleFreshBranch}
         onWorkspacePathChange={onWorkspacePathChange}
       />
       <SourceModeSwitch
-        useGitHubUrl={fs.useGitHubUrl}
+        useRemote={fs.useRemote}
         noRepository={fs.noRepository}
-        onToggleGitHubUrl={onToggleGitHubUrl}
+        onToggleRemote={onToggleRemote}
         onToggleNoRepository={onToggleNoRepository}
       />
     </div>
@@ -187,7 +186,6 @@ function ModeBody({
   freshBranchEnabled,
   onRowRepositoryChange,
   onRowBranchChange,
-  onGitHubUrlChange,
   onToggleFreshBranch,
   onWorkspacePathChange,
 }: {
@@ -202,7 +200,6 @@ function ModeBody({
   freshBranchEnabled?: boolean;
   onRowRepositoryChange: (key: string, value: string) => void;
   onRowBranchChange: (key: string, value: string) => void;
-  onGitHubUrlChange?: (value: string) => void;
   onToggleFreshBranch?: (enabled: boolean) => void;
   onWorkspacePathChange?: (value: string) => void;
 }) {
@@ -215,16 +212,13 @@ function ModeBody({
       />
     );
   }
-  if (fs.useGitHubUrl) {
+  if (fs.useRemote) {
     return (
-      <GitHubUrlSection
-        githubUrl={fs.githubUrl}
-        githubUrlError={fs.githubUrlError}
-        githubBranch={fs.githubBranch}
-        githubBranches={fs.githubBranches}
-        githubBranchesLoading={fs.githubBranchesLoading}
-        onGitHubUrlChange={onGitHubUrlChange}
-        onGitHubBranchChange={fs.setGitHubBranch}
+      <RemoteRepoChipsRow
+        fs={fs}
+        onUpdateRow={fs.updateRemoteRepo}
+        onAddRow={fs.addRemoteRepo}
+        onRemoveRow={fs.removeRemoteRepo}
       />
     );
   }
@@ -287,7 +281,11 @@ function ChipsList({
           workspaceId={workspaceId}
           repositories={repositories}
           discoveredRepositories={fs.discoveredRepositories}
-          excludedRepoIds={collectUsedRepoIds(fs.repositories, row.key)}
+          // Multi-branch: the same repository may be reused across rows when
+          // each row picks a different branch. Only exclude rows that hold
+          // the exact (repo, branch) pair this row would clash with on the
+          // backend — empty-branch rows can't collide yet, so they pass.
+          excludedRepoIds={collectExactDuplicateRepoIds(fs.repositories, row)}
           branchLocked={branchLocked}
           // For local-executor rows, seed row.branch with the workspace's
           // current branch via this prop. Non-local rows leave it undefined
@@ -378,11 +376,24 @@ function computeAddHint(canAddMore: boolean, workspaceRepoCount: number): string
   return "All workspace repositories are already added";
 }
 
-/** Build the set of repo identifiers (workspace id or path) currently in use. */
-function collectUsedRepoIds(rows: TaskRepoRow[], exceptKey?: string): Set<string> {
+/**
+ * Returns the set of repo ids/paths that would create a literal duplicate
+ * (same repo + same branch) of an *existing* row if `currentRow` adopted
+ * them — used to hide already-claimed pairings from the repo dropdown.
+ *
+ * Multi-branch tasks are supported: the same repo can appear across multiple
+ * rows as long as each row's branch differs. Rows with empty branches don't
+ * collide yet, so they don't contribute to the exclusion set.
+ *
+ * Same-row entries are skipped so the current row's own pick remains
+ * selectable; without that, after the user pairs (repo, branch) the chip
+ * would suddenly render its current repo as unavailable.
+ */
+function collectExactDuplicateRepoIds(rows: TaskRepoRow[], currentRow: TaskRepoRow): Set<string> {
   const ids = new Set<string>();
   for (const r of rows) {
-    if (r.key === exceptKey) continue;
+    if (r.key === currentRow.key) continue;
+    if (!r.branch || r.branch !== currentRow.branch) continue;
     if (r.repositoryId) ids.add(r.repositoryId);
     if (r.localPath) ids.add(r.localPath);
   }

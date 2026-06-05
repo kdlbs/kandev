@@ -48,7 +48,7 @@ BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || powershell -c
 
 LDFLAGS += -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)
 
-.PHONY: all build build-all build-agentctl build-agentctl-linux build-acpdbg acpdbg build-mock-agent build-mock-agent-linux build-preview build-winjob clean run dev start-debug test test-e2e test-sprites-e2e lint fmt vet help
+.PHONY: all build build-all build-agentctl build-agentctl-linux build-acpdbg acpdbg build-mock-agent build-mock-agent-linux build-preview build-winjob clean run dev start-debug test test-e2e test-sprites-e2e test-lifecycle-goleak lint fmt vet help
 
 ## Default target
 all: build
@@ -167,6 +167,18 @@ test-sprites-e2e: build-agentctl-linux
 	KANDEV_AGENTCTL_LINUX_BINARY=$(CURDIR)/$(BUILD_DIR)/agentctl-linux-amd64 \
 		$(GO) test -v -count=1 -tags sprites_e2e -run TestSpritesE2E -timeout 10m ./internal/agent/runtime/lifecycle/
 
+## Stress-run the lifecycle goleak suite — repro target for the CI-only flake
+## where StreamManager/WorkspaceStream goroutines linger past TestMain on
+## slow runners. Local hardware almost never reproduces the leak under a
+## single pass; -count=20 (configurable) plus -race is the smallest cadence
+## that consistently surfaces the race during development.
+##
+## Override the loop count with `make test-lifecycle-goleak LIFECYCLE_GOLEAK_COUNT=N`.
+LIFECYCLE_GOLEAK_COUNT ?= 20
+test-lifecycle-goleak:
+	@echo "Stress-running lifecycle goleak suite ($(LIFECYCLE_GOLEAK_COUNT)x)..."
+	$(CGO_PREFIX) $(GO) test -tags fts5 -race -count=$(LIFECYCLE_GOLEAK_COUNT) -timeout 600s ./internal/agent/runtime/lifecycle/ ./internal/agent/runtime/agentctl/
+
 ## Run tests with coverage
 test-coverage:
 	@echo "Running tests with coverage..."
@@ -227,6 +239,7 @@ help:
 	@echo "  test          Run tests (full suite — fails on Windows pending fixture cleanup)"
 	@echo "  test-windows  Run only the Windows-clean subset (matches CI windows-latest job)"
 	@echo "  test-e2e      Run E2E adapter tests (real agents, costs money)"
+	@echo "  test-lifecycle-goleak  Stress-run lifecycle goleak suite (override LIFECYCLE_GOLEAK_COUNT=N)"
 	@echo "  test-coverage Run tests with coverage report"
 	@echo "  lint          Run golangci-lint"
 	@echo "  fmt           Format code"

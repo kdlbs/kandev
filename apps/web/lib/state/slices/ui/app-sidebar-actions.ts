@@ -6,7 +6,7 @@ import {
   setStoredAppSidebarCollapsed,
   setStoredAppSidebarSectionExpanded,
   setStoredAppSidebarWidth,
-} from "@/lib/local-storage";
+} from "@/lib/local-storage-app-sidebar";
 import { APP_SIDEBAR_EXPANDED_WIDTH } from "@/components/app-sidebar/app-sidebar-constants";
 import type { AppSidebarState, UISlice } from "./types";
 

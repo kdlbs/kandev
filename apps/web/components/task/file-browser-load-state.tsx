@@ -1,6 +1,6 @@
 "use client";
 
-import { IconLoader2 } from "@tabler/icons-react";
+import { PanelLoadingState } from "@/components/panel-loading-state";
 import type { FileTreeNode } from "@/lib/types/backend";
 
 type RenderSessionOrLoadStateInput = {
@@ -31,18 +31,10 @@ export function renderSessionOrLoadState({
     );
   }
   if ((loadState === "loading" || isLoadingTree) && !tree) {
-    return <div className="p-4 text-sm text-muted-foreground">Loading files...</div>;
+    return <PanelLoadingState label="Loading files..." />;
   }
   if (loadState === "waiting") {
-    return (
-      <div
-        data-testid="file-tree-waiting"
-        className="p-4 text-sm text-muted-foreground flex items-center gap-2"
-      >
-        <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
-        Preparing workspace...
-      </div>
-    );
+    return <PanelLoadingState testId="file-tree-waiting" label="Preparing workspace..." />;
   }
   if (loadState === "manual") {
     return (

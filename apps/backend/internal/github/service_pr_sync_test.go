@@ -2,7 +2,9 @@ package github
 
 import (
 	"context"
+	"sync"
 	"testing"
+	"testing/synctest"
 )
 
 func TestTriggerPRSync_SyncsExistingWatch(t *testing.T) {
@@ -107,4 +109,103 @@ func TestTriggerPRSync_NoWatch(t *testing.T) {
 	if result != nil {
 		t.Errorf("expected nil TaskPR for task without watch, got %+v", result)
 	}
+}
+
+// TestTriggerPRSyncAll_ThrottlesDetectionProbe reproduces the log-flood bug:
+// a pr_number=0 watch on a branch that has no PR (e.g. an unresolvable repo)
+// was re-probing GitHub on every on-demand sync, because the detection path —
+// unlike the status-sync path — had no freshness guard and never stamped
+// last_checked_at. The frontend re-syncs every 5s while no PR is found, so
+// each repeated sync hit `gh` again and logged a warning. After the fix the
+// first sync probes once and stamps the watch; the immediate second sync is
+// throttled within prSyncFreshnessWindow and must NOT probe again.
+func TestTriggerPRSyncAll_ThrottlesDetectionProbe(t *testing.T) {
+	_, svc, mockClient, store := setupPollerTest(t)
+	ctx := context.Background()
+
+	// Watch with pr_number=0 on a branch that has no PR in the mock — every
+	// FindPRByBranch returns (nil, nil), mirroring "PR not found yet".
+	watch := &PRWatch{
+		SessionID: "s1",
+		TaskID:    "t1",
+		Owner:     "org",
+		Repo:      "missing",
+		PRNumber:  0,
+		Branch:    "feat/never-merged",
+	}
+	if err := store.CreatePRWatch(ctx, watch); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.TriggerPRSyncAll(ctx, "t1"); err != nil {
+		t.Fatalf("first TriggerPRSyncAll: %v", err)
+	}
+	if got := mockClient.FindPRByBranchCallCount(); got != 1 {
+		t.Fatalf("expected exactly 1 detection probe on first sync, got %d", got)
+	}
+
+	// Second sync immediately after — well within prSyncFreshnessWindow.
+	if _, err := svc.TriggerPRSyncAll(ctx, "t1"); err != nil {
+		t.Fatalf("second TriggerPRSyncAll: %v", err)
+	}
+	if got := mockClient.FindPRByBranchCallCount(); got != 1 {
+		t.Errorf("expected detection probe to be throttled on second sync (still 1 call), got %d", got)
+	}
+}
+
+// TestTriggerPRDetection_CoalescesConcurrentProbes verifies that parallel
+// syncs for the same watch collapse to a single GitHub probe. The freshness
+// guard alone is racy — concurrent callers can all read a stale
+// last_checked_at and probe simultaneously — so detection runs inside a
+// per-watch singleflight. We force overlap by blocking the probe: the leader
+// enters FindPRByBranch and parks; the followers must coalesce into it rather
+// than issue their own probes.
+//
+// synctest.Wait() supplies the otherwise-unobservable "all followers have
+// joined the singleflight" signal: it returns only once every goroutine is
+// durably blocked (the leader on the release channel, the followers inside
+// singleflight). That makes the coalescing assertion deterministic without a
+// fixed sleep.
+func TestTriggerPRDetection_CoalescesConcurrentProbes(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		_, svc, mockClient, store := setupPollerTest(t)
+		ctx := context.Background()
+
+		watch := &PRWatch{
+			SessionID: "s1",
+			TaskID:    "t1",
+			Owner:     "org",
+			Repo:      "missing",
+			PRNumber:  0,
+			Branch:    "feat/never-merged",
+		}
+		if err := store.CreatePRWatch(ctx, watch); err != nil {
+			t.Fatal(err)
+		}
+
+		const concurrency = 6
+		release := make(chan struct{})
+		mockClient.GateFindPRByBranch(nil, release) // block the leader inside FindPRByBranch
+
+		var wg sync.WaitGroup
+		wg.Add(concurrency)
+		for range concurrency {
+			go func() {
+				defer wg.Done()
+				if _, err := svc.TriggerPRSyncAll(ctx, "t1"); err != nil {
+					t.Errorf("TriggerPRSyncAll: %v", err)
+				}
+			}()
+		}
+
+		// Block until the leader is parked in FindPRByBranch and every other
+		// caller has coalesced into its singleflight call.
+		synctest.Wait()
+		close(release)
+		wg.Wait()
+
+		if got := mockClient.FindPRByBranchCallCount(); got != 1 {
+			t.Errorf("expected concurrent detection probes to coalesce to 1 GitHub call, got %d", got)
+		}
+	})
 }

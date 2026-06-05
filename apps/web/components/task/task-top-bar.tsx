@@ -20,7 +20,7 @@ import { useLinearAvailable } from "@/hooks/domains/linear/use-linear-availabili
 import { PortForwardButton } from "@/components/task/port-forward-dialog";
 import { ExecutorSettingsButton } from "@/components/task/executor-settings-button";
 import { WorkflowStepper, type WorkflowStepperStep } from "@/components/task/workflow-stepper";
-import { DEBUG_UI } from "@/lib/config";
+import { isDebugUI } from "@/lib/config";
 
 type TaskTopBarProps = {
   taskId?: string | null;
@@ -269,7 +269,7 @@ function TopbarToolsGroup({
   onToggleDebugOverlay?: () => void;
   isArchived?: boolean;
 }) {
-  const showDebugToggle = DEBUG_UI && onToggleDebugOverlay;
+  const showDebugToggle = isDebugUI() && onToggleDebugOverlay;
 
   return (
     <TopbarCluster label="Task tools" className="[&_button]:h-8 [&_button]:text-xs">

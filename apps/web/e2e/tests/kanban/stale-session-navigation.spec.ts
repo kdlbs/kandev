@@ -68,8 +68,14 @@ test.describe("Stale session navigation", () => {
     await cardB.click();
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
-    // 6. Verify Task B's page shows the correct title
-    await expect(testPage.getByText("Sessionless Task")).toBeVisible({ timeout: 10_000 });
+    // 6. Verify Task B's page shows the correct title.
+    // Use the breadcrumb link specifically — `getByText` collides with the
+    // task card still visible in the sidebar list, triggering a strict-mode
+    // failure ("resolved to 2 elements") under flaky conditions where both
+    // surfaces happen to render the title.
+    await expect(testPage.getByRole("link", { name: "Sessionless Task" })).toBeVisible({
+      timeout: 10_000,
+    });
 
     // 7. Task A's messages must NOT appear on Task B's page
     await expect(testPage.getByText("simple mock response", { exact: false })).not.toBeVisible({

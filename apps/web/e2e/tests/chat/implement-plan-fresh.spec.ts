@@ -40,7 +40,7 @@ async function seedTaskAndEnterPlanMode(
 
   const session = new SessionPage(testPage);
   await session.waitForLoad();
-  await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+  await session.waitForChatIdle({ timeout: 30_000 });
 
   await session.togglePlanMode();
   await expect(session.planModeInput()).toBeVisible({ timeout: 10_000 });
@@ -134,7 +134,7 @@ test.describe("Implement plan — fresh-agent path", () => {
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // No plan mode → no Implement button and no chevron trigger.
     await expect(testPage.getByTestId("implement-plan-button")).not.toBeVisible();

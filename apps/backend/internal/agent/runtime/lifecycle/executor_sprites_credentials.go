@@ -63,7 +63,7 @@ func (r *SpritesExecutor) uploadCredentials(
 		return nil
 	}
 
-	stepCtx, cancel := context.WithTimeout(ctx, spriteStepTimeout)
+	stepCtx, cancel := context.WithTimeout(ctx, spriteUploadTimeout)
 	defer cancel()
 
 	uploader := &spriteFileUploader{sprite: sprite, runtime: r}

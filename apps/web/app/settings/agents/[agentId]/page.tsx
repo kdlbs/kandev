@@ -51,7 +51,6 @@ const createDraftProfile = (
   name: "",
   agentDisplayName,
   model: defaultModel,
-  allowIndexing: false,
   ...buildDefaultPermissions(permissionSettings ?? {}),
   cliPassthrough: false,
   cliFlags: seedDefaultCLIFlags(permissionSettings ?? {}),

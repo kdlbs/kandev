@@ -11,6 +11,7 @@ const baseProfile: AgentProfile = {
   model: "mock-fast",
   mode: "default",
   allowIndexing: false,
+  autoApprove: false,
   cliFlags: [],
   cliPassthrough: false,
   createdAt: "2026-01-01T00:00:00Z",
@@ -31,6 +32,7 @@ describe("toAgentProfilePatch", () => {
       model: "claude-sonnet",
       mode: "default",
       allow_indexing: true,
+      auto_approve: true,
       cli_passthrough: true,
       cli_flags: [{ flag: ALLOW_ALL_TOOLS_FLAG, enabled: true, description: "" }],
     };
@@ -39,6 +41,7 @@ describe("toAgentProfilePatch", () => {
       model: "claude-sonnet",
       mode: "default",
       allowIndexing: true,
+      autoApprove: true,
       cliPassthrough: true,
       cliFlags: [{ flag: ALLOW_ALL_TOOLS_FLAG, enabled: true, description: "" }],
     });
@@ -105,5 +108,15 @@ describe("isProfileDirty", () => {
     const saved: AgentProfile = { ...baseProfile, cliFlags: flags };
     const draft = draftFrom(saved, { cliFlags: [...flags] });
     expect(isProfileDirty(draft, saved)).toBe(false);
+  });
+
+  it("returns true when autoApprove changes via camelCase draft field", () => {
+    const draft = draftFrom(baseProfile, { autoApprove: true });
+    expect(isProfileDirty(draft, baseProfile)).toBe(true);
+  });
+
+  it("returns false when stale snake_case auto_approve disagrees with camelCase", () => {
+    const draft = draftFrom(baseProfile, { auto_approve: true, autoApprove: false });
+    expect(isProfileDirty(draft, baseProfile)).toBe(false);
   });
 });

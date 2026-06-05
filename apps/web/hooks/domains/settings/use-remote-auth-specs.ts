@@ -1,14 +1,25 @@
 import { useEffect, useState } from "react";
 import { listRemoteCredentials, type RemoteAuthSpec } from "@/lib/api/domains/settings-api";
+import { createDebugLogger } from "@/lib/debug/log";
+
+const debug = createDebugLogger("executor-compat:specs");
 
 let cached: Promise<RemoteAuthSpec[]> | null = null;
 
 function loadAuthSpecs(): Promise<RemoteAuthSpec[]> {
   if (!cached) {
     cached = listRemoteCredentials()
-      .then((res) => res.auth_specs ?? [])
-      .catch(() => {
+      .then((res) => {
+        const specs = res.auth_specs ?? [];
+        debug("loaded", {
+          count: specs.length,
+          ids: specs.map((s) => s.id).join(",") || "-",
+        });
+        return specs;
+      })
+      .catch((err) => {
         cached = null;
+        debug("load-failed", { error: err instanceof Error ? err.message : String(err) });
         return [] as RemoteAuthSpec[];
       });
   }

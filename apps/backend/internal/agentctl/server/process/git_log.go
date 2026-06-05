@@ -430,3 +430,15 @@ func (g *GitOperator) GetMergeBase(ctx context.Context, ref1, ref2 string) (stri
 	}
 	return strings.TrimSpace(output), nil
 }
+
+// GetRevParse resolves a ref name to its commit SHA. Returns the empty
+// string when the ref doesn't exist; used as a no-common-ancestor fallback
+// for the commits panel so a base branch with unrelated history still
+// produces a stable anchor for `git log <tip>..HEAD`.
+func (g *GitOperator) GetRevParse(ctx context.Context, ref string) (string, error) {
+	output, err := g.runGitCommand(ctx, "rev-parse", ref)
+	if err != nil {
+		return "", fmt.Errorf("failed to rev-parse %q: %w", ref, err)
+	}
+	return strings.TrimSpace(output), nil
+}

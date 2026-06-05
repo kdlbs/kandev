@@ -21,6 +21,7 @@ import {
   DropdownMenuSeparator,
 } from "@kandev/ui/dropdown-menu";
 import { PanelHeaderBarSplit } from "./panel-primitives";
+import { BaseBranchPicker } from "./base-branch-picker";
 
 type PerRepoStatus = {
   repository_name: string;
@@ -31,7 +32,15 @@ type PerRepoStatus = {
   hasUnstaged: boolean;
 };
 
-type BranchRow = { repoLabel: string | null; branch: string; baseBranch: string };
+type BranchRow = {
+  repoLabel: string | null;
+  branch: string;
+  baseBranch: string;
+  /** Name agentctl emits for this repo (= worktree dir basename). Empty for
+   *  single-repo workspaces; passed to the BaseBranchPicker so it can resolve
+   *  the task_repositories row to PATCH. */
+  repositoryName: string;
+};
 
 /**
  * Builds per-repo rows for the branch hover card. Returns [] for single-repo
@@ -51,10 +60,17 @@ function buildBranchRows(
     repoLabel: repoDisplayName?.(s.repository_name) || s.repository_name,
     branch: s.branch ?? "",
     baseBranch: baseBranchByRepo?.[s.repository_name] || baseBranchFallback,
+    repositoryName: s.repository_name,
   }));
 }
 
-function BranchRowView({ repoLabel, branch, baseBranch }: BranchRow) {
+function BranchRowView({
+  repoLabel,
+  branch,
+  baseBranch,
+  repositoryName,
+  taskId,
+}: BranchRow & { taskId: string | null }) {
   return (
     <div className="flex items-center gap-2">
       {repoLabel && (
@@ -68,7 +84,11 @@ function BranchRowView({ repoLabel, branch, baseBranch }: BranchRow) {
       </span>
       <div className="flex-1 border-t border-muted-foreground/20 min-w-8" />
       <IconArrowRight className="h-3 w-3 text-muted-foreground/40" />
-      <span className="text-foreground font-medium">{baseBranch}</span>
+      <BaseBranchPicker
+        taskId={taskId}
+        repositoryName={repositoryName}
+        fallbackBaseBranch={baseBranch}
+      />
     </div>
   );
 }
@@ -77,16 +97,19 @@ function BranchHoverCard({
   displayBranch,
   baseBranchDisplay,
   rows,
+  taskId,
 }: {
   displayBranch: string;
   baseBranchDisplay: string;
   /** When non-empty, the card renders one row per repo instead of the single
    *  workspace-level pair. Single-repo workspaces leave this undefined. */
   rows?: BranchRow[];
+  /** Active task id, plumbed into BaseBranchPicker for the PATCH call. */
+  taskId: string | null;
 }) {
   const isMulti = rows && rows.length > 0;
   const headerLabel = isMulti ? "Your branches:" : "Your code lives in:";
-  const trailerLabel = "and will be merged into:";
+  const trailerLabel = "comparing against:";
   return (
     <HoverCard openDelay={200} closeDelay={100}>
       <HoverCardTrigger asChild>
@@ -106,11 +129,17 @@ function BranchHoverCard({
           {isMulti ? (
             <div className="flex flex-col gap-1.5">
               {rows!.map((row) => (
-                <BranchRowView key={row.repoLabel ?? row.branch} {...row} />
+                <BranchRowView key={row.repoLabel ?? row.branch} {...row} taskId={taskId} />
               ))}
             </div>
           ) : (
-            <BranchRowView repoLabel={null} branch={displayBranch} baseBranch={baseBranchDisplay} />
+            <BranchRowView
+              repoLabel={null}
+              branch={displayBranch}
+              baseBranch={baseBranchDisplay}
+              repositoryName=""
+              taskId={taskId}
+            />
           )}
         </div>
       </HoverCardContent>
@@ -269,6 +298,40 @@ function PerRepoPullMenu({
   );
 }
 
+function ChangesPanelHeaderLeft({
+  showDiffReview,
+  onOpenDiffAll,
+  onOpenReview,
+}: {
+  showDiffReview: boolean;
+  onOpenDiffAll?: () => void;
+  onOpenReview?: () => void;
+}) {
+  if (!showDiffReview) return null;
+  return (
+    <>
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-5 text-[11px] px-1.5 gap-1 cursor-pointer"
+        onClick={onOpenDiffAll}
+      >
+        <IconGitMerge className="h-3 w-3" />
+        Diff
+      </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-5 text-[11px] px-1.5 gap-1 cursor-pointer"
+        onClick={onOpenReview}
+      >
+        <IconEye className="h-3 w-3" />
+        Review
+      </Button>
+    </>
+  );
+}
+
 export function ChangesPanelHeader({
   hasChanges,
   hasCommits,
@@ -287,6 +350,7 @@ export function ChangesPanelHeader({
   onRepoRebase,
   onRepoMerge,
   repoDisplayName,
+  taskId,
 }: {
   hasChanges: boolean;
   hasCommits: boolean;
@@ -308,6 +372,10 @@ export function ChangesPanelHeader({
   onRepoRebase: (repo: string) => void;
   onRepoMerge: (repo: string) => void;
   repoDisplayName?: (repositoryName: string) => string | undefined;
+  /** Active task id; piped into the base-branch picker so it can resolve
+   *  the right task_repositories row to PATCH. Null while task data is
+   *  hydrating — the picker falls back to a static label. */
+  taskId: string | null;
 }) {
   const branchRows = buildBranchRows(
     perRepoStatus,
@@ -319,28 +387,11 @@ export function ChangesPanelHeader({
   return (
     <PanelHeaderBarSplit
       left={
-        showDiffReview ? (
-          <>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-5 text-[11px] px-1.5 gap-1 cursor-pointer"
-              onClick={onOpenDiffAll}
-            >
-              <IconGitMerge className="h-3 w-3" />
-              Diff
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-5 text-[11px] px-1.5 gap-1 cursor-pointer"
-              onClick={onOpenReview}
-            >
-              <IconEye className="h-3 w-3" />
-              Review
-            </Button>
-          </>
-        ) : undefined
+        <ChangesPanelHeaderLeft
+          showDiffReview={showDiffReview}
+          onOpenDiffAll={onOpenDiffAll}
+          onOpenReview={onOpenReview}
+        />
       }
       right={
         <>
@@ -349,6 +400,7 @@ export function ChangesPanelHeader({
               displayBranch={displayBranch ?? ""}
               baseBranchDisplay={baseBranchDisplay}
               rows={branchRows}
+              taskId={taskId}
             />
           )}
           <PullDropdown

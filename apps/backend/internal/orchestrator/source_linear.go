@@ -83,6 +83,22 @@ func (s *LinearWatcherSource) AttachTaskID(ctx context.Context, evt any, taskID 
 	return s.service.AssignIssueWatchTaskID(ctx, e.IssueWatchID, e.Issue.Identifier, taskID)
 }
 
+func (s *LinearWatcherSource) WatchID(evt any) string {
+	e, ok := evt.(*linear.NewLinearIssueEvent)
+	if !ok || e == nil {
+		return ""
+	}
+	return e.IssueWatchID
+}
+
+func (s *LinearWatcherSource) MaxInflightTasks(evt any) *int {
+	e, ok := evt.(*linear.NewLinearIssueEvent)
+	if !ok || e == nil {
+		return nil
+	}
+	return e.MaxInflightTasks
+}
+
 func (s *LinearWatcherSource) AutoStartParams(evt any) AutoStartParams {
 	e, ok := evt.(*linear.NewLinearIssueEvent)
 	if !ok || e == nil {
@@ -93,4 +109,25 @@ func (s *LinearWatcherSource) AutoStartParams(evt any) AutoStartParams {
 		ExecutorProfileID: e.ExecutorProfileID,
 		WorkflowStepID:    e.WorkflowStepID,
 	}
+}
+
+// AgentProfileID returns the watcher's bound profile id, or "" when the
+// event payload is malformed. Pre-flight uses "" as the skip-check signal.
+func (s *LinearWatcherSource) AgentProfileID(evt any) string {
+	e, ok := evt.(*linear.NewLinearIssueEvent)
+	if !ok || e == nil {
+		return ""
+	}
+	return e.AgentProfileID
+}
+
+// SelfHeal disables the linear_issue_watches row that produced this event.
+// Nil-safe: with no LinearService wired the call is silently dropped — same
+// pattern as Reserve / Release.
+func (s *LinearWatcherSource) SelfHeal(ctx context.Context, evt any, cause string) error {
+	e, ok := evt.(*linear.NewLinearIssueEvent)
+	if !ok || e == nil || s.service == nil {
+		return nil
+	}
+	return s.service.DisableIssueWatchWithError(ctx, e.IssueWatchID, cause)
 }

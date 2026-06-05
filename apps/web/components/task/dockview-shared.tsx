@@ -34,8 +34,10 @@ import { VscodePanel } from "./vscode-panel";
 import { CommitDetailPanel } from "./commit-detail-panel";
 import { PRDetailPanelComponent } from "@/components/github/pr-detail-panel";
 
-import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
+import { setPanelTitle, panelPortalManager } from "@/lib/layout/panel-portal-manager";
+import { getWebSocketClient } from "@/lib/ws/connection";
 import { usePortalSlot } from "@/lib/layout/panel-portal-host";
+import { ENV_SCOPED_DOCKVIEW_COMPONENTS } from "@/lib/state/dockview-env-scoped-components";
 
 // ---------------------------------------------------------------------------
 // PORTAL SLOT — generic dockview component that adopts a persistent portal
@@ -72,14 +74,7 @@ import { usePortalSlot } from "@/lib/layout/panel-portal-host";
  *  - files    — uses `useEnvironmentSessionId()` for stable file tree
  *  - plan     — reads `activeTaskId` from the store
  */
-export const ENV_SCOPED_COMPONENTS = new Set([
-  "file-editor",
-  "browser",
-  "vscode",
-  "commit-detail",
-  "diff-viewer",
-  "pr-detail",
-]);
+export const ENV_SCOPED_COMPONENTS = ENV_SCOPED_DOCKVIEW_COMPONENTS;
 
 /**
  * Every entry in the dockview `components` map uses this wrapper.
@@ -206,6 +201,45 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
   );
 }
 
+/**
+ * Force a fresh git-status push whenever the diff panel becomes the active
+ * dockview tab.
+ *
+ * Background: the diff panel's content is derived from `gitStatus` (the
+ * per-file `.diff` string), which only refreshes when a `session.git.event`
+ * status_update arrives from agentctl's workspace poll loop. That loop runs at
+ * 3s (fast) only while the workspace is in fast poll mode; if the focus→fast
+ * upgrade lost a race with agentctl startup the loop can sit in slow mode (30s)
+ * and the open diff shows stale content until the next slow tick.
+ *
+ * This is the diff-side analog of `useResyncOnTabActivate` in
+ * file-editor-panel.tsx (which force-syncs editor content on activation). Tab
+ * activation is a deterministic, user-driven "I'm about to look at this diff"
+ * signal, so we ask the backend for a fresh git-status snapshot via
+ * `refreshSessionData` (re-sends `session.focus`, whose handler pushes a fresh
+ * `GetGitStatusMultiFresh` result) — closing the WS-event-miss gap without
+ * depending on poll cadence. No-op when the session isn't focused.
+ */
+function useResyncGitStatusOnTabActivate(panelId: string, sessionId: string | null) {
+  useEffect(() => {
+    if (!sessionId) return;
+    const entry = panelPortalManager.get(panelId);
+    if (!entry?.api) return;
+    const refreshNow = () => {
+      const client = getWebSocketClient();
+      client?.refreshSessionData(sessionId);
+    };
+    // If the panel is already active when this effect first runs,
+    // onDidActiveChange won't fire (no transition) — refresh immediately so the
+    // initial open benefits from the same WS-event-miss recovery.
+    if (entry.api.isActive) refreshNow();
+    const disposable = entry.api.onDidActiveChange((event) => {
+      if (event.isActive) refreshNow();
+    });
+    return () => disposable.dispose();
+  }, [panelId, sessionId]);
+}
+
 function DiffViewerContent({
   panelId,
   params,
@@ -216,9 +250,11 @@ function DiffViewerContent({
   const selectedDiff = useDockviewStore((s) => s.selectedDiff);
   const setSelectedDiff = useDockviewStore((s) => s.setSelectedDiff);
   const { openFile } = useFileEditors();
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const panelKind = (params?.kind as string) ?? "all";
   const selectedPath = panelKind === "file" ? (params?.path as string) : undefined;
   const panelSelectedDiff = panelKind === "all" ? selectedDiff : null;
+  useResyncGitStatusOnTabActivate(panelId, activeSessionId);
   const handleClosePanel = useCallback(() => {
     const dockApi = useDockviewStore.getState().api;
     const panel = dockApi?.getPanel(panelId);

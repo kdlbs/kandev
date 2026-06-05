@@ -28,9 +28,10 @@ test.describe("System Status page", () => {
     await trigger.click();
     const popover = testPage.getByTestId("system-health-checks-popover");
     await expect(popover).toBeVisible();
-    // The default backend wiring registers GitHub + agents checks.
+    // The default backend wiring registers GitHub, agents, and OS resource limits checks.
     await expect(testPage.getByTestId("system-health-check-github")).toBeVisible();
     await expect(testPage.getByTestId("system-health-check-agents")).toBeVisible();
+    await expect(testPage.getByTestId("system-health-check-system_resources")).toBeVisible();
   });
 
   test("UI state Reset button is wired up and triggers a reload", async ({ testPage }) => {

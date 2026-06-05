@@ -101,6 +101,7 @@ func (a *Auggie) Runtime() *RuntimeConfig {
 		Protocol:        agent.ProtocolACP,
 		WorkspaceFlag:   "--workspace-root",
 		AssumeMcpSse:    true,
+		AssumeMcpHttp:   true,
 		ProjectSkillDir: ".agents/skills",
 		SessionConfig: SessionConfig{
 			NativeSessionResume: true,

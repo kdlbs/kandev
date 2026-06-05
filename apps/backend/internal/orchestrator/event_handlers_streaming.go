@@ -376,7 +376,9 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 // check, same-state check). This is an optimistic fast-path: between load and check another
 // goroutine may have changed the state in the DB. The guards are best-effort to avoid
 // unnecessary writes; the DB update via UpdateTaskSessionState is the atomic source of truth.
-func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID string, nextState models.TaskSessionState, errorMessage string, allowWakeFromWaiting bool, preloadedSession ...*models.TaskSession) {
+// Returns the session row after a successful write (refreshed from DB when possible); callers
+// that need authoritative UpdatedAt should use the return value, not the preloaded input.
+func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID string, nextState models.TaskSessionState, errorMessage string, allowWakeFromWaiting bool, preloadedSession ...*models.TaskSession) *models.TaskSession {
 	var session *models.TaskSession
 	if len(preloadedSession) > 0 && preloadedSession[0] != nil {
 		session = preloadedSession[0]
@@ -384,75 +386,97 @@ func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID 
 		var err error
 		session, err = s.repo.GetTaskSession(ctx, sessionID)
 		if err != nil {
-			return
+			return nil
 		}
 	}
 	if session.State == models.TaskSessionStateWaitingForInput && nextState == models.TaskSessionStateRunning && !allowWakeFromWaiting {
-		return
+		return session
 	}
 	oldState := session.State
 	switch session.State {
 	case models.TaskSessionStateCompleted, models.TaskSessionStateFailed, models.TaskSessionStateCancelled:
-		return
+		return session
 	}
 	if session.State == nextState {
-		return
+		return session
 	}
 	if err := s.repo.UpdateTaskSessionState(ctx, sessionID, nextState, errorMessage); err != nil {
 		s.logger.Error("failed to update task session state",
 			zap.String("session_id", sessionID),
 			zap.String("state", string(nextState)),
 			zap.Error(err))
+		return session
 	}
-	s.logger.Debug("task session state updated",
-		zap.String("task_id", taskID),
-		zap.String("session_id", sessionID),
-		zap.String("old_state", string(oldState)),
-		zap.String("new_state", string(nextState)))
-	if s.eventBus != nil {
-		// Resolve agent_profile_id for the office per-agent live indicators on
-		// the frontend. Prefer the value stored on the session row (post
-		// office-task-session-lifecycle, populated for office sessions); fall
-		// back to the task's assignee for legacy rows that pre-date that spec.
-		// Best-effort: a missed lookup just omits the field, it doesn't drop
-		// the rest of the event.
-		agentProfileID := session.AgentProfileID
-		if agentProfileID == "" {
-			if task, terr := s.repo.GetTask(ctx, taskID); terr == nil && task != nil {
-				agentProfileID = task.AssigneeAgentProfileID
-			}
+	var authoritativeUpdatedAt *time.Time
+	if refreshed, err := s.repo.GetTaskSession(ctx, sessionID); err == nil && refreshed != nil {
+		session = refreshed
+		if !refreshed.UpdatedAt.IsZero() {
+			t := refreshed.UpdatedAt.UTC()
+			authoritativeUpdatedAt = &t
 		}
-		eventData := map[string]interface{}{
-			"task_id":                taskID,
-			"session_id":             sessionID,
-			"old_state":              string(oldState),
-			"new_state":              string(nextState),
-			"error_message":          errorMessage,
-			"agent_profile_id":       agentProfileID,
-			"agent_profile_snapshot": session.AgentProfileSnapshot,
-			"is_passthrough":         session.IsPassthrough,
-		}
-		// Include review_status if present to ensure frontend state consistency
-		if session.ReviewStatus != models.ReviewStatusNone {
-			eventData["review_status"] = string(session.ReviewStatus)
-		}
-		// Include session metadata (e.g. plan_mode set by workflow events).
-		// Key is "session_metadata" to avoid conflict with message-level "metadata".
-		if len(session.Metadata) > 0 {
-			eventData["session_metadata"] = session.Metadata
-		}
-		// Propagate toast suppression flag set by failure handlers (e.g. missing branch).
-		if suppressed, ok := s.suppressToast.LoadAndDelete(sessionID); ok && suppressed.(bool) {
-			eventData["suppress_toast"] = true
-		}
-		if session.TaskEnvironmentID != "" {
-			eventData["task_environment_id"] = session.TaskEnvironmentID
-		}
-		_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(events.TaskSessionStateChanged, "task-session", eventData))
+	}
+	if authoritativeUpdatedAt == nil {
+		s.logger.Warn("skipping session state_changed publish; could not read authoritative updated_at",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("new_state", string(nextState)))
+	} else {
+		s.logger.Debug("task session state updated",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("old_state", string(oldState)),
+			zap.String("new_state", string(nextState)))
+		s.publishTaskSessionStateChanged(ctx, taskID, sessionID, oldState, nextState, errorMessage, authoritativeUpdatedAt, session)
 	}
 
 	// Auto-promote another session to primary when the current primary enters a terminal state
 	s.maybePromotePrimary(ctx, taskID, sessionID, nextState)
+	return session
+}
+
+func (s *Service) publishTaskSessionStateChanged(
+	ctx context.Context,
+	taskID, sessionID string,
+	oldState, nextState models.TaskSessionState,
+	errorMessage string,
+	stateUpdatedAt *time.Time,
+	session *models.TaskSession,
+) {
+	if s.eventBus == nil || session == nil {
+		return
+	}
+	agentProfileID := session.AgentProfileID
+	if agentProfileID == "" {
+		if task, terr := s.repo.GetTask(ctx, taskID); terr == nil && task != nil {
+			agentProfileID = task.AssigneeAgentProfileID
+		}
+	}
+	eventData := map[string]interface{}{
+		metaKeyTaskID:            taskID,
+		metaKeySessionID:         sessionID,
+		"old_state":              string(oldState),
+		metaKeyNewState:          string(nextState),
+		"error_message":          errorMessage,
+		metaKeyAgentProfileID:    agentProfileID,
+		"agent_profile_snapshot": session.AgentProfileSnapshot,
+		"is_passthrough":         session.IsPassthrough,
+	}
+	if stateUpdatedAt != nil && !stateUpdatedAt.IsZero() {
+		eventData[metaKeyUpdatedAt] = stateUpdatedAt.Format(time.RFC3339Nano)
+	}
+	if session.ReviewStatus != models.ReviewStatusNone {
+		eventData["review_status"] = string(session.ReviewStatus)
+	}
+	if len(session.Metadata) > 0 {
+		eventData["session_metadata"] = session.Metadata
+	}
+	if suppressed, ok := s.suppressToast.LoadAndDelete(sessionID); ok && suppressed.(bool) {
+		eventData["suppress_toast"] = true
+	}
+	if session.TaskEnvironmentID != "" {
+		eventData["task_environment_id"] = session.TaskEnvironmentID
+	}
+	_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(events.TaskSessionStateChanged, "task-session", eventData))
 }
 
 // maybePromotePrimary promotes the next best active session to primary when the
@@ -537,7 +561,11 @@ func (s *Service) setSessionWaitingForInput(ctx context.Context, taskID, session
 	}
 
 	wasAlreadyWaiting := session.State == models.TaskSessionStateWaitingForInput
-	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", false, session)
+	if updatedSession := s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", false, session); updatedSession != nil {
+		if len(preloadedSession) > 0 && preloadedSession[0] != nil && preloadedSession[0] != updatedSession {
+			*preloadedSession[0] = *updatedSession
+		}
+	}
 
 	if wasAlreadyWaiting {
 		return
@@ -554,6 +582,46 @@ func (s *Service) writeTaskReviewState(ctx context.Context, taskID string) {
 		return
 	}
 	s.logger.Info("task moved to REVIEW state",
+		zap.String("task_id", taskID))
+}
+
+// writeTaskReviewStateOnCancel clears the kanban "actively working" task
+// states when the user cancels a turn mid-flight by landing the task in
+// REVIEW — the same bucket a normal turn completion uses, so the sidebar
+// shows the green check rather than the yellow "needs input" question icon.
+// Office task status reflects workflow position, not runtime cancel, so those
+// tasks are left alone. Only actively-working tasks are reconciled; tasks
+// already past IN_PROGRESS / SCHEDULING keep their state.
+func (s *Service) writeTaskReviewStateOnCancel(ctx context.Context, taskID string) {
+	dbTask, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || dbTask == nil {
+		if err != nil {
+			s.logger.Warn("failed to load task for cancel state reconcile",
+				zap.String("task_id", taskID),
+				zap.Error(err))
+		}
+		return
+	}
+	if dbTask.AssigneeAgentProfileID != "" {
+		return
+	}
+
+	updated, err := s.taskRepo.UpdateTaskStateIfCurrentIn(
+		ctx,
+		taskID,
+		v1.TaskStateReview,
+		[]v1.TaskState{v1.TaskStateInProgress, v1.TaskStateScheduling},
+	)
+	if err != nil {
+		s.logger.Error("failed to update task state to REVIEW",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return
+	}
+	if !updated {
+		return
+	}
+	s.logger.Info("task moved to REVIEW state after turn cancel",
 		zap.String("task_id", taskID))
 }
 
@@ -582,7 +650,11 @@ func (s *Service) setSessionRunning(ctx context.Context, taskID, sessionID strin
 	// (2,000+ redundant writes observed on long-running turns).
 	wasAlreadyRunning := session.State == models.TaskSessionStateRunning
 
-	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateRunning, "", true, session)
+	if updatedSession := s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateRunning, "", true, session); updatedSession != nil {
+		if len(preloadedSession) > 0 && preloadedSession[0] != nil && preloadedSession[0] != updatedSession {
+			*preloadedSession[0] = *updatedSession
+		}
+	}
 
 	if wasAlreadyRunning {
 		return
@@ -654,11 +726,11 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 	// complete time.
 	s.publishAgentTurnComplete(ctx, payload)
 
-	// Cancel any pending clarifications for this session so WaitForResponse
-	// unblocks and later user responses go through the event fallback path.
+	// Detach any pending clarifications so WaitForResponse unblocks while the
+	// overlay stays interactive for a deferred answer via the event fallback path.
 	if s.clarificationCanceller != nil && payload.SessionID != "" {
-		if n := s.clarificationCanceller.CancelSessionAndNotify(ctx, payload.SessionID); n > 0 {
-			s.logger.Info("cancelled pending clarifications on turn complete",
+		if n := s.clarificationCanceller.DetachSessionAndNotify(ctx, payload.SessionID); n > 0 {
+			s.logger.Info("detached pending clarifications on turn complete",
 				zap.String("session_id", payload.SessionID),
 				zap.Int("count", n))
 		}
@@ -695,13 +767,35 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 	// READY events own workflow transitions and queued prompt execution.
 	// If we're still RUNNING here, avoid racing READY by forcing WAITING/REVIEW.
 	if session != nil && session.State == models.TaskSessionStateRunning {
-		s.logger.Debug("skipping complete-event terminal state update while session is running",
+		// Deferring the running→waiting transition to a READY event. If no READY
+		// follows, the session stays RUNNING and the chat UI keeps showing the
+		// agent as working even though the turn already completed. This is the
+		// backend half of the frontend [session:state] trace — filter both by the
+		// same task_id to see whether a clear ever lands.
+		s.logger.Debug("complete-event deferring running->waiting to READY (turn done, state not yet cleared)",
 			zap.String("task_id", payload.TaskID),
 			zap.String("session_id", payload.SessionID))
 		return
 	}
 
+	// Positive path: this complete event owns the running→WAITING_FOR_INPUT
+	// transition (no READY race). Pairs with the frontend [session:state] line
+	// under the same task_id.
+	s.logger.Debug("complete-event clearing running->waiting (this event owns the transition)",
+		zap.String("task_id", payload.TaskID),
+		zap.String("session_id", payload.SessionID),
+		zap.String("prev_state", sessionStateString(session)))
 	s.setSessionWaitingForInput(ctx, payload.TaskID, payload.SessionID, session)
+}
+
+// sessionStateString renders a session's state for logging, returning "" when
+// the session is nil (e.g. a complete event with no session ID). Kept tiny so
+// state-transition trace logs don't add branching to their hot-path callers.
+func sessionStateString(session *models.TaskSession) string {
+	if session == nil {
+		return ""
+	}
+	return string(session.State)
 }
 
 // Mirrors the same read in lifecycle/manager_events.go.
@@ -872,6 +966,14 @@ func (s *Service) handleSessionModeEvent(ctx context.Context, payload *lifecycle
 	if sessionID == "" || s.eventBus == nil {
 		return
 	}
+	// Persist the agent-reported mode to session metadata so the user's chosen
+	// permission mode survives a backend restart / SSR reload, mirroring how the
+	// current model is persisted. Only non-empty modes are stored — an empty
+	// CurrentModeID means the agent left a special mode, with nothing sticky to keep.
+	if mode := payload.Data.CurrentModeID; mode != "" {
+		s.persistSessionMode(ctx, sessionID, mode)
+	}
+
 	eventPayload := lifecycle.SessionModeEventPayload{
 		TaskID:         payload.TaskID,
 		SessionID:      sessionID,
@@ -882,6 +984,21 @@ func (s *Service) handleSessionModeEvent(ctx context.Context, payload *lifecycle
 	}
 	subject := events.BuildSessionModeSubject(sessionID)
 	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionModeChanged, "orchestrator", eventPayload))
+}
+
+// persistSessionMode stores the agent-reported session permission mode in the
+// session metadata using a targeted json_set, so other metadata keys (plan_mode,
+// acp_session_id, …) are preserved. See issue #1183.
+func (s *Service) persistSessionMode(ctx context.Context, sessionID, modeID string) {
+	if s.repo == nil {
+		return
+	}
+	if err := s.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeySessionMode, modeID); err != nil {
+		s.logger.Warn("failed to persist session mode to metadata",
+			zap.String("session_id", sessionID),
+			zap.String("mode", modeID),
+			zap.Error(err))
+	}
 }
 
 // handleAgentCapabilitiesEvent broadcasts agent_capabilities events to the WebSocket.

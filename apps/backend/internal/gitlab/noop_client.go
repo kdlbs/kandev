@@ -130,3 +130,31 @@ func (c *NoopClient) SearchMRsPaged(context.Context, string, string, int, int) (
 func (c *NoopClient) GetIssueState(context.Context, string, int) (string, error) {
 	return "", ErrNoClient
 }
+
+func (c *NoopClient) MergeMR(context.Context, string, int, bool, string) (*MR, error) {
+	return nil, ErrNoClient
+}
+
+func (c *NoopClient) GetProjectMergeMethods(context.Context, string) (*ProjectMergeMethods, error) {
+	return nil, ErrNoClient
+}
+
+func (c *NoopClient) GetProtectedBranch(context.Context, string, string) (*ProtectedBranch, error) {
+	return nil, nil
+}
+
+func (c *NoopClient) ListUserProjects(context.Context) ([]Project, error) {
+	return nil, ErrNoClient
+}
+
+func (c *NoopClient) SearchProjects(context.Context, string, int) ([]Project, error) {
+	return nil, ErrNoClient
+}
+
+func (c *NoopClient) SetMRLabels(context.Context, string, int, []string) error {
+	return ErrNoClient
+}
+
+func (c *NoopClient) SetMRAssignees(context.Context, string, int, []int) error {
+	return ErrNoClient
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -240,13 +241,30 @@ func (h *Handlers) httpExportWorkflow(c *gin.Context) {
 }
 
 func (h *Handlers) httpExportWorkflows(c *gin.Context) {
-	resp, err := h.controller.ExportWorkflows(c.Request.Context(), c.Param("id"))
+	resp, err := h.controller.ExportWorkflows(c.Request.Context(), c.Param("id"), parseExportIDs(c))
 	if err != nil {
 		h.logger.Error("failed to export workflows", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to export workflows"})
 		return
 	}
 	h.respondYAML(c, resp)
+}
+
+// parseExportIDs reads the optional comma-separated `ids` query param. It
+// returns nil when the param is absent (export all, back-compat) and a non-nil
+// slice (possibly empty) when present, restricting the export to those IDs.
+func parseExportIDs(c *gin.Context) []string {
+	raw, ok := c.GetQuery("ids")
+	if !ok {
+		return nil
+	}
+	ids := []string{}
+	for _, part := range strings.Split(raw, ",") {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			ids = append(ids, trimmed)
+		}
+	}
+	return ids
 }
 
 func (h *Handlers) httpImportWorkflows(c *gin.Context) {

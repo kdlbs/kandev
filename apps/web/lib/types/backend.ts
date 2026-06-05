@@ -263,6 +263,8 @@ export type TaskSessionStateChangedPayload = {
   session_id: string;
   old_state?: string;
   new_state?: string;
+  /** Authoritative row timestamp — used to drop out-of-order subscribe snapshots. */
+  updated_at?: string;
   /**
    * Agent profile id — drives the per-agent live-session selectors on the
    * sidebar. Empty for sessions launched without a profile.
@@ -296,6 +298,11 @@ export type TaskSessionAgentctlPayload = {
   worktree_id?: string;
   worktree_path?: string;
   worktree_branch?: string;
+  /** Task root that contains every per-repo worktree as a sibling subdir.
+   *  Set only when the event signals a sibling worktree addition (multi-branch
+   *  add_branch flow) — the frontend repoints the file browser to it instead of
+   *  staying on the original primary worktree. */
+  task_workspace_path?: string;
 };
 
 export type FileInfo = {
@@ -383,6 +390,7 @@ export type UserSettingsUpdatedPayload = {
   keyboard_shortcuts?: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
   terminal_link_behavior?: string;
   changes_panel_layout?: "flat" | "tree";
+  voice_mode?: import("@/lib/types/http-voice").VoiceModeSettings;
   updated_at?: string;
 };
 
@@ -401,6 +409,8 @@ export type TurnEventPayload = {
   started_at: string;
   completed_at?: string;
   metadata?: Record<string, unknown>;
+  /** Whether the completed turn produced any agent output. Only set on turn.completed. */
+  had_output?: boolean;
   created_at: string;
   updated_at: string;
 };

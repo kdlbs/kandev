@@ -6,7 +6,10 @@ import { useAppStore } from "@/components/state-provider";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { repositoryId, type Repository } from "@/lib/types/http";
-import type { UserSettingsState } from "@/lib/state/slices/settings/types";
+import {
+  DEFAULT_VOICE_MODE_STATE,
+  type UserSettingsState,
+} from "@/lib/state/slices/settings/types";
 
 type DisplaySettings = UserSettingsState;
 
@@ -36,7 +39,15 @@ function carryForwardTerminalSettings(current: DisplaySettings) {
   };
 }
 
-function carryForwardSettings(current: DisplaySettings) {
+function carryForwardLspSettings(current: DisplaySettings) {
+  return {
+    lspAutoStartLanguages: current.lspAutoStartLanguages ?? [],
+    lspAutoInstallLanguages: current.lspAutoInstallLanguages ?? [],
+    lspServerConfigs: current.lspServerConfigs ?? {},
+  };
+}
+
+function carryForwardCoreSettings(current: DisplaySettings) {
   return {
     shellOptions: current.shellOptions ?? [],
     defaultEditorId: current.defaultEditorId ?? null,
@@ -44,14 +55,19 @@ function carryForwardSettings(current: DisplaySettings) {
     reviewAutoMarkOnScroll: current.reviewAutoMarkOnScroll ?? true,
     showReleaseNotification: current.showReleaseNotification ?? true,
     releaseNotesLastSeenVersion: current.releaseNotesLastSeenVersion ?? null,
-    lspAutoStartLanguages: current.lspAutoStartLanguages ?? [],
-    lspAutoInstallLanguages: current.lspAutoInstallLanguages ?? [],
-    lspServerConfigs: current.lspServerConfigs ?? {},
     savedLayouts: current.savedLayouts ?? [],
     sidebarViews: current.sidebarViews ?? [],
     defaultUtilityAgentId: current.defaultUtilityAgentId ?? null,
     keyboardShortcuts: current.keyboardShortcuts ?? {},
     changesPanelLayout: current.changesPanelLayout ?? "flat",
+    voiceMode: current.voiceMode ?? { ...DEFAULT_VOICE_MODE_STATE },
+  };
+}
+
+function carryForwardSettings(current: DisplaySettings) {
+  return {
+    ...carryForwardCoreSettings(current),
+    ...carryForwardLspSettings(current),
     ...carryForwardTerminalSettings(current),
   };
 }

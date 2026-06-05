@@ -114,6 +114,15 @@ export class SidebarFilterPopoverPage {
     await this.clauseRow(index).getByTestId("filter-value-input").fill(value);
   }
 
+  /** Pick a single-select enum clause value (e.g. repository) by its option label. */
+  async setClauseEnumValue(index: number, optionLabel: string): Promise<void> {
+    const trigger = this.clauseRow(index).getByTestId("filter-value-select");
+    await trigger.click();
+    // No .first(): exact:true + unique slugs mean a single match, so Playwright's
+    // strict mode surfaces a duplicate-option regression instead of masking it.
+    await this.page.getByRole("option", { name: optionLabel, exact: true }).click();
+  }
+
   async removeClause(index: number): Promise<void> {
     await this.clauseRow(index).getByTestId("filter-clause-remove").click();
   }

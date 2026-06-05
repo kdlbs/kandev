@@ -18,6 +18,7 @@ export type SessionStatus = {
   session_id: string;
   task_id: string;
   state: string;
+  updated_at?: string;
   agent_profile_id?: string;
   is_agent_running: boolean;
   is_resumable: boolean;
@@ -240,7 +241,7 @@ function applyStatusToState(
       task_id: toTaskId(taskId),
       state: status.state as TaskSessionState,
       started_at: session?.started_at ?? "",
-      updated_at: session?.updated_at ?? "",
+      updated_at: status.updated_at ?? session?.updated_at ?? "",
     });
   }
 }

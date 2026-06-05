@@ -11,19 +11,6 @@ import (
 	"go.uber.org/zap"
 )
 
-func (h *Handlers) handleListExecutors(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	executors, err := h.taskSvc.ListExecutors(ctx)
-	if err != nil {
-		h.logger.Error("failed to list executors", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list executors", nil)
-	}
-	dtos := make([]dto.ExecutorDTO, 0, len(executors))
-	for _, e := range executors {
-		dtos = append(dtos, dto.FromExecutor(e))
-	}
-	return ws.NewResponse(msg.ID, msg.Action, dto.ListExecutorsResponse{Executors: dtos, Total: len(dtos)})
-}
-
 func (h *Handlers) handleListExecutorProfiles(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return h.handleListByField(ctx, msg, "executor_id", "failed to list executor profiles", "Failed to list executor profiles",
 		func(ctx context.Context, executorID string) (any, error) {

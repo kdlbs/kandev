@@ -114,7 +114,7 @@ export const defaultUIState: UISliceState = {
   rightPanel: { activeTabBySessionId: {} },
   diffs: { files: [] },
   connection: { status: "disconnected", error: null },
-  mobileKanban: { activeColumnIndex: 0, isMenuOpen: false },
+  mobileKanban: { activeColumnIndex: 0, isMenuOpen: false, isSearchOpen: false },
   mobileSession: { activePanelBySessionId: {}, isTaskSwitcherOpen: false },
   chatInput: { planModeBySessionId: {} },
   documentPanel: { activeDocumentBySessionId: {} },
@@ -193,6 +193,10 @@ function buildMobileActions(set: ImmerSet) {
     setMobileKanbanMenuOpen: (open: boolean) =>
       set((draft) => {
         draft.mobileKanban.isMenuOpen = open;
+      }),
+    setMobileKanbanSearchOpen: (open: boolean) =>
+      set((draft) => {
+        draft.mobileKanban.isSearchOpen = open;
       }),
     setMobileSessionPanel: (
       sessionId: string,

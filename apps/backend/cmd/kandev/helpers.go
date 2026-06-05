@@ -43,6 +43,7 @@ import (
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/gitlab"
 	"github.com/kandev/kandev/internal/health"
+	"github.com/kandev/kandev/internal/health/oslimits"
 	"github.com/kandev/kandev/internal/improvekandev"
 	"github.com/kandev/kandev/internal/jira"
 	"github.com/kandev/kandev/internal/linear"
@@ -59,6 +60,7 @@ import (
 	prompthandlers "github.com/kandev/kandev/internal/prompts/handlers"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
+	"github.com/kandev/kandev/internal/sentry"
 	"github.com/kandev/kandev/internal/slack"
 	spriteshandlers "github.com/kandev/kandev/internal/sprites"
 	sshhandlers "github.com/kandev/kandev/internal/ssh"
@@ -71,6 +73,8 @@ import (
 	userhandlers "github.com/kandev/kandev/internal/user/handlers"
 	utilitycontroller "github.com/kandev/kandev/internal/utility/controller"
 	utilityhandlers "github.com/kandev/kandev/internal/utility/handlers"
+	voicehandlers "github.com/kandev/kandev/internal/voice/handlers"
+	"github.com/kandev/kandev/internal/voice/transcribe"
 	workflowcontroller "github.com/kandev/kandev/internal/workflow/controller"
 	workflowhandlers "github.com/kandev/kandev/internal/workflow/handlers"
 	"github.com/kandev/kandev/internal/worktree"
@@ -99,6 +103,9 @@ func buildSessionDataProvider(taskRepo *sqliterepo.Repository, lifecycleMgr *lif
 }
 
 const sessionIDPayloadKey = "session_id"
+const taskIDPayloadKey = "task_id"
+const newStatePayloadKey = "new_state"
+const sessionUpdatedAtPayloadKey = "updated_at"
 
 // appendAgentctlStatusMessage snapshots the current agentctl readiness for a
 // session so late-subscribing clients (page reload, task switch, WS reconnect)
@@ -157,9 +164,10 @@ func appendAgentctlStatusMessage(
 // — without it, env-routed shell terminals stall on "Connecting terminal...".
 func appendSessionStateMessage(sessionID string, session *models.TaskSession, result []*ws.Message) []*ws.Message {
 	payload := map[string]interface{}{
-		"session_id": sessionID,
-		"task_id":    session.TaskID,
-		"new_state":  string(session.State),
+		sessionIDPayloadKey:        sessionID,
+		taskIDPayloadKey:           session.TaskID,
+		newStatePayloadKey:         string(session.State),
+		sessionUpdatedAtPayloadKey: session.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	}
 	if session.ReviewStatus != models.ReviewStatusNone {
 		payload["review_status"] = string(session.ReviewStatus)
@@ -341,7 +349,6 @@ func appendContextWindowMessage(sessionID string, session *models.TaskSession, r
 	notification, err := ws.NewNotification(ws.ActionSessionStateChanged, map[string]interface{}{
 		"session_id": sessionID,
 		"task_id":    session.TaskID,
-		"new_state":  string(session.State),
 		"metadata": map[string]interface{}{
 			"context_window": contextWindow,
 		},
@@ -449,6 +456,7 @@ type routeParams struct {
 	devMode                 bool
 	httpPort                int
 	features                config.FeaturesConfig
+	voice                   config.VoiceConfig
 	log                     *logger.Logger
 }
 
@@ -506,7 +514,7 @@ func registerRoutes(p routeParams) {
 
 	p.gateway.SetupRoutes(p.router)
 	registerTaskRoutes(p, planService, handoffSvc)
-	registerSecondaryRoutes(p, workflowCtrl, clarificationStore, planService, handoffSvc)
+	registerSecondaryRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, planService, handoffSvc)
 
 	// /health is a readiness probe, not a liveness probe. It only
 	// returns 200 after main has flipped the package-level `ready`
@@ -662,6 +670,7 @@ func registerSecondaryRoutes(
 	p routeParams,
 	workflowCtrl *workflowcontroller.Controller,
 	clarificationStore *clarification.Store,
+	clarificationCanceller *clarification.Canceller,
 	planService *taskservice.PlanService,
 	handoffSvc *taskservice.HandoffService,
 ) {
@@ -697,6 +706,11 @@ func registerSecondaryRoutes(
 
 	utilityhandlers.RegisterRoutes(p.router, p.utilityCtrl, p.lifecycleMgr, p.hostUtilityMgr, p.services.User, p.log)
 	p.log.Debug("Registered Utility Agents handlers (HTTP)")
+
+	// Voice transcription fallback. The route always mounts, but returns 503
+	// when no API key is configured so the frontend can hide the path.
+	voicehandlers.RegisterRoutes(p.router, transcribe.New(p.voice.OpenAIAPIKey), p.log)
+	p.log.Debug("Registered Voice handlers (HTTP)")
 
 	agentcapabilities.RegisterRoutes(p.router, p.hostUtilityMgr, p.log)
 	p.log.Debug("Registered Agent Capabilities handlers (HTTP)")
@@ -734,8 +748,9 @@ func registerSecondaryRoutes(
 	}
 
 	if p.services.GitLab != nil {
-		gitlab.RegisterRoutes(p.router, p.services.GitLab, p.log)
-		p.log.Debug("Registered GitLab handlers (HTTP)")
+		gitlab.RegisterRoutesWithDispatcher(p.router, p.gateway.Dispatcher, p.services.GitLab, p.log)
+		gitlab.RegisterMockRoutes(p.router, p.services.GitLab, p.log)
+		p.log.Debug("Registered GitLab handlers (HTTP + WebSocket)")
 	}
 
 	if p.services.Jira != nil {
@@ -748,6 +763,12 @@ func registerSecondaryRoutes(
 		linear.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.Linear, p.log)
 		linear.RegisterMockRoutes(p.router, p.services.Linear, p.log)
 		p.log.Debug("Registered Linear handlers (HTTP + WebSocket)")
+	}
+
+	if p.services.Sentry != nil {
+		sentry.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.Sentry, p.log)
+		sentry.RegisterMockRoutes(p.router, p.services.Sentry, p.log)
+		p.log.Debug("Registered Sentry handlers (HTTP)")
 	}
 
 	if p.services.Slack != nil {
@@ -775,7 +796,7 @@ func registerSecondaryRoutes(
 		p.log.Debug("Registered Improve Kandev handlers (HTTP)")
 	}
 
-	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, planService, handoffSvc)
+	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, planService, handoffSvc)
 
 	var automationSvc *automation.Service
 	if p.services.Automation != nil {
@@ -848,9 +869,14 @@ func registerHealthRoutes(p routeParams) {
 	if githubRateProvider != nil {
 		githubChecker.WithRateLimitProvider(githubRateProvider)
 	}
+	osLimitsChecker := health.NewCachedChecker(
+		oslimits.NewOSLimitsChecker(oslimits.NewInotifyProbe()),
+		5*time.Minute,
+	)
 	healthSvc := health.NewService(p.log,
 		githubChecker,
 		health.NewAgentChecker(p.agentSettingsController),
+		osLimitsChecker,
 	)
 	health.RegisterRoutes(p.router, healthSvc, p.log)
 }
@@ -877,20 +903,66 @@ func (a githubRateLimitAdapter) ExhaustedRateLimits() []health.GitHubRateLimitSt
 	return out
 }
 
+// mcpTaskPRListerAdapter adapts *github.Service to the MCP handlers'
+// TaskPRLister interface so list_tasks responses can carry per-task PR
+// summaries. Returns an empty map when the github service is nil.
+type mcpTaskPRListerAdapter struct {
+	gh *github.Service
+}
+
+func (a mcpTaskPRListerAdapter) ListTaskPRsByTaskIDs(
+	ctx context.Context, taskIDs []string,
+) (map[string][]mcphandlers.TaskPRInfo, error) {
+	out := make(map[string][]mcphandlers.TaskPRInfo)
+	if a.gh == nil || len(taskIDs) == 0 {
+		return out, nil
+	}
+	prs, err := a.gh.ListTaskPRsByTaskIDs(ctx, taskIDs)
+	if err != nil {
+		return nil, err
+	}
+	for taskID, list := range prs {
+		infos := make([]mcphandlers.TaskPRInfo, 0, len(list))
+		for _, pr := range list {
+			if pr == nil {
+				continue
+			}
+			infos = append(infos, mcphandlers.TaskPRInfo{
+				Number:   pr.PRNumber,
+				URL:      pr.PRURL,
+				Title:    pr.PRTitle,
+				State:    pr.State,
+				MergedAt: pr.MergedAt,
+			})
+		}
+		if len(infos) > 0 {
+			out[taskID] = infos
+		}
+	}
+	return out, nil
+}
+
 // registerMCPAndDebugRoutes registers MCP and debug routes and wires the MCP handler.
 func registerMCPAndDebugRoutes(
 	p routeParams,
 	wfCtrl *workflowcontroller.Controller,
 	clarificationStore *clarification.Store,
+	clarificationCanceller *clarification.Canceller,
 	planService *taskservice.PlanService,
 	handoffSvc *taskservice.HandoffService,
 ) {
 	mcpHandlers := mcphandlers.NewHandlers(
 		p.taskSvc, wfCtrl,
-		clarificationStore, p.msgCreator, p.taskRepo, p.taskRepo, p.eventBus, planService, p.orchestratorSvc, p.orchestratorSvc.GetMessageQueue(), p.log,
+		clarificationStore, clarificationCanceller, p.msgCreator, p.taskRepo, p.taskRepo, p.eventBus, planService, p.orchestratorSvc, p.orchestratorSvc.GetMessageQueue(), p.log,
 	)
 	// Wire config-mode dependencies for agent-native configuration
 	mcpHandlers.SetConfigDeps(p.services.Workflow, p.agentSettingsController, p.mcpConfigSvc)
+
+	// Enrich list_tasks responses with associated GitHub PRs (link, title,
+	// number, state) when the github service is available.
+	if p.services.GitHub != nil {
+		mcpHandlers.SetTaskPRLister(mcpTaskPRListerAdapter{gh: p.services.GitHub})
+	}
 
 	// Reuse the cross-task handoff service constructed in registerRoutes —
 	// the same instance backs the MCP path and the HTTP Kanban path so

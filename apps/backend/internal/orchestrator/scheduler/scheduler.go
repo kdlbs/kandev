@@ -42,6 +42,7 @@ func DefaultSchedulerConfig() SchedulerConfig {
 type TaskRepository interface {
 	GetTask(ctx context.Context, taskID string) (*v1.Task, error)
 	UpdateTaskState(ctx context.Context, taskID string, state v1.TaskState) error
+	UpdateTaskStateIfCurrentIn(ctx context.Context, taskID string, state v1.TaskState, allowed []v1.TaskState) (bool, error)
 }
 
 // QueueStatus contains queue statistics

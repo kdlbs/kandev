@@ -77,8 +77,6 @@ function makeFs(): DialogFormState {
     addRepository: () => {},
     removeRepository: () => {},
     updateRepository: () => {},
-    githubBranch: "",
-    setGitHubBranch: () => {},
     agentProfileId: "",
     setAgentProfileId: () => {},
     executorId: "",
@@ -99,20 +97,27 @@ function makeFs(): DialogFormState {
     setIsCreatingSession: () => {},
     isCreatingTask: false,
     setIsCreatingTask: () => {},
-    useGitHubUrl: false,
-    setUseGitHubUrl: () => {},
-    githubUrl: "",
-    setGitHubUrl: () => {},
-    githubBranches: [],
-    setGitHubBranches: () => {},
-    githubBranchesLoading: false,
-    setGitHubBranchesLoading: () => {},
+    useRemote: false,
+    setUseRemote: () => {},
+    remoteRepos: [],
+    setRemoteRepos: () => {},
+    addRemoteRepo: () => {},
+    removeRemoteRepo: () => {},
+    updateRemoteRepo: () => {},
+    branchesByUrl: {
+      branches: () => [],
+      loading: () => false,
+      ensure: () => undefined,
+      clear: () => undefined,
+    },
+    prInfoByUrl: {
+      info: () => undefined,
+      loading: () => false,
+      ensure: () => undefined,
+      clear: () => undefined,
+    },
     githubUrlError: null,
     setGitHubUrlError: () => {},
-    githubPrHeadBranch: null,
-    setGitHubPrHeadBranch: () => {},
-    githubPrBaseBranch: null,
-    setGitHubPrBaseBranch: () => {},
     workflowAgentProfileId: "",
     setWorkflowAgentProfileId: () => {},
     clearDraft: () => {},
@@ -184,6 +189,24 @@ describe("DialogPromptSection (CLI-mode parity)", () => {
     const last = taskFormInputsCalls.at(-1)!;
     expect((last.jiraImport as { disabled: boolean } | undefined)?.disabled).toBe(false);
     expect((last.linearImport as { disabled: boolean } | undefined)?.disabled).toBe(false);
+  });
+
+  it("forwards onVoiceAutoSend to TaskFormInputs", () => {
+    taskFormInputsCalls.length = 0;
+    const onVoiceAutoSend = () => {};
+    render(
+      <DialogPromptSection
+        isSessionMode={false}
+        isTaskStarted={false}
+        initialDescription=""
+        fs={makeFs()}
+        handleKeyDown={(() => {}) as never}
+        onVoiceAutoSend={onVoiceAutoSend}
+      />,
+    );
+
+    const last = taskFormInputsCalls.at(-1)!;
+    expect(last.onVoiceAutoSend).toBe(onVoiceAutoSend);
   });
 });
 

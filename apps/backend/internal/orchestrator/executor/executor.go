@@ -48,6 +48,7 @@ type executorStore interface {
 	UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error
 	HasExecutorRunningRow(ctx context.Context, sessionID string) (bool, error)
 	DeleteExecutorRunningBySessionID(ctx context.Context, sessionID string) error
+	UpdateExecutorRunningStatus(ctx context.Context, sessionID, status string) error
 	// Workspace
 	GetWorkspace(ctx context.Context, id string) (*models.Workspace, error)
 	// Task environment
@@ -137,6 +138,11 @@ type AgentManagerClient interface {
 	// SetSessionModelBySessionID attempts an in-place model switch via ACP session/set_model.
 	// Returns an error if the agent doesn't support in-place model switching.
 	SetSessionModelBySessionID(ctx context.Context, sessionID, modelID string) error
+
+	// SetSessionModeBySessionID applies a session permission mode (e.g. "default",
+	// "acceptEdits") to the running agent via ACP session/set_mode. Returns an
+	// error when no agent is running for the session. See issue #1183.
+	SetSessionModeBySessionID(ctx context.Context, sessionID, modeID string) error
 
 	// WasSessionInitialized reports whether the given execution completed session initialization.
 	// Used to distinguish launch-phase failures from normal prompt failures.
@@ -331,6 +337,11 @@ type RepoSpec struct {
 	RepoSetupScript      string
 	RepoCleanupScript    string
 	CopyFiles            string
+	// BranchSlug, when non-empty, nests the worktree under the repo dir so
+	// the same repo can host multiple branches within one task. Set by the
+	// orchestrator when buildRepoSpecs detects multiple rows sharing a
+	// RepositoryID; empty otherwise to preserve the single-branch layout.
+	BranchSlug string
 }
 
 // McpModeConfig activates config-mode MCP tools (workflow steps, agents, MCP

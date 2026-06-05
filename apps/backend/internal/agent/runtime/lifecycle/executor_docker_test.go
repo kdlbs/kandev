@@ -515,7 +515,8 @@ func TestBuildReconnectCreateInstanceRequest(t *testing.T) {
 			id:      "codex",
 			enabled: true,
 			runtimeConfig: &agents.RuntimeConfig{
-				AssumeMcpSse: true,
+				AssumeMcpSse:  true,
+				AssumeMcpHttp: true,
 			},
 		},
 		Env: map[string]string{
@@ -546,6 +547,9 @@ func TestBuildReconnectCreateInstanceRequest(t *testing.T) {
 	}
 	if !got.AssumeMcpSse {
 		t.Fatal("expected AssumeMcpSse to be propagated")
+	}
+	if !got.AssumeMcpHttp {
+		t.Fatal("expected AssumeMcpHttp to be propagated")
 	}
 	if got.McpMode != "config" {
 		t.Fatalf("McpMode = %q, want config", got.McpMode)

@@ -128,10 +128,21 @@ function RecentTaskList({
   );
 }
 
-function SwitcherFooter({ shortcutLabel }: { shortcutLabel: string }) {
+function SwitcherFooter({
+  shortcutLabel,
+  reverseShortcutLabel,
+}: {
+  shortcutLabel: string;
+  reverseShortcutLabel: string;
+}) {
   return (
-    <div className="border-t px-4 py-2 text-[11px] text-muted-foreground">
-      <Kbd>{shortcutLabel}</Kbd>
+    <div className="flex items-center gap-3 border-t px-4 py-2 text-[11px] text-muted-foreground">
+      <span className="flex items-center gap-1.5">
+        <Kbd>{shortcutLabel}</Kbd> Next
+      </span>
+      <span className="flex items-center gap-1.5">
+        <Kbd>{reverseShortcutLabel}</Kbd> Previous
+      </span>
     </div>
   );
 }
@@ -160,7 +171,10 @@ function RecentTaskSwitcherDialog(props: RecentTaskSwitcherController) {
             selectItem={props.selectItem}
           />
         </div>
-        <SwitcherFooter shortcutLabel={props.shortcutLabel} />
+        <SwitcherFooter
+          shortcutLabel={props.shortcutLabel}
+          reverseShortcutLabel={props.reverseShortcutLabel}
+        />
       </DialogContent>
     </Dialog>
   );

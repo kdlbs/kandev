@@ -289,6 +289,28 @@ export function setEnvLayout(envId: string, layout: object): void {
   }
 }
 
+// --- Dockview global left-sidebar width (localStorage) ---
+// The LEFT sidebar width is a single GLOBAL preference shared across every
+// task env (unlike the per-env layout above, which keys widths by envId).
+// Stores the user's raw, unclamped width — clamping to the current screen
+// happens at apply time. Written only by a genuine sash drag; read by every
+// layout build/restore/switch via getPinnedWidth.
+const DOCKVIEW_GLOBAL_SIDEBAR_WIDTH_KEY = "kandev.dockview.sidebar-width";
+
+export function getGlobalSidebarWidth(): number | null {
+  const v = getLocalStorage<number | null>(DOCKVIEW_GLOBAL_SIDEBAR_WIDTH_KEY, null);
+  return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;
+}
+
+export function setGlobalSidebarWidth(width: number): void {
+  if (!Number.isFinite(width) || width <= 0) return;
+  setLocalStorage(DOCKVIEW_GLOBAL_SIDEBAR_WIDTH_KEY, Math.round(width));
+}
+
+export function clearGlobalSidebarWidth(): void {
+  removeLocalStorage(DOCKVIEW_GLOBAL_SIDEBAR_WIDTH_KEY);
+}
+
 // --- Dockview per-env maximize state (sessionStorage) ---
 // v3: bumped in lockstep with DOCKVIEW_ENV_LAYOUT_PREFIX. The maximize blob
 // references the pre-maximize layout, which can carry the same oversized
@@ -360,6 +382,50 @@ export function markPRPanelOffered(sessionId: string): void {
   if (typeof window === "undefined") return;
   try {
     window.sessionStorage.setItem(`${PR_PANEL_OFFERED_PREFIX}${sessionId}`, "1");
+  } catch {
+    // Ignore write failures
+  }
+}
+
+// PR merged banner dismissal — per-task, survives reload + task switch within
+// the tab session, resets on tab close.
+const PR_MERGED_BANNER_DISMISSED_PREFIX = "kandev.pr-merged-banner-dismissed.";
+
+export function wasPRMergedBannerDismissed(taskId: string): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.sessionStorage.getItem(`${PR_MERGED_BANNER_DISMISSED_PREFIX}${taskId}`) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function markPRMergedBannerDismissed(taskId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(`${PR_MERGED_BANNER_DISMISSED_PREFIX}${taskId}`, "1");
+  } catch {
+    // Ignore write failures
+  }
+}
+
+// PR closed banner dismissal — same lifetime as the merged banner: per-task,
+// survives reload + task switch within the tab session, resets on tab close.
+const PR_CLOSED_BANNER_DISMISSED_PREFIX = "kandev.pr-closed-banner-dismissed.";
+
+export function wasPRClosedBannerDismissed(taskId: string): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.sessionStorage.getItem(`${PR_CLOSED_BANNER_DISMISSED_PREFIX}${taskId}`) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function markPRClosedBannerDismissed(taskId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(`${PR_CLOSED_BANNER_DISMISSED_PREFIX}${taskId}`, "1");
   } catch {
     // Ignore write failures
   }
@@ -574,6 +640,10 @@ export function cleanupTaskStorage(
   // Plan notification (localStorage, keyed per task inside a Record)
   setPlanLastSeen(taskId, null);
 
+  // PR merged / closed banner dismissal (sessionStorage, keyed per task)
+  removeSessionStorage(`${PR_MERGED_BANNER_DISMISSED_PREFIX}${taskId}`);
+  removeSessionStorage(`${PR_CLOSED_BANNER_DISMISSED_PREFIX}${taskId}`);
+
   // Sidebar collapsed-subtask set (sessionStorage, array keyed by parent taskId)
   const collapsed = getStoredCollapsedSubtaskParents();
   if (collapsed.includes(taskId)) {
@@ -755,51 +825,8 @@ export function pruneSubtaskOrder(map: Record<string, string[]>, taskId: string)
   return changed;
 }
 
-// --- Unified AppSidebar collapse + section expand state (localStorage, global) ---
-
-const APP_SIDEBAR_COLLAPSED_KEY = "kandev.appSidebar.collapsed";
-const APP_SIDEBAR_SECTION_EXPANDED_KEY = "kandev.appSidebar.sectionExpanded";
-
-export function getStoredAppSidebarCollapsed(fallback: boolean): boolean {
-  return getLocalStorage(APP_SIDEBAR_COLLAPSED_KEY, fallback);
-}
-
-export function setStoredAppSidebarCollapsed(collapsed: boolean): void {
-  setLocalStorage(APP_SIDEBAR_COLLAPSED_KEY, collapsed);
-}
-
-export function getStoredAppSidebarSectionExpanded(
-  fallback: Record<string, boolean>,
-): Record<string, boolean> {
-  const raw = getLocalStorage<Record<string, boolean>>(
-    APP_SIDEBAR_SECTION_EXPANDED_KEY,
-    fallback,
-  ) as unknown;
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ...fallback };
-  const out: Record<string, boolean> = { ...fallback };
-  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (typeof key === "string" && typeof value === "boolean") {
-      out[key] = value;
-    }
-  }
-  return out;
-}
-
-export function setStoredAppSidebarSectionExpanded(map: Record<string, boolean>): void {
-  setLocalStorage(APP_SIDEBAR_SECTION_EXPANDED_KEY, map);
-}
-
-const APP_SIDEBAR_WIDTH_KEY = "kandev.appSidebar.width";
-
-export function getStoredAppSidebarWidth(fallback: number): number {
-  const raw = getLocalStorage<number>(APP_SIDEBAR_WIDTH_KEY, fallback) as unknown;
-  if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) return fallback;
-  return raw;
-}
-
-export function setStoredAppSidebarWidth(width: number): void {
-  setLocalStorage(APP_SIDEBAR_WIDTH_KEY, width);
-}
+// AppSidebar collapse/section/width storage helpers live in
+// `./local-storage-app-sidebar` to keep this module under the line cap.
 
 // --- Sidebar collapsed subtask parents (sessionStorage, tab-scoped) ---
 

@@ -15,7 +15,8 @@ import { PRTaskIcon } from "@/components/github/pr-task-icon";
 import { IssueTaskIcon } from "@/components/github/issue-task-icon";
 import { useAppStore } from "@/components/state-provider";
 import { cn } from "@/lib/utils";
-import { DEBUG_UI } from "@/lib/config";
+import { computeRowIndent, resolveRowDepth } from "@/lib/sidebar/row-indent";
+import { isDebugUI } from "@/lib/config";
 import { useTaskColor } from "@/hooks/use-task-color";
 import { TASK_COLOR_BAR_CLASS, type TaskColor } from "@/lib/task-colors";
 import type { TaskState, TaskSessionState } from "@/lib/types/http";
@@ -51,6 +52,12 @@ type TaskItemProps = {
   hasPendingPermission?: boolean;
   parentTaskTitle?: string;
   isSubTask?: boolean;
+  /**
+   * Nesting depth in the sidebar tree (0 = root). Drives left indentation so
+   * arbitrarily deep subtask trees read as a hierarchy. Falls back to
+   * `isSubTask` (depth 1) when omitted.
+   */
+  depth?: number;
   /** Number of subtasks under this parent task. Only set for parent rows. */
   subtaskCount?: number;
   /** Whether the subtasks of this parent are currently hidden. */
@@ -164,7 +171,9 @@ function TaskItemStatsRow({
   primarySessionId?: string | null;
 }) {
   const pollMode = useAppStore((s) =>
-    DEBUG_UI && primarySessionId ? (s.sessionPollMode.bySessionId[primarySessionId] ?? null) : null,
+    isDebugUI() && primarySessionId
+      ? (s.sessionPollMode.bySessionId[primarySessionId] ?? null)
+      : null,
   );
 
   if (!updatedAt && !prInfo && !pollMode) return null;
@@ -312,6 +321,7 @@ export const TaskItem = memo(function TaskItem({
   hasPendingClarification,
   hasPendingPermission,
   isSubTask,
+  depth,
   subtaskCount,
   subtasksCollapsed,
   onToggleSubtasks,
@@ -325,6 +335,7 @@ export const TaskItem = memo(function TaskItem({
   const hasDiffStats = !!diffStats && (diffStats.additions > 0 || diffStats.deletions > 0);
   const showSubtaskToggle = !!subtaskCount && subtaskCount > 0 && !!onToggleSubtasks;
   const taskColor = useTaskColor(taskId);
+  const indent = computeRowIndent(resolveRowDepth(depth, isSubTask));
 
   return (
     <div
@@ -335,18 +346,16 @@ export const TaskItem = memo(function TaskItem({
       aria-current={isSelected ? "true" : undefined}
       onClick={onClick}
       onKeyDown={(e) => handleTaskItemKeyDown(e, onClick)}
+      style={indent.depth > 0 ? { paddingLeft: indent.paddingLeftPx } : undefined}
       className={cn(
         "group relative flex w-full items-start gap-2 py-2 pr-3 text-left text-sm outline-none cursor-pointer",
         "transition-colors duration-75 hover:bg-foreground/[0.05]",
-        isSubTask ? "pl-8" : "pl-3",
+        isSelected && "bg-primary/10",
+        indent.depth === 0 && "pl-3",
       )}
     >
       <SelectionBar isSelected={isSelected} color={taskColor} />
-      {isSubTask && (
-        <span className="absolute left-3.5 top-[10px] select-none text-[11px] text-muted-foreground/30">
-          ↳
-        </span>
-      )}
+      <RowConnector depth={indent.depth} leftPx={indent.connectorLeftPx} />
       <TaskStateIcon
         sessionState={sessionState}
         state={state}
@@ -368,8 +377,16 @@ export const TaskItem = memo(function TaskItem({
         prInfo={prInfo}
         issueInfo={issueInfo}
       />
-      {hasDiffStats && <DiffStatsRight diffStats={diffStats!} menuOpen={effectiveMenuOpen} />}
-      <TaskMenuButton visible={effectiveMenuOpen} />
+      {hasDiffStats ? (
+        <div className="relative shrink-0 self-center flex items-center">
+          <DiffStatsRight diffStats={diffStats!} menuOpen={effectiveMenuOpen} />
+          <div className="absolute inset-0 flex items-center justify-end">
+            <TaskMenuButton visible={effectiveMenuOpen} />
+          </div>
+        </div>
+      ) : (
+        <TaskMenuButton visible={effectiveMenuOpen} />
+      )}
       {showSubtaskToggle && (
         <SubtaskToggle
           taskId={taskId}
@@ -381,6 +398,19 @@ export const TaskItem = memo(function TaskItem({
     </div>
   );
 });
+
+// Nested-subtask connector glyph. Renders nothing at the top level (depth 0).
+function RowConnector({ depth, leftPx }: { depth: number; leftPx: number }) {
+  if (depth === 0) return null;
+  return (
+    <span
+      style={{ left: leftPx }}
+      className="absolute top-[10px] select-none text-[11px] text-muted-foreground/30"
+    >
+      ↳
+    </span>
+  );
+}
 
 function SelectionBar({ isSelected, color }: { isSelected: boolean; color: TaskColor | null }) {
   if (color) {

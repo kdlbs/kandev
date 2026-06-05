@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -39,6 +40,25 @@ func (b *recordingEventBus) Request(context.Context, string, *bus.Event, time.Du
 }
 func (b *recordingEventBus) Close()            {}
 func (b *recordingEventBus) IsConnected() bool { return true }
+
+func TestUpdateTaskSessionStatePublishesPersistedUpdatedAt(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	eb := &recordingEventBus{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.eventBus = eb
+
+	svc.updateTaskSessionState(ctx, "t1", "s1", models.TaskSessionStateWaitingForInput, "", false)
+
+	require.Len(t, eb.events, 1)
+	require.Equal(t, events.TaskSessionStateChanged, eb.events[0].subject)
+	data, ok := eb.events[0].event.Data.(map[string]interface{})
+	require.True(t, ok)
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, session.UpdatedAt.UTC().Format(time.RFC3339Nano), data["updated_at"])
+}
 
 func TestHandleSessionModeEvent(t *testing.T) {
 	t.Run("publishes plan mode", func(t *testing.T) {
@@ -114,6 +134,57 @@ func TestHandleSessionModeEvent(t *testing.T) {
 		})
 
 		require.Empty(t, eb.events)
+	})
+
+	// Regression for issue #1183: a non-empty mode is persisted to session
+	// metadata (so it survives backend restart / SSR) without clobbering other
+	// keys such as plan_mode.
+	t.Run("persists non-empty mode without clobbering plan_mode", func(t *testing.T) {
+		ctx := context.Background()
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		require.NoError(t, repo.UpdateSessionMetadata(ctx, "s1", map[string]interface{}{"plan_mode": true}))
+
+		eb := &recordingEventBus{}
+		svc := &Service{logger: testLogger(), eventBus: eb, repo: repo}
+
+		svc.handleSessionModeEvent(ctx, &lifecycle.AgentStreamEventPayload{
+			TaskID:    "t1",
+			SessionID: "s1",
+			AgentID:   "a1",
+			Data:      &lifecycle.AgentStreamEventData{CurrentModeID: "acceptEdits"},
+		})
+
+		updated, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		require.Equal(t, "acceptEdits", updated.Metadata[models.SessionMetaKeySessionMode],
+			"session mode must be persisted to metadata")
+		pm, _ := updated.Metadata["plan_mode"].(bool)
+		require.True(t, pm, "plan_mode and other metadata keys must be preserved")
+	})
+
+	// An empty CurrentModeID (agent left a special mode) must not overwrite a
+	// previously-stored sticky mode.
+	t.Run("empty mode does not overwrite stored mode", func(t *testing.T) {
+		ctx := context.Background()
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		require.NoError(t, repo.UpdateSessionMetadata(ctx, "s1",
+			map[string]interface{}{models.SessionMetaKeySessionMode: "acceptEdits"}))
+
+		eb := &recordingEventBus{}
+		svc := &Service{logger: testLogger(), eventBus: eb, repo: repo}
+
+		svc.handleSessionModeEvent(ctx, &lifecycle.AgentStreamEventPayload{
+			TaskID:    "t1",
+			SessionID: "s1",
+			AgentID:   "a1",
+			Data:      &lifecycle.AgentStreamEventData{CurrentModeID: ""},
+		})
+
+		updated, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		require.Equal(t, "acceptEdits", updated.Metadata[models.SessionMetaKeySessionMode])
 	})
 }
 
@@ -380,4 +451,11 @@ func TestSetSessionWaitingForInput_WritesOnTransition(t *testing.T) {
 	require.Equal(t, 1, taskRepo.stateWrites["t1"],
 		"setSessionWaitingForInput must write tasks.state on actual transition")
 	require.Equal(t, v1.TaskStateReview, taskRepo.updatedStates["t1"])
+}
+
+func TestSessionStateString(t *testing.T) {
+	require.Equal(t, "", sessionStateString(nil),
+		"nil session must render as empty so trace logs stay clean")
+	require.Equal(t, string(models.TaskSessionStateRunning),
+		sessionStateString(&models.TaskSession{State: models.TaskSessionStateRunning}))
 }

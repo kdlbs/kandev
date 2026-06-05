@@ -158,3 +158,156 @@ export type GitLabMRDiscussion = {
   created_at: string;
   updated_at: string;
 };
+
+/** Project filter for review/issue watch scoping. */
+export type ProjectFilter = { path: string };
+
+/** Review watch — saved search for MRs awaiting review. */
+export type ReviewWatch = {
+  id: string;
+  workspace_id: string;
+  workflow_id: string;
+  workflow_step_id: string;
+  projects: ProjectFilter[];
+  agent_profile_id: string;
+  executor_profile_id: string;
+  prompt: string;
+  review_scope: "user" | "user_and_teams" | string;
+  custom_query: string;
+  enabled: boolean;
+  poll_interval_seconds: number;
+  cleanup_policy: "auto" | "always" | "never" | string;
+  last_polled_at?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Issue watch — saved search for issues. */
+export type IssueWatch = {
+  id: string;
+  workspace_id: string;
+  workflow_id: string;
+  workflow_step_id: string;
+  projects: ProjectFilter[];
+  agent_profile_id: string;
+  executor_profile_id: string;
+  prompt: string;
+  labels: string[];
+  custom_query: string;
+  enabled: boolean;
+  poll_interval_seconds: number;
+  cleanup_policy: "auto" | "always" | "never" | string;
+  last_polled_at?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Branch-bound MR watch — links a session's source branch to a discovered MR. */
+export type MRWatch = {
+  id: string;
+  session_id: string;
+  task_id: string;
+  repository_id?: string;
+  project_path: string;
+  mr_iid: number;
+  branch: string;
+  last_checked_at?: string;
+  last_note_at?: string;
+  last_pipeline_state: string;
+  last_approval_state: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Aggregate stats for the /gitlab page. */
+export type GitLabStats = {
+  open_mrs: number;
+  mrs_awaiting_my_review: number;
+  open_issues_assigned_me: number;
+};
+
+/** Action preset (quick-launch task template). */
+export type GitLabActionPreset = {
+  id: string;
+  label: string;
+  hint: string;
+  icon: string;
+  prompt_template: string;
+};
+
+/** Workspace's MR + issue presets. */
+export type GitLabActionPresets = {
+  workspace_id: string;
+  mr: GitLabActionPreset[];
+  issue: GitLabActionPreset[];
+};
+
+/** Project (lightweight, for autocomplete). */
+export type GitLabProject = {
+  id: number;
+  path_with_namespace: string;
+  namespace: string;
+  path: string;
+  name: string;
+  visibility: string;
+};
+
+/** Project allowed merge methods. */
+export type ProjectMergeMethods = {
+  merge: boolean;
+  rebase_merge: boolean;
+  fast_forward: boolean;
+  allow_squash: boolean;
+};
+
+/** Single approval entry on an MR. */
+export type GitLabMRApproval = {
+  username: string;
+  avatar?: string;
+  created_at: string;
+};
+
+/** Pipeline (CI) for an MR. */
+export type GitLabPipeline = {
+  id: number;
+  iid: number;
+  status: string;
+  source: string;
+  ref: string;
+  sha: string;
+  web_url: string;
+  jobs_total: number;
+  jobs_passing: number;
+  started_at?: string;
+  finished_at?: string;
+};
+
+/** Aggregate feedback for an MR (used by the detail panel). */
+export type GitLabMRFeedback = {
+  mr: MR;
+  approvals: GitLabMRApproval[];
+  discussions: GitLabMRDiscussion[];
+  pipelines: GitLabPipeline[];
+  has_issues: boolean;
+};
+
+/** File changed in an MR. */
+export type GitLabMRFile = {
+  filename: string;
+  status: string;
+  additions: number;
+  deletions: number;
+  patch?: string;
+  old_path?: string;
+};
+
+/** Commit in an MR. */
+export type GitLabMRCommit = {
+  sha: string;
+  message: string;
+  author_name: string;
+  author_date: string;
+};
+
+/** Project branch entry. */
+export type GitLabRepoBranch = { name: string };

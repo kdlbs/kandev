@@ -15,19 +15,22 @@ import (
 // the way SQLite holds it. The store marshals/unmarshals at this boundary so
 // service callers see a typed SearchFilter and never have to think about JSON.
 type issueWatchRow struct {
-	ID                  string     `db:"id"`
-	WorkspaceID         string     `db:"workspace_id"`
-	WorkflowID          string     `db:"workflow_id"`
-	WorkflowStepID      string     `db:"workflow_step_id"`
-	FilterJSON          string     `db:"filter_json"`
-	AgentProfileID      string     `db:"agent_profile_id"`
-	ExecutorProfileID   string     `db:"executor_profile_id"`
-	Prompt              string     `db:"prompt"`
-	Enabled             bool       `db:"enabled"`
-	PollIntervalSeconds int        `db:"poll_interval_seconds"`
-	LastPolledAt        *time.Time `db:"last_polled_at"`
-	CreatedAt           time.Time  `db:"created_at"`
-	UpdatedAt           time.Time  `db:"updated_at"`
+	ID                  string        `db:"id"`
+	WorkspaceID         string        `db:"workspace_id"`
+	WorkflowID          string        `db:"workflow_id"`
+	WorkflowStepID      string        `db:"workflow_step_id"`
+	FilterJSON          string        `db:"filter_json"`
+	AgentProfileID      string        `db:"agent_profile_id"`
+	ExecutorProfileID   string        `db:"executor_profile_id"`
+	Prompt              string        `db:"prompt"`
+	Enabled             bool          `db:"enabled"`
+	PollIntervalSeconds int           `db:"poll_interval_seconds"`
+	MaxInflightTasks    sql.NullInt64 `db:"max_inflight_tasks"`
+	LastPolledAt        *time.Time    `db:"last_polled_at"`
+	LastError           string        `db:"last_error"`
+	LastErrorAt         *time.Time    `db:"last_error_at"`
+	CreatedAt           time.Time     `db:"created_at"`
+	UpdatedAt           time.Time     `db:"updated_at"`
 }
 
 func (r *issueWatchRow) toIssueWatch() (*IssueWatch, error) {
@@ -36,6 +39,11 @@ func (r *issueWatchRow) toIssueWatch() (*IssueWatch, error) {
 		if err := json.Unmarshal([]byte(r.FilterJSON), &filter); err != nil {
 			return nil, fmt.Errorf("decode filter: %w", err)
 		}
+	}
+	var maxInflight *int
+	if r.MaxInflightTasks.Valid {
+		v := int(r.MaxInflightTasks.Int64)
+		maxInflight = &v
 	}
 	return &IssueWatch{
 		ID:                  r.ID,
@@ -48,7 +56,10 @@ func (r *issueWatchRow) toIssueWatch() (*IssueWatch, error) {
 		Prompt:              r.Prompt,
 		Enabled:             r.Enabled,
 		PollIntervalSeconds: r.PollIntervalSeconds,
+		MaxInflightTasks:    maxInflight,
 		LastPolledAt:        r.LastPolledAt,
+		LastError:           r.LastError,
+		LastErrorAt:         r.LastErrorAt,
 		CreatedAt:           r.CreatedAt,
 		UpdatedAt:           r.UpdatedAt,
 	}, nil
@@ -62,9 +73,21 @@ func encodeFilter(f SearchFilter) (string, error) {
 	return string(b), nil
 }
 
-const issueWatchColumns = `id, workspace_id, workflow_id, workflow_step_id, filter_json,
+// issueWatchInsertColumns lists the writable column names in row-insert order.
+// SELECTs use issueWatchSelectColumns which wraps the nullable last_error in
+// COALESCE so older databases (pre-self-heal migration) read back as empty
+// strings rather than NULL.
+const issueWatchInsertColumns = `id, workspace_id, workflow_id, workflow_step_id, filter_json,
 	agent_profile_id, executor_profile_id, prompt, enabled,
-	poll_interval_seconds, last_polled_at, created_at, updated_at`
+	poll_interval_seconds, max_inflight_tasks, last_polled_at,
+	last_error, last_error_at,
+	created_at, updated_at`
+
+const issueWatchSelectColumns = `id, workspace_id, workflow_id, workflow_step_id, filter_json,
+	agent_profile_id, executor_profile_id, prompt, enabled,
+	poll_interval_seconds, max_inflight_tasks, last_polled_at,
+	COALESCE(last_error, '') AS last_error, last_error_at,
+	created_at, updated_at`
 
 // CreateIssueWatch persists a new issue watch row. ID and timestamps are
 // assigned here so callers can pass a partially-populated struct.
@@ -83,19 +106,31 @@ func (s *Store) CreateIssueWatch(ctx context.Context, w *IssueWatch) error {
 		return err
 	}
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO linear_issue_watches (`+issueWatchColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO linear_issue_watches (`+issueWatchInsertColumns+`)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		w.ID, w.WorkspaceID, w.WorkflowID, w.WorkflowStepID, filterJSON,
 		w.AgentProfileID, w.ExecutorProfileID, w.Prompt, w.Enabled,
-		w.PollIntervalSeconds, w.LastPolledAt, w.CreatedAt, w.UpdatedAt)
+		w.PollIntervalSeconds, nullableInt(w.MaxInflightTasks), w.LastPolledAt,
+		w.LastError, w.LastErrorAt,
+		w.CreatedAt, w.UpdatedAt)
 	return err
+}
+
+// nullableInt converts a *int into a value suitable for a nullable SQL column.
+// A nil pointer becomes a SQL NULL; a non-nil pointer becomes the underlying
+// int. Used for max_inflight_tasks where NULL means "uncapped".
+func nullableInt(v *int) interface{} {
+	if v == nil {
+		return nil
+	}
+	return *v
 }
 
 // GetIssueWatch returns a single watch by ID, or nil when no row matches.
 func (s *Store) GetIssueWatch(ctx context.Context, id string) (*IssueWatch, error) {
 	var row issueWatchRow
 	err := s.ro.GetContext(ctx, &row,
-		`SELECT `+issueWatchColumns+` FROM linear_issue_watches WHERE id = ?`, id)
+		`SELECT `+issueWatchSelectColumns+` FROM linear_issue_watches WHERE id = ?`, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -109,7 +144,7 @@ func (s *Store) GetIssueWatch(ctx context.Context, id string) (*IssueWatch, erro
 func (s *Store) ListIssueWatches(ctx context.Context, workspaceID string) ([]*IssueWatch, error) {
 	var rows []issueWatchRow
 	err := s.ro.SelectContext(ctx, &rows,
-		`SELECT `+issueWatchColumns+` FROM linear_issue_watches
+		`SELECT `+issueWatchSelectColumns+` FROM linear_issue_watches
 		 WHERE workspace_id = ? ORDER BY created_at`, workspaceID)
 	if err != nil {
 		return nil, err
@@ -121,7 +156,7 @@ func (s *Store) ListIssueWatches(ctx context.Context, workspaceID string) ([]*Is
 func (s *Store) ListAllIssueWatches(ctx context.Context) ([]*IssueWatch, error) {
 	var rows []issueWatchRow
 	err := s.ro.SelectContext(ctx, &rows,
-		`SELECT `+issueWatchColumns+` FROM linear_issue_watches ORDER BY workspace_id, created_at`)
+		`SELECT `+issueWatchSelectColumns+` FROM linear_issue_watches ORDER BY workspace_id, created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +168,7 @@ func (s *Store) ListAllIssueWatches(ctx context.Context) ([]*IssueWatch, error) 
 func (s *Store) ListEnabledIssueWatches(ctx context.Context) ([]*IssueWatch, error) {
 	var rows []issueWatchRow
 	err := s.ro.SelectContext(ctx, &rows,
-		`SELECT `+issueWatchColumns+` FROM linear_issue_watches
+		`SELECT `+issueWatchSelectColumns+` FROM linear_issue_watches
 		 WHERE enabled = 1 ORDER BY created_at`)
 	if err != nil {
 		return nil, err
@@ -168,11 +203,13 @@ func (s *Store) UpdateIssueWatch(ctx context.Context, w *IssueWatch) error {
 	_, err = s.db.ExecContext(ctx, `
 		UPDATE linear_issue_watches SET workflow_id = ?, workflow_step_id = ?, filter_json = ?,
 			agent_profile_id = ?, executor_profile_id = ?, prompt = ?,
-			enabled = ?, poll_interval_seconds = ?, last_polled_at = ?, updated_at = ?
+			enabled = ?, poll_interval_seconds = ?, max_inflight_tasks = ?,
+			last_polled_at = ?, updated_at = ?
 		WHERE id = ?`,
 		w.WorkflowID, w.WorkflowStepID, filterJSON,
 		w.AgentProfileID, w.ExecutorProfileID, w.Prompt,
-		w.Enabled, w.PollIntervalSeconds, w.LastPolledAt, w.UpdatedAt, w.ID)
+		w.Enabled, w.PollIntervalSeconds, nullableInt(w.MaxInflightTasks),
+		w.LastPolledAt, w.UpdatedAt, w.ID)
 	return err
 }
 
@@ -182,6 +219,21 @@ func (s *Store) UpdateIssueWatchLastPolled(ctx context.Context, id string, t tim
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE linear_issue_watches SET last_polled_at = ?, updated_at = ? WHERE id = ?`,
 		t, time.Now().UTC(), id)
+	return err
+}
+
+// DisableIssueWatchWithError is the self-heal write: it disables the watch
+// and stamps a human-readable cause + timestamp so the settings UI can show
+// a "disabled because ..." banner. Called by the orchestrator dispatch
+// pipeline when the watcher's bound agent profile is detected as
+// soft-deleted (see internal/agent/runtime/lifecycle/profile_resolver.go).
+func (s *Store) DisableIssueWatchWithError(ctx context.Context, id, cause string) error {
+	now := time.Now().UTC()
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE linear_issue_watches
+		   SET enabled = 0, last_error = ?, last_error_at = ?, updated_at = ?
+		 WHERE id = ?`,
+		cause, now, now, id)
 	return err
 }
 

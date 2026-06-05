@@ -404,6 +404,11 @@ func (r *Repository) GetTaskSessionByTaskAndAgent(ctx context.Context, taskID, a
 // to detect "no row found" so the caller gets nil, nil instead of an error.
 const sessionNotFoundMsg = "task_sessions: no matching row"
 
+// noPrimarySessionSentinel is the no-rows marker passed to scanTaskSession by
+// GetPrimarySessionByTaskID. Matching this exact string lets the function wrap
+// the result with ErrNoPrimarySession so callers can use errors.Is.
+const noPrimarySessionSentinel = "task_sessions: no primary session row"
+
 // ListNonTerminalSessionsByAgentInstance returns every office task_session row
 // for the given agent_profile_id whose state is NOT terminal
 // (CREATED / STARTING / RUNNING / IDLE / WAITING_FOR_INPUT). Used by the
@@ -606,6 +611,42 @@ func (r *Repository) UpdateTaskSessionBaseCommit(ctx context.Context, id string,
 	return nil
 }
 
+// ResetTaskSessionBasesForRepository rewrites base_branch and clears
+// base_commit_sha on every task_session belonging to (taskID, repositoryID).
+// Used by service.UpdateRepositoryBaseBranch after the changes-panel
+// "Compare against" picker changes the recorded base.
+//
+// Clearing base_commit_sha matters because git_handlers.computeGitCommits and
+// computeCumulativeDiff read it first and only fall back to the live
+// agentctl GetGitStatus().BaseCommit (which now resolves against the new
+// base_branch via Phase 1) when the column is empty. Without this reset the
+// task-card stat counts would refresh against the new base while the
+// commits panel + cumulative diff would keep filtering against the OLD
+// commit snapshot — visible to users as "Commits section disappeared
+// after I changed the base".
+//
+// Returns the number of sessions touched so callers can log / no-op when
+// the task has no sessions yet.
+func (r *Repository) ResetTaskSessionBasesForRepository(ctx context.Context, taskID, repositoryID, baseBranch string) (int64, error) {
+	if taskID == "" {
+		return 0, fmt.Errorf("task_id is required")
+	}
+	if repositoryID == "" {
+		return 0, fmt.Errorf("repository_id is required")
+	}
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_sessions
+		SET base_branch = ?, base_commit_sha = '', updated_at = ?
+		WHERE task_id = ? AND repository_id = ?
+	`), baseBranch, now, taskID, repositoryID)
+	if err != nil {
+		return 0, err
+	}
+	rows, _ := result.RowsAffected()
+	return rows, nil
+}
+
 // ListTaskSessions returns all agent sessions for a task
 func (r *Repository) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
 	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTaskSessions")
@@ -680,6 +721,46 @@ func (r *Repository) loadWorktreesBatch(ctx context.Context, sessions []*models.
 	return sessions, nil
 }
 
+// BatchGetSessionsByTaskIDs returns all task_sessions for the given task IDs,
+// grouped by task ID and ordered by started_at DESC within each task. The
+// returned sessions carry their associated worktrees (loaded in one extra
+// query). Used by callers that need primary session, session count, and
+// session info for many tasks in one round trip (e.g. the workspace
+// task-list endpoint) to avoid issuing one GetSession per task.
+//
+// Returns an empty map for an empty input. Chunks input larger than
+// sqliteMaxHostParams to stay well below SQLite's compile-time placeholder
+// limit.
+func (r *Repository) BatchGetSessionsByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]*models.TaskSession, error) {
+	result := make(map[string][]*models.TaskSession, len(taskIDs))
+	if len(taskIDs) == 0 {
+		return result, nil
+	}
+
+	for _, chunk := range chunkIDs(taskIDs, sqliteMaxHostParams) {
+		placeholders, args := buildInPlaceholders(chunk)
+		query := `SELECT ` + taskSessionSelectCols + ` ` + taskSessionFromClause +
+			` WHERE ts.task_id IN (` + placeholders + `) ORDER BY ts.task_id, ts.started_at DESC`
+		rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
+		if err != nil {
+			return nil, err
+		}
+		sessions, scanErr := r.scanTaskSessions(ctx, rows)
+		_ = rows.Close()
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		sessions, err = r.loadWorktreesBatch(ctx, sessions)
+		if err != nil {
+			return nil, err
+		}
+		for _, s := range sessions {
+			result[s.TaskID] = append(result[s.TaskID], s)
+		}
+	}
+	return result, nil
+}
+
 func (r *Repository) HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error) {
 	var exists int
 	// Exclude ephemeral tasks (quick chat, config chat) - they shouldn't block profile deletion
@@ -734,12 +815,16 @@ func (r *Repository) HasActiveTaskSessionsByEnvironment(ctx context.Context, env
 
 func (r *Repository) HasActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (bool, error) {
 	var exists int
+	// Only sessions of live (non-archived) tasks count; archived tasks never
+	// block repository deletion.
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT 1
 		FROM task_sessions s
 		INNER JOIN task_repositories tr ON tr.task_id = s.task_id
+		INNER JOIN tasks t ON t.id = s.task_id
 		WHERE s.state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
 			AND tr.repository_id = ?
+			AND t.archived_at IS NULL
 		LIMIT 1
 	`), repositoryID).Scan(&exists)
 	if err == sql.ErrNoRows {
@@ -750,12 +835,16 @@ func (r *Repository) HasActiveTaskSessionsByRepository(ctx context.Context, repo
 
 func (r *Repository) CountActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (int, error) {
 	var count int
+	// Counts only sessions of live (non-archived) tasks, matching
+	// HasActiveTaskSessionsByRepository.
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT COUNT(*)
 		FROM task_sessions s
 		INNER JOIN task_repositories tr ON tr.task_id = s.task_id
+		INNER JOIN tasks t ON t.id = s.task_id
 		WHERE s.state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
 			AND tr.repository_id = ?
+			AND t.archived_at IS NULL
 	`), repositoryID).Scan(&count)
 	if err != nil {
 		return 0, err
@@ -961,44 +1050,56 @@ func (r *Repository) ListTaskSessionWorktrees(ctx context.Context, sessionID str
 }
 
 // ListWorktreesBySessionIDs returns all worktrees for the given session IDs,
-// grouped by session ID. This eliminates N+1 queries when loading worktrees for multiple sessions.
+// grouped by session ID. This eliminates N+1 queries when loading worktrees
+// for multiple sessions. Chunks input above sqliteMaxHostParams (500) because
+// callers like loadWorktreesBatch — invoked from BatchGetSessionsByTaskIDs —
+// can pass `chunk_size_tasks × avg_sessions_per_task` IDs, which crosses
+// SQLite's SQLITE_MAX_VARIABLE_NUMBER (999 on older builds) at modest task
+// volumes (500 tasks × 2 sessions = 1000 placeholders).
 func (r *Repository) ListWorktreesBySessionIDs(ctx context.Context, sessionIDs []string) (map[string][]*models.TaskSessionWorktree, error) {
 	result := make(map[string][]*models.TaskSessionWorktree, len(sessionIDs))
 	if len(sessionIDs) == 0 {
 		return result, nil
 	}
-
-	placeholders := make([]string, len(sessionIDs))
-	args := make([]interface{}, len(sessionIDs))
-	for i, id := range sessionIDs {
-		placeholders[i] = "?"
-		args[i] = id
+	for _, chunk := range chunkIDs(sessionIDs, sqliteMaxHostParams) {
+		if err := r.appendWorktreesForSessionChunk(ctx, chunk, result); err != nil {
+			return nil, err
+		}
 	}
+	return result, nil
+}
 
-	query := fmt.Sprintf(`
-		SELECT tsw.id, tsw.session_id, tsw.worktree_id, tsw.repository_id, tsw.position,
-			tsw.worktree_path, tsw.worktree_branch, tsw.created_at
+// appendWorktreesForSessionChunk runs the worktree SELECT for one chunk of
+// session IDs and merges the rows into result. Extracted from
+// ListWorktreesBySessionIDs so the public method stays inside the funlen cap
+// after the chunking loop was added.
+func (r *Repository) appendWorktreesForSessionChunk(
+	ctx context.Context,
+	sessionIDs []string,
+	result map[string][]*models.TaskSessionWorktree,
+) error {
+	placeholders, args := buildInPlaceholders(sessionIDs)
+	query := `SELECT tsw.id, tsw.session_id, tsw.worktree_id, tsw.repository_id, tsw.position,
+		tsw.worktree_path, tsw.worktree_branch, tsw.created_at
 		FROM task_session_worktrees tsw
-		WHERE tsw.session_id IN (%s)
-		ORDER BY tsw.position ASC, tsw.created_at ASC
-	`, strings.Join(placeholders, ","))
+		WHERE tsw.session_id IN (` + placeholders + `)
+		ORDER BY tsw.position ASC, tsw.created_at ASC`
 
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var wt models.TaskSessionWorktree
-		err := rows.Scan(&wt.ID, &wt.SessionID, &wt.WorktreeID, &wt.RepositoryID,
-			&wt.Position, &wt.WorktreePath, &wt.WorktreeBranch, &wt.CreatedAt)
-		if err != nil {
-			return nil, err
+		if err := rows.Scan(&wt.ID, &wt.SessionID, &wt.WorktreeID, &wt.RepositoryID,
+			&wt.Position, &wt.WorktreePath, &wt.WorktreeBranch, &wt.CreatedAt); err != nil {
+			return err
 		}
 		result[wt.SessionID] = append(result[wt.SessionID], &wt)
 	}
-	return result, rows.Err()
+	return rows.Err()
 }
 
 func (r *Repository) DeleteTaskSessionWorktree(ctx context.Context, id string) error {
@@ -1019,12 +1120,18 @@ func (r *Repository) DeleteTaskSessionWorktreesBySession(ctx context.Context, se
 	return err
 }
 
-// GetPrimarySessionByTaskID retrieves the primary session for a task
+// GetPrimarySessionByTaskID retrieves the primary session for a task.
+// Returns ErrNoPrimarySession (wrapped) when the task has no primary session
+// row; callers should use errors.Is to distinguish this from real DB errors.
 func (r *Repository) GetPrimarySessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(
 		`SELECT `+taskSessionSelectCols+` `+taskSessionFromClause+` WHERE ts.task_id = ? AND ts.is_primary = 1 LIMIT 1`,
 	), taskID)
-	return r.scanTaskSession(ctx, row, fmt.Sprintf("no primary session found for task: %s", taskID))
+	session, err := r.scanTaskSession(ctx, row, noPrimarySessionSentinel)
+	if err != nil && err.Error() == noPrimarySessionSentinel {
+		return nil, fmt.Errorf("%w: %s", ErrNoPrimarySession, taskID)
+	}
+	return session, err
 }
 
 // GetPrimarySessionIDsByTaskIDs returns a map of task ID to primary session ID for the given task IDs.

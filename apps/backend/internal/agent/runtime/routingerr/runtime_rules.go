@@ -27,6 +27,72 @@ var runtimeEnvironmentRules = []runtimeRule{
 			}
 		},
 	},
+	{
+		// Anthropic 400 surfaced by the claude-agent-acp adapter on a
+		// prompt after session/load: the reconstructed history loses the
+		// extended-thinking block signatures, so the API rejects the
+		// modified `thinking`/`redacted_thinking` blocks. Provider-agnostic
+		// because the signature is unique enough to never false-positive,
+		// and any adapter routing to Anthropic models can hit it.
+		id:      resumeCorruptedRuleID,
+		pattern: thinkingBlocksImmutableRe,
+		build: func(string) *Error {
+			return &Error{
+				Code:            CodeResumeCorrupted,
+				Confidence:      ConfHigh,
+				RemediationPath: RemediationStartFreshSession,
+			}
+		},
+	},
+	{
+		// Anthropic 529 Overloaded surfaced over ACP as a prompt-time error
+		// event: a transient, server-side condition the orchestrator should
+		// retry with backoff rather than tear down. Provider-agnostic because
+		// the "529 ... overloaded" / "overloaded_error" signature is unique
+		// enough not to false-positive on unrelated logs.
+		id:      overloadedRuleID,
+		pattern: overloadedRe,
+		build: func(string) *Error {
+			return &Error{
+				Code:       CodeProviderOverloaded,
+				Confidence: ConfHigh,
+			}
+		},
+	},
+}
+
+const resumeCorruptedRuleID = "anthropic.thinking_blocks.immutable.v1"
+
+const overloadedRuleID = "anthropic.overloaded.529.v1"
+
+// overloadedRe matches the transient 529 Overloaded signature: either the
+// numeric code adjacent to "overloaded" on a single line (in either order), or
+// the Anthropic "overloaded_error" type token. Kept tight ([^\n] stays within
+// one line) so a stray "529" and "overloaded" in unrelated multi-line logs
+// can't bridge into a false positive.
+var overloadedRe = regexp.MustCompile(`(?i)\b529\b[^\n]*overloaded|overloaded[^\n]*\b529\b|\boverloaded_error\b`)
+
+// IsTransientProviderError reports whether the error message carries the
+// transient provider-overload (529 Overloaded) signature. Exposed for callers
+// outside the classify path (e.g. the orchestrator's retry-with-backoff) that
+// need to branch on transience without re-running full Classify.
+func IsTransientProviderError(message string) bool {
+	return message != "" && overloadedRe.MatchString(message)
+}
+
+// thinkingBlocksImmutableRe matches the Anthropic "thinking blocks cannot be
+// modified" 400 in either the `thinking` or `redacted_thinking` form. The
+// gaps stay bounded ([^\n] is non-greedy-friendly within a single line) so a
+// stray "thinking" elsewhere in a multi-line log can't accidentally bridge to
+// an unrelated "cannot be modified".
+var thinkingBlocksImmutableRe = regexp.MustCompile(`(?i)(?:redacted_)?thinking[^\n]*blocks[^\n]*cannot be modified`)
+
+// IsResumeCorrupted reports whether the error message carries the
+// resume-corrupted (thinking-blocks-immutable) signature. Exposed for callers
+// outside the classify path (e.g. the orchestrator's recovery UI) that need to
+// steer the user toward a fresh session without re-running full Classify.
+func IsResumeCorrupted(message string) bool {
+	return message != "" && thinkingBlocksImmutableRe.MatchString(message)
 }
 
 type runtimeRule struct {

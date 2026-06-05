@@ -66,13 +66,25 @@ func (c *Config) ExpandedTasksBasePath() (string, error) {
 }
 
 // TaskWorktreePath returns the full path for a worktree inside a task directory.
-// Format: {tasksBase}/{taskDirName}/{repoName}
-func (c *Config) TaskWorktreePath(taskDirName, repoName string) (string, error) {
+//
+// Layout:
+//   - branchSlug == "" → {tasksBase}/{taskDirName}/{repoName}         (legacy single-branch path)
+//   - branchSlug != "" → {tasksBase}/{taskDirName}/{repoName}-{slug}  (sibling at task root)
+//
+// Additional branches sit as siblings of the primary worktree under the task
+// root instead of nesting inside it. Nesting (e.g. `<task>/<repo>/<slug>/`)
+// places the second worktree INSIDE the first worktree's working tree, which
+// pollutes the primary's git scope (file scans, status, etc.) and surfaces a
+// surprise subdirectory to the agent working in the primary.
+func (c *Config) TaskWorktreePath(taskDirName, repoName, branchSlug string) (string, error) {
 	basePath, err := c.ExpandedTasksBasePath()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(basePath, taskDirName, repoName), nil
+	if branchSlug == "" {
+		return filepath.Join(basePath, taskDirName, repoName), nil
+	}
+	return filepath.Join(basePath, taskDirName, repoName+"-"+branchSlug), nil
 }
 
 // BranchName returns the branch name for a given task ID and suffix.
@@ -149,14 +161,9 @@ func NormalizeBranchPrefix(prefix string) string {
 	return trimmed
 }
 
-// TaskBranchName returns the standard per-task branch name used by isolated
-// executors. The random suffix keeps similarly titled tasks from colliding.
-func TaskBranchName(taskTitle, taskID, prefix string) string {
-	return TaskBranchNameWithSuffix(taskTitle, taskID, prefix, SmallSuffix(3))
-}
-
-// TaskBranchNameWithSuffix is the deterministic form of TaskBranchName used by
-// worktree naming, where the caller already generated the suffix.
+// TaskBranchNameWithSuffix builds the per-task branch name from a caller-supplied suffix.
+// The caller is responsible for generating the suffix (e.g. SmallSuffix(3)) so that
+// naming is deterministic when the suffix is derived externally.
 func TaskBranchNameWithSuffix(taskTitle, taskID, prefix, suffix string) string {
 	sanitized := SanitizeForBranch(taskTitle, 20)
 	if sanitized == "" {
@@ -242,6 +249,37 @@ func SanitizeRepoDirName(name string) string {
 }
 
 var repoDirHyphenRun = regexp.MustCompile(`-+`)
+
+// SanitizeBranchSlug converts a git branch name into a filesystem-safe single
+// path segment for use under the per-repo worktree directory. Forward slashes
+// (common in branch names like "feature/foo") collapse to hyphens so the slug
+// never introduces extra path levels. Returns the empty string when the input
+// has no usable characters — callers MUST treat that as "no nesting" rather
+// than as an empty path segment.
+//
+// Determinism: same branch name always produces the same slug. Two branches
+// that differ only in unsafe characters (e.g. "feat/a" and "feat-a") collapse
+// to the same slug and would collide on disk; the service layer should reject
+// such duplicates before reaching the worktree manager.
+func SanitizeBranchSlug(branch string) string {
+	if branch == "" {
+		return ""
+	}
+	var sb strings.Builder
+	sb.Grow(len(branch))
+	for _, r := range branch {
+		switch {
+		case isASCIIAlphaNum(r):
+			sb.WriteRune(r)
+		case r == '_', r == '.', r == '-':
+			sb.WriteRune(r)
+		default:
+			sb.WriteRune('-')
+		}
+	}
+	result := repoDirHyphenRun.ReplaceAllString(sb.String(), "-")
+	return strings.Trim(result, "-.")
+}
 
 // SemanticWorktreeName generates a semantic worktree directory name from a task title.
 // Format: {sanitizedTitle}_{suffix} e.g. fix-login-bug_ab12cd34

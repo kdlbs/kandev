@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
+	acptransport "github.com/kandev/kandev/internal/agentctl/server/adapter/transport/acp"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/constants"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -106,8 +108,9 @@ type AgentStderrResponse struct {
 
 // CancelResponse is the response from a cancel request.
 type CancelResponse struct {
-	Success bool   `json:"success"`
-	Error   string `json:"error,omitempty"`
+	Success         bool   `json:"success"`
+	Error           string `json:"error,omitempty"`
+	NotAcknowledged bool   `json:"not_acknowledged,omitempty"`
 }
 
 // handleAgentStreamWS streams agent session notifications via WebSocket.
@@ -487,12 +490,21 @@ func (s *Server) handleWSCancel(ctx context.Context, msg *ws.Message) *ws.Messag
 	}
 
 	if err := adapter.Cancel(ctx); err != nil {
-		s.logger.Error("cancel failed", zap.Error(err))
-		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		notAck := errors.Is(err, acptransport.ErrTurnCancelNotAcknowledged)
+		if notAck {
+			s.logger.Warn("cancel not acknowledged by in-flight prompt", zap.Error(err))
+		} else {
+			s.logger.Error("cancel failed", zap.Error(err))
+		}
+		resp, _ := ws.NewResponse(msg.ID, msg.Action, CancelResponse{
+			Success:         false,
+			Error:           err.Error(),
+			NotAcknowledged: notAck,
+		})
 		return resp
 	}
 
-	s.logger.Info("cancel completed")
+	s.logger.Info("cancel acknowledged")
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, CancelResponse{Success: true})
 	return resp
 }

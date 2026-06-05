@@ -108,4 +108,28 @@ type Client interface {
 
 	// GetIssueState returns the state of a single issue ("opened" or "closed").
 	GetIssueState(ctx context.Context, projectPath string, iid int) (string, error)
+
+	// MergeMR accepts an MR. squash=true performs a squash merge regardless of
+	// project merge method. squashCommitMessage is used when squash=true.
+	MergeMR(ctx context.Context, projectPath string, iid int, squash bool, squashCommitMessage string) (*MR, error)
+
+	// GetProjectMergeMethods reads the project's merge_method + squash_option
+	// settings.
+	GetProjectMergeMethods(ctx context.Context, projectPath string) (*ProjectMergeMethods, error)
+
+	// GetProtectedBranch returns the protected-branch settings for a branch.
+	// Returns (nil, nil) when the branch isn't protected.
+	GetProtectedBranch(ctx context.Context, projectPath, branch string) (*ProtectedBranch, error)
+
+	// ListUserProjects lists projects the authenticated user is a member of.
+	ListUserProjects(ctx context.Context) ([]Project, error)
+
+	// SearchProjects searches all projects matching `query`.
+	SearchProjects(ctx context.Context, query string, limit int) ([]Project, error)
+
+	// SetMRLabels replaces an MR's labels.
+	SetMRLabels(ctx context.Context, projectPath string, iid int, labels []string) error
+
+	// SetMRAssignees replaces an MR's assignees (by user ID).
+	SetMRAssignees(ctx context.Context, projectPath string, iid int, assigneeIDs []int) error
 }

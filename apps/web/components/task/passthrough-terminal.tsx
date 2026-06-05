@@ -6,7 +6,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { AttachAddon } from "@xterm/addon-attach";
 import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
-import { GridSpinner } from "@/components/grid-spinner";
+import { PanelLoadingState } from "@/components/panel-loading-state";
 import { useAppStore } from "@/components/state-provider";
 import { useSession } from "@/hooks/domains/session/use-session";
 import { useSessionAgentctl } from "@/hooks/domains/session/use-session-agentctl";
@@ -27,6 +27,7 @@ import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import { useTerminalSearch } from "./use-terminal-search";
 import { TerminalSearchBar } from "./terminal-search-bar";
 import { usePanelSearch } from "@/hooks/use-panel-search";
+import { useTerminalBusyTracking } from "./use-terminal-busy-tracking";
 
 type BaseProps = {
   autoFocus?: boolean;
@@ -232,6 +233,7 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     keyboardShortcutsRef,
     onFindInPanelRef,
   });
+  useTerminalBusyTracking(terminalId, xtermRef, mode === "shell", isTerminalReady);
 
   useTouchScroll({
     terminalRef: refs.terminalRef,
@@ -277,17 +279,11 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
       </div>
       <TerminalSearchBar search={search} />
       {!isConnected && (
-        <div
-          data-testid="passthrough-loading"
-          className="absolute inset-0 flex items-start justify-center pt-12 bg-background"
-        >
-          <div className="flex flex-col items-center gap-3 text-muted-foreground">
-            <GridSpinner />
-            <span className="text-sm">
-              {mode === "agent" ? "Preparing workspace..." : "Connecting terminal..."}
-            </span>
-          </div>
-        </div>
+        <PanelLoadingState
+          testId="passthrough-loading"
+          className="absolute inset-0 bg-background"
+          label={mode === "agent" ? "Preparing workspace..." : "Connecting terminal..."}
+        />
       )}
     </div>
   );

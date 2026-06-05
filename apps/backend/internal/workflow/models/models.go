@@ -12,6 +12,10 @@ const (
 	OnEnterEnablePlanMode    OnEnterActionType = "enable_plan_mode"
 	OnEnterAutoStartAgent    OnEnterActionType = "auto_start_agent"
 	OnEnterResetAgentContext OnEnterActionType = "reset_agent_context"
+	// OnEnterSetSessionMode declares the agent's session permission mode (e.g.
+	// "default", "acceptEdits") for a step on entry. The target mode is carried
+	// in the action Config under the "mode" key. See issue #1183.
+	OnEnterSetSessionMode OnEnterActionType = "set_session_mode"
 
 	// Phase 2 (ADR-0004) — generic actions are also permitted on on_enter
 	// so review/approval steps can clear decisions and fan out runs to
@@ -165,6 +169,9 @@ type StepDefinition struct {
 	// default + coordination workflows can declare their UX role
 	// ("work", "review", "approval", "custom") in YAML.
 	StageType StageType `json:"stage_type,omitempty"`
+	// AutoAdvanceRequiresSignal gates on_turn_complete transitions on an
+	// explicit `step_complete_kandev` MCP signal from the agent (ADR 0015).
+	AutoAdvanceRequiresSignal bool `json:"auto_advance_requires_signal,omitempty" yaml:"auto_advance_requires_signal,omitempty"`
 }
 
 // WorkflowStep represents a step in a workflow
@@ -186,8 +193,14 @@ type WorkflowStep struct {
 	// on it. Stored as TEXT in workflow_steps.stage_type, defaulting to
 	// "custom" so existing rows remain unchanged.
 	StageType StageType `json:"stage_type,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	// AutoAdvanceRequiresSignal gates on_turn_complete transitions on an
+	// explicit `step_complete_kandev` MCP signal from the agent (ADR 0015).
+	// When true, bare turn-end does NOT trigger the step's transition
+	// actions; instead the orchestrator waits for the agent (or a manual
+	// UI fallback) to write the pending-signal bag on TaskSession.Metadata.
+	AutoAdvanceRequiresSignal bool      `json:"auto_advance_requires_signal,omitempty"`
+	CreatedAt                 time.Time `json:"created_at"`
+	UpdatedAt                 time.Time `json:"updated_at"`
 }
 
 // HasOnEnterAction checks if the step has a specific on_enter action type.

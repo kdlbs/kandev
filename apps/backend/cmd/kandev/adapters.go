@@ -48,6 +48,14 @@ func (a *taskRepositoryAdapter) UpdateTaskState(ctx context.Context, taskID stri
 	return err
 }
 
+// UpdateTaskStateIfCurrentIn transitions task state via the service when the
+// current state is in allowed.
+func (a *taskRepositoryAdapter) UpdateTaskStateIfCurrentIn(
+	ctx context.Context, taskID string, state v1.TaskState, allowed []v1.TaskState,
+) (bool, error) {
+	return a.svc.UpdateTaskStateIfCurrentIn(ctx, taskID, state, allowed)
+}
+
 // lifecycleAdapter adapts the lifecycle manager as an AgentManagerClient
 type lifecycleAdapter struct {
 	mgr      *lifecycle.Manager
@@ -143,6 +151,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 				RepoSetupScript:      r.RepoSetupScript,
 				RepoCleanupScript:    r.RepoCleanupScript,
 				CopyFiles:            r.CopyFiles,
+				BranchSlug:           r.BranchSlug,
 			})
 		}
 		launchReq.Repositories = specs
@@ -339,6 +348,11 @@ func (a *lifecycleAdapter) ResetAgentContext(ctx context.Context, agentExecution
 // SetSessionModelBySessionID attempts an in-place model switch via ACP session/set_model.
 func (a *lifecycleAdapter) SetSessionModelBySessionID(ctx context.Context, sessionID, modelID string) error {
 	return a.mgr.SetSessionModelBySessionID(ctx, sessionID, modelID)
+}
+
+// SetSessionModeBySessionID applies a session permission mode via ACP session/set_mode.
+func (a *lifecycleAdapter) SetSessionModeBySessionID(ctx context.Context, sessionID, modeID string) error {
+	return a.mgr.SetSessionModeBySessionID(ctx, sessionID, modeID)
 }
 
 // RespondToPermissionBySessionID sends a response to a permission request for a session

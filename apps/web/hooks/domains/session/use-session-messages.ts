@@ -3,15 +3,67 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import type { TaskSessionState, Message } from "@/lib/types/http";
 import { listTaskSessionMessages } from "@/lib/api";
-import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
 const INITIAL_FETCH_LIMIT = 100;
 const BACKFILL_PAGE_LIMIT = 100;
-const MAX_BACKFILL_ROUNDS = 3;
+const RUNNING_BACKFILL_INITIAL_DELAY_MS = 1200;
+const RUNNING_BACKFILL_INTERVAL_MS = 3000;
+export const MAX_AUTO_BACKFILL_PAGES = 10;
 
 export function hasUserOrAgentMessage(messages: Message[]): boolean {
   return messages.some(
     (m) => m.type === "message" && (m.author_type === "user" || m.author_type === "agent"),
+  );
+}
+
+// States where a turn (or the agent boot) is actively progressing.
+const ACTIVE_SESSION_STATES: ReadonlySet<TaskSessionState> = new Set(["STARTING", "RUNNING"]);
+// States the session settles into once a turn finishes.
+const SETTLED_SESSION_STATES: ReadonlySet<TaskSessionState> = new Set([
+  "IDLE",
+  "WAITING_FOR_INPUT",
+  "COMPLETED",
+  "FAILED",
+  "CANCELLED",
+]);
+
+/**
+ * True when the session just left an active state for a settled one — i.e. a
+ * turn (or a resume's agent boot) finished. Session-scoped message updates
+ * emitted as the turn winds down (e.g. the `agent_boot` `script_execution`
+ * completion during a resume) can be missed if the live subscription lapsed
+ * during the resume churn, so this is the signal to refetch and reconcile.
+ *
+ * `state_changed` / `turn.completed` are broadcast globally (not session-scoped),
+ * so the client always observes this transition even when its session
+ * subscription was dropped.
+ */
+export function isTurnSettleTransition(
+  prev: TaskSessionState | null,
+  next: TaskSessionState | null,
+): boolean {
+  if (prev === null || next === null) return false;
+  return ACTIVE_SESSION_STATES.has(prev) && SETTLED_SESSION_STATES.has(next);
+}
+
+export function hasUserPromptInActiveTurn(messages: Message[], activeTurnId: string | null) {
+  if (!activeTurnId) return false;
+  return messages.some(
+    (m) => m.turn_id === activeTurnId && m.type === "message" && m.author_type === "user",
+  );
+}
+
+export function shouldRunMessageBackfill(params: {
+  taskSessionState: TaskSessionState | null;
+  connectionStatus: string;
+  activeTurnId: string | null;
+  messages: Message[];
+}) {
+  return (
+    params.connectionStatus === "connected" &&
+    params.taskSessionState === "RUNNING" &&
+    hasUserPromptInActiveTurn(params.messages, params.activeTurnId)
   );
 }
 
@@ -74,7 +126,7 @@ async function fetchAndStoreMessages(
   debug("message.list request", requestParams);
   const response = await client.request<MessageListResponse>("message.list", requestParams, 10000);
   const fetched = [...(response.messages ?? [])].reverse();
-  if (IS_DEBUG) {
+  if (isDebug()) {
     const summary = summarizeMessages(fetched);
     debug("message.list response", {
       sessionId,
@@ -120,7 +172,7 @@ async function fetchAndStoreMessages(
  * past — the lazy-load sentinel at the top of the list never fires because
  * the user has no anchor to scroll from. Paginate backward via the same HTTP
  * endpoint `useLazyLoadMessages` uses until we span at least one user/agent
- * message or hit the round cap.
+ * message or hit the page budget.
  */
 export type BackfillStep = "continue" | "stop";
 
@@ -178,13 +230,14 @@ export async function autoBackfillUntilUserMessage(
   sessionId: string,
   store: ReturnType<typeof useAppStoreApi>,
 ): Promise<void> {
-  for (let round = 0; round < MAX_BACKFILL_ROUNDS; round++) {
+  for (let round = 0; round < MAX_AUTO_BACKFILL_PAGES; round++) {
     const step = await runBackfillRound(sessionId, store, round);
     if (step === "stop") return;
   }
-  debug("autoBackfill: hit round cap without finding user/agent message", {
+  debug("autoBackfill: hit page budget without finding user/agent message", {
     sessionId,
-    cap: MAX_BACKFILL_ROUNDS,
+    pageBudget: MAX_AUTO_BACKFILL_PAGES,
+    messageBudget: MAX_AUTO_BACKFILL_PAGES * BACKFILL_PAGE_LIMIT,
   });
 }
 
@@ -355,8 +408,96 @@ function useSessionSubscription(
   }, [taskSessionId, connectionStatus, store, isSessionStartingOrUnknown]);
 }
 
-export function useSessionMessages(taskSessionId: string | null): UseSessionMessagesReturn {
-  const store = useAppStoreApi();
+/**
+ * Refetch messages whenever a turn settles (active → settled). During a resume
+ * the agent_boot `script_execution` is created and then marked completed within
+ * ~1s, all server-side; if the live session subscription lapsed in that window
+ * the completion `session.message.updated` is dropped and the entry renders
+ * with a spinner forever (until a manual refresh). The settle transition is
+ * delivered globally, so reconciling messages here recovers any session-scoped
+ * updates missed while the turn was running.
+ */
+function useResyncOnTurnSettle(
+  taskSessionId: string | null,
+  taskSessionState: TaskSessionState | null,
+  connectionStatus: string,
+  store: ReturnType<typeof useAppStoreApi>,
+) {
+  const prevRef = useRef<{ sessionId: string | null; state: TaskSessionState | null }>({
+    sessionId: null,
+    state: null,
+  });
+  useEffect(() => {
+    const prev = prevRef.current;
+    prevRef.current = { sessionId: taskSessionId, state: taskSessionState };
+    if (!taskSessionId || connectionStatus !== "connected") return;
+    const prevState = prev.sessionId === taskSessionId ? prev.state : null;
+    if (!isTurnSettleTransition(prevState, taskSessionState)) return;
+    debug("resync on turn settle", {
+      sessionId: taskSessionId,
+      prev: prevState,
+      next: taskSessionState,
+    });
+    fetchAndStoreMessages(taskSessionId, store).catch(() => {});
+  }, [taskSessionId, taskSessionState, connectionStatus, store]);
+}
+
+function useRunningMessageBackfill(
+  taskSessionId: string | null,
+  shouldBackfill: boolean,
+  store: ReturnType<typeof useAppStoreApi>,
+) {
+  useEffect(() => {
+    if (!taskSessionId || !shouldBackfill) return;
+
+    let inFlight = false;
+    const sync = () => {
+      if (inFlight) return;
+      inFlight = true;
+      debug("running backfill", { sessionId: taskSessionId });
+      fetchAndStoreMessages(taskSessionId, store)
+        .catch((err) => {
+          debug("running backfill failed", { sessionId: taskSessionId, err });
+        })
+        .finally(() => {
+          inFlight = false;
+        });
+    };
+    const initial = window.setTimeout(sync, RUNNING_BACKFILL_INITIAL_DELAY_MS);
+    const interval = window.setInterval(sync, RUNNING_BACKFILL_INTERVAL_MS);
+    return () => {
+      window.clearTimeout(initial);
+      window.clearInterval(interval);
+    };
+  }, [taskSessionId, shouldBackfill, store]);
+}
+
+function useMessageFetchState(store: ReturnType<typeof useAppStoreApi>) {
+  const [isLoading, setIsLoading] = useState(false);
+  const [isWaitingForInitialMessages, setIsWaitingForInitialMessages] = useState(false);
+  const initialFetchStartRef = useRef<number | null>(null);
+  const lastFetchedSessionIdRef = useRef<string | null>(null);
+  const refs = useMemo(
+    () => ({
+      store,
+      setIsLoading,
+      setIsWaitingForInitialMessages,
+      initialFetchStartRef,
+      lastFetchedSessionIdRef,
+    }),
+    [store],
+  );
+  return {
+    isLoading,
+    isWaitingForInitialMessages,
+    setIsWaitingForInitialMessages,
+    initialFetchStartRef,
+    lastFetchedSessionIdRef,
+    refs,
+  };
+}
+
+function useSessionMessageInputs(taskSessionId: string | null) {
   const messages = useAppStore((state) =>
     taskSessionId ? (state.messages.bySession[taskSessionId] ?? EMPTY_MESSAGES) : EMPTY_MESSAGES,
   );
@@ -366,22 +507,40 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
   const taskSessionState = useAppStore((state) =>
     taskSessionId ? (state.taskSessions.items[taskSessionId]?.state ?? null) : null,
   );
+  const activeTurnId = useAppStore((state) =>
+    taskSessionId ? (state.turns.activeBySession[taskSessionId] ?? null) : null,
+  );
   const connectionStatus = useAppStore((state) => state.connection.status);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isWaitingForInitialMessages, setIsWaitingForInitialMessages] = useState(false);
-  const initialFetchStartRef = useRef<number | null>(null);
-  const lastFetchedSessionIdRef = useRef<string | null>(null);
+  return { messages, messagesMeta, taskSessionState, activeTurnId, connectionStatus };
+}
+
+export function useSessionMessages(taskSessionId: string | null): UseSessionMessagesReturn {
+  const store = useAppStoreApi();
+  const { messages, messagesMeta, taskSessionState, activeTurnId, connectionStatus } =
+    useSessionMessageInputs(taskSessionId);
   const prevSessionIdRef = useRef<string | null>(null);
   const hasAgentMessage = messages.some((message: Message) => message.author_type === "agent");
+  const {
+    isLoading,
+    isWaitingForInitialMessages,
+    setIsWaitingForInitialMessages,
+    initialFetchStartRef,
+    lastFetchedSessionIdRef,
+    refs: fetchRefs,
+  } = useMessageFetchState(store);
 
-  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!taskSessionId) {
       initialFetchStartRef.current = null;
       lastFetchedSessionIdRef.current = null;
       setIsWaitingForInitialMessages(false);
     }
-  }, [taskSessionId, store]);
+  }, [
+    taskSessionId,
+    initialFetchStartRef,
+    lastFetchedSessionIdRef,
+    setIsWaitingForInitialMessages,
+  ]);
 
   useEffect(() => {
     if (!taskSessionId) return;
@@ -393,8 +552,7 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
       initialFetchStartRef.current = Date.now();
       setIsWaitingForInitialMessages(true);
     }
-  }, [taskSessionId, messages.length]);
-  /* eslint-enable react-hooks/set-state-in-effect */
+  }, [taskSessionId, messages.length, initialFetchStartRef, setIsWaitingForInitialMessages]);
 
   useEffect(() => {
     if (!taskSessionId || connectionStatus !== "connected") return;
@@ -411,7 +569,6 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
     // Normal re-render with cached messages — skip fetch
     if (messages.length > 0 && !sessionChanged && !isFreshMount) {
       lastFetchedSessionIdRef.current = taskSessionId;
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setIsWaitingForInitialMessages(false);
       return;
     }
@@ -428,13 +585,17 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
 
     void doFetchMessages({
       taskSessionId,
-      store,
-      setIsLoading,
-      setIsWaitingForInitialMessages,
-      initialFetchStartRef,
-      lastFetchedSessionIdRef,
+      ...fetchRefs,
     });
-  }, [taskSessionId, connectionStatus, messages.length, store]);
+  }, [
+    taskSessionId,
+    connectionStatus,
+    messages.length,
+    store,
+    lastFetchedSessionIdRef,
+    setIsWaitingForInitialMessages,
+    fetchRefs,
+  ]);
 
   // Bool flips exactly once when a freshly-adopted session leaves STARTING,
   // so the subscription effect re-runs then (covering the backend race where
@@ -443,19 +604,20 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
   const isSessionStartingOrUnknown = taskSessionState === null || taskSessionState === "STARTING";
 
   useSessionSubscription(taskSessionId, connectionStatus, isSessionStartingOrUnknown, store);
+  useResyncOnTurnSettle(taskSessionId, taskSessionState, connectionStatus, store);
+  useRunningMessageBackfill(
+    taskSessionId,
+    shouldRunMessageBackfill({
+      taskSessionState,
+      connectionStatus,
+      activeTurnId,
+      messages,
+    }),
+    store,
+  );
   useVisibilityBackfill(taskSessionId, store);
 
-  const terminalFetchRefs = useMemo(
-    () => ({
-      store,
-      setIsLoading,
-      setIsWaitingForInitialMessages,
-      initialFetchStartRef,
-      lastFetchedSessionIdRef,
-    }),
-    [store],
-  );
-  useTerminalStateFetch(taskSessionId, taskSessionState, hasAgentMessage, terminalFetchRefs);
+  useTerminalStateFetch(taskSessionId, taskSessionState, hasAgentMessage, fetchRefs);
 
   return {
     isLoading: isLoading || isWaitingForInitialMessages || messagesMeta.isLoading,

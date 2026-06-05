@@ -16,7 +16,7 @@ import { INTENT_PR_REVIEW } from "@/lib/state/layout-manager";
 import { replaceTaskUrl } from "@/lib/links";
 import { launchSession } from "@/lib/services/session-launch-service";
 import { buildPrepareRequest } from "@/lib/services/session-launch-helpers";
-import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
 const debug = createDebugLogger("dockview:task-select");
 
@@ -45,19 +45,30 @@ export function resolveLoadedSessionId(
  * `lastSessionByTaskId`) over `primarySessionId`, so opening a non-primary
  * tab then bouncing through another task does not silently snap the user
  * back to primary. Falls back to `primarySessionId` when the remembered
- * session is unknown / missing an env mapping (e.g. it was deleted).
+ * session is unknown / missing an env mapping (e.g. it was deleted), OR
+ * when it belongs to a different task — the latter guards against a poisoned
+ * `lastSessionByTaskId` entry written by a stale dockview panel-activation
+ * during a task switch (see `setupSessionTabSync`).
  */
-export function resolvePreferredSessionId(
-  taskId: string,
-  primarySessionId: string,
-  lastSessionByTaskId: Record<string, string>,
-  environmentIdBySessionId: Record<string, string>,
-): string {
+export function resolvePreferredSessionId(args: {
+  taskId: string;
+  primarySessionId: string;
+  lastSessionByTaskId: Record<string, string>;
+  environmentIdBySessionId: Record<string, string>;
+  taskSessionsById: Record<string, TaskSession>;
+}): string {
+  const {
+    taskId,
+    primarySessionId,
+    lastSessionByTaskId,
+    environmentIdBySessionId,
+    taskSessionsById,
+  } = args;
   const last = lastSessionByTaskId[taskId];
-  if (last && environmentIdBySessionId[last]) {
-    return last;
-  }
-  return primarySessionId;
+  if (!last || !environmentIdBySessionId[last]) return primarySessionId;
+  const lastTaskId = taskSessionsById[last]?.task_id;
+  if (lastTaskId && lastTaskId !== taskId) return primarySessionId;
+  return last;
 }
 
 export function buildSwitchToSession(
@@ -68,7 +79,7 @@ export function buildSwitchToSession(
     const state = store.getState();
     const oldEnvId = oldSessionId ? (state.environmentIdBySessionId[oldSessionId] ?? null) : null;
     const newEnvId = state.environmentIdBySessionId[sessionId] ?? null;
-    if (IS_DEBUG) {
+    if (isDebug()) {
       debug("switchToSession: entry", {
         taskId,
         sessionId,
@@ -90,7 +101,7 @@ export function buildSwitchToSession(
     // layout to default so the new task starts from a clean slate; when the
     // new env id arrives, useEnvSwitchCleanup will adopt it without rebuild.
     if (oldEnvId || oldSessionId !== sessionId) {
-      if (IS_DEBUG) {
+      if (isDebug()) {
         debug("switchToSession: releasing outgoing env (no newEnvId yet)", { oldEnvId });
       }
       releaseLayoutToDefault(oldEnvId);
@@ -153,7 +164,7 @@ export function selectTaskWithLayout(params: {
   const { taskId, task, store, switchToSession, loadTaskSessionsForTask } = params;
   const state = store.getState();
   const oldSessionId = state.tasks.activeSessionId;
-  if (IS_DEBUG) {
+  if (isDebug()) {
     debug("selectTaskWithLayout: entry", {
       taskId,
       primarySessionId: task?.primarySessionId ?? null,
@@ -162,12 +173,13 @@ export function selectTaskWithLayout(params: {
     });
   }
   if (task?.primarySessionId) {
-    const targetSessionId = resolvePreferredSessionId(
+    const targetSessionId = resolvePreferredSessionId({
       taskId,
-      task.primarySessionId,
-      state.tasks.lastSessionByTaskId,
-      state.environmentIdBySessionId,
-    );
+      primarySessionId: task.primarySessionId,
+      lastSessionByTaskId: state.tasks.lastSessionByTaskId,
+      environmentIdBySessionId: state.environmentIdBySessionId,
+      taskSessionsById: state.taskSessions.items,
+    });
     const hasEnvId = !!state.environmentIdBySessionId[targetSessionId];
     if (hasEnvId) {
       switchToSession(taskId, targetSessionId, oldSessionId);

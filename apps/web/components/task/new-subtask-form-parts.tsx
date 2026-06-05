@@ -45,6 +45,12 @@ type SelectorsRowProps = {
   onAgentProfileChange: (value: string) => void;
   onExecutorProfileChange: (value: string) => void;
   disabled: boolean;
+  /**
+   * When true, hide the executor-profile selector. The subtask reuses the
+   * parent's materialized environment (inherit_parent), so choosing an
+   * executor would be meaningless — the parent's executor is always used.
+   */
+  hideExecutor: boolean;
 };
 
 export function SelectorsRow({
@@ -55,10 +61,11 @@ export function SelectorsRow({
   onAgentProfileChange,
   onExecutorProfileChange,
   disabled,
+  hideExecutor,
 }: SelectorsRowProps) {
   const noAgents = profileOptions.length === 0;
   return (
-    <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
+    <div className={"grid gap-4 grid-cols-1" + (hideExecutor ? "" : " sm:grid-cols-2")}>
       <div>
         <AgentSelector
           options={profileOptions}
@@ -68,15 +75,17 @@ export function SelectorsRow({
           placeholder={noAgents ? "No agents found" : "Select agent profile"}
         />
       </div>
-      <div>
-        <ExecutorProfileSelector
-          options={executorProfileOptions}
-          value={executorProfileId}
-          onValueChange={onExecutorProfileChange}
-          disabled={disabled}
-          placeholder="Select executor profile"
-        />
-      </div>
+      {!hideExecutor && (
+        <div>
+          <ExecutorProfileSelector
+            options={executorProfileOptions}
+            value={executorProfileId}
+            onValueChange={onExecutorProfileChange}
+            disabled={disabled}
+            placeholder="Select executor profile"
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -213,8 +222,7 @@ function WorkspaceSection({
         workspaceId={workspaceId}
         onRowRepositoryChange={handlers.handleRowRepositoryChange}
         onRowBranchChange={handlers.handleRowBranchChange}
-        onToggleGitHubUrl={handlers.handleToggleGitHubUrl}
-        onGitHubUrlChange={handlers.handleGitHubUrlChange}
+        onToggleRemote={handlers.handleToggleRemote}
       />
       <WorktreeBadge show={showWorktreeBadge} branch={worktreeBranch} />
     </>
@@ -344,6 +352,21 @@ function WorkspaceModeOption({
   );
 }
 
+// Worktree badge shows only when the subtask still targets the parent's repo
+// (single chip, same id). Adding repos or pasting a URL makes it ambiguous.
+function shouldShowWorktreeBadge(
+  fs: ReturnType<typeof useSubtaskFormState>,
+  worktreeBranch: string | null,
+  parentRepositoryId: string | null,
+): boolean {
+  return (
+    !!worktreeBranch &&
+    fs.repositories.length === 1 &&
+    fs.repositories[0]?.repositoryId === parentRepositoryId &&
+    !fs.useRemote
+  );
+}
+
 /**
  * Renders the entire subtask form body (title input, repo chips, selectors,
  * context picker, prompt zone, footer). Extracted from `NewSubtaskForm` so
@@ -374,13 +397,7 @@ export function SubtaskFormBody({
   onClose,
   onSubmit,
 }: SubtaskFormBodyProps) {
-  // Worktree badge only when subtask still targets parent's repo (single chip,
-  // same id). Adding repos or pasting a URL makes it ambiguous, so hide.
-  const showWorktreeBadge =
-    !!worktreeBranch &&
-    fs.repositories.length === 1 &&
-    fs.repositories[0]?.repositoryId === parentRepositoryId &&
-    !fs.useGitHubUrl;
+  const showWorktreeBadge = shouldShowWorktreeBadge(fs, worktreeBranch, parentRepositoryId);
   const inheritParent = workspaceMode === "inherit_parent";
   return (
     <form onSubmit={onSubmit} className="space-y-4">
@@ -421,6 +438,7 @@ export function SubtaskFormBody({
         onAgentProfileChange={handlers.handleAgentProfileChange}
         onExecutorProfileChange={handlers.handleExecutorProfileChange}
         disabled={isCreating}
+        hideExecutor={inheritParent}
       />
       <ContextSelect
         value={contextValue}

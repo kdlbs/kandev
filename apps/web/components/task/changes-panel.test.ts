@@ -8,11 +8,13 @@ const makeLocal = (sha: string, message = "msg") => ({
   deletions: 0,
 });
 
+const PR_DATE = "2026-03-29T00:00:00Z";
+
 const makePR = (sha: string) => ({
   sha,
   message: "msg",
   author_login: "user",
-  author_date: "2026-03-29T00:00:00Z",
+  author_date: PR_DATE,
 });
 
 describe("filterUnpushedCommits", () => {
@@ -43,7 +45,7 @@ const makePRFull = (sha: string, message = "msg", author = "user") => ({
   sha,
   message,
   author_login: author,
-  author_date: "2026-03-29T00:00:00Z",
+  author_date: PR_DATE,
   additions: 5,
   deletions: 2,
   files_changed: 1,
@@ -120,6 +122,7 @@ describe("mergeCommits", () => {
         insertions: 5,
         deletions: 2,
         pushed: true,
+        committed_at: PR_DATE,
       },
     ]);
   });
@@ -141,5 +144,17 @@ describe("mergeCommits", () => {
     expect(result[0]).toMatchObject({ commit_sha: "bbb2222", pushed: false });
     expect(result[1]).toMatchObject({ commit_sha: "aaa1111", pushed: true });
     expect(result[2]).toMatchObject({ commit_sha: "ddd4444", pushed: true });
+  });
+
+  it("propagates committed_at from local commits", () => {
+    const local = [{ ...makeLocal("aaa1111"), committed_at: "2026-05-31T10:00:00Z" }];
+    const result = mergeCommits(local, []);
+    expect(result[0].committed_at).toBe("2026-05-31T10:00:00Z");
+  });
+
+  it("forwards author_date as committed_at for PR-only commits", () => {
+    const pr = [makePRFull("ccc3333", "external fix", "other-dev")];
+    const result = mergeCommits([], pr);
+    expect(result[0].committed_at).toBe(PR_DATE);
   });
 });

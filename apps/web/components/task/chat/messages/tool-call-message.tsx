@@ -71,6 +71,7 @@ type ToolCallExpandedContentProps = {
   isPermissionPending: boolean;
   onApprove: () => void;
   onReject: () => void;
+  onAllowAlways?: () => void;
   isResponding: boolean;
 };
 
@@ -80,6 +81,7 @@ function ToolCallExpandedContent({
   isPermissionPending,
   onApprove,
   onReject,
+  onAllowAlways,
   isResponding,
 }: ToolCallExpandedContentProps) {
   return (
@@ -99,6 +101,7 @@ function ToolCallExpandedContent({
         <PermissionActionRow
           onApprove={onApprove}
           onReject={onReject}
+          onAllowAlways={onAllowAlways}
           isResponding={isResponding}
         />
       )}
@@ -179,10 +182,11 @@ export const ToolCallMessage = memo(function ToolCallMessage({
     inlineOutput,
     isSuccess,
   } = parseToolCallMetadata(comment, permissionMessage);
-  const { isResponding, handleApprove, handleReject } = usePermissionResponseHandlers({
-    permissionMetadata,
-    permissionMessage,
-  });
+  const { isResponding, handleApprove, handleAllowAlways, hasAllowAlways, handleReject } =
+    usePermissionResponseHandlers({
+      permissionMetadata,
+      permissionMessage,
+    });
   const autoExpanded = status === "running" || isPermissionPending;
   const { isExpanded, handleToggle } = useExpandState(status, autoExpanded);
 
@@ -234,6 +238,7 @@ export const ToolCallMessage = memo(function ToolCallMessage({
         isPermissionPending={isPermissionPending}
         onApprove={handleApprove}
         onReject={handleReject}
+        onAllowAlways={hasAllowAlways ? handleAllowAlways : undefined}
         isResponding={isResponding}
       />
     </ExpandableRow>

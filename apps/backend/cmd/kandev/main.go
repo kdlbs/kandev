@@ -30,10 +30,12 @@ import (
 
 	// GitHub integration
 	githubpkg "github.com/kandev/kandev/internal/github"
+	gitlabpkg "github.com/kandev/kandev/internal/gitlab"
 
 	// JIRA integration
 	jirapkg "github.com/kandev/kandev/internal/jira"
 	linearpkg "github.com/kandev/kandev/internal/linear"
+	sentrypkg "github.com/kandev/kandev/internal/sentry"
 	slackpkg "github.com/kandev/kandev/internal/slack"
 
 	// Agent infrastructure
@@ -372,6 +374,9 @@ func startAgentInfrastructure(
 	log.Info("Worktree Manager initialized",
 		zap.Bool("enabled", cfg.Worktree.Enabled))
 
+	services.Task.SetBranchMaterializer(newBranchMaterializer(repos.Task, worktreeMgr, lifecycleMgr, log))
+	services.Task.SetAgentBaseBranchPusher(lifecycleMgr)
+
 	lifecycleMgr.SetWorkspaceInfoProvider(services.Task)
 	log.Info("Workspace info provider configured for session recovery")
 
@@ -420,6 +425,22 @@ func startAgentInfrastructure(
 		return false
 	}
 
+	// Wire the soft-deleted-profile pre-flight into the watcher dispatch.
+	// Orphan watchers (their agent profile was soft-deleted by the
+	// reconciler when its agent type left the registry) self-heal on the
+	// next poll instead of looping on "profile not found" forever.
+	orchestratorSvc.SetProfileLookup(&profileLookupAdapter{store: repos.AgentSettings})
+
+	// Wire the watcher-dependency enumerator into the agent settings
+	// controller so the profile-delete UI can surface "this will also
+	// disable N watchers" before the user confirms.
+	agentSettingsController.SetWatcherDependencyChecker(&watcherDepsAdapter{
+		linear: services.Linear,
+		jira:   services.Jira,
+		github: services.GitHub,
+		log:    log,
+	})
+
 	// Wire GitHub service into orchestrator for PR auto-detection on push
 	if services.GitHub != nil {
 		orchestratorSvc.SetGitHubService(services.GitHub)
@@ -433,6 +454,18 @@ func startAgentInfrastructure(
 		ghPoller.Start(ctx)
 		addCleanup(func() error { ghPoller.Stop(); return nil })
 		log.Info("GitHub poller started")
+	}
+
+	// Start GitLab background poller + wire the service into the
+	// orchestrator so review/issue watch events get turned into tasks.
+	if services.GitLab != nil {
+		orchestratorSvc.SetGitLabService(services.GitLab)
+		services.GitLab.SetTaskDeleter(&taskDeleterAdapter{svc: services.Task})
+		services.GitLab.SetTaskSessionChecker(&taskSessionCheckerAdapter{repo: repos.Task})
+		glPoller := gitlabpkg.NewPoller(services.GitLab, eventBus, log)
+		glPoller.Start(ctx)
+		addCleanup(func() error { glPoller.Stop(); return nil })
+		log.Info("GitLab poller started")
 	}
 
 	// Start JIRA poller. Drives two background loops sharing one service: an
@@ -454,6 +487,16 @@ func startAgentInfrastructure(
 		linearPoller := linearpkg.NewPoller(services.Linear, log)
 		linearPoller.Start(ctx)
 		addCleanup(func() error { linearPoller.Stop(); return nil })
+	}
+
+	// Start Sentry poller: an auth-health probe plus an issue-watch loop that
+	// runs configured filters and emits NewSentryIssueEvent. The dedup adapter
+	// lets the orchestrator turn matching Sentry issues into kandev tasks.
+	if services.Sentry != nil {
+		orchestratorSvc.SetSentryService(&sentryServiceAdapter{svc: services.Sentry})
+		sentryPoller := sentrypkg.NewPoller(services.Sentry, log)
+		sentryPoller.Start(ctx)
+		addCleanup(func() error { sentryPoller.Stop(); return nil })
 	}
 
 	// Start Slack auth-health poller and the trigger loop. The trigger
@@ -1513,6 +1556,7 @@ func buildHTTPServer(
 		devMode:                 cfg.Debug.DevMode || cfg.Debug.PprofEnabled,
 		httpPort:                port,
 		features:                cfg.Features,
+		voice:                   cfg.Voice,
 		log:                     log,
 	})
 

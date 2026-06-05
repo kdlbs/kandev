@@ -116,6 +116,10 @@ func (m *mockAgentManager) SetSessionModelBySessionID(ctx context.Context, sessi
 	return fmt.Errorf("not supported")
 }
 
+func (m *mockAgentManager) SetSessionModeBySessionID(ctx context.Context, sessionID, modeID string) error {
+	return fmt.Errorf("not supported")
+}
+
 func (m *mockAgentManager) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
 	m.isAgentRunningForSessionCallArgs = append(m.isAgentRunningForSessionCallArgs, sessionID)
 	if m.isAgentRunningForSessionFunc != nil {
@@ -390,6 +394,15 @@ func (m *mockRepository) GetTask(ctx context.Context, id string) (*models.Task, 
 	}
 	return nil, nil
 }
+func (m *mockRepository) GetTasksByIDs(ctx context.Context, ids []string) ([]*models.Task, error) {
+	var out []*models.Task
+	for _, id := range ids {
+		if task, ok := m.tasks[id]; ok {
+			out = append(out, task)
+		}
+	}
+	return out, nil
+}
 func (m *mockRepository) UpdateTask(ctx context.Context, task *models.Task) error { return nil }
 func (m *mockRepository) DeleteTask(ctx context.Context, id string) error         { return nil }
 func (m *mockRepository) ListTasks(ctx context.Context, workflowID string) ([]*models.Task, error) {
@@ -582,6 +595,9 @@ func (m *mockRepository) GetSessionCountsByTaskIDs(ctx context.Context, taskIDs 
 func (m *mockRepository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs []string) (map[string]*models.TaskSession, error) {
 	return nil, nil
 }
+func (m *mockRepository) BatchGetSessionsByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]*models.TaskSession, error) {
+	return nil, nil
+}
 func (m *mockRepository) UpdateSessionWorkflowStep(ctx context.Context, sessionID string, stepID string) error {
 	return nil
 }
@@ -703,6 +719,22 @@ func (m *mockRepository) HasExecutorRunningRow(ctx context.Context, sessionID st
 		return ok, nil
 	}
 	return false, nil
+}
+
+// UpdateExecutorRunningStatus mirrors the production sqlite repo: returns
+// ErrExecutorRunningNotFound when no row exists for the session. Tests that
+// exercise the "no row" warning-log path can rely on this, and tests that want
+// the status flip to land must seed m.executorsRunning[sessionID] first.
+func (m *mockRepository) UpdateExecutorRunningStatus(ctx context.Context, sessionID, status string) error {
+	if m.executorsRunning == nil {
+		return models.ErrExecutorRunningNotFound
+	}
+	row, ok := m.executorsRunning[sessionID]
+	if !ok {
+		return models.ErrExecutorRunningNotFound
+	}
+	row.Status = status
+	return nil
 }
 
 // Environment operations

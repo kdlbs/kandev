@@ -52,6 +52,9 @@ func (m *mockRepository) CreateTask(ctx context.Context, task *models.Task) erro
 func (m *mockRepository) GetTask(ctx context.Context, id string) (*models.Task, error) {
 	return nil, nil
 }
+func (m *mockRepository) GetTasksByIDs(ctx context.Context, ids []string) ([]*models.Task, error) {
+	return nil, nil
+}
 func (m *mockRepository) UpdateTask(ctx context.Context, task *models.Task) error {
 	return nil
 }
@@ -73,8 +76,14 @@ func (m *mockRepository) ArchiveTask(ctx context.Context, id string) error {
 func (m *mockRepository) ListTasksForAutoArchive(ctx context.Context) ([]*models.Task, error) {
 	return nil, nil
 }
+func (m *mockRepository) CountOpenWatcherCreatedTasks(_ context.Context, _, _ string) (int, error) {
+	return 0, nil
+}
 func (m *mockRepository) UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error {
 	return nil
+}
+func (m *mockRepository) UpdateTaskStateIfCurrentIn(_ context.Context, _ string, _ v1.TaskState, _ []v1.TaskState) (v1.TaskState, bool, error) {
+	return "", false, nil
 }
 func (m *mockRepository) AddTaskToWorkflow(ctx context.Context, taskID, workflowID, columnID string, position int) error {
 	return nil
@@ -178,10 +187,16 @@ func (m *mockRepository) FindMessagesByPendingID(ctx context.Context, pendingID 
 func (m *mockRepository) FindMessageByPendingIDAndQuestion(ctx context.Context, sessionID, pendingID, questionID string) (*models.Message, error) {
 	return nil, nil
 }
+func (m *mockRepository) FindPendingClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*models.Message, error) {
+	return nil, nil
+}
 func (m *mockRepository) UpdateMessage(ctx context.Context, message *models.Message) error {
 	return nil
 }
 func (m *mockRepository) ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error) {
+	return nil, nil
+}
+func (m *mockRepository) ListMessagesByTurnID(ctx context.Context, turnID string) ([]*models.Message, error) {
 	return nil, nil
 }
 func (m *mockRepository) ListMessagesPaginated(ctx context.Context, sessionID string, opts models.ListMessagesOptions) ([]*models.Message, bool, error) {
@@ -239,6 +254,9 @@ func (m *mockRepository) UpdateTaskSession(ctx context.Context, session *models.
 }
 func (m *mockRepository) UpdateTaskSessionState(ctx context.Context, id string, state models.TaskSessionState, errorMessage string) error {
 	return nil
+}
+func (m *mockRepository) ResetTaskSessionBasesForRepository(ctx context.Context, taskID, repositoryID, baseBranch string) (int64, error) {
+	return 0, nil
 }
 func (m *mockRepository) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
 	return nil, nil
@@ -365,6 +383,9 @@ func (m *mockRepository) HasExecutorRunningRow(ctx context.Context, sessionID st
 func (m *mockRepository) UpdateResumeToken(ctx context.Context, sessionID, expectedExecID, resumeToken, lastMessageUUID string) error {
 	return nil
 }
+func (m *mockRepository) UpdateExecutorRunningStatus(ctx context.Context, sessionID, status string) error {
+	return nil
+}
 func (m *mockRepository) CreateEnvironment(ctx context.Context, environment *models.Environment) error {
 	return nil
 }
@@ -457,6 +478,9 @@ func (m *mockRepository) GetSessionCountsByTaskIDs(ctx context.Context, taskIDs 
 }
 func (m *mockRepository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs []string) (map[string]*models.TaskSession, error) {
 	return make(map[string]*models.TaskSession), nil
+}
+func (m *mockRepository) BatchGetSessionsByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]*models.TaskSession, error) {
+	return make(map[string][]*models.TaskSession), nil
 }
 func (m *mockRepository) SetSessionPrimary(ctx context.Context, sessionID string) error {
 	return nil

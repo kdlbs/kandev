@@ -130,8 +130,8 @@ test.describe("Improve Kandev dialog", () => {
     await expect(createDialog.getByText("/commit", { exact: true })).toBeVisible();
     await expect(createDialog.getByText("/pr-fixup", { exact: true })).toBeVisible();
 
-    // GitHub URL toggle is hidden because the repository is locked to kandev
-    await expect(createDialog.getByTestId("toggle-github-url")).toHaveCount(0);
+    // Remote-tab toggle is hidden because the repository is locked to kandev
+    await expect(createDialog.getByTestId("source-mode-remote")).toHaveCount(0);
   });
 
   test("contributor banner shows direct-push copy when user has write access", async ({
@@ -224,9 +224,9 @@ test.describe("Improve Kandev dialog", () => {
     await expect(createDialog.getByTestId("workflow-selector-trigger")).toHaveCount(0);
 
     // Source-mode switch must be hidden entirely when the repo is locked:
-    // neither the URL nor the None ("scratch") modes can be reached, so the
-    // dialog can only ever submit against the bootstrapped kandev repository.
-    await expect(createDialog.getByTestId("toggle-github-url")).toHaveCount(0);
+    // neither the Remote nor the None ("scratch") modes can be reached, so
+    // the dialog can only ever submit against the bootstrapped kandev repo.
+    await expect(createDialog.getByTestId("source-mode-remote")).toHaveCount(0);
     await expect(createDialog.getByTestId("source-mode-scratch")).toHaveCount(0);
     await expect(createDialog.getByTestId("source-mode-workspace")).toHaveCount(0);
   });

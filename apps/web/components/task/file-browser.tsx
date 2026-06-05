@@ -6,6 +6,7 @@ import type { FileTreeNode, OpenFileTab } from "@/lib/types/backend";
 import { useSession } from "@/hooks/domains/session/use-session";
 import { useRepository } from "@/hooks/domains/workspace/use-repository";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
+import { useAppStore } from "@/components/state-provider";
 import { useOpenSessionFolder } from "@/hooks/use-open-session-folder";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useToast } from "@/components/toast-provider";
@@ -379,7 +380,16 @@ export function FileBrowser({
   const containerRef = useRef<HTMLDivElement>(null);
 
   const search = useFileBrowserSearch(sessionId);
-  const treeState = useFileBrowserTree(sessionId, environmentId ?? undefined);
+  // Worktree count participates in the tree's reset key so an add_branch_to_task
+  // call that materializes a sibling worktree forces a fresh tree load — the
+  // backend's workspace_path has just been promoted from the primary worktree
+  // to the task root, and the cached tree (rooted at the old primary) would
+  // otherwise still be shown.
+  const worktreeCount = useAppStore(
+    (state) => state.sessionWorktreesBySessionId.itemsBySessionId[sessionId]?.length ?? 0,
+  );
+  const resetKey = environmentId ? `${environmentId}:${worktreeCount}` : undefined;
+  const treeState = useFileBrowserTree(sessionId, resetKey);
   const isTreeLoaded = !treeState.isLoadingTree && treeState.tree !== null;
   useScrollPersistence(sessionId, isTreeLoaded, scrollAreaRef, treeState.tree);
 

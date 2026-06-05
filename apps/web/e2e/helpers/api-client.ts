@@ -7,6 +7,7 @@ import type {
   TaskSessionState,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile } from "../../lib/types/http-agents";
+import type { VoiceModeSettings } from "../../lib/types/http-voice";
 import type {
   SSHAgentReadinessResponse,
   SSHProbeShellsResponse,
@@ -194,6 +195,50 @@ export class ApiClient {
       workspace_id: workspaceId,
       name,
       ...(templateId ? { workflow_template_id: templateId } : {}),
+    });
+  }
+
+  /**
+   * Seed a workflow with an explicit style (kanban / office / custom) via the
+   * KANDEV_E2E_MOCK test harness. Production has no HTTP path that creates an
+   * office-style workflow (the normal create endpoint always normalises to
+   * kanban), so this is the only way to stand up an office workflow for the
+   * "exclude office from settings export" coverage (issue #1109).
+   */
+  async seedWorkflow(
+    workspaceId: string,
+    name: string,
+    style: "kanban" | "office" | "custom",
+  ): Promise<{ workflow_id: string }> {
+    return this.request("POST", "/api/v1/_test/workflows", {
+      workspace_id: workspaceId,
+      name,
+      style,
+    });
+  }
+
+  /**
+   * Seed a task row directly via the test harness, bypassing the service-layer
+   * subtask-depth guard. Use this (not `createTask`) to build nested chains
+   * deeper than one level — `createTask` rejects depth > 1 for kanban tasks.
+   */
+  async seedTask(
+    workspaceId: string,
+    title: string,
+    opts?: {
+      workflow_id?: string;
+      workflow_step_id?: string;
+      parent_id?: string;
+      state?: string;
+    },
+  ): Promise<{ task_id: string }> {
+    return this.request("POST", "/api/v1/_test/tasks", {
+      workspace_id: workspaceId,
+      title,
+      workflow_id: opts?.workflow_id ?? "",
+      workflow_step_id: opts?.workflow_step_id ?? "",
+      parent_id: opts?.parent_id ?? "",
+      state: opts?.state ?? "",
     });
   }
 
@@ -565,6 +610,7 @@ export class ApiClient {
     default_utility_model?: string;
     sidebar_views?: unknown[];
     kanban_view_mode?: string;
+    voice_mode?: VoiceModeSettings;
   }): Promise<void> {
     await this.request("PATCH", "/api/v1/user/settings", settings);
   }
@@ -721,6 +767,25 @@ export class ApiClient {
       await this.seedSessionMessage(sessionId, {
         type: "tool_call",
         content: `synthetic tool call ${i + 1}`,
+      });
+    }
+  }
+
+  /**
+   * Seed `count` agent text messages (type "message"), oldest-to-newest.
+   * Unlike `seedToolCallMessages`, these are `message`-type rows so the chat's
+   * newest-window fetch contains a user/agent message and does not trigger the
+   * auto-backfill that would otherwise pull older pages on its own.
+   */
+  async seedAgentMessages(
+    sessionId: string,
+    count: number,
+    prefix = "filler message",
+  ): Promise<void> {
+    for (let i = 0; i < count; i++) {
+      await this.seedSessionMessage(sessionId, {
+        type: "message",
+        content: `${prefix} ${i + 1}`,
       });
     }
   }
@@ -967,6 +1032,16 @@ export class ApiClient {
 
   async mockGitHubSetAuthHealth(data: { authenticated: boolean; error?: string }): Promise<void> {
     await this.request("PUT", "/api/v1/github/mock/auth-health", data);
+  }
+
+  /**
+   * Toggles the mock client's "list accessible repos unavailable" branch.
+   * When set to true, GET /api/v1/github/repos responds with 503
+   * `github_not_configured` — used by Remote-tab e2e specs that need to
+   * verify the "Connect GitHub" banner in the chip popover.
+   */
+  async mockGitHubSetReposUnavailable(unavailable: boolean): Promise<void> {
+    await this.request("PUT", "/api/v1/github/mock/repos-unavailable", { unavailable });
   }
 
   async mockGitHubGetStatus(): Promise<{
@@ -1238,7 +1313,7 @@ export class ApiClient {
    * navigating, otherwise the import bar can race the first render.
    */
   async waitForIntegrationAuthHealthy(
-    integration: "jira" | "linear",
+    integration: "jira" | "linear" | "sentry",
     timeoutMs = 5_000,
   ): Promise<void> {
     const deadline = Date.now() + timeoutMs;
@@ -1339,6 +1414,82 @@ export class ApiClient {
 
   async mockLinearSetGetIssueError(args: { statusCode: number; message: string }): Promise<void> {
     await this.request("PUT", "/api/v1/linear/mock/get-issue-error", args);
+  }
+
+  // --- Sentry Mock Control ---
+
+  async mockSentryReset(): Promise<void> {
+    await this.request("DELETE", "/api/v1/sentry/mock/reset");
+  }
+
+  async mockSentrySetAuthResult(result: {
+    ok: boolean;
+    userId?: string;
+    displayName?: string;
+    email?: string;
+    error?: string;
+  }): Promise<void> {
+    await this.request("PUT", "/api/v1/sentry/mock/auth-result", result);
+  }
+
+  async mockSentrySetAuthHealth(args: { ok: boolean; error?: string }): Promise<void> {
+    await this.request("PUT", "/api/v1/sentry/mock/auth-health", args);
+  }
+
+  async mockSentrySetOrganizations(organizations: MockSentryOrganization[]): Promise<void> {
+    await this.request("POST", "/api/v1/sentry/mock/organizations", { organizations });
+  }
+
+  async mockSentrySetProjects(projects: MockSentryProject[]): Promise<void> {
+    await this.request("POST", "/api/v1/sentry/mock/projects", { projects });
+  }
+
+  // --- Linear issue watch CRUD ---
+  // Used by the agent-profile-delete spec to exercise the watcher dependency
+  // surface added in the watcher self-heal PR. Filter shape matches
+  // linear.CreateIssueWatchRequest (Go side).
+
+  async createLinearIssueWatch(opts: {
+    workspaceId: string;
+    workflowId: string;
+    workflowStepId: string;
+    agentProfileId: string;
+    executorProfileId?: string;
+    filter?: { teamKey?: string };
+    prompt?: string;
+    enabled?: boolean;
+    pollIntervalSeconds?: number;
+  }): Promise<{ id: string; enabled: boolean; lastError?: string }> {
+    return this.request("POST", "/api/v1/linear/watches/issue", {
+      workspaceId: opts.workspaceId,
+      workflowId: opts.workflowId,
+      workflowStepId: opts.workflowStepId,
+      agentProfileId: opts.agentProfileId,
+      executorProfileId: opts.executorProfileId ?? "",
+      filter: { teamKey: "ENG", ...(opts.filter ?? {}) },
+      prompt: opts.prompt ?? "",
+      enabled: opts.enabled ?? true,
+      pollIntervalSeconds: opts.pollIntervalSeconds ?? 300,
+    });
+  }
+
+  async getLinearIssueWatch(
+    workspaceId: string,
+    watchId: string,
+  ): Promise<{
+    id: string;
+    enabled: boolean;
+    lastError?: string;
+    lastErrorAt?: string;
+  } | null> {
+    // No single-watch GET on the route table (only POST/PATCH/DELETE/trigger);
+    // walk the workspace list and find by id. Scoped by workspace_id so the
+    // result set stays small even if the install accumulates watchers. The
+    // list endpoint wraps the rows in a { watches: [...] } envelope.
+    const { watches } = await this.request<{
+      watches: Array<{ id: string; enabled: boolean; lastError?: string; lastErrorAt?: string }>;
+    }>("GET", `/api/v1/linear/watches/issue?workspace_id=${encodeURIComponent(workspaceId)}`);
+    return watches.find((w) => w.id === watchId) ?? null;
   }
 
   // --- Agent dashboard E2E seed helpers (KANDEV_E2E_MOCK=true) ---
@@ -1641,3 +1792,9 @@ export type MockLinearIssue = {
   priority?: number;
   url?: string;
 };
+
+// --- Sentry mock payload types ---
+
+export type MockSentryOrganization = { id: string; slug: string; name: string };
+
+export type MockSentryProject = { id: string; slug: string; name: string; orgSlug: string };

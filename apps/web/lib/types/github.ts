@@ -55,6 +55,9 @@ export type GitHubPR = {
   repo_name: string;
   draft: boolean;
   mergeable: boolean;
+  /** Rich merge state (clean | blocked | behind | dirty | ...). Optional because
+   *  legacy payloads predate it; falls back to TaskPR.mergeable_state. */
+  mergeable_state?: MergeableState;
   additions: number;
   deletions: number;
   requested_reviewers: RequestedReviewer[];

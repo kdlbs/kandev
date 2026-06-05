@@ -204,7 +204,7 @@ func (h *Handler) resolveOrCloneRepo(ctx context.Context, workspaceID string) (*
 	if err != nil {
 		return nil, err
 	}
-	return h.taskSvc.FindOrCreateRepository(ctx, &taskservice.FindOrCreateRepositoryRequest{
+	repo, _, err := h.taskSvc.FindOrCreateRepository(ctx, &taskservice.FindOrCreateRepositoryRequest{
 		WorkspaceID:   workspaceID,
 		Provider:      repoProvider,
 		ProviderOwner: repoOwner,
@@ -212,6 +212,7 @@ func (h *Handler) resolveOrCloneRepo(ctx context.Context, workspaceID string) (*
 		DefaultBranch: defaultBranch,
 		LocalPath:     localPath,
 	})
+	return repo, err
 }
 
 // findKandevRepoByLocalRemote returns the first repo with a local path whose

@@ -18,6 +18,15 @@ type TaskRepositoryInput struct {
 	Name           string `json:"name,omitempty"`
 	DefaultBranch  string `json:"default_branch,omitempty"`
 	GitHubURL      string `json:"github_url,omitempty"`
+
+	// ResolveProviderDefaults opts the GitHub-URL resolution path into a
+	// synchronous default-branch probe (git ls-remote --symref) when neither
+	// the input nor the existing workspace repo carries one. Set only by
+	// callers that have no downstream backfill (e.g. add_branch_to_task on a
+	// live worktree-executor task — no executor relaunch will run
+	// backfillRepoDefaultBranch). Left zero by create_task so the pinned
+	// "empty default_branch is filled at clone time" contract stays intact.
+	ResolveProviderDefaults bool `json:"-"`
 }
 
 // CreateTaskRequest contains the data for creating a new task

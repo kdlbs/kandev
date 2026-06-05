@@ -8,6 +8,9 @@ vi.mock("@/lib/local-storage", () => ({
   getEnvMaximizeState: vi.fn(() => null),
   setEnvMaximizeState: vi.fn(),
   removeEnvMaximizeState: vi.fn(),
+  getGlobalSidebarWidth: vi.fn(() => null),
+  setGlobalSidebarWidth: vi.fn(),
+  clearGlobalSidebarWidth: vi.fn(),
 }));
 
 vi.mock("@/lib/layout/panel-portal-manager", () => ({
@@ -73,16 +76,21 @@ describe("switchEnvLayout — root fix for terminal/layout swapping", () => {
     expect(useDockviewStore.getState().currentLayoutEnvId).toBe("env-new");
   });
 
-  it("first adoption (no previous env) just records the new env", () => {
+  it("first adoption applies the env's layout without overwriting it or releasing portals", () => {
     const api = makeMockApi();
     useDockviewStore.setState({ api, currentLayoutEnvId: null });
 
     useDockviewStore.getState().switchEnvLayout(null, "env-first", "session-Y");
 
-    // First adoption keeps existing layout, no portal release on the
-    // (empty) outgoing env.
+    // No outgoing env to save/release.
     expect(panelPortalManager.releaseByEnv).not.toHaveBeenCalled();
     expect(useDockviewStore.getState().currentLayoutEnvId).toBe("env-first");
+    // Regression: the old "just adopt onReady's layout" shortcut persisted the
+    // stale global-fallback layout into the new env via setEnvLayout(newEnvId,
+    // toJSON()), overwriting any real saved layout and giving fresh tasks the
+    // previous env's proportions. First adoption must apply the env's layout
+    // (defaults here, since getEnvLayout is mocked null), never persist over it.
+    expect(setEnvLayout).not.toHaveBeenCalledWith("env-first", expect.anything());
   });
 
   it("does nothing when api is unset", () => {

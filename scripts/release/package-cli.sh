@@ -18,11 +18,11 @@ OUT_DIR="$ROOT_DIR/dist/kandev/cli"
 echo "Building CLI for release bundle..."
 
 # Build TypeScript
-pnpm -C "$ROOT_DIR/apps" --filter kandev build
+(cd "$ROOT_DIR/apps" && pnpm --filter kandev build)
 echo "  TypeScript build complete"
 
 # Bundle with esbuild (inlines tree-kill and all other deps)
-pnpm -C "$ROOT_DIR/apps/cli" bundle
+(cd "$ROOT_DIR/apps" && pnpm --filter kandev bundle)
 echo "  esbuild bundle complete"
 
 # Copy artifacts into dist/kandev/cli/

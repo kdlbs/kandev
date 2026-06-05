@@ -91,6 +91,9 @@ func (m *mockAgentManager) ResetAgentContext(ctx context.Context, agentExecution
 func (m *mockAgentManager) SetSessionModelBySessionID(_ context.Context, _, _ string) error {
 	return errors.New("not supported")
 }
+func (m *mockAgentManager) SetSessionModeBySessionID(_ context.Context, _, _ string) error {
+	return errors.New("not supported")
+}
 
 func (m *mockAgentManager) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
 	return false
@@ -203,6 +206,25 @@ func (r *testTaskRepository) UpdateTaskState(ctx context.Context, taskID string,
 	}
 	task.State = state
 	return nil
+}
+
+func (r *testTaskRepository) UpdateTaskStateIfCurrentIn(
+	_ context.Context, taskID string, state v1.TaskState, allowed []v1.TaskState,
+) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	task, exists := r.tasks[taskID]
+	if !exists {
+		return false, fmt.Errorf("%w: %s", taskrepo.ErrTaskNotFound, taskID)
+	}
+	for _, candidate := range allowed {
+		if task.State != candidate {
+			continue
+		}
+		task.State = state
+		return true, nil
+	}
+	return false, nil
 }
 
 func createTestLogger() *logger.Logger {

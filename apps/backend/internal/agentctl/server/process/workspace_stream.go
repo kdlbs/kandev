@@ -20,6 +20,14 @@ func (wt *WorkspaceTracker) SubscribeWorkspaceStream() types.WorkspaceStreamSubs
 // process Manager to fan out a single client subscription across multiple
 // per-repo trackers (multi-repo task roots) without giving the client a
 // channel per tracker.
+//
+// Before replaying, run a fresh git status update if the cached snapshot may be
+// stale. The cache can lag the working tree when an agent committed via its
+// own shell tool (which bypasses GitOperator) while polling was paused or in
+// slow mode, or in the brief window between a HEAD-changing operation and the
+// next poll tick. Without this refresh, the new subscriber sees the old
+// "file=modified" state and only the next poll tick (up to ~30s away in slow
+// mode, never in paused mode) corrects it.
 func (wt *WorkspaceTracker) AttachWorkspaceStreamSubscriber(sub types.WorkspaceStreamSubscriber) {
 	wt.workspaceSubMu.Lock()
 	wt.workspaceStreamSubscribers[sub] = struct{}{}
@@ -36,8 +44,25 @@ func (wt *WorkspaceTracker) AttachWorkspaceStreamSubscriber(sub types.WorkspaceS
 		return
 	}
 
-	// Replay current git status so the new subscriber doesn't have to wait for
-	// the next poll tick.
+	// Refresh the cache opportunistically before replaying. Use TryLock so a
+	// concurrent poll/refresh doesn't block the attach; in that case we fall
+	// through to replaying whatever's cached, which is still no worse than
+	// the previous behaviour. We deliberately don't go through
+	// tryUpdateGitStatus here because its broadcast would (a) duplicate the
+	// manual replay below for this subscriber and (b) push a redundant frame
+	// to every already-attached subscriber.
+	//
+	// Use the tracker's cancellable context (not context.Background) so
+	// Stop() can kill an in-flight `git status` here without waiting it out.
+	if wt.updateMu.TryLock() {
+		if status, err := wt.getGitStatus(wt.cancelCtx); err == nil {
+			wt.mu.Lock()
+			wt.currentStatus = status
+			wt.mu.Unlock()
+		}
+		wt.updateMu.Unlock()
+	}
+
 	wt.mu.RLock()
 	currentStatus := wt.currentStatus
 	wt.mu.RUnlock()
@@ -106,6 +131,10 @@ func (wt *WorkspaceTracker) notifyWorkspaceStreamGitCommit(commit *types.GitComm
 
 // NotifyGitCommit notifies all subscribers about a new git commit.
 // It also updates the cached HEAD SHA to prevent polling from re-detecting the same commit.
+// Callers that mutate the working tree are responsible for refreshing
+// currentStatus separately (see GitOperator's triggerRefresh) — keeping that
+// responsibility on the caller avoids implicit blocking inside this Notify*
+// path, which is otherwise a fast event emit.
 func (wt *WorkspaceTracker) NotifyGitCommit(commit *types.GitCommitNotification) {
 	// Update cached HEAD to the new commit SHA so polling doesn't re-detect it
 	if commit.CommitSHA != "" {

@@ -134,7 +134,38 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 	if req.BaseBranch != "" {
 		metadata[MetadataKeyBaseBranch] = req.BaseBranch
 	}
+	if branches := collectBaseBranches(req); len(branches) > 0 {
+		metadata[MetadataKeyBaseBranches] = branches
+	}
 	return metadata
+}
+
+// collectBaseBranches builds the per-repo {RepositoryName → base_branch}
+// map that agentctl reads to scope diff stats. Single-repo legacy launches
+// are recorded under the empty key "" so single-repo trackers (which have
+// no repositoryName) still find their value. Repos missing a base_branch
+// are skipped so the existing fallback list applies to them.
+func collectBaseBranches(req *LaunchRequest) map[string]string {
+	specs := req.RepoSpecs()
+	if len(specs) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(specs)+1)
+	for _, spec := range specs {
+		if spec.BaseBranch == "" {
+			continue
+		}
+		out[spec.RepoName] = spec.BaseBranch
+	}
+	if req.BaseBranch != "" {
+		if _, ok := out[""]; !ok {
+			out[""] = req.BaseBranch
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // agentCommands holds the initial and continue command strings for an agent execution.
@@ -153,7 +184,7 @@ func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfil
 	if profileInfo != nil {
 		model = profileInfo.Model
 		autoApprove = profileInfo.AutoApprove
-		permissionValues["auto_approve"] = profileInfo.AutoApprove
+		permissionValues[agents.PermissionKeyAutoApprove] = profileInfo.AutoApprove
 		permissionValues["allow_indexing"] = profileInfo.AllowIndexing
 		permissionValues["dangerously_skip_permissions"] = profileInfo.DangerouslySkipPermissions
 		tokens, err := cliflags.Resolve(profileInfo.CLIFlags)
@@ -603,6 +634,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 		PullBeforeWorktree:   req.PullBeforeWorktree,
 		TaskDirName:          req.TaskDirName,
 		RepoName:             req.RepoName,
+		BranchSlug:           req.BranchSlug,
 		Env:                  req.Env,
 	}
 	// Multi-repo: forward the repo list when the launch request carries one.
@@ -627,6 +659,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 				WorktreeBranchPrefix: r.WorktreeBranchPrefix,
 				PullBeforeWorktree:   r.PullBeforeWorktree,
 				RepoSetupScript:      setup,
+				BranchSlug:           r.BranchSlug,
 			})
 		}
 		prepReq.Repositories = specs

@@ -121,8 +121,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
     onRowBranchChange,
     onAgentProfileChange,
     onExecutorProfileChange,
-    onToggleGitHubUrl,
-    onGitHubUrlChange,
+    onToggleRemote,
     onToggleFreshBranch,
     workflowAgentLocked,
     repositories,
@@ -130,7 +129,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
     isLocalExecutor,
   } = props;
   const showTaskName = (isCreateMode || isEditMode) && !isTaskStarted;
-  const taskNameAutoFocus = !isEditMode && !fs.useGitHubUrl;
+  const taskNameAutoFocus = !isEditMode && !fs.useRemote;
   return (
     <>
       <RepoChipsRow
@@ -140,8 +139,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
         workspaceId={workspaceId}
         onRowRepositoryChange={onRowRepositoryChange}
         onRowBranchChange={onRowBranchChange}
-        onToggleGitHubUrl={onToggleGitHubUrl}
-        onGitHubUrlChange={onGitHubUrlChange}
+        onToggleRemote={onToggleRemote}
         freshBranchAvailable={freshBranchAvailable}
         freshBranchEnabled={fs.freshBranchEnabled}
         onToggleFreshBranch={onToggleFreshBranch}
@@ -170,6 +168,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
         aboveDescriptionSlot={props.aboveDescriptionSlot}
         extraFormSlot={props.extraFormSlot}
         autoFocusDescription={!isTaskStarted && !(showTaskName && taskNameAutoFocus)}
+        onVoiceAutoSend={props.onVoiceAutoSend}
       />
       <CreateModeSelectors
         isTaskStarted={isTaskStarted}
@@ -203,6 +202,7 @@ function SessionModeBody(props: DialogFormBodyProps) {
         enhance={props.enhance}
         workspaceId={props.workspaceId}
         onJiraImport={props.onJiraImport}
+        onVoiceAutoSend={props.onVoiceAutoSend}
       />
       <SessionSelectors
         agentProfileOptions={props.agentProfileOptions}
@@ -323,11 +323,9 @@ function useSubmitHandlersWiring({
     repositories: fs.repositories,
     discoveredRepositories: fs.discoveredRepositories,
     workspaceRepositories,
-    useGitHubUrl: fs.useGitHubUrl,
-    githubUrl: fs.githubUrl,
-    githubPrHeadBranch: fs.githubPrHeadBranch,
-    githubPrBaseBranch: fs.githubPrBaseBranch,
-    githubBranch: fs.githubBranch,
+    useRemote: fs.useRemote,
+    remoteRepos: fs.remoteRepos,
+    prInfoByUrl: fs.prInfoByUrl,
     agentProfileId: computed.effectiveAgentProfileId,
     executorId: fs.executorId,
     executorProfileId: fs.executorProfileId,
@@ -344,7 +342,7 @@ function useSubmitHandlersWiring({
     setHasDescription: fs.setHasDescription,
     setTaskName: fs.setTaskName,
     setRepositories: fs.setRepositories,
-    setGitHubBranch: fs.setGitHubBranch,
+    setRemoteRepos: fs.setRemoteRepos,
     setAgentProfileId: fs.setAgentProfileId,
     setExecutorId: fs.setExecutorId,
     setSelectedWorkflowId: fs.setSelectedWorkflowId,
@@ -400,6 +398,8 @@ export function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     repositories,
     repositoriesLoading,
     agentProfiles,
+    compatibleAgentProfiles: computed.compatibleAgentProfiles,
+    authLoaded: computed.authLoaded,
     executors,
     workspaceDefaults: computed.workspaceDefaults,
     toast,
@@ -429,7 +429,7 @@ export function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
   // can hold any number of repos; we hide the toggle whenever the question
   // ("which repo do we discard local changes in?") becomes ambiguous.
   const freshBranchAvailable =
-    !fs.useGitHubUrl && computed.isLocalExecutor && fs.repositories.length === 1;
+    !fs.useRemote && computed.isLocalExecutor && fs.repositories.length === 1;
   return {
     fs,
     isSessionMode,
@@ -471,8 +471,24 @@ function useGuardedSubmit(
   );
 }
 
+// Synthetic submit event used by the voice auto-send path. Calling the form
+// handler directly (instead of `form.requestSubmit()`) matches the chat
+// composer's pattern and avoids the Safari < 16 gap where `requestSubmit` is
+// missing on `HTMLFormElement`. `guardedHandleSubmit` only reads
+// `preventDefault` off the event, so a stubbed shape is sufficient.
+const VOICE_SUBMIT_EVENT = { preventDefault: () => {} } as unknown as FormEvent;
+
 export function TaskCreateDialog(props: TaskCreateDialogProps) {
   const setup = useTaskCreateDialogSetup(props);
+  const { guardedHandleSubmit } = setup;
+  // Voice auto-send invokes the same submit handler as the in-form Submit
+  // button. Every existing validation gate (missing title/repo/branch/agent,
+  // `submitBlockedReason`, in-flight create) still applies because they live
+  // inside `handleSubmit` itself, so a dictation with incomplete fields
+  // silently no-ops rather than creating a malformed task.
+  const handleVoiceAutoSend = useCallback(() => {
+    guardedHandleSubmit(VOICE_SUBMIT_EVENT);
+  }, [guardedHandleSubmit]);
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogContent
@@ -487,8 +503,11 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
             initialTitle={props.initialValues?.title}
           />
         </DialogHeader>
-        <form onSubmit={setup.guardedHandleSubmit} className="flex flex-col gap-4 overflow-hidden">
-          <DialogFormBody {...buildDialogFormBodyProps(setup, props)} />
+        <form onSubmit={guardedHandleSubmit} className="flex flex-col gap-4 overflow-hidden">
+          <DialogFormBody
+            {...buildDialogFormBodyProps(setup, props)}
+            onVoiceAutoSend={handleVoiceAutoSend}
+          />
           <DialogFooter className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2">
             <TaskCreateDialogFooter {...buildDialogFooterProps(setup, props)} />
           </DialogFooter>

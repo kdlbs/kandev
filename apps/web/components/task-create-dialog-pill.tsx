@@ -23,6 +23,14 @@ export type PillOption = {
   renderLabel?: () => React.ReactNode;
 };
 
+/**
+ * `Pill` wraps cmdk's `Command` / `CommandInput` / `CommandList`. Its popover
+ * body only supports cmdk children (`CommandItem`, etc.) — keyboard nav and
+ * focus are routed through cmdk. If you need a popover with mixed content
+ * (search list + a free-form `<input>`, banners, etc.), build a custom
+ * `Popover` from `@kandev/ui/popover` instead of warping `Pill`.
+ */
+
 type PillProps = {
   icon: React.ReactNode;
   value: string;

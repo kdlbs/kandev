@@ -21,6 +21,7 @@ import type {
   UserSettingsResponse,
   DynamicModelsResponse,
 } from "@/lib/types/http";
+import type { VoiceModeSettings } from "@/lib/types/http-voice";
 
 // User settings
 export async function fetchUserSettings(options?: ApiRequestOptions) {
@@ -52,6 +53,7 @@ export async function updateUserSettings(
     terminal_font_family?: string;
     terminal_font_size?: number;
     changes_panel_layout?: "flat" | "tree";
+    voice_mode?: VoiceModeSettings;
   },
   options?: ApiRequestOptions,
 ) {

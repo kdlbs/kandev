@@ -165,11 +165,19 @@ func (m *Manager) IsShuttingDown() bool {
 	return m.shuttingDown.Load()
 }
 
+// closeStopCh closes the manager shutdown channel at most once.
+func (m *Manager) closeStopCh() {
+	m.stopOnce.Do(func() { close(m.stopCh) })
+}
+
 // Stop stops the lifecycle manager and releases resources held by executors.
 func (m *Manager) Stop() error {
 	m.logger.Info("stopping lifecycle manager")
 
-	close(m.stopCh)
+	m.closeStopCh()
+	if m.streamManager != nil {
+		m.streamManager.Wait()
+	}
 	m.wg.Wait()
 
 	// Close executor backends that hold resources (e.g., Docker SDK client).

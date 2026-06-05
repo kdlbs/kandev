@@ -11,7 +11,20 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/kandev/kandev/internal/common/subproc"
 )
+
+// ghSearchReposPath is the GitHub REST search-repositories path that gh CLI
+// invocations target via `gh api`. Centralised to keep the search-bucket
+// rate-limit dispatch (`resourceForGHArgs`) and the repo search helpers in
+// sync.
+const ghSearchReposPath = "search/repositories"
+
+// ghAccessibleReposPath is the GET /user/repos endpoint (with affiliation +
+// sort + per_page baked in) that backs ListAccessibleRepos. It returns a flat
+// JSON array on the core REST quota, replacing the per-org search fan-out.
+const ghAccessibleReposPathFmt = "/user/repos?affiliation=%s&sort=pushed&per_page=%d"
 
 // GHClient implements Client using the gh CLI.
 type GHClient struct {
@@ -113,15 +126,16 @@ func (c *GHClient) IsAuthenticated(ctx context.Context) (bool, error) {
 
 // RunAuthDiagnostics executes gh auth status and captures the raw output for troubleshooting.
 func (c *GHClient) RunAuthDiagnostics(ctx context.Context) *AuthDiagnostics {
-	ctx, cancel := withDefaultGHTimeout(ctx)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "gh", "auth", "status", "--hostname", "github.com")
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	runErr, execCtxErr := subproc.RunGHAfterAcquire(ctx, resolveGHExecTimeout(ctx), func(execCtx context.Context) *exec.Cmd {
+		cmd := exec.CommandContext(execCtx, "gh", "auth", "status", "--hostname", "github.com")
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		return cmd
+	})
 	exitCode := 0
-	if err := cmd.Run(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+	if runErr != nil {
+		if exitErr, ok := runErr.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		} else {
 			exitCode = -1
@@ -130,6 +144,17 @@ func (c *GHClient) RunAuthDiagnostics(ctx context.Context) *AuthDiagnostics {
 	output := stderr.String()
 	if output == "" {
 		output = stdout.String()
+	}
+	// When acquire/context fails before gh runs (or the exec is killed by
+	// the per-command deadline), both buffers can be empty. Surface the
+	// underlying error so the diagnostics panel doesn't show a blank
+	// "command failed with exit code -1" with no explanation.
+	if output == "" && runErr != nil {
+		if execCtxErr != nil {
+			output = fmt.Sprintf("gh auth status did not run: %v (context: %v)", runErr, execCtxErr)
+		} else {
+			output = fmt.Sprintf("gh auth status did not run: %v", runErr)
+		}
 	}
 	return &AuthDiagnostics{
 		Command:  "gh auth status --hostname github.com",
@@ -337,10 +362,8 @@ func (c *GHClient) SearchOrgRepos(ctx context.Context, org, query string, limit 
 	if query != "" {
 		q += " " + query
 	}
-	if limit <= 0 {
-		limit = 20
-	}
-	out, err := c.run(ctx, "api", "search/repositories",
+	limit = clampRepoSearchLimit(limit)
+	out, err := c.run(ctx, "api", ghSearchReposPath,
 		"-X", "GET",
 		"-f", "q="+q,
 		"-f", fmt.Sprintf("per_page=%d", limit),
@@ -351,14 +374,83 @@ func (c *GHClient) SearchOrgRepos(ctx context.Context, org, query string, limit 
 	return parseGHSearchRepos(out)
 }
 
+func (c *GHClient) ListUserRepos(ctx context.Context, query string, limit int) ([]GitHubRepo, error) {
+	limit = clampRepoSearchLimit(limit)
+	login, err := c.GetAuthenticatedUser(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list user repos: %w", err)
+	}
+	args := buildUserReposGHArgs(login, query, limit)
+	out, err := c.run(ctx, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list user repos: %w", err)
+	}
+	return parseGHSearchRepos(out)
+}
+
+// buildUserReposGHArgs constructs the `gh api search/repositories` argv used
+// to list repos for the authenticated user. Keeping this pure makes the
+// endpoint + qualifier construction unit-testable without spawning gh. The
+// `q` value mirrors the PAT path (`user:<login> <query>`) so both clients
+// honour the same GitHub search syntax (e.g. `language:go`, `in:name`).
+// Callers must clamp `limit` via clampRepoSearchLimit beforehand.
+func buildUserReposGHArgs(login, query string, limit int) []string {
+	q := "user:" + login
+	if query != "" {
+		q += " " + query
+	}
+	return []string{
+		"api", ghSearchReposPath,
+		"-X", "GET",
+		"-f", "q=" + q,
+		"-f", fmt.Sprintf("per_page=%d", limit),
+		"--jq", ".items",
+	}
+}
+
+// ListAccessibleRepos lists every repo the authenticated user can access via a
+// single `gh api /user/repos` call on the core REST quota. The endpoint returns
+// a flat JSON array (parsed by parseGHSearchRepos, which already decodes a
+// top-level array). No --paginate: one page of up to 100 is what the picker
+// needs (the frontend caps at 100 and filters client-side).
+//
+// query is a BEST-EFFORT substring filter over only that single un-paginated
+// page — a match beyond the cap returns nothing. The frontend does the
+// canonical client-side filtering, so this server filter is just optional
+// narrowing; do not rely on it for completeness.
+func (c *GHClient) ListAccessibleRepos(ctx context.Context, query string, limit int) ([]GitHubRepo, error) {
+	limit = clampRepoSearchLimit(limit)
+	out, err := c.run(ctx, buildAccessibleReposGHArgs(limit)...)
+	if err != nil {
+		return nil, fmt.Errorf("list accessible repos: %w", err)
+	}
+	repos, err := parseGHSearchRepos(out)
+	if err != nil {
+		return nil, err
+	}
+	return filterReposByQuery(repos, query), nil
+}
+
+// buildAccessibleReposGHArgs constructs the `gh api /user/repos?...` argv for
+// ListAccessibleRepos. Keeping it pure makes the endpoint/query construction
+// unit-testable without spawning gh. Callers must clamp `limit` via
+// clampRepoSearchLimit beforehand.
+func buildAccessibleReposGHArgs(limit int) []string {
+	endpoint := fmt.Sprintf(ghAccessibleReposPathFmt, accessibleReposAffiliation, limit)
+	return []string{"api", endpoint}
+}
+
 func parseGHSearchRepos(data string) ([]GitHubRepo, error) {
 	var items []struct {
 		FullName string `json:"full_name"`
 		Owner    struct {
 			Login string `json:"login"`
 		} `json:"owner"`
-		Name    string `json:"name"`
-		Private bool   `json:"private"`
+		Name          string    `json:"name"`
+		Private       bool      `json:"private"`
+		DefaultBranch string    `json:"default_branch"`
+		Description   string    `json:"description"`
+		PushedAt      time.Time `json:"pushed_at"`
 	}
 	if err := json.Unmarshal([]byte(data), &items); err != nil {
 		return nil, fmt.Errorf("parse search repos: %w", err)
@@ -366,10 +458,16 @@ func parseGHSearchRepos(data string) ([]GitHubRepo, error) {
 	repos := make([]GitHubRepo, len(items))
 	for i, item := range items {
 		repos[i] = GitHubRepo{
-			FullName: item.FullName,
-			Owner:    item.Owner.Login,
-			Name:     item.Name,
-			Private:  item.Private,
+			FullName:      item.FullName,
+			Owner:         item.Owner.Login,
+			Name:          item.Name,
+			Private:       item.Private,
+			DefaultBranch: item.DefaultBranch,
+			Description:   item.Description,
+		}
+		if !item.PushedAt.IsZero() {
+			t := item.PushedAt
+			repos[i].PushedAt = &t
 		}
 	}
 	return repos, nil
@@ -753,46 +851,78 @@ func (c *GHClient) DeleteGist(ctx context.Context, gistID string) error {
 
 const ghCLITimeout = 30 * time.Second
 
-// withDefaultGHTimeout applies a 30s timeout if the context has no deadline.
-func withDefaultGHTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
-	if _, ok := ctx.Deadline(); ok {
-		return ctx, func() {}
+// resolveGHExecTimeout returns the per-command exec budget used by
+// run / runWithStdin. Honours the caller's ctx deadline when set (so a
+// short-lived WS request stays bounded by the request deadline), but
+// caps the budget at ghCLITimeout when the deadline is further out or
+// absent. Used by the acquire-then-derive-timeout path so a queued
+// waiter's exec timer starts AFTER it gets the throttle slot.
+func resolveGHExecTimeout(ctx context.Context) time.Duration {
+	if dl, ok := ctx.Deadline(); ok {
+		remaining := time.Until(dl)
+		if remaining < ghCLITimeout {
+			return remaining
+		}
 	}
-	return context.WithTimeout(ctx, ghCLITimeout)
+	return ghCLITimeout
 }
 
 // run executes a gh CLI command and returns its stdout output.
 // Stderr is captured separately to avoid contaminating JSON output.
-// A default 30s timeout is applied if the context has no deadline.
+// A 30s per-command exec timeout is applied AFTER the gh throttle slot
+// is acquired (acquire-then-derive-timeout). Pre-fix the timer started
+// before Acquire, so a queued waiter inherited a deadline that had
+// already partly elapsed against throttle queue time — producing the
+// `signal: killed` + `context deadline exceeded` cascade in the
+// SyncWatchesBatched storm logs.
 func (c *GHClient) run(ctx context.Context, args ...string) (string, error) {
-	ctx, cancel := withDefaultGHTimeout(ctx)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "gh", args...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		c.inspectRateStderr(args, stderr.String())
-		return stdout.String(), fmt.Errorf("gh %s: %w: %s", args[0], err, stderr.String())
-	}
-	return stdout.String(), nil
+	return c.runGH(ctx, nil, args...)
 }
 
 // runWithStdin is like run but pipes stdin into the gh CLI process.
 // Useful for `gh api --input -` calls where the body comes from JSON.
 func (c *GHClient) runWithStdin(ctx context.Context, stdin []byte, args ...string) (string, error) {
-	ctx, cancel := withDefaultGHTimeout(ctx)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "gh", args...)
-	cmd.Stdin = bytes.NewReader(stdin)
+	return c.runGH(ctx, stdin, args...)
+}
+
+// runGH is the shared body of run / runWithStdin — both apply the same
+// acquire-then-derive-timeout ordering, the same stderr/rate-limit
+// inspection, and the same error wrap. The only delta is whether stdin
+// is wired (`stdin != nil`).
+func (c *GHClient) runGH(ctx context.Context, stdin []byte, args ...string) (string, error) {
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	execTimeout := resolveGHExecTimeout(ctx)
+	runErr, execCtxErr := subproc.RunGHAfterAcquire(ctx, execTimeout, func(execCtx context.Context) *exec.Cmd {
+		cmd := exec.CommandContext(execCtx, "gh", args...)
+		if stdin != nil {
+			cmd.Stdin = bytes.NewReader(stdin)
+		}
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		return cmd
+	})
+	if runErr != nil {
+		// Surface execCtx timeouts AND cancellations as the canonical
+		// context error so callers (FetchRateLimit, IsAuthenticated,
+		// share.IsAlreadyGone) can still errors.Is(err, context.X). The
+		// runErr from cmd.Run on a killed child is `signal: killed`,
+		// which loses both classifier signals that pre-fix code relied on.
+		if execCtxErr != nil && (errors.Is(execCtxErr, context.DeadlineExceeded) || errors.Is(execCtxErr, context.Canceled)) {
+			return stdout.String(), fmt.Errorf("gh %s: %w", firstArg(args), execCtxErr)
+		}
 		c.inspectRateStderr(args, stderr.String())
-		return stdout.String(), fmt.Errorf("gh %s: %w: %s", args[0], err, stderr.String())
+		return stdout.String(), fmt.Errorf("gh %s: %w: %s", firstArg(args), runErr, stderr.String())
 	}
 	return stdout.String(), nil
+}
+
+// firstArg returns args[0] when present, else "<no-args>". Used for error
+// messages when the semaphore acquisition fails before we even exec gh.
+func firstArg(args []string) string {
+	if len(args) == 0 {
+		return "<no-args>"
+	}
+	return args[0]
 }
 
 // ghRateLimitResponse mirrors the GET /rate_limit JSON shape so we can seed

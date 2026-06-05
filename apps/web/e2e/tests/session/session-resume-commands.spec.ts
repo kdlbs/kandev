@@ -66,7 +66,7 @@ test.describe("Slash commands after session resume", () => {
     await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
       timeout: 30_000,
     });
-    await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
+    await session.waitForChatIdle({ timeout: 15_000 });
 
     // 3. Verify slash commands work before restart
     await expectSlashCommandsVisible(testPage);
@@ -79,7 +79,7 @@ test.describe("Slash commands after session resume", () => {
     await session.waitForLoad();
 
     // 6. Wait for auto-resume to complete
-    await expect(session.idleInput()).toBeVisible({ timeout: 60_000 });
+    await session.waitForChatIdle({ timeout: 60_000 });
     await expect(session.chat.getByText("Resumed agent Mock", { exact: false })).toBeVisible({
       timeout: 15_000,
     });
@@ -90,7 +90,7 @@ test.describe("Slash commands after session resume", () => {
     await expect(
       session.chat.getByText("simple mock response", { exact: false }).nth(1),
     ).toBeVisible({ timeout: 30_000 });
-    await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
+    await session.waitForChatIdle({ timeout: 15_000 });
 
     // 8. Verify slash commands work after resume
     await expectSlashCommandsVisible(testPage);

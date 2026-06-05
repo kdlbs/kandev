@@ -23,6 +23,7 @@ import {
   buildLogDownloadUrl,
   fetchUpdates,
   checkUpdates,
+  applyUpdate,
   fetchSystemJob,
 } from "./system-api";
 
@@ -260,5 +261,15 @@ describe("updates", () => {
     await checkUpdates();
     expect(lastCall().url).toBe(`${BASE}/updates/check`);
     expect(method()).toBe("POST");
+  });
+
+  it("applyUpdate POSTs /updates/apply with confirmation", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ job_id: "self-update-1" }));
+    const res = await applyUpdate("UPDATE");
+    const { url, init } = lastCall();
+    expect(url).toBe(`${BASE}/updates/apply`);
+    expect((init?.method ?? "").toUpperCase()).toBe("POST");
+    expect(init?.body).toBe(JSON.stringify({ confirm: "UPDATE" }));
+    expect(res.job_id).toBe("self-update-1");
   });
 });

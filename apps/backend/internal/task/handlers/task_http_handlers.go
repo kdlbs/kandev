@@ -80,8 +80,14 @@ func (h *TaskHandlers) httpListTasksByWorkspace(c *gin.Context) {
 	})
 }
 
-// buildTaskDTOsWithSessionInfo converts tasks to DTOs enriched with primary session IDs,
-// session counts, and review status using bulk queries.
+// buildTaskDTOsWithSessionInfo converts tasks to DTOs enriched with primary
+// session IDs, session counts, and review status. Uses BatchGetSessionsForTasks
+// to derive the primary session ID and session count in a single round trip,
+// then calls GetPrimarySessionInfoForTasks for the executor type/name fields
+// — those are populated by a LEFT JOIN to the executors table inside that
+// method (the persisted ExecutorSnapshot JSON uses different keys), so the
+// batch loader alone can't supply them without a regression. Two queries
+// total, down from three pre-batch.
 func buildTaskDTOsWithSessionInfo(ctx context.Context, svc *service.Service, tasks []*models.Task) ([]dto.TaskDTO, error) {
 	if len(tasks) == 0 {
 		return []dto.TaskDTO{}, nil
@@ -90,11 +96,7 @@ func buildTaskDTOsWithSessionInfo(ctx context.Context, svc *service.Service, tas
 	for i, t := range tasks {
 		taskIDs[i] = t.ID
 	}
-	primarySessionMap, err := svc.GetPrimarySessionIDsForTasks(ctx, taskIDs)
-	if err != nil {
-		return nil, err
-	}
-	sessionCountMap, err := svc.GetSessionCountsForTasks(ctx, taskIDs)
+	sessionsByTask, err := svc.BatchGetSessionsForTasks(ctx, taskIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -104,13 +106,18 @@ func buildTaskDTOsWithSessionInfo(ctx context.Context, svc *service.Service, tas
 	}
 	result := make([]dto.TaskDTO, 0, len(tasks))
 	for _, task := range tasks {
+		sessions := sessionsByTask[task.ID]
 		var primarySessionID *string
-		if sid, ok := primarySessionMap[task.ID]; ok {
-			primarySessionID = &sid
+		for _, s := range sessions {
+			if s.IsPrimary {
+				id := s.ID
+				primarySessionID = &id
+				break
+			}
 		}
 		var sessionCount *int
-		if count, ok := sessionCountMap[task.ID]; ok {
-			sessionCount = &count
+		if n := len(sessions); n > 0 {
+			sessionCount = &n
 		}
 		si := extractSessionInfo(primarySessionInfoMap[task.ID])
 		result = append(result, dto.FromTaskWithSessionInfo(
@@ -900,6 +907,52 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, dto.FromTask(task))
+}
+
+type httpUpdateTaskRepositoryRequest struct {
+	BaseBranch string `json:"base_branch"`
+}
+
+// httpUpdateTaskRepository handles PATCH /tasks/:id/repositories/:repo_id.
+// Today it only mutates base_branch; future per-row fields can be added on
+// httpUpdateTaskRepositoryRequest. Mirrors the WS / MCP paths through the
+// same service method so all three surfaces stay in sync.
+func (h *TaskHandlers) httpUpdateTaskRepository(c *gin.Context) {
+	var body httpUpdateTaskRepositoryRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	taskRepo, err := h.service.UpdateRepositoryBaseBranch(c.Request.Context(), service.UpdateRepositoryBaseBranchRequest{
+		TaskID:           c.Param("id"),
+		TaskRepositoryID: c.Param("repo_id"),
+		BaseBranch:       body.BaseBranch,
+	})
+	if err != nil {
+		if errors.Is(err, service.ErrTaskRepositoryNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		// Distinguish caller-fixable validation failures (required field
+		// missing, unsafe ref name, …) from server-side faults (DB write
+		// errors propagated up from the service). Anything that matches a
+		// known validation message stays at 400; everything else escalates
+		// to 500 so client retries don't mask backend regressions.
+		if isValidationError(err) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		// Avoid echoing raw service errors on the 500 path — DB / IO
+		// failures can carry connection strings, table names, or stack
+		// traces. Log the detail server-side; return an opaque message.
+		h.logger.Error("update task repository failed",
+			zap.String("task_id", c.Param("id")),
+			zap.String("repo_id", c.Param("repo_id")),
+			zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update task repository"})
+		return
+	}
+	c.JSON(http.StatusOK, taskRepo)
 }
 
 type httpMoveTaskRequest struct {

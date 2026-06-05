@@ -411,6 +411,28 @@ func (r *Repository) UpdateResumeToken(ctx context.Context, sessionID, expectedE
 	return nil
 }
 
+// UpdateExecutorRunningStatus narrowly updates the status column.
+// Returns ErrExecutorRunningNotFound when no row exists for the session.
+func (r *Repository) UpdateExecutorRunningStatus(ctx context.Context, sessionID, status string) error {
+	if sessionID == "" {
+		return fmt.Errorf("session_id is required")
+	}
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE executors_running
+		   SET status = ?, updated_at = ?
+		 WHERE session_id = ?
+	`), status, now, sessionID)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("%w for session: %s", models.ErrExecutorRunningNotFound, sessionID)
+	}
+	return nil
+}
+
 func (r *Repository) HasActiveTaskSessionsByExecutor(ctx context.Context, executorID string) (bool, error) {
 	var exists int
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`

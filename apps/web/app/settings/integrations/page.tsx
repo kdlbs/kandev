@@ -2,6 +2,7 @@ import Link from "next/link";
 import {
   IconBrandGithub,
   IconBrandGitlab,
+  IconBrandSentry,
   IconBrandSlack,
   IconHexagon,
   IconTicket,
@@ -32,6 +33,12 @@ const INTEGRATIONS = [
     label: "Linear",
     description: "Personal API key and team defaults.",
     Icon: IconHexagon,
+  },
+  {
+    href: "/settings/integrations/sentry",
+    label: "Sentry",
+    description: "Auth token, org/project defaults, and issue browsing.",
+    Icon: IconBrandSentry,
   },
   {
     href: "/settings/integrations/slack",

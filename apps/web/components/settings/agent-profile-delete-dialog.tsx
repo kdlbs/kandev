@@ -10,7 +10,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@kandev/ui/alert-dialog";
-import type { ActiveSessionInfo } from "@/lib/types/agent-profile-errors";
+import type { ActiveSessionInfo, WatcherReference } from "@/lib/types/agent-profile-errors";
+
+const WATCHER_KIND_LABELS: Record<WatcherReference["kind"], string> = {
+  linear: "Linear",
+  jira: "Jira",
+  github_issue: "GitHub Issues",
+  github_review: "GitHub PR Reviews",
+};
 
 type AgentProfileDeleteConfirmDialogProps = {
   open: boolean;
@@ -46,22 +53,32 @@ export function AgentProfileDeleteConfirmDialog({
   );
 }
 
+// AgentProfileDeleteConflict carries the structured 409 payload from the
+// backend. `open` is separate from the lists so a watcher-only conflict
+// (no active sessions) still pops the dialog.
+export type AgentProfileDeleteConflict = {
+  activeSessions: ActiveSessionInfo[];
+  watchers: WatcherReference[];
+};
+
 type AgentProfileDeleteConflictDialogProps = {
-  activeSessions: ActiveSessionInfo[] | null;
+  conflict: AgentProfileDeleteConflict | null;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
 };
 
 export function AgentProfileDeleteConflictDialog({
-  activeSessions,
+  conflict,
   onOpenChange,
   onConfirm,
 }: AgentProfileDeleteConflictDialogProps) {
-  const tasks = activeSessions?.filter((s) => !s.is_ephemeral) ?? [];
-  const quickChats = activeSessions?.filter((s) => s.is_ephemeral) ?? [];
+  const tasks = conflict?.activeSessions.filter((s) => !s.is_ephemeral) ?? [];
+  const quickChats = conflict?.activeSessions.filter((s) => s.is_ephemeral) ?? [];
+  const watchers = conflict?.watchers ?? [];
+  const watchersByKind = groupWatchersByKind(watchers);
 
   return (
-    <AlertDialog open={!!activeSessions} onOpenChange={onOpenChange}>
+    <AlertDialog open={!!conflict} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Delete agent profile?</AlertDialogTitle>
@@ -92,9 +109,24 @@ export function AgentProfileDeleteConflictDialog({
                   </ul>
                 </div>
               )}
+              {watchers.length > 0 && (
+                <div className="mt-2">
+                  <p className="font-medium text-sm">Watchers (will be disabled):</p>
+                  <ul className="list-disc list-inside mt-1 space-y-0.5">
+                    {Object.entries(watchersByKind).map(([kind, items]) => (
+                      <li key={kind} className="text-sm">
+                        <span className="font-medium">
+                          {WATCHER_KIND_LABELS[kind as WatcherReference["kind"]] ?? kind}:
+                        </span>{" "}
+                        {items.map((w) => w.label || w.id).join(", ")}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <p className="mt-2">
-                These sessions will no longer be able to use this profile. This action cannot be
-                undone.
+                These sessions will no longer be able to use this profile and the listed watchers
+                will be disabled. This action cannot be undone.
               </p>
             </div>
           </AlertDialogDescription>
@@ -111,4 +143,11 @@ export function AgentProfileDeleteConflictDialog({
       </AlertDialogContent>
     </AlertDialog>
   );
+}
+
+function groupWatchersByKind(watchers: WatcherReference[]): Record<string, WatcherReference[]> {
+  return watchers.reduce<Record<string, WatcherReference[]>>((acc, w) => {
+    (acc[w.kind] ??= []).push(w);
+    return acc;
+  }, {});
 }

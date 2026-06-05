@@ -188,7 +188,7 @@ func TestWakeupE2EFullPipeline_BridgeToEventBus(t *testing.T) {
 	})
 
 	// ---- Set up lifecycle Manager with tracking bus ----
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	trackBus := &trackingBus{}
 	// Reach into the manager's event publisher: replace the bus with the
 	// tracker. eventPublisher is the only thing that calls eventBus.Publish.
