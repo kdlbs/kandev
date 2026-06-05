@@ -354,6 +354,12 @@ func (s *Service) ListTaskPRs(ctx context.Context, taskIDs []string) (map[string
 	return s.store.ListTaskPRsByTaskIDs(ctx, taskIDs)
 }
 
+// FindTaskIDsByPRNumber returns the IDs of tasks in a workspace associated with
+// the given PR number. Used by task search to surface a task by its PR number.
+func (s *Service) FindTaskIDsByPRNumber(ctx context.Context, workspaceID string, prNumber int) ([]string, error) {
+	return s.store.ListTaskIDsByPRNumber(ctx, workspaceID, prNumber)
+}
+
 // ListWorkspaceTaskPRs returns all PR associations for a workspace, grouped by
 // task_id. Multi-repo tasks may have more than one PR per task. It returns
 // cached data immediately and triggers background refresh for stale entries.

@@ -21,7 +21,7 @@ func newTestStore(t *testing.T) *Store {
 	}
 	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
 	t.Cleanup(func() { _ = sqlxDB.Close() })
-	if _, err := sqlxDB.Exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, archived_at DATETIME)`); err != nil {
+	if _, err := sqlxDB.Exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, workspace_id TEXT, archived_at DATETIME)`); err != nil {
 		t.Fatalf("create tasks table: %v", err)
 	}
 	store, err := NewStore(sqlxDB, sqlxDB)

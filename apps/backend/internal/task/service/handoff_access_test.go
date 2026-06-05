@@ -19,6 +19,15 @@ func (f *fakeTaskLookup) GetTask(ctx context.Context, id string) (*models.Task, 
 	}
 	return nil, nil
 }
+func (f *fakeTaskLookup) GetTasksByIDs(ctx context.Context, ids []string) ([]*models.Task, error) {
+	var out []*models.Task
+	for _, id := range ids {
+		if t, ok := f.tasks[id]; ok {
+			out = append(out, t)
+		}
+	}
+	return out, nil
+}
 
 func newGraph(tasks ...*models.Task) *fakeTaskLookup {
 	m := make(map[string]*models.Task, len(tasks))
