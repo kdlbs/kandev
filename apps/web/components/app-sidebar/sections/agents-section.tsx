@@ -109,6 +109,7 @@ function AgentRow({ agent }: { agent: AgentProfile }) {
       <span className="flex-1 truncate">{agent.name}</span>
       {isAutoPaused ? (
         <span
+          data-testid="sidebar-agent-paused-badge"
           title={agent.pauseReason}
           className="rounded-full bg-red-500/15 text-red-600 dark:text-red-400 px-1.5 py-0.5 text-[10px] font-medium"
         >

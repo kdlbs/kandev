@@ -81,7 +81,7 @@ export function AppSidebarWorkspacePicker() {
             <DropdownMenuItem
               key={ws.id}
               data-testid={`sidebar-workspace-item-${ws.id}`}
-              onClick={() => handleSelect(ws.id)}
+              onSelect={() => handleSelect(ws.id)}
               className="cursor-pointer gap-2"
             >
               <span className="flex-1 truncate">{ws.name}</span>
@@ -92,9 +92,8 @@ export function AppSidebarWorkspacePicker() {
         <DropdownMenuSeparator />
         <DropdownMenuItem
           className="cursor-pointer gap-2"
-          onClick={() => {
+          onSelect={() => {
             router.push("/office/setup?mode=new");
-            setOpen(false);
           }}
         >
           <IconPlus className="h-3.5 w-3.5" />

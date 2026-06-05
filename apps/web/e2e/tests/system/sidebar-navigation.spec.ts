@@ -16,10 +16,13 @@ test.describe("System sidebar navigation", () => {
   }) => {
     test.setTimeout(120_000);
 
-    // The settings nav is a single-open accordion: a group's sub-entries are
-    // only mounted while that group is the open one. Landing on a System page
-    // opens the System group (route-synced), so its sub-entries are visible.
+    // In the unified AppSidebar the settings nav is a gear-gated takeover, so
+    // open it via the footer gear. It's a single-open accordion: a group's
+    // sub-entries are only mounted while that group is the open one. Landing on
+    // a System page route-syncs the System group open, so its sub-entries show.
     await testPage.goto("/settings/system/status");
+    await testPage.getByTestId("sidebar-settings-gear").click();
+    await expect(testPage.getByTestId("app-sidebar-settings-mode")).toBeVisible();
 
     // Each sub-entry is present in the settings sidebar.
     for (const entry of SYSTEM_ENTRIES) {

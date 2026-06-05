@@ -32,8 +32,9 @@ const SECTION_ROUTE_MAP: Array<{ id: string; matches: (path: string) => boolean 
  * Unified app sidebar mounted at the root layout. Replaces the legacy
  * WorkspaceRail + OfficeSidebar + dockview-embedded sidebar surfaces.
  *
- * Width: w-60 expanded / w-14 collapsed, smooth 300ms transition. On mobile
- * (`absolute md:relative`) it overlays content instead of pushing it.
+ * Width: w-60 expanded / w-14 collapsed, smooth 300ms transition. Desktop-only
+ * (`hidden md:flex`) — mobile surfaces carry their own nav (mobile headers and
+ * menu sheets), so the global rail never overlays mobile content.
  */
 export function AppSidebar() {
   const collapsed = useAppStore((s) => s.appSidebar.collapsed);
@@ -103,8 +104,12 @@ export function AppSidebar() {
       data-testid="app-sidebar"
       data-collapsed={collapsed ? "true" : "false"}
       className={cn(
-        "h-full min-h-0 border-r border-border bg-background flex flex-col shrink-0",
-        "absolute md:relative left-0 top-0 z-30",
+        // Desktop-only: mobile uses its own per-surface nav (mobile headers +
+        // menu sheets), so the global rail is hidden below md to avoid an
+        // always-on overlay covering page content. `md:relative` anchors the
+        // absolute resize handle.
+        "h-full min-h-0 border-r border-border bg-background hidden md:flex flex-col shrink-0",
+        "md:relative",
         "transition-all duration-300 ease-out",
       )}
       style={{
