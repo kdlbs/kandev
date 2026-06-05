@@ -76,6 +76,39 @@ const (
 // SSR reload, alongside the in-memory re-apply on context reset. See issue #1183.
 const SessionMetaKeySessionMode = "session_mode"
 
+// Session restart receipts: classify how an ACP session came back after a
+// backend restart, lifecycle event, or model switch. Written by the
+// orchestrator's ACPSessionCreated handler. Surface to the UI via the normal
+// task-session payload — no separate WS action needed because Metadata is
+// already serialised on every session update.
+const (
+	// SessionMetaKeyRestartKind records the last classification from the
+	// RestartKind* values below.
+	SessionMetaKeyRestartKind = "restart_kind"
+	// SessionMetaKeyRestartGen is a monotonically-increasing counter bumped
+	// on every classified ACP session creation. Lets the UI distinguish
+	// "this is the same run as before" from "this is run #N".
+	SessionMetaKeyRestartGen = "restart_generation"
+)
+
+// RestartKind values mirror the four-way taxonomy in the session-receipts
+// proposal:
+//   - RestartKindResumed: ACP session/load succeeded with the stored token.
+//   - RestartKindFresh:   session/new was called (either no token, or
+//     session/load failed and we fell back).
+//   - RestartKindRebound: backend restart reattached to a still-live agentctl
+//     subprocess; no ACP handshake re-run. Reserved — not yet emitted; the
+//     reattach path lives in manager.GetOrEnsureExecution and will write this
+//     in a follow-up.
+//   - RestartKindStale:   couldn't recover the session at all (createNewSession
+//     also failed); the task is effectively dead until the user retries.
+const (
+	RestartKindResumed = "resumed_stored_session"
+	RestartKindFresh   = "fresh_session"
+	RestartKindRebound = "rebound_same_session"
+	RestartKindStale   = "stale_task"
+)
+
 // Task origin values for the Origin field.
 const (
 	TaskOriginManual        = "manual"

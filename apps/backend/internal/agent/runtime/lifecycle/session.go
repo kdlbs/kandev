@@ -16,6 +16,7 @@ import (
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/appctx"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -52,6 +53,10 @@ type InitializeResult struct {
 	AgentName    string
 	AgentVersion string
 	SessionID    string
+	// RestartKind classifies how the ACP session came into existence.
+	// One of the models.RestartKind* values. Empty string means the
+	// session wasn't classified (Mock provider, no ACP handshake).
+	RestartKind string
 }
 
 // InitializeSession initializes an ACP session with the agent.
@@ -103,16 +108,20 @@ func (sm *SessionManager) InitializeSession(
 		zap.String("agent_version", result.AgentVersion))
 
 	// Step 2: Create or resume ACP session based on configuration
-	sessionID, err := sm.createOrLoadSession(ctx, client, agentConfig, existingSessionID, workspacePath, mcpServers)
+	sessionID, restartKind, err := sm.createOrLoadSession(ctx, client, agentConfig, existingSessionID, workspacePath, mcpServers)
 	if err != nil {
 		return nil, err
 	}
 
 	result.SessionID = sessionID
+	result.RestartKind = restartKind
 	return result, nil
 }
 
 // createOrLoadSession creates a new session or loads an existing one based on agent config.
+// The returned restartKind is one of the models.RestartKind* values and classifies
+// how the session came into existence — see SessionMetaKeyRestartKind in the
+// task/models package for the receipt taxonomy.
 func (sm *SessionManager) createOrLoadSession(
 	ctx context.Context,
 	client *agentctl.Client,
@@ -120,7 +129,7 @@ func (sm *SessionManager) createOrLoadSession(
 	existingSessionID string,
 	workspacePath string,
 	mcpServers []agentctltypes.McpServer,
-) (string, error) {
+) (string, string, error) {
 	rt := agentConfig.Runtime()
 	sm.logger.Debug("createOrLoadSession decision",
 		zap.String("agent_type", agentConfig.ID()),
@@ -130,7 +139,7 @@ func (sm *SessionManager) createOrLoadSession(
 	if rt.SessionConfig.NativeSessionResume && existingSessionID != "" {
 		sessionID, err := sm.loadSession(ctx, client, agentConfig, existingSessionID, mcpServers)
 		if err == nil {
-			return sessionID, nil
+			return sessionID, models.RestartKindResumed, nil
 		}
 		// session/load can fail for reasons that don't justify aborting the
 		// session: agent doesn't support the method (capability mismatch /
@@ -147,9 +156,17 @@ func (sm *SessionManager) createOrLoadSession(
 			zap.Bool("method_not_found", isMethodNotFoundErr(err)),
 			zap.Bool("capability_mismatch", strings.Contains(err.Error(), "LoadSession capability is false")),
 			zap.Bool("session_unknown", isSessionUnknownErr(err)))
-		return sm.createNewSession(ctx, client, agentConfig, workspacePath, mcpServers)
+		sessionID, err = sm.createNewSession(ctx, client, agentConfig, workspacePath, mcpServers)
+		if err != nil {
+			return "", models.RestartKindStale, err
+		}
+		return sessionID, models.RestartKindFresh, nil
 	}
-	return sm.createNewSession(ctx, client, agentConfig, workspacePath, mcpServers)
+	sessionID, err := sm.createNewSession(ctx, client, agentConfig, workspacePath, mcpServers)
+	if err != nil {
+		return "", models.RestartKindStale, err
+	}
+	return sessionID, models.RestartKindFresh, nil
 }
 
 // shouldInjectResumeContext determines if we should inject resume context for this session.
@@ -358,7 +375,7 @@ func (sm *SessionManager) InitializeAndPrompt(
 
 	// Publish session created event
 	if sm.eventPublisher != nil {
-		sm.eventPublisher.PublishACPSessionCreated(execution, result.SessionID)
+		sm.eventPublisher.PublishACPSessionCreated(execution, result.SessionID, result.RestartKind)
 	}
 
 	// Send the task prompt if provided, or mark the execution as ready.

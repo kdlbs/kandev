@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/pkg/agent"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -504,6 +505,9 @@ func TestInitializeSession_CreatesNewSession(t *testing.T) {
 	if result.SessionID != "test-session-123" {
 		t.Errorf("expected session ID 'test-session-123', got %q", result.SessionID)
 	}
+	if result.RestartKind != models.RestartKindFresh {
+		t.Errorf("expected RestartKind %q, got %q", models.RestartKindFresh, result.RestartKind)
+	}
 }
 
 func TestIsMethodNotFoundErr(t *testing.T) {
@@ -587,6 +591,9 @@ func TestInitializeSession_LoadsExistingSession(t *testing.T) {
 	if result.SessionID != "existing-session" {
 		t.Errorf("expected session ID 'existing-session', got %q", result.SessionID)
 	}
+	if result.RestartKind != models.RestartKindResumed {
+		t.Errorf("expected RestartKind %q, got %q", models.RestartKindResumed, result.RestartKind)
+	}
 
 	// Verify that session.load was called (not session.new)
 	actions := mock.getActionLog()
@@ -605,6 +612,101 @@ func TestInitializeSession_LoadsExistingSession(t *testing.T) {
 	}
 	if hasNew {
 		t.Error("did not expect agent.session.new to be called when loading existing session")
+	}
+}
+
+// TestInitializeSession_FreshAfterLoadFailure verifies the fall-back path:
+// session/load reports an error (capability mismatch / unknown session / etc.),
+// the manager retries with session/new, and the resulting receipt is
+// RestartKindFresh — not RestartKindResumed. This is the most common
+// post-incident shape (token persisted, agent CLI no longer recognises it).
+func TestInitializeSession_FreshAfterLoadFailure(t *testing.T) {
+	mock := newMockAgentServer(t)
+	defer mock.Close()
+
+	// Custom handler: session.load returns an error, session.new succeeds.
+	mock.handler = func(msg ws.Message) *ws.Message {
+		switch msg.Action {
+		case "agent.initialize":
+			resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+				"success": true,
+				"agent_info": map[string]string{
+					"name":    "test-agent",
+					"version": "1.0.0",
+				},
+			})
+			return resp
+		case "agent.session.load":
+			resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnknownAction, "session unknown", nil)
+			return resp
+		case "agent.session.new":
+			resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+				"success":    true,
+				"session_id": "new-after-load-fail",
+			})
+			return resp
+		default:
+			resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnknownAction, "unknown action", nil)
+			return resp
+		}
+	}
+
+	log := newSessionTestLogger()
+	sm := NewSessionManager(log, make(chan struct{}))
+
+	client := createTestClient(t, mock.server.URL)
+	defer client.Close()
+
+	ctx := context.Background()
+	if err := client.StreamUpdates(ctx, func(event agentctl.AgentEvent) {}, nil, nil); err != nil {
+		t.Fatalf("failed to connect stream: %v", err)
+	}
+	waitForWSConnected(t, mock)
+
+	agentConfig := &testAgent{
+		id:      "test-agent",
+		enabled: true,
+		runtimeConfig: &agents.RuntimeConfig{
+			Cmd:      agents.NewCommand("test-agent"),
+			Protocol: agent.ProtocolACP,
+			SessionConfig: agents.SessionConfig{
+				NativeSessionResume: true,
+			},
+			ResourceLimits: agents.ResourceLimits{MemoryMB: 512, CPUCores: 0.5, Timeout: time.Hour},
+		},
+	}
+
+	result, err := sm.InitializeSession(ctx, client, agentConfig, "stale-token", "/workspace", nil)
+	if err != nil {
+		t.Fatalf("InitializeSession failed: %v", err)
+	}
+	if result.SessionID != "new-after-load-fail" {
+		t.Errorf("expected session ID 'new-after-load-fail', got %q", result.SessionID)
+	}
+	if result.RestartKind != models.RestartKindFresh {
+		t.Errorf("expected RestartKind %q after load failure, got %q",
+			models.RestartKindFresh, result.RestartKind)
+	}
+
+	// Both actions must have been called: load first (failed), then new.
+	actions := mock.getActionLog()
+	var loadIdx, newIdx = -1, -1
+	for i, a := range actions {
+		if a == "agent.session.load" && loadIdx < 0 {
+			loadIdx = i
+		}
+		if a == "agent.session.new" && newIdx < 0 {
+			newIdx = i
+		}
+	}
+	if loadIdx < 0 {
+		t.Error("expected agent.session.load to be attempted")
+	}
+	if newIdx < 0 {
+		t.Error("expected agent.session.new to follow the failed load")
+	}
+	if loadIdx >= 0 && newIdx >= 0 && loadIdx >= newIdx {
+		t.Errorf("expected session.load before session.new, got order load=%d new=%d", loadIdx, newIdx)
 	}
 }
 

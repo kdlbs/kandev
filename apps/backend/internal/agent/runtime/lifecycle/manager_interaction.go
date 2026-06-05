@@ -710,7 +710,7 @@ func (m *Manager) initializeACPSessionForRestart(
 	execution.ACPSessionID = result.SessionID
 
 	if m.sessionManager.eventPublisher != nil {
-		m.sessionManager.eventPublisher.PublishACPSessionCreated(execution, result.SessionID)
+		m.sessionManager.eventPublisher.PublishACPSessionCreated(execution, result.SessionID, result.RestartKind)
 	}
 
 	// Mark execution as ready. This is a *boot* signal — initializeACPSessionForRestart

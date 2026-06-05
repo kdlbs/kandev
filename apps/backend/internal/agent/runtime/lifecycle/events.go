@@ -100,7 +100,11 @@ func (p *EventPublisher) PublishAgentctlEvent(ctx context.Context, eventType str
 }
 
 // PublishACPSessionCreated publishes an event when an ACP session is created.
-func (p *EventPublisher) PublishACPSessionCreated(execution *AgentExecution, sessionID string) {
+// restartKind classifies how the ACP session came back (one of the
+// models.RestartKind* values, empty if unclassified). It rides on the existing
+// event so the orchestrator can persist the receipt under the same code path
+// that stores the resume token.
+func (p *EventPublisher) PublishACPSessionCreated(execution *AgentExecution, sessionID, restartKind string) {
 	if p.eventBus == nil || sessionID == "" {
 		return
 	}
@@ -111,6 +115,7 @@ func (p *EventPublisher) PublishACPSessionCreated(execution *AgentExecution, ses
 		AgentProfileID:   execution.ID,
 		AgentExecutionID: execution.ID,
 		ACPSessionID:     sessionID,
+		RestartKind:      restartKind,
 	}
 
 	event := bus.NewEvent(events.AgentACPSessionCreated, "agent-manager", payload)

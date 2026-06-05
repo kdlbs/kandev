@@ -51,6 +51,13 @@ type ACPSessionCreatedPayload struct {
 	AgentProfileID   string `json:"agent_profile_id"`
 	AgentExecutionID string `json:"agent_execution_id"`
 	ACPSessionID     string `json:"acp_session_id"`
+	// RestartKind classifies how the ACP session came back. One of the
+	// models.RestartKind* values; empty when the producer didn't classify
+	// (e.g. Mock provider, legacy event source). The orchestrator's
+	// handleACPSessionCreated writes this into TaskSession.Metadata so the
+	// receipt survives backend restarts and is visible on the next session
+	// payload broadcast to the UI.
+	RestartKind string `json:"restart_kind,omitempty"`
 }
 
 // PrepareProgressEventPayload is the payload for environment preparation progress events.

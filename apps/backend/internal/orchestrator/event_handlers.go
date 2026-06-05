@@ -40,6 +40,24 @@ func (s *Service) handleACPSessionCreated(ctx context.Context, data watcher.ACPS
 		return
 	}
 	s.storeResumeToken(ctx, data.TaskID, data.SessionID, data.AgentExecutionID, data.ACPSessionID, "")
+	s.storeRestartReceipt(ctx, data.SessionID, data.RestartKind)
+}
+
+// storeRestartReceipt persists the session-restart classification under
+// SessionMetaKeyRestartKind so the UI can show *how* the session came back
+// (resumed via session/load, freshly created, stale_task, etc.) instead of
+// just "running". Empty kind = producer didn't classify (legacy event source
+// or Mock provider) — skip without overwriting whatever was last recorded.
+func (s *Service) storeRestartReceipt(ctx context.Context, sessionID, kind string) {
+	if sessionID == "" || kind == "" {
+		return
+	}
+	if err := s.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyRestartKind, kind); err != nil {
+		s.logger.Warn("failed to persist restart receipt",
+			zap.String("session_id", sessionID),
+			zap.String("restart_kind", kind),
+			zap.Error(err))
+	}
 }
 
 // storeResumeToken stores an agent's session ID as the resume token for session recovery.

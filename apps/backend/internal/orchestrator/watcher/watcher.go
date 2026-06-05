@@ -39,6 +39,10 @@ type ACPSessionEventData struct {
 	SessionID        string `json:"session_id"`
 	AgentExecutionID string `json:"agent_execution_id"`
 	ACPSessionID     string `json:"acp_session_id"`
+	// RestartKind classifies how the session came back — see
+	// models.RestartKind* values and SessionMetaKeyRestartKind. Empty when
+	// the producer didn't classify (e.g. Mock provider).
+	RestartKind string `json:"restart_kind,omitempty"`
 }
 
 // PermissionRequestData contains data from permission_request events
