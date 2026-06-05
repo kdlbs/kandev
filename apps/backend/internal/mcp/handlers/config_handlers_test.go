@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -390,6 +392,19 @@ func (r *recordingMessageQueuer) QueueMessage(_ context.Context, sessionID, task
 	return &msg, nil
 }
 
+type pendingMoveRecordingQueuer struct {
+	recordingMessageQueuer
+	pendingSessionID string
+	pendingMoves     []messagequeue.PendingMove
+}
+
+func (r *pendingMoveRecordingQueuer) SetPendingMove(_ context.Context, sessionID string, move *messagequeue.PendingMove) {
+	r.pendingSessionID = sessionID
+	if move != nil {
+		r.pendingMoves = append(r.pendingMoves, *move)
+	}
+}
+
 func (r *recordingMessageQueuer) SetPendingMove(_ context.Context, _ string, _ *messagequeue.PendingMove) {
 }
 
@@ -516,6 +531,66 @@ func TestHandleUpdateTaskState_MissingState(t *testing.T) {
 	resp, err := h.handleUpdateTaskState(context.Background(), msg)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeValidation)
+}
+
+// TestHandleMoveTask_ActiveSessionWithoutPrompt_DefersMove pins the production
+// bug where an agent on Work called move_task_kandev → Done without a prompt
+// mid-turn. The immediate path hit validateMoveSessions (RUNNING session) and
+// returned INTERNAL_ERROR. Active-session moves must always defer.
+func TestHandleMoveTask_ActiveSessionWithoutPrompt_DefersMove(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{
+		ID: "ws-move", Name: "Move", CreatedAt: now, UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{
+		ID: "wf-move", WorkspaceID: "ws-move", Name: "Board", CreatedAt: now, UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{
+		ID: "task-move", WorkspaceID: "ws-move", WorkflowID: "wf-move",
+		WorkflowStepID: "step-work", Title: "Move me", State: v1.TaskStateInProgress,
+		CreatedAt: now, UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "sess-move", TaskID: "task-move", State: models.TaskSessionStateRunning,
+		IsPrimary: true, StartedAt: now, UpdatedAt: now,
+	}))
+
+	queue := &pendingMoveRecordingQueuer{}
+	h := &Handlers{
+		taskSvc:      svc,
+		messageQueue: queue,
+		logger:       testLogger(t).WithFields(),
+	}
+
+	msg := makeWSMessage(t, ws.ActionMCPMoveTask, map[string]interface{}{
+		"task_id":          "task-move",
+		"workflow_id":      "wf-move",
+		"workflow_step_id": "step-done",
+		"position":         0,
+	})
+
+	resp, err := h.handleMoveTask(ctx, msg)
+	require.NoError(t, err)
+	assert.NotEqual(t, ws.MessageTypeError, resp.Type, "active-session move without prompt must not fail")
+
+	require.Len(t, queue.pendingMoves, 1)
+	assert.Equal(t, "step-done", queue.pendingMoves[0].WorkflowStepID)
+	assert.Equal(t, "sess-move", queue.pendingSessionID)
+	assert.Empty(t, queue.calls, "no hand-off prompt should be queued when prompt omitted")
+
+	task, err := svc.GetTask(ctx, "task-move")
+	require.NoError(t, err)
+	assert.Equal(t, "step-work", task.WorkflowStepID, "deferred move must not apply immediately")
+}
+
+func TestNormalizeTaskState_AcceptsCommonAliases(t *testing.T) {
+	assert.Equal(t, v1.TaskStateCompleted, normalizeTaskState("complete"))
+	assert.Equal(t, v1.TaskStateCompleted, normalizeTaskState("DONE"))
+	assert.Equal(t, v1.TaskStateInProgress, normalizeTaskState("in_progress"))
+	assert.Equal(t, v1.TaskStateTODO, normalizeTaskState("open"))
 }
 
 func TestHandleUpdateTaskState_InvalidPayload(t *testing.T) {
