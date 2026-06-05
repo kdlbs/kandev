@@ -35,6 +35,12 @@ const (
 	WorkflowStepCreated = "workflow_step.created"
 	WorkflowStepUpdated = "workflow_step.updated"
 	WorkflowStepDeleted = "workflow_step.deleted"
+	// WorkflowStepCompletionSignaled fires when an agent (or the manual
+	// fallback button) signals that the current workflow step is complete
+	// for a given (task, session) — ADR 0015. The orchestrator subscriber
+	// reads the pending bag on TaskSession.Metadata and drives the
+	// transition.
+	WorkflowStepCompletionSignaled = "workflow.step_completion_signaled"
 )
 
 // Event types for comments

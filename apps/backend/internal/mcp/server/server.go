@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -375,6 +376,12 @@ func (s *Server) registerTools() {
 		// (repository, branch) to. External mode has no such context.
 		s.registerAddBranchToTaskTool()
 		s.registerUpdateRepositoryBaseBranchTool()
+		count += 2
+		// Task-mode only: ADR 0015 explicit step-completion signal. The
+		// tool targets the current (task, session, step) the MCP server
+		// was bound to, so it has no meaningful semantics outside a task
+		// session.
+		s.registerStepCompleteTool()
 		count++
 	}
 	s.logger.Info("registered MCP tools",
@@ -678,6 +685,66 @@ func (s *Server) updateRepositoryBaseBranchHandler() server.ToolHandlerFunc {
 		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPUpdateRepositoryBaseBranch, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+// registerStepCompleteTool registers step_complete_kandev — the ADR 0015
+// explicit completion signal. The tool is bound to the current (task, session)
+// and writes a pending-signal entry on the session's metadata bag; the
+// orchestrator consumes that signal to drive the workflow's on_turn_complete
+// transitions. Steps with `auto_advance_requires_signal=false` (the legacy
+// default) ignore the signal entirely.
+func (s *Server) registerStepCompleteTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("step_complete_kandev",
+			mcp.WithDescription(`Signal that every user-stated requirement for the CURRENT workflow step is satisfied.
+
+WHEN TO CALL:
+- All work for the current step is finished and the task is ready to move forward in the workflow.
+- This is the LAST thing you do in the step — call it after the final tool call / commit / answer that completes the requested work.
+
+WHEN NOT TO CALL:
+- You are about to ask the user a question (use ask_user_question_kandev instead and wait).
+- The work is partially done or you ran into a blocker you couldn't resolve.
+- You are mid-conversation and expect the user to reply with more direction.
+
+BEHAVIOUR:
+- The call is idempotent within a step: subsequent calls return accepted=false with reason="already_signaled" and have no other effect.
+- The call returns immediately. The workflow transition (if the step is configured to auto-advance) is driven asynchronously by the orchestrator on turn-end.
+- If the user sends another message before the transition fires, the signal is cancelled and the conversation continues on the current step. Call again at the end of the new turn if appropriate.
+- For steps that do NOT have auto-advance enabled, the call succeeds (accepted=true) but the workflow does not move automatically. The signal is discarded on the next turn start; there is no separate audit history to query later.
+
+The summary you provide is shown to the user in chat and may be forwarded to the next step's agent as a hand-off note.`),
+			mcp.WithString("summary", mcp.Required(), mcp.Description("One-paragraph plain-text summary of what was done in this step. Shown to the user.")),
+			mcp.WithString("handoff", mcp.Description("Optional context the next step's agent will need to pick up where you left off (decisions, open files, follow-ups).")),
+			mcp.WithString("blockers", mcp.Description("Optional list of known unresolved issues. Use sparingly — only when the step is complete in the sense that you cannot make further progress without input, not for normal partial work.")),
+		),
+		s.wrapHandler("step_complete_kandev", s.stepCompleteHandler()),
+	)
+}
+
+func (s *Server) stepCompleteHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if s.taskID == "" || s.sessionID == "" {
+			return mcp.NewToolResultError("step_complete_kandev requires a bound task and session"), nil
+		}
+		summary := strings.TrimSpace(req.GetString("summary", ""))
+		if summary == "" {
+			return mcp.NewToolResultError("summary is required"), nil
+		}
+		payload := map[string]interface{}{
+			"task_id":    s.taskID,
+			"session_id": s.sessionID,
+			"summary":    summary,
+			"handoff":    req.GetString("handoff", ""),
+			"blockers":   req.GetString("blockers", ""),
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPStepComplete, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")

@@ -76,6 +76,81 @@ const (
 // SSR reload, alongside the in-memory re-apply on context reset. See issue #1183.
 const SessionMetaKeySessionMode = "session_mode"
 
+// SessionMetaKeyPendingStepCompletion stores the agent's (or manual fallback's)
+// step-complete signal under TaskSession.Metadata. ADR 0015: the orchestrator
+// reads this on turn-end for steps with AutoAdvanceRequiresSignal=true and
+// only fires on_turn_complete transitions when a matching signal is present.
+// Cleared on successful transition, on user reply before transition, or any
+// other step change.
+const SessionMetaKeyPendingStepCompletion = "pending_step_completion_signal"
+
+// PendingStepCompletionSignal source values.
+const (
+	StepCompletionSourceAgent          = "agent"
+	StepCompletionSourceManualFallback = "manual_fallback"
+)
+
+// PendingStepCompletionSignal is the JSON shape persisted under
+// TaskSession.Metadata[SessionMetaKeyPendingStepCompletion]. It records an
+// agent-emitted (or user-emitted via the fallback button) completion signal
+// that the orchestrator should consume to drive a workflow step transition.
+// See ADR 0015 for the lifecycle (set → read → clear).
+type PendingStepCompletionSignal struct {
+	StepID     string    `json:"step_id"`
+	Source     string    `json:"source"`
+	Summary    string    `json:"summary"`
+	Handoff    string    `json:"handoff,omitempty"`
+	Blockers   string    `json:"blockers,omitempty"`
+	SignaledAt time.Time `json:"signaled_at"`
+}
+
+// LoadPendingStepSignal decodes the pending-completion bag entry from a
+// session's metadata. Single source of truth shared by the MCP handler
+// (write site, idempotency check) and the orchestrator (read site, gating).
+// Survives both the in-process typed shape and the JSON-rehydrated
+// `map[string]interface{}` shape produced when the row is loaded fresh from
+// SQLite after a backend restart.
+func LoadPendingStepSignal(metadata map[string]interface{}) (PendingStepCompletionSignal, bool) {
+	if metadata == nil {
+		return PendingStepCompletionSignal{}, false
+	}
+	raw, ok := metadata[SessionMetaKeyPendingStepCompletion]
+	if !ok || raw == nil {
+		return PendingStepCompletionSignal{}, false
+	}
+	switch v := raw.(type) {
+	case PendingStepCompletionSignal:
+		return v, true
+	case map[string]interface{}:
+		out := PendingStepCompletionSignal{
+			StepID:   StringFromAny(v["step_id"]),
+			Source:   StringFromAny(v["source"]),
+			Summary:  StringFromAny(v["summary"]),
+			Handoff:  StringFromAny(v["handoff"]),
+			Blockers: StringFromAny(v["blockers"]),
+		}
+		if ts, ok := v["signaled_at"].(string); ok {
+			if parsed, err := time.Parse(time.RFC3339Nano, ts); err == nil {
+				out.SignaledAt = parsed
+			}
+		}
+		return out, out.StepID != ""
+	}
+	return PendingStepCompletionSignal{}, false
+}
+
+// StringFromAny narrows an interface{} slot to a string, returning "" when
+// the value is absent or of a different type. Used by both the
+// PendingStepCompletionSignal map-shape decoder and the orchestrator's
+// step-completion event-payload parser — single source of truth so the
+// two decoders can't drift on what counts as a "missing string".
+func StringFromAny(v interface{}) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
+}
+
 // Task origin values for the Origin field.
 const (
 	TaskOriginManual        = "manual"

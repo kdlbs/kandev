@@ -211,10 +211,11 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
 	tools := getRegisteredToolNames(s)
 	// 13 kanban (incl. delete + archive task) + 1 add_branch_to_task +
-	// 1 update_repository_base_branch + 1 interaction + 4 plan +
-	// 1 related-tasks = 21. Task-document tools (list/get/write) are
-	// office-only.
-	assert.Equal(t, 21, len(tools))
+	// 1 update_repository_base_branch + 1 step_complete (ADR 0015) +
+	// 1 interaction + 4 plan + 1 related-tasks = 22. Task-document tools
+	// (list/get/write) are office-only.
+	assert.Contains(t, tools, "step_complete_kandev", "ADR 0015 explicit-completion signal must be registered in task mode")
+	assert.Equal(t, 22, len(tools))
 }
 
 func TestServerModeConfig_ToolCount(t *testing.T) {
@@ -225,6 +226,7 @@ func TestServerModeConfig_ToolCount(t *testing.T) {
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeConfig)
 	tools := getRegisteredToolNames(s)
 	// 12 workflow (incl. list_repositories + import_workflow) + 4 agent + 4 mcp + 5 executor + 6 task + 1 interaction = 32
+	assert.NotContains(t, tools, "step_complete_kandev", "step_complete_kandev requires a live task session; must NOT register in config mode")
 	assert.Equal(t, 32, len(tools))
 }
 
@@ -297,6 +299,7 @@ func TestServerModeOffice_ToolCount(t *testing.T) {
 	tools := getRegisteredToolNames(s)
 	// 4 plan + 1 interaction + 1 related-tasks + 3 task-documents = 9
 	// (delegate_task_kandev retired in favour of `agentctl kandev task create …`).
+	assert.NotContains(t, tools, "step_complete_kandev", "step_complete_kandev is kanban-task-only; office mode advances tasks via its own approval surface")
 	assert.Equal(t, 9, len(tools))
 }
 

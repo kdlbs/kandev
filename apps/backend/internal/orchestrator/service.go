@@ -864,6 +864,10 @@ func (s *Service) Start(ctx context.Context) error {
 	// Subscribe to prepare events (persist result in session metadata)
 	s.subscribePrepareEvents()
 
+	// Subscribe to ADR-0015 step-completion signals (out-of-band path:
+	// signal arrives after turn-end).
+	s.subscribeStepCompletionEvents()
+
 	s.logger.Info("orchestrator service started successfully")
 	return nil
 }

@@ -56,6 +56,20 @@ func (s *Service) processOnTurnComplete(ctx context.Context, task *models.Task, 
 		return false
 	}
 
+	// ADR 0015 — explicit completion signal gating (legacy path mirror of
+	// processOnTurnCompleteViaEngine). Steps marked
+	// `auto_advance_requires_signal=true` wait for a step_complete_kandev
+	// signal before evaluating their transition actions.
+	if currentStep.AutoAdvanceRequiresSignal {
+		signal, has := models.LoadPendingStepSignal(session.Metadata)
+		if !has || signal.StepID != currentStep.ID {
+			s.logger.Debug("on_turn_complete gated on explicit signal (legacy path)",
+				zap.String("step_id", currentStep.ID))
+			s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
+			return false
+		}
+	}
+
 	// Process side-effect actions first, then find the first transition action
 	transitionAction := s.processTurnCompleteActions(ctx, session, currentStep)
 
@@ -194,6 +208,10 @@ func (s *Service) ProcessOnTurnStart(ctx context.Context, taskID, sessionID stri
 	if err != nil {
 		return fmt.Errorf("load session for on_turn_start: %w", err)
 	}
+	// ADR 0015 — a fresh user message before the pending signal's
+	// transition has fired cancels the signal (re-open semantics). The
+	// user is continuing the conversation; this step is no longer "done".
+	s.clearPendingStepSignal(ctx, session)
 	s.processOnTurnStartViaEngine(ctx, taskID, session)
 	return nil
 }
@@ -257,6 +275,15 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		zap.Bool("trigger_on_enter", triggerOnEnter))
 
 	if triggerOnEnter {
+		// ADR 0015 — clear any pending completion-signal bag for the
+		// step we just left. Only on_turn_complete transitions trigger
+		// gating, so the triggerOnEnter=true branch is the only one
+		// that could have consumed a signal; on_turn_start moves leave
+		// the bag alone (it's still tied to an unsignaled step we have
+		// not left). The session struct isn't used after this point,
+		// so skip the extra GetTaskSession round-trip and write
+		// straight to the DB by session_id.
+		s.clearPendingStepSignalByID(ctx, sessionID)
 		// Automated transitions always clear review: the agent just completed
 		// a turn, so any pending review from a prior step is stale regardless
 		// of whether the new step has auto_start_agent.
@@ -1978,6 +2005,47 @@ func (s *Service) processOnTurnCompleteViaEngine(ctx context.Context, taskID str
 		return false
 	}
 
+	// ADR 0015 — explicit completion signal gating. Steps marked
+	// `auto_advance_requires_signal=true` only transition when the agent
+	// (or the manual fallback button) has written the pending bag entry.
+	// On gate-fail we set the session to WAITING_FOR_INPUT and bail —
+	// either the user replies (clearing the bag) or a later
+	// step_complete_kandev call triggers the out-of-band subscriber.
+	//
+	// Fail closed on step-load errors: a missing/broken step record must
+	// not silently bypass the gate (which would let a signal-required step
+	// auto-advance whenever the loader hiccups). Block the transition and
+	// let the next turn re-evaluate after the underlying error clears.
+	currentStep, stepErr := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
+	if stepErr != nil || currentStep == nil {
+		s.logger.Warn("on_turn_complete: failed to load current step for signal gating, blocking transition",
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID),
+			zap.String("step_id", task.WorkflowStepID),
+			zap.Error(stepErr))
+		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
+		return false
+	}
+	if currentStep.AutoAdvanceRequiresSignal {
+		signal, has := models.LoadPendingStepSignal(session.Metadata)
+		if !has || signal.StepID != task.WorkflowStepID {
+			s.logger.Debug("on_turn_complete gated on explicit signal (none received yet)",
+				zap.String("task_id", taskID),
+				zap.String("session_id", session.ID),
+				zap.String("step_id", task.WorkflowStepID))
+			s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
+			return false
+		}
+		s.logger.Info("on_turn_complete consuming explicit signal",
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID),
+			zap.String("step_id", task.WorkflowStepID),
+			zap.String("source", signal.Source))
+		// Bag is consumed once the transition executes (in
+		// applyEngineTransition's stamp + clear), so don't clear here —
+		// otherwise a failed transition would lose the signal.
+	}
+
 	state := s.buildMachineState(ctx, task, session)
 	result, err := s.workflowEngine.HandleTrigger(ctx, engine.HandleInput{
 		TaskID:         taskID,
@@ -2059,6 +2127,13 @@ func (s *Service) applyEngineTransition(
 			zap.Error(err))
 		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
 		return false
+	}
+
+	// ADR 0015 — a successful on_turn_complete transition consumes any
+	// pending step-completion signal for the source step. The bag must be
+	// cleared so the next step's gating starts from a clean slate.
+	if trigger == engine.TriggerOnTurnComplete {
+		s.clearPendingStepSignal(ctx, session)
 	}
 
 	if len(result.DataPatch) > 0 {
