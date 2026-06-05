@@ -249,46 +249,14 @@ export function TurnCompleteSelect({
           <HelpTip text="Turn off plan mode after the agent finishes this step." />
         </div>
       )}
-      {transitionType !== "none" && (
-        <ExplicitCompletionToggle step={step} onUpdate={onUpdate} readOnly={readOnly} />
-      )}
     </div>
   );
 }
 
-// ExplicitCompletionToggle gates a step's auto-advance on the agent calling
-// `step_complete_kandev` (ADR 0015). Rendered as a sibling checkbox under the
-// On Turn Complete picker so users only see it when a transition action is
-// actually configured.
-function ExplicitCompletionToggle({
-  step,
-  onUpdate,
-  readOnly,
-}: {
-  step: WorkflowStep;
-  onUpdate: (updates: Partial<WorkflowStep>) => void;
-  readOnly: boolean;
-}) {
-  return (
-    <div className="flex flex-col gap-1 pt-1">
-      <div className="flex items-center gap-2">
-        <Checkbox
-          id={`${step.id}-explicit-completion`}
-          checked={step.auto_advance_requires_signal === true}
-          onCheckedChange={(checked) => {
-            if (readOnly) return;
-            onUpdate({ auto_advance_requires_signal: checked === true });
-          }}
-          disabled={readOnly}
-        />
-        <Label htmlFor={`${step.id}-explicit-completion`} className="text-sm">
-          Wait for agent completion signal
-        </Label>
-      </div>
-      <p className="text-muted-foreground pl-6 text-xs leading-snug">
-        Agent must call <code>step_complete_kandev</code> to advance. Halting without the signal
-        leaves the step paused for the user.
-      </p>
-    </div>
-  );
-}
+// ADR 0015 explicit-completion-signal UI (the "Wait for agent completion
+// signal" toggle) is deferred to a follow-up PR. The backend column ships
+// here so workflow steps can opt in via the workflow-import/export YAML or
+// the MCP `update_workflow_step_kandev` tool. Direct toggle in the
+// pipeline editor needs its own iteration to avoid an unrelated E2E
+// flake in `workflow-agent-profile.spec.ts` caused by additional UI
+// shifting the Radix select dropdown into a sibling tooltip's hover path.

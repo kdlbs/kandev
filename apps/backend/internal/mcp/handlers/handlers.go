@@ -911,14 +911,16 @@ func classifyAddBranchError(err error) string {
 //   - Loads the session and the task to identify the current workflow step.
 //   - Dedupes: if a pending signal already exists for the same step, returns
 //     {accepted: false, reason: "already_signaled"} without overwriting.
+//     When the session is WAITING_FOR_INPUT, the bus event is re-published
+//     so a failed first-attempt publish can still drive the subscriber.
 //   - Otherwise writes a PendingStepCompletionSignal blob under
 //     TaskSession.Metadata[SessionMetaKeyPendingStepCompletion] via
 //     SetSessionMetadataKey (json_set — preserves other metadata keys).
 //   - Publishes events.WorkflowStepCompletionSignaled so the orchestrator
-//     subscriber can drive the on_turn_complete transition. The transition
-//     itself only fires when the step's AutoAdvanceRequiresSignal is true
-//     AND the feature flag is on; otherwise the signal is recorded as a
-//     no-op audit entry.
+//     subscriber can drive the on_turn_complete transition for steps with
+//     AutoAdvanceRequiresSignal=true. Steps that don't opt in ignore the
+//     signal entirely; the bag entry is cleared on the next turn start
+//     (no separate audit trail is persisted).
 //
 // Idempotency is intentionally lossy — a second call within the same step
 // silently keeps the first signal's payload (summary/handoff/blockers). The
@@ -950,7 +952,19 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 	// without overwriting. A stale signal for a different step (left over
 	// from a transition that hasn't yet cleared the bag) is treated as
 	// absent and overwritten — the new step's signal supersedes.
+	//
+	// Re-publish on the dedup path when the session is WAITING_FOR_INPUT.
+	// Without this, an agent's retry after a publish failure short-circuits
+	// to `already_signaled` without firing the out-of-band subscriber,
+	// leaving the session stuck until the user replies. Publish is
+	// idempotent on the subscriber side (it re-checks bag + step), so a
+	// double-fire when the first publish actually landed is harmless.
 	if existing, ok := models.LoadPendingStepSignal(session.Metadata); ok && existing.StepID == task.WorkflowStepID {
+		if session.State == models.TaskSessionStateWaitingForInput {
+			if errMsg, err := h.publishStepCompletionEvent(ctx, msg, req.TaskID, req.SessionID, task.WorkflowStepID, existing); errMsg != nil {
+				return errMsg, err
+			}
+		}
 		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 			"accepted": false,
 			"reason":   "already_signaled",

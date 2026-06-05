@@ -716,7 +716,7 @@ BEHAVIOUR:
 - The call is idempotent within a step: subsequent calls return accepted=false with reason="already_signaled" and have no other effect.
 - The call returns immediately. The workflow transition (if the step is configured to auto-advance) is driven asynchronously by the orchestrator on turn-end.
 - If the user sends another message before the transition fires, the signal is cancelled and the conversation continues on the current step. Call again at the end of the new turn if appropriate.
-- For steps that do NOT have auto-advance enabled, the signal is recorded for audit but the workflow does not move automatically.
+- For steps that do NOT have auto-advance enabled, the call succeeds (accepted=true) but the workflow does not move automatically. The signal is discarded on the next turn start; there is no separate audit history to query later.
 
 The summary you provide is shown to the user in chat and may be forwarded to the next step's agent as a hand-off note.`),
 			mcp.WithString("summary", mcp.Required(), mcp.Description("One-paragraph plain-text summary of what was done in this step. Shown to the user.")),
