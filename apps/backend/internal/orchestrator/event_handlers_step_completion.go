@@ -80,18 +80,13 @@ func (s *Service) clearPendingStepSignalByID(ctx context.Context, sessionID stri
 // and the transition fires inline — the bus event arrives later and finds
 // nothing to do (bag already cleared by the transition). Idempotent.
 func (s *Service) onStepCompletionSignaled(ctx context.Context, event *bus.Event) {
-	if event == nil || event.Data == nil {
-		return
-	}
-	data, ok := event.Data.(map[string]interface{})
+	taskID, sessionID, stepID, ok := parseStepCompletionEvent(event)
 	if !ok {
-		s.logger.Warn("onStepCompletionSignaled: unexpected event payload type")
-		return
-	}
-	taskID := stringFromAny(data["task_id"])
-	sessionID := stringFromAny(data["session_id"])
-	stepID := stringFromAny(data["step_id"])
-	if taskID == "" || sessionID == "" || stepID == "" {
+		if event != nil && event.Data != nil {
+			if _, isMap := event.Data.(map[string]interface{}); !isMap {
+				s.logger.Warn("onStepCompletionSignaled: unexpected event payload type")
+			}
+		}
 		return
 	}
 
@@ -101,7 +96,6 @@ func (s *Service) onStepCompletionSignaled(ctx context.Context, event *bus.Event
 			zap.String("session_id", sessionID), zap.Error(err))
 		return
 	}
-
 	// If the session is still running (turn hasn't ended yet) the inline
 	// turn-end check will pick the signal up — no out-of-band work needed.
 	// Only act on signals that arrive while the session is waiting.
@@ -109,9 +103,6 @@ func (s *Service) onStepCompletionSignaled(ctx context.Context, event *bus.Event
 		return
 	}
 
-	// Re-load the task: the step may have changed since the signal was
-	// written (concurrent user move, etc.). If the current step no longer
-	// matches the signal's step, drop the stale bag and exit.
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		s.logger.Warn("onStepCompletionSignaled: failed to load task",
@@ -122,36 +113,69 @@ func (s *Service) onStepCompletionSignaled(ctx context.Context, event *bus.Event
 		s.logger.Debug("onStepCompletionSignaled: signal stale (step changed)",
 			zap.String("signal_step", stepID), zap.String("current_step", task.WorkflowStepID))
 		// Only clear the bag when its current contents are themselves
-		// stale (matching THIS subscriber's stepID). Without this guard
-		// we'd destroy a freshly-written valid signal for the new step
-		// if the session was reused across steps and the new step's
-		// agent signalled before this stale subscriber ran.
-		if existing, ok := models.LoadPendingStepSignal(session.Metadata); ok && existing.StepID == stepID {
-			s.clearPendingStepSignal(ctx, session)
+		// stale (matching THIS subscriber's stepID). Re-load the session
+		// before checking: the local `session` snapshot was taken when
+		// the subscriber fired and may be older than a concurrent
+		// write from the new step's agent. Without the reload the
+		// in-memory check could see a stale signal that's already been
+		// cleared/replaced and erase a freshly-written valid bag entry.
+		latestSession, loadErr := s.repo.GetTaskSession(ctx, sessionID)
+		if loadErr != nil {
+			return
+		}
+		if existing, ok := models.LoadPendingStepSignal(latestSession.Metadata); ok && existing.StepID == stepID {
+			s.clearPendingStepSignal(ctx, latestSession)
 		}
 		return
 	}
 
-	// Steps that don't opt in to signal-gating do not transition out-of-band
-	// from a signal. Without this guard `step_complete_kandev` becomes an
-	// unintended manual-advance path for every signalless step — exactly
-	// the legacy "any turn-end advances" behaviour we replaced.
-	if s.workflowStepGetter == nil {
-		return
-	}
-	currentStep, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
-	if err != nil || currentStep == nil {
-		s.logger.Debug("onStepCompletionSignaled: cannot load current step, skipping",
-			zap.String("step_id", task.WorkflowStepID), zap.Error(err))
-		return
-	}
-	if !currentStep.AutoAdvanceRequiresSignal {
-		s.logger.Debug("onStepCompletionSignaled: step is not signal-gated, ignoring",
-			zap.String("step_id", currentStep.ID))
+	if !s.stepIsSignalGated(ctx, task.WorkflowStepID) {
 		return
 	}
 
 	// Drive the transition via the engine path. It will re-read the bag
 	// and consume it through the same code path the inline turn-end uses.
 	s.processOnTurnCompleteViaEngine(ctx, taskID, session)
+}
+
+// parseStepCompletionEvent extracts (task_id, session_id, step_id) from a
+// step-completion bus event. Returns ok=false when the event is nil/empty,
+// the payload isn't a map, or any required ID is missing.
+func parseStepCompletionEvent(event *bus.Event) (taskID, sessionID, stepID string, ok bool) {
+	if event == nil || event.Data == nil {
+		return "", "", "", false
+	}
+	data, isMap := event.Data.(map[string]interface{})
+	if !isMap {
+		return "", "", "", false
+	}
+	taskID = stringFromAny(data["task_id"])
+	sessionID = stringFromAny(data["session_id"])
+	stepID = stringFromAny(data["step_id"])
+	if taskID == "" || sessionID == "" || stepID == "" {
+		return "", "", "", false
+	}
+	return taskID, sessionID, stepID, true
+}
+
+// stepIsSignalGated reports whether the given workflow step opts in to
+// the ADR-0015 explicit-signal gate. False on a missing step-getter or
+// any lookup error — those land the subscriber on the safe side (don't
+// auto-advance a step we can't classify).
+func (s *Service) stepIsSignalGated(ctx context.Context, stepID string) bool {
+	if s.workflowStepGetter == nil {
+		return false
+	}
+	currentStep, err := s.workflowStepGetter.GetStep(ctx, stepID)
+	if err != nil || currentStep == nil {
+		s.logger.Debug("onStepCompletionSignaled: cannot load current step, skipping",
+			zap.String("step_id", stepID), zap.Error(err))
+		return false
+	}
+	if !currentStep.AutoAdvanceRequiresSignal {
+		s.logger.Debug("onStepCompletionSignaled: step is not signal-gated, ignoring",
+			zap.String("step_id", currentStep.ID))
+		return false
+	}
+	return true
 }
