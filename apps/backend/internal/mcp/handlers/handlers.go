@@ -852,15 +852,16 @@ func boolCount(flags ...bool) int {
 // isValidationError matches the user-facing fragments emitted by the
 // service-layer validators (required fields, invalid ref names). Shared by
 // every MCP write handler so service-side message tweaks need only one
-// place to flow through to the MCP error classification.
+// place to flow through to the MCP error classification. Kept narrow on
+// purpose — DB / IO failures often carry "invalid" in their message and
+// must surface as InternalError, not Validation.
 func isValidationError(err error) bool {
 	if err == nil {
 		return false
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "is required") ||
-		strings.Contains(msg, "not allowed in a git ref name") ||
-		strings.Contains(msg, "invalid")
+		strings.Contains(msg, "not allowed in a git ref name")
 }
 
 // classifyAddBranchError maps service-layer add_branch failures to ws error

@@ -51,6 +51,8 @@ func (s *Server) handleSetBaseBranches(c *gin.Context) {
 		safe[k] = v
 	}
 	s.procMgr.UpdateBaseBranches(c.Request.Context(), safe)
-	s.logger.Debug("base branches updated", zap.Int("entries", len(req.BaseBranches)))
+	s.logger.Debug("base branches updated",
+		zap.Int("accepted", len(safe)),
+		zap.Int("rejected", len(req.BaseBranches)-len(safe)))
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }

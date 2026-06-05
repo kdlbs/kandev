@@ -942,7 +942,14 @@ func (h *TaskHandlers) httpUpdateTaskRepository(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		// Avoid echoing raw service errors on the 500 path — DB / IO
+		// failures can carry connection strings, table names, or stack
+		// traces. Log the detail server-side; return an opaque message.
+		h.logger.Error("update task repository failed",
+			zap.String("task_id", c.Param("id")),
+			zap.String("repo_id", c.Param("repo_id")),
+			zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update task repository"})
 		return
 	}
 	c.JSON(http.StatusOK, taskRepo)
