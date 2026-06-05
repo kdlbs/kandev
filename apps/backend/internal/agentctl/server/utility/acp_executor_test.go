@@ -59,15 +59,51 @@ func TestIsOpenCodeACPCommand(t *testing.T) {
 func TestParseOpenCodeModelsOutput(t *testing.T) {
 	t.Parallel()
 
-	got := parseOpenCodeModelsOutput("\nopenai/gpt-5.5\nanthropic/claude-sonnet-4-5\nopenai/gpt-5.5\n")
+	got := parseOpenCodeModelsOutput("\nAvailable models:\nopenai/gpt-5.5\nanthropic/claude-sonnet-4-5\nloading models\nopenrouter/anthropic/claude-sonnet-4\nopenai/gpt-5.5\n")
 	want := []ProbeModel{
 		{ID: "openai/gpt-5.5", Name: "openai/gpt-5.5"},
 		{ID: "anthropic/claude-sonnet-4-5", Name: "anthropic/claude-sonnet-4-5"},
+		{ID: "openrouter/anthropic/claude-sonnet-4", Name: "openrouter/anthropic/claude-sonnet-4"},
 	}
 	if !slices.EqualFunc(got, want, func(a, b ProbeModel) bool {
 		return a.ID == b.ID && a.Name == b.Name && a.Description == b.Description
 	}) {
 		t.Fatalf("parseOpenCodeModelsOutput() = %#v, want %#v", got, want)
+	}
+}
+
+func TestEnvironWithNoColorOverridesExistingValue(t *testing.T) {
+	t.Parallel()
+
+	got := environWithNoColor([]string{"PATH=/usr/bin", "NO_COLOR=0", "HOME=/tmp"})
+	want := []string{"PATH=/usr/bin", "HOME=/tmp", "NO_COLOR=1"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("environWithNoColor() = %#v, want %#v", got, want)
+	}
+}
+
+func TestIsOpenCodeModelID(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		id   string
+		want bool
+	}{
+		{id: "openai/gpt-5.5", want: true},
+		{id: "openrouter/anthropic/claude-sonnet-4", want: true},
+		{id: "Available models:", want: false},
+		{id: "loading models", want: false},
+		{id: "", want: false},
+		{id: "openai /gpt-5.5", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.id, func(t *testing.T) {
+			t.Parallel()
+			if got := isOpenCodeModelID(tt.id); got != tt.want {
+				t.Fatalf("isOpenCodeModelID(%q) = %v, want %v", tt.id, got, tt.want)
+			}
+		})
 	}
 }
 

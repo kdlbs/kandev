@@ -2,6 +2,7 @@ package utility
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -352,12 +353,33 @@ func probeOpenCodeModels(ctx context.Context, resolvedCmd, workDir string) ([]Pr
 	//nolint:gosec // resolvedCmd is from the same hard-coded allow-list used to launch the ACP probe.
 	cmd := exec.CommandContext(ctx, resolvedCmd, "models")
 	cmd.Dir = workDir
-	cmd.Env = append(os.Environ(), "NO_COLOR=1")
+	cmd.Env = environWithNoColor(os.Environ())
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, err
+		return nil, commandErrorWithStderr(err)
 	}
 	return parseOpenCodeModelsOutput(string(out)), nil
+}
+
+func environWithNoColor(environ []string) []string {
+	env := make([]string, 0, len(environ)+1)
+	for _, item := range environ {
+		if !strings.HasPrefix(item, "NO_COLOR=") {
+			env = append(env, item)
+		}
+	}
+	return append(env, "NO_COLOR=1")
+}
+
+func commandErrorWithStderr(err error) error {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		stderr := strings.TrimSpace(string(exitErr.Stderr))
+		if stderr != "" {
+			return fmt.Errorf("%w: %s", err, stderr)
+		}
+	}
+	return err
 }
 
 func parseOpenCodeModelsOutput(output string) []ProbeModel {
@@ -365,7 +387,7 @@ func parseOpenCodeModelsOutput(output string) []ProbeModel {
 	var models []ProbeModel
 	for _, line := range strings.Split(output, "\n") {
 		id := strings.TrimSpace(line)
-		if id == "" {
+		if !isOpenCodeModelID(id) {
 			continue
 		}
 		if _, ok := seen[id]; ok {
@@ -375,6 +397,10 @@ func parseOpenCodeModelsOutput(output string) []ProbeModel {
 		models = append(models, ProbeModel{ID: id, Name: id})
 	}
 	return models
+}
+
+func isOpenCodeModelID(id string) bool {
+	return strings.Contains(id, "/") && !strings.ContainsAny(id, " \t\r")
 }
 
 // probeACPSession performs initialize + session/new and returns the parsed
