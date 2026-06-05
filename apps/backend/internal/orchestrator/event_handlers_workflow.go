@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -1537,6 +1538,112 @@ func (s *Service) scheduleAutoResumeForWorkflowQueue(ctx context.Context, sessio
 		return
 	}
 	go s.tryEnsureExecution(context.WithoutCancel(ctx), sessionID)
+}
+
+// maybeRecoverOrphanedWorkflowQueue is the per-session decision point of the
+// workflow-queue watchdog (workflow_queue_watchdog.go). For a session that
+// the sweep has flagged because it holds a stale workflow auto-start prompt,
+// this function decides whether to take a recovery action and what:
+//
+//   - terminal session → drop the stale workflow entries (the agent is
+//     gone for good; leaving them in the queue would never drain).
+//   - in-flight turn (activeTurns / running / starting / cancel / reset) →
+//     skip; the normal lifecycle will drain.
+//   - live agent process → skip; handleAgentReady will drain on next turn end.
+//   - otherwise → fire tryEnsureExecution to drive the same auto-resume
+//     cascade scheduleAutoResumeForWorkflowQueue uses inline (#1163).
+//
+// queuedAt is the queued_at of the oldest matched entry, used only for the
+// recovery log line.
+func (s *Service) maybeRecoverOrphanedWorkflowQueue(ctx context.Context, sessionID string, queuedAt time.Time, wg *sync.WaitGroup) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		// Transient DB read failure — leave the queue alone and let the
+		// next tick retry. Don't conflate this with "session truly gone".
+		s.logger.Debug("workflow queue watchdog: skip session load failed",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	if session == nil {
+		s.dropOrphanedWorkflowQueue(ctx, sessionID, "session_missing")
+		return
+	}
+	if isTerminalSessionState(session.State) {
+		s.dropOrphanedWorkflowQueue(ctx, sessionID, "terminal_session")
+		return
+	}
+	if _, hasActiveTurn := s.activeTurns.Load(sessionID); hasActiveTurn {
+		return
+	}
+	if s.isSessionResetInProgress(sessionID) || s.isCancelInFlight(sessionID) {
+		return
+	}
+	if s.executor == nil || s.agentManager == nil {
+		return
+	}
+	// Skip when the agent process is genuinely alive — handleAgentReady (or
+	// the inline drain on the next turn end) will pick up the queue. The
+	// agentManager probe is authoritative; the executor's in-memory store
+	// can lag a dying process.
+	if s.agentManager.IsAgentRunningForSession(ctx, sessionID) {
+		return
+	}
+	ageSec := int(time.Since(queuedAt) / time.Second)
+	s.logger.Warn("workflow queue watchdog: recovering orphaned session",
+		zap.String("session_id", sessionID),
+		zap.String("task_id", session.TaskID),
+		zap.String("session_state", string(session.State)),
+		zap.Int("queue_age_s", ageSec))
+	// Bypass scheduleAutoResumeForWorkflowQueue's GetExecutionBySession gate:
+	// IsAgentRunningForSession just told us the process is dead, but the
+	// in-memory store may still hold a stale record. Drive tryEnsureExecution
+	// directly so the resume happens even when the store is out of sync.
+	//
+	// Escalation risk: tryEnsureExecution → ensureSessionRunning → ResumeSession
+	// will mark the session FAILED via updateTaskSessionState if the resume
+	// itself errors (disk full, ErrNoAgentProfileID, container won't start,
+	// etc.). The watchdog inherits this from the inline auto-resume path —
+	// a stuck-but-otherwise-recoverable session can flip to terminal if its
+	// underlying executor environment is broken. That's the right escalation
+	// (the orphan can never drain anyway) but worth flagging for future
+	// maintainers: the watchdog is "best-effort recover OR fail loudly".
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		s.tryEnsureExecution(ctx, sessionID)
+	}()
+}
+
+// dropOrphanedWorkflowQueue removes every workflow-tagged queued entry for
+// a session whose agent is gone for good. User and agent entries are left
+// alone — only the workflow auto-start prompts the watchdog owns are dropped.
+func (s *Service) dropOrphanedWorkflowQueue(ctx context.Context, sessionID, reason string) {
+	if s.messageQueue == nil {
+		return
+	}
+	status := s.messageQueue.GetStatus(ctx, sessionID)
+	dropped := 0
+	for _, entry := range status.Entries {
+		if entry.QueuedBy != messagequeue.QueuedByWorkflow {
+			continue
+		}
+		if err := s.messageQueue.RemoveEntry(ctx, sessionID, entry.ID); err != nil {
+			s.logger.Debug("workflow queue watchdog: drop entry failed",
+				zap.String("session_id", sessionID),
+				zap.String("entry_id", entry.ID),
+				zap.Error(err))
+			continue
+		}
+		dropped++
+	}
+	if dropped > 0 {
+		s.logger.Warn("workflow queue watchdog: dropped orphaned workflow entries",
+			zap.String("session_id", sessionID),
+			zap.String("reason", reason),
+			zap.Int("dropped", dropped))
+		s.publishQueueStatusEvent(ctx, sessionID)
+	}
 }
 
 // flipStaleRunningToWaiting flips the session to WAITING_FOR_INPUT when its

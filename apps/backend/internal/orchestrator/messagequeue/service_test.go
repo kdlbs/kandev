@@ -417,6 +417,49 @@ func TestConcurrentTakeIdempotent(t *testing.T) {
 	assert.Equal(t, int32(1), hits.Load())
 }
 
+func TestService_ListStaleByQueuedBy(t *testing.T) {
+	svc := setupService(t)
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+	cutoff := now.Add(-1 * time.Minute)
+
+	// Stale workflow entry (should match).
+	stale, err := svc.QueueMessage(ctx, "s1", "t1", "stale-wf", "", QueuedByWorkflow, false, nil)
+	require.NoError(t, err)
+	require.NoError(t, svc.UpdateMessage(ctx, "s1", stale.ID, "stale-wf", nil, ""))
+	// Backdate via direct repository access since UpdateMessage doesn't expose queued_at.
+	// Memory repo lets us cheat by re-inserting with QueuedAt pre-set.
+	mem := svc.repo.(*memoryRepository)
+	mem.mu.Lock()
+	for _, m := range mem.entries["s1"] {
+		if m.ID == stale.ID {
+			m.QueuedAt = now.Add(-10 * time.Minute)
+		}
+	}
+	mem.mu.Unlock()
+
+	// Fresh workflow entry (should NOT match).
+	_, err = svc.QueueMessage(ctx, "s1", "t1", "fresh-wf", "", QueuedByWorkflow, false, nil)
+	require.NoError(t, err)
+
+	// Stale user entry (wrong queued_by; should NOT match).
+	user, err := svc.QueueMessage(ctx, "s2", "t1", "stale-user", "", QueuedByUser, false, nil)
+	require.NoError(t, err)
+	mem.mu.Lock()
+	for _, m := range mem.entries["s2"] {
+		if m.ID == user.ID {
+			m.QueuedAt = now.Add(-10 * time.Minute)
+		}
+	}
+	mem.mu.Unlock()
+
+	got, err := svc.ListStaleByQueuedBy(ctx, QueuedByWorkflow, cutoff, 0)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, stale.ID, got[0].ID)
+}
+
 func TestQueuedTimestamp(t *testing.T) {
 	svc := setupService(t)
 	ctx := context.Background()

@@ -44,6 +44,7 @@ func (r *sqliteRepository) initSchema() error {
 		queued_by        TEXT NOT NULL DEFAULT ''
 	);
 	CREATE INDEX IF NOT EXISTS idx_queued_messages_session_position ON queued_messages(session_id, position);
+	CREATE INDEX IF NOT EXISTS idx_queued_messages_queued_by_at ON queued_messages(queued_by, queued_at);
 
 	CREATE TABLE IF NOT EXISTS pending_moves (
 		id               TEXT PRIMARY KEY,
@@ -194,6 +195,35 @@ func (r *sqliteRepository) ListBySession(ctx context.Context, sessionID string) 
 	`), sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("list queued: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []QueuedMessage
+	for rows.Next() {
+		msg, err := scanQueuedRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *msg)
+	}
+	return out, rows.Err()
+}
+
+func (r *sqliteRepository) ListStaleByQueuedBy(ctx context.Context, queuedBy string, olderThan time.Time, limit int) ([]QueuedMessage, error) {
+	query := `
+		SELECT id, session_id, task_id, position, content, model, plan_mode,
+		       attachments_json, metadata_json, queued_at, queued_by
+		FROM queued_messages
+		WHERE queued_by = ? AND queued_at < ?
+		ORDER BY queued_at ASC`
+	args := []any{queuedBy, olderThan}
+	if limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, limit)
+	}
+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(query), args...)
+	if err != nil {
+		return nil, fmt.Errorf("list stale queued: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 

@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
@@ -311,6 +312,69 @@ func TestSQLiteRepository_PendingMove(t *testing.T) {
 	got, err = repo.TakePendingMove(ctx, "s1")
 	if err != nil || got != nil {
 		t.Errorf("expected empty after take, got %+v err=%v", got, err)
+	}
+}
+
+// TestSQLiteRepository_ListStaleByQueuedBy verifies the watchdog query:
+// it returns workflow-tagged entries older than the cutoff and skips
+// recent workflow entries, user entries, and entries from other sessions.
+func TestSQLiteRepository_ListStaleByQueuedBy(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+	stale := now.Add(-5 * time.Minute)
+	fresh := now.Add(-10 * time.Second)
+	cutoff := now.Add(-1 * time.Minute)
+
+	mustInsert := func(sessionID, queuedBy string, queuedAt time.Time) string {
+		msg := &QueuedMessage{
+			SessionID: sessionID, TaskID: "t1", Content: "x",
+			QueuedBy: queuedBy, QueuedAt: queuedAt,
+		}
+		if err := repo.Insert(ctx, msg, 0); err != nil {
+			t.Fatalf("insert: %v", err)
+		}
+		return msg.ID
+	}
+
+	staleWorkflow := mustInsert("s1", QueuedByWorkflow, stale)
+	mustInsert("s1", QueuedByWorkflow, fresh) // too fresh
+	mustInsert("s2", QueuedByUser, stale)     // wrong queued_by
+	staleWorkflowS3 := mustInsert("s3", QueuedByWorkflow, stale.Add(-1*time.Minute))
+
+	got, err := repo.ListStaleByQueuedBy(ctx, QueuedByWorkflow, cutoff, 0)
+	if err != nil {
+		t.Fatalf("list stale: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 stale workflow entries, got %d: %+v", len(got), got)
+	}
+	// queued_at ASC: s3's older entry must come first.
+	if got[0].ID != staleWorkflowS3 || got[1].ID != staleWorkflow {
+		t.Errorf("unexpected order: got [%s, %s], want [%s, %s]",
+			got[0].ID, got[1].ID, staleWorkflowS3, staleWorkflow)
+	}
+
+	// Limit caps the result to the oldest entries.
+	capped, err := repo.ListStaleByQueuedBy(ctx, QueuedByWorkflow, cutoff, 1)
+	if err != nil {
+		t.Fatalf("list stale capped: %v", err)
+	}
+	if len(capped) != 1 {
+		t.Fatalf("expected 1 entry under limit=1, got %d", len(capped))
+	}
+	if capped[0].ID != staleWorkflowS3 {
+		t.Errorf("limited result should hold the oldest entry, got %s", capped[0].ID)
+	}
+
+	// Empty result when cutoff predates everything.
+	empty, err := repo.ListStaleByQueuedBy(ctx, QueuedByWorkflow, stale.Add(-2*time.Hour), 0)
+	if err != nil {
+		t.Fatalf("list stale empty: %v", err)
+	}
+	if len(empty) != 0 {
+		t.Errorf("expected 0 entries past distant cutoff, got %d", len(empty))
 	}
 }
 
