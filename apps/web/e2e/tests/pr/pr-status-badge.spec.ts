@@ -92,7 +92,9 @@ test.describe("PR status badge", () => {
       timeout: 45_000,
     });
 
-    const icon = testPage.getByTestId(`pr-task-icon-${task.id}`);
+    // The global AppSidebar also renders a PRTaskIcon per task, so scope to the
+    // kanban board to target the card icon this test asserts on.
+    const icon = kanban.board.getByTestId(`pr-task-icon-${task.id}`);
     await expect(icon).toBeVisible({ timeout: 15_000 });
 
     // No reviews, so ready-to-merge must be false; badge should not be yellow.
@@ -152,7 +154,9 @@ test.describe("PR status badge", () => {
       timeout: 45_000,
     });
 
-    const icon = testPage.getByTestId(`pr-task-icon-${task.id}`);
+    // The global AppSidebar also renders a PRTaskIcon per task, so scope to the
+    // kanban board to target the card icon this test asserts on.
+    const icon = kanban.board.getByTestId(`pr-task-icon-${task.id}`);
     await expect(icon).toBeVisible({ timeout: 15_000 });
     await expect(icon).toHaveAttribute("data-pr-ready-to-merge", "true");
 
@@ -210,7 +214,9 @@ test.describe("PR status badge", () => {
       timeout: 45_000,
     });
 
-    const icon = testPage.getByTestId(`pr-task-icon-${task.id}`);
+    // The global AppSidebar also renders a PRTaskIcon per task, so scope to the
+    // kanban board to target the card icon this test asserts on.
+    const icon = kanban.board.getByTestId(`pr-task-icon-${task.id}`);
     await expect(icon).toBeVisible({ timeout: 15_000 });
     await expect(icon).toHaveAttribute("data-pr-ready-to-merge", "false");
     // Plain-green approved state, not the ready-to-merge emerald.
@@ -264,7 +270,9 @@ test.describe("PR status badge", () => {
       timeout: 45_000,
     });
 
-    const icon = testPage.getByTestId(`pr-task-icon-${task.id}`);
+    // The global AppSidebar also renders a PRTaskIcon per task, so scope to the
+    // kanban board to target the card icon this test asserts on.
+    const icon = kanban.board.getByTestId(`pr-task-icon-${task.id}`);
     await expect(icon).toBeVisible({ timeout: 15_000 });
     await expect(icon).toHaveAttribute("data-pr-ready-to-merge", "false");
     await expect(icon).toHaveClass(/text-sky-400/);

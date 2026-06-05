@@ -361,8 +361,18 @@ test.describe("Multi-session UX", () => {
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
-    await session.waitForLoad();
-    await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
+
+    // After the AppSidebar overhaul, switching tasks via the sidebar restores
+    // each task's dockview env layout. The restored layout can land the chat
+    // panel as a non-active background tab in the right-column group, so the
+    // chat-visible `waitForLoad()` gate (and a [data-testid=session-chat]:visible
+    // lookup) isn't reliable right after a switch. Foreground the chat tab first,
+    // then assert the session's mock response on the now-visible chat — this is
+    // exactly what a user does to read the conversation after switching.
+    await session.showSessionContext();
+    await expect(
+      session.activeChat().getByText("simple mock response", { exact: false }),
+    ).toBeVisible({
       timeout: 15_000,
     });
 
@@ -377,15 +387,19 @@ test.describe("Multi-session UX", () => {
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     // Verify chat loads for task 2
-    await session.waitForLoad();
-    await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
+    await session.showSessionContext();
+    await expect(
+      session.activeChat().getByText("simple mock response", { exact: false }),
+    ).toBeVisible({
       timeout: 15_000,
     });
 
     // Switch back to task 1
     await session.clickTaskInSidebar("Task Switch A");
-    await session.waitForLoad();
-    await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
+    await session.showSessionContext();
+    await expect(
+      session.activeChat().getByText("simple mock response", { exact: false }),
+    ).toBeVisible({
       timeout: 15_000,
     });
   });

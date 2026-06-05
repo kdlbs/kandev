@@ -79,7 +79,12 @@ test.describe("Onboarding", () => {
     officeSeed: _,
   }) => {
     await testPage.goto("/office");
-    await testPage.getByRole("button", { name: "Add workspace" }).click();
+    // The unified AppSidebar overhaul folded the workspace switcher into a
+    // dropdown in the sidebar header. "Add workspace" is now a menu item
+    // (role=menuitem) inside that dropdown, reached by opening the picker
+    // via its `sidebar-workspace-trigger` button.
+    await testPage.getByTestId("sidebar-workspace-trigger").click();
+    await testPage.getByRole("menuitem", { name: "Add workspace" }).click();
     await expect(testPage).toHaveURL(/\/office\/setup\?mode=new/, { timeout: 10_000 });
     await expect(
       testPage.getByRole("heading", { name: "Set up your Office workspace" }),

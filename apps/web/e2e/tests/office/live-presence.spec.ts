@@ -31,15 +31,18 @@ test.describe("live presence", () => {
     expect(task.id).toBeTruthy();
 
     await testPage.goto("/office");
-    const sidebar = testPage.locator("aside, nav").first();
+    // Post-overhaul: the office Agents list lives in the unified AppSidebar
+    // (`<aside data-testid="app-sidebar">`). There is no longer a "Dashboard"
+    // sidebar nav row — the dashboard is reached via the "Home" link / topbar
+    // title. The CEO agent row carries the LiveAgentIndicator.
+    const sidebar = testPage.getByTestId("app-sidebar");
     await expect(sidebar.getByText("CEO").first()).toBeVisible({ timeout: 20_000 });
 
-    // Dashboard nav row reuses the same LiveAgentIndicator. We can't deterministically
-    // force RUNNING in CI, so soft-check: the badge MAY appear if the orchestrator
-    // launches and reaches RUNNING within the window. The render path was still
-    // exercised — the absence of a crash is the assertion.
-    const dashboardRow = sidebar.getByRole("link", { name: /Dashboard/i }).first();
-    await expect(dashboardRow).toBeVisible();
+    // The CEO agent row renders the same LiveAgentIndicator. We can't
+    // deterministically force RUNNING in CI, so soft-check: the badge MAY
+    // appear if the orchestrator launches and reaches RUNNING within the
+    // window. The render path was still exercised — the absence of a crash is
+    // the assertion.
     try {
       await expect(sidebar.getByText(/\d+ live/).first()).toBeVisible({
         timeout: 5_000,

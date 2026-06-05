@@ -11,6 +11,8 @@ test.describe("Task List", () => {
     await testPage.goto("/tasks");
     await testPage.waitForLoadState("networkidle");
 
-    await expect(testPage.getByText("Direct Navigate Task")).toBeVisible();
+    // The global AppSidebar also lists tasks (data-testid="sidebar-task-item"),
+    // so a bare getByText matches two elements. Scope to the page's data table.
+    await expect(testPage.getByRole("table").getByText("Direct Navigate Task")).toBeVisible();
   });
 });

@@ -93,7 +93,8 @@ test.describe("Improve Kandev dialog", () => {
 
     await testPage.goto("/");
 
-    await testPage.getByTestId("improve-kandev-button").first().click();
+    // Post-overhaul: the Improve Kandev opener moved to the AppSidebar footer.
+    await testPage.getByTestId("sidebar-improve-kandev-button").click();
 
     // Intro screen
     const introDialog = testPage.getByRole("dialog", { name: "Improve Kandev" });
@@ -144,7 +145,8 @@ test.describe("Improve Kandev dialog", () => {
     });
 
     await testPage.goto("/");
-    await testPage.getByTestId("improve-kandev-button").first().click();
+    // Post-overhaul: the Improve Kandev opener moved to the AppSidebar footer.
+    await testPage.getByTestId("sidebar-improve-kandev-button").click();
 
     const contribute = testPage.getByTestId("improve-kandev-proceed");
     await expect(contribute).toBeEnabled({ timeout: 10_000 });
@@ -175,7 +177,8 @@ test.describe("Improve Kandev dialog", () => {
     });
 
     await testPage.goto("/");
-    await testPage.getByTestId("improve-kandev-button").first().click();
+    // Post-overhaul: the Improve Kandev opener moved to the AppSidebar footer.
+    await testPage.getByTestId("sidebar-improve-kandev-button").click();
 
     const contribute = testPage.getByTestId("improve-kandev-proceed");
     await expect(contribute).toBeEnabled({ timeout: 10_000 });
@@ -209,7 +212,8 @@ test.describe("Improve Kandev dialog", () => {
     await mockImproveKandevApis(testPage, seedData);
 
     await testPage.goto("/");
-    await testPage.getByTestId("improve-kandev-button").first().click();
+    // Post-overhaul: the Improve Kandev opener moved to the AppSidebar footer.
+    await testPage.getByTestId("sidebar-improve-kandev-button").click();
 
     const contribute = testPage.getByTestId("improve-kandev-proceed");
     await expect(contribute).toBeEnabled({ timeout: 10_000 });
@@ -243,7 +247,8 @@ test.describe("Improve Kandev dialog", () => {
     await mockImproveKandevApis(testPage, seedData, { bootstrapHold });
 
     await testPage.goto("/");
-    await testPage.getByTestId("improve-kandev-button").first().click();
+    // Post-overhaul: the Improve Kandev opener moved to the AppSidebar footer.
+    await testPage.getByTestId("sidebar-improve-kandev-button").click();
 
     const contribute = testPage.getByTestId("improve-kandev-proceed");
     await expect(contribute).toBeEnabled({ timeout: 10_000 });

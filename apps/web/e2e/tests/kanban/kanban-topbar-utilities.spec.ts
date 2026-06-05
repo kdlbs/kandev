@@ -2,17 +2,26 @@ import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 
 test.describe("Kanban topbar utilities", () => {
-  test("settings is reachable directly from the topbar (no dropdown)", async ({ testPage }) => {
-    // Lock to desktop width — on tablet/mobile Settings lives inside the hamburger sheet.
+  // Post-overhaul: Settings is no longer a topbar link/dropdown. It lives behind
+  // the AppSidebar footer gear, which toggles a full-height settings takeover
+  // (the settings tree). From there each leaf navigates to a /settings/... page.
+  test("settings is reachable from the AppSidebar footer gear", async ({ testPage }) => {
+    // Lock to desktop width — the AppSidebar is desktop-only (`hidden md:flex`).
     await testPage.setViewportSize({ width: 1280, height: 800 });
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
-    const settingsButton = testPage.getByRole("link", { name: "Settings" });
-    await expect(settingsButton).toBeVisible();
+    const sidebar = testPage.getByTestId("app-sidebar");
+    await expect(sidebar).toBeVisible();
 
-    await settingsButton.click();
-    await expect(testPage).toHaveURL(/\/settings/);
+    // The footer gear toggles the settings takeover (the settings tree).
+    await sidebar.getByTestId("sidebar-settings-gear").click();
+    const settingsMode = testPage.getByTestId("app-sidebar-settings-mode");
+    await expect(settingsMode).toBeVisible();
+
+    // Clicking a settings leaf navigates to its /settings/... page.
+    await settingsMode.getByRole("link", { name: "Automations" }).click();
+    await expect(testPage).toHaveURL(/\/settings\//);
   });
 
   test("system health button is hidden when there are no issues", async ({ testPage, backend }) => {

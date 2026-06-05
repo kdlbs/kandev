@@ -277,9 +277,13 @@ test.describe("Session tab management — close behavior", () => {
 
     await session.clickTaskInSidebar("Delete Then Switch A");
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
-    await session.waitForLoad();
 
-    await expect(session.sessionTabBySessionId(session2Id)).toBeVisible({ timeout: 10_000 });
+    // After a delete-then-switch round-trip the restored env layout can land the
+    // chat panel as a non-active background tab in the right-column group, so the
+    // chat-visible `waitForLoad()` gate isn't reliable here. The test only cares
+    // that the remaining session tab is present (and the deleted one didn't come
+    // back), so gate on the surviving session tab instead.
+    await expect(session.sessionTabBySessionId(session2Id)).toBeVisible({ timeout: 15_000 });
     await testPage.waitForTimeout(800);
     await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible();
   });

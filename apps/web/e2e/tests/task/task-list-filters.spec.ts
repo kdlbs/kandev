@@ -2,7 +2,7 @@ import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import type { WorkflowStep } from "../../../lib/types/http";
 
 const TASK_VISIBLE_TIMEOUT = 10_000;
@@ -16,6 +16,15 @@ async function gotoTasksPage(page: Page): Promise<void> {
   // Wait for a header landmark instead of networkidle — persistent WebSocket
   // connections can keep the network "active" and make networkidle unreliable.
   await page.getByTestId("display-button").waitFor();
+}
+
+/**
+ * Task title within the /tasks page's data table. The global AppSidebar also
+ * lists tasks (data-testid="sidebar-task-item"), so a bare getByText matches
+ * two elements; scoping to the table targets the list this spec is asserting on.
+ */
+function taskInList(page: Page, title: string): Locator {
+  return page.getByRole("table").getByText(title);
 }
 
 async function pickListboxOption(page: Page, optionLabel: string): Promise<void> {
@@ -108,13 +117,13 @@ test.describe("Task list display filters", () => {
     await gotoTasksPage(testPage);
 
     // testPage fixture pre-selects seedData.workflowId — only Alpha is visible initially.
-    await expect(testPage.getByText("Alpha task")).toBeVisible({ timeout: TASK_VISIBLE_TIMEOUT });
-    await expect(testPage.getByText("Beta task")).not.toBeVisible();
+    await expect(taskInList(testPage, "Alpha task")).toBeVisible({ timeout: TASK_VISIBLE_TIMEOUT });
+    await expect(taskInList(testPage, "Beta task")).not.toBeVisible();
 
     await selectWorkflowFilter(testPage, "Workflow B");
 
-    await expect(testPage.getByText("Beta task")).toBeVisible({ timeout: TASK_VISIBLE_TIMEOUT });
-    await expect(testPage.getByText("Alpha task")).not.toBeVisible();
+    await expect(taskInList(testPage, "Beta task")).toBeVisible({ timeout: TASK_VISIBLE_TIMEOUT });
+    await expect(taskInList(testPage, "Alpha task")).not.toBeVisible();
   });
 
   test("'All Workflows' shows tasks from every workflow", async ({
@@ -136,13 +145,13 @@ test.describe("Task list display filters", () => {
     });
 
     await gotoTasksPage(testPage);
-    await expect(testPage.getByText("Alpha task")).toBeVisible({ timeout: TASK_VISIBLE_TIMEOUT });
-    await expect(testPage.getByText("Beta task")).not.toBeVisible();
+    await expect(taskInList(testPage, "Alpha task")).toBeVisible({ timeout: TASK_VISIBLE_TIMEOUT });
+    await expect(taskInList(testPage, "Beta task")).not.toBeVisible();
 
     await selectWorkflowFilter(testPage, "All Workflows");
 
-    await expect(testPage.getByText("Alpha task")).toBeVisible({ timeout: TASK_VISIBLE_TIMEOUT });
-    await expect(testPage.getByText("Beta task")).toBeVisible({ timeout: TASK_VISIBLE_TIMEOUT });
+    await expect(taskInList(testPage, "Alpha task")).toBeVisible({ timeout: TASK_VISIBLE_TIMEOUT });
+    await expect(taskInList(testPage, "Beta task")).toBeVisible({ timeout: TASK_VISIBLE_TIMEOUT });
   });
 
   test("'All Workflows' is preserved when navigating with workspace query param", async ({
@@ -175,8 +184,8 @@ test.describe("Task list display filters", () => {
     await testPage.goto(`/tasks?workspace=${seedData.workspaceId}`);
     await testPage.getByTestId("display-button").waitFor();
 
-    await expect(testPage.getByText("Alpha task")).toBeVisible({ timeout: TASK_VISIBLE_TIMEOUT });
-    await expect(testPage.getByText("Beta task")).toBeVisible({ timeout: TASK_VISIBLE_TIMEOUT });
+    await expect(taskInList(testPage, "Alpha task")).toBeVisible({ timeout: TASK_VISIBLE_TIMEOUT });
+    await expect(taskInList(testPage, "Beta task")).toBeVisible({ timeout: TASK_VISIBLE_TIMEOUT });
   });
 
   test("repository filter narrows the list to the selected repository", async ({
@@ -209,19 +218,19 @@ test.describe("Task list display filters", () => {
     });
 
     await gotoTasksPage(testPage);
-    await expect(testPage.getByText("Task on seed repo")).toBeVisible({
+    await expect(taskInList(testPage, "Task on seed repo")).toBeVisible({
       timeout: TASK_VISIBLE_TIMEOUT,
     });
-    await expect(testPage.getByText("Task on other repo")).toBeVisible();
-    await expect(testPage.getByText("Task with no repo")).toBeVisible();
+    await expect(taskInList(testPage, "Task on other repo")).toBeVisible();
+    await expect(taskInList(testPage, "Task with no repo")).toBeVisible();
 
     await selectRepositoryFilter(testPage, repoName);
 
-    await expect(testPage.getByText("Task on other repo")).toBeVisible({
+    await expect(taskInList(testPage, "Task on other repo")).toBeVisible({
       timeout: TASK_VISIBLE_TIMEOUT,
     });
-    await expect(testPage.getByText("Task on seed repo")).not.toBeVisible();
-    await expect(testPage.getByText("Task with no repo")).not.toBeVisible();
+    await expect(taskInList(testPage, "Task on seed repo")).not.toBeVisible();
+    await expect(taskInList(testPage, "Task with no repo")).not.toBeVisible();
   });
 
   test("'All repositories' restores tasks across all repositories", async ({
@@ -253,18 +262,18 @@ test.describe("Task list display filters", () => {
 
     await gotoTasksPage(testPage);
     await selectRepositoryFilter(testPage, repoName);
-    await expect(testPage.getByText("Task on seed repo")).not.toBeVisible();
-    await expect(testPage.getByText("Task on other repo")).toBeVisible({
+    await expect(taskInList(testPage, "Task on seed repo")).not.toBeVisible();
+    await expect(taskInList(testPage, "Task on other repo")).toBeVisible({
       timeout: TASK_VISIBLE_TIMEOUT,
     });
 
     await selectRepositoryFilter(testPage, "All repositories");
 
-    await expect(testPage.getByText("Task on seed repo")).toBeVisible({
+    await expect(taskInList(testPage, "Task on seed repo")).toBeVisible({
       timeout: TASK_VISIBLE_TIMEOUT,
     });
-    await expect(testPage.getByText("Task on other repo")).toBeVisible();
-    await expect(testPage.getByText("Task with no repo")).toBeVisible();
+    await expect(taskInList(testPage, "Task on other repo")).toBeVisible();
+    await expect(taskInList(testPage, "Task with no repo")).toBeVisible();
   });
 
   test("workflow + repository filters combine", async ({
@@ -301,19 +310,19 @@ test.describe("Task list display filters", () => {
 
     await gotoTasksPage(testPage);
     // Initial: workflow=seed, repo=all → T1 + T2.
-    await expect(testPage.getByText("T1 wf-A repo-1")).toBeVisible({
+    await expect(taskInList(testPage, "T1 wf-A repo-1")).toBeVisible({
       timeout: TASK_VISIBLE_TIMEOUT,
     });
-    await expect(testPage.getByText("T2 wf-A repo-2")).toBeVisible();
-    await expect(testPage.getByText("T3 wf-B repo-1")).not.toBeVisible();
+    await expect(taskInList(testPage, "T2 wf-A repo-2")).toBeVisible();
+    await expect(taskInList(testPage, "T3 wf-B repo-1")).not.toBeVisible();
 
     await selectRepositoryFilter(testPage, "E2E Repo");
 
     // Workflow=seed AND repo=seed → only T1.
-    await expect(testPage.getByText("T1 wf-A repo-1")).toBeVisible({
+    await expect(taskInList(testPage, "T1 wf-A repo-1")).toBeVisible({
       timeout: TASK_VISIBLE_TIMEOUT,
     });
-    await expect(testPage.getByText("T2 wf-A repo-2")).not.toBeVisible();
-    await expect(testPage.getByText("T3 wf-B repo-1")).not.toBeVisible();
+    await expect(taskInList(testPage, "T2 wf-A repo-2")).not.toBeVisible();
+    await expect(taskInList(testPage, "T3 wf-B repo-1")).not.toBeVisible();
   });
 });

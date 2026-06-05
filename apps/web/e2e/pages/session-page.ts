@@ -97,6 +97,28 @@ export class SessionPage {
   }
 
   /**
+   * Foreground the session chat and wait for it to be visible.
+   *
+   * After the unified AppSidebar overhaul, switching tasks via the sidebar
+   * restores each task's saved dockview env layout. That restored layout can
+   * land the chat panel as a *non-active* background tab in the right-column
+   * group (e.g. behind Files/Changes), so the chat is mounted but not visible
+   * and a plain `waitForLoad()` (which gates on `session-chat:visible`) times
+   * out. Clicking the session tab brings the chat to the foreground — exactly
+   * what a user does to read the conversation after switching tasks — and then
+   * we wait for the now-visible chat. No-op (still waits) when the chat is
+   * already foregrounded.
+   */
+  async showSessionContext(timeout = 15_000): Promise<void> {
+    const tab = this.page.locator("[data-testid^='session-tab-']").first();
+    await tab.waitFor({ state: "visible", timeout });
+    // Clicking a tab that's already active is harmless; clicking a background
+    // one promotes its panel to the foreground.
+    await tab.click();
+    await this.activeChat().waitFor({ state: "visible", timeout });
+  }
+
+  /**
    * Wait for the chat to be idle (input placeholder visible, agent not busy).
    *
    * On mobile-chrome (and occasionally desktop), there's a WS subscribe race:

@@ -151,6 +151,14 @@ test.describe("Session layout", () => {
     const closeBtn = terminalTab.locator(".dv-default-tab-action");
     await closeBtn.click();
 
+    // Closing a terminal that looks busy now pops a "Close terminal?" confirmation
+    // (CloseTerminalConfirmDialog) — the test typed a command into the shell, so it
+    // trips the busy heuristic. Confirm it so the destroy-on-close proceeds.
+    const closeTerminalDialog = testPage.getByRole("alertdialog", { name: "Close terminal?" });
+    await expect(closeTerminalDialog).toBeVisible({ timeout: 5_000 });
+    await closeTerminalDialog.getByRole("button", { name: "Close terminal" }).click();
+    await expect(closeTerminalDialog).not.toBeVisible({ timeout: 5_000 });
+
     // Should exit maximize and restore default layout minus the closed terminal
     await expect(session.chat).toBeVisible({ timeout: 10_000 });
     await expect(session.files).toBeVisible({ timeout: 10_000 });

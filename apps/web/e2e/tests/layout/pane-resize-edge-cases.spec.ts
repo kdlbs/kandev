@@ -3,24 +3,16 @@ import {
   WIDE_VIEWPORT,
   openWideTask,
   expectApproxWidth,
-  getColumnSashIndex,
   getDockviewGroupWidth,
   resizeColumnViaSplitview,
 } from "../../helpers/dockview-resize";
 
+// The "double-click on sidebar sash does not crash dockview" test was removed:
+// the dockview-embedded sidebar column was retired in the unified AppSidebar
+// overhaul, so there is no sidebar sash to interact with anymore. The remaining
+// edge cases exercise the RIGHT (files/changes/terminal) column, which is still
+// resizable.
 test.describe("Pane resize edge cases", () => {
-  test("double-click on sidebar sash does not crash dockview", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    const session = await openWideTask(testPage, apiClient, seedData, "Edge dblclick");
-    const sashIdx = await getColumnSashIndex(testPage, "sidebar");
-    const sash = testPage.locator(".dv-sash").nth(sashIdx);
-    await sash.dblclick();
-    await session.expectLayoutHealthy();
-  });
-
   test("resize during maximize does not corrupt the pre-maximize width", async ({
     testPage,
     apiClient,

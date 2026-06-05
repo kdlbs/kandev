@@ -7,10 +7,11 @@ test.describe("Sidebar live agent indicator", () => {
   }) => {
     await testPage.goto("/office");
 
-    // The CEO agent appears in the sidebar Agents section. With no active
-    // task sessions it should render the static AgentStatusDot, NOT the
-    // emerald pulsing dot + "{N} live" badge.
-    const sidebar = testPage.locator("aside, nav").first();
+    // The CEO agent appears in the unified AppSidebar's Agents section
+    // (`<aside data-testid="app-sidebar">`). With no active task sessions it
+    // should render the static AgentStatusDot, NOT the emerald pulsing dot +
+    // "{N} live" badge (LiveAgentIndicator).
+    const sidebar = testPage.getByTestId("app-sidebar");
     await expect(sidebar.getByText("CEO").first()).toBeVisible({ timeout: 10_000 });
     await expect(sidebar.getByText(/\d+ live/)).toHaveCount(0);
   });
@@ -31,7 +32,7 @@ test.describe("Sidebar live agent indicator", () => {
     expect(task.id).toBeTruthy();
 
     await testPage.goto("/office");
-    const sidebar = testPage.locator("aside, nav").first();
+    const sidebar = testPage.getByTestId("app-sidebar");
     await expect(sidebar.getByText("CEO").first()).toBeVisible({ timeout: 10_000 });
 
     // The badge MAY appear if the orchestrator launches a session that

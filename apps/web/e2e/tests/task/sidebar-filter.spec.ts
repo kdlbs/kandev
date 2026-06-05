@@ -1,6 +1,14 @@
 /**
  * E2E tests for the composable sidebar filter / sort / group system + saved views.
  *
+ * After the unified AppSidebar overhaul, the filter UI lives in the AppSidebar
+ * Tasks-section header as the `TasksViewPicker` (a view-picker dropdown +
+ * filter gear) rather than the legacy `sidebar-filter-bar`. The picker is
+ * visible whenever the Tasks section is expanded, which it is by default and on
+ * `/t/` routes. The `SidebarFilterPopoverPage` page object encapsulates the new
+ * surface (see its docstring). Saved-view chips now live inside the picker's
+ * dropdown menu instead of an always-visible chip row.
+ *
  * Coverage:
  *   - Gear popover open/close
  *   - Default "All tasks" view is seeded for new users
@@ -11,6 +19,11 @@
  *   - Persistence across reload
  *   - Draft semantics + discard
  *   - Last-view deletion guard
+ *
+ * NOTE: Drag-to-reorder of saved views was removed by the overhaul — the views
+ * are now dropdown-menu items, not a sortable chip row. The "view ordering"
+ * tests that depended on dragging are dropped / adapted accordingly (see the
+ * "view ordering" describe block).
  */
 import path from "node:path";
 import fs from "node:fs";
@@ -62,19 +75,6 @@ async function saveTitleView(
   await filters.close();
 }
 
-async function expectStoredSidebarViewOrder(
-  apiClient: import("../../helpers/api-client").ApiClient,
-  names: string[],
-): Promise<void> {
-  await expect
-    .poll(async () => {
-      const response = await apiClient.getUserSettings();
-      const views = (response.settings.sidebar_views ?? []) as Array<{ name: string }>;
-      return views.map((view) => view.name);
-    })
-    .toEqual(names);
-}
-
 test.describe("Sidebar filter bar — popover basics", () => {
   test("gear opens popover; ESC closes it", async ({ testPage, apiClient, seedData }) => {
     const { filters } = await openWithSeed(testPage, apiClient, seedData, ["Basics Task"]);
@@ -90,7 +90,8 @@ test.describe("Sidebar filter bar — popover basics", () => {
     seedData,
   }) => {
     const { filters } = await openWithSeed(testPage, apiClient, seedData, ["Chip Task"]);
-    const chips = filters.chipRow.getByTestId("sidebar-view-chip");
+    await filters.openViewPicker();
+    const chips = filters.chipMenu.getByTestId("sidebar-view-chip");
     await expect(chips).toHaveCount(1);
     await expect(chips.filter({ hasText: "All tasks" })).toBeVisible();
   });
@@ -116,36 +117,16 @@ test.describe("Sidebar filter bar — popover basics", () => {
 });
 
 test.describe("Sidebar filter — view ordering", () => {
-  test("dragged view order persists to settings and survives reload", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    const { filters } = await openWithSeed(testPage, apiClient, seedData, [
-      "Order alpha task",
-      "Order beta task",
-      "Order gamma task",
-    ]);
-    await saveTitleView(filters, "Alpha View", "alpha");
-    await saveTitleView(filters, "Beta View", "beta");
-    await saveTitleView(filters, "Gamma View", "gamma");
-    await filters.expectChipOrder(["All tasks", "Alpha View", "Beta View", "Gamma View"]);
+  // The "dragged view order persists to settings and survives reload" test was
+  // DELETED in the AppSidebar overhaul: saved views moved from a horizontal,
+  // drag-sortable `sidebar-view-chip-row` into the `TasksViewPicker` dropdown
+  // menu. Dropdown menu items are not sortable, so there is no longer a
+  // drag-to-reorder affordance to exercise. The underlying store action
+  // (reorderSidebarViews) still exists but has no UI entry point, so an E2E
+  // test would have nothing to drive. Re-add coverage if a reorder affordance
+  // returns to the picker.
 
-    await filters.dragViewBefore("Gamma View", "All tasks");
-
-    const reorderedNames = ["Gamma View", "All tasks", "Alpha View", "Beta View"];
-    await filters.expectChipOrder(reorderedNames);
-    await expectStoredSidebarViewOrder(apiClient, reorderedNames);
-
-    await testPage.reload();
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
-    const filters2 = new SidebarFilterPopoverPage(testPage);
-    await filters2.expectChipOrder(reorderedNames);
-    await filters2.expectActiveViewChip("Gamma View");
-  });
-
-  test("reordered views still select, delete, and append normally", async ({
+  test("appended views select, delete, and append normally", async ({
     testPage,
     apiClient,
     seedData,
@@ -158,8 +139,8 @@ test.describe("Sidebar filter — view ordering", () => {
     await saveTitleView(filters, "Alpha View", "alpha");
     await saveTitleView(filters, "Beta View", "beta");
     await saveTitleView(filters, "Gamma View", "gamma");
-    await filters.dragViewBefore("Gamma View", "All tasks");
-    await filters.expectChipOrder(["Gamma View", "All tasks", "Alpha View", "Beta View"]);
+    // Views append in creation order after the default "All tasks".
+    await filters.expectChipOrder(["All tasks", "Alpha View", "Beta View", "Gamma View"]);
 
     await filters.selectViewByName("Alpha View");
     await filters.expectActiveViewChip("Alpha View");
@@ -169,11 +150,12 @@ test.describe("Sidebar filter — view ordering", () => {
     await filters.selectViewByName("Beta View");
     await filters.open();
     await filters.deleteActiveView();
-    await filters.expectChipOrder(["Gamma View", "All tasks", "Alpha View"]);
-    await filters.expectActiveViewChip("Gamma View");
+    await filters.expectChipOrder(["All tasks", "Alpha View", "Gamma View"]);
+    // Deleting the active view falls back to the first remaining view.
+    await filters.expectActiveViewChip("All tasks");
 
     await saveTitleView(filters, "Delta View", "delta");
-    await filters.expectChipOrder(["Gamma View", "All tasks", "Alpha View", "Delta View"]);
+    await filters.expectChipOrder(["All tasks", "Alpha View", "Gamma View", "Delta View"]);
     await filters.expectActiveViewChip("Delta View");
   });
 });
@@ -271,9 +253,12 @@ test.describe("Sidebar filter — saved views CRUD", () => {
     await filters.expectActiveViewChip("My View");
 
     await testPage.reload();
+    const session2 = new SessionPage(testPage);
+    await session2.waitForLoad();
     const f2 = new SidebarFilterPopoverPage(testPage);
+    await f2.openViewPicker();
     await expect(
-      f2.chipRow.getByTestId("sidebar-view-chip").filter({ hasText: "My View" }),
+      f2.chipMenu.getByTestId("sidebar-view-chip").filter({ hasText: "My View" }),
     ).toBeVisible();
   });
 
@@ -291,9 +276,12 @@ test.describe("Sidebar filter — saved views CRUD", () => {
 
     await filters.open();
     await filters.deleteActiveView();
+    await filters.close();
+    await filters.openViewPicker();
     await expect(
-      filters.chipRow.getByTestId("sidebar-view-chip").filter({ hasText: "Ephemeral" }),
+      filters.chipMenu.getByTestId("sidebar-view-chip").filter({ hasText: "Ephemeral" }),
     ).toHaveCount(0);
+    await filters.closeViewPicker();
     await filters.expectActiveViewChip("All tasks");
   });
 
