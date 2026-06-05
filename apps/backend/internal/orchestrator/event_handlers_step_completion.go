@@ -31,16 +31,6 @@ func (s *Service) handleStepCompletionSignaled(ctx context.Context, event *bus.E
 	return nil
 }
 
-// stringFromAny narrows an `interface{}` slot to a string, returning "" when
-// the value is absent or of a different type. Used to decode event-payload
-// scalars (which always arrive typed as `map[string]interface{}`).
-func stringFromAny(v interface{}) string {
-	if s, ok := v.(string); ok {
-		return s
-	}
-	return ""
-}
-
 // clearPendingStepSignal removes the pending bag entry from the session's
 // metadata, both in-memory (so callers operating on the same struct see it
 // gone) and in the DB (so a later reload doesn't resurrect a stale entry).
@@ -149,9 +139,9 @@ func parseStepCompletionEvent(event *bus.Event) (taskID, sessionID, stepID strin
 	if !isMap {
 		return "", "", "", false
 	}
-	taskID = stringFromAny(data["task_id"])
-	sessionID = stringFromAny(data["session_id"])
-	stepID = stringFromAny(data["step_id"])
+	taskID = models.StringFromAny(data["task_id"])
+	sessionID = models.StringFromAny(data["session_id"])
+	stepID = models.StringFromAny(data["step_id"])
 	if taskID == "" || sessionID == "" || stepID == "" {
 		return "", "", "", false
 	}

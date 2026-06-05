@@ -282,6 +282,49 @@ func TestOnStepCompletionSignaled(t *testing.T) {
 		}
 	})
 
+	t.Run("stale event → valid bag for CURRENT step is preserved", func(t *testing.T) {
+		// Pins the negative side of the StepID guard in the subscriber's
+		// stale-step branch: a late step-A event must not erase a
+		// freshly-written step-B bag (which can happen when the session
+		// is reused across steps without auto_start_agent). A regression
+		// here would silently leave signal-gated steps stuck waiting.
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step_current")
+		if err := repo.UpdateTaskSessionState(ctx, "s1", models.TaskSessionStateWaitingForInput, ""); err != nil {
+			t.Fatalf("flip session waiting: %v", err)
+		}
+		// Bag holds a VALID signal for the current step (step_current).
+		valid := models.PendingStepCompletionSignal{
+			StepID:     "step_current",
+			Source:     models.StepCompletionSourceAgent,
+			Summary:    "valid current-step signal",
+			SignaledAt: time.Now().UTC(),
+		}
+		if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, valid); err != nil {
+			t.Fatalf("seed valid signal: %v", err)
+		}
+
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step_current"] = &wfmodels.WorkflowStep{
+			ID: "step_current", WorkflowID: "wf1", Name: "Current", Position: 5,
+		}
+		svc := createTestService(repo, stepGetter, newMockTaskRepo())
+
+		// Fire a STALE event (step_old != current step_current). The
+		// guard must see that the bag's StepID is "step_current" (not
+		// "step_old") and leave it alone.
+		svc.onStepCompletionSignaled(ctx, buildEvent("t1", "s1", "step_old"))
+
+		updatedSession, _ := repo.GetTaskSession(ctx, "s1")
+		bag, hasBag := models.LoadPendingStepSignal(updatedSession.Metadata)
+		if !hasBag {
+			t.Fatal("expected valid bag to survive stale event")
+		}
+		if bag.StepID != "step_current" {
+			t.Errorf("expected bag StepID=step_current, got %q", bag.StepID)
+		}
+	})
+
 	t.Run("step not signal-gated → subscriber ignores", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")

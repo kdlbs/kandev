@@ -123,11 +123,11 @@ func LoadPendingStepSignal(metadata map[string]interface{}) (PendingStepCompleti
 		return v, true
 	case map[string]interface{}:
 		out := PendingStepCompletionSignal{
-			StepID:   pendingSignalString(v["step_id"]),
-			Source:   pendingSignalString(v["source"]),
-			Summary:  pendingSignalString(v["summary"]),
-			Handoff:  pendingSignalString(v["handoff"]),
-			Blockers: pendingSignalString(v["blockers"]),
+			StepID:   StringFromAny(v["step_id"]),
+			Source:   StringFromAny(v["source"]),
+			Summary:  StringFromAny(v["summary"]),
+			Handoff:  StringFromAny(v["handoff"]),
+			Blockers: StringFromAny(v["blockers"]),
 		}
 		if ts, ok := v["signaled_at"].(string); ok {
 			if parsed, err := time.Parse(time.RFC3339Nano, ts); err == nil {
@@ -139,7 +139,12 @@ func LoadPendingStepSignal(metadata map[string]interface{}) (PendingStepCompleti
 	return PendingStepCompletionSignal{}, false
 }
 
-func pendingSignalString(v interface{}) string {
+// StringFromAny narrows an interface{} slot to a string, returning "" when
+// the value is absent or of a different type. Used by both the
+// PendingStepCompletionSignal map-shape decoder and the orchestrator's
+// step-completion event-payload parser — single source of truth so the
+// two decoders can't drift on what counts as a "missing string".
+func StringFromAny(v interface{}) string {
 	if s, ok := v.(string); ok {
 		return s
 	}
