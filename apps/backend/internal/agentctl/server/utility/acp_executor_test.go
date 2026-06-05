@@ -31,6 +31,46 @@ func TestResolveProbeCommand_RejectsUnknown(t *testing.T) {
 	}
 }
 
+func TestIsOpenCodeACPCommand(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		command []string
+		want    bool
+	}{
+		{name: "opencode acp", command: []string{"opencode", "acp"}, want: true},
+		{name: "path opencode acp", command: []string{filepath.Join("/usr/local/bin", "opencode"), "acp"}, want: true},
+		{name: "opencode non acp", command: []string{"opencode", "run"}, want: false},
+		{name: "too short", command: []string{"opencode"}, want: false},
+		{name: "other acp", command: []string{"claude", "acp"}, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := isOpenCodeACPCommand(tt.command); got != tt.want {
+				t.Fatalf("isOpenCodeACPCommand(%v) = %v, want %v", tt.command, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseOpenCodeModelsOutput(t *testing.T) {
+	t.Parallel()
+
+	got := parseOpenCodeModelsOutput("\nopenai/gpt-5.5\nanthropic/claude-sonnet-4-5\nopenai/gpt-5.5\n")
+	want := []ProbeModel{
+		{ID: "openai/gpt-5.5", Name: "openai/gpt-5.5"},
+		{ID: "anthropic/claude-sonnet-4-5", Name: "anthropic/claude-sonnet-4-5"},
+	}
+	if !slices.EqualFunc(got, want, func(a, b ProbeModel) bool {
+		return a.ID == b.ID && a.Name == b.Name && a.Description == b.Description
+	}) {
+		t.Fatalf("parseOpenCodeModelsOutput() = %#v, want %#v", got, want)
+	}
+}
+
 func TestSanitizeInferenceChunk_DropsPiVersionBanner(t *testing.T) {
 	t.Parallel()
 

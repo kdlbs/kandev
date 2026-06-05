@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -325,10 +326,55 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 			DurationMs: int(time.Since(startTime).Milliseconds()),
 		}, nil
 	}
+	if len(resp.Models) == 0 && isOpenCodeACPCommand(cfg.Command) {
+		e.applyOpenCodeModelsFallback(ctx, resp, resolvedCmd, workDir)
+	}
 
 	resp.Success = true
 	resp.DurationMs = int(time.Since(startTime).Milliseconds())
 	return resp, nil
+}
+
+func isOpenCodeACPCommand(command []string) bool {
+	return len(command) >= 2 && filepath.Base(command[0]) == "opencode" && command[1] == "acp"
+}
+
+func (e *ACPInferenceExecutor) applyOpenCodeModelsFallback(ctx context.Context, resp *ProbeResponse, resolvedCmd, workDir string) {
+	models, err := probeOpenCodeModels(ctx, resolvedCmd, workDir)
+	if err != nil {
+		e.logger.Warn("ACP probe: failed to list opencode models", zap.Error(err))
+		return
+	}
+	resp.Models = models
+}
+
+func probeOpenCodeModels(ctx context.Context, resolvedCmd, workDir string) ([]ProbeModel, error) {
+	//nolint:gosec // resolvedCmd is from the same hard-coded allow-list used to launch the ACP probe.
+	cmd := exec.CommandContext(ctx, resolvedCmd, "models")
+	cmd.Dir = workDir
+	cmd.Env = append(os.Environ(), "NO_COLOR=1")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	return parseOpenCodeModelsOutput(string(out)), nil
+}
+
+func parseOpenCodeModelsOutput(output string) []ProbeModel {
+	seen := make(map[string]struct{})
+	var models []ProbeModel
+	for _, line := range strings.Split(output, "\n") {
+		id := strings.TrimSpace(line)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		models = append(models, ProbeModel{ID: id, Name: id})
+	}
+	return models
 }
 
 // probeACPSession performs initialize + session/new and returns the parsed
