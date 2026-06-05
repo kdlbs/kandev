@@ -255,8 +255,10 @@ export function TurnCompleteSelect({
 
 // ADR 0015 explicit-completion-signal UI (the "Wait for agent completion
 // signal" toggle) is deferred to a follow-up PR. The backend column ships
-// here so workflow steps can opt in via the workflow-import/export YAML or
-// the MCP `update_workflow_step_kandev` tool. Direct toggle in the
-// pipeline editor needs its own iteration to avoid an unrelated E2E
-// flake in `workflow-agent-profile.spec.ts` caused by additional UI
-// shifting the Radix select dropdown into a sibling tooltip's hover path.
+// here so workflow steps can opt in via the MCP
+// `update_workflow_step_kandev` tool. The pipeline-editor toggle needs its
+// own iteration to avoid an unrelated E2E flake in
+// `workflow-agent-profile.spec.ts` caused by additional UI shifting the
+// Radix select dropdown into a sibling tooltip's hover path. The workflow
+// import/export YAML also needs to be extended to serialize this flag in
+// the follow-up so the toggle setting round-trips through export.
