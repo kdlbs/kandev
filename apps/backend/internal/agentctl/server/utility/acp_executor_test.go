@@ -31,6 +31,8 @@ func TestResolveProbeCommand_RejectsUnknown(t *testing.T) {
 	}
 }
 
+// TestIsOpenCodeACPCommand verifies that the fallback only applies to
+// OpenCode's ACP transport command.
 func TestIsOpenCodeACPCommand(t *testing.T) {
 	t.Parallel()
 
@@ -56,6 +58,8 @@ func TestIsOpenCodeACPCommand(t *testing.T) {
 	}
 }
 
+// TestParseOpenCodeModelsOutput verifies parsing, deduplication, and filtering
+// of non-model lines from OpenCode CLI output.
 func TestParseOpenCodeModelsOutput(t *testing.T) {
 	t.Parallel()
 
@@ -72,6 +76,8 @@ func TestParseOpenCodeModelsOutput(t *testing.T) {
 	}
 }
 
+// TestEnvironWithNoColorOverridesExistingValue verifies that NO_COLOR=1 wins
+// over any pre-existing environment value.
 func TestEnvironWithNoColorOverridesExistingValue(t *testing.T) {
 	t.Parallel()
 
@@ -82,6 +88,8 @@ func TestEnvironWithNoColorOverridesExistingValue(t *testing.T) {
 	}
 }
 
+// TestIsOpenCodeModelID verifies the lightweight format guard for OpenCode
+// model IDs parsed from CLI output.
 func TestIsOpenCodeModelID(t *testing.T) {
 	t.Parallel()
 
