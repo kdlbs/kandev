@@ -167,6 +167,13 @@ func TestHandleStepComplete_FirstCallAccepted(t *testing.T) {
 	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
 	assert.Equal(t, true, payload["accepted"])
 	assert.Equal(t, "step-1", payload["step_id"])
+	// signaled_at is part of the documented response contract — pin its
+	// presence + RFC3339Nano shape so a future refactor can't silently
+	// drop or rename the field.
+	signaledAt, ok := payload["signaled_at"].(string)
+	require.True(t, ok, "expected signaled_at string in response payload")
+	_, parseErr := time.Parse(time.RFC3339Nano, signaledAt)
+	require.NoError(t, parseErr, "signaled_at must be RFC3339Nano")
 
 	// Bag written under the canonical key.
 	session, err := repo.GetTaskSession(context.Background(), "session-first")

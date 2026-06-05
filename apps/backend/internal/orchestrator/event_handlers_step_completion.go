@@ -53,9 +53,19 @@ func (s *Service) clearPendingStepSignal(ctx context.Context, session *models.Ta
 	if session.Metadata != nil {
 		delete(session.Metadata, models.SessionMetaKeyPendingStepCompletion)
 	}
-	if err := s.repo.SetSessionMetadataKey(ctx, session.ID, models.SessionMetaKeyPendingStepCompletion, nil); err != nil {
-		s.logger.Debug("clearPendingStepSignal: failed to persist nil bag entry (in-memory cleared)",
-			zap.String("session_id", session.ID), zap.Error(err))
+	s.clearPendingStepSignalByID(ctx, session.ID)
+}
+
+// clearPendingStepSignalByID issues only the DB write — skip when the
+// caller has no in-memory session struct to update (or already discarded
+// it). Same best-effort failure handling as clearPendingStepSignal.
+func (s *Service) clearPendingStepSignalByID(ctx context.Context, sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	if err := s.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyPendingStepCompletion, nil); err != nil {
+		s.logger.Debug("clearPendingStepSignal: failed to persist nil bag entry",
+			zap.String("session_id", sessionID), zap.Error(err))
 	}
 }
 

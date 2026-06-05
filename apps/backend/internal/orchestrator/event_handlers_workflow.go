@@ -278,11 +278,11 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	// just left. Only on_turn_complete transitions trigger gating, so the
 	// triggerOnEnter=true branch is the only one that could have consumed
 	// a signal; on_turn_start moves leave the bag alone (it's still tied
-	// to an unsignaled step we have not left).
+	// to an unsignaled step we have not left). The session struct isn't
+	// used after this point, so skip the extra GetTaskSession round-trip
+	// and write straight to the DB by session_id.
 	if triggerOnEnter {
-		if sessionForClear, err := s.repo.GetTaskSession(ctx, sessionID); err == nil {
-			s.clearPendingStepSignal(ctx, sessionForClear)
-		}
+		s.clearPendingStepSignalByID(ctx, sessionID)
 	}
 
 	if triggerOnEnter {
