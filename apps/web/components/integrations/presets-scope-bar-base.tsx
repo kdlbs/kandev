@@ -140,13 +140,16 @@ function SavedMenu<K extends string>({
           saved.map((s) => (
             <DropdownMenuItem
               key={s.id}
-              onClick={() => onSelect({ kind: s.kind, source: "saved", id: s.id })}
+              onSelect={() => onSelect({ kind: s.kind, source: "saved", id: s.id })}
               className="group/saved cursor-pointer gap-2"
             >
               <IconBookmark className="h-3.5 w-3.5 shrink-0" />
               <span className="flex-1 truncate">{s.label}</span>
               <button
                 type="button"
+                // Stop the pointerdown so Radix doesn't treat the delete click
+                // as a select of the (about-to-be-deleted) saved query.
+                onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
                   onDeleteSaved(s.id);
@@ -162,7 +165,7 @@ function SavedMenu<K extends string>({
         <DropdownMenuSeparator />
         <DropdownMenuItem
           disabled={!canSaveCurrent}
-          onClick={onSaveCurrent}
+          onSelect={onSaveCurrent}
           className={cn("gap-2", canSaveCurrent && "cursor-pointer")}
         >
           <IconDeviceFloppy className="h-3.5 w-3.5 shrink-0" />
