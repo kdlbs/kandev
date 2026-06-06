@@ -2,6 +2,28 @@
 
 All notable changes to Kandev.
 
+## 0.56.0 - 2026-06-06
+
+### Features
+
+- explicit step-completion signal for auto-advance ([#1276](https://github.com/kdlbs/kandev/pull/1276))
+- search tasks by PR number in command panel ([#1268](https://github.com/kdlbs/kandev/pull/1268))
+- use stored base_branch for diff stats + per-task compare picker ([#1273](https://github.com/kdlbs/kandev/pull/1273))
+- add Sentry integration with issue watcher ([#1133](https://github.com/kdlbs/kandev/pull/1133)) by @nlenepveu
+- accept repository_url and local_path on add_branch_to_task_kandev ([#1256](https://github.com/kdlbs/kandev/pull/1256))
+
+### Bug Fixes
+
+- exclude archived tasks from repository delete guard ([#1274](https://github.com/kdlbs/kandev/pull/1274)) by @nlenepveu
+- order workspace stream wg.Add before publish to fix Close race ([#1272](https://github.com/kdlbs/kandev/pull/1272))
+- prevent cross-task session leak in dockview layout switch ([#1265](https://github.com/kdlbs/kandev/pull/1265))
+- use claude-acp as default inference agent id ([#1271](https://github.com/kdlbs/kandev/pull/1271))
+- rmdir empty task parent after worktree removal ([#1267](https://github.com/kdlbs/kandev/pull/1267))
+- unblock next prompt when agent does not acknowledge cancel ([#1259](https://github.com/kdlbs/kandev/pull/1259))
+- surface add_branch_to_task failures instead of silent orphans ([#1264](https://github.com/kdlbs/kandev/pull/1264))
+- drain StreamManager goroutines in tests ([#1227](https://github.com/kdlbs/kandev/pull/1227))
+- emit --dangerously-skip-permissions for Claude CLI passthrough ([#1262](https://github.com/kdlbs/kandev/pull/1262))
+
 ## 0.55.0 - 2026-06-02
 
 ### Features
