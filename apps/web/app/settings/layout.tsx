@@ -1,12 +1,14 @@
 import { SettingsLayoutClient } from "@/components/settings/settings-layout-client";
 import { StateHydrator } from "@/components/state-hydrator";
 import {
+  fetchUserSettings,
   listAgentDiscovery,
   listAgents,
   listAvailableAgents,
   listExecutors,
   listWorkspaces,
 } from "@/lib/api";
+import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
@@ -19,13 +21,20 @@ async function SettingsLayoutServer({ children }: { children: React.ReactNode })
     // Fetch discovery + available agents alongside the DB-backed list so a
     // hard refresh of /settings/agents/[name] (where no profile exists yet)
     // can still render the agent from the discovered set.
-    const [workspaces, executors, agents, discovery, available] = await Promise.all([
-      listWorkspaces({ cache: "no-store" }),
-      listExecutors({ cache: "no-store" }),
-      listAgents({ cache: "no-store" }),
-      listAgentDiscovery({ cache: "no-store" }),
-      listAvailableAgents({ cache: "no-store" }),
-    ]);
+    const [workspaces, executors, agents, discovery, available, userSettingsResponse] =
+      await Promise.all([
+        listWorkspaces({ cache: "no-store" }),
+        listExecutors({ cache: "no-store" }),
+        listAgents({ cache: "no-store" }),
+        listAgentDiscovery({ cache: "no-store" }),
+        listAvailableAgents({ cache: "no-store" }),
+        fetchUserSettings({ cache: "no-store" }).catch(() => null),
+      ]);
+    // Hydrate userSettings into the ROOT store so app-global, override-driven
+    // shortcuts (TOGGLE_SIDEBAR, Quick Chat) work on settings routes too. The
+    // settings/general page mounts its own nested store for editing; that store
+    // is invisible to the root-mounted GlobalCommands/useAppShortcuts.
+    const mappedUserSettings = mapUserSettingsResponse(userSettingsResponse);
     initialState = {
       workspaces: {
         items: workspaces.workspaces.map((workspace) => ({
@@ -64,6 +73,14 @@ async function SettingsLayoutServer({ children }: { children: React.ReactNode })
         executorsLoaded: true,
         agentsLoaded: true,
       },
+      ...(mappedUserSettings.loaded
+        ? {
+            userSettings: {
+              ...mappedUserSettings,
+              workspaceId: workspaces.workspaces[0]?.id ?? null,
+            },
+          }
+        : {}),
     };
   } catch {
     initialState = {};
