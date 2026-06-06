@@ -83,6 +83,10 @@ async function SettingsLayoutServer({ children }: { children: React.ReactNode })
         : {}),
     };
   } catch {
+    // If any non-settings fetch (workspaces, executors, agents, …) throws, we
+    // render with empty initial state — losing the userSettings overrides too.
+    // That's acceptable: the page is already degraded (no executors/agents), so
+    // override-driven shortcuts being inactive until client hydration is fine.
     initialState = {};
   }
 

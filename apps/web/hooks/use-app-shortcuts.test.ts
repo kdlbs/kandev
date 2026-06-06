@@ -23,16 +23,17 @@ const CTRL_B_OVERRIDE: StoredShortcutOverrides = {
   TOGGLE_SIDEBAR: { key: "b", modifiers: { ctrlOrCmd: true } },
 };
 
-function pressCtrlB(target: EventTarget = window): KeyboardEvent {
-  const event = new KeyboardEvent("keydown", {
-    key: "b",
-    ctrlKey: true,
-    bubbles: true,
-    cancelable: true,
-  });
+function pressB(modifier: "ctrlKey" | "metaKey", target: EventTarget = window): KeyboardEvent {
+  const init: KeyboardEventInit = { key: "b", bubbles: true, cancelable: true };
+  init[modifier] = true;
+  const event = new KeyboardEvent("keydown", init);
   target.dispatchEvent(event);
   return event;
 }
+
+// Cover both `ctrlOrCmd` branches: Ctrl on Windows/Linux, Cmd (metaKey) on macOS.
+const pressCtrlB = (target?: EventTarget) => pressB("ctrlKey", target);
+const pressMetaB = (target?: EventTarget) => pressB("metaKey", target);
 
 describe("useAppShortcuts", () => {
   beforeEach(() => {
@@ -55,6 +56,15 @@ describe("useAppShortcuts", () => {
     renderHook(() => useAppShortcuts());
 
     const event = pressCtrlB();
+    expect(mockToggleAppSidebar).toHaveBeenCalledTimes(1);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("toggles the sidebar with Cmd (metaKey) too — the macOS path", () => {
+    mockShortcuts = CTRL_B_OVERRIDE;
+    renderHook(() => useAppShortcuts());
+
+    const event = pressMetaB();
     expect(mockToggleAppSidebar).toHaveBeenCalledTimes(1);
     expect(event.defaultPrevented).toBe(true);
   });
