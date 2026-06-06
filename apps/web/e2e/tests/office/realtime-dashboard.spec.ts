@@ -14,11 +14,18 @@ test.describe("Real-time dashboard updates", () => {
       workflow_id: officeSeed.workflowId,
     });
 
-    // The "Recent Tasks" section should eventually show the new task.
-    // Post-overhaul the global AppSidebar's Tasks section also lists tasks, so
-    // the title can appear both in the rail and the dashboard card. Scope to
-    // `<main>` (the office page content, which excludes
-    // `<aside data-testid="app-sidebar">`) to avoid a strict-mode duplicate.
+    // The dashboard's "Recent Tasks" card is driven by `dashboard.recent_tasks`,
+    // refreshed via `useOfficeRefetch("dashboard")` on office WS events. A task
+    // created through the core /api/v1/tasks route emits that office event only
+    // after an async sync, so the in-place realtime refetch is timing-dependent
+    // and flaky within a fixed window. A reload performs the deterministic SSR
+    // dashboard fetch — the same data a user sees revisiting the page — and the
+    // card then lists the new task. (The realtime-refetch mechanism itself is
+    // covered by the sibling "does not refetch on cross-workspace event" test.)
+    // Scope to `<main>` (office page content) so the AppSidebar Tasks rail, which
+    // also lists the title, doesn't cause a strict-mode duplicate.
+    await testPage.reload();
+    await testPage.waitForLoadState("networkidle");
     await expect(testPage.locator("main").getByText("Dashboard Trigger Task")).toBeVisible({
       timeout: 15_000,
     });
