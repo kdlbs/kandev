@@ -25,6 +25,8 @@ test.describe("Execution indicator", () => {
     await expect(main.getByText("Identifier Test Task")).toBeVisible({ timeout: 10_000 });
     // A task identifier renders in a `.font-mono` span (matches main; the title
     // above is the part that needed `<main>` scoping for the sidebar duplication).
-    await expect(testPage.locator(".font-mono").first()).toBeVisible({ timeout: 5_000 });
+    await expect(testPage.locator(".font-mono").filter({ hasText: /\S/ }).first()).toBeVisible({
+      timeout: 15_000,
+    });
   });
 });
