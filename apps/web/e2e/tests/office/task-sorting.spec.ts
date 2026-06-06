@@ -27,6 +27,10 @@ test.describe("Issue sorting", () => {
     const main = testPage.locator("main");
     await expect(main.getByText("Identifier Sort Task")).toBeVisible({ timeout: 10_000 });
     // Verify identifier elements (font-mono class) are present in issue rows.
-    await expect(main.locator(".font-mono").first()).toBeVisible({ timeout: 5_000 });
+    // The span is initially empty until the backend assigns the id — filter to
+    // a non-empty one.
+    await expect(main.locator(".font-mono").filter({ hasText: /\S/ }).first()).toBeVisible({
+      timeout: 10_000,
+    });
   });
 });

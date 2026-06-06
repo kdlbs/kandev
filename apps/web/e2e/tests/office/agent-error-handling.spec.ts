@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/office-fixture";
+import { AppSidebarPage } from "../../pages/app-sidebar-page";
 
 /**
  * E2E coverage for office-agent-error-handling (the v1 design):
@@ -74,7 +75,9 @@ test.describe("Office agent error handling", () => {
     // The per-task entries are hidden once the agent is paused
     // (consolidation rule).
     await expect(testPage.getByTestId("inbox-item-agent_run_failed")).toHaveCount(0);
-    // Sidebar reflects the paused state on the agent row.
+    // Sidebar reflects the paused state on the agent row. The Agents section is
+    // a collapsible AppSidebar section (collapsed by default) — expand it first.
+    await new AppSidebarPage(testPage).expandSection("Agents");
     await expect(testPage.getByTestId("sidebar-agent-paused-badge").first()).toBeVisible();
   });
 

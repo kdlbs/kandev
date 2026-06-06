@@ -24,8 +24,10 @@ test.describe("Execution indicator", () => {
     const main = testPage.locator("main");
     await expect(main.getByText("Identifier Test Task")).toBeVisible({ timeout: 10_000 });
     // Task identifiers use a workspace prefix (e.g. E2E-1, TST-1) rendered in a
-    // `.font-mono` span on each office task row. Scope to the page table so we
-    // assert the office-tasks-page identifier, not a sidebar element.
-    await expect(main.locator(".font-mono").first()).toBeVisible({ timeout: 5_000 });
+    // `.font-mono` span on each office task row. The span is initially empty
+    // until the backend assigns the id, so filter to a non-empty one.
+    await expect(main.locator(".font-mono").filter({ hasText: /\S/ }).first()).toBeVisible({
+      timeout: 10_000,
+    });
   });
 });

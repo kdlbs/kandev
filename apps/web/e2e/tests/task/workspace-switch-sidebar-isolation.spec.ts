@@ -3,8 +3,15 @@ import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
 import { test, expect } from "../../fixtures/test-base";
+import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+
+// Office off: the picker routes a workspace switch to `/office` only when the
+// office feature is on, and `/office` requires onboarding this regular fixture
+// doesn't perform (it errors). With office off the switch happens in place on
+// the board, exercising the same cross-workspace isolation.
+useRegularMode();
 
 test.describe("Sidebar — cross-workspace isolation", () => {
   test("tasks from the previous workspace do not leak into the sidebar after switching", async ({
@@ -56,16 +63,12 @@ test.describe("Sidebar — cross-workspace isolation", () => {
     await expect(kanban.taskCard(taskB.id)).not.toBeVisible();
 
     // --- Switch to workspace B via the sidebar workspace picker ---
-    // The picker (top of the sidebar) is now the only workspace switcher — the
-    // Home display dropdown no longer offers one. In office mode it routes to
-    // /office, but that is a client-side navigation (no full reload), so the
-    // in-memory store must already reflect workspace B with no leaked
-    // workspace-A tasks. We return to the board via the Home nav link, still
-    // without a full reload, to keep the isolation assertions on the kanban.
+    // The picker (top of the sidebar) is now the only workspace switcher. With
+    // office off it switches in place (no /office redirect, no full reload), so
+    // the board re-renders from the in-memory store with workspace B's tasks and
+    // none of workspace A's.
     await testPage.getByTestId("sidebar-workspace-trigger").click();
     await testPage.getByTestId(`sidebar-workspace-item-${workspaceB.id}`).click();
-    await expect(testPage).toHaveURL(/\/office/);
-    await testPage.getByRole("link", { name: "Home", exact: true }).click();
 
     await expect(kanban.taskCard(taskB.id)).toBeVisible({ timeout: 10_000 });
     await expect(kanban.taskCard(taskA.id)).not.toBeVisible();
