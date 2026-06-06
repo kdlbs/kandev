@@ -55,7 +55,10 @@ export function AppSidebarHeader({ collapsed, onToggleCollapse }: AppSidebarHead
   // workspace share the same text size so they sit on a common baseline; the
   // brand carries weight/colour, the workspace stays muted and secondary.
   return (
-    <div className="flex items-center gap-1.5 h-10 px-3 shrink-0 border-b border-border">
+    <div
+      data-testid="app-sidebar-header"
+      className="flex items-center gap-1.5 h-10 px-3 shrink-0 border-b border-border"
+    >
       <Link
         href="/"
         aria-label="Kandev home"

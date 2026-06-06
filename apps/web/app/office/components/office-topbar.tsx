@@ -44,7 +44,10 @@ export function OfficeTopbar() {
   const detail = isDetailPage(pathname);
 
   return (
-    <div className="flex items-center gap-2 px-4 h-12 border-b border-border bg-background shrink-0">
+    <div
+      data-testid="office-topbar"
+      className="flex items-center gap-2 px-4 h-10 border-b border-border bg-background shrink-0"
+    >
       {detail ? (
         <div id="office-topbar-slot" className="flex items-center gap-2 flex-1 min-w-0" />
       ) : (
