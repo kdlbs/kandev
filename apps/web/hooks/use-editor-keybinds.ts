@@ -73,31 +73,6 @@ function handleTerminalToggle(
     });
 }
 
-/** Returns true if the active element is a text input or contenteditable. */
-function isEditableTarget(e: KeyboardEvent): boolean {
-  const tag = (e.target as HTMLElement)?.tagName;
-  return (
-    tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement)?.isContentEditable === true
-  );
-}
-
-function handleLayoutToggle(
-  e: KeyboardEvent,
-  overrides: StoredShortcutOverrides | undefined,
-  appStore: ReturnType<typeof useAppStoreApi>,
-): boolean {
-  if (isEditableTarget(e)) return false;
-
-  if (matchesShortcut(e, getShortcut("TOGGLE_SIDEBAR", overrides))) {
-    e.preventDefault();
-    e.stopPropagation();
-    appStore.getState().toggleAppSidebar();
-    return true;
-  }
-
-  return false;
-}
-
 function handleBottomTerminal(
   e: KeyboardEvent,
   appStore: ReturnType<typeof useAppStoreApi>,
@@ -146,8 +121,10 @@ function handleBottomTerminal(
  * Global editor keybinds for dockview:
  * - Cmd/Ctrl+Shift+[ / ] — navigate prev/next tab in active group
  * - Ctrl+` — toggle terminal focus
- * - Cmd/Ctrl+B — toggle sidebar
  * - Cmd/Ctrl+J — toggle bottom terminal panel
+ *
+ * Note: `TOGGLE_SIDEBAR` (Cmd/Ctrl+B) is handled app-wide by `useAppShortcuts`
+ * (mounted near the root), not here, so it works on every route.
  */
 export function useEditorKeybinds() {
   const previousPanelIdRef = useRef<string | null>(null);
@@ -188,7 +165,6 @@ export function useEditorKeybinds() {
         return;
       }
 
-      if (handleLayoutToggle(e, overrides, appStore)) return;
       handleBottomTerminal(e, appStore, previousFocusRef, overrides);
     };
 

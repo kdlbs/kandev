@@ -20,6 +20,7 @@ import {
 } from "@tabler/icons-react";
 import { useRegisterCommands } from "@/hooks/use-register-commands";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
+import { useAppShortcuts } from "@/hooks/use-app-shortcuts";
 import { useAppStore } from "@/components/state-provider";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import type { CommandItem } from "@/lib/commands/types";
@@ -216,6 +217,7 @@ export function GlobalCommands() {
 
   useRegisterCommands(commands);
   useKeyboardShortcut(quickChatShortcut, handleOpenQuickChat);
+  useAppShortcuts();
 
   return null;
 }
