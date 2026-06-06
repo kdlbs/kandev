@@ -6,7 +6,13 @@ test.describe("Execution indicator", () => {
       workflow_id: officeSeed.workflowId,
     });
     await testPage.goto("/office/tasks");
-    await expect(testPage.getByText("Indicator Test Task")).toBeVisible({ timeout: 10_000 });
+    // Post-overhaul: the unified AppSidebar's Tasks section also lists tasks, so
+    // the title text appears in BOTH the global rail and the page table. Scope
+    // to `<main>` (the office layout's page content, which excludes the
+    // `<aside data-testid="app-sidebar">`) to avoid a strict-mode duplicate.
+    await expect(testPage.locator("main").getByText("Indicator Test Task")).toBeVisible({
+      timeout: 10_000,
+    });
   });
 
   test("issue row displays task identifier", async ({ testPage, apiClient, officeSeed }) => {
@@ -14,9 +20,12 @@ test.describe("Execution indicator", () => {
       workflow_id: officeSeed.workflowId,
     });
     await testPage.goto("/office/tasks");
-    await expect(testPage.getByText("Identifier Test Task")).toBeVisible({ timeout: 10_000 });
-    // Task identifiers use a workspace prefix (e.g. E2E-1, TST-1)
-    // Verify at least one element with a short alphanumeric identifier pattern exists
-    await expect(testPage.locator(".font-mono").first()).toBeVisible({ timeout: 5_000 });
+    // Scope to `<main>` — the AppSidebar Tasks section duplicates task titles.
+    const main = testPage.locator("main");
+    await expect(main.getByText("Identifier Test Task")).toBeVisible({ timeout: 10_000 });
+    // Task identifiers use a workspace prefix (e.g. E2E-1, TST-1) rendered in a
+    // `.font-mono` span on each office task row. Scope to the page table so we
+    // assert the office-tasks-page identifier, not a sidebar element.
+    await expect(main.locator(".font-mono").first()).toBeVisible({ timeout: 5_000 });
   });
 });

@@ -14,8 +14,14 @@ test.describe("Real-time dashboard updates", () => {
       workflow_id: officeSeed.workflowId,
     });
 
-    // The "Recent Tasks" section should eventually show the new task
-    await expect(testPage.getByText("Dashboard Trigger Task")).toBeVisible({ timeout: 15_000 });
+    // The "Recent Tasks" section should eventually show the new task.
+    // Post-overhaul the global AppSidebar's Tasks section also lists tasks, so
+    // the title can appear both in the rail and the dashboard card. Scope to
+    // `<main>` (the office page content, which excludes
+    // `<aside data-testid="app-sidebar">`) to avoid a strict-mode duplicate.
+    await expect(testPage.locator("main").getByText("Dashboard Trigger Task")).toBeVisible({
+      timeout: 15_000,
+    });
   });
 
   test("dashboard does not refetch on cross-workspace task event", async ({

@@ -35,9 +35,10 @@ export class SidebarFilterPopoverPage {
     return this.page.getByTestId("sidebar-filter-popover");
   }
 
-  /** Open radix dropdown menu hosting the view chips. */
+  /** Open radix dropdown menu hosting the view chips. Scoped to the menu that
+   *  actually contains the view chips so it can't match another sidebar menu. */
   get chipMenu(): Locator {
-    return this.page.getByRole("menu");
+    return this.page.getByRole("menu").filter({ has: this.page.getByTestId("sidebar-view-chip") });
   }
 
   async open(): Promise<void> {

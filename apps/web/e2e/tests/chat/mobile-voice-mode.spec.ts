@@ -42,12 +42,9 @@ test.describe("Mobile voice mode", () => {
     await expect(testPage.getByText("Behavior")).toBeVisible();
     await expect(testPage.getByText("Whisper Web Model")).toBeVisible();
     await expect(testPage.getByText(/Shortcut$/)).toBeVisible();
-
-    // The mobile sidebar trigger (md:hidden) lives in the topbar; assert it
-    // exists so we know the sidebar entry chain that exposed this page is
-    // not silently removed by a future layout change.
-    const sidebarTrigger = testPage.locator('button[data-sidebar="trigger"]');
-    await expect(sidebarTrigger).toBeVisible();
+    // (The legacy `button[data-sidebar="trigger"]` mobile settings-sidebar
+    // trigger was removed by the unified-AppSidebar overhaul — settings nav is
+    // now the footer-gear takeover, and the global rail is hidden on mobile.)
   });
 
   test("voice input mic button mounts on the mobile chat composer with the coarse-pointer touch target and effective toggle mode", async ({

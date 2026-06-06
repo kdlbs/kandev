@@ -54,13 +54,21 @@ vi.mock("next/navigation", () => ({
 const storeState = {
   appSidebar: {
     collapsed: false,
-    sectionExpanded: { tasks: true, projects: false, agents: false, settings: false },
+    sectionExpanded: {
+      tasks: true,
+      projects: false,
+      agents: false,
+      integrations: false,
+      settings: false,
+    },
     width: 240,
+    settingsMode: false,
   },
   toggleAppSidebar: vi.fn(),
   setAppSidebarCollapsed: vi.fn(),
   toggleAppSidebarSection: vi.fn(),
   setAppSidebarWidth: vi.fn(),
+  toggleAppSidebarSettingsMode: vi.fn(),
 };
 
 vi.mock("@/components/state-provider", () => ({

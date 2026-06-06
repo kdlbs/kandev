@@ -22,8 +22,8 @@ test.describe("Mobile task list search", () => {
     const searchToggle = testPage.getByTestId("mobile-search-toggle");
 
     // Both tasks are listed and search is collapsed behind the topbar icon
-    await expect(testPage.getByText("List Alpha Task")).toBeVisible();
-    await expect(testPage.getByText("List Beta Task")).toBeVisible();
+    await expect(testPage.getByRole("table").getByText("List Alpha Task")).toBeVisible();
+    await expect(testPage.getByRole("table").getByText("List Beta Task")).toBeVisible();
     await expect(searchBar).not.toBeVisible();
 
     // Tapping the icon reveals the focused search input
@@ -33,13 +33,21 @@ test.describe("Mobile task list search", () => {
 
     // Typing filters the list down to the match
     await searchBar.getByPlaceholder("Search tasks...").fill("Alpha");
-    await expect(testPage.getByText("List Alpha Task")).toBeVisible({ timeout: 5000 });
-    await expect(testPage.getByText("List Beta Task")).not.toBeVisible({ timeout: 5000 });
+    await expect(testPage.getByRole("table").getByText("List Alpha Task")).toBeVisible({
+      timeout: 5000,
+    });
+    await expect(testPage.getByRole("table").getByText("List Beta Task")).not.toBeVisible({
+      timeout: 5000,
+    });
 
     // Collapsing clears the query so the full list returns
     await searchToggle.click();
     await expect(searchBar).not.toBeVisible();
-    await expect(testPage.getByText("List Alpha Task")).toBeVisible({ timeout: 5000 });
-    await expect(testPage.getByText("List Beta Task")).toBeVisible({ timeout: 5000 });
+    await expect(testPage.getByRole("table").getByText("List Alpha Task")).toBeVisible({
+      timeout: 5000,
+    });
+    await expect(testPage.getByRole("table").getByText("List Beta Task")).toBeVisible({
+      timeout: 5000,
+    });
   });
 });

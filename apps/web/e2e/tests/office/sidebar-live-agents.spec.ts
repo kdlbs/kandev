@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/office-fixture";
+import { AppSidebarPage } from "../../pages/app-sidebar-page";
 
 test.describe("Sidebar live agent indicator", () => {
   test("CEO row shows static status dot (no 'live' badge) when idle", async ({
@@ -8,12 +9,15 @@ test.describe("Sidebar live agent indicator", () => {
     await testPage.goto("/office");
 
     // The CEO agent appears in the unified AppSidebar's Agents section
-    // (`<aside data-testid="app-sidebar">`). With no active task sessions it
-    // should render the static AgentStatusDot, NOT the emerald pulsing dot +
+    // (`<aside data-testid="app-sidebar">`). That section is a COLLAPSIBLE
+    // `AppSidebarSection` that defaults to collapsed on `/office`, so expand it
+    // before asserting the row. With no active task sessions the row should
+    // render the static AgentStatusDot, NOT the emerald pulsing dot +
     // "{N} live" badge (LiveAgentIndicator).
-    const sidebar = testPage.getByTestId("app-sidebar");
-    await expect(sidebar.getByText("CEO").first()).toBeVisible({ timeout: 10_000 });
-    await expect(sidebar.getByText(/\d+ live/)).toHaveCount(0);
+    const sidebar = new AppSidebarPage(testPage);
+    await sidebar.expandSection("Agents");
+    await expect(sidebar.root.getByText("CEO").first()).toBeVisible({ timeout: 10_000 });
+    await expect(sidebar.root.getByText(/\d+ live/)).toHaveCount(0);
   });
 
   test("CEO row shows '1 live' badge when a session is RUNNING", async ({
@@ -32,13 +36,16 @@ test.describe("Sidebar live agent indicator", () => {
     expect(task.id).toBeTruthy();
 
     await testPage.goto("/office");
-    const sidebar = testPage.getByTestId("app-sidebar");
-    await expect(sidebar.getByText("CEO").first()).toBeVisible({ timeout: 10_000 });
+    const sidebar = new AppSidebarPage(testPage);
+    // The Agents section defaults to collapsed on `/office` — expand it so the
+    // CEO row (and its LiveAgentIndicator) renders.
+    await sidebar.expandSection("Agents");
+    await expect(sidebar.root.getByText("CEO").first()).toBeVisible({ timeout: 10_000 });
 
     // The badge MAY appear if the orchestrator launches a session that
     // reaches RUNNING within the 5s window. We don't fail the test if the
     // backend can't run the agent; we only assert the UI doesn't crash.
-    const badge = sidebar.getByText(/\d+ live/);
+    const badge = sidebar.root.getByText(/\d+ live/);
     try {
       await expect(badge.first()).toBeVisible({ timeout: 5_000 });
     } catch {
