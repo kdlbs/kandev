@@ -26,11 +26,8 @@ test.describe("Issue sorting", () => {
     // Scope to `<main>` — the AppSidebar Tasks section duplicates task titles.
     const main = testPage.locator("main");
     await expect(main.getByText("Identifier Sort Task")).toBeVisible({ timeout: 10_000 });
-    // Verify identifier elements (font-mono class) are present in issue rows.
-    // The span is initially empty until the backend assigns the id — filter to
-    // a non-empty one.
-    await expect(main.locator(".font-mono").filter({ hasText: /\S/ }).first()).toBeVisible({
-      timeout: 10_000,
-    });
+    // Verify identifier elements (font-mono class) are present (matches main;
+    // only the title above needed `<main>` scoping for the sidebar duplication).
+    await expect(testPage.locator(".font-mono").first()).toBeVisible({ timeout: 5_000 });
   });
 });

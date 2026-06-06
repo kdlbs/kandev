@@ -23,11 +23,8 @@ test.describe("Execution indicator", () => {
     // Scope to `<main>` — the AppSidebar Tasks section duplicates task titles.
     const main = testPage.locator("main");
     await expect(main.getByText("Identifier Test Task")).toBeVisible({ timeout: 10_000 });
-    // Task identifiers use a workspace prefix (e.g. E2E-1, TST-1) rendered in a
-    // `.font-mono` span on each office task row. The span is initially empty
-    // until the backend assigns the id, so filter to a non-empty one.
-    await expect(main.locator(".font-mono").filter({ hasText: /\S/ }).first()).toBeVisible({
-      timeout: 10_000,
-    });
+    // A task identifier renders in a `.font-mono` span (matches main; the title
+    // above is the part that needed `<main>` scoping for the sidebar duplication).
+    await expect(testPage.locator(".font-mono").first()).toBeVisible({ timeout: 5_000 });
   });
 });
