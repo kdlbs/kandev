@@ -23,6 +23,14 @@ test.describe("Topbar breadcrumb", () => {
   // so the two horizontal borders form one continuous seam where the sidebar
   // meets the page content. Previously the topbar was h-12 and sat ~8px lower.
   test("topbar bottom aligns with sidebar header bottom", async ({ testPage, officeSeed: _ }) => {
+    // The seam we assert exists only for the EXPANDED sidebar header — its
+    // border sits under the workspace picker, and data-testid="app-sidebar-header"
+    // lives on the expanded layout. Force the collapse flag off before load so a
+    // leftover collapsed state can't turn this into a confusing timeout (the
+    // collapsed-rail header carries no testid) rather than a real assertion.
+    await testPage.addInitScript(() => {
+      window.localStorage.setItem("kandev.appSidebar.collapsed", "false");
+    });
     await testPage.setViewportSize({ width: 1280, height: 900 });
     await testPage.goto("/office/inbox");
 
