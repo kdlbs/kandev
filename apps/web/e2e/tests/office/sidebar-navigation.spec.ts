@@ -57,3 +57,33 @@ test.describe("Sidebar navigation", () => {
     });
   });
 });
+
+// The sidebar "Home" item is office-aware: while on any /office/* route it
+// targets the office dashboard (/office), and on a regular Kanban route it
+// targets the board (/). Active-highlight stays exact-match in both modes.
+test.describe("Sidebar Home destination", () => {
+  test("Home goes to the office dashboard from an office route", async ({
+    testPage,
+    officeSeed: _,
+  }) => {
+    await testPage.goto("/office/inbox");
+    const home = testPage.getByRole("link", { name: "Home", exact: true });
+    await expect(home).toBeVisible({ timeout: 15_000 });
+    await home.click();
+    await expect(testPage).toHaveURL(/\/office$/);
+    // "Agents Enabled" is the stable dashboard metric marker.
+    await expect(testPage.getByText("Agents Enabled")).toBeVisible({ timeout: 10_000 });
+  });
+
+  test("Home goes to the Kanban board from a regular route", async ({
+    testPage,
+    officeSeed: _,
+  }) => {
+    await testPage.goto("/");
+    const home = testPage.getByRole("link", { name: "Home", exact: true });
+    await expect(home).toBeVisible({ timeout: 15_000 });
+    await home.click();
+    await expect(testPage).toHaveURL(/\/$/);
+    await expect(testPage.getByTestId("kanban-board")).toBeVisible({ timeout: 15_000 });
+  });
+});

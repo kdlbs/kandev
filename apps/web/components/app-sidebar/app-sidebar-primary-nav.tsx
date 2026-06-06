@@ -19,7 +19,13 @@ export function AppSidebarPrimaryNav({ collapsed }: AppSidebarPrimaryNavProps) {
 
   return (
     <div className="flex flex-col gap-0.5">
-      <AppSidebarNavItem icon={IconHome} label="Home" href="/" collapsed={collapsed} exactMatch />
+      <AppSidebarNavItem
+        icon={IconHome}
+        label="Home"
+        href={inOffice ? "/office" : "/"}
+        collapsed={collapsed}
+        exactMatch
+      />
       {inOffice && (
         <AppSidebarNavItem
           icon={IconInbox}
