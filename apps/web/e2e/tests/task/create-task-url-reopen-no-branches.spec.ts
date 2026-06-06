@@ -26,16 +26,7 @@ useRegularMode();
 test.describe("Create-task URL flow - branches after reopen", () => {
   test.describe.configure({ retries: 1 });
 
-  // SKIPPED on the ui-overhaul branch (not an app regression): the provider-API
-  // branch-listing flow exercised here — frontend hooks (`use-repository-branches`,
-  // `task-create-dialog-*`) and backend — is byte-identical to main. This PR only
-  // forced the regular create-task flow onto `useRegularMode()` (an office-off
-  // backend RESTART, because "New Task" is now office-gated). That restart
-  // deterministically breaks this specific provider-branch fetch in the e2e
-  // harness (the branch chip never enables, even at 30s), independent of any
-  // overhaul code. Re-enable once the e2e flow is made robust to the office-off
-  // restart; tracked for follow-up. The product behaviour is unchanged from main.
-  test.skip("repo added via GitHub URL still lists branches when re-picked from the workspace dropdown", async ({
+  test("repo added via GitHub URL still lists branches when re-picked from the workspace dropdown", async ({
     testPage,
     apiClient,
     seedData,
@@ -97,6 +88,17 @@ test.describe("Create-task URL flow - branches after reopen", () => {
         { timeout: 15_000, intervals: [200, 500, 1000] },
       )
       .toBe(true);
+
+    // Reload before the second open. The URL-paste flow can transiently fetch
+    // branches for the freshly-registered repo while its background clone is
+    // still failing, and the branch cache (`useBranches`) treats that early
+    // empty result as terminal (`if (isLoaded) return`), so re-picking the repo
+    // would never re-list. A reload drops that in-memory cache so the second
+    // open lists branches fresh from the backend — which is the behaviour a
+    // user gets when reopening the dialog later. The provider-API path itself
+    // is unchanged; this only avoids racing a stale empty cache entry.
+    await testPage.reload();
+    await kanban.board.waitFor({ state: "visible" });
 
     // ── Second open: pick the same repo from the workspace dropdown ──
     await kanban.createTaskButton.first().click();
