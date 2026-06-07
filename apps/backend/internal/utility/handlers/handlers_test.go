@@ -326,6 +326,10 @@ func TestSanitizeStatusMessage(t *testing.T) {
 		{in: "auth failed: token = abc123", want: "auth failed: token=<redacted>"},
 		{in: "bearer sk-xyz expired", want: "bearer=<redacted> expired"},
 		{in: "API-KEY: SECRETVAL", want: "API-KEY=<redacted>"},
+		// Prose without a real separator must not be mangled — guards against
+		// the kw=val matcher eating the next word.
+		{in: "access token was revoked", want: "access token was revoked"},
+		{in: "the secret handshake failed", want: "the secret handshake failed"},
 	}
 	for _, tc := range cases {
 		got := sanitizeStatusMessage(tc.in)

@@ -357,7 +357,6 @@ func (h *Handlers) httpRefreshInferenceAgent(c *gin.Context) {
 	// avoids spinning up probes for typos / arbitrary input.
 	var info *lifecycle.InferenceAgentInfo
 	for _, ia := range h.executor.ListInferenceAgentsWithContext(ctx) {
-		ia := ia
 		if ia.ID == agentID {
 			info = &ia
 			break
@@ -416,11 +415,20 @@ func inferenceAgentDTOFromCaps(ia lifecycle.InferenceAgentInfo, caps hostutility
 // the upstream CLI's stderr verbatim; a misconfigured key can end up echoed
 // back ("...invalid api key=sk-..."). Belt-and-braces — the frontend never
 // shows the raw value, but the response is also reachable via /api/v1.
-var credentialPattern = regexp.MustCompile(`(?i)(api[_-]?key|token|secret|password|bearer)[\s=:]+\S+`)
+//
+// Split into two patterns so prose like "access token was revoked" is left
+// alone: kw=val / kw:val requires a real separator, while the bare-space
+// "bearer <tok>" form gets its own anchored rule.
+var (
+	credentialKVPattern     = regexp.MustCompile(`(?i)(api[_-]?key|token|secret|password)\s*[:=]\s*\S+`)
+	credentialBearerPattern = regexp.MustCompile(`(?i)(bearer)\s+\S+`)
+)
 
 func sanitizeStatusMessage(msg string) string {
 	if msg == "" {
 		return ""
 	}
-	return credentialPattern.ReplaceAllString(msg, "${1}=<redacted>")
+	msg = credentialKVPattern.ReplaceAllString(msg, "${1}=<redacted>")
+	msg = credentialBearerPattern.ReplaceAllString(msg, "${1}=<redacted>")
+	return msg
 }
