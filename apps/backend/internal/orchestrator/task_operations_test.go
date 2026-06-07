@@ -905,7 +905,7 @@ func TestStartCreatedSession_DoesNotDoubleWrapPreWrappedPrompt(t *testing.T) {
 	svc.messageCreator = mc
 
 	// Simulate an upstream caller (e.g. wsAddMessage) that has already wrapped.
-	preWrapped := sysprompt.InjectKandevContext("task1", "session1", "Build me a feature")
+	preWrapped := sysprompt.InjectKandevContext("task1", "session1", "Build me a feature", false)
 
 	_, err := svc.StartCreatedSession(ctx, "task1", "session1", "profile1", preWrapped, false, false, false, nil)
 	if err != nil {

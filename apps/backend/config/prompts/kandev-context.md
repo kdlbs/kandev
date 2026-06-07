@@ -7,8 +7,7 @@ Use these IDs when calling tools that require task_id or session_id.
 
 Available tools:
 - ask_user_question_kandev: Ask the user one or more clarifying questions in a single tool call. Use this whenever you need user input before proceeding. Required params: questions (array of 1-4 question objects; each object has prompt (string) and options (array of 2-6 {label, description})). Optional: context (string).
-- step_complete_kandev: Signal that every user-stated requirement for the CURRENT workflow step is satisfied. Call this as the LAST action of the step (after the final tool call / commit / answer). Idempotent — a second call within the same step is a no-op. Do NOT call when asking a question, mid-conversation, or on partial progress. Required params: summary (one-paragraph plain text). Optional: handoff, blockers.
-- create_task_plan_kandev: Save an implementation plan for the current task. Required params: task_id, content (markdown). Optional: title.
+{step_complete_section}- create_task_plan_kandev: Save an implementation plan for the current task. Required params: task_id, content (markdown). Optional: title.
 - get_task_plan_kandev: Retrieve the current plan for a task (includes any user edits). Required params: task_id.
 - update_task_plan_kandev: Update an existing plan. Required params: task_id, content (markdown). Optional: title.
 - delete_task_plan_kandev: Delete a task plan. Required params: task_id.

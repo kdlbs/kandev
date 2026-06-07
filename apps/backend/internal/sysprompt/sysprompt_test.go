@@ -93,16 +93,31 @@ func TestInjectConfigContext_SystemContentStrippable(t *testing.T) {
 
 // --- KandevContext tests (existing, verify not broken) ---
 
-func TestKandevContext_HasExactlyTwoPlaceholders(t *testing.T) {
+func TestKandevContext_HasExpectedPlaceholders(t *testing.T) {
 	ctx := KandevContext()
 	taskCount := strings.Count(ctx, "{task_id}")
 	sessionCount := strings.Count(ctx, "{session_id}")
+	stepCount := strings.Count(ctx, "{step_complete_section}")
 	assert.Equal(t, 1, taskCount, "KandevContext should have exactly 1 {task_id} placeholder")
 	assert.Equal(t, 1, sessionCount, "KandevContext should have exactly 1 {session_id} placeholder")
+	assert.Equal(t, 1, stepCount, "KandevContext should have exactly 1 {step_complete_section} placeholder")
+}
+
+func TestFormatKandevContext_OmitsStepCompleteToolByDefault(t *testing.T) {
+	result := FormatKandevContext("task-abc", "session-xyz", false)
+	assert.NotContains(t, result, "step_complete_kandev",
+		"step_complete_kandev must be hidden when the step does not require an explicit signal")
+	assert.NotContains(t, result, "{step_complete_section}")
+}
+
+func TestFormatKandevContext_IncludesStepCompleteToolWhenRequired(t *testing.T) {
+	result := FormatKandevContext("task-abc", "session-xyz", true)
+	assert.Contains(t, result, "step_complete_kandev",
+		"step_complete_kandev must be exposed when the step requires an explicit signal")
 }
 
 func TestFormatKandevContext_InjectsIDs(t *testing.T) {
-	result := FormatKandevContext("task-abc", "session-xyz")
+	result := FormatKandevContext("task-abc", "session-xyz", false)
 	assert.Contains(t, result, "Kandev Task ID: task-abc")
 	assert.Contains(t, result, "Session ID: session-xyz")
 	assert.NotContains(t, result, "{task_id}")
@@ -110,13 +125,13 @@ func TestFormatKandevContext_InjectsIDs(t *testing.T) {
 }
 
 func TestInjectKandevContext_WrapsInSystemTags(t *testing.T) {
-	result := InjectKandevContext("task-abc", "session-xyz", "Do something")
+	result := InjectKandevContext("task-abc", "session-xyz", "Do something", false)
 	assert.True(t, strings.HasPrefix(result, TagStart))
 	assert.Contains(t, result, "Do something")
 }
 
 func TestInjectKandevContext_SystemContentStrippable(t *testing.T) {
-	result := InjectKandevContext("task-abc", "session-xyz", "Do something")
+	result := InjectKandevContext("task-abc", "session-xyz", "Do something", false)
 	stripped := StripSystemContent(result)
 	assert.Equal(t, "Do something", stripped)
 }
@@ -124,7 +139,7 @@ func TestInjectKandevContext_SystemContentStrippable(t *testing.T) {
 func TestHasKandevContext_DetectsInjectedWrap(t *testing.T) {
 	// Any prompt produced by InjectKandevContext must be detectable so call
 	// sites can make the wrap step idempotent.
-	wrapped := InjectKandevContext("task-abc", "session-xyz", "Do something")
+	wrapped := InjectKandevContext("task-abc", "session-xyz", "Do something", false)
 	assert.True(t, HasKandevContext(wrapped))
 
 	// A bare user message has no marker.

@@ -358,6 +358,7 @@ type BackendWorkflowStep = {
   show_in_command_panel?: boolean;
   auto_archive_after_hours?: number;
   agent_profile_id?: string;
+  auto_advance_requires_signal?: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -375,6 +376,7 @@ const transformWorkflowStep = (step: BackendWorkflowStep): WorkflowStep => ({
   show_in_command_panel: step.show_in_command_panel,
   auto_archive_after_hours: step.auto_archive_after_hours,
   agent_profile_id: step.agent_profile_id,
+  auto_advance_requires_signal: step.auto_advance_requires_signal,
   created_at: step.created_at,
   updated_at: step.updated_at,
 });
@@ -447,6 +449,7 @@ export async function updateWorkflowStepAction(
       | "show_in_command_panel"
       | "auto_archive_after_hours"
       | "agent_profile_id"
+      | "auto_advance_requires_signal"
     >
   >,
 ): Promise<WorkflowStep> {
@@ -463,6 +466,8 @@ export async function updateWorkflowStepAction(
   if (payload.auto_archive_after_hours !== undefined)
     body.auto_archive_after_hours = payload.auto_archive_after_hours;
   if (payload.agent_profile_id !== undefined) body.agent_profile_id = payload.agent_profile_id;
+  if (payload.auto_advance_requires_signal !== undefined)
+    body.auto_advance_requires_signal = payload.auto_advance_requires_signal;
   const response = await fetchJson<BackendWorkflowStep>(
     `${apiBaseUrl}/api/v1/workflow/steps/${stepId}`,
     {

@@ -29,6 +29,7 @@ type OrchestratorService interface {
 	ResumeTaskSession(ctx context.Context, taskID, taskSessionID string) error
 	StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode, autoStart bool, attachments []v1.MessageAttachment) error
 	ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) error
+	StepRequiresCompletionSignal(ctx context.Context, taskID string) bool
 }
 
 // MessageHandlers handles WebSocket requests for messages
@@ -235,7 +236,8 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// wall of MCP-tool boilerplate prepended to "hello".
 	storedContent := req.Content
 	if isCreatedSession && !sessionResp.Session.IsPassthrough && (req.Content != "" || len(req.Attachments) > 0) {
-		storedContent = sysprompt.InjectKandevContext(req.TaskID, req.TaskSessionID, req.Content)
+		requiresSignal := h.orchestrator != nil && h.orchestrator.StepRequiresCompletionSignal(ctx, req.TaskID)
+		storedContent = sysprompt.InjectKandevContext(req.TaskID, req.TaskSessionID, req.Content, requiresSignal)
 		req.Content = storedContent
 	}
 

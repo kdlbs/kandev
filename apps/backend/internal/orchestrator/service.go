@@ -558,6 +558,28 @@ func (s *Service) publishTaskUpdated(ctx context.Context, task *models.Task) {
 	s.taskEvents.PublishTaskUpdated(ctx, task)
 }
 
+// StepRequiresCompletionSignal reports whether the workflow step bound to taskID
+// has `auto_advance_requires_signal = true` (ADR 0015). Used by sysprompt
+// injection sites to decide whether to expose the `step_complete_kandev` MCP
+// tool to the agent. Returns false (without error) when the getter is unset,
+// the task has no workflow step, or the step lookup fails — the caller treats
+// "unknown" the same as "no signal required" so a flaky workflow lookup never
+// silently enables the tool.
+func (s *Service) StepRequiresCompletionSignal(ctx context.Context, taskID string) bool {
+	if s.workflowStepGetter == nil {
+		return false
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil || task.WorkflowStepID == "" {
+		return false
+	}
+	step, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
+	if err != nil || step == nil {
+		return false
+	}
+	return step.AutoAdvanceRequiresSignal
+}
+
 // SetWorkflowStepGetter sets the workflow step getter for prompt building.
 //
 // When workflow_step_id is provided to StartTask, the orchestrator uses this getter

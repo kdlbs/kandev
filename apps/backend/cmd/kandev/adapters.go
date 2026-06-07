@@ -535,6 +535,11 @@ func (w *orchestratorWrapper) ProcessOnTurnStart(ctx context.Context, taskID, se
 	return w.svc.ProcessOnTurnStart(ctx, taskID, sessionID)
 }
 
+// StepRequiresCompletionSignal forwards to the orchestrator service.
+func (w *orchestratorWrapper) StepRequiresCompletionSignal(ctx context.Context, taskID string) bool {
+	return w.svc.StepRequiresCompletionSignal(ctx, taskID)
+}
+
 // messageCreatorAdapter adapts the task service to the orchestrator.MessageCreator interface
 type messageCreatorAdapter struct {
 	svc    *taskservice.Service
