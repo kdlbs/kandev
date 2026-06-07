@@ -340,8 +340,7 @@ export function useTaskSubmitHandlers({
       if (!taskResponse) return;
       const newSessionId = taskResponse.session_id ?? taskResponse.primary_session_id ?? null;
       const willNavigate =
-        (opts.withAgent && isPassthroughProfile && !opts.planMode) ||
-        !!(opts.planMode && newSessionId);
+        (opts.withAgent && isPassthroughProfile) || !!(opts.planMode && newSessionId);
       onSuccess?.(taskResponse, "create", { taskSessionId: newSessionId, willNavigate });
       clearDraft();
       onOpenChange(false);
