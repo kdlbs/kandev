@@ -688,11 +688,57 @@ func (s *Store) ResetPRWatch(ctx context.Context, id, branch string) error {
 
 // UpdatePRWatchBranchIfSearching atomically updates branch only when pr_number = 0,
 // preventing races with concurrent PR association.
+//
+// Collision semantics: a sibling watch may already own the destination
+// (session_id, repository_id, branch) triple — e.g. multi-branch task where
+// the agent's live branch collapsed onto a peer watch's branch. In that
+// case the raw UPDATE would trip the UNIQUE constraint. We instead drop the
+// source row (which is still searching, pr_number=0, so it owns no PR
+// state) and let the sibling continue to track the branch.
 func (s *Store) UpdatePRWatchBranchIfSearching(ctx context.Context, id, branch string) error {
-	_, err := s.db.ExecContext(ctx,
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var sessionID, repositoryID string
+	var prNumber int
+	err = tx.QueryRowContext(ctx,
+		`SELECT session_id, repository_id, pr_number FROM github_pr_watches WHERE id = ?`, id).
+		Scan(&sessionID, &repositoryID, &prNumber)
+	if errors.Is(err, sql.ErrNoRows) {
+		return tx.Commit()
+	}
+	if err != nil {
+		return err
+	}
+	if prNumber != 0 {
+		return tx.Commit()
+	}
+
+	var siblingID string
+	err = tx.QueryRowContext(ctx,
+		`SELECT id FROM github_pr_watches
+		 WHERE session_id = ? AND repository_id = ? AND branch = ? AND id <> ?`,
+		sessionID, repositoryID, branch, id).Scan(&siblingID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if err == nil {
+		if _, delErr := tx.ExecContext(ctx,
+			`DELETE FROM github_pr_watches WHERE id = ? AND pr_number = 0`, id); delErr != nil {
+			return delErr
+		}
+		return tx.Commit()
+	}
+
+	if _, err := tx.ExecContext(ctx,
 		`UPDATE github_pr_watches SET branch = ?, updated_at = ? WHERE id = ? AND pr_number = 0`,
-		branch, time.Now().UTC(), id)
-	return err
+		branch, time.Now().UTC(), id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // --- TaskPR operations ---
