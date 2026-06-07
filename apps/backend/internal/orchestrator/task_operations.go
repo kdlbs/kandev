@@ -376,7 +376,7 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 	// agent CLI's TTY and the user sees it verbatim — they don't want a wall of
 	// MCP-tool boilerplate prepended to "hello".
 	if (effectivePrompt != "" || len(attachments) > 0) && !sysprompt.HasKandevContext(effectivePrompt) && !session.IsPassthrough {
-		effectivePrompt = sysprompt.InjectKandevContext(taskID, sessionID, effectivePrompt, s.StepRequiresCompletionSignal(ctx, taskID))
+		effectivePrompt = sysprompt.InjectKandevContext(taskID, sessionID, effectivePrompt, s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID))
 	}
 
 	executorID := session.ExecutorID
@@ -600,7 +600,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		skipKandevMCPWrap = launchSession.IsPassthrough
 	}
 	if (effectivePrompt != "" || len(attachments) > 0) && !sysprompt.HasKandevContext(effectivePrompt) && !skipKandevMCPWrap {
-		effectivePrompt = sysprompt.InjectKandevContext(task.ID, sessionID, effectivePrompt, s.StepRequiresCompletionSignal(ctx, task.ID))
+		effectivePrompt = sysprompt.InjectKandevContext(task.ID, sessionID, effectivePrompt, s.WorkflowStepRequiresCompletionSignal(ctx, workflowStepID))
 	}
 
 	// Office tasks restrict the MCP toolset: kanban tools (move/update/list

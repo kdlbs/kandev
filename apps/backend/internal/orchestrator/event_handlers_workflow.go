@@ -1250,7 +1250,8 @@ func (s *Service) autoStartStepPrompt(
 	// the agent CLI's TTY and the user sees it verbatim.
 	recordedPrompt := prompt
 	if session.State == models.TaskSessionStateCreated && !session.IsPassthrough && (prompt != "" || len(attachments) > 0) && !sysprompt.HasKandevContext(prompt) {
-		recordedPrompt = sysprompt.InjectKandevContext(taskID, sessionID, prompt, s.StepRequiresCompletionSignal(ctx, taskID))
+		requiresSignal := step != nil && step.AutoAdvanceRequiresSignal
+		recordedPrompt = sysprompt.InjectKandevContext(taskID, sessionID, prompt, requiresSignal)
 	}
 	userMsgRecorded := s.recordAutoStartMessage(ctx, taskID, sessionID, recordedPrompt, planMode, origin)
 

@@ -565,15 +565,30 @@ func (s *Service) publishTaskUpdated(ctx context.Context, task *models.Task) {
 // the task has no workflow step, or the step lookup fails — the caller treats
 // "unknown" the same as "no signal required" so a flaky workflow lookup never
 // silently enables the tool.
+//
+// Call sites that already have the task or step ID in scope should prefer
+// [WorkflowStepRequiresCompletionSignal] to skip the extra GetTask round-trip.
 func (s *Service) StepRequiresCompletionSignal(ctx context.Context, taskID string) bool {
 	if s.workflowStepGetter == nil {
 		return false
 	}
 	task, err := s.repo.GetTask(ctx, taskID)
-	if err != nil || task == nil || task.WorkflowStepID == "" {
+	if err != nil || task == nil {
 		return false
 	}
-	step, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
+	return s.WorkflowStepRequiresCompletionSignal(ctx, task.WorkflowStepID)
+}
+
+// WorkflowStepRequiresCompletionSignal reports whether the given workflow step
+// has `auto_advance_requires_signal = true` (ADR 0015). Cheaper alternative to
+// [StepRequiresCompletionSignal] for callers that already loaded the task and
+// can pass `task.WorkflowStepID` directly — avoids a redundant GetTask round-trip
+// at hot first-turn launch sites. Same "unknown ⇒ false" contract.
+func (s *Service) WorkflowStepRequiresCompletionSignal(ctx context.Context, stepID string) bool {
+	if s.workflowStepGetter == nil || stepID == "" {
+		return false
+	}
+	step, err := s.workflowStepGetter.GetStep(ctx, stepID)
 	if err != nil || step == nil {
 		return false
 	}
