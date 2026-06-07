@@ -133,11 +133,7 @@ func (c *GitExecutableChecker) Name() string { return "Git executable" }
 func (c *GitExecutableChecker) Category() string { return "system_requirements" }
 
 func (c *GitExecutableChecker) Check(_ context.Context) []Issue {
-	lookPath := c.lookPath
-	if lookPath == nil {
-		lookPath = exec.LookPath
-	}
-	if _, err := lookPath("git"); err == nil {
+	if _, err := c.lookPath("git"); err == nil {
 		return nil
 	}
 	return []Issue{{

@@ -1,21 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
-
-const missingGitHealth = {
-  healthy: false,
-  issues: [
-    {
-      id: "git_executable_missing",
-      category: "system_requirements",
-      title: "Git executable is required",
-      message: "Install Git and ensure the git executable is available on PATH.",
-      severity: "error",
-      fix_url: "/settings/system/status",
-      fix_label: "View system status",
-    },
-  ],
-  checks: [],
-};
+import { missingGitHealth } from "./health-fixtures";
 
 test.describe("Mobile kanban view", () => {
   test("renders mobile layout with column tabs and swipeable columns", async ({
@@ -123,6 +108,7 @@ test.describe("Mobile kanban view", () => {
     await expect(
       dialog.getByText("Install Git and ensure the git executable is available on PATH."),
     ).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "View system status" })).toBeVisible();
   });
 
   test("column tabs allow switching between workflow steps", async ({

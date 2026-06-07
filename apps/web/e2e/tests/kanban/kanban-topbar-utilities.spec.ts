@@ -1,21 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
-
-const missingGitHealth = {
-  healthy: false,
-  issues: [
-    {
-      id: "git_executable_missing",
-      category: "system_requirements",
-      title: "Git executable is required",
-      message: "Install Git and ensure the git executable is available on PATH.",
-      severity: "error",
-      fix_url: "/settings/system/status",
-      fix_label: "View system status",
-    },
-  ],
-  checks: [],
-};
+import { missingGitHealth } from "./health-fixtures";
 
 test.describe("Kanban topbar utilities", () => {
   // Post-overhaul: Settings is no longer a topbar link/dropdown. It lives behind
