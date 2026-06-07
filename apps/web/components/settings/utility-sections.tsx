@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@kandev/ui/select";
 import { ModelCombobox } from "@/components/settings/model-combobox";
+import { InferenceAgentStatusNote } from "@/components/settings/inference-agent-status";
 import type { UtilityAgent, InferenceAgent } from "@/lib/api/domains/utility-api";
 
 const USE_DEFAULT = "__USE_DEFAULT__";
@@ -39,6 +40,7 @@ type DefaultModelSectionProps = {
   defaultAgentId: string;
   defaultModel: string;
   onDefaultChange: (agentId: string, model: string) => void;
+  onRefreshAgent: (agentId: string) => Promise<unknown> | void;
 };
 
 export function DefaultModelSection({
@@ -46,6 +48,7 @@ export function DefaultModelSection({
   defaultAgentId,
   defaultModel,
   onDefaultChange,
+  onRefreshAgent,
 }: DefaultModelSectionProps) {
   const selectedAgent = inferenceAgents.find((a) => a.id === defaultAgentId);
   const modelOptions = selectedAgent?.models ?? [];
@@ -87,6 +90,13 @@ export function DefaultModelSection({
           />
         </div>
       </div>
+      {defaultAgentId && (
+        <InferenceAgentStatusNote
+          agent={selectedAgent}
+          fallbackName={defaultAgentId}
+          onRefresh={() => onRefreshAgent(defaultAgentId)}
+        />
+      )}
     </div>
   );
 }

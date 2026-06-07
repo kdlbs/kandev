@@ -51,11 +51,28 @@ export type InferenceModel = {
   meta?: Record<string, unknown>;
 };
 
+/**
+ * Probe outcome for the host-utility agentctl instance backing this agent.
+ * Mirrors `hostutility.Status` (`apps/backend/internal/agent/hostutility/types.go`).
+ * The settings page renders an inline status note + Refresh button when
+ * `status !== "ok"` or `models` is empty, instead of a silently-disabled
+ * Model picker.
+ */
+export type InferenceAgentStatus =
+  | "ok"
+  | "probing"
+  | "auth_required"
+  | "not_installed"
+  | "failed"
+  | "not_configured";
+
 export type InferenceAgent = {
   id: string;
   name: string;
   display_name: string;
   models: InferenceModel[];
+  status: InferenceAgentStatus;
+  status_message?: string;
 };
 
 export type ExecutePromptRequest = {
@@ -139,6 +156,22 @@ export async function listInferenceAgents(
   options?: ApiRequestOptions,
 ): Promise<{ agents: InferenceAgent[] }> {
   return fetchJson<{ agents: InferenceAgent[] }>("/api/v1/utility/inference-agents", options);
+}
+
+/**
+ * Re-probe a single inference agent and return its updated capabilities.
+ * Used by the settings-page Refresh button so the user can recover from a
+ * transient probe failure (sign-in race, agent not yet installed at boot,
+ * network blip) without restarting kandev.
+ */
+export async function refreshInferenceAgent(
+  id: string,
+  options?: ApiRequestOptions,
+): Promise<InferenceAgent> {
+  return fetchJson<InferenceAgent>(`/api/v1/utility/inference-agents/${id}/refresh`, {
+    ...options,
+    init: { method: "POST", ...(options?.init ?? {}) },
+  });
 }
 
 export async function executeUtilityPrompt(
