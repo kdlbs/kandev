@@ -39,8 +39,15 @@ function liveContainerSize(): { width: number; height: number } | null {
   const dv = document.querySelector(".dv-dockview") as HTMLElement | null;
   const parent = dv?.parentElement;
   if (!parent || parent.clientWidth <= 0 || parent.clientHeight <= 0) return null;
-  if (parent.clientWidth < viewportWidth() * MIN_PLAUSIBLE_WIDTH_RATIO) return null;
-  return { width: parent.clientWidth, height: parent.clientHeight };
+  // The sidebar animation is horizontal, so only the width can be a transient —
+  // the live height is reliable. Fall back just the width to the viewport so the
+  // build stays horizontal; keep the real height to avoid a needless vertical
+  // transient. The resize observer then snaps the width to the exact size.
+  const plausibleWidth = parent.clientWidth >= viewportWidth() * MIN_PLAUSIBLE_WIDTH_RATIO;
+  return {
+    width: plausibleWidth ? parent.clientWidth : viewportWidth(),
+    height: parent.clientHeight,
+  };
 }
 
 function viewportWidth(): number {
