@@ -197,7 +197,7 @@ export function CommitsGroupActions({
 
 /**
  * Per-repo group inside the Commits section. Like {@link RepoGroupItem} but
- * for commit rows; surfaces a Push button when the repo has unpushed commits.
+ * for commit rows; surfaces a Push button when the repo is ahead of its remote.
  */
 export function CommitsRepoGroup({
   repositoryName,
