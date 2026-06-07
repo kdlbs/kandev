@@ -681,6 +681,36 @@ func TestImportWorkflows(t *testing.T) {
 		assert.False(t, steps[2].ShowInCommandPanel, "Done should not show in command panel")
 	})
 
+	t.Run("preserves auto_advance_requires_signal on import", func(t *testing.T) {
+		svc, _, _ := setupTestServiceWithProvider(t)
+		ctx := context.Background()
+
+		export := &models.WorkflowExport{
+			Version: models.ExportVersion,
+			Type:    models.ExportType,
+			Workflows: []models.WorkflowPortable{
+				{
+					Name: "Signal WF",
+					Steps: []models.StepPortable{
+						{Name: "Legacy", Position: 0, Color: "gray", AutoAdvanceRequiresSignal: false},
+						{Name: "Gated", Position: 1, Color: "blue", AutoAdvanceRequiresSignal: true},
+					},
+				},
+			},
+		}
+
+		result, err := svc.ImportWorkflows(ctx, "ws-1", export)
+		require.NoError(t, err)
+		require.Len(t, result.Created, 1)
+
+		steps, err := svc.repo.ListStepsByWorkflow(ctx, "imported-Signal WF")
+		require.NoError(t, err)
+		require.Len(t, steps, 2)
+
+		assert.False(t, steps[0].AutoAdvanceRequiresSignal, "Legacy step should not require signal")
+		assert.True(t, steps[1].AutoAdvanceRequiresSignal, "Gated step should require signal")
+	})
+
 	t.Run("rejects invalid export data", func(t *testing.T) {
 		svc, _, _ := setupTestServiceWithProvider(t)
 		ctx := context.Background()

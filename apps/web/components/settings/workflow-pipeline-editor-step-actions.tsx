@@ -249,7 +249,9 @@ export function TurnCompleteSelect({
           <HelpTip text="Turn off plan mode after the agent finishes this step." />
         </div>
       )}
-      <ExplicitCompletionToggle step={step} onUpdate={onUpdate} readOnly={readOnly} />
+      {transitionType !== "none" && (
+        <ExplicitCompletionToggle step={step} onUpdate={onUpdate} readOnly={readOnly} />
+      )}
     </div>
   );
 }
