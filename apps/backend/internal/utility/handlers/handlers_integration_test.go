@@ -240,9 +240,11 @@ func TestIntegration_RefreshPathFuzz(t *testing.T) {
 }
 
 // TestIntegration_ConcurrentRefresh hammers the refresh endpoint to
-// verify race-freedom. We don't assert on call count (singleflight is
-// in the real Manager, not this stub) — only that every response is
-// well-formed and the goroutine pool drains without panic.
+// verify race-freedom. The stub has no singleflight (that lives in the
+// real Manager), so every one of the N requests must reach the stub —
+// the assertion below pins refreshCalls == N. The primary signal is
+// still that 50 concurrent goroutines drain without panic or data
+// race, which is what -race exercises.
 func TestIntegration_ConcurrentRefresh(t *testing.T) {
 	host := newStatefulHostStub()
 	host.caps["claude-acp"] = hostutility.AgentCapabilities{AgentType: "claude-acp", Status: hostutility.StatusAuthRequired}

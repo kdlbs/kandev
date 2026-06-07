@@ -114,9 +114,11 @@ test.describe("Utility Agents settings page", () => {
     // Regression guard for "I select an agent but can't select a model".
     // The mock-agent binary advertises `mock-fast` (default) and `mock-smart`
     // in its session/new response, so the boot-time ACP probe populates the
-    // host utility capability cache. The backend filters out agents whose
-    // probe didn't reach StatusOK, so in E2E (KANDEV_MOCK_AGENT=only) the
-    // Agent dropdown should show exactly one option: Mock.
+    // host utility capability cache. In E2E (KANDEV_MOCK_AGENT=only) only
+    // `mock-agent` is registered in the inference-agent registry, so the
+    // Agent dropdown shows exactly one option: Mock. (Non-OK agents are no
+    // longer filtered out — see #1269 — but in this profile no other agent
+    // is registered to begin with.)
     const pageErrors: Error[] = [];
     testPage.on("pageerror", (err) => pageErrors.push(err));
 
