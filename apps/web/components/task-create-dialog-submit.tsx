@@ -339,7 +339,8 @@ export function useTaskSubmitHandlers({
       const taskResponse = await createTaskWithFreshBranchRetry(buildPayload, opts.consented);
       if (!taskResponse) return;
       const newSessionId = taskResponse.session_id ?? taskResponse.primary_session_id ?? null;
-      onSuccess?.(taskResponse, "create", { taskSessionId: newSessionId });
+      const willNavigate = opts.withAgent && isPassthroughProfile && !opts.planMode;
+      onSuccess?.(taskResponse, "create", { taskSessionId: newSessionId, willNavigate });
       clearDraft();
       onOpenChange(false);
       if (opts.planMode && newSessionId) {

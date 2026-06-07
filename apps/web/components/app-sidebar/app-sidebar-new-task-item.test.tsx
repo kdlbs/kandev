@@ -5,6 +5,7 @@ import { TooltipProvider } from "@kandev/ui/tooltip";
 const mocks = vi.hoisted(() => ({
   routerPush: vi.fn(),
   setActiveTask: vi.fn(),
+  dialogWillNavigate: false,
 }));
 
 function renderItem(collapsed: boolean) {
@@ -48,13 +49,15 @@ vi.mock("@/components/task-create-dialog", () => ({
     onSuccess?: (
       task: { id: string },
       mode: "create" | "edit",
-      meta?: { taskSessionId?: string | null },
+      meta?: { taskSessionId?: string | null; willNavigate?: boolean },
     ) => void;
   }) => (
     <button
       type="button"
       data-testid="regular-task-create-dialog"
-      onClick={() => onSuccess?.({ id: "t-new" }, "create")}
+      onClick={() =>
+        onSuccess?.({ id: "t-new" }, "create", { willNavigate: mocks.dialogWillNavigate })
+      }
     >
       regular dialog
     </button>
@@ -79,6 +82,7 @@ describe("AppSidebarNewTaskItem", () => {
     state.tasks.activeTaskId = null;
     mocks.routerPush.mockClear();
     mocks.setActiveTask.mockClear();
+    mocks.dialogWillNavigate = false;
     officeEnabled = false;
     pathname = "/";
   });
@@ -154,5 +158,13 @@ describe("AppSidebarNewTaskItem", () => {
     screen.getByTestId(REGULAR_DIALOG_TESTID).click();
     expect(mocks.setActiveTask).toHaveBeenCalledWith("t-new");
     expect(mocks.routerPush).toHaveBeenCalledWith("/t/t-new");
+  });
+
+  it("does not push twice when the regular task dialog already navigates", () => {
+    mocks.dialogWillNavigate = true;
+    renderItem(false);
+    screen.getByTestId(REGULAR_DIALOG_TESTID).click();
+    expect(mocks.setActiveTask).toHaveBeenCalledWith("t-new");
+    expect(mocks.routerPush).not.toHaveBeenCalled();
   });
 });

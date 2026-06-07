@@ -60,9 +60,10 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
   // and the expanded rail to host the trailing button.
   const canCreateSubtask = !collapsed && !!workspaceId && !!activeTaskId;
   const handleRegularTaskCreated = useCallback(
-    (task: Task) => {
+    (task: Task, _mode: "create" | "edit", meta?: { willNavigate?: boolean }) => {
       setOpen(false);
       setActiveTask(task.id);
+      if (meta?.willNavigate) return;
       router.push(linkToTask(task.id));
     },
     [router, setActiveTask],
