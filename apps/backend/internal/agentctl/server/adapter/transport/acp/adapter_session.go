@@ -378,7 +378,7 @@ func (a *Adapter) emitSessionModels(sessionID string, models *acp.SessionModelSt
 	// CurrentModelId nor a configOption surface a value, emit empty and let
 	// the frontend fall through to its profile/snapshot resolution.
 	if currentModelID == "" {
-		currentModelID = resolveCurrentModelFromConfig(configOptions)
+		currentModelID = resolveCurrentModelFromConfig(configOptions, models.AvailableModels)
 	}
 
 	// Cache config options so emitSetModelEvent can include them in the
@@ -443,13 +443,42 @@ func (a *Adapter) emitSetModelEvent(sessionID, modelID string, cachedModels []ac
 }
 
 // resolveCurrentModelFromConfig extracts current model ID from configOptions.
-func resolveCurrentModelFromConfig(options []streams.ConfigOption) string {
+func resolveCurrentModelFromConfig(options []streams.ConfigOption, available []acp.ModelInfo) string {
+	modelID := ""
+	reasoningEffort := ""
 	for _, opt := range options {
 		if opt.ID == configOptionIDModel || opt.Category == configOptionIDModel {
-			return opt.CurrentValue
+			modelID = opt.CurrentValue
+		}
+		if opt.ID == configOptionIDReasoningEffort || opt.Category == configOptionCategoryThoughtLevel {
+			reasoningEffort = opt.CurrentValue
 		}
 	}
-	return ""
+	if modelID == "" {
+		return ""
+	}
+	if modelIDExists(modelID, available) {
+		return modelID
+	}
+	if reasoningEffort != "" {
+		combined := modelID + "/" + reasoningEffort
+		if modelIDExists(combined, available) {
+			return combined
+		}
+	}
+	return modelID
+}
+
+func modelIDExists(modelID string, available []acp.ModelInfo) bool {
+	if len(available) == 0 {
+		return false
+	}
+	for _, model := range available {
+		if string(model.ModelId) == modelID {
+			return true
+		}
+	}
+	return false
 }
 
 // SetMode changes the agent's session mode via ACP session/set_mode.

@@ -230,7 +230,7 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 			cachedModels := a.availableModels
 			a.availableConfigOptions = configOptions
 			a.mu.Unlock()
-			currentModelID := resolveCurrentModelFromConfig(configOptions)
+			currentModelID := resolveCurrentModelFromConfig(configOptions, cachedModels)
 			return &AgentEvent{
 				Type:           streams.EventTypeSessionModels,
 				SessionID:      sessionID,

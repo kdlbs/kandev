@@ -73,6 +73,62 @@ func TestEmitSessionModels_EmptyCurrentIDFromConfigOption(t *testing.T) {
 	}
 }
 
+// TestEmitSessionModels_EmptyCurrentIDComposesReasoningEffort pins Codex's
+// split config-option shape: configOptions reports model="gpt-5.5" and
+// reasoning_effort="medium", while availableModels carries the actual
+// selectable ID "gpt-5.5/medium".
+func TestEmitSessionModels_EmptyCurrentIDComposesReasoningEffort(t *testing.T) {
+	a := newTestAdapter()
+	models := &acp.SessionModelState{
+		CurrentModelId: "",
+		AvailableModels: []acp.ModelInfo{
+			{ModelId: "gpt-5.5/low", Name: "GPT-5.5 (low)"},
+			{ModelId: "gpt-5.5/medium", Name: "GPT-5.5 (medium)"},
+		},
+	}
+	meta := map[string]any{
+		"configOptions": []any{
+			map[string]any{
+				"type":         "select",
+				"id":           "model",
+				"name":         "Model",
+				"category":     "model",
+				"currentValue": "gpt-5.5",
+			},
+			map[string]any{
+				"type":         "select",
+				"id":           "reasoning_effort",
+				"name":         "Reasoning Effort",
+				"category":     "thought_level",
+				"currentValue": "medium",
+			},
+		},
+	}
+
+	a.emitSessionModels("sess-1", models, meta, nil)
+
+	ev := findSessionModelsEvent(t, drainEvents(a))
+	if ev.CurrentModelID != "gpt-5.5/medium" {
+		t.Errorf("CurrentModelID = %q, want %q", ev.CurrentModelID, "gpt-5.5/medium")
+	}
+}
+
+func TestResolveCurrentModelFromConfig_ComposesReasoningEffort(t *testing.T) {
+	options := []streams.ConfigOption{
+		{Type: "select", ID: "model", Category: "model", CurrentValue: "gpt-5.5"},
+		{Type: "select", ID: "reasoning_effort", Category: "thought_level", CurrentValue: "medium"},
+	}
+	available := []acp.ModelInfo{
+		{ModelId: "gpt-5.5/low", Name: "GPT-5.5 (low)"},
+		{ModelId: "gpt-5.5/medium", Name: "GPT-5.5 (medium)"},
+	}
+
+	got := resolveCurrentModelFromConfig(options, available)
+	if got != "gpt-5.5/medium" {
+		t.Errorf("resolveCurrentModelFromConfig() = %q, want %q", got, "gpt-5.5/medium")
+	}
+}
+
 // TestEmitSessionModels_NonEmptyCurrentIDPreserved checks the happy path:
 // when the agent populates CurrentModelId, we propagate it verbatim.
 func TestEmitSessionModels_NonEmptyCurrentIDPreserved(t *testing.T) {
