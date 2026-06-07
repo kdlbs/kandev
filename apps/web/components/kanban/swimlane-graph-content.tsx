@@ -24,6 +24,7 @@ import type { WorkflowStep } from "@/components/kanban-column";
 import type { MoveTaskError } from "@/hooks/use-drag-and-drop";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import { useTaskPendingClarification } from "@/hooks/use-task-pending-clarification";
+import { compareTasksByCreatedDesc } from "@/lib/kanban/task-order";
 
 export type SwimlaneGraphContentProps = {
   workflowId: string;
@@ -199,7 +200,7 @@ function useSwimlaneGraphDnd({ tasks, steps, workflowId, onMoveError }: Swimlane
     for (const col of steps) {
       map[col.id] = tasks
         .filter((t) => t.workflowStepId === col.id)
-        .sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""));
+        .sort(compareTasksByCreatedDesc);
     }
     return map;
   }, [steps, tasks]);
