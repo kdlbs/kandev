@@ -4,6 +4,12 @@ import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { focusOrAddPanel } from "@/lib/state/dockview-layout-builders";
+import {
+  CENTER_GROUP,
+  RIGHT_BOTTOM_GROUP,
+  RIGHT_TOP_GROUP,
+  SIDEBAR_GROUP,
+} from "@/lib/state/layout-manager";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { wasPRPanelOffered, markPRPanelOffered } from "@/lib/local-storage";
 import { sessionId as toSessionId } from "@/lib/types/ids";
@@ -169,7 +175,11 @@ export function setupChatPanelSafetyNet(
           position,
         });
         const nc = api.getPanel(`session:${activeSessionId}`);
-        if (nc) useDockviewStore.setState({ centerGroupId: nc.group.id });
+        if (nc) {
+          useDockviewStore.setState({
+            centerGroupId: isCenterCandidateGroupId(nc.group.id) ? nc.group.id : CENTER_GROUP,
+          });
+        }
       });
     });
   });
@@ -293,6 +303,10 @@ export function useAutoPRPanel() {
  */
 const SESSION_ANCHOR_PANEL_IDS = ["pr-detail"];
 
+function isCenterCandidateGroupId(groupId: string): boolean {
+  return groupId !== SIDEBAR_GROUP && groupId !== RIGHT_TOP_GROUP && groupId !== RIGHT_BOTTOM_GROUP;
+}
+
 export function findSessionAnchorGroupId(api: DockviewApi): string | null {
   for (const id of SESSION_ANCHOR_PANEL_IDS) {
     const exact = api.getPanel(id);
@@ -311,9 +325,12 @@ function resolveInitialPosition(api: DockviewApi): AddPanelOptions["position"] {
   // centerGroupId goes stale, and the session panel gets appended as a new row,
   // collapsing the horizontal default layout into a vertical stack.
   const chatGroupId = api.getPanel("chat")?.group?.id;
-  if (chatGroupId) return { referenceGroup: chatGroupId };
+  if (chatGroupId && isCenterCandidateGroupId(chatGroupId)) return { referenceGroup: chatGroupId };
   const { centerGroupId } = useDockviewStore.getState();
-  const centerGroupExists = centerGroupId && api.groups.some((g) => g.id === centerGroupId);
+  const centerGroupExists =
+    centerGroupId &&
+    isCenterCandidateGroupId(centerGroupId) &&
+    api.groups.some((g) => g.id === centerGroupId);
   if (centerGroupExists) return { referenceGroup: centerGroupId };
   const anchorGroupId = findSessionAnchorGroupId(api);
   // index:0 matches the project's session-on-the-left convention (agent tab
@@ -322,7 +339,11 @@ function resolveInitialPosition(api: DockviewApi): AddPanelOptions["position"] {
   // lost here — but the alternative (appending) would put the agent tab
   // to the right of pr-detail, which contradicts the default placement
   // every other code path produces. Pick the consistent default.
-  if (anchorGroupId) return { referenceGroup: anchorGroupId, index: 0 };
+  if (anchorGroupId && isCenterCandidateGroupId(anchorGroupId)) {
+    return { referenceGroup: anchorGroupId, index: 0 };
+  }
+  const rightTopExists = api.groups.some((g) => g.id === RIGHT_TOP_GROUP);
+  if (rightTopExists) return { referenceGroup: RIGHT_TOP_GROUP, direction: "left" };
   return undefined;
 }
 
@@ -499,7 +520,11 @@ function activateSessionPanel(
     });
   }
   if (shouldActivate) activePanel.api.setActive();
-  useDockviewStore.setState({ centerGroupId: activePanel.group.id });
+  useDockviewStore.setState({
+    centerGroupId: isCenterCandidateGroupId(activePanel.group.id)
+      ? activePanel.group.id
+      : CENTER_GROUP,
+  });
   return activePanel;
 }
 

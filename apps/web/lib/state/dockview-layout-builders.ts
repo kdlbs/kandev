@@ -22,6 +22,10 @@ export { getRootSplitview } from "./layout-manager";
 
 const debugWidths = createDebugLogger("dockview:widths");
 
+function isCenterCandidateGroupId(groupId: string): boolean {
+  return groupId !== SIDEBAR_GROUP && groupId !== RIGHT_TOP_GROUP && groupId !== RIGHT_BOTTOM_GROUP;
+}
+
 /** Dockview's measured grid width, or undefined when not yet laid out — passed
  *  to the cap helpers so they don't fall back to a possibly-stale
  *  `window.innerWidth`. */
@@ -244,14 +248,14 @@ export function fallbackGroupPosition(api: DockviewApi): { referenceGroup: strin
   if (centerGroup) return { referenceGroup: centerGroup.id };
 
   const chatGroupId = api.getPanel("chat")?.group?.id;
-  if (chatGroupId) return { referenceGroup: chatGroupId };
+  if (chatGroupId && isCenterCandidateGroupId(chatGroupId)) return { referenceGroup: chatGroupId };
 
   const sessionGroupId = api.panels.find((p) => p.id.startsWith("session:"))?.group?.id;
-  if (sessionGroupId) return { referenceGroup: sessionGroupId };
+  if (sessionGroupId && isCenterCandidateGroupId(sessionGroupId)) {
+    return { referenceGroup: sessionGroupId };
+  }
 
-  const centerish = api.groups.find(
-    (g) => g.id !== SIDEBAR_GROUP && g.id !== RIGHT_TOP_GROUP && g.id !== RIGHT_BOTTOM_GROUP,
-  );
+  const centerish = api.groups.find((g) => isCenterCandidateGroupId(g.id));
   if (centerish) return { referenceGroup: centerish.id };
 
   return undefined;

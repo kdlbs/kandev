@@ -34,6 +34,10 @@ function findGroupId(api: DockviewApi, knownId: string, fallbackPanelId: string)
   return pnl?.group?.id ?? knownId;
 }
 
+function isCenterCandidateGroupId(groupId: string): boolean {
+  return groupId !== SIDEBAR_GROUP && groupId !== RIGHT_TOP_GROUP && groupId !== RIGHT_BOTTOM_GROUP;
+}
+
 /** Find the center group, preferring the well-known ID, then "chat", then any
  *  "session:*" panel's group. When a session is active, "chat" is removed and
  *  replaced with per-session tabs — without the session fallback the returned
@@ -41,9 +45,13 @@ function findGroupId(api: DockviewApi, knownId: string, fallbackPanelId: string)
 function findCenterGroupId(api: DockviewApi): string {
   if (api.groups.some((g) => g.id === CENTER_GROUP)) return CENTER_GROUP;
   const chat = api.getPanel("chat");
-  if (chat?.group?.id) return chat.group.id;
+  if (chat?.group?.id && isCenterCandidateGroupId(chat.group.id)) return chat.group.id;
   const sessionPanel = api.panels.find((p) => p.id.startsWith("session:"));
-  if (sessionPanel?.group?.id) return sessionPanel.group.id;
+  if (sessionPanel?.group?.id && isCenterCandidateGroupId(sessionPanel.group.id)) {
+    return sessionPanel.group.id;
+  }
+  const centerish = api.groups.find((g) => isCenterCandidateGroupId(g.id));
+  if (centerish) return centerish.id;
   return CENTER_GROUP;
 }
 
