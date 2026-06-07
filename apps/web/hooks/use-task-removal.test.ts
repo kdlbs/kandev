@@ -231,13 +231,14 @@ describe("useTaskRemoval — switch guard (WS-clear fallback)", () => {
 });
 
 describe("useTaskRemoval — next task selection", () => {
-  it("switches to the most recent remaining task instead of the first snapshot task", async () => {
-    const recentTaskId = "task-recent";
-    const recentSessionId = "sess-recent";
+  const recentTaskId = "task-recent";
+  const recentSessionId = "sess-recent";
+
+  function makeStoreWithOldAndRecentTasks(activeTaskId: string | null) {
     const oldTask = { id: "task-old", primarySessionId: "sess-old" };
     const recentTask = { id: recentTaskId, primarySessionId: recentSessionId };
     const store = makeStore({
-      activeTaskId: "task-A",
+      activeTaskId,
       activeSessionId: "sess-A",
       remainingTasks: [{ id: "task-A", primarySessionId: "sess-A" }, oldTask, recentTask],
     });
@@ -246,6 +247,11 @@ describe("useTaskRemoval — next task selection", () => {
       "sess-old": "env-old",
       [recentSessionId]: "env-recent",
     };
+    return store;
+  }
+
+  it("switches to the most recent remaining task instead of the first snapshot task", async () => {
+    const store = makeStoreWithOldAndRecentTasks("task-A");
     setRecentTasks([
       {
         taskId: recentTaskId,
@@ -255,6 +261,42 @@ describe("useTaskRemoval — next task selection", () => {
       {
         taskId: "task-A",
         title: "Removed task",
+        visitedAt: "2026-06-07T09:00:00Z",
+      },
+      {
+        taskId: "task-old",
+        title: "Old task",
+        visitedAt: "2026-06-06T10:00:00Z",
+      },
+    ]);
+
+    const { result } = renderHook(() =>
+      useTaskRemoval({ store: store as unknown as StoreApi<never> }),
+    );
+
+    await result.current.removeTaskFromBoard("task-A", {
+      wasActiveTaskId: "task-A",
+      wasActiveSessionId: "sess-A",
+    });
+
+    expect(store.getRecorded().setActiveSession).toHaveBeenCalledWith(
+      recentTaskId,
+      recentSessionId,
+    );
+    expect(replaceTaskUrlMock).toHaveBeenCalledWith(recentTaskId);
+  });
+
+  it("skips the removed active task when it is first in recent history", async () => {
+    const store = makeStoreWithOldAndRecentTasks("task-A");
+    setRecentTasks([
+      {
+        taskId: "task-A",
+        title: "Removed task",
+        visitedAt: "2026-06-07T10:00:00Z",
+      },
+      {
+        taskId: recentTaskId,
+        title: "Recent task",
         visitedAt: "2026-06-07T09:00:00Z",
       },
       {
