@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 // TestCreatePRWatch_AllowsMultipleBranchesPerRepo locks the multi-branch
@@ -254,5 +255,127 @@ func TestUpdatePRWatchBranchIfSearching_MissingRow_NoOp(t *testing.T) {
 
 	if err := svc.UpdatePRWatchBranchIfSearching(ctx, "nonexistent-id", "feature/any"); err != nil {
 		t.Fatalf("must be a no-op for missing row, got: %v", err)
+	}
+}
+
+func TestTriggerPRStatusSync_AssociatesExactPRWhenSiblingIsFresh(t *testing.T) {
+	_, svc, mockClient, store := setupPollerTest(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-1", false)
+
+	now := time.Now().UTC()
+	mergedAt := now.Add(-30 * time.Minute)
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID:       "task-1",
+		RepositoryID: "repo-1",
+		Owner:        "owner",
+		Repo:         "repo",
+		PRNumber:     1293,
+		PRURL:        "https://github.com/owner/repo/pull/1293",
+		PRTitle:      "First",
+		HeadBranch:   "feature/first",
+		BaseBranch:   "main",
+		State:        "merged",
+		CreatedAt:    now.Add(-2 * time.Hour),
+		MergedAt:     &mergedAt,
+		ClosedAt:     &mergedAt,
+		LastSyncedAt: &now,
+	}); err != nil {
+		t.Fatalf("seed merged sibling: %v", err)
+	}
+
+	watch, err := svc.CreatePRWatch(ctx, "session-1", "task-1", "repo-1", "owner", "repo", 1299, "feature/second")
+	if err != nil {
+		t.Fatalf("CreatePRWatch: %v", err)
+	}
+	mockClient.AddPR(&PR{
+		Number:     1299,
+		Title:      "Second",
+		HTMLURL:    "https://github.com/owner/repo/pull/1299",
+		State:      "open",
+		HeadBranch: "feature/second",
+		BaseBranch: "main",
+		RepoOwner:  "owner",
+		RepoName:   "repo",
+		CreatedAt:  now.Add(-1 * time.Hour),
+		UpdatedAt:  now,
+	})
+
+	got, err := svc.triggerPRStatusSync(ctx, watch, "task-1")
+	if err != nil {
+		t.Fatalf("triggerPRStatusSync: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected TaskPR result")
+	}
+	if got.PRNumber != 1299 || got.State != "open" {
+		t.Fatalf("sync returned PR #%d state=%q, want PR #1299 open", got.PRNumber, got.State)
+	}
+
+	all, err := store.ListTaskPRsByTask(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("ListTaskPRsByTask: %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("expected sync to create exact sibling row, got %d rows", len(all))
+	}
+}
+
+func TestApplyBatchedNumberedWatch_AssociatesExactPRWhenSiblingExists(t *testing.T) {
+	_, svc, _, store := setupPollerTest(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-1", false)
+
+	now := time.Now().UTC()
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID:       "task-1",
+		RepositoryID: "repo-1",
+		Owner:        "owner",
+		Repo:         "repo",
+		PRNumber:     1293,
+		PRURL:        "https://github.com/owner/repo/pull/1293",
+		PRTitle:      "First",
+		HeadBranch:   "feature/first",
+		BaseBranch:   "main",
+		State:        "merged",
+		CreatedAt:    now.Add(-2 * time.Hour),
+		LastSyncedAt: &now,
+	}); err != nil {
+		t.Fatalf("seed merged sibling: %v", err)
+	}
+
+	watch, err := svc.CreatePRWatch(ctx, "session-1", "task-1", "repo-1", "owner", "repo", 1299, "feature/second")
+	if err != nil {
+		t.Fatalf("CreatePRWatch: %v", err)
+	}
+	status := &PRStatus{
+		PR: &PR{
+			Number:     1299,
+			Title:      "Second",
+			HTMLURL:    "https://github.com/owner/repo/pull/1299",
+			State:      "open",
+			HeadBranch: "feature/second",
+			BaseBranch: "main",
+			RepoOwner:  "owner",
+			RepoName:   "repo",
+			CreatedAt:  now.Add(-1 * time.Hour),
+			UpdatedAt:  now,
+		},
+		ChecksState: "pending",
+	}
+
+	result := svc.applyBatchedNumberedWatch(ctx, watch, map[string]*PRStatus{
+		prStatusCacheKey("owner", "repo", 1299): status,
+	}, now)
+	if result.SyncFailed {
+		t.Fatal("batched sync should not fail")
+	}
+
+	got, err := store.GetTaskPRByRepoAndNumber(ctx, "task-1", "repo-1", 1299)
+	if err != nil {
+		t.Fatalf("GetTaskPRByRepoAndNumber: %v", err)
+	}
+	if got == nil || got.State != "open" {
+		t.Fatalf("expected exact PR #1299 open row, got %+v", got)
 	}
 }

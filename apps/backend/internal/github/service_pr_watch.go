@@ -832,12 +832,11 @@ func (s *Service) detectPRForWatchOnce(ctx context.Context, watch *PRWatch, task
 }
 
 func (s *Service) triggerPRStatusSync(ctx context.Context, watch *PRWatch, taskID string) (*TaskPR, error) {
-	// Freshness check: skip GitHub API if recently synced. Look up by the
-	// watch's own (task, repo) — the legacy GetTaskPR(ctx, taskID) returned
-	// "first match" which for multi-repo tasks would mistakenly hit the
-	// other repo's row and skip the sync that this watch actually needs.
+	// Freshness check: skip GitHub API if this exact PR row was recently
+	// synced. Multi-branch tasks can have multiple PRs in the same repo, so a
+	// repo-only lookup would let a fresh sibling suppress this PR's sync.
 	loadTaskPR := func(c context.Context) (*TaskPR, error) {
-		tp, err := s.store.GetTaskPRByRepository(c, taskID, watch.RepositoryID)
+		tp, err := s.store.GetTaskPRByRepoAndNumber(c, taskID, watch.RepositoryID, watch.PRNumber)
 		if err != nil {
 			return nil, err
 		}
@@ -846,6 +845,9 @@ func (s *Service) triggerPRStatusSync(ctx context.Context, watch *PRWatch, taskI
 		}
 		// Fall back to the legacy untagged row for single-repo tasks that
 		// haven't been re-associated under the multi-repo schema yet.
+		if watch.RepositoryID != "" {
+			return nil, nil
+		}
 		return s.store.GetTaskPR(c, taskID)
 	}
 	if tp, _ := loadTaskPR(ctx); tp != nil && tp.LastSyncedAt != nil {
@@ -879,6 +881,13 @@ func (s *Service) triggerPRStatusSync(ctx context.Context, watch *PRWatch, taskI
 		}
 		if status == nil {
 			return loadTaskPR(bgCtx)
+		}
+		if existing, loadErr := loadTaskPR(bgCtx); loadErr != nil {
+			return nil, loadErr
+		} else if existing == nil {
+			if _, assocErr := s.AssociatePRWithTask(bgCtx, taskID, watch.RepositoryID, status.PR); assocErr != nil {
+				return nil, assocErr
+			}
 		}
 		if syncErr := s.SyncTaskPR(bgCtx, taskID, status); syncErr != nil {
 			return nil, syncErr
