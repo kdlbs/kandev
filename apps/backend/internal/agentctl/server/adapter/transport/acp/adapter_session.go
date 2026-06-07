@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
@@ -422,9 +423,19 @@ func (a *Adapter) emitSetModelEvent(sessionID, modelID string, cachedModels []ac
 		// deep copy to avoid aliasing the caller's backing array.
 		outConfig = make([]streams.ConfigOption, len(cachedConfig))
 		copy(outConfig, cachedConfig)
+		baseModelID, reasoningEffort, splitReasoningModel := splitReasoningModelID(modelID, outConfig)
 		for i := range outConfig {
 			if outConfig[i].ID == configOptionIDModel || outConfig[i].Category == configOptionIDModel {
-				outConfig[i].CurrentValue = modelID
+				if splitReasoningModel {
+					outConfig[i].CurrentValue = baseModelID
+				} else {
+					outConfig[i].CurrentValue = modelID
+				}
+			}
+			if splitReasoningModel &&
+				(outConfig[i].ID == configOptionIDReasoningEffort ||
+					outConfig[i].Category == configOptionCategoryThoughtLevel) {
+				outConfig[i].CurrentValue = reasoningEffort
 			}
 		}
 	}
@@ -457,16 +468,36 @@ func resolveCurrentModelFromConfig(options []streams.ConfigOption, available []a
 	if modelID == "" {
 		return ""
 	}
-	if modelIDExists(modelID, available) {
-		return modelID
-	}
 	if reasoningEffort != "" {
 		combined := modelID + "/" + reasoningEffort
 		if modelIDExists(combined, available) {
 			return combined
 		}
 	}
+	if modelIDExists(modelID, available) {
+		return modelID
+	}
+	// Keep the agent-reported config value as a best-effort fallback for
+	// providers that expose the current model only through configOptions.
 	return modelID
+}
+
+func splitReasoningModelID(modelID string, options []streams.ConfigOption) (string, string, bool) {
+	hasReasoningOption := false
+	for _, opt := range options {
+		if opt.ID == configOptionIDReasoningEffort || opt.Category == configOptionCategoryThoughtLevel {
+			hasReasoningOption = true
+			break
+		}
+	}
+	if !hasReasoningOption {
+		return "", "", false
+	}
+	baseModelID, reasoningEffort, ok := strings.Cut(modelID, "/")
+	if !ok || baseModelID == "" || reasoningEffort == "" {
+		return "", "", false
+	}
+	return baseModelID, reasoningEffort, true
 }
 
 func modelIDExists(modelID string, available []acp.ModelInfo) bool {
