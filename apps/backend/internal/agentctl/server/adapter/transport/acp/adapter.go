@@ -44,6 +44,11 @@ const (
 	// availableModels list uses model/effort IDs such as gpt-5.5/medium.
 	configOptionIDReasoningEffort    = "reasoning_effort"
 	configOptionCategoryThoughtLevel = "thought_level"
+
+	reasoningEffortLow    = "low"
+	reasoningEffortMedium = "medium"
+	reasoningEffortHigh   = "high"
+	reasoningEffortXHigh  = "xhigh"
 )
 
 // wakeupPromptTimeout bounds how long a synthetic wakeup prompt can run.

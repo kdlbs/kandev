@@ -483,14 +483,29 @@ func resolveCurrentModelFromConfig(options []streams.ConfigOption, available []a
 }
 
 func splitReasoningModelID(modelID string, options []streams.ConfigOption) (string, string, bool) {
+	allowedReasoningEfforts := map[string]bool{}
 	hasReasoningOption := false
 	for _, opt := range options {
 		if opt.ID == configOptionIDReasoningEffort || opt.Category == configOptionCategoryThoughtLevel {
 			hasReasoningOption = true
-			break
+			for _, optionValue := range opt.Options {
+				if optionValue.Value != "" {
+					allowedReasoningEfforts[optionValue.Value] = true
+				}
+			}
 		}
 	}
-	if !hasReasoningOption {
+	if hasReasoningOption && len(allowedReasoningEfforts) == 0 {
+		for _, effort := range []string{
+			reasoningEffortLow,
+			reasoningEffortMedium,
+			reasoningEffortHigh,
+			reasoningEffortXHigh,
+		} {
+			allowedReasoningEfforts[effort] = true
+		}
+	}
+	if len(allowedReasoningEfforts) == 0 {
 		return "", "", false
 	}
 	slashIndex := strings.LastIndex(modelID, "/")
@@ -499,6 +514,9 @@ func splitReasoningModelID(modelID string, options []streams.ConfigOption) (stri
 	}
 	baseModelID := modelID[:slashIndex]
 	reasoningEffort := modelID[slashIndex+1:]
+	if !allowedReasoningEfforts[reasoningEffort] {
+		return "", "", false
+	}
 	return baseModelID, reasoningEffort, true
 }
 
