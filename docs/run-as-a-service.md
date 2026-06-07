@@ -113,7 +113,7 @@ Type=simple
 ExecStart=/usr/local/bin/node /usr/local/lib/node_modules/kandev/bin/cli.js --headless
 Environment=KANDEV_HOME_DIR=/home/alice/.kandev
 Environment=KANDEV_LOG_LEVEL=info
-Environment=PATH=/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin
+Environment=PATH=%h/.local/bin:%h/.bun/bin:%h/.opencode/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin
 Environment=KANDEV_RUNNING_AS_SERVICE=true
 Environment=KANDEV_SERVICE_MODE=user
 Environment=KANDEV_SERVICE_MANAGER=systemd

@@ -64,7 +64,7 @@ describe("renderSystemdUnit", () => {
       mode: "user",
     });
     expect(unit).toMatch(
-      /^Environment=PATH=%h\/\.local\/bin:%h\/\.bun\/bin:\/usr\/local\/bin:\/usr\/bin:\/bin:\/opt\/homebrew\/bin:\/home\/linuxbrew\/\.linuxbrew\/bin$/m,
+      /^Environment=PATH=%h\/\.local\/bin:%h\/\.bun\/bin:%h\/\.opencode\/bin:\/usr\/local\/bin:\/usr\/bin:\/bin:\/opt\/homebrew\/bin:\/home\/linuxbrew\/\.linuxbrew\/bin$/m,
     );
   });
 
@@ -78,7 +78,7 @@ describe("renderSystemdUnit", () => {
     expect(unit).toContain("%h/.bun/bin");
   });
 
-  it("omits %h/.local/bin from PATH for system-mode units", () => {
+  it("includes run-as user agent bin dirs in PATH for system-mode units", () => {
     const unit = renderSystemdUnit({
       launcher: NPM_LAUNCHER,
       homeDir: "/var/lib/kandev",
@@ -86,8 +86,9 @@ describe("renderSystemdUnit", () => {
       mode: "system",
       systemUser: "alice",
     });
-    expect(unit).not.toContain("%h/.local/bin");
-    expect(unit).toMatch(/^Environment=PATH=\/usr\/local\/bin/m);
+    expect(unit).toMatch(
+      /^Environment=PATH=%h\/\.local\/bin:%h\/\.bun\/bin:%h\/\.opencode\/bin:\/usr\/local\/bin/m,
+    );
   });
 
   it("sets WantedBy=multi-user.target and User= for system mode", () => {
@@ -149,7 +150,7 @@ describe("renderSystemdUnit", () => {
       mode: "user",
     });
     expect(unit).toContain(
-      "Environment=PATH=/home/alice/.local/share/fnm/node-versions/v24.14.0/installation/bin:%h/.local/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin",
+      "Environment=PATH=/home/alice/.local/share/fnm/node-versions/v24.14.0/installation/bin:%h/.local/bin:%h/.bun/bin:%h/.opencode/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin",
     );
   });
 
@@ -160,9 +161,9 @@ describe("renderSystemdUnit", () => {
       logDir: "/home/alice/.kandev/logs",
       mode: "user",
     });
-    // /usr/local/bin already in SYSTEMD_USER_PATH — dirname(nodePath) must not double it.
+    // /usr/local/bin already in the base service PATH — dirname(nodePath) must not double it.
     expect(unit).toContain(
-      "Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin",
+      "Environment=PATH=%h/.local/bin:%h/.bun/bin:%h/.opencode/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin",
     );
     expect(unit).not.toContain("/usr/local/bin:/usr/local/bin");
   });
@@ -176,7 +177,7 @@ describe("renderSystemdUnit", () => {
       systemUser: "alice",
     });
     expect(unit).toContain(
-      "Environment=PATH=/home/alice/.local/share/fnm/node-versions/v24.14.0/installation/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin",
+      "Environment=PATH=/home/alice/.local/share/fnm/node-versions/v24.14.0/installation/bin:%h/.local/bin:%h/.bun/bin:%h/.opencode/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin",
     );
   });
 
@@ -196,7 +197,7 @@ describe("renderSystemdUnit", () => {
     });
     expect(unit).not.toMatch(/^Environment=PATH=\.:/m);
     expect(unit).toContain(
-      "Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin",
+      "Environment=PATH=%h/.local/bin:%h/.bun/bin:%h/.opencode/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin",
     );
   });
 
@@ -246,7 +247,7 @@ describe("renderSystemdUnit", () => {
     // bin. The shim's own bin dir (/home/linuxbrew/.linuxbrew/bin) is already in
     // the base path, so it is not duplicated.
     expect(unit).toContain(
-      "Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin",
+      "Environment=PATH=%h/.local/bin:%h/.bun/bin:%h/.opencode/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin",
     );
   });
 
@@ -276,7 +277,9 @@ describe("renderSystemdUnit", () => {
     });
     // Custom prefix's bin dir is prepended so npm/npx resolve, even though it
     // isn't one of the hardcoded default prefixes.
-    expect(unit).toContain("Environment=PATH=/home/me/.brew/bin:%h/.local/bin:%h/.bun/bin:");
+    expect(unit).toContain(
+      "Environment=PATH=/home/me/.brew/bin:%h/.local/bin:%h/.bun/bin:%h/.opencode/bin:",
+    );
     expect(unit).not.toContain("/Cellar/");
   });
 });
@@ -456,7 +459,9 @@ describe("renderLaunchdPlist", () => {
     // The whole assignment must be wrapped, not just the value.
     expect(unit).toContain('Environment="KANDEV_HOME_DIR=/home/john doe/.kandev"');
     // PATH always contains colons but no spaces — should NOT be quoted.
-    expect(unit).toMatch(/^Environment=PATH=%h\/\.local\/bin:%h\/\.bun\/bin:\/usr\/local\/bin/m);
+    expect(unit).toMatch(
+      /^Environment=PATH=%h\/\.local\/bin:%h\/\.bun\/bin:%h\/\.opencode\/bin:\/usr\/local\/bin/m,
+    );
   });
 
   it("escapes backslash + double-quote in Environment= and ExecStart values", () => {

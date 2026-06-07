@@ -21,12 +21,14 @@ export type UnitInputs = {
   serviceMetadataPath?: string;
 };
 
-// User-mode PATH includes ~/.local/bin and ~/.bun/bin so user-installed agent
-// CLIs (npm user prefix, pipx, fnm, Bun globals like oh-my-pi/omp, etc.) are
-// discoverable.
+// Service PATH includes common per-user agent install dirs so user-installed
+// CLIs (npm user prefix, pipx, fnm, Bun globals like oh-my-pi/omp, OpenCode's
+// installer, etc.) are discoverable. System-mode units still run as the
+// configured User=, so %h resolves to that user's home directory.
 const SYSTEMD_SYSTEM_PATH =
   "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin";
-const SYSTEMD_USER_PATH = `%h/.local/bin:%h/.bun/bin:${SYSTEMD_SYSTEM_PATH}`;
+const SYSTEMD_AGENT_BIN_PATH = `%h/.local/bin:%h/.bun/bin:%h/.opencode/bin`;
+const SYSTEMD_SERVICE_PATH = `${SYSTEMD_AGENT_BIN_PATH}:${SYSTEMD_SYSTEM_PATH}`;
 const LAUNCHD_SYSTEM_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin";
 const launchdUserPath = (): string =>
   `${os.homedir()}/.local/bin:${os.homedir()}/.bun/bin:${LAUNCHD_SYSTEM_PATH}`;
@@ -79,7 +81,7 @@ export function looksLikeManagedUnit(content: string): boolean {
  */
 export function renderSystemdUnit(input: UnitInputs): string {
   const shimPath = input.launcher.shimPath;
-  const basePath = input.mode === "system" ? SYSTEMD_SYSTEM_PATH : SYSTEMD_USER_PATH;
+  const basePath = SYSTEMD_SERVICE_PATH;
   // For the shim, prepend its own bin dir (the Homebrew prefix's `bin`, where
   // node/npm/npx live) so npx-based agents resolve even when the prefix isn't
   // one of the hardcoded defaults. pathWithNodeBinDir dedupes when it already is.
