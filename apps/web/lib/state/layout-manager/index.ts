@@ -59,7 +59,12 @@ export { computeColumnWidths, computeGroupHeights, getPinnedWidth } from "./sizi
 export { toSerializedDockview, fromDockviewApi, filterEphemeral } from "./serializer";
 
 // Applier
-export { applyLayout, getRootSplitview, resolveGroupIds } from "./applier";
+export {
+  applyLayout,
+  getRootSplitview,
+  resolveGroupIds,
+  isCenterCandidateGroupId,
+} from "./applier";
 export type { LayoutGroupIds } from "./applier";
 
 // Merger

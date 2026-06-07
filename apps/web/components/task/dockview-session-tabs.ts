@@ -6,9 +6,8 @@ import { useDockviewStore } from "@/lib/state/dockview-store";
 import { focusOrAddPanel } from "@/lib/state/dockview-layout-builders";
 import {
   CENTER_GROUP,
-  RIGHT_BOTTOM_GROUP,
+  isCenterCandidateGroupId,
   RIGHT_TOP_GROUP,
-  SIDEBAR_GROUP,
 } from "@/lib/state/layout-manager";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { wasPRPanelOffered, markPRPanelOffered } from "@/lib/local-storage";
@@ -220,8 +219,9 @@ export function resolvePRPanelTargetGroup(
   centerGroupId: string,
 ): string {
   const sessionPanel = api.getPanel(`session:${sessionId}`);
-  const resolved = sessionPanel?.group?.id ?? centerGroupId;
-  return resolved;
+  const sessionGroupId = sessionPanel?.group?.id;
+  if (sessionGroupId && isCenterCandidateGroupId(sessionGroupId)) return sessionGroupId;
+  return isCenterCandidateGroupId(centerGroupId) ? centerGroupId : CENTER_GROUP;
 }
 
 /**
@@ -303,10 +303,6 @@ export function useAutoPRPanel() {
  */
 const SESSION_ANCHOR_PANEL_IDS = ["pr-detail"];
 
-function isCenterCandidateGroupId(groupId: string): boolean {
-  return groupId !== SIDEBAR_GROUP && groupId !== RIGHT_TOP_GROUP && groupId !== RIGHT_BOTTOM_GROUP;
-}
-
 export function findSessionAnchorGroupId(api: DockviewApi): string | null {
   for (const id of SESSION_ANCHOR_PANEL_IDS) {
     const exact = api.getPanel(id);
@@ -318,7 +314,7 @@ export function findSessionAnchorGroupId(api: DockviewApi): string | null {
   return null;
 }
 
-function resolveInitialPosition(api: DockviewApi): AddPanelOptions["position"] {
+export function resolveInitialPosition(api: DockviewApi): AddPanelOptions["position"] {
   // Prefer the live "chat" placeholder's group. The session panel must be added
   // INTO that group (so it's a tab beside chat) BEFORE chat is removed —
   // otherwise removing chat empties and destroys the center group, the stored

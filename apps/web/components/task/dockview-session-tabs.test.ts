@@ -4,8 +4,11 @@ import type { TaskSession } from "@/lib/types/http";
 import {
   findSessionAnchorGroupId,
   reconcileRemovedSessionPanels,
+  resolveInitialPosition,
   resolveSessionTabSyncTarget,
 } from "./dockview-session-tabs";
+import { RIGHT_TOP_GROUP } from "@/lib/state/layout-manager";
+import { useDockviewStore } from "@/lib/state/dockview-store";
 
 type FakePanel = {
   id: string;
@@ -41,6 +44,22 @@ function makeApi(panelIds: string[]): { api: DockviewApi; panels: FakePanel[] } 
     getPanel: (id: string) => panels.find((p) => p.id === id) ?? null,
   } as unknown as DockviewApi;
   return { api, panels };
+}
+
+function makePositionApi(args: {
+  groups: string[];
+  panels?: Array<{ id: string; groupId: string }>;
+}): DockviewApi {
+  const panels =
+    args.panels?.map((p) => ({
+      id: p.id,
+      group: { id: p.groupId },
+    })) ?? [];
+  return {
+    groups: args.groups.map((id) => ({ id })),
+    panels,
+    getPanel: (id: string) => panels.find((p) => p.id === id) ?? null,
+  } as unknown as DockviewApi;
 }
 
 function panelById(panels: FakePanel[], id: string): FakePanel | undefined {
@@ -189,6 +208,18 @@ describe("findSessionAnchorGroupId", () => {
     const api = makeApiWithPanels([]);
 
     expect(findSessionAnchorGroupId(api)).toBeNull();
+  });
+});
+
+describe("resolveInitialPosition", () => {
+  it("creates a center column left of the right sidebar when only the right group remains", () => {
+    useDockviewStore.setState({ centerGroupId: RIGHT_TOP_GROUP });
+    const api = makePositionApi({ groups: [RIGHT_TOP_GROUP] });
+
+    expect(resolveInitialPosition(api)).toEqual({
+      referenceGroup: RIGHT_TOP_GROUP,
+      direction: "left",
+    });
   });
 });
 

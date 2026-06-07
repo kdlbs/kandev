@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { DockviewApi } from "dockview-react";
 import { shouldAutoAddPRPanel, resolvePRPanelTargetGroup } from "../dockview-session-tabs";
+import { CENTER_GROUP, RIGHT_TOP_GROUP } from "@/lib/state/layout-manager";
 
 function makeApi(panels: Array<{ id: string; groupId: string }>): DockviewApi {
   return {
@@ -80,5 +81,17 @@ describe("resolvePRPanelTargetGroup", () => {
     // the new session's chat panel is the authoritative anchor.
     const api = makeApi([{ id: "session:new", groupId: "group-new" }]);
     expect(resolvePRPanelTargetGroup(api, "new", "group-old")).toBe("group-new");
+  });
+
+  it("falls back to the center group when the live session panel is in a right group", () => {
+    // Corrupted layouts can briefly leave the session panel in the right tools
+    // column. The PR panel must not follow it there.
+    const api = makeApi([{ id: "session:abc", groupId: RIGHT_TOP_GROUP }]);
+    expect(resolvePRPanelTargetGroup(api, "abc", "group-center")).toBe("group-center");
+  });
+
+  it("uses the well-known center group when both candidates are right groups", () => {
+    const api = makeApi([{ id: "session:abc", groupId: RIGHT_TOP_GROUP }]);
+    expect(resolvePRPanelTargetGroup(api, "abc", RIGHT_TOP_GROUP)).toBe(CENTER_GROUP);
   });
 });

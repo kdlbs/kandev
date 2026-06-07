@@ -1,7 +1,6 @@
 import type { DockviewApi, AddPanelOptions } from "dockview-react";
 import {
   SIDEBAR_LOCK,
-  SIDEBAR_GROUP,
   CENTER_GROUP,
   RIGHT_TOP_GROUP,
   RIGHT_BOTTOM_GROUP,
@@ -9,6 +8,7 @@ import {
   computeSidebarMaxPx,
   computeRightMaxPx,
   getPinnedWidth,
+  isCenterCandidateGroupId,
   getRootSplitview as getRootSplitviewImpl,
   resolveGroupIds,
   setPinnedTarget,
@@ -21,10 +21,6 @@ import { createDebugLogger, isDebug } from "@/lib/debug/log";
 export { getRootSplitview } from "./layout-manager";
 
 const debugWidths = createDebugLogger("dockview:widths");
-
-function isCenterCandidateGroupId(groupId: string): boolean {
-  return groupId !== SIDEBAR_GROUP && groupId !== RIGHT_TOP_GROUP && groupId !== RIGHT_BOTTOM_GROUP;
-}
 
 /** Dockview's measured grid width, or undefined when not yet laid out — passed
  *  to the cap helpers so they don't fall back to a possibly-stale

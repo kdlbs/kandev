@@ -34,7 +34,7 @@ function findGroupId(api: DockviewApi, knownId: string, fallbackPanelId: string)
   return pnl?.group?.id ?? knownId;
 }
 
-function isCenterCandidateGroupId(groupId: string): boolean {
+export function isCenterCandidateGroupId(groupId: string): boolean {
   return groupId !== SIDEBAR_GROUP && groupId !== RIGHT_TOP_GROUP && groupId !== RIGHT_BOTTOM_GROUP;
 }
 
