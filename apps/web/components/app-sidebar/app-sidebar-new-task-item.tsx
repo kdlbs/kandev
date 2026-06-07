@@ -1,12 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
 import { IconSquarePlus, IconSubtask } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import { useInOffice } from "@/hooks/use-in-office";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
+import { linkToTask } from "@/lib/links";
+import type { Task } from "@/lib/types/http";
 
 // The Office "New issue" dialog only renders on `/office` routes, but this item
 // lives in the global sidebar (every page). Lazy-load it so its office-only
@@ -36,10 +39,12 @@ type AppSidebarNewTaskItemProps = {
  * used to provide.
  */
 export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps) {
+  const router = useRouter();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const workflowId = useAppStore((s) => s.kanban.workflowId);
   const steps = useAppStore((s) => s.kanban.steps);
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
+  const setActiveTask = useAppStore((s) => s.setActiveTask);
   const activeTaskTitle = useAppStore((s) => {
     const id = s.tasks.activeTaskId;
     if (!id) return "";
@@ -54,6 +59,14 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
   // NewSubtaskDialog, matching the retired dropdown). It needs an active task
   // and the expanded rail to host the trailing button.
   const canCreateSubtask = !collapsed && !!workspaceId && !!activeTaskId;
+  const handleRegularTaskCreated = useCallback(
+    (task: Task) => {
+      setOpen(false);
+      setActiveTask(task.id);
+      router.push(linkToTask(task.id));
+    },
+    [router, setActiveTask],
+  );
 
   return (
     <>
@@ -95,7 +108,7 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
             workflowId={workflowId}
             defaultStepId={steps[0]?.id ?? null}
             steps={steps}
-            onSuccess={() => setOpen(false)}
+            onSuccess={handleRegularTaskCreated}
           />
         ))}
       {canCreateSubtask && (

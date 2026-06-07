@@ -221,16 +221,10 @@ test.describe("Task creation", () => {
     const startBtn = testPage.getByTestId(START_AGENT_TEST_ID);
     await expect(startBtn).toBeEnabled({ timeout: START_ENABLED_TIMEOUT });
 
-    // Click "Start task" — the agent starts, the dialog closes, we stay on kanban
+    // Click "Start task" — the agent starts, the dialog closes, and sidebar creation
+    // focuses the newly created task immediately.
     await startBtn.click();
     await expect(dialog).not.toBeVisible({ timeout: 10_000 });
-
-    // The new task card appears on the kanban board (pushed via WS)
-    const card = kanban.taskCardByTitle("Start Agent Task");
-    await expect(card).toBeVisible({ timeout: 10_000 });
-
-    // Clicking the card fetches the session and navigates to /t/<taskId>
-    await card.click();
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
@@ -422,11 +416,6 @@ test.describe("Create task regression", () => {
     await expect(startBtn).toBeEnabled({ timeout: START_ENABLED_TIMEOUT });
     await startBtn.click();
     await expect(dialog).not.toBeVisible({ timeout: 10_000 });
-
-    // Navigate to the task session
-    const card = kanban.taskCardByTitle("Regression Task");
-    await expect(card).toBeVisible({ timeout: 10_000 });
-    await card.click();
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
