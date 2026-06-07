@@ -153,6 +153,23 @@ describe("useTaskRemoval — switch guard (WS-clear fallback)", () => {
     expect(replaceTaskUrlMock).toHaveBeenCalledWith("task-next");
   });
 
+  it("does NOT switch when no opts provided and WS already cleared activeTaskId", async () => {
+    const store = makeStore({
+      activeTaskId: null,
+      activeSessionId: null,
+      remainingTasks: [nextTask],
+    });
+    const { result } = renderHook(() =>
+      useTaskRemoval({ store: store as unknown as StoreApi<never> }),
+    );
+
+    await result.current.removeTaskFromBoard("task-A");
+
+    expect(store.getRecorded().setActiveSession).not.toHaveBeenCalled();
+    expect(store.getRecorded().setActiveTask).not.toHaveBeenCalled();
+    expect(replaceTaskUrlMock).not.toHaveBeenCalled();
+  });
+
   it("does NOT switch when activeTaskId is null AND wasActiveTaskId does not match removed task", async () => {
     const store = makeStore({
       activeTaskId: null,

@@ -166,7 +166,7 @@ function shouldSwitchAfterRemoval(
 ): boolean {
   const currentActiveTaskId = store.getState().tasks.activeTaskId;
   const stillOnRemoved = currentActiveTaskId === taskId;
-  const wsCleared = currentActiveTaskId == null && opts?.wasActiveTaskId === taskId;
+  const wsCleared = currentActiveTaskId === null && opts?.wasActiveTaskId === taskId;
   return stillOnRemoved || wsCleared;
 }
 
