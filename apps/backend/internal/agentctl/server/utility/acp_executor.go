@@ -437,6 +437,12 @@ func buildInitProbeFields(initResp acp.InitializeResponse) *ProbeResponse {
 }
 
 // applySessionProbeFields populates models and modes from an ACP session/new response.
+//
+// The legacy `models`/`modes` fields were marked UNSTABLE in the ACP spec and
+// newer agents (e.g. claude-agent-acp v0.42+) drop them in favour of the
+// general `configOptions[]` carrier with `category: model | mode`. Read the
+// legacy fields first, then fall back to configOptions when they are absent
+// so both shapes work.
 func applySessionProbeFields(out *ProbeResponse, sessionResp acp.NewSessionResponse) {
 	if sessionResp.Models != nil {
 		out.CurrentModelID = string(sessionResp.Models.CurrentModelId)
@@ -460,6 +466,80 @@ func applySessionProbeFields(out *ProbeResponse, sessionResp acp.NewSessionRespo
 			})
 		}
 	}
+	if len(out.Models) == 0 {
+		applyConfigOptionsAsModels(out, sessionResp.ConfigOptions)
+	}
+	if len(out.Modes) == 0 {
+		applyConfigOptionsAsModes(out, sessionResp.ConfigOptions)
+	}
+}
+
+// applyConfigOptionsAsModels extracts a ProbeModel list from any
+// configOptions[] entry tagged with category=model. Used as a fallback when
+// the legacy `models` field is omitted by the agent.
+func applyConfigOptionsAsModels(out *ProbeResponse, opts []acp.SessionConfigOption) {
+	sel := findSelectConfigOption(opts, acp.SessionConfigOptionCategoryModel)
+	if sel == nil {
+		return
+	}
+	out.CurrentModelID = string(sel.CurrentValue)
+	for _, opt := range selectOptionsUngrouped(sel.Options) {
+		out.Models = append(out.Models, ProbeModel{
+			ID:          string(opt.Value),
+			Name:        opt.Name,
+			Description: derefString(opt.Description),
+			Meta:        opt.Meta,
+		})
+	}
+}
+
+// applyConfigOptionsAsModes mirrors applyConfigOptionsAsModels for modes.
+func applyConfigOptionsAsModes(out *ProbeResponse, opts []acp.SessionConfigOption) {
+	sel := findSelectConfigOption(opts, acp.SessionConfigOptionCategoryMode)
+	if sel == nil {
+		return
+	}
+	out.CurrentModeID = string(sel.CurrentValue)
+	for _, opt := range selectOptionsUngrouped(sel.Options) {
+		out.Modes = append(out.Modes, ProbeMode{
+			ID:          string(opt.Value),
+			Name:        opt.Name,
+			Description: derefString(opt.Description),
+			Meta:        opt.Meta,
+		})
+	}
+}
+
+// findSelectConfigOption returns the first Select-typed configOption whose
+// category matches. Boolean toggles and other categories are skipped.
+func findSelectConfigOption(opts []acp.SessionConfigOption, want acp.SessionConfigOptionCategory) *acp.SessionConfigOptionSelect {
+	for i := range opts {
+		sel := opts[i].Select
+		if sel == nil || sel.Category == nil {
+			continue
+		}
+		if *sel.Category == want {
+			return sel
+		}
+	}
+	return nil
+}
+
+// selectOptionsUngrouped flattens a SessionConfigSelectOptions union to a
+// plain slice. Grouped options are flattened group-by-group so callers do not
+// need to care about the nesting.
+func selectOptionsUngrouped(opts acp.SessionConfigSelectOptions) []acp.SessionConfigSelectOption {
+	if opts.Ungrouped != nil {
+		return []acp.SessionConfigSelectOption(*opts.Ungrouped)
+	}
+	if opts.Grouped == nil {
+		return nil
+	}
+	var out []acp.SessionConfigSelectOption
+	for _, g := range *opts.Grouped {
+		out = append(out, g.Options...)
+	}
+	return out
 }
 
 func derefString(p *string) string {
