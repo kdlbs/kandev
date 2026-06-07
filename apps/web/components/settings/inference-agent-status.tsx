@@ -75,9 +75,17 @@ function RefreshButton({ onRefresh }: { onRefresh: () => Promise<unknown> | void
   );
 }
 
+// Treat a missing `status` field as healthy when models are present —
+// older backends (or non-OK API consumers) that don't populate `status`
+// should not show a spurious warning. Real probe states ("auth_required",
+// "probing", …) still fall through to noteForStatus. Per cubic review.
+function isAgentHealthy(agent: InferenceAgent | null | undefined): boolean {
+  if (!agent || (agent.models?.length ?? 0) === 0) return false;
+  return agent.status === "ok" || agent.status === undefined;
+}
+
 export function InferenceAgentStatusNote({ agent, fallbackName, onRefresh }: Props) {
-  const modelCount = agent?.models?.length ?? 0;
-  if (agent && agent.status === "ok" && modelCount > 0) {
+  if (isAgentHealthy(agent)) {
     return null;
   }
 

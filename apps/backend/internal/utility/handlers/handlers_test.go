@@ -330,6 +330,17 @@ func TestSanitizeStatusMessage(t *testing.T) {
 		// the kw=val matcher eating the next word.
 		{in: "access token was revoked", want: "access token was revoked"},
 		{in: "the secret handshake failed", want: "the secret handshake failed"},
+		// "api key" with a literal space must still be redacted (cubic review).
+		{in: "invalid api key=sk-deadbeef", want: "invalid api key=<redacted>"},
+		// Newline must NOT count as a separator — otherwise a multi-line
+		// stderr ("invalid token\ncaused by network") would consume the next
+		// word on the next line (greptile review).
+		{
+			in:   "invalid token\ncaused by network timeout",
+			want: "invalid token\ncaused by network timeout",
+		},
+		// Tabs are valid horizontal whitespace separators.
+		{in: "token\t=\tabc123", want: "token=<redacted>"},
 	}
 	for _, tc := range cases {
 		got := sanitizeStatusMessage(tc.in)

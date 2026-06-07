@@ -96,6 +96,19 @@ describe("InferenceAgentStatusNote", () => {
     });
   });
 
+  it("treats an agent with no status field as healthy when models are present", () => {
+    const { container } = render(
+      <InferenceAgentStatusNote
+        agent={makeAgent({
+          status: undefined as unknown as InferenceAgentStatus,
+          models: [{ id: "sonnet", name: "Sonnet", description: "", is_default: true }],
+        })}
+        onRefresh={() => {}}
+      />,
+    );
+    expect(container.firstChild).toBeNull();
+  });
+
   it("exposes the sanitized status_message detail line", () => {
     render(
       <InferenceAgentStatusNote

@@ -97,18 +97,32 @@ func getJSON(t *testing.T, url string) (int, http.Header, map[string]any) {
 	return resp.StatusCode, resp.Header, out
 }
 
-func postEmpty(t *testing.T, url string) (int, map[string]any) {
-	t.Helper()
+// postEmptyE issues a POST with an empty body. Returns an error rather
+// than calling t.Fatalf so it is safe to invoke from goroutines spawned
+// by TestIntegration_ConcurrentRefresh — t.Fatalf is only legal from the
+// test's main goroutine and panics elsewhere on Go 1.21+ (cubic review).
+func postEmptyE(url string) (int, map[string]any, error) {
 	req, _ := http.NewRequest(http.MethodPost, url, nil)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		t.Fatalf("POST %s: %v", url, err)
+		return 0, nil, fmt.Errorf("POST %s: %w", url, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	var out map[string]any
 	_ = json.Unmarshal(body, &out)
-	return resp.StatusCode, out
+	return resp.StatusCode, out, nil
+}
+
+// postEmpty is the main-goroutine convenience wrapper. Concurrent callers
+// must use postEmptyE.
+func postEmpty(t *testing.T, url string) (int, map[string]any) {
+	t.Helper()
+	code, body, err := postEmptyE(url)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	return code, body
 }
 
 // TestIntegration_ProbeStateMachine drives GET → POST refresh → GET
@@ -248,7 +262,11 @@ func TestIntegration_ConcurrentRefresh(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			code, body := postEmpty(t, ts.URL+"/api/v1/utility/inference-agents/claude-acp/refresh")
+			code, body, err := postEmptyE(ts.URL + "/api/v1/utility/inference-agents/claude-acp/refresh")
+			if err != nil {
+				errs <- err
+				return
+			}
 			if code != http.StatusOK || body["status"] != "ok" {
 				errs <- fmt.Errorf("code=%d status=%v", code, body["status"])
 			}

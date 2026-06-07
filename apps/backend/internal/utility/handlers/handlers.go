@@ -373,7 +373,9 @@ func (h *Handlers) httpRefreshInferenceAgent(c *gin.Context) {
 		// via Manager.Refresh, so we surface the same shape as a GET would
 		// rather than a generic 500 — the UI can re-render the inline note
 		// with the latest probe error instead of going blank.
-		h.logger.Warn("failed to refresh inference agent", zap.Error(err), zap.String("agent_id", agentID))
+		h.logger.Warn("failed to refresh inference agent",
+			zap.String("error", sanitizeStatusMessage(err.Error())),
+			zap.String("agent_id", agentID))
 		latest, ok := h.hostExecutor.Get(agentID)
 		c.JSON(http.StatusOK, inferenceAgentDTOFromCaps(*info, latest, ok))
 		return
@@ -417,11 +419,15 @@ func inferenceAgentDTOFromCaps(ia lifecycle.InferenceAgentInfo, caps hostutility
 // shows the raw value, but the response is also reachable via /api/v1.
 //
 // Split into two patterns so prose like "access token was revoked" is left
-// alone: kw=val / kw:val requires a real separator, while the bare-space
-// "bearer <tok>" form gets its own anchored rule.
+// alone: kw=val / kw:val requires a real separator (claude bot review), and
+// the separator is restricted to horizontal whitespace so a stderr line like
+// "invalid token\ncaused by network" does not eat words across lines
+// (greptile review). "api key" with a literal space is matched alongside
+// api_key / api-key (cubic review). The bare-space "bearer <tok>" form gets
+// its own anchored rule so the kv-only matcher can stay strict.
 var (
-	credentialKVPattern     = regexp.MustCompile(`(?i)(api[_-]?key|token|secret|password)\s*[:=]\s*\S+`)
-	credentialBearerPattern = regexp.MustCompile(`(?i)(bearer)\s+\S+`)
+	credentialKVPattern     = regexp.MustCompile(`(?i)((?:api[ _-]?key|token|secret|password))[^\S\n]*[:=][^\S\n]*\S+`)
+	credentialBearerPattern = regexp.MustCompile(`(?i)(bearer)[^\S\n]+\S+`)
 )
 
 func sanitizeStatusMessage(msg string) string {
