@@ -16,6 +16,8 @@ Wait for CI and code review to complete on a pull request, fix any failures or v
 - **`/e2e`** — Read for debugging guidance when E2E tests fail in CI. Covers test patterns, run commands, failure triage, and local reproduction.
 - **`/commit`** — Use for staging and committing fixes with Conventional Commits format.
 
+Prefer the `pr-poller` and `verify` helpers when the runtime supports delegated helpers. If helper delegation is unavailable, follow the direct-command fallback sections below and keep the same output contract: compact CI state, compact review state, bounded polling, and full local verification before pushing.
+
 ## Context
 
 - Current branch: !`git branch --show-current`
@@ -27,12 +29,12 @@ The first thing you do — before fetching PR state, before reading logs, before
 
 Create these tasks immediately (use your task/todo tracking tool if available):
 
-1. **Delegate to `pr-poller`** — Subagent gathers CI + bot review state, returns a compact report
+1. **Gather PR state** — Use `pr-poller` when available; otherwise gather compact CI + bot review state directly
 2. **Fix failing CI checks** — Read failing run logs (via `scripts/run-quiet gh-run -- gh run view ...`), fix issues, run E2E tests locally if needed
 3. **Triage review comments** — Classify each comment as valid, already addressed, nitpick, or wrong
 4. **Address each comment** — Fix or reply with reasoning, resolve threads
-5. **Verify, commit, push** — Delegate to `verify` subagent; commit fixes; push
-6. **Re-check** — Delegate to `pr-poller` again. If new failures, loop back to task 2
+5. **Verify, commit, push** — Use `verify` when available; otherwise run the full verification commands directly; commit fixes; push
+6. **Re-check** — Use `pr-poller` again when available; otherwise re-check directly. If new failures, loop back to task 2
 7. **Summary** — Report what was done
 
 Then start with task 1. Mark each task in_progress when you begin it and completed when you finish it.
@@ -41,11 +43,11 @@ Then start with task 1. Mark each task in_progress when you begin it and complet
 
 ## Steps
 
-### 1. Delegate state-gathering to `pr-poller`
+### 1. Gather PR state
 
 Mark task 1 as in_progress.
 
-Invoke the `pr-poller` subagent with the PR number (or let it resolve via `gh pr view` against the current branch). The subagent:
+If available, invoke the `pr-poller` subagent with the PR number (or let it resolve via `gh pr view` against the current branch). The subagent:
 - Fetches the current CI/bot/comment state once
 - Polls (30s cadence, **20 min cap**) until every CI check and every bot (CodeRabbit, Greptile, Claude, cubic) reaches a terminal state
 - Counts unresolved review threads and bot issue comments
@@ -61,6 +63,21 @@ Invoke the `pr-poller` subagent with the PR number (or let it resolve via `gh pr
 **E2E CI outlasts the poller.** The pr-poller caps at ~20 minutes. The E2E matrix (10 shards × 2 projects) often runs longer. If the report shows `ci_pending` with only E2E/lint jobs and `ci_failed` is empty, re-invoke pr-poller once those jobs finish — do not spin a manual `gh pr checks` loop in the parent. If the cap hits with E2E still pending, report "CI in progress" to the user instead of blocking.
 
 **Do not fetch poll output yourself** — that is what burns context. The report is the only thing that enters your context.
+
+#### Direct-command fallback
+
+If delegated polling is unavailable, gather the same information directly without streaming long logs into context:
+
+```bash
+scripts/run-quiet gh-checks -- gh pr checks <PR>
+gh pr checks <PR> --json name,workflow,status,conclusion,detailsUrl
+scripts/pr-resolve list <PR>
+gh pr view <PR> --json comments
+```
+
+Poll at a 30s cadence with a **20 min cap**. Stop early if any required check fails. If the cap hits and only E2E shards are still pending with no failures, report "CI in progress" instead of continuing to watch indefinitely. Do not run `gh pr checks --watch` in the main session unless the runtime can keep the watcher isolated and automatically clean it up.
+
+Summarize the direct-command result using the same fields as the `pr-poller` report: `ci_failed`, `ci_pending`, bot states, unresolved review thread count, issue-comment count, and a recommendation.
 
 Mark task 1 as completed.
 
@@ -230,7 +247,17 @@ Mark task 4 as completed.
 
 Mark task 5 as in_progress.
 
-1. Delegate to the **`verify` sub-agent** to run the full verification pipeline (format, typecheck, test, lint). It will fix any issues it finds. Wait for it to complete.
+1. Use the **`verify` sub-agent** when available to run the full verification pipeline (format, typecheck, test, lint). It will fix any issues it finds. Wait for it to complete.
+
+   If delegated verification is unavailable, run the full verification pipeline directly:
+   ```bash
+   make fmt
+   make typecheck
+   make test
+   make lint
+   ```
+
+   If formatting changes files, re-run the affected checks after reviewing the diff.
 
 2. Stage and commit the fixes directly. Use a descriptive Conventional Commits message, e.g.:
    ```
@@ -246,11 +273,11 @@ Mark task 5 as in_progress.
 
 Mark task 5 as completed.
 
-### 6. Re-check via `pr-poller`
+### 6. Re-check PR state
 
 Mark task 6 as in_progress.
 
-After the push, CI restarts and bots may re-review. Delegate to `pr-poller` again — same subagent, same contract, same 20-min cap. Parse the new report:
+After the push, CI restarts and bots may re-review. Use `pr-poller` again when available — same helper, same contract, same 20-min cap. If delegated polling is unavailable, use the direct-command fallback from step 1. Parse the new report:
 
 - If `ci_failed:` is empty AND `unresolved_review_threads: 0` AND `issue_comments_from_bots: 0` (no new bot comments to address) → mark task 6 completed and proceed to summary.
 - If new CI failures appeared from the latest commit → loop back to task 2 and reset task 2-5 to `in_progress` as needed.
