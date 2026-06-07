@@ -84,6 +84,13 @@ func KandevContext() string { return prompts.Get("kandev-context") }
 // step_complete_kandev MCP tool. Only injected when the current workflow step
 // has `auto_advance_requires_signal = true` (ADR 0015). Agents on legacy
 // auto-advance steps never see the tool so they cannot fire false transitions.
+//
+// MUST end with "\n": the template inlines {step_complete_section}
+// immediately before the next bullet (`- create_task_plan_kandev:`), so the
+// trailing newline is what separates the two list items in the enabled case
+// without forcing the template to add its own. Dropping the "\n" silently
+// merges the two bullets onto one line; the omit path (empty string) is
+// unaffected since the next line in the template already starts the bullet.
 const stepCompleteSection = "- step_complete_kandev: Signal that every user-stated requirement for the CURRENT workflow step is satisfied. " +
 	"Call this as the LAST action of the step (after the final tool call / commit / answer). " +
 	"Idempotent — a second call within the same step is a no-op. " +
