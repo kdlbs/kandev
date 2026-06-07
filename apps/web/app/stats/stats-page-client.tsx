@@ -4,12 +4,19 @@ import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Button } from "@kandev/ui/button";
 import { PageTopbar } from "@/components/page-topbar";
 import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
-import type { StatsResponse } from "@/lib/types/http";
-import { useCallback, useEffect, useMemo, useReducer } from "react";
+import { useCallback, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { IconChartBar } from "@tabler/icons-react";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
-import { fetchStats } from "@/lib/api/domains/stats-api";
+import type {
+  AgentUsageDTO,
+  CompletedTaskActivityDTO,
+  DailyActivityDTO,
+  GitStatsDTO,
+  GlobalStatsDTO,
+  RepositoryStatsDTO,
+  TaskStatsDTO,
+} from "@/lib/types/http";
 import {
   OverviewCards,
   WorkloadSection,
@@ -39,13 +46,18 @@ import {
   getRangeLabel,
   getSubtitle,
   isRangeKey,
-  type PanelState,
   RANGE_KEYS,
   type RangeKey,
-  type StatsState,
-  statsReducer,
-  toPanelState,
 } from "./stats-utils";
+import {
+  anyError,
+  composeStatsResponse,
+  flattenTaskStats,
+  readyGlobal,
+  type SectionStatus,
+  type StatsSections,
+  useStatsSections,
+} from "./stats-data";
 
 interface StatsPageClientProps {
   workspaceId?: string;
@@ -65,7 +77,7 @@ function StatsEmptyState({ message }: { message: string }) {
 }
 
 type StatsHeaderProps = {
-  global: StatsResponse["global"] | null;
+  global: GlobalStatsDTO | null;
   range: RangeKey;
   copied: boolean;
   copyDisabled: boolean;
@@ -147,34 +159,44 @@ function ErrorPanel({ title, message }: { title: string; message: string }) {
   );
 }
 
-function TelemetryPanels({ state, rangeLabel }: { state: PanelState; rangeLabel: string }) {
-  if (state.kind === "loading") {
-    return (
-      <>
-        <div id="completed" className="scroll-mt-24">
-          <ChartsSkeleton />
-        </div>
-        <div id="activity" className="scroll-mt-24">
-          <ActivitySkeleton />
-        </div>
-      </>
-    );
-  }
-  if (state.kind === "error") {
-    return (
-      <>
-        <div id="completed" className="scroll-mt-24">
-          <ErrorPanel title="Completed Tasks Over Time" message={state.message} />
-        </div>
-        <div id="activity" className="scroll-mt-24">
-          <ErrorPanel title="Activity" message={state.message} />
-        </div>
-      </>
-    );
-  }
-  const { stats } = state;
-  return (
-    <>
+// renderSection picks a skeleton, error panel, or ready render based on
+// the section's status. Centralising the switch keeps each call site to one line.
+function renderSection<T>(
+  status: SectionStatus<T>,
+  options: {
+    skeleton: React.ReactNode;
+    errorTitle: string;
+    ready: (data: T) => React.ReactNode;
+  },
+): React.ReactNode {
+  if (status.kind === "loading") return options.skeleton;
+  if (status.kind === "error")
+    return <ErrorPanel title={options.errorTitle} message={status.message} />;
+  return options.ready(status.data);
+}
+
+function OverviewPanel({
+  global,
+  git,
+}: {
+  global: SectionStatus<GlobalStatsDTO>;
+  git: SectionStatus<GitStatsDTO>;
+}) {
+  if (global.kind === "loading" || git.kind === "loading") return <OverviewCardsSkeleton />;
+  if (global.kind === "error") return <ErrorPanel title="Overview" message={global.message} />;
+  if (git.kind === "error") return <ErrorPanel title="Overview" message={git.message} />;
+  return <OverviewCards global={global.data} git_stats={git.data} />;
+}
+
+function CompletedPanel({ status }: { status: SectionStatus<CompletedTaskActivityDTO[]> }) {
+  return renderSection(status, {
+    skeleton: (
+      <div id="completed" className="scroll-mt-24">
+        <ChartsSkeleton />
+      </div>
+    ),
+    errorTitle: "Completed Tasks Over Time",
+    ready: (data) => (
       <div id="completed" className="scroll-mt-24">
         <div className="grid gap-4 lg:grid-cols-3">
           <Card className="rounded-sm lg:col-span-2">
@@ -184,7 +206,7 @@ function TelemetryPanels({ state, rangeLabel }: { state: PanelState; rangeLabel:
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <CompletedTasksChart completedActivity={stats.completed_activity} />
+              <CompletedTasksChart completedActivity={data} />
             </CardContent>
           </Card>
           <Card className="rounded-sm">
@@ -194,149 +216,154 @@ function TelemetryPanels({ state, rangeLabel }: { state: PanelState; rangeLabel:
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <MostProductiveSummary completedActivity={stats.completed_activity} />
+              <MostProductiveSummary completedActivity={data} />
             </CardContent>
           </Card>
         </div>
       </div>
-      <div id="activity" className="grid gap-4 lg:grid-cols-2 scroll-mt-24">
-        <Card className="rounded-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Activity ({rangeLabel.toLowerCase()})
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ActivityHeatmap dailyActivity={stats.daily_activity} />
-          </CardContent>
-        </Card>
-        <Card className="rounded-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Top Agents</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <AgentUsageList agentUsage={stats.agent_usage} />
-          </CardContent>
-        </Card>
-      </div>
-    </>
-  );
+    ),
+  });
 }
 
-function renderOverviewPanel(state: PanelState) {
-  if (state.kind === "loading") return <OverviewCardsSkeleton />;
-  if (state.kind === "error") return <ErrorPanel title="Overview" message={state.message} />;
-  return <OverviewCards global={state.stats.global} git_stats={state.stats.git_stats} />;
-}
-
-function renderRepositoryActivityPanel(state: PanelState) {
-  if (state.kind === "loading") return <RepositoriesSkeleton />;
-  if (state.kind === "error")
-    return <ErrorPanel title="Repository Activity" message={state.message} />;
-  return (
-    <Card id="repositories" className="rounded-sm scroll-mt-24">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium text-muted-foreground">
-          Repository Activity
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <RepositoryStatsGrid repositoryStats={state.stats.repository_stats} />
-      </CardContent>
-    </Card>
-  );
-}
-
-function renderTopRepositoriesPanel(state: PanelState) {
-  if (state.kind === "loading") return <TopRepositoriesSkeleton />;
-  if (state.kind === "error")
-    return <ErrorPanel title="Top Repositories" message={state.message} />;
-  return (
-    <Card className="rounded-sm">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium text-muted-foreground">
-          Top Repositories
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <TopRepositories repositoryStats={state.stats.repository_stats} />
-      </CardContent>
-    </Card>
-  );
-}
-
-function renderRepoLeadersPanel(state: PanelState) {
-  if (state.kind === "loading") return <RepoLeadersSkeleton />;
-  if (state.kind === "error") return <ErrorPanel title="Repo Leaders" message={state.message} />;
-  return (
-    <Card className="rounded-sm">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium text-muted-foreground">Repo Leaders</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <RepoLeaders repositoryStats={state.stats.repository_stats} />
-      </CardContent>
-    </Card>
-  );
-}
-
-function renderWorkloadPanel(state: PanelState) {
-  if (state.kind === "loading") return <WorkloadSkeleton />;
-  if (state.kind === "error") return <ErrorPanel title="Workload" message={state.message} />;
-  return <WorkloadSection task_stats={state.stats.task_stats} />;
-}
-
-function StatsContent({
-  state,
+function ActivityPanel({
+  daily,
+  agents,
   rangeLabel,
-  workspaceId,
 }: {
-  state: PanelState;
+  daily: SectionStatus<DailyActivityDTO[]>;
+  agents: SectionStatus<AgentUsageDTO[]>;
   rangeLabel: string;
-  workspaceId?: string;
 }) {
   return (
-    <div className="flex-1 overflow-auto">
-      <div className="max-w-7xl mx-auto p-6">
-        <div className="space-y-5">
-          {renderOverviewPanel(state)}
-          <SectionDivider id="telemetry" label="Telemetry" />
-          <TelemetryPanels state={state} rangeLabel={rangeLabel} />
-          {renderRepositoryActivityPanel(state)}
-          {renderTopRepositoriesPanel(state)}
-          {renderRepoLeadersPanel(state)}
-          <SectionDivider id="github" label="GitHub" />
-          <PRStatsPanel workspaceId={workspaceId ?? null} />
-          <SectionDivider id="workload" label="Workload" />
-          {renderWorkloadPanel(state)}
-        </div>
-      </div>
+    <div id="activity" className="grid gap-4 lg:grid-cols-2 scroll-mt-24">
+      {renderSection(daily, {
+        skeleton: <ActivitySkeleton />,
+        errorTitle: "Activity",
+        ready: (data) => (
+          <Card className="rounded-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Activity ({rangeLabel.toLowerCase()})
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ActivityHeatmap dailyActivity={data} />
+            </CardContent>
+          </Card>
+        ),
+      })}
+      {renderSection(agents, {
+        skeleton: <ActivitySkeleton />,
+        errorTitle: "Top Agents",
+        ready: (data) => (
+          <Card className="rounded-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Top Agents
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <AgentUsageList agentUsage={data} />
+            </CardContent>
+          </Card>
+        ),
+      })}
     </div>
   );
 }
 
-function useStatsData(workspaceId: string | undefined, range: RangeKey): StatsState {
-  const [state, dispatch] = useReducer(statsReducer, { stats: null, error: null });
+function RepositoryActivityPanel({ status }: { status: SectionStatus<RepositoryStatsDTO[]> }) {
+  return renderSection(status, {
+    skeleton: <RepositoriesSkeleton />,
+    errorTitle: "Repository Activity",
+    ready: (data) => (
+      <Card id="repositories" className="rounded-sm scroll-mt-24">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium text-muted-foreground">
+            Repository Activity
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <RepositoryStatsGrid repositoryStats={data} />
+        </CardContent>
+      </Card>
+    ),
+  });
+}
 
-  useEffect(() => {
-    if (!workspaceId) return;
-    const controller = new AbortController();
-    dispatch({ type: "fetch" });
-    fetchStats(workspaceId, { cache: "no-store", init: { signal: controller.signal } }, range)
-      .then((data) => {
-        if (!controller.signal.aborted) dispatch({ type: "success", stats: data });
-      })
-      .catch((e: unknown) => {
-        if (controller.signal.aborted) return;
-        const message = e instanceof Error ? e.message : "Failed to fetch stats";
-        dispatch({ type: "failure", error: message });
-      });
-    return () => {
-      controller.abort();
-    };
-  }, [workspaceId, range]);
+function TopRepositoriesPanel({ status }: { status: SectionStatus<RepositoryStatsDTO[]> }) {
+  return renderSection(status, {
+    skeleton: <TopRepositoriesSkeleton />,
+    errorTitle: "Top Repositories",
+    ready: (data) => (
+      <Card className="rounded-sm">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium text-muted-foreground">
+            Top Repositories
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <TopRepositories repositoryStats={data} />
+        </CardContent>
+      </Card>
+    ),
+  });
+}
 
-  return state;
+function RepoLeadersPanel({ status }: { status: SectionStatus<RepositoryStatsDTO[]> }) {
+  return renderSection(status, {
+    skeleton: <RepoLeadersSkeleton />,
+    errorTitle: "Repo Leaders",
+    ready: (data) => (
+      <Card className="rounded-sm">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium text-muted-foreground">Repo Leaders</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <RepoLeaders repositoryStats={data} />
+        </CardContent>
+      </Card>
+    ),
+  });
+}
+
+function WorkloadPanel({ status }: { status: SectionStatus<TaskStatsDTO[]> }) {
+  return renderSection(status, {
+    skeleton: <WorkloadSkeleton />,
+    errorTitle: "Workload",
+    ready: (data) => <WorkloadSection task_stats={data} />,
+  });
+}
+
+function StatsContent({
+  sections,
+  rangeLabel,
+  workspaceId,
+}: {
+  sections: StatsSections;
+  rangeLabel: string;
+  workspaceId?: string;
+}) {
+  const taskStatus = flattenTaskStats(sections.tasks);
+  return (
+    <div className="flex-1 overflow-auto">
+      <div className="max-w-7xl mx-auto p-6">
+        <div className="space-y-5">
+          <OverviewPanel global={sections.global} git={sections.git} />
+          <SectionDivider id="telemetry" label="Telemetry" />
+          <CompletedPanel status={sections.completed} />
+          <ActivityPanel daily={sections.daily} agents={sections.agents} rangeLabel={rangeLabel} />
+          <RepositoryActivityPanel status={sections.repos} />
+          <TopRepositoriesPanel status={sections.repos} />
+          <RepoLeadersPanel status={sections.repos} />
+          <SectionDivider id="github" label="GitHub" />
+          <PRStatsPanel workspaceId={workspaceId ?? null} />
+          <SectionDivider id="workload" label="Workload" />
+          <WorkloadPanel status={taskStatus} />
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function StatsPageClient({ workspaceId, activeRange, initialError }: StatsPageClientProps) {
@@ -348,16 +375,19 @@ export function StatsPageClient({ workspaceId, activeRange, initialError }: Stat
   const range: RangeKey = isRangeKey(rawRange) ? rawRange : DEFAULT_RANGE;
   const rangeLabel = getRangeLabel(range);
 
-  const { stats, error: fetchError } = useStatsData(workspaceId, range);
-  const panelState = toPanelState(stats, fetchError);
+  const sections = useStatsSections(workspaceId, range);
+  const fetchError = anyError(sections);
+  const globalReady = readyGlobal(sections);
+  const fullStats = composeStatsResponse(sections);
 
-  const completedInRange = useMemo(
-    () => (stats?.completed_activity ?? []).reduce((sum, item) => sum + item.completed_tasks, 0),
-    [stats?.completed_activity],
-  );
+  const completedInRange = useMemo(() => {
+    if (sections.completed.kind !== "ready") return 0;
+    return sections.completed.data.reduce((sum, item) => sum + item.completed_tasks, 0);
+  }, [sections.completed]);
+
   const statsSummary = useMemo(
-    () => (stats ? buildStatsSummary(stats, rangeLabel, completedInRange) : ""),
-    [stats, rangeLabel, completedInRange],
+    () => (fullStats ? buildStatsSummary(fullStats, rangeLabel, completedInRange) : ""),
+    [fullStats, rangeLabel, completedInRange],
   );
 
   const handleCopyStats = useCallback(() => {
@@ -387,15 +417,15 @@ export function StatsPageClient({ workspaceId, activeRange, initialError }: Stat
   return (
     <div className="h-screen w-full flex flex-col bg-background">
       <StatsHeader
-        global={stats?.global ?? null}
+        global={globalReady}
         range={range}
         copied={copied}
-        copyDisabled={!stats}
+        copyDisabled={!fullStats}
         hasError={Boolean(fetchError)}
         onRangeChange={handleRangeChange}
         onCopy={handleCopyStats}
       />
-      <StatsContent state={panelState} rangeLabel={rangeLabel} workspaceId={workspaceId} />
+      <StatsContent sections={sections} rangeLabel={rangeLabel} workspaceId={workspaceId} />
     </div>
   );
 }

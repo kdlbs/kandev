@@ -227,6 +227,60 @@ func TestGetRepositoryStats_ExcludesSoftDeletedRepos(t *testing.T) {
 	}
 }
 
+// TestGetGlobalStats_AggregatesAcrossTables exercises the CTE-based query path
+// for every aggregated field — total/user/tool messages, turn count, and the
+// computed total duration — to guard against regressions when the query is
+// further consolidated.
+func TestGetGlobalStats_AggregatesAcrossTables(t *testing.T) {
+	dbConn := createTestDB(t)
+	repo, err := NewWithDB(dbConn, dbConn)
+	if err != nil {
+		t.Fatalf("NewWithDB failed: %v", err)
+	}
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	nowStr := now.Format(time.RFC3339)
+
+	execOrFatal(t, dbConn, `INSERT INTO workspaces (id, name, created_at, updated_at) VALUES ('ws-1', 'Test', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO boards (id, workspace_id, name, created_at, updated_at) VALUES ('board-1', 'ws-1', 'Board', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, created_at, updated_at) VALUES ('task-1', 'ws-1', 'board-1', '', 'T1', 0, ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, state, started_at, updated_at) VALUES ('sess-1', 'task-1', 'agent-1', 'COMPLETED', ?, ?)`, nowStr, nowStr)
+	// Two turns: 5m + 10m of active duration (= 900_000 ms).
+	execOrFatal(t, dbConn, `INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, completed_at, created_at, updated_at) VALUES ('turn-1', 'sess-1', 'task-1', '2026-01-01T10:00:00Z', '2026-01-01T10:05:00Z', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, completed_at, created_at, updated_at) VALUES ('turn-2', 'sess-1', 'task-1', '2026-01-01T10:10:00Z', '2026-01-01T10:20:00Z', ?, ?)`, nowStr, nowStr)
+	// Messages: 2 user, 1 tool_call, 1 tool_edit, 1 agent text.
+	execOrFatal(t, dbConn, `INSERT INTO task_session_messages (id, task_session_id, turn_id, author_type, type, content, created_at) VALUES ('m-1', 'sess-1', 'turn-1', 'user', 'message', 'hi', ?)`, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO task_session_messages (id, task_session_id, turn_id, author_type, type, content, created_at) VALUES ('m-2', 'sess-1', 'turn-1', 'user', 'message', 'hello', ?)`, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO task_session_messages (id, task_session_id, turn_id, author_type, type, content, created_at) VALUES ('m-3', 'sess-1', 'turn-1', 'agent', 'tool_call', 'bash', ?)`, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO task_session_messages (id, task_session_id, turn_id, author_type, type, content, created_at) VALUES ('m-4', 'sess-1', 'turn-1', 'agent', 'tool_edit', 'edit', ?)`, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO task_session_messages (id, task_session_id, turn_id, author_type, type, content, created_at) VALUES ('m-5', 'sess-1', 'turn-1', 'agent', 'message', 'reply', ?)`, nowStr)
+
+	stats, err := repo.GetGlobalStats(ctx, "ws-1", nil)
+	if err != nil {
+		t.Fatalf("GetGlobalStats failed: %v", err)
+	}
+	if stats.TotalTasks != 1 {
+		t.Errorf("TotalTasks: want 1, got %d", stats.TotalTasks)
+	}
+	if stats.TotalSessions != 1 {
+		t.Errorf("TotalSessions: want 1, got %d", stats.TotalSessions)
+	}
+	if stats.TotalTurns != 2 {
+		t.Errorf("TotalTurns: want 2, got %d", stats.TotalTurns)
+	}
+	if stats.TotalMessages != 5 {
+		t.Errorf("TotalMessages: want 5, got %d", stats.TotalMessages)
+	}
+	if stats.TotalUserMessages != 2 {
+		t.Errorf("TotalUserMessages: want 2, got %d", stats.TotalUserMessages)
+	}
+	if stats.TotalToolCalls != 2 {
+		t.Errorf("TotalToolCalls: want 2 (tool_call + tool_edit), got %d", stats.TotalToolCalls)
+	}
+	assertDurationAlmostEqual(t, stats.TotalDurationMs, int64(15*60*1000), "TotalDurationMs")
+}
+
 func TestGetGlobalStats_EmptyWorkspace(t *testing.T) {
 	dbConn := createTestDB(t)
 	repo, err := NewWithDB(dbConn, dbConn)
