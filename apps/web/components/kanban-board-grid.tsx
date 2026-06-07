@@ -21,6 +21,7 @@ import { MobileFab } from "./kanban/mobile-fab";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
 import { getKanbanColumnGridTemplate } from "./kanban/kanban-grid-template";
+import { compareTasksByCreatedDesc } from "@/lib/kanban/task-order";
 
 export type KanbanBoardGridProps = {
   steps: WorkflowStep[];
@@ -61,7 +62,7 @@ function getTasksForStep(tasks: Task[], stepId: string) {
   return tasks
     .filter((task) => task.workflowStepId === stepId)
     .map((task) => ({ ...task, position: task.position ?? 0 }))
-    .sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""));
+    .sort(compareTasksByCreatedDesc);
 }
 
 function EmptyState({ showLoading }: { showLoading: boolean }) {

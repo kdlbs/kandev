@@ -24,6 +24,7 @@ import { SwipeableColumns } from "./swipeable-columns";
 import { MobileDropTargets } from "./mobile-drop-targets";
 import { getKanbanColumnGridTemplate } from "./kanban-grid-template";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
+import { compareTasksByCreatedDesc } from "@/lib/kanban/task-order";
 
 export type SwimlaneKanbanContentProps = {
   workflowId: string;
@@ -80,13 +81,9 @@ function useSwimlaneKanbanDnd({ tasks, workflowId, onMoveError }: SwimlaneKanban
       const snapshot = state.kanbanMulti.snapshots[workflowId];
       if (!snapshot) return;
 
-      const targetTasks = snapshot.tasks
-        .filter(
-          (t: KanbanState["tasks"][number]) => t.workflowStepId === targetStepId && t.id !== taskId,
-        )
-        .sort((a: KanbanState["tasks"][number], b: KanbanState["tasks"][number]) =>
-          (a.createdAt ?? "").localeCompare(b.createdAt ?? ""),
-        );
+      const targetTasks = snapshot.tasks.filter(
+        (t: KanbanState["tasks"][number]) => t.workflowStepId === targetStepId && t.id !== taskId,
+      );
       const nextPosition = targetTasks.length;
       const originalTasks = snapshot.tasks;
 
@@ -166,9 +163,7 @@ function useMobileColumnIndex(steps: WorkflowStep[], tasks: Task[]) {
 function useTasksByStep(tasks: Task[]) {
   return useCallback(
     (stepId: string) =>
-      tasks
-        .filter((t) => t.workflowStepId === stepId)
-        .sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? "")),
+      tasks.filter((t) => t.workflowStepId === stepId).sort(compareTasksByCreatedDesc),
     [tasks],
   );
 }
