@@ -52,7 +52,7 @@ type StepPortable struct {
 	AllowManualMove           bool                  `json:"allow_manual_move" yaml:"allow_manual_move"`
 	AutoArchiveAfterHours     int                   `json:"auto_archive_after_hours,omitempty" yaml:"auto_archive_after_hours,omitempty"`
 	AgentProfile              *AgentProfilePortable `json:"agent_profile,omitempty" yaml:"agent_profile,omitempty"`
-	AutoAdvanceRequiresSignal bool                  `json:"auto_advance_requires_signal,omitempty" yaml:"auto_advance_requires_signal,omitempty"`
+	AutoAdvanceRequiresSignal bool                  `json:"auto_advance_requires_signal" yaml:"auto_advance_requires_signal"`
 }
 
 // BuildWorkflowExport builds a portable WorkflowExport from domain models.
