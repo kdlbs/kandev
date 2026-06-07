@@ -184,6 +184,42 @@ func TestApplySessionProbeFields_PrefersLegacyModelsField(t *testing.T) {
 	}
 }
 
+// A non-nil `Models` struct with an empty `AvailableModels` slice is
+// schema-valid. The fallback must NOT fire in that case — otherwise
+// `CurrentModelID` set from the legacy field gets clobbered by the
+// configOptions value, mixing sources.
+func TestApplySessionProbeFields_LegacyEmptyModelsBlocksFallback(t *testing.T) {
+	t.Parallel()
+
+	modelCat := acp.SessionConfigOptionCategoryModel
+	resp := acp.NewSessionResponse{
+		Models: &acp.SessionModelState{
+			CurrentModelId:  "legacy-current",
+			AvailableModels: nil,
+		},
+		ConfigOptions: []acp.SessionConfigOption{
+			{Select: &acp.SessionConfigOptionSelect{
+				Category:     &modelCat,
+				CurrentValue: "fallback-current",
+				Options: acp.SessionConfigSelectOptions{Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{
+					{Value: "fallback-current", Name: "Fallback"},
+				}},
+				Type: "select",
+			}},
+		},
+	}
+
+	out := &ProbeResponse{}
+	applySessionProbeFields(out, resp)
+
+	if got, want := out.CurrentModelID, "legacy-current"; got != want {
+		t.Fatalf("CurrentModelID = %q, want %q (legacy must win, fallback must not fire)", got, want)
+	}
+	if len(out.Models) != 0 {
+		t.Fatalf("Models = %+v, want empty (fallback should be skipped when legacy field is non-nil)", out.Models)
+	}
+}
+
 // Grouped select-option payloads are flattened group-by-group so the
 // fallback works regardless of whether the agent groups its options.
 func TestApplySessionProbeFields_FlattensGroupedConfigOptions(t *testing.T) {

@@ -466,10 +466,15 @@ func applySessionProbeFields(out *ProbeResponse, sessionResp acp.NewSessionRespo
 			})
 		}
 	}
-	if len(out.Models) == 0 {
+	// Gate the fallback on the legacy field being absent (nil) rather than
+	// producing an empty slice. A non-nil `Models` with an empty
+	// `AvailableModels` is schema-valid and would otherwise mix sources:
+	// `CurrentModelID` set from the legacy field, then immediately
+	// overwritten by the configOptions fallback. Same for modes.
+	if sessionResp.Models == nil {
 		applyConfigOptionsAsModels(out, sessionResp.ConfigOptions)
 	}
-	if len(out.Modes) == 0 {
+	if sessionResp.Modes == nil {
 		applyConfigOptionsAsModes(out, sessionResp.ConfigOptions)
 	}
 }
