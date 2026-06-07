@@ -45,7 +45,11 @@ vi.mock("@/components/task-create-dialog", () => ({
   TaskCreateDialog: ({
     onSuccess,
   }: {
-    onSuccess?: (task: { id: string }, mode: "create" | "edit") => void;
+    onSuccess?: (
+      task: { id: string },
+      mode: "create" | "edit",
+      meta?: { taskSessionId?: string | null },
+    ) => void;
   }) => (
     <button
       type="button"
