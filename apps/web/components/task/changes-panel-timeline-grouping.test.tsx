@@ -41,6 +41,7 @@ const ARIA_EXPANDED = "aria-expanded";
 afterEach(cleanup);
 
 type Props = ComponentProps<typeof FileListSection>;
+type CommitProps = ComponentProps<typeof CommitsSection>;
 
 const baseProps: Omit<Props, "files" | "variant" | "isLast" | "actionLabel" | "onAction"> = {
   pendingStageFiles: new Set(),
@@ -60,6 +61,17 @@ function file(path: string, repo?: string): Props["files"][number] {
     minus: 0,
     oldPath: undefined,
     repositoryName: repo,
+  };
+}
+
+function commit(sha: string, message: string, repo?: string): CommitProps["commits"][number] {
+  return {
+    commit_sha: sha,
+    commit_message: message,
+    insertions: 1,
+    deletions: 0,
+    pushed: false,
+    repository_name: repo,
   };
 }
 
@@ -159,19 +171,6 @@ describe("FileListSection — multi-repo grouping", () => {
 });
 
 describe("CommitsSection", () => {
-  type CommitProps = ComponentProps<typeof CommitsSection>;
-
-  function commit(sha: string, message: string, repo?: string): CommitProps["commits"][number] {
-    return {
-      commit_sha: sha,
-      commit_message: message,
-      insertions: 1,
-      deletions: 0,
-      pushed: false,
-      repository_name: repo,
-    };
-  }
-
   it("renders the commits section header collapsed by default", () => {
     render(<CommitsSection commits={[commit("abc123", "first")]} isLast />);
     // Commits section is collapsed by default; the toggle reflects that and
@@ -219,6 +218,41 @@ describe("CommitsSection", () => {
     fireEvent.click(screen.getByTestId(COMMITS_SECTION_TOGGLE_TID));
     expect(screen.queryAllByTestId("commits-repo-header")).toHaveLength(0);
     expect(screen.getAllByTestId(COMMIT_ROW_TID)).toHaveLength(2);
+  });
+});
+
+describe("CommitsSection actions", () => {
+  it("does not show Push when commits are already on the tracked remote", () => {
+    render(
+      <CommitsSection
+        commits={[commit("c1", "already pushed"), commit("c2", "also pushed")]}
+        isLast
+        onRepoPush={() => undefined}
+        perRepoStatus={[{ repository_name: "", ahead: 0 }]}
+      />,
+    );
+
+    expect(screen.queryByTestId("commits-repo-push")).toBeNull();
+
+    fireEvent.click(screen.getByTestId(COMMITS_SECTION_TOGGLE_TID));
+    expect(screen.getAllByTestId(COMMIT_ROW_TID)).toHaveLength(2);
+    expect(screen.queryByTestId("commits-repo-push")).toBeNull();
+  });
+
+  it("labels Push with the actual ahead count instead of the commit list count", () => {
+    render(
+      <CommitsSection
+        commits={[commit("c1", "newest"), commit("c2", "middle"), commit("c3", "oldest")]}
+        isLast
+        onRepoPush={() => undefined}
+        perRepoStatus={[{ repository_name: "", ahead: 1 }]}
+      />,
+    );
+
+    const push = screen.getByTestId("commits-repo-push");
+    expect(push.textContent).toContain("Push");
+    expect(push.textContent).toContain("1");
+    expect(push.textContent).not.toContain("3");
   });
 
   // Regression: previously isLatest was computed against the merged list, so

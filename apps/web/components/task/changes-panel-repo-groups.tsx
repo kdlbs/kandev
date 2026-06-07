@@ -143,7 +143,6 @@ export function FileSectionActions({
 
 export function CommitsGroupActions({
   repositoryName,
-  unpushedCount,
   aheadCount,
   prExists,
   canCreatePR,
@@ -152,7 +151,6 @@ export function CommitsGroupActions({
   stop,
 }: {
   repositoryName: string;
-  unpushedCount: number;
   aheadCount: number;
   prExists: boolean;
   canCreatePR: boolean;
@@ -162,7 +160,7 @@ export function CommitsGroupActions({
 }) {
   return (
     <div className="flex items-center gap-1" onClick={stop}>
-      {onRepoPush && (unpushedCount > 0 || aheadCount > 0) && (
+      {onRepoPush && aheadCount > 0 && (
         <Button
           size="sm"
           variant="ghost"
@@ -172,7 +170,7 @@ export function CommitsGroupActions({
         >
           <IconCloudUpload className="h-3 w-3" />
           Push
-          <span className="text-muted-foreground">{unpushedCount || aheadCount}</span>
+          <span className="text-muted-foreground">{aheadCount}</span>
         </Button>
       )}
       {onRepoCreatePR && (
@@ -237,7 +235,6 @@ export function CommitsRepoGroup({
   // Each repo has its own "latest unpushed commit" — revert/amend in this
   // group must target THIS repo's newest, not the merged-list newest.
   const firstUnpushedInGroup = groupCommits.findIndex((c) => c.pushed !== true);
-  const unpushedCount = groupCommits.filter((c) => !c.pushed).length;
   const stop = (e: React.MouseEvent) => e.stopPropagation();
   const label = displayName || repositoryName || "Repository";
   // Bug 10 acknowledged trade-off: `existingPrUrl` is sourced from a
@@ -288,7 +285,6 @@ export function CommitsRepoGroup({
         </button>
         <CommitsGroupActions
           repositoryName={repositoryName}
-          unpushedCount={unpushedCount}
           aheadCount={aheadCount}
           prExists={prExists}
           canCreatePR={canCreatePR}

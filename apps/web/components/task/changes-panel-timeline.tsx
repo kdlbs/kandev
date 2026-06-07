@@ -182,7 +182,6 @@ export function CommitsSection({
   const sectionAction = isSingleRepo ? (
     <CommitsGroupActions
       repositoryName=""
-      unpushedCount={groups[0].items.filter((c) => !c.pushed).length}
       aheadCount={aheadByRepo.get("") ?? 0}
       prExists={!!prByRepo?.[""]}
       canCreatePR={!!onRepoCreatePR && !prByRepo?.[""]}
