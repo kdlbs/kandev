@@ -28,6 +28,10 @@ const SECTION_ROUTE_MAP: Array<{ id: string; matches: (path: string) => boolean 
   { id: APP_SIDEBAR_SECTION_IDS.agents, matches: (p) => p.startsWith("/office/agents") },
 ];
 
+function isSettingsRoute(pathname: string | null): boolean {
+  return pathname === "/settings" || Boolean(pathname?.startsWith("/settings/"));
+}
+
 /**
  * Unified app sidebar mounted at the root layout. Replaces the legacy
  * WorkspaceRail + OfficeSidebar + dockview-embedded sidebar surfaces.
@@ -73,16 +77,19 @@ export function AppSidebar() {
 
   const expandedWidth = Math.max(APP_SIDEBAR_EXPANDED_WIDTH, storedWidth);
 
-  // Close the settings takeover when the user navigates off the settings
-  // surface — e.g. the Home button, the Kandev brand, the Office/Stats footer
-  // buttons, or opening a task. Keyed on an actual pathname *change* so opening
-  // the gear from a non-settings page (no navigation) doesn't immediately close
-  // it, and clicking within the tree (`/settings/...`) keeps it open.
-  const prevPathnameRef = useRef(pathname);
+  // Keep the transient settings takeover aligned with route ownership. It is
+  // intentionally not persisted, so direct reloads on `/settings/...` need to
+  // enter it from the current pathname. Key on actual pathname changes so a
+  // user can still close the takeover while staying on a settings page.
+  const prevPathnameRef = useRef<string | null>(null);
   useEffect(() => {
-    if (prevPathnameRef.current === pathname) return;
+    if (!pathname || prevPathnameRef.current === pathname) return;
     prevPathnameRef.current = pathname;
-    if (settingsMode && (!pathname || !pathname.startsWith("/settings"))) {
+    if (isSettingsRoute(pathname)) {
+      if (!settingsMode) toggleSettingsMode();
+      return;
+    }
+    if (settingsMode) {
       toggleSettingsMode();
     }
   }, [pathname, settingsMode, toggleSettingsMode]);

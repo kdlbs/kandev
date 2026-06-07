@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { APP_SIDEBAR_EXPANDED_WIDTH } from "./app-sidebar-constants";
+
+const navigationMock = vi.hoisted(() => ({
+  pathname: "/",
+}));
 
 // The AppSidebar pulls in a lot of children that touch the dockview / kanban
 // data layer. For unit testing the collapse + section toggle behaviour we stub
@@ -47,9 +51,12 @@ vi.mock("./sections/integrations-section", () => ({
 vi.mock("./app-sidebar-footer", () => ({
   AppSidebarFooter: () => <div data-testid="footer" />,
 }));
+vi.mock("./app-sidebar-settings-mode", () => ({
+  AppSidebarSettingsMode: () => <div data-testid="settings-mode" />,
+}));
 
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/",
+  usePathname: () => navigationMock.pathname,
 }));
 
 const storeState = {
@@ -80,9 +87,12 @@ import { AppSidebar } from "./app-sidebar";
 
 describe("AppSidebar", () => {
   beforeEach(() => {
+    navigationMock.pathname = "/";
     storeState.appSidebar.collapsed = false;
+    storeState.appSidebar.settingsMode = false;
     storeState.toggleAppSidebar = vi.fn();
     storeState.toggleAppSidebarSection = vi.fn();
+    storeState.toggleAppSidebarSettingsMode = vi.fn();
   });
 
   afterEach(() => {
@@ -109,5 +119,16 @@ describe("AppSidebar", () => {
     render(<AppSidebar />);
     fireEvent.click(screen.getByTestId("header-toggle"));
     expect(storeState.toggleAppSidebar).toHaveBeenCalledOnce();
+  });
+
+  it("enters settings mode on initial mount for a deep settings route", async () => {
+    navigationMock.pathname =
+      "/settings/agents/opencode-acp/profiles/1f593628-6752-4972-95ab-5c8c3e7eaeab";
+
+    render(<AppSidebar />);
+
+    await waitFor(() => {
+      expect(storeState.toggleAppSidebarSettingsMode).toHaveBeenCalledOnce();
+    });
   });
 });

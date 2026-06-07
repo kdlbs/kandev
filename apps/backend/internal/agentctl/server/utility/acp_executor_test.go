@@ -45,11 +45,11 @@ func TestIsOpenCodeACPCommand(t *testing.T) {
 		command []string
 		want    bool
 	}{
-		{name: "opencode acp", command: []string{"opencode", "acp"}, want: true},
-		{name: "path opencode acp", command: []string{filepath.Join("/usr/local/bin", "opencode"), "acp"}, want: true},
-		{name: "opencode non acp", command: []string{"opencode", "run"}, want: false},
-		{name: "too short", command: []string{"opencode"}, want: false},
-		{name: "other acp", command: []string{"claude", "acp"}, want: false},
+		{name: "opencode acp", command: []string{openCodeCommand, openCodeACPSubcommand}, want: true},
+		{name: "path opencode acp", command: []string{filepath.Join("/usr/local/bin", openCodeCommand), openCodeACPSubcommand}, want: true},
+		{name: "opencode non acp", command: []string{openCodeCommand, "run"}, want: false},
+		{name: "too short", command: []string{openCodeCommand}, want: false},
+		{name: "other acp", command: []string{"claude", openCodeACPSubcommand}, want: false},
 	}
 
 	for _, tt := range tests {

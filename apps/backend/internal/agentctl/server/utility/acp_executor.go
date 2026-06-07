@@ -19,6 +19,11 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	openCodeCommand       = "opencode"
+	openCodeACPSubcommand = "acp"
+)
+
 // ACPInferenceExecutor executes one-shot prompts using the ACP protocol.
 // It spawns a new agent process, performs the ACP handshake, sends the prompt,
 // collects the response, and tears down the process.
@@ -339,7 +344,9 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 // isOpenCodeACPCommand reports whether the configured ACP probe command is
 // OpenCode's ACP transport.
 func isOpenCodeACPCommand(command []string) bool {
-	return len(command) >= 2 && filepath.Base(command[0]) == "opencode" && command[1] == "acp"
+	return len(command) >= 2 &&
+		filepath.Base(command[0]) == openCodeCommand &&
+		command[1] == openCodeACPSubcommand
 }
 
 // applyOpenCodeModelsFallback fills an otherwise empty probe model list from
@@ -660,7 +667,7 @@ var allowedProbeCommands = map[string]string{
 	"mock-agent":    "mock-agent",
 	"npx":           "npx",
 	"omp":           "omp",
-	"opencode":      "opencode",
+	openCodeCommand: openCodeCommand,
 	"qodercli":      "qodercli",
 	"traecli":       "traecli",
 }
