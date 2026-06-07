@@ -9,5 +9,9 @@ function createdAtTime(task: CreatedTask): number {
 }
 
 export function compareTasksByCreatedDesc(a: CreatedTask, b: CreatedTask): number {
-  return createdAtTime(b) - createdAtTime(a);
+  const aTime = createdAtTime(a);
+  const bTime = createdAtTime(b);
+  if (bTime > aTime) return 1;
+  if (bTime < aTime) return -1;
+  return 0;
 }

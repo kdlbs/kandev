@@ -48,4 +48,8 @@ describe("compareTasksByCreatedDesc", () => {
       "second",
     ]);
   });
+
+  it("returns 0 when both tasks are missing createdAt", () => {
+    expect(compareTasksByCreatedDesc({}, {})).toBe(0);
+  });
 });
