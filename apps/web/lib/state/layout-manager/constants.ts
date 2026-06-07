@@ -3,15 +3,12 @@ import type { LayoutPanel } from "./types";
 // Layout sizing constants (single source of truth).
 // Pinned column max width is computed at runtime — see ./caps.ts.
 //
-// Ratio applied to viewport width to compute the initial default for any
-// pinned column when no user override exists. Sidebar and right pane share
-// the same initial fraction today; if they need to diverge later, split this
-// into per-column ratios at that time.
-export const LAYOUT_INITIAL_RATIO = 2.5 / 10;
-/** @deprecated use LAYOUT_INITIAL_RATIO. */
-export const LAYOUT_SIDEBAR_RATIO = LAYOUT_INITIAL_RATIO;
-/** @deprecated use LAYOUT_INITIAL_RATIO. */
-export const LAYOUT_RIGHT_RATIO = LAYOUT_INITIAL_RATIO;
+// Ratio applied to dockview width to compute initial defaults when no user
+// override exists. The left app sidebar now sits outside dockview, so the
+// right pane needs a larger dockview-relative ratio to preserve the old
+// laptop proportions after the app sidebar consumes horizontal space.
+export const LAYOUT_SIDEBAR_RATIO = 2.5 / 10;
+export const LAYOUT_RIGHT_RATIO = 1 / 3;
 
 // Well-known group/panel IDs
 export const SIDEBAR_GROUP = "group-sidebar";

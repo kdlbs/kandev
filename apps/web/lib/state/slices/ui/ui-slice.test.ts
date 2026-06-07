@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
 import { createUISlice } from "./ui-slice";
+import { APP_SIDEBAR_EXPANDED_WIDTH } from "@/components/app-sidebar/app-sidebar-constants";
 import type { SidebarViewDraft } from "./sidebar-view-types";
 import type { UISlice } from "./types";
 
@@ -224,6 +225,7 @@ describe("appSidebar actions", () => {
   it("hydrates default state when localStorage is empty", () => {
     const store = makeStore();
     expect(store.getState().appSidebar.collapsed).toBe(false);
+    expect(store.getState().appSidebar.width).toBe(APP_SIDEBAR_EXPANDED_WIDTH);
     expect(store.getState().appSidebar.sectionExpanded.tasks).toBe(true);
     expect(store.getState().appSidebar.sectionExpanded.projects).toBe(false);
   });

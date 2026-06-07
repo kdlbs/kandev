@@ -153,11 +153,11 @@ describe("applyLayout — pinned target capture with no override", () => {
     // Empty overrides → each pinned column should fall back to its default.
     applyLayout(api, state, new Map(), 1600, 800);
 
-    // Defaults at totalWidth 1600: ratio 0.25*1600 = 400 → sidebar clamps to
-    // 350, right stays 400. NOT the transient 245 / 258.
+    // Defaults at totalWidth 1600: sidebar ratio clamps to 350; right ratio
+    // clamps to its legacy 450 cap. NOT the transient 245 / 258.
     expect(getPinnedTarget("sidebar")).toBe(350);
-    expect(getPinnedTarget("right")).toBe(400);
+    expect(getPinnedTarget("right")).toBe(450);
     expect(resizeView).toHaveBeenCalledWith(0, 350);
-    expect(resizeView).toHaveBeenCalledWith(2, 400);
+    expect(resizeView).toHaveBeenCalledWith(2, 450);
   });
 });

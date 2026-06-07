@@ -10,7 +10,7 @@ export const APP_SIDEBAR_SECTION_IDS = {
 export type AppSidebarSectionId =
   (typeof APP_SIDEBAR_SECTION_IDS)[keyof typeof APP_SIDEBAR_SECTION_IDS];
 
-export const APP_SIDEBAR_EXPANDED_WIDTH = 240;
+export const APP_SIDEBAR_EXPANDED_WIDTH = 320;
 export const APP_SIDEBAR_COLLAPSED_WIDTH = 56;
 
 /**

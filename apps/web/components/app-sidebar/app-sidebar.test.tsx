@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { APP_SIDEBAR_EXPANDED_WIDTH } from "./app-sidebar-constants";
 
 // The AppSidebar pulls in a lot of children that touch the dockview / kanban
 // data layer. For unit testing the collapse + section toggle behaviour we stub
@@ -61,7 +62,7 @@ const storeState = {
       integrations: false,
       settings: false,
     },
-    width: 240,
+    width: APP_SIDEBAR_EXPANDED_WIDTH,
     settingsMode: false,
   },
   toggleAppSidebar: vi.fn(),

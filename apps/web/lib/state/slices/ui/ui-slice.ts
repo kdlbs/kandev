@@ -21,6 +21,7 @@ import {
   buildAppSidebarActions,
   loadAppSidebarState,
 } from "./app-sidebar-actions";
+import { APP_SIDEBAR_EXPANDED_WIDTH } from "@/components/app-sidebar/app-sidebar-constants";
 import { buildSidebarTaskPrefsActions } from "./sidebar-task-prefs-actions";
 import { DEFAULT_ACTIVE_VIEW_ID, DEFAULT_VIEW } from "./sidebar-view-builtins";
 import type {
@@ -130,7 +131,7 @@ export const defaultUIState: UISliceState = {
   appSidebar: {
     collapsed: false,
     sectionExpanded: { ...DEFAULT_SECTION_EXPANDED },
-    width: 240,
+    width: APP_SIDEBAR_EXPANDED_WIDTH,
     settingsMode: false,
   },
 };

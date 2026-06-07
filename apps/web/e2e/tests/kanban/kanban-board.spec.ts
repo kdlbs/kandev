@@ -53,19 +53,19 @@ test.describe("Kanban board", () => {
   // no longer room between the left/right action groups for the centered
   // search, so the header hides it (see useIsHeaderNarrow in kanban-header).
   //
-  // Post-overhaul: the always-on AppSidebar (~240px expanded) permanently eats
+  // Post-overhaul: the always-on AppSidebar (~320px expanded) permanently eats
   // horizontal space, so the header's own clientWidth is viewport − sidebar.
   // The default Desktop Chrome 1280px viewport now leaves the header below the
   // 1100px narrow threshold even with no preview open, so this test forces a
   // viewport wide enough that the centered search shows with the sidebar
-  // present (1400 − ~240 = ~1160 ≥ 1100), and opening the 500px preview drops
-  // it below the threshold (1400 − ~240 − 500 = ~660 < 1100).
+  // present (1500 − ~320 = ~1180 ≥ 1100), and opening the 500px preview drops
+  // it below the threshold (1500 − ~320 − 500 = ~680 < 1100).
   test("hides header search when preview panel narrows the kanban area", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
-    await testPage.setViewportSize({ width: 1400, height: 800 });
+    await testPage.setViewportSize({ width: 1500, height: 800 });
     await apiClient.saveUserSettings({ enable_preview_on_click: true });
 
     const task = await apiClient.createTask(seedData.workspaceId, "Header Squeeze Task", {

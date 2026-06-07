@@ -100,8 +100,8 @@ describe("dockview-store resolveFilePath (via onDidActivePanelChange)", () => {
 
 describe("resolvePresetPinnedWidths", () => {
   // sidebar + center + right, with the legacy initial caps (sidebar 350, right
-  // 450). At totalWidth 1600 the ratio (0.25) is 400 → sidebar clamps to 350,
-  // right stays 400.
+  // 450). At totalWidth 1600 the sidebar ratio clamps to 350, while the right
+  // ratio clamps to 450.
   const cols = [
     { id: "sidebar", pinned: true, groups: [] },
     { id: "center", groups: [] },
@@ -120,7 +120,7 @@ describe("resolvePresetPinnedWidths", () => {
     const result = resolvePresetPinnedWidths(live, cols, 1600, true);
 
     expect(result.get("sidebar")).toBe(350); // clamped to legacy sidebar cap
-    expect(result.get("right")).toBe(400); // ratio 0.25 * 1600
+    expect(result.get("right")).toBe(450); // clamped to legacy right cap
     expect(result.has("center")).toBe(false); // not pinned
   });
 
