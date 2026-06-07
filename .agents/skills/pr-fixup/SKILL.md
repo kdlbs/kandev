@@ -70,14 +70,14 @@ If delegated polling is unavailable, gather the same information directly withou
 
 ```bash
 scripts/run-quiet gh-checks -- gh pr checks <PR>
-gh pr checks <PR> --json name,workflow,status,conclusion,detailsUrl
+gh pr checks <PR> --json name,workflow,state,link
 scripts/pr-resolve list <PR>
 gh pr view <PR> --json comments
 ```
 
 Poll at a 30s cadence with a **20 min cap**. Stop early if any required check fails. If the cap hits and only E2E shards are still pending with no failures, report "CI in progress" instead of continuing to watch indefinitely. Do not run `gh pr checks --watch` in the main session unless the runtime can keep the watcher isolated and automatically clean it up.
 
-Summarize the direct-command result using the same fields as the `pr-poller` report: `ci_failed`, `ci_pending`, bot states, unresolved review thread count, issue-comment count, and a recommendation.
+Summarize the direct-command result with the subset of the `pr-poller` report that can be derived directly: `ci_failed`, `ci_pending`, unresolved review thread count, issue-comment count, and a recommendation. Do not invent per-bot `bots.<name>` states in the fallback path; if bot state matters, use `pr-poller` or mark the bot state as unavailable.
 
 Mark task 1 as completed.
 
