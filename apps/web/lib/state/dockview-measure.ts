@@ -25,11 +25,21 @@ export function measureDockviewContainer(api: DockviewApi): { width: number; hei
   };
 }
 
+// The dockview content area sits next to the unified AppSidebar (#1165), whose
+// width animates over 300ms (`transition-all`). During that animation `onReady`
+// can read the parent at a tiny positive width — building the default layout at
+// that width collapses the horizontal columns into a vertical stack. The
+// sidebar maxes at 30vw (desktop-only surface), so a healthy content width is
+// always >= ~70vw; anything below half the viewport is a mid-transition
+// transient and must be treated like a not-yet-laid-out (0-width) container.
+const MIN_PLAUSIBLE_WIDTH_RATIO = 0.5;
+
 function liveContainerSize(): { width: number; height: number } | null {
   if (typeof document === "undefined") return null;
   const dv = document.querySelector(".dv-dockview") as HTMLElement | null;
   const parent = dv?.parentElement;
   if (!parent || parent.clientWidth <= 0 || parent.clientHeight <= 0) return null;
+  if (parent.clientWidth < viewportWidth() * MIN_PLAUSIBLE_WIDTH_RATIO) return null;
   return { width: parent.clientWidth, height: parent.clientHeight };
 }
 
