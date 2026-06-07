@@ -732,10 +732,12 @@ func (s *Store) UpdatePRWatchBranchIfSearching(ctx context.Context, id, branch s
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE github_pr_watches SET branch = ?, updated_at = ? WHERE id = ? AND pr_number = 0`,
 		branch, time.Now().UTC(), id); err != nil {
-		// TOCTOU: a concurrent CreatePRWatch may have inserted a sibling
-		// row for the destination triple between our existence probe and
-		// this UPDATE. SQLite rejects with UNIQUE — treat it as the same
-		// collision case we just handled above and drop the source row.
+		// Defensive belt-and-suspenders: the SQLite writer pool is
+		// SetMaxOpenConns(1), so an in-process CreatePRWatch cannot
+		// commit a sibling row between our probe and this UPDATE. But
+		// an external writer (separate process touching the same file,
+		// future pool reshuffle) could; if the UPDATE still trips
+		// UNIQUE, treat it identically to the probe-found path.
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
 			return dropSourceAndCommit(ctx, tx, id)
 		}

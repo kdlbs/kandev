@@ -243,3 +243,16 @@ func TestUpdatePRWatchBranchIfSearching_PRAlreadyFound_NoOp(t *testing.T) {
 		t.Fatalf("expected watch branch unchanged, got %+v", got)
 	}
 }
+
+// TestUpdatePRWatchBranchIfSearching_MissingRow_NoOp locks the
+// idempotency contract: calling with an ID that doesn't exist must be
+// a silent no-op (matches the prior UPDATE-by-id semantics that
+// affected 0 rows without error).
+func TestUpdatePRWatchBranchIfSearching_MissingRow_NoOp(t *testing.T) {
+	_, svc, _, _ := setupPollerTest(t)
+	ctx := context.Background()
+
+	if err := svc.UpdatePRWatchBranchIfSearching(ctx, "nonexistent-id", "feature/any"); err != nil {
+		t.Fatalf("must be a no-op for missing row, got: %v", err)
+	}
+}
