@@ -207,7 +207,7 @@ function DebugOverlayToggle({
         <Button
           size="sm"
           variant="outline"
-          className="h-8 cursor-pointer px-2"
+          className="h-7 cursor-pointer px-2"
           onClick={onToggleDebugOverlay}
           aria-label={label}
         >
@@ -237,7 +237,7 @@ function AttentionStatusGroup({
   taskTitle?: string;
 }) {
   return (
-    <TopbarCluster label="Task status and attention" className="[&_button]:h-8 [&_button]:text-xs">
+    <TopbarCluster label="Task status and attention" className="[&_button]:h-7 [&_button]:text-xs">
       <DocumentControls activeSessionId={activeSessionId ?? null} />
       {!isArchived && (
         <>
@@ -272,7 +272,7 @@ function TopbarToolsGroup({
   const showDebugToggle = isDebugUI() && onToggleDebugOverlay;
 
   return (
-    <TopbarCluster label="Task tools" className="[&_button]:h-8 [&_button]:text-xs">
+    <TopbarCluster label="Task tools" className="[&_button]:h-7 [&_button]:text-xs">
       {!isArchived && (
         <>
           <LayoutPresetSelector />
@@ -318,8 +318,8 @@ function TopBarRight({
   return (
     <div className="flex items-center justify-self-end gap-2 [&_button]:whitespace-nowrap">
       {officeTaskHref && (
-        <TopbarCluster label="Open in office view" className="[&_a]:h-8 [&_a]:text-xs">
-          <Button asChild size="sm" variant="outline" className="h-8 cursor-pointer px-2">
+        <TopbarCluster label="Open in office view" className="[&_a]:h-7 [&_a]:text-xs">
+          <Button asChild size="sm" variant="outline" className="h-7 cursor-pointer px-2">
             <Link href={officeTaskHref}>Open in office view</Link>
           </Button>
         </TopbarCluster>

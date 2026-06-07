@@ -45,7 +45,7 @@ export function EditorsMenu({ activeSessionId }: EditorsMenuProps) {
   }, [defaultEditorId, enabledEditors]);
 
   return (
-    <div className="inline-flex rounded-md border border-border overflow-hidden">
+    <div className="inline-flex h-7 rounded-md border border-border overflow-hidden">
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
