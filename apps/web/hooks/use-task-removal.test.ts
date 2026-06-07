@@ -19,6 +19,7 @@ vi.mock("@/lib/api", () => ({
 }));
 
 import { useTaskRemoval } from "./use-task-removal";
+import { setRecentTasks } from "@/lib/recent-tasks";
 
 type TaskRow = { id: string; primarySessionId: string | null };
 
@@ -90,6 +91,7 @@ const nextTask: TaskRow = { id: "task-next", primarySessionId: "sess-next" };
 
 beforeEach(() => {
   vi.clearAllMocks();
+  window.localStorage.clear();
 });
 
 describe("useTaskRemoval — switch guard (current store wins)", () => {
@@ -225,5 +227,56 @@ describe("useTaskRemoval — switch guard (WS-clear fallback)", () => {
         value: originalLocation,
       });
     }
+  });
+});
+
+describe("useTaskRemoval — next task selection", () => {
+  it("switches to the most recent remaining task instead of the first snapshot task", async () => {
+    const recentTaskId = "task-recent";
+    const recentSessionId = "sess-recent";
+    const oldTask = { id: "task-old", primarySessionId: "sess-old" };
+    const recentTask = { id: recentTaskId, primarySessionId: recentSessionId };
+    const store = makeStore({
+      activeTaskId: "task-A",
+      activeSessionId: "sess-A",
+      remainingTasks: [{ id: "task-A", primarySessionId: "sess-A" }, oldTask, recentTask],
+    });
+    store.getRecorded().environmentIdBySessionId = {
+      ...store.getRecorded().environmentIdBySessionId,
+      "sess-old": "env-old",
+      [recentSessionId]: "env-recent",
+    };
+    setRecentTasks([
+      {
+        taskId: recentTaskId,
+        title: "Recent task",
+        visitedAt: "2026-06-07T10:00:00Z",
+      },
+      {
+        taskId: "task-A",
+        title: "Removed task",
+        visitedAt: "2026-06-07T09:00:00Z",
+      },
+      {
+        taskId: "task-old",
+        title: "Old task",
+        visitedAt: "2026-06-06T10:00:00Z",
+      },
+    ]);
+
+    const { result } = renderHook(() =>
+      useTaskRemoval({ store: store as unknown as StoreApi<never> }),
+    );
+
+    await result.current.removeTaskFromBoard("task-A", {
+      wasActiveTaskId: "task-A",
+      wasActiveSessionId: "sess-A",
+    });
+
+    expect(store.getRecorded().setActiveSession).toHaveBeenCalledWith(
+      recentTaskId,
+      recentSessionId,
+    );
+    expect(replaceTaskUrlMock).toHaveBeenCalledWith(recentTaskId);
   });
 });

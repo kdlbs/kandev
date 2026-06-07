@@ -6,6 +6,7 @@ import type { TaskSession } from "@/lib/types/http";
 import { replaceTaskUrl } from "@/lib/links";
 import { listTaskSessions } from "@/lib/api";
 import { performLayoutSwitch } from "@/lib/state/dockview-store";
+import { getRecentTasks } from "@/lib/recent-tasks";
 
 type TaskRemovalOptions = {
   store: StoreApi<AppState>;
@@ -90,6 +91,17 @@ function collectRemainingTasks(store: StoreApi<AppState>): KanbanState["tasks"] 
     allRemainingTasks.push(...store.getState().kanban.tasks);
   }
   return allRemainingTasks;
+}
+
+function selectNextTaskAfterRemoval(
+  remainingTasks: KanbanState["tasks"],
+): KanbanState["tasks"][number] | null {
+  const remainingById = new Map(remainingTasks.map((task) => [task.id, task]));
+  for (const recent of getRecentTasks()) {
+    const task = remainingById.get(recent.taskId);
+    if (task) return task;
+  }
+  return remainingTasks[0] ?? null;
 }
 
 function switchToSessionForTask(params: {
@@ -201,10 +213,11 @@ export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOp
       if (!shouldSwitchAfterRemoval(store, taskId, opts)) return;
 
       const oldEnvId = resolveOldEnvId(store, opts);
-      if (allRemainingTasks.length > 0) {
+      const nextTask = selectNextTaskAfterRemoval(allRemainingTasks);
+      if (nextTask) {
         await switchToNextTask({
           store,
-          nextTask: allRemainingTasks[0],
+          nextTask,
           oldEnvId,
           useLayoutSwitch,
           loadTaskSessionsForTask,
