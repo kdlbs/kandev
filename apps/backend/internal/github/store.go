@@ -717,25 +717,38 @@ func (s *Store) UpdatePRWatchBranchIfSearching(ctx context.Context, id, branch s
 		return tx.Commit()
 	}
 
-	var siblingID string
+	var probe int // existence probe only; value unused
 	err = tx.QueryRowContext(ctx,
-		`SELECT id FROM github_pr_watches
+		`SELECT 1 FROM github_pr_watches
 		 WHERE session_id = ? AND repository_id = ? AND branch = ? AND id <> ?`,
-		sessionID, repositoryID, branch, id).Scan(&siblingID)
+		sessionID, repositoryID, branch, id).Scan(&probe)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	if err == nil {
-		if _, delErr := tx.ExecContext(ctx,
-			`DELETE FROM github_pr_watches WHERE id = ? AND pr_number = 0`, id); delErr != nil {
-			return delErr
-		}
-		return tx.Commit()
+		return dropSourceAndCommit(ctx, tx, id)
 	}
 
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE github_pr_watches SET branch = ?, updated_at = ? WHERE id = ? AND pr_number = 0`,
 		branch, time.Now().UTC(), id); err != nil {
+		// TOCTOU: a concurrent CreatePRWatch may have inserted a sibling
+		// row for the destination triple between our existence probe and
+		// this UPDATE. SQLite rejects with UNIQUE — treat it as the same
+		// collision case we just handled above and drop the source row.
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return dropSourceAndCommit(ctx, tx, id)
+		}
+		return err
+	}
+	return tx.Commit()
+}
+
+// dropSourceAndCommit removes a still-searching source watch (pr_number=0)
+// whose destination branch is already owned by a sibling row, then commits.
+func dropSourceAndCommit(ctx context.Context, tx *sql.Tx, id string) error {
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM github_pr_watches WHERE id = ? AND pr_number = 0`, id); err != nil {
 		return err
 	}
 	return tx.Commit()

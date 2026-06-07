@@ -174,6 +174,50 @@ func TestUpdatePRWatchBranchIfSearching_CollidesWithSibling_DropsSource(t *testi
 	}
 }
 
+// TestUpdatePRWatchBranchIfSearching_CollidesWithSiblingHasPR_DropsSource
+// exercises the realistic race: the sibling has already discovered its PR
+// (pr_number != 0) when the still-searching source tries to migrate onto
+// the same branch. Source must be deleted, sibling row (including its PR
+// number) must survive untouched.
+func TestUpdatePRWatchBranchIfSearching_CollidesWithSiblingHasPR_DropsSource(t *testing.T) {
+	_, svc, _, store := setupPollerTest(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-1", false)
+
+	source, err := svc.CreatePRWatch(ctx, "session-1", "task-1", "repo-1", "owner", "repo", 0, "feature/A")
+	if err != nil {
+		t.Fatalf("create source watch: %v", err)
+	}
+	sibling, err := svc.CreatePRWatch(ctx, "session-1", "task-1", "repo-1", "owner", "repo", 0, "feature/B")
+	if err != nil {
+		t.Fatalf("create sibling watch: %v", err)
+	}
+	if err := store.UpdatePRWatchPRNumber(ctx, sibling.ID, 99); err != nil {
+		t.Fatalf("mark sibling as found: %v", err)
+	}
+
+	if err := svc.UpdatePRWatchBranchIfSearching(ctx, source.ID, "feature/B"); err != nil {
+		t.Fatalf("UpdatePRWatchBranchIfSearching must not error when sibling owns branch with active PR: %v", err)
+	}
+
+	all, err := store.ListPRWatchesBySession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("list watches: %v", err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("expected source watch dropped, sibling preserved; got %d remaining", len(all))
+	}
+	if all[0].ID != sibling.ID {
+		t.Fatalf("expected sibling %q to survive, got %q", sibling.ID, all[0].ID)
+	}
+	if all[0].Branch != "feature/B" {
+		t.Errorf("sibling branch must be untouched, got %q", all[0].Branch)
+	}
+	if all[0].PRNumber != 99 {
+		t.Errorf("sibling PR number must be preserved (99), got %d", all[0].PRNumber)
+	}
+}
+
 // TestUpdatePRWatchBranchIfSearching_PRAlreadyFound_NoOp preserves the
 // existing "searching" guard: a watch that already found its PR
 // (pr_number != 0) must not have its branch overwritten.
