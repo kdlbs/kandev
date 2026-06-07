@@ -874,6 +874,7 @@ func registerHealthRoutes(p routeParams) {
 		5*time.Minute,
 	)
 	healthSvc := health.NewService(p.log,
+		health.NewGitExecutableChecker(),
 		githubChecker,
 		health.NewAgentChecker(p.agentSettingsController),
 		osLimitsChecker,

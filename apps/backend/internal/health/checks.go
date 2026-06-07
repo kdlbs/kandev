@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os/exec"
 	"time"
 )
 
@@ -113,6 +114,41 @@ func rateLimitMessage(status GitHubRateLimitStatus) string {
 		return "PR/issue checks are paused until the limit resets."
 	}
 	return fmt.Sprintf("PR/issue checks are paused; resets in %s.", wait)
+}
+
+// GitExecutableChecker checks whether the host git executable is available.
+type GitExecutableChecker struct {
+	lookPath func(string) (string, error)
+}
+
+// NewGitExecutableChecker creates a checker for the required host git binary.
+func NewGitExecutableChecker() *GitExecutableChecker {
+	return &GitExecutableChecker{lookPath: exec.LookPath}
+}
+
+// Name returns the user-facing label for this check.
+func (c *GitExecutableChecker) Name() string { return "Git executable" }
+
+// Category returns the issue category this checker emits issues under.
+func (c *GitExecutableChecker) Category() string { return "system_requirements" }
+
+func (c *GitExecutableChecker) Check(_ context.Context) []Issue {
+	lookPath := c.lookPath
+	if lookPath == nil {
+		lookPath = exec.LookPath
+	}
+	if _, err := lookPath("git"); err == nil {
+		return nil
+	}
+	return []Issue{{
+		ID:       "git_executable_missing",
+		Category: c.Category(),
+		Title:    "Git executable is required",
+		Message:  "Install Git and ensure the git executable is available on PATH.",
+		Severity: SeverityError,
+		FixURL:   "/settings/system/status",
+		FixLabel: "View system status",
+	}}
 }
 
 // AgentDiscoveryProvider abstracts the agent discovery check.

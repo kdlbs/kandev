@@ -1,6 +1,22 @@
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 
+const missingGitHealth = {
+  healthy: false,
+  issues: [
+    {
+      id: "git_executable_missing",
+      category: "system_requirements",
+      title: "Git executable is required",
+      message: "Install Git and ensure the git executable is available on PATH.",
+      severity: "error",
+      fix_url: "/settings/system/status",
+      fix_label: "View system status",
+    },
+  ],
+  checks: [],
+};
+
 test.describe("Kanban topbar utilities", () => {
   // Post-overhaul: Settings is no longer a topbar link/dropdown. It lives behind
   // the AppSidebar footer gear, which toggles a full-height settings takeover
@@ -99,5 +115,34 @@ test.describe("Kanban topbar utilities", () => {
 
     await expect(testPage.getByText("Inotify instances limit nearly exhausted")).toBeVisible();
     await expect(testPage.getByRole("button", { name: "View system status" })).toBeVisible();
+  });
+
+  test("missing git executable appears in the homepage health dialog", async ({
+    testPage,
+    backend,
+  }) => {
+    await testPage.setViewportSize({ width: 1280, height: 800 });
+
+    await testPage.route(`${backend.baseUrl}/api/v1/system/health`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(missingGitHealth),
+      }),
+    );
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    const issueButton = testPage.getByRole("button", { name: "Setup Issues" });
+    await expect(issueButton).toBeVisible();
+    await issueButton.click();
+
+    const dialog = testPage.getByRole("dialog", { name: "Setup Issues" });
+    await expect(dialog.getByText("Git executable is required")).toBeVisible();
+    await expect(
+      dialog.getByText("Install Git and ensure the git executable is available on PATH."),
+    ).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "View system status" })).toBeVisible();
   });
 });
