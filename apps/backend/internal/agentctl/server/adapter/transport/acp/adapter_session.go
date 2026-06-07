@@ -493,10 +493,12 @@ func splitReasoningModelID(modelID string, options []streams.ConfigOption) (stri
 	if !hasReasoningOption {
 		return "", "", false
 	}
-	baseModelID, reasoningEffort, ok := strings.Cut(modelID, "/")
-	if !ok || baseModelID == "" || reasoningEffort == "" {
+	slashIndex := strings.LastIndex(modelID, "/")
+	if slashIndex < 1 || slashIndex == len(modelID)-1 {
 		return "", "", false
 	}
+	baseModelID := modelID[:slashIndex]
+	reasoningEffort := modelID[slashIndex+1:]
 	return baseModelID, reasoningEffort, true
 }
 

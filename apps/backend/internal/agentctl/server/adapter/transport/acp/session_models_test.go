@@ -293,11 +293,58 @@ func TestEmitSetModelEvent_RewritesSplitReasoningOptions(t *testing.T) {
 	if len(ev.ConfigOptions) != 2 {
 		t.Fatalf("ConfigOptions len = %d, want 2", len(ev.ConfigOptions))
 	}
-	if ev.ConfigOptions[0].CurrentValue != "gpt-5.5" {
-		t.Errorf("model option CurrentValue = %q, want %q", ev.ConfigOptions[0].CurrentValue, "gpt-5.5")
+	for _, opt := range ev.ConfigOptions {
+		switch opt.ID {
+		case "model":
+			if opt.CurrentValue != "gpt-5.5" {
+				t.Errorf("model option CurrentValue = %q, want %q", opt.CurrentValue, "gpt-5.5")
+			}
+		case "reasoning_effort":
+			if opt.CurrentValue != "high" {
+				t.Errorf("reasoning option CurrentValue = %q, want %q", opt.CurrentValue, "high")
+			}
+		}
 	}
-	if ev.ConfigOptions[1].CurrentValue != "high" {
-		t.Errorf("reasoning option CurrentValue = %q, want %q", ev.ConfigOptions[1].CurrentValue, "high")
+}
+
+func TestEmitSetModelEvent_RewritesSplitReasoningOptionsWithSlashInBaseModel(t *testing.T) {
+	a := newTestAdapter()
+
+	cachedModels := []acp.ModelInfo{
+		{ModelId: "vendor/gpt-5.5/medium", Name: "Vendor GPT-5.5 (medium)"},
+		{ModelId: "vendor/gpt-5.5/high", Name: "Vendor GPT-5.5 (high)"},
+	}
+	cachedConfig := []streams.ConfigOption{
+		{Type: "select", ID: "model", Category: "model", Name: "Model", CurrentValue: "vendor/gpt-5.5"},
+		{
+			Type:         "select",
+			ID:           "reasoning_effort",
+			Category:     "thought_level",
+			Name:         "Reasoning Effort",
+			CurrentValue: "medium",
+		},
+	}
+
+	a.emitSetModelEvent("sess-1", "vendor/gpt-5.5/high", cachedModels, cachedConfig)
+
+	ev := findSessionModelsEvent(t, drainEvents(a))
+	if ev.CurrentModelID != "vendor/gpt-5.5/high" {
+		t.Errorf("CurrentModelID = %q, want %q", ev.CurrentModelID, "vendor/gpt-5.5/high")
+	}
+	if len(ev.ConfigOptions) != 2 {
+		t.Fatalf("ConfigOptions len = %d, want 2", len(ev.ConfigOptions))
+	}
+	for _, opt := range ev.ConfigOptions {
+		switch opt.ID {
+		case "model":
+			if opt.CurrentValue != "vendor/gpt-5.5" {
+				t.Errorf("model option CurrentValue = %q, want %q", opt.CurrentValue, "vendor/gpt-5.5")
+			}
+		case "reasoning_effort":
+			if opt.CurrentValue != "high" {
+				t.Errorf("reasoning option CurrentValue = %q, want %q", opt.CurrentValue, "high")
+			}
+		}
 	}
 }
 
