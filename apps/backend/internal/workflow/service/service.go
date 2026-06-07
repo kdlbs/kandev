@@ -518,17 +518,18 @@ func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, 
 	// Create each step with remapped events.
 	for _, sp := range pw.Steps {
 		step := &models.WorkflowStep{
-			ID:                    posToID[sp.Position],
-			WorkflowID:            wf.ID,
-			Name:                  sp.Name,
-			Position:              sp.Position,
-			Color:                 sp.Color,
-			Prompt:                sp.Prompt,
-			Events:                models.ConvertPositionToStepID(sp.Events, posToID),
-			IsStartStep:           sp.IsStartStep,
-			ShowInCommandPanel:    sp.ShowInCommandPanel,
-			AllowManualMove:       sp.AllowManualMove,
-			AutoArchiveAfterHours: sp.AutoArchiveAfterHours,
+			ID:                        posToID[sp.Position],
+			WorkflowID:                wf.ID,
+			Name:                      sp.Name,
+			Position:                  sp.Position,
+			Color:                     sp.Color,
+			Prompt:                    sp.Prompt,
+			Events:                    models.ConvertPositionToStepID(sp.Events, posToID),
+			IsStartStep:               sp.IsStartStep,
+			ShowInCommandPanel:        sp.ShowInCommandPanel,
+			AllowManualMove:           sp.AllowManualMove,
+			AutoArchiveAfterHours:     sp.AutoArchiveAfterHours,
+			AutoAdvanceRequiresSignal: sp.AutoAdvanceRequiresSignal,
 		}
 		// Match step-level agent profile if present.
 		if sp.AgentProfile != nil && s.matchProfile != nil {

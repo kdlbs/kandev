@@ -249,16 +249,43 @@ export function TurnCompleteSelect({
           <HelpTip text="Turn off plan mode after the agent finishes this step." />
         </div>
       )}
+      <ExplicitCompletionToggle step={step} onUpdate={onUpdate} readOnly={readOnly} />
     </div>
   );
 }
 
-// ADR 0015 explicit-completion-signal UI (the "Wait for agent completion
-// signal" toggle) is deferred to a follow-up PR. The backend column ships
-// here so workflow steps can opt in via the MCP
-// `update_workflow_step_kandev` tool. The pipeline-editor toggle needs its
-// own iteration to avoid an unrelated E2E flake in
-// `workflow-agent-profile.spec.ts` caused by additional UI shifting the
-// Radix select dropdown into a sibling tooltip's hover path. The workflow
-// import/export YAML also needs to be extended to serialize this flag in
-// the follow-up so the toggle setting round-trips through export.
+// --- ExplicitCompletionToggle ---
+// ADR 0015: when checked, on_turn_complete transitions only fire after the
+// agent calls the `step_complete_kandev` MCP tool. Bare turn-end leaves the
+// task in WAITING_FOR_INPUT until the signal arrives.
+
+type ExplicitCompletionToggleProps = {
+  step: WorkflowStep;
+  onUpdate: (updates: Partial<WorkflowStep>) => void;
+  readOnly: boolean;
+};
+
+export function ExplicitCompletionToggle({
+  step,
+  onUpdate,
+  readOnly,
+}: ExplicitCompletionToggleProps) {
+  return (
+    <div className="flex items-center gap-2 pt-1" data-testid={`${step.id}-require-signal-row`}>
+      <Checkbox
+        id={`${step.id}-require-signal`}
+        data-testid={`${step.id}-require-signal-checkbox`}
+        checked={step.auto_advance_requires_signal === true}
+        onCheckedChange={(c) => {
+          if (readOnly) return;
+          onUpdate({ auto_advance_requires_signal: c === true });
+        }}
+        disabled={readOnly}
+      />
+      <Label htmlFor={`${step.id}-require-signal`} className="text-sm">
+        Wait for agent completion signal
+      </Label>
+      <HelpTip text="Only auto-advance once the agent calls step_complete_kandev. Otherwise turn-end is treated as completion." />
+    </div>
+  );
+}

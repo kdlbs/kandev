@@ -42,16 +42,17 @@ type WorkflowPortable struct {
 
 // StepPortable is a workflow step without instance-specific fields.
 type StepPortable struct {
-	Name                  string                `json:"name" yaml:"name"`
-	Position              int                   `json:"position" yaml:"position"`
-	Color                 string                `json:"color" yaml:"color"`
-	Prompt                string                `json:"prompt,omitempty" yaml:"prompt,omitempty"`
-	Events                StepEvents            `json:"events" yaml:"events"`
-	IsStartStep           bool                  `json:"is_start_step" yaml:"is_start_step"`
-	ShowInCommandPanel    bool                  `json:"show_in_command_panel" yaml:"show_in_command_panel"`
-	AllowManualMove       bool                  `json:"allow_manual_move" yaml:"allow_manual_move"`
-	AutoArchiveAfterHours int                   `json:"auto_archive_after_hours,omitempty" yaml:"auto_archive_after_hours,omitempty"`
-	AgentProfile          *AgentProfilePortable `json:"agent_profile,omitempty" yaml:"agent_profile,omitempty"`
+	Name                      string                `json:"name" yaml:"name"`
+	Position                  int                   `json:"position" yaml:"position"`
+	Color                     string                `json:"color" yaml:"color"`
+	Prompt                    string                `json:"prompt,omitempty" yaml:"prompt,omitempty"`
+	Events                    StepEvents            `json:"events" yaml:"events"`
+	IsStartStep               bool                  `json:"is_start_step" yaml:"is_start_step"`
+	ShowInCommandPanel        bool                  `json:"show_in_command_panel" yaml:"show_in_command_panel"`
+	AllowManualMove           bool                  `json:"allow_manual_move" yaml:"allow_manual_move"`
+	AutoArchiveAfterHours     int                   `json:"auto_archive_after_hours,omitempty" yaml:"auto_archive_after_hours,omitempty"`
+	AgentProfile              *AgentProfilePortable `json:"agent_profile,omitempty" yaml:"agent_profile,omitempty"`
+	AutoAdvanceRequiresSignal bool                  `json:"auto_advance_requires_signal,omitempty" yaml:"auto_advance_requires_signal,omitempty"`
 }
 
 // BuildWorkflowExport builds a portable WorkflowExport from domain models.
@@ -79,15 +80,16 @@ func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep, resol
 	}
 	for _, s := range steps {
 		sp := StepPortable{
-			Name:                  s.Name,
-			Position:              s.Position,
-			Color:                 s.Color,
-			Prompt:                s.Prompt,
-			Events:                convertStepIDToPosition(s.Events, idToPos),
-			IsStartStep:           s.IsStartStep,
-			ShowInCommandPanel:    s.ShowInCommandPanel,
-			AllowManualMove:       s.AllowManualMove,
-			AutoArchiveAfterHours: s.AutoArchiveAfterHours,
+			Name:                      s.Name,
+			Position:                  s.Position,
+			Color:                     s.Color,
+			Prompt:                    s.Prompt,
+			Events:                    convertStepIDToPosition(s.Events, idToPos),
+			IsStartStep:               s.IsStartStep,
+			ShowInCommandPanel:        s.ShowInCommandPanel,
+			AllowManualMove:           s.AllowManualMove,
+			AutoArchiveAfterHours:     s.AutoArchiveAfterHours,
+			AutoAdvanceRequiresSignal: s.AutoAdvanceRequiresSignal,
 		}
 		if resolveProfile != nil && s.AgentProfileID != "" {
 			sp.AgentProfile = resolveProfile(s.AgentProfileID)
