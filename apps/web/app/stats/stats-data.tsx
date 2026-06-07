@@ -71,7 +71,10 @@ export function useStatsSections(workspaceId: string | undefined, range: RangeKe
     if (!workspaceId) return;
     const controller = new AbortController();
 
-    const opts = { init: { signal: controller.signal } };
+    // cache: "no-store" matches the previous useStatsData behaviour — Gin emits
+    // no Cache-Control headers, so without this the browser is free to serve a
+    // heuristically-cached response when the user navigates back to the page.
+    const opts = { cache: "no-store" as const, init: { signal: controller.signal } };
     const apply = <K extends keyof StatsSections>(key: K, next: StatsSections[K]) => {
       if (controller.signal.aborted) return;
       setSections((prev) => ({ ...prev, [key]: next }));
@@ -107,7 +110,12 @@ export function readyGlobal(sections: StatsSections): GlobalStatsDTO | null {
   return sections.global.kind === "ready" ? sections.global.data : null;
 }
 
-export function anyError(sections: StatsSections): string | null {
+// firstError returns the message of the first errored section in object-iteration
+// order (insertion order: global → tasks → daily → completed → agents → repos →
+// git). Callers use it only as a boolean "any section failed?" signal driving
+// the header's "Failed to load stats" subtitle, so the deterministic ordering
+// is fine — surface a specific section's error inside its own panel instead.
+export function firstError(sections: StatsSections): string | null {
   for (const key of Object.keys(sections) as (keyof StatsSections)[]) {
     const s = sections[key];
     if (s.kind === "error") return s.message;

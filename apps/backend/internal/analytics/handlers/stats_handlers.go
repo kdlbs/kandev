@@ -83,14 +83,20 @@ func (h *StatsHandlers) httpGetTaskStats(c *gin.Context) {
 	if !ok {
 		return
 	}
-	stats, err := h.repo.GetTaskStats(c.Request.Context(), workspaceID, start, taskStatsLimit)
+	// Probe one row past the page size so we can distinguish "exactly N rows"
+	// from "N rows visible, more after" without a separate COUNT query.
+	stats, err := h.repo.GetTaskStats(c.Request.Context(), workspaceID, start, taskStatsLimit+1)
 	if err != nil {
 		h.fail(c, workspaceID, "task stats", err)
 		return
 	}
+	hasMore := len(stats) > taskStatsLimit
+	if hasMore {
+		stats = stats[:taskStatsLimit]
+	}
 	c.JSON(http.StatusOK, taskStatsResponse{
 		TaskStats:        taskStatsToDTOs(stats),
-		TaskStatsHasMore: len(stats) >= taskStatsLimit,
+		TaskStatsHasMore: hasMore,
 	})
 }
 

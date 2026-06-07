@@ -50,8 +50,8 @@ import {
   type RangeKey,
 } from "./stats-utils";
 import {
-  anyError,
   composeStatsResponse,
+  firstError,
   flattenTaskStats,
   readyGlobal,
   type SectionStatus,
@@ -182,10 +182,14 @@ function OverviewPanel({
   global: SectionStatus<GlobalStatsDTO>;
   git: SectionStatus<GitStatsDTO>;
 }) {
-  if (global.kind === "loading" || git.kind === "loading") return <OverviewCardsSkeleton />;
+  if (global.kind === "loading") return <OverviewCardsSkeleton />;
   if (global.kind === "error") return <ErrorPanel title="Overview" message={global.message} />;
-  if (git.kind === "error") return <ErrorPanel title="Overview" message={git.message} />;
-  return <OverviewCards global={global.data} git_stats={git.data} />;
+  // Render global cards as soon as `global` is ready; `git` is independent and
+  // its failure must not blank the tasks/sessions/turns summary the user can
+  // already see. OverviewCards.git_stats is optional → falls back to the
+  // averages card when git data is missing.
+  const gitData = git.kind === "ready" ? git.data : undefined;
+  return <OverviewCards global={global.data} git_stats={gitData} />;
 }
 
 function CompletedPanel({ status }: { status: SectionStatus<CompletedTaskActivityDTO[]> }) {
@@ -376,7 +380,7 @@ export function StatsPageClient({ workspaceId, activeRange, initialError }: Stat
   const rangeLabel = getRangeLabel(range);
 
   const sections = useStatsSections(workspaceId, range);
-  const fetchError = anyError(sections);
+  const fetchError = firstError(sections);
   const globalReady = readyGlobal(sections);
   const fullStats = composeStatsResponse(sections);
 

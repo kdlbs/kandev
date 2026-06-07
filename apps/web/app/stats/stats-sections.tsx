@@ -88,7 +88,7 @@ function TimeSpentCard({ global }: { global: GlobalStats }) {
   );
 }
 
-function GitOrAveragesCard({ global, git_stats }: { global: GlobalStats; git_stats: GitStats }) {
+function GitOrAveragesCard({ global, git_stats }: { global: GlobalStats; git_stats?: GitStats }) {
   const hasGitStats =
     git_stats && (git_stats.total_commits > 0 || git_stats.total_files_changed > 0);
 
@@ -199,7 +199,13 @@ function SignalCard({ global }: { global: GlobalStats }) {
   );
 }
 
-export function OverviewCards({ global, git_stats }: { global: GlobalStats; git_stats: GitStats }) {
+export function OverviewCards({
+  global,
+  git_stats,
+}: {
+  global: GlobalStats;
+  git_stats?: GitStats;
+}) {
   return (
     <div id="overview" className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 scroll-mt-24">
       <TasksCard global={global} />
