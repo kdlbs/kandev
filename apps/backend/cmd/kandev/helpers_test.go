@@ -123,14 +123,14 @@ func TestAppendSessionStateMessage_OmitsEmptyTaskEnvironmentID(t *testing.T) {
 func TestExternalMCPOpenMiddleware_AllowsLoopbackAndRemote(t *testing.T) {
 	r := setupExternalMCPAccessRouter()
 
-	for name, remoteAddr := range map[string]string{
-		"remote":   "203.0.113.10:4321",
-		"loopback": "127.0.0.1:4321",
+	for _, tc := range []struct{ name, remoteAddr string }{
+		{"loopback", "127.0.0.1:4321"},
+		{"remote", "203.0.113.10:4321"},
 	} {
-		t.Run(name, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
 			req := httptest.NewRequest("GET", "/mcp", nil)
-			req.RemoteAddr = remoteAddr
+			req.RemoteAddr = tc.remoteAddr
 			r.ServeHTTP(w, req)
 
 			if w.Code != http.StatusOK {
