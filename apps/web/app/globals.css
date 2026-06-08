@@ -192,6 +192,10 @@
     scrollbar-width: thin;
     scrollbar-color: var(--scrollbar-thumb) transparent;
   }
+  html,
+  body {
+    @apply h-full overflow-hidden overscroll-none;
+  }
   body {
     @apply bg-background text-foreground;
   }

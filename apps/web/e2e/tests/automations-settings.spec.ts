@@ -227,6 +227,32 @@ test.describe("Automations settings page", () => {
     });
   });
 
+  test("create page keeps scrolling inside the settings pane", async ({ testPage, seedData }) => {
+    const automations = new AutomationsPage(testPage, seedData.workspaceId);
+    await automations.gotoNew();
+
+    const rootScrollStyles = await testPage.evaluate(() => ({
+      htmlOverflowY: getComputedStyle(document.documentElement).overflowY,
+      htmlOverscrollY: getComputedStyle(document.documentElement).overscrollBehaviorY,
+      bodyOverflowY: getComputedStyle(document.body).overflowY,
+      bodyOverscrollY: getComputedStyle(document.body).overscrollBehaviorY,
+    }));
+    expect(rootScrollStyles).toEqual({
+      htmlOverflowY: "hidden",
+      htmlOverscrollY: "none",
+      bodyOverflowY: "hidden",
+      bodyOverscrollY: "none",
+    });
+
+    const settingsScroller = testPage.getByTestId("settings-scroll-container");
+    await expect(settingsScroller).toBeVisible();
+    await expect(settingsScroller).toHaveCSS("overflow-y", "auto");
+    await expect(settingsScroller).toHaveCSS("overscroll-behavior-y", "contain");
+
+    await testPage.mouse.wheel(0, 3000);
+    await expect.poll(() => testPage.evaluate(() => window.scrollY), { timeout: 5_000 }).toBe(0);
+  });
+
   test("enable/disable toggle on list page", async ({ testPage, seedData }) => {
     const automations = new AutomationsPage(testPage, seedData.workspaceId);
 

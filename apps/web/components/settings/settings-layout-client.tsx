@@ -116,7 +116,10 @@ function SettingsShell({
         />
         {/* Scroll the content, not the topbar: min-h-0 lets this flex child
             shrink below its content height so overflow-y-auto can take effect. */}
-        <div className="flex min-w-0 min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 pt-0 pb-20">
+        <div
+          data-testid="settings-scroll-container"
+          className="flex min-w-0 min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4 pt-0 pb-20"
+        >
           {children}
         </div>
       </main>
