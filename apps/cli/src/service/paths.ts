@@ -43,7 +43,7 @@ export type LauncherInfo = {
   cliEntry: string;
   /** Best-guess of how kandev was installed. Used to seed env vars. */
   kind: LauncherKind;
-  /** KANDEV_BUNDLE_DIR if set (Homebrew sets this). */
+  /** KANDEV_BUNDLE_DIR if set (Homebrew and local checkout installs set this). */
   bundleDir?: string;
   /** KANDEV_VERSION if set (Homebrew sets this). */
   version?: string;

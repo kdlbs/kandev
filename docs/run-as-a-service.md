@@ -33,10 +33,13 @@ Useful targets:
 make service-install          # user service from the current checkout
 make service-install PORT=3000
 make service-install HOME_DIR=/path/to/kandev-home
-make service-install-system   # system service; only the install step uses sudo
+make service-install NO_BOOT_START=1
+make service-install-system   # system service install; other targets below use the user service
 make service-status
 make service-logs
 make service-logs-follow
+make service-start
+make service-stop
 make service-restart
 make service-uninstall
 make service-config

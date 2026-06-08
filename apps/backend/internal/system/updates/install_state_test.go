@@ -144,8 +144,14 @@ func TestService_GetLocalBundleServiceDisablesApply(t *testing.T) {
 	if resp.ApplySupported {
 		t.Fatalf("ApplySupported=true for local bundle service")
 	}
+	if resp.ApplyUnsupportedReason == "" {
+		t.Fatalf("expected unsupported reason for local bundle service")
+	}
 	if !hasString(resp.ManualCommands, "kandev service install") {
 		t.Fatalf("manual commands = %v, want service install command", resp.ManualCommands)
+	}
+	if !hasString(resp.ManualCommands, "kandev service restart") {
+		t.Fatalf("manual commands = %v, want service restart command", resp.ManualCommands)
 	}
 }
 

@@ -80,10 +80,13 @@ help:
 	@echo "  service-status           Show current user service status"
 	@echo "  service-logs             Show current user service logs"
 	@echo "  service-logs-follow      Follow current user service logs"
+	@echo "  service-start            Start current user service"
+	@echo "  service-stop             Stop current user service"
 	@echo "  service-restart          Restart current user service"
 	@echo "  service-uninstall        Uninstall current user service"
 	@echo "  service-config           Show service launcher/config paths"
 	@echo "  service-install PORT=3000 HOME_DIR=/path  Optional install overrides"
+	@echo "  service-install NO_BOOT_START=1  Skip Linux user-service boot hint"
 	@echo ""
 	@echo "Build Commands:"
 	@echo "  build            Build backend and web app"
@@ -218,9 +221,12 @@ service-bundle: install build
 	$(call phase,Packaging Service Bundle)
 	@scripts/release/package-web.sh
 	@scripts/release/package-cli.sh
-	@$(RMDIR) $(SERVICE_BUNDLE_DIR)/bin
-	@mkdir -p $(SERVICE_BUNDLE_DIR)/bin
-	@cp $(BACKEND_DIR)/bin/kandev $(BACKEND_DIR)/bin/agentctl $(BACKEND_DIR)/bin/agentctl-linux-amd64 $(SERVICE_BUNDLE_DIR)/bin/
+	@test -n "$(SERVICE_BUNDLE_DIR)" || { echo "SERVICE_BUNDLE_DIR is empty; aborting."; exit 1; }
+	@test "$(SERVICE_BUNDLE_DIR)" != "/" || { echo "SERVICE_BUNDLE_DIR must not be /; aborting."; exit 1; }
+	@test -f "$(BACKEND_DIR)/bin/agentctl-linux-amd64" || $(MAKE) -C $(BACKEND_DIR) build-agentctl-linux
+	@$(RMDIR) "$(SERVICE_BUNDLE_DIR)/bin"
+	@mkdir -p "$(SERVICE_BUNDLE_DIR)/bin"
+	@cp "$(BACKEND_DIR)/bin/kandev" "$(BACKEND_DIR)/bin/agentctl" "$(BACKEND_DIR)/bin/agentctl-linux-amd64" "$(SERVICE_BUNDLE_DIR)/bin/"
 	@scripts/release/package-bundle.sh
 	$(call success,Service bundle packaged at $(SERVICE_BUNDLE_DIR))
 
