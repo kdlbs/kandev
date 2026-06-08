@@ -183,7 +183,7 @@ function MinimalWorkflowStepper({
     >
       <div
         data-testid={`workflow-step-${current.name}`}
-        aria-current="step"
+        aria-current={currentIndex >= 0 ? "step" : undefined}
         className="flex min-w-0 items-center gap-1.5 text-xs"
       >
         <StepCircleIndicator isCurrent isCompleted={false} />

@@ -67,7 +67,8 @@ describe("WorkflowStepper", () => {
     collapsedMock.mockReturnValue(true);
     render(<WorkflowStepper steps={STEPS} currentStepId={null} />);
 
-    expect(screen.getByTestId("workflow-step-Spec")).toBeTruthy();
+    // Fallback step isn't the real current step, so it must not claim aria-current.
+    expect(screen.getByTestId("workflow-step-Spec").getAttribute("aria-current")).toBeNull();
     expect(screen.getByText("1/3")).toBeTruthy();
   });
 
