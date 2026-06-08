@@ -103,3 +103,68 @@ func TestPreparePromptRequest_UsesDefaultAgentAndModelAsPairWhenModelIsUnset(t *
 		t.Fatalf("Model = %q, want %q", req.Model, "opencode-go/deepseek-v4-flash")
 	}
 }
+
+func TestPreparePromptRequest_UsesDefaultAgentWhenAgentIDIsUnset(t *testing.T) {
+	t.Parallel()
+
+	svc := NewService(&fakeRepository{agents: map[string]*models.UtilityAgent{
+		"custom": {
+			ID:      "custom",
+			Prompt:  "Do {{UserPrompt}}",
+			AgentID: "",
+			Model:   "custom-model",
+		},
+	}})
+
+	req, err := svc.PreparePromptRequest(
+		context.Background(),
+		"custom",
+		&template.Context{UserPrompt: "fix the bug"},
+		&DefaultUtilitySettings{
+			AgentID: "default-acp",
+			Model:   "default-model",
+		},
+		false,
+	)
+	if err != nil {
+		t.Fatalf("PreparePromptRequest() error = %v", err)
+	}
+
+	if req.AgentCLI != "default-acp" {
+		t.Fatalf("AgentCLI = %q, want %q", req.AgentCLI, "default-acp")
+	}
+	if req.Model != "custom-model" {
+		t.Fatalf("Model = %q, want %q", req.Model, "custom-model")
+	}
+}
+
+func TestPreparePromptRequest_PreservesConfiguredAgentAndModelWithoutDefaults(t *testing.T) {
+	t.Parallel()
+
+	svc := NewService(&fakeRepository{agents: map[string]*models.UtilityAgent{
+		"custom": {
+			ID:      "custom",
+			Prompt:  "Do {{UserPrompt}}",
+			AgentID: "custom-acp",
+			Model:   "custom-model",
+		},
+	}})
+
+	req, err := svc.PreparePromptRequest(
+		context.Background(),
+		"custom",
+		&template.Context{UserPrompt: "fix the bug"},
+		nil,
+		false,
+	)
+	if err != nil {
+		t.Fatalf("PreparePromptRequest() error = %v", err)
+	}
+
+	if req.AgentCLI != "custom-acp" {
+		t.Fatalf("AgentCLI = %q, want %q", req.AgentCLI, "custom-acp")
+	}
+	if req.Model != "custom-model" {
+		t.Fatalf("Model = %q, want %q", req.Model, "custom-model")
+	}
+}
