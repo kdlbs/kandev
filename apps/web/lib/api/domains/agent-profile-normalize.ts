@@ -32,6 +32,16 @@ function pickEnvVars(raw: RawProfile): ProfileEnvVar[] {
   return Array.isArray(value) ? (value as ProfileEnvVar[]) : [];
 }
 
+function pickConfigOptions(raw: RawProfile): Record<string, string> | undefined {
+  const value = raw.configOptions ?? raw.config_options;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const entries = Object.entries(value).filter(
+    (entry): entry is [string, string] =>
+      typeof entry[0] === "string" && typeof entry[1] === "string" && entry[0] !== "",
+  );
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
 /**
  * Convert a kanban snake_case payload (or a partially-camelCased one) into
  * the canonical `AgentProfile`. Office-orchestration fields are left
@@ -46,6 +56,7 @@ export function normalizeAgentProfile(raw: unknown): AgentProfile {
     agentDisplayName: pickString(profile, "agentDisplayName", "agent_display_name"),
     model: pickString(profile, "model", "model"),
     mode: (profile.mode as string | undefined) ?? undefined,
+    configOptions: pickConfigOptions(profile),
     allowIndexing: pickBool(profile, "allowIndexing", "allow_indexing"),
     autoApprove: pickBool(profile, "autoApprove", "auto_approve"),
     cliFlags: pickFlags(profile),
@@ -57,6 +68,16 @@ export function normalizeAgentProfile(raw: unknown): AgentProfile {
   };
 }
 
+function setPayloadField<K extends keyof AgentProfilePayload>(
+  payload: Partial<AgentProfilePayload>,
+  key: K,
+  value: AgentProfilePayload[K] | undefined,
+) {
+  if (value !== undefined) {
+    payload[key] = value;
+  }
+}
+
 /**
  * Inverse of `normalizeAgentProfile` — convert the canonical shape back to
  * a snake_case wire payload for `POST/PATCH` to the kanban endpoints.
@@ -65,19 +86,20 @@ export function toAgentProfilePayload(
   profile: Partial<AgentProfile>,
 ): Partial<AgentProfilePayload> {
   const payload: Partial<AgentProfilePayload> = {};
-  if (profile.id !== undefined) payload.id = profile.id;
-  if (profile.name !== undefined) payload.name = profile.name;
-  if (profile.agentId !== undefined) payload.agent_id = profile.agentId;
-  if (profile.agentDisplayName !== undefined) payload.agent_display_name = profile.agentDisplayName;
-  if (profile.model !== undefined) payload.model = profile.model;
-  if (profile.mode !== undefined) payload.mode = profile.mode;
-  if (profile.allowIndexing !== undefined) payload.allow_indexing = profile.allowIndexing;
-  if (profile.autoApprove !== undefined) payload.auto_approve = profile.autoApprove;
-  if (profile.cliFlags !== undefined) payload.cli_flags = profile.cliFlags;
-  if (profile.envVars !== undefined) payload.env_vars = profile.envVars;
-  if (profile.cliPassthrough !== undefined) payload.cli_passthrough = profile.cliPassthrough;
-  if (profile.userModified !== undefined) payload.user_modified = profile.userModified;
-  if (profile.createdAt !== undefined) payload.created_at = profile.createdAt;
-  if (profile.updatedAt !== undefined) payload.updated_at = profile.updatedAt;
+  setPayloadField(payload, "id", profile.id);
+  setPayloadField(payload, "name", profile.name);
+  setPayloadField(payload, "agent_id", profile.agentId);
+  setPayloadField(payload, "agent_display_name", profile.agentDisplayName);
+  setPayloadField(payload, "model", profile.model);
+  setPayloadField(payload, "mode", profile.mode);
+  setPayloadField(payload, "config_options", profile.configOptions);
+  setPayloadField(payload, "allow_indexing", profile.allowIndexing);
+  setPayloadField(payload, "auto_approve", profile.autoApprove);
+  setPayloadField(payload, "cli_flags", profile.cliFlags);
+  setPayloadField(payload, "env_vars", profile.envVars);
+  setPayloadField(payload, "cli_passthrough", profile.cliPassthrough);
+  setPayloadField(payload, "user_modified", profile.userModified);
+  setPayloadField(payload, "created_at", profile.createdAt);
+  setPayloadField(payload, "updated_at", profile.updatedAt);
   return payload;
 }

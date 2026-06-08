@@ -30,6 +30,7 @@ export function toAgentProfilePatch(patch: Partial<ProfileFormData>): Partial<Ag
   if (patch.name !== undefined) next.name = patch.name;
   if (patch.model !== undefined) next.model = patch.model;
   if (patch.mode !== undefined) next.mode = patch.mode;
+  if (patch.config_options !== undefined) next.configOptions = patch.config_options;
   if (patch.allow_indexing !== undefined) next.allowIndexing = patch.allow_indexing;
   if (patch.auto_approve !== undefined) next.autoApprove = patch.auto_approve;
   if (patch.cli_passthrough !== undefined) next.cliPassthrough = patch.cli_passthrough;
@@ -169,6 +170,7 @@ export async function saveNewAgent(draftAgent: DraftAgent, callbacks: SaveAgentC
       name: profile.name,
       model: profile.model,
       mode: profile.mode,
+      config_options: profile.configOptions ?? {},
       ...permissionsToProfilePatch(profile),
       cli_passthrough: profile.cliPassthrough ?? false,
       cli_flags: profile.cliFlags ?? [],
@@ -224,6 +226,7 @@ async function saveExistingProfiles(
         name: profile.name,
         model: profile.model,
         mode: profile.mode,
+        config_options: profile.configOptions ?? {},
         ...permissionsToProfilePatch(profile),
         cli_passthrough: profile.cliPassthrough ?? false,
         cli_flags: profile.cliFlags ?? [],
@@ -242,6 +245,7 @@ async function saveExistingProfiles(
         name: profile.name,
         model: profile.model,
         mode: profile.mode,
+        config_options: profile.configOptions ?? {},
         ...permissionsToProfilePatch(profile),
         cli_passthrough: profile.cliPassthrough ?? false,
         cli_flags: profile.cliFlags ?? [],
@@ -309,9 +313,19 @@ export function isProfileDirty(draft: DraftProfile, saved?: AgentProfile): boole
     draft.name !== saved.name ||
     draft.model !== saved.model ||
     (draft.mode ?? "") !== (saved.mode ?? "") ||
+    !areConfigOptionsEqual(draft.configOptions, saved.configOptions) ||
     arePermissionsDirty(draft, saved) ||
     draft.cliPassthrough !== saved.cliPassthrough ||
     !areCLIFlagsEqual(draft.cliFlags ?? [], saved.cliFlags ?? []) ||
     !areEnvVarsEqual(draft.envVars, saved.envVars)
   );
+}
+
+function areConfigOptionsEqual(a?: Record<string, string>, b?: Record<string, string>): boolean {
+  const left = a ?? {};
+  const right = b ?? {};
+  const leftKeys = Object.keys(left).sort();
+  const rightKeys = Object.keys(right).sort();
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every((key, index) => key === rightKeys[index] && left[key] === right[key]);
 }

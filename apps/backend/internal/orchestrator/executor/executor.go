@@ -135,7 +135,7 @@ type AgentManagerClient interface {
 	// For other agents, this falls back to RestartAgentProcess.
 	ResetAgentContext(ctx context.Context, agentExecutionID string) error
 
-	// SetSessionModelBySessionID attempts an in-place model switch via ACP session/set_model.
+	// SetSessionModelBySessionID attempts an in-place model switch via ACP model selection.
 	// Returns an error if the agent doesn't support in-place model switching.
 	SetSessionModelBySessionID(ctx context.Context, sessionID, modelID string) error
 

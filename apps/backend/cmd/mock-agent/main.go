@@ -105,9 +105,10 @@ func (a *mockAgent) NewSession(_ context.Context, req acp.NewSessionRequest) (ac
 	go a.emitAvailableCommandsAfterDelay(sid)
 
 	return acp.NewSessionResponse{
-		SessionId: sid,
-		Models:    mockSessionModels(),
-		Modes:     mockSessionModes(),
+		SessionId:     sid,
+		Models:        mockSessionModels(),
+		Modes:         mockSessionModes(),
+		ConfigOptions: mockSessionConfigOptions(),
 	}, nil
 }
 
@@ -140,6 +141,52 @@ func mockSessionModes() *acp.SessionModeState {
 			{Id: "plan-mock", Name: "Plan Mock", Description: &planDesc},
 		},
 	}
+}
+
+func mockSessionConfigOptions() []acp.SessionConfigOption {
+	modelCat := acp.SessionConfigOptionCategoryModel
+	modeCat := acp.SessionConfigOptionCategoryMode
+	thoughtCat := acp.SessionConfigOptionCategoryThoughtLevel
+	return []acp.SessionConfigOption{
+		{Select: &acp.SessionConfigOptionSelect{
+			Category:     &modelCat,
+			CurrentValue: "mock-fast",
+			Id:           "model",
+			Name:         "Model",
+			Options: acp.SessionConfigSelectOptions{Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{
+				{Value: "mock-fast", Name: "Mock Fast", Description: ptr("Fast mock model for testing")},
+				{Value: "mock-smart", Name: "Mock Smart", Description: ptr("Smart mock model for testing")},
+			}},
+			Type: "select",
+		}},
+		{Select: &acp.SessionConfigOptionSelect{
+			Category:     &modeCat,
+			CurrentValue: "default",
+			Id:           "mode",
+			Name:         "Mode",
+			Options: acp.SessionConfigSelectOptions{Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{
+				{Value: "default", Name: "Default", Description: ptr("Default mock mode")},
+				{Value: "plan-mock", Name: "Plan Mock", Description: ptr("Plan-style mock mode for testing")},
+			}},
+			Type: "select",
+		}},
+		{Select: &acp.SessionConfigOptionSelect{
+			Category:     &thoughtCat,
+			CurrentValue: "medium",
+			Id:           "effort",
+			Name:         "Effort",
+			Options: acp.SessionConfigSelectOptions{Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{
+				{Value: "low", Name: "Low"},
+				{Value: "medium", Name: "Medium"},
+				{Value: "high", Name: "High"},
+			}},
+			Type: "select",
+		}},
+	}
+}
+
+func ptr(s string) *string {
+	return &s
 }
 
 // LoadSession restores a previous session for resume.

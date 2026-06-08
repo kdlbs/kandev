@@ -100,6 +100,12 @@ export async function setSessionModel(sessionId: string, modelId: string) {
   });
 }
 
+export async function setSessionConfigOption(sessionId: string, configId: string, value: string) {
+  return fetchJson<{ ok: boolean }>(`/api/v1/task-sessions/${sessionId}/set-config-option`, {
+    init: { method: "POST", body: JSON.stringify({ config_id: configId, value }) },
+  });
+}
+
 export async function authenticateSession(sessionId: string, methodId: string) {
   return fetchJson<{ ok: boolean }>(`/api/v1/task-sessions/${sessionId}/authenticate`, {
     init: { method: "POST", body: JSON.stringify({ method_id: methodId }) },

@@ -328,7 +328,7 @@ func TestStoreProfileResolver_ResolveProfile_FallbackToRegistryDefaultModel(t *t
 	}
 	// Static per-agent default models have been removed; an empty profile
 	// model stays empty until the host utility probe fills it in via the
-	// reconciler. The session-start hook calls session/set_model only when
+	// reconciler. The session-start hook applies model selection only when
 	// a model is set, otherwise the agent uses its own default.
 	if info.Model != "" {
 		t.Errorf("expected Model '' (no static fallback), got '%s'", info.Model)

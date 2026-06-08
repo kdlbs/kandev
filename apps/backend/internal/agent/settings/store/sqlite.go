@@ -553,6 +553,10 @@ func enrichmentValues(profile *models.AgentProfile) (profileEnrichmentValues, er
 	if settings == "" {
 		settings = "{}"
 	}
+	settings, err := settingsWithConfigOptions(settings, profile.ConfigOptions)
+	if err != nil {
+		return profileEnrichmentValues{}, err
+	}
 	permissions := profile.Permissions
 	if permissions == "" {
 		permissions = "{}"
@@ -573,6 +577,70 @@ func enrichmentValues(profile *models.AgentProfile) (profileEnrichmentValues, er
 		settings:              settings,
 		permissions:           permissions,
 	}, nil
+}
+
+const profileSettingsConfigOptionsKey = "config_options"
+
+func settingsWithConfigOptions(raw string, options map[string]string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		raw = "{}"
+	}
+	var settings map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &settings); err != nil {
+		return "", fmt.Errorf("parse profile settings: %w", err)
+	}
+	if settings == nil {
+		settings = map[string]json.RawMessage{}
+	}
+	clean := cleanConfigOptions(options)
+	if len(clean) == 0 {
+		delete(settings, profileSettingsConfigOptionsKey)
+	} else {
+		data, err := json.Marshal(clean)
+		if err != nil {
+			return "", fmt.Errorf("marshal profile config options: %w", err)
+		}
+		settings[profileSettingsConfigOptionsKey] = data
+	}
+	data, err := json.Marshal(settings)
+	if err != nil {
+		return "", fmt.Errorf("marshal profile settings: %w", err)
+	}
+	return string(data), nil
+}
+
+func configOptionsFromSettings(raw string) map[string]string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var payload struct {
+		ConfigOptions map[string]string `json:"config_options"`
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return nil
+	}
+	return cleanConfigOptions(payload.ConfigOptions)
+}
+
+func cleanConfigOptions(options map[string]string) map[string]string {
+	if len(options) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(options))
+	for key, value := range options {
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key == "" || value == "" || key == "model" || key == "mode" {
+			continue
+		}
+		out[key] = value
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // normalizeJSONArray returns "[]" for empty values; otherwise the input. Used
@@ -975,6 +1043,7 @@ func scanAgentProfile(scanner interface {
 	profile.SkipIdleRuns = skipIdleRuns == 1
 	profile.Role = models.AgentRole(role)
 	profile.Status = models.AgentStatus(status)
+	profile.ConfigOptions = configOptionsFromSettings(profile.Settings)
 	if failureThreshold > 0 {
 		ft := failureThreshold
 		profile.FailureThreshold = &ft

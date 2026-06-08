@@ -398,6 +398,24 @@ func inferenceAgentDTOFromCaps(ia lifecycle.InferenceAgentInfo, caps hostutility
 			Meta:        m.Meta,
 		})
 	}
+	configOptions := make([]dto.ConfigOptionDTO, 0, len(caps.ConfigOptions))
+	for _, opt := range caps.ConfigOptions {
+		choices := make([]dto.ConfigOptionChoiceDTO, 0, len(opt.Options))
+		for _, choice := range opt.Options {
+			choices = append(choices, dto.ConfigOptionChoiceDTO{
+				Value: choice.Value,
+				Name:  choice.Name,
+			})
+		}
+		configOptions = append(configOptions, dto.ConfigOptionDTO{
+			Type:         opt.Type,
+			ID:           opt.ID,
+			Name:         opt.Name,
+			CurrentValue: opt.CurrentValue,
+			Category:     opt.Category,
+			Options:      choices,
+		})
+	}
 	status := string(caps.Status)
 	if !hasCaps || status == "" {
 		status = string(hostutility.StatusProbing)
@@ -407,6 +425,7 @@ func inferenceAgentDTOFromCaps(ia lifecycle.InferenceAgentInfo, caps hostutility
 		Name:          ia.Name,
 		DisplayName:   ia.DisplayName,
 		Models:        models,
+		ConfigOptions: configOptions,
 		Status:        status,
 		StatusMessage: sanitizeStatusMessage(caps.Error),
 	}

@@ -329,6 +329,7 @@ export class ApiClient {
     opts: {
       model: string;
       mode?: string;
+      config_options?: Record<string, string>;
       cli_passthrough?: boolean;
       cli_flags?: Array<{ description: string; flag: string; enabled: boolean }>;
       env_vars?: Array<{ key: string; value?: string; secret_id?: string }>;
@@ -341,6 +342,7 @@ export class ApiClient {
       name,
       model: opts.model,
       mode: opts.mode,
+      config_options: opts.config_options,
       cli_passthrough: opts.cli_passthrough ?? false,
       cli_flags: opts.cli_flags,
       env_vars: opts.env_vars,
@@ -367,6 +369,7 @@ export class ApiClient {
       name?: string;
       model?: string;
       mode?: string;
+      config_options?: Record<string, string>;
       cli_passthrough?: boolean;
       cli_flags?: Array<{ description: string; flag: string; enabled: boolean }>;
       env_vars?: Array<{ key: string; value?: string; secret_id?: string }>;

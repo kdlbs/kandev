@@ -9,8 +9,8 @@ import (
 )
 
 func TestMockAgent_BuildCommand_NoModelFlag(t *testing.T) {
-	// ACP agents apply model via session/set_model after session/new, not
-	// via --model CLI flag. BuildCommand must not add --model.
+	// ACP agents apply model after session/new, not via --model CLI flag.
+	// BuildCommand must not add --model.
 	a := NewMockAgent()
 	cmd := a.BuildCommand(CommandOptions{Model: "mock-fast"})
 	args := cmd.Args()

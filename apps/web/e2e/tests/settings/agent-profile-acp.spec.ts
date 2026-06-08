@@ -93,6 +93,76 @@ test.describe("Agent profile — ACP-first", () => {
     }
   });
 
+  test("profile model selector shows and saves dynamic config options", async ({
+    testPage,
+    apiClient,
+    backend,
+  }) => {
+    test.setTimeout(60_000);
+
+    await expect
+      .poll(
+        async () => {
+          const resp = await testPage.request.get(`${backend.baseUrl}/api/v1/agents/available`);
+          if (!resp.ok()) return false;
+          const data = (await resp.json()) as {
+            agents?: {
+              name: string;
+              model_config?: { config_options?: { id: string }[] };
+            }[];
+          };
+          const mock = data.agents?.find((a) => a.name === "mock-agent");
+          return Boolean(
+            mock?.model_config?.config_options?.some((option) => option.id === "effort"),
+          );
+        },
+        { timeout: 20_000, intervals: [250, 500, 1000] },
+      )
+      .toBe(true);
+
+    const { agents } = await apiClient.listAgents();
+    const agent = agents.find((item) => item.name === "mock-agent") ?? agents[0];
+    const profile = await apiClient.createAgentProfile(agent.id, "Config Option Test Profile", {
+      model: "mock-fast",
+      config_options: { effort: "high" },
+    });
+
+    try {
+      await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
+      const selector = testPage.getByRole("button", { name: "Profile start model settings" });
+      await expect(selector).toBeVisible({ timeout: 15_000 });
+      await expect(selector).toContainText("High", { timeout: 10_000 });
+
+      await selector.click();
+      await expect(testPage.getByText("Effort", { exact: true })).toBeVisible();
+      await testPage.getByRole("button", { name: "Low", exact: true }).click();
+      await expect(selector).toContainText("Low");
+
+      const saveButton = testPage.getByRole("button", { name: /^Save( changes)?$/i }).first();
+      await expect(saveButton).toBeEnabled({ timeout: 10_000 });
+      await saveButton.click();
+      await expect(testPage.getByText(/unsaved changes/i)).toBeHidden({ timeout: 15_000 });
+
+      await expect
+        .poll(
+          async () => {
+            const saved = (await apiClient.getAgentProfile(profile.id)) as unknown as {
+              configOptions?: Record<string, string>;
+              config_options?: Record<string, string>;
+            };
+            return saved.configOptions?.effort ?? saved.config_options?.effort ?? "";
+          },
+          { timeout: 10_000, intervals: [250, 500, 1000] },
+        )
+        .toBe("low");
+
+      await testPage.reload();
+      await expect(selector).toContainText("Low", { timeout: 15_000 });
+    } finally {
+      await apiClient.deleteAgentProfile(profile.id, true);
+    }
+  });
+
   test("profile mode propagates to session mode selector", async ({
     testPage,
     apiClient,

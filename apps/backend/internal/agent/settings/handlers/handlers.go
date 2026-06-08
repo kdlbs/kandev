@@ -359,6 +359,7 @@ type createProfileRequest struct {
 	Name           string                 `json:"name"`
 	Model          string                 `json:"model"`
 	Mode           string                 `json:"mode,omitempty"`
+	ConfigOptions  map[string]string      `json:"config_options,omitempty"`
 	AllowIndexing  bool                   `json:"allow_indexing"`
 	AutoApprove    bool                   `json:"auto_approve"`
 	CLIPassthrough bool                   `json:"cli_passthrough"`
@@ -381,6 +382,7 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 		Name:           body.Name,
 		Model:          body.Model,
 		Mode:           body.Mode,
+		ConfigOptions:  body.ConfigOptions,
 		AllowIndexing:  body.AllowIndexing,
 		AutoApprove:    body.AutoApprove,
 		CLIPassthrough: body.CLIPassthrough,
@@ -409,6 +411,7 @@ type updateProfileRequest struct {
 	Name           *string                 `json:"name,omitempty"`
 	Model          *string                 `json:"model,omitempty"`
 	Mode           *string                 `json:"mode,omitempty"`
+	ConfigOptions  *map[string]string      `json:"config_options,omitempty"`
 	AllowIndexing  *bool                   `json:"allow_indexing,omitempty"`
 	AutoApprove    *bool                   `json:"auto_approve,omitempty"`
 	CLIPassthrough *bool                   `json:"cli_passthrough,omitempty"`
@@ -431,6 +434,7 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 		Name:           body.Name,
 		Model:          body.Model,
 		Mode:           body.Mode,
+		ConfigOptions:  body.ConfigOptions,
 		AllowIndexing:  body.AllowIndexing,
 		AutoApprove:    body.AutoApprove,
 		CLIPassthrough: body.CLIPassthrough,

@@ -158,6 +158,78 @@ func TestEnrichment_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestProfileConfigOptions_RoundTripInSettings(t *testing.T) {
+	db, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	repo, err := newSQLiteRepository(db, db, nil, false)
+	if err != nil {
+		t.Fatalf("newSQLiteRepository: %v", err)
+	}
+
+	ctx := context.Background()
+	agent := &models.Agent{Name: "claude-acp"}
+	if err := repo.CreateAgent(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	profile := &models.AgentProfile{
+		AgentID:          agent.ID,
+		Name:             "profile",
+		AgentDisplayName: "Claude",
+		Model:            "sonnet",
+		Settings:         `{"office":"kept"}`,
+		ConfigOptions: map[string]string{
+			"effort": "high",
+			"model":  "ignored",
+			"mode":   "ignored",
+		},
+	}
+	if err := repo.CreateAgentProfile(ctx, profile); err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+
+	got, err := repo.GetAgentProfile(ctx, profile.ID)
+	if err != nil {
+		t.Fatalf("get profile: %v", err)
+	}
+	if got.ConfigOptions["effort"] != "high" || len(got.ConfigOptions) != 1 {
+		t.Fatalf("config options = %+v, want only effort=high", got.ConfigOptions)
+	}
+	if got.Settings != `{"config_options":{"effort":"high"},"office":"kept"}` {
+		t.Fatalf("settings = %s", got.Settings)
+	}
+
+	got.ConfigOptions = map[string]string{"effort": "low"}
+	if err := repo.UpdateAgentProfile(ctx, got); err != nil {
+		t.Fatalf("update profile: %v", err)
+	}
+	updated, err := repo.GetAgentProfile(ctx, profile.ID)
+	if err != nil {
+		t.Fatalf("get updated profile: %v", err)
+	}
+	if updated.ConfigOptions["effort"] != "low" || len(updated.ConfigOptions) != 1 {
+		t.Fatalf("updated config options = %+v, want only effort=low", updated.ConfigOptions)
+	}
+
+	updated.ConfigOptions = nil
+	if err := repo.UpdateAgentProfile(ctx, updated); err != nil {
+		t.Fatalf("clear config options: %v", err)
+	}
+	cleared, err := repo.GetAgentProfile(ctx, profile.ID)
+	if err != nil {
+		t.Fatalf("get cleared profile: %v", err)
+	}
+	if len(cleared.ConfigOptions) != 0 {
+		t.Fatalf("cleared config options = %+v, want empty", cleared.ConfigOptions)
+	}
+	if cleared.Settings != `{"office":"kept"}` {
+		t.Fatalf("cleared settings = %s", cleared.Settings)
+	}
+}
+
 // TestEnrichment_Migration_LegacyDB verifies that adding the new enrichment
 // columns on an existing database with the legacy CHECK(model != ”)
 // constraint does not regress existing reads. The legacy DB has rows that

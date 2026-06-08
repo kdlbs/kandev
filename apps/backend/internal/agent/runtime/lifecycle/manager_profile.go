@@ -144,17 +144,17 @@ func runtimeName(rt ExecutorBackend) executor.Name {
 	return rt.Name()
 }
 
-// resolveProfileModelAndMode resolves the model and mode configured on an agent profile.
-// Returns empty strings if the profile cannot be resolved.
-func (m *Manager) resolveProfileModelAndMode(ctx context.Context, profileID string) (string, string) {
+// resolveProfileSessionConfig resolves the ACP session config on an agent profile.
+// Returns empty values if the profile cannot be resolved.
+func (m *Manager) resolveProfileSessionConfig(ctx context.Context, profileID string) (string, string, map[string]string) {
 	if profileID == "" || m.profileResolver == nil {
-		return "", ""
+		return "", "", nil
 	}
 	info, err := m.profileResolver.ResolveProfile(ctx, profileID)
 	if err != nil || info == nil {
-		return "", ""
+		return "", "", nil
 	}
-	return info.Model, info.Mode
+	return info.Model, info.Mode, info.ConfigOptions
 }
 
 // initializeACPSession delegates to SessionManager for full ACP session initialization and prompting.
@@ -163,9 +163,9 @@ func (m *Manager) resolveProfileModelAndMode(ctx context.Context, profileID stri
 // signal (the agent has never run a turn). When there IS a prompt, the callback is unused and
 // MarkReady fires later from handleCompleteEvent — that path is the true turn-end.
 func (m *Manager) initializeACPSession(ctx context.Context, execution *AgentExecution, agentConfig agents.Agent, taskDescription string, attachments []MessageAttachment, mcpServers []agentctltypes.McpServer) error {
-	profileModel, profileMode := m.resolveProfileModelAndMode(ctx, execution.AgentProfileID)
+	profileModel, profileMode, profileConfigOptions := m.resolveProfileSessionConfig(ctx, execution.AgentProfileID)
 	mode := m.effectiveSessionMode(ctx, execution, profileMode)
-	return m.sessionManager.InitializeAndPrompt(ctx, execution, agentConfig, taskDescription, attachments, mcpServers, m.MarkBootReady, profileModel, mode)
+	return m.sessionManager.InitializeAndPrompt(ctx, execution, agentConfig, taskDescription, attachments, mcpServers, m.MarkBootReady, profileModel, mode, profileConfigOptions)
 }
 
 // effectiveSessionMode prefers a session-level permission mode persisted in the

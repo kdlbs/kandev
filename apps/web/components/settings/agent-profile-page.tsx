@@ -161,6 +161,7 @@ function ProfileSettingsCard({
             name: draft.name,
             model: draft.model,
             mode: draft.mode ?? "",
+            config_options: draft.configOptions ?? {},
             auto_approve: permissionValues.auto_approve,
             allow_indexing: permissionValues.allow_indexing,
             cli_passthrough: draft.cliPassthrough,
@@ -211,6 +212,7 @@ function useProfileEditorState(
       draft.name !== savedProfile.name ||
       draft.model !== savedProfile.model ||
       (draft.mode ?? "") !== (savedProfile.mode ?? "") ||
+      !areProfileConfigOptionsEqual(draft.configOptions, savedProfile.configOptions) ||
       arePermissionsDirty(draft, savedProfile, permissionSettings) ||
       draft.cliPassthrough !== savedProfile.cliPassthrough ||
       !areCLIFlagsEqual(draft.cliFlags ?? [], savedProfile.cliFlags ?? []) ||
@@ -258,13 +260,14 @@ function useProfileSave({
       return;
     }
     // Model is optional — an empty profile model means "use the agent's
-    // default", which is applied via ACP session/set_model at session start.
+    // default", which is applied through ACP session model selection at session start.
     setSaveStatus("loading");
     try {
       const updated = await updateAgentProfileAction(draft.id, {
         name: draft.name,
         model: draft.model,
         mode: draft.mode,
+        config_options: draft.configOptions ?? {},
         ...permissionsToProfilePatch(draft),
         cli_passthrough: draft.cliPassthrough,
         cli_flags: draft.cliFlags,
@@ -293,6 +296,18 @@ function useProfileSave({
       });
     }
   };
+}
+
+function areProfileConfigOptionsEqual(
+  a?: Record<string, string>,
+  b?: Record<string, string>,
+): boolean {
+  const left = a ?? {};
+  const right = b ?? {};
+  const leftKeys = Object.keys(left).sort();
+  const rightKeys = Object.keys(right).sort();
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every((key, index) => key === rightKeys[index] && left[key] === right[key]);
 }
 
 function useProfileDelete(

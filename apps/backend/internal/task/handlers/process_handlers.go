@@ -65,6 +65,7 @@ func RegisterProcessRoutes(
 	session := api.Group("/task-sessions/:id")
 	session.POST("/set-mode", handlers.httpSetSessionMode)
 	session.POST("/set-model", handlers.httpSetSessionModel)
+	session.POST("/set-config-option", handlers.httpSetSessionConfigOption)
 	session.POST("/authenticate", handlers.httpAuthenticate)
 }
 
@@ -513,6 +514,28 @@ func (h *ProcessHandlers) httpSetSessionModel(c *gin.Context) {
 		h.logger.Error("failed to set session model",
 			zap.String("session_id", sessionID),
 			zap.String("model_id", req.ModelID),
+			zap.Error(err))
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"ok": true})
+}
+
+// httpSetSessionConfigOption sets a session config option for a running agent.
+func (h *ProcessHandlers) httpSetSessionConfigOption(c *gin.Context) {
+	sessionID := c.Param("id")
+	var req struct {
+		ConfigID string `json:"config_id"`
+		Value    string `json:"value"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": "invalid request: " + err.Error()})
+		return
+	}
+	if err := h.lifecycleMgr.SetSessionConfigOptionBySessionID(c.Request.Context(), sessionID, req.ConfigID, req.Value); err != nil {
+		h.logger.Error("failed to set session config option",
+			zap.String("session_id", sessionID),
+			zap.String("config_id", req.ConfigID),
 			zap.Error(err))
 		c.JSON(500, gin.H{"error": err.Error()})
 		return

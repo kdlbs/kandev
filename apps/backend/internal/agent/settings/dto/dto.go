@@ -13,6 +13,7 @@ type AgentProfileDTO struct {
 	AgentDisplayName string             `json:"agent_display_name"`
 	Model            string             `json:"model"`
 	Mode             string             `json:"mode,omitempty"`
+	ConfigOptions    map[string]string  `json:"config_options,omitempty"`
 	AllowIndexing    bool               `json:"allow_indexing"` // Deprecated: use CLIFlags. Retained for legacy clients.
 	AutoApprove      bool               `json:"auto_approve"`
 	CLIFlags         []CLIFlagDTO       `json:"cli_flags"`
@@ -129,11 +130,26 @@ type ModelConfigDTO struct {
 	AvailableModes        []ModeEntryDTO    `json:"available_modes,omitempty"`
 	CurrentModeID         string            `json:"current_mode_id,omitempty"`
 	AvailableCommands     []CommandEntryDTO `json:"available_commands,omitempty"`
+	ConfigOptions         []ConfigOptionDTO `json:"config_options,omitempty"`
 	SupportsDynamicModels bool              `json:"supports_dynamic_models"`
 	// Status reflects the host utility probe state for this agent type:
 	// "probing" | "ok" | "auth_required" | "not_installed" | "failed".
 	Status string `json:"status,omitempty"`
 	Error  string `json:"error,omitempty"`
+}
+
+type ConfigOptionDTO struct {
+	Type         string                  `json:"type"`
+	ID           string                  `json:"id"`
+	Name         string                  `json:"name"`
+	CurrentValue string                  `json:"current_value"`
+	Category     string                  `json:"category,omitempty"`
+	Options      []ConfigOptionChoiceDTO `json:"options,omitempty"`
+}
+
+type ConfigOptionChoiceDTO struct {
+	Value string `json:"value"`
+	Name  string `json:"name"`
 }
 
 type PermissionSettingDTO struct {

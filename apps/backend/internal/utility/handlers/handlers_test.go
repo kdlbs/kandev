@@ -84,9 +84,10 @@ type wantModel struct {
 
 // wantAgent is the expected shape of a single agent entry in the response.
 type wantAgent struct {
-	status string
-	hasMsg bool
-	models []wantModel
+	status        string
+	hasMsg        bool
+	models        []wantModel
+	configOptions int
 }
 
 // TestHttpListInferenceAgents covers the full /api/v1/utility/inference-agents
@@ -131,11 +132,23 @@ func TestHttpListInferenceAgents(t *testing.T) {
 						{ID: "sonnet", Name: "Sonnet"},
 						{ID: "opus", Name: "Opus"},
 					},
+					ConfigOptions: []hostutility.ConfigOption{{
+						Type:         "select",
+						ID:           "reasoning_effort",
+						Name:         "Reasoning effort",
+						CurrentValue: "medium",
+						Category:     "thought-level",
+						Options: []hostutility.ConfigOptionChoice{
+							{Value: "low", Name: "Low"},
+							{Value: "medium", Name: "Medium"},
+						},
+					}},
 				},
 			},
 			wantByAgent: map[string]wantAgent{
 				"Claude ACP Agent": {
-					status: "ok",
+					status:        "ok",
+					configOptions: 1,
 					models: []wantModel{
 						{id: "sonnet", isDefault: true},
 						{id: "opus", isDefault: false},
@@ -263,6 +276,13 @@ func TestHttpListInferenceAgents(t *testing.T) {
 						IsDefault bool           `json:"is_default"`
 						Meta      map[string]any `json:"meta,omitempty"`
 					} `json:"models"`
+					ConfigOptions []struct {
+						ID      string `json:"id"`
+						Options []struct {
+							Value string `json:"value"`
+							Name  string `json:"name"`
+						} `json:"options"`
+					} `json:"config_options"`
 				} `json:"agents"`
 			}
 			if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
@@ -290,6 +310,9 @@ func TestHttpListInferenceAgents(t *testing.T) {
 				}
 				if !want.hasMsg && a.StatusMessage != "" {
 					t.Errorf("agent %q: expected empty status_message, got %q", a.Name, a.StatusMessage)
+				}
+				if len(a.ConfigOptions) != want.configOptions {
+					t.Errorf("agent %q: got %d config options, want %d", a.Name, len(a.ConfigOptions), want.configOptions)
 				}
 				if len(a.Models) != len(want.models) {
 					t.Errorf("agent %q: got %d models, want %d", a.Name, len(a.Models), len(want.models))
@@ -487,6 +510,13 @@ func agentNames(agents []struct {
 		IsDefault bool           `json:"is_default"`
 		Meta      map[string]any `json:"meta,omitempty"`
 	} `json:"models"`
+	ConfigOptions []struct {
+		ID      string `json:"id"`
+		Options []struct {
+			Value string `json:"value"`
+			Name  string `json:"name"`
+		} `json:"options"`
+	} `json:"config_options"`
 }) []string {
 	names := make([]string, 0, len(agents))
 	for _, a := range agents {
