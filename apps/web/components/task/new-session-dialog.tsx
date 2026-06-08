@@ -39,6 +39,11 @@ type NewSessionDialogProps = {
   handoff?: HandoffPreset;
 };
 
+function agentProfileDisplayLabel(profile: AgentProfileOption): string {
+  const parts = profile.label.split(" \u2022 ");
+  return parts.length > 1 ? parts.slice(1).join(" \u2022 ") : (parts[0] ?? profile.label);
+}
+
 function useNewSessionDialogState(taskId: string) {
   const taskTitle = useAppStore((state) => {
     const task = state.kanban.tasks.find((t: { id: string }) => t.id === taskId);
@@ -118,8 +123,7 @@ function useSessionOptions(taskId: string) {
     );
     return sorted.map((s, idx) => {
       const profile = agentProfiles.find((p: { id: string }) => p.id === s.agent_profile_id);
-      const parts = profile?.label.split(" \u2022 ");
-      const name = parts?.[1] || parts?.[0] || "Agent";
+      const name = profile ? agentProfileDisplayLabel(profile) : "Agent";
       return { id: s.id, label: name, index: idx + 1, agentName: profile?.agent_name };
     });
   }, [sessions, agentProfiles]);
@@ -393,8 +397,7 @@ function handoffProfileLabel(
   if (!handoff) return null;
   const profile = agentProfiles.find((p) => p.id === handoff.targetProfileId);
   if (!profile) return null;
-  const parts = profile.label.split(" \u2022 ");
-  return parts[1] || parts[0] || profile.label;
+  return agentProfileDisplayLabel(profile);
 }
 
 export function NewSessionDialog({
