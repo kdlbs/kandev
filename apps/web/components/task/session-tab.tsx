@@ -31,6 +31,8 @@ import {
 } from "@/hooks/domains/session/use-session-actions";
 import { shareableSessionStateClient } from "@/components/task/share/share-button";
 import { ShareDialog } from "@/components/task/share/share-dialog";
+import { HandoffContextMenuSub } from "@/components/task/handoff-profile-menu-items";
+import { NewSessionDialog, type HandoffPreset } from "@/components/task/new-session-dialog";
 import type { TaskSessionState } from "@/lib/types/http";
 import { isSessionActive } from "./session-sort";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
@@ -166,16 +168,22 @@ function SessionContextMenuItems({
   sessionState,
   isPrimary,
   canShare,
+  taskId,
+  sessionId,
   actions,
   onDelete,
   onShare,
+  onHandoffProfile,
 }: {
   sessionState: TaskSessionState | null;
   isPrimary: boolean;
   canShare: boolean;
+  taskId: string | null;
+  sessionId: string | undefined;
   actions: ReturnType<typeof useSessionTabActions>;
   onDelete: () => void;
   onShare: () => void;
+  onHandoffProfile: (profileId: string) => void;
 }) {
   return (
     <ContextMenuContent>
@@ -208,6 +216,12 @@ function SessionContextMenuItems({
           <ContextMenuItem className="cursor-pointer" onSelect={onShare}>
             Share
           </ContextMenuItem>
+        </>
+      )}
+      {taskId && sessionId && (
+        <>
+          <ContextMenuSeparator />
+          <HandoffContextMenuSub taskId={taskId} onSelectProfile={onHandoffProfile} />
         </>
       )}
       <ContextMenuSeparator />
@@ -295,8 +309,18 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
   const onDoubleClick = useTabMaximizeOnDoubleClick(api);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [handoffOpen, setHandoffOpen] = useState(false);
+  const [handoffPreset, setHandoffPreset] = useState<HandoffPreset | null>(null);
   const [isActive, setIsActive] = useState(api.isActive);
   const canShare = !!taskId && !!sessionId && shareableSessionStateClient(sessionState);
+  const handleHandoffProfile = useCallback(
+    (profileId: string) => {
+      if (!sessionId) return;
+      setHandoffPreset({ sourceSessionId: sessionId, targetProfileId: profileId });
+      setHandoffOpen(true);
+    },
+    [sessionId],
+  );
 
   useEffect(() => {
     const disposable = api.onDidActiveChange((e) => setIsActive(e.isActive));
@@ -340,9 +364,12 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
           sessionState={sessionState}
           isPrimary={isPrimary}
           canShare={canShare}
+          taskId={taskId}
+          sessionId={sessionId}
           actions={actions}
           onDelete={() => setConfirmDelete(true)}
           onShare={() => setShareOpen(true)}
+          onHandoffProfile={handleHandoffProfile}
         />
       </ContextMenu>
       <DeleteSessionDialog
@@ -358,6 +385,18 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
           onOpenChange={setShareOpen}
           taskId={taskId}
           sessionId={sessionId}
+        />
+      )}
+      {taskId && handoffPreset && (
+        <NewSessionDialog
+          open={handoffOpen}
+          onOpenChange={(open) => {
+            setHandoffOpen(open);
+            if (!open) setHandoffPreset(null);
+          }}
+          taskId={taskId}
+          groupId={api.group?.id}
+          handoff={handoffPreset}
         />
       )}
     </>

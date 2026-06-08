@@ -3,74 +3,41 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@kandev/ui/dialog";
 import { Button } from "@kandev/ui/button";
-import { Textarea } from "@kandev/ui/textarea";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
-import { launchSession } from "@/lib/services/session-launch-service";
-import { buildStartRequest } from "@/lib/services/session-launch-helpers";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { addSessionPanel } from "@/lib/state/dockview-panel-actions";
 
 import { AgentSelector } from "@/components/task-create-dialog-selectors";
 import { useAgentProfileOptions } from "@/components/task-create-dialog-options";
-import { toMessageAttachments } from "@/components/task-create-dialog-helpers";
 import { useSummarizeSession } from "@/hooks/use-summarize-session";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { useRemoteAuthSpecs } from "@/hooks/domains/settings/use-remote-auth-specs";
+import { useTaskExecutorProfile } from "@/hooks/domains/session/use-task-executor-profile";
 import { isAgentConfiguredOnExecutor } from "@/lib/agent-executor-compat";
-import { fetchTaskEnvironment } from "@/lib/api/domains/task-environment-api";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { ExecutorProfile } from "@/lib/types/http";
-import { IconLoader2 } from "@tabler/icons-react";
-import { EnhancePromptButton } from "@/components/enhance-prompt-button";
+import { buildHandoffInitialState, type HandoffPreset } from "./handoff-types";
 import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import {
   EnvironmentBadges,
   ContextSelect,
   useDialogAttachments,
-  AttachButton,
   toContextItems,
 } from "./session-dialog-shared";
-import { ContextZone } from "./chat/context-items/context-zone";
+import { SessionPromptField } from "./new-session-form-prompt";
+import { useSessionContextChange, useSessionLaunchSubmit } from "./new-session-form-actions";
+
+export type { HandoffPreset } from "./handoff-types";
 
 type NewSessionDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   taskId: string;
   groupId?: string;
+  handoff?: HandoffPreset;
 };
-
-function useTaskExecutorProfile(taskId: string, open: boolean): ExecutorProfile | null {
-  const executors = useAppStore((state) => state.executors.items);
-  const [profile, setProfile] = useState<ExecutorProfile | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    let active = true;
-    void fetchTaskEnvironment(taskId)
-      .then((env) => {
-        if (!active || !env) return;
-        for (const executor of executors) {
-          const match = (executor.profiles ?? []).find((p) => p.id === env.executor_profile_id);
-          if (match) {
-            setProfile({
-              ...match,
-              executor_type: match.executor_type ?? executor.type,
-              executor_name: match.executor_name ?? executor.name,
-            });
-            return;
-          }
-        }
-      })
-      .catch(() => {});
-    return () => {
-      active = false;
-    };
-  }, [open, taskId, executors]);
-
-  return profile;
-}
 
 function useNewSessionDialogState(taskId: string) {
   const taskTitle = useAppStore((state) => {
@@ -181,6 +148,19 @@ function useCompatibleAgentProfiles(
   }, [agentProfiles, executorProfile, authSpecs, authLoaded]);
 }
 
+function useHandoffAutoSummarize(
+  handoff: HandoffPreset | undefined,
+  contextValue: string,
+  onContextChange: (value: string) => void,
+) {
+  const started = useRef(false);
+  useEffect(() => {
+    if (!handoff || started.current) return;
+    started.current = true;
+    void onContextChange(contextValue);
+  }, [handoff, contextValue, onContextChange]);
+}
+
 function useEnforceCompatibleProfile(
   hasExecutorProfile: boolean,
   compatible: AgentProfileOption[],
@@ -194,7 +174,7 @@ function useEnforceCompatibleProfile(
   }, [hasExecutorProfile, compatible, selectedId, setSelected]);
 }
 
-// eslint-disable-next-line max-lines-per-function
+// eslint-disable-next-line max-lines-per-function, complexity
 function NewSessionForm({
   taskId,
   defaultProfileId,
@@ -206,6 +186,7 @@ function NewSessionForm({
   initialPrompt,
   agentProfiles,
   groupId,
+  handoff,
   onClose,
 }: {
   taskId: string;
@@ -218,15 +199,19 @@ function NewSessionForm({
   initialPrompt: string | null;
   agentProfiles: AgentProfileOption[];
   groupId?: string;
+  handoff?: HandoffPreset;
   onClose: () => void;
 }) {
+  const handoffInitial = handoff ? buildHandoffInitialState(handoff) : null;
   const { toast } = useToast();
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const { summarize, isSummarizing } = useSummarizeSession();
-  const [isCreating, setIsCreating] = useState(false);
-  const [contextValue, setContextValue] = useState("blank");
-  const [selectedProfileId, setSelectedProfileId] = useState(initialProfileId ?? defaultProfileId);
+  const [contextValue, setContextValue] = useState(handoffInitial?.contextValue ?? "blank");
+  const [selectedProfileId, setSelectedProfileId] = useState(
+    handoffInitial?.selectedProfileId ?? initialProfileId ?? defaultProfileId,
+  );
   const [hasPrompt, setHasPrompt] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const {
     attachments,
@@ -275,89 +260,33 @@ function NewSessionForm({
     hasProfiles &&
     (profileOptions.length > 1 ||
       (!!defaultProfileId && !profileOptions.find((o) => o.value === defaultProfileId)));
+  const handleContextChange = useSessionContextChange({
+    promptRef,
+    initialPrompt,
+    summarize,
+    toast,
+    setContextValue,
+    setHasPrompt,
+  });
+  useHandoffAutoSummarize(handoff, handoffInitial?.contextValue ?? "blank", handleContextChange);
+
+  const handleSubmit = useSessionLaunchSubmit({
+    promptRef,
+    taskId,
+    selectedProfileId,
+    executorId,
+    contextValue,
+    initialPrompt,
+    agentProfiles,
+    groupId,
+    attachments,
+    onClose,
+    toast,
+    setActiveSession,
+    activateSession: activateNewSession,
+    setIsCreating,
+  });
   const isBusy = isCreating || isSummarizing;
-
-  const handleContextChange = useCallback(
-    async (value: string) => {
-      if (!value) return;
-      setContextValue(value);
-      if (value === "copy_prompt" && initialPrompt && promptRef.current) {
-        promptRef.current.value = initialPrompt;
-        setHasPrompt(true);
-      } else if (value === "blank" && promptRef.current) {
-        promptRef.current.value = "";
-        setHasPrompt(false);
-      } else if (value.startsWith("summarize:")) {
-        const sessionId = value.slice("summarize:".length);
-        const result = await summarize(sessionId);
-        if (result && promptRef.current) {
-          promptRef.current.value = result;
-          setHasPrompt(true);
-        } else {
-          setContextValue("blank");
-          toast({
-            title: "Summarize failed",
-            description:
-              "Could not generate a summary. Check that the summarize utility agent is configured and enabled in settings.",
-            variant: "error",
-          });
-        }
-      }
-    },
-    [initialPrompt, summarize, toast],
-  );
-
-  const handleSubmit = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault();
-      const typed = promptRef.current?.value?.trim() ?? "";
-      const prompt =
-        contextValue === "copy_prompt" && !typed && initialPrompt ? initialPrompt : typed;
-      if (!prompt) return;
-      setIsCreating(true);
-      try {
-        const { request } = buildStartRequest(taskId, selectedProfileId, {
-          executorId,
-          prompt,
-          attachments: toMessageAttachments(attachments),
-        });
-        const response = await launchSession(request);
-        if (!response.session_id) {
-          throw new Error("Session created but no session ID returned");
-        }
-        const profile = agentProfiles.find((p: AgentProfileOption) => p.id === selectedProfileId);
-        activateNewSession(
-          response.session_id,
-          taskId,
-          profile?.label ?? "Agent",
-          groupId,
-          setActiveSession,
-        );
-        onClose();
-      } catch (error) {
-        toast({
-          title: "Failed to create session",
-          description: error instanceof Error ? error.message : "Unknown error",
-          variant: "error",
-        });
-      } finally {
-        setIsCreating(false);
-      }
-    },
-    [
-      taskId,
-      selectedProfileId,
-      executorId,
-      contextValue,
-      initialPrompt,
-      agentProfiles,
-      groupId,
-      onClose,
-      toast,
-      setActiveSession,
-      attachments,
-    ],
-  );
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -386,66 +315,27 @@ function NewSessionForm({
         sessionOptions={sessionOptions}
         isSummarizing={isSummarizing}
       />
-      <div
-        className="relative"
+      <SessionPromptField
+        promptRef={promptRef}
+        contextItems={contextItems}
+        isBusy={isBusy}
+        isDragging={isDragging}
+        isSummarizing={isSummarizing}
+        hasPrompt={hasPrompt}
+        hasProfiles={hasProfiles}
+        isUtilityConfigured={isUtilityConfigured}
+        isEnhancingPrompt={isEnhancingPrompt}
+        fileInputRef={fileInputRef}
+        onPromptInput={() => setHasPrompt(!!promptRef.current?.value)}
+        onPaste={handlePaste}
+        onSubmit={handleSubmit}
+        onAttachClick={handleAttachClick}
+        onEnhancePrompt={handleEnhancePrompt}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-      >
-        <div className="rounded-md border border-input bg-transparent">
-          <ContextZone items={contextItems} />
-          <Textarea
-            ref={promptRef}
-            placeholder="What should the agent work on?"
-            className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 min-h-[120px] max-h-[240px] resize-none overflow-auto text-[13px]"
-            autoFocus
-            disabled={isBusy}
-            onInput={(e) => setHasPrompt(!!e.currentTarget.value)}
-            onPaste={handlePaste}
-            onKeyDown={(e) => {
-              if (
-                e.key === "Enter" &&
-                (e.metaKey || e.ctrlKey) &&
-                !isBusy &&
-                hasPrompt &&
-                hasProfiles
-              ) {
-                e.preventDefault();
-                handleSubmit(e);
-              }
-            }}
-          />
-          <div className="flex items-center px-1 pb-1">
-            <AttachButton onClick={handleAttachClick} disabled={isBusy} />
-            <EnhancePromptButton
-              onClick={handleEnhancePrompt}
-              isLoading={isEnhancingPrompt}
-              isConfigured={isUtilityConfigured}
-            />
-          </div>
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            className="hidden"
-            onChange={handleFileInputChange}
-            tabIndex={-1}
-          />
-        </div>
-        {isDragging && (
-          <div className="absolute inset-0 flex items-center justify-center bg-primary/10 border-2 border-dashed border-primary rounded-md pointer-events-none">
-            <span className="text-sm text-primary font-medium">Drop files here</span>
-          </div>
-        )}
-        {isSummarizing && (
-          <div className="absolute inset-0 flex items-center justify-center rounded-md bg-background/80">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <IconLoader2 className="h-4 w-4 animate-spin" />
-              <span>Generating summary...</span>
-            </div>
-          </div>
-        )}
-      </div>
+        onFileInputChange={handleFileInputChange}
+      />
       <DialogFooter>
         <Button
           type="button"
@@ -496,7 +386,24 @@ function NoAgentBanner({
   return null;
 }
 
-export function NewSessionDialog({ open, onOpenChange, taskId, groupId }: NewSessionDialogProps) {
+function handoffProfileLabel(
+  agentProfiles: AgentProfileOption[],
+  handoff: HandoffPreset | undefined,
+): string | null {
+  if (!handoff) return null;
+  const profile = agentProfiles.find((p) => p.id === handoff.targetProfileId);
+  if (!profile) return null;
+  const parts = profile.label.split(" \u2022 ");
+  return parts[1] || parts[0] || profile.label;
+}
+
+export function NewSessionDialog({
+  open,
+  onOpenChange,
+  taskId,
+  groupId,
+  handoff,
+}: NewSessionDialogProps) {
   const {
     taskTitle,
     agentProfiles,
@@ -508,17 +415,29 @@ export function NewSessionDialog({ open, onOpenChange, taskId, groupId }: NewSes
     effectiveDefaultProfileId,
   } = useNewSessionDialogState(taskId);
   const executorProfile = useTaskExecutorProfile(taskId, open);
+  const handoffLabel = handoffProfileLabel(agentProfiles, handoff);
+  const formKey = handoff
+    ? `${open}-${handoff.sourceSessionId}-${handoff.targetProfileId}`
+    : `${open}`;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[520px]">
         <DialogHeader>
           <DialogTitle className="text-sm font-medium">
-            New agent in <span className="text-foreground">{taskTitle}</span>
+            {handoffLabel ? (
+              <>
+                Hand off to <span className="text-foreground">{handoffLabel}</span>
+              </>
+            ) : (
+              <>
+                New agent in <span className="text-foreground">{taskTitle}</span>
+              </>
+            )}
           </DialogTitle>
         </DialogHeader>
         <NewSessionForm
-          key={`${open}`}
+          key={formKey}
           taskId={taskId}
           defaultProfileId={sessionProfileId}
           initialProfileId={effectiveDefaultProfileId}
@@ -529,6 +448,7 @@ export function NewSessionDialog({ open, onOpenChange, taskId, groupId }: NewSes
           initialPrompt={initialPrompt}
           agentProfiles={agentProfiles}
           groupId={groupId}
+          handoff={handoff}
           onClose={() => onOpenChange(false)}
         />
       </DialogContent>

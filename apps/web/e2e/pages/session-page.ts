@@ -1024,24 +1024,60 @@ export class SessionPage {
     await this.newSessionMenuButton().click();
   }
 
+  /** New session or handoff dialog container. */
+  sessionLaunchDialog(): Locator {
+    return this.page.getByRole("dialog").filter({ hasText: /New agent in|Hand off to/ });
+  }
+
   /** The new session dialog container. */
   newSessionDialog(): Locator {
     return this.page.getByRole("dialog").filter({ hasText: "New agent in" });
   }
 
-  /** Prompt textarea inside the new session dialog. */
-  newSessionPromptInput(): Locator {
-    return this.newSessionDialog().locator("textarea");
+  /** Handoff dialog opened from session tab context menu. */
+  handoffDialog(): Locator {
+    return this.page.getByRole("dialog").filter({ hasText: "Hand off to" });
   }
 
-  /** Start Agent button inside the new session dialog. */
+  /** Prompt textarea inside the new session or handoff dialog. */
+  newSessionPromptInput(): Locator {
+    return this.sessionLaunchDialog().locator("textarea");
+  }
+
+  /** Start Agent button inside the new session or handoff dialog. */
   newSessionStartButton(): Locator {
-    return this.newSessionDialog().getByRole("button", { name: "Start Agent" });
+    return this.sessionLaunchDialog().getByRole("button", { name: "Start Agent" });
   }
 
   /** Environment info badges inside the new session dialog. */
   newSessionEnvironmentInfo(): Locator {
-    return this.newSessionDialog().getByText("Same environment as current session");
+    return this.sessionLaunchDialog().getByText("Same environment as current session");
+  }
+
+  /** Handoff submenu trigger in session context or actions menu. */
+  handoffSubmenu(): Locator {
+    return this.page.getByTestId("session-handoff-submenu");
+  }
+
+  /** Handoff profile item in the Handoff submenu. */
+  handoffProfileItem(profileId: string): Locator {
+    return this.page.getByTestId(`handoff-profile-${profileId}`);
+  }
+
+  /** Open handoff dialog via session tab right-click context menu. */
+  async openHandoffDialog(sessionId: string, profileId: string): Promise<void> {
+    await this.sessionTabBySessionId(sessionId).click({ button: "right" });
+    await this.handoffSubmenu().hover();
+    await this.handoffProfileItem(profileId).click();
+  }
+
+  /** Open handoff dialog via mobile session row actions menu. */
+  async openMobileHandoffDialog(sessionId: string, profileId: string): Promise<void> {
+    await this.page.getByTestId("mobile-sessions-pill").click();
+    const row = this.page.getByTestId(`mobile-session-row-${sessionId}`);
+    await row.getByRole("button", { name: "Session actions" }).click();
+    await this.handoffSubmenu().hover();
+    await this.handoffProfileItem(profileId).click();
   }
 
   /** Session tab in dockview by session label (e.g., "Session 1", "Session 2"). */

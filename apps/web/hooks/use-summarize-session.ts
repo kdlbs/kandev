@@ -27,9 +27,10 @@ export function useSummarizeSession() {
       const transcript = formatTranscript(messages);
       if (!transcript) return null;
 
+      // Sessionless: handoff often runs against a completed session whose
+      // agentctl is gone. Host utility executes the builtin summarize agent.
       const result = await executeUtilityPrompt({
         utility_agent_id: "builtin-summarize-session",
-        session_id: sessionId,
         conversation_history: transcript,
       });
       return result.success ? (result.response ?? null) : null;
