@@ -14,6 +14,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/agent/settings/profileconfig"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
@@ -593,7 +594,7 @@ func settingsWithConfigOptions(raw string, options map[string]string) (string, e
 	if settings == nil {
 		settings = map[string]json.RawMessage{}
 	}
-	clean := cleanConfigOptions(options)
+	clean := profileconfig.SanitizeConfigOptions(options)
 	if len(clean) == 0 {
 		delete(settings, profileSettingsConfigOptionsKey)
 	} else {
@@ -621,26 +622,7 @@ func configOptionsFromSettings(raw string) map[string]string {
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
 		return nil
 	}
-	return cleanConfigOptions(payload.ConfigOptions)
-}
-
-func cleanConfigOptions(options map[string]string) map[string]string {
-	if len(options) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(options))
-	for key, value := range options {
-		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-		if key == "" || value == "" || key == "model" || key == "mode" {
-			continue
-		}
-		out[key] = value
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
+	return profileconfig.SanitizeConfigOptions(payload.ConfigOptions)
 }
 
 // normalizeJSONArray returns "[]" for empty values; otherwise the input. Used

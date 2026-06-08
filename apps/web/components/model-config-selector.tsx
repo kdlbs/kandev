@@ -217,8 +217,8 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
 
   const triggerClassName =
     variant === "compact"
-      ? "h-7 max-w-[min(18rem,70vw)] gap-1 px-2 text-xs hover:bg-muted/40"
-      : "h-9 w-full justify-between gap-2 px-3 text-sm";
+      ? "h-7 max-w-[min(18rem,70vw)] cursor-pointer gap-1 px-2 text-xs hover:bg-muted/40"
+      : "w-full justify-between font-normal cursor-pointer";
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -226,7 +226,7 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
         <Button
           type="button"
           variant={variant === "compact" ? "ghost" : "outline"}
-          size="sm"
+          size={variant === "compact" ? "sm" : "default"}
           className={triggerClassName}
           aria-label={ariaLabel}
           disabled={disabled}

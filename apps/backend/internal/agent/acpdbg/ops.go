@@ -354,21 +354,22 @@ func extractSelectConfigOption(newResult map[string]any, category string) (strin
 }
 
 func extractConfigOptionValues(raw any) []string {
-	if list, ok := raw.([]any); ok {
-		return extractStringField(list, "value")
-	}
-	groups, ok := raw.(map[string]any)
+	list, ok := raw.([]any)
 	if !ok {
 		return nil
 	}
 	var out []string
-	for _, rawGroup := range groups {
-		group, ok := rawGroup.(map[string]any)
+	for _, item := range list {
+		m, ok := item.(map[string]any)
 		if !ok {
 			continue
 		}
-		if list, ok := group["options"].([]any); ok {
-			out = append(out, extractStringField(list, "value")...)
+		if v, ok := m["value"].(string); ok {
+			out = append(out, v)
+			continue
+		}
+		if nested, ok := m["options"].([]any); ok {
+			out = append(out, extractStringField(nested, "value")...)
 		}
 	}
 	return out

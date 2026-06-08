@@ -72,3 +72,70 @@ func TestBuildProbeResult_PrefersLegacyModels(t *testing.T) {
 		t.Fatalf("Models = %+v, want [legacy]", got.Models)
 	}
 }
+
+func TestBuildProbeResult_PrefersLegacyModes(t *testing.T) {
+	t.Parallel()
+
+	got := buildProbeResult(Frame{}, Frame{"result": map[string]any{
+		"modes": map[string]any{
+			"currentModeId":  "legacy-mode",
+			"availableModes": []any{map[string]any{"id": "legacy-mode"}},
+		},
+		"configOptions": []any{map[string]any{
+			"category":     "mode",
+			"currentValue": "fallback-mode",
+			"type":         "select",
+			"options":      []any{map[string]any{"value": "fallback-mode"}},
+		}},
+	}})
+
+	if got.CurrentModeID != "legacy-mode" {
+		t.Fatalf("CurrentModeID = %q, want legacy-mode", got.CurrentModeID)
+	}
+	if len(got.Modes) != 1 || got.Modes[0] != "legacy-mode" {
+		t.Fatalf("Modes = %+v, want [legacy-mode]", got.Modes)
+	}
+}
+
+func TestBuildProbeResult_FallsBackToConfigOptionGroupedModels(t *testing.T) {
+	t.Parallel()
+
+	got := buildProbeResult(Frame{}, Frame{"result": map[string]any{
+		"sessionId": "session-grouped",
+		"configOptions": []any{
+			map[string]any{
+				"category":     "model",
+				"currentValue": "opus",
+				"type":         "select",
+				"options": []any{
+					map[string]any{
+						"group": "Anthropic",
+						"options": []any{
+							map[string]any{"value": "opus", "name": "Opus"},
+							map[string]any{"value": "sonnet", "name": "Sonnet"},
+						},
+					},
+					map[string]any{
+						"group": "Other",
+						"options": []any{
+							map[string]any{"value": "haiku", "name": "Haiku"},
+						},
+					},
+				},
+			},
+		},
+	}})
+
+	if got.CurrentModelID != "opus" {
+		t.Fatalf("CurrentModelID = %q, want opus", got.CurrentModelID)
+	}
+	wantModels := map[string]bool{"opus": true, "sonnet": true, "haiku": true}
+	if len(got.Models) != 3 {
+		t.Fatalf("len(Models) = %d, want 3: %v", len(got.Models), got.Models)
+	}
+	for _, model := range got.Models {
+		if !wantModels[model] {
+			t.Fatalf("unexpected model %q in %v", model, got.Models)
+		}
+	}
+}

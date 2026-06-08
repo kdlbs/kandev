@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { IconTrash } from "@tabler/icons-react";
 import { areCLIFlagsEqual } from "@/lib/cli-flags";
+import { areConfigOptionsEqual } from "@/lib/config-options";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
@@ -212,7 +213,7 @@ function useProfileEditorState(
       draft.name !== savedProfile.name ||
       draft.model !== savedProfile.model ||
       (draft.mode ?? "") !== (savedProfile.mode ?? "") ||
-      !areProfileConfigOptionsEqual(draft.configOptions, savedProfile.configOptions) ||
+      !areConfigOptionsEqual(draft.configOptions, savedProfile.configOptions) ||
       arePermissionsDirty(draft, savedProfile, permissionSettings) ||
       draft.cliPassthrough !== savedProfile.cliPassthrough ||
       !areCLIFlagsEqual(draft.cliFlags ?? [], savedProfile.cliFlags ?? []) ||
@@ -296,18 +297,6 @@ function useProfileSave({
       });
     }
   };
-}
-
-function areProfileConfigOptionsEqual(
-  a?: Record<string, string>,
-  b?: Record<string, string>,
-): boolean {
-  const left = a ?? {};
-  const right = b ?? {};
-  const leftKeys = Object.keys(left).sort();
-  const rightKeys = Object.keys(right).sort();
-  if (leftKeys.length !== rightKeys.length) return false;
-  return leftKeys.every((key, index) => key === rightKeys[index] && left[key] === right[key]);
 }
 
 function useProfileDelete(

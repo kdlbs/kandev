@@ -457,7 +457,7 @@ function CapabilitiesRow({
     return (
       <div className={gapCls}>
         <Label className={labelCls}>Start model</Label>
-        <Skeleton className="h-9 w-full" />
+        <Skeleton className="h-7 w-full" />
       </div>
     );
   }

@@ -42,6 +42,56 @@ type Applier interface {
 	SetModel(ctx context.Context, sessionID, modelID string) error
 }
 
+// SDKConn is the subset of the ACP SDK connection used to apply model changes.
+type SDKConn interface {
+	SetSessionConfigOption(context.Context, acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error)
+	UnstableSetSessionModel(context.Context, acp.UnstableSetSessionModelRequest) (acp.UnstableSetSessionModelResponse, error)
+}
+
+// SDKApplier applies model changes through a typed ACP SDK connection.
+type SDKApplier struct {
+	Conn SDKConn
+}
+
+func (a SDKApplier) SetConfigOption(ctx context.Context, sessionID, configID, value string) error {
+	_, err := a.Conn.SetSessionConfigOption(ctx, acp.SetSessionConfigOptionRequest{
+		ValueId: &acp.SetSessionConfigOptionValueId{
+			SessionId: acp.SessionId(sessionID),
+			ConfigId:  acp.SessionConfigId(configID),
+			Value:     acp.SessionConfigValueId(value),
+		},
+	})
+	return err
+}
+
+func (a SDKApplier) SetModel(ctx context.Context, sessionID, modelID string) error {
+	_, err := a.Conn.UnstableSetSessionModel(ctx, acp.UnstableSetSessionModelRequest{
+		SessionId: acp.SessionId(sessionID),
+		ModelId:   acp.UnstableModelId(modelID),
+	})
+	return err
+}
+
+// ApplySDK applies a model change through the ACP SDK connection.
+func ApplySDK(ctx context.Context, conn SDKConn, req Request) (Method, error) {
+	return Apply(ctx, SDKApplier{Conn: conn}, req)
+}
+
+// ApplySDKFromACP applies a model change using typed session config options.
+func ApplySDKFromACP(
+	ctx context.Context,
+	conn SDKConn,
+	sessionID string,
+	modelID string,
+	configOptions []acp.SessionConfigOption,
+) (Method, error) {
+	return ApplySDK(ctx, conn, Request{
+		SessionID:     sessionID,
+		ModelID:       modelID,
+		ConfigOptions: FromACP(configOptions),
+	})
+}
+
 // Apply chooses the model-switching mechanism supported by the session. Agents
 // that expose a model-shaped config option (Codex, Cursor, recent Claude) are
 // configured through session/set_config_option. If that RPC is not implemented,

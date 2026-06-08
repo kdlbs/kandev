@@ -16,6 +16,7 @@ import type {
 } from "@/lib/types/http";
 import { arePermissionsDirty, permissionsToProfilePatch } from "@/lib/agent-permissions";
 import { areCLIFlagsEqual } from "@/lib/cli-flags";
+import { areConfigOptionsEqual } from "@/lib/config-options";
 import type { ProfileFormData } from "@/components/settings/profile-form-fields";
 
 /**
@@ -319,13 +320,4 @@ export function isProfileDirty(draft: DraftProfile, saved?: AgentProfile): boole
     !areCLIFlagsEqual(draft.cliFlags ?? [], saved.cliFlags ?? []) ||
     !areEnvVarsEqual(draft.envVars, saved.envVars)
   );
-}
-
-function areConfigOptionsEqual(a?: Record<string, string>, b?: Record<string, string>): boolean {
-  const left = a ?? {};
-  const right = b ?? {};
-  const leftKeys = Object.keys(left).sort();
-  const rightKeys = Object.keys(right).sort();
-  if (leftKeys.length !== rightKeys.length) return false;
-  return leftKeys.every((key, index) => key === rightKeys[index] && left[key] === right[key]);
 }

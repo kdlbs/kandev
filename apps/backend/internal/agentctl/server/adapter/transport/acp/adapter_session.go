@@ -608,42 +608,14 @@ func (a *Adapter) SetModel(ctx context.Context, modelID string) error {
 	return nil
 }
 
-type sessionModelConn interface {
-	SetSessionConfigOption(context.Context, acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error)
-	UnstableSetSessionModel(context.Context, acp.UnstableSetSessionModelRequest) (acp.UnstableSetSessionModelResponse, error)
-}
-
-type sdkSessionModelApplier struct {
-	conn sessionModelConn
-}
-
-func (a sdkSessionModelApplier) SetConfigOption(ctx context.Context, sessionID, configID, value string) error {
-	_, err := a.conn.SetSessionConfigOption(ctx, acp.SetSessionConfigOptionRequest{
-		ValueId: &acp.SetSessionConfigOptionValueId{
-			SessionId: acp.SessionId(sessionID),
-			ConfigId:  acp.SessionConfigId(configID),
-			Value:     acp.SessionConfigValueId(value),
-		},
-	})
-	return err
-}
-
-func (a sdkSessionModelApplier) SetModel(ctx context.Context, sessionID, modelID string) error {
-	_, err := a.conn.UnstableSetSessionModel(ctx, acp.UnstableSetSessionModelRequest{
-		SessionId: acp.SessionId(sessionID),
-		ModelId:   acp.UnstableModelId(modelID),
-	})
-	return err
-}
-
 func applySessionModel(
 	ctx context.Context,
-	conn sessionModelConn,
+	conn sessionmodel.SDKConn,
 	sessionID string,
 	modelID string,
 	configOptions []streams.ConfigOption,
 ) (sessionmodel.Method, error) {
-	return sessionmodel.Apply(ctx, sdkSessionModelApplier{conn: conn}, sessionmodel.Request{
+	return sessionmodel.ApplySDK(ctx, conn, sessionmodel.Request{
 		SessionID:     sessionID,
 		ModelID:       modelID,
 		ConfigOptions: sessionmodel.FromStreams(configOptions),

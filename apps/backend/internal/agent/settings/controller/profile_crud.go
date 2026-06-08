@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/agent/settings/profileconfig"
 )
 
 type CreateProfileRequest struct {
@@ -62,7 +63,7 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		AgentDisplayName: displayName,
 		Model:            req.Model,
 		Mode:             req.Mode,
-		ConfigOptions:    normalizeProfileConfigOptions(req.ConfigOptions),
+		ConfigOptions:    profileconfig.SanitizeConfigOptions(req.ConfigOptions),
 		AllowIndexing:    req.AllowIndexing,
 		AutoApprove:      req.AutoApprove,
 		CLIPassthrough:   req.CLIPassthrough,
@@ -152,7 +153,7 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		profile.Mode = *req.Mode
 	}
 	if req.ConfigOptions != nil {
-		profile.ConfigOptions = normalizeProfileConfigOptions(*req.ConfigOptions)
+		profile.ConfigOptions = profileconfig.SanitizeConfigOptions(*req.ConfigOptions)
 	}
 	if req.AllowIndexing != nil {
 		profile.AllowIndexing = *req.AllowIndexing
@@ -378,7 +379,7 @@ func toProfileDTO(profile *models.AgentProfile) dto.AgentProfileDTO {
 		AgentDisplayName: profile.AgentDisplayName,
 		Model:            profile.Model,
 		Mode:             profile.Mode,
-		ConfigOptions:    normalizeProfileConfigOptions(profile.ConfigOptions),
+		ConfigOptions:    profileconfig.SanitizeConfigOptions(profile.ConfigOptions),
 		AllowIndexing:    profile.AllowIndexing,
 		AutoApprove:      profile.AutoApprove,
 		CLIFlags:         cliFlagsToDTO(profile.CLIFlags),
@@ -429,25 +430,6 @@ func envVarsFromDTO(in []dto.ProfileEnvVarDTO) []models.ProfileEnvVar {
 			Value:    ev.Value,
 			SecretID: ev.SecretID,
 		})
-	}
-	return out
-}
-
-func normalizeProfileConfigOptions(in map[string]string) map[string]string {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(in))
-	for key, value := range in {
-		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-		if key == "" || value == "" || key == "model" || key == "mode" {
-			continue
-		}
-		out[key] = value
-	}
-	if len(out) == 0 {
-		return nil
 	}
 	return out
 }
