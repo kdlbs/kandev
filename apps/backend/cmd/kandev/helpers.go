@@ -1001,7 +1001,7 @@ func registerExternalMCP(p routeParams) {
 	baseURL := fmt.Sprintf("http://localhost:%d", port)
 
 	backendClient := mcpserver.NewDispatcherBackendClient(p.gateway.Dispatcher, p.log)
-	srv := mcpserver.NewExternal(backendClient, baseURL, p.log, "")
+	srv := mcpserver.NewExternal(backendClient, p.log, "")
 	mcpGroup := p.router.Group("", externalMCPOpenMiddleware())
 	srv.RegisterBackendRoutes(mcpGroup)
 	if p.addCleanup != nil {

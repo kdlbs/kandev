@@ -382,7 +382,7 @@ func TestNewExternal_Constructs(t *testing.T) {
 	backend := NewChannelBackendClient(log)
 	defer backend.Close()
 
-	s := NewExternal(backend, "http://localhost:38429", log, "")
+	s := NewExternal(backend, log, "")
 	require.NotNil(t, s)
 	assert.Equal(t, ModeExternal, s.mode)
 	assert.True(t, s.disableAskQuestion)
@@ -390,4 +390,5 @@ func TestNewExternal_Constructs(t *testing.T) {
 	assert.Empty(t, s.taskID)
 	assert.NotNil(t, s.sseServer)
 	assert.NotNil(t, s.httpServer)
+	assert.Equal(t, "/mcp/message?sessionId=session-1", s.sseServer.GetMessageEndpointForClient(nil, "session-1"))
 }

@@ -119,18 +119,17 @@ func New(backend BackendClient, sessionID, taskID string, port int, log *logger.
 // NewExternal creates an MCP server for the Kandev backend's external endpoint.
 // External coding agents (Claude Code, Cursor, etc.) connect here to manage Kandev
 // configuration and create tasks. Routes are mounted under /mcp on the backend.
-//
-// baseURL is the publicly reachable backend URL (e.g. "http://localhost:38429").
-// It is used to build the message endpoint URL emitted in SSE events.
-func NewExternal(backend BackendClient, baseURL string, log *logger.Logger, mcpLogFile string) *Server {
+func NewExternal(backend BackendClient, log *logger.Logger, mcpLogFile string) *Server {
 	// External mode has no live session, so disable ask-question and use empty IDs.
 	s := newServer(backend, "", "", log, mcpLogFile, true, ModeExternal)
 
 	// SSE handlers are mounted at /mcp/sse and /mcp/message — the static base path
-	// makes the SSE endpoint event emit the correct full message URL.
+	// makes the SSE endpoint event emit /mcp/message. Keeping the message endpoint
+	// path-only lets remote clients resolve it against the URL they used to reach
+	// Kandev instead of a server-guessed localhost URL.
 	s.sseServer = server.NewSSEServer(s.mcpServer,
-		server.WithBaseURL(baseURL),
 		server.WithStaticBasePath("/mcp"),
+		server.WithUseFullURLForMessageEndpoint(false),
 	)
 
 	// Streamable HTTP transport handler — mounted at /mcp on the backend.
