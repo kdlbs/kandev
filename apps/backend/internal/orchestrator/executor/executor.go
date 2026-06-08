@@ -269,7 +269,7 @@ type LaunchAgentRequest struct {
 	ExecutorType        string            // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime
 	ExecutorConfig      map[string]string // Executor config (docker_host, git_token, etc.)
 	PreviousExecutionID string            // Previous execution ID for runtime reconnect
-	McpMode             string            // MCP tool mode: "config" activates config-mode tools
+	McpMode             string            // MCP tool mode: "task" (default), "config", or "office"
 	IsEphemeral         bool              // Ephemeral task (quick chat) — enables fallback workspace creation
 	WorkspacePath       string            // Optional host folder for repo-less tasks (overrides scratch fallback)
 
@@ -361,7 +361,7 @@ type LaunchOptions struct {
 	Prompt         string
 	WorkflowStepID string
 	StartAgent     bool
-	McpMode        string // MCP tool mode: McpModeConfig activates config-mode tools
+	McpMode        string // MCP tool mode: McpModeConfig or McpModeOffice
 	Attachments    []v1.MessageAttachment
 	Env            map[string]string
 	// RouteOverride carries a provider-routing override resolved by the

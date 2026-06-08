@@ -209,7 +209,7 @@ type InstanceConfig struct {
 	AssumeMcpHttp bool
 
 	// McpMode controls which MCP tools are registered for this instance.
-	// "task" (default) registers kanban/plan tools; "config" registers config tools.
+	// "task" (default), "config", and "office" select distinct tool surfaces.
 	McpMode string
 
 	// AuthToken is a shared secret for authenticating requests.

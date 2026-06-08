@@ -148,7 +148,7 @@ type CreateRequest struct {
 	// AssumeMcpHttp overrides MCP capability filtering to assume HTTP support.
 	AssumeMcpHttp bool `json:"assume_mcp_http,omitempty"`
 
-	// McpMode controls which MCP tools are registered: "task" (default) or "config".
+	// McpMode controls which MCP tools are registered: "task" (default), "config", or "office".
 	McpMode string `json:"mcp_mode,omitempty"`
 
 	// RequiresProcessKill forces the agent's process group to be killed on

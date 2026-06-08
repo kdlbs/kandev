@@ -400,6 +400,9 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	if req.Title == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "title is required", nil)
 	}
+	if req.AssigneeAgentProfileID != "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "assignee_agent_profile_id is office-only and cannot be set via create_task_kandev", nil)
+	}
 
 	// Default start_agent to true for backward compatibility
 	startAgent := req.StartAgent == nil || *req.StartAgent

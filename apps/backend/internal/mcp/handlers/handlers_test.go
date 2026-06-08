@@ -142,6 +142,30 @@ func TestHandleCreateTask_MissingTitle(t *testing.T) {
 	assertWSError(t, resp, ws.ErrorCodeValidation)
 }
 
+func TestHandleCreateTask_RejectsAssigneeAgentProfileID(t *testing.T) {
+	svc, _ := newTestTaskService(t)
+	ctx := context.Background()
+	workspaces, err := svc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	require.Len(t, workspaces, 1)
+	workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
+	require.NoError(t, err)
+	require.Len(t, workflows, 1)
+
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"workspace_id":              workspaces[0].ID,
+		"workflow_id":               workflows[0].ID,
+		"title":                     "Office child from kanban",
+		"assignee_agent_profile_id": "agent-inst-42",
+		"start_agent":               false,
+	})
+
+	resp, err := h.handleCreateTask(ctx, msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+}
+
 func TestSessionStateEventsIncludeUpdatedAt(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -839,16 +863,15 @@ func TestHandleCreateTask_AutoResolveFailsWithMultipleWorkflows(t *testing.T) {
 }
 
 func TestHandleCreateTask_NewFields_Unmarshalled(t *testing.T) {
-	// Verify that execution_policy and assignee_agent_profile_id are accepted
-	// in the payload without triggering a parse error. The handler will fail
-	// at the workspace_id validation stage, not at unmarshal.
+	// Verify that extra fields are tolerated by JSON decoding. Office-only
+	// assignee_agent_profile_id is covered by
+	// TestHandleCreateTask_RejectsAssigneeAgentProfileID.
 	h := &Handlers{}
 	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
-		"title":                     "My task",
-		"workspace_id":              "ws-1",
-		"workflow_id":               "wf-1",
-		"execution_policy":          `{"stages":[]}`,
-		"assignee_agent_profile_id": "agent-inst-42",
+		"title":            "My task",
+		"workspace_id":     "ws-1",
+		"workflow_id":      "wf-1",
+		"execution_policy": `{"stages":[]}`,
 	})
 
 	// taskSvc is nil so CreateTask will panic before we reach it; the payload
@@ -859,9 +882,8 @@ func TestHandleCreateTask_NewFields_Unmarshalled(t *testing.T) {
 	// a payload that fails a post-unmarshal check (missing workspace) which
 	// exercised the request struct fields.
 	msgMissingWs := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
-		"title":                     "My task",
-		"execution_policy":          `{"stages":[]}`,
-		"assignee_agent_profile_id": "agent-inst-42",
+		"title":            "My task",
+		"execution_policy": `{"stages":[]}`,
 	})
 
 	resp, err := h.handleCreateTask(context.Background(), msgMissingWs)

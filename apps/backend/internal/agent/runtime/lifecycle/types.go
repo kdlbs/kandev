@@ -360,7 +360,7 @@ type LaunchRequest struct {
 	ExecutorType        string            // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime
 	ExecutorConfig      map[string]string // Executor config (docker_host, git_token, etc.)
 	PreviousExecutionID string            // Previous execution ID for runtime reconnect
-	McpMode             string            // MCP tool mode: "config" activates config-mode tools
+	McpMode             string            // MCP tool mode: "task" (default), "config", or "office"
 
 	// Environment preparation
 	SetupScript string // Setup script to run before agent starts
