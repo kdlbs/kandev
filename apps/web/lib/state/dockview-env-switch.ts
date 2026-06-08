@@ -291,7 +291,11 @@ function tryFastEnvSwitch(params: EnvSwitchParams): LayoutGroupIds | null {
   // incoming session at this same slot *before* removing the outgoing one, so
   // removing the panels ahead of it shifts the new panel into the right final
   // position (equivalent to the old "survivor index" math, minus the group
-  // death described below).
+  // death described below). This equivalence relies on every panel that
+  // `removeEphemeralPanels` removes *ahead of* the insert position being
+  // ephemeral/stale (they'd have been excluded by the old survivor count too).
+  // If `shouldRemoveDuringSwitch` ever retains a non-stale panel before the
+  // outgoing slot, this raw index would land the new panel off by one.
   const outgoingIndex =
     outgoingGroup && outgoingSessionPanel
       ? outgoingGroup.panels.findIndex((p) => p.id === outgoingSessionPanel.id)
