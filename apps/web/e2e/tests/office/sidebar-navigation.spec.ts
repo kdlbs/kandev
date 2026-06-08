@@ -80,9 +80,10 @@ test.describe("Sidebar Home destination", () => {
     officeSeed: _,
   }) => {
     // Start from a non-home regular route so the Home click is a real
-    // navigation (not a no-op): from a Kanban-side route `useInOffice()` is
-    // false, so Home must land back on the board at `/`.
-    await testPage.goto("/settings/system/status");
+    // navigation (not a no-op): from a non-office route `useInOffice()` is
+    // false, so Home must land back on the board at `/`. Avoid settings routes
+    // because they intentionally replace the primary nav with settings mode.
+    await testPage.goto("/stats");
     const home = testPage.getByRole("link", { name: "Home", exact: true });
     await expect(home).toBeVisible({ timeout: 15_000 });
     await home.click();
