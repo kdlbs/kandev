@@ -49,7 +49,10 @@ const SESSION_ID = "session-2";
 const GROUP_ID = "group-1";
 const SEED_PROMPT = "seed prompt";
 const MESSAGE_ATTACHMENTS = ["message-attachment"];
+const SUMMARY_ACTION = "summarize:session-1";
+const SUMMARY_SESSION_ID = "session-1";
 
+// eslint-disable-next-line max-lines-per-function
 describe("useSessionContextChange", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -121,10 +124,10 @@ describe("useSessionContextChange", () => {
     );
 
     await act(async () => {
-      await result.current("summarize:session-1");
+      await result.current(SUMMARY_ACTION);
     });
 
-    expect(summarize).toHaveBeenCalledWith("session-1");
+    expect(summarize).toHaveBeenCalledWith(SUMMARY_SESSION_ID);
     expect(promptRef.current.value).toBe("summary text");
     expect(setHasPrompt).toHaveBeenCalledWith(true);
     expect(mockToast).not.toHaveBeenCalled();
@@ -147,7 +150,7 @@ describe("useSessionContextChange", () => {
     );
 
     await act(async () => {
-      await result.current("summarize:session-1");
+      await result.current(SUMMARY_ACTION);
     });
 
     expect(setContextValue).toHaveBeenCalledWith("blank");
@@ -158,6 +161,32 @@ describe("useSessionContextChange", () => {
       variant: "error",
     });
     expect(setHasPrompt).not.toHaveBeenCalled();
+  });
+
+  it("does not toast when summarize succeeds after prompt ref unmounts", async () => {
+    const promptRef = { current: null as HTMLTextAreaElement | null };
+    const summarize = vi.fn().mockResolvedValue("summary text");
+    const setContextValue = vi.fn();
+    const setHasPrompt = vi.fn();
+    const { result } = renderHook(() =>
+      useSessionContextChange({
+        promptRef,
+        initialPrompt: null,
+        summarize,
+        toast: mockToast,
+        setContextValue,
+        setHasPrompt,
+      }),
+    );
+
+    await act(async () => {
+      await result.current(SUMMARY_ACTION);
+    });
+
+    expect(summarize).toHaveBeenCalledWith(SUMMARY_SESSION_ID);
+    expect(setContextValue).toHaveBeenCalledWith(SUMMARY_ACTION);
+    expect(setHasPrompt).not.toHaveBeenCalled();
+    expect(mockToast).not.toHaveBeenCalled();
   });
 });
 

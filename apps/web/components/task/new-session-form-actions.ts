@@ -35,10 +35,7 @@ export function useSessionContextChange(opts: SessionContextChangeOpts) {
       } else if (value.startsWith("summarize:")) {
         const sessionId = value.slice("summarize:".length);
         const result = await summarize(sessionId);
-        if (result && promptRef.current) {
-          promptRef.current.value = result;
-          setHasPrompt(true);
-        } else {
+        if (result === null) {
           setContextValue("blank");
           toast({
             title: "Summarize failed",
@@ -46,6 +43,9 @@ export function useSessionContextChange(opts: SessionContextChangeOpts) {
               "Could not generate a summary. Check that the summarize utility agent is configured and enabled in settings.",
             variant: "error",
           });
+        } else if (promptRef.current) {
+          promptRef.current.value = result;
+          setHasPrompt(true);
         }
       }
     },

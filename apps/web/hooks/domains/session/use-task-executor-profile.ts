@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { fetchTaskEnvironment } from "@/lib/api/domains/task-environment-api";
 import type { ExecutorProfile } from "@/lib/types/http";
@@ -18,10 +18,9 @@ export function useTaskExecutorProfile(taskId: string, enabled = true): Executor
   );
   const executorsRef = useRef(executors);
   const [profile, setProfile] = useState<ExecutorProfile | null>(null);
-
-  useEffect(() => {
+  useLayoutEffect(() => {
     executorsRef.current = executors;
-  }, [executors, executorsFingerprint]);
+  }, [executors]);
 
   useEffect(() => {
     if (!enabled || !taskId) return;
