@@ -92,7 +92,8 @@ func (c *Controller) GetTemplateVariables(ctx context.Context) *dto.TemplateVari
 }
 
 // PreparePromptRequest prepares a prompt request by resolving the template.
-// If defaults is provided and the utility agent has empty agent_id/model, the defaults are used.
+// If defaults is provided and the utility agent has no model, the default
+// agent/model pair is used.
 func (c *Controller) PreparePromptRequest(ctx context.Context, req dto.ExecutePromptRequest, defaults *service.DefaultUtilitySettings, sessionless bool) (*service.PromptRequest, error) {
 	tmplCtx := &template.Context{
 		GitDiff:             req.GitDiff,

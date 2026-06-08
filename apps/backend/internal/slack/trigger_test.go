@@ -179,11 +179,13 @@ func (f fakeUtility) PreparePromptRequest(
 		return nil, err
 	}
 	agentCLI, model := a.AgentID, a.Model
-	if agentCLI == "" && defaults != nil {
-		agentCLI = defaults.AgentID
-	}
-	if model == "" && defaults != nil {
-		model = defaults.Model
+	if defaults != nil {
+		if model == "" {
+			agentCLI = defaults.AgentID
+			model = defaults.Model
+		} else if agentCLI == "" {
+			agentCLI = defaults.AgentID
+		}
 	}
 	return &utilityservice.PromptRequest{
 		UtilityID:      utilityID,
