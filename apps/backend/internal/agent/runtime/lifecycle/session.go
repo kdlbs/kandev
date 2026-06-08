@@ -12,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agent/settings/profileconfig"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/appctx"
@@ -360,25 +361,21 @@ func (sm *SessionManager) InitializeAndPrompt(
 
 	// Apply any dynamic ACP config options saved on the profile. Model and
 	// mode are handled above so their existing semantics stay unchanged.
-	if len(profileConfigOptions) > 0 && execution.agentctl != nil {
-		for configID, value := range profileConfigOptions {
-			configID = strings.TrimSpace(configID)
-			value = strings.TrimSpace(value)
-			if configID == "" || value == "" || configID == "model" || configID == "mode" {
-				continue
-			}
-			if err := execution.agentctl.SetConfigOption(ctx, configID, value); err != nil {
-				sm.logger.Warn("failed to set profile config option via ACP",
-					zap.String("execution_id", execution.ID),
-					zap.String("config_id", configID),
-					zap.String("value", value),
-					zap.Error(err))
-			} else {
-				sm.logger.Info("set profile config option on ACP session",
-					zap.String("execution_id", execution.ID),
-					zap.String("config_id", configID),
-					zap.String("value", value))
-			}
+	for configID, value := range profileconfig.SanitizeConfigOptions(profileConfigOptions) {
+		if execution.agentctl == nil {
+			break
+		}
+		if err := execution.agentctl.SetConfigOption(ctx, configID, value); err != nil {
+			sm.logger.Warn("failed to set profile config option via ACP",
+				zap.String("execution_id", execution.ID),
+				zap.String("config_id", configID),
+				zap.String("value", value),
+				zap.Error(err))
+		} else {
+			sm.logger.Info("set profile config option on ACP session",
+				zap.String("execution_id", execution.ID),
+				zap.String("config_id", configID),
+				zap.String("value", value))
 		}
 	}
 

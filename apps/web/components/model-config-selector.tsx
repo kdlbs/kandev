@@ -163,7 +163,7 @@ function ConfigOptionSection({
             type="button"
             variant={item.value === option.currentValue ? "secondary" : "ghost"}
             size="sm"
-            className="h-9 min-w-0 justify-start px-2 text-left"
+            className="h-9 min-w-0 cursor-pointer justify-start px-2 text-left"
             disabled={!onChange}
             onClick={() => onChange?.(option.id, item.value)}
           >
