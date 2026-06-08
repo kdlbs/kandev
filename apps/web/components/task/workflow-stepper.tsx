@@ -103,8 +103,7 @@ const WorkflowStepper = memo(function WorkflowStepper({
     [taskId, workflowId, disablePlanMode],
   );
 
-  // Collapse to a minimal view when the full stepper can't fit; `w-full` keeps
-  // clientWidth track-driven so the collapse decision stays stable.
+  // Collapse to a minimal view when the full stepper can't fit (w-full keeps the measurement track-driven).
   const containerRef = useRef<HTMLDivElement>(null);
   const isCollapsed = useToolbarCollapsed(containerRef);
 
@@ -153,10 +152,7 @@ const WorkflowStepper = memo(function WorkflowStepper({
   );
 });
 
-/** Minimal stepper shown when there isn't room for the full version: renders
- *  only the current step (or the archived badge). Keeps the same
- *  `workflow-step-<name>` test id + `aria-current` on the active step so it
- *  stays selectable regardless of which variant is on screen. */
+/** Minimal stepper: current step only (or archived badge), keeping the per-step test id + aria-current. */
 function MinimalWorkflowStepper({
   sortedSteps,
   currentIndex,
@@ -168,7 +164,10 @@ function MinimalWorkflowStepper({
 }) {
   if (isArchived) {
     return (
-      <span className="text-[11px] font-medium text-amber-500 bg-amber-500/15 px-2 py-0.5 rounded-md whitespace-nowrap">
+      <span
+        data-testid="workflow-stepper-minimal"
+        className="text-[11px] font-medium text-amber-500 bg-amber-500/15 px-2 py-0.5 rounded-md whitespace-nowrap"
+      >
         Archived
       </span>
     );

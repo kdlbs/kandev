@@ -79,6 +79,9 @@ describe("WorkflowStepper", () => {
     render(<WorkflowStepper steps={STEPS} currentStepId="b" isArchived />);
 
     expect(screen.getByText("Archived")).toBeTruthy();
+    // Archived badge carries the minimal test id so collapsed-mode detection
+    // works for archived tasks too.
+    expect(screen.getByTestId("workflow-stepper-minimal")).toBeTruthy();
     expect(screen.queryByTestId("workflow-step-Work")).toBeNull();
   });
 
