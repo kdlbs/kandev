@@ -192,6 +192,7 @@
     scrollbar-width: thin;
     scrollbar-color: var(--scrollbar-thumb) transparent;
   }
+  /* App shell: lock the document to the viewport; each route owns its scroll container. */
   html,
   body {
     @apply h-full overflow-hidden overscroll-none;
