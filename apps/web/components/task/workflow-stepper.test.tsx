@@ -7,8 +7,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-// Drive the collapse decision directly instead of relying on layout
-// measurement, which the test DOM can't perform (offsetWidth is always 0).
+// useToolbarCollapsed is mocked because the test DOM can't measure offsetWidth.
 const collapsedMock = vi.fn(() => false);
 vi.mock("@/hooks/use-toolbar-collapsed", () => ({
   useToolbarCollapsed: () => collapsedMock(),
@@ -50,13 +49,11 @@ describe("WorkflowStepper", () => {
     collapsedMock.mockReturnValue(true);
     render(<WorkflowStepper steps={STEPS} currentStepId="b" />);
 
-    // Outer container persists across variants (keeps the e2e locator stable);
-    // the minimal child marks the collapsed state.
+    // Outer container persists across variants (stable e2e locator); minimal child marks collapsed state.
     expect(screen.getByTestId("workflow-stepper")).toBeTruthy();
     expect(screen.getByTestId("workflow-stepper-minimal")).toBeTruthy();
 
-    // Only the current step is shown, and it keeps its test id + aria-current
-    // so it stays selectable in either variant.
+    // Current step keeps its test id + aria-current in either variant.
     const current = screen.getByTestId("workflow-step-Work");
     expect(current.getAttribute("aria-current")).toBe("step");
     expect(screen.queryByTestId("workflow-step-Spec")).toBeNull();
@@ -79,8 +76,7 @@ describe("WorkflowStepper", () => {
     render(<WorkflowStepper steps={STEPS} currentStepId="b" isArchived />);
 
     expect(screen.getByText("Archived")).toBeTruthy();
-    // Archived badge carries the minimal test id so collapsed-mode detection
-    // works for archived tasks too.
+    // Archived badge carries the minimal test id for collapsed-mode detection.
     expect(screen.getByTestId("workflow-stepper-minimal")).toBeTruthy();
     expect(screen.queryByTestId("workflow-step-Work")).toBeNull();
   });
