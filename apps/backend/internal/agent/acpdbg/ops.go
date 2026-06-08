@@ -324,13 +324,54 @@ func parseSessionResult(newResult map[string]any, out *ProbeResult) {
 		if avail, ok := models["availableModels"].([]any); ok {
 			out.Models = extractStringField(avail, "modelId")
 		}
+	} else {
+		out.CurrentModelID, out.Models = extractSelectConfigOption(newResult, "model")
 	}
 	if modes, ok := newResult["modes"].(map[string]any); ok {
 		out.CurrentModeID, _ = modes["currentModeId"].(string)
 		if avail, ok := modes["availableModes"].([]any); ok {
 			out.Modes = extractStringField(avail, "id")
 		}
+	} else {
+		out.CurrentModeID, out.Modes = extractSelectConfigOption(newResult, "mode")
 	}
+}
+
+func extractSelectConfigOption(newResult map[string]any, category string) (string, []string) {
+	opts, ok := newResult["configOptions"].([]any)
+	if !ok {
+		return "", nil
+	}
+	for _, item := range opts {
+		opt, ok := item.(map[string]any)
+		if !ok || opt["category"] != category || opt["type"] != "select" {
+			continue
+		}
+		current, _ := opt["currentValue"].(string)
+		return current, extractConfigOptionValues(opt["options"])
+	}
+	return "", nil
+}
+
+func extractConfigOptionValues(raw any) []string {
+	if list, ok := raw.([]any); ok {
+		return extractStringField(list, "value")
+	}
+	groups, ok := raw.(map[string]any)
+	if !ok {
+		return nil
+	}
+	var out []string
+	for _, rawGroup := range groups {
+		group, ok := rawGroup.(map[string]any)
+		if !ok {
+			continue
+		}
+		if list, ok := group["options"].([]any); ok {
+			out = append(out, extractStringField(list, "value")...)
+		}
+	}
+	return out
 }
 
 // extractStringField pulls a string field from each map entry in the list.
