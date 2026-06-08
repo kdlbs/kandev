@@ -103,11 +103,8 @@ const WorkflowStepper = memo(function WorkflowStepper({
     [taskId, workflowId, disablePlanMode],
   );
 
-  // When the full stepper outgrows the available horizontal space (small
-  // windows), collapse it to a minimal "current step only" view so it stops
-  // overlapping the top-bar action buttons. The container fills the grid track
-  // (`w-full`), so its width is content-independent and the collapse decision
-  // stays stable across the full/minimal swap.
+  // Collapse to a minimal view when the full stepper can't fit; `w-full` keeps
+  // clientWidth track-driven so the collapse decision stays stable.
   const containerRef = useRef<HTMLDivElement>(null);
   const isCollapsed = useToolbarCollapsed(containerRef);
 
