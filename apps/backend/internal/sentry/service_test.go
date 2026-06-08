@@ -413,3 +413,84 @@ func TestService_ClientFor_InvalidateDuringBuild(t *testing.T) {
 		t.Errorf("expected factory called at least twice (once per clientFor after invalidation), got %d", got)
 	}
 }
+
+func TestService_SetConfig_DefaultsURLToSentryIO(t *testing.T) {
+	f := newSvcFixture(t)
+	cfg, err := f.svc.SetConfig(context.Background(), &SetConfigRequest{
+		AuthMethod: AuthMethodAuthToken, Secret: "tok",
+	})
+	if err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	if cfg.URL != DefaultSentryURL {
+		t.Errorf("expected URL defaulted to %q, got %q", DefaultSentryURL, cfg.URL)
+	}
+}
+
+func TestService_SetConfig_NormalizesAndPersistsURL(t *testing.T) {
+	f := newSvcFixture(t)
+	cfg, err := f.svc.SetConfig(context.Background(), &SetConfigRequest{
+		AuthMethod: AuthMethodAuthToken, Secret: "tok", URL: "sentry.example.com/",
+	})
+	if err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	if cfg.URL != "https://sentry.example.com" {
+		t.Errorf("expected normalized URL, got %q", cfg.URL)
+	}
+}
+
+func TestService_SetConfig_RejectsMalformedURL(t *testing.T) {
+	f := newSvcFixture(t)
+	_, err := f.svc.SetConfig(context.Background(), &SetConfigRequest{
+		AuthMethod: AuthMethodAuthToken, Secret: "tok", URL: "ftp://nope",
+	})
+	if err == nil {
+		t.Error("expected validation error for non-http(s) URL")
+	}
+}
+
+// TestService_TestConnection_PassesConfiguredURL ensures a pre-save test uses
+// the URL the user typed in the form, so a self-hosted instance can be
+// validated before the config is persisted.
+func TestService_TestConnection_PassesConfiguredURL(t *testing.T) {
+	f := newSvcFixture(t)
+	var sawURL string
+	f.svc.clientFn = func(cfg *SentryConfig, _ string) Client {
+		sawURL = cfg.URL
+		return f.client
+	}
+	if _, err := f.svc.TestConnection(context.Background(), &SetConfigRequest{
+		AuthMethod: AuthMethodAuthToken, Secret: "inline", URL: "https://sentry.example.com",
+	}); err != nil {
+		t.Fatalf("test: %v", err)
+	}
+	if sawURL != "https://sentry.example.com" {
+		t.Errorf("expected configured URL passed to client, got %q", sawURL)
+	}
+}
+
+// TestService_TestConnection_FallsBackToStoredURL covers the post-save "Test
+// connection" path (blank secret, blank URL in the request): the stored
+// instance URL must be used rather than silently reverting to sentry.io.
+func TestService_TestConnection_FallsBackToStoredURL(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	if _, err := f.svc.SetConfig(ctx, &SetConfigRequest{
+		AuthMethod: AuthMethodAuthToken, Secret: "stored", URL: "https://sentry.example.com",
+	}); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	waitForAuthProbe(t, f)
+	var sawURL string
+	f.svc.clientFn = func(cfg *SentryConfig, _ string) Client {
+		sawURL = cfg.URL
+		return f.client
+	}
+	if _, err := f.svc.TestConnection(ctx, &SetConfigRequest{AuthMethod: AuthMethodAuthToken}); err != nil {
+		t.Fatalf("test: %v", err)
+	}
+	if sawURL != "https://sentry.example.com" {
+		t.Errorf("expected stored URL used, got %q", sawURL)
+	}
+}

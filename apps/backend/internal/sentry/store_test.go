@@ -130,3 +130,63 @@ func TestStore_UpdateAuthHealth(t *testing.T) {
 		t.Errorf("expected last_error preserved, got %q", cfg.LastError)
 	}
 }
+
+func TestStore_UpsertGetConfig_RoundTripsURL(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	cfg := &SentryConfig{AuthMethod: AuthMethodAuthToken, URL: "https://sentry.example.com"}
+	if err := store.UpsertConfig(ctx, cfg); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	got, err := store.GetConfig(ctx)
+	if err != nil || got == nil {
+		t.Fatalf("get: %v / %v", err, got)
+	}
+	if got.URL != "https://sentry.example.com" {
+		t.Errorf("url not persisted: got %q", got.URL)
+	}
+}
+
+// TestStore_MigratesURLColumn seeds a pre-self-hosted sentry_configs table (no
+// url column) and verifies NewStore adds the column, backfilling the existing
+// SaaS row to the sentry.io default rather than an empty string.
+func TestStore_MigratesURLColumn(t *testing.T) {
+	raw, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	raw.SetMaxOpenConns(1)
+	raw.SetMaxIdleConns(1)
+	db := sqlx.NewDb(raw, "sqlite3")
+	t.Cleanup(func() { _ = db.Close() })
+
+	now := time.Now().UTC()
+	if _, err := db.Exec(`
+		CREATE TABLE sentry_configs (
+			id TEXT PRIMARY KEY CHECK(id = 'singleton'),
+			auth_method TEXT NOT NULL,
+			last_checked_at DATETIME,
+			last_ok INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)`); err != nil {
+		t.Fatalf("create legacy schema: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO sentry_configs (id, auth_method, created_at, updated_at)
+		VALUES ('singleton', ?, ?, ?)`, AuthMethodAuthToken, now, now); err != nil {
+		t.Fatalf("seed legacy row: %v", err)
+	}
+
+	store, err := NewStore(db, db)
+	if err != nil {
+		t.Fatalf("new store (migrate): %v", err)
+	}
+	cfg, err := store.GetConfig(context.Background())
+	if err != nil || cfg == nil {
+		t.Fatalf("get after migrate: %v / %v", err, cfg)
+	}
+	if cfg.URL != DefaultSentryURL {
+		t.Errorf("expected legacy row backfilled to %q, got %q", DefaultSentryURL, cfg.URL)
+	}
+}

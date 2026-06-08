@@ -37,13 +37,20 @@ export async function deleteSentryConfig(options?: ApiRequestOptions) {
   });
 }
 
-export async function testSentryConnection(secret?: string, options?: ApiRequestOptions) {
+export async function testSentryConnection(
+  secret?: string,
+  url?: string,
+  options?: ApiRequestOptions,
+) {
+  const payload: { secret?: string; url?: string } = {};
+  if (secret) payload.secret = secret;
+  if (url) payload.url = url;
   return fetchJson<TestSentryConnectionResult>(`/api/v1/sentry/config/test`, {
     ...options,
     init: {
       ...(options?.init ?? {}),
       method: "POST",
-      body: JSON.stringify(secret ? { secret } : {}),
+      body: JSON.stringify(payload),
     },
   });
 }

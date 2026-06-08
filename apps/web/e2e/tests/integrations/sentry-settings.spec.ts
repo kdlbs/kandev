@@ -36,4 +36,35 @@ test.describe("Sentry settings", () => {
     await expect(settings.saveButton).toHaveText(/Update/i);
     await expect(settings.deleteButton).toBeVisible();
   });
+
+  // Self-hosted support: the instance URL defaults to sentry.io, accepts a
+  // custom host, and persists across reload via the saved config.
+  test("defaults the instance URL and persists a self-hosted URL", async ({
+    testPage,
+    apiClient,
+  }) => {
+    await apiClient.mockSentryReset();
+    await apiClient.mockSentrySetAuthResult({
+      ok: true,
+      userId: "u-2",
+      displayName: "Self Hosted",
+    });
+
+    const settings = new SentrySettingsPage(testPage);
+    await settings.goto();
+
+    // The URL field is pre-filled with the SaaS default.
+    await expect(settings.urlInput).toHaveValue("https://sentry.io");
+
+    // Point it at a self-hosted instance and save with a token.
+    await settings.urlInput.fill("https://sentry.acme.example.com");
+    await settings.secretInput.fill(TOKEN);
+    await settings.saveButton.click();
+    await expect(settings.saveButton).toHaveText(/Update/i);
+    await apiClient.waitForIntegrationAuthHealthy("sentry");
+
+    // Reload: the custom instance URL round-trips through the saved config.
+    await settings.goto();
+    await expect(settings.urlInput).toHaveValue("https://sentry.acme.example.com");
+  });
 });
