@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { cn } from "@kandev/ui/lib/utils";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@kandev/ui/hover-card";
 import { Button } from "@kandev/ui/button";
@@ -11,6 +11,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { useLayoutStore } from "@/lib/state/layout-store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { useToolbarCollapsed } from "@/hooks/use-toolbar-collapsed";
 import type { KanbanStepEvents } from "@/lib/state/slices/kanban/types";
 
 type Step = {
@@ -102,37 +103,105 @@ const WorkflowStepper = memo(function WorkflowStepper({
     [taskId, workflowId, disablePlanMode],
   );
 
+  // When the full stepper outgrows the available horizontal space (small
+  // windows), collapse it to a minimal "current step only" view so it stops
+  // overlapping the top-bar action buttons. The container fills the grid track
+  // (`w-full`), so its width is content-independent and the collapse decision
+  // stays stable across the full/minimal swap.
+  const containerRef = useRef<HTMLDivElement>(null);
+  const isCollapsed = useToolbarCollapsed(containerRef);
+
   if (sortedSteps.length === 0) return null;
 
   return (
     <div
-      data-testid="workflow-stepper"
-      className="flex items-center gap-0 overflow-x-auto flex-shrink min-w-0 mx-2"
+      ref={containerRef}
+      className="flex w-full min-w-0 items-center justify-center gap-0 overflow-hidden mx-2"
     >
-      {sortedSteps.map((step, index) => (
-        <WorkflowStepItem
-          key={step.id}
-          step={step}
-          index={index}
+      {isCollapsed ? (
+        <MinimalWorkflowStepper
+          sortedSteps={sortedSteps}
           currentIndex={currentIndex}
           isArchived={isArchived}
-          taskId={taskId}
-          workflowId={workflowId}
-          movingToStepId={movingToStepId}
-          onMove={handleMove}
         />
-      ))}
-      {isArchived && (
+      ) : (
         <>
-          <div className="h-px w-6 shrink-0 bg-border" />
-          <span className="text-[11px] font-medium text-amber-500 bg-amber-500/15 px-2 py-0.5 rounded-md whitespace-nowrap">
-            Archived
-          </span>
+          <div data-testid="workflow-stepper" className="flex items-center gap-0">
+            {sortedSteps.map((step, index) => (
+              <WorkflowStepItem
+                key={step.id}
+                step={step}
+                index={index}
+                currentIndex={currentIndex}
+                isArchived={isArchived}
+                taskId={taskId}
+                workflowId={workflowId}
+                movingToStepId={movingToStepId}
+                onMove={handleMove}
+              />
+            ))}
+          </div>
+          {isArchived && (
+            <>
+              <div className="h-px w-6 shrink-0 bg-border" />
+              <span className="text-[11px] font-medium text-amber-500 bg-amber-500/15 px-2 py-0.5 rounded-md whitespace-nowrap">
+                Archived
+              </span>
+            </>
+          )}
         </>
       )}
     </div>
   );
 });
+
+/** Minimal stepper shown when there isn't room for the full version: renders
+ *  only the current step (or the archived badge). Keeps the same
+ *  `workflow-step-<name>` test id + `aria-current` on the active step so it
+ *  stays selectable regardless of which variant is on screen. */
+function MinimalWorkflowStepper({
+  sortedSteps,
+  currentIndex,
+  isArchived,
+}: {
+  sortedSteps: Step[];
+  currentIndex: number;
+  isArchived?: boolean;
+}) {
+  if (isArchived) {
+    return (
+      <span className="text-[11px] font-medium text-amber-500 bg-amber-500/15 px-2 py-0.5 rounded-md whitespace-nowrap">
+        Archived
+      </span>
+    );
+  }
+
+  const current = currentIndex >= 0 ? sortedSteps[currentIndex] : sortedSteps[0];
+  if (!current) return null;
+
+  return (
+    <div
+      data-testid="workflow-stepper-minimal"
+      className="flex min-w-0 items-center gap-1.5 rounded-md px-2 py-0.5"
+    >
+      <div
+        data-testid={`workflow-step-${current.name}`}
+        aria-current="step"
+        className="flex min-w-0 items-center gap-1.5 text-xs"
+      >
+        <StepCircleIndicator isCurrent isCompleted={false} />
+        <span className="truncate text-xs font-medium leading-none text-foreground">
+          {current.name}
+        </span>
+      </div>
+      {sortedSteps.length > 1 && (
+        <span className="shrink-0 text-[11px] tabular-nums leading-none text-muted-foreground">
+          {(currentIndex >= 0 ? currentIndex : 0) + 1}/{sortedSteps.length}
+        </span>
+      )}
+    </div>
+  );
+}
 
 /** Check if a step can be moved to */
 function canMoveToStep(params: {
