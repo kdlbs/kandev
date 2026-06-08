@@ -168,3 +168,37 @@ func TestPreparePromptRequest_PreservesConfiguredAgentAndModelWithoutDefaults(t 
 		t.Fatalf("Model = %q, want %q", req.Model, "custom-model")
 	}
 }
+
+func TestPreparePromptRequest_IgnoresDefaultsWhenAgentAndModelAreConfigured(t *testing.T) {
+	t.Parallel()
+
+	svc := NewService(&fakeRepository{agents: map[string]*models.UtilityAgent{
+		"custom": {
+			ID:      "custom",
+			Prompt:  "Do {{UserPrompt}}",
+			AgentID: "custom-acp",
+			Model:   "custom-model",
+		},
+	}})
+
+	req, err := svc.PreparePromptRequest(
+		context.Background(),
+		"custom",
+		&template.Context{UserPrompt: "fix the bug"},
+		&DefaultUtilitySettings{
+			AgentID: "default-acp",
+			Model:   "default-model",
+		},
+		false,
+	)
+	if err != nil {
+		t.Fatalf("PreparePromptRequest() error = %v", err)
+	}
+
+	if req.AgentCLI != "custom-acp" {
+		t.Fatalf("AgentCLI = %q, want %q", req.AgentCLI, "custom-acp")
+	}
+	if req.Model != "custom-model" {
+		t.Fatalf("Model = %q, want %q", req.Model, "custom-model")
+	}
+}
