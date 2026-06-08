@@ -55,8 +55,9 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 	a.mu.Lock()
 	a.sessionID = string(resp.SessionId)
 	sessionID := a.sessionID
-	if resp.Models != nil {
-		a.availableModels = resp.Models.AvailableModels
+	initialModels := initialSessionModelState(resp.Models, resp.Meta, resp.ConfigOptions)
+	if initialModels != nil {
+		a.availableModels = initialModels.AvailableModels
 	}
 	a.mu.Unlock()
 	a.attachMgr.SetSessionID(sessionID)
@@ -69,9 +70,10 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 		a.emitInitialModeState(resp.Modes)
 	}
 
-	// Emit session models if the agent returned model state
-	if resp.Models != nil {
-		a.emitSessionModels(sessionID, resp.Models, resp.Meta, resp.ConfigOptions)
+	// Emit session models if the agent returned model state, or if it exposes
+	// model selection only through configOptions.
+	if initialModels != nil {
+		a.emitSessionModels(sessionID, initialModels, resp.Meta, resp.ConfigOptions)
 	}
 
 	// Emit session status event to normalize with other adapters.
@@ -87,6 +89,30 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 	})
 
 	return sessionID, nil
+}
+
+func initialSessionModelState(
+	models *acp.SessionModelState,
+	meta map[string]any,
+	configOptions []acp.SessionConfigOption,
+) *acp.SessionModelState {
+	if models != nil {
+		return models
+	}
+	if hasModelConfigOption(convertACPConfigOptions(configOptions)) ||
+		hasModelConfigOption(extractConfigOptions(meta)) {
+		return &acp.SessionModelState{}
+	}
+	return nil
+}
+
+func hasModelConfigOption(options []streams.ConfigOption) bool {
+	for _, option := range options {
+		if option.ID == configOptionIDModel || option.Category == configOptionIDModel {
+			return true
+		}
+	}
+	return false
 }
 
 // effectiveMcpCapabilities applies the adapter's AssumeMcpSse/AssumeMcpHttp
