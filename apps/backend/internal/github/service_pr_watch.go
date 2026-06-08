@@ -884,7 +884,10 @@ func (s *Service) triggerPRStatusSync(ctx context.Context, watch *PRWatch, taskI
 		}
 		if existing, loadErr := loadTaskPR(bgCtx); loadErr != nil {
 			return nil, loadErr
-		} else if existing == nil {
+		} else if existing == nil && status.PR != nil {
+			// Gap-fill a numbered watch whose exact task_pr row was never
+			// created. AssociatePRWithTask publishes the creation event; the
+			// following SyncTaskPR may publish again if status fields changed.
 			if _, assocErr := s.AssociatePRWithTask(bgCtx, taskID, watch.RepositoryID, status.PR); assocErr != nil {
 				return nil, assocErr
 			}

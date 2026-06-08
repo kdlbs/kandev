@@ -379,3 +379,30 @@ func TestApplyBatchedNumberedWatch_AssociatesExactPRWhenSiblingExists(t *testing
 		t.Fatalf("expected exact PR #1299 open row, got %+v", got)
 	}
 }
+
+func TestApplyBatchedNumberedWatch_MissingPRDataDoesNotPanic(t *testing.T) {
+	_, svc, _, store := setupPollerTest(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-1", false)
+
+	now := time.Now().UTC()
+	watch, err := svc.CreatePRWatch(ctx, "session-1", "task-1", "repo-1", "owner", "repo", 1299, "feature/second")
+	if err != nil {
+		t.Fatalf("CreatePRWatch: %v", err)
+	}
+
+	result := svc.applyBatchedNumberedWatch(ctx, watch, map[string]*PRStatus{
+		prStatusCacheKey("owner", "repo", 1299): &PRStatus{ChecksState: "pending"},
+	}, now)
+	if !result.SyncFailed {
+		t.Fatal("batched sync should fail without PR data")
+	}
+
+	got, err := store.GetTaskPRByRepoAndNumber(ctx, "task-1", "repo-1", 1299)
+	if err != nil {
+		t.Fatalf("GetTaskPRByRepoAndNumber: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("expected no task PR row without PR data, got %+v", got)
+	}
+}
