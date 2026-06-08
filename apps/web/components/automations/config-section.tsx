@@ -11,6 +11,7 @@ import { discoverRepositoriesAction } from "@/app/actions/workspaces";
 import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
 import type { LocalRepository, Repository } from "@/lib/types/http";
 import type { ExecutionMode, TriggerType } from "@/lib/types/automation";
+import { RequiredFieldLabel } from "./required-field-label";
 
 // RepositorySelection mirrors the task-create dialog's two-tier model: a
 // registered workspace repository (keyed by id) OR a filesystem-discovered
@@ -121,6 +122,12 @@ function useDiscoveredRepositories(workspaceId: string) {
 
 type StepOption = { id: string; name: string };
 
+function getWorkflowStepHelpText(workflowId: string, workflowStepId: string): string | undefined {
+  if (!workflowId) return "Select a workflow before choosing a step.";
+  if (!workflowStepId) return "Select a workflow step to enable saving.";
+  return undefined;
+}
+
 function useWorkflowSteps(workflowId: string) {
   const [steps, setSteps] = useState<StepOption[]>([]);
 
@@ -190,7 +197,7 @@ export function ConfigSection({
       <Label className="text-xs uppercase tracking-wider text-muted-foreground">
         Configuration
       </Label>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <SelectField
           testId="execution-mode-selector"
           label="Execution Mode"
@@ -269,20 +276,23 @@ function WorkflowFields({
       <SelectField
         testId="workflow-selector"
         label="Workflow"
+        required
         value={workflowId}
         onChange={onWorkflowChange}
         placeholder="Select workflow"
         items={workflows.map((w) => ({ id: w.id, label: w.name }))}
+        helpText={!hasWorkflow ? "Select a workflow to enable saving." : undefined}
       />
       <SelectField
         testId="workflow-step-selector"
         label="Workflow Step"
+        required
         value={workflowStepId}
         onChange={onStepChange}
         placeholder={hasWorkflow ? "Select step" : "Pick a workflow first"}
         items={steps.map((s) => ({ id: s.id, label: s.name }))}
         disabled={!hasWorkflow}
-        helpText={hasWorkflow ? undefined : "Pick a workflow above to load its steps."}
+        helpText={getWorkflowStepHelpText(workflowId, workflowStepId)}
       />
     </>
   );
@@ -297,6 +307,7 @@ function SelectField({
   items,
   disabled,
   helpText,
+  required,
 }: {
   testId?: string;
   label: string;
@@ -306,12 +317,21 @@ function SelectField({
   items: Array<{ id: string; label: string }>;
   disabled?: boolean;
   helpText?: string;
+  required?: boolean;
 }) {
   return (
     <div className="space-y-1.5">
-      <Label className="text-xs">{label}</Label>
+      {required ? (
+        <RequiredFieldLabel className="text-xs">{label}</RequiredFieldLabel>
+      ) : (
+        <Label className="text-xs">{label}</Label>
+      )}
       <Select value={value || undefined} onValueChange={onChange} disabled={disabled}>
-        <SelectTrigger data-testid={testId} className="cursor-pointer">
+        <SelectTrigger
+          data-testid={testId}
+          className="cursor-pointer"
+          aria-invalid={required && !value ? true : undefined}
+        >
           <SelectValue placeholder={placeholder} />
         </SelectTrigger>
         <SelectContent>

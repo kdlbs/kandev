@@ -30,6 +30,7 @@ import { PromptSection } from "./prompt-section";
 import { ConfigSection } from "./config-section";
 import { RunsSection } from "./runs-section";
 import { WebhookCreatedDialog } from "./webhook-created-dialog";
+import { RequiredFieldLabel } from "./required-field-label";
 import {
   type CreatedWebhookDetails,
   type FormState,
@@ -353,14 +354,20 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
   return (
     <div className="max-w-3xl space-y-6" data-testid="automation-editor">
       <div className="space-y-2">
-        <Label htmlFor="automation-name">Name</Label>
+        <RequiredFieldLabel htmlFor="automation-name">Name</RequiredFieldLabel>
         <Input
           id="automation-name"
           data-testid="automation-name-input"
           value={form.name}
           onChange={(e) => updateField("name", e.target.value)}
           placeholder="Automation name"
+          aria-invalid={!form.name.trim() ? true : undefined}
         />
+        {!form.name.trim() && (
+          <p className="text-xs text-muted-foreground">
+            Enter an automation name to enable saving.
+          </p>
+        )}
       </div>
       <Separator />
       <WhenSection
