@@ -292,8 +292,9 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 
 	a.mu.Lock()
 	a.sessionID = sessionID
-	if resp.Models != nil {
-		a.availableModels = resp.Models.AvailableModels
+	initialModels := initialSessionModelState(resp.Models, resp.Meta, resp.ConfigOptions)
+	if initialModels != nil {
+		a.availableModels = initialModels.AvailableModels
 	}
 	a.mu.Unlock()
 	a.attachMgr.SetSessionID(sessionID)
@@ -306,9 +307,10 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 		a.emitInitialModeState(resp.Modes)
 	}
 
-	// Emit session models if the agent returned model state
-	if resp.Models != nil {
-		a.emitSessionModels(sessionID, resp.Models, resp.Meta, resp.ConfigOptions)
+	// Emit session models if the agent returned model state, or if it exposes
+	// model selection only through configOptions.
+	if initialModels != nil {
+		a.emitSessionModels(sessionID, initialModels, resp.Meta, resp.ConfigOptions)
 	}
 
 	// Re-emit plan captured during history replay and clear the loading flag.

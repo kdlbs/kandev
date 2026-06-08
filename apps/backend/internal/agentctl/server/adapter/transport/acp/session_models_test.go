@@ -195,6 +195,39 @@ func TestInitialSessionModelState_UsesConfigOptionsWithoutModels(t *testing.T) {
 	}
 }
 
+func TestInitialSessionModelState_UsesMetaConfigOptionsWithoutModels(t *testing.T) {
+	meta := map[string]any{
+		"configOptions": []any{
+			map[string]any{
+				"type":         "select",
+				"id":           "model",
+				"name":         "Model",
+				"category":     "model",
+				"currentValue": "gpt-5.5",
+			},
+		},
+	}
+
+	models := initialSessionModelState(nil, meta, nil)
+	if models == nil {
+		t.Fatal("initialSessionModelState returned nil for meta configOptions-only response")
+	}
+
+	a := newTestAdapter()
+	a.emitSessionModels("sess-1", models, meta, nil)
+
+	ev := findSessionModelsEvent(t, drainEvents(a))
+	if ev.CurrentModelID != "gpt-5.5" {
+		t.Errorf("CurrentModelID = %q, want %q", ev.CurrentModelID, "gpt-5.5")
+	}
+	if len(ev.ConfigOptions) != 1 {
+		t.Fatalf("ConfigOptions len = %d, want 1", len(ev.ConfigOptions))
+	}
+	if ev.ConfigOptions[0].ID != "model" {
+		t.Errorf("ConfigOptions[0].ID = %q, want model", ev.ConfigOptions[0].ID)
+	}
+}
+
 func TestInitialSessionModelState_IgnoresNonModelConfigOptions(t *testing.T) {
 	modeCategory := acp.SessionConfigOptionCategoryMode
 	modeOptions := acp.SessionConfigSelectOptionsUngrouped{
