@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/discovery"
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/settings/models"
@@ -28,7 +29,7 @@ type fakeStore struct {
 	agents       map[string]*models.Agent          // keyed by DB ID
 	byName       map[string]*models.Agent          // keyed by Name
 	profiles     map[string][]*models.AgentProfile // keyed by DB agent ID (live)
-	deleted      map[string]bool                   // keyed by DB agent ID (has soft-deleted rows)
+	deleted      map[string][]*models.AgentProfile // keyed by DB agent ID (soft-deleted)
 	created      []*models.AgentProfile
 	updated      []*models.AgentProfile
 	softDeleted  []string
@@ -42,7 +43,7 @@ func newFakeStore() *fakeStore {
 		agents:   map[string]*models.Agent{},
 		byName:   map[string]*models.Agent{},
 		profiles: map[string][]*models.AgentProfile{},
-		deleted:  map[string]bool{},
+		deleted:  map[string][]*models.AgentProfile{},
 	}
 }
 
@@ -105,13 +106,14 @@ func (f *fakeStore) UpdateAgentProfile(_ context.Context, p *models.AgentProfile
 
 func (f *fakeStore) DeleteAgentProfile(_ context.Context, id string) error {
 	f.softDeleted = append(f.softDeleted, id)
-	// Faithfully model soft-delete: drop the row from the live list and record
-	// that the owning agent now has a deleted profile.
+	// Faithfully model soft-delete: move the row out of the live list into the
+	// deleted list so HasDeletedAgentProfiles and GetAgentProfileIncludingDeleted
+	// stay consistent with the live ListAgentProfiles view.
 	for agentID, list := range f.profiles {
 		kept := list[:0:0]
 		for _, p := range list {
 			if p.ID == id {
-				f.deleted[agentID] = true
+				f.deleted[agentID] = append(f.deleted[agentID], p)
 				continue
 			}
 			kept = append(kept, p)
@@ -122,7 +124,7 @@ func (f *fakeStore) DeleteAgentProfile(_ context.Context, id string) error {
 }
 
 func (f *fakeStore) HasDeletedAgentProfiles(_ context.Context, agentID string) (bool, error) {
-	return f.deleted[agentID], nil
+	return len(f.deleted[agentID]) > 0, nil
 }
 
 func (f *fakeStore) GetAgentProfile(_ context.Context, id string) (*models.AgentProfile, error) {
@@ -137,10 +139,19 @@ func (f *fakeStore) GetAgentProfile(_ context.Context, id string) (*models.Agent
 }
 
 func (f *fakeStore) GetAgentProfileIncludingDeleted(ctx context.Context, id string) (*models.AgentProfile, error) {
-	// Delegate to the deleted_at-aware lookup; the fake does not model
-	// soft-delete state, so both methods see the same rows. This keeps
-	// nil dereferences out of any test that calls the new method.
-	return f.GetAgentProfile(ctx, id)
+	if p, err := f.GetAgentProfile(ctx, id); err == nil {
+		return p, nil
+	}
+	// Fall back to the soft-deleted set so this method, unlike GetAgentProfile,
+	// surfaces rows that DeleteAgentProfile moved out of the live list.
+	for _, list := range f.deleted {
+		for _, p := range list {
+			if p.ID == id {
+				return p, nil
+			}
+		}
+	}
+	return nil, sql.ErrNoRows
 }
 
 func (f *fakeStore) ListAgentProfiles(_ context.Context, agentID string) ([]*models.AgentProfile, error) {
@@ -239,10 +250,14 @@ func TestProfileReconciler_SeedsDefaultProfile(t *testing.T) {
 func TestProfileReconciler_DoesNotReseedAfterUserDelete(t *testing.T) {
 	st := newFakeStore()
 	// Agent exists and was provisioned before, but the user deleted every
-	// profile — modelled as zero live rows plus a recorded soft-delete.
+	// profile — modelled by creating a profile and soft-deleting it via the
+	// real delete path, leaving zero live rows and one soft-deleted row.
 	dbAgent := &models.Agent{Name: "claude-acp"}
 	_ = st.CreateAgent(context.Background(), dbAgent)
-	st.deleted[dbAgent.ID] = true
+	deletedProfile := &models.AgentProfile{AgentID: dbAgent.ID, Name: "Sonnet 4.6", Model: "claude-sonnet"}
+	_ = st.CreateAgentProfile(context.Background(), deletedProfile)
+	_ = st.DeleteAgentProfile(context.Background(), deletedProfile.ID)
+	st.created = nil // discard setup bookkeeping; measure only what Run() seeds
 
 	ag := &mockInferenceAgent{id: "claude-acp", displayName: "Claude", enabled: true}
 	caps := &fakeCapReader{
@@ -328,5 +343,62 @@ func TestProfileReconciler_CleansOrphanProfiles(t *testing.T) {
 	}
 	if len(st.softDeleted) != 1 || st.softDeleted[0] != orphanProfile.ID {
 		t.Fatalf("expected orphan profile to be soft-deleted, got %v", st.softDeleted)
+	}
+}
+
+// newDiscoveryController builds a Controller with just the dependencies that
+// syncAgentFromDiscovery touches: the agent registry, the store, and a logger.
+func newDiscoveryController(t *testing.T, st *fakeStore, ag agents.Agent) *Controller {
+	t.Helper()
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+	reg := registry.NewRegistry(log)
+	if err := reg.Register(ag); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	return &Controller{agentRegistry: reg, repo: st, logger: log}
+}
+
+// TestSyncAgentFromDiscovery_DoesNotReseedAfterUserDelete pins the discovery
+// seed path — the other half of the fix. An agent whose only profile the user
+// deleted must NOT have a default recreated when discovery runs on boot.
+func TestSyncAgentFromDiscovery_DoesNotReseedAfterUserDelete(t *testing.T) {
+	st := newFakeStore()
+	ag := &mockInferenceAgent{id: "claude-acp", displayName: "Claude", enabled: true}
+
+	dbAgent := &models.Agent{Name: "claude-acp"}
+	_ = st.CreateAgent(context.Background(), dbAgent)
+	deletedProfile := &models.AgentProfile{AgentID: dbAgent.ID, Name: "Sonnet 4.6", Model: "claude-sonnet"}
+	_ = st.CreateAgentProfile(context.Background(), deletedProfile)
+	_ = st.DeleteAgentProfile(context.Background(), deletedProfile.ID)
+	st.created = nil // discard setup bookkeeping; measure only what sync seeds
+
+	c := newDiscoveryController(t, st, ag)
+	result := discovery.Availability{Name: "claude-acp", Available: true}
+	if err := c.syncAgentFromDiscovery(context.Background(), result); err != nil {
+		t.Fatalf("syncAgentFromDiscovery: %v", err)
+	}
+	if len(st.created) != 0 {
+		t.Fatalf("expected no profile to be recreated after user delete, got %d: %+v",
+			len(st.created), st.created)
+	}
+}
+
+// TestSyncAgentFromDiscovery_SeedsFreshAgent is the positive counterpart: an
+// agent that has never been provisioned (no live and no deleted rows) still
+// gets its default profile, so the guard does not break new-agent detection.
+func TestSyncAgentFromDiscovery_SeedsFreshAgent(t *testing.T) {
+	st := newFakeStore()
+	ag := &mockInferenceAgent{id: "claude-acp", displayName: "Claude", enabled: true}
+
+	c := newDiscoveryController(t, st, ag)
+	result := discovery.Availability{Name: "claude-acp", Available: true}
+	if err := c.syncAgentFromDiscovery(context.Background(), result); err != nil {
+		t.Fatalf("syncAgentFromDiscovery: %v", err)
+	}
+	if len(st.created) != 1 {
+		t.Fatalf("expected fresh agent to be seeded, got %d created", len(st.created))
 	}
 }

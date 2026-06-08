@@ -23,6 +23,7 @@ type MockRepository struct {
 	GetAgentProfileIncludingDeletedFn func(ctx context.Context, id string) (*models.AgentProfile, error)
 	ListAgentsFn                      func(ctx context.Context) ([]*models.Agent, error)
 	ListAgentProfilesFn               func(ctx context.Context, agentID string) ([]*models.AgentProfile, error)
+	HasDeletedAgentProfilesFn         func(ctx context.Context, agentID string) (bool, error)
 }
 
 var _ store.Repository = (*MockRepository)(nil)
@@ -102,6 +103,9 @@ func (m *MockRepository) ListAgentProfiles(ctx context.Context, agentID string) 
 }
 
 func (m *MockRepository) HasDeletedAgentProfiles(ctx context.Context, agentID string) (bool, error) {
+	if m.HasDeletedAgentProfilesFn != nil {
+		return m.HasDeletedAgentProfilesFn(ctx, agentID)
+	}
 	return false, nil
 }
 
