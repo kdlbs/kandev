@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { fetchTaskEnvironment } from "@/lib/api/domains/task-environment-api";
 import type { ExecutorProfile } from "@/lib/types/http";
@@ -6,7 +6,22 @@ import type { ExecutorProfile } from "@/lib/types/http";
 /** Resolves the executor profile bound to a task's environment. */
 export function useTaskExecutorProfile(taskId: string, enabled = true): ExecutorProfile | null {
   const executors = useAppStore((state) => state.executors.items);
+  const executorsFingerprint = useMemo(
+    () =>
+      executors
+        .map(
+          (executor) =>
+            `${executor.id}|${executor.type}|${(executor.profiles ?? []).map((profile) => profile.id).join(",")}`,
+        )
+        .join(";"),
+    [executors],
+  );
+  const executorsRef = useRef(executors);
   const [profile, setProfile] = useState<ExecutorProfile | null>(null);
+
+  useEffect(() => {
+    executorsRef.current = executors;
+  }, [executors, executorsFingerprint]);
 
   useEffect(() => {
     if (!enabled || !taskId) return;
@@ -14,23 +29,25 @@ export function useTaskExecutorProfile(taskId: string, enabled = true): Executor
     void fetchTaskEnvironment(taskId)
       .then((env) => {
         if (!active || !env) return;
-        for (const executor of executors) {
+        let foundProfile: ExecutorProfile | undefined;
+        for (const executor of executorsRef.current) {
           const match = (executor.profiles ?? []).find((p) => p.id === env.executor_profile_id);
           if (match) {
-            setProfile({
+            foundProfile = {
               ...match,
               executor_type: match.executor_type ?? executor.type,
               executor_name: match.executor_name ?? executor.name,
-            });
-            return;
+            };
+            break;
           }
         }
+        setProfile(foundProfile ?? null);
       })
       .catch(() => {});
     return () => {
       active = false;
     };
-  }, [enabled, taskId, executors]);
+  }, [enabled, taskId, executorsFingerprint]);
 
   if (!enabled || !taskId) return null;
   return profile;

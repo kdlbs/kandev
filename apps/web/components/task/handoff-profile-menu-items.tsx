@@ -29,8 +29,10 @@ export type HandoffProfile = {
 
 function profileDisplayLabel(profile: AgentProfileOption): { label: string; agentName: string } {
   const parts = profile.label.split(" \u2022 ");
+  const agentLabel =
+    parts.length > 1 ? parts.slice(1).join(" \u2022 ") : (parts[0] ?? profile.label);
   return {
-    label: parts[1] || parts[0] || profile.label,
+    label: agentLabel,
     agentName: profile.agent_name,
   };
 }
@@ -95,7 +97,7 @@ type HandoffMenuProps = {
 
 export function HandoffContextMenuSub({ taskId, disabled, onSelectProfile }: HandoffMenuProps) {
   const profiles = useHandoffProfiles(taskId);
-  const submenuDisabled = disabled || profiles.every((p) => p.disabled);
+  const submenuDisabled = disabled || (profiles.length > 0 && profiles.every((p) => p.disabled));
 
   return (
     <ContextMenuSub>
@@ -119,7 +121,7 @@ export function HandoffContextMenuSub({ taskId, disabled, onSelectProfile }: Han
 
 export function HandoffDropdownMenuSub({ taskId, disabled, onSelectProfile }: HandoffMenuProps) {
   const profiles = useHandoffProfiles(taskId);
-  const submenuDisabled = disabled || profiles.every((p) => p.disabled);
+  const submenuDisabled = disabled || (profiles.length > 0 && profiles.every((p) => p.disabled));
 
   return (
     <DropdownMenuSub>

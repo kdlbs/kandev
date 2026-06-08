@@ -326,7 +326,7 @@ function NewSessionForm({
         isUtilityConfigured={isUtilityConfigured}
         isEnhancingPrompt={isEnhancingPrompt}
         fileInputRef={fileInputRef}
-        onPromptInput={() => setHasPrompt(!!promptRef.current?.value)}
+        onPromptInput={() => setHasPrompt(!!promptRef.current?.value?.trim())}
         onPaste={handlePaste}
         onSubmit={handleSubmit}
         onAttachClick={handleAttachClick}
