@@ -247,8 +247,7 @@ test.describe("Task creation from GitHub URL", () => {
     await startBtn.click();
     await expect(dialog).not.toBeVisible({ timeout: 10_000 });
 
-    // Both cards visible — second task created successfully on its own repo
-    // The sidebar create flow navigates directly to Task B's session.
+    // Task B created successfully on its own repo; sidebar navigates directly to its session.
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
     const session = new SessionPage(testPage);
     await session.waitForLoad();
