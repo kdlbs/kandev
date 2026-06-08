@@ -5,6 +5,8 @@ import { TooltipProvider } from "@kandev/ui/tooltip";
 const mocks = vi.hoisted(() => ({
   routerPush: vi.fn(),
   setActiveTask: vi.fn(),
+  setActiveSession: vi.fn(),
+  dialogTaskSessionId: null as string | null,
   dialogWillNavigate: false,
 }));
 
@@ -25,6 +27,7 @@ const state = {
   },
   tasks: { activeTaskId: null as string | null },
   setActiveTask: mocks.setActiveTask,
+  setActiveSession: mocks.setActiveSession,
 };
 let officeEnabled = false;
 let pathname = "/";
@@ -56,7 +59,10 @@ vi.mock("@/components/task-create-dialog", () => ({
       type="button"
       data-testid="regular-task-create-dialog"
       onClick={() =>
-        onSuccess?.({ id: "t-new" }, "create", { willNavigate: mocks.dialogWillNavigate })
+        onSuccess?.({ id: "t-new" }, "create", {
+          taskSessionId: mocks.dialogTaskSessionId,
+          willNavigate: mocks.dialogWillNavigate,
+        })
       }
     >
       regular dialog
@@ -82,6 +88,8 @@ describe("AppSidebarNewTaskItem", () => {
     state.tasks.activeTaskId = null;
     mocks.routerPush.mockClear();
     mocks.setActiveTask.mockClear();
+    mocks.setActiveSession.mockClear();
+    mocks.dialogTaskSessionId = null;
     mocks.dialogWillNavigate = false;
     officeEnabled = false;
     pathname = "/";
@@ -157,6 +165,16 @@ describe("AppSidebarNewTaskItem", () => {
     renderItem(false);
     screen.getByTestId(REGULAR_DIALOG_TESTID).click();
     expect(mocks.setActiveTask).toHaveBeenCalledWith("t-new");
+    expect(mocks.setActiveSession).not.toHaveBeenCalled();
+    expect(mocks.routerPush).toHaveBeenCalledWith("/t/t-new");
+  });
+
+  it("focuses the created session after starting a sidebar task with an agent", () => {
+    mocks.dialogTaskSessionId = "s-new";
+    renderItem(false);
+    screen.getByTestId(REGULAR_DIALOG_TESTID).click();
+    expect(mocks.setActiveSession).toHaveBeenCalledWith("t-new", "s-new");
+    expect(mocks.setActiveTask).not.toHaveBeenCalled();
     expect(mocks.routerPush).toHaveBeenCalledWith("/t/t-new");
   });
 

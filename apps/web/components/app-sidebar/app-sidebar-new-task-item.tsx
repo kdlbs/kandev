@@ -45,6 +45,7 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
   const steps = useAppStore((s) => s.kanban.steps);
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
   const setActiveTask = useAppStore((s) => s.setActiveTask);
+  const setActiveSession = useAppStore((s) => s.setActiveSession);
   const activeTaskTitle = useAppStore((s) => {
     const id = s.tasks.activeTaskId;
     if (!id) return "";
@@ -60,13 +61,21 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
   // and the expanded rail to host the trailing button.
   const canCreateSubtask = !collapsed && !!workspaceId && !!activeTaskId;
   const handleRegularTaskCreated = useCallback(
-    (task: Task, _mode: "create" | "edit", meta?: { willNavigate?: boolean }) => {
+    (
+      task: Task,
+      _mode: "create" | "edit",
+      meta?: { taskSessionId?: string | null; willNavigate?: boolean },
+    ) => {
       setOpen(false);
-      setActiveTask(task.id);
+      if (meta?.taskSessionId) {
+        setActiveSession(task.id, meta.taskSessionId);
+      } else {
+        setActiveTask(task.id);
+      }
       if (meta?.willNavigate) return;
       router.push(linkToTask(task.id));
     },
-    [router, setActiveTask],
+    [router, setActiveSession, setActiveTask],
   );
 
   return (
