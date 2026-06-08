@@ -11,7 +11,7 @@ type settingsScanner struct {
 
 func (s settingsScanner) Scan(dest ...any) error {
 	*(dest[0].(*string)) = s.raw
-	*(dest[1].(*time.Time)) = time.Date(2026, 6, 8, 12, 0, 0, 0, time.UTC)
+	*(dest[1].(*time.Time)) = time.Time{}
 	return nil
 }
 
