@@ -18,6 +18,35 @@ sudo kandev service install --system
 
 After install, kandev is reachable at `http://localhost:38429` (or `--port <N>` if you passed it).
 
+## Run the Current Checkout as a Service
+
+When developing from a cloned repo, use the root Make targets instead of the globally installed `kandev` binary. They install dependencies, build the currently checked-out branch, assemble a local release-style bundle under `dist/kandev`, and install the service with `KANDEV_BUNDLE_DIR` pointing at that bundle.
+
+```bash
+git checkout my-branch
+make service-install
+```
+
+Useful targets:
+
+```bash
+make service-install          # user service from the current checkout
+make service-install PORT=3000
+make service-install HOME_DIR=/path/to/kandev-home
+make service-install NO_BOOT_START=1
+make service-install-system   # system service install; other targets below use the user service
+make service-status
+make service-logs
+make service-logs-follow
+make service-start
+make service-stop
+make service-restart
+make service-uninstall
+make service-config
+```
+
+The service runs the built snapshot in `dist/kandev`, not live source files. After switching branches or changing code, rerun `make service-install` to rebuild and refresh the service unit. Checkout-based services are marked as a local install kind, so the System → Updates page will not offer one-click npm/Homebrew self-update; update by rebuilding from the desired branch.
+
 ## User Mode vs `--system` Mode
 
 |                                  | **User mode** (default)                                                                            | **`--system` mode**                                                                       |

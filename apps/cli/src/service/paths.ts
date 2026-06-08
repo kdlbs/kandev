@@ -34,7 +34,7 @@ export function macosSystemPlistPath(): string {
   return path.join(MACOS_SYSTEM_DAEMON_DIR, `${LAUNCHD_LABEL}.plist`);
 }
 
-export type LauncherKind = "homebrew" | "npm" | "npx" | "unknown";
+export type LauncherKind = "homebrew" | "npm" | "npx" | "local" | "unknown";
 
 export type LauncherInfo = {
   /** Absolute path to node executable (process.execPath at install time). */
@@ -43,7 +43,7 @@ export type LauncherInfo = {
   cliEntry: string;
   /** Best-guess of how kandev was installed. Used to seed env vars. */
   kind: LauncherKind;
-  /** KANDEV_BUNDLE_DIR if set (Homebrew sets this). */
+  /** KANDEV_BUNDLE_DIR if set (Homebrew and local checkout installs set this). */
   bundleDir?: string;
   /** KANDEV_VERSION if set (Homebrew sets this). */
   version?: string;
@@ -96,7 +96,9 @@ export function captureLauncher(): LauncherInfo {
   const bundleDir = process.env.KANDEV_BUNDLE_DIR;
   const version = process.env.KANDEV_VERSION;
   const kind: LauncherKind = bundleDir
-    ? "homebrew"
+    ? homebrewShimPath(cliEntry)
+      ? "homebrew"
+      : "local"
     : looksLikeNpxEntry(cliEntry)
       ? "npx"
       : cliEntry.includes(`${path.sep}node_modules${path.sep}`)

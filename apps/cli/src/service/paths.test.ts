@@ -187,4 +187,17 @@ describe("captureLauncher shim resolution", () => {
     expect(info.kind).toBe("homebrew");
     expect(info.shimPath).toBeUndefined();
   });
+
+  it("classifies a non-Cellar bundle as a local checkout install", () => {
+    const cliEntry = "/Users/alice/src/kandev/dist/kandev/cli/bin/cli.js";
+    process.argv = ["/path/to/node", cliEntry];
+    vi.stubEnv("KANDEV_BUNDLE_DIR", "/Users/alice/src/kandev/dist/kandev");
+    vi.spyOn(fs, "existsSync").mockImplementation((p) => p === cliEntry);
+    vi.spyOn(fs, "realpathSync").mockReturnValue(cliEntry);
+
+    const info = captureLauncher();
+    expect(info.kind).toBe("local");
+    expect(info.bundleDir).toBe("/Users/alice/src/kandev/dist/kandev");
+    expect(info.shimPath).toBeUndefined();
+  });
 });

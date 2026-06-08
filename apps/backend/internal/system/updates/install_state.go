@@ -25,6 +25,7 @@ const (
 	installKindHomebrew    = "homebrew"
 	installKindNPM         = "npm"
 	installKindNPX         = "npx"
+	installKindLocal       = "local"
 	manualServiceInstall   = "kandev service install"
 	manualServiceRestart   = "kandev service restart"
 )
