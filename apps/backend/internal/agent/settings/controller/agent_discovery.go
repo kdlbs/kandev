@@ -325,6 +325,16 @@ func (c *Controller) syncAgentFromDiscovery(ctx context.Context, result discover
 	if len(profiles) > 0 {
 		return c.updateExistingProfiles(ctx, profiles, p)
 	}
+	// No live profiles. Only seed a default for an agent that has never been
+	// provisioned. If soft-deleted rows exist the user deliberately removed
+	// the profile(s); recreating one here would resurrect it on every restart.
+	hadProfiles, err := c.repo.HasDeletedAgentProfiles(ctx, agent.ID)
+	if err != nil {
+		return err
+	}
+	if hadProfiles {
+		return nil
+	}
 	return c.createDefaultProfile(ctx, agent.ID, p)
 }
 

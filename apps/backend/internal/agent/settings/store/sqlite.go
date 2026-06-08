@@ -799,6 +799,21 @@ func (r *sqliteRepository) ListAgentProfiles(ctx context.Context, agentID string
 	return result, rows.Err()
 }
 
+// HasDeletedAgentProfiles reports whether the agent has any soft-deleted
+// profile rows (deleted_at IS NOT NULL). It is the "has been provisioned
+// before" signal the boot-time seeders consult before recreating a default
+// profile, so a profile the user deleted is not silently resurrected.
+func (r *sqliteRepository) HasDeletedAgentProfiles(ctx context.Context, agentID string) (bool, error) {
+	var exists int
+	err := r.ro.QueryRowContext(ctx,
+		r.ro.Rebind(`SELECT EXISTS(SELECT 1 FROM agent_profiles WHERE agent_id = ? AND deleted_at IS NOT NULL)`),
+		agentID).Scan(&exists)
+	if err != nil {
+		return false, err
+	}
+	return exists == 1, nil
+}
+
 // applyLegacyBackfill returns the profile with CLIFlags populated from the
 // legacy allow_indexing column for Auggie rows that predate the cli_flags
 // column. The backfill is scoped to auggie only so a legacy Claude/Codex/

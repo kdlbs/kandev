@@ -28,6 +28,12 @@ type Repository interface {
 	// only used by callers of ProfileResolver, which wraps this method.
 	GetAgentProfileIncludingDeleted(ctx context.Context, id string) (*models.AgentProfile, error)
 	ListAgentProfiles(ctx context.Context, agentID string) ([]*models.AgentProfile, error)
+	// HasDeletedAgentProfiles reports whether the agent has any soft-deleted
+	// profile rows. Seeding paths use this to distinguish a fresh agent that
+	// has never been provisioned (no rows at all -> seed a default) from one
+	// whose profiles the user deliberately deleted (deleted rows present ->
+	// do not resurrect them on the next boot).
+	HasDeletedAgentProfiles(ctx context.Context, agentID string) (bool, error)
 
 	Close() error
 }

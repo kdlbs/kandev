@@ -146,6 +146,20 @@ func (r *ProfileReconciler) reconcileAgent(ctx context.Context, ag agents.Agent)
 	}
 
 	if len(profiles) == 0 {
+		// Only seed for an agent that has never been provisioned. Soft-deleted
+		// rows mean the user deliberately removed the profile(s) — re-seeding
+		// here would resurrect them on every boot (the bug this guards).
+		hadProfiles, err := r.store.HasDeletedAgentProfiles(ctx, dbAgent.ID)
+		if err != nil {
+			r.log.Warn("reconcile: check deleted profiles failed",
+				zap.String("agent_id", agentType), zap.Error(err))
+			return
+		}
+		if hadProfiles {
+			r.log.Debug("skipping seed: agent has user-deleted profiles",
+				zap.String("agent_id", agentType))
+			return
+		}
 		r.seedDefaultProfile(ctx, ag, dbAgent, caps)
 		return
 	}

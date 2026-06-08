@@ -27,7 +27,8 @@ func (f *fakeCapReader) Get(agentType string) (hostutility.AgentCapabilities, bo
 type fakeStore struct {
 	agents       map[string]*models.Agent          // keyed by DB ID
 	byName       map[string]*models.Agent          // keyed by Name
-	profiles     map[string][]*models.AgentProfile // keyed by DB agent ID
+	profiles     map[string][]*models.AgentProfile // keyed by DB agent ID (live)
+	deleted      map[string]bool                   // keyed by DB agent ID (has soft-deleted rows)
 	created      []*models.AgentProfile
 	updated      []*models.AgentProfile
 	softDeleted  []string
@@ -41,6 +42,7 @@ func newFakeStore() *fakeStore {
 		agents:   map[string]*models.Agent{},
 		byName:   map[string]*models.Agent{},
 		profiles: map[string][]*models.AgentProfile{},
+		deleted:  map[string]bool{},
 	}
 }
 
@@ -103,7 +105,24 @@ func (f *fakeStore) UpdateAgentProfile(_ context.Context, p *models.AgentProfile
 
 func (f *fakeStore) DeleteAgentProfile(_ context.Context, id string) error {
 	f.softDeleted = append(f.softDeleted, id)
+	// Faithfully model soft-delete: drop the row from the live list and record
+	// that the owning agent now has a deleted profile.
+	for agentID, list := range f.profiles {
+		kept := list[:0:0]
+		for _, p := range list {
+			if p.ID == id {
+				f.deleted[agentID] = true
+				continue
+			}
+			kept = append(kept, p)
+		}
+		f.profiles[agentID] = kept
+	}
 	return nil
+}
+
+func (f *fakeStore) HasDeletedAgentProfiles(_ context.Context, agentID string) (bool, error) {
+	return f.deleted[agentID], nil
 }
 
 func (f *fakeStore) GetAgentProfile(_ context.Context, id string) (*models.AgentProfile, error) {
@@ -211,6 +230,39 @@ func TestProfileReconciler_SeedsDefaultProfile(t *testing.T) {
 	}
 	if p.Mode != "default" {
 		t.Errorf("mode = %q, want default", p.Mode)
+	}
+}
+
+// TestProfileReconciler_DoesNotReseedAfterUserDelete pins the core fix: an
+// agent whose only profile the user deleted (zero live rows, but soft-deleted
+// rows present) must NOT have a default profile recreated on the next boot.
+func TestProfileReconciler_DoesNotReseedAfterUserDelete(t *testing.T) {
+	st := newFakeStore()
+	// Agent exists and was provisioned before, but the user deleted every
+	// profile — modelled as zero live rows plus a recorded soft-delete.
+	dbAgent := &models.Agent{Name: "claude-acp"}
+	_ = st.CreateAgent(context.Background(), dbAgent)
+	st.deleted[dbAgent.ID] = true
+
+	ag := &mockInferenceAgent{id: "claude-acp", displayName: "Claude", enabled: true}
+	caps := &fakeCapReader{
+		caps: map[string]hostutility.AgentCapabilities{
+			"claude-acp": {
+				AgentType:      "claude-acp",
+				Status:         hostutility.StatusOK,
+				Models:         []hostutility.Model{{ID: "claude-sonnet", Name: "Sonnet"}},
+				CurrentModelID: "claude-sonnet",
+				CurrentModeID:  "default",
+			},
+		},
+	}
+	r := newReconciler(t, st, caps, ag)
+	if err := r.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(st.created) != 0 {
+		t.Fatalf("expected no profile to be recreated after user delete, got %d: %+v",
+			len(st.created), st.created)
 	}
 }
 

@@ -69,6 +69,52 @@ func TestGetAgentProfileIncludingDeleted_MissingRowStillErrors(t *testing.T) {
 	}
 }
 
+// TestHasDeletedAgentProfiles pins the "has been provisioned before" signal the
+// boot-time seeders rely on: false while a profile is live (or never existed),
+// true once the user soft-deletes it. This is what stops a deleted profile from
+// being resurrected on the next restart.
+func TestHasDeletedAgentProfiles(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	id := seedAgentProfile(t, repo, "kilo-default", "kilocode-acp")
+
+	live, err := repo.GetAgentProfileIncludingDeleted(ctx, id)
+	if err != nil {
+		t.Fatalf("lookup profile: %v", err)
+	}
+	agentID := live.AgentID
+
+	// Fresh agent with no deleted rows -> false.
+	has, err := repo.HasDeletedAgentProfiles(ctx, agentID)
+	if err != nil {
+		t.Fatalf("HasDeletedAgentProfiles (live): %v", err)
+	}
+	if has {
+		t.Fatal("expected false while the only profile is still live")
+	}
+
+	// Unknown agent -> false (not an error).
+	has, err = repo.HasDeletedAgentProfiles(ctx, "agent-that-never-existed")
+	if err != nil {
+		t.Fatalf("HasDeletedAgentProfiles (unknown): %v", err)
+	}
+	if has {
+		t.Fatal("expected false for an agent with no profile rows at all")
+	}
+
+	if err := repo.DeleteAgentProfile(ctx, id); err != nil {
+		t.Fatalf("soft-delete failed: %v", err)
+	}
+
+	has, err = repo.HasDeletedAgentProfiles(ctx, agentID)
+	if err != nil {
+		t.Fatalf("HasDeletedAgentProfiles (deleted): %v", err)
+	}
+	if !has {
+		t.Fatal("expected true once the agent has a soft-deleted profile")
+	}
+}
+
 // seedAgentProfile creates a parent agent + a profile referencing it and
 // returns the profile id. Centralised so the table+FK setup stays in one
 // place even if the schema grows new required columns.

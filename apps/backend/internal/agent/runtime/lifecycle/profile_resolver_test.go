@@ -101,6 +101,10 @@ func (m *MockRepository) ListAgentProfiles(ctx context.Context, agentID string) 
 	return []*models.AgentProfile{}, nil
 }
 
+func (m *MockRepository) HasDeletedAgentProfiles(ctx context.Context, agentID string) (bool, error) {
+	return false, nil
+}
+
 func (m *MockRepository) ListTUIAgents(ctx context.Context) ([]*models.Agent, error) {
 	return []*models.Agent{}, nil
 }
