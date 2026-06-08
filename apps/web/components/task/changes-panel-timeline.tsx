@@ -52,7 +52,6 @@ function TimelineSection({
   label?: string;
   count?: number;
   action?: React.ReactNode;
-  isLast?: boolean;
   children?: React.ReactNode;
   collapsible?: boolean;
   defaultCollapsed?: boolean;
@@ -130,7 +129,6 @@ function TimelineSection({
 
 type CommitsSectionProps = {
   commits: CommitItem[];
-  isLast: boolean;
   onOpenCommitDetail?: (sha: string, repo?: string) => void;
   // Handlers receive the commit's repository_name so amend/revert/reset land
   // in the right git repo. The empty string routes to the workspace root for
@@ -158,7 +156,6 @@ type CommitsSectionProps = {
 
 export function CommitsSection({
   commits,
-  isLast,
   onOpenCommitDetail,
   onRevertCommit,
   onAmendCommit,
@@ -194,7 +191,6 @@ export function CommitsSection({
       dotColor={DOT_COLORS.commits}
       label="Commits"
       count={commits.length}
-      isLast={isLast}
       defaultCollapsed={defaultCollapsed}
       data-testid="commits-section"
       action={sectionAction}
@@ -229,7 +225,6 @@ type FileListSectionProps = {
   variant: "unstaged" | "staged";
   files: ChangedFile[];
   pendingStageFiles: Set<string>;
-  isLast: boolean;
   actionLabel: string;
   isActionLoading?: boolean;
   onAction: () => void;
@@ -442,7 +437,6 @@ export function FileListSection(props: FileListSectionProps) {
     variant,
     files,
     pendingStageFiles,
-    isLast,
     onOpenDiff,
     onEditFile,
     onStage,
@@ -474,7 +468,6 @@ export function FileListSection(props: FileListSectionProps) {
       dotColor={dotColor}
       label={label}
       count={files.length}
-      isLast={isLast}
       data-testid={`${variant}-files-section`}
       action={
         isSingleRepo ? (
@@ -541,7 +534,6 @@ export type PRChangedFile = {
 
 type PRFilesSectionProps = {
   files: PRChangedFile[];
-  isLast: boolean;
   onOpenDiff: (path: string, options?: OpenDiffOptions) => void;
   /** Maps a repository_name to a human-readable label (used for the per-repo header). */
   repoDisplayName?: (repositoryName: string) => string | undefined;
@@ -551,7 +543,6 @@ type PRFilesSectionProps = {
 
 export function PRFilesSection({
   files,
-  isLast,
   onOpenDiff,
   repoDisplayName,
   defaultCollapsed = true,
@@ -561,7 +552,6 @@ export function PRFilesSection({
       dotColor={DOT_COLORS.pr}
       label="PR Changes"
       count={files.length}
-      isLast={isLast}
       defaultCollapsed={defaultCollapsed}
       data-testid="pr-changes-section"
     >

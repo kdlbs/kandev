@@ -108,7 +108,7 @@ type WorkingTreeProps = Pick<
   | "onRepoUnstageAll"
   | "onRepoCommit"
   | "repoDisplayName"
-> & { isLastUnstaged: boolean; isLastStaged: boolean };
+>;
 
 function WorkingTreeSections(props: WorkingTreeProps) {
   const isBulkOp = props.pendingStageFiles.size === 0;
@@ -119,7 +119,6 @@ function WorkingTreeSections(props: WorkingTreeProps) {
           variant="unstaged"
           files={props.unstagedFiles}
           pendingStageFiles={props.pendingStageFiles}
-          isLast={props.isLastUnstaged}
           actionLabel="Stage all"
           isActionLoading={isBulkOp && props.loadingOperation === "stage"}
           onAction={props.onStageAll}
@@ -139,7 +138,6 @@ function WorkingTreeSections(props: WorkingTreeProps) {
           variant="staged"
           files={props.stagedFiles}
           pendingStageFiles={props.pendingStageFiles}
-          isLast={props.isLastStaged}
           actionLabel="Commit"
           isActionLoading={props.loadingOperation === "commit"}
           onAction={() => props.dialogs.openCommitDialog()}
@@ -174,9 +172,7 @@ function ChangesPanelTimeline(props: TimelineProps) {
   const mergedCommits = mergeCommits(props.commits, props.prCommits);
   const hasMergedCommits = mergedCommits.length > 0;
   const hasLocalChanges = props.hasUnstaged || props.hasStaged;
-  const showCommits = props.hasStaged || props.hasCommits;
   const showCommitsList = props.hasStaged || hasMergedCommits;
-  const hasSomethingAfterStaged = (props.hasPRFiles && hasLocalChanges) || showCommitsList;
   // Auto-expand the first (topmost) visible section so the panel never opens
   // looking empty (e.g. review mode: PR + Commits both collapsed). Unstaged /
   // Staged keep their always-expanded default; PR and Commits are gated. Large
@@ -195,7 +191,6 @@ function ChangesPanelTimeline(props: TimelineProps) {
         <div data-testid="pr-files-section">
           <PRFilesSection
             files={props.prFiles}
-            isLast={!showCommitsList}
             onOpenDiff={props.onOpenDiffFile}
             repoDisplayName={props.repoDisplayName}
             defaultCollapsed={firstSection !== "pr"}
@@ -203,17 +198,12 @@ function ChangesPanelTimeline(props: TimelineProps) {
         </div>
       )}
 
-      <WorkingTreeSections
-        {...props}
-        isLastUnstaged={!props.hasStaged && !hasSomethingAfterStaged}
-        isLastStaged={!hasSomethingAfterStaged}
-      />
+      <WorkingTreeSections {...props} />
 
       {props.hasPRFiles && hasLocalChanges && (
         <div data-testid="pr-files-section">
           <PRFilesSection
             files={props.prFiles}
-            isLast={!showCommitsList}
             onOpenDiff={props.onOpenDiffFile}
             repoDisplayName={props.repoDisplayName}
           />
@@ -223,7 +213,6 @@ function ChangesPanelTimeline(props: TimelineProps) {
       {showCommitsList && (
         <CommitsSection
           commits={mergedCommits}
-          isLast={!showCommits}
           defaultCollapsed={firstSection !== "commits"}
           onOpenCommitDetail={props.onOpenCommitDetail}
           onRevertCommit={props.onRevertCommit}
