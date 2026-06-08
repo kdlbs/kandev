@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { IconTrash } from "@tabler/icons-react";
 import { areCLIFlagsEqual } from "@/lib/cli-flags";
+import { areConfigOptionsEqual } from "@/lib/config-options";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
@@ -161,6 +162,7 @@ function ProfileSettingsCard({
             name: draft.name,
             model: draft.model,
             mode: draft.mode ?? "",
+            config_options: draft.configOptions ?? {},
             auto_approve: permissionValues.auto_approve,
             allow_indexing: permissionValues.allow_indexing,
             cli_passthrough: draft.cliPassthrough,
@@ -211,6 +213,7 @@ function useProfileEditorState(
       draft.name !== savedProfile.name ||
       draft.model !== savedProfile.model ||
       (draft.mode ?? "") !== (savedProfile.mode ?? "") ||
+      !areConfigOptionsEqual(draft.configOptions, savedProfile.configOptions) ||
       arePermissionsDirty(draft, savedProfile, permissionSettings) ||
       draft.cliPassthrough !== savedProfile.cliPassthrough ||
       !areCLIFlagsEqual(draft.cliFlags ?? [], savedProfile.cliFlags ?? []) ||
@@ -258,13 +261,14 @@ function useProfileSave({
       return;
     }
     // Model is optional — an empty profile model means "use the agent's
-    // default", which is applied via ACP session/set_model at session start.
+    // default", which is applied through ACP session model selection at session start.
     setSaveStatus("loading");
     try {
       const updated = await updateAgentProfileAction(draft.id, {
         name: draft.name,
         model: draft.model,
         mode: draft.mode,
+        config_options: draft.configOptions ?? {},
         ...permissionsToProfilePatch(draft),
         cli_passthrough: draft.cliPassthrough,
         cli_flags: draft.cliFlags,

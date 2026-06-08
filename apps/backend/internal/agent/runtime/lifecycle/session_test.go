@@ -168,6 +168,11 @@ func (m *mockAgentServer) defaultHandler(msg ws.Message) *ws.Message {
 			"success": true,
 		})
 		return resp
+	case "agent.session.set_model", "agent.session.set_mode", "agent.session.set_config_option":
+		resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+			"success": true,
+		})
+		return resp
 	default:
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnknownAction, "unknown action", nil)
 		return resp
@@ -248,7 +253,7 @@ func TestInitializeAndPrompt_StreamBeforeInitialize(t *testing.T) {
 
 	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil, func(executionID string) error {
 		return nil
-	}, "", "")
+	}, "", "", nil)
 	if err != nil {
 		t.Fatalf("InitializeAndPrompt failed: %v", err)
 	}
@@ -277,6 +282,74 @@ func TestInitializeAndPrompt_StreamBeforeInitialize(t *testing.T) {
 	if execution.ACPSessionID != "test-session-123" {
 		t.Errorf("expected ACPSessionID 'test-session-123', got %q", execution.ACPSessionID)
 	}
+}
+
+func TestInitializeAndPrompt_AppliesProfileConfigOptions(t *testing.T) {
+	mock := newMockAgentServer(t)
+	defer mock.Close()
+
+	log := newSessionTestLogger()
+	stopCh := newTestStopCh(t)
+	sm := NewSessionManager(log, stopCh)
+	streamMgr := NewStreamManager(log, StreamCallbacks{
+		OnAgentEvent: func(execution *AgentExecution, event agentctl.AgentEvent) {},
+	}, nil, stopCh)
+	cleanupStreamManager(t, stopCh, streamMgr)
+	sm.SetDependencies(nil, streamMgr, nil, nil)
+
+	client := createTestClient(t, mock.server.URL)
+	defer client.Close()
+	execution := &AgentExecution{
+		ID:            "exec-1",
+		TaskID:        "task-1",
+		SessionID:     "session-1",
+		WorkspacePath: "/workspace",
+		agentctl:      client,
+		promptDoneCh:  make(chan PromptCompletionSignal, 1),
+	}
+	agentConfig := &testAgent{
+		id:      "test-agent",
+		enabled: true,
+		runtimeConfig: &agents.RuntimeConfig{
+			Cmd:            agents.NewCommand("test-agent"),
+			Protocol:       agent.ProtocolACP,
+			SessionConfig:  agents.SessionConfig{},
+			ResourceLimits: agents.ResourceLimits{MemoryMB: 512, CPUCores: 0.5, Timeout: time.Hour},
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil, func(executionID string) error {
+		return nil
+	}, "sonnet", "plan", map[string]string{
+		"effort": "high",
+		"model":  "ignored",
+		"mode":   "ignored",
+	})
+	if err != nil {
+		t.Fatalf("InitializeAndPrompt failed: %v", err)
+	}
+
+	actions := mock.getActionLog()
+	for _, want := range []string{
+		"agent.session.set_model",
+		"agent.session.set_mode",
+		"agent.session.set_config_option",
+	} {
+		if !containsAction(actions, want) {
+			t.Fatalf("actions = %v, missing %s", actions, want)
+		}
+	}
+}
+
+func containsAction(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestInitializeAndPrompt_StreamTimeout(t *testing.T) {
@@ -331,7 +404,7 @@ func TestInitializeAndPrompt_StreamTimeout(t *testing.T) {
 
 	err = sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil, func(executionID string) error {
 		return nil
-	}, "", "")
+	}, "", "", nil)
 
 	// Should fail because stream couldn't connect and Initialize fails
 	if err == nil {
@@ -386,7 +459,7 @@ func TestInitializeAndPrompt_WithTaskDescription(t *testing.T) {
 
 	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "Build a feature", nil, nil, func(executionID string) error {
 		return nil
-	}, "", "")
+	}, "", "", nil)
 	if err != nil {
 		t.Fatalf("InitializeAndPrompt failed: %v", err)
 	}
@@ -454,7 +527,7 @@ func TestInitializeAndPrompt_NoStreamManager(t *testing.T) {
 	// But it should NOT panic due to nil streamManager.
 	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil, func(executionID string) error {
 		return nil
-	}, "", "")
+	}, "", "", nil)
 
 	// Expect error because Initialize call over WS will fail (stream not connected)
 	if err == nil {

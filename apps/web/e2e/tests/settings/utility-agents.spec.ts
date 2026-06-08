@@ -148,20 +148,18 @@ test.describe("Utility Agents settings page", () => {
       testPage.getByRole("heading", { name: "Utility Agents", exact: true }),
     ).toBeVisible({ timeout: 15_000 });
 
-    // The default-model section has an Agent select (shadcn) and a Model
-    // combobox (the shared ModelCombobox from the profile page). Each is
-    // scoped by the Label above it (no `htmlFor`).
+    // The default-model section has an Agent select (shadcn) and the shared
+    // model/config selector button used by profile settings.
     const agentSelect = testPage
       .locator('div:has(> label:text-is("Agent"))')
       .first()
       .getByRole("combobox");
-    const modelCombobox = testPage
-      .locator('div:has(> label:text-is("Model"))')
-      .first()
-      .getByRole("combobox");
+    const modelSelector = testPage.getByRole("button", {
+      name: "Default utility model settings",
+    });
 
-    // Model combobox starts disabled until an agent is picked.
-    await expect(modelCombobox).toBeDisabled();
+    // Model selector starts disabled until an agent is picked.
+    await expect(modelSelector).toBeDisabled();
 
     // Open the Agent dropdown: the only healthy option in E2E is Mock.
     // This implicitly guards the backend filter — if an auth_required or
@@ -174,21 +172,21 @@ test.describe("Utility Agents settings page", () => {
     await agentListbox.getByRole("option", { name: "Mock", exact: true }).click();
     await expect(agentListbox).not.toBeVisible();
 
-    // Model combobox is now enabled. Open the popover and verify both
-    // probed models are listed as command items, along with the "(default)"
-    // badge on mock-fast.
-    await expect(modelCombobox).toBeEnabled();
-    await modelCombobox.click();
-    await expect(testPage.getByRole("option", { name: /Mock Fast.*\(default\)/ })).toBeVisible();
-    await expect(testPage.getByRole("option", { name: /Mock Smart/ })).toBeVisible();
+    // Model selector is now enabled. Open the popover and verify both
+    // probed models are listed.
+    await expect(modelSelector).toBeEnabled();
+    await modelSelector.click();
+    const suggestions = testPage.getByLabel("Suggestions");
+    await expect(suggestions.getByText("Mock Fast", { exact: true })).toBeVisible();
+    await expect(suggestions.getByText("Mock Smart", { exact: true })).toBeVisible();
 
-    // Search input is part of the ModelCombobox — filtering narrows the list.
-    await testPage.getByPlaceholder("Search models...").fill("smart");
-    await expect(testPage.getByRole("option", { name: /Mock Fast/ })).toHaveCount(0);
+    // Search input is part of the shared selector — filtering narrows the list.
+    await testPage.getByPlaceholder("Filter models...").fill("smart");
+    await expect(suggestions.getByText("Mock Fast", { exact: true })).toHaveCount(0);
 
     // Pick Mock Smart and verify the trigger reflects the selection.
-    await testPage.getByRole("option", { name: /Mock Smart/ }).click();
-    await expect(modelCombobox).toContainText("Mock Smart");
+    await suggestions.getByText("Mock Smart", { exact: true }).click();
+    await expect(modelSelector).toContainText("Mock Smart");
 
     expect(pageErrors, `uncaught errors: ${pageErrors.map((e) => e.message).join("; ")}`).toEqual(
       [],

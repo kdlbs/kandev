@@ -16,6 +16,7 @@ import (
 
 	acp "github.com/coder/acp-go-sdk"
 	acpclient "github.com/kandev/kandev/internal/agentctl/server/acp"
+	"github.com/kandev/kandev/internal/agentctl/sessionmodel"
 	"go.uber.org/zap"
 )
 
@@ -185,14 +186,12 @@ func (e *ACPInferenceExecutor) executeACPSession(
 	sessionID := sessionResp.SessionId
 
 	// Optionally set the session model before prompting. ACP-first agents
-	// declare no CLI ModelFlag, so `--model` is not appended at spawn time;
-	// the model has to be applied over the ACP protocol here.
+	// declare no CLI ModelFlag, so `--model` is not appended at spawn time.
+	// Model selection may be a model-shaped config option (Codex/Cursor) or
+	// the older unstable session/set_model method, depending on the agent.
 	if model != "" {
-		if _, err := conn.UnstableSetSessionModel(ctx, acp.UnstableSetSessionModelRequest{
-			SessionId: sessionID,
-			ModelId:   acp.UnstableModelId(model),
-		}); err != nil {
-			return "", fmt.Errorf("ACP session/set_model failed: %w", err)
+		if _, err := applySessionModel(ctx, conn, sessionID, model, sessionResp.ConfigOptions); err != nil {
+			return "", fmt.Errorf("ACP model selection failed: %w", err)
 		}
 	}
 
@@ -220,6 +219,16 @@ func (e *ACPInferenceExecutor) executeACPSession(
 	mu.Unlock()
 
 	return result, nil
+}
+
+func applySessionModel(
+	ctx context.Context,
+	conn sessionmodel.SDKConn,
+	sessionID acp.SessionId,
+	model string,
+	configOptions []acp.SessionConfigOption,
+) (sessionmodel.Method, error) {
+	return sessionmodel.ApplySDKFromACP(ctx, conn, string(sessionID), model, configOptions)
 }
 
 // toACPMcpServers converts the cross-process DTO list into the ACP SDK shape.
@@ -544,6 +553,7 @@ func buildInitProbeFields(initResp acp.InitializeResponse) *ProbeResponse {
 // legacy fields first, then fall back to configOptions when they are absent
 // so both shapes work.
 func applySessionProbeFields(out *ProbeResponse, sessionResp acp.NewSessionResponse) {
+	out.ConfigOptions = probeConfigOptions(sessionResp.ConfigOptions)
 	if sessionResp.Models != nil {
 		out.CurrentModelID = string(sessionResp.Models.CurrentModelId)
 		for _, m := range sessionResp.Models.AvailableModels {
@@ -577,6 +587,33 @@ func applySessionProbeFields(out *ProbeResponse, sessionResp acp.NewSessionRespo
 	if sessionResp.Modes == nil {
 		applyConfigOptionsAsModes(out, sessionResp.ConfigOptions)
 	}
+}
+
+func probeConfigOptions(opts []acp.SessionConfigOption) []ProbeConfigOption {
+	out := make([]ProbeConfigOption, 0, len(opts))
+	for _, opt := range opts {
+		sel := opt.Select
+		if sel == nil {
+			continue
+		}
+		config := ProbeConfigOption{
+			Type:         sel.Type,
+			ID:           string(sel.Id),
+			Name:         sel.Name,
+			CurrentValue: string(sel.CurrentValue),
+		}
+		if sel.Category != nil {
+			config.Category = string(*sel.Category)
+		}
+		for _, item := range selectOptionsUngrouped(sel.Options) {
+			config.Options = append(config.Options, ProbeConfigOptionChoice{
+				Value: string(item.Value),
+				Name:  item.Name,
+			})
+		}
+		out = append(out, config)
+	}
+	return out
 }
 
 // applyConfigOptionsAsModels extracts a ProbeModel list from any
@@ -680,7 +717,7 @@ func resolveProbeCommand(name string) string {
 
 // buildACPCommand builds the command arguments for ACP inference. The model
 // parameter is a no-op for ACP-first agents (they have no ModelFlag); model
-// selection is applied via the ACP session/set_model protocol call instead.
+// selection is applied through the ACP session after session/new instead.
 func buildACPCommand(cfg *InferenceConfigDTO, model string) []string {
 	args := make([]string, len(cfg.Command))
 	copy(args, cfg.Command)

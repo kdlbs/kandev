@@ -14,6 +14,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/agent/settings/profileconfig"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
@@ -553,6 +554,10 @@ func enrichmentValues(profile *models.AgentProfile) (profileEnrichmentValues, er
 	if settings == "" {
 		settings = "{}"
 	}
+	settings, err := settingsWithConfigOptions(settings, profile.ConfigOptions)
+	if err != nil {
+		return profileEnrichmentValues{}, err
+	}
 	permissions := profile.Permissions
 	if permissions == "" {
 		permissions = "{}"
@@ -573,6 +578,51 @@ func enrichmentValues(profile *models.AgentProfile) (profileEnrichmentValues, er
 		settings:              settings,
 		permissions:           permissions,
 	}, nil
+}
+
+const profileSettingsConfigOptionsKey = "config_options"
+
+func settingsWithConfigOptions(raw string, options map[string]string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		raw = "{}"
+	}
+	var settings map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &settings); err != nil {
+		return "", fmt.Errorf("parse profile settings: %w", err)
+	}
+	if settings == nil {
+		settings = map[string]json.RawMessage{}
+	}
+	clean := profileconfig.SanitizeConfigOptions(options)
+	if len(clean) == 0 {
+		delete(settings, profileSettingsConfigOptionsKey)
+	} else {
+		data, err := json.Marshal(clean)
+		if err != nil {
+			return "", fmt.Errorf("marshal profile config options: %w", err)
+		}
+		settings[profileSettingsConfigOptionsKey] = data
+	}
+	data, err := json.Marshal(settings)
+	if err != nil {
+		return "", fmt.Errorf("marshal profile settings: %w", err)
+	}
+	return string(data), nil
+}
+
+func configOptionsFromSettings(raw string) map[string]string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var payload struct {
+		ConfigOptions map[string]string `json:"config_options"`
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return nil
+	}
+	return profileconfig.SanitizeConfigOptions(payload.ConfigOptions)
 }
 
 // normalizeJSONArray returns "[]" for empty values; otherwise the input. Used
@@ -975,6 +1025,7 @@ func scanAgentProfile(scanner interface {
 	profile.SkipIdleRuns = skipIdleRuns == 1
 	profile.Role = models.AgentRole(role)
 	profile.Status = models.AgentStatus(status)
+	profile.ConfigOptions = configOptionsFromSettings(profile.Settings)
 	if failureThreshold > 0 {
 		ft := failureThreshold
 		profile.FailureThreshold = &ft

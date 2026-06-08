@@ -51,7 +51,7 @@ func (a *testAgent) IsInstalled(ctx context.Context) (*agents.DiscoveryResult, e
 }
 
 // BuildCommand builds a command using runtime config and permission flags.
-// Model/mode are applied via ACP session/set_model at session start, not via CLI.
+// Model/mode are applied through ACP session configuration at session start, not via CLI.
 func (a *testAgent) BuildCommand(opts agents.CommandOptions) agents.Command {
 	rt := a.Runtime()
 	if rt == nil {
@@ -149,7 +149,7 @@ func TestController_PreviewAgentCommand_StandardCommand(t *testing.T) {
 		t.Error("PreviewAgentCommand() Supported = false, want true")
 	}
 
-	// --model is no longer emitted: model is applied via ACP session/set_model.
+	// --model is no longer emitted: model is applied through ACP session configuration.
 	expectedParts := []string{"test-cli", "--verbose", "--yes"}
 	for _, part := range expectedParts {
 		found := false

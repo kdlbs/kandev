@@ -225,18 +225,19 @@ func (e *Executor) promptPassthrough(ctx context.Context, taskID, sessionID, pro
 	return &PromptResult{StopReason: stopReasonPassthrough}, nil
 }
 
-// SwitchModel switches the model for a running session. It first attempts an in-place switch
-// via ACP session/set_model (instant, no process restart). If the agent doesn't support
-// in-place switching, it falls back to stopping and restarting the agent with the new model.
+// SwitchModel switches the model for a running session. It first attempts an
+// in-place switch via ACP model selection (instant, no process restart). If
+// the agent doesn't support in-place switching, it falls back to stopping and
+// restarting the agent with the new model.
 func (e *Executor) SwitchModel(ctx context.Context, taskID, sessionID, newModel, prompt string) (*PromptResult, error) {
 	e.logger.Info("switching model for session",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
 		zap.String("new_model", newModel))
 
-	// Try in-place model switch first (ACP agents support session/set_model)
+	// Try in-place model switch first.
 	if err := e.agentManager.SetSessionModelBySessionID(ctx, sessionID, newModel); err == nil {
-		e.logger.Info("model switched in-place via ACP session/set_model",
+		e.logger.Info("model switched in-place via ACP model selection",
 			zap.String("session_id", sessionID),
 			zap.String("new_model", newModel))
 		e.persistInPlaceModelSwitch(ctx, sessionID, newModel)

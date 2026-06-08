@@ -23,7 +23,13 @@ import { Skeleton } from "@kandev/ui/skeleton";
 import { Switch } from "@kandev/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { ModeCombobox } from "@/components/settings/mode-combobox";
-import { ModelCombobox } from "@/components/settings/model-combobox";
+import {
+  configOptionToModelOptions,
+  isModelConfigOption,
+  ModelConfigSelector,
+  type SelectConfigOption,
+  usableConfigOptions,
+} from "@/components/model-config-selector";
 import { useAgentCapabilities } from "@/hooks/domains/settings/use-dynamic-models";
 import {
   PERMISSION_APPLY_AGENTCTL_AUTO_APPROVE,
@@ -46,6 +52,7 @@ export type ProfileFormData = {
   name: string;
   model: string;
   mode: string;
+  config_options?: Record<string, string>;
   cli_passthrough: boolean;
   cli_flags: CLIFlag[];
 } & Record<PermissionKey, boolean>;
@@ -295,20 +302,44 @@ function ModelPicker({
   profile,
   models,
   currentModelId,
+  configOptions,
   onChange,
 }: {
   profile: ProfileFormData;
   models: ModelEntry[];
   currentModelId: string | undefined;
+  configOptions: SelectConfigOption[];
   onChange: (patch: Partial<ProfileFormData>) => void;
 }) {
+  const modelConfig = configOptions.find(isModelConfigOption);
+  const modelOptions = modelConfig
+    ? configOptionToModelOptions(modelConfig)
+    : models.map((model) => ({
+        id: model.id,
+        name: model.name,
+        description: model.description || (model.id !== model.name ? model.id : undefined),
+        usageMultiplier:
+          typeof model.meta?.copilotUsage === "string" ? model.meta.copilotUsage : undefined,
+      }));
+  const currentModel = profile.model || modelConfig?.currentValue || currentModelId || null;
+  const selectedConfigOptions = configOptions.map((option) => ({
+    ...option,
+    currentValue: isModelConfigOption(option)
+      ? profile.model || option.currentValue
+      : profile.config_options?.[option.id] || option.currentValue,
+  }));
+
   return (
-    <ModelCombobox
-      value={profile.model}
-      onChange={(value) => onChange({ model: value })}
-      models={models}
-      currentModelId={currentModelId}
+    <ModelConfigSelector
+      modelOptions={modelOptions}
+      currentModel={currentModel}
+      configOptions={selectedConfigOptions}
+      onModelChange={(value) => onChange({ model: value })}
+      onConfigChange={(configId, value) =>
+        onChange({ config_options: { ...(profile.config_options ?? {}), [configId]: value } })
+      }
       placeholder="Select a model..."
+      ariaLabel="Profile start model settings"
     />
   );
 }
@@ -331,6 +362,19 @@ function ModePicker({
       modes={modes}
       currentModeId={currentModeId}
     />
+  );
+}
+
+function modelConfigOptions(modelConfig: ModelConfig): SelectConfigOption[] {
+  return usableConfigOptions(
+    modelConfig.config_options?.map((option) => ({
+      type: option.type,
+      id: option.id,
+      name: option.name,
+      currentValue: option.current_value,
+      category: option.category,
+      options: option.options,
+    })),
   );
 }
 
@@ -402,6 +446,7 @@ function CapabilitiesRow({
   agentName: string;
 }) {
   const hasModes = modes.length > 0;
+  const configOptions = modelConfigOptions(modelConfig);
   const activeMode = hasModes
     ? modes.find((m) => m.id === (profile.mode || currentModeId || modes[0]?.id))
     : undefined;
@@ -412,7 +457,7 @@ function CapabilitiesRow({
     return (
       <div className={gapCls}>
         <Label className={labelCls}>Start model</Label>
-        <Skeleton className="h-9 w-full" />
+        <Skeleton className="h-7 w-full" />
       </div>
     );
   }
@@ -443,6 +488,7 @@ function CapabilitiesRow({
             profile={profile}
             models={models}
             currentModelId={currentModelId}
+            configOptions={configOptions}
             onChange={onChange}
           />
         </div>

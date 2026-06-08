@@ -195,6 +195,7 @@ func TestApplySessionProbeFields_FallsBackToConfigOptions(t *testing.T) {
 	t.Parallel()
 
 	modelCat := acp.SessionConfigOptionCategoryModel
+	thoughtCat := acp.SessionConfigOptionCategoryThoughtLevel
 	resp := acp.NewSessionResponse{
 		ConfigOptions: []acp.SessionConfigOption{
 			{Select: &acp.SessionConfigOptionSelect{
@@ -206,6 +207,18 @@ func TestApplySessionProbeFields_FallsBackToConfigOptions(t *testing.T) {
 					{Value: "default", Name: "Default (recommended)", Description: ptr("Sonnet 4.6")},
 					{Value: "opus", Name: "Opus", Description: ptr("Opus 4.7")},
 					{Value: "haiku", Name: "Haiku"},
+				}},
+				Type: "select",
+			}},
+			{Select: &acp.SessionConfigOptionSelect{
+				Category:     &thoughtCat,
+				CurrentValue: "medium",
+				Id:           "reasoning_effort",
+				Name:         "Reasoning effort",
+				Options: acp.SessionConfigSelectOptions{Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{
+					{Value: "low", Name: "Low"},
+					{Value: "medium", Name: "Medium"},
+					{Value: "high", Name: "High"},
 				}},
 				Type: "select",
 			}},
@@ -226,6 +239,15 @@ func TestApplySessionProbeFields_FallsBackToConfigOptions(t *testing.T) {
 	}
 	if got, want := out.Models[0].Description, "Sonnet 4.6"; got != want {
 		t.Fatalf("Models[0].Description = %q, want %q", got, want)
+	}
+	if got, want := len(out.ConfigOptions), 2; got != want {
+		t.Fatalf("len(ConfigOptions) = %d, want %d", got, want)
+	}
+	if got, want := out.ConfigOptions[1].ID, "reasoning_effort"; got != want {
+		t.Fatalf("ConfigOptions[1].ID = %q, want %q", got, want)
+	}
+	if got, want := out.ConfigOptions[1].Options[2].Name, "High"; got != want {
+		t.Fatalf("ConfigOptions[1].Options[2].Name = %q, want %q", got, want)
 	}
 }
 

@@ -122,6 +122,7 @@ export function ProfileCardItem({
             name: profile.name,
             model: profile.model,
             mode: profile.mode ?? "",
+            config_options: profile.configOptions ?? {},
             auto_approve: permissionValues.auto_approve,
             allow_indexing: permissionValues.allow_indexing,
             cli_passthrough: profile.cliPassthrough ?? false,

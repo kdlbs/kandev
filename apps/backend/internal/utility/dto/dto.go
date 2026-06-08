@@ -180,8 +180,23 @@ type InferenceAgentDTO struct {
 	Name          string              `json:"name"`
 	DisplayName   string              `json:"display_name"`
 	Models        []InferenceModelDTO `json:"models"`
+	ConfigOptions []ConfigOptionDTO   `json:"config_options,omitempty"`
 	Status        string              `json:"status"`
 	StatusMessage string              `json:"status_message,omitempty"`
+}
+
+type ConfigOptionDTO struct {
+	Type         string                  `json:"type"`
+	ID           string                  `json:"id"`
+	Name         string                  `json:"name"`
+	CurrentValue string                  `json:"current_value"`
+	Category     string                  `json:"category,omitempty"`
+	Options      []ConfigOptionChoiceDTO `json:"options,omitempty"`
+}
+
+type ConfigOptionChoiceDTO struct {
+	Value string `json:"value"`
+	Name  string `json:"name"`
 }
 
 // InferenceAgentsResponse is the response for listing inference agents.

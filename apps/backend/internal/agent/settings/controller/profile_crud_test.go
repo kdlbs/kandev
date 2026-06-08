@@ -206,6 +206,51 @@ func TestCreateProfile_PersistsEnvVars(t *testing.T) {
 	}
 }
 
+func TestCreateAndUpdateProfile_PersistsConfigOptions(t *testing.T) {
+	ctrl := newTestController(map[string]agents.Agent{"test-agent": &testAgent{
+		id:          "test-agent",
+		name:        "test-agent",
+		displayName: "Test Agent",
+		enabled:     true,
+	}})
+	st := newFakeStore()
+	agent := &models.Agent{ID: "agent-1", Name: "test-agent"}
+	st.agents[agent.ID] = agent
+	st.byName[agent.Name] = agent
+	ctrl.repo = st
+
+	profile, err := ctrl.CreateProfile(context.Background(), CreateProfileRequest{
+		AgentID: "agent-1",
+		Name:    "With config",
+		ConfigOptions: map[string]string{
+			"effort": " high ",
+			"model":  "ignored",
+			"mode":   "ignored",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+	if profile.ConfigOptions["effort"] != "high" || len(profile.ConfigOptions) != 1 {
+		t.Fatalf("response config options: %+v", profile.ConfigOptions)
+	}
+	if len(st.created) != 1 || st.created[0].ConfigOptions["effort"] != "high" || len(st.created[0].ConfigOptions) != 1 {
+		t.Fatalf("stored config options: %+v", st.created)
+	}
+
+	next := map[string]string{"effort": "low"}
+	updated, err := ctrl.UpdateProfile(context.Background(), UpdateProfileRequest{
+		ID:            profile.ID,
+		ConfigOptions: &next,
+	})
+	if err != nil {
+		t.Fatalf("UpdateProfile: %v", err)
+	}
+	if updated.ConfigOptions["effort"] != "low" || len(updated.ConfigOptions) != 1 {
+		t.Fatalf("updated response config options: %+v", updated.ConfigOptions)
+	}
+}
+
 func TestCreateAgentProfiles_PersistsEnvVars(t *testing.T) {
 	ctrl := newTestController(nil)
 	st := newFakeStore()

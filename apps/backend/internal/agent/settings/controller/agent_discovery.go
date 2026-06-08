@@ -12,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/discovery"
+	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
 )
@@ -197,6 +198,7 @@ func (c *Controller) buildModelConfigFromHostUtility(agentID string) dto.ModelCo
 	cfg.DefaultModel = caps.CurrentModelID
 	cfg.CurrentModelID = caps.CurrentModelID
 	cfg.CurrentModeID = caps.CurrentModeID
+	cfg.ConfigOptions = configOptionDTOs(caps.ConfigOptions)
 	for _, m := range caps.Models {
 		cfg.AvailableModels = append(cfg.AvailableModels, dto.ModelEntryDTO{
 			ID:          m.ID,
@@ -221,6 +223,28 @@ func (c *Controller) buildModelConfigFromHostUtility(agentID string) dto.ModelCo
 		})
 	}
 	return cfg
+}
+
+func configOptionDTOs(options []hostutility.ConfigOption) []dto.ConfigOptionDTO {
+	out := make([]dto.ConfigOptionDTO, 0, len(options))
+	for _, opt := range options {
+		choices := make([]dto.ConfigOptionChoiceDTO, 0, len(opt.Options))
+		for _, choice := range opt.Options {
+			choices = append(choices, dto.ConfigOptionChoiceDTO{
+				Value: choice.Value,
+				Name:  choice.Name,
+			})
+		}
+		out = append(out, dto.ConfigOptionDTO{
+			Type:         opt.Type,
+			ID:           opt.ID,
+			Name:         opt.Name,
+			CurrentValue: opt.CurrentValue,
+			Category:     opt.Category,
+			Options:      choices,
+		})
+	}
+	return out
 }
 
 func (c *Controller) EnsureInitialAgentProfiles(ctx context.Context) error {

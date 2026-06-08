@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/agent/settings/profileconfig"
 )
 
 type CreateProfileRequest struct {
@@ -19,6 +20,7 @@ type CreateProfileRequest struct {
 	Name           string
 	Model          string
 	Mode           string
+	ConfigOptions  map[string]string
 	AllowIndexing  bool
 	AutoApprove    bool
 	CLIPassthrough bool
@@ -33,7 +35,7 @@ type CreateProfileRequest struct {
 func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest) (*dto.AgentProfileDTO, error) {
 	// Model is optional — the profile reconciler fills it from the host
 	// utility probe cache on boot, and session start applies it via
-	// session/set_model. An empty model means "use the agent's default".
+	// ACP model selection. An empty model means "use the agent's default".
 	agent, err := c.repo.GetAgent(ctx, req.AgentID)
 	if err != nil {
 		return nil, err
@@ -61,6 +63,7 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		AgentDisplayName: displayName,
 		Model:            req.Model,
 		Mode:             req.Mode,
+		ConfigOptions:    profileconfig.SanitizeConfigOptions(req.ConfigOptions),
 		AllowIndexing:    req.AllowIndexing,
 		AutoApprove:      req.AutoApprove,
 		CLIPassthrough:   req.CLIPassthrough,
@@ -119,6 +122,7 @@ type UpdateProfileRequest struct {
 	Name           *string
 	Model          *string
 	Mode           *string
+	ConfigOptions  *map[string]string
 	AllowIndexing  *bool
 	AutoApprove    *bool
 	CLIPassthrough *bool
@@ -147,6 +151,9 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 	}
 	if req.Mode != nil {
 		profile.Mode = *req.Mode
+	}
+	if req.ConfigOptions != nil {
+		profile.ConfigOptions = profileconfig.SanitizeConfigOptions(*req.ConfigOptions)
 	}
 	if req.AllowIndexing != nil {
 		profile.AllowIndexing = *req.AllowIndexing
@@ -372,6 +379,7 @@ func toProfileDTO(profile *models.AgentProfile) dto.AgentProfileDTO {
 		AgentDisplayName: profile.AgentDisplayName,
 		Model:            profile.Model,
 		Mode:             profile.Mode,
+		ConfigOptions:    profileconfig.SanitizeConfigOptions(profile.ConfigOptions),
 		AllowIndexing:    profile.AllowIndexing,
 		AutoApprove:      profile.AutoApprove,
 		CLIFlags:         cliFlagsToDTO(profile.CLIFlags),

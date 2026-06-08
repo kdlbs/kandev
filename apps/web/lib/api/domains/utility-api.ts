@@ -51,6 +51,15 @@ export type InferenceModel = {
   meta?: Record<string, unknown>;
 };
 
+export type InferenceConfigOption = {
+  type: string;
+  id: string;
+  name: string;
+  current_value: string;
+  category?: string;
+  options?: { value: string; name: string }[];
+};
+
 /**
  * Probe outcome for the host-utility agentctl instance backing this agent.
  * Mirrors `hostutility.Status` (`apps/backend/internal/agent/hostutility/types.go`).
@@ -71,6 +80,7 @@ export type InferenceAgent = {
   name: string;
   display_name: string;
   models: InferenceModel[];
+  config_options?: InferenceConfigOption[];
   // Optional so older backends (or non-OK API consumers) that omit the
   // field decode without forcing a default; the UI treats missing status
   // as healthy when models are present.

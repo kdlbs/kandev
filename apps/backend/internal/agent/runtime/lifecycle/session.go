@@ -12,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agent/settings/profileconfig"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/appctx"
@@ -264,6 +265,7 @@ func (sm *SessionManager) InitializeAndPrompt(
 	markReady func(executionID string) error,
 	profileModel string,
 	profileMode string,
+	profileConfigOptions map[string]string,
 ) error {
 	// Create session-level trace span to group all operations under one trace
 	_, sessionSpan := tracing.TraceSessionStart(
@@ -327,8 +329,9 @@ func (sm *SessionManager) InitializeAndPrompt(
 	execution.ACPSessionID = result.SessionID
 	execution.sessionInitialized = true
 
-	// Apply profile model via ACP session/set_model (best-effort).
-	// ACP is the only surface for model selection now; no --model CLI flag.
+	// Apply profile model through the ACP session's advertised model-selection
+	// mechanism (best-effort). ACP is the only surface for model selection now;
+	// no --model CLI flag.
 	if profileModel != "" && execution.agentctl != nil {
 		if err := execution.agentctl.SetModel(ctx, profileModel); err != nil {
 			sm.logger.Warn("failed to set profile model via ACP",
@@ -353,6 +356,26 @@ func (sm *SessionManager) InitializeAndPrompt(
 			sm.logger.Info("set profile mode on ACP session",
 				zap.String("execution_id", execution.ID),
 				zap.String("mode", profileMode))
+		}
+	}
+
+	// Apply any dynamic ACP config options saved on the profile. Model and
+	// mode are handled above so their existing semantics stay unchanged.
+	for configID, value := range profileconfig.SanitizeConfigOptions(profileConfigOptions) {
+		if execution.agentctl == nil {
+			break
+		}
+		if err := execution.agentctl.SetConfigOption(ctx, configID, value); err != nil {
+			sm.logger.Warn("failed to set profile config option via ACP",
+				zap.String("execution_id", execution.ID),
+				zap.String("config_id", configID),
+				zap.String("value", value),
+				zap.Error(err))
+		} else {
+			sm.logger.Info("set profile config option on ACP session",
+				zap.String("execution_id", execution.ID),
+				zap.String("config_id", configID),
+				zap.String("value", value))
 		}
 	}
 

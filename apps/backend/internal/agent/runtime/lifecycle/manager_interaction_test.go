@@ -122,6 +122,10 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 				resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 					"success": true,
 				})
+			case "agent.session.set_config_option":
+				resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+					"success": true,
+				})
 			default:
 				resp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnknownAction, "unknown action", nil)
 			}
@@ -482,6 +486,34 @@ func TestManager_RestartAgentProcess_PrefersPersistedModeOverStaleCache(t *testi
 	require.NotNil(t, exec.GetModeState())
 	require.Equal(t, "acceptEdits", exec.GetModeState().CurrentModeID,
 		"restart must restore the persisted DB mode, not the stale in-memory cache")
+}
+
+func TestManager_SetSessionConfigOptionBySessionID(t *testing.T) {
+	mgr := newTestManager(t)
+	mock := newRestartMockAgentctlServer(t, false, false)
+
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	require.NoError(t, client.StreamUpdates(ctx, func(agentctl.AgentEvent) {}, nil, nil))
+
+	exec := &AgentExecution{
+		ID:                 "exec-config-option",
+		TaskID:             "task-1",
+		SessionID:          "session-1",
+		AgentProfileID:     "profile-1",
+		ACPSessionID:       "acp-session-1",
+		Status:             v1.AgentStatusRunning,
+		WorkspacePath:      "/workspace",
+		agentctl:           client,
+		sessionInitialized: true,
+	}
+	require.NoError(t, mgr.executionStore.Add(exec))
+
+	require.NoError(t, mgr.SetSessionConfigOptionBySessionID(ctx, "session-1", "reasoning_effort", "high"))
+	require.Contains(t, mock.getWSActions(), "agent.session.set_config_option")
 }
 
 // --- SetSessionModel passthrough tests ---

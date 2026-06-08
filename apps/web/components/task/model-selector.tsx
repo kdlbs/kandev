@@ -1,26 +1,27 @@
 "use client";
 
 import { memo, useCallback, useMemo } from "react";
+
+import {
+  configOptionToModelOptions,
+  isModelConfigOption,
+  ModelConfigSelector,
+  type ModelSelectorOption,
+  type SelectConfigOption,
+  usableConfigOptions,
+} from "@/components/model-config-selector";
 import { useAppStore } from "@/components/state-provider";
-import { Combobox, type ComboboxOption } from "@/components/combobox";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
+import { setSessionConfigOption, setSessionModel } from "@/lib/api/domains/session-api";
 import type { Agent, AgentProfile, AvailableAgent } from "@/lib/types/http";
-import { setSessionModel } from "@/lib/api/domains/session-api";
-import type { SessionModelEntry } from "@/lib/state/slices/session-runtime/types";
+import type {
+  ConfigOptionEntry,
+  SessionModelEntry,
+} from "@/lib/state/slices/session-runtime/types";
 
 type ModelSelectorProps = {
   sessionId: string | null;
-};
-
-type ModelOption = {
-  id: string;
-  name: string;
-  provider?: string;
-  context_window?: number;
-  is_default?: boolean;
-  description?: string;
-  usageMultiplier?: string;
 };
 
 function resolveSnapshotModel(snapshot: unknown): string | null {
@@ -33,14 +34,13 @@ function resolveStaticModels(
   agents: Agent[],
   profileId: string | null | undefined,
   availableAgents: AvailableAgent[],
-): ModelOption[] {
+): ModelSelectorOption[] {
   if (!profileId) return [];
   for (const agent of agents) {
     const profile = agent.profiles.find((p: AgentProfile) => p.id === profileId);
     if (!profile) continue;
     const available = availableAgents.find((a: AvailableAgent) => a.name === agent.name);
     const models = available?.model_config?.available_models ?? [];
-    // Static models don't include description — use model ID as subtitle when it differs from name
     return models.map((m) => ({
       ...m,
       description: m.id !== m.name ? m.id : undefined,
@@ -49,31 +49,22 @@ function resolveStaticModels(
   return [];
 }
 
-function sessionModelsToOptions(models: SessionModelEntry[]): ModelOption[] {
+function sessionModelsToOptions(models: SessionModelEntry[]): ModelSelectorOption[] {
   return models.map((m) => ({
     id: m.modelId,
     name: m.name,
-    provider: "",
-    context_window: 0,
-    is_default: false,
     description: m.description,
     usageMultiplier: m.usageMultiplier,
   }));
 }
 
 function buildModelOptions(
-  availableModels: ModelOption[],
+  availableModels: ModelSelectorOption[],
   currentModel: string | null,
-): ModelOption[] {
+): ModelSelectorOption[] {
   const options = [...availableModels];
   if (currentModel && !options.some((m) => m.id === currentModel)) {
-    options.unshift({
-      id: currentModel,
-      name: currentModel,
-      provider: "unknown",
-      context_window: 0,
-      is_default: false,
-    });
+    options.unshift({ id: currentModel, name: currentModel });
   }
   return options;
 }
@@ -96,7 +87,47 @@ function resolveCurrentModel(
   return activeModel || acpCurrentModel || snapshotModel || profileModel;
 }
 
-/** Resolves available models and current model from store state. */
+function updateConfigOptionValue(
+  options: ConfigOptionEntry[],
+  configId: string,
+  value: string,
+): ConfigOptionEntry[] {
+  return options.map((option) =>
+    option.id === configId ? { ...option, currentValue: value } : option,
+  );
+}
+
+function nextCurrentModelId(
+  data: { currentModelId: string; configOptions: ConfigOptionEntry[] },
+  configId: string,
+  value: string,
+): string {
+  const option = data.configOptions.find((item) => item.id === configId);
+  if (option && isModelConfigOption(option)) return value;
+  return data.currentModelId;
+}
+
+function resolveAvailableModels({
+  modelConfig,
+  usingAcpModels,
+  sessionModels,
+  settingsAgents,
+  profileId,
+  availableAgents,
+}: {
+  modelConfig: SelectConfigOption | undefined;
+  usingAcpModels: boolean;
+  sessionModels: SessionModelEntry[];
+  settingsAgents: Agent[];
+  profileId: string | null | undefined;
+  availableAgents: AvailableAgent[];
+}): ModelSelectorOption[] {
+  if (modelConfig) return configOptionToModelOptions(modelConfig);
+  if (usingAcpModels) return sessionModelsToOptions(sessionModels);
+  return resolveStaticModels(settingsAgents, profileId, availableAgents);
+}
+
+/** Resolves available models, config options and current model from store state. */
 function useModelSelectorState(sessionId: string | null) {
   useSettingsData(true);
 
@@ -104,6 +135,7 @@ function useModelSelectorState(sessionId: string | null) {
   const taskSessions = useAppStore((state) => state.taskSessions.items);
   const activeModels = useAppStore((state) => state.activeModel.bySessionId);
   const setActiveModel = useAppStore((state) => state.setActiveModel);
+  const setSessionModels = useAppStore((state) => state.setSessionModels);
   const { items: availableAgents } = useAvailableAgents();
   const sessionModelsData = useAppStore((state) =>
     sessionId ? state.sessionModels.bySessionId[sessionId] : undefined,
@@ -117,9 +149,16 @@ function useModelSelectorState(sessionId: string | null) {
   );
 
   const usingAcpModels = !!sessionModelsData?.models?.length;
-  const availableModels = usingAcpModels
-    ? sessionModelsToOptions(sessionModelsData.models)
-    : resolveStaticModels(settingsAgents as Agent[], session?.agent_profile_id, availableAgents);
+  const configOptions = usableConfigOptions(sessionModelsData?.configOptions);
+  const modelConfig = configOptions.find(isModelConfigOption);
+  const availableModels = resolveAvailableModels({
+    modelConfig,
+    usingAcpModels,
+    sessionModels: sessionModelsData?.models ?? [],
+    settingsAgents: settingsAgents as Agent[],
+    profileId: session?.agent_profile_id,
+    availableAgents,
+  });
 
   const activeModel = sessionId ? activeModels[sessionId] || null : null;
   const acpCurrentModel = sessionModelsData?.currentModelId || null;
@@ -131,73 +170,83 @@ function useModelSelectorState(sessionId: string | null) {
   );
   const modelOptions = buildModelOptions(availableModels, currentModel);
 
+  const updateLocalConfig = useCallback(
+    (sid: string, configId: string, value: string) => {
+      if (!sessionModelsData) return;
+      setSessionModels(sid, {
+        ...sessionModelsData,
+        currentModelId: nextCurrentModelId(sessionModelsData, configId, value),
+        configOptions: updateConfigOptionValue(sessionModelsData.configOptions, configId, value),
+      });
+    },
+    [sessionModelsData, setSessionModels],
+  );
+
   const handleModelChange = useCallback(
     (sid: string, modelId: string) => {
       setActiveModel(sid, modelId);
+      const modelConfig = configOptions.find(isModelConfigOption);
+      if (modelConfig) {
+        updateLocalConfig(sid, modelConfig.id, modelId);
+        setSessionConfigOption(sid, modelConfig.id, modelId).catch((err) => {
+          console.error("[ModelSelector] set-config-option API failed:", err);
+        });
+        return;
+      }
       setSessionModel(sid, modelId).catch((err) => {
         console.error("[ModelSelector] set-model API failed:", err);
       });
     },
-    [setActiveModel],
+    [configOptions, setActiveModel, updateLocalConfig],
   );
 
-  return { currentModel, modelOptions, handleModelChange };
-}
+  const handleConfigChange = useCallback(
+    (sid: string, configId: string, value: string) => {
+      updateLocalConfig(sid, configId, value);
+      setSessionConfigOption(sid, configId, value).catch((err) => {
+        console.error("[ModelSelector] set-config-option API failed:", err);
+      });
+    },
+    [updateLocalConfig],
+  );
 
-function modelToComboboxOption(model: ModelOption): ComboboxOption {
-  return {
-    value: model.id,
-    label: model.name,
-    description: model.description,
-    renderLabel: () => (
-      <>
-        <div className="min-w-0 flex-1">
-          <div className="truncate">{model.name}</div>
-          {model.description && (
-            <div className="text-xs text-muted-foreground truncate" title={model.description}>
-              {model.description}
-            </div>
-          )}
-        </div>
-        {model.usageMultiplier && (
-          <span className="text-xs text-muted-foreground shrink-0">{model.usageMultiplier}</span>
-        )}
-      </>
-    ),
-  };
+  return { currentModel, modelOptions, configOptions, handleModelChange, handleConfigChange };
 }
 
 export const ModelSelector = memo(function ModelSelector({ sessionId }: ModelSelectorProps) {
-  const { currentModel, modelOptions, handleModelChange } = useModelSelectorState(sessionId);
+  const { currentModel, modelOptions, configOptions, handleModelChange, handleConfigChange } =
+    useModelSelectorState(sessionId);
+  const modelConfig = configOptions.find(isModelConfigOption);
 
-  const comboboxOptions = useMemo(() => modelOptions.map(modelToComboboxOption), [modelOptions]);
-
-  const onValueChange = useCallback(
+  const onModelChange = useCallback(
     (value: string) => {
-      // Don't allow deselecting — always keep a model selected
-      if (!value || !sessionId) return;
+      if (!sessionId) return;
       handleModelChange(sessionId, value);
     },
     [sessionId, handleModelChange],
   );
 
-  if (!sessionId || !currentModel) return null;
+  const onConfigChange = useCallback(
+    (configId: string, value: string) => {
+      if (!sessionId) return;
+      handleConfigChange(sessionId, configId, value);
+    },
+    [sessionId, handleConfigChange],
+  );
+
+  if (!sessionId || (!currentModel && !modelConfig)) return null;
 
   return (
-    <Combobox
-      options={comboboxOptions}
-      value={currentModel}
-      onValueChange={onValueChange}
-      placeholder="Select model..."
-      searchPlaceholder="Filter models..."
-      emptyMessage="No models found."
-      showSearch={modelOptions.length > 5}
-      dropdownLabel="Available Models"
-      triggerClassName="h-7 gap-1 px-2 text-xs w-auto hover:bg-muted/40 whitespace-nowrap"
-      className="min-w-[280px]"
-      plainTrigger
+    <ModelConfigSelector
+      modelOptions={modelOptions}
+      currentModel={currentModel}
+      configOptions={configOptions}
+      onModelChange={onModelChange}
+      onConfigChange={onConfigChange}
+      placeholder="Model"
+      ariaLabel="Session model settings"
+      variant="compact"
       popoverSide="top"
-      popoverAlign="end"
     />
   );
 });

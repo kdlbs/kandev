@@ -14,7 +14,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@kandev/ui/select";
-import { ModelCombobox } from "@/components/settings/model-combobox";
+import {
+  configOptionToModelOptions,
+  isModelConfigOption,
+  ModelConfigSelector,
+  type SelectConfigOption,
+  usableConfigOptions,
+} from "@/components/model-config-selector";
 import { InferenceAgentStatusNote } from "@/components/settings/inference-agent-status";
 import type { UtilityAgent, InferenceAgent } from "@/lib/api/domains/utility-api";
 
@@ -32,6 +38,19 @@ function groupModelsByAgent(models: ModelOption[]): ModelGroup[] {
     else map.set(m.agentName, [m]);
   }
   return Array.from(map, ([agentName, items]) => ({ agentName, models: items }));
+}
+
+function utilityConfigOptions(agent: InferenceAgent | undefined): SelectConfigOption[] {
+  return usableConfigOptions(
+    agent?.config_options?.map((option) => ({
+      type: option.type,
+      id: option.id,
+      name: option.name,
+      currentValue: option.current_value,
+      category: option.category,
+      options: option.options,
+    })),
+  );
 }
 
 // Default model selector section
@@ -53,6 +72,23 @@ export function DefaultModelSection({
   const selectedAgent = inferenceAgents.find((a) => a.id === defaultAgentId);
   const modelOptions = selectedAgent?.models ?? [];
   const currentModelId = modelOptions.find((m) => m.is_default)?.id;
+  const configOptions = utilityConfigOptions(selectedAgent);
+  const modelConfig = configOptions.find(isModelConfigOption);
+  const selectorModels = modelConfig
+    ? configOptionToModelOptions(modelConfig)
+    : modelOptions.map((model) => ({
+        id: model.id,
+        name: model.name,
+        description: model.description || (model.id !== model.name ? model.id : undefined),
+        usageMultiplier:
+          typeof model.meta?.copilotUsage === "string" ? model.meta.copilotUsage : undefined,
+      }));
+  const selectedModel = defaultModel || modelConfig?.currentValue || currentModelId || null;
+  const selectedConfigOptions = configOptions.map((option) => ({
+    ...option,
+    currentValue:
+      isModelConfigOption(option) && selectedModel ? selectedModel : option.currentValue,
+  }));
 
   return (
     <div className="space-y-3">
@@ -62,8 +98,8 @@ export function DefaultModelSection({
           Select the default model used by all built-in utility actions.
         </p>
       </div>
-      <div className="flex gap-2">
-        <div className="w-[180px]">
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <div className="w-full sm:w-[180px]">
           <Label className="text-xs text-muted-foreground mb-1 block">Agent</Label>
           <Select value={defaultAgentId} onValueChange={(v) => onDefaultChange(v, "")}>
             <SelectTrigger className="cursor-pointer">
@@ -78,15 +114,16 @@ export function DefaultModelSection({
             </SelectContent>
           </Select>
         </div>
-        <div className="w-[220px]">
+        <div className="w-full sm:w-[280px]">
           <Label className="text-xs text-muted-foreground mb-1 block">Model</Label>
-          <ModelCombobox
-            value={defaultModel}
-            onChange={(v) => onDefaultChange(defaultAgentId, v)}
-            models={modelOptions}
-            currentModelId={currentModelId}
-            placeholder="Select model..."
+          <ModelConfigSelector
+            modelOptions={selectorModels}
+            currentModel={selectedModel}
+            configOptions={selectedConfigOptions}
+            onModelChange={(v) => onDefaultChange(defaultAgentId, v)}
             disabled={!defaultAgentId}
+            placeholder="Select model..."
+            ariaLabel="Default utility model settings"
           />
         </div>
       </div>

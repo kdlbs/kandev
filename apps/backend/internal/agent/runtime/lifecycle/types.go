@@ -442,9 +442,10 @@ type AgentProfileInfo struct {
 	ProfileName         string
 	AgentID             string
 	AgentName           string // e.g., "auggie", "claude", "codex"
-	Model               string // applied via ACP session/set_model at session start
+	Model               string // applied through ACP model selection at session start
 	Mode                string // applied via ACP session/set_mode at session start (empty = use agent default)
-	AllowIndexing       bool   // Deprecated: legacy, kept so existing call sites compile; launch path reads CLIFlags.
+	ConfigOptions       map[string]string
+	AllowIndexing       bool // Deprecated: legacy, kept so existing call sites compile; launch path reads CLIFlags.
 	CLIPassthrough      bool
 	NativeSessionResume bool // Agent supports ACP session/load for resume
 	SupportsMCP         bool

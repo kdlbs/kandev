@@ -22,6 +22,28 @@ type AgentProfileSettingsResult = {
   passthroughConfig: PassthroughConfig | null;
 };
 
+const EMPTY_MODEL_CONFIG: ModelConfig = {
+  default_model: "",
+  available_models: [],
+  available_modes: [],
+  available_commands: [],
+  config_options: [],
+  supports_dynamic_models: false,
+};
+
+function normalizeModelConfig(raw: AvailableAgent["model_config"] | undefined): ModelConfig {
+  if (!raw) return EMPTY_MODEL_CONFIG;
+  return {
+    ...raw,
+    default_model: raw.default_model ?? "",
+    available_models: raw.available_models ?? [],
+    available_modes: raw.available_modes ?? [],
+    available_commands: raw.available_commands ?? [],
+    config_options: raw.config_options ?? [],
+    supports_dynamic_models: raw.supports_dynamic_models ?? false,
+  };
+}
+
 export function useAgentProfileSettings(
   agentKey: string,
   profileId: string,
@@ -75,19 +97,9 @@ export function useAgentProfileSettings(
   }, [availableAgents, agent?.name]);
 
   const modelConfig = useMemo(() => {
-    const raw = availableAgent?.model_config;
     // Defensive normalization: the backend may marshal nil slices as null.
     // Ensure arrays are always arrays so consumers can call .some()/.map().
-    return {
-      default_model: raw?.default_model ?? "",
-      available_models: raw?.available_models ?? [],
-      current_model_id: raw?.current_model_id,
-      available_modes: raw?.available_modes ?? [],
-      current_mode_id: raw?.current_mode_id,
-      supports_dynamic_models: raw?.supports_dynamic_models ?? false,
-      status: raw?.status,
-      error: raw?.error,
-    };
+    return normalizeModelConfig(availableAgent?.model_config);
   }, [availableAgent]);
 
   const permissionSettings = useMemo(() => {

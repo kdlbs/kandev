@@ -256,10 +256,10 @@ func (m *Manager) SetSessionModeBySessionID(ctx context.Context, sessionID, mode
 }
 
 // SetSessionModel changes the session model for a running agent. ACP agents
-// swap the model in-place via session.set_model. Passthrough (TUI) agents have
-// no protocol channel — the model is a CLI flag baked into the launch — so the
-// override is persisted on the execution and the PTY is relaunched so the next
-// process picks up the new --model.
+// swap the model in-place via their advertised model-selection mechanism.
+// Passthrough (TUI) agents have no protocol channel — the model is a CLI flag
+// baked into the launch — so the override is persisted on the execution and
+// the PTY is relaunched so the next process picks up the new --model.
 func (m *Manager) SetSessionModel(ctx context.Context, executionID, modelID string) error {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
@@ -291,6 +291,30 @@ func (m *Manager) SetSessionModelBySessionID(ctx context.Context, sessionID, mod
 		return fmt.Errorf("no agent running for session %q", sessionID)
 	}
 	return m.SetSessionModel(ctx, execution.ID, modelID)
+}
+
+// SetSessionConfigOption changes an ACP session config option for a running agent.
+func (m *Manager) SetSessionConfigOption(ctx context.Context, executionID, configID, value string) error {
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return fmt.Errorf("execution %q not found", executionID)
+	}
+	if execution.agentctl == nil {
+		return fmt.Errorf("execution %q has no agentctl client", executionID)
+	}
+	if !execution.sessionInitialized || execution.ACPSessionID == "" {
+		return fmt.Errorf("execution %q ACP session is not ready", executionID)
+	}
+	return execution.agentctl.SetConfigOption(ctx, configID, value)
+}
+
+// SetSessionConfigOptionBySessionID changes an ACP session config option by task session ID.
+func (m *Manager) SetSessionConfigOptionBySessionID(ctx context.Context, sessionID, configID, value string) error {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return fmt.Errorf("no agent running for session %q", sessionID)
+	}
+	return m.SetSessionConfigOption(ctx, execution.ID, configID, value)
 }
 
 // AuthenticateBySessionID triggers authentication for a given auth method on the agent.

@@ -110,6 +110,7 @@ export async function createAgentProfileAction(
     name: string;
     model: string;
     mode?: string;
+    config_options?: Record<string, string>;
     cli_passthrough: boolean;
     cli_flags?: CLIFlag[];
     env_vars?: ProfileEnvVar[];
@@ -128,6 +129,7 @@ export async function updateAgentProfileAction(
     name?: string;
     model?: string;
     mode?: string;
+    config_options?: Record<string, string>;
     allow_indexing?: boolean;
     auto_approve?: boolean;
     cli_passthrough?: boolean;

@@ -71,6 +71,7 @@ func (r *StoreProfileResolver) ResolveProfile(ctx context.Context, profileID str
 		AgentName:                  agent.Name,
 		Model:                      model,
 		Mode:                       profile.Mode,
+		ConfigOptions:              profile.ConfigOptions,
 		AutoApprove:                profile.AutoApprove,
 		DangerouslySkipPermissions: profile.DangerouslySkipPermissions,
 		AllowIndexing:              profile.AllowIndexing,

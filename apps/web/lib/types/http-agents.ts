@@ -113,6 +113,15 @@ export type CommandEntry = {
   description?: string;
 };
 
+export type ConfigOptionEntry = {
+  type: string;
+  id: string;
+  name: string;
+  current_value: string;
+  category?: string;
+  options?: { value: string; name: string }[];
+};
+
 // CapabilityStatus mirrors the host utility probe status. "probing" is the
 // in-flight state; "ok" is populated; the remaining values signal errors the
 // UI can surface directly (auth, install, generic failure, not started yet).
@@ -131,6 +140,7 @@ export type ModelConfig = {
   available_modes?: ModeEntry[];
   current_mode_id?: string;
   available_commands?: CommandEntry[];
+  config_options?: ConfigOptionEntry[];
   supports_dynamic_models: boolean;
   status?: CapabilityStatus;
   error?: string;
