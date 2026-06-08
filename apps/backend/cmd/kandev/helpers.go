@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -993,9 +992,7 @@ func registerMCPAndDebugRoutes(
 }
 
 // registerExternalMCP mounts an MCP server on the backend HTTP router so external
-// coding agents can connect to Kandev at /mcp, /mcp/sse, /mcp/message. The MCP
-// routes are gated by a loopback-only middleware because the endpoint is
-// unauthenticated in v1 — see docs/specs/external-mcp/spec.md.
+// coding agents can connect to Kandev at /mcp, /mcp/sse, /mcp/message.
 func registerExternalMCP(p routeParams) {
 	port := p.httpPort
 	if port == 0 {
@@ -1005,7 +1002,7 @@ func registerExternalMCP(p routeParams) {
 
 	backendClient := mcpserver.NewDispatcherBackendClient(p.gateway.Dispatcher, p.log)
 	srv := mcpserver.NewExternal(backendClient, baseURL, p.log, "")
-	mcpGroup := p.router.Group("", loopbackOnlyMiddleware(p.log))
+	mcpGroup := p.router.Group("", externalMCPOpenMiddleware())
 	srv.RegisterBackendRoutes(mcpGroup)
 	if p.addCleanup != nil {
 		p.addCleanup(func() error {
@@ -1021,23 +1018,12 @@ func registerExternalMCP(p routeParams) {
 		zap.String("sse_message", baseURL+"/mcp/message"))
 }
 
-// loopbackOnlyMiddleware rejects requests that did not originate from the
-// loopback interface. The external MCP endpoint has no authentication in v1,
-// so it must only accept connections from the same machine.
-func loopbackOnlyMiddleware(log *logger.Logger) gin.HandlerFunc {
+// externalMCPOpenMiddleware documents the external MCP access policy: the
+// endpoint is open on every interface the backend listens on. Kandev does not
+// yet have a user auth boundary, so protecting MCP separately would create a
+// false sense of security while the rest of the app remains reachable.
+func externalMCPOpenMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		host, _, err := net.SplitHostPort(c.Request.RemoteAddr)
-		if err != nil {
-			host = c.Request.RemoteAddr
-		}
-		ip := net.ParseIP(host)
-		if ip == nil || !ip.IsLoopback() {
-			log.Warn("rejected non-loopback MCP request",
-				zap.String("remote_addr", c.Request.RemoteAddr),
-				zap.String("path", c.Request.URL.Path))
-			c.AbortWithStatus(http.StatusForbidden)
-			return
-		}
 		c.Next()
 	}
 }

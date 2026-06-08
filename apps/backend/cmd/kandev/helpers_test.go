@@ -2,9 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -115,4 +118,34 @@ func TestAppendSessionStateMessage_OmitsEmptyTaskEnvironmentID(t *testing.T) {
 	if _, present := payload["task_environment_id"]; present {
 		t.Fatalf("payload should not include task_environment_id when session has none")
 	}
+}
+
+func TestExternalMCPOpenMiddleware_AllowsLoopbackAndRemote(t *testing.T) {
+	r := setupExternalMCPAccessRouter()
+
+	for name, remoteAddr := range map[string]string{
+		"remote":   "203.0.113.10:4321",
+		"loopback": "127.0.0.1:4321",
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest("GET", "/mcp", nil)
+			req.RemoteAddr = remoteAddr
+			r.ServeHTTP(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("request = %d, want %d", w.Code, http.StatusOK)
+			}
+		})
+	}
+}
+
+func setupExternalMCPAccessRouter() *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(externalMCPOpenMiddleware())
+	r.GET("/mcp", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+	return r
 }
