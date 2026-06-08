@@ -75,12 +75,6 @@ test.describe("Task creation from GitHub URL", () => {
     await startBtn.click();
     await expect(dialog).not.toBeVisible({ timeout: 10_000 });
 
-    // The new task card appears on the kanban board
-    const card = kanban.taskCardByTitle("GitHub URL Task");
-    await expect(card).toBeVisible({ timeout: 10_000 });
-
-    // Click the card to navigate to the session
-    await card.click();
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
@@ -165,10 +159,6 @@ test.describe("Task creation from GitHub URL", () => {
     await startBtn.click();
     await expect(dialog).not.toBeVisible({ timeout: 10_000 });
 
-    const card = kanban.taskCardByTitle("Worktree GitHub Task");
-    await expect(card).toBeVisible({ timeout: 10_000 });
-
-    await card.click();
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
@@ -243,7 +233,9 @@ test.describe("Task creation from GitHub URL", () => {
     await expect(startBtn).toBeEnabled({ timeout: 15_000 });
     await startBtn.click();
     await expect(dialog).not.toBeVisible({ timeout: 10_000 });
-    await expect(kanban.taskCardByTitle("Task A")).toBeVisible({ timeout: 10_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+
+    await kanban.goto();
 
     // ── Second task from repo-b (different URL) ──
     await kanban.createTaskButton.first().click();
@@ -255,11 +247,7 @@ test.describe("Task creation from GitHub URL", () => {
     await startBtn.click();
     await expect(dialog).not.toBeVisible({ timeout: 10_000 });
 
-    // Both cards visible — second task created successfully on its own repo
-    await expect(kanban.taskCardByTitle("Task B")).toBeVisible({ timeout: 10_000 });
-
-    // Navigate to Task B session and verify agent completes
-    await kanban.taskCardByTitle("Task B").click();
+    // Task B created successfully on its own repo; sidebar navigates directly to its session.
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -403,12 +391,6 @@ test.describe("Task creation from GitHub URL", () => {
     await startBtn.click();
     await expect(dialog).not.toBeVisible({ timeout: 10_000 });
 
-    // The new task card appears on the kanban board
-    const card = kanban.taskCardByTitle("PR Task Local");
-    await expect(card).toBeVisible({ timeout: 10_000 });
-
-    // Navigate to the session and verify the agent completes
-    await card.click();
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
@@ -534,10 +516,6 @@ test.describe("Task creation from GitHub URL", () => {
     await startBtn.click();
     await expect(dialog).not.toBeVisible({ timeout: 10_000 });
 
-    const card = kanban.taskCardByTitle("PR Worktree Task");
-    await expect(card).toBeVisible({ timeout: 10_000 });
-
-    await card.click();
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
@@ -646,10 +624,6 @@ test.describe("Task creation from GitHub URL", () => {
     await startBtn.click();
     await expect(dialog).not.toBeVisible({ timeout: 10_000 });
 
-    const card = kanban.taskCardByTitle("Warning Test Task");
-    await expect(card).toBeVisible({ timeout: 10_000 });
-
-    await card.click();
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
@@ -777,10 +751,8 @@ test.describe("Task creation from GitHub URL", () => {
 
     await startBtn.click();
     await expect(dialog).not.toBeVisible({ timeout: 10_000 });
-    await expect(kanban.taskCardByTitle("Shared PR Task A")).toBeVisible({ timeout: 10_000 });
 
-    // Wait for Task A agent to complete before creating Task B
-    await kanban.taskCardByTitle("Shared PR Task A").click();
+    // Wait for Task A agent to complete before creating Task B.
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
     const sessionA = new SessionPage(testPage);
     await sessionA.waitForLoad();
@@ -818,10 +790,7 @@ test.describe("Task creation from GitHub URL", () => {
     await startBtn.click();
     await expect(dialog).not.toBeVisible({ timeout: 10_000 });
 
-    // Task B should also succeed (this would have failed before the fix)
-    await expect(kanban.taskCardByTitle("Shared PR Task B")).toBeVisible({ timeout: 10_000 });
-
-    await kanban.taskCardByTitle("Shared PR Task B").click();
+    // Task B should also succeed (this would have failed before the fix).
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
     const sessionB = new SessionPage(testPage);
     await sessionB.waitForLoad();

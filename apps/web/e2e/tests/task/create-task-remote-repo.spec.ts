@@ -140,9 +140,7 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
       timeout: 10_000,
     });
 
-    const kanban2 = new KanbanPage(testPage);
-    const card = kanban2.taskCardByTitle("Remote picker happy path");
-    await expect(card).toBeVisible({ timeout: 10_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     // Verify the task carries exactly one repository row resolved from the
     // picked URL.
@@ -190,8 +188,7 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
       timeout: 10_000,
     });
 
-    const card = new KanbanPage(testPage).taskCardByTitle("Remote paste happy path");
-    await expect(card).toBeVisible({ timeout: 10_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const taskList = await apiClient.listTasks(seedData.workspaceId);
     const created = taskList.tasks.find((t) => t.title === "Remote paste happy path");
@@ -272,8 +269,7 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
       timeout: 10_000,
     });
 
-    const card = new KanbanPage(testPage).taskCardByTitle("Remote multi-row");
-    await expect(card).toBeVisible({ timeout: 10_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     // Verify the task carries three TaskRepository rows in the order they
     // were added.
@@ -376,8 +372,7 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
       timeout: 10_000,
     });
 
-    const card = new KanbanPage(testPage).taskCardByTitle("Banner paste fallback");
-    await expect(card).toBeVisible({ timeout: 10_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     // Confirm the task was created with the pasted repo.
     const taskList = await apiClient.listTasks(seedData.workspaceId);

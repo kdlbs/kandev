@@ -69,7 +69,7 @@ export interface TaskCreateDialogProps {
   onSuccess?: (
     task: Task,
     mode: "create" | "edit",
-    meta?: { taskSessionId?: string | null },
+    meta?: { taskSessionId?: string | null; willNavigate?: boolean },
   ) => void;
   onCreateSession?: (data: { prompt: string; agentProfileId: string; executorId: string }) => void;
   initialValues?: TaskCreateDialogInitialValues;

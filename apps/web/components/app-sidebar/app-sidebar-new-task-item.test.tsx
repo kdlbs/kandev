@@ -2,6 +2,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 
+const mocks = vi.hoisted(() => ({
+  routerPush: vi.fn(),
+  setActiveTask: vi.fn(),
+  setActiveSession: vi.fn(),
+  dialogTaskSessionId: null as string | null,
+  dialogWillNavigate: false,
+}));
+
 function renderItem(collapsed: boolean) {
   return render(
     <TooltipProvider>
@@ -18,6 +26,8 @@ const state = {
     tasks: [{ id: "t-1", title: "Parent task" }] as Array<{ id: string; title: string }>,
   },
   tasks: { activeTaskId: null as string | null },
+  setActiveTask: mocks.setActiveTask,
+  setActiveSession: mocks.setActiveSession,
 };
 let officeEnabled = false;
 let pathname = "/";
@@ -29,14 +39,35 @@ vi.mock("@/hooks/domains/features/use-feature", () => ({
   useFeature: () => officeEnabled,
 }));
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => ({ push: mocks.routerPush }),
   usePathname: () => pathname,
 }));
 vi.mock("@/app/office/components/new-task-dialog", () => ({
   NewTaskDialog: () => <div data-testid="office-new-task-dialog" />,
 }));
 vi.mock("@/components/task-create-dialog", () => ({
-  TaskCreateDialog: () => <div data-testid="regular-task-create-dialog" />,
+  TaskCreateDialog: ({
+    onSuccess,
+  }: {
+    onSuccess?: (
+      task: { id: string },
+      mode: "create" | "edit",
+      meta?: { taskSessionId?: string | null; willNavigate?: boolean },
+    ) => void;
+  }) => (
+    <button
+      type="button"
+      data-testid="regular-task-create-dialog"
+      onClick={() =>
+        onSuccess?.({ id: "t-new" }, "create", {
+          taskSessionId: mocks.dialogTaskSessionId,
+          willNavigate: mocks.dialogWillNavigate,
+        })
+      }
+    >
+      regular dialog
+    </button>
+  ),
 }));
 vi.mock("@/components/task/new-subtask-dialog", () => ({
   NewSubtaskDialog: () => <div data-testid="new-subtask-dialog" />,
@@ -55,6 +86,11 @@ describe("AppSidebarNewTaskItem", () => {
     state.kanban.steps = [{ id: "s1", title: "Todo" }];
     state.kanban.tasks = [{ id: "t-1", title: "Parent task" }];
     state.tasks.activeTaskId = null;
+    mocks.routerPush.mockClear();
+    mocks.setActiveTask.mockClear();
+    mocks.setActiveSession.mockClear();
+    mocks.dialogTaskSessionId = null;
+    mocks.dialogWillNavigate = false;
     officeEnabled = false;
     pathname = "/";
   });
@@ -123,5 +159,40 @@ describe("AppSidebarNewTaskItem", () => {
     state.tasks.activeTaskId = "t-1";
     renderItem(true);
     expect(screen.queryByTestId(SUBTASK_TESTID)).toBeNull();
+  });
+
+  it("focuses the created task after regular sidebar task creation succeeds", () => {
+    renderItem(false);
+    screen.getByTestId(REGULAR_DIALOG_TESTID).click();
+    expect(mocks.setActiveTask).toHaveBeenCalledWith("t-new");
+    expect(mocks.setActiveSession).not.toHaveBeenCalled();
+    expect(mocks.routerPush).toHaveBeenCalledWith("/t/t-new");
+  });
+
+  it("focuses the created session after starting a sidebar task with an agent", () => {
+    mocks.dialogTaskSessionId = "s-new";
+    renderItem(false);
+    screen.getByTestId(REGULAR_DIALOG_TESTID).click();
+    expect(mocks.setActiveSession).toHaveBeenCalledWith("t-new", "s-new");
+    expect(mocks.setActiveTask).not.toHaveBeenCalled();
+    expect(mocks.routerPush).toHaveBeenCalledWith("/t/t-new");
+  });
+
+  it("does not push twice when the regular task dialog already navigates", () => {
+    mocks.dialogWillNavigate = true;
+    renderItem(false);
+    screen.getByTestId(REGULAR_DIALOG_TESTID).click();
+    expect(mocks.setActiveTask).toHaveBeenCalledWith("t-new");
+    expect(mocks.routerPush).not.toHaveBeenCalled();
+  });
+
+  it("focuses the created session without pushing when the dialog already navigates", () => {
+    mocks.dialogTaskSessionId = "s-new";
+    mocks.dialogWillNavigate = true;
+    renderItem(false);
+    screen.getByTestId(REGULAR_DIALOG_TESTID).click();
+    expect(mocks.setActiveSession).toHaveBeenCalledWith("t-new", "s-new");
+    expect(mocks.setActiveTask).not.toHaveBeenCalled();
+    expect(mocks.routerPush).not.toHaveBeenCalled();
   });
 });

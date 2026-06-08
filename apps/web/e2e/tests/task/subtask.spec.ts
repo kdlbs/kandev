@@ -137,10 +137,7 @@ test.describe("MCP subtask creation", () => {
     await startBtn.click();
     await expect(dialog).not.toBeVisible({ timeout: 10_000 });
 
-    // 2. Click the parent task card to navigate to its session
-    const parentCard = kanban.taskCardByTitle("MCP Subtask Parent");
-    await expect(parentCard).toBeVisible({ timeout: 10_000 });
-    await parentCard.click();
+    // 2. Sidebar task creation navigates directly to the parent session.
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     // 3. Wait for the agent to complete — the MCP create_task call happens during execution
@@ -242,10 +239,7 @@ test.describe("MCP subtask creation", () => {
     await startBtn.click();
     await expect(dialog).not.toBeVisible({ timeout: 10_000 });
 
-    // 2. Click the parent card to navigate to its session
-    const parentCard = kanban.taskCardByTitle("Subtask Button Parent");
-    await expect(parentCard).toBeVisible({ timeout: 10_000 });
-    await parentCard.click();
+    // 2. Sidebar task creation navigates directly to the parent session.
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     // 3. Wait for the agent to finish

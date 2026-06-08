@@ -97,7 +97,7 @@ test.describe("Create-task URL flow - branches after reopen", () => {
     // open lists branches fresh from the backend — which is the behaviour a
     // user gets when reopening the dialog later. The provider-API path itself
     // is unchanged; this only avoids racing a stale empty cache entry.
-    await testPage.reload();
+    await kanban.goto();
     await kanban.board.waitFor({ state: "visible" });
 
     // ── Second open: pick the same repo from the workspace dropdown ──
