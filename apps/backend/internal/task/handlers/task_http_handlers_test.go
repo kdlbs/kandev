@@ -15,9 +15,58 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 )
+
+// captureOrchestrator records every LaunchSession request so tests can assert
+// on the fields the handler set. prepErr, when non-nil, is returned from
+// LaunchSession to short-circuit the two-phase create flow before its async
+// start goroutine spawns (keeping assertions race-free).
+type captureOrchestrator struct {
+	mu       sync.Mutex
+	requests []*orchestrator.LaunchSessionRequest
+	prepErr  error
+}
+
+func (m *captureOrchestrator) LaunchSession(_ context.Context, req *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error) {
+	m.mu.Lock()
+	m.requests = append(m.requests, req)
+	m.mu.Unlock()
+	if m.prepErr != nil {
+		return nil, m.prepErr
+	}
+	return &orchestrator.LaunchSessionResponse{SessionID: "sess-1"}, nil
+}
+
+func (m *captureOrchestrator) EnsureSession(_ context.Context, _ string, _ ...orchestrator.EnsureSessionOptions) (*orchestrator.EnsureSessionResponse, error) {
+	return nil, nil
+}
+
+// TestStartAgentForNewTask_SetsDeferredStart pins the call-site half of the
+// passthrough start_agent prompt-delivery fix: the synchronous prepare must
+// carry DeferredStart=true so launchPrepare does not eagerly upgrade a
+// passthrough profile into a promptless PTY launch and pre-empt the
+// prompt-bearing IntentStartCreated that follows. Returning an error from the
+// prepare call keeps the async start goroutine from spawning, so the assertion
+// reads orch.requests without racing it.
+func TestStartAgentForNewTask_SetsDeferredStart(t *testing.T) {
+	orch := &captureOrchestrator{prepErr: errors.New("prepare failed")}
+	h := &TaskHandlers{orchestrator: orch, logger: newTestLogger(t)}
+
+	resp := &createTaskResponse{}
+	body := httpCreateTaskRequest{StartAgent: true, AgentProfileID: "profile-1"}
+	h.startAgentForNewTask(context.Background(), resp, "task-1", "do the thing", body, "step-1")
+
+	orch.mu.Lock()
+	defer orch.mu.Unlock()
+	require.Len(t, orch.requests, 1, "prepare error must short-circuit before the async start goroutine")
+	prep := orch.requests[0]
+	assert.Equal(t, orchestrator.IntentPrepare, prep.Intent)
+	assert.True(t, prep.DeferredStart,
+		"sync prepare must defer the start so the passthrough PTY is launched with the prompt by the follow-up IntentStartCreated")
+}
 
 type captureCreateTaskRepo struct {
 	mockRepository

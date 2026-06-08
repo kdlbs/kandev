@@ -44,9 +44,11 @@ type LaunchSessionRequest struct {
 	// IntentStartCreated that carries the prompt (the two-phase create flow:
 	// cheap sync prepare + async start). It suppresses the passthrough
 	// launchPrepare→launchStart upgrade so the eager launch doesn't spawn a
-	// promptless PTY and pre-empt the prompt-bearing start. Set server-side by
-	// the deferred-start handlers, not by clients.
-	DeferredStart bool                   `json:"deferred_start,omitempty"`
+	// promptless PTY and pre-empt the prompt-bearing start. It is an internal
+	// server-side coordination flag set by the deferred-start handlers, so it is
+	// kept off the wire protocol (`json:"-"`) — a client must not be able to
+	// suppress the upgrade and strand a passthrough session without a PTY.
+	DeferredStart bool                   `json:"-"`
 	Attachments   []v1.MessageAttachment `json:"attachments,omitempty"`
 }
 

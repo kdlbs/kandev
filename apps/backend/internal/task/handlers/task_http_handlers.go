@@ -770,6 +770,10 @@ func (h *TaskHandlers) handlePostCreateTaskSession(
 		return
 	}
 	if body.PrepareSession && !body.StartAgent {
+		// Prepare-only: no follow-up start is coming, so DeferredStart is
+		// intentionally omitted — a passthrough profile should be eagerly
+		// upgraded to a full launch here so the terminal has a PTY to attach to.
+		// (Contrast startAgentForNewTask below, which sets DeferredStart=true.)
 		resp, err := h.orchestrator.LaunchSession(c.Request.Context(), &orchestrator.LaunchSessionRequest{
 			TaskID:            taskID,
 			Intent:            orchestrator.IntentPrepare,
