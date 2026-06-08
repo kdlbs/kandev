@@ -888,6 +888,7 @@ func (s *Service) triggerPRStatusSync(ctx context.Context, watch *PRWatch, taskI
 			// Gap-fill a numbered watch whose exact task_pr row was never
 			// created. AssociatePRWithTask publishes the creation event; the
 			// following SyncTaskPR may publish again if status fields changed.
+			// That double event is harmless because clients re-fetch state.
 			if _, assocErr := s.AssociatePRWithTask(bgCtx, taskID, watch.RepositoryID, status.PR); assocErr != nil {
 				return nil, assocErr
 			}
