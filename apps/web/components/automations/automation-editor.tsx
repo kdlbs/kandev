@@ -361,10 +361,11 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
           value={form.name}
           onChange={(e) => updateField("name", e.target.value)}
           placeholder="Automation name"
+          aria-describedby={!form.name.trim() ? "automation-name-help" : undefined}
           aria-invalid={!form.name.trim() ? true : undefined}
         />
         {!form.name.trim() && (
-          <p className="text-xs text-muted-foreground">
+          <p id="automation-name-help" className="text-xs text-muted-foreground">
             Enter an automation name to enable saving.
           </p>
         )}
