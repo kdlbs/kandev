@@ -87,8 +87,16 @@ test.describe("Git Panel Multi-Select", () => {
 
     await session.changesBulkStageButton().click();
 
-    await expect(session.changesFileRow("stage-a.ts")).toBeVisible({ timeout: 15_000 });
-    await expect(session.changesFileRow("stage-b.ts")).toBeVisible({ timeout: 15_000 });
+    const stagedSection = testPage.getByTestId("staged-files-section");
+    const unstagedSection = testPage.getByTestId("unstaged-files-section");
+    await expect(stagedSection.locator('[data-changes-file="stage-a.ts"]')).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(stagedSection.locator('[data-changes-file="stage-b.ts"]')).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(unstagedSection.locator('[data-changes-file="stage-a.ts"]')).toHaveCount(0);
+    await expect(unstagedSection.locator('[data-changes-file="stage-b.ts"]')).toHaveCount(0);
   });
 
   test("escape clears selection in git panel", async ({

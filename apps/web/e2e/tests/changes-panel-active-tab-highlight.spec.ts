@@ -99,8 +99,11 @@ test.describe("Changes Panel — Active-Tab Highlight", () => {
     // for the same path is still the active panel.
     git.stageFile("staged-active.ts");
 
-    const stagedRow = session.changesFileRow("staged-active.ts");
+    const stagedSection = testPage.getByTestId("staged-files-section");
+    const unstagedSection = testPage.getByTestId("unstaged-files-section");
+    const stagedRow = stagedSection.locator('[data-changes-file="staged-active.ts"]');
     await expect(stagedRow).toBeVisible({ timeout: 15_000 });
+    await expect(unstagedSection.locator('[data-changes-file="staged-active.ts"]')).toHaveCount(0);
 
     // The active row should still be the same staged path.
     await expect(stagedRow).toHaveAttribute("data-active", "true", { timeout: 5_000 });
