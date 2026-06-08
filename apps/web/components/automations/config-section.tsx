@@ -319,6 +319,8 @@ function SelectField({
   helpText?: string;
   required?: boolean;
 }) {
+  const invalid = required && !value;
+  const helpId = testId && helpText ? `${testId}-help` : undefined;
   return (
     <div className="space-y-1.5">
       {required ? (
@@ -330,7 +332,8 @@ function SelectField({
         <SelectTrigger
           data-testid={testId}
           className="cursor-pointer"
-          aria-invalid={required && !value ? true : undefined}
+          aria-describedby={invalid ? helpId : undefined}
+          aria-invalid={invalid ? true : undefined}
         >
           <SelectValue placeholder={placeholder} />
         </SelectTrigger>
@@ -342,7 +345,11 @@ function SelectField({
           ))}
         </SelectContent>
       </Select>
-      {helpText && <p className="text-[10px] text-muted-foreground">{helpText}</p>}
+      {helpText && (
+        <p id={helpId} className="text-[10px] text-muted-foreground">
+          {helpText}
+        </p>
+      )}
     </div>
   );
 }

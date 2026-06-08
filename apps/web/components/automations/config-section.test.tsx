@@ -68,10 +68,32 @@ describe("ConfigSection", () => {
   it("marks task workflow fields as required and explains missing selections", () => {
     renderConfigSection();
 
-    expect(screen.getByText("Workflow")).toBeTruthy();
-    expect(screen.getByText("Workflow Step")).toBeTruthy();
+    screen.getByText("Workflow");
+    screen.getByText("Workflow Step");
     expect(screen.getAllByText("required")).toHaveLength(2);
-    expect(screen.getByText("Select a workflow to enable saving.")).toBeTruthy();
-    expect(screen.getByText("Select a workflow before choosing a step.")).toBeTruthy();
+    screen.getByText("Select a workflow to enable saving.");
+    screen.getByText("Select a workflow before choosing a step.");
+    expect(screen.getByTestId("workflow-selector").getAttribute("aria-describedby")).toBe(
+      "workflow-selector-help",
+    );
+  });
+
+  it("changes step help text once a workflow is selected", () => {
+    renderConfigSection({ workflowId: "workflow-1" });
+
+    expect(screen.queryByText("Select a workflow to enable saving.")).toBeNull();
+    expect(screen.queryByText("Select a workflow before choosing a step.")).toBeNull();
+    screen.getByText("Select a workflow step to enable saving.");
+    expect(screen.getByTestId("workflow-step-selector").getAttribute("aria-describedby")).toBe(
+      "workflow-step-selector-help",
+    );
+  });
+
+  it("hides workflow required markers in run mode", () => {
+    renderConfigSection({ executionMode: "run" });
+
+    expect(screen.queryByText("Workflow")).toBeNull();
+    expect(screen.queryByText("Workflow Step")).toBeNull();
+    expect(screen.queryAllByText("required")).toHaveLength(0);
   });
 });
