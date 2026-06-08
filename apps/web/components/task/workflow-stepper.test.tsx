@@ -40,6 +40,7 @@ describe("WorkflowStepper", () => {
 
     expect(screen.getByTestId("workflow-stepper")).toBeTruthy();
     expect(screen.queryByTestId("workflow-stepper-minimal")).toBeNull();
+    // All steps render under the persistent outer container.
     expect(screen.getByTestId("workflow-step-Spec")).toBeTruthy();
     expect(screen.getByTestId("workflow-step-Work")).toBeTruthy();
     expect(screen.getByTestId("workflow-step-Review")).toBeTruthy();
@@ -49,8 +50,10 @@ describe("WorkflowStepper", () => {
     collapsedMock.mockReturnValue(true);
     render(<WorkflowStepper steps={STEPS} currentStepId="b" />);
 
+    // Outer container persists across variants (keeps the e2e locator stable);
+    // the minimal child marks the collapsed state.
+    expect(screen.getByTestId("workflow-stepper")).toBeTruthy();
     expect(screen.getByTestId("workflow-stepper-minimal")).toBeTruthy();
-    expect(screen.queryByTestId("workflow-stepper")).toBeNull();
 
     // Only the current step is shown, and it keeps its test id + aria-current
     // so it stays selectable in either variant.

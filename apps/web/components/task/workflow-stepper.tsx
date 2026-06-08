@@ -116,7 +116,8 @@ const WorkflowStepper = memo(function WorkflowStepper({
   return (
     <div
       ref={containerRef}
-      className="flex w-full min-w-0 items-center justify-center gap-0 overflow-hidden mx-2"
+      data-testid="workflow-stepper"
+      className="flex w-full min-w-0 items-center justify-center gap-0 overflow-hidden"
     >
       {isCollapsed ? (
         <MinimalWorkflowStepper
@@ -126,7 +127,7 @@ const WorkflowStepper = memo(function WorkflowStepper({
         />
       ) : (
         <>
-          <div data-testid="workflow-stepper" className="flex items-center gap-0">
+          <div className="flex items-center gap-0">
             {sortedSteps.map((step, index) => (
               <WorkflowStepItem
                 key={step.id}
