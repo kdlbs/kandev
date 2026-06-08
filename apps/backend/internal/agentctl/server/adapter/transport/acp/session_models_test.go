@@ -250,6 +250,38 @@ func TestInitialSessionModelState_IgnoresNonModelConfigOptions(t *testing.T) {
 	}
 }
 
+func TestInitialSessionModelState_UsesTypedConfigOptionPrecedence(t *testing.T) {
+	modeCategory := acp.SessionConfigOptionCategoryMode
+	modeOptions := acp.SessionConfigSelectOptionsUngrouped{
+		{Name: "Read Only", Value: "read-only"},
+	}
+	configOptions := []acp.SessionConfigOption{
+		{Select: &acp.SessionConfigOptionSelect{
+			Type:         "select",
+			Id:           "mode",
+			Name:         "Approval Preset",
+			Category:     &modeCategory,
+			CurrentValue: "read-only",
+			Options:      acp.SessionConfigSelectOptions{Ungrouped: &modeOptions},
+		}},
+	}
+	meta := map[string]any{
+		"configOptions": []any{
+			map[string]any{
+				"type":         "select",
+				"id":           "model",
+				"name":         "Model",
+				"category":     "model",
+				"currentValue": "gpt-5.5",
+			},
+		},
+	}
+
+	if models := initialSessionModelState(nil, meta, configOptions); models != nil {
+		t.Fatalf("initialSessionModelState returned %+v for non-model typed configOptions", models)
+	}
+}
+
 func TestResolveCurrentModelFromConfig_ComposesReasoningEffort(t *testing.T) {
 	options := []streams.ConfigOption{
 		{Type: "select", ID: "model", Category: "model", CurrentValue: "gpt-5.5"},

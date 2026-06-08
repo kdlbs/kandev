@@ -99,8 +99,7 @@ func initialSessionModelState(
 	if models != nil {
 		return models
 	}
-	if hasModelConfigOption(convertACPConfigOptions(configOptions)) ||
-		hasModelConfigOption(extractConfigOptions(meta)) {
+	if hasModelConfigOption(sessionConfigOptions(meta, configOptions)) {
 		return &acp.SessionModelState{}
 	}
 	return nil
@@ -113,6 +112,14 @@ func hasModelConfigOption(options []streams.ConfigOption) bool {
 		}
 	}
 	return false
+}
+
+func sessionConfigOptions(meta map[string]any, acpConfigOptions []acp.SessionConfigOption) []streams.ConfigOption {
+	configOptions := convertACPConfigOptions(acpConfigOptions)
+	if len(configOptions) > 0 {
+		return configOptions
+	}
+	return extractConfigOptions(meta)
 }
 
 // effectiveMcpCapabilities applies the adapter's AssumeMcpSse/AssumeMcpHttp
@@ -394,11 +401,9 @@ func (a *Adapter) emitInitialModeState(modes *acp.SessionModeState) {
 // emitSessionModels emits a session_models event from the session response.
 func (a *Adapter) emitSessionModels(sessionID string, models *acp.SessionModelState, meta map[string]any, acpConfigOptions []acp.SessionConfigOption) {
 	currentModelID := string(models.CurrentModelId)
-	// Prefer typed config options from the response; fall back to _meta extraction for older agents
-	configOptions := convertACPConfigOptions(acpConfigOptions)
-	if len(configOptions) == 0 {
-		configOptions = extractConfigOptions(meta)
-	}
+	// Prefer typed config options from the response; fall back to _meta
+	// extraction for older agents.
+	configOptions := sessionConfigOptions(meta, acpConfigOptions)
 
 	// Fallback: if the SDK didn't parse currentModelId (some agents omit it),
 	// try to resolve it from a model-shaped configOption. We deliberately do
