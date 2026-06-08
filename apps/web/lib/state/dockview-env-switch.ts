@@ -139,8 +139,7 @@ export type EnvSwitchParams = {
  * Ephemeral panels (file-editors, diffs, commit-details, etc.) are env-scoped
  * and never carry across switches. When `keepSessionId` is provided, chat
  * panels for any other session are also removed so the old env's session tab
- * doesn't bleed into the new env. Pulled out so `computeSurvivingIndex` can
- * reuse the same survival rules without duplicating them.
+ * doesn't bleed into the new env.
  */
 function shouldRemoveDuringSwitch(
   panel: { id: string; api: { component: string } },
@@ -238,26 +237,6 @@ function replaceStaleSessionPanels(api: DockviewApi, keepSessionId: string | nul
 }
 
 /**
- * Given the panels of a group and the id of the panel being replaced, return
- * the target tab index for the replacement among the siblings that will
- * survive `removeEphemeralPanels`. Returns -1 if the panel isn't in the group.
- */
-function computeSurvivingIndex(
-  groupPanels: readonly { id: string; api: { component: string } }[],
-  outgoingPanelId: string | undefined,
-  keepSessionId: string | null,
-): number {
-  if (!outgoingPanelId) return -1;
-  const idx = groupPanels.findIndex((p) => p.id === outgoingPanelId);
-  if (idx < 0) return -1;
-  let count = 0;
-  for (let i = 0; i < idx; i++) {
-    if (!shouldRemoveDuringSwitch(groupPanels[i], keepSessionId)) count++;
-  }
-  return count;
-}
-
-/**
  * Fast path: check if we can skip `api.fromJSON()` because the layout
  * structure hasn't changed. Returns group IDs if the fast path was taken,
  * or null if a full rebuild is needed.
@@ -308,18 +287,27 @@ function tryFastEnvSwitch(params: EnvSwitchParams): LayoutGroupIds | null {
     api.panels.find((p) => isSessionPanel(p) && p.api.isActive) ?? api.panels.find(isSessionPanel);
   const outgoingGroup = outgoingSessionPanel?.group;
   const outgoingGroupId = outgoingGroup?.id;
-  // Capture the session's index among siblings that will survive
-  // `removeEphemeralPanels`, so the new session panel lands in the same tab
-  // slot. Without this, dockview appends and the agent tab drifts to the end
-  // of the group on every cross-task fast-path switch.
-  const outgoingIndex = outgoingGroup
-    ? computeSurvivingIndex(outgoingGroup.panels, outgoingSessionPanel?.id, activeSessionId)
-    : -1;
+  // The outgoing session panel's current index in its group. We insert the
+  // incoming session at this same slot *before* removing the outgoing one, so
+  // removing the panels ahead of it shifts the new panel into the right final
+  // position (equivalent to the old "survivor index" math, minus the group
+  // death described below).
+  const outgoingIndex =
+    outgoingGroup && outgoingSessionPanel
+      ? outgoingGroup.panels.findIndex((p) => p.id === outgoingSessionPanel.id)
+      : -1;
 
-  removeEphemeralPanels(api, activeSessionId);
+  // Add the incoming session panel BEFORE removing the outgoing chat. Removing
+  // first can leave the outgoing group empty, at which point dockview destroys
+  // it: `outgoingGroupId` no longer exists, and post-#1165 the old
+  // `referenceGroup: "sidebar"` fallback is dead, so `addPanel` runs with an
+  // undefined position and dockview drops the incoming chat into whatever group
+  // is active (e.g. the terminal) — collapsing the grid root to a vertical
+  // stack. Adding first keeps the group alive throughout the swap.
   if (activeSessionId && !api.getPanel(`session:${activeSessionId}`)) {
     addIncomingSessionPanel(api, activeSessionId, outgoingGroupId, outgoingIndex);
   }
+  removeEphemeralPanels(api, activeSessionId);
 
   // The fast path skips `fromJSON`, so per-group active tabs from the
   // outgoing env would otherwise persist into the incoming env. Reapply

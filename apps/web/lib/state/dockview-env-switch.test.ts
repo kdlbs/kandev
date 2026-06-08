@@ -206,6 +206,52 @@ describe("performEnvSwitch", () => {
   });
 });
 
+describe("performEnvSwitch fast-path group survival", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("adds the incoming session panel before closing the outgoing chat (keeps its group alive)", () => {
+    // Regression: when the outgoing session chat is the only surviving panel in
+    // its group (e.g. the default layout's chat column), removing it FIRST
+    // empties — and so destroys — the group. The captured group id then no
+    // longer exists, and post-#1165 the old `referenceGroup: "sidebar"` fallback
+    // is dead, so `addPanel` runs with an undefined position and dockview drops
+    // the incoming chat into whatever group is active (the terminal),
+    // collapsing the grid root to a vertical stack. Adding the incoming panel
+    // BEFORE removing the outgoing one keeps the group alive throughout.
+    vi.mocked(layoutStructuresMatch).mockReturnValueOnce(true);
+    const order: string[] = [];
+    const closeOutgoing = vi.fn(() => order.push("close"));
+    const groupId = "center-group";
+    const outgoingPanels = [
+      {
+        id: "session:old-session",
+        api: { component: "chat", isActive: true, close: closeOutgoing },
+      },
+    ];
+    const outgoing = { ...outgoingPanels[0], group: { id: groupId, panels: outgoingPanels } };
+    const addPanel = vi.fn(() => order.push("add"));
+    const api = {
+      ...makeMockApi(),
+      panels: [outgoing],
+      groups: [{ id: groupId }],
+      getPanel: vi.fn(() => null),
+      addPanel,
+    } as unknown as EnvSwitchParams["api"];
+
+    performEnvSwitch(makeParams({ api }));
+
+    expect(addPanel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: NEW_SESSION_PANEL_ID,
+        position: { referenceGroup: groupId, index: 0 },
+      }),
+    );
+    expect(order).toEqual(["add", "close"]);
+  });
+});
+
 describe("performEnvSwitch slow-path stale session strip", () => {
   beforeEach(() => {
     vi.clearAllMocks();
