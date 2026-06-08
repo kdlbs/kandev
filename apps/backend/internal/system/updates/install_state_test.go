@@ -114,6 +114,41 @@ func TestService_GetForeignServiceDisablesApply(t *testing.T) {
 	}
 }
 
+func TestService_GetLocalBundleServiceDisablesApply(t *testing.T) {
+	homeDir := t.TempDir()
+	metadataPath, _ := writeServiceInstallForTest(t, homeDir, serviceInstallMetadata{
+		Manager:     "systemd",
+		Mode:        "user",
+		Kind:        installKindLocal,
+		HomeDir:     homeDir,
+		LogDir:      filepath.Join(homeDir, "logs"),
+		ServicePath: filepath.Join(homeDir, "kandev.service"),
+		NodePath:    "/usr/local/bin/node",
+		CLIEntry:    "/Users/alice/src/kandev/dist/kandev/cli/bin/cli.js",
+		BundleDir:   "/Users/alice/src/kandev/dist/kandev",
+	})
+	t.Setenv(envRunningAsService, "true")
+	t.Setenv(envServiceMode, "user")
+	t.Setenv(envServiceManager, "systemd")
+	t.Setenv(envInstallKind, installKindLocal)
+	t.Setenv(envServiceMetadata, metadataPath)
+
+	svc := NewService(newTestPool(t), "v1.0.0", nil, logger.Default(), WithHomeDir(homeDir))
+	resp, err := svc.Get()
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !resp.Install.ManagedService {
+		t.Fatalf("expected service to be recognised as managed")
+	}
+	if resp.ApplySupported {
+		t.Fatalf("ApplySupported=true for local bundle service")
+	}
+	if !hasString(resp.ManualCommands, "kandev service install") {
+		t.Fatalf("manual commands = %v, want service install command", resp.ManualCommands)
+	}
+}
+
 func TestManualCommandsNPXHasNoDuplicateBinaryName(t *testing.T) {
 	cmds := manualCommands(InstallStateResponse{Kind: installKindNPX, Mode: installModeUser}, "v1.2.3")
 	if !hasString(cmds, "npx -y kandev@1.2.3 service install") {
