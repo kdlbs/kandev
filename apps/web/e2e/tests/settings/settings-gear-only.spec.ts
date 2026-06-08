@@ -1,29 +1,32 @@
 import { test, expect } from "../../fixtures/test-base";
 
-// Settings is reachable ONLY via the footer gear (no nav "Settings" section),
-// and the gear closes the settings-tree takeover even while on a settings page.
+// Settings has no nav "Settings" section; direct settings routes keep the
+// gear-gated tree open so a hard refresh preserves settings navigation context.
 test.describe("Settings sidebar takeover", () => {
-  test("gear opens the tree, and closes it even on a settings page", async ({ testPage }) => {
+  test("direct settings routes open the tree, and the gear can close it", async ({ testPage }) => {
     await testPage.goto("/settings");
 
     const gear = testPage.getByTestId("sidebar-settings-gear");
     const takeover = testPage.getByTestId("app-sidebar-settings-mode");
 
-    // No standalone "Settings" nav section: the tree is not shown until the gear
-    // is toggled, even though we're sitting on a settings page.
+    // Direct settings routes preserve sidebar context after a hard refresh.
     await expect(gear).toBeVisible();
+    await expect(takeover).toBeVisible();
+
+    // Gear closes the takeover even though we're sitting on a settings page.
+    await gear.click();
     await expect(takeover).toHaveCount(0);
 
-    // Gear opens the takeover.
+    // Gear opens the takeover again.
     await gear.click();
     await expect(takeover).toBeVisible();
 
-    // Enter a section — navigates to a settings sub-page; takeover stays open.
+    // Enter a section: navigates to a settings sub-page; takeover stays open.
     await takeover.locator('a[href="/settings/agents"]').first().click();
     await expect(testPage).toHaveURL(/\/settings\/agents/);
     await expect(takeover).toBeVisible();
 
-    // Clicking the gear again must close the tree — even though we're still on a
+    // Clicking the gear again must close the tree even though we're still on a
     // settings page (the previous bug left it open).
     await gear.click();
     await expect(takeover).toHaveCount(0);
@@ -34,14 +37,12 @@ test.describe("Settings sidebar takeover", () => {
   }) => {
     await testPage.goto("/settings");
 
-    const gear = testPage.getByTestId("sidebar-settings-gear");
     const takeover = testPage.getByTestId("app-sidebar-settings-mode");
     const sidebar = testPage.getByTestId("app-sidebar");
 
-    await gear.click();
     await expect(takeover).toBeVisible();
 
-    // The Kandev brand navigates Home — leaving the settings surface must close
+    // The Kandev brand navigates Home; leaving the settings surface must close
     // the takeover (the bug left the tree up after going Home).
     await sidebar.locator('[aria-label="Kandev home"]').first().click();
     await expect(testPage).not.toHaveURL(/\/settings/);
@@ -58,7 +59,7 @@ test.describe("Settings sidebar takeover", () => {
     await sidebar.getByRole("button", { name: "Collapse sidebar" }).click();
     await expect(sidebar).toHaveAttribute("data-collapsed", "true");
 
-    // Clicking the gear while collapsed must expand the rail AND show the tree —
+    // Clicking the gear while collapsed must expand the rail AND show the tree:
     // a collapsed rail can't host the settings tree.
     await testPage.getByTestId("sidebar-settings-gear").click();
     await expect(sidebar).toHaveAttribute("data-collapsed", "false");

@@ -21,7 +21,6 @@ test.describe("System sidebar navigation", () => {
     // sub-entries are only mounted while that group is the open one. Landing on
     // a System page route-syncs the System group open, so its sub-entries show.
     await testPage.goto("/settings/system/status");
-    await testPage.getByTestId("sidebar-settings-gear").click();
     await expect(testPage.getByTestId("app-sidebar-settings-mode")).toBeVisible();
 
     // Each sub-entry is present in the settings sidebar.

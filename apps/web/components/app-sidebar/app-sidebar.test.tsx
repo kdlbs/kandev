@@ -131,4 +131,18 @@ describe("AppSidebar", () => {
       expect(storeState.toggleAppSidebarSettingsMode).toHaveBeenCalledOnce();
     });
   });
+
+  it("exits settings mode when navigating from a settings route to a non-settings route", async () => {
+    navigationMock.pathname = "/settings/agents";
+    storeState.appSidebar.settingsMode = true;
+
+    const { rerender } = render(<AppSidebar />);
+
+    navigationMock.pathname = "/office/tasks";
+    rerender(<AppSidebar />);
+
+    await waitFor(() => {
+      expect(storeState.toggleAppSidebarSettingsMode).toHaveBeenCalledOnce();
+    });
+  });
 });
