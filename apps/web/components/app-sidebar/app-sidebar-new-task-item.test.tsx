@@ -185,4 +185,14 @@ describe("AppSidebarNewTaskItem", () => {
     expect(mocks.setActiveTask).toHaveBeenCalledWith("t-new");
     expect(mocks.routerPush).not.toHaveBeenCalled();
   });
+
+  it("focuses the created session without pushing when the dialog already navigates", () => {
+    mocks.dialogTaskSessionId = "s-new";
+    mocks.dialogWillNavigate = true;
+    renderItem(false);
+    screen.getByTestId(REGULAR_DIALOG_TESTID).click();
+    expect(mocks.setActiveSession).toHaveBeenCalledWith("t-new", "s-new");
+    expect(mocks.setActiveTask).not.toHaveBeenCalled();
+    expect(mocks.routerPush).not.toHaveBeenCalled();
+  });
 });
