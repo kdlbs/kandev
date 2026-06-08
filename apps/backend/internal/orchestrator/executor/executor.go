@@ -361,7 +361,7 @@ type LaunchOptions struct {
 	Prompt         string
 	WorkflowStepID string
 	StartAgent     bool
-	McpMode        string // MCP tool mode: McpModeConfig or McpModeOffice
+	McpMode        string // MCP tool mode: empty task default, McpModeConfig, or McpModeOffice
 	Attachments    []v1.MessageAttachment
 	Env            map[string]string
 	// RouteOverride carries a provider-routing override resolved by the

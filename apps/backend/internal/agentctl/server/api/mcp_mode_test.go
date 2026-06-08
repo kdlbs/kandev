@@ -65,7 +65,7 @@ func TestHandleSetMcpMode_AcceptsSupportedModes(t *testing.T) {
 func TestHandleSetMcpMode_RejectsUnsupportedMode(t *testing.T) {
 	s := newTestServerWithMCP(t)
 
-	rec := setMcpMode(t, s, "external")
+	rec := setMcpMode(t, s, mcpserver.ModeExternal)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
 	}
