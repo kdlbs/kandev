@@ -43,7 +43,6 @@ function TimelineSection({
   label,
   count,
   action,
-  isLast,
   children,
   collapsible = true,
   defaultCollapsed = false,
@@ -80,7 +79,6 @@ function TimelineSection({
       {/* Vertical line + dot */}
       <div className="flex flex-col items-center">
         <TimelineDot color={dotColor} />
-        {!isLast && <div className="w-px flex-1 bg-border/60" />}
       </div>
 
       {/* Content */}

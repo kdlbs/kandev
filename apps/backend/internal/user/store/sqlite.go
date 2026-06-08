@@ -259,7 +259,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		settings.ChatSubmitKey = "cmd_enter"
 		settings.KeyboardShortcuts = map[string]interface{}{}
 		settings.TerminalLinkBehavior = "new_tab"
-		settings.ChangesPanelLayout = "flat"
+		settings.ChangesPanelLayout = "tree"
 		settings.SidebarViews = []models.SidebarView{}
 		settings.VoiceMode = defaultVoiceModeSettings()
 		return settings, nil
@@ -350,10 +350,10 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.TerminalFontFamily = payload.TerminalFontFamily
 	settings.TerminalFontSize = payload.TerminalFontSize
 	settings.VoiceMode = mergeVoiceModeDefaults(payload.VoiceMode)
-	if payload.ChangesPanelLayout == "tree" {
-		settings.ChangesPanelLayout = "tree"
-	} else {
+	if payload.ChangesPanelLayout == "flat" {
 		settings.ChangesPanelLayout = "flat"
+	} else {
+		settings.ChangesPanelLayout = "tree"
 	}
 	return settings, nil
 }

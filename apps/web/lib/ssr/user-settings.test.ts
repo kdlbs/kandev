@@ -90,9 +90,9 @@ describe("mapUserSettingsResponse", () => {
     expect(result.terminalFontFamily).toBeNull();
   });
 
-  it("defaults changesPanelLayout to flat when response is null", () => {
+  it("defaults changesPanelLayout to tree when response is null", () => {
     const result = mapUserSettingsResponse(null);
-    expect(result.changesPanelLayout).toBe("flat");
+    expect(result.changesPanelLayout).toBe("tree");
   });
 });
 
@@ -101,11 +101,14 @@ describe("parseChangesPanelLayout", () => {
     expect(parseChangesPanelLayout("tree")).toBe("tree");
   });
 
-  it('returns "flat" for "flat", undefined, or unknown values', () => {
+  it('returns "flat" only for "flat"', () => {
     expect(parseChangesPanelLayout("flat")).toBe("flat");
-    expect(parseChangesPanelLayout(undefined)).toBe("flat");
-    expect(parseChangesPanelLayout("grid")).toBe("flat");
-    expect(parseChangesPanelLayout("")).toBe("flat");
+  });
+
+  it('returns "tree" for undefined or unknown values', () => {
+    expect(parseChangesPanelLayout(undefined)).toBe("tree");
+    expect(parseChangesPanelLayout("grid")).toBe("tree");
+    expect(parseChangesPanelLayout("")).toBe("tree");
   });
 });
 

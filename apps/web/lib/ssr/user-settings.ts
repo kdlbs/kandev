@@ -11,7 +11,7 @@ export function parseTerminalLinkBehavior(value: string | undefined): "new_tab" 
 }
 
 export function parseChangesPanelLayout(value: string | undefined): "flat" | "tree" {
-  return value === "tree" ? "tree" : "flat";
+  return value === "flat" ? "flat" : "tree";
 }
 
 /**
@@ -116,7 +116,7 @@ export function mapUserSettingsResponse(response: UserSettingsResponse | null) {
       terminalLinkBehavior: "new_tab" as const,
       terminalFontFamily: null,
       terminalFontSize: null,
-      changesPanelLayout: "flat" as const,
+      changesPanelLayout: "tree" as const,
       voiceMode: { ...DEFAULT_VOICE_MODE_STATE },
       ...buildLspFields(undefined),
       loaded: false,

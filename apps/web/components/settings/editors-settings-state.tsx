@@ -7,7 +7,11 @@ import { createEditor, deleteEditor, updateEditor, updateUserSettings } from "@/
 import { useRequest } from "@/lib/http/use-request";
 import type { EditorOption } from "@/lib/types/http";
 import { type ComboboxOption } from "@/components/combobox";
-import { parseTerminalLinkBehavior, parseVoiceMode } from "@/lib/ssr/user-settings";
+import {
+  parseChangesPanelLayout,
+  parseTerminalLinkBehavior,
+  parseVoiceMode,
+} from "@/lib/ssr/user-settings";
 import { fromApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
 import {
   type EditorFormState,
@@ -244,7 +248,7 @@ function buildUserSettingsFromResponse(
     terminalLinkBehavior: parseTerminalLinkBehavior(s.terminal_link_behavior),
     terminalFontFamily: s.terminal_font_family || null,
     terminalFontSize: s.terminal_font_size || null,
-    changesPanelLayout: s.changes_panel_layout === "tree" ? ("tree" as const) : ("flat" as const),
+    changesPanelLayout: parseChangesPanelLayout(s.changes_panel_layout),
     voiceMode: parseVoiceMode(s.voice_mode),
     ...mapEditorSettingsFields(s),
   };
