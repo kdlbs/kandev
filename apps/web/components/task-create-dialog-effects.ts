@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef } from "react";
-import type { Repository, Executor } from "@/lib/types/http";
+import type { Repository, Executor, ExecutorProfile } from "@/lib/types/http";
 import { DEFAULT_LOCAL_EXECUTOR_TYPE } from "@/lib/utils";
 import { useToast } from "@/components/toast-provider";
 import {
@@ -199,13 +199,16 @@ export function useCurrentLocalBranchEffect(
 
 /**
  * Picks the default executor ID to auto-fill on dialog open. Repo-less tasks
- * skip the worktree executor (it needs a repo); other modes use the workspace
- * default → DEFAULT_LOCAL_EXECUTOR_TYPE → first available, in priority order.
+ * skip the worktree executor (it needs a repo). Explicit local paths prefer
+ * the local executor because the user chose an on-machine working tree.
+ * Otherwise repo-backed tasks use the workspace default →
+ * DEFAULT_LOCAL_EXECUTOR_TYPE → first available, in priority order.
  */
 function pickDefaultExecutorId(
   executors: Executor[],
   workspaceDefaults: { default_executor_id?: string | null } | null | undefined,
   noRepository: boolean,
+  preferLocalExecutor: boolean,
 ): string | null {
   const eligible = noRepository
     ? executors.filter((e: Executor) => e.type !== "worktree")
@@ -213,8 +216,61 @@ function pickDefaultExecutorId(
   if (eligible.length === 0) return null;
   const defId = workspaceDefaults?.default_executor_id ?? null;
   if (defId && eligible.some((e: Executor) => e.id === defId)) return defId;
+  if (noRepository || preferLocalExecutor) {
+    const directLocal = eligible.find((e: Executor) => isDirectLocalExecutorType(e.type));
+    if (directLocal) return directLocal.id;
+  }
   const local = eligible.find((e: Executor) => e.type === DEFAULT_LOCAL_EXECUTOR_TYPE);
   return local?.id ?? eligible[0].id;
+}
+
+type ExecutorProfileCandidate = ExecutorProfile & {
+  _executorId: string;
+  _executorType: string;
+};
+
+function isDirectLocalExecutorType(executorType: string | undefined): boolean {
+  return executorType === "local" || executorType === "local_pc";
+}
+
+function isWorktreeExecutorType(executorType: string | undefined): boolean {
+  return executorType === "worktree";
+}
+
+function flattenExecutorProfiles(executors: Executor[]): ExecutorProfileCandidate[] {
+  return executors.flatMap((e) =>
+    (e.profiles ?? []).map((p) => ({
+      ...p,
+      _executorId: e.id,
+      _executorType: p.executor_type ?? e.type,
+    })),
+  );
+}
+
+function pickDefaultExecutorProfileId(
+  executors: Executor[],
+  workspaceDefaults: { default_executor_id?: string | null } | null | undefined,
+  noRepository: boolean,
+  preferLocalExecutor: boolean,
+): string | null {
+  const allProfiles = flattenExecutorProfiles(executors);
+  if (allProfiles.length === 0) return null;
+  const eligibleProfiles = noRepository
+    ? allProfiles.filter((p) => !isWorktreeExecutorType(p._executorType))
+    : allProfiles;
+  if (eligibleProfiles.length === 0) return null;
+
+  const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID, null);
+  if (lastId && eligibleProfiles.some((p) => p.id === lastId)) return lastId;
+
+  const executorId = pickDefaultExecutorId(
+    executors,
+    workspaceDefaults,
+    noRepository,
+    preferLocalExecutor,
+  );
+  const executorProfile = eligibleProfiles.find((p) => p._executorId === executorId);
+  return executorProfile?.id ?? eligibleProfiles[0].id;
 }
 
 export function useDefaultSelectionsEffect(
@@ -224,26 +280,58 @@ export function useDefaultSelectionsEffect(
   workflows: Array<{ id: string; agent_profile_id?: string }>,
 ) {
   const { executors, workspaceDefaults } = sel;
-  const { executorId, executorProfileId, setExecutorId, setExecutorProfileId, noRepository } = fs;
+  const {
+    executorId,
+    executorProfileId,
+    setExecutorId,
+    setExecutorProfileId,
+    noRepository,
+    useRemote,
+    repositories,
+  } = fs;
+  const preferLocalExecutor =
+    !noRepository && !useRemote && repositories.some((row) => Boolean(row.localPath));
   useAgentProfileAutopickEffect(fs, open, sel, workflows);
 
   useEffect(() => {
     if (!open || executorId || executors.length === 0) return;
-    const pick = pickDefaultExecutorId(executors, workspaceDefaults, noRepository);
+    const pick = pickDefaultExecutorId(
+      executors,
+      workspaceDefaults,
+      noRepository,
+      preferLocalExecutor,
+    );
     if (pick) void Promise.resolve().then(() => setExecutorId(pick));
-  }, [open, executorId, executors, workspaceDefaults, setExecutorId, noRepository]);
+  }, [
+    open,
+    executorId,
+    executors,
+    workspaceDefaults,
+    setExecutorId,
+    noRepository,
+    preferLocalExecutor,
+  ]);
 
   useEffect(() => {
-    // Auto-select executor profile: last used (localStorage) → first available
+    // Auto-select executor profile: last used (localStorage) → source-aware
+    // executor default → first eligible profile.
     if (!open || executorProfileId || executors.length === 0) return;
-    const allProfiles = executors.flatMap((e) =>
-      (e.profiles ?? []).map((p) => ({ ...p, _executorId: e.id })),
+    const pick = pickDefaultExecutorProfileId(
+      executors,
+      workspaceDefaults,
+      noRepository,
+      preferLocalExecutor,
     );
-    if (allProfiles.length === 0) return;
-    const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID, null);
-    const pick = lastId && allProfiles.some((p) => p.id === lastId) ? lastId : allProfiles[0].id;
-    void Promise.resolve().then(() => setExecutorProfileId(pick));
-  }, [open, executorProfileId, executors, setExecutorProfileId]);
+    if (pick) void Promise.resolve().then(() => setExecutorProfileId(pick));
+  }, [
+    open,
+    executorProfileId,
+    executors,
+    workspaceDefaults,
+    setExecutorProfileId,
+    noRepository,
+    preferLocalExecutor,
+  ]);
 
   // Derive executorId from the selected executor profile
   useEffect(() => {
@@ -271,7 +359,7 @@ export function useDefaultSelectionsEffect(
   // literal every render, so listing it in the dep array would re-run this
   // effect on every render. computeSelectedRepoCount only reads noRepository /
   // useRemote / remoteRepos / repositories, so memoize over exactly those.
-  const { noRepository: fsNoRepository, useRemote, remoteRepos, repositories } = fs;
+  const { noRepository: fsNoRepository, remoteRepos } = fs;
   const selectedRepoCount = useMemo(
     () =>
       computeSelectedRepoCount({

@@ -478,8 +478,16 @@ describe("useGitHubUrlErrorEffect", () => {
 });
 
 const PROFILE_DOCKER = "profile-docker";
+const PROFILE_LOCAL = "profile-local";
 const PROFILE_WORKTREE = "profile-worktree";
 
+function localExecutor(): StoreSelections["executors"][number] {
+  return {
+    id: "exec-local",
+    type: "local",
+    profiles: [{ id: PROFILE_LOCAL, executor_type: "local" }],
+  } as unknown as StoreSelections["executors"][number];
+}
 function dockerExecutor(): StoreSelections["executors"][number] {
   return {
     id: "exec-docker",
@@ -494,6 +502,39 @@ function worktreeExecutor(): StoreSelections["executors"][number] {
     profiles: [{ id: PROFILE_WORKTREE, executor_type: "worktree" }],
   } as unknown as StoreSelections["executors"][number];
 }
+
+describe("useDefaultSelectionsEffect — executor profile defaults", () => {
+  it("defaults repo-backed tasks to the worktree profile when no profile was saved", async () => {
+    const fs = makeDefaultSelFs({ executorId: "", executorProfileId: "" });
+    const sel = makeSel({ executors: [localExecutor(), worktreeExecutor()] });
+
+    renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
+
+    await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(PROFILE_WORKTREE));
+  });
+
+  it("defaults repo-less tasks to a local profile because worktree needs a repo", async () => {
+    const fs = makeDefaultSelFs({ executorId: "", executorProfileId: "", noRepository: true });
+    const sel = makeSel({ executors: [worktreeExecutor(), localExecutor()] });
+
+    renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
+
+    await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(PROFILE_LOCAL));
+  });
+
+  it("defaults explicit local-path tasks to a local profile when no profile was saved", async () => {
+    const fs = makeDefaultSelFs({
+      executorId: "",
+      executorProfileId: "",
+      repositories: [{ key: "row-0", localPath: "/workspace/custom", branch: "" }],
+    });
+    const sel = makeSel({ executors: [worktreeExecutor(), localExecutor()] });
+
+    renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
+
+    await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(PROFILE_LOCAL));
+  });
+});
 
 type MultiRepoGuardFake = Pick<
   DialogFormState,
