@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agentctl/sessionmodel"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
@@ -744,5 +745,48 @@ func TestConfigOptionUpdate_ComposesReasoningEffortCurrentModel(t *testing.T) {
 	}
 	if ev.CurrentModelID != "gpt-5.5/high" {
 		t.Errorf("event CurrentModelID = %q, want %q", ev.CurrentModelID, "gpt-5.5/high")
+	}
+}
+
+// TestFinalizeSetModel_MethodNoneEmitsNothing pins the contract that when
+// applySessionModel returns MethodNone (agent supports neither
+// session/set_config_option nor session/set_model), the adapter must NOT emit
+// a session_models convergence event nor reset the cached context-window size,
+// because no switch actually happened.
+func TestFinalizeSetModel_MethodNoneEmitsNothing(t *testing.T) {
+	a := newTestAdapter()
+
+	cachedModels := []modelInfo{{ModelId: "claude-opus-4-7", Name: "Opus 4.7"}}
+	cachedConfig := []streams.ConfigOption{
+		{Type: "select", ID: "model", Name: "Model", CurrentValue: "old-model"},
+	}
+
+	a.finalizeSetModel(sessionmodel.MethodNone, "sess-1", "claude-opus-4-7", cachedModels, cachedConfig)
+
+	events := drainEvents(a)
+	for _, ev := range events {
+		if ev.Type == streams.EventTypeSessionModels {
+			t.Fatalf("expected no session_models event, got %+v", ev)
+		}
+	}
+}
+
+// TestFinalizeSetModel_RealMethodEmitsEvent pins the positive path: when
+// applySessionModel reports a real RPC was used (MethodSetConfigOption or
+// MethodSetModel), the adapter must emit a session_models event so the
+// frontend converges on the new model.
+func TestFinalizeSetModel_RealMethodEmitsEvent(t *testing.T) {
+	a := newTestAdapter()
+
+	cachedModels := []modelInfo{{ModelId: "claude-opus-4-7", Name: "Opus 4.7"}}
+	cachedConfig := []streams.ConfigOption{
+		{Type: "select", ID: "model", Name: "Model", CurrentValue: "old-model"},
+	}
+
+	a.finalizeSetModel(sessionmodel.MethodSetConfigOption, "sess-1", "claude-opus-4-7", cachedModels, cachedConfig)
+
+	ev := findSessionModelsEvent(t, drainEvents(a))
+	if ev.CurrentModelID != "claude-opus-4-7" {
+		t.Errorf("CurrentModelID = %q, want %q", ev.CurrentModelID, "claude-opus-4-7")
 	}
 }

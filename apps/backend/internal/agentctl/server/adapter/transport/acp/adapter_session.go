@@ -660,16 +660,26 @@ func (a *Adapter) SetModel(ctx context.Context, modelID string) error {
 	if err != nil {
 		return fmt.Errorf("set session model failed via %s: %w", method, err)
 	}
-	// MethodNone means the agent supports neither the typed
-	// session/set_config_option nor the legacy session/set_model RPC, so no
-	// switch actually happened. Don't claim convergence in that case — the
-	// agent's model is unchanged and the frontend shouldn't be told otherwise.
+	a.finalizeSetModel(method, sessionID, modelID, available, cachedConfig)
+	return nil
+}
+
+// finalizeSetModel emits the post-apply convergence event when applySessionModel
+// actually performed a switch. MethodNone means the agent supports neither the
+// typed session/set_config_option nor the legacy session/set_model RPC, so no
+// switch happened — skip the reset and the emit to avoid lying to the frontend.
+func (a *Adapter) finalizeSetModel(
+	method sessionmodel.Method,
+	sessionID string,
+	modelID string,
+	available []modelInfo,
+	cachedConfig []streams.ConfigOption,
+) {
 	if method == sessionmodel.MethodNone {
-		return nil
+		return
 	}
 	a.resetContextWindowMaxSize(sessionID)
 	a.emitSetModelEvent(sessionID, modelID, available, cachedConfig)
-	return nil
 }
 
 func applySessionModel(
