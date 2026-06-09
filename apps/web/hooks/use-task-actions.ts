@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import { archiveTask, deleteTask, moveTask, updateTask } from "@/lib/api";
+import { replaceTaskUrl } from "@/lib/links";
 import { useAppStoreApi } from "@/components/state-provider";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
 
@@ -41,13 +42,30 @@ export function useArchiveAndSwitchTask(opts?: { useLayoutSwitch?: boolean }) {
     async (taskId: string, opts?: { cascade?: boolean }) => {
       const { activeTaskId: wasActiveTaskId, activeSessionId: wasActiveSessionId } =
         store.getState().tasks;
-      await removeTaskFromBoard(taskId, {
+
+      const initialSwitch = await removeTaskFromBoard(taskId, {
         wasActiveTaskId,
         wasActiveSessionId,
-        removeFromBoard: false,
+        switchOnly: true,
       });
-      await archiveTaskById(taskId, opts);
-      await removeTaskFromBoard(taskId, { wasActiveTaskId, wasActiveSessionId });
+
+      try {
+        await archiveTaskById(taskId, opts);
+        await removeTaskFromBoard(taskId, { wasActiveTaskId, wasActiveSessionId });
+      } catch (error) {
+        if (
+          wasActiveTaskId &&
+          store.getState().tasks.activeTaskId === initialSwitch.switchedTaskId
+        ) {
+          if (wasActiveSessionId) {
+            store.getState().setActiveSession(wasActiveTaskId, wasActiveSessionId);
+          } else {
+            store.getState().setActiveTask(wasActiveTaskId);
+          }
+          replaceTaskUrl(wasActiveTaskId);
+        }
+        throw error;
+      }
     },
     [archiveTaskById, removeTaskFromBoard, store],
   );

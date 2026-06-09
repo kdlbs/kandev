@@ -5,12 +5,24 @@ const archiveTaskMock = vi.fn();
 const removeTaskFromBoardMock = vi.fn();
 const getStateMock = vi.fn();
 const storeMock = { getState: getStateMock };
+const replaceTaskUrlMock = vi.fn();
+const setActiveSessionMock = vi.fn();
+const setActiveTaskMock = vi.fn();
+let storeState: {
+  tasks: { activeTaskId: string | null; activeSessionId: string | null };
+  setActiveSession: (...args: unknown[]) => void;
+  setActiveTask: (...args: unknown[]) => void;
+};
 
 vi.mock("@/lib/api", () => ({
   archiveTask: (...args: unknown[]) => archiveTaskMock(...args),
   deleteTask: vi.fn(),
   moveTask: vi.fn(),
   updateTask: vi.fn(),
+}));
+
+vi.mock("@/lib/links", () => ({
+  replaceTaskUrl: (...args: unknown[]) => replaceTaskUrlMock(...args),
 }));
 
 vi.mock("@/components/state-provider", () => ({
@@ -37,9 +49,13 @@ function deferred<T>() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  getStateMock.mockReturnValue({
+  storeState = {
     tasks: { activeTaskId: "task-A", activeSessionId: "sess-A" },
-  });
+    setActiveSession: (...args: unknown[]) => setActiveSessionMock(...args),
+    setActiveTask: (...args: unknown[]) => setActiveTaskMock(...args),
+  };
+  getStateMock.mockReturnValue(storeState);
+  removeTaskFromBoardMock.mockResolvedValue({ switchedTaskId: "task-B" });
 });
 
 describe("useArchiveAndSwitchTask", () => {
@@ -56,7 +72,7 @@ describe("useArchiveAndSwitchTask", () => {
     expect(removeTaskFromBoardMock).toHaveBeenCalledWith("task-A", {
       wasActiveTaskId: "task-A",
       wasActiveSessionId: "sess-A",
-      removeFromBoard: false,
+      switchOnly: true,
     });
 
     archive.resolve();
@@ -66,5 +82,27 @@ describe("useArchiveAndSwitchTask", () => {
       wasActiveTaskId: "task-A",
       wasActiveSessionId: "sess-A",
     });
+  });
+
+  it("restores active task when archive API rejects after switching", async () => {
+    const error = new Error("network error");
+    archiveTaskMock.mockRejectedValueOnce(error);
+    removeTaskFromBoardMock.mockImplementationOnce(async () => {
+      storeState.tasks.activeTaskId = "task-B";
+      return { switchedTaskId: "task-B" };
+    });
+    const { result } = renderHook(() => useArchiveAndSwitchTask());
+
+    await expect(result.current("task-A")).rejects.toThrow("network error");
+
+    expect(removeTaskFromBoardMock).toHaveBeenCalledTimes(1);
+    expect(removeTaskFromBoardMock).toHaveBeenCalledWith("task-A", {
+      wasActiveTaskId: "task-A",
+      wasActiveSessionId: "sess-A",
+      switchOnly: true,
+    });
+    expect(setActiveSessionMock).toHaveBeenCalledWith("task-A", "sess-A");
+    expect(replaceTaskUrlMock).toHaveBeenCalledWith("task-A");
+    expect(archiveTaskMock).toHaveBeenCalledWith("task-A", undefined);
   });
 });

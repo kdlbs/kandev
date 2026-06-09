@@ -340,7 +340,7 @@ describe("useTaskRemoval — next task selection", () => {
     await result.current.removeTaskFromBoard("task-A", {
       wasActiveTaskId: "task-A",
       wasActiveSessionId: "sess-A",
-      removeFromBoard: false,
+      switchOnly: true,
     });
 
     expect(store.getRecorded().setWorkflowSnapshot).not.toHaveBeenCalled();

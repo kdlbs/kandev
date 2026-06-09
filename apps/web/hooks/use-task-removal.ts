@@ -27,7 +27,11 @@ type RemoveFromBoardOptions = {
   /** The active session ID captured before the async delete API call. */
   wasActiveSessionId?: string | null;
   /** Switch away from the task without removing it from board state yet. */
-  removeFromBoard?: boolean;
+  switchOnly?: boolean;
+};
+
+type RemoveFromBoardResult = {
+  switchedTaskId: string | null;
 };
 
 function cachedSessionsHaveEnvIds(sessions: TaskSession[]): boolean {
@@ -211,11 +215,13 @@ export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOp
    * wins and the captured value is ignored (no auto-switch).
    */
   const removeTaskFromBoard = useCallback(
-    async (taskId: string, opts?: RemoveFromBoardOptions) => {
-      if (opts?.removeFromBoard !== false) removeTaskFromSnapshots(store, taskId);
+    async (taskId: string, opts?: RemoveFromBoardOptions): Promise<RemoveFromBoardResult> => {
+      if (!opts?.switchOnly) removeTaskFromSnapshots(store, taskId);
       const allRemainingTasks = collectRemainingTasks(store);
 
-      if (!shouldSwitchAfterRemoval(store, taskId, opts)) return;
+      if (!shouldSwitchAfterRemoval(store, taskId, opts)) {
+        return { switchedTaskId: null };
+      }
 
       const oldEnvId = resolveOldEnvId(store, opts);
       const nextTask = selectNextTaskAfterRemoval(allRemainingTasks, taskId);
@@ -227,9 +233,11 @@ export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOp
           useLayoutSwitch,
           loadTaskSessionsForTask,
         });
-      } else {
-        window.location.href = "/";
+        return { switchedTaskId: nextTask.id };
       }
+
+      window.location.href = "/";
+      return { switchedTaskId: taskId };
     },
     [store, useLayoutSwitch, loadTaskSessionsForTask],
   );
