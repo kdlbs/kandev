@@ -55,6 +55,7 @@ export function useArchiveAndSwitchTask(opts?: { useLayoutSwitch?: boolean }) {
       } catch (error) {
         if (
           wasActiveTaskId &&
+          initialSwitch.switchedTaskId !== null &&
           store.getState().tasks.activeTaskId === initialSwitch.switchedTaskId
         ) {
           if (wasActiveSessionId) {

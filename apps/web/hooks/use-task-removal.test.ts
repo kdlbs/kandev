@@ -274,10 +274,11 @@ describe("useTaskRemoval — switch guard (WS-clear fallback)", () => {
       const { result } = renderHook(() =>
         useTaskRemoval({ store: store as unknown as StoreApi<never> }),
       );
-      await result.current.removeTaskFromBoard("task-A", {
+      const removeResult = await result.current.removeTaskFromBoard("task-A", {
         wasActiveTaskId: "task-A",
         wasActiveSessionId: "sess-A",
       });
+      expect(removeResult.switchedTaskId).toBeNull();
       expect(hrefSetter).toHaveBeenCalledWith("/");
     } finally {
       Object.defineProperty(window, "location", {

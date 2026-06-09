@@ -237,7 +237,7 @@ export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOp
       }
 
       window.location.href = "/";
-      return { switchedTaskId: taskId };
+      return { switchedTaskId: null };
     },
     [store, useLayoutSwitch, loadTaskSessionsForTask],
   );

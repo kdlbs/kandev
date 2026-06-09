@@ -12,6 +12,7 @@ export type SidebarDialogsActions = {
   handleRenameSubmit: (newTitle: string) => Promise<void> | void;
   archivingTask: Target;
   setArchivingTask: (next: Target) => void;
+  archivingTaskId: string | null;
   isArchiving: boolean;
   handleArchiveConfirm: (opts: { cascade: boolean }) => Promise<void> | void;
   deletingTask: Target;
@@ -27,6 +28,7 @@ export function SidebarDialogs({ actions }: { actions: SidebarDialogsActions }) 
     handleRenameSubmit,
     archivingTask,
     setArchivingTask,
+    archivingTaskId,
     isArchiving,
     handleArchiveConfirm,
     deletingTask,
@@ -52,7 +54,7 @@ export function SidebarDialogs({ actions }: { actions: SidebarDialogsActions }) 
         taskTitle={archivingTask?.title ?? ""}
         taskId={archivingTask?.id}
         executorType={archivingTask?.executorType}
-        isArchiving={isArchiving}
+        isArchiving={isArchiving && archivingTask?.id === archivingTaskId}
         onConfirm={handleArchiveConfirm}
       />
       <TaskDeleteConfirmDialog
