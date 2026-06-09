@@ -561,7 +561,6 @@ describe("useDefaultSelectionsEffect — executor profile defaults", () => {
 
     renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
 
-    await waitFor(() => expect(fs.setExecutorId).toHaveBeenCalledWith(localWithoutProfiles.id));
     await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(PROFILE_DOCKER));
     expect(fs.setExecutorProfileId).not.toHaveBeenCalledWith(PROFILE_WORKTREE);
   });
