@@ -442,8 +442,13 @@ describe("aggregatePRStatusColor", () => {
   });
 
   it("falls back to terminal state when every PR is merged/closed", () => {
+    // All-terminal tasks bypass the open-PR filter and rank across every PR,
+    // so the result depends on which terminal state is present. Merged ranks
+    // 0 (purple), closed ranks 5 (red) — both paths need a guard.
     const merged = makePR({ state: "merged" });
     expect(aggregatePRStatusColor([merged, merged])).toBe("text-purple-500");
+    const closed = makePR({ state: "closed" });
+    expect(aggregatePRStatusColor([closed, closed])).toBe("text-red-500");
   });
 });
 
