@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { AgentLogo } from "@/components/agent-logo";
 import {
   ContextMenuItem,
@@ -37,9 +37,9 @@ function profileDisplayLabel(profile: AgentProfileOption): { label: string; agen
   };
 }
 
-export function useHandoffProfiles(taskId: string): HandoffProfile[] {
+export function useHandoffProfiles(taskId: string, enabled = true): HandoffProfile[] {
   const agentProfiles = useAppStore((s) => s.agentProfiles.items);
-  const executorProfile = useTaskExecutorProfile(taskId);
+  const executorProfile = useTaskExecutorProfile(taskId, enabled);
   const { specs: authSpecs, loaded: authLoaded } = useRemoteAuthSpecs();
 
   return useMemo(() => {
@@ -96,11 +96,12 @@ type HandoffMenuProps = {
 };
 
 export function HandoffContextMenuSub({ taskId, disabled, onSelectProfile }: HandoffMenuProps) {
-  const profiles = useHandoffProfiles(taskId);
+  const [submenuOpen, setSubmenuOpen] = useState(false);
+  const profiles = useHandoffProfiles(taskId, submenuOpen);
   const submenuDisabled = disabled || (profiles.length > 0 && profiles.every((p) => p.disabled));
 
   return (
-    <ContextMenuSub>
+    <ContextMenuSub open={submenuOpen} onOpenChange={setSubmenuOpen}>
       <ContextMenuSubTrigger
         className="cursor-pointer"
         disabled={submenuDisabled}
@@ -120,11 +121,12 @@ export function HandoffContextMenuSub({ taskId, disabled, onSelectProfile }: Han
 }
 
 export function HandoffDropdownMenuSub({ taskId, disabled, onSelectProfile }: HandoffMenuProps) {
-  const profiles = useHandoffProfiles(taskId);
+  const [submenuOpen, setSubmenuOpen] = useState(false);
+  const profiles = useHandoffProfiles(taskId, submenuOpen);
   const submenuDisabled = disabled || (profiles.length > 0 && profiles.every((p) => p.disabled));
 
   return (
-    <DropdownMenuSub>
+    <DropdownMenuSub open={submenuOpen} onOpenChange={setSubmenuOpen}>
       <DropdownMenuSubTrigger
         className="cursor-pointer"
         disabled={submenuDisabled}

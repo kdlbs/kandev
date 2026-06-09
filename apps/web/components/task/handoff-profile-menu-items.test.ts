@@ -23,6 +23,9 @@ let mockProfiles: AgentProfileOption[] = [PROFILE_A, PROFILE_B];
 let mockExecutorProfile: ExecutorProfile | null = null;
 let mockAuthLoaded = true;
 let mockAuthSpecs: Record<string, unknown> = {};
+const mockUseTaskExecutorProfile = vi.fn(
+  (_taskId: string, _enabled?: boolean) => mockExecutorProfile,
+);
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
@@ -32,7 +35,8 @@ vi.mock("@/components/state-provider", () => ({
 }));
 
 vi.mock("@/hooks/domains/session/use-task-executor-profile", () => ({
-  useTaskExecutorProfile: () => mockExecutorProfile,
+  useTaskExecutorProfile: (taskId: string, enabled?: boolean) =>
+    mockUseTaskExecutorProfile(taskId, enabled),
 }));
 
 vi.mock("@/hooks/domains/settings/use-remote-auth-specs", () => ({
@@ -55,6 +59,7 @@ describe("useHandoffProfiles", () => {
     mockExecutorProfile = null;
     mockAuthLoaded = true;
     mockAuthSpecs = {};
+    mockUseTaskExecutorProfile.mockClear();
   });
 
   it("returns all agent profiles with display labels", () => {
@@ -91,5 +96,10 @@ describe("useHandoffProfiles", () => {
     mockProfiles = [];
     const { result } = renderHook(() => useHandoffProfiles("task-1"));
     expect(result.current).toEqual([]);
+  });
+
+  it("passes the enabled flag to executor profile lookup", () => {
+    renderHook(() => useHandoffProfiles("task-1", false));
+    expect(mockUseTaskExecutorProfile).toHaveBeenCalledWith("task-1", false);
   });
 });

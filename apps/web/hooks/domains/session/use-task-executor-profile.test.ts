@@ -39,7 +39,7 @@ const EXECUTOR_TEMPLATE = {
   ],
   created_at: TIMESTAMP,
   updated_at: TIMESTAMP,
-};
+} satisfies Executor;
 
 let mockExecutors: Executor[] = [
   {

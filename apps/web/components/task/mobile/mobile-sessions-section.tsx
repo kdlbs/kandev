@@ -106,6 +106,10 @@ function SessionActionsMenu({
   onAskDelete: () => void;
   onHandoffProfile: (profileId: string) => void;
 }) {
+  const hasLifecycleAction =
+    !!state &&
+    (isSessionStoppable(state) || isSessionResumable(state) || isSessionDeletable(state));
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -146,7 +150,7 @@ function SessionActionsMenu({
             Delete
           </DropdownMenuItem>
         )}
-        <DropdownMenuSeparator />
+        {hasLifecycleAction && <DropdownMenuSeparator />}
         <HandoffDropdownMenuSub taskId={taskId} onSelectProfile={onHandoffProfile} />
       </DropdownMenuContent>
     </DropdownMenu>
