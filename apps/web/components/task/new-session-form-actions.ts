@@ -21,7 +21,7 @@ type SessionContextChangeOpts = {
 };
 
 function sanitizePromptText(value: string): string {
-  return value.replace(/[\r\n<>]/g, " ");
+  return value.replace(/\r/g, "").replace(/[<>]/g, " ");
 }
 
 export function useSessionContextChange(opts: SessionContextChangeOpts) {

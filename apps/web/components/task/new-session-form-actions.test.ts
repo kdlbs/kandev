@@ -209,7 +209,7 @@ describe("useSessionContextChange", () => {
       await result.current(SUMMARY_ACTION);
     });
 
-    expect(promptRef.current.value).toBe("line1   unsafe  line2");
+    expect(promptRef.current.value).toBe("line1\n unsafe \nline2");
     expect(setHasPrompt).toHaveBeenCalledWith(true);
   });
 });

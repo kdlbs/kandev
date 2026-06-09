@@ -429,7 +429,7 @@ function NewSessionForm({
         isDragging={isDragging}
         isSummarizing={isSummarizing}
         hasPrompt={hasPrompt}
-        hasProfiles={hasProfiles}
+        hasProfiles={profileSelection.hasProfiles}
         isUtilityConfigured={isUtilityConfigured}
         isEnhancingPrompt={isEnhancingPrompt}
         fileInputRef={fileInputRef}
