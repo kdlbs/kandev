@@ -11,6 +11,7 @@ import {
   usableConfigOptions,
 } from "@/components/model-config-selector";
 import { useAppStore } from "@/components/state-provider";
+import { useToast } from "@/components/toast-provider";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { setSessionConfigOption, setSessionModel } from "@/lib/api/domains/session-api";
@@ -19,6 +20,12 @@ import type {
   ConfigOptionEntry,
   SessionModelEntry,
 } from "@/lib/state/slices/session-runtime/types";
+
+type SessionModelsEntry = {
+  currentModelId: string;
+  models: SessionModelEntry[];
+  configOptions: ConfigOptionEntry[];
+};
 
 type ModelSelectorProps = {
   sessionId: string | null;
@@ -127,6 +134,74 @@ function resolveAvailableModels({
   return resolveStaticModels(settingsAgents, profileId, availableAgents);
 }
 
+function describeError(err: unknown): string {
+  return err instanceof Error ? err.message : "Unknown error";
+}
+
+/** Builds model/config change handlers with optimistic update + error toast + revert. */
+function useModelChangeHandlers(
+  configOptions: SelectConfigOption[],
+  sessionModelsData: SessionModelsEntry | undefined,
+) {
+  const activeModels = useAppStore((state) => state.activeModel.bySessionId);
+  const setActiveModel = useAppStore((state) => state.setActiveModel);
+  const setSessionModels = useAppStore((state) => state.setSessionModels);
+  const { toast } = useToast();
+
+  const updateLocalConfig = useCallback(
+    (sid: string, configId: string, value: string) => {
+      if (!sessionModelsData) return;
+      setSessionModels(sid, {
+        ...sessionModelsData,
+        currentModelId: nextCurrentModelId(sessionModelsData, configId, value),
+        configOptions: updateConfigOptionValue(sessionModelsData.configOptions, configId, value),
+      });
+    },
+    [sessionModelsData, setSessionModels],
+  );
+
+  const onFail = useCallback(
+    (sid: string, previousActive: string, previousModels: SessionModelsEntry | undefined) =>
+      (err: unknown) => {
+        setActiveModel(sid, previousActive);
+        if (previousModels) setSessionModels(sid, previousModels);
+        console.error("[ModelSelector] model change failed:", err);
+        toast({
+          title: "Failed to change model",
+          description: describeError(err),
+          variant: "error",
+        });
+      },
+    [setActiveModel, setSessionModels, toast],
+  );
+
+  const handleModelChange = useCallback(
+    (sid: string, modelId: string) => {
+      const fail = onFail(sid, activeModels[sid] ?? "", sessionModelsData);
+      setActiveModel(sid, modelId);
+      const modelConfig = configOptions.find(isModelConfigOption);
+      if (modelConfig) {
+        updateLocalConfig(sid, modelConfig.id, modelId);
+        setSessionConfigOption(sid, modelConfig.id, modelId).catch(fail);
+        return;
+      }
+      setSessionModel(sid, modelId).catch(fail);
+    },
+    [activeModels, configOptions, onFail, sessionModelsData, setActiveModel, updateLocalConfig],
+  );
+
+  const handleConfigChange = useCallback(
+    (sid: string, configId: string, value: string) => {
+      const fail = onFail(sid, activeModels[sid] ?? "", sessionModelsData);
+      updateLocalConfig(sid, configId, value);
+      setSessionConfigOption(sid, configId, value).catch(fail);
+    },
+    [activeModels, onFail, sessionModelsData, updateLocalConfig],
+  );
+
+  return { handleModelChange, handleConfigChange };
+}
+
 /** Resolves available models, config options and current model from store state. */
 function useModelSelectorState(sessionId: string | null) {
   useSettingsData(true);
@@ -134,8 +209,6 @@ function useModelSelectorState(sessionId: string | null) {
   const settingsAgents = useAppStore((state) => state.settingsAgents.items);
   const taskSessions = useAppStore((state) => state.taskSessions.items);
   const activeModels = useAppStore((state) => state.activeModel.bySessionId);
-  const setActiveModel = useAppStore((state) => state.setActiveModel);
-  const setSessionModels = useAppStore((state) => state.setSessionModels);
   const { items: availableAgents } = useAvailableAgents();
   const sessionModelsData = useAppStore((state) =>
     sessionId ? state.sessionModels.bySessionId[sessionId] : undefined,
@@ -170,44 +243,9 @@ function useModelSelectorState(sessionId: string | null) {
   );
   const modelOptions = buildModelOptions(availableModels, currentModel);
 
-  const updateLocalConfig = useCallback(
-    (sid: string, configId: string, value: string) => {
-      if (!sessionModelsData) return;
-      setSessionModels(sid, {
-        ...sessionModelsData,
-        currentModelId: nextCurrentModelId(sessionModelsData, configId, value),
-        configOptions: updateConfigOptionValue(sessionModelsData.configOptions, configId, value),
-      });
-    },
-    [sessionModelsData, setSessionModels],
-  );
-
-  const handleModelChange = useCallback(
-    (sid: string, modelId: string) => {
-      setActiveModel(sid, modelId);
-      const modelConfig = configOptions.find(isModelConfigOption);
-      if (modelConfig) {
-        updateLocalConfig(sid, modelConfig.id, modelId);
-        setSessionConfigOption(sid, modelConfig.id, modelId).catch((err) => {
-          console.error("[ModelSelector] set-config-option API failed:", err);
-        });
-        return;
-      }
-      setSessionModel(sid, modelId).catch((err) => {
-        console.error("[ModelSelector] set-model API failed:", err);
-      });
-    },
-    [configOptions, setActiveModel, updateLocalConfig],
-  );
-
-  const handleConfigChange = useCallback(
-    (sid: string, configId: string, value: string) => {
-      updateLocalConfig(sid, configId, value);
-      setSessionConfigOption(sid, configId, value).catch((err) => {
-        console.error("[ModelSelector] set-config-option API failed:", err);
-      });
-    },
-    [updateLocalConfig],
+  const { handleModelChange, handleConfigChange } = useModelChangeHandlers(
+    configOptions,
+    sessionModelsData,
   );
 
   return { currentModel, modelOptions, configOptions, handleModelChange, handleConfigChange };
