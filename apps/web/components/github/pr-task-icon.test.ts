@@ -421,6 +421,20 @@ describe("aggregatePRStatusColor", () => {
     const merged = makePR({ state: "merged" });
     expect(aggregatePRStatusColor([merged, pending])).toBe("text-yellow-500");
   });
+
+  it("ignores a merged PR when a fresh open PR has no status yet", () => {
+    // Repro: first PR merged, then a new branch + PR opened on the same task.
+    // The open PR has no checks/reviews yet so its color rank ties merged at
+    // 0, but the icon must reflect the live PR, not the closed one.
+    const merged = makePR({ state: "merged" });
+    const fresh = makePR({ state: "open", review_state: "", checks_state: "" });
+    expect(aggregatePRStatusColor([merged, fresh])).toBe("text-muted-foreground");
+  });
+
+  it("falls back to terminal state when every PR is merged/closed", () => {
+    const merged = makePR({ state: "merged" });
+    expect(aggregatePRStatusColor([merged, merged])).toBe("text-purple-500");
+  });
 });
 
 describe("getPRTooltip", () => {
