@@ -181,6 +181,8 @@ type DefaultSelFake = Pick<
   | "setExecutorProfileId"
   | "noRepository"
   | "repositories"
+  | "remoteRepos"
+  | "useRemote"
 >;
 function makeDefaultSelFs(overrides: Partial<DefaultSelFake> = {}): DialogFormState {
   return {
@@ -193,6 +195,8 @@ function makeDefaultSelFs(overrides: Partial<DefaultSelFake> = {}): DialogFormSt
     setExecutorId: vi.fn(),
     setExecutorProfileId: vi.fn(),
     noRepository: false,
+    remoteRepos: [],
+    useRemote: false,
     // Multi-repo guard effect inside useDefaultSelectionsEffect reads
     // fs.repositories when executorProfileId is set. Empty list keeps that
     // branch a no-op for these autopick-focused tests.
@@ -506,19 +510,25 @@ function worktreeExecutor(): StoreSelections["executors"][number] {
 describe("useDefaultSelectionsEffect — executor profile defaults", () => {
   it("defaults repo-backed tasks to the worktree profile when no profile was saved", async () => {
     const fs = makeDefaultSelFs({ executorId: "", executorProfileId: "" });
-    const sel = makeSel({ executors: [localExecutor(), worktreeExecutor()] });
+    const local = localExecutor();
+    const worktree = worktreeExecutor();
+    const sel = makeSel({ executors: [local, worktree] });
 
     renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
 
+    await waitFor(() => expect(fs.setExecutorId).toHaveBeenCalledWith(worktree.id));
     await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(PROFILE_WORKTREE));
   });
 
   it("defaults repo-less tasks to a local profile because worktree needs a repo", async () => {
     const fs = makeDefaultSelFs({ executorId: "", executorProfileId: "", noRepository: true });
-    const sel = makeSel({ executors: [worktreeExecutor(), localExecutor()] });
+    const worktree = worktreeExecutor();
+    const local = localExecutor();
+    const sel = makeSel({ executors: [worktree, local] });
 
     renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
 
+    await waitFor(() => expect(fs.setExecutorId).toHaveBeenCalledWith(local.id));
     await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(PROFILE_LOCAL));
   });
 
@@ -528,11 +538,32 @@ describe("useDefaultSelectionsEffect — executor profile defaults", () => {
       executorProfileId: "",
       repositories: [{ key: "row-0", localPath: "/workspace/custom", branch: "" }],
     });
-    const sel = makeSel({ executors: [worktreeExecutor(), localExecutor()] });
+    const worktree = worktreeExecutor();
+    const local = localExecutor();
+    const sel = makeSel({ executors: [worktree, local] });
 
     renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
 
+    await waitFor(() => expect(fs.setExecutorId).toHaveBeenCalledWith(local.id));
     await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(PROFILE_LOCAL));
+  });
+
+  it("does not fall back to a worktree profile for explicit local-path tasks", async () => {
+    const fs = makeDefaultSelFs({
+      executorId: "",
+      executorProfileId: "",
+      repositories: [{ key: "row-0", localPath: "/workspace/custom", branch: "" }],
+    });
+    const localWithoutProfiles = { ...localExecutor(), profiles: [] };
+    const worktree = worktreeExecutor();
+    const docker = dockerExecutor();
+    const sel = makeSel({ executors: [worktree, localWithoutProfiles, docker] });
+
+    renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
+
+    await waitFor(() => expect(fs.setExecutorId).toHaveBeenCalledWith(localWithoutProfiles.id));
+    await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(PROFILE_DOCKER));
+    expect(fs.setExecutorProfileId).not.toHaveBeenCalledWith(PROFILE_WORKTREE);
   });
 });
 
