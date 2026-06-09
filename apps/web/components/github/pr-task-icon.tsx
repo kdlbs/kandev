@@ -111,6 +111,16 @@ export function aggregatePRStatusColor(prs: TaskPR[]): string {
   return bestColor;
 }
 
+/**
+ * True when at least one PR is open AND every open PR is ready to merge.
+ * Terminal (merged/closed) siblings are ignored so they can't drag the result
+ * to false. Extracted so the rule is testable without mounting MultiPRIcon.
+ */
+export function areAllOpenPRsReadyToMerge(prs: TaskPR[]): boolean {
+  const openPRs = prs.filter((p) => p.state === "open");
+  return openPRs.length > 0 && openPRs.every(isPRReadyToMerge);
+}
+
 export function PRTaskIcon({ taskId }: { taskId: string }) {
   const prs = useAppStore((state) => state.taskPRs.byTaskId[taskId] ?? null);
 
@@ -143,10 +153,7 @@ function SinglePRIcon({ taskId, pr }: { taskId: string; pr: TaskPR }) {
 
 function MultiPRIcon({ taskId, prs }: { taskId: string; prs: TaskPR[] }) {
   const aggregateColor = aggregatePRStatusColor(prs);
-  // Compute readiness against open PRs only — a merged sibling shouldn't drag
-  // `allReady` to false when the remaining open PR is itself ready to merge.
-  const openPRs = prs.filter((p) => p.state === "open");
-  const allReady = openPRs.length > 0 && openPRs.every(isPRReadyToMerge);
+  const allReady = areAllOpenPRsReadyToMerge(prs);
   return (
     <Tooltip>
       <TooltipTrigger asChild>

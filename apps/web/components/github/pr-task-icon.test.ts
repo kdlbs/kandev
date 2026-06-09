@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   aggregatePRStatusColor,
+  areAllOpenPRsReadyToMerge,
   getPRStatusColor,
   getPRTooltip,
   isPRAwaitingReview,
@@ -431,9 +432,52 @@ describe("aggregatePRStatusColor", () => {
     expect(aggregatePRStatusColor([merged, fresh])).toBe("text-muted-foreground");
   });
 
+  it("ignores a closed PR when a fresh open PR is present", () => {
+    // Closed PRs rank red (5, the highest), so without filtering they would
+    // dominate every open sibling. Same reasoning as the merged case — a
+    // terminal PR shouldn't drive the live status indicator.
+    const closed = makePR({ state: "closed" });
+    const fresh = makePR({ state: "open", review_state: "", checks_state: "" });
+    expect(aggregatePRStatusColor([closed, fresh])).toBe("text-muted-foreground");
+  });
+
   it("falls back to terminal state when every PR is merged/closed", () => {
     const merged = makePR({ state: "merged" });
     expect(aggregatePRStatusColor([merged, merged])).toBe("text-purple-500");
+  });
+});
+
+describe("areAllOpenPRsReadyToMerge", () => {
+  const ready = () =>
+    makePR({
+      state: "open",
+      review_state: "approved",
+      checks_state: "success",
+      mergeable_state: "clean",
+    });
+
+  it("is false when the list is empty", () => {
+    expect(areAllOpenPRsReadyToMerge([])).toBe(false);
+  });
+
+  it("is false when no PR is open", () => {
+    // A fully-merged task isn't "ready to merge" — there's nothing left to do.
+    expect(areAllOpenPRsReadyToMerge([makePR({ state: "merged" })])).toBe(false);
+  });
+
+  it("is true when the only open PR is ready, even with a merged sibling", () => {
+    // The fix: a merged sibling used to drag the result to false because
+    // prs.every(isPRReadyToMerge) saw the merged PR as not-ready.
+    expect(areAllOpenPRsReadyToMerge([makePR({ state: "merged" }), ready()])).toBe(true);
+  });
+
+  it("is false when any open PR is not ready", () => {
+    const pending = makePR({ state: "open", checks_state: "pending" });
+    expect(areAllOpenPRsReadyToMerge([ready(), pending])).toBe(false);
+  });
+
+  it("is true when every open PR is ready", () => {
+    expect(areAllOpenPRsReadyToMerge([ready(), ready()])).toBe(true);
   });
 });
 
