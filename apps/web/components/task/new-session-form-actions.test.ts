@@ -188,6 +188,30 @@ describe("useSessionContextChange", () => {
     expect(setHasPrompt).not.toHaveBeenCalled();
     expect(mockToast).not.toHaveBeenCalled();
   });
+
+  it("sanitizes unsafe characters from summarize result before setting prompt", async () => {
+    const promptRef = { current: { value: "" } as unknown as HTMLTextAreaElement };
+    const summarize = vi.fn().mockResolvedValue("line1\r\n<unsafe>\nline2");
+    const setContextValue = vi.fn();
+    const setHasPrompt = vi.fn();
+    const { result } = renderHook(() =>
+      useSessionContextChange({
+        promptRef,
+        initialPrompt: null,
+        summarize,
+        toast: mockToast,
+        setContextValue,
+        setHasPrompt,
+      }),
+    );
+
+    await act(async () => {
+      await result.current(SUMMARY_ACTION);
+    });
+
+    expect(promptRef.current.value).toBe("line1   unsafe  line2");
+    expect(setHasPrompt).toHaveBeenCalledWith(true);
+  });
 });
 
 // eslint-disable-next-line max-lines-per-function

@@ -20,6 +20,10 @@ type SessionContextChangeOpts = {
   setHasPrompt: (v: boolean) => void;
 };
 
+function sanitizePromptText(value: string): string {
+  return value.replace(/[\r\n<>]/g, " ");
+}
+
 export function useSessionContextChange(opts: SessionContextChangeOpts) {
   const { promptRef, initialPrompt, summarize, toast, setContextValue, setHasPrompt } = opts;
   return useCallback(
@@ -44,7 +48,7 @@ export function useSessionContextChange(opts: SessionContextChangeOpts) {
             variant: "error",
           });
         } else if (promptRef.current) {
-          promptRef.current.value = result;
+          promptRef.current.value = sanitizePromptText(result);
           setHasPrompt(true);
         }
       }

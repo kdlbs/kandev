@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { RefObject } from "react";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@kandev/ui/dialog";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
@@ -165,6 +166,38 @@ function useHandoffAutoSummarize(
   }, [handoff, contextValue, onContextChange]);
 }
 
+function useSessionPromptEnhancer(
+  promptRef: RefObject<HTMLTextAreaElement | null>,
+  setHasPrompt: (value: boolean) => void,
+) {
+  const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({ sessionId: null });
+
+  const handleEnhancePrompt = useCallback(() => {
+    const current = promptRef.current?.value?.trim();
+    if (!current) return;
+
+    enhancePrompt(current, (enhanced) => {
+      if (promptRef.current) {
+        promptRef.current.value = enhanced;
+        setHasPrompt(true);
+      }
+    });
+  }, [enhancePrompt, promptRef, setHasPrompt]);
+
+  return { handleEnhancePrompt, isEnhancingPrompt };
+}
+
+function shouldDisableSubmit(
+  isCreating: boolean,
+  isSummarizing: boolean,
+  hasPrompt: boolean,
+  hasProfiles: boolean,
+) {
+  const isBusy = Number(isCreating) + Number(isSummarizing);
+  const submitPenalty = Number(hasPrompt === false) + Number(hasProfiles === false) + isBusy;
+  return submitPenalty > 0;
+}
+
 function useEnforceCompatibleProfile(
   hasExecutorProfile: boolean,
   compatible: AgentProfileOption[],
@@ -178,7 +211,94 @@ function useEnforceCompatibleProfile(
   }, [hasExecutorProfile, compatible, selectedId, setSelected]);
 }
 
-// eslint-disable-next-line max-lines-per-function, complexity
+function useSessionProfileSelection({
+  agentProfiles,
+  executorProfile,
+  defaultProfileId,
+  selectedProfileId,
+  setSelectedProfileId,
+}: {
+  agentProfiles: AgentProfileOption[];
+  executorProfile: ExecutorProfile | null;
+  defaultProfileId: string;
+  selectedProfileId: string;
+  setSelectedProfileId: (value: string) => void;
+}) {
+  const compatibleAgentProfiles = useCompatibleAgentProfiles(agentProfiles, executorProfile);
+  useEnforceCompatibleProfile(
+    Boolean(executorProfile),
+    compatibleAgentProfiles,
+    selectedProfileId,
+    setSelectedProfileId,
+  );
+  const profileOptions = useAgentProfileOptions(compatibleAgentProfiles);
+  const hasProfiles = profileOptions.length > 0;
+  const noCompatibleProfiles = isMissingCompatibleProfile(
+    executorProfile,
+    agentProfiles.length,
+    hasProfiles,
+  );
+  const showAgentSelector =
+    hasProfiles &&
+    (profileOptions.length > 1 ||
+      (!!defaultProfileId && !profileOptions.find((o) => o.value === defaultProfileId)));
+
+  return {
+    profileOptions,
+    hasProfiles,
+    noCompatibleProfiles,
+    showAgentSelector,
+  };
+}
+
+function SessionFormHeader({
+  executorLabel,
+  worktreeBranch,
+  noCompatibleProfiles,
+  hasProfiles,
+  executorProfileName,
+  showAgentSelector,
+  profileOptions,
+  selectedProfileId,
+  isCreating,
+  onProfileChange,
+}: {
+  executorLabel: string | null;
+  worktreeBranch: string | null;
+  noCompatibleProfiles: boolean;
+  hasProfiles: boolean;
+  executorProfileName: string | null;
+  showAgentSelector: boolean;
+  profileOptions: ReturnType<typeof useAgentProfileOptions>;
+  selectedProfileId: string;
+  isCreating: boolean;
+  onProfileChange: (value: string) => void;
+}) {
+  return (
+    <>
+      <EnvironmentBadges executorLabel={executorLabel} worktreeBranch={worktreeBranch} />
+      <NoAgentBanner
+        noCompatibleProfiles={noCompatibleProfiles}
+        hasProfiles={hasProfiles}
+        executorProfileName={executorProfileName}
+      />
+      {showAgentSelector && (
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground">Agent Profile</label>
+          <AgentSelector
+            options={profileOptions}
+            value={selectedProfileId}
+            onValueChange={onProfileChange}
+            disabled={isCreating}
+            placeholder="Select agent profile"
+          />
+        </div>
+      )}
+    </>
+  );
+}
+
+// eslint-disable-next-line max-lines-per-function
 function NewSessionForm({
   taskId,
   defaultProfileId,
@@ -217,6 +337,8 @@ function NewSessionForm({
   const [hasPrompt, setHasPrompt] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const promptRef = useRef<HTMLTextAreaElement>(null);
+  const busySignal = Number(isCreating) + Number(isSummarizing);
+  const isBusyState = busySignal > 0;
   const {
     attachments,
     isDragging,
@@ -228,42 +350,24 @@ function NewSessionForm({
     handleDrop,
     handleAttachClick,
     handleFileInputChange,
-  } = useDialogAttachments(isCreating || isSummarizing);
+  } = useDialogAttachments(isBusyState);
   const contextItems = useMemo(
     () => toContextItems(attachments, handleRemoveAttachment),
     [attachments, handleRemoveAttachment],
   );
-  const compatibleAgentProfiles = useCompatibleAgentProfiles(agentProfiles, executorProfile);
-  useEnforceCompatibleProfile(
-    Boolean(executorProfile),
-    compatibleAgentProfiles,
-    selectedProfileId,
-    setSelectedProfileId,
-  );
-  const profileOptions = useAgentProfileOptions(compatibleAgentProfiles);
   const sessionOptions = useSessionOptions(taskId);
   const isUtilityConfigured = useIsUtilityConfigured();
-  const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({ sessionId: null });
-  const handleEnhancePrompt = useCallback(() => {
-    const current = promptRef.current?.value?.trim();
-    if (!current) return;
-    enhancePrompt(current, (enhanced) => {
-      if (promptRef.current) {
-        promptRef.current.value = enhanced;
-        setHasPrompt(true);
-      }
-    });
-  }, [enhancePrompt]);
-  const hasProfiles = profileOptions.length > 0;
-  const noCompatibleProfiles = isMissingCompatibleProfile(
+  const profileSelection = useSessionProfileSelection({
+    agentProfiles,
     executorProfile,
-    agentProfiles.length,
-    hasProfiles,
+    defaultProfileId,
+    selectedProfileId,
+    setSelectedProfileId,
+  });
+  const { handleEnhancePrompt, isEnhancingPrompt } = useSessionPromptEnhancer(
+    promptRef,
+    setHasPrompt,
   );
-  const showAgentSelector =
-    hasProfiles &&
-    (profileOptions.length > 1 ||
-      (!!defaultProfileId && !profileOptions.find((o) => o.value === defaultProfileId)));
   const handleContextChange = useSessionContextChange({
     promptRef,
     initialPrompt,
@@ -290,28 +394,27 @@ function NewSessionForm({
     activateSession: activateNewSession,
     setIsCreating,
   });
-  const isBusy = isCreating || isSummarizing;
+  const isSubmitDisabled = shouldDisableSubmit(
+    isCreating,
+    isSummarizing,
+    hasPrompt,
+    profileSelection.hasProfiles,
+  );
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <EnvironmentBadges executorLabel={executorLabel} worktreeBranch={worktreeBranch} />
-      <NoAgentBanner
-        noCompatibleProfiles={noCompatibleProfiles}
-        hasProfiles={hasProfiles}
+      <SessionFormHeader
+        executorLabel={executorLabel}
+        worktreeBranch={worktreeBranch}
+        noCompatibleProfiles={profileSelection.noCompatibleProfiles}
+        hasProfiles={profileSelection.hasProfiles}
         executorProfileName={executorProfile?.name ?? null}
+        showAgentSelector={profileSelection.showAgentSelector}
+        profileOptions={profileSelection.profileOptions}
+        selectedProfileId={selectedProfileId}
+        isCreating={isCreating}
+        onProfileChange={setSelectedProfileId}
       />
-      {showAgentSelector && (
-        <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">Agent Profile</label>
-          <AgentSelector
-            options={profileOptions}
-            value={selectedProfileId}
-            onValueChange={setSelectedProfileId}
-            disabled={isCreating}
-            placeholder="Select agent profile"
-          />
-        </div>
-      )}
       <ContextSelect
         value={contextValue}
         onValueChange={handleContextChange}
@@ -322,7 +425,7 @@ function NewSessionForm({
       <SessionPromptField
         promptRef={promptRef}
         contextItems={contextItems}
-        isBusy={isBusy}
+        isBusy={isBusyState}
         isDragging={isDragging}
         isSummarizing={isSummarizing}
         hasPrompt={hasPrompt}
@@ -350,11 +453,7 @@ function NewSessionForm({
         >
           Cancel
         </Button>
-        <Button
-          type="submit"
-          disabled={isBusy || !hasPrompt || !hasProfiles}
-          className="cursor-pointer"
-        >
+        <Button type="submit" disabled={isSubmitDisabled} className="cursor-pointer">
           {isCreating ? "Creating..." : "Start Agent"}
         </Button>
       </DialogFooter>
