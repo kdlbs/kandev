@@ -26,7 +26,8 @@ const userAgent = "kandev/1.0 (+https://github.com/kdlbs/kandev)"
 // RESTClient talks to Sentry's REST API using a Bearer auth token.
 type RESTClient struct {
 	http        *http.Client
-	endpoint    string
+	endpoint    string // REST API base, including the apiPathPrefix suffix
+	baseURL     string // instance base URL shown to users (no apiPathPrefix)
 	token       string
 	maxBodySize int64
 }
@@ -39,23 +40,27 @@ func NewRESTClient(cfg *SentryConfig, secret string) *RESTClient {
 	if cfg != nil {
 		rawURL = cfg.URL
 	}
+	base := resolveBaseURL(rawURL)
 	return &RESTClient{
 		http:        &http.Client{Timeout: 30 * time.Second},
-		endpoint:    apiEndpointForURL(rawURL),
+		endpoint:    base + apiPathPrefix,
+		baseURL:     base,
 		token:       secret,
 		maxBodySize: 8 << 20, // 8 MB — issue payloads can include event samples.
 	}
 }
 
-// apiEndpointForURL turns an instance base URL into the REST API base by
-// normalizing it (scheme defaulted, trailing slash trimmed) and appending
-// apiPathPrefix. An empty URL falls back to the SaaS default.
-func apiEndpointForURL(rawURL string) string {
+// resolveBaseURL normalizes an instance base URL (scheme defaulted, trailing
+// slash trimmed), falling back to the SaaS default when empty. The result is
+// the user-facing host root; apiPathPrefix is appended separately to form the
+// REST endpoint, so it is kept out of error messages to avoid users pasting a
+// /api/0-suffixed value back into the Instance URL field.
+func resolveBaseURL(rawURL string) string {
 	base := normalizeSentryURL(rawURL)
 	if base == "" {
 		base = DefaultSentryURL
 	}
-	return base + apiPathPrefix
+	return base
 }
 
 // do executes a GET against path (relative to endpoint), parses query params,
@@ -151,10 +156,10 @@ func (c *RESTClient) classifyProbeError(err error) string {
 		case http.StatusUnauthorized, http.StatusForbidden:
 			return fmt.Sprintf("authentication failed — check the auth token (HTTP %d)", apiErr.StatusCode)
 		default:
-			return fmt.Sprintf("%s did not respond like a Sentry API (HTTP %d) — check the instance URL", c.endpoint, apiErr.StatusCode)
+			return fmt.Sprintf("%s did not respond like a Sentry API (HTTP %d) — check the instance URL", c.baseURL, apiErr.StatusCode)
 		}
 	}
-	return fmt.Sprintf("could not reach Sentry at %s — check the instance URL (%s)", c.endpoint, err.Error())
+	return fmt.Sprintf("could not reach Sentry at %s — check the instance URL (%s)", c.baseURL, err.Error())
 }
 
 // --- organizations ---

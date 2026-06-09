@@ -494,3 +494,41 @@ func TestService_TestConnection_FallsBackToStoredURL(t *testing.T) {
 		t.Errorf("expected stored URL used, got %q", sawURL)
 	}
 }
+
+func TestService_SetConfig_RejectsNonRootURL(t *testing.T) {
+	cases := []struct {
+		name string
+		url  string
+	}{
+		{"path", "https://sentry.example.com/some/path"},
+		{"query", "https://sentry.example.com?x=1"},
+		{"fragment", "https://sentry.example.com#frag"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newSvcFixture(t)
+			_, err := f.svc.SetConfig(context.Background(), &SetConfigRequest{
+				AuthMethod: AuthMethodAuthToken, Secret: "tok", URL: tc.url,
+			})
+			if err == nil {
+				t.Errorf("expected rejection of non-root URL %q", tc.url)
+			}
+		})
+	}
+}
+
+// TestService_SetConfig_AllowsHostRootWithTrailingSlash guards the boundary:
+// a bare host root (with or without a trailing slash) must still be accepted
+// and normalized, so the non-root rejection above doesn't over-reach.
+func TestService_SetConfig_AllowsHostRootWithTrailingSlash(t *testing.T) {
+	f := newSvcFixture(t)
+	cfg, err := f.svc.SetConfig(context.Background(), &SetConfigRequest{
+		AuthMethod: AuthMethodAuthToken, Secret: "tok", URL: "https://sentry.example.com/",
+	})
+	if err != nil {
+		t.Fatalf("host root with trailing slash should be accepted: %v", err)
+	}
+	if cfg.URL != "https://sentry.example.com" {
+		t.Errorf("expected trailing slash trimmed, got %q", cfg.URL)
+	}
+}

@@ -19,6 +19,7 @@ func newMockServer(t *testing.T, handler http.HandlerFunc) *httptest.Server {
 // httptest server without needing a mockable URL on the production constructor.
 func pointTo(c *RESTClient, url string) *RESTClient {
 	c.endpoint = url
+	c.baseURL = url
 	return c
 }
 

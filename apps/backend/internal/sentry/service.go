@@ -365,7 +365,10 @@ func normalizeSentryURL(raw string) string {
 }
 
 // validateSentryURL rejects an instance URL the HTTP client could not use: it
-// must parse, carry an http/https scheme, and name a host.
+// must parse, carry an http/https scheme, name a host, and be a bare host root.
+// A path/query/fragment is rejected because apiPathPrefix ("/api/0") is later
+// appended by string concatenation — e.g. "https://host?x=1" would otherwise
+// become the malformed base "https://host?x=1/api/0".
 func validateSentryURL(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -376,6 +379,12 @@ func validateSentryURL(raw string) error {
 	}
 	if u.Host == "" {
 		return fmt.Errorf("instance URL must include a host: %q", raw)
+	}
+	if u.Path != "" && u.Path != "/" {
+		return fmt.Errorf("instance URL must be a host root without a path: %q", raw)
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("instance URL must not include a query or fragment: %q", raw)
 	}
 	return nil
 }
