@@ -74,6 +74,8 @@ const createTablesSQL = `
 // singletonID is the synthetic primary key of the (only) row in sentry_configs.
 const singletonID = "singleton"
 
+// initSchema creates the integration tables when absent and applies the
+// additive column migrations that bring older databases to the current schema.
 func (s *Store) initSchema() error {
 	if _, err := s.db.Exec(createTablesSQL); err != nil {
 		return err

@@ -131,6 +131,8 @@ func TestStore_UpdateAuthHealth(t *testing.T) {
 	}
 }
 
+// TestStore_UpsertGetConfig_RoundTripsURL asserts the instance URL persists
+// through an upsert/get cycle.
 func TestStore_UpsertGetConfig_RoundTripsURL(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()

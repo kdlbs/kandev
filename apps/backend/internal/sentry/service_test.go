@@ -414,6 +414,8 @@ func TestService_ClientFor_InvalidateDuringBuild(t *testing.T) {
 	}
 }
 
+// TestService_SetConfig_DefaultsURLToSentryIO asserts a blank instance URL is
+// stored as the sentry.io SaaS default.
 func TestService_SetConfig_DefaultsURLToSentryIO(t *testing.T) {
 	f := newSvcFixture(t)
 	cfg, err := f.svc.SetConfig(context.Background(), &SetConfigRequest{
@@ -427,6 +429,8 @@ func TestService_SetConfig_DefaultsURLToSentryIO(t *testing.T) {
 	}
 }
 
+// TestService_SetConfig_NormalizesAndPersistsURL asserts a host-only URL is
+// normalized (scheme added, trailing slash trimmed) before being stored.
 func TestService_SetConfig_NormalizesAndPersistsURL(t *testing.T) {
 	f := newSvcFixture(t)
 	cfg, err := f.svc.SetConfig(context.Background(), &SetConfigRequest{
@@ -440,6 +444,8 @@ func TestService_SetConfig_NormalizesAndPersistsURL(t *testing.T) {
 	}
 }
 
+// TestService_SetConfig_RejectsMalformedURL asserts a non-http(s) URL is
+// rejected at save time.
 func TestService_SetConfig_RejectsMalformedURL(t *testing.T) {
 	f := newSvcFixture(t)
 	_, err := f.svc.SetConfig(context.Background(), &SetConfigRequest{
@@ -495,6 +501,8 @@ func TestService_TestConnection_FallsBackToStoredURL(t *testing.T) {
 	}
 }
 
+// TestService_SetConfig_RejectsNonRootURL asserts URLs carrying a path, query,
+// or fragment are rejected, so /api/0 cannot be appended to a malformed base.
 func TestService_SetConfig_RejectsNonRootURL(t *testing.T) {
 	cases := []struct {
 		name string

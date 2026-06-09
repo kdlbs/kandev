@@ -334,6 +334,9 @@ func (s *Service) resolveCredentials(ctx context.Context, req *SetConfigRequest)
 	return cfg, secret, nil
 }
 
+// validateConfigRequest normalizes and validates a config request in place: it
+// defaults a blank auth method and instance URL, rejects unknown auth methods,
+// and rejects URLs the HTTP client could not use (see validateSentryURL).
 func validateConfigRequest(req *SetConfigRequest) error {
 	if req.AuthMethod == "" {
 		req.AuthMethod = AuthMethodAuthToken
