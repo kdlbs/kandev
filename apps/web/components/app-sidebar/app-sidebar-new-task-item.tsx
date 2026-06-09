@@ -27,6 +27,9 @@ type AppSidebarNewTaskItemProps = {
   collapsed: boolean;
 };
 
+const ONE_ROW_ACTION_INSET_CLASS = "pr-10";
+const TWO_ROW_ACTIONS_INSET_CLASS = "pr-16";
+
 type RowActionButtonProps = {
   icon: TablerIcon;
   label: string;
@@ -91,10 +94,12 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
   const canOpenQuickChat = !collapsed && !!workspaceId;
   const canCreateSubtask = !collapsed && !!workspaceId && !!activeTaskId;
   let actionInsetClass: string | undefined;
+  // Keep the label clear of the absolute action cluster:
+  // pr-10 covers one w-6 button + right-1.5 inset; pr-16 covers two buttons + gap-1.
   if (canCreateSubtask) {
-    actionInsetClass = "pr-16";
+    actionInsetClass = TWO_ROW_ACTIONS_INSET_CLASS;
   } else if (canOpenQuickChat) {
-    actionInsetClass = "pr-10";
+    actionInsetClass = ONE_ROW_ACTION_INSET_CLASS;
   }
   const handleRegularTaskCreated = useCallback(
     (

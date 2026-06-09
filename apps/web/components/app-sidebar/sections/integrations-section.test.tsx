@@ -65,7 +65,7 @@ describe("IntegrationsSection", () => {
 
   afterEach(() => cleanup());
 
-  it("keeps configured integration shortcuts visible while the section is collapsed", () => {
+  it("keeps integration shortcuts visible while the section accordion is closed", () => {
     renderSection();
 
     const shortcuts = screen.getAllByTestId("integration-header-shortcut");

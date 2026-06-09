@@ -15,7 +15,9 @@ type AppSidebarSectionProps = {
   children: React.ReactNode;
   /** Optional control rendered between the label and the collapse chevron. */
   headerAction?: React.ReactNode;
-  /** By default header actions only render while expanded. */
+  /** By default header actions render only while the section accordion is open.
+   *  "always" keeps them visible while the accordion is closed, but has no
+   *  effect when the sidebar itself is in collapsed/rail mode. */
   headerActionVisibility?: "expanded" | "always";
   /** Fills remaining sidebar height when expanded. Parent must be a flex column. */
   grow?: boolean;
