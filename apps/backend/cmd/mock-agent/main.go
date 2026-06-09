@@ -85,10 +85,11 @@ func (a *mockAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.
 
 // NewSession creates a new conversation session.
 // MCP servers from the ACP request are registered so callMCPTool can use them.
-// The Models and Modes fields advertise available capabilities so the host
-// utility capability probe can populate them in the cache — this is what makes
-// the utility-agents settings page show model and mode options for mock-agent
-// in E2E, and lets profile-mode tests select a non-default mode.
+// The Modes field and the model-shaped entry in ConfigOptions advertise
+// available capabilities so the host utility capability probe can populate
+// them in the cache — this is what makes the utility-agents settings page
+// show model and mode options for mock-agent in E2E, and lets profile-mode
+// tests select a non-default mode.
 func (a *mockAgent) NewSession(_ context.Context, req acp.NewSessionRequest) (acp.NewSessionResponse, error) {
 	sid := acp.SessionId(fmt.Sprintf("mock-session-%d", os.Getpid()))
 	a.mu.Lock()
@@ -106,25 +107,15 @@ func (a *mockAgent) NewSession(_ context.Context, req acp.NewSessionRequest) (ac
 
 	return acp.NewSessionResponse{
 		SessionId:     sid,
-		Models:        mockSessionModels(),
 		Modes:         mockSessionModes(),
 		ConfigOptions: mockSessionConfigOptions(),
 	}, nil
 }
 
-// mockSessionModels returns the mock agent's advertised model list for ACP
-// session responses. Two models are exposed so tests can verify both
-// selection and default behavior (mock-fast is the default).
-func mockSessionModels() *acp.SessionModelState {
-	fastDesc := "Fast mock model for testing"
-	smartDesc := "Smart mock model for testing"
-	return &acp.SessionModelState{
-		CurrentModelId: "mock-fast",
-		AvailableModels: []acp.ModelInfo{
-			{ModelId: "mock-fast", Name: "Mock Fast", Description: &fastDesc},
-			{ModelId: "mock-smart", Name: "Mock Smart", Description: &smartDesc},
-		},
-	}
+// Logout terminates the current authenticated session. The mock agent has no
+// persistent auth state so this is a no-op.
+func (a *mockAgent) Logout(_ context.Context, _ acp.LogoutRequest) (acp.LogoutResponse, error) {
+	return acp.LogoutResponse{}, nil
 }
 
 // mockSessionModes returns the mock agent's advertised session-mode list for

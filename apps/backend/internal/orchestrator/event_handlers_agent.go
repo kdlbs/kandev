@@ -907,6 +907,23 @@ func (s *Service) handleAgentStopped(ctx context.Context, data watcher.AgentEven
 	// on that self-inflicted stop would abort the retry. The loop is freed on
 	// ready/completed (success), cancel, and exhaustion instead.
 
+	// Drop stopped events that belong to a previous (rotated) execution. The
+	// session might already be running a fresh resume cycle; flipping its state
+	// to CANCELLED based on the corpse of the prior execution poisons the
+	// recovery (the new cycle's session/load succeeds against a session that
+	// looks terminal to the rest of the system). Mirrors the rotation guard in
+	// handleAgentCompleted.
+	if s.agentManager != nil && data.AgentExecutionID != "" && data.SessionID != "" {
+		if liveExecID, _ := s.agentManager.GetExecutionIDForSession(ctx, data.SessionID); liveExecID != "" && liveExecID != data.AgentExecutionID {
+			s.logger.Info("ignoring agent.stopped for non-active (rotated) execution",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID),
+				zap.String("event_execution_id", data.AgentExecutionID),
+				zap.String("live_execution_id", liveExecID))
+			return
+		}
+	}
+
 	// Complete the current turn if there is one
 	s.completeTurnForSession(ctx, data.SessionID)
 

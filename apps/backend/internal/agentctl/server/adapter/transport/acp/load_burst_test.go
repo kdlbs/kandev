@@ -33,6 +33,10 @@ func (burstAgent) ListSessions(context.Context, acp.ListSessionsRequest) (acp.Li
 	return acp.ListSessionsResponse{}, nil
 }
 
+func (burstAgent) Logout(context.Context, acp.LogoutRequest) (acp.LogoutResponse, error) {
+	return acp.LogoutResponse{}, nil
+}
+
 func (burstAgent) NewSession(context.Context, acp.NewSessionRequest) (acp.NewSessionResponse, error) {
 	return acp.NewSessionResponse{}, nil
 }

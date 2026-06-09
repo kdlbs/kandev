@@ -251,78 +251,77 @@ func TestApplySessionProbeFields_FallsBackToConfigOptions(t *testing.T) {
 	}
 }
 
-// The legacy `models` field still wins when present so existing agents are
-// unaffected; configOptions is only consulted as a fallback.
-func TestApplySessionProbeFields_PrefersLegacyModelsField(t *testing.T) {
+// auggie 0.29.x hasn't migrated to configOptions[category=model] and still
+// emits the pre-v0.13.5 top-level `models` field. The kdlbs SDK fork keeps
+// parsing it as acp.LegacyModels; the probe must fall through to that surface
+// so the inference-agents endpoint still surfaces auggie's model list.
+func TestApplySessionProbeFields_FallsBackToLegacyModels(t *testing.T) {
 	t.Parallel()
 
-	modelCat := acp.SessionConfigOptionCategoryModel
+	opusDesc := "Great for complex coding"
 	resp := acp.NewSessionResponse{
-		Models: &acp.SessionModelState{
-			CurrentModelId: "legacy",
-			AvailableModels: []acp.ModelInfo{
-				{ModelId: "legacy", Name: "Legacy"},
+		LegacyModels: &acp.LegacyModels{
+			CurrentModelId: "claude-opus-4-7",
+			AvailableModels: []acp.LegacyModelInfo{
+				{ModelId: "claude-opus-4-7", Name: "Opus 4.7", Description: &opusDesc},
+				{ModelId: "claude-sonnet-4-5", Name: "Sonnet 4.5"},
 			},
-		},
-		ConfigOptions: []acp.SessionConfigOption{
-			{Select: &acp.SessionConfigOptionSelect{
-				Category:     &modelCat,
-				CurrentValue: "fallback",
-				Options: acp.SessionConfigSelectOptions{Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{
-					{Value: "fallback", Name: "Fallback"},
-				}},
-				Type: "select",
-			}},
 		},
 	}
 
 	out := &ProbeResponse{}
 	applySessionProbeFields(out, resp)
 
-	if got, want := out.CurrentModelID, "legacy"; got != want {
+	if got, want := out.CurrentModelID, "claude-opus-4-7"; got != want {
 		t.Fatalf("CurrentModelID = %q, want %q", got, want)
+	}
+	if got, want := len(out.Models), 2; got != want {
+		t.Fatalf("len(Models) = %d, want %d", got, want)
+	}
+	if got, want := out.Models[0].ID, "claude-opus-4-7"; got != want {
+		t.Fatalf("Models[0].ID = %q, want %q", got, want)
+	}
+	if got, want := out.Models[0].Description, "Great for complex coding"; got != want {
+		t.Fatalf("Models[0].Description = %q, want %q", got, want)
+	}
+}
+
+// When both surfaces are present the typed configOptions list wins — the
+// legacy field is only a fallback for unmigrated agents.
+func TestApplySessionProbeFields_TypedConfigOptionsBeatLegacyModels(t *testing.T) {
+	t.Parallel()
+
+	modelCat := acp.SessionConfigOptionCategoryModel
+	resp := acp.NewSessionResponse{
+		ConfigOptions: []acp.SessionConfigOption{
+			{Select: &acp.SessionConfigOptionSelect{
+				Category:     &modelCat,
+				CurrentValue: "opus",
+				Id:           "model",
+				Name:         "Model",
+				Options: acp.SessionConfigSelectOptions{Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{
+					{Value: "opus", Name: "Opus"},
+				}},
+				Type: "select",
+			}},
+		},
+		LegacyModels: &acp.LegacyModels{
+			CurrentModelId:  "claude-opus-4-7",
+			AvailableModels: []acp.LegacyModelInfo{{ModelId: "claude-opus-4-7", Name: "Opus 4.7"}},
+		},
+	}
+
+	out := &ProbeResponse{}
+	applySessionProbeFields(out, resp)
+
+	if got, want := out.CurrentModelID, "opus"; got != want {
+		t.Fatalf("CurrentModelID = %q, want %q (typed configOptions must win)", got, want)
 	}
 	if got, want := len(out.Models), 1; got != want {
 		t.Fatalf("len(Models) = %d, want %d", got, want)
 	}
-	if got, want := out.Models[0].ID, "legacy"; got != want {
+	if got, want := out.Models[0].ID, "opus"; got != want {
 		t.Fatalf("Models[0].ID = %q, want %q", got, want)
-	}
-}
-
-// A non-nil `Models` struct with an empty `AvailableModels` slice is
-// schema-valid. The fallback must NOT fire in that case — otherwise
-// `CurrentModelID` set from the legacy field gets clobbered by the
-// configOptions value, mixing sources.
-func TestApplySessionProbeFields_LegacyEmptyModelsBlocksFallback(t *testing.T) {
-	t.Parallel()
-
-	modelCat := acp.SessionConfigOptionCategoryModel
-	resp := acp.NewSessionResponse{
-		Models: &acp.SessionModelState{
-			CurrentModelId:  "legacy-current",
-			AvailableModels: nil,
-		},
-		ConfigOptions: []acp.SessionConfigOption{
-			{Select: &acp.SessionConfigOptionSelect{
-				Category:     &modelCat,
-				CurrentValue: "fallback-current",
-				Options: acp.SessionConfigSelectOptions{Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{
-					{Value: "fallback-current", Name: "Fallback"},
-				}},
-				Type: "select",
-			}},
-		},
-	}
-
-	out := &ProbeResponse{}
-	applySessionProbeFields(out, resp)
-
-	if got, want := out.CurrentModelID, "legacy-current"; got != want {
-		t.Fatalf("CurrentModelID = %q, want %q (legacy must win, fallback must not fire)", got, want)
-	}
-	if len(out.Models) != 0 {
-		t.Fatalf("Models = %+v, want empty (fallback should be skipped when legacy field is non-nil)", out.Models)
 	}
 }
 

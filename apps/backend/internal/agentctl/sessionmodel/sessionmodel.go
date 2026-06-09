@@ -17,8 +17,13 @@ type Method string
 
 const (
 	MethodNone            Method = ""
-	MethodSetModel        Method = "session/set_model"
 	MethodSetConfigOption Method = "session/set_config_option"
+	// MethodSetModel is the pre-v0.13.5 unstable session/set_model RPC.
+	// Used as a fallback for agents (e.g. auggie 0.29.x) that surface their
+	// model list via the legacy top-level `models` field on session/new
+	// instead of SessionConfigOption(category="model"). The RPC is provided
+	// by the kdlbs acp-go-sdk fork (ClientSideConnection.UnstableSetSessionModel).
+	MethodSetModel Method = "session/set_model"
 )
 
 // ConfigOption is the subset of ACP session config options needed to decide
@@ -35,16 +40,23 @@ type Request struct {
 	ConfigOptions []ConfigOption
 }
 
-// Applier performs the actual ACP calls. Implementations wrap either the ACP
+// Applier performs the actual ACP call. Implementations wrap either the ACP
 // SDK connection or the agentctl websocket client.
 type Applier interface {
 	SetConfigOption(ctx context.Context, sessionID, configID, value string) error
-	SetModel(ctx context.Context, sessionID, modelID string) error
+	// SetModelLegacy issues the pre-v0.13.5 unstable session/set_model RPC.
+	// Used only when the session advertises no model-shaped config option;
+	// implementations should return a JSON-RPC -32601 error (recognized by
+	// IsMethodNotFound) when the agent doesn't implement the legacy surface,
+	// so Apply can treat the model change as a clean no-op.
+	SetModelLegacy(ctx context.Context, sessionID, modelID string) error
 }
 
 // SDKConn is the subset of the ACP SDK connection used to apply model changes.
 type SDKConn interface {
 	SetSessionConfigOption(context.Context, acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error)
+	// UnstableSetSessionModel is the legacy session/set_model RPC restored by
+	// the kdlbs acp-go-sdk fork for compatibility with unmigrated agents.
 	UnstableSetSessionModel(context.Context, acp.UnstableSetSessionModelRequest) (acp.UnstableSetSessionModelResponse, error)
 }
 
@@ -64,10 +76,10 @@ func (a SDKApplier) SetConfigOption(ctx context.Context, sessionID, configID, va
 	return err
 }
 
-func (a SDKApplier) SetModel(ctx context.Context, sessionID, modelID string) error {
+func (a SDKApplier) SetModelLegacy(ctx context.Context, sessionID, modelID string) error {
 	_, err := a.Conn.UnstableSetSessionModel(ctx, acp.UnstableSetSessionModelRequest{
 		SessionId: acp.SessionId(sessionID),
-		ModelId:   acp.UnstableModelId(modelID),
+		ModelId:   modelID,
 	})
 	return err
 }
@@ -92,27 +104,31 @@ func ApplySDKFromACP(
 	})
 }
 
-// Apply chooses the model-switching mechanism supported by the session. Agents
-// that expose a model-shaped config option (Codex, Cursor, recent Claude) are
-// configured through session/set_config_option. If that RPC is not implemented,
-// we fall back to the older unstable session/set_model call.
+// Apply selects the model by routing through the typed
+// session/set_config_option RPC when the session advertises a model-shaped
+// config option. When that option is absent, falls through to the legacy
+// session/set_model RPC for agents (e.g. auggie 0.29.x) that haven't
+// migrated. A JSON-RPC -32601 (method not found) from the legacy call is
+// treated as the agent declaring "I don't support model selection", and
+// Apply returns MethodNone with no error so callers can no-op cleanly.
 func Apply(ctx context.Context, applier Applier, req Request) (Method, error) {
 	if req.ModelID == "" {
 		return MethodNone, nil
 	}
 	if configID, ok := modelConfigID(req.ConfigOptions); ok {
 		if err := applier.SetConfigOption(ctx, req.SessionID, configID, req.ModelID); err != nil {
-			if !IsMethodNotFound(err) {
-				return MethodSetConfigOption, err
-			}
-		} else {
-			return MethodSetConfigOption, nil
+			return MethodSetConfigOption, err
 		}
+		return MethodSetConfigOption, nil
 	}
-	if err := applier.SetModel(ctx, req.SessionID, req.ModelID); err != nil {
-		return MethodSetModel, err
+	err := applier.SetModelLegacy(ctx, req.SessionID, req.ModelID)
+	if err == nil {
+		return MethodSetModel, nil
 	}
-	return MethodSetModel, nil
+	if IsMethodNotFound(err) {
+		return MethodNone, nil
+	}
+	return MethodSetModel, err
 }
 
 // FromACP converts typed ACP SDK options to the shared strategy shape.

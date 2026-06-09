@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useState } from "react";
+import { memo, useState } from "react";
 import { IconCheck, IconChevronDown } from "@tabler/icons-react";
 
 import { cn } from "@/lib/utils";
@@ -207,13 +207,14 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
   const currentModelValue = modelConfig?.currentValue || currentModel || "";
   const label = resolveTriggerLabel(modelOptions, currentModel, modelConfig, configOptions);
 
-  const onModelSelect = useCallback(
-    (value: string) => {
-      if (!value) return;
-      onModelChange(value);
-    },
-    [onModelChange],
-  );
+  const hasExtraConfigOptions = extraConfigOptions.length > 0;
+  const onModelSelect = (value: string) => {
+    if (!value) return;
+    onModelChange(value);
+    if (!hasExtraConfigOptions) {
+      setOpen(false);
+    }
+  };
 
   const triggerClassName =
     variant === "compact"

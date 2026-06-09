@@ -22,10 +22,10 @@ func findSessionModelsEvent(t *testing.T, events []AgentEvent) AgentEvent {
 
 // auggieLikeModels mimics Auggie's response: empty CurrentModelId with an
 // alphabetically-sorted list whose [0] is a pseudo-agent ("Build Analyzer").
-func auggieLikeModels() *acp.SessionModelState {
-	return &acp.SessionModelState{
+func auggieLikeModels() *sessionModelState {
+	return &sessionModelState{
 		CurrentModelId: "",
-		AvailableModels: []acp.ModelInfo{
+		AvailableModels: []modelInfo{
 			{ModelId: "build-fix-gpt5-2-responses-high-200k-v1-c4-p2-agent", Name: "Build Analyzer"},
 			{ModelId: "claude-opus-4-7", Name: "Opus 4.7"},
 		},
@@ -79,9 +79,9 @@ func TestEmitSessionModels_EmptyCurrentIDFromConfigOption(t *testing.T) {
 // selectable ID "gpt-5.5/medium".
 func TestEmitSessionModels_EmptyCurrentIDComposesReasoningEffort(t *testing.T) {
 	a := newTestAdapter()
-	models := &acp.SessionModelState{
+	models := &sessionModelState{
 		CurrentModelId: "",
-		AvailableModels: []acp.ModelInfo{
+		AvailableModels: []modelInfo{
 			{ModelId: "gpt-5.5/low", Name: "GPT-5.5 (low)"},
 			{ModelId: "gpt-5.5/medium", Name: "GPT-5.5 (medium)"},
 		},
@@ -124,9 +124,9 @@ func TestEmitSessionModels_EmptyCurrentIDComposesReasoningEffortFromTypedOptions
 		{Name: "Low", Value: reasoningEffortLow},
 		{Name: "Medium", Value: reasoningEffortMedium},
 	}
-	models := &acp.SessionModelState{
+	models := &sessionModelState{
 		CurrentModelId: "",
-		AvailableModels: []acp.ModelInfo{
+		AvailableModels: []modelInfo{
 			{ModelId: "gpt-5.5/low", Name: "GPT-5.5 (low)"},
 			{ModelId: "gpt-5.5/medium", Name: "GPT-5.5 (medium)"},
 		},
@@ -175,7 +175,7 @@ func TestInitialSessionModelState_UsesConfigOptionsWithoutModels(t *testing.T) {
 		}},
 	}
 
-	models := initialSessionModelState(nil, nil, configOptions)
+	models := initialSessionModelState(nil, configOptions, nil)
 	if models == nil {
 		t.Fatal("initialSessionModelState returned nil for configOptions-only response")
 	}
@@ -208,7 +208,7 @@ func TestInitialSessionModelState_UsesMetaConfigOptionsWithoutModels(t *testing.
 		},
 	}
 
-	models := initialSessionModelState(nil, meta, nil)
+	models := initialSessionModelState(meta, nil, nil)
 	if models == nil {
 		t.Fatal("initialSessionModelState returned nil for meta configOptions-only response")
 	}
@@ -245,7 +245,7 @@ func TestInitialSessionModelState_IgnoresNonModelConfigOptions(t *testing.T) {
 		}},
 	}
 
-	if models := initialSessionModelState(nil, nil, configOptions); models != nil {
+	if models := initialSessionModelState(nil, configOptions, nil); models != nil {
 		t.Fatalf("initialSessionModelState returned %+v for non-model configOptions", models)
 	}
 }
@@ -277,8 +277,78 @@ func TestInitialSessionModelState_UsesTypedConfigOptionPrecedence(t *testing.T) 
 		},
 	}
 
-	if models := initialSessionModelState(nil, meta, configOptions); models != nil {
+	if models := initialSessionModelState(meta, configOptions, nil); models != nil {
 		t.Fatalf("initialSessionModelState returned %+v for non-model typed configOptions", models)
+	}
+}
+
+func TestInitialSessionModelState_FallsBackToLegacyModels(t *testing.T) {
+	// auggie 0.29.x emits the pre-v0.13.5 top-level `models` field and does
+	// NOT surface a SessionConfigOption(category="model"). The kdlbs SDK fork
+	// restores read-only parsing as acp.LegacyModels; the third-tier fallback
+	// in initialSessionModelState must turn that into a fully populated state.
+	desc := "Anthropic Claude Opus 4.7"
+	legacy := &acp.LegacyModels{
+		CurrentModelId: "claude-opus-4-7",
+		AvailableModels: []acp.LegacyModelInfo{
+			{ModelId: "claude-opus-4-7", Name: "Opus 4.7", Description: &desc},
+			{ModelId: "claude-sonnet-4-5", Name: "Sonnet 4.5"},
+		},
+	}
+
+	models := initialSessionModelState(nil, nil, legacy)
+	if models == nil {
+		t.Fatal("initialSessionModelState returned nil for legacy-models-only response")
+	}
+	if models.CurrentModelId != "claude-opus-4-7" {
+		t.Errorf("CurrentModelId = %q, want claude-opus-4-7", models.CurrentModelId)
+	}
+	if len(models.AvailableModels) != 2 {
+		t.Fatalf("AvailableModels len = %d, want 2", len(models.AvailableModels))
+	}
+	if models.AvailableModels[0].Name != "Opus 4.7" {
+		t.Errorf("AvailableModels[0].Name = %q, want Opus 4.7", models.AvailableModels[0].Name)
+	}
+
+	a := newTestAdapter()
+	a.emitSessionModels("sess-1", models, nil, nil)
+	ev := findSessionModelsEvent(t, drainEvents(a))
+	if ev.CurrentModelID != "claude-opus-4-7" {
+		t.Errorf("event CurrentModelID = %q, want claude-opus-4-7", ev.CurrentModelID)
+	}
+	if len(ev.SessionModels) != 2 {
+		t.Fatalf("event SessionModels len = %d, want 2", len(ev.SessionModels))
+	}
+}
+
+func TestInitialSessionModelState_TypedConfigOptionsBeatLegacyModels(t *testing.T) {
+	// When both surfaces are present, the typed configOptions[category=model]
+	// list wins — matches the documented precedence.
+	modelCategory := acp.SessionConfigOptionCategoryModel
+	modelOptions := acp.SessionConfigSelectOptionsUngrouped{
+		{Name: "GPT-5.5", Value: "gpt-5.5"},
+	}
+	configOptions := []acp.SessionConfigOption{
+		{Select: &acp.SessionConfigOptionSelect{
+			Type:         "select",
+			Id:           "model",
+			Name:         "Model",
+			Category:     &modelCategory,
+			CurrentValue: "gpt-5.5",
+			Options:      acp.SessionConfigSelectOptions{Ungrouped: &modelOptions},
+		}},
+	}
+	legacy := &acp.LegacyModels{
+		CurrentModelId:  "claude-opus-4-7",
+		AvailableModels: []acp.LegacyModelInfo{{ModelId: "claude-opus-4-7", Name: "Opus 4.7"}},
+	}
+
+	models := initialSessionModelState(nil, configOptions, legacy)
+	if models == nil {
+		t.Fatal("initialSessionModelState returned nil")
+	}
+	if models.CurrentModelId != "gpt-5.5" {
+		t.Errorf("CurrentModelId = %q, want gpt-5.5 (typed must win over legacy)", models.CurrentModelId)
 	}
 }
 
@@ -287,7 +357,7 @@ func TestResolveCurrentModelFromConfig_ComposesReasoningEffort(t *testing.T) {
 		{Type: "select", ID: "model", Category: "model", CurrentValue: "gpt-5.5"},
 		{Type: "select", ID: "reasoning_effort", Category: "thought_level", CurrentValue: reasoningEffortMedium},
 	}
-	available := []acp.ModelInfo{
+	available := []modelInfo{
 		{ModelId: "gpt-5.5/low", Name: "GPT-5.5 (low)"},
 		{ModelId: "gpt-5.5/medium", Name: "GPT-5.5 (medium)"},
 	}
@@ -303,7 +373,7 @@ func TestResolveCurrentModelFromConfig_PrefersReasoningModelWhenBaseAlsoAvailabl
 		{Type: "select", ID: "model", Category: "model", CurrentValue: "gpt-5.5"},
 		{Type: "select", ID: "reasoning_effort", Category: "thought_level", CurrentValue: reasoningEffortMedium},
 	}
-	available := []acp.ModelInfo{
+	available := []modelInfo{
 		{ModelId: "gpt-5.5", Name: "GPT-5.5"},
 		{ModelId: "gpt-5.5/medium", Name: "GPT-5.5 (medium)"},
 	}
@@ -318,9 +388,9 @@ func TestResolveCurrentModelFromConfig_PrefersReasoningModelWhenBaseAlsoAvailabl
 // when the agent populates CurrentModelId, we propagate it verbatim.
 func TestEmitSessionModels_NonEmptyCurrentIDPreserved(t *testing.T) {
 	a := newTestAdapter()
-	models := &acp.SessionModelState{
+	models := &sessionModelState{
 		CurrentModelId: "claude-opus-4-7",
-		AvailableModels: []acp.ModelInfo{
+		AvailableModels: []modelInfo{
 			{ModelId: "claude-opus-4-7", Name: "Opus 4.7"},
 		},
 	}
@@ -340,7 +410,7 @@ func TestEmitSessionModels_NonEmptyCurrentIDPreserved(t *testing.T) {
 func TestEmitSetModelEvent_EmitsSessionModelsWithCachedState(t *testing.T) {
 	a := newTestAdapter()
 
-	cachedModels := []acp.ModelInfo{
+	cachedModels := []modelInfo{
 		{ModelId: "claude-opus-4-7", Name: "Opus 4.7"},
 		{ModelId: "build-analyzer", Name: "Build Analyzer"},
 	}
@@ -397,7 +467,7 @@ func TestEmitSetModelEvent_RewritesSplitReasoningOptions(t *testing.T) {
 		{Name: "Medium", Value: reasoningEffortMedium},
 		{Name: "High", Value: reasoningEffortHigh},
 	}
-	cachedModels := []acp.ModelInfo{
+	cachedModels := []modelInfo{
 		{ModelId: "gpt-5.5/medium", Name: "GPT-5.5 (medium)"},
 		{ModelId: "gpt-5.5/high", Name: "GPT-5.5 (high)"},
 	}
@@ -445,7 +515,7 @@ func TestEmitSetModelEvent_RewritesSplitReasoningOptionsWithSlashInBaseModel(t *
 		{Name: "Medium", Value: reasoningEffortMedium},
 		{Name: "High", Value: reasoningEffortHigh},
 	}
-	cachedModels := []acp.ModelInfo{
+	cachedModels := []modelInfo{
 		{ModelId: "vendor/gpt-5.5/medium", Name: "Vendor GPT-5.5 (medium)"},
 		{ModelId: "vendor/gpt-5.5/high", Name: "Vendor GPT-5.5 (high)"},
 	}
@@ -494,7 +564,7 @@ func TestEmitSetModelEvent_DoesNotSplitSlashModelWithoutReasoningSuffix(t *testi
 		{Name: "Medium", Value: reasoningEffortMedium},
 		{Name: "High", Value: reasoningEffortHigh},
 	}
-	cachedModels := []acp.ModelInfo{
+	cachedModels := []modelInfo{
 		{ModelId: "vendor/gpt-5.5", Name: "Vendor GPT-5.5"},
 	}
 	cachedConfig := []streams.ConfigOption{
@@ -592,7 +662,7 @@ func TestConfigOptionUpdate_ComposesReasoningEffortCurrentModel(t *testing.T) {
 	}
 
 	a.mu.Lock()
-	a.availableModels = []acp.ModelInfo{
+	a.availableModels = []modelInfo{
 		{ModelId: "gpt-5.5/medium", Name: "GPT-5.5 (medium)"},
 		{ModelId: "gpt-5.5/high", Name: "GPT-5.5 (high)"},
 	}

@@ -547,24 +547,15 @@ func buildInitProbeFields(initResp acp.InitializeResponse) *ProbeResponse {
 
 // applySessionProbeFields populates models and modes from an ACP session/new response.
 //
-// The legacy `models`/`modes` fields were marked UNSTABLE in the ACP spec and
-// newer agents (e.g. claude-agent-acp v0.42+) drop them in favour of the
-// general `configOptions[]` carrier with `category: model | mode`. Read the
-// legacy fields first, then fall back to configOptions when they are absent
-// so both shapes work.
+// As of acp-go-sdk v0.13.5 the legacy unstable `models` field on
+// NewSessionResponse was removed upstream; model and mode selection are
+// surfaced through the typed `configOptions[]` carrier with
+// `category: model | mode`. The kdlbs fork restores read-only parsing of the
+// top-level `models` field via acp.LegacyModels for agents that haven't
+// migrated yet (auggie 0.29.x). The legacy `modes` field is still present on
+// the SDK type and we keep populating from it for older agents.
 func applySessionProbeFields(out *ProbeResponse, sessionResp acp.NewSessionResponse) {
 	out.ConfigOptions = probeConfigOptions(sessionResp.ConfigOptions)
-	if sessionResp.Models != nil {
-		out.CurrentModelID = string(sessionResp.Models.CurrentModelId)
-		for _, m := range sessionResp.Models.AvailableModels {
-			out.Models = append(out.Models, ProbeModel{
-				ID:          string(m.ModelId),
-				Name:        m.Name,
-				Description: derefString(m.Description),
-				Meta:        m.Meta,
-			})
-		}
-	}
 	if sessionResp.Modes != nil {
 		out.CurrentModeID = string(sessionResp.Modes.CurrentModeId)
 		for _, m := range sessionResp.Modes.AvailableModes {
@@ -576,16 +567,31 @@ func applySessionProbeFields(out *ProbeResponse, sessionResp acp.NewSessionRespo
 			})
 		}
 	}
-	// Gate the fallback on the legacy field being absent (nil) rather than
-	// producing an empty slice. A non-nil `Models` with an empty
-	// `AvailableModels` is schema-valid and would otherwise mix sources:
-	// `CurrentModelID` set from the legacy field, then immediately
-	// overwritten by the configOptions fallback. Same for modes.
-	if sessionResp.Models == nil {
-		applyConfigOptionsAsModels(out, sessionResp.ConfigOptions)
+	applyConfigOptionsAsModels(out, sessionResp.ConfigOptions)
+	if len(out.Models) == 0 {
+		applyLegacyModelsFallback(out, sessionResp.LegacyModels)
 	}
 	if sessionResp.Modes == nil {
 		applyConfigOptionsAsModes(out, sessionResp.ConfigOptions)
+	}
+}
+
+// applyLegacyModelsFallback fills out.Models / out.CurrentModelID from the
+// pre-v0.13.5 top-level `models` field still emitted by agents like
+// auggie 0.29.x. Only invoked when typed configOptions[category=model] did
+// not produce a model list, so the new surface always wins when present.
+func applyLegacyModelsFallback(out *ProbeResponse, legacy *acp.LegacyModels) {
+	if legacy == nil || len(legacy.AvailableModels) == 0 {
+		return
+	}
+	out.CurrentModelID = legacy.CurrentModelId
+	for _, m := range legacy.AvailableModels {
+		out.Models = append(out.Models, ProbeModel{
+			ID:          m.ModelId,
+			Name:        m.Name,
+			Description: derefString(m.Description),
+			Meta:        m.Meta,
+		})
 	}
 }
 

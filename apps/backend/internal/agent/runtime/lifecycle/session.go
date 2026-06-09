@@ -133,6 +133,19 @@ func (sm *SessionManager) createOrLoadSession(
 		if err == nil {
 			return sessionID, nil
 		}
+		// If the underlying ACP connection is dead (peer disconnected, context
+		// cancelled), session/new on the same client will return the same
+		// transport error — falling back just emits a noisy duplicate failure
+		// and delays the FAILED transition. Short-circuit so the caller can
+		// rebuild the connection (next resume cycle gets a fresh agentctl
+		// instance and a fresh ACP connection).
+		if isTransportDeadErr(err) {
+			sm.logger.Warn("session/load failed at transport layer, not retrying with session/new",
+				zap.String("agent_type", agentConfig.ID()),
+				zap.String("existing_session_id", existingSessionID),
+				zap.String("reason", err.Error()))
+			return "", err
+		}
 		// session/load can fail for reasons that don't justify aborting the
 		// session: agent doesn't support the method (capability mismatch /
 		// method not found), the upstream agent CLI no longer recognises the
@@ -725,4 +738,23 @@ func isAgentStreamNotConnectedErr(err error) bool {
 		return false
 	}
 	return strings.Contains(err.Error(), "agent stream not connected")
+}
+
+// isTransportDeadErr reports whether a session/load failure is caused by the
+// underlying ACP connection being gone rather than an agent-side error. The
+// coder/acp-go-sdk surfaces this as a JSON-RPC internal-error whose data map
+// carries the canonical phrase "peer disconnected before response" (also
+// emitted while waiting for pre-response notifications). The error reaches us
+// as a string through the agentctl WS layer, so we match the phrase.
+// "connection closed" is the SDK's own cause string emitted from
+// shutdownReceive — pulling double duty as a fallback for paths where the
+// peer-disconnected wrapping isn't applied.
+func isTransportDeadErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "peer disconnected") ||
+		strings.Contains(msg, "connection closed") ||
+		strings.Contains(msg, "notification queue overflow")
 }
