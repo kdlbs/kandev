@@ -149,6 +149,12 @@ describe("AppSidebarNewTaskItem row actions", () => {
     expect(screen.queryByTestId("sidebar-quick-chat-shortcut")).toBeNull();
   });
 
+  it("hides the quick chat shortcut when there is no active workspace", () => {
+    state.workspaces.activeId = null;
+    renderItem(false);
+    expect(screen.queryByTestId("sidebar-quick-chat-shortcut")).toBeNull();
+  });
+
   it("offers a subtask affordance when a task is active in regular mode", () => {
     state.tasks.activeTaskId = "t-1";
     renderItem(false);
