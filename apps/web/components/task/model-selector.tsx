@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useMemo } from "react";
+import { memo, useCallback, useMemo, useRef } from "react";
 
 import {
   configOptionToModelOptions,
@@ -147,6 +147,9 @@ function useModelChangeHandlers(
   const setActiveModel = useAppStore((state) => state.setActiveModel);
   const setSessionModels = useAppStore((state) => state.setSessionModels);
   const { toast } = useToast();
+  // Per-session monotonic request id so a stale failure doesn't clobber a
+  // newer successful selection (rapid A -> B -> C where B fails).
+  const latestReqId = useRef<Record<string, number>>({});
 
   const updateLocalConfig = useCallback(
     (sid: string, configId: string, value: string) => {
@@ -161,11 +164,17 @@ function useModelChangeHandlers(
   );
 
   const onFail = useCallback(
-    (sid: string, previousActive: string, previousModels: SessionModelsEntry | undefined) =>
+    (
+      sid: string,
+      reqId: number,
+      previousActive: string,
+      previousModels: SessionModelsEntry | undefined,
+    ) =>
       (err: unknown) => {
+        console.error("[ModelSelector] model change failed:", err);
+        if (latestReqId.current[sid] !== reqId) return;
         setActiveModel(sid, previousActive);
         if (previousModels) setSessionModels(sid, previousModels);
-        console.error("[ModelSelector] model change failed:", err);
         toast({
           title: "Failed to change model",
           description: describeError(err),
@@ -175,9 +184,16 @@ function useModelChangeHandlers(
     [setActiveModel, setSessionModels, toast],
   );
 
+  const nextReqId = useCallback((sid: string) => {
+    const id = (latestReqId.current[sid] ?? 0) + 1;
+    latestReqId.current[sid] = id;
+    return id;
+  }, []);
+
   const handleModelChange = useCallback(
     (sid: string, modelId: string) => {
-      const fail = onFail(sid, activeModels[sid] ?? "", sessionModelsData);
+      const reqId = nextReqId(sid);
+      const fail = onFail(sid, reqId, activeModels[sid] ?? "", sessionModelsData);
       setActiveModel(sid, modelId);
       const modelConfig = configOptions.find(isModelConfigOption);
       if (modelConfig) {
@@ -187,16 +203,25 @@ function useModelChangeHandlers(
       }
       setSessionModel(sid, modelId).catch(fail);
     },
-    [activeModels, configOptions, onFail, sessionModelsData, setActiveModel, updateLocalConfig],
+    [
+      activeModels,
+      configOptions,
+      nextReqId,
+      onFail,
+      sessionModelsData,
+      setActiveModel,
+      updateLocalConfig,
+    ],
   );
 
   const handleConfigChange = useCallback(
     (sid: string, configId: string, value: string) => {
-      const fail = onFail(sid, activeModels[sid] ?? "", sessionModelsData);
+      const reqId = nextReqId(sid);
+      const fail = onFail(sid, reqId, activeModels[sid] ?? "", sessionModelsData);
       updateLocalConfig(sid, configId, value);
       setSessionConfigOption(sid, configId, value).catch(fail);
     },
-    [activeModels, onFail, sessionModelsData, updateLocalConfig],
+    [activeModels, nextReqId, onFail, sessionModelsData, updateLocalConfig],
   );
 
   return { handleModelChange, handleConfigChange };
