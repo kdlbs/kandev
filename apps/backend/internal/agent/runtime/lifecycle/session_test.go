@@ -649,6 +649,16 @@ func TestIsTransportDeadErr(t *testing.T) {
 			expected: true,
 		},
 		{
+			name:     "context canceled",
+			err:      context.Canceled,
+			expected: true,
+		},
+		{
+			name:     "context deadline exceeded wrapped",
+			err:      fmt.Errorf("load session failed: %w", context.DeadlineExceeded),
+			expected: true,
+		},
+		{
 			name:     "method not found is not transport-dead",
 			err:      &acp.RequestError{Code: -32601, Message: "Method not found"},
 			expected: false,

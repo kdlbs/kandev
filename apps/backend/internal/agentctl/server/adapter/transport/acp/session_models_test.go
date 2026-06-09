@@ -250,7 +250,48 @@ func TestInitialSessionModelState_IgnoresNonModelConfigOptions(t *testing.T) {
 	}
 }
 
-func TestInitialSessionModelState_UsesTypedConfigOptionPrecedence(t *testing.T) {
+// TestInitialSessionModelState_NonModelConfigOptionsFallThroughToLegacy
+// pins that an agent emitting typed configOptions[category="mode"] alongside
+// the legacy top-level `models` field still surfaces its models — the typed
+// non-model option must not block the LegacyModels tier.
+func TestInitialSessionModelState_NonModelConfigOptionsFallThroughToLegacy(t *testing.T) {
+	modeCategory := acp.SessionConfigOptionCategoryMode
+	modeOptions := acp.SessionConfigSelectOptionsUngrouped{
+		{Name: "Read Only", Value: "read-only"},
+	}
+	configOptions := []acp.SessionConfigOption{
+		{Select: &acp.SessionConfigOptionSelect{
+			Type:         "select",
+			Id:           "mode",
+			Name:         "Approval Preset",
+			Category:     &modeCategory,
+			CurrentValue: "read-only",
+			Options:      acp.SessionConfigSelectOptions{Ungrouped: &modeOptions},
+		}},
+	}
+	legacy := &acp.LegacyModels{
+		CurrentModelId: "claude-opus-4-7",
+		AvailableModels: []acp.LegacyModelInfo{
+			{ModelId: "claude-opus-4-7", Name: "Opus 4.7"},
+		},
+	}
+
+	models := initialSessionModelState(nil, configOptions, legacy)
+	if models == nil {
+		t.Fatal("initialSessionModelState returned nil; expected legacy fallback")
+	}
+	if models.CurrentModelId != "claude-opus-4-7" {
+		t.Errorf("CurrentModelId = %q, want claude-opus-4-7", models.CurrentModelId)
+	}
+	if len(models.AvailableModels) != 1 {
+		t.Fatalf("AvailableModels = %d, want 1", len(models.AvailableModels))
+	}
+}
+
+// TestInitialSessionModelState_NonModelConfigOptionsAllowMetaFallback pins
+// that the _meta tier-3 fallback still fires when typed configOptions has
+// only non-model entries and no LegacyModels are present.
+func TestInitialSessionModelState_NonModelConfigOptionsAllowMetaFallback(t *testing.T) {
 	modeCategory := acp.SessionConfigOptionCategoryMode
 	modeOptions := acp.SessionConfigSelectOptionsUngrouped{
 		{Name: "Read Only", Value: "read-only"},
@@ -277,8 +318,12 @@ func TestInitialSessionModelState_UsesTypedConfigOptionPrecedence(t *testing.T) 
 		},
 	}
 
-	if models := initialSessionModelState(meta, configOptions, nil); models != nil {
-		t.Fatalf("initialSessionModelState returned %+v for non-model typed configOptions", models)
+	models := initialSessionModelState(meta, configOptions, nil)
+	if models == nil {
+		t.Fatal("initialSessionModelState returned nil; expected _meta fallback stub")
+	}
+	if len(models.AvailableModels) != 0 {
+		t.Errorf("AvailableModels = %d, want 0 (stub state)", len(models.AvailableModels))
 	}
 }
 

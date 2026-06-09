@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 
@@ -46,23 +47,48 @@ func TestApplySessionModel_UsesConfigOptionForModelConfig(t *testing.T) {
 	}
 }
 
-// TestApplySessionModel_PropagatesSetConfigOptionError pins that errors from
-// the underlying SetSessionConfigOption RPC bubble up unchanged when the
-// session does advertise a model-shaped config option (the legacy fallback
-// is exercised separately in TestApplySessionModel_FallsBackToLegacySetModel).
+// TestApplySessionModel_PropagatesSetConfigOptionError pins that non
+// MethodNotFound errors from the underlying SetSessionConfigOption RPC bubble
+// up unchanged when the session advertises a model-shaped config option.
 func TestApplySessionModel_PropagatesSetConfigOptionError(t *testing.T) {
 	t.Parallel()
 
-	conn := &fakeModelApplier{configErr: sdk.NewMethodNotFound(sdk.AgentMethodSessionSetConfigOption)}
+	boom := errors.New("boom")
+	conn := &fakeModelApplier{configErr: boom}
 	_, err := applySessionModel(context.Background(), conn, "sess-1", "claude-opus-4-8", []streams.ConfigOption{{
 		ID:       "model",
 		Category: "model",
 	}})
 
-	if err == nil {
-		t.Fatalf("applySessionModel() error = nil, want method-not-found")
+	if !errors.Is(err, boom) {
+		t.Fatalf("applySessionModel() error = %v, want boom", err)
 	}
 	wantCalls := []string{"config:model:claude-opus-4-8"}
+	if !reflect.DeepEqual(conn.calls, wantCalls) {
+		t.Fatalf("calls = %#v, want %#v", conn.calls, wantCalls)
+	}
+}
+
+// TestApplySessionModel_SetConfigOptionMethodNotFoundFallsBack pins the
+// partial-migration case: when the agent advertises the typed model-shaped
+// config option but hasn't wired up the session/set_config_option handler,
+// applySessionModel falls through to the legacy session/set_model RPC.
+func TestApplySessionModel_SetConfigOptionMethodNotFoundFallsBack(t *testing.T) {
+	t.Parallel()
+
+	conn := &fakeModelApplier{configErr: sdk.NewMethodNotFound(sdk.AgentMethodSessionSetConfigOption)}
+	method, err := applySessionModel(context.Background(), conn, "sess-1", "claude-opus-4-8", []streams.ConfigOption{{
+		ID:       "model",
+		Category: "model",
+	}})
+
+	if err != nil {
+		t.Fatalf("applySessionModel() error = %v, want nil after legacy fallback", err)
+	}
+	if method != "session/set_model" {
+		t.Fatalf("method = %q, want session/set_model", method)
+	}
+	wantCalls := []string{"config:model:claude-opus-4-8", "legacy:sess-1:claude-opus-4-8"}
 	if !reflect.DeepEqual(conn.calls, wantCalls) {
 		t.Fatalf("calls = %#v, want %#v", conn.calls, wantCalls)
 	}

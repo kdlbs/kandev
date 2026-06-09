@@ -106,20 +106,26 @@ func ApplySDKFromACP(
 
 // Apply selects the model by routing through the typed
 // session/set_config_option RPC when the session advertises a model-shaped
-// config option. When that option is absent, falls through to the legacy
-// session/set_model RPC for agents (e.g. auggie 0.29.x) that haven't
-// migrated. A JSON-RPC -32601 (method not found) from the legacy call is
-// treated as the agent declaring "I don't support model selection", and
-// Apply returns MethodNone with no error so callers can no-op cleanly.
+// config option. When that option is absent — or when the modern RPC returns
+// JSON-RPC -32601 because a partially-migrated agent advertises the option
+// without implementing the handler — falls through to the legacy
+// session/set_model RPC. A -32601 from the legacy call is treated as the
+// agent declaring "I don't support model selection", and Apply returns
+// MethodNone with no error so callers can no-op cleanly.
 func Apply(ctx context.Context, applier Applier, req Request) (Method, error) {
 	if req.ModelID == "" {
 		return MethodNone, nil
 	}
 	if configID, ok := modelConfigID(req.ConfigOptions); ok {
-		if err := applier.SetConfigOption(ctx, req.SessionID, configID, req.ModelID); err != nil {
+		err := applier.SetConfigOption(ctx, req.SessionID, configID, req.ModelID)
+		if err == nil {
+			return MethodSetConfigOption, nil
+		}
+		if !IsMethodNotFound(err) {
 			return MethodSetConfigOption, err
 		}
-		return MethodSetConfigOption, nil
+		// Agent advertises the typed option but its handler isn't wired up
+		// (partial migration); fall through to the legacy RPC below.
 	}
 	err := applier.SetModelLegacy(ctx, req.SessionID, req.ModelID)
 	if err == nil {

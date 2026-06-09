@@ -62,9 +62,10 @@ const wakeupPromptTimeout = 30 * time.Minute
 // notifQueueCapacity sizes the buffered channel that feeds the update
 // worker. 4096 covers any realistic session/load replay burst (the failure
 // case that motivated this was ~5-10k notifications spread over several
-// seconds, well within the worker's sub-microsecond drain rate). Set big
-// enough that the SDK's 1024-slot upstream queue stays near-empty under
-// burst, small enough that worst-case memory is bounded.
+// seconds, well within the worker's sub-microsecond drain rate). This is
+// the internal hand-off between the SDK's update handler and our worker;
+// it sits in front of the larger acpNotifQueueDefault SDK inbound queue and
+// can be smaller because the worker drains it well under SDK fill rate.
 const notifQueueCapacity = 4096
 
 // acpNotifQueueDefault is the per-connection capacity passed to the SDK's
@@ -348,8 +349,10 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	)
 
 	// Create ACP SDK connection. Raise the inbound notification queue cap
-	// above the SDK's 1024 default so long session/load replays don't
-	// overflow and tear the connection down. Requires a coder/acp-go-sdk
+	// to acpNotifQueueDefault (well above the SDK's built-in default) so
+	// long session/load replays don't overflow and tear the connection
+	// down. The internal notifQueueCapacity channel sits in front of this
+	// queue and is drained by our update worker. Requires a coder/acp-go-sdk
 	// fork with WithMaxQueuedNotifications; see go.mod replace directive.
 	notifQueueCap := acpNotifQueueCapacity()
 	a.acpConn = acp.NewClientSideConnection(a.acpClient, a.stdin, a.stdout,

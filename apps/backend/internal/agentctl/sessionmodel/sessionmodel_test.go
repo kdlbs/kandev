@@ -150,3 +150,33 @@ func TestApply_PropagatesSetConfigOptionError(t *testing.T) {
 		t.Fatalf("calls = %#v, want %#v", applier.calls, wantCalls)
 	}
 }
+
+// TestApply_SetConfigOptionMethodNotFoundFallsBackToLegacy pins the
+// partial-migration fallthrough: when the session advertises a model-shaped
+// config option but the agent answers session/set_config_option with -32601,
+// Apply falls through to the legacy session/set_model RPC instead of
+// surfacing the error.
+func TestApply_SetConfigOptionMethodNotFoundFallsBackToLegacy(t *testing.T) {
+	t.Parallel()
+
+	applier := &fakeApplier{configErr: acp.NewMethodNotFound(acp.AgentMethodSessionSetConfigOption)}
+	method, err := Apply(context.Background(), applier, Request{
+		SessionID: "sess-1",
+		ModelID:   "claude-opus-4-7",
+		ConfigOptions: []ConfigOption{{
+			ID:       "model",
+			Category: "model",
+		}},
+	})
+
+	if err != nil {
+		t.Fatalf("Apply() error = %v, want nil", err)
+	}
+	if method != MethodSetModel {
+		t.Fatalf("method = %q, want %q", method, MethodSetModel)
+	}
+	wantCalls := []string{"config:model:claude-opus-4-7", "legacy:sess-1:claude-opus-4-7"}
+	if !reflect.DeepEqual(applier.calls, wantCalls) {
+		t.Fatalf("calls = %#v, want %#v", applier.calls, wantCalls)
+	}
+}

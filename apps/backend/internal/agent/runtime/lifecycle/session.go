@@ -748,10 +748,15 @@ func isAgentStreamNotConnectedErr(err error) bool {
 // as a string through the agentctl WS layer, so we match the phrase.
 // "connection closed" is the SDK's own cause string emitted from
 // shutdownReceive — pulling double duty as a fallback for paths where the
-// peer-disconnected wrapping isn't applied.
+// peer-disconnected wrapping isn't applied. Canonical context cancellation
+// errors short-circuit too: the caller's ctx going down means session/new
+// retry will fail for the same reason, so treat it as transport-dead.
 func isTransportDeadErr(err error) bool {
 	if err == nil {
 		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
 	}
 	msg := err.Error()
 	return strings.Contains(msg, "peer disconnected") ||

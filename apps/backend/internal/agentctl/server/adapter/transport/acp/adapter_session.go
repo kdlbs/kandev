@@ -55,6 +55,11 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 	a.mu.Lock()
 	a.sessionID = string(resp.SessionId)
 	sessionID := a.sessionID
+	// Reset session-scoped model caches before computing the new session's
+	// state so a session without a model surface can't reuse the previous
+	// session's models / configOptions for validation in SetModel.
+	a.availableModels = nil
+	a.availableConfigOptions = nil
 	initialModels := initialSessionModelState(resp.Meta, resp.ConfigOptions, resp.LegacyModels)
 	if initialModels != nil {
 		a.availableModels = initialModels.AvailableModels
@@ -97,13 +102,12 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 // Precedence (in order):
 //  1. Typed ConfigOptions list with category="model" (v0.13.4+ agents).
 //  2. Pre-v0.13.5 top-level `models` field (e.g. auggie 0.29.x), exposed by the
-//     kdlbs fork as acp.LegacyModels.
+//     kdlbs fork as acp.LegacyModels. Reached even when configOptions carries
+//     non-model entries (e.g. `category="mode"`) so an agent that mixes typed
+//     mode options with a legacy models block still surfaces its models.
 //  3. _meta-only ConfigOption stub for legacy agents that surface options
 //     under `_meta.configOptions` (returns an empty state so emitSessionModels
 //     still fires; the event's ConfigOptions list is filled from _meta there).
-//
-// Tier 1 short-circuits tier 2 even when the typed list contains non-model
-// options — that matches the pre-v0.13.5 behavior of typed sessionConfigOptions.
 func initialSessionModelState(
 	meta map[string]any,
 	configOptions []acp.SessionConfigOption,
@@ -111,9 +115,6 @@ func initialSessionModelState(
 ) *sessionModelState {
 	if state := modelsFromConfigOptions(configOptions); state != nil {
 		return state
-	}
-	if len(configOptions) > 0 {
-		return nil
 	}
 	if state := modelsFromLegacy(legacy); state != nil {
 		return state
@@ -318,6 +319,10 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 
 	a.mu.Lock()
 	a.sessionID = sessionID
+	// Reset session-scoped model caches so a load that lands on a session
+	// without a model surface can't reuse the previous session's data.
+	a.availableModels = nil
+	a.availableConfigOptions = nil
 	initialModels := initialSessionModelState(resp.Meta, resp.ConfigOptions, resp.LegacyModels)
 	if initialModels != nil {
 		a.availableModels = initialModels.AvailableModels
