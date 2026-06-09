@@ -10,6 +10,7 @@ import {
   IconTicket,
 } from "@tabler/icons-react";
 import type { Icon as TablerIcon } from "@tabler/icons-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useConfiguredIntegrationLinks } from "@/components/integrations/integrations-menu";
 import { cn } from "@/lib/utils";
 import {
@@ -30,6 +31,35 @@ const INTEGRATION_ICONS: Record<string, TablerIcon> = {
   linear: IconHexagon,
 };
 
+const MAX_HEADER_SHORTCUTS = 4;
+
+type ConfiguredIntegrationLink = ReturnType<typeof useConfiguredIntegrationLinks>[number];
+
+function IntegrationHeaderShortcuts({ links }: { links: ConfiguredIntegrationLink[] }) {
+  return (
+    <div className="flex items-center gap-0.5">
+      {links.slice(0, MAX_HEADER_SHORTCUTS).map(({ id, label, href }) => {
+        const Icon = INTEGRATION_ICONS[id] ?? IconPlugConnected;
+        return (
+          <Tooltip key={id}>
+            <TooltipTrigger asChild>
+              <Link
+                href={href}
+                aria-label={label}
+                data-testid="integration-header-shortcut"
+                className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/70 hover:bg-muted/60 hover:text-foreground cursor-pointer transition-colors"
+              >
+                <Icon className="h-3.5 w-3.5" />
+              </Link>
+            </TooltipTrigger>
+            <TooltipContent side="right">{label}</TooltipContent>
+          </Tooltip>
+        );
+      })}
+    </div>
+  );
+}
+
 export function IntegrationsSection({ collapsed }: IntegrationsSectionProps) {
   const pathname = usePathname();
   const links = useConfiguredIntegrationLinks();
@@ -42,6 +72,8 @@ export function IntegrationsSection({ collapsed }: IntegrationsSectionProps) {
       label="Integrations"
       collapsed={collapsed}
       icon={IconPlugConnected}
+      headerAction={<IntegrationHeaderShortcuts links={links} />}
+      headerActionVisibility="always"
     >
       {links.map(({ id, label, href }) => {
         const Icon = INTEGRATION_ICONS[id] ?? IconPlugConnected;

@@ -21,9 +21,11 @@ export function TasksSection({ collapsed }: TasksSectionProps) {
       label="Tasks"
       collapsed={collapsed}
       icon={IconCircleDot}
-      headerAction={<TasksViewPicker />}
       grow
     >
+      <div className="shrink-0 px-2 pb-1">
+        <TasksViewPicker />
+      </div>
       <div className="flex-1 min-h-0 [&_[data-testid=task-sidebar]]:bg-transparent [&_[data-testid=task-sidebar-scroll]]:bg-transparent">
         <TaskSessionSidebar workspaceId={workspaceId} workflowId={workflowId} hideFilterBar />
       </div>

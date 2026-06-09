@@ -15,6 +15,8 @@ type AppSidebarSectionProps = {
   children: React.ReactNode;
   /** Optional control rendered between the label and the collapse chevron. */
   headerAction?: React.ReactNode;
+  /** By default header actions only render while expanded. */
+  headerActionVisibility?: "expanded" | "always";
   /** Fills remaining sidebar height when expanded. Parent must be a flex column. */
   grow?: boolean;
 };
@@ -23,10 +25,19 @@ type SectionHeaderProps = {
   label: string;
   expanded: boolean;
   headerAction?: React.ReactNode;
+  headerActionVisibility: "expanded" | "always";
   onToggle: () => void;
 };
 
-function SectionHeader({ label, expanded, headerAction, onToggle }: SectionHeaderProps) {
+function SectionHeader({
+  label,
+  expanded,
+  headerAction,
+  headerActionVisibility,
+  onToggle,
+}: SectionHeaderProps) {
+  const showHeaderAction = !!headerAction && (expanded || headerActionVisibility === "always");
+
   return (
     <div className="group/section flex items-center px-2 h-7 shrink-0">
       <button
@@ -37,9 +48,7 @@ function SectionHeader({ label, expanded, headerAction, onToggle }: SectionHeade
       >
         <span className="text-[11px] font-semibold uppercase tracking-wider truncate">{label}</span>
       </button>
-      {expanded && headerAction && (
-        <div className="shrink-0 mr-1 flex items-center">{headerAction}</div>
-      )}
+      {showHeaderAction && <div className="shrink-0 mr-1 flex items-center">{headerAction}</div>}
       <button
         type="button"
         onClick={onToggle}
@@ -62,6 +71,7 @@ export function AppSidebarSection({
   icon: Icon,
   children,
   headerAction,
+  headerActionVisibility = "expanded",
   grow,
 }: AppSidebarSectionProps) {
   const expanded = useAppStore((s) => s.appSidebar.sectionExpanded[id] ?? false);
@@ -101,6 +111,7 @@ export function AppSidebarSection({
           label={label}
           expanded={expanded}
           headerAction={headerAction}
+          headerActionVisibility={headerActionVisibility}
           onToggle={handleToggle}
         />
         {expanded && (
@@ -116,6 +127,7 @@ export function AppSidebarSection({
         label={label}
         expanded={expanded}
         headerAction={headerAction}
+        headerActionVisibility={headerActionVisibility}
         onToggle={handleToggle}
       />
       <CollapsibleContent className="sidebar-section-content">

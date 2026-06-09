@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { IconChevronsLeft, IconChevronsRight } from "@tabler/icons-react";
+import { IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -41,7 +41,7 @@ export function AppSidebarHeader({ collapsed, onToggleCollapse }: AppSidebarHead
               onClick={onToggleCollapse}
               aria-label="Expand sidebar"
             >
-              <IconChevronsRight className="h-4 w-4" />
+              <IconLayoutSidebarLeftExpand className="h-4 w-4" />
             </Button>
           </TooltipTrigger>
           <TooltipContent side="right">Expand sidebar</TooltipContent>
@@ -82,7 +82,7 @@ export function AppSidebarHeader({ collapsed, onToggleCollapse }: AppSidebarHead
             onClick={onToggleCollapse}
             aria-label="Collapse sidebar"
           >
-            <IconChevronsLeft className="h-4 w-4" />
+            <IconLayoutSidebarLeftCollapse className="h-4 w-4" />
           </Button>
         </TooltipTrigger>
         <TooltipContent side="top">Collapse sidebar</TooltipContent>

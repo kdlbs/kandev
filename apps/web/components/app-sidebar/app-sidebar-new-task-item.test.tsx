@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   routerPush: vi.fn(),
   setActiveTask: vi.fn(),
   setActiveSession: vi.fn(),
+  openQuickChat: vi.fn(),
   dialogTaskSessionId: null as string | null,
   dialogWillNavigate: false,
 }));
@@ -34,6 +35,9 @@ let pathname = "/";
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: typeof state) => unknown) => selector(state),
+}));
+vi.mock("@/hooks/use-quick-chat-launcher", () => ({
+  useQuickChatLauncher: () => mocks.openQuickChat,
 }));
 vi.mock("@/hooks/domains/features/use-feature", () => ({
   useFeature: () => officeEnabled,
@@ -79,24 +83,26 @@ const SUBTASK_TESTID = "sidebar-new-subtask";
 const OFFICE_DIALOG_TESTID = "office-new-task-dialog";
 const REGULAR_DIALOG_TESTID = "regular-task-create-dialog";
 
-describe("AppSidebarNewTaskItem", () => {
-  beforeEach(() => {
-    state.workspaces.activeId = "ws-1";
-    state.kanban.workflowId = "wf-1";
-    state.kanban.steps = [{ id: "s1", title: "Todo" }];
-    state.kanban.tasks = [{ id: "t-1", title: "Parent task" }];
-    state.tasks.activeTaskId = null;
-    mocks.routerPush.mockClear();
-    mocks.setActiveTask.mockClear();
-    mocks.setActiveSession.mockClear();
-    mocks.dialogTaskSessionId = null;
-    mocks.dialogWillNavigate = false;
-    officeEnabled = false;
-    pathname = "/";
-  });
+function resetTestState() {
+  state.workspaces.activeId = "ws-1";
+  state.kanban.workflowId = "wf-1";
+  state.kanban.steps = [{ id: "s1", title: "Todo" }];
+  state.kanban.tasks = [{ id: "t-1", title: "Parent task" }];
+  state.tasks.activeTaskId = null;
+  mocks.routerPush.mockClear();
+  mocks.setActiveTask.mockClear();
+  mocks.setActiveSession.mockClear();
+  mocks.openQuickChat.mockClear();
+  mocks.dialogTaskSessionId = null;
+  mocks.dialogWillNavigate = false;
+  officeEnabled = false;
+  pathname = "/";
+}
 
-  afterEach(() => cleanup());
+beforeEach(resetTestState);
+afterEach(() => cleanup());
 
+describe("AppSidebarNewTaskItem dialog routing", () => {
   it("uses the regular task-create dialog when office is disabled", () => {
     officeEnabled = false;
     renderItem(false);
@@ -129,6 +135,19 @@ describe("AppSidebarNewTaskItem", () => {
     expect(screen.queryByTestId(REGULAR_DIALOG_TESTID)).toBeNull();
     expect(screen.queryByTestId(OFFICE_DIALOG_TESTID)).toBeNull();
   });
+});
+
+describe("AppSidebarNewTaskItem row actions", () => {
+  it("opens quick chat from the trailing action beside New Task", () => {
+    renderItem(false);
+    screen.getByTestId("sidebar-quick-chat-shortcut").click();
+    expect(mocks.openQuickChat).toHaveBeenCalledOnce();
+  });
+
+  it("hides the quick chat shortcut when the rail is collapsed", () => {
+    renderItem(true);
+    expect(screen.queryByTestId("sidebar-quick-chat-shortcut")).toBeNull();
+  });
 
   it("offers a subtask affordance when a task is active in regular mode", () => {
     state.tasks.activeTaskId = "t-1";
@@ -160,7 +179,9 @@ describe("AppSidebarNewTaskItem", () => {
     renderItem(true);
     expect(screen.queryByTestId(SUBTASK_TESTID)).toBeNull();
   });
+});
 
+describe("AppSidebarNewTaskItem creation success", () => {
   it("focuses the created task after regular sidebar task creation succeeds", () => {
     renderItem(false);
     screen.getByTestId(REGULAR_DIALOG_TESTID).click();
