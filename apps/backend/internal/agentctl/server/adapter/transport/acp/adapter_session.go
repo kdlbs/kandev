@@ -424,7 +424,7 @@ func (a *Adapter) emitInitialModeState(modes *acp.SessionModeState) {
 
 // emitSessionModels emits a session_models event from the session response.
 func (a *Adapter) emitSessionModels(sessionID string, models *sessionModelState, meta map[string]any, acpConfigOptions []acp.SessionConfigOption) {
-	currentModelID := string(models.CurrentModelId)
+	currentModelID := models.CurrentModelId
 	// Prefer typed config options from the response; fall back to _meta
 	// extraction for older agents.
 	configOptions := sessionConfigOptions(meta, acpConfigOptions)
@@ -659,6 +659,13 @@ func (a *Adapter) SetModel(ctx context.Context, modelID string) error {
 	method, err := applySessionModel(ctx, conn, sessionID, modelID, cachedConfig)
 	if err != nil {
 		return fmt.Errorf("set session model failed via %s: %w", method, err)
+	}
+	// MethodNone means the agent supports neither the typed
+	// session/set_config_option nor the legacy session/set_model RPC, so no
+	// switch actually happened. Don't claim convergence in that case — the
+	// agent's model is unchanged and the frontend shouldn't be told otherwise.
+	if method == sessionmodel.MethodNone {
+		return nil
 	}
 	a.resetContextWindowMaxSize(sessionID)
 	a.emitSetModelEvent(sessionID, modelID, available, cachedConfig)

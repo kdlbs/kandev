@@ -171,8 +171,8 @@ function useModelChangeHandlers(
       previousModels: SessionModelsEntry | undefined,
     ) =>
       (err: unknown) => {
-        console.error("[ModelSelector] model change failed:", err);
         if (latestReqId.current[sid] !== reqId) return;
+        console.error("[ModelSelector] model change failed:", err);
         setActiveModel(sid, previousActive);
         if (previousModels) setSessionModels(sid, previousModels);
         toast({

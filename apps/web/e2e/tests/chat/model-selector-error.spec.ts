@@ -100,16 +100,25 @@ test.describe("Chat model selector — RPC failure", () => {
     const firstHeld = new Promise<void>((resolve) => {
       releaseFirst = resolve;
     });
+    // Resolves once the first (stale) request has fully completed its
+    // route.fulfill, so the test can deterministically await propagation
+    // instead of using a fixed sleep.
+    let firstSettled: (() => void) | null = null;
+    const firstSettledPromise = new Promise<void>((resolve) => {
+      firstSettled = resolve;
+    });
     let callCount = 0;
     await testPage.route("**/set-config-option", async (route) => {
       callCount += 1;
       if (callCount === 1) {
         await firstHeld;
-        return route.fulfill({
+        await route.fulfill({
           status: 500,
           contentType: "application/json",
           body: JSON.stringify({ error: "stale failure" }),
         });
+        firstSettled?.();
+        return;
       }
       return route.fulfill({
         status: 200,
@@ -128,10 +137,7 @@ test.describe("Chat model selector — RPC failure", () => {
     // Now release the first (stale) request — its 500 rejection should be
     // swallowed (no toast).
     releaseFirst?.();
-
-    // Give the stale rejection a beat to propagate, then assert no toast was
-    // shown by the stale failure.
-    await testPage.waitForTimeout(500);
+    await firstSettledPromise;
     await expect(testPage.getByTestId("toast-message")).toHaveCount(0);
     // Trigger should still reflect the newer (successful) selection.
     await expect(trigger).toContainText("Mock Fast", { timeout: 5_000 });
