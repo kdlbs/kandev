@@ -210,9 +210,10 @@ function pickDefaultExecutorId(
   noRepository: boolean,
   preferLocalExecutor: boolean,
 ): string | null {
-  const eligible = noRepository
-    ? executors.filter((e: Executor) => e.type !== "worktree")
-    : executors;
+  const eligible =
+    noRepository || preferLocalExecutor
+      ? executors.filter((e: Executor) => e.type !== "worktree")
+      : executors;
   if (eligible.length === 0) return null;
   const defId = workspaceDefaults?.default_executor_id ?? null;
   if (defId && eligible.some((e: Executor) => e.id === defId)) return defId;

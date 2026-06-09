@@ -121,6 +121,28 @@ describe("useDefaultSelectionsEffect - executor profile defaults", () => {
     await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(PROFILE_LOCAL));
   });
 
+  it("ignores a workspace-default worktree executor for explicit local-path tasks", async () => {
+    const fs = makeDefaultSelFs({
+      executorId: "",
+      executorProfileId: "",
+      repositories: [{ key: "row-0", localPath: "/workspace/custom", branch: "" }],
+    });
+    const worktree = worktreeExecutor();
+    const local = localExecutor();
+    const sel = makeSel({
+      executors: [worktree, local],
+      workspaceDefaults: {
+        default_executor_id: worktree.id,
+      } as StoreSelections["workspaceDefaults"],
+    });
+
+    renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
+
+    await waitFor(() => expect(fs.setExecutorId).toHaveBeenCalledWith(local.id));
+    expect(fs.setExecutorId).not.toHaveBeenCalledWith(worktree.id);
+    await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(PROFILE_LOCAL));
+  });
+
   it("does not fall back to a worktree profile for explicit local-path tasks", async () => {
     const fs = makeDefaultSelFs({
       executorId: "",
