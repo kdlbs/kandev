@@ -69,4 +69,11 @@ describe("AppSidebarPrimaryNav", () => {
 
     expect(screen.queryByRole("button", { name: "Quick Chat" })).toBeNull();
   });
+
+  it("omits Quick Chat when the rail is collapsed but there is no workspace", () => {
+    state.workspaces.activeId = null;
+    renderNav(true);
+
+    expect(screen.queryByRole("button", { name: "Quick Chat" })).toBeNull();
+  });
 });
