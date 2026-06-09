@@ -274,6 +274,38 @@ function pickDefaultExecutorProfileId(
   return executorProfile?.id ?? eligibleProfiles[0].id;
 }
 
+function useMultiRepoGuardEffect(
+  open: boolean,
+  executorProfileId: string,
+  setExecutorProfileId: (id: string) => void,
+  executors: Executor[],
+  selectedRepoCount: number,
+) {
+  // Multi-repo guard: when 2+ repos are selected, only worktree profiles can
+  // run the task (Docker / Sprites / standalone don't yet provision sibling
+  // repos under one task root). If the current profile is non-worktree, swap
+  // to a worktree profile — preferring the last-used worktree, otherwise the
+  // first one available. Single-repo selections leave the profile alone.
+  useEffect(() => {
+    if (!open || !executorProfileId || executors.length === 0) return;
+    if (selectedRepoCount <= 1) return;
+    const profileToType = new Map<string, string | undefined>();
+    const worktreeProfileIds: string[] = [];
+    for (const e of executors) {
+      for (const p of e.profiles ?? []) {
+        const type = p.executor_type ?? e.type;
+        profileToType.set(p.id, type);
+        if (type === "worktree") worktreeProfileIds.push(p.id);
+      }
+    }
+    if (worktreeProfileIds.length === 0) return;
+    if (profileToType.get(executorProfileId) === "worktree") return;
+    const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID, null);
+    const pick = lastId && worktreeProfileIds.includes(lastId) ? lastId : worktreeProfileIds[0];
+    void Promise.resolve().then(() => setExecutorProfileId(pick));
+  }, [open, executorProfileId, executors, selectedRepoCount, setExecutorProfileId]);
+}
+
 export function useDefaultSelectionsEffect(
   fs: DialogFormState,
   open: boolean,
@@ -289,6 +321,7 @@ export function useDefaultSelectionsEffect(
     noRepository,
     useRemote,
     repositories,
+    remoteRepos,
   } = fs;
   const preferLocalExecutor =
     !noRepository && !useRemote && repositories.some((row) => Boolean(row.localPath));
@@ -346,12 +379,6 @@ export function useDefaultSelectionsEffect(
     }
   }, [executorProfileId, executors, setExecutorId]);
 
-  // Multi-repo guard: when 2+ repos are selected, only worktree profiles can
-  // run the task (Docker / Sprites / standalone don't yet provision sibling
-  // repos under one task root). If the current profile is non-worktree, swap
-  // to a worktree profile — preferring the last-used worktree, otherwise the
-  // first one available. Single-repo selections leave the profile alone.
-  //
   // Count is mode-aware: Remote mode counts non-empty URL rows, workspace
   // mode counts rows with a repo/path. Without this, 2 Remote rows + 0
   // workspace rows would slip past the guard because the legacy check only
@@ -360,35 +387,23 @@ export function useDefaultSelectionsEffect(
   // literal every render, so listing it in the dep array would re-run this
   // effect on every render. computeSelectedRepoCount only reads noRepository /
   // useRemote / remoteRepos / repositories, so memoize over exactly those.
-  const { noRepository: fsNoRepository, remoteRepos } = fs;
   const selectedRepoCount = useMemo(
     () =>
       computeSelectedRepoCount({
-        noRepository: fsNoRepository,
+        noRepository,
         useRemote,
         remoteRepos,
         repositories,
       } as DialogFormState),
-    [fsNoRepository, useRemote, remoteRepos, repositories],
+    [noRepository, useRemote, remoteRepos, repositories],
   );
-  useEffect(() => {
-    if (!open || !executorProfileId || executors.length === 0) return;
-    if (selectedRepoCount <= 1) return;
-    const profileToType = new Map<string, string | undefined>();
-    const worktreeProfileIds: string[] = [];
-    for (const e of executors) {
-      for (const p of e.profiles ?? []) {
-        const type = p.executor_type ?? e.type;
-        profileToType.set(p.id, type);
-        if (type === "worktree") worktreeProfileIds.push(p.id);
-      }
-    }
-    if (worktreeProfileIds.length === 0) return;
-    if (profileToType.get(executorProfileId) === "worktree") return;
-    const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID, null);
-    const pick = lastId && worktreeProfileIds.includes(lastId) ? lastId : worktreeProfileIds[0];
-    void Promise.resolve().then(() => setExecutorProfileId(pick));
-  }, [open, executorProfileId, executors, selectedRepoCount, setExecutorProfileId]);
+  useMultiRepoGuardEffect(
+    open,
+    executorProfileId,
+    setExecutorProfileId,
+    executors,
+    selectedRepoCount,
+  );
 }
 
 /**
