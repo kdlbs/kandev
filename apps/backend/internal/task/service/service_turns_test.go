@@ -109,6 +109,58 @@ func TestGetWorkspaceInfoForSession_IncludesSessionMode(t *testing.T) {
 	}
 }
 
+// TestGetWorkspaceInfoForSession_IncludesModelAndConfigOptions pins the
+// snapshot-driven model + config option restore path. The user's last-chosen
+// model and reasoning effort live in AgentProfileSnapshot; surfacing them on
+// WorkspaceInfo lets initializeACPSession reapply them on backend restart /
+// session resumption instead of reverting to the profile defaults.
+func TestGetWorkspaceInfoForSession_IncludesModelAndConfigOptions(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+
+	session := &models.TaskSession{
+		ID:     "session-1",
+		TaskID: "task-123",
+		State:  models.TaskSessionStateRunning,
+		AgentProfileSnapshot: map[string]interface{}{
+			"model": "gpt-5.4-mini",
+			"config_options": map[string]interface{}{
+				"effort":    "high",
+				"reasoning": "on",
+				"empty":     "",
+			},
+		},
+		StartedAt: now,
+		UpdatedAt: now,
+	}
+	if err := repo.CreateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	info, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-1")
+	if err != nil {
+		t.Fatalf("GetWorkspaceInfoForSession returned error: %v", err)
+	}
+	if info.SessionModel != "gpt-5.4-mini" {
+		t.Errorf("expected SessionModel 'gpt-5.4-mini', got %q", info.SessionModel)
+	}
+	want := map[string]string{"effort": "high", "reasoning": "on"}
+	if len(info.SessionConfigOptions) != len(want) {
+		t.Fatalf("expected %d config options, got %d (%v)", len(want), len(info.SessionConfigOptions), info.SessionConfigOptions)
+	}
+	for k, v := range want {
+		if info.SessionConfigOptions[k] != v {
+			t.Errorf("expected SessionConfigOptions[%q] = %q, got %q", k, v, info.SessionConfigOptions[k])
+		}
+	}
+	if _, ok := info.SessionConfigOptions["empty"]; ok {
+		t.Errorf("empty-valued config option should be skipped")
+	}
+}
+
 func TestGetWorkspaceInfoForSession_InfersTaskID(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()

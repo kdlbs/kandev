@@ -142,4 +142,103 @@ test.describe("Chat model selector — RPC failure", () => {
     // Trigger should still reflect the newer (successful) selection.
     await expect(trigger).toContainText("Mock Fast", { timeout: 5_000 });
   });
+
+  test("model change persists across page reload", async ({ testPage, apiClient, seedData }) => {
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Model Selector Persistence Test",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await testPage.goto(`/t/${task.id}`);
+
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+
+    const trigger = testPage.getByRole("button", { name: "Session model settings" });
+    await expect(trigger).toContainText("Mock Fast", { timeout: 15_000 });
+
+    // Switch from Mock Fast to Mock Smart. mock-agent routes model changes
+    // through POST /set-config-option — the same path the persistence bug
+    // lived on (SetConfigOption did not emit the session_models convergence
+    // event, so the orchestrator never wrote the new model to the DB).
+    await trigger.click();
+    await testPage.getByRole("option", { name: /Mock Smart/ }).click();
+    await expect(trigger).toContainText("Mock Smart", { timeout: 5_000 });
+
+    await testPage.reload();
+    await session.waitForLoad();
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+
+    // After reload the trigger label comes from SSR-hydrated session state.
+    // If SetConfigOption fails to emit the convergence event, the orchestrator
+    // never persists the change and SSR re-serves "Mock Fast" — this assertion
+    // is the regression guard.
+    await expect(trigger).toContainText("Mock Smart", { timeout: 15_000 });
+    await expect(trigger).not.toContainText("Mock Fast");
+  });
+});
+
+/**
+ * Verifies the chat-input model selector's popover stays open after picking a
+ * model when extra config options (reasoning effort, thought level, …) are
+ * present on the same popover. Picking a model is rarely the last thing a user
+ * wants to do when there are other knobs in the same surface — they typically
+ * want to adjust effort too. Auto-closing on model select forces a second open.
+ *
+ * mock-agent ships with model + effort config options, so the popover renders
+ * the Effort section alongside the model list — exactly the layout this guard
+ * protects.
+ */
+test.describe("Chat model selector — popover open/close behavior", () => {
+  test("stays open after picking a model when extra config options exist", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Model Selector Stay Open Test",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await testPage.goto(`/t/${task.id}`);
+
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+
+    const trigger = testPage.getByRole("button", { name: "Session model settings" });
+    await expect(trigger).toContainText("Mock Fast", { timeout: 15_000 });
+
+    await trigger.click();
+    // The Effort section is the rendered marker that the popover content is
+    // mounted — it lives below the model list inside the same PopoverContent.
+    const effortHeading = testPage.getByText("Effort", { exact: true });
+    await expect(effortHeading).toBeVisible({ timeout: 5_000 });
+
+    await testPage.getByRole("option", { name: /Mock Smart/ }).click();
+
+    // The trigger label updates optimistically — wait for that so we know the
+    // selection round-tripped through the handler.
+    await expect(trigger).toContainText("Mock Smart", { timeout: 5_000 });
+
+    // Popover must still be open so the user can also pick an effort level
+    // without re-opening. The Effort heading is rendered only when the
+    // PopoverContent is mounted (Radix unmounts it on close).
+    await expect(effortHeading).toBeVisible();
+  });
 });

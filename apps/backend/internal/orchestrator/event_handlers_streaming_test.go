@@ -459,3 +459,58 @@ func TestSessionStateString(t *testing.T) {
 	require.Equal(t, string(models.TaskSessionStateRunning),
 		sessionStateString(&models.TaskSession{State: models.TaskSessionStateRunning}))
 }
+
+// TestConfigOptionsEqual pins the comparator that persistSessionModelsState
+// uses to skip redundant UpdateTaskSession writes when the cached config
+// options haven't actually changed. Values arrive as interface{} from the
+// deserialized JSON snapshot but as strings from the freshly-built ACP
+// payload, so the comparator must coerce both sides through `.(string)`.
+func TestConfigOptionsEqual(t *testing.T) {
+	cases := []struct {
+		name     string
+		existing interface{}
+		next     map[string]interface{}
+		want     bool
+	}{
+		{name: "both empty", existing: nil, next: map[string]interface{}{}, want: true},
+		{name: "existing nil, next populated", existing: nil, next: map[string]interface{}{"model": "gpt-5"}, want: false},
+		{name: "existing populated, next empty", existing: map[string]interface{}{"model": "gpt-5"}, next: map[string]interface{}{}, want: false},
+		{name: "same keys and values", existing: map[string]interface{}{"model": "gpt-5", "reasoning_effort": "high"}, next: map[string]interface{}{"model": "gpt-5", "reasoning_effort": "high"}, want: true},
+		{name: "different value for same key", existing: map[string]interface{}{"reasoning_effort": "low"}, next: map[string]interface{}{"reasoning_effort": "high"}, want: false},
+		{name: "different key sets", existing: map[string]interface{}{"model": "gpt-5"}, next: map[string]interface{}{"reasoning_effort": "high"}, want: false},
+		{name: "existing is non-map type", existing: "not a map", next: map[string]interface{}{"model": "gpt-5"}, want: false},
+		{name: "existing is non-map type and next empty", existing: 42, next: map[string]interface{}{}, want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, configOptionsEqual(tc.existing, tc.next))
+		})
+	}
+}
+
+// TestPersistSessionModelsState_PersistsModelAndConfigOptions pins the
+// regression behind issue: reasoning_effort etc were lost on page refresh
+// because persistence only wrote the `model` key. Now the full set of
+// CurrentValues lands under `config_options` so SSR can restore them.
+func TestPersistSessionModelsState_PersistsModelAndConfigOptions(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	svc := &Service{logger: testLogger(), repo: repo}
+
+	svc.persistSessionModelsState(ctx, "s1", "gpt-5.4", []streams.ConfigOption{
+		{ID: "model", Category: "model", CurrentValue: "gpt-5.4"},
+		{ID: "reasoning_effort", CurrentValue: "high"},
+		{ID: "empty_value", CurrentValue: ""}, // must be skipped
+	})
+
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, "gpt-5.4", updated.AgentProfileSnapshot["model"])
+	opts, ok := updated.AgentProfileSnapshot["config_options"].(map[string]interface{})
+	require.True(t, ok, "config_options must be persisted under its own key")
+	require.Equal(t, "gpt-5.4", opts["model"])
+	require.Equal(t, "high", opts["reasoning_effort"])
+	_, hasEmpty := opts["empty_value"]
+	require.False(t, hasEmpty, "options with empty CurrentValue must be skipped — there's nothing to restore on SSR")
+}

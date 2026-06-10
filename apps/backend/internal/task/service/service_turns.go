@@ -364,12 +364,30 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 
 	// Get agent name (registry slug) from profile snapshot.
 	// Prefer "agent_name" (the slug used as registry key) over "agent_id" (the database UUID).
-	var agentID string
+	// Also read the user's last-selected model and any dynamic config options
+	// (reasoning effort, thought level, …) so a fresh launch / backend restart
+	// can reapply them as overrides on top of the profile defaults.
+	var (
+		agentID              string
+		sessionModel         string
+		sessionConfigOptions map[string]string
+	)
 	if session.AgentProfileSnapshot != nil {
 		if name, ok := session.AgentProfileSnapshot["agent_name"].(string); ok {
 			agentID = name
 		} else if id, ok := session.AgentProfileSnapshot["agent_id"].(string); ok {
 			agentID = id
+		}
+		if model, ok := session.AgentProfileSnapshot["model"].(string); ok {
+			sessionModel = model
+		}
+		if raw, ok := session.AgentProfileSnapshot["config_options"].(map[string]interface{}); ok && len(raw) > 0 {
+			sessionConfigOptions = make(map[string]string, len(raw))
+			for k, v := range raw {
+				if s, ok := v.(string); ok && s != "" {
+					sessionConfigOptions[k] = s
+				}
+			}
 		}
 	}
 
@@ -385,14 +403,16 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 	}
 
 	info := &lifecycle.WorkspaceInfo{
-		TaskID:            taskID,
-		SessionID:         sessionID,
-		TaskEnvironmentID: session.TaskEnvironmentID,
-		WorkspacePath:     workspacePath,
-		AgentProfileID:    session.AgentProfileID,
-		AgentID:           agentID,
-		ACPSessionID:      acpSessionID,
-		SessionMode:       sessionMode,
+		TaskID:               taskID,
+		SessionID:            sessionID,
+		TaskEnvironmentID:    session.TaskEnvironmentID,
+		WorkspacePath:        workspacePath,
+		AgentProfileID:       session.AgentProfileID,
+		AgentID:              agentID,
+		ACPSessionID:         acpSessionID,
+		SessionMode:          sessionMode,
+		SessionModel:         sessionModel,
+		SessionConfigOptions: sessionConfigOptions,
 	}
 
 	var taskEnv *models.TaskEnvironment

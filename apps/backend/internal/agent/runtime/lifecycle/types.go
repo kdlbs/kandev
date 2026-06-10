@@ -501,6 +501,19 @@ type WorkspaceInfo struct {
 	// a user toggle. Applied as a mode override at ACP session init so a fresh
 	// launch starts in the declared mode before the first prompt. See issue #1183.
 	SessionMode string
+	// SessionModel is the model the user last selected for this session, read
+	// back from AgentProfileSnapshot["model"]. Empty when no override has been
+	// persisted yet (fresh session, or agent hasn't advertised a model). Used
+	// at ACP session init to override the profile default so a backend restart
+	// reapplies the user's last choice instead of resetting to the profile's
+	// configured model.
+	SessionModel string
+	// SessionConfigOptions is the latest known set of dynamic ACP config
+	// options for this session (reasoning effort, thought level, …), read
+	// back from AgentProfileSnapshot["config_options"]. Empty when no
+	// override has been persisted yet. Applied at ACP session init after the
+	// model, replacing the profile's static config options when present.
+	SessionConfigOptions map[string]string
 
 	// Executor-aware fields for correct runtime selection and remote reconnection
 	ExecutorType     string                 // Executor type (e.g., "local_pc", "sprites")

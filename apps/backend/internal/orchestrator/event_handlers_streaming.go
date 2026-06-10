@@ -1022,18 +1022,18 @@ func (s *Service) handleAgentCapabilitiesEvent(ctx context.Context, payload *lif
 }
 
 // handleSessionModelsEvent broadcasts session_models events to the WebSocket
-// and persists the current model to the session snapshot so it survives page refresh.
+// and persists the current model + config options to the session snapshot so
+// they survive page refresh and backend restart.
 func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	sessionID := payload.SessionID
 	if sessionID == "" || s.eventBus == nil {
 		return
 	}
 
-	// Persist the ACP-reported current model to the session snapshot so it's
-	// available after page refresh (SSR reads from the DB, not runtime state).
-	if currentModel := payload.Data.CurrentModelID; currentModel != "" {
-		s.persistSessionModel(ctx, sessionID, currentModel)
-	}
+	// Persist the ACP-reported state to the session snapshot so it's available
+	// after page refresh (SSR reads from the DB, not runtime state) and after
+	// a backend restart (lifecycle's CachedModelState is in-memory only).
+	s.persistSessionModelsState(ctx, sessionID, payload.Data.CurrentModelID, payload.Data.ConfigOptions)
 
 	eventPayload := lifecycle.SessionModelsEventPayload{
 		TaskID:         payload.TaskID,
@@ -1053,8 +1053,12 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionModelsUpdated, "orchestrator", eventPayload))
 }
 
-// persistSessionModel updates the session's AgentProfileSnapshot with the current model.
-func (s *Service) persistSessionModel(ctx context.Context, sessionID, model string) {
+// persistSessionModelsState updates the session's AgentProfileSnapshot with
+// the current model and the latest config option values. Both are written
+// under their own keys so the existing `model` consumer keeps working while
+// secondary options (reasoning effort, thought level, …) get restored on
+// SSR / backend restart.
+func (s *Service) persistSessionModelsState(ctx context.Context, sessionID, model string, configOptions []streams.ConfigOption) {
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return
@@ -1062,16 +1066,60 @@ func (s *Service) persistSessionModel(ctx context.Context, sessionID, model stri
 	if session.AgentProfileSnapshot == nil {
 		session.AgentProfileSnapshot = make(map[string]interface{})
 	}
-	existing, _ := session.AgentProfileSnapshot["model"].(string)
-	if existing == model {
+	changed := false
+	if model != "" {
+		if existing, _ := session.AgentProfileSnapshot["model"].(string); existing != model {
+			session.AgentProfileSnapshot["model"] = model
+			changed = true
+		}
+	}
+	if len(configOptions) > 0 {
+		options := make(map[string]interface{}, len(configOptions))
+		for _, opt := range configOptions {
+			if opt.ID == "" || opt.CurrentValue == "" {
+				continue
+			}
+			options[opt.ID] = opt.CurrentValue
+		}
+		if !configOptionsEqual(session.AgentProfileSnapshot["config_options"], options) {
+			session.AgentProfileSnapshot["config_options"] = options
+			changed = true
+		}
+	}
+	if !changed {
 		return
 	}
-	session.AgentProfileSnapshot["model"] = model
 	_ = s.repo.UpdateTaskSession(ctx, session)
 	// Invalidate the message creator's model cache so subsequent messages use the new model.
 	if s.messageCreator != nil {
 		s.messageCreator.InvalidateModelCache(sessionID)
 	}
+}
+
+// configOptionsEqual compares the existing config_options map (as deserialized
+// from JSON — values are interface{}) with the freshly-built one (values are
+// strings) by key+string-value. Returns true when both carry the same set of
+// entries, avoiding redundant UpdateTaskSession writes.
+func configOptionsEqual(existing interface{}, next map[string]interface{}) bool {
+	existingMap, ok := existing.(map[string]interface{})
+	if !ok {
+		return len(next) == 0
+	}
+	if len(existingMap) != len(next) {
+		return false
+	}
+	for k, v := range next {
+		ev, exists := existingMap[k]
+		if !exists {
+			return false
+		}
+		es, _ := ev.(string)
+		ns, _ := v.(string)
+		if es != ns {
+			return false
+		}
+	}
+	return true
 }
 
 // handleSessionTodosEvent broadcasts plan/todo entries to the WebSocket and persists
