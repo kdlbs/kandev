@@ -12,7 +12,7 @@ require (
 	github.com/gin-gonic/gin v1.9.1
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
-	github.com/jackc/pgx/v5 v5.9.0
+	github.com/jackc/pgx/v5 v5.9.2
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/kevinburke/ssh_config v1.6.0
 	github.com/mark3labs/mcp-go v0.43.2
