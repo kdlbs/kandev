@@ -504,6 +504,7 @@ func (a *Adapter) emitSetModelEvent(sessionID, modelID string, cachedModels []mo
 		CurrentModelID: modelID,
 		SessionModels:  convertSessionModels(cachedModels),
 		ConfigOptions:  outConfig,
+		UserInitiated:  true,
 	})
 }
 
@@ -711,13 +712,36 @@ func (a *Adapter) SetConfigOption(ctx context.Context, configID, value string) e
 // emitSetModelEvent.
 func (a *Adapter) emitSetConfigOptionEvent(sessionID, configID, value string, cachedModels []modelInfo, cachedConfig []streams.ConfigOption) {
 	outConfig := cachedConfig
+	if len(cachedConfig) == 0 {
+		// In normal operation session/new populates availableConfigOptions
+		// before the frontend can fire a SetConfigOption. Hitting this branch
+		// means we accepted the RPC against a cache that was never seeded —
+		// log it so it's observable during debugging.
+		a.logger.Warn("SetConfigOption succeeded but local config cache is empty; emitted event will carry no options",
+			zap.String("session_id", sessionID),
+			zap.String("config_id", configID),
+		)
+	}
 	if len(cachedConfig) > 0 {
 		outConfig = make([]streams.ConfigOption, len(cachedConfig))
 		copy(outConfig, cachedConfig)
+		found := false
 		for i := range outConfig {
 			if outConfig[i].ID == configID {
 				outConfig[i].CurrentValue = value
+				found = true
 			}
+		}
+		if !found {
+			// The agent accepted a configID that wasn't in its own
+			// availableConfigOptions list — most likely a stale frontend cache
+			// or an agent-side drift between session/new and ConfigOptionUpdate.
+			// The event carries the unmutated CurrentValues; the agent's own
+			// ConfigOptionUpdate notification will correct the snapshot shortly.
+			a.logger.Warn("SetConfigOption: configID not in local cache; convergence event carries stale options",
+				zap.String("session_id", sessionID),
+				zap.String("config_id", configID),
+			)
 		}
 		// Refresh the cached config options so consecutive SetConfigOption
 		// calls (or a follow-up SetModel) read the latest CurrentValues
@@ -738,6 +762,7 @@ func (a *Adapter) emitSetConfigOptionEvent(sessionID, configID, value string, ca
 		CurrentModelID: currentModelFromConfig(outConfig),
 		SessionModels:  convertSessionModels(cachedModels),
 		ConfigOptions:  outConfig,
+		UserInitiated:  true,
 	})
 }
 

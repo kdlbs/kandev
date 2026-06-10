@@ -126,7 +126,10 @@ func TestGetWorkspaceInfoForSession_IncludesModelAndConfigOptions(t *testing.T) 
 		TaskID: "task-123",
 		State:  models.TaskSessionStateRunning,
 		AgentProfileSnapshot: map[string]interface{}{
-			"model": "gpt-5.4-mini",
+			// `model` mirrors the agent's current advertisement and drives SSR
+			// only; `user_model` is the user override the resume path replays.
+			"model":      "gpt-5.4-mini-default",
+			"user_model": "gpt-5.4-mini",
 			"config_options": map[string]interface{}{
 				"effort":    "high",
 				"reasoning": "on",

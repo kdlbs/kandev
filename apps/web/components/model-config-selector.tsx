@@ -152,7 +152,7 @@ function ConfigOptionSection({
   onChange?: (configId: string, value: string) => void;
 }) {
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-1.5" data-testid={`config-option-section-${option.id}`}>
       <div className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">
         {option.name}
       </div>

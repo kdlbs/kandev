@@ -142,7 +142,16 @@ test.describe("Chat model selector — RPC failure", () => {
     // Trigger should still reflect the newer (successful) selection.
     await expect(trigger).toContainText("Mock Fast", { timeout: 5_000 });
   });
+});
 
+/**
+ * Verifies that a model change selected via the chat-input model selector
+ * survives a full page reload. The regression this guards against: the
+ * SetConfigOption RPC path used by mock-agent did not emit the session_models
+ * convergence event, so the orchestrator never persisted the new model to the
+ * session snapshot and SSR re-served the pre-change model on reload.
+ */
+test.describe("Chat model selector — persistence", () => {
   test("model change persists across page reload", async ({ testPage, apiClient, seedData }) => {
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
@@ -225,10 +234,12 @@ test.describe("Chat model selector — popover open/close behavior", () => {
     await expect(trigger).toContainText("Mock Fast", { timeout: 15_000 });
 
     await trigger.click();
-    // The Effort section is the rendered marker that the popover content is
-    // mounted — it lives below the model list inside the same PopoverContent.
-    const effortHeading = testPage.getByText("Effort", { exact: true });
-    await expect(effortHeading).toBeVisible({ timeout: 5_000 });
+    // The effort config section is the rendered marker that the popover
+    // content is mounted — it sits below the model list inside the same
+    // PopoverContent. Selecting by testid mirrors the suite-wide convention
+    // (apps/web/e2e/README.md).
+    const effortSection = testPage.getByTestId("config-option-section-effort");
+    await expect(effortSection).toBeVisible({ timeout: 5_000 });
 
     await testPage.getByRole("option", { name: /Mock Smart/ }).click();
 
@@ -237,8 +248,8 @@ test.describe("Chat model selector — popover open/close behavior", () => {
     await expect(trigger).toContainText("Mock Smart", { timeout: 5_000 });
 
     // Popover must still be open so the user can also pick an effort level
-    // without re-opening. The Effort heading is rendered only when the
+    // without re-opening. The effort section is rendered only when the
     // PopoverContent is mounted (Radix unmounts it on close).
-    await expect(effortHeading).toBeVisible();
+    await expect(effortSection).toBeVisible();
   });
 });

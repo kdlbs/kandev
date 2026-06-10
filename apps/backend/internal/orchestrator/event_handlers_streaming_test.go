@@ -488,11 +488,12 @@ func TestConfigOptionsEqual(t *testing.T) {
 	}
 }
 
-// TestPersistSessionModelsState_PersistsModelAndConfigOptions pins the
-// regression behind issue: reasoning_effort etc were lost on page refresh
-// because persistence only wrote the `model` key. Now the full set of
-// CurrentValues lands under `config_options` so SSR can restore them.
-func TestPersistSessionModelsState_PersistsModelAndConfigOptions(t *testing.T) {
+// TestPersistSessionModelsState_UserInitiated pins the regression behind
+// issue: reasoning_effort etc were lost on page refresh because persistence
+// only wrote the `model` key. A user-initiated event now also lands the full
+// CurrentValues under `config_options` and the user-chosen model under
+// `user_model`, so backend-restart resume can replay them.
+func TestPersistSessionModelsState_UserInitiated(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "step1")
@@ -502,15 +503,44 @@ func TestPersistSessionModelsState_PersistsModelAndConfigOptions(t *testing.T) {
 		{ID: "model", Category: "model", CurrentValue: "gpt-5.4"},
 		{ID: "reasoning_effort", CurrentValue: "high"},
 		{ID: "empty_value", CurrentValue: ""}, // must be skipped
-	})
+	}, true)
 
 	updated, err := repo.GetTaskSession(ctx, "s1")
 	require.NoError(t, err)
 	require.Equal(t, "gpt-5.4", updated.AgentProfileSnapshot["model"])
+	require.Equal(t, "gpt-5.4", updated.AgentProfileSnapshot["user_model"],
+		"user_model must be set when a user-initiated event changes the model")
 	opts, ok := updated.AgentProfileSnapshot["config_options"].(map[string]interface{})
-	require.True(t, ok, "config_options must be persisted under its own key")
+	require.True(t, ok, "config_options must be persisted under its own key on user-initiated events")
 	require.Equal(t, "gpt-5.4", opts["model"])
 	require.Equal(t, "high", opts["reasoning_effort"])
 	_, hasEmpty := opts["empty_value"]
 	require.False(t, hasEmpty, "options with empty CurrentValue must be skipped — there's nothing to restore on SSR")
+}
+
+// TestPersistSessionModelsState_AgentAdvertised verifies that an
+// agent-advertised (non-user-initiated) event still refreshes the SSR `model`
+// key but does NOT populate `user_model` or `config_options`. Replaying
+// agent-advertised defaults on backend restart would cycle the session
+// through STARTING / RUNNING and flicker the task into the sidebar's Running
+// bucket (see session-resume-keeps-review-state.spec.ts).
+func TestPersistSessionModelsState_AgentAdvertised(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	svc := &Service{logger: testLogger(), repo: repo}
+
+	svc.persistSessionModelsState(ctx, "s1", "mock-fast", []streams.ConfigOption{
+		{ID: "model", Category: "model", CurrentValue: "mock-fast"},
+		{ID: "effort", CurrentValue: "medium"},
+	}, false)
+
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, "mock-fast", updated.AgentProfileSnapshot["model"],
+		"`model` must mirror agent-advertised state for SSR display")
+	_, hasUserModel := updated.AgentProfileSnapshot["user_model"]
+	require.False(t, hasUserModel, "`user_model` must NOT be set from agent-advertised events")
+	_, hasConfigOptions := updated.AgentProfileSnapshot["config_options"]
+	require.False(t, hasConfigOptions, "`config_options` must NOT be persisted from agent-advertised events")
 }

@@ -221,10 +221,17 @@ export async function fetchSessionDataForTask(taskId: string): Promise<FetchedSe
   // Refetch the active session via the single-session endpoint to get
   // agent_profile_snapshot, which the list endpoint strips. See
   // BuildSessionPageStateParams.activeSession for the SSR-flicker rationale.
+  // A failure here (auth, 5xx, timeout) degrades gracefully to the original
+  // initial-flash behaviour but should surface in server logs so silent
+  // 401/500s are debuggable.
   const { fetchTaskSession } = await import("@/lib/api");
-  const sessionResponse = await fetchTaskSession(sessionId, { cache: "no-store" }).catch(
-    () => null,
-  );
+  const sessionResponse = await fetchTaskSession(sessionId, { cache: "no-store" }).catch((e) => {
+    console.warn(
+      "[session-page-state] failed to fetch active session snapshot; SSR will fall back to summary entry",
+      e,
+    );
+    return null;
+  });
   return fetchSessionDataFromTask(
     task,
     sessionId,

@@ -364,9 +364,12 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 
 	// Get agent name (registry slug) from profile snapshot.
 	// Prefer "agent_name" (the slug used as registry key) over "agent_id" (the database UUID).
-	// Also read the user's last-selected model and any dynamic config options
-	// (reasoning effort, thought level, …) so a fresh launch / backend restart
-	// can reapply them as overrides on top of the profile defaults.
+	// Read the user's last-selected model (`user_model`) and any dynamic config
+	// options (`config_options`) so a fresh launch / backend restart can reapply
+	// them as overrides on top of the profile defaults. The plain `model` key
+	// mirrors the agent's current advertisement and is used by SSR for display
+	// only — replaying it on resume would issue a redundant SetModel even for
+	// sessions the user never touched (see persistSessionModelsState).
 	var (
 		agentID              string
 		sessionModel         string
@@ -378,7 +381,7 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		} else if id, ok := session.AgentProfileSnapshot["agent_id"].(string); ok {
 			agentID = id
 		}
-		if model, ok := session.AgentProfileSnapshot["model"].(string); ok {
+		if model, ok := session.AgentProfileSnapshot["user_model"].(string); ok {
 			sessionModel = model
 		}
 		if raw, ok := session.AgentProfileSnapshot["config_options"].(map[string]interface{}); ok && len(raw) > 0 {

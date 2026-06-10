@@ -1022,8 +1022,8 @@ func (s *Service) handleAgentCapabilitiesEvent(ctx context.Context, payload *lif
 }
 
 // handleSessionModelsEvent broadcasts session_models events to the WebSocket
-// and persists the current model + config options to the session snapshot so
-// they survive page refresh and backend restart.
+// and persists the current model + (when user-initiated) config options to the
+// session snapshot so they survive page refresh and backend restart.
 func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	sessionID := payload.SessionID
 	if sessionID == "" || s.eventBus == nil {
@@ -1033,7 +1033,7 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 	// Persist the ACP-reported state to the session snapshot so it's available
 	// after page refresh (SSR reads from the DB, not runtime state) and after
 	// a backend restart (lifecycle's CachedModelState is in-memory only).
-	s.persistSessionModelsState(ctx, sessionID, payload.Data.CurrentModelID, payload.Data.ConfigOptions)
+	s.persistSessionModelsState(ctx, sessionID, payload.Data.CurrentModelID, payload.Data.ConfigOptions, payload.Data.UserInitiated)
 
 	eventPayload := lifecycle.SessionModelsEventPayload{
 		TaskID:         payload.TaskID,
@@ -1053,12 +1053,24 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionModelsUpdated, "orchestrator", eventPayload))
 }
 
-// persistSessionModelsState updates the session's AgentProfileSnapshot with
-// the current model and the latest config option values. Both are written
-// under their own keys so the existing `model` consumer keeps working while
-// secondary options (reasoning effort, thought level, …) get restored on
-// SSR / backend restart.
-func (s *Service) persistSessionModelsState(ctx context.Context, sessionID, model string, configOptions []streams.ConfigOption) {
+// persistSessionModelsState updates the session's AgentProfileSnapshot.
+//
+// Three keys, three roles:
+//
+//   - `model` — refreshed on every event (including agent-pushed
+//     advertisements). SSR reads this to render the model selector without a
+//     flash; it must always mirror the agent's current state.
+//   - `user_model` — only written when a user-initiated event's
+//     CurrentModelID differs from the existing `model`. This is the value
+//     replayed on backend-restart resume; sourcing it from any event would
+//     cause a SetModel RPC during resume even for sessions the user never
+//     touched, briefly cycling the session through STARTING / RUNNING and
+//     flickering the task into the sidebar's Running bucket (see
+//     session-resume-keeps-review-state.spec.ts).
+//   - `config_options` — same rationale as user_model: only persisted when
+//     userInitiated is true so resume only replays options the user actually
+//     changed.
+func (s *Service) persistSessionModelsState(ctx context.Context, sessionID, model string, configOptions []streams.ConfigOption, userInitiated bool) {
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return
@@ -1068,12 +1080,17 @@ func (s *Service) persistSessionModelsState(ctx context.Context, sessionID, mode
 	}
 	changed := false
 	if model != "" {
-		if existing, _ := session.AgentProfileSnapshot["model"].(string); existing != model {
+		existing, _ := session.AgentProfileSnapshot["model"].(string)
+		if userInitiated && existing != model {
+			session.AgentProfileSnapshot["user_model"] = model
+			changed = true
+		}
+		if existing != model {
 			session.AgentProfileSnapshot["model"] = model
 			changed = true
 		}
 	}
-	if len(configOptions) > 0 {
+	if userInitiated && len(configOptions) > 0 {
 		options := make(map[string]interface{}, len(configOptions))
 		for _, opt := range configOptions {
 			if opt.ID == "" || opt.CurrentValue == "" {
@@ -1100,6 +1117,12 @@ func (s *Service) persistSessionModelsState(ctx context.Context, sessionID, mode
 // from JSON — values are interface{}) with the freshly-built one (values are
 // strings) by key+string-value. Returns true when both carry the same set of
 // entries, avoiding redundant UpdateTaskSession writes.
+//
+// Invariant: persisted values are always strings (sourced from
+// streams.ConfigOption.CurrentValue). A non-string value on the existing side
+// (e.g. a future numeric slider) coerces to "" via the type-assertion
+// fallthrough and compares unequal to any incoming string, which falls through
+// to a write — slightly wasteful but correct.
 func configOptionsEqual(existing interface{}, next map[string]interface{}) bool {
 	existingMap, ok := existing.(map[string]interface{})
 	if !ok {
