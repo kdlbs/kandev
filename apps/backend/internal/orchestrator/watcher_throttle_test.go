@@ -318,7 +318,7 @@ func TestDispatchWatcherEvent_GateBlocksBurstRace(t *testing.T) {
 	// Fire the burst back-to-back. Only one should pass the gate; the rest
 	// must defer without spawning a goroutine.
 	for i := 0; i < burstSize; i++ {
-		s.dispatchWatcherEvent(context.Background(), "linear", src, "evt")
+		s.dispatchWatcherEvent(context.Background(), src, "evt")
 	}
 
 	// Gate acquisition is synchronous (it happens before the goroutine spawns),

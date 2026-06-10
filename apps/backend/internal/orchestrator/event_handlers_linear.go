@@ -61,7 +61,7 @@ func (s *Service) handleNewLinearIssue(ctx context.Context, event *bus.Event) er
 		// source so behaviour matches the pre-cache code path.
 		src = NewLinearWatcherSource(nil, s.logger)
 	}
-	s.dispatchWatcherEvent(ctx, "linear", src, evt,
+	s.dispatchWatcherEvent(ctx, src, evt,
 		zap.String("issue_watch_id", evt.IssueWatchID),
 		zap.String("identifier", evt.Issue.Identifier))
 	return nil

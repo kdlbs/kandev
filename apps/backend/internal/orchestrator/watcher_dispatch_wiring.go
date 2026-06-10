@@ -168,15 +168,17 @@ func (s *Service) disableGitHubReviewWatch(ctx context.Context, watchID, cause s
 
 // dispatchWatcherEvent runs the wiring guards every per-integration bus
 // handler shares — issueTaskCreator check and the final goroutine dispatch
-// with cancellation detached. integration is used in log message templating
-// ("new linear issue ...", "skipping jira task ..."). fields are the
-// structured log fields that identify the event in operator logs; pass at
-// least the issue_watch_id and an integration-specific identifier field so
-// a deferred / dropped event is diagnosable.
+// with cancellation detached. The integration label for log templating
+// ("new linear issue ...", "skipping jira task ...") and metrics comes from
+// src.Name(), so handlers don't repeat it. fields are the structured log
+// fields that identify the event in operator logs; pass at least the
+// issue_watch_id and an integration-specific identifier field so a
+// deferred / dropped event is diagnosable.
 //
 // Lives in its own helper so per-integration handlers stay below dupl's
 // duplicate-block threshold without copy-pasting the same guards.
-func (s *Service) dispatchWatcherEvent(ctx context.Context, integration string, src WatcherSource, evt any, fields ...zap.Field) {
+func (s *Service) dispatchWatcherEvent(ctx context.Context, src WatcherSource, evt any, fields ...zap.Field) {
+	integration := src.Name()
 	s.logger.Info(fmt.Sprintf("new %s issue detected from watch", integration), fields...)
 	if s.getIssueTaskCreator() == nil {
 		s.logger.Warn(fmt.Sprintf("issue task creator not configured, skipping %s task creation", integration))
