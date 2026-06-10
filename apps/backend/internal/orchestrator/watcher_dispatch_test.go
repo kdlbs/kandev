@@ -34,6 +34,7 @@ type fakeWatcherSource struct {
 	attachErr        error
 	autoStart        AutoStartParams
 	watchID          string
+	metadataKey      string
 	maxInflightTasks *int
 	recordedReserve  int
 	recordedRelease  int
@@ -72,6 +73,8 @@ func (f *fakeWatcherSource) AutoStartParams(_ any) AutoStartParams {
 func (f *fakeWatcherSource) WatchID(_ any) string { return f.watchID }
 
 func (f *fakeWatcherSource) MaxInflightTasks(_ any) *int { return f.maxInflightTasks }
+
+func (f *fakeWatcherSource) WatchMetadataKey() string { return f.metadataKey }
 
 // AgentProfileID returns "" so the pre-flight check skips and behaviour
 // matches pre-self-heal semantics for tests that don't wire a ProfileLookup.

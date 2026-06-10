@@ -202,7 +202,7 @@ func (s *Service) dispatchWatcherEvent(ctx context.Context, integration string, 
 	// over-throttle a watch by one. The slot is released when the goroutine
 	// exits and the DB count is unaffected, so this self-heals on the next
 	// tick — acceptable for v1.
-	release, ok := s.acquireWatcherSlot(ctx, integration, src.WatchID(evt), src.MaxInflightTasks(evt))
+	release, ok := s.acquireWatcherSlot(ctx, integration, src.WatchMetadataKey(), src.WatchID(evt), src.MaxInflightTasks(evt))
 	if !ok {
 		return
 	}

@@ -37,10 +37,13 @@ type TaskRepository interface {
 	UnarchiveTaskByCascade(ctx context.Context, id, cascadeID string) (bool, error)
 	ListTasksForAutoArchive(ctx context.Context) ([]*models.Task, error)
 	// CountOpenWatcherCreatedTasks returns the number of open watcher-created
-	// tasks for a single (integration, watchID) pair. Open = non-archived AND
-	// state NOT IN (COMPLETED, FAILED, CANCELLED). Used by the
-	// orchestrator's watcher throttle gate to enforce a per-watch cap.
-	CountOpenWatcherCreatedTasks(ctx context.Context, integration, watchID string) (int, error)
+	// tasks for a single watch, identified by the integration's task-metadata
+	// key (e.g. "sentry_issue_watch_id") and the watch id. Open = non-archived
+	// AND state NOT IN (COMPLETED, FAILED, CANCELLED). Used by the
+	// orchestrator's watcher throttle gate to enforce a per-watch cap. Keyed
+	// by metadata key (not integration name) so this layer stays agnostic of
+	// which integrations exist.
+	CountOpenWatcherCreatedTasks(ctx context.Context, metadataKey, watchID string) (int, error)
 	UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error
 	// UpdateTaskStateIfCurrentIn atomically transitions state only when the
 	// task's current state is in allowed. Returns the pre-update state and

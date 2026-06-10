@@ -755,41 +755,50 @@ func (r *Repository) ListTasksForAutoArchive(ctx context.Context) ([]*models.Tas
 	return r.scanTasks(rows)
 }
 
-// watcherMetadataKeyByIntegration maps an integration name to the metadata key
-// that watcher-created tasks carry. Used by CountOpenWatcherCreatedTasks to
-// scope the COUNT to a single watcher. Returns "" for unknown integrations so
-// the count query returns 0 without erroring.
-func watcherMetadataKeyByIntegration(integration string) string {
-	switch integration {
-	case "linear":
-		return "linear_issue_watch_id"
-	case "jira":
-		return "jira_issue_watch_id"
-	case "sentry":
-		return "sentry_issue_watch_id"
-	default:
-		return ""
+// isSafeMetadataKey reports whether s is a safe JSON metadata key to splice
+// into a json_extract path. The key is concatenated into the SQL text (it
+// cannot be a bind parameter inside the '$.<key>' path literal), so it must be
+// constrained to a fixed identifier alphabet to keep the query injection-safe.
+// Callers pass compile-time constants today (WatcherSource.WatchMetadataKey),
+// but validating here keeps the repository safe regardless of caller.
+func isSafeMetadataKey(s string) bool {
+	if s == "" {
+		return false
 	}
+	for _, c := range s {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '_':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // CountOpenWatcherCreatedTasks returns the number of open watcher-created tasks
-// for a single (integration, watchID) pair. "Open" means non-archived AND not
-// in a terminal state (COMPLETED, FAILED, CANCELLED). Watcher-created tasks
-// are identified via the integration's JSON metadata key, scoped per
-// integration so a Linear and Jira watch with the same id don't collide.
+// for a single watch, identified by the task-metadata key the integration
+// writes (metadataKey, e.g. "sentry_issue_watch_id") and the watch id. "Open"
+// means non-archived AND not in a terminal state (COMPLETED, FAILED,
+// CANCELLED). Distinct integrations use distinct metadata keys, so counts are
+// naturally scoped per integration without this repository knowing which
+// integrations exist — the caller supplies the key.
 //
-// Unknown integrations return (0, nil) — the throttle gate falls open for
-// integrations not yet wired into the JSON predicate map.
-func (r *Repository) CountOpenWatcherCreatedTasks(ctx context.Context, integration, watchID string) (int, error) {
-	key := watcherMetadataKeyByIntegration(integration)
-	if key == "" || watchID == "" {
+// An empty watchID returns (0, nil) — no watch to count. A malformed
+// metadataKey (not a bare [A-Za-z0-9_] identifier) returns an error rather
+// than silently counting nothing, so a wiring bug surfaces in the logs (the
+// throttle gate fails open on the error).
+func (r *Repository) CountOpenWatcherCreatedTasks(ctx context.Context, metadataKey, watchID string) (int, error) {
+	if watchID == "" {
 		return 0, nil
+	}
+	if !isSafeMetadataKey(metadataKey) {
+		return 0, fmt.Errorf("invalid watcher metadata key %q", metadataKey)
 	}
 	query := r.ro.Rebind(`
 		SELECT COUNT(*) FROM tasks
 		WHERE archived_at IS NULL
 			AND state NOT IN (?, ?, ?)
-			AND json_extract(metadata, '$.` + key + `') = ?
+			AND json_extract(metadata, '$.` + metadataKey + `') = ?
 	`)
 	var n int
 	if err := r.ro.QueryRowxContext(ctx, query,

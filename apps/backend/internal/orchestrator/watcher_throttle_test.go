@@ -12,7 +12,10 @@ import (
 )
 
 // fakeWatcherCounter implements WatcherTaskCounter for tests. Each test sets
-// the value returned for a (integration, watchID) lookup.
+// the value returned for a (metadataKey, watchID) lookup. Tests pass the
+// integration name as the metadata key for brevity — the gate keys the
+// counter purely by the metadata key, so the exact string only has to match
+// between set() and the acquireWatcherSlot call.
 type fakeWatcherCounter struct {
 	mu       sync.Mutex
 	counts   map[string]int
@@ -24,20 +27,20 @@ func newFakeWatcherCounter() *fakeWatcherCounter {
 	return &fakeWatcherCounter{counts: map[string]int{}}
 }
 
-func (f *fakeWatcherCounter) set(integration, watchID string, n int) {
+func (f *fakeWatcherCounter) set(metadataKey, watchID string, n int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.counts[integration+"|"+watchID] = n
+	f.counts[metadataKey+"|"+watchID] = n
 }
 
-func (f *fakeWatcherCounter) CountOpenWatcherCreatedTasks(_ context.Context, integration, watchID string) (int, error) {
+func (f *fakeWatcherCounter) CountOpenWatcherCreatedTasks(_ context.Context, metadataKey, watchID string) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.queryLog = append(f.queryLog, integration+"|"+watchID)
+	f.queryLog = append(f.queryLog, metadataKey+"|"+watchID)
 	if f.err != nil {
 		return 0, f.err
 	}
-	return f.counts[integration+"|"+watchID], nil
+	return f.counts[metadataKey+"|"+watchID], nil
 }
 
 // nopServiceWithCounter builds a Service with just enough wiring for the
@@ -57,7 +60,7 @@ func TestAcquireWatcherSlot_NilCapBypasses(t *testing.T) {
 	counter := newFakeWatcherCounter()
 	s := nopServiceWithCounter(t, counter)
 
-	release, ok := s.acquireWatcherSlot(context.Background(), "linear", "watch-1", nil)
+	release, ok := s.acquireWatcherSlot(context.Background(), "linear", "linear", "watch-1", nil)
 	if !ok {
 		t.Fatal("expected acquire to pass when cap is nil (uncapped)")
 	}
@@ -72,9 +75,25 @@ func TestAcquireWatcherSlot_NilCapBypasses(t *testing.T) {
 
 func TestAcquireWatcherSlot_EmptyWatchIDBypasses(t *testing.T) {
 	s := nopServiceWithCounter(t, newFakeWatcherCounter())
-	release, ok := s.acquireWatcherSlot(context.Background(), "linear", "", ptrInt(1))
+	release, ok := s.acquireWatcherSlot(context.Background(), "linear", "linear", "", ptrInt(1))
 	if !ok || release == nil {
 		t.Fatal("expected bypass when watch id is empty")
+	}
+	release()
+}
+
+func TestAcquireWatcherSlot_EmptyMetadataKeyBypasses(t *testing.T) {
+	// A source that exposes no metadata key (WatchMetadataKey() == "") cannot
+	// be counted, so the gate must treat the watch as uncapped rather than
+	// querying with an empty key.
+	counter := newFakeWatcherCounter()
+	s := nopServiceWithCounter(t, counter)
+	release, ok := s.acquireWatcherSlot(context.Background(), "linear", "", "w-1", ptrInt(1))
+	if !ok || release == nil {
+		t.Fatal("expected bypass when metadata key is empty")
+	}
+	if len(counter.queryLog) != 0 {
+		t.Fatalf("expected no DB query for empty metadata key, got %v", counter.queryLog)
 	}
 	release()
 }
@@ -84,7 +103,7 @@ func TestAcquireWatcherSlot_UnderCapAcquires(t *testing.T) {
 	counter.set("linear", "w-1", 2)
 	s := nopServiceWithCounter(t, counter)
 
-	release, ok := s.acquireWatcherSlot(context.Background(), "linear", "w-1", ptrInt(5))
+	release, ok := s.acquireWatcherSlot(context.Background(), "linear", "linear", "w-1", ptrInt(5))
 	if !ok {
 		t.Fatal("expected acquire to pass when count+pending < cap")
 	}
@@ -96,7 +115,7 @@ func TestAcquireWatcherSlot_AtCapDefers(t *testing.T) {
 	counter.set("linear", "w-1", 5)
 	s := nopServiceWithCounter(t, counter)
 
-	_, ok := s.acquireWatcherSlot(context.Background(), "linear", "w-1", ptrInt(5))
+	_, ok := s.acquireWatcherSlot(context.Background(), "linear", "linear", "w-1", ptrInt(5))
 	if ok {
 		t.Fatal("expected acquire to fail when count >= cap")
 	}
@@ -110,13 +129,13 @@ func TestAcquireWatcherSlot_PendingCountedAgainstCap(t *testing.T) {
 	counter := newFakeWatcherCounter()
 	s := nopServiceWithCounter(t, counter)
 
-	release1, ok1 := s.acquireWatcherSlot(context.Background(), "linear", "w-1", ptrInt(1))
+	release1, ok1 := s.acquireWatcherSlot(context.Background(), "linear", "linear", "w-1", ptrInt(1))
 	if !ok1 {
 		t.Fatal("expected first acquire to pass")
 	}
 	defer release1()
 
-	_, ok2 := s.acquireWatcherSlot(context.Background(), "linear", "w-1", ptrInt(1))
+	_, ok2 := s.acquireWatcherSlot(context.Background(), "linear", "linear", "w-1", ptrInt(1))
 	if ok2 {
 		t.Fatal("expected second acquire to defer (pending=1, cap=1)")
 	}
@@ -126,14 +145,14 @@ func TestAcquireWatcherSlot_ReleaseRestoresSlot(t *testing.T) {
 	counter := newFakeWatcherCounter()
 	s := nopServiceWithCounter(t, counter)
 
-	release1, ok1 := s.acquireWatcherSlot(context.Background(), "linear", "w-1", ptrInt(1))
+	release1, ok1 := s.acquireWatcherSlot(context.Background(), "linear", "linear", "w-1", ptrInt(1))
 	if !ok1 {
 		t.Fatal("expected first acquire to pass")
 	}
 	release1()
 
 	// After release, the next event should pass (pending is back to 0).
-	release2, ok2 := s.acquireWatcherSlot(context.Background(), "linear", "w-1", ptrInt(1))
+	release2, ok2 := s.acquireWatcherSlot(context.Background(), "linear", "linear", "w-1", ptrInt(1))
 	if !ok2 {
 		t.Fatal("expected second acquire to pass after first released")
 	}
@@ -147,11 +166,11 @@ func TestAcquireWatcherSlot_DifferentWatchesIsolated(t *testing.T) {
 	s := nopServiceWithCounter(t, counter)
 
 	// w-1 is at cap, w-2 is empty — they must not share pending state.
-	_, ok1 := s.acquireWatcherSlot(context.Background(), "linear", "w-1", ptrInt(1))
+	_, ok1 := s.acquireWatcherSlot(context.Background(), "linear", "linear", "w-1", ptrInt(1))
 	if ok1 {
 		t.Fatal("expected w-1 to be at cap")
 	}
-	release2, ok2 := s.acquireWatcherSlot(context.Background(), "linear", "w-2", ptrInt(1))
+	release2, ok2 := s.acquireWatcherSlot(context.Background(), "linear", "linear", "w-2", ptrInt(1))
 	if !ok2 {
 		t.Fatal("expected w-2 to be acquirable (independent watch)")
 	}
@@ -162,16 +181,24 @@ func TestAcquireWatcherSlot_DifferentIntegrationsIsolated(t *testing.T) {
 	counter := newFakeWatcherCounter()
 	s := nopServiceWithCounter(t, counter)
 
-	// Same watch id across two integrations must NOT collide.
-	releaseLin, okLin := s.acquireWatcherSlot(context.Background(), "linear", "w-1", ptrInt(1))
+	// Acquire linear w-1 with cap=1 and HOLD it, saturating linear's pending
+	// slot for that watch id.
+	releaseLin, okLin := s.acquireWatcherSlot(context.Background(), "linear", "linear", "w-1", ptrInt(1))
 	if !okLin {
 		t.Fatal("expected linear w-1 to acquire")
 	}
 	defer releaseLin()
 
-	releaseJira, okJira := s.acquireWatcherSlot(context.Background(), "jira", "w-1", ptrInt(1))
+	// A second linear w-1 must defer — the held slot saturates the cap.
+	if _, ok := s.acquireWatcherSlot(context.Background(), "linear", "linear", "w-1", ptrInt(1)); ok {
+		t.Fatal("expected second linear w-1 to defer (pending=1, cap=1)")
+	}
+
+	// jira w-1 shares the watch id but must NOT collide with linear's pending
+	// state — the slot map is keyed by (integration, watchID). It must acquire.
+	releaseJira, okJira := s.acquireWatcherSlot(context.Background(), "jira", "jira", "w-1", ptrInt(1))
 	if !okJira {
-		t.Fatal("expected jira w-1 to acquire independently")
+		t.Fatal("expected jira w-1 to acquire independently of linear's held slot")
 	}
 	releaseJira()
 }
@@ -185,7 +212,7 @@ func TestAcquireWatcherSlot_NonPositiveCapTreatedAsUncapped(t *testing.T) {
 	s := nopServiceWithCounter(t, counter)
 
 	for _, c := range []int{0, -1, -100} {
-		release, ok := s.acquireWatcherSlot(context.Background(), "linear", "w-1", ptrInt(c))
+		release, ok := s.acquireWatcherSlot(context.Background(), "linear", "linear", "w-1", ptrInt(c))
 		if !ok {
 			t.Fatalf("expected non-positive cap (%d) to bypass gate", c)
 		}
@@ -198,7 +225,7 @@ func TestAcquireWatcherSlot_CountErrorFailsOpen(t *testing.T) {
 	counter.err = errors.New("db down")
 	s := nopServiceWithCounter(t, counter)
 
-	release, ok := s.acquireWatcherSlot(context.Background(), "linear", "w-1", ptrInt(1))
+	release, ok := s.acquireWatcherSlot(context.Background(), "linear", "linear", "w-1", ptrInt(1))
 	if !ok {
 		t.Fatal("expected fail-open on count error")
 	}
@@ -208,7 +235,7 @@ func TestAcquireWatcherSlot_CountErrorFailsOpen(t *testing.T) {
 func TestAcquireWatcherSlot_NilCounterBypasses(t *testing.T) {
 	// Service constructed before WatcherTaskCounter is wired must not panic.
 	s := nopServiceWithCounter(t, nil)
-	release, ok := s.acquireWatcherSlot(context.Background(), "linear", "w-1", ptrInt(1))
+	release, ok := s.acquireWatcherSlot(context.Background(), "linear", "linear", "w-1", ptrInt(1))
 	if !ok {
 		t.Fatal("expected nil counter to bypass gate (fail-open)")
 	}
@@ -235,7 +262,7 @@ func TestAcquireWatcherSlot_ConcurrentBurstRespectsCap(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				<-start
-				if _, ok := s.acquireWatcherSlot(context.Background(), "linear", "w-burst", ptrInt(capValue)); ok {
+				if _, ok := s.acquireWatcherSlot(context.Background(), "linear", "linear", "w-burst", ptrInt(capValue)); ok {
 					atomic.AddInt64(&acquired, 1)
 					// Hold the slot — do NOT release, so the cap stays full.
 				}
@@ -266,6 +293,7 @@ func TestDispatchWatcherEvent_GateBlocksBurstRace(t *testing.T) {
 			WorkflowStepID: "step-1",
 		},
 		watchID:          "w-1",
+		metadataKey:      "linear_issue_watch_id",
 		maxInflightTasks: ptrInt(1),
 	}
 
