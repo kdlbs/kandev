@@ -41,16 +41,6 @@ const (
 	// configOptionIDModel is the well-known ConfigOption ID/Category value used
 	// by ACP agents to surface the active model as a selectable option.
 	configOptionIDModel = "model"
-
-	// Codex surfaces reasoning effort as a separate config option while its
-	// availableModels list uses model/effort IDs such as gpt-5.5/medium.
-	configOptionIDReasoningEffort    = "reasoning_effort"
-	configOptionCategoryThoughtLevel = "thought_level"
-
-	reasoningEffortLow    = "low"
-	reasoningEffortMedium = "medium"
-	reasoningEffortHigh   = "high"
-	reasoningEffortXHigh  = "xhigh"
 )
 
 // wakeupPromptTimeout bounds how long a synthetic wakeup prompt can run.

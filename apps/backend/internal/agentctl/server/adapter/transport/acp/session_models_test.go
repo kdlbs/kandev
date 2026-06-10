@@ -74,91 +74,6 @@ func TestEmitSessionModels_EmptyCurrentIDFromConfigOption(t *testing.T) {
 	}
 }
 
-// TestEmitSessionModels_EmptyCurrentIDComposesReasoningEffort pins Codex's
-// split config-option shape: configOptions reports model="gpt-5.5" and
-// reasoning_effort="medium", while availableModels carries the actual
-// selectable ID "gpt-5.5/medium".
-func TestEmitSessionModels_EmptyCurrentIDComposesReasoningEffort(t *testing.T) {
-	a := newTestAdapter()
-	models := &sessionModelState{
-		CurrentModelId: "",
-		AvailableModels: []modelInfo{
-			{ModelId: "gpt-5.5/low", Name: "GPT-5.5 (low)"},
-			{ModelId: "gpt-5.5/medium", Name: "GPT-5.5 (medium)"},
-		},
-	}
-	meta := map[string]any{
-		"configOptions": []any{
-			map[string]any{
-				"type":         "select",
-				"id":           "model",
-				"name":         "Model",
-				"category":     "model",
-				"currentValue": "gpt-5.5",
-			},
-			map[string]any{
-				"type":         "select",
-				"id":           "reasoning_effort",
-				"name":         "Reasoning Effort",
-				"category":     "thought_level",
-				"currentValue": "medium",
-			},
-		},
-	}
-
-	a.emitSessionModels("sess-1", models, meta, nil)
-
-	ev := findSessionModelsEvent(t, drainEvents(a))
-	if ev.CurrentModelID != "gpt-5.5/medium" {
-		t.Errorf("CurrentModelID = %q, want %q", ev.CurrentModelID, "gpt-5.5/medium")
-	}
-}
-
-func TestEmitSessionModels_EmptyCurrentIDComposesReasoningEffortFromTypedOptions(t *testing.T) {
-	a := newTestAdapter()
-	modelCategory := acp.SessionConfigOptionCategoryModel
-	thoughtCategory := acp.SessionConfigOptionCategoryThoughtLevel
-	modelOptions := acp.SessionConfigSelectOptionsUngrouped{
-		{Name: "GPT-5.5", Value: "gpt-5.5"},
-	}
-	effortOptions := acp.SessionConfigSelectOptionsUngrouped{
-		{Name: "Low", Value: reasoningEffortLow},
-		{Name: "Medium", Value: reasoningEffortMedium},
-	}
-	models := &sessionModelState{
-		CurrentModelId: "",
-		AvailableModels: []modelInfo{
-			{ModelId: "gpt-5.5/low", Name: "GPT-5.5 (low)"},
-			{ModelId: "gpt-5.5/medium", Name: "GPT-5.5 (medium)"},
-		},
-	}
-	configOptions := []acp.SessionConfigOption{
-		{Select: &acp.SessionConfigOptionSelect{
-			Type:         "select",
-			Id:           "model",
-			Name:         "Model",
-			Category:     &modelCategory,
-			CurrentValue: "gpt-5.5",
-			Options:      acp.SessionConfigSelectOptions{Ungrouped: &modelOptions},
-		}},
-		{Select: &acp.SessionConfigOptionSelect{
-			Type:         "select",
-			Id:           "reasoning_effort",
-			Name:         "Reasoning Effort",
-			Category:     &thoughtCategory,
-			CurrentValue: reasoningEffortMedium,
-			Options:      acp.SessionConfigSelectOptions{Ungrouped: &effortOptions},
-		}},
-	}
-
-	a.emitSessionModels("sess-1", models, nil, configOptions)
-
-	ev := findSessionModelsEvent(t, drainEvents(a))
-	if ev.CurrentModelID != "gpt-5.5/medium" {
-		t.Errorf("CurrentModelID = %q, want %q", ev.CurrentModelID, "gpt-5.5/medium")
-	}
-}
-
 func TestInitialSessionModelState_UsesConfigOptionsWithoutModels(t *testing.T) {
 	modelCategory := acp.SessionConfigOptionCategoryModel
 	modelOptions := acp.SessionConfigSelectOptionsUngrouped{
@@ -398,35 +313,50 @@ func TestInitialSessionModelState_TypedConfigOptionsBeatLegacyModels(t *testing.
 	}
 }
 
-func TestResolveCurrentModelFromConfig_ComposesReasoningEffort(t *testing.T) {
-	options := []streams.ConfigOption{
-		{Type: "select", ID: "model", Category: "model", CurrentValue: "gpt-5.5"},
-		{Type: "select", ID: "reasoning_effort", Category: "thought_level", CurrentValue: reasoningEffortMedium},
+// TestCurrentModelFromConfig_ReadsModelShapedOption pins the simple verbatim
+// fallback used by emitSessionModels / emitSetConfigOptionEvent /
+// ConfigOptionUpdate: the model-shaped option (well-known ID or category)
+// surfaces its CurrentValue unchanged, regardless of any other options.
+func TestCurrentModelFromConfig_ReadsModelShapedOption(t *testing.T) {
+	cases := []struct {
+		name    string
+		options []streams.ConfigOption
+		want    string
+	}{
+		{
+			name: "well-known id",
+			options: []streams.ConfigOption{
+				{ID: "model", CurrentValue: "gpt-5.5"},
+			},
+			want: "gpt-5.5",
+		},
+		{
+			name: "category-tagged custom id",
+			options: []streams.ConfigOption{
+				{ID: "primary_model", Category: "model", CurrentValue: "claude-opus-4-7"},
+			},
+			want: "claude-opus-4-7",
+		},
+		{
+			name: "non-model options ignored",
+			options: []streams.ConfigOption{
+				{ID: "reasoning_effort", CurrentValue: "high"},
+				{ID: "mode", CurrentValue: "default"},
+			},
+			want: "",
+		},
+		{
+			name:    "empty options",
+			options: nil,
+			want:    "",
+		},
 	}
-	available := []modelInfo{
-		{ModelId: "gpt-5.5/low", Name: "GPT-5.5 (low)"},
-		{ModelId: "gpt-5.5/medium", Name: "GPT-5.5 (medium)"},
-	}
-
-	got := resolveCurrentModelFromConfig(options, available)
-	if got != "gpt-5.5/medium" {
-		t.Errorf("resolveCurrentModelFromConfig() = %q, want %q", got, "gpt-5.5/medium")
-	}
-}
-
-func TestResolveCurrentModelFromConfig_PrefersReasoningModelWhenBaseAlsoAvailable(t *testing.T) {
-	options := []streams.ConfigOption{
-		{Type: "select", ID: "model", Category: "model", CurrentValue: "gpt-5.5"},
-		{Type: "select", ID: "reasoning_effort", Category: "thought_level", CurrentValue: reasoningEffortMedium},
-	}
-	available := []modelInfo{
-		{ModelId: "gpt-5.5", Name: "GPT-5.5"},
-		{ModelId: "gpt-5.5/medium", Name: "GPT-5.5 (medium)"},
-	}
-
-	got := resolveCurrentModelFromConfig(options, available)
-	if got != "gpt-5.5/medium" {
-		t.Errorf("resolveCurrentModelFromConfig() = %q, want %q", got, "gpt-5.5/medium")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := currentModelFromConfig(tc.options); got != tc.want {
+				t.Errorf("currentModelFromConfig() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -506,150 +436,6 @@ func TestEmitSetModelEvent_EmitsSessionModelsWithCachedState(t *testing.T) {
 	}
 }
 
-func TestEmitSetModelEvent_RewritesSplitReasoningOptions(t *testing.T) {
-	a := newTestAdapter()
-
-	reasoningOptions := []streams.ConfigOptionValue{
-		{Name: "Medium", Value: reasoningEffortMedium},
-		{Name: "High", Value: reasoningEffortHigh},
-	}
-	cachedModels := []modelInfo{
-		{ModelId: "gpt-5.5/medium", Name: "GPT-5.5 (medium)"},
-		{ModelId: "gpt-5.5/high", Name: "GPT-5.5 (high)"},
-	}
-	cachedConfig := []streams.ConfigOption{
-		{Type: "select", ID: "model", Category: "model", Name: "Model", CurrentValue: "gpt-5.5"},
-		{
-			Type:         "select",
-			ID:           "reasoning_effort",
-			Category:     "thought_level",
-			Name:         "Reasoning Effort",
-			CurrentValue: reasoningEffortMedium,
-			Options:      reasoningOptions,
-		},
-	}
-
-	a.emitSetModelEvent("sess-1", "gpt-5.5/high", cachedModels, cachedConfig)
-
-	ev := findSessionModelsEvent(t, drainEvents(a))
-	if ev.CurrentModelID != "gpt-5.5/high" {
-		t.Errorf("CurrentModelID = %q, want %q", ev.CurrentModelID, "gpt-5.5/high")
-	}
-	if len(ev.ConfigOptions) != 2 {
-		t.Fatalf("ConfigOptions len = %d, want 2", len(ev.ConfigOptions))
-	}
-	for _, opt := range ev.ConfigOptions {
-		switch opt.ID {
-		case "model":
-			if opt.CurrentValue != "gpt-5.5" {
-				t.Errorf("model option CurrentValue = %q, want %q", opt.CurrentValue, "gpt-5.5")
-			}
-		case "reasoning_effort":
-			if opt.CurrentValue != reasoningEffortHigh {
-				t.Errorf("reasoning option CurrentValue = %q, want %q", opt.CurrentValue, reasoningEffortHigh)
-			}
-		default:
-			t.Errorf("unexpected option ID %q in ConfigOptions", opt.ID)
-		}
-	}
-}
-
-func TestEmitSetModelEvent_RewritesSplitReasoningOptionsWithSlashInBaseModel(t *testing.T) {
-	a := newTestAdapter()
-
-	reasoningOptions := []streams.ConfigOptionValue{
-		{Name: "Medium", Value: reasoningEffortMedium},
-		{Name: "High", Value: reasoningEffortHigh},
-	}
-	cachedModels := []modelInfo{
-		{ModelId: "vendor/gpt-5.5/medium", Name: "Vendor GPT-5.5 (medium)"},
-		{ModelId: "vendor/gpt-5.5/high", Name: "Vendor GPT-5.5 (high)"},
-	}
-	cachedConfig := []streams.ConfigOption{
-		{Type: "select", ID: "model", Category: "model", Name: "Model", CurrentValue: "vendor/gpt-5.5"},
-		{
-			Type:         "select",
-			ID:           "reasoning_effort",
-			Category:     "thought_level",
-			Name:         "Reasoning Effort",
-			CurrentValue: reasoningEffortMedium,
-			Options:      reasoningOptions,
-		},
-	}
-
-	a.emitSetModelEvent("sess-1", "vendor/gpt-5.5/high", cachedModels, cachedConfig)
-
-	ev := findSessionModelsEvent(t, drainEvents(a))
-	if ev.CurrentModelID != "vendor/gpt-5.5/high" {
-		t.Errorf("CurrentModelID = %q, want %q", ev.CurrentModelID, "vendor/gpt-5.5/high")
-	}
-	if len(ev.ConfigOptions) != 2 {
-		t.Fatalf("ConfigOptions len = %d, want 2", len(ev.ConfigOptions))
-	}
-	for _, opt := range ev.ConfigOptions {
-		switch opt.ID {
-		case "model":
-			if opt.CurrentValue != "vendor/gpt-5.5" {
-				t.Errorf("model option CurrentValue = %q, want %q", opt.CurrentValue, "vendor/gpt-5.5")
-			}
-		case "reasoning_effort":
-			if opt.CurrentValue != reasoningEffortHigh {
-				t.Errorf("reasoning option CurrentValue = %q, want %q", opt.CurrentValue, reasoningEffortHigh)
-			}
-		default:
-			t.Errorf("unexpected option ID %q in ConfigOptions", opt.ID)
-		}
-	}
-}
-
-func TestEmitSetModelEvent_DoesNotSplitSlashModelWithoutReasoningSuffix(t *testing.T) {
-	a := newTestAdapter()
-
-	reasoningOptions := []streams.ConfigOptionValue{
-		{Name: "Low", Value: reasoningEffortLow},
-		{Name: "Medium", Value: reasoningEffortMedium},
-		{Name: "High", Value: reasoningEffortHigh},
-	}
-	cachedModels := []modelInfo{
-		{ModelId: "vendor/gpt-5.5", Name: "Vendor GPT-5.5"},
-	}
-	cachedConfig := []streams.ConfigOption{
-		{Type: "select", ID: "model", Category: "model", Name: "Model", CurrentValue: "old-model"},
-		{
-			Type:         "select",
-			ID:           "reasoning_effort",
-			Category:     "thought_level",
-			Name:         "Reasoning Effort",
-			CurrentValue: reasoningEffortMedium,
-			Options:      reasoningOptions,
-		},
-	}
-
-	a.emitSetModelEvent("sess-1", "vendor/gpt-5.5", cachedModels, cachedConfig)
-
-	ev := findSessionModelsEvent(t, drainEvents(a))
-	if ev.CurrentModelID != "vendor/gpt-5.5" {
-		t.Errorf("CurrentModelID = %q, want %q", ev.CurrentModelID, "vendor/gpt-5.5")
-	}
-	if len(ev.ConfigOptions) != 2 {
-		t.Fatalf("ConfigOptions len = %d, want 2", len(ev.ConfigOptions))
-	}
-	for _, opt := range ev.ConfigOptions {
-		switch opt.ID {
-		case "model":
-			if opt.CurrentValue != "vendor/gpt-5.5" {
-				t.Errorf("model option CurrentValue = %q, want %q", opt.CurrentValue, "vendor/gpt-5.5")
-			}
-		case "reasoning_effort":
-			if opt.CurrentValue != reasoningEffortMedium {
-				t.Errorf("reasoning option CurrentValue = %q, want %q", opt.CurrentValue, reasoningEffortMedium)
-			}
-		default:
-			t.Errorf("unexpected option ID %q in ConfigOptions", opt.ID)
-		}
-	}
-}
-
 // TestConfigOptionUpdate_RefreshesCachedConfig pins that an inbound
 // ConfigOptionUpdate notification refreshes the adapter's availableConfigOptions
 // cache, so a subsequent SetModel convergence event emits the latest options
@@ -696,58 +482,6 @@ func TestConfigOptionUpdate_RefreshesCachedConfig(t *testing.T) {
 	}
 }
 
-func TestConfigOptionUpdate_ComposesReasoningEffortCurrentModel(t *testing.T) {
-	a := newTestAdapter()
-	thoughtCategory := acp.SessionConfigOptionCategoryThoughtLevel
-	modelOptions := acp.SessionConfigSelectOptionsUngrouped{
-		{Name: "GPT-5.5", Value: "gpt-5.5"},
-	}
-	effortOptions := acp.SessionConfigSelectOptionsUngrouped{
-		{Name: "Medium", Value: reasoningEffortMedium},
-		{Name: "High", Value: reasoningEffortHigh},
-	}
-
-	a.mu.Lock()
-	a.availableModels = []modelInfo{
-		{ModelId: "gpt-5.5/medium", Name: "GPT-5.5 (medium)"},
-		{ModelId: "gpt-5.5/high", Name: "GPT-5.5 (high)"},
-	}
-	a.mu.Unlock()
-
-	notif := acp.SessionNotification{
-		SessionId: "sess-1",
-		Update: acp.SessionUpdate{
-			ConfigOptionUpdate: &acp.SessionConfigOptionUpdate{
-				ConfigOptions: []acp.SessionConfigOption{
-					{Select: &acp.SessionConfigOptionSelect{
-						Type:         "select",
-						Id:           "model",
-						Name:         "Model",
-						CurrentValue: "gpt-5.5",
-						Options:      acp.SessionConfigSelectOptions{Ungrouped: &modelOptions},
-					}},
-					{Select: &acp.SessionConfigOptionSelect{
-						Type:         "select",
-						Id:           "reasoning_effort",
-						Name:         "Reasoning Effort",
-						Category:     &thoughtCategory,
-						CurrentValue: reasoningEffortHigh,
-						Options:      acp.SessionConfigSelectOptions{Ungrouped: &effortOptions},
-					}},
-				},
-			},
-		},
-	}
-
-	ev := a.convertNotification(notif)
-	if ev == nil {
-		t.Fatalf("expected a session_models event from ConfigOptionUpdate")
-	}
-	if ev.CurrentModelID != "gpt-5.5/high" {
-		t.Errorf("event CurrentModelID = %q, want %q", ev.CurrentModelID, "gpt-5.5/high")
-	}
-}
-
 // TestFinalizeSetModel_MethodNoneEmitsNothing pins the contract that when
 // applySessionModel returns MethodNone (agent supports neither
 // session/set_config_option nor session/set_model), the adapter must NOT emit
@@ -788,5 +522,62 @@ func TestFinalizeSetModel_RealMethodEmitsEvent(t *testing.T) {
 	ev := findSessionModelsEvent(t, drainEvents(a))
 	if ev.CurrentModelID != "claude-opus-4-7" {
 		t.Errorf("CurrentModelID = %q, want %q", ev.CurrentModelID, "claude-opus-4-7")
+	}
+}
+
+// TestSetModelThenSetConfigOption_PreservesModel pins the regression where
+// changing a non-model option (e.g. reasoning effort) after a SetModel call
+// reverted CurrentModelID to the agent's initial default. Root cause:
+// emitSetModelEvent rewrote outConfig but never refreshed the adapter's
+// availableConfigOptions, so the next emitSetConfigOptionEvent read the stale
+// model CurrentValue. Fix: both emit paths now write the rewritten outConfig
+// back to the cache. With model and reasoning_effort as fully independent
+// options (Codex 0.16.0+ / Auggie 0.27.0+), the model is whatever the
+// model-shaped option's CurrentValue says — verbatim.
+func TestSetModelThenSetConfigOption_PreservesModel(t *testing.T) {
+	a := newTestAdapter()
+
+	reasoningOptions := []streams.ConfigOptionValue{
+		{Name: "Medium", Value: "medium"},
+		{Name: "High", Value: "high"},
+	}
+	cachedModels := []modelInfo{
+		{ModelId: "gpt-5.4-mini", Name: "GPT-5.4 Mini"},
+		{ModelId: "gpt-5.5", Name: "GPT-5.5"},
+	}
+	// Seed the adapter cache with the agent's initial state — model defaults
+	// to gpt-5.5 with high effort, mirroring what session/new would surface.
+	initialConfig := []streams.ConfigOption{
+		{Type: "select", ID: "model", Category: "model", Name: "Model", CurrentValue: "gpt-5.5"},
+		{
+			Type:         "select",
+			ID:           "reasoning_effort",
+			Name:         "Reasoning Effort",
+			CurrentValue: "high",
+			Options:      reasoningOptions,
+		},
+	}
+	a.mu.Lock()
+	a.availableModels = cachedModels
+	a.availableConfigOptions = initialConfig
+	a.mu.Unlock()
+
+	// 1. User selects gpt-5.4-mini — emitSetModelEvent rewrites
+	// model.CurrentValue to "gpt-5.4-mini" and refreshes the cache.
+	a.emitSetModelEvent("sess-1", "gpt-5.4-mini", cachedModels, initialConfig)
+	_ = drainEvents(a)
+
+	// 2. User flips reasoning effort to medium. The cached model option must
+	// already reflect step 1, so currentModelFromConfig returns "gpt-5.4-mini"
+	// — NOT the original gpt-5.5.
+	a.mu.RLock()
+	cachedAfterSetModel := a.availableConfigOptions
+	a.mu.RUnlock()
+	a.emitSetConfigOptionEvent("sess-1", "reasoning_effort", "medium", cachedModels, cachedAfterSetModel)
+
+	ev := findSessionModelsEvent(t, drainEvents(a))
+	if ev.CurrentModelID != "gpt-5.4-mini" {
+		t.Errorf("CurrentModelID = %q, want %q (model must not revert to agent default)",
+			ev.CurrentModelID, "gpt-5.4-mini")
 	}
 }
