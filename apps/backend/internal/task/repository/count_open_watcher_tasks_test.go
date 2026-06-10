@@ -51,6 +51,11 @@ func TestSQLiteRepository_CountOpenWatcherCreatedTasks(t *testing.T) {
 	// Different integration — Jira watch with the same id must not bleed in.
 	mkTask("t-jira", "jira_issue_watch_id", "watch-a", v1.TaskStateTODO, false)
 
+	// Sentry watch with the same id — must be counted under "sentry", not
+	// bleed into linear/jira. 1 open + 1 completed → count should be 1.
+	mkTask("t-sentry-open", "sentry_issue_watch_id", "watch-a", v1.TaskStateInProgress, false)
+	mkTask("t-sentry-done", "sentry_issue_watch_id", "watch-a", v1.TaskStateCompleted, false)
+
 	// User-created task with no watcher metadata.
 	mkTask("t-user", "unrelated_key", "watch-a", v1.TaskStateTODO, false)
 
@@ -76,6 +81,14 @@ func TestSQLiteRepository_CountOpenWatcherCreatedTasks(t *testing.T) {
 	}
 	if gotJira != 1 {
 		t.Fatalf("expected 1 open jira task for watch-a, got %d", gotJira)
+	}
+
+	gotSentry, err := repo.CountOpenWatcherCreatedTasks(ctx, "sentry", "watch-a")
+	if err != nil {
+		t.Fatalf("count sentry: %v", err)
+	}
+	if gotSentry != 1 {
+		t.Fatalf("expected 1 open sentry task for watch-a, got %d", gotSentry)
 	}
 
 	// Unknown integration falls through without erroring.

@@ -765,6 +765,8 @@ func watcherMetadataKeyByIntegration(integration string) string {
 		return "linear_issue_watch_id"
 	case "jira":
 		return "jira_issue_watch_id"
+	case "sentry":
+		return "sentry_issue_watch_id"
 	default:
 		return ""
 	}

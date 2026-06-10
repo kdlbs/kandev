@@ -59,8 +59,8 @@ func watcherSlotKey(integration, watchID string) string {
 
 // acquireWatcherSlot is the synchronous slot acquisition that gates the
 // `go coordinator.Dispatch(...)` spawn. It is the front-pressure valve for
-// the Linear and Jira watchers: with a per-watch cap, an unexpectedly broad
-// filter cannot fan out into dozens of concurrent tasks on a single poll
+// the Linear, Jira, and Sentry watchers: with a per-watch cap, an unexpectedly
+// broad filter cannot fan out into dozens of concurrent tasks on a single poll
 // tick.
 //
 // Returns (release, ok). When ok is true the caller MUST invoke release()
