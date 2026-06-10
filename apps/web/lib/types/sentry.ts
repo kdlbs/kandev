@@ -2,8 +2,14 @@ export type SentryAuthMethod = "auth_token";
 
 export const SENTRY_AUTH_METHOD: SentryAuthMethod = "auth_token";
 
+// SENTRY_DEFAULT_URL is the SaaS base URL pre-filled in the settings form and
+// used by the backend when no custom instance URL is configured. Self-hosted
+// installs replace it with their own host.
+export const SENTRY_DEFAULT_URL = "https://sentry.io";
+
 export interface SentryConfig {
   authMethod: SentryAuthMethod;
+  url: string;
   hasSecret: boolean;
   lastCheckedAt?: string | null;
   lastOk: boolean;
@@ -14,6 +20,7 @@ export interface SentryConfig {
 
 export interface SetSentryConfigRequest {
   authMethod: SentryAuthMethod;
+  url: string;
   secret: string;
 }
 
