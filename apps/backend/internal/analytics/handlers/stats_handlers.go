@@ -75,6 +75,8 @@ func (h *StatsHandlers) httpGetGlobalStats(c *gin.Context) {
 		AvgTurnsPerTask:      stats.AvgTurnsPerTask,
 		AvgMessagesPerTask:   stats.AvgMessagesPerTask,
 		AvgDurationMsPerTask: stats.AvgDurationMsPerTask,
+		AvgTurnDurationMs:    stats.AvgTurnDurationMs,
+		AvgMessagesPerTurn:   stats.AvgMessagesPerTurn,
 	})
 }
 

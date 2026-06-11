@@ -138,6 +138,28 @@ function GitOrAveragesCard({ global, git_stats }: { global: GlobalStats; git_sta
             </span>
           </div>
           <div className="flex justify-between">
+            <span
+              className="text-sm text-muted-foreground"
+              title="Mean duration of completed turns, excluding turns <1s, >1h, or with no messages"
+            >
+              Turn duration
+            </span>
+            <span className="font-medium tabular-nums">
+              {formatDuration(global.avg_turn_duration_ms)}
+            </span>
+          </div>
+          <div className="flex justify-between">
+            <span
+              className="text-sm text-muted-foreground"
+              title="Mean message count per turn, same exclusions as turn duration"
+            >
+              Messages per turn
+            </span>
+            <span className="font-medium tabular-nums">
+              {global.avg_messages_per_turn.toFixed(1)}
+            </span>
+          </div>
+          <div className="flex justify-between">
             <span className="text-sm text-muted-foreground">Sessions</span>
             <span className="font-medium tabular-nums">{global.total_sessions}</span>
           </div>
