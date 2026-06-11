@@ -28,7 +28,10 @@ async function seedTaskWithSession(
 
   const session = new SessionPage(testPage);
   await session.waitForLoad();
-  await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+  // The auto-started mock agent can finish its turn before the client's WS
+  // subscription registers, so a raw idleInput() visibility wait loses that
+  // race. waitForChatIdle reloads once to re-derive state from SSR.
+  await session.waitForChatIdle();
 
   return session;
 }
