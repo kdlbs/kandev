@@ -81,7 +81,11 @@ vi.mock("@/lib/local-storage", () => ({
 }));
 
 const mockState = {
-  taskPRs: { byTaskId: taskPRsByTaskId.value },
+  taskPRs: {
+    get byTaskId() {
+      return taskPRsByTaskId.value;
+    },
+  },
 };
 
 import { PRMergedBanner } from "./chat-input-area";
