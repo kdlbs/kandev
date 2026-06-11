@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const mockDestroyUserShell = vi.fn();
 const mockRenameUserShell = vi.fn();
@@ -69,7 +69,19 @@ vi.mock("@kandev/ui/context-menu", () => ({
     [key: string]: unknown;
   }) => <div {...props}>{children}</div>,
   ContextMenuContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  ContextMenuItem: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  ContextMenuItem: ({
+    children,
+    onClick,
+    className,
+  }: {
+    children: React.ReactNode;
+    onClick?: () => void;
+    className?: string;
+  }) => (
+    <button type="button" onClick={onClick} className={className}>
+      {children}
+    </button>
+  ),
   ContextMenuSeparator: () => null,
 }));
 
@@ -110,5 +122,30 @@ describe("TerminalTab", () => {
     expect(screen.getByTestId("terminal-tab-closing-shell-1")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "close" })).toBeNull();
     expect(mockClose).not.toHaveBeenCalled();
+  });
+
+  it("restores the close affordance if destroy fails", async () => {
+    mockDestroyUserShell.mockRejectedValueOnce(new Error("network down"));
+    render(<TerminalTab {...makeProps()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "close" }));
+
+    expect(screen.getByTestId("terminal-tab-closing-shell-1")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "close" })).toBeNull();
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "close" })).toBeTruthy();
+      expect(screen.queryByTestId("terminal-tab-closing-shell-1")).toBeNull();
+    });
+  });
+
+  it("ignores context-menu terminate while close is in progress", () => {
+    render(<TerminalTab {...makeProps()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "close" }));
+    fireEvent.click(screen.getByRole("button", { name: "Terminate" }));
+
+    expect(mockDestroyUserShell).toHaveBeenCalledTimes(1);
+    expect(mockDestroyUserShell).toHaveBeenCalledWith("env-1", "shell-1", "task-1");
   });
 });

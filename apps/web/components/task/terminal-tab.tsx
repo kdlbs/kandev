@@ -208,6 +208,7 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
           taskID={taskID}
           environmentId={stampedEnv ?? null}
           canMutate={isOrdinary}
+          isClosing={isClosing}
           onStartRename={() => setIsRenaming(true)}
           onClosePanel={() => props.api.close()}
           onTerminatePanel={() => {
@@ -384,6 +385,7 @@ function TerminalTabMenu({
   taskID,
   environmentId,
   canMutate,
+  isClosing,
   onStartRename,
   onClosePanel,
   onTerminatePanel,
@@ -392,6 +394,7 @@ function TerminalTabMenu({
   taskID: string | null;
   environmentId: string | null;
   canMutate: boolean;
+  isClosing: boolean;
   onStartRename: () => void;
   onClosePanel: () => void;
   onTerminatePanel: () => void;
@@ -399,6 +402,7 @@ function TerminalTabMenu({
   const removeUserShellStore = useAppStore((s) => s.removeUserShell);
 
   const handleTerminate = useCallback(async () => {
+    if (isClosing) return;
     if (!environmentId) return;
     if (!canMutate) {
       onClosePanel();
@@ -413,6 +417,7 @@ function TerminalTabMenu({
     }
   }, [
     canMutate,
+    isClosing,
     environmentId,
     terminalId,
     taskID,
