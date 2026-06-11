@@ -522,6 +522,9 @@ func (s *Service) updateSessionRuntimeConfig(ctx context.Context, sessionID stri
 	if err != nil {
 		return err
 	}
+	if session == nil {
+		return fmt.Errorf("agent session not found: %s", sessionID)
+	}
 	cfg, _ := models.LoadSessionRuntimeConfig(session.Metadata)
 	mutate(&cfg)
 	if cfg.IsZero() {

@@ -9,7 +9,20 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 )
+
+type nilTaskSessionRepo struct {
+	repository.SessionRepository
+}
+
+func (nilTaskSessionRepo) GetTaskSession(context.Context, string) (*models.TaskSession, error) {
+	return nil, nil
+}
+
+func (nilTaskSessionRepo) SetSessionMetadataKey(context.Context, string, string, interface{}) error {
+	panic("SetSessionMetadataKey should not be called for a nil session")
+}
 
 func TestGetWorkspaceInfoForSession_BasicFields(t *testing.T) {
 	svc, _, repo := createTestService(t)
@@ -75,6 +88,16 @@ func TestGetWorkspaceInfoForSession_BasicFields(t *testing.T) {
 	}
 	if info.ACPSessionID != "acp-123" {
 		t.Errorf("expected ACPSessionID 'acp-123', got %q", info.ACPSessionID)
+	}
+}
+
+func TestPersistSessionRuntimeModelMissingSessionDoesNotPanic(t *testing.T) {
+	svc := &Service{sessions: nilTaskSessionRepo{}}
+
+	err := svc.PersistSessionRuntimeModel(context.Background(), "missing-session", "gpt-5.3-codex-spark")
+
+	if err == nil {
+		t.Fatal("expected missing session error")
 	}
 }
 
