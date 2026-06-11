@@ -87,9 +87,7 @@ test.describe("Slash commands after session resume", () => {
     // 7. Send a follow-up message to trigger AvailableCommandsUpdate from the agent.
     //    The mock agent emits commands on the first Prompt after session load.
     await session.sendMessage("/e2e:simple-message");
-    await expect(
-      session.chat.getByText("simple mock response", { exact: false }).nth(1),
-    ).toBeVisible({ timeout: 30_000 });
+    await session.expectChatResponseVisible("simple mock response", 1, { timeout: 30_000 });
     await session.waitForChatIdle({ timeout: 15_000 });
 
     // 8. Verify slash commands work after resume

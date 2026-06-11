@@ -805,6 +805,29 @@ export class SessionPage {
     await this.page.getByTestId("submit-message-button").click();
   }
 
+  /**
+   * Wait for the agent reply containing `text` at the given 0-based match
+   * `index` to be visible after a follow-up prompt. On first timeout, reload
+   * once so SSR re-fetches the persisted turn, then re-assert.
+   *
+   * This rides out the same WS-subscribe race `waitForChatIdle` handles, but
+   * for the reply message itself: a mid-session prompt's response event can be
+   * dropped when the client's WS subscription loses the race with the agent's
+   * reply (common after repeated restart/resume cycles). The reply is persisted
+   * server-side, so a single reload recovers it.
+   */
+  async expectChatResponseVisible(text: string, index = 0, opts: { timeout?: number } = {}) {
+    const timeout = opts.timeout ?? 30_000;
+    const target = () => this.chat.getByText(text, { exact: false }).nth(index);
+    try {
+      await expect(target()).toBeVisible({ timeout });
+    } catch {
+      await this.page.reload();
+      await this.waitForLoad();
+      await expect(target()).toBeVisible({ timeout });
+    }
+  }
+
   /** Toggle plan mode on/off by clicking the plan mode toggle button in the toolbar.
    *
    * Waits for the button to advertise `data-plan-available="true"` before clicking.

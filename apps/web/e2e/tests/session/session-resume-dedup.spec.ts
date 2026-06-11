@@ -82,8 +82,6 @@ test.describe("Session resume boot-message dedup", () => {
 
     // 6. Agent interaction still works after dedup.
     await session.sendMessage("/e2e:simple-message");
-    await expect(
-      session.chat.getByText("simple mock response", { exact: false }).nth(1),
-    ).toBeVisible({ timeout: 30_000 });
+    await session.expectChatResponseVisible("simple mock response", 1, { timeout: 30_000 });
   });
 });

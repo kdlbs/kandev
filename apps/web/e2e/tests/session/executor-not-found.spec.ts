@@ -68,8 +68,6 @@ test.describe("Executor not found after backend restart", () => {
     await session.sendMessage("/e2e:simple-message");
 
     // 7. The agent should respond successfully (not fail with executor not found)
-    await expect(
-      session.chat.getByText("simple mock response", { exact: false }).nth(1),
-    ).toBeVisible({ timeout: 30_000 });
+    await session.expectChatResponseVisible("simple mock response", 1, { timeout: 30_000 });
   });
 });

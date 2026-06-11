@@ -106,9 +106,7 @@ test.describe("Session resume (ACP mode)", () => {
     await session.sendMessage("/e2e:simple-message");
 
     // 10. The agent should respond to the new prompt
-    await expect(
-      session.chat.getByText("simple mock response", { exact: false }).nth(1),
-    ).toBeVisible({ timeout: 30_000 });
+    await session.expectChatResponseVisible("simple mock response", 1, { timeout: 30_000 });
   });
 });
 
@@ -468,8 +466,6 @@ test.describe("Session resume (active turn interrupted)", () => {
     //    execution (not stuck "Agent is not running") even though the previous
     //    turn was interrupted.
     await session.sendMessage("/e2e:simple-message");
-    await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
-      timeout: 30_000,
-    });
+    await session.expectChatResponseVisible("simple mock response", 0, { timeout: 30_000 });
   });
 });

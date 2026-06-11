@@ -217,9 +217,7 @@ test.describe("Workflow automation", () => {
     await session.sendMessage("/e2e:simple-message");
 
     // Wait for the agent to respond (second "simple mock response")
-    await expect(
-      session.chat.getByText("simple mock response", { exact: false }).nth(1),
-    ).toBeVisible({ timeout: 30_000 });
+    await session.expectChatResponseVisible("simple mock response", 1, { timeout: 30_000 });
 
     // Stepper still shows Review (no on_turn_complete events on Review)
     await expect(session.stepperStep("Review")).toHaveAttribute("aria-current", "step", {
