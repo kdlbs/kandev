@@ -41,7 +41,23 @@ export async function seedQueuedWorkflowMessageScenario(
   await page.goto(`/t/${task.id}`);
   const session = new SessionPage(page);
   await session.waitForLoad();
-  await expect(session.agentStatus()).toBeVisible({ timeout: 20_000 });
+  // Confirm the agent is mid-turn before the manual move via the backend session
+  // state, not the transient "Agent is starting/running" badge. The badge depends
+  // on the client receiving the state over WS, and under the WS-subscribe race the
+  // client can miss it when its subscription registers after the transition fans
+  // out; the backend session state is the source of truth and avoids that race.
+  // The e2e:delay(8000) keeps the first turn busy long enough to observe a STARTING
+  // or RUNNING state (the mock agent can jump STARTING->WAITING_FOR_INPUT without
+  // ever surfacing RUNNING, so accept either busy state).
+  await expect
+    .poll(
+      async () => {
+        const { sessions } = await apiClient.listTaskSessions(task.id);
+        return sessions.find((s) => s.id === task.session_id)?.state ?? "";
+      },
+      { timeout: 20_000, message: "Waiting for agent to start its turn" },
+    )
+    .toMatch(/^(STARTING|RUNNING)$/);
 
   await apiClient.moveTask(task.id, workflow.id, reviewStep.id);
 
