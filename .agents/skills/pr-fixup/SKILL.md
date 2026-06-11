@@ -16,7 +16,7 @@ Wait for CI and code review to complete on a pull request, fix any failures or v
 - **`/e2e`** — Read for debugging guidance when E2E tests fail in CI. Covers test patterns, run commands, failure triage, and local reproduction.
 - **`/commit`** — Use for staging and committing fixes with Conventional Commits format.
 
-Prefer the `pr-poller` and `verify` helpers when the runtime supports delegated helpers. If helper delegation is unavailable, follow the direct-command fallback sections below and keep the same output contract: compact CI state, compact review state, bounded polling, and full local verification before pushing.
+Prefer the `pr-poller` and `verify` helpers when the runtime supports delegated helpers. If runtime policy forbids delegated helpers/subagents unless explicitly requested by the user, treat helper delegation as unavailable and use the direct-command fallback. If helper delegation is unavailable, follow the direct-command fallback sections below and keep the same output contract: compact CI state, compact review state, bounded polling, and full local verification before pushing.
 
 ## Context
 
@@ -29,7 +29,7 @@ The first thing you do — before fetching PR state, before reading logs, before
 
 Create these tasks immediately (use your task/todo tracking tool if available):
 
-1. **Gather PR state** — Use `pr-poller` when available; otherwise gather compact CI + bot review state directly
+1. **Gather PR state** — Use `pr-poller` when available; otherwise gather compact CI + bot review state via `scripts/pr-state`
 2. **Fix failing CI checks** — Read failing run logs (via `scripts/run-quiet gh-run -- gh run view ...`), fix issues, run E2E tests locally if needed
 3. **Triage review comments** — Classify each comment as valid, already addressed, nitpick, or wrong
 4. **Address each comment** — Fix or reply with reasoning, resolve threads
@@ -69,21 +69,22 @@ If available, invoke the `pr-poller` subagent with the PR number (or let it reso
 If delegated polling is unavailable, gather the same information directly without streaming long logs into context:
 
 ```bash
-scripts/run-quiet gh-checks -- gh pr checks <PR>
-gh pr checks <PR> --json name,workflow,state,link
-scripts/pr-resolve list <PR>
-gh pr view <PR> --json comments
+scripts/pr-state <PR>
 ```
 
 Poll at a 30s cadence with a **20 min cap**. Stop early if any required check fails. If the cap hits and only E2E shards are still pending with no failures, report "CI in progress" instead of continuing to watch indefinitely. Do not run `gh pr checks --watch` in the main session unless the runtime can keep the watcher isolated and automatically clean it up.
 
-Summarize the direct-command result with the subset of the `pr-poller` report that can be derived directly: `ci_failed`, `ci_pending`, unresolved review thread count, issue-comment count, and a recommendation. Do not invent per-bot `bots.<name>` states in the fallback path; if bot state matters, use `pr-poller` or mark the bot state as unavailable.
+Summarize the direct-command result from `scripts/pr-state` using its raw snapshot fields: `.checks`, `.review_threads`, `.unresolved_review_thread_count`, `.reviews`, `.issue_comments`, and `.errors`. Derive `ci_failed`, `ci_pending`, and which bot comments are actionable in the parent from those raw arrays. If `.errors` is non-empty, treat the affected fields as unknown and report the data-gathering failure instead of reconstructing them ad hoc.
 
 Mark task 1 as completed.
 
 ### 2. Fix failing CI checks
 
 Mark task 2 as in_progress.
+
+**Sanity-check the poller's `ci_failed` before fixing anything.** Confirm each reported check `name` actually appears in `gh pr checks <PR>` output and its `run_id` resolves (`gh run view <run_id>` must not 404). If the report cites checks the repo doesn't have, discard it and re-gather state directly before touching code.
+
+Prefer `scripts/pr-state <PR>` for this cross-check before falling back to raw `gh` output. It already gives you raw checks with normalized names plus extracted `run_id`s in one JSON snapshot.
 
 For each entry in the report's `ci_failed:` list:
 
@@ -143,6 +144,10 @@ gh api repos/:owner/:repo/pulls/<number>/comments
 # Issue comments (CodeRabbit walkthrough, Claude fork findings):
 gh pr view <number> --json comments
 ```
+
+When piping `gh api` or `gh api graphql` to `jq`, never use `2>&1`. `gh` writes diagnostics to stderr, and merging them corrupts the JSON stream (`jq: parse error: Invalid numeric literal`). Use `2>/dev/null` or `gh`'s built-in `--jq`.
+
+Bot issue comments such as CodeRabbit walkthroughs, Claude summaries, Greptile summaries, and historical "actionable comments posted" notices are informational once `scripts/pr-resolve list <PR>` is empty and the latest bot check is passing. Do not reply to old top-level summaries unless they contain a current unresolved request.
 
 **Verify before implementing.** Do not blindly accept review feedback — evaluate each comment technically:
 
@@ -237,6 +242,17 @@ Or confirm via GraphQL that unresolved thread count is 0:
 
 ```bash
 gh api graphql -f query='query { repository(owner:"kdlbs", name:"kandev") { pullRequest(number:<PR>) { reviewThreads(first:100) { nodes { isResolved } } } } }' --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length'
+```
+
+Manual fallback when you reply outside `scripts/pr-resolve`:
+
+```bash
+# Get the first comment's REST databaseId for one thread:
+gh api graphql -f query='query { node(id:"PRRT_xxx") { ... on PullRequestReviewThread { comments(first:1){ nodes{ databaseId } } } } }' 2>/dev/null --jq '.data.node.comments.nodes[0].databaseId'
+# Reply to THAT id (a guessed id 404s with "Parent comment not found"):
+gh api --method POST repos/:owner/:repo/pulls/<PR>/comments/<databaseId>/replies --input reply.json 2>/dev/null
+# Resolve:
+gh api graphql -f query='mutation { resolveReviewThread(input:{threadId:"PRRT_xxx"}){ thread { isResolved } } }' 2>/dev/null
 ```
 
 Informational threads (acknowledged, no code change) still need `scripts/pr-resolve reply` + resolve — skipping them leaves the PR blocked.
