@@ -93,7 +93,7 @@ test.describe("Onboarding", () => {
     });
 
     await testPage.getByRole("button", { name: "Cancel" }).click();
-    await expect(testPage).toHaveURL(/\/$/, { timeout: 10_000 });
+    await expect(testPage).toHaveURL((url) => url.pathname === "/", { timeout: 10_000 });
   });
 
   test("cancel button returns to homepage when adding a new workspace", async ({
@@ -107,7 +107,7 @@ test.describe("Onboarding", () => {
 
     await testPage.getByRole("button", { name: "Cancel" }).click();
 
-    await expect(testPage).toHaveURL(/\/$/, { timeout: 10_000 });
+    await expect(testPage).toHaveURL((url) => url.pathname === "/", { timeout: 10_000 });
   });
 
   test("inline CLI profile creation selects the profile for the new agent", async ({
