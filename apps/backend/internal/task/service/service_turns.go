@@ -381,6 +381,10 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		} else if id, ok := session.AgentProfileSnapshot["agent_id"].(string); ok {
 			agentID = id
 		}
+		// Read `user_model` (not `model`). `model` mirrors the agent's most
+		// recent advertisement and would issue a redundant SetModel RPC on
+		// every resume; `user_model` is only written when a user-initiated
+		// event genuinely changed the model — see persistSessionModelsState.
 		if model, ok := session.AgentProfileSnapshot["user_model"].(string); ok {
 			sessionModel = model
 		}

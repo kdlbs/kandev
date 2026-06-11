@@ -1090,7 +1090,12 @@ func (s *Service) persistSessionModelsState(ctx context.Context, sessionID, mode
 			changed = true
 		}
 	}
-	if userInitiated && len(configOptions) > 0 {
+	if userInitiated {
+		// Gate only on userInitiated, not on len(configOptions) > 0: a
+		// user-initiated event with an empty option set is the legitimate
+		// signal that the agent stopped advertising any options and the
+		// stale snapshot value should be cleared rather than re-replayed on
+		// the next resume.
 		options := make(map[string]interface{}, len(configOptions))
 		for _, opt := range configOptions {
 			if opt.ID == "" || opt.CurrentValue == "" {
