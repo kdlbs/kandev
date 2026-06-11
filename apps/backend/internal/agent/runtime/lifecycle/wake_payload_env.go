@@ -26,27 +26,34 @@ func spillLargeWakePayloadEnv(env map[string]string, workspacePath string, log *
 	if payload == "" || len(payload) <= envWakePayloadInlineMax {
 		return nil
 	}
+	fileID := sanitizeWakePayloadFileID(env["KANDEV_RUN_ID"])
+	if fileID == defaultWakePayloadFileID && log != nil {
+		log.Warn("KANDEV_RUN_ID is missing or empty; spill file may collide across runs",
+			zap.String("payload_path", filepath.Join(wakePayloadDirRel, fileID+".json")))
+	}
 	if workspacePath == "" {
 		return fmt.Errorf("%s is %d bytes, above %d byte inline limit, but workspace path is empty",
 			envWakePayloadJSON, len(payload), envWakePayloadInlineMax)
 	}
 
-	relPath := filepath.ToSlash(filepath.Join(wakePayloadDirRel, sanitizeWakePayloadFileID(env["KANDEV_RUN_ID"])+".json"))
+	relPath := filepath.ToSlash(filepath.Join(wakePayloadDirRel, fileID+".json"))
 	absPath := filepath.Join(workspacePath, filepath.FromSlash(relPath))
 	if err := os.MkdirAll(filepath.Dir(absPath), 0o700); err != nil {
 		return fmt.Errorf("create wake payload directory: %w", err)
 	}
 	if err := os.WriteFile(absPath, []byte(payload), 0o600); err != nil {
+		_ = os.Remove(absPath)
 		return fmt.Errorf("write wake payload file: %w", err)
 	}
+
+	delete(env, envWakePayloadJSON)
+	env[envWakePayloadPath] = relPath
+
 	if err := ensureWakePayloadGitExclude(workspacePath); err != nil && log != nil {
 		log.Warn("failed to update git exclude for wake payload spill file",
 			zap.String("workspace_path", workspacePath),
 			zap.Error(err))
 	}
-
-	delete(env, envWakePayloadJSON)
-	env[envWakePayloadPath] = relPath
 	if log != nil {
 		log.Info("spilled oversized wake payload env to workspace file",
 			zap.Int("payload_bytes", len(payload)),
@@ -104,6 +111,10 @@ func gitInfoDir(workspacePath string) (string, error) {
 		return filepath.Join(gitPath, "info"), nil
 	} else if err != nil && !os.IsNotExist(err) && !errors.Is(err, syscall.ENOTDIR) {
 		return "", err
+	} else if os.IsNotExist(err) {
+		if fi, serr := os.Stat(gitPath); serr == nil && fi.IsDir() {
+			return filepath.Join(gitPath, "info"), nil
+		}
 	}
 
 	data, err := os.ReadFile(gitPath)

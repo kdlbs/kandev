@@ -231,7 +231,7 @@ Injected before each agent session:
 
 ### Wake payload
 
-`KANDEV_WAKE_PAYLOAD_JSON` carries pre-computed context. Fresh session: full task context (`task` object with id, identifier, title, status, priority, project, `blockedBy`, `childTasks`). Resume: only new comments since last run plus a `commentWindow` rollup (`{total, included, fetchMore}`). New comments include author, body, createdAt. If the serialized payload is too large for inline environment delivery, Kandev writes it under the workspace and sets `KANDEV_WAKE_PAYLOAD_PATH` to that workspace-relative file path instead.
+`KANDEV_WAKE_PAYLOAD_JSON` carries pre-computed context. Fresh session: full task context (`task` object with id, identifier, title, status, priority, project, `blockedBy`, `childTasks`). Resume: only new comments since last run plus a `commentWindow` rollup (`{total, included, fetchMore}`). New comments include author, body, createdAt. If the serialized payload exceeds 64KB for inline environment delivery, Kandev writes it under the workspace and sets `KANDEV_WAKE_PAYLOAD_PATH` to that workspace-relative file path instead.
 
 ### Instructions delivery
 
