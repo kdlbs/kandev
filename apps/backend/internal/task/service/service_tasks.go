@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -28,6 +29,12 @@ const defaultPriority = "medium"
 // subtask of a kanban subtask (nesting depth > 1). Office task trees are
 // intentionally exempt.
 var ErrSubtaskDepthExceeded = fmt.Errorf("cannot create a subtask of a subtask — maximum nesting depth is 1 for kanban tasks. Create a sibling task under the same parent or a top-level task instead")
+
+// ErrTaskAlreadyArchived is returned by ArchiveTask when the target task
+// already has archived_at set. Sentinel so cascade callers (e.g.
+// DeleteWorkflow) can treat a concurrent archive as a no-op instead of
+// aborting the whole operation.
+var ErrTaskAlreadyArchived = errors.New("task is already archived")
 
 type taskStopTarget struct {
 	sessionID   string
@@ -729,7 +736,7 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	}
 
 	if task.ArchivedAt != nil {
-		return fmt.Errorf("task is already archived: %s", id)
+		return fmt.Errorf("%w: %s", ErrTaskAlreadyArchived, id)
 	}
 
 	// 2. Gather data needed for cleanup BEFORE archive

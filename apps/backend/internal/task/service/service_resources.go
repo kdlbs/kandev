@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -218,14 +219,21 @@ func (s *Service) DeleteWorkflow(ctx context.Context, id string) error {
 			zap.String("workflow_id", id), zap.Error(err))
 		return err
 	}
+	archived := 0
 	for _, task := range tasks {
 		if err := s.ArchiveTask(ctx, task.ID); err != nil {
+			// Concurrent archive between ListTasks and here is a no-op:
+			// the task is already in the desired state, keep cascading.
+			if errors.Is(err, ErrTaskAlreadyArchived) {
+				continue
+			}
 			s.logger.Error("failed to archive task during workflow delete cascade",
 				zap.String("workflow_id", id),
 				zap.String("task_id", task.ID),
 				zap.Error(err))
 			return err
 		}
+		archived++
 	}
 
 	if err := s.workflows.DeleteWorkflow(ctx, id); err != nil {
@@ -236,7 +244,7 @@ func (s *Service) DeleteWorkflow(ctx context.Context, id string) error {
 	s.publishWorkflowEvent(ctx, events.WorkflowDeleted, workflow)
 	s.logger.Info("workflow deleted",
 		zap.String("workflow_id", id),
-		zap.Int("archived_tasks", len(tasks)))
+		zap.Int("archived_tasks", archived))
 	return nil
 }
 

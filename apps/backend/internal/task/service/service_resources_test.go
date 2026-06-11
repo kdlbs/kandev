@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 )
 
 // errWorkspaceRepo is a WorkspaceRepository that always returns an error from
@@ -175,6 +176,136 @@ func TestService_DeleteWorkflow_ArchivesChildTasks(t *testing.T) {
 	}
 	if other.ArchivedAt != nil {
 		t.Errorf("task in unrelated workflow should not be archived, got archived_at=%v", other.ArchivedAt)
+	}
+}
+
+// leakyListTaskRepo wraps the real TaskRepository and injects extra tasks
+// into ListTasks results, simulating a TOCTOU race where a task is archived
+// between the snapshot and the cascade loop.
+type leakyListTaskRepo struct {
+	repository.TaskRepository
+	extra []*models.Task
+}
+
+func (l leakyListTaskRepo) ListTasks(ctx context.Context, workflowID string) ([]*models.Task, error) {
+	real, err := l.TaskRepository.ListTasks(ctx, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	return append(real, l.extra...), nil
+}
+
+// TestService_DeleteWorkflow_SkipsConcurrentlyArchivedTask covers the
+// TOCTOU race window between Service.tasks.ListTasks and Service.ArchiveTask:
+// if a task is archived by another caller in that window, ArchiveTask
+// returns ErrTaskAlreadyArchived and the cascade must continue rather than
+// abort, so the workflow row still gets deleted.
+func TestService_DeleteWorkflow_SkipsConcurrentlyArchivedTask(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "WS"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-doomed", WorkspaceID: "ws-1", Name: "Doomed"})
+
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-live", WorkspaceID: "ws-1", WorkflowID: "wf-doomed", WorkflowStepID: "step-1", Title: "Live",
+	}); err != nil {
+		t.Fatalf("CreateTask live: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-raced", WorkspaceID: "ws-1", WorkflowID: "wf-doomed", WorkflowStepID: "step-1", Title: "Raced",
+	}); err != nil {
+		t.Fatalf("CreateTask raced: %v", err)
+	}
+	if err := repo.ArchiveTask(ctx, "task-raced"); err != nil {
+		t.Fatalf("pre-archive raced task: %v", err)
+	}
+
+	raced, err := repo.GetTask(ctx, "task-raced")
+	if err != nil {
+		t.Fatalf("GetTask raced: %v", err)
+	}
+	svc.tasks = leakyListTaskRepo{TaskRepository: repo, extra: []*models.Task{raced}}
+
+	if err := svc.DeleteWorkflow(ctx, "wf-doomed"); err != nil {
+		t.Fatalf("DeleteWorkflow should swallow ErrTaskAlreadyArchived: %v", err)
+	}
+
+	if _, err := svc.workflows.GetWorkflow(ctx, "wf-doomed"); err == nil {
+		t.Fatalf("expected workflow to be deleted despite race")
+	}
+
+	got, err := repo.GetTask(ctx, "task-live")
+	if err != nil {
+		t.Fatalf("GetTask live: %v", err)
+	}
+	if got.ArchivedAt == nil {
+		t.Errorf("live task should be archived by cascade")
+	}
+}
+
+// TestService_DeleteWorkflow_PartialArchiveErrorPreservesWorkflow verifies
+// the fail-fast contract: when ArchiveTask returns a non-sentinel error
+// part-way through the cascade, DeleteWorkflow surfaces it, leaves the
+// workflow row intact, and the tasks archived before the failure stay
+// archived. Retries are safe because ListTasks filters them out.
+func TestService_DeleteWorkflow_PartialArchiveErrorPreservesWorkflow(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "WS"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-doomed", WorkspaceID: "ws-1", Name: "Doomed"})
+
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-first", WorkspaceID: "ws-1", WorkflowID: "wf-doomed", WorkflowStepID: "step-1", Title: "First",
+	}); err != nil {
+		t.Fatalf("CreateTask first: %v", err)
+	}
+	// "task-ghost" never actually exists in the DB — the leaky list returns
+	// it so the cascade's ArchiveTask call hits a real GetTask error.
+	ghost := &models.Task{ID: "task-ghost", WorkspaceID: "ws-1", WorkflowID: "wf-doomed", WorkflowStepID: "step-1", Title: "Ghost"}
+	svc.tasks = leakyListTaskRepo{TaskRepository: repo, extra: []*models.Task{ghost}}
+
+	err := svc.DeleteWorkflow(ctx, "wf-doomed")
+	if err == nil {
+		t.Fatalf("expected error when ArchiveTask fails mid-cascade")
+	}
+	if errors.Is(err, ErrTaskAlreadyArchived) {
+		t.Fatalf("non-sentinel error must propagate, got sentinel: %v", err)
+	}
+
+	if _, err := svc.workflows.GetWorkflow(ctx, "wf-doomed"); err != nil {
+		t.Fatalf("workflow row must survive a partial cascade, got: %v", err)
+	}
+	first, err := repo.GetTask(ctx, "task-first")
+	if err != nil {
+		t.Fatalf("GetTask first: %v", err)
+	}
+	if first.ArchivedAt == nil {
+		t.Errorf("task archived before the failure should remain archived")
+	}
+}
+
+// TestService_ArchiveTask_ReturnsAlreadyArchivedSentinel locks in the
+// sentinel-error contract DeleteWorkflow relies on.
+func TestService_ArchiveTask_ReturnsAlreadyArchivedSentinel(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "WS"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "T",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	if err := svc.ArchiveTask(ctx, "task-1"); err != nil {
+		t.Fatalf("first ArchiveTask: %v", err)
+	}
+	err := svc.ArchiveTask(ctx, "task-1")
+	if !errors.Is(err, ErrTaskAlreadyArchived) {
+		t.Fatalf("second ArchiveTask: want ErrTaskAlreadyArchived, got %v", err)
 	}
 }
 
