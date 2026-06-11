@@ -242,14 +242,6 @@ type AgentEvent struct {
 	// ConfigOptions lists session configuration options from ACP _meta.
 	ConfigOptions []ConfigOption `json:"config_options,omitempty"`
 
-	// UserInitiated marks a session_models event as the optimistic emission
-	// that follows a user-driven session/set_model or session/set_config_option
-	// RPC. Agent-pushed session_models notifications and the initial event
-	// derived from session/new leave it false. Persistence layers use the
-	// flag to distinguish "user override I must restore on resume" from
-	// "agent default that the agent itself will re-advertise on restart".
-	UserInitiated bool `json:"user_initiated,omitempty"`
-
 	// --- Usage fields (attached to "complete" event) ---
 
 	// Usage contains token usage stats from the prompt response.

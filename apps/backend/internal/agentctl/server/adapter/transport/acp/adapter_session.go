@@ -472,16 +472,6 @@ func (a *Adapter) emitSessionModels(sessionID string, models *sessionModelState,
 // .CurrentValue (codex-style agents surface the current model there) from
 // disagreeing with the CurrentModelID emitted on the same event.
 func (a *Adapter) emitSetModelEvent(sessionID, modelID string, cachedModels []modelInfo, cachedConfig []streams.ConfigOption) {
-	// Skip when the value isn't actually changing. The resume code path in
-	// lifecycle's InitializeAndPrompt re-applies profile defaults on every
-	// session resume by calling SetModel(profileModel); when the agent's
-	// current matches (the common case — agent's own default or preserved via
-	// session/load), emitting here would broadcast a UserInitiated convergence
-	// event that the orchestrator persists as a user override, causing the
-	// session-resume flicker tracked by session-resume-keeps-review-state.
-	if currentModelFromConfig(cachedConfig) == modelID {
-		return
-	}
 	outConfig := cachedConfig
 	if len(cachedConfig) > 0 {
 		// Shallow copy: only CurrentValue (a string) is rewritten below, so
@@ -514,7 +504,6 @@ func (a *Adapter) emitSetModelEvent(sessionID, modelID string, cachedModels []mo
 		CurrentModelID: modelID,
 		SessionModels:  convertSessionModels(cachedModels),
 		ConfigOptions:  outConfig,
-		UserInitiated:  true,
 	})
 }
 
@@ -716,24 +705,10 @@ func (a *Adapter) SetConfigOption(ctx context.Context, configID, value string) e
 }
 
 // emitSetConfigOptionEvent emits a session_models convergence event after a
-// non-model SetConfigOption RPC succeeds. The orchestrator persists the
-// updated option to AgentProfileSnapshot so it survives page refresh /
-// backend restart, mirroring how the model itself is persisted by
-// emitSetModelEvent.
+// non-model SetConfigOption RPC succeeds. The frontend uses this to keep the
+// option dropdowns in sync with the agent without waiting for an agent-driven
+// ConfigOptionUpdate.
 func (a *Adapter) emitSetConfigOptionEvent(sessionID, configID, value string, cachedModels []modelInfo, cachedConfig []streams.ConfigOption) {
-	// Skip when the value isn't actually changing. Same rationale as
-	// emitSetModelEvent: the lifecycle resume path replays
-	// profileConfigOptions via SetConfigOption on every resume, and we don't
-	// want those redundant calls to broadcast UserInitiated convergence
-	// events the orchestrator would persist back into the snapshot.
-	for _, opt := range cachedConfig {
-		if opt.ID == configID {
-			if opt.CurrentValue == value {
-				return
-			}
-			break
-		}
-	}
 	outConfig := cachedConfig
 	if len(cachedConfig) == 0 {
 		// In normal operation session/new populates availableConfigOptions
@@ -785,7 +760,6 @@ func (a *Adapter) emitSetConfigOptionEvent(sessionID, configID, value string, ca
 		CurrentModelID: currentModelFromConfig(outConfig),
 		SessionModels:  convertSessionModels(cachedModels),
 		ConfigOptions:  outConfig,
-		UserInitiated:  true,
 	})
 }
 

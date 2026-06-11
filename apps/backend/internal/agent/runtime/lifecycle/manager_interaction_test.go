@@ -769,47 +769,6 @@ func TestEffectiveSessionMode(t *testing.T) {
 	})
 }
 
-// TestEffectiveSessionValue / TestEffectiveSessionConfigOptions pin the
-// snapshot-driven override semantics used by initializeACPSession to restore
-// the user's last model / reasoning effort / etc. across a backend restart or
-// session resumption. Mirrors TestEffectiveSessionMode but for the model and
-// the dynamic config-options map.
-func TestEffectiveSessionValue(t *testing.T) {
-	pickModel := func(i *WorkspaceInfo) string { return i.SessionModel }
-
-	t.Run("session value overrides profile default", func(t *testing.T) {
-		info := &WorkspaceInfo{SessionModel: "gpt-5.4-mini"}
-		require.Equal(t, "gpt-5.4-mini", effectiveSessionValue(info, pickModel, "sonnet"))
-	})
-
-	t.Run("falls back to profile default when session value empty", func(t *testing.T) {
-		info := &WorkspaceInfo{}
-		require.Equal(t, "sonnet", effectiveSessionValue(info, pickModel, "sonnet"))
-	})
-
-	t.Run("falls back to profile default when info is nil", func(t *testing.T) {
-		require.Equal(t, "sonnet", effectiveSessionValue(nil, pickModel, "sonnet"))
-	})
-}
-
-func TestEffectiveSessionConfigOptions(t *testing.T) {
-	profile := map[string]string{"effort": "low", "reasoning": "off"}
-
-	t.Run("session options replace profile defaults", func(t *testing.T) {
-		info := &WorkspaceInfo{SessionConfigOptions: map[string]string{"effort": "high"}}
-		require.Equal(t, map[string]string{"effort": "high"}, effectiveSessionConfigOptions(info, profile))
-	})
-
-	t.Run("falls back to profile options when session options empty", func(t *testing.T) {
-		info := &WorkspaceInfo{SessionConfigOptions: map[string]string{}}
-		require.Equal(t, profile, effectiveSessionConfigOptions(info, profile))
-	})
-
-	t.Run("falls back to profile options when info is nil", func(t *testing.T) {
-		require.Equal(t, profile, effectiveSessionConfigOptions(nil, profile))
-	})
-}
-
 // --- IsRemoteSession tests ---
 
 type mockWorkspaceInfoProvider struct {

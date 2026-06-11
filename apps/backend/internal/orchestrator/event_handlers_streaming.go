@@ -1022,18 +1022,18 @@ func (s *Service) handleAgentCapabilitiesEvent(ctx context.Context, payload *lif
 }
 
 // handleSessionModelsEvent broadcasts session_models events to the WebSocket
-// and persists the current model + (when user-initiated) config options to the
-// session snapshot so they survive page refresh and backend restart.
+// and persists the current model to the session snapshot so the model
+// selector survives a page refresh without a flash.
 func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	sessionID := payload.SessionID
 	if sessionID == "" || s.eventBus == nil {
 		return
 	}
 
-	// Persist the ACP-reported state to the session snapshot so it's available
-	// after page refresh (SSR reads from the DB, not runtime state) and after
-	// a backend restart (lifecycle's CachedModelState is in-memory only).
-	s.persistSessionModelsState(ctx, sessionID, payload.Data.CurrentModelID, payload.Data.ConfigOptions, payload.Data.UserInitiated)
+	// Persist the agent-reported current model so SSR can render the model
+	// selector trigger with the right value on a page reload instead of
+	// flashing the profile default before the WS catches up.
+	s.persistSessionModel(ctx, sessionID, payload.Data.CurrentModelID)
 
 	eventPayload := lifecycle.SessionModelsEventPayload{
 		TaskID:         payload.TaskID,
@@ -1053,24 +1053,21 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionModelsUpdated, "orchestrator", eventPayload))
 }
 
-// persistSessionModelsState updates the session's AgentProfileSnapshot.
+// persistSessionModel writes the agent-reported current model to the session's
+// AgentProfileSnapshot under the `model` key so SSR can render the model
+// selector trigger with the right value on a page reload without a flash.
 //
-// Three keys, three roles:
-//
-//   - `model` — refreshed on every event (including agent-pushed
-//     advertisements). SSR reads this to render the model selector without a
-//     flash; it must always mirror the agent's current state.
-//   - `user_model` — only written when a user-initiated event's
-//     CurrentModelID differs from the existing `model`. This is the value
-//     replayed on backend-restart resume; sourcing it from any event would
-//     cause a SetModel RPC during resume even for sessions the user never
-//     touched, briefly cycling the session through STARTING / RUNNING and
-//     flickering the task into the sidebar's Running bucket (see
-//     session-resume-keeps-review-state.spec.ts).
-//   - `config_options` — same rationale as user_model: only persisted when
-//     userInitiated is true so resume only replays options the user actually
-//     changed.
-func (s *Service) persistSessionModelsState(ctx context.Context, sessionID, model string, configOptions []streams.ConfigOption, userInitiated bool) {
+// We intentionally only persist the model (not the full set of dynamic config
+// options) and intentionally do NOT replay this on backend-restart resume:
+// agents that support session/load preserve the value themselves, and replay
+// would issue redundant SetModel / SetConfigOption RPCs that cycle the session
+// through STARTING / RUNNING and flicker the task into the sidebar's Running
+// bucket (see session-resume-keeps-review-state.spec.ts and
+// effectiveSessionMode's sibling note in lifecycle/manager_profile.go).
+func (s *Service) persistSessionModel(ctx context.Context, sessionID, model string) {
+	if model == "" {
+		return
+	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return
@@ -1078,76 +1075,15 @@ func (s *Service) persistSessionModelsState(ctx context.Context, sessionID, mode
 	if session.AgentProfileSnapshot == nil {
 		session.AgentProfileSnapshot = make(map[string]interface{})
 	}
-	changed := false
-	if model != "" {
-		existing, _ := session.AgentProfileSnapshot["model"].(string)
-		if userInitiated && existing != model {
-			session.AgentProfileSnapshot["user_model"] = model
-			changed = true
-		}
-		if existing != model {
-			session.AgentProfileSnapshot["model"] = model
-			changed = true
-		}
-	}
-	if userInitiated {
-		// Gate only on userInitiated, not on len(configOptions) > 0: a
-		// user-initiated event with an empty option set is the legitimate
-		// signal that the agent stopped advertising any options and the
-		// stale snapshot value should be cleared rather than re-replayed on
-		// the next resume.
-		options := make(map[string]interface{}, len(configOptions))
-		for _, opt := range configOptions {
-			if opt.ID == "" || opt.CurrentValue == "" {
-				continue
-			}
-			options[opt.ID] = opt.CurrentValue
-		}
-		if !configOptionsEqual(session.AgentProfileSnapshot["config_options"], options) {
-			session.AgentProfileSnapshot["config_options"] = options
-			changed = true
-		}
-	}
-	if !changed {
+	if existing, _ := session.AgentProfileSnapshot["model"].(string); existing == model {
 		return
 	}
+	session.AgentProfileSnapshot["model"] = model
 	_ = s.repo.UpdateTaskSession(ctx, session)
 	// Invalidate the message creator's model cache so subsequent messages use the new model.
 	if s.messageCreator != nil {
 		s.messageCreator.InvalidateModelCache(sessionID)
 	}
-}
-
-// configOptionsEqual compares the existing config_options map (as deserialized
-// from JSON — values are interface{}) with the freshly-built one (values are
-// strings) by key+string-value. Returns true when both carry the same set of
-// entries, avoiding redundant UpdateTaskSession writes.
-//
-// Invariant: persisted values are always strings (sourced from
-// streams.ConfigOption.CurrentValue). A non-string value on the existing side
-// (e.g. a future numeric slider) coerces to "" via the type-assertion
-// fallthrough and compares unequal to any incoming string, which falls through
-// to a write — slightly wasteful but correct.
-func configOptionsEqual(existing interface{}, next map[string]interface{}) bool {
-	existingMap, ok := existing.(map[string]interface{})
-	if !ok {
-		return len(next) == 0
-	}
-	if len(existingMap) != len(next) {
-		return false
-	}
-	for k, v := range next {
-		ev, exists := existingMap[k]
-		if !exists {
-			return false
-		}
-		es, _ := ev.(string)
-		ns, _ := v.(string)
-		if es != ns {
-			return false
-		}
-	}
-	return true
 }
 
 // handleSessionTodosEvent broadcasts plan/todo entries to the WebSocket and persists

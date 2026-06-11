@@ -162,13 +162,6 @@ type AgentStreamEventData struct {
 	SessionModels  []streams.SessionModelInfo `json:"session_models,omitempty"`
 	ConfigOptions  []streams.ConfigOption     `json:"config_options,omitempty"`
 
-	// UserInitiated marks a session_models event as the optimistic emission
-	// from a user-driven set_model / set_config_option RPC, so persistence can
-	// distinguish "user override I must restore on resume" from "agent default
-	// the agent will re-advertise on restart". See streams.AgentEvent for the
-	// full rationale.
-	UserInitiated bool `json:"user_initiated,omitempty"`
-
 	// Usage (attached to "complete" event)
 	Usage *streams.PromptUsage `json:"usage,omitempty"`
 

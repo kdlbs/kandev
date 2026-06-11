@@ -109,23 +109,3 @@ func TestEmitSetConfigOptionEvent_RewritesChangedOptionAndKeepsModel(t *testing.
 		t.Errorf("cachedConfig[reasoning_effort] mutated to %q; expected event-local copy only", cachedConfig[1].CurrentValue)
 	}
 }
-
-// TestEmitSetConfigOptionEvent_SkipsWhenValueUnchanged is the SetConfigOption
-// twin of TestEmitSetModelEvent_SkipsWhenValueUnchanged: the lifecycle resume
-// path replays profileConfigOptions via SetConfigOption on every resume; when
-// the agent already carries that value, emitting a UserInitiated convergence
-// event would let the orchestrator persist a fake user override and replay
-// it on the next resume, flickering the task into the Running bucket.
-func TestEmitSetConfigOptionEvent_SkipsWhenValueUnchanged(t *testing.T) {
-	a := newTestAdapter()
-	cachedConfig := []streams.ConfigOption{
-		{Type: "select", ID: "reasoning_effort", Name: "Reasoning", CurrentValue: "medium"},
-	}
-	a.emitSetConfigOptionEvent("sess-1", "reasoning_effort", "medium", nil, cachedConfig)
-	events := drainEvents(a)
-	for _, ev := range events {
-		if ev.Type == streams.EventTypeSessionModels {
-			t.Errorf("emitSetConfigOptionEvent broadcast a session_models event for a no-op set: %+v", ev)
-		}
-	}
-}

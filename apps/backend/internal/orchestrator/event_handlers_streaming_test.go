@@ -460,87 +460,34 @@ func TestSessionStateString(t *testing.T) {
 		sessionStateString(&models.TaskSession{State: models.TaskSessionStateRunning}))
 }
 
-// TestConfigOptionsEqual pins the comparator that persistSessionModelsState
-// uses to skip redundant UpdateTaskSession writes when the cached config
-// options haven't actually changed. Values arrive as interface{} from the
-// deserialized JSON snapshot but as strings from the freshly-built ACP
-// payload, so the comparator must coerce both sides through `.(string)`.
-func TestConfigOptionsEqual(t *testing.T) {
-	cases := []struct {
-		name     string
-		existing interface{}
-		next     map[string]interface{}
-		want     bool
-	}{
-		{name: "both empty", existing: nil, next: map[string]interface{}{}, want: true},
-		{name: "existing nil, next populated", existing: nil, next: map[string]interface{}{"model": "gpt-5"}, want: false},
-		{name: "existing populated, next empty", existing: map[string]interface{}{"model": "gpt-5"}, next: map[string]interface{}{}, want: false},
-		{name: "same keys and values", existing: map[string]interface{}{"model": "gpt-5", "reasoning_effort": "high"}, next: map[string]interface{}{"model": "gpt-5", "reasoning_effort": "high"}, want: true},
-		{name: "different value for same key", existing: map[string]interface{}{"reasoning_effort": "low"}, next: map[string]interface{}{"reasoning_effort": "high"}, want: false},
-		{name: "different key sets", existing: map[string]interface{}{"model": "gpt-5"}, next: map[string]interface{}{"reasoning_effort": "high"}, want: false},
-		{name: "existing is non-map type", existing: "not a map", next: map[string]interface{}{"model": "gpt-5"}, want: false},
-		{name: "existing is non-map type and next empty", existing: 42, next: map[string]interface{}{}, want: true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want, configOptionsEqual(tc.existing, tc.next))
-		})
-	}
-}
-
-// TestPersistSessionModelsState_UserInitiated pins the regression behind
-// issue: reasoning_effort etc were lost on page refresh because persistence
-// only wrote the `model` key. A user-initiated event now also lands the full
-// CurrentValues under `config_options` and the user-chosen model under
-// `user_model`, so backend-restart resume can replay them.
-func TestPersistSessionModelsState_UserInitiated(t *testing.T) {
+// TestPersistSessionModel pins the SSR-side behaviour of the session_models
+// event handler: a non-empty agent-reported model is written to
+// AgentProfileSnapshot["model"] so the model selector trigger doesn't flash
+// the profile default on a page reload before WS state catches up.
+func TestPersistSessionModel(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "step1")
 	svc := &Service{logger: testLogger(), repo: repo}
 
-	svc.persistSessionModelsState(ctx, "s1", "gpt-5.4", []streams.ConfigOption{
-		{ID: "model", Category: "model", CurrentValue: "gpt-5.4"},
-		{ID: "reasoning_effort", CurrentValue: "high"},
-		{ID: "empty_value", CurrentValue: ""}, // must be skipped
-	}, true)
+	svc.persistSessionModel(ctx, "s1", "gpt-5.4")
 
 	updated, err := repo.GetTaskSession(ctx, "s1")
 	require.NoError(t, err)
 	require.Equal(t, "gpt-5.4", updated.AgentProfileSnapshot["model"])
-	require.Equal(t, "gpt-5.4", updated.AgentProfileSnapshot["user_model"],
-		"user_model must be set when a user-initiated event changes the model")
-	opts, ok := updated.AgentProfileSnapshot["config_options"].(map[string]interface{})
-	require.True(t, ok, "config_options must be persisted under its own key on user-initiated events")
-	require.Equal(t, "gpt-5.4", opts["model"])
-	require.Equal(t, "high", opts["reasoning_effort"])
-	_, hasEmpty := opts["empty_value"]
-	require.False(t, hasEmpty, "options with empty CurrentValue must be skipped — there's nothing to restore on SSR")
-}
 
-// TestPersistSessionModelsState_AgentAdvertised verifies that an
-// agent-advertised (non-user-initiated) event still refreshes the SSR `model`
-// key but does NOT populate `user_model` or `config_options`. Replaying
-// agent-advertised defaults on backend restart would cycle the session
-// through STARTING / RUNNING and flicker the task into the sidebar's Running
-// bucket (see session-resume-keeps-review-state.spec.ts).
-func TestPersistSessionModelsState_AgentAdvertised(t *testing.T) {
-	ctx := context.Background()
-	repo := setupTestRepo(t)
-	seedSession(t, repo, "t1", "s1", "step1")
-	svc := &Service{logger: testLogger(), repo: repo}
-
-	svc.persistSessionModelsState(ctx, "s1", "mock-fast", []streams.ConfigOption{
-		{ID: "model", Category: "model", CurrentValue: "mock-fast"},
-		{ID: "effort", CurrentValue: "medium"},
-	}, false)
-
-	updated, err := repo.GetTaskSession(ctx, "s1")
+	// A no-op write must not touch the DB row, but the visible behaviour is
+	// the same: the snapshot still carries the previously-set value.
+	svc.persistSessionModel(ctx, "s1", "gpt-5.4")
+	again, err := repo.GetTaskSession(ctx, "s1")
 	require.NoError(t, err)
-	require.Equal(t, "mock-fast", updated.AgentProfileSnapshot["model"],
-		"`model` must mirror agent-advertised state for SSR display")
-	_, hasUserModel := updated.AgentProfileSnapshot["user_model"]
-	require.False(t, hasUserModel, "`user_model` must NOT be set from agent-advertised events")
-	_, hasConfigOptions := updated.AgentProfileSnapshot["config_options"]
-	require.False(t, hasConfigOptions, "`config_options` must NOT be persisted from agent-advertised events")
+	require.Equal(t, "gpt-5.4", again.AgentProfileSnapshot["model"])
+
+	// An empty model is a no-op (some agents emit session_models without a
+	// CurrentModelID before the first ConfigOptionUpdate). The previously
+	// persisted value must not be cleared.
+	svc.persistSessionModel(ctx, "s1", "")
+	preserved, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, "gpt-5.4", preserved.AgentProfileSnapshot["model"])
 }

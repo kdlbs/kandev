@@ -162,51 +162,21 @@ func (m *Manager) resolveProfileSessionConfig(ctx context.Context, profileID str
 // invokes the callback when there's no taskDescription/attachments to send, which is a *boot*
 // signal (the agent has never run a turn). When there IS a prompt, the callback is unused and
 // MarkReady fires later from handleCompleteEvent — that path is the true turn-end.
+//
+// Note: the only session-level override applied on resume is `mode` (see
+// effectiveSessionMode / issue #1183). We deliberately do NOT replay the
+// model or dynamic config options from AgentProfileSnapshot here. Agents
+// that support session/load preserve those values themselves; agents that
+// don't can use the profile defaults. Replaying snapshot state on every
+// resume issues redundant SetModel / SetConfigOption RPCs that cycle the
+// session through STARTING / RUNNING and flicker the task into the sidebar's
+// Running bucket (see session-resume-keeps-review-state.spec.ts).
+// SSR-side page-reload persistence still works because the model selector
+// reads `agent_profile_snapshot.model` directly.
 func (m *Manager) initializeACPSession(ctx context.Context, execution *AgentExecution, agentConfig agents.Agent, taskDescription string, attachments []MessageAttachment, mcpServers []agentctltypes.McpServer) error {
 	profileModel, profileMode, profileConfigOptions := m.resolveProfileSessionConfig(ctx, execution.AgentProfileID)
-	info := m.lookupSessionInfo(ctx, execution)
-	model := effectiveSessionValue(info, func(i *WorkspaceInfo) string { return i.SessionModel }, profileModel)
-	mode := effectiveSessionValue(info, func(i *WorkspaceInfo) string { return i.SessionMode }, profileMode)
-	configOptions := effectiveSessionConfigOptions(info, profileConfigOptions)
-	return m.sessionManager.InitializeAndPrompt(ctx, execution, agentConfig, taskDescription, attachments, mcpServers, m.MarkBootReady, model, mode, configOptions)
-}
-
-// lookupSessionInfo fetches the per-session overrides (mode, model, config
-// options) from the workspace info provider. Returns nil when no provider is
-// wired or the lookup fails — callers must fall back to the profile defaults.
-func (m *Manager) lookupSessionInfo(ctx context.Context, execution *AgentExecution) *WorkspaceInfo {
-	if m.workspaceInfoProvider == nil {
-		return nil
-	}
-	info, err := m.workspaceInfoProvider.GetWorkspaceInfoForSession(ctx, execution.TaskID, execution.SessionID)
-	if err != nil {
-		return nil
-	}
-	return info
-}
-
-// effectiveSessionValue returns the session-level override for a scalar field
-// (model, mode, …) when present, otherwise the profile fallback.
-func effectiveSessionValue(info *WorkspaceInfo, pick func(*WorkspaceInfo) string, fallback string) string {
-	if info == nil {
-		return fallback
-	}
-	if v := pick(info); v != "" {
-		return v
-	}
-	return fallback
-}
-
-// effectiveSessionConfigOptions returns the persisted session config options
-// when present, otherwise the profile defaults. The snapshot stores the full
-// set of options the agent advertised after the user's last change, so a
-// non-empty session map fully replaces the profile defaults (no merge) —
-// mirroring the model / mode override semantics. See issue #1183 / #1310.
-func effectiveSessionConfigOptions(info *WorkspaceInfo, profileOptions map[string]string) map[string]string {
-	if info == nil || len(info.SessionConfigOptions) == 0 {
-		return profileOptions
-	}
-	return info.SessionConfigOptions
+	mode := m.effectiveSessionMode(ctx, execution, profileMode)
+	return m.sessionManager.InitializeAndPrompt(ctx, execution, agentConfig, taskDescription, attachments, mcpServers, m.MarkBootReady, profileModel, mode, profileConfigOptions)
 }
 
 // effectiveSessionMode prefers a session-level permission mode persisted in the
@@ -216,5 +186,12 @@ func effectiveSessionConfigOptions(info *WorkspaceInfo, profileOptions map[strin
 // reverting to the profile default. Falls back to profileMode when no provider
 // is wired, the lookup fails, or no session mode is set. See issue #1183.
 func (m *Manager) effectiveSessionMode(ctx context.Context, execution *AgentExecution, profileMode string) string {
-	return effectiveSessionValue(m.lookupSessionInfo(ctx, execution), func(i *WorkspaceInfo) string { return i.SessionMode }, profileMode)
+	if m.workspaceInfoProvider == nil {
+		return profileMode
+	}
+	info, err := m.workspaceInfoProvider.GetWorkspaceInfoForSession(ctx, execution.TaskID, execution.SessionID)
+	if err != nil || info == nil || info.SessionMode == "" {
+		return profileMode
+	}
+	return info.SessionMode
 }
