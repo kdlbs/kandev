@@ -207,8 +207,10 @@ export async function fetchSessionData(sessionId: string): Promise<FetchedSessio
 }
 
 export async function fetchSessionDataForTask(taskId: string): Promise<FetchedSessionData> {
-  const task = await fetchTask(taskId, { cache: "no-store" });
-  const allSessionsResponse = await listTaskSessions(taskId, { cache: "no-store" });
+  const [task, allSessionsResponse] = await Promise.all([
+    fetchTask(taskId, { cache: "no-store" }),
+    listTaskSessions(taskId, { cache: "no-store" }),
+  ]);
   const sessions = allSessionsResponse.sessions ?? [];
 
   const sessionId = task.primary_session_id ?? sessions[0]?.id;

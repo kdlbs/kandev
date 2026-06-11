@@ -709,46 +709,46 @@ func (a *Adapter) SetConfigOption(ctx context.Context, configID, value string) e
 // option dropdowns in sync with the agent without waiting for an agent-driven
 // ConfigOptionUpdate.
 func (a *Adapter) emitSetConfigOptionEvent(sessionID, configID, value string, cachedModels []modelInfo, cachedConfig []streams.ConfigOption) {
-	outConfig := cachedConfig
 	if len(cachedConfig) == 0 {
 		// In normal operation session/new populates availableConfigOptions
 		// before the frontend can fire a SetConfigOption. Hitting this branch
 		// means we accepted the RPC against a cache that was never seeded —
-		// log it so it's observable during debugging.
-		a.logger.Warn("SetConfigOption succeeded but local config cache is empty; emitted event will carry no options",
+		// skip the convergence event entirely (an empty one would briefly
+		// blank the UI selectors) and rely on the agent's own
+		// ConfigOptionUpdate notification to correct the snapshot.
+		a.logger.Warn("SetConfigOption succeeded but local config cache is empty; skipping convergence event",
+			zap.String("session_id", sessionID),
+			zap.String("config_id", configID),
+		)
+		return
+	}
+	outConfig := make([]streams.ConfigOption, len(cachedConfig))
+	copy(outConfig, cachedConfig)
+	found := false
+	for i := range outConfig {
+		if outConfig[i].ID == configID {
+			outConfig[i].CurrentValue = value
+			found = true
+			break
+		}
+	}
+	if !found {
+		// The agent accepted a configID that wasn't in its own
+		// availableConfigOptions list — most likely a stale frontend cache
+		// or an agent-side drift between session/new and ConfigOptionUpdate.
+		// The event carries the unmutated CurrentValues; the agent's own
+		// ConfigOptionUpdate notification will correct the snapshot shortly.
+		a.logger.Warn("SetConfigOption: configID not in local cache; convergence event carries stale options",
 			zap.String("session_id", sessionID),
 			zap.String("config_id", configID),
 		)
 	}
-	if len(cachedConfig) > 0 {
-		outConfig = make([]streams.ConfigOption, len(cachedConfig))
-		copy(outConfig, cachedConfig)
-		found := false
-		for i := range outConfig {
-			if outConfig[i].ID == configID {
-				outConfig[i].CurrentValue = value
-				found = true
-				break
-			}
-		}
-		if !found {
-			// The agent accepted a configID that wasn't in its own
-			// availableConfigOptions list — most likely a stale frontend cache
-			// or an agent-side drift between session/new and ConfigOptionUpdate.
-			// The event carries the unmutated CurrentValues; the agent's own
-			// ConfigOptionUpdate notification will correct the snapshot shortly.
-			a.logger.Warn("SetConfigOption: configID not in local cache; convergence event carries stale options",
-				zap.String("session_id", sessionID),
-				zap.String("config_id", configID),
-			)
-		}
-		// Refresh the cached config options so consecutive SetConfigOption
-		// calls (or a follow-up SetModel) read the latest CurrentValues
-		// instead of the stale session/new snapshot.
-		a.mu.Lock()
-		a.availableConfigOptions = outConfig
-		a.mu.Unlock()
-	}
+	// Refresh the cached config options so consecutive SetConfigOption
+	// calls (or a follow-up SetModel) read the latest CurrentValues
+	// instead of the stale session/new snapshot.
+	a.mu.Lock()
+	a.availableConfigOptions = outConfig
+	a.mu.Unlock()
 
 	a.logger.Info("emitting session_models convergence event after SetConfigOption",
 		zap.String("session_id", sessionID),
