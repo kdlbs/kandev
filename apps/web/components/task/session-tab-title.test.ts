@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { resolveSessionTabTitle } from "./session-tab-title";
 
 const SPARK_MODEL_ID = "gpt-5.3-codex-spark";
+const SPARK_MODEL_NAME = "GPT-5.3-Codex-Spark";
 
 const baseArgs = {
   agentLabel: "GPT-5.5 (medium)",
@@ -18,9 +19,9 @@ describe("resolveSessionTabTitle", () => {
       resolveSessionTabTitle({
         ...baseArgs,
         activeModelId: SPARK_MODEL_ID,
-        modelOptions: [{ id: SPARK_MODEL_ID, name: "GPT-5.3-Codex-Spark" }],
+        modelOptions: [{ id: SPARK_MODEL_ID, name: SPARK_MODEL_NAME }],
       }),
-    ).toBe("GPT-5.3-Codex-Spark");
+    ).toBe(SPARK_MODEL_NAME);
   });
 
   it("includes non-model config selections in the title", () => {
@@ -36,7 +37,7 @@ describe("resolveSessionTabTitle", () => {
             currentValue: "gpt-5.5",
             options: [
               { value: "gpt-5.5", name: "GPT-5.5" },
-              { value: SPARK_MODEL_ID, name: "GPT-5.3-Codex-Spark" },
+              { value: SPARK_MODEL_ID, name: SPARK_MODEL_NAME },
             ],
           },
           {
@@ -51,11 +52,21 @@ describe("resolveSessionTabTitle", () => {
           },
         ],
       }),
-    ).toBe("GPT-5.3-Codex-Spark / High");
+    ).toBe(`${SPARK_MODEL_NAME} / High`);
   });
 
   it("falls back to the agent label when live model state is unavailable", () => {
     expect(resolveSessionTabTitle(baseArgs)).toBe("GPT-5.5 (medium)");
+  });
+
+  it("falls back to currentModelId when active model id is missing", () => {
+    expect(
+      resolveSessionTabTitle({
+        ...baseArgs,
+        currentModelId: SPARK_MODEL_ID,
+        modelOptions: [{ id: SPARK_MODEL_ID, name: SPARK_MODEL_NAME }],
+      }),
+    ).toBe(SPARK_MODEL_NAME);
   });
 
   it("keeps the agent label over the start-time snapshot model", () => {

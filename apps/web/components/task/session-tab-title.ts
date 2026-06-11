@@ -1,4 +1,5 @@
 import {
+  displayModelName,
   isModelConfigOption,
   type DynamicConfigOption,
   type ModelSelectorOption,
@@ -17,10 +18,6 @@ function optionName(option: DynamicConfigOption, value: string): string {
   return option.options?.find((item) => item.value === value)?.name ?? value;
 }
 
-function modelName(modelOptions: ModelSelectorOption[], modelId: string): string {
-  return modelOptions.find((model) => model.id === modelId)?.name ?? modelId;
-}
-
 function resolveModelTitle(
   args: ResolveSessionTabTitleArgs,
   modelId: string | null,
@@ -30,7 +27,7 @@ function resolveModelTitle(
   const modelConfig = args.configOptions.find(isModelConfigOption);
   const modelLabel = modelConfig
     ? optionName(modelConfig, modelId)
-    : modelName(args.modelOptions, modelId);
+    : displayModelName(args.modelOptions, modelId);
   const extras = args.configOptions
     .filter((option) => !isModelConfigOption(option))
     .map((option) => optionName(option, option.currentValue))

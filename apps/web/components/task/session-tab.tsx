@@ -52,22 +52,20 @@ function useSessionTabState(sessionId: string | undefined) {
     return state.taskSessions.items[sessionId]?.state ?? null;
   }) as TaskSessionState | null;
   const taskId = useAppStore((state) => state.tasks.activeTaskId);
-  const agentLabel = useAppStore((state) => {
-    if (!sessionId) return null;
-    const session = state.taskSessions.items[sessionId];
-    if (!session?.agent_profile_id) return null;
-    const profile = state.agentProfiles.items.find(
-      (p: { id: string }) => p.id === session.agent_profile_id,
-    );
-    if (!profile) return null;
-    const parts = profile.label.split(" \u2022 ");
-    return parts[1] || parts[0] || profile.label;
-  });
   const tabTitle = useAppStore((state) => {
     if (!sessionId) return null;
     const session = state.taskSessions.items[sessionId];
     const sessionModels = state.sessionModels.bySessionId[sessionId];
     const activeModelId = state.activeModel.bySessionId[sessionId] || null;
+    const agentLabel = (() => {
+      if (!session?.agent_profile_id) return null;
+      const profile = state.agentProfiles.items.find(
+        (p: { id: string }) => p.id === session.agent_profile_id,
+      );
+      if (!profile) return null;
+      const parts = profile.label.split(" \u2022 ");
+      return parts[1] || parts[0] || profile.label;
+    })();
     const snapshotModel =
       typeof session?.agent_profile_snapshot?.model === "string"
         ? session.agent_profile_snapshot.model

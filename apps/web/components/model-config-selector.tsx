@@ -77,7 +77,10 @@ function currentOptionName(option: DynamicConfigOption): string {
   );
 }
 
-function displayModelName(modelOptions: ModelSelectorOption[], currentModel: string): string {
+export function displayModelName(
+  modelOptions: ModelSelectorOption[],
+  currentModel: string,
+): string {
   return modelOptions.find((m) => m.id === currentModel)?.name ?? currentModel;
 }
 
