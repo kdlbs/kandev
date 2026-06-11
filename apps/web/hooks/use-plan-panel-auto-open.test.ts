@@ -177,6 +177,24 @@ describe("usePlanPanelAutoOpen — eager fetch", () => {
     expect(mockAddPlanPanel).not.toHaveBeenCalled();
   });
 
+  it("does not acknowledge a panel it just auto-opened when the eager fetch re-applies the plan", () => {
+    // First render: panel doesn't exist yet, so we auto-open it.
+    mockGetPanel.mockReturnValue(null);
+    const { rerender } = renderHook(() => usePlanPanelAutoOpen());
+    expect(mockAddPlanPanel).toHaveBeenCalledTimes(1);
+
+    // The eager getTaskPlan self-heal resolves after the WS push and
+    // re-applies an equivalent plan object (new reference, same updated_at),
+    // re-running the effect. By now the panel we added is registered, so
+    // getPanel returns it while lastSeen is still undefined. This must NOT
+    // mark the plan seen — that would suppress the indicator the user expects.
+    mockGetPanel.mockReturnValue({ id: "plan" });
+    mockPlan = agentPlan();
+    rerender();
+
+    expect(mockMarkTaskPlanSeen).not.toHaveBeenCalled();
+  });
+
   it("does not retry the eager fetch after a failure", async () => {
     mockIsLoaded = false;
     mockPlan = null;

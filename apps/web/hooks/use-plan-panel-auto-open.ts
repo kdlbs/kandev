@@ -39,6 +39,14 @@ export function usePlanPanelAutoOpen() {
   // reconnect can retry any failed or not-yet-attempted tasks.
   const attemptedRef = useRef<Set<string>>(new Set());
 
+  // Whether *this* hook added the plan panel for the current task. Lets the
+  // reload-heal branch below tell "panel restored from a saved layout" (heal)
+  // apart from "panel we just auto-opened" (don't heal). Reset per task.
+  const addedPlanPanelRef = useRef(false);
+  useEffect(() => {
+    addedPlanPanelRef.current = false;
+  }, [activeTaskId]);
+
   // Eagerly fetch the plan on task load. The Plan panel mounts `useTaskPlan`
   // only after the panel exists, so without this fetch a plan written by the
   // agent before the browser's WS connected (fast auto-start path) would never
@@ -90,10 +98,20 @@ export function usePlanPanelAutoOpen() {
       // every reload. When a live update arrives after the reload,
       // `lastSeen` is defined so we don't suppress it — PlanTab reads the
       // store directly and re-arms the indicator.
-      if (lastSeen === undefined) markTaskPlanSeen(plan.task_id);
+      //
+      // Guard on `addedPlanPanelRef`: only heal panels we did *not* add this
+      // session. Otherwise this branch misfires when our own addPlanPanel
+      // below re-triggers the effect — e.g. the eager getTaskPlan self-heal
+      // resolves after the WS push and re-applies an equivalent plan object —
+      // which would mark a freshly auto-opened plan seen and suppress the
+      // indicator the user must see.
+      if (lastSeen === undefined && !addedPlanPanelRef.current) {
+        markTaskPlanSeen(plan.task_id);
+      }
       return;
     }
 
+    addedPlanPanelRef.current = true;
     addPlanPanel({ quiet: true, inCenter: true });
   }, [api, isRestoringLayout, plan, lastSeen, addPlanPanel, markTaskPlanSeen]);
 }
