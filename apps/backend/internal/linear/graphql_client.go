@@ -538,10 +538,13 @@ func buildIssueFilter(f SearchFilter) map[string]interface{} {
 	out := map[string]interface{}{}
 	if q := strings.TrimSpace(f.Query); q != "" {
 		// Linear has no top-level free-text field, but `searchableContent`
-		// matches across title and description. When the query parses as a
-		// ticket identifier (ENG-123), OR an exact identifier match so users
-		// can find a ticket by ID — searchableContent never matches the
-		// identifier itself.
+		// matches across title and description. When the query looks like a
+		// ticket identifier (ENG-123) we OR in an exact team+number branch,
+		// because `searchableContent` never indexes the identifier itself —
+		// without the extra branch, searching by ID would return zero hits
+		// for the target ticket. We keep the `searchableContent` branch in
+		// the OR so cross-references like "duplicate of ENG-123" pasted into
+		// another issue's title or description still surface.
 		if teamKey, num, ok := parseIssueIdentifier(q); ok {
 			out["or"] = []map[string]interface{}{
 				{"searchableContent": map[string]interface{}{"contains": q}},
