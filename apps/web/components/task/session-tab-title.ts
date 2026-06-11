@@ -25,9 +25,12 @@ function resolveModelTitle(
   if (!modelId) return null;
 
   const modelConfig = args.configOptions.find(isModelConfigOption);
-  const modelLabel = modelConfig
-    ? optionName(modelConfig, modelId)
-    : displayModelName(args.modelOptions, modelId);
+  let modelLabel = displayModelName(args.modelOptions, modelId);
+  if (modelConfig) {
+    // Use caller-supplied modelId, not modelConfig.currentValue, so live
+    // active/current model switches are reflected immediately in the tab title.
+    modelLabel = optionName(modelConfig, modelId);
+  }
   const extras = args.configOptions
     .filter((option) => !isModelConfigOption(option))
     .map((option) => optionName(option, option.currentValue))
