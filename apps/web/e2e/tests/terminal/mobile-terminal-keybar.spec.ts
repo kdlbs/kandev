@@ -43,7 +43,7 @@ async function seedTaskWithSession(
  * xterm focuses its hidden textarea.
  */
 async function focusTerminalForTyping(session: SessionPage): Promise<void> {
-  await session.terminal.locator(".xterm").click();
+  await session.terminal.locator(".xterm").last().click();
 }
 
 /**
