@@ -109,3 +109,20 @@ func TestEmitSetConfigOptionEvent_RewritesChangedOptionAndKeepsModel(t *testing.
 		t.Errorf("cachedConfig[reasoning_effort] mutated to %q; expected event-local copy only", cachedConfig[1].CurrentValue)
 	}
 }
+
+// TestEmitSetConfigOptionEvent_SkipsWhenCacheEmpty pins that when the local
+// config cache hasn't been seeded yet (e.g. the agent hasn't sent its first
+// ConfigOptionUpdate), emitSetConfigOptionEvent returns without emitting any
+// event rather than broadcasting a blank session_models frame that would
+// temporarily clear the UI's model selector. The agent's own ConfigOptionUpdate
+// remains the authoritative event for this path.
+func TestEmitSetConfigOptionEvent_SkipsWhenCacheEmpty(t *testing.T) {
+	a := newTestAdapter()
+
+	a.emitSetConfigOptionEvent("sess-1", "reasoning_effort", "high", nil, nil)
+
+	events := drainEvents(a)
+	if len(events) != 0 {
+		t.Fatalf("expected 0 events when cachedConfig is empty; got %d", len(events))
+	}
+}
