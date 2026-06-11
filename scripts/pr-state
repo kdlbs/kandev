@@ -197,7 +197,7 @@ else
   if [[ "$PR" =~ ^[0-9]+$ ]]; then
     pr_json="$(jq -cn --argjson number "$PR" '{number: $number, branch: "unknown"}')"
   else
-    pr_json="$(jq -cn --arg pr "$PR" '{number: $pr, branch: "unknown"}')"
+    pr_json="$(jq -cn --arg branch "$PR" '{number: null, branch: $branch}')"
   fi
   add_error "pr_view" "gh pr view failed"
 fi

@@ -521,7 +521,8 @@ func (r *Repository) UpdateTaskSessionState(ctx context.Context, id string, stat
 // task's sessions independent of agent-process teardown.
 func (r *Repository) CancelActiveTaskSessionsByTaskID(ctx context.Context, taskID, reason string) (int64, error) {
 	now := time.Now().UTC()
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	writeCtx := context.WithoutCancel(ctx)
+	result, err := r.db.ExecContext(writeCtx, r.db.Rebind(`
 		UPDATE task_sessions
 		SET state = ?, error_message = ?, completed_at = ?, updated_at = ?
 		WHERE task_id = ?

@@ -54,6 +54,11 @@ if [[ "${GH_FAIL_GRAPHQL:-0}" == "1" && "$1" == "api" && "$2" == "graphql" ]]; t
   exit 1
 fi
 
+if [[ "${GH_FAIL_PR_VIEW:-0}" == "1" && "$1" == "pr" && "$2" == "view" ]]; then
+  echo "pr view failed" >&2
+  exit 1
+fi
+
 if [[ "${GH_FAIL_REPO:-0}" == "1" && "$1" == "repo" && "$2" == "view" ]]; then
   echo "repo view failed" >&2
   exit 1
@@ -296,6 +301,21 @@ test_partial_failure_records_error_but_keeps_other_data() {
   pass "partial failure records error but keeps other data"
 }
 
+test_pr_view_failure_with_non_numeric_ref_keeps_schema() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  local json
+  GH_FAIL_PR_VIEW=1 PATH="$tmp/bin:$PATH" "$SCRIPT" feat/pr-state >"$tmp/out.json"
+  json="$(<"$tmp/out.json")"
+
+  assert_jq "pr number is null on ref-based invocation" '.pr.number == null' "$json"
+  assert_jq "pr branch preserved" '.pr.branch == "feat/pr-state"' "$json"
+  assert_jq "pr_view error recorded" '.errors[] | select(.source == "pr_view") | .message == "gh pr view failed"' "$json"
+  pass "pr_view failure keeps schema stable for non-numeric refs"
+}
+
 test_repo_failure_skips_review_threads() {
   local tmp
   make_tmp_dir tmp
@@ -349,6 +369,7 @@ test_graphql_pagination_collects_all_threads() {
 
 test_snapshot_happy_path
 test_partial_failure_records_error_but_keeps_other_data
+test_pr_view_failure_with_non_numeric_ref_keeps_schema
 test_repo_failure_skips_review_threads
 test_graphql_failure_records_error_but_keeps_other_data
 test_graphql_pagination_collects_all_threads

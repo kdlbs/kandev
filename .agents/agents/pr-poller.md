@@ -125,12 +125,12 @@ The `claude_summary` line carries the **latest** Claude summary's structured fin
      }' -f owner=":owner" -f repo=":repo" -F num=<num> --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length'
    ```
 
-5. **Fallback only: count bot issue comments** (CodeRabbit walkthrough, fork-Claude findings, etc.). Skip this when `scripts/pr-state` already returned `.issue_comments` without an `issue_comments` error:
+5. **Fallback only: count bot issue comments** (CodeRabbit walkthrough, fork-Claude findings, etc.). Skip this when `scripts/pr-state` already returned `.issue_comments` without a `pr_view` error:
    ```bash
    gh pr view <num> --json comments --jq '[.comments[] | select(.author.login | IN("coderabbitai","github-actions"))] | length'
    ```
 
-6. **Fallback only: parse the latest Claude summary** for structured findings. Skip this when `scripts/pr-state` already returned `.issue_comments` without an `issue_comments` error. Claude posts its review summary as an *issue comment* (not a review) — either as `claude[bot]` (same-repo app) or as `github-actions` with a body that begins `**Claude finished ` (fork path). Each summary ends with a markdown table of the form `| Blocker | <N> |` / `| Suggestion | <N> |` and a `**Verdict:** ...` line. Read only the **latest** such comment — earlier summaries reflect previous commit states.
+6. **Fallback only: parse the latest Claude summary** for structured findings. Skip this when `scripts/pr-state` already returned `.issue_comments` without a `pr_view` error. Claude posts its review summary as an *issue comment* (not a review) — either as `claude[bot]` (same-repo app) or as `github-actions` with a body that begins `**Claude finished ` (fork path). Each summary ends with a markdown table of the form `| Blocker | <N> |` / `| Suggestion | <N> |` and a `**Verdict:** ...` line. Read only the **latest** such comment — earlier summaries reflect previous commit states.
 
    ```bash
    body=$(gh api repos/:owner/:repo/issues/<num>/comments --jq '
