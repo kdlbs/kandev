@@ -140,7 +140,7 @@ export class SessionPage {
     const attemptTimeout =
       opts.attemptTimeout ?? Math.min(15_000, Math.max(5_000, Math.floor(softTotalTimeout / 3)));
     const pollSlice = 1_500;
-    const idle = this.idleInput();
+    const idle = this.anyIdleInput();
     const start = Date.now();
     let reloaded = false;
 
@@ -297,6 +297,14 @@ export class SessionPage {
   /** Chat input placeholder when agent is idle (default mode). */
   idleInput(): Locator {
     return this.page.locator('[data-placeholder="Continue working on the task..."]');
+  }
+
+  /** Chat input placeholder when agent is idle in any current mode. */
+  anyIdleInput(): Locator {
+    return this.page
+      .locator('[data-placeholder="Continue working on the task..."]')
+      .or(this.page.locator('[data-placeholder="Continue working on the plan..."]'))
+      .or(this.page.locator('[data-placeholder="Continue working on the file..."]'));
   }
 
   /** Chat input placeholder when agent is idle (plan mode). */
