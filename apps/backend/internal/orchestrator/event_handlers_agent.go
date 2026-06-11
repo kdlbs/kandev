@@ -25,9 +25,19 @@ func (s *Service) handleAgentRunning(ctx context.Context, data watcher.AgentEven
 		return
 	}
 
-	// Process on_turn_start workflow events (step transitions).
-	// For ACP sessions this happens in the message handler before PromptTask;
-	// for passthrough it happens here when the PTY detects user input.
+	// agent.running fires whenever the agent process starts running — including
+	// the boot of a silent resume after a backend restart (session/new fallback
+	// for agents without native resume, or a session/load reconnect), where no
+	// turn is actually in flight. ACP sessions drive RUNNING from the
+	// prompt-dispatch path (PromptTask / dispatchPromptAsync) and stream
+	// tool/message events, so reacting to the boot signal here would only flicker
+	// a settled WAITING_FOR_INPUT task into the Running bucket during resume.
+	// Passthrough sessions have no PromptTask, so agent.running IS their
+	// turn-start signal: handle on_turn_start and move the session to RUNNING.
+	if !s.agentManager.IsPassthroughSession(ctx, data.SessionID) {
+		return
+	}
+
 	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
 	if err != nil {
 		s.logger.Warn("failed to load session for agent running",
@@ -39,11 +49,9 @@ func (s *Service) handleAgentRunning(ctx context.Context, data watcher.AgentEven
 	// on_turn_start is only needed for passthrough sessions where there's
 	// no PromptTask call to handle it. For ACP sessions, PromptTask or
 	// dispatchPromptAsync already processes on_turn_start.
-	if s.agentManager.IsPassthroughSession(ctx, data.SessionID) {
-		s.processOnTurnStartViaEngine(ctx, data.TaskID, session)
-	}
+	s.processOnTurnStartViaEngine(ctx, data.TaskID, session)
 
-	// Move session to running and task to in progress
+	// Move session to running and task to in progress.
 	s.setSessionRunning(ctx, data.TaskID, data.SessionID, session)
 }
 

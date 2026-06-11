@@ -27,7 +27,11 @@ test.describe("PR watcher dockview layout stability", () => {
     seedData,
     backend,
   }) => {
-    test.setTimeout(120_000);
+    // The review watcher auto-starts a mock agent for each of the 3 PR tasks,
+    // so 3 git checkouts + agent boots run concurrently up front. Under CI shard
+    // contention that inherent workload, plus three subsequent session
+    // navigations, can outlast the default budget — give the whole flow headroom.
+    test.setTimeout(180_000);
 
     // --- Register the GitHub repo so the PR watcher can resolve it to a real
     // local path (the seed repo created in test-base.ts has no provider info,
@@ -140,15 +144,22 @@ test.describe("PR watcher dockview layout stability", () => {
     const prTask2Title = "PR #202: Add dashboard";
     const prTask3Title = "PR #303: Update docs";
 
-    await expect(kanban.taskCardInColumn(prTask1Title, reviewStep.id)).toBeVisible({
-      timeout: 60_000,
-    });
-    await expect(kanban.taskCardInColumn(prTask2Title, reviewStep.id)).toBeVisible({
-      timeout: 60_000,
-    });
-    await expect(kanban.taskCardInColumn(prTask3Title, reviewStep.id)).toBeVisible({
-      timeout: 60_000,
-    });
+    // Poll for all 3 cards together in one shared budget rather than three
+    // independent per-card waits. The cards are created concurrently and render
+    // out of order under load; waiting for the whole set at once avoids
+    // cumulative per-card timeout pressure and settles as soon as all 3 appear.
+    const prTaskTitles = [prTask1Title, prTask2Title, prTask3Title];
+    await expect
+      .poll(
+        async () => {
+          const visible = await Promise.all(
+            prTaskTitles.map((title) => kanban.taskCardInColumn(title, reviewStep.id).isVisible()),
+          );
+          return visible.filter(Boolean).length;
+        },
+        { timeout: 90_000, intervals: [500, 1_000, 2_000] },
+      )
+      .toBe(3);
 
     // --- Click PR task 1 to enter session view ---
     await kanban.taskCardInColumn(prTask1Title, reviewStep.id).click();

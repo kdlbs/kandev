@@ -1088,6 +1088,60 @@ func TestHandleAgentRunning_PassthroughGuard(t *testing.T) {
 	})
 }
 
+// TestHandleAgentRunning_DoesNotWakeWaitingAcpSession is the regression guard for
+// the silent-resume flicker (session-resume-keeps-review-state e2e). On resume,
+// the agent.running boot event fires for the reconnecting ACP session; it must
+// NOT wake a settled WAITING_FOR_INPUT session to RUNNING (which would displace
+// the task into the Running sidebar bucket). ACP turns drive RUNNING via the
+// prompt path instead. Passthrough sessions, which have no prompt path, must
+// still wake on agent.running.
+func TestHandleAgentRunning_DoesNotWakeWaitingAcpSession(t *testing.T) {
+	ctx := context.Background()
+
+	settleWaiting := func(t *testing.T, repo *sqliterepo.Repository) {
+		t.Helper()
+		if err := repo.UpdateTaskSessionState(ctx, "s1", models.TaskSessionStateWaitingForInput, ""); err != nil {
+			t.Fatalf("failed to settle session to WAITING_FOR_INPUT: %v", err)
+		}
+	}
+
+	t.Run("ACP boot does not wake session", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		settleWaiting(t, repo)
+
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(),
+			&mockAgentManager{isPassthrough: false})
+		svc.handleAgentRunning(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
+
+		sess, err := repo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("failed to get session: %v", err)
+		}
+		if sess.State != models.TaskSessionStateWaitingForInput {
+			t.Errorf("ACP agent.running boot must keep session WAITING_FOR_INPUT, got %q", sess.State)
+		}
+	})
+
+	t.Run("passthrough turn wakes session", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		settleWaiting(t, repo)
+
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(),
+			&mockAgentManager{isPassthrough: true})
+		svc.handleAgentRunning(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
+
+		sess, err := repo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("failed to get session: %v", err)
+		}
+		if sess.State != models.TaskSessionStateRunning {
+			t.Errorf("passthrough agent.running must wake session to RUNNING, got %q", sess.State)
+		}
+	})
+}
+
 func TestDeliverPassthroughPrompt(t *testing.T) {
 	ctx := context.Background()
 
