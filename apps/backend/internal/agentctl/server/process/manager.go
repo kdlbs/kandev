@@ -4,15 +4,18 @@ package process
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
@@ -728,7 +731,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	// Start the subprocess now that pipes are connected
 	if err := m.cmd.Start(); err != nil {
 		m.status.Store(StatusError)
-		return fmt.Errorf("failed to start agent: %w", err)
+		return formatAgentStartError(err, m.cfg.AgentEnv)
 	}
 
 	m.stopCh = make(chan struct{})
@@ -881,13 +884,74 @@ func (m *Manager) buildFinalCommand() error {
 	// (npx -> sh -> node -> opencode binary).
 	setProcGroup(m.cmd)
 
+	envBytes, largestEnv := summarizeEnvBytes(m.cfg.AgentEnv, 3)
 	m.logger.Info("agent command prepared",
 		zap.Strings("args", m.cfg.AgentArgs),
 		zap.Strings("extra_args", extraArgs),
 		zap.String("workdir", m.cfg.WorkDir),
-		zap.Int("env_count", len(m.cfg.AgentEnv)))
+		zap.Int("env_count", len(m.cfg.AgentEnv)),
+		zap.Int("env_bytes", envBytes),
+		zap.String("largest_env_keys", formatEnvEntrySizes(largestEnv)))
 
 	return nil
+}
+
+type envEntrySize struct {
+	key   string
+	bytes int
+}
+
+func formatAgentStartError(err error, env []string) error {
+	if isArgumentListTooLong(err) {
+		total, largest := summarizeEnvBytes(env, 3)
+		return fmt.Errorf(
+			"failed to start agent: environment/arguments too large; env_bytes=%d largest_env_keys=%s: %w",
+			total, formatEnvEntrySizes(largest), err,
+		)
+	}
+	return fmt.Errorf("failed to start agent: %w", err)
+}
+
+func isArgumentListTooLong(err error) bool {
+	if errors.Is(err, syscall.E2BIG) {
+		return true
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "argument list too long")
+}
+
+func summarizeEnvBytes(env []string, limit int) (int, []envEntrySize) {
+	entries := make([]envEntrySize, 0, len(env))
+	total := 0
+	for _, item := range env {
+		size := len(item) + 1
+		total += size
+		key := item
+		if idx := strings.IndexByte(item, '='); idx >= 0 {
+			key = item[:idx]
+		}
+		entries = append(entries, envEntrySize{key: key, bytes: size})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].bytes == entries[j].bytes {
+			return entries[i].key < entries[j].key
+		}
+		return entries[i].bytes > entries[j].bytes
+	})
+	if limit > 0 && len(entries) > limit {
+		entries = entries[:limit]
+	}
+	return total, entries
+}
+
+func formatEnvEntrySizes(entries []envEntrySize) string {
+	if len(entries) == 0 {
+		return "[]"
+	}
+	parts := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		parts = append(parts, fmt.Sprintf("%s:%d", entry.key, entry.bytes))
+	}
+	return "[" + strings.Join(parts, ",") + "]"
 }
 
 func (m *Manager) ensureAgentTempEnv() error {

@@ -70,9 +70,10 @@ Your session ends. The orchestrator will wake you with reason
 ## On wakeup after resolution
 
 When you wake with `KANDEV_WAKE_REASON=task_blockers_resolved`, parse
-`$KANDEV_WAKE_PAYLOAD_JSON` for the resolved blocker titles, then continue
-your work incorporating the human's decision (visible in the resolved task's
-comments or description).
+`$KANDEV_WAKE_PAYLOAD_JSON` for the resolved blocker titles. If it is absent,
+read the JSON file at `$KANDEV_WAKE_PAYLOAD_PATH` instead. Then continue your
+work incorporating the human's decision (visible in the resolved task's comments
+or description).
 
 ## Rules
 

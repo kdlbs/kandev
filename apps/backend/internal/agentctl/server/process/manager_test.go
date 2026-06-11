@@ -2,8 +2,12 @@ package process
 
 import (
 	"context"
+	"errors"
 	"io"
+	"os"
 	"os/exec"
+	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
@@ -140,4 +144,26 @@ func TestManager_Start_PipesCreatedBeforeProcessStart(t *testing.T) {
 	// Clean up: close stdin so cat exits, then wait.
 	_ = m.stdin.Close()
 	_ = m.cmd.Wait()
+}
+
+func TestFormatAgentStartError_E2BIGIncludesEnvDiagnostics(t *testing.T) {
+	err := formatAgentStartError(&os.PathError{Op: "fork/exec", Path: "npx", Err: syscall.E2BIG}, []string{
+		"SMALL=1",
+		"KANDEV_WAKE_PAYLOAD_JSON=" + strings.Repeat("x", 100),
+		"PATH=/usr/bin",
+	})
+
+	msg := err.Error()
+	if !strings.Contains(msg, "environment/arguments too large") {
+		t.Fatalf("missing actionable E2BIG message: %s", msg)
+	}
+	if !strings.Contains(msg, "env_bytes=") {
+		t.Fatalf("missing env byte diagnostics: %s", msg)
+	}
+	if !strings.Contains(msg, "KANDEV_WAKE_PAYLOAD_JSON") {
+		t.Fatalf("missing largest env key diagnostics: %s", msg)
+	}
+	if !errors.Is(err, syscall.E2BIG) {
+		t.Fatalf("formatted error must preserve E2BIG wrapping: %v", err)
+	}
 }

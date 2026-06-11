@@ -2,7 +2,14 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -148,15 +155,158 @@ func TestBuildEnvForExecution_ResolvesSecretBackedProfileEnv(t *testing.T) {
 		EnvVars: []settingsmodels.ProfileEnvVar{{Key: "FROM_SECRET", SecretID: "sec-1"}},
 	}
 
-	env := mgr.buildEnvForExecution(
+	env, err := mgr.buildEnvForExecution(
 		context.Background(),
 		"exec-1",
 		&LaunchRequest{AgentProfileID: "profile-1"},
 		nil,
 		profileInfo,
 	)
+	if err != nil {
+		t.Fatalf("buildEnvForExecution: %v", err)
+	}
 	if env["FROM_SECRET"] != "revealed" {
 		t.Fatalf("FROM_SECRET: got %q want revealed", env["FROM_SECRET"])
+	}
+}
+
+func TestBuildEnvForExecution_DoesNotCopyTaskDescriptionToEnv(t *testing.T) {
+	mgr := newTestManager(t)
+	env, err := mgr.buildEnvForExecution(
+		context.Background(),
+		"exec-1",
+		&LaunchRequest{
+			TaskID:          "task-1",
+			SessionID:       "session-1",
+			AgentProfileID:  "profile-1",
+			TaskDescription: strings.Repeat("large prompt\n", 1000),
+		},
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("buildEnvForExecution: %v", err)
+	}
+
+	if _, exists := env["TASK_DESCRIPTION"]; exists {
+		t.Fatalf("TASK_DESCRIPTION must not be copied into subprocess env")
+	}
+	if env["KANDEV_TASK_ID"] != "task-1" {
+		t.Fatalf("KANDEV_TASK_ID = %q, want task-1", env["KANDEV_TASK_ID"])
+	}
+}
+
+func TestBuildEnvForExecution_SpillsLargeWakePayloadToWorkspaceFile(t *testing.T) {
+	mgr := newTestManager(t)
+	workspace := t.TempDir()
+	payload := strings.Repeat("x", envWakePayloadInlineMax+1)
+
+	env, err := mgr.buildEnvForExecution(
+		context.Background(),
+		"exec-1",
+		&LaunchRequest{
+			TaskID:         "task-1",
+			SessionID:      "session-1",
+			AgentProfileID: "profile-1",
+			WorkspacePath:  workspace,
+			Env: map[string]string{
+				"KANDEV_RUN_ID":            "run-1",
+				"KANDEV_WAKE_PAYLOAD_JSON": payload,
+			},
+		},
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("buildEnvForExecution: %v", err)
+	}
+	if _, exists := env["KANDEV_WAKE_PAYLOAD_JSON"]; exists {
+		t.Fatalf("large wake payload must not remain inline in env")
+	}
+	relPath := env["KANDEV_WAKE_PAYLOAD_PATH"]
+	if relPath == "" {
+		t.Fatalf("KANDEV_WAKE_PAYLOAD_PATH missing from env: %+v", env)
+	}
+	got, err := os.ReadFile(filepath.Join(workspace, filepath.FromSlash(relPath)))
+	if err != nil {
+		t.Fatalf("read spilled payload: %v", err)
+	}
+	if string(got) != payload {
+		t.Fatalf("spilled payload mismatch")
+	}
+}
+
+func TestConfigureAndStartAgent_DoesNotSendTaskDescriptionEnv(t *testing.T) {
+	mgr := newTestManager(t)
+	var configuredEnv map[string]string
+	client := newConfigureCaptureAgentctlClient(t, newTestLogger(), &configuredEnv)
+	execution := &AgentExecution{
+		ID:             "exec-1",
+		TaskID:         "task-1",
+		SessionID:      "session-1",
+		AgentProfileID: "profile-1",
+		AgentCommand:   "npx -y @zed-industries/codex-acp",
+		WorkspacePath:  t.TempDir(),
+		Metadata: map[string]interface{}{
+			"runtime_env":      map[string]string{"KEEP_ME": "yes"},
+			"task_description": strings.Repeat("large prompt\n", 1000),
+		},
+		agentctl: client,
+	}
+
+	bootCommand, err := mgr.configureAndStartAgent(context.Background(), execution, getTaskDescriptionFromMetadata(execution), "never")
+	if err != nil {
+		t.Fatalf("configureAndStartAgent() error = %v", err)
+	}
+	if bootCommand != "npx -y @zed-industries/codex-acp" {
+		t.Fatalf("bootCommand = %q, want agent command", bootCommand)
+	}
+	if configuredEnv["KEEP_ME"] != "yes" {
+		t.Fatalf("runtime_env was not preserved: %+v", configuredEnv)
+	}
+	if _, exists := configuredEnv["TASK_DESCRIPTION"]; exists {
+		t.Fatalf("TASK_DESCRIPTION must not be sent to agentctl configure env")
+	}
+}
+
+func TestConfigureAndStartAgent_SpillsLargeWakePayloadEnv(t *testing.T) {
+	mgr := newTestManager(t)
+	var configuredEnv map[string]string
+	workspace := t.TempDir()
+	client := newConfigureCaptureAgentctlClient(t, newTestLogger(), &configuredEnv)
+	payload := strings.Repeat("x", envWakePayloadInlineMax+1)
+	execution := &AgentExecution{
+		ID:             "exec-1",
+		TaskID:         "task-1",
+		SessionID:      "session-1",
+		AgentProfileID: "profile-1",
+		AgentCommand:   "npx -y @zed-industries/codex-acp",
+		WorkspacePath:  workspace,
+		Metadata: map[string]interface{}{
+			"runtime_env": map[string]string{
+				"KANDEV_RUN_ID":            "run-2",
+				"KANDEV_WAKE_PAYLOAD_JSON": payload,
+			},
+		},
+		agentctl: client,
+	}
+
+	if _, err := mgr.configureAndStartAgent(context.Background(), execution, "", "never"); err != nil {
+		t.Fatalf("configureAndStartAgent() error = %v", err)
+	}
+	if _, exists := configuredEnv["KANDEV_WAKE_PAYLOAD_JSON"]; exists {
+		t.Fatalf("large wake payload must not be sent inline to agentctl configure env")
+	}
+	relPath := configuredEnv["KANDEV_WAKE_PAYLOAD_PATH"]
+	if relPath == "" {
+		t.Fatalf("KANDEV_WAKE_PAYLOAD_PATH missing from env: %+v", configuredEnv)
+	}
+	got, err := os.ReadFile(filepath.Join(workspace, filepath.FromSlash(relPath)))
+	if err != nil {
+		t.Fatalf("read spilled payload: %v", err)
+	}
+	if string(got) != payload {
+		t.Fatalf("spilled payload mismatch")
 	}
 }
 
@@ -189,6 +339,44 @@ func TestSetExecutionEnv_DoesNotSnapshotProfileEnvVars(t *testing.T) {
 	if _, exists := runtimeEnv["PROFILE_ONLY"]; exists {
 		t.Fatalf("profile env vars must not be snapshotted into runtime_env: %+v", runtimeEnv)
 	}
+}
+
+func newConfigureCaptureAgentctlClient(t *testing.T, log *logger.Logger, captured *map[string]string) *agentctl.Client {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/agent/configure":
+			var req struct {
+				Env map[string]string `json:"env"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Errorf("decode configure request: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			*captured = req.Env
+			_, _ = w.Write([]byte(`{"success":true}`))
+		case "/api/v1/start":
+			_, _ = w.Write([]byte(`{"success":true,"command":"npx -y @zed-industries/codex-acp"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse test server URL: %v", err)
+	}
+	host, portString, err := net.SplitHostPort(parsed.Host)
+	if err != nil {
+		t.Fatalf("split test server host: %v", err)
+	}
+	port, err := strconv.Atoi(portString)
+	if err != nil {
+		t.Fatalf("parse test server port: %v", err)
+	}
+	return agentctl.NewClient(host, port, log)
 }
 
 // trackingPreparer records whether Prepare was called.

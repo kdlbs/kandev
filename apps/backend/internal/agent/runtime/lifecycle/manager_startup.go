@@ -224,7 +224,7 @@ func (m *Manager) finalizeBootMessage(execution *AgentExecution, msg *models.Mes
 
 // buildEnvForExecution builds environment variables for any runtime.
 // This is the unified method used by the runtime interface.
-func (m *Manager) buildEnvForExecution(ctx context.Context, executionID string, req *LaunchRequest, agentConfig agents.Agent, profileInfo *AgentProfileInfo) map[string]string {
+func (m *Manager) buildEnvForExecution(ctx context.Context, executionID string, req *LaunchRequest, agentConfig agents.Agent, profileInfo *AgentProfileInfo) (map[string]string, error) {
 	env := make(map[string]string)
 
 	// Copy request environment
@@ -243,7 +243,6 @@ func (m *Manager) buildEnvForExecution(ctx context.Context, executionID string, 
 	env["KANDEV_TASK_ID"] = req.TaskID
 	env["KANDEV_SESSION_ID"] = req.SessionID
 	env["KANDEV_AGENT_PROFILE_ID"] = req.AgentProfileID
-	env["TASK_DESCRIPTION"] = req.TaskDescription
 
 	// Add agent runtime default env vars (e.g., MCP_TIMEOUT for Claude Code)
 	if agentConfig != nil {
@@ -265,7 +264,11 @@ func (m *Manager) buildEnvForExecution(ctx context.Context, executionID string, 
 		}
 	}
 
-	return env
+	if err := spillLargeWakePayloadEnv(env, req.WorkspacePath, m.logger.Zap()); err != nil {
+		return nil, err
+	}
+
+	return env, nil
 }
 
 // waitForAgentctlReady waits for the agentctl HTTP server to be ready.

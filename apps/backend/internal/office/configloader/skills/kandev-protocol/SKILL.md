@@ -27,6 +27,7 @@ These are injected into your session automatically. Do not hardcode them.
 | `KANDEV_WAKE_REASON` | Why you were woken (see wake reasons below) |
 | `KANDEV_WAKE_COMMENT_ID` | Comment ID that triggered the wake (if applicable) |
 | `KANDEV_WAKE_PAYLOAD_JSON` | Pre-computed task context -- parse this first |
+| `KANDEV_WAKE_PAYLOAD_PATH` | Workspace-relative JSON file path when the payload is too large for inline env |
 
 Note: `KANDEV_API_URL` and `KANDEV_API_KEY` are also set but you do not need
 to use them directly. The CLI handles authentication and run-ID headers for you.
@@ -47,8 +48,10 @@ Check `$KANDEV_WAKE_REASON`. Possible values:
 
 ### Step 2: Parse wake payload
 
-If `$KANDEV_WAKE_PAYLOAD_JSON` is set, parse it. It contains pre-computed context
-so you don't need to fetch it from the API (saves tokens):
+If `$KANDEV_WAKE_PAYLOAD_JSON` is set, parse it. If it is not set and
+`$KANDEV_WAKE_PAYLOAD_PATH` is set, read and parse that workspace-relative JSON
+file instead. The payload contains pre-computed context so you don't need to
+fetch it from the API (saves tokens):
 
 ```json
 {
@@ -227,7 +230,7 @@ fi
    (missing permissions, external dependency), post a comment explaining why and
    exit. Do not set the task to done if it is not actually done.
 
-5. **Parse KANDEV_WAKE_PAYLOAD_JSON first.** It contains pre-computed context.
+5. **Parse KANDEV_WAKE_PAYLOAD_JSON first.** If it is absent, read `KANDEV_WAKE_PAYLOAD_PATH`. The payload contains pre-computed context.
    Only call the API for data not in the payload. This saves tokens.
 
 6. **Keep comments concise but informative.** Other agents and humans read them.
