@@ -41,6 +41,18 @@ test.describe("Office onboarding — mobile layout", () => {
     expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
   });
 
+  test("close button returns to homepage on mobile when adding a workspace", async ({
+    testPage,
+    officeSeed: _,
+  }) => {
+    await testPage.goto(SETUP_ROUTE);
+    await expect(testPage.getByRole("heading", { name: STEP_0_HEADING })).toBeVisible();
+
+    await testPage.getByRole("button", { name: "Cancel" }).tap();
+
+    await expect(testPage).toHaveURL(/\/$/, { timeout: 10_000 });
+  });
+
   test("agent step (Step 1) fits within the viewport horizontally", async ({
     testPage,
     officeSeed: _,

@@ -74,7 +74,7 @@ test.describe("Onboarding", () => {
     });
   });
 
-  test('"Add workspace" button navigates to setup with mode=new', async ({
+  test('"Add workspace" button opens setup and close returns to homepage', async ({
     testPage,
     officeSeed: _,
   }) => {
@@ -91,9 +91,12 @@ test.describe("Onboarding", () => {
     ).toBeVisible({
       timeout: 10_000,
     });
+
+    await testPage.getByRole("button", { name: "Cancel" }).click();
+    await expect(testPage).toHaveURL(/\/$/, { timeout: 10_000 });
   });
 
-  test("cancel button returns to dashboard when adding a new workspace", async ({
+  test("cancel button returns to homepage when adding a new workspace", async ({
     testPage,
     officeSeed: _,
   }) => {
@@ -104,10 +107,7 @@ test.describe("Onboarding", () => {
 
     await testPage.getByRole("button", { name: "Cancel" }).click();
 
-    await expect(testPage).toHaveURL(/\/office$/, { timeout: 10_000 });
-    await expect(testPage.getByRole("heading", { name: /Dashboard/i }).first()).toBeVisible({
-      timeout: 10_000,
-    });
+    await expect(testPage).toHaveURL(/\/$/, { timeout: 10_000 });
   });
 
   test("inline CLI profile creation selects the profile for the new agent", async ({

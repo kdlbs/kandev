@@ -198,7 +198,7 @@ export function SetupWizard({
     }
   }, [router]);
 
-  const closeHref = mode === "new" ? "/office" : "/";
+  const closeHref = "/";
 
   if (!showWizard) {
     return (
