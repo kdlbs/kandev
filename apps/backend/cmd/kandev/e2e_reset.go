@@ -96,9 +96,12 @@ func handleE2EReset(
 		// poller polls every enabled watch and would create a duplicate task
 		// for any PR a later test adds that the stale watch also matches.
 		// Done before task deletion so the poller can't recreate tasks mid-reset.
+		var deletedWatches int
 		if githubSvc != nil {
-			if _, err := githubSvc.DeleteReviewWatchesByWorkspace(ctx, workspaceID); err != nil {
+			if n, err := githubSvc.DeleteReviewWatchesByWorkspace(ctx, workspaceID); err != nil {
 				log.Warn("e2e reset: review watch cleanup failed", zap.Error(err))
+			} else {
+				deletedWatches = n
 			}
 		}
 
@@ -152,9 +155,10 @@ func handleE2EReset(
 		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"deleted_tasks":       deletedTasks,
-			"deleted_workflows":   deletedWorkflows,
-			"deleted_automations": deletedAutomations,
+			"deleted_tasks":          deletedTasks,
+			"deleted_workflows":      deletedWorkflows,
+			"deleted_automations":    deletedAutomations,
+			"deleted_review_watches": deletedWatches,
 		})
 	}
 }
