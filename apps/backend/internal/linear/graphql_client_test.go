@@ -302,3 +302,104 @@ func TestBuildIssueFilter_PriorityZero(t *testing.T) {
 		t.Errorf("priorities=[0] should map to in:[0] (No priority), got %+v", prio)
 	}
 }
+
+func TestParseIssueIdentifier(t *testing.T) {
+	cases := []struct {
+		in      string
+		wantKey string
+		wantNum int
+		wantOK  bool
+	}{
+		{"ENG-123", "ENG", 123, true},
+		{"eng-123", "ENG", 123, true},
+		{"ENG_1-2", "ENG_1", 2, true},
+		{" eng-1 ", "ENG", 1, true},
+		{"ENG-007", "ENG", 7, true},
+		{"", "", 0, false},
+		{"ENG-", "", 0, false},
+		{"-123", "", 0, false},
+		{"ENG-abc", "", 0, false},
+		{"ENG-12-34", "", 0, false},
+		{"1-2", "", 0, false},
+		{"auth bug", "", 0, false},
+	}
+	for _, tc := range cases {
+		gotKey, gotNum, gotOK := parseIssueIdentifier(tc.in)
+		if gotOK != tc.wantOK || gotKey != tc.wantKey || gotNum != tc.wantNum {
+			t.Errorf("parseIssueIdentifier(%q) = (%q,%d,%v), want (%q,%d,%v)",
+				tc.in, gotKey, gotNum, gotOK, tc.wantKey, tc.wantNum, tc.wantOK)
+		}
+	}
+}
+
+func TestBuildIssueFilter_IdentifierQuery(t *testing.T) {
+	got := buildIssueFilter(SearchFilter{Query: "ENG-123"})
+	if _, ok := got["searchableContent"]; ok {
+		t.Error("identifier query should not set top-level searchableContent")
+	}
+	or, ok := got["or"].([]map[string]interface{})
+	if !ok || len(or) != 2 {
+		t.Fatalf("expected or with 2 branches, got %+v", got["or"])
+	}
+	sc, _ := or[0]["searchableContent"].(map[string]interface{})
+	if sc["contains"] != "ENG-123" {
+		t.Errorf("first OR branch should match searchableContent on raw query, got %+v", or[0])
+	}
+	team, _ := or[1]["team"].(map[string]interface{})
+	teamKey, _ := team["key"].(map[string]interface{})
+	if teamKey["eq"] != "ENG" {
+		t.Errorf("second OR branch team.key.eq mismatch: %+v", or[1])
+	}
+	num, _ := or[1]["number"].(map[string]interface{})
+	if num["eq"] != 123 {
+		t.Errorf("second OR branch number.eq mismatch: %+v", or[1])
+	}
+}
+
+func TestBuildIssueFilter_IdentifierLowercase(t *testing.T) {
+	got := buildIssueFilter(SearchFilter{Query: "eng-123"})
+	or, ok := got["or"].([]map[string]interface{})
+	if !ok || len(or) != 2 {
+		t.Fatalf("expected or with 2 branches, got %+v", got["or"])
+	}
+	team, _ := or[1]["team"].(map[string]interface{})
+	teamKey, _ := team["key"].(map[string]interface{})
+	if teamKey["eq"] != "ENG" {
+		t.Errorf("expected upper-cased team key ENG, got %+v", teamKey)
+	}
+}
+
+func TestBuildIssueFilter_IdentifierComposesWithFilters(t *testing.T) {
+	got := buildIssueFilter(SearchFilter{
+		Query:    "ENG-123",
+		TeamKey:  "ENG",
+		Assigned: "me",
+		StateIDs: []string{"s1"},
+	})
+	if _, ok := got["or"]; !ok {
+		t.Error("expected or branch alongside other filters")
+	}
+	if _, ok := got["team"]; !ok {
+		t.Error("expected top-level team filter to remain AND-joined")
+	}
+	if _, ok := got["assignee"]; !ok {
+		t.Error("expected top-level assignee filter to remain AND-joined")
+	}
+	if _, ok := got["state"]; !ok {
+		t.Error("expected top-level state filter to remain AND-joined")
+	}
+}
+
+func TestBuildIssueFilter_NonIdentifierUnchanged(t *testing.T) {
+	got := buildIssueFilter(SearchFilter{Query: "auth bug"})
+	sc, ok := got["searchableContent"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected top-level searchableContent for non-identifier query, got %+v", got)
+	}
+	if sc["contains"] != "auth bug" {
+		t.Errorf("searchableContent.contains mismatch: %+v", sc)
+	}
+	if _, ok := got["or"]; ok {
+		t.Error("non-identifier query must not produce an or branch")
+	}
+}

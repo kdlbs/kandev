@@ -9,6 +9,8 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -504,6 +506,31 @@ func (c *GraphQLClient) SearchIssues(ctx context.Context, filter SearchFilter, p
 	return out, nil
 }
 
+// issueIdentifierRe matches a Linear-style ticket identifier like ENG-123.
+// Team keys per Linear are uppercase alphanumerics + underscore, starting with
+// a letter.
+var issueIdentifierRe = regexp.MustCompile(`^([A-Z][A-Z0-9_]*)-(\d+)$`)
+
+// parseIssueIdentifier returns the team key and issue number when q looks like
+// a Linear identifier (e.g. "ENG-123"). Input is trimmed and upper-cased so
+// "eng-123" works too. ok=false means q is not an identifier and callers
+// should treat it as a free-text query.
+func parseIssueIdentifier(q string) (string, int, bool) {
+	q = strings.ToUpper(strings.TrimSpace(q))
+	if q == "" {
+		return "", 0, false
+	}
+	m := issueIdentifierRe.FindStringSubmatch(q)
+	if m == nil {
+		return "", 0, false
+	}
+	n, err := strconv.Atoi(m[2])
+	if err != nil {
+		return "", 0, false
+	}
+	return m[1], n, true
+}
+
 // buildIssueFilter translates our SearchFilter into Linear's IssueFilter input.
 // Empty fields are dropped so we don't send `{ "team": null }` and similar
 // (which Linear treats as a typed null and rejects).
@@ -511,8 +538,21 @@ func buildIssueFilter(f SearchFilter) map[string]interface{} {
 	out := map[string]interface{}{}
 	if q := strings.TrimSpace(f.Query); q != "" {
 		// Linear has no top-level free-text field, but `searchableContent`
-		// matches across title and description.
-		out["searchableContent"] = map[string]interface{}{"contains": q}
+		// matches across title and description. When the query parses as a
+		// ticket identifier (ENG-123), OR an exact identifier match so users
+		// can find a ticket by ID — searchableContent never matches the
+		// identifier itself.
+		if teamKey, num, ok := parseIssueIdentifier(q); ok {
+			out["or"] = []map[string]interface{}{
+				{"searchableContent": map[string]interface{}{"contains": q}},
+				{
+					"team":   map[string]interface{}{"key": map[string]interface{}{"eq": teamKey}},
+					"number": map[string]interface{}{"eq": num},
+				},
+			}
+		} else {
+			out["searchableContent"] = map[string]interface{}{"contains": q}
+		}
 	}
 	if f.TeamKey != "" {
 		out["team"] = map[string]interface{}{"key": map[string]interface{}{"eq": f.TeamKey}}
