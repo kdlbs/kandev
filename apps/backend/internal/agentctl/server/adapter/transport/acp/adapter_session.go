@@ -728,6 +728,7 @@ func (a *Adapter) emitSetConfigOptionEvent(sessionID, configID, value string, ca
 			if outConfig[i].ID == configID {
 				outConfig[i].CurrentValue = value
 				found = true
+				break
 			}
 		}
 		if !found {
