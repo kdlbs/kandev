@@ -246,14 +246,13 @@ export function useChatPanelHandlers(
 }
 
 // Shared archive-task action for the terminal-state banners: archives the task,
-// switches to the next one, and toasts the outcome.
+// switches to the next one, and only toasts on failure.
 function useArchiveTaskAction(taskId: string) {
   const archiveAndSwitch = useArchiveAndSwitchTask();
   const { toast } = useToast();
   return useCallback(async () => {
     try {
       await archiveAndSwitch(taskId);
-      toast({ description: "Task archived" });
     } catch {
       toast({ description: "Failed to archive task", variant: "error" });
     }
