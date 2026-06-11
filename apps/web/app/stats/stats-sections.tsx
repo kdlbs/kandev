@@ -162,7 +162,7 @@ function GitOrAveragesCard({ global, git_stats }: { global: GlobalStats; git_sta
               </TooltipContent>
             </Tooltip>
             <span className="font-medium tabular-nums">
-              {global.avg_messages_per_turn.toFixed(1)}
+              {global.avg_messages_per_turn === 0 ? "—" : global.avg_messages_per_turn.toFixed(1)}
             </span>
           </div>
           <div className="flex justify-between">

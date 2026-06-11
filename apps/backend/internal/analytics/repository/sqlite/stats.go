@@ -156,9 +156,11 @@ const (
 )
 
 // GetGlobalStats retrieves workspace-wide aggregated statistics.
-// Implemented as a single query over 5 CTEs (tasks, sessions, turns, messages,
-// clean_turn) rather than independent correlated subqueries: each underlying
-// table is scanned at most once per request.
+// Implemented as a single query over 5 CTEs (tasks, sessions, turns,
+// clean_turn, messages). The four count/sum CTEs each scan their underlying
+// table at most once per request; clean_turn additionally issues one
+// index-only message-count subquery per qualifying turn (kept correlated to
+// stay portable between the SQLite and Postgres dialects).
 func (r *Repository) GetGlobalStats(ctx context.Context, workspaceID string, start *time.Time) (*models.GlobalStats, error) {
 	var startArg any
 	if start != nil {
