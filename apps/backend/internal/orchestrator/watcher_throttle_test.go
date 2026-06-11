@@ -332,6 +332,24 @@ func TestDispatchWatcherEvent_GateBlocksBurstRace(t *testing.T) {
 		t.Fatalf("expected exactly 1 slot acquired across the burst, got %d", pending)
 	}
 
+	// Gate acquisition (and thus the counter query) is synchronous within
+	// dispatchWatcherEvent, so once the burst loop returns the queryLog is
+	// final. Assert the counter was actually consulted with the source's
+	// metadata key — this proves dispatch forwards WatchMetadataKey()
+	// end-to-end rather than querying with an empty or hardcoded key.
+	counter.mu.Lock()
+	queryLog := append([]string(nil), counter.queryLog...)
+	counter.mu.Unlock()
+	if len(queryLog) == 0 {
+		t.Fatal("expected the counter to be queried during the burst, got none")
+	}
+	for _, q := range queryLog {
+		if q != "linear_issue_watch_id|w-1" {
+			t.Fatalf("expected every counter query to use the source metadata key %q, got %q",
+				"linear_issue_watch_id|w-1", q)
+		}
+	}
+
 	// Confirm the admitted goroutine actually reached CreateIssueTask. Bounded
 	// so a broken gate that admits nothing fails fast instead of hanging.
 	select {

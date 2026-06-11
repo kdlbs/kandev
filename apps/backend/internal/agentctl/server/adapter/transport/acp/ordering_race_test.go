@@ -74,6 +74,12 @@ func TestACPMessageChunkOrdering(t *testing.T) {
 	// Create pipes for stdin/stdout simulation
 	agentStdinReader, agentStdinWriter := io.Pipe()
 	agentStdoutReader, agentStdoutWriter := io.Pipe()
+	t.Cleanup(func() {
+		_ = agentStdinReader.Close()
+		_ = agentStdinWriter.Close()
+		_ = agentStdoutReader.Close()
+		_ = agentStdoutWriter.Close()
+	})
 
 	// Track received chunks with ordering
 	var mu sync.Mutex
@@ -137,10 +143,6 @@ func TestACPMessageChunkOrdering(t *testing.T) {
 		t.Log("All chunks arrived in order (race condition not triggered this run)")
 		t.Log("Note: Race conditions are non-deterministic - try running with -count=10")
 	}
-
-	// Clean up
-	_ = agentStdinReader.Close()
-	_ = agentStdinWriter.Close()
 }
 
 // TestACPUpdateHandlerOrdering tests if adding serialization in our handler fixes ordering.
@@ -151,6 +153,12 @@ func TestACPUpdateHandlerOrdering(t *testing.T) {
 
 	agentStdoutReader, agentStdoutWriter := io.Pipe()
 	agentStdinReader, agentStdinWriter := io.Pipe()
+	t.Cleanup(func() {
+		_ = agentStdinReader.Close()
+		_ = agentStdinWriter.Close()
+		_ = agentStdoutReader.Close()
+		_ = agentStdoutWriter.Close()
+	})
 
 	var mu sync.Mutex
 	var receivedChunks []string
@@ -203,10 +211,6 @@ func TestACPUpdateHandlerOrdering(t *testing.T) {
 	if outOfOrder > 0 {
 		t.Log("Handler mutex doesn't fully fix the issue - ordering lost before handler is called")
 	}
-
-	// Clean up
-	_ = agentStdinReader.Close()
-	_ = agentStdinWriter.Close()
 }
 
 // Helper to verify AdapterEvent type (unused variable fix)
@@ -220,6 +224,12 @@ func TestNotificationOrderingFix(t *testing.T) {
 
 	agentStdoutReader, agentStdoutWriter := io.Pipe()
 	agentStdinReader, agentStdinWriter := io.Pipe()
+	t.Cleanup(func() {
+		_ = agentStdinReader.Close()
+		_ = agentStdinWriter.Close()
+		_ = agentStdoutReader.Close()
+		_ = agentStdoutWriter.Close()
+	})
 
 	var mu sync.Mutex
 	var receivedChunks []string
@@ -259,9 +269,6 @@ func TestNotificationOrderingFix(t *testing.T) {
 		expected := fmt.Sprintf("chunk_%03d", i)
 		assert.Equal(t, expected, chunk, "Chunk at position %d should be in order", i)
 	}
-
-	_ = agentStdinReader.Close()
-	_ = agentStdinWriter.Close()
 }
 
 // TestNotificationOrderingWithMultipleSessions verifies ordering is maintained
@@ -272,6 +279,12 @@ func TestNotificationOrderingWithMultipleSessions(t *testing.T) {
 
 	agentStdoutReader, agentStdoutWriter := io.Pipe()
 	agentStdinReader, agentStdinWriter := io.Pipe()
+	t.Cleanup(func() {
+		_ = agentStdinReader.Close()
+		_ = agentStdinWriter.Close()
+		_ = agentStdoutReader.Close()
+		_ = agentStdoutWriter.Close()
+	})
 
 	var mu sync.Mutex
 	receivedBySession := make(map[string][]string)
@@ -328,9 +341,6 @@ func TestNotificationOrderingWithMultipleSessions(t *testing.T) {
 			assert.Equal(t, expected, chunk, "Session %s chunk at position %d should be in order", session, i)
 		}
 	}
-
-	_ = agentStdinReader.Close()
-	_ = agentStdinWriter.Close()
 }
 
 // TestNotificationOrderingWithLargePayloads verifies ordering with varying payload sizes.
@@ -340,6 +350,12 @@ func TestNotificationOrderingWithLargePayloads(t *testing.T) {
 
 	agentStdoutReader, agentStdoutWriter := io.Pipe()
 	agentStdinReader, agentStdinWriter := io.Pipe()
+	t.Cleanup(func() {
+		_ = agentStdinReader.Close()
+		_ = agentStdinWriter.Close()
+		_ = agentStdoutReader.Close()
+		_ = agentStdoutWriter.Close()
+	})
 
 	var mu sync.Mutex
 	var receivedChunks []string
@@ -389,9 +405,6 @@ func TestNotificationOrderingWithLargePayloads(t *testing.T) {
 		expected := fmt.Sprintf("chunk_%03d", i)
 		assert.Equal(t, expected, chunk, "Chunk at position %d should be in order", i)
 	}
-
-	_ = agentStdinReader.Close()
-	_ = agentStdinWriter.Close()
 }
 
 // TestNotificationOrderingStressTest runs multiple iterations to ensure
@@ -408,6 +421,12 @@ func TestNotificationOrderingStressTest(t *testing.T) {
 		t.Run(fmt.Sprintf("iteration_%d", iter), func(t *testing.T) {
 			agentStdoutReader, agentStdoutWriter := io.Pipe()
 			agentStdinReader, agentStdinWriter := io.Pipe()
+			t.Cleanup(func() {
+				_ = agentStdinReader.Close()
+				_ = agentStdinWriter.Close()
+				_ = agentStdoutReader.Close()
+				_ = agentStdoutWriter.Close()
+			})
 
 			var mu sync.Mutex
 			var receivedChunks []string
@@ -450,9 +469,6 @@ func TestNotificationOrderingStressTest(t *testing.T) {
 			}
 
 			assert.Zero(t, outOfOrder, "No chunks should be out of order")
-
-			_ = agentStdinReader.Close()
-			_ = agentStdinWriter.Close()
 		})
 	}
 }
@@ -462,6 +478,12 @@ func TestNotificationOrderingStressTest(t *testing.T) {
 func TestMixedNotificationTypes(t *testing.T) {
 	agentStdoutReader, agentStdoutWriter := io.Pipe()
 	agentStdinReader, agentStdinWriter := io.Pipe()
+	t.Cleanup(func() {
+		_ = agentStdinReader.Close()
+		_ = agentStdinWriter.Close()
+		_ = agentStdoutReader.Close()
+		_ = agentStdoutWriter.Close()
+	})
 
 	var mu sync.Mutex
 	var receivedEvents []string
@@ -515,9 +537,6 @@ func TestMixedNotificationTypes(t *testing.T) {
 		}
 		assert.Equal(t, expected, event, "Event at position %d should be in order", i)
 	}
-
-	_ = agentStdinReader.Close()
-	_ = agentStdinWriter.Close()
 }
 
 // makeACPToolCallNotification creates a valid ACP session/update JSON-RPC notification
