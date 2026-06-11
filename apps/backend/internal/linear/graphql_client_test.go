@@ -342,8 +342,8 @@ func TestBuildIssueFilter_IdentifierQuery(t *testing.T) {
 		t.Fatalf("expected or with 2 branches, got %+v", got["or"])
 	}
 	sc, _ := or[0]["searchableContent"].(map[string]interface{})
-	if sc["contains"] != "ENG-123" {
-		t.Errorf("first OR branch should match searchableContent on canonical identifier, got %+v", or[0])
+	if sc["containsIgnoreCase"] != "ENG-123" {
+		t.Errorf("first OR branch should match searchableContent.containsIgnoreCase on raw query, got %+v", or[0])
 	}
 	team, _ := or[1]["team"].(map[string]interface{})
 	teamKey, _ := team["key"].(map[string]interface{})
@@ -363,8 +363,8 @@ func TestBuildIssueFilter_IdentifierLowercase(t *testing.T) {
 		t.Fatalf("expected or with 2 branches, got %+v", got["or"])
 	}
 	sc, _ := or[0]["searchableContent"].(map[string]interface{})
-	if sc["contains"] != "ENG-123" {
-		t.Errorf("searchableContent branch should use canonical upper-cased form ENG-123, got %+v", sc)
+	if sc["containsIgnoreCase"] != "eng-123" {
+		t.Errorf("searchableContent branch should preserve raw query under containsIgnoreCase, got %+v", sc)
 	}
 	team, _ := or[1]["team"].(map[string]interface{})
 	teamKey, _ := team["key"].(map[string]interface{})
@@ -400,8 +400,8 @@ func TestBuildIssueFilter_NonIdentifierUnchanged(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected top-level searchableContent for non-identifier query, got %+v", got)
 	}
-	if sc["contains"] != "auth bug" {
-		t.Errorf("searchableContent.contains mismatch: %+v", sc)
+	if sc["containsIgnoreCase"] != "auth bug" {
+		t.Errorf("searchableContent.containsIgnoreCase mismatch: %+v", sc)
 	}
 	if _, ok := got["or"]; ok {
 		t.Error("non-identifier query must not produce an or branch")

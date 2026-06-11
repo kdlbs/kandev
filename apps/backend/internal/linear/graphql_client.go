@@ -545,21 +545,19 @@ func buildIssueFilter(f SearchFilter) map[string]interface{} {
 		// for the target ticket. We keep the `searchableContent` branch in
 		// the OR so cross-references like "duplicate of ENG-123" pasted into
 		// another issue's title or description still surface.
+		// `containsIgnoreCase` so identifier cross-references ("see ENG-123")
+		// match regardless of the user's input casing, and so free-text
+		// queries behave intuitively case-insensitively.
 		if teamKey, num, ok := parseIssueIdentifier(q); ok {
-			// Use the canonical upper-cased identifier for the
-			// `searchableContent` branch so lowercase input (`eng-123`) still
-			// matches cross-references written in the canonical form
-			// (`ENG-123`) — Linear's `contains` filter is case-sensitive.
-			canonical := fmt.Sprintf("%s-%d", teamKey, num)
 			out["or"] = []map[string]interface{}{
-				{"searchableContent": map[string]interface{}{"contains": canonical}},
+				{"searchableContent": map[string]interface{}{"containsIgnoreCase": q}},
 				{
 					"team":   map[string]interface{}{"key": map[string]interface{}{"eq": teamKey}},
 					"number": map[string]interface{}{"eq": num},
 				},
 			}
 		} else {
-			out["searchableContent"] = map[string]interface{}{"contains": q}
+			out["searchableContent"] = map[string]interface{}{"containsIgnoreCase": q}
 		}
 	}
 	if f.TeamKey != "" {
