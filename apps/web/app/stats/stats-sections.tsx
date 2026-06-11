@@ -2,6 +2,7 @@
 
 import { IconGitCommit } from "@tabler/icons-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { StatsResponse, TaskStatsDTO, RepositoryStatsDTO } from "@/lib/types/http";
 
 function formatDuration(ms: number): string {
@@ -138,23 +139,28 @@ function GitOrAveragesCard({ global, git_stats }: { global: GlobalStats; git_sta
             </span>
           </div>
           <div className="flex justify-between">
-            <span
-              className="text-sm text-muted-foreground"
-              title="Mean duration of completed turns, excluding turns <1s, >1h, or with no messages"
-            >
-              Turn duration
-            </span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="text-sm text-muted-foreground cursor-help">Turn duration</span>
+              </TooltipTrigger>
+              <TooltipContent>
+                Mean duration of completed turns, excluding turns &lt;1s, &gt;=1h, or with no
+                messages
+              </TooltipContent>
+            </Tooltip>
             <span className="font-medium tabular-nums">
               {formatDuration(global.avg_turn_duration_ms)}
             </span>
           </div>
           <div className="flex justify-between">
-            <span
-              className="text-sm text-muted-foreground"
-              title="Mean message count per turn, same exclusions as turn duration"
-            >
-              Messages per turn
-            </span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="text-sm text-muted-foreground cursor-help">Messages per turn</span>
+              </TooltipTrigger>
+              <TooltipContent>
+                Mean message count per turn, same exclusions as turn duration
+              </TooltipContent>
+            </Tooltip>
             <span className="font-medium tabular-nums">
               {global.avg_messages_per_turn.toFixed(1)}
             </span>

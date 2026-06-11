@@ -143,10 +143,12 @@ func (r *Repository) scanTaskStats(rows *sql.Rows) ([]*models.TaskStats, error) 
 }
 
 // Outlier bounds for the "average turn size" metric. Determined empirically
-// from prod data: durations <1s are no-op/aborted turns and >1h are zombie
-// turns whose completed_at was backfilled across an agent restart. Both
-// classes badly skew the mean — excluding them drops avg duration from
-// ~1062s to ~289s on a ~4k-turn sample.
+// from prod data: durations under cleanTurnMinDurationMs are no-op/aborted
+// turns and durations at or above cleanTurnMaxDurationMs are zombie turns
+// whose completed_at was backfilled across an agent restart. Both classes
+// badly skew the mean — excluding them drops avg duration from ~1062s to
+// ~289s on a ~4k-turn sample. The duration filter is half-open
+// [cleanTurnMinDurationMs, cleanTurnMaxDurationMs).
 const (
 	cleanTurnMinDurationMs = 1000
 	cleanTurnMaxDurationMs = 3600000
@@ -208,7 +210,7 @@ func (r *Repository) GetGlobalStats(ctx context.Context, workspaceID string, sta
 				WHERE t.workspace_id = ? AND t.is_ephemeral = 0 AND (? IS NULL OR s.started_at >= ?)
 				  AND turn.completed_at IS NOT NULL
 			) clean
-			WHERE dur_ms BETWEEN %d AND %d AND msg_count >= %d
+			WHERE dur_ms >= %d AND dur_ms < %d AND msg_count >= %d
 		),
 		message_agg AS (
 			SELECT

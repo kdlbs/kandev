@@ -246,7 +246,9 @@ func TestGetGlobalStats_AggregatesAcrossTables(t *testing.T) {
 	execOrFatal(t, dbConn, `INSERT INTO boards (id, workspace_id, name, created_at, updated_at) VALUES ('board-1', 'ws-1', 'Board', ?, ?)`, nowStr, nowStr)
 	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, created_at, updated_at) VALUES ('task-1', 'ws-1', 'board-1', '', 'T1', 0, ?, ?)`, nowStr, nowStr)
 	execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, state, started_at, updated_at) VALUES ('sess-1', 'task-1', 'agent-1', 'COMPLETED', ?, ?)`, nowStr, nowStr)
-	// Two turns: 5m + 10m of active duration (= 900_000 ms).
+	// Two turns: 5m + 10m of active duration (= 900_000 ms). All messages live
+	// on turn-1; turn-2 is intentionally empty so it's excluded from
+	// clean_turn_agg via the msg_count >= cleanTurnMinMessages filter.
 	execOrFatal(t, dbConn, `INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, completed_at, created_at, updated_at) VALUES ('turn-1', 'sess-1', 'task-1', '2026-01-01T10:00:00Z', '2026-01-01T10:05:00Z', ?, ?)`, nowStr, nowStr)
 	execOrFatal(t, dbConn, `INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, completed_at, created_at, updated_at) VALUES ('turn-2', 'sess-1', 'task-1', '2026-01-01T10:10:00Z', '2026-01-01T10:20:00Z', ?, ?)`, nowStr, nowStr)
 	// Messages: 2 user, 1 tool_call, 1 tool_edit, 1 agent text.
