@@ -83,6 +83,46 @@ func TestPromptTask_SessionAlreadyRunning(t *testing.T) {
 	}
 }
 
+func TestTrySwitchModelUpdatesRuntimeModelCache(t *testing.T) {
+	repo := setupTestRepo(t)
+	agentMgr := &mockAgentManager{
+		isAgentRunning:           true,
+		setSessionModelSupported: true,
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+	session, err := repo.GetTaskSession(context.Background(), "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	session.AgentProfileSnapshot = map[string]interface{}{"model": "gpt-5.5"}
+	seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-1")
+	if err := repo.UpdateTaskSession(context.Background(), session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+	svc.runtimeModelBySession.Store("session1", "gpt-5.5")
+
+	result, switched, err := svc.trySwitchModel(context.Background(), "task1", "session1", "gpt-5.3-codex-spark", "continue", session)
+	if err != nil {
+		t.Fatalf("trySwitchModel returned error: %v", err)
+	}
+	if switched {
+		t.Fatal("in-place model switch should let prompt dispatch continue")
+	}
+	if result != nil {
+		t.Fatalf("expected nil prompt result for in-place switch, got %#v", result)
+	}
+	cached, ok := svc.runtimeModelBySession.Load("session1")
+	if !ok {
+		t.Fatal("expected runtime model cache entry")
+	}
+	if cached != "gpt-5.3-codex-spark" {
+		t.Fatalf("expected runtime model cache to update, got %#v", cached)
+	}
+}
+
 func TestPromptTask_TransientErrorDoesNotMoveTaskToReview(t *testing.T) {
 	repo := setupTestRepo(t)
 	taskRepo := newMockTaskRepo()

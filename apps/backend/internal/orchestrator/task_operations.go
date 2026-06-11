@@ -2136,6 +2136,7 @@ func (s *Service) trySwitchModel(ctx context.Context, taskID, sessionID, model, 
 	if err != nil {
 		return nil, true, fmt.Errorf("model switch failed: %w", err)
 	}
+	s.runtimeModelBySession.Store(sessionID, model)
 	if switchResult.StopReason == "model_switched_in_place" {
 		// Agent is still running with the new model — let PromptTask send the prompt normally.
 		// Invalidate the message creator's model cache so the next message picks up the new model.

@@ -206,8 +206,10 @@ type mockAgentManager struct {
 	// set_session_mode tracking (issue #1183). Records (sessionID, modeID) for
 	// every SetSessionModeBySessionID call. setSessionModeErr, when set, is
 	// returned to simulate "no running agent".
-	setSessionModeCalls []sessionModeCall
-	setSessionModeErr   error
+	setSessionModeCalls      []sessionModeCall
+	setSessionModeErr        error
+	setSessionModelSupported bool
+	setSessionModelErr       error
 }
 
 type sessionModeCall struct {
@@ -322,7 +324,13 @@ func (m *mockAgentManager) SetExecutionEnv(_ context.Context, _ string, _ map[st
 	return nil
 }
 func (m *mockAgentManager) SetSessionModelBySessionID(_ context.Context, _, _ string) error {
-	return fmt.Errorf("not supported")
+	if !m.setSessionModelSupported {
+		return fmt.Errorf("not supported")
+	}
+	if m.setSessionModelErr != nil {
+		return m.setSessionModelErr
+	}
+	return nil
 }
 func (m *mockAgentManager) SetSessionModeBySessionID(_ context.Context, sessionID, modeID string) error {
 	m.mu.Lock()
