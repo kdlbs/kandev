@@ -16,6 +16,9 @@ import (
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
+// errKey is the JSON field used for error responses from the E2E endpoints.
+const errKey = "error"
+
 // registerE2EResetRoutes registers the E2E test-only endpoints.
 // The endpoints are available when KANDEV_MOCK_AGENT is "true" or "only" (dev/E2E modes).
 func registerE2EResetRoutes(
@@ -98,11 +101,16 @@ func handleE2EReset(
 		// Done before task deletion so the poller can't recreate tasks mid-reset.
 		var deletedWatches int
 		if githubSvc != nil {
-			if n, err := githubSvc.DeleteReviewWatchesByWorkspace(ctx, workspaceID); err != nil {
-				log.Warn("e2e reset: review watch cleanup failed", zap.Error(err))
-			} else {
-				deletedWatches = n
+			n, err := githubSvc.DeleteReviewWatchesByWorkspace(ctx, workspaceID)
+			if err != nil {
+				// Abort like every other cleanup below: leaving stale watches
+				// behind reintroduces the cross-test poller pollution this
+				// endpoint exists to prevent.
+				log.Error("e2e reset: review watch cleanup failed", zap.Error(err))
+				c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
+				return
 			}
+			deletedWatches = n
 		}
 
 		// Route through the task service (rather than a raw SQL DELETE) so
@@ -114,7 +122,7 @@ func handleE2EReset(
 		tasks, total, err := repo.ListTasksByWorkspace(ctx, workspaceID, "", "", "", 1, resetPageSize, true, true, false, false)
 		if err != nil {
 			log.Error("e2e reset: failed to list tasks", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
 			return
 		}
 		if total > resetPageSize {
@@ -134,7 +142,7 @@ func handleE2EReset(
 				// would create orphan rows visible to subsequent tests.
 				log.Error("e2e reset: failed to delete task",
 					zap.String("task_id", t.ID), zap.Error(err))
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
 				return
 			}
 			deletedTasks++
@@ -143,14 +151,14 @@ func handleE2EReset(
 		deletedWorkflows, err := repo.DeleteWorkflowsByWorkspace(ctx, workspaceID, keepWorkflowIDs)
 		if err != nil {
 			log.Error("e2e reset: failed to delete workflows", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
 			return
 		}
 
 		deletedAutomations, autoErr := deleteAutomationsForReset(ctx, automationSvc, workspaceID)
 		if autoErr != nil {
 			log.Error("e2e reset: failed to delete automations", zap.Error(autoErr))
-			c.JSON(http.StatusInternalServerError, gin.H{"error": autoErr.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: autoErr.Error()})
 			return
 		}
 
@@ -183,7 +191,7 @@ func handleE2ECreateHiddenWorkflow(taskSvc *taskservice.Service, log *logger.Log
 	return func(c *gin.Context) {
 		var body e2eHiddenWorkflowRequest
 		if err := c.ShouldBindJSON(&body); err != nil || body.WorkspaceID == "" || body.Name == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id and name are required"})
+			c.JSON(http.StatusBadRequest, gin.H{errKey: "workspace_id and name are required"})
 			return
 		}
 		workflow, err := taskSvc.CreateWorkflow(c.Request.Context(), &taskservice.CreateWorkflowRequest{
@@ -193,7 +201,7 @@ func handleE2ECreateHiddenWorkflow(taskSvc *taskservice.Service, log *logger.Log
 		})
 		if err != nil {
 			log.Error("e2e: failed to create hidden workflow", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
 			return
 		}
 		c.JSON(http.StatusCreated, gin.H{

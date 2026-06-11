@@ -698,6 +698,12 @@ func TestDeleteReviewWatchesByWorkspace(t *testing.T) {
 	_, svc, _, store := setupPollerTest(t)
 	ctx := context.Background()
 
+	// Wire a deleter so the watch-delete task-reaping branch runs: the
+	// workspace sweep must reap each cleared watch's owned task and leave the
+	// survivor's task untouched.
+	rec := &recordingTaskDeleter{}
+	svc.SetTaskDeleter(rec)
+
 	mk := func(ws string) *ReviewWatch {
 		w := &ReviewWatch{WorkspaceID: ws, Enabled: true}
 		if err := store.CreateReviewWatch(ctx, w); err != nil {
@@ -759,6 +765,20 @@ func TestDeleteReviewWatchesByWorkspace(t *testing.T) {
 	}
 	if len(survivor) != 1 {
 		t.Fatalf("survivor dedup rows = %d, want 1", len(survivor))
+	}
+
+	// Only the cleared workspace's tasks are reaped; the survivor's is not.
+	reaped := map[string]bool{}
+	for _, id := range rec.calls {
+		reaped[id] = true
+	}
+	for _, w := range []*ReviewWatch{w1, w2} {
+		if !reaped["task-"+w.ID] {
+			t.Fatalf("task for cleared watch %s was not reaped; calls=%v", w.ID, rec.calls)
+		}
+	}
+	if reaped["task-"+wOther.ID] {
+		t.Fatalf("survivor task was reaped; calls=%v", rec.calls)
 	}
 }
 
