@@ -16,6 +16,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// waitForChunks blocks until len(*chunks) reaches want, or fails the test after a
+// generous timeout. The ACP SDK (coder/acp-go-sdk) dispatches received notifications
+// from an internal queue that drains asynchronously *after* conn.Done() fires (see
+// shutdownReceive / notificationQueueDrainTimeout), so notifications already read can be
+// delivered late. A fixed sleep races under CI load; polling with require.Eventually is
+// deterministic. The condition takes mu when reading the shared slice.
+func waitForChunks(t *testing.T, mu *sync.Mutex, chunks *[]string, want int) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(*chunks) >= want
+	}, 10*time.Second, 5*time.Millisecond, "All chunks should be received")
+}
+
 // makeACPSessionUpdateNotification creates a valid ACP session/update JSON-RPC notification
 // with an agent_message_chunk update containing the given text.
 func makeACPSessionUpdateNotification(sessionID, text string) []byte {
@@ -89,8 +104,8 @@ func TestACPMessageChunkOrdering(t *testing.T) {
 	// Wait for connection to close
 	<-conn.Done()
 
-	// Allow some buffer time for any remaining processing
-	time.Sleep(50 * time.Millisecond)
+	// Wait for the SDK's async notification queue to finish draining (see waitForChunks).
+	waitForChunks(t, &mu, &receivedChunks, numChunks)
 
 	// Check results
 	mu.Lock()
@@ -166,7 +181,7 @@ func TestACPUpdateHandlerOrdering(t *testing.T) {
 	}()
 
 	<-conn.Done()
-	time.Sleep(50 * time.Millisecond)
+	waitForChunks(t, &mu, &receivedChunks, numChunks)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -229,7 +244,7 @@ func TestNotificationOrderingFix(t *testing.T) {
 	}()
 
 	<-conn.Done()
-	time.Sleep(50 * time.Millisecond)
+	waitForChunks(t, &mu, &receivedChunks, numChunks)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -284,7 +299,18 @@ func TestNotificationOrderingWithMultipleSessions(t *testing.T) {
 	}()
 
 	<-conn.Done()
-	time.Sleep(50 * time.Millisecond)
+	// The SDK drains received notifications asynchronously after Done() (see
+	// waitForChunks). Poll until every session has all its chunks before asserting.
+	require.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, session := range sessions {
+			if len(receivedBySession[session]) < chunksPerSession {
+				return false
+			}
+		}
+		return true
+	}, 10*time.Second, 5*time.Millisecond, "All chunks should be received")
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -349,7 +375,7 @@ func TestNotificationOrderingWithLargePayloads(t *testing.T) {
 	}()
 
 	<-conn.Done()
-	time.Sleep(50 * time.Millisecond)
+	waitForChunks(t, &mu, &receivedChunks, numChunks)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -405,7 +431,7 @@ func TestNotificationOrderingStressTest(t *testing.T) {
 			}()
 
 			<-conn.Done()
-			time.Sleep(50 * time.Millisecond)
+			waitForChunks(t, &mu, &receivedChunks, chunksPerIteration)
 
 			mu.Lock()
 			defer mu.Unlock()
@@ -469,7 +495,7 @@ func TestMixedNotificationTypes(t *testing.T) {
 	}()
 
 	<-conn.Done()
-	time.Sleep(50 * time.Millisecond)
+	waitForChunks(t, &mu, &receivedEvents, 40)
 
 	mu.Lock()
 	defer mu.Unlock()
