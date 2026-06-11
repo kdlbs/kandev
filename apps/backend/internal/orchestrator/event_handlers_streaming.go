@@ -1101,24 +1101,7 @@ func (s *Service) persistSessionRuntimeConfig(ctx context.Context, sessionID, mo
 	}
 	cfg, _ := models.LoadSessionRuntimeConfig(session.Metadata)
 	previousModel := cfg.Model
-	if model != "" {
-		cfg.Model = model
-	}
-	if mode != "" {
-		cfg.Mode = mode
-	}
-	for _, option := range options {
-		if option.ID == "" || option.CurrentValue == "" {
-			continue
-		}
-		if cfg.ConfigOptions == nil {
-			cfg.ConfigOptions = make(map[string]string)
-		}
-		cfg.ConfigOptions[option.ID] = option.CurrentValue
-		if option.ID == "model" || option.Category == "model" {
-			cfg.Model = option.CurrentValue
-		}
-	}
+	applySessionRuntimeConfigUpdate(&cfg, model, mode, options)
 	if cfg.IsZero() {
 		return
 	}
@@ -1136,6 +1119,27 @@ func (s *Service) persistSessionRuntimeConfig(ctx context.Context, sessionID, mo
 				zap.String("previous_model", previousModel),
 				zap.String("model", cfg.Model),
 				zap.Error(err))
+		}
+	}
+}
+
+func applySessionRuntimeConfigUpdate(cfg *models.SessionRuntimeConfig, model, mode string, options []streams.ConfigOption) {
+	if model != "" {
+		cfg.Model = model
+	}
+	if mode != "" {
+		cfg.Mode = mode
+	}
+	for _, option := range options {
+		if option.ID == "" || option.CurrentValue == "" {
+			continue
+		}
+		if cfg.ConfigOptions == nil {
+			cfg.ConfigOptions = make(map[string]string)
+		}
+		cfg.ConfigOptions[option.ID] = option.CurrentValue
+		if option.ID == "model" || option.Category == "model" {
+			cfg.Model = option.CurrentValue
 		}
 	}
 }
