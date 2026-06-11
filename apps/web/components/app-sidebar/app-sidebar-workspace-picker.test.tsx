@@ -18,12 +18,14 @@ vi.mock("@kandev/ui/dropdown-menu", () => ({
     children,
     onSelect,
     disabled,
+    "data-testid": testId,
   }: {
     children: React.ReactNode;
     onSelect?: () => void;
     disabled?: boolean;
+    "data-testid"?: string;
   }) => (
-    <button type="button" disabled={disabled} onClick={() => onSelect?.()}>
+    <button type="button" disabled={disabled} data-testid={testId} onClick={() => onSelect?.()}>
       {children}
     </button>
   ),
@@ -72,5 +74,54 @@ describe("AppSidebarWorkspacePicker — Add workspace routing", () => {
     fireEvent.click(screen.getByText("Add workspace"));
 
     expect(navigationMock.push).toHaveBeenCalledWith("/settings/workspace");
+  });
+});
+
+describe("AppSidebarWorkspacePicker — workspace select", () => {
+  // jsdom over http drops `secure` cookies, so intercept the setter to capture
+  // the write directly rather than reading `document.cookie` back.
+  let cookieWrites: string[] = [];
+  let cookieDescriptor: PropertyDescriptor | undefined;
+
+  beforeEach(() => {
+    navigationMock.push = vi.fn();
+    storeState.setActiveWorkspace = vi.fn();
+    cookieWrites = [];
+    cookieDescriptor = Object.getOwnPropertyDescriptor(Document.prototype, "cookie");
+    Object.defineProperty(document, "cookie", {
+      configurable: true,
+      get: () => cookieWrites.join("; "),
+      set: (value: string) => {
+        cookieWrites.push(value);
+      },
+    });
+  });
+
+  afterEach(() => {
+    if (cookieDescriptor) {
+      Object.defineProperty(document, "cookie", cookieDescriptor);
+    }
+    cleanup();
+  });
+
+  it("writes the active-workspace cookie and updates the store on select", () => {
+    storeState.features.office = false;
+    render(<AppSidebarWorkspacePicker />);
+
+    fireEvent.click(screen.getByTestId("sidebar-workspace-item-w1"));
+
+    expect(cookieWrites.some((c) => c.startsWith("office-active-workspace=w1"))).toBe(true);
+    expect(storeState.setActiveWorkspace).toHaveBeenCalledWith("w1");
+    expect(navigationMock.push).not.toHaveBeenCalled();
+  });
+
+  it("navigates to the office workspace when the office feature is enabled", () => {
+    storeState.features.office = true;
+    render(<AppSidebarWorkspacePicker />);
+
+    fireEvent.click(screen.getByTestId("sidebar-workspace-item-w1"));
+
+    expect(storeState.setActiveWorkspace).toHaveBeenCalledWith("w1");
+    expect(navigationMock.push).toHaveBeenCalledWith("/office?workspaceId=w1");
   });
 });

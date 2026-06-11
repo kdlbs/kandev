@@ -116,7 +116,10 @@ export default async function Page({ searchParams }: PageProps) {
     const [workspaces, userSettingsResponse, cookieStore] = await Promise.all([
       listWorkspaces({ cache: "no-store" }),
       fetchUserSettings({ cache: "no-store" }).catch(() => null),
-      cookies().catch(() => null),
+      cookies().catch((error) => {
+        console.error("Failed to read cookies on Kanban page:", error);
+        return null;
+      }),
     ]);
     const settingsWorkspaceId = userSettingsResponse?.settings?.workspace_id || null;
     const settingsWorkflowId = userSettingsResponse?.settings?.workflow_filter_id || null;
