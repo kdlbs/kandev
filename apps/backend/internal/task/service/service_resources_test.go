@@ -128,6 +128,56 @@ func TestService_GetOfficeWorkflowIDs_DBError(t *testing.T) {
 	}
 }
 
+// TestService_DeleteWorkflow_ArchivesChildTasks verifies the cascade fix for
+// issue #1279: workflow deletion archives any active child tasks instead of
+// leaving them with a dangling workflow_id (tasks.workflow_id has no FK, so
+// SQLite cannot CASCADE for us).
+func TestService_DeleteWorkflow_ArchivesChildTasks(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "WS"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-doomed", WorkspaceID: "ws-1", Name: "Doomed"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-keep", WorkspaceID: "ws-1", Name: "Keep"})
+
+	tasks := []*models.Task{
+		{ID: "task-a", WorkspaceID: "ws-1", WorkflowID: "wf-doomed", WorkflowStepID: "step-1", Title: "A"},
+		{ID: "task-b", WorkspaceID: "ws-1", WorkflowID: "wf-doomed", WorkflowStepID: "step-1", Title: "B"},
+		{ID: "task-other", WorkspaceID: "ws-1", WorkflowID: "wf-keep", WorkflowStepID: "step-1", Title: "Other"},
+	}
+	for _, task := range tasks {
+		if err := repo.CreateTask(ctx, task); err != nil {
+			t.Fatalf("CreateTask %s: %v", task.ID, err)
+		}
+	}
+
+	if err := svc.DeleteWorkflow(ctx, "wf-doomed"); err != nil {
+		t.Fatalf("DeleteWorkflow: %v", err)
+	}
+
+	if _, err := svc.workflows.GetWorkflow(ctx, "wf-doomed"); err == nil {
+		t.Fatalf("expected workflow to be deleted")
+	}
+
+	for _, id := range []string{"task-a", "task-b"} {
+		got, err := repo.GetTask(ctx, id)
+		if err != nil {
+			t.Fatalf("GetTask %s after cascade: %v", id, err)
+		}
+		if got.ArchivedAt == nil {
+			t.Errorf("task %s: expected archived_at to be set, got nil", id)
+		}
+	}
+
+	other, err := repo.GetTask(ctx, "task-other")
+	if err != nil {
+		t.Fatalf("GetTask task-other: %v", err)
+	}
+	if other.ArchivedAt != nil {
+		t.Errorf("task in unrelated workflow should not be archived, got archived_at=%v", other.ArchivedAt)
+	}
+}
+
 // TestApplyRepositoryUpdates_CopyFilesNilLeavesUntouched verifies the
 // pointer-nil convention: a nil CopyFiles field on the request must not
 // clobber an existing repository value.

@@ -202,19 +202,41 @@ func (s *Service) SetWorkflowHidden(ctx context.Context, id string, hidden bool)
 	return nil
 }
 
-// DeleteWorkflow deletes a workflow
+// DeleteWorkflow deletes a workflow, archiving its remaining tasks first so
+// they do not linger as orphan rows pointing at a workflow_id that no longer
+// exists (the tasks.workflow_id FK was dropped to support empty workflow_id
+// on ephemeral tasks, so SQLite cannot cascade for us).
 func (s *Service) DeleteWorkflow(ctx context.Context, id string) error {
 	workflow, err := s.workflows.GetWorkflow(ctx, id)
 	if err != nil {
 		return err
 	}
+
+	tasks, err := s.tasks.ListTasks(ctx, id)
+	if err != nil {
+		s.logger.Error("failed to list tasks for workflow delete cascade",
+			zap.String("workflow_id", id), zap.Error(err))
+		return err
+	}
+	for _, task := range tasks {
+		if err := s.ArchiveTask(ctx, task.ID); err != nil {
+			s.logger.Error("failed to archive task during workflow delete cascade",
+				zap.String("workflow_id", id),
+				zap.String("task_id", task.ID),
+				zap.Error(err))
+			return err
+		}
+	}
+
 	if err := s.workflows.DeleteWorkflow(ctx, id); err != nil {
 		s.logger.Error("failed to delete workflow", zap.String("workflow_id", id), zap.Error(err))
 		return err
 	}
 
 	s.publishWorkflowEvent(ctx, events.WorkflowDeleted, workflow)
-	s.logger.Info("workflow deleted", zap.String("workflow_id", id))
+	s.logger.Info("workflow deleted",
+		zap.String("workflow_id", id),
+		zap.Int("archived_tasks", len(tasks)))
 	return nil
 }
 
