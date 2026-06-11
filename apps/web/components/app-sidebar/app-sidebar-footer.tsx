@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   IconBuildings,
@@ -31,7 +30,6 @@ type FooterIconButtonProps = {
   label: string;
   collapsed: boolean;
   onClick?: () => void;
-  href?: string;
   badge?: boolean;
   testId?: string;
   /** Toggle state: rotates the icon a half-turn (spins back out when cleared). */
@@ -43,7 +41,6 @@ function FooterIconButton({
   label,
   collapsed,
   onClick,
-  href,
   badge,
   testId,
   active,
@@ -68,14 +65,9 @@ function FooterIconButton({
     </>
   );
 
-  const trigger = href ? (
-    <Button asChild {...buttonProps}>
-      <Link href={href} aria-label={label} data-testid={testId}>
-        {content}
-      </Link>
-    </Button>
-  ) : (
+  const trigger = (
     <Button
+      type="button"
       onClick={onClick}
       {...buttonProps}
       aria-label={label}
@@ -122,7 +114,7 @@ export function AppSidebarFooter({ collapsed }: AppSidebarFooterProps) {
         icon={IconChartBar}
         label="Stats"
         collapsed={collapsed}
-        href="/stats"
+        onClick={() => router.push("/stats")}
         testId="sidebar-stats-button"
       />
       <FooterIconButton
@@ -147,7 +139,7 @@ export function AppSidebarFooter({ collapsed }: AppSidebarFooterProps) {
           icon={IconBuildings}
           label="Office"
           collapsed={collapsed}
-          href="/office"
+          onClick={() => router.push("/office")}
           testId="sidebar-office-button"
         />
       )}
