@@ -187,6 +187,40 @@ describe("FileRow tree-mode hover stage action", () => {
     expect(rightActions).not.toBeNull();
     expect(rightActions!.querySelector("button[title='Stage file']")).toBeNull();
   });
+
+  it("keeps the unstage button in the same icon slot for staged files", () => {
+    const { container } = render(
+      <TooltipProvider>
+        <ul>
+          <FileRow
+            file={{ ...baseFile, path: "src/staged.go", staged: true }}
+            isPending={false}
+            treeMode
+            onSelect={noopSelect}
+            onOpenDiff={noop}
+            onStage={noop}
+            onUnstage={noop}
+            onDiscard={noop}
+            onEditFile={noop}
+          />
+        </ul>
+      </TooltipProvider>,
+    );
+
+    const row = container.querySelector(
+      "[data-changes-file='src/staged.go']",
+    ) as HTMLElement | null;
+    expect(row).not.toBeNull();
+
+    const iconSlot = row!.querySelector("[data-testid='file-row-icon-action-slot']");
+    expect(iconSlot).not.toBeNull();
+    expect(iconSlot!.className).toContain("size-4");
+    expect(iconSlot!.querySelector("button[title='Unstage file']")).not.toBeNull();
+
+    const rightActions = row!.querySelector("[data-testid='file-row-hover-actions']");
+    expect(rightActions).not.toBeNull();
+    expect(rightActions!.querySelector("button[title='Unstage file']")).toBeNull();
+  });
 });
 
 describe("FileRow active-tab highlight", () => {
