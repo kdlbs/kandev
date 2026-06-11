@@ -247,12 +247,24 @@ gh api graphql -f query='query { repository(owner:"kdlbs", name:"kandev") { pull
 Manual fallback when you reply outside `scripts/pr-resolve`:
 
 ```bash
+set -euo pipefail
+
 # Get the first comment's REST databaseId for one thread:
-gh api graphql -f query='query { node(id:"PRRT_xxx") { ... on PullRequestReviewThread { comments(first:1){ nodes{ databaseId } } } } }' 2>/dev/null --jq '.data.node.comments.nodes[0].databaseId'
+db_id="$(gh api graphql -f query='query { node(id:"PRRT_xxx") { ... on PullRequestReviewThread { comments(first:1){ nodes{ databaseId } } } } }' --jq '.data.node.comments.nodes[0].databaseId')"
+if [[ -z "$db_id" || "$db_id" == "null" ]]; then
+  echo "failed to fetch first comment databaseId for PRRT_xxx" >&2
+  exit 1
+fi
+
 # Reply to THAT id (a guessed id 404s with "Parent comment not found"):
-gh api --method POST repos/:owner/:repo/pulls/<PR>/comments/<databaseId>/replies --input reply.json 2>/dev/null
+gh api --method POST repos/:owner/:repo/pulls/<PR>/comments/"$db_id"/replies --input reply.json >/dev/null
+
 # Resolve:
-gh api graphql -f query='mutation { resolveReviewThread(input:{threadId:"PRRT_xxx"}){ thread { isResolved } } }' 2>/dev/null
+resolved="$(gh api graphql -f query='mutation { resolveReviewThread(input:{threadId:"PRRT_xxx"}){ thread { isResolved } } }' --jq '.data.resolveReviewThread.thread.isResolved')"
+if [[ "$resolved" != "true" ]]; then
+  echo "failed to resolve PRRT_xxx" >&2
+  exit 1
+fi
 ```
 
 Informational threads (acknowledged, no code change) still need `scripts/pr-resolve reply` + resolve — skipping them leaves the PR blocked.

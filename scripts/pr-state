@@ -93,9 +93,9 @@ extract_reviews_json() {
 }
 
 extract_review_threads_json() {
-  local threads_json=$1
-  jq -cn --argjson data "$threads_json" '
-    ($data.data.repository.pullRequest.reviewThreads.nodes // []) | map({
+  local threads_nodes_json=$1
+  jq -cn --argjson threads "$threads_nodes_json" '
+    $threads | map({
       thread_id: .id,
       is_resolved: (.isResolved // false),
       path: (.path // ""),
@@ -106,6 +106,70 @@ extract_review_threads_json() {
   '
 }
 
+fetch_review_threads_nodes_json() {
+  local owner=$1
+  local repo=$2
+  local pr_number=$3
+  local cursor=''
+  local nodes='[]'
+
+  while :; do
+    local cursor_args=()
+    if [[ -n "$cursor" ]]; then
+      cursor_args=(-f cursor="$cursor")
+    fi
+
+    local page_json
+    if ! page_json="$(gh_json api graphql \
+      -f query='
+        query($owner: String!, $repo: String!, $pr: Int!, $cursor: String) {
+          repository(owner: $owner, name: $repo) {
+            pullRequest(number: $pr) {
+              reviewThreads(first: 100, after: $cursor) {
+                pageInfo {
+                  hasNextPage
+                  endCursor
+                }
+                nodes {
+                  id
+                  isResolved
+                  path
+                  comments(first: 1) {
+                    nodes {
+                      databaseId
+                      author { login }
+                      body
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }' \
+      -f owner="$owner" -f repo="$repo" -F pr="$pr_number" "${cursor_args[@]}")"; then
+      return 1
+    fi
+
+    local page_nodes
+    page_nodes="$(jq -c '.data.repository.pullRequest.reviewThreads.nodes // []' <<<"$page_json")"
+    nodes="$(jq -cn --argjson prev "$nodes" --argjson page "$page_nodes" '$prev + $page')"
+
+    local has_next
+    has_next="$(jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage // false' <<<"$page_json")"
+    if [[ "$has_next" != "true" ]]; then
+      break
+    fi
+
+    cursor="$(jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor // ""' <<<"$page_json")"
+    if [[ -z "$cursor" ]]; then
+      add_error "review_threads" "pagination stopped: missing endCursor"
+      break
+    fi
+  done
+
+  printf '%s\n' "$nodes"
+}
+
 repo_owner=''
 repo_name=''
 if repo_json="$(gh_json repo view --json owner,name)"; then
@@ -113,12 +177,17 @@ if repo_json="$(gh_json repo view --json owner,name)"; then
   repo_name="$(jq -r '.name // ""' <<<"$repo_json")"
 else
   add_error "repo" "gh repo view failed"
-  add_error "review_threads" "skipped: repo lookup failed"
 fi
 
 comments_json='[]'
 status_json='[]'
-if pr_view_json="$(gh_json pr view "$PR" --json number,headRefName,statusCheckRollup,comments)"; then
+resolved_pr_number=''
+if pr_view_json="$(gh_json pr view "$PR" --json number,headRefName,statusCheckRollup,comments,url)"; then
+  resolved_pr_number="$(jq -r '.number // ""' <<<"$pr_view_json")"
+  if pr_url_owner="$(jq -r '.url | capture("github.com/(?<owner>[^/]+)/(?<repo>[^/]+)/pull/[0-9]+").owner // ""' <<<"$pr_view_json" 2>/dev/null)" && [[ -n "$pr_url_owner" ]]; then
+    repo_owner="$pr_url_owner"
+    repo_name="$(jq -r '.url | capture("github.com/(?<owner>[^/]+)/(?<repo>[^/]+)/pull/[0-9]+").repo // ""' <<<"$pr_view_json")"
+  fi
   pr_json="$(jq -c '{number: .number, branch: (.headRefName // "unknown")}' <<<"$pr_view_json")"
   comments_json="$(jq -c '.comments // []' <<<"$pr_view_json")"
   status_json="$(jq -c '.statusCheckRollup // []' <<<"$pr_view_json")"
@@ -133,41 +202,28 @@ else
   add_error "pr_view" "gh pr view failed"
 fi
 
-if reviews_api_json="$(gh_json api "repos/:owner/:repo/pulls/$PR/reviews")"; then
-  reviews_json="$(extract_reviews_json "$reviews_api_json")"
+if [[ -n "$repo_owner" && -n "$repo_name" && -n "$resolved_pr_number" ]]; then
+  if reviews_pages_json="$(gh_json api --paginate -X GET "repos/$repo_owner/$repo_name/pulls/$resolved_pr_number/reviews")"; then
+    reviews_api_json="$(jq -cs 'add // []' <<<"$reviews_pages_json")"
+    reviews_json="$(extract_reviews_json "$reviews_api_json")"
+  else
+    add_error "reviews" "gh api pulls reviews failed"
+  fi
 else
-  add_error "reviews" "gh api pulls reviews failed"
+  add_error "reviews" "skipped: resolved PR identity unavailable"
 fi
 
-if [[ -n "$repo_owner" && -n "$repo_name" ]]; then
-  if threads_json="$(gh_json api graphql \
-    -f query='
-      query($owner: String!, $repo: String!, $pr: Int!) {
-        repository(owner: $owner, name: $repo) {
-          pullRequest(number: $pr) {
-            reviewThreads(first: 100) {
-              nodes {
-                id
-                isResolved
-                path
-                comments(first: 1) {
-                  nodes {
-                    databaseId
-                    author { login }
-                    body
-                  }
-                }
-              }
-            }
-          }
-        }
-      }' \
-    -f owner="$repo_owner" -f repo="$repo_name" -F pr="$PR")"; then
-    review_threads_json="$(extract_review_threads_json "$threads_json")"
+if [[ -n "$repo_owner" && -n "$repo_name" && -n "$resolved_pr_number" ]]; then
+  if threads_nodes_json="$(fetch_review_threads_nodes_json "$repo_owner" "$repo_name" "$resolved_pr_number")"; then
+    review_threads_json="$(extract_review_threads_json "$threads_nodes_json")"
     unresolved_review_thread_count="$(jq -r '[.[] | select(.is_resolved == false)] | length' <<<"$review_threads_json")"
   else
     add_error "review_threads" "gh api graphql reviewThreads failed"
   fi
+elif [[ -z "$repo_owner" || -z "$repo_name" ]]; then
+  add_error "review_threads" "skipped: repo lookup failed"
+elif [[ -z "$resolved_pr_number" ]]; then
+  add_error "review_threads" "skipped: resolved PR identity unavailable"
 fi
 
 jq -cn \

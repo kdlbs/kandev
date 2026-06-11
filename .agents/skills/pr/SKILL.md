@@ -70,7 +70,7 @@ description: Commit, push, and create a PR. Default is ready-for-review with aut
    - Read the manifest to list available screenshots/GIFs
    - Run `npx tsx apps/web/e2e/scripts/upload-pr-assets.ts <PR_NUMBER>` to generate embed markdown
    - If `apps/web/.pr-assets/embed.md` exists and is non-empty, append its contents to the PR body using a body file and `gh pr edit <PR_NUMBER> --body-file <file>`
-   - If `gh pr edit` fails after PR creation, fall back to `gh api --method PATCH repos/:owner/:repo/pulls/<PR_NUMBER> --input <json>` with a JSON payload containing the full updated body
+   - If `gh pr edit` fails after PR creation, fall back to `gh api --method PATCH repos/:owner/:repo/pulls/<PR_NUMBER> --input <json>` with a JSON payload containing the full updated body. Build that payload with `jq -n --arg body "$(cat <file>)" '{body: $body}'` (or equivalent), never by hand-escaping shell strings.
    - Tell the user to drag and drop the image files from `.pr-assets/` into the PR description on GitHub for the images to render
 
 7. **Return the PR URL** when done.
