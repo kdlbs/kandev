@@ -114,6 +114,12 @@ func TestTrySwitchModelUpdatesRuntimeModelCache(t *testing.T) {
 	if result != nil {
 		t.Fatalf("expected nil prompt result for in-place switch, got %#v", result)
 	}
+	if len(agentMgr.setSessionModelCalls) != 1 {
+		t.Fatalf("expected one model switch call, got %d", len(agentMgr.setSessionModelCalls))
+	}
+	if agentMgr.setSessionModelCalls[0] != (sessionModelCall{SessionID: "session1", ModelID: "gpt-5.3-codex-spark"}) {
+		t.Fatalf("unexpected model switch call: %#v", agentMgr.setSessionModelCalls[0])
+	}
 	cached, ok := svc.runtimeModelBySession.Load("session1")
 	if !ok {
 		t.Fatal("expected runtime model cache entry")
