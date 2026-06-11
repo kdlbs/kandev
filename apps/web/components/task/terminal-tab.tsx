@@ -436,6 +436,7 @@ function TerminalTabMenu({
       )}
       <ContextMenuItem
         onClick={handleTerminate}
+        disabled={isClosing}
         className="text-destructive focus:text-destructive"
       >
         Terminate
