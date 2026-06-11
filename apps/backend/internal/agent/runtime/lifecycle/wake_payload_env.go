@@ -155,8 +155,10 @@ func gitWorktreeInfo(workspacePath string, gitPath string) (string, error) {
 	st, err := os.Stat(infoDir)
 	if os.IsNotExist(err) {
 		return infoDir, nil
-	} else if err != nil || !st.IsDir() {
+	} else if err != nil {
 		return "", err
+	} else if !st.IsDir() {
+		return "", fmt.Errorf("git info path is not a directory: %s", infoDir)
 	}
 	return infoDir, nil
 }

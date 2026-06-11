@@ -53,6 +53,28 @@ func TestEnsureWakePayloadGitExclude_WorktreeGitFile(t *testing.T) {
 	}
 }
 
+func TestEnsureWakePayloadGitExclude_WorktreeInfoPathIsFile(t *testing.T) {
+	workspace := t.TempDir()
+	gitDir := filepath.Join(t.TempDir(), "worktrees", "task", ".git")
+	if err := os.MkdirAll(gitDir, 0o700); err != nil {
+		t.Fatalf("create git dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "info"), []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("write git info file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, ".git"), []byte("gitdir: "+gitDir+"\n"), 0o600); err != nil {
+		t.Fatalf("write .git file: %v", err)
+	}
+
+	err := ensureWakePayloadGitExclude(workspace)
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if !strings.Contains(err.Error(), "git info path is not a directory") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestEnsureWakePayloadGitExclude_NormalGitDirWithoutInfo(t *testing.T) {
 	workspace := t.TempDir()
 	gitDir := filepath.Join(workspace, ".git")
