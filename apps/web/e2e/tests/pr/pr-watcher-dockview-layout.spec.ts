@@ -157,7 +157,11 @@ test.describe("PR watcher dockview layout stability", () => {
           );
           return visible.filter(Boolean).length;
         },
-        { timeout: 90_000, intervals: [500, 1_000, 2_000] },
+        {
+          timeout: 90_000,
+          intervals: [500, 1_000, 2_000],
+          message: `Expected all 3 PR task cards (${prTaskTitles.join(", ")}) to appear in the Review column`,
+        },
       )
       .toBe(3);
 
