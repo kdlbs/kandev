@@ -9,6 +9,11 @@ import { test } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
+import {
+  readTerminalBuffer,
+  switchToTerminalPanel,
+  waitForShellReady,
+} from "./mobile-terminal-helpers";
 
 async function seedTaskWithSession(
   testPage: Page,
@@ -32,54 +37,6 @@ async function seedTaskWithSession(
   await session.waitForLoad();
   await session.waitForChatIdle();
   return session;
-}
-
-async function tapTerminalTab(testPage: Page): Promise<void> {
-  await testPage.getByRole("button", { name: "Terminal" }).tap();
-}
-
-async function switchToTerminalPanel(testPage: Page): Promise<void> {
-  // Confirm the panel actually mounted rather than firing a single tap. On
-  // mobile the bottom-nav button can be tapped before hydration wires its
-  // handler; a lost tap leaves the terminal panel unmounted, which would later
-  // strand waitForShellReady polling an element that never appears. Re-tap once
-  // if the first tap didn't take.
-  const panel = testPage.getByTestId("terminal-panel");
-  await tapTerminalTab(testPage);
-  if (!(await panel.isVisible())) {
-    await tapTerminalTab(testPage);
-  }
-  await expect(panel).toBeVisible({ timeout: 10_000 });
-}
-
-async function waitForShellReady(testPage: Page, timeout = 45_000): Promise<void> {
-  // The shell WS connect can be missed under CI load (the auto-create guard
-  // only retries on a WS reconnect). If the panel falls out of view we re-tap
-  // it, which forces a remount and kicks the reconnect loop — so we don't
-  // blindly wait out the whole budget on a dead connection.
-  const panel = testPage.getByTestId("terminal-panel");
-  const deadline = Date.now() + timeout;
-  while (Date.now() < deadline) {
-    if ((await readTerminalBuffer(testPage)).length > 0) return;
-    if (!(await panel.isVisible())) {
-      await switchToTerminalPanel(testPage);
-    }
-    await testPage.waitForTimeout(1_000);
-  }
-  expect(
-    (await readTerminalBuffer(testPage)).length,
-    "Waiting for mobile terminal shell to connect",
-  ).toBeGreaterThan(0);
-}
-
-async function readTerminalBuffer(page: Page): Promise<string> {
-  return page.evaluate(() => {
-    const panel = document.querySelector('[data-testid="terminal-panel"]');
-    const xtermEl = panel?.querySelector(".xterm");
-    type XC = HTMLElement & { __xtermReadBuffer?: () => string };
-    const container = xtermEl?.parentElement as XC | null | undefined;
-    return container?.__xtermReadBuffer?.() ?? "";
-  });
 }
 
 async function readViewportY(page: Page): Promise<number> {
