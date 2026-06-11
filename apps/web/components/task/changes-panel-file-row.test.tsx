@@ -180,7 +180,7 @@ describe("FileRow tree-mode hover stage action", () => {
 
     const iconSlot = row!.querySelector("[data-testid='file-row-icon-action-slot']");
     expect(iconSlot).not.toBeNull();
-    expect(iconSlot!.className).toContain("size-4");
+    expect(iconSlot!.classList.contains("size-4")).toBe(true);
     expect(iconSlot!.querySelector("button[title='Stage file']")).not.toBeNull();
 
     const rightActions = row!.querySelector("[data-testid='file-row-hover-actions']");
@@ -214,7 +214,7 @@ describe("FileRow tree-mode hover stage action", () => {
 
     const iconSlot = row!.querySelector("[data-testid='file-row-icon-action-slot']");
     expect(iconSlot).not.toBeNull();
-    expect(iconSlot!.className).toContain("size-4");
+    expect(iconSlot!.classList.contains("size-4")).toBe(true);
     expect(iconSlot!.querySelector("button[title='Unstage file']")).not.toBeNull();
 
     const rightActions = row!.querySelector("[data-testid='file-row-hover-actions']");
