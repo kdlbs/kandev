@@ -769,6 +769,52 @@ func TestEffectiveSessionMode(t *testing.T) {
 	})
 }
 
+func TestEffectiveSessionRuntimeConfig(t *testing.T) {
+	exec := &AgentExecution{ID: "exec-1", TaskID: "task-1", SessionID: "session-1"}
+	profileOptions := map[string]string{"reasoning_effort": "medium"}
+
+	t.Run("session runtime config overrides profile defaults", func(t *testing.T) {
+		mgr := newTestManager(t)
+		mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{
+			infos: map[string]*WorkspaceInfo{
+				"session-1": {
+					SessionID:            "session-1",
+					SessionMode:          "full-access",
+					RuntimeModel:         "gpt-5.3-codex-spark",
+					RuntimeConfigOptions: map[string]string{"reasoning_effort": "low"},
+				},
+			},
+		}
+
+		model, mode, options := mgr.effectiveSessionRuntimeConfig(
+			context.Background(),
+			exec,
+			"gpt-5.5",
+			"auto",
+			profileOptions,
+		)
+
+		require.Equal(t, "gpt-5.3-codex-spark", model)
+		require.Equal(t, "full-access", mode)
+		require.Equal(t, map[string]string{"reasoning_effort": "low"}, options)
+	})
+
+	t.Run("falls back to profile defaults", func(t *testing.T) {
+		mgr := newTestManager(t)
+		model, mode, options := mgr.effectiveSessionRuntimeConfig(
+			context.Background(),
+			exec,
+			"gpt-5.5",
+			"auto",
+			profileOptions,
+		)
+
+		require.Equal(t, "gpt-5.5", model)
+		require.Equal(t, "auto", mode)
+		require.Equal(t, profileOptions, options)
+	})
+}
+
 // --- IsRemoteSession tests ---
 
 type mockWorkspaceInfoProvider struct {

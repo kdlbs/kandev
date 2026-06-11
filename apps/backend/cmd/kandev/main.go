@@ -796,6 +796,7 @@ func initOfficeServices(
 		CachePath: modelsdevCachePath,
 	}, log)
 	services.Office.SetPricingLookup(pricingLookup)
+	orchestratorSvc.SetModelInfoLookup(pricingLookup)
 	services.Office.SetSessionUsageWriter(repos.Task)
 
 	// ADR 0005 Wave E: plug the runtime-tier skill deployer into the

@@ -497,6 +497,14 @@ func (h *ProcessHandlers) httpSetSessionMode(c *gin.Context) {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
+	if err := h.service.PersistSessionRuntimeMode(c.Request.Context(), sessionID, req.ModeID); err != nil {
+		h.logger.Error("failed to persist session mode",
+			zap.String("session_id", sessionID),
+			zap.String("mode_id", req.ModeID),
+			zap.Error(err))
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
 	c.JSON(200, gin.H{"ok": true})
 }
 
@@ -512,6 +520,14 @@ func (h *ProcessHandlers) httpSetSessionModel(c *gin.Context) {
 	}
 	if err := h.lifecycleMgr.SetSessionModelBySessionID(c.Request.Context(), sessionID, req.ModelID); err != nil {
 		h.logger.Error("failed to set session model",
+			zap.String("session_id", sessionID),
+			zap.String("model_id", req.ModelID),
+			zap.Error(err))
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	if err := h.service.PersistSessionRuntimeModel(c.Request.Context(), sessionID, req.ModelID); err != nil {
+		h.logger.Error("failed to persist session model",
 			zap.String("session_id", sessionID),
 			zap.String("model_id", req.ModelID),
 			zap.Error(err))
@@ -534,6 +550,14 @@ func (h *ProcessHandlers) httpSetSessionConfigOption(c *gin.Context) {
 	}
 	if err := h.lifecycleMgr.SetSessionConfigOptionBySessionID(c.Request.Context(), sessionID, req.ConfigID, req.Value); err != nil {
 		h.logger.Error("failed to set session config option",
+			zap.String("session_id", sessionID),
+			zap.String("config_id", req.ConfigID),
+			zap.Error(err))
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	if err := h.service.PersistSessionRuntimeConfigOption(c.Request.Context(), sessionID, req.ConfigID, req.Value); err != nil {
+		h.logger.Error("failed to persist session config option",
 			zap.String("session_id", sessionID),
 			zap.String("config_id", req.ConfigID),
 			zap.Error(err))

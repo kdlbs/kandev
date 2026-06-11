@@ -367,6 +367,7 @@ export type SessionRuntimeSliceActions = {
   clearLegacyGitStatusEntry: (sessionId: string) => void;
   registerSessionEnvironment: (sessionId: string, environmentId: string) => void;
   setContextWindow: (sessionId: string, contextWindow: ContextWindowEntry) => void;
+  clearContextWindow: (sessionId: string) => void;
   // Session commit actions
   setSessionCommits: (
     sessionId: string,

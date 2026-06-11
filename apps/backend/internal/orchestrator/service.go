@@ -288,6 +288,9 @@ type Service struct {
 	// dispatch pre-flight. Set via SetProfileLookup from main; nil-safe so
 	// the legacy code path (and tests without profile wiring) keep working.
 	profileLookup ProfileLookup
+	// modelInfoLookup resolves optional model metadata from models.dev. Nil-safe;
+	// ACP context-window events remain authoritative when they include a size.
+	modelInfoLookup ModelInfoLookup
 
 	// Jira service for issue watch dedup operations
 	jiraService JiraService

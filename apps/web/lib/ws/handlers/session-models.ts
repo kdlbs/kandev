@@ -3,6 +3,41 @@ import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import type { SessionModelsPayload } from "@/lib/types/backend";
 
+type SessionModelConfigOption = SessionModelsPayload["config_options"][number];
+
+function resolveCurrentModelId(payload: SessionModelsPayload): string {
+  if (payload.current_model_id) {
+    return payload.current_model_id;
+  }
+  const modelOpt = (payload.config_options ?? []).find(isModelConfigOption);
+  return modelOpt?.current_value ?? "";
+}
+
+function isModelConfigOption(option: SessionModelConfigOption): boolean {
+  return option.id === "model" || option.category === "model";
+}
+
+function clearStaleContextWindow(state: AppState, sessionId: string, currentModelId: string) {
+  const previousModelId = state.sessionModels.bySessionId[sessionId]?.currentModelId ?? "";
+  if (previousModelId && currentModelId && previousModelId !== currentModelId) {
+    state.clearContextWindow(sessionId);
+  }
+}
+
+function clearStaleActiveModel(
+  state: AppState,
+  sessionId: string,
+  acpModels: SessionModelsPayload["models"],
+) {
+  if (!acpModels?.length) {
+    return;
+  }
+  const currentActive = state.activeModel.bySessionId[sessionId];
+  if (currentActive && !acpModels.some((m) => m.model_id === currentActive)) {
+    state.setActiveModel(sessionId, "");
+  }
+}
+
 export function registerSessionModelsHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     "session.models_updated": (message) => {
@@ -11,18 +46,12 @@ export function registerSessionModelsHandlers(store: StoreApi<AppState>): WsHand
         return;
       }
       const acpModels = payload.models ?? [];
-      // Resolve currentModelId: prefer the explicit field, fall back to the "model"
-      // config option's currentValue (some ACP agents send currentModelId as empty).
-      let currentModelId = payload.current_model_id || "";
-      if (!currentModelId) {
-        const modelOpt = (payload.config_options ?? []).find(
-          (o) => o.id === "model" || o.category === "model",
-        );
-        if (modelOpt?.current_value) {
-          currentModelId = modelOpt.current_value;
-        }
-      }
-      store.getState().setSessionModels(payload.session_id, {
+      const sessionId = payload.session_id;
+      const currentModelId = resolveCurrentModelId(payload);
+      const state = store.getState();
+      clearStaleContextWindow(state, sessionId, currentModelId);
+
+      state.setSessionModels(sessionId, {
         currentModelId,
         models: acpModels.map((m) => ({
           modelId: m.model_id,
@@ -41,15 +70,7 @@ export function registerSessionModelsHandlers(store: StoreApi<AppState>): WsHand
         })),
       });
 
-      // Clear stale activeModel if it uses a profile ID that doesn't exist in ACP models.
-      // This happens when a user selected a static model before ACP models arrived.
-      if (acpModels.length > 0) {
-        const state = store.getState();
-        const currentActive = state.activeModel.bySessionId[payload.session_id];
-        if (currentActive && !acpModels.some((m) => m.model_id === currentActive)) {
-          state.setActiveModel(payload.session_id, "");
-        }
-      }
+      clearStaleActiveModel(state, sessionId, acpModels);
     },
   };
 }

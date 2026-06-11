@@ -501,6 +501,11 @@ type WorkspaceInfo struct {
 	// a user toggle. Applied as a mode override at ACP session init so a fresh
 	// launch starts in the declared mode before the first prompt. See issue #1183.
 	SessionMode string
+	// RuntimeModel/RuntimeConfigOptions are user-selected ACP session runtime
+	// settings persisted in task_sessions.metadata.runtime_config. They take
+	// precedence over profile defaults when resuming or recreating a session.
+	RuntimeModel         string
+	RuntimeConfigOptions map[string]string
 
 	// Executor-aware fields for correct runtime selection and remote reconnection
 	ExecutorType     string                 // Executor type (e.g., "local_pc", "sprites")

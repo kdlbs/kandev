@@ -427,6 +427,7 @@ export type AppState = {
   clearSessionCommits: (sessionId: string) => void;
   bumpSessionCommitsRefetch: (sessionId: string) => void;
   setContextWindow: (sessionId: string, contextWindow: ContextWindowEntry) => void;
+  clearContextWindow: (sessionId: string) => void;
   bumpAgentProfilesVersion: () => void;
   setPendingModel: (sessionId: string, modelId: string) => void;
   clearPendingModel: (sessionId: string) => void;

@@ -999,6 +999,7 @@ func (s *Service) persistSessionMode(ctx context.Context, sessionID, modeID stri
 			zap.String("mode", modeID),
 			zap.Error(err))
 	}
+	s.persistSessionRuntimeConfig(ctx, sessionID, "", modeID, nil)
 }
 
 // handleAgentCapabilitiesEvent broadcasts agent_capabilities events to the WebSocket.
@@ -1034,6 +1035,7 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 	// selector trigger with the right value on a page reload instead of
 	// flashing the profile default before the WS catches up.
 	s.persistSessionModel(ctx, sessionID, payload.Data.CurrentModelID)
+	s.persistSessionRuntimeConfig(ctx, sessionID, payload.Data.CurrentModelID, "", payload.Data.ConfigOptions)
 
 	eventPayload := lifecycle.SessionModelsEventPayload{
 		TaskID:         payload.TaskID,
@@ -1083,6 +1085,40 @@ func (s *Service) persistSessionModel(ctx context.Context, sessionID, model stri
 	// Invalidate the message creator's model cache so subsequent messages use the new model.
 	if s.messageCreator != nil {
 		s.messageCreator.InvalidateModelCache(sessionID)
+	}
+}
+
+func (s *Service) persistSessionRuntimeConfig(ctx context.Context, sessionID, model, mode string, options []streams.ConfigOption) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return
+	}
+	cfg, _ := models.LoadSessionRuntimeConfig(session.Metadata)
+	previousModel := cfg.Model
+	if model != "" {
+		cfg.Model = model
+	}
+	if mode != "" {
+		cfg.Mode = mode
+	}
+	for _, option := range options {
+		if option.ID == "" || option.CurrentValue == "" {
+			continue
+		}
+		if cfg.ConfigOptions == nil {
+			cfg.ConfigOptions = make(map[string]string)
+		}
+		cfg.ConfigOptions[option.ID] = option.CurrentValue
+		if option.ID == "model" || option.Category == "model" {
+			cfg.Model = option.CurrentValue
+		}
+	}
+	if cfg.IsZero() {
+		return
+	}
+	_ = s.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyRuntimeConfig, cfg)
+	if cfg.Model != "" && previousModel != "" && cfg.Model != previousModel {
+		_ = s.repo.SetSessionMetadataKey(ctx, sessionID, "context_window", nil)
 	}
 }
 

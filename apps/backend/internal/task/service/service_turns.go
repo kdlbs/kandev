@@ -373,8 +373,9 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		}
 	}
 
-	// Get ACP session ID and persisted session permission mode from metadata.
+	// Get ACP session ID and persisted session runtime settings from metadata.
 	var acpSessionID, sessionMode string
+	var runtimeConfig models.SessionRuntimeConfig
 	if session.Metadata != nil {
 		if id, ok := session.Metadata["acp_session_id"].(string); ok {
 			acpSessionID = id
@@ -382,17 +383,25 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		if mode, ok := session.Metadata[models.SessionMetaKeySessionMode].(string); ok {
 			sessionMode = mode
 		}
+		if cfg, ok := models.LoadSessionRuntimeConfig(session.Metadata); ok {
+			runtimeConfig = cfg
+			if sessionMode == "" {
+				sessionMode = cfg.Mode
+			}
+		}
 	}
 
 	info := &lifecycle.WorkspaceInfo{
-		TaskID:            taskID,
-		SessionID:         sessionID,
-		TaskEnvironmentID: session.TaskEnvironmentID,
-		WorkspacePath:     workspacePath,
-		AgentProfileID:    session.AgentProfileID,
-		AgentID:           agentID,
-		ACPSessionID:      acpSessionID,
-		SessionMode:       sessionMode,
+		TaskID:               taskID,
+		SessionID:            sessionID,
+		TaskEnvironmentID:    session.TaskEnvironmentID,
+		WorkspacePath:        workspacePath,
+		AgentProfileID:       session.AgentProfileID,
+		AgentID:              agentID,
+		ACPSessionID:         acpSessionID,
+		SessionMode:          sessionMode,
+		RuntimeModel:         runtimeConfig.Model,
+		RuntimeConfigOptions: runtimeConfig.ConfigOptions,
 	}
 
 	var taskEnv *models.TaskEnvironment
@@ -455,6 +464,67 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 	}
 
 	return info, nil
+}
+
+// PersistSessionRuntimeModel records the session's selected ACP model.
+func (s *Service) PersistSessionRuntimeModel(ctx context.Context, sessionID, modelID string) error {
+	if modelID == "" {
+		return nil
+	}
+	if err := s.updateSessionRuntimeConfig(ctx, sessionID, func(cfg *models.SessionRuntimeConfig) {
+		cfg.Model = modelID
+	}); err != nil {
+		return err
+	}
+	return s.sessions.SetSessionMetadataKey(ctx, sessionID, "context_window", nil)
+}
+
+// PersistSessionRuntimeMode records the session's selected ACP permission mode.
+func (s *Service) PersistSessionRuntimeMode(ctx context.Context, sessionID, modeID string) error {
+	if modeID == "" {
+		return nil
+	}
+	if err := s.sessions.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeySessionMode, modeID); err != nil {
+		return err
+	}
+	return s.updateSessionRuntimeConfig(ctx, sessionID, func(cfg *models.SessionRuntimeConfig) {
+		cfg.Mode = modeID
+	})
+}
+
+// PersistSessionRuntimeConfigOption records a selected dynamic ACP config option.
+func (s *Service) PersistSessionRuntimeConfigOption(ctx context.Context, sessionID, configID, value string) error {
+	if configID == "" {
+		return nil
+	}
+	if err := s.updateSessionRuntimeConfig(ctx, sessionID, func(cfg *models.SessionRuntimeConfig) {
+		if cfg.ConfigOptions == nil {
+			cfg.ConfigOptions = make(map[string]string)
+		}
+		cfg.ConfigOptions[configID] = value
+		if configID == "model" {
+			cfg.Model = value
+		}
+	}); err != nil {
+		return err
+	}
+	if configID == "model" {
+		return s.sessions.SetSessionMetadataKey(ctx, sessionID, "context_window", nil)
+	}
+	return nil
+}
+
+func (s *Service) updateSessionRuntimeConfig(ctx context.Context, sessionID string, mutate func(*models.SessionRuntimeConfig)) error {
+	session, err := s.sessions.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	cfg, _ := models.LoadSessionRuntimeConfig(session.Metadata)
+	mutate(&cfg)
+	if cfg.IsZero() {
+		return nil
+	}
+	return s.sessions.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyRuntimeConfig, cfg)
 }
 
 func applyTaskEnvironmentToWorkspaceInfo(info *lifecycle.WorkspaceInfo, env *models.TaskEnvironment) {

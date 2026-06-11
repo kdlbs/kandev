@@ -446,6 +446,7 @@ func (e *Executor) persistModelSwitchState(ctx context.Context, taskID, sessionI
 		session.AgentProfileSnapshot = make(map[string]interface{})
 	}
 	session.AgentProfileSnapshot["model"] = newModel
+	persistRuntimeModelOnSession(session, newModel)
 
 	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
 		e.logger.Error("failed to update session after model switch",
@@ -469,11 +470,22 @@ func (e *Executor) persistInPlaceModelSwitch(ctx context.Context, sessionID, new
 		session.AgentProfileSnapshot = make(map[string]interface{})
 	}
 	session.AgentProfileSnapshot["model"] = newModel
+	persistRuntimeModelOnSession(session, newModel)
 	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
 		e.logger.Warn("failed to persist in-place model switch",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 	}
+}
+
+func persistRuntimeModelOnSession(session *models.TaskSession, modelID string) {
+	if session.Metadata == nil {
+		session.Metadata = make(map[string]interface{})
+	}
+	cfg, _ := models.LoadSessionRuntimeConfig(session.Metadata)
+	cfg.Model = modelID
+	session.Metadata[models.SessionMetaKeyRuntimeConfig] = cfg
+	session.Metadata["context_window"] = nil
 }
 
 // RespondToPermission sends a response to a permission request for a session

@@ -491,3 +491,25 @@ func TestPersistSessionModel(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "gpt-5.4", preserved.AgentProfileSnapshot["model"])
 }
+
+func TestPersistSessionRuntimeConfigFromSessionModels(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	svc := &Service{logger: testLogger(), repo: repo}
+
+	svc.persistSessionRuntimeConfig(ctx, "s1", "gpt-5.3-codex-spark", "", []streams.ConfigOption{
+		{ID: "model", Category: "model", CurrentValue: "gpt-5.3-codex-spark"},
+		{ID: "reasoning_effort", Category: "thought_level", CurrentValue: "low"},
+	})
+
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	cfg, ok := models.LoadSessionRuntimeConfig(updated.Metadata)
+	require.True(t, ok)
+	require.Equal(t, "gpt-5.3-codex-spark", cfg.Model)
+	require.Equal(t, map[string]string{
+		"model":            "gpt-5.3-codex-spark",
+		"reasoning_effort": "low",
+	}, cfg.ConfigOptions)
+}
