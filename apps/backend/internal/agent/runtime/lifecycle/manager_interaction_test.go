@@ -802,13 +802,12 @@ func TestEffectiveSessionRuntimeConfig(t *testing.T) {
 		require.Equal(t, 1, provider.sessionCalls)
 	})
 
-	t.Run("empty session runtime options override profile defaults", func(t *testing.T) {
+	t.Run("model-only session runtime config keeps profile options", func(t *testing.T) {
 		provider := &mockWorkspaceInfoProvider{
 			infos: map[string]*WorkspaceInfo{
 				"session-1": {
-					SessionID:               "session-1",
-					RuntimeModel:            "gpt-5.3-codex-spark",
-					RuntimeConfigOptionsSet: true,
+					SessionID:    "session-1",
+					RuntimeModel: "gpt-5.3-codex-spark",
 				},
 			},
 		}
@@ -825,7 +824,7 @@ func TestEffectiveSessionRuntimeConfig(t *testing.T) {
 
 		require.Equal(t, "gpt-5.3-codex-spark", model)
 		require.Equal(t, "auto", mode)
-		require.Nil(t, options)
+		require.Equal(t, profileOptions, options)
 	})
 
 	t.Run("falls back to profile defaults", func(t *testing.T) {

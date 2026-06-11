@@ -402,10 +402,7 @@ func (s *Service) resolveContextWindowValues(ctx context.Context, data watcher.C
 	if remaining < 0 {
 		remaining = 0
 	}
-	efficiency := 0.0
-	if info.ContextWindow > 0 {
-		efficiency = float64(data.ContextWindowUsed) / float64(info.ContextWindow) * 100
-	}
+	efficiency := float64(data.ContextWindowUsed) / float64(info.ContextWindow) * 100
 	return info.ContextWindow, remaining, efficiency, true
 }
 

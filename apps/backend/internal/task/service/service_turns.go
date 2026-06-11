@@ -376,7 +376,7 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 	// Get ACP session ID and persisted session runtime settings from metadata.
 	var acpSessionID, sessionMode string
 	var runtimeConfig models.SessionRuntimeConfig
-	runtimeConfigSet := false
+	runtimeConfigOptionsSet := false
 	if session.Metadata != nil {
 		if id, ok := session.Metadata["acp_session_id"].(string); ok {
 			acpSessionID = id
@@ -386,7 +386,7 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		}
 		if cfg, ok := models.LoadSessionRuntimeConfig(session.Metadata); ok {
 			runtimeConfig = cfg
-			runtimeConfigSet = true
+			runtimeConfigOptionsSet = cfg.ConfigOptions != nil
 			if sessionMode == "" {
 				sessionMode = cfg.Mode
 			}
@@ -404,7 +404,7 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		SessionMode:             sessionMode,
 		RuntimeModel:            runtimeConfig.Model,
 		RuntimeConfigOptions:    runtimeConfig.ConfigOptions,
-		RuntimeConfigOptionsSet: runtimeConfigSet,
+		RuntimeConfigOptionsSet: runtimeConfigOptionsSet,
 	}
 
 	var taskEnv *models.TaskEnvironment
