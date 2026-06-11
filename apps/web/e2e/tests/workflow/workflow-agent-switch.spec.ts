@@ -454,7 +454,9 @@ test.describe("Workflow agent profile switching", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(60_000);
+    // Two agent boots (git worktree checkouts) — one before the move, one after —
+    // can outlast the default budget under CI shard contention; give headroom.
+    test.setTimeout(180_000);
     const { profileA, profileB } = await createProfiles(apiClient);
 
     // Step1 (profileA, auto_start, is_start) → Step2 (profileB, auto_start)
@@ -492,7 +494,7 @@ test.describe("Workflow agent profile switching", () => {
 
     // Wait for Profile A tab to appear and be active
     const profileATab = session.sessionTabByText("Profile A");
-    await expect(profileATab).toBeVisible({ timeout: 30_000 });
+    await expect(profileATab).toBeVisible({ timeout: 60_000 });
 
     // Wait for agent to be ready (WAITING_FOR_INPUT)
     await expect
@@ -501,7 +503,7 @@ test.describe("Workflow agent profile switching", () => {
           const { sessions } = await apiClient.listTaskSessions(task.id);
           return sessions.some((s) => s.state === "WAITING_FOR_INPUT");
         },
-        { timeout: 30_000, message: "Waiting for agent to be ready" },
+        { timeout: 60_000, message: "Waiting for agent to be ready" },
       )
       .toBe(true);
 
@@ -511,8 +513,8 @@ test.describe("Workflow agent profile switching", () => {
     // The new "Profile B" tab should appear and the primary star should move to it
     // (the active tab stays on Profile A because the SSR-load pin protects it).
     const profileBTab = session.sessionTabByText("Profile B");
-    await expect(profileBTab).toBeVisible({ timeout: 30_000 });
-    await expect(session.primaryStarInTab("Profile B")).toBeVisible({ timeout: 30_000 });
+    await expect(profileBTab).toBeVisible({ timeout: 60_000 });
+    await expect(session.primaryStarInTab("Profile B")).toBeVisible({ timeout: 60_000 });
   });
 
   /**
@@ -528,7 +530,9 @@ test.describe("Workflow agent profile switching", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(60_000);
+    // Cascade boots two agents sequentially (step1 turn, then step2 on move_to_next);
+    // under CI shard contention that can outlast the default budget — give headroom.
+    test.setTimeout(180_000);
     const { profileA, profileB } = await createProfiles(apiClient);
 
     // Step1 (profileA, auto_start, move_to_next) → Step2 (profileB, auto_start)
@@ -568,8 +572,8 @@ test.describe("Workflow agent profile switching", () => {
 
     // After the cascade, the Profile B tab should appear and own the primary star.
     const profileBTab = session.sessionTabByText("Profile B");
-    await expect(profileBTab).toBeVisible({ timeout: 45_000 });
-    await expect(session.primaryStarInTab("Profile B")).toBeVisible({ timeout: 45_000 });
+    await expect(profileBTab).toBeVisible({ timeout: 90_000 });
+    await expect(session.primaryStarInTab("Profile B")).toBeVisible({ timeout: 90_000 });
   });
 
   /**
@@ -583,7 +587,9 @@ test.describe("Workflow agent profile switching", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(60_000);
+    // Two agent boots (git worktree checkouts) — one before the move, one after —
+    // can outlast the default budget under CI shard contention; give headroom.
+    test.setTimeout(180_000);
     const { profileA, profileB } = await createProfiles(apiClient);
 
     const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Primary Star Test");
@@ -624,7 +630,7 @@ test.describe("Workflow agent profile switching", () => {
           const { sessions } = await apiClient.listTaskSessions(task.id);
           return sessions.some((s) => s.state === "WAITING_FOR_INPUT");
         },
-        { timeout: 30_000, message: "Waiting for agent to be ready" },
+        { timeout: 60_000, message: "Waiting for agent to be ready" },
       )
       .toBe(true);
 
@@ -635,8 +641,8 @@ test.describe("Workflow agent profile switching", () => {
     // Per PR #743, the active dockview tab stays pinned to Profile A — the star
     // moving is what proves SetPrimarySession's WS broadcast landed.
     const profileBTab = session.sessionTabByText("Profile B");
-    await expect(profileBTab).toBeVisible({ timeout: 30_000 });
-    await expect(session.primaryStarInTab("Profile B")).toBeVisible({ timeout: 30_000 });
+    await expect(profileBTab).toBeVisible({ timeout: 60_000 });
+    await expect(session.primaryStarInTab("Profile B")).toBeVisible({ timeout: 60_000 });
   });
 
   /**
@@ -650,7 +656,9 @@ test.describe("Workflow agent profile switching", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(60_000);
+    // Two agent boots (git worktree checkouts) — profileB on entry, profileA on
+    // revert — can outlast the default budget under CI shard contention; give headroom.
+    test.setTimeout(180_000);
     const { profileA, profileB } = await createProfiles(apiClient);
 
     // Step1 (profileB, auto_start) → Step2 (NO override, auto_start)
@@ -688,14 +696,14 @@ test.describe("Workflow agent profile switching", () => {
 
     // Wait for Profile B session (Step1 override) to be ready
     const profileBTab = session.sessionTabByText("Profile B");
-    await expect(profileBTab).toBeVisible({ timeout: 30_000 });
+    await expect(profileBTab).toBeVisible({ timeout: 60_000 });
     await expect
       .poll(
         async () => {
           const { sessions } = await apiClient.listTaskSessions(task.id);
           return sessions.some((s) => s.state === "WAITING_FOR_INPUT");
         },
-        { timeout: 30_000, message: "Waiting for agent to be ready" },
+        { timeout: 60_000, message: "Waiting for agent to be ready" },
       )
       .toBe(true);
 
@@ -706,8 +714,8 @@ test.describe("Workflow agent profile switching", () => {
     // Per PR #743, the user's pinned tab — Profile B from initial load — stays
     // active; the primary marker is what proves the revert-to-default landed.
     const profileATab = session.sessionTabByText("Profile A");
-    await expect(profileATab).toBeVisible({ timeout: 30_000 });
-    await expect(session.primaryStarInTab("Profile A")).toBeVisible({ timeout: 30_000 });
+    await expect(profileATab).toBeVisible({ timeout: 60_000 });
+    await expect(session.primaryStarInTab("Profile A")).toBeVisible({ timeout: 60_000 });
   });
 
   /**

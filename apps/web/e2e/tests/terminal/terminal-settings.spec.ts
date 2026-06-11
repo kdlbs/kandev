@@ -33,7 +33,10 @@ async function seedTaskWithSession(
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
-  await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+  // waitForChatIdle (not a raw idleInput wait) rides out the WS-subscribe race:
+  // the auto-started agent can settle RUNNING->WAITING_FOR_INPUT before the
+  // client subscribes, so the idle composer never renders without a reload.
+  await session.waitForChatIdle({ timeout: 30_000 });
   return session;
 }
 
