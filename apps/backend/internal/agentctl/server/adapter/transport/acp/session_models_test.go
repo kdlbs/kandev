@@ -436,6 +436,28 @@ func TestEmitSetModelEvent_EmitsSessionModelsWithCachedState(t *testing.T) {
 	}
 }
 
+// TestEmitSetModelEvent_SkipsWhenValueUnchanged pins that emitting a model
+// "change" to the current value is a no-op. The lifecycle resume path calls
+// SetModel(profileModel) on every backend-restart resume; when the agent
+// already has that model (the common case — agent default matches profile, or
+// session/load preserved it), broadcasting a UserInitiated convergence event
+// would cause the orchestrator to persist a fake user override and replay it
+// on the next resume, flickering the task into the sidebar's Running bucket
+// (see session-resume-keeps-review-state.spec.ts).
+func TestEmitSetModelEvent_SkipsWhenValueUnchanged(t *testing.T) {
+	a := newTestAdapter()
+	cachedConfig := []streams.ConfigOption{
+		{Type: "select", ID: "model", Name: "Model", CurrentValue: "mock-fast"},
+	}
+	a.emitSetModelEvent("sess-1", "mock-fast", nil, cachedConfig)
+	events := drainEvents(a)
+	for _, ev := range events {
+		if ev.Type == streams.EventTypeSessionModels {
+			t.Errorf("emitSetModelEvent broadcast a session_models event for a no-op model set: %+v", ev)
+		}
+	}
+}
+
 // TestConfigOptionUpdate_RefreshesCachedConfig pins that an inbound
 // ConfigOptionUpdate notification refreshes the adapter's availableConfigOptions
 // cache, so a subsequent SetModel convergence event emits the latest options
