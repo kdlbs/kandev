@@ -313,13 +313,15 @@ func TestGetGlobalStats_CleanTurnExcludesOutliers(t *testing.T) {
 	execOrFatal(t, dbConn, `INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, completed_at, created_at, updated_at) VALUES ('turn-short', 'sess-1', 'task-1', '2026-01-01T11:00:00.000Z', '2026-01-01T11:00:00.500Z', ?, ?)`, nowStr, nowStr)
 	// turn-zombie: 2h — excluded (above 1h ceiling).
 	execOrFatal(t, dbConn, `INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, completed_at, created_at, updated_at) VALUES ('turn-zombie', 'sess-1', 'task-1', '2026-01-01T12:00:00Z', '2026-01-01T14:00:00Z', ?, ?)`, nowStr, nowStr)
+	// turn-boundary: exactly 1h — excluded (cleanTurnMaxDurationMs is exclusive).
+	execOrFatal(t, dbConn, `INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, completed_at, created_at, updated_at) VALUES ('turn-boundary', 'sess-1', 'task-1', '2026-01-01T13:00:00Z', '2026-01-01T14:00:00Z', ?, ?)`, nowStr, nowStr)
 	// turn-empty: 10m, 0 messages — excluded (no messages).
 	execOrFatal(t, dbConn, `INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, completed_at, created_at, updated_at) VALUES ('turn-empty', 'sess-1', 'task-1', '2026-01-01T15:00:00Z', '2026-01-01T15:10:00Z', ?, ?)`, nowStr, nowStr)
 	// turn-incomplete: still running — excluded (NULL completed_at).
 	execOrFatal(t, dbConn, `INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, created_at, updated_at) VALUES ('turn-incomplete', 'sess-1', 'task-1', '2026-01-01T16:00:00Z', ?, ?)`, nowStr, nowStr)
 
 	// Messages: 4 on turn-good, 1 each on the otherwise-excluded turns so they aren't excluded by msg filter alone.
-	for i, turnID := range []string{"turn-good", "turn-good", "turn-good", "turn-good", "turn-short", "turn-zombie", "turn-incomplete"} {
+	for i, turnID := range []string{"turn-good", "turn-good", "turn-good", "turn-good", "turn-short", "turn-zombie", "turn-boundary", "turn-incomplete"} {
 		mid := fmt.Sprintf("m-%d", i)
 		execOrFatal(t, dbConn, `INSERT INTO task_session_messages (id, task_session_id, turn_id, author_type, type, content, created_at) VALUES (?, 'sess-1', ?, 'user', 'message', 'x', ?)`, mid, turnID, nowStr)
 	}
