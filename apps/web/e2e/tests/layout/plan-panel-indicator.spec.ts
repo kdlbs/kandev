@@ -82,8 +82,12 @@ test.describe("Plan panel auto-open + indicator", () => {
     await expect(session.chat).toBeVisible();
     await expect(planTabLocator(testPage)).not.toHaveClass(/dv-active-tab/);
 
-    // Indicator dot is visible on the Plan tab
-    await expect(planTabIndicator(testPage)).toBeVisible();
+    // Indicator dot is visible on the Plan tab. The indicator arms only once
+    // `plan.created_by === "agent"` lands in the store — that comes from the
+    // `task.plan.created` WS push, or the eager getTaskPlan self-heal if the
+    // push was missed. Both can land after the default 5s under shard load, so
+    // match the 15s tab budget.
+    await expect(planTabIndicator(testPage)).toBeVisible({ timeout: 15_000 });
   });
 
   test("clicking the Plan tab clears the indicator and reveals plan content", async ({
@@ -101,7 +105,7 @@ test.describe("Plan panel auto-open + indicator", () => {
       CREATE_PLAN_SCRIPT,
     );
     await expect(planTabLocator(testPage)).toBeVisible({ timeout: 15_000 });
-    await expect(planTabIndicator(testPage)).toBeVisible();
+    await expect(planTabIndicator(testPage)).toBeVisible({ timeout: 15_000 });
 
     await session.clickTab("Plan");
 
@@ -126,7 +130,7 @@ test.describe("Plan panel auto-open + indicator", () => {
       CREATE_PLAN_SCRIPT,
     );
     await expect(planTabLocator(testPage)).toBeVisible({ timeout: 15_000 });
-    await expect(planTabIndicator(testPage)).toBeVisible();
+    await expect(planTabIndicator(testPage)).toBeVisible({ timeout: 15_000 });
 
     // Acknowledge then leave back to chat
     await session.clickTab("Plan");
@@ -140,7 +144,7 @@ test.describe("Plan panel auto-open + indicator", () => {
 
     // Chat still focused, indicator re-armed
     await expect(planTabLocator(testPage)).not.toHaveClass(/dv-active-tab/);
-    await expect(planTabIndicator(testPage)).toBeVisible();
+    await expect(planTabIndicator(testPage)).toBeVisible({ timeout: 15_000 });
 
     // Clicking the Plan tab shows the updated content
     await session.clickTab("Plan");
