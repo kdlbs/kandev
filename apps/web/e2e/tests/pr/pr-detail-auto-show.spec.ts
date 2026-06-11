@@ -95,7 +95,7 @@ test.describe("PR detail panel", () => {
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await session.idleInput().waitFor({ state: "visible", timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // Verify PR topbar button appears with PR number
     await expect(session.prTopbarButton()).toBeVisible({ timeout: 15_000 });
@@ -195,7 +195,7 @@ test.describe("PR detail panel", () => {
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await session.idleInput().waitFor({ state: "visible", timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // Wait for PR data to arrive (topbar button confirms PR is loaded)
     await expect(session.prTopbarButton()).toBeVisible({ timeout: 15_000 });
@@ -212,7 +212,7 @@ test.describe("PR detail panel", () => {
     // 3. Reload page — panel should stay dismissed
     await testPage.reload();
     await session.waitForLoad();
-    await session.idleInput().waitFor({ state: "visible", timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // Give the auto-show hook time to fire (double rAF) — panel should NOT reappear
     await testPage.waitForTimeout(1_000);
@@ -324,13 +324,13 @@ test.describe("PR detail panel", () => {
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await session.idleInput().waitFor({ state: "visible", timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
     await expect(session.prDetailTab()).toBeVisible({ timeout: 15_000 });
 
     // Switch to Task B (no PR) — PR panel should be removed
     await session.clickTaskInSidebar("Plain Task");
     await session.waitForLoad();
-    await session.idleInput().waitFor({ state: "visible", timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
     await expect(session.prDetailTab()).not.toBeVisible({ timeout: 10_000 });
 
     // Switch back to Task A — PR panel should re-appear
@@ -464,7 +464,7 @@ test.describe("PR detail panel", () => {
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await session.idleInput().waitFor({ state: "visible", timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
     await expect(session.prDetailTab()).toBeVisible({ timeout: 15_000 });
 
     // Invariant: PR panel shares the session's dockview group (is a tab, not a split).
@@ -475,7 +475,7 @@ test.describe("PR detail panel", () => {
     // against the new session. Assert the invariant still holds.
     await session.clickTaskInSidebar("Second PR Task");
     await session.waitForLoad();
-    await session.idleInput().waitFor({ state: "visible", timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
     await expect(session.prDetailTab()).toBeVisible({ timeout: 15_000 });
     await session.expectPrPanelAndSessionShareGroup();
 
@@ -486,7 +486,7 @@ test.describe("PR detail panel", () => {
     // tab in a new group while the PR panel stayed in the old center group.
     await session.clickTaskInSidebar("First PR Task");
     await session.waitForLoad();
-    await session.idleInput().waitFor({ state: "visible", timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
     await expect(session.prDetailTab()).toBeVisible({ timeout: 15_000 });
     await session.expectPrPanelAndSessionShareGroup();
   });

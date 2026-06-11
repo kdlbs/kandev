@@ -240,7 +240,7 @@ test.describe("Workflow start step placement", () => {
     });
 
     // Session transitions to idle
-    await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
+    await session.waitForChatIdle({ timeout: 15_000 });
   });
 
   /**

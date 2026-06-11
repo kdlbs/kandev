@@ -76,7 +76,7 @@ test.describe("Subtask basics", () => {
     await session.waitForLoad();
 
     // Wait for agent to complete
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // Open the New Subtask dialog from the sidebar New Task row's trailing
     // subtask affordance (shown while viewing a task).
@@ -306,7 +306,7 @@ test.describe("MCP subtask creation", () => {
     await testPage.goto(`/t/${parentTask.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // 3. Open the New Subtask dialog from the sidebar New Task subtask affordance.
     await testPage.getByTestId("sidebar-new-subtask").click();
@@ -640,7 +640,7 @@ test.describe("Subtask dialog feature parity", () => {
     await testPage.goto(`/t/${parentTask.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // 3. Open the subtask dialog and toggle to GitHub URL mode.
     await testPage.getByTestId("sidebar-new-subtask").click();
@@ -735,7 +735,7 @@ test.describe("Subtask dialog feature parity", () => {
     await testPage.goto(`/t/${parentTask.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // 3. Sanity-check via the API that backend discovery actually finds the
     //    on-disk directory. If this fails, the issue is the backend scan, not
@@ -817,7 +817,7 @@ test.describe("Subtask dialog feature parity", () => {
     await testPage.goto(`/t/${parentTask.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // 3. Open the subtask dialog. The first chip is seeded with the parent's
     //    repo. Click the "+ add repository" button to append a second chip,

@@ -127,7 +127,7 @@ test.describe("Preview tab survives session switch", () => {
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // Open a file in preview mode
     await openFileInPreview(testPage, session, FILE_A);
@@ -186,7 +186,7 @@ test.describe("Preview tab survives session switch", () => {
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // Open file in preview, then promote via double-click. The panel keeps id
     // `preview:file-editor` with `params.promoted=true` until another file is
@@ -240,7 +240,7 @@ test.describe("Preview tab survives session switch", () => {
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // Open file in preview — it auto-activates, but we click it explicitly to
     // make the intent clear and to be robust against any default-active changes.

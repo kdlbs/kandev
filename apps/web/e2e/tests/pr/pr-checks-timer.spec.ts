@@ -104,7 +104,7 @@ test.describe("PR checks running timer", () => {
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await session.idleInput().waitFor({ state: "visible", timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // Open PR detail panel
     await expect(session.prTopbarButton()).toBeVisible({ timeout: 15_000 });

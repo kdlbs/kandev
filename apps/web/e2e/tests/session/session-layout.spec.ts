@@ -34,7 +34,7 @@ async function seedTaskWithSession(
 
   const session = new SessionPage(testPage);
   await session.waitForLoad();
-  await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+  await session.waitForChatIdle({ timeout: 30_000 });
 
   return session;
 }
@@ -121,7 +121,7 @@ test.describe("Session layout", () => {
     // Foreground the chat tab — after the layout restore it can land as a
     // background tab in the right group, so the idle input isn't visible yet.
     await sessionB.showSessionContext(30_000);
-    await expect(sessionB.idleInput()).toBeVisible({ timeout: 30_000 });
+    await sessionB.waitForChatIdle({ timeout: 30_000 });
 
     // Task B should have default (non-maximized) layout
     await sessionB.expectDefaultLayout();

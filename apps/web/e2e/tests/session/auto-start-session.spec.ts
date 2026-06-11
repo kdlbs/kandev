@@ -1,4 +1,4 @@
-import { test, expect } from "../../fixtures/test-base";
+import { test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("Auto-start session on task page", () => {
@@ -28,6 +28,6 @@ test.describe("Auto-start session on task page", () => {
     await session.waitForLoad();
 
     // Wait for agent to complete — confirms session was started and ran successfully
-    await expect(session.idleInput()).toBeVisible({ timeout: 45_000 });
+    await session.waitForChatIdle({ timeout: 45_000 });
   });
 });

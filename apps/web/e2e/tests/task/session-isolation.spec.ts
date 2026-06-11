@@ -37,7 +37,7 @@ test.describe("Session isolation", () => {
     await testPage.goto(`/t/${taskWithSession.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // 3. Verify there are messages in the chat (agent has responded)
     const chatPanel = testPage.getByTestId("session-chat");
@@ -89,7 +89,7 @@ test.describe("Session isolation", () => {
     await testPage.goto(`/t/${taskA.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // 3. Verify mock response message is visible for first task
     const chatPanel = testPage.getByTestId("session-chat");
@@ -118,7 +118,7 @@ test.describe("Session isolation", () => {
       timeout: 10_000,
     });
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // 7. The chat should NOT show messages from the first task's session
     // (the "simple-message" text should not appear for task B which uses "read-and-edit")

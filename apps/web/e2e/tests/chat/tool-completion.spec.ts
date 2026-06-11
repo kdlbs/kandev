@@ -30,7 +30,7 @@ test.describe("Tool completion on turn end", () => {
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // After turn completes, no grid spinners should remain in the chat
     const spinners = session.chat.locator('[role="status"][aria-label="Loading"]');

@@ -99,7 +99,7 @@ test.describe("PR detail panel — manual open", () => {
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await session.idleInput().waitFor({ state: "visible", timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
     await expect(session.prTopbarButton()).toBeVisible({ timeout: 15_000 });
     await expect(session.prDetailTab()).toBeVisible({ timeout: 15_000 });
 

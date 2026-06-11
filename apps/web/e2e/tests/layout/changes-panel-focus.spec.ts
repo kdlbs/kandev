@@ -65,7 +65,7 @@ test.describe("Changes panel focus behavior", () => {
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // Create a file and commit so there are existing changes
     git.createFile("test-file.txt", "hello world");
@@ -129,7 +129,7 @@ test.describe("Changes panel focus behavior", () => {
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // Toggle plan mode — this moves changes into the center group
     await session.togglePlanMode();

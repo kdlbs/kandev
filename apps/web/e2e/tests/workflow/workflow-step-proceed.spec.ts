@@ -73,7 +73,7 @@ test.describe("Manual proceed to next workflow step", () => {
     await session.waitForLoad();
 
     // Wait for agent to complete its turn (idle input visible)
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // Stepper shows Spec as current step
     await expect(session.stepperStep("Spec")).toHaveAttribute("aria-current", "step", {

@@ -32,7 +32,7 @@ test.describe("Chat model selector — RPC failure", () => {
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     const trigger = testPage.getByRole("button", { name: "Session model settings" });
     await expect(trigger).toBeVisible({ timeout: 15_000 });
@@ -87,7 +87,7 @@ test.describe("Chat model selector — RPC failure", () => {
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     const trigger = testPage.getByRole("button", { name: "Session model settings" });
     await expect(trigger).toContainText("Mock Fast", { timeout: 15_000 });
@@ -169,7 +169,7 @@ test.describe("Chat model selector — persistence", () => {
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     const trigger = testPage.getByRole("button", { name: "Session model settings" });
     await expect(trigger).toContainText("Mock Fast", { timeout: 15_000 });
@@ -228,7 +228,7 @@ test.describe("Chat model selector — popover open/close behavior", () => {
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     const trigger = testPage.getByRole("button", { name: "Session model settings" });
     await expect(trigger).toContainText("Mock Fast", { timeout: 15_000 });

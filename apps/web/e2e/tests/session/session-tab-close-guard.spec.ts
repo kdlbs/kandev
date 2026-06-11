@@ -22,7 +22,7 @@ test.describe("Session tab close guard", () => {
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // Find the session tab
     const sessionTab = testPage.locator("[data-testid^='session-tab-']").first();
