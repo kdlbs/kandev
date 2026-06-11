@@ -21,7 +21,10 @@ import (
 // from an internal queue that drains asynchronously *after* conn.Done() fires (see
 // shutdownReceive / notificationQueueDrainTimeout), so notifications already read can be
 // delivered late. A fixed sleep races under CI load; polling with require.Eventually is
-// deterministic. The condition takes mu when reading the shared slice.
+// deterministic. The condition takes mu when reading the shared slice. The wait uses >=
+// so that over-delivery surfaces as a clear count mismatch in the caller's exact-count
+// assertion rather than as a timeout here (the writer closes the pipe after exactly
+// `want` frames, so more than `want` chunks cannot legitimately arrive).
 func waitForChunks(t *testing.T, mu *sync.Mutex, chunks *[]string, want int) {
 	t.Helper()
 	require.Eventually(t, func() bool {
