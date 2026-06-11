@@ -26,6 +26,12 @@ type RemoveFromBoardOptions = {
   wasActiveTaskId?: string | null;
   /** The active session ID captured before the async delete API call. */
   wasActiveSessionId?: string | null;
+  /** Switch away from the task without removing it from board state yet. */
+  switchOnly?: boolean;
+};
+
+type RemoveFromBoardResult = {
+  switchedTaskId: string | null;
 };
 
 function cachedSessionsHaveEnvIds(sessions: TaskSession[]): boolean {
@@ -95,13 +101,16 @@ function collectRemainingTasks(store: StoreApi<AppState>): KanbanState["tasks"] 
 
 function selectNextTaskAfterRemoval(
   remainingTasks: KanbanState["tasks"],
+  removedTaskId: string,
 ): KanbanState["tasks"][number] | null {
-  const remainingById = new Map(remainingTasks.map((task) => [task.id, task]));
+  const remainingById = new Map(
+    remainingTasks.filter((task) => task.id !== removedTaskId).map((task) => [task.id, task]),
+  );
   for (const recent of getRecentTasks()) {
     const task = remainingById.get(recent.taskId);
     if (task) return task;
   }
-  return remainingTasks[0] ?? null;
+  return remainingTasks.find((task) => task.id !== removedTaskId) ?? null;
 }
 
 function switchToSessionForTask(params: {
@@ -206,14 +215,16 @@ export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOp
    * wins and the captured value is ignored (no auto-switch).
    */
   const removeTaskFromBoard = useCallback(
-    async (taskId: string, opts?: RemoveFromBoardOptions) => {
-      removeTaskFromSnapshots(store, taskId);
+    async (taskId: string, opts?: RemoveFromBoardOptions): Promise<RemoveFromBoardResult> => {
+      if (!opts?.switchOnly) removeTaskFromSnapshots(store, taskId);
       const allRemainingTasks = collectRemainingTasks(store);
 
-      if (!shouldSwitchAfterRemoval(store, taskId, opts)) return;
+      if (!shouldSwitchAfterRemoval(store, taskId, opts)) {
+        return { switchedTaskId: null };
+      }
 
       const oldEnvId = resolveOldEnvId(store, opts);
-      const nextTask = selectNextTaskAfterRemoval(allRemainingTasks);
+      const nextTask = selectNextTaskAfterRemoval(allRemainingTasks, taskId);
       if (nextTask) {
         await switchToNextTask({
           store,
@@ -222,9 +233,11 @@ export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOp
           useLayoutSwitch,
           loadTaskSessionsForTask,
         });
-      } else {
-        window.location.href = "/";
+        return { switchedTaskId: nextTask.id };
       }
+
+      window.location.href = "/";
+      return { switchedTaskId: null };
     },
     [store, useLayoutSwitch, loadTaskSessionsForTask],
   );

@@ -622,6 +622,74 @@ func TestIsMethodNotFoundErr(t *testing.T) {
 	}
 }
 
+func TestIsTransportDeadErr(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{
+			name:     "peer disconnected before response",
+			err:      fmt.Errorf("session/load failed: %w", fmt.Errorf("peer disconnected before response")),
+			expected: true,
+		},
+		{
+			name:     "peer disconnected while waiting for pre-response notifications",
+			err:      fmt.Errorf("peer disconnected while waiting for pre-response notifications"),
+			expected: true,
+		},
+		{
+			name:     "connection closed cause",
+			err:      fmt.Errorf("load session failed: connection closed"),
+			expected: true,
+		},
+		{
+			name:     "notification queue overflow",
+			err:      fmt.Errorf("load session failed: notification queue overflow"),
+			expected: true,
+		},
+		{
+			name:     "context canceled",
+			err:      context.Canceled,
+			expected: true,
+		},
+		{
+			name:     "context deadline exceeded wrapped",
+			err:      fmt.Errorf("load session failed: %w", context.DeadlineExceeded),
+			expected: true,
+		},
+		{
+			name:     "method not found is not transport-dead",
+			err:      &acp.RequestError{Code: -32601, Message: "Method not found"},
+			expected: false,
+		},
+		{
+			name:     "session unknown is not transport-dead",
+			err:      &acp.RequestError{Code: -32002, Message: "Resource not found"},
+			expected: false,
+		},
+		{
+			name:     "nil error",
+			err:      nil,
+			expected: false,
+		},
+		{
+			name:     "unrelated error",
+			err:      fmt.Errorf("some other failure"),
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isTransportDeadErr(tt.err)
+			if got != tt.expected {
+				t.Errorf("isTransportDeadErr(%v) = %v, want %v", tt.err, got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestInitializeSession_LoadsExistingSession(t *testing.T) {
 	mock := newMockAgentServer(t)
 	defer mock.Close()

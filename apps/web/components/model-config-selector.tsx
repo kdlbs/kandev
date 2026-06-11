@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useState } from "react";
+import { memo, useState } from "react";
 import { IconCheck, IconChevronDown } from "@tabler/icons-react";
 
 import { cn } from "@/lib/utils";
@@ -152,7 +152,7 @@ function ConfigOptionSection({
   onChange?: (configId: string, value: string) => void;
 }) {
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-1.5" data-testid={`config-option-section-${option.id}`}>
       <div className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">
         {option.name}
       </div>
@@ -207,13 +207,14 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
   const currentModelValue = modelConfig?.currentValue || currentModel || "";
   const label = resolveTriggerLabel(modelOptions, currentModel, modelConfig, configOptions);
 
-  const onModelSelect = useCallback(
-    (value: string) => {
-      if (!value) return;
-      onModelChange(value);
-    },
-    [onModelChange],
-  );
+  const hasExtraConfigOptions = extraConfigOptions.length > 0;
+  const onModelSelect = (value: string) => {
+    if (!value) return;
+    onModelChange(value);
+    if (!hasExtraConfigOptions) {
+      setOpen(false);
+    }
+  };
 
   const triggerClassName =
     variant === "compact"

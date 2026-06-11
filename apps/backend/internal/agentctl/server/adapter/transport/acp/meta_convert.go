@@ -68,16 +68,16 @@ func extractTerminalAuth(meta map[string]any) *streams.TerminalAuth {
 	return ta
 }
 
-// convertSessionModels converts ACP model info to stream types,
+// convertSessionModels converts kandev-local model info to stream types,
 // normalizing known _meta patterns (copilotUsage) while preserving raw _meta.
-func convertSessionModels(models []acp.ModelInfo) []streams.SessionModelInfo {
+func convertSessionModels(models []modelInfo) []streams.SessionModelInfo {
 	if len(models) == 0 {
 		return nil
 	}
 	result := make([]streams.SessionModelInfo, 0, len(models))
 	for _, m := range models {
 		info := streams.SessionModelInfo{
-			ModelID:     string(m.ModelId),
+			ModelID:     m.ModelId,
 			Name:        m.Name,
 			Description: derefStr(m.Description),
 			Meta:        toStringMap(m.Meta),

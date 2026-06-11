@@ -63,6 +63,9 @@ func (f *concurrencyFakeAgent) SetSessionConfigOption(_ context.Context, _ acp.S
 func (f *concurrencyFakeAgent) SetSessionMode(_ context.Context, _ acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
 	return acp.SetSessionModeResponse{}, nil
 }
+func (f *concurrencyFakeAgent) Logout(_ context.Context, _ acp.LogoutRequest) (acp.LogoutResponse, error) {
+	return acp.LogoutResponse{}, nil
+}
 
 // setupConcurrencyFakeAgent wires an adapter to a blocking fake agent and
 // registers cleanup immediately so early t.Fatal paths cannot leak pipes or

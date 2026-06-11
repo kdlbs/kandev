@@ -30,6 +30,7 @@ const createTablesSQL = `
 	CREATE TABLE IF NOT EXISTS sentry_configs (
 		id TEXT PRIMARY KEY CHECK(id = 'singleton'),
 		auth_method TEXT NOT NULL,
+		url TEXT NOT NULL DEFAULT 'https://sentry.io',
 		last_checked_at DATETIME,
 		last_ok INTEGER NOT NULL DEFAULT 0,
 		last_error TEXT NOT NULL DEFAULT '',
@@ -73,14 +74,41 @@ const createTablesSQL = `
 // singletonID is the synthetic primary key of the (only) row in sentry_configs.
 const singletonID = "singleton"
 
+// initSchema creates the integration tables when absent and applies the
+// additive column migrations that bring older databases to the current schema.
 func (s *Store) initSchema() error {
 	if _, err := s.db.Exec(createTablesSQL); err != nil {
+		return err
+	}
+	if err := s.addConfigURLColumn(); err != nil {
 		return err
 	}
 	if err := s.addMaxInflightTasksColumn(); err != nil {
 		return err
 	}
 	return s.addIssueWatchLastErrorColumns()
+}
+
+// addConfigURLColumn brings older databases up to the current schema by adding
+// the url column to sentry_configs when missing. Existing rows — all SaaS
+// installs, since this predates self-hosted support — backfill to the
+// sentry.io default (mirrors DefaultSentryURL). A fresh install hits the
+// column-already-present branch since createTablesSQL declares the column.
+func (s *Store) addConfigURLColumn() error {
+	cols, err := s.tableColumns("sentry_configs")
+	if err != nil {
+		return err
+	}
+	if len(cols) == 0 {
+		return nil
+	}
+	if _, ok := cols["url"]; ok {
+		return nil
+	}
+	if _, err := s.db.Exec(`ALTER TABLE sentry_configs ADD COLUMN url TEXT NOT NULL DEFAULT 'https://sentry.io'`); err != nil {
+		return fmt.Errorf("add url column: %w", err)
+	}
+	return nil
 }
 
 // addMaxInflightTasksColumn brings older databases up to the current schema by
@@ -156,7 +184,7 @@ func (s *Store) tableColumns(table string) (map[string]struct{}, error) {
 	return cols, rows.Err()
 }
 
-const selectConfigColumns = `auth_method,
+const selectConfigColumns = `auth_method, url,
 		last_checked_at, last_ok, last_error, created_at, updated_at`
 
 // GetConfig returns the singleton Sentry config, or nil when no row exists.
@@ -182,12 +210,13 @@ func (s *Store) UpsertConfig(ctx context.Context, cfg *SentryConfig) error {
 	}
 	cfg.UpdatedAt = now
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO sentry_configs (id, auth_method, created_at, updated_at)
-		VALUES (?, ?, ?, ?)
+		INSERT INTO sentry_configs (id, auth_method, url, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			auth_method = excluded.auth_method,
+			url = excluded.url,
 			updated_at = excluded.updated_at`,
-		singletonID, cfg.AuthMethod, cfg.CreatedAt, cfg.UpdatedAt)
+		singletonID, cfg.AuthMethod, cfg.URL, cfg.CreatedAt, cfg.UpdatedAt)
 	return err
 }
 

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -102,7 +104,7 @@ func (s *Service) SetConfig(ctx context.Context, req *SetConfigRequest) (*Sentry
 	if err := validateConfigRequest(req); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidConfig, err.Error())
 	}
-	cfg := &SentryConfig{AuthMethod: req.AuthMethod}
+	cfg := &SentryConfig{AuthMethod: req.AuthMethod, URL: req.URL}
 	if err := s.store.UpsertConfig(ctx, cfg); err != nil {
 		return nil, fmt.Errorf("upsert sentry config: %w", err)
 	}
@@ -296,8 +298,11 @@ func (s *Service) invalidateClient() {
 // resolveCredentials picks credentials for a test: inline if the request
 // carries a secret, otherwise the stored secret.
 func (s *Service) resolveCredentials(ctx context.Context, req *SetConfigRequest) (*SentryConfig, string, error) {
-	cfg := &SentryConfig{AuthMethod: req.AuthMethod}
+	cfg := &SentryConfig{AuthMethod: req.AuthMethod, URL: normalizeSentryURL(req.URL)}
 	if req.Secret != "" {
+		if cfg.URL == "" {
+			cfg.URL = DefaultSentryURL
+		}
 		return cfg, req.Secret, nil
 	}
 	if s.secrets == nil {
@@ -315,18 +320,74 @@ func (s *Service) resolveCredentials(ctx context.Context, req *SetConfigRequest)
 	if storeErr != nil {
 		s.log.Warn("sentry: load stored config for credential resolution failed", zap.Error(storeErr))
 	}
-	if stored != nil && cfg.AuthMethod == "" {
-		cfg.AuthMethod = stored.AuthMethod
+	if stored != nil {
+		if cfg.AuthMethod == "" {
+			cfg.AuthMethod = stored.AuthMethod
+		}
+		if cfg.URL == "" {
+			cfg.URL = stored.URL
+		}
+	}
+	if cfg.URL == "" {
+		cfg.URL = DefaultSentryURL
 	}
 	return cfg, secret, nil
 }
 
+// validateConfigRequest normalizes and validates a config request in place: it
+// defaults a blank auth method and instance URL, rejects unknown auth methods,
+// and rejects URLs the HTTP client could not use (see validateSentryURL).
 func validateConfigRequest(req *SetConfigRequest) error {
 	if req.AuthMethod == "" {
 		req.AuthMethod = AuthMethodAuthToken
 	}
 	if req.AuthMethod != AuthMethodAuthToken {
 		return fmt.Errorf("unknown auth method: %q", req.AuthMethod)
+	}
+	req.URL = normalizeSentryURL(req.URL)
+	if req.URL == "" {
+		req.URL = DefaultSentryURL
+	}
+	return validateSentryURL(req.URL)
+}
+
+// normalizeSentryURL trims whitespace and trailing slashes and prepends
+// https:// when the user typed only a host (e.g. "sentry.acme.com"). Without a
+// scheme the Go HTTP client fails with "unsupported protocol scheme". An empty
+// input is returned as-is so callers can apply the sentry.io default.
+func normalizeSentryURL(raw string) string {
+	s := strings.TrimSpace(raw)
+	s = strings.TrimRight(s, "/")
+	if s == "" {
+		return s
+	}
+	if !strings.Contains(s, "://") {
+		s = "https://" + s
+	}
+	return s
+}
+
+// validateSentryURL rejects an instance URL the HTTP client could not use: it
+// must parse, carry an http/https scheme, name a host, and be a bare host root.
+// A path/query/fragment is rejected because apiPathPrefix ("/api/0") is later
+// appended by string concatenation — e.g. "https://host?x=1" would otherwise
+// become the malformed base "https://host?x=1/api/0".
+func validateSentryURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid instance URL: %s", err.Error())
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("instance URL must use http or https: %q", raw)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("instance URL must include a host: %q", raw)
+	}
+	if u.Path != "" && u.Path != "/" {
+		return fmt.Errorf("instance URL must be a host root without a path: %q", raw)
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("instance URL must not include a query or fragment: %q", raw)
 	}
 	return nil
 }

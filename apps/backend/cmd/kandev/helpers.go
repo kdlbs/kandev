@@ -801,7 +801,7 @@ func registerSecondaryRoutes(
 	if p.services.Automation != nil {
 		automationSvc = p.services.Automation.Service
 	}
-	registerE2EResetRoutes(p.router, p.taskRepo, p.taskSvc, automationSvc, p.log)
+	registerE2EResetRoutes(p.router, p.taskRepo, p.taskSvc, automationSvc, p.services.GitHub, p.log)
 
 	if officetestharness.Enabled() {
 		var officeAgentSvc *officeagents.AgentService

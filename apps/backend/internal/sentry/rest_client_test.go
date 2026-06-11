@@ -19,6 +19,7 @@ func newMockServer(t *testing.T, handler http.HandlerFunc) *httptest.Server {
 // httptest server without needing a mockable URL on the production constructor.
 func pointTo(c *RESTClient, url string) *RESTClient {
 	c.endpoint = url
+	c.baseURL = url
 	return c
 }
 
@@ -273,5 +274,98 @@ func TestBuildIssueQueryString(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("query string %q missing %q", got, want)
 		}
+	}
+}
+
+// TestNewRESTClient_BuildsEndpointFromConfigURL locks in that a self-hosted
+// instance URL becomes the API base with the /api/0 suffix appended, that a
+// trailing slash and missing scheme are normalized, and that an empty URL
+// falls back to the SaaS default.
+func TestNewRESTClient_BuildsEndpointFromConfigURL(t *testing.T) {
+	cases := []struct {
+		name string
+		url  string
+		want string
+	}{
+		{"self-hosted", "https://sentry.example.com", "https://sentry.example.com/api/0"},
+		{"trailing slash", "https://sentry.example.com/", "https://sentry.example.com/api/0"},
+		{"scheme defaulted", "sentry.example.com", "https://sentry.example.com/api/0"},
+		{"empty falls back to saas", "", DefaultSentryURL + "/api/0"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := NewRESTClient(&SentryConfig{URL: tc.url}, "tok")
+			if c.endpoint != tc.want {
+				t.Errorf("endpoint = %q, want %q", c.endpoint, tc.want)
+			}
+		})
+	}
+}
+
+// TestRESTClient_TestAuth_WrongURL covers the self-hosted failure mode: when
+// the configured instance answers but isn't a Sentry API (non-JSON body, or a
+// 5xx/4xx other than 401/403), the probe must blame the instance URL rather
+// than the auth token.
+func TestRESTClient_TestAuth_WrongURL(t *testing.T) {
+	t.Run("non-json body", func(t *testing.T) {
+		ts := newMockServer(t, func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = w.Write([]byte("<!doctype html><html><body>Not Sentry</body></html>"))
+		})
+		c := pointTo(NewRESTClient(&SentryConfig{}, "tok"), ts.URL)
+		res, err := c.TestAuth(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+		if res.OK {
+			t.Error("expected OK=false for non-Sentry response")
+		}
+		if !strings.Contains(res.Error, "instance URL") {
+			t.Errorf("expected instance-URL hint, got %q", res.Error)
+		}
+	})
+	t.Run("server error", func(t *testing.T) {
+		ts := newMockServer(t, func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte("bad gateway"))
+		})
+		c := pointTo(NewRESTClient(&SentryConfig{}, "tok"), ts.URL)
+		res, _ := c.TestAuth(context.Background())
+		if res.OK || !strings.Contains(res.Error, "instance URL") {
+			t.Errorf("expected instance-URL hint for 502, got %+v", res)
+		}
+	})
+	t.Run("unreachable host", func(t *testing.T) {
+		s := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+		dead := s.URL
+		s.Close() // close so the next request is refused immediately
+		c := pointTo(NewRESTClient(&SentryConfig{}, "tok"), dead)
+		res, err := c.TestAuth(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+		if res.OK || !strings.Contains(res.Error, "instance URL") {
+			t.Errorf("expected instance-URL hint for unreachable host, got %+v", res)
+		}
+	})
+}
+
+// TestRESTClient_TestAuth_Unauthorized_BlamesToken complements the wrong-URL
+// cases: a 401/403 must read as an auth-token problem, not a URL problem.
+func TestRESTClient_TestAuth_Unauthorized_BlamesToken(t *testing.T) {
+	ts := newMockServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"detail":"Invalid token"}`))
+	})
+	c := pointTo(NewRESTClient(&SentryConfig{}, "bad"), ts.URL)
+	res, _ := c.TestAuth(context.Background())
+	if res.OK {
+		t.Fatal("expected OK=false")
+	}
+	if strings.Contains(res.Error, "instance URL") {
+		t.Errorf("401 should blame the token, not the URL: %q", res.Error)
+	}
+	if !strings.Contains(res.Error, "token") {
+		t.Errorf("expected token hint, got %q", res.Error)
 	}
 }

@@ -1,3 +1,4 @@
+import { cookies } from "next/headers";
 import { PageClient } from "@/app/page-client";
 import { StateHydrator } from "@/components/state-hydrator";
 import {
@@ -13,6 +14,7 @@ import { listWorkspaceTaskPRs } from "@/lib/api/domains/github-api";
 import { snapshotToState } from "@/lib/ssr/mapper";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { resolveDesiredWorkflowId } from "@/lib/kanban/resolve-workflow";
+import { resolveActiveId } from "@/lib/ssr/resolve-active-id";
 import type { AppState } from "@/lib/state/store";
 import type { ListWorkspacesResponse, UserSettingsResponse } from "@/lib/types/http";
 
@@ -54,19 +56,6 @@ function readAgentProfileId(
   if (!metadata || typeof metadata !== "object") return undefined;
   const value = metadata.agent_profile_id;
   return typeof value === "string" ? value : undefined;
-}
-
-function resolveActiveId<T extends { id: string }>(
-  items: T[],
-  preferredId?: string,
-  fallbackId?: string | null,
-): string | null {
-  return (
-    items.find((i) => i.id === preferredId)?.id ??
-    items.find((i) => i.id === fallbackId)?.id ??
-    items[0]?.id ??
-    null
-  );
 }
 
 function buildBaseState(
@@ -124,15 +113,24 @@ export default async function Page({ searchParams }: PageProps) {
     const taskId = resolveParam(resolvedParams.taskId);
     const sessionId = resolveParam(resolvedParams.sessionId);
 
-    const [workspaces, userSettingsResponse] = await Promise.all([
+    const [workspaces, userSettingsResponse, cookieStore] = await Promise.all([
       listWorkspaces({ cache: "no-store" }),
       fetchUserSettings({ cache: "no-store" }).catch(() => null),
+      cookies().catch((error) => {
+        console.error("Failed to read cookies on Kanban page:", error);
+        return null;
+      }),
     ]);
     const settingsWorkspaceId = userSettingsResponse?.settings?.workspace_id || null;
     const settingsWorkflowId = userSettingsResponse?.settings?.workflow_filter_id || null;
+    // The sidebar picker writes the selected workspace to this cookie so the
+    // choice survives a refresh even when office is disabled (userSettings is
+    // not updated on select). Priority: URL param > cookie > saved setting.
+    const cookieWorkspaceId = cookieStore?.get("office-active-workspace")?.value ?? null;
     const activeWorkspaceId = resolveActiveId(
       workspaces.workspaces,
       workspaceId,
+      cookieWorkspaceId,
       settingsWorkspaceId,
     );
 

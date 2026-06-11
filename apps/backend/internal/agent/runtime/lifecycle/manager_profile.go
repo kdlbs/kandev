@@ -162,6 +162,17 @@ func (m *Manager) resolveProfileSessionConfig(ctx context.Context, profileID str
 // invokes the callback when there's no taskDescription/attachments to send, which is a *boot*
 // signal (the agent has never run a turn). When there IS a prompt, the callback is unused and
 // MarkReady fires later from handleCompleteEvent — that path is the true turn-end.
+//
+// Note: the only session-level override applied on resume is `mode` (see
+// effectiveSessionMode / issue #1183). We deliberately do NOT replay the
+// model or dynamic config options from AgentProfileSnapshot here. Agents
+// that support session/load preserve those values themselves; agents that
+// don't can use the profile defaults. Replaying snapshot state on every
+// resume issues redundant SetModel / SetConfigOption RPCs that cycle the
+// session through STARTING / RUNNING and flicker the task into the sidebar's
+// Running bucket (see session-resume-keeps-review-state.spec.ts).
+// SSR-side page-reload persistence still works because the model selector
+// reads `agent_profile_snapshot.model` directly.
 func (m *Manager) initializeACPSession(ctx context.Context, execution *AgentExecution, agentConfig agents.Agent, taskDescription string, attachments []MessageAttachment, mcpServers []agentctltypes.McpServer) error {
 	profileModel, profileMode, profileConfigOptions := m.resolveProfileSessionConfig(ctx, execution.AgentProfileID)
 	mode := m.effectiveSessionMode(ctx, execution, profileMode)

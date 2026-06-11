@@ -95,8 +95,16 @@ test.describe("GitHub PR list task indicator", () => {
 
     await testPage.goto("/github");
 
+    // Gate on the PR list finishing its first-load chain (client GitHub-status
+    // fetch -> AuthenticatedLayout mount -> PR search) before asserting on the
+    // per-row indicators. /github doesn't SSR-hydrate github status, so the list
+    // only renders after that serial chain resolves. Waiting for the three rows
+    // here lets every indicator assertion below run against an already-rendered
+    // list with the default timeout instead of racing the load.
+    await expect(testPage.getByTestId("pr-row")).toHaveCount(3, { timeout: 15_000 });
+
     const singleIndicator = testPage.getByTestId("pr-row-task-indicator-single");
-    await expect(singleIndicator).toBeVisible({ timeout: 15_000 });
+    await expect(singleIndicator).toBeVisible();
     await expect(singleIndicator).toContainText("Linked task title");
 
     const emptyIndicator = testPage.getByTestId("pr-row-task-indicator-empty");

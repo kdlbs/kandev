@@ -2,6 +2,67 @@
 
 All notable changes to Kandev.
 
+## 0.57.0 - 2026-06-11
+
+### Features
+
+- add avg turn duration and messages per turn ([#1328](https://github.com/kdlbs/kandev/pull/1328))
+- support self-hosted instances via configurable URL ([#1320](https://github.com/kdlbs/kandev/pull/1320)) by @ClemDNL
+- add session handoff via agent tab context menu ([#1317](https://github.com/kdlbs/kandev/pull/1317))
+- add checkout service make targets ([#1311](https://github.com/kdlbs/kandev/pull/1311))
+- allow remote external mcp access ([#1307](https://github.com/kdlbs/kandev/pull/1307))
+- ship explicit completion signal toggle + YAML round-trip ([#1284](https://github.com/kdlbs/kandev/pull/1284))
+- unified app sidebar ([#1165](https://github.com/kdlbs/kandev/pull/1165))
+
+### Bug Fixes
+
+- reap active sessions when archiving a task ([#1275](https://github.com/kdlbs/kandev/pull/1275)) by @nlenepveu
+- improve sidebar action layout ([#1323](https://github.com/kdlbs/kandev/pull/1323))
+- correct sidebar workspace switcher routing and selection persistence ([#1329](https://github.com/kdlbs/kandev/pull/1329))
+- persist session model and drop composite id logic ([#1327](https://github.com/kdlbs/kandev/pull/1327))
+- improve archive switch reliability ([#1325](https://github.com/kdlbs/kandev/pull/1325))
+- bound long session resumes and restore legacy model surfaces ([#1324](https://github.com/kdlbs/kandev/pull/1324))
+- show open PR status when task has merged and open PRs ([#1322](https://github.com/kdlbs/kandev/pull/1322))
+- default new task executor to worktree ([#1321](https://github.com/kdlbs/kandev/pull/1321))
+- deliver initial prompt to passthrough start_agent ([#1306](https://github.com/kdlbs/kandev/pull/1306)) by @nlenepveu
+- keep utility default agent and model paired ([#1318](https://github.com/kdlbs/kandev/pull/1318))
+- handle config-option-only model state ([#1319](https://github.com/kdlbs/kandev/pull/1319))
+- read claude agent models and modes from configOptions ([#1310](https://github.com/kdlbs/kandev/pull/1310))
+- contain settings page overscroll ([#1316](https://github.com/kdlbs/kandev/pull/1316))
+- default changes panel to tree view ([#1314](https://github.com/kdlbs/kandev/pull/1314))
+- allow office mcp mode for existing tasks ([#1315](https://github.com/kdlbs/kandev/pull/1315))
+- quote record skill description ([#1313](https://github.com/kdlbs/kandev/pull/1313))
+- clarify required automation fields ([#1312](https://github.com/kdlbs/kandev/pull/1312))
+- collapse dockview workflow stepper to current step when cramped ([#1309](https://github.com/kdlbs/kandev/pull/1309))
+- stop reseeding agent profiles the user deleted ([#1305](https://github.com/kdlbs/kandev/pull/1305)) by @nlenepveu
+- preserve settings sidebar on refresh ([#1303](https://github.com/kdlbs/kandev/pull/1303))
+- avoid stale sibling PR sync ([#1302](https://github.com/kdlbs/kandev/pull/1302))
+- focus sidebar-created tasks ([#1301](https://github.com/kdlbs/kandev/pull/1301))
+- keep dockview group alive on task switch to stop layout collapse ([#1308](https://github.com/kdlbs/kandev/pull/1308))
+- gate step_complete_kandev tool on per-step signal flag ([#1300](https://github.com/kdlbs/kandev/pull/1300))
+- preserve codex reasoning model ids ([#1296](https://github.com/kdlbs/kandev/pull/1296))
+- sort kanban cards by newest created ([#1298](https://github.com/kdlbs/kandev/pull/1298))
+- list opencode models when ACP probe is empty ([#1278](https://github.com/kdlbs/kandev/pull/1278)) by @ClemDNL
+- alert when git executable is missing ([#1297](https://github.com/kdlbs/kandev/pull/1297))
+- use recent task after removal ([#1295](https://github.com/kdlbs/kandev/pull/1295))
+- gate changes push button on ahead count ([#1294](https://github.com/kdlbs/kandev/pull/1294))
+- restore dockview sidebar layout ([#1293](https://github.com/kdlbs/kandev/pull/1293))
+- expose user agent bins to system service ([#1292](https://github.com/kdlbs/kandev/pull/1292))
+- read models from configOptions fallback ([#1291](https://github.com/kdlbs/kandev/pull/1291))
+- tighten dockview topbar button sizing ([#1290](https://github.com/kdlbs/kandev/pull/1290))
+- surface inference-agent probe status + add refresh endpoint ([#1287](https://github.com/kdlbs/kandev/pull/1287))
+- guard dockview measure against mid-transition sidebar width ([#1288](https://github.com/kdlbs/kandev/pull/1288))
+- preserve manual task selection during archive/delete ([#1286](https://github.com/kdlbs/kandev/pull/1286))
+- handle UNIQUE collision in UpdatePRWatchBranchIfSearching ([#1285](https://github.com/kdlbs/kandev/pull/1285))
+- defer move_task when session is running ([#1277](https://github.com/kdlbs/kandev/pull/1277)) by @edan-binshtok
+- make toggle-sidebar shortcut work on every route ([#1283](https://github.com/kdlbs/kandev/pull/1283))
+- point sidebar Home to office dashboard in office mode ([#1282](https://github.com/kdlbs/kandev/pull/1282))
+- align office topbar border with sidebar header (h-10) ([#1281](https://github.com/kdlbs/kandev/pull/1281))
+
+### Performance
+
+- split stats endpoint per-section and rewrite GetGlobalStats ([#1289](https://github.com/kdlbs/kandev/pull/1289))
+
 ## 0.56.0 - 2026-06-06
 
 ### Features

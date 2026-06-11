@@ -26,21 +26,23 @@ import {
 } from "@/lib/api/domains/sentry-api";
 import {
   SENTRY_AUTH_METHOD,
+  SENTRY_DEFAULT_URL,
   type SentryConfig,
   type TestSentryConnectionResult,
 } from "@/lib/types/sentry";
 import { SentryIssueWatchersSection } from "./sentry-issue-watchers-section";
 
 type FormState = {
+  url: string;
   secret: string;
 };
 
-const emptyForm: FormState = { secret: "" };
+const emptyForm: FormState = { url: SENTRY_DEFAULT_URL, secret: "" };
 
-function configToForm(_cfg: SentryConfig | null): FormState {
-  // Only the (write-only) secret is editable here; org/project are chosen
-  // per-watcher and per-browse, not stored install-wide.
-  return { secret: "" };
+function configToForm(cfg: SentryConfig | null): FormState {
+  // Only the instance URL and the (write-only) secret are editable here;
+  // org/project are chosen per-watcher and per-browse, not stored install-wide.
+  return { url: cfg?.url || SENTRY_DEFAULT_URL, secret: "" };
 }
 
 function saveLabel(saving: boolean, hasConfig: boolean): string {
@@ -59,6 +61,33 @@ function configToHealth(config: SentryConfig | null): IntegrationAuthHealth | nu
 }
 
 type UpdateFn = <K extends keyof FormState>(key: K, value: FormState[K]) => void;
+
+type UrlFieldProps = {
+  form: FormState;
+  loading: boolean;
+  update: UpdateFn;
+};
+
+function UrlField({ form, loading, update }: UrlFieldProps) {
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor="sentry-url">Instance URL</Label>
+      <Input
+        id="sentry-url"
+        data-testid="sentry-url-input"
+        type="url"
+        placeholder={SENTRY_DEFAULT_URL}
+        value={form.url}
+        onChange={(e) => update("url", e.target.value)}
+        disabled={loading}
+      />
+      <p className="text-xs text-muted-foreground">
+        Base URL of your Sentry instance. Leave as {SENTRY_DEFAULT_URL} for Sentry SaaS, or point it
+        at a self-hosted install (e.g. https://sentry.your-company.com).
+      </p>
+    </div>
+  );
+}
 
 type SecretFieldProps = {
   form: FormState;
@@ -220,7 +249,7 @@ function useSettingsActions({ form, setConfig, setForm, setTestResult }: Setting
     setTesting(true);
     setTestResult(null);
     try {
-      const res = await testSentryConnection(form.secret || undefined);
+      const res = await testSentryConnection(form.secret || undefined, form.url || undefined);
       setTestResult(res);
     } catch (err) {
       setTestResult({ ok: false, error: String(err) });
@@ -234,6 +263,7 @@ function useSettingsActions({ form, setConfig, setForm, setTestResult }: Setting
     try {
       const saved = await saveSentryConfig({
         authMethod: SENTRY_AUTH_METHOD,
+        url: form.url,
         secret: form.secret,
       });
       setConfig(saved);
@@ -360,6 +390,7 @@ export function SentryConnectionSection() {
       <Card>
         <CardContent className="space-y-4 pt-6">
           <IntegrationAuthStatusBanner health={s.health} />
+          <UrlField form={s.form} loading={s.loading} update={s.update} />
           <SecretField
             form={s.form}
             loading={s.loading}

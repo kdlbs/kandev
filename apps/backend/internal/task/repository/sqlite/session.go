@@ -514,6 +514,25 @@ func (r *Repository) UpdateTaskSessionState(ctx context.Context, id string, stat
 	return nil
 }
 
+// CancelActiveTaskSessionsByTaskID transitions every active session of a task
+// (CREATED/STARTING/RUNNING/WAITING_FOR_INPUT) to CANCELLED, returning the
+// number of rows changed. The transition is a pure DB state change and does not
+// require a live agent execution, making it the authoritative way to finalize a
+// task's sessions independent of agent-process teardown.
+func (r *Repository) CancelActiveTaskSessionsByTaskID(ctx context.Context, taskID, reason string) (int64, error) {
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_sessions
+		SET state = ?, error_message = ?, completed_at = ?, updated_at = ?
+		WHERE task_id = ?
+			AND state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
+	`), string(models.TaskSessionStateCancelled), reason, now, now, taskID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 // UpdateSessionMetadata updates only the metadata column of a session,
 // avoiding a full-row overwrite that could clobber concurrent field updates.
 func (r *Repository) UpdateSessionMetadata(ctx context.Context, sessionID string, metadata map[string]interface{}) error {

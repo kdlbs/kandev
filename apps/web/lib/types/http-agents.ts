@@ -337,6 +337,8 @@ export type GlobalStatsDTO = {
   avg_turns_per_task: number;
   avg_messages_per_task: number;
   avg_duration_ms_per_task: number;
+  avg_turn_duration_ms: number;
+  avg_messages_per_turn: number;
 };
 
 export type DailyActivityDTO = {

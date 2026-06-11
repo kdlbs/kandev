@@ -20,7 +20,11 @@ const SecretKey = "sentry:singleton:token"
 // The token is stored separately in the encrypted secret store under SecretKey.
 type SentryConfig struct {
 	AuthMethod string `json:"authMethod" db:"auth_method"`
-	HasSecret  bool   `json:"hasSecret" db:"-"`
+	// URL is the base URL of the Sentry instance (e.g. https://sentry.io for
+	// SaaS, or a self-hosted host). The REST client appends /api/0. Defaults
+	// to the sentry.io SaaS endpoint when left blank.
+	URL       string `json:"url" db:"url"`
+	HasSecret bool   `json:"hasSecret" db:"-"`
 	// LastCheckedAt / LastOk / LastError are written by the background auth
 	// poller so the UI can render a "connected/disconnected + checked Xs ago"
 	// indicator without doing its own probing.
@@ -36,7 +40,10 @@ type SentryConfig struct {
 // is retained; when non-empty it replaces the stored value.
 type SetConfigRequest struct {
 	AuthMethod string `json:"authMethod"`
-	Secret     string `json:"secret"`
+	// URL is the Sentry instance base URL. Optional: blank defaults to the
+	// sentry.io SaaS endpoint, preserving the prior single-tenant behavior.
+	URL    string `json:"url"`
+	Secret string `json:"secret"`
 }
 
 // TestConnectionResult reports what the backend learned when pinging Sentry

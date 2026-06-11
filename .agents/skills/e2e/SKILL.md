@@ -253,6 +253,7 @@ When a test fails:
 - **"Backend did not become healthy"** — run `make build-backend build-web`, check with `E2E_DEBUG=1`
 - **"Cannot find module"** — run `cd apps && pnpm install`
 - **Port conflicts** — backends use 18080+ and frontends use 13000+ (per worker), auto-offset by `E2E_PORT_OFFSET` (derived from PID). Set `E2E_PORT_OFFSET=0` for deterministic ports
+- **Auto-started session never goes idle** — for sessions started by the same call that creates them, the mock agent can finish before the client WS subscription registers, so a raw `idleInput()` visibility wait hangs. Use `SessionPage.waitForChatIdle()` instead; it reloads once and re-derives state from SSR.
 - **Flaky timeouts** — **never increase locator timeouts to fix flaky tests.** If a locator times out, the root cause is almost always something else: a setup failure, missing navigation, race condition, or the element genuinely not rendering. Investigate why the element never appears instead of giving it more time. Note: infrastructure health timeouts (30s in `fixtures/backend.ts`) and overall test timeouts (60s in `playwright.config.ts`) are separate and should not be modified either.
 - Screenshots on failure, video on first retry (CI)
 
@@ -280,6 +281,7 @@ A test that flakes under parallel/sharded load is one of two things — decide w
    pnpm e2e:docker --no-build -- --repeat-each=4 --workers=1 --retries=0 tests/path.spec.ts:LINE
    # or raw: pnpm exec playwright test --config e2e/playwright.config.ts --project=chromium --repeat-each=4 --workers=1 --retries=0 tests/path.spec.ts:LINE
    ```
+   (On Apple Silicon, `pnpm e2e:docker` needs Colima + Rosetta — `colima start --vz-rosetta`; default QEMU segfaults the amd64 Go build. See `apps/web/e2e/README.md`.)
    - **Flakes alone (fails some reps, fast):** intrinsic race — fix it (condition-correct wait, fix the actual race; not a timeout bump). E.g. a `waitForRequest` that times out the full window means the request *never fired* (a click swallowed during hydration) — retry the action with `await expect(async () => { ... }).toPass()`, don't extend the timeout.
    - **Passes clean AND fast alone (well under timeout):** contention, not a defect. The wait is correct; the test just starved for CPU/IO under load. No code/test fix applies.
 2. **Signature of contention, not a code path:** two identical-config full runs giving *different* hard-fail counts (e.g. 0 vs 3). Same code + same config + different outcome ⇒ host oversubscription, not a bug. CI's isolated runners don't reproduce it; reduce local concurrency (2–3 shards, not 5+) for a clean signal.

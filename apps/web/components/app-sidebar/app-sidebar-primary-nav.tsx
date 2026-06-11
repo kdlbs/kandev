@@ -35,7 +35,7 @@ export function AppSidebarPrimaryNav({ collapsed }: AppSidebarPrimaryNavProps) {
           collapsed={collapsed}
         />
       )}
-      {workspaceId && (
+      {workspaceId && collapsed && (
         <AppSidebarNavItem
           icon={IconMessageCircle}
           label="Quick Chat"

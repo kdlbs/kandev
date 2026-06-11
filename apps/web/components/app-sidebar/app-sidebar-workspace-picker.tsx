@@ -93,7 +93,7 @@ export function AppSidebarWorkspacePicker() {
         <DropdownMenuItem
           className="cursor-pointer gap-2"
           onSelect={() => {
-            router.push("/office/setup?mode=new");
+            router.push(officeEnabled ? "/office/setup?mode=new" : "/settings/workspace");
           }}
         >
           <IconPlus className="h-3.5 w-3.5" />

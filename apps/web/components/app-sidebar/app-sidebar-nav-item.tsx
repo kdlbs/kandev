@@ -23,6 +23,8 @@ type AppSidebarNavItemProps = {
   disabled?: boolean;
   /** Optional data-testid placed on the button/link element. */
   testId?: string;
+  /** Optional extra classes for surface-specific spacing. */
+  className?: string;
 };
 
 type TriggerProps = {
@@ -83,6 +85,7 @@ export function AppSidebarNavItem({
   exactMatch = false,
   disabled = false,
   testId,
+  className,
 }: AppSidebarNavItemProps) {
   const pathname = usePathname();
   const active = isActive ?? isPathActive(pathname, href, exactMatch);
@@ -93,6 +96,7 @@ export function AppSidebarNavItem({
     disabled
       ? "cursor-not-allowed text-foreground/40"
       : cn("cursor-pointer", active ? SIDEBAR_ITEM_ACTIVE : SIDEBAR_ITEM_INACTIVE),
+    className,
   );
 
   const inner = (

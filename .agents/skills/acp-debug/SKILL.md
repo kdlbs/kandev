@@ -65,7 +65,7 @@ acpdbg matrix                                          # probe every ACP agent i
 Always capture stdout — it contains the JSONL file path (and for `matrix`, the summary table and `matrix-summary.json` path).
 
 ```bash
-apps/backend/bin/acpdbg probe auggie --timeout 45s
+apps/backend/bin/acpdbg probe --timeout 45s auggie
 ```
 
 For `matrix`, prefer `--timeout 60s` so `npx`-spawned agents have time to cold-start.

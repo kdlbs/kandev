@@ -92,3 +92,7 @@ Enforced by `apps/web/eslint.config.mjs` (warnings, will become errors):
 - No nested ternaries
 
 When you hit a limit, extract a helper function, custom hook, or sub-component. Prefer composition over growing a single function.
+
+## Testing notes
+
+- jsdom drops `secure` cookies over `http`, so `document.cookie` reads back empty. To assert a cookie write in a Vitest unit test, intercept the setter with `Object.defineProperty(document, "cookie", { set: ... })` and restore it after.

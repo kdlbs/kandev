@@ -97,8 +97,11 @@ test.describe("Quick Chat", () => {
 
     const dialog = await openQuickChatWithAgent(testPage);
 
-    // Type initial text.
+    // Type initial text. Re-gate on the editor being editable: eager init can
+    // flip it back to contenteditable=false (agent briefly RUNNING) after the
+    // open helper's initial check, and fill() requires an editable element.
     const editor = dialog.locator(".tiptap.ProseMirror");
+    await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
     await editor.click();
     await editor.fill("fix the bug");
 

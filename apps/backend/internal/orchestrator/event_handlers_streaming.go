@@ -1022,18 +1022,18 @@ func (s *Service) handleAgentCapabilitiesEvent(ctx context.Context, payload *lif
 }
 
 // handleSessionModelsEvent broadcasts session_models events to the WebSocket
-// and persists the current model to the session snapshot so it survives page refresh.
+// and persists the current model to the session snapshot so the model
+// selector survives a page refresh without a flash.
 func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	sessionID := payload.SessionID
 	if sessionID == "" || s.eventBus == nil {
 		return
 	}
 
-	// Persist the ACP-reported current model to the session snapshot so it's
-	// available after page refresh (SSR reads from the DB, not runtime state).
-	if currentModel := payload.Data.CurrentModelID; currentModel != "" {
-		s.persistSessionModel(ctx, sessionID, currentModel)
-	}
+	// Persist the agent-reported current model so SSR can render the model
+	// selector trigger with the right value on a page reload instead of
+	// flashing the profile default before the WS catches up.
+	s.persistSessionModel(ctx, sessionID, payload.Data.CurrentModelID)
 
 	eventPayload := lifecycle.SessionModelsEventPayload{
 		TaskID:         payload.TaskID,
@@ -1053,8 +1053,21 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionModelsUpdated, "orchestrator", eventPayload))
 }
 
-// persistSessionModel updates the session's AgentProfileSnapshot with the current model.
+// persistSessionModel writes the agent-reported current model to the session's
+// AgentProfileSnapshot under the `model` key so SSR can render the model
+// selector trigger with the right value on a page reload without a flash.
+//
+// We intentionally only persist the model (not the full set of dynamic config
+// options) and intentionally do NOT replay this on backend-restart resume:
+// agents that support session/load preserve the value themselves, and replay
+// would issue redundant SetModel / SetConfigOption RPCs that cycle the session
+// through STARTING / RUNNING and flicker the task into the sidebar's Running
+// bucket (see session-resume-keeps-review-state.spec.ts and
+// effectiveSessionMode's sibling note in lifecycle/manager_profile.go).
 func (s *Service) persistSessionModel(ctx context.Context, sessionID, model string) {
+	if model == "" {
+		return
+	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return
@@ -1062,8 +1075,7 @@ func (s *Service) persistSessionModel(ctx context.Context, sessionID, model stri
 	if session.AgentProfileSnapshot == nil {
 		session.AgentProfileSnapshot = make(map[string]interface{})
 	}
-	existing, _ := session.AgentProfileSnapshot["model"].(string)
-	if existing == model {
+	if existing, _ := session.AgentProfileSnapshot["model"].(string); existing == model {
 		return
 	}
 	session.AgentProfileSnapshot["model"] = model

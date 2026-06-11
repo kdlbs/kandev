@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -39,16 +41,6 @@ const (
 	// configOptionIDModel is the well-known ConfigOption ID/Category value used
 	// by ACP agents to surface the active model as a selectable option.
 	configOptionIDModel = "model"
-
-	// Codex surfaces reasoning effort as a separate config option while its
-	// availableModels list uses model/effort IDs such as gpt-5.5/medium.
-	configOptionIDReasoningEffort    = "reasoning_effort"
-	configOptionCategoryThoughtLevel = "thought_level"
-
-	reasoningEffortLow    = "low"
-	reasoningEffortMedium = "medium"
-	reasoningEffortHigh   = "high"
-	reasoningEffortXHigh  = "xhigh"
 )
 
 // wakeupPromptTimeout bounds how long a synthetic wakeup prompt can run.
@@ -60,10 +52,46 @@ const wakeupPromptTimeout = 30 * time.Minute
 // notifQueueCapacity sizes the buffered channel that feeds the update
 // worker. 4096 covers any realistic session/load replay burst (the failure
 // case that motivated this was ~5-10k notifications spread over several
-// seconds, well within the worker's sub-microsecond drain rate). Set big
-// enough that the SDK's 1024-slot upstream queue stays near-empty under
-// burst, small enough that worst-case memory is bounded.
+// seconds, well within the worker's sub-microsecond drain rate). This is
+// the internal hand-off between the SDK's update handler and our worker;
+// it sits in front of the larger acpNotifQueueDefault SDK inbound queue and
+// can be smaller because the worker drains it well under SDK fill rate.
 const notifQueueCapacity = 4096
+
+// acpNotifQueueDefault is the per-connection capacity passed to the SDK's
+// inbound notification queue. Larger than the SDK's own default (1024) so
+// long session/load replays (auggie 500+ exchanges, claude with heavy tool
+// use) don't overflow and tear the connection down. The SDK still bounds
+// memory to (capacity * avg notification size).
+const acpNotifQueueDefault = 16384
+
+// acpNotifQueueMin / acpNotifQueueMax clamp KANDEV_ACP_NOTIF_QUEUE so a
+// misconfigured value can't either re-introduce the overflow (too low) or
+// blow the heap (too high).
+const (
+	acpNotifQueueMin = 1024
+	acpNotifQueueMax = 131072
+)
+
+// acpNotifQueueCapacity returns the per-connection inbound notification queue
+// capacity, honoring KANDEV_ACP_NOTIF_QUEUE when set and parseable.
+func acpNotifQueueCapacity() int {
+	raw := os.Getenv("KANDEV_ACP_NOTIF_QUEUE")
+	if raw == "" {
+		return acpNotifQueueDefault
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return acpNotifQueueDefault
+	}
+	if n < acpNotifQueueMin {
+		return acpNotifQueueMin
+	}
+	if n > acpNotifQueueMax {
+		return acpNotifQueueMax
+	}
+	return n
+}
 
 // AgentInfo contains information about the connected agent.
 type AgentInfo struct {
@@ -170,7 +198,7 @@ type Adapter struct {
 
 	// Available models from the most recent session creation/load.
 	// Used by SetModel to validate the requested model exists.
-	availableModels []acp.ModelInfo
+	availableModels []modelInfo
 
 	// usageDelta tracks the running cumulative `usage_update.used` and
 	// the most recent USD cost reported per session. codex-acp emits no
@@ -310,9 +338,18 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 		acpclient.WithPermissionHandler(a.handlePermissionRequest),
 	)
 
-	// Create ACP SDK connection
-	a.acpConn = acp.NewClientSideConnection(a.acpClient, a.stdin, a.stdout)
+	// Create ACP SDK connection. Raise the inbound notification queue cap
+	// to acpNotifQueueDefault (well above the SDK's built-in default) so
+	// long session/load replays don't overflow and tear the connection
+	// down. The internal notifQueueCapacity channel sits in front of this
+	// queue and is drained by our update worker. Requires a coder/acp-go-sdk
+	// fork with WithMaxQueuedNotifications; see go.mod replace directive.
+	notifQueueCap := acpNotifQueueCapacity()
+	a.acpConn = acp.NewClientSideConnection(a.acpClient, a.stdin, a.stdout,
+		acp.WithMaxQueuedNotifications(notifQueueCap))
 	a.acpConn.SetLogger(slog.Default().With("component", "acp-conn"))
+	a.logger.Debug("ACP connection notification queue sized",
+		zap.Int("capacity", notifQueueCap))
 
 	// Perform ACP handshake - this exchanges capabilities with the agent
 	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "initialize")

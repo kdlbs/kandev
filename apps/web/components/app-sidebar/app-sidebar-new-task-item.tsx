@@ -3,10 +3,12 @@
 import { useCallback, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { IconSquarePlus, IconSubtask } from "@tabler/icons-react";
+import { IconMessageCircle, IconSquarePlus, IconSubtask } from "@tabler/icons-react";
+import type { Icon as TablerIcon } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import { useInOffice } from "@/hooks/use-in-office";
+import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { linkToTask } from "@/lib/links";
 import type { Task } from "@/lib/types/http";
@@ -24,6 +26,35 @@ import { AppSidebarNavItem } from "./app-sidebar-nav-item";
 type AppSidebarNewTaskItemProps = {
   collapsed: boolean;
 };
+
+const ONE_ROW_ACTION_INSET_CLASS = "pr-10";
+const TWO_ROW_ACTIONS_INSET_CLASS = "pr-16";
+
+type RowActionButtonProps = {
+  icon: TablerIcon;
+  label: string;
+  testId: string;
+  onClick: () => void;
+};
+
+function RowActionButton({ icon: Icon, label, testId, onClick }: RowActionButtonProps) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          onClick={onClick}
+          aria-label={label}
+          data-testid={testId}
+          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground/70 hover:bg-muted hover:text-foreground cursor-pointer"
+        >
+          <Icon className="h-3.5 w-3.5" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="right">{label}</TooltipContent>
+    </Tooltip>
+  );
+}
 
 /**
  * "New Task" entry in the sidebar primary nav. Inside Office (an `/office`
@@ -52,6 +83,7 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
     return s.kanban.tasks.find((t) => t.id === id)?.title ?? "";
   });
   const inOffice = useInOffice();
+  const handleOpenQuickChat = useQuickChatLauncher(workspaceId);
   const [open, setOpen] = useState(false);
   const [subtaskOpen, setSubtaskOpen] = useState(false);
 
@@ -59,7 +91,16 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
   // dialog for the primary New Task, but subtasks always go through the compact
   // NewSubtaskDialog, matching the retired dropdown). It needs an active task
   // and the expanded rail to host the trailing button.
+  const canOpenQuickChat = !collapsed && !!workspaceId;
   const canCreateSubtask = !collapsed && !!workspaceId && !!activeTaskId;
+  let actionInsetClass: string | undefined;
+  // Keep the label clear of the absolute action cluster:
+  // pr-10 covers one w-6 button + right-1.5 inset; pr-16 covers two buttons + gap-1.
+  if (canCreateSubtask) {
+    actionInsetClass = TWO_ROW_ACTIONS_INSET_CLASS;
+  } else if (canOpenQuickChat) {
+    actionInsetClass = ONE_ROW_ACTION_INSET_CLASS;
+  }
   const handleRegularTaskCreated = useCallback(
     (
       task: Task,
@@ -88,22 +129,25 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
           collapsed={collapsed}
           disabled={!workspaceId}
           testId="create-task-button"
+          className={actionInsetClass}
         />
-        {canCreateSubtask && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
+        {canOpenQuickChat && (
+          <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1 sidebar-fade-in">
+            <RowActionButton
+              icon={IconMessageCircle}
+              label="Quick Chat"
+              testId="sidebar-quick-chat-shortcut"
+              onClick={handleOpenQuickChat}
+            />
+            {canCreateSubtask && (
+              <RowActionButton
+                icon={IconSubtask}
+                label="New subtask of current task"
+                testId="sidebar-new-subtask"
                 onClick={() => setSubtaskOpen(true)}
-                aria-label="New subtask of current task"
-                data-testid="sidebar-new-subtask"
-                className="absolute right-1.5 top-1/2 -translate-y-1/2 flex h-6 w-6 items-center justify-center rounded text-muted-foreground/70 hover:bg-muted hover:text-foreground cursor-pointer"
-              >
-                <IconSubtask className="h-3.5 w-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="right">New subtask of current task</TooltipContent>
-          </Tooltip>
+              />
+            )}
+          </div>
         )}
       </div>
       {workspaceId &&

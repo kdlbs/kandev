@@ -23,6 +23,8 @@ const emptyGlobal: StatsResponse["global"] = {
   avg_turns_per_task: 0,
   avg_messages_per_task: 0,
   avg_duration_ms_per_task: 0,
+  avg_turn_duration_ms: 0,
+  avg_messages_per_turn: 0,
 };
 
 const sampleStats: StatsResponse = {

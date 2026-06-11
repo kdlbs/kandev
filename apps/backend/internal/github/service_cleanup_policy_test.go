@@ -694,6 +694,94 @@ func TestDeleteReviewWatch_CascadesDedupRows(t *testing.T) {
 	}
 }
 
+func TestDeleteReviewWatchesByWorkspace(t *testing.T) {
+	_, svc, _, store := setupPollerTest(t)
+	ctx := context.Background()
+
+	// Wire a deleter so the watch-delete task-reaping branch runs: the
+	// workspace sweep must reap each cleared watch's owned task and leave the
+	// survivor's task untouched.
+	rec := &recordingTaskDeleter{}
+	svc.SetTaskDeleter(rec)
+
+	mk := func(ws string) *ReviewWatch {
+		w := &ReviewWatch{WorkspaceID: ws, Enabled: true}
+		if err := store.CreateReviewWatch(ctx, w); err != nil {
+			t.Fatalf("CreateReviewWatch: %v", err)
+		}
+		rpt := &ReviewPRTask{
+			ReviewWatchID: w.ID,
+			RepoOwner:     "acme",
+			RepoName:      "widget",
+			PRNumber:      1,
+			TaskID:        "task-" + w.ID,
+		}
+		if err := store.CreateReviewPRTask(ctx, rpt); err != nil {
+			t.Fatalf("CreateReviewPRTask: %v", err)
+		}
+		return w
+	}
+	// Two watches in ws-1 (to be cleared) and one in ws-2 that must survive.
+	w1 := mk("ws-1")
+	w2 := mk("ws-1")
+	wOther := mk("ws-2")
+
+	deleted, err := svc.DeleteReviewWatchesByWorkspace(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("DeleteReviewWatchesByWorkspace: %v", err)
+	}
+	if deleted != 2 {
+		t.Fatalf("deleted = %d, want 2", deleted)
+	}
+
+	ws1, err := store.ListReviewWatches(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("ListReviewWatches ws-1: %v", err)
+	}
+	if len(ws1) != 0 {
+		t.Fatalf("ws-1 watches remain: %d", len(ws1))
+	}
+	ws2, err := store.ListReviewWatches(ctx, "ws-2")
+	if err != nil {
+		t.Fatalf("ListReviewWatches ws-2: %v", err)
+	}
+	if len(ws2) != 1 {
+		t.Fatalf("ws-2 watches = %d, want 1 (unaffected)", len(ws2))
+	}
+
+	// Dedup rows for the deleted watches are gone; the survivor's remain.
+	for _, w := range []*ReviewWatch{w1, w2} {
+		rows, err := store.ListReviewPRTasksByWatch(ctx, w.ID)
+		if err != nil {
+			t.Fatalf("ListReviewPRTasksByWatch: %v", err)
+		}
+		if len(rows) != 0 {
+			t.Fatalf("dedup rows leaked for deleted watch %s: %d", w.ID, len(rows))
+		}
+	}
+	survivor, err := store.ListReviewPRTasksByWatch(ctx, wOther.ID)
+	if err != nil {
+		t.Fatalf("ListReviewPRTasksByWatch survivor: %v", err)
+	}
+	if len(survivor) != 1 {
+		t.Fatalf("survivor dedup rows = %d, want 1", len(survivor))
+	}
+
+	// Only the cleared workspace's tasks are reaped; the survivor's is not.
+	reaped := map[string]bool{}
+	for _, id := range rec.calls {
+		reaped[id] = true
+	}
+	for _, w := range []*ReviewWatch{w1, w2} {
+		if !reaped["task-"+w.ID] {
+			t.Fatalf("task for cleared watch %s was not reaped; calls=%v", w.ID, rec.calls)
+		}
+	}
+	if reaped["task-"+wOther.ID] {
+		t.Fatalf("survivor task was reaped; calls=%v", rec.calls)
+	}
+}
+
 func TestNormalizeCleanupPolicy(t *testing.T) {
 	if got := NormalizeCleanupPolicy(""); got != CleanupPolicyAuto {
 		t.Fatalf("empty → %q, want auto", got)

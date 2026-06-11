@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -28,6 +29,12 @@ const defaultPriority = "medium"
 // subtask of a kanban subtask (nesting depth > 1). Office task trees are
 // intentionally exempt.
 var ErrSubtaskDepthExceeded = fmt.Errorf("cannot create a subtask of a subtask — maximum nesting depth is 1 for kanban tasks. Create a sibling task under the same parent or a top-level task instead")
+
+// ErrTaskAlreadyArchived is returned by ArchiveTask when the target task
+// already has archived_at set. Sentinel so cascade callers (e.g.
+// DeleteWorkflow) can treat a concurrent archive as a no-op instead of
+// aborting the whole operation.
+var ErrTaskAlreadyArchived = errors.New("task is already archived")
 
 type taskStopTarget struct {
 	sessionID   string
@@ -729,7 +736,7 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	}
 
 	if task.ArchivedAt != nil {
-		return fmt.Errorf("task is already archived: %s", id)
+		return fmt.Errorf("%w: %s", ErrTaskAlreadyArchived, id)
 	}
 
 	// 2. Gather data needed for cleanup BEFORE archive
@@ -786,6 +793,19 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	// 3. Set archived_at in DB
 	if err := s.tasks.ArchiveTask(ctx, id); err != nil {
 		return err
+	}
+
+	// 3b. Finalize active sessions in the DB. The async cleanup below tears down
+	// the agent processes; this records the terminal session state, which
+	// process teardown does not persist on its own.
+	if reaped, rerr := s.sessions.CancelActiveTaskSessionsByTaskID(ctx, id, "task archived"); rerr != nil {
+		s.logger.Warn("failed to reap active sessions on archive",
+			zap.String("task_id", id),
+			zap.Error(rerr))
+	} else if reaped > 0 {
+		s.logger.Info("reaped active sessions on archive",
+			zap.String("task_id", id),
+			zap.Int64("count", reaped))
 	}
 
 	// 4. Re-read task for updated archived_at field

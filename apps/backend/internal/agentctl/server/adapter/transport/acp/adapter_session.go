@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
@@ -55,7 +54,12 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 	a.mu.Lock()
 	a.sessionID = string(resp.SessionId)
 	sessionID := a.sessionID
-	initialModels := initialSessionModelState(resp.Models, resp.Meta, resp.ConfigOptions)
+	// Reset session-scoped model caches before computing the new session's
+	// state so a session without a model surface can't reuse the previous
+	// session's models / configOptions for validation in SetModel.
+	a.availableModels = nil
+	a.availableConfigOptions = nil
+	initialModels := initialSessionModelState(resp.Meta, resp.ConfigOptions, resp.LegacyModels)
 	if initialModels != nil {
 		a.availableModels = initialModels.AvailableModels
 	}
@@ -70,8 +74,7 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 		a.emitInitialModeState(resp.Modes)
 	}
 
-	// Emit session models if the agent returned model state, or if it exposes
-	// model selection only through configOptions.
+	// Emit session models when the session exposes a model-shaped config option.
 	if initialModels != nil {
 		a.emitSessionModels(sessionID, initialModels, resp.Meta, resp.ConfigOptions)
 	}
@@ -91,16 +94,32 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 	return sessionID, nil
 }
 
+// initialSessionModelState resolves the initial model state for a session.
+// Returns nil when no model-shaped surface exists, signalling that the agent
+// doesn't advertise model selection on this session.
+//
+// Precedence (in order):
+//  1. Typed ConfigOptions list with category="model" (v0.13.4+ agents).
+//  2. Pre-v0.13.5 top-level `models` field (e.g. auggie 0.29.x), exposed by the
+//     kdlbs fork as acp.LegacyModels. Reached even when configOptions carries
+//     non-model entries (e.g. `category="mode"`) so an agent that mixes typed
+//     mode options with a legacy models block still surfaces its models.
+//  3. _meta-only ConfigOption stub for legacy agents that surface options
+//     under `_meta.configOptions` (returns an empty state so emitSessionModels
+//     still fires; the event's ConfigOptions list is filled from _meta there).
 func initialSessionModelState(
-	models *acp.SessionModelState,
 	meta map[string]any,
 	configOptions []acp.SessionConfigOption,
-) *acp.SessionModelState {
-	if models != nil {
-		return models
+	legacy *acp.LegacyModels,
+) *sessionModelState {
+	if state := modelsFromConfigOptions(configOptions); state != nil {
+		return state
 	}
-	if hasModelConfigOption(sessionConfigOptions(meta, configOptions)) {
-		return &acp.SessionModelState{}
+	if state := modelsFromLegacy(legacy); state != nil {
+		return state
+	}
+	if hasModelConfigOption(extractConfigOptions(meta)) {
+		return &sessionModelState{}
 	}
 	return nil
 }
@@ -299,7 +318,11 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 
 	a.mu.Lock()
 	a.sessionID = sessionID
-	initialModels := initialSessionModelState(resp.Models, resp.Meta, resp.ConfigOptions)
+	// Reset session-scoped model caches so a load that lands on a session
+	// without a model surface can't reuse the previous session's data.
+	a.availableModels = nil
+	a.availableConfigOptions = nil
+	initialModels := initialSessionModelState(resp.Meta, resp.ConfigOptions, resp.LegacyModels)
 	if initialModels != nil {
 		a.availableModels = initialModels.AvailableModels
 	}
@@ -399,21 +422,21 @@ func (a *Adapter) emitInitialModeState(modes *acp.SessionModeState) {
 }
 
 // emitSessionModels emits a session_models event from the session response.
-func (a *Adapter) emitSessionModels(sessionID string, models *acp.SessionModelState, meta map[string]any, acpConfigOptions []acp.SessionConfigOption) {
-	currentModelID := string(models.CurrentModelId)
+func (a *Adapter) emitSessionModels(sessionID string, models *sessionModelState, meta map[string]any, acpConfigOptions []acp.SessionConfigOption) {
+	currentModelID := models.CurrentModelId
 	// Prefer typed config options from the response; fall back to _meta
 	// extraction for older agents.
 	configOptions := sessionConfigOptions(meta, acpConfigOptions)
 
 	// Fallback: if the SDK didn't parse currentModelId (some agents omit it),
-	// try to resolve it from a model-shaped configOption. We deliberately do
-	// NOT fall back to AvailableModels[0]: agents like auggie return an
-	// alphabetically-sorted list whose first entry is a pseudo-agent ("Build
-	// Analyzer"), which clobbered the profile model in the UI. When neither
-	// CurrentModelId nor a configOption surface a value, emit empty and let
-	// the frontend fall through to its profile/snapshot resolution.
+	// take the model-shaped configOption's CurrentValue verbatim. We
+	// deliberately do NOT fall back to AvailableModels[0]: agents like auggie
+	// return an alphabetically-sorted list whose first entry is a pseudo-agent
+	// ("Build Analyzer"), which clobbered the profile model in the UI. When
+	// neither CurrentModelId nor a configOption surface a value, emit empty
+	// and let the frontend fall through to its profile/snapshot resolution.
 	if currentModelID == "" {
-		currentModelID = resolveCurrentModelFromConfig(configOptions, models.AvailableModels)
+		currentModelID = currentModelFromConfig(configOptions)
 	}
 
 	// Cache config options so emitSetModelEvent can include them in the
@@ -448,7 +471,7 @@ func (a *Adapter) emitSessionModels(sessionID string, models *acp.SessionModelSt
 // — this prevents a downstream consumer that reads ConfigOptions[model]
 // .CurrentValue (codex-style agents surface the current model there) from
 // disagreeing with the CurrentModelID emitted on the same event.
-func (a *Adapter) emitSetModelEvent(sessionID, modelID string, cachedModels []acp.ModelInfo, cachedConfig []streams.ConfigOption) {
+func (a *Adapter) emitSetModelEvent(sessionID, modelID string, cachedModels []modelInfo, cachedConfig []streams.ConfigOption) {
 	outConfig := cachedConfig
 	if len(cachedConfig) > 0 {
 		// Shallow copy: only CurrentValue (a string) is rewritten below, so
@@ -457,21 +480,18 @@ func (a *Adapter) emitSetModelEvent(sessionID, modelID string, cachedModels []ac
 		// deep copy to avoid aliasing the caller's backing array.
 		outConfig = make([]streams.ConfigOption, len(cachedConfig))
 		copy(outConfig, cachedConfig)
-		baseModelID, reasoningEffort, splitReasoningModel := splitReasoningModelID(modelID, outConfig)
 		for i := range outConfig {
 			if outConfig[i].ID == configOptionIDModel || outConfig[i].Category == configOptionIDModel {
-				if splitReasoningModel {
-					outConfig[i].CurrentValue = baseModelID
-				} else {
-					outConfig[i].CurrentValue = modelID
-				}
-			}
-			if splitReasoningModel &&
-				(outConfig[i].ID == configOptionIDReasoningEffort ||
-					outConfig[i].Category == configOptionCategoryThoughtLevel) {
-				outConfig[i].CurrentValue = reasoningEffort
+				outConfig[i].CurrentValue = modelID
 			}
 		}
+		// Refresh the cached config options so a subsequent SetConfigOption
+		// (e.g. user toggles reasoning effort after switching model) doesn't
+		// reuse the stale model CurrentValue from session/new and clobber the
+		// just-applied model in the convergence event.
+		a.mu.Lock()
+		a.availableConfigOptions = outConfig
+		a.mu.Unlock()
 	}
 
 	a.logger.Info("emitting session_models convergence event after SetModel",
@@ -487,83 +507,16 @@ func (a *Adapter) emitSetModelEvent(sessionID, modelID string, cachedModels []ac
 	})
 }
 
-// resolveCurrentModelFromConfig extracts current model ID from configOptions.
-func resolveCurrentModelFromConfig(options []streams.ConfigOption, available []acp.ModelInfo) string {
-	modelID := ""
-	reasoningEffort := ""
+// currentModelFromConfig returns the CurrentValue of the model-shaped
+// configOption (matched by well-known ID or Category="model"), or empty
+// when none is present.
+func currentModelFromConfig(options []streams.ConfigOption) string {
 	for _, opt := range options {
 		if opt.ID == configOptionIDModel || opt.Category == configOptionIDModel {
-			modelID = opt.CurrentValue
-		}
-		if opt.ID == configOptionIDReasoningEffort || opt.Category == configOptionCategoryThoughtLevel {
-			reasoningEffort = opt.CurrentValue
+			return opt.CurrentValue
 		}
 	}
-	if modelID == "" {
-		return ""
-	}
-	if reasoningEffort != "" {
-		combined := modelID + "/" + reasoningEffort
-		if modelIDExists(combined, available) {
-			return combined
-		}
-	}
-	if modelIDExists(modelID, available) {
-		return modelID
-	}
-	// Keep the agent-reported config value as a best-effort fallback for
-	// providers that expose the current model only through configOptions.
-	return modelID
-}
-
-func splitReasoningModelID(modelID string, options []streams.ConfigOption) (string, string, bool) {
-	allowedReasoningEfforts := map[string]bool{}
-	hasReasoningOption := false
-	for _, opt := range options {
-		if opt.ID == configOptionIDReasoningEffort || opt.Category == configOptionCategoryThoughtLevel {
-			hasReasoningOption = true
-			for _, optionValue := range opt.Options {
-				if optionValue.Value != "" {
-					allowedReasoningEfforts[optionValue.Value] = true
-				}
-			}
-		}
-	}
-	if hasReasoningOption && len(allowedReasoningEfforts) == 0 {
-		for _, effort := range []string{
-			reasoningEffortLow,
-			reasoningEffortMedium,
-			reasoningEffortHigh,
-			reasoningEffortXHigh,
-		} {
-			allowedReasoningEfforts[effort] = true
-		}
-	}
-	if len(allowedReasoningEfforts) == 0 {
-		return "", "", false
-	}
-	slashIndex := strings.LastIndex(modelID, "/")
-	if slashIndex < 1 || slashIndex == len(modelID)-1 {
-		return "", "", false
-	}
-	baseModelID := modelID[:slashIndex]
-	reasoningEffort := modelID[slashIndex+1:]
-	if !allowedReasoningEfforts[reasoningEffort] {
-		return "", "", false
-	}
-	return baseModelID, reasoningEffort, true
-}
-
-func modelIDExists(modelID string, available []acp.ModelInfo) bool {
-	if len(available) == 0 {
-		return false
-	}
-	for _, model := range available {
-		if string(model.ModelId) == modelID {
-			return true
-		}
-	}
-	return false
+	return ""
 }
 
 // SetMode changes the agent's session mode via ACP session/set_mode.
@@ -619,7 +572,7 @@ func (a *Adapter) SetModel(ctx context.Context, modelID string) error {
 	if len(available) > 0 {
 		found := false
 		for _, m := range available {
-			if string(m.ModelId) == modelID {
+			if m.ModelId == modelID {
 				found = true
 				break
 			}
@@ -636,9 +589,26 @@ func (a *Adapter) SetModel(ctx context.Context, modelID string) error {
 	if err != nil {
 		return fmt.Errorf("set session model failed via %s: %w", method, err)
 	}
+	a.finalizeSetModel(method, sessionID, modelID, available, cachedConfig)
+	return nil
+}
+
+// finalizeSetModel emits the post-apply convergence event when applySessionModel
+// actually performed a switch. MethodNone means the agent supports neither the
+// typed session/set_config_option nor the legacy session/set_model RPC, so no
+// switch happened — skip the reset and the emit to avoid lying to the frontend.
+func (a *Adapter) finalizeSetModel(
+	method sessionmodel.Method,
+	sessionID string,
+	modelID string,
+	available []modelInfo,
+	cachedConfig []streams.ConfigOption,
+) {
+	if method == sessionmodel.MethodNone {
+		return
+	}
 	a.resetContextWindowMaxSize(sessionID)
 	a.emitSetModelEvent(sessionID, modelID, available, cachedConfig)
-	return nil
 }
 
 func applySessionModel(
@@ -693,10 +663,20 @@ func (a *Adapter) maybeEmitAuthRequired(err error) bool {
 
 // SetConfigOption sets a session configuration option via ACP session/set_config_option.
 // configID is the option's ID; value is the option-value ID to apply.
+//
+// On success a session_models convergence event is emitted with the updated
+// option's CurrentValue. The orchestrator persists the change to
+// AgentProfileSnapshot so model + secondary options (reasoning effort,
+// thought level, …) survive page refresh and backend restart. Agents that
+// proactively send a ConfigOptionUpdate notification will produce a second,
+// equivalent event; downstream persistence is idempotent so duplicates are
+// harmless.
 func (a *Adapter) SetConfigOption(ctx context.Context, configID, value string) error {
 	a.mu.RLock()
 	conn := a.acpConn
 	sessionID := a.sessionID
+	cachedModels := a.availableModels
+	cachedConfig := a.availableConfigOptions
 	a.mu.RUnlock()
 
 	if conn == nil {
@@ -716,7 +696,87 @@ func (a *Adapter) SetConfigOption(ctx context.Context, configID, value string) e
 	if err != nil {
 		return fmt.Errorf("set session config option failed: %w", err)
 	}
+	if isModelConfigID(configID, cachedConfig) {
+		a.emitSetModelEvent(sessionID, value, cachedModels, cachedConfig)
+	} else {
+		a.emitSetConfigOptionEvent(sessionID, configID, value, cachedModels, cachedConfig)
+	}
 	return nil
+}
+
+// emitSetConfigOptionEvent emits a session_models convergence event after a
+// non-model SetConfigOption RPC succeeds. The frontend uses this to keep the
+// option dropdowns in sync with the agent without waiting for an agent-driven
+// ConfigOptionUpdate.
+func (a *Adapter) emitSetConfigOptionEvent(sessionID, configID, value string, cachedModels []modelInfo, cachedConfig []streams.ConfigOption) {
+	if len(cachedConfig) == 0 {
+		// In normal operation session/new populates availableConfigOptions
+		// before the frontend can fire a SetConfigOption. Hitting this branch
+		// means we accepted the RPC against a cache that was never seeded —
+		// skip the convergence event entirely (an empty one would briefly
+		// blank the UI selectors) and rely on the agent's own
+		// ConfigOptionUpdate notification to correct the snapshot.
+		a.logger.Warn("SetConfigOption succeeded but local config cache is empty; skipping convergence event",
+			zap.String("session_id", sessionID),
+			zap.String("config_id", configID),
+		)
+		return
+	}
+	outConfig := make([]streams.ConfigOption, len(cachedConfig))
+	copy(outConfig, cachedConfig)
+	found := false
+	for i := range outConfig {
+		if outConfig[i].ID == configID {
+			outConfig[i].CurrentValue = value
+			found = true
+			break
+		}
+	}
+	if !found {
+		// The agent accepted a configID that wasn't in its own
+		// availableConfigOptions list — most likely a stale frontend cache
+		// or an agent-side drift between session/new and ConfigOptionUpdate.
+		// The event carries the unmutated CurrentValues; the agent's own
+		// ConfigOptionUpdate notification will correct the snapshot shortly.
+		a.logger.Warn("SetConfigOption: configID not in local cache; convergence event carries stale options",
+			zap.String("session_id", sessionID),
+			zap.String("config_id", configID),
+		)
+	}
+	// Refresh the cached config options so consecutive SetConfigOption
+	// calls (or a follow-up SetModel) read the latest CurrentValues
+	// instead of the stale session/new snapshot.
+	a.mu.Lock()
+	a.availableConfigOptions = outConfig
+	a.mu.Unlock()
+
+	a.logger.Info("emitting session_models convergence event after SetConfigOption",
+		zap.String("session_id", sessionID),
+		zap.String("config_id", configID),
+		zap.String("value", value),
+	)
+	a.sendUpdate(AgentEvent{
+		Type:           streams.EventTypeSessionModels,
+		SessionID:      sessionID,
+		CurrentModelID: currentModelFromConfig(outConfig),
+		SessionModels:  convertSessionModels(cachedModels),
+		ConfigOptions:  outConfig,
+	})
+}
+
+// isModelConfigID reports whether configID identifies the model-shaped
+// SessionConfigOption — either the well-known "model" ID, or a custom ID that
+// the agent tagged with Category="model" in its session config options.
+func isModelConfigID(configID string, cachedConfig []streams.ConfigOption) bool {
+	if configID == configOptionIDModel {
+		return true
+	}
+	for _, opt := range cachedConfig {
+		if opt.ID == configID && opt.Category == configOptionIDModel {
+			return true
+		}
+	}
+	return false
 }
 
 // Authenticate triggers ACP session/authenticate for a given auth method.

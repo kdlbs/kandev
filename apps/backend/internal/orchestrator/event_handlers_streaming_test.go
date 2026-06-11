@@ -459,3 +459,35 @@ func TestSessionStateString(t *testing.T) {
 	require.Equal(t, string(models.TaskSessionStateRunning),
 		sessionStateString(&models.TaskSession{State: models.TaskSessionStateRunning}))
 }
+
+// TestPersistSessionModel pins the SSR-side behaviour of the session_models
+// event handler: a non-empty agent-reported model is written to
+// AgentProfileSnapshot["model"] so the model selector trigger doesn't flash
+// the profile default on a page reload before WS state catches up.
+func TestPersistSessionModel(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	svc := &Service{logger: testLogger(), repo: repo}
+
+	svc.persistSessionModel(ctx, "s1", "gpt-5.4")
+
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, "gpt-5.4", updated.AgentProfileSnapshot["model"])
+
+	// A no-op write must not touch the DB row, but the visible behaviour is
+	// the same: the snapshot still carries the previously-set value.
+	svc.persistSessionModel(ctx, "s1", "gpt-5.4")
+	again, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, "gpt-5.4", again.AgentProfileSnapshot["model"])
+
+	// An empty model is a no-op (some agents emit session_models without a
+	// CurrentModelID before the first ConfigOptionUpdate). The previously
+	// persisted value must not be cleared.
+	svc.persistSessionModel(ctx, "s1", "")
+	preserved, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, "gpt-5.4", preserved.AgentProfileSnapshot["model"])
+}

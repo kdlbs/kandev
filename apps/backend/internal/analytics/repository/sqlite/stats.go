@@ -142,10 +142,25 @@ func (r *Repository) scanTaskStats(rows *sql.Rows) ([]*models.TaskStats, error) 
 	return results, rows.Err()
 }
 
+// Outlier bounds for the "average turn size" metric. Determined empirically
+// from prod data: durations under cleanTurnMinDurationMs are no-op/aborted
+// turns and durations at or above cleanTurnMaxDurationMs are zombie turns
+// whose completed_at was backfilled across an agent restart. Both classes
+// badly skew the mean — excluding them drops avg duration from ~1062s to
+// ~289s on a ~4k-turn sample. The duration filter is half-open
+// [cleanTurnMinDurationMs, cleanTurnMaxDurationMs).
+const (
+	cleanTurnMinDurationMs = 1000
+	cleanTurnMaxDurationMs = 3600000
+	cleanTurnMinMessages   = 1
+)
+
 // GetGlobalStats retrieves workspace-wide aggregated statistics.
-// Implemented as a single query over 4 CTEs (tasks, sessions, turns, messages)
-// rather than 9 independent correlated subqueries: each underlying table is
-// scanned at most once per request.
+// Implemented as a single query over 5 CTEs (tasks, sessions, turns,
+// clean_turn, messages). The four count/sum CTEs each scan their underlying
+// table at most once per request; clean_turn additionally issues one
+// index-only message-count subquery per qualifying turn (kept correlated to
+// stay portable between the SQLite and Postgres dialects).
 func (r *Repository) GetGlobalStats(ctx context.Context, workspaceID string, start *time.Time) (*models.GlobalStats, error) {
 	var startArg any
 	if start != nil {
@@ -183,6 +198,22 @@ func (r *Repository) GetGlobalStats(ctx context.Context, workspaceID string, sta
 			JOIN tasks t ON t.id = s.task_id
 			WHERE t.workspace_id = ? AND t.is_ephemeral = 0 AND (? IS NULL OR s.started_at >= ?)
 		),
+		clean_turn_agg AS (
+			SELECT
+				AVG(dur_ms) AS avg_turn_duration_ms,
+				AVG(msg_count) AS avg_messages_per_turn
+			FROM (
+				SELECT
+					%s AS dur_ms,
+					(SELECT COUNT(*) FROM task_session_messages m WHERE m.turn_id = turn.id) AS msg_count
+				FROM task_session_turns turn
+				JOIN task_sessions s ON s.id = turn.task_session_id
+				JOIN tasks t ON t.id = s.task_id
+				WHERE t.workspace_id = ? AND t.is_ephemeral = 0 AND (? IS NULL OR s.started_at >= ?)
+				  AND turn.completed_at IS NOT NULL
+			) clean
+			WHERE dur_ms >= %d AND dur_ms < %d AND msg_count >= %d
+		),
 		message_agg AS (
 			SELECT
 				COUNT(*) AS total_messages,
@@ -198,24 +229,28 @@ func (r *Repository) GetGlobalStats(ctx context.Context, workspaceID string, sta
 			session_agg.total_sessions,
 			turn_agg.total_turns,
 			message_agg.total_messages, message_agg.total_user_messages, message_agg.total_tool_calls,
-			turn_agg.total_duration_ms
-		FROM task_agg, session_agg, turn_agg, message_agg
-	`, dur)
+			turn_agg.total_duration_ms,
+			clean_turn_agg.avg_turn_duration_ms, clean_turn_agg.avg_messages_per_turn
+		FROM task_agg, session_agg, turn_agg, clean_turn_agg, message_agg
+	`, dur, dur, cleanTurnMinDurationMs, cleanTurnMaxDurationMs, cleanTurnMinMessages)
 
 	var stats models.GlobalStats
 	var totalDurationMs float64
 	var completedTasks, inProgressTasks sql.NullInt64
 	var userMessages, toolCalls sql.NullInt64
+	var avgTurnDurationMs, avgMessagesPerTurn sql.NullFloat64
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(query),
 		workspaceID, startArg, startArg, // task_agg
 		workspaceID, startArg, startArg, // session_agg
 		workspaceID, startArg, startArg, // turn_agg
+		workspaceID, startArg, startArg, // clean_turn_agg
 		workspaceID, startArg, startArg, // message_agg
 	).Scan(
 		&stats.TotalTasks, &completedTasks, &inProgressTasks,
 		&stats.TotalSessions, &stats.TotalTurns,
 		&stats.TotalMessages, &userMessages, &toolCalls,
 		&totalDurationMs,
+		&avgTurnDurationMs, &avgMessagesPerTurn,
 	)
 	if err != nil {
 		return nil, err
@@ -225,6 +260,8 @@ func (r *Repository) GetGlobalStats(ctx context.Context, workspaceID string, sta
 	stats.TotalUserMessages = int(userMessages.Int64)
 	stats.TotalToolCalls = int(toolCalls.Int64)
 	stats.TotalDurationMs = int64(totalDurationMs)
+	stats.AvgTurnDurationMs = int64(avgTurnDurationMs.Float64)
+	stats.AvgMessagesPerTurn = avgMessagesPerTurn.Float64
 
 	if stats.TotalTasks > 0 {
 		stats.AvgTurnsPerTask = float64(stats.TotalTurns) / float64(stats.TotalTasks)

@@ -1650,6 +1650,44 @@ func TestHandleAgentStopped_PreservesRecoveryState(t *testing.T) {
 				models.TaskSessionStateIdle, updated.State)
 		}
 	})
+
+	// Rotated-execution regression: a previous cycle's agent.stopped event must
+	// not flip the session to CANCELLED when a fresh resume cycle has already
+	// taken over (executors_running.agent_execution_id rotated). Without this
+	// guard, an intermittent ACP notification-queue overflow on cycle 1
+	// produces a late stopped event whose state mutation poisons the in-
+	// progress cycle 2 — the user sees the task transition to FAILED even
+	// though cycle 2 loaded the session cleanly. See discussion in the cycle
+	// 1/2/3 analysis (task a263caf5).
+	t.Run("drops stopped events from rotated executions", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		// Make sure session is in RUNNING — the state we'd clobber if the
+		// guard didn't fire.
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		session.State = models.TaskSessionStateRunning
+		_ = repo.UpdateTaskSession(ctx, session)
+
+		// Live execution is exec-2 (cycle 2). The stale event below carries
+		// exec-1 (cycle 1).
+		seedExecutorRunning(t, repo, "s1", "t1", "exec-2")
+
+		agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+		svc.handleAgentStopped(ctx, watcher.AgentEventData{
+			TaskID:           "t1",
+			SessionID:        "s1",
+			AgentExecutionID: "exec-1",
+		})
+
+		updated, _ := repo.GetTaskSession(ctx, "s1")
+		if updated.State != models.TaskSessionStateRunning {
+			t.Errorf("expected state to remain %q (rotated event ignored), got %q",
+				models.TaskSessionStateRunning, updated.State)
+		}
+	})
 }
 
 // waitForStopCall polls until the mock agent manager has received at least one

@@ -50,7 +50,7 @@ export function WorkflowDeleteDialog({
           <DialogTitle>Delete workflow</DialogTitle>
           <DialogDescription>
             {hasTasks
-              ? `This workflow has ${workflowTaskCount} task${workflowTaskCount === 1 ? "" : "s"}. Choose where to migrate them, or delete everything.`
+              ? `This workflow has ${workflowTaskCount} task${workflowTaskCount === 1 ? "" : "s"}. Choose where to migrate them, or delete the workflow and archive the tasks.`
               : "This will permanently delete the workflow and all its steps."}
           </DialogDescription>
         </DialogHeader>
@@ -116,7 +116,7 @@ export function WorkflowDeleteDialog({
             disabled={deleteLoading || migrateLoading}
             className="cursor-pointer"
           >
-            {hasTasks ? "Delete Everything" : "Delete Workflow"}
+            {hasTasks ? "Delete & Archive Tasks" : "Delete Workflow"}
           </Button>
         </DialogFooter>
       </DialogContent>

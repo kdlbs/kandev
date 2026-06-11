@@ -58,6 +58,12 @@ type BuildSessionPageStateParams = {
   agents: Awaited<ReturnType<typeof listAgents>>;
   repositories: Awaited<ReturnType<typeof listRepositories>>["repositories"];
   allSessions: TaskSession[];
+  // Full session payload (with agent_profile_snapshot) for the active sessionId,
+  // when available. The list endpoint returns lightweight summaries without the
+  // snapshot, which would force the model selector to fall back to the agent's
+  // default model on SSR — visible as a brief flash of the wrong model before
+  // the WS-driven cached state arrives.
+  activeSession: TaskSession | null;
   workspaces: Awaited<ReturnType<typeof listWorkspaces>>["workspaces"];
   workflows: Awaited<ReturnType<typeof listWorkflows>>["workflows"];
   turns: Awaited<ReturnType<typeof listSessionTurns>>["turns"];
@@ -139,9 +145,16 @@ function buildResourceState(p: BuildSessionPageStateParams) {
 }
 
 function buildSessionState(p: BuildSessionPageStateParams) {
-  const { task, sessionId, allSessions, turns } = p;
+  const { task, sessionId, allSessions, activeSession, turns } = p;
+  // Prefer the full active session payload (with agent_profile_snapshot) over
+  // its summary entry in allSessions so the model selector can resolve the
+  // persisted model on first render without flashing the agent default.
+  const itemsBySessionId = Object.fromEntries(allSessions.map((s) => [s.id, s]));
+  if (activeSession?.id) {
+    itemsBySessionId[activeSession.id] = activeSession;
+  }
   return {
-    taskSessions: { items: Object.fromEntries(allSessions.map((s) => [s.id, s])) },
+    taskSessions: { items: itemsBySessionId },
     taskSessionsByTask: {
       itemsByTaskId: { [task.id]: allSessions },
       loadingByTaskId: { [task.id]: false },
@@ -181,23 +194,23 @@ export type FetchedSessionData = {
 };
 
 export async function fetchSessionData(sessionId: string): Promise<FetchedSessionData> {
-  const [allSessionsResponse, task] = await (async () => {
-    // We need task + sessions; caller provides sessionId
-    const { fetchTaskSession } = await import("@/lib/api");
-    const sessionResponse = await fetchTaskSession(sessionId, { cache: "no-store" });
-    const session = sessionResponse.session;
-    if (!session?.task_id) throw new Error("No task_id found for session");
-    const t = await fetchTask(session.task_id, { cache: "no-store" });
-    const sessResp = await listTaskSessions(session.task_id, { cache: "no-store" });
-    return [sessResp, t] as const;
-  })();
+  const { fetchTaskSession } = await import("@/lib/api");
+  const sessionResponse = await fetchTaskSession(sessionId, { cache: "no-store" });
+  const activeSession = sessionResponse.session ?? null;
+  if (!activeSession?.task_id) throw new Error("No task_id found for session");
+  const [task, allSessionsResponse] = await Promise.all([
+    fetchTask(activeSession.task_id, { cache: "no-store" }),
+    listTaskSessions(activeSession.task_id, { cache: "no-store" }),
+  ]);
 
-  return fetchSessionDataFromTask(task, sessionId, allSessionsResponse);
+  return fetchSessionDataFromTask(task, sessionId, allSessionsResponse, activeSession);
 }
 
 export async function fetchSessionDataForTask(taskId: string): Promise<FetchedSessionData> {
-  const task = await fetchTask(taskId, { cache: "no-store" });
-  const allSessionsResponse = await listTaskSessions(taskId, { cache: "no-store" });
+  const [task, allSessionsResponse] = await Promise.all([
+    fetchTask(taskId, { cache: "no-store" }),
+    listTaskSessions(taskId, { cache: "no-store" }),
+  ]);
   const sessions = allSessionsResponse.sessions ?? [];
 
   const sessionId = task.primary_session_id ?? sessions[0]?.id;
@@ -207,7 +220,26 @@ export async function fetchSessionDataForTask(taskId: string): Promise<FetchedSe
     return fetchTaskDataOnly(task, allSessionsResponse);
   }
 
-  return fetchSessionDataFromTask(task, sessionId, allSessionsResponse);
+  // Refetch the active session via the single-session endpoint to get
+  // agent_profile_snapshot, which the list endpoint strips. See
+  // BuildSessionPageStateParams.activeSession for the SSR-flicker rationale.
+  // A failure here (auth, 5xx, timeout) degrades gracefully to the original
+  // initial-flash behaviour but should surface in server logs so silent
+  // 401/500s are debuggable.
+  const { fetchTaskSession } = await import("@/lib/api");
+  const sessionResponse = await fetchTaskSession(sessionId, { cache: "no-store" }).catch((e) => {
+    console.warn(
+      "[session-page-state] failed to fetch active session snapshot; SSR will fall back to summary entry",
+      e,
+    );
+    return null;
+  });
+  return fetchSessionDataFromTask(
+    task,
+    sessionId,
+    allSessionsResponse,
+    sessionResponse?.session ?? null,
+  );
 }
 
 async function fetchTaskDataOnly(
@@ -246,6 +278,7 @@ async function fetchTaskDataOnly(
     agents,
     repositories,
     allSessions,
+    activeSession: null,
     workspaces,
     workflows,
     turns: [],
@@ -316,6 +349,7 @@ async function fetchSessionDataFromTask(
   task: Task,
   sessionId: string,
   allSessionsResponse: Awaited<ReturnType<typeof listTaskSessions>>,
+  activeSession: TaskSession | null,
 ): Promise<FetchedSessionData> {
   // User shells are env-scoped — look up this session's task_environment_id
   // from the already-fetched session list. Sessions w/o env (legacy) skip
@@ -369,6 +403,7 @@ async function fetchSessionDataFromTask(
     agents,
     repositories,
     allSessions,
+    activeSession,
     workspaces,
     workflows,
     turns,
