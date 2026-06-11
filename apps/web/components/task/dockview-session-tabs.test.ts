@@ -6,8 +6,9 @@ import {
   reconcileRemovedSessionPanels,
   resolveInitialPosition,
   resolveSessionTabSyncTarget,
+  shouldRebuildDefaultForPendingSession,
 } from "./dockview-session-tabs";
-import { RIGHT_TOP_GROUP } from "@/lib/state/layout-manager";
+import { CENTER_GROUP, RIGHT_TOP_GROUP } from "@/lib/state/layout-manager";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 
 type FakePanel = {
@@ -18,6 +19,7 @@ type FakePanel = {
 const KEEP = "keep";
 const KEEP_PANEL = `session:${KEEP}`;
 const LEAKED_PANEL = "session:leaked";
+const PENDING_SESSION_ID = "session-new";
 
 /**
  * Builds a fake DockviewApi where `panel.api.close()` mutates the underlying
@@ -220,6 +222,53 @@ describe("resolveInitialPosition", () => {
       referenceGroup: RIGHT_TOP_GROUP,
       direction: "left",
     });
+  });
+});
+
+describe("shouldRebuildDefaultForPendingSession", () => {
+  it("rebuilds default when the active session is pending and no chat group remains", () => {
+    const api = makePositionApi({
+      groups: [RIGHT_TOP_GROUP],
+      panels: [
+        { id: "files", groupId: RIGHT_TOP_GROUP },
+        { id: "changes", groupId: RIGHT_TOP_GROUP },
+      ],
+    });
+
+    expect(shouldRebuildDefaultForPendingSession(api, PENDING_SESSION_ID, [])).toBe(true);
+  });
+
+  it("rebuilds before stale session panels are reconciled away", () => {
+    const api = makePositionApi({
+      groups: ["stale-center", RIGHT_TOP_GROUP],
+      panels: [
+        { id: "session:old", groupId: "stale-center" },
+        { id: "files", groupId: RIGHT_TOP_GROUP },
+        { id: "changes", groupId: RIGHT_TOP_GROUP },
+      ],
+    });
+
+    expect(shouldRebuildDefaultForPendingSession(api, PENDING_SESSION_ID, [])).toBe(true);
+  });
+
+  it("does not rebuild while the chat placeholder is still present", () => {
+    const api = makePositionApi({
+      groups: [CENTER_GROUP, RIGHT_TOP_GROUP],
+      panels: [
+        { id: "chat", groupId: CENTER_GROUP },
+        { id: "files", groupId: RIGHT_TOP_GROUP },
+      ],
+    });
+
+    expect(shouldRebuildDefaultForPendingSession(api, PENDING_SESSION_ID, [])).toBe(false);
+  });
+
+  it("does not rebuild once the active session is hydrated for the task", () => {
+    const api = makePositionApi({ groups: [RIGHT_TOP_GROUP] });
+
+    expect(
+      shouldRebuildDefaultForPendingSession(api, PENDING_SESSION_ID, [PENDING_SESSION_ID]),
+    ).toBe(false);
   });
 });
 

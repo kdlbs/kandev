@@ -2,7 +2,7 @@ import { useEffect, useRef, type MutableRefObject } from "react";
 import type { DockviewApi, DockviewReadyEvent, AddPanelOptions } from "dockview-react";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
-import { useDockviewStore } from "@/lib/state/dockview-store";
+import { releaseLayoutToDefault, useDockviewStore } from "@/lib/state/dockview-store";
 import { focusOrAddPanel } from "@/lib/state/dockview-layout-builders";
 import {
   CENTER_GROUP,
@@ -585,6 +585,36 @@ function shouldSkipPanelEnsure(
   return false;
 }
 
+export function shouldRebuildDefaultForPendingSession(
+  api: DockviewApi,
+  effectiveSessionId: string | null,
+  currentSessionIds: string[],
+): boolean {
+  if (!effectiveSessionId) return false;
+  if (currentSessionIds.includes(toSessionId(effectiveSessionId))) return false;
+  if (api.getPanel("chat")) return false;
+  return true;
+}
+
+function logAutoSessionTabEffectEntry(
+  api: DockviewApi,
+  effectiveSessionId: string | null,
+  tid: string | null,
+  currentSessionIds: string[],
+  refs: AutoSessionTabRefs,
+): void {
+  if (!isDebug()) return;
+  debug("useAutoSessionTab: effect entry", {
+    effectiveSessionId,
+    activeTaskId: tid,
+    prevTaskId: refs.prevTaskIdRef.current,
+    prevSessionId: refs.prevSessionIdRef.current,
+    currentSessionIds,
+    livePanelIdsBefore: api.panels.map((p) => p.id),
+    createdSet: Array.from(refs.sessionTabCreatedRef.current),
+  });
+}
+
 /**
  * Core effect body for useAutoSessionTab — extracted to reduce complexity of
  * the hook itself.
@@ -599,16 +629,19 @@ function runAutoSessionTabEffect(
 
   const { tid, currentSessionIds } = resolveCurrentSessionIds(appStore);
 
-  if (isDebug()) {
-    debug("useAutoSessionTab: effect entry", {
-      effectiveSessionId,
-      activeTaskId: tid,
-      prevTaskId: refs.prevTaskIdRef.current,
-      prevSessionId: refs.prevSessionIdRef.current,
-      currentSessionIds,
-      livePanelIdsBefore: api.panels.map((p) => p.id),
-      createdSet: Array.from(refs.sessionTabCreatedRef.current),
-    });
+  logAutoSessionTabEffectEntry(api, effectiveSessionId, tid, currentSessionIds, refs);
+
+  if (shouldRebuildDefaultForPendingSession(api, effectiveSessionId, currentSessionIds)) {
+    if (isDebug()) {
+      debug("useAutoSessionTab: release default for pending session", {
+        effectiveSessionId,
+        currentSessionIds,
+        currentLayoutEnvId: useDockviewStore.getState().currentLayoutEnvId,
+        livePanelIds: api.panels.map((p) => p.id),
+      });
+    }
+    releaseLayoutToDefault(useDockviewStore.getState().currentLayoutEnvId);
+    return;
   }
 
   reconcileRemovedSessionPanels(
