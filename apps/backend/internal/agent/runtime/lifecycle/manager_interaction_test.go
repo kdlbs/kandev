@@ -774,8 +774,7 @@ func TestEffectiveSessionRuntimeConfig(t *testing.T) {
 	profileOptions := map[string]string{"reasoning_effort": "medium"}
 
 	t.Run("session runtime config overrides profile defaults", func(t *testing.T) {
-		mgr := newTestManager(t)
-		mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{
+		provider := &mockWorkspaceInfoProvider{
 			infos: map[string]*WorkspaceInfo{
 				"session-1": {
 					SessionID:            "session-1",
@@ -785,6 +784,8 @@ func TestEffectiveSessionRuntimeConfig(t *testing.T) {
 				},
 			},
 		}
+		mgr := newTestManager(t)
+		mgr.workspaceInfoProvider = provider
 
 		model, mode, options := mgr.effectiveSessionRuntimeConfig(
 			context.Background(),
@@ -797,6 +798,7 @@ func TestEffectiveSessionRuntimeConfig(t *testing.T) {
 		require.Equal(t, "gpt-5.3-codex-spark", model)
 		require.Equal(t, "full-access", mode)
 		require.Equal(t, map[string]string{"reasoning_effort": "low"}, options)
+		require.Equal(t, 1, provider.sessionCalls)
 	})
 
 	t.Run("falls back to profile defaults", func(t *testing.T) {
@@ -818,12 +820,14 @@ func TestEffectiveSessionRuntimeConfig(t *testing.T) {
 // --- IsRemoteSession tests ---
 
 type mockWorkspaceInfoProvider struct {
-	infos    map[string]*WorkspaceInfo
-	envInfos map[string]*WorkspaceInfo
-	err      error
+	infos        map[string]*WorkspaceInfo
+	envInfos     map[string]*WorkspaceInfo
+	err          error
+	sessionCalls int
 }
 
 func (m *mockWorkspaceInfoProvider) GetWorkspaceInfoForSession(_ context.Context, _, sessionID string) (*WorkspaceInfo, error) {
+	m.sessionCalls++
 	if m.err != nil {
 		return nil, m.err
 	}

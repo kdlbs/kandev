@@ -133,7 +133,16 @@ func LoadSessionRuntimeConfig(metadata map[string]interface{}) (SessionRuntimeCo
 	case SessionRuntimeConfig:
 		return v, !v.IsZero()
 	case map[string]string:
-		out := SessionRuntimeConfig{ConfigOptions: maps.Clone(v)}
+		out := SessionRuntimeConfig{
+			Model:         v["model"],
+			Mode:          v["mode"],
+			ConfigOptions: maps.Clone(v),
+		}
+		delete(out.ConfigOptions, "model")
+		delete(out.ConfigOptions, "mode")
+		if len(out.ConfigOptions) == 0 {
+			out.ConfigOptions = nil
+		}
 		return out, !out.IsZero()
 	case map[string]interface{}:
 		out := SessionRuntimeConfig{

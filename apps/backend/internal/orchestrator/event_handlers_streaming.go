@@ -1090,7 +1090,13 @@ func (s *Service) persistSessionModel(ctx context.Context, sessionID, model stri
 
 func (s *Service) persistSessionRuntimeConfig(ctx context.Context, sessionID, model, mode string, options []streams.ConfigOption) {
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
-	if err != nil || session == nil {
+	if err != nil {
+		s.logger.Warn("failed to load session for runtime config persistence",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	if session == nil {
 		return
 	}
 	cfg, _ := models.LoadSessionRuntimeConfig(session.Metadata)
@@ -1116,9 +1122,20 @@ func (s *Service) persistSessionRuntimeConfig(ctx context.Context, sessionID, mo
 	if cfg.IsZero() {
 		return
 	}
-	_ = s.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyRuntimeConfig, cfg)
+	if err := s.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyRuntimeConfig, cfg); err != nil {
+		s.logger.Warn("failed to persist session runtime config",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
 	if cfg.Model != "" && previousModel != "" && cfg.Model != previousModel {
-		_ = s.repo.SetSessionMetadataKey(ctx, sessionID, "context_window", nil)
+		if err := s.repo.SetSessionMetadataKey(ctx, sessionID, "context_window", nil); err != nil {
+			s.logger.Warn("failed to clear stale context window after runtime model change",
+				zap.String("session_id", sessionID),
+				zap.String("previous_model", previousModel),
+				zap.String("model", cfg.Model),
+				zap.Error(err))
+		}
 	}
 }
 

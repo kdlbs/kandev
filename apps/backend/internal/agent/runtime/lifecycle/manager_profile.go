@@ -174,7 +174,7 @@ func (m *Manager) initializeACPSession(ctx context.Context, execution *AgentExec
 
 func (m *Manager) effectiveSessionRuntimeConfig(ctx context.Context, execution *AgentExecution, profileModel, profileMode string, profileConfigOptions map[string]string) (string, string, map[string]string) {
 	model := profileModel
-	mode := m.effectiveSessionMode(ctx, execution, profileMode)
+	mode := profileMode
 	configOptions := profileConfigOptions
 	info := m.sessionWorkspaceInfo(ctx, execution)
 	if info == nil {

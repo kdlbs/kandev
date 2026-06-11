@@ -383,7 +383,7 @@ func lookupModelInfoInDataset(buf []byte, key string) (ModelInfo, bool) {
 				continue
 			}
 			if entry.Limit.Context <= 0 {
-				return ModelInfo{}, false
+				continue
 			}
 			return ModelInfo{ContextWindow: entry.Limit.Context}, true
 		}

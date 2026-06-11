@@ -382,43 +382,18 @@ export function migrateEnvKeyedData(
   migrate(draft.userShells.loaded);
 }
 
-function buildGitStatusActions(set: ImmerSet) {
+function buildContextWindowActions(set: ImmerSet) {
   return {
-    setGitStatus: (sessionId: string, gitStatus: GitStatusEntry) =>
+    setContextWindow: (
+      sessionId: string,
+      contextWindow: Parameters<SessionRuntimeSlice["setContextWindow"]>[1],
+    ) =>
       set((draft) => {
-        const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
-        // Multi-repo: when the update is tagged with repository_name, route it
-        // into the per-repo map. Single-repo updates (no name) keep the legacy
-        // single-status path; the per-repo map mirrors the same entry under an
-        // empty key so consumers using only byEnvironmentRepo still see it.
-        const repoName = gitStatus.repository_name ?? "";
-        const repoMap = (draft.gitStatus.byEnvironmentRepo[envKey] ??= {});
-        const existingRepo = repoMap[repoName];
-        const repoChanged = !existingRepo || hasGitStatusChanged(existingRepo, gitStatus);
-        if (isDebug()) {
-          debugGit("setGitStatus", {
-            sessionId,
-            envKey,
-            usingFallbackKey: envKey === sessionId,
-            repoName,
-            prevFileCount: Object.keys(existingRepo?.files ?? {}).length,
-            nextFileCount: Object.keys(gitStatus.files ?? {}).length,
-            prevRepoKeys: Object.keys(repoMap),
-            willMutate: gitStatusWouldMutate(draft.gitStatus, envKey, gitStatus),
-          });
-        }
-        if (repoChanged) {
-          repoMap[repoName] = gitStatus;
-        }
-        if (repoName === "") {
-          const existing = draft.gitStatus.byEnvironmentId[envKey];
-          if (!existing || hasGitStatusChanged(existing, gitStatus)) {
-            draft.gitStatus.byEnvironmentId[envKey] = gitStatus;
-          }
-        } else if (repoChanged) {
-          // Multi-repo: only mirror into the legacy map when this repo's entry changed.
-          draft.gitStatus.byEnvironmentId[envKey] = gitStatus;
-        }
+        draft.contextWindow.bySessionId[sessionId] = contextWindow;
+      }),
+    clearContextWindow: (sessionId: string) =>
+      set((draft) => {
+        delete draft.contextWindow.bySessionId[sessionId];
       }),
   };
 }
@@ -431,7 +406,42 @@ export const createSessionRuntimeSlice: StateCreator<
 > = (set) => ({
   ...defaultSessionRuntimeState,
   ...buildTerminalShellProcessActions(set),
-  ...buildGitStatusActions(set),
+  setGitStatus: (sessionId, gitStatus) =>
+    set((draft) => {
+      const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
+      // Multi-repo: when the update is tagged with repository_name, route it
+      // into the per-repo map. Single-repo updates (no name) keep the legacy
+      // single-status path; the per-repo map mirrors the same entry under an
+      // empty key so consumers using only byEnvironmentRepo still see it.
+      const repoName = gitStatus.repository_name ?? "";
+      const repoMap = (draft.gitStatus.byEnvironmentRepo[envKey] ??= {});
+      const existingRepo = repoMap[repoName];
+      const repoChanged = !existingRepo || hasGitStatusChanged(existingRepo, gitStatus);
+      if (isDebug()) {
+        debugGit("setGitStatus", {
+          sessionId,
+          envKey,
+          usingFallbackKey: envKey === sessionId,
+          repoName,
+          prevFileCount: Object.keys(existingRepo?.files ?? {}).length,
+          nextFileCount: Object.keys(gitStatus.files ?? {}).length,
+          prevRepoKeys: Object.keys(repoMap),
+          willMutate: gitStatusWouldMutate(draft.gitStatus, envKey, gitStatus),
+        });
+      }
+      if (repoChanged) {
+        repoMap[repoName] = gitStatus;
+      }
+      if (repoName === "") {
+        const existing = draft.gitStatus.byEnvironmentId[envKey];
+        if (!existing || hasGitStatusChanged(existing, gitStatus)) {
+          draft.gitStatus.byEnvironmentId[envKey] = gitStatus;
+        }
+      } else if (repoChanged) {
+        // Multi-repo: only mirror into the legacy map when this repo's entry changed.
+        draft.gitStatus.byEnvironmentId[envKey] = gitStatus;
+      }
+    }),
   clearGitStatus: (sessionId) =>
     set((draft) => {
       const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
@@ -458,14 +468,7 @@ export const createSessionRuntimeSlice: StateCreator<
       draft.environmentIdBySessionId[sessionId] = environmentId;
       migrateEnvKeyedData(draft, sessionId, environmentId);
     }),
-  setContextWindow: (sessionId, contextWindow) =>
-    set((draft) => {
-      draft.contextWindow.bySessionId[sessionId] = contextWindow;
-    }),
-  clearContextWindow: (sessionId) =>
-    set((draft) => {
-      delete draft.contextWindow.bySessionId[sessionId];
-    }),
+  ...buildContextWindowActions(set),
   ...buildSessionCommitActions(set),
   setAvailableCommands: (sessionId, commands) =>
     set((draft) => {
