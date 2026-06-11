@@ -33,8 +33,10 @@ import { shareableSessionStateClient } from "@/components/task/share/share-butto
 import { ShareDialog } from "@/components/task/share/share-dialog";
 import { HandoffContextMenuSub } from "@/components/task/handoff-profile-menu-items";
 import { NewSessionDialog, type HandoffPreset } from "@/components/task/new-session-dialog";
+import { usableConfigOptions } from "@/components/model-config-selector";
 import type { TaskSessionState } from "@/lib/types/http";
 import { isSessionActive } from "./session-sort";
+import { resolveSessionTabTitle } from "./session-tab-title";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
 
 function useSessionTabState(sessionId: string | undefined) {
@@ -60,6 +62,30 @@ function useSessionTabState(sessionId: string | undefined) {
     if (!profile) return null;
     const parts = profile.label.split(" \u2022 ");
     return parts[1] || parts[0] || profile.label;
+  });
+  const tabTitle = useAppStore((state) => {
+    if (!sessionId) return null;
+    const session = state.taskSessions.items[sessionId];
+    const sessionModels = state.sessionModels.bySessionId[sessionId];
+    const activeModelId = state.activeModel.bySessionId[sessionId] || null;
+    const snapshotModel =
+      typeof session?.agent_profile_snapshot?.model === "string"
+        ? session.agent_profile_snapshot.model
+        : null;
+    return resolveSessionTabTitle({
+      agentLabel,
+      activeModelId,
+      currentModelId: sessionModels?.currentModelId || null,
+      snapshotModel,
+      modelOptions:
+        sessionModels?.models.map((model) => ({
+          id: model.modelId,
+          name: model.name,
+          description: model.description,
+          usageMultiplier: model.usageMultiplier,
+        })) ?? [],
+      configOptions: usableConfigOptions(sessionModels?.configOptions),
+    });
   });
   const agentName = useAppStore((state) => {
     if (!sessionId) return null;
@@ -89,7 +115,7 @@ function useSessionTabState(sessionId: string | undefined) {
     if (!activeTaskId) return 0;
     return state.taskSessionsByTask.itemsByTaskId[activeTaskId]?.length ?? 0;
   });
-  return { isPrimary, sessionState, taskId, agentLabel, agentName, sessionNumber, sessionCount };
+  return { isPrimary, sessionState, taskId, tabTitle, agentName, sessionNumber, sessionCount };
 }
 
 function useSessionTabActions(
@@ -303,7 +329,7 @@ function SessionTabTriggerContent({
 export function SessionTab(props: IDockviewPanelHeaderProps) {
   const { api, containerApi } = props;
   const sessionId = api.id.startsWith("session:") ? api.id.slice("session:".length) : undefined;
-  const { isPrimary, sessionState, taskId, agentLabel, agentName, sessionNumber, sessionCount } =
+  const { isPrimary, sessionState, taskId, tabTitle, agentName, sessionNumber, sessionCount } =
     useSessionTabState(sessionId);
   const actions = useSessionTabActions(sessionId, taskId, api, containerApi);
   const onDoubleClick = useTabMaximizeOnDoubleClick(api);
@@ -328,8 +354,8 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
   }, [api]);
 
   useEffect(() => {
-    if (agentLabel && api.title !== agentLabel) api.setTitle(agentLabel);
-  }, [agentLabel, api]);
+    if (tabTitle && api.title !== tabTitle) api.setTitle(tabTitle);
+  }, [tabTitle, api]);
 
   const showMultiSessionBadges = sessionCount > 1;
   // Multi-session tab close means delete, not hide-only. Running/starting sessions are
