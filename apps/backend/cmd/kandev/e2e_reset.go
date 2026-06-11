@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/github"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
@@ -22,6 +23,7 @@ func registerE2EResetRoutes(
 	repo *sqliterepo.Repository,
 	taskSvc *taskservice.Service,
 	automationSvc *automation.Service,
+	githubSvc *github.Service,
 	log *logger.Logger,
 ) {
 	mockMode := os.Getenv("KANDEV_MOCK_AGENT")
@@ -30,7 +32,7 @@ func registerE2EResetRoutes(
 	}
 
 	api := router.Group("/api/v1/e2e")
-	api.DELETE("/reset/:workspaceId", handleE2EReset(repo, taskSvc, automationSvc, log))
+	api.DELETE("/reset/:workspaceId", handleE2EReset(repo, taskSvc, automationSvc, githubSvc, log))
 	// Hidden-workflow factory: lets E2E tests cover the system-only
 	// workflow path (e.g. improve-kandev) without depending on the real
 	// bootstrap endpoint, which clones from GitHub and shells out to gh.
@@ -43,6 +45,7 @@ func handleE2EReset(
 	repo *sqliterepo.Repository,
 	taskSvc *taskservice.Service,
 	automationSvc *automation.Service,
+	githubSvc *github.Service,
 	log *logger.Logger,
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -85,6 +88,18 @@ func handleE2EReset(
 			WHERE workspace_id = ?
 		`, workspaceID); err != nil {
 			log.Warn("e2e reset: agent settings reset failed", zap.Error(err))
+		}
+
+		// Wipe GitHub review watches (and their dedup rows + owned tasks) so
+		// review-watch specs stay isolated. seedData/backend are worker-scoped,
+		// so a watch an earlier test created stays enabled; the global review
+		// poller polls every enabled watch and would create a duplicate task
+		// for any PR a later test adds that the stale watch also matches.
+		// Done before task deletion so the poller can't recreate tasks mid-reset.
+		if githubSvc != nil {
+			if _, err := githubSvc.DeleteReviewWatchesByWorkspace(ctx, workspaceID); err != nil {
+				log.Warn("e2e reset: review watch cleanup failed", zap.Error(err))
+			}
 		}
 
 		// Route through the task service (rather than a raw SQL DELETE) so

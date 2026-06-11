@@ -184,6 +184,30 @@ func (s *Service) DeleteReviewWatch(ctx context.Context, id string) error {
 	return s.store.DeleteReviewWatch(ctx, id)
 }
 
+// DeleteReviewWatchesByWorkspace deletes every review watch in a workspace —
+// its dedup rows (transactionally, in the store) and any tasks it owned. The
+// E2E reset endpoint calls this to keep worker-scoped specs isolated: review
+// watches are not otherwise cleared between tests, so a stale enabled watch
+// would let the global review poller create duplicate tasks for PRs a later
+// test adds that the stale watch also matches. Best-effort per watch — a
+// single failure logs Warn and the sweep continues. Returns the count deleted.
+func (s *Service) DeleteReviewWatchesByWorkspace(ctx context.Context, workspaceID string) (int, error) {
+	watches, err := s.store.ListReviewWatches(ctx, workspaceID)
+	if err != nil {
+		return 0, fmt.Errorf("list review watches: %w", err)
+	}
+	deleted := 0
+	for _, w := range watches {
+		if err := s.DeleteReviewWatch(ctx, w.ID); err != nil {
+			s.logger.Warn("failed to delete review watch during workspace reset",
+				zap.String("watch_id", w.ID), zap.Error(err))
+			continue
+		}
+		deleted++
+	}
+	return deleted, nil
+}
+
 // CheckReviewWatch checks for new PRs needing review and returns ones not yet tracked.
 // If watch.Repos is empty, all repos are queried. Otherwise, each repo is queried individually.
 func (s *Service) CheckReviewWatch(ctx context.Context, watch *ReviewWatch) ([]*PR, error) {

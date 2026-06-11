@@ -38,7 +38,11 @@ async function seedRemoteSession(
 
   const session = new SessionPage(testPage);
   await session.waitForLoad();
-  await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+  // waitForChatIdle (not a raw idleInput wait) rides out the WS-subscribe race:
+  // the auto-started mock agent can complete before the client's WS subscription
+  // registers, leaving isAgentBusy=true and the idle input never rendering. The
+  // helper reloads once to re-derive state from SSR. The plain wait flaked here.
+  await session.waitForChatIdle({ timeout: 30_000 });
 
   // Reset workspace default executor so other tests aren't affected
   await apiClient.updateWorkspace(seedData.workspaceId, {
@@ -75,7 +79,9 @@ async function seedLocalSession(
 
   const session = new SessionPage(testPage);
   await session.waitForLoad();
-  await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+  // See seedRemoteSession: waitForChatIdle handles the WS-subscribe race that
+  // makes a raw idleInput wait flake when the auto-started agent finishes early.
+  await session.waitForChatIdle({ timeout: 30_000 });
 
   return { session, sessionId: task.session_id };
 }
