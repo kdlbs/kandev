@@ -71,11 +71,13 @@ The `claude_summary` line carries the **latest** Claude summary's structured fin
       ```bash
       gh pr view <num> --json statusCheckRollup
       ```
-      - Read each `statusCheckRollup` entry's `status`, `conclusion`, and `detailsUrl`
-      - `status` ∈ `{QUEUED, IN_PROGRESS, COMPLETED}`
-      - `COMPLETED` + `conclusion=SUCCESS` → passing
-      - `COMPLETED` + `conclusion∈{FAILURE,TIMED_OUT}` → failed
-      - `COMPLETED` + `conclusion=CANCELLED` → **check for supersession first**: if a newer run of the **same workflow** exists for the same head SHA (`gh run list --workflow "<workflow>" --json headSha,conclusion,databaseId,createdAt`), the cancelled one is a concurrency-superseded duplicate — exclude it from `ci_failed` (report it as `conclusion=cancelled (superseded)` at most). Only treat a cancelled run as failed when it is the newest run for that SHA.
+      - `statusCheckRollup` is a union:
+        - CheckRun: read `name`, `status`, `conclusion`, `detailsUrl`, and workflow name from `workflowName`/`workflow`/nested workflow fields.
+        - StatusContext: read `context`, `state`, and `targetUrl`; `state=SUCCESS` passes, `state∈{FAILURE,ERROR}` fails, and `state∈{PENDING,EXPECTED}` is pending.
+      - CheckRun `status` ∈ `{QUEUED, IN_PROGRESS, COMPLETED}`
+      - CheckRun `COMPLETED` + `conclusion=SUCCESS` → passing
+      - CheckRun `COMPLETED` + `conclusion∈{FAILURE,TIMED_OUT}` → failed
+      - CheckRun `COMPLETED` + `conclusion=CANCELLED` → **check for supersession first**: if a newer run of the **same workflow** exists for the same head SHA (`gh run list --workflow "<workflow>" --json headSha,conclusion,databaseId,createdAt`), the cancelled one is a concurrency-superseded duplicate — exclude it from `ci_failed` (report it as `conclusion=cancelled (superseded)` at most). Use the workflow name, not the check/job name. If no workflow name is available, do not apply the supersession shortcut. Only treat a cancelled run as failed when it is the newest run for that SHA.
       - anything else → pending
 
    c. **Fallback raw bot reviews** (terminal conditions):
@@ -111,7 +113,7 @@ The `claude_summary` line carries the **latest** Claude summary's structured fin
       - All CI checks completed AND every bot is in a terminal state (`done` / `rate_limited` / `timeout`) → exit loop.
       - Round 40 reached (≈20 min) → mark any still-pending CI checks under `ci_pending:` and any still-pending bots as `timeout`, then exit loop.
 
-4. **Count unresolved review threads** via GraphQL (single call, not per-round):
+4. **Fallback only: count unresolved review threads** via GraphQL (single call, not per-round). Skip this when `scripts/pr-state` already returned `.unresolved_review_thread_count` without a `review_threads` error:
    ```bash
    gh api graphql -f query='
      query($owner:String!,$repo:String!,$num:Int!){
@@ -123,12 +125,12 @@ The `claude_summary` line carries the **latest** Claude summary's structured fin
      }' -f owner=":owner" -f repo=":repo" -F num=<num> --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length'
    ```
 
-5. **Count bot issue comments** (CodeRabbit walkthrough, fork-Claude findings, etc.):
+5. **Fallback only: count bot issue comments** (CodeRabbit walkthrough, fork-Claude findings, etc.). Skip this when `scripts/pr-state` already returned `.issue_comments` without an `issue_comments` error:
    ```bash
    gh pr view <num> --json comments --jq '[.comments[] | select(.author.login | IN("coderabbitai","github-actions"))] | length'
    ```
 
-6. **Parse the latest Claude summary** for structured findings. Claude posts its review summary as an *issue comment* (not a review) — either as `claude[bot]` (same-repo app) or as `github-actions` with a body that begins `**Claude finished ` (fork path). Each summary ends with a markdown table of the form `| Blocker | <N> |` / `| Suggestion | <N> |` and a `**Verdict:** ...` line. Read only the **latest** such comment — earlier summaries reflect previous commit states.
+6. **Fallback only: parse the latest Claude summary** for structured findings. Skip this when `scripts/pr-state` already returned `.issue_comments` without an `issue_comments` error. Claude posts its review summary as an *issue comment* (not a review) — either as `claude[bot]` (same-repo app) or as `github-actions` with a body that begins `**Claude finished ` (fork path). Each summary ends with a markdown table of the form `| Blocker | <N> |` / `| Suggestion | <N> |` and a `**Verdict:** ...` line. Read only the **latest** such comment — earlier summaries reflect previous commit states.
 
    ```bash
    body=$(gh api repos/:owner/:repo/issues/<num>/comments --jq '

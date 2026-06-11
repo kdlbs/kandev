@@ -13,6 +13,22 @@ fail() {
   exit 1
 }
 
+TMP_DIRS=()
+
+cleanup() {
+  if [ "${#TMP_DIRS[@]}" -gt 0 ]; then
+    rm -rf "${TMP_DIRS[@]}"
+  fi
+}
+trap cleanup EXIT
+
+make_tmp_dir() {
+  local tmp
+  tmp="$(mktemp -d)"
+  TMP_DIRS+=("$tmp")
+  printf '%s\n' "$tmp"
+}
+
 assert_jq() {
   local name=$1
   local expr=$2
@@ -29,6 +45,11 @@ set -euo pipefail
 
 if [[ "${GH_FAIL_REVIEWS:-0}" == "1" && "$*" == *"pulls/123/reviews"* ]]; then
   echo "reviews api failed" >&2
+  exit 1
+fi
+
+if [[ "${GH_FAIL_REPO:-0}" == "1" && "$1" == "repo" && "$2" == "view" ]]; then
+  echo "repo view failed" >&2
   exit 1
 fi
 
@@ -64,7 +85,14 @@ if [[ "$1" == "pr" && "$2" == "view" && "$4" == "--json" ]]; then
         "name": "e2e",
         "status": "COMPLETED",
         "conclusion": "FAILURE",
-        "detailsUrl": "https://github.com/kdlbs/kandev/actions/runs/27340000002/job/55150000002"
+        "detailsUrl": "https://github.com/kdlbs/kandev/actions/runs/27340000002/job/55150000002",
+        "checkSuite": {
+          "workflowRun": {
+            "workflow": {
+              "name": "CI"
+            }
+          }
+        }
       },
       {
         "__typename": "CheckRun",
@@ -138,8 +166,7 @@ EOF
 
 test_snapshot_happy_path() {
   local tmp
-  tmp="$(mktemp -d)"
-  trap 'rm -rf "$tmp"' RETURN
+  tmp="$(make_tmp_dir)"
   make_mock_gh "$tmp/bin"
 
   local json
@@ -151,6 +178,7 @@ test_snapshot_happy_path() {
   assert_jq "checks count" '.checks | length == 3' "$json"
   assert_jq "failed check preserved" '.checks[] | select(.name == "e2e") | .conclusion == "failure"' "$json"
   assert_jq "check run id" '.checks[] | select(.name == "e2e") | .run_id == "27340000002"' "$json"
+  assert_jq "nested workflow name" '.checks[] | select(.name == "e2e") | .workflow == "CI"' "$json"
   assert_jq "threads count" '.review_threads | length == 2' "$json"
   assert_jq "unresolved count" '.unresolved_review_thread_count == 1' "$json"
   assert_jq "thread comment id" '.review_threads[] | select(.thread_id == "PRRT_1") | .comment_id == 111' "$json"
@@ -165,8 +193,7 @@ test_snapshot_happy_path() {
 
 test_partial_failure_records_error_but_keeps_other_data() {
   local tmp
-  tmp="$(mktemp -d)"
-  trap 'rm -rf "$tmp"' RETURN
+  tmp="$(make_tmp_dir)"
   make_mock_gh "$tmp/bin"
 
   local json
@@ -181,5 +208,23 @@ test_partial_failure_records_error_but_keeps_other_data() {
   pass "partial failure records error but keeps other data"
 }
 
+test_repo_failure_skips_review_threads() {
+  local tmp
+  tmp="$(make_tmp_dir)"
+  make_mock_gh "$tmp/bin"
+
+  local json
+  GH_FAIL_REPO=1 PATH="$tmp/bin:$PATH" "$SCRIPT" 123 >"$tmp/out.json"
+  json="$(<"$tmp/out.json")"
+
+  assert_jq "checks still present on repo failure" '.checks | length == 3' "$json"
+  assert_jq "review threads empty on repo failure" '.review_threads == []' "$json"
+  assert_jq "unresolved count unknown on repo failure" '.unresolved_review_thread_count == null' "$json"
+  assert_jq "repo failure recorded" '.errors[] | select(.source == "repo") | .message == "gh repo view failed"' "$json"
+  assert_jq "review thread skip recorded" '.errors[] | select(.source == "review_threads") | .message == "skipped: repo lookup failed"' "$json"
+  pass "repo failure skips review threads"
+}
+
 test_snapshot_happy_path
 test_partial_failure_records_error_but_keeps_other_data
+test_repo_failure_skips_review_threads

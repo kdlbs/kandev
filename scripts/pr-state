@@ -32,7 +32,7 @@ checks_json='[]'
 review_threads_json='[]'
 reviews_json='[]'
 issue_comments_json='[]'
-unresolved_review_thread_count=0
+unresolved_review_thread_count=null
 
 add_error() {
   local source=$1
@@ -57,7 +57,7 @@ extract_checks_json() {
     $checks_in | map({
       type: (.["__typename"] // null),
       name: (.name // .context // "unknown"),
-      workflow: (.workflowName // .workflow // null),
+      workflow: (.workflowName // .workflow // .checkSuite.workflowRun.workflow.name // null),
       status: ((.status // .state // "unknown") | ascii_downcase),
       conclusion: ((.conclusion // .state // "") | lower_or_null),
       details_url: (.detailsUrl // null),
@@ -113,6 +113,7 @@ if repo_json="$(gh_json repo view --json owner,name)"; then
   repo_name="$(jq -r '.name // ""' <<<"$repo_json")"
 else
   add_error "repo" "gh repo view failed"
+  add_error "review_threads" "skipped: repo lookup failed"
 fi
 
 comments_json='[]'
