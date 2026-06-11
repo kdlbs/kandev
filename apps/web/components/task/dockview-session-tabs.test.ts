@@ -226,6 +226,18 @@ describe("resolveInitialPosition", () => {
 });
 
 describe("shouldRebuildDefaultForPendingSession", () => {
+  it("does not rebuild when there is no effective session id", () => {
+    const api = makePositionApi({
+      groups: [RIGHT_TOP_GROUP],
+      panels: [
+        { id: "session:missing", groupId: RIGHT_TOP_GROUP },
+        { id: "files", groupId: RIGHT_TOP_GROUP },
+      ],
+    });
+
+    expect(shouldRebuildDefaultForPendingSession(api, null, [])).toBe(false);
+  });
+
   it("rebuilds default when the active session is pending and no chat group remains", () => {
     const api = makePositionApi({
       groups: [RIGHT_TOP_GROUP],
