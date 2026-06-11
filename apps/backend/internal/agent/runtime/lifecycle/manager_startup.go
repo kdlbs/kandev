@@ -135,7 +135,7 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 			zap.String("acp_session_id", execution.ACPSessionID))
 
 		var err error
-		bootCommand, err = m.configureAndStartAgent(ctx, execution, taskDescription, approvalPolicy)
+		bootCommand, err = m.configureAndStartAgent(ctx, execution, approvalPolicy)
 		if err != nil {
 			return err
 		}

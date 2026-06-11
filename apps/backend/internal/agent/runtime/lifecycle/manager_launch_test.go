@@ -254,7 +254,7 @@ func TestConfigureAndStartAgent_DoesNotSendTaskDescriptionEnv(t *testing.T) {
 		agentctl: client,
 	}
 
-	bootCommand, err := mgr.configureAndStartAgent(context.Background(), execution, getTaskDescriptionFromMetadata(execution), "never")
+	bootCommand, err := mgr.configureAndStartAgent(context.Background(), execution, "never")
 	if err != nil {
 		t.Fatalf("configureAndStartAgent() error = %v", err)
 	}
@@ -291,7 +291,7 @@ func TestConfigureAndStartAgent_SpillsLargeWakePayloadEnv(t *testing.T) {
 		agentctl: client,
 	}
 
-	if _, err := mgr.configureAndStartAgent(context.Background(), execution, "", "never"); err != nil {
+	if _, err := mgr.configureAndStartAgent(context.Background(), execution, "never"); err != nil {
 		t.Fatalf("configureAndStartAgent() error = %v", err)
 	}
 	if _, exists := configuredEnv["KANDEV_WAKE_PAYLOAD_JSON"]; exists {

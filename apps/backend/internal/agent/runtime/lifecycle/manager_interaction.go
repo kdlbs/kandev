@@ -661,9 +661,7 @@ func (m *Manager) RestartAgentProcess(ctx context.Context, executionID string) e
 
 	// 5. Reconfigure and start new agent subprocess
 	approvalPolicy, _ := m.resolveApprovalPolicyAndDisplayName(ctx, execution)
-	taskDescription := getTaskDescriptionFromMetadata(execution)
-
-	if _, err := m.configureAndStartAgent(ctx, execution, taskDescription, approvalPolicy); err != nil {
+	if _, err := m.configureAndStartAgent(ctx, execution, approvalPolicy); err != nil {
 		m.updateExecutionError(executionID, "failed to restart agent: "+err.Error())
 		return fmt.Errorf("failed to restart agent: %w", err)
 	}
