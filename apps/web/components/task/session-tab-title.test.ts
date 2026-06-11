@@ -69,6 +69,17 @@ describe("resolveSessionTabTitle", () => {
     ).toBe(SPARK_MODEL_NAME);
   });
 
+  it("falls back to snapshot model when both agent and live model states are unavailable", () => {
+    expect(
+      resolveSessionTabTitle({
+        ...baseArgs,
+        agentLabel: null,
+        snapshotModel: SPARK_MODEL_ID,
+        modelOptions: [{ id: SPARK_MODEL_ID, name: SPARK_MODEL_NAME }],
+      }),
+    ).toBe(SPARK_MODEL_NAME);
+  });
+
   it("keeps the agent label over the start-time snapshot model", () => {
     expect(
       resolveSessionTabTitle({
