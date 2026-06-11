@@ -77,8 +77,13 @@ describe("AppSidebarFooter", () => {
 
     renderFooter();
 
-    expect(screen.getByRole("button", { name: "Stats" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Office" })).toBeTruthy();
+    const statsButton = screen.getByRole("button", { name: "Stats" });
+    const officeButton = screen.getByRole("button", { name: "Office" });
+
+    expect(statsButton).toBeTruthy();
+    expect(officeButton).toBeTruthy();
+    expect(statsButton.getAttribute("href")).toBeNull();
+    expect(officeButton.getAttribute("href")).toBeNull();
     expect(screen.queryByRole("link", { name: "Stats" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Office" })).toBeNull();
   });
