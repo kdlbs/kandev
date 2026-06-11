@@ -1122,14 +1122,15 @@ func (s *Service) persistSessionRuntimeConfig(ctx context.Context, sessionID, mo
 	if cfg.IsZero() {
 		return
 	}
-	if err := s.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyRuntimeConfig, cfg); err != nil {
+	writeCtx := context.WithoutCancel(ctx)
+	if err := s.repo.SetSessionMetadataKey(writeCtx, sessionID, models.SessionMetaKeyRuntimeConfig, cfg); err != nil {
 		s.logger.Warn("failed to persist session runtime config",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 		return
 	}
-	if cfg.Model != "" && previousModel != "" && cfg.Model != previousModel {
-		if err := s.repo.SetSessionMetadataKey(ctx, sessionID, "context_window", nil); err != nil {
+	if cfg.Model != "" && cfg.Model != previousModel {
+		if err := s.repo.SetSessionMetadataKey(writeCtx, sessionID, "context_window", nil); err != nil {
 			s.logger.Warn("failed to clear stale context window after runtime model change",
 				zap.String("session_id", sessionID),
 				zap.String("previous_model", previousModel),

@@ -386,14 +386,15 @@ func (s *Service) resolveContextWindowValues(ctx context.Context, data watcher.C
 	if data.ContextWindowSize > 0 {
 		return data.ContextWindowSize, data.ContextWindowRemaining, data.ContextEfficiency, true
 	}
-	if s.modelInfoLookup == nil {
+	lookup := s.currentModelInfoLookup()
+	if lookup == nil {
 		return 0, 0, 0, false
 	}
 	modelID := s.currentRuntimeModel(ctx, data.TaskSessionID)
 	if modelID == "" {
 		return 0, 0, 0, false
 	}
-	info, ok := s.modelInfoLookup.LookupModelInfo(ctx, modelID)
+	info, ok := lookup.LookupModelInfo(ctx, modelID)
 	if !ok || info.ContextWindow <= 0 {
 		return 0, 0, 0, false
 	}

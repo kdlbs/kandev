@@ -446,14 +446,15 @@ func (e *Executor) persistModelSwitchState(ctx context.Context, taskID, sessionI
 		session.AgentProfileSnapshot = make(map[string]interface{})
 	}
 	session.AgentProfileSnapshot["model"] = newModel
-	persistRuntimeModelOnSession(session, newModel)
 
 	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
 		e.logger.Error("failed to update session after model switch",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.Error(err))
+		return
 	}
+	e.persistRuntimeModelMetadata(ctx, sessionID, session, newModel)
 }
 
 // persistInPlaceModelSwitch updates the session snapshot model after a successful
@@ -470,22 +471,32 @@ func (e *Executor) persistInPlaceModelSwitch(ctx context.Context, sessionID, new
 		session.AgentProfileSnapshot = make(map[string]interface{})
 	}
 	session.AgentProfileSnapshot["model"] = newModel
-	persistRuntimeModelOnSession(session, newModel)
 	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
 		e.logger.Warn("failed to persist in-place model switch",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
+		return
 	}
+	e.persistRuntimeModelMetadata(ctx, sessionID, session, newModel)
 }
 
-func persistRuntimeModelOnSession(session *models.TaskSession, modelID string) {
-	if session.Metadata == nil {
-		session.Metadata = make(map[string]interface{})
-	}
+func (e *Executor) persistRuntimeModelMetadata(ctx context.Context, sessionID string, session *models.TaskSession, modelID string) {
 	cfg, _ := models.LoadSessionRuntimeConfig(session.Metadata)
 	cfg.Model = modelID
-	session.Metadata[models.SessionMetaKeyRuntimeConfig] = cfg
-	session.Metadata["context_window"] = nil
+	writeCtx := context.WithoutCancel(ctx)
+	if err := e.repo.SetSessionMetadataKey(writeCtx, sessionID, models.SessionMetaKeyRuntimeConfig, cfg); err != nil {
+		e.logger.Warn("failed to persist runtime model after model switch",
+			zap.String("session_id", sessionID),
+			zap.String("model", modelID),
+			zap.Error(err))
+		return
+	}
+	if err := e.repo.SetSessionMetadataKey(writeCtx, sessionID, "context_window", nil); err != nil {
+		e.logger.Warn("failed to clear context window after model switch",
+			zap.String("session_id", sessionID),
+			zap.String("model", modelID),
+			zap.Error(err))
+	}
 }
 
 // RespondToPermission sends a response to a permission request for a session

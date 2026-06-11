@@ -504,8 +504,9 @@ type WorkspaceInfo struct {
 	// RuntimeModel/RuntimeConfigOptions are user-selected ACP session runtime
 	// settings persisted in task_sessions.metadata.runtime_config. They take
 	// precedence over profile defaults when resuming or recreating a session.
-	RuntimeModel         string
-	RuntimeConfigOptions map[string]string
+	RuntimeModel            string
+	RuntimeConfigOptions    map[string]string
+	RuntimeConfigOptionsSet bool
 
 	// Executor-aware fields for correct runtime selection and remote reconnection
 	ExecutorType     string                 // Executor type (e.g., "local_pc", "sprites")

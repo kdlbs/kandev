@@ -186,7 +186,7 @@ func (m *Manager) effectiveSessionRuntimeConfig(ctx context.Context, execution *
 	if info.SessionMode != "" {
 		mode = info.SessionMode
 	}
-	if len(info.RuntimeConfigOptions) > 0 {
+	if info.RuntimeConfigOptionsSet {
 		configOptions = info.RuntimeConfigOptions
 	}
 	return model, mode, configOptions

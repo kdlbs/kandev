@@ -777,10 +777,11 @@ func TestEffectiveSessionRuntimeConfig(t *testing.T) {
 		provider := &mockWorkspaceInfoProvider{
 			infos: map[string]*WorkspaceInfo{
 				"session-1": {
-					SessionID:            "session-1",
-					SessionMode:          "full-access",
-					RuntimeModel:         "gpt-5.3-codex-spark",
-					RuntimeConfigOptions: map[string]string{"reasoning_effort": "low"},
+					SessionID:               "session-1",
+					SessionMode:             "full-access",
+					RuntimeModel:            "gpt-5.3-codex-spark",
+					RuntimeConfigOptions:    map[string]string{"reasoning_effort": "low"},
+					RuntimeConfigOptionsSet: true,
 				},
 			},
 		}
@@ -799,6 +800,32 @@ func TestEffectiveSessionRuntimeConfig(t *testing.T) {
 		require.Equal(t, "full-access", mode)
 		require.Equal(t, map[string]string{"reasoning_effort": "low"}, options)
 		require.Equal(t, 1, provider.sessionCalls)
+	})
+
+	t.Run("empty session runtime options override profile defaults", func(t *testing.T) {
+		provider := &mockWorkspaceInfoProvider{
+			infos: map[string]*WorkspaceInfo{
+				"session-1": {
+					SessionID:               "session-1",
+					RuntimeModel:            "gpt-5.3-codex-spark",
+					RuntimeConfigOptionsSet: true,
+				},
+			},
+		}
+		mgr := newTestManager(t)
+		mgr.workspaceInfoProvider = provider
+
+		model, mode, options := mgr.effectiveSessionRuntimeConfig(
+			context.Background(),
+			exec,
+			"gpt-5.5",
+			"auto",
+			profileOptions,
+		)
+
+		require.Equal(t, "gpt-5.3-codex-spark", model)
+		require.Equal(t, "auto", mode)
+		require.Nil(t, options)
 	})
 
 	t.Run("falls back to profile defaults", func(t *testing.T) {

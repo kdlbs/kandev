@@ -30,6 +30,7 @@ type executorStore interface {
 	// Session
 	CreateTaskSession(ctx context.Context, session *models.TaskSession) error
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
+	SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
 	UpdateTaskSessionState(ctx context.Context, id string, state models.TaskSessionState, errorMessage string) error
 	UpdateTaskSessionBaseCommit(ctx context.Context, id string, baseCommitSHA string) error

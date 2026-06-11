@@ -15,5 +15,13 @@ type ModelInfoLookup interface {
 // SetModelInfoLookup wires optional models.dev metadata lookup for
 // context-window fallback. Nil means ACP-only behavior.
 func (s *Service) SetModelInfoLookup(lookup ModelInfoLookup) {
+	s.modelInfoMu.Lock()
+	defer s.modelInfoMu.Unlock()
 	s.modelInfoLookup = lookup
+}
+
+func (s *Service) currentModelInfoLookup() ModelInfoLookup {
+	s.modelInfoMu.RLock()
+	defer s.modelInfoMu.RUnlock()
+	return s.modelInfoLookup
 }
