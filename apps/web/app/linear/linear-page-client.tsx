@@ -280,7 +280,7 @@ function FilterControls({
       <div className="relative flex-1 min-w-[280px]">
         <IconSearch className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
-          placeholder="Search title or description"
+          placeholder="Search by ID, title, or description"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           className="pl-8"

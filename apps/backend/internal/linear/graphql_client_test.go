@@ -255,6 +255,81 @@ func TestBuildIssueFilter_DropsEmpty(t *testing.T) {
 	}
 }
 
+func TestParseIssueIdentifier(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		wantTeam   string
+		wantNumber int
+		wantOK     bool
+	}{
+		{name: "uppercase", input: "ENG-123", wantTeam: "ENG", wantNumber: 123, wantOK: true},
+		{name: "lowercase", input: "eng-123", wantTeam: "ENG", wantNumber: 123, wantOK: true},
+		{name: "trims space", input: " eng-123 ", wantTeam: "ENG", wantNumber: 123, wantOK: true},
+		{name: "text search", input: "ENG auth", wantOK: false},
+		{name: "missing number", input: "ENG-", wantOK: false},
+		{name: "zero number", input: "ENG-0", wantOK: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotTeam, gotNumber, gotOK := parseIssueIdentifier(tt.input)
+			if gotOK != tt.wantOK {
+				t.Fatalf("ok=%v, want %v", gotOK, tt.wantOK)
+			}
+			if gotTeam != tt.wantTeam || gotNumber != tt.wantNumber {
+				t.Fatalf("parseIssueIdentifier(%q)=(%q,%d), want (%q,%d)",
+					tt.input, gotTeam, gotNumber, tt.wantTeam, tt.wantNumber)
+			}
+		})
+	}
+}
+
+func TestBuildIssueFilter_IdentifierQuery(t *testing.T) {
+	got := buildIssueFilter(SearchFilter{Query: "eng-123"})
+	orFilters, ok := got["or"].([]map[string]interface{})
+	if !ok {
+		t.Fatalf("expected identifier query to build or filters, got %+v", got)
+	}
+	if len(orFilters) != 2 {
+		t.Fatalf("expected content and identifier filters, got %+v", orFilters)
+	}
+	if content := orFilters[0]["searchableContent"]; content == nil {
+		t.Fatalf("expected searchableContent branch, got %+v", orFilters[0])
+	}
+	identifier := orFilters[1]
+	team := identifier["team"].(map[string]interface{})
+	key := team["key"].(map[string]interface{})
+	if key["eq"] != "ENG" {
+		t.Fatalf("expected uppercase team key, got %+v", team)
+	}
+	number := identifier["number"].(map[string]interface{})
+	if number["eq"] != 123 {
+		t.Fatalf("expected exact issue number, got %+v", number)
+	}
+}
+
+func TestBuildIssueFilter_IdentifierComposesWithOtherFilters(t *testing.T) {
+	got := buildIssueFilter(SearchFilter{
+		Query:    "ENG-123",
+		TeamKey:  "ENG",
+		StateIDs: []string{"started"},
+		Assigned: "me",
+	})
+	if _, ok := got["or"]; !ok {
+		t.Fatalf("expected identifier query to preserve query or filter, got %+v", got)
+	}
+	if _, ok := got["team"]; !ok {
+		t.Fatalf("expected explicit team filter to remain top-level, got %+v", got)
+	}
+	if _, ok := got["state"]; !ok {
+		t.Fatalf("expected state filter to remain top-level, got %+v", got)
+	}
+	if _, ok := got["assignee"]; !ok {
+		t.Fatalf("expected assignee filter to remain top-level, got %+v", got)
+	}
+}
+
 func TestBuildIssueFilter_RichFilters(t *testing.T) {
 	min := 1.0
 	max := 5.0

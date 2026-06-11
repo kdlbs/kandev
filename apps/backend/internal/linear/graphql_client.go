@@ -9,6 +9,8 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -512,7 +514,20 @@ func buildIssueFilter(f SearchFilter) map[string]interface{} {
 	if q := strings.TrimSpace(f.Query); q != "" {
 		// Linear has no top-level free-text field, but `searchableContent`
 		// matches across title and description.
-		out["searchableContent"] = map[string]interface{}{"contains": q}
+		contentFilter := map[string]interface{}{
+			"searchableContent": map[string]interface{}{"contains": q},
+		}
+		if teamKey, issueNumber, ok := parseIssueIdentifier(q); ok {
+			out["or"] = []map[string]interface{}{
+				contentFilter,
+				{
+					"team":   map[string]interface{}{"key": map[string]interface{}{"eq": teamKey}},
+					"number": map[string]interface{}{"eq": issueNumber},
+				},
+			}
+		} else {
+			out["searchableContent"] = contentFilter["searchableContent"]
+		}
 	}
 	if f.TeamKey != "" {
 		out["team"] = map[string]interface{}{"key": map[string]interface{}{"eq": f.TeamKey}}
@@ -557,6 +572,20 @@ func buildIssueFilter(f SearchFilter) map[string]interface{} {
 		return nil
 	}
 	return out
+}
+
+var issueIdentifierRE = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9]*)-([1-9][0-9]*)$`)
+
+func parseIssueIdentifier(input string) (string, int, bool) {
+	matches := issueIdentifierRE.FindStringSubmatch(strings.TrimSpace(input))
+	if matches == nil {
+		return "", 0, false
+	}
+	number, err := strconv.Atoi(matches[2])
+	if err != nil {
+		return "", 0, false
+	}
+	return strings.ToUpper(matches[1]), number, true
 }
 
 // --- labels ---
