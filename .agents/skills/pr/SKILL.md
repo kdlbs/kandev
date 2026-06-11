@@ -46,30 +46,31 @@ description: Commit, push, and create a PR. Default is ready-for-review with aut
 
    **PR title** must follow Conventional Commits format (see `/commit` for full rules). CI validates via `pr-title.yml` — the PR title becomes the squash-merge commit used for release notes.
 
-   **PR body** must follow the project's pull request template:
-   - **Summary** (required): 1-2 sentences of prose, no heading. Lead with the problem/goal, end with the outcome. Say WHY, not what.
-   - **Important Changes** (optional): short bullet list of significant architectural changes. Remove section if not needed.
-   - **Validation** (required): list commands or checks run (e.g. `go test ./...`, `make lint`).
-   - **Diagram** (optional): Mermaid diagram only for non-obvious flows. Remove section if not needed.
-   - **Possible Improvements** (optional): one line on risk and what could go wrong. Remove section if not needed.
-   - **Checklist**: always include as-is, do not pre-fill.
-   - **Related issues**: use `Closes #N` if applicable, otherwise remove.
+   **PR body** must be built from `.github/pull_request_template.md`; fail fast if it is missing. Read the whole template before writing the body. Treat HTML comments as authoring instructions for the agent, not as output:
+   - Fill the template's required sections from the actual diff, commits, and verification performed.
+   - Remove optional sections that add no value for this change.
+   - Preserve static required sections such as checklists exactly as the template provides them; do not pre-fill unchecked boxes.
+   - Include related issue closing text only when an actual issue number is known.
+   - Remove all HTML comments/placeholders from the final body.
    - Do NOT add tool attribution footers.
-   - Do NOT leave placeholder text or unfilled sections.
+   - Before creating the PR, self-check that the final body has no `<!--`, no empty required sections, and no placeholder text.
 
    ```bash
-   gh pr create [--draft] --title "type: description" --body "$(cat <<'EOF'
-   <filled PR template>
-   EOF
-   )"
+   test -f .github/pull_request_template.md
+   # Build /tmp/pr-body.md from the template, using comments as instructions
+   # and removing them from the final file.
+   gh pr create [--draft] --title "type: description" --body-file /tmp/pr-body.md
    ```
+
+   Do not fall back to hand-composed `--body` prose. If creation fails, surface the exact stderr, fix the template/body-file problem, and retry with `--body-file`.
 
 5. **If ready (not draft):** Run `/pr-fixup` to wait for CI checks and CodeRabbit, Greptile, Claude, and cubic review feedback, fix any failures or valid comments, and push.
 
 6. **PR screenshots:** After creating the PR, check if `apps/web/.pr-assets/manifest.json` exists. If it does:
    - Read the manifest to list available screenshots/GIFs
    - Run `npx tsx apps/web/e2e/scripts/upload-pr-assets.ts <PR_NUMBER>` to generate embed markdown
-   - Read `apps/web/.pr-assets/embed.md` and append its contents to the PR body using `gh pr edit <PR_NUMBER> --body "..."`
+   - If `apps/web/.pr-assets/embed.md` exists and is non-empty, append its contents to the PR body using a body file and `gh pr edit <PR_NUMBER> --body-file <file>`
+   - If `gh pr edit` fails after PR creation, fall back to `gh api --method PATCH repos/:owner/:repo/pulls/<PR_NUMBER> --input <json>` with a JSON payload containing the full updated body
    - Tell the user to drag and drop the image files from `.pr-assets/` into the PR description on GitHub for the images to render
 
 7. **Return the PR URL** when done.
