@@ -290,8 +290,9 @@ type Service struct {
 	profileLookup ProfileLookup
 	// modelInfoLookup resolves optional model metadata from models.dev. Nil-safe;
 	// ACP context-window events remain authoritative when they include a size.
-	modelInfoMu     sync.RWMutex
-	modelInfoLookup ModelInfoLookup
+	modelInfoMu           sync.RWMutex
+	modelInfoLookup       ModelInfoLookup
+	runtimeModelBySession sync.Map
 
 	// Jira service for issue watch dedup operations
 	jiraService JiraService

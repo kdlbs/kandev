@@ -407,6 +407,11 @@ func (s *Service) resolveContextWindowValues(ctx context.Context, data watcher.C
 }
 
 func (s *Service) currentRuntimeModel(ctx context.Context, sessionID string) string {
+	if model, ok := s.runtimeModelBySession.Load(sessionID); ok {
+		if modelID, _ := model.(string); modelID != "" {
+			return modelID
+		}
+	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil || session == nil {
 		return ""

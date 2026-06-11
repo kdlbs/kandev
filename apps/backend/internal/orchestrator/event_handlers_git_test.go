@@ -289,6 +289,23 @@ func TestResolveContextWindowValues(t *testing.T) {
 		require.Equal(t, 50.0, efficiency)
 	})
 
+	t.Run("models.dev fallback uses cached runtime model before session load", func(t *testing.T) {
+		svc := &Service{
+			modelInfoLookup: fakeModelInfoLookup{info: modelsdev.ModelInfo{ContextWindow: 96000}, ok: true},
+		}
+		svc.runtimeModelBySession.Store("s1", "gpt-5.3-codex-spark")
+		size, remaining, efficiency, ok := svc.resolveContextWindowValues(ctx, watcher.ContextWindowData{
+			TaskID:            base.TaskID,
+			TaskSessionID:     base.TaskSessionID,
+			ContextWindowUsed: 24000,
+		})
+
+		require.True(t, ok)
+		require.Equal(t, int64(96000), size)
+		require.Equal(t, int64(72000), remaining)
+		require.Equal(t, 25.0, efficiency)
+	})
+
 	t.Run("lookup miss hides context window", func(t *testing.T) {
 		svc := &Service{repo: repo, modelInfoLookup: fakeModelInfoLookup{}}
 		_, _, _, ok := svc.resolveContextWindowValues(ctx, watcher.ContextWindowData{

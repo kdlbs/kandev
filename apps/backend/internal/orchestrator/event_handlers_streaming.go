@@ -1034,8 +1034,7 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 	// Persist the agent-reported current model so SSR can render the model
 	// selector trigger with the right value on a page reload instead of
 	// flashing the profile default before the WS catches up.
-	s.persistSessionModel(ctx, sessionID, payload.Data.CurrentModelID)
-	s.persistSessionRuntimeConfig(ctx, sessionID, payload.Data.CurrentModelID, "", payload.Data.ConfigOptions)
+	s.persistSessionModelAndRuntimeConfig(ctx, sessionID, payload.Data.CurrentModelID, "", payload.Data.ConfigOptions)
 
 	eventPayload := lifecycle.SessionModelsEventPayload{
 		TaskID:         payload.TaskID,
@@ -1074,18 +1073,24 @@ func (s *Service) persistSessionModel(ctx context.Context, sessionID, model stri
 	if err != nil {
 		return
 	}
-	if session.AgentProfileSnapshot == nil {
-		session.AgentProfileSnapshot = make(map[string]interface{})
-	}
-	if existing, _ := session.AgentProfileSnapshot["model"].(string); existing == model {
+	s.persistSessionModelOnSession(ctx, sessionID, session, model)
+}
+
+func (s *Service) persistSessionModelAndRuntimeConfig(ctx context.Context, sessionID, model, mode string, options []streams.ConfigOption) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to load session for session model persistence",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
 		return
 	}
-	session.AgentProfileSnapshot["model"] = model
-	_ = s.repo.UpdateTaskSession(ctx, session)
-	// Invalidate the message creator's model cache so subsequent messages use the new model.
-	if s.messageCreator != nil {
-		s.messageCreator.InvalidateModelCache(sessionID)
+	if session == nil {
+		return
 	}
+	if model != "" {
+		s.persistSessionModelOnSession(ctx, sessionID, session, model)
+	}
+	s.persistSessionRuntimeConfigOnSession(ctx, sessionID, session, model, mode, options)
 }
 
 func (s *Service) persistSessionRuntimeConfig(ctx context.Context, sessionID, model, mode string, options []streams.ConfigOption) {
@@ -1099,6 +1104,10 @@ func (s *Service) persistSessionRuntimeConfig(ctx context.Context, sessionID, mo
 	if session == nil {
 		return
 	}
+	s.persistSessionRuntimeConfigOnSession(ctx, sessionID, session, model, mode, options)
+}
+
+func (s *Service) persistSessionRuntimeConfigOnSession(ctx context.Context, sessionID string, session *models.TaskSession, model, mode string, options []streams.ConfigOption) {
 	cfg, _ := models.LoadSessionRuntimeConfig(session.Metadata)
 	previousModel := cfg.Model
 	applySessionRuntimeConfigUpdate(&cfg, model, mode, options)
@@ -1112,6 +1121,9 @@ func (s *Service) persistSessionRuntimeConfig(ctx context.Context, sessionID, mo
 			zap.Error(err))
 		return
 	}
+	if cfg.Model != "" {
+		s.runtimeModelBySession.Store(sessionID, cfg.Model)
+	}
 	if cfg.Model != "" && cfg.Model != previousModel {
 		if err := s.repo.SetSessionMetadataKey(writeCtx, sessionID, "context_window", nil); err != nil {
 			s.logger.Warn("failed to clear stale context window after runtime model change",
@@ -1120,6 +1132,21 @@ func (s *Service) persistSessionRuntimeConfig(ctx context.Context, sessionID, mo
 				zap.String("model", cfg.Model),
 				zap.Error(err))
 		}
+	}
+}
+
+func (s *Service) persistSessionModelOnSession(ctx context.Context, sessionID string, session *models.TaskSession, model string) {
+	if session.AgentProfileSnapshot == nil {
+		session.AgentProfileSnapshot = make(map[string]interface{})
+	}
+	if existing, _ := session.AgentProfileSnapshot["model"].(string); existing == model {
+		return
+	}
+	session.AgentProfileSnapshot["model"] = model
+	_ = s.repo.UpdateTaskSession(ctx, session)
+	// Invalidate the message creator's model cache so subsequent messages use the new model.
+	if s.messageCreator != nil {
+		s.messageCreator.InvalidateModelCache(sessionID)
 	}
 }
 

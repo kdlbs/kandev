@@ -513,3 +513,26 @@ func TestPersistSessionRuntimeConfigFromSessionModels(t *testing.T) {
 		"reasoning_effort": "low",
 	}, cfg.ConfigOptions)
 }
+
+func TestPersistSessionModelAndRuntimeConfigPersistsSnapshotRuntimeConfigAndCache(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", "context_window", map[string]interface{}{"size": int64(256000)}))
+	svc := &Service{logger: testLogger(), repo: repo}
+
+	svc.persistSessionModelAndRuntimeConfig(ctx, "s1", "gpt-5.3-codex-spark", "", []streams.ConfigOption{
+		{ID: "reasoning_effort", Category: "thought_level", CurrentValue: "low"},
+	})
+
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, "gpt-5.3-codex-spark", updated.AgentProfileSnapshot["model"])
+	cfg, ok := models.LoadSessionRuntimeConfig(updated.Metadata)
+	require.True(t, ok)
+	require.Equal(t, "gpt-5.3-codex-spark", cfg.Model)
+	require.Equal(t, "low", cfg.ConfigOptions["reasoning_effort"])
+	require.Nil(t, updated.Metadata["context_window"])
+	model, _ := svc.runtimeModelBySession.Load("s1")
+	require.Equal(t, "gpt-5.3-codex-spark", model)
+}
