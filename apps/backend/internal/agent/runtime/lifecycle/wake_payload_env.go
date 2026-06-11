@@ -153,11 +153,12 @@ func gitWorktreeInfo(workspacePath string, gitPath string) (string, error) {
 	}
 	infoDir := filepath.Join(filepath.Clean(gitDir), "info")
 	st, err := os.Stat(infoDir)
-	if os.IsNotExist(err) {
+	switch {
+	case os.IsNotExist(err):
 		return infoDir, nil
-	} else if err != nil {
+	case err != nil:
 		return "", err
-	} else if !st.IsDir() {
+	case !st.IsDir():
 		return "", fmt.Errorf("git info path is not a directory: %s", infoDir)
 	}
 	return infoDir, nil
