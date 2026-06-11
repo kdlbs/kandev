@@ -48,9 +48,9 @@ test.describe("Office onboarding — mobile layout", () => {
     await testPage.goto(SETUP_ROUTE);
     await expect(testPage.getByRole("heading", { name: STEP_0_HEADING })).toBeVisible();
 
-    await testPage.getByRole("button", { name: "Cancel" }).tap();
+    await testPage.getByRole("button", { name: "Cancel" }).click();
 
-    await expect(testPage).toHaveURL(/\/$/, { timeout: 10_000 });
+    await expect(testPage).toHaveURL((url) => url.pathname === "/", { timeout: 10_000 });
   });
 
   test("agent step (Step 1) fits within the viewport horizontally", async ({
