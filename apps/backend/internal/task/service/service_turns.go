@@ -385,6 +385,11 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		// recent advertisement and would issue a redundant SetModel RPC on
 		// every resume; `user_model` is only written when a user-initiated
 		// event genuinely changed the model — see persistSessionModelsState.
+		//
+		// Migration note: sessions created before `user_model` existed only
+		// carry `model`. On their first post-deploy resume they fall back to
+		// the profile default; the next explicit model pick repopulates
+		// `user_model` and restores the persisted-override behaviour.
 		if model, ok := session.AgentProfileSnapshot["user_model"].(string); ok {
 			sessionModel = model
 		}
