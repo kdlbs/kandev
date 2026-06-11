@@ -364,6 +364,7 @@ function useArchiveActions(store: StoreApi) {
     title: string;
     executorType?: string | null;
   } | null>(null);
+  const [archivingTaskId, setArchivingTaskId] = useState<string | null>(null);
   const [isArchiving, setIsArchiving] = useState(false);
 
   const handleArchiveTask = useCallback(
@@ -382,20 +383,30 @@ function useArchiveActions(store: StoreApi) {
   const handleArchiveConfirm = useCallback(
     async (opts: { cascade: boolean }) => {
       if (!archivingTask) return;
+      const taskId = archivingTask.id;
       setIsArchiving(true);
+      setArchivingTaskId(taskId);
       try {
-        await archiveAndSwitch(archivingTask.id, opts);
+        await archiveAndSwitch(taskId, opts);
       } catch (error) {
         console.error("Failed to archive task:", error);
       } finally {
         setIsArchiving(false);
-        setArchivingTask(null);
+        setArchivingTaskId((current) => (current === taskId ? null : current));
+        setArchivingTask((current) => (current?.id === taskId ? null : current));
       }
     },
     [archivingTask, archiveAndSwitch],
   );
 
-  return { archivingTask, setArchivingTask, isArchiving, handleArchiveTask, handleArchiveConfirm };
+  return {
+    archivingTask,
+    setArchivingTask,
+    archivingTaskId,
+    isArchiving,
+    handleArchiveTask,
+    handleArchiveConfirm,
+  };
 }
 
 function useDeleteActions(
