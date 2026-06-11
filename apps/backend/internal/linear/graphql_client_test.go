@@ -343,7 +343,7 @@ func TestBuildIssueFilter_IdentifierQuery(t *testing.T) {
 	}
 	sc, _ := or[0]["searchableContent"].(map[string]interface{})
 	if sc["contains"] != "ENG-123" {
-		t.Errorf("first OR branch should match searchableContent on raw query, got %+v", or[0])
+		t.Errorf("first OR branch should match searchableContent on canonical identifier, got %+v", or[0])
 	}
 	team, _ := or[1]["team"].(map[string]interface{})
 	teamKey, _ := team["key"].(map[string]interface{})
@@ -361,6 +361,10 @@ func TestBuildIssueFilter_IdentifierLowercase(t *testing.T) {
 	or, ok := got["or"].([]map[string]interface{})
 	if !ok || len(or) != 2 {
 		t.Fatalf("expected or with 2 branches, got %+v", got["or"])
+	}
+	sc, _ := or[0]["searchableContent"].(map[string]interface{})
+	if sc["contains"] != "ENG-123" {
+		t.Errorf("searchableContent branch should use canonical upper-cased form ENG-123, got %+v", sc)
 	}
 	team, _ := or[1]["team"].(map[string]interface{})
 	teamKey, _ := team["key"].(map[string]interface{})

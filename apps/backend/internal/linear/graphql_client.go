@@ -546,8 +546,13 @@ func buildIssueFilter(f SearchFilter) map[string]interface{} {
 		// the OR so cross-references like "duplicate of ENG-123" pasted into
 		// another issue's title or description still surface.
 		if teamKey, num, ok := parseIssueIdentifier(q); ok {
+			// Use the canonical upper-cased identifier for the
+			// `searchableContent` branch so lowercase input (`eng-123`) still
+			// matches cross-references written in the canonical form
+			// (`ENG-123`) — Linear's `contains` filter is case-sensitive.
+			canonical := fmt.Sprintf("%s-%d", teamKey, num)
 			out["or"] = []map[string]interface{}{
-				{"searchableContent": map[string]interface{}{"contains": q}},
+				{"searchableContent": map[string]interface{}{"contains": canonical}},
 				{
 					"team":   map[string]interface{}{"key": map[string]interface{}{"eq": teamKey}},
 					"number": map[string]interface{}{"eq": num},
