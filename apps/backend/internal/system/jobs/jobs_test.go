@@ -71,6 +71,24 @@ func waitForState(t *testing.T, tracker *Tracker, id string, target State) *Job 
 	return nil
 }
 
+// waitForEvents polls the stub bus until at least n events have been
+// published or the timeout fires. The terminal lifecycle event is published
+// after the transition releases the lock (see Tracker.transition), so
+// observing the terminal state via waitForState does not guarantee the
+// terminal event has landed yet - assertions on the event log must sync on
+// the published count, not the job state.
+func waitForEvents(t *testing.T, stub *stubBus, n int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(stub.snapshot()) >= n {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("expected at least %d published events within 2s, got %d", n, len(stub.snapshot()))
+}
+
 func TestStart_PublishesQueuedRunningSucceeded(t *testing.T) {
 	stub := &stubBus{}
 	tracker := NewTracker(stub, newTestLogger())
@@ -84,6 +102,7 @@ func TestStart_PublishesQueuedRunningSucceeded(t *testing.T) {
 		t.Errorf("expected reclaimed_bytes in result, got %+v", job.Result)
 	}
 
+	waitForEvents(t, stub, 3)
 	events := stub.snapshot()
 	if len(events) < 3 {
 		t.Fatalf("expected at least 3 published events (queued/running/succeeded), got %d", len(events))
@@ -120,6 +139,7 @@ func TestStart_PublishesFailed(t *testing.T) {
 		t.Error("expected EndedAt to be set on failed job")
 	}
 
+	waitForEvents(t, stub, 3)
 	events := stub.snapshot()
 	if len(events) < 3 {
 		t.Fatalf("expected at least 3 events, got %d", len(events))
