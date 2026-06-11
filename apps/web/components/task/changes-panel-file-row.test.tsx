@@ -155,6 +155,40 @@ describe("FileRow hover swap (stats <-> actions occupy same cell)", () => {
   });
 });
 
+describe("FileRow tree-mode hover stage action", () => {
+  it("keeps the stage button in the icon slot instead of the right hover actions", () => {
+    const { container } = render(
+      <TooltipProvider>
+        <ul>
+          <FileRow
+            file={{ ...baseFile, path: "src/file.go" }}
+            isPending={false}
+            treeMode
+            onSelect={noopSelect}
+            onOpenDiff={noop}
+            onStage={noop}
+            onUnstage={noop}
+            onDiscard={noop}
+            onEditFile={noop}
+          />
+        </ul>
+      </TooltipProvider>,
+    );
+
+    const row = container.querySelector("[data-changes-file='src/file.go']") as HTMLElement | null;
+    expect(row).not.toBeNull();
+
+    const iconSlot = row!.querySelector("[data-testid='file-row-icon-action-slot']");
+    expect(iconSlot).not.toBeNull();
+    expect(iconSlot!.className).toContain("size-4");
+    expect(iconSlot!.querySelector("button[title='Stage file']")).not.toBeNull();
+
+    const rightActions = row!.querySelector("[data-testid='file-row-hover-actions']");
+    expect(rightActions).not.toBeNull();
+    expect(rightActions!.querySelector("button[title='Stage file']")).toBeNull();
+  });
+});
+
 describe("FileRow active-tab highlight", () => {
   it("renders data-active='true' and bg-accent/60 when isActive", () => {
     const { container } = render(
