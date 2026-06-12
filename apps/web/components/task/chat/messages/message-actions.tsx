@@ -100,14 +100,10 @@ function mergeSessionConfig(
   primary: MessageSessionConfig,
   fallback: MessageSessionConfig,
 ): MessageSessionConfig {
-  const optionsByLabel = new Map(fallback.configOptions.map((option) => [option.label, option]));
-  for (const option of primary.configOptions) {
-    optionsByLabel.set(option.label, option);
-  }
   return {
     model: primary.model ?? fallback.model,
     mode: primary.mode ?? fallback.mode,
-    configOptions: mergedConfigOptions(primary, fallback, Array.from(optionsByLabel.values())),
+    configOptions: mergedConfigOptions(primary, fallback),
     configOptionsSet: primary.configOptionsSet || fallback.configOptionsSet,
   };
 }
@@ -115,10 +111,14 @@ function mergeSessionConfig(
 function mergedConfigOptions(
   primary: MessageSessionConfig,
   fallback: MessageSessionConfig,
-  merged: MessageSessionConfig["configOptions"],
 ): MessageSessionConfig["configOptions"] {
   if (!primary.configOptionsSet) return fallback.configOptions;
-  return primary.configOptions.length > 0 ? merged : [];
+  if (primary.configOptions.length === 0) return [];
+  const optionsByLabel = new Map(fallback.configOptions.map((option) => [option.label, option]));
+  for (const option of primary.configOptions) {
+    optionsByLabel.set(option.label, option);
+  }
+  return Array.from(optionsByLabel.values());
 }
 
 function formatSessionConfig(config: MessageSessionConfig): string | null {
