@@ -12,7 +12,11 @@ import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
 import { MobileTerminalKeybarPage } from "../../pages/mobile-terminal-keybar-page";
 import { attachShellInputCapture, type ShellInputFrame } from "../../helpers/ws-capture";
-import { switchToTerminalPanel, waitForShellReady } from "./mobile-terminal-helpers";
+import {
+  focusTerminalForTyping,
+  switchToTerminalPanel,
+  waitForShellReady,
+} from "./mobile-terminal-helpers";
 
 async function seedTaskWithSession(
   testPage: Page,
@@ -36,14 +40,6 @@ async function seedTaskWithSession(
   await session.waitForLoad();
   await session.waitForChatIdle();
   return session;
-}
-
-/**
- * Bring up the OS keyboard the way a user would: tap inside the terminal so
- * xterm focuses its hidden textarea.
- */
-async function focusTerminalForTyping(session: SessionPage): Promise<void> {
-  await session.terminal.locator(".xterm").click();
 }
 
 /**
@@ -109,7 +105,7 @@ test.describe("Mobile terminal key-bar — user flows", () => {
     await expect(keybar.root).toBeVisible({ timeout: 10_000 });
 
     await waitForShellReady(testPage);
-    await focusTerminalForTyping(session);
+    await focusTerminalForTyping(testPage);
 
     // User types a command on the OS keyboard, then runs it.
     await testPage.keyboard.type("sleep 30");
@@ -130,13 +126,13 @@ test.describe("Mobile terminal key-bar — user flows", () => {
   }) => {
     test.setTimeout(90_000);
     const { frames } = attachShellInputCapture(testPage);
-    const session = await seedTaskWithSession(testPage, apiClient, seedData, "Keybar Ctrl+L");
+    await seedTaskWithSession(testPage, apiClient, seedData, "Keybar Ctrl+L");
     await switchToTerminalPanel(testPage);
 
     const keybar = new MobileTerminalKeybarPage(testPage);
     await expect(keybar.root).toBeVisible({ timeout: 10_000 });
     await waitForShellReady(testPage);
-    await focusTerminalForTyping(session);
+    await focusTerminalForTyping(testPage);
 
     // User taps Ctrl on the bar — visible state change.
     await keybar.ctrl.tap();
@@ -158,13 +154,13 @@ test.describe("Mobile terminal key-bar — user flows", () => {
   }) => {
     test.setTimeout(90_000);
     const { frames } = attachShellInputCapture(testPage);
-    const session = await seedTaskWithSession(testPage, apiClient, seedData, "Keybar sticky Ctrl");
+    await seedTaskWithSession(testPage, apiClient, seedData, "Keybar sticky Ctrl");
     await switchToTerminalPanel(testPage);
 
     const keybar = new MobileTerminalKeybarPage(testPage);
     await expect(keybar.root).toBeVisible({ timeout: 10_000 });
     await waitForShellReady(testPage);
-    await focusTerminalForTyping(session);
+    await focusTerminalForTyping(testPage);
 
     // Two taps → sticky.
     await keybar.ctrl.tap();
@@ -215,13 +211,13 @@ test.describe("Mobile terminal key-bar — user flows", () => {
   }) => {
     test.setTimeout(90_000);
     const { frames } = attachShellInputCapture(testPage);
-    const session = await seedTaskWithSession(testPage, apiClient, seedData, "Keybar passthrough");
+    await seedTaskWithSession(testPage, apiClient, seedData, "Keybar passthrough");
     await switchToTerminalPanel(testPage);
 
     const keybar = new MobileTerminalKeybarPage(testPage);
     await expect(keybar.root).toBeVisible({ timeout: 10_000 });
     await waitForShellReady(testPage);
-    await focusTerminalForTyping(session);
+    await focusTerminalForTyping(testPage);
 
     await testPage.keyboard.press("c");
 
