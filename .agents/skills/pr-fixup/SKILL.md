@@ -96,7 +96,7 @@ For each entry in the report's `ci_failed:` list:
    If the printed summary is enough, stop. Only `Read` specific line ranges from the printed log path if you need surrounding context.
    If `gh run view --log-failed` returns only metadata or says logs are unavailable while the workflow is still running, wait for the workflow/report job to finish. If it still omits details, fetch the job log directly and search the downloaded file:
    ```bash
-   gh api repos/<owner>/<repo>/actions/jobs/<job_id>/logs > job.log
+   gh api repos/:owner/:repo/actions/jobs/<job_id>/logs > job.log
    ```
 3. Read the relevant source files at the failing lines (use `Read` with `offset`/`limit`, not `cat`)
 4. Fix the issues (lint errors, test failures, type errors, etc.)

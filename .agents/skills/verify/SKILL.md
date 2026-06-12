@@ -23,7 +23,9 @@ Do NOT run the verification commands yourself in the main session when the helpe
 Use this only when the runtime does not permit delegated helpers/subagents. Run the full pipeline directly from the repository root and report the exact commands and results:
 
 ```bash
-git fetch origin main && git rebase origin/main  # if the branch is behind
+# If the branch is behind main, rebase first:
+git fetch origin main
+git rebase origin/main
 make fmt
 make typecheck
 make test
