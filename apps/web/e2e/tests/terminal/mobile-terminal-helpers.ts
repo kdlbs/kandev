@@ -24,17 +24,14 @@ export async function switchToTerminalPanel(testPage: Page): Promise<void> {
 
 export async function readTerminalBuffer(page: Page): Promise<string> {
   return page.evaluate(() => {
-    const panel = document.querySelector('[data-testid="terminal-panel"]');
-    const xterms = Array.from(panel?.querySelectorAll(".xterm") ?? []);
-    const xtermEl = panel?.querySelector(".xterm.focus") ?? xterms.at(-1);
     type XC = HTMLElement & { __xtermReadBuffer?: () => string };
-    const container = xtermEl?.parentElement as XC | null | undefined;
+    const container = document.querySelector('[data-testid="terminal-xterm-host"]') as XC | null;
     return container?.__xtermReadBuffer?.() ?? "";
   });
 }
 
 export async function focusTerminalForTyping(testPage: Page): Promise<void> {
-  await testPage.getByTestId("terminal-panel").locator(".xterm").last().click();
+  await testPage.getByTestId("terminal-xterm-host").last().click();
 }
 
 /**

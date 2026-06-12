@@ -42,11 +42,8 @@ async function seedTaskWithSession(
 
 async function readViewportY(page: Page): Promise<number> {
   return page.evaluate(() => {
-    const panel = document.querySelector('[data-testid="terminal-panel"]');
-    const xterms = Array.from(panel?.querySelectorAll(".xterm") ?? []);
-    const xtermEl = panel?.querySelector(".xterm.focus") ?? xterms.at(-1);
     type XC = HTMLElement & { __xtermReadViewportY?: () => number };
-    const container = xtermEl?.parentElement as XC | null | undefined;
+    const container = document.querySelector('[data-testid="terminal-xterm-host"]') as XC | null;
     return container?.__xtermReadViewportY?.() ?? -1;
   });
 }
@@ -66,6 +63,8 @@ async function swipe(
   await page.evaluate(
     ({ direction, steps, rowsToScroll }) => {
       const panel = document.querySelector('[data-testid="terminal-panel"]');
+      // xterm registers touch handling on its generated element, so this test
+      // intentionally locates that implementation node for event dispatch.
       const xterms = Array.from(panel?.querySelectorAll(".xterm") ?? []);
       const xtermEl = (panel?.querySelector(".xterm.focus") ?? xterms.at(-1)) as HTMLElement | null;
       if (!xtermEl) throw new Error("xterm element not found");

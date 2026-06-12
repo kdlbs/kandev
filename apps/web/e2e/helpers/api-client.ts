@@ -1148,7 +1148,8 @@ export class ApiClient {
       return await this.wsRequest("task.plan.get", { task_id: taskId });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (message.includes("not found") || message.includes("404")) return null;
+      // Backend returns "plan not found" when no plan exists for the task.
+      if (message.includes("plan not found")) return null;
       throw error;
     }
   }

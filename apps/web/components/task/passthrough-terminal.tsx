@@ -275,7 +275,7 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
       style={{ minWidth: MIN_WIDTH, minHeight: MIN_HEIGHT }}
     >
       <div className="h-full w-full p-2 pb-3">
-        <div ref={terminalRef} className="h-full w-full" />
+        <div ref={terminalRef} data-testid="terminal-xterm-host" className="h-full w-full" />
       </div>
       <TerminalSearchBar search={search} />
       {!isConnected && (
