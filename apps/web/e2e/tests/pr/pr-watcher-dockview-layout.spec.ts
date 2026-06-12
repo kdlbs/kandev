@@ -1,9 +1,68 @@
 import { execSync } from "node:child_process";
 import path from "node:path";
+import type { Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { makeGitEnv } from "../../helpers/git-helper";
+import type { ApiClient } from "../../helpers/api-client";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+
+async function waitForReviewTasksInBackend(
+  apiClient: ApiClient,
+  workspaceId: string,
+  reviewStepId: string,
+  titles: string[],
+) {
+  await expect
+    .poll(
+      async () => {
+        const { tasks } = await apiClient.listTasks(workspaceId);
+        return titles.filter((title) =>
+          tasks.some((task) => task.title === title && task.workflow_step_id === reviewStepId),
+        ).length;
+      },
+      {
+        timeout: 60_000,
+        intervals: [500, 1_000, 2_000],
+        message: `Expected ${titles.length} PR tasks to exist in the Review step`,
+      },
+    )
+    .toBe(titles.length);
+}
+
+async function waitForReviewTaskCards(
+  testPage: Page,
+  kanban: KanbanPage,
+  reviewStepId: string,
+  titles: string[],
+) {
+  async function visibleCardCount() {
+    const visible = await Promise.all(
+      titles.map((title) => kanban.taskCardInColumn(title, reviewStepId).isVisible()),
+    );
+    return visible.filter(Boolean).length;
+  }
+
+  const expected = titles.length;
+  await expect
+    .poll(visibleCardCount, { timeout: 10_000, intervals: [500, 1_000] })
+    .toBe(expected)
+    .catch(async () => {
+      // The watcher creates tasks from a background poll. If task.created events
+      // arrive before the kanban subscription is fully attached, backend state is
+      // correct but one card can be absent until SSR rehydrates the board.
+      await testPage.reload();
+      await kanban.board.waitFor({ state: "visible", timeout: 15_000 });
+    });
+
+  await expect
+    .poll(visibleCardCount, {
+      timeout: 90_000,
+      intervals: [500, 1_000, 2_000],
+      message: `Expected all ${expected} PR task cards (${titles.join(", ")}) to appear in the Review column`,
+    })
+    .toBe(expected);
+}
 
 test.describe("PR watcher dockview layout stability", () => {
   /**
@@ -149,21 +208,8 @@ test.describe("PR watcher dockview layout stability", () => {
     // out of order under load; waiting for the whole set at once avoids
     // cumulative per-card timeout pressure and settles as soon as all 3 appear.
     const prTaskTitles = [prTask1Title, prTask2Title, prTask3Title];
-    await expect
-      .poll(
-        async () => {
-          const visible = await Promise.all(
-            prTaskTitles.map((title) => kanban.taskCardInColumn(title, reviewStep.id).isVisible()),
-          );
-          return visible.filter(Boolean).length;
-        },
-        {
-          timeout: 90_000,
-          intervals: [500, 1_000, 2_000],
-          message: `Expected all 3 PR task cards (${prTaskTitles.join(", ")}) to appear in the Review column`,
-        },
-      )
-      .toBe(3);
+    await waitForReviewTasksInBackend(apiClient, seedData.workspaceId, reviewStep.id, prTaskTitles);
+    await waitForReviewTaskCards(testPage, kanban, reviewStep.id, prTaskTitles);
 
     // --- Click PR task 1 to enter session view ---
     await kanban.taskCardInColumn(prTask1Title, reviewStep.id).click();

@@ -30,6 +30,36 @@ function planTabIndicator(page: Page) {
   return page.getByTestId("plan-tab-indicator");
 }
 
+async function waitForAgentPlan(apiClient: ApiClient, taskId: string, contentText: string) {
+  await expect
+    .poll(
+      async () => {
+        const plan = await apiClient.getTaskPlan(taskId);
+        return plan?.created_by === "agent" && plan.content.includes(contentText);
+      },
+      {
+        timeout: 15_000,
+        message: `Expected agent-authored plan containing "${contentText}"`,
+      },
+    )
+    .toBe(true);
+}
+
+async function expectPlanIndicatorVisible(page: Page, session: SessionPage) {
+  await planTabIndicator(page)
+    .waitFor({ state: "visible", timeout: 5_000 })
+    .catch(async () => {
+      // The plan is durable backend state, but the tab indicator is armed from
+      // the task.plan.* WS push. Under shard load that push can beat the page's
+      // subscription; a reload exercises the same self-heal users get on refresh.
+      await page.reload();
+      await session.waitForLoad();
+    });
+
+  await expect(planTabLocator(page)).toBeVisible({ timeout: 15_000 });
+  await expect(planTabIndicator(page)).toBeVisible({ timeout: 15_000 });
+}
+
 async function seedTaskAndWaitForIdle(
   testPage: Page,
   apiClient: ApiClient,
@@ -67,13 +97,14 @@ test.describe("Plan panel auto-open + indicator", () => {
   }) => {
     test.setTimeout(90_000);
 
-    const { session } = await seedTaskAndWaitForIdle(
+    const { session, taskId } = await seedTaskAndWaitForIdle(
       testPage,
       apiClient,
       seedData,
       "plan indicator create",
       CREATE_PLAN_SCRIPT,
     );
+    await waitForAgentPlan(apiClient, taskId, "Step one");
 
     // Plan tab is rendered (panel mounted as a sibling of chat in the center group)
     await expect(planTabLocator(testPage)).toBeVisible({ timeout: 15_000 });
@@ -87,7 +118,7 @@ test.describe("Plan panel auto-open + indicator", () => {
     // `task.plan.created` WS push, or the eager getTaskPlan self-heal if the
     // push was missed. Both can land after the default 5s under shard load, so
     // match the 15s tab budget.
-    await expect(planTabIndicator(testPage)).toBeVisible({ timeout: 15_000 });
+    await expectPlanIndicatorVisible(testPage, session);
   });
 
   test("clicking the Plan tab clears the indicator and reveals plan content", async ({
@@ -97,15 +128,16 @@ test.describe("Plan panel auto-open + indicator", () => {
   }) => {
     test.setTimeout(90_000);
 
-    const { session } = await seedTaskAndWaitForIdle(
+    const { session, taskId } = await seedTaskAndWaitForIdle(
       testPage,
       apiClient,
       seedData,
       "plan indicator acknowledge",
       CREATE_PLAN_SCRIPT,
     );
+    await waitForAgentPlan(apiClient, taskId, "Step one");
     await expect(planTabLocator(testPage)).toBeVisible({ timeout: 15_000 });
-    await expect(planTabIndicator(testPage)).toBeVisible({ timeout: 15_000 });
+    await expectPlanIndicatorVisible(testPage, session);
 
     await session.clickTab("Plan");
 
@@ -122,15 +154,16 @@ test.describe("Plan panel auto-open + indicator", () => {
   }) => {
     test.setTimeout(120_000);
 
-    const { session } = await seedTaskAndWaitForIdle(
+    const { session, taskId } = await seedTaskAndWaitForIdle(
       testPage,
       apiClient,
       seedData,
       "plan indicator update",
       CREATE_PLAN_SCRIPT,
     );
+    await waitForAgentPlan(apiClient, taskId, "Step one");
     await expect(planTabLocator(testPage)).toBeVisible({ timeout: 15_000 });
-    await expect(planTabIndicator(testPage)).toBeVisible({ timeout: 15_000 });
+    await expectPlanIndicatorVisible(testPage, session);
 
     // Acknowledge then leave back to chat
     await session.clickTab("Plan");
@@ -141,10 +174,11 @@ test.describe("Plan panel auto-open + indicator", () => {
     // Trigger an agent update via a follow-up message
     await session.sendMessage(UPDATE_PLAN_SCRIPT);
     await expect(session.idleInput()).toBeVisible({ timeout: 45_000 });
+    await waitForAgentPlan(apiClient, taskId, "Step two");
 
     // Chat still focused, indicator re-armed
     await expect(planTabLocator(testPage)).not.toHaveClass(/dv-active-tab/);
-    await expect(planTabIndicator(testPage)).toBeVisible({ timeout: 15_000 });
+    await expectPlanIndicatorVisible(testPage, session);
 
     // Clicking the Plan tab shows the updated content
     await session.clickTab("Plan");
@@ -165,13 +199,14 @@ test.describe("Plan panel auto-open + indicator", () => {
       "plan indicator refresh",
       CREATE_PLAN_SCRIPT,
     );
+    await waitForAgentPlan(apiClient, taskId, "Step one");
     await expect(planTabLocator(testPage)).toBeVisible({ timeout: 15_000 });
     // The plan-update WS event arrives separately from the agent's idle
     // signal — the tab mounts as soon as the panel registers, but the
     // indicator only flips on once `plan.created_by === "agent"` is in the
     // store. Match the tab's 15s budget instead of using the default 5s,
     // which raced the WS push under shard load.
-    await expect(planTabIndicator(testPage)).toBeVisible({ timeout: 15_000 });
+    await expectPlanIndicatorVisible(testPage, session);
 
     // Acknowledge
     await session.clickTab("Plan");

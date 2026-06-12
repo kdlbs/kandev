@@ -995,6 +995,25 @@ export class ApiClient {
     await this.request("POST", "/api/v1/github/mock/task-prs", data);
   }
 
+  async getTaskPR(taskId: string): Promise<{
+    task_id: string;
+    pr_number: number;
+    state: string;
+    review_state: string;
+    checks_state: string;
+    mergeable_state: string;
+    review_count: number;
+    pending_review_count: number;
+    required_reviews?: number | null;
+  } | null> {
+    const res = await this.rawRequest("GET", `/api/v1/github/task-prs/${taskId}`);
+    if (res.status === 404) return null;
+    if (!res.ok) {
+      throw new Error(`getTaskPR failed (${res.status}): ${await res.text()}`);
+    }
+    return res.json();
+  }
+
   async mockGitHubSeedPRFeedback(data: {
     owner: string;
     repo: string;
@@ -1116,6 +1135,22 @@ export class ApiClient {
     }>;
   }> {
     return this.request("GET", `/api/v1/tasks/${taskId}`);
+  }
+
+  async getTaskPlan(taskId: string): Promise<{
+    task_id: string;
+    content: string;
+    title?: string;
+    created_by: string;
+    updated_at: string;
+  } | null> {
+    try {
+      return await this.wsRequest("task.plan.get", { task_id: taskId });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("not found") || message.includes("404")) return null;
+      throw error;
+    }
   }
 
   /**

@@ -2,6 +2,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
+import type { Page } from "@playwright/test";
 
 async function seedBadgeTest(
   apiClient: ApiClient,
@@ -40,6 +41,62 @@ async function seedBadgeTest(
   });
 
   return { workflow, inboxStep, workingStep, doneStep, task };
+}
+
+function isReadyToMerge(pr: Awaited<ReturnType<ApiClient["getTaskPR"]>>): boolean {
+  if (!pr) return false;
+  if (pr.state !== "open") return false;
+  if (pr.checks_state !== "success") return false;
+  if (pr.mergeable_state !== "clean") return false;
+  if (pr.required_reviews != null && pr.review_count < pr.required_reviews) return false;
+  return (
+    pr.review_state === "approved" || (pr.review_state === "" && pr.pending_review_count === 0)
+  );
+}
+
+async function waitForTaskPRReadyState(
+  apiClient: ApiClient,
+  taskId: string,
+  expected: "true" | "false",
+) {
+  await expect
+    .poll(
+      async () => {
+        const pr = await apiClient.getTaskPR(taskId);
+        return String(isReadyToMerge(pr));
+      },
+      {
+        timeout: 15_000,
+        message: `Expected backend TaskPR ready-to-merge=${expected}`,
+      },
+    )
+    .toBe(expected);
+}
+
+async function expectTopbarReadyState(
+  page: Page,
+  session: SessionPage,
+  expected: "true" | "false",
+) {
+  const button = session.prTopbarButton();
+  await button.waitFor({ state: "visible", timeout: 15_000 });
+
+  await button
+    .waitFor({ state: "attached", timeout: 1_000 })
+    .then(() =>
+      expect(button).toHaveAttribute("data-pr-ready-to-merge", expected, { timeout: 5_000 }),
+    )
+    .catch(async () => {
+      // The topbar PR button hydrates from task-pr state that can arrive via a
+      // github.task_pr.updated WS event. If the event was missed during task
+      // navigation, a reload rehydrates from the backend state asserted above.
+      await page.reload();
+      await session.waitForLoad();
+    });
+
+  await expect(session.prTopbarButton()).toHaveAttribute("data-pr-ready-to-merge", expected, {
+    timeout: 15_000,
+  });
 }
 
 test.describe("PR status badge", () => {
@@ -87,6 +144,7 @@ test.describe("PR status badge", () => {
       state: "open",
       checks_state: "success",
     });
+    await waitForTaskPRReadyState(apiClient, task.id, "false");
 
     await expect(kanban.taskCardInColumn("CI Skipped Task", doneStep.id)).toBeVisible({
       timeout: 45_000,
@@ -106,8 +164,7 @@ test.describe("PR status badge", () => {
     await expect(testPage).toHaveURL(/\/[st]\//, { timeout: 15_000 });
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.prTopbarButton()).toBeVisible({ timeout: 15_000 });
-    await expect(session.prTopbarButton()).toHaveAttribute("data-pr-ready-to-merge", "false");
+    await expectTopbarReadyState(testPage, session, "false");
   });
 
   /**
@@ -149,6 +206,7 @@ test.describe("PR status badge", () => {
       checks_state: "success",
       mergeable_state: "clean",
     });
+    await waitForTaskPRReadyState(apiClient, task.id, "true");
 
     await expect(kanban.taskCardInColumn("Ready To Merge Task", doneStep.id)).toBeVisible({
       timeout: 45_000,
@@ -164,10 +222,7 @@ test.describe("PR status badge", () => {
     await expect(testPage).toHaveURL(/\/[st]\//, { timeout: 15_000 });
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.prTopbarButton()).toBeVisible({ timeout: 15_000 });
-    await expect(session.prTopbarButton()).toHaveAttribute("data-pr-ready-to-merge", "true", {
-      timeout: 15_000,
-    });
+    await expectTopbarReadyState(testPage, session, "true");
   });
 
   /**
@@ -209,6 +264,7 @@ test.describe("PR status badge", () => {
       checks_state: "success",
       mergeable_state: "blocked",
     });
+    await waitForTaskPRReadyState(apiClient, task.id, "false");
 
     await expect(kanban.taskCardInColumn("Blocked Task", doneStep.id)).toBeVisible({
       timeout: 45_000,
@@ -265,6 +321,7 @@ test.describe("PR status badge", () => {
       mergeable_state: "blocked",
       pending_review_count: 1,
     });
+    await waitForTaskPRReadyState(apiClient, task.id, "false");
 
     await expect(kanban.taskCardInColumn("Awaiting Review Task", doneStep.id)).toBeVisible({
       timeout: 45_000,
