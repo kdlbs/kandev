@@ -220,6 +220,7 @@ Tests are grouped by feature area in subdirectories under `tests/`. When creatin
 - **Test through the UI, not the API.** E2E tests verify user-facing behavior. Don't write tests that only call the API and assert the response -- those are integration tests. Instead, navigate to the page, interact with UI elements, and assert what the user sees.
 - **Verify persistence with page reload.** After changing a setting or creating data, reload the page (`testPage.reload()`) and assert the state is still correct. This catches hydration bugs and SSR/client mismatches.
 - **Seed via API, assert via UI.** Use `apiClient` to set up preconditions quickly, but always verify the result by opening the page and checking the DOM.
+- **Scope terminal helpers to the active panel.** Terminal/mobile helpers must avoid document-wide `.xterm` or `terminal-xterm-host` selectors because multiple terminal panels can be mounted at once. Scope locators through `data-testid="terminal-panel"` and prefer the visible or latest panel for `page.evaluate` helpers.
 
 ## Debugging failures
 
