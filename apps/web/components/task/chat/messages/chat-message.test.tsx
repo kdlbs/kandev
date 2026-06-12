@@ -3,7 +3,12 @@ import type { ReactNode } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
 import { ChatMessage } from "./chat-message";
-import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
+import {
+  sessionId as toSessionId,
+  taskId as toTaskId,
+  type Message,
+  type TaskSession,
+} from "@/lib/types/http";
 
 const SENDER_TASK_ID = "task-sender";
 const SENDER_TITLE = "Fix login bug";
@@ -64,6 +69,36 @@ function renderWithSender(
   return render(
     <Wrapper>
       <ChatMessage comment={userMessage({ metadata })} label="Message" className="" />
+    </Wrapper>,
+  );
+}
+
+function renderAgentMessageWithSession(session: Partial<TaskSession>, metadata = {}) {
+  const taskSession: TaskSession = {
+    id: toSessionId("sess-1"),
+    task_id: toTaskId("task-target"),
+    state: "COMPLETED",
+    started_at: "2026-05-04T00:00:00Z",
+    updated_at: "2026-05-04T00:00:00Z",
+    ...session,
+  };
+  const Wrapper = ({ children }: { children: ReactNode }) => (
+    <StateProvider
+      initialState={{
+        taskSessions: { items: { "sess-1": taskSession } },
+      }}
+    >
+      {children}
+    </StateProvider>
+  );
+
+  return render(
+    <Wrapper>
+      <ChatMessage
+        comment={userMessage({ author_type: "agent", metadata })}
+        label="Message"
+        className=""
+      />
     </Wrapper>,
   );
 }
@@ -164,6 +199,63 @@ describe("ChatMessage sender badge", () => {
     expect(container.querySelector("[data-testid='workflow-message-dot']")?.className).toContain(
       "bg-neutral-400",
     );
+  });
+});
+
+describe("ChatMessage agent session config metadata", () => {
+  it("shows session config options next to the model", () => {
+    renderAgentMessageWithSession({
+      agent_profile_snapshot: {
+        model: "gpt-5.5",
+        config_options: {
+          reasoning_effort: "high",
+          verbosity: "low",
+        },
+      },
+    });
+
+    expect(screen.getByText("gpt-5.5 · Reasoning effort: high · Verbosity: low")).not.toBeNull();
+  });
+
+  it("prefers live runtime config over the profile snapshot", () => {
+    renderAgentMessageWithSession({
+      metadata: {
+        runtime_config: {
+          model: "gpt-5.6",
+          mode: "accept-edits",
+          config_options: {
+            reasoning_effort: "medium",
+          },
+        },
+      },
+      agent_profile_snapshot: {
+        model: "gpt-5.5",
+        mode: "default",
+        config_options: {
+          reasoning_effort: "high",
+        },
+      },
+    });
+
+    expect(
+      screen.getByText("gpt-5.6 · Mode: accept-edits · Reasoning effort: medium"),
+    ).not.toBeNull();
+  });
+
+  it("keeps message-level model attribution while showing session options", () => {
+    renderAgentMessageWithSession(
+      {
+        agent_profile_snapshot: {
+          model: "gpt-5.5",
+          config_options: {
+            reasoning_effort: "high",
+          },
+        },
+      },
+      { model: "gpt-5.5-mini" },
+    );
+
+    expect(screen.getByText("gpt-5.5-mini · Reasoning effort: high")).not.toBeNull();
   });
 });
 
