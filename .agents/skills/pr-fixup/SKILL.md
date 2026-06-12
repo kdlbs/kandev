@@ -96,7 +96,8 @@ For each entry in the report's `ci_failed:` list:
    If the printed summary is enough, stop. Only `Read` specific line ranges from the printed log path if you need surrounding context.
    If `gh run view --log-failed` returns only metadata or says logs are unavailable while the workflow is still running, wait for the workflow/report job to finish. If it still omits details, fetch the job log directly and search the downloaded file:
    ```bash
-   gh api repos/:owner/:repo/actions/jobs/<job_id>/logs > job.log
+   job_id="$(gh api repos/:owner/:repo/actions/runs/<run-id>/jobs --jq '[.jobs[] | select(.conclusion == "failure")] | first | .id')"
+   gh api repos/:owner/:repo/actions/jobs/"$job_id"/logs > job.log
    ```
 3. Read the relevant source files at the failing lines (use `Read` with `offset`/`limit`, not `cat`)
 4. Fix the issues (lint errors, test failures, type errors, etc.)
@@ -124,12 +125,12 @@ If any failing check is an E2E test (Playwright):
    scripts/run-quiet build -- make build-backend build-web
    scripts/run-quiet e2e -- bash -c 'cd apps && pnpm --filter @kandev/web e2e -- tests/path/to/failing.spec.ts'
    ```
-   Run the specific failing test file(s), not the full suite. Only proceed to step 6 after the test passes locally.
+   Run the specific failing test file(s), not the full suite. Only proceed to the verify/commit/push step after the test passes locally.
 
 **Don't dismiss a repeated failure as "flaky".** If the same shard or test fails 2+ poll iterations in a row, stop polling and do two cheap checks instead:
 
 - **Compare per-shard runtime vs `main`.** `gh run list --branch main --workflow "<name>" --limit 5 --json databaseId` then `gh run view <id> --json jobs` and diff started/completed timestamps against the PR's run. A shard that takes e.g. 216s on main and 616s on the PR is real test failures + retries pushing past the job's `timeout-minutes` cap, not infrastructure variance. "Cancelled" at exactly the timeout boundary almost always means this.
-- **Reproduce the failing spec locally** (step 5 above). CI logs hide in-DOM React render errors that show up immediately in the local `e2e/test-results/<test>/error-context.md`. A single local run (~5-10 min) routinely unlocks fixes that would otherwise burn 3+ CI cycles of speculative "rerun and hope".
+- **Reproduce the failing spec locally** (step 4 above). CI logs hide in-DOM React render errors that show up immediately in the local `e2e/test-results/<test>/error-context.md`. A single local run (~5-10 min) routinely unlocks fixes that would otherwise burn 3+ CI cycles of speculative "rerun and hope".
 
 Recommend a merge over green-pending-flake-rerun only after both checks pass.
 
