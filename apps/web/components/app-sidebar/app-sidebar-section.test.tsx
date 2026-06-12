@@ -69,6 +69,20 @@ describe("AppSidebarSection", () => {
     const after = screen.getByTestId(CHILDREN_TESTID);
     expect(after).toBe(before);
     expect(after.parentElement?.classList.contains("hidden")).toBe(true);
+
+    // round-trip: re-expanding should restore the visible state on the same node
+    rerender(
+      <TooltipProvider>
+        <AppSidebarSection id="tasks" label="Tasks" icon={IconCircleDot} collapsed={false} grow>
+          <div data-testid={CHILDREN_TESTID}>children</div>
+        </AppSidebarSection>
+      </TooltipProvider>,
+    );
+
+    const reopened = screen.getByTestId(CHILDREN_TESTID);
+    expect(reopened).toBe(before);
+    expect(reopened.parentElement?.classList.contains("hidden")).toBe(false);
+    expect(reopened.parentElement?.classList.contains("sidebar-fade-in")).toBe(true);
   });
 
   it("does not render grow-section children while the section accordion is closed", () => {
