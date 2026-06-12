@@ -17,6 +17,7 @@ import type { Message } from "@/lib/types/http";
 const ACTION_BUTTON_SIZE = "h-5 w-5 p-1";
 const ACTION_BUTTON_HOVER = "hover:bg-muted rounded";
 const ACTION_BUTTON_TRANSITION = "transition-colors duration-200";
+const SESSION_CONFIG_TEXT_SEPARATOR = "\u001f";
 
 type MessageActionsProps = {
   message: Message;
@@ -139,19 +140,16 @@ function useMessageSessionConfigText(message: Message, showModel: boolean) {
   const messageConfig = showModel
     ? configFromSource(message.metadata as SessionConfigSource | undefined)
     : null;
-  const sessionDetailsText = useSessionConfigText(sessionId, showModel, true);
-  const sessionConfigText = useSessionConfigText(sessionId, showModel, false);
-  if (!messageConfig?.model) return sessionConfigText;
+  const [sessionConfigText, sessionDetailsText] = splitSessionConfigText(
+    useSessionConfigText(sessionId, showModel),
+  );
+  if (!messageConfig?.model) return sessionConfigText || null;
   const messageDetails = formatSessionConfigDetails(messageConfig);
   const details = messageDetails ?? sessionDetailsText;
   return details ? `${messageConfig.model} · ${details}` : messageConfig.model;
 }
 
-function useSessionConfigText(
-  sessionId: string | undefined,
-  showModel: boolean,
-  detailsOnly: boolean,
-) {
+function useSessionConfigText(sessionId: string | undefined, showModel: boolean) {
   return useAppStore((state) => {
     if (!showModel || !sessionId) return null;
     const session = state.taskSessions.items[sessionId];
@@ -163,8 +161,18 @@ function useSessionConfigText(
       metadata?.runtime_config as SessionConfigSource | null | undefined,
     );
     const config = mergeSessionConfig(runtime, snapshot);
-    return detailsOnly ? formatSessionConfigDetails(config) : formatSessionConfig(config);
+    return joinSessionConfigText(formatSessionConfig(config), formatSessionConfigDetails(config));
   });
+}
+
+function joinSessionConfigText(full: string | null, details: string | null): string {
+  return `${full ?? ""}${SESSION_CONFIG_TEXT_SEPARATOR}${details ?? ""}`;
+}
+
+function splitSessionConfigText(value: string | null): [string | null, string | null] {
+  if (!value) return [null, null];
+  const [full = "", details = ""] = value.split(SESSION_CONFIG_TEXT_SEPARATOR, 2);
+  return [full || null, details || null];
 }
 
 function CopyButton({ copied, onCopy }: { copied: boolean; onCopy: () => void }) {
