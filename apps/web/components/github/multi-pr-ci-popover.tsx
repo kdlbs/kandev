@@ -31,7 +31,9 @@ function PRTab({
     <button
       type="button"
       role="tab"
+      id={`pr-tab-${pr.repo}-${pr.pr_number}`}
       aria-selected={active}
+      aria-controls={`pr-tabpanel-${pr.repo}-${pr.pr_number}`}
       data-testid={`pr-popover-tab-${pr.repo}-${pr.pr_number}`}
       data-active={active ? "true" : "false"}
       onClick={() => onSelect(pr)}
@@ -73,9 +75,11 @@ export function MultiPRCIPopover({
 
   return (
     <div data-testid="pr-multi-popover" className="flex flex-col gap-2">
-      {prs.map((pr) => (
-        <PRFeedbackWarmer key={pr.id} pr={pr} />
-      ))}
+      {prs
+        .filter((p) => p.state === "open")
+        .map((pr) => (
+          <PRFeedbackWarmer key={pr.id} pr={pr} />
+        ))}
       <div
         role="tablist"
         aria-label="Pull requests"
@@ -91,11 +95,17 @@ export function MultiPRCIPopover({
           />
         ))}
       </div>
-      <PRCIPopover
-        pr={selected}
-        enabled={enabled}
-        onOpenDetailPanel={onOpenDetailPanel ? () => onOpenDetailPanel(selected) : undefined}
-      />
+      <div
+        role="tabpanel"
+        id={`pr-tabpanel-${selected.repo}-${selected.pr_number}`}
+        aria-labelledby={`pr-tab-${selected.repo}-${selected.pr_number}`}
+      >
+        <PRCIPopover
+          pr={selected}
+          enabled={enabled}
+          onOpenDetailPanel={onOpenDetailPanel ? () => onOpenDetailPanel(selected) : undefined}
+        />
+      </div>
     </div>
   );
 }

@@ -23,7 +23,11 @@ import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { usePRFeedbackBackgroundSync } from "@/hooks/domains/github/use-pr-ci-popover";
 import { PRCIPopover } from "@/components/github/pr-ci-popover";
 import { MultiPRCIPopover } from "@/components/github/multi-pr-ci-popover";
-import { isPRAwaitingReview, isPRReadyToMerge } from "@/components/github/pr-task-icon";
+import {
+  isPRAwaitingReview,
+  isPRReadyToMerge,
+  pickDefaultPR,
+} from "@/components/github/pr-task-icon";
 import { useIsMobile } from "@/hooks/use-mobile";
 import type { TaskPR } from "@/lib/types/github";
 
@@ -119,9 +123,11 @@ export function PRStatusChip({ taskId }: { taskId: string | null }) {
     ? prs.filter((p) => p.state !== "merged" && p.state !== "closed")
     : [];
   // Subscribe at the chip level so the cache warms even when the top-bar PR
-  // button isn't mounted (e.g. small viewport that hides it). The remaining
-  // PRs in a multi-PR task warm when the popover opens.
-  usePRFeedbackBackgroundSync(openPRs[0] ?? null);
+  // button isn't mounted (e.g. small viewport that hides it). Warm the PR the
+  // popover will actually open first (worst-status via pickDefaultPR — for a
+  // single PR that's just the PR itself); the remaining PRs in a multi-PR
+  // task warm when the popover opens.
+  usePRFeedbackBackgroundSync(pickDefaultPR(openPRs));
   if (openPRs.length === 0) return null;
   if (openPRs.length === 1) return <PRStatusChipInner pr={openPRs[0]} />;
   return <PRStatusChipMultiInner prs={openPRs} />;
