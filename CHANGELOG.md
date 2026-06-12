@@ -2,6 +2,35 @@
 
 All notable changes to Kandev.
 
+## 0.58.0 - 2026-06-12
+
+### Features
+
+- indicate pending close state ([#1334](https://github.com/kdlbs/kandev/pull/1334))
+
+### Bug Fixes
+
+- hide sidebar footer urls on hover ([#1348](https://github.com/kdlbs/kandev/pull/1348))
+- restore Sentry entry in settings integrations nav ([#1350](https://github.com/kdlbs/kandev/pull/1350)) by @nlenepveu
+- persist session runtime config ([#1346](https://github.com/kdlbs/kandev/pull/1346))
+- move changes stage action to file icon slot ([#1349](https://github.com/kdlbs/kandev/pull/1349))
+- apply max inflight cap to Sentry watcher tasks ([#1326](https://github.com/kdlbs/kandev/pull/1326)) by @nlenepveu
+- route setup cancel to homepage ([#1333](https://github.com/kdlbs/kandev/pull/1333))
+- update session tab title on model changes ([#1335](https://github.com/kdlbs/kandev/pull/1335))
+- avoid oversized env spawn failures ([#1344](https://github.com/kdlbs/kandev/pull/1344))
+- restore default layout during session preparation ([#1343](https://github.com/kdlbs/kandev/pull/1343))
+- suppress archive success toast ([#1345](https://github.com/kdlbs/kandev/pull/1345))
+- reset xterm before terminal reconnect ([#1342](https://github.com/kdlbs/kandev/pull/1342))
+- de-flake e2e resume flicker, WS-subscribe race, and agent-boot contention ([#1338](https://github.com/kdlbs/kandev/pull/1338))
+- match issue identifier (ENG-123) in search ([#1340](https://github.com/kdlbs/kandev/pull/1340))
+- harden pr-state and e2e guidance ([#1331](https://github.com/kdlbs/kandev/pull/1331))
+- cascade-archive child tasks on workflow delete ([#1332](https://github.com/kdlbs/kandev/pull/1332))
+
+### Documentation
+
+- update readme and e2e skill with missing executors, integrations, agents ([#1347](https://github.com/kdlbs/kandev/pull/1347))
+- add sentry to integrations list ([#1337](https://github.com/kdlbs/kandev/pull/1337))
+
 ## 0.57.0 - 2026-06-11
 
 ### Features
