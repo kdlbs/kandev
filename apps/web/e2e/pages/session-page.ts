@@ -597,7 +597,13 @@ export class SessionPage {
     return this.page.getByTestId(`pr-popover-tab-${repo}-${prNumber}`);
   }
 
-  /** A specific bucket group inside the popover by kind. */
+  /**
+   * A specific bucket group inside the popover by kind.
+   *
+   * Scoped to the TOPBAR popover (`pr-topbar-popover`) — the chip's HoverCard
+   * renders the same inner content without that wrapper, so specs asserting
+   * check groups after hovering the status chip need a chip-scoped variant.
+   */
   prCheckGroup(kind: "passed" | "in_progress" | "failed"): Locator {
     return this.prTopbarPopover().locator(`[data-testid='pr-check-group'][data-kind='${kind}']`);
   }
