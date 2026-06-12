@@ -142,14 +142,14 @@ test.describe("Multi-PR CI popover", () => {
     await expect(session.prTopbarPopoverAggregate()).toBeVisible({ timeout: 10_000 });
 
     // Default tab = worst status: failing web#42, not first-created green api#77.
-    await expect(session.prMultiPopoverTab(42)).toHaveAttribute("data-active", "true");
-    await expect(session.prMultiPopoverTab(77)).toHaveAttribute("data-active", "false");
+    await expect(session.prMultiPopoverTab("web", 42)).toHaveAttribute("data-active", "true");
+    await expect(session.prMultiPopoverTab("api", 77)).toHaveAttribute("data-active", "false");
     // Body shows the failing PR's bucket groups (failed group present).
     await expect(session.prCheckGroup("failed")).toBeVisible();
 
     // Switch to the green PR: failed group disappears, passed shows 4.
-    await session.prMultiPopoverTab(77).click();
-    await expect(session.prMultiPopoverTab(77)).toHaveAttribute("data-active", "true");
+    await session.prMultiPopoverTab("api", 77).click();
+    await expect(session.prMultiPopoverTab("api", 77)).toHaveAttribute("data-active", "true");
     await expect(session.prCheckGroup("failed")).toHaveCount(0);
     await expect(session.prCheckGroupCount("passed")).toHaveText("4");
   });
@@ -179,7 +179,7 @@ test.describe("Multi-PR CI popover", () => {
 
     await chip.hover();
     await expect(session.prTopbarPopoverAggregate()).toBeVisible({ timeout: 10_000 });
-    await expect(session.prMultiPopoverTab(42)).toHaveAttribute("data-active", "true");
+    await expect(session.prMultiPopoverTab("web", 42)).toHaveAttribute("data-active", "true");
   });
 
   test("clicking the multi-PR button still opens the dropdown with per-PR rows", async ({

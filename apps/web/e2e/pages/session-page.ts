@@ -592,9 +592,9 @@ export class SessionPage {
     return this.page.getByTestId("pr-multi-popover");
   }
 
-  /** A single PR tab inside the multi-PR aggregate popover, by PR number. */
-  prMultiPopoverTab(prNumber: number): Locator {
-    return this.page.getByTestId(`pr-popover-tab-${prNumber}`);
+  /** A single PR tab inside the multi-PR aggregate popover, by repo + PR number. */
+  prMultiPopoverTab(repo: string, prNumber: number): Locator {
+    return this.page.getByTestId(`pr-popover-tab-${repo}-${prNumber}`);
   }
 
   /** A specific bucket group inside the popover by kind. */

@@ -205,12 +205,15 @@ function PRMultiButton({ prs }: { prs: TaskPR[] }) {
   const addPRPanel = useDockviewStore((s) => s.addPRPanel);
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const { isMobile, open, onOpenChange, handleEnter, handleLeave } = usePopoverInteractions();
+  const [menuOpen, setMenuOpen] = useState(false);
   const aggColor = aggregatePRStatusColor(prs);
 
   // The trigger is the click target for the dropdown AND the hover anchor for
   // the popover. On desktop we wrap it in a PopoverAnchor so all the asChild
   // layers (Tooltip → Popover → Dropdown) collapse onto the single Button and
-  // the popover positions against it.
+  // the popover positions against it. While the dropdown is open the hover
+  // popover is closed and hover re-opens are suppressed, so the two overlays
+  // never stack.
   const triggerButton = (
     <DropdownMenuTrigger asChild>
       <Button
@@ -219,7 +222,7 @@ function PRMultiButton({ prs }: { prs: TaskPR[] }) {
         size="sm"
         variant="outline"
         className="cursor-pointer gap-1.5 px-2"
-        onMouseEnter={handleEnter}
+        onMouseEnter={menuOpen ? undefined : handleEnter}
         onMouseLeave={handleLeave}
       >
         <IconGitPullRequest className={`h-4 w-4 ${aggColor}`} />
@@ -230,7 +233,12 @@ function PRMultiButton({ prs }: { prs: TaskPR[] }) {
   );
 
   const dropdown = (
-    <DropdownMenu>
+    <DropdownMenu
+      onOpenChange={(next) => {
+        setMenuOpen(next);
+        if (next) onOpenChange(false);
+      }}
+    >
       <Tooltip>
         <TooltipTrigger asChild>
           {isMobile ? triggerButton : <PopoverAnchor asChild>{triggerButton}</PopoverAnchor>}

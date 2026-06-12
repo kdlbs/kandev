@@ -30,7 +30,9 @@ function PRTab({
   return (
     <button
       type="button"
-      data-testid={`pr-popover-tab-${pr.pr_number}`}
+      role="tab"
+      aria-selected={active}
+      data-testid={`pr-popover-tab-${pr.repo}-${pr.pr_number}`}
       data-active={active ? "true" : "false"}
       onClick={() => onSelect(pr)}
       className={cn(
@@ -75,6 +77,8 @@ export function MultiPRCIPopover({
         <PRFeedbackWarmer key={pr.id} pr={pr} />
       ))}
       <div
+        role="tablist"
+        aria-label="Pull requests"
         data-testid="pr-multi-popover-tabs"
         className="flex gap-1 overflow-x-auto border-b border-border/50 pb-2"
       >

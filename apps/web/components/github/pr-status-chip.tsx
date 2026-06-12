@@ -110,10 +110,14 @@ function useChipTriggerGuard() {
  */
 export function PRStatusChip({ taskId }: { taskId: string | null }) {
   const { prs } = useTaskPR(taskId);
+  // Defensive Array.isArray: a partial hydration can briefly seed the store
+  // with a non-array value (same guard as PRTaskIcon).
   // Only open PRs are worth a CI chip — terminal PRs (merged/closed) are
   // already conveyed by the chat-input banner. With multiple PRs the chip
   // stays visible as long as at least one is still open.
-  const openPRs = prs.filter((p) => p.state !== "merged" && p.state !== "closed");
+  const openPRs = Array.isArray(prs)
+    ? prs.filter((p) => p.state !== "merged" && p.state !== "closed")
+    : [];
   // Subscribe at the chip level so the cache warms even when the top-bar PR
   // button isn't mounted (e.g. small viewport that hides it). The remaining
   // PRs in a multi-PR task warm when the popover opens.
