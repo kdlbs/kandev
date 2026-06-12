@@ -635,6 +635,12 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
   const toggleSubtaskCollapsed = useAppStore((state) => state.toggleSubtaskCollapsed);
   const { grouped, effectiveView, prefs } = useGroupedSidebarView(displayTasks);
   const { pinnedTaskIds, togglePinnedTask, handleReorderGroup, handleReorderSubtasks } = prefs;
+  // Stable ref: an inline arrow here would defeat TaskSwitcher's memo() and
+  // re-render every task row whenever this component renders.
+  const handleToggleGroup = useCallback(
+    (groupKey: string) => toggleSidebarGroupCollapsed(effectiveView.id, groupKey),
+    [toggleSidebarGroupCollapsed, effectiveView.id],
+  );
   return (
     <PanelRoot data-testid="task-sidebar">
       {!hideFilterBar && <SidebarFilterBar />}
@@ -646,7 +652,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
           activeTaskId={highlightedTaskId}
           selectedTaskId={highlightedSelectedTaskId}
           collapsedGroupKeys={effectiveView.collapsedGroups}
-          onToggleGroup={(groupKey) => toggleSidebarGroupCollapsed(effectiveView.id, groupKey)}
+          onToggleGroup={handleToggleGroup}
           collapsedSubtaskParentIds={collapsedSubtaskParents}
           onToggleSubtasks={toggleSubtaskCollapsed}
           onSelectTask={handleSelectTask}

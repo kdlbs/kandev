@@ -80,44 +80,62 @@ export function AppSidebarSection({
   const toggleSection = useAppStore((s) => s.toggleAppSidebarSection);
   const setCollapsed = useAppStore((s) => s.setAppSidebarCollapsed);
 
-  if (collapsed) {
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            className="flex h-9 w-9 mx-auto items-center justify-center rounded-md text-foreground/70 hover:bg-muted/60 cursor-pointer"
-            onClick={() => {
-              setCollapsed(false);
-              if (!expanded) toggleSection(id);
-            }}
-            aria-label={label}
-          >
-            <Icon className="h-4 w-4" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="right">{label}</TooltipContent>
-      </Tooltip>
-    );
-  }
+  const railButton = (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          className="flex h-9 w-9 mx-auto items-center justify-center rounded-md text-foreground/70 hover:bg-muted/60 cursor-pointer"
+          onClick={() => {
+            setCollapsed(false);
+            if (!expanded) toggleSection(id);
+          }}
+          aria-label={label}
+        >
+          <Icon className="h-4 w-4" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="right">{label}</TooltipContent>
+    </Tooltip>
+  );
+
+  if (collapsed && !grow) return railButton;
 
   const handleToggle = () => toggleSection(id);
 
   // The grow section (Tasks) absorbs remaining vertical space and scrolls
   // internally, so it stays flex-driven rather than animating to content
   // height like the fixed-size sections below.
+  //
+  // In rail mode its children stay mounted but CSS-hidden: this section holds
+  // the (potentially huge) task list, and unmounting it made collapsing the
+  // sidebar jank — React tore down every task row in the same frame the close
+  // animation started. Hiding is O(1) on close and makes reopening instant.
+  // The children div keeps the same position in the tree across the toggle so
+  // React preserves it instead of remounting.
   if (grow) {
     return (
-      <div className={cn(expanded && "flex-1 min-h-0 flex flex-col")}>
-        <SectionHeader
-          label={label}
-          expanded={expanded}
-          headerAction={headerAction}
-          headerActionVisibility={headerActionVisibility}
-          onToggle={handleToggle}
-        />
+      <div className={cn(!collapsed && expanded && "flex-1 min-h-0 flex flex-col")}>
+        {collapsed ? (
+          railButton
+        ) : (
+          <SectionHeader
+            label={label}
+            expanded={expanded}
+            headerAction={headerAction}
+            headerActionVisibility={headerActionVisibility}
+            onToggle={handleToggle}
+          />
+        )}
         {expanded && (
-          <div className="flex flex-col gap-0.5 flex-1 min-h-0 sidebar-fade-in">{children}</div>
+          <div
+            className={cn(
+              "flex flex-col gap-0.5",
+              collapsed ? "hidden" : "flex-1 min-h-0 sidebar-fade-in",
+            )}
+          >
+            {children}
+          </div>
         )}
       </div>
     );

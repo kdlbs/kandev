@@ -117,7 +117,10 @@ export function AppSidebar() {
         // absolute resize handle.
         "h-full min-h-0 border-r border-border bg-background hidden md:flex flex-col shrink-0",
         "md:relative",
-        "transition-all duration-300 ease-out",
+        // Animate only the width: `transition-all` makes the browser watch
+        // every animatable property, and any incidental property change on the
+        // aside (border, background) would also animate during open/close.
+        "transition-[width] duration-300 ease-out",
       )}
       style={{
         width: collapsed ? APP_SIDEBAR_COLLAPSED_WIDTH : expandedWidth,
