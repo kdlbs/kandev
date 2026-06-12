@@ -587,9 +587,14 @@ export class SessionPage {
     await expect(this.prStatusChipDrawer()).toBeVisible({ timeout: 5_000 });
   }
 
-  /** Multi-PR aggregate popover content. */
+  /** Multi-PR aggregate popover content (segmented tabs + selected PR's CI). */
   prTopbarPopoverAggregate(): Locator {
-    return this.page.getByTestId("pr-topbar-popover-aggregate");
+    return this.page.getByTestId("pr-multi-popover");
+  }
+
+  /** A single PR tab inside the multi-PR aggregate popover, by PR number. */
+  prMultiPopoverTab(prNumber: number): Locator {
+    return this.page.getByTestId(`pr-popover-tab-${prNumber}`);
   }
 
   /** A specific bucket group inside the popover by kind. */
