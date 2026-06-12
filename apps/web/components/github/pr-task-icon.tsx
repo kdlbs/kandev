@@ -141,10 +141,10 @@ export function pickDefaultPR(prs: TaskPR[]): TaskPR | null {
   if (prs.length === 0) return null;
   let best = prs[0];
   let bestRank = prStatusRank(prs[0]);
-  for (const pr of prs) {
-    const rank = prStatusRank(pr);
+  for (let i = 1; i < prs.length; i++) {
+    const rank = prStatusRank(prs[i]);
     if (rank > bestRank) {
-      best = pr;
+      best = prs[i];
       bestRank = rank;
     }
   }
