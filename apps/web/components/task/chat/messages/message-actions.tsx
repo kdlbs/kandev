@@ -45,20 +45,26 @@ type MessageSessionConfig = {
   model: string | null;
   mode: string | null;
   configOptions: Array<{ label: string; value: string }>;
+  configOptionsSet: boolean;
 };
 
 function stringValue(value: unknown): string | null {
   return typeof value === "string" && value.trim() !== "" ? value : null;
 }
 
+function isStringConfigEntry(entry: [string, unknown]): entry is [string, string] {
+  const [key, optionValue] = entry;
+  return key !== "model" && key !== "mode" && stringValue(optionValue) !== null;
+}
+
 function configOptionEntries(value: unknown): Array<{ label: string; value: string }> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return [];
   return Object.entries(value)
-    .filter(([key, optionValue]) => key !== "model" && key !== "mode" && stringValue(optionValue))
+    .filter(isStringConfigEntry)
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([key, optionValue]) => ({
       label: humanizeConfigKey(key),
-      value: optionValue as string,
+      value: optionValue,
     }));
 }
 
@@ -71,24 +77,47 @@ function humanizeConfigKey(key: string): string {
 }
 
 function configFromSource(source: SessionConfigSource | null | undefined): MessageSessionConfig {
-  if (!source) return { model: null, mode: null, configOptions: [] };
+  if (!source) return emptySessionConfig();
+  const configOptionsValue = source.config_options ?? source.configOptions;
   return {
     model: stringValue(source.model),
     mode: stringValue(source.mode),
-    configOptions: configOptionEntries(source.config_options ?? source.configOptions),
+    configOptions: configOptionEntries(configOptionsValue),
+    configOptionsSet: isConfigOptionsObject(configOptionsValue),
   };
+}
+
+function emptySessionConfig(): MessageSessionConfig {
+  return { model: null, mode: null, configOptions: [], configOptionsSet: false };
+}
+
+function isConfigOptionsObject(value: unknown): boolean {
+  return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
 function mergeSessionConfig(
   primary: MessageSessionConfig,
   fallback: MessageSessionConfig,
 ): MessageSessionConfig {
+  const optionsByLabel = new Map(fallback.configOptions.map((option) => [option.label, option]));
+  for (const option of primary.configOptions) {
+    optionsByLabel.set(option.label, option);
+  }
   return {
     model: primary.model ?? fallback.model,
     mode: primary.mode ?? fallback.mode,
-    configOptions:
-      primary.configOptions.length > 0 ? primary.configOptions : fallback.configOptions,
+    configOptions: mergedConfigOptions(primary, fallback, Array.from(optionsByLabel.values())),
+    configOptionsSet: primary.configOptionsSet || fallback.configOptionsSet,
   };
+}
+
+function mergedConfigOptions(
+  primary: MessageSessionConfig,
+  fallback: MessageSessionConfig,
+  merged: MessageSessionConfig["configOptions"],
+): MessageSessionConfig["configOptions"] {
+  if (!primary.configOptionsSet) return fallback.configOptions;
+  return primary.configOptions.length > 0 ? merged : [];
 }
 
 function formatSessionConfig(config: MessageSessionConfig): string | null {
@@ -110,7 +139,20 @@ function useMessageSessionConfigText(message: Message, showModel: boolean) {
   const messageConfig = showModel
     ? configFromSource(message.metadata as SessionConfigSource | undefined)
     : null;
-  const sessionConfigText = useAppStore((state) => {
+  const sessionDetailsText = useSessionConfigText(sessionId, showModel, true);
+  const sessionConfigText = useSessionConfigText(sessionId, showModel, false);
+  if (!messageConfig?.model) return sessionConfigText;
+  const messageDetails = formatSessionConfigDetails(messageConfig);
+  const details = messageDetails ?? sessionDetailsText;
+  return details ? `${messageConfig.model} · ${details}` : messageConfig.model;
+}
+
+function useSessionConfigText(
+  sessionId: string | undefined,
+  showModel: boolean,
+  detailsOnly: boolean,
+) {
+  return useAppStore((state) => {
     if (!showModel || !sessionId) return null;
     const session = state.taskSessions.items[sessionId];
     const snapshot = configFromSource(
@@ -121,12 +163,8 @@ function useMessageSessionConfigText(message: Message, showModel: boolean) {
       metadata?.runtime_config as SessionConfigSource | null | undefined,
     );
     const config = mergeSessionConfig(runtime, snapshot);
-    return messageConfig?.model ? formatSessionConfigDetails(config) : formatSessionConfig(config);
+    return detailsOnly ? formatSessionConfigDetails(config) : formatSessionConfig(config);
   });
-  if (!messageConfig?.model) return sessionConfigText;
-  const messageDetails = formatSessionConfigDetails(messageConfig);
-  const details = messageDetails ?? sessionConfigText;
-  return details ? `${messageConfig.model} · ${details}` : messageConfig.model;
 }
 
 function CopyButton({ copied, onCopy }: { copied: boolean; onCopy: () => void }) {

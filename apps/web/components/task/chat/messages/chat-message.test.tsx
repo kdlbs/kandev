@@ -242,6 +242,46 @@ describe("ChatMessage agent session config metadata", () => {
     ).not.toBeNull();
   });
 
+  it("merges runtime config options over snapshot options per option", () => {
+    renderAgentMessageWithSession({
+      metadata: {
+        runtime_config: {
+          config_options: {
+            reasoning_effort: "medium",
+          },
+        },
+      },
+      agent_profile_snapshot: {
+        model: "gpt-5.5",
+        config_options: {
+          reasoning_effort: "high",
+          verbosity: "low",
+        },
+      },
+    });
+
+    expect(screen.getByText("gpt-5.5 · Reasoning effort: medium · Verbosity: low")).not.toBeNull();
+  });
+
+  it("does not fall back to snapshot options when runtime options are explicitly empty", () => {
+    const { container } = renderAgentMessageWithSession({
+      metadata: {
+        runtime_config: {
+          config_options: {},
+        },
+      },
+      agent_profile_snapshot: {
+        model: "gpt-5.5",
+        config_options: {
+          reasoning_effort: "high",
+        },
+      },
+    });
+
+    expect(screen.getByText("gpt-5.5")).not.toBeNull();
+    expect(container.textContent).not.toContain("Reasoning effort");
+  });
+
   it("keeps message-level model attribution while showing session options", () => {
     renderAgentMessageWithSession(
       {
