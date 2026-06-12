@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   IconCircleCheckFilled,
   IconCircleXFilled,
@@ -22,6 +22,7 @@ import { Button } from "@kandev/ui/button";
 import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { usePRFeedbackBackgroundSync } from "@/hooks/domains/github/use-pr-ci-popover";
 import { PRCIPopover } from "@/components/github/pr-ci-popover";
+import { MultiPRCIPopover } from "@/components/github/multi-pr-ci-popover";
 import { isPRAwaitingReview, isPRReadyToMerge } from "@/components/github/pr-task-icon";
 import { useIsMobile } from "@/hooks/use-mobile";
 import type { TaskPR } from "@/lib/types/github";
@@ -48,6 +49,47 @@ function chipStatus(pr: TaskPR): ChipStatus {
   return "neutral";
 }
 
+// Higher = more attention-worthy. Drives the aggregate glyph when a task has
+// multiple open PRs — one failing PR colours the whole chip red.
+const CHIP_STATUS_RANK: Record<ChipStatus, number> = {
+  failed: 3,
+  in_progress: 2,
+  passed: 1,
+  neutral: 0,
+};
+
+export function aggregateChipStatus(prs: TaskPR[]): ChipStatus {
+  let worst: ChipStatus = "neutral";
+  for (const pr of prs) {
+    const status = chipStatus(pr);
+    if (CHIP_STATUS_RANK[status] > CHIP_STATUS_RANK[worst]) worst = status;
+  }
+  return worst;
+}
+
+const CHIP_BUTTON_CLASS =
+  "cursor-pointer inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-xs";
+
+/**
+ * Radix HoverCard treats the trigger as outside the content's bounding box, so
+ * a click on the chip would auto-close the popover. This guard filters out
+ * trigger clicks so clicking the chip is a no-op while the popover stays open
+ * via hover. Returns the trigger ref plus a memoised handler that reads the ref
+ * lazily (inside the callback, never during render).
+ */
+function useChipTriggerGuard() {
+  const ref = useRef<HTMLButtonElement>(null);
+  const onPointerDownOutside = useCallback(
+    (e: { target: EventTarget | null; preventDefault: () => void }) => {
+      if (ref.current && ref.current.contains(e.target as Node)) {
+        e.preventDefault();
+      }
+    },
+    [],
+  );
+  return { ref, onPointerDownOutside };
+}
+
 /**
  * Compact CI indicator for the chat status bar — a "CI" prefix icon plus a
  * status glyph that mirrors the popover's bucket colors:
@@ -67,13 +109,18 @@ function chipStatus(pr: TaskPR): ChipStatus {
  * CI chip would be redundant.
  */
 export function PRStatusChip({ taskId }: { taskId: string | null }) {
-  const { pr } = useTaskPR(taskId);
-  // Subscribe at the chip level so the cache warms even when the
-  // top-bar PR button isn't mounted (e.g. small viewport that hides it).
-  usePRFeedbackBackgroundSync(pr);
-  if (!pr) return null;
-  if (pr.state === "merged" || pr.state === "closed") return null;
-  return <PRStatusChipInner pr={pr} />;
+  const { prs } = useTaskPR(taskId);
+  // Only open PRs are worth a CI chip — terminal PRs (merged/closed) are
+  // already conveyed by the chat-input banner. With multiple PRs the chip
+  // stays visible as long as at least one is still open.
+  const openPRs = prs.filter((p) => p.state !== "merged" && p.state !== "closed");
+  // Subscribe at the chip level so the cache warms even when the top-bar PR
+  // button isn't mounted (e.g. small viewport that hides it). The remaining
+  // PRs in a multi-PR task warm when the popover opens.
+  usePRFeedbackBackgroundSync(openPRs[0] ?? null);
+  if (openPRs.length === 0) return null;
+  if (openPRs.length === 1) return <PRStatusChipInner pr={openPRs[0]} />;
+  return <PRStatusChipMultiInner prs={openPRs} />;
 }
 
 type ChipButtonAttrs = {
@@ -94,7 +141,7 @@ function chipButtonAttrs(pr: TaskPR, status: ChipStatus): ChipButtonAttrs {
     "data-status": status,
     "data-pr-ready-to-merge": isPRReadyToMerge(pr) ? "true" : "false",
     "aria-label": `Pull request #${pr.pr_number} CI status`,
-    className: "cursor-pointer inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-xs",
+    className: CHIP_BUTTON_CLASS,
   };
 }
 
@@ -106,11 +153,11 @@ function PRStatusChipInner({ pr }: { pr: TaskPR }) {
 
 function PRStatusChipHoverCard({ pr }: { pr: TaskPR }) {
   const status = chipStatus(pr);
-  const triggerRef = useRef<HTMLButtonElement>(null);
+  const { ref, onPointerDownOutside } = useChipTriggerGuard();
   return (
     <HoverCard openDelay={HOVER_OPEN_DELAY_MS} closeDelay={HOVER_CLOSE_DELAY_MS}>
       <HoverCardTrigger asChild>
-        <button ref={triggerRef} type="button" {...chipButtonAttrs(pr, status)}>
+        <button ref={ref} type="button" {...chipButtonAttrs(pr, status)}>
           <IconChecklist className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
           <ChipStatusGlyph status={status} />
         </button>
@@ -120,19 +167,108 @@ function PRStatusChipHoverCard({ pr }: { pr: TaskPR }) {
         align="start"
         sideOffset={8}
         className="w-80 p-2.5"
-        onPointerDownOutside={(e) => {
-          // Radix HoverCard treats the trigger as outside the content's
-          // bounding box, so a click on the chip would auto-close the
-          // popover. Filter out trigger clicks so clicking the chip is
-          // a no-op while the popover stays open via hover.
-          if (triggerRef.current && triggerRef.current.contains(e.target as Node)) {
-            e.preventDefault();
-          }
-        }}
+        onPointerDownOutside={onPointerDownOutside}
       >
         <PRCIPopover pr={pr} enabled={true} />
       </HoverCardContent>
     </HoverCard>
+  );
+}
+
+function PRStatusChipMultiInner({ prs }: { prs: TaskPR[] }) {
+  const isMobile = useIsMobile();
+  if (isMobile) return <PRStatusChipMultiDrawer prs={prs} />;
+  return <PRStatusChipMultiHoverCard prs={prs} />;
+}
+
+type MultiChipButtonAttrs = {
+  "data-testid": "pr-status-chip";
+  "data-pr-count": number;
+  "data-status": ChipStatus;
+  "aria-label": string;
+  className: string;
+};
+
+function multiChipButtonAttrs(prs: TaskPR[], status: ChipStatus): MultiChipButtonAttrs {
+  return {
+    "data-testid": "pr-status-chip",
+    "data-pr-count": prs.length,
+    "data-status": status,
+    "aria-label": `${prs.length} pull requests CI status`,
+    className: CHIP_BUTTON_CLASS,
+  };
+}
+
+function MultiChipGlyph({ prs, status }: { prs: TaskPR[]; status: ChipStatus }) {
+  return (
+    <>
+      <IconChecklist className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+      <ChipStatusGlyph status={status} />
+      <span className="text-[9px] font-semibold leading-none tabular-nums">{prs.length}</span>
+    </>
+  );
+}
+
+function PRStatusChipMultiHoverCard({ prs }: { prs: TaskPR[] }) {
+  const status = aggregateChipStatus(prs);
+  const { ref, onPointerDownOutside } = useChipTriggerGuard();
+  return (
+    <HoverCard openDelay={HOVER_OPEN_DELAY_MS} closeDelay={HOVER_CLOSE_DELAY_MS}>
+      <HoverCardTrigger asChild>
+        <button ref={ref} type="button" {...multiChipButtonAttrs(prs, status)}>
+          <MultiChipGlyph prs={prs} status={status} />
+        </button>
+      </HoverCardTrigger>
+      <HoverCardContent
+        side="top"
+        align="start"
+        sideOffset={8}
+        className="w-96 p-2.5"
+        onPointerDownOutside={onPointerDownOutside}
+      >
+        <MultiPRCIPopover prs={prs} enabled={true} />
+      </HoverCardContent>
+    </HoverCard>
+  );
+}
+
+function PRStatusChipMultiDrawer({ prs }: { prs: TaskPR[] }) {
+  const status = aggregateChipStatus(prs);
+  const [open, setOpen] = useState(false);
+  return (
+    <Drawer open={open} onOpenChange={setOpen}>
+      <button
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={() => setOpen(true)}
+        {...multiChipButtonAttrs(prs, status)}
+      >
+        <MultiChipGlyph prs={prs} status={status} />
+      </button>
+      <DrawerContent data-testid="pr-status-chip-drawer" className="max-h-[80vh] flex flex-col">
+        <DrawerHeader className="flex flex-row items-center justify-between border-b py-2">
+          <DrawerTitle className="text-sm">{prs.length} pull requests</DrawerTitle>
+          <DrawerDescription className="sr-only">
+            Pull request CI status, reviews, and checks summary.
+          </DrawerDescription>
+          <DrawerClose asChild>
+            <Button
+              data-testid="pr-status-chip-drawer-close"
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Close PR status"
+              className="cursor-pointer"
+            >
+              <IconX className="h-4 w-4" />
+            </Button>
+          </DrawerClose>
+        </DrawerHeader>
+        <div className="flex-1 min-h-0 overflow-y-auto p-3" data-vaul-no-drag>
+          <MultiPRCIPopover prs={prs} enabled={open} />
+        </div>
+      </DrawerContent>
+    </Drawer>
   );
 }
 

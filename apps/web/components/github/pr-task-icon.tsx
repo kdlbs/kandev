@@ -121,6 +121,36 @@ export function areAllOpenPRsReadyToMerge(prs: TaskPR[]): boolean {
   return openPRs.length > 0 && openPRs.every(isPRReadyToMerge);
 }
 
+/**
+ * Attention rank for a single PR, reusing the same colour→rank table that
+ * drives the aggregate icon. Terminal PRs (merged/closed) return -1 so they're
+ * never the default focus when a task mixes open and finished PRs.
+ */
+export function prStatusRank(pr: TaskPR): number {
+  if (pr.state !== "open") return -1;
+  return STATUS_RANK[getPRStatusColor(pr)] ?? 0;
+}
+
+/**
+ * Picks the most attention-worthy PR to focus first in a multi-PR popover —
+ * the worst open status (failing > pending > awaiting-review > ready/passing).
+ * Ties resolve to the first PR (creation order). Falls back to the first PR
+ * when every PR is terminal so the popover always has something to show.
+ */
+export function pickDefaultPR(prs: TaskPR[]): TaskPR | null {
+  if (prs.length === 0) return null;
+  let best = prs[0];
+  let bestRank = prStatusRank(prs[0]);
+  for (const pr of prs) {
+    const rank = prStatusRank(pr);
+    if (rank > bestRank) {
+      best = pr;
+      bestRank = rank;
+    }
+  }
+  return best;
+}
+
 export function PRTaskIcon({ taskId }: { taskId: string }) {
   const prs = useAppStore((state) => state.taskPRs.byTaskId[taskId] ?? null);
 

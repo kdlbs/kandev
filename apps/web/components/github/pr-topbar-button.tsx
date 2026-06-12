@@ -30,6 +30,7 @@ import {
 } from "@/components/github/pr-task-icon";
 import { prTaskKey } from "@/components/github/pr-detail-panel";
 import { PRCIPopover } from "@/components/github/pr-ci-popover";
+import { MultiPRCIPopover } from "@/components/github/multi-pr-ci-popover";
 import { useAppStore } from "@/components/state-provider";
 import type { TaskPR } from "@/lib/types/github";
 
@@ -197,57 +198,100 @@ function PRSingleButton({ pr }: { pr: TaskPR }) {
 }
 
 function PRMultiButton({ prs }: { prs: TaskPR[] }) {
-  // Multi-PR keeps the original dropdown semantics on every form factor —
-  // the popover lives inside the dropdown trigger via hover only, and the
-  // per-PR rows are the click targets that addPRPanel.
-  return <PRMultiDropdown prs={prs} />;
-}
-
-function PRMultiDropdown({ prs }: { prs: TaskPR[] }) {
+  // Click still drives the dropdown (the explicit "jump to this PR's panel"
+  // affordance, and the only interaction on touch). Hover adds the aggregate
+  // CI popover with a tab per PR — desktop only, suppressed on touch where
+  // there is no hover.
   const addPRPanel = useDockviewStore((s) => s.addPRPanel);
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
+  const { isMobile, open, onOpenChange, handleEnter, handleLeave } = usePopoverInteractions();
   const aggColor = aggregatePRStatusColor(prs);
-  return (
+
+  // The trigger is the click target for the dropdown AND the hover anchor for
+  // the popover. On desktop we wrap it in a PopoverAnchor so all the asChild
+  // layers (Tooltip → Popover → Dropdown) collapse onto the single Button and
+  // the popover positions against it.
+  const triggerButton = (
+    <DropdownMenuTrigger asChild>
+      <Button
+        data-testid="pr-topbar-button"
+        data-pr-count={prs.length}
+        size="sm"
+        variant="outline"
+        className="cursor-pointer gap-1.5 px-2"
+        onMouseEnter={handleEnter}
+        onMouseLeave={handleLeave}
+      >
+        <IconGitPullRequest className={`h-4 w-4 ${aggColor}`} />
+        <span className="text-xs font-medium">{prs.length} PRs</span>
+        <IconChevronDown className="h-3 w-3 text-muted-foreground" />
+      </Button>
+    </DropdownMenuTrigger>
+  );
+
+  const dropdown = (
     <DropdownMenu>
       <Tooltip>
         <TooltipTrigger asChild>
-          <DropdownMenuTrigger asChild>
-            <Button
-              data-testid="pr-topbar-button"
-              data-pr-count={prs.length}
-              size="sm"
-              variant="outline"
-              className="cursor-pointer gap-1.5 px-2"
-            >
-              <IconGitPullRequest className={`h-4 w-4 ${aggColor}`} />
-              <span className="text-xs font-medium">{prs.length} PRs</span>
-              <IconChevronDown className="h-3 w-3 text-muted-foreground" />
-            </Button>
-          </DropdownMenuTrigger>
+          {isMobile ? triggerButton : <PopoverAnchor asChild>{triggerButton}</PopoverAnchor>}
         </TooltipTrigger>
         <TooltipContent>{prs.length} pull requests linked to this task — open one</TooltipContent>
       </Tooltip>
-      <DropdownMenuContent align="end" className="w-72">
-        <DropdownMenuLabel className="text-xs">Pull requests</DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        {prs.map((pr) => (
-          <DropdownMenuItem
-            key={pr.id}
-            onClick={() => addPRPanel(prTaskKey(pr), activeSessionId)}
-            className="cursor-pointer gap-2"
-            data-testid={`pr-topbar-menu-item-${pr.pr_number}`}
-          >
-            <IconGitPullRequest className={`h-4 w-4 shrink-0 ${getPRStatusColor(pr)}`} />
-            <div className="flex flex-col min-w-0 flex-1">
-              <span className="text-xs font-medium">
-                {pr.repo} #{pr.pr_number}
-              </span>
-              <span className="text-[11px] text-muted-foreground truncate">{pr.pr_title}</span>
-            </div>
-            <PRStatusIcon pr={pr} />
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
+      <MultiPRMenuContent prs={prs} />
     </DropdownMenu>
+  );
+
+  if (isMobile) return dropdown;
+
+  return (
+    <Popover open={open} onOpenChange={onOpenChange}>
+      {dropdown}
+      <PopoverContent
+        data-testid="pr-topbar-popover"
+        align="end"
+        sideOffset={4}
+        className="w-96"
+        onMouseEnter={handleEnter}
+        onMouseLeave={handleLeave}
+        onOpenAutoFocus={(e) => e.preventDefault()}
+      >
+        <MultiPRCIPopover
+          prs={prs}
+          enabled={open}
+          onOpenDetailPanel={(pr) => {
+            addPRPanel(prTaskKey(pr), activeSessionId);
+            onOpenChange(false);
+          }}
+        />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function MultiPRMenuContent({ prs }: { prs: TaskPR[] }) {
+  const addPRPanel = useDockviewStore((s) => s.addPRPanel);
+  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
+  return (
+    <DropdownMenuContent align="end" className="w-72">
+      <DropdownMenuLabel className="text-xs">Pull requests</DropdownMenuLabel>
+      <DropdownMenuSeparator />
+      {prs.map((pr) => (
+        <DropdownMenuItem
+          key={pr.id}
+          onClick={() => addPRPanel(prTaskKey(pr), activeSessionId)}
+          className="cursor-pointer gap-2"
+          data-testid={`pr-topbar-menu-item-${pr.pr_number}`}
+        >
+          <IconGitPullRequest className={`h-4 w-4 shrink-0 ${getPRStatusColor(pr)}`} />
+          <div className="flex flex-col min-w-0 flex-1">
+            <span className="text-xs font-medium">
+              {pr.repo} #{pr.pr_number}
+            </span>
+            <span className="text-[11px] text-muted-foreground truncate">{pr.pr_title}</span>
+          </div>
+          <PRStatusIcon pr={pr} />
+        </DropdownMenuItem>
+      ))}
+    </DropdownMenuContent>
   );
 }

@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
-import { PRStatusChip } from "./pr-status-chip";
+import { PRStatusChip, aggregateChipStatus } from "./pr-status-chip";
 import type { AppState } from "@/lib/state/store";
 import type { TaskPR } from "@/lib/types/github";
 
@@ -79,9 +79,16 @@ afterEach(() => {
 });
 
 const CHIP_TESTID = "pr-status-chip";
+const ATTR_PR_NUMBER = "data-pr-number";
+const ATTR_STATUS = "data-status";
+const DRAWER_SELECTOR = "[data-testid='pr-status-chip-drawer']";
 const seededState: Partial<AppState> = {
   taskPRs: { byTaskId: { "task-1": [makePR()] } },
 };
+
+function multiState(prs: TaskPR[]): Partial<AppState> {
+  return { taskPRs: { byTaskId: { "task-1": prs } } };
+}
 
 describe("PRStatusChip", () => {
   it("returns null when the task has no PR", () => {
@@ -117,15 +124,15 @@ describe("PRStatusChip", () => {
       act(() => {
         fireEvent.click(chip);
       });
-      expect(document.querySelector("[data-testid='pr-status-chip-drawer']")).toBeNull();
+      expect(document.querySelector(DRAWER_SELECTOR)).toBeNull();
     });
 
     it("exposes the canonical data attributes that desktop tests rely on", () => {
       renderWithStore(seededState, <PRStatusChip taskId="task-1" />);
       const chip = screen.getByTestId(CHIP_TESTID);
-      expect(chip.getAttribute("data-pr-number")).toBe("42");
+      expect(chip.getAttribute(ATTR_PR_NUMBER)).toBe("42");
       expect(chip.getAttribute("data-pr-state")).toBe("open");
-      expect(chip.getAttribute("data-status")).toBe("passed");
+      expect(chip.getAttribute(ATTR_STATUS)).toBe("passed");
       expect(chip.getAttribute("data-pr-ready-to-merge")).toBe("true");
     });
   });
@@ -137,14 +144,14 @@ describe("PRStatusChip", () => {
       renderWithStore(seededState, <PRStatusChip taskId="task-1" />);
       // Drawer must not be in the DOM before the user taps the chip — relied
       // on by the e2e spec's `toHaveCount(0)` precondition.
-      expect(document.querySelector("[data-testid='pr-status-chip-drawer']")).toBeNull();
+      expect(document.querySelector(DRAWER_SELECTOR)).toBeNull();
 
       const chip = screen.getByTestId(CHIP_TESTID);
       act(() => {
         fireEvent.click(chip);
       });
 
-      const drawer = document.querySelector("[data-testid='pr-status-chip-drawer']");
+      const drawer = document.querySelector(DRAWER_SELECTOR);
       expect(drawer).not.toBeNull();
       // Inner popover body + close button render inside the drawer.
       expect(document.querySelector("[data-testid='pr-topbar-popover-inner']")).not.toBeNull();
@@ -154,9 +161,9 @@ describe("PRStatusChip", () => {
     it("preserves the same data attributes as the desktop chip", () => {
       renderWithStore(seededState, <PRStatusChip taskId="task-1" />);
       const chip = screen.getByTestId(CHIP_TESTID);
-      expect(chip.getAttribute("data-pr-number")).toBe("42");
+      expect(chip.getAttribute(ATTR_PR_NUMBER)).toBe("42");
       expect(chip.getAttribute("data-pr-state")).toBe("open");
-      expect(chip.getAttribute("data-status")).toBe("passed");
+      expect(chip.getAttribute(ATTR_STATUS)).toBe("passed");
       expect(chip.getAttribute("data-pr-ready-to-merge")).toBe("true");
     });
 
@@ -165,7 +172,7 @@ describe("PRStatusChip", () => {
         { taskPRs: { byTaskId: { "task-1": [makePR({ checks_state: "failure" })] } } },
         <PRStatusChip taskId="task-1" />,
       );
-      expect(screen.getByTestId(CHIP_TESTID).getAttribute("data-status")).toBe("failed");
+      expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("failed");
     });
 
     // NOTE: vaul's close animation depends on CSS transition events that
@@ -196,6 +203,72 @@ describe("PRStatusChip", () => {
         fireEvent.click(screen.getByTestId(CHIP_TESTID));
       });
       expect(document.querySelector("[data-testid='pr-checks-empty']")).not.toBeNull();
+    });
+  });
+});
+
+describe("aggregateChipStatus", () => {
+  it("returns 'neutral' for an empty list", () => {
+    expect(aggregateChipStatus([])).toBe("neutral");
+  });
+
+  it("lets one failing PR dominate a passing sibling", () => {
+    const passing = makePR();
+    const failing = makePR({ id: "fail", checks_state: "failure" });
+    expect(aggregateChipStatus([passing, failing])).toBe("failed");
+  });
+
+  it("returns 'in_progress' when the worst is a pending PR", () => {
+    const passing = makePR();
+    const pending = makePR({ id: "pend", review_state: "", checks_state: "pending" });
+    expect(aggregateChipStatus([passing, pending])).toBe("in_progress");
+  });
+});
+
+describe("PRStatusChip — multiple PRs", () => {
+  const TWO_OPEN = [
+    makePR({ id: "a", pr_number: 1 }),
+    makePR({ id: "b", pr_number: 2, checks_state: "failure" }),
+  ];
+
+  it("renders one aggregate chip with a PR count and worst-of status", () => {
+    renderWithStore(multiState(TWO_OPEN), <PRStatusChip taskId="task-1" />);
+    const chip = screen.getByTestId(CHIP_TESTID);
+    expect(chip.getAttribute("data-pr-count")).toBe("2");
+    // PR #2 is failing, so the aggregate glyph is red.
+    expect(chip.getAttribute(ATTR_STATUS)).toBe("failed");
+  });
+
+  it("stays visible while at least one PR is still open", () => {
+    renderWithStore(
+      multiState([makePR({ id: "a", state: "merged" }), makePR({ id: "b", pr_number: 2 })]),
+      <PRStatusChip taskId="task-1" />,
+    );
+    // Only one PR is open, so it renders as the single-PR chip (its number).
+    expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_PR_NUMBER)).toBe("2");
+  });
+
+  it("returns null only when every PR is terminal", () => {
+    renderWithStore(
+      multiState([makePR({ id: "a", state: "merged" }), makePR({ id: "b", state: "closed" })]),
+      <PRStatusChip taskId="task-1" />,
+    );
+    expect(screen.queryByTestId(CHIP_TESTID)).toBeNull();
+  });
+
+  describe("mobile drawer", () => {
+    beforeEach(() => isMobileMock.mockReturnValue(true));
+
+    it("opens a drawer with the tabbed multi-PR popover", () => {
+      renderWithStore(multiState(TWO_OPEN), <PRStatusChip taskId="task-1" />);
+      act(() => {
+        fireEvent.click(screen.getByTestId(CHIP_TESTID));
+      });
+      expect(document.querySelector(DRAWER_SELECTOR)).not.toBeNull();
+      expect(document.querySelector("[data-testid='pr-multi-popover']")).not.toBeNull();
+      // One tab per PR.
+      expect(document.querySelector("[data-testid='pr-popover-tab-1']")).not.toBeNull();
+      expect(document.querySelector("[data-testid='pr-popover-tab-2']")).not.toBeNull();
     });
   });
 });

@@ -6,6 +6,8 @@ import {
   getPRTooltip,
   isPRAwaitingReview,
   isPRReadyToMerge,
+  pickDefaultPR,
+  prStatusRank,
 } from "./pr-task-icon";
 import type { TaskPR } from "@/lib/types/github";
 
@@ -483,6 +485,60 @@ describe("areAllOpenPRsReadyToMerge", () => {
 
   it("is true when every open PR is ready", () => {
     expect(areAllOpenPRsReadyToMerge([ready(), ready()])).toBe(true);
+  });
+});
+
+describe("prStatusRank", () => {
+  it("returns -1 for terminal PRs so they're never the default focus", () => {
+    expect(prStatusRank(makePR({ state: "merged" }))).toBe(-1);
+    expect(prStatusRank(makePR({ state: "closed" }))).toBe(-1);
+  });
+
+  it("ranks a failing open PR above a passing open PR", () => {
+    const failing = makePR({ state: "open", checks_state: "failure" });
+    const passing = makePR({
+      state: "open",
+      review_state: "approved",
+      checks_state: "success",
+      mergeable_state: "clean",
+    });
+    expect(prStatusRank(failing)).toBeGreaterThan(prStatusRank(passing));
+  });
+});
+
+describe("pickDefaultPR", () => {
+  it("returns null for an empty list", () => {
+    expect(pickDefaultPR([])).toBeNull();
+  });
+
+  it("picks the worst-status open PR (failing over passing)", () => {
+    const passing = makePR({
+      id: "pass",
+      state: "open",
+      review_state: "approved",
+      checks_state: "success",
+      mergeable_state: "clean",
+    });
+    const failing = makePR({ id: "fail", state: "open", checks_state: "failure" });
+    expect(pickDefaultPR([passing, failing])?.id).toBe("fail");
+  });
+
+  it("prefers an open PR over a terminal one even when listed first", () => {
+    const merged = makePR({ id: "merged", state: "merged" });
+    const open = makePR({ id: "open", state: "open", checks_state: "pending" });
+    expect(pickDefaultPR([merged, open])?.id).toBe("open");
+  });
+
+  it("breaks ties on the first PR (creation order)", () => {
+    const first = makePR({ id: "first", state: "open", checks_state: "failure" });
+    const second = makePR({ id: "second", state: "open", checks_state: "failure" });
+    expect(pickDefaultPR([first, second])?.id).toBe("first");
+  });
+
+  it("falls back to the first PR when every PR is terminal", () => {
+    const merged = makePR({ id: "merged", state: "merged" });
+    const closed = makePR({ id: "closed", state: "closed" });
+    expect(pickDefaultPR([merged, closed])?.id).toBe("merged");
   });
 });
 

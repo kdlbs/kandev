@@ -591,7 +591,3 @@ function useAddCheckToContext(pr: TaskPR): ((message: string) => void) | null {
   );
   return sessionId ? handler : null;
 }
-
-// Multi-PR aggregate popover deferred — multi-PR tasks currently keep the
-// existing DropdownMenu trigger (no hover popover). The aggregate component
-// will land alongside that hover variant when it ships, see follow-up.
