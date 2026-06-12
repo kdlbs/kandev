@@ -59,7 +59,7 @@ func (s *Service) handleNewJiraIssue(ctx context.Context, event *bus.Event) erro
 		// source so behaviour matches the pre-cache code path.
 		src = NewJiraWatcherSource(nil, s.logger)
 	}
-	s.dispatchWatcherEvent(ctx, "jira", src, evt,
+	s.dispatchWatcherEvent(ctx, src, evt,
 		zap.String("issue_watch_id", evt.IssueWatchID),
 		zap.String("issue_key", evt.Issue.Key))
 	return nil

@@ -76,6 +76,21 @@ const (
 // SSR reload, alongside the in-memory re-apply on context reset. See issue #1183.
 const SessionMetaKeySessionMode = "session_mode"
 
+// SessionMetaKeyRuntimeConfig records user-selected session runtime settings
+// (model, mode, and dynamic config options) separately from the immutable-ish
+// agent profile snapshot that seeded the session.
+const SessionMetaKeyRuntimeConfig = "runtime_config"
+
+// SessionRuntimeConfig is persisted under
+// TaskSession.Metadata[SessionMetaKeyRuntimeConfig]. It captures live ACP
+// settings chosen after session start so process resume can restore the same
+// model/config instead of reverting to profile defaults.
+type SessionRuntimeConfig struct {
+	Model         string            `json:"model,omitempty"`
+	Mode          string            `json:"mode,omitempty"`
+	ConfigOptions map[string]string `json:"config_options,omitempty"`
+}
+
 // SessionMetaKeyPendingStepCompletion stores the agent's (or manual fallback's)
 // step-complete signal under TaskSession.Metadata. ADR 0015: the orchestrator
 // reads this on turn-end for steps with AutoAdvanceRequiresSignal=true and
@@ -102,6 +117,67 @@ type PendingStepCompletionSignal struct {
 	Handoff    string    `json:"handoff,omitempty"`
 	Blockers   string    `json:"blockers,omitempty"`
 	SignaledAt time.Time `json:"signaled_at"`
+}
+
+// LoadSessionRuntimeConfig decodes the runtime-config bag entry from session
+// metadata. It tolerates both typed values and JSON-rehydrated maps.
+func LoadSessionRuntimeConfig(metadata map[string]interface{}) (SessionRuntimeConfig, bool) {
+	if metadata == nil {
+		return SessionRuntimeConfig{}, false
+	}
+	raw, ok := metadata[SessionMetaKeyRuntimeConfig]
+	if !ok || raw == nil {
+		return SessionRuntimeConfig{}, false
+	}
+	switch v := raw.(type) {
+	case SessionRuntimeConfig:
+		return v, !v.IsZero()
+	case map[string]string:
+		out := SessionRuntimeConfig{
+			Model:         v["model"],
+			Mode:          v["mode"],
+			ConfigOptions: maps.Clone(v),
+		}
+		delete(out.ConfigOptions, "model")
+		delete(out.ConfigOptions, "mode")
+		if len(out.ConfigOptions) == 0 {
+			out.ConfigOptions = nil
+		}
+		return out, !out.IsZero()
+	case map[string]interface{}:
+		out := SessionRuntimeConfig{
+			Model: StringFromAny(v["model"]),
+			Mode:  StringFromAny(v["mode"]),
+		}
+		if opts := stringMapFromAny(v["config_options"]); len(opts) > 0 {
+			out.ConfigOptions = opts
+		}
+		return out, !out.IsZero()
+	default:
+		return SessionRuntimeConfig{}, false
+	}
+}
+
+// IsZero reports whether the runtime config carries any selected value.
+func (c SessionRuntimeConfig) IsZero() bool {
+	return c.Model == "" && c.Mode == "" && len(c.ConfigOptions) == 0
+}
+
+func stringMapFromAny(raw interface{}) map[string]string {
+	switch v := raw.(type) {
+	case map[string]string:
+		return maps.Clone(v)
+	case map[string]interface{}:
+		out := make(map[string]string, len(v))
+		for key, value := range v {
+			if str := StringFromAny(value); str != "" {
+				out[key] = str
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 // LoadPendingStepSignal decodes the pending-completion bag entry from a

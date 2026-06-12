@@ -249,9 +249,16 @@ type mockRepository struct {
 	// Track calls for verification
 	createTaskSessionCalls     []*models.TaskSession
 	updateTaskSessionCalls     []*models.TaskSession
+	setSessionMetadataKeyCalls []setSessionMetadataKeyCall
 	setSessionPrimaryCalls     []string
 	createTaskEnvironmentCalls []*models.TaskEnvironment
 	updateTaskEnvironmentCalls []*models.TaskEnvironment
+}
+
+type setSessionMetadataKeyCall struct {
+	SessionID string
+	Key       string
+	Value     interface{}
 }
 
 func newMockRepository() *mockRepository {
@@ -608,6 +615,21 @@ func (m *mockRepository) UpdateSessionMetadata(ctx context.Context, sessionID st
 	return nil
 }
 func (m *mockRepository) SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.setSessionMetadataKeyCalls = append(m.setSessionMetadataKeyCalls, setSessionMetadataKeyCall{
+		SessionID: sessionID,
+		Key:       key,
+		Value:     value,
+	})
+	session := m.sessions[sessionID]
+	if session == nil {
+		return nil
+	}
+	if session.Metadata == nil {
+		session.Metadata = make(map[string]interface{})
+	}
+	session.Metadata[key] = value
 	return nil
 }
 func (m *mockRepository) GetLastAgentMessage(_ context.Context, _ string) (string, error) {

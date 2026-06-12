@@ -382,6 +382,22 @@ export function migrateEnvKeyedData(
   migrate(draft.userShells.loaded);
 }
 
+function buildContextWindowActions(set: ImmerSet) {
+  return {
+    setContextWindow: (
+      sessionId: string,
+      contextWindow: Parameters<SessionRuntimeSlice["setContextWindow"]>[1],
+    ) =>
+      set((draft) => {
+        draft.contextWindow.bySessionId[sessionId] = contextWindow;
+      }),
+    clearContextWindow: (sessionId: string) =>
+      set((draft) => {
+        delete draft.contextWindow.bySessionId[sessionId];
+      }),
+  };
+}
+
 export const createSessionRuntimeSlice: StateCreator<
   SessionRuntimeSlice,
   [["zustand/immer", never]],
@@ -452,10 +468,7 @@ export const createSessionRuntimeSlice: StateCreator<
       draft.environmentIdBySessionId[sessionId] = environmentId;
       migrateEnvKeyedData(draft, sessionId, environmentId);
     }),
-  setContextWindow: (sessionId, contextWindow) =>
-    set((draft) => {
-      draft.contextWindow.bySessionId[sessionId] = contextWindow;
-    }),
+  ...buildContextWindowActions(set),
   ...buildSessionCommitActions(set),
   setAvailableCommands: (sessionId, commands) =>
     set((draft) => {

@@ -3,6 +3,7 @@
 import {
   IconBrandGithub,
   IconBrandGitlab,
+  IconBrandSentry,
   IconBrandSlack,
   IconHexagon,
   IconPlugConnected,
@@ -18,6 +19,7 @@ const ITEMS: Array<{ href: string; label: string; icon: TablerIcon }> = [
   { href: `${ROOT_HREF}/gitlab`, label: "GitLab", icon: IconBrandGitlab },
   { href: `${ROOT_HREF}/jira`, label: "Jira", icon: IconTicket },
   { href: `${ROOT_HREF}/linear`, label: "Linear", icon: IconHexagon },
+  { href: `${ROOT_HREF}/sentry`, label: "Sentry", icon: IconBrandSentry },
   { href: `${ROOT_HREF}/slack`, label: "Slack", icon: IconBrandSlack },
 ];
 

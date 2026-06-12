@@ -65,6 +65,8 @@ func (s *stubWatcherSource) WatchID(_ any) string { return "" }
 
 func (s *stubWatcherSource) MaxInflightTasks(_ any) *int { return nil }
 
+func (s *stubWatcherSource) WatchMetadataKey() string { return "" }
+
 func (s *stubWatcherSource) SelfHeal(_ context.Context, _ any, cause string) error {
 	s.selfHealCalls++
 	s.selfHealCause = cause

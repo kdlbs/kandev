@@ -9,7 +9,20 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 )
+
+type nilTaskSessionRepo struct {
+	repository.SessionRepository
+}
+
+func (nilTaskSessionRepo) GetTaskSession(context.Context, string) (*models.TaskSession, error) {
+	return nil, nil
+}
+
+func (nilTaskSessionRepo) SetSessionMetadataKey(context.Context, string, string, interface{}) error {
+	panic("SetSessionMetadataKey should not be called for a nil session")
+}
 
 func TestGetWorkspaceInfoForSession_BasicFields(t *testing.T) {
 	svc, _, repo := createTestService(t)
@@ -75,6 +88,69 @@ func TestGetWorkspaceInfoForSession_BasicFields(t *testing.T) {
 	}
 	if info.ACPSessionID != "acp-123" {
 		t.Errorf("expected ACPSessionID 'acp-123', got %q", info.ACPSessionID)
+	}
+}
+
+func TestGetWorkspaceInfoForSession_RuntimeConfigOptionsSetOnlyWhenOptionsPresent(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+
+	modelOnly := &models.TaskSession{
+		ID:        "session-model-only",
+		TaskID:    "task-123",
+		State:     models.TaskSessionStateCompleted,
+		StartedAt: now,
+		UpdatedAt: now,
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyRuntimeConfig: models.SessionRuntimeConfig{Model: "gpt-5.3-codex-spark"},
+		},
+	}
+	if err := repo.CreateTaskSession(ctx, modelOnly); err != nil {
+		t.Fatalf("failed to create model-only session: %v", err)
+	}
+	modelOnlyInfo, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-model-only")
+	if err != nil {
+		t.Fatalf("GetWorkspaceInfoForSession model-only: %v", err)
+	}
+	if modelOnlyInfo.RuntimeConfigOptionsSet {
+		t.Fatal("model-only runtime config should not mark config options as set")
+	}
+
+	withOptions := &models.TaskSession{
+		ID:        "session-with-options",
+		TaskID:    "task-123",
+		State:     models.TaskSessionStateCompleted,
+		StartedAt: now,
+		UpdatedAt: now,
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyRuntimeConfig: models.SessionRuntimeConfig{
+				Model:         "gpt-5.3-codex-spark",
+				ConfigOptions: map[string]string{"reasoning_effort": "low"},
+			},
+		},
+	}
+	if err := repo.CreateTaskSession(ctx, withOptions); err != nil {
+		t.Fatalf("failed to create options session: %v", err)
+	}
+	optionsInfo, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-with-options")
+	if err != nil {
+		t.Fatalf("GetWorkspaceInfoForSession with options: %v", err)
+	}
+	if !optionsInfo.RuntimeConfigOptionsSet {
+		t.Fatal("runtime config with options should mark config options as set")
+	}
+}
+
+func TestPersistSessionRuntimeModelMissingSessionDoesNotPanic(t *testing.T) {
+	svc := &Service{sessions: nilTaskSessionRepo{}}
+
+	err := svc.PersistSessionRuntimeModel(context.Background(), "missing-session", "gpt-5.3-codex-spark")
+
+	if err == nil {
+		t.Fatal("expected missing session error")
 	}
 }
 

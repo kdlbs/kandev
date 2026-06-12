@@ -999,6 +999,7 @@ func (s *Service) persistSessionMode(ctx context.Context, sessionID, modeID stri
 			zap.String("mode", modeID),
 			zap.Error(err))
 	}
+	s.persistSessionRuntimeConfig(ctx, sessionID, "", modeID, nil)
 }
 
 // handleAgentCapabilitiesEvent broadcasts agent_capabilities events to the WebSocket.
@@ -1033,7 +1034,7 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 	// Persist the agent-reported current model so SSR can render the model
 	// selector trigger with the right value on a page reload instead of
 	// flashing the profile default before the WS catches up.
-	s.persistSessionModel(ctx, sessionID, payload.Data.CurrentModelID)
+	s.persistSessionModelAndRuntimeConfig(ctx, sessionID, payload.Data.CurrentModelID, "", payload.Data.ConfigOptions)
 
 	eventPayload := lifecycle.SessionModelsEventPayload{
 		TaskID:         payload.TaskID,
@@ -1072,6 +1073,69 @@ func (s *Service) persistSessionModel(ctx context.Context, sessionID, model stri
 	if err != nil {
 		return
 	}
+	s.persistSessionModelOnSession(ctx, sessionID, session, model)
+}
+
+func (s *Service) persistSessionModelAndRuntimeConfig(ctx context.Context, sessionID, model, mode string, options []streams.ConfigOption) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to load session for session model persistence",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	if session == nil {
+		return
+	}
+	if model != "" {
+		s.persistSessionModelOnSession(ctx, sessionID, session, model)
+	}
+	s.persistSessionRuntimeConfigOnSession(ctx, sessionID, session, model, mode, options)
+}
+
+func (s *Service) persistSessionRuntimeConfig(ctx context.Context, sessionID, model, mode string, options []streams.ConfigOption) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to load session for runtime config persistence",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	if session == nil {
+		return
+	}
+	s.persistSessionRuntimeConfigOnSession(ctx, sessionID, session, model, mode, options)
+}
+
+func (s *Service) persistSessionRuntimeConfigOnSession(ctx context.Context, sessionID string, session *models.TaskSession, model, mode string, options []streams.ConfigOption) {
+	cfg, _ := models.LoadSessionRuntimeConfig(session.Metadata)
+	previousModel := cfg.Model
+	applySessionRuntimeConfigUpdate(&cfg, model, mode, options)
+	if cfg.IsZero() {
+		return
+	}
+	writeCtx := context.WithoutCancel(ctx)
+	if err := s.repo.SetSessionMetadataKey(writeCtx, sessionID, models.SessionMetaKeyRuntimeConfig, cfg); err != nil {
+		s.logger.Warn("failed to persist session runtime config",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	if cfg.Model != "" {
+		s.runtimeModelBySession.Store(sessionID, cfg.Model)
+	}
+	if cfg.Model != "" && cfg.Model != previousModel {
+		if err := s.repo.SetSessionMetadataKey(writeCtx, sessionID, "context_window", nil); err != nil {
+			s.logger.Warn("failed to clear stale context window after runtime model change",
+				zap.String("session_id", sessionID),
+				zap.String("previous_model", previousModel),
+				zap.String("model", cfg.Model),
+				zap.Error(err))
+		}
+	}
+}
+
+func (s *Service) persistSessionModelOnSession(ctx context.Context, sessionID string, session *models.TaskSession, model string) {
 	if session.AgentProfileSnapshot == nil {
 		session.AgentProfileSnapshot = make(map[string]interface{})
 	}
@@ -1083,6 +1147,27 @@ func (s *Service) persistSessionModel(ctx context.Context, sessionID, model stri
 	// Invalidate the message creator's model cache so subsequent messages use the new model.
 	if s.messageCreator != nil {
 		s.messageCreator.InvalidateModelCache(sessionID)
+	}
+}
+
+func applySessionRuntimeConfigUpdate(cfg *models.SessionRuntimeConfig, model, mode string, options []streams.ConfigOption) {
+	if model != "" {
+		cfg.Model = model
+	}
+	if mode != "" {
+		cfg.Mode = mode
+	}
+	for _, option := range options {
+		if option.ID == "" || option.CurrentValue == "" {
+			continue
+		}
+		if cfg.ConfigOptions == nil {
+			cfg.ConfigOptions = make(map[string]string)
+		}
+		cfg.ConfigOptions[option.ID] = option.CurrentValue
+		if option.ID == "model" || option.Category == "model" {
+			cfg.Model = option.CurrentValue
+		}
 	}
 }
 

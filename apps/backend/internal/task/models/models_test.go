@@ -8,6 +8,34 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+func TestLoadSessionRuntimeConfigMapStringExtractsReservedKeys(t *testing.T) {
+	cfg, ok := LoadSessionRuntimeConfig(map[string]interface{}{
+		SessionMetaKeyRuntimeConfig: map[string]string{
+			"model":            "gpt-5.3-codex-spark",
+			"mode":             "acceptEdits",
+			"reasoning_effort": "low",
+		},
+	})
+	if !ok {
+		t.Fatal("expected runtime config")
+	}
+	if cfg.Model != "gpt-5.3-codex-spark" {
+		t.Fatalf("Model = %q", cfg.Model)
+	}
+	if cfg.Mode != "acceptEdits" {
+		t.Fatalf("Mode = %q", cfg.Mode)
+	}
+	if got := cfg.ConfigOptions["reasoning_effort"]; got != "low" {
+		t.Fatalf("reasoning_effort = %q", got)
+	}
+	if _, ok := cfg.ConfigOptions["model"]; ok {
+		t.Fatal("model key should not remain in ConfigOptions")
+	}
+	if _, ok := cfg.ConfigOptions["mode"]; ok {
+		t.Fatal("mode key should not remain in ConfigOptions")
+	}
+}
+
 func TestTaskStateConstants(t *testing.T) {
 	tests := []struct {
 		name     string

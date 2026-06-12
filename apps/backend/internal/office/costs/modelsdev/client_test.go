@@ -22,12 +22,15 @@ const sampleDataset = `{
       "claude-sonnet-4-5": {"cost": {"input": 3.0,   "output": 15.0, "cache_read": 0.3, "cache_write": 3.75}}
     }
   },
-  "openai": {
-    "models": {
-      "gpt-5-mini":     {"cost": {"input": 0.4,  "output": 1.6, "cache_read": 0.1, "cache_write": 0.5}},
-      "gpt-5.4-mini":   {"cost": {"input": 0.5,  "output": 2.0, "cache_read": 0.1, "cache_write": 0.6}}
-    }
-  },
+	  "openai": {
+	    "models": {
+	      "gpt-5-mini":     {"cost": {"input": 0.4,  "output": 1.6, "cache_read": 0.1, "cache_write": 0.5}},
+	      "gpt-5.3-codex-spark": {"cost": {"input": 0.4, "output": 1.6}, "limit": {"context": 128000}},
+	      "gpt-5.4-zero": {"cost": {"input": 0.4, "output": 1.6}, "limit": {"context": 0}},
+	      "gpt.5-4.zero": {"cost": {"input": 0.4, "output": 1.6}, "limit": {"context": 64000}},
+	      "gpt-5.4-mini":   {"cost": {"input": 0.5,  "output": 2.0, "cache_read": 0.1, "cache_write": 0.6}, "limit": {"context": 256000}}
+	    }
+	  },
   "google": {
     "models": {
       "gemini-2.5-pro": {"cost": {"input": 1.25, "output": 10.0, "cache_read": 0.31, "cache_write": 1.56}}
@@ -129,6 +132,76 @@ func TestClient_NormalizesCodexAndOpencodeForms(t *testing.T) {
 	// opencode-acp: github-copilot/gpt-5-mini -> gpt-5-mini.
 	if _, ok := c.LookupForModel(context.Background(), "github-copilot/gpt-5-mini"); !ok {
 		t.Error("expected hit on opencode-acp shaped id")
+	}
+}
+
+func TestClient_LookupModelInfo(t *testing.T) {
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, "models-dev.json")
+	c, _ := newTestClient(t, cachePath)
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	info, ok := c.LookupModelInfo(context.Background(), "gpt-5.3-codex-spark")
+	if !ok {
+		t.Fatal("expected hit on gpt-5.3-codex-spark")
+	}
+	if info.ContextWindow != 128000 {
+		t.Errorf("ContextWindow = %d, want 128000", info.ContextWindow)
+	}
+}
+
+func TestClient_LookupModelInfoNormalizesModelID(t *testing.T) {
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, "models-dev.json")
+	c, _ := newTestClient(t, cachePath)
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	info, ok := c.LookupModelInfo(context.Background(), "github-copilot/gpt-5.4-mini/medium")
+	if !ok {
+		t.Fatal("expected hit on normalized gpt-5.4-mini")
+	}
+	if info.ContextWindow != 256000 {
+		t.Errorf("ContextWindow = %d, want 256000", info.ContextWindow)
+	}
+}
+
+func TestClient_LookupModelInfoTriesSwappedCandidateAfterZeroLimit(t *testing.T) {
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, "models-dev.json")
+	c, _ := newTestClient(t, cachePath)
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	info, ok := c.LookupModelInfo(context.Background(), "gpt-5.4-zero")
+	if !ok {
+		t.Fatal("expected fallback hit on swapped model id")
+	}
+	if info.ContextWindow != 64000 {
+		t.Errorf("ContextWindow = %d, want 64000", info.ContextWindow)
+	}
+}
+
+func TestClient_LookupModelInfoMissesGracefully(t *testing.T) {
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, "models-dev.json")
+	c, _ := newTestClient(t, cachePath)
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	if _, ok := c.LookupModelInfo(context.Background(), "claude-opus-4-7"); ok {
+		t.Error("expected miss when model has no context limit")
+	}
+	if _, ok := c.LookupModelInfo(context.Background(), "gpt-unknown"); ok {
+		t.Error("expected miss on unknown model")
+	}
+	if _, ok := c.LookupModelInfo(context.Background(), "sonnet"); ok {
+		t.Error("expected miss on logical alias sonnet")
 	}
 }
 

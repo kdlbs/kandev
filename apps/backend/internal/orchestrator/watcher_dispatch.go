@@ -148,6 +148,13 @@ type WatcherSource interface {
 	// this to decide whether to defer the event.
 	MaxInflightTasks(evt any) *int
 
+	// WatchMetadataKey returns the task-metadata key under which this
+	// integration records the originating watch id (the same key written in
+	// BuildTaskRequest's Metadata map). The throttle gate passes it to the
+	// task counter so the repository can tally open tasks for a watch WITHOUT
+	// hard-coding which integrations exist — the integration owns its own key.
+	WatchMetadataKey() string
+
 	// SelfHeal disables the watcher row that produced this event and stamps
 	// a human-readable cause so the settings UI can show "disabled because
 	// the bound agent profile was removed". Called by the coordinator

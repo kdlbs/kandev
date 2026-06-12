@@ -272,6 +272,13 @@ cd apps/web && npx playwright test --config e2e/playwright.config.ts --shard=2/1
 
 E2E tests run against the **production build** (`next build`), not dev mode. Always rebuild with `make build-web` (or `pnpm --filter @kandev/web build`) after code changes before running E2E tests locally.
 
+```bash
+# Unzip a shard's blob report from CI artifacts
+unzip report-*.zip -d report-shard && cat report-shard/*.jsonl
+```
+
+When a CI shard fails, download its report-*.zip artifact and unzip it; the report is a *.jsonl event stream. Build a testId map by walking the events: test titles and locations come from the testBegin events, and final status plus duration come from the testEnd events. Match them by test id. This surfaces the slow but passing specs (the timing markers in Playwright output) that never show up as outright failures but are latent flake risks. Specs whose duration approaches the 60s per-test timeout (defined in playwright.config.ts) are the flake candidates to harden. Typically by converting raw chat-flow assertions to the waitForChatIdle() / expectChatResponseVisible() recovery helpers documented earlier in this file.
+
 ### Flake triage: intrinsic race vs. contention
 
 A test that flakes under parallel/sharded load is one of two things — decide which **before** touching it:

@@ -12,6 +12,11 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+// linearWatchMetadataKey is the task-metadata key a Linear watcher-created
+// task records its originating watch id under. Shared by BuildTaskRequest
+// (writer) and WatchMetadataKey (read by the throttle gate's task counter).
+const linearWatchMetadataKey = "linear_issue_watch_id"
+
 // LinearWatcherSource adapts the Linear integration onto the WatcherSource
 // pipeline. Wraps the existing LinearService (already used by the orchestrator
 // for dedup) and the package-local interpolateLinearPrompt so behaviour is
@@ -64,7 +69,7 @@ func (s *LinearWatcherSource) BuildTaskRequest(evt any) (*IssueTaskRequest, erro
 		Title:          fmt.Sprintf("[%s] %s", e.Issue.Identifier, e.Issue.Title),
 		Description:    interpolateLinearPrompt(e.Prompt, e.Issue),
 		Metadata: map[string]interface{}{
-			"linear_issue_watch_id":         e.IssueWatchID,
+			linearWatchMetadataKey:          e.IssueWatchID,
 			"linear_issue_identifier":       e.Issue.Identifier,
 			"linear_issue_url":              e.Issue.URL,
 			"linear_state":                  e.Issue.StateName,
@@ -98,6 +103,10 @@ func (s *LinearWatcherSource) MaxInflightTasks(evt any) *int {
 	}
 	return e.MaxInflightTasks
 }
+
+// WatchMetadataKey returns the task-metadata key this source writes in
+// BuildTaskRequest, used by the throttle gate to count open Linear tasks.
+func (s *LinearWatcherSource) WatchMetadataKey() string { return linearWatchMetadataKey }
 
 func (s *LinearWatcherSource) AutoStartParams(evt any) AutoStartParams {
 	e, ok := evt.(*linear.NewLinearIssueEvent)

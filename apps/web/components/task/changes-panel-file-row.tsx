@@ -101,7 +101,15 @@ export function FileRow({
         style={indentPx ? { paddingLeft: indentPx } : undefined}
       >
         {treeMode ? (
-          <FileIcon fileName={name} className="size-4 shrink-0" />
+          <TreeModeFileActionSlot
+            name={name}
+            isPending={isPending}
+            staged={file.staged}
+            path={file.path}
+            repo={file.repositoryName}
+            onStage={onStage}
+            onUnstage={onUnstage}
+          />
         ) : (
           <StageButton
             isPending={isPending}
@@ -133,21 +141,49 @@ export function FileRow({
           repo={file.repositoryName}
           onDiscard={onDiscard}
           onEditFile={onEditFile}
-          stageButton={
-            treeMode ? (
-              <StageButton
-                isPending={isPending}
-                staged={file.staged}
-                path={file.path}
-                repo={file.repositoryName}
-                onStage={onStage}
-                onUnstage={onUnstage}
-              />
-            ) : null
-          }
         />
       </div>
     </li>
+  );
+}
+
+function TreeModeFileActionSlot({
+  name,
+  isPending,
+  staged,
+  path,
+  repo,
+  onStage,
+  onUnstage,
+}: {
+  name: string;
+  isPending: boolean;
+  staged: boolean;
+  path: string;
+  repo?: string;
+  onStage: (path: string, repo?: string) => void;
+  onUnstage: (path: string, repo?: string) => void;
+}) {
+  return (
+    <div
+      data-testid="file-row-icon-action-slot"
+      className="grid size-4 shrink-0 items-center justify-center [&>*]:col-start-1 [&>*]:row-start-1"
+    >
+      <FileIcon
+        fileName={name}
+        className="size-4 transition-opacity group-hover:opacity-0 pointer-events-none"
+      />
+      <div className="opacity-0 transition-opacity pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto">
+        <StageButton
+          isPending={isPending}
+          staged={staged}
+          path={path}
+          repo={repo}
+          onStage={onStage}
+          onUnstage={onUnstage}
+        />
+      </div>
+    </div>
   );
 }
 
@@ -209,17 +245,17 @@ function FileRowActions({
   repo,
   onDiscard,
   onEditFile,
-  stageButton,
 }: {
   path: string;
   repo?: string;
   onDiscard: (path: string, repo?: string) => void;
   onEditFile: (path: string) => void;
-  /** Tree mode: stage/unstage control rendered alongside the other hover actions. */
-  stageButton?: React.ReactNode;
 }) {
   return (
-    <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto">
+    <div
+      data-testid="file-row-hover-actions"
+      className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto"
+    >
       <Tooltip>
         <TooltipTrigger asChild>
           <button
@@ -250,7 +286,6 @@ function FileRowActions({
         </TooltipTrigger>
         <TooltipContent>Edit</TooltipContent>
       </Tooltip>
-      {stageButton}
     </div>
   );
 }

@@ -20,6 +20,13 @@ import (
 // so the producer truncates here rather than deferring to the UI.
 const maxSentryTitleRunes = 80
 
+// sentryWatchMetadataKey is the task-metadata key under which a Sentry
+// watcher-created task records its originating watch id. It is the single
+// source of truth shared by BuildTaskRequest (which writes it) and
+// WatchMetadataKey (which the throttle gate uses to count open tasks) — the
+// two MUST stay in lockstep or the per-watch cap silently stops counting.
+const sentryWatchMetadataKey = "sentry_issue_watch_id"
+
 func truncateSentryTitle(s string) string {
 	if utf8.RuneCountInString(s) <= maxSentryTitleRunes {
 		return s
@@ -98,7 +105,7 @@ func (s *SentryWatcherSource) BuildTaskRequest(evt any) (*IssueTaskRequest, erro
 		Title:          fmt.Sprintf("[%s] %s — %s", strings.ToUpper(e.Issue.Level), e.Issue.ShortID, truncateSentryTitle(e.Issue.Title)),
 		Description:    interpolateSentryPrompt(e.Prompt, e.Issue),
 		Metadata: map[string]interface{}{
-			"sentry_issue_watch_id":         e.IssueWatchID,
+			sentryWatchMetadataKey:          e.IssueWatchID,
 			"sentry_issue_short_id":         e.Issue.ShortID,
 			"sentry_issue_url":              e.Issue.Permalink,
 			"sentry_issue_level":            e.Issue.Level,
@@ -148,3 +155,8 @@ func (s *SentryWatcherSource) MaxInflightTasks(evt any) *int {
 	}
 	return e.MaxInflightTasks
 }
+
+// WatchMetadataKey returns the task-metadata key this source writes in
+// BuildTaskRequest. The throttle gate hands it to the task counter so the
+// repository can tally open Sentry tasks without knowing Sentry exists.
+func (s *SentryWatcherSource) WatchMetadataKey() string { return sentryWatchMetadataKey }

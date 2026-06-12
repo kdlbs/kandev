@@ -9,11 +9,14 @@ import (
 )
 
 // WatcherTaskCounter exposes the count of open watcher-created tasks for a
-// single (integration, watchID) pair. Implemented by the task repository.
-// Kept as a narrow interface so the orchestrator's throttle gate can be
-// tested without spinning up SQLite.
+// single watch, identified by the task-metadata key the integration writes
+// (e.g. "sentry_issue_watch_id") and the watch id. Implemented by the task
+// repository. Keyed by metadata key rather than an integration name so the
+// repository stays ignorant of which integrations exist — each integration
+// owns its key (see WatcherSource.WatchMetadataKey). Kept as a narrow
+// interface so the orchestrator's throttle gate can be tested without SQLite.
 type WatcherTaskCounter interface {
-	CountOpenWatcherCreatedTasks(ctx context.Context, integration, watchID string) (int, error)
+	CountOpenWatcherCreatedTasks(ctx context.Context, metadataKey, watchID string) (int, error)
 }
 
 // SetWatcherTaskCounter wires the open-task counter used by the watcher
@@ -59,8 +62,8 @@ func watcherSlotKey(integration, watchID string) string {
 
 // acquireWatcherSlot is the synchronous slot acquisition that gates the
 // `go coordinator.Dispatch(...)` spawn. It is the front-pressure valve for
-// the Linear and Jira watchers: with a per-watch cap, an unexpectedly broad
-// filter cannot fan out into dozens of concurrent tasks on a single poll
+// the Linear, Jira, and Sentry watchers: with a per-watch cap, an unexpectedly
+// broad filter cannot fan out into dozens of concurrent tasks on a single poll
 // tick.
 //
 // Returns (release, ok). When ok is true the caller MUST invoke release()
@@ -69,12 +72,17 @@ func watcherSlotKey(integration, watchID string) string {
 // drop the event — no goroutine, no dedup row — so the next poll tick can
 // retry.
 //
+// metadataKey is the task-metadata key the integration records the watch id
+// under (from WatcherSource.WatchMetadataKey); the counter uses it to tally
+// open tasks. integration stays for metrics labels and the pending-slot key.
+//
 // Bypass paths (all return release=no-op, ok=true):
 //
 //   - cap is nil (uncapped watch)
 //   - cap is <= 0 (defensive: API rejects these, but a stale row should not
 //     freeze the gate)
 //   - watchID is empty (event has no watch — treat as unthrottled)
+//   - metadataKey is empty (integration exposes no key — treat as unthrottled)
 //   - watcherTaskCount is unset (early boot / tests)
 //   - the count query errors (fail-open: a transient DB blip must not
 //     silently stall the watcher; one-event overshoot is acceptable)
@@ -83,18 +91,18 @@ func watcherSlotKey(integration, watchID string) string {
 // defers. Pending is incremented atomically with the read under watcherMu
 // so a burst of events arriving in the same poll tick cannot collectively
 // read the same stale DB count and all pass.
-func (s *Service) acquireWatcherSlot(ctx context.Context, integration, watchID string, maxInflight *int) (func(), bool) {
+func (s *Service) acquireWatcherSlot(ctx context.Context, integration, metadataKey, watchID string, maxInflight *int) (func(), bool) {
 	watcherDispatchAttemptedTotal.Add(watcherMetricLabel("integration", integration), 1)
 	noop := func() {}
 
-	if maxInflight == nil || *maxInflight <= 0 || watchID == "" {
+	if maxInflight == nil || *maxInflight <= 0 || watchID == "" || metadataKey == "" {
 		return noop, true
 	}
 	if s.watcherTaskCount == nil {
 		return noop, true
 	}
 
-	count, err := s.watcherTaskCount.CountOpenWatcherCreatedTasks(ctx, integration, watchID)
+	count, err := s.watcherTaskCount.CountOpenWatcherCreatedTasks(ctx, metadataKey, watchID)
 	if err != nil {
 		s.logger.Warn("watcher throttle: count failed, failing open",
 			zap.String("integration", integration),

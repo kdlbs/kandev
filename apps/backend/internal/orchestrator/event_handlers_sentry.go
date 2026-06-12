@@ -62,7 +62,7 @@ func (s *Service) handleNewSentryIssue(ctx context.Context, event *bus.Event) er
 		// source so behaviour matches the pre-cache code path.
 		src = NewSentryWatcherSource(nil, s.logger)
 	}
-	s.dispatchWatcherEvent(ctx, "sentry", src, evt,
+	s.dispatchWatcherEvent(ctx, src, evt,
 		zap.String("issue_watch_id", evt.IssueWatchID),
 		zap.String("short_id", evt.Issue.ShortID))
 	return nil

@@ -61,6 +61,46 @@ func TestPrepareSession_Success(t *testing.T) {
 	}
 }
 
+func TestPersistRuntimeModelMetadataStoresRuntimeConfigAndClearsContextWindow(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	session := &models.TaskSession{
+		ID:     "session-123",
+		TaskID: "task-123",
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyRuntimeConfig: models.SessionRuntimeConfig{
+				Mode:          "fast",
+				ConfigOptions: map[string]string{"reasoning_effort": "low"},
+			},
+			"context_window": map[string]interface{}{"size": int64(256000)},
+		},
+	}
+	repo.sessions[session.ID] = session
+
+	exec.persistRuntimeModelMetadata(context.Background(), session.ID, session, "gpt-5.3-codex-spark")
+
+	updated := repo.sessions[session.ID]
+	cfg, ok := models.LoadSessionRuntimeConfig(updated.Metadata)
+	if !ok {
+		t.Fatal("expected runtime config metadata")
+	}
+	if cfg.Model != "gpt-5.3-codex-spark" {
+		t.Fatalf("expected runtime model to be persisted, got %q", cfg.Model)
+	}
+	if cfg.Mode != "fast" {
+		t.Fatalf("expected mode to be preserved, got %q", cfg.Mode)
+	}
+	if cfg.ConfigOptions["reasoning_effort"] != "low" {
+		t.Fatalf("expected config options to be preserved, got %#v", cfg.ConfigOptions)
+	}
+	if updated.Metadata["context_window"] != nil {
+		t.Fatalf("expected context_window to be cleared, got %#v", updated.Metadata["context_window"])
+	}
+	if len(repo.setSessionMetadataKeyCalls) != 2 {
+		t.Fatalf("expected runtime config and context window metadata writes, got %d", len(repo.setSessionMetadataKeyCalls))
+	}
+}
+
 func TestPrepareSession_InvokesPrimarySessionCallback(t *testing.T) {
 	repo := newMockRepository()
 	agentManager := &mockAgentManager{}

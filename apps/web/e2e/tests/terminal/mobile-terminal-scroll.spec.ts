@@ -42,8 +42,11 @@ async function seedTaskWithSession(
 
 async function readViewportY(page: Page): Promise<number> {
   return page.evaluate(() => {
+    const panels = Array.from(document.querySelectorAll('[data-testid="terminal-panel"]'));
+    const visiblePanels = panels.filter((panel) => panel.getClientRects().length > 0);
+    const panel = visiblePanels.at(-1) ?? panels.at(-1);
     type XC = HTMLElement & { __xtermReadViewportY?: () => number };
-    const container = document.querySelector('[data-testid="terminal-xterm-host"]') as XC | null;
+    const container = panel?.querySelector('[data-testid="terminal-xterm-host"]') as XC | null;
     return container?.__xtermReadViewportY?.() ?? -1;
   });
 }

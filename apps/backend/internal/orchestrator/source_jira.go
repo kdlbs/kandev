@@ -11,6 +11,11 @@ import (
 	"github.com/kandev/kandev/internal/jira"
 )
 
+// jiraWatchMetadataKey is the task-metadata key a Jira watcher-created task
+// records its originating watch id under. Shared by BuildTaskRequest (writer)
+// and WatchMetadataKey (read by the throttle gate's task counter).
+const jiraWatchMetadataKey = "jira_issue_watch_id"
+
 // JiraWatcherSource adapts the Jira integration onto the WatcherSource
 // pipeline. Symmetric with LinearWatcherSource; the only differences are
 // the metadata keys and the interpolation function.
@@ -63,7 +68,7 @@ func (s *JiraWatcherSource) BuildTaskRequest(evt any) (*IssueTaskRequest, error)
 		// Preserve today's literal metadata keys (do NOT normalise to
 		// models.MetaKey* in this refactor — separate cleanup).
 		Metadata: map[string]interface{}{
-			"jira_issue_watch_id": e.IssueWatchID,
+			jiraWatchMetadataKey:  e.IssueWatchID,
 			"jira_issue_key":      e.Issue.Key,
 			"jira_issue_url":      e.Issue.URL,
 			"jira_status":         e.Issue.StatusName,
@@ -97,6 +102,10 @@ func (s *JiraWatcherSource) MaxInflightTasks(evt any) *int {
 	}
 	return e.MaxInflightTasks
 }
+
+// WatchMetadataKey returns the task-metadata key this source writes in
+// BuildTaskRequest, used by the throttle gate to count open Jira tasks.
+func (s *JiraWatcherSource) WatchMetadataKey() string { return jiraWatchMetadataKey }
 
 func (s *JiraWatcherSource) AutoStartParams(evt any) AutoStartParams {
 	e, ok := evt.(*jira.NewJiraIssueEvent)
