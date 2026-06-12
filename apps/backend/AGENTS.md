@@ -217,7 +217,7 @@ When you hit a limit, extract a helper function. Prefer composition over growing
 When a PR fixup touches backend code, run the CI-style changed-file linter locally from `apps/backend` with the PR base SHA before pushing, because CI enforces changed-file complexity thresholds:
 
 ```bash
-BASE_SHA=<base> golangci-lint run ./... --new-from-rev="$BASE_SHA" --timeout=5m
+golangci-lint run ./... --new-from-rev="<base-sha>" --timeout=5m
 ```
 
 ## Further scoped notes
