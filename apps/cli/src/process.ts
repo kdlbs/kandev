@@ -36,6 +36,12 @@ export function createProcessSupervisor(): {
   };
 
   const attachSignalHandlers = () => {
+    // Ctrl-C sends SIGINT to the whole process group, so the parent (make/shell)
+    // exits and closes the pipe our stdout/stderr write to. Any console.log during
+    // shutdown then triggers an EPIPE 'error' event with no listener, which Node
+    // treats as fatal and crashes us before children are gracefully terminated.
+    // Swallow EPIPE so shutdown can finish.
+    ignoreBrokenPipe();
     process.on("SIGINT", onSignal);
     // SIGTERM is not available on Windows — only attach where supported
     if (process.platform !== "win32") {
@@ -44,6 +50,23 @@ export function createProcessSupervisor(): {
   };
 
   return { children, shutdown, attachSignalHandlers };
+}
+
+let brokenPipeGuarded = false;
+
+/**
+ * Install error handlers on stdout/stderr that swallow EPIPE (broken pipe).
+ * Idempotent: only attaches once per process.
+ */
+export function ignoreBrokenPipe(): void {
+  if (brokenPipeGuarded) return;
+  brokenPipeGuarded = true;
+  const onPipeError = (err: NodeJS.ErrnoException) => {
+    if (err.code === "EPIPE") return;
+    throw err;
+  };
+  process.stdout.on("error", onPipeError);
+  process.stderr.on("error", onPipeError);
 }
 
 /**
