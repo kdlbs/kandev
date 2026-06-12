@@ -37,7 +37,7 @@
     "esbuild": "^0.24.0",
     "tsx": "^4.15.7",
     "typescript": "^5",
-    "vitest": "^1.6.0"
+    "vitest": "^4.1.0"
   },
   "scripts": {
     "dev": "tsx src/cli.ts",
