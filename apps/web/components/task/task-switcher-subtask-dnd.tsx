@@ -21,6 +21,13 @@ import type { TaskSwitcherItem } from "./task-switcher";
 
 export const DRAG_ACTIVATION_DISTANCE = 8;
 
+// Skip layout/paint for rows outside the sidebar scrollport so long task lists
+// stay cheap to render and scroll. `auto 52px` seeds the height estimate before
+// first paint; afterwards the browser remembers each row's real size, so
+// scrollbar/anchor behavior stays stable and dnd-kit's drag-start rect
+// measurements remain accurate for previously rendered rows.
+const OFFSCREEN_SKIP = "[content-visibility:auto] [contain-intrinsic-block-size:auto_52px]";
+
 /** Sortable implementation — isolated so `useSortable` is never called conditionally. */
 function DraggableSortableTaskNode({
   taskId,
@@ -53,7 +60,7 @@ function DraggableSortableTaskNode({
       data-testid="sortable-task-block"
       data-task-id={taskId}
       data-depth={depth}
-      className={cn(isDragging && "z-50")}
+      className={cn(OFFSCREEN_SKIP, isDragging && "z-50")}
     >
       <div
         {...sortableAttributes}
@@ -99,7 +106,12 @@ export function SortableTaskNode({
 }) {
   if (!isDraggable) {
     return (
-      <div data-testid="sortable-task-block" data-task-id={taskId} data-depth={depth}>
+      <div
+        data-testid="sortable-task-block"
+        data-task-id={taskId}
+        data-depth={depth}
+        className={OFFSCREEN_SKIP}
+      >
         <div data-testid="sortable-task-handle">{handle}</div>
         {nested}
       </div>
