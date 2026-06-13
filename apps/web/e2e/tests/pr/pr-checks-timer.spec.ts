@@ -119,10 +119,10 @@ test.describe("PR checks running timer", () => {
     const initialText = await durationEl.textContent();
     expect(initialText).toContain("running");
 
-    // Wait ~3 seconds and verify the time has changed (incremented)
-    await testPage.waitForTimeout(3_000);
-    const updatedText = await durationEl.textContent();
-    expect(updatedText).toContain("running");
-    expect(updatedText).not.toBe(initialText);
+    // Verify the live timer increments without paying a fixed sleep.
+    await expect
+      .poll(async () => durationEl.textContent(), { timeout: 3_000 })
+      .not.toBe(initialText);
+    await expect(durationEl).toContainText("running");
   });
 });

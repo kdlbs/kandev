@@ -1,5 +1,4 @@
 import { test, expect } from "../../fixtures/test-base";
-import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("PR watcher missing branch", () => {
@@ -82,21 +81,9 @@ test.describe("PR watcher missing branch", () => {
       state: "closed",
     });
 
-    // --- Navigate to the kanban and click the task ---
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    const card = kanban.taskCardByTitle("PR #999: Already merged feature");
-    await expect(card).toBeVisible({ timeout: 15_000 });
-
-    // Click → navigate to the session view. The card renders via SSR and its
-    // router.push click handler only fires once React has hydrated; under shard
-    // load the first click can land pre-hydration and no-op, so re-click until
-    // the URL flips. toPass stops on the first success, so no stray re-clicks.
-    await expect(async () => {
-      await card.click();
-      await expect(testPage).toHaveURL(/\/t\//, { timeout: 5_000 });
-    }).toPass({ timeout: 20_000 });
+    // --- Navigate to the task session view ---
+    await testPage.goto(`/t/${task.id}`);
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
 
