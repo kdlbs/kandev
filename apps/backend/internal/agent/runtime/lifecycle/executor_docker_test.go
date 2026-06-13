@@ -509,8 +509,9 @@ func TestShouldStartExistingDockerContainer(t *testing.T) {
 
 func TestBuildReconnectCreateInstanceRequest(t *testing.T) {
 	req := &ExecutorCreateRequest{
-		TaskID:    "task-1",
-		SessionID: "session-1",
+		TaskID:                 "task-1",
+		SessionID:              "session-1",
+		AutoApprovePermissions: true,
 		AgentConfig: &testAgent{
 			id:      "codex",
 			enabled: true,
@@ -542,6 +543,9 @@ func TestBuildReconnectCreateInstanceRequest(t *testing.T) {
 	if got.Env["OPENAI_API_KEY"] != "token" {
 		t.Fatalf("env not propagated: %v", got.Env)
 	}
+	if got.AutoApprovePermissions == nil || !*got.AutoApprovePermissions {
+		t.Fatalf("AutoApprovePermissions = %v, want true", got.AutoApprovePermissions)
+	}
 	if len(got.McpServers) != 1 || got.McpServers[0].Name != "test-mcp" {
 		t.Fatalf("mcp servers not propagated: %v", got.McpServers)
 	}
@@ -553,6 +557,15 @@ func TestBuildReconnectCreateInstanceRequest(t *testing.T) {
 	}
 	if got.McpMode != "config" {
 		t.Fatalf("McpMode = %q, want config", got.McpMode)
+	}
+}
+
+func TestBuildReconnectCreateInstanceRequestOmitsAutoApproveOverrideWhenUnset(t *testing.T) {
+	req := &ExecutorCreateRequest{}
+
+	got := buildReconnectCreateInstanceRequest(req, "previous-exec")
+	if got.AutoApprovePermissions != nil {
+		t.Fatalf("AutoApprovePermissions = %v, want nil", got.AutoApprovePermissions)
 	}
 }
 

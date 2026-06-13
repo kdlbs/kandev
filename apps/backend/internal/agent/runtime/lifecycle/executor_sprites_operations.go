@@ -357,12 +357,16 @@ func (r *SpritesExecutor) createAgentInstance(
 	req *ExecutorCreateRequest,
 ) (int, error) {
 	instanceReq := agentctl.CreateInstanceRequest{
-		ID:                  req.InstanceID,
-		WorkspacePath:       spritesWorkspacePath,
-		SessionID:           req.SessionID,
-		TaskID:              req.TaskID,
-		Protocol:            req.Protocol,
-		AgentType:           agentTypeFromReq(req),
+		ID:            req.InstanceID,
+		WorkspacePath: spritesWorkspacePath,
+		SessionID:     req.SessionID,
+		TaskID:        req.TaskID,
+		Protocol:      req.Protocol,
+		AgentType:     agentTypeFromReq(req),
+		AutoApprovePermissions: autoApprovePermissionsOverride(
+			req.AutoApprovePermissions,
+			req.AutoApprovePermissionsOverride,
+		),
 		McpServers:          req.McpServers,
 		McpMode:             req.McpMode,
 		RequiresProcessKill: requiresProcessKillFromReq(req),

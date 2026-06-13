@@ -27,30 +27,46 @@ const (
 
 // ContainerConfig holds configuration for launching a Docker container
 type ContainerConfig struct {
-	AgentConfig       agents.Agent
-	WorkspacePath     string // If empty, workspace is not mounted (will clone inside container)
-	TaskID            string
-	TaskTitle         string
-	TaskEnvironmentID string
-	TaskDescription   string
-	Model             string
-	SessionID         string
-	ExecutorProfileID string
-	Credentials       map[string]string
-	ProfileInfo       *AgentProfileInfo
-	InstanceID        string
-	MainRepoGitDir    string // Path to main repo's .git directory (for worktrees)
-	McpServers        []McpServerConfig
-	McpMode           string
-	PrepareScript     string                 // Script to run inside container before agent starts (e.g., clone repo)
-	ImageTagOverride  string                 // If set, replaces the agent runtime's default image (e.g. profile.config.image_tag)
-	LocalClonePath    string                 // Host path for file:// repository clone URLs; mounted read-only at the same path.
-	BootstrapNonce    string                 // one-time nonce for agentctl handshake (set internally)
-	Metadata          map[string]interface{} // Optional metadata (e.g., office runtime dir)
+	AgentConfig                    agents.Agent
+	WorkspacePath                  string // If empty, workspace is not mounted (will clone inside container)
+	TaskID                         string
+	TaskTitle                      string
+	TaskEnvironmentID              string
+	TaskDescription                string
+	Model                          string
+	SessionID                      string
+	ExecutorProfileID              string
+	Credentials                    map[string]string
+	AutoApprovePermissions         bool
+	AutoApprovePermissionsOverride *bool
+	ProfileInfo                    *AgentProfileInfo
+	InstanceID                     string
+	MainRepoGitDir                 string // Path to main repo's .git directory (for worktrees)
+	McpServers                     []McpServerConfig
+	McpMode                        string
+	PrepareScript                  string                 // Script to run inside container before agent starts (e.g., clone repo)
+	ImageTagOverride               string                 // If set, replaces the agent runtime's default image (e.g. profile.config.image_tag)
+	LocalClonePath                 string                 // Host path for file:// repository clone URLs; mounted read-only at the same path.
+	BootstrapNonce                 string                 // one-time nonce for agentctl handshake (set internally)
+	Metadata                       map[string]interface{} // Optional metadata (e.g., office runtime dir)
 	// BaseBranches maps RepositoryName → base branch ref; forwarded into
 	// agentctl's CreateInstanceRequest so each WorkspaceTracker resolves
 	// diff stats against the task-recorded base.
 	BaseBranches map[string]string
+}
+
+func boolPtr(v bool) *bool {
+	return &v
+}
+
+func autoApprovePermissionsOverride(enabled bool, override *bool) *bool {
+	if override != nil {
+		return override
+	}
+	if enabled {
+		return boolPtr(true)
+	}
+	return nil
 }
 
 // ContainerManager handles Docker container lifecycle operations
@@ -217,11 +233,15 @@ func (cm *ContainerManager) createInstanceAndClient(
 	}
 
 	createReq := &agentctl.CreateInstanceRequest{
-		ID:                  config.InstanceID,
-		WorkspacePath:       "/workspace",
-		AgentCommand:        "",
-		AgentType:           agentType,
-		Env:                 config.Credentials,
+		ID:            config.InstanceID,
+		WorkspacePath: "/workspace",
+		AgentCommand:  "",
+		AgentType:     agentType,
+		Env:           config.Credentials,
+		AutoApprovePermissions: autoApprovePermissionsOverride(
+			config.AutoApprovePermissions,
+			config.AutoApprovePermissionsOverride,
+		),
 		AutoStart:           false,
 		McpServers:          config.McpServers,
 		SessionID:           config.SessionID,

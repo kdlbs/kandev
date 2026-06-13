@@ -107,12 +107,16 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 	}
 
 	createReq := &agentctl.CreateInstanceRequest{
-		ID:                  req.InstanceID,
-		WorkspacePath:       req.WorkspacePath,
-		AgentCommand:        "", // Agent command set via Configure endpoint
-		Protocol:            req.Protocol,
-		AgentType:           agentType,
-		Env:                 env,
+		ID:            req.InstanceID,
+		WorkspacePath: req.WorkspacePath,
+		AgentCommand:  "", // Agent command set via Configure endpoint
+		Protocol:      req.Protocol,
+		AgentType:     agentType,
+		Env:           env,
+		AutoApprovePermissions: autoApprovePermissionsOverride(
+			req.AutoApprovePermissions,
+			req.AutoApprovePermissionsOverride,
+		),
 		AutoStart:           false,
 		McpServers:          req.McpServers,
 		SessionID:           req.SessionID,
