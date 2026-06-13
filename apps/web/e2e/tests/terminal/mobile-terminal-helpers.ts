@@ -37,6 +37,15 @@ export async function focusTerminalForTyping(testPage: Page): Promise<void> {
   await testPage.getByTestId("terminal-panel").last().getByTestId("terminal-xterm-host").click();
 }
 
+async function remountTerminalPanel(testPage: Page): Promise<void> {
+  const chatTab = testPage.getByRole("button", { name: "Chat" });
+  if (await chatTab.isVisible()) {
+    await chatTab.tap();
+    await testPage.waitForTimeout(250);
+  }
+  await switchToTerminalPanel(testPage);
+}
+
 /**
  * Wait for the mobile shell to be ready by tailing xterm's buffer until it has
  * any content (a prompt is enough). Mobile mounts the terminal lazily on tab
@@ -50,10 +59,16 @@ export async function focusTerminalForTyping(testPage: Page): Promise<void> {
 export async function waitForShellReady(testPage: Page, timeout = 45_000): Promise<void> {
   const panel = testPage.getByTestId("terminal-panel");
   const deadline = Date.now() + timeout;
+  let remounts = 0;
+  let nextRemountAt = Date.now() + 10_000;
   while (Date.now() < deadline) {
     if ((await readTerminalBuffer(testPage)).length > 0) return;
     if (!(await panel.isVisible())) {
       await switchToTerminalPanel(testPage);
+    } else if (remounts < 2 && Date.now() >= nextRemountAt) {
+      await remountTerminalPanel(testPage);
+      remounts += 1;
+      nextRemountAt = Date.now() + 15_000;
     }
     await testPage.waitForTimeout(1_000);
   }

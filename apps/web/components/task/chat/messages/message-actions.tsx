@@ -17,7 +17,6 @@ import type { Message } from "@/lib/types/http";
 const ACTION_BUTTON_SIZE = "h-5 w-5 p-1";
 const ACTION_BUTTON_HOVER = "hover:bg-muted rounded";
 const ACTION_BUTTON_TRANSITION = "transition-colors duration-200";
-const SESSION_CONFIG_TEXT_SEPARATOR = "\u001f";
 
 type MessageActionsProps = {
   message: Message;
@@ -118,7 +117,7 @@ function mergedConfigOptions(
   for (const option of primary.configOptions) {
     optionsByLabel.set(option.label, option);
   }
-  return Array.from(optionsByLabel.values());
+  return Array.from(optionsByLabel.values()).sort((a, b) => a.label.localeCompare(b.label));
 }
 
 function formatSessionConfig(config: MessageSessionConfig): string | null {
@@ -166,13 +165,14 @@ function useSessionConfigText(sessionId: string | undefined, showModel: boolean)
 }
 
 function joinSessionConfigText(full: string | null, details: string | null): string {
-  return `${full ?? ""}${SESSION_CONFIG_TEXT_SEPARATOR}${details ?? ""}`;
+  return JSON.stringify([full, details]);
 }
 
 function splitSessionConfigText(value: string | null): [string | null, string | null] {
   if (!value) return [null, null];
-  const [full = "", details = ""] = value.split(SESSION_CONFIG_TEXT_SEPARATOR, 2);
-  return [full || null, details || null];
+  const parsed = JSON.parse(value) as [unknown, unknown];
+  const [full, details] = parsed;
+  return [stringValue(full), stringValue(details)];
 }
 
 function CopyButton({ copied, onCopy }: { copied: boolean; onCopy: () => void }) {

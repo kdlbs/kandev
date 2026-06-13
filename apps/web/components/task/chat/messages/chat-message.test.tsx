@@ -260,9 +260,35 @@ describe("ChatMessage agent session config metadata", () => {
       },
     });
 
-    expect(screen.getByText("gpt-5.5 · Reasoning effort: medium · Verbosity: low")).not.toBeNull();
+    expect(
+      screen.getAllByText("gpt-5.5 · Reasoning effort: medium · Verbosity: low").length,
+    ).toBeGreaterThan(0);
   });
 
+  it("keeps merged runtime-only config options sorted", () => {
+    renderAgentMessageWithSession({
+      metadata: {
+        runtime_config: {
+          config_options: {
+            reasoning_effort: "medium",
+          },
+        },
+      },
+      agent_profile_snapshot: {
+        model: "gpt-5.5",
+        config_options: {
+          verbosity: "low",
+        },
+      },
+    });
+
+    expect(
+      screen.getAllByText("gpt-5.5 · Reasoning effort: medium · Verbosity: low").length,
+    ).toBeGreaterThan(0);
+  });
+});
+
+describe("ChatMessage agent session config metadata overrides", () => {
   it("does not fall back to snapshot options when runtime options are explicitly empty", () => {
     const { container } = renderAgentMessageWithSession({
       metadata: {
@@ -296,6 +322,28 @@ describe("ChatMessage agent session config metadata", () => {
     );
 
     expect(screen.getByText("gpt-5.5-mini · Reasoning effort: high")).not.toBeNull();
+  });
+
+  it("uses message-level config options when message metadata provides them", () => {
+    const { container } = renderAgentMessageWithSession(
+      {
+        agent_profile_snapshot: {
+          model: "gpt-5.5",
+          config_options: {
+            reasoning_effort: "high",
+          },
+        },
+      },
+      {
+        model: "gpt-5.5-mini",
+        config_options: {
+          reasoning_effort: "low",
+        },
+      },
+    );
+
+    expect(screen.getByText("gpt-5.5-mini · Reasoning effort: low")).not.toBeNull();
+    expect(container.textContent).not.toContain("Reasoning effort: high");
   });
 });
 

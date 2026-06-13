@@ -65,6 +65,15 @@ function closeServer(server: net.Server): Promise<void> {
   return new Promise((resolve) => server.close(() => resolve()));
 }
 
+async function findReportedAvailablePort(): Promise<number> {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const { server, port } = await listenOn("127.0.0.1");
+    await closeServer(server);
+    if (await __testing.isPortAvailable(port)) return port;
+  }
+  throw new Error("Unable to find a port reported available");
+}
+
 describe("isPortAvailable", () => {
   const servers: net.Server[] = [];
 
@@ -105,8 +114,7 @@ describe("isPortInUse", () => {
 
 describe("pickAvailablePort", () => {
   it("returns the preferred port when it is free", async () => {
-    const { server, port } = await listenOn("127.0.0.1");
-    await closeServer(server);
+    const port = await findReportedAvailablePort();
     expect(await pickAvailablePort(port)).toBe(port);
   });
 
