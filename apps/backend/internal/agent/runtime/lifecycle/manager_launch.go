@@ -510,25 +510,30 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 
 	metadata := buildLaunchMetadata(reqWithWorktree, mainRepoGitDir, worktreeID, worktreeBranch)
 
+	var autoApproveOverride *bool
+	if profileInfo != nil {
+		autoApproveOverride = boolPtr(profileInfo.AutoApprove)
+	}
 	execReq := &ExecutorCreateRequest{
-		InstanceID:             executionID,
-		TaskID:                 reqWithWorktree.TaskID,
-		TaskTitle:              reqWithWorktree.TaskTitle,
-		SessionID:              reqWithWorktree.SessionID,
-		TaskEnvironmentID:      reqWithWorktree.TaskEnvironmentID,
-		AgentProfileID:         reqWithWorktree.AgentProfileID,
-		WorkspacePath:          reqWithWorktree.WorkspacePath,
-		Protocol:               string(agentConfig.Runtime().Protocol),
-		Env:                    env,
-		AutoApprovePermissions: profileInfo != nil && profileInfo.AutoApprove,
-		Metadata:               metadata,
-		AgentConfig:            agentConfig,
-		McpServers:             mcpServers,
-		PreviousExecutionID:    reqWithWorktree.PreviousExecutionID,
-		McpMode:                reqWithWorktree.McpMode,
-		AuthToken:              m.revealRuntimeSecret(ctx, metadata, MetadataKeyAuthTokenSecret),
-		BootstrapNonce:         m.revealRuntimeSecret(ctx, metadata, MetadataKeyBootstrapNonceSecret),
-		OnProgress:             onProgress,
+		InstanceID:                     executionID,
+		TaskID:                         reqWithWorktree.TaskID,
+		TaskTitle:                      reqWithWorktree.TaskTitle,
+		SessionID:                      reqWithWorktree.SessionID,
+		TaskEnvironmentID:              reqWithWorktree.TaskEnvironmentID,
+		AgentProfileID:                 reqWithWorktree.AgentProfileID,
+		WorkspacePath:                  reqWithWorktree.WorkspacePath,
+		Protocol:                       string(agentConfig.Runtime().Protocol),
+		Env:                            env,
+		AutoApprovePermissions:         profileInfo != nil && profileInfo.AutoApprove,
+		AutoApprovePermissionsOverride: autoApproveOverride,
+		Metadata:                       metadata,
+		AgentConfig:                    agentConfig,
+		McpServers:                     mcpServers,
+		PreviousExecutionID:            reqWithWorktree.PreviousExecutionID,
+		McpMode:                        reqWithWorktree.McpMode,
+		AuthToken:                      m.revealRuntimeSecret(ctx, metadata, MetadataKeyAuthTokenSecret),
+		BootstrapNonce:                 m.revealRuntimeSecret(ctx, metadata, MetadataKeyBootstrapNonceSecret),
+		OnProgress:                     onProgress,
 	}
 
 	if resumer, ok := rt.(RemoteSessionResumer); ok {

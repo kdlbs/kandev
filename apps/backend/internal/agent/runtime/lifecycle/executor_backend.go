@@ -260,13 +260,16 @@ type ExecutorCreateRequest struct {
 	Protocol               string
 	Env                    map[string]string
 	AutoApprovePermissions bool
-	Metadata               map[string]interface{}
-	McpServers             []McpServerConfig
-	AgentConfig            agents.Agent // Agent type info needed by runtimes
-	PreviousExecutionID    string       // Non-empty when reconnecting to a previous execution
-	McpMode                string       // MCP tool mode: "task" (default), "config", or "office"
-	AuthToken              string       // Previously handshaken agentctl token for reconnects
-	BootstrapNonce         string       // Stored nonce for re-handshake after container restart
+	// AutoApprovePermissionsOverride is set when a resolved profile explicitly
+	// selected the auto-approve value. Nil preserves agentctl defaults/env fallback.
+	AutoApprovePermissionsOverride *bool
+	Metadata                       map[string]interface{}
+	McpServers                     []McpServerConfig
+	AgentConfig                    agents.Agent // Agent type info needed by runtimes
+	PreviousExecutionID            string       // Non-empty when reconnecting to a previous execution
+	McpMode                        string       // MCP tool mode: "task" (default), "config", or "office"
+	AuthToken                      string       // Previously handshaken agentctl token for reconnects
+	BootstrapNonce                 string       // Stored nonce for re-handshake after container restart
 
 	// OnProgress is an optional callback for streaming preparation progress.
 	// Executors that perform multi-step setup (e.g. Sprites, remote Docker) can

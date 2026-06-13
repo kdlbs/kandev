@@ -228,21 +228,22 @@ func (r *DockerExecutor) seedSessionDir(ctx context.Context, req *ExecutorCreate
 
 func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) ContainerConfig {
 	return ContainerConfig{
-		AgentConfig:            req.AgentConfig,
-		WorkspacePath:          "", // Empty = no workspace mount; we clone inside container.
-		TaskID:                 req.TaskID,
-		TaskTitle:              req.TaskTitle,
-		TaskEnvironmentID:      req.TaskEnvironmentID,
-		SessionID:              req.SessionID,
-		ExecutorProfileID:      getMetadataString(req.Metadata, "executor_profile_id"),
-		InstanceID:             req.InstanceID,
-		Credentials:            req.Env,
-		AutoApprovePermissions: req.AutoApprovePermissions,
-		McpServers:             req.McpServers,
-		PrepareScript:          r.resolvePrepareScript(req),
-		ImageTagOverride:       getMetadataString(req.Metadata, MetadataKeyImageTagOverride),
-		LocalClonePath:         localCloneMountPath(req.Metadata),
-		BaseBranches:           getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
+		AgentConfig:                    req.AgentConfig,
+		WorkspacePath:                  "", // Empty = no workspace mount; we clone inside container.
+		TaskID:                         req.TaskID,
+		TaskTitle:                      req.TaskTitle,
+		TaskEnvironmentID:              req.TaskEnvironmentID,
+		SessionID:                      req.SessionID,
+		ExecutorProfileID:              getMetadataString(req.Metadata, "executor_profile_id"),
+		InstanceID:                     req.InstanceID,
+		Credentials:                    req.Env,
+		AutoApprovePermissions:         req.AutoApprovePermissions,
+		AutoApprovePermissionsOverride: req.AutoApprovePermissionsOverride,
+		McpServers:                     req.McpServers,
+		PrepareScript:                  r.resolvePrepareScript(req),
+		ImageTagOverride:               getMetadataString(req.Metadata, MetadataKeyImageTagOverride),
+		LocalClonePath:                 localCloneMountPath(req.Metadata),
+		BaseBranches:                   getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 	}
 }
 
@@ -490,21 +491,24 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 		}
 	}
 	return &agentctl.CreateInstanceRequest{
-		ID:                     instanceID,
-		WorkspacePath:          dockerWorkspacePath,
-		AgentType:              agentType,
-		Env:                    req.Env,
-		AutoApprovePermissions: boolPtr(req.AutoApprovePermissions),
-		AutoStart:              false,
-		McpServers:             req.McpServers,
-		SessionID:              req.SessionID,
-		TaskID:                 req.TaskID,
-		DisableAskQuestion:     disableAskQuestion,
-		AssumeMcpSse:           assumeMcpSse,
-		AssumeMcpHttp:          assumeMcpHttp,
-		McpMode:                req.McpMode,
-		RequiresProcessKill:    requiresProcessKill,
-		BaseBranches:           getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
+		ID:            instanceID,
+		WorkspacePath: dockerWorkspacePath,
+		AgentType:     agentType,
+		Env:           req.Env,
+		AutoApprovePermissions: autoApprovePermissionsOverride(
+			req.AutoApprovePermissions,
+			req.AutoApprovePermissionsOverride,
+		),
+		AutoStart:           false,
+		McpServers:          req.McpServers,
+		SessionID:           req.SessionID,
+		TaskID:              req.TaskID,
+		DisableAskQuestion:  disableAskQuestion,
+		AssumeMcpSse:        assumeMcpSse,
+		AssumeMcpHttp:       assumeMcpHttp,
+		McpMode:             req.McpMode,
+		RequiresProcessKill: requiresProcessKill,
+		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 	}
 }
 

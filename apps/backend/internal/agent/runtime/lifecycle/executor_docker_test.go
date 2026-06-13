@@ -560,6 +560,15 @@ func TestBuildReconnectCreateInstanceRequest(t *testing.T) {
 	}
 }
 
+func TestBuildReconnectCreateInstanceRequestOmitsAutoApproveOverrideWhenUnset(t *testing.T) {
+	req := &ExecutorCreateRequest{}
+
+	got := buildReconnectCreateInstanceRequest(req, "previous-exec")
+	if got.AutoApprovePermissions != nil {
+		t.Fatalf("AutoApprovePermissions = %v, want nil", got.AutoApprovePermissions)
+	}
+}
+
 func TestResolvePrepareScript(t *testing.T) {
 	log := newTestDockerLogger()
 	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
