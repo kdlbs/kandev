@@ -34,18 +34,145 @@ type MessageActionsProps = {
   hasNext?: boolean;
 };
 
-function useMessageModel(message: Message, showModel: boolean) {
+type SessionConfigSource = {
+  model?: unknown;
+  mode?: unknown;
+  config_options?: unknown;
+  configOptions?: unknown;
+};
+
+type MessageSessionConfig = {
+  model: string | null;
+  mode: string | null;
+  configOptions: Array<{ label: string; value: string }>;
+  configOptionsSet: boolean;
+};
+
+function stringValue(value: unknown): string | null {
+  return typeof value === "string" && value.trim() !== "" ? value : null;
+}
+
+function isStringConfigEntry(entry: [string, unknown]): entry is [string, string] {
+  const [key, optionValue] = entry;
+  return key !== "model" && key !== "mode" && stringValue(optionValue) !== null;
+}
+
+function configOptionEntries(value: unknown): Array<{ label: string; value: string }> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  return Object.entries(value)
+    .filter(isStringConfigEntry)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, optionValue]) => ({
+      label: humanizeConfigKey(key),
+      value: optionValue,
+    }));
+}
+
+function humanizeConfigKey(key: string): string {
+  return key
+    .replace(/[_-]+/g, " ")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .trim()
+    .replace(/^./, (char) => char.toUpperCase());
+}
+
+function configFromSource(source: SessionConfigSource | null | undefined): MessageSessionConfig {
+  if (!source) return emptySessionConfig();
+  const configOptionsValue = source.config_options ?? source.configOptions;
+  return {
+    model: stringValue(source.model),
+    mode: stringValue(source.mode),
+    configOptions: configOptionEntries(configOptionsValue),
+    configOptionsSet: isConfigOptionsObject(configOptionsValue),
+  };
+}
+
+function emptySessionConfig(): MessageSessionConfig {
+  return { model: null, mode: null, configOptions: [], configOptionsSet: false };
+}
+
+function isConfigOptionsObject(value: unknown): boolean {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function mergeSessionConfig(
+  primary: MessageSessionConfig,
+  fallback: MessageSessionConfig,
+): MessageSessionConfig {
+  return {
+    model: primary.model ?? fallback.model,
+    mode: primary.mode ?? fallback.mode,
+    configOptions: mergedConfigOptions(primary, fallback),
+    configOptionsSet: primary.configOptionsSet || fallback.configOptionsSet,
+  };
+}
+
+function mergedConfigOptions(
+  primary: MessageSessionConfig,
+  fallback: MessageSessionConfig,
+): MessageSessionConfig["configOptions"] {
+  if (!primary.configOptionsSet) return fallback.configOptions;
+  if (primary.configOptions.length === 0) return [];
+  const optionsByLabel = new Map(fallback.configOptions.map((option) => [option.label, option]));
+  for (const option of primary.configOptions) {
+    optionsByLabel.set(option.label, option);
+  }
+  return Array.from(optionsByLabel.values()).sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function formatSessionConfig(config: MessageSessionConfig): string | null {
+  if (!config.model) return null;
+  const details = formatSessionConfigDetails(config);
+  return details ? `${config.model} · ${details}` : config.model;
+}
+
+function formatSessionConfigDetails(config: MessageSessionConfig): string | null {
+  const details = [
+    config.mode ? `Mode: ${config.mode}` : null,
+    ...config.configOptions.map((option) => `${option.label}: ${option.value}`),
+  ].filter(Boolean);
+  return details.length > 0 ? details.join(" · ") : null;
+}
+
+function useMessageSessionConfigText(message: Message, showModel: boolean) {
   const sessionId = message.session_id;
-  const messageModel = showModel
-    ? (message.metadata as { model?: string } | undefined)?.model
-    : undefined;
-  const sessionModel = useAppStore((state) => {
-    if (!showModel || messageModel || !sessionId) return null;
+  const messageConfig = showModel
+    ? configFromSource(message.metadata as SessionConfigSource | undefined)
+    : null;
+  const [sessionConfigText, sessionDetailsText] = splitSessionConfigText(
+    useSessionConfigText(sessionId, showModel),
+  );
+  if (!messageConfig?.model) return sessionConfigText || null;
+  const messageDetails = formatSessionConfigDetails(messageConfig);
+  const details = messageDetails ?? sessionDetailsText;
+  return details ? `${messageConfig.model} · ${details}` : messageConfig.model;
+}
+
+function useSessionConfigText(sessionId: string | undefined, showModel: boolean) {
+  return useAppStore((state) => {
+    if (!showModel || !sessionId) return null;
     const session = state.taskSessions.items[sessionId];
-    const snapshot = session?.agent_profile_snapshot as { model?: string } | null | undefined;
-    return snapshot?.model ?? null;
+    const snapshot = configFromSource(
+      session?.agent_profile_snapshot as SessionConfigSource | null | undefined,
+    );
+    const metadata = session?.metadata as Record<string, unknown> | null | undefined;
+    const runtime = configFromSource(
+      metadata?.runtime_config as SessionConfigSource | null | undefined,
+    );
+    const config = mergeSessionConfig(runtime, snapshot);
+    return joinSessionConfigText(formatSessionConfig(config), formatSessionConfigDetails(config));
   });
-  return messageModel ?? sessionModel;
+}
+
+function joinSessionConfigText(full: string | null, details: string | null): string {
+  return JSON.stringify([full, details]);
+}
+
+function splitSessionConfigText(value: string | null): [string | null, string | null] {
+  if (!value) return [null, null];
+  const parsed = JSON.parse(value) as [unknown, unknown];
+  const [full, details] = parsed;
+  return [stringValue(full), stringValue(details)];
 }
 
 function CopyButton({ copied, onCopy }: { copied: boolean; onCopy: () => void }) {
@@ -141,19 +268,21 @@ function RawToggleButton({
 
 function MessageMetaInfo({
   showModel,
-  modelName,
+  sessionConfigText,
   showTimestamp,
   createdAt,
 }: {
   showModel: boolean;
-  modelName: string | null | undefined;
+  sessionConfigText: string | null;
   showTimestamp: boolean;
   createdAt: string;
 }) {
   return (
     <>
-      {showModel && modelName && (
-        <span className="text-[10px] text-muted-foreground/60 font-mono">{modelName}</span>
+      {showModel && sessionConfigText && (
+        <span className="min-w-0 truncate text-[10px] text-muted-foreground/60 font-mono">
+          {sessionConfigText}
+        </span>
       )}
       {showTimestamp && (
         <span className="text-[10px] text-muted-foreground/60 font-mono">
@@ -180,7 +309,7 @@ export function MessageActions({
   hasNext = false,
 }: MessageActionsProps) {
   const { copied, copy } = useCopyToClipboard();
-  const modelName = useMessageModel(message, showModel);
+  const sessionConfigText = useMessageSessionConfigText(message, showModel);
   const handleCopy = async () => {
     await copy(message.content);
   };
@@ -205,7 +334,7 @@ export function MessageActions({
       )}
       <MessageMetaInfo
         showModel={showModel}
-        modelName={modelName}
+        sessionConfigText={sessionConfigText}
         showTimestamp={showTimestamp}
         createdAt={message.created_at}
       />
