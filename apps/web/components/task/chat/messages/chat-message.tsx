@@ -1,19 +1,14 @@
 "use client";
 
 import { memo, useState, useCallback } from "react";
-import ReactMarkdown from "react-markdown";
 import { IconWand, IconMessageDots, IconFile } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
 import { RichBlocks } from "@/components/task/chat/messages/rich-blocks";
 import { MessageActions } from "@/components/task/chat/messages/message-actions";
-import { useMessageNavigation } from "@/hooks/use-message-navigation";
+import { useUserMessageNavigation } from "@/hooks/use-message-navigation";
 import { SenderTaskBadge, type SenderTaskInfo } from "./sender-task-badge";
-import {
-  markdownComponents,
-  normalizeMarkdown,
-  remarkPlugins,
-} from "@/components/shared/markdown-components";
+import { MemoizedMarkdown } from "@/components/shared/memoized-markdown";
 import { ImagePreviewDialog } from "@/components/task/chat/image-preview-dialog";
 import {
   WorkflowStepMessageBadge,
@@ -27,7 +22,7 @@ type ChatMessageProps = {
   label: string;
   className: string;
   showRichBlocks?: boolean;
-  allMessages?: Message[];
+  sessionId?: string | null;
   onScrollToMessage?: (messageId: string) => void;
 };
 
@@ -88,9 +83,7 @@ function renderUserMessageBody(
   if (hasContent) {
     return (
       <div className="markdown-body markdown-body-user max-w-none">
-        <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
-          {normalizeMarkdown(content)}
-        </ReactMarkdown>
+        <MemoizedMarkdown content={content} />
       </div>
     );
   }
@@ -106,7 +99,7 @@ type UserMessageProps = {
   comment: Message;
   showRaw: boolean;
   onToggleRaw: () => void;
-  allMessages?: Message[];
+  sessionId?: string | null;
   onScrollToMessage?: (messageId: string) => void;
 };
 
@@ -200,10 +193,10 @@ function UserMessageContent({
   comment,
   showRaw,
   onToggleRaw,
-  allMessages,
+  sessionId,
   onScrollToMessage,
 }: UserMessageProps) {
-  const userNavigation = useMessageNavigation(allMessages || [], comment.id, "user");
+  const userNavigation = useUserMessageNavigation(sessionId ?? null, comment.id);
   const {
     imageAttachments,
     fileAttachments,
@@ -263,15 +256,16 @@ function UserMessageContent({
           showTimestamp={true}
           showRawToggle={true}
           hasHiddenPrompts={hasHiddenPrompts}
-          showNavigation={!!allMessages && allMessages.length > 0}
+          showNavigation={userNavigation.hasPrevious || userNavigation.hasNext}
           isRawView={showRaw}
           onToggleRaw={onToggleRaw}
           onNavigatePrev={() => {
-            if (userNavigation.previous && onScrollToMessage)
-              onScrollToMessage(userNavigation.previous.id);
+            if (userNavigation.previousId && onScrollToMessage)
+              onScrollToMessage(userNavigation.previousId);
           }}
           onNavigateNext={() => {
-            if (userNavigation.next && onScrollToMessage) onScrollToMessage(userNavigation.next.id);
+            if (userNavigation.nextId && onScrollToMessage)
+              onScrollToMessage(userNavigation.nextId);
           }}
           hasPrev={userNavigation.hasPrevious}
           hasNext={userNavigation.hasNext}
@@ -300,9 +294,7 @@ function AgentMessageContent({ comment, showRaw, onToggleRaw, showRichBlocks }: 
           </pre>
         ) : (
           <div className="markdown-body max-w-none">
-            <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
-              {normalizeMarkdown(comment.content || "(empty)")}
-            </ReactMarkdown>
+            <MemoizedMarkdown content={comment.content || "(empty)"} />
             {showRichBlocks ? <RichBlocks comment={comment} /> : null}
           </div>
         )}
@@ -328,7 +320,7 @@ export const ChatMessage = memo(function ChatMessage({
   label,
   className,
   showRichBlocks,
-  allMessages,
+  sessionId,
   onScrollToMessage,
 }: ChatMessageProps) {
   const [showRaw, setShowRaw] = useState(false);
@@ -360,7 +352,7 @@ export const ChatMessage = memo(function ChatMessage({
         comment={comment}
         showRaw={showRaw}
         onToggleRaw={toggleRaw}
-        allMessages={allMessages}
+        sessionId={sessionId}
         onScrollToMessage={onScrollToMessage}
       />
     );

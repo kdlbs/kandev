@@ -233,6 +233,15 @@ export type ChatInputBodyProps = {
   editorAreaProps: ChatInputEditorAreaProps;
 };
 
+/** Glow class for the outer wrapper. The pulsing glow lives on the wrapper
+ * (not the inner box) because the inner box has `overflow-hidden`, which would
+ * clip a child pseudo-element's outer box-shadow. */
+function chatInputGlowClass(isAgentBusy: boolean, isStarting: boolean): string {
+  if (isAgentBusy) return "chat-input-glow-running";
+  if (isStarting) return "chat-input-glow-starting";
+  return "";
+}
+
 export function ChatInputBody({
   containerRef,
   height,
@@ -294,7 +303,7 @@ export function ChatInputBody({
   );
 
   return (
-    <div className="relative">
+    <div className={cn("relative", chatInputGlowClass(isAgentBusy, isStarting))}>
       <ResizeHandle
         planModeEnabled={planModeEnabled}
         isAgentBusy={isAgentBusy}

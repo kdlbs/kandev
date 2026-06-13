@@ -181,7 +181,6 @@ export const NativeMessageList = memo(function NativeMessageList({
   messagesLoading,
   isWorking,
   sessionState,
-  taskState,
   worktreePath,
   onOpenFile,
 }: MessageListProps) {
@@ -245,9 +244,6 @@ export const NativeMessageList = memo(function NativeMessageList({
               onOpenFile={onOpenFile}
               isLastGroup={item.type === "turn_group" && item.id === lastTurnGroupId}
               isTurnActive={isRunning}
-              messages={messages}
-              sessionState={sessionState}
-              taskState={taskState}
               onScrollToMessage={handleScrollToMessage}
             />
           </div>
@@ -256,12 +252,7 @@ export const NativeMessageList = memo(function NativeMessageList({
 
       <AgentStatus sessionState={sessionState} sessionId={sessionId} messages={messages} />
       {(footerActionMessages ?? []).map((msg: Message) => (
-        <MessageRenderer
-          key={msg.id}
-          comment={msg}
-          isTaskDescription={false}
-          sessionState={sessionState}
-        />
+        <MessageRenderer key={msg.id} comment={msg} isTaskDescription={false} />
       ))}
 
       {/* Bottom anchor — browser keeps scroll pinned here when new content appends */}

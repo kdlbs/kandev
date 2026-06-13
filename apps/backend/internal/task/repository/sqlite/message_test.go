@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // insertMsgWithType inserts a message row with a configurable type column,
@@ -55,6 +57,48 @@ func TestListMessagesByTurnID(t *testing.T) {
 	}
 	if len(empty) != 0 {
 		t.Errorf("expected no messages for unknown turn, got %d", len(empty))
+	}
+}
+
+func TestUpdateMessageBumpsUpdatedAt(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-U", "sess-U", "turn-U")
+
+	created := time.Now().UTC().Add(-time.Hour)
+	msg := &models.Message{
+		ID:            "m-u",
+		TaskSessionID: "sess-U",
+		TurnID:        "turn-U",
+		AuthorType:    models.MessageAuthorAgent,
+		Content:       "hello",
+		Type:          models.MessageTypeMessage,
+		CreatedAt:     created,
+	}
+	if err := repo.CreateMessage(ctx, msg); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+
+	// On insert, updated_at defaults to created_at.
+	got, err := repo.GetMessage(ctx, "m-u")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if !got.UpdatedAt.Equal(got.CreatedAt) {
+		t.Errorf("after create, updated_at = %v, want == created_at %v", got.UpdatedAt, got.CreatedAt)
+	}
+
+	// Update advances updated_at past created_at.
+	msg.Content = "hello world"
+	if err := repo.UpdateMessage(ctx, msg); err != nil {
+		t.Fatalf("UpdateMessage: %v", err)
+	}
+	got, err = repo.GetMessage(ctx, "m-u")
+	if err != nil {
+		t.Fatalf("GetMessage after update: %v", err)
+	}
+	if !got.UpdatedAt.After(got.CreatedAt) {
+		t.Errorf("after update, updated_at = %v, want after created_at %v", got.UpdatedAt, got.CreatedAt)
 	}
 }
 

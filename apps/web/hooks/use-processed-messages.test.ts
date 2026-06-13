@@ -12,6 +12,10 @@ import {
   deduplicateAgentBootResumes,
   isAgentBootResumeMessage,
   isSetupScriptMessage,
+  messageListMapsEqual,
+  messageMapsEqualByIdentity,
+  reconcileRenderItems,
+  type RenderItem,
 } from "./use-processed-messages";
 
 function makeMessage(
@@ -255,5 +259,113 @@ describe("buildGroupedRenderItems prepare progress placement", () => {
     });
 
     expect(result.map((item) => item.type)).toEqual(["message", "prepare_progress"]);
+  });
+});
+
+describe("messageMapsEqualByIdentity", () => {
+  it("treats maps with the same keys and identical Message refs as equal", () => {
+    const a = makeMessage("perm-1", "permission_request");
+    const b = makeMessage("perm-2", "permission_request");
+    const first = new Map<string, Message>([
+      ["tc-1", a],
+      ["tc-2", b],
+    ]);
+    const second = new Map<string, Message>([
+      ["tc-1", a],
+      ["tc-2", b],
+    ]);
+    expect(messageMapsEqualByIdentity(first, second)).toBe(true);
+  });
+
+  it("is false when sizes differ", () => {
+    const a = makeMessage("perm-1", "permission_request");
+    const first = new Map<string, Message>([["tc-1", a]]);
+    const second = new Map<string, Message>([
+      ["tc-1", a],
+      ["tc-2", makeMessage("perm-2", "permission_request")],
+    ]);
+    expect(messageMapsEqualByIdentity(first, second)).toBe(false);
+  });
+
+  it("is false when a key maps to a different Message ref (e.g. status changed)", () => {
+    const first = new Map<string, Message>([["tc-1", makeMessage("perm-1", "permission_request")]]);
+    const second = new Map<string, Message>([
+      ["tc-1", makeMessage("perm-1", "permission_request")],
+    ]);
+    expect(messageMapsEqualByIdentity(first, second)).toBe(false);
+  });
+});
+
+describe("messageListMapsEqual", () => {
+  it("treats maps whose array values share positional Message refs as equal", () => {
+    const c1 = makeMessage("child-1", "tool_call");
+    const c2 = makeMessage("child-2", "tool_call");
+    const first = new Map<string, Message[]>([["parent-1", [c1, c2]]]);
+    const second = new Map<string, Message[]>([["parent-1", [c1, c2]]]);
+    expect(messageListMapsEqual(first, second)).toBe(true);
+  });
+
+  it("is false when an array length changes (new child appended)", () => {
+    const c1 = makeMessage("child-1", "tool_call");
+    const first = new Map<string, Message[]>([["parent-1", [c1]]]);
+    const second = new Map<string, Message[]>([
+      ["parent-1", [c1, makeMessage("child-2", "tool_call")]],
+    ]);
+    expect(messageListMapsEqual(first, second)).toBe(false);
+  });
+
+  it("is false when a child Message ref changes positionally", () => {
+    const c1 = makeMessage("child-1", "tool_call");
+    const first = new Map<string, Message[]>([["parent-1", [c1]]]);
+    const second = new Map<string, Message[]>([
+      ["parent-1", [makeMessage("child-1", "tool_call")]],
+    ]);
+    expect(messageListMapsEqual(first, second)).toBe(false);
+  });
+});
+
+describe("reconcileRenderItems", () => {
+  const turnGroup = (id: string, messages: Message[]): RenderItem => ({
+    type: "turn_group",
+    id,
+    turnId: messages[0]?.turn_id ?? null,
+    messages,
+  });
+  const messageItem = (message: Message): RenderItem => ({ type: "message", message });
+
+  it("returns the prior array unchanged when nothing changed", () => {
+    const m1 = makeMessage("m1", "message");
+    const prev = [messageItem(m1)];
+    const next = [messageItem(m1)];
+    expect(reconcileRenderItems(prev, next)).toBe(prev);
+  });
+
+  it("reuses unchanged turn-group wrappers while replacing the changed one", () => {
+    const a1 = makeMessage("a1", "tool_call");
+    const a2 = makeMessage("a2", "tool_call");
+    const b1 = makeMessage("b1", "tool_call");
+    const b2 = makeMessage("b2", "tool_call");
+    const groupA = turnGroup("turn-group-a1", [a1, a2]);
+    const groupBPrev = turnGroup("turn-group-b1", [b1]);
+    const prev = [groupA, groupBPrev];
+
+    // groupA identical content (rebuilt wrapper); groupB grows by a token.
+    const groupBNext = turnGroup("turn-group-b1", [b1, b2]);
+    const next = [turnGroup("turn-group-a1", [a1, a2]), groupBNext];
+
+    const result = reconcileRenderItems(prev, next);
+    expect(result[0]).toBe(groupA); // stable → memo holds
+    expect(result[1]).toBe(groupBNext); // changed → fresh wrapper
+  });
+
+  it("keeps stable message wrappers and appends a new item", () => {
+    const m1 = makeMessage("m1", "message");
+    const prev = [messageItem(m1)];
+    const m2 = makeMessage("m2", "message");
+    const next = [messageItem(m1), messageItem(m2)];
+    const result = reconcileRenderItems(prev, next);
+    expect(result).not.toBe(prev);
+    expect(result[0]).toBe(prev[0]);
+    expect(result).toHaveLength(2);
   });
 });

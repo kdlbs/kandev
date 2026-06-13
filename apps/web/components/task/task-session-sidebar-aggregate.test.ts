@@ -1,10 +1,26 @@
 import { describe, expect, it } from "vitest";
 import {
   aggregateSidebarTasks,
+  buildPendingFlags,
+  readPendingFlags,
   type SidebarStepInfo,
   type WorkflowSnapshotMap,
 } from "./task-session-sidebar-aggregate";
 import type { KanbanState } from "@/lib/state/slices";
+import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
+
+function makePermissionRequest(id: string, status?: string): Message {
+  return {
+    id,
+    session_id: toSessionId("s1"),
+    task_id: toTaskId("t1"),
+    author_type: "agent",
+    content: "",
+    type: "permission_request",
+    metadata: status ? { status } : undefined,
+    created_at: "",
+  };
+}
 
 type KanbanTask = KanbanState["tasks"][number];
 
@@ -139,5 +155,33 @@ describe("aggregateSidebarTasks", () => {
       [makeStep("step-B", 0)],
     );
     expect(result.allTasks.map((t) => t.id)).toEqual(["task-B"]);
+  });
+});
+
+describe("buildPendingFlags / readPendingFlags", () => {
+  it("flags a session with a pending permission request", () => {
+    const flags = buildPendingFlags({ "sess-1": [makePermissionRequest("p1")] }, ["sess-1"]);
+    expect(readPendingFlags(flags, "sess-1")).toEqual({ clarification: false, permission: true });
+  });
+
+  it("does not flag a session whose permission request is already resolved", () => {
+    const flags = buildPendingFlags({ "sess-1": [makePermissionRequest("p1", "approved")] }, [
+      "sess-1",
+    ]);
+    expect(readPendingFlags(flags, "sess-1")).toEqual({ clarification: false, permission: false });
+  });
+
+  it("only computes flags for the requested session ids", () => {
+    const flags = buildPendingFlags(
+      { "sess-1": [makePermissionRequest("p1")], "sess-2": [makePermissionRequest("p2")] },
+      ["sess-1"],
+    );
+    expect(readPendingFlags(flags, "sess-1").permission).toBe(true);
+    expect(readPendingFlags(flags, "sess-2").permission).toBe(false);
+  });
+
+  it("returns all-false for a null/unknown session", () => {
+    expect(readPendingFlags({}, null)).toEqual({ clarification: false, permission: false });
+    expect(readPendingFlags({}, "missing")).toEqual({ clarification: false, permission: false });
   });
 });

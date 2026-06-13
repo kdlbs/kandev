@@ -8,7 +8,7 @@ import { createDebugLogger, isDebug } from "@/lib/debug/log";
 const INITIAL_FETCH_LIMIT = 100;
 const BACKFILL_PAGE_LIMIT = 100;
 const RUNNING_BACKFILL_INITIAL_DELAY_MS = 1200;
-const RUNNING_BACKFILL_INTERVAL_MS = 3000;
+const RUNNING_BACKFILL_INTERVAL_MS = 5000;
 export const MAX_AUTO_BACKFILL_PAGES = 10;
 
 export function hasUserOrAgentMessage(messages: Message[]): boolean {
@@ -158,10 +158,15 @@ async function fetchAndStoreMessages(
         )
       : fetched;
 
-  store.getState().setMessages(sessionId, merged, {
+  // Idempotent merge: the store reconciles this snapshot against current state,
+  // preserving object/array identity for unchanged messages so the periodic
+  // refetch doesn't re-render the whole chat (see reconcileMessages).
+  store.getState().mergeMessages(sessionId, merged, {
     hasMore: response.has_more ?? false,
     oldestCursor: merged[0]?.id ?? null,
   });
+  // The store now holds the identity-reconciled array; callers only read length
+  // and message content from the return, so `merged` is equivalent.
   return merged;
 }
 

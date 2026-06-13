@@ -387,6 +387,11 @@ export type AppState = {
     meta?: { hasMore?: boolean; oldestCursor?: string | null },
   ) => void;
   addMessage: (message: Message) => void;
+  mergeMessages: (
+    sessionId: string,
+    messages: Message[],
+    meta?: { hasMore?: boolean; oldestCursor?: string | null },
+  ) => void;
   addTurn: (turn: Turn) => void;
   completeTurn: (sessionId: string, turnId: string, completedAt: string) => void;
   setActiveTurn: (sessionId: string, turnId: string | null) => void;

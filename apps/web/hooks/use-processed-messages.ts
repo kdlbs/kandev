@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   sessionId as toSessionId,
   taskId as toTaskId,
@@ -155,6 +155,98 @@ function buildSubagentChildIds(childrenByParentToolCallId: Map<string, Message[]
     for (const child of children) set.add(child.id);
   }
   return set;
+}
+
+/** True when both maps hold the same keys pointing at the same Message refs. */
+export function messageMapsEqualByIdentity(
+  a: Map<string, Message>,
+  b: Map<string, Message>,
+): boolean {
+  if (a.size !== b.size) return false;
+  for (const [key, value] of a) {
+    if (b.get(key) !== value) return false;
+  }
+  return true;
+}
+
+/** True when both maps hold the same keys pointing at arrays whose Message refs
+ *  match positionally. */
+export function messageListMapsEqual(
+  a: Map<string, Message[]>,
+  b: Map<string, Message[]>,
+): boolean {
+  if (a.size !== b.size) return false;
+  for (const [key, value] of a) {
+    const other = b.get(key);
+    if (!other || other.length !== value.length) return false;
+    for (let i = 0; i < value.length; i++) {
+      if (value[i] !== other[i]) return false;
+    }
+  }
+  return true;
+}
+
+/** Keep a prior reference when the freshly-built value is content-equal. The
+ *  per-token `messages` array churns every reference downstream; holding the
+ *  prior value lets `memo` on each message component survive commits where the
+ *  derived map content didn't actually change. Uses the React-endorsed
+ *  "adjust state during render" pattern so we never mutate a ref mid-render. */
+function useStableValue<T>(next: T, equal: (a: T, b: T) => boolean): T {
+  const [stable, setStable] = useState(next);
+  if (!equal(stable, next)) {
+    setStable(next);
+    return next;
+  }
+  return stable;
+}
+
+function renderItemKey(item: RenderItem): string {
+  return item.type === "message" ? `m:${item.message.id}` : item.id;
+}
+
+/** Content-equal when the wrapper would render identically. Turn groups compare
+ *  their messages by positional identity so a streaming token in the active turn
+ *  yields a fresh wrapper while quiescent earlier turns stay equal. */
+function renderItemsEqual(a: RenderItem, b: RenderItem): boolean {
+  if (a.type !== b.type) return false;
+  if (a.type === "message" && b.type === "message") return a.message === b.message;
+  if (a.type === "prepare_progress" && b.type === "prepare_progress") return a.id === b.id;
+  if (a.type === "turn_group" && b.type === "turn_group") {
+    if (a.id !== b.id || a.turnId !== b.turnId || a.messages.length !== b.messages.length) {
+      return false;
+    }
+    for (let i = 0; i < a.messages.length; i++) {
+      if (a.messages[i] !== b.messages[i]) return false;
+    }
+    return true;
+  }
+  return false;
+}
+
+/** Reuse prior wrapper objects for items whose content didn't change so the
+ *  `memo` on TurnGroupMessage/MessageRenderer survives new-message commits.
+ *  Returns `prev` unchanged when every slot is positionally identical. */
+export function reconcileRenderItems(prev: RenderItem[], next: RenderItem[]): RenderItem[] {
+  const prevByKey = new Map<string, RenderItem>();
+  for (const item of prev) prevByKey.set(renderItemKey(item), item);
+  let identical = prev.length === next.length;
+  const result = next.map((nextItem, i) => {
+    const prevItem = prevByKey.get(renderItemKey(nextItem));
+    const reused = prevItem && renderItemsEqual(prevItem, nextItem) ? prevItem : nextItem;
+    if (reused !== prev[i]) identical = false;
+    return reused;
+  });
+  return identical ? prev : result;
+}
+
+function useStableGroupedItems(next: RenderItem[]): RenderItem[] {
+  const [stable, setStable] = useState(next);
+  const reconciled = reconcileRenderItems(stable, next);
+  if (reconciled !== stable) {
+    setStable(reconciled);
+    return reconciled;
+  }
+  return stable;
 }
 
 function isRecoveryMessage(message: Message): boolean {
@@ -407,10 +499,13 @@ export function useProcessedMessages(
   options: ProcessedMessagesOptions = {},
 ) {
   const toolCallIds = useMemo(() => buildToolCallIds(messages), [messages]);
-  const permissionsByToolCallId = useMemo(() => buildPermissionsByToolCallId(messages), [messages]);
-  const childrenByParentToolCallId = useMemo(
-    () => buildChildrenByParentToolCallId(messages),
-    [messages],
+  const permissionsByToolCallId = useStableValue(
+    useMemo(() => buildPermissionsByToolCallId(messages), [messages]),
+    messageMapsEqualByIdentity,
+  );
+  const childrenByParentToolCallId = useStableValue(
+    useMemo(() => buildChildrenByParentToolCallId(messages), [messages]),
+    messageListMapsEqual,
   );
   const subagentChildIds = useMemo(
     () => buildSubagentChildIds(childrenByParentToolCallId),
@@ -467,7 +562,7 @@ export function useProcessedMessages(
     return { regularMessages: regular, footerActionMessages: footer };
   }, [allMessages]);
 
-  const groupedItems = useMemo<RenderItem[]>(() => {
+  const rawGroupedItems = useMemo<RenderItem[]>(() => {
     return buildGroupedItemsForHook({
       regularMessages,
       allSessionMessages: messages,
@@ -475,6 +570,7 @@ export function useProcessedMessages(
       hasOlderMessages: options.hasOlderMessages ?? false,
     });
   }, [regularMessages, resolvedSessionId, messages, options.hasOlderMessages]);
+  const groupedItems = useStableGroupedItems(rawGroupedItems);
 
   useDebugProcessedPipeline({
     sessionId: resolvedSessionId,

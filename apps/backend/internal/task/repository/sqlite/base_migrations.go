@@ -86,6 +86,15 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("task_sessions.workspace_path", `ALTER TABLE task_sessions ADD COLUMN workspace_path TEXT DEFAULT ''`)
 	r.migrate.Apply("repositories.copy_files", `ALTER TABLE repositories ADD COLUMN copy_files TEXT DEFAULT ''`)
 
+	// Authoritative per-message change signal (chat render-perf). SQLite forbids a
+	// non-constant default on ADD COLUMN, so the column is added nullable and
+	// existing rows are backfilled to created_at; new inserts/updates set it
+	// explicitly in CreateMessage/UpdateMessage. The backfill UPDATE is idempotent
+	// (WHERE updated_at IS NULL).
+	r.migrate.Apply("task_session_messages.updated_at", `ALTER TABLE task_session_messages ADD COLUMN updated_at TIMESTAMP`)
+	r.migrate.Apply("task_session_messages.updated_at.backfill", `UPDATE task_session_messages SET updated_at = created_at WHERE updated_at IS NULL`)
+	r.migrate.Apply("idx_messages_session_updated", `CREATE INDEX IF NOT EXISTS idx_messages_session_updated ON task_session_messages(task_session_id, updated_at)`)
+
 	// Backfill the per-session cost/token columns. Runs after the gated
 	// task_sessions rebuilds above so it repairs legacy DBs whose schema can no
 	// longer trigger a rebuild (see migrateSessionsAddCostColumns).

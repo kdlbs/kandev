@@ -663,6 +663,8 @@ export type Message = {
   metadata?: Record<string, unknown>;
   requests_input?: boolean;
   created_at: string;
+  /** Authoritative per-message change signal; advances on every content/metadata update. */
+  updated_at?: string;
 };
 
 export type Turn = {

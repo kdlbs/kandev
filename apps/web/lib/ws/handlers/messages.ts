@@ -23,6 +23,7 @@ export function registerMessagesHandlers(store: StoreApi<AppState>): WsHandlers 
         metadata: payload.metadata,
         requests_input: payload.requests_input,
         created_at: payload.created_at,
+        updated_at: payload.updated_at,
       });
     },
     "session.message.updated": (message) => {
@@ -43,6 +44,7 @@ export function registerMessagesHandlers(store: StoreApi<AppState>): WsHandlers 
         metadata: payload.metadata,
         requests_input: payload.requests_input,
         created_at: payload.created_at,
+        updated_at: payload.updated_at,
       });
     },
   };

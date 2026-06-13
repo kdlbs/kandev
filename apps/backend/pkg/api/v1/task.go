@@ -164,6 +164,7 @@ type Message struct {
 	RequestsInput bool                   `json:"requests_input"` // True if agent is requesting user input
 	Metadata      map[string]interface{} `json:"metadata,omitempty"`
 	CreatedAt     time.Time              `json:"created_at"`
+	UpdatedAt     time.Time              `json:"updated_at,omitempty"` // Authoritative per-message change signal
 }
 
 // CreateMessageRequest for adding a message to a task session

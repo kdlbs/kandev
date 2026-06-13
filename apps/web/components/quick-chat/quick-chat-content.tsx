@@ -95,7 +95,6 @@ export const QuickChatContent = memo(function QuickChatContent({
           messagesLoading={panelState.messagesLoading}
           isWorking={panelState.isWorking}
           sessionState={panelState.session?.state}
-          taskState={panelState.task?.state}
           worktreePath={panelState.session?.worktree_path}
           onOpenFile={undefined}
         />

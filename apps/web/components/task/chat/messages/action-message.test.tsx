@@ -1,9 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ReactNode } from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
 import { ActionMessage } from "./action-message";
-import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
+import {
+  sessionId as toSessionId,
+  taskId as toTaskId,
+  type Message,
+  type TaskSession,
+  type TaskSessionState,
+} from "@/lib/types/http";
+import type { AppState } from "@/lib/state/store";
 
 const requestMock = vi.fn().mockResolvedValue({});
 
@@ -52,24 +58,29 @@ function retryMessage(overrides: Partial<Message> = {}): Message {
   } as Message;
 }
 
-function Wrapper({ children }: { children: ReactNode }) {
-  return <StateProvider initialState={{}}>{children}</StateProvider>;
+/** ActionMessage reads session state from the store (keyed by comment.session_id),
+ *  so seed it via the provider instead of passing a prop. */
+function renderAction(comment: Message, sessionState?: TaskSessionState) {
+  const initialState: Partial<AppState> = sessionState
+    ? { taskSessions: { items: { "sess-1": { state: sessionState } as TaskSession } } }
+    : {};
+  return render(<ActionMessage comment={comment} />, {
+    wrapper: ({ children }) => (
+      <StateProvider initialState={initialState}>{children}</StateProvider>
+    ),
+  });
 }
 
 describe("ActionMessage — transient retry (warning variant)", () => {
   it("renders the retrying copy in amber, not red", () => {
-    render(<ActionMessage comment={retryMessage()} sessionState="WAITING_FOR_INPUT" />, {
-      wrapper: Wrapper,
-    });
+    renderAction(retryMessage(), "WAITING_FOR_INPUT");
     const text = screen.getByText(/retrying in 5s \(attempt 1\/3\)/i);
     expect(text.className).toContain("text-amber-600");
     expect(text.className).not.toContain("text-red-600");
   });
 
   it("Cancel fires a session.recover ws_request with action cancel_retry", async () => {
-    render(<ActionMessage comment={retryMessage()} sessionState="WAITING_FOR_INPUT" />, {
-      wrapper: Wrapper,
-    });
+    renderAction(retryMessage(), "WAITING_FOR_INPUT");
     fireEvent.click(screen.getByTestId(CANCEL_TEST_ID));
     await waitFor(() => expect(requestMock).toHaveBeenCalledTimes(1));
     expect(requestMock).toHaveBeenCalledWith("session.recover", {
@@ -80,10 +91,7 @@ describe("ActionMessage — transient retry (warning variant)", () => {
   });
 
   it("hides while the session is RUNNING (retry in flight) to avoid a stale card", () => {
-    const { container } = render(
-      <ActionMessage comment={retryMessage()} sessionState="RUNNING" />,
-      { wrapper: Wrapper },
-    );
+    const { container } = renderAction(retryMessage(), "RUNNING");
     expect(container.firstChild).toBeNull();
   });
 
@@ -98,9 +106,7 @@ describe("ActionMessage — transient retry (warning variant)", () => {
         ],
       },
     } as Partial<Message>);
-    render(<ActionMessage comment={errorMsg} sessionState="WAITING_FOR_INPUT" />, {
-      wrapper: Wrapper,
-    });
+    renderAction(errorMsg, "WAITING_FOR_INPUT");
     const text = screen.getByText(/Agent encountered an error/i);
     expect(text.className).toContain("text-red-600");
     expect(text.className).not.toContain("text-amber-600");

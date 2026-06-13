@@ -3,13 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, memo } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { linkToTask } from "@/lib/links";
-import type {
-  Message,
-  TaskState,
-  TaskSession,
-  TaskSessionState,
-  Repository,
-} from "@/lib/types/http";
+import type { TaskState, TaskSession, TaskSessionState, Repository } from "@/lib/types/http";
 import type { TaskPR } from "@/lib/types/github";
 import type { KanbanState } from "@/lib/state/slices";
 import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
@@ -33,10 +27,8 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import { useArchivedTaskState } from "./task-archived-context";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
-import {
-  hasPendingClarificationForSession,
-  hasPendingPermissionForSession,
-} from "@/lib/utils/pending-clarification";
+import { buildPendingFlags, readPendingFlags } from "./task-session-sidebar-aggregate";
+import { useShallow } from "zustand/react/shallow";
 
 /**
  * Stabilize a derived array of primary session IDs so the reference only
@@ -98,7 +90,7 @@ type SidebarCtx = {
   envIdBySessionId: Record<string, string>;
   repositorySlugById: Map<string, string | undefined>;
   taskPRsByTaskId: Record<string, TaskPR[] | undefined>;
-  messagesBySession: Record<string, Message[]>;
+  pendingFlags: Record<string, boolean>;
   titleById: Map<string, string>;
   workflowNameById: Map<string, string>;
   stepTitleById: Map<string, string>;
@@ -128,14 +120,7 @@ function toSidebarItem(
   const repoSlug = task.repositoryId ? ctx.repositorySlugById.get(task.repositoryId) : undefined;
   // Sidebar shows just one slot; pick the primary PR (first by created_at).
   const pr = ctx.taskPRsByTaskId[task.id]?.[0];
-  const hasPendingClarificationRequest = hasPendingClarificationForSession(
-    ctx.messagesBySession,
-    task.primarySessionId,
-  );
-  const hasPendingPermission = hasPendingPermissionForSession(
-    ctx.messagesBySession,
-    task.primarySessionId,
-  );
+  const pending = readPendingFlags(ctx.pendingFlags, task.primarySessionId);
 
   const diffStats = resolveDiffStats(
     sessionInfo.diffStats,
@@ -162,8 +147,8 @@ function toSidebarItem(
     remoteExecutorType: task.primaryExecutorType ?? undefined,
     remoteExecutorName: task.primaryExecutorName ?? undefined,
     primarySessionId: task.primarySessionId ?? null,
-    hasPendingClarification: hasPendingClarificationRequest,
-    hasPendingPermission,
+    hasPendingClarification: pending.clarification,
+    hasPendingPermission: pending.permission,
     updatedAt: sessionInfo.updatedAt ?? task.updatedAt ?? task.createdAt,
     createdAt: task.createdAt,
     isArchived: false as boolean,
@@ -225,7 +210,6 @@ function useSidebarData(workspaceId: string | null) {
   const envIdBySessionId = useAppStore((state) => state.environmentIdBySessionId);
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
   const taskPRsByTaskId = useAppStore((state) => state.taskPRs.byTaskId);
-  const messagesBySession = useAppStore((state) => state.messages.bySession);
   const archivedState = useArchivedTaskState();
 
   const selectedTaskId = useMemo(() => {
@@ -241,6 +225,14 @@ function useSidebarData(workspaceId: string | null) {
     isLoading: isLoadingWorkflow,
   } = useWorkspaceSidebarTasks(workspaceId);
 
+  // Stable list of primary session IDs for the bulk-subscribe effect and the
+  // narrow pending-flag selector below. Derived from kanban tasks (always
+  // available) rather than sessionsByTaskId (loaded on-demand).
+  const primarySessionIds = useStablePrimarySessionIds(allTasks);
+  const pendingFlags = useAppStore(
+    useShallow((state) => buildPendingFlags(state.messages.bySession, primarySessionIds)),
+  );
+
   const tasksWithRepositories = useMemo(() => {
     const repositories = workspaceId ? (repositoriesByWorkspace[workspaceId] ?? []) : [];
     const repositorySlugById = new Map(
@@ -255,7 +247,7 @@ function useSidebarData(workspaceId: string | null) {
       envIdBySessionId,
       repositorySlugById,
       taskPRsByTaskId,
-      messagesBySession,
+      pendingFlags,
       titleById,
       workflowNameById,
       stepTitleById,
@@ -279,13 +271,9 @@ function useSidebarData(workspaceId: string | null) {
     gitStatusByEnvId,
     envIdBySessionId,
     taskPRsByTaskId,
-    messagesBySession,
+    pendingFlags,
     archivedState,
   ]);
-
-  // Stable list of primary session IDs for the bulk-subscribe effect.
-  // Derived from kanban tasks (always available) rather than sessionsByTaskId (loaded on-demand).
-  const primarySessionIds = useStablePrimarySessionIds(allTasks);
 
   return {
     activeTaskId,

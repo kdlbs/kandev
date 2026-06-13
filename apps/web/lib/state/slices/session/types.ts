@@ -150,6 +150,17 @@ export type SessionSliceActions = {
   ) => void;
   addMessage: (message: Message) => void;
   updateMessage: (message: Message) => void;
+  /**
+   * Idempotent full-snapshot merge: reconciles `messages` against the current
+   * stored array, preserving object identity for unchanged messages and the
+   * array reference itself when nothing changed (see `reconcileMessages`). Used
+   * by periodic refetches so a no-op tick triggers zero re-renders.
+   */
+  mergeMessages: (
+    sessionId: string,
+    messages: Message[],
+    meta?: { hasMore?: boolean; oldestCursor?: string | null },
+  ) => void;
   prependMessages: (
     sessionId: string,
     messages: Message[],

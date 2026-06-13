@@ -10,6 +10,7 @@ import {
   useMemo,
 } from "react";
 import { EditorContent } from "@tiptap/react";
+import { useShallow } from "zustand/react/shallow";
 import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
@@ -490,8 +491,15 @@ function TipTapPopups({
 }
 
 function useMessageHistoryForSession(sessionId: string | null): string[] {
-  const messages = useAppStore((s) => (sessionId ? s.messages.bySession[sessionId] : undefined));
-  return useMemo(() => extractUserHistory(messages ?? []), [messages]);
+  // Subscribe to the *derived* user history (not the raw messages array) via a
+  // shallow comparison: agent streaming tokens churn the messages array every
+  // frame but don't change the user's sent-message history, so the rich editor
+  // only re-renders when the history list itself changes.
+  return useAppStore(
+    useShallow((s) =>
+      extractUserHistory((sessionId ? s.messages.bySession[sessionId] : undefined) ?? []),
+    ),
+  );
 }
 
 function useChatHistory(sessionId: string | null) {

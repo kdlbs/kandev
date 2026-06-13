@@ -256,6 +256,7 @@ export type MessageAddedPayload = {
   metadata?: Record<string, unknown>;
   requests_input?: boolean;
   created_at: string;
+  updated_at?: string;
 };
 
 export type TaskSessionStateChangedPayload = {

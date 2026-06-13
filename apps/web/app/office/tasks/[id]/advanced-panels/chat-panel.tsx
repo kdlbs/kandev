@@ -12,7 +12,7 @@ import { useAppStore } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { buildStartRequest } from "@/lib/services/session-launch-helpers";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
-import type { Message, TaskSessionState } from "@/lib/types/http";
+import type { Message } from "@/lib/types/http";
 
 type AdvancedChatPanelProps = {
   taskId: string;
@@ -58,14 +58,12 @@ function StartSessionPrompt({
 function MessageList({
   messages,
   isLoading,
-  sessionState,
   taskId,
   sessionId,
   scrollRef,
 }: {
   messages: Message[];
   isLoading: boolean;
-  sessionState: TaskSessionState | null;
   taskId: string;
   sessionId: string | null;
   scrollRef: React.RefObject<HTMLDivElement | null>;
@@ -87,7 +85,6 @@ function MessageList({
             key={msg.id}
             comment={msg}
             isTaskDescription={idx === 0 && msg.author_type === "user"}
-            sessionState={sessionState ?? undefined}
             taskId={taskId}
             sessionId={sessionId ?? undefined}
           />
@@ -198,7 +195,6 @@ export function AdvancedChatPanel({ taskId, sessionId, hideInput }: AdvancedChat
       <MessageList
         messages={messages}
         isLoading={isLoading}
-        sessionState={sessionState}
         taskId={taskId}
         sessionId={sessionId}
         scrollRef={scrollRef}

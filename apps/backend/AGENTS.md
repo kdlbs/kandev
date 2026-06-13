@@ -204,6 +204,14 @@ Every long-running goroutine must have a single owner with explicit start and st
 - After all repos complete `initSchema`, `cmd/kandev/storage.go:recordSchemaVersion` writes the current binary version into `kandev_meta` (non-fatal; a failure just means the next boot will take a fresh snapshot).
 - Migration logging: `db.MigrateLogger.Apply(name, stmt)` — success logs Info, "already exists" / "duplicate column name" is silently swallowed, anything else logs Warn but never returns an error (preserving the existing swallow-error contract).
 
+## Schema & migrations (SQLite repository)
+
+`initSchema()` in `internal/task/repository/sqlite/base_schema.go` runs the `init*Schema` (CREATE TABLE) steps **before** `runMigrations()`. The table-creation DDL uses `CREATE TABLE IF NOT EXISTS`, so on an **existing** database it is a no-op and never adds columns to a table that is already present.
+
+**Rule:** when you add a column to an existing table, add it **only** via an idempotent `ADD COLUMN` migration in `runMigrations()` (`base_migrations.go`), never by editing the table's `CREATE TABLE` alone. Anything that *references* that new column — an index, a backfill `UPDATE`, a partial-index predicate — must live in `runMigrations()` **after** the `ADD COLUMN`, not in the `init*Schema` DDL. Putting a `CREATE INDEX ... (new_col)` in the schema-init block crashes existing DBs with `no such column: new_col`, because schema init runs before the migration that adds the column.
+
+You may still list the column in the `CREATE TABLE` so fresh DBs get it inline, but the migration is the source of truth for evolution and must stand alone. New columns also need: the struct field in `models/`, the DTO field + `ToAPI` in `pkg/api/v1/`, and every `CreateX`/`UpdateX`/bulk write in the repo that should set it.
+
 ## Code-quality limits
 
 Enforced by `apps/backend/.golangci.yml` (errors on new code only):

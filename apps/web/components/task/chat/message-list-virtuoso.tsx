@@ -97,15 +97,7 @@ function useStableFirstItemIndex(items: RenderItem[]) {
 
 function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
   const { items, sessionId, permissionsByToolCallId, childrenByParentToolCallId, taskId } = props;
-  const {
-    worktreePath,
-    onOpenFile,
-    lastTurnGroupId,
-    isRunning,
-    messages,
-    sessionState,
-    taskState,
-  } = props;
+  const { worktreePath, onOpenFile, lastTurnGroupId, isRunning } = props;
   const { hasMore, isLoadingMore, loadMore } = props;
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const itemCount = items.length;
@@ -162,9 +154,6 @@ function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
             onOpenFile={onOpenFile}
             isLastGroup={item.type === "turn_group" && item.id === lastTurnGroupId}
             isTurnActive={isRunning}
-            messages={messages}
-            sessionState={sessionState}
-            taskState={taskState}
             onScrollToMessage={handleScrollToMessage}
           />
         </div>
@@ -181,9 +170,6 @@ function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
       onOpenFile,
       lastTurnGroupId,
       isRunning,
-      messages,
-      sessionState,
-      taskState,
       handleScrollToMessage,
     ],
   );
@@ -436,12 +422,7 @@ function useVirtuosoHeaderFooter(args: HeaderFooterArgs) {
       <>
         <AgentStatus sessionState={sessionState} sessionId={sessionId} messages={messages} />
         {footerActions.map((msg) => (
-          <MessageRenderer
-            key={msg.id}
-            comment={msg}
-            isTaskDescription={false}
-            sessionState={sessionState}
-          />
+          <MessageRenderer key={msg.id} comment={msg} isTaskDescription={false} />
         ))}
       </>
     ),
@@ -511,12 +492,7 @@ export const VirtuosoMessageList = memo(function VirtuosoMessageList(props: Mess
         />
         <AgentStatus sessionState={sessionState} sessionId={sessionId} messages={messages} />
         {footerActions.map((msg) => (
-          <MessageRenderer
-            key={msg.id}
-            comment={msg}
-            isTaskDescription={false}
-            sessionState={sessionState}
-          />
+          <MessageRenderer key={msg.id} comment={msg} isTaskDescription={false} />
         ))}
       </SessionPanelContent>
     );

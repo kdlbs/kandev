@@ -4,7 +4,7 @@ import { useState, useCallback, memo, useMemo } from "react";
 import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { GridSpinner } from "@/components/grid-spinner";
 import { cn, transformPathsInText } from "@/lib/utils";
-import type { Message, TaskSessionState, TaskState } from "@/lib/types/http";
+import type { Message } from "@/lib/types/http";
 import type { TurnGroup } from "@/hooks/use-processed-messages";
 import type { ToolCallMetadata } from "@/components/task/chat/types";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
@@ -21,9 +21,6 @@ type TurnGroupMessageProps = {
   isLastGroup?: boolean;
   /** Whether the turn is still active (agent is running) */
   isTurnActive?: boolean;
-  allMessages?: Message[];
-  sessionState?: TaskSessionState;
-  taskState?: TaskState;
   onScrollToMessage?: (messageId: string) => void;
 };
 
@@ -154,9 +151,6 @@ type TurnGroupContentProps = {
   taskId?: string;
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
-  allMessages?: Message[];
-  sessionState?: TaskSessionState;
-  taskState?: TaskState;
   onScrollToMessage?: (messageId: string) => void;
 };
 
@@ -261,14 +255,11 @@ function renderMessageEntry(message: Message, props: MessageRenderProps) {
       comment={message}
       isTaskDescription={false}
       taskId={props.taskId}
-      sessionState={props.sessionState}
-      taskState={props.taskState}
       permissionsByToolCallId={props.permissionsByToolCallId}
       childrenByParentToolCallId={props.childrenByParentToolCallId}
       worktreePath={props.worktreePath}
       sessionId={props.sessionId ?? undefined}
       onOpenFile={props.onOpenFile}
-      allMessages={props.allMessages}
       onScrollToMessage={props.onScrollToMessage}
     />
   );
@@ -320,9 +311,6 @@ function TurnGroupContent({
   taskId,
   worktreePath,
   onOpenFile,
-  allMessages,
-  sessionState,
-  taskState,
   onScrollToMessage,
 }: TurnGroupContentProps) {
   const renderProps: MessageRenderProps = {
@@ -332,9 +320,6 @@ function TurnGroupContent({
     taskId,
     worktreePath,
     onOpenFile,
-    allMessages,
-    sessionState,
-    taskState,
     onScrollToMessage,
   };
   const compacted = useMemo(() => compactTurnGroupMessages(group.messages), [group.messages]);
@@ -361,9 +346,6 @@ export const TurnGroupMessage = memo(function TurnGroupMessage({
   onOpenFile,
   isLastGroup = false,
   isTurnActive = false,
-  allMessages,
-  sessionState,
-  taskState,
   onScrollToMessage,
 }: TurnGroupMessageProps) {
   const isGroupRunning = hasRunningTool(group.messages);
@@ -401,9 +383,6 @@ export const TurnGroupMessage = memo(function TurnGroupMessage({
           taskId={taskId}
           worktreePath={worktreePath}
           onOpenFile={onOpenFile}
-          allMessages={allMessages}
-          sessionState={sessionState}
-          taskState={taskState}
           onScrollToMessage={onScrollToMessage}
         />
       )}

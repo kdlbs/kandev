@@ -445,6 +445,7 @@ type Message struct {
 	Metadata      map[string]interface{} `json:"metadata,omitempty"`
 	RequestsInput bool                   `json:"requests_input"` // True if agent is requesting user input
 	CreatedAt     time.Time              `json:"created_at"`
+	UpdatedAt     time.Time              `json:"updated_at"` // Authoritative per-message change signal
 }
 
 // ToAPI converts internal Message to API type.
@@ -478,6 +479,7 @@ func (m *Message) ToAPI() *v1.Message {
 		Metadata:      meta,
 		RequestsInput: m.RequestsInput,
 		CreatedAt:     m.CreatedAt,
+		UpdatedAt:     m.UpdatedAt,
 	}
 	if hasHidden {
 		result.RawContent = m.Content

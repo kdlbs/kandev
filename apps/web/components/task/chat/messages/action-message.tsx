@@ -47,13 +47,15 @@ function isSessionActive(state?: TaskSessionState) {
   return state === "RUNNING" || state === "STARTING" || state === "COMPLETED";
 }
 
-export const ActionMessage = memo(function ActionMessage({
-  comment,
-  sessionState,
-}: {
-  comment: Message;
-  sessionState?: TaskSessionState;
-}) {
+export const ActionMessage = memo(function ActionMessage({ comment }: { comment: Message }) {
+  // Read session state from the store instead of receiving it as a prop, so a
+  // state transition doesn't re-render every message in the list (only the
+  // rare action messages that actually depend on it).
+  const sessionState = useAppStore((state) =>
+    comment.session_id
+      ? (state.taskSessions.items[comment.session_id]?.state ?? undefined)
+      : undefined,
+  );
   const metadata = comment.metadata as ActionMeta | undefined;
   const isWarning = metadata?.variant === "warning";
   const message = comment.content || "An error occurred";

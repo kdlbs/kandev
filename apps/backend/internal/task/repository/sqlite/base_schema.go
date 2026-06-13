@@ -465,6 +465,7 @@ func (r *Repository) initMessageTurnSchema() error {
 		type TEXT NOT NULL DEFAULT 'message',
 		metadata TEXT DEFAULT '{}',
 		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (task_session_id) REFERENCES task_sessions(id) ON DELETE CASCADE,
 		FOREIGN KEY (turn_id) REFERENCES task_session_turns(id) ON DELETE CASCADE
 	);
@@ -473,6 +474,10 @@ func (r *Repository) initMessageTurnSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_messages_created_at ON task_session_messages(created_at);
 	CREATE INDEX IF NOT EXISTS idx_messages_session_created ON task_session_messages(task_session_id, created_at);
 	CREATE INDEX IF NOT EXISTS idx_messages_turn_id ON task_session_messages(turn_id);
+	-- idx_messages_session_updated is created in runMigrations() after the
+	-- updated_at ADD COLUMN + backfill. Creating it here would fail on existing
+	-- DBs where CREATE TABLE IF NOT EXISTS is a no-op and the column does not
+	-- yet exist (schema init runs before migrations).
 
 	CREATE TABLE IF NOT EXISTS task_session_turns (
 		id TEXT PRIMARY KEY,

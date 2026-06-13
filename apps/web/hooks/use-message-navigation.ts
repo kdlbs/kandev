@@ -1,35 +1,39 @@
 import { useMemo } from "react";
-import type { Message } from "@/lib/types/http";
+import { useAppStore } from "@/components/state-provider";
 
-export function useMessageNavigation(
-  messages: Message[],
-  currentMessageId: string,
-  filterType: "user" | "agent",
-) {
-  const currentIndex = useMemo(() => {
-    return messages.findIndex((msg) => msg.id === currentMessageId);
-  }, [messages, currentMessageId]);
+const EMPTY_KEY = "";
 
-  const filteredIndices = useMemo(() => {
-    return messages
-      .map((msg, idx) => (msg.author_type === filterType ? idx : -1))
-      .filter((idx) => idx !== -1);
-  }, [messages, filterType]);
+/**
+ * Prev/next navigation between user messages in a session, sourced directly from
+ * the store rather than a drilled `allMessages` array.
+ *
+ * The selector returns a value-stable key (the comma-joined ids of the session's
+ * user messages). During agent token streaming the user-message set is unchanged,
+ * so the key is referentially equal and the subscribing message does not
+ * re-render — which keeps `ChatMessage` memoized instead of re-running its
+ * markdown render on every streamed token.
+ */
+export function useUserMessageNavigation(sessionId: string | null, currentMessageId: string) {
+  const userIdsKey = useAppStore((state) => {
+    const messages = sessionId ? state.messages.bySession[sessionId] : undefined;
+    if (!messages) return EMPTY_KEY;
+    let key = EMPTY_KEY;
+    for (const message of messages) {
+      if (message.author_type === "user") key += `${message.id},`;
+    }
+    return key;
+  });
 
-  const previous = useMemo(() => {
-    const validPrev = filteredIndices.filter((idx) => idx < currentIndex);
-    return validPrev.length > 0 ? messages[validPrev[validPrev.length - 1]] : null;
-  }, [filteredIndices, currentIndex, messages]);
-
-  const next = useMemo(() => {
-    const validNext = filteredIndices.filter((idx) => idx > currentIndex);
-    return validNext.length > 0 ? messages[validNext[0]] : null;
-  }, [filteredIndices, currentIndex, messages]);
-
-  return {
-    hasPrevious: previous !== null,
-    hasNext: next !== null,
-    previous,
-    next,
-  };
+  return useMemo(() => {
+    const ids = userIdsKey ? userIdsKey.slice(0, -1).split(",") : [];
+    const index = ids.indexOf(currentMessageId);
+    const previousId = index > 0 ? ids[index - 1] : null;
+    const nextId = index >= 0 && index < ids.length - 1 ? ids[index + 1] : null;
+    return {
+      hasPrevious: previousId !== null,
+      hasNext: nextId !== null,
+      previousId,
+      nextId,
+    };
+  }, [userIdsKey, currentMessageId]);
 }

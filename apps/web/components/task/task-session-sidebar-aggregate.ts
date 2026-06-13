@@ -1,4 +1,39 @@
 import type { KanbanState } from "@/lib/state/slices";
+import type { Message } from "@/lib/types/http";
+import {
+  hasPendingClarification,
+  hasPendingPermissionRequest,
+} from "@/lib/utils/pending-clarification";
+
+/** Flat per-session pending flags keyed for shallow comparison so the sidebar
+ *  only re-renders when a clarification/permission flag actually flips, not on
+ *  every streaming token that churns the messages map. */
+const pendingClarKey = (sessionId: string) => `${sessionId}#clar`;
+const pendingPermKey = (sessionId: string) => `${sessionId}#perm`;
+
+export function buildPendingFlags(
+  bySession: Record<string, Message[] | undefined>,
+  sessionIds: string[],
+): Record<string, boolean> {
+  const flags: Record<string, boolean> = {};
+  for (const id of sessionIds) {
+    const msgs = bySession[id];
+    flags[pendingClarKey(id)] = hasPendingClarification(msgs);
+    flags[pendingPermKey(id)] = hasPendingPermissionRequest(msgs);
+  }
+  return flags;
+}
+
+export function readPendingFlags(
+  pendingFlags: Record<string, boolean>,
+  sessionId?: string | null,
+): { clarification: boolean; permission: boolean } {
+  if (!sessionId) return { clarification: false, permission: false };
+  return {
+    clarification: pendingFlags[pendingClarKey(sessionId)] ?? false,
+    permission: pendingFlags[pendingPermKey(sessionId)] ?? false,
+  };
+}
 
 export type SidebarStepInfo = {
   id: string;

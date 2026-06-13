@@ -325,6 +325,7 @@ func (s *Service) publishMessageEvent(ctx context.Context, eventType string, mes
 		"type":           messageType,
 		"requests_input": message.RequestsInput,
 		"created_at":     message.CreatedAt.Format(time.RFC3339),
+		"updated_at":     message.UpdatedAt.Format(time.RFC3339),
 	}
 
 	if hasHidden {

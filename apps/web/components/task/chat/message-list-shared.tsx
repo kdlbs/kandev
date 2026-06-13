@@ -1,8 +1,9 @@
 "use client";
 
+import { memo } from "react";
 import { Button } from "@kandev/ui/button";
 import { GridSpinner } from "@/components/grid-spinner";
-import type { Message, TaskSessionState, TaskState } from "@/lib/types/http";
+import type { Message, TaskSessionState } from "@/lib/types/http";
 import type { RenderItem } from "@/hooks/use-processed-messages";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import { TurnGroupMessage } from "@/components/task/chat/messages/turn-group-message";
@@ -20,7 +21,6 @@ export type MessageListProps = {
   messagesLoading: boolean;
   isWorking: boolean;
   sessionState?: TaskSessionState;
-  taskState?: TaskState;
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
 };
@@ -100,7 +100,7 @@ export function MessageListStatus({
   );
 }
 
-export function MessageItem({
+export const MessageItem = memo(function MessageItem({
   item,
   sessionId,
   permissionsByToolCallId,
@@ -110,9 +110,6 @@ export function MessageItem({
   onOpenFile,
   isLastGroup,
   isTurnActive,
-  messages,
-  sessionState,
-  taskState,
   onScrollToMessage,
 }: {
   item: RenderItem;
@@ -124,9 +121,6 @@ export function MessageItem({
   onOpenFile?: (path: string) => void;
   isLastGroup: boolean;
   isTurnActive: boolean;
-  messages: Message[];
-  sessionState?: TaskSessionState;
-  taskState?: TaskState;
   onScrollToMessage: (id: string) => void;
 }) {
   if (item.type === "prepare_progress") {
@@ -144,9 +138,6 @@ export function MessageItem({
         onOpenFile={onOpenFile}
         isLastGroup={isLastGroup}
         isTurnActive={isTurnActive}
-        allMessages={messages}
-        sessionState={sessionState}
-        taskState={taskState}
         onScrollToMessage={onScrollToMessage}
       />
     );
@@ -155,16 +146,13 @@ export function MessageItem({
     <MessageRenderer
       comment={item.message}
       isTaskDescription={item.message.id === "task-description"}
-      sessionState={sessionState}
-      taskState={taskState}
       taskId={taskId}
       permissionsByToolCallId={permissionsByToolCallId}
       childrenByParentToolCallId={childrenByParentToolCallId}
       worktreePath={worktreePath}
       sessionId={sessionId ?? undefined}
       onOpenFile={onOpenFile}
-      allMessages={messages}
       onScrollToMessage={onScrollToMessage}
     />
   );
-}
+});

@@ -1,6 +1,8 @@
 import type { StateCreator } from "zustand";
-import type { TaskSession } from "@/lib/types/http";
+import { original } from "immer";
+import type { Message, TaskSession } from "@/lib/types/http";
 import type { SessionSlice, SessionSliceState } from "./types";
+import { reconcileMessages } from "./message-signature";
 import { migrateEnvKeyedData } from "@/lib/state/slices/session-runtime/session-runtime-slice";
 import { prepareResultToSessionState } from "@/lib/state/slices/session-runtime/prepare-result";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
@@ -174,6 +176,25 @@ function buildMessageActions(set: ImmerSet) {
           message as unknown as Record<string, unknown>,
         );
         messages[index] = merged;
+      }),
+    mergeMessages: (
+      sessionId: string,
+      messages: Parameters<SessionSlice["mergeMessages"]>[1],
+      meta?: Parameters<SessionSlice["mergeMessages"]>[2],
+    ) =>
+      set((draft) => {
+        const prevDraft = draft.messages.bySession[sessionId];
+        const prev = (prevDraft ? (original(prevDraft) ?? prevDraft) : undefined) as
+          | Message[]
+          | undefined;
+        const reconciled = reconcileMessages(prev, messages);
+        // Only replace the array when identity actually changed, so a no-op
+        // refetch preserves the array reference and triggers no re-render.
+        if (reconciled !== prev) {
+          draft.messages.bySession[sessionId] = reconciled;
+        }
+        ensureMessageMeta(draft.messages.metaBySession, sessionId);
+        if (meta) applyMessageMeta(draft.messages.metaBySession, sessionId, meta);
       }),
     prependMessages: (
       sessionId: string,
