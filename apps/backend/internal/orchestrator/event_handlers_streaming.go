@@ -1020,12 +1020,7 @@ func (s *Service) handleSessionInfoEvent(ctx context.Context, payload *lifecycle
 	if payload == nil || payload.Data == nil || payload.SessionID == "" || s.repo == nil {
 		return
 	}
-	info := map[string]interface{}{
-		"session_id": payload.Data.ACPSessionID,
-		"title":      payload.Data.SessionTitle,
-		"updated_at": payload.Data.SessionUpdatedAt,
-		"meta":       payload.Data.SessionMeta,
-	}
+	info := s.mergedACPSessionInfo(ctx, payload.SessionID, payload.Data)
 	if err := s.repo.SetSessionMetadataKey(ctx, payload.SessionID, "acp", info); err != nil {
 		s.logger.Warn("failed to persist ACP session info",
 			zap.String("session_id", payload.SessionID),
@@ -1039,14 +1034,53 @@ func (s *Service) handleSessionInfoEvent(ctx context.Context, payload *lifecycle
 		TaskID:           payload.TaskID,
 		SessionID:        payload.SessionID,
 		AgentID:          payload.AgentID,
-		ACPSessionID:     payload.Data.ACPSessionID,
-		SessionTitle:     payload.Data.SessionTitle,
-		SessionUpdatedAt: payload.Data.SessionUpdatedAt,
-		SessionMeta:      payload.Data.SessionMeta,
+		ACPSessionID:     stringFromMap(info, "session_id"),
+		SessionTitle:     stringFromMap(info, "title"),
+		SessionUpdatedAt: stringFromMap(info, "updated_at"),
+		SessionMeta:      mapFromMap(info, "meta"),
 		Timestamp:        time.Now().UTC().Format(time.RFC3339),
 	}
 	subject := events.BuildSessionInfoSubject(payload.SessionID)
 	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionInfoUpdated, "orchestrator", eventPayload))
+}
+
+func (s *Service) mergedACPSessionInfo(ctx context.Context, sessionID string, data *lifecycle.AgentStreamEventData) map[string]interface{} {
+	info := map[string]interface{}{
+		"session_id": "",
+		"title":      "",
+		"updated_at": "",
+		"meta":       map[string]any{},
+	}
+	if session, err := s.repo.GetTaskSession(ctx, sessionID); err == nil && session != nil {
+		if existing, ok := session.Metadata["acp"].(map[string]interface{}); ok {
+			for key, value := range existing {
+				info[key] = value
+			}
+		}
+	}
+	if data.ACPSessionID != "" {
+		info["session_id"] = data.ACPSessionID
+	}
+	if data.SessionTitle != "" {
+		info["title"] = data.SessionTitle
+	}
+	if data.SessionUpdatedAt != "" {
+		info["updated_at"] = data.SessionUpdatedAt
+	}
+	if data.SessionMeta != nil {
+		info["meta"] = data.SessionMeta
+	}
+	return info
+}
+
+func stringFromMap(values map[string]interface{}, key string) string {
+	value, _ := values[key].(string)
+	return value
+}
+
+func mapFromMap(values map[string]interface{}, key string) map[string]any {
+	value, _ := values[key].(map[string]any)
+	return value
 }
 
 // handleAvailableCommandsEvent broadcasts available_commands events to the WebSocket for the frontend.

@@ -221,6 +221,49 @@ func TestHandleSessionInfoEvent_PersistsACPDebugInfo(t *testing.T) {
 	require.Equal(t, "req-1", cursor["requestId"])
 }
 
+func TestHandleSessionInfoEvent_PreservesACPDebugInfoOnSparseUpdate(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", "acp", map[string]any{
+		"session_id": "acp-1",
+		"title":      "List files",
+		"updated_at": "2026-06-13T19:37:46Z",
+		"meta":       map[string]any{"cursor": map[string]any{"requestId": "req-1"}},
+	}))
+	eb := &recordingEventBus{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.eventBus = eb
+
+	svc.handleSessionInfoEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:    "t1",
+		SessionID: "s1",
+		Data: &lifecycle.AgentStreamEventData{
+			SessionUpdatedAt: "2026-06-13T19:40:00Z",
+		},
+	})
+
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	acp, ok := updated.Metadata["acp"].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, "acp-1", acp["session_id"])
+	require.Equal(t, "List files", acp["title"])
+	require.Equal(t, "2026-06-13T19:40:00Z", acp["updated_at"])
+	meta, ok := acp["meta"].(map[string]interface{})
+	require.True(t, ok)
+	cursor, ok := meta["cursor"].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, "req-1", cursor["requestId"])
+
+	require.Len(t, eb.events, 1)
+	eventPayload, ok := eb.events[0].event.Data.(lifecycle.SessionInfoEventPayload)
+	require.True(t, ok)
+	require.Equal(t, "acp-1", eventPayload.ACPSessionID)
+	require.Equal(t, "List files", eventPayload.SessionTitle)
+	require.Equal(t, "2026-06-13T19:40:00Z", eventPayload.SessionUpdatedAt)
+}
+
 func TestPersistTurnPromptMetadata(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

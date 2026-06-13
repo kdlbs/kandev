@@ -5,14 +5,22 @@ import type { BackendMessageMap, SessionInfoPayload } from "@/lib/types/backend"
 import type { TaskSession } from "@/lib/types/http";
 import { registerSessionInfoHandlers } from "./session-info";
 
+const SESSION_STARTED_AT = "2026-06-11T00:00:00.000Z";
+const SESSION_INFO_UPDATED_AT = "2026-06-11T00:01:00.000Z";
+const SPARSE_SESSION_INFO_UPDATED_AT = "2026-06-11T00:03:00.000Z";
+const TASK_ID = "task-1";
+const SESSION_ID = "session-1";
+const ACP_SESSION_ID = "acp-session-1";
+const SESSION_TITLE = "List files";
+
 function makeSession(overrides: Partial<TaskSession> = {}): TaskSession {
   return {
-    id: "session-1",
-    task_id: "task-1",
+    id: SESSION_ID,
+    task_id: TASK_ID,
     state: "running",
     metadata: { existing: true },
-    started_at: "2026-06-11T00:00:00.000Z",
-    updated_at: "2026-06-11T00:00:00.000Z",
+    started_at: SESSION_STARTED_AT,
+    updated_at: SESSION_STARTED_AT,
     ...overrides,
   } as TaskSession;
 }
@@ -21,7 +29,7 @@ function makeStore(overrides: Partial<AppState> = {}) {
   const state = {
     taskSessions: {
       items: {
-        "session-1": makeSession(),
+        [SESSION_ID]: makeSession(),
       },
     },
     setTaskSession: vi.fn(),
@@ -39,12 +47,12 @@ function makeStore(overrides: Partial<AppState> = {}) {
 
 function makePayload(overrides: Partial<SessionInfoPayload> = {}): SessionInfoPayload {
   return {
-    task_id: "task-1",
-    session_id: "session-1",
+    task_id: TASK_ID,
+    session_id: SESSION_ID,
     agent_id: "agent-1",
-    acp_session_id: "acp-session-1",
-    session_title: "List files",
-    session_updated_at: "2026-06-11T00:01:00.000Z",
+    acp_session_id: ACP_SESSION_ID,
+    session_title: SESSION_TITLE,
+    session_updated_at: SESSION_INFO_UPDATED_AT,
     session_meta: { provider: "codex", nested: { value: true } },
     timestamp: "2026-06-11T00:02:00.000Z",
     ...overrides,
@@ -76,9 +84,9 @@ describe("session.info_updated handler", () => {
       metadata: {
         existing: true,
         acp: {
-          session_id: "acp-session-1",
-          title: "List files",
-          updated_at: "2026-06-11T00:01:00.000Z",
+          session_id: ACP_SESSION_ID,
+          title: SESSION_TITLE,
+          updated_at: SESSION_INFO_UPDATED_AT,
           meta: { provider: "codex", nested: { value: true } },
         },
       },
@@ -92,7 +100,51 @@ describe("session.info_updated handler", () => {
     handler(makeMessage(makePayload()));
 
     expect(store.getState().setTaskSession).toHaveBeenCalledWith(
-      expect.objectContaining({ updated_at: "2026-06-11T00:00:00.000Z" }),
+      expect.objectContaining({ updated_at: SESSION_STARTED_AT }),
+    );
+  });
+
+  it("preserves existing ACP fields on sparse updates", () => {
+    const store = makeStore({
+      taskSessions: {
+        items: {
+          [SESSION_ID]: makeSession({
+            metadata: {
+              acp: {
+                session_id: ACP_SESSION_ID,
+                title: SESSION_TITLE,
+                updated_at: SESSION_INFO_UPDATED_AT,
+                meta: { provider: "codex" },
+              },
+            },
+          }),
+        },
+      },
+    } as Partial<AppState>);
+    const handler = registerSessionInfoHandlers(store)["session.info_updated"]!;
+
+    handler(
+      makeMessage(
+        makePayload({
+          acp_session_id: undefined,
+          session_title: undefined,
+          session_updated_at: SPARSE_SESSION_INFO_UPDATED_AT,
+          session_meta: undefined,
+        }),
+      ),
+    );
+
+    expect(store.getState().setTaskSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: {
+          acp: {
+            session_id: ACP_SESSION_ID,
+            title: SESSION_TITLE,
+            updated_at: SPARSE_SESSION_INFO_UPDATED_AT,
+            meta: { provider: "codex" },
+          },
+        },
+      }),
     );
   });
 

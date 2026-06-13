@@ -831,6 +831,7 @@ func TestTryConvertUntypedUpdate_UsageUpdate(t *testing.T) {
 
 func TestTryConvertUntypedUpdate_SessionInfoUpdate(t *testing.T) {
 	a := newTestAdapter()
+	t.Cleanup(func() { _ = a.Close() })
 	raw := []byte(`{"sessionId":"s1","update":{"sessionUpdate":"session_info_update","title":"Linux File Guide","updatedAt":"2026-06-13T19:37:46Z","_meta":{"cursor":{"requestId":"req-1"}}}}`)
 
 	result := a.tryConvertUntypedUpdate(raw, "s1")
