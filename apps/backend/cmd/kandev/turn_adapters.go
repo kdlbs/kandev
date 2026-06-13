@@ -28,6 +28,10 @@ func (a *turnServiceAdapter) GetActiveTurn(ctx context.Context, sessionID string
 	return a.svc.GetActiveTurn(ctx, sessionID)
 }
 
+func (a *turnServiceAdapter) UpdateTurn(ctx context.Context, turn *models.Turn) error {
+	return a.svc.UpdateTurn(ctx, turn)
+}
+
 func (a *turnServiceAdapter) AbandonOpenTurns(ctx context.Context, sessionID string) error {
 	return a.svc.AbandonOpenTurns(ctx, sessionID)
 }

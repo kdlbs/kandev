@@ -1,9 +1,29 @@
 import type { Repository, Task } from "@/lib/types/http";
 
+type ACPDebugInfo = {
+  sessionId: unknown;
+  title: unknown;
+  updatedAt: unknown;
+  meta: unknown;
+};
+
+function readACPDebugInfo(metadata: Record<string, unknown> | null | undefined): ACPDebugInfo {
+  const acp = metadata?.acp;
+  const acpObject =
+    acp && typeof acp === "object" && !Array.isArray(acp) ? (acp as Record<string, unknown>) : {};
+  return {
+    sessionId: acpObject.session_id ?? metadata?.acp_session_id ?? null,
+    title: acpObject.title ?? acpObject.session_title ?? null,
+    updatedAt: acpObject.updated_at ?? acpObject.session_updated_at ?? null,
+    meta: acpObject.meta ?? acpObject.session_meta ?? null,
+  };
+}
+
 export function buildDebugEntries(params: {
   connectionStatus: string;
   task: Task | null;
   effectiveSessionId: string | null | undefined;
+  activeSessionMetadata?: Record<string, unknown> | null;
   taskSessionState: string | null;
   isAgentWorking: boolean;
   resumptionState: string;
@@ -24,6 +44,7 @@ export function buildDebugEntries(params: {
     connectionStatus,
     task,
     effectiveSessionId,
+    activeSessionMetadata,
     taskSessionState,
     isAgentWorking,
     resumptionState,
@@ -35,10 +56,15 @@ export function buildDebugEntries(params: {
     devProcessId,
     devProcessStatus,
   } = params;
+  const acp = readACPDebugInfo(activeSessionMetadata);
   return {
     ws_status: connectionStatus,
     task_id: task?.id ?? null,
     session_id: effectiveSessionId ?? null,
+    acp_session_id: acp.sessionId,
+    acp_session_title: acp.title,
+    acp_session_updated_at: acp.updatedAt,
+    acp_meta: acp.meta,
     task_state: task?.state ?? null,
     task_session_state: taskSessionState ?? null,
     is_agent_working: isAgentWorking,

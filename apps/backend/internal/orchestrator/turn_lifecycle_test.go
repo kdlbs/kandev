@@ -49,6 +49,10 @@ func (a *repoTurnService) GetActiveTurn(ctx context.Context, sessionID string) (
 	return turn, err
 }
 
+func (a *repoTurnService) UpdateTurn(ctx context.Context, turn *models.Turn) error {
+	return a.repo.UpdateTurn(ctx, turn)
+}
+
 func (a *repoTurnService) AbandonOpenTurns(ctx context.Context, sessionID string) error {
 	for {
 		turn, err := a.GetActiveTurn(ctx, sessionID)

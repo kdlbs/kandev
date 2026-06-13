@@ -207,6 +207,7 @@ const (
 const (
 	AgentCapabilitiesUpdated = "agent_capabilities.updated" // Agent capabilities received
 	SessionModelsUpdated     = "session_models.updated"     // Session models received
+	SessionInfoUpdated       = "session_info.updated"       // ACP session info received
 )
 
 // Event types for session todos (ACP plan entries)
@@ -399,6 +400,16 @@ func BuildSessionModelsSubject(sessionID string) string {
 // BuildSessionModelsWildcardSubject creates a wildcard subscription for all session models events
 func BuildSessionModelsWildcardSubject() string {
 	return SessionModelsUpdated + ".*"
+}
+
+// BuildSessionInfoSubject creates a session info subject for a specific session
+func BuildSessionInfoSubject(sessionID string) string {
+	return SessionInfoUpdated + "." + sessionID
+}
+
+// BuildSessionInfoWildcardSubject creates a wildcard subscription for all session info events
+func BuildSessionInfoWildcardSubject() string {
+	return SessionInfoUpdated + ".*"
 }
 
 // BuildSessionTodosSubject creates a session todos subject for a specific session

@@ -103,6 +103,14 @@ func (s *Service) GetActiveTurn(ctx context.Context, sessionID string) (*models.
 	return turn, err
 }
 
+// UpdateTurn persists changes to an existing turn.
+func (s *Service) UpdateTurn(ctx context.Context, turn *models.Turn) error {
+	if turn == nil {
+		return nil
+	}
+	return s.turns.UpdateTurn(ctx, turn)
+}
+
 // AbandonOpenTurns closes any open turns for a session by setting their
 // completed_at = started_at. Used on session resume to bury orphan turns left
 // behind by a previous crash/restart so a fresh prompt starts a fresh turn

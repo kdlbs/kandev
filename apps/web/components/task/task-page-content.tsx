@@ -335,6 +335,7 @@ function maybeBuildDebugEntries(params: {
   connectionStatus: string;
   task: Task | null;
   effectiveSessionId: string | null | undefined;
+  activeSessionMetadata?: Record<string, unknown> | null;
   merged: ReturnType<typeof useMergedAgentState>;
   resumption: ReturnType<typeof useSessionResumption>;
   sessionPanel: ReturnType<typeof useSessionPanelState>;
@@ -345,6 +346,7 @@ function maybeBuildDebugEntries(params: {
     connectionStatus: params.connectionStatus,
     task: params.task,
     effectiveSessionId: params.effectiveSessionId,
+    activeSessionMetadata: params.activeSessionMetadata,
     taskSessionState: params.merged.taskSessionState,
     isAgentWorking: params.merged.isAgentWorking,
     resumptionState: params.resumption.resumptionState,
@@ -381,11 +383,15 @@ function TaskPageInner({
 }: TaskPageInnerProps) {
   const taskProps = resolveTaskProps(task, repository);
   const remote = resolveRemoteExecutor(resumption.sessionStatus as RemoteExecutorStatus | null);
+  const activeSessionMetadata = useAppStore((state) =>
+    effectiveSessionId ? (state.taskSessions.items[effectiveSessionId]?.metadata ?? null) : null,
+  );
   const debugEntries = maybeBuildDebugEntries({
     isVisible: isDebugUI() && showDebugOverlay,
     connectionStatus,
     task,
     effectiveSessionId,
+    activeSessionMetadata,
     merged,
     resumption,
     sessionPanel,

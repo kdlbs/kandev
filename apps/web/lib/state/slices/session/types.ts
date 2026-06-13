@@ -172,7 +172,12 @@ export type SessionSliceActions = {
   ) => void;
   setMessagesLoading: (sessionId: string, loading: boolean) => void;
   addTurn: (turn: Turn) => void;
-  completeTurn: (sessionId: string, turnId: string, completedAt: string) => void;
+  completeTurn: (
+    sessionId: string,
+    turnId: string,
+    completedAt: string,
+    metadata?: Record<string, unknown>,
+  ) => void;
   setActiveTurn: (sessionId: string, turnId: string | null) => void;
   setTaskSession: (session: TaskSession) => void;
   removeTaskSession: (taskId: string, sessionId: string) => void;

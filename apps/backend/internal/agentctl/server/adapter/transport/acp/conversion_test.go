@@ -829,6 +829,32 @@ func TestTryConvertUntypedUpdate_UsageUpdate(t *testing.T) {
 	}
 }
 
+func TestTryConvertUntypedUpdate_SessionInfoUpdate(t *testing.T) {
+	a := newTestAdapter()
+	raw := []byte(`{"sessionId":"s1","update":{"sessionUpdate":"session_info_update","title":"Linux File Guide","updatedAt":"2026-06-13T19:37:46Z","_meta":{"cursor":{"requestId":"req-1"}}}}`)
+
+	result := a.tryConvertUntypedUpdate(raw, "s1")
+
+	if result == nil {
+		t.Fatal("expected non-nil result for session_info_update")
+	}
+	if result.Type != streams.EventTypeSessionInfo {
+		t.Errorf("Type = %q, want %q", result.Type, streams.EventTypeSessionInfo)
+	}
+	if result.SessionID != "s1" {
+		t.Errorf("SessionID = %q, want %q", result.SessionID, "s1")
+	}
+	if result.SessionTitle != "Linux File Guide" {
+		t.Errorf("SessionTitle = %q, want Linux File Guide", result.SessionTitle)
+	}
+	if result.SessionUpdatedAt != "2026-06-13T19:37:46Z" {
+		t.Errorf("SessionUpdatedAt = %q, want timestamp", result.SessionUpdatedAt)
+	}
+	if got := result.SessionMeta["cursor"].(map[string]any)["requestId"]; got != "req-1" {
+		t.Errorf("SessionMeta cursor.requestId = %v, want req-1", got)
+	}
+}
+
 func TestTryConvertUntypedUpdate_ZeroUsed(t *testing.T) {
 	a := newTestAdapter()
 	raw := []byte(`{"sessionId":"s1","update":{"sessionUpdate":"usage_update","size":200000,"used":0}}`)
