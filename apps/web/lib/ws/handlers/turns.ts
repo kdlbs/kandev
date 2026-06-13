@@ -49,6 +49,7 @@ export function registerTurnsHandlers(store: StoreApi<AppState>): WsHandlers {
           payload.session_id,
           payload.id,
           payload.completed_at || new Date().toISOString(),
+          payload.metadata,
         );
       // Surface a notice when the turn finished with no agent output.
       maybeEmitEmptyTurnNotice(store, payload);

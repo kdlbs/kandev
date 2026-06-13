@@ -393,7 +393,12 @@ export type AppState = {
     meta?: { hasMore?: boolean; oldestCursor?: string | null },
   ) => void;
   addTurn: (turn: Turn) => void;
-  completeTurn: (sessionId: string, turnId: string, completedAt: string) => void;
+  completeTurn: (
+    sessionId: string,
+    turnId: string,
+    completedAt: string,
+    metadata?: Record<string, unknown>,
+  ) => void;
   setActiveTurn: (sessionId: string, turnId: string | null) => void;
   updateMessage: (message: Message) => void;
   prependMessages: (

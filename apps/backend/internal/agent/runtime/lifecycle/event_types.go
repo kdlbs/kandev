@@ -162,6 +162,11 @@ type AgentStreamEventData struct {
 	SessionModels  []streams.SessionModelInfo `json:"session_models,omitempty"`
 	ConfigOptions  []streams.ConfigOption     `json:"config_options,omitempty"`
 
+	// Session info (from "session_info" event)
+	SessionTitle     string         `json:"session_title,omitempty"`
+	SessionUpdatedAt string         `json:"session_updated_at,omitempty"`
+	SessionMeta      map[string]any `json:"session_meta,omitempty"`
+
 	// Usage (attached to "complete" event)
 	Usage *streams.PromptUsage `json:"usage,omitempty"`
 
@@ -485,6 +490,23 @@ type SessionModelsEventPayload struct {
 
 // GetSessionID returns the session ID for this event (used by event routing).
 func (p SessionModelsEventPayload) GetSessionID() string {
+	return p.SessionID
+}
+
+// SessionInfoEventPayload is the payload for ACP session info updates.
+type SessionInfoEventPayload struct {
+	TaskID           string         `json:"task_id"`
+	SessionID        string         `json:"session_id"`
+	AgentID          string         `json:"agent_id"`
+	ACPSessionID     string         `json:"acp_session_id,omitempty"`
+	SessionTitle     string         `json:"session_title,omitempty"`
+	SessionUpdatedAt string         `json:"session_updated_at,omitempty"`
+	SessionMeta      map[string]any `json:"session_meta,omitempty"`
+	Timestamp        string         `json:"timestamp"`
+}
+
+// GetSessionID returns the session ID for this event (used by event routing).
+func (p SessionInfoEventPayload) GetSessionID() string {
 	return p.SessionID
 }
 

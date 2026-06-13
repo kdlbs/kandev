@@ -69,6 +69,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	case "session_models":
 		s.handleSessionModelsEvent(ctx, payload)
 
+	case streams.EventTypeSessionInfo:
+		s.handleSessionInfoEvent(ctx, payload)
+
 	case "plan":
 		s.handleSessionTodosEvent(ctx, payload)
 
@@ -716,6 +719,7 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 
 	s.saveAgentTextIfPresent(ctx, payload)
 	s.publishAgentPlanIfPresent(ctx, payload)
+	s.persistTurnPromptMetadata(ctx, payload, session)
 	s.publishPromptUsage(ctx, payload, session)
 	s.completeTurnForSession(ctx, payload.SessionID)
 
@@ -917,18 +921,7 @@ func (s *Service) publishPromptUsage(
 		return
 	}
 
-	model := payload.Data.CurrentModelID
-	agentType := ""
-	if session != nil && session.AgentProfileSnapshot != nil {
-		if model == "" {
-			if m, ok := session.AgentProfileSnapshot["model"].(string); ok {
-				model = m
-			}
-		}
-		if t, ok := session.AgentProfileSnapshot["agent_name"].(string); ok {
-			agentType = t
-		}
-	}
+	model, agentType := resolvePromptUsageLabels(payload, session)
 
 	eventPayload := lifecycle.SessionPromptUsageEventPayload{
 		TaskID:    payload.TaskID,
@@ -941,6 +934,119 @@ func (s *Service) publishPromptUsage(
 	}
 	subject := events.BuildSessionPromptUsageSubject(sessionID)
 	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionPromptUsageUpdated, "orchestrator", eventPayload))
+}
+
+func resolvePromptUsageLabels(
+	payload *lifecycle.AgentStreamEventPayload,
+	session *models.TaskSession,
+) (string, string) {
+	model := ""
+	if payload != nil && payload.Data != nil {
+		model = payload.Data.CurrentModelID
+	}
+	agentType := ""
+	if session != nil && session.AgentProfileSnapshot != nil {
+		if model == "" {
+			if m, ok := session.AgentProfileSnapshot["model"].(string); ok {
+				model = m
+			}
+		}
+		if t, ok := session.AgentProfileSnapshot["agent_name"].(string); ok {
+			agentType = t
+		}
+	}
+	return model, agentType
+}
+
+func (s *Service) persistTurnPromptMetadata(
+	ctx context.Context,
+	payload *lifecycle.AgentStreamEventPayload,
+	session *models.TaskSession,
+) {
+	if payload == nil || payload.Data == nil || payload.SessionID == "" || payload.Data.Usage == nil || s.turnService == nil {
+		return
+	}
+	turn, err := s.turnService.GetActiveTurn(ctx, payload.SessionID)
+	if err != nil {
+		s.logger.Warn("failed to get active turn for prompt usage metadata",
+			zap.String("session_id", payload.SessionID),
+			zap.Error(err))
+		return
+	}
+	if turn == nil {
+		return
+	}
+	model, agentType := resolvePromptUsageLabels(payload, session)
+	metadata := turn.Metadata
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
+	metadata["prompt_usage"] = promptUsageMetadata(payload.Data.Usage)
+	if model != "" {
+		metadata["model"] = model
+	}
+	if agentType != "" {
+		metadata["agent_type"] = agentType
+	}
+	if payload.AgentID != "" {
+		metadata["agent_id"] = payload.AgentID
+	}
+	turn.Metadata = metadata
+	if err := s.turnService.UpdateTurn(ctx, turn); err != nil {
+		s.logger.Warn("failed to persist prompt usage metadata on turn",
+			zap.String("turn_id", turn.ID),
+			zap.String("session_id", payload.SessionID),
+			zap.Error(err))
+	}
+}
+
+func promptUsageMetadata(usage *streams.PromptUsage) map[string]interface{} {
+	if usage == nil {
+		return nil
+	}
+	return map[string]interface{}{
+		"input_tokens":                    usage.InputTokens,
+		"output_tokens":                   usage.OutputTokens,
+		"cached_read_tokens":              usage.CachedReadTokens,
+		"cached_write_tokens":             usage.CachedWriteTokens,
+		"thought_tokens":                  usage.ThoughtTokens,
+		"total_tokens":                    usage.TotalTokens,
+		"provider_reported_cost_subcents": usage.ProviderReportedCostSubcents,
+		"estimated":                       usage.Estimated,
+	}
+}
+
+func (s *Service) handleSessionInfoEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	if payload == nil || payload.Data == nil || payload.SessionID == "" || s.repo == nil {
+		return
+	}
+	info := map[string]interface{}{
+		"session_id": payload.Data.ACPSessionID,
+		"title":      payload.Data.SessionTitle,
+		"updated_at": payload.Data.SessionUpdatedAt,
+		"meta":       payload.Data.SessionMeta,
+	}
+	if err := s.repo.SetSessionMetadataKey(ctx, payload.SessionID, "acp", info); err != nil {
+		s.logger.Warn("failed to persist ACP session info",
+			zap.String("session_id", payload.SessionID),
+			zap.String("acp_session_id", payload.Data.ACPSessionID),
+			zap.Error(err))
+	}
+	if s.eventBus == nil {
+		return
+	}
+	eventPayload := lifecycle.SessionInfoEventPayload{
+		TaskID:           payload.TaskID,
+		SessionID:        payload.SessionID,
+		AgentID:          payload.AgentID,
+		ACPSessionID:     payload.Data.ACPSessionID,
+		SessionTitle:     payload.Data.SessionTitle,
+		SessionUpdatedAt: payload.Data.SessionUpdatedAt,
+		SessionMeta:      payload.Data.SessionMeta,
+		Timestamp:        time.Now().UTC().Format(time.RFC3339),
+	}
+	subject := events.BuildSessionInfoSubject(payload.SessionID)
+	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionInfoUpdated, "orchestrator", eventPayload))
 }
 
 // handleAvailableCommandsEvent broadcasts available_commands events to the WebSocket for the frontend.

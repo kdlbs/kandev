@@ -20,6 +20,7 @@ type testRepo interface {
 	CreateTurn(ctx context.Context, turn *models.Turn) error
 	CompleteTurn(ctx context.Context, id string) error
 	GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error)
+	UpdateTurn(ctx context.Context, turn *models.Turn) error
 }
 
 func (s *repoBackedTurnService) StartTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
@@ -40,6 +41,10 @@ func (s *repoBackedTurnService) CompleteTurn(ctx context.Context, turnID string)
 
 func (s *repoBackedTurnService) GetActiveTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
 	return s.repo.GetActiveTurnBySessionID(ctx, sessionID)
+}
+
+func (s *repoBackedTurnService) UpdateTurn(ctx context.Context, turn *models.Turn) error {
+	return s.repo.UpdateTurn(ctx, turn)
 }
 
 func (s *repoBackedTurnService) AbandonOpenTurns(ctx context.Context, sessionID string) error {
