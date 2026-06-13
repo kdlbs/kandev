@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it } from "vitest";
 
-import { ignoreBrokenPipe } from "./process";
+import { __resetBrokenPipeGuard, ignoreBrokenPipe } from "./process";
 
 function makeError(code: string, message: string): NodeJS.ErrnoException {
   return Object.assign(new Error(message), { code });
@@ -20,6 +20,10 @@ describe("ignoreBrokenPipe", () => {
       process.stdout.removeListener("error", installed);
       process.stderr.removeListener("error", installed);
     }
+    // Reset the module guard alongside listener removal so a later
+    // ignoreBrokenPipe() reattaches instead of hitting a no-op with no
+    // listeners present (order-independent for other tests in this worker).
+    __resetBrokenPipeGuard();
   });
 
   it("attaches an error handler to stdout and stderr", () => {

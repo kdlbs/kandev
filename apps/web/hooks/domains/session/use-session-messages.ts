@@ -11,6 +11,32 @@ const RUNNING_BACKFILL_INITIAL_DELAY_MS = 1200;
 const RUNNING_BACKFILL_INTERVAL_MS = 5000;
 export const MAX_AUTO_BACKFILL_PAGES = 10;
 
+// Monotonic guard against stale concurrent fetches. Each fetch claims an
+// increasing sequence number before awaiting; a completion only merges if no
+// newer fetch for the same session has already merged, so an older in-flight
+// fetch cannot overwrite newer state (WS-delivered messages or a newer fetch's
+// snapshot) when two fetches for the same session race.
+let fetchSeqCounter = 0;
+const lastAppliedFetchSeq = new Map<string, number>();
+
+/** Claims the next monotonic fetch sequence number. */
+export function nextFetchSeq(): number {
+  fetchSeqCounter += 1;
+  return fetchSeqCounter;
+}
+
+/**
+ * Records that the fetch identified by `seq` is about to merge for `sessionId`.
+ * Returns false when a newer fetch has already merged for the session, so the
+ * caller can skip the stale merge.
+ */
+export function commitFetchSeq(sessionId: string, seq: number): boolean {
+  const applied = lastAppliedFetchSeq.get(sessionId) ?? 0;
+  if (seq < applied) return false;
+  lastAppliedFetchSeq.set(sessionId, seq);
+  return true;
+}
+
 export function hasUserOrAgentMessage(messages: Message[]): boolean {
   return messages.some(
     (m) => m.type === "message" && (m.author_type === "user" || m.author_type === "agent"),
@@ -108,6 +134,32 @@ type MessageListResponse = { messages: Message[]; has_more?: boolean; cursor?: s
 const EMPTY_MESSAGES: Message[] = [];
 const EMPTY_META = { isLoading: false, hasMore: false, oldestCursor: null };
 
+/** Debug-only summary of a fetch response (no-op unless debug logging is on). */
+function logFetchSummary(
+  sessionId: string,
+  fetched: Message[],
+  response: MessageListResponse,
+  limit: number,
+): void {
+  if (!isDebug()) return;
+  const summary = summarizeMessages(fetched);
+  debug("message.list response", {
+    sessionId,
+    hasMore: response.has_more ?? false,
+    cursor: response.cursor ?? null,
+    ...summary,
+  });
+  if (fetched.length > 0 && summary.userMessageCount === 0 && summary.agentMessageCount === 0) {
+    debug("WARNING: fetched window contains no user/agent message rows", {
+      sessionId,
+      limit,
+      hasMore: response.has_more ?? false,
+      byType: summary.byType,
+      hint: "The fetch limit may be too small for this session's last turn — user prompt and agent replies live further back. Paginate or raise the limit to see them.",
+    });
+  }
+}
+
 /** Fetch latest messages via WS and merge with any that arrived via live notifications. */
 async function fetchAndStoreMessages(
   sessionId: string,
@@ -117,6 +169,7 @@ async function fetchAndStoreMessages(
   if (!client) {
     return [];
   }
+  const seq = nextFetchSeq();
 
   const requestParams = {
     session_id: sessionId,
@@ -126,24 +179,7 @@ async function fetchAndStoreMessages(
   debug("message.list request", requestParams);
   const response = await client.request<MessageListResponse>("message.list", requestParams, 10000);
   const fetched = [...(response.messages ?? [])].reverse();
-  if (isDebug()) {
-    const summary = summarizeMessages(fetched);
-    debug("message.list response", {
-      sessionId,
-      hasMore: response.has_more ?? false,
-      cursor: response.cursor ?? null,
-      ...summary,
-    });
-    if (fetched.length > 0 && summary.userMessageCount === 0 && summary.agentMessageCount === 0) {
-      debug("WARNING: fetched window contains no user/agent message rows", {
-        sessionId,
-        limit: requestParams.limit,
-        hasMore: response.has_more ?? false,
-        byType: summary.byType,
-        hint: "The fetch limit may be too small for this session's last turn — user prompt and agent replies live further back. Paginate or raise the limit to see them.",
-      });
-    }
-  }
+  logFetchSummary(sessionId, fetched, response, requestParams.limit);
   // Merge: keep WS-delivered messages that aren't in the fetch response.
   // This prevents a slow fetch (sent before messages existed) from wiping
   // messages that arrived via real-time notifications while the fetch was
@@ -157,6 +193,14 @@ async function fetchAndStoreMessages(
           (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
         )
       : fetched;
+
+  // Stale-fetch guard: if a newer fetch for this session already merged while
+  // this one was in flight, skip the merge so the older snapshot can't drop
+  // newer messages. The newer state is already in the store.
+  if (!commitFetchSeq(sessionId, seq)) {
+    debug("message.list stale fetch skipped", { sessionId, seq });
+    return store.getState().messages.bySession[sessionId] ?? merged;
+  }
 
   // Idempotent merge: the store reconciles this snapshot against current state,
   // preserving object/array identity for unchanged messages so the periodic

@@ -93,11 +93,13 @@ export function normalizeCached(input: string): string {
   }
   parseCount += 1;
   const result = normalizeMarkdown(input);
-  normalizeCache.set(input, result);
-  if (normalizeCache.size > MAX_CACHE_ENTRIES) {
+  // Evict before insert so the map never exceeds the cap. A miss means the key
+  // isn't present, so the cache holds at most MAX_CACHE_ENTRIES - 1 entries here.
+  if (normalizeCache.size >= MAX_CACHE_ENTRIES) {
     const oldest = normalizeCache.keys().next().value;
     if (oldest !== undefined) normalizeCache.delete(oldest);
   }
+  normalizeCache.set(input, result);
   return result;
 }
 

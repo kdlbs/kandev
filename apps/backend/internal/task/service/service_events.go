@@ -324,8 +324,11 @@ func (s *Service) publishMessageEvent(ctx context.Context, eventType string, mes
 		"content":        sysprompt.StripSystemContent(message.Content),
 		"type":           messageType,
 		"requests_input": message.RequestsInput,
-		"created_at":     message.CreatedAt.Format(time.RFC3339),
-		"updated_at":     message.UpdatedAt.Format(time.RFC3339),
+		// RFC3339Nano keeps sub-second precision so rapid updates within the same
+		// second produce distinct timestamps; the REST/DTO path serializes these
+		// fields with nanosecond precision too, so both delivery channels agree.
+		"created_at": message.CreatedAt.Format(time.RFC3339Nano),
+		"updated_at": message.UpdatedAt.Format(time.RFC3339Nano),
 	}
 
 	if hasHidden {

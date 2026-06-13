@@ -33,6 +33,8 @@ import {
   shouldRunMessageBackfill,
   runBackfillRound,
   autoBackfillUntilUserMessage,
+  nextFetchSeq,
+  commitFetchSeq,
   MAX_AUTO_BACKFILL_PAGES,
 } from "./use-session-messages";
 import type { TaskSessionState } from "@/lib/types/http";
@@ -266,6 +268,32 @@ describe("runBackfillRound", () => {
     const store = makeStore({ messages: [], hasMore: true, oldestCursor: "msg-1" });
     const result = await runBackfillRound("sess-1", store as never, 0);
     expect(result).toBe("stop");
+  });
+});
+
+describe("stale concurrent fetch guard", () => {
+  it("rejects an older fetch that completes after a newer one merged", () => {
+    const sid = "guard-sess-a";
+    const older = nextFetchSeq();
+    const newer = nextFetchSeq();
+    // The newer fetch finishes first and merges.
+    expect(commitFetchSeq(sid, newer)).toBe(true);
+    // The older fetch finishing late must be skipped.
+    expect(commitFetchSeq(sid, older)).toBe(false);
+  });
+
+  it("applies fetches that complete in order", () => {
+    const sid = "guard-sess-b";
+    expect(commitFetchSeq(sid, nextFetchSeq())).toBe(true);
+    expect(commitFetchSeq(sid, nextFetchSeq())).toBe(true);
+  });
+
+  it("tracks the applied sequence independently per session", () => {
+    const older = nextFetchSeq();
+    const newer = nextFetchSeq();
+    expect(commitFetchSeq("guard-sess-c", newer)).toBe(true);
+    // A different session is unaffected by another session's higher applied seq.
+    expect(commitFetchSeq("guard-sess-d", older)).toBe(true);
   });
 });
 

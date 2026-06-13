@@ -70,6 +70,15 @@ export function ignoreBrokenPipe(): void {
 }
 
 /**
+ * Test-only: resets the broken-pipe guard so a later `ignoreBrokenPipe()` call
+ * reattaches listeners. Keeps the module guard consistent with suites that
+ * remove the listeners they installed.
+ */
+export function __resetBrokenPipeGuard(): void {
+  brokenPipeGuarded = false;
+}
+
+/**
  * Terminate a process and wait for it to exit.
  * On Unix: sends SIGTERM, falls back to SIGKILL after timeout.
  * On Windows: tree-kill uses taskkill (no SIGTERM/SIGKILL distinction).
