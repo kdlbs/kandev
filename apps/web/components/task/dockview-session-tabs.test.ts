@@ -17,10 +17,25 @@ type FakePanel = {
   api: { close: ReturnType<typeof vi.fn<[], void>> };
 };
 
+type MoveToOptions = {
+  group: unknown;
+  position: "center";
+  index: number;
+  skipSetActive: boolean;
+};
+
+type MoveToCall = {
+  panelId: string;
+  options: MoveToOptions;
+};
+
 const KEEP = "keep";
 const KEEP_PANEL = `session:${KEEP}`;
 const LEAKED_PANEL = "session:leaked";
 const PENDING_SESSION_ID = "session-new";
+const TEST_GROUP_CENTER = "group-center";
+const CENTER_POSITION = "center";
+const SIBLING_PANEL = "session:sibling";
 
 /**
  * Builds a fake DockviewApi where `panel.api.close()` mutates the underlying
@@ -67,6 +82,42 @@ function makePositionApi(args: {
 
 function panelById(panels: FakePanel[], id: string): FakePanel | undefined {
   return panels.find((p) => p.id === id);
+}
+
+function makeTabOrderApi(panelIds: string[]): {
+  api: DockviewApi;
+  moveToCalls: MoveToCall[];
+} {
+  const moveToCalls: MoveToCall[] = [];
+  const group = { id: TEST_GROUP_CENTER, panels: [] as Array<{ id: string }> };
+  const panels = panelIds.map((id) => ({
+    id,
+    group,
+    api: {
+      moveTo: vi.fn((options: MoveToOptions) => {
+        moveToCalls.push({ panelId: id, options });
+      }),
+    },
+  }));
+  group.panels = panels;
+  return {
+    api: {
+      getPanel: (id: string) => panels.find((p) => p.id === id) ?? null,
+    } as unknown as DockviewApi,
+    moveToCalls,
+  };
+}
+
+function expectedMove(panelId: string, index: number): MoveToCall {
+  return {
+    panelId,
+    options: {
+      group: expect.objectContaining({ id: TEST_GROUP_CENTER }),
+      position: CENTER_POSITION,
+      index,
+      skipSetActive: true,
+    },
+  };
 }
 
 describe("reconcileRemovedSessionPanels", () => {
@@ -227,58 +278,52 @@ describe("resolveInitialPosition", () => {
 });
 
 describe("ensureSessionTabPrecedesNonSessionTabs", () => {
-  function makeTabOrderApi(panelIds: string[]): {
-    api: DockviewApi;
-    moveTo: ReturnType<typeof vi.fn>;
-  } {
-    const moveTo = vi.fn();
-    const group = { id: "group-center", panels: [] as Array<{ id: string }> };
-    const panels = panelIds.map((id) => ({
-      id,
-      group,
-      api: { moveTo },
-    }));
-    group.panels = panels;
-    return {
-      api: {
-        getPanel: (id: string) => panels.find((p) => p.id === id) ?? null,
-      } as unknown as DockviewApi,
-      moveTo,
-    };
-  }
-
   it("moves a restored session tab before a PR tab that was saved first", () => {
-    const { api, moveTo } = makeTabOrderApi(["pr-detail", KEEP_PANEL, "preview:file-diff"]);
+    const { api, moveToCalls } = makeTabOrderApi(["pr-detail", KEEP_PANEL, "preview:file-diff"]);
 
     ensureSessionTabPrecedesNonSessionTabs(api, KEEP);
 
-    expect(moveTo).toHaveBeenCalledWith({
-      group: expect.objectContaining({ id: "group-center" }),
-      position: "center",
-      index: 0,
-      skipSetActive: true,
-    });
+    expect(moveToCalls).toEqual([expectedMove(KEEP_PANEL, 0)]);
+  });
+
+  it("moves interleaved session tabs as a stable block before non-session tabs", () => {
+    const { api, moveToCalls } = makeTabOrderApi(["pr-detail", SIBLING_PANEL, KEEP_PANEL]);
+
+    ensureSessionTabPrecedesNonSessionTabs(api, KEEP);
+
+    expect(moveToCalls).toEqual([expectedMove(KEEP_PANEL, 0), expectedMove(SIBLING_PANEL, 0)]);
+  });
+
+  it("does not move when session tabs already precede non-session tabs", () => {
+    const { api, moveToCalls } = makeTabOrderApi([KEEP_PANEL, SIBLING_PANEL, "pr-detail"]);
+
+    ensureSessionTabPrecedesNonSessionTabs(api, KEEP);
+
+    expect(moveToCalls).toEqual([]);
   });
 
   it("does not move when the session tab already precedes non-session tabs", () => {
-    const { api, moveTo } = makeTabOrderApi([KEEP_PANEL, "pr-detail"]);
+    const { api, moveToCalls } = makeTabOrderApi([KEEP_PANEL, "pr-detail"]);
 
     ensureSessionTabPrecedesNonSessionTabs(api, KEEP);
 
-    expect(moveTo).not.toHaveBeenCalled();
+    expect(moveToCalls).toEqual([]);
   });
 
   it("keeps earlier session tabs ahead of the active session tab", () => {
-    const { api, moveTo } = makeTabOrderApi(["session:older", "pr-detail", KEEP_PANEL]);
+    const { api, moveToCalls } = makeTabOrderApi(["session:older", "pr-detail", KEEP_PANEL]);
 
     ensureSessionTabPrecedesNonSessionTabs(api, KEEP);
 
-    expect(moveTo).toHaveBeenCalledWith({
-      group: expect.objectContaining({ id: "group-center" }),
-      position: "center",
-      index: 1,
-      skipSetActive: true,
-    });
+    expect(moveToCalls).toEqual([expectedMove(KEEP_PANEL, 1)]);
+  });
+
+  it("does not move when the target session panel is absent", () => {
+    const { api, moveToCalls } = makeTabOrderApi(["pr-detail", SIBLING_PANEL]);
+
+    ensureSessionTabPrecedesNonSessionTabs(api, KEEP);
+
+    expect(moveToCalls).toEqual([]);
   });
 });
 
