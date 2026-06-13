@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import type { DockviewApi } from "dockview-react";
 import type { TaskSession } from "@/lib/types/http";
 import {
+  ensureSessionTabPrecedesNonSessionTabs,
   findSessionAnchorGroupId,
   reconcileRemovedSessionPanels,
   resolveInitialPosition,
@@ -221,6 +222,62 @@ describe("resolveInitialPosition", () => {
     expect(resolveInitialPosition(api)).toEqual({
       referenceGroup: RIGHT_TOP_GROUP,
       direction: "left",
+    });
+  });
+});
+
+describe("ensureSessionTabPrecedesNonSessionTabs", () => {
+  function makeTabOrderApi(panelIds: string[]): {
+    api: DockviewApi;
+    moveTo: ReturnType<typeof vi.fn>;
+  } {
+    const moveTo = vi.fn();
+    const group = { id: "group-center", panels: [] as Array<{ id: string }> };
+    const panels = panelIds.map((id) => ({
+      id,
+      group,
+      api: { moveTo },
+    }));
+    group.panels = panels;
+    return {
+      api: {
+        getPanel: (id: string) => panels.find((p) => p.id === id) ?? null,
+      } as unknown as DockviewApi,
+      moveTo,
+    };
+  }
+
+  it("moves a restored session tab before a PR tab that was saved first", () => {
+    const { api, moveTo } = makeTabOrderApi(["pr-detail", KEEP_PANEL, "preview:file-diff"]);
+
+    ensureSessionTabPrecedesNonSessionTabs(api, KEEP);
+
+    expect(moveTo).toHaveBeenCalledWith({
+      group: expect.objectContaining({ id: "group-center" }),
+      position: "center",
+      index: 0,
+      skipSetActive: true,
+    });
+  });
+
+  it("does not move when the session tab already precedes non-session tabs", () => {
+    const { api, moveTo } = makeTabOrderApi([KEEP_PANEL, "pr-detail"]);
+
+    ensureSessionTabPrecedesNonSessionTabs(api, KEEP);
+
+    expect(moveTo).not.toHaveBeenCalled();
+  });
+
+  it("keeps earlier session tabs ahead of the active session tab", () => {
+    const { api, moveTo } = makeTabOrderApi(["session:older", "pr-detail", KEEP_PANEL]);
+
+    ensureSessionTabPrecedesNonSessionTabs(api, KEEP);
+
+    expect(moveTo).toHaveBeenCalledWith({
+      group: expect.objectContaining({ id: "group-center" }),
+      position: "center",
+      index: 1,
+      skipSetActive: true,
     });
   });
 });
