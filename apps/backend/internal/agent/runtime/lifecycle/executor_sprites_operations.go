@@ -357,16 +357,17 @@ func (r *SpritesExecutor) createAgentInstance(
 	req *ExecutorCreateRequest,
 ) (int, error) {
 	instanceReq := agentctl.CreateInstanceRequest{
-		ID:                  req.InstanceID,
-		WorkspacePath:       spritesWorkspacePath,
-		SessionID:           req.SessionID,
-		TaskID:              req.TaskID,
-		Protocol:            req.Protocol,
-		AgentType:           agentTypeFromReq(req),
-		McpServers:          req.McpServers,
-		McpMode:             req.McpMode,
-		RequiresProcessKill: requiresProcessKillFromReq(req),
-		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
+		ID:                     req.InstanceID,
+		WorkspacePath:          spritesWorkspacePath,
+		SessionID:              req.SessionID,
+		TaskID:                 req.TaskID,
+		Protocol:               req.Protocol,
+		AgentType:              agentTypeFromReq(req),
+		AutoApprovePermissions: boolPtr(req.AutoApprovePermissions),
+		McpServers:             req.McpServers,
+		McpMode:                req.McpMode,
+		RequiresProcessKill:    requiresProcessKillFromReq(req),
+		BaseBranches:           getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 	}
 	reqJSON, err := json.Marshal(instanceReq)
 	if err != nil {

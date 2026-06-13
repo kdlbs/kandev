@@ -402,24 +402,31 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	// found.
 	env := map[string]string{}
 	m.mergeAgentProfileEnv(ctx, info.AgentProfileID, env)
+	autoApprove := false
+	if info.AgentProfileID != "" && m.profileResolver != nil {
+		if profileInfo, err := m.profileResolver.ResolveProfile(ctx, info.AgentProfileID); err == nil {
+			autoApprove = profileInfo.AutoApprove
+		}
+	}
 	if len(env) == 0 {
 		env = nil
 	}
 
 	req := &ExecutorCreateRequest{
-		InstanceID:          executionID,
-		TaskID:              taskID,
-		SessionID:           info.SessionID,
-		TaskEnvironmentID:   info.TaskEnvironmentID,
-		AgentProfileID:      info.AgentProfileID,
-		WorkspacePath:       info.WorkspacePath,
-		Protocol:            string(agentConfig.Runtime().Protocol),
-		Env:                 env,
-		AgentConfig:         agentConfig,
-		Metadata:            info.Metadata,
-		PreviousExecutionID: info.AgentExecutionID,
-		AuthToken:           m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyAuthTokenSecret),
-		BootstrapNonce:      m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret),
+		InstanceID:             executionID,
+		TaskID:                 taskID,
+		SessionID:              info.SessionID,
+		TaskEnvironmentID:      info.TaskEnvironmentID,
+		AgentProfileID:         info.AgentProfileID,
+		WorkspacePath:          info.WorkspacePath,
+		Protocol:               string(agentConfig.Runtime().Protocol),
+		Env:                    env,
+		AutoApprovePermissions: autoApprove,
+		AgentConfig:            agentConfig,
+		Metadata:               info.Metadata,
+		PreviousExecutionID:    info.AgentExecutionID,
+		AuthToken:              m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyAuthTokenSecret),
+		BootstrapNonce:         m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret),
 	}
 
 	runtimeInstance, err := rt.CreateInstance(ctx, req)

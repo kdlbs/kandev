@@ -356,6 +356,12 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	}
 	if overrides.Env != nil {
 		cfg.AgentEnv = overrides.Env
+		if envBool(overrides.Env, "AGENTCTL_AUTO_APPROVE_PERMISSIONS") {
+			cfg.AutoApprovePermissions = true
+		}
+	}
+	if overrides.AutoApprovePermissions != nil {
+		cfg.AutoApprovePermissions = *overrides.AutoApprovePermissions
 	}
 	if overrides.ApprovalPolicy != "" {
 		cfg.ApprovalPolicy = overrides.ApprovalPolicy
@@ -394,23 +400,24 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 
 // InstanceOverrides allows overriding default values when creating an instance
 type InstanceOverrides struct {
-	InstanceID          string
-	Protocol            agent.Protocol
-	AgentCommand        string
-	WorkDir             string
-	AutoStart           *bool
-	Env                 []string
-	ApprovalPolicy      string
-	AgentType           string
-	McpServers          []McpServerConfig
-	SessionID           string
-	TaskID              string
-	DisableAskQuestion  bool
-	AssumeMcpSse        bool
-	AssumeMcpHttp       bool
-	McpMode             string
-	RequiresProcessKill bool
-	BaseBranches        map[string]string
+	InstanceID             string
+	Protocol               agent.Protocol
+	AgentCommand           string
+	WorkDir                string
+	AutoStart              *bool
+	Env                    []string
+	AutoApprovePermissions *bool
+	ApprovalPolicy         string
+	AgentType              string
+	McpServers             []McpServerConfig
+	SessionID              string
+	TaskID                 string
+	DisableAskQuestion     bool
+	AssumeMcpSse           bool
+	AssumeMcpHttp          bool
+	McpMode                string
+	RequiresProcessKill    bool
+	BaseBranches           map[string]string
 }
 
 // ParseCommand splits a command string into arguments
@@ -446,6 +453,18 @@ func CollectAgentEnv(additional map[string]string) []string {
 		result = append(result, k+"="+v)
 	}
 	return result
+}
+
+func envBool(env []string, key string) bool {
+	prefix := key + "="
+	for _, entry := range env {
+		value, ok := strings.CutPrefix(entry, prefix)
+		if !ok {
+			continue
+		}
+		return value == "1" || strings.EqualFold(value, "true") || strings.EqualFold(value, "yes")
+	}
+	return false
 }
 
 // isNpmEnvVar returns true if the key is an npm-related environment variable

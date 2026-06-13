@@ -130,6 +130,10 @@ type CreateRequest struct {
 	// AutoStart indicates whether to start the agent automatically after creation.
 	AutoStart bool `json:"auto_start,omitempty"`
 
+	// AutoApprovePermissions controls agentctl-side permission auto-approval
+	// for this instance. Nil uses the control server default.
+	AutoApprovePermissions *bool `json:"auto_approve_permissions,omitempty"`
+
 	// McpServers is a list of MCP servers to configure for the agent.
 	McpServers []McpServerConfig `json:"mcp_servers,omitempty"`
 
