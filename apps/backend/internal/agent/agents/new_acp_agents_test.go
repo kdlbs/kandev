@@ -122,6 +122,13 @@ grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$HOME/.bashrc" 2>/dev/null || 
 		passthroughArgv: []string{"omp"},
 		installViaNpm:   false,
 	}},
+	{func() Agent { return NewHermesACP() }, acpAgentSpec{
+		id: "hermes-acp", displayName: "Hermes", detectBinaries: []string{"hermes"},
+		expectedArgv:    []string{"hermes", "acp"},
+		inferenceArgv:   []string{"hermes", "acp"},
+		passthroughArgv: []string{"hermes"},
+		installViaNpm:   false,
+	}},
 }
 
 func TestNewACPAgents_IDAndDisplay(t *testing.T) {
