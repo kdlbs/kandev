@@ -90,14 +90,13 @@ export function usePlanPanelAutoOpen() {
     if (!api || isRestoringLayout) return;
     if (!plan || plan.created_by !== "agent") return;
     if (lastSeen === plan.updated_at) return;
-    if (api.getPanel("plan")) {
+    const planPanel = api.getPanel("plan");
+    if (planPanel) {
       // Page-reload case: panel restored from saved layout and there is no
-      // recorded `lastSeen` (not persisted across sessions). We can't tell
-      // whether the plan was acknowledged before reload or not, so we
-      // optimistically mark it seen to avoid a stale indicator flash on
-      // every reload. When a live update arrives after the reload,
-      // `lastSeen` is defined so we don't suppress it — PlanTab reads the
-      // store directly and re-arms the indicator.
+      // recorded `lastSeen` (not persisted across sessions). Only mark the
+      // plan seen when the restored Plan panel is active, meaning the user is
+      // already looking at it. If Chat is active, the existing tab still needs
+      // its unseen indicator for a new or inactive plan.
       //
       // Guard on `addedPlanPanelRef`: only heal panels we did *not* add this
       // session. Otherwise this branch misfires when our own addPlanPanel
@@ -105,7 +104,11 @@ export function usePlanPanelAutoOpen() {
       // resolves after the WS push and re-applies an equivalent plan object —
       // which would mark a freshly auto-opened plan seen and suppress the
       // indicator the user must see.
-      if (lastSeen === undefined && !addedPlanPanelRef.current) {
+      if (
+        lastSeen === undefined &&
+        !addedPlanPanelRef.current &&
+        api.activePanel?.id === planPanel.id
+      ) {
         markTaskPlanSeen(plan.task_id);
       }
       return;

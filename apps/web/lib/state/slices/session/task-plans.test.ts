@@ -1,9 +1,17 @@
-import { describe, it, expect } from "vitest";
+import { beforeEach, describe, it, expect, vi } from "vitest";
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { createSessionSlice } from "./session-slice";
 import type { SessionSlice } from "./types";
 import type { TaskPlan } from "@/lib/types/http";
+
+const mockGetPlanLastSeen = vi.fn();
+const mockSetPlanLastSeen = vi.fn();
+
+vi.mock("@/lib/local-storage", () => ({
+  getPlanLastSeen: (...args: unknown[]) => mockGetPlanLastSeen(...args),
+  setPlanLastSeen: (...args: unknown[]) => mockSetPlanLastSeen(...args),
+}));
 
 function makeStore() {
   return create<SessionSlice>()(immer(createSessionSlice));
@@ -28,6 +36,11 @@ function makePlan(overrides: Partial<TaskPlan> = {}): TaskPlan {
 }
 
 describe("task plan slice", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetPlanLastSeen.mockReturnValue(null);
+  });
+
   it("markTaskPlanSeen writes the current plan updated_at", () => {
     const store = makeStore();
     store.getState().setTaskPlan(TASK_ID, makePlan({ updated_at: TS_LATER }));
@@ -35,6 +48,7 @@ describe("task plan slice", () => {
     store.getState().markTaskPlanSeen(TASK_ID);
 
     expect(store.getState().taskPlans.lastSeenUpdatedAtByTaskId[TASK_ID]).toBe(TS_LATER);
+    expect(mockSetPlanLastSeen).toHaveBeenCalledWith(TASK_ID, TS_LATER);
   });
 
   it("markTaskPlanSeen with no plan writes an empty-string sentinel", () => {
@@ -43,6 +57,16 @@ describe("task plan slice", () => {
     store.getState().markTaskPlanSeen("task-missing");
 
     expect(store.getState().taskPlans.lastSeenUpdatedAtByTaskId["task-missing"]).toBe("");
+    expect(mockSetPlanLastSeen).toHaveBeenCalledWith("task-missing", "");
+  });
+
+  it("setTaskPlan hydrates stored lastSeenUpdatedAtByTaskId", () => {
+    mockGetPlanLastSeen.mockReturnValue(TS_LATER);
+    const store = makeStore();
+
+    store.getState().setTaskPlan(TASK_ID, makePlan({ updated_at: TS_LATER }));
+
+    expect(store.getState().taskPlans.lastSeenUpdatedAtByTaskId[TASK_ID]).toBe(TS_LATER);
   });
 
   it("setTaskPlan does not change lastSeenUpdatedAtByTaskId", () => {
@@ -65,5 +89,6 @@ describe("task plan slice", () => {
 
     expect(store.getState().taskPlans.lastSeenUpdatedAtByTaskId[TASK_ID]).toBeUndefined();
     expect(store.getState().taskPlans.byTaskId[TASK_ID]).toBeUndefined();
+    expect(mockSetPlanLastSeen).toHaveBeenCalledWith(TASK_ID, null);
   });
 });

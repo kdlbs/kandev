@@ -6,6 +6,7 @@ import { reconcileMessages } from "./message-signature";
 import { migrateEnvKeyedData } from "@/lib/state/slices/session-runtime/session-runtime-slice";
 import { prepareResultToSessionState } from "@/lib/state/slices/session-runtime/prepare-result";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
+import { getPlanLastSeen, setPlanLastSeen } from "@/lib/local-storage";
 
 const debugEnv = createDebugLogger("session:env-mapping");
 
@@ -132,6 +133,7 @@ export const defaultSessionState: SessionSliceState = {
 };
 
 type ImmerSet = Parameters<typeof createSessionSlice>[0];
+type ImmerGet = () => SessionSlice;
 
 function buildMessageActions(set: ImmerSet) {
   return {
@@ -226,14 +228,20 @@ function buildMessageActions(set: ImmerSet) {
   };
 }
 
-function buildTaskPlanActions(set: ImmerSet) {
+function buildTaskPlanActions(set: ImmerSet, get: ImmerGet) {
   return {
-    setTaskPlan: (taskId: string, plan: Parameters<SessionSlice["setTaskPlan"]>[1]) =>
+    setTaskPlan: (taskId: string, plan: Parameters<SessionSlice["setTaskPlan"]>[1]) => {
+      const shouldHydrateLastSeen = get().taskPlans.lastSeenUpdatedAtByTaskId[taskId] === undefined;
+      const storedLastSeen = shouldHydrateLastSeen ? getPlanLastSeen(taskId) : null;
       set((draft) => {
         draft.taskPlans.byTaskId[taskId] = plan;
         draft.taskPlans.loadingByTaskId[taskId] = false;
         draft.taskPlans.loadedByTaskId[taskId] = true;
-      }),
+        if (shouldHydrateLastSeen && storedLastSeen !== null) {
+          draft.taskPlans.lastSeenUpdatedAtByTaskId[taskId] = storedLastSeen;
+        }
+      });
+    },
     setTaskPlanLoading: (taskId: string, loading: boolean) =>
       set((draft) => {
         draft.taskPlans.loadingByTaskId[taskId] = loading;
@@ -242,7 +250,8 @@ function buildTaskPlanActions(set: ImmerSet) {
       set((draft) => {
         draft.taskPlans.savingByTaskId[taskId] = saving;
       }),
-    clearTaskPlan: (taskId: string) =>
+    clearTaskPlan: (taskId: string) => {
+      setPlanLastSeen(taskId, null);
       set((draft) => {
         // revisionContentCache is keyed by revisionId, so pick the IDs for this
         // task before deleting the revisions list and drop their cache entries.
@@ -262,12 +271,16 @@ function buildTaskPlanActions(set: ImmerSet) {
         delete draft.taskPlans.previewRevisionIdByTaskId[taskId];
         delete draft.taskPlans.comparePairByTaskId[taskId];
         delete draft.taskPlans.lastSeenUpdatedAtByTaskId[taskId];
-      }),
-    markTaskPlanSeen: (taskId: string) =>
+      });
+    },
+    markTaskPlanSeen: (taskId: string) => {
+      const plan = get().taskPlans.byTaskId[taskId];
+      const lastSeen = plan?.updated_at ?? "";
+      setPlanLastSeen(taskId, lastSeen);
       set((draft) => {
-        const plan = draft.taskPlans.byTaskId[taskId];
-        draft.taskPlans.lastSeenUpdatedAtByTaskId[taskId] = plan?.updated_at ?? "";
-      }),
+        draft.taskPlans.lastSeenUpdatedAtByTaskId[taskId] = lastSeen;
+      });
+    },
     setPlanRevisions: (
       taskId: string,
       revisions: Parameters<SessionSlice["setPlanRevisions"]>[1],
@@ -427,7 +440,7 @@ export const createSessionSlice: StateCreator<
   [["zustand/immer", never]],
   [],
   SessionSlice
-> = (set) => ({
+> = (set, get) => ({
   ...defaultSessionState,
   ...buildMessageActions(set),
   addTurn: (turn) =>
@@ -472,7 +485,7 @@ export const createSessionSlice: StateCreator<
     set((draft) => {
       draft.activeModel.bySessionId[sessionId] = modelId;
     }),
-  ...buildTaskPlanActions(set),
+  ...buildTaskPlanActions(set, get),
   setQueueEntries: (sessionId, entries, meta) =>
     set((draft) => {
       draft.queue.bySessionId[sessionId] = entries;
