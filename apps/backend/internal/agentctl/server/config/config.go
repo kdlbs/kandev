@@ -356,6 +356,8 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	}
 	if overrides.Env != nil {
 		cfg.AgentEnv = overrides.Env
+		// Env is a legacy/fallback path; it can only enable auto-approve.
+		// The explicit pointer below always takes final precedence.
 		if envBool(overrides.Env, "AGENTCTL_AUTO_APPROVE_PERMISSIONS") {
 			cfg.AutoApprovePermissions = true
 		}

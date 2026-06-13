@@ -401,12 +401,21 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	// session/load then looks under the wrong SDK root → -32002 Resource not
 	// found.
 	env := map[string]string{}
-	m.mergeAgentProfileEnv(ctx, info.AgentProfileID, env)
-	autoApprove := false
+	var profileInfo *AgentProfileInfo
 	if info.AgentProfileID != "" && m.profileResolver != nil {
-		if profileInfo, err := m.profileResolver.ResolveProfile(ctx, info.AgentProfileID); err == nil {
-			autoApprove = profileInfo.AutoApprove
+		resolvedProfile, err := m.profileResolver.ResolveProfile(ctx, info.AgentProfileID)
+		if err != nil {
+			m.logger.Warn("failed to resolve profile for workspace execution",
+				zap.String("agent_profile_id", info.AgentProfileID),
+				zap.Error(err))
+		} else {
+			profileInfo = resolvedProfile
 		}
+	}
+	m.mergeAgentProfileEnvFromInfo(ctx, profileInfo, env)
+	autoApprove := false
+	if profileInfo != nil {
+		autoApprove = profileInfo.AutoApprove
 	}
 	if len(env) == 0 {
 		env = nil
