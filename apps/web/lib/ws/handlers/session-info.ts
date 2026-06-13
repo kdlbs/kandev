@@ -21,7 +21,6 @@ export function registerSessionInfoHandlers(store: StoreApi<AppState>): WsHandle
             meta: payload.session_meta ?? {},
           },
         },
-        updated_at: payload.timestamp ?? existing.updated_at,
       });
     },
   };
