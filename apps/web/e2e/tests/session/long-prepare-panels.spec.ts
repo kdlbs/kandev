@@ -21,12 +21,12 @@ test.describe("Long prepare (slow git fetch)", () => {
   }) => {
     test.setTimeout(120_000);
 
-    // Sleep 25s on every `git fetch`/`git pull` run by the backend. The
-    // worktree fetch timeout is 90s (see worktree/manager.go) so 25s fits
-    // comfortably under it. 25s is well past the file-tree retry budget
+    // Sleep 20s on every `git fetch`/`git pull` run by the backend. The
+    // worktree fetch timeout is 90s (see worktree/manager.go) so 20s fits
+    // comfortably under it. 20s is still past the file-tree retry budget
     // (~18s), which is what we want to exercise.
     const delayFile = path.join(backend.tmpDir, "git-delay-ms");
-    fs.writeFileSync(delayFile, "25000");
+    fs.writeFileSync(delayFile, "20000");
 
     try {
       // Force the worktree executor path; otherwise the task resolves with an

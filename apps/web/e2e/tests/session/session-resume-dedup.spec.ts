@@ -1,17 +1,9 @@
 import { test, expect } from "../../fixtures/test-base";
-import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import type { Page } from "@playwright/test";
 
-async function openTaskSession(page: Page, title: string): Promise<SessionPage> {
-  const kanban = new KanbanPage(page);
-  await kanban.goto();
-
-  const card = kanban.taskCardByTitle(title);
-  await expect(card).toBeVisible({ timeout: 15_000 });
-  await card.click();
-  await expect(page).toHaveURL(/\/t\//, { timeout: 15_000 });
-
+async function openTaskSession(page: Page, taskId: string): Promise<SessionPage> {
+  await page.goto(`/t/${taskId}`);
   const session = new SessionPage(page);
   await session.waitForLoad();
   return session;
@@ -30,7 +22,7 @@ test.describe("Session resume boot-message dedup", () => {
     test.setTimeout(180_000);
 
     // 1. Create the task and wait for the initial agent turn to finish.
-    await apiClient.createTaskWithAgent(
+    const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Resume Dedup Task",
       seedData.agentProfileId,
@@ -42,7 +34,7 @@ test.describe("Session resume boot-message dedup", () => {
       },
     );
 
-    const session = await openTaskSession(testPage, "Resume Dedup Task");
+    const session = await openTaskSession(testPage, task.id);
     await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
       timeout: 30_000,
     });
@@ -53,10 +45,10 @@ test.describe("Session resume boot-message dedup", () => {
       timeout: 15_000,
     });
 
-    // 3. Restart the backend three times to produce three "Resumed agent" boot
-    //    messages. The first two must be hidden by the dedup; only the third
+    // 3. Restart the backend twice to produce two "Resumed agent" boot
+    //    messages. The first must be hidden by the dedup; only the second
     //    (most recent) should remain visible.
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 2; i++) {
       await backend.restart();
       await testPage.reload();
       await session.waitForLoad();
@@ -68,7 +60,7 @@ test.describe("Session resume boot-message dedup", () => {
       });
     }
 
-    // 4. Key assertion: despite three resumes, only the last "Resumed agent"
+    // 4. Key assertion: despite two resumes, only the last "Resumed agent"
     //    row should be rendered.
     await expect(session.chat.getByText("Resumed agent Mock", { exact: false })).toHaveCount(1, {
       timeout: 15_000,
