@@ -66,6 +66,8 @@ description: Commit, push, and create a PR. Default is ready-for-review with aut
 
 5. **If ready (not draft):** Run `/pr-fixup` to wait for CI checks and CodeRabbit, Greptile, Claude, and cubic review feedback, fix any failures or valid comments, and push.
 
+   CodeRabbit issue comments that only report rate limits or exhausted usage credits are informational. They should not block PR completion when other review threads are resolved and checks are otherwise passing or pending.
+
 6. **PR screenshots:** After creating the PR, check if `apps/web/.pr-assets/manifest.json` exists. If it does:
    - Read the manifest to list available screenshots/GIFs
    - Run `npx tsx apps/web/e2e/scripts/upload-pr-assets.ts <PR_NUMBER>` to generate embed markdown

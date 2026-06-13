@@ -72,9 +72,9 @@ If delegated polling is unavailable, gather the same information directly withou
 scripts/pr-state <PR>
 ```
 
-Poll at a 30s cadence with a **20 min cap**. Stop early if any required check fails. If the cap hits and only E2E shards are still pending with no failures, report "CI in progress" instead of continuing to watch indefinitely. Do not run `gh pr checks --watch` in the main session unless the runtime can keep the watcher isolated and automatically clean it up.
+Poll at a 30s cadence with a **20 min cap**. Stop early if any required check fails. If the cap hits and only E2E shards are still pending with no failures, report "CI in progress" instead of continuing to watch indefinitely. Do not run `gh pr checks --watch` in the main session unless the runtime can keep the watcher isolated and automatically clean it up. If you do use `gh pr checks --watch`, keep watching until the command exits; GitHub can expand matrix jobs after an initial aggregate "Build" check passes, so the first green build/lint/test rows are not necessarily terminal.
 
-Summarize the direct-command result from `scripts/pr-state` using its raw snapshot fields: `.checks`, `.review_threads`, `.unresolved_review_thread_count`, `.reviews`, `.issue_comments`, and `.errors`. Derive `ci_failed`, `ci_pending`, and which bot comments are actionable in the parent from those raw arrays. If `.errors` is non-empty, treat the affected fields as unknown and report the data-gathering failure instead of reconstructing them ad hoc.
+Summarize the direct-command result from `scripts/pr-state` using its raw snapshot fields: `.checks`, `.review_threads`, `.unresolved_review_thread_count`, `.reviews`, `.issue_comments`, and `.errors`. Derive `ci_failed`, `ci_pending`, and which bot comments are actionable in the parent from those raw arrays. If `.errors` is non-empty, treat the affected fields as unknown and report the data-gathering failure instead of reconstructing them ad hoc. When deriving non-green checks, filter to actionable failures/pending checks; check/status records with both `status=success` and `conclusion=success` are green even if they appear in a mixed raw array.
 
 Mark task 1 as completed.
 
@@ -94,6 +94,11 @@ For each entry in the report's `ci_failed:` list:
    scripts/run-quiet gh-run -- gh run view <run-id> --log-failed
    ```
    If the printed summary is enough, stop. Only `Read` specific line ranges from the printed log path if you need surrounding context.
+   If `gh run view --log-failed` returns only metadata or says logs are unavailable while the workflow is still running, wait for the workflow/report job to finish. If it still omits details, fetch the job log directly and search the downloaded file:
+   ```bash
+   job_id="$(gh api repos/:owner/:repo/actions/runs/<run-id>/jobs --jq '[.jobs[] | select(.conclusion == "failure")] | first | .id')"
+   gh api repos/:owner/:repo/actions/jobs/"$job_id"/logs > job.log
+   ```
 3. Read the relevant source files at the failing lines (use `Read` with `offset`/`limit`, not `cat`)
 4. Fix the issues (lint errors, test failures, type errors, etc.)
 
@@ -113,13 +118,14 @@ If any failing check is an E2E test (Playwright):
 
 1. Read the `/e2e` skill (`SKILL.md`) for debugging guidance, test patterns, and run commands
 2. Follow the "Debugging failures" section — read error output, check failure screenshots in `e2e/test-results/`, classify the failure (test logic, frontend, backend)
-3. Fix the root cause. **Never increase timeouts to fix flaky tests** — find the real issue
-4. Confirm fixes pass locally before pushing. Wrap with `scripts/run-quiet`:
+3. For failed shards, identify the exact failing spec/test from logs before making changes.
+4. Fix the root cause. **Never increase timeouts to fix flaky tests** — find the real issue
+5. Confirm fixes pass locally before pushing. Build required artifacts first if global setup needs them, then run the targeted Playwright command. Wrap with `scripts/run-quiet`:
    ```bash
    scripts/run-quiet build -- make build-backend build-web
    scripts/run-quiet e2e -- bash -c 'cd apps && pnpm --filter @kandev/web e2e -- tests/path/to/failing.spec.ts'
    ```
-   Run the specific failing test file(s), not the full suite. Only proceed to step 5 after the test passes locally.
+   Run the specific failing test file(s), not the full suite. Only proceed to the verify/commit/push step after the test passes locally.
 
 **Don't dismiss a repeated failure as "flaky".** If the same shard or test fails 2+ poll iterations in a row, stop polling and do two cheap checks instead:
 
@@ -294,6 +300,12 @@ Mark task 5 as in_progress.
    fix: address review feedback and fix CI failures
    ```
 
+   For conflict-fix PRs, after merging or rebasing `origin/main`, check unresolved review threads again before pushing because conflict-resolution diffs can trigger new comments:
+   ```bash
+   scripts/pr-resolve list <PR>
+   scripts/pr-resolve reply <PR> <CID> <TID> "Fixed in the conflict resolution."
+   ```
+
 3. Push:
    ```bash
    git push
@@ -307,7 +319,9 @@ Mark task 6 as in_progress.
 
 After the push, CI restarts and bots may re-review. Use `pr-poller` again when available — same helper, same contract, same 20-min cap. If delegated polling is unavailable, use the direct-command fallback from step 1. Parse the new report:
 
+- Before waiting on CI, run `scripts/pr-resolve list <PR>` and address any newly opened review threads. Review bots may add new unresolved threads after earlier threads were resolved.
 - If `ci_failed:` is empty AND `unresolved_review_threads: 0` AND `issue_comments_from_bots: 0` (no new bot comments to address) → mark task 6 completed and proceed to summary.
+- If `scripts/pr-state <PR>` (or the poller report) shows no failed checks and no unresolved review threads, but CI is still queued or in progress after the bounded re-check, it is acceptable to report "CI still in progress" and stop instead of polling indefinitely.
 - If new CI failures appeared from the latest commit → loop back to task 2 and reset task 2-5 to `in_progress` as needed.
 - If new review comments appeared after the push → loop back to task 3.
 - If the poller hit its cap (`recommendation:` mentions "timed out") → surface the remaining pending items to the user and stop.

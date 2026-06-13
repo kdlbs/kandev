@@ -214,6 +214,12 @@ Enforced by `apps/backend/.golangci.yml` (errors on new code only):
 
 When you hit a limit, extract a helper function. Prefer composition over growing a single function.
 
+When a PR fixup touches backend code, run the CI-style changed-file linter locally from `apps/backend` with the PR base SHA before pushing, because CI enforces changed-file complexity thresholds:
+
+```bash
+golangci-lint run ./... --new-from-rev="<base-sha>" --timeout=5m
+```
+
 ## Further scoped notes
 
 - `internal/agentctl/AGENTS.md` — agentctl server route groups, adapter model, ACP protocol
