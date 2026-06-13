@@ -264,6 +264,25 @@ func TestHandleSessionInfoEvent_PreservesACPDebugInfoOnSparseUpdate(t *testing.T
 	require.Equal(t, "2026-06-13T19:40:00Z", eventPayload.SessionUpdatedAt)
 }
 
+func TestHandleSessionInfoEvent_SkipsWhenSessionReadFails(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	eb := &recordingEventBus{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.eventBus = eb
+
+	svc.handleSessionInfoEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:    "t1",
+		SessionID: "missing-session",
+		Data: &lifecycle.AgentStreamEventData{
+			ACPSessionID:     "acp-1",
+			SessionUpdatedAt: "2026-06-13T19:40:00Z",
+		},
+	})
+
+	require.Empty(t, eb.events)
+}
+
 func TestPersistTurnPromptMetadata(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

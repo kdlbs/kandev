@@ -13,9 +13,9 @@ function readACPDebugInfo(metadata: Record<string, unknown> | null | undefined):
     acp && typeof acp === "object" && !Array.isArray(acp) ? (acp as Record<string, unknown>) : {};
   return {
     sessionId: acpObject.session_id ?? null,
-    title: acpObject.title ?? acpObject.session_title ?? null,
-    updatedAt: acpObject.updated_at ?? acpObject.session_updated_at ?? null,
-    meta: acpObject.meta ?? acpObject.session_meta ?? null,
+    title: acpObject.title ?? null,
+    updatedAt: acpObject.updated_at ?? null,
+    meta: acpObject.meta ?? null,
   };
 }
 

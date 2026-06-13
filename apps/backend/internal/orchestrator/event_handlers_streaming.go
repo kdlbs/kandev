@@ -1020,7 +1020,14 @@ func (s *Service) handleSessionInfoEvent(ctx context.Context, payload *lifecycle
 	if payload == nil || payload.Data == nil || payload.SessionID == "" || s.repo == nil {
 		return
 	}
-	info := s.mergedACPSessionInfo(ctx, payload.SessionID, payload.Data)
+	info, err := s.mergedACPSessionInfo(ctx, payload.SessionID, payload.Data)
+	if err != nil {
+		s.logger.Warn("failed to read existing ACP session info",
+			zap.String("session_id", payload.SessionID),
+			zap.String("acp_session_id", payload.Data.ACPSessionID),
+			zap.Error(err))
+		return
+	}
 	if err := s.repo.SetSessionMetadataKey(ctx, payload.SessionID, "acp", info); err != nil {
 		s.logger.Warn("failed to persist ACP session info",
 			zap.String("session_id", payload.SessionID),
@@ -1049,14 +1056,22 @@ func (s *Service) handleSessionInfoEvent(ctx context.Context, payload *lifecycle
 	}
 }
 
-func (s *Service) mergedACPSessionInfo(ctx context.Context, sessionID string, data *lifecycle.AgentStreamEventData) map[string]interface{} {
+func (s *Service) mergedACPSessionInfo(
+	ctx context.Context,
+	sessionID string,
+	data *lifecycle.AgentStreamEventData,
+) (map[string]interface{}, error) {
 	info := map[string]interface{}{
 		"session_id": "",
 		"title":      "",
 		"updated_at": "",
 		"meta":       map[string]any{},
 	}
-	if session, err := s.repo.GetTaskSession(ctx, sessionID); err == nil && session != nil {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if session != nil {
 		if existing, ok := session.Metadata["acp"].(map[string]interface{}); ok {
 			for key, value := range existing {
 				info[key] = value
@@ -1075,7 +1090,7 @@ func (s *Service) mergedACPSessionInfo(ctx context.Context, sessionID string, da
 	if data.SessionMeta != nil {
 		info["meta"] = data.SessionMeta
 	}
-	return info
+	return info, nil
 }
 
 func stringFromMap(values map[string]interface{}, key string) string {
