@@ -75,6 +75,7 @@ export function buildMessageDebugEntries(
       metadataValue(messageMetadata, "agent_type"),
       metadataValue(turnMetadata, "agent_type"),
     ),
+    // prompt_usage is written to turn metadata by persistTurnPromptMetadata, so turn wins.
     prompt_usage: firstPresent(
       metadataValue(turnMetadata, "prompt_usage"),
       metadataValue(messageMetadata, "prompt_usage"),

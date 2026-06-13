@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import {
   IconCheck,
   IconCopy,
@@ -370,20 +371,24 @@ export function MessageActions({
 }: MessageActionsProps) {
   const { copied, copy } = useCopyToClipboard();
   const sessionConfigText = useMessageSessionConfigText(message, showModel);
-  const { turn, usageMultiplier } = useAppStore((state) => {
-    const turnId = message.turn_id;
-    const turn =
-      turnId && message.session_id
-        ? (state.turns.bySession[message.session_id]?.find((item) => item.id === turnId) ?? null)
-        : null;
-    if (!message.session_id) return { turn, usageMultiplier: null };
-    const sessionModels = state.sessionModels.bySessionId[message.session_id];
-    const metadataModel = (message.metadata?.model ?? turn?.metadata?.model) as string | undefined;
-    const modelId = metadataModel ?? sessionModels?.currentModelId;
-    const usageMultiplier =
-      sessionModels?.models.find((model) => model.modelId === modelId)?.usageMultiplier ?? null;
-    return { turn, usageMultiplier };
-  });
+  const { turn, usageMultiplier } = useAppStore(
+    useShallow((state) => {
+      const turnId = message.turn_id;
+      const turn =
+        turnId && message.session_id
+          ? (state.turns.bySession[message.session_id]?.find((item) => item.id === turnId) ?? null)
+          : null;
+      if (!message.session_id) return { turn, usageMultiplier: null };
+      const sessionModels = state.sessionModels.bySessionId[message.session_id];
+      const metadataModel = (message.metadata?.model ?? turn?.metadata?.model) as
+        | string
+        | undefined;
+      const modelId = metadataModel ?? sessionModels?.currentModelId;
+      const usageMultiplier =
+        sessionModels?.models.find((model) => model.modelId === modelId)?.usageMultiplier ?? null;
+      return { turn, usageMultiplier };
+    }),
+  );
   const handleCopy = async () => {
     await copy(message.content);
   };
