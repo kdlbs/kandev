@@ -78,7 +78,8 @@ The summary output contains:
 
 - `failed_checks` — actionable non-green checks with `name`, `workflow`, `status`, `conclusion`, `run_id`, `job_id`, and `details_url`
 - `pending_checks` — still-running or queued checks with `name`, `workflow`, `status`, `run_id`, `job_id`, and `details_url`
-- `unresolved_review_thread_count` and `unresolved_threads` — compact inline review state
+- `unresolved_review_thread_count` — total unresolved thread count on the PR, including older unresolved threads outside the current-head filter
+- `filtered_review_thread_count` and `unresolved_threads` — compact current-head inline review state to triage in this fixup pass
 - `errors` — data-gathering failures; treat affected fields as unknown instead of reconstructing them ad hoc
 
 Poll at a 30s cadence with a **20 min cap**. Stop early if any required check fails. If the cap hits and only E2E shards are still pending with no failures or unresolved comments, report "CI in progress" instead of continuing to watch indefinitely, and include the exact pending shard names from `pending_checks`. Do not run `gh pr checks --watch` in the main session unless the runtime can keep the watcher isolated and automatically clean it up. If you do use `gh pr checks --watch`, keep watching until the command exits; GitHub can expand matrix jobs after an initial aggregate "Build" check passes, so the first green build/lint/test rows are not necessarily terminal.

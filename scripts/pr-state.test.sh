@@ -273,7 +273,7 @@ if [[ "$1" == "api" && "$2" == "graphql" ]]; then
               },
               {
                 "id": "PRRT_2",
-                "isResolved": true,
+                "isResolved": false,
                 "path": "apps/web/other.ts",
                 "comments": {
                   "nodes": [
@@ -318,7 +318,8 @@ test_snapshot_happy_path() {
   assert_jq "check run id" '.checks[] | select(.name == "e2e") | .run_id == "27340000002"' "$json"
   assert_jq "nested workflow name" '.checks[] | select(.name == "e2e") | .workflow == "CI"' "$json"
   assert_jq "threads count" '.review_threads | length == 1' "$json"
-  assert_jq "unresolved count" '.unresolved_review_thread_count == 1' "$json"
+  assert_jq "total unresolved count includes historical unresolved thread" '.unresolved_review_thread_count == 2' "$json"
+  assert_jq "filtered thread count" '.filtered_review_thread_count == 1' "$json"
   assert_jq "thread comment id" '.review_threads[] | select(.thread_id == "PRRT_1") | .comment_id == 112' "$json"
   assert_jq "thread comment timestamp" '.review_threads[] | select(.thread_id == "PRRT_1") | .comment_created_at == "2026-06-01T13:00:00Z"' "$json"
   assert_jq "reviews count" '.reviews | length == 1' "$json"
@@ -408,6 +409,7 @@ test_graphql_pagination_collects_all_threads() {
   assert_jq "paginated first thread" '.review_threads[] | select(.thread_id == "PRRT_1") | .is_resolved == false' "$json"
   assert_jq "paginated second thread" '.review_threads[] | select(.thread_id == "PRRT_2") | .is_resolved == true' "$json"
   assert_jq "paginated unresolved count" '.unresolved_review_thread_count == 1' "$json"
+  assert_jq "paginated filtered thread count" '.filtered_review_thread_count == 2' "$json"
   assert_jq "paginated no errors" '.errors == []' "$json"
   pass "graphql pagination collects all threads"
 }
@@ -444,7 +446,8 @@ test_summary_mode_returns_compact_fixup_state() {
   assert_jq "summary failed check" '.failed_checks[0] | .name == "e2e" and .conclusion == "failure" and .run_id == "27340000002"' "$json"
   assert_jq "summary pending check count" '.pending_checks | length == 1' "$json"
   assert_jq "summary pending check" '.pending_checks[0] | .name == "claude-review" and .status == "in_progress" and .run_id == "27340000003"' "$json"
-  assert_jq "summary unresolved count" '.unresolved_review_thread_count == 1' "$json"
+  assert_jq "summary unresolved count" '.unresolved_review_thread_count == 2' "$json"
+  assert_jq "summary filtered thread count" '.filtered_review_thread_count == 1' "$json"
   assert_jq "summary unresolved threads" '.unresolved_threads | length == 1' "$json"
   assert_jq "summary unresolved thread fields" '.unresolved_threads[0] | .thread_id == "PRRT_1" and .comment_id == 112 and .author == "greptile-apps[bot]"' "$json"
   assert_jq "summary omits raw arrays" 'has("checks") | not' "$json"
@@ -462,7 +465,8 @@ test_summary_all_flag_includes_historical_unresolved_threads() {
   json="$(<"$tmp/out.json")"
 
   assert_jq "summary all since omitted" '.since == null' "$json"
-  assert_jq "summary all unresolved count" '.unresolved_review_thread_count == 1' "$json"
+  assert_jq "summary all unresolved count" '.unresolved_review_thread_count == 2' "$json"
+  assert_jq "summary all filtered thread count" '.filtered_review_thread_count == 2' "$json"
   assert_jq "summary all keeps historical first comment" '.unresolved_threads[] | select(.thread_id == "PRRT_1") | .comment_id == 111' "$json"
   pass "--summary --all includes historical unresolved thread comments"
 }
