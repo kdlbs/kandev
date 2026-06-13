@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -23,6 +24,19 @@ type recordingEventBus struct {
 type recordedEvent struct {
 	subject string
 	event   *bus.Event
+}
+
+type failSetSessionMetadataRepo struct {
+	repoStore
+}
+
+func (r failSetSessionMetadataRepo) SetSessionMetadataKey(
+	context.Context,
+	string,
+	string,
+	interface{},
+) error {
+	return errors.New("set session metadata failed")
 }
 
 func (b *recordingEventBus) Publish(_ context.Context, subject string, event *bus.Event) error {
@@ -192,7 +206,9 @@ func TestHandleSessionInfoEvent_PersistsACPDebugInfo(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "step1")
+	eb := &recordingEventBus{}
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.eventBus = eb
 
 	svc.handleSessionInfoEvent(ctx, &lifecycle.AgentStreamEventPayload{
 		TaskID:    "t1",
@@ -219,6 +235,17 @@ func TestHandleSessionInfoEvent_PersistsACPDebugInfo(t *testing.T) {
 	cursor, ok := meta["cursor"].(map[string]interface{})
 	require.True(t, ok)
 	require.Equal(t, "req-1", cursor["requestId"])
+
+	require.Len(t, eb.events, 1)
+	require.Equal(t, events.BuildSessionInfoSubject("s1"), eb.events[0].subject)
+	eventPayload, ok := eb.events[0].event.Data.(lifecycle.SessionInfoEventPayload)
+	require.True(t, ok)
+	require.Equal(t, "t1", eventPayload.TaskID)
+	require.Equal(t, "s1", eventPayload.SessionID)
+	require.Equal(t, "acp-1", eventPayload.ACPSessionID)
+	require.Equal(t, "List files", eventPayload.SessionTitle)
+	require.Equal(t, "2026-06-13T19:37:46Z", eventPayload.SessionUpdatedAt)
+	require.Equal(t, meta, eventPayload.SessionMeta)
 }
 
 func TestHandleSessionInfoEvent_PreservesACPDebugInfoOnSparseUpdate(t *testing.T) {
@@ -274,6 +301,27 @@ func TestHandleSessionInfoEvent_SkipsWhenSessionReadFails(t *testing.T) {
 	svc.handleSessionInfoEvent(ctx, &lifecycle.AgentStreamEventPayload{
 		TaskID:    "t1",
 		SessionID: "missing-session",
+		Data: &lifecycle.AgentStreamEventData{
+			ACPSessionID:     "acp-1",
+			SessionUpdatedAt: "2026-06-13T19:40:00Z",
+		},
+	})
+
+	require.Empty(t, eb.events)
+}
+
+func TestHandleSessionInfoEvent_SkipsPublishWhenSessionWriteFails(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	eb := &recordingEventBus{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.repo = failSetSessionMetadataRepo{repoStore: repo}
+	svc.eventBus = eb
+
+	svc.handleSessionInfoEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:    "t1",
+		SessionID: "s1",
 		Data: &lifecycle.AgentStreamEventData{
 			ACPSessionID:     "acp-1",
 			SessionUpdatedAt: "2026-06-13T19:40:00Z",

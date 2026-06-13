@@ -1033,6 +1033,7 @@ func (s *Service) handleSessionInfoEvent(ctx context.Context, payload *lifecycle
 			zap.String("session_id", payload.SessionID),
 			zap.String("acp_session_id", payload.Data.ACPSessionID),
 			zap.Error(err))
+		return
 	}
 	if s.eventBus == nil {
 		return
