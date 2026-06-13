@@ -70,6 +70,40 @@ cd apps && pnpm --filter @kandev/web e2e -- tests/task/my-test.spec.ts  # single
 cd apps && pnpm --filter @kandev/web e2e -- --grep "task creation" # by name
 ```
 
+### Flake reproduction
+
+Start by matching CI as closely as possible, then add pressure deliberately:
+
+1. Run the exact failed shard in the CI runtime image with CI env enabled:
+   ```bash
+   docker run --rm --ipc=host -v "$PWD":/work -w /work/apps/web \
+     -e CI=true -e GITHUB_ACTIONS=true -e GITHUB_WORKSPACE=/work \
+     -e NODE_OPTIONS=--dns-result-order=ipv4first \
+     -e PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+     ghcr.io/kdlbs/kandev-ci:runtime-latest \
+     bash -lc 'git config --global --add safe.directory /work 2>/dev/null; npx playwright test --config e2e/playwright.config.ts --project=chromium --project=mobile-chrome --shard=10/10 --reporter=list'
+   ```
+2. If the exact shard passes, constrain container resources and repeat the
+   failing spec/test. GitHub-hosted runners can expose timing bugs that a roomy
+   local machine hides:
+   ```bash
+   docker run --rm --ipc=host --cpus=2 --memory=4g --memory-swap=4g \
+     -v "$PWD":/work -w /work/apps/web \
+     -e CI=true -e GITHUB_ACTIONS=true -e GITHUB_WORKSPACE=/work \
+     -e NODE_OPTIONS=--dns-result-order=ipv4first \
+     -e PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+     ghcr.io/kdlbs/kandev-ci:runtime-latest \
+     bash -lc 'git config --global --add safe.directory /work 2>/dev/null; npx playwright test --config e2e/playwright.config.ts --project=mobile-chrome e2e/tests/terminal/mobile-terminal-keybar.spec.ts --grep "user presses an OS-keyboard letter while no modifier is active" --repeat-each=30 --reporter=list'
+   ```
+3. Preserve nearby test ordering when a single-test repeat stays green. Run the
+   full spec file or full shard with the same resource limits before declaring
+   a flake non-reproducible.
+
+Record the exact command, resource limits, repeat number, and failure artifact
+path. Always inspect `error-context.md`; mobile/terminal flakes often show
+state that the stack trace alone hides, such as duplicate active terminals or a
+terminal stuck on "Starting terminal...".
+
 **CRITICAL: E2E tests run against the production build** (`.next/standalone/`), not dev mode. After any frontend code change, you **must** rebuild before running tests (`pnpm e2e:run` does this for you):
 
 ```bash

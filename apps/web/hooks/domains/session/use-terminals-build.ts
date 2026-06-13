@@ -40,6 +40,11 @@ export function shellToTerminal(shell: UserShellInfo): Terminal {
   };
 }
 
+export function appendTerminalIfMissing(terminals: Terminal[], terminal: Terminal): Terminal[] {
+  if (terminals.some((item) => item.id === terminal.id)) return terminals;
+  return [...terminals, terminal];
+}
+
 /**
  * Compute the effective active tab value, preferring store, then
  * sessionStorage, then fallback.

@@ -75,6 +75,13 @@ Before anything else, reproduce the bug reliably. Pick the right method based on
 If it can't be reproduced, add logging/assertions to gather more info — don't guess at a fix.
 Find the minimal reproduction case: strip away everything that isn't needed to trigger the bug.
 
+For flaky Playwright failures, do not stop after one clean focused run. Use the
+`/e2e` flake reproduction flow: run the exact CI shard in
+`ghcr.io/kdlbs/kandev-ci:runtime-latest` with `CI=true`, then add resource
+limits such as `--cpus=2 --memory=4g --memory-swap=4g` and repeat the failing
+test or full spec file. Preserve nearby test ordering when a single-test repeat
+passes, and inspect `error-context.md` from the failed repeat before fixing.
+
 Mark task 1 as completed.
 
 ---

@@ -12,6 +12,7 @@ import {
 } from "@/lib/api/domains/user-shell-api";
 import { useUserShells } from "./use-user-shells";
 import {
+  appendTerminalIfMissing,
   buildParkedTerminals,
   buildTerminalsFromShells,
   computeTerminalTabValue,
@@ -174,7 +175,7 @@ function useAddTerminal({
         state: ordinary ? (result.state ?? "open") : result.state,
         ptyStatus: result.ptyStatus ?? "stopped",
       };
-      setTerminals((prev) => [...prev, newTerm]);
+      setTerminals((prev) => appendTerminalIfMissing(prev, newTerm));
       if (sessionId) setRightPanelActiveTab(sessionId, result.terminalId);
     } catch (error) {
       console.error("Failed to create user shell:", error);
@@ -443,7 +444,7 @@ function useTerminalActions({
           closable: true,
           kind: "script",
         };
-        setTerminals((prev) => [...prev, newTerm]);
+        setTerminals((prev) => appendTerminalIfMissing(prev, newTerm));
         if (sessionId) setRightPanelActiveTab(sessionId, result.terminalId);
       } catch (error) {
         console.error("Failed to create script terminal:", error);
