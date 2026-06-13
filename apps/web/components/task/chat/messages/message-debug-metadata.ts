@@ -35,8 +35,16 @@ function resolveTurnID(message: Message, turn: Turn | null | undefined): string 
   return turn?.id ?? null;
 }
 
-export function hasMessageDebugMetadata(message: Message, turn?: Turn | null): boolean {
-  return hasOwnMetadata(message.metadata) || hasOwnMetadata(turn?.metadata);
+export function hasMessageDebugMetadata(
+  message: Message,
+  turn?: Turn | null,
+  context: MessageDebugContext = {},
+): boolean {
+  return (
+    hasOwnMetadata(message.metadata) ||
+    hasOwnMetadata(turn?.metadata) ||
+    context.usageMultiplier != null
+  );
 }
 
 export function buildMessageDebugEntries(

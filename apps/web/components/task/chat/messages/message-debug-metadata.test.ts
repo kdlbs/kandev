@@ -44,6 +44,10 @@ describe("message debug metadata", () => {
     ).toBe(true);
   });
 
+  it("shows the debug affordance when context metadata exists", () => {
+    expect(hasMessageDebugMetadata(message(), turn(), { usageMultiplier: "3x" })).toBe(true);
+  });
+
   it("builds a compact summary while preserving raw metadata", () => {
     const entries = buildMessageDebugEntries(
       message({ metadata: { tool_call_id: "tool1" } }),

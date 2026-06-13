@@ -1041,7 +1041,12 @@ func (s *Service) handleSessionInfoEvent(ctx context.Context, payload *lifecycle
 		Timestamp:        time.Now().UTC().Format(time.RFC3339),
 	}
 	subject := events.BuildSessionInfoSubject(payload.SessionID)
-	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionInfoUpdated, "orchestrator", eventPayload))
+	if err := s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionInfoUpdated, "orchestrator", eventPayload)); err != nil {
+		s.logger.Warn("failed to publish ACP session info",
+			zap.String("session_id", payload.SessionID),
+			zap.String("acp_session_id", eventPayload.ACPSessionID),
+			zap.Error(err))
+	}
 }
 
 func (s *Service) mergedACPSessionInfo(ctx context.Context, sessionID string, data *lifecycle.AgentStreamEventData) map[string]interface{} {

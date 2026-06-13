@@ -8,6 +8,7 @@ import { registerSessionInfoHandlers } from "./session-info";
 const SESSION_STARTED_AT = "2026-06-11T00:00:00.000Z";
 const SESSION_INFO_UPDATED_AT = "2026-06-11T00:01:00.000Z";
 const SPARSE_SESSION_INFO_UPDATED_AT = "2026-06-11T00:03:00.000Z";
+const STALE_SESSION_INFO_UPDATED_AT = "2026-06-11T00:00:30.000Z";
 const TASK_ID = "task-1";
 const SESSION_ID = "session-1";
 const ACP_SESSION_ID = "acp-session-1";
@@ -103,6 +104,12 @@ describe("session.info_updated handler", () => {
       expect.objectContaining({ updated_at: SESSION_STARTED_AT }),
     );
   });
+});
+
+describe("session.info_updated partial updates", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
 
   it("preserves existing ACP fields on sparse updates", () => {
     const store = makeStore({
@@ -146,6 +153,30 @@ describe("session.info_updated handler", () => {
         },
       }),
     );
+  });
+
+  it("ignores stale updates when existing ACP metadata is newer", () => {
+    const store = makeStore({
+      taskSessions: {
+        items: {
+          [SESSION_ID]: makeSession({
+            metadata: {
+              acp: {
+                session_id: ACP_SESSION_ID,
+                title: SESSION_TITLE,
+                updated_at: SESSION_INFO_UPDATED_AT,
+                meta: { provider: "codex" },
+              },
+            },
+          }),
+        },
+      },
+    } as Partial<AppState>);
+    const handler = registerSessionInfoHandlers(store)["session.info_updated"]!;
+
+    handler(makeMessage(makePayload({ session_updated_at: STALE_SESSION_INFO_UPDATED_AT })));
+
+    expect(store.getState().setTaskSession).not.toHaveBeenCalled();
   });
 
   it("ignores updates for unknown sessions", () => {

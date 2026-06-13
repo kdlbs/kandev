@@ -295,8 +295,9 @@ function MessageDebugDialog({
   usageMultiplier?: string | null;
 }) {
   const [open, setOpen] = useState(false);
-  if (!hasMessageDebugMetadata(message, turn)) return null;
-  const entries = buildMessageDebugEntries(message, turn, { usageMultiplier });
+  const context = { usageMultiplier };
+  if (!hasMessageDebugMetadata(message, turn, context)) return null;
+  const entries = buildMessageDebugEntries(message, turn, context);
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>

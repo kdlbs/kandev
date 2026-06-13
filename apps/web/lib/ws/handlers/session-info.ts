@@ -11,6 +11,7 @@ export function registerSessionInfoHandlers(store: StoreApi<AppState>): WsHandle
       const existing = store.getState().taskSessions.items[payload.session_id];
       if (!existing) return;
       const existingACP = readExistingACP(existing.metadata?.acp);
+      if (isStaleSessionInfoUpdate(payload.session_updated_at, existingACP.updated_at)) return;
       store.getState().setTaskSession({
         ...existing,
         metadata: {
@@ -25,6 +26,17 @@ export function registerSessionInfoHandlers(store: StoreApi<AppState>): WsHandle
       });
     },
   };
+}
+
+function isStaleSessionInfoUpdate(
+  incomingUpdatedAt: string | undefined,
+  existingUpdatedAt: string,
+) {
+  if (!incomingUpdatedAt || !existingUpdatedAt) return false;
+  const incoming = Date.parse(incomingUpdatedAt);
+  const existing = Date.parse(existingUpdatedAt);
+  if (Number.isNaN(incoming) || Number.isNaN(existing)) return false;
+  return incoming < existing;
 }
 
 function readExistingACP(value: unknown) {
