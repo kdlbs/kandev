@@ -354,20 +354,7 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.AutoStart != nil {
 		cfg.AutoStart = *overrides.AutoStart
 	}
-	if overrides.Env != nil {
-		cfg.AgentEnv = overrides.Env
-		// Env is a legacy/fallback path; it can only enable auto-approve.
-		// The explicit pointer below always takes final precedence.
-		if envBool(overrides.Env, "AGENTCTL_AUTO_APPROVE_PERMISSIONS") {
-			cfg.AutoApprovePermissions = true
-		}
-	}
-	if overrides.AutoApprovePermissions != nil {
-		cfg.AutoApprovePermissions = *overrides.AutoApprovePermissions
-	}
-	if overrides.ApprovalPolicy != "" {
-		cfg.ApprovalPolicy = overrides.ApprovalPolicy
-	}
+	applyApprovalOverrides(cfg, overrides)
 	if overrides.AgentType != "" {
 		cfg.AgentType = overrides.AgentType
 	}
@@ -397,6 +384,23 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	}
 	if len(overrides.BaseBranches) > 0 {
 		cfg.BaseBranches = overrides.BaseBranches
+	}
+}
+
+// applyApprovalOverrides sets approval-related instance overrides. Env is a
+// legacy path that can only enable auto-approve; explicit values win.
+func applyApprovalOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
+	if overrides.Env != nil {
+		cfg.AgentEnv = overrides.Env
+		if envBool(overrides.Env, "AGENTCTL_AUTO_APPROVE_PERMISSIONS") {
+			cfg.AutoApprovePermissions = true
+		}
+	}
+	if overrides.AutoApprovePermissions != nil {
+		cfg.AutoApprovePermissions = *overrides.AutoApprovePermissions
+	}
+	if overrides.ApprovalPolicy != "" {
+		cfg.ApprovalPolicy = overrides.ApprovalPolicy
 	}
 }
 
