@@ -107,22 +107,23 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 	}
 
 	createReq := &agentctl.CreateInstanceRequest{
-		ID:                  req.InstanceID,
-		WorkspacePath:       req.WorkspacePath,
-		AgentCommand:        "", // Agent command set via Configure endpoint
-		Protocol:            req.Protocol,
-		AgentType:           agentType,
-		Env:                 env,
-		AutoStart:           false,
-		McpServers:          req.McpServers,
-		SessionID:           req.SessionID,
-		TaskID:              req.TaskID,
-		DisableAskQuestion:  disableAskQuestion,
-		AssumeMcpSse:        assumeMcpSse,
-		AssumeMcpHttp:       assumeMcpHttp,
-		McpMode:             req.McpMode,
-		RequiresProcessKill: requiresProcessKill,
-		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
+		ID:                     req.InstanceID,
+		WorkspacePath:          req.WorkspacePath,
+		AgentCommand:           "", // Agent command set via Configure endpoint
+		Protocol:               req.Protocol,
+		AgentType:              agentType,
+		Env:                    env,
+		AutoApprovePermissions: boolPtr(req.AutoApprovePermissions),
+		AutoStart:              false,
+		McpServers:             req.McpServers,
+		SessionID:              req.SessionID,
+		TaskID:                 req.TaskID,
+		DisableAskQuestion:     disableAskQuestion,
+		AssumeMcpSse:           assumeMcpSse,
+		AssumeMcpHttp:          assumeMcpHttp,
+		McpMode:                req.McpMode,
+		RequiresProcessKill:    requiresProcessKill,
+		BaseBranches:           getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 	}
 
 	r.logger.Info("CreateInstance: sending request to agentctl",

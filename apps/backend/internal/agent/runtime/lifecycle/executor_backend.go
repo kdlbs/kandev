@@ -250,22 +250,23 @@ type RemoteStatusProvider interface {
 
 // ExecutorCreateRequest contains parameters for creating an agentctl instance.
 type ExecutorCreateRequest struct {
-	InstanceID          string
-	TaskID              string
-	TaskTitle           string
-	SessionID           string
-	TaskEnvironmentID   string // Env this execution belongs to (shared across sessions in same task)
-	AgentProfileID      string
-	WorkspacePath       string
-	Protocol            string
-	Env                 map[string]string
-	Metadata            map[string]interface{}
-	McpServers          []McpServerConfig
-	AgentConfig         agents.Agent // Agent type info needed by runtimes
-	PreviousExecutionID string       // Non-empty when reconnecting to a previous execution
-	McpMode             string       // MCP tool mode: "task" (default), "config", or "office"
-	AuthToken           string       // Previously handshaken agentctl token for reconnects
-	BootstrapNonce      string       // Stored nonce for re-handshake after container restart
+	InstanceID             string
+	TaskID                 string
+	TaskTitle              string
+	SessionID              string
+	TaskEnvironmentID      string // Env this execution belongs to (shared across sessions in same task)
+	AgentProfileID         string
+	WorkspacePath          string
+	Protocol               string
+	Env                    map[string]string
+	AutoApprovePermissions bool
+	Metadata               map[string]interface{}
+	McpServers             []McpServerConfig
+	AgentConfig            agents.Agent // Agent type info needed by runtimes
+	PreviousExecutionID    string       // Non-empty when reconnecting to a previous execution
+	McpMode                string       // MCP tool mode: "task" (default), "config", or "office"
+	AuthToken              string       // Previously handshaken agentctl token for reconnects
+	BootstrapNonce         string       // Stored nonce for re-handshake after container restart
 
 	// OnProgress is an optional callback for streaming preparation progress.
 	// Executors that perform multi-step setup (e.g. Sprites, remote Docker) can
