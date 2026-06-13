@@ -64,6 +64,7 @@ func autoApprovePermissionsOverride(enabled bool, override *bool) *bool {
 		return override
 	}
 	if enabled {
+		// Preserve compatibility for callers that still only set the legacy bool.
 		return boolPtr(true)
 	}
 	return nil
