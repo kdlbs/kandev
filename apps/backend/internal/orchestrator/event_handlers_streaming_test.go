@@ -188,6 +188,83 @@ func TestHandleSessionModeEvent(t *testing.T) {
 	})
 }
 
+func TestHandleSessionInfoEvent_PersistsACPDebugInfo(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	svc.handleSessionInfoEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:    "t1",
+		SessionID: "s1",
+		Data: &lifecycle.AgentStreamEventData{
+			ACPSessionID:     "acp-1",
+			SessionTitle:     "List files",
+			SessionUpdatedAt: "2026-06-13T19:37:46Z",
+			SessionMeta: map[string]any{
+				"cursor": map[string]any{"requestId": "req-1"},
+			},
+		},
+	})
+
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	acp, ok := updated.Metadata["acp"].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, "acp-1", acp["session_id"])
+	require.Equal(t, "List files", acp["title"])
+	require.Equal(t, "2026-06-13T19:37:46Z", acp["updated_at"])
+	meta, ok := acp["meta"].(map[string]interface{})
+	require.True(t, ok)
+	cursor, ok := meta["cursor"].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, "req-1", cursor["requestId"])
+}
+
+func TestPersistTurnPromptMetadata(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = &repoTurnService{repo: repo}
+	turn, err := svc.turnService.StartTurn(ctx, "s1")
+	require.NoError(t, err)
+
+	svc.persistTurnPromptMetadata(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:    "t1",
+		SessionID: "s1",
+		AgentID:   "exec-1",
+		Data: &lifecycle.AgentStreamEventData{
+			Usage: &streams.PromptUsage{
+				InputTokens:                  10,
+				OutputTokens:                 20,
+				CachedReadTokens:             3,
+				CachedWriteTokens:            4,
+				ThoughtTokens:                5,
+				TotalTokens:                  42,
+				ProviderReportedCostSubcents: 123,
+				Estimated:                    true,
+			},
+		},
+	}, &models.TaskSession{
+		AgentProfileSnapshot: map[string]interface{}{
+			"model":      "gpt-5.5",
+			"agent_name": "codex-acp",
+		},
+	})
+
+	updated, err := repo.GetTurn(ctx, turn.ID)
+	require.NoError(t, err)
+	require.Equal(t, "gpt-5.5", updated.Metadata["model"])
+	require.Equal(t, "codex-acp", updated.Metadata["agent_type"])
+	require.Equal(t, "exec-1", updated.Metadata["agent_id"])
+	usage, ok := updated.Metadata["prompt_usage"].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, float64(42), usage["total_tokens"])
+	require.Equal(t, float64(123), usage["provider_reported_cost_subcents"])
+	require.Equal(t, true, usage["estimated"])
+}
+
 // TestToolEventsWakeSessionAndTaskTogether locks in the fix for the
 // REVIEW + RUNNING split: when an out-of-turn tool event (e.g. a Monitor
 // watcher firing after on_turn_complete moved the task to REVIEW) wakes

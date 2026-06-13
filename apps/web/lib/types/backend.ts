@@ -41,6 +41,7 @@ export type BackendMessageType =
   | "session.mode_changed"
   | "session.agent_capabilities"
   | "session.models_updated"
+  | "session.info_updated"
   | "session.todos_updated"
   | "session.prompt_usage"
   | "session.poll_mode_changed"
@@ -90,6 +91,7 @@ import type { GitHubRateLimitUpdate, TaskPR } from "@/lib/types/github";
 import type { FileChangeNotificationPayload } from "./workspace-files";
 import type {
   AgentCapabilitiesPayload,
+  SessionInfoPayload,
   SessionModelsPayload,
   SessionPromptUsagePayload,
   SessionTodosPayload,
@@ -450,6 +452,7 @@ export {
   type SessionModelInfoPayload,
   type ConfigOptionPayload,
   type SessionModelsPayload,
+  type SessionInfoPayload,
   type SessionTodosPayload,
 } from "./session-runtime-payloads";
 
@@ -553,6 +556,7 @@ export type BackendMessageMap = OfficeBackendMessageMap & {
     AgentCapabilitiesPayload
   >;
   "session.models_updated": BackendMessage<"session.models_updated", SessionModelsPayload>;
+  "session.info_updated": BackendMessage<"session.info_updated", SessionInfoPayload>;
   "session.todos_updated": BackendMessage<"session.todos_updated", SessionTodosPayload>;
   "session.prompt_usage": BackendMessage<"session.prompt_usage", SessionPromptUsagePayload>;
   "session.poll_mode_changed": BackendMessage<

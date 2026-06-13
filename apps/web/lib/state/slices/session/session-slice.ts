@@ -451,10 +451,13 @@ export const createSessionSlice: StateCreator<
         draft.turns.bySession[sessionId].push(turn);
       }
     }),
-  completeTurn: (sessionId, turnId, completedAt) =>
+  completeTurn: (sessionId, turnId, completedAt, metadata) =>
     set((draft) => {
       const turn = draft.turns.bySession[sessionId]?.find((t) => t.id === turnId);
-      if (turn) turn.completed_at = completedAt;
+      if (turn) {
+        turn.completed_at = completedAt;
+        if (metadata) turn.metadata = metadata;
+      }
     }),
   setActiveTurn: (sessionId, turnId) =>
     set((draft) => {

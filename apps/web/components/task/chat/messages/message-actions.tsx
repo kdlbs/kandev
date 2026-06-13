@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import {
   IconCheck,
   IconCopy,
@@ -7,12 +8,18 @@ import {
   IconChevronLeft,
   IconChevronRight,
   IconEyeCode,
+  IconInfoCircle,
 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useAppStore } from "@/components/state-provider";
-import type { Message } from "@/lib/types/http";
+import type { Message, Turn } from "@/lib/types/http";
+import {
+  buildMessageDebugEntries,
+  hasMessageDebugMetadata,
+} from "@/components/task/chat/messages/message-debug-metadata";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@kandev/ui/dialog";
 
 const ACTION_BUTTON_SIZE = "h-5 w-5 p-1";
 const ACTION_BUTTON_HOVER = "hover:bg-muted rounded";
@@ -266,6 +273,58 @@ function RawToggleButton({
   );
 }
 
+function MetadataValue({ value }: { value: unknown }) {
+  if (value == null) return <span className="text-muted-foreground">null</span>;
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return <span className="font-mono text-muted-foreground">{String(value)}</span>;
+  }
+  return (
+    <pre className="max-h-[48vh] overflow-auto rounded border bg-background p-3 text-[11px] leading-relaxed">
+      {JSON.stringify(value, null, 2)}
+    </pre>
+  );
+}
+
+function MessageDebugDialog({
+  message,
+  turn,
+  usageMultiplier,
+}: {
+  message: Message;
+  turn: Turn | null;
+  usageMultiplier?: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  if (!hasMessageDebugMetadata(message, turn)) return null;
+  const entries = buildMessageDebugEntries(message, turn, { usageMultiplier });
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <button
+          className={cn(ACTION_BUTTON_SIZE, ACTION_BUTTON_HOVER, ACTION_BUTTON_TRANSITION)}
+          title="Message metadata"
+          aria-label="Show message metadata"
+        >
+          <IconInfoCircle className="h-full w-full" />
+        </button>
+      </DialogTrigger>
+      <DialogContent className="max-h-[85vh] overflow-hidden sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Message Metadata</DialogTitle>
+        </DialogHeader>
+        <div className="grid gap-3 overflow-auto pr-1">
+          {Object.entries(entries).map(([key, value]) => (
+            <div key={key} className="grid gap-1">
+              <div className="font-mono text-[10px] uppercase text-muted-foreground">{key}</div>
+              <MetadataValue value={value} />
+            </div>
+          ))}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function MessageMetaInfo({
   showModel,
   sessionConfigText,
@@ -310,12 +369,26 @@ export function MessageActions({
 }: MessageActionsProps) {
   const { copied, copy } = useCopyToClipboard();
   const sessionConfigText = useMessageSessionConfigText(message, showModel);
+  const { turn, usageMultiplier } = useAppStore((state) => {
+    const turnId = message.turn_id;
+    const turn =
+      turnId && message.session_id
+        ? (state.turns.bySession[message.session_id]?.find((item) => item.id === turnId) ?? null)
+        : null;
+    if (!message.session_id) return { turn, usageMultiplier: null };
+    const sessionModels = state.sessionModels.bySessionId[message.session_id];
+    const metadataModel = (message.metadata?.model ?? turn?.metadata?.model) as string | undefined;
+    const modelId = metadataModel ?? sessionModels?.currentModelId;
+    const usageMultiplier =
+      sessionModels?.models.find((model) => model.modelId === modelId)?.usageMultiplier ?? null;
+    return { turn, usageMultiplier };
+  });
   const handleCopy = async () => {
     await copy(message.content);
   };
 
   return (
-    <div className="flex items-center gap-2 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+    <div className="flex items-center gap-2 mt-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
       {showCopy && <CopyButton copied={copied} onCopy={handleCopy} />}
       {showRawToggle && onToggleRaw && (
         <RawToggleButton
@@ -332,6 +405,7 @@ export function MessageActions({
           onNavigateNext={onNavigateNext}
         />
       )}
+      <MessageDebugDialog message={message} turn={turn} usageMultiplier={usageMultiplier} />
       <MessageMetaInfo
         showModel={showModel}
         sessionConfigText={sessionConfigText}

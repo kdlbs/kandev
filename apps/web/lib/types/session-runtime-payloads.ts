@@ -48,6 +48,17 @@ export type SessionModelsPayload = {
   timestamp: string;
 };
 
+export type SessionInfoPayload = {
+  task_id: string;
+  session_id: string;
+  agent_id: string;
+  acp_session_id?: string;
+  session_title?: string;
+  session_updated_at?: string;
+  session_meta?: Record<string, unknown>;
+  timestamp: string;
+};
+
 export type SessionPromptUsagePayload = {
   task_id: string;
   session_id: string;

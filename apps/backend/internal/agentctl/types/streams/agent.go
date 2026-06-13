@@ -55,6 +55,9 @@ const (
 	// EventTypeSessionModels indicates available models from ACP session/new.
 	EventTypeSessionModels = "session_models"
 
+	// EventTypeSessionInfo indicates ACP session metadata such as title changed.
+	EventTypeSessionInfo = "session_info"
+
 	// EventTypeAuthRequired indicates the agent rejected session/new with an
 	// authentication-required error. The event carries the available auth
 	// methods (from ACP initialize); the client picks one and replays the
@@ -241,6 +244,17 @@ type AgentEvent struct {
 
 	// ConfigOptions lists session configuration options from ACP _meta.
 	ConfigOptions []ConfigOption `json:"config_options,omitempty"`
+
+	// --- Session info fields ---
+
+	// SessionTitle is the agent-provided human-readable ACP session title.
+	SessionTitle string `json:"session_title,omitempty"`
+
+	// SessionUpdatedAt is the provider-reported ISO 8601 last activity timestamp.
+	SessionUpdatedAt string `json:"session_updated_at,omitempty"`
+
+	// SessionMeta contains opaque ACP _meta from session_info_update.
+	SessionMeta map[string]any `json:"session_meta,omitempty"`
 
 	// --- Usage fields (attached to "complete" event) ---
 

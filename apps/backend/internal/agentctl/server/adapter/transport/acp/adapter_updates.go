@@ -255,6 +255,15 @@ type acpUsageUpdate struct {
 	} `json:"cost,omitempty"`
 }
 
+// acpSessionInfoUpdate represents the ACP "session_info_update" notification.
+// TODO: Replace with the SDK type when acp-go-sdk exposes it.
+type acpSessionInfoUpdate struct {
+	SessionUpdate string         `json:"sessionUpdate"`
+	Title         string         `json:"title,omitempty"`
+	UpdatedAt     string         `json:"updatedAt,omitempty"`
+	Meta          map[string]any `json:"_meta,omitempty"`
+}
+
 // usageTracker carries the running cumulative usage state for one ACP
 // session — used to infer codex-acp's per-turn deltas. Reset when the
 // prompt-complete handler consumes it; lastUsed sticks so subsequent
@@ -340,6 +349,18 @@ func (a *Adapter) tryConvertUntypedUpdate(rawNotification []byte, sessionID stri
 	}
 	if err := json.Unmarshal(rawNotification, &envelope); err != nil {
 		return nil
+	}
+
+	var sessionInfo acpSessionInfoUpdate
+	if err := json.Unmarshal(envelope.Update, &sessionInfo); err == nil &&
+		sessionInfo.SessionUpdate == "session_info_update" {
+		return &AgentEvent{
+			Type:             streams.EventTypeSessionInfo,
+			SessionID:        sessionID,
+			SessionTitle:     sessionInfo.Title,
+			SessionUpdatedAt: sessionInfo.UpdatedAt,
+			SessionMeta:      sessionInfo.Meta,
+		}
 	}
 
 	var usage acpUsageUpdate
