@@ -2,26 +2,69 @@
 # pr-state — emit a raw JSON snapshot of PR CI and review state.
 #
 # Usage:
-#   scripts/pr-state <PR>
+#   scripts/pr-state [--summary] [--all] <PR>
 #
-# Output:
+# Raw output:
 #   JSON object with:
 #   - pr: { number, branch }
+#   - since: { head_oid, committed_at } or null
 #   - checks: [{ type, name, workflow, status, conclusion, details_url, target_url, run_id, job_id }]
-#   - review_threads: [{ thread_id, is_resolved, path, comment_id, author, body_preview }]
+#   - review_threads: [{ thread_id, is_resolved, path, comment_id, comment_created_at, author, body_preview }]
 #   - unresolved_review_thread_count: <N>
 #   - reviews: [{ author, state, submitted_at, html_url }]
 #   - issue_comments: [{ author, body, created_at, url }]
 #   - errors: [{ source, message }]
+#
+# Summary output (--summary):
+#   JSON object with:
+#   - pr: { number, branch }
+#   - since: { head_oid, committed_at } or null
+#   - failed_checks: [{ name, workflow, status, conclusion, run_id, job_id, details_url }]
+#   - pending_checks: [{ name, workflow, status, run_id, job_id, details_url }]
+#   - unresolved_review_thread_count: <N>
+#   - unresolved_threads: [{ thread_id, comment_id, author, path, body_preview }]
+#   - errors: [{ source, message }]
+#
+# By default, comments/reviews/review threads are limited to items created after
+# the PR head commit. Checks are already scoped by GitHub to the current head.
+# Pass --all to include historical comments and reviews.
 #
 # Requires: gh (authenticated), jq.
 
 set -euo pipefail
 
 usage() {
-  sed -n '2,15p' "$0" | sed 's|^# \{0,1\}||'
+  sed -n '2,28p' "$0" | sed 's|^# \{0,1\}||'
   exit "${1:-1}"
 }
+
+INCLUDE_ALL=0
+SUMMARY=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --all)
+      INCLUDE_ALL=1
+      shift
+      ;;
+    --summary)
+      SUMMARY=1
+      shift
+      ;;
+    -h | --help)
+      usage 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      usage 1
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
 
 [ $# -eq 1 ] || usage
 PR=$1
@@ -32,6 +75,7 @@ checks_json='[]'
 review_threads_json='[]'
 reviews_json='[]'
 issue_comments_json='[]'
+since_json='null'
 unresolved_review_thread_count=null
 
 add_error() {
@@ -70,8 +114,11 @@ extract_checks_json() {
 
 extract_issue_comments_json() {
   local comments_json=$1
-  jq -cn --argjson comments "$comments_json" '
-    $comments | map({
+  local since=$2
+  jq -cn --argjson comments "$comments_json" --arg since "$since" '
+    $comments
+    | map(select($since == "" or ((.createdAt // .created_at // "") > $since)))
+    | map({
       author: (.author.login // "unknown"),
       body: (.body // ""),
       created_at: (.createdAt // .created_at // null),
@@ -82,8 +129,11 @@ extract_issue_comments_json() {
 
 extract_reviews_json() {
   local reviews_api_json=$1
-  jq -cn --argjson reviews "$reviews_api_json" '
-    $reviews | map({
+  local since=$2
+  jq -cn --argjson reviews "$reviews_api_json" --arg since "$since" '
+    $reviews
+    | map(select($since == "" or ((.submitted_at // "") > $since)))
+    | map({
       author: (.user.login // "unknown"),
       state: ((.state // "unknown") | ascii_downcase),
       submitted_at: (.submitted_at // null),
@@ -94,16 +144,97 @@ extract_reviews_json() {
 
 extract_review_threads_json() {
   local threads_nodes_json=$1
-  jq -cn --argjson threads "$threads_nodes_json" '
-    $threads | map({
+  local since=$2
+  jq -cn --argjson threads "$threads_nodes_json" --arg since "$since" '
+    def relevant_comments:
+      if $since == "" then
+        (.comments.nodes // [])
+      else
+        [(.comments.nodes // [])[] | select((.createdAt // "") > $since)]
+      end;
+    $threads
+    | map(. as $thread | (relevant_comments) as $comments | select($comments | length > 0) | {
       thread_id: .id,
       is_resolved: (.isResolved // false),
       path: (.path // ""),
-      comment_id: (.comments.nodes[0].databaseId // null),
-      author: (.comments.nodes[0].author.login // "unknown"),
-      body_preview: ((.comments.nodes[0].body // "") | gsub("\n"; " ") | .[0:120])
+      comment_id: ($comments[0].databaseId // null),
+      comment_created_at: ($comments[0].createdAt // null),
+      author: ($comments[0].author.login // "unknown"),
+      body_preview: (($comments[0].body // "") | gsub("\n"; " ") | .[0:120])
     })
   '
+}
+
+summarize_state_json() {
+  jq -c '
+    def bad_conclusion:
+      .conclusion != null
+      and .conclusion != "success"
+      and .conclusion != "skipped"
+      and .conclusion != "neutral";
+
+    def terminal_failure_status:
+      .status == "completed"
+      or .status == "failure"
+      or .status == "error";
+
+    def pending_status:
+      .status != "completed"
+      and .status != "success"
+      and .status != "failure"
+      and .status != "error";
+
+    {
+      pr,
+      since,
+      failed_checks: [
+        .checks[]
+        | select(terminal_failure_status and bad_conclusion)
+        | {name, workflow, status, conclusion, run_id, job_id, details_url}
+      ],
+      pending_checks: [
+        .checks[]
+        | select(pending_status and (.conclusion == null or .conclusion == "pending" or .conclusion == "expected"))
+        | {name, workflow, status, run_id, job_id, details_url}
+      ],
+      unresolved_review_thread_count,
+      unresolved_threads: [
+        .review_threads[]
+        | select(.is_resolved == false)
+        | {thread_id, comment_id, author, path, body_preview}
+      ],
+      errors
+    }
+  '
+}
+
+fetch_head_commit_json() {
+  local owner=$1
+  local repo=$2
+  local pr_number=$3
+
+  gh_json api graphql \
+    -f query='
+      query($owner: String!, $repo: String!, $pr: Int!) {
+        repository(owner: $owner, name: $repo) {
+          pullRequest(number: $pr) {
+            headRefOid
+            commits(last: 1) {
+              nodes {
+                commit {
+                  oid
+                  committedDate
+                }
+              }
+            }
+          }
+        }
+      }' \
+    -f owner="$owner" -f repo="$repo" -F pr="$pr_number" |
+    jq -c '{
+      head_oid: (.data.repository.pullRequest.headRefOid // .data.repository.pullRequest.commits.nodes[0].commit.oid // null),
+      committed_at: (.data.repository.pullRequest.commits.nodes[0].commit.committedDate // null)
+    }'
 }
 
 fetch_review_threads_nodes_json() {
@@ -134,9 +265,10 @@ fetch_review_threads_nodes_json() {
                   id
                   isResolved
                   path
-                  comments(first: 1) {
+                  comments(first: 100) {
                     nodes {
                       databaseId
+                      createdAt
                       author { login }
                       body
                     }
@@ -192,7 +324,6 @@ if pr_view_json="$(gh_json pr view "$PR" --json number,headRefName,statusCheckRo
   comments_json="$(jq -c '.comments // []' <<<"$pr_view_json")"
   status_json="$(jq -c '.statusCheckRollup // []' <<<"$pr_view_json")"
   checks_json="$(extract_checks_json "$status_json")"
-  issue_comments_json="$(extract_issue_comments_json "$comments_json")"
 else
   if [[ "$PR" =~ ^[0-9]+$ ]]; then
     pr_json="$(jq -cn --argjson number "$PR" '{number: $number, branch: "unknown"}')"
@@ -202,10 +333,26 @@ else
   add_error "pr_view" "gh pr view failed"
 fi
 
+since=''
+if [[ "$INCLUDE_ALL" != "1" && -n "$repo_owner" && -n "$repo_name" && -n "$resolved_pr_number" ]]; then
+  if since_json="$(fetch_head_commit_json "$repo_owner" "$repo_name" "$resolved_pr_number")"; then
+    since="$(jq -r '.committed_at // ""' <<<"$since_json")"
+    if [[ -z "$since" ]]; then
+      add_error "since" "head commit timestamp unavailable; including historical comments"
+      since_json='null'
+    fi
+  else
+    add_error "since" "gh api graphql head commit failed; including historical comments"
+    since_json='null'
+  fi
+fi
+
+issue_comments_json="$(extract_issue_comments_json "$comments_json" "$since")"
+
 if [[ -n "$repo_owner" && -n "$repo_name" && -n "$resolved_pr_number" ]]; then
   if reviews_pages_json="$(gh_json api --paginate -X GET "repos/$repo_owner/$repo_name/pulls/$resolved_pr_number/reviews")"; then
     reviews_api_json="$(jq -cs 'add // []' <<<"$reviews_pages_json")"
-    reviews_json="$(extract_reviews_json "$reviews_api_json")"
+    reviews_json="$(extract_reviews_json "$reviews_api_json" "$since")"
   else
     add_error "reviews" "gh api pulls reviews failed"
   fi
@@ -215,7 +362,7 @@ fi
 
 if [[ -n "$repo_owner" && -n "$repo_name" && -n "$resolved_pr_number" ]]; then
   if threads_nodes_json="$(fetch_review_threads_nodes_json "$repo_owner" "$repo_name" "$resolved_pr_number")"; then
-    review_threads_json="$(extract_review_threads_json "$threads_nodes_json")"
+    review_threads_json="$(extract_review_threads_json "$threads_nodes_json" "$since")"
     unresolved_review_thread_count="$(jq -r '[.[] | select(.is_resolved == false)] | length' <<<"$review_threads_json")"
   else
     add_error "review_threads" "gh api graphql reviewThreads failed"
@@ -226,8 +373,9 @@ elif [[ -z "$resolved_pr_number" ]]; then
   add_error "review_threads" "skipped: resolved PR identity unavailable"
 fi
 
-jq -cn \
+state_json="$(jq -cn \
   --argjson pr "$pr_json" \
+  --argjson since "$since_json" \
   --argjson checks "$checks_json" \
   --argjson review_threads "$review_threads_json" \
   --argjson reviews "$reviews_json" \
@@ -236,10 +384,17 @@ jq -cn \
   --argjson errors "$errors" \
   '{
     pr: $pr,
+    since: $since,
     checks: $checks,
     review_threads: $review_threads,
     unresolved_review_thread_count: $unresolved_review_thread_count,
     reviews: $reviews,
     issue_comments: $issue_comments,
     errors: $errors
-  }'
+  }')"
+
+if [[ "$SUMMARY" == "1" ]]; then
+  summarize_state_json <<<"$state_json"
+else
+  printf '%s\n' "$state_json"
+fi

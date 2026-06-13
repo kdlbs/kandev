@@ -60,7 +60,7 @@ If available, invoke the `pr-poller` subagent with the PR number (or let it reso
 - `bots.<name>` — `done` / `rate_limited` / `pending` / `timeout`. Anything in `done` or `rate_limited` has had its chance; treat the rest as missing data, not a blocker.
 - `unresolved_review_threads` and `issue_comments_from_bots` — drive steps 3-4. If both are 0 and `ci_failed` is empty, skip to step 5 (still run verify + push if you have fixes from earlier).
 
-**E2E CI outlasts the poller.** The pr-poller caps at ~20 minutes. The E2E matrix (10 shards × 2 projects) often runs longer. If the report shows `ci_pending` with only E2E/lint jobs and `ci_failed` is empty, re-invoke pr-poller once those jobs finish — do not spin a manual `gh pr checks` loop in the parent. If the cap hits with E2E still pending, report "CI in progress" to the user instead of blocking.
+**E2E CI outlasts the poller.** The pr-poller caps at ~20 minutes. The E2E matrix (10 shards × 2 projects) often runs longer. GitHub can expand E2E matrix jobs late; if pending checks briefly drop near zero and then jump when E2E shards appear, keep treating that as normal pending CI unless a shard reports failure. If the report shows `ci_pending` with only E2E/lint jobs and `ci_failed` is empty, re-invoke pr-poller once those jobs finish — do not spin a manual `gh pr checks` loop in the parent. If the cap hits with E2E still pending, report "CI in progress" to the user instead of blocking, and include the exact pending shard names from `ci_pending`.
 
 **Do not fetch poll output yourself** — that is what burns context. The report is the only thing that enters your context.
 
@@ -69,12 +69,25 @@ If available, invoke the `pr-poller` subagent with the PR number (or let it reso
 If delegated polling is unavailable, gather the same information directly without streaming long logs into context:
 
 ```bash
-scripts/pr-state <PR>
+scripts/pr-state --summary <PR>
 ```
 
-Poll at a 30s cadence with a **20 min cap**. Stop early if any required check fails. If the cap hits and only E2E shards are still pending with no failures, report "CI in progress" instead of continuing to watch indefinitely. Do not run `gh pr checks --watch` in the main session unless the runtime can keep the watcher isolated and automatically clean it up. If you do use `gh pr checks --watch`, keep watching until the command exits; GitHub can expand matrix jobs after an initial aggregate "Build" check passes, so the first green build/lint/test rows are not necessarily terminal.
+By default, `scripts/pr-state` returns comments, reviews, and review threads created after the latest PR head commit only. This is intentional for fixup passes: it keeps old bot summaries and already-addressed historical threads out of the working set. Use `scripts/pr-state --summary --all <PR>` only when you need to audit the full PR history.
 
-Summarize the direct-command result from `scripts/pr-state` using its raw snapshot fields: `.checks`, `.review_threads`, `.unresolved_review_thread_count`, `.reviews`, `.issue_comments`, and `.errors`. Derive `ci_failed`, `ci_pending`, and which bot comments are actionable in the parent from those raw arrays. If `.errors` is non-empty, treat the affected fields as unknown and report the data-gathering failure instead of reconstructing them ad hoc. When deriving non-green checks, filter to actionable failures/pending checks; check/status records with both `status=success` and `conclusion=success` are green even if they appear in a mixed raw array.
+The summary output contains:
+
+- `failed_checks` — actionable non-green checks with `name`, `workflow`, `status`, `conclusion`, `run_id`, `job_id`, and `details_url`
+- `pending_checks` — still-running or queued checks with `name`, `workflow`, `status`, `run_id`, `job_id`, and `details_url`
+- `unresolved_review_thread_count` and `unresolved_threads` — compact inline review state
+- `errors` — data-gathering failures; treat affected fields as unknown instead of reconstructing them ad hoc
+
+Poll at a 30s cadence with a **20 min cap**. Stop early if any required check fails. If the cap hits and only E2E shards are still pending with no failures or unresolved comments, report "CI in progress" instead of continuing to watch indefinitely, and include the exact pending shard names from `pending_checks`. Do not run `gh pr checks --watch` in the main session unless the runtime can keep the watcher isolated and automatically clean it up. If you do use `gh pr checks --watch`, keep watching until the command exits; GitHub can expand matrix jobs after an initial aggregate "Build" check passes, so the first green build/lint/test rows are not necessarily terminal.
+
+Use raw mode only when debugging an odd GitHub state:
+
+```bash
+scripts/pr-state <PR>
+```
 
 Mark task 1 as completed.
 

@@ -83,11 +83,14 @@ if [[ "$1" == "pr" && "$2" == "view" && "$4" == "--json" ]]; then
   "comments": [
     {
       "author": { "login": "coderabbitai" },
-      "body": "<!-- walkthrough_start -->"
+      "body": "<!-- walkthrough_start -->",
+      "createdAt": "2026-06-01T10:00:00Z"
     },
     {
       "author": { "login": "github-actions" },
-      "body": "**Claude finished review**\\n| Blocker | 1 |\\n| Suggestion | 2 |\\n**Verdict:** Ready with suggestions"
+      "body": "**Claude finished review**\\n| Blocker | 1 |\\n| Suggestion | 2 |\\n**Verdict:** Ready with suggestions",
+      "createdAt": "2026-06-01T13:00:00Z",
+      "url": "https://github.com/kdlbs/kandev/pull/123#issuecomment-2"
     }
   ],
   "statusCheckRollup": [
@@ -127,15 +130,46 @@ fi
 
 if [[ "$1" == "api" && "$2" == "--paginate" && "$3" == "-X" && "$4" == "GET" && "$5" == "repos/kdlbs/kandev/pulls/123/reviews" ]]; then
   printf '%s\n' '[
-    { "user": { "login": "greptile-apps[bot]" } }
+    {
+      "user": { "login": "greptile-apps[bot]" },
+      "state": "COMMENTED",
+      "submitted_at": "2026-06-01T10:30:00Z"
+    }
   ]'
   printf '%s\n' '[
-    { "user": { "login": "cubic-dev-ai[bot]" } }
+    {
+      "user": { "login": "cubic-dev-ai[bot]" },
+      "state": "CHANGES_REQUESTED",
+      "submitted_at": "2026-06-01T13:30:00Z"
+    }
   ]'
   exit 0
 fi
 
 if [[ "$1" == "api" && "$2" == "graphql" ]]; then
+  if [[ "$*" == *"headRefOid"* ]]; then
+    printf '%s\n' '{
+      "data": {
+        "repository": {
+          "pullRequest": {
+            "headRefOid": "abc123",
+            "commits": {
+              "nodes": [
+                {
+                  "commit": {
+                    "oid": "abc123",
+                    "committedDate": "2026-06-01T12:00:00Z"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    }'
+    exit 0
+  fi
+
   if [[ "${GH_GRAPHQL_TWO_PAGES:-0}" == "1" && "$*" != *"cursor=CURSOR1"* ]]; then
     printf '%s\n' '{
       "data": {
@@ -155,6 +189,7 @@ if [[ "$1" == "api" && "$2" == "graphql" ]]; then
                     "nodes": [
                       {
                         "databaseId": 111,
+                        "createdAt": "2026-06-01T13:00:00Z",
                         "author": { "login": "greptile-apps[bot]" },
                         "body": "Please rename this helper"
                       }
@@ -189,6 +224,7 @@ if [[ "$1" == "api" && "$2" == "graphql" ]]; then
                     "nodes": [
                       {
                         "databaseId": 222,
+                        "createdAt": "2026-06-01T14:00:00Z",
                         "author": { "login": "cubic-dev-ai[bot]" },
                         "body": "resolved"
                       }
@@ -220,13 +256,20 @@ if [[ "$1" == "api" && "$2" == "graphql" ]]; then
                 "path": "apps/web/file.ts",
                 "comments": {
                   "nodes": [
-                    {
-                      "databaseId": 111,
-                      "author": { "login": "greptile-apps[bot]" },
-                      "body": "Please rename this helper"
-                    }
-                  ]
-                }
+                      {
+                        "databaseId": 111,
+                        "createdAt": "2026-06-01T10:00:00Z",
+                        "author": { "login": "greptile-apps[bot]" },
+                        "body": "Please rename this helper"
+                      },
+                      {
+                        "databaseId": 112,
+                        "createdAt": "2026-06-01T13:00:00Z",
+                        "author": { "login": "greptile-apps[bot]" },
+                        "body": "Please rename this helper after the latest commit"
+                      }
+                    ]
+                  }
               },
               {
                 "id": "PRRT_2",
@@ -234,10 +277,11 @@ if [[ "$1" == "api" && "$2" == "graphql" ]]; then
                 "path": "apps/web/other.ts",
                 "comments": {
                   "nodes": [
-                    {
-                      "databaseId": 222,
-                      "author": { "login": "cubic-dev-ai[bot]" },
-                      "body": "resolved"
+                      {
+                        "databaseId": 222,
+                        "createdAt": "2026-06-01T11:00:00Z",
+                        "author": { "login": "cubic-dev-ai[bot]" },
+                        "body": "resolved"
                     }
                   ]
                 }
@@ -268,17 +312,18 @@ test_snapshot_happy_path() {
 
   assert_jq "pr number" '.pr.number == 123' "$json"
   assert_jq "branch" '.pr.branch == "feat/pr-state"' "$json"
+  assert_jq "since timestamp" '.since.committed_at == "2026-06-01T12:00:00Z"' "$json"
   assert_jq "checks count" '.checks | length == 3' "$json"
   assert_jq "failed check preserved" '.checks[] | select(.name == "e2e") | .conclusion == "failure"' "$json"
   assert_jq "check run id" '.checks[] | select(.name == "e2e") | .run_id == "27340000002"' "$json"
   assert_jq "nested workflow name" '.checks[] | select(.name == "e2e") | .workflow == "CI"' "$json"
-  assert_jq "threads count" '.review_threads | length == 2' "$json"
+  assert_jq "threads count" '.review_threads | length == 1' "$json"
   assert_jq "unresolved count" '.unresolved_review_thread_count == 1' "$json"
-  assert_jq "thread comment id" '.review_threads[] | select(.thread_id == "PRRT_1") | .comment_id == 111' "$json"
-  assert_jq "thread resolved field" '.review_threads[] | select(.thread_id == "PRRT_2") | .is_resolved == true' "$json"
-  assert_jq "reviews count" '.reviews | length == 2' "$json"
-  assert_jq "review author" '.reviews[] | select(.author == "greptile-apps[bot]") | .author == "greptile-apps[bot]"' "$json"
-  assert_jq "issue comments count" '.issue_comments | length == 2' "$json"
+  assert_jq "thread comment id" '.review_threads[] | select(.thread_id == "PRRT_1") | .comment_id == 112' "$json"
+  assert_jq "thread comment timestamp" '.review_threads[] | select(.thread_id == "PRRT_1") | .comment_created_at == "2026-06-01T13:00:00Z"' "$json"
+  assert_jq "reviews count" '.reviews | length == 1' "$json"
+  assert_jq "review author" '.reviews[] | select(.author == "cubic-dev-ai[bot]") | .author == "cubic-dev-ai[bot]"' "$json"
+  assert_jq "issue comments count" '.issue_comments | length == 1' "$json"
   assert_jq "issue comment author" '.issue_comments[] | select(.author == "github-actions") | .body | contains("Verdict")' "$json"
   assert_jq "no errors" '.errors == []' "$json"
   pass "snapshot happy path"
@@ -295,7 +340,7 @@ test_partial_failure_records_error_but_keeps_other_data() {
 
   assert_jq "reviews empty on failure" '.reviews == []' "$json"
   assert_jq "checks still present" '.checks | length == 3' "$json"
-  assert_jq "issue comments still present" '.issue_comments | length == 2' "$json"
+  assert_jq "new issue comments still present" '.issue_comments | length == 1' "$json"
   assert_jq "partial failure recorded" '.errors | length == 1' "$json"
   assert_jq "partial failure source" '.errors[0].source == "reviews"' "$json"
   pass "partial failure records error but keeps other data"
@@ -367,9 +412,67 @@ test_graphql_pagination_collects_all_threads() {
   pass "graphql pagination collects all threads"
 }
 
+test_all_flag_includes_historical_comments_and_reviews() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  local json
+  PATH="$tmp/bin:$PATH" "$SCRIPT" --all 123 >"$tmp/out.json"
+  json="$(<"$tmp/out.json")"
+
+  assert_jq "since omitted in all mode" '.since == null' "$json"
+  assert_jq "all issue comments present" '.issue_comments | length == 2' "$json"
+  assert_jq "all reviews present" '.reviews | length == 2' "$json"
+  assert_jq "all review threads present" '.review_threads | length == 2' "$json"
+  assert_jq "all mode keeps historical thread comment" '.review_threads[] | select(.thread_id == "PRRT_1") | .comment_id == 111' "$json"
+  pass "--all includes historical comments and reviews"
+}
+
+test_summary_mode_returns_compact_fixup_state() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  local json
+  PATH="$tmp/bin:$PATH" "$SCRIPT" --summary 123 >"$tmp/out.json"
+  json="$(<"$tmp/out.json")"
+
+  assert_jq "summary keeps pr" '.pr.number == 123' "$json"
+  assert_jq "summary keeps since" '.since.committed_at == "2026-06-01T12:00:00Z"' "$json"
+  assert_jq "summary failed check count" '.failed_checks | length == 1' "$json"
+  assert_jq "summary failed check" '.failed_checks[0] | .name == "e2e" and .conclusion == "failure" and .run_id == "27340000002"' "$json"
+  assert_jq "summary pending check count" '.pending_checks | length == 1' "$json"
+  assert_jq "summary pending check" '.pending_checks[0] | .name == "claude-review" and .status == "in_progress" and .run_id == "27340000003"' "$json"
+  assert_jq "summary unresolved count" '.unresolved_review_thread_count == 1' "$json"
+  assert_jq "summary unresolved threads" '.unresolved_threads | length == 1' "$json"
+  assert_jq "summary unresolved thread fields" '.unresolved_threads[0] | .thread_id == "PRRT_1" and .comment_id == 112 and .author == "greptile-apps[bot]"' "$json"
+  assert_jq "summary omits raw arrays" 'has("checks") | not' "$json"
+  assert_jq "summary no errors" '.errors == []' "$json"
+  pass "--summary returns compact fixup state"
+}
+
+test_summary_all_flag_includes_historical_unresolved_threads() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  local json
+  PATH="$tmp/bin:$PATH" "$SCRIPT" --summary --all 123 >"$tmp/out.json"
+  json="$(<"$tmp/out.json")"
+
+  assert_jq "summary all since omitted" '.since == null' "$json"
+  assert_jq "summary all unresolved count" '.unresolved_review_thread_count == 1' "$json"
+  assert_jq "summary all keeps historical first comment" '.unresolved_threads[] | select(.thread_id == "PRRT_1") | .comment_id == 111' "$json"
+  pass "--summary --all includes historical unresolved thread comments"
+}
+
 test_snapshot_happy_path
 test_partial_failure_records_error_but_keeps_other_data
 test_pr_view_failure_with_non_numeric_ref_keeps_schema
 test_repo_failure_skips_review_threads
 test_graphql_failure_records_error_but_keeps_other_data
 test_graphql_pagination_collects_all_threads
+test_all_flag_includes_historical_comments_and_reviews
+test_summary_mode_returns_compact_fixup_state
+test_summary_all_flag_includes_historical_unresolved_threads
