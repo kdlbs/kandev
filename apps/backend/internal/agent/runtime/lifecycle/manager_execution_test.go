@@ -621,6 +621,9 @@ func TestCreateExecutionResolvesProfileOnceForEnvAndAutoApprove(t *testing.T) {
 	if !backend.lastRequest.AutoApprovePermissions {
 		t.Fatal("AutoApprovePermissions = false, want true")
 	}
+	if backend.lastRequest.AutoApprovePermissionsOverride == nil || !*backend.lastRequest.AutoApprovePermissionsOverride {
+		t.Fatalf("AutoApprovePermissionsOverride = %v, want true", backend.lastRequest.AutoApprovePermissionsOverride)
+	}
 	if got := backend.lastRequest.Env["CLAUDE_CONFIG_DIR"]; got != "/tmp/claude" {
 		t.Fatalf("CLAUDE_CONFIG_DIR = %q, want %q", got, "/tmp/claude")
 	}

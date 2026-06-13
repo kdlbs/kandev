@@ -414,28 +414,31 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	}
 	m.mergeAgentProfileEnvFromInfo(ctx, profileInfo, env)
 	autoApprove := false
+	var autoApproveOverride *bool
 	if profileInfo != nil {
 		autoApprove = profileInfo.AutoApprove
+		autoApproveOverride = boolPtr(profileInfo.AutoApprove)
 	}
 	if len(env) == 0 {
 		env = nil
 	}
 
 	req := &ExecutorCreateRequest{
-		InstanceID:             executionID,
-		TaskID:                 taskID,
-		SessionID:              info.SessionID,
-		TaskEnvironmentID:      info.TaskEnvironmentID,
-		AgentProfileID:         info.AgentProfileID,
-		WorkspacePath:          info.WorkspacePath,
-		Protocol:               string(agentConfig.Runtime().Protocol),
-		Env:                    env,
-		AutoApprovePermissions: autoApprove,
-		AgentConfig:            agentConfig,
-		Metadata:               info.Metadata,
-		PreviousExecutionID:    info.AgentExecutionID,
-		AuthToken:              m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyAuthTokenSecret),
-		BootstrapNonce:         m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret),
+		InstanceID:                     executionID,
+		TaskID:                         taskID,
+		SessionID:                      info.SessionID,
+		TaskEnvironmentID:              info.TaskEnvironmentID,
+		AgentProfileID:                 info.AgentProfileID,
+		WorkspacePath:                  info.WorkspacePath,
+		Protocol:                       string(agentConfig.Runtime().Protocol),
+		Env:                            env,
+		AutoApprovePermissions:         autoApprove,
+		AutoApprovePermissionsOverride: autoApproveOverride,
+		AgentConfig:                    agentConfig,
+		Metadata:                       info.Metadata,
+		PreviousExecutionID:            info.AgentExecutionID,
+		AuthToken:                      m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyAuthTokenSecret),
+		BootstrapNonce:                 m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret),
 	}
 
 	runtimeInstance, err := rt.CreateInstance(ctx, req)
