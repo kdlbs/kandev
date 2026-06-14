@@ -23,13 +23,16 @@ describe("getTaskStateIcon", () => {
 });
 
 describe("shouldShowTaskRunningSpinner", () => {
-  it("returns false for non-loading task states regardless of session state", () => {
+  it("returns false for non-loading task states without an active session", () => {
     expect(shouldShowTaskRunningSpinner("COMPLETED")).toBe(false);
     expect(shouldShowTaskRunningSpinner("FAILED")).toBe(false);
     expect(shouldShowTaskRunningSpinner("CANCELLED")).toBe(false);
     expect(shouldShowTaskRunningSpinner("REVIEW")).toBe(false);
     expect(shouldShowTaskRunningSpinner("TODO")).toBe(false);
-    expect(shouldShowTaskRunningSpinner("REVIEW", "RUNNING")).toBe(false);
+  });
+
+  it("returns true when any task state has an actively running primary session", () => {
+    expect(shouldShowTaskRunningSpinner("REVIEW", "RUNNING")).toBe(true);
   });
 
   it("returns true for SCHEDULING with no primary session yet", () => {

@@ -83,11 +83,11 @@ const ACTIVE_SESSION_STATES: ReadonlySet<string> = new Set<TaskSessionState>([
 ]);
 
 /**
- * Returns true when the kanban card should show the spinning loader for an
- * in-progress task. The task workflow state and the primary session's runtime
- * state are decoupled — the workflow can keep a task in `IN_PROGRESS` after
- * the agent has finished, errored, or paused waiting for input — so we gate
- * the spinner on the primary session being actively running.
+ * Returns true when the kanban card should show the spinning loader. The task
+ * workflow state and the primary session's runtime state are decoupled — the
+ * workflow can keep a task in `IN_PROGRESS` after the agent has finished, or
+ * move it to `REVIEW` while the current primary session is still running — so
+ * an explicit primary session state takes precedence.
  *
  * When no primary session is attached yet (task just created / scheduling),
  * we still show the spinner so users see the imminent work; otherwise we
@@ -97,9 +97,8 @@ export function shouldShowTaskRunningSpinner(
   taskState?: TaskState,
   primarySessionState?: string | null,
 ): boolean {
-  if (taskState !== "IN_PROGRESS" && taskState !== "SCHEDULING") return false;
-  if (!primarySessionState) return true;
-  return ACTIVE_SESSION_STATES.has(primarySessionState);
+  if (primarySessionState) return ACTIVE_SESSION_STATES.has(primarySessionState);
+  return taskState === "IN_PROGRESS" || taskState === "SCHEDULING";
 }
 
 export function shouldUsePermissionTaskIcon(hasPendingPermission = false): boolean {

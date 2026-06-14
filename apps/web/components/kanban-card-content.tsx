@@ -193,7 +193,8 @@ function KanbanCardActions({
   const hasPendingClarificationRequest = useTaskPendingClarification(task.primarySessionId);
   const showQuestionIcon = shouldUseQuestionTaskIcon(task.state, hasPendingClarificationRequest);
   const showRunningSpinner = shouldShowTaskRunningSpinner(task.state, task.primarySessionState);
-  const statusIcon = getTaskStateIcon(task.state, "h-4 w-4", hasPendingClarificationRequest);
+  const statusIconState = showRunningSpinner ? "IN_PROGRESS" : task.state;
+  const statusIcon = getTaskStateIcon(statusIconState, "h-4 w-4", hasPendingClarificationRequest);
   const hasKnownSession =
     Boolean(task.primarySessionId) || Boolean(task.sessionCount && task.sessionCount > 0);
 
