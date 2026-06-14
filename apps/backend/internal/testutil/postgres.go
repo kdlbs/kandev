@@ -29,15 +29,14 @@ func OpenIsolatedPostgres(t testing.TB, dsn string) *sqlx.DB {
 		_ = db.Close()
 		t.Fatalf("create postgres schema %s: %v", schema, err)
 	}
-	if _, err := db.Exec("SET search_path TO " + schema); err != nil {
-		_ = db.Close()
-		t.Fatalf("set postgres search_path %s: %v", schema, err)
-	}
-
 	t.Cleanup(func() {
 		_, _ = db.Exec("DROP SCHEMA IF EXISTS " + schema + " CASCADE")
 		_ = db.Close()
 	})
+
+	if _, err := db.Exec("SET search_path TO " + schema); err != nil {
+		t.Fatalf("set postgres search_path %s: %v", schema, err)
+	}
 	return db
 }
 
