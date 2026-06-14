@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useState } from "react";
 import type { StoreApi } from "zustand";
 import { useStore } from "zustand";
 import { isDebug, registerSessionTaskResolver } from "@/lib/debug/log";
@@ -15,7 +15,14 @@ type E2EWindow = Window & {
 };
 
 export function StateProvider({ children, initialState }: StoreProviderProps) {
-  const [store] = useState(() => createAppStore(initialState));
+  const parentStore = useContext(StoreContext);
+  const [ownStore] = useState(() => createAppStore(parentStore ? undefined : initialState));
+  const store = parentStore ?? ownStore;
+
+  useLayoutEffect(() => {
+    if (!parentStore || !initialState || Object.keys(initialState).length === 0) return;
+    store.getState().hydrate(initialState);
+  }, [initialState, parentStore, store]);
 
   useEffect(() => {
     const win = window as E2EWindow;
