@@ -20,8 +20,8 @@
 #   JSON object with:
 #   - pr: { number, branch }
 #   - since: { head_oid, committed_at } or null
-#   - failed_checks: [{ name, workflow, status, conclusion, run_id, job_id, details_url }]
-#   - pending_checks: [{ name, workflow, status, run_id, job_id, details_url }]
+#   - failed_checks: [{ name, workflow, status, conclusion, run_id, job_id, details_url, target_url }]
+#   - pending_checks: [{ name, workflow, status, run_id, job_id, details_url, target_url }]
 #   - unresolved_review_thread_count: <N>
 #   - filtered_review_thread_count: <N>
 #   - unresolved_threads: [{ thread_id, comment_id, author, path, body_preview }]
@@ -200,12 +200,12 @@ summarize_state_json() {
       failed_checks: [
         .checks[]
         | select(terminal_failure_status and bad_conclusion)
-        | {name, workflow, status, conclusion, run_id, job_id, details_url}
+        | {name, workflow, status, conclusion, run_id, job_id, details_url, target_url}
       ],
       pending_checks: [
         .checks[]
         | select(pending_status and .conclusion == null)
-        | {name, workflow, status, run_id, job_id, details_url}
+        | {name, workflow, status, run_id, job_id, details_url, target_url}
       ],
       unresolved_review_thread_count,
       filtered_review_thread_count,

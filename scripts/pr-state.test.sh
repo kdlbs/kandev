@@ -456,7 +456,7 @@ test_summary_mode_returns_compact_fixup_state() {
   assert_jq "summary failed check" '.failed_checks[0] | .name == "e2e" and .conclusion == "failure" and .run_id == "27340000002"' "$json"
   assert_jq "summary pending check count" '.pending_checks | length == 2' "$json"
   assert_jq "summary pending check" '.pending_checks[0] | .name == "claude-review" and .status == "in_progress" and .run_id == "27340000003"' "$json"
-  assert_jq "summary pending status context" '.pending_checks[] | select(.name == "external pending") | .status == "pending" and .details_url == null' "$json"
+  assert_jq "summary pending status context keeps target url" '.pending_checks[] | select(.name == "external pending") | .status == "pending" and .details_url == null and .target_url == "https://ci.example.test/build/1"' "$json"
   assert_jq "summary unresolved count" '.unresolved_review_thread_count == 2' "$json"
   assert_jq "summary filtered thread count" '.filtered_review_thread_count == 1' "$json"
   assert_jq "summary unresolved threads" '.unresolved_threads | length == 1' "$json"

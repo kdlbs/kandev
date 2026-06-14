@@ -76,8 +76,8 @@ By default, `scripts/pr-state` returns comments, reviews, and review threads cre
 
 The summary output contains:
 
-- `failed_checks` — actionable non-green checks with `name`, `workflow`, `status`, `conclusion`, `run_id`, `job_id`, and `details_url`
-- `pending_checks` — still-running or queued checks with `name`, `workflow`, `status`, `run_id`, `job_id`, and `details_url`
+- `failed_checks` — actionable non-green checks with `name`, `workflow`, `status`, `conclusion`, `run_id`, `job_id`, `details_url`, and `target_url`
+- `pending_checks` — still-running or queued checks with `name`, `workflow`, `status`, `run_id`, `job_id`, `details_url`, and `target_url`
 - `unresolved_review_thread_count` — total unresolved thread count on the PR, including older unresolved threads outside the current-head filter
 - `filtered_review_thread_count` and `unresolved_threads` — compact current-head inline review state to triage in this fixup pass
 - `errors` — data-gathering failures; treat affected fields as unknown instead of reconstructing them ad hoc
