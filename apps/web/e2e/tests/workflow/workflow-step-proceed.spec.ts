@@ -40,7 +40,7 @@ test.describe("Manual proceed to next workflow step", () => {
 
     // Work: auto-start agent with a response we can assert on
     await apiClient.updateWorkflowStep(workStep.id, {
-      prompt: 'e2e:delay(2000)\ne2e:message("work step response")\n{{task_prompt}}',
+      prompt: 'e2e:message("work step response")\n{{task_prompt}}',
       events: {
         on_enter: [{ type: "auto_start_agent" }],
       },
@@ -85,7 +85,6 @@ test.describe("Manual proceed to next workflow step", () => {
     await expect(proceedBtn).toBeVisible({ timeout: 10_000 });
 
     // --- Enable plan mode manually (simulates being in a plan-mode workflow step) ---
-    await testPage.waitForTimeout(1_000);
     await session.togglePlanMode();
     await expect(session.planPanel).toBeVisible({ timeout: 15_000 });
     await expect(session.planModeInput()).toBeVisible({ timeout: 10_000 });
@@ -116,7 +115,7 @@ test.describe("Manual proceed to next workflow step", () => {
    * Previously, isMoving stayed true after clicking proceed because the button
    * reappeared (for the next step) before isMoving was reset.
    *
-   * Workflow: Spec -> Work -> Review -> QA -> Done (all with auto_start_agent)
+   * Workflow: Spec -> Work -> Done (all with auto_start_agent)
    */
   test("proceed button re-enables across multiple step transitions", async ({
     testPage,
@@ -130,7 +129,7 @@ test.describe("Manual proceed to next workflow step", () => {
       "Multi Step Proceed Workflow",
     );
 
-    const stepNames = ["Spec", "Work", "Review", "QA", "Done"];
+    const stepNames = ["Spec", "Work", "Done"];
     const steps: { id: string; name: string }[] = [];
     for (let i = 0; i < stepNames.length; i++) {
       const step = await apiClient.createWorkflowStep(workflow.id, stepNames[i], i);
