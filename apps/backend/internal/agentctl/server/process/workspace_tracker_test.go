@@ -514,6 +514,48 @@ func TestGetFileContent_BinaryDetection(t *testing.T) {
 	}
 }
 
+func TestGetFileContent_ExternalAbsolutePath(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	externalDir := t.TempDir()
+	externalPath := filepath.Join(externalDir, "sprite-doc.txt")
+	externalContent := "outside workspace\n"
+	if err := os.WriteFile(externalPath, []byte(externalContent), 0o644); err != nil {
+		t.Fatalf("failed to write external file: %v", err)
+	}
+
+	log := newTestLogger(t)
+	wt := NewWorkspaceTracker(repoDir, log)
+
+	content, size, isBinary, resolvedPath, err := wt.GetFileContent(externalPath)
+	if err != nil {
+		t.Fatalf("GetFileContent(external absolute path) error: %v", err)
+	}
+	if content != externalContent {
+		t.Fatalf("content = %q, want %q", content, externalContent)
+	}
+	if size != int64(len(externalContent)) {
+		t.Fatalf("size = %d, want %d", size, len(externalContent))
+	}
+	if isBinary {
+		t.Fatal("expected text file to not be binary")
+	}
+	if resolvedPath != "" {
+		t.Fatalf("resolvedPath = %q, want empty for external file", resolvedPath)
+	}
+
+	_, _, _, _, err = wt.GetFileContent(externalDir)
+	if err == nil {
+		t.Fatal("expected error for external absolute directory")
+	}
+
+	_, _, _, _, err = wt.GetFileContent(filepath.Join(externalDir, "missing.txt"))
+	if err == nil {
+		t.Fatal("expected error for missing external absolute file")
+	}
+}
+
 // setupTestDir creates a temp directory with a WorkspaceTracker (no git required).
 func setupTestDir(t *testing.T) (string, *WorkspaceTracker) {
 	t.Helper()

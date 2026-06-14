@@ -18,7 +18,7 @@ import (
 // Windows (`C:\...`) and POSIX (`/...`) without per-OS branches in
 // every case.
 func TestResolveRescanPath(t *testing.T) {
-	root := absRoot() // "/" on POSIX, "C:\" on Windows
+	root := filepath.Join(t.TempDir(), "root")
 	repo := join(root, "task", "repo")
 	task := join(root, "task")
 	other := join(root, "task", "other")
@@ -43,8 +43,8 @@ func TestResolveRescanPath(t *testing.T) {
 		{"child of current (rejected)", sub, repo, "", false},
 		{"sibling repo (rejected)", other, repo, "", false},
 		{"unrelated absolute (rejected)", etc, repo, "", false},
-		{"current is filesystem root", root, root, root, true},
-		{"current is root, promotion impossible", join(root, "foo"), root, "", false},
+		{"current is anchor root", root, root, root, true},
+		{"current is anchor root, child rejected", join(root, "foo"), root, "", false},
 		{"dotted segment is legal as exact match", dotted, dotted, dotted, true},
 		{"dotted segment is legal as promotion", dotted, dottedRepo, dotted, true},
 	}
@@ -70,13 +70,6 @@ func TestResolveRescanPath(t *testing.T) {
 			}
 		})
 	}
-}
-
-// absRoot returns the platform's absolute filesystem root prefix —
-// "/" on POSIX, "C:\" (the runner's drive) on Windows.
-func absRoot() string {
-	root, _ := filepath.Abs(string(filepath.Separator))
-	return root
 }
 
 // join wraps filepath.Join so callers can express paths with separate

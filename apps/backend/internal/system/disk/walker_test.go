@@ -72,6 +72,9 @@ func TestWalkSubdir_RecordsPermissionWarningAndContinues(t *testing.T) {
 		// Restore permissions so the temp dir can be cleaned up.
 		_ = os.Chmod(blocked, 0o755)
 	})
+	if _, err := os.ReadDir(blocked); err == nil {
+		t.Skip("chmod 0o000 did not block directory reads in this environment")
+	}
 
 	res := walkSubdir(root)
 

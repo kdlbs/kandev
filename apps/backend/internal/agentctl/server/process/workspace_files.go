@@ -32,6 +32,8 @@ const (
 
 const maxFileSize = 10 * 1024 * 1024 // 10MB
 
+var errPathTraversal = errors.New("path traversal detected")
+
 // updateFiles updates the file listing
 func (wt *WorkspaceTracker) updateFiles(ctx context.Context) {
 	files, err := wt.getFileList(ctx)
@@ -169,6 +171,25 @@ func (wt *WorkspaceTracker) resolvedWorkDir() string {
 	return resolved
 }
 
+func absoluteReadPath(reqPath string) (string, bool) {
+	cleanReqPath := filepath.Clean(reqPath)
+	if !filepath.IsAbs(cleanReqPath) {
+		return "", false
+	}
+
+	realPath, err := filepath.EvalSymlinks(cleanReqPath)
+	if err != nil {
+		return "", false
+	}
+
+	// codeql[go/path-injection] Intentional read-only absolute file access; see ADR 0016.
+	info, err := os.Stat(realPath)
+	if err != nil || !info.Mode().IsRegular() {
+		return "", false
+	}
+	return realPath, true
+}
+
 // resolveSafePath resolves reqPath to an absolute path within workDir,
 // rejecting any path traversal attempts. The returned path is always
 // constructed as filepath.Join(resolvedWorkDir, validatedRelPath) so that
@@ -216,7 +237,7 @@ func (wt *WorkspaceTracker) resolveSafePath(reqPath string) (string, error) {
 
 	// Ensure the relative path doesn't escape the workspace
 	if strings.HasPrefix(relPath, ".."+string(os.PathSeparator)) || relPath == ".." {
-		return "", fmt.Errorf("path traversal detected: %s", reqPath)
+		return "", fmt.Errorf("%w: %s", errPathTraversal, reqPath)
 	}
 
 	// Reconstruct the absolute path from the trusted workspace root and the
@@ -260,31 +281,44 @@ func resolveNonExistentPath(path string) (string, error) {
 func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, bool, string, error) {
 	safePath, err := wt.resolveSafePath(reqPath)
 	if err != nil {
+		if errors.Is(err, errPathTraversal) {
+			externalPath, ok := absoluteReadPath(reqPath)
+			if !ok {
+				return "", 0, false, "", err
+			}
+			content, size, isBinary, readErr := readFileContent(externalPath)
+			return content, size, isBinary, "", readErr
+		}
 		return "", 0, false, "", err
 	}
 
 	// Check if the original path is a symlink and compute the resolved relative path.
 	resolvedPath := wt.resolveSymlinkRelPath(reqPath)
 
+	content, size, isBinary, err := readFileContent(safePath)
+	return content, size, isBinary, resolvedPath, err
+}
+
+func readFileContent(safePath string) (string, int64, bool, error) {
 	// Check if file exists and is a regular file
 	info, err := os.Stat(safePath)
 	if err != nil {
-		return "", 0, false, "", fmt.Errorf("file not found: %w", err)
+		return "", 0, false, fmt.Errorf("file not found: %w", err)
 	}
 
-	if info.IsDir() {
-		return "", 0, false, "", fmt.Errorf("path is a directory, not a file")
+	if !info.Mode().IsRegular() {
+		return "", 0, false, fmt.Errorf("path is not a regular file")
 	}
 
 	// Check file size
 	if info.Size() > maxFileSize {
-		return "", info.Size(), false, "", fmt.Errorf("file too large (max 10MB)")
+		return "", info.Size(), false, fmt.Errorf("file too large (max 10MB)")
 	}
 
 	// Read file content
 	file, err := os.Open(safePath)
 	if err != nil {
-		return "", 0, false, "", fmt.Errorf("failed to open file: %w", err)
+		return "", 0, false, fmt.Errorf("failed to open file: %w", err)
 	}
 	defer func() {
 		_ = file.Close()
@@ -292,16 +326,16 @@ func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, bool,
 
 	content, err := io.ReadAll(file)
 	if err != nil {
-		return "", 0, false, "", fmt.Errorf("failed to read file: %w", err)
+		return "", 0, false, fmt.Errorf("failed to read file: %w", err)
 	}
 
 	// Detect binary: if content is not valid UTF-8, base64-encode it
 	if !utf8.Valid(content) {
 		encoded := base64.StdEncoding.EncodeToString(content)
-		return encoded, info.Size(), true, resolvedPath, nil
+		return encoded, info.Size(), true, nil
 	}
 
-	return string(content), info.Size(), false, resolvedPath, nil
+	return string(content), info.Size(), false, nil
 }
 
 // resolveSymlinkRelPath checks if reqPath is a symlink and returns the resolved
