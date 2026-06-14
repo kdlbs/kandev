@@ -58,6 +58,7 @@ type UpdateUserSettingsRequest struct {
 	TerminalFontFamily          *string
 	TerminalFontSize            *int
 	ChangesPanelLayout          *string
+	SystemMetricsDisplay        *models.SystemMetricsDisplaySettings
 	VoiceMode                   *models.VoiceModeSettings
 }
 
@@ -186,6 +187,9 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 	}
 	if err := applyChangesPanelLayout(settings, req.ChangesPanelLayout); err != nil {
 		return err
+	}
+	if req.SystemMetricsDisplay != nil {
+		settings.SystemMetricsDisplay = *req.SystemMetricsDisplay
 	}
 	if req.TerminalFontFamily != nil {
 		settings.TerminalFontFamily = strings.TrimSpace(*req.TerminalFontFamily)

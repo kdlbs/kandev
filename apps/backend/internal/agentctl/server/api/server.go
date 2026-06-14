@@ -88,6 +88,7 @@ func (s *Server) setupRoutes() {
 		// Status and info
 		api.GET("/status", s.handleStatus)
 		api.GET("/info", s.handleInfo)
+		api.GET("/system/metrics", s.handleSystemMetrics)
 
 		// Process control
 		api.POST("/agent/configure", s.handleAgentConfigure)

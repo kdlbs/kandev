@@ -46,3 +46,21 @@ func TestScanUserSettingsChangesPanelLayoutDefault(t *testing.T) {
 		}
 	})
 }
+
+func TestScanUserSettingsSystemMetricsDisplayDefault(t *testing.T) {
+	settings, err := scanUserSettings(settingsScanner{raw: "{}"}, DefaultUserID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if settings.SystemMetricsDisplay.ShowInTopbar {
+		t.Fatal("system metrics display should default to disabled")
+	}
+
+	settings, err = scanUserSettings(settingsScanner{raw: `{"system_metrics_display":{"show_in_topbar":true}}`}, DefaultUserID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !settings.SystemMetricsDisplay.ShowInTopbar {
+		t.Fatal("expected stored system metrics display preference")
+	}
+}

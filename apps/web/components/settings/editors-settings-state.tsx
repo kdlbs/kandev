@@ -9,6 +9,7 @@ import type { EditorOption } from "@/lib/types/http";
 import { type ComboboxOption } from "@/components/combobox";
 import {
   parseChangesPanelLayout,
+  parseSystemMetricsDisplay,
   parseTerminalLinkBehavior,
   parseVoiceMode,
 } from "@/lib/ssr/user-settings";
@@ -249,6 +250,7 @@ function buildUserSettingsFromResponse(
     terminalFontFamily: s.terminal_font_family || null,
     terminalFontSize: s.terminal_font_size || null,
     changesPanelLayout: parseChangesPanelLayout(s.changes_panel_layout),
+    systemMetricsDisplay: parseSystemMetricsDisplay(s.system_metrics_display),
     voiceMode: parseVoiceMode(s.voice_mode),
     ...mapEditorSettingsFields(s),
   };

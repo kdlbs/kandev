@@ -38,9 +38,14 @@ type UserSettings struct {
 	TerminalFontFamily          string                            `json:"terminal_font_family"`
 	TerminalFontSize            int                               `json:"terminal_font_size"`
 	ChangesPanelLayout          string                            `json:"changes_panel_layout"` // "flat" | "tree"
+	SystemMetricsDisplay        SystemMetricsDisplaySettings      `json:"system_metrics_display"`
 	VoiceMode                   VoiceModeSettings                 `json:"voice_mode"`
 	CreatedAt                   time.Time                         `json:"created_at"`
 	UpdatedAt                   time.Time                         `json:"updated_at"`
+}
+
+type SystemMetricsDisplaySettings struct {
+	ShowInTopbar bool `json:"show_in_topbar"`
 }
 
 // VoiceModeSettings is the per-user configuration surface for the chat

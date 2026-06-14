@@ -68,6 +68,7 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		TerminalFontFamily:          req.TerminalFontFamily,
 		TerminalFontSize:            req.TerminalFontSize,
 		ChangesPanelLayout:          req.ChangesPanelLayout,
+		SystemMetricsDisplay:        req.SystemMetricsDisplay,
 		VoiceMode:                   req.VoiceMode,
 	})
 	if err != nil {

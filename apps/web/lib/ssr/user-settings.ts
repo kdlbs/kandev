@@ -14,6 +14,10 @@ export function parseChangesPanelLayout(value: string | undefined): "flat" | "tr
   return value === "flat" ? "flat" : "tree";
 }
 
+export function parseSystemMetricsDisplay(value: UserSettingsData["system_metrics_display"]) {
+  return { showInTopbar: value?.show_in_topbar ?? false };
+}
+
 /**
  * Maps the backend's snake_case VoiceMode payload into the camelCase shape
  * the store and UI use. Missing or partial payloads fall back to the defaults
@@ -46,6 +50,12 @@ function buildVoiceModeFields(s: UserSettingsData) {
   return { voiceMode: parseVoiceMode(s.voice_mode) };
 }
 
+function buildSystemMetricsDisplayFields(s: UserSettingsData | undefined) {
+  return {
+    systemMetricsDisplay: parseSystemMetricsDisplay(s?.system_metrics_display),
+  };
+}
+
 function buildIdentityFields(s: UserSettingsData) {
   return {
     workspaceId: s.workspace_id || null,
@@ -76,6 +86,7 @@ export function buildCoreFields(s: UserSettingsData) {
     savedLayouts: s.saved_layouts ?? [],
     sidebarViews: (s.sidebar_views ?? []).map(fromApiSidebarView) as SidebarView[],
     ...buildTerminalFields(s),
+    ...buildSystemMetricsDisplayFields(s),
     ...buildVoiceModeFields(s),
   };
 }
@@ -117,6 +128,7 @@ export function mapUserSettingsResponse(response: UserSettingsResponse | null) {
       terminalFontFamily: null,
       terminalFontSize: null,
       changesPanelLayout: "tree" as const,
+      ...buildSystemMetricsDisplayFields(undefined),
       voiceMode: { ...DEFAULT_VOICE_MODE_STATE },
       ...buildLspFields(undefined),
       loaded: false,

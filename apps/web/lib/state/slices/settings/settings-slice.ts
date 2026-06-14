@@ -44,6 +44,7 @@ export const defaultSettingsState: SettingsSliceState = {
     terminalFontFamily: null,
     terminalFontSize: null,
     changesPanelLayout: "tree",
+    systemMetricsDisplay: { showInTopbar: false },
     voiceMode: { ...DEFAULT_VOICE_MODE_STATE },
     loaded: false,
   },

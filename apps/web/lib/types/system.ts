@@ -108,6 +108,49 @@ export interface SystemJob {
   ended_at?: string;
 }
 
+export type SystemMetricId =
+  | "cpu_percent"
+  | "memory_percent"
+  | "disk_percent"
+  | "cpu_temp"
+  | "io_load";
+
+export interface SystemMetricsGlobalSettings {
+  metrics: SystemMetricId[];
+  interval_seconds: number;
+  backend_disk_path: string;
+  collect_execution: boolean;
+}
+
+export interface SystemMetricsSettingsResponse {
+  settings: SystemMetricsGlobalSettings;
+}
+
+export interface SystemMetricSample {
+  id: SystemMetricId | string;
+  label: string;
+  unit?: string;
+  value?: number;
+  available: boolean;
+  error?: string;
+}
+
+export interface SystemMetricsSource {
+  id: string;
+  label: string;
+  kind: "backend" | "execution" | string;
+  executor_type?: string;
+  session_id?: string;
+  task_id?: string;
+  metrics: SystemMetricSample[];
+}
+
+export interface SystemMetricsSnapshot {
+  timestamp: string;
+  interval_seconds: number;
+  sources: SystemMetricsSource[];
+}
+
 export interface JobAcceptResponse {
   job_id: string;
 }

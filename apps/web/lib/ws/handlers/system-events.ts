@@ -13,5 +13,8 @@ export function registerSystemEventsHandlers(store: StoreApi<AppState>): WsHandl
       // jobs map mirrors the latest queued/running/succeeded/failed state.
       store.getState().upsertSystemJob(message.payload);
     },
+    "system.metrics.updated": (message) => {
+      store.getState().setSystemMetricsSnapshot(message.payload);
+    },
   };
 }

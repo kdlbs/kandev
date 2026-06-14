@@ -14,33 +14,34 @@ type UserDTO struct {
 }
 
 type UserSettingsDTO struct {
-	UserID                      string                            `json:"user_id"`
-	WorkspaceID                 string                            `json:"workspace_id"`
-	KanbanViewMode              string                            `json:"kanban_view_mode"`
-	WorkflowFilterID            string                            `json:"workflow_filter_id"`
-	RepositoryIDs               []string                          `json:"repository_ids"`
-	InitialSetupComplete        bool                              `json:"initial_setup_complete"`
-	PreferredShell              string                            `json:"preferred_shell"`
-	DefaultEditorID             string                            `json:"default_editor_id"`
-	EnablePreviewOnClick        bool                              `json:"enable_preview_on_click"`
-	ChatSubmitKey               string                            `json:"chat_submit_key"`
-	ReviewAutoMarkOnScroll      bool                              `json:"review_auto_mark_on_scroll"`
-	ShowReleaseNotification     bool                              `json:"show_release_notification"`
-	ReleaseNotesLastSeenVersion string                            `json:"release_notes_last_seen_version"`
-	LspAutoStartLanguages       []string                          `json:"lsp_auto_start_languages"`
-	LspAutoInstallLanguages     []string                          `json:"lsp_auto_install_languages"`
-	LspServerConfigs            map[string]map[string]interface{} `json:"lsp_server_configs,omitempty"`
-	SavedLayouts                []models.SavedLayout              `json:"saved_layouts"`
-	SidebarViews                []models.SidebarView              `json:"sidebar_views"`
-	DefaultUtilityAgentID       string                            `json:"default_utility_agent_id"`
-	DefaultUtilityModel         string                            `json:"default_utility_model"`
-	KeyboardShortcuts           map[string]interface{}            `json:"keyboard_shortcuts,omitempty"`
-	TerminalLinkBehavior        string                            `json:"terminal_link_behavior"`
-	TerminalFontFamily          string                            `json:"terminal_font_family"`
-	TerminalFontSize            int                               `json:"terminal_font_size"`
-	ChangesPanelLayout          string                            `json:"changes_panel_layout"`
-	VoiceMode                   models.VoiceModeSettings          `json:"voice_mode"`
-	UpdatedAt                   string                            `json:"updated_at"`
+	UserID                      string                              `json:"user_id"`
+	WorkspaceID                 string                              `json:"workspace_id"`
+	KanbanViewMode              string                              `json:"kanban_view_mode"`
+	WorkflowFilterID            string                              `json:"workflow_filter_id"`
+	RepositoryIDs               []string                            `json:"repository_ids"`
+	InitialSetupComplete        bool                                `json:"initial_setup_complete"`
+	PreferredShell              string                              `json:"preferred_shell"`
+	DefaultEditorID             string                              `json:"default_editor_id"`
+	EnablePreviewOnClick        bool                                `json:"enable_preview_on_click"`
+	ChatSubmitKey               string                              `json:"chat_submit_key"`
+	ReviewAutoMarkOnScroll      bool                                `json:"review_auto_mark_on_scroll"`
+	ShowReleaseNotification     bool                                `json:"show_release_notification"`
+	ReleaseNotesLastSeenVersion string                              `json:"release_notes_last_seen_version"`
+	LspAutoStartLanguages       []string                            `json:"lsp_auto_start_languages"`
+	LspAutoInstallLanguages     []string                            `json:"lsp_auto_install_languages"`
+	LspServerConfigs            map[string]map[string]interface{}   `json:"lsp_server_configs,omitempty"`
+	SavedLayouts                []models.SavedLayout                `json:"saved_layouts"`
+	SidebarViews                []models.SidebarView                `json:"sidebar_views"`
+	DefaultUtilityAgentID       string                              `json:"default_utility_agent_id"`
+	DefaultUtilityModel         string                              `json:"default_utility_model"`
+	KeyboardShortcuts           map[string]interface{}              `json:"keyboard_shortcuts,omitempty"`
+	TerminalLinkBehavior        string                              `json:"terminal_link_behavior"`
+	TerminalFontFamily          string                              `json:"terminal_font_family"`
+	TerminalFontSize            int                                 `json:"terminal_font_size"`
+	ChangesPanelLayout          string                              `json:"changes_panel_layout"`
+	SystemMetricsDisplay        models.SystemMetricsDisplaySettings `json:"system_metrics_display"`
+	VoiceMode                   models.VoiceModeSettings            `json:"voice_mode"`
+	UpdatedAt                   string                              `json:"updated_at"`
 }
 
 type UserResponse struct {
@@ -59,31 +60,32 @@ type ShellOption struct {
 }
 
 type UpdateUserSettingsRequest struct {
-	WorkspaceID                 *string                            `json:"workspace_id,omitempty"`
-	KanbanViewMode              *string                            `json:"kanban_view_mode,omitempty"`
-	WorkflowFilterID            *string                            `json:"workflow_filter_id,omitempty"`
-	RepositoryIDs               *[]string                          `json:"repository_ids,omitempty"`
-	InitialSetupComplete        *bool                              `json:"initial_setup_complete,omitempty"`
-	PreferredShell              *string                            `json:"preferred_shell,omitempty"`
-	DefaultEditorID             *string                            `json:"default_editor_id,omitempty"`
-	EnablePreviewOnClick        *bool                              `json:"enable_preview_on_click,omitempty"`
-	ChatSubmitKey               *string                            `json:"chat_submit_key,omitempty"`
-	ReviewAutoMarkOnScroll      *bool                              `json:"review_auto_mark_on_scroll,omitempty"`
-	ShowReleaseNotification     *bool                              `json:"show_release_notification,omitempty"`
-	ReleaseNotesLastSeenVersion *string                            `json:"release_notes_last_seen_version,omitempty"`
-	LspAutoStartLanguages       *[]string                          `json:"lsp_auto_start_languages,omitempty"`
-	LspAutoInstallLanguages     *[]string                          `json:"lsp_auto_install_languages,omitempty"`
-	LspServerConfigs            *map[string]map[string]interface{} `json:"lsp_server_configs,omitempty"`
-	SavedLayouts                *[]models.SavedLayout              `json:"saved_layouts,omitempty"`
-	SidebarViews                *[]models.SidebarView              `json:"sidebar_views,omitempty"`
-	DefaultUtilityAgentID       *string                            `json:"default_utility_agent_id,omitempty"`
-	DefaultUtilityModel         *string                            `json:"default_utility_model,omitempty"`
-	KeyboardShortcuts           *map[string]interface{}            `json:"keyboard_shortcuts,omitempty"`
-	TerminalLinkBehavior        *string                            `json:"terminal_link_behavior,omitempty"`
-	TerminalFontFamily          *string                            `json:"terminal_font_family,omitempty"`
-	TerminalFontSize            *int                               `json:"terminal_font_size,omitempty"`
-	ChangesPanelLayout          *string                            `json:"changes_panel_layout,omitempty"`
-	VoiceMode                   *models.VoiceModeSettings          `json:"voice_mode,omitempty"`
+	WorkspaceID                 *string                              `json:"workspace_id,omitempty"`
+	KanbanViewMode              *string                              `json:"kanban_view_mode,omitempty"`
+	WorkflowFilterID            *string                              `json:"workflow_filter_id,omitempty"`
+	RepositoryIDs               *[]string                            `json:"repository_ids,omitempty"`
+	InitialSetupComplete        *bool                                `json:"initial_setup_complete,omitempty"`
+	PreferredShell              *string                              `json:"preferred_shell,omitempty"`
+	DefaultEditorID             *string                              `json:"default_editor_id,omitempty"`
+	EnablePreviewOnClick        *bool                                `json:"enable_preview_on_click,omitempty"`
+	ChatSubmitKey               *string                              `json:"chat_submit_key,omitempty"`
+	ReviewAutoMarkOnScroll      *bool                                `json:"review_auto_mark_on_scroll,omitempty"`
+	ShowReleaseNotification     *bool                                `json:"show_release_notification,omitempty"`
+	ReleaseNotesLastSeenVersion *string                              `json:"release_notes_last_seen_version,omitempty"`
+	LspAutoStartLanguages       *[]string                            `json:"lsp_auto_start_languages,omitempty"`
+	LspAutoInstallLanguages     *[]string                            `json:"lsp_auto_install_languages,omitempty"`
+	LspServerConfigs            *map[string]map[string]interface{}   `json:"lsp_server_configs,omitempty"`
+	SavedLayouts                *[]models.SavedLayout                `json:"saved_layouts,omitempty"`
+	SidebarViews                *[]models.SidebarView                `json:"sidebar_views,omitempty"`
+	DefaultUtilityAgentID       *string                              `json:"default_utility_agent_id,omitempty"`
+	DefaultUtilityModel         *string                              `json:"default_utility_model,omitempty"`
+	KeyboardShortcuts           *map[string]interface{}              `json:"keyboard_shortcuts,omitempty"`
+	TerminalLinkBehavior        *string                              `json:"terminal_link_behavior,omitempty"`
+	TerminalFontFamily          *string                              `json:"terminal_font_family,omitempty"`
+	TerminalFontSize            *int                                 `json:"terminal_font_size,omitempty"`
+	ChangesPanelLayout          *string                              `json:"changes_panel_layout,omitempty"`
+	SystemMetricsDisplay        *models.SystemMetricsDisplaySettings `json:"system_metrics_display,omitempty"`
+	VoiceMode                   *models.VoiceModeSettings            `json:"voice_mode,omitempty"`
 }
 
 func FromUser(user *models.User) UserDTO {
@@ -122,6 +124,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		TerminalFontFamily:          settings.TerminalFontFamily,
 		TerminalFontSize:            settings.TerminalFontSize,
 		ChangesPanelLayout:          settings.ChangesPanelLayout,
+		SystemMetricsDisplay:        settings.SystemMetricsDisplay,
 		VoiceMode:                   settings.VoiceMode,
 		UpdatedAt:                   settings.UpdatedAt.Format(time.RFC3339),
 	}

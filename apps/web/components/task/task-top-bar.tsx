@@ -20,6 +20,7 @@ import { useLinearAvailable } from "@/hooks/domains/linear/use-linear-availabili
 import { PortForwardButton } from "@/components/task/port-forward-dialog";
 import { ExecutorSettingsButton } from "@/components/task/executor-settings-button";
 import { WorkflowStepper, type WorkflowStepperStep } from "@/components/task/workflow-stepper";
+import { TopbarMetrics } from "@/components/system-metrics/topbar-metrics";
 import { isDebugUI } from "@/lib/config";
 
 type TaskTopBarProps = {
@@ -317,6 +318,7 @@ function TopBarRight({
 }) {
   return (
     <div className="flex items-center justify-self-end gap-2 [&_button]:whitespace-nowrap">
+      <TopbarMetrics activeSessionId={activeSessionId} />
       {officeTaskHref && (
         <TopbarCluster label="Open in office view" className="[&_a]:h-7 [&_a]:text-xs">
           <Button asChild size="sm" variant="outline" className="h-7 cursor-pointer px-2">

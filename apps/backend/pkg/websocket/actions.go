@@ -134,12 +134,14 @@ const (
 	// Focus signals are layered on top of subscriptions to indicate which
 	// session the user is actively viewing (task details page or task panel),
 	// vs merely subscribed (sidebar diff badges). Drives backend polling tier.
-	ActionSessionFocus    = "session.focus"
-	ActionSessionUnfocus  = "session.unfocus"
-	ActionUserSubscribe   = "user.subscribe"
-	ActionUserUnsubscribe = "user.unsubscribe"
-	ActionRunSubscribe    = "run.subscribe"
-	ActionRunUnsubscribe  = "run.unsubscribe"
+	ActionSessionFocus             = "session.focus"
+	ActionSessionUnfocus           = "session.unfocus"
+	ActionUserSubscribe            = "user.subscribe"
+	ActionUserUnsubscribe          = "user.unsubscribe"
+	ActionRunSubscribe             = "run.subscribe"
+	ActionRunUnsubscribe           = "run.unsubscribe"
+	ActionSystemMetricsSubscribe   = "system.metrics.subscribe"
+	ActionSystemMetricsUnsubscribe = "system.metrics.unsubscribe"
 
 	// Message actions
 	ActionMessageAdd    = "message.add"
@@ -213,6 +215,7 @@ const (
 	ActionExecutorProfileDeleted   = "executor.profile.deleted"
 	ActionExecutorPrepareProgress  = "executor.prepare.progress"
 	ActionExecutorPrepareCompleted = "executor.prepare.completed"
+	ActionSystemMetricsUpdated     = "system.metrics.updated"
 
 	ActionAgentProfileDeleted = "agent.profile.deleted"
 	ActionAgentProfileCreated = "agent.profile.created"

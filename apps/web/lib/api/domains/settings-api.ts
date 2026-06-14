@@ -22,6 +22,10 @@ import type {
   DynamicModelsResponse,
 } from "@/lib/types/http";
 import type { VoiceModeSettings } from "@/lib/types/http-voice";
+import type {
+  SystemMetricsGlobalSettings,
+  SystemMetricsSettingsResponse,
+} from "@/lib/types/system";
 
 // User settings
 export async function fetchUserSettings(options?: ApiRequestOptions) {
@@ -53,11 +57,29 @@ export async function updateUserSettings(
     terminal_font_family?: string;
     terminal_font_size?: number;
     changes_panel_layout?: "flat" | "tree";
+    system_metrics_display?: { show_in_topbar?: boolean };
     voice_mode?: VoiceModeSettings;
   },
   options?: ApiRequestOptions,
 ) {
   return fetchJson<UserSettingsResponse>("/api/v1/user/settings", {
+    ...options,
+    init: { method: "PATCH", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+  });
+}
+
+export async function fetchSystemMetricsSettings(options?: ApiRequestOptions) {
+  return fetchJsonWithRetry<SystemMetricsSettingsResponse>(
+    "/api/v1/system/metrics/settings",
+    options,
+  );
+}
+
+export async function updateSystemMetricsSettings(
+  payload: SystemMetricsGlobalSettings,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<SystemMetricsSettingsResponse>("/api/v1/system/metrics/settings", {
     ...options,
     init: { method: "PATCH", body: JSON.stringify(payload), ...(options?.init ?? {}) },
   });

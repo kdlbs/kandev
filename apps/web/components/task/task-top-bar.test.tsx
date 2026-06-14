@@ -1,5 +1,6 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { StateProvider } from "@/components/state-provider";
 import { TaskTopBar } from "./task-top-bar";
 
 afterEach(() => cleanup());
@@ -90,14 +91,18 @@ vi.mock("@/components/task/branch-path-popover", () => ({
 
 describe("TaskTopBar executor environment controls", () => {
   it("hides the executor environment button for filesystem executors", () => {
-    render(<TaskTopBar taskId="task-1" remoteExecutorType="worktree" />);
+    renderTopBar(<TaskTopBar taskId="task-1" remoteExecutorType="worktree" />);
 
     expect(screen.queryByTestId("executor-settings-button")).toBeNull();
   });
 
   it("shows the executor environment button for Docker executors", () => {
-    render(<TaskTopBar taskId="task-1" remoteExecutorType="local_docker" />);
+    renderTopBar(<TaskTopBar taskId="task-1" remoteExecutorType="local_docker" />);
 
     expect(screen.getByTestId("executor-settings-button")).toBeTruthy();
   });
 });
+
+function renderTopBar(ui: React.ReactNode) {
+  return render(<StateProvider>{ui}</StateProvider>);
+}

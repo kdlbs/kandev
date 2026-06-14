@@ -1,7 +1,11 @@
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
-import { parseChangesPanelLayout, parseVoiceMode } from "@/lib/ssr/user-settings";
+import {
+  parseChangesPanelLayout,
+  parseSystemMetricsDisplay,
+  parseVoiceMode,
+} from "@/lib/ssr/user-settings";
 
 export function registerUsersHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
@@ -32,6 +36,7 @@ export function registerUsersHandlers(store: StoreApi<AppState>): WsHandlers {
               ? "browser_panel"
               : "new_tab",
           changesPanelLayout: parseChangesPanelLayout(message.payload.changes_panel_layout),
+          systemMetricsDisplay: parseSystemMetricsDisplay(message.payload.system_metrics_display),
           voiceMode: parseVoiceMode(message.payload.voice_mode),
           loaded: true,
         },

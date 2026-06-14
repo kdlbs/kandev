@@ -64,6 +64,7 @@ export class WebSocketClient {
   private sessionFocusCounts = new Map<string, number>();
   private userSubscriptionCount = 0;
   private runSubscriptions = new Map<string, number>();
+  private systemMetricsSubscriptionCount = 0;
 
   constructor(
     private url: string,
@@ -332,6 +333,31 @@ export class WebSocketClient {
     return () => this.unsubscribeRun(runId);
   }
 
+  subscribeSystemMetrics() {
+    this.systemMetricsSubscriptionCount += 1;
+    if (this.status === "connected" && this.systemMetricsSubscriptionCount === 1) {
+      this.send({
+        id: generateUUID(),
+        type: "request",
+        action: "system.metrics.subscribe",
+        payload: {},
+      });
+    }
+    return () => this.unsubscribeSystemMetrics();
+  }
+
+  unsubscribeSystemMetrics() {
+    this.systemMetricsSubscriptionCount = Math.max(0, this.systemMetricsSubscriptionCount - 1);
+    if (this.status === "connected" && this.systemMetricsSubscriptionCount === 0) {
+      this.send({
+        id: generateUUID(),
+        type: "request",
+        action: "system.metrics.unsubscribe",
+        payload: {},
+      });
+    }
+  }
+
   unsubscribeRun(runId: string) {
     const currentCount = this.runSubscriptions.get(runId);
     if (!currentCount) return;
@@ -531,6 +557,14 @@ export class WebSocketClient {
         id: generateUUID(),
         type: "request",
         action: "user.subscribe",
+        payload: {},
+      });
+    }
+    if (this.systemMetricsSubscriptionCount > 0) {
+      this.send({
+        id: generateUUID(),
+        type: "request",
+        action: "system.metrics.subscribe",
         payload: {},
       });
     }

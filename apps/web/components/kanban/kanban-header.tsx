@@ -19,6 +19,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { useReleaseNotes } from "@/hooks/use-release-notes";
 import { useSystemHealthIndicator } from "@/hooks/use-system-health-indicator";
+import { TopbarMetrics } from "@/components/system-metrics/topbar-metrics";
 import type { ComponentProps, RefObject } from "react";
 
 type KanbanHeaderProps = {
@@ -169,6 +170,7 @@ function TabletHeader({
               className="hidden md:flex w-48 lg:w-56 [&_input]:h-8"
             />
           )}
+          <TopbarMetrics />
           <TooltipProvider>
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} size="lg" />
           </TooltipProvider>
@@ -244,6 +246,7 @@ function DesktopHeader({
       actions={
         <>
           {actionsSearch}
+          <TopbarMetrics />
           <TooltipProvider>
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} size="lg" />
           </TooltipProvider>

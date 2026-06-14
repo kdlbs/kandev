@@ -25,7 +25,9 @@ import (
 	"github.com/kandev/kandev/internal/system/info"
 	"github.com/kandev/kandev/internal/system/jobs"
 	"github.com/kandev/kandev/internal/system/logs"
+	"github.com/kandev/kandev/internal/system/metrics"
 	"github.com/kandev/kandev/internal/system/updates"
+	"go.uber.org/zap"
 )
 
 // BuildInfo holds the ldflag-injected build metadata that cmd/kandev
@@ -55,6 +57,7 @@ type Service struct {
 	Database *database.Service
 	Backups  *backups.Service
 	Logs     *logs.Service
+	Metrics  *metrics.Service
 	Updates  *updates.Service
 }
 
@@ -81,6 +84,14 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 
 	logDir := log.LogDirectory()
 	logFile := log.LogFilename()
+	metricsStore, err := metrics.NewStore(pool)
+	if err != nil {
+		log.Error("Failed to initialize system metrics store", zap.Error(err))
+	}
+	var metricsSvc *metrics.Service
+	if metricsStore != nil {
+		metricsSvc = metrics.NewService(metricsStore, metrics.NewCollector())
+	}
 
 	return &Service{
 		Info:     info.NewService(build.Version, build.Commit, build.BuildTime),
@@ -89,6 +100,7 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 		Database: dbSvc,
 		Backups:  backupsSvc,
 		Logs:     logs.NewService(logDir, logFile, log),
+		Metrics:  metricsSvc,
 		Updates:  updates.NewService(pool, build.Version, nil, log, updates.WithHomeDir(homeDir), updates.WithJobs(tracker)),
 	}
 }
@@ -115,6 +127,10 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 	g.GET("/logs", logs.HandleList(s.Logs))
 	g.GET("/logs/tail", logs.HandleTail(s.Logs))
 	g.GET("/logs/:name/download", logs.HandleDownload(s.Logs))
+
+	if s.Metrics != nil {
+		metrics.RegisterRoutes(g, s.Metrics)
+	}
 
 	g.GET("/updates", updates.HandleGet(s.Updates))
 	g.POST("/updates/check", updates.HandleCheck(s.Updates))

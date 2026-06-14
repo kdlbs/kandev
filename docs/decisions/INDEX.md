@@ -22,3 +22,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 0014 | [Per-CLI MCP server injection for passthrough mode](0014-passthrough-mcp-injection-strategies.md) | accepted | backend | 2026-05-29 |
 | 0015 | [Explicit completion signal for auto-advance](0015-explicit-completion-signal-for-auto-advance.md) | proposed | backend, frontend | 2026-06-04 |
 | 0016 | [Read-only absolute file paths](0016-observed-external-file-reads.md) | accepted | backend | 2026-06-14 |
+| 0017 | [Resource metrics sampling](0017-resource-metrics-sampling.md) | accepted | backend, frontend, protocol | 2026-06-14 |

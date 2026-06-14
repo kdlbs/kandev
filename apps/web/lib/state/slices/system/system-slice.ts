@@ -10,6 +10,7 @@ export const defaultSystemState: SystemSliceState = {
     logs: { files: [], tail: [], tailLoaded: false },
     updates: null,
     jobs: {},
+    metrics: null,
   },
 };
 
@@ -60,5 +61,9 @@ export const createSystemSlice: StateCreator<
   clearSystemJob: (jobId) =>
     set((draft) => {
       delete draft.system.jobs[jobId];
+    }),
+  setSystemMetricsSnapshot: (snapshot) =>
+    set((draft) => {
+      draft.system.metrics = snapshot;
     }),
 });

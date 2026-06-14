@@ -19,6 +19,7 @@ export type BackendMessageType =
   | "session.git.event"
   | "system.error"
   | "system.job.update"
+  | "system.metrics.updated"
   | "workspace.created"
   | "workspace.updated"
   | "workspace.deleted"
@@ -393,6 +394,7 @@ export type UserSettingsUpdatedPayload = {
   keyboard_shortcuts?: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
   terminal_link_behavior?: string;
   changes_panel_layout?: "flat" | "tree";
+  system_metrics_display?: { show_in_topbar?: boolean };
   voice_mode?: import("@/lib/types/http-voice").VoiceModeSettings;
   updated_at?: string;
 };
@@ -522,6 +524,10 @@ export type BackendMessageMap = OfficeBackendMessageMap & {
   "session.git.event": BackendMessage<"session.git.event", GitEventPayload>;
   "system.error": BackendMessage<"system.error", SystemErrorPayload>;
   "system.job.update": BackendMessage<"system.job.update", import("./system").SystemJob>;
+  "system.metrics.updated": BackendMessage<
+    "system.metrics.updated",
+    import("./system").SystemMetricsSnapshot
+  >;
   "workspace.created": BackendMessage<"workspace.created", WorkspacePayload>;
   "workspace.updated": BackendMessage<"workspace.updated", WorkspacePayload>;
   "workspace.deleted": BackendMessage<"workspace.deleted", WorkspacePayload>;

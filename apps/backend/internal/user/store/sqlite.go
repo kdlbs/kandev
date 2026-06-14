@@ -162,6 +162,7 @@ func (r *sqliteRepository) UpsertUserSettings(ctx context.Context, settings *mod
 		"terminal_font_family":            settings.TerminalFontFamily,
 		"terminal_font_size":              settings.TerminalFontSize,
 		"changes_panel_layout":            settings.ChangesPanelLayout,
+		"system_metrics_display":          settings.SystemMetricsDisplay,
 		"voice_mode":                      settings.VoiceMode,
 	})
 	if err != nil {
@@ -265,31 +266,32 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		return settings, nil
 	}
 	var payload struct {
-		WorkspaceID                 string                            `json:"workspace_id"`
-		KanbanViewMode              string                            `json:"kanban_view_mode"`
-		WorkflowFilterID            string                            `json:"workflow_filter_id"`
-		RepositoryIDs               []string                          `json:"repository_ids"`
-		InitialSetupComplete        bool                              `json:"initial_setup_complete"`
-		PreferredShell              string                            `json:"preferred_shell"`
-		DefaultEditorID             string                            `json:"default_editor_id"`
-		EnablePreviewOnClick        bool                              `json:"enable_preview_on_click"`
-		ChatSubmitKey               string                            `json:"chat_submit_key"`
-		ReviewAutoMarkOnScroll      *bool                             `json:"review_auto_mark_on_scroll"`
-		ShowReleaseNotification     *bool                             `json:"show_release_notification"`
-		ReleaseNotesLastSeenVersion string                            `json:"release_notes_last_seen_version"`
-		LspAutoStartLanguages       []string                          `json:"lsp_auto_start_languages"`
-		LspAutoInstallLanguages     []string                          `json:"lsp_auto_install_languages"`
-		LspServerConfigs            map[string]map[string]interface{} `json:"lsp_server_configs"`
-		SavedLayouts                []models.SavedLayout              `json:"saved_layouts"`
-		SidebarViews                []models.SidebarView              `json:"sidebar_views"`
-		DefaultUtilityAgentID       string                            `json:"default_utility_agent_id"`
-		DefaultUtilityModel         string                            `json:"default_utility_model"`
-		KeyboardShortcuts           map[string]interface{}            `json:"keyboard_shortcuts"`
-		TerminalLinkBehavior        string                            `json:"terminal_link_behavior"`
-		TerminalFontFamily          string                            `json:"terminal_font_family"`
-		TerminalFontSize            int                               `json:"terminal_font_size"`
-		ChangesPanelLayout          string                            `json:"changes_panel_layout"`
-		VoiceMode                   *storedVoiceMode                  `json:"voice_mode"`
+		WorkspaceID                 string                              `json:"workspace_id"`
+		KanbanViewMode              string                              `json:"kanban_view_mode"`
+		WorkflowFilterID            string                              `json:"workflow_filter_id"`
+		RepositoryIDs               []string                            `json:"repository_ids"`
+		InitialSetupComplete        bool                                `json:"initial_setup_complete"`
+		PreferredShell              string                              `json:"preferred_shell"`
+		DefaultEditorID             string                              `json:"default_editor_id"`
+		EnablePreviewOnClick        bool                                `json:"enable_preview_on_click"`
+		ChatSubmitKey               string                              `json:"chat_submit_key"`
+		ReviewAutoMarkOnScroll      *bool                               `json:"review_auto_mark_on_scroll"`
+		ShowReleaseNotification     *bool                               `json:"show_release_notification"`
+		ReleaseNotesLastSeenVersion string                              `json:"release_notes_last_seen_version"`
+		LspAutoStartLanguages       []string                            `json:"lsp_auto_start_languages"`
+		LspAutoInstallLanguages     []string                            `json:"lsp_auto_install_languages"`
+		LspServerConfigs            map[string]map[string]interface{}   `json:"lsp_server_configs"`
+		SavedLayouts                []models.SavedLayout                `json:"saved_layouts"`
+		SidebarViews                []models.SidebarView                `json:"sidebar_views"`
+		DefaultUtilityAgentID       string                              `json:"default_utility_agent_id"`
+		DefaultUtilityModel         string                              `json:"default_utility_model"`
+		KeyboardShortcuts           map[string]interface{}              `json:"keyboard_shortcuts"`
+		TerminalLinkBehavior        string                              `json:"terminal_link_behavior"`
+		TerminalFontFamily          string                              `json:"terminal_font_family"`
+		TerminalFontSize            int                                 `json:"terminal_font_size"`
+		ChangesPanelLayout          string                              `json:"changes_panel_layout"`
+		SystemMetricsDisplay        models.SystemMetricsDisplaySettings `json:"system_metrics_display"`
+		VoiceMode                   *storedVoiceMode                    `json:"voice_mode"`
 	}
 	if err := json.Unmarshal([]byte(settingsRaw), &payload); err != nil {
 		return nil, err
@@ -350,6 +352,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.TerminalFontFamily = payload.TerminalFontFamily
 	settings.TerminalFontSize = payload.TerminalFontSize
 	settings.VoiceMode = mergeVoiceModeDefaults(payload.VoiceMode)
+	settings.SystemMetricsDisplay = payload.SystemMetricsDisplay
 	if payload.ChangesPanelLayout == "flat" {
 		settings.ChangesPanelLayout = "flat"
 	} else {

@@ -658,6 +658,11 @@ func startGatewayAndServe(
 	}, systemsvc.Wiring{
 		OrchestratorShutdown: func() { _ = orchestratorSvc.Stop() },
 	})
+	if systemSvc.Metrics != nil {
+		systemSvc.Metrics.SetBroadcaster(gateway.Hub.BroadcastToSystemMetrics)
+		gateway.Hub.SetSystemMetricsInterestTracker(systemSvc.Metrics)
+		systemSvc.Metrics.SetExecutionProvider(lifecycleMetricProvider{manager: lifecycleMgr})
+	}
 	systemSvc.StartBackground(ctx)
 	gateways.RegisterSystemNotifications(ctx, eventBus, gateway.Hub, log)
 

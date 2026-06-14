@@ -9,6 +9,7 @@ import {
   IconKeyboard,
   IconTerminal2,
   IconGitBranch,
+  IconActivity,
 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
@@ -28,6 +29,7 @@ import { Separator } from "@kandev/ui/separator";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { ShellSettingsCard } from "@/components/settings/shell-settings-card";
 import { KeyboardShortcutsCard } from "@/components/settings/keyboard-shortcuts-card";
+import { SystemMetricsSettingsCard } from "@/components/settings/system-metrics-settings-card";
 import { getBackendConfig } from "@/lib/config";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
@@ -496,6 +498,16 @@ export function GeneralSettings() {
         <TerminalFontCard />
         <TerminalFontSizeCard />
         <TerminalLinksCard />
+      </SettingsSection>
+
+      <Separator />
+
+      <SettingsSection
+        icon={<IconActivity className="h-5 w-5" />}
+        title="Resource Metrics"
+        description="Configure backend and execution resource sampling"
+      >
+        <SystemMetricsSettingsCard />
       </SettingsSection>
 
       <Separator />

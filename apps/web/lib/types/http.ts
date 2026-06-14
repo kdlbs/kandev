@@ -414,8 +414,6 @@ export type SidebarViewApi = {
   collapsed_groups: string[];
 };
 
-import type { VoiceModeSettings } from "./http-voice";
-
 export type UserSettings = {
   user_id: string;
   workspace_id: WorkspaceId;
@@ -442,7 +440,8 @@ export type UserSettings = {
   terminal_font_family?: string;
   terminal_font_size?: number;
   changes_panel_layout?: "flat" | "tree";
-  voice_mode?: VoiceModeSettings;
+  system_metrics_display?: { show_in_topbar?: boolean };
+  voice_mode?: import("./http-voice").VoiceModeSettings;
   updated_at: string;
 };
 

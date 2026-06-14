@@ -30,18 +30,19 @@ const (
 
 // Client represents a single WebSocket connection
 type Client struct {
-	ID                   string
-	conn                 *websocket.Conn
-	hub                  *Hub
-	send                 chan []byte
-	subscriptions        map[string]bool // Task IDs this client is subscribed to
-	sessionSubscriptions map[string]bool // Session IDs this client is subscribed to
-	sessionFocus         map[string]bool // Session IDs this client has focused (a strict subset of subscriptions, conceptually — see hub_session_mode.go)
-	userSubscriptions    map[string]bool // User IDs this client is subscribed to
-	runSubscriptions     map[string]bool // Office run IDs this client is subscribed to (for run.event.appended)
-	mu                   sync.RWMutex
-	closed               bool
-	logger               *logger.Logger
+	ID                      string
+	conn                    *websocket.Conn
+	hub                     *Hub
+	send                    chan []byte
+	subscriptions           map[string]bool // Task IDs this client is subscribed to
+	sessionSubscriptions    map[string]bool // Session IDs this client is subscribed to
+	sessionFocus            map[string]bool // Session IDs this client has focused (a strict subset of subscriptions, conceptually — see hub_session_mode.go)
+	userSubscriptions       map[string]bool // User IDs this client is subscribed to
+	runSubscriptions        map[string]bool // Office run IDs this client is subscribed to (for run.event.appended)
+	systemMetricsSubscribed bool
+	mu                      sync.RWMutex
+	closed                  bool
+	logger                  *logger.Logger
 }
 
 // NewClient creates a new WebSocket client
@@ -151,6 +152,12 @@ func (c *Client) handleMessage(msg *ws.Message) {
 		return
 	case ws.ActionRunUnsubscribe:
 		c.handleRunUnsubscribe(msg)
+		return
+	case ws.ActionSystemMetricsSubscribe:
+		c.handleSystemMetricsSubscribe(msg)
+		return
+	case ws.ActionSystemMetricsUnsubscribe:
+		c.handleSystemMetricsUnsubscribe(msg)
 		return
 	}
 
@@ -373,6 +380,22 @@ func (c *Client) handleRunUnsubscribe(msg *ws.Message) {
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		"success": true,
 		"run_id":  req.RunID,
+	})
+	c.sendMessage(resp)
+}
+
+func (c *Client) handleSystemMetricsSubscribe(msg *ws.Message) {
+	c.hub.SubscribeToSystemMetrics(c)
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"success": true,
+	})
+	c.sendMessage(resp)
+}
+
+func (c *Client) handleSystemMetricsUnsubscribe(msg *ws.Message) {
+	c.hub.UnsubscribeFromSystemMetrics(c)
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"success": true,
 	})
 	c.sendMessage(resp)
 }

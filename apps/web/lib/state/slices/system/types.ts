@@ -6,6 +6,7 @@ import type {
   LogFileInfo,
   UpdatesResponse,
   SystemJob,
+  SystemMetricsSnapshot,
 } from "@/lib/types/system";
 
 export type SystemBackupsState = {
@@ -30,6 +31,7 @@ export type SystemSliceState = {
     logs: SystemLogsState;
     updates: UpdatesResponse | null;
     jobs: SystemJobsMap;
+    metrics: SystemMetricsSnapshot | null;
   };
 };
 
@@ -43,6 +45,7 @@ export type SystemSliceActions = {
   setSystemUpdates: (updates: UpdatesResponse) => void;
   upsertSystemJob: (job: SystemJob) => void;
   clearSystemJob: (jobId: string) => void;
+  setSystemMetricsSnapshot: (snapshot: SystemMetricsSnapshot) => void;
 };
 
 export type SystemSlice = SystemSliceState & SystemSliceActions;

@@ -60,6 +60,7 @@ function carryForwardCoreSettings(current: DisplaySettings) {
     defaultUtilityAgentId: current.defaultUtilityAgentId ?? null,
     keyboardShortcuts: current.keyboardShortcuts ?? {},
     changesPanelLayout: current.changesPanelLayout ?? "tree",
+    systemMetricsDisplay: current.systemMetricsDisplay ?? { showInTopbar: false },
     voiceMode: current.voiceMode ?? { ...DEFAULT_VOICE_MODE_STATE },
   };
 }

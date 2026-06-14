@@ -161,6 +161,7 @@ export type UserSettingsState = {
   terminalFontFamily: string | null;
   terminalFontSize: number | null;
   changesPanelLayout: "flat" | "tree";
+  systemMetricsDisplay: { showInTopbar: boolean };
   voiceMode: VoiceModeState;
   loaded: boolean;
 };
