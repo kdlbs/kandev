@@ -31,8 +31,8 @@ import { cn } from "@/lib/utils";
  */
 const WorkspaceTrigger = forwardRef<
   HTMLButtonElement,
-  ComponentPropsWithoutRef<"button"> & { activeName: string; activeType: WorkspaceType }
->(function WorkspaceTrigger({ activeName, activeType, className, ...props }, ref) {
+  ComponentPropsWithoutRef<"button"> & { activeName: string }
+>(function WorkspaceTrigger({ activeName, className, ...props }, ref) {
   return (
     <button
       ref={ref}
@@ -46,10 +46,6 @@ const WorkspaceTrigger = forwardRef<
       {...props}
     >
       <span className="min-w-0 flex-1 truncate text-left sidebar-fade-in">{activeName}</span>
-      <span className="hidden shrink-0 items-center gap-1 rounded border border-border/60 px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground md:inline-flex">
-        <WorkspaceTypeIcon type={activeType} className="h-3 w-3" />
-        {workspaceTypeLabel(activeType)}
-      </span>
       <IconChevronDown className="h-3.5 w-3.5 shrink-0 opacity-50 transition-opacity group-hover/ws:opacity-80" />
     </button>
   );
@@ -88,7 +84,6 @@ export function AppSidebarWorkspacePicker() {
   const activeWorkspace = workspaces.items.find((w) => w.id === workspaces.activeId);
   const activeId = activeWorkspace?.id ?? null;
   const activeName = activeWorkspace?.name ?? "Workspace";
-  const activeType = workspaceType(activeWorkspace);
 
   const handleSelect = useCallback(
     (workspace: WorkspaceItem) => {
@@ -111,7 +106,7 @@ export function AppSidebarWorkspacePicker() {
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
-        <WorkspaceTrigger activeName={activeName} activeType={activeType} />
+        <WorkspaceTrigger activeName={activeName} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-72">
         {workspaces.items.length === 0 ? (

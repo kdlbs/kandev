@@ -164,11 +164,11 @@ describe("AppSidebarWorkspacePicker — workspace select", () => {
     expect(navigationMock.push).toHaveBeenCalledWith("/?workspaceId=w1");
   });
 
-  it("labels workspace types in the trigger and menu", () => {
-    storeState.workspaces.activeId = "w2";
+  it("labels workspace types in the menu without using trigger space", () => {
+    storeState.workspaces.activeId = "w1";
     render(<AppSidebarWorkspacePicker />);
 
-    expect(screen.getByTestId("sidebar-workspace-trigger").textContent).toContain("Office");
+    expect(screen.getByTestId("sidebar-workspace-trigger").textContent).not.toContain("Kanban");
     expect(screen.getByTestId(KANBAN_WORKSPACE_ITEM).textContent).toContain("Kanban");
     expect(screen.getByTestId(OFFICE_WORKSPACE_ITEM).textContent).toContain("Office");
   });
