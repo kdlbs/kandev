@@ -60,10 +60,11 @@ test.describe("Long prepare (slow git fetch)", () => {
 
       // Wait past the pre-fix retry budget (1+2+5+10 = 18s). The file tree
       // must NOT have transitioned to the "manual" (Load Files) state —
-      // that's the regression.
+      // that's the regression. On faster CI runners the 20s fetch may already
+      // have completed by the time this assertion runs, so do not require the
+      // waiting state to still be visible here.
       await testPage.waitForTimeout(19_000);
       await expect(fileTreeManual).toHaveCount(0);
-      await expect(fileTreeWaiting).toBeVisible();
 
       // Fetch eventually returns, worktree creation proceeds, agentctl
       // becomes ready. File tree leaves the waiting state automatically.
