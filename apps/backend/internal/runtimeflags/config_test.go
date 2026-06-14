@@ -14,10 +14,10 @@ func TestApplyStatesToConfigClearsProfileDebugEnvWhenDisabled(t *testing.T) {
 		"KANDEV_DEBUG_PPROF_ENABLED",
 		"KANDEV_DEBUG_AGENT_MESSAGES",
 	} {
-		name := name
-		_ = os.Unsetenv(name)
-		t.Cleanup(func() { _ = os.Unsetenv(name) })
+		preserveEnv(t, name)
 	}
+	_ = os.Unsetenv("KANDEV_DEBUG_PPROF_ENABLED")
+	_ = os.Unsetenv("KANDEV_DEBUG_AGENT_MESSAGES")
 	t.Setenv("KANDEV_DEBUG_DEV_MODE", "true")
 
 	if _, _, err := profiles.ApplyProfile(); err != nil {
@@ -45,4 +45,28 @@ func TestApplyStatesToConfigClearsProfileDebugEnvWhenDisabled(t *testing.T) {
 	if _, ok := os.LookupEnv("KANDEV_DEBUG_PPROF_ENABLED"); ok {
 		t.Fatal("KANDEV_DEBUG_PPROF_ENABLED remained set after disabled override")
 	}
+}
+
+func TestOptionsFromConfigParsesUppercaseTruthyEnv(t *testing.T) {
+	preserveEnv(t, "KANDEV_FEATURES_OFFICE")
+	t.Setenv("KANDEV_FEATURES_OFFICE", "TRUE")
+
+	opts := OptionsFromConfig(&config.Config{})
+
+	if !opts.EnvValues["KANDEV_FEATURES_OFFICE"] {
+		t.Fatal("KANDEV_FEATURES_OFFICE TRUE parsed false, want true")
+	}
+}
+
+func preserveEnv(t *testing.T, name string) {
+	t.Helper()
+	value, ok := os.LookupEnv(name)
+	_ = os.Unsetenv(name)
+	t.Cleanup(func() {
+		if ok {
+			_ = os.Setenv(name, value)
+			return
+		}
+		_ = os.Unsetenv(name)
+	})
 }

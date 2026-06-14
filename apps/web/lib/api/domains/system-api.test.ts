@@ -287,7 +287,7 @@ describe("restart", () => {
 
   it("requestRestart POSTs /restart", async () => {
     fetchSpy.mockResolvedValueOnce(jsonResponse({ accepted: true, message: "Restarting" }));
-    const res = await requestRestart();
+    const res = await requestRestart({ init: { method: "GET" } });
     expect(lastCall().url).toBe(`${BASE}/restart`);
     expect(method()).toBe("POST");
     expect(res.accepted).toBe(true);

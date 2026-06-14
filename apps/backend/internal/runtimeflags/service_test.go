@@ -2,6 +2,7 @@ package runtimeflags
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
 
@@ -98,6 +99,16 @@ func TestServiceExplicitImpliedEnvLocksDebugMode(t *testing.T) {
 	}
 	if !debug.EnvLocked {
 		t.Fatal("EnvLocked = false, want true")
+	}
+}
+
+func TestServiceNilStoreFailsFast(t *testing.T) {
+	svc := NewService(nil, Options{})
+	if _, err := svc.ListStates(context.Background()); !errors.Is(err, ErrStoreUnset) {
+		t.Fatalf("ListStates error = %v, want %v", err, ErrStoreUnset)
+	}
+	if _, err := svc.SetOverride(context.Background(), "features.office", nil); !errors.Is(err, ErrStoreUnset) {
+		t.Fatalf("SetOverride error = %v, want %v", err, ErrStoreUnset)
 	}
 }
 

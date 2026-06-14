@@ -38,7 +38,7 @@ function lastCall(): { url: string; init: FetchInit | undefined } {
 describe("runtime flags api", () => {
   it("fetchRuntimeFlags GETs the runtime flags endpoint with no-store cache", async () => {
     fetchSpy.mockResolvedValueOnce(jsonResponse({ flags: [] }));
-    const res = await fetchRuntimeFlags();
+    const res = await fetchRuntimeFlags({ cache: "force-cache" });
     const { url, init } = lastCall();
     expect(url).toBe(BASE);
     expect((init?.method ?? "GET").toUpperCase()).toBe("GET");
@@ -48,7 +48,9 @@ describe("runtime flags api", () => {
 
   it("updateRuntimeFlag PATCHes a boolean override", async () => {
     fetchSpy.mockResolvedValueOnce(jsonResponse({ flags: [] }));
-    await updateRuntimeFlag("features.office", true);
+    await updateRuntimeFlag("features.office", true, {
+      init: { method: "GET", body: JSON.stringify({ override: false }) },
+    });
     const { url, init } = lastCall();
     expect(url).toBe(`${BASE}/features.office`);
     expect((init?.method ?? "").toUpperCase()).toBe("PATCH");

@@ -9,6 +9,7 @@ import (
 
 var (
 	ErrEnvLocked   = errors.New("runtime flag is controlled by environment")
+	ErrStoreUnset  = errors.New("runtime flag store is not configured")
 	ErrUnknownFlag = errors.New("unknown runtime flag")
 )
 
@@ -32,6 +33,9 @@ func NewService(store Store, opts Options) *Service {
 }
 
 func (s *Service) ListStates(ctx context.Context) ([]RuntimeFlagState, error) {
+	if s.store == nil {
+		return nil, ErrStoreUnset
+	}
 	overrides, err := s.store.ListOverrides(ctx)
 	if err != nil {
 		return nil, err
@@ -46,6 +50,9 @@ func (s *Service) ListStates(ctx context.Context) ([]RuntimeFlagState, error) {
 }
 
 func (s *Service) SetOverride(ctx context.Context, key string, value *bool) ([]RuntimeFlagState, error) {
+	if s.store == nil {
+		return nil, ErrStoreUnset
+	}
 	def, ok := DefinitionByKey(key)
 	if !ok {
 		return nil, fmt.Errorf("%w: %s", ErrUnknownFlag, key)

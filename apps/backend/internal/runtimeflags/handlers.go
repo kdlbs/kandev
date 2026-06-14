@@ -2,6 +2,7 @@ package runtimeflags
 
 import (
 	"errors"
+	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -34,8 +35,10 @@ type patchRequest struct {
 func (h *Handler) patch(c *gin.Context) {
 	var req patchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid runtime flag payload"})
-		return
+		if !errors.Is(err, io.EOF) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid runtime flag payload"})
+			return
+		}
 	}
 	states, err := h.svc.SetOverride(c.Request.Context(), c.Param("key"), req.Override)
 	if err != nil {

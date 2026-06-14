@@ -183,6 +183,6 @@ export function fetchRestartCapability(options?: ApiRequestOptions): Promise<Res
 export function requestRestart(options?: ApiRequestOptions): Promise<RestartResponse> {
   return fetchJson<RestartResponse>(`${SYSTEM_BASE}/restart`, {
     ...options,
-    init: { method: "POST", ...(options?.init ?? {}) },
+    init: { ...(options?.init ?? {}), method: "POST" },
   });
 }

@@ -2,6 +2,7 @@ package runtimeflags
 
 import (
 	"os"
+	"strings"
 
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/profiles"
@@ -73,7 +74,7 @@ func unsetIfNotExplicit(name string) {
 }
 
 func isTruthy(s string) bool {
-	switch s {
+	switch strings.ToLower(s) {
 	case "true", "1", "yes", "on":
 		return true
 	default:

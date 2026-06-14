@@ -5,8 +5,8 @@ const RUNTIME_FLAGS_BASE = "/api/v1/runtime-flags";
 
 export function fetchRuntimeFlags(options?: ApiRequestOptions): Promise<RuntimeFlagsResponse> {
   return fetchJson<RuntimeFlagsResponse>(RUNTIME_FLAGS_BASE, {
-    cache: "no-store",
     ...options,
+    cache: "no-store",
   });
 }
 
@@ -18,9 +18,9 @@ export function updateRuntimeFlag(
   return fetchJson<RuntimeFlagsResponse>(`${RUNTIME_FLAGS_BASE}/${encodeURIComponent(key)}`, {
     ...options,
     init: {
+      ...(options?.init ?? {}),
       method: "PATCH",
       body: JSON.stringify({ override }),
-      ...(options?.init ?? {}),
     },
   });
 }

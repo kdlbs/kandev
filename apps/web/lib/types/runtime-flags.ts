@@ -13,7 +13,7 @@ export interface RuntimeFlagState {
   risk_description?: string;
   effective_value: boolean;
   default_value: boolean;
-  override_value?: boolean | null;
+  override_value: boolean | null;
   source: RuntimeFlagSource;
   env_var: string;
   env_locked: boolean;

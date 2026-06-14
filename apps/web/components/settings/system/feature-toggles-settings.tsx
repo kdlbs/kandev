@@ -1,6 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import {
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type MutableRefObject,
+  type SetStateAction,
+} from "react";
 import { Alert, AlertDescription, AlertTitle } from "@kandev/ui/alert";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
@@ -19,8 +26,9 @@ type Props = {
 
 export function FeatureTogglesSettings({ initialFlags, restartCapability }: Props) {
   const [flags, setFlags] = useState(initialFlags);
-  const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [savingKeys, setSavingKeys] = useState<Set<string>>(() => new Set());
   const [restarting, setRestarting] = useState(false);
+  const requestSeqRef = useRef(0);
   const { toast } = useToast();
   const pendingRestart = useMemo(
     () => flags.some((flag) => flag.requires_restart_to_apply),
@@ -28,15 +36,29 @@ export function FeatureTogglesSettings({ initialFlags, restartCapability }: Prop
   );
 
   const reload = async () => {
-    const res = await fetchRuntimeFlags();
-    setFlags(res.flags);
+    const seq = nextRequestSeq(requestSeqRef);
+    try {
+      const res = await fetchRuntimeFlags();
+      setFlagsIfLatest(requestSeqRef, seq, res.flags, setFlags);
+    } catch (err) {
+      toast({
+        title: "Failed to load feature toggles",
+        description: errorMessage(err),
+        variant: "error",
+      });
+    }
   };
 
   const setOverride = async (flag: RuntimeFlagState, override: boolean | null) => {
-    setSavingKey(flag.key);
+    const seq = nextRequestSeq(requestSeqRef);
+    setSavingKeys((prev) => {
+      const next = new Set(prev);
+      next.add(flag.key);
+      return next;
+    });
     try {
       const res = await updateRuntimeFlag(flag.key, override);
-      setFlags(res.flags);
+      setFlagsIfLatest(requestSeqRef, seq, res.flags, setFlags);
       toast({ title: "Feature toggle saved", variant: "success" });
     } catch (err) {
       toast({
@@ -45,7 +67,11 @@ export function FeatureTogglesSettings({ initialFlags, restartCapability }: Prop
         variant: "error",
       });
     } finally {
-      setSavingKey(null);
+      setSavingKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(flag.key);
+        return next;
+      });
     }
   };
 
@@ -74,7 +100,7 @@ export function FeatureTogglesSettings({ initialFlags, restartCapability }: Prop
         <FeatureToggleCard
           key={flag.key}
           flag={flag}
-          saving={savingKey === flag.key}
+          saving={savingKeys.has(flag.key)}
           onChange={(next) => void setOverride(flag, next)}
           onReset={() => void setOverride(flag, null)}
         />
@@ -135,4 +161,20 @@ function RestartRequiredAlert({
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function nextRequestSeq(seqRef: MutableRefObject<number>): number {
+  seqRef.current += 1;
+  return seqRef.current;
+}
+
+function setFlagsIfLatest(
+  seqRef: MutableRefObject<number>,
+  seq: number,
+  flags: RuntimeFlagState[],
+  setFlags: Dispatch<SetStateAction<RuntimeFlagState[]>>,
+) {
+  if (seq === seqRef.current) {
+    setFlags(flags);
+  }
 }
