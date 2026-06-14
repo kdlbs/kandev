@@ -13,6 +13,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { formatDistanceToNow } from "date-fns";
 import { useAppStore } from "@/components/state-provider";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useSystemMetricsSubscription } from "@/hooks/use-system-metrics-subscription";
 import type { SystemMetricSample, SystemMetricsSource } from "@/lib/types/system";
 
@@ -23,9 +24,11 @@ type TopbarMetricsProps = {
 export function TopbarMetrics({ activeSessionId }: TopbarMetricsProps) {
   const enabled = useAppStore((s) => s.userSettings.systemMetricsDisplay.showInTopbar);
   const snapshot = useAppStore((s) => s.system.metrics);
-  useSystemMetricsSubscription(enabled);
+  const { isMobile } = useResponsiveBreakpoint();
+  const shouldRender = enabled && !isMobile;
+  useSystemMetricsSubscription(shouldRender);
 
-  if (!enabled) return null;
+  if (!shouldRender) return null;
   const sources = selectSources(snapshot?.sources ?? [], activeSessionId);
   if (sources.length === 0) {
     return (
@@ -65,15 +68,18 @@ function SourceMetrics({
   updatedAt?: string;
   showSource: boolean;
 }) {
-  const metrics = source.metrics.filter((metric) => metric.available).slice(0, 4);
-  if (metrics.length === 0) return null;
+  const metrics = source.metrics.slice(0, 4);
 
   return (
     <div className="flex h-7 max-w-[220px] items-center gap-1 overflow-hidden rounded border border-border px-1.5 text-xs">
       {showSource ? <SourceBadge source={source} updatedAt={updatedAt} /> : null}
-      {metrics.map((metric) => (
-        <MetricChip key={metric.id} metric={metric} source={source} updatedAt={updatedAt} />
-      ))}
+      {metrics.length > 0 ? (
+        metrics.map((metric) => (
+          <MetricChip key={metric.id} metric={metric} source={source} updatedAt={updatedAt} />
+        ))
+      ) : (
+        <span className="px-1 text-muted-foreground">-</span>
+      )}
     </div>
   );
 }
@@ -134,6 +140,9 @@ function MetricChip({
             {source.kind === "backend" ? "Host" : "Executor"}: {source.label}
           </div>
           <div className="text-xs tabular-nums">{formatMetric(metric)}</div>
+          {metric.error ? (
+            <div className="text-xs text-muted-foreground">{metric.error}</div>
+          ) : null}
           <div className="text-xs text-muted-foreground">{lastUpdatedText(updatedAt)}</div>
         </div>
       </TooltipContent>
@@ -182,6 +191,7 @@ function formatMetric(metric: SystemMetricSample) {
 }
 
 function metricColor(metric: SystemMetricSample) {
+  if (!metric.available) return "text-muted-foreground";
   if (metric.unit !== "%" || typeof metric.value !== "number") return "text-muted-foreground";
   if (metric.value > 95) return "text-destructive";
   if (metric.value >= 80) return "text-yellow-500 dark:text-yellow-400";

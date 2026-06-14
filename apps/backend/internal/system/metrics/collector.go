@@ -19,6 +19,7 @@ type Collector struct {
 	sysRoot    string
 	cgroupRoot string
 	prevCPU    *cpuTimes
+	lastCPUAt  time.Time
 	mu         sync.Mutex
 }
 
@@ -65,6 +66,7 @@ func (c *Collector) Reset() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.prevCPU = nil
+	c.lastCPUAt = time.Time{}
 }
 
 func (c *Collector) sampleMetric(id string, diskPath string) MetricSample {
@@ -148,12 +150,18 @@ func (c *Collector) cpuPercent() (float64, error) {
 	if err != nil {
 		return 0, err
 	}
+	now := time.Now()
+	if c.prevCPU != nil && !c.lastCPUAt.IsZero() && now.Sub(c.lastCPUAt) > 2*time.Duration(MaxIntervalSeconds)*time.Second {
+		c.prevCPU = nil
+	}
 	if c.prevCPU == nil {
 		c.prevCPU = &current
+		c.lastCPUAt = now
 		return 0, nil
 	}
 	value := calculateCPUPercent(*c.prevCPU, current)
 	c.prevCPU = &current
+	c.lastCPUAt = now
 	return value, nil
 }
 

@@ -36,6 +36,7 @@ type Service struct {
 	mu          sync.Mutex
 	interested  map[string]struct{}
 	cancel      context.CancelFunc
+	runDone     chan struct{}
 	broadcaster Broadcaster
 	executions  ExecutionProvider
 }
@@ -82,12 +83,26 @@ func (s *Service) MetricsSubscribe(clientID string) {
 
 func (s *Service) MetricsUnsubscribe(clientID string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	delete(s.interested, clientID)
+	var done chan struct{}
 	if len(s.interested) == 0 && s.cancel != nil {
 		s.cancel()
-		s.cancel = nil
+		done = s.runDone
 	}
+	s.mu.Unlock()
+	if done == nil {
+		return
+	}
+	<-done
+	s.mu.Lock()
+	if s.runDone == done {
+		s.cancel = nil
+		s.runDone = nil
+		if len(s.interested) > 0 {
+			s.startLocked()
+		}
+	}
+	s.mu.Unlock()
 }
 
 func (s *Service) startLocked() {
@@ -96,11 +111,14 @@ func (s *Service) startLocked() {
 	}
 	s.collector.Reset()
 	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
 	s.cancel = cancel
-	go s.run(ctx)
+	s.runDone = done
+	go s.run(ctx, done)
 }
 
-func (s *Service) run(ctx context.Context) {
+func (s *Service) run(ctx context.Context, done chan struct{}) {
+	defer close(done)
 	for {
 		settings, err := s.store.GetSettings(ctx)
 		if err == nil {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
@@ -35,6 +35,7 @@ export function SystemMetricsSettingsCard() {
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const [settings, setSettings] = useState<SystemMetricsGlobalSettings>(DEFAULT_METRICS_SETTINGS);
   const [isSaving, setIsSaving] = useState(false);
+  const saveSeqRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -49,13 +50,18 @@ export function SystemMetricsSettingsCard() {
   }, []);
 
   const saveGlobal = async (next: SystemMetricsGlobalSettings) => {
+    const previous = settings;
+    const seq = saveSeqRef.current + 1;
+    saveSeqRef.current = seq;
     setSettings(next);
     setIsSaving(true);
     try {
       const res = await updateSystemMetricsSettings(next);
-      setSettings(res.settings);
+      if (seq === saveSeqRef.current) setSettings(res.settings);
+    } catch {
+      if (seq === saveSeqRef.current) setSettings(previous);
     } finally {
-      setIsSaving(false);
+      if (seq === saveSeqRef.current) setIsSaving(false);
     }
   };
 

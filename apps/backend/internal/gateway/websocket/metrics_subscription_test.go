@@ -83,6 +83,7 @@ func TestHandleSystemMetricsSubscribe(t *testing.T) {
 	h.SetSystemMetricsInterestTracker(rec)
 	c := newTestClient("c1")
 	c.hub = h
+	registerTestClient(h, c)
 
 	msg, _ := ws.NewRequest("req-1", ws.ActionSystemMetricsSubscribe, map[string]any{})
 	c.handleMessage(msg)
@@ -101,5 +102,21 @@ func TestHandleSystemMetricsSubscribe(t *testing.T) {
 		}
 	default:
 		t.Fatal("expected subscribe response")
+	}
+}
+
+func TestSystemMetricsSubscribeIgnoresDisconnectedClient(t *testing.T) {
+	h := newTestHub(t)
+	rec := &metricsInterestRecorder{}
+	h.SetSystemMetricsInterestTracker(rec)
+	c := newTestClient("c1")
+
+	h.SubscribeToSystemMetrics(c)
+
+	if len(rec.subs) != 0 {
+		t.Fatalf("subscribe calls=%d, want 0", len(rec.subs))
+	}
+	if c.systemMetricsSubscribed {
+		t.Fatal("disconnected client should not be marked as subscribed")
 	}
 }

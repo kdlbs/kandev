@@ -400,6 +400,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"terminal_font_family":            settings.TerminalFontFamily,
 		"terminal_font_size":              settings.TerminalFontSize,
 		"changes_panel_layout":            settings.ChangesPanelLayout,
+		"system_metrics_display":          settings.SystemMetricsDisplay,
 		"voice_mode":                      settings.VoiceMode,
 		"updated_at":                      settings.UpdatedAt.Format(time.RFC3339),
 	}

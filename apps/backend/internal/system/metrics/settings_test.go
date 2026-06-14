@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestNormalizeSettingsDefaults(t *testing.T) {
@@ -70,5 +71,28 @@ func TestCollectorResetClearsCPUBaseline(t *testing.T) {
 	collector.Reset()
 	if collector.prevCPU != nil {
 		t.Fatal("expected Reset to clear CPU baseline")
+	}
+	if !collector.lastCPUAt.IsZero() {
+		t.Fatal("expected Reset to clear CPU timestamp")
+	}
+}
+
+func TestCollectorCPUPercentResetsStaleBaseline(t *testing.T) {
+	dir := t.TempDir()
+	statPath := filepath.Join(dir, "stat")
+	if err := os.WriteFile(statPath, []byte("cpu  1 0 0 9 0 0 0 0\n"), 0o600); err != nil {
+		t.Fatalf("write stat: %v", err)
+	}
+	collector := NewCollector()
+	collector.procRoot = dir
+	if value, err := collector.cpuPercent(); err != nil || value != 0 {
+		t.Fatalf("cpuPercent baseline=(%v, %v), want 0 nil", value, err)
+	}
+	collector.lastCPUAt = time.Now().Add(-time.Duration(2*MaxIntervalSeconds+1) * time.Second)
+	if err := os.WriteFile(statPath, []byte("cpu  10 0 0 10 0 0 0 0\n"), 0o600); err != nil {
+		t.Fatalf("rewrite stat: %v", err)
+	}
+	if value, err := collector.cpuPercent(); err != nil || value != 0 {
+		t.Fatalf("stale cpuPercent=(%v, %v), want 0 nil", value, err)
 	}
 }

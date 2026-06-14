@@ -1,8 +1,14 @@
 package store
 
 import (
+	"context"
 	"testing"
 	"time"
+
+	"github.com/jmoiron/sqlx"
+	_ "github.com/mattn/go-sqlite3"
+
+	"github.com/kandev/kandev/internal/user/models"
 )
 
 type settingsScanner struct {
@@ -62,5 +68,34 @@ func TestScanUserSettingsSystemMetricsDisplayDefault(t *testing.T) {
 	}
 	if !settings.SystemMetricsDisplay.ShowInTopbar {
 		t.Fatal("expected stored system metrics display preference")
+	}
+}
+
+func TestSQLiteRepositorySystemMetricsDisplayRoundTrip(t *testing.T) {
+	conn, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	repo, err := newSQLiteRepositoryWithDB(conn, conn)
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+
+	ctx := context.Background()
+	settings, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("get defaults: %v", err)
+	}
+	settings.SystemMetricsDisplay = models.SystemMetricsDisplaySettings{ShowInTopbar: true}
+	if err := repo.UpsertUserSettings(ctx, settings); err != nil {
+		t.Fatalf("upsert settings: %v", err)
+	}
+	got, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("get settings: %v", err)
+	}
+	if !got.SystemMetricsDisplay.ShowInTopbar {
+		t.Fatal("expected system metrics display preference to round-trip")
 	}
 }

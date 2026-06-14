@@ -512,6 +512,10 @@ func (h *Hub) UnsubscribeFromRun(client *Client, runID string) {
 
 func (h *Hub) SubscribeToSystemMetrics(client *Client) {
 	h.mu.Lock()
+	if _, ok := h.clients[client]; !ok {
+		h.mu.Unlock()
+		return
+	}
 	if client.systemMetricsSubscribed {
 		h.mu.Unlock()
 		return
