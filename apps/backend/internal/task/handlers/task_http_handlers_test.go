@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // captureOrchestrator records every LaunchSession request so tests can assert
@@ -183,6 +184,40 @@ func TestHTTPCreateTask_ProjectIDReachesOfficePath(t *testing.T) {
 	require.NotNil(t, repo.captured, "service.CreateTask was not called")
 	assert.Equal(t, "proj-1", repo.captured.ProjectID)
 	assert.Equal(t, "wf-office", repo.captured.WorkflowID, "office workflow should be auto-resolved")
+}
+
+func TestValidateAttachments_DeliveryMode(t *testing.T) {
+	base := v1.MessageAttachment{
+		Type:     "resource",
+		MimeType: "text/plain",
+		Data:     "dGVzdA==",
+	}
+
+	tests := []struct {
+		name         string
+		deliveryMode string
+		wantErr      string
+	}{
+		{name: "empty uses default", deliveryMode: ""},
+		{name: "prompt is valid", deliveryMode: "prompt"},
+		{name: "path is valid", deliveryMode: "path"},
+		{name: "inline is rejected", deliveryMode: "inline", wantErr: "delivery_mode must be prompt or path"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			attachment := base
+			attachment.DeliveryMode = tt.deliveryMode
+
+			err := validateAttachments([]v1.MessageAttachment{attachment})
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
 }
 
 func newTestLogger(t *testing.T) *logger.Logger {

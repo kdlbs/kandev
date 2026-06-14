@@ -189,7 +189,7 @@ func writeUniqueAttachmentFile(dir, name string, used map[string]bool, data []by
 }
 
 func sanitizePromptValue(value string) string {
-	replacer := strings.NewReplacer("\r", " ", "\n", " ", "<", "(", ">", ")")
+	replacer := strings.NewReplacer("\r", " ", "\n", " ", "<", "(", ">", ")", "`", "'")
 	return strings.TrimSpace(replacer.Replace(value))
 }
 

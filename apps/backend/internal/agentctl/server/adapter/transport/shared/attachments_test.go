@@ -517,18 +517,18 @@ func TestBuildAttachmentPrompt_MultipleFiles(t *testing.T) {
 func TestBuildAttachmentPrompt_SanitizesPromptValues(t *testing.T) {
 	saved := []SavedAttachment{
 		{
-			RelPath: ".kandev/attachments/s1/<bad>\npath.pdf",
-			Name:    "report<one>\nplease.pdf",
+			RelPath: ".kandev/attachments/s1/<bad>\npath`v2`.pdf",
+			Name:    "report<one>\nplease`now`.pdf",
 		},
 	}
 	result := BuildAttachmentPrompt(saved, true)
-	if contains(result, "<") || contains(result, ">") || contains(result, "\nplease") {
+	if contains(result, "<") || contains(result, ">") || contains(result, "`") || contains(result, "\nplease") {
 		t.Errorf("result contains unsanitized prompt values: %q", result)
 	}
-	if !contains(result, "report(one) please.pdf") {
+	if !contains(result, "report(one) please'now'.pdf") {
 		t.Errorf("result should contain sanitized filename, got: %q", result)
 	}
-	if !contains(result, ".kandev/attachments/s1/(bad) path.pdf") {
+	if !contains(result, ".kandev/attachments/s1/(bad) path'v2'.pdf") {
 		t.Errorf("result should contain sanitized path, got: %q", result)
 	}
 }
