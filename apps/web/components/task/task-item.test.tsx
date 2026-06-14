@@ -121,7 +121,9 @@ describe("TaskItem status icon", () => {
   it("shows a separate agent error icon when the task has retained error details", () => {
     renderTaskItem({ agentErrorMessage: "peer disconnected before response" });
 
-    expect(screen.queryByTestId(AGENT_ERROR_ICON_TEST_ID)).not.toBeNull();
+    const errorIcon = screen.getByTestId(AGENT_ERROR_ICON_TEST_ID);
+    expect(errorIcon).not.toBeNull();
+    expect(errorIcon.classList.contains("cursor-help")).toBe(true);
     expect(screen.queryByTestId(REVIEW_ICON_TEST_ID)).not.toBeNull();
   });
 });

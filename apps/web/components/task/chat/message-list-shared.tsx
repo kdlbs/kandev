@@ -69,7 +69,7 @@ export function LastAgentErrorNotice({ sessionId }: { sessionId: string | null }
     <div
       data-testid="last-agent-error-notice"
       className="mb-3 rounded-md border border-destructive/25 bg-destructive/10 text-destructive"
-      role="status"
+      role="alert"
     >
       <div className="flex items-start gap-2 px-3 py-2">
         <IconAlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />

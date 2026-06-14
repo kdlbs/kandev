@@ -492,6 +492,7 @@ export const VirtuosoMessageList = memo(function VirtuosoMessageList(props: Mess
           messagesCount={messages.length}
           onLoadMore={loadMore}
         />
+        <LastAgentErrorNotice sessionId={sessionId} />
         <AgentStatus sessionState={sessionState} sessionId={sessionId} messages={messages} />
         {footerActions.map((msg) => (
           <MessageRenderer key={msg.id} comment={msg} isTaskDescription={false} />

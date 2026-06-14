@@ -328,7 +328,7 @@ function TaskAgentErrorIcon({ message }: { message: string }) {
       <TooltipTrigger asChild>
         <span
           data-testid="task-agent-error-icon"
-          className="inline-flex shrink-0 text-destructive"
+          className="inline-flex shrink-0 cursor-help text-destructive"
           aria-label="Task has an agent error"
         >
           <IconAlertCircle className="h-3.5 w-3.5" aria-hidden="true" />
