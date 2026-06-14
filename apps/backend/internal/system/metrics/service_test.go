@@ -10,6 +10,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/kandev/kandev/internal/db"
+	systemsettings "github.com/kandev/kandev/internal/system/settings"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -81,10 +82,11 @@ func newTestService(t *testing.T) *Service {
 		t.Fatalf("open sqlite: %v", err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
-	store, err := NewStore(db.NewPool(conn, conn))
+	settingsStore, err := systemsettings.NewStore(db.NewPool(conn, conn))
 	if err != nil {
-		t.Fatalf("new store: %v", err)
+		t.Fatalf("new settings store: %v", err)
 	}
+	store := NewStore(settingsStore)
 	if _, err := store.SaveSettings(context.Background(), GlobalSettings{
 		Metrics:         []string{MetricCPUPercent},
 		IntervalSeconds: 1,

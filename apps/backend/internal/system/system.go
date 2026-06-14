@@ -26,6 +26,7 @@ import (
 	"github.com/kandev/kandev/internal/system/jobs"
 	"github.com/kandev/kandev/internal/system/logs"
 	"github.com/kandev/kandev/internal/system/metrics"
+	systemsettings "github.com/kandev/kandev/internal/system/settings"
 	"github.com/kandev/kandev/internal/system/updates"
 	"go.uber.org/zap"
 )
@@ -84,12 +85,13 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 
 	logDir := log.LogDirectory()
 	logFile := log.LogFilename()
-	metricsStore, err := metrics.NewStore(pool)
+	settingsStore, err := systemsettings.NewStore(pool)
 	if err != nil {
-		log.Error("Failed to initialize system metrics store", zap.Error(err))
+		log.Error("Failed to initialize system settings store", zap.Error(err))
 	}
 	var metricsSvc *metrics.Service
-	if metricsStore != nil {
+	if settingsStore != nil {
+		metricsStore := metrics.NewStore(settingsStore)
 		metricsSvc = metrics.NewService(metricsStore, metrics.NewCollector())
 	}
 
