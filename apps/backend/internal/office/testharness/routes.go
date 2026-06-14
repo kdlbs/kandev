@@ -256,10 +256,7 @@ func updateSeededSession(
 	for key, value := range session.Metadata {
 		existing.Metadata[key] = value
 	}
-	if err := repo.UpdateTaskSession(ctx, existing); err != nil {
-		return nil, err
-	}
-	if err := repo.UpdateSessionMetadata(ctx, existing.ID, existing.Metadata); err != nil {
+	if err := repo.UpdateTaskSessionWithMetadata(ctx, existing, existing.Metadata); err != nil {
 		return nil, err
 	}
 	return existing, nil

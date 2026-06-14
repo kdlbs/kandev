@@ -10,6 +10,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 func newRepoForSessionTests(t *testing.T) *Repository {
@@ -478,6 +479,36 @@ func sessionState(t *testing.T, repo *Repository, sessionID string) string {
 		t.Fatalf("read state for %s: %v", sessionID, err)
 	}
 	return state
+}
+
+func TestUpdateTaskSessionWithMetadataRejectsInvalidMetadataBeforeStateWrite(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+
+	seedForMsgTest(t, repo, "task-atomic", "sess-atomic", "turn-atomic")
+	if err := repo.UpdateSessionMetadata(ctx, "sess-atomic", map[string]interface{}{"keep": "yes"}); err != nil {
+		t.Fatalf("seed metadata: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "sess-atomic")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	session.State = models.TaskSessionStateFailed
+
+	err = repo.UpdateTaskSessionWithMetadata(ctx, session, map[string]interface{}{"bad": func() {}})
+	if err == nil {
+		t.Fatal("expected invalid metadata error")
+	}
+	if got := sessionState(t, repo, "sess-atomic"); got == string(models.TaskSessionStateFailed) {
+		t.Fatalf("state was partially updated to %q", got)
+	}
+	got, err := repo.GetTaskSession(ctx, "sess-atomic")
+	if err != nil {
+		t.Fatalf("get session after failed update: %v", err)
+	}
+	if got.Metadata["keep"] != "yes" {
+		t.Fatalf("metadata keep = %v, want yes", got.Metadata["keep"])
+	}
 }
 
 func sessionCancellationMetadata(t *testing.T, repo *Repository, sessionID string) (string, sql.NullTime, time.Time) {

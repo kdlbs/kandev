@@ -17,6 +17,10 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+type taskSessionExecutor interface {
+	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
+}
+
 // Turn operations
 
 // CreateTurn creates a new turn
@@ -436,7 +440,40 @@ func (r *Repository) ListNonTerminalSessionsByAgentInstance(ctx context.Context,
 // Use UpdateSessionMetadata for metadata changes.
 func (r *Repository) UpdateTaskSession(ctx context.Context, session *models.TaskSession) error {
 	session.UpdatedAt = time.Now().UTC()
+	return r.updateTaskSession(ctx, r.db, session)
+}
 
+// UpdateTaskSessionWithMetadata updates the session row and metadata column in
+// one transaction so callers cannot observe a partially-applied update.
+func (r *Repository) UpdateTaskSessionWithMetadata(
+	ctx context.Context,
+	session *models.TaskSession,
+	metadata map[string]interface{},
+) error {
+	session.UpdatedAt = time.Now().UTC()
+	metadataJSON, err := marshalSessionMetadata(metadata)
+	if err != nil {
+		return err
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.updateTaskSession(ctx, tx, session); err != nil {
+		return err
+	}
+	if err := r.updateSessionMetadataJSON(ctx, tx, session.ID, metadataJSON, session.UpdatedAt); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) updateTaskSession(
+	ctx context.Context,
+	exec taskSessionExecutor,
+	session *models.TaskSession,
+) error {
 	agentProfileSnapshotJSON, err := json.Marshal(session.AgentProfileSnapshot)
 	if err != nil {
 		return fmt.Errorf("failed to serialize agent profile snapshot: %w", err)
@@ -465,7 +502,7 @@ func (r *Repository) UpdateTaskSession(ctx context.Context, session *models.Task
 	if session.AgentProfileID != "" {
 		agentProfileID = session.AgentProfileID
 	}
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	result, err := exec.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions SET
 			agent_profile_id = ?, executor_id = ?, executor_profile_id = ?, environment_id = ?,
 			repository_id = ?, base_branch = ?, base_commit_sha = ?, workspace_path = ?,
@@ -537,14 +574,32 @@ func (r *Repository) CancelActiveTaskSessionsByTaskID(ctx context.Context, taskI
 // UpdateSessionMetadata updates only the metadata column of a session,
 // avoiding a full-row overwrite that could clobber concurrent field updates.
 func (r *Repository) UpdateSessionMetadata(ctx context.Context, sessionID string, metadata map[string]interface{}) error {
-	metadataJSON, err := json.Marshal(metadata)
+	metadataJSON, err := marshalSessionMetadata(metadata)
 	if err != nil {
-		return fmt.Errorf("failed to serialize metadata: %w", err)
+		return err
 	}
 	now := time.Now().UTC()
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	return r.updateSessionMetadataJSON(ctx, r.db, sessionID, metadataJSON, now)
+}
+
+func marshalSessionMetadata(metadata map[string]interface{}) (string, error) {
+	metadataJSON, err := json.Marshal(metadata)
+	if err != nil {
+		return "", fmt.Errorf("failed to serialize metadata: %w", err)
+	}
+	return string(metadataJSON), nil
+}
+
+func (r *Repository) updateSessionMetadataJSON(
+	ctx context.Context,
+	exec taskSessionExecutor,
+	sessionID string,
+	metadataJSON string,
+	updatedAt time.Time,
+) error {
+	result, err := exec.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions SET metadata = ?, updated_at = ? WHERE id = ?
-	`), string(metadataJSON), now, sessionID)
+	`), metadataJSON, updatedAt, sessionID)
 	if err != nil {
 		return err
 	}
