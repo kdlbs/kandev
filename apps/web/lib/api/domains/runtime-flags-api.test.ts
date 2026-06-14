@@ -36,7 +36,7 @@ function lastCall(): { url: string; init: FetchInit | undefined } {
 }
 
 describe("runtime flags api", () => {
-  it("fetchRuntimeFlags GETs the runtime flags endpoint with no-store cache", async () => {
+  it("fetchRuntimeFlags forces no-store cache for the runtime flags endpoint", async () => {
     fetchSpy.mockResolvedValueOnce(jsonResponse({ flags: [] }));
     const res = await fetchRuntimeFlags({ cache: "force-cache" });
     const { url, init } = lastCall();
