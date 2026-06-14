@@ -95,6 +95,11 @@ function computeIsInProgress(state?: TaskState, sessionState?: TaskSessionState)
   return classifyTask(sessionState, state) === "in_progress";
 }
 
+function computeIsPreparing(state?: TaskState, sessionState?: TaskSessionState): boolean {
+  if (state === "SCHEDULING") return true;
+  return sessionState === "STARTING" && classifyTask(sessionState, state) !== "review";
+}
+
 function handleTaskItemKeyDown(e: React.KeyboardEvent<HTMLDivElement>, onClick?: () => void): void {
   if (e.key !== "Enter" && e.key !== " ") return;
   e.preventDefault();
@@ -130,10 +135,20 @@ function TaskStateIcon({
       />
     );
   }
+  if (computeIsPreparing(state, sessionState)) {
+    return (
+      <IconCircleDashed
+        data-testid="task-state-running"
+        data-loading-phase="preparing"
+        className="mt-[1px] h-3.5 w-3.5 shrink-0 animate-spin text-purple-500 [animation-duration:2s]"
+      />
+    );
+  }
   if (isInProgress) {
     return (
       <IconCircleDashed
         data-testid="task-state-running"
+        data-loading-phase="running"
         className="mt-[1px] h-3.5 w-3.5 shrink-0 text-yellow-500 animate-spin"
       />
     );
