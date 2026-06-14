@@ -729,6 +729,9 @@ func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentE
 	if errMsg == "" {
 		errMsg = "agent failed"
 	}
+	// Keep this metadata until the user dismisses the UI notice locally or a
+	// later recoverable failure replaces it. A successful turn should not erase
+	// the investigation breadcrumb that explains why the task was marked REVIEW.
 	lastErr := models.LastAgentError{
 		Message:          errMsg,
 		OccurredAt:       time.Now().UTC(),

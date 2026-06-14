@@ -1,5 +1,11 @@
-import type { TaskSession } from "@/lib/types/http";
+import type { TaskSession, TaskSessionState } from "@/lib/types/http";
 import { readLastAgentError } from "@/lib/session-last-agent-error";
+
+const TERMINAL_SESSION_STATES: ReadonlySet<TaskSessionState> = new Set([
+  "COMPLETED",
+  "FAILED",
+  "CANCELLED",
+]);
 
 export function agentErrorMessageForTask(
   task: { id: string; primarySessionId?: string | null },
@@ -10,7 +16,10 @@ export function agentErrorMessageForTask(
     const primaryError = readLastAgentError(sessionsById[task.primarySessionId]?.metadata);
     if (primaryError) return primaryError.message;
   }
-  for (const session of sessionsByTaskId[task.id] ?? []) {
+  const fallbackSessions = [...(sessionsByTaskId[task.id] ?? [])]
+    .filter((session) => !TERMINAL_SESSION_STATES.has(session.state))
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  for (const session of fallbackSessions) {
     const error = readLastAgentError(session.metadata);
     if (error) return error.message;
   }

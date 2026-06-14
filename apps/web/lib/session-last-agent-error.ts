@@ -1,6 +1,6 @@
 export type LastAgentError = {
   message: string;
-  occurredAt: string;
+  occurredAt?: string;
   agentExecutionId?: string;
 };
 
@@ -13,16 +13,17 @@ export function readLastAgentError(metadata: Record<string, unknown> | null | un
   if (!message) return null;
   return {
     message,
-    occurredAt: readString(record.occurred_at) || readString(record.occurredAt),
-    agentExecutionId: readString(record.agent_execution_id) || readString(record.agentExecutionId),
+    occurredAt: readOptionalString(record.occurred_at) ?? readOptionalString(record.occurredAt),
+    agentExecutionId:
+      readOptionalString(record.agent_execution_id) ?? readOptionalString(record.agentExecutionId),
   } satisfies LastAgentError;
 }
 
 export function lastAgentErrorDismissKey(sessionId: string, error: LastAgentError) {
-  const stamp = error.occurredAt || error.message;
+  const stamp = `${error.occurredAt ?? ""}:${error.message}`;
   return `kandev:last-agent-error-dismissed:${sessionId}:${stamp}`;
 }
 
-function readString(value: unknown) {
-  return typeof value === "string" ? value : "";
+function readOptionalString(value: unknown) {
+  return typeof value === "string" && value !== "" ? value : undefined;
 }
