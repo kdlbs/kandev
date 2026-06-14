@@ -1,13 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
-import type { Page } from "@playwright/test";
-
-async function openTaskSession(page: Page, taskId: string) {
-  await page.goto(`/t/${taskId}`);
-  const session = new SessionPage(page);
-  await session.waitForLoad();
-  return session;
-}
+import { openTaskSession } from "../../helpers/session";
 
 /**
  * Stop the running session via the tab context menu (session.stop → CANCELLED state),

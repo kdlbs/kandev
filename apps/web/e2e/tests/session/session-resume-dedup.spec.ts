@@ -1,13 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
-import { SessionPage } from "../../pages/session-page";
-import type { Page } from "@playwright/test";
-
-async function openTaskSession(page: Page, taskId: string): Promise<SessionPage> {
-  await page.goto(`/t/${taskId}`);
-  const session = new SessionPage(page);
-  await session.waitForLoad();
-  return session;
-}
+import { openTaskSession } from "../../helpers/session";
 
 test.describe("Session resume boot-message dedup", () => {
   // Test restarts the backend multiple times — can be flaky under CI load.

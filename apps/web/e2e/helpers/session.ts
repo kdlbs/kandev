@@ -67,6 +67,13 @@ export async function waitForSessionEnvironment(
     .toBe(options.expectedEnvironmentId);
 }
 
+export async function openTaskSession(page: Page, taskId: string): Promise<SessionPage> {
+  await page.goto(`/t/${taskId}`);
+  const session = new SessionPage(page);
+  await session.waitForLoad();
+  return session;
+}
+
 /**
  * Seed a task + session and navigate to it, waiting for the first (normal)
  * turn to complete. Follow-up prompts can then exercise retry flows from a
