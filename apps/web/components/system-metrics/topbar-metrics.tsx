@@ -161,7 +161,7 @@ function metricLabel(id: string) {
     case "cpu_temp":
       return "CPU temperature";
     case "io_load":
-      return "I/O load";
+      return "Load avg";
     default:
       return id;
   }

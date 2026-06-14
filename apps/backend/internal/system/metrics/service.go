@@ -90,11 +90,15 @@ func (s *Service) MetricsUnsubscribe(clientID string) {
 		done = s.runDone
 	}
 	s.mu.Unlock()
-	if done == nil {
-		return
+	if done != nil {
+		go s.finishStop(done)
 	}
+}
+
+func (s *Service) finishStop(done chan struct{}) {
 	<-done
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.runDone == done {
 		s.cancel = nil
 		s.runDone = nil
@@ -102,7 +106,6 @@ func (s *Service) MetricsUnsubscribe(clientID string) {
 			s.startLocked()
 		}
 	}
-	s.mu.Unlock()
 }
 
 func (s *Service) startLocked() {

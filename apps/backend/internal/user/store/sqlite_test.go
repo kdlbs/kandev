@@ -76,6 +76,7 @@ func TestSQLiteRepositorySystemMetricsDisplayRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	conn.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = conn.Close() })
 	repo, err := newSQLiteRepositoryWithDB(conn, conn)
 	if err != nil {

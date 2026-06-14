@@ -21,6 +21,7 @@ func TestServiceSubscribeLifecycle(t *testing.T) {
 	})
 
 	svc.MetricsSubscribe("client-1")
+	t.Cleanup(func() { unsubscribeAll(t, svc) })
 	waitForPublish(t, published)
 
 	svc.mu.Lock()
@@ -48,14 +49,7 @@ func TestServiceSubscribeLifecycle(t *testing.T) {
 	svc.mu.Unlock()
 
 	svc.MetricsUnsubscribe("client-2")
-	svc.mu.Lock()
-	if len(svc.interested) != 0 {
-		t.Fatalf("interested after unsubscribe=%d, want 0", len(svc.interested))
-	}
-	if svc.cancel != nil {
-		t.Fatal("expected sampler cancel to clear after last unsubscribe")
-	}
-	svc.mu.Unlock()
+	waitForStoppedSampler(t, svc)
 }
 
 func TestServiceCollectExecutionsUsesContainerRootDiskPath(t *testing.T) {
@@ -108,6 +102,41 @@ func waitForPublish(t *testing.T, ch <-chan struct{}) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for metrics publish")
 	}
+}
+
+func waitForStoppedSampler(t *testing.T, svc *Service) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for sampler to stop")
+		case <-ticker.C:
+			svc.mu.Lock()
+			interested := len(svc.interested)
+			cancel := svc.cancel
+			svc.mu.Unlock()
+			if interested == 0 && cancel == nil {
+				return
+			}
+		}
+	}
+}
+
+func unsubscribeAll(t *testing.T, svc *Service) {
+	t.Helper()
+	svc.mu.Lock()
+	clients := make([]string, 0, len(svc.interested))
+	for client := range svc.interested {
+		clients = append(clients, client)
+	}
+	svc.mu.Unlock()
+	for _, client := range clients {
+		svc.MetricsUnsubscribe(client)
+	}
+	waitForStoppedSampler(t, svc)
 }
 
 type staticExecutionProvider struct {
