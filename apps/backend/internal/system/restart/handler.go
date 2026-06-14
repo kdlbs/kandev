@@ -31,7 +31,7 @@ func HandleCapability() gin.HandlerFunc {
 
 func HandleRequest() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.JSON(http.StatusConflict, RestartResponse{
+		c.JSON(http.StatusNotImplemented, RestartResponse{
 			Accepted: false,
 			Message:  unsupportedReason,
 		})

@@ -128,6 +128,15 @@ func WasApplied(name string) bool {
 	return appliedEnvVars.names[name]
 }
 
+// MarkApplied records a process env var as runtime/profile-applied rather than
+// launcher-explicit. This is for startup code that derives secondary env vars
+// from a profile-backed setting after ApplyProfile has already run.
+func MarkApplied(name string) {
+	appliedEnvVars.Lock()
+	defer appliedEnvVars.Unlock()
+	appliedEnvVars.names[name] = true
+}
+
 // parse decodes profiles.yaml into the typed shape. A parse error
 // here means someone committed a malformed profiles.yaml; fail loud
 // so CI catches it before a release ships.

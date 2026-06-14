@@ -58,6 +58,34 @@ func TestOptionsFromConfigParsesUppercaseTruthyEnv(t *testing.T) {
 	}
 }
 
+func TestApplyStatesToConfigMarksImpliedDebugEnvAsApplied(t *testing.T) {
+	for _, name := range []string{
+		"KANDEV_DEBUG_PPROF_ENABLED",
+		"KANDEV_DEBUG_AGENT_MESSAGES",
+	} {
+		preserveEnv(t, name)
+	}
+
+	cfg := &config.Config{}
+	ApplyStatesToConfig(cfg, []RuntimeFlagState{{
+		Key:            "debug.devMode",
+		EffectiveValue: true,
+	}})
+	opts := OptionsFromConfig(cfg)
+
+	for _, name := range []string{
+		"KANDEV_DEBUG_PPROF_ENABLED",
+		"KANDEV_DEBUG_AGENT_MESSAGES",
+	} {
+		if !opts.EnvValues[name] {
+			t.Fatalf("%s was not enabled", name)
+		}
+		if opts.IsExplicitEnv(name) {
+			t.Fatalf("%s reported explicit, want profile-applied", name)
+		}
+	}
+}
+
 func preserveEnv(t *testing.T, name string) {
 	t.Helper()
 	value, ok := os.LookupEnv(name)

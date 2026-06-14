@@ -64,6 +64,7 @@ func setIfNotExplicit(name, value string) {
 		return
 	}
 	_ = os.Setenv(name, value)
+	profiles.MarkApplied(name)
 }
 
 func unsetIfNotExplicit(name string) {
