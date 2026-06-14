@@ -61,6 +61,8 @@ func isFromOfficeProjection(alias string) string {
 
 func excludeConfigModePredicate(driver, col string) string {
 	if dialect.IsPostgres(driver) {
+		// Repository writes always marshal metadata as JSON; dirty Postgres rows
+		// with malformed JSON should fail loudly instead of being silently skipped.
 		return fmt.Sprintf("COALESCE(%s, '') NOT IN ('true', '1')", dialect.JSONExtract(driver, col, "config_mode"))
 	}
 	return fmt.Sprintf("%s IS NOT 1", dialect.JSONExtract(driver, col, "config_mode"))

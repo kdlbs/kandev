@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -32,21 +31,17 @@ func Provide(writer, reader *sqlx.DB, crypto *MasterKeyProvider) (*sqliteStore, 
 }
 
 func (s *sqliteStore) initSchema() error {
-	binaryType := "BLOB"
-	if dialect.IsPostgres(s.db.DriverName()) {
-		binaryType = "BYTEA"
-	}
-	schema := `
+	binaryType := dialect.BlobType(s.db.DriverName())
+	schema := fmt.Sprintf(`
 	CREATE TABLE IF NOT EXISTS secrets (
 		id              TEXT PRIMARY KEY,
 		name            TEXT NOT NULL,
-		encrypted_value {{BINARY_TYPE}} NOT NULL,
-		nonce           {{BINARY_TYPE}} NOT NULL,
+		encrypted_value %s NOT NULL,
+		nonce           %s NOT NULL,
 		created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 	);
-	`
-	schema = strings.ReplaceAll(schema, "{{BINARY_TYPE}}", binaryType)
+	`, binaryType, binaryType)
 	_, err := s.db.Exec(schema)
 	return err
 }

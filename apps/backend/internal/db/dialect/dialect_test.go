@@ -27,6 +27,15 @@ func TestBoolToInt(t *testing.T) {
 	}
 }
 
+func TestBlobType(t *testing.T) {
+	if BlobType(SQLite3) != "BLOB" {
+		t.Errorf("sqlite: got %q", BlobType(SQLite3))
+	}
+	if BlobType(PGX) != "BYTEA" {
+		t.Errorf("pgx: got %q", BlobType(PGX))
+	}
+}
+
 func TestJSONExtract(t *testing.T) {
 	got := JSONExtract(SQLite3, "metadata", "status")
 	if got != "json_extract(metadata, '$.status')" {
