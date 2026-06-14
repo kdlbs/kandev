@@ -399,7 +399,10 @@ test_graphql_failure_records_error_but_keeps_other_data() {
   assert_jq "reviews still present on graphql failure" '.reviews | length == 2' "$json"
   assert_jq "review threads empty on graphql failure" '.review_threads == []' "$json"
   assert_jq "unresolved count unknown on graphql failure" '.unresolved_review_thread_count == null' "$json"
-  assert_jq "graphql failure recorded" '.errors[] | select(.source == "review_threads") | .message == "gh api graphql reviewThreads failed"' "$json"
+  assert_jq "graphql failure records both errors" '.errors | length == 2' "$json"
+  assert_jq "graphql failure records since error" '.errors[] | select(.source == "since") | .message == "gh api graphql head commit failed; including historical comments"' "$json"
+  assert_jq "graphql failure records review_threads error" '.errors[] | select(.source == "review_threads") | .message == "gh api graphql reviewThreads failed"' "$json"
+  assert_jq "since fallback includes all historical comments" '.issue_comments | length == 2' "$json"
   pass "graphql failure records error but keeps other data"
 }
 
