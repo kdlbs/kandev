@@ -1,5 +1,17 @@
 # Screenshots
 
+## Mobile
+
+<table>
+  <tr>
+    <td align="center"><strong>Mobile Chat</strong><br><img src="screenshots/mobile-chat.webp" alt="Mobile Chat" width="240"></td>
+    <td align="center"><strong>Mobile Changes</strong><br><img src="screenshots/mobile-changes.webp" alt="Mobile Changes" width="240"></td>
+    <td align="center"><strong>Mobile Diff Review</strong><br><img src="screenshots/mobile-diff.webp" alt="Mobile Diff Review" width="240"></td>
+  </tr>
+</table>
+
+## Desktop
+
 <table>
   <tr>
     <td align="center"><strong>Kanban</strong><br><img src="screenshots/kanban.png" alt="Kanban"></td>

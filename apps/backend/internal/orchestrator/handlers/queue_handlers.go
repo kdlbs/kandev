@@ -100,6 +100,10 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 	if req.Content == "" && len(req.Attachments) == 0 {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "content or attachments are required", nil)
 	}
+	if invalid := firstInvalidDeliveryMode(req.Attachments); invalid >= 0 {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "attachment delivery_mode must be prompt or path",
+			map[string]interface{}{"attachment_index": invalid})
+	}
 	if req.UserID == messagequeue.QueuedByAgent {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "user_id may not impersonate the agent identity", nil)
 	}
@@ -233,6 +237,10 @@ func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*
 	if req.Content == "" && len(req.Attachments) == 0 {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "content or attachments are required", nil)
 	}
+	if invalid := firstInvalidDeliveryMode(req.Attachments); invalid >= 0 {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "attachment delivery_mode must be prompt or path",
+			map[string]interface{}{"attachment_index": invalid})
+	}
 
 	// Reject any client-supplied identity that would impersonate the agent.
 	// Without this guard a hostile WS client could send user_id="agent" to
@@ -258,6 +266,15 @@ func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*
 
 	h.publishStatus(ctx, req.SessionID)
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{fieldEntryID: req.EntryID})
+}
+
+func firstInvalidDeliveryMode(attachments []messagequeue.MessageAttachment) int {
+	for i, att := range attachments {
+		if att.DeliveryMode != "" && att.DeliveryMode != "prompt" && att.DeliveryMode != "path" {
+			return i
+		}
+	}
+	return -1
 }
 
 type wsRemoveEntryRequest struct {

@@ -17,6 +17,8 @@ export type MessageAttachment = {
   type: string;
   data: string;
   mime_type: string;
+  name?: string;
+  delivery_mode?: "prompt" | "path";
 };
 
 /** Selectors over the queue slice for one session. */

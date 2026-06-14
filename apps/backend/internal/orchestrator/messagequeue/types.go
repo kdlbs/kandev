@@ -51,9 +51,11 @@ type QueuedMessage struct {
 
 // MessageAttachment represents an attachment (image) in a queued message.
 type MessageAttachment struct {
-	Type     string `json:"type"`
-	Data     string `json:"data"`
-	MimeType string `json:"mime_type"`
+	Type         string `json:"type"`
+	Data         string `json:"data"`
+	MimeType     string `json:"mime_type"`
+	Name         string `json:"name,omitempty"`
+	DeliveryMode string `json:"delivery_mode,omitempty"`
 }
 
 // QueueStatus is the per-session view returned to clients: full ordered list of

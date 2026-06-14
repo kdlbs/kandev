@@ -29,6 +29,7 @@ export type MessageAttachment = {
   data: string;
   mime_type: string;
   name?: string;
+  delivery_mode?: "prompt" | "path";
 };
 
 export type ChatInputContainerHandle = {

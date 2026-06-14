@@ -44,6 +44,7 @@ export type PlanCommentContextItem = ContextItemBase & {
 export type ImageContextItem = ContextItemBase & {
   kind: "image";
   attachment: FileAttachment;
+  onDeliveryModeChange?: (mode: "prompt" | "path") => void;
 };
 
 export type FileAttachmentContextItem = ContextItemBase & {

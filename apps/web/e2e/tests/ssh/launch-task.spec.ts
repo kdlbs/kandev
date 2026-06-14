@@ -1,5 +1,10 @@
 import { test, expect } from "../../fixtures/ssh-test-base";
-import { listRemoteDir, readRemoteFile, remotePathExists } from "../../helpers/ssh";
+import {
+  execInContainer,
+  listRemoteDir,
+  readRemoteFile,
+  remotePathExists,
+} from "../../helpers/ssh";
 import { waitForLatestSessionDone } from "../../helpers/session";
 
 /**
@@ -163,6 +168,121 @@ test.describe("ssh executor — task launch", () => {
     // AGENTCTL_PORT env var and the ExecutorRunning metadata, not a file.
     expect(entries).toEqual(expect.arrayContaining(["agentctl.pid", "agentctl.log"]));
     expect(row!.remote_agentctl_port).toBeGreaterThan(0);
+  });
+
+  test("uploads path-mode attachments into the remote executor workspace", async ({
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(180_000);
+    const content = "remote attachment bytes";
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "H6 attachment upload",
+      seedData.agentProfileId,
+      {
+        description: "Inspect the attached file.",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+        executor_profile_id: seedData.sshExecutorProfileId,
+        attachments: [
+          {
+            type: "resource",
+            data: Buffer.from(content, "utf8").toString("base64"),
+            mime_type: "text/plain",
+            name: "remote-note.txt",
+            delivery_mode: "path",
+          },
+        ],
+      },
+    );
+    await waitForLatestSessionDone(apiClient, task.id, 1, "Wait for attachment upload");
+
+    await expect
+      .poll(
+        async () => {
+          const sessions = await apiClient.listSSHSessions(seedData.sshExecutorId);
+          return sessions.find((s) => s.task_id === task.id)?.remote_task_dir ?? "";
+        },
+        { timeout: 60_000, message: "Wait for SSH session row" },
+      )
+      .not.toBe("");
+
+    const sessions = await apiClient.listSSHSessions(seedData.sshExecutorId);
+    const row = sessions.find((s) => s.task_id === task.id);
+    expect(row?.remote_task_dir).toBeTruthy();
+    const savedPath = execInContainer(seedData.sshTarget, [
+      "sh",
+      "-c",
+      `find ${JSON.stringify(row!.remote_task_dir)}/.kandev/attachments -name remote-note.txt -type f -print -quit`,
+    ]).trim();
+    expect(savedPath).toContain("/.kandev/attachments/");
+    expect(readRemoteFile(seedData.sshTarget, savedPath)).toBe(content);
+  });
+
+  test("uploads path-mode attachments queued while the remote task is running", async ({
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(180_000);
+    const content = "remote follow-up attachment bytes";
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "H6 running attachment upload",
+      seedData.agentProfileId,
+      {
+        description: "/slow 20s",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+        executor_profile_id: seedData.sshExecutorProfileId,
+      },
+    );
+    if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+
+    await apiClient.queueMessage(task.id, task.session_id, "Inspect the follow-up file.", [
+      {
+        type: "resource",
+        data: Buffer.from(content, "utf8").toString("base64"),
+        mime_type: "text/plain",
+        name: "remote-followup.txt",
+        delivery_mode: "path",
+      },
+    ]);
+
+    await expect
+      .poll(
+        async () => {
+          const sessions = await apiClient.listSSHSessions(seedData.sshExecutorId);
+          return sessions.find((s) => s.task_id === task.id)?.remote_task_dir ?? "";
+        },
+        { timeout: 60_000, message: "Wait for SSH session row" },
+      )
+      .not.toBe("");
+
+    const sessions = await apiClient.listSSHSessions(seedData.sshExecutorId);
+    const row = sessions.find((s) => s.task_id === task.id);
+    const taskDir = row?.remote_task_dir;
+    expect(taskDir).toBeTruthy();
+
+    const findAttachment = () =>
+      execInContainer(seedData.sshTarget, [
+        "sh",
+        "-c",
+        `find ${JSON.stringify(taskDir)}/.kandev/attachments -name remote-followup.txt -type f -print -quit 2>/dev/null || true`,
+      ]).trim();
+
+    await expect
+      .poll(findAttachment, {
+        timeout: 120_000,
+        message: "Wait for queued attachment to upload remotely",
+      })
+      .not.toBe("");
+
+    const attachmentPath = findAttachment();
+    expect(attachmentPath).toContain("/.kandev/attachments/");
+    expect(readRemoteFile(seedData.sshTarget, attachmentPath)).toBe(content);
   });
 
   test("stopping the session cleans up the session runtime dir but leaves the task dir", async ({

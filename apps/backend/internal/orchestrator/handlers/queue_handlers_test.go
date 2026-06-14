@@ -151,6 +151,41 @@ func TestWsQueueMessage(t *testing.T) {
 	})
 }
 
+func TestFirstInvalidDeliveryMode(t *testing.T) {
+	tests := []struct {
+		name        string
+		attachments []messagequeue.MessageAttachment
+		want        int
+	}{
+		{name: "empty list", attachments: nil, want: -1},
+		{
+			name: "valid modes",
+			attachments: []messagequeue.MessageAttachment{
+				{DeliveryMode: ""},
+				{DeliveryMode: "prompt"},
+				{DeliveryMode: "path"},
+			},
+			want: -1,
+		},
+		{
+			name: "first invalid mode",
+			attachments: []messagequeue.MessageAttachment{
+				{DeliveryMode: "prompt"},
+				{DeliveryMode: "inline"},
+				{DeliveryMode: "path"},
+			},
+			want: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := firstInvalidDeliveryMode(tt.attachments)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
 func TestWsCancelAll(t *testing.T) {
 	t.Run("clears the queue", func(t *testing.T) {
 		handlers, svc := setupQueueHandlers(t)

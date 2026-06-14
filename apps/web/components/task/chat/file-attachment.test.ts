@@ -42,6 +42,7 @@ describe("processFile in insecure context (HTTP, no crypto.randomUUID)", () => {
     expect(attachment!.id).toMatch(UUID_V4_REGEX);
     expect(attachment!.isImage).toBe(false);
     expect(attachment!.fileName).toBe("notes.txt");
+    expect(attachment!.deliveryMode).toBe("path");
   });
 
   it("assigns a fallback UUID to image attachments when crypto.randomUUID is unavailable", async () => {
@@ -56,6 +57,7 @@ describe("processFile in insecure context (HTTP, no crypto.randomUUID)", () => {
     expect(attachment).not.toBeNull();
     expect(attachment!.id).toMatch(UUID_V4_REGEX);
     expect(attachment!.isImage).toBe(true);
+    expect(attachment!.deliveryMode).toBe("prompt");
     expect(attachment!.preview).toMatch(/^data:image\/png;base64,/);
   });
 

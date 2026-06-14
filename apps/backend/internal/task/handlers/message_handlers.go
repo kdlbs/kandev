@@ -298,6 +298,9 @@ func validateAddMessageRequest(req wsAddMessageRequest) string {
 	if req.Content == "" && len(req.Attachments) == 0 {
 		return "content or attachments are required"
 	}
+	if err := validateAttachments(req.Attachments); err != nil {
+		return err.Error()
+	}
 	return ""
 }
 

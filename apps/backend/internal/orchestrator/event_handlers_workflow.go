@@ -1415,9 +1415,11 @@ func (s *Service) takeAndMergeHandoffMessage(ctx context.Context, sessionID, bas
 		attachments = make([]v1.MessageAttachment, 0, len(msg.Attachments))
 		for _, a := range msg.Attachments {
 			attachments = append(attachments, v1.MessageAttachment{
-				Type:     a.Type,
-				Data:     a.Data,
-				MimeType: a.MimeType,
+				Type:         a.Type,
+				Data:         a.Data,
+				MimeType:     a.MimeType,
+				Name:         a.Name,
+				DeliveryMode: a.DeliveryMode,
 			})
 		}
 	}
@@ -1495,9 +1497,11 @@ func toQueuedAttachments(attachments []v1.MessageAttachment) []messagequeue.Mess
 	queued := make([]messagequeue.MessageAttachment, 0, len(attachments))
 	for _, attachment := range attachments {
 		queued = append(queued, messagequeue.MessageAttachment{
-			Type:     attachment.Type,
-			Data:     attachment.Data,
-			MimeType: attachment.MimeType,
+			Type:         attachment.Type,
+			Data:         attachment.Data,
+			MimeType:     attachment.MimeType,
+			Name:         attachment.Name,
+			DeliveryMode: attachment.DeliveryMode,
 		})
 	}
 	return queued

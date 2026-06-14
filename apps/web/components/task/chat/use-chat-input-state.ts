@@ -52,8 +52,20 @@ function collectComments(
 function toMessageAttachments(attachments: FileAttachment[]): MessageAttachment[] {
   return attachments.map((att) =>
     att.isImage
-      ? { type: "image" as const, data: att.data, mime_type: att.mimeType }
-      : { type: "resource" as const, data: att.data, mime_type: att.mimeType, name: att.fileName },
+      ? {
+          type: "image" as const,
+          data: att.data,
+          mime_type: att.mimeType,
+          name: att.fileName,
+          ...(att.deliveryMode === "path" && { delivery_mode: "path" as const }),
+        }
+      : {
+          type: "resource" as const,
+          data: att.data,
+          mime_type: att.mimeType,
+          name: att.fileName,
+          delivery_mode: "path" as const,
+        },
   );
 }
 
@@ -117,7 +129,19 @@ function useAttachments(sessionId: string | null) {
   );
 
   const handleRemoveAttachment = useCallback((id: string) => {
-    setAttachments((prev) => prev.filter((att) => att.id !== id));
+    setAttachments((prev) => {
+      const next = prev.filter((att) => att.id !== id);
+      attachmentsRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const handleDeliveryModeChange = useCallback((id: string, deliveryMode: "prompt" | "path") => {
+    setAttachments((prev) => {
+      const next = prev.map((att) => (att.id === id ? { ...att, deliveryMode } : att));
+      attachmentsRef.current = next;
+      return next;
+    });
   }, []);
 
   const getAttachments = useCallback(
@@ -131,6 +155,7 @@ function useAttachments(sessionId: string | null) {
     setAttachments,
     addFiles,
     handleRemoveAttachment,
+    handleDeliveryModeChange,
     getAttachments,
   };
 }
@@ -158,6 +183,7 @@ export function useChatInputState({
     setAttachments,
     addFiles,
     handleRemoveAttachment,
+    handleDeliveryModeChange,
     getAttachments,
   } = useAttachments(sessionId);
 
@@ -225,6 +251,7 @@ export function useChatInputState({
               label: `Image (${formatBytes(att.size)})`,
               attachment: att,
               onRemove: () => handleRemoveAttachment(att.id),
+              onDeliveryModeChange: (mode) => handleDeliveryModeChange(att.id, mode),
             } as ImageContextItem)
           : ({
               kind: "file-attachment" as const,
@@ -235,7 +262,7 @@ export function useChatInputState({
             } as FileAttachmentContextItem),
     );
     return [...contextItems, ...attachmentItems];
-  }, [contextItems, attachments, handleRemoveAttachment]);
+  }, [contextItems, attachments, handleRemoveAttachment, handleDeliveryModeChange]);
 
   // prettier-ignore
   return { value, attachments, inputRef, addFiles, handleChange, handleSubmit, allItems, getAttachments };

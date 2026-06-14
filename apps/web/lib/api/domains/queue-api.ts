@@ -68,7 +68,13 @@ export type QueueMessageParams = {
   content: string;
   model?: string;
   plan_mode?: boolean;
-  attachments?: Array<{ type: string; data: string; mime_type: string }>;
+  attachments?: Array<{
+    type: string;
+    data: string;
+    mime_type: string;
+    name?: string;
+    delivery_mode?: "prompt" | "path";
+  }>;
   user_id?: string;
 };
 
@@ -140,7 +146,13 @@ export async function updateQueuedMessage(params: {
   session_id: string;
   entry_id: string;
   content: string;
-  attachments?: Array<{ type: string; data: string; mime_type: string }>;
+  attachments?: Array<{
+    type: string;
+    data: string;
+    mime_type: string;
+    name?: string;
+    delivery_mode?: "prompt" | "path";
+  }>;
   user_id?: string;
 }): Promise<{ entry_id: string }> {
   const client = getWebSocketClient();
