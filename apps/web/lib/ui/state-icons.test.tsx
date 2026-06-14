@@ -33,6 +33,9 @@ describe("shouldShowTaskRunningSpinner", () => {
 
   it("returns true when any task state has an actively running primary session", () => {
     expect(shouldShowTaskRunningSpinner("REVIEW", "RUNNING")).toBe(true);
+    expect(shouldShowTaskRunningSpinner("COMPLETED", "RUNNING")).toBe(true);
+    expect(shouldShowTaskRunningSpinner("FAILED", "RUNNING")).toBe(true);
+    expect(shouldShowTaskRunningSpinner("CANCELLED", "RUNNING")).toBe(true);
   });
 
   it("returns true for SCHEDULING with no primary session yet", () => {
