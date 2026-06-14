@@ -23,3 +23,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 0015 | [Explicit completion signal for auto-advance](0015-explicit-completion-signal-for-auto-advance.md) | proposed | backend, frontend | 2026-06-04 |
 | 0016 | [Read-only absolute file paths](0016-observed-external-file-reads.md) | accepted | backend | 2026-06-14 |
 | 0017 | [Resource metrics sampling](0017-resource-metrics-sampling.md) | accepted | backend, frontend, protocol | 2026-06-14 |
+| 0018 | [Runtime settings overrides](0018-runtime-settings-overrides.md) | accepted | backend, frontend, cli | 2026-06-14 |

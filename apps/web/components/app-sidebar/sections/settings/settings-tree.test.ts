@@ -15,6 +15,7 @@ describe("settingsGroupIdForPath", () => {
     expect(settingsGroupIdForPath("/settings/executors/profile-123")).toBe("executors");
     expect(settingsGroupIdForPath("/settings/workspace/ws-1/repositories")).toBe("workspaces");
     expect(settingsGroupIdForPath("/settings/system/logs")).toBe("system");
+    expect(settingsGroupIdForPath("/settings/system/feature-toggles")).toBe("system");
     // Editors/Secrets live under /settings/general so they belong to General.
     expect(settingsGroupIdForPath("/settings/general/editors")).toBe("general");
   });

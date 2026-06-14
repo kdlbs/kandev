@@ -9,6 +9,8 @@ import type {
   LogTailResponse,
   UpdatesResponse,
   JobAcceptResponse,
+  RestartCapability,
+  RestartResponse,
 } from "@/lib/types/system";
 
 const SYSTEM_BASE = "/api/v1/system";
@@ -166,5 +168,21 @@ export function applyUpdate(
     ...options,
     // Spread caller init first so the required method/body can't be overridden.
     init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify({ confirm }) },
+  });
+}
+
+// --- Restart ------------------------------------------------------------
+
+export function fetchRestartCapability(options?: ApiRequestOptions): Promise<RestartCapability> {
+  return fetchJson<RestartCapability>(`${SYSTEM_BASE}/restart-capability`, {
+    cache: "no-store",
+    ...options,
+  });
+}
+
+export function requestRestart(options?: ApiRequestOptions): Promise<RestartResponse> {
+  return fetchJson<RestartResponse>(`${SYSTEM_BASE}/restart`, {
+    ...options,
+    init: { method: "POST", ...(options?.init ?? {}) },
   });
 }

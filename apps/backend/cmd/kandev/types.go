@@ -17,6 +17,7 @@ import (
 	officeservice "github.com/kandev/kandev/internal/office/service"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	promptstore "github.com/kandev/kandev/internal/prompts/store"
+	"github.com/kandev/kandev/internal/runtimeflags"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/sentry"
 	"github.com/kandev/kandev/internal/slack"
@@ -47,6 +48,7 @@ type Repositories struct {
 	Secrets       secrets.SecretStore
 	Office        *officesqlite.Repository
 	Terminal      *terminalrepo.Repository
+	RuntimeFlags  *runtimeflags.SQLiteStore
 }
 
 type Services struct {
@@ -76,7 +78,8 @@ type Services struct {
 	// Terminal is the first-class user-terminal service (rename, park, etc.).
 	// Wired into the gateway once lifecycle.Manager is up so the PTY backend
 	// is available.
-	Terminal *terminalservice.Service
+	Terminal     *terminalservice.Service
+	RuntimeFlags *runtimeflags.Service
 	// Automation is the trigger-based automation subsystem (cron, GitHub PR
 	// events, webhooks). Independent of Office — has its own scheduler and
 	// creates tasks via the task service.

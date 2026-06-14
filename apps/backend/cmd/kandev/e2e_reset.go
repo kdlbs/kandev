@@ -79,6 +79,9 @@ func handleE2EReset(
 				log.Warn("e2e reset: routing cleanup failed", zap.String("sql", q), zap.Error(err))
 			}
 		}
+		if _, err := repo.DB().ExecContext(ctx, `DELETE FROM runtime_flag_overrides`); err != nil {
+			log.Warn("e2e reset: runtime flag override cleanup failed", zap.Error(err))
+		}
 
 		// Reset every agent's routing override to the inherit-markers
 		// shape onboarding writes. Without this, an agent-override test

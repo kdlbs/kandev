@@ -26,6 +26,7 @@ import (
 	"github.com/kandev/kandev/internal/system/jobs"
 	"github.com/kandev/kandev/internal/system/logs"
 	"github.com/kandev/kandev/internal/system/metrics"
+	"github.com/kandev/kandev/internal/system/restart"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
 	"github.com/kandev/kandev/internal/system/updates"
 	"go.uber.org/zap"
@@ -137,6 +138,8 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 	g.GET("/updates", updates.HandleGet(s.Updates))
 	g.POST("/updates/check", updates.HandleCheck(s.Updates))
 	g.POST("/updates/apply", updates.HandleApply(s.Updates))
+	g.GET("/restart-capability", restart.HandleCapability())
+	g.POST("/restart", restart.HandleRequest())
 
 	g.GET("/jobs/:id", jobs.HandleGet(s.Jobs))
 

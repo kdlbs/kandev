@@ -5,6 +5,7 @@ import {
   IconArchive,
   IconDatabase,
   IconFileText,
+  IconFlask,
   IconInfoCircle,
   IconRefresh,
   IconScale,
@@ -18,6 +19,7 @@ const DEFAULT_HREF = `${ROOT_HREF}/status`;
 
 const ITEMS: Array<{ href: string; label: string; icon: TablerIcon }> = [
   { href: `${ROOT_HREF}/status`, label: "Status", icon: IconActivity },
+  { href: `${ROOT_HREF}/feature-toggles`, label: "Feature Toggles", icon: IconFlask },
   { href: `${ROOT_HREF}/database`, label: "Database", icon: IconDatabase },
   { href: `${ROOT_HREF}/backups`, label: "Backups", icon: IconArchive },
   { href: `${ROOT_HREF}/logs`, label: "Logs", icon: IconFileText },

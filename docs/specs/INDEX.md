@@ -96,6 +96,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | Spec | Status |
 |---|---|
 | [system-page](system-page/spec.md) | draft |
+| [feature-toggles](feature-toggles/spec.md) | draft |
 
 ---
 

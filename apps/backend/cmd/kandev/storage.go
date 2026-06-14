@@ -22,6 +22,7 @@ import (
 	notificationstore "github.com/kandev/kandev/internal/notifications/store"
 	"github.com/kandev/kandev/internal/office"
 	promptstore "github.com/kandev/kandev/internal/prompts/store"
+	"github.com/kandev/kandev/internal/runtimeflags"
 	userstore "github.com/kandev/kandev/internal/user/store"
 )
 
@@ -78,6 +79,11 @@ func provideRepositories(cfg *config.Config, log *logger.Logger, version string)
 		return nil, nil, nil, fmt.Errorf("terminal repo: %w", err)
 	}
 
+	runtimeFlagsStore, err := runtimeflags.NewSQLiteStore(writer, reader)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("runtime flags store: %w", err)
+	}
+
 	masterKeyProvider, err := secrets.NewMasterKeyProvider(cfg.ResolvedDataDir())
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("master key: %w", err)
@@ -105,6 +111,7 @@ func provideRepositories(cfg *config.Config, log *logger.Logger, version string)
 		Secrets:       secretStore,
 		Office:        officeRepo,
 		Terminal:      terminalRepoImpl,
+		RuntimeFlags:  runtimeFlagsStore,
 	}
 	return pool, repos, cleanups, nil
 }

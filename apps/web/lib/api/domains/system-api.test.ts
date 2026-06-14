@@ -25,6 +25,8 @@ import {
   checkUpdates,
   applyUpdate,
   fetchSystemJob,
+  fetchRestartCapability,
+  requestRestart,
 } from "./system-api";
 
 const BASE = "http://api.test/api/v1/system";
@@ -271,5 +273,23 @@ describe("updates", () => {
     expect((init?.method ?? "").toUpperCase()).toBe("POST");
     expect(init?.body).toBe(JSON.stringify({ confirm: "UPDATE" }));
     expect(res.job_id).toBe("self-update-1");
+  });
+});
+
+describe("restart", () => {
+  it("fetchRestartCapability GETs /restart-capability", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ supported: false, mode: "manual" }));
+    const res = await fetchRestartCapability();
+    expect(lastCall().url).toBe(`${BASE}/restart-capability`);
+    expect(method()).toBe("GET");
+    expect(res.supported).toBe(false);
+  });
+
+  it("requestRestart POSTs /restart", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ accepted: true, message: "Restarting" }));
+    const res = await requestRestart();
+    expect(lastCall().url).toBe(`${BASE}/restart`);
+    expect(method()).toBe("POST");
+    expect(res.accepted).toBe(true);
   });
 });

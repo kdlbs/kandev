@@ -155,6 +155,17 @@ export interface JobAcceptResponse {
   job_id: string;
 }
 
+export interface RestartCapability {
+  supported: boolean;
+  mode: "manual" | "supervisor" | string;
+  reason?: string;
+}
+
+export interface RestartResponse {
+  accepted: boolean;
+  message: string;
+}
+
 export type LicenseEcosystem = "npm" | "go";
 
 export interface LicenseEntry {

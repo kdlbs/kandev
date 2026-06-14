@@ -58,6 +58,7 @@ import (
 	promptcontroller "github.com/kandev/kandev/internal/prompts/controller"
 	prompthandlers "github.com/kandev/kandev/internal/prompts/handlers"
 	"github.com/kandev/kandev/internal/repoclone"
+	"github.com/kandev/kandev/internal/runtimeflags"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/sentry"
 	"github.com/kandev/kandev/internal/slack"
@@ -435,6 +436,7 @@ type routeParams struct {
 	eventBus                bus.EventBus
 	services                *Services
 	systemSvc               *systemsvc.Service
+	runtimeFlagsSvc         *runtimeflags.Service
 	agentSettingsController *agentsettingscontroller.Controller
 	agentSettingsRepo       settingsstore.Repository
 	agentList               taskhandlers.AgentLister
@@ -785,6 +787,9 @@ func registerSecondaryRoutes(
 
 	registerHealthRoutes(p)
 	registerSystemRoutes(p)
+	if p.runtimeFlagsSvc != nil {
+		runtimeflags.RegisterRoutes(p.router, p.runtimeFlagsSvc)
+	}
 
 	if p.repoCloner != nil {
 		ikHandler := improvekandev.NewHandler(p.taskSvc, p.repoCloner, p.version, p.log)

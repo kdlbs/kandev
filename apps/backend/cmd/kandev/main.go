@@ -102,6 +102,7 @@ import (
 
 	// Repository cloning
 	"github.com/kandev/kandev/internal/repoclone"
+	"github.com/kandev/kandev/internal/runtimeflags"
 
 	// Secrets
 	"github.com/kandev/kandev/internal/secrets"
@@ -255,6 +256,20 @@ func run(cfg *config.Config, log *logger.Logger, cleanups *[]func() error, runCl
 	return startServices(ctx, cfg, log, addCleanup, eventBus, runCleanups)
 }
 
+func applyStartupRuntimeFlags(ctx context.Context, cfg *config.Config, repos *Repositories, log *logger.Logger) bool {
+	if repos.RuntimeFlags == nil {
+		return true
+	}
+	svc := runtimeflags.NewService(repos.RuntimeFlags, runtimeflags.OptionsFromConfig(cfg))
+	states, err := svc.ListStates(ctx)
+	if err != nil {
+		log.Error("Failed to resolve runtime flag overrides", zap.Error(err))
+		return false
+	}
+	runtimeflags.ApplyStatesToConfig(cfg, states)
+	return true
+}
+
 // startServices initializes task-level services and all downstream infrastructure.
 func startServices( //nolint:cyclop
 	ctx context.Context,
@@ -278,6 +293,11 @@ func startServices( //nolint:cyclop
 		addCleanup(c)
 	}
 
+	runtimeFlagDefaults := runtimeflags.OptionsFromConfig(cfg).DefaultValues
+	if !applyStartupRuntimeFlags(ctx, cfg, repos, log) {
+		return false
+	}
+
 	agentRegistry, _, err := registry.Provide(log)
 	if err != nil {
 		log.Error("Failed to initialize agent registry", zap.Error(err))
@@ -289,6 +309,10 @@ func startServices( //nolint:cyclop
 		log.Error("Failed to initialize services", zap.Error(err))
 		return false
 	}
+	services.RuntimeFlags = runtimeflags.NewService(
+		repos.RuntimeFlags,
+		runtimeflags.RuntimeOptionsFromAppliedConfig(runtimeFlagDefaults, cfg),
+	)
 	log.Info("Task Service initialized")
 
 	if err := runInitialAgentSetup(ctx, services.User, agentSettingsController, log); err != nil {
@@ -1542,6 +1566,7 @@ func buildHTTPServer(
 		eventBus:                eventBus,
 		services:                services,
 		systemSvc:               systemSvc,
+		runtimeFlagsSvc:         services.RuntimeFlags,
 		agentSettingsController: agentSettingsController,
 		agentSettingsRepo:       repos.AgentSettings,
 		agentList:               agentRegistry,
