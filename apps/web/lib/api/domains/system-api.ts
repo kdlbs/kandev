@@ -175,8 +175,8 @@ export function applyUpdate(
 
 export function fetchRestartCapability(options?: ApiRequestOptions): Promise<RestartCapability> {
   return fetchJson<RestartCapability>(`${SYSTEM_BASE}/restart-capability`, {
-    cache: "no-store",
     ...options,
+    cache: "no-store",
   });
 }
 

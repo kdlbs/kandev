@@ -285,6 +285,12 @@ describe("restart", () => {
     expect(res.supported).toBe(false);
   });
 
+  it("fetchRestartCapability always bypasses cache", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ supported: true, mode: "supervisor" }));
+    await fetchRestartCapability({ cache: "force-cache" });
+    expect(lastCall().init?.cache).toBe("no-store");
+  });
+
   it("requestRestart POSTs /restart", async () => {
     fetchSpy.mockResolvedValueOnce(jsonResponse({ accepted: true, message: "Restarting" }));
     const res = await requestRestart({ init: { method: "GET" } });

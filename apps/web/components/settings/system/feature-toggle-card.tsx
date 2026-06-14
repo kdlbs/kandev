@@ -43,7 +43,7 @@ export function FeatureToggleCard({ flag, saving, onChange, onReset }: FeatureTo
           <Button
             variant="outline"
             size="sm"
-            disabled={saving || flag.env_locked || flag.override_value == null}
+            disabled={saving || flag.env_locked || !flag.mutable || flag.override_value == null}
             onClick={onReset}
             className="cursor-pointer disabled:cursor-not-allowed"
           >

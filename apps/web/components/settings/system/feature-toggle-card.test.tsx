@@ -94,6 +94,22 @@ describe("FeatureToggleCard", () => {
     expect(screen.getByText("Controlled by launch environment")).not.toBeNull();
   });
 
+  it("disables changes and reset for immutable flags", () => {
+    const onChange = vi.fn();
+    const onReset = vi.fn();
+    render(
+      <FeatureToggleCard
+        flag={flagState({ mutable: false, override_value: false })}
+        saving={false}
+        onChange={onChange}
+        onReset={onReset}
+      />,
+    );
+
+    expect(screen.getByLabelText("Toggle Office mode")).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: /use default/i })).toHaveProperty("disabled", true);
+  });
+
   it("shows restart metadata when a saved change is pending", () => {
     render(
       <FeatureToggleCard

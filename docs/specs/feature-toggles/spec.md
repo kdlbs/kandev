@@ -65,11 +65,12 @@ apps/backend/internal/runtimeflags/      Runtime flag registry, store, service, 
 apps/backend/internal/system/restart/    Restart capability/request support
 apps/backend/cmd/kandev/                 Startup override application and route wiring
 apps/web/app/settings/system/feature-toggles/page.tsx
-apps/web/components/settings/feature-toggles-settings.tsx
+apps/web/components/settings/system/feature-toggles-settings.tsx
 apps/web/lib/api/domains/runtime-flags-api.ts
 apps/web/e2e/settings/feature-toggles.spec.ts
 apps/web/e2e/settings/mobile-feature-toggles.spec.ts
-docs/decisions/0016-runtime-settings-overrides.md
+docs/decisions/0018-runtime-settings-overrides.md
+docs/decisions/0019-restart-supervisor.md
 ```
 
 ## Code style
