@@ -85,6 +85,11 @@ func deployArtifacts(ctx context.Context, binDir, tarPath, spritesToken, spriteN
 		return "", fmt.Errorf("build web: %w", err)
 	}
 
+	fmt.Fprintln(os.Stderr, "building cli launcher...")
+	if err := buildCLI(ctx); err != nil {
+		return "", fmt.Errorf("build cli: %w", err)
+	}
+
 	fmt.Fprintln(os.Stderr, "packaging bundle...")
 	if err := packageBundle(binDir, tarPath); err != nil {
 		return "", fmt.Errorf("package bundle: %w", err)

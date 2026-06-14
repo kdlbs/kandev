@@ -14,6 +14,7 @@ import (
 
 // appsDir is the apps/ workspace root relative to the working directory (apps/backend/).
 const appsDir = ".."
+const repoRootDir = "../.."
 
 // goDockerImage is used to cross-compile CGO binaries on non-linux/amd64 hosts.
 const goDockerImage = "golang:1.26-bookworm"
@@ -139,12 +140,27 @@ func buildWeb(ctx context.Context, skipInstall bool) error {
 	return nil
 }
 
+// buildCLI creates the bundled TypeScript launcher used by release-style
+// installs. Preview sprites run through this launcher so their backend is
+// managed by the same restart supervisor as normal kandev starts.
+func buildCLI(ctx context.Context) error {
+	cmd := exec.CommandContext(ctx, "bash", "scripts/release/package-cli.sh")
+	cmd.Dir = repoRootDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("package cli: %w", err)
+	}
+	return nil
+}
+
 // packageBundle creates a tar.gz matching the Docker container layout:
 //
 //	app/apps/backend/bin/{kandev,agentctl,mock-agent}
 //	app/apps/web/.next/standalone/           (Next.js server + node_modules)
 //	app/apps/web/.next/standalone/web/.next/static/  (static assets inside standalone)
 //	app/apps/web/.next/standalone/web/public/        (public assets inside standalone)
+//	usr/local/lib/kandev-cli/                (CLI launcher bundle)
 func packageBundle(binDir, tarPath string) error {
 	f, err := os.Create(tarPath)
 	if err != nil {
@@ -186,6 +202,11 @@ func packageBundle(binDir, tarPath string) error {
 	publicDst := filepath.Join("app", "apps", "web", ".next", "standalone", "web", "public")
 	if err := addDirToTar(tw, publicDir, publicDst); err != nil {
 		return fmt.Errorf("add public: %w", err)
+	}
+
+	cliDir := filepath.Join(repoRootDir, "dist", "kandev", "cli")
+	if err := addDirToTar(tw, cliDir, filepath.Join("usr", "local", "lib", "kandev-cli")); err != nil {
+		return fmt.Errorf("add cli: %w", err)
 	}
 
 	// Close in order: tar → gzip → file (flush compressed data).

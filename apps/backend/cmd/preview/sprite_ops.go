@@ -104,9 +104,11 @@ func buildExtractScript(backendPort int) string {
 tar -xzf /tmp/kandev-preview.tar.gz -C /
 chmod +x /app/apps/backend/bin/kandev \
          /app/apps/backend/bin/agentctl \
-         /app/apps/backend/bin/mock-agent
+         /app/apps/backend/bin/mock-agent \
+         /usr/local/lib/kandev-cli/bin/cli.js
 ln -sf /app/apps/backend/bin/agentctl    /usr/local/bin/agentctl
 ln -sf /app/apps/backend/bin/mock-agent  /usr/local/bin/mock-agent
+ln -sf /usr/local/lib/kandev-cli/bin/cli.js /usr/local/bin/kandev
 # Reset data directory on each deploy so the DB starts fresh (preview env only).
 rm -rf /data
 mkdir -p /data /var/log
@@ -120,27 +122,26 @@ mkdir -p /data
 
 # Kill any agentctl orphans from previous runs.
 pkill -f agentctl || true
-# Kill any stale web (node) process — nohup'd node survives StopService since
-# it detaches from the process group, and would hold the web port on redeploy.
+# Kill any stale web (node) process from older preview deployments, where the
+# web server was nohup'd outside the service process group.
 pkill -f '/app/apps/web/.next/standalone/web/server.js' || true
 sleep 1
 
-# Start Next.js web server in background.
-PORT=%d HOSTNAME=0.0.0.0 NODE_ENV=production \
-  nohup node /app/apps/web/.next/standalone/web/server.js \
-  > /var/log/kandev-web.log 2>&1 &
-
-# Start Go backend (main process — Sprites HTTPPort proxies here).
 export KANDEV_HOME_DIR=/data
 export KANDEV_DOCKER_ENABLED=false
 export KANDEV_LOG_LEVEL=info
-export KANDEV_SERVER_PORT=%d
-export KANDEV_WEB_INTERNAL_URL=http://localhost:%d
 # Preview mode: only register the mock agent, suppress real agent discovery.
 export KANDEV_MOCK_AGENT=only
-/app/apps/backend/bin/kandev > /var/log/kandev.log 2>&1
+
+# Launch through the CLI so the backend runs under the restart supervisor.
+exec kandev start \
+  --backend-port %d \
+  --web-internal-port %d \
+  --verbose \
+  --headless \
+  > /var/log/kandev.log 2>&1
 STARTSCRIPT
-chmod +x /app/start-kandev.sh`, ports.Web, backendPort, ports.Web)
+chmod +x /app/start-kandev.sh`, backendPort, ports.Web)
 }
 
 // deployService stops any running kandev service, registers (or updates) its

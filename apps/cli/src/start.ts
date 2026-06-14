@@ -81,6 +81,8 @@ export type StartOptions = {
   verbose?: boolean;
   /** Show debug logs + agent message dumps */
   debug?: boolean;
+  /** Skip browser open. Set by service units and preview environments. */
+  headless?: boolean;
 };
 
 /**
@@ -102,6 +104,7 @@ export async function runStart({
   webPort,
   verbose = false,
   debug = false,
+  headless = false,
 }: StartOptions): Promise<void> {
   const ports = await pickPorts(backendPort, webPort);
 
@@ -214,5 +217,9 @@ export async function runStart({
 
   await waitForUrlReady(webUrl, webProc, healthTimeoutMs);
   console.log("[kandev] open: " + ports.backendUrl);
+  if (headless) {
+    console.log(`[kandev] ready (headless) at ${ports.backendUrl}`);
+    return;
+  }
   openBrowser(ports.backendUrl);
 }

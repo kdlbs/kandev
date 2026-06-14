@@ -138,6 +138,7 @@ async function main(): Promise<void> {
       webPort,
       verbose: options.verbose,
       debug: options.debug,
+      headless: options.headless,
     });
     return;
   }
