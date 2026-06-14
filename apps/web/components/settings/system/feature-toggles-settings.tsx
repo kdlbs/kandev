@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useCallback,
   useMemo,
   useRef,
   useState,
@@ -31,13 +32,12 @@ export function FeatureTogglesSettings({ initialFlags, restartCapability }: Prop
   const [savingKeys, setSavingKeys] = useState<Set<string>>(() => new Set());
   const requestSeqRef = useRef(0);
   const { toast } = useToast();
-  const restart = useKandevRestart({ onComplete: () => void reload() });
   const pendingRestart = useMemo(
     () => flags.some((flag) => flag.requires_restart_to_apply),
     [flags],
   );
 
-  const reload = async () => {
+  const reload = useCallback(async () => {
     const seq = nextRequestSeq(requestSeqRef);
     try {
       const res = await fetchRuntimeFlags();
@@ -49,7 +49,10 @@ export function FeatureTogglesSettings({ initialFlags, restartCapability }: Prop
         variant: "error",
       });
     }
-  };
+  }, [toast]);
+
+  const onRestartComplete = useCallback(() => void reload(), [reload]);
+  const restart = useKandevRestart({ onComplete: onRestartComplete });
 
   const setOverride = async (flag: RuntimeFlagState, override: boolean | null) => {
     const seq = nextRequestSeq(requestSeqRef);

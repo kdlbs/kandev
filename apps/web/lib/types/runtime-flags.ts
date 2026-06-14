@@ -10,7 +10,7 @@ export interface RuntimeFlagState {
   description: string;
   stability: RuntimeFlagStability;
   risk_level: RuntimeFlagRiskLevel;
-  risk_description?: string;
+  risk_description: string;
   effective_value: boolean;
   default_value: boolean;
   override_value: boolean | null;
