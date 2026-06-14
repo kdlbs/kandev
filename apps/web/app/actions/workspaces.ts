@@ -97,7 +97,7 @@ export async function updateWorkspaceAction(
 }
 
 export async function deleteWorkspaceAction(id: string, confirmName: string) {
-  await fetchJson<void>(`${apiBaseUrl}/api/v1/office/workspaces/${id}`, {
+  await fetchJson<void>(`${apiBaseUrl}/api/v1/workspaces/${id}`, {
     method: "DELETE",
     body: JSON.stringify({ confirm_name: confirmName }),
   });

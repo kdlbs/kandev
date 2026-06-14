@@ -129,6 +129,46 @@ func TestService_GetOfficeWorkflowIDs_DBError(t *testing.T) {
 	}
 }
 
+func TestService_DeleteWorkspaceDeletesWorkspaceOwnedTasksAndWorkflows(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-delete", Name: "Delete Me"})
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-keep", Name: "Keep Me"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-delete", WorkspaceID: "ws-delete", Name: "Doomed"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-keep", WorkspaceID: "ws-keep", Name: "Keep"})
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID:             "task-delete",
+		WorkspaceID:    "ws-delete",
+		WorkflowID:     "wf-delete",
+		WorkflowStepID: "step-delete",
+		Title:          "Delete task",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	if err := svc.DeleteWorkspace(ctx, "ws-delete"); err != nil {
+		t.Fatalf("DeleteWorkspace: %v", err)
+	}
+
+	if _, err := repo.GetWorkspace(ctx, "ws-delete"); err == nil {
+		t.Fatalf("workspace should be deleted")
+	}
+	if _, err := repo.GetTask(ctx, "task-delete"); err == nil {
+		t.Fatalf("workspace task should be deleted")
+	}
+	workflows, err := repo.ListWorkflows(ctx, "ws-delete", true)
+	if err != nil {
+		t.Fatalf("ListWorkflows: %v", err)
+	}
+	if len(workflows) != 0 {
+		t.Fatalf("workspace workflows should be deleted, got %d", len(workflows))
+	}
+	if _, err := repo.GetWorkflow(ctx, "wf-keep"); err != nil {
+		t.Fatalf("unrelated workflow should remain: %v", err)
+	}
+}
+
 // TestService_DeleteWorkflow_ArchivesChildTasks verifies the cascade fix for
 // issue #1279: workflow deletion archives any active child tasks instead of
 // leaving them with a dangling workflow_id (tasks.workflow_id has no FK, so
