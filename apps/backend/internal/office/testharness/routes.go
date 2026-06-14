@@ -369,13 +369,17 @@ func buildSeededSession(req *seedTaskSessionRequest) (*models.TaskSession, error
 	if req.AgentProfileID != "" {
 		metadata["agent_profile_id"] = req.AgentProfileID
 	}
+	sessionID := req.SessionID
+	if sessionID == "" {
+		sessionID = uuid.New().String()
+	}
 	// Leave AgentProfileID empty when the caller didn't supply one — that
 	// makes the seeded row a non-office (kanban / quick-chat) session, so
 	// it renders inline in the task chat timeline rather than collapsing
 	// into a per-agent sibling tab. Tests that want office (per-agent)
 	// behaviour pass the agent profile id explicitly.
 	return &models.TaskSession{
-		ID:             uuid.New().String(),
+		ID:             sessionID,
 		TaskID:         req.TaskID,
 		AgentProfileID: req.AgentProfileID,
 		State:          models.TaskSessionState(req.State),
