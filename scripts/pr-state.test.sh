@@ -479,6 +479,7 @@ test_summary_all_flag_includes_historical_unresolved_threads() {
   assert_jq "summary all unresolved count" '.unresolved_review_thread_count == 2' "$json"
   assert_jq "summary all filtered thread count" '.filtered_review_thread_count == 2' "$json"
   assert_jq "summary all keeps historical first comment" '.unresolved_threads[] | select(.thread_id == "PRRT_1") | .comment_id == 111' "$json"
+  assert_jq "summary all unresolved threads count" '.unresolved_threads | length == 2' "$json"
   pass "--summary --all includes historical unresolved thread comments"
 }
 
