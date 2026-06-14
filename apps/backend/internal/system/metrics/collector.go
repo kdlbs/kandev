@@ -30,14 +30,27 @@ func NewCollector() *Collector {
 	}
 }
 
-func (c *Collector) Sample(_ context.Context, metricIDs []string, diskPath string) SourceSnapshot {
-	c.mu.Lock()
+func (c *Collector) Sample(ctx context.Context, metricIDs []string, diskPath string) SourceSnapshot {
+	if err := ctx.Err(); err != nil {
+		return canceledBackendSnapshot(metricIDs, err)
+	}
+	for !c.mu.TryLock() {
+		select {
+		case <-ctx.Done():
+			return canceledBackendSnapshot(metricIDs, ctx.Err())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
 	defer c.mu.Unlock()
 	if diskPath == "" {
 		diskPath = "/"
 	}
 	samples := make([]MetricSample, 0, len(metricIDs))
 	for _, id := range metricIDs {
+		if err := ctx.Err(); err != nil {
+			samples = append(samples, sample(id, metricLabel(id), metricUnit(id), 0, err))
+			continue
+		}
 		samples = append(samples, c.sampleMetric(id, diskPath))
 	}
 	return SourceSnapshot{
@@ -70,9 +83,50 @@ func (c *Collector) sampleMetric(id string, diskPath string) MetricSample {
 		return sample(id, "CPU temp", "C", value, err)
 	case MetricIOLoad:
 		value, err := ioLoad(c.procRoot)
-		return sample(id, "I/O load", "", value, err)
+		return sample(id, "Load avg", "", value, err)
 	default:
 		return MetricSample{ID: id, Label: id, Available: false, Error: "unknown metric"}
+	}
+}
+
+func canceledBackendSnapshot(metricIDs []string, err error) SourceSnapshot {
+	samples := make([]MetricSample, 0, len(metricIDs))
+	for _, id := range metricIDs {
+		samples = append(samples, sample(id, metricLabel(id), metricUnit(id), 0, err))
+	}
+	return SourceSnapshot{
+		ID:      "kandev-backend",
+		Label:   "Kandev backend",
+		Kind:    "backend",
+		Metrics: samples,
+	}
+}
+
+func metricLabel(id string) string {
+	switch id {
+	case MetricCPUPercent:
+		return "CPU"
+	case MetricMemoryPercent:
+		return "Memory"
+	case MetricDiskPercent:
+		return "Disk"
+	case MetricCPUTemp:
+		return "CPU temp"
+	case MetricIOLoad:
+		return "Load avg"
+	default:
+		return id
+	}
+}
+
+func metricUnit(id string) string {
+	switch id {
+	case MetricCPUPercent, MetricMemoryPercent, MetricDiskPercent:
+		return "%"
+	case MetricCPUTemp:
+		return "C"
+	default:
+		return ""
 	}
 }
 

@@ -19,7 +19,7 @@ const METRIC_OPTIONS: Array<{ id: SystemMetricId; label: string }> = [
   { id: "memory_percent", label: "Memory %" },
   { id: "disk_percent", label: "Disk %" },
   { id: "cpu_temp", label: "CPU temp" },
-  { id: "io_load", label: "I/O load" },
+  { id: "io_load", label: "Load avg" },
 ];
 
 const DEFAULT_METRICS_SETTINGS: SystemMetricsGlobalSettings = {

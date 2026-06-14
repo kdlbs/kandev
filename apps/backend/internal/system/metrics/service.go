@@ -27,6 +27,8 @@ type ExecutionProvider interface {
 	MetricExecutions() []ExecutionSource
 }
 
+const executionMetricsDiskPath = "/"
+
 type Service struct {
 	store     *Store
 	collector *Collector
@@ -150,7 +152,7 @@ func (s *Service) collectExecutions(ctx context.Context, settings GlobalSettings
 		if execution.Client == nil {
 			continue
 		}
-		source, err := execution.Client.SystemMetrics(ctx, settings.Metrics, settings.BackendDiskPath)
+		source, err := execution.Client.SystemMetrics(ctx, settings.Metrics, executionMetricsDiskPath)
 		if err != nil {
 			sources = append(sources, unavailableExecutionSource(execution.ID, execution.Label, "execution", err.Error()))
 			continue
