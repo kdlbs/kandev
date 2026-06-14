@@ -27,11 +27,7 @@ type acpTodoItem struct {
 }
 
 func extractTodoItems(raw any) ([]acpTodoItem, bool) {
-	todosRaw, ok := findTodosRaw(raw)
-	if !ok {
-		return nil, false
-	}
-	todosSlice, ok := todosRaw.([]any)
+	todosSlice, ok := findTodosSlice(raw)
 	if !ok {
 		return nil, false
 	}
@@ -43,24 +39,29 @@ func extractTodoItems(raw any) ([]acpTodoItem, bool) {
 		}
 		items = append(items, item)
 	}
+	// Require at least one recognisable item so an empty or fully-malformed
+	// todos array doesn't emit a no-op plan event that wipes the indicator.
+	if len(items) == 0 {
+		return nil, false
+	}
 	return items, true
 }
 
-func findTodosRaw(raw any) (any, bool) {
+func findTodosSlice(raw any) ([]any, bool) {
 	m, ok := raw.(map[string]any)
 	if !ok {
 		return nil, false
 	}
-	if todos, ok := m["todos"]; ok {
+	if todos, ok := m["todos"].([]any); ok {
 		return todos, true
 	}
 	if meta, ok := m["metadata"].(map[string]any); ok {
-		if todos, ok := meta["todos"]; ok {
+		if todos, ok := meta["todos"].([]any); ok {
 			return todos, true
 		}
 	}
 	if rawOutput, ok := m["rawOutput"].(map[string]any); ok {
-		return findTodosRaw(rawOutput)
+		return findTodosSlice(rawOutput)
 	}
 	return nil, false
 }
