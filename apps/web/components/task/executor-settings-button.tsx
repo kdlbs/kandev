@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 import { IconBox, IconLoader2, IconTrash } from "@tabler/icons-react";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@kandev/ui/hover-card";
 import { Button } from "@kandev/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 
 import { getExecutorStatusIcon } from "@/lib/executor-icons";
 import { TaskResetEnvConfirmDialog } from "./task-reset-env-confirm-dialog";
@@ -82,16 +83,34 @@ export function ExecutorSettingsButton({
           <PrepareStatusSection summary={prepare} />
           <EnvironmentInfo env={env} container={container} ssh={ssh} loading={loading} />
           <div className="border-t border-border px-2 py-1.5 flex items-center justify-end">
-            <Button
-              variant="destructive"
-              size="sm"
-              className="cursor-pointer text-xs"
-              disabled={!env || isResetting}
-              data-testid="executor-settings-reset"
-              onClick={() => setResetDialogOpen(true)}
-            >
-              <IconTrash className="h-3.5 w-3.5 mr-1" /> Reset environment
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="cursor-pointer text-xs"
+                  disabled={!env || isResetting}
+                  data-testid="executor-settings-reset"
+                  onClick={() => setResetDialogOpen(true)}
+                >
+                  <IconTrash className="h-3.5 w-3.5 mr-1" /> Reset environment
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs">
+                <p className="font-medium">Reset environment</p>
+                <p className="mt-1 text-xs">
+                  Deletes the current task environment (container, sandbox, and/or worktree) and
+                  forces a fresh one to be created for your next run.
+                </p>
+                <p className="mt-1 text-xs text-destructive">
+                  Any uncommitted or unpushed changes are lost.
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Check Push the current branch... in the confirm step first to preserve committed
+                  work before resetting.
+                </p>
+              </TooltipContent>
+            </Tooltip>
           </div>
         </HoverCardContent>
       </HoverCard>
