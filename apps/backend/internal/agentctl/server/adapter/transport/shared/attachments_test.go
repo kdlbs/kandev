@@ -209,6 +209,50 @@ func TestSaveAttachments_DuplicateNamesDoNotClobber(t *testing.T) {
 	}
 }
 
+func TestSaveAttachments_DuplicateNamesAcrossCallsDoNotClobber(t *testing.T) {
+	workDir := t.TempDir()
+	mgr := NewAttachmentManager(workDir, testLogger())
+	mgr.SetSessionID("sess-dupe-calls")
+
+	first := base64.StdEncoding.EncodeToString([]byte("first"))
+	second := base64.StdEncoding.EncodeToString([]byte("second"))
+
+	firstSaved, err := mgr.SaveAttachments([]v1.MessageAttachment{
+		{Type: "resource", Data: first, MimeType: "text/plain", Name: "report.txt"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected first save error: %v", err)
+	}
+	secondSaved, err := mgr.SaveAttachments([]v1.MessageAttachment{
+		{Type: "resource", Data: second, MimeType: "text/plain", Name: "report.txt"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected second save error: %v", err)
+	}
+
+	if firstSaved[0].Name != "report.txt" {
+		t.Fatalf("first name = %q, want report.txt", firstSaved[0].Name)
+	}
+	if secondSaved[0].Name != "report-2.txt" {
+		t.Fatalf("second name = %q, want report-2.txt", secondSaved[0].Name)
+	}
+
+	firstData, err := os.ReadFile(firstSaved[0].AbsPath)
+	if err != nil {
+		t.Fatalf("failed to read first file: %v", err)
+	}
+	secondData, err := os.ReadFile(secondSaved[0].AbsPath)
+	if err != nil {
+		t.Fatalf("failed to read second file: %v", err)
+	}
+	if string(firstData) != "first" {
+		t.Errorf("first content = %q, want first", string(firstData))
+	}
+	if string(secondData) != "second" {
+		t.Errorf("second content = %q, want second", string(secondData))
+	}
+}
+
 func TestSaveAttachments_NoName_GeneratesFromMime(t *testing.T) {
 	workDir := t.TempDir()
 	mgr := NewAttachmentManager(workDir, testLogger())
