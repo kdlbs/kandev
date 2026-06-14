@@ -11,7 +11,7 @@ const PREPARE_STATUS_TESTID = "executor-prepare-status";
 const SETTINGS_BUTTON_TESTID = "executor-settings-button";
 const BRANCH_PUSH_HINT_TEXT =
   "Check Push the current branch... in the confirm step first to preserve committed work before resetting.";
-const BRANCH_PUSH_HINT = new RegExp(BRANCH_PUSH_HINT_TEXT);
+const BRANCH_PUSH_HINT = BRANCH_PUSH_HINT_TEXT;
 const SPRITES_ENV = { executor_type: "sprites", sandbox_id: "kandev-abc" };
 const SPRITES_WORKTREE_ENV = { ...SPRITES_ENV, worktree_path: "/tmp/worktree" };
 const DOCKER_ENV = { executor_type: "local_docker", container_id: "abcdef" };
@@ -189,11 +189,14 @@ describe("ExecutorSettingsButton prepare status", () => {
 });
 
 describe("ExecutorSettingsButton reset tooltip", () => {
-  it("does not mention branch push in tooltip when no worktree path exists", () => {
+  it("does not mention branch push in tooltip when no worktree path exists", async () => {
     mockEnv = SPRITES_ENV;
 
     renderButton();
     hoverSettingsButton();
+
+    // Wait for env to load — the cloud icon only renders once executor_type resolves.
+    await screen.findByTestId("executor-status-cloud-icon");
 
     expect(screen.queryByText(BRANCH_PUSH_HINT)).toBeNull();
   });
