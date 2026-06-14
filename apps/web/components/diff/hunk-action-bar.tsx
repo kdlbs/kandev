@@ -31,6 +31,9 @@ export function HunkActionBar({
     setLoading(true);
     try {
       await onRevert();
+    } catch {
+      // Revert failures are surfaced by the caller; keep this overlay from
+      // turning a failed async action into an unhandled event rejection.
     } finally {
       if (!mountedRef.current) return;
       setLoading(false);
