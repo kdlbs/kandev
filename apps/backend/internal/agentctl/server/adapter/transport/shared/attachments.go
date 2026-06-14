@@ -64,6 +64,7 @@ func (m *AttachmentManager) SaveAttachments(attachments []v1.MessageAttachment) 
 	}
 
 	var saved []SavedAttachment
+	usedNames := make(map[string]bool, len(attachments))
 	for _, att := range attachments {
 		name := att.Name
 		if name == "" {
@@ -75,6 +76,8 @@ func (m *AttachmentManager) SaveAttachments(attachments []v1.MessageAttachment) 
 			m.logger.Warn("skipping attachment with invalid name", zap.String("original_name", att.Name))
 			continue
 		}
+		name = uniqueAttachmentName(name, usedNames)
+		usedNames[name] = true
 
 		decoded, err := base64.StdEncoding.DecodeString(att.Data)
 		if err != nil {
@@ -148,6 +151,20 @@ func BuildAttachmentPrompt(saved []SavedAttachment, writable bool) string {
 		}
 	}
 	return sb.String()
+}
+
+func uniqueAttachmentName(name string, used map[string]bool) string {
+	if !used[name] {
+		return name
+	}
+	ext := filepath.Ext(name)
+	base := strings.TrimSuffix(name, ext)
+	for i := 2; ; i++ {
+		candidate := fmt.Sprintf("%s-%d%s", base, i, ext)
+		if !used[candidate] {
+			return candidate
+		}
+	}
 }
 
 func sanitizePromptValue(value string) string {

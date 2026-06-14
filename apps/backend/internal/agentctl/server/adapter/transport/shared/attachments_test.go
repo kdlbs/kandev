@@ -172,6 +172,43 @@ func TestSaveAttachments_MultipleAttachments(t *testing.T) {
 	}
 }
 
+func TestSaveAttachments_DuplicateNamesDoNotClobber(t *testing.T) {
+	workDir := t.TempDir()
+	mgr := NewAttachmentManager(workDir, testLogger())
+	mgr.SetSessionID("sess-dupe")
+
+	first := base64.StdEncoding.EncodeToString([]byte("first"))
+	second := base64.StdEncoding.EncodeToString([]byte("second"))
+	third := base64.StdEncoding.EncodeToString([]byte("third"))
+
+	saved, err := mgr.SaveAttachments([]v1.MessageAttachment{
+		{Type: "resource", Data: first, MimeType: "text/plain", Name: "report.txt"},
+		{Type: "resource", Data: second, MimeType: "text/plain", Name: "report.txt"},
+		{Type: "resource", Data: third, MimeType: "text/plain", Name: "report.txt"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(saved) != 3 {
+		t.Fatalf("expected 3 saved, got %d", len(saved))
+	}
+
+	wantNames := []string{"report.txt", "report-2.txt", "report-3.txt"}
+	wantContents := []string{"first", "second", "third"}
+	for i := range saved {
+		if saved[i].Name != wantNames[i] {
+			t.Errorf("saved[%d].Name = %q, want %q", i, saved[i].Name, wantNames[i])
+		}
+		data, err := os.ReadFile(saved[i].AbsPath)
+		if err != nil {
+			t.Fatalf("failed to read saved[%d]: %v", i, err)
+		}
+		if string(data) != wantContents[i] {
+			t.Errorf("saved[%d] content = %q, want %q", i, string(data), wantContents[i])
+		}
+	}
+}
+
 func TestSaveAttachments_NoName_GeneratesFromMime(t *testing.T) {
 	workDir := t.TempDir()
 	mgr := NewAttachmentManager(workDir, testLogger())
