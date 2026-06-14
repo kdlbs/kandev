@@ -52,7 +52,7 @@ func (c *Collector) Sample(ctx context.Context, metricIDs []string, diskPath str
 			samples = append(samples, sample(id, metricLabel(id), metricUnit(id), 0, err))
 			continue
 		}
-		samples = append(samples, c.sampleMetric(id, diskPath))
+		samples = append(samples, c.sampleMetric(ctx, id, diskPath))
 	}
 	return SourceSnapshot{
 		ID:      "kandev-backend",
@@ -69,7 +69,7 @@ func (c *Collector) Reset() {
 	c.lastCPUAt = time.Time{}
 }
 
-func (c *Collector) sampleMetric(id string, diskPath string) MetricSample {
+func (c *Collector) sampleMetric(ctx context.Context, id string, diskPath string) MetricSample {
 	switch id {
 	case MetricCPUPercent:
 		value, err := c.cpuPercent()
@@ -78,7 +78,7 @@ func (c *Collector) sampleMetric(id string, diskPath string) MetricSample {
 		value, err := c.memoryPercent()
 		return sample(id, "Memory", "%", value, err)
 	case MetricDiskPercent:
-		value, err := diskPercent(diskPath)
+		value, err := diskPercent(ctx, diskPath)
 		return sample(id, "Disk", "%", value, err)
 	case MetricCPUTemp:
 		value, err := cpuTemp(c.sysRoot)

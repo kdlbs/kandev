@@ -2,8 +2,11 @@
 
 package metrics
 
-import "errors"
+import (
+	"context"
+	"errors"
+)
 
-func diskPercent(_ string) (float64, error) {
+func diskPercent(_ context.Context, _ string) (float64, error) {
 	return 0, errors.New("disk usage unavailable on windows")
 }
