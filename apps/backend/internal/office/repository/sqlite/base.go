@@ -206,8 +206,8 @@ func (r *Repository) createAgentTables() error {
 		is_system INTEGER NOT NULL DEFAULT 0,
 		system_version TEXT NOT NULL DEFAULT '',
 		default_for_roles TEXT NOT NULL DEFAULT '[]',
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
 		UNIQUE(workspace_id, slug)
 	);
 	`)
@@ -227,8 +227,8 @@ func (r *Repository) createProjectTables() error {
 		budget_cents INTEGER DEFAULT 0,
 		repositories TEXT DEFAULT '[]',
 		executor_config TEXT DEFAULT '{}',
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL
 	);
 	`)
 	return err
@@ -240,8 +240,8 @@ func (r *Repository) createAgentRuntimeTable() error {
 		agent_id TEXT PRIMARY KEY,
 		status TEXT NOT NULL DEFAULT 'idle',
 		pause_reason TEXT DEFAULT '',
-		last_run_finished_at DATETIME,
-		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		last_run_finished_at TIMESTAMP,
+		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);
 	`)
 	return err
@@ -266,8 +266,8 @@ func (r *Repository) createCostTables() error {
 		tokens_out INTEGER DEFAULT 0,
 		cost_subcents INTEGER NOT NULL DEFAULT 0,
 		estimated INTEGER NOT NULL DEFAULT 0,
-		occurred_at DATETIME NOT NULL,
-		created_at DATETIME NOT NULL
+		occurred_at TIMESTAMP NOT NULL,
+		created_at TIMESTAMP NOT NULL
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_office_cost_agent ON office_cost_events(agent_profile_id);
@@ -283,8 +283,8 @@ func (r *Repository) createCostTables() error {
 		period TEXT NOT NULL,
 		alert_threshold_pct INTEGER DEFAULT 80,
 		action_on_exceed TEXT DEFAULT 'notify_only',
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL
 	);
 	`)
 	return err
@@ -307,7 +307,7 @@ func (r *Repository) createRunTables() error {
 		failure_reason TEXT NOT NULL DEFAULT '',
 		session_id TEXT NOT NULL DEFAULT '',
 		retry_count INTEGER DEFAULT 0,
-		scheduled_retry_at DATETIME,
+		scheduled_retry_at TIMESTAMP,
 		error_message TEXT NOT NULL DEFAULT '',
 		cancel_reason TEXT,
 		-- Provider routing (office-provider-routing).
@@ -330,9 +330,9 @@ func (r *Repository) createRunTables() error {
 		result_json TEXT NOT NULL DEFAULT '{}',
 		assembled_prompt TEXT NOT NULL DEFAULT '',
 		summary_injected TEXT NOT NULL DEFAULT '',
-		requested_at DATETIME NOT NULL,
-		claimed_at DATETIME,
-		finished_at DATETIME
+		requested_at TIMESTAMP NOT NULL,
+		claimed_at TIMESTAMP,
+		finished_at TIMESTAMP
 	);
 	CREATE INDEX IF NOT EXISTS idx_run_status_requested ON runs(status, requested_at);
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_run_idempotency ON runs(idempotency_key) WHERE idempotency_key IS NOT NULL;
@@ -363,9 +363,9 @@ func (r *Repository) createRoutineTables() error {
 		catch_up_policy TEXT NOT NULL DEFAULT 'enqueue_missed_with_cap',
 		catch_up_max INTEGER NOT NULL DEFAULT 25,
 		variables TEXT DEFAULT '{}',
-		last_run_at DATETIME,
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL
+		last_run_at TIMESTAMP,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL
 	);
 
 	CREATE TABLE IF NOT EXISTS office_routine_triggers (
@@ -377,11 +377,11 @@ func (r *Repository) createRoutineTables() error {
 		public_id TEXT DEFAULT '',
 		signing_mode TEXT DEFAULT '',
 		secret TEXT DEFAULT '',
-		next_run_at DATETIME,
-		last_fired_at DATETIME,
+		next_run_at TIMESTAMP,
+		last_fired_at TIMESTAMP,
 		enabled INTEGER DEFAULT 1,
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (routine_id) REFERENCES office_routines(id) ON DELETE CASCADE
 	);
 
@@ -395,9 +395,9 @@ func (r *Repository) createRoutineTables() error {
 		linked_task_id TEXT DEFAULT '',
 		coalesced_into_run_id TEXT DEFAULT '',
 		dispatch_fingerprint TEXT DEFAULT '',
-		started_at DATETIME,
-		completed_at DATETIME,
-		created_at DATETIME NOT NULL,
+		started_at TIMESTAMP,
+		completed_at TIMESTAMP,
+		created_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (routine_id) REFERENCES office_routines(id) ON DELETE CASCADE
 	);
 	`)
@@ -415,9 +415,9 @@ func (r *Repository) createApprovalTables() error {
 		payload TEXT DEFAULT '{}',
 		decision_note TEXT DEFAULT '',
 		decided_by TEXT DEFAULT '',
-		decided_at DATETIME,
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL
+		decided_at TIMESTAMP,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL
 	);
 	`)
 	return err
@@ -436,7 +436,7 @@ func (r *Repository) createActivityTables() error {
 		details TEXT DEFAULT '{}',
 		run_id TEXT NOT NULL DEFAULT '',
 		session_id TEXT NOT NULL DEFAULT '',
-		created_at DATETIME NOT NULL
+		created_at TIMESTAMP NOT NULL
 	);
 	CREATE INDEX IF NOT EXISTS idx_activity_workspace_created ON office_activity_log(workspace_id, created_at DESC);
 	CREATE INDEX IF NOT EXISTS idx_activity_run_id ON office_activity_log(run_id) WHERE run_id != '';
@@ -448,7 +448,7 @@ func (r *Repository) createActivityTables() error {
 		event_type TEXT NOT NULL,
 		level TEXT NOT NULL DEFAULT 'info',
 		payload TEXT NOT NULL DEFAULT '{}',
-		created_at DATETIME NOT NULL,
+		created_at TIMESTAMP NOT NULL,
 		PRIMARY KEY (run_id, seq)
 	);
 	CREATE INDEX IF NOT EXISTS idx_run_events_run_created ON run_events(run_id, created_at);
@@ -465,8 +465,8 @@ func (r *Repository) createMemoryTables() error {
 		key TEXT NOT NULL,
 		content TEXT DEFAULT '',
 		metadata TEXT DEFAULT '{}',
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
 		UNIQUE(agent_profile_id, layer, key)
 	);
 	`)
@@ -484,8 +484,8 @@ func (r *Repository) createChannelTables() error {
 		webhook_secret TEXT NOT NULL DEFAULT '',
 		status TEXT DEFAULT 'active',
 		task_id TEXT DEFAULT '',
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL
 	);
 	`)
 	return err
@@ -498,8 +498,8 @@ func (r *Repository) createOnboardingTable() error {
 		completed INTEGER NOT NULL DEFAULT 0,
 		ceo_agent_id TEXT DEFAULT '',
 		first_task_id TEXT DEFAULT '',
-		completed_at DATETIME,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		completed_at TIMESTAMP,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);
 	`)
 	return err
@@ -513,8 +513,8 @@ func (r *Repository) createInstructionTable() error {
 		filename TEXT NOT NULL,
 		content TEXT NOT NULL DEFAULT '',
 		is_entry INTEGER DEFAULT 0,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		UNIQUE(agent_profile_id, filename)
 	);
 	`)
@@ -528,8 +528,8 @@ func (r *Repository) createLabelTables() error {
 		workspace_id TEXT NOT NULL,
 		name TEXT NOT NULL,
 		color TEXT NOT NULL DEFAULT '#6b7280',
-		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		UNIQUE(workspace_id, name)
 	);
 	CREATE INDEX IF NOT EXISTS idx_office_labels_workspace ON office_labels(workspace_id);
@@ -537,7 +537,7 @@ func (r *Repository) createLabelTables() error {
 	CREATE TABLE IF NOT EXISTS office_task_labels (
 		task_id TEXT NOT NULL,
 		label_id TEXT NOT NULL,
-		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		PRIMARY KEY (task_id, label_id),
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
 		FOREIGN KEY (label_id) REFERENCES office_labels(id) ON DELETE CASCADE
@@ -552,7 +552,7 @@ func (r *Repository) createTaskExtensionTables() error {
 	CREATE TABLE IF NOT EXISTS task_blockers (
 		task_id TEXT NOT NULL,
 		blocker_task_id TEXT NOT NULL,
-		created_at DATETIME NOT NULL,
+		created_at TIMESTAMP NOT NULL,
 		PRIMARY KEY (task_id, blocker_task_id),
 		CHECK (task_id != blocker_task_id)
 	);
@@ -565,7 +565,7 @@ func (r *Repository) createTaskExtensionTables() error {
 		body TEXT NOT NULL,
 		source TEXT NOT NULL DEFAULT 'user',
 		reply_channel_id TEXT DEFAULT '',
-		created_at DATETIME NOT NULL
+		created_at TIMESTAMP NOT NULL
 	);
 	CREATE INDEX IF NOT EXISTS idx_task_comments_task_created ON task_comments(task_id, created_at);
 

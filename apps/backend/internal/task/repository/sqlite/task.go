@@ -59,6 +59,13 @@ func isFromOfficeProjection(alias string) string {
 	)`
 }
 
+func excludeConfigModePredicate(driver, col string) string {
+	if dialect.IsPostgres(driver) {
+		return fmt.Sprintf("COALESCE(%s, '') NOT IN ('true', '1')", dialect.JSONExtract(driver, col, "config_mode"))
+	}
+	return fmt.Sprintf("%s IS NOT 1", dialect.JSONExtract(driver, col, "config_mode"))
+}
+
 // runnerProjection produces the correlated subquery (without alias) that
 // resolves the runner for the row of `tasks` with the given alias. Used
 // inline in SELECT projections.
@@ -411,7 +418,7 @@ func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID, work
 	}
 
 	if excludeConfig {
-		filter += " AND (metadata IS NULL OR json_extract(metadata, '$.config_mode') IS NOT 1)"
+		filter += " AND " + excludeConfigModePredicate(r.ro.DriverName(), "metadata")
 	}
 
 	var rows *sql.Rows
@@ -544,7 +551,7 @@ func (r *Repository) searchTasks(ctx context.Context, workspaceID, query, filter
 		tFilter += " AND t.archived_at IS NULL"
 	}
 	if excludeConfig {
-		tFilter += " AND (t.metadata IS NULL OR json_extract(t.metadata, '$.config_mode') IS NOT 1)"
+		tFilter += " AND " + excludeConfigModePredicate(r.ro.DriverName(), "t.metadata")
 	}
 
 	// Collect extra filter args in query-argument order
@@ -794,12 +801,12 @@ func (r *Repository) CountOpenWatcherCreatedTasks(ctx context.Context, metadataK
 	if !isSafeMetadataKey(metadataKey) {
 		return 0, fmt.Errorf("invalid watcher metadata key %q", metadataKey)
 	}
-	query := r.ro.Rebind(`
+	query := r.ro.Rebind(fmt.Sprintf(`
 		SELECT COUNT(*) FROM tasks
 		WHERE archived_at IS NULL
 			AND state NOT IN (?, ?, ?)
-			AND json_extract(metadata, '$.` + metadataKey + `') = ?
-	`)
+			AND %s = ?
+	`, dialect.JSONExtract(r.ro.DriverName(), "metadata", metadataKey)))
 	var n int
 	if err := r.ro.QueryRowxContext(ctx, query,
 		v1.TaskStateCompleted, v1.TaskStateFailed, v1.TaskStateCancelled, watchID,

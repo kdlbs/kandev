@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+
+	"github.com/kandev/kandev/internal/db/dialect"
 )
 
 // initSchema creates the database tables if they don't exist and applies
@@ -57,10 +59,19 @@ func (r *Repository) ensureWorkspaceIndexes() error {
 
 // ensureMessageMetadataIndexes creates indexes on JSON metadata fields for fast lookups.
 func (r *Repository) ensureMessageMetadataIndexes() error {
-	if _, err := r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_messages_metadata_tool_call_id ON task_session_messages(task_session_id, json_extract(metadata, '$.tool_call_id'))`); err != nil {
+	driver := r.db.DriverName()
+	toolCallIndex := fmt.Sprintf(
+		`CREATE INDEX IF NOT EXISTS idx_messages_metadata_tool_call_id ON task_session_messages(task_session_id, (%s))`,
+		dialect.JSONExtract(driver, "metadata", "tool_call_id"),
+	)
+	if _, err := r.db.Exec(toolCallIndex); err != nil {
 		return err
 	}
-	if _, err := r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_messages_metadata_pending_id ON task_session_messages(task_session_id, json_extract(metadata, '$.pending_id'))`); err != nil {
+	pendingIndex := fmt.Sprintf(
+		`CREATE INDEX IF NOT EXISTS idx_messages_metadata_pending_id ON task_session_messages(task_session_id, (%s))`,
+		dialect.JSONExtract(driver, "metadata", "pending_id"),
+	)
+	if _, err := r.db.Exec(pendingIndex); err != nil {
 		return err
 	}
 	return nil
@@ -238,21 +249,6 @@ func (r *Repository) initTaskSchema() error {
 		updated_at TIMESTAMP NOT NULL
 	);
 
-	CREATE TABLE IF NOT EXISTS task_repositories (
-		id TEXT PRIMARY KEY,
-		task_id TEXT NOT NULL,
-		repository_id TEXT NOT NULL,
-		base_branch TEXT DEFAULT '',
-		checkout_branch TEXT DEFAULT '',
-		position INTEGER DEFAULT 0,
-		metadata TEXT DEFAULT '{}',
-		created_at TIMESTAMP NOT NULL,
-		updated_at TIMESTAMP NOT NULL,
-		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
-		FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE,
-		UNIQUE(task_id, repository_id, base_branch, checkout_branch)
-	);
-
 	CREATE TABLE IF NOT EXISTS repositories (
 		id TEXT PRIMARY KEY,
 		workspace_id TEXT NOT NULL,
@@ -274,6 +270,21 @@ func (r *Repository) initTaskSchema() error {
 		updated_at TIMESTAMP NOT NULL,
 		deleted_at TIMESTAMP,
 		FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS task_repositories (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		repository_id TEXT NOT NULL,
+		base_branch TEXT DEFAULT '',
+		checkout_branch TEXT DEFAULT '',
+		position INTEGER DEFAULT 0,
+		metadata TEXT DEFAULT '{}',
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+		FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE,
+		UNIQUE(task_id, repository_id, base_branch, checkout_branch)
 	);
 
 	CREATE TABLE IF NOT EXISTS repository_scripts (
@@ -445,14 +456,30 @@ func (r *Repository) initDocumentsSchema() error {
 }
 
 func (r *Repository) initSessionSchema() error {
-	if err := r.initMessageTurnSchema(); err != nil {
+	if err := r.initSessionWorktreeSchema(); err != nil {
 		return err
 	}
-	return r.initSessionWorktreeSchema()
+	return r.initMessageTurnSchema()
 }
 
 func (r *Repository) initMessageTurnSchema() error {
 	_, err := r.db.Exec(`
+	CREATE TABLE IF NOT EXISTS task_session_turns (
+		id TEXT PRIMARY KEY,
+		task_session_id TEXT NOT NULL,
+		task_id TEXT NOT NULL,
+		started_at TIMESTAMP NOT NULL,
+		completed_at TIMESTAMP,
+		metadata TEXT DEFAULT '{}',
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (task_session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_turns_session_id ON task_session_turns(task_session_id);
+	CREATE INDEX IF NOT EXISTS idx_turns_session_started ON task_session_turns(task_session_id, started_at);
+	CREATE INDEX IF NOT EXISTS idx_turns_task_id ON task_session_turns(task_id);
+
 	CREATE TABLE IF NOT EXISTS task_session_messages (
 		id TEXT PRIMARY KEY,
 		task_session_id TEXT NOT NULL,
@@ -478,22 +505,6 @@ func (r *Repository) initMessageTurnSchema() error {
 	-- updated_at ADD COLUMN + backfill. Creating it here would fail on existing
 	-- DBs where CREATE TABLE IF NOT EXISTS is a no-op and the column does not
 	-- yet exist (schema init runs before migrations).
-
-	CREATE TABLE IF NOT EXISTS task_session_turns (
-		id TEXT PRIMARY KEY,
-		task_session_id TEXT NOT NULL,
-		task_id TEXT NOT NULL,
-		started_at TIMESTAMP NOT NULL,
-		completed_at TIMESTAMP,
-		metadata TEXT DEFAULT '{}',
-		created_at TIMESTAMP NOT NULL,
-		updated_at TIMESTAMP NOT NULL,
-		FOREIGN KEY (task_session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_turns_session_id ON task_session_turns(task_session_id);
-	CREATE INDEX IF NOT EXISTS idx_turns_session_started ON task_session_turns(task_session_id, started_at);
-	CREATE INDEX IF NOT EXISTS idx_turns_task_id ON task_session_turns(task_id);
 	`)
 	return err
 }

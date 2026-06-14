@@ -31,13 +31,13 @@ func (r *Repository) createWorkspaceGroupTables() error {
 		owned_by_kandev INTEGER NOT NULL DEFAULT 0,
 		cleanup_policy TEXT NOT NULL DEFAULT 'never_delete',
 		cleanup_status TEXT NOT NULL DEFAULT 'active',
-		cleaned_at DATETIME,
+		cleaned_at TIMESTAMP,
 		cleanup_error TEXT NOT NULL DEFAULT '',
 		restore_status TEXT NOT NULL DEFAULT 'not_needed',
 		restore_error TEXT NOT NULL DEFAULT '',
 		restore_config_json TEXT NOT NULL DEFAULT '',
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_task_workspace_groups_workspace
@@ -49,10 +49,10 @@ func (r *Repository) createWorkspaceGroupTables() error {
 		workspace_group_id TEXT NOT NULL,
 		task_id TEXT NOT NULL,
 		role TEXT NOT NULL DEFAULT 'member',
-		released_at DATETIME,
+		released_at TIMESTAMP,
 		release_reason TEXT NOT NULL DEFAULT '',
 		released_by_cascade_id TEXT NOT NULL DEFAULT '',
-		created_at DATETIME NOT NULL,
+		created_at TIMESTAMP NOT NULL,
 		PRIMARY KEY (workspace_group_id, task_id),
 		FOREIGN KEY (workspace_group_id) REFERENCES task_workspace_groups(id) ON DELETE CASCADE
 	);

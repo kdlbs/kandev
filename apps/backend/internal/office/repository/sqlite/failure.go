@@ -262,7 +262,7 @@ func (r *Repository) ListFailedRunsForInbox(
 }
 
 // parseSqliteTime parses the various string formats SQLite stores
-// DATETIME values in (RFC3339, with or without timezone, with or
+// TIMESTAMP values in (RFC3339, with or without timezone, with or
 // without nanoseconds). Falls back to zero time on parse failure
 // rather than erroring, since the inbox doesn't break if a row's
 // timestamp is unparseable.

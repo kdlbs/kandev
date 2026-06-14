@@ -10,6 +10,8 @@ import (
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/db/dialect"
 )
 
 // migrateExecutorProfiles adds mcp_policy column and drops is_default from executor_profiles.
@@ -151,6 +153,10 @@ func (r *Repository) runMigrations() error {
 // the PRAGMA and the subsequent transaction use the same connection.
 // Returns true if the migration actually ran (gate fired), false if it was a no-op.
 func (r *Repository) recreateTable(tableName, triggerPhrase string, statements []string) (bool, error) {
+	if dialect.IsPostgres(r.db.DriverName()) {
+		return false, nil
+	}
+
 	var tableSql string
 	err := r.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name=?`, tableName).Scan(&tableSql)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -242,6 +248,10 @@ func (r *Repository) migrateTasksRemoveWorkflowFK() error {
 //
 // Idempotent: rows that already exist on either side are left untouched.
 func (r *Repository) backfillExecutorsRunningFromTaskSessions() error {
+	if dialect.IsPostgres(r.db.DriverName()) {
+		return nil
+	}
+
 	// Check whether task_sessions still has the column. If migration already ran,
 	// the column is gone and there's nothing to backfill.
 	var tableSql string
@@ -523,11 +533,11 @@ func (r *Repository) backfillTaskEnvironments() error {
 func (r *Repository) findOrphanedTasks() ([]backfillRow, error) {
 	rows, err := r.db.Query(`
 		SELECT ts.task_id,
-		       COALESCE(ts.executor_id, ''),
-		       COALESCE(ts.executor_profile_id, ''),
-		       COALESCE(ts.repository_id, ''),
-		       COALESCE(er.container_id, ''),
-		       ts.started_at
+		       MIN(COALESCE(ts.executor_id, '')),
+		       MIN(COALESCE(ts.executor_profile_id, '')),
+		       MIN(COALESCE(ts.repository_id, '')),
+		       MIN(COALESCE(er.container_id, '')),
+		       MIN(ts.started_at)
 		FROM task_sessions ts
 		LEFT JOIN task_environments te ON te.task_id = ts.task_id
 		LEFT JOIN executors_running er ON er.session_id = ts.id

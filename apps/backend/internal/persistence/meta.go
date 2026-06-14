@@ -33,7 +33,7 @@ func ensureMetaTable(db *sqlx.DB) error {
 // readKey returns the value for key, or "" when the key is absent.
 func readKey(db *sqlx.DB, key string) (string, error) {
 	var value string
-	err := db.QueryRow(`SELECT value FROM kandev_meta WHERE key = ?`, key).Scan(&value)
+	err := db.QueryRow(db.Rebind(`SELECT value FROM kandev_meta WHERE key = ?`), key).Scan(&value)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -46,8 +46,8 @@ func readKey(db *sqlx.DB, key string) (string, error) {
 // writeKey upserts key=value into kandev_meta.
 func writeKey(db *sqlx.DB, key, value string) error {
 	_, err := db.Exec(
-		`INSERT INTO kandev_meta (key, value) VALUES (?, ?)
-		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+		db.Rebind(`INSERT INTO kandev_meta (key, value) VALUES (?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`),
 		key, value,
 	)
 	if err != nil {

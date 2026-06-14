@@ -204,6 +204,10 @@ func (r *sqliteRepository) migrateOfficeEnrichmentColumns() {
 // The migration is idempotent: it inspects sqlite_master for the CHECK keyword
 // and only proceeds when the constraint is present.
 func (r *sqliteRepository) migrateDropModelCheckConstraint() error {
+	if dialect.IsPostgres(r.db.DriverName()) {
+		return nil
+	}
+
 	var tableDDL string
 	err := r.db.QueryRow(
 		`SELECT sql FROM sqlite_master WHERE type='table' AND name='agent_profiles'`,
