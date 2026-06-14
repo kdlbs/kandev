@@ -126,6 +126,7 @@ pkill -f agentctl || true
 # web server was nohup'd outside the service process group.
 pkill -f '/app/apps/web/.next/standalone/web/server.js' || true
 sleep 1
+cd /app
 
 export KANDEV_HOME_DIR=/data
 export KANDEV_DOCKER_ENABLED=false
