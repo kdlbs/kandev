@@ -1,6 +1,17 @@
 "use client";
 
-import { IconActivity } from "@tabler/icons-react";
+import {
+  IconActivity,
+  IconCpu,
+  IconDatabase,
+  IconDeviceDesktopAnalytics,
+  IconFlame,
+  IconGauge,
+  IconDisc,
+  IconServer,
+} from "@tabler/icons-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { formatDistanceToNow } from "date-fns";
 import { useAppStore } from "@/components/state-provider";
 import { useSystemMetricsSubscription } from "@/hooks/use-system-metrics-subscription";
 import type { SystemMetricSample, SystemMetricsSource } from "@/lib/types/system";
@@ -27,21 +38,12 @@ export function TopbarMetrics({ activeSessionId }: TopbarMetricsProps) {
   return (
     <div className="hidden md:flex max-w-[42vw] items-center gap-1 overflow-hidden">
       {sources.map((source) => (
-        <div
+        <SourceMetrics
           key={source.id}
-          className="flex h-7 max-w-[360px] items-center gap-1 overflow-hidden rounded border border-border px-2 text-xs"
-          title={source.label}
-        >
-          <span className="shrink-0 text-muted-foreground">
-            {source.kind === "backend" ? "Host" : "Exec"}
-          </span>
-          {source.metrics
-            .filter((metric) => metric.available)
-            .slice(0, 4)
-            .map((metric) => (
-              <MetricChip key={metric.id} metric={metric} />
-            ))}
-        </div>
+          source={source}
+          updatedAt={snapshot?.timestamp}
+          showSource={sources.length > 1}
+        />
       ))}
     </div>
   );
@@ -54,28 +56,122 @@ function selectSources(sources: SystemMetricsSource[], activeSessionId?: string 
   return [backend, execution].filter(Boolean) as SystemMetricsSource[];
 }
 
-function MetricChip({ metric }: { metric: SystemMetricSample }) {
+function SourceMetrics({
+  source,
+  updatedAt,
+  showSource,
+}: {
+  source: SystemMetricsSource;
+  updatedAt?: string;
+  showSource: boolean;
+}) {
+  const metrics = source.metrics.filter((metric) => metric.available).slice(0, 4);
+  if (metrics.length === 0) return null;
+
   return (
-    <span className={`shrink-0 tabular-nums ${metricColor(metric)}`}>
-      {shortLabel(metric.id)} {formatMetric(metric)}
-    </span>
+    <div className="flex h-7 max-w-[220px] items-center gap-1 overflow-hidden rounded border border-border px-1.5 text-xs">
+      {showSource ? <SourceBadge source={source} updatedAt={updatedAt} /> : null}
+      {metrics.map((metric) => (
+        <MetricChip key={metric.id} metric={metric} source={source} updatedAt={updatedAt} />
+      ))}
+    </div>
   );
 }
 
-function shortLabel(id: string) {
+function SourceBadge({ source, updatedAt }: { source: SystemMetricsSource; updatedAt?: string }) {
+  const isHost = source.kind === "backend";
+  const label = isHost ? "Host" : "Executor";
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground"
+          aria-label={`${label} metrics`}
+        >
+          {isHost ? (
+            <IconServer className="h-3.5 w-3.5" />
+          ) : (
+            <IconDeviceDesktopAnalytics className="h-3.5 w-3.5" />
+          )}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>
+        <div className="space-y-1">
+          <div className="font-medium">{label}</div>
+          <div className="text-xs text-muted-foreground">{source.label}</div>
+          <div className="text-xs text-muted-foreground">{lastUpdatedText(updatedAt)}</div>
+        </div>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function MetricChip({
+  metric,
+  source,
+  updatedAt,
+}: {
+  metric: SystemMetricSample;
+  source: SystemMetricsSource;
+  updatedAt?: string;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className={`flex h-5 shrink-0 items-center gap-0.5 rounded px-1 tabular-nums ${metricColor(metric)}`}
+          aria-label={`${metricLabel(metric.id)} ${formatMetric(metric)}`}
+        >
+          {metricIcon(metric.id)}
+          <span>{formatMetric(metric)}</span>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>
+        <div className="space-y-1">
+          <div className="font-medium">{metricLabel(metric.id)}</div>
+          <div className="text-xs text-muted-foreground">
+            {source.kind === "backend" ? "Host" : "Executor"}: {source.label}
+          </div>
+          <div className="text-xs tabular-nums">{formatMetric(metric)}</div>
+          <div className="text-xs text-muted-foreground">{lastUpdatedText(updatedAt)}</div>
+        </div>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function metricLabel(id: string) {
   switch (id) {
     case "cpu_percent":
       return "CPU";
     case "memory_percent":
-      return "Mem";
+      return "Memory";
     case "disk_percent":
       return "Disk";
     case "cpu_temp":
-      return "Temp";
+      return "CPU temperature";
     case "io_load":
-      return "Load";
+      return "I/O load";
     default:
       return id;
+  }
+}
+
+function metricIcon(id: string) {
+  switch (id) {
+    case "cpu_percent":
+      return <IconCpu className="h-3.5 w-3.5" />;
+    case "memory_percent":
+      return <IconDatabase className="h-3.5 w-3.5" />;
+    case "disk_percent":
+      return <IconDisc className="h-3.5 w-3.5" />;
+    case "cpu_temp":
+      return <IconFlame className="h-3.5 w-3.5" />;
+    case "io_load":
+      return <IconGauge className="h-3.5 w-3.5" />;
+    default:
+      return <IconActivity className="h-3.5 w-3.5" />;
   }
 }
 
@@ -90,4 +186,11 @@ function metricColor(metric: SystemMetricSample) {
   if (metric.value > 95) return "text-destructive";
   if (metric.value >= 80) return "text-yellow-500 dark:text-yellow-400";
   return "text-muted-foreground";
+}
+
+function lastUpdatedText(updatedAt?: string) {
+  if (!updatedAt) return "Last update unknown";
+  const date = new Date(updatedAt);
+  if (Number.isNaN(date.getTime())) return "Last update unknown";
+  return `Updated ${formatDistanceToNow(date, { addSuffix: true })}`;
 }

@@ -87,6 +87,10 @@ export function SystemMetricsSettingsCard() {
         <CardTitle className="text-base">Resource Metrics</CardTitle>
       </CardHeader>
       <CardContent className="space-y-5">
+        <p className="max-w-3xl text-sm text-muted-foreground">
+          Useful when Kandev is self-hosted on a remote server and you want a lightweight view of
+          the machine resources from the kanban or task topbar.
+        </p>
         <MetricsDisplayToggle
           checked={userSettings.systemMetricsDisplay.showInTopbar}
           onCheckedChange={toggleDisplay}
