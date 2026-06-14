@@ -4,17 +4,26 @@ Setup notes and caveats for developing Kandev in ephemeral cloud VMs (Cursor Clo
 
 ## Runtime requirements
 
-- **Go 1.26** — install to `/usr/local/go` and ensure `PATH` includes `/usr/local/go/bin`.
-- **Node.js 24** — use `nvm install 24 && nvm use 24`.
-- **pnpm 9.15.9** — matches `packageManager` in `apps/package.json`. Install with `npm install -g pnpm@9.15.9`.
-- **golangci-lint v2** — required for `make lint-backend`. Install with `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest`.
-- **gcc** — required for CGO (SQLite FTS5). Pre-installed on most Ubuntu-based cloud VMs.
+- **mise** — `mise.toml` at the repo root pins the developer toolchain (Go 1.26, Node.js 24, pnpm 9.15.9, golangci-lint 2.9.0, go-licenses 1.6.0, pre-commit, etc.).
+- **gcc / sqlite headers** — required for CGO (SQLite FTS5). `scripts/bootstrap-dev-env` installs these on common Linux/macOS package managers when it has permission.
 - **Azure Repos PR creation (optional)** — only needed when testing `worktree.create_pr` against Azure remotes outside the published Docker image:
   - [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli) (`az`) on `PATH`
   - DevOps extension: `az extension add --name azure-devops`
   - Auth: `az login` or `export AZURE_DEVOPS_EXT_PAT=<pat>`
   - The `ghcr.io/kdlbs/kandev` image ships `gh`, `az`, and the `azure-devops` extension preinstalled (see root `Dockerfile`).
   - Host routing table: `apps/backend/internal/agentctl/AGENTS.md`.
+
+Provider prepare scripts should do auth + clone first, then run the shared bootstrap from the repo root:
+
+```bash
+scripts/bootstrap-dev-env
+```
+
+For E2E-capable environments:
+
+```bash
+scripts/bootstrap-dev-env --with-e2e
+```
 
 ## Generated files before typecheck
 
@@ -45,7 +54,7 @@ All documented in the root `Makefile`:
 
 These apply to Cursor Cloud, Codex, and similar Firecracker-backed sandboxes:
 
-- **golangci-lint PATH**: `go install` places the binary in `~/go/bin/`. Ensure `PATH` includes it (the update script appends to `~/.bashrc`, but in-session shells may need `export PATH="$PATH:$HOME/go/bin"`).
+- **tool PATH**: `scripts/bootstrap-dev-env` activates mise for its own process. New shells should run `eval "$(mise activate bash)"` or use a shell profile that activates mise so `node`, `pnpm`, `go`, `golangci-lint`, and `pre-commit` resolve from the pinned toolchain.
 - **First page load**: `make dev` compiles pages on first visit via Turbopack — expect ~25 s for the initial load.
 - **CLI test flake**: `src/ports.test.ts > isPortInUse > returns false within the timeout when the host black-holes packets` fails because `192.0.2.1` behaves differently inside Firecracker. This is a known environment-specific flake, not a code issue.
-- **Playwright browser installation**: `playwright install chromium` hangs during zip extraction (Node.js io_uring incompatibility with the Firecracker kernel). Workaround: `scripts/install-playwright-browsers.sh` runs the install with a timeout, then falls back to extracting the already-downloaded zips with `unzip`. The update script calls this automatically. System deps can be installed via `playwright install-deps chromium`.
+- **Playwright browser installation**: `playwright install chromium` hangs during zip extraction (Node.js io_uring incompatibility with the Firecracker kernel). Workaround: `scripts/install-playwright-browsers.sh` runs the install with a timeout, then falls back to extracting the already-downloaded zips with `unzip`. `scripts/bootstrap-dev-env --with-e2e` calls this automatically. System deps can be installed via `playwright install-deps chromium`.

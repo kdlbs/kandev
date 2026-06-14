@@ -188,10 +188,19 @@ apps/
 
 ### Prerequisites
 
-- Go 1.26+
-- Node.js 18+
-- pnpm
+- [mise](https://mise.jdx.dev/) for the pinned toolchain in `mise.toml` (`make bootstrap` installs it when missing)
+- Go 1.26, Node.js 24, pnpm 9.15.9 (installed by `make bootstrap`)
 - Docker (optional)
+
+### Environment Setup
+
+```bash
+# Install mise tools, workspace dependencies, and git hooks
+make bootstrap
+
+# Also install Playwright Chromium browser/deps for E2E
+make bootstrap-e2e
+```
 
 ### Running Dev Servers
 
@@ -216,11 +225,8 @@ make fmt            # Format all code
 ### Pre-commit Hooks
 
 ```bash
-# Install pre-commit (https://pre-commit.com/#install)
-pipx install pre-commit
-
-# Install git hooks
-pre-commit install
+# Installed and wired by make bootstrap
+make doctor
 ```
 
 </details>

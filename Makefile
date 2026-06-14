@@ -62,6 +62,8 @@ help:
 	@echo "Kandev - AI Agent Kanban Board"
 	@echo ""
 	@echo "Development Commands:"
+	@echo "  bootstrap        Install mise tools, workspace deps, and git hooks"
+	@echo "  bootstrap-e2e    Bootstrap plus Playwright browser/system deps"
 	@echo "  dev              Run backend + web via CLI (auto ports)"
 	@echo "  dev-prod-db      Run dev mode against the production db at ~/.kandev"
 	@echo "  dev-backend      Run backend in development mode (port 38429)"
@@ -128,6 +130,14 @@ help:
 #
 # Development
 #
+
+.PHONY: bootstrap
+bootstrap:
+	@scripts/bootstrap-dev-env
+
+.PHONY: bootstrap-e2e
+bootstrap-e2e:
+	@scripts/bootstrap-dev-env --with-e2e
 
 # Build the linux/amd64 agentctl on every host except Linux/x86_64 (where the
 # host build IS already linux/amd64). Computed up here, OS-conditionally, so
