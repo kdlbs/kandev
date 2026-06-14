@@ -29,7 +29,7 @@ export function FeatureToggleCard({ flag, saving, onChange, onReset }: FeatureTo
         <Switch
           checked={flag.effective_value}
           disabled={disabled}
-          onCheckedChange={(value) => onChange(value === true)}
+          onCheckedChange={onChange}
           aria-label={`Toggle ${flag.label}`}
           className="cursor-pointer disabled:cursor-not-allowed"
         />

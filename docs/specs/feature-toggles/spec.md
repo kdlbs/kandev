@@ -67,10 +67,15 @@ apps/backend/cmd/kandev/                 Startup override application and route 
 apps/web/app/settings/system/feature-toggles/page.tsx
 apps/web/components/settings/system/feature-toggles-settings.tsx
 apps/web/lib/api/domains/runtime-flags-api.ts
-apps/web/e2e/settings/feature-toggles.spec.ts
-apps/web/e2e/settings/mobile-feature-toggles.spec.ts
 docs/decisions/0018-runtime-settings-overrides.md
 docs/decisions/0019-restart-supervisor.md
+```
+
+Planned E2E coverage:
+
+```text
+apps/web/e2e/settings/feature-toggles.spec.ts         TODO
+apps/web/e2e/settings/mobile-feature-toggles.spec.ts  TODO
 ```
 
 ## Code style

@@ -51,7 +51,7 @@ func (m *SupervisorManager) Capability(ctx context.Context) Capability {
 	if runtime.GOOS == "windows" {
 		return m.unsupported("Supervisor restart is not available on Windows yet.")
 	}
-	if m == nil || m.SocketPath == "" {
+	if m.SocketPath == "" {
 		return m.unsupported("Supervisor restart is not configured for this launch mode.")
 	}
 	if err := m.probe(ctx); err != nil {
