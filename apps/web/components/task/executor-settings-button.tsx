@@ -86,16 +86,18 @@ export function ExecutorSettingsButton({
           <div className="border-t border-border px-2 py-1.5 flex items-center justify-end">
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  className="cursor-pointer text-xs"
-                  disabled={!env || isResetting}
-                  data-testid="executor-settings-reset"
-                  onClick={() => setResetDialogOpen(true)}
-                >
-                  <IconTrash className="h-3.5 w-3.5 mr-1" /> Reset environment
-                </Button>
+                <span tabIndex={0} aria-label="Reset environment">
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    className="cursor-pointer text-xs"
+                    disabled={!env || isResetting}
+                    data-testid="executor-settings-reset"
+                    onClick={() => setResetDialogOpen(true)}
+                  >
+                    <IconTrash className="h-3.5 w-3.5 mr-1" /> Reset environment
+                  </Button>
+                </span>
               </TooltipTrigger>
               <TooltipContent className="max-w-xs">
                 <p className="font-medium">Reset environment</p>
