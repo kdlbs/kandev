@@ -42,6 +42,7 @@ usage() {
 
 INCLUDE_ALL=0
 SUMMARY=0
+PR=''
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --all)
@@ -57,19 +58,26 @@ while [[ $# -gt 0 ]]; do
       ;;
     --)
       shift
+      if [[ $# -gt 0 ]]; then
+        [[ -z "${PR:-}" && $# -eq 1 ]] || usage
+        PR=$1
+        shift
+      fi
       break
       ;;
     -*)
       usage 1
       ;;
     *)
-      break
+      [[ -z "${PR:-}" ]] || usage
+      PR=$1
+      shift
       ;;
   esac
 done
 
-[ $# -eq 1 ] || usage
-PR=$1
+[ -n "${PR:-}" ] || usage
+[ $# -eq 0 ] || usage
 
 errors='[]'
 pr_json='{}'

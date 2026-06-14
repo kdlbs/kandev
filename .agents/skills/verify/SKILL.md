@@ -33,3 +33,10 @@ make lint
 ```
 
 If `make fmt` changes files, review the diff and continue with the remaining commands. If any command fails, fix the issue and re-run the failed command; for formatter-caused changes, re-run any affected checks before reporting success.
+
+If the aggregate `make lint` wrapper stalls or does not provide useful progress, run the backend and frontend lint checks directly instead and record the substitution in your result:
+
+```bash
+make lint-backend
+cd apps && pnpm --filter @kandev/web lint
+```

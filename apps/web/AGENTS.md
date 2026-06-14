@@ -74,6 +74,18 @@ Use subscription hooks only; the WS client auto-deduplicates.
 - Components: <200 lines, extract to domain components, composition over props.
 - Hooks: domain-organized in `hooks/domains/`, encapsulate subscription + selection.
 - **Interactivity:** all buttons and links with actions must have `cursor-pointer` class.
+- **Radix tooltip on disabled buttons:** disabled buttons do not receive pointer/focus events, so wrap the disabled `Button` in a focusable span and put `TooltipTrigger asChild` on that span:
+  ```tsx
+  <Tooltip>
+    <TooltipTrigger asChild>
+      <span tabIndex={disabled ? 0 : -1} className="inline-flex">
+        <Button disabled={disabled}>Run</Button>
+      </span>
+    </TooltipTrigger>
+    <TooltipContent>{disabledReason}</TooltipContent>
+  </Tooltip>
+  ```
+  Keep the wrapper focusable only while disabled; when enabled, the button itself owns focus.
 - **Renaming a `data-testid`:** set the new id as `data-testid="<new>"` and keep
   the old id as `data-legacy-testid="<old>"`, then migrate e2e specs to the new
   id in the same PR. JSX rejects two `data-testid` attributes on one element,

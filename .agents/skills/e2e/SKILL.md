@@ -54,6 +54,7 @@ Each worker gets an isolated backend, frontend, database, and mock agent — no 
 cd apps/web
 pnpm e2e:run                                   # auto: docker if daemon + CI image available, else host; builds first
 pnpm e2e:run tests/task/my-test.spec.ts        # single file (extra args pass through to Playwright)
+pnpm e2e:run tests/path/spec.ts -- --grep "exact test name"  # exact CI failure with a fresh build
 pnpm e2e:run --shards 3                          # 3 shards concurrently on this machine (isolated)
 pnpm e2e:run --no-build -- --grep "task creation"  # skip rebuild; forward flags after --
 pnpm e2e:docker                                # force the docker CI image (full isolation from a host dev instance)
@@ -103,6 +104,8 @@ Record the exact command, resource limits, repeat number, and failure artifact
 path. Always inspect `error-context.md`; mobile/terminal flakes often show
 state that the stack trace alone hides, such as duplicate active terminals or a
 terminal stuck on "Starting terminal...".
+
+When a PR-specific E2E shard fails, first identify the failed spec(s). If failures are in unrelated existing specs and no changed code plausibly affects that surface, record the failure as unrelated in the PR fixup summary instead of changing unrelated tests.
 
 **CRITICAL: E2E tests run against the production build** (`.next/standalone/`), not dev mode. After any frontend code change, you **must** rebuild before running tests (`pnpm e2e:run` does this for you):
 

@@ -68,11 +68,19 @@ description: Commit, push, and create a PR. Default is ready-for-review with aut
 
    CodeRabbit issue comments that only report rate limits or exhausted usage credits are informational. They should not block PR completion when other review threads are resolved and checks are otherwise passing or pending.
 
+   After pushing review fixes, interpret `scripts/pr-state --summary <PR>` thread counts carefully. The command filters thread details by the latest head commit, so `filtered_review_thread_count` can include resolved historical threads from the current filtered view. Treat `unresolved_review_thread_count` as the blocker. For example, a re-check may show `unresolved_review_thread_count: 0` and `filtered_review_thread_count: 3`; do not turn the filtered historical count into new unresolved work.
+
+   A ready PR may still end with "CI pending" after fixup when no checks have failed and no review threads remain unresolved, especially after a late fixup push restarts CodeQL, E2E, or preview jobs. When PR checks include long E2E shard queues, continue fixing failed checks and unresolved review threads, but it is acceptable to report the PR as ready locally once full local verification is green, CodeQL/security alerts are intentionally handled, required non-E2E checks are passing, and only queued/in-progress E2E shards remain with no failures. Do not wait indefinitely; include the exact pending checks from the final re-check in the response.
+
 6. **PR screenshots:** After creating the PR, check if `apps/web/.pr-assets/manifest.json` exists. If it does:
    - Read the manifest to list available screenshots/GIFs
    - Run `npx tsx apps/web/e2e/scripts/upload-pr-assets.ts <PR_NUMBER>` to generate embed markdown
    - If `apps/web/.pr-assets/embed.md` exists and is non-empty, append its contents to the PR body using a body file and `gh pr edit <PR_NUMBER> --body-file <file>`
-   - If `gh pr edit` fails after PR creation, fall back to `gh api --method PATCH repos/:owner/:repo/pulls/<PR_NUMBER> --input <json>` with a JSON payload containing the full updated body. Build that payload with `jq -n --arg body "$(cat <file>)" '{body: $body}'` (or equivalent), never by hand-escaping shell strings.
+   - If `gh pr edit --body-file` fails after PR creation, especially with the GitHub Projects classic deprecation GraphQL error, fall back to REST. Build the payload with `jq --rawfile`, never by hand-escaping shell strings:
+     ```bash
+     jq -n --rawfile body <body-file> '{body: $body}' > /tmp/pr-body-payload.json
+     gh api --method PATCH repos/:owner/:repo/pulls/<PR_NUMBER> --input /tmp/pr-body-payload.json
+     ```
    - Tell the user to drag and drop the image files from `.pr-assets/` into the PR description on GitHub for the images to render
 
 7. **Return the PR URL** when done.

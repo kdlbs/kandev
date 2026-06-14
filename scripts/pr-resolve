@@ -6,7 +6,11 @@
 #       List unresolved review threads, one per line, TAB-separated:
 #         <thread_id>\t<comment_id>\t<author>\t<path>\t<body_first_120_chars>
 #
-#   scripts/pr-resolve reply <PR> <CID> <TID> <BODY>
+#   scripts/pr-resolve show <PR> <thread_id|comment_id>
+#       Print the full thread/comment body plus path, line, author, commit id,
+#       and URL. Use before deciding how to answer a preview from list.
+#
+#   scripts/pr-resolve reply <PR> <comment_id> <thread_id> <body>
 #       Reply to the thread starter, resolve the thread, and add a +1
 #       reaction in one call. Use this for both "fixed" replies and
 #       pushback replies — the reply body conveys whether you agreed
@@ -19,7 +23,7 @@
 set -euo pipefail
 
 usage() {
-  sed -n '2,16p' "$0" | sed 's|^# \{0,1\}||'
+  sed -n '2,20p' "$0" | sed 's|^# \{0,1\}||'
   exit "${1:-1}"
 }
 
@@ -56,16 +60,73 @@ case "$cmd" in
              | "\(.id)\t\(.comments.nodes[0].databaseId)\t\(.comments.nodes[0].author.login)\t\(.path)\t\(.comments.nodes[0].body | gsub("\n"; " ") | .[0:120])"'
     ;;
 
+  show)
+    [ $# -eq 2 ] || usage
+    PR=$1; TARGET=$2
+    case "$TARGET" in
+      PRRT_*)
+        gh api graphql -f query='
+          query($id: ID!) {
+            node(id: $id) {
+              ... on PullRequestReviewThread {
+                id
+                isResolved
+                path
+                line
+                comments(first: 100) {
+                  nodes {
+                    databaseId
+                    author { login }
+                    body
+                    path
+                    line
+                    commit { oid }
+                    url
+                    createdAt
+                  }
+                }
+              }
+            }
+          }' -f id="$TARGET" \
+        | jq -r '
+            .data.node as $thread
+            | if $thread == null then error("thread not found")
+              else
+                "thread_id: \($thread.id)",
+                "resolved: \($thread.isResolved)",
+                "path: \($thread.path // "-")",
+                "line: \($thread.line // "-")",
+                "comments:",
+                ($thread.comments.nodes[] | [
+                  "  comment_id: \(.databaseId)",
+                  "  author: \(.author.login // "-")",
+                  "  path: \(.path // $thread.path // "-")",
+                  "  line: \(.line // "-")",
+                  "  commit_id: \(.commit.oid // "-")",
+                  "  html_url: \(.url // "-")",
+                  "  created_at: \(.createdAt // "-")",
+                  "  body:",
+                  (.body | split("\n") | map("    " + .) | join("\n"))
+                ] | join("\n"))
+              end'
+        ;;
+      *)
+        gh api "repos/$OWNER/$REPO/pulls/comments/$TARGET" \
+          --jq '{comment_id:.id,author:.user.login,body,path,line,commit_id,html_url,created_at}'
+        ;;
+    esac
+    ;;
+
   reply)
     [ $# -eq 4 ] || usage
-    PR=$1; CID=$2; TID=$3; BODY=$4
-    gh api -X POST "repos/$OWNER/$REPO/pulls/$PR/comments/$CID/replies" \
+    PR=$1; COMMENT_ID=$2; THREAD_ID=$3; BODY=$4
+    gh api -X POST "repos/$OWNER/$REPO/pulls/$PR/comments/$COMMENT_ID/replies" \
       -f body="$BODY" --silent
     gh api graphql -f query='mutation($t: ID!) { resolveReviewThread(input: {threadId: $t}) { thread { isResolved } } }' \
-      -f t="$TID" --silent
-    gh api -X POST "repos/$OWNER/$REPO/pulls/comments/$CID/reactions" \
+      -f t="$THREAD_ID" --silent
+    gh api -X POST "repos/$OWNER/$REPO/pulls/comments/$COMMENT_ID/reactions" \
       -f content="+1" --silent
-    echo "ok $TID"
+    echo "ok $THREAD_ID"
     ;;
 
   *)

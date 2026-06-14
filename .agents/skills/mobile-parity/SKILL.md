@@ -47,6 +47,7 @@ If task has no UI surface, say why this skill does not apply and continue.
 
 5. Verify visually and behaviorally.
    - Run the narrowest relevant viewport locally or with screenshots when possible.
+   - Even small user-facing UI tweaks need at least focused rendered verification when feasible: dev-server/browser check, Playwright screenshot, or targeted E2E. If not run, report the exact reason.
    - Check that text does not overlap, controls remain clickable, focus/keyboard flows still work, and no unintended horizontal scroll appears.
    - Run the focused Playwright tests. If full E2E cannot run, report the command and blocker.
    - E2E runs against the standalone build, not a dev server, so rebuild after frontend changes: `make build-web` (and `make build-backend` for Go), or use `make test-e2e` which rebuilds both. Skipping this silently tests stale code. See `/e2e`.
@@ -96,4 +97,5 @@ test.describe("feature on mobile", () => {
 - Required controls are reachable by touch.
 - No required workflow depends on hover, wide viewport, or hidden desktop-only UI.
 - Mobile Playwright coverage exists or absence is justified.
+- Focused rendered/visual verification was run for UI tweaks, or exact "not run" reason is reported.
 - Focused tests were run, or exact blocker is reported.

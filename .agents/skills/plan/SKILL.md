@@ -37,6 +37,8 @@ Search in parallel for all integration points the spec touches:
 
 Use `docs/decisions/INDEX.md` to check for relevant architectural decisions.
 
+Map dependencies before writing tasks. Implementation order follows the dependency chain: persistence/contracts first, service behavior next, API/client wiring after that, then UI and E2E. Prefer vertical slices that leave the product working over broad horizontal layers that cannot be verified until the end.
+
 ### 3. Ask before designing (if needed)
 
 If the spec leaves implementation choices open, ask — one question at a time. Do not assume. Examples of things to ask:
@@ -131,6 +133,14 @@ Wave 3: [E2E tests]
 ```
 
 For small features (≤3 tasks total), waves are optional — list sequentially.
+
+Each task should be small enough for one focused implementation pass:
+- **Acceptance:** 1-3 concrete conditions.
+- **Verification:** exact command(s), e.g. `cd apps/backend && go test -run TestName ./internal/path/...` or `cd apps && pnpm --filter @kandev/web test -- --run path/to/file.test.ts`.
+- **Files likely touched:** specific paths, not broad directories.
+- **Dependencies:** task numbers that must land first, or `None`.
+
+Break a task down further if it touches unrelated subsystems, needs more than one focused session, or the title contains "and".
 
 ---
 
