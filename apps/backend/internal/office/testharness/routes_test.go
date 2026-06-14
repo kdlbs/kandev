@@ -163,8 +163,12 @@ func TestSeedTaskSessionUsesRequestedSessionID(t *testing.T) {
 	if resp.SessionID != sessionID {
 		t.Fatalf("session_id = %q, want requested %q", resp.SessionID, sessionID)
 	}
-	if _, err := repo.GetTaskSession(context.Background(), sessionID); err != nil {
+	session, err := repo.GetTaskSession(context.Background(), sessionID)
+	if err != nil {
 		t.Fatalf("get requested session: %v", err)
+	}
+	if session.TaskID != taskID {
+		t.Fatalf("task_id = %q, want %q", session.TaskID, taskID)
 	}
 }
 

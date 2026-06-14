@@ -51,6 +51,7 @@ test.describe("Task agent error indicator", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
+    // .first() - desktop and mobile sidebars can both be mounted in this layout.
     const taskRow = session.sidebarTaskItem(taskTitle).first();
     const errorIcon = taskRow.getByTestId("task-agent-error-icon");
     await expect(errorIcon).toBeVisible({ timeout: 15_000 });
