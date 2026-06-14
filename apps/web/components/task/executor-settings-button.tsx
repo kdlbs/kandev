@@ -36,6 +36,7 @@ export function ExecutorSettingsButton({
     taskId,
     open || isPreparing,
   );
+  const hasWorktreePath = Boolean(env?.worktree_path);
 
   const handleReset = useCallback(
     async (opts: { pushBranch: boolean }) => {
@@ -105,10 +106,12 @@ export function ExecutorSettingsButton({
                 <p className="mt-1 text-xs text-destructive">
                   Any uncommitted or unpushed changes are lost.
                 </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Check Push the current branch... in the confirm step first to preserve committed
-                  work before resetting.
-                </p>
+                {hasWorktreePath && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Check Push the current branch... in the confirm step first to preserve committed
+                    work before resetting.
+                  </p>
+                )}
               </TooltipContent>
             </Tooltip>
           </div>
@@ -118,7 +121,7 @@ export function ExecutorSettingsButton({
       <TaskResetEnvConfirmDialog
         open={resetDialogOpen}
         onOpenChange={setResetDialogOpen}
-        hasWorktreePath={Boolean(env?.worktree_path)}
+        hasWorktreePath={hasWorktreePath}
         isResetting={isResetting}
         onConfirm={handleReset}
       />

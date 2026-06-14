@@ -2,21 +2,46 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionPrepareState } from "@/lib/state/slices/session-runtime/types";
 
-// Constants declared *above* the vi.mock factories so the mocks can reference
-// them without relying on vitest's hoisting capturing TDZ-undefined closures.
-// The previous layout worked by accident (factories aren't invoked until the
-// test imports the module under test, by which time the const initialization
-// has run), but a refactor that imports the module earlier — for example, a
-// shared test helper — would break the closure silently.
+// Constants declared before mocks so the mocked factories can reference them without
+// hoisting-related TDZ pitfalls.
 const SESSION_ID = "session-1";
 const TASK_ID = "task-1";
 const STEP_CREATE_SANDBOX = "Creating cloud sandbox";
 const PREPARE_STATUS_TESTID = "executor-prepare-status";
 const SETTINGS_BUTTON_TESTID = "executor-settings-button";
+const BRANCH_PUSH_HINT_TEXT =
+  "Check Push the current branch... in the confirm step first to preserve committed work before resetting.";
+const BRANCH_PUSH_HINT = new RegExp(BRANCH_PUSH_HINT_TEXT);
+const SPRITES_ENV = { executor_type: "sprites", sandbox_id: "kandev-abc" };
+const SPRITES_WORKTREE_ENV = { ...SPRITES_ENV, worktree_path: "/tmp/worktree" };
+const DOCKER_ENV = { executor_type: "local_docker", container_id: "abcdef" };
+
+type MockEnv = {
+  executor_type: string;
+  sandbox_id?: string;
+  container_id?: string;
+  worktree_path?: string;
+};
 
 let mockPrepareState: SessionPrepareState | null = null;
 let mockSessionState: string | null = null;
-let mockEnv: { executor_type: string; sandbox_id?: string; container_id?: string } | null = null;
+let mockEnv: MockEnv | null = null;
+
+const renderButton = () => {
+  render(<ExecutorSettingsButton taskId={TASK_ID} sessionId={SESSION_ID} />);
+};
+
+const hoverSettingsButton = () =>
+  fireEvent.pointerEnter(screen.getByTestId(SETTINGS_BUTTON_TESTID));
+
+const flushTicks = () => Promise.resolve().then(() => Promise.resolve());
+
+afterEach(() => {
+  cleanup();
+  mockPrepareState = null;
+  mockSessionState = null;
+  mockEnv = null;
+});
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
@@ -52,48 +77,42 @@ vi.mock("@kandev/ui/tooltip", () => ({
 
 import { ExecutorSettingsButton } from "./executor-settings-button";
 
-describe("ExecutorSettingsButton", () => {
-  afterEach(() => {
-    cleanup();
-    mockPrepareState = null;
-    mockSessionState = null;
-    mockEnv = null;
-  });
-
+describe("ExecutorSettingsButton icon states", () => {
   it("shows the cloud icon when the executor type is sprites", async () => {
-    mockEnv = { executor_type: "sprites", sandbox_id: "kandev-abc" };
+    mockEnv = SPRITES_ENV;
 
-    render(<ExecutorSettingsButton taskId={TASK_ID} sessionId={SESSION_ID} />);
+    renderButton();
+    await flushTicks();
+    await flushTicks();
 
-    // Wait a tick for the live fetch to resolve.
-    await Promise.resolve();
-    await Promise.resolve();
     expect(await screen.findByTestId("executor-status-cloud-icon")).toBeTruthy();
   });
 
   it("shows the container icon for both docker variants", async () => {
-    mockEnv = { executor_type: "local_docker", container_id: "abcdef" };
+    mockEnv = DOCKER_ENV;
 
-    render(<ExecutorSettingsButton taskId={TASK_ID} sessionId={SESSION_ID} />);
+    renderButton();
+    await flushTicks();
 
-    await Promise.resolve();
     expect(await screen.findByTestId("executor-status-container-icon")).toBeTruthy();
   });
 
   it("swaps to a spinner while the prepare progress is preparing", async () => {
-    mockEnv = { executor_type: "sprites", sandbox_id: "kandev-abc" };
+    mockEnv = SPRITES_ENV;
     mockPrepareState = {
       sessionId: SESSION_ID,
       status: "preparing",
       steps: [{ name: STEP_CREATE_SANDBOX, status: "running" }],
     };
 
-    render(<ExecutorSettingsButton taskId={TASK_ID} sessionId={SESSION_ID} />);
+    renderButton();
 
     expect(screen.getByTestId("executor-settings-button-spinner")).toBeTruthy();
     expect(screen.queryByTestId("executor-status-cloud-icon")).toBeNull();
   });
+});
 
+describe("ExecutorSettingsButton prepare status", () => {
   it("renders the preparing section with current step copy", async () => {
     mockPrepareState = {
       sessionId: SESSION_ID,
@@ -105,11 +124,8 @@ describe("ExecutorSettingsButton", () => {
       ],
     };
 
-    render(<ExecutorSettingsButton taskId={TASK_ID} sessionId={SESSION_ID} />);
-
-    // Open the hover card by hovering the trigger (not clicking — it's a
-    // borderless info surface, not a button).
-    fireEvent.pointerEnter(screen.getByTestId(SETTINGS_BUTTON_TESTID));
+    renderButton();
+    hoverSettingsButton();
 
     expect(await screen.findByTestId(PREPARE_STATUS_TESTID)).toHaveProperty(
       "dataset.phase",
@@ -133,8 +149,8 @@ describe("ExecutorSettingsButton", () => {
       ],
     };
 
-    render(<ExecutorSettingsButton taskId={TASK_ID} sessionId={SESSION_ID} />);
-    fireEvent.pointerEnter(screen.getByTestId(SETTINGS_BUTTON_TESTID));
+    renderButton();
+    hoverSettingsButton();
 
     const status = await screen.findByTestId(PREPARE_STATUS_TESTID);
     expect(status.dataset.phase).toBe("preparing_fallback");
@@ -144,10 +160,9 @@ describe("ExecutorSettingsButton", () => {
   it("renders the Resuming session row when session is STARTING with no prepare events", async () => {
     mockSessionState = "STARTING";
 
-    render(<ExecutorSettingsButton taskId={TASK_ID} sessionId={SESSION_ID} />);
-
+    renderButton();
     expect(screen.getByTestId("executor-settings-button-spinner")).toBeTruthy();
-    fireEvent.pointerEnter(screen.getByTestId(SETTINGS_BUTTON_TESTID));
+    hoverSettingsButton();
 
     const status = await screen.findByTestId(PREPARE_STATUS_TESTID);
     expect(status.dataset.phase).toBe("resuming");
@@ -156,19 +171,39 @@ describe("ExecutorSettingsButton", () => {
   });
 
   it("hides the prepare-status section once preparation completes", async () => {
-    // The READY badge next to the executor name conveys ready-state; the
-    // dedicated "Environment ready · 12s" row is redundant noise.
+    // The READY badge next to the executor name conveys ready-state; this dedicated
+    // "Environment ready · 12s" row is redundant in the tooltip.
     mockPrepareState = {
       sessionId: SESSION_ID,
       status: "completed",
-      steps: [{ name: "Creating cloud sandbox", status: "completed" }],
+      steps: [{ name: STEP_CREATE_SANDBOX, status: "completed" }],
       durationMs: 12500,
     };
 
-    render(<ExecutorSettingsButton taskId={TASK_ID} sessionId={SESSION_ID} />);
-    fireEvent.pointerEnter(screen.getByTestId(SETTINGS_BUTTON_TESTID));
+    renderButton();
+    hoverSettingsButton();
 
     expect(screen.queryByTestId(PREPARE_STATUS_TESTID)).toBeNull();
     expect(screen.queryByText(/Environment ready/)).toBeNull();
+  });
+});
+
+describe("ExecutorSettingsButton reset tooltip", () => {
+  it("does not mention branch push in tooltip when no worktree path exists", () => {
+    mockEnv = SPRITES_ENV;
+
+    renderButton();
+    hoverSettingsButton();
+
+    expect(screen.queryByText(BRANCH_PUSH_HINT)).toBeNull();
+  });
+
+  it("mentions branch push in tooltip when a worktree path exists", async () => {
+    mockEnv = SPRITES_WORKTREE_ENV;
+
+    renderButton();
+    hoverSettingsButton();
+
+    expect(await screen.findByText(BRANCH_PUSH_HINT)).toBeTruthy();
   });
 });
