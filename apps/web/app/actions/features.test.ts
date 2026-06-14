@@ -47,4 +47,14 @@ describe("getRuntimeDebugModeAction", () => {
 
     await expect(getRuntimeDebugModeAction()).resolves.toBe(false);
   });
+
+  it("returns false when the debug runtime flag is absent", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        flags: [{ key: "features.office", effective_value: true }],
+      }),
+    );
+
+    await expect(getRuntimeDebugModeAction()).resolves.toBe(false);
+  });
 });
