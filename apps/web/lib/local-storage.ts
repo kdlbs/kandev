@@ -577,6 +577,13 @@ export function getChatDraftAttachments(sessionId: string): StoredFileAttachment
   );
 }
 
+function normalizeAttachmentDeliveryMode(
+  value: unknown,
+  fallback: "prompt" | "path",
+): "prompt" | "path" {
+  return value === "prompt" || value === "path" ? value : fallback;
+}
+
 export function setChatDraftAttachments(
   sessionId: string,
   attachments: Array<{
@@ -618,11 +625,11 @@ export function restoreAttachmentPreview(
   if (att.isImage) {
     return {
       ...att,
-      deliveryMode: att.deliveryMode ?? "prompt",
+      deliveryMode: normalizeAttachmentDeliveryMode(att.deliveryMode, "prompt"),
       preview: `data:${att.mimeType};base64,${att.data}`,
     };
   }
-  return { ...att, deliveryMode: att.deliveryMode ?? "path" };
+  return { ...att, deliveryMode: normalizeAttachmentDeliveryMode(att.deliveryMode, "path") };
 }
 
 export function getChatInputHeight(sessionId: string): number | null {

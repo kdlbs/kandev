@@ -5,6 +5,7 @@ import {
   getGlobalSidebarWidth,
   markPRClosedBannerDismissed,
   markPRMergedBannerDismissed,
+  restoreAttachmentPreview,
   setGlobalSidebarWidth,
   wasPRClosedBannerDismissed,
   wasPRMergedBannerDismissed,
@@ -101,5 +102,36 @@ describe("global sidebar width storage", () => {
     setGlobalSidebarWidth(320);
     cleanupTaskStorage("task-a", []);
     expect(getGlobalSidebarWidth()).toBe(320);
+  });
+});
+
+describe("chat draft attachment storage", () => {
+  it("normalizes invalid restored image delivery modes to prompt", () => {
+    const restored = restoreAttachmentPreview({
+      id: "att-1",
+      data: "abc",
+      mimeType: "image/png",
+      fileName: "shot.png",
+      size: 3,
+      isImage: true,
+      deliveryMode: "inline" as "prompt",
+    });
+
+    expect(restored.deliveryMode).toBe("prompt");
+    expect(restored.preview).toBe("data:image/png;base64,abc");
+  });
+
+  it("normalizes invalid restored file delivery modes to path", () => {
+    const restored = restoreAttachmentPreview({
+      id: "att-2",
+      data: "abc",
+      mimeType: "application/pdf",
+      fileName: "doc.pdf",
+      size: 3,
+      isImage: false,
+      deliveryMode: "inline" as "path",
+    });
+
+    expect(restored.deliveryMode).toBe("path");
   });
 });
