@@ -2,6 +2,25 @@
 
 All notable changes to Kandev.
 
+## 0.59.0 - 2026-06-14
+
+### Features
+
+- expose ACP session debug metadata ([#1359](https://github.com/kdlbs/kandev/pull/1359))
+- show session config in message metadata ([#1354](https://github.com/kdlbs/kandev/pull/1354))
+- tabbed multi-PR CI popover for topbar button and chat status chip ([#1356](https://github.com/kdlbs/kandev/pull/1356))
+
+### Bug Fixes
+
+- summarize current PR state ([#1362](https://github.com/kdlbs/kandev/pull/1362))
+- keep agent tab before PR tab ([#1360](https://github.com/kdlbs/kandev/pull/1360))
+- apply profile auto-approve to agentctl instances ([#1358](https://github.com/kdlbs/kandev/pull/1358))
+
+### Performance
+
+- eliminate redundant re-renders and markdown re-parsing ([#1357](https://github.com/kdlbs/kandev/pull/1357))
+- eliminate sidebar close lag with many tasks ([#1355](https://github.com/kdlbs/kandev/pull/1355))
+
 ## 0.58.0 - 2026-06-12
 
 ### Features
