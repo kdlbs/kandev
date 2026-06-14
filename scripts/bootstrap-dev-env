@@ -119,15 +119,18 @@ install_mise() {
   command -v curl >/dev/null 2>&1 || die "curl is required to install mise"
 
   log "installing mise"
-  curl -fsSL https://mise.run | sh
+  tmp_mise_script="$(mktemp)"
+  trap 'rm -f "$tmp_mise_script"' EXIT
+  curl -fsSL https://mise.run -o "$tmp_mise_script"
+  sh "$tmp_mise_script"
   export PATH="$HOME/.local/bin:$PATH"
   command -v mise >/dev/null 2>&1 || die "mise install finished but mise is not on PATH"
   persist_mise_activation
 }
 
 persist_mise_activation() {
-  local bashrc="${HOME:-}/.bashrc"
-  [[ -n "$bashrc" ]] || return 0
+  [[ -n "${HOME:-}" ]] || return 0
+  local bashrc="$HOME/.bashrc"
 
   touch "$bashrc"
   grep -Fqx 'export PATH="$HOME/.local/bin:$PATH"' "$bashrc" 2>/dev/null \

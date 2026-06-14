@@ -16,15 +16,26 @@ cd "$(dirname "$0")/../apps"
 
 PW_ARGS=(chromium chromium-headless-shell)
 
-dry_run=$(pnpm --filter @kandev/web exec playwright install --dry-run "${PW_ARGS[@]}" 2>&1 || true)
-missing=0
-while IFS= read -r loc; do
-  [ -n "$loc" ] || continue
-  if [ ! -f "$loc/INSTALLATION_COMPLETE" ]; then
+missing=1
+found=0
+
+if dry_run="$(pnpm --filter @kandev/web exec playwright install --dry-run "${PW_ARGS[@]}" 2>&1)"; then
+  missing=0
+  while IFS= read -r loc; do
+    [ -n "$loc" ] || continue
+    found=1
+    if [ ! -f "$loc/INSTALLATION_COMPLETE" ]; then
+      missing=1
+      break
+    fi
+  done < <(printf '%s\n' "$dry_run" | awk -F'Install location:[[:space:]]*' 'NF > 1 {print $2}' | sort -u)
+
+  if [ "$found" -eq 0 ]; then
     missing=1
-    break
   fi
-done < <(printf '%s\n' "$dry_run" | awk -F'Install location:[[:space:]]*' 'NF > 1 {print $2}' | sort -u)
+else
+  echo "[playwright] dry-run failed; continuing with browser installation"
+fi
 
 if [ "$missing" -eq 0 ]; then
   echo "[playwright] browsers already installed"

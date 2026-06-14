@@ -2,9 +2,9 @@
 node = "24"
 pnpm = "9.15.9"
 go = "1.26.0"
-jq = "latest"
-ripgrep = "latest"
-uv = "latest"
+jq = "1.8.1"
+ripgrep = "15.1.1"
+uv = "0.11.21"
 golangci-lint = "2.9.0"
 git-cliff = "2.13.1"
 "go:github.com/google/go-licenses" = { version = "v1.6.0", depends = "go" }
