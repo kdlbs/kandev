@@ -734,20 +734,24 @@ export class ApiClient {
     taskId: string,
     opts: {
       state: TaskSessionState;
+      sessionId?: string;
       agentProfileId?: string;
       startedAt?: string;
       completedAt?: string;
       commandCount?: number;
+      metadata?: Record<string, unknown>;
     },
   ): Promise<{ session_id: string }> {
     const body: Record<string, unknown> = {
       task_id: taskId,
       state: opts.state,
     };
+    if (opts.sessionId !== undefined) body.session_id = opts.sessionId;
     if (opts.agentProfileId !== undefined) body.agent_profile_id = opts.agentProfileId;
     if (opts.startedAt !== undefined) body.started_at = opts.startedAt;
     if (opts.completedAt !== undefined) body.completed_at = opts.completedAt;
     if (opts.commandCount !== undefined) body.command_count = opts.commandCount;
+    if (opts.metadata !== undefined) body.metadata = opts.metadata;
     return this.request("POST", "/api/v1/_test/task-sessions", body);
   }
 

@@ -2,6 +2,7 @@
 
 import { memo } from "react";
 import {
+  IconAlertCircle,
   IconChevronDown,
   IconCircleCheck,
   IconCircleDashed,
@@ -68,6 +69,7 @@ type TaskItemProps = {
   prInfo?: { number: number; state: string };
   issueInfo?: { url: string; number: number };
   isPinned?: boolean;
+  agentErrorMessage?: string | null;
 };
 
 function formatRelativeTime(dateString: string): string {
@@ -266,6 +268,7 @@ function TaskItemContent({
   updatedAt,
   prInfo,
   issueInfo,
+  agentErrorMessage,
 }: {
   title: string;
   taskId?: string;
@@ -279,6 +282,7 @@ function TaskItemContent({
   updatedAt?: string;
   prInfo?: { number: number; state: string };
   issueInfo?: { url: string; number: number };
+  agentErrorMessage?: string | null;
 }) {
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -292,6 +296,7 @@ function TaskItemContent({
         )}
         <TaskPRIcon taskId={taskId} prInfo={prInfo} />
         {issueInfo && <IssueTaskIcon issueInfo={issueInfo} />}
+        {agentErrorMessage && <TaskAgentErrorIcon message={agentErrorMessage} />}
         {isRemoteExecutor && (
           <RemoteCloudTooltip
             taskId={taskId ?? ""}
@@ -314,6 +319,25 @@ function TaskItemContent({
       )}
       <TaskItemStatsRow updatedAt={updatedAt} prInfo={prInfo} primarySessionId={primarySessionId} />
     </div>
+  );
+}
+
+function TaskAgentErrorIcon({ message }: { message: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          data-testid="task-agent-error-icon"
+          className="inline-flex shrink-0 text-destructive"
+          aria-label="Task has an agent error"
+        >
+          <IconAlertCircle className="h-3.5 w-3.5" aria-hidden="true" />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="right" className="max-w-[320px] whitespace-pre-wrap break-words">
+        {message}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -344,6 +368,7 @@ export const TaskItem = memo(function TaskItem({
   prInfo,
   issueInfo,
   isPinned,
+  agentErrorMessage,
 }: TaskItemProps) {
   const effectiveMenuOpen = menuOpen || isDeleting === true;
   const isInProgress = computeIsInProgress(state, sessionState);
@@ -391,6 +416,7 @@ export const TaskItem = memo(function TaskItem({
         updatedAt={updatedAt}
         prInfo={prInfo}
         issueInfo={issueInfo}
+        agentErrorMessage={agentErrorMessage}
       />
       {hasDiffStats ? (
         <div className="relative shrink-0 self-center flex items-center">

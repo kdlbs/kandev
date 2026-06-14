@@ -3,11 +3,13 @@ import { cleanup, render, screen } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { StateProvider } from "@/components/state-provider";
 import { TaskItem } from "./task-item";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 
 const REVIEW_ICON_TEST_ID = "task-state-review";
 const RUNNING_ICON_TEST_ID = "task-state-running";
 const WAITING_FOR_INPUT_ICON_TEST_ID = "task-state-waiting-for-input";
 const PENDING_PERMISSION_ICON_TEST_ID = "task-state-pending-permission";
+const AGENT_ERROR_ICON_TEST_ID = "task-agent-error-icon";
 const PREPARING_PHASE = "preparing";
 const PURPLE_SPINNER_CLASS = "text-purple-500";
 const SPIN_CLASS = "animate-spin";
@@ -18,7 +20,9 @@ afterEach(() => cleanup());
 function renderTaskItem(props: Partial<ComponentProps<typeof TaskItem>> = {}) {
   return render(
     <StateProvider>
-      <TaskItem title="Needs answer" state="REVIEW" {...props} />
+      <TooltipProvider>
+        <TaskItem title="Needs answer" state="REVIEW" {...props} />
+      </TooltipProvider>
     </StateProvider>,
   );
 }
@@ -112,5 +116,12 @@ describe("TaskItem status icon", () => {
 
     expect(screen.queryByTestId(REVIEW_ICON_TEST_ID)).not.toBeNull();
     expect(screen.queryByTestId(WAITING_FOR_INPUT_ICON_TEST_ID)).toBeNull();
+  });
+
+  it("shows a separate agent error icon when the task has retained error details", () => {
+    renderTaskItem({ agentErrorMessage: "peer disconnected before response" });
+
+    expect(screen.queryByTestId(AGENT_ERROR_ICON_TEST_ID)).not.toBeNull();
+    expect(screen.queryByTestId(REVIEW_ICON_TEST_ID)).not.toBeNull();
   });
 });

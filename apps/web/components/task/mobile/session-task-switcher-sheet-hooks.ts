@@ -17,6 +17,7 @@ import {
 import {
   repositoryId as toRepositoryId,
   type TaskState,
+  type TaskSession,
   type TaskSessionState,
   type Repository,
   type Task,
@@ -26,6 +27,7 @@ import type { KanbanState } from "@/lib/state/slices";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import { repositorySlug } from "@/lib/repository-slug";
 import { resolvePreferredSessionId } from "../task-select-helpers";
+import { agentErrorMessageForTask } from "@/lib/task-agent-error";
 
 // Map workflow snapshot to kanban state on workspace switch.
 function mapSnapshotToKanban(snapshot: WorkflowSnapshot, newWorkflowId: string) {
@@ -85,6 +87,7 @@ type SheetItemCtx = {
   repositoryPathsById: Map<string, string | undefined>;
   workflowNameById: Map<string, string>;
   stepTitleById: Map<string, string>;
+  sessionsById: Record<string, TaskSession>;
   sessionsByTaskId: Parameters<typeof getSessionInfoForTask>[1];
   gitStatusByEnvId: Parameters<typeof getSessionInfoForTask>[2];
   envIdBySessionId: Parameters<typeof getSessionInfoForTask>[3];
@@ -132,6 +135,7 @@ function toSheetItem(
       ctx.messagesBySession,
       task.primarySessionId,
     ),
+    agentErrorMessage: agentErrorMessageForTask(task, ctx.sessionsById, ctx.sessionsByTaskId),
   };
 }
 
@@ -167,6 +171,7 @@ export function useSheetData(workspaceId: string | null) {
       ),
       workflowNameById: new Map(workflows.map((w) => [w.id, w.name])),
       stepTitleById: new Map(allSteps.map((s) => [s.id, s.title])),
+      sessionsById,
       sessionsByTaskId,
       gitStatusByEnvId,
       envIdBySessionId,
@@ -179,6 +184,7 @@ export function useSheetData(workspaceId: string | null) {
     allSteps,
     workflows,
     workspaceId,
+    sessionsById,
     sessionsByTaskId,
     gitStatusByEnvId,
     envIdBySessionId,

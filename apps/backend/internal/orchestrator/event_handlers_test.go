@@ -1605,6 +1605,14 @@ func TestHandleAgentFailed_RecoverableWithSession(t *testing.T) {
 		if session.State != models.TaskSessionStateWaitingForInput {
 			t.Errorf("expected recoverable state %q, got %q", models.TaskSessionStateWaitingForInput, session.State)
 		}
+		lastErrRaw := session.Metadata[models.SessionMetaKeyLastAgentError]
+		lastErr, ok := lastErrRaw.(map[string]interface{})
+		if !ok {
+			t.Fatalf("expected last agent error metadata map, got %#v", lastErrRaw)
+		}
+		if got := lastErr["message"]; got != "agent process exited" {
+			t.Fatalf("expected last agent error message to persist, got %#v", got)
+		}
 	})
 
 	t.Run("routes to resume failure when resume token exists and init not completed", func(t *testing.T) {

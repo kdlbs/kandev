@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { registerTaskSessionHandlers } from "./agent-session";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
+import type { TaskSessionStateChangedPayload } from "@/lib/types/backend";
 
 function makeStore(overrides: Record<string, unknown> = {}) {
   const state: Record<string, unknown> = {
@@ -18,6 +19,7 @@ function makeStore(overrides: Record<string, unknown> = {}) {
     upsertTaskSessionFromEvent: vi.fn(),
     setActiveSession: vi.fn(),
     setActiveSessionAuto: vi.fn(),
+    setSessionAgentctlStatus: vi.fn(),
     setSessionFailureNotification: vi.fn(),
     setContextWindow: vi.fn(),
     ...overrides,
@@ -32,9 +34,16 @@ function makeStore(overrides: Record<string, unknown> = {}) {
 }
 
 const STATE_CHANGED_EVENT = "session.state_changed";
+const RECOVERABLE_ERROR_MESSAGE = "peer disconnected before response";
+const RECOVERABLE_ERROR_AT = "2026-06-14T14:06:40Z";
 
-function makeMessage(payload: Record<string, unknown>) {
-  return { id: "msg-1", type: "notification", action: STATE_CHANGED_EVENT, payload };
+function makeMessage(payload: TaskSessionStateChangedPayload) {
+  return {
+    id: "msg-1",
+    type: "notification" as const,
+    action: "session.state_changed" as const,
+    payload,
+  };
 }
 
 describe("session.state_changed handler", () => {
@@ -128,6 +137,48 @@ describe("session.state_changed handler", () => {
     );
 
     expect(store.getState().setSessionFailureNotification).not.toHaveBeenCalled();
+  });
+});
+
+describe("session.state_changed recoverable errors", () => {
+  it("upserts recoverable error metadata for non-failed session states", () => {
+    const upsertTaskSessionFromEvent = vi.fn();
+    const store = makeStore({
+      taskSessions: {
+        items: { "s-1": { id: "s-1", task_id: "t-1", state: "RUNNING" } },
+      },
+      upsertTaskSessionFromEvent,
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        new_state: "WAITING_FOR_INPUT",
+        error_message: RECOVERABLE_ERROR_MESSAGE,
+        session_metadata: {
+          last_agent_error: {
+            message: RECOVERABLE_ERROR_MESSAGE,
+            occurred_at: RECOVERABLE_ERROR_AT,
+          },
+        },
+      }),
+    );
+
+    expect(upsertTaskSessionFromEvent).toHaveBeenCalledWith(
+      "t-1",
+      expect.objectContaining({
+        state: "WAITING_FOR_INPUT",
+        error_message: RECOVERABLE_ERROR_MESSAGE,
+        metadata: {
+          last_agent_error: {
+            message: RECOVERABLE_ERROR_MESSAGE,
+            occurred_at: RECOVERABLE_ERROR_AT,
+          },
+        },
+      }),
+    );
   });
 });
 

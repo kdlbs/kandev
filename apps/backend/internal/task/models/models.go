@@ -99,6 +99,17 @@ type SessionRuntimeConfig struct {
 // other step change.
 const SessionMetaKeyPendingStepCompletion = "pending_step_completion_signal"
 
+// SessionMetaKeyLastAgentError stores the last recoverable agent runtime
+// failure for UI surfaces that need to keep the error visible after auto-resume.
+const SessionMetaKeyLastAgentError = "last_agent_error"
+
+// LastAgentError is persisted under TaskSession.Metadata[SessionMetaKeyLastAgentError].
+type LastAgentError struct {
+	Message          string    `json:"message"`
+	OccurredAt       time.Time `json:"occurred_at"`
+	AgentExecutionID string    `json:"agent_execution_id,omitempty"`
+}
+
 // PendingStepCompletionSignal source values.
 const (
 	StepCompletionSourceAgent          = "agent"

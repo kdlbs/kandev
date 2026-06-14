@@ -42,6 +42,7 @@ export type TaskSwitcherItem = {
   isPRReview?: boolean;
   isIssueWatch?: boolean;
   issueInfo?: { url: string; number: number };
+  agentErrorMessage?: string | null;
 };
 
 type TaskSwitcherProps = {
@@ -192,6 +193,7 @@ function TaskRow({
         repositories={task.repositories}
         prInfo={task.prInfo}
         issueInfo={task.issueInfo}
+        agentErrorMessage={task.agentErrorMessage}
         isSubTask={isSubTask}
         depth={depth}
         subtaskCount={subtaskToggle?.subtaskCount}

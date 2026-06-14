@@ -275,6 +275,7 @@ export type TaskSessionStateChangedPayload = {
   agent_profile_id?: string;
   agent_profile_snapshot?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
+  session_metadata?: Record<string, unknown>;
   is_passthrough?: boolean;
   error_message?: string;
   /** When true, the frontend should not show an error toast for this state change. */

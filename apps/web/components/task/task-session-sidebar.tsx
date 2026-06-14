@@ -29,6 +29,7 @@ import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
 import { buildPendingFlags, readPendingFlags } from "./task-session-sidebar-aggregate";
 import { useShallow } from "zustand/react/shallow";
+import { agentErrorMessageForTask } from "@/lib/task-agent-error";
 
 /**
  * Stabilize a derived array of primary session IDs so the reference only
@@ -85,6 +86,7 @@ function toPrInfo(pr: TaskPR | undefined): { number: number; state: string } | u
 
 /** Map a kanban task to a sidebar item with session info and repository metadata. */
 type SidebarCtx = {
+  sessionsById: Record<string, TaskSession>;
   sessionsByTaskId: Record<string, TaskSession[]>;
   gitStatusByEnvId: Record<string, GitStatusEntry>;
   envIdBySessionId: Record<string, string>;
@@ -158,6 +160,7 @@ function toSidebarItem(
     isPRReview: task.isPRReview ?? false,
     isIssueWatch: task.isIssueWatch ?? false,
     issueInfo: toIssueInfo(task),
+    agentErrorMessage: agentErrorMessageForTask(task, ctx.sessionsById, ctx.sessionsByTaskId),
   };
 }
 
@@ -198,6 +201,7 @@ function buildArchivedItem(s: ReturnType<typeof useArchivedTaskState>): SidebarI
     isPRReview: false,
     isIssueWatch: false,
     issueInfo: undefined,
+    agentErrorMessage: null,
   };
 }
 
@@ -242,6 +246,7 @@ function useSidebarData(workspaceId: string | null) {
     const workflowNameById = new Map(workflows.map((w) => [w.id, w.name]));
     const stepTitleById = new Map(allSteps.map((s) => [s.id, s.title]));
     const mapCtx = {
+      sessionsById,
       sessionsByTaskId,
       gitStatusByEnvId,
       envIdBySessionId,
@@ -268,6 +273,7 @@ function useSidebarData(workspaceId: string | null) {
     workflows,
     workspaceId,
     sessionsByTaskId,
+    sessionsById,
     gitStatusByEnvId,
     envIdBySessionId,
     taskPRsByTaskId,

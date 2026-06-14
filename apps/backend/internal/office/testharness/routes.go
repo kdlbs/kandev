@@ -11,6 +11,7 @@ package testharness
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"time"
@@ -169,12 +170,14 @@ func seedTaskHandler(repo *sqliterepo.Repository, log *logger.Logger) gin.Handle
 }
 
 type seedTaskSessionRequest struct {
-	TaskID         string  `json:"task_id"`
-	State          string  `json:"state"`
-	AgentProfileID string  `json:"agent_profile_id,omitempty"`
-	StartedAt      *string `json:"started_at,omitempty"`
-	CompletedAt    *string `json:"completed_at,omitempty"`
-	CommandCount   int     `json:"command_count,omitempty"`
+	TaskID         string                 `json:"task_id"`
+	SessionID      string                 `json:"session_id,omitempty"`
+	State          string                 `json:"state"`
+	AgentProfileID string                 `json:"agent_profile_id,omitempty"`
+	StartedAt      *string                `json:"started_at,omitempty"`
+	CompletedAt    *string                `json:"completed_at,omitempty"`
+	CommandCount   int                    `json:"command_count,omitempty"`
+	Metadata       map[string]interface{} `json:"metadata,omitempty"`
 }
 
 type seedTaskSessionResponse struct {
@@ -207,16 +210,14 @@ func seedTaskSessionHandler(repo *sqliterepo.Repository, eventBus bus.EventBus, 
 		// state in place. Office sessions are unique per (task, agent) per the
 		// schema's partial unique index, and tests routinely flip the same
 		// pair RUNNING → IDLE (and back) to exercise reactive UI.
-		if existing, _ := repo.GetTaskSessionByTaskAndAgent(ctx, req.TaskID, req.AgentProfileID); existing != nil {
-			existing.State = session.State
-			existing.CompletedAt = session.CompletedAt
-			existing.UpdatedAt = time.Now().UTC()
-			if err := repo.UpdateTaskSession(ctx, existing); err != nil {
+		existing := getExistingSeedSession(ctx, repo, &req)
+		if existing != nil {
+			session, err = updateSeededSession(ctx, repo, existing, session, req.TaskID)
+			if err != nil {
 				log.Error("test harness: update session failed", zap.Error(err))
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				c.JSON(statusForSeedSessionUpdateError(err), gin.H{"error": err.Error()})
 				return
 			}
-			session = existing
 		} else if err := repo.CreateTaskSession(ctx, session); err != nil {
 			log.Error("test harness: create session failed", zap.Error(err))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -234,6 +235,59 @@ func seedTaskSessionHandler(repo *sqliterepo.Repository, eventBus bus.EventBus, 
 		publishSessionStateChanged(ctx, eventBus, session, log)
 		c.JSON(http.StatusOK, seedTaskSessionResponse{SessionID: session.ID})
 	}
+}
+
+func updateSeededSession(
+	ctx context.Context,
+	repo *sqliterepo.Repository,
+	existing *models.TaskSession,
+	session *models.TaskSession,
+	taskID string,
+) (*models.TaskSession, error) {
+	if existing.TaskID != taskID {
+		return nil, seedSessionUpdateError{message: "session does not belong to task: " + existing.ID}
+	}
+	existing.State = session.State
+	existing.CompletedAt = session.CompletedAt
+	existing.UpdatedAt = time.Now().UTC()
+	if existing.Metadata == nil {
+		existing.Metadata = map[string]interface{}{}
+	}
+	for key, value := range session.Metadata {
+		existing.Metadata[key] = value
+	}
+	if err := repo.UpdateTaskSession(ctx, existing); err != nil {
+		return nil, err
+	}
+	if err := repo.UpdateSessionMetadata(ctx, existing.ID, existing.Metadata); err != nil {
+		return nil, err
+	}
+	return existing, nil
+}
+
+type seedSessionUpdateError struct {
+	message string
+}
+
+func (err seedSessionUpdateError) Error() string {
+	return err.message
+}
+
+func statusForSeedSessionUpdateError(err error) int {
+	var updateErr seedSessionUpdateError
+	if errors.As(err, &updateErr) {
+		return http.StatusBadRequest
+	}
+	return http.StatusInternalServerError
+}
+
+func getExistingSeedSession(ctx context.Context, repo *sqliterepo.Repository, req *seedTaskSessionRequest) *models.TaskSession {
+	if req.SessionID != "" {
+		existing, _ := repo.GetTaskSession(ctx, req.SessionID)
+		return existing
+	}
+	existing, _ := repo.GetTaskSessionByTaskAndAgent(ctx, req.TaskID, req.AgentProfileID)
+	return existing
 }
 
 type seedWorkflowRequest struct {
@@ -309,6 +363,9 @@ func buildSeededSession(req *seedTaskSessionRequest) (*models.TaskSession, error
 		completedAt = &ts
 	}
 	metadata := map[string]interface{}{"seeded_by_e2e_mock": true}
+	for key, value := range req.Metadata {
+		metadata[key] = value
+	}
 	if req.AgentProfileID != "" {
 		metadata["agent_profile_id"] = req.AgentProfileID
 	}

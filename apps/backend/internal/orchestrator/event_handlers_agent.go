@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -689,6 +690,7 @@ func (s *Service) handleRecoverableFailure(ctx context.Context, data watcher.Age
 
 	// Complete the current turn.
 	s.completeTurnForSession(ctx, data.SessionID)
+	s.persistLastAgentError(ctx, data)
 
 	// Create a status message with recovery action metadata.
 	// Skipped for office sessions: the office task page renders its
@@ -720,6 +722,24 @@ func (s *Service) handleRecoverableFailure(ctx context.Context, data watcher.Age
 
 	// Clean up the agent execution.
 	go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
+}
+
+func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentEventData) {
+	errMsg := data.ErrorMessage
+	if errMsg == "" {
+		errMsg = "agent failed"
+	}
+	lastErr := models.LastAgentError{
+		Message:          errMsg,
+		OccurredAt:       time.Now().UTC(),
+		AgentExecutionID: data.AgentExecutionID,
+	}
+	if err := s.repo.SetSessionMetadataKey(ctx, data.SessionID, models.SessionMetaKeyLastAgentError, lastErr); err != nil {
+		s.logger.Warn("failed to persist last agent error",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.Error(err))
+	}
 }
 
 // createRecoveryStatusMessage builds and persists the ActionMessage shown

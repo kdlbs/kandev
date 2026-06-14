@@ -11,6 +11,7 @@ import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
 import {
   type MessageListProps,
+  LastAgentErrorNotice,
   MessageListStatus,
   MessageItem,
   getItemKey,
@@ -420,6 +421,7 @@ function useVirtuosoHeaderFooter(args: HeaderFooterArgs) {
   const Footer = useCallback(
     () => (
       <>
+        <LastAgentErrorNotice sessionId={sessionId} />
         <AgentStatus sessionState={sessionState} sessionId={sessionId} messages={messages} />
         {footerActions.map((msg) => (
           <MessageRenderer key={msg.id} comment={msg} isTaskDescription={false} />

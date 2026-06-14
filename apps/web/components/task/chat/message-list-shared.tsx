@@ -1,13 +1,16 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useCallback, useState } from "react";
 import { Button } from "@kandev/ui/button";
+import { IconAlertCircle, IconX } from "@tabler/icons-react";
 import { GridSpinner } from "@/components/grid-spinner";
 import type { Message, TaskSessionState } from "@/lib/types/http";
 import type { RenderItem } from "@/hooks/use-processed-messages";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import { TurnGroupMessage } from "@/components/task/chat/messages/turn-group-message";
 import { PrepareProgress } from "@/components/session/prepare-progress";
+import { useAppStore } from "@/components/state-provider";
+import { lastAgentErrorDismissKey, readLastAgentError } from "@/lib/session-last-agent-error";
 
 export type MessageListProps = {
   items: RenderItem[];
@@ -40,6 +43,53 @@ export function getLastTurnGroupId(items: RenderItem[]) {
     if (item.type === "turn_group") return item.id;
   }
   return null;
+}
+
+export function LastAgentErrorNotice({ sessionId }: { sessionId: string | null }) {
+  const metadata = useAppStore((state) =>
+    sessionId ? state.taskSessions.items[sessionId]?.metadata : null,
+  );
+  const error = readLastAgentError(metadata);
+  const dismissKey = sessionId && error ? lastAgentErrorDismissKey(sessionId, error) : "";
+  const [dismissedKey, setDismissedKey] = useState<string | null>(() =>
+    dismissKey && globalThis.localStorage?.getItem(dismissKey) === "true" ? dismissKey : null,
+  );
+  const isDismissed =
+    dismissedKey === dismissKey || globalThis.localStorage?.getItem(dismissKey) === "true";
+
+  const dismiss = useCallback(() => {
+    if (!dismissKey) return;
+    globalThis.localStorage?.setItem(dismissKey, "true");
+    setDismissedKey(dismissKey);
+  }, [dismissKey]);
+
+  if (!error || isDismissed) return null;
+
+  return (
+    <div
+      data-testid="last-agent-error-notice"
+      className="mb-3 rounded-md border border-destructive/25 bg-destructive/10 text-destructive"
+      role="status"
+    >
+      <div className="flex items-start gap-2 px-3 py-2">
+        <IconAlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+        <div className="min-w-0 flex-1">
+          <div className="text-xs font-medium">Previous agent error</div>
+          <pre className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-[11px] leading-relaxed text-destructive/85">
+            {error.message}
+          </pre>
+        </div>
+        <button
+          type="button"
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded hover:bg-destructive/10 cursor-pointer"
+          aria-label="Hide previous agent error"
+          onClick={dismiss}
+        >
+          <IconX className="h-3.5 w-3.5" aria-hidden="true" />
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export function MessageListStatus({
