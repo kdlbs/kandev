@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -22,6 +23,19 @@ func TestSupervisorManagerReportsUnsupportedWithoutSocket(t *testing.T) {
 	}
 	if cap.Reason == "" {
 		t.Fatal("Reason empty")
+	}
+}
+
+func TestNewManagerFromEnvReportsMissingSupervisorSocket(t *testing.T) {
+	t.Setenv(EnvRestartAdapter, AdapterSupervisor)
+	t.Setenv(EnvSupervisorSocket, "")
+
+	cap := NewManagerFromEnv().Capability(context.Background())
+	if cap.Supported {
+		t.Fatal("Supported = true, want false")
+	}
+	if !strings.Contains(cap.Reason, EnvSupervisorSocket) {
+		t.Fatalf("Reason = %q, want mention %s", cap.Reason, EnvSupervisorSocket)
 	}
 }
 

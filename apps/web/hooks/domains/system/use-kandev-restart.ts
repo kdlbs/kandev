@@ -26,14 +26,18 @@ export function useKandevRestart({
   const [phase, setPhase] = useState<KandevRestartPhase>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [previousBootID, setPreviousBootID] = useState<string | null>(null);
+  const activeRef = useRef(false);
   const startedAtRef = useRef<number | null>(null);
 
   const fail = useCallback((message: string) => {
+    activeRef.current = false;
     setErrorMessage(message);
     setPhase("error");
   }, []);
 
   const start = useCallback(async () => {
+    if (activeRef.current) return;
+    activeRef.current = true;
     setErrorMessage(null);
     setPhase("starting");
     try {
@@ -48,6 +52,7 @@ export function useKandevRestart({
   }, [fail]);
 
   const dismiss = useCallback(() => {
+    activeRef.current = false;
     setPhase("idle");
     setErrorMessage(null);
     setPreviousBootID(null);
@@ -71,6 +76,7 @@ export function useKandevRestart({
         const info = await fetchSystemInfo({ cache: "no-store" });
         if (cancelled) return;
         if (info.boot_id && info.boot_id !== previousBootID) {
+          activeRef.current = false;
           setPhase("done");
           onComplete?.();
         }

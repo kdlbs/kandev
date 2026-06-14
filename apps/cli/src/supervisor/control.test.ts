@@ -27,6 +27,35 @@ describe("supervisor control protocol", () => {
 
     expect(response).toEqual({ accepted: true, message: "Restart accepted" });
   });
+
+  it("rejects concurrent restart requests while one is already running", async () => {
+    let calls = 0;
+    let releaseRestart!: () => void;
+    let markRestartStarted!: () => void;
+    const restartStarted = new Promise<void>((resolve) => {
+      markRestartStarted = resolve;
+    });
+    const restartReleased = new Promise<void>((resolve) => {
+      releaseRestart = resolve;
+    });
+    const socket = testSocketPath();
+    const server = await startControlServer(socket, async () => {
+      calls += 1;
+      markRestartStarted();
+      await restartReleased;
+    });
+
+    const first = requestRestart(socket);
+    await restartStarted;
+    const second = await requestRestart(socket);
+    releaseRestart();
+    const firstResponse = await first;
+    await server.close();
+
+    expect(firstResponse).toEqual({ accepted: true, message: "Restart accepted" });
+    expect(second).toEqual({ accepted: false, message: "Restart already in progress" });
+    expect(calls).toBe(1);
+  });
 });
 
 function testSocketPath(): string {

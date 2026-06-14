@@ -5,6 +5,7 @@ package info
 
 import (
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/hex"
 	"net/http"
 	"runtime"
@@ -71,7 +72,7 @@ func Handler(s *Service) gin.HandlerFunc {
 func newBootID() string {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		return time.Now().UTC().Format("20060102T150405.000000000Z")
+		binary.BigEndian.PutUint64(b[8:], uint64(time.Now().UTC().UnixNano()))
 	}
 	return hex.EncodeToString(b[:])
 }

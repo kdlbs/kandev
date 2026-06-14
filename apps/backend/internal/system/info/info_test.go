@@ -3,6 +3,7 @@ package info
 import (
 	"encoding/json"
 	"net/http/httptest"
+	"regexp"
 	"runtime"
 	"testing"
 
@@ -63,5 +64,15 @@ func TestHandler_RendersJSON(t *testing.T) {
 	}
 	if resp.BootID == "" {
 		t.Fatal("BootID empty")
+	}
+	if resp.StartedAt == "" {
+		t.Fatal("StartedAt empty")
+	}
+}
+
+func TestNewBootID_ReturnsHexEncodedBytes(t *testing.T) {
+	got := newBootID()
+	if matched := regexp.MustCompile(`^[0-9a-f]{32}$`).MatchString(got); !matched {
+		t.Fatalf("BootID = %q, want 32 lowercase hex chars", got)
 	}
 }

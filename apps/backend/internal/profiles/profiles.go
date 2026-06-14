@@ -46,6 +46,10 @@ var appliedEnvVars = struct {
 	names map[string]bool
 }{names: map[string]bool{}}
 
+var derivedAppliedEnvVars = map[string]bool{
+	"KANDEV_DEBUG_AGENT_MESSAGES": true,
+}
+
 // Environment identifies the active runtime profile.
 type Environment string
 
@@ -132,6 +136,9 @@ func WasApplied(name string) bool {
 // launcher-explicit. This is for startup code that derives secondary env vars
 // from a profile-backed setting after ApplyProfile has already run.
 func MarkApplied(name string) {
+	if !derivedAppliedEnvVars[name] {
+		return
+	}
 	appliedEnvVars.Lock()
 	defer appliedEnvVars.Unlock()
 	appliedEnvVars.names[name] = true

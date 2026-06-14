@@ -26,8 +26,13 @@ type SupervisorManager struct {
 }
 
 func NewManagerFromEnv() Manager {
-	if os.Getenv(EnvRestartAdapter) == AdapterSupervisor || os.Getenv(EnvSupervisorSocket) != "" {
-		return NewSupervisorManager(os.Getenv(EnvSupervisorSocket), os.Getenv(EnvSupervisorManifest))
+	adapter := os.Getenv(EnvRestartAdapter)
+	socket := os.Getenv(EnvSupervisorSocket)
+	if adapter == AdapterSupervisor && socket == "" {
+		return NewUnsupportedManager(fmt.Sprintf("%s is required when %s=%s.", EnvSupervisorSocket, EnvRestartAdapter, AdapterSupervisor))
+	}
+	if adapter == AdapterSupervisor || socket != "" {
+		return NewSupervisorManager(socket, os.Getenv(EnvSupervisorManifest))
 	}
 	return NewUnsupportedManager("")
 }

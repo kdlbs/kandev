@@ -63,7 +63,47 @@ describe("useKandevRestart", () => {
       await result.current.start();
     });
 
+    expect(mocks.fetchSystemInfo).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchSystemInfo.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.requestRestart.mock.invocationCallOrder[0],
+    );
     expect(result.current.phase).toBe("error");
     expect(result.current.errorMessage).toBe("unsupported launch mode");
+  });
+
+  it("ignores duplicate starts while a restart is already active", async () => {
+    mocks.fetchSystemInfo.mockResolvedValueOnce({ boot_id: "boot-1" });
+    let releaseRestart!: () => void;
+    const restartStarted = new Promise<void>((resolve) => {
+      mocks.requestRestart.mockImplementationOnce(
+        () =>
+          new Promise((release) => {
+            releaseRestart = () => release({ accepted: true, message: "Restarting" });
+            resolve();
+          }),
+      );
+    });
+
+    const { result } = renderHook(() => useKandevRestart());
+
+    let firstStart!: Promise<void>;
+    await act(async () => {
+      firstStart = result.current.start();
+      await restartStarted;
+    });
+
+    await act(async () => {
+      await result.current.start();
+    });
+    expect(mocks.fetchSystemInfo).toHaveBeenCalledTimes(1);
+    expect(mocks.requestRestart).toHaveBeenCalledTimes(1);
+
+    releaseRestart();
+    await act(async () => {
+      await firstStart;
+    });
+
+    await waitFor(() => expect(result.current.phase).toBe("restarting"));
+    expect(mocks.requestRestart).toHaveBeenCalledTimes(1);
   });
 });

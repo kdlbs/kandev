@@ -18,6 +18,18 @@ export function startControlServer(
   socket: string,
   onRestart: () => Promise<void>,
 ): Promise<ControlServer> {
+  let restartInProgress = false;
+  const scheduleRestart = (): boolean => {
+    if (restartInProgress) return false;
+    restartInProgress = true;
+    setTimeout(() => {
+      void onRestart().finally(() => {
+        restartInProgress = false;
+      });
+    }, 0);
+    return true;
+  };
+
   if (process.platform !== "win32" && fs.existsSync(socket)) {
     fs.unlinkSync(socket);
   }
@@ -28,7 +40,7 @@ export function startControlServer(
       buf += chunk;
       if (!buf.includes("\n")) return;
       const line = buf.slice(0, buf.indexOf("\n"));
-      void handleControlLine(line, onRestart)
+      void handleControlLine(line, scheduleRestart)
         .then((resp) => {
           conn.end(`${JSON.stringify(resp)}\n`);
         })
@@ -86,12 +98,14 @@ export function requestRestart(socket: string): Promise<ControlResponse> {
 
 async function handleControlLine(
   line: string,
-  onRestart: () => Promise<void>,
+  scheduleRestart: () => boolean,
 ): Promise<ControlResponse> {
   const req = JSON.parse(line) as ControlRequest;
   if (req.action !== "restart") {
     return { accepted: false, message: `unsupported action ${String(req.action)}` };
   }
-  setTimeout(() => void onRestart(), 0);
+  if (!scheduleRestart()) {
+    return { accepted: false, message: "Restart already in progress" };
+  }
   return { accepted: true, message: "Restart accepted" };
 }
