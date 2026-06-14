@@ -54,8 +54,8 @@ func TestPlanEntriesFromTodosResult_RawOutputWrapped(t *testing.T) {
 	if !ok || len(entries) != 1 {
 		t.Fatalf("planEntriesFromTodosResult = (%+v, %v), want one entry ok=true", entries, ok)
 	}
-	if entries[0].Description != "Investigate" {
-		t.Fatalf("unexpected description: %q", entries[0].Description)
+	if entries[0].Description != "Investigate" || entries[0].Status != "in_progress" {
+		t.Fatalf("unexpected entry: %+v", entries[0])
 	}
 }
 
