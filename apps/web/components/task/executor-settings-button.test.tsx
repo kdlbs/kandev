@@ -194,10 +194,9 @@ describe("ExecutorSettingsButton reset tooltip", () => {
     renderButton();
     hoverSettingsButton();
 
-    // Confirm HoverCardContent is open before asserting the hint is absent —
-    // the reset button lives inside the popover, so finding it proves the
-    // popover has rendered (and the hint would have too, if it weren't
-    // gated on hasWorktreePath).
+    // Wait for env to load (cloud icon only renders once executor_type resolves)
+    // and for HoverCardContent to open (reset button lives inside the popover).
+    await screen.findByTestId("executor-status-cloud-icon");
     await screen.findByTestId("executor-settings-reset");
 
     expect(screen.queryByText(BRANCH_PUSH_HINT)).toBeNull();
