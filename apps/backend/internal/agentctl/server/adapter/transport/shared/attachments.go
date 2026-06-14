@@ -2,6 +2,7 @@ package shared
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -76,20 +77,18 @@ func (m *AttachmentManager) SaveAttachments(attachments []v1.MessageAttachment) 
 			m.logger.Warn("skipping attachment with invalid name", zap.String("original_name", att.Name))
 			continue
 		}
-		name = uniqueAttachmentName(dir, name, usedNames)
-		usedNames[name] = true
-
 		decoded, err := base64.StdEncoding.DecodeString(att.Data)
 		if err != nil {
 			m.logger.Warn("failed to decode attachment", zap.String("name", name), zap.Error(err))
 			continue
 		}
 
-		absPath := filepath.Join(dir, name)
-		if err := os.WriteFile(absPath, decoded, 0o644); err != nil {
+		name, absPath, err := writeUniqueAttachmentFile(dir, name, usedNames, decoded)
+		if err != nil {
 			m.logger.Warn("failed to write attachment", zap.String("path", absPath), zap.Error(err))
 			continue
 		}
+		usedNames[name] = true
 
 		relPath := filepath.Join(".kandev", "attachments", m.sessionID, name)
 		saved = append(saved, SavedAttachment{
@@ -153,23 +152,40 @@ func BuildAttachmentPrompt(saved []SavedAttachment, writable bool) string {
 	return sb.String()
 }
 
-func uniqueAttachmentName(dir, name string, used map[string]bool) string {
-	if !used[name] && !fileExists(filepath.Join(dir, name)) {
-		return name
-	}
+func writeUniqueAttachmentFile(dir, name string, used map[string]bool, data []byte) (string, string, error) {
 	ext := filepath.Ext(name)
 	base := strings.TrimSuffix(name, ext)
-	for i := 2; ; i++ {
-		candidate := fmt.Sprintf("%s-%d%s", base, i, ext)
-		if !used[candidate] && !fileExists(filepath.Join(dir, candidate)) {
-			return candidate
+	for i := 1; ; i++ {
+		candidate := name
+		if i > 1 {
+			candidate = fmt.Sprintf("%s-%d%s", base, i, ext)
 		}
-	}
-}
+		if used[candidate] {
+			continue
+		}
 
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
+		absPath := filepath.Join(dir, candidate)
+		file, err := os.OpenFile(absPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if errors.Is(err, os.ErrExist) {
+			used[candidate] = true
+			continue
+		}
+		if err != nil {
+			return "", absPath, err
+		}
+
+		_, writeErr := file.Write(data)
+		closeErr := file.Close()
+		if writeErr != nil {
+			_ = os.Remove(absPath)
+			return "", absPath, writeErr
+		}
+		if closeErr != nil {
+			_ = os.Remove(absPath)
+			return "", absPath, closeErr
+		}
+		return candidate, absPath, nil
+	}
 }
 
 func sanitizePromptValue(value string) string {

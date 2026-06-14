@@ -2,8 +2,10 @@ package shared
 
 import (
 	"encoding/base64"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -250,6 +252,76 @@ func TestSaveAttachments_DuplicateNamesAcrossCallsDoNotClobber(t *testing.T) {
 	}
 	if string(secondData) != "second" {
 		t.Errorf("second content = %q, want second", string(secondData))
+	}
+}
+
+func TestSaveAttachments_ConcurrentDuplicateNamesDoNotClobber(t *testing.T) {
+	workDir := t.TempDir()
+	const workers = 20
+
+	var wg sync.WaitGroup
+	savedCh := make(chan SavedAttachment, workers)
+	errCh := make(chan error, workers)
+
+	for i := 0; i < workers; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			mgr := NewAttachmentManager(workDir, testLogger())
+			mgr.SetSessionID("sess-concurrent")
+
+			content := fmt.Sprintf("payload-%02d", i)
+			saved, err := mgr.SaveAttachments([]v1.MessageAttachment{
+				{
+					Type:     "resource",
+					Data:     base64.StdEncoding.EncodeToString([]byte(content)),
+					MimeType: "text/plain",
+					Name:     "report.txt",
+				},
+			})
+			if err != nil {
+				errCh <- err
+				return
+			}
+			if len(saved) != 1 {
+				errCh <- fmt.Errorf("saved count = %d, want 1", len(saved))
+				return
+			}
+			savedCh <- saved[0]
+		}()
+	}
+
+	wg.Wait()
+	close(savedCh)
+	close(errCh)
+
+	for err := range errCh {
+		if err != nil {
+			t.Fatalf("unexpected save error: %v", err)
+		}
+	}
+
+	names := make(map[string]bool, workers)
+	contents := make(map[string]bool, workers)
+	for saved := range savedCh {
+		if names[saved.Name] {
+			t.Fatalf("duplicate saved name %q", saved.Name)
+		}
+		names[saved.Name] = true
+
+		data, err := os.ReadFile(saved.AbsPath)
+		if err != nil {
+			t.Fatalf("failed to read %s: %v", saved.AbsPath, err)
+		}
+		contents[string(data)] = true
+	}
+	if len(names) != workers {
+		t.Fatalf("saved unique names = %d, want %d", len(names), workers)
+	}
+	if len(contents) != workers {
+		t.Fatalf("saved unique contents = %d, want %d", len(contents), workers)
 	}
 }
 
