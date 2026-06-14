@@ -8,7 +8,7 @@ uv = "0.11.21"
 golangci-lint = "2.9.0"
 git-cliff = "2.13.1"
 "go:github.com/google/go-licenses" = { version = "v1.6.0", depends = "go" }
-"pipx:pre-commit" = { version = "latest", depends = "uv" }
+"pipx:pre-commit" = { version = "4.6.0", depends = "uv" }
 
 [env]
 NODE_OPTIONS = "--dns-result-order=ipv4first"
