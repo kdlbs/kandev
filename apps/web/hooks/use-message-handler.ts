@@ -227,6 +227,7 @@ export function useMessageHandler({
           data: att.data,
           mime_type: att.mime_type,
           name: att.name,
+          delivery_mode: att.delivery_mode,
         }));
         await queue(taskId, finalMessage, modelToSend, planModeEnabled, queueAttachments);
         return;

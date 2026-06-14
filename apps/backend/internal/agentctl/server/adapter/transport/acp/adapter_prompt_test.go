@@ -1,10 +1,16 @@
 package acp
 
 import (
+	"encoding/base64"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
-	"github.com/coder/acp-go-sdk"
+	acp "github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // TestCancelActiveToolCalls_PreservesSubagentTask pins the fix for the
@@ -47,6 +53,56 @@ func TestCancelActiveToolCalls_PreservesSubagentTask(t *testing.T) {
 	}
 	if len(cancelledIDs) != 1 || cancelledIDs[0] != "shell-1" {
 		t.Errorf("cancelled IDs = %v, want [shell-1]", cancelledIDs)
+	}
+}
+
+func TestBuildPromptContentBlocks_PathModeAttachmentSavesWritableFile(t *testing.T) {
+	a := newTestAdapter()
+	t.Cleanup(func() { _ = a.Close() })
+
+	workDir := t.TempDir()
+	a.attachMgr = shared.NewAttachmentManager(workDir, a.logger.Zap())
+	a.attachMgr.SetSessionID("sess-path")
+	a.capabilities = acp.AgentCapabilities{
+		PromptCapabilities: acp.PromptCapabilities{
+			Image:           true,
+			EmbeddedContext: true,
+		},
+	}
+
+	encoded := base64.StdEncoding.EncodeToString([]byte("remote bytes"))
+	blocks := a.buildPromptContentBlocks("inspect this", []v1.MessageAttachment{{
+		Type:         "image",
+		Data:         encoded,
+		MimeType:     "image/png",
+		Name:         "shot.png",
+		DeliveryMode: "path",
+	}})
+
+	if len(blocks) != 2 {
+		t.Fatalf("expected text prompt plus attachment path prompt, got %d blocks", len(blocks))
+	}
+	if blocks[1].Text == nil {
+		t.Fatalf("expected path-mode attachment to be sent as text, got %#v", blocks[1])
+	}
+	if blocks[1].Image != nil {
+		t.Fatalf("path-mode attachment should not be sent as an image block")
+	}
+	text := blocks[1].Text.Text
+	if !strings.Contains(text, ".kandev/attachments/sess-path/shot.png") {
+		t.Fatalf("attachment prompt did not include saved path: %q", text)
+	}
+	if !strings.Contains(text, "writable") {
+		t.Fatalf("attachment prompt did not include writable contract: %q", text)
+	}
+
+	savedPath := filepath.Join(workDir, ".kandev", "attachments", "sess-path", "shot.png")
+	data, err := os.ReadFile(savedPath)
+	if err != nil {
+		t.Fatalf("expected attachment to be written to workspace: %v", err)
+	}
+	if string(data) != "remote bytes" {
+		t.Fatalf("saved attachment = %q, want %q", string(data), "remote bytes")
 	}
 }
 

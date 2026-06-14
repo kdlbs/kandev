@@ -30,12 +30,19 @@ export function toMessageAttachments(
   if (attachments.length === 0) return undefined;
   return attachments.map((att) =>
     att.isImage
-      ? { type: "image" as const, data: att.data, mime_type: att.mimeType }
+      ? {
+          type: "image" as const,
+          data: att.data,
+          mime_type: att.mimeType,
+          name: att.fileName,
+          ...(att.deliveryMode === "path" && { delivery_mode: "path" as const }),
+        }
       : {
           type: "resource" as const,
           data: att.data,
           mime_type: att.mimeType,
           name: att.fileName,
+          delivery_mode: "path" as const,
         },
   );
 }

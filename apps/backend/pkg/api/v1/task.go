@@ -138,10 +138,11 @@ type TaskEvent struct {
 // Type determines the ACP content block: "image" → ImageBlock, "audio" → AudioBlock,
 // "resource" → ResourceBlock (text or blob based on MIME type).
 type MessageAttachment struct {
-	Type     string `json:"type"`                // "image", "audio", "resource"
-	Data     string `json:"data,omitempty"`      // Base64-encoded data
-	MimeType string `json:"mime_type,omitempty"` // MIME type (e.g., "image/png")
-	Name     string `json:"name,omitempty"`      // Display name (e.g., filename)
+	Type         string `json:"type"`                    // "image", "audio", "resource"
+	Data         string `json:"data,omitempty"`          // Base64-encoded data
+	MimeType     string `json:"mime_type,omitempty"`     // MIME type (e.g., "image/png")
+	Name         string `json:"name,omitempty"`          // Display name (e.g., filename)
+	DeliveryMode string `json:"delivery_mode,omitempty"` // "prompt" (native/default) or "path"
 }
 
 // ContextFileMeta represents a context file reference attached to a message

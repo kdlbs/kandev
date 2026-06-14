@@ -324,6 +324,9 @@ func TestBuildAttachmentPrompt_SingleFile(t *testing.T) {
 	if !contains(result, ".kandev/attachments/s1/report.pdf") {
 		t.Errorf("result should contain path, got: %q", result)
 	}
+	if !contains(result, "writable") {
+		t.Errorf("result should tell the agent the file is writable, got: %q", result)
+	}
 }
 
 func TestBuildAttachmentPrompt_MultipleFiles(t *testing.T) {

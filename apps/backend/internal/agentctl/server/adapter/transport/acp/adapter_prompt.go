@@ -77,32 +77,7 @@ func (a *Adapter) sendPrompt(ctx context.Context, message string, attachments []
 			zap.Int("context_length", len(pendingContext)))
 	}
 
-	// Build content blocks: text first, then images
-	contentBlocks := []acp.ContentBlock{acp.TextBlock(finalMessage)}
-
-	// Add media attachments as typed content blocks
-	for _, att := range attachments {
-		switch att.Type {
-		case contentTypeImage:
-			contentBlocks = append(contentBlocks, acp.ImageBlock(att.Data, att.MimeType))
-		case contentTypeAudio:
-			contentBlocks = append(contentBlocks, acp.AudioBlock(att.Data, att.MimeType))
-		case contentTypeResource:
-			if a.capabilities.PromptCapabilities.EmbeddedContext {
-				contentBlocks = append(contentBlocks, buildResourceBlock(att))
-			} else {
-				// Agent doesn't support embedded resources — save to workspace and reference in text
-				saved, saveErr := a.attachMgr.SaveAttachments([]v1.MessageAttachment{att})
-				if saveErr != nil || len(saved) == 0 {
-					a.logger.Warn("failed to save attachment to workspace, falling back to resource block",
-						zap.String("name", att.Name), zap.Error(saveErr))
-					contentBlocks = append(contentBlocks, buildResourceBlock(att))
-				} else {
-					contentBlocks = append(contentBlocks, acp.TextBlock(shared.BuildAttachmentPrompt(saved)))
-				}
-			}
-		}
-	}
+	contentBlocks := a.buildPromptContentBlocks(finalMessage, attachments)
 
 	// Start prompt span — notification spans become children via getPromptTraceCtx()
 	traceCtx, promptSpan := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "prompt")
@@ -225,10 +200,47 @@ func (a *Adapter) sendPrompt(ctx context.Context, message string, attachments []
 		Usage:     usage,
 	})
 
-	// Clean up saved attachments — agent has finished reading them
-	a.attachMgr.Cleanup()
-
 	return nil
+}
+
+func (a *Adapter) buildPromptContentBlocks(message string, attachments []v1.MessageAttachment) []acp.ContentBlock {
+	contentBlocks := []acp.ContentBlock{acp.TextBlock(message)}
+
+	for _, att := range attachments {
+		if att.DeliveryMode == "path" {
+			saved, saveErr := a.attachMgr.SaveAttachments([]v1.MessageAttachment{att})
+			if saveErr != nil || len(saved) == 0 {
+				a.logger.Warn("failed to save path-mode attachment to workspace",
+					zap.String("name", att.Name), zap.Error(saveErr))
+				continue
+			}
+			contentBlocks = append(contentBlocks, acp.TextBlock(shared.BuildAttachmentPrompt(saved)))
+			continue
+		}
+
+		switch att.Type {
+		case contentTypeImage:
+			contentBlocks = append(contentBlocks, acp.ImageBlock(att.Data, att.MimeType))
+		case contentTypeAudio:
+			contentBlocks = append(contentBlocks, acp.AudioBlock(att.Data, att.MimeType))
+		case contentTypeResource:
+			if a.capabilities.PromptCapabilities.EmbeddedContext {
+				contentBlocks = append(contentBlocks, buildResourceBlock(att))
+			} else {
+				// Agent doesn't support embedded resources — save to workspace and reference in text.
+				saved, saveErr := a.attachMgr.SaveAttachments([]v1.MessageAttachment{att})
+				if saveErr != nil || len(saved) == 0 {
+					a.logger.Warn("failed to save attachment to workspace, falling back to resource block",
+						zap.String("name", att.Name), zap.Error(saveErr))
+					contentBlocks = append(contentBlocks, buildResourceBlock(att))
+				} else {
+					contentBlocks = append(contentBlocks, acp.TextBlock(shared.BuildAttachmentPrompt(saved)))
+				}
+			}
+		}
+	}
+
+	return contentBlocks
 }
 
 // fireWakeup is invoked by wakeupScheduler when a ScheduleWakeup timer

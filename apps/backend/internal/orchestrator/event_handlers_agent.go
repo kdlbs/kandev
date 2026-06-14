@@ -354,9 +354,11 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 	attachments := make([]v1.MessageAttachment, len(queuedMsg.Attachments))
 	for i, att := range queuedMsg.Attachments {
 		attachments[i] = v1.MessageAttachment{
-			Type:     att.Type,
-			Data:     att.Data,
-			MimeType: att.MimeType,
+			Type:         att.Type,
+			Data:         att.Data,
+			MimeType:     att.MimeType,
+			Name:         att.Name,
+			DeliveryMode: att.DeliveryMode,
 		}
 	}
 

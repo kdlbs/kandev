@@ -84,6 +84,8 @@ type CreateTaskOpts = {
   repositories?: Array<{ repository_id: string; base_branch?: string; checkout_branch?: string }>;
   plan_mode?: boolean;
   metadata?: Record<string, unknown>;
+  parent_id?: string;
+  attachments?: MessageAttachmentInput[];
 };
 
 function buildTaskMetadata(opts: CreateTaskOpts): Record<string, unknown> | undefined {
@@ -112,10 +114,19 @@ function buildCreateTaskBody(
     "repositories",
     opts?.repositories ?? opts?.repository_ids?.map((id) => ({ repository_id: id })),
   );
+  setIf(body, "attachments", opts?.attachments);
   if (opts?.plan_mode) body.plan_mode = true;
   setIf(body, "parent_id", opts?.parent_id);
   return body;
 }
+
+type MessageAttachmentInput = {
+  type: string;
+  data: string;
+  mime_type: string;
+  name?: string;
+  delivery_mode?: "prompt" | "path";
+};
 
 type OptionalAgentTaskOpts = {
   workflow_id?: string;
@@ -126,6 +137,7 @@ type OptionalAgentTaskOpts = {
   executor_profile_id?: string;
   metadata?: Record<string, unknown>;
   parent_id?: string;
+  attachments?: MessageAttachmentInput[];
 };
 
 /** `repositories` (with per-entry branches) takes precedence over the shorthand
@@ -147,6 +159,7 @@ function buildOptionalAgentTaskFields(opts?: OptionalAgentTaskOpts): Record<stri
   setIf(fields, "executor_profile_id", opts.executor_profile_id);
   setIf(fields, "metadata", opts.metadata);
   setIf(fields, "parent_id", opts.parent_id);
+  setIf(fields, "attachments", opts.attachments);
   return fields;
 }
 
@@ -274,6 +287,7 @@ export class ApiClient {
       metadata?: Record<string, unknown>;
       /** Parent task ID for subtasks. */
       parent_id?: string;
+      attachments?: MessageAttachmentInput[];
     },
   ): Promise<CreateTaskResponse> {
     return this.request("POST", "/api/v1/tasks", buildCreateTaskBody(workspaceId, title, opts));
@@ -415,6 +429,7 @@ export class ApiClient {
       metadata?: Record<string, unknown>;
       /** Parent task ID for subtasks. */
       parent_id?: string;
+      attachments?: MessageAttachmentInput[];
     },
   ): Promise<CreateTaskResponse> {
     return this.request("POST", "/api/v1/tasks", {
@@ -1311,11 +1326,31 @@ export class ApiClient {
    * Use after the auto-started agent finishes so the session is in a state
    * that accepts new prompts.
    */
-  async addUserMessage(taskId: string, sessionId: string, content: string): Promise<void> {
+  async addUserMessage(
+    taskId: string,
+    sessionId: string,
+    content: string,
+    attachments?: MessageAttachmentInput[],
+  ): Promise<void> {
     await this.wsRequest("message.add", {
       task_id: taskId,
       session_id: sessionId,
       content,
+      attachments,
+    });
+  }
+
+  async queueMessage(
+    taskId: string,
+    sessionId: string,
+    content: string,
+    attachments?: MessageAttachmentInput[],
+  ): Promise<void> {
+    await this.wsRequest("message.queue.add", {
+      task_id: taskId,
+      session_id: sessionId,
+      content,
+      attachments,
     });
   }
 

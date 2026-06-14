@@ -41,6 +41,7 @@ const ATTACHMENT: FileAttachment = {
   fileName: "notes.txt",
   size: 42,
   isImage: false,
+  deliveryMode: "path",
 };
 const TASK_ID = "task-1";
 const PROFILE_ID = "profile-a";

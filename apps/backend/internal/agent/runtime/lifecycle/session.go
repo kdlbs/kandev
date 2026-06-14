@@ -411,10 +411,11 @@ func convertAttachments(attachments []MessageAttachment) []v1.MessageAttachment 
 	result := make([]v1.MessageAttachment, 0, len(attachments))
 	for _, att := range attachments {
 		result = append(result, v1.MessageAttachment{
-			Type:     att.Type,
-			Data:     att.Data,
-			MimeType: att.MimeType,
-			Name:     att.Name,
+			Type:         att.Type,
+			Data:         att.Data,
+			MimeType:     att.MimeType,
+			Name:         att.Name,
+			DeliveryMode: att.DeliveryMode,
 		})
 	}
 	return result

@@ -102,7 +102,13 @@ export type QueuedMessage = {
   content: string;
   model?: string;
   plan_mode: boolean;
-  attachments?: Array<{ type: string; data: string; mime_type: string }>;
+  attachments?: Array<{
+    type: string;
+    data: string;
+    mime_type: string;
+    name?: string;
+    delivery_mode?: "prompt" | "path";
+  }>;
   metadata?: QueuedMessageMetadata;
   queued_at: string;
   queued_by?: string;

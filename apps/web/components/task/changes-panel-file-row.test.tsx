@@ -107,6 +107,36 @@ describe("FileRow truncation (regression: path overlaps diff stats in narrow pan
       repositoryName: "frontend",
     });
   });
+
+  it("opens image files in the file preview instead of the diff viewer", () => {
+    const onOpenDiff = vi.fn();
+    const onEditFile = vi.fn();
+    const { container } = render(
+      <TooltipProvider>
+        <ul>
+          <FileRow
+            file={{ ...baseFile, path: "docs/screenshots/mobile-chat.webp" }}
+            isPending={false}
+            onSelect={noopSelect}
+            onOpenDiff={onOpenDiff}
+            onStage={noop}
+            onUnstage={noop}
+            onDiscard={noop}
+            onEditFile={onEditFile}
+          />
+        </ul>
+      </TooltipProvider>,
+    );
+
+    const row = container.querySelector(
+      "[data-changes-file='docs/screenshots/mobile-chat.webp']",
+    ) as HTMLElement | null;
+    expect(row).not.toBeNull();
+    fireEvent.click(row!);
+
+    expect(onEditFile).toHaveBeenCalledWith("docs/screenshots/mobile-chat.webp");
+    expect(onOpenDiff).not.toHaveBeenCalled();
+  });
 });
 
 describe("FileRow hover swap (stats <-> actions occupy same cell)", () => {

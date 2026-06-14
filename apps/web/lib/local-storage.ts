@@ -542,6 +542,7 @@ type StoredFileAttachment = {
   fileName: string;
   size: number;
   isImage: boolean;
+  deliveryMode?: "prompt" | "path";
 };
 
 export function getChatDraftText(sessionId: string): string {
@@ -585,6 +586,7 @@ export function setChatDraftAttachments(
     fileName: string;
     size: number;
     isImage: boolean;
+    deliveryMode?: "prompt" | "path";
     preview?: string;
   }>,
 ): void {
@@ -593,13 +595,14 @@ export function setChatDraftAttachments(
   } else {
     // Strip `preview` to halve storage cost — reconstructed on load for images
     const stored: StoredFileAttachment[] = attachments.map(
-      ({ id, data, mimeType, fileName, size, isImage }) => ({
+      ({ id, data, mimeType, fileName, size, isImage, deliveryMode }) => ({
         id,
         data,
         mimeType,
         fileName,
         size,
         isImage,
+        deliveryMode,
       }),
     );
     setSessionStorage(`${CHAT_DRAFT_ATTACHMENTS_KEY}.${sessionId}`, stored);
@@ -611,11 +614,15 @@ export function setChatDraftAttachments(
  */
 export function restoreAttachmentPreview(
   att: StoredFileAttachment,
-): StoredFileAttachment & { preview?: string } {
+): StoredFileAttachment & { deliveryMode: "prompt" | "path"; preview?: string } {
   if (att.isImage) {
-    return { ...att, preview: `data:${att.mimeType};base64,${att.data}` };
+    return {
+      ...att,
+      deliveryMode: att.deliveryMode ?? "prompt",
+      preview: `data:${att.mimeType};base64,${att.data}`,
+    };
   }
-  return att;
+  return { ...att, deliveryMode: att.deliveryMode ?? "path" };
 }
 
 export function getChatInputHeight(sessionId: string): number | null {

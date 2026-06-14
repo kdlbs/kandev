@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { LineStat } from "@/components/diff-stat";
 import { FileIcon } from "@/components/ui/file-icon";
+import { getFileCategory } from "@/lib/utils/file-types";
 import { FileStatusIcon } from "./file-status-icon";
 import type { ChangedFile } from "./changes-panel-helpers";
 import type { OpenDiffOptions } from "./changes-diff-target";
@@ -74,6 +75,10 @@ export function FileRow({
     if (e.button === 2) return;
     const consumed = onSelect?.(file.path, e);
     if (!consumed) {
+      if (getFileCategory(file.path) === "image") {
+        onEditFile(file.path);
+        return;
+      }
       onOpenDiff(file.path, {
         source: "uncommitted",
         repositoryName: file.repositoryName,

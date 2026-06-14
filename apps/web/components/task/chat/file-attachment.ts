@@ -13,6 +13,7 @@ export type FileAttachment = {
   size: number; // File size in bytes
   preview?: string; // Data URL for image preview (only for images)
   isImage: boolean; // Whether this is a previewable image
+  deliveryMode: "prompt" | "path"; // Native prompt block or writable executor file path
 };
 
 export const PREVIEWABLE_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
@@ -79,6 +80,7 @@ export function processFile(file: File): Promise<FileAttachment | null> {
             size: file.size,
             preview: dataUrl,
             isImage: true,
+            deliveryMode: "prompt",
           });
         };
         img.onerror = () => resolve(null);
@@ -91,6 +93,7 @@ export function processFile(file: File): Promise<FileAttachment | null> {
           fileName: file.name,
           size: file.size,
           isImage: false,
+          deliveryMode: "path",
         });
       }
     };

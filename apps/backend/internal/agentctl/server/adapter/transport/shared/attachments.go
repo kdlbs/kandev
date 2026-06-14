@@ -125,13 +125,13 @@ func BuildAttachmentPrompt(saved []SavedAttachment) string {
 	var sb strings.Builder
 	if len(saved) == 1 {
 		s := saved[0]
-		fmt.Fprintf(&sb, "The user attached a file: %s (saved to %s in the workspace). Use your file reading tools to access it.\n\n", s.Name, s.RelPath)
+		fmt.Fprintf(&sb, "The user attached a writable file: %s (saved to %s in the workspace). Use your file reading tools to access or modify it.\n\n", s.Name, s.RelPath)
 	} else {
-		sb.WriteString("The user attached files that you should read and analyze:\n")
+		sb.WriteString("The user attached writable files that you should read and analyze:\n")
 		for _, s := range saved {
 			fmt.Fprintf(&sb, "- %s (saved to %s)\n", s.Name, s.RelPath)
 		}
-		sb.WriteString("\nUse your file reading tools to access them.\n\n")
+		sb.WriteString("\nUse your file reading tools to access or modify them.\n\n")
 	}
 	return sb.String()
 }

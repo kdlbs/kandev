@@ -8,7 +8,7 @@ Manage and run tasks in parallel. Orchestrate agents. Review changes. Ship value
   <img src="docs/screenshots/readme-intro.gif" alt="Kandev Demo">
 </p>
 
-[See all screenshots](docs/screenshots.md)
+[See desktop and mobile screenshots](docs/screenshots.md)
 
 ## What
 

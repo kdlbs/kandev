@@ -425,10 +425,11 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 
 // MessageAttachment represents an image or file attachment for agent prompts.
 type MessageAttachment struct {
-	Type     string // "image", "audio", or "resource"
-	Data     string // base64-encoded data
-	MimeType string // MIME type
-	Name     string // optional filename for resource attachments
+	Type         string // "image", "audio", or "resource"
+	Data         string // base64-encoded data
+	MimeType     string // MIME type
+	Name         string // optional filename for resource attachments
+	DeliveryMode string // "prompt" (native/default) or "path"
 }
 
 // CredentialsManager interface for credential retrieval
