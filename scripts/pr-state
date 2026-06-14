@@ -101,12 +101,19 @@ extract_checks_json() {
       if . == null or . == "" then null else ascii_downcase end;
     def extract($re; $field):
       if . == null then null else ((capture($re)? | .[$field]) // null) end;
+    def normalized_conclusion:
+      if has("conclusion") then
+        (.conclusion | lower_or_null)
+      else
+        ((.state // "") | lower_or_null) as $state
+        | if $state == "pending" or $state == "expected" then null else $state end
+      end;
     $checks_in | map({
       type: (.["__typename"] // null),
       name: (.name // .context // "unknown"),
       workflow: (.workflowName // .workflow // .checkSuite.workflowRun.workflow.name // null),
       status: ((.status // .state // "unknown") | ascii_downcase),
-      conclusion: ((.conclusion // .state // "") | lower_or_null),
+      conclusion: normalized_conclusion,
       details_url: (.detailsUrl // null),
       target_url: (.targetUrl // null),
       run_id: ((.detailsUrl // null) | extract("/actions/runs/(?<id>[0-9]+)"; "id")),
@@ -197,7 +204,7 @@ summarize_state_json() {
       ],
       pending_checks: [
         .checks[]
-        | select(pending_status and (.conclusion == null or .conclusion == "pending" or .conclusion == "expected"))
+        | select(pending_status and .conclusion == null)
         | {name, workflow, status, run_id, job_id, details_url}
       ],
       unresolved_review_thread_count,
