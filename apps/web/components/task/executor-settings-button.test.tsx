@@ -9,9 +9,8 @@ const TASK_ID = "task-1";
 const STEP_CREATE_SANDBOX = "Creating cloud sandbox";
 const PREPARE_STATUS_TESTID = "executor-prepare-status";
 const SETTINGS_BUTTON_TESTID = "executor-settings-button";
-const BRANCH_PUSH_HINT_TEXT =
-  "Check Push the current branch... in the confirm step first to preserve committed work before resetting.";
-const BRANCH_PUSH_HINT = BRANCH_PUSH_HINT_TEXT;
+const BRANCH_PUSH_HINT =
+  "Push your branch to its remote in the confirmation dialog to preserve committed work before resetting.";
 const SPRITES_ENV = { executor_type: "sprites", sandbox_id: "kandev-abc" };
 const SPRITES_WORKTREE_ENV = { ...SPRITES_ENV, worktree_path: "/tmp/worktree" };
 const DOCKER_ENV = { executor_type: "local_docker", container_id: "abcdef" };
@@ -195,8 +194,11 @@ describe("ExecutorSettingsButton reset tooltip", () => {
     renderButton();
     hoverSettingsButton();
 
-    // Wait for env to load — the cloud icon only renders once executor_type resolves.
-    await screen.findByTestId("executor-status-cloud-icon");
+    // Confirm HoverCardContent is open before asserting the hint is absent —
+    // the reset button lives inside the popover, so finding it proves the
+    // popover has rendered (and the hint would have too, if it weren't
+    // gated on hasWorktreePath).
+    await screen.findByTestId("executor-settings-reset");
 
     expect(screen.queryByText(BRANCH_PUSH_HINT)).toBeNull();
   });

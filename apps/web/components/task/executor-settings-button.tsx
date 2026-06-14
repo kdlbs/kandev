@@ -86,7 +86,7 @@ export function ExecutorSettingsButton({
           <div className="border-t border-border px-2 py-1.5 flex items-center justify-end">
             <Tooltip>
               <TooltipTrigger asChild>
-                <span tabIndex={0} aria-label="Reset environment">
+                <span tabIndex={!env || isResetting ? 0 : -1} aria-label="Reset environment">
                   <Button
                     variant="destructive"
                     size="sm"
@@ -110,7 +110,7 @@ export function ExecutorSettingsButton({
                 </p>
                 {hasWorktreePath && (
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Check Push the current branch... in the confirm step first to preserve committed
+                    Push your branch to its remote in the confirmation dialog to preserve committed
                     work before resetting.
                   </p>
                 )}
