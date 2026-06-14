@@ -217,6 +217,20 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 		a.normalizer.EnrichFromToolCallUpdate(payload, tcu.Title, tcu.Meta, tcu.RawInput, supplemental)
 	}
 
+	// Todo tools from MCP-style runtimes report the final list in the completion
+	// output rather than through ACP's native plan notification. Feed those
+	// entries into the same plan stream Claude/Codex already use so the existing
+	// above-input todo indicator updates without a separate UI path.
+	if tcu.RawOutput != nil {
+		if entries, ok := planEntriesFromTodosResult(tcu.RawOutput); ok {
+			a.sendUpdate(AgentEvent{
+				Type:        streams.EventTypePlan,
+				SessionID:   sessionID,
+				PlanEntries: entries,
+			})
+		}
+	}
+
 	// Update stored payload with tool result output. Skip for tracked-Monitor
 	// terminal updates so Generic.Output stays the structured `{monitor: …}`
 	// view rather than getting clobbered by the rawOutput string.
