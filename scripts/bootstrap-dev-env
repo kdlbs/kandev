@@ -187,4 +187,4 @@ main() {
   log "bootstrap complete"
 }
 
-main "$@"
+main
