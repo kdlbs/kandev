@@ -501,6 +501,10 @@ type backfillRow struct {
 // that have sessions but no environment, and links orphaned sessions.
 // Idempotent: tasks with existing environments are skipped.
 func (r *Repository) backfillTaskEnvironments() error {
+	if dialect.IsPostgres(r.db.DriverName()) {
+		return nil
+	}
+
 	orphaned, err := r.findOrphanedTasks()
 	if err != nil {
 		return err
