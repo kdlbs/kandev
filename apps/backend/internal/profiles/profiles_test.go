@@ -139,6 +139,10 @@ func TestMarkApplied_OnlyAllowsKnownDerivedEnvVars(t *testing.T) {
 	if !WasApplied("KANDEV_DEBUG_AGENT_MESSAGES") {
 		t.Fatal("KANDEV_DEBUG_AGENT_MESSAGES was not marked applied")
 	}
+	MarkApplied("KANDEV_DEBUG_PPROF_ENABLED")
+	if !WasApplied("KANDEV_DEBUG_PPROF_ENABLED") {
+		t.Fatal("KANDEV_DEBUG_PPROF_ENABLED was not marked applied")
+	}
 
 	MarkApplied("KANDEV_UNRELATED")
 	if WasApplied("KANDEV_UNRELATED") {

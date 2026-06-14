@@ -48,6 +48,7 @@ var appliedEnvVars = struct {
 
 var derivedAppliedEnvVars = map[string]bool{
 	"KANDEV_DEBUG_AGENT_MESSAGES": true,
+	"KANDEV_DEBUG_PPROF_ENABLED":  true,
 }
 
 // Environment identifies the active runtime profile.
