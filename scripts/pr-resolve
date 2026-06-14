@@ -73,6 +73,7 @@ case "$cmd" in
                 isResolved
                 path
                 line
+                pullRequest { number }
                 comments(first: 100) {
                   nodes {
                     databaseId
@@ -88,9 +89,10 @@ case "$cmd" in
               }
             }
           }' -f id="$TARGET" \
-        | jq -r '
+        | jq -r --argjson pr "$PR" '
             .data.node as $thread
             | if $thread == null then error("thread not found")
+              elif $thread.pullRequest.number != $pr then error("thread belongs to PR #\($thread.pullRequest.number), not #\($pr)")
               else
                 "thread_id: \($thread.id)",
                 "resolved: \($thread.isResolved)",
@@ -112,7 +114,11 @@ case "$cmd" in
         ;;
       *)
         gh api "repos/$OWNER/$REPO/pulls/comments/$TARGET" \
-          --jq '{comment_id:.id,author:.user.login,body,path,line,commit_id,html_url,created_at}'
+        | jq --argjson pr "$PR" '
+            (.pull_request_url | capture("/pulls/(?<number>[0-9]+)$").number | tonumber) as $comment_pr
+            | if $comment_pr != $pr then error("comment belongs to PR #\($comment_pr), not #\($pr)")
+              else {comment_id:.id,author:.user.login,body,path,line,commit_id,html_url,created_at}
+              end'
         ;;
     esac
     ;;

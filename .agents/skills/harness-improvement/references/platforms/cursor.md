@@ -50,7 +50,7 @@ Typical rule frontmatter:
 ```yaml
 ---
 description: Style rules for Python files.
-paths: "**/*.py, scripts/**/*.py"
+globs: "**/*.py, scripts/**/*.py"
 alwaysApply: false
 ---
 ```

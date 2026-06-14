@@ -3,10 +3,10 @@
 Verified against Claude Code docs on 2026-06-14.
 
 Sources:
-- https://code.claude.com/docs/en/skills
-- https://code.claude.com/docs/en/sub-agents
-- https://code.claude.com/docs/en/memory
-- https://code.claude.com/docs/en/commands
+- https://docs.anthropic.com/en/docs/claude-code/skills
+- https://docs.anthropic.com/en/docs/claude-code/sub-agents
+- https://docs.anthropic.com/en/docs/claude-code/memory
+- https://docs.anthropic.com/en/docs/claude-code/slash-commands
 
 ## Skills
 

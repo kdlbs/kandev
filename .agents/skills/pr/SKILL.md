@@ -78,7 +78,7 @@ description: Commit, push, and create a PR. Default is ready-for-review with aut
    - If `apps/web/.pr-assets/embed.md` exists and is non-empty, append its contents to the PR body using a body file and `gh pr edit <PR_NUMBER> --body-file <file>`
    - If `gh pr edit --body-file` fails after PR creation, especially with the GitHub Projects classic deprecation GraphQL error, fall back to REST. Build the payload with `jq --rawfile`, never by hand-escaping shell strings:
      ```bash
-     jq -n --rawfile body <body-file> '{body: $body}' > /tmp/pr-body-payload.json
+     jq -n --rawfile body "<body-file>" '{body: $body}' > /tmp/pr-body-payload.json
      gh api --method PATCH repos/:owner/:repo/pulls/<PR_NUMBER> --input /tmp/pr-body-payload.json
      ```
    - Tell the user to drag and drop the image files from `.pr-assets/` into the PR description on GitHub for the images to render
