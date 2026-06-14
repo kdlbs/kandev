@@ -19,7 +19,7 @@ var definitions = []RuntimeFlagDefinition{
 		EnvVar:      "KANDEV_DEBUG_DEV_MODE",
 		Kind:        KindDebug,
 		Label:       "Debug mode",
-		Description: "Enables local diagnostic endpoints and detailed agent message debug logging.",
+		Description: "Enables local diagnostic endpoints and agent message debug logs for troubleshooting backend, agent, and tool-call behavior.",
 		Stability:   StabilityStable,
 		RiskLevel:   RiskHigh,
 		RiskDescription: "Debug mode can expose local diagnostic endpoints and write prompt, file, " +

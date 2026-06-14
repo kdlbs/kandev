@@ -11,7 +11,8 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@kandev/ui/alert";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
-import { IconPower, IconRotateClockwise } from "@tabler/icons-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { IconInfoCircle, IconPower, IconRotateClockwise } from "@tabler/icons-react";
 import { useToast } from "@/components/toast-provider";
 import { fetchRuntimeFlags, updateRuntimeFlag } from "@/lib/api/domains/runtime-flags-api";
 import { requestRestart } from "@/lib/api/domains/system-api";
@@ -134,14 +135,16 @@ function RestartRequiredAlert({
 }) {
   const supported = capability?.supported === true;
   return (
-    <Alert>
-      <IconRotateClockwise className="h-4 w-4" />
-      <AlertTitle>Restart required</AlertTitle>
-      <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <Alert className="border-border/70 bg-muted/30">
+      <IconRotateClockwise className="h-4 w-4 text-muted-foreground" />
+      <AlertTitle className="flex items-center gap-2">
+        Restart required
+        <RestartSupportInfo supported={supported} reason={capability?.reason} />
+      </AlertTitle>
+      <AlertDescription className="flex flex-col gap-3 text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
         <span>
-          Saved toggle changes will apply after Kandev restarts.
-          {!supported &&
-            ` ${capability?.reason ?? "Restart Kandev from the terminal or service manager."}`}
+          Saved toggle changes will apply the next time Kandev starts.
+          {!supported && " Restart it from your terminal or service manager when convenient."}
         </span>
         {supported && (
           <Button
@@ -156,6 +159,41 @@ function RestartRequiredAlert({
         )}
       </AlertDescription>
     </Alert>
+  );
+}
+
+function RestartSupportInfo({
+  supported,
+  reason,
+}: {
+  supported: boolean;
+  reason: string | undefined;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label="Restart support details"
+          className="inline-flex h-6 w-6 cursor-help items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <IconInfoCircle className="h-4 w-4" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="right" className="max-w-xs text-xs leading-relaxed">
+        {restartSupportMessage(supported, reason)}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function restartSupportMessage(supported: boolean, reason: string | undefined): string {
+  if (supported) {
+    return "Restart from this page is available when Kandev is running under a supported local supervisor.";
+  }
+  return (
+    reason ??
+    "Automatic restart is not available in deploy previews, unmanaged terminal runs, or launch modes without a restart supervisor."
   );
 }
 

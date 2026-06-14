@@ -4,7 +4,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Switch } from "@kandev/ui/switch";
-import { IconAlertTriangle, IconFlask, IconLock, IconRefresh } from "@tabler/icons-react";
+import { IconFlask, IconLock, IconRefresh } from "@tabler/icons-react";
 import type { RuntimeFlagState } from "@/lib/types/runtime-flags";
 
 type FeatureToggleCardProps = {
@@ -36,10 +36,7 @@ export function FeatureToggleCard({ flag, saving, onChange, onReset }: FeatureTo
       </CardHeader>
       <CardContent className="space-y-3">
         {flag.risk_description && (
-          <div className="flex gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/25 dark:text-amber-100">
-            <IconAlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>{flag.risk_description}</span>
-          </div>
+          <p className="text-sm leading-6 text-muted-foreground">{flag.risk_description}</p>
         )}
         <FlagMetadata flag={flag} />
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
