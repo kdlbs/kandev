@@ -81,6 +81,7 @@ func newTestService(t *testing.T) *Service {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	conn.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = conn.Close() })
 	settingsStore, err := systemsettings.NewStore(db.NewPool(conn, conn))
 	if err != nil {

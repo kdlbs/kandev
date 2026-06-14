@@ -78,6 +78,7 @@ func newSQLite(t *testing.T) *sqlx.DB {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	conn.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = conn.Close() })
 	return conn
 }
