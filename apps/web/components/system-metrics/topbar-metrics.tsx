@@ -192,10 +192,17 @@ function formatMetric(metric: SystemMetricSample) {
 
 function metricColor(metric: SystemMetricSample) {
   if (!metric.available) return "text-muted-foreground";
-  if (metric.unit !== "%" || typeof metric.value !== "number") return "text-muted-foreground";
-  if (metric.value > 95) return "text-destructive";
-  if (metric.value >= 80) return "text-yellow-500 dark:text-yellow-400";
+  const thresholdValue = metricThresholdValue(metric);
+  if (thresholdValue === null) return "text-muted-foreground";
+  if (thresholdValue > 95) return "text-destructive";
+  if (thresholdValue >= 80) return "text-yellow-500 dark:text-yellow-400";
   return "text-muted-foreground";
+}
+
+function metricThresholdValue(metric: SystemMetricSample) {
+  if (typeof metric.value !== "number") return null;
+  if (metric.unit === "%" || metric.id === "cpu_temp") return metric.value;
+  return null;
 }
 
 function lastUpdatedText(updatedAt?: string) {

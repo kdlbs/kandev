@@ -9,7 +9,11 @@ import (
 )
 
 type lifecycleMetricProvider struct {
-	manager *lifecycle.Manager
+	manager metricExecutionLister
+}
+
+type metricExecutionLister interface {
+	ListExecutions() []*lifecycle.AgentExecution
 }
 
 func (p lifecycleMetricProvider) MetricExecutions() []metrics.ExecutionSource {
