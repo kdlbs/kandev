@@ -11,6 +11,7 @@ import { useGitOperations } from "@/hooks/use-git-operations";
 import { useReviewSidebarResize } from "@/hooks/use-review-sidebar-resize";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
+import { DEFAULT_DIFF_WORD_WRAP } from "@/components/diff/diff-defaults";
 import { ReviewTopBar } from "./review-top-bar";
 import { ReviewFileTree } from "./review-file-tree";
 import { ReviewDiffList } from "./review-diff-list";
@@ -317,7 +318,7 @@ function useReviewDialogState(props: ReviewDialogProps) {
   const [splitView, setSplitView] = useState(() =>
     typeof window === "undefined" ? false : localStorage.getItem("diff-view-mode") === "split",
   );
-  const [wordWrap, setWordWrap] = useState(false);
+  const [wordWrap, setWordWrap] = useState(DEFAULT_DIFF_WORD_WRAP);
   const autoMarkOnScroll = useAppStore((s) => s.userSettings.reviewAutoMarkOnScroll);
   const { reviews, markReviewed, markUnreviewed } = useSessionFileReviews(sessionId);
   const byId = useCommentsStore((s) => s.byId);

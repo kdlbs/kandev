@@ -52,6 +52,23 @@ const DIFF_UNSAFE_CSS = `
     padding-inline: 12px !important;
     background: var(--card) !important;
   }
+  [data-header-content] {
+    display: flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    min-width: 0 !important;
+  }
+  [data-title],
+  [data-prev-name] {
+    min-width: 0 !important;
+  }
+  [data-title] bdi,
+  [data-prev-name] bdi {
+    display: block !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
   /* Vertically center the "Add comment" hover button in the line gutter.
      Pierre 1.1.22 declares the slot wrapper as display:flex with top:0/bottom:0
      but no align-items, so our fixed-size button pins to the top of the line

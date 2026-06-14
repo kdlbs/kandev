@@ -13,6 +13,7 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import { updateUserSettings } from "@/lib/api";
 import { formatReviewCommentsAsMarkdown } from "@/lib/state/slices/comments/format";
 import { ReviewDiffList } from "@/components/review/review-diff-list";
+import { DEFAULT_DIFF_WORD_WRAP } from "@/components/diff/diff-defaults";
 import type { ReviewFile } from "@/components/review/types";
 import { hashDiff, reviewFileKey, splitReviewFileKey } from "@/components/review/types";
 import { usePanelActions } from "@/hooks/use-panel-actions";
@@ -34,7 +35,7 @@ type TaskChangesPanelProps = {
    * filter). Mobile uses this for source tabs; desktop omits it.
    */
   sourceFilter?: "all" | ReviewSource;
-  /** Force word-wrap on diffs. Defaults to false (user-controlled). */
+  /** Force word-wrap on diffs. Defaults to the app diff preference. */
   wordWrap?: boolean;
 };
 
@@ -168,7 +169,7 @@ function persistAutoMarkSetting(checked: boolean) {
 function useChangesActions(
   activeSessionId: string | null | undefined,
   allFiles: ReviewFile[],
-  defaultWordWrap = false,
+  defaultWordWrap = DEFAULT_DIFF_WORD_WRAP,
 ) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const autoMarkOnScroll = useAppStore((s) => s.userSettings.reviewAutoMarkOnScroll);
@@ -439,7 +440,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
   onBecameEmpty,
   onOpenFile: onOpenFileProp,
   sourceFilter = "all",
-  wordWrap: wordWrapProp = false,
+  wordWrap: wordWrapProp = DEFAULT_DIFF_WORD_WRAP,
 }: TaskChangesPanelProps) {
   const isArchived = useIsTaskArchived();
   const { openFile: panelOpenFile, openFileInMarkdownPreview } = usePanelActions();

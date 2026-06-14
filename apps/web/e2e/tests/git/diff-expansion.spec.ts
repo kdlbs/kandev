@@ -72,6 +72,14 @@ async function waitForDiffText(testPage: Page, text: string, timeout = 60_000) {
     .toBe(true);
 }
 
+async function readDiffOverflow(testPage: Page): Promise<string | null> {
+  return testPage.evaluate(() => {
+    const container = document.querySelector("diffs-container");
+    const shadow = container?.shadowRoot;
+    return shadow?.querySelector("pre[data-diff]")?.getAttribute("data-overflow") ?? null;
+  });
+}
+
 async function hoverUntilGutterSlotAppears(testPage: Page) {
   const points = await testPage.evaluate(() => {
     const container = document.querySelector("diffs-container");
@@ -234,6 +242,25 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
     await testPage.screenshot({ path: "test-results/diff-hover-button-extrusion.png" });
     expect(geometry.marginRight).toBeLessThan(0);
     expect(geometry.buttonRight).toBeGreaterThan(geometry.cellRight);
+  });
+
+  test("word wrap is enabled by default and can be toggled off", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await seedExpansionTask(testPage, apiClient, seedData);
+    await openChangesTab(testPage);
+    await openExpansionFileDiff(testPage);
+
+    await waitForDiffText(testPage, "HUNK_TOP");
+    await expect.poll(() => readDiffOverflow(testPage), { timeout: 15_000 }).toBe("wrap");
+
+    const toggle = testPage.getByRole("button", { name: "Toggle word wrap" }).first();
+    await expect(toggle).toBeVisible({ timeout: 10_000 });
+    await toggle.click();
+
+    await expect.poll(() => readDiffOverflow(testPage), { timeout: 10_000 }).toBe("scroll");
   });
 
   test("renders Pierre Diffs viewer and shows both hunks", async ({

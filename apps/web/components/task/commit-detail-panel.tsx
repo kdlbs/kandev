@@ -4,6 +4,7 @@ import { memo, useEffect, useMemo } from "react";
 import { IconLoader2 } from "@tabler/icons-react";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { FileDiffViewer } from "@/components/diff";
+import { DEFAULT_DIFF_WORD_WRAP } from "@/components/diff/diff-defaults";
 import { useAppStore } from "@/components/state-provider";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import { useCommitDiff } from "@/hooks/domains/session/use-commit-diff";
@@ -65,7 +66,7 @@ export const CommitDiffView = memo(function CommitDiffView({
   sha: commitSha,
   repo,
   onOpenFile,
-  wordWrap,
+  wordWrap = DEFAULT_DIFF_WORD_WRAP,
 }: CommitDiffViewProps) {
   const commit = useActiveCommit(commitSha);
   const { files, loading } = useCommitDiff(commitSha, repo);

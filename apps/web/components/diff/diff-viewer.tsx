@@ -6,6 +6,7 @@ import { cn } from "@kandev/ui/lib/utils";
 import type { FileDiffData, DiffComment } from "@/lib/diff/types";
 import { useHunkHover } from "./use-hunk-hover";
 import { useAnnotationRenderer } from "./use-diff-annotation-renderer";
+import { DEFAULT_DIFF_WORD_WRAP } from "./diff-defaults";
 import { useDiffOptions } from "./use-diff-options";
 import { useDiffViewerState } from "./use-diff-viewer-state";
 
@@ -207,7 +208,7 @@ export const DiffViewer = memo(function DiffViewer({
   onToggleExpandUnchanged: onToggleExpandUnchangedProp,
   repo,
 }: DiffViewerProps) {
-  const [wordWrapLocal, setWordWrap] = useState(false);
+  const [wordWrapLocal, setWordWrap] = useState(DEFAULT_DIFF_WORD_WRAP);
   const wordWrap = wordWrapProp ?? wordWrapLocal;
   const [expandUnchangedLocal, setExpandUnchangedLocal] = useState(false);
   const expandUnchanged = expandUnchangedProp ?? expandUnchangedLocal;
