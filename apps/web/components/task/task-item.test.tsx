@@ -8,6 +8,10 @@ const REVIEW_ICON_TEST_ID = "task-state-review";
 const RUNNING_ICON_TEST_ID = "task-state-running";
 const WAITING_FOR_INPUT_ICON_TEST_ID = "task-state-waiting-for-input";
 const PENDING_PERMISSION_ICON_TEST_ID = "task-state-pending-permission";
+const PREPARING_PHASE = "preparing";
+const PURPLE_SPINNER_CLASS = "text-purple-500";
+const SPIN_CLASS = "animate-spin";
+const SLOW_SPIN_CLASS = "[animation-duration:2s]";
 
 afterEach(() => cleanup());
 
@@ -17,6 +21,14 @@ function renderTaskItem(props: Partial<ComponentProps<typeof TaskItem>> = {}) {
       <TaskItem title="Needs answer" state="REVIEW" {...props} />
     </StateProvider>,
   );
+}
+
+function expectPreparingSpinner(): void {
+  const icon = screen.getByTestId(RUNNING_ICON_TEST_ID);
+  expect(icon.getAttribute("data-loading-phase")).toBe(PREPARING_PHASE);
+  expect(icon.classList.contains(PURPLE_SPINNER_CLASS)).toBe(true);
+  expect(icon.classList.contains(SPIN_CLASS)).toBe(true);
+  expect(icon.classList.contains(SLOW_SPIN_CLASS)).toBe(true);
 }
 
 describe("TaskItem status icon", () => {
@@ -63,21 +75,26 @@ describe("TaskItem status icon", () => {
   it("shows a slower purple spinner while the workflow is scheduling", () => {
     renderTaskItem({ state: "SCHEDULING" });
 
-    const icon = screen.getByTestId(RUNNING_ICON_TEST_ID);
-    expect(icon.getAttribute("data-loading-phase")).toBe("preparing");
-    expect(icon.classList.contains("text-purple-500")).toBe(true);
-    expect(icon.classList.contains("animate-spin")).toBe(true);
-    expect(icon.classList.contains("[animation-duration:2s]")).toBe(true);
+    expectPreparingSpinner();
   });
 
   it("shows a slower purple spinner while the session is starting before progress", () => {
     renderTaskItem({ state: "TODO", sessionState: "STARTING" });
 
-    const icon = screen.getByTestId(RUNNING_ICON_TEST_ID);
-    expect(icon.getAttribute("data-loading-phase")).toBe("preparing");
-    expect(icon.classList.contains("text-purple-500")).toBe(true);
-    expect(icon.classList.contains("animate-spin")).toBe(true);
-    expect(icon.classList.contains("[animation-duration:2s]")).toBe(true);
+    expectPreparingSpinner();
+  });
+
+  it("shows a slower purple spinner for in-progress tasks while the session is starting", () => {
+    renderTaskItem({ state: "IN_PROGRESS", sessionState: "STARTING" });
+
+    expectPreparingSpinner();
+  });
+
+  it("does not show preparing spinner for a review task whose session transiently hits STARTING", () => {
+    renderTaskItem({ state: "REVIEW", sessionState: "STARTING" });
+
+    expect(screen.queryByTestId(REVIEW_ICON_TEST_ID)).not.toBeNull();
+    expect(screen.queryByTestId(RUNNING_ICON_TEST_ID)).toBeNull();
   });
 
   it("keeps running tasks on the normal running spinner", () => {
@@ -86,8 +103,8 @@ describe("TaskItem status icon", () => {
     const icon = screen.getByTestId(RUNNING_ICON_TEST_ID);
     expect(icon.getAttribute("data-loading-phase")).toBe("running");
     expect(icon.classList.contains("text-yellow-500")).toBe(true);
-    expect(icon.classList.contains("animate-spin")).toBe(true);
-    expect(icon.classList.contains("text-purple-500")).toBe(false);
+    expect(icon.classList.contains(SPIN_CLASS)).toBe(true);
+    expect(icon.classList.contains(PURPLE_SPINNER_CLASS)).toBe(false);
   });
 
   it("keeps the review check for completed review tasks", () => {
