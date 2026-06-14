@@ -461,6 +461,9 @@ func validateAttachments(items []v1.MessageAttachment) error {
 		if len(a.Data) > maxAttachmentDataBytes {
 			return fmt.Errorf("attachment[%d] data exceeds size limit", i)
 		}
+		if !a.HasValidDeliveryMode() {
+			return fmt.Errorf("attachment[%d] delivery_mode must be prompt or path", i)
+		}
 		totalSize += len(a.Data)
 	}
 	if totalSize > maxAttachmentDataBytes {

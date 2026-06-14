@@ -303,21 +303,20 @@ func TestCleanup_SessionIsolation(t *testing.T) {
 }
 
 func TestBuildAttachmentPrompt_Empty(t *testing.T) {
-	result := BuildAttachmentPrompt(nil)
+	result := BuildAttachmentPrompt(nil, true)
 	if result != "" {
 		t.Errorf("expected empty string, got %q", result)
 	}
 }
 
-func TestBuildAttachmentPrompt_SingleFile(t *testing.T) {
+func TestBuildAttachmentPrompt_SingleWritableFile(t *testing.T) {
 	saved := []SavedAttachment{
 		{RelPath: ".kandev/attachments/s1/report.pdf", Name: "report.pdf"},
 	}
-	result := BuildAttachmentPrompt(saved)
+	result := BuildAttachmentPrompt(saved, true)
 	if result == "" {
 		t.Fatal("expected non-empty result")
 	}
-	// Should mention the file name and path
 	if !contains(result, "report.pdf") {
 		t.Errorf("result should contain filename, got: %q", result)
 	}
@@ -329,17 +328,55 @@ func TestBuildAttachmentPrompt_SingleFile(t *testing.T) {
 	}
 }
 
+func TestBuildAttachmentPrompt_SingleReadOnlyFile(t *testing.T) {
+	saved := []SavedAttachment{
+		{RelPath: ".kandev/attachments/s1/report.pdf", Name: "report.pdf"},
+	}
+	result := BuildAttachmentPrompt(saved, false)
+	if result == "" {
+		t.Fatal("expected non-empty result")
+	}
+	if contains(result, "writable") {
+		t.Errorf("read-only result should not call the file writable, got: %q", result)
+	}
+	if contains(result, "modify") {
+		t.Errorf("read-only result should not tell the agent to modify the file, got: %q", result)
+	}
+	if !contains(result, "access it") {
+		t.Errorf("read-only result should tell the agent to access the file, got: %q", result)
+	}
+}
+
 func TestBuildAttachmentPrompt_MultipleFiles(t *testing.T) {
 	saved := []SavedAttachment{
 		{RelPath: ".kandev/attachments/s1/a.pdf", Name: "a.pdf"},
 		{RelPath: ".kandev/attachments/s1/b.png", Name: "b.png"},
 	}
-	result := BuildAttachmentPrompt(saved)
+	result := BuildAttachmentPrompt(saved, true)
 	if !contains(result, "a.pdf") {
 		t.Errorf("result should contain a.pdf, got: %q", result)
 	}
 	if !contains(result, "b.png") {
 		t.Errorf("result should contain b.png, got: %q", result)
+	}
+}
+
+func TestBuildAttachmentPrompt_SanitizesPromptValues(t *testing.T) {
+	saved := []SavedAttachment{
+		{
+			RelPath: ".kandev/attachments/s1/<bad>\npath.pdf",
+			Name:    "report<one>\nplease.pdf",
+		},
+	}
+	result := BuildAttachmentPrompt(saved, true)
+	if contains(result, "<") || contains(result, ">") || contains(result, "\nplease") {
+		t.Errorf("result contains unsanitized prompt values: %q", result)
+	}
+	if !contains(result, "report(one) please.pdf") {
+		t.Errorf("result should contain sanitized filename, got: %q", result)
+	}
+	if !contains(result, ".kandev/attachments/s1/(bad) path.pdf") {
+		t.Errorf("result should contain sanitized path, got: %q", result)
 	}
 }
 

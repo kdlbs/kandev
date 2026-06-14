@@ -212,9 +212,10 @@ func (a *Adapter) buildPromptContentBlocks(message string, attachments []v1.Mess
 			if saveErr != nil || len(saved) == 0 {
 				a.logger.Warn("failed to save path-mode attachment to workspace",
 					zap.String("name", att.Name), zap.Error(saveErr))
+				contentBlocks = append(contentBlocks, buildAttachmentFallbackBlock(att))
 				continue
 			}
-			contentBlocks = append(contentBlocks, acp.TextBlock(shared.BuildAttachmentPrompt(saved)))
+			contentBlocks = append(contentBlocks, acp.TextBlock(shared.BuildAttachmentPrompt(saved, true)))
 			continue
 		}
 
@@ -234,13 +235,26 @@ func (a *Adapter) buildPromptContentBlocks(message string, attachments []v1.Mess
 						zap.String("name", att.Name), zap.Error(saveErr))
 					contentBlocks = append(contentBlocks, buildResourceBlock(att))
 				} else {
-					contentBlocks = append(contentBlocks, acp.TextBlock(shared.BuildAttachmentPrompt(saved)))
+					contentBlocks = append(contentBlocks, acp.TextBlock(shared.BuildAttachmentPrompt(saved, false)))
 				}
 			}
 		}
 	}
 
 	return contentBlocks
+}
+
+func buildAttachmentFallbackBlock(att v1.MessageAttachment) acp.ContentBlock {
+	switch att.Type {
+	case contentTypeImage:
+		return acp.ImageBlock(att.Data, att.MimeType)
+	case contentTypeAudio:
+		return acp.AudioBlock(att.Data, att.MimeType)
+	case contentTypeResource:
+		return buildResourceBlock(att)
+	default:
+		return acp.TextBlock("The user attached a file, but Kandev could not save it to the workspace.")
+	}
 }
 
 // fireWakeup is invoked by wakeupScheduler when a ScheduleWakeup timer

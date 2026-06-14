@@ -145,6 +145,10 @@ type MessageAttachment struct {
 	DeliveryMode string `json:"delivery_mode,omitempty"` // "prompt" (native/default) or "path"
 }
 
+func (a MessageAttachment) HasValidDeliveryMode() bool {
+	return a.DeliveryMode == "" || a.DeliveryMode == "prompt" || a.DeliveryMode == "path"
+}
+
 // ContextFileMeta represents a context file reference attached to a message
 type ContextFileMeta struct {
 	Path string `json:"path"`

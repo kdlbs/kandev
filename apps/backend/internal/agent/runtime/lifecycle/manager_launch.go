@@ -19,7 +19,6 @@ import (
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
-	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // resolveAgentProfile resolves the agent profile and returns the agent type name and profile info.
@@ -1124,20 +1123,6 @@ func getAttachmentsFromMetadata(execution *AgentExecution) []MessageAttachment {
 	attachments, ok := execution.Metadata["attachments"].([]MessageAttachment)
 	if ok {
 		return attachments
-	}
-	apiAttachments, ok := execution.Metadata["attachments"].([]v1.MessageAttachment)
-	if ok {
-		result := make([]MessageAttachment, 0, len(apiAttachments))
-		for _, att := range apiAttachments {
-			result = append(result, MessageAttachment{
-				Type:         att.Type,
-				Data:         att.Data,
-				MimeType:     att.MimeType,
-				Name:         att.Name,
-				DeliveryMode: att.DeliveryMode,
-			})
-		}
-		return result
 	}
 	return nil
 }

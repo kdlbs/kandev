@@ -23,7 +23,7 @@ export const ImageItem = memo(function ImageItem({ item }: { item: ImageContextI
       {/* eslint-disable-next-line @next/next/no-img-element -- base64 preview */}
       <img src={previewSrc} alt="Preview" className="max-w-full max-h-48 rounded object-contain" />
       {item.onDeliveryModeChange && (
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1" role="group" aria-label="Attachment delivery mode">
           <Button
             type="button"
             size="sm"
@@ -31,6 +31,7 @@ export const ImageItem = memo(function ImageItem({ item }: { item: ImageContextI
             className="h-6 px-2 text-xs"
             data-testid="attachment-delivery-prompt"
             data-selected={item.attachment.deliveryMode === "prompt" ? "true" : "false"}
+            aria-pressed={item.attachment.deliveryMode === "prompt"}
             onClick={(event) => {
               event.stopPropagation();
               item.onDeliveryModeChange?.("prompt");
@@ -45,6 +46,7 @@ export const ImageItem = memo(function ImageItem({ item }: { item: ImageContextI
             className="h-6 px-2 text-xs"
             data-testid="attachment-delivery-path"
             data-selected={item.attachment.deliveryMode === "path" ? "true" : "false"}
+            aria-pressed={item.attachment.deliveryMode === "path"}
             onClick={(event) => {
               event.stopPropagation();
               item.onDeliveryModeChange?.("path");

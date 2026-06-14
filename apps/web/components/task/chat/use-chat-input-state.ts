@@ -129,11 +129,19 @@ function useAttachments(sessionId: string | null) {
   );
 
   const handleRemoveAttachment = useCallback((id: string) => {
-    setAttachments((prev) => prev.filter((att) => att.id !== id));
+    setAttachments((prev) => {
+      const next = prev.filter((att) => att.id !== id);
+      attachmentsRef.current = next;
+      return next;
+    });
   }, []);
 
   const handleDeliveryModeChange = useCallback((id: string, deliveryMode: "prompt" | "path") => {
-    setAttachments((prev) => prev.map((att) => (att.id === id ? { ...att, deliveryMode } : att)));
+    setAttachments((prev) => {
+      const next = prev.map((att) => (att.id === id ? { ...att, deliveryMode } : att));
+      attachmentsRef.current = next;
+      return next;
+    });
   }, []);
 
   const getAttachments = useCallback(

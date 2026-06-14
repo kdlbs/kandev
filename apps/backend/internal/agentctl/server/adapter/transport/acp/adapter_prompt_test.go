@@ -106,6 +106,74 @@ func TestBuildPromptContentBlocks_PathModeAttachmentSavesWritableFile(t *testing
 	}
 }
 
+func TestBuildPromptContentBlocks_PathModeSaveFailureFallsBackToNativeBlock(t *testing.T) {
+	a := newTestAdapter()
+	t.Cleanup(func() { _ = a.Close() })
+
+	a.attachMgr = shared.NewAttachmentManager("", a.logger.Zap())
+	a.attachMgr.SetSessionID("sess-path")
+	a.capabilities = acp.AgentCapabilities{
+		PromptCapabilities: acp.PromptCapabilities{
+			Image: true,
+		},
+	}
+
+	encoded := base64.StdEncoding.EncodeToString([]byte("image bytes"))
+	blocks := a.buildPromptContentBlocks("inspect this", []v1.MessageAttachment{{
+		Type:         "image",
+		Data:         encoded,
+		MimeType:     "image/png",
+		Name:         "shot.png",
+		DeliveryMode: "path",
+	}})
+
+	if len(blocks) != 2 {
+		t.Fatalf("expected text prompt plus native fallback block, got %d blocks", len(blocks))
+	}
+	if blocks[1].Image == nil {
+		t.Fatalf("expected path-mode save failure to fall back to an image block, got %#v", blocks[1])
+	}
+	if blocks[1].Text != nil {
+		t.Fatalf("fallback image should not be replaced by a text path prompt")
+	}
+}
+
+func TestBuildPromptContentBlocks_UnsupportedEmbeddedResourceSavesReadOnlyFile(t *testing.T) {
+	a := newTestAdapter()
+	t.Cleanup(func() { _ = a.Close() })
+
+	workDir := t.TempDir()
+	a.attachMgr = shared.NewAttachmentManager(workDir, a.logger.Zap())
+	a.attachMgr.SetSessionID("sess-resource")
+	a.capabilities = acp.AgentCapabilities{
+		PromptCapabilities: acp.PromptCapabilities{
+			EmbeddedContext: false,
+		},
+	}
+
+	encoded := base64.StdEncoding.EncodeToString([]byte("doc bytes"))
+	blocks := a.buildPromptContentBlocks("read this", []v1.MessageAttachment{{
+		Type:     "resource",
+		Data:     encoded,
+		MimeType: "application/pdf",
+		Name:     "doc.pdf",
+	}})
+
+	if len(blocks) != 2 {
+		t.Fatalf("expected text prompt plus attachment path prompt, got %d blocks", len(blocks))
+	}
+	if blocks[1].Text == nil {
+		t.Fatalf("expected unsupported embedded resource to be sent as text path prompt, got %#v", blocks[1])
+	}
+	text := blocks[1].Text.Text
+	if !strings.Contains(text, ".kandev/attachments/sess-resource/doc.pdf") {
+		t.Fatalf("attachment prompt did not include saved path: %q", text)
+	}
+	if strings.Contains(text, "writable") || strings.Contains(text, "modify") {
+		t.Fatalf("fallback resource prompt should be read-only, got: %q", text)
+	}
+}
+
 // TestCancelActiveToolCalls_SubagentLateUpdate_LandsAsComplete drives the full
 // race scenario end-to-end through the real adapter methods (no mocks):
 //

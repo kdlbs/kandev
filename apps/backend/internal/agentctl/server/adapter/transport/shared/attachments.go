@@ -117,7 +117,7 @@ func (m *AttachmentManager) Cleanup() {
 
 // BuildAttachmentPrompt generates prompt text referencing saved attachment files.
 // Used by adapters that don't support native multimodal content.
-func BuildAttachmentPrompt(saved []SavedAttachment) string {
+func BuildAttachmentPrompt(saved []SavedAttachment, writable bool) string {
 	if len(saved) == 0 {
 		return ""
 	}
@@ -125,15 +125,34 @@ func BuildAttachmentPrompt(saved []SavedAttachment) string {
 	var sb strings.Builder
 	if len(saved) == 1 {
 		s := saved[0]
-		fmt.Fprintf(&sb, "The user attached a writable file: %s (saved to %s in the workspace). Use your file reading tools to access or modify it.\n\n", s.Name, s.RelPath)
-	} else {
-		sb.WriteString("The user attached writable files that you should read and analyze:\n")
-		for _, s := range saved {
-			fmt.Fprintf(&sb, "- %s (saved to %s)\n", s.Name, s.RelPath)
+		name := sanitizePromptValue(s.Name)
+		relPath := sanitizePromptValue(s.RelPath)
+		if writable {
+			fmt.Fprintf(&sb, "The user attached a writable file: %s (saved to %s in the workspace). Use your file reading tools to access or modify it.\n\n", name, relPath)
+		} else {
+			fmt.Fprintf(&sb, "The user attached a file: %s (saved to %s in the workspace). Use your file reading tools to access it.\n\n", name, relPath)
 		}
-		sb.WriteString("\nUse your file reading tools to access or modify them.\n\n")
+	} else {
+		if writable {
+			sb.WriteString("The user attached writable files that you should read and analyze:\n")
+		} else {
+			sb.WriteString("The user attached files that you should read and analyze:\n")
+		}
+		for _, s := range saved {
+			fmt.Fprintf(&sb, "- %s (saved to %s)\n", sanitizePromptValue(s.Name), sanitizePromptValue(s.RelPath))
+		}
+		if writable {
+			sb.WriteString("\nUse your file reading tools to access or modify them.\n\n")
+		} else {
+			sb.WriteString("\nUse your file reading tools to access them.\n\n")
+		}
 	}
 	return sb.String()
+}
+
+func sanitizePromptValue(value string) string {
+	replacer := strings.NewReplacer("\r", " ", "\n", " ", "<", "(", ">", ")")
+	return strings.TrimSpace(replacer.Replace(value))
 }
 
 // generateName creates a filename for attachments that don't have a Name field.
