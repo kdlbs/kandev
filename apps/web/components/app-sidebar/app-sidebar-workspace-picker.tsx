@@ -2,7 +2,13 @@
 
 import { forwardRef, useCallback, useState, type ComponentPropsWithoutRef } from "react";
 import { useRouter } from "next/navigation";
-import { IconCheck, IconChevronDown, IconPlus } from "@tabler/icons-react";
+import {
+  IconBriefcase,
+  IconCheck,
+  IconChevronDown,
+  IconLayoutKanban,
+  IconPlus,
+} from "@tabler/icons-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,8 +31,8 @@ import { cn } from "@/lib/utils";
  */
 const WorkspaceTrigger = forwardRef<
   HTMLButtonElement,
-  ComponentPropsWithoutRef<"button"> & { activeName: string }
->(function WorkspaceTrigger({ activeName, className, ...props }, ref) {
+  ComponentPropsWithoutRef<"button"> & { activeName: string; activeType: WorkspaceType }
+>(function WorkspaceTrigger({ activeName, activeType, className, ...props }, ref) {
   return (
     <button
       ref={ref}
@@ -40,10 +46,37 @@ const WorkspaceTrigger = forwardRef<
       {...props}
     >
       <span className="min-w-0 flex-1 truncate text-left sidebar-fade-in">{activeName}</span>
+      <span className="hidden shrink-0 items-center gap-1 rounded border border-border/60 px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground md:inline-flex">
+        <WorkspaceTypeIcon type={activeType} className="h-3 w-3" />
+        {workspaceTypeLabel(activeType)}
+      </span>
       <IconChevronDown className="h-3.5 w-3.5 shrink-0 opacity-50 transition-opacity group-hover/ws:opacity-80" />
     </button>
   );
 });
+
+type WorkspaceType = "kanban" | "office";
+
+type WorkspaceItem = {
+  id: string;
+  name: string;
+  office_workflow_id?: string | null;
+};
+
+function workspaceType(workspace: WorkspaceItem | undefined): WorkspaceType {
+  return workspace?.office_workflow_id ? "office" : "kanban";
+}
+
+function workspaceTypeLabel(type: WorkspaceType) {
+  return type === "office" ? "Office" : "Kanban";
+}
+
+function WorkspaceTypeIcon({ type, className }: { type: WorkspaceType; className: string }) {
+  if (type === "office") {
+    return <IconBriefcase className={className} />;
+  }
+  return <IconLayoutKanban className={className} />;
+}
 
 export function AppSidebarWorkspacePicker() {
   const router = useRouter();
@@ -55,50 +88,84 @@ export function AppSidebarWorkspacePicker() {
   const activeWorkspace = workspaces.items.find((w) => w.id === workspaces.activeId);
   const activeId = activeWorkspace?.id ?? null;
   const activeName = activeWorkspace?.name ?? "Workspace";
+  const activeType = workspaceType(activeWorkspace);
 
   const handleSelect = useCallback(
-    (id: string) => {
+    (workspace: WorkspaceItem) => {
+      const { id } = workspace;
+      if (id === activeId) {
+        setOpen(false);
+        return;
+      }
       document.cookie = `office-active-workspace=${id}; path=/; max-age=86400; samesite=strict; secure`;
       setActiveWorkspace(id);
       if (officeEnabled) {
-        router.push(`/office?workspaceId=${id}`);
+        const target = workspaceType(workspace) === "office" ? "/office" : "/";
+        router.push(`${target}?workspaceId=${id}`);
       }
       setOpen(false);
     },
-    [router, setActiveWorkspace, officeEnabled],
+    [activeId, router, setActiveWorkspace, officeEnabled],
   );
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
-        <WorkspaceTrigger activeName={activeName} />
+        <WorkspaceTrigger activeName={activeName} activeType={activeType} />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-60">
+      <DropdownMenuContent align="start" className="w-72">
         {workspaces.items.length === 0 ? (
           <DropdownMenuItem disabled>No workspaces</DropdownMenuItem>
         ) : (
-          workspaces.items.map((ws) => (
-            <DropdownMenuItem
-              key={ws.id}
-              data-testid={`sidebar-workspace-item-${ws.id}`}
-              onSelect={() => handleSelect(ws.id)}
-              className="cursor-pointer gap-2"
-            >
-              <span className="flex-1 truncate">{ws.name}</span>
-              {ws.id === activeId && <IconCheck className="h-3.5 w-3.5" />}
-            </DropdownMenuItem>
-          ))
+          workspaces.items.map((ws) => {
+            const type = workspaceType(ws);
+            return (
+              <DropdownMenuItem
+                key={ws.id}
+                data-testid={`sidebar-workspace-item-${ws.id}`}
+                onSelect={() => handleSelect(ws)}
+                className="cursor-pointer gap-2"
+              >
+                <WorkspaceTypeIcon
+                  type={type}
+                  className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+                />
+                <span className="min-w-0 flex-1 truncate">{ws.name}</span>
+                <span className="shrink-0 rounded border border-border/60 px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground">
+                  {workspaceTypeLabel(type)}
+                </span>
+                {ws.id === activeId && <IconCheck className="h-3.5 w-3.5 shrink-0" />}
+              </DropdownMenuItem>
+            );
+          })
         )}
         <DropdownMenuSeparator />
-        <DropdownMenuItem
-          className="cursor-pointer gap-2"
-          onSelect={() => {
-            router.push(officeEnabled ? "/office/setup?mode=new" : "/settings/workspace");
-          }}
-        >
-          <IconPlus className="h-3.5 w-3.5" />
-          <span>Add workspace</span>
-        </DropdownMenuItem>
+        {officeEnabled ? (
+          <>
+            <DropdownMenuItem
+              className="cursor-pointer gap-2"
+              onSelect={() => router.push("/settings/workspace")}
+            >
+              <IconLayoutKanban className="h-3.5 w-3.5" />
+              <span>New kanban workspace</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="cursor-pointer gap-2"
+              onSelect={() => router.push("/office/setup?mode=new")}
+            >
+              <IconBriefcase className="h-3.5 w-3.5" />
+              <span>New office workspace</span>
+            </DropdownMenuItem>
+          </>
+        ) : (
+          <DropdownMenuItem
+            className="cursor-pointer gap-2"
+            onSelect={() => router.push("/settings/workspace")}
+          >
+            <IconPlus className="h-3.5 w-3.5" />
+            <span>Add workspace</span>
+          </DropdownMenuItem>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

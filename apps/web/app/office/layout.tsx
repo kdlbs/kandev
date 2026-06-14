@@ -37,6 +37,7 @@ function mapWorkspaceItem(ws: {
   default_environment_id?: string | null;
   default_agent_profile_id?: string | null;
   default_config_agent_profile_id?: string | null;
+  office_workflow_id?: string | null;
   created_at: string;
   updated_at: string;
 }) {
@@ -49,6 +50,7 @@ function mapWorkspaceItem(ws: {
     default_environment_id: ws.default_environment_id ?? null,
     default_agent_profile_id: ws.default_agent_profile_id ?? null,
     default_config_agent_profile_id: ws.default_config_agent_profile_id ?? null,
+    office_workflow_id: ws.office_workflow_id ?? null,
     created_at: ws.created_at,
     updated_at: ws.updated_at,
   };
@@ -83,17 +85,19 @@ export default async function OfficeLayout({ children }: { children: React.React
     cookies().catch(() => null),
   ]);
 
-  // Only show office workspaces (those with an office_workflow_id) in the rail.
-  // The kanban's "Default Workspace" has no office_workflow_id and should not appear.
-  const officeWorkspaces = workspacesResponse.workspaces.filter((ws) => ws.office_workflow_id);
-  const workspaceItems = officeWorkspaces.map(mapWorkspaceItem);
+  // Only office workspaces can be active inside /office, but hydrate every
+  // workspace into the shared sidebar picker so users can switch back to Kanban.
+  const officeWorkspaceItems = workspacesResponse.workspaces
+    .filter((ws) => ws.office_workflow_id)
+    .map(mapWorkspaceItem);
+  const workspaceItems = workspacesResponse.workspaces.map(mapWorkspaceItem);
   const settingsWorkspaceId = userSettingsResponse?.settings?.workspace_id || null;
   // office-active-workspace cookie is set by the setup wizard and workspace rail so the
   // layout can load the correct workspace even when userSettings.workspace_id still points
   // to a kanban workspace (we never write to userSettings from office).
   const cookieWorkspaceId = cookieStore?.get("office-active-workspace")?.value ?? null;
   const activeWorkspaceId = resolveActiveOfficeWorkspaceId(
-    workspaceItems,
+    officeWorkspaceItems,
     cookieWorkspaceId,
     settingsWorkspaceId,
   );

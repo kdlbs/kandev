@@ -24,6 +24,7 @@ export type Workspace = {
   name: string;
   description?: string | null;
   owner_id: string;
+  office_workflow_id?: string;
   created_at: string;
   updated_at: string;
 };
