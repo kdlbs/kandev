@@ -23,6 +23,10 @@ apps/
 - **GitHub repo**: `https://github.com/kdlbs/kandev`
 - **Container image**: `ghcr.io/kdlbs/kandev` (GitHub Container Registry)
 
+### GitHub CI capacity
+
+On free/public GitHub runners, assume the practical concurrency cap can make extra E2E shards unhelpful once the workflow is already saturating available runners. Prefer duration-aware shard balancing or reducing slow specs before adding more shards.
+
 ### Worktrees and commit hooks
 
 A fresh git worktree shares `.git/` but **not** `apps/node_modules/`. The missing install breaks not just the commit-msg hook (`pnpm exec commitlint` → `Command "commitlint" not found` / `ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL`) but any pnpm command — `vitest` fails with `Failed to resolve import "vitest"`, eslint similarly. Run `pnpm install --frozen-lockfile` from `apps/` once after creating the worktree, before running tests/lint/commits; subsequent pnpm commands work normally.

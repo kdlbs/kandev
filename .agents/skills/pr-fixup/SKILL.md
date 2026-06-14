@@ -72,6 +72,8 @@ If delegated polling is unavailable, gather the same information directly withou
 scripts/pr-state --summary <PR>
 ```
 
+Prefer `scripts/pr-state --summary <PR>` for direct polling and `scripts/pr-resolve list <PR>` for review-thread state over raw `gh pr checks`. `gh pr checks` only reports CI/status checks; review bots can open unresolved threads after CI is green, and a checks-only poll will miss that blocker.
+
 By default, `scripts/pr-state` returns comments, reviews, and review threads created after the latest PR head commit only. This is intentional for fixup passes: it keeps old bot summaries and already-addressed historical threads out of the working set. Use `scripts/pr-state --summary --all <PR>` only when you need to audit the full PR history.
 
 The summary output contains:
@@ -83,6 +85,8 @@ The summary output contains:
 - `errors` — data-gathering failures; treat affected fields as unknown instead of reconstructing them ad hoc
 
 Poll at a 30s cadence with a **20 min cap**. Stop early if any required check fails. If the cap hits and only E2E shards are still pending with no failures or unresolved comments, report "CI in progress" instead of continuing to watch indefinitely, and include the exact pending shard names from `pending_checks`. Do not run `gh pr checks --watch` in the main session unless the runtime can keep the watcher isolated and automatically clean it up. If you do use `gh pr checks --watch`, keep watching until the command exits; GitHub can expand matrix jobs after an initial aggregate "Build" check passes, so the first green build/lint/test rows are not necessarily terminal.
+
+If a user interrupts a long manual poll loop (`sleep`, `gh pr checks`, or `scripts/pr-state`), check for leftover polling processes before switching tasks and terminate only the processes you started.
 
 Use raw mode only when debugging an odd GitHub state:
 
@@ -347,6 +351,8 @@ Mark task 6 as completed.
 ### Multi-round bot reviews
 
 **Expect new threads after every push.** CodeRabbit, Greptile, Claude, and cubic often re-review the latest commit and open fresh inline threads even when earlier ones were resolved. On cross-cutting changes (backend event payloads + frontend WS handlers + E2E), plan for 2–3 fixup rounds. After each push, always run `scripts/pr-resolve list <PR>` before declaring done — do not rely on the prior round's zero count.
+
+**Stop when green unless the next comment is clearly worth another cycle.** Tiny review-only commits restart the full CI and bot-review stack. Once the PR is green with no unresolved threads, avoid nonessential cleanup that would trigger another round unless the comment is blocking, clearly valid, or requested by the user.
 
 ### 7. Summary
 
