@@ -5,6 +5,8 @@ import (
 	"fmt"
 )
 
+var ErrValidation = errors.New("metrics settings validation")
+
 const (
 	MetricCPUPercent    = "cpu_percent"
 	MetricMemoryPercent = "memory_percent"
@@ -40,7 +42,7 @@ func NormalizeSettings(in GlobalSettings) (GlobalSettings, error) {
 		out.IntervalSeconds = defaults.IntervalSeconds
 	}
 	if out.IntervalSeconds < MinIntervalSeconds || out.IntervalSeconds > MaxIntervalSeconds {
-		return GlobalSettings{}, fmt.Errorf("interval_seconds must be between %d and %d", MinIntervalSeconds, MaxIntervalSeconds)
+		return GlobalSettings{}, fmt.Errorf("%w: interval_seconds must be between %d and %d", ErrValidation, MinIntervalSeconds, MaxIntervalSeconds)
 	}
 	if out.BackendDiskPath == "" {
 		out.BackendDiskPath = defaults.BackendDiskPath
@@ -54,7 +56,7 @@ func NormalizeSettings(in GlobalSettings) (GlobalSettings, error) {
 	metrics := make([]string, 0, len(out.Metrics))
 	for _, metric := range out.Metrics {
 		if !isKnownMetric(metric) {
-			return GlobalSettings{}, fmt.Errorf("unknown metric %q", metric)
+			return GlobalSettings{}, fmt.Errorf("%w: unknown metric %q", ErrValidation, metric)
 		}
 		if _, ok := seen[metric]; ok {
 			continue
@@ -63,7 +65,7 @@ func NormalizeSettings(in GlobalSettings) (GlobalSettings, error) {
 		metrics = append(metrics, metric)
 	}
 	if len(metrics) == 0 {
-		return GlobalSettings{}, errors.New("at least one metric is required")
+		return GlobalSettings{}, fmt.Errorf("%w: at least one metric is required", ErrValidation)
 	}
 	out.Metrics = metrics
 	return out, nil

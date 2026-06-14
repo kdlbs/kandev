@@ -1,6 +1,10 @@
 package metrics
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestNormalizeSettingsDefaults(t *testing.T) {
 	got, err := NormalizeSettings(GlobalSettings{})
@@ -45,5 +49,26 @@ func TestNormalizeSettingsValidatesIntervalAndMetrics(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for unknown metric")
+	}
+}
+
+func TestCollectorResetClearsCPUBaseline(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "stat"), []byte("cpu  1 0 0 9 0 0 0 0\n"), 0o600); err != nil {
+		t.Fatalf("write stat: %v", err)
+	}
+	collector := NewCollector()
+	collector.procRoot = dir
+
+	if _, err := collector.cpuPercent(); err != nil {
+		t.Fatalf("cpuPercent baseline: %v", err)
+	}
+	if collector.prevCPU == nil {
+		t.Fatal("expected CPU baseline to be stored")
+	}
+
+	collector.Reset()
+	if collector.prevCPU != nil {
+		t.Fatal("expected Reset to clear CPU baseline")
 	}
 }

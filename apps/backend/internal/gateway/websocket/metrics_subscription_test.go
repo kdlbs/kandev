@@ -62,6 +62,21 @@ func TestSystemMetricsInterestTracksClientLifecycle(t *testing.T) {
 	}
 }
 
+func TestSystemMetricsInterestTracksHubShutdown(t *testing.T) {
+	h := newTestHub(t)
+	rec := &metricsInterestRecorder{}
+	h.SetSystemMetricsInterestTracker(rec)
+	c := newTestClient("c1")
+	registerTestClient(h, c)
+
+	h.SubscribeToSystemMetrics(c)
+	h.closeAllClients()
+
+	if len(rec.unsubs) != 1 {
+		t.Fatalf("unsubscribe calls=%d, want 1", len(rec.unsubs))
+	}
+}
+
 func TestHandleSystemMetricsSubscribe(t *testing.T) {
 	h := newTestHub(t)
 	rec := &metricsInterestRecorder{}

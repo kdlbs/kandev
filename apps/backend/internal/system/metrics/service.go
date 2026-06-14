@@ -92,6 +92,7 @@ func (s *Service) startLocked() {
 	if s.cancel != nil {
 		return
 	}
+	s.collector.Reset()
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
 	go s.run(ctx)

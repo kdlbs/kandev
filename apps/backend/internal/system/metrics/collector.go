@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -18,6 +19,7 @@ type Collector struct {
 	sysRoot    string
 	cgroupRoot string
 	prevCPU    *cpuTimes
+	mu         sync.Mutex
 }
 
 func NewCollector() *Collector {
@@ -29,6 +31,8 @@ func NewCollector() *Collector {
 }
 
 func (c *Collector) Sample(_ context.Context, metricIDs []string, diskPath string) SourceSnapshot {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if diskPath == "" {
 		diskPath = "/"
 	}
@@ -42,6 +46,12 @@ func (c *Collector) Sample(_ context.Context, metricIDs []string, diskPath strin
 		Kind:    "backend",
 		Metrics: samples,
 	}
+}
+
+func (c *Collector) Reset() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.prevCPU = nil
 }
 
 func (c *Collector) sampleMetric(id string, diskPath string) MetricSample {

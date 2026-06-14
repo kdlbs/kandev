@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/mcp/server"
+	"github.com/kandev/kandev/internal/system/metrics"
 	"go.uber.org/zap"
 )
 
@@ -31,6 +32,7 @@ type Server struct {
 	logger           *logger.Logger
 	router           *gin.Engine
 	portProxies      *portProxyCache
+	metricsCollector *metrics.Collector
 
 	upgrader websocket.Upgrader
 }
@@ -49,6 +51,7 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 		logger:           log.WithFields(zap.String("component", "api-server")),
 		router:           gin.New(),
 		portProxies:      newPortProxyCache(),
+		metricsCollector: metrics.NewCollector(),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				return true // Allow all origins for container-local communication

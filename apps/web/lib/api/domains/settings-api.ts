@@ -81,7 +81,7 @@ export async function updateSystemMetricsSettings(
 ) {
   return fetchJson<SystemMetricsSettingsResponse>("/api/v1/system/metrics/settings", {
     ...options,
-    init: { method: "PATCH", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+    init: { ...(options?.init ?? {}), method: "PATCH", body: JSON.stringify(payload) },
   });
 }
 

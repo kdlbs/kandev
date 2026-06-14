@@ -17,8 +17,7 @@ func (s *Server) handleSystemMetrics(c *gin.Context) {
 	if diskPath == "" {
 		diskPath = "/"
 	}
-	collector := metrics.NewCollector()
-	snapshot := collector.Sample(c.Request.Context(), metricIDs, diskPath)
+	snapshot := s.metricsCollector.Sample(c.Request.Context(), metricIDs, diskPath)
 	snapshot.ID = "agentctl"
 	snapshot.Label = "Execution"
 	snapshot.Kind = "execution"

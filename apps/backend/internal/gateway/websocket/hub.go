@@ -117,16 +117,28 @@ func (h *Hub) Run(ctx context.Context) {
 // after shutdown and call into listeners with stale state.
 func (h *Hub) closeAllClients() {
 	h.mu.Lock()
+	metricClientIDs := make([]string, 0, len(h.systemMetricsSubscribers))
 	for client := range h.clients {
+		if client.systemMetricsSubscribed {
+			metricClientIDs = append(metricClientIDs, client.ID)
+			client.systemMetricsSubscribed = false
+		}
 		client.closeSend()
 		delete(h.clients, client)
 	}
+	tracker := h.metricsInterestTracker
 	h.taskSubscribers = make(map[string]map[*Client]bool)
 	h.sessionSubscribers = make(map[string]map[*Client]bool)
 	h.runSubscribers = make(map[string]map[*Client]bool)
 	h.systemMetricsSubscribers = make(map[*Client]bool)
 	h.sessionMode.focusByClient = make(map[string]map[*Client]bool)
 	h.mu.Unlock()
+
+	for _, clientID := range metricClientIDs {
+		if tracker != nil {
+			tracker.MetricsUnsubscribe(clientID)
+		}
+	}
 
 	h.stopAllPendingTransitions()
 }
@@ -166,14 +178,19 @@ func (h *Hub) removeClient(client *Client) {
 	for runID := range client.runSubscriptions {
 		removeClientFromSubscriberMap(h.runSubscribers, runID, client)
 	}
+	var metricClientID string
+	var tracker SystemMetricsInterestTracker
 	if client.systemMetricsSubscribed {
 		delete(h.systemMetricsSubscribers, client)
 		client.systemMetricsSubscribed = false
-		if h.metricsInterestTracker != nil {
-			h.metricsInterestTracker.MetricsUnsubscribe(client.ID)
-		}
+		metricClientID = client.ID
+		tracker = h.metricsInterestTracker
 	}
 	h.mu.Unlock()
+
+	if tracker != nil && metricClientID != "" {
+		tracker.MetricsUnsubscribe(metricClientID)
+	}
 
 	for _, sessionID := range dedupStrings(affectedSessions) {
 		h.recomputeSessionMode(sessionID)
