@@ -1,39 +1,38 @@
 package restart
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 )
 
-type Capability struct {
-	Supported bool   `json:"supported"`
-	Mode      string `json:"mode"`
-	Reason    string `json:"reason,omitempty"`
-}
-
-type RestartResponse struct {
-	Accepted bool   `json:"accepted"`
-	Message  string `json:"message"`
-}
-
-const unsupportedReason = "Automatic restart is not available for this launch mode. Restart Kandev from the terminal or service manager."
-
-func HandleCapability() gin.HandlerFunc {
+func HandleCapability(manager Manager) gin.HandlerFunc {
+	if manager == nil {
+		manager = NewUnsupportedManager("")
+	}
 	return func(c *gin.Context) {
-		c.JSON(http.StatusOK, Capability{
-			Supported: false,
-			Mode:      "manual",
-			Reason:    unsupportedReason,
-		})
+		c.JSON(http.StatusOK, manager.Capability(c.Request.Context()))
 	}
 }
 
-func HandleRequest() gin.HandlerFunc {
+func HandleRequest(manager Manager) gin.HandlerFunc {
+	if manager == nil {
+		manager = NewUnsupportedManager("")
+	}
 	return func(c *gin.Context) {
-		c.JSON(http.StatusNotImplemented, RestartResponse{
-			Accepted: false,
-			Message:  unsupportedReason,
-		})
+		resp, err := manager.RequestRestart(c.Request.Context())
+		if errors.Is(err, ErrUnsupported) {
+			c.JSON(http.StatusNotImplemented, resp)
+			return
+		}
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, RestartResponse{
+				Accepted: false,
+				Message:  err.Error(),
+			})
+			return
+		}
+		c.JSON(http.StatusAccepted, resp)
 	}
 }

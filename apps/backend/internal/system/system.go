@@ -61,6 +61,7 @@ type Service struct {
 	Logs     *logs.Service
 	Metrics  *metrics.Service
 	Updates  *updates.Service
+	Restart  restart.Manager
 }
 
 // Provide constructs the composed Service. The HTTP routes are
@@ -105,6 +106,7 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 		Logs:     logs.NewService(logDir, logFile, log),
 		Metrics:  metricsSvc,
 		Updates:  updates.NewService(pool, build.Version, nil, log, updates.WithHomeDir(homeDir), updates.WithJobs(tracker)),
+		Restart:  restart.NewManagerFromEnv(),
 	}
 }
 
@@ -138,8 +140,8 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 	g.GET("/updates", updates.HandleGet(s.Updates))
 	g.POST("/updates/check", updates.HandleCheck(s.Updates))
 	g.POST("/updates/apply", updates.HandleApply(s.Updates))
-	g.GET("/restart-capability", restart.HandleCapability())
-	g.POST("/restart", restart.HandleRequest())
+	g.GET("/restart-capability", restart.HandleCapability(s.Restart))
+	g.POST("/restart", restart.HandleRequest(s.Restart))
 
 	g.GET("/jobs/:id", jobs.HandleGet(s.Jobs))
 

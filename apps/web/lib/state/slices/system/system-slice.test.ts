@@ -29,6 +29,8 @@ const INFO: SystemInfo = {
   go_version: "go1.24",
   os: "darwin",
   arch: "arm64",
+  boot_id: "boot-1",
+  started_at: "2026-01-01T00:00:00Z",
 };
 
 const DISK_USAGE: DiskUsageResponse = {

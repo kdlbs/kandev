@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -7,13 +6,8 @@ import { devKandevHome, HEALTH_TIMEOUT_MS_DEV } from "./constants";
 import { resolveHealthTimeoutMs, waitForHealth, waitForUrlReady } from "./health";
 import { isInsideKandevTask } from "./kandev-env";
 import { createProcessSupervisor } from "./process";
-import {
-  attachBackendExitHandler,
-  buildBackendEnv,
-  buildWebEnv,
-  logStartupInfo,
-  pickPorts,
-} from "./shared";
+import { buildBackendEnv, buildWebEnv, logStartupInfo, pickPorts } from "./shared";
+import { launchRestartableBackend } from "./supervisor/backend";
 import { launchWebApp, openBrowser } from "./web";
 
 export type DevOptions = {
@@ -64,18 +58,21 @@ export async function runDev({ repoRoot, backendPort, webPort }: DevOptions): Pr
     path.join("apps", "backend"),
     "dev",
   ]);
-  const backendProc = spawn(backendCmd, backendArgs, {
+  const backend = await launchRestartableBackend({
+    command: backendCmd,
+    args: backendArgs,
     cwd: repoRoot,
     env: backendEnv,
+    homeDir: backendEnv.KANDEV_HOME_DIR ?? devKandevHome(repoRoot),
+    ports,
+    mode: "dev",
     stdio: "inherit",
+    supervisor,
   });
-  supervisor.children.push(backendProc);
-
-  attachBackendExitHandler(backendProc, supervisor);
 
   const healthTimeoutMs = resolveHealthTimeoutMs(HEALTH_TIMEOUT_MS_DEV);
   console.log("[kandev] starting backend...");
-  await waitForHealth(ports.backendUrl, backendProc, healthTimeoutMs);
+  await waitForHealth(ports.backendUrl, backend.proc, healthTimeoutMs);
   console.log(`[kandev] backend ready at ${ports.backendUrl}`);
 
   console.log("[kandev] starting web...");

@@ -244,9 +244,13 @@ export function networkUrlsForPort(port: number, hosts: string[]): string[] {
 export function attachBackendExitHandler(
   backendProc: ChildProcess,
   supervisor: ReturnType<typeof createProcessSupervisor>,
+  options: { shouldShutdown?: () => boolean } = {},
 ): void {
   backendProc.on("exit", (code, signal) => {
     console.error(`[kandev] backend exited (code=${code}, signal=${signal})`);
+    if (options.shouldShutdown && !options.shouldShutdown()) {
+      return;
+    }
     const exitCode = signal ? 0 : (code ?? 1);
     void supervisor.shutdown("backend exit").then(() => process.exit(exitCode));
   });

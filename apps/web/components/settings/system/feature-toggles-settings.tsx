@@ -14,11 +14,12 @@ import { Card, CardContent } from "@kandev/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconInfoCircle, IconPower, IconRotateClockwise } from "@tabler/icons-react";
 import { useToast } from "@/components/toast-provider";
+import { useKandevRestart } from "@/hooks/domains/system/use-kandev-restart";
 import { fetchRuntimeFlags, updateRuntimeFlag } from "@/lib/api/domains/runtime-flags-api";
-import { requestRestart } from "@/lib/api/domains/system-api";
 import type { RuntimeFlagState } from "@/lib/types/runtime-flags";
 import type { RestartCapability } from "@/lib/types/system";
 import { FeatureToggleCard } from "./feature-toggle-card";
+import { RestartProgressDialog } from "./restart-progress-dialog";
 
 type Props = {
   initialFlags: RuntimeFlagState[];
@@ -28,9 +29,9 @@ type Props = {
 export function FeatureTogglesSettings({ initialFlags, restartCapability }: Props) {
   const [flags, setFlags] = useState(initialFlags);
   const [savingKeys, setSavingKeys] = useState<Set<string>>(() => new Set());
-  const [restarting, setRestarting] = useState(false);
   const requestSeqRef = useRef(0);
   const { toast } = useToast();
+  const restart = useKandevRestart({ onComplete: () => void reload() });
   const pendingRestart = useMemo(
     () => flags.some((flag) => flag.requires_restart_to_apply),
     [flags],
@@ -76,32 +77,20 @@ export function FeatureTogglesSettings({ initialFlags, restartCapability }: Prop
     }
   };
 
-  const restart = async () => {
-    setRestarting(true);
-    try {
-      const res = await requestRestart();
-      toast({ title: "Restart requested", description: res.message, variant: "success" });
-    } catch (err) {
-      toast({ title: "Restart unavailable", description: errorMessage(err), variant: "error" });
-    } finally {
-      setRestarting(false);
-    }
-  };
-
   return (
     <div className="space-y-4" data-testid="feature-toggles-settings">
       {pendingRestart && (
         <RestartRequiredAlert
           capability={restartCapability}
-          restarting={restarting}
-          onRestart={() => void restart()}
+          restarting={restart.isRestarting}
+          onRestart={() => void restart.start()}
         />
       )}
       {flags.map((flag) => (
         <FeatureToggleCard
           key={flag.key}
           flag={flag}
-          saving={savingKeys.has(flag.key)}
+          saving={savingKeys.has(flag.key) || restart.isRestarting}
           onChange={(next) => void setOverride(flag, next)}
           onReset={() => void setOverride(flag, null)}
         />
@@ -120,6 +109,11 @@ export function FeatureTogglesSettings({ initialFlags, restartCapability }: Prop
           </CardContent>
         </Card>
       )}
+      <RestartProgressDialog
+        phase={restart.phase}
+        errorMessage={restart.errorMessage}
+        onDismiss={restart.dismiss}
+      />
     </div>
   );
 }

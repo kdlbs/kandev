@@ -30,6 +30,15 @@ func TestInfo_ReturnsConfiguredAndRuntimeFields(t *testing.T) {
 	if got.Arch != runtime.GOARCH {
 		t.Errorf("Arch = %q", got.Arch)
 	}
+	if got.BootID == "" {
+		t.Fatal("BootID empty")
+	}
+	if got.StartedAt == "" {
+		t.Fatal("StartedAt empty")
+	}
+	if again := s.Info(); again.BootID != got.BootID {
+		t.Fatalf("BootID changed within process: %q != %q", again.BootID, got.BootID)
+	}
 }
 
 func TestHandler_RendersJSON(t *testing.T) {
@@ -51,5 +60,8 @@ func TestHandler_RendersJSON(t *testing.T) {
 	}
 	if resp.Version != "v1.2.3" {
 		t.Errorf("Version = %q", resp.Version)
+	}
+	if resp.BootID == "" {
+		t.Fatal("BootID empty")
 	}
 }

@@ -11,21 +11,20 @@
  * - Or simply: `make build` (builds both)
  */
 
-import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-import { HEALTH_TIMEOUT_MS_RELEASE, resolveDataDir, resolveDatabasePath } from "./constants";
+import {
+  HEALTH_TIMEOUT_MS_RELEASE,
+  resolveDataDir,
+  resolveDatabasePath,
+  resolveKandevHomeDir,
+} from "./constants";
 import { resolveHealthTimeoutMs, waitForHealth, waitForUrlReady } from "./health";
 import { getBinaryName } from "./platform";
 import { createProcessSupervisor } from "./process";
-import {
-  attachBackendExitHandler,
-  buildBackendEnv,
-  buildWebEnv,
-  logStartupInfo,
-  pickPorts,
-} from "./shared";
+import { buildBackendEnv, buildWebEnv, logStartupInfo, pickPorts } from "./shared";
+import { launchRestartableBackend } from "./supervisor/backend";
 import { launchWebApp, openBrowser } from "./web";
 
 /**
@@ -183,18 +182,21 @@ export async function runStart({
 
   // Start backend: ignore stdin, show stdout only in verbose/debug mode, always show stderr
   // Stderr is always inherited to ensure error messages are visible immediately (no pipe buffering)
-  const backendProc = spawn(backendBin, [], {
+  const backend = await launchRestartableBackend({
+    command: backendBin,
+    args: [],
     cwd: path.dirname(backendBin),
     env: backendEnv,
+    homeDir: resolveKandevHomeDir(),
+    ports,
+    mode: "start",
     stdio: showOutput ? ["ignore", "inherit", "inherit"] : ["ignore", "ignore", "inherit"],
+    supervisor,
   });
-  supervisor.children.push(backendProc);
-
-  attachBackendExitHandler(backendProc, supervisor);
 
   const healthTimeoutMs = resolveHealthTimeoutMs(HEALTH_TIMEOUT_MS_RELEASE);
   console.log("[kandev] starting backend...");
-  await waitForHealth(ports.backendUrl, backendProc, healthTimeoutMs);
+  await waitForHealth(ports.backendUrl, backend.proc, healthTimeoutMs);
   console.log(`[kandev] backend ready at ${ports.backendUrl}`);
 
   // Use standalone server.js directly (not pnpm start)

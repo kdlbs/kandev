@@ -9,6 +9,8 @@ export interface SystemInfo {
   go_version: string;
   os: string;
   arch: string;
+  boot_id: string;
+  started_at: string;
 }
 
 export interface DiskBreakdown {
@@ -158,7 +160,9 @@ export interface JobAcceptResponse {
 export interface RestartCapability {
   supported: boolean;
   mode: "manual" | "supervisor" | string;
+  adapter?: string;
   reason?: string;
+  details?: Record<string, unknown>;
 }
 
 export interface RestartResponse {

@@ -11,6 +11,7 @@ import {
   resolveCacheDir,
   resolveDataDir,
   resolveDatabasePath,
+  resolveKandevHomeDir,
 } from "./constants";
 import { ensureAsset, getRelease } from "./github";
 import { resolveHealthTimeoutMs, waitForHealth, waitForUrlReady } from "./health";
@@ -19,7 +20,8 @@ import { sortVersionsDesc } from "./version";
 import { pickAvailablePort } from "./ports";
 import { createProcessSupervisor } from "./process";
 import { resolveRuntime, validateBundle } from "./runtime";
-import { attachBackendExitHandler, buildBackendEnv, buildWebEnv, logStartupInfo } from "./shared";
+import { buildBackendEnv, buildWebEnv, logStartupInfo } from "./shared";
+import { launchRestartableBackend } from "./supervisor/backend";
 import { launchWebApp, openBrowser } from "./web";
 
 export type RunOptions = {
@@ -254,12 +256,12 @@ export function attachRingBuffer(
   return () => buf;
 }
 
-function launchBundle(prepared: PreparedBundle): {
+async function launchBundle(prepared: PreparedBundle): Promise<{
   supervisor: ReturnType<typeof createProcessSupervisor>;
   backendProc: ReturnType<typeof spawn>;
   webServerPath: string;
   dumpBackendLogs: () => void;
-} {
+}> {
   logStartupInfo({
     header: `release: ${prepared.releaseTag}`,
     ports: {
@@ -275,12 +277,23 @@ function launchBundle(prepared: PreparedBundle): {
   const supervisor = createProcessSupervisor();
   supervisor.attachSignalHandlers();
 
-  const backendProc = spawn(prepared.backendBin, [], {
+  const backend = await launchRestartableBackend({
+    command: prepared.backendBin,
+    args: [],
     cwd: path.dirname(prepared.backendBin),
     env: prepared.backendEnv,
+    homeDir: resolveKandevHomeDir(),
+    ports: {
+      backendPort: Number(prepared.backendEnv.KANDEV_SERVER_PORT),
+      webPort: prepared.webPort,
+      agentctlPort: prepared.agentctlPort,
+      backendUrl: prepared.backendUrl,
+    },
+    mode: "run",
     stdio: prepared.showOutput ? ["ignore", "inherit", "inherit"] : ["ignore", "pipe", "inherit"],
+    supervisor,
   });
-  supervisor.children.push(backendProc);
+  const backendProc = backend.proc;
 
   const readBuffered = prepared.showOutput ? () => "" : attachRingBuffer(backendProc.stdout);
   let dumped = false;
@@ -293,8 +306,6 @@ function launchBundle(prepared: PreparedBundle): {
     console.error(buffered.trimEnd());
     console.error("[kandev] --- end backend stdout ---");
   };
-
-  attachBackendExitHandler(backendProc, supervisor);
 
   const webServerPath = resolveWebServerPath(prepared.bundleDir);
   if (!webServerPath) {
@@ -319,7 +330,7 @@ export async function runRelease({
     verbose,
     debug,
   });
-  const { supervisor, backendProc, webServerPath, dumpBackendLogs } = launchBundle(prepared);
+  const { supervisor, backendProc, webServerPath, dumpBackendLogs } = await launchBundle(prepared);
   const healthTimeoutMs = resolveHealthTimeoutMs(HEALTH_TIMEOUT_MS_RELEASE);
   console.log("[kandev] starting backend...");
   await waitForHealth(prepared.backendUrl, backendProc, healthTimeoutMs, dumpBackendLogs);

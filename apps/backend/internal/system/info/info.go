@@ -4,8 +4,11 @@
 package info
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"net/http"
 	"runtime"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -18,6 +21,8 @@ type Response struct {
 	GoVersion string `json:"go_version"`
 	OS        string `json:"os"`
 	Arch      string `json:"arch"`
+	BootID    string `json:"boot_id"`
+	StartedAt string `json:"started_at"`
 }
 
 // Service composes the static build info; instantiated once at boot from
@@ -27,11 +32,19 @@ type Service struct {
 	Version   string
 	Commit    string
 	BuildTime string
+	BootID    string
+	StartedAt time.Time
 }
 
 // NewService constructs a Service from the ldflag-injected build values.
 func NewService(version, commit, buildTime string) *Service {
-	return &Service{Version: version, Commit: commit, BuildTime: buildTime}
+	return &Service{
+		Version:   version,
+		Commit:    commit,
+		BuildTime: buildTime,
+		BootID:    newBootID(),
+		StartedAt: time.Now().UTC(),
+	}
 }
 
 // Info renders the response payload.
@@ -43,6 +56,8 @@ func (s *Service) Info() Response {
 		GoVersion: runtime.Version(),
 		OS:        runtime.GOOS,
 		Arch:      runtime.GOARCH,
+		BootID:    s.BootID,
+		StartedAt: s.StartedAt.Format(time.RFC3339Nano),
 	}
 }
 
@@ -51,4 +66,12 @@ func Handler(s *Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.JSON(http.StatusOK, s.Info())
 	}
+}
+
+func newBootID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return time.Now().UTC().Format("20060102T150405.000000000Z")
+	}
+	return hex.EncodeToString(b[:])
 }
