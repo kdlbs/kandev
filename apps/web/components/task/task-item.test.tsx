@@ -11,7 +11,7 @@ const WAITING_FOR_INPUT_ICON_TEST_ID = "task-state-waiting-for-input";
 const PENDING_PERMISSION_ICON_TEST_ID = "task-state-pending-permission";
 const AGENT_ERROR_ICON_TEST_ID = "task-agent-error-icon";
 const PREPARING_PHASE = "preparing";
-const PURPLE_SPINNER_CLASS = "text-purple-500";
+const PREPARING_SPINNER_CLASS = "text-muted-foreground/40";
 const SPIN_CLASS = "animate-spin";
 const SLOW_SPIN_CLASS = "[animation-duration:2s]";
 
@@ -30,7 +30,7 @@ function renderTaskItem(props: Partial<ComponentProps<typeof TaskItem>> = {}) {
 function expectPreparingSpinner(): void {
   const icon = screen.getByTestId(RUNNING_ICON_TEST_ID);
   expect(icon.getAttribute("data-loading-phase")).toBe(PREPARING_PHASE);
-  expect(icon.classList.contains(PURPLE_SPINNER_CLASS)).toBe(true);
+  expect(icon.classList.contains(PREPARING_SPINNER_CLASS)).toBe(true);
   expect(icon.classList.contains(SPIN_CLASS)).toBe(true);
   expect(icon.classList.contains(SLOW_SPIN_CLASS)).toBe(true);
 }
@@ -76,19 +76,19 @@ describe("TaskItem status icon", () => {
     expect(screen.queryByTestId(PENDING_PERMISSION_ICON_TEST_ID)).toBeNull();
   });
 
-  it("shows a slower purple spinner while the workflow is scheduling", () => {
+  it("shows a slower muted spinner while the workflow is scheduling", () => {
     renderTaskItem({ state: "SCHEDULING" });
 
     expectPreparingSpinner();
   });
 
-  it("shows a slower purple spinner while the session is starting before progress", () => {
+  it("shows a slower muted spinner while the session is starting before progress", () => {
     renderTaskItem({ state: "TODO", sessionState: "STARTING" });
 
     expectPreparingSpinner();
   });
 
-  it("shows a slower purple spinner for in-progress tasks while the session is starting", () => {
+  it("shows a slower muted spinner for in-progress tasks while the session is starting", () => {
     renderTaskItem({ state: "IN_PROGRESS", sessionState: "STARTING" });
 
     expectPreparingSpinner();
@@ -108,7 +108,7 @@ describe("TaskItem status icon", () => {
     expect(icon.getAttribute("data-loading-phase")).toBe("running");
     expect(icon.classList.contains("text-yellow-500")).toBe(true);
     expect(icon.classList.contains(SPIN_CLASS)).toBe(true);
-    expect(icon.classList.contains(PURPLE_SPINNER_CLASS)).toBe(false);
+    expect(icon.classList.contains(PREPARING_SPINNER_CLASS)).toBe(false);
   });
 
   it("keeps the review check for completed review tasks", () => {

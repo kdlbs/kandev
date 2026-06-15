@@ -142,7 +142,7 @@ function TaskStateIcon({
       <IconCircleDashed
         data-testid="task-state-running"
         data-loading-phase="preparing"
-        className="mt-[1px] h-3.5 w-3.5 shrink-0 animate-spin text-purple-500 [animation-duration:2s]"
+        className="mt-[1px] h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground/40 [animation-duration:2s]"
       />
     );
   }
