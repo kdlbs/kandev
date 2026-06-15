@@ -9,14 +9,19 @@ function setLocation(path: string) {
 describe("client router adapter", () => {
   it("pushes and replaces browser history routes", () => {
     setLocation("/");
+    const scrollTo = vi.fn();
+    vi.stubGlobal("scrollTo", scrollTo);
     const { result } = renderHook(() => useRouter());
 
     act(() => result.current.push("/tasks"));
     expect(window.location.pathname).toBe("/tasks");
+    expect(scrollTo).toHaveBeenCalledWith(0, 0);
 
     act(() => result.current.replace("/stats?range=7d", { scroll: false }));
     expect(window.location.pathname).toBe("/stats");
     expect(window.location.search).toBe("?range=7d");
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
   });
 
   it("returns current path and search params", () => {

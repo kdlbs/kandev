@@ -20,8 +20,8 @@ const LOCATION_CHANGE_EVENT = "kandev:navigation";
 export function useRouter(): AppRouter {
   return useMemo(
     () => ({
-      push: (href) => navigate("push", href),
-      replace: (href) => navigate("replace", href),
+      push: (href, options) => navigate("push", href, options),
+      replace: (href, options) => navigate("replace", href, options),
       refresh: () => window.location.reload(),
       back: () => window.history.back(),
       forward: () => window.history.forward(),
@@ -45,11 +45,14 @@ export function useParams(): Record<string, string> {
   return useMemo(() => paramsForPath(pathname), [pathname]);
 }
 
-function navigate(mode: "push" | "replace", href: string): void {
+function navigate(mode: "push" | "replace", href: string, options?: NavigateOptions): void {
   if (mode === "push") {
     window.history.pushState({}, "", href);
   } else {
     window.history.replaceState({}, "", href);
+  }
+  if (options?.scroll !== false) {
+    window.scrollTo(0, 0);
   }
   dispatchLocationChange();
 }
