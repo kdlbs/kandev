@@ -114,7 +114,7 @@ func copyFile(src, dst string, mode fs.FileMode) error {
 	return nil
 }
 
-// buildWeb runs the Next.js production build. When skipInstall is true the
+// buildWeb runs the Vite production build. When skipInstall is true the
 // pnpm install step is skipped (CI already runs it before invoking the CLI).
 func buildWeb(ctx context.Context, skipInstall bool) error {
 	steps := []struct {
@@ -157,9 +157,7 @@ func buildCLI(ctx context.Context) error {
 // packageBundle creates a tar.gz matching the Docker container layout:
 //
 //	app/apps/backend/bin/{kandev,agentctl,mock-agent}
-//	app/apps/web/.next/standalone/           (Next.js server + node_modules)
-//	app/apps/web/.next/standalone/web/.next/static/  (static assets inside standalone)
-//	app/apps/web/.next/standalone/web/public/        (public assets inside standalone)
+//	app/apps/web/dist/                       (Vite SPA assets)
 //	usr/local/lib/kandev-cli/                (CLI launcher bundle)
 func packageBundle(binDir, tarPath string) error {
 	f, err := os.Create(tarPath)
@@ -184,24 +182,11 @@ func packageBundle(binDir, tarPath string) error {
 		}
 	}
 
-	// Add Next.js standalone output.
-	standaloneDir := filepath.Join(appsDir, "web", ".next", "standalone")
-	if err := addDirToTar(tw, standaloneDir, filepath.Join("app", "apps", "web", ".next", "standalone")); err != nil {
-		return fmt.Errorf("add standalone: %w", err)
-	}
-
-	// Add static assets into the standalone web dir (mirrors the Dockerfile COPY).
-	staticDir := filepath.Join(appsDir, "web", ".next", "static")
-	staticDst := filepath.Join("app", "apps", "web", ".next", "standalone", "web", ".next", "static")
-	if err := addDirToTar(tw, staticDir, staticDst); err != nil {
-		return fmt.Errorf("add static: %w", err)
-	}
-
-	// Add public directory into the standalone web dir.
-	publicDir := filepath.Join(appsDir, "web", "public")
-	publicDst := filepath.Join("app", "apps", "web", ".next", "standalone", "web", "public")
-	if err := addDirToTar(tw, publicDir, publicDst); err != nil {
-		return fmt.Errorf("add public: %w", err)
+	// Add Vite SPA assets. `kandev start` resolves these from /app/apps/web/dist
+	// and passes KANDEV_WEB_DIST_DIR to the backend.
+	webDistDir := filepath.Join(appsDir, "web", "dist")
+	if err := addDirToTar(tw, webDistDir, filepath.Join("app", "apps", "web", "dist")); err != nil {
+		return fmt.Errorf("add web dist: %w", err)
 	}
 
 	cliDir := filepath.Join(repoRootDir, "dist", "kandev", "cli")
@@ -249,7 +234,7 @@ func addDirToTar(tw *tar.Writer, srcDir, dstPrefix string) error {
 			return err
 		}
 
-		// Preserve symlinks as-is (Next.js standalone relies on them for node_modules).
+		// Preserve symlinks as-is.
 		if info.Mode()&fs.ModeSymlink != 0 {
 			target, err := os.Readlink(path)
 			if err != nil {

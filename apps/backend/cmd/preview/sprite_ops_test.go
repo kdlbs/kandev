@@ -29,6 +29,9 @@ func TestBuildExtractScript(t *testing.T) {
 	if strings.Contains(script, "nohup node") {
 		t.Errorf("script should not start web outside the CLI supervisor")
 	}
+	if strings.Contains(script, ".next") {
+		t.Errorf("script should not refer to Next.js build output")
+	}
 	if strings.Contains(script, "/app/apps/backend/bin/kandev >") {
 		t.Errorf("script should not launch the backend binary directly")
 	}

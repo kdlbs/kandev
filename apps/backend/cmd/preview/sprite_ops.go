@@ -122,9 +122,8 @@ mkdir -p /data
 
 # Kill any agentctl orphans from previous runs.
 pkill -f agentctl || true
-# Kill any stale web (node) process from older preview deployments, where the
-# web server was nohup'd outside the service process group.
-pkill -f '/app/apps/web/.next/standalone/web/server.js' || true
+# Kill any stale web (node) process from older preview deployments.
+pkill -f '/app/apps/web/.*/server.js' || true
 sleep 1
 cd /app
 
@@ -280,7 +279,7 @@ func fetchSpriteLogs(ctx context.Context, sprite *sprites.Sprite) string {
 	logCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	script := `echo "=== /var/log/kandev.log ==="; tail -50 /var/log/kandev.log 2>/dev/null || echo "(empty)"; echo "=== /var/log/kandev-web.log ==="; tail -20 /var/log/kandev-web.log 2>/dev/null || echo "(empty)"`
+	script := `echo "=== /var/log/kandev.log ==="; tail -50 /var/log/kandev.log 2>/dev/null || echo "(empty)"`
 	out, err := sprite.CommandContext(logCtx, "bash", "-c", script).CombinedOutput()
 	if err != nil {
 		return fmt.Sprintf("[log fetch error: %v]\n%s", err, string(out))
