@@ -13,6 +13,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/watchreset"
 )
 
 // SecretStore is the subset of the secrets store the service needs.
@@ -44,6 +45,19 @@ type Service struct {
 	// NewSentryIssueEvent. Optional: when nil, observed issues are not
 	// surfaced to the orchestrator.
 	eventBus bus.EventBus
+	// taskDeleter is the cascade-delete entry point used by ResetIssueWatch.
+	// Wired post-construction via SetTaskDeleter to avoid an import cycle
+	// with the task service.
+	taskDeleter watchreset.TaskDeleter
+}
+
+// SetTaskDeleter wires the cascade-delete dependency used by ResetIssueWatch.
+// Optional — when unset, reset returns an error so the missing wiring is
+// surfaced instead of silently no-op'ing.
+func (s *Service) SetTaskDeleter(td watchreset.TaskDeleter) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.taskDeleter = td
 }
 
 // MockClient returns the shared mock client when the service was built in mock

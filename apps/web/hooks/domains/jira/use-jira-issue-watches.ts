@@ -7,9 +7,16 @@ import {
   updateJiraIssueWatch,
   deleteJiraIssueWatch,
   triggerJiraIssueWatch,
+  previewResetJiraIssueWatch,
+  resetJiraIssueWatch,
 } from "@/lib/api/domains/jira-api";
 import { useAppStore } from "@/components/state-provider";
 import type { CreateJiraIssueWatchInput, UpdateJiraIssueWatchInput } from "@/lib/types/jira";
+
+// WORKSPACE_REQUIRED is thrown by per-row mutation callbacks when the
+// install-wide listing case forgets to forward the row's workspaceId
+// (the install-wide hook leaves workspaceId undefined to fetch all rows).
+const WORKSPACE_REQUIRED = "workspaceId required";
 
 /**
  * useJiraIssueWatches owns the JIRA-watcher list:
@@ -72,7 +79,7 @@ export function useJiraIssueWatches(workspaceId?: string | null) {
   const update = useCallback(
     async (id: string, req: UpdateJiraIssueWatchInput, rowWorkspaceId?: string) => {
       const ws = rowWorkspaceId ?? workspaceId;
-      if (!ws) throw new Error("workspaceId required");
+      if (!ws) throw new Error(WORKSPACE_REQUIRED);
       const watch = await updateJiraIssueWatch(ws, id, req);
       updateWatch(watch);
       return watch;
@@ -83,7 +90,7 @@ export function useJiraIssueWatches(workspaceId?: string | null) {
   const remove = useCallback(
     async (id: string, rowWorkspaceId?: string) => {
       const ws = rowWorkspaceId ?? workspaceId;
-      if (!ws) throw new Error("workspaceId required");
+      if (!ws) throw new Error(WORKSPACE_REQUIRED);
       await deleteJiraIssueWatch(ws, id);
       removeWatch(id);
     },
@@ -93,11 +100,36 @@ export function useJiraIssueWatches(workspaceId?: string | null) {
   const trigger = useCallback(
     async (id: string, rowWorkspaceId?: string) => {
       const ws = rowWorkspaceId ?? workspaceId;
-      if (!ws) throw new Error("workspaceId required");
+      if (!ws) throw new Error(WORKSPACE_REQUIRED);
       return triggerJiraIssueWatch(ws, id);
     },
     [workspaceId],
   );
 
-  return { items, loaded, loading, create, update, remove, trigger };
+  // previewReset / reset use the same per-row workspaceId pattern as update /
+  // remove / trigger — the install-wide listing case relies on the caller
+  // passing the row's stored workspaceId, satisfying the backend IDOR guard.
+  const previewReset = useCallback(
+    async (id: string, rowWorkspaceId?: string) => {
+      const ws = rowWorkspaceId ?? workspaceId;
+      if (!ws) throw new Error(WORKSPACE_REQUIRED);
+      return previewResetJiraIssueWatch(ws, id);
+    },
+    [workspaceId],
+  );
+
+  const reset = useCallback(
+    async (id: string, rowWorkspaceId?: string) => {
+      const ws = rowWorkspaceId ?? workspaceId;
+      if (!ws) throw new Error(WORKSPACE_REQUIRED);
+      const res = await resetJiraIssueWatch(ws, id);
+      // Wipe the dedup row cache so the next list/refresh doesn't surface
+      // stale state — the watch is now in "freshly created" mode.
+      resetWatches();
+      return res;
+    },
+    [workspaceId, resetWatches],
+  );
+
+  return { items, loaded, loading, create, update, remove, trigger, previewReset, reset };
 }

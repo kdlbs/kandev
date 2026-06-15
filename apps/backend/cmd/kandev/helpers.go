@@ -502,6 +502,22 @@ func registerRoutes(p routeParams) {
 	// runCanceller but its container leaks because the cascade bypasses
 	// Service.ArchiveTask's runAsyncTaskCleanup branch.
 	handoffSvc.SetTaskResourceCleaner(p.taskSvc)
+	// Watch reset (Reset button on integration settings) cascade-deletes
+	// every task a watch previously created. The integrations re-use the
+	// shared HandoffService so the reset path goes through the same
+	// cleanup machinery as the regular delete-task surface.
+	if p.services.GitHub != nil {
+		p.services.GitHub.SetCascadeTaskDeleter(handoffSvc)
+	}
+	if p.services.Jira != nil {
+		p.services.Jira.SetTaskDeleter(handoffSvc)
+	}
+	if p.services.Linear != nil {
+		p.services.Linear.SetTaskDeleter(handoffSvc)
+	}
+	if p.services.Sentry != nil {
+		p.services.Sentry.SetTaskDeleter(handoffSvc)
+	}
 	p.orchestratorSvc.SetWorkspaceMaterializer(handoffSvc)
 	// Phase 8 prompt enrichment — wire the office scheduler's
 	// TaskContextProvider so every run prompt rendered by the active

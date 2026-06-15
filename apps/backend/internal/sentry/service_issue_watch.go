@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/watchreset"
 )
 
 // ErrIssueWatchNotFound is returned when GetIssueWatch's caller looks up an ID
@@ -102,6 +103,45 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 // DeleteIssueWatch removes the watch and its dedup rows. Idempotent.
 func (s *Service) DeleteIssueWatch(ctx context.Context, id string) error {
 	return s.store.DeleteIssueWatch(ctx, id)
+}
+
+// sentryIssueWatchResetter is the watchreset.Resetter adapter for a single
+// Sentry issue watch. Closes over the store and watch ID so the shared
+// watchreset.Run helper stays integration-agnostic.
+type sentryIssueWatchResetter struct {
+	store   *Store
+	watchID string
+}
+
+func (r *sentryIssueWatchResetter) ListTaskIDs(ctx context.Context) ([]string, error) {
+	return r.store.ListIssueWatchTaskIDs(ctx, r.watchID)
+}
+
+func (r *sentryIssueWatchResetter) Clear(ctx context.Context) error {
+	return r.store.ResetIssueWatchState(ctx, r.watchID)
+}
+
+// PreviewResetIssueWatch returns how many tasks ResetIssueWatch would
+// cascade-delete. Used by the frontend to populate the confirmation dialog.
+func (s *Service) PreviewResetIssueWatch(ctx context.Context, watchID string) (int, error) {
+	return watchreset.Preview(ctx, &sentryIssueWatchResetter{store: s.store, watchID: watchID})
+}
+
+// ResetIssueWatch is destructive: cascade-deletes every task previously
+// created by the watch (including archived), wipes the per-watch dedup
+// rows, and nulls last_polled_at so the next poll re-imports every
+// currently-matching issue. Returns the count of tasks deleted.
+func (s *Service) ResetIssueWatch(ctx context.Context, watchID string) (int, error) {
+	s.mu.Lock()
+	td := s.taskDeleter
+	s.mu.Unlock()
+	if td == nil {
+		return 0, errors.New("sentry: task deleter not wired; reset unavailable")
+	}
+	res, err := watchreset.Run(ctx,
+		&sentryIssueWatchResetter{store: s.store, watchID: watchID},
+		td, s.log)
+	return res.TasksDeleted, err
 }
 
 // CheckIssueWatch runs the watch's filter once and returns the issues that

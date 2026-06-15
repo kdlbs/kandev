@@ -267,6 +267,71 @@ func TestStore_IssueWatchTask_ListSeenIssueKeys(t *testing.T) {
 	}
 }
 
+func TestStore_IssueWatchTask_ListTaskIDsAndReset(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	w := newTestIssueWatch("ws-1")
+	if err := store.CreateIssueWatch(ctx, w); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// Stamp a last_polled_at so we can assert the reset clears it.
+	if err := store.UpdateIssueWatchLastPolled(ctx, w.ID, time.Now().UTC()); err != nil {
+		t.Fatalf("stamp last polled: %v", err)
+	}
+	// Reserve three slots; only two get assigned task IDs (mirrors the
+	// "task creation in flight" state the reset must handle).
+	for _, k := range []string{"PROJ-1", "PROJ-2", "PROJ-3"} {
+		if _, err := store.ReserveIssueWatchTask(ctx, w.ID, k, "https://x/"+k); err != nil {
+			t.Fatalf("reserve %s: %v", k, err)
+		}
+	}
+	if err := store.AssignIssueWatchTaskID(ctx, w.ID, "PROJ-1", "task-a"); err != nil {
+		t.Fatalf("assign 1: %v", err)
+	}
+	if err := store.AssignIssueWatchTaskID(ctx, w.ID, "PROJ-2", "task-b"); err != nil {
+		t.Fatalf("assign 2: %v", err)
+	}
+
+	ids, err := store.ListIssueWatchTaskIDs(ctx, w.ID)
+	if err != nil {
+		t.Fatalf("list ids: %v", err)
+	}
+	if len(ids) != 3 {
+		t.Fatalf("ListIssueWatchTaskIDs returned %d rows, want 3 (including empty reservation)", len(ids))
+	}
+	nonEmpty := 0
+	for _, id := range ids {
+		if id != "" {
+			nonEmpty++
+		}
+	}
+	if nonEmpty != 2 {
+		t.Errorf("expected 2 non-empty task IDs, got %d", nonEmpty)
+	}
+
+	if err := store.ResetIssueWatchState(ctx, w.ID); err != nil {
+		t.Fatalf("reset: %v", err)
+	}
+
+	// Dedup rows wiped.
+	idsAfter, err := store.ListIssueWatchTaskIDs(ctx, w.ID)
+	if err != nil {
+		t.Fatalf("list ids after reset: %v", err)
+	}
+	if len(idsAfter) != 0 {
+		t.Errorf("expected 0 dedup rows after reset, got %d", len(idsAfter))
+	}
+	// last_polled_at cleared.
+	got, err := store.GetIssueWatch(ctx, w.ID)
+	if err != nil {
+		t.Fatalf("get watch: %v", err)
+	}
+	if got.LastPolledAt != nil {
+		t.Errorf("expected LastPolledAt to be nil after reset, got %v", got.LastPolledAt)
+	}
+}
+
 func TestStore_IssueWatchTask_Release(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()

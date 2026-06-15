@@ -7,6 +7,8 @@ import {
   updateSentryIssueWatch,
   deleteSentryIssueWatch,
   triggerSentryIssueWatch,
+  previewResetSentryIssueWatch,
+  resetSentryIssueWatch,
 } from "@/lib/api/domains/sentry-api";
 import type {
   CreateSentryIssueWatchRequest,
@@ -104,5 +106,17 @@ export function useSentryIssueWatches(workspaceId?: string | null) {
     return triggerSentryIssueWatch(id, watchWorkspaceId);
   }, []);
 
-  return { items, loaded, loading, create, update, remove, trigger };
+  const previewReset = useCallback(async (id: string, watchWorkspaceId: string) => {
+    return previewResetSentryIssueWatch(id, watchWorkspaceId);
+  }, []);
+
+  const reset = useCallback(async (id: string, watchWorkspaceId: string) => {
+    const res = await resetSentryIssueWatch(id, watchWorkspaceId);
+    // Force the next render to refetch so the now-empty dedup set / cleared
+    // last_polled_at land in the UI immediately.
+    setLoaded(false);
+    return res;
+  }, []);
+
+  return { items, loaded, loading, create, update, remove, trigger, previewReset, reset };
 }

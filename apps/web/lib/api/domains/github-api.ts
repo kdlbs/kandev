@@ -224,6 +224,25 @@ export async function triggerReviewWatch(id: string, options?: ApiRequestOptions
   });
 }
 
+// previewResetReviewWatch returns how many tasks would be deleted if the
+// review watch were reset. Used by the confirmation dialog.
+export async function previewResetReviewWatch(id: string, options?: ApiRequestOptions) {
+  return fetchJson<{ taskCount: number }>(
+    `/api/v1/github/watches/review/${id}/reset/preview`,
+    options,
+  );
+}
+
+// resetReviewWatch deletes every task previously created by the review
+// watch (including archived), wipes its dedup table, and nulls
+// last_polled_at so the next poll re-imports every currently-matching PR.
+export async function resetReviewWatch(id: string, options?: ApiRequestOptions) {
+  return fetchJson<{ tasksDeleted: number }>(`/api/v1/github/watches/review/${id}/reset`, {
+    ...options,
+    init: { method: "POST", ...(options?.init ?? {}) },
+  });
+}
+
 export async function triggerAllReviewWatches(workspaceId: string, options?: ApiRequestOptions) {
   const query = new URLSearchParams({ workspace_id: workspaceId });
   return fetchJson<TriggerReviewResponse>(
@@ -396,6 +415,26 @@ export async function deleteIssueWatch(id: string, options?: ApiRequestOptions) 
 
 export async function triggerIssueWatch(id: string, options?: ApiRequestOptions) {
   return fetchJson<TriggerIssueResponse>(`/api/v1/github/watches/issue/${id}/trigger`, {
+    ...options,
+    init: { method: "POST", ...(options?.init ?? {}) },
+  });
+}
+
+// previewResetIssueWatch returns how many tasks would be deleted if the
+// issue watch were reset. Used by the confirmation dialog.
+export async function previewResetIssueWatch(id: string, options?: ApiRequestOptions) {
+  return fetchJson<{ taskCount: number }>(
+    `/api/v1/github/watches/issue/${id}/reset/preview`,
+    options,
+  );
+}
+
+// resetIssueWatch deletes every task previously created by the issue
+// watch (including archived), wipes its dedup table, and nulls
+// last_polled_at so the next poll re-imports every currently-matching
+// issue.
+export async function resetIssueWatch(id: string, options?: ApiRequestOptions) {
+  return fetchJson<{ tasksDeleted: number }>(`/api/v1/github/watches/issue/${id}/reset`, {
     ...options,
     init: { method: "POST", ...(options?.init ?? {}) },
   });

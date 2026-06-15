@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/watchreset"
 )
 
 // Auth method constants.
@@ -70,15 +71,21 @@ type SecretManager interface {
 
 // Service coordinates GitHub integration operations.
 type Service struct {
-	mu                   sync.Mutex
-	client               Client
-	authMethod           string
-	secrets              SecretProvider
-	secretManager        SecretManager
-	store                *Store
-	eventBus             bus.EventBus
-	logger               *logger.Logger
-	taskDeleter          TaskDeleter
+	mu            sync.Mutex
+	client        Client
+	authMethod    string
+	secrets       SecretProvider
+	secretManager SecretManager
+	store         *Store
+	eventBus      bus.EventBus
+	logger        *logger.Logger
+	taskDeleter   TaskDeleter
+	// cascadeTaskDeleter is the cascade-delete entry point used by the
+	// watch reset flow. It is distinct from taskDeleter (which only deletes
+	// a single task by ID) because reset must walk the task tree and clean
+	// up subtasks, runs, and worktrees too. Wired post-construction via
+	// SetCascadeTaskDeleter to avoid an import cycle with the task service.
+	cascadeTaskDeleter   watchreset.TaskDeleter
 	taskSessionChecker   TaskSessionChecker
 	syncGroup            singleflight.Group
 	taskEventSubs        []bus.Subscription
@@ -175,6 +182,16 @@ func (s *Service) newPATClient(token string) *PATClient {
 
 // SetTaskDeleter sets the task deletion dependency for cleanup operations.
 func (s *Service) SetTaskDeleter(d TaskDeleter) { s.taskDeleter = d }
+
+// SetCascadeTaskDeleter wires the cascade-delete dependency used by the
+// watch reset flow (ResetIssueWatch / ResetReviewWatch). Optional — when
+// unset, reset returns an error so the missing wiring is surfaced instead
+// of silently no-op'ing.
+func (s *Service) SetCascadeTaskDeleter(d watchreset.TaskDeleter) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cascadeTaskDeleter = d
+}
 
 // SetTaskSessionChecker sets the session checker for cleanup operations.
 func (s *Service) SetTaskSessionChecker(c TaskSessionChecker) { s.taskSessionChecker = c }

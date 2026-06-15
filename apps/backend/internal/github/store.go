@@ -1236,6 +1236,38 @@ func (s *Store) DeleteReviewPRTask(ctx context.Context, id string) error {
 	return err
 }
 
+// ListReviewPRTaskIDsByWatch returns every task_id recorded against a
+// review watch, including empty-string reservations. Used by the watch
+// reset flow to enumerate the tasks to cascade-delete.
+func (s *Store) ListReviewPRTaskIDsByWatch(ctx context.Context, watchID string) ([]string, error) {
+	var ids []string
+	err := s.ro.SelectContext(ctx, &ids,
+		`SELECT task_id FROM github_review_pr_tasks WHERE review_watch_id = ?`, watchID)
+	return ids, err
+}
+
+// ResetReviewWatchState wipes a review watch's dedup rows and nulls its
+// last_polled_at in a single transaction. Used by the reset flow after
+// the cascade-delete loop so the next poll re-imports every currently
+// matching PR as if the watch were freshly created.
+func (s *Store) ResetReviewWatchState(ctx context.Context, watchID string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM github_review_pr_tasks WHERE review_watch_id = ?`, watchID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE github_review_watches SET last_polled_at = NULL, updated_at = ? WHERE id = ?`,
+		time.Now().UTC(), watchID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // --- Stats queries ---
 
 // prStatsQuery builds parameterised SELECT queries against the github_task_prs table.
@@ -1593,6 +1625,38 @@ func (s *Store) ListAllIssueWatchTasks(ctx context.Context) ([]*IssueWatchTask, 
 func (s *Store) DeleteIssueWatchTask(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM github_issue_watch_tasks WHERE id = ?`, id)
 	return err
+}
+
+// ListIssueWatchTaskIDsByWatch returns every task_id recorded against an
+// issue watch, including empty-string reservations. Used by the watch
+// reset flow to enumerate the tasks to cascade-delete.
+func (s *Store) ListIssueWatchTaskIDsByWatch(ctx context.Context, watchID string) ([]string, error) {
+	var ids []string
+	err := s.ro.SelectContext(ctx, &ids,
+		`SELECT task_id FROM github_issue_watch_tasks WHERE issue_watch_id = ?`, watchID)
+	return ids, err
+}
+
+// ResetIssueWatchState wipes an issue watch's dedup rows and nulls its
+// last_polled_at in a single transaction. Used by the reset flow after
+// the cascade-delete loop so the next poll re-imports every currently
+// matching issue as if the watch were freshly created.
+func (s *Store) ResetIssueWatchState(ctx context.Context, watchID string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM github_issue_watch_tasks WHERE issue_watch_id = ?`, watchID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE github_issue_watches SET last_polled_at = NULL, updated_at = ? WHERE id = ?`,
+		time.Now().UTC(), watchID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // --- Action preset operations ---

@@ -8,8 +8,10 @@ import {
   deleteIssueWatch,
   triggerIssueWatch,
   triggerAllIssueWatches,
+  previewResetIssueWatch,
+  resetIssueWatch,
 } from "@/lib/api/domains/github-api";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import type { CreateIssueWatchRequest, UpdateIssueWatchRequest } from "@/lib/types/github";
 
 // useIssueWatches has three modes:
@@ -25,6 +27,10 @@ export function useIssueWatches(workspaceId?: string | null) {
   const addWatch = useAppStore((state) => state.addIssueWatch);
   const updateWatch = useAppStore((state) => state.updateIssueWatch);
   const removeWatch = useAppStore((state) => state.removeIssueWatch);
+  // storeApi exposes getState() without subscribing — used in reset() to
+  // read the current watch row outside of the React render cycle so the
+  // callback doesn't need `items` as a dependency.
+  const storeApi = useAppStoreApi();
 
   useEffect(() => {
     if (workspaceId === null || loaded || loading) return;
@@ -76,6 +82,22 @@ export function useIssueWatches(workspaceId?: string | null) {
     return triggerAllIssueWatches(workspaceId);
   }, [workspaceId]);
 
+  const previewReset = useCallback(async (id: string) => {
+    return previewResetIssueWatch(id);
+  }, []);
+
+  const reset = useCallback(
+    async (id: string) => {
+      const res = await resetIssueWatch(id);
+      // Patch the cached watch so the "Last polled" column reflects the
+      // reset immediately without waiting for the next poll tick.
+      const current = storeApi.getState().issueWatches.items.find((w) => w.id === id);
+      if (current) updateWatch({ ...current, last_polled_at: null });
+      return res;
+    },
+    [storeApi, updateWatch],
+  );
+
   return {
     items,
     loaded,
@@ -85,5 +107,7 @@ export function useIssueWatches(workspaceId?: string | null) {
     remove,
     trigger,
     triggerAll,
+    previewReset,
+    reset,
   };
 }

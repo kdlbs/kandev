@@ -19,6 +19,7 @@ import { PRStatsPanel } from "./pr-stats";
 import { useReviewWatches } from "@/hooks/domains/github/use-review-watches";
 import { useIssueWatches } from "@/hooks/domains/github/use-issue-watches";
 import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
+import { ResetWatchDialog, useWatchResetController } from "@/components/watches/reset-watch-dialog";
 import { cleanupMergedReviewTasks, cleanupClosedIssueTasks } from "@/lib/api/domains/github-api";
 import type { ReviewWatch, IssueWatch } from "@/lib/types/github";
 
@@ -66,7 +67,15 @@ function CleanupNowButton({
 }
 
 function useWatchActions(workspaceId?: string | null) {
-  const { items: watches, create, update, remove, trigger } = useReviewWatches(workspaceId);
+  const {
+    items: watches,
+    create,
+    update,
+    remove,
+    trigger,
+    previewReset,
+    reset,
+  } = useReviewWatches(workspaceId);
   const { toast } = useToast();
 
   const handleDelete = useCallback(
@@ -116,11 +125,47 @@ function useWatchActions(workspaceId?: string | null) {
     [update, toast],
   );
 
-  return { watches, create, update, handleDelete, handleTrigger, handleToggleEnabled };
+  const handleReset = useCallback(
+    async (id: string) => {
+      try {
+        const { tasksDeleted } = await reset(id);
+        toast({
+          description:
+            tasksDeleted > 0
+              ? `Reset complete — deleted ${tasksDeleted} task(s); next poll will re-import.`
+              : "Reset complete — next poll will re-import matches.",
+          variant: "success",
+        });
+      } catch {
+        toast({ description: "Failed to reset review watch", variant: "error" });
+        throw new Error("reset failed");
+      }
+    },
+    [reset, toast],
+  );
+
+  return {
+    watches,
+    create,
+    update,
+    previewReset,
+    handleDelete,
+    handleTrigger,
+    handleReset,
+    handleToggleEnabled,
+  };
 }
 
 function useIssueWatchActions(workspaceId?: string | null) {
-  const { items: watches, create, update, remove, trigger } = useIssueWatches(workspaceId);
+  const {
+    items: watches,
+    create,
+    update,
+    remove,
+    trigger,
+    previewReset,
+    reset,
+  } = useIssueWatches(workspaceId);
   const { toast } = useToast();
 
   const handleDelete = useCallback(
@@ -170,7 +215,35 @@ function useIssueWatchActions(workspaceId?: string | null) {
     [update, toast],
   );
 
-  return { watches, create, update, handleDelete, handleTrigger, handleToggleEnabled };
+  const handleReset = useCallback(
+    async (id: string) => {
+      try {
+        const { tasksDeleted } = await reset(id);
+        toast({
+          description:
+            tasksDeleted > 0
+              ? `Reset complete — deleted ${tasksDeleted} task(s); next poll will re-import.`
+              : "Reset complete — next poll will re-import matches.",
+          variant: "success",
+        });
+      } catch {
+        toast({ description: "Failed to reset issue watch", variant: "error" });
+        throw new Error("reset failed");
+      }
+    },
+    [reset, toast],
+  );
+
+  return {
+    watches,
+    create,
+    update,
+    previewReset,
+    handleDelete,
+    handleTrigger,
+    handleReset,
+    handleToggleEnabled,
+  };
 }
 
 export function GitHubConnectionSection() {
@@ -232,16 +305,36 @@ export function GitHubIntegrationPage() {
 // single flat table. Pass `undefined` to the hook so it fetches all rows; the
 // dialog's create flow asks the user to pick the workspace.
 function ReviewWatchSection() {
-  const { watches, create, update, handleDelete, handleTrigger, handleToggleEnabled } =
-    useWatchActions(undefined);
+  const {
+    watches,
+    create,
+    update,
+    previewReset,
+    handleDelete,
+    handleTrigger,
+    handleReset,
+    handleToggleEnabled,
+  } = useWatchActions(undefined);
   const { toast } = useToast();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingWatch, setEditingWatch] = useState<ReviewWatch | null>(null);
+  const resetCtrl = useWatchResetController<ReviewWatch>({
+    preview: (w) => previewReset(w.id),
+    reset: (w) => handleReset(w.id),
+  });
 
   const handleEdit = useCallback((watch: ReviewWatch) => {
     setEditingWatch(watch);
     setDialogOpen(true);
   }, []);
+
+  const onResetClick = useCallback(
+    (id: string) => {
+      const w = watches.find((item) => item.id === id);
+      if (w) resetCtrl.setResetting(w);
+    },
+    [watches, resetCtrl],
+  );
 
   return (
     <>
@@ -273,6 +366,7 @@ function ReviewWatchSection() {
               onEdit={handleEdit}
               onDelete={handleDelete}
               onTrigger={handleTrigger}
+              onReset={onResetClick}
               onToggleEnabled={handleToggleEnabled}
             />
           </CardContent>
@@ -292,6 +386,15 @@ function ReviewWatchSection() {
           toast({ description: "Review watch updated", variant: "success" });
         }}
       />
+      {resetCtrl.resetting && (
+        <ResetWatchDialog
+          open
+          onOpenChange={resetCtrl.onOpenChange}
+          integrationLabel="review watch"
+          previewLoader={resetCtrl.previewLoader}
+          onConfirm={resetCtrl.confirmReset}
+        />
+      )}
     </>
   );
 }
@@ -301,11 +404,23 @@ function IssueWatchSection() {
   const { toast } = useToast();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingWatch, setEditingIssueWatch] = useState<IssueWatch | null>(null);
+  const resetCtrl = useWatchResetController<IssueWatch>({
+    preview: (w) => issueActions.previewReset(w.id),
+    reset: (w) => issueActions.handleReset(w.id),
+  });
 
   const handleEdit = useCallback((watch: IssueWatch) => {
     setEditingIssueWatch(watch);
     setDialogOpen(true);
   }, []);
+
+  const onResetClick = useCallback(
+    (id: string) => {
+      const w = issueActions.watches.find((item) => item.id === id);
+      if (w) resetCtrl.setResetting(w);
+    },
+    [issueActions.watches, resetCtrl],
+  );
 
   return (
     <>
@@ -337,6 +452,7 @@ function IssueWatchSection() {
               onEdit={handleEdit}
               onDelete={issueActions.handleDelete}
               onTrigger={issueActions.handleTrigger}
+              onReset={onResetClick}
               onToggleEnabled={issueActions.handleToggleEnabled}
             />
           </CardContent>
@@ -355,6 +471,15 @@ function IssueWatchSection() {
           toast({ description: "Issue watch updated", variant: "success" });
         }}
       />
+      {resetCtrl.resetting && (
+        <ResetWatchDialog
+          open
+          onOpenChange={resetCtrl.onOpenChange}
+          integrationLabel="issue watch"
+          previewLoader={resetCtrl.previewLoader}
+          onConfirm={resetCtrl.confirmReset}
+        />
+      )}
     </>
   );
 }

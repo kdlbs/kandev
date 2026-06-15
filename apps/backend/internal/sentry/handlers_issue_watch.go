@@ -16,6 +16,8 @@ func (c *Controller) registerIssueWatchRoutes(api *gin.RouterGroup) {
 	api.PATCH("/watches/issue/:id", c.httpUpdateIssueWatch)
 	api.DELETE("/watches/issue/:id", c.httpDeleteIssueWatch)
 	api.POST("/watches/issue/:id/trigger", c.httpTriggerIssueWatch)
+	api.GET("/watches/issue/:id/reset/preview", c.httpPreviewResetIssueWatch)
+	api.POST("/watches/issue/:id/reset", c.httpResetIssueWatch)
 }
 
 // httpListIssueWatches returns watches scoped to one workspace when
@@ -121,6 +123,39 @@ func (c *Controller) httpTriggerIssueWatch(ctx *gin.Context) {
 		c.service.publishNewSentryIssueEvent(ctx.Request.Context(), w, issue)
 	}
 	ctx.JSON(http.StatusOK, gin.H{"published": len(issues)})
+}
+
+// httpPreviewResetIssueWatch returns the count of tasks that a reset on the
+// watch would cascade-delete. Used by the confirmation dialog so the user
+// sees "delete N task(s)" before they commit.
+func (c *Controller) httpPreviewResetIssueWatch(ctx *gin.Context) {
+	id := ctx.Param("id")
+	if !c.assertWatchInWorkspace(ctx, id) {
+		return
+	}
+	n, err := c.service.PreviewResetIssueWatch(ctx.Request.Context(), id)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"taskCount": n})
+}
+
+// httpResetIssueWatch executes the destructive reset: cascade-deletes all
+// tasks previously created by the watch (including archived), wipes its
+// dedup table, and nulls last_polled_at so the next poll re-imports
+// everything currently matching the filter.
+func (c *Controller) httpResetIssueWatch(ctx *gin.Context) {
+	id := ctx.Param("id")
+	if !c.assertWatchInWorkspace(ctx, id) {
+		return
+	}
+	n, err := c.service.ResetIssueWatch(ctx.Request.Context(), id)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"tasksDeleted": n})
 }
 
 // assertWatchInWorkspace guards mutation/trigger endpoints against IDOR: the

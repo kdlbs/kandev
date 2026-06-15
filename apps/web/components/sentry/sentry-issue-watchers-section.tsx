@@ -7,6 +7,7 @@ import { Card, CardContent } from "@kandev/ui/card";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { useToast } from "@/components/toast-provider";
 import { useSentryIssueWatches } from "@/hooks/domains/sentry/use-sentry-issue-watches";
+import { ResetWatchDialog, useWatchResetController } from "@/components/watches/reset-watch-dialog";
 import { SentryIssueWatchTable } from "./sentry-issue-watch-table";
 import { SentryIssueWatchDialog } from "./sentry-issue-watch-dialog";
 import type { SentryIssueWatch } from "@/lib/types/sentry";
@@ -19,9 +20,10 @@ type RawActions = {
   update: ReturnType<typeof useSentryIssueWatches>["update"];
   remove: ReturnType<typeof useSentryIssueWatches>["remove"];
   trigger: ReturnType<typeof useSentryIssueWatches>["trigger"];
+  reset: ReturnType<typeof useSentryIssueWatches>["reset"];
 };
 
-function useToastedActions({ create, update, remove, trigger }: RawActions) {
+function useToastedActions({ create, update, remove, trigger, reset }: RawActions) {
   const { toast } = useToast();
 
   const wrappedCreate = useCallback(
@@ -89,21 +91,47 @@ function useToastedActions({ create, update, remove, trigger }: RawActions) {
     [update, toast],
   );
 
+  const wrappedReset = useCallback(
+    async (id: string, workspaceId: string) => {
+      try {
+        const res = await reset(id, workspaceId);
+        const n = res?.tasksDeleted ?? 0;
+        toast({
+          description:
+            n > 0
+              ? `Reset complete — deleted ${n} task(s); next poll will re-import matches.`
+              : "Reset complete — next poll will re-import matches.",
+          variant: "success",
+        });
+      } catch (err) {
+        toast({ description: `Reset failed: ${String(err)}`, variant: "error" });
+        throw err;
+      }
+    },
+    [reset, toast],
+  );
+
   return {
     create: wrappedCreate,
     update: wrappedUpdate,
     remove: wrappedDelete,
     trigger: wrappedTrigger,
+    reset: wrappedReset,
     toggleEnabled,
   };
 }
 
 export function SentryIssueWatchersSection() {
-  const { items, loading, create, update, remove, trigger } = useSentryIssueWatches();
-  const actions = useToastedActions({ create, update, remove, trigger });
+  const { items, loading, create, update, remove, trigger, previewReset, reset } =
+    useSentryIssueWatches();
+  const actions = useToastedActions({ create, update, remove, trigger, reset });
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<SentryIssueWatch | null>(null);
+  const resetCtrl = useWatchResetController<SentryIssueWatch>({
+    preview: (w) => previewReset(w.id, w.workspaceId),
+    reset: (w) => actions.reset(w.id, w.workspaceId).then(() => undefined),
+  });
 
   const openCreate = useCallback(() => {
     setEditing(null);
@@ -113,6 +141,14 @@ export function SentryIssueWatchersSection() {
     setEditing(w);
     setDialogOpen(true);
   }, []);
+
+  const handleReset = useCallback(
+    (id: string, _workspaceId: string) => {
+      const w = items.find((item) => item.id === id);
+      if (w) resetCtrl.setResetting(w);
+    },
+    [items, resetCtrl],
+  );
 
   return (
     <SettingsSection
@@ -137,6 +173,7 @@ export function SentryIssueWatchersSection() {
               onEdit={openEdit}
               onDelete={actions.remove}
               onTrigger={actions.trigger}
+              onReset={handleReset}
               onToggleEnabled={actions.toggleEnabled}
             />
           )}
@@ -149,6 +186,15 @@ export function SentryIssueWatchersSection() {
         onCreate={actions.create}
         onUpdate={actions.update}
       />
+      {resetCtrl.resetting && (
+        <ResetWatchDialog
+          open
+          onOpenChange={resetCtrl.onOpenChange}
+          integrationLabel="Sentry watcher"
+          previewLoader={resetCtrl.previewLoader}
+          onConfirm={resetCtrl.confirmReset}
+        />
+      )}
     </SettingsSection>
   );
 }

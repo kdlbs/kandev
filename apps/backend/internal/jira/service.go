@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/watchreset"
 )
 
 // SecretStore is the subset of the secrets store the service needs. Kept small
@@ -35,10 +36,24 @@ type Service struct {
 	client    Client // singleton, cleared on config change.
 	probeHook func()
 	eventBus  bus.EventBus
+	// taskDeleter is the cascade-delete entry point used by the watch
+	// reset flow. Wired post-construction via SetTaskDeleter to avoid
+	// the import cycle that would result from passing the concrete
+	// *task.HandoffService into NewService.
+	taskDeleter watchreset.TaskDeleter
 	// mockClient is non-nil only when Provide built the service with a MockClient
 	// (KANDEV_MOCK_JIRA=true). Exposed via MockClient() so the e2e control routes
 	// can drive the same instance the clientFn returns.
 	mockClient *MockClient
+}
+
+// SetTaskDeleter wires the cascade-delete dependency used by ResetIssueWatch.
+// Optional — when unset, reset returns an error so the missing wiring is
+// surfaced instead of silently no-op'ing.
+func (s *Service) SetTaskDeleter(td watchreset.TaskDeleter) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.taskDeleter = td
 }
 
 // MockClient returns the shared mock client when the service was built in mock
@@ -579,6 +594,45 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 // a missing ID is a silent success.
 func (s *Service) DeleteIssueWatch(ctx context.Context, id string) error {
 	return s.store.DeleteIssueWatch(ctx, id)
+}
+
+// jiraIssueWatchResetter is the watchreset.Resetter adapter for a single
+// Jira issue watch. Closes over the store and watch ID so the shared
+// watchreset.Run helper stays integration-agnostic.
+type jiraIssueWatchResetter struct {
+	store   *Store
+	watchID string
+}
+
+func (r *jiraIssueWatchResetter) ListTaskIDs(ctx context.Context) ([]string, error) {
+	return r.store.ListIssueWatchTaskIDs(ctx, r.watchID)
+}
+
+func (r *jiraIssueWatchResetter) Clear(ctx context.Context) error {
+	return r.store.ResetIssueWatchState(ctx, r.watchID)
+}
+
+// PreviewResetIssueWatch returns how many tasks ResetIssueWatch would
+// cascade-delete. Used by the frontend to populate the confirmation dialog.
+func (s *Service) PreviewResetIssueWatch(ctx context.Context, watchID string) (int, error) {
+	return watchreset.Preview(ctx, &jiraIssueWatchResetter{store: s.store, watchID: watchID})
+}
+
+// ResetIssueWatch is destructive: cascade-deletes every task previously
+// created by the watch (including archived), wipes the per-watch dedup
+// rows, and nulls last_polled_at so the next poll re-imports every
+// currently-matching ticket. Returns the count of tasks deleted.
+func (s *Service) ResetIssueWatch(ctx context.Context, watchID string) (int, error) {
+	s.mu.Lock()
+	td := s.taskDeleter
+	s.mu.Unlock()
+	if td == nil {
+		return 0, errors.New("jira: task deleter not wired; reset unavailable")
+	}
+	res, err := watchreset.Run(ctx,
+		&jiraIssueWatchResetter{store: s.store, watchID: watchID},
+		td, s.log)
+	return res.TasksDeleted, err
 }
 
 // CheckIssueWatch runs the watch's JQL once and returns the tickets that

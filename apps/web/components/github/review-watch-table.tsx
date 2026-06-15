@@ -1,6 +1,12 @@
 "use client";
 
-import { IconTrash, IconRefresh, IconPlayerPlay, IconPlayerPause } from "@tabler/icons-react";
+import {
+  IconTrash,
+  IconRefresh,
+  IconPlayerPlay,
+  IconPlayerPause,
+  IconRestore,
+} from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
@@ -17,6 +23,7 @@ type ReviewWatchTableProps = {
   onEdit: (watch: ReviewWatch) => void;
   onDelete: (id: string) => void;
   onTrigger: (id: string) => void;
+  onReset: (id: string) => void;
   onToggleEnabled: (watch: ReviewWatch) => void;
 };
 
@@ -42,10 +49,11 @@ type WatchActionsProps = {
   watch: ReviewWatch;
   onToggleEnabled: (watch: ReviewWatch) => void;
   onTrigger: (id: string) => void;
+  onReset: (id: string) => void;
   onDelete: (id: string) => void;
 };
 
-function WatchActions({ watch, onToggleEnabled, onTrigger, onDelete }: WatchActionsProps) {
+function WatchActions({ watch, onToggleEnabled, onTrigger, onReset, onDelete }: WatchActionsProps) {
   const { toast } = useToast();
   return (
     <div className="flex items-center justify-end gap-1">
@@ -91,6 +99,23 @@ function WatchActions({ watch, onToggleEnabled, onTrigger, onDelete }: WatchActi
           <Button
             variant="ghost"
             size="sm"
+            className="h-7 w-7 p-0 cursor-pointer"
+            data-testid="watch-reset-button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onReset(watch.id);
+            }}
+          >
+            <IconRestore className="h-3.5 w-3.5" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Reset</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
             className="h-7 w-7 p-0 text-red-500 hover:text-red-600 cursor-pointer"
             onClick={(e) => {
               e.stopPropagation();
@@ -112,6 +137,7 @@ export function ReviewWatchTable({
   onEdit,
   onDelete,
   onTrigger,
+  onReset,
   onToggleEnabled,
 }: ReviewWatchTableProps) {
   const workspaces = useAppStore((s) => s.workspaces.items);
@@ -162,6 +188,7 @@ export function ReviewWatchTable({
                 watch={watch}
                 onToggleEnabled={onToggleEnabled}
                 onTrigger={onTrigger}
+                onReset={onReset}
                 onDelete={onDelete}
               />
             </TableCell>

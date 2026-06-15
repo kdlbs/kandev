@@ -317,3 +317,35 @@ func (s *Store) ListSeenIssueIdentifiers(ctx context.Context, watchID string) (m
 	}
 	return out, nil
 }
+
+// ListIssueWatchTaskIDs returns every task_id recorded against a watch,
+// including the empty-string sentinel reservations that never completed.
+// Used by the reset flow to enumerate the tasks to cascade-delete.
+func (s *Store) ListIssueWatchTaskIDs(ctx context.Context, watchID string) ([]string, error) {
+	var ids []string
+	err := s.ro.SelectContext(ctx, &ids,
+		`SELECT task_id FROM linear_issue_watch_tasks WHERE issue_watch_id = ?`, watchID)
+	return ids, err
+}
+
+// ResetIssueWatchState wipes the watch's dedup rows and nulls its
+// last_polled_at in one transaction. Used by the reset flow after the
+// cascade-delete loop so the next poll re-imports every currently-matching
+// issue as if the watch were freshly created.
+func (s *Store) ResetIssueWatchState(ctx context.Context, watchID string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM linear_issue_watch_tasks WHERE issue_watch_id = ?`, watchID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE linear_issue_watches SET last_polled_at = NULL, updated_at = ? WHERE id = ?`,
+		time.Now().UTC(), watchID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}

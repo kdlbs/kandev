@@ -51,6 +51,8 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.PUT("/watches/review/:id", c.httpUpdateReviewWatch)
 	api.DELETE("/watches/review/:id", c.httpDeleteReviewWatch)
 	api.POST("/watches/review/:id/trigger", c.httpTriggerReviewWatch)
+	api.GET("/watches/review/:id/reset/preview", c.httpPreviewResetReviewWatch)
+	api.POST("/watches/review/:id/reset", c.httpResetReviewWatch)
 	api.POST("/watches/review/trigger-all", c.httpTriggerAllReviewChecks)
 
 	api.GET("/watches/issue", c.httpListIssueWatches)
@@ -58,6 +60,8 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.PUT("/watches/issue/:id", c.httpUpdateIssueWatch)
 	api.DELETE("/watches/issue/:id", c.httpDeleteIssueWatch)
 	api.POST("/watches/issue/:id/trigger", c.httpTriggerIssueWatch)
+	api.GET("/watches/issue/:id/reset/preview", c.httpPreviewResetIssueWatch)
+	api.POST("/watches/issue/:id/reset", c.httpResetIssueWatch)
 	api.POST("/watches/issue/trigger-all", c.httpTriggerAllIssueChecks)
 
 	api.POST("/cleanup/review-tasks", c.httpCleanupReviewTasks)

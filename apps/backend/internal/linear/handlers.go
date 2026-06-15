@@ -49,6 +49,8 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.PATCH("/watches/issue/:id", c.httpUpdateIssueWatch)
 	api.DELETE("/watches/issue/:id", c.httpDeleteIssueWatch)
 	api.POST("/watches/issue/:id/trigger", c.httpTriggerIssueWatch)
+	api.GET("/watches/issue/:id/reset/preview", c.httpPreviewResetIssueWatch)
+	api.POST("/watches/issue/:id/reset", c.httpResetIssueWatch)
 }
 
 // --- HTTP handlers ---

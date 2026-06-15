@@ -139,3 +139,30 @@ export async function triggerJiraIssueWatch(
     { ...options, init: { ...(options?.init ?? {}), method: "POST" } },
   );
 }
+
+// previewResetJiraIssueWatch returns how many tasks would be deleted if the
+// watch were reset. Used by the confirmation dialog.
+export async function previewResetJiraIssueWatch(
+  workspaceId: string,
+  id: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<{ taskCount: number }>(
+    `/api/v1/jira/watches/issue/${encodeURIComponent(id)}/reset/preview?workspace_id=${encodeURIComponent(workspaceId)}`,
+    options,
+  );
+}
+
+// resetJiraIssueWatch deletes every task previously created by the watch
+// (including archived), wipes its dedup table, and nulls last_polled_at so
+// the next poll re-imports every currently-matching ticket.
+export async function resetJiraIssueWatch(
+  workspaceId: string,
+  id: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<{ tasksDeleted: number }>(
+    `/api/v1/jira/watches/issue/${encodeURIComponent(id)}/reset?workspace_id=${encodeURIComponent(workspaceId)}`,
+    { ...options, init: { ...(options?.init ?? {}), method: "POST" } },
+  );
+}
