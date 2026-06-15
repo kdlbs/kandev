@@ -4,6 +4,8 @@ import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
 
+const TERMINAL_SETTINGS_PATH = "/settings/general/terminal";
+
 // The full font stack value for "JetBrains Mono" preset
 const JB_MONO_STACK = '"JetBrains Mono", "Fira Code", Menlo, Consolas, monospace';
 
@@ -116,7 +118,7 @@ test.describe("Terminal font settings", () => {
   });
 
   test("settings page shows font and size controls", async ({ testPage }) => {
-    await testPage.goto("/settings/general");
+    await testPage.goto(TERMINAL_SETTINGS_PATH);
 
     // Font family selector
     const fontSelect = testPage.getByTestId("terminal-font-select");
@@ -172,7 +174,7 @@ test.describe("Terminal link settings", () => {
   });
 
   test("settings page shows terminal links card and allows toggling", async ({ testPage }) => {
-    await testPage.goto("/settings");
+    await testPage.goto(TERMINAL_SETTINGS_PATH);
 
     // Terminal Links section visible
     await expect(testPage.locator("text=Terminal Links").first()).toBeVisible({ timeout: 10_000 });

@@ -1,10 +1,12 @@
 import { test, expect } from "../../fixtures/test-base";
 
+const KEYBOARD_SETTINGS_PATH = "/settings/general/keyboard-shortcuts";
+
 test.describe("Keyboard Shortcuts Settings", () => {
   test.describe.configure({ retries: 1 });
 
   test("settings page shows all configurable shortcuts", async ({ testPage }) => {
-    await testPage.goto("/settings/general");
+    await testPage.goto(KEYBOARD_SETTINGS_PATH);
 
     // Original 3 shortcuts
     await expect(testPage.getByTestId("shortcut-recorder-SEARCH")).toBeVisible({ timeout: 10_000 });
@@ -30,7 +32,7 @@ test.describe("Keyboard Shortcuts Settings", () => {
       keyboard_shortcuts: {},
     });
 
-    await testPage.goto("/settings/general");
+    await testPage.goto(KEYBOARD_SETTINGS_PATH);
 
     // Find the BOTTOM_TERMINAL recorder and verify it shows the default (Cmd+J or Ctrl+J)
     const recorder = testPage.getByTestId("shortcut-recorder-BOTTOM_TERMINAL");
@@ -49,7 +51,7 @@ test.describe("Keyboard Shortcuts Settings", () => {
     await expect(recorder).toContainText("T", { timeout: 3_000 });
 
     // Reload the page and verify the shortcut persisted
-    await testPage.goto("/settings/general");
+    await testPage.goto(KEYBOARD_SETTINGS_PATH);
     const recorderAfterReload = testPage.getByTestId("shortcut-recorder-BOTTOM_TERMINAL");
     await expect(recorderAfterReload).toBeVisible({ timeout: 10_000 });
     await expect(recorderAfterReload).toContainText("T");
@@ -68,7 +70,7 @@ test.describe("Keyboard Shortcuts Settings", () => {
       },
     });
 
-    await testPage.goto("/settings/general");
+    await testPage.goto(KEYBOARD_SETTINGS_PATH);
 
     const recorder = testPage.getByTestId("shortcut-recorder-TOGGLE_SIDEBAR");
     await expect(recorder).toBeVisible({ timeout: 10_000 });
