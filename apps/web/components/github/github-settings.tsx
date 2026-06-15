@@ -328,12 +328,13 @@ function ReviewWatchSection() {
     setDialogOpen(true);
   }, []);
 
+  const { setResetting: setReviewResetting } = resetCtrl;
   const onResetClick = useCallback(
     (id: string) => {
       const w = watches.find((item) => item.id === id);
-      if (w) resetCtrl.setResetting(w);
+      if (w) setReviewResetting(w);
     },
-    [watches, resetCtrl],
+    [watches, setReviewResetting],
   );
 
   return (
@@ -414,12 +415,13 @@ function IssueWatchSection() {
     setDialogOpen(true);
   }, []);
 
+  const { setResetting: setIssueResetting } = resetCtrl;
   const onResetClick = useCallback(
     (id: string) => {
       const w = issueActions.watches.find((item) => item.id === id);
-      if (w) resetCtrl.setResetting(w);
+      if (w) setIssueResetting(w);
     },
-    [issueActions.watches, resetCtrl],
+    [issueActions.watches, setIssueResetting],
   );
 
   return (

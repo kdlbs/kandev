@@ -160,12 +160,13 @@ export function LinearIssueWatchersSection() {
     },
     [items, actions],
   );
+  const { setResetting } = resetCtrl;
   const handleReset = useCallback(
     (id: string) => {
       const w = items.find((item) => item.id === id);
-      if (w) resetCtrl.setResetting(w);
+      if (w) setResetting(w);
     },
-    [items, resetCtrl],
+    [items, setResetting],
   );
 
   return (

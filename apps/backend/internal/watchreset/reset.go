@@ -71,6 +71,12 @@ func Run(ctx context.Context, r Resetter, td TaskDeleter, log *logger.Logger) (R
 	if td == nil {
 		return Result{}, fmt.Errorf("watchreset: nil TaskDeleter")
 	}
+	// Respect a caller deadline that's already expired before we detach.
+	// WithoutCancel intentionally drops every signal, so swallowing an
+	// already-cancelled context here would silently run an unwanted reset.
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
 	ctx = context.WithoutCancel(ctx)
 
 	ids, err := r.ListTaskIDs(ctx)

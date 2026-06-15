@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -147,10 +147,14 @@ export function useWatchResetController<TWatch extends { id: string }>(opts: {
 }) {
   const [resetting, setResetting] = useState<TWatch | null>(null);
   const optsRef = useRef(opts);
-  // Sync the ref in an effect rather than during render: the ESLint
-  // react-x/no-access-state-in-setstate rule (React 19 docs) flags
-  // `ref.current = value` at render time as a stale-closure footgun.
-  useEffect(() => {
+  // Sync the ref in a layout effect rather than during render: a render-
+  // time write trips react-x/no-access-state-in-setstate (React 19 docs)
+  // as a stale-closure footgun, and a regular useEffect would let the
+  // confirm-click handler (which fires synchronously after a commit) read
+  // a previous render's reset() callback. useLayoutEffect runs before the
+  // browser paints, so optsRef.current is always current for the next
+  // user interaction.
+  useLayoutEffect(() => {
     optsRef.current = opts;
   }, [opts]);
 
