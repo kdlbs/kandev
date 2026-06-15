@@ -501,10 +501,9 @@ func TestRecognizeSubagent_AuggieDoesNotOverrideRawInput(t *testing.T) {
 	}
 }
 
-func TestExtractSubagentResult_AuggieOutput(t *testing.T) {
-	rawOutput := map[string]any{"output": "Subagent found the issue: foo.go:42 is wrong."}
-	res, ok := extractSubagentResult(nil, rawOutput)
-	if !ok {
+func TestAuggieSubagentResult_Output(t *testing.T) {
+	var res SubagentTaskResult
+	if !auggieSubagentResult(map[string]any{"output": "Subagent found the issue: foo.go:42 is wrong."}, &res) {
 		t.Fatal("expected Auggie rawOutput.output to be extracted")
 	}
 	if res.ResultText != "Subagent found the issue: foo.go:42 is wrong." {
@@ -512,18 +511,35 @@ func TestExtractSubagentResult_AuggieOutput(t *testing.T) {
 	}
 }
 
-func TestExtractSubagentResult_AuggieEmptyOutput(t *testing.T) {
-	if _, ok := extractSubagentResult(nil, map[string]any{"output": ""}); ok {
+func TestAuggieSubagentResult_EmptyOrWrongType(t *testing.T) {
+	var res SubagentTaskResult
+	if auggieSubagentResult(map[string]any{"output": ""}, &res) {
 		t.Error("empty output must not register as a result")
 	}
-	if _, ok := extractSubagentResult(nil, map[string]any{"output": 42}); ok {
+	if auggieSubagentResult(map[string]any{"output": 42}, &res) {
 		t.Error("non-string output must not register as a result")
+	}
+}
+
+// extractSubagentResult must NOT pick up Auggie's generic `output` field on
+// its own — that path is gated on the payload's IsAuggie flag inside
+// EnrichSubagentResult so a future agent emitting `{output: "..."}` alongside
+// its own structured metadata can't silently surface as Auggie text.
+func TestExtractSubagentResult_IgnoresAuggieOutput(t *testing.T) {
+	rawOutput := map[string]any{"output": "this should not be picked up by extract"}
+	res, ok := extractSubagentResult(nil, rawOutput)
+	if ok {
+		t.Error("extractSubagentResult must not recognize bare rawOutput.output")
+	}
+	if res.ResultText != "" {
+		t.Errorf("ResultText = %q, want empty", res.ResultText)
 	}
 }
 
 func TestEnrichSubagentResult_Auggie(t *testing.T) {
 	n := NewNormalizer("")
 	payload := streams.NewSubagentTask("find the bug", "", "explore")
+	payload.SubagentTask().SetIsAuggie(true)
 	n.EnrichSubagentResult(payload, nil, map[string]any{"output": "Done. Bug is at foo.go:42."})
 	sa := payload.SubagentTask()
 	if sa.ResultText != "Done. Bug is at foo.go:42." {
@@ -536,6 +552,18 @@ func TestEnrichSubagentResult_Auggie(t *testing.T) {
 	}
 	if !strings.Contains(string(out), `"result_text":"Done. Bug is at foo.go:42."`) {
 		t.Errorf("expected result_text in JSON, got %s", out)
+	}
+}
+
+// EnrichSubagentResult must NOT populate ResultText for non-Auggie payloads
+// even when rawOutput happens to carry an `output` string. Guards against the
+// regression Greptile/Claude flagged on the original Auggie PR.
+func TestEnrichSubagentResult_NonAuggieIgnoresOutput(t *testing.T) {
+	n := NewNormalizer("")
+	payload := streams.NewSubagentTask("Investigate", "do it", "general-purpose")
+	n.EnrichSubagentResult(payload, nil, map[string]any{"output": "stray string from some other agent"})
+	if got := payload.SubagentTask().ResultText; got != "" {
+		t.Errorf("ResultText = %q, want empty (non-Auggie payload)", got)
 	}
 }
 
@@ -555,5 +583,29 @@ func TestNormalizeToolCall_AuggieSubagent(t *testing.T) {
 	}
 	if sa.Description != "investigate flaky test" {
 		t.Errorf("Description = %q, want investigate flaky test", sa.Description)
+	}
+	if !sa.IsAuggie() {
+		t.Error("IsAuggie() = false, want true (title carries Auggie prefix)")
+	}
+}
+
+func TestNormalizeToolCall_NonAuggieSubagentNotMarked(t *testing.T) {
+	n := NewNormalizer("")
+	// OpenCode-style title=task subagent must NOT be flagged as Auggie.
+	args := map[string]any{
+		"kind":  "other",
+		"title": "task",
+		"raw_input": map[string]any{
+			"description":   "Investigate",
+			"prompt":        "Find the bug",
+			"subagent_type": "general-purpose",
+		},
+	}
+	payload := n.NormalizeToolCall("other", args)
+	if payload.Kind() != streams.ToolKindSubagentTask {
+		t.Fatalf("Kind = %q, want subagent_task", payload.Kind())
+	}
+	if payload.SubagentTask().IsAuggie() {
+		t.Error("IsAuggie() = true, want false (OpenCode-style title=task)")
 	}
 }

@@ -273,7 +273,22 @@ type SubagentTaskPayload struct {
 	IsAsync           bool   `json:"is_async,omitempty"`
 	OutputFile        string `json:"output_file,omitempty"`
 	CanReadOutputFile bool   `json:"can_read_output_file,omitempty"`
+
+	// isAuggie marks payloads recognized via Auggie's "sub-agent-<type>:"
+	// title prefix. Internal to the adapter; not serialized. Gates the
+	// Auggie-specific result extractor (which keys off a generic
+	// `rawOutput.output` string) so it never fires for unrelated agents that
+	// happen to emit a similarly-shaped completion frame.
+	isAuggie bool
 }
+
+// IsAuggie reports whether the subagent was recognized via Auggie's title
+// prefix. Used by the normalizer to gate Auggie-only result extraction.
+func (p *SubagentTaskPayload) IsAuggie() bool { return p.isAuggie }
+
+// SetIsAuggie marks the payload as an Auggie subagent. Called by the
+// normalizer at recognition time; never set by JSON unmarshal.
+func (p *SubagentTaskPayload) SetIsAuggie(v bool) { p.isAuggie = v }
 
 // ShowPlanPayload contains normalized data for plan display operations.
 type ShowPlanPayload struct {

@@ -204,6 +204,11 @@ func subagentInputFields(rawInput any) (description, prompt, subagentType string
 //   - OpenCode: rawOutput.metadata = {sessionId, parentSessionId,
 //     model:{providerID, modelID}}
 //   - Cursor:   rawOutput = {durationMs, isBackground}
+//
+// Auggie's `rawOutput.output` shape is intentionally NOT extracted here — it's
+// too generic (a bare "output" string field) to attribute reliably. The caller
+// (EnrichSubagentResult) gates it on the payload's IsAuggie flag, which is set
+// at recognition time from the "sub-agent-<type>:" title prefix.
 func extractSubagentResult(meta map[string]any, rawOutput any) (res SubagentTaskResult, ok bool) {
 	if claudeSubagentResponse(meta, &res) {
 		ok = true
@@ -215,9 +220,6 @@ func extractSubagentResult(meta map[string]any, rawOutput any) (res SubagentTask
 		if cursorSubagentResult(out, &res) {
 			ok = true
 		}
-		if auggieSubagentResult(out, &res) {
-			ok = true
-		}
 	}
 	return res, ok
 }
@@ -225,7 +227,9 @@ func extractSubagentResult(meta map[string]any, rawOutput any) (res SubagentTask
 // auggieSubagentResult reads Auggie's `rawOutput.output` (the final result
 // text) into res. Auggie sub-agents are silent — they never emit intermediate
 // tool calls or structured metrics — so this text is the only completion
-// signal we get to surface in the UI.
+// signal we get to surface in the UI. Called only when the parent payload was
+// recognized as Auggie at tool_call time; the generic shape is unsafe for
+// other agents.
 func auggieSubagentResult(out map[string]any, res *SubagentTaskResult) bool {
 	output, _ := out["output"].(string)
 	if output == "" {

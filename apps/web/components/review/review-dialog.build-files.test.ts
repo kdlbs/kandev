@@ -115,6 +115,8 @@ describe("buildAllFiles (review dialog)", () => {
     const result = buildAllFiles(gitStatusFiles, cumulativeDiff);
     expect(result).toHaveLength(1);
     expect(result[0].source).toBe("uncommitted");
-    expect(result[0].diff).toContain("-u\n+u");
+    // Exact equality (not toContain) so a future normalization change that
+    // appends or rewrites diff content can't silently pass this guard.
+    expect(result[0].diff).toBe("@@ -1 +1 @@\n-u\n+u");
   });
 });

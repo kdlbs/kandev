@@ -186,6 +186,19 @@ export const ToolSubagentMessage = memo(function ToolSubagentMessage({
   // final summary visible without an extra click).
   const autoExpanded = isActive || Boolean(resultText);
 
+  // Reset the manual override the first time a result_text arrives so a card
+  // the user collapsed while the subagent was running auto-opens to show the
+  // summary. "Adjust state during render" pattern (preferred over useEffect):
+  // https://react.dev/learn/you-might-not-need-an-effect — only fires on the
+  // empty -> non-empty transition; later user collapses persist.
+  const [prevResultText, setPrevResultText] = useState(resultText);
+  if (resultText !== prevResultText) {
+    setPrevResultText(resultText);
+    if (resultText && !prevResultText) {
+      setManualExpandState(null);
+    }
+  }
+
   // Derive expanded state: manual override takes precedence, otherwise use auto
   const isExpanded = manualExpandState ?? autoExpanded;
 
