@@ -136,6 +136,7 @@ type WiringArgs = {
   expandUnchanged: boolean;
   toggleExpandUnchanged: () => void;
   wrapperRef: React.RefObject<HTMLDivElement | null>;
+  repo?: string;
 };
 
 /**
@@ -181,6 +182,7 @@ function useDiffViewerWiring(args: WiringArgs) {
     enableExpansion: canUseExpansion,
     expandUnchanged: args.expandUnchanged,
     onToggleExpandUnchanged: canUseExpansion ? args.toggleExpandUnchanged : undefined,
+    repo: args.repo,
   });
   return { ...opts, renderAnnotation };
 }
@@ -250,6 +252,7 @@ export const DiffViewer = memo(function DiffViewer({
       expandUnchanged,
       toggleExpandUnchanged,
       wrapperRef,
+      repo,
     });
 
   const controlledSelection = state.showCommentForm ? state.selectedLines : null;

@@ -88,9 +88,11 @@ type UseDiffOptionsArgs = {
   handleLineSelectionEnd: (range: SelectedLineRange | null) => void;
   onLineEnter: (props: { lineType?: string; lineNumber?: number; annotationSide?: string }) => void;
   onLineLeave: () => void;
-  onOpenFile?: (filePath: string) => void;
+  onOpenFile?: (filePath: string, repo?: string) => void;
   onPreviewMarkdown?: (filePath: string) => void;
   onRevert?: (filePath: string) => void;
+  /** Multi-repo subpath (repository_name) so Edit opens under the right repo. */
+  repo?: string;
   /** Enable diff expansion (requires full deletionLines/additionLines in metadata) */
   enableExpansion?: boolean;
   /** Number of lines to expand per click (default: 20) */
@@ -122,6 +124,7 @@ export function useDiffOptions(args: UseDiffOptionsArgs): UseDiffOptionsResult {
     onOpenFile,
     onPreviewMarkdown,
     onRevert,
+    repo,
     enableExpansion = false,
     expansionLineCount = 20,
     expandUnchanged,
@@ -148,6 +151,7 @@ export function useDiffOptions(args: UseDiffOptionsArgs): UseDiffOptionsResult {
     onOpenFile,
     onPreviewMarkdown,
     onRevert,
+    repo,
     expandUnchanged,
     onToggleExpandUnchanged,
   });

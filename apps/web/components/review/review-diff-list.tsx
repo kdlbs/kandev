@@ -268,6 +268,7 @@ function FileDiffHeader({
         onPreviewMarkdown={onPreviewMarkdown}
         onToggleExpandUnchanged={onToggleExpandUnchanged}
         onToggleWordWrap={onToggleWordWrap}
+        repo={file.repository_name}
       />
     </div>
   );

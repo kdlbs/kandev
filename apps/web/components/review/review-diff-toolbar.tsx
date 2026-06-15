@@ -33,10 +33,13 @@ export type FileDiffToolbarProps = {
   wordWrap: boolean;
   expandUnchanged: boolean;
   onDiscard: () => void;
-  onOpenFile?: (filePath: string) => void;
+  onOpenFile?: (filePath: string, repo?: string) => void;
   onPreviewMarkdown?: (filePath: string) => void;
   onToggleExpandUnchanged: () => void;
   onToggleWordWrap: () => void;
+  /** Multi-repo subpath (repository_name) so the Edit action opens the file
+   *  under the right repository instead of the bare task root. */
+  repo?: string;
 };
 
 function ToolbarIconBtn({
@@ -85,6 +88,7 @@ export function FileDiffToolbar(props: FileDiffToolbarProps) {
     onPreviewMarkdown,
     onToggleExpandUnchanged,
     onToggleWordWrap,
+    repo,
   } = props;
   const [globalViewMode, setGlobalViewMode] = useGlobalViewMode();
   const handleCopyDiff = useCallback(() => {
@@ -129,7 +133,7 @@ export function FileDiffToolbar(props: FileDiffToolbarProps) {
         </ToolbarIconBtn>
       )}
       {onOpenFile && (
-        <ToolbarIconBtn onClick={() => onOpenFile(filePath)} tooltip="Edit">
+        <ToolbarIconBtn onClick={() => onOpenFile(filePath, repo)} tooltip="Edit">
           <IconPencil className="h-3.5 w-3.5" />
         </ToolbarIconBtn>
       )}
