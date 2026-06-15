@@ -136,7 +136,7 @@ For small features (≤3 tasks total), waves are optional — list sequentially.
 
 Each task should be small enough for one focused implementation pass:
 - **Acceptance:** 1-3 concrete conditions.
-- **Verification:** exact command(s), e.g. `cd apps/backend && go test -run TestName ./internal/path/...` or `cd apps && pnpm --filter @kandev/web test -- --run path/to/file.test.ts`.
+- **Verification:** exact command(s), e.g. `cd apps/backend && go test -run TestName ./internal/path/...` or `cd apps && pnpm --filter @kandev/web test -- path/to/file.test.ts`.
 - **Files likely touched:** specific paths, not broad directories.
 - **Dependencies:** task numbers that must land first, or `None`.
 

@@ -12,7 +12,7 @@ Sources:
 OpenCode discovers skills from:
 
 ```text
-.opencode/skills/<name>/SKILL.md
+.config/opencode/skills/<name>/SKILL.md
 .claude/skills/<name>/SKILL.md
 .agents/skills/<name>/SKILL.md
 ```

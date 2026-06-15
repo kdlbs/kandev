@@ -92,7 +92,7 @@ If `scripts/pr-state --summary <PR>` briefly returns `branch:"unknown"` or repor
 If `scripts/pr-state --summary <PR>` fails with `jq: Argument list too long`, do not debug the summary script during fixup. Split the fallback checks:
 
 ```bash
-gh pr checks <PR> --repo kdlbs/kandev
+gh pr checks <PR>
 scripts/pr-resolve list <PR>
 ```
 
@@ -128,13 +128,14 @@ For each entry in the report's `ci_failed:` list:
    scripts/run-quiet gh-run -- gh run view <run-id> --log-failed
    ```
    If the printed summary is enough, stop. Only `Read` specific line ranges from the printed log path if you need surrounding context.
-   If `gh run view --log-failed` returns only metadata or says logs are unavailable while the workflow is still running, wait for the workflow/report job to finish. If it still omits details, fetch the job log directly and search the downloaded file:
+   If `gh run view --log-failed` returns only GitHub request metadata and no failure output, immediately fetch the failed job log directly and search the saved file for failing specs/errors:
    ```bash
    job_id="<failed job id from scripts/pr-state or gh run view --json jobs>"
    gh api repos/:owner/:repo/actions/jobs/"$job_id"/logs > /tmp/kandev-job.log
    rg -n "(Error:|FAIL|Failed|Timed out|Timeout|\\.spec\\.ts)" /tmp/kandev-job.log
    ```
    Then inspect targeted line ranges or downloaded artifacts rather than streaming the full log into context.
+   If `gh run view --log-failed` says logs are unavailable because the workflow is still running, wait for the workflow/report job to finish before retrying.
 3. Read the relevant source files at the failing lines (use `Read` with `offset`/`limit`, not `cat`)
 4. Fix the issues (lint errors, test failures, type errors, etc.)
 
@@ -272,7 +273,7 @@ scripts/pr-resolve show <PR> <THREAD_ID_OR_COMMENT_ID>
 gh api repos/:owner/:repo/pulls/comments/<comment_id> --jq '{body,path,line,commit_id,html_url}'
 
 # Raw fallback for all PR review comments when the helper only supports list/reply:
-gh api repos/kdlbs/kandev/pulls/<PR>/comments --paginate
+gh api repos/:owner/:repo/pulls/<PR>/comments --paginate
 
 # Use GraphQL reviewThreads when you need thread IDs, resolution state,
 # or all comments in a review thread.

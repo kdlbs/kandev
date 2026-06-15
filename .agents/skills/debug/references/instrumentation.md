@@ -19,14 +19,14 @@ If the user says "add logs to debug X", default to temporary. If they say "instr
 2. Use a consistent searchable prefix, e.g. `[reorder-bug]` or `[WS-DEBUG]`.
 3. Inline every value as readable text. Do not rely on collapsed objects like `Array(2)` or `{...}`.
 4. One log per event, not per render frame or hot loop.
-5. Guard expensive persistent debug argument computation with `if (IS_DEBUG)`.
+5. Guard expensive persistent debug argument computation with `if (isDebug())`.
 
 ## Frontend Persistent
 
 Use `apps/web/lib/debug/log.ts`:
 
 ```typescript
-import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
 const debug = createDebugLogger("executor-compat");
 
@@ -36,12 +36,12 @@ debug("check", { agent: name, executor_type: type, ok: result, reason });
 Conventions:
 - Namespace is `domain:aspect` when useful.
 - Register the namespace in the cheat-sheet docblock in `lib/debug/log.ts`.
-- Keep debug helper dependencies minimal. `IS_DEBUG` is true under vitest, so partial mocks must export any symbols debug paths touch.
+- Keep debug helper dependencies minimal. `isDebug()` returns true under vitest, so partial mocks must export any symbols debug paths touch.
 
 Good:
 
 ```typescript
-if (IS_DEBUG) {
+if (isDebug()) {
   debug("compute", {
     input: profiles.length,
     output: filtered.length,

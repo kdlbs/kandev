@@ -25,6 +25,7 @@
 #   - unresolved_review_thread_count: <N>
 #   - filtered_review_thread_count: <N>
 #   - unresolved_threads: [{ thread_id, comment_id, author, path, body_preview }]
+#   - summary_notes: [<short human-readable notes>]
 #   - errors: [{ source, message }]
 #
 # By default, comments/reviews/review threads are limited to items created after
@@ -222,6 +223,22 @@ summarize_state_json() {
         | select(.is_resolved == false)
         | {thread_id, comment_id, author, path, body_preview}
       ],
+      summary_notes: (
+        [
+          if (
+            (.unresolved_review_thread_count | type) == "number"
+            and .unresolved_review_thread_count > 0
+            and ([
+              .review_threads[]
+              | select(.is_resolved == false)
+            ] | length) == 0
+          ) then
+            "unresolved threads exist outside current-head filter; run `scripts/pr-resolve list <PR>` for full list"
+          else
+            empty
+          end
+        ]
+      ),
       errors
     }
   '
