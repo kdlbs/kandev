@@ -1,11 +1,13 @@
 ---
 name: plan
-description: Create an implementation plan (plan.md) from a feature spec. Explores the codebase, designs the approach, and produces a structured plan with backend, frontend, tests, and E2E sections. Use after writing a spec and before implementing.
+description: Create an ephemeral implementation plan from a feature spec. Explores the codebase, designs the approach, and produces docs/plans/<feature>/plan.md plus individual task files. Use after writing a spec and before implementing.
 ---
 
 # Create Implementation Plan
 
-Translate a feature spec into a concrete, phased implementation plan saved as `plan.md` alongside the spec.
+Translate a feature spec into a concrete, phased implementation plan saved under
+`docs/plans/<feature>/`. Plans are ephemeral implementation artifacts; specs
+remain the durable requirements under `docs/specs/`.
 
 ## Input
 
@@ -14,7 +16,10 @@ Translate a feature spec into a concrete, phased implementation plan saved as `p
 
 ## Output
 
-`docs/specs/<slug>/plan.md` — a structured plan the implementing agent can follow directly
+- `docs/plans/<slug>/plan.md` — a structured plan that links back to the spec
+  and references every task file
+- `docs/plans/<slug>/task-<NN>-<short-slug>.md` — one independently executable
+  implementation task per file
 
 ---
 
@@ -50,11 +55,11 @@ Stop asking when you have enough to write the plan.
 
 ### 4. Write plan.md
 
-Save to `docs/specs/<slug>/plan.md`. Use this structure:
+Save to `docs/plans/<slug>/plan.md`. Use this structure:
 
 ```markdown
 ---
-spec: <slug>
+spec: docs/specs/<slug>/spec.md
 created: YYYY-MM-DD
 status: draft
 ---
@@ -121,31 +126,66 @@ For each user-facing scenario in the spec:
 
 ## Implementation Waves
 
-Group all work above into waves. Parallelism rules:
+Group all task files into waves. Parallelism rules:
 - Backend packages: can run in parallel
 - Frontend (Next.js): single build — only one task at a time
 - E2E: after all backend + frontend changes are done
 
 ```
-Wave 1 (parallel): [backend task A, backend task B]
-Wave 2: [frontend changes]
-Wave 3: [E2E tests]
+Wave 1 (parallel):
+- [ ] [task-01-backend-contracts](task-01-backend-contracts.md)
+- [ ] [task-02-backend-repository](task-02-backend-repository.md)
+
+Wave 2:
+- [ ] [task-03-frontend-ui](task-03-frontend-ui.md)
+
+Wave 3:
+- [ ] [task-04-e2e](task-04-e2e.md)
 ```
 
 For small features (≤3 tasks total), waves are optional — list sequentially.
+
+The plan links to task files; it does not contain full task bodies. Update the
+checkbox/status link when a task is completed.
+
+---
+
+## Open Questions
+(Delete when empty.)
+```
+
+### 5. Write task files
+
+Create one task file beside `plan.md` per task, named
+`docs/plans/<slug>/task-<NN>-<short-slug>.md`. Use this structure:
+
+```markdown
+---
+id: "01-backend-contracts"
+title: "Backend contracts"
+status: pending
+wave: 1
+depends_on: []
+plan: "plan.md"
+spec: "../../specs/<slug>/spec.md"
+---
+
+# Task 01: Backend contracts
 
 Each task should be small enough for one focused implementation pass:
 - **Acceptance:** 1-3 concrete conditions.
 - **Verification:** exact command(s), e.g. `cd apps/backend && go test -run TestName ./internal/path/...` or `cd apps && pnpm --filter @kandev/web test -- path/to/file.test.ts`.
 - **Files likely touched:** specific paths, not broad directories.
 - **Dependencies:** task numbers that must land first, or `None`.
+- **Inputs:** relevant spec sections, plan sections, patterns, and dependencies.
+- **Output contract:** summary, files changed, tests run, blockers, risks, and
+  task status update.
 
 Break a task down further if it touches unrelated subsystems, needs more than one focused session, or the title contains "and".
 
----
-
-## Open Questions
-(Delete when empty.)
+When an implementation agent starts the task, it must change `status` to
+`in_progress`. When it finishes, it must change `status` to `done` and update
+the corresponding checkbox/status in `plan.md`.
 ```
 
 ### Style rules
@@ -155,3 +195,5 @@ Break a task down further if it touches unrelated subsystems, needs more than on
 - **Tests are not optional.** Every plan must have a Tests section. E2E is required whenever there are UI changes.
 - **Frontend is not optional.** If the spec has any user-visible behavior, the plan must have a Frontend section.
 - **Keep it proportional.** A small spec gets a 1-page plan. A large spec may need 3-4 pages. Do not pad.
+- **Keep task bodies out of the plan.** Put implementation details in individual
+  task files and link to them from `plan.md`.

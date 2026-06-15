@@ -47,7 +47,9 @@ describe("buildFileEditorState", () => {
 });
 
 describe("fetchFileEditorState", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
 
   it("returns the built state (with repo) when the session is unchanged", async () => {
     mockRequestFileContent.mockResolvedValueOnce(RESPONSE);

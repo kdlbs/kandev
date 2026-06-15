@@ -49,6 +49,10 @@ A spec **is not**:
 - A retrospective of work already done
 - A record of a bug, incident, or postmortem (those are ADRs and regression tests)
 
+Implementation plans are separate ephemeral artifacts under
+`docs/plans/<feature>/`. A spec may link to the active plan, but requirements
+must remain useful after that plan is deleted or regenerated.
+
 ## Where it lives
 
 ```
@@ -64,7 +68,7 @@ docs/specs/<feature-slug>/spec.md             # standalone feature folder
 
 Required sections: `Why`, `What`, `Scenarios`, `Out of scope`.
 
-Optional sections: include only when the feature has the corresponding concern. A small UI feature may need none of them; a stateful subsystem will need most.
+Optional sections: include only when the feature has the corresponding concern. A small UI feature may need none of them; a stateful subsystem will need most. A spec may include an `Implementation plan` link to `docs/plans/<feature>/plan.md`, but that link is informational and ephemeral.
 
 ```markdown
 ---

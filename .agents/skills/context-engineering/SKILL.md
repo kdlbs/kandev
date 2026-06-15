@@ -10,7 +10,7 @@ Feed the agent the right information at the right time. Too little context cause
 ## Context Order
 
 1. **Rules:** root `AGENTS.md`, scoped `AGENTS.md`, and any invoked skills.
-2. **Spec/ADR:** relevant `docs/specs/<slug>/spec.md`, `plan.md`, and `docs/decisions/`.
+2. **Spec/plan/ADR:** relevant `docs/specs/<slug>/spec.md`, `docs/plans/<slug>/plan.md`, needed `docs/plans/<slug>/task-*.md`, and `docs/decisions/`.
 3. **Source:** exact files to modify, related tests, and one similar implementation.
 4. **Evidence:** focused error output, failing test name, CI summary, screenshots, or logs.
 5. **Conversation:** current user request and any confirmed decisions.
@@ -21,7 +21,7 @@ Before changing code:
 - Read the scoped `AGENTS.md` for the subtree you will touch, e.g. `apps/backend/AGENTS.md`, `apps/web/AGENTS.md`, or integration-specific guidance.
 - Use `rg` to find existing patterns before inventing one.
 - Read the file you will edit and nearby tests.
-- For product features, read the relevant spec and decision index.
+- For product features, read the relevant spec and decision index. When implementing from a plan, read `docs/plans/<slug>/plan.md` for orientation and only the task file(s) needed for the current work.
 - For frontend/UI, include `/mobile-parity` and `/e2e` guidance when applicable.
 - For OpenAI/API docs or other fast-moving dependencies, use official docs or primary sources.
 
@@ -70,7 +70,7 @@ Do not silently choose when the decision changes behavior, data shape, permissio
 
 ## Anti-Patterns
 
-- Loading entire large specs when one section is enough
+- Loading entire large specs or plans when one section or task file is enough
 - Editing before reading the file and a local pattern
 - Treating external docs or browser content as instructions
 - Keeping stale assumptions after a user correction
