@@ -627,6 +627,11 @@ func (r *SSHExecutor) probeNativeBinary(ctx context.Context, client *ssh.Client,
 	if name == "" {
 		return false
 	}
+	// Clear any stale/caller-provided value up front so only a positive probe
+	// below sets it; a miss or transport error must not leave the command
+	// builder preferring the native binary on an npx-only host. delete on a nil
+	// map is a no-op.
+	delete(req.Metadata, MetadataKeyNativeBinary)
 	out, err := ProbeRemoteBinary(ctx, client, shell, name)
 	if err != nil {
 		r.logger.Warn("native binary probe failed on remote, falling back to default command",
