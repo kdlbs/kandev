@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("next/headers", () => ({
-  cookies: vi.fn(),
+vi.mock("@/lib/server/cookies", () => ({
+  readCookies: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -13,12 +13,12 @@ vi.mock("@/lib/api/domains/settings-api", () => ({
   updateUserSettings: vi.fn(),
 }));
 
-import { cookies } from "next/headers";
+import { readCookies } from "@/lib/server/cookies";
 import { listWorkspaces, fetchUserSettings } from "@/lib/api";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
 import { getActiveWorkspaceId } from "./get-active-workspace";
 
-const mockCookies = vi.mocked(cookies);
+const mockReadCookies = vi.mocked(readCookies);
 const mockListWorkspaces = vi.mocked(listWorkspaces);
 const mockFetchUserSettings = vi.mocked(fetchUserSettings);
 const mockUpdateUserSettings = vi.mocked(updateUserSettings);
@@ -42,13 +42,13 @@ function makeCookieStore(workspaceId: string | null) {
 }
 
 beforeEach(() => {
-  mockCookies.mockReset();
+  mockReadCookies.mockReset();
   mockListWorkspaces.mockReset();
   mockFetchUserSettings.mockReset();
   mockUpdateUserSettings.mockReset();
   mockUpdateUserSettings.mockResolvedValue({} as never);
   // Default: no cookie set
-  mockCookies.mockResolvedValue(makeCookieStore(null) as never);
+  mockReadCookies.mockResolvedValue(makeCookieStore(null) as never);
 });
 
 afterEach(() => {
@@ -81,7 +81,7 @@ describe("getActiveWorkspaceId", () => {
 
   describe("cookie wins after URL param misses", () => {
     it("returns the cookie workspace and does NOT call updateUserSettings", async () => {
-      mockCookies.mockResolvedValue(makeCookieStore(OFFICE_WS_ID_2) as never);
+      mockReadCookies.mockResolvedValue(makeCookieStore(OFFICE_WS_ID_2) as never);
       mockListWorkspaces.mockResolvedValue({ workspaces: [OFFICE_WS, OFFICE_WS_2] } as never);
       mockFetchUserSettings.mockResolvedValue(makeSettings(KANBAN_WS_ID) as never);
 
@@ -92,7 +92,7 @@ describe("getActiveWorkspaceId", () => {
     });
 
     it("ignores cookie when it does not match any office workspace", async () => {
-      mockCookies.mockResolvedValue(makeCookieStore("ws-stale") as never);
+      mockReadCookies.mockResolvedValue(makeCookieStore("ws-stale") as never);
       mockListWorkspaces.mockResolvedValue({ workspaces: [OFFICE_WS] } as never);
       mockFetchUserSettings.mockResolvedValue(makeSettings(OFFICE_WS_ID) as never);
 

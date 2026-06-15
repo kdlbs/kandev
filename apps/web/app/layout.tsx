@@ -1,4 +1,3 @@
-import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { StateProvider } from "@/components/state-provider";
@@ -19,12 +18,12 @@ import { SidebarViewsSyncBridge } from "@/components/sidebar-views-sync-bridge";
 import { LogBufferBridge } from "@/components/log-buffer-bridge";
 import { getFeatureFlagsAction, getRuntimeDebugModeAction } from "@/app/actions/features";
 
-export const metadata: Metadata = {
+export const metadata = {
   title: "Kandev - AI Kanban",
   description: "AI-powered workflow management for developers",
 };
 
-export const viewport: Viewport = {
+export const viewport = {
   // Enable safe area insets for iOS devices (notch, home indicator)
   viewportFit: "cover",
   // Prevent iOS auto-zoom on input focus (for app-like experience)

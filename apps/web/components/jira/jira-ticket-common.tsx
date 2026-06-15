@@ -59,7 +59,6 @@ export function IconLabel({ icon, label }: { icon?: string; label?: string }) {
       {icon && (
         // Jira serves issuetype/priority icons from its CDN at fixed 16x16;
         // next/image would require per-host allowlisting for no real gain.
-        // eslint-disable-next-line @next/next/no-img-element
         <img src={icon} alt="" className="h-3.5 w-3.5" />
       )}
       <span className="truncate">{label}</span>

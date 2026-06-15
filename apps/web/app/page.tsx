@@ -1,4 +1,3 @@
-import { cookies } from "next/headers";
 import { PageClient } from "@/app/page-client";
 import { StateHydrator } from "@/components/state-hydrator";
 import {
@@ -15,6 +14,7 @@ import { snapshotToState } from "@/lib/ssr/mapper";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { resolveDesiredWorkflowId } from "@/lib/kanban/resolve-workflow";
 import { resolveActiveId } from "@/lib/ssr/resolve-active-id";
+import { readCookies } from "@/lib/server/cookies";
 import type { AppState } from "@/lib/state/store";
 import type { ListWorkspacesResponse, UserSettingsResponse } from "@/lib/types/http";
 
@@ -117,7 +117,7 @@ export default async function Page({ searchParams }: PageProps) {
     const [workspaces, userSettingsResponse, cookieStore] = await Promise.all([
       listWorkspaces({ cache: "no-store" }),
       fetchUserSettings({ cache: "no-store" }).catch(() => null),
-      cookies().catch((error) => {
+      readCookies().catch((error) => {
         console.error("Failed to read cookies on Kanban page:", error);
         return null;
       }),

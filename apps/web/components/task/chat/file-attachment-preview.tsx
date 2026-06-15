@@ -29,7 +29,6 @@ export const FileAttachmentPreview = memo(function FileAttachmentPreview({
           )}
         >
           {attachment.isImage && attachment.preview ? (
-            /* eslint-disable-next-line @next/next/no-img-element -- base64/blob preview URLs are not compatible with next/image */
             <img
               src={attachment.preview}
               alt="Attachment preview"

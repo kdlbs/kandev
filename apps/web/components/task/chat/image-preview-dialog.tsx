@@ -25,7 +25,6 @@ export function ImagePreviewContent({ src, alt }: ImagePreviewContentProps) {
   return (
     <>
       <DialogTitle className="sr-only">Image preview</DialogTitle>
-      {/* eslint-disable-next-line @next/next/no-img-element -- base64 preview URL */}
       <img src={src} alt={alt} className={IMAGE_PREVIEW_IMAGE_CLASSNAME} />
     </>
   );
@@ -38,10 +37,7 @@ export function ImagePreviewDialog({
   interactive = true,
 }: ImagePreviewDialogProps) {
   if (!interactive) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element -- base64 preview URL
-      <img src={src} alt={alt} className={thumbnailClassName} />
-    );
+    return <img src={src} alt={alt} className={thumbnailClassName} />;
   }
 
   return (
@@ -52,7 +48,6 @@ export function ImagePreviewDialog({
           aria-label={`Open ${alt}`}
           className="inline-flex max-w-full cursor-pointer items-center justify-center rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
         >
-          {/* eslint-disable-next-line @next/next/no-img-element -- base64 preview URL */}
           <img src={src} alt="" className={cn("pointer-events-none", thumbnailClassName)} />
         </button>
       </DialogTrigger>

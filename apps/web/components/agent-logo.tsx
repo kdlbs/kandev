@@ -84,8 +84,5 @@ function AgentLogoImage({ agentName, size = 16, className }: AgentLogoProps) {
     );
   }
 
-  return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img src={src} alt="" width={size} height={size} className={className} />
-  );
+  return <img src={src} alt="" width={size} height={size} className={className} />;
 }

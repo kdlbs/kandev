@@ -1,5 +1,5 @@
-import { cookies } from "next/headers";
 import { listWorkspaces, fetchUserSettings } from "@/lib/api";
+import { readCookies } from "@/lib/server/cookies";
 
 /**
  * Server-side helper to resolve the active workspace ID.
@@ -19,7 +19,7 @@ export async function getActiveWorkspaceId(urlWorkspaceId?: string): Promise<str
   const [workspacesRes, settingsRes, cookieStore] = await Promise.all([
     listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
     fetchUserSettings({ cache: "no-store" }).catch(() => null),
-    cookies().catch(() => null),
+    readCookies().catch(() => null),
   ]);
 
   // Only consider office workspaces (those with office_workflow_id set).

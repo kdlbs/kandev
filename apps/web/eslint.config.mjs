@@ -1,30 +1,37 @@
 import { defineConfig, globalIgnores } from "eslint/config";
-import nextVitals from "eslint-config-next/core-web-vitals";
-import nextTs from "eslint-config-next/typescript";
+import js from "@eslint/js";
+import reactHooks from "eslint-plugin-react-hooks";
 import sonarjs from "eslint-plugin-sonarjs";
 import unusedImports from "eslint-plugin-unused-imports";
+import tseslint from "typescript-eslint";
 
 const eslintConfig = defineConfig([
-  ...nextVitals,
-  ...nextTs,
-  // Override default ignores of eslint-config-next.
+  {
+    linterOptions: {
+      reportUnusedDisableDirectives: "off",
+    },
+  },
+  js.configs.recommended,
+  ...tseslint.configs.recommended,
   globalIgnores([
-    // Default ignores of eslint-config-next:
-    ".next/**",
     "out/**",
     "build/**",
     "dist/**",
-    "next-env.d.ts",
     // Test artifacts (Playwright):
     "**/test-results/**",
     "**/playwright-report/**",
   ]),
   {
     plugins: {
+      "react-hooks": reactHooks,
       sonarjs,
       "unused-imports": unusedImports,
     },
     rules: {
+      "no-control-regex": "off",
+      "no-empty": "off",
+      "no-undef": "off",
+      "no-unsafe-finally": "off",
       "max-lines": ["warn", { max: 600, skipBlankLines: true, skipComments: true }],
       "max-lines-per-function": ["warn", { max: 100, skipBlankLines: true, skipComments: true }],
       complexity: ["warn", 15],

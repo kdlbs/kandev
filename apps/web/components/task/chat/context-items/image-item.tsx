@@ -27,7 +27,6 @@ export const ImageItem = memo(function ImageItem({ item }: { item: ImageContextI
 
   const preview = previewSrc ? (
     <div className="space-y-1.5">
-      {/* eslint-disable-next-line @next/next/no-img-element -- base64 preview */}
       <img src={previewSrc} alt="Preview" className="max-w-full max-h-48 rounded object-contain" />
       {item.onDeliveryModeChange && (
         <div className="space-y-1.5">
@@ -77,7 +76,6 @@ export const ImageItem = memo(function ImageItem({ item }: { item: ImageContextI
       <span className="relative h-3 w-3 shrink-0" aria-hidden="true">
         <IconFile className="h-3 w-3 text-muted-foreground" />
         {previewSrc && (
-          // eslint-disable-next-line @next/next/no-img-element -- base64 thumbnail
           <img
             src={previewSrc}
             alt=""

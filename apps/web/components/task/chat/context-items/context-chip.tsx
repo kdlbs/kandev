@@ -55,10 +55,7 @@ export const ContextChip = memo(function ContextChip({
   if (leadingIcon) {
     iconNode = leadingIcon;
   } else if (thumbnail) {
-    iconNode = (
-      // eslint-disable-next-line @next/next/no-img-element -- base64 thumbnail
-      <img src={thumbnail} alt="" className="h-3 w-3 shrink-0 rounded-sm object-cover" />
-    );
+    iconNode = <img src={thumbnail} alt="" className="h-3 w-3 shrink-0 rounded-sm object-cover" />;
   } else {
     iconNode = <Icon className="h-3 w-3 shrink-0" />;
   }

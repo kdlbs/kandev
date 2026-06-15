@@ -1,5 +1,4 @@
 import { notFound } from "@/lib/routing/server-navigation";
-import { cookies } from "next/headers";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateHydrator } from "@/components/state-hydrator";
 import { getFeatureFlagsAction } from "@/app/actions/features";
@@ -12,6 +11,7 @@ import {
   listProjects,
 } from "@/lib/api/domains/office-api";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
+import { readCookies } from "@/lib/server/cookies";
 import type { AppState } from "@/lib/state/store";
 import { OfficeTopbar } from "./components/office-topbar";
 
@@ -82,7 +82,7 @@ export default async function OfficeLayout({ children }: { children: React.React
     listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
     fetchUserSettings({ cache: "no-store" }).catch(() => null),
     getMeta({ cache: "no-store" }).catch(() => null),
-    cookies().catch(() => null),
+    readCookies().catch(() => null),
   ]);
 
   // Only office workspaces can be active inside /office, but hydrate every

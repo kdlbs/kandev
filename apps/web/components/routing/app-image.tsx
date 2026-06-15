@@ -15,6 +15,5 @@ export default function Image({
   priority: _priority,
   ...props
 }: AppImageProps) {
-  // eslint-disable-next-line @next/next/no-img-element -- SPA image adapter intentionally renders a native image.
   return <img alt={alt} {...props} />;
 }
