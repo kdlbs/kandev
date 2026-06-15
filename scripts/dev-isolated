@@ -28,7 +28,7 @@
 #   scripts/dev-isolated [options]
 #
 # Options:
-#   --web                 Also start the Next.js dev frontend (default: backend only)
+#   --web                 Also start the Vite dev frontend (default: backend only)
 #   --backend-port N      Force the backend port (default: auto from base 48429)
 #   --web-port N          Force the web port (default: auto from base 47429)
 #   --agentctl-port N     Force the agentctl base port (default: auto from base 49429)

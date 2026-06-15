@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # kandev-kill — terminate exactly ONE kandev instance: the backend listening on
-# a given port, plus its agentctl child(ren) and its matching web/next server.
+# a given port, plus its agentctl child(ren) and matching Vite dev server.
 #
 # This NEVER does a blanket `pkill kandev`. It resolves the backend PID from the
 # port, confirms the process is actually a kandev backend, computes the exact
@@ -210,8 +210,8 @@ collect_descendants() {
 
 mapfile -t TREE < <(collect_descendants "$BACKEND_PID")
 
-# The web/next server is typically a sibling (spawned by the launcher, not a
-# child of the backend). If a pidfile sidecar lists it, include it.
+# The optional Vite dev server is typically a sibling (spawned by the launcher,
+# not a child of the backend). If a pidfile sidecar lists it, include it.
 WEB_PID=""
 if [[ -n "$PIDFILE" && -f "${PIDFILE%.pid}.web.pid" ]]; then
   WEB_PID="$(tr -d '[:space:]' <"${PIDFILE%.pid}.web.pid" 2>/dev/null || true)"
