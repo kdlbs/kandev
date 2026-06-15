@@ -104,9 +104,23 @@ describe("markdownComponents", () => {
   it("opens relative file links in the editor", () => {
     render(<Markdown>{"[plan.md](docs/specs/native/plan.md)"}</Markdown>);
 
-    fireEvent.click(screen.getByRole("link", { name: "plan.md" }));
+    const link = screen.getByRole("link", { name: "plan.md" });
+    expect(link.getAttribute("target")).toBe("_self");
+
+    fireEvent.click(link);
 
     expect(openFile).toHaveBeenCalledWith("docs/specs/native/plan.md");
+  });
+
+  it("does not treat bare domains as relative file links", () => {
+    render(<Markdown>{"[service](api.service.com)"}</Markdown>);
+
+    const link = screen.getByRole("link", { name: "service" });
+    link.addEventListener("click", (event) => event.preventDefault());
+    fireEvent.click(link);
+
+    expect(openFile).not.toHaveBeenCalled();
+    expect(link.getAttribute("target")).toBe("_blank");
   });
 });
 

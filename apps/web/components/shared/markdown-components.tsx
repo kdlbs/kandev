@@ -1,13 +1,6 @@
 "use client";
 
-import {
-  createContext,
-  isValidElement,
-  useCallback,
-  useContext,
-  type MouseEvent,
-  type ReactNode,
-} from "react";
+import { createContext, isValidElement, useContext, type MouseEvent, type ReactNode } from "react";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
 import remarkGemoji from "remark-gemoji";
@@ -69,9 +62,14 @@ function isBlockCode(rawContent: string, hasLanguage: boolean): boolean {
   return hasLanguage || rawContent.includes("\n");
 }
 
+const WEB_TLD_EXTENSIONS = new Set(["ai", "app", "cloud", "co", "com", "dev", "io", "net", "org"]);
+
 function looksLikeFilePath(path: string): boolean {
   const lastSegment = path.split("/").pop() ?? "";
-  return lastSegment.includes(".") && !path.endsWith("/");
+  if (!lastSegment.includes(".") || path.endsWith("/")) return false;
+  const extension = lastSegment.split(".").pop() ?? "";
+  if (!/^[a-z0-9]{1,8}$/i.test(extension)) return false;
+  return !WEB_TLD_EXTENSIONS.has(extension.toLowerCase());
 }
 
 function isExternalHref(href: string): boolean {
@@ -131,23 +129,21 @@ function MarkdownFileAnchor({
   openFile: (path: string) => void;
 }) {
   const filePath = resolveMarkdownFileHref(href, worktreePath);
-  const isInternal = href?.startsWith("/") || href?.startsWith("#");
+  const isInternal = !!filePath || href?.startsWith("/") || href?.startsWith("#");
 
-  const handleClick = useCallback(
-    (event: MouseEvent<HTMLAnchorElement>) => {
-      if (!filePath) return;
-      event.preventDefault();
-      openFile(filePath);
-    },
-    [filePath, openFile],
-  );
+  const handleClick = filePath
+    ? (event: MouseEvent<HTMLAnchorElement>) => {
+        event.preventDefault();
+        openFile(filePath);
+      }
+    : undefined;
 
   return (
     <a
       href={href}
       target={isInternal ? "_self" : "_blank"}
       rel={isInternal ? undefined : "noopener noreferrer"}
-      onClick={filePath ? handleClick : undefined}
+      onClick={handleClick}
     >
       {children}
     </a>
