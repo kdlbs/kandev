@@ -946,8 +946,10 @@ func (m *Manager) buildExecutionFromInstance(
 		execution.isResumedSession = true
 	}
 	execution.IsPassthrough = req.IsPassthrough
-	runtime := models.ExecutorType(req.ExecutorType).Runtime()
-	preferNative := m.preferNativeBinary(agentConfig, runtime, execReq.Metadata)
+	// Use the resolved runtime (set from rt.Name() above), matching
+	// promoteWorkspaceExecution's call site rather than re-deriving from the
+	// requested ExecutorType.
+	preferNative := m.preferNativeBinary(agentConfig, execution.RuntimeName, execReq.Metadata)
 	cmds := m.buildAgentCommand(req, profileInfo, agentConfig, preferNative)
 	execution.AgentCommand = cmds.initial
 	execution.ContinueCommand = cmds.continue_
