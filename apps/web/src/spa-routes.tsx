@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { GitHubPageClient } from "@/app/github/github-page-client";
 import { GitLabPageClient } from "@/app/gitlab/gitlab-page-client";
 import { JiraPageClient } from "@/app/jira/jira-page-client";
@@ -11,6 +12,13 @@ import { useAppStore } from "@/components/state-provider";
 import { usePathname, useSearchParams } from "@/lib/routing/client-router";
 import type { Repository } from "@/lib/types/http";
 
+const OfficeRoutes = lazy(() =>
+  import("./office-routes").then((mod) => ({ default: mod.OfficeRoutes })),
+);
+const SettingsRoutes = lazy(() =>
+  import("./settings-routes").then((mod) => ({ default: mod.SettingsRoutes })),
+);
+
 type SpaRoute =
   | { kind: "kanban"; taskId?: string; sessionId?: string }
   | { kind: "tasks" }
@@ -18,7 +26,9 @@ type SpaRoute =
   | { kind: "gitlab" }
   | { kind: "jira" }
   | { kind: "linear" }
-  | { kind: "stats"; range?: RangeKey };
+  | { kind: "stats"; range?: RangeKey }
+  | { kind: "settings"; pathname: string }
+  | { kind: "office"; pathname: string };
 
 export function resolveSpaRoute(pathname: string, searchParams: URLSearchParams): SpaRoute {
   const normalized = normalizePath(pathname);
@@ -48,6 +58,12 @@ export function resolveSpaRoute(pathname: string, searchParams: URLSearchParams)
       return { kind: "stats", range: range && isRangeKey(range) ? range : undefined };
     }
     default:
+      if (normalized === "/settings" || normalized.startsWith("/settings/")) {
+        return { kind: "settings", pathname: normalized };
+      }
+      if (normalized === "/office" || normalized.startsWith("/office/")) {
+        return { kind: "office", pathname: normalized };
+      }
       return { kind: "kanban" };
   }
 }
@@ -56,8 +72,34 @@ export function SpaRoutes() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const route = resolveSpaRoute(pathname, searchParams);
-  const { activeWorkspaceId, repositories } = useRouteData();
 
+  if (route.kind === "kanban") {
+    return <PageClient initialTaskId={route.taskId} initialSessionId={route.sessionId} />;
+  }
+  if (route.kind === "settings") {
+    return (
+      <Suspense fallback={null}>
+        <SettingsRoutes pathname={route.pathname} />
+      </Suspense>
+    );
+  }
+  if (route.kind === "office") {
+    return (
+      <Suspense fallback={null}>
+        <OfficeRoutes pathname={route.pathname} />
+      </Suspense>
+    );
+  }
+
+  return <DataBackedRoute route={route} />;
+}
+
+function DataBackedRoute({
+  route,
+}: {
+  route: Exclude<SpaRoute, { kind: "kanban" | "settings" | "office" }>;
+}) {
+  const { activeWorkspaceId, repositories } = useRouteData();
   switch (route.kind) {
     case "tasks":
       return (
@@ -98,8 +140,6 @@ export function SpaRoutes() {
           initialError={null}
         />
       );
-    case "kanban":
-      return <PageClient initialTaskId={route.taskId} initialSessionId={route.sessionId} />;
   }
 }
 

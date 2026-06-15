@@ -60,4 +60,15 @@ describe("resolveSpaRoute", () => {
       range: undefined,
     });
   });
+
+  it("routes settings and office paths through their SPA shells", () => {
+    expect(resolveSpaRoute("/settings/general/editors", new URLSearchParams())).toEqual({
+      kind: "settings",
+      pathname: "/settings/general/editors",
+    });
+    expect(resolveSpaRoute("/office/projects/project-1", new URLSearchParams())).toEqual({
+      kind: "office",
+      pathname: "/office/projects/project-1",
+    });
+  });
 });
