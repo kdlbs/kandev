@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,7 +10,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/common/config"
+	taskdto "github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/webapp"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -58,9 +61,12 @@ func TestAppendSessionStateMessage_IncludesTaskEnvironmentID(t *testing.T) {
 }
 
 func TestBootInitialStateIncludesFeatureFlags(t *testing.T) {
-	state := bootInitialState(routeParams{
-		features: config.FeaturesConfig{Office: true},
-	})
+	state := bootInitialState(
+		context.Background(),
+		nil,
+		routeParams{features: config.FeaturesConfig{Office: true}},
+		webapp.ClassifyRoute("/"),
+	)
 
 	raw, err := json.Marshal(state)
 	if err != nil {
@@ -74,6 +80,34 @@ func TestBootInitialStateIncludesFeatureFlags(t *testing.T) {
 	}
 	if !decoded.Features.Office {
 		t.Fatal("features.office should hydrate true from the backend boot payload")
+	}
+}
+
+func TestBootInitialStateSettingsWithNilServicesDoesNotPanic(t *testing.T) {
+	state := bootInitialState(
+		context.Background(),
+		nil,
+		routeParams{features: config.FeaturesConfig{Office: true}},
+		webapp.ClassifyRoute("/settings/prompts"),
+	)
+
+	if _, ok := state["features"]; !ok {
+		t.Fatal("features should always be present even when optional services are unavailable")
+	}
+	if _, ok := state["prompts"]; ok {
+		t.Fatal("prompts should not be marked loaded when the prompts controller is unavailable")
+	}
+}
+
+func TestResolveActiveOfficeWorkspaceIDPrefersCookie(t *testing.T) {
+	workspaces := []taskdto.WorkspaceDTO{
+		{ID: "ws-a", OfficeWorkflowID: "office-a"},
+		{ID: "ws-b", OfficeWorkflowID: "office-b"},
+	}
+
+	got := resolveActiveOfficeWorkspaceID(workspaces, "ws-b")
+	if got != "ws-b" {
+		t.Fatalf("expected cookie workspace to win, got %q", got)
 	}
 }
 
