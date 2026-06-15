@@ -1,18 +1,19 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "@/app/globals.css";
-import { PageClient } from "@/app/page-client";
 import { StateProvider } from "@/components/state-provider";
+import { AppShell } from "./app-shell";
 import { readBootPayload } from "./boot-payload";
-import { getInitialPageProps } from "./spa-routing";
+import { SpaRoutes } from "./spa-routes";
 
 function App() {
   const payload = readBootPayload();
-  const initialPageProps = getInitialPageProps(payload);
 
   return (
     <StateProvider initialState={payload.initialState ?? {}}>
-      <PageClient {...initialPageProps} />
+      <AppShell>
+        <SpaRoutes />
+      </AppShell>
     </StateProvider>
   );
 }

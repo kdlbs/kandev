@@ -30,6 +30,7 @@ const (
 	RouteGitLab     RouteName = "gitlab"
 	RouteJira       RouteName = "jira"
 	RouteLinear     RouteName = "linear"
+	RouteStats      RouteName = "stats"
 )
 
 // RouteClassification is the backend contract for SPA-vs-backend routing.
@@ -90,6 +91,8 @@ func classifySPARoute(requestPath string) (RouteName, map[string]string) {
 		return RouteJira, nil
 	case requestPath == "/linear":
 		return RouteLinear, nil
+	case requestPath == "/stats":
+		return RouteStats, nil
 	case requestPath == "/office" || strings.HasPrefix(requestPath, "/office/"):
 		return RouteOffice, nil
 	case requestPath == "/settings" || strings.HasPrefix(requestPath, "/settings/"):
@@ -100,11 +103,22 @@ func classifySPARoute(requestPath string) (RouteName, map[string]string) {
 }
 
 func classifyTaskRoute(requestPath string) (RouteName, map[string]string) {
-	taskID, ok := strings.CutPrefix(requestPath, "/t/")
-	if !ok || taskID == "" || strings.Contains(taskID, "/") {
+	taskID, ok := cutSingleSegment(requestPath, "/t/")
+	if !ok {
+		taskID, ok = cutSingleSegment(requestPath, "/tasks/")
+	}
+	if !ok {
 		return RouteUnknown, nil
 	}
 	return RouteTaskDetail, map[string]string{"taskId": taskID}
+}
+
+func cutSingleSegment(requestPath, prefix string) (string, bool) {
+	value, ok := strings.CutPrefix(requestPath, prefix)
+	if !ok || value == "" || strings.Contains(value, "/") {
+		return "", false
+	}
+	return value, true
 }
 
 func isStaticPath(requestPath string) bool {

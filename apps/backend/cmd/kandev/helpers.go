@@ -568,7 +568,7 @@ func registerRoutes(p routeParams) {
 		payload := webapp.NewBootPayload(
 			webapp.ClassifyRoute(routePath),
 			webapp.RuntimeConfig{APIPrefix: "/api/v1", WebSocketPath: "/ws"},
-			nil,
+			bootInitialState(p),
 		)
 		c.JSON(http.StatusOK, payload)
 	})
@@ -633,10 +633,16 @@ func newWebAppHandler(p routeParams) (*webapp.Handler, string, bool) {
 		os.DirFS(distDir),
 		webapp.WithRuntimeConfig(webapp.RuntimeConfig{APIPrefix: "/api/v1", WebSocketPath: "/ws"}),
 		webapp.WithPayloadBuilder(func(_ *http.Request, route webapp.RouteClassification) webapp.BootPayload {
-			return webapp.NewBootPayload(route, webapp.RuntimeConfig{APIPrefix: "/api/v1", WebSocketPath: "/ws"}, nil)
+			return webapp.NewBootPayload(route, webapp.RuntimeConfig{APIPrefix: "/api/v1", WebSocketPath: "/ws"}, bootInitialState(p))
 		}),
 	)
 	return handler, distDir, true
+}
+
+func bootInitialState(p routeParams) map[string]any {
+	return map[string]any{
+		"features": p.features,
+	}
 }
 
 func firstExistingDir(candidates ...string) string {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -53,6 +54,26 @@ func TestAppendSessionStateMessage_IncludesTaskEnvironmentID(t *testing.T) {
 	}
 	if got != "env-42" {
 		t.Fatalf("expected task_environment_id=env-42, got %v", got)
+	}
+}
+
+func TestBootInitialStateIncludesFeatureFlags(t *testing.T) {
+	state := bootInitialState(routeParams{
+		features: config.FeaturesConfig{Office: true},
+	})
+
+	raw, err := json.Marshal(state)
+	if err != nil {
+		t.Fatalf("Marshal state: %v", err)
+	}
+	var decoded struct {
+		Features config.FeaturesConfig `json:"features"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("Unmarshal state: %v", err)
+	}
+	if !decoded.Features.Office {
+		t.Fatal("features.office should hydrate true from the backend boot payload")
 	}
 }
 

@@ -18,6 +18,7 @@ func TestClassifyRouteSPARoutes(t *testing.T) {
 		{name: "home", path: "/", wantRoute: RouteHome},
 		{name: "tasks", path: "/tasks", wantRoute: RouteTasks},
 		{name: "task detail", path: "/t/task-123", wantRoute: RouteTaskDetail, wantParams: map[string]string{"taskId": "task-123"}},
+		{name: "task detail compat", path: "/tasks/task-123", wantRoute: RouteTaskDetail, wantParams: map[string]string{"taskId": "task-123"}},
 		{name: "office root", path: "/office", wantRoute: RouteOffice},
 		{name: "office nested", path: "/office/agents/agent-1", wantRoute: RouteOffice},
 		{name: "settings root", path: "/settings", wantRoute: RouteSettings},
@@ -26,6 +27,7 @@ func TestClassifyRouteSPARoutes(t *testing.T) {
 		{name: "gitlab", path: "/gitlab", wantRoute: RouteGitLab},
 		{name: "jira", path: "/jira", wantRoute: RouteJira},
 		{name: "linear", path: "/linear", wantRoute: RouteLinear},
+		{name: "stats", path: "/stats", wantRoute: RouteStats},
 		{name: "query stripped", path: "/tasks?view=all", wantRoute: RouteTasks},
 		{name: "trailing slash normalized", path: "/settings/", wantRoute: RouteSettings},
 	}
