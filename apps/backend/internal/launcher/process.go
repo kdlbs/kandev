@@ -1,0 +1,127 @@
+package launcher
+
+import (
+	"bytes"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"os/signal"
+	"sync"
+	"syscall"
+)
+
+type processSupervisor struct {
+	mu       sync.Mutex
+	children []*managedProcess
+}
+
+type managedProcess struct {
+	cmd      *exec.Cmd
+	exitCode int
+	exited   bool
+	mu       sync.Mutex
+	done     chan struct{}
+}
+
+func newSupervisor() *processSupervisor {
+	return &processSupervisor{}
+}
+
+func (s *processSupervisor) add(proc *managedProcess) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.children = append(s.children, proc)
+}
+
+func (s *processSupervisor) shutdown(reason string) {
+	fmt.Printf("[kandev] shutting down (%s)...\n", reason)
+	s.mu.Lock()
+	children := append([]*managedProcess(nil), s.children...)
+	s.mu.Unlock()
+	for _, child := range children {
+		child.kill()
+	}
+}
+
+func (s *processSupervisor) attachSignals() {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		sig := <-ch
+		s.shutdown("signal " + sig.String())
+		os.Exit(0)
+	}()
+}
+
+func startProcess(command string, args []string, cwd string, env []string, quiet bool, label string, supervisor *processSupervisor) (*managedProcess, func(), error) {
+	cmd := exec.Command(command, args...)
+	cmd.Dir = cwd
+	cmd.Env = env
+	cmd.Stdin = nil
+	var stdout bytes.Buffer
+	if quiet {
+		cmd.Stdout = &stdout
+		cmd.Stderr = os.Stderr
+	} else {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, nil, err
+	}
+	proc := &managedProcess{cmd: cmd, done: make(chan struct{})}
+	supervisor.add(proc)
+	go func() {
+		err := cmd.Wait()
+		code := 0
+		if err != nil {
+			code = 1
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				code = exitErr.ExitCode()
+			}
+		}
+		proc.mu.Lock()
+		proc.exitCode = code
+		proc.exited = true
+		proc.mu.Unlock()
+		close(proc.done)
+		if label != "" && code != 0 {
+			fmt.Fprintf(os.Stderr, "[kandev] %s exited (code=%d)\n", label, code)
+		}
+	}()
+	return proc, func() {
+		if stdout.Len() == 0 {
+			return
+		}
+		fmt.Fprintln(os.Stderr, "[kandev] --- backend stdout (last captured output) ---")
+		_, _ = io.Copy(os.Stderr, bytes.NewReader(stdout.Bytes()))
+		fmt.Fprintln(os.Stderr, "[kandev] --- end backend stdout ---")
+	}, nil
+}
+
+func (p *managedProcess) Exited() (bool, int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.exited, p.exitCode
+}
+
+func (p *managedProcess) kill() {
+	if p.cmd.Process == nil {
+		return
+	}
+	_ = p.cmd.Process.Kill()
+	<-p.done
+}
+
+func waitForAppExit(supervisor *processSupervisor, backend *restartableBackend, web *managedProcess) int {
+	select {
+	case code := <-backend.exitCh:
+		supervisor.shutdown("backend exit")
+		return code
+	case <-web.done:
+		_, code := web.Exited()
+		supervisor.shutdown("web exit")
+		return code
+	}
+}

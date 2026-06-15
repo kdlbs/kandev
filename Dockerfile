@@ -3,7 +3,7 @@
 # Single-stage build that consumes prebuilt artifacts. The release workflow
 # (.github/workflows/release.yml) extracts the per-arch release bundle
 # (`kandev-linux-{x64,arm64}.tar.gz`) into the build context, then this file
-# just COPYs the binaries + web standalone + CLI into the runtime layout.
+# just COPYs the binaries + web standalone into the runtime layout.
 #
 # Building this file outside CI (manual `docker build .`) will fail because
 # the `bundle/` directory isn't present in the build context. To build
@@ -54,7 +54,7 @@ RUN mkdir -p /data/home/.azure && \
 # Create app directory structure matching what `kandev start` expects:
 #   /app/apps/backend/bin/kandev
 #   /app/apps/web/.next/standalone/web/server.js
-RUN mkdir -p /app/apps/backend/bin /app/apps/web/.next/standalone /usr/local/lib/kandev-cli /data/worktrees
+RUN mkdir -p /app/apps/backend/bin /app/apps/web/.next/standalone /data/worktrees
 
 # Build context layout (prepared by the release workflow from the extracted
 # bundle tarball):
@@ -62,9 +62,6 @@ RUN mkdir -p /app/apps/backend/bin /app/apps/web/.next/standalone /usr/local/lib
 #   bundle/bin/agentctl                - native agentctl (per-arch)
 #   bundle/bin/agentctl-linux-amd64    - amd64 agentctl helper (always amd64)
 #   bundle/web/...                     - Next.js standalone + static + public
-#   bundle/cli/bin/cli.js              - CLI entrypoint (calls cli.bundle.js)
-#   bundle/cli/dist/cli.bundle.js      - self-contained CLI bundle (deps inlined)
-#   bundle/cli/package.json            - package metadata (version, etc.)
 #
 # The bundle's `bin/agentctl-linux-amd64` variant is bind-mounted into
 # Docker-executor sandboxes by the lifecycle manager; ship it next to kandev
@@ -73,19 +70,16 @@ COPY bundle/bin/kandev               /app/apps/backend/bin/kandev
 COPY bundle/bin/agentctl-linux-amd64 /app/apps/backend/bin/agentctl-linux-amd64
 COPY bundle/bin/agentctl             /usr/local/bin/agentctl
 COPY bundle/web/                     /app/apps/web/.next/standalone/
-COPY bundle/cli/                     /usr/local/lib/kandev-cli/
 COPY docker-entrypoint.sh            /usr/local/bin/docker-entrypoint.sh
 
-# Re-apply executable bits stripped by tar/COPY edge cases, then link the
-# CLI launcher onto PATH. The CLI's deps are inlined into dist/cli.bundle.js
-# by the release bundle step, so no `npm install` is needed here.
+# Re-apply executable bits stripped by tar/COPY edge cases, then link the native
+# launcher onto PATH.
 RUN chmod +x \
         /app/apps/backend/bin/kandev \
         /app/apps/backend/bin/agentctl-linux-amd64 \
         /usr/local/bin/agentctl \
-        /usr/local/lib/kandev-cli/bin/cli.js \
         /usr/local/bin/docker-entrypoint.sh && \
-    ln -s /usr/local/lib/kandev-cli/bin/cli.js /usr/local/bin/kandev && \
+    ln -s /app/apps/backend/bin/kandev /usr/local/bin/kandev && \
     chown -R kandev:kandev /app /data
 
 # Kandev home directory (DB, worktrees, sessions, repos)

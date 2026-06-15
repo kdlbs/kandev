@@ -16,11 +16,9 @@ flowchart TB
 
     resolve --> envvar["KANDEV_BUNDLE_DIR<br/>(Homebrew, tests)"]
     resolve --> npmpkg["@kdlbs/runtime-{platform}<br/>(npm/npx)"]
-    resolve --> cache["~/.kandev/bin cache<br/>(--runtime-version only)"]
 
     envvar --> supervisor
     npmpkg --> supervisor
-    cache --> supervisor
     makedev --> supervisor
     binary --> supervisor
 
@@ -89,7 +87,7 @@ kandev run
 ```
 
 **What happens:**
-1. Resolves the runtime bundle (KANDEV_BUNDLE_DIR → npm package → cache).
+1. Resolves the runtime bundle (KANDEV_BUNDLE_DIR → npm package).
 2. Starts the backend server.
 3. Waits for backend health check.
 4. Starts the web app.
@@ -129,7 +127,6 @@ kandev start
 | `--verbose`, `-v` | Show info logs from backend + web | `--verbose` |
 | `--debug` | Show debug logs + agent message dumps | `--debug` |
 | `--help`, `-h` | Show help | `--help` |
-| `--runtime-version <tag>` | **Advanced/debug only**: download a specific runtime tag from GitHub releases instead of using the installed runtime | `--runtime-version v0.16.0` |
 
 ### Examples
 
@@ -143,8 +140,6 @@ kandev --port 18080 --web-internal-port 13000
 # Dev mode
 kandev dev --port 18080
 
-# Force a specific runtime version (debug)
-kandev --runtime-version v0.16.0
 ```
 
 ## Port Selection
@@ -167,8 +162,6 @@ If the default port is in use, the CLI finds the next available port automatical
 | `KANDEV_PORT` / `KANDEV_BACKEND_PORT` | Backend port (CLI flag wins) |
 | `KANDEV_WEB_PORT` | Internal web app port |
 | `KANDEV_HEALTH_TIMEOUT_MS` | Override health check timeout (ms) |
-| `KANDEV_GITHUB_OWNER` / `KANDEV_GITHUB_REPO` | Override GitHub repo for `--runtime-version` downloads |
-| `KANDEV_GITHUB_TOKEN` | GitHub token for `--runtime-version` API access |
 
 ## Makefile Integration
 
@@ -245,7 +238,6 @@ kandev start
 
 | Path | Contents |
 |------|----------|
-| `~/.kandev/bin/` | Cached downloads from `--runtime-version` (debug only) |
 | `~/.kandev/data/` | SQLite database and app data |
 | Homebrew Cellar | Installed runtime (when installed via brew) |
 | `<npm cache>/node_modules/@kdlbs/runtime-{platform}/` | Installed runtime (when installed via npm/npx) |

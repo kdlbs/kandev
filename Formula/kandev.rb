@@ -23,7 +23,6 @@ class Kandev < Formula
     system "pnpm", "-C", "apps", "install", "--frozen-lockfile"
     system "pnpm", "-C", "apps", "--filter", "@kandev/web", "build"
     system "./scripts/release/package-web.sh"
-    system "./scripts/release/package-cli.sh"
 
     bundle = buildpath/"dist/kandev"
     (bundle/"bin").mkpath
@@ -32,6 +31,7 @@ class Kandev < Formula
       # kandev backend needs cgo for mattn/go-sqlite3.
       with_env(CGO_ENABLED: "1") do
         system "go", "build",
+               "-tags", "fts5",
                *std_go_args(ldflags: "-s -w -X main.Version=#{version}",
                             output:  bundle/"bin/kandev"),
                "./cmd/kandev"
@@ -60,7 +60,7 @@ class Kandev < Formula
 
     libexec.install Dir[bundle/"*"]
 
-    (bin/"kandev").write_env_script libexec/"cli/bin/cli.js",
+    (bin/"kandev").write_env_script libexec/"bin/kandev",
       KANDEV_BUNDLE_DIR: libexec.to_s,
       KANDEV_VERSION:    version.to_s
   end

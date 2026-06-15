@@ -29,13 +29,6 @@ importers:
         version: 5.9.3
 
   cli:
-    dependencies:
-      tar:
-        specifier: ^7.5.11
-        version: 7.5.13
-      tree-kill:
-        specifier: ^1.2.2
-        version: 1.2.2
     optionalDependencies:
       '@kdlbs/runtime-darwin-arm64':
         specifier: 0.0.0-bootstrap
@@ -59,6 +52,12 @@ importers:
       esbuild:
         specifier: ^0.24.0
         version: 0.24.2
+      tar:
+        specifier: ^7.5.11
+        version: 7.5.13
+      tree-kill:
+        specifier: ^1.2.2
+        version: 1.2.2
       tsx:
         specifier: ^4.15.7
         version: 4.21.0
