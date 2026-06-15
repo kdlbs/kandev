@@ -167,10 +167,10 @@ function TerminalFontCard() {
         terminal_font_family: value,
       });
     } catch {
-      setUserSettings({
-        ...storeApi.getState().userSettings,
-        terminalFontFamily: previous,
-      });
+      const latest = storeApi.getState().userSettings;
+      if (latest.workspaceId === current.workspaceId) {
+        setUserSettings({ ...latest, terminalFontFamily: previous });
+      }
     } finally {
       setIsSaving(false);
     }
@@ -252,10 +252,10 @@ function TerminalLinksCard() {
         terminal_link_behavior: value,
       });
     } catch {
-      setUserSettings({
-        ...storeApi.getState().userSettings,
-        terminalLinkBehavior: previous,
-      });
+      const latest = storeApi.getState().userSettings;
+      if (latest.workspaceId === current.workspaceId) {
+        setUserSettings({ ...latest, terminalLinkBehavior: previous });
+      }
     } finally {
       setIsSaving(false);
     }
