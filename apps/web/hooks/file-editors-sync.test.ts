@@ -156,6 +156,33 @@ describe("syncOpenFileFromWorkspace", () => {
     );
   });
 
+  it("is a no-op when remote content matches the editor buffer", async () => {
+    seedOpenFile({ content: "v1", originalContent: "v1", originalHash: "h:2:v1" });
+    mockRequestFileContent.mockResolvedValueOnce({
+      content: "v1",
+      is_binary: false,
+      resolved_path: PATH,
+    });
+
+    await syncOpenFileFromWorkspace({
+      client: FAKE_CLIENT,
+      sessionId: SESSION_ID,
+      path: PATH,
+      updateFileState,
+    });
+
+    expect(updateFileState).not.toHaveBeenCalled();
+  });
+});
+
+describe("syncOpenFileFromWorkspace repo scoping", () => {
+  let updateFileState: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    updateFileState = vi.fn();
+  });
+
   it("forwards the file's repo subpath so multi-repo files resolve under the right repository", async () => {
     // Multi-repo task: foo.ts lives inside the "enrichment-commons" repo. The
     // open editor buffer carries that repo. Re-syncing must pass `repo` to the
@@ -188,12 +215,14 @@ describe("syncOpenFileFromWorkspace", () => {
     );
   });
 
-  it("is a no-op when remote content matches the editor buffer", async () => {
-    seedOpenFile({ content: "v1", originalContent: "v1", originalHash: "h:2:v1" });
-    mockRequestFileContent.mockResolvedValueOnce({
-      content: "v1",
-      is_binary: false,
-      resolved_path: PATH,
+  it("drops the response if the tab was swapped to a different repo mid-fetch", async () => {
+    // The fetch is issued for repo "repoA". While it is in flight the same path
+    // key is reused for a file from "repoB". Writing repoA's content into the
+    // repoB buffer would be wrong, so the stale response must be discarded.
+    seedOpenFile({ content: "v1", originalContent: "v1", repo: "repoA" });
+    mockRequestFileContent.mockImplementationOnce(async () => {
+      seedOpenFile({ content: "other", originalContent: "other", repo: "repoB" });
+      return { content: "repoA-content", is_binary: false, resolved_path: PATH };
     });
 
     await syncOpenFileFromWorkspace({

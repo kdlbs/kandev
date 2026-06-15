@@ -22,7 +22,7 @@ interface DiffViewerResolverProps {
   className?: string;
   compact?: boolean;
   hideHeader?: boolean;
-  onOpenFile?: (filePath: string) => void;
+  onOpenFile?: (filePath: string, repo?: string) => void;
   onPreviewMarkdown?: (filePath: string) => void;
   onRevert?: (filePath: string) => void;
   enableAcceptReject?: boolean;

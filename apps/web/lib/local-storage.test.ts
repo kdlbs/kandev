@@ -3,10 +3,12 @@ import {
   cleanupTaskStorage,
   clearGlobalSidebarWidth,
   getGlobalSidebarWidth,
+  getOpenFileTabs,
   markPRClosedBannerDismissed,
   markPRMergedBannerDismissed,
   restoreAttachmentPreview,
   setGlobalSidebarWidth,
+  setOpenFileTabs,
   wasPRClosedBannerDismissed,
   wasPRMergedBannerDismissed,
 } from "./local-storage";
@@ -102,6 +104,27 @@ describe("global sidebar width storage", () => {
     setGlobalSidebarWidth(320);
     cleanupTaskStorage("task-a", []);
     expect(getGlobalSidebarWidth()).toBe(320);
+  });
+});
+
+describe("open file tabs storage", () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  it("round-trips the multi-repo repo subpath so a restored tab refetches under the right repo", () => {
+    setOpenFileTabs("sess-1", [
+      { path: "src/foo.ts", name: "foo.ts", repo: "enrichment-commons", pinned: true },
+    ]);
+
+    const tabs = getOpenFileTabs("sess-1");
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0].repo).toBe("enrichment-commons");
+  });
+
+  it("leaves repo undefined for single-repo tabs", () => {
+    setOpenFileTabs("sess-1", [{ path: "src/foo.ts", name: "foo.ts", pinned: true }]);
+    expect(getOpenFileTabs("sess-1")[0].repo).toBeUndefined();
   });
 });
 

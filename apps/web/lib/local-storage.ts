@@ -443,6 +443,9 @@ const ACTIVE_TAB_KEY = "kandev.activeTab";
 export interface StoredFileTab {
   path: string;
   name: string;
+  /** Multi-repo subpath (repository_name) so a restored tab re-fetches its
+   *  content under the right repository after a refresh. */
+  repo?: string;
   markdownPreview?: boolean;
   pinned?: boolean;
 }

@@ -79,21 +79,33 @@ function buildPersistedTabs(
   const previewParams = preview?.params as Record<string, unknown> | undefined;
   const previewPath = (previewParams?.previewItemId ?? null) as string | null;
   const isPromoted = previewParams?.promoted === true;
-  return Array.from(openFiles.values()).flatMap(({ path, name, markdownPreview }) => {
+  return Array.from(openFiles.values()).flatMap(({ path, name, repo, markdownPreview }) => {
     const isPinned = !!api?.getPanel(`file:${path}`);
     const isPreview = !isPinned && path === previewPath;
     if (!isPinned && !isPreview) return [];
     // Promoted previews persist as pinned so edits survive refresh
     const persistAsPinned = isPinned || (isPreview && isPromoted);
     return [
-      { path, name, ...(markdownPreview ? { markdownPreview } : {}), pinned: persistAsPinned },
+      {
+        path,
+        name,
+        ...(repo ? { repo } : {}),
+        ...(markdownPreview ? { markdownPreview } : {}),
+        pinned: persistAsPinned,
+      },
     ];
   });
 }
 
 type RestoreTabsParams = {
   activeSessionId: string;
-  savedTabs: Array<{ path: string; name: string; markdownPreview?: boolean; pinned?: boolean }>;
+  savedTabs: Array<{
+    path: string;
+    name: string;
+    repo?: string;
+    markdownPreview?: boolean;
+    pinned?: boolean;
+  }>;
   savedActiveTab: string;
   setFileState: (path: string, state: FileEditorState) => void;
   addFileEditorPanel: (
@@ -156,6 +168,7 @@ async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Pr
     // restored preview flag is clobbered and the tab reopens in code view.
     setFileState(savedTab.path, {
       path: savedTab.path,
+      repo: savedTab.repo,
       name: savedTab.name,
       content: "",
       originalContent: "",
@@ -166,10 +179,16 @@ async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Pr
   }
   for (const savedTab of savedTabs) {
     try {
-      const response = await requestFileContent(client, activeSessionId, savedTab.path);
+      const response = await requestFileContent(
+        client,
+        activeSessionId,
+        savedTab.path,
+        savedTab.repo,
+      );
       const hash = await calculateHash(response.content);
       setFileState(savedTab.path, {
         path: savedTab.path,
+        repo: savedTab.repo,
         name: savedTab.name,
         content: response.content,
         originalContent: response.content,
