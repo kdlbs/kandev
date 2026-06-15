@@ -112,13 +112,13 @@ function SettingsShell({
           backHref={backHref}
           backLabel={backLabel}
           parents={parents}
-          className="h-16 border-b-0"
+          className="h-12"
         />
         {/* Scroll the content, not the topbar: min-h-0 lets this flex child
             shrink below its content height so overflow-y-auto can take effect. */}
         <div
           data-testid="settings-scroll-container"
-          className="flex min-w-0 min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4 pt-0 pb-20"
+          className="flex min-w-0 min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4 pb-20"
         >
           {children}
         </div>

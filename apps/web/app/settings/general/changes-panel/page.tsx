@@ -1,13 +1,5 @@
-import { ChangesPanelSettings } from "@/components/settings/general-settings";
-import { StateProvider } from "@/components/state-provider";
-import { getUserSettingsInitialState } from "../user-settings-state";
+import { redirect } from "next/navigation";
 
-export default async function GeneralChangesPanelPage() {
-  const initialState = await getUserSettingsInitialState();
-
-  return (
-    <StateProvider initialState={initialState}>
-      <ChangesPanelSettings />
-    </StateProvider>
-  );
+export default function GeneralChangesPanelPage() {
+  redirect("/settings/general/appearance");
 }

@@ -120,9 +120,11 @@ test.describe("Terminal font settings", () => {
   test("settings page shows font and size controls", async ({ testPage }) => {
     await testPage.goto(TERMINAL_SETTINGS_PATH);
 
+    await expect(testPage.getByText("Preferred Shell")).toBeVisible({ timeout: 10_000 });
+
     // Font family selector
     const fontSelect = testPage.getByTestId("terminal-font-select");
-    await expect(fontSelect).toBeVisible({ timeout: 10_000 });
+    await expect(fontSelect).toBeVisible();
     await fontSelect.click();
 
     // Verify a preset is listed (exact match to avoid matching Nerd Font variant)

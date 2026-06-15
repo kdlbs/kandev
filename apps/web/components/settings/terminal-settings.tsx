@@ -18,6 +18,7 @@ import {
 } from "@kandev/ui/select";
 import { Separator } from "@kandev/ui/separator";
 import { SettingsSection } from "@/components/settings/settings-section";
+import { ShellSettingsCard } from "@/components/settings/shell-settings-card";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
 import { TERMINAL_FONT_PRESETS } from "@/lib/terminal/terminal-font";
@@ -282,12 +283,7 @@ function TerminalLinksCard() {
 export function TerminalSettings() {
   return (
     <div className="space-y-8">
-      <div>
-        <h2 className="text-2xl font-bold">Terminal</h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          Configure terminal appearance and behavior
-        </p>
-      </div>
+      <ShellSettingsCard />
 
       <Separator />
 

@@ -18,13 +18,8 @@ describe("settingsGroupIdForPath", () => {
     expect(settingsGroupIdForPath("/settings/system/feature-toggles")).toBe("system");
     // General subpages stay under /settings/general so they belong to General.
     expect(settingsGroupIdForPath("/settings/general/appearance")).toBe("general");
-    expect(settingsGroupIdForPath("/settings/general/shell")).toBe("general");
     expect(settingsGroupIdForPath("/settings/general/terminal")).toBe("general");
-    expect(settingsGroupIdForPath("/settings/general/resource-metrics")).toBe("general");
-    expect(settingsGroupIdForPath("/settings/general/chat-input")).toBe("general");
-    expect(settingsGroupIdForPath("/settings/general/changes-panel")).toBe("general");
     expect(settingsGroupIdForPath("/settings/general/keyboard-shortcuts")).toBe("general");
-    expect(settingsGroupIdForPath("/settings/general/backend-connection")).toBe("general");
     expect(settingsGroupIdForPath("/settings/general/editors")).toBe("general");
   });
 

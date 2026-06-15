@@ -8,8 +8,10 @@ test.describe("Keyboard Shortcuts Settings", () => {
   test("settings page shows all configurable shortcuts", async ({ testPage }) => {
     await testPage.goto(KEYBOARD_SETTINGS_PATH);
 
+    await expect(testPage.locator("#chat-submit-key")).toBeVisible({ timeout: 10_000 });
+
     // Original 3 shortcuts
-    await expect(testPage.getByTestId("shortcut-recorder-SEARCH")).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByTestId("shortcut-recorder-SEARCH")).toBeVisible();
     await expect(testPage.getByTestId("shortcut-recorder-FILE_SEARCH")).toBeVisible();
     await expect(testPage.getByTestId("shortcut-recorder-QUICK_CHAT")).toBeVisible();
 

@@ -9,21 +9,17 @@ import {
   IconCommand,
   IconCode,
   IconPalette,
-  IconServer,
   IconKeyboard,
   IconTerminal2,
   IconGitBranch,
 } from "@tabler/icons-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
-import { Input } from "@kandev/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Separator } from "@kandev/ui/separator";
 import { SettingsSection } from "@/components/settings/settings-section";
-import { ShellSettingsCard } from "@/components/settings/shell-settings-card";
 import { KeyboardShortcutsCard } from "@/components/settings/keyboard-shortcuts-card";
 import { SystemMetricsSettingsCard } from "@/components/settings/system-metrics-settings-card";
-import { getBackendConfig } from "@/lib/config";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
 import type { Theme } from "@/lib/settings/types";
@@ -32,19 +28,13 @@ const GENERAL_SETTING_LINKS = [
   {
     href: "/settings/general/appearance",
     title: "Appearance",
-    description: "Color theme and visual preferences",
+    description: "Theme, metrics, and changes panel preferences",
     icon: IconPalette,
-  },
-  {
-    href: "/settings/general/shell",
-    title: "Shell",
-    description: "Default shell for task sessions",
-    icon: IconTerminal2,
   },
   {
     href: "/settings/general/terminal",
     title: "Terminal",
-    description: "Terminal fonts and link behavior",
+    description: "Shell, terminal fonts, and link behavior",
     icon: IconTerminal2,
   },
   {
@@ -60,34 +50,10 @@ const GENERAL_SETTING_LINKS = [
     icon: IconCode,
   },
   {
-    href: "/settings/general/resource-metrics",
-    title: "Resource Metrics",
-    description: "Backend and execution sampling",
-    icon: IconActivity,
-  },
-  {
-    href: "/settings/general/chat-input",
-    title: "Chat Input",
-    description: "Message submit behavior",
-    icon: IconKeyboard,
-  },
-  {
-    href: "/settings/general/changes-panel",
-    title: "Changes Panel",
-    description: "Changed-file display preferences",
-    icon: IconGitBranch,
-  },
-  {
     href: "/settings/general/keyboard-shortcuts",
     title: "Keyboard Shortcuts",
-    description: "Command panel shortcuts",
+    description: "Chat input and command shortcuts",
     icon: IconCommand,
-  },
-  {
-    href: "/settings/general/backend-connection",
-    title: "Backend Connection",
-    description: "Runtime backend server URL",
-    icon: IconServer,
   },
 ];
 
@@ -232,48 +198,9 @@ function ChangesPanelLayoutCard() {
   );
 }
 
-function BackendConnectionCard() {
-  const [backendUrl] = useState<string>(() => getBackendConfig().apiBaseUrl);
-  const displayBackendUrl = backendUrl.replace(/^https?:\/\//, "").replace(/\/$/, "");
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Backend Server URL</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-2">
-          <Label htmlFor="backend-url">Server URL</Label>
-          <Input
-            id="backend-url"
-            type="url"
-            value={displayBackendUrl}
-            readOnly
-            disabled
-            placeholder="http://localhost:38429"
-            className="cursor-default"
-          />
-          <p className="text-xs text-muted-foreground">
-            Backend URL is provided at runtime for SSR and WebSocket connections.
-          </p>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
 export function GeneralSettings() {
   return (
     <div className="space-y-8">
-      <div>
-        <h2 className="text-2xl font-bold">General Settings</h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          Manage application preferences, input behavior, and local runtime defaults
-        </p>
-      </div>
-
-      <Separator />
-
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {GENERAL_SETTING_LINKS.map(({ href, title, description, icon: Icon }) => (
           <Link key={href} href={href} className="cursor-pointer">
@@ -298,13 +225,6 @@ export function GeneralSettings() {
 export function AppearanceSettings() {
   return (
     <div className="space-y-8">
-      <div>
-        <h2 className="text-2xl font-bold">Appearance</h2>
-        <p className="text-sm text-muted-foreground mt-1">Customize how the application looks</p>
-      </div>
-
-      <Separator />
-
       <SettingsSection
         icon={<IconPalette className="h-5 w-5" />}
         title="Appearance"
@@ -312,36 +232,6 @@ export function AppearanceSettings() {
       >
         <ThemeSettingsCard />
       </SettingsSection>
-    </div>
-  );
-}
-
-export function ShellSettings() {
-  return (
-    <div className="space-y-8">
-      <div>
-        <h2 className="text-2xl font-bold">Shell</h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          Pick the default shell for task sessions
-        </p>
-      </div>
-
-      <Separator />
-
-      <ShellSettingsCard />
-    </div>
-  );
-}
-
-export function ResourceMetricsSettings() {
-  return (
-    <div className="space-y-8">
-      <div>
-        <h2 className="text-2xl font-bold">Resource Metrics</h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          Configure backend and execution resource sampling
-        </p>
-      </div>
 
       <Separator />
 
@@ -352,40 +242,6 @@ export function ResourceMetricsSettings() {
       >
         <SystemMetricsSettingsCard />
       </SettingsSection>
-    </div>
-  );
-}
-
-export function ChatInputSettings() {
-  return (
-    <div className="space-y-8">
-      <div>
-        <h2 className="text-2xl font-bold">Chat Input</h2>
-        <p className="text-sm text-muted-foreground mt-1">Configure chat input behavior</p>
-      </div>
-
-      <Separator />
-
-      <SettingsSection
-        icon={<IconKeyboard className="h-5 w-5" />}
-        title="Chat Input"
-        description="Configure chat input behavior"
-      >
-        <ChatSubmitKeyCard />
-      </SettingsSection>
-    </div>
-  );
-}
-
-export function ChangesPanelSettings() {
-  return (
-    <div className="space-y-8">
-      <div>
-        <h2 className="text-2xl font-bold">Changes Panel</h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          Customize how changed files are displayed
-        </p>
-      </div>
 
       <Separator />
 
@@ -403,12 +259,13 @@ export function ChangesPanelSettings() {
 export function KeyboardShortcutsSettings() {
   return (
     <div className="space-y-8">
-      <div>
-        <h2 className="text-2xl font-bold">Keyboard Shortcuts</h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          Customize keyboard shortcuts for the command panel
-        </p>
-      </div>
+      <SettingsSection
+        icon={<IconKeyboard className="h-5 w-5" />}
+        title="Chat Input"
+        description="Configure chat input behavior"
+      >
+        <ChatSubmitKeyCard />
+      </SettingsSection>
 
       <Separator />
 
@@ -418,27 +275,6 @@ export function KeyboardShortcutsSettings() {
         description="Customize keyboard shortcuts for the command panel"
       >
         <KeyboardShortcutsCard />
-      </SettingsSection>
-    </div>
-  );
-}
-
-export function BackendConnectionSettings() {
-  return (
-    <div className="space-y-8">
-      <div>
-        <h2 className="text-2xl font-bold">Backend Connection</h2>
-        <p className="text-sm text-muted-foreground mt-1">View the runtime backend server URL</p>
-      </div>
-
-      <Separator />
-
-      <SettingsSection
-        icon={<IconServer className="h-5 w-5" />}
-        title="Backend Connection"
-        description="Configure the backend server URL"
-      >
-        <BackendConnectionCard />
       </SettingsSection>
     </div>
   );
