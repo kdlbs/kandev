@@ -8,6 +8,7 @@ import (
 )
 
 const bootPayloadGlobal = "window.__KANDEV_BOOT_PAYLOAD__"
+const maxInt = int(^uint(0) >> 1)
 
 var headCloseTag = []byte("</head>")
 
@@ -35,7 +36,7 @@ func BootPayloadScript(payload BootPayload) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("marshal boot payload: %w", err)
 	}
-	script := make([]byte, 0, len(data)+len(bootPayloadGlobal)+32)
+	script := make([]byte, 0, bytesCapacity(len(data), len(bootPayloadGlobal), 32))
 	script = append(script, "<script>"...)
 	script = append(script, bootPayloadGlobal...)
 	script = append(script, "="...)
@@ -47,15 +48,26 @@ func BootPayloadScript(payload BootPayload) ([]byte, error) {
 func injectBeforeHeadClose(indexHTML, script []byte) []byte {
 	idx := bytes.Index(indexHTML, headCloseTag)
 	if idx < 0 {
-		out := make([]byte, 0, len(indexHTML)+len(script))
+		out := make([]byte, 0, bytesCapacity(len(indexHTML), len(script)))
 		out = append(out, script...)
 		out = append(out, indexHTML...)
 		return out
 	}
 
-	out := make([]byte, 0, len(indexHTML)+len(script))
+	out := make([]byte, 0, bytesCapacity(len(indexHTML), len(script)))
 	out = append(out, indexHTML[:idx]...)
 	out = append(out, script...)
 	out = append(out, indexHTML[idx:]...)
 	return out
+}
+
+func bytesCapacity(parts ...int) int {
+	total := 0
+	for _, part := range parts {
+		if part > maxInt-total {
+			return 0
+		}
+		total += part
+	}
+	return total
 }

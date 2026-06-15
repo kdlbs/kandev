@@ -76,3 +76,14 @@ func TestRenderShellPrependsScriptWhenHeadCloseIsMissing(t *testing.T) {
 		t.Fatalf("expected script prefix for shell without </head>: %s", html)
 	}
 }
+
+func TestBytesCapacityReturnsZeroOnOverflow(t *testing.T) {
+	t.Parallel()
+
+	if got := bytesCapacity(3, 4, 5); got != 12 {
+		t.Fatalf("bytesCapacity returned %d, want 12", got)
+	}
+	if got := bytesCapacity(maxInt, 1); got != 0 {
+		t.Fatalf("bytesCapacity overflow returned %d, want 0", got)
+	}
+}
