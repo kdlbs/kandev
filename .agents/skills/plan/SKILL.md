@@ -1,13 +1,14 @@
 ---
 name: plan
-description: Create an ephemeral implementation plan from a feature spec. Explores the codebase, designs the approach, and produces docs/plans/<feature>/plan.md plus individual task files. Use after writing a spec and before implementing.
+description: Create a committed implementation plan from a feature spec. Explores the codebase, designs the approach, and produces docs/plans/<feature>/plan.md plus individual task files. Use after writing a spec and before implementing.
 ---
 
 # Create Implementation Plan
 
 Translate a feature spec into a concrete, phased implementation plan saved under
-`docs/plans/<feature>/`. Plans are ephemeral implementation artifacts; specs
-remain the durable requirements under `docs/specs/`.
+`docs/plans/<feature>/`. Plans and task files are committed implementation
+records for the current buildout; specs remain the durable requirements under
+`docs/specs/`.
 
 ## Input
 
