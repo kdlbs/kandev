@@ -13,10 +13,12 @@ if [ ! -f "$WEB_DIR/dist/index.html" ]; then
   echo "Run: pnpm -C apps --filter @kandev/web build:vite"
   exit 1
 fi
+"$ROOT_DIR/scripts/release/validate-web-bundle.sh" "$WEB_DIR/dist"
 
 rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR"
 
 cp -R "$WEB_DIR/dist/." "$OUT_DIR/"
+"$ROOT_DIR/scripts/release/validate-web-bundle.sh" "$OUT_DIR"
 
 echo "Web bundle packaged at $OUT_DIR"

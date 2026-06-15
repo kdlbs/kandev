@@ -15,9 +15,11 @@ if [ ! -d "$WEB_SRC" ]; then
   echo "Missing $WEB_SRC; run scripts/release/package-web.sh first" >&2
   exit 1
 fi
+"$ROOT_DIR/scripts/release/validate-web-bundle.sh" "$WEB_SRC"
 
 mkdir -p "$BUNDLE/web"
 cp -R "$WEB_SRC/." "$BUNDLE/web/"
+"$ROOT_DIR/scripts/release/validate-web-bundle.sh" "$BUNDLE/web"
 
 if [ ! -f "$BUNDLE/cli/bin/cli.js" ]; then
   echo "Missing $BUNDLE/cli/bin/cli.js; run scripts/release/package-cli.sh first" >&2

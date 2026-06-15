@@ -408,8 +408,10 @@ jobs:
           cp apps/backend/bin/kandev${EXT} dist/kandev/bin/
           cp apps/backend/bin/agentctl${EXT} dist/kandev/bin/
           cp apps/backend/bin/agentctl-linux-amd64 dist/kandev/bin/
+          bash scripts/release/validate-web-bundle.sh dist/web
           mkdir -p dist/kandev/web
           cp -R dist/web/. dist/kandev/web/
+          bash scripts/release/validate-web-bundle.sh dist/kandev/web
           # cli/ was already placed by the build-cli job (downloaded above).
           # actions/upload-artifact + download-artifact zip-roundtrip strips the
           # executable bit, so re-apply it. The Homebrew formula's wrapper at
