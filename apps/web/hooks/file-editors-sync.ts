@@ -52,7 +52,8 @@ export async function syncOpenFileFromWorkspace({
 }: SyncOpenFileArgs): Promise<void> {
   if (!client) return;
   try {
-    const response = await requestFileContent(client, sessionId, path);
+    const repo = useDockviewStore.getState().openFiles.get(path)?.repo;
+    const response = await requestFileContent(client, sessionId, path, repo);
     const latest = useDockviewStore.getState().openFiles.get(path);
     if (!latest) return;
     const remoteHash = await calculateHash(response.content);

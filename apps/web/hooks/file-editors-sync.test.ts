@@ -110,7 +110,7 @@ describe("syncOpenFileFromWorkspace", () => {
       updateFileState,
     });
 
-    expect(mockRequestFileContent).toHaveBeenCalledWith(FAKE_CLIENT, SESSION_ID, PATH);
+    expect(mockRequestFileContent).toHaveBeenCalledWith(FAKE_CLIENT, SESSION_ID, PATH, undefined);
     expect(updateFileState).toHaveBeenCalledTimes(1);
     expect(updateFileState).toHaveBeenCalledWith(
       PATH,
@@ -153,6 +153,38 @@ describe("syncOpenFileFromWorkspace", () => {
         hasRemoteUpdate: true,
         remoteContent: "v2-from-agent",
       }),
+    );
+  });
+
+  it("forwards the file's repo subpath so multi-repo files resolve under the right repository", async () => {
+    // Multi-repo task: foo.ts lives inside the "enrichment-commons" repo. The
+    // open editor buffer carries that repo. Re-syncing must pass `repo` to the
+    // backend, otherwise it stats <workDir>/src/foo.ts (bare task root) and
+    // fails with "file not found" — the reported "Failed to edit" bug.
+    seedOpenFile({
+      content: "v1",
+      originalContent: "v1",
+      originalHash: "h:2:v1",
+      repo: "enrichment-commons",
+    });
+    mockRequestFileContent.mockResolvedValueOnce({
+      content: "v2",
+      is_binary: false,
+      resolved_path: PATH,
+    });
+
+    await syncOpenFileFromWorkspace({
+      client: FAKE_CLIENT,
+      sessionId: SESSION_ID,
+      path: PATH,
+      updateFileState,
+    });
+
+    expect(mockRequestFileContent).toHaveBeenCalledWith(
+      FAKE_CLIENT,
+      SESSION_ID,
+      PATH,
+      "enrichment-commons",
     );
   });
 

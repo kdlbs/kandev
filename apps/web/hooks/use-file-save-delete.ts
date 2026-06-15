@@ -30,6 +30,20 @@ export function updatePanelAfterSave(path: string, name: string) {
   }
 }
 
+/** Close the pinned (or preview) editor panel for a path after a remote delete. */
+function closeFileEditorPanel(path: string) {
+  const dockApi = useDockviewStore.getState().api;
+  const pinned = dockApi?.getPanel(`file:${path}`);
+  if (pinned) {
+    dockApi?.removePanel(pinned);
+    return;
+  }
+  const preview = dockApi?.getPanel(PREVIEW_FILE_EDITOR_ID);
+  if (preview && (preview.params as Record<string, unknown>)?.previewItemId === path) {
+    dockApi?.removePanel(preview);
+  }
+}
+
 export type SaveDeleteParams = {
   activeSessionIdRef: React.MutableRefObject<string | null>;
   updateFileState: (path: string, updates: Partial<FileEditorState>) => void;
@@ -51,6 +65,7 @@ async function performSaveFile(path: string, params: SaveDeleteParams) {
       diff,
       originalHash: file.originalHash,
       desiredContent: file.content,
+      repo: file.repo,
     });
     if (response.success && response.new_hash) {
       // Re-read current state: user may have typed more while the save was
@@ -107,7 +122,8 @@ export function useSaveDeleteActions(params: SaveDeleteParams) {
       const currentSessionId = activeSessionIdRef.current;
       if (!client || !currentSessionId) return;
       try {
-        const response = await deleteFile(client, currentSessionId, path);
+        const repo = getOpenFiles().get(path)?.repo;
+        const response = await deleteFile(client, currentSessionId, path, repo);
         if (!response.success) {
           toast({
             title: "Delete failed",
@@ -126,16 +142,7 @@ export function useSaveDeleteActions(params: SaveDeleteParams) {
         return;
       }
       // Close the panel only after the remote delete succeeds.
-      const dockApi = useDockviewStore.getState().api;
-      const pinned = dockApi?.getPanel(`file:${path}`);
-      if (pinned) {
-        dockApi?.removePanel(pinned);
-      } else {
-        const preview = dockApi?.getPanel(PREVIEW_FILE_EDITOR_ID);
-        if (preview && (preview.params as Record<string, unknown>)?.previewItemId === path) {
-          dockApi?.removePanel(preview);
-        }
-      }
+      closeFileEditorPanel(path);
     },
     [activeSessionIdRef, toast],
   );

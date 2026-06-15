@@ -67,6 +67,14 @@ export { applyLayoutFixups } from "./dockview-layout-builders";
 
 export type FileEditorState = {
   path: string;
+  /**
+   * Multi-repo subpath (the repository_name, e.g. "enrichment-commons") this
+   * file belongs to; `path` is interpreted relative to it. Undefined for
+   * single-repo tasks. Threaded into every workspace file request so the
+   * backend resolves the file under the right repository directory instead of
+   * the bare task root.
+   */
+  repo?: string;
   name: string;
   content: string;
   originalContent: string;

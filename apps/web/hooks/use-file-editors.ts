@@ -44,15 +44,22 @@ function getOpenFiles() {
   return useDockviewStore.getState().openFiles;
 }
 
-/** Build a FileEditorState from a file content response. */
-async function buildFileEditorState(
+/**
+ * Build a FileEditorState from a file content response. `repo` is the
+ * multi-repo subpath (repository_name) the file belongs to; it is recorded on
+ * the state so subsequent save/sync/delete requests stay scoped to the right
+ * repository instead of resolving against the bare task root.
+ */
+export async function buildFileEditorState(
   filePath: string,
   response: FileContentResponse,
+  repo?: string,
 ): Promise<FileEditorState> {
   const fileName = filePath.split("/").pop() || filePath;
   const hash = await calculateHash(response.content);
   return {
     path: filePath,
+    repo,
     name: fileName,
     content: response.content,
     originalContent: response.content,
@@ -292,7 +299,7 @@ function useFileEditorActions({
   toast,
 }: FileEditorActionsParams) {
   const openFile = useCallback(
-    async (filePath: string) => {
+    async (filePath: string, repo?: string) => {
       const client = getWebSocketClient();
       const currentSessionId = activeSessionIdRef.current;
       if (!client || !currentSessionId) return;
@@ -306,8 +313,9 @@ function useFileEditorActions({
           client,
           currentSessionId,
           filePath,
+          repo,
         );
-        const state = await buildFileEditorState(filePath, response);
+        const state = await buildFileEditorState(filePath, response, repo);
         // Create the panel BEFORE setting file state. The openFiles subscription
         // triggers tab persistence — it needs the dockview panel to already exist
         // so buildPersistedTabs can detect whether the file is preview or pinned.
@@ -352,7 +360,7 @@ function useFileEditorActions({
   });
 
   const openFileInMarkdownPreview = useCallback(
-    async (filePath: string) => {
+    async (filePath: string, repo?: string) => {
       const client = getWebSocketClient();
       const currentSessionId = activeSessionIdRef.current;
       if (!client || !currentSessionId) return;
@@ -367,8 +375,9 @@ function useFileEditorActions({
           client,
           currentSessionId,
           filePath,
+          repo,
         );
-        const state = await buildFileEditorState(filePath, response);
+        const state = await buildFileEditorState(filePath, response, repo);
         addFileEditorPanel(filePath, state.name);
         setFileState(filePath, { ...state, markdownPreview: true });
       } catch (error) {
