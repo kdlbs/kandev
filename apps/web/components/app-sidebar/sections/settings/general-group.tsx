@@ -1,29 +1,10 @@
 "use client";
 
-import {
-  IconBell,
-  IconCommand,
-  IconCode,
-  IconPalette,
-  IconSettings,
-  IconTerminal2,
-} from "@tabler/icons-react";
-import type { Icon as TablerIcon } from "@tabler/icons-react";
+import { IconSettings } from "@tabler/icons-react";
+import { GENERAL_NAV_ITEMS } from "@/components/settings/general-nav";
 import { SettingsGroup, SettingsLeaf } from "./settings-nav-primitives";
 
 const GENERAL_HREF = "/settings/general";
-
-const GENERAL_ITEMS: Array<{ href: string; label: string; icon: TablerIcon }> = [
-  { href: "/settings/general/appearance", label: "Appearance", icon: IconPalette },
-  { href: "/settings/general/terminal", label: "Terminal", icon: IconTerminal2 },
-  { href: "/settings/general/notifications", label: "Notifications", icon: IconBell },
-  { href: "/settings/general/editors", label: "Editors", icon: IconCode },
-  {
-    href: "/settings/general/keyboard-shortcuts",
-    label: "Keyboard Shortcuts",
-    icon: IconCommand,
-  },
-];
 
 type GeneralGroupProps = {
   pathname: string;
@@ -41,7 +22,7 @@ export function GeneralGroup({ pathname, expanded, onToggle }: GeneralGroupProps
       expanded={expanded}
       onToggle={onToggle}
     >
-      {GENERAL_ITEMS.map(({ href, label, icon }) => (
+      {GENERAL_NAV_ITEMS.map(({ href, label, icon }) => (
         <SettingsLeaf
           key={href}
           href={href}

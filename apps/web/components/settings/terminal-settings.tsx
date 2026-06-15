@@ -43,6 +43,11 @@ const FONT_GROUPS: Record<string, typeof TERMINAL_FONT_PRESETS> = TERMINAL_FONT_
 );
 const FONT_CATEGORIES: FontCategory[] = ["icons", "ligatures", "system"];
 
+export function normalizeTerminalFontSize(value: number, fallback: number): number {
+  const base = Number.isFinite(value) ? value : fallback;
+  return Math.min(24, Math.max(8, base));
+}
+
 function FontGroupOptions() {
   return FONT_CATEGORIES.map((category) => (
     <SelectGroup key={category}>
@@ -72,6 +77,7 @@ function TerminalFontSizeCard() {
 
   const saveFontSize = async (value: number) => {
     if (isSaving) return;
+    if (!Number.isFinite(value)) return;
     if (value < 8 || value > 24) return;
     setIsSaving(true);
     const current = storeApi.getState().userSettings;
@@ -84,14 +90,17 @@ function TerminalFontSizeCard() {
         terminal_font_size: value,
       });
     } catch {
-      setUserSettings({ ...storeApi.getState().userSettings, terminalFontSize: previous });
+      const latest = storeApi.getState().userSettings;
+      if (latest.workspaceId === current.workspaceId) {
+        setUserSettings({ ...latest, terminalFontSize: previous });
+      }
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleFontSizeBlur = () => {
-    const value = Math.min(24, Math.max(8, fontSize));
+    const value = normalizeTerminalFontSize(fontSize, userSettings.terminalFontSize ?? 13);
     setFontSize(value);
     void saveFontSize(value);
   };

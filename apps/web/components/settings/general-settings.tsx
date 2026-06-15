@@ -5,12 +5,9 @@ import Link from "next/link";
 import { useTheme } from "next-themes";
 import {
   IconActivity,
-  IconBell,
   IconCommand,
-  IconCode,
   IconPalette,
   IconKeyboard,
-  IconTerminal2,
   IconGitBranch,
 } from "@tabler/icons-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
@@ -20,42 +17,10 @@ import { Separator } from "@kandev/ui/separator";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { KeyboardShortcutsCard } from "@/components/settings/keyboard-shortcuts-card";
 import { SystemMetricsSettingsCard } from "@/components/settings/system-metrics-settings-card";
+import { GENERAL_NAV_ITEMS } from "@/components/settings/general-nav";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
 import type { Theme } from "@/lib/settings/types";
-
-const GENERAL_SETTING_LINKS = [
-  {
-    href: "/settings/general/appearance",
-    title: "Appearance",
-    description: "Theme, metrics, and changes panel preferences",
-    icon: IconPalette,
-  },
-  {
-    href: "/settings/general/terminal",
-    title: "Terminal",
-    description: "Shell, terminal fonts, and link behavior",
-    icon: IconTerminal2,
-  },
-  {
-    href: "/settings/general/notifications",
-    title: "Notifications",
-    description: "Providers and notification events",
-    icon: IconBell,
-  },
-  {
-    href: "/settings/general/editors",
-    title: "Editors",
-    description: "Editor integrations and defaults",
-    icon: IconCode,
-  },
-  {
-    href: "/settings/general/keyboard-shortcuts",
-    title: "Keyboard Shortcuts",
-    description: "Chat input and command shortcuts",
-    icon: IconCommand,
-  },
-];
 
 function ThemeSettingsCard() {
   const { theme: currentTheme, setTheme } = useTheme();
@@ -202,13 +167,13 @@ export function GeneralSettings() {
   return (
     <div className="space-y-8">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {GENERAL_SETTING_LINKS.map(({ href, title, description, icon: Icon }) => (
+        {GENERAL_NAV_ITEMS.map(({ href, label, description, icon: Icon }) => (
           <Link key={href} href={href} className="cursor-pointer">
             <Card className="h-full transition-colors hover:bg-muted/40">
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-base">
                   <Icon className="h-4 w-4 text-muted-foreground" />
-                  {title}
+                  {label}
                 </CardTitle>
               </CardHeader>
               <CardContent>
