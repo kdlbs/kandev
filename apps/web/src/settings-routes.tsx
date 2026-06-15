@@ -1,4 +1,14 @@
 import AgentsSettingsPage from "@/app/settings/agents/page";
+import AgentSetupPage from "@/app/settings/agents/[agentId]/page";
+import AgentProfileRoute from "@/app/settings/agents/[agentId]/profiles/[profileId]/page";
+import AutomationsTopLevelPage from "@/app/settings/automations/page";
+import ExecutorEditPage from "@/app/settings/executor/[id]/page";
+import ProfileDetailPage from "@/app/settings/executor/[id]/profile/[profileId]/page";
+import ExecutorCreatePage from "@/app/settings/executor/new/page";
+import ExecutorsPage from "@/app/settings/executors/page";
+import ProfileEditPage from "@/app/settings/executors/[profileId]/page";
+import CreateProfilePage from "@/app/settings/executors/new/[type]/page";
+import SSHExecutorPage from "@/app/settings/executors/ssh/[executorId]/page";
 import ExternalMcpPage from "@/app/settings/external-mcp/page";
 import IntegrationsIndexPage from "@/app/settings/integrations/page";
 import IntegrationsGitLabPage from "@/app/settings/integrations/gitlab/page";
@@ -7,6 +17,12 @@ import IntegrationsLinearPage from "@/app/settings/integrations/linear/page";
 import IntegrationsSentryPage from "@/app/settings/integrations/sentry/page";
 import IntegrationsSlackPage from "@/app/settings/integrations/slack/page";
 import UtilityAgentsSettingsPage from "@/app/settings/utility-agents/page";
+import AutomationsPage from "@/app/settings/workspace/[id]/automations/page";
+import AutomationEditorPage from "@/app/settings/workspace/[id]/automations/[automationId]/page";
+import NewAutomationPage from "@/app/settings/workspace/[id]/automations/new/page";
+import WorkspaceEditPage from "@/app/settings/workspace/[id]/page";
+import WorkspaceRepositoriesPage from "@/app/settings/workspace/[id]/repositories/page";
+import WorkspaceWorkflowsPage from "@/app/settings/workspace/[id]/workflows/page";
 import WorkspacesPage from "@/app/settings/workspace/page";
 import { GitHubIntegrationPage } from "@/components/github/github-settings";
 import { EditorsSettings } from "@/components/settings/editors-settings";
@@ -39,6 +55,9 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   "/settings/general/sprites": () => <SpritesSettings />,
   "/settings/workspace": () => <WorkspacesPage />,
   "/settings/agents": () => <AgentsSettingsPage />,
+  "/settings/automations": () => <AutomationsTopLevelPage />,
+  "/settings/executors": () => <ExecutorsPage />,
+  "/settings/executor/new": () => <ExecutorCreatePage />,
   "/settings/utility-agents": () => <UtilityAgentsSettingsPage />,
   "/settings/external-mcp": () => <ExternalMcpPage />,
   "/settings/prompts": () => <PromptsSettings />,
@@ -106,7 +125,85 @@ export function settingsRouteKey(pathname: string): string {
 }
 
 function renderSettingsRoute(pathname: string) {
+  const dynamicRoute = renderDynamicSettingsRoute(pathname);
+  if (dynamicRoute) return dynamicRoute;
   return SETTINGS_ROUTES[pathname]?.() ?? <SettingsRouteFallback pathname={pathname} />;
+}
+
+function renderDynamicSettingsRoute(pathname: string) {
+  const workspaceAutomation = matchDouble(
+    pathname,
+    /^\/settings\/workspace\/([^/]+)\/automations\/([^/]+)$/,
+  );
+  if (workspaceAutomation) {
+    const [id, automationId] = workspaceAutomation;
+    if (automationId === "new") {
+      return <NewAutomationPage params={Promise.resolve({ id })} />;
+    }
+    return <AutomationEditorPage params={Promise.resolve({ id, automationId })} />;
+  }
+
+  const workspaceSubpage = matchDouble(
+    pathname,
+    /^\/settings\/workspace\/([^/]+)\/(repositories|workflows|automations)$/,
+  );
+  if (workspaceSubpage) {
+    const [id, section] = workspaceSubpage;
+    if (section === "repositories") {
+      return <WorkspaceRepositoriesPage params={Promise.resolve({ id })} />;
+    }
+    if (section === "workflows") {
+      return <WorkspaceWorkflowsPage params={Promise.resolve({ id })} />;
+    }
+    return <AutomationsPage params={Promise.resolve({ id })} />;
+  }
+
+  const workspaceId = matchSingle(pathname, /^\/settings\/workspace\/([^/]+)$/);
+  if (workspaceId) {
+    return <WorkspaceEditPage params={Promise.resolve({ id: workspaceId })} />;
+  }
+
+  const agentProfile = matchDouble(pathname, /^\/settings\/agents\/([^/]+)\/profiles\/([^/]+)$/);
+  if (agentProfile) {
+    const [agentId, profileId] = agentProfile;
+    return <AgentProfileRoute params={Promise.resolve({ agentId, profileId })} />;
+  }
+
+  const agentId = matchSingle(pathname, /^\/settings\/agents\/([^/]+)$/);
+  if (agentId) {
+    return <AgentSetupPage />;
+  }
+
+  const executorProfile = matchDouble(
+    pathname,
+    /^\/settings\/executor\/([^/]+)\/profile\/([^/]+)$/,
+  );
+  if (executorProfile) {
+    const [id, profileId] = executorProfile;
+    return <ProfileDetailPage params={Promise.resolve({ id, profileId })} />;
+  }
+
+  const executorId = matchSingle(pathname, /^\/settings\/executor\/([^/]+)$/);
+  if (executorId) {
+    return <ExecutorEditPage params={Promise.resolve({ id: executorId })} />;
+  }
+
+  const profileId = matchSingle(pathname, /^\/settings\/executors\/([^/]+)$/);
+  if (profileId) {
+    return <ProfileEditPage params={Promise.resolve({ profileId })} />;
+  }
+
+  const executorType = matchSingle(pathname, /^\/settings\/executors\/new\/([^/]+)$/);
+  if (executorType) {
+    return <CreateProfilePage params={Promise.resolve({ type: executorType })} />;
+  }
+
+  const sshExecutorId = matchSingle(pathname, /^\/settings\/executors\/ssh\/([^/]+)$/);
+  if (sshExecutorId) {
+    return <SSHExecutorPage params={Promise.resolve({ executorId: sshExecutorId })} />;
+  }
+
+  return null;
 }
 
 function renderUpdatesRoute() {
@@ -127,6 +224,17 @@ function SettingsRouteFallback({ pathname }: { pathname: string }) {
       ported: <span className="font-mono">{pathname}</span>
     </div>
   );
+}
+
+function matchSingle(pathname: string, pattern: RegExp): string | null {
+  const match = pathname.match(pattern);
+  return match?.[1] ? decodeURIComponent(match[1]) : null;
+}
+
+function matchDouble(pathname: string, pattern: RegExp): [string, string] | null {
+  const match = pathname.match(pattern);
+  if (!match?.[1] || !match[2]) return null;
+  return [decodeURIComponent(match[1]), decodeURIComponent(match[2])];
 }
 
 function normalizeSettingsPath(pathname: string): string {

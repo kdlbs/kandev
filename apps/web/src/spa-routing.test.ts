@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+import { officeRouteKey } from "./office-routes";
 import { getInitialPageProps } from "./spa-routing";
 import { resolveSpaRoute } from "./spa-routes";
+import { settingsRouteKey } from "./settings-routes";
 
 describe("getInitialPageProps", () => {
   it("hydrates task detail URLs into the existing kanban page client", () => {
@@ -70,5 +72,29 @@ describe("resolveSpaRoute", () => {
       kind: "office",
       pathname: "/office/projects/project-1",
     });
+  });
+});
+
+describe("settingsRouteKey", () => {
+  it("normalizes dynamic settings detail paths", () => {
+    expect(settingsRouteKey("/settings/workspace/ws-1/repositories/")).toBe(
+      "/settings/workspace/ws-1/repositories",
+    );
+    expect(settingsRouteKey("/settings/executor/executor-1/profile/profile-1")).toBe(
+      "/settings/executor/executor-1/profile/profile-1",
+    );
+    expect(settingsRouteKey("/settings/executors/new/ssh")).toBe("/settings/executors/new/ssh");
+  });
+});
+
+describe("officeRouteKey", () => {
+  it("normalizes dynamic office detail paths", () => {
+    expect(officeRouteKey("/office/agents/agent-1/configuration/")).toBe(
+      "/office/agents/agent-1/configuration",
+    );
+    expect(officeRouteKey("/office/agents/agent-1/runs/run-1")).toBe(
+      "/office/agents/agent-1/runs/run-1",
+    );
+    expect(officeRouteKey("/office/routines/routine-1")).toBe("/office/routines/routine-1");
   });
 });
