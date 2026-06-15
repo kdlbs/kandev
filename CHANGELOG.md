@@ -2,6 +2,31 @@
 
 All notable changes to Kandev.
 
+## 0.60.0 - 2026-06-15
+
+### Features
+
+- split general settings pages ([#1383](https://github.com/kdlbs/kandev/pull/1383))
+- auggie subagent detection and single-repo review diff ([#1385](https://github.com/kdlbs/kandev/pull/1385))
+- add reset action for integration watches ([#1381](https://github.com/kdlbs/kandev/pull/1381))
+- add feature toggles settings ([#1372](https://github.com/kdlbs/kandev/pull/1372))
+- add resource metrics topbar ([#1373](https://github.com/kdlbs/kandev/pull/1373))
+- add tooltip explaining reset environment behavior ([#1374](https://github.com/kdlbs/kandev/pull/1374))
+- add file-backed prompt attachments ([#1367](https://github.com/kdlbs/kandev/pull/1367))
+- allow read-only absolute file paths ([#1371](https://github.com/kdlbs/kandev/pull/1371))
+
+### Bug Fixes
+
+- use muted color for scheduling/starting spinner ([#1386](https://github.com/kdlbs/kandev/pull/1386))
+- scope multi-repo file editor open/save to the right repo ([#1382](https://github.com/kdlbs/kandev/pull/1382))
+- map acp todo tool results to session todos ([#1376](https://github.com/kdlbs/kandev/pull/1376))
+- preserve recoverable agent errors ([#1368](https://github.com/kdlbs/kandev/pull/1368))
+- distinguish sidebar workspace types ([#1364](https://github.com/kdlbs/kandev/pull/1364))
+- show preparing task spinner ([#1369](https://github.com/kdlbs/kandev/pull/1369))
+- show spinner for running review sessions ([#1363](https://github.com/kdlbs/kandev/pull/1363))
+- improve diff undo and wrapping defaults ([#1366](https://github.com/kdlbs/kandev/pull/1366))
+- initialize postgres schemas ([#1365](https://github.com/kdlbs/kandev/pull/1365))
+
 ## 0.59.0 - 2026-06-14
 
 ### Features
