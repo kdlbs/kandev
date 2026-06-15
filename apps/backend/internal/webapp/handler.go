@@ -120,7 +120,7 @@ func (h *Handler) serveAsset(w http.ResponseWriter, r *http.Request) bool {
 
 func assetName(requestPath string) string {
 	cleanPath := path.Clean("/" + strings.TrimPrefix(requestPath, "/"))
-	if cleanPath == "/" || strings.Contains(cleanPath, "..") {
+	if cleanPath == "/" {
 		return ""
 	}
 	return strings.TrimPrefix(cleanPath, "/")

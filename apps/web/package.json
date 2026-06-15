@@ -12,6 +12,7 @@
     "lint": "eslint --max-warnings 0",
     "pretypecheck": "node scripts/generate-release-notes.mjs && node scripts/generate-changelog.mjs",
     "typecheck": "tsc --noEmit",
+    "pretest": "node scripts/generate-release-notes.mjs && node scripts/generate-changelog.mjs",
     "test": "vitest run",
     "e2e": "playwright test --config e2e/playwright.config.ts",
     "e2e:run": "e2e/scripts/run-e2e.sh",

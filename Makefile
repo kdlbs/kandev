@@ -299,12 +299,12 @@ build-backend-quiet:
 .PHONY: build-web
 build-web:
 	@printf "$(CYAN)Building web app...$(RESET)\n"
-	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web build:vite
+	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web build
 
 .PHONY: build-web-quiet
 build-web-quiet:
 	@printf "  $(DIM)Web app$(RESET)\n"
-	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web build:vite 2>&1 | grep -v "Warning:" | grep -v "parseLineType" | grep -v "^$$" || true
+	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web build 2>&1 | grep -v "Warning:" | grep -v "parseLineType" | grep -v "^$$" || true
 
 #
 # Installation

@@ -27,12 +27,9 @@ func bootInitialState(
 		"features": p.features,
 	}
 
-	if route.Route == webapp.RouteSettings || route.Route == webapp.RouteOffice {
+	if route.Route == webapp.RouteSettings {
 		builder.addWorkspaceState(ctx, state, nil)
 		builder.addUserSettingsState(ctx, state, "")
-	}
-
-	if route.Route == webapp.RouteSettings {
 		builder.addSettingsRouteState(ctx, state, route.Path)
 	}
 	if route.Route == webapp.RouteOffice {
