@@ -26,11 +26,10 @@ func runInstalled(opts Options) int {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}
-	if err := os.MkdirAll(resolveDataDir(), 0o700); err != nil {
+	if err := ensureDataDir(); err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}
-	_ = os.Chmod(resolveDataDir(), 0o700)
 
 	logLevel := resolveLogLevel(opts)
 	releaseTag := os.Getenv("KANDEV_VERSION")

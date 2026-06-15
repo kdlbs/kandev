@@ -1,15 +1,15 @@
 package launcher
 
 import (
-	"bytes"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"os/signal"
 	"sync"
 	"syscall"
 )
+
+const capturedOutputLimit = 64 * 1024
 
 type processSupervisor struct {
 	mu       sync.Mutex
@@ -59,9 +59,9 @@ func startProcess(command string, args []string, cwd string, env []string, quiet
 	cmd.Dir = cwd
 	cmd.Env = env
 	cmd.Stdin = nil
-	var stdout bytes.Buffer
+	stdout := newLimitedBuffer(capturedOutputLimit)
 	if quiet {
-		cmd.Stdout = &stdout
+		cmd.Stdout = stdout
 		cmd.Stderr = os.Stderr
 	} else {
 		cmd.Stdout = os.Stdout
@@ -91,13 +91,40 @@ func startProcess(command string, args []string, cwd string, env []string, quiet
 		}
 	}()
 	return proc, func() {
-		if stdout.Len() == 0 {
+		snapshot := stdout.Bytes()
+		if len(snapshot) == 0 {
 			return
 		}
 		fmt.Fprintln(os.Stderr, "[kandev] --- backend stdout (last captured output) ---")
-		_, _ = io.Copy(os.Stderr, bytes.NewReader(stdout.Bytes()))
+		_, _ = os.Stderr.Write(snapshot)
 		fmt.Fprintln(os.Stderr, "[kandev] --- end backend stdout ---")
 	}, nil
+}
+
+type limitedBuffer struct {
+	mu    sync.Mutex
+	limit int
+	buf   []byte
+}
+
+func newLimitedBuffer(limit int) *limitedBuffer {
+	return &limitedBuffer{limit: limit}
+}
+
+func (b *limitedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.buf = append(b.buf, p...)
+	if len(b.buf) > b.limit {
+		b.buf = append([]byte(nil), b.buf[len(b.buf)-b.limit:]...)
+	}
+	return len(p), nil
+}
+
+func (b *limitedBuffer) Bytes() []byte {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]byte(nil), b.buf...)
 }
 
 func (p *managedProcess) Exited() (bool, int) {

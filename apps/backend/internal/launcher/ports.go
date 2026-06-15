@@ -53,23 +53,29 @@ func envPort(name string) (int, error) {
 }
 
 func pickPorts(backendPort, webPort int) (portConfig, error) {
+	if backendPort != 0 && webPort != 0 && backendPort == webPort {
+		return portConfig{}, fmt.Errorf("backend and web ports must be different")
+	}
+	used := map[int]bool{}
 	backend := backendPort
 	if backend == 0 {
-		p, err := pickAvailablePort(defaultBackendPort)
+		p, err := pickAvailablePortExcept(defaultBackendPort, used)
 		if err != nil {
 			return portConfig{}, err
 		}
 		backend = p
 	}
+	used[backend] = true
 	web := webPort
 	if web == 0 {
-		p, err := pickAvailablePort(defaultWebPort)
+		p, err := pickAvailablePortExcept(defaultWebPort, used)
 		if err != nil {
 			return portConfig{}, err
 		}
 		web = p
 	}
-	agentctl, err := pickAvailablePort(defaultAgentctlPort)
+	used[web] = true
+	agentctl, err := pickAvailablePortExcept(defaultAgentctlPort, used)
 	if err != nil {
 		return portConfig{}, err
 	}
@@ -82,13 +88,19 @@ func pickPorts(backendPort, webPort int) (portConfig, error) {
 }
 
 func pickAvailablePort(preferred int) (int, error) {
+	return pickAvailablePortExcept(preferred, nil)
+}
+
+func pickAvailablePortExcept(preferred int, used map[int]bool) (int, error) {
 	if canBind(preferred) {
-		return preferred, nil
+		if !used[preferred] {
+			return preferred, nil
+		}
 	}
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	for i := 0; i < 10; i++ {
 		candidate := randomPortMin + r.Intn(randomPortMax-randomPortMin+1)
-		if canBind(candidate) {
+		if !used[candidate] && canBind(candidate) {
 			return candidate, nil
 		}
 	}
