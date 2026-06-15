@@ -1,11 +1,14 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useSessionGitStatus, useSessionGitStatusByRepo } from "./use-session-git-status";
 import { useCumulativeDiff } from "./use-cumulative-diff";
 import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { usePRDiff } from "@/hooks/domains/github/use-pr-diff";
 import { normalizeDiffContent } from "@/components/review/types";
+import { createDebugLogger } from "@/lib/debug/log";
 import type { ReviewFile } from "@/components/review/types";
 import type { PRDiffFile } from "@/lib/types/github";
+
+const debug = createDebugLogger("review:sources");
 
 export type ReviewSource = "uncommitted" | "committed" | "pr";
 
@@ -265,6 +268,35 @@ export function useReviewSources(sessionId: string | null | undefined): UseRevie
   // PR diff files have loaded yet — avoids the tab bar reflowing the moment
   // the GitHub PR diff hydrates.
   const hasPR = !!pr;
+
+  useEffect(() => {
+    if (!sessionId) return;
+    debug("merged", {
+      sessionId,
+      total: allFiles.length,
+      uncommitted: sourceCounts.uncommitted,
+      committed: sourceCounts.committed,
+      pr: sourceCounts.pr,
+      hasPR,
+      hasCumulativeDiff: !!cumulativeDiff,
+      cumulativeLoading,
+      prDiffLoading,
+      prRepo: pr?.repo ?? null,
+      prNumber: pr?.pr_number ?? null,
+    });
+  }, [
+    sessionId,
+    allFiles.length,
+    sourceCounts.uncommitted,
+    sourceCounts.committed,
+    sourceCounts.pr,
+    hasPR,
+    cumulativeDiff,
+    cumulativeLoading,
+    prDiffLoading,
+    pr?.repo,
+    pr?.pr_number,
+  ]);
 
   return {
     allFiles,

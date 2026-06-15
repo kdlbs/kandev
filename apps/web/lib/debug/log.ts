@@ -146,6 +146,30 @@
  *                             `[session:state] newState=WAITING_FOR_INPUT` is the
  *                             smoking gun: the turn ended but running-state stuck.
  *
+ *   Review / Diff pipeline (bug: Review or Diff panel shows empty when
+ *   commits exist — distinguishes "no cumulative diff" vs "missing PR data"
+ *   vs "gh rate-limited" by tracing each source independently)
+ *     [review:cumulative]     useCumulativeDiff fetch lifecycle —
+ *                             fetch.start / fetch.success (with fileCount) /
+ *                             fetch.error / cache.invalidated. A success
+ *                             with fileCount=0 means the backend computed
+ *                             the merge-base diff and there are no committed
+ *                             changes ahead of base.
+ *     [review:pr-diff]        usePRDiff fetch lifecycle — fetch.start /
+ *                             fetch.success (with fileCount) / fetch.error
+ *                             (with error message — surfaces gh rate-limit
+ *                             and auth failures as the literal error string).
+ *     [review:sources]        Merged review/diff list — total + per-source
+ *                             counts (uncommitted/committed/pr) + load flags
+ *                             + hasPR + hasCumulativeDiff. The smoking-gun
+ *                             line: total=0 with hasPR=true & hasCumulativeDiff=true
+ *                             means both sources returned but were empty;
+ *                             total=0 with prDiffLoading=true means the PR
+ *                             fetch is still in flight; total=0 with
+ *                             hasPR=true & no preceding [review:pr-diff]
+ *                             fetch.success/error means the PR fetch never
+ *                             fired (look at useActiveTaskPR plumbing).
+ *
  *   Other
  *     [ws:connection]         WS hook mount + status transitions
  *     [dockview:*]            layout restore / save / env-switch / session-tabs / task-select

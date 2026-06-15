@@ -1,7 +1,10 @@
 import { useEffect, useCallback, useRef, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { createDebugLogger } from "@/lib/debug/log";
 import type { CumulativeDiff } from "@/lib/state/slices/session-runtime/types";
+
+const debug = createDebugLogger("review:cumulative");
 
 const cumulativeDiffCache: Record<string, CumulativeDiff | null> = {};
 const loadingState: Record<string, boolean> = {};
@@ -14,6 +17,7 @@ const listeners = new Set<(envKey: string) => void>();
  */
 export function invalidateCumulativeDiffCache(envKey: string) {
   delete cumulativeDiffCache[envKey];
+  debug("cache.invalidated", { envKey });
   listeners.forEach((fn) => fn(envKey));
 }
 
@@ -46,6 +50,7 @@ export function useCumulativeDiff(sessionId: string | null) {
     setLoading(true);
     loadingState[envKey] = true;
     setError(null);
+    debug("fetch.start", { sessionId, envKey });
 
     try {
       // Backend routes by session_id, but we cache by envKey
@@ -60,11 +65,20 @@ export function useCumulativeDiff(sessionId: string | null) {
       if (response?.cumulative_diff) {
         cumulativeDiffCache[envKey] = response.cumulative_diff;
         setDiff(response.cumulative_diff);
+        debug("fetch.success", {
+          sessionId,
+          envKey,
+          fileCount: Object.keys(response.cumulative_diff.files ?? {}).length,
+        });
+      } else {
+        debug("fetch.success", { sessionId, envKey, fileCount: 0, empty: true });
       }
     } catch (err) {
       if (version !== requestVersionRef.current) return;
       console.error("Failed to fetch cumulative diff:", err);
-      setError(err instanceof Error ? err.message : "Failed to fetch cumulative diff");
+      const message = err instanceof Error ? err.message : "Failed to fetch cumulative diff";
+      setError(message);
+      debug("fetch.error", { sessionId, envKey, error: message });
     } finally {
       if (version === requestVersionRef.current) {
         setLoading(false);
