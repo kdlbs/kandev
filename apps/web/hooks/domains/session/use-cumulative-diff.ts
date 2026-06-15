@@ -8,8 +8,19 @@ const debug = createDebugLogger("review:cumulative");
 
 const cumulativeDiffCache: Record<string, CumulativeDiff | null> = {};
 const loadingState: Record<string, boolean> = {};
+// Invalidations that arrived while a fetch was in flight. The in-flight
+// request can't be guaranteed to capture the working-tree state it was
+// triggered by (git diff runs once on the server, edits may land after),
+// so we always run one follow-up fetch after the in-flight one settles.
+const pendingInvalidationByEnvKey: Record<string, boolean> = {};
 
-const listeners = new Set<(envKey: string) => void>();
+// Listener events: "invalidated" triggers a refetch (bumps invalidationCount);
+// "populated" tells subscribers to pick up the fresh cache value WITHOUT
+// triggering another fetch. Without the populated signal, only the subscriber
+// that "wins" the fetch race calls setDiff — the others stay stale because
+// useState only reads the module cache at initial mount.
+type ListenerEvent = { envKey: string; kind: "invalidated" | "populated" };
+const listeners = new Set<(event: ListenerEvent) => void>();
 
 /**
  * Invalidate the cumulative diff cache for the given environment key.
@@ -17,8 +28,39 @@ const listeners = new Set<(envKey: string) => void>();
  */
 export function invalidateCumulativeDiffCache(envKey: string) {
   delete cumulativeDiffCache[envKey];
+  // If a fetch is in flight, mark a pending refetch — the in-flight git diff
+  // may have run before the worktree edit that triggered this invalidation,
+  // so we need to refetch once it settles. Drained in fetchCumulativeDiff's
+  // finally block. Only `invalidateCumulativeDiffCache` sets this flag (not
+  // the in-flight skip path in the fetch itself), so duplicate React
+  // subscribers don't create phantom invalidations that loop forever.
+  if (loadingState[envKey]) {
+    pendingInvalidationByEnvKey[envKey] = true;
+  }
   debug("cache.invalidated", { envKey });
-  listeners.forEach((fn) => fn(envKey));
+  listeners.forEach((fn) => fn({ envKey, kind: "invalidated" }));
+}
+
+function commitFetchedDiff(
+  envKey: string,
+  sessionId: string,
+  diff: CumulativeDiff | null,
+  setDiff: (d: CumulativeDiff | null) => void,
+) {
+  cumulativeDiffCache[envKey] = diff;
+  setDiff(diff);
+  if (isDebug()) {
+    debug("fetch.success", {
+      sessionId,
+      envKey,
+      fileCount: diff ? Object.keys(diff.files ?? {}).length : 0,
+      empty: !diff,
+    });
+  }
+  // Broadcast the populated cache to other subscribers so they pick up the
+  // fresh value. Without this, only the subscriber that "won" the fetch race
+  // calls setDiff — others stay stale on the value they had at mount time.
+  listeners.forEach((fn) => fn({ envKey, kind: "populated" }));
 }
 
 export function useCumulativeDiff(sessionId: string | null) {
@@ -40,7 +82,15 @@ export function useCumulativeDiff(sessionId: string | null) {
 
   const fetchCumulativeDiff = useCallback(async () => {
     if (!sessionId || !envKey) return;
-    if (loadingState[envKey]) return;
+    if (loadingState[envKey]) {
+      // Another subscriber already kicked off the fetch. Do NOT set the
+      // pending flag here — only `invalidateCumulativeDiffCache` does that,
+      // so we don't loop on duplicate subscriber calls. When the in-flight
+      // fetch completes it broadcasts a "populated" event that updates every
+      // subscriber from the shared cache.
+      debug("fetch.skip.in-flight", { sessionId, envKey });
+      return;
+    }
 
     const client = getWebSocketClient();
     if (!client) return;
@@ -62,22 +112,7 @@ export function useCumulativeDiff(sessionId: string | null) {
       // Discard if the environment changed while the request was in flight
       if (version !== requestVersionRef.current) return;
 
-      if (response?.cumulative_diff) {
-        cumulativeDiffCache[envKey] = response.cumulative_diff;
-        setDiff(response.cumulative_diff);
-        // Guard the Object.keys allocation behind isDebug() — JS evaluates
-        // call args eagerly, so building the payload runs even when the
-        // logger suppresses output.
-        if (isDebug()) {
-          debug("fetch.success", {
-            sessionId,
-            envKey,
-            fileCount: Object.keys(response.cumulative_diff.files ?? {}).length,
-          });
-        }
-      } else {
-        debug("fetch.success", { sessionId, envKey, fileCount: 0, empty: true });
-      }
+      commitFetchedDiff(envKey, sessionId, response?.cumulative_diff ?? null, setDiff);
     } catch (err) {
       if (version !== requestVersionRef.current) return;
       console.error("Failed to fetch cumulative diff:", err);
@@ -89,6 +124,15 @@ export function useCumulativeDiff(sessionId: string | null) {
         setLoading(false);
       }
       loadingState[envKey] = false;
+      // Drain any invalidation that arrived mid-flight by re-notifying
+      // listeners, which bumps `invalidationCount` and re-runs the fetch
+      // effect. Cleared first so the follow-up fetch can record its own
+      // pending state if needed.
+      if (pendingInvalidationByEnvKey[envKey]) {
+        delete pendingInvalidationByEnvKey[envKey];
+        debug("fetch.drain.pending", { sessionId, envKey });
+        listeners.forEach((fn) => fn({ envKey, kind: "invalidated" }));
+      }
     }
   }, [sessionId, envKey]);
 
@@ -101,6 +145,7 @@ export function useCumulativeDiff(sessionId: string | null) {
     requestVersionRef.current++;
     if (envKey) {
       loadingState[envKey] = false;
+      delete pendingInvalidationByEnvKey[envKey];
       setDiff(cumulativeDiffCache[envKey] ?? null);
     } else {
       setDiff(null);
@@ -114,11 +159,16 @@ export function useCumulativeDiff(sessionId: string | null) {
     fetchCumulativeDiff();
   }, [envKey, invalidationCount, fetchCumulativeDiff]);
 
-  // Subscribe to cache invalidation from WS handlers
+  // Subscribe to cache events from WS handlers and from other subscribers'
+  // successful fetches.
   useEffect(() => {
     if (!envKey) return;
-    const handler = (invalidatedEnvKey: string) => {
-      if (invalidatedEnvKey === envKey) {
+    const handler = (event: ListenerEvent) => {
+      if (event.envKey !== envKey) return;
+      if (event.kind === "populated") {
+        // Pick up the freshly-cached value without triggering a refetch.
+        setDiff(cumulativeDiffCache[envKey] ?? null);
+      } else {
         setInvalidationCount((c) => c + 1);
       }
     };

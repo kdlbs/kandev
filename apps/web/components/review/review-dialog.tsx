@@ -146,9 +146,16 @@ function buildAllFiles(
   prDiffFiles?: PRDiffFile[],
 ): ReviewFile[] {
   const fileMap = new Map<string, ReviewFile>();
-  if (prDiffFiles) addPRFiles(fileMap, prDiffFiles);
-  if (cumulativeDiff?.files) addCumulativeDiffFiles(fileMap, cumulativeDiff.files, gitStatusFiles);
+  // Order matters and must match `buildReviewSources` (the Changes panel
+  // builder): uncommitted FIRST so its always-fresh WS-pushed diff content
+  // wins over the polled cumulative diff for files that exist in both. Before
+  // this, the dialog and the panel disagreed on `datasource.ts`-style files
+  // (panel: fresh worktree content from `git-status`, dialog: stale cumulative
+  // diff snapshot from the last fetch) — the dialog appeared to show outdated
+  // content even though the cumulative-diff hook was successfully refetching.
   if (gitStatusFiles) addUncommittedFiles(fileMap, gitStatusFiles);
+  if (cumulativeDiff?.files) addCumulativeDiffFiles(fileMap, cumulativeDiff.files, gitStatusFiles);
+  if (prDiffFiles) addPRFiles(fileMap, prDiffFiles);
   return Array.from(fileMap.values()).sort((a, b) => a.path.localeCompare(b.path));
 }
 

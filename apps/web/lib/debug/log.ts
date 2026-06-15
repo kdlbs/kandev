@@ -151,10 +151,16 @@
  *   vs "gh rate-limited" by tracing each source independently)
  *     [review:cumulative]     useCumulativeDiff fetch lifecycle —
  *                             fetch.start / fetch.success (with fileCount) /
- *                             fetch.error / cache.invalidated. A success
- *                             with fileCount=0 means the backend computed
- *                             the merge-base diff and there are no committed
- *                             changes ahead of base.
+ *                             fetch.error / cache.invalidated /
+ *                             fetch.skip.in-flight / fetch.drain.pending. A
+ *                             success with fileCount=0 means the backend
+ *                             computed the merge-base diff and there are no
+ *                             committed changes ahead of base. A skip.in-flight
+ *                             followed by drain.pending then a fresh fetch.start
+ *                             means an invalidation arrived mid-fetch and was
+ *                             correctly coalesced (the Review dialog shows the
+ *                             freshest worktree state, not the snapshot the
+ *                             original git diff captured).
  *     [review:pr-diff]        usePRDiff fetch lifecycle — fetch.start /
  *                             fetch.success (with fileCount) / fetch.error
  *                             (with error message — surfaces gh rate-limit
