@@ -35,4 +35,20 @@ func TestRenderLaunchdPlistExecsNativeKandev(t *testing.T) {
 	if strings.Contains(plist, "cli.js") {
 		t.Fatalf("plist contains Node CLI launcher:\n%s", plist)
 	}
+	if !strings.Contains(plist, "<key>RunAtLoad</key>\n  <true/>") {
+		t.Fatalf("plist should start at load by default:\n%s", plist)
+	}
+}
+
+func TestRenderLaunchdPlistCanDisableBootStart(t *testing.T) {
+	plist := renderLaunchdPlist(nativeServiceUnitInput{
+		Executable:  "/opt/kandev/bin/kandev",
+		HomeDir:     "/Users/alice/.kandev",
+		LogDir:      "/Users/alice/.kandev/logs",
+		NoBootStart: true,
+	})
+
+	if !strings.Contains(plist, "<key>RunAtLoad</key>\n  <false/>") {
+		t.Fatalf("plist should not start at load with no boot start:\n%s", plist)
+	}
 }

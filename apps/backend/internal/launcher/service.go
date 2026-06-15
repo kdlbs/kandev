@@ -211,6 +211,13 @@ func installSystemd(args serviceArgs, unitPath string) int {
 	if err := runCommand("systemctl", append(systemctlScope(args.System), "daemon-reload")...); err != nil {
 		return 1
 	}
+	if args.NoBootStart {
+		if err := runCommand("systemctl", append(systemctlScope(args.System), string(CommandStart), serviceUnitName)...); err != nil {
+			return 1
+		}
+		fmt.Println("[kandev] service installed and started")
+		return 0
+	}
 	if err := runCommand("systemctl", append(systemctlScope(args.System), "enable", "--now", serviceUnitName)...); err != nil {
 		return 1
 	}
@@ -234,9 +241,8 @@ func runLaunchdService(args serviceArgs) int {
 		_ = os.Remove(plistPath)
 		return 0
 	case "start":
-		_ = runCommand("launchctl", "bootout", target)
-		if err := runCommand("launchctl", "bootstrap", domain, plistPath); err != nil {
-			return 1
+		if err := runCommand("launchctl", "kickstart", target); err != nil {
+			return runCommandExit("launchctl", "bootstrap", domain, plistPath)
 		}
 		return 0
 	case "stop":
@@ -278,12 +284,13 @@ func installLaunchd(args serviceArgs, plistPath, target, domain string) int {
 		return 1
 	}
 	plist := renderLaunchdPlist(nativeServiceUnitInput{
-		Executable: self,
-		HomeDir:    homeDir,
-		LogDir:     logDir,
-		Port:       args.Port,
-		System:     args.System,
-		SystemUser: serviceUser(args.System),
+		Executable:  self,
+		HomeDir:     homeDir,
+		LogDir:      logDir,
+		Port:        args.Port,
+		System:      args.System,
+		SystemUser:  serviceUser(args.System),
+		NoBootStart: args.NoBootStart,
 	})
 	if err := os.WriteFile(plistPath, []byte(plist), 0o644); err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
@@ -294,17 +301,25 @@ func installLaunchd(args serviceArgs, plistPath, target, domain string) int {
 		return 1
 	}
 	_ = runCommand("launchctl", "enable", target)
+	if args.NoBootStart {
+		if err := runCommand("launchctl", "kickstart", target); err != nil {
+			return 1
+		}
+		fmt.Println("[kandev] service loaded and started")
+		return 0
+	}
 	fmt.Println("[kandev] service loaded and started")
 	return 0
 }
 
 type nativeServiceUnitInput struct {
-	Executable string
-	HomeDir    string
-	LogDir     string
-	Port       int
-	System     bool
-	SystemUser string
+	Executable  string
+	HomeDir     string
+	LogDir      string
+	Port        int
+	System      bool
+	SystemUser  string
+	NoBootStart bool
 }
 
 func renderSystemdUnit(input nativeServiceUnitInput) string {
@@ -372,7 +387,7 @@ func renderLaunchdPlist(input nativeServiceUnitInput) string {
   <dict>
 ` + envXML.String() + `  </dict>
 ` + userBlock + `  <key>RunAtLoad</key>
-  <true/>
+  ` + plistBool(!input.NoBootStart) + `
   <key>KeepAlive</key>
   <true/>
   <key>StandardOutPath</key>
@@ -384,6 +399,13 @@ func renderLaunchdPlist(input nativeServiceUnitInput) string {
 </dict>
 </plist>
 `
+}
+
+func plistBool(value bool) string {
+	if value {
+		return "<true/>"
+	}
+	return "<false/>"
 }
 
 func serviceEnvLine(key, value string) string {

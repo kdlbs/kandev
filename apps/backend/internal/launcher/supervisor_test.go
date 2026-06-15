@@ -3,6 +3,7 @@ package launcher
 import (
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestBuildManifestUsesSameBinaryBackendMode(t *testing.T) {
@@ -42,5 +43,24 @@ func TestPrepareSupervisorEnvWritesExpectedPaths(t *testing.T) {
 	got := allowedSupervisorEnv(env)
 	if got["KANDEV_RESTART_ADAPTER"] != "supervisor" {
 		t.Fatalf("restart adapter env = %+v", got)
+	}
+}
+
+func TestRestartFailureNotifiesLauncherExit(t *testing.T) {
+	backend := &restartableBackend{
+		command:    filepath.Join(t.TempDir(), "missing-kandev"),
+		supervisor: newSupervisor(),
+		exitCh:     make(chan int, 1),
+	}
+
+	backend.restart()
+
+	select {
+	case code := <-backend.exitCh:
+		if code == 0 {
+			t.Fatal("restart failure reported successful exit")
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("restart failure did not notify launcher exit")
 	}
 }

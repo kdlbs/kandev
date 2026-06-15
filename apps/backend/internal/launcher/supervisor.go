@@ -25,6 +25,7 @@ type launchManifest struct {
 
 type restartableBackend struct {
 	mu         sync.Mutex
+	restartMu  sync.Mutex
 	command    string
 	args       []string
 	cwd        string
@@ -104,6 +105,9 @@ func (b *restartableBackend) start() error {
 }
 
 func (b *restartableBackend) restart() {
+	b.restartMu.Lock()
+	defer b.restartMu.Unlock()
+
 	b.mu.Lock()
 	current := b.current
 	b.current = nil
@@ -113,6 +117,14 @@ func (b *restartableBackend) restart() {
 	}
 	if err := b.start(); err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] backend restart failed: "+err.Error())
+		b.notifyExit(1)
+	}
+}
+
+func (b *restartableBackend) notifyExit(code int) {
+	select {
+	case b.exitCh <- code:
+	default:
 	}
 }
 
