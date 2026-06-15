@@ -24,6 +24,8 @@ type SettingsLeafProps = {
 
 const LEAF_DEPTH_PADDING = ["px-2.5", "pl-7 pr-2.5", "pl-10 pr-2.5"] as const;
 const GROUP_DEPTH_PADDING = ["pl-2.5 pr-1", "pl-7 pr-1", "pl-10 pr-1"] as const;
+const NAV_FOCUS_CLASS =
+  "outline-none focus-visible:ring-1 focus-visible:ring-primary/50 focus-visible:ring-offset-1";
 
 function clampDepth(depth: number, max: number): number {
   if (depth < 0) return 0;
@@ -44,7 +46,7 @@ export function SettingsLeaf({
       href={href}
       className={cn(
         "flex items-center gap-2 py-1.5 text-[13px] font-medium rounded-md cursor-pointer",
-        "outline-none focus-visible:outline-none focus-visible:ring-0",
+        NAV_FOCUS_CLASS,
         LEAF_DEPTH_PADDING[clampDepth(depth, LEAF_DEPTH_PADDING.length - 1)],
         isActive ? ACTIVE_CLASS : INACTIVE_CLASS,
       )}
@@ -113,7 +115,10 @@ export function SettingsGroup({
         {href ? (
           <Link
             href={href}
-            className="flex flex-1 min-w-0 items-center gap-2 py-1.5 text-[13px] font-medium cursor-pointer outline-none focus-visible:outline-none focus-visible:ring-0"
+            className={cn(
+              "flex flex-1 min-w-0 items-center gap-2 py-1.5 text-[13px] font-medium cursor-pointer",
+              NAV_FOCUS_CLASS,
+            )}
           >
             {labelInner}
           </Link>
@@ -121,7 +126,10 @@ export function SettingsGroup({
           <button
             type="button"
             onClick={toggle}
-            className="flex flex-1 min-w-0 items-center gap-2 py-1.5 text-[13px] font-medium cursor-pointer text-left outline-none focus-visible:outline-none focus-visible:ring-0"
+            className={cn(
+              "flex flex-1 min-w-0 items-center gap-2 py-1.5 text-[13px] font-medium cursor-pointer text-left",
+              NAV_FOCUS_CLASS,
+            )}
           >
             {labelInner}
           </button>
@@ -131,7 +139,10 @@ export function SettingsGroup({
           onClick={toggle}
           aria-label={expanded ? `Collapse ${label}` : `Expand ${label}`}
           aria-expanded={expanded}
-          className="shrink-0 flex h-5 w-5 items-center justify-center text-muted-foreground/60 hover:text-foreground/80 cursor-pointer transition-colors outline-none focus-visible:outline-none focus-visible:ring-0"
+          className={cn(
+            "shrink-0 flex h-5 w-5 items-center justify-center text-muted-foreground/60 hover:text-foreground/80 cursor-pointer transition-colors",
+            NAV_FOCUS_CLASS,
+          )}
         >
           <IconChevronRight
             className={cn("h-3 w-3 transition-transform", expanded && "rotate-90")}
