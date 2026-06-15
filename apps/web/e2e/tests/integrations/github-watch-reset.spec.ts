@@ -56,10 +56,12 @@ test.describe("GitHub review watch reset", () => {
       )
       .toBeTruthy();
 
-    // Preview reports the count the dialog will surface.
+    // Preview reports the count the dialog will surface. workspace_id is
+    // required — the reset endpoints reject cross-workspace IDs with 404.
+    const wsQuery = `workspace_id=${seedData.workspaceId}`;
     const preview = await apiClient.rawRequest(
       "GET",
-      `/api/v1/github/watches/review/${watch.id}/reset/preview`,
+      `/api/v1/github/watches/review/${watch.id}/reset/preview?${wsQuery}`,
     );
     expect(preview.status).toBe(200);
     expect(await preview.json()).toMatchObject({ taskCount: 1 });
@@ -67,7 +69,7 @@ test.describe("GitHub review watch reset", () => {
     // Reset cascades the delete and returns the count it actually removed.
     const reset = await apiClient.rawRequest(
       "POST",
-      `/api/v1/github/watches/review/${watch.id}/reset`,
+      `/api/v1/github/watches/review/${watch.id}/reset?${wsQuery}`,
     );
     expect(reset.status).toBe(200);
     expect(await reset.json()).toMatchObject({ tasksDeleted: 1 });
@@ -148,9 +150,11 @@ test.describe("GitHub review watch reset", () => {
 
     // The settings page aggregates every workspace's watches into a flat
     // table — find the row for our PR by the repo name it shows, then click
-    // its Reset button. There can be only one watch row in the worker-scoped
-    // workspace, so scoping by data-testid alone is unambiguous.
-    const resetButton = testPage.getByTestId("watch-reset-button").first();
+    // its Reset button. Scoping the testid lookup to the row ensures the
+    // test fails loudly if a future selector change clones the reset button
+    // onto another row.
+    const watchRow = testPage.getByRole("row", { name: /testorg\/testrepo/i });
+    const resetButton = watchRow.getByTestId("watch-reset-button");
     await expect(resetButton).toBeVisible({ timeout: 10_000 });
     await resetButton.click();
 

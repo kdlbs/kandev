@@ -1,7 +1,7 @@
 import { useEffect, useCallback, useRef, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
-import { createDebugLogger } from "@/lib/debug/log";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import type { CumulativeDiff } from "@/lib/state/slices/session-runtime/types";
 
 const debug = createDebugLogger("review:cumulative");
@@ -65,11 +65,16 @@ export function useCumulativeDiff(sessionId: string | null) {
       if (response?.cumulative_diff) {
         cumulativeDiffCache[envKey] = response.cumulative_diff;
         setDiff(response.cumulative_diff);
-        debug("fetch.success", {
-          sessionId,
-          envKey,
-          fileCount: Object.keys(response.cumulative_diff.files ?? {}).length,
-        });
+        // Guard the Object.keys allocation behind isDebug() — JS evaluates
+        // call args eagerly, so building the payload runs even when the
+        // logger suppresses output.
+        if (isDebug()) {
+          debug("fetch.success", {
+            sessionId,
+            envKey,
+            fileCount: Object.keys(response.cumulative_diff.files ?? {}).length,
+          });
+        }
       } else {
         debug("fetch.success", { sessionId, envKey, fileCount: 0, empty: true });
       }

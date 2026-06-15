@@ -82,13 +82,13 @@ export function useReviewWatches(workspaceId?: string | null) {
     return triggerAllReviewWatches(workspaceId);
   }, [workspaceId]);
 
-  const previewReset = useCallback(async (id: string) => {
-    return previewResetReviewWatch(id);
+  const previewReset = useCallback(async (id: string, watchWorkspaceId: string) => {
+    return previewResetReviewWatch(id, watchWorkspaceId);
   }, []);
 
   const reset = useCallback(
-    async (id: string) => {
-      const res = await resetReviewWatch(id);
+    async (id: string, watchWorkspaceId: string) => {
+      const res = await resetReviewWatch(id, watchWorkspaceId);
       // Patch the cached watch so the "Last polled" column reflects the
       // reset immediately without waiting for the next poll tick.
       const current = storeApi.getState().reviewWatches.items.find((w) => w.id === id);

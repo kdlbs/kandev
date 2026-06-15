@@ -254,7 +254,7 @@ func (c *Controller) httpPreviewResetIssueWatch(ctx *gin.Context) {
 	}
 	n, err := c.service.PreviewResetIssueWatch(ctx.Request.Context(), id)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.writeIssueWatchError(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"taskCount": n})
@@ -271,7 +271,7 @@ func (c *Controller) httpResetIssueWatch(ctx *gin.Context) {
 	}
 	n, err := c.service.ResetIssueWatch(ctx.Request.Context(), id)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.writeIssueWatchError(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"tasksDeleted": n})

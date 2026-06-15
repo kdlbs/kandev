@@ -126,9 +126,9 @@ function useWatchActions(workspaceId?: string | null) {
   );
 
   const handleReset = useCallback(
-    async (id: string) => {
+    async (id: string, workspaceId: string) => {
       try {
-        const { tasksDeleted } = await reset(id);
+        const { tasksDeleted } = await reset(id, workspaceId);
         toast({
           description:
             tasksDeleted > 0
@@ -216,9 +216,9 @@ function useIssueWatchActions(workspaceId?: string | null) {
   );
 
   const handleReset = useCallback(
-    async (id: string) => {
+    async (id: string, workspaceId: string) => {
       try {
-        const { tasksDeleted } = await reset(id);
+        const { tasksDeleted } = await reset(id, workspaceId);
         toast({
           description:
             tasksDeleted > 0
@@ -319,8 +319,8 @@ function ReviewWatchSection() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingWatch, setEditingWatch] = useState<ReviewWatch | null>(null);
   const resetCtrl = useWatchResetController<ReviewWatch>({
-    preview: (w) => previewReset(w.id),
-    reset: (w) => handleReset(w.id),
+    preview: (w) => previewReset(w.id, w.workspace_id),
+    reset: (w) => handleReset(w.id, w.workspace_id),
   });
 
   const handleEdit = useCallback((watch: ReviewWatch) => {
@@ -405,8 +405,8 @@ function IssueWatchSection() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingWatch, setEditingIssueWatch] = useState<IssueWatch | null>(null);
   const resetCtrl = useWatchResetController<IssueWatch>({
-    preview: (w) => issueActions.previewReset(w.id),
-    reset: (w) => issueActions.handleReset(w.id),
+    preview: (w) => issueActions.previewReset(w.id, w.workspace_id),
+    reset: (w) => issueActions.handleReset(w.id, w.workspace_id),
   });
 
   const handleEdit = useCallback((watch: IssueWatch) => {

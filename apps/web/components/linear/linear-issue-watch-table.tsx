@@ -111,6 +111,7 @@ function WatchActions({
             size="sm"
             className="h-7 w-7 p-0 cursor-pointer"
             data-testid="watch-reset-button"
+            aria-label="Reset watch"
             onClick={(e) => {
               e.stopPropagation();
               onReset(watch.id);

@@ -43,6 +43,13 @@ var ErrInvalidToken = errors.New("invalid token")
 // transient upstream blip.
 var ErrRepoNotResolvable = errors.New("github: repository not resolvable")
 
+// errStoreUnavailable is returned from service methods when no Store is
+// wired (Provide can return a Service with store == nil when the SQLite
+// repos aren't configured). Returning a typed error instead of nil-
+// dereferencing keeps the watch reset handlers from panicking under that
+// degenerate config — the caller surfaces a 5xx, the process keeps running.
+var errStoreUnavailable = errors.New("github: store not configured")
+
 // repoNotResolvableSubstrings matches the wire-format substrings GitHub's
 // GraphQL/REST APIs use for a deterministic "repository does not exist /
 // not accessible" outcome:

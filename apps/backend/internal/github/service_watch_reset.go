@@ -28,6 +28,9 @@ func (r *githubIssueWatchResetter) Clear(ctx context.Context) error {
 // PreviewResetIssueWatch returns how many tasks ResetIssueWatch would
 // cascade-delete. Used by the frontend to populate the confirmation dialog.
 func (s *Service) PreviewResetIssueWatch(ctx context.Context, watchID string) (int, error) {
+	if s.store == nil {
+		return 0, errStoreUnavailable
+	}
 	return watchreset.Preview(ctx, &githubIssueWatchResetter{store: s.store, watchID: watchID})
 }
 
@@ -36,6 +39,9 @@ func (s *Service) PreviewResetIssueWatch(ctx context.Context, watchID string) (i
 // dedup rows, and nulls last_polled_at so the next poll re-imports every
 // currently-matching issue. Returns the count of tasks deleted.
 func (s *Service) ResetIssueWatch(ctx context.Context, watchID string) (int, error) {
+	if s.store == nil {
+		return 0, errStoreUnavailable
+	}
 	s.mu.Lock()
 	td := s.cascadeTaskDeleter
 	s.mu.Unlock()
@@ -68,6 +74,9 @@ func (r *githubReviewWatchResetter) Clear(ctx context.Context) error {
 // PreviewResetReviewWatch returns how many tasks ResetReviewWatch would
 // cascade-delete. Used by the frontend to populate the confirmation dialog.
 func (s *Service) PreviewResetReviewWatch(ctx context.Context, watchID string) (int, error) {
+	if s.store == nil {
+		return 0, errStoreUnavailable
+	}
 	return watchreset.Preview(ctx, &githubReviewWatchResetter{store: s.store, watchID: watchID})
 }
 
@@ -76,6 +85,9 @@ func (s *Service) PreviewResetReviewWatch(ctx context.Context, watchID string) (
 // dedup rows, and nulls last_polled_at so the next poll re-imports every
 // currently-matching PR. Returns the count of tasks deleted.
 func (s *Service) ResetReviewWatch(ctx context.Context, watchID string) (int, error) {
+	if s.store == nil {
+		return 0, errStoreUnavailable
+	}
 	s.mu.Lock()
 	td := s.cascadeTaskDeleter
 	s.mu.Unlock()

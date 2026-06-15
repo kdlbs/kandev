@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -133,11 +133,26 @@ export function ResetWatchDialog({
 // Caller supplies preview(watch) and reset(watch). resetting carries the
 // whole watch row so per-row workspaceId stays available even if the
 // underlying list re-renders mid-dialog.
+//
+// opts is captured by ref, NOT included in the callbacks' deps. Call sites
+// pass `useWatchResetController({ preview: ..., reset: ... })` with an
+// inline object literal, so opts is a fresh reference on every parent
+// render. Including it in the deps would re-create previewLoader each
+// render, re-firing ResetWatchDialog's `useEffect([open, previewLoader])`
+// and re-issuing the preview API call mid-dialog. The ref keeps the
+// closure stable while still seeing the latest callbacks.
 export function useWatchResetController<TWatch extends { id: string }>(opts: {
   preview: (watch: TWatch) => Promise<{ taskCount: number }>;
   reset: (watch: TWatch) => Promise<void>;
 }) {
   const [resetting, setResetting] = useState<TWatch | null>(null);
+  const optsRef = useRef(opts);
+  // Sync the ref in an effect rather than during render: the ESLint
+  // react-x/no-access-state-in-setstate rule (React 19 docs) flags
+  // `ref.current = value` at render time as a stale-closure footgun.
+  useEffect(() => {
+    optsRef.current = opts;
+  }, [opts]);
 
   const previewLoader = useCallback(() => {
     if (!resetting) {
@@ -146,18 +161,18 @@ export function useWatchResetController<TWatch extends { id: string }>(opts: {
       // in practice. The check keeps the closure typed cleanly.
       return Promise.resolve({ taskCount: 0 });
     }
-    return opts.preview(resetting);
-  }, [opts, resetting]);
+    return optsRef.current.preview(resetting);
+  }, [resetting]);
 
   const confirmReset = useCallback(async () => {
     if (!resetting) return;
     try {
-      await opts.reset(resetting);
+      await optsRef.current.reset(resetting);
       setResetting(null);
     } catch {
       // Keep dialog open on error so the user sees the toast and can retry.
     }
-  }, [opts, resetting]);
+  }, [resetting]);
 
   const onOpenChange = useCallback((open: boolean) => {
     if (!open) setResetting(null);

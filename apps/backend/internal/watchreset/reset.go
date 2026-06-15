@@ -57,6 +57,13 @@ type Result struct {
 // reset that fails halfway would leave the watch unable to re-import the
 // items it just lost references to. Returns the final Result regardless;
 // the only fatal error is the dedup/clear step itself.
+//
+// Once started, the reset runs to completion even if the caller's context
+// is cancelled (e.g. the HTTP client disconnects mid-reset). A half-applied
+// reset is worse than a slow one: the user already confirmed the
+// destructive action, and the dedup wipe is the step that lets them retry
+// safely. The cancel signal is preserved for deadlines that arrive
+// before Run is invoked, but not for ones that fire after.
 func Run(ctx context.Context, r Resetter, td TaskDeleter, log *logger.Logger) (Result, error) {
 	if r == nil {
 		return Result{}, fmt.Errorf("watchreset: nil Resetter")
@@ -64,6 +71,7 @@ func Run(ctx context.Context, r Resetter, td TaskDeleter, log *logger.Logger) (R
 	if td == nil {
 		return Result{}, fmt.Errorf("watchreset: nil TaskDeleter")
 	}
+	ctx = context.WithoutCancel(ctx)
 
 	ids, err := r.ListTaskIDs(ctx)
 	if err != nil {

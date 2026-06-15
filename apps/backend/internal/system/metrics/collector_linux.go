@@ -93,11 +93,11 @@ func memInfoPercent(path string) (float64, error) {
 		}
 	}
 	total := values["MemTotal"]
-	available := values["MemAvailable"]
 	if total == 0 {
 		return 0, errors.New("MemTotal missing")
 	}
-	if available == 0 {
+	available, ok := values["MemAvailable"]
+	if !ok {
 		available = values["MemFree"]
 	}
 	return (1 - float64(available)/float64(total)) * 100, nil
