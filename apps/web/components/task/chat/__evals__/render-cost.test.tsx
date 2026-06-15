@@ -7,7 +7,7 @@
  * update pattern. Wave 1 owns the parse-count assertions; Wave 2/3 extend the
  * row-render assertions once callbacks + store identity are stabilized.
  */
-import { memo, useState } from "react";
+import { createContext, memo, useState } from "react";
 import { act, fireEvent, render } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -16,6 +16,7 @@ vi.mock("react-markdown", () => ({
 }));
 
 vi.mock("@/components/shared/markdown-components", () => ({
+  MarkdownFileLinkContext: createContext({}),
   markdownComponents: {},
   remarkPlugins: [],
 }));

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { createContext, useState } from "react";
 import { fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -13,6 +13,7 @@ vi.mock("react-markdown", () => ({
 
 // Stub the component overrides so the test stays light (no shiki / mermaid).
 vi.mock("@/components/shared/markdown-components", () => ({
+  MarkdownFileLinkContext: createContext({}),
   markdownComponents: {},
   remarkPlugins: [],
 }));

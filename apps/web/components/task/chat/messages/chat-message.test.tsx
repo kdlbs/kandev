@@ -203,6 +203,30 @@ describe("ChatMessage sender badge", () => {
 });
 
 describe("ChatMessage agent session config metadata", () => {
+  it("opens markdown file links with the provided chat file opener", () => {
+    const onOpenFile = vi.fn();
+    const Wrapper = wrapper([]);
+
+    render(
+      <Wrapper>
+        <ChatMessage
+          comment={userMessage({
+            author_type: "agent",
+            content: "[spec.md](/root/.kandev/tasks/example/kandev/docs/specs/native/spec.md)",
+          })}
+          label="Message"
+          className=""
+          worktreePath="/root/.kandev/tasks/example/kandev"
+          onOpenFile={onOpenFile}
+        />
+      </Wrapper>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "spec.md" }));
+
+    expect(onOpenFile).toHaveBeenCalledWith("docs/specs/native/spec.md");
+  });
+
   it("shows session config options next to the model", () => {
     renderAgentMessageWithSession({
       agent_profile_snapshot: {

@@ -1,8 +1,22 @@
 import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
-import { markdownComponents, normalizeMarkdown, remarkPlugins } from "./markdown-components";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const openFile = vi.hoisted(() => vi.fn());
+const appState = vi.hoisted(() => ({
+  value: {
+    tasks: { activeSessionId: "session-1" },
+    taskSessions: {
+      items: {
+        "session-1": {
+          worktree_path: "/root/.kandev/tasks/example/kandev",
+        },
+      },
+    },
+  },
+}));
 
 vi.mock("@/components/shared/mermaid-block", () => ({
   MermaidBlock: ({ code }: { code: string }) => <div data-kind="mermaid">{code}</div>,
@@ -20,6 +34,16 @@ vi.mock("@/components/task/chat/messages/inline-code", () => ({
   InlineCode: ({ children }: { children: ReactNode }) => <code data-kind="inline">{children}</code>,
 }));
 
+vi.mock("@/hooks/use-panel-actions", () => ({
+  usePanelActions: () => ({ openFile }),
+}));
+
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (selector: (state: typeof appState.value) => unknown) => selector(appState.value),
+}));
+
+import { markdownComponents, normalizeMarkdown, remarkPlugins } from "./markdown-components";
+
 function renderMarkdown(source: string): string {
   return renderToStaticMarkup(
     <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
@@ -28,7 +52,19 @@ function renderMarkdown(source: string): string {
   );
 }
 
+function Markdown({ children }: { children: string }) {
+  return (
+    <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
+      {children}
+    </ReactMarkdown>
+  );
+}
+
 describe("markdownComponents", () => {
+  afterEach(() => {
+    openFile.mockClear();
+  });
+
   it("keeps mermaid keywords in inline code as inline code", () => {
     const html = renderMarkdown("Metadata comes from `kanban`, `kanbanMulti`, repositories.");
 
@@ -51,6 +87,26 @@ describe("markdownComponents", () => {
     expect(html).toContain("language-ts");
     expect(html).toContain("const source");
     expect(html).not.toContain('data-kind="mermaid"');
+  });
+
+  it("opens absolute worktree file links in the editor", () => {
+    render(
+      <Markdown>
+        {"[spec.md](/root/.kandev/tasks/example/kandev/docs/specs/native/spec.md)"}
+      </Markdown>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "spec.md" }));
+
+    expect(openFile).toHaveBeenCalledWith("docs/specs/native/spec.md");
+  });
+
+  it("opens relative file links in the editor", () => {
+    render(<Markdown>{"[plan.md](docs/specs/native/plan.md)"}</Markdown>);
+
+    fireEvent.click(screen.getByRole("link", { name: "plan.md" }));
+
+    expect(openFile).toHaveBeenCalledWith("docs/specs/native/plan.md");
   });
 });
 

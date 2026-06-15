@@ -23,6 +23,8 @@ type ChatMessageProps = {
   className: string;
   showRichBlocks?: boolean;
   sessionId?: string | null;
+  worktreePath?: string;
+  onOpenFile?: (path: string) => void;
   onScrollToMessage?: (messageId: string) => void;
 };
 
@@ -70,20 +72,32 @@ function renderContentWithFileRefs(content: string): React.ReactNode[] {
 
 // ── Markdown component overrides imported from shared/markdown-components ─────
 
-function renderUserMessageBody(
-  hasContent: boolean,
-  showRaw: boolean,
-  hasAttachments: boolean,
-  content: string,
-  rawContent?: string,
-): React.ReactNode {
+type UserMessageBodyOptions = {
+  hasContent: boolean;
+  showRaw: boolean;
+  hasAttachments: boolean;
+  content: string;
+  rawContent?: string;
+  worktreePath?: string;
+  onOpenFile?: (path: string) => void;
+};
+
+function renderUserMessageBody({
+  hasContent,
+  showRaw,
+  hasAttachments,
+  content,
+  rawContent,
+  worktreePath,
+  onOpenFile,
+}: UserMessageBodyOptions): React.ReactNode {
   if (hasContent && showRaw) {
     return <pre className="whitespace-pre-wrap font-mono text-xs">{rawContent || content}</pre>;
   }
   if (hasContent) {
     return (
       <div className="markdown-body markdown-body-user max-w-none">
-        <MemoizedMarkdown content={content} />
+        <MemoizedMarkdown content={content} worktreePath={worktreePath} onOpenFile={onOpenFile} />
       </div>
     );
   }
@@ -100,6 +114,8 @@ type UserMessageProps = {
   showRaw: boolean;
   onToggleRaw: () => void;
   sessionId?: string | null;
+  worktreePath?: string;
+  onOpenFile?: (path: string) => void;
   onScrollToMessage?: (messageId: string) => void;
 };
 
@@ -194,6 +210,8 @@ function UserMessageContent({
   showRaw,
   onToggleRaw,
   sessionId,
+  worktreePath,
+  onOpenFile,
   onScrollToMessage,
 }: UserMessageProps) {
   const userNavigation = useUserMessageNavigation(sessionId ?? null, comment.id);
@@ -242,13 +260,15 @@ function UserMessageContent({
               ))}
             </div>
           )}
-          {renderUserMessageBody(
+          {renderUserMessageBody({
             hasContent,
             showRaw,
             hasAttachments,
-            comment.content,
-            comment.raw_content,
-          )}
+            content: comment.content,
+            rawContent: comment.raw_content,
+            worktreePath,
+            onOpenFile,
+          })}
         </div>
         <MessageActions
           message={comment}
@@ -282,9 +302,18 @@ type AgentMessageProps = {
   showRaw: boolean;
   onToggleRaw: () => void;
   showRichBlocks?: boolean;
+  worktreePath?: string;
+  onOpenFile?: (path: string) => void;
 };
 
-function AgentMessageContent({ comment, showRaw, onToggleRaw, showRichBlocks }: AgentMessageProps) {
+function AgentMessageContent({
+  comment,
+  showRaw,
+  onToggleRaw,
+  showRichBlocks,
+  worktreePath,
+  onOpenFile,
+}: AgentMessageProps) {
   return (
     <div className="flex items-start gap-2 sm:gap-3 w-full group">
       <div className="flex-1 min-w-0">
@@ -294,7 +323,11 @@ function AgentMessageContent({ comment, showRaw, onToggleRaw, showRichBlocks }: 
           </pre>
         ) : (
           <div className="markdown-body max-w-none">
-            <MemoizedMarkdown content={comment.content || "(empty)"} />
+            <MemoizedMarkdown
+              content={comment.content || "(empty)"}
+              worktreePath={worktreePath}
+              onOpenFile={onOpenFile}
+            />
             {showRichBlocks ? <RichBlocks comment={comment} /> : null}
           </div>
         )}
@@ -321,6 +354,8 @@ export const ChatMessage = memo(function ChatMessage({
   className,
   showRichBlocks,
   sessionId,
+  worktreePath,
+  onOpenFile,
   onScrollToMessage,
 }: ChatMessageProps) {
   const [showRaw, setShowRaw] = useState(false);
@@ -353,6 +388,8 @@ export const ChatMessage = memo(function ChatMessage({
         showRaw={showRaw}
         onToggleRaw={toggleRaw}
         sessionId={sessionId}
+        worktreePath={worktreePath}
+        onOpenFile={onOpenFile}
         onScrollToMessage={onScrollToMessage}
       />
     );
@@ -364,6 +401,8 @@ export const ChatMessage = memo(function ChatMessage({
       showRaw={showRaw}
       onToggleRaw={toggleRaw}
       showRichBlocks={showRichBlocks}
+      worktreePath={worktreePath}
+      onOpenFile={onOpenFile}
     />
   );
 });

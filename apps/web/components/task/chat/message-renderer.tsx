@@ -95,11 +95,15 @@ function TaskDescriptionMessage({
   comment,
   taskId,
   sessionId,
+  worktreePath,
+  onOpenFile,
   onScrollToMessage,
 }: {
   comment: Message;
   taskId?: string;
   sessionId?: string;
+  worktreePath?: string;
+  onOpenFile?: (path: string) => void;
   onScrollToMessage?: (messageId: string) => void;
 }) {
   const sessionState = useSessionStateValue(sessionId);
@@ -113,6 +117,8 @@ function TaskDescriptionMessage({
         className="bg-muted/40 text-foreground border-border/60"
         showRichBlocks={comment.type === "message" || comment.type === "content" || !comment.type}
         sessionId={sessionId}
+        worktreePath={worktreePath}
+        onOpenFile={onOpenFile}
         onScrollToMessage={onScrollToMessage}
       />
     );
@@ -126,6 +132,8 @@ function TaskDescriptionMessage({
         label="You"
         className="bg-primary/10 text-foreground border-primary/30"
         sessionId={sessionId}
+        worktreePath={worktreePath}
+        onOpenFile={onOpenFile}
         onScrollToMessage={onScrollToMessage}
       />
       {showStartButton && <TaskDescriptionStartButton taskId={taskId!} sessionId={sessionId!} />}
@@ -305,6 +313,8 @@ const adapters: MessageAdapter[] = [
             comment={comment}
             taskId={ctx.taskId}
             sessionId={ctx.sessionId}
+            worktreePath={ctx.worktreePath}
+            onOpenFile={ctx.onOpenFile}
             onScrollToMessage={ctx.onScrollToMessage}
           />
         );
@@ -316,6 +326,8 @@ const adapters: MessageAdapter[] = [
             label="You"
             className="bg-primary/10 text-foreground border-primary/30"
             sessionId={ctx.sessionId}
+            worktreePath={ctx.worktreePath}
+            onOpenFile={ctx.onOpenFile}
             onScrollToMessage={ctx.onScrollToMessage}
           />
         );
@@ -327,6 +339,8 @@ const adapters: MessageAdapter[] = [
           className="bg-muted/40 text-foreground border-border/60"
           showRichBlocks={comment.type === "message" || comment.type === "content" || !comment.type}
           sessionId={ctx.sessionId}
+          worktreePath={ctx.worktreePath}
+          onOpenFile={ctx.onOpenFile}
           onScrollToMessage={ctx.onScrollToMessage}
         />
       );
