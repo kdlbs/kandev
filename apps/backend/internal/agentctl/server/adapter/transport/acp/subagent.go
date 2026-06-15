@@ -7,13 +7,16 @@ import (
 )
 
 // Subagent (Task) tool detection constants. These are the wire-level tool
-// identifiers three real agents use to spawn a child agent ("subagent"):
+// identifiers four real agents use to spawn a child agent ("subagent"):
 //   - Claude-acp tags it via `_meta.claudeCode.toolName == "Agent"`.
 //   - OpenCode reports tool title == "task" (case-insensitive).
 //   - Cursor reports `rawInput._toolName == "task"` (title "Task: Subagent task").
+//   - Auggie reports a tool_call with `kind == "other"` and a title prefixed
+//     with `sub-agent-<type>: `; no meta or rawInput is provided.
 const (
-	subagentClaudeToolName = "Agent"
-	subagentTaskName       = "task"
+	subagentClaudeToolName    = "Agent"
+	subagentTaskName          = "task"
+	subagentAuggieTitlePrefix = "sub-agent-"
 )
 
 // rawInput field keys carrying subagent invocation details. These arrive on a
@@ -48,6 +51,10 @@ type SubagentTaskResult struct {
 	IsAsync           bool
 	OutputFile        string
 	CanReadOutputFile bool
+
+	// ResultText carries the silent-subagent final text (Auggie). Empty when
+	// the agent streams progress as nested tool calls instead.
+	ResultText string
 }
 
 // subagentAsyncLaunchedStatus is the Claude Code marker that the Task tool
@@ -75,13 +82,15 @@ func isSubagentAsyncLaunched(meta map[string]any) bool {
 }
 
 // recognizeSubagent reports whether a tool call spawns a subagent (Task) and
-// pulls description/prompt/subagent_type out of rawInput when present. The
-// detection mirrors monitor.go: defensive over untyped maps, no logging.
+// pulls description/prompt/subagent_type out of rawInput (or, for Auggie, the
+// title) when present. The detection mirrors monitor.go: defensive over
+// untyped maps, no logging.
 //
 // A tool call is a subagent if ANY of:
 //   - Claude:   meta.claudeCode.toolName == "Agent"
 //   - OpenCode: title == "task" (case-insensitive)
 //   - Cursor:   rawInput._toolName == "task"
+//   - Auggie:   title starts with "sub-agent-<type>:"
 //
 // The Claude "Monitor"/"ScheduleWakeup" tool names are deliberately NOT matched
 // here so their dedicated handling stays intact.
@@ -90,10 +99,20 @@ func recognizeSubagent(meta map[string]any, title string, rawInput any) (descrip
 		return "", "", "", false
 	}
 	description, prompt, subagentType = subagentInputFields(rawInput)
+	// Auggie carries the subagent type + a truncated description in the title;
+	// rawInput is empty so we fall back to parsing the title.
+	if titleType, titleDesc, isAuggie := auggieSubagentTitleFields(title); isAuggie {
+		if subagentType == "" {
+			subagentType = titleType
+		}
+		if description == "" {
+			description = titleDesc
+		}
+	}
 	return description, prompt, subagentType, true
 }
 
-// isSubagentSignal implements the three detection rules.
+// isSubagentSignal implements the four detection rules.
 func isSubagentSignal(meta map[string]any, title string, rawInput any) bool {
 	if isClaudeAgentMeta(meta) {
 		return true
@@ -106,7 +125,30 @@ func isSubagentSignal(meta map[string]any, title string, rawInput any) bool {
 			return true
 		}
 	}
+	if _, _, ok := auggieSubagentTitleFields(title); ok {
+		return true
+	}
 	return false
+}
+
+// auggieSubagentTitleFields parses Auggie's "sub-agent-<type>: <description>"
+// title. Returns ok=false when the title doesn't carry the prefix, omits the
+// ":" separator, or the type segment is empty after trimming. The description
+// is whatever follows the first ":" (Auggie truncates it; we keep it as-is).
+func auggieSubagentTitleFields(title string) (subagentType, description string, ok bool) {
+	rest, found := strings.CutPrefix(title, subagentAuggieTitlePrefix)
+	if !found {
+		return "", "", false
+	}
+	typeName, desc, hasColon := strings.Cut(rest, ":")
+	if !hasColon {
+		return "", "", false
+	}
+	typeName = strings.TrimSpace(typeName)
+	if typeName == "" {
+		return "", "", false
+	}
+	return typeName, strings.TrimSpace(desc), true
 }
 
 // parentToolUseID returns `_meta.claudeCode.parentToolUseId` — the tool-call id
@@ -162,6 +204,11 @@ func subagentInputFields(rawInput any) (description, prompt, subagentType string
 //   - OpenCode: rawOutput.metadata = {sessionId, parentSessionId,
 //     model:{providerID, modelID}}
 //   - Cursor:   rawOutput = {durationMs, isBackground}
+//
+// Auggie's `rawOutput.output` shape is intentionally NOT extracted here — it's
+// too generic (a bare "output" string field) to attribute reliably. The caller
+// (EnrichSubagentResult) gates it on the payload's IsAuggie flag, which is set
+// at recognition time from the "sub-agent-<type>:" title prefix.
 func extractSubagentResult(meta map[string]any, rawOutput any) (res SubagentTaskResult, ok bool) {
 	if claudeSubagentResponse(meta, &res) {
 		ok = true
@@ -175,6 +222,21 @@ func extractSubagentResult(meta map[string]any, rawOutput any) (res SubagentTask
 		}
 	}
 	return res, ok
+}
+
+// auggieSubagentResult reads Auggie's `rawOutput.output` (the final result
+// text) into res. Auggie sub-agents are silent — they never emit intermediate
+// tool calls or structured metrics — so this text is the only completion
+// signal we get to surface in the UI. Called only when the parent payload was
+// recognized as Auggie at tool_call time; the generic shape is unsafe for
+// other agents.
+func auggieSubagentResult(out map[string]any, res *SubagentTaskResult) bool {
+	output, _ := out["output"].(string)
+	if output == "" {
+		return false
+	}
+	res.ResultText = output
+	return true
 }
 
 // claudeSubagentResponse reads `_meta.claudeCode.toolResponse` into res.
@@ -300,5 +362,8 @@ func applySubagentResult(p *streams.SubagentTaskPayload, res SubagentTaskResult)
 	}
 	if res.CanReadOutputFile {
 		p.CanReadOutputFile = true
+	}
+	if res.ResultText != "" && p.ResultText == "" {
+		p.ResultText = res.ResultText
 	}
 }

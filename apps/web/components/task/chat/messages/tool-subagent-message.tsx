@@ -5,8 +5,21 @@ import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { GridSpinner } from "@/components/grid-spinner";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
-import type { ToolCallMetadata } from "@/components/task/chat/types";
+import type { SubagentTaskPayload, ToolCallMetadata } from "@/components/task/chat/types";
 import { SubagentMetaRow } from "@/components/task/chat/messages/subagent-meta-row";
+
+// deriveSubagentBody picks which secondary block (result text or prompt) the
+// card should render below the header. Result text wins because it carries the
+// silent-subagent summary that prompt placeholders cannot substitute for.
+function deriveSubagentBody(
+  childCount: number,
+  payload: SubagentTaskPayload | undefined,
+): { resultText?: string; prompt?: string } {
+  if (childCount > 0) return {};
+  if (payload?.result_text) return { resultText: payload.result_text };
+  if (payload?.prompt) return { prompt: payload.prompt };
+  return {};
+}
 
 type ToolSubagentMessageProps = {
   comment: Message;
@@ -92,6 +105,7 @@ type SubagentContentProps = {
   childMessages: Message[];
   isActive: boolean;
   prompt?: string;
+  resultText?: string;
   renderChild: (message: Message) => React.ReactNode;
 };
 
@@ -100,6 +114,7 @@ function SubagentContent({
   childMessages,
   isActive,
   prompt,
+  resultText,
   renderChild,
 }: SubagentContentProps) {
   if (!isExpanded) return null;
@@ -116,6 +131,18 @@ function SubagentContent({
     return (
       <div className={NESTED_BORDER}>
         <span className="text-xs text-muted-foreground italic">Subagent working...</span>
+      </div>
+    );
+  }
+  if (resultText) {
+    return (
+      <div className={NESTED_BORDER}>
+        <p
+          data-testid="subagent-result-text"
+          className="text-xs text-foreground/80 whitespace-pre-wrap break-words"
+        >
+          {resultText}
+        </p>
       </div>
     );
   }
@@ -149,13 +176,28 @@ export const ToolSubagentMessage = memo(function ToolSubagentMessage({
 
   const isActive = status === "running";
   const showMeta = !isActive;
-  const prompt = childCount === 0 ? subagentTask?.prompt : undefined;
+  const { resultText, prompt } = deriveSubagentBody(childCount, subagentTask);
 
   // Track manual override state - null means "use auto behavior"
   const [manualExpandState, setManualExpandState] = useState<boolean | null>(null);
 
-  // Auto behavior: expand if active, collapse otherwise
-  const autoExpanded = isActive;
+  // Auto behavior: expand if active or if we have a result text to surface
+  // (silent Auggie-style subagents have no child messages, so we want the
+  // final summary visible without an extra click).
+  const autoExpanded = isActive || Boolean(resultText);
+
+  // Reset the manual override the first time a result_text arrives so a card
+  // the user collapsed while the subagent was running auto-opens to show the
+  // summary. "Adjust state during render" pattern (preferred over useEffect):
+  // https://react.dev/learn/you-might-not-need-an-effect — only fires on the
+  // empty -> non-empty transition; later user collapses persist.
+  const [prevResultText, setPrevResultText] = useState(resultText);
+  if (resultText !== prevResultText) {
+    setPrevResultText(resultText);
+    if (resultText && !prevResultText) {
+      setManualExpandState(null);
+    }
+  }
 
   // Derive expanded state: manual override takes precedence, otherwise use auto
   const isExpanded = manualExpandState ?? autoExpanded;
@@ -180,6 +222,7 @@ export const ToolSubagentMessage = memo(function ToolSubagentMessage({
         childMessages={childMessages}
         isActive={isActive}
         prompt={prompt}
+        resultText={resultText}
         renderChild={renderChild}
       />
     </div>

@@ -492,21 +492,38 @@ func (n *Normalizer) normalizeSubagent(args map[string]any) (*streams.Normalized
 	if !ok {
 		return nil, false
 	}
-	return streams.NewSubagentTask(desc, prompt, subagentType), true
+	payload := streams.NewSubagentTask(desc, prompt, subagentType)
+	// Mark Auggie subagents at recognition time so the result extractor
+	// (which reads a generic `rawOutput.output` string) only runs for
+	// payloads whose tool_call title actually carried the Auggie prefix.
+	if _, _, isAuggie := auggieSubagentTitleFields(title); isAuggie {
+		payload.SubagentTask().SetIsAuggie(true)
+	}
+	return payload, true
 }
 
 // EnrichSubagentResult fills the result fields of a subagent payload from a
 // completion tool_call_update. Claude's result lives in meta, OpenCode's and
-// Cursor's in rawOutput — so this takes both. No-op for non-subagent payloads.
+// Cursor's in rawOutput — so this takes both. Auggie's `rawOutput.output` is
+// extracted separately and only when the payload was recognized as Auggie at
+// tool_call time. No-op for non-subagent payloads.
 func (n *Normalizer) EnrichSubagentResult(payload *streams.NormalizedPayload, meta map[string]any, rawOutput any) {
 	if payload == nil || payload.Kind() != streams.ToolKindSubagentTask {
 		return
 	}
+	sa := payload.SubagentTask()
 	res, ok := extractSubagentResult(meta, rawOutput)
+	if sa.IsAuggie() {
+		if out, isMap := rawOutput.(map[string]any); isMap {
+			if auggieSubagentResult(out, &res) {
+				ok = true
+			}
+		}
+	}
 	if !ok {
 		return
 	}
-	applySubagentResult(payload.SubagentTask(), res)
+	applySubagentResult(sa, res)
 }
 
 // --- Helper functions ---
