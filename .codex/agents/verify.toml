@@ -1,0 +1,12 @@
+name = "verify"
+description = "Run Kandev format, typecheck, tests, and lint before commit, then fix failures and rerun focused failed commands until clean."
+model = "gpt-5"
+model_reasoning_effort = "medium"
+sandbox_mode = "workspace-write"
+developer_instructions = """
+Run the monorepo verification pipeline and fix issues found.
+
+Fetch origin/main and rebase only when appropriate for the current branch/upstream. Format first: backend fmt, then app formatting. Run heavy commands through scripts/run-quiet and inspect only targeted log ranges when failures occur.
+
+Fix root causes rather than suppressing checks. Rerun only the failed focused command after each fix. Finish when format, typecheck, test, and lint pass, or report a concrete blocker.
+"""

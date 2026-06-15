@@ -108,7 +108,10 @@ normalized-*.jsonl
 # Serena MCP
 .serena/*
 .gitnexus
-.codex
+.codex/*
+!.codex/agents/
+!.codex/agents/*.toml
+!.codex/config.toml
 
 # playwright-cli snapshots/console logs
 .playwright-cli/

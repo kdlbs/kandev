@@ -24,6 +24,7 @@ If the user names a target platform for a skill, command, or instruction file, l
 
 1. **Inventory first**
    - Use `rg --files` to find existing `.agents/skills`, `.agents/agents`, `.claude`, `.codex`, `.cursor`, `.opencode`, `AGENTS.md`, and `CLAUDE.md` files.
+   - For platform-specific formats, read the bundled files under `references/platforms/` before consulting external docs. Treat those files as the first source of truth for Claude, Codex, Cursor, and OpenCode harness layout.
    - Check for duplicate or superseded skills/agents before adding new ones.
    - For subagent/agent edits, map the role across all platform directories before editing so mirrors stay aligned.
    - Prefer updating the existing artifact when the behavior belongs to an existing workflow.
@@ -57,7 +58,7 @@ If the user names a target platform for a skill, command, or instruction file, l
 6. **Report**
    - Name each artifact changed.
    - State why the instruction belongs there.
-   - Mention validation run and any platform docs consulted.
+   - Mention validation run and any bundled platform references consulted.
 
 ## Guardrails
 
@@ -65,4 +66,4 @@ If the user names a target platform for a skill, command, or instruction file, l
 - Do not add always-on instructions for rare workflows; use skills or commands.
 - Do not make subagents recursively spawn other subagents unless the user explicitly asks for nested orchestration.
 - Do not keep deprecated/replaced skills around without a clear compatibility reason.
-- When platform docs are time-sensitive or user asks for latest behavior, verify current docs before editing.
+- Do not web-search platform formats by default. Use external docs only when the bundled reference is missing the needed detail, conflicts with files already in the repo, or the user explicitly asks for latest/current upstream behavior; if that happens, say why before browsing.
