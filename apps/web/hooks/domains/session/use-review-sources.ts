@@ -29,6 +29,12 @@ type CumulativeFile = {
   additions?: number;
   deletions?: number;
   repository_name?: string;
+  /**
+   * Repo-relative path. Stamped by the backend's multi-repo cumulative-diff
+   * merge (`mergeCumulativeFiles` in agentctl); single-repo payloads omit
+   * this and carry the path only on the map key.
+   */
+  path?: string;
 };
 
 function addUncommittedFiles(
@@ -60,7 +66,13 @@ function addCumulativeFiles(
   files: Record<string, CumulativeFile>,
   uncommittedPaths: Set<string>,
 ) {
-  for (const [path, file] of Object.entries(files)) {
+  for (const [mapKey, file] of Object.entries(files)) {
+    // Multi-repo cumulative payloads use a NUL-composite `<repo>\x00<path>`
+    // map key and stamp the clean repo-relative path on `file.path`.
+    // Single-repo keeps the bare path on the map key with no `file.path`.
+    // Prefer the stamped value so the composite key doesn't bleed into the
+    // displayed path; fall back to the map key for single-repo.
+    const path = file.path ?? mapKey;
     const key = file.repository_name ? `${file.repository_name}:${path}` : path;
     const hasRepoUnawareCollision = key !== path && fileMap.has(path);
     if (fileMap.has(key) || uncommittedPaths.has(key) || hasRepoUnawareCollision) continue;
