@@ -91,7 +91,7 @@ function TerminalFontSizeCard() {
       });
     } catch {
       const latest = storeApi.getState().userSettings;
-      if (latest.workspaceId === current.workspaceId) {
+      if (latest.workspaceId === current.workspaceId && latest.terminalFontSize === value) {
         setUserSettings({ ...latest, terminalFontSize: previous });
       }
     } finally {
@@ -159,8 +159,9 @@ function TerminalFontCard() {
     setIsSaving(true);
     const current = storeApi.getState().userSettings;
     const previous = current.terminalFontFamily;
+    const nextValue = value || null;
     try {
-      setUserSettings({ ...current, terminalFontFamily: value || null });
+      setUserSettings({ ...current, terminalFontFamily: nextValue });
       await updateUserSettings({
         workspace_id: current.workspaceId || "",
         repository_ids: current.repositoryIds || [],
@@ -168,7 +169,7 @@ function TerminalFontCard() {
       });
     } catch {
       const latest = storeApi.getState().userSettings;
-      if (latest.workspaceId === current.workspaceId) {
+      if (latest.workspaceId === current.workspaceId && latest.terminalFontFamily === nextValue) {
         setUserSettings({ ...latest, terminalFontFamily: previous });
       }
     } finally {
@@ -253,7 +254,7 @@ function TerminalLinksCard() {
       });
     } catch {
       const latest = storeApi.getState().userSettings;
-      if (latest.workspaceId === current.workspaceId) {
+      if (latest.workspaceId === current.workspaceId && latest.terminalLinkBehavior === value) {
         setUserSettings({ ...latest, terminalLinkBehavior: previous });
       }
     } finally {
