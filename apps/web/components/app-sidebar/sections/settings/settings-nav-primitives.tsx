@@ -44,6 +44,7 @@ export function SettingsLeaf({
       href={href}
       className={cn(
         "flex items-center gap-2 py-1.5 text-[13px] font-medium rounded-md cursor-pointer",
+        "outline-none focus-visible:outline-none focus-visible:ring-0",
         LEAF_DEPTH_PADDING[clampDepth(depth, LEAF_DEPTH_PADDING.length - 1)],
         isActive ? ACTIVE_CLASS : INACTIVE_CLASS,
       )}
@@ -112,7 +113,7 @@ export function SettingsGroup({
         {href ? (
           <Link
             href={href}
-            className="flex flex-1 min-w-0 items-center gap-2 py-1.5 text-[13px] font-medium cursor-pointer"
+            className="flex flex-1 min-w-0 items-center gap-2 py-1.5 text-[13px] font-medium cursor-pointer outline-none focus-visible:outline-none focus-visible:ring-0"
           >
             {labelInner}
           </Link>
@@ -120,7 +121,7 @@ export function SettingsGroup({
           <button
             type="button"
             onClick={toggle}
-            className="flex flex-1 min-w-0 items-center gap-2 py-1.5 text-[13px] font-medium cursor-pointer text-left"
+            className="flex flex-1 min-w-0 items-center gap-2 py-1.5 text-[13px] font-medium cursor-pointer text-left outline-none focus-visible:outline-none focus-visible:ring-0"
           >
             {labelInner}
           </button>
@@ -130,7 +131,7 @@ export function SettingsGroup({
           onClick={toggle}
           aria-label={expanded ? `Collapse ${label}` : `Expand ${label}`}
           aria-expanded={expanded}
-          className="shrink-0 flex h-5 w-5 items-center justify-center text-muted-foreground/60 hover:text-foreground/80 cursor-pointer transition-colors"
+          className="shrink-0 flex h-5 w-5 items-center justify-center text-muted-foreground/60 hover:text-foreground/80 cursor-pointer transition-colors outline-none focus-visible:outline-none focus-visible:ring-0"
         >
           <IconChevronRight
             className={cn("h-3 w-3 transition-transform", expanded && "rotate-90")}

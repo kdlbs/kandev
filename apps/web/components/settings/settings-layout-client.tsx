@@ -112,7 +112,7 @@ function SettingsShell({
           backHref={backHref}
           backLabel={backLabel}
           parents={parents}
-          className="h-12"
+          className="h-10"
         />
         {/* Scroll the content, not the topbar: min-h-0 lets this flex child
             shrink below its content height so overflow-y-auto can take effect. */}

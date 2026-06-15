@@ -201,21 +201,21 @@ export function AppearanceSettings() {
       <Separator />
 
       <SettingsSection
-        icon={<IconActivity className="h-5 w-5" />}
-        title="Resource Metrics"
-        description="Configure backend and execution resource sampling"
-      >
-        <SystemMetricsSettingsCard />
-      </SettingsSection>
-
-      <Separator />
-
-      <SettingsSection
         icon={<IconGitBranch className="h-5 w-5" />}
         title="Changes Panel"
         description="Customize how changed files are displayed"
       >
         <ChangesPanelLayoutCard />
+      </SettingsSection>
+
+      <Separator />
+
+      <SettingsSection
+        icon={<IconActivity className="h-5 w-5" />}
+        title="Resource Metrics"
+        description="Configure backend and execution resource sampling"
+      >
+        <SystemMetricsSettingsCard />
       </SettingsSection>
     </div>
   );
