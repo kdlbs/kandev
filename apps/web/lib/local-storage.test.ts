@@ -114,12 +114,24 @@ describe("open file tabs storage", () => {
 
   it("round-trips the multi-repo repo subpath so a restored tab refetches under the right repo", () => {
     setOpenFileTabs("sess-1", [
-      { path: "src/foo.ts", name: "foo.ts", repo: "enrichment-commons", pinned: true },
+      {
+        path: "src/foo.ts",
+        name: "foo.ts",
+        repo: "enrichment-commons",
+        markdownPreview: true,
+        pinned: true,
+      },
     ]);
 
     const tabs = getOpenFileTabs("sess-1");
     expect(tabs).toHaveLength(1);
-    expect(tabs[0].repo).toBe("enrichment-commons");
+    expect(tabs[0]).toEqual({
+      path: "src/foo.ts",
+      name: "foo.ts",
+      repo: "enrichment-commons",
+      markdownPreview: true,
+      pinned: true,
+    });
   });
 
   it("leaves repo undefined for single-repo tabs", () => {

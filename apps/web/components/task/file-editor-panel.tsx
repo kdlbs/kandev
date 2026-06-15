@@ -51,6 +51,7 @@ function useFileLoader(
   activeSessionId: string | null,
   path: string,
   setFileState: (path: string, state: FileEditorState) => void,
+  repo?: string,
 ) {
   const loadingRef = useRef(false);
   useEffect(() => {
@@ -61,12 +62,13 @@ function useFileLoader(
       loadingRef.current = false;
       return;
     }
-    requestFileContent(client, activeSessionId, path)
+    requestFileContent(client, activeSessionId, path, repo)
       .then(async (response) => {
         const hash = await calculateHash(response.content);
         const name = path.split("/").pop() || path;
         const state: FileEditorState = {
           path,
+          repo,
           name,
           content: response.content,
           originalContent: response.content,
@@ -82,7 +84,7 @@ function useFileLoader(
       .finally(() => {
         loadingRef.current = false;
       });
-  }, [hasFile, activeSessionId, path, setFileState]);
+  }, [hasFile, activeSessionId, path, setFileState, repo]);
 }
 
 /**
@@ -151,6 +153,7 @@ export const FileEditorPanel = memo(function FileEditorPanel({
   params,
 }: FileEditorPanelProps) {
   const path = params.path as string;
+  const repo = params.repo as string | undefined;
 
   const hasFile = useDockviewStore((s) => s.openFiles.has(path));
   const content = useDockviewStore((s) => s.openFiles.get(path)?.content ?? "");
@@ -170,7 +173,7 @@ export const FileEditorPanel = memo(function FileEditorPanel({
   const vcsDiff = gitStatus?.files?.[path]?.diff;
   const { savingFiles, handleFileChange, saveFile, deleteFile, applyRemoteUpdate } =
     useFileEditors();
-  useFileLoader(hasFile, activeSessionId, path, setFileState);
+  useFileLoader(hasFile, activeSessionId, path, setFileState, repo);
   useResyncOnTabActivate(panelId, hasFile, activeSessionId, path, updateFileState);
 
   const onChange = useCallback(

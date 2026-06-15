@@ -233,6 +233,9 @@ export type OpenPanelOpts = {
   quiet?: boolean;
   /** Force the per-item pinned panel instead of the shared preview slot. */
   pin?: boolean;
+  /** Multi-repo subpath (repository_name) recorded on the panel params so
+   *  FileEditorPanel's fallback content fetch resolves under the right repo. */
+  repo?: string;
 };
 
 export const PREVIEW_FILE_EDITOR_ID = "preview:file-editor";
@@ -247,7 +250,7 @@ function buildFileEditorAction(get: StoreGet) {
       type: "file-editor",
       itemId: path,
       title: name,
-      params: { path },
+      params: { path, ...(opts?.repo ? { repo: opts.repo } : {}) },
       groupId: centerGroupId,
       quiet: opts?.quiet,
       pin: opts?.pin,

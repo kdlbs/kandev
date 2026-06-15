@@ -111,7 +111,7 @@ type RestoreTabsParams = {
   addFileEditorPanel: (
     path: string,
     name: string,
-    opts?: { quiet?: boolean; pin?: boolean },
+    opts?: { quiet?: boolean; pin?: boolean; repo?: string },
   ) => void;
 };
 
@@ -158,6 +158,7 @@ async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Pr
     addFileEditorPanel(savedTab.path, savedTab.name, {
       quiet: true,
       pin: savedTab.pinned,
+      repo: savedTab.repo,
     });
     // Seed a placeholder file state synchronously, carrying the restored
     // `markdownPreview` flag. This makes `openFiles.has(path)` true the moment
@@ -213,7 +214,7 @@ type FileEditorEffectsParams = {
   addFileEditorPanel: (
     path: string,
     name: string,
-    opts?: { quiet?: boolean; pin?: boolean },
+    opts?: { quiet?: boolean; pin?: boolean; repo?: string },
   ) => void;
   clearFileStates: () => void;
   removeFileState: (path: string) => void;
@@ -301,7 +302,7 @@ type FileEditorActionsParams = {
   addFileEditorPanel: (
     path: string,
     name: string,
-    opts?: { quiet?: boolean; pin?: boolean },
+    opts?: { quiet?: boolean; pin?: boolean; repo?: string },
   ) => void;
   promotePreviewToPinned: (type: "file-editor") => void;
   setSavingFiles: React.Dispatch<React.SetStateAction<Set<string>>>;
@@ -324,21 +325,17 @@ function useFileEditorActions({
       if (!client || !currentSessionId) return;
       const files = getOpenFiles();
       if (files.has(filePath)) {
-        addFileEditorPanel(filePath, filePath.split("/").pop() || filePath);
+        const tabName = filePath.split("/").pop() || filePath;
+        addFileEditorPanel(filePath, tabName, { repo: files.get(filePath)?.repo });
         return;
       }
       try {
-        const response: FileContentResponse = await requestFileContent(
-          client,
-          currentSessionId,
-          filePath,
-          repo,
-        );
+        const response = await requestFileContent(client, currentSessionId, filePath, repo);
         const state = await buildFileEditorState(filePath, response, repo);
         // Create the panel BEFORE setting file state. The openFiles subscription
         // triggers tab persistence — it needs the dockview panel to already exist
         // so buildPersistedTabs can detect whether the file is preview or pinned.
-        addFileEditorPanel(filePath, state.name);
+        addFileEditorPanel(filePath, state.name, { repo });
         setFileState(filePath, state);
       } catch (error) {
         toast({
@@ -386,7 +383,8 @@ function useFileEditorActions({
       const files = getOpenFiles();
       if (files.has(filePath)) {
         updateFileState(filePath, { markdownPreview: true });
-        addFileEditorPanel(filePath, filePath.split("/").pop() || filePath);
+        const name = filePath.split("/").pop() || filePath;
+        addFileEditorPanel(filePath, name, { repo: files.get(filePath)?.repo });
         return;
       }
       try {
@@ -397,7 +395,7 @@ function useFileEditorActions({
           repo,
         );
         const state = await buildFileEditorState(filePath, response, repo);
-        addFileEditorPanel(filePath, state.name);
+        addFileEditorPanel(filePath, state.name, { repo });
         setFileState(filePath, { ...state, markdownPreview: true });
       } catch (error) {
         toast({
