@@ -214,14 +214,14 @@ func TestClient_FirstBootMissesGracefully(t *testing.T) {
 	// configured URL. Block that refresh at the server so it can't
 	// populate the cache before the lookup reads it — otherwise the
 	// "miss" we're asserting races a fast background fetch and flakes
-	// into a hit. The handler unblocks at cleanup so nothing leaks.
-	release := make(chan struct{})
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		<-release
-		_, _ = w.Write([]byte(sampleDataset))
+	// into a hit. The request exits when the lookup context is canceled,
+	// before TempDir cleanup can race a cache write.
+	ctx, cancel := context.WithCancel(context.Background())
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
 	}))
 	t.Cleanup(func() {
-		close(release)
+		cancel()
 		srv.Close()
 	})
 	c := modelsdev.New(modelsdev.Config{
@@ -232,7 +232,7 @@ func TestClient_FirstBootMissesGracefully(t *testing.T) {
 	}, logger.Default())
 
 	// No Refresh — simulating cold boot before any HTTP fetch.
-	if _, ok := c.LookupForModel(context.Background(), "claude-opus-4-7"); ok {
+	if _, ok := c.LookupForModel(ctx, "claude-opus-4-7"); ok {
 		t.Error("expected miss on cold-boot lookup")
 	}
 }
