@@ -17,6 +17,9 @@ export type SubagentTaskPayload = {
   is_async?: boolean;
   output_file?: string;
   can_read_output_file?: boolean;
+  // Final summary returned by silent subagents (Auggie) that don't stream
+  // intermediate tool calls. Rendered inline when there are no child messages.
+  result_text?: string;
 };
 
 export type GenericPayload = {

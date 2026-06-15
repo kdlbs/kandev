@@ -442,3 +442,118 @@ func TestEnrichSubagentResult_Cursor(t *testing.T) {
 		t.Errorf("DurationMs = %d", payload.SubagentTask().DurationMs)
 	}
 }
+
+// --- Auggie subagent detection ---
+
+func TestAuggieSubagentTitleFields(t *testing.T) {
+	for _, tc := range []struct {
+		name, title, wantType, wantDesc string
+		wantOK                          bool
+	}{
+		{"simple", "sub-agent-explore: find the bug", "explore", "find the bug", true},
+		{"hyphenated type", "sub-agent-code-review: look at PR 12", "code-review", "look at PR 12", true},
+		{"truncated description", "sub-agent-explore: a very long thing (und...", "explore", "a very long thing (und...", true},
+		{"no description", "sub-agent-qa:", "qa", "", true},
+		{"missing colon", "sub-agent-explore find the bug", "", "", false},
+		{"missing prefix", "explore: find the bug", "", "", false},
+		{"empty type after prefix", "sub-agent-: foo", "", "", false},
+		{"empty title", "", "", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gotType, gotDesc, gotOK := auggieSubagentTitleFields(tc.title)
+			if gotOK != tc.wantOK || gotType != tc.wantType || gotDesc != tc.wantDesc {
+				t.Errorf("got (%q,%q,%v) want (%q,%q,%v)", gotType, gotDesc, gotOK, tc.wantType, tc.wantDesc, tc.wantOK)
+			}
+		})
+	}
+}
+
+func TestRecognizeSubagent_AuggieTitleNoInput(t *testing.T) {
+	desc, prompt, st, ok := recognizeSubagent(nil, "sub-agent-explore: find the bug", nil)
+	if !ok {
+		t.Fatal("expected Auggie title to be recognized as subagent")
+	}
+	if st != "explore" {
+		t.Errorf("SubagentType = %q, want explore", st)
+	}
+	if desc != "find the bug" {
+		t.Errorf("Description = %q, want find the bug", desc)
+	}
+	if prompt != "" {
+		t.Errorf("Prompt = %q, want empty (Auggie does not provide it)", prompt)
+	}
+}
+
+func TestRecognizeSubagent_AuggieDoesNotOverrideRawInput(t *testing.T) {
+	// Hypothetical: title looks Auggie-shaped but rawInput carries fuller
+	// fields (e.g. a future agent that adopts both). rawInput must win for
+	// fields it provides; the title fills only the gaps.
+	rawInput := map[string]any{"description": "from rawInput", "subagent_type": "research"}
+	desc, _, st, ok := recognizeSubagent(nil, "sub-agent-explore: from title", rawInput)
+	if !ok {
+		t.Fatal("expected recognition")
+	}
+	if desc != "from rawInput" {
+		t.Errorf("Description = %q, want from rawInput (rawInput wins)", desc)
+	}
+	if st != "research" {
+		t.Errorf("SubagentType = %q, want research (rawInput wins)", st)
+	}
+}
+
+func TestExtractSubagentResult_AuggieOutput(t *testing.T) {
+	rawOutput := map[string]any{"output": "Subagent found the issue: foo.go:42 is wrong."}
+	res, ok := extractSubagentResult(nil, rawOutput)
+	if !ok {
+		t.Fatal("expected Auggie rawOutput.output to be extracted")
+	}
+	if res.ResultText != "Subagent found the issue: foo.go:42 is wrong." {
+		t.Errorf("ResultText = %q", res.ResultText)
+	}
+}
+
+func TestExtractSubagentResult_AuggieEmptyOutput(t *testing.T) {
+	if _, ok := extractSubagentResult(nil, map[string]any{"output": ""}); ok {
+		t.Error("empty output must not register as a result")
+	}
+	if _, ok := extractSubagentResult(nil, map[string]any{"output": 42}); ok {
+		t.Error("non-string output must not register as a result")
+	}
+}
+
+func TestEnrichSubagentResult_Auggie(t *testing.T) {
+	n := NewNormalizer("")
+	payload := streams.NewSubagentTask("find the bug", "", "explore")
+	n.EnrichSubagentResult(payload, nil, map[string]any{"output": "Done. Bug is at foo.go:42."})
+	sa := payload.SubagentTask()
+	if sa.ResultText != "Done. Bug is at foo.go:42." {
+		t.Errorf("ResultText = %q", sa.ResultText)
+	}
+	// JSON must surface result_text for the frontend.
+	out, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(out), `"result_text":"Done. Bug is at foo.go:42."`) {
+		t.Errorf("expected result_text in JSON, got %s", out)
+	}
+}
+
+func TestNormalizeToolCall_AuggieSubagent(t *testing.T) {
+	n := NewNormalizer("")
+	args := map[string]any{
+		"kind":  "other",
+		"title": "sub-agent-explore: investigate flaky test",
+	}
+	payload := n.NormalizeToolCall("other", args)
+	if payload.Kind() != streams.ToolKindSubagentTask {
+		t.Fatalf("Kind = %q, want subagent_task", payload.Kind())
+	}
+	sa := payload.SubagentTask()
+	if sa.SubagentType != "explore" {
+		t.Errorf("SubagentType = %q, want explore", sa.SubagentType)
+	}
+	if sa.Description != "investigate flaky test" {
+		t.Errorf("Description = %q, want investigate flaky test", sa.Description)
+	}
+}
