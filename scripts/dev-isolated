@@ -281,10 +281,10 @@ if [[ "$healthy" -ne 1 ]]; then
   exit 1
 fi
 
-# --- Optionally launch the web frontend (Next.js dev) ---
+# --- Optionally launch the web frontend (Vite dev) ---
 WEB_STARTED=0
 if [[ "$WANT_WEB" -eq 1 ]]; then
-  echo "dev-isolated: starting web (next dev) on :$WEB_PORT ..."
+  echo "dev-isolated: starting web (vite dev) on :$WEB_PORT ..."
   env \
     NEXT_PUBLIC_KANDEV_API_PORT="$BACKEND_PORT" \
     KANDEV_API_BASE_URL="$BACKEND_URL" \

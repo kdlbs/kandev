@@ -5,7 +5,7 @@ name: release
 #
 # Flow (one click → everything below):
 #   1. prepare           — bump version, regen CHANGELOG, open + merge release PR, push tag vX.Y.Z
-#   2. build-web         — build Next.js standalone bundle (shared across arches)
+#   2. build-web         — build Vite SPA bundle (shared across arches)
 #   3. build-cli         — build + esbuild-bundle CLI (shared across arches)
 #   4. build-bundles     — assemble bin/ + web/ + cli/ tarballs for 5 platforms
 #   5. docker-{amd64,arm64} — native per-arch image builds (no QEMU), consuming
@@ -251,7 +251,7 @@ jobs:
           echo "DRY RUN: CHANGELOG.md regenerated (in-runner only)."
 
   build-web:
-    name: Build web standalone
+    name: Build web SPA
     needs: prepare
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
@@ -269,7 +269,7 @@ jobs:
           cache-dependency-path: apps/pnpm-lock.yaml
       - name: Install dependencies
         run: pnpm -C apps install --frozen-lockfile
-      - name: Build web (standalone)
+      - name: Build web (Vite)
         env:
           KANDEV_VERSION: ${{ needs.prepare.outputs.tag }}
         run: pnpm -C apps --filter @kandev/web build

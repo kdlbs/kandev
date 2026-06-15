@@ -32,8 +32,8 @@ Examples:
   kandev --debug
 
 Options:
-  dev              Use local repo for dev (make dev + next dev) if available.
-  start            Use local production build (make build + next start).
+  dev              Use local repo for dev (Go backend + Vite dev server).
+  start            Use local production build (Go backend serves Vite dist).
   run              Use installed runtime bundle (default).
   service          Manage kandev as an OS service (systemd / launchd).
                    Run 'kandev service --help' for details.
@@ -49,8 +49,8 @@ Options:
 
 Advanced:
   --backend-port         Same as --port.
-  --web-internal-port    Override the internal Next.js port. The Go backend
-                         reverse-proxies to it; users hit the backend port.
+  --web-internal-port    Override the internal dev web port. The Go backend
+                         reverse-proxies to it in dev; start/run serve from Go.
                          Also reads KANDEV_WEB_PORT.
   --web-port             Deprecated alias for --web-internal-port.
   --runtime-version <tag>  Download and use a specific release tag instead of

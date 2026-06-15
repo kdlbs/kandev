@@ -12,7 +12,7 @@ flowchart TB
 
     run --> resolve["Resolve installed runtime"]
     dev --> makedev["make dev"]
-    start --> binary["Local binary + next start"]
+    start --> binary["Local binary + Vite dist"]
 
     resolve --> envvar["KANDEV_BUNDLE_DIR<br/>(Homebrew, tests)"]
     resolve --> npmpkg["@kdlbs/runtime-{platform}<br/>(npm/npx)"]
@@ -26,7 +26,7 @@ flowchart TB
 
     subgraph supervisor["Process Supervisor"]
         direction LR
-        s1["Manages backend + web processes"]
+        s1["Manages backend process"]
         s2["Handles graceful shutdown"]
         s3["Forwards signals"]
     end
@@ -34,7 +34,7 @@ flowchart TB
 
 ## Overview
 
-The Kandev CLI (`kandev`) is the primary way to run the Kandev application. It launches the backend and web processes from an installed runtime bundle and provides a unified interface for end users and developers.
+The Kandev CLI (`kandev`) is the primary way to run the Kandev application. It launches the backend from an installed runtime bundle; the backend serves the web assets, API, and WebSocket gateway.
 
 ## Installation
 

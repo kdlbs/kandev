@@ -1,6 +1,6 @@
 # Kandev Web — E2E Test Suite
 
-Playwright-based end-to-end tests. Each Playwright worker spawns its own real Go backend (no mocks of internal services) on isolated ports and a real Next.js standalone frontend, then drives a real Chromium against them.
+Playwright-based end-to-end tests. Each Playwright worker spawns its own real Go backend (no mocks of internal services) on isolated ports; that backend serves the Vite SPA assets and boot data while Playwright drives a real Chromium against it.
 
 ## Project layout
 
@@ -11,7 +11,7 @@ Playwright-based end-to-end tests. Each Playwright worker spawns its own real Go
 | `helpers/`             | Reusable building blocks for specs (`api-client.ts`, `docker.ts`, `ssh.ts`, `git-helper.ts`, `ws-capture.ts`, …).                            |
 | `pages/`               | Page Objects (one class per top-level UI surface — `SessionPage`, `KanbanPage`, `JiraSettingsPage`, `SSHSettingsPage`, …).                   |
 | `playwright.config.ts` | Project definitions, timeouts, sharding config.                                                                                              |
-| `global-setup.ts`      | Pre-flight checks for required binaries (kandev, mock-agent, standalone next build).                                                         |
+| `global-setup.ts`      | Pre-flight checks for required binaries (kandev, mock-agent) and the Vite web build.                                                         |
 
 ## Playwright projects
 
@@ -88,7 +88,7 @@ pnpm e2e:docker                                # force the docker CI image (full
 pnpm e2e:clean                                 # remove build/test artifacts, incl. root-owned ones from prior docker runs
 ```
 
-Why a script instead of raw `docker run`: in docker mode it builds the CGO/`fts5` backend on the **host** and runs it in the runtime image — a host glibc that's the same or older than the image's (the usual case; the image tracks recent Ubuntu) is forward-compatible, so no build image is needed. The runner smoke-tests the binary in the image first and only falls back to the build image (`KANDEV_CI_BUILD_IMAGE`, default `…/kandev-ci:build-latest`) if your host glibc is _newer_. It also builds the FE standalone on the host, pre-creates the standalone symlinks as **relative** links (so in-container `global-setup` doesn't recreate them as root), points Playwright output at a container-local dir, and cleans up. Run `clean` if a previous bare `docker run` left root-owned files you can't delete.
+Why a script instead of raw `docker run`: in docker mode it builds the CGO/`fts5` backend on the **host** and runs it in the runtime image — a host glibc that's the same or older than the image's (the usual case; the image tracks recent Ubuntu) is forward-compatible, so no build image is needed. The runner smoke-tests the binary in the image first and only falls back to the build image (`KANDEV_CI_BUILD_IMAGE`, default `…/kandev-ci:build-latest`) if your host glibc is _newer_. It also builds the Vite web assets on the host, points Playwright output at a container-local dir, and cleans up. Run `clean` if a previous bare `docker run` left root-owned files you can't delete.
 
 > **Apple Silicon:** the docker path runs the amd64 CI image. Under Docker Desktop's default QEMU emulation the amd64 Go toolchain segfaults (`SIGSEGV` in `modindex.dirHash`) during backend build. Use Colima with Rosetta instead: `colima start --vm-type=vz --vz-rosetta`. QEMU is not viable for the Go build; Rosetta is required for local amd64 E2E repro on arm64.
 

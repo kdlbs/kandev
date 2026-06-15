@@ -14,24 +14,8 @@ export default function globalSetup() {
     }
   }
 
-  const standaloneServer = path.join(WEB_DIR, ".next/standalone/web/server.js");
-  if (!fs.existsSync(standaloneServer)) {
-    throw new Error(
-      `Next.js standalone build not found: ${standaloneServer}\nRun "make build-web" first.`,
-    );
-  }
-
-  // Standalone builds don't include static assets or public dir.
-  // Symlink them so the standalone server can serve them.
-  const staticSource = path.join(WEB_DIR, ".next/static");
-  const staticTarget = path.join(WEB_DIR, ".next/standalone/web/.next/static");
-  if (fs.existsSync(staticSource) && !fs.existsSync(staticTarget)) {
-    fs.symlinkSync(staticSource, staticTarget, "dir");
-  }
-
-  const publicSource = path.join(WEB_DIR, "public");
-  const publicTarget = path.join(WEB_DIR, ".next/standalone/web/public");
-  if (fs.existsSync(publicSource) && !fs.existsSync(publicTarget)) {
-    fs.symlinkSync(publicSource, publicTarget, "dir");
+  const spaIndex = path.join(WEB_DIR, "dist", "index.html");
+  if (!fs.existsSync(spaIndex)) {
+    throw new Error(`Vite web build not found: ${spaIndex}\nRun "make build-web" first.`);
   }
 }

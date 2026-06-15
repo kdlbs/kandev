@@ -10,13 +10,12 @@
 #     image — a host glibc that's the same or older than the image's (the usual
 #     case) is forward-compatible, so no build image is needed. It smoke-tests
 #     the binary in the image first and only falls back to the BUILD image
-#     (KANDEV_CI_BUILD_IMAGE) if the host glibc is newer. FE standalone builds
-#     on the host (pure JS at runtime).
+#     (KANDEV_CI_BUILD_IMAGE) if the host glibc is newer. FE Vite builds
+#     on the host and are served by the Go backend.
 #   • Runs N shards concurrently (--shards N): N isolated containers in docker
 #     mode, or N host processes with distinct E2E_PORT_OFFSET + output dirs.
-#   • Never leaves root-owned junk in the repo: pre-creates the standalone
-#     symlinks host-side (so in-container global-setup doesn't create them as
-#     root) and points Playwright output at a container-local dir. `clean`
+#   • Never leaves root-owned junk in the repo: points Playwright output at a
+#     container-local dir. `clean`
 #     removes any pre-existing root-owned artifacts via a throwaway container.
 #
 # Usage:
@@ -60,37 +59,18 @@ resolve_runtime_image() {
 # --- clean: remove build/test artifacts, including root-owned ones from prior
 # docker runs (host user can't rm root-owned files, so shell out to a container).
 clean_artifacts() {
-  log "cleaning e2e/test-results, blob-report, standalone symlinks, and /tmp shard logs"
+  log "cleaning e2e/test-results, blob-report, and /tmp shard logs"
   rm -rf "$WEB_DIR"/e2e/test-results* "$WEB_DIR"/e2e/blob-report 2>/dev/null
-  rm -f "$WEB_DIR"/.next/standalone/web/.next/static "$WEB_DIR"/.next/standalone/web/public 2>/dev/null
   rm -f /tmp/e2e-host-shard-*.log /tmp/e2e-docker-shard-*.log 2>/dev/null
   if docker_up; then
     docker run --rm -v "$WEB_DIR":/web alpine sh -c \
-      'rm -rf /web/e2e/test-results* /web/e2e/blob-report; rm -f /web/.next/standalone/web/.next/static /web/.next/standalone/web/public' \
+      'rm -rf /web/e2e/test-results* /web/e2e/blob-report' \
       2>/dev/null || true
   fi
 }
 
-# Pre-create the standalone symlinks host-side so in-container global-setup
-# finds them and skips creating them (which would make them root-owned).
-# Use RELATIVE symlinks so they resolve both on the host and at the
-# container's /work mount — an absolute host path is broken in-container, which
-# makes global-setup's existsSync() return false and then EEXIST on recreate.
-# Use python3 to compute the relative path portably (ln -r is GNU-only).
-prelink_standalone() {
-  command -v python3 >/dev/null 2>&1 || die "python3 is required for prelink_standalone"
-  local sa="$WEB_DIR/.next/standalone/web"
-  [[ -d "$sa" ]] || return 0
-  mkdir -p "$sa/.next"
-  local rel_static rel_public
-  rel_static=$(python3 -c "import os,sys; print(os.path.relpath(sys.argv[1],sys.argv[2]))" "$WEB_DIR/.next/static" "$sa/.next")
-  rel_public=$(python3 -c "import os,sys; print(os.path.relpath(sys.argv[1],sys.argv[2]))" "$WEB_DIR/public" "$sa")
-  [[ -e "$sa/.next/static" ]] || ln -sn "$rel_static" "$sa/.next/static" 2>/dev/null || true
-  [[ -e "$sa/public" ]]       || ln -sn "$rel_public" "$sa/public"       2>/dev/null || true
-}
-
 build_fe() {
-  log "building FE standalone (NEXT_PUBLIC_KANDEV_E2E_MOCK=true)"
+  log "building Vite web assets"
   ( cd "$REPO_ROOT/apps" && NEXT_PUBLIC_KANDEV_E2E_MOCK=true pnpm --filter @kandev/web build ) \
     || die "FE build failed"
 }
@@ -178,7 +158,6 @@ STRICT_ENV=()
 # ---------------------------------------------------------------------------
 run_host() {
   [[ "$DO_BUILD" == 1 ]] && { build_backend_host; build_fe; }
-  prelink_standalone
   local base_args=(playwright test --config e2e/playwright.config.ts --project="$PROJECT")
   if [[ "$SHARDS" -le 1 ]]; then
     ( cd "$WEB_DIR" && env ${STRICT_ENV[@]+"${STRICT_ENV[@]}"} pnpm exec "${base_args[@]}" ${PW_ARGS[@]+"${PW_ARGS[@]}"} )
@@ -209,7 +188,6 @@ run_docker() {
   log "runtime image: $img"
   clean_artifacts
   [[ "$DO_BUILD" == 1 ]] && { build_backend_for_docker "$img"; build_fe; }
-  prelink_standalone
 
   local strict_flag=()
   [[ "$STRICT" == 1 ]] && strict_flag=(-e KANDEV_E2E_WS_ASSERT=1)

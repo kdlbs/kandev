@@ -1,6 +1,6 @@
 # Web E2E Tests
 
-Browser-based end-to-end tests that exercise the full stack: Next.js frontend, Go backend, and mock agent. Tests run in parallel with complete isolation — each Playwright worker gets its own backend process, frontend process, database, and temp directory.
+Browser-based end-to-end tests that exercise the full stack: Go-served Vite SPA, Go backend, and mock agent. Tests run in parallel with complete isolation — each Playwright worker gets its own backend process, database, and temp directory.
 
 **Location:** `apps/web/e2e/`
 
@@ -11,8 +11,7 @@ Browser-based end-to-end tests that exercise the full stack: Next.js frontend, G
 │  Worker 0                         Worker 1                │
 │  ┌──────────────────────┐        ┌──────────────────────┐│
 │  │ Backend  :18080      │        │ Backend  :18081      ││
-│  │ Frontend :13000      │        │ Frontend :13001      ││
-│  │ SSR → localhost:18080│        │ SSR → localhost:18081││
+│  │ Web UI   :18080      │        │ Web UI   :18081      ││
 │  │ HOME=/tmp/e2e-0      │        │ HOME=/tmp/e2e-1      ││
 │  │ own SQLite DB        │        │ own SQLite DB        ││
 │  │ mock-agent only      │        │ mock-agent only      ││
@@ -22,8 +21,8 @@ Browser-based end-to-end tests that exercise the full stack: Next.js frontend, G
 ```
 
 - **One backend per worker** — port `18080 + workerIndex`, isolated temp HOME, own SQLite DB
-- **One frontend per worker** — port `13000 + workerIndex`, SSR routed to that worker's backend via `KANDEV_API_BASE_URL`
-- **Shared `.next/` build** — all frontend processes serve from the same pre-built output (read-only)
+- **Web UI served by backend** — each worker's backend serves Vite `dist` and boot data on the same port as the API
+- **Shared `dist/` build** — all workers serve from the same pre-built Vite output (read-only)
 - **Mock agent** — deterministic responses, no API keys needed
 - **Mock GitHub client** — reports as authenticated, returns configurable data via REST API
 - **No external dependencies** — no Docker, no GitHub tokens, no real git credentials
@@ -36,7 +35,7 @@ Build the backend binaries and web app before running tests:
 make build-backend build-web
 ```
 
-This produces `apps/backend/bin/kandev`, `apps/backend/bin/mock-agent`, and `apps/web/.next/`. The global setup script verifies all exist.
+This produces `apps/backend/bin/kandev`, `apps/backend/bin/mock-agent`, and `apps/web/dist/`. The global setup script verifies all exist.
 
 ## Running Tests
 
@@ -93,7 +92,7 @@ apps/web/e2e/
 
 ### Backend + frontend fixture (`fixtures/backend.ts`)
 
-Each Playwright worker spawns an isolated `kandev` backend and a dedicated `next start` frontend:
+Each Playwright worker spawns an isolated `kandev` backend that also serves the SPA:
 
 **Backend:**
 1. Creates a temp directory as `HOME` with its own `.gitconfig`, data dir, and SQLite DB
@@ -109,12 +108,12 @@ Each Playwright worker spawns an isolated `kandev` backend and a dedicated `next
 3. Spawns `apps/backend/bin/kandev` and waits for `/health` to return 200
 
 **Frontend:**
-1. Spawns `npx next start --port {13000 + workerIndex}` from `apps/web/`
-2. Sets `KANDEV_API_BASE_URL` to the worker's backend URL so SSR routes correctly
-3. Waits for the frontend to become healthy
-4. All `next start` processes share the same `.next/` build output (read-only)
+1. Sets `KANDEV_WEB_DIST_DIR` to `apps/web/dist`
+2. Uses the worker backend URL as the browser URL
+3. The backend serves `index.html`, static assets, and injected boot payloads
+4. All workers share the same `dist/` build output (read-only)
 
-**Teardown:** sends SIGTERM to frontend then backend, falls back to SIGKILL after 5s, cleans up temp dir.
+**Teardown:** sends SIGTERM to the backend process group, falls back to SIGKILL after 7s, cleans up temp dir.
 
 ### Test base (`fixtures/test-base.ts`)
 
@@ -288,7 +287,7 @@ The GitHub Actions workflow (`.github/workflows/e2e-tests.yml`) runs on pushes a
 
 **Tests fail with "Backend did not become healthy" or "Service did not become healthy"**
 - Ensure `make build-backend build-web` completed successfully
-- Check that `apps/backend/bin/kandev`, `apps/backend/bin/mock-agent`, and `apps/web/.next/` exist
+- Check that `apps/backend/bin/kandev`, `apps/backend/bin/mock-agent`, and `apps/web/dist/` exist
 - Run with `E2E_DEBUG=1` to see backend and frontend stderr
 
 **Tests fail with "Cannot find module" or import errors**

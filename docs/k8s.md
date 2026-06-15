@@ -80,7 +80,7 @@ kubectl port-forward svc/kandev 38429:38429
 # Open http://localhost:38429
 ```
 
-**Ingress**: Edit `k8s/ingress.yaml` to set your domain, then apply. The ingress routes all traffic to the backend on port 38429 (the Go backend reverse-proxies the Next.js frontend internally).
+**Ingress**: Edit `k8s/ingress.yaml` to set your domain, then apply. The ingress routes all traffic to the backend on port 38429; the Go backend serves API, WebSocket, and SPA traffic on that port.
 
 ### Custom Domain / Reverse Proxy
 

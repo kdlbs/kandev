@@ -38,7 +38,7 @@ Without these, `tsc` fails with missing module errors for `@/generated/release-n
 
 ## Running dev mode
 
-`make dev` from the repo root builds the backend and starts both the Go backend (port 38429) and Next.js frontend (port 37429). The CLI launcher sets `KANDEV_DEBUG_DEV_MODE=true` which activates the `dev` profile from `profiles.yaml`, enabling mock agent and other dev conveniences. No external services (database, message queue, Docker) are needed — SQLite is embedded and the event bus runs in-memory.
+`make dev` from the repo root builds the backend and starts both the Go backend (port 38429) and Vite frontend (port 37429). The CLI launcher sets `KANDEV_DEBUG_DEV_MODE=true` which activates the `dev` profile from `profiles.yaml`, enabling mock agent and other dev conveniences. No external services (database, message queue, Docker) are needed — SQLite is embedded and the event bus runs in-memory.
 
 ## Key commands
 

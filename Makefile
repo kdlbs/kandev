@@ -480,7 +480,7 @@ clean-backend:
 .PHONY: clean-web
 clean-web:
 	@printf "$(CYAN)Cleaning web artifacts...$(RESET)\n"
-	@$(RMDIR) $(WEB_DIR)/.next $(APPS_DIR)/node_modules
+	@$(RMDIR) $(WEB_DIR)/dist $(WEB_DIR)/.next $(APPS_DIR)/node_modules
 	@$(RMDIR) $(APPS_DIR)/packages/*/node_modules
 
 .PHONY: clean-db

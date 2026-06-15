@@ -7,9 +7,7 @@ import path from "node:path";
 const BACKEND_DIR = path.resolve(__dirname, "../../../../apps/backend");
 const WEB_DIR = path.resolve(__dirname, "../..");
 const KANDEV_BIN = path.join(BACKEND_DIR, "bin", "kandev");
-const STANDALONE_SERVER = path.join(WEB_DIR, ".next/standalone/web/server.js");
-const STANDALONE_STATIC_DIR = path.join(WEB_DIR, ".next/standalone/web/.next/static");
-const SOURCE_STATIC_DIR = path.join(WEB_DIR, ".next/static");
+const WEB_DIST_DIR = path.join(WEB_DIR, "dist");
 // Auto-derive from PID if not explicitly set — prevents port clashes between concurrent test runs
 // Modulo 30 keeps agentctl ports under 65535 (30001 + 30*1000 = 60001 max)
 const rawPortOffset = process.env.E2E_PORT_OFFSET;
@@ -18,7 +16,6 @@ if (!Number.isInteger(E2E_PORT_OFFSET) || E2E_PORT_OFFSET < 0 || E2E_PORT_OFFSET
   throw new Error(`E2E_PORT_OFFSET must be an integer 0-29, got: ${rawPortOffset}`);
 }
 const BACKEND_BASE_PORT = 18080 + E2E_PORT_OFFSET;
-const FRONTEND_BASE_PORT = 13000 + E2E_PORT_OFFSET;
 const HEALTH_TIMEOUT_MS = 30_000;
 const HEALTH_POLL_MS = 250;
 
@@ -84,20 +81,6 @@ async function waitForHealth(url: string, timeoutMs: number, proc?: ChildProcess
   } finally {
     proc?.off("exit", onExit);
   }
-}
-
-function killProcess(proc: ChildProcess): Promise<void> {
-  return new Promise<void>((resolve) => {
-    proc.kill("SIGTERM");
-    const timeout = setTimeout(() => {
-      proc.kill("SIGKILL");
-      resolve();
-    }, 5_000);
-    proc.on("exit", () => {
-      clearTimeout(timeout);
-      resolve();
-    });
-  });
 }
 
 /**
@@ -201,15 +184,16 @@ function spawnBackendProcess(
 
 /**
  * Worker-scoped fixture that spawns an isolated backend process and
- * a dedicated Next.js frontend. Each Playwright worker gets its own
+ * a Go-served SPA frontend. Each Playwright worker gets its own
  * backend on a unique port with an isolated HOME, database, and data
- * directory, plus its own frontend with SSR routed to that backend.
+ * directory. Browser traffic hits that same backend, which serves the
+ * Vite assets and route-aware boot payload.
  */
 export const backendFixture = base.extend<object, { backend: BackendContext }>({
   backend: [
     async ({}, use, workerInfo) => {
       const backendPort = BACKEND_BASE_PORT + workerInfo.workerIndex;
-      const frontendPort = FRONTEND_BASE_PORT + workerInfo.workerIndex;
+      const frontendPort = backendPort;
       const tmpDir = fs.mkdtempSync(
         path.join(os.tmpdir(), `kandev-e2e-${workerInfo.workerIndex}-`),
       );
@@ -294,6 +278,7 @@ exec git "$@"
         HOME: tmpDir,
         KANDEV_HOME_DIR: homeDir,
         KANDEV_SERVER_PORT: String(backendPort),
+        KANDEV_WEB_DIST_DIR: WEB_DIST_DIR,
         KANDEV_DATABASE_PATH: dbPath,
         // Profile selector. KANDEV_E2E_MOCK=true tells the backend to
         // apply the `e2e:` profile from profiles.yaml at startup —
@@ -347,39 +332,7 @@ exec git "$@"
       // --- Spawn backend ---
       let backendProc = spawnBackendProcess(backendEnv, debug, backendPort);
       await waitForHealth(`${baseUrl}/health`, HEALTH_TIMEOUT_MS);
-
-      // Ensure Next.js static assets are available to the standalone server.
-      // The CLI start command does this via symlink; replicate it here.
-      // Use try/catch to handle concurrent workers racing to create the same symlink.
-      if (fs.existsSync(SOURCE_STATIC_DIR) && !fs.existsSync(STANDALONE_STATIC_DIR)) {
-        fs.mkdirSync(path.dirname(STANDALONE_STATIC_DIR), { recursive: true });
-        try {
-          fs.symlinkSync(SOURCE_STATIC_DIR, STANDALONE_STATIC_DIR, "junction");
-        } catch (err: unknown) {
-          if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-        }
-      }
-
-      // --- Spawn frontend (Next.js standalone server) ---
-      const frontendProc: ChildProcess = spawn("node", [STANDALONE_SERVER], {
-        cwd: WEB_DIR,
-        env: {
-          ...(process.env as unknown as Record<string, string>),
-          KANDEV_API_BASE_URL: baseUrl,
-          NEXT_PUBLIC_KANDEV_API_PORT: String(backendPort),
-          PORT: String(frontendPort),
-          HOSTNAME: "localhost",
-          NODE_ENV: "production",
-        } as unknown as NodeJS.ProcessEnv,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-
-      frontendProc.stderr?.on("data", (chunk: Buffer) => {
-        if (debug) process.stderr.write(`[frontend:${frontendPort}] ${chunk.toString()}`);
-      });
-
-      const frontendUrl = `http://localhost:${frontendPort}`;
-      await waitForHealth(frontendUrl, HEALTH_TIMEOUT_MS);
+      const frontendUrl = baseUrl;
 
       /**
        * Kill the backend process group and respawn with the same config.
@@ -411,8 +364,7 @@ exec git "$@"
       try {
         await use({ port: backendPort, baseUrl, frontendPort, frontendUrl, tmpDir, restart });
       } finally {
-        // Shutdown frontend first (simple process), then backend (process group)
-        await killProcess(frontendProc);
+        // Shutdown the backend process group.
         await killProcessGroup(backendProc);
 
         // Cleanup temp directory — ignore errors (backend may still hold files briefly)

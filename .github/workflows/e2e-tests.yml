@@ -84,16 +84,15 @@ jobs:
           path: apps/backend/bin/
           retention-days: 1
 
-      # Tar the .next directory to preserve pnpm symlinks in the standalone build.
-      # upload-artifact dereferences symlinks which breaks the Node.js module resolution.
+      # Tar the Vite dist directory so shards can reuse the same static web build.
       - name: Package web build
-        run: tar -cf apps/web/next-build.tar -C apps/web .next
+        run: tar -cf apps/web/web-dist.tar -C apps/web dist
 
       - name: Upload web build
         uses: actions/upload-artifact@v5
         with:
           name: e2e-web-build
-          path: apps/web/next-build.tar
+          path: apps/web/web-dist.tar
           retention-days: 1
 
   e2e:
@@ -122,15 +121,8 @@ jobs:
     defaults:
       run:
         shell: bash
-    # Node 18+'s `dns.lookup` defaults to `verbatim: true`, returning the OS
-    # resolver order. Inside this container `localhost` resolves to ::1 first,
-    # so `net.Server.listen({ host: "localhost" })` (used by Next.js standalone
-    # via $HOSTNAME) binds IPv6-only — and undici's `fetch("http://localhost…")`
-    # in the test runner only tries the first resolved address (IPv4), so the
-    # frontend health check times out and every spec fails. Forcing
-    # IPv4-first ordering aligns both the bind and the fetch and matches the
-    # effective default on the github-hosted ubuntu runner this workflow
-    # previously ran on.
+    # Keep localhost resolution deterministic for Node fetches used by the
+    # Playwright fixtures and backend readiness polling.
     env:
       NODE_OPTIONS: --dns-result-order=ipv4first
     strategy:
@@ -173,7 +165,7 @@ jobs:
 
       - name: Extract web build
         working-directory: apps/web
-        run: tar -xf next-build.tar && rm next-build.tar
+        run: tar -xf web-dist.tar && rm web-dist.tar
 
       # Pinned to chromium + mobile-chrome so the dedicated `e2e-containers`
       # job below owns the real-Docker project (which covers both the Docker
@@ -334,7 +326,7 @@ jobs:
 
       - name: Extract web build
         working-directory: apps/web
-        run: tar -xf next-build.tar && rm next-build.tar
+        run: tar -xf web-dist.tar && rm web-dist.tar
 
       - name: Run container-backed E2E tests shard ${{ matrix.shard }}/6 (Docker executor + SSH executor)
         working-directory: apps/web

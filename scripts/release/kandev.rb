@@ -6,7 +6,7 @@ class Kandev < Formula
   license "AGPL-3.0-only"
   version "__VERSION__"
 
-  # Node is required: the CLI launcher and Next.js standalone server both need it.
+  # Node is required for the CLI launcher.
   depends_on "node"
 
   on_macos do

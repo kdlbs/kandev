@@ -90,11 +90,10 @@ export function buildWebEnv(options: WebEnvOptions): NodeJS.ProcessEnv {
 
   const env: NodeJS.ProcessEnv = {
     ...process.env,
-    // Server-side: full localhost URL for SSR fetches (Next.js SSR → Go backend)
+    // Browser-facing dev server config. Production start/run do not spawn a
+    // web process; the Go backend serves the built SPA.
     KANDEV_API_BASE_URL: ports.backendUrl,
     PORT: String(ports.webPort),
-    // Ensure Next.js standalone server binds to 127.0.0.1 so localhost health checks work.
-    // Without this, HOSTNAME from the host environment can cause binding issues.
     HOSTNAME: "127.0.0.1",
   };
 
@@ -105,12 +104,10 @@ export function buildWebEnv(options: WebEnvOptions): NodeJS.ProcessEnv {
     // spread above and reintroduce the cross-origin URL problem.
     delete env.NEXT_PUBLIC_KANDEV_API_PORT;
   } else {
-    // Dev mode only: browser hits the web port directly, so the client needs to
-    // know the backend port for API calls. In production the Go backend
-    // reverse-proxies Next.js on a single port, so the client uses same-origin
-    // and this var must NOT be set — otherwise the client builds cross-origin
-    // URLs like `https://host:38429/...` that aren't reachable behind a
-    // reverse proxy / ingress / Cloudflare tunnel.
+    // Dev mode only: browser hits the Vite web port directly, so the client
+    // needs to know the backend port for API calls. In production the Go
+    // backend serves the SPA on the backend port, so the client uses
+    // same-origin and this var must NOT be set.
     env.NEXT_PUBLIC_KANDEV_API_PORT = String(ports.backendPort);
 
     // Auto-allow the host's own LAN / VPN addresses so a dev hitting the dev
