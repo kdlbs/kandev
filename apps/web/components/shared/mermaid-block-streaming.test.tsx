@@ -17,7 +17,7 @@ import { MermaidBlock } from "./mermaid-block";
 
 const mockToast = vi.fn();
 
-vi.mock("next-themes", () => ({
+vi.mock("@/components/theme/app-theme", () => ({
   useTheme: () => ({ resolvedTheme: "dark" }),
 }));
 

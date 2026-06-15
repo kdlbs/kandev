@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { notFound } from "@/lib/routing/server-navigation";
 import { cookies } from "next/headers";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateHydrator } from "@/components/state-hydrator";

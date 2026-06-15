@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
+import Link from "@/components/routing/app-link";
 import { IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { NewTaskDialog } from "@/app/office/components/new-task-dialog";

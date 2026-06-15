@@ -1,6 +1,6 @@
 "use client";
 
-import { usePathname } from "next/navigation";
+import { usePathname } from "@/lib/routing/client-router";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { PageTopbar } from "@/components/page-topbar";
 

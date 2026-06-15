@@ -17,7 +17,7 @@ kandev
 npx kandev@latest
 ```
 
-Either install path resolves a platform-matched runtime (Go backend, agentctl, Next.js standalone web), launches the backend + web, and opens your browser. Data (worktrees, SQLite DB) is stored in `~/.kandev` by default.
+Either install path resolves a platform-matched runtime (Go backend, agentctl, and static Vite web assets), launches the backend, and opens your browser. Data (worktrees, SQLite DB) is stored in `~/.kandev` by default.
 
 ## Version and Updates
 
@@ -71,7 +71,7 @@ See [docs/run-as-a-service.md](../../docs/run-as-a-service.md) for the full guid
 
 ## Requirements
 
-- Node.js (for `npx`)
+- Node.js (only for `npx` / npm-based installs and development tooling)
 - Git
 - Docker (optional - needed for container runtimes)
 

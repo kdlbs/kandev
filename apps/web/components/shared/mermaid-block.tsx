@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/components/theme/app-theme";
 import { IconZoomIn, IconZoomOut, IconCode } from "@tabler/icons-react";
 import {
   DEFAULT_SCALE,

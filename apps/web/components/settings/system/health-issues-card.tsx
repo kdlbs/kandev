@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/routing/client-router";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";

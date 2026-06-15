@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
+import Link from "@/components/routing/app-link";
 import { Button } from "@kandev/ui/button";
 import {
   DropdownMenu,

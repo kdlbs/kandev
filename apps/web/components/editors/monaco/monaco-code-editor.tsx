@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import Editor from "@monaco-editor/react";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/components/theme/app-theme";
 import { Button } from "@kandev/ui/button";
 import { IconMessagePlus } from "@tabler/icons-react";
 import { getMonacoLanguage } from "@/lib/editor/language-map";

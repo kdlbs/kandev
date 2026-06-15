@@ -1,6 +1,6 @@
 "use client";
 
-import { usePathname } from "next/navigation";
+import { usePathname } from "@/lib/routing/client-router";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 
 /**

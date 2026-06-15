@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect } from "react";
-import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import Link from "@/components/routing/app-link";
+import { usePathname, useRouter } from "@/lib/routing/client-router";
 import { IconPlus, IconRobot, IconSitemap } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";

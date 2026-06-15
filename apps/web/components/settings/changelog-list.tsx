@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "@/lib/routing/client-router";
 import ReactMarkdown from "react-markdown";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Badge } from "@kandev/ui/badge";

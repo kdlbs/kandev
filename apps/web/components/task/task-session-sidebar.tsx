@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, memo } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter } from "@/lib/routing/client-router";
 import { linkToTask } from "@/lib/links";
 import type { Repository, TaskSession, TaskSessionState, TaskState } from "@/lib/types/http";
 import type { TaskPR } from "@/lib/types/github";

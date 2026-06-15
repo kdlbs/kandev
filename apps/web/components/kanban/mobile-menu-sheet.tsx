@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/routing/client-router";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
 import { Button } from "@kandev/ui/button";
 import { Checkbox } from "@kandev/ui/checkbox";

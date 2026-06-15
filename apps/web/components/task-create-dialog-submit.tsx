@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, FormEvent } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/routing/client-router";
 import { updateTask } from "@/lib/api";
 import { useAppStore } from "@/components/state-provider";
 import { launchSession } from "@/lib/services/session-launch-service";

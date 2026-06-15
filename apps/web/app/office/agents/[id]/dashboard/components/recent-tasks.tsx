@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/routing/app-link";
 import { Badge } from "@kandev/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import type { AgentRecentTask } from "@/lib/api/domains/office-extended-api";

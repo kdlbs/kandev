@@ -43,6 +43,8 @@ export type BackendEnvOptions = {
   ports: PortConfig;
   /** Log level: debug, info, warn, error (default: info) */
   logLevel?: string;
+  /** Route browser pages through an external dev web server. Production serves the SPA from Go. */
+  webProxy?: boolean;
   /** Additional environment variables to merge */
   extra?: Record<string, string>;
 };
@@ -54,15 +56,19 @@ export type BackendEnvOptions = {
  * @returns Environment object for the backend process
  */
 export function buildBackendEnv(options: BackendEnvOptions): NodeJS.ProcessEnv {
-  const { ports, logLevel, extra } = options;
-  return {
+  const { ports, logLevel, webProxy = true, extra } = options;
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
     KANDEV_SERVER_PORT: String(ports.backendPort),
-    KANDEV_WEB_INTERNAL_URL: `http://localhost:${ports.webPort}`,
+    ...(webProxy ? { KANDEV_WEB_INTERNAL_URL: `http://localhost:${ports.webPort}` } : {}),
     KANDEV_AGENT_STANDALONE_PORT: String(ports.agentctlPort),
     ...(logLevel ? { KANDEV_LOG_LEVEL: logLevel } : {}),
     ...extra,
   };
+  if (!webProxy) {
+    delete env.KANDEV_WEB_INTERNAL_URL;
+  }
+  return env;
 }
 
 export type WebEnvOptions = {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import Link from "next/link";
+import Link from "@/components/routing/app-link";
 import { toast } from "sonner";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";

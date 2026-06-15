@@ -6,7 +6,7 @@ import type { FileDiffData } from "@/lib/diff/types";
 
 const fileDiffProps: Array<{ options?: { overflow?: string } }> = [];
 
-vi.mock("next-themes", () => ({
+vi.mock("@/components/theme/app-theme", () => ({
   useTheme: () => ({ resolvedTheme: "dark" }),
 }));
 

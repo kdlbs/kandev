@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect } from "react";
-import Link from "next/link";
+import Link from "@/components/routing/app-link";
 import {
   IconRobot,
   IconCircleDot,

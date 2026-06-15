@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import Link from "next/link";
-import { useParams } from "next/navigation";
+import Link from "@/components/routing/app-link";
+import { useParams } from "@/lib/routing/client-router";
 import { IconTrash } from "@tabler/icons-react";
 import { areCLIFlagsEqual } from "@/lib/cli-flags";
 import { areConfigOptionsEqual } from "@/lib/config-options";

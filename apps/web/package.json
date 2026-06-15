@@ -4,10 +4,11 @@
   "private": true,
   "scripts": {
     "predev": "node scripts/generate-release-notes.mjs && node scripts/generate-changelog.mjs",
-    "dev": "next dev --hostname 0.0.0.0",
+    "dev": "vite --host 0.0.0.0",
     "prebuild": "node scripts/generate-release-notes.mjs && node scripts/generate-changelog.mjs",
-    "build": "cross-env NODE_ENV=production next build",
-    "start": "cross-env NODE_ENV=production next start",
+    "build": "vite build",
+    "build:vite": "vite build",
+    "start": "vite preview --host 0.0.0.0",
     "lint": "eslint --max-warnings 0",
     "pretypecheck": "node scripts/generate-release-notes.mjs && node scripts/generate-changelog.mjs",
     "typecheck": "tsc --noEmit",
@@ -132,6 +133,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^6.0.2",
     "cross-env": "^7.0.3",
     "eslint": "^9",
     "eslint-config-next": "16.1.1",
@@ -141,6 +143,7 @@
     "tailwindcss": "^4",
     "tsx": "^4.21.0",
     "typescript": "^5",
+    "vite": "^8.0.16",
     "vitest": "^1.6.0"
   }
 }

@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
+import Link from "@/components/routing/app-link";
+import { usePathname } from "@/lib/routing/client-router";
 import type { Icon as TablerIcon } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";

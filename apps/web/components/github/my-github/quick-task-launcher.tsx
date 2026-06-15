@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/routing/client-router";
 import type { Icon } from "@tabler/icons-react";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { createTaskPR } from "@/lib/api/domains/github-api";

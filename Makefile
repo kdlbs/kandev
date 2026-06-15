@@ -1,5 +1,5 @@
 # Kandev Root Makefile
-# Orchestrates both backend (Go) and web app (Next.js)
+# Orchestrates both backend (Go) and web app (Vite/React)
 
 # Directories
 BACKEND_DIR := apps/backend
@@ -299,12 +299,12 @@ build-backend-quiet:
 .PHONY: build-web
 build-web:
 	@printf "$(CYAN)Building web app...$(RESET)\n"
-	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web build
+	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web build:vite
 
 .PHONY: build-web-quiet
 build-web-quiet:
 	@printf "  $(DIM)Web app$(RESET)\n"
-	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web build 2>&1 | grep -v "Warning:" | grep -v "parseLineType" | grep -v "^$$" || true
+	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web build:vite 2>&1 | grep -v "Warning:" | grep -v "parseLineType" | grep -v "^$$" || true
 
 #
 # Installation

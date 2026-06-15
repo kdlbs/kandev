@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/routing/client-router";
 import { toast } from "sonner";
 import {
   completeOnboarding,

@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import Link from "@/components/routing/app-link";
+import { useRouter } from "@/lib/routing/client-router";
 import {
   IconDownload,
   IconGripVertical,

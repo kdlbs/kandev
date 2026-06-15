@@ -1,5 +1,5 @@
 import { useCallback, useMemo, type ReactNode } from "react";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/components/theme/app-theme";
 import type { FileDiffOptions, SelectedLineRange, FileDiffMetadata } from "@pierre/diffs";
 import { IconPlus } from "@tabler/icons-react";
 import { FONT } from "@/lib/theme/colors";

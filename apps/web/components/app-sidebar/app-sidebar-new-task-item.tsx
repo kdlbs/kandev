@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import dynamic from "next/dynamic";
-import { useRouter } from "next/navigation";
+import dynamic from "@/lib/routing/client-dynamic";
+import { useRouter } from "@/lib/routing/client-router";
 import { IconMessageCircle, IconSquarePlus, IconSubtask } from "@tabler/icons-react";
 import type { Icon as TablerIcon } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";

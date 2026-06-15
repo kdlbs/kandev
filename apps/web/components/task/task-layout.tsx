@@ -1,7 +1,7 @@
 "use client";
 
 import { memo } from "react";
-import dynamic from "next/dynamic";
+import dynamic from "@/lib/routing/client-dynamic";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { SessionMobileLayout, SessionTabletLayout } from "./mobile";
 import type { Repository, RepositoryScript } from "@/lib/types/http";

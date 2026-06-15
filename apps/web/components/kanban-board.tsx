@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/routing/client-router";
 import { Task } from "./kanban-card";
 import { TaskCreateDialog } from "./task-create-dialog";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";

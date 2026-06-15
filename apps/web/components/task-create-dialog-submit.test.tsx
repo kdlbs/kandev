@@ -9,7 +9,7 @@ import { createRef } from "react";
 // create call; non-empty prompt → call with that prompt in the payload.
 
 const pushMock = vi.fn();
-vi.mock("next/navigation", () => ({
+vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ push: pushMock, replace: vi.fn(), back: vi.fn() }),
 }));
 

@@ -16,7 +16,7 @@
  * "open a shell anyway" affordance (decision pinned in plan.md F7.4).
  */
 
-import dynamic from "next/dynamic";
+import dynamic from "@/lib/routing/client-dynamic";
 import { IconClock } from "@tabler/icons-react";
 
 const OfficeDockviewLayout = dynamic(

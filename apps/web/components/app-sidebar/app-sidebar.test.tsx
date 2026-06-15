@@ -63,7 +63,7 @@ vi.mock("./app-sidebar-settings-mode", () => ({
   AppSidebarSettingsMode: () => <div data-testid="settings-mode" />,
 }));
 
-vi.mock("next/navigation", () => ({
+vi.mock("@/lib/routing/client-router", () => ({
   usePathname: () => navigationMock.pathname,
 }));
 

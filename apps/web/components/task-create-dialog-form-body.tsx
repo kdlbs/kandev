@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useState } from "react";
-import Link from "next/link";
+import Link from "@/components/routing/app-link";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 import { WorkflowSelectorRow } from "@/components/workflow-selector-row";

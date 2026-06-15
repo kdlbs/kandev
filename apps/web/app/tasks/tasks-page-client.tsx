@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useMemo, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/routing/client-router";
 import type { PaginationState } from "@tanstack/react-table";
 import { DataTable } from "@/components/ui/data-table";
 import { getColumns } from "./columns";

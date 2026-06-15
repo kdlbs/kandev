@@ -1,4 +1,4 @@
-import { redirect } from "next/navigation";
+import { redirect } from "@/lib/routing/server-navigation";
 import { getDashboard, getOnboardingState } from "@/lib/api/domains/office-api";
 import { getActiveWorkspaceId } from "./lib/get-active-workspace";
 import { OfficePageClient } from "./page-client";

@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/components/routing/app-link";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";

@@ -5,7 +5,7 @@ import { Button } from "@kandev/ui/button";
 import { PageTopbar } from "@/components/page-topbar";
 import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
 import { useCallback, useMemo } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "@/lib/routing/client-router";
 import { IconChartBar } from "@tabler/icons-react";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import type {

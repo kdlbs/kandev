@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { Row, ColumnDef } from "@tanstack/react-table";
 import type { Task, Workflow, WorkflowStep, Repository } from "@/lib/types/http";
-import Link from "next/link";
+import Link from "@/components/routing/app-link";
 import { IconTrash, IconLoader, IconArchive } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";

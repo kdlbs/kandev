@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
+import Link from "@/components/routing/app-link";
 import { IconBrandGithub, IconGitBranch, IconLink, IconX } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import type { Branch } from "@/lib/types/http";

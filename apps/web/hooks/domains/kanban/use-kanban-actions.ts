@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/routing/client-router";
 import { useAppStoreApi } from "@/components/state-provider";
 import { useTaskCRUD } from "@/hooks/use-task-crud";
 import type { Task as BackendTask } from "@/lib/types/http";

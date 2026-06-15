@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/components/routing/app-link";
 import { Badge } from "@kandev/ui/badge";
 import { Card, CardContent } from "@kandev/ui/card";
 import { useAppStore } from "@/components/state-provider";

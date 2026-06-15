@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/components/routing/app-link";
 import { IconRobot } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import Link from "next/link";
+import Link from "@/components/routing/app-link";
 import {
   IconClock,
   IconLoader2,

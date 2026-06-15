@@ -20,55 +20,12 @@ import {
   resolveDatabasePath,
   resolveKandevHomeDir,
 } from "./constants";
-import { resolveHealthTimeoutMs, waitForHealth, waitForUrlReady } from "./health";
+import { resolveHealthTimeoutMs, waitForHealth } from "./health";
 import { getBinaryName } from "./platform";
 import { createProcessSupervisor } from "./process";
-import { buildBackendEnv, buildWebEnv, logStartupInfo, pickPorts } from "./shared";
+import { buildBackendEnv, logStartupInfo, pickPorts } from "./shared";
 import { launchRestartableBackend } from "./supervisor/backend";
-import { launchWebApp, openBrowser } from "./web";
-
-/**
- * Locates the standalone Next.js `server.js` inside `apps/web/.next/standalone/`.
- *
- * Normally this sits at `.next/standalone/web/server.js`, but Turbopack may
- * place it under a deeper path (e.g. `.next/standalone/Users/.../web/server.js`)
- * when it detects the wrong project root (typically caused by a stray
- * `package-lock.json` in a parent directory). We look for any `web/server.js`
- * below the standalone directory so `kandev start` keeps working.
- *
- * @returns absolute path to `server.js`, or null if it cannot be found.
- */
-export function resolveStandaloneServerPath(repoRoot: string): string | null {
-  const standaloneDir = path.join(repoRoot, "apps", "web", ".next", "standalone");
-  const expected = path.join(standaloneDir, "web", "server.js");
-  if (fs.existsSync(expected)) return expected;
-  if (!fs.existsSync(standaloneDir)) return null;
-
-  return findWebServerJs(standaloneDir);
-}
-
-// Walks `dir` manually instead of relying on `Dirent.parentPath` (Node 20.12+),
-// so the CLI keeps working on older Node 20.x runtimes installed via npx.
-function findWebServerJs(dir: string): string | null {
-  const stack: string[] = [dir];
-  while (stack.length > 0) {
-    const current = stack.pop() as string;
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(current, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const entry of entries) {
-      if (entry.isDirectory() && entry.name !== "node_modules") {
-        stack.push(path.join(current, entry.name));
-      } else if (entry.isFile() && entry.name === "server.js" && path.basename(current) === "web") {
-        return path.join(current, entry.name);
-      }
-    }
-  }
-  return null;
-}
+import { openBrowser } from "./web";
 
 export type StartOptions = {
   /** Path to the repository root directory */
@@ -92,8 +49,7 @@ export type StartOptions = {
  * 1. Validates that build artifacts exist
  * 2. Picks available ports for all services
  * 3. Starts the backend binary (with warn log level for clean output)
- * 4. Starts the web app via `pnpm start`
- * 5. Waits for the backend to be healthy before announcing readiness
+ * 4. Waits for the backend to be healthy before announcing readiness
  *
  * @param options - Configuration for the start command
  * @throws Error if backend binary or web build is not found
@@ -113,45 +69,9 @@ export async function runStart({
     throw new Error("Backend binary not found. Run `make build` first.");
   }
 
-  // Check for standalone build (Next.js standalone output)
-  const webServerPath = resolveStandaloneServerPath(repoRoot);
-  if (!webServerPath) {
-    const standaloneDir = path.join(repoRoot, "apps", "web", ".next", "standalone");
-    if (!fs.existsSync(standaloneDir)) {
-      throw new Error("Web standalone build not found. Run `make build` first.");
-    }
-    throw new Error(
-      `Web standalone build is missing server.js under ${standaloneDir}. ` +
-        "This can happen when Next.js/Turbopack detects a different project root " +
-        "(e.g. a stray package-lock.json in a parent directory). " +
-        "Remove the stray lockfile and re-run `make build`.",
-    );
-  }
-  const webStandaloneDir = path.dirname(webServerPath);
-  const webStaticDir = path.join(repoRoot, "apps", "web", ".next", "static");
-  const standaloneStaticDir = path.join(webStandaloneDir, ".next", "static");
-  if (fs.existsSync(webStaticDir) && !fs.existsSync(standaloneStaticDir)) {
-    fs.mkdirSync(path.dirname(standaloneStaticDir), { recursive: true });
-    try {
-      fs.symlinkSync(webStaticDir, standaloneStaticDir, "junction");
-    } catch (err) {
-      console.warn(
-        `[kandev] failed to link Next.js static assets: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-  }
-
-  // Link public directory (fonts, images, etc.) into standalone output
-  const webPublicDir = path.join(repoRoot, "apps", "web", "public");
-  const standalonePublicDir = path.join(webStandaloneDir, "public");
-  if (fs.existsSync(webPublicDir) && !fs.existsSync(standalonePublicDir)) {
-    try {
-      fs.symlinkSync(webPublicDir, standalonePublicDir, "junction");
-    } catch (err) {
-      console.warn(
-        `[kandev] failed to link public assets: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
+  const webDistDir = path.join(repoRoot, "apps", "web", "dist");
+  if (!fs.existsSync(path.join(webDistDir, "index.html"))) {
+    throw new Error("Vite web build not found. Run `make build` first.");
   }
 
   // Production mode: use warn log level for clean output unless verbose/debug
@@ -166,12 +86,13 @@ export async function runStart({
   const backendEnv = buildBackendEnv({
     ports,
     logLevel,
+    webProxy: false,
     extra: {
       KANDEV_DATABASE_PATH: dbPath,
+      KANDEV_WEB_DIST_DIR: webDistDir,
       ...(debug ? { KANDEV_DEBUG_AGENT_MESSAGES: "true", KANDEV_DEBUG_PPROF_ENABLED: "true" } : {}),
     },
   });
-  const webEnv = buildWebEnv({ ports, production: true, debug });
 
   logStartupInfo({
     header: "start mode: using local build",
@@ -202,20 +123,6 @@ export async function runStart({
   await waitForHealth(ports.backendUrl, backend.proc, healthTimeoutMs);
   console.log(`[kandev] backend ready at ${ports.backendUrl}`);
 
-  // Use standalone server.js directly (not pnpm start)
-  const webUrl = `http://localhost:${ports.webPort}`;
-  console.log("[kandev] starting web...");
-  const webProc = launchWebApp({
-    command: "node",
-    args: [webServerPath],
-    cwd: webStandaloneDir,
-    env: webEnv,
-    supervisor,
-    label: "web",
-    quiet: !showOutput,
-  });
-
-  await waitForUrlReady(webUrl, webProc, healthTimeoutMs);
   console.log("[kandev] open: " + ports.backendUrl);
   if (headless) {
     console.log(`[kandev] ready (headless) at ${ports.backendUrl}`);

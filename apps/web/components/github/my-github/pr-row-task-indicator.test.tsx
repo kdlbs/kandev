@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { cleanup, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 
-vi.mock("next/navigation", () => ({
+vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
 }));
 

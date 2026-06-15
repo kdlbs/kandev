@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import Link from "@/components/routing/app-link";
+import { useRouter } from "@/lib/routing/client-router";
 import { IconGitBranch } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";

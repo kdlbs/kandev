@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/routing/client-router";
 import { IconTrash } from "@tabler/icons-react";
 import { toast } from "sonner";
 import { Button } from "@kandev/ui/button";

@@ -15,7 +15,7 @@
  * path.
  */
 
-import Link from "next/link";
+import Link from "@/components/routing/app-link";
 import { TaskPageContent } from "@/components/task/task-page-content";
 import { TaskBody, resolveTaskBodyMode } from "@/components/task/TaskBody";
 import { TaskHeader } from "@/components/task/TaskHeader";

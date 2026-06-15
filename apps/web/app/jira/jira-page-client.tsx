@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/components/routing/app-link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { IconTicket } from "@tabler/icons-react";
 import { Alert, AlertDescription } from "@kandev/ui/alert";

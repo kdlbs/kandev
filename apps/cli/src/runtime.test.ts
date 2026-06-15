@@ -17,7 +17,7 @@ function createFakeBundle(dir: string) {
   fs.writeFileSync(path.join(dir, "bin", "kandev"), "fake");
   fs.writeFileSync(path.join(dir, "bin", "agentctl"), "fake");
   fs.mkdirSync(path.join(dir, "web"), { recursive: true });
-  fs.writeFileSync(path.join(dir, "web", "server.js"), "fake");
+  fs.writeFileSync(path.join(dir, "web", "index.html"), '<div id="root"></div>');
 }
 
 describe("validateBundle", () => {
@@ -40,7 +40,7 @@ describe("validateBundle", () => {
     fs.mkdirSync(path.join(tmpDir, "bin"), { recursive: true });
     fs.writeFileSync(path.join(tmpDir, "bin", "agentctl"), "fake");
     fs.mkdirSync(path.join(tmpDir, "web"), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, "web", "server.js"), "fake");
+    fs.writeFileSync(path.join(tmpDir, "web", "index.html"), "");
     expect(() => validateBundle(tmpDir)).toThrow(/Backend binary not found/);
   });
 
@@ -48,15 +48,20 @@ describe("validateBundle", () => {
     fs.mkdirSync(path.join(tmpDir, "bin"), { recursive: true });
     fs.writeFileSync(path.join(tmpDir, "bin", "kandev"), "fake");
     fs.mkdirSync(path.join(tmpDir, "web"), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, "web", "server.js"), "fake");
+    fs.writeFileSync(path.join(tmpDir, "web", "index.html"), "");
     expect(() => validateBundle(tmpDir)).toThrow(/agentctl binary not found/);
   });
 
-  it("throws when web server.js is missing", () => {
+  it("throws when static web assets are missing", () => {
     fs.mkdirSync(path.join(tmpDir, "bin"), { recursive: true });
     fs.writeFileSync(path.join(tmpDir, "bin", "kandev"), "fake");
     fs.writeFileSync(path.join(tmpDir, "bin", "agentctl"), "fake");
-    expect(() => validateBundle(tmpDir)).toThrow(/Web server.*not found/);
+    expect(() => validateBundle(tmpDir)).toThrow(/Web assets not found/);
+  });
+
+  it("does not require a Node web server in the runtime bundle", () => {
+    createFakeBundle(tmpDir);
+    expect(() => validateBundle(tmpDir)).not.toThrow();
   });
 });
 

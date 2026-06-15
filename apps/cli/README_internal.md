@@ -19,24 +19,24 @@ flowchart TD
     D5 -->|yes| D6["Download from GitHub Releases (cache)"]
     D5 -->|no| D7["Throw: 'No runtime found'"]
 
-    D2 --> E["Start backend + Next.js standalone"]
+    D2 --> E["Start Go backend serving static SPA"]
     D4 --> E
     D6 --> E
 
-    F --> F1["make dev + next dev"]
-    G --> G1["binary + next start"]
+    F --> F1["make dev + web dev server"]
+    G --> G1["backend binary serving Vite dist"]
 ```
 
 ## Overview
 
-This package provides the `kandev` CLI launcher. The runtime bundle (Go backend, agentctl, Next.js standalone web) is **installed by the package manager** — there is no first-run download.
+This package provides the `kandev` CLI launcher. The runtime bundle (Go backend, agentctl, and static Vite web assets) is **installed by the package manager** — there is no first-run download.
 
 Two install channels share the same release artifacts:
 
 - **npm/npx**: `kandev@X.Y.Z` declares `optionalDependencies` for `@kdlbs/runtime-{platform}@X.Y.Z`. npm 7+ filters by `os`/`cpu` and installs only the matching one.
 - **Homebrew**: `kdlbs/homebrew-kandev` formula downloads the GitHub release tarball into the Cellar and sets `KANDEV_BUNDLE_DIR`.
 
-Both channels resolve to the same runtime bundle layout (`bin/kandev`, `bin/agentctl`, `web/server.js`). The CLI launcher (`runtime.ts`) abstracts over them.
+Both channels resolve to the same runtime bundle layout (`bin/kandev`, `bin/agentctl`, `web/index.html` plus assets). The CLI launcher (`runtime.ts`) abstracts over them.
 
 ## Artifact shapes
 
@@ -46,7 +46,8 @@ The GitHub release bundle and the npm runtime package are **different shapes** b
 # GitHub release bundle (used by Homebrew + manual installs)
 kandev/
 ├── bin/{kandev,agentctl}
-├── web/server.js
+├── web/index.html
+├── web/assets/
 └── cli/
     ├── bin/cli.js              # #!/usr/bin/env node + chmod +x
     └── dist/cli.bundle.js      # esbuild single-file bundle (deps inlined)
@@ -54,10 +55,11 @@ kandev/
 # npm runtime package (@kdlbs/runtime-{platform})
 @kdlbs/runtime-{platform}/
 ├── bin/{kandev,agentctl}
-└── web/server.js
+├── web/index.html
+└── web/assets/
 ```
 
-The `cli/` directory is only in the GitHub bundle (Homebrew needs the launcher). For npm installs, the main `kandev` package already provides the CLI; the runtime package only ships the binaries + web bundle.
+The `cli/` directory is only in the GitHub bundle (Homebrew needs the launcher). For npm installs, the main `kandev` package already provides the CLI; the runtime package only ships the binaries + web assets.
 
 ## Commands
 
@@ -73,7 +75,7 @@ The `cli/` directory is only in the GitHub bundle (Homebrew needs the launcher).
 | -------------------------- | ---------------------------------------------------------- |
 | `--version`, `-V`          | Print CLI version and exit                                 |
 | `--port`, `--backend-port` | Backend port                                               |
-| `--web-internal-port`      | Override internal Next.js port                             |
+| `--web-internal-port`      | Override internal dev web port                             |
 | `--verbose`, `-v`          | Show info logs                                             |
 | `--debug`                  | Show debug logs + agent message dumps                      |
 | `--runtime-version <tag>`  | **Advanced/debug**: download a specific GitHub runtime tag |

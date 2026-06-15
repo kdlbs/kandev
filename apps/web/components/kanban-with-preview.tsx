@@ -9,7 +9,7 @@ import {
   type Dispatch,
   type SetStateAction,
 } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/routing/client-router";
 import { KanbanBoard } from "./kanban-board";
 import { TaskPreviewPanel } from "./task-preview-panel";
 import { useKanbanPreview } from "@/hooks/use-kanban-preview";

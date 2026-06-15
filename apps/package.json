@@ -10,7 +10,7 @@
     "dev": "pnpm -r run dev",
     "dev:web": "pnpm --filter @kandev/web dev",
     "build": "pnpm -r run build",
-    "build:web": "pnpm --filter @kandev/web build",
+    "build:web": "pnpm --filter @kandev/web build:vite",
     "lint": "pnpm -r run lint",
     "format": "prettier --write web cli packages --ignore-unknown",
     "format:check": "prettier --check web cli packages --ignore-unknown",

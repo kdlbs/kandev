@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/components/routing/app-link";
 import type { ActivityEntry } from "@/lib/state/slices/office/types";
 import { timeAgo } from "@/lib/utils/time";
 

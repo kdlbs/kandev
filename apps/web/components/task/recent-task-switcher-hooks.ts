@@ -9,7 +9,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MutableRefObject,
 } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/routing/client-router";
 import { useAppStore } from "@/components/state-provider";
 import { useCommandPanelOpen } from "@/lib/commands/command-registry";
 import { useRegisterCommands } from "@/hooks/use-register-commands";

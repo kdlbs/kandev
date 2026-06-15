@@ -1,4 +1,4 @@
-# Frontend (Next.js) — architecture and conventions
+# Frontend (Vite/React SPA, Next migration in progress) — architecture and conventions
 
 Scoped guidance for `apps/web/`. Repo-wide rules (commit format, code-quality limits, etc.) live in the root `AGENTS.md`.
 
@@ -23,7 +23,7 @@ import { Dialog } from "@kandev/ui/dialog";
 ## Data Flow Pattern (Critical)
 
 ```text
-SSR Fetch -> Hydrate Store -> Components Read Store -> Hooks Subscribe
+Go Boot Payload -> Hydrate Store -> Components Read Store -> Hooks Subscribe
 ```
 
 **Never fetch data directly in components.**
@@ -59,7 +59,7 @@ lib/api/domains/                    # API clients
 - `tasks.activeTaskId`, `tasks.activeSessionId`, `workspaces.activeId`
 - `repositories.byWorkspace`, `repositoryBranches.byRepository`
 
-**Hydration:** `lib/state/hydration/merge-strategies.ts` has `deepMerge()`, `mergeSessionMap()`, `mergeLoadingState()` to avoid overwriting live client state. Pass `activeSessionId` to protect active sessions.
+**Hydration:** Go injects `window.__KANDEV_BOOT_PAYLOAD__` into the SPA shell before React mounts. `lib/state/hydration/merge-strategies.ts` has `deepMerge()`, `mergeSessionMap()`, `mergeLoadingState()` to avoid overwriting live client state. Pass `activeSessionId` to protect active sessions.
 
 **Hooks Pattern:** Hooks in `hooks/domains/` encapsulate WS subscription + store selection. WS client deduplicates subscriptions automatically.
 
@@ -71,6 +71,13 @@ Use subscription hooks only; the WS client auto-deduplicates.
 
 ## Component conventions
 
+- **Framework adapters during Next removal:** Client components should import
+  links, router hooks, dynamic imports, images, and theme hooks from the local
+  adapter modules (`components/routing/*`, `lib/routing/*`,
+  `components/theme/app-theme`) instead of importing `next/*` or
+  `next-themes` directly. The routing/image/dynamic adapters now provide
+  browser-native behavior for the Vite SPA while legacy Next entrypoints are
+  phased out.
 - Components: <200 lines, extract to domain components, composition over props.
 - Hooks: domain-organized in `hooks/domains/`, encapsulate subscription + selection.
 - **Interactivity:** all buttons and links with actions must have `cursor-pointer` class.

@@ -3,6 +3,7 @@ import os from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  buildBackendEnv,
   buildWebEnv,
   listHostNetworkAddresses,
   logStartupInfo,
@@ -67,6 +68,20 @@ describe("buildWebEnv", () => {
     expect(buildWebEnv({ ports, debug: true }).KANDEV_DEBUG).toBe("true");
     expect(buildWebEnv({ ports }).NEXT_PUBLIC_KANDEV_DEBUG).toBeUndefined();
     expect(buildWebEnv({ ports }).KANDEV_DEBUG).toBeUndefined();
+  });
+});
+
+describe("buildBackendEnv", () => {
+  it("points backend non-API routes at the dev web server by default", () => {
+    const env = buildBackendEnv({ ports });
+
+    expect(env.KANDEV_WEB_INTERNAL_URL).toBe("http://localhost:37429");
+  });
+
+  it("omits the web proxy in production single-process mode", () => {
+    const env = buildBackendEnv({ ports, webProxy: false });
+
+    expect(env.KANDEV_WEB_INTERNAL_URL).toBeUndefined();
   });
 });
 

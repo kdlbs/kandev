@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -75,6 +76,7 @@ import (
 	utilityhandlers "github.com/kandev/kandev/internal/utility/handlers"
 	voicehandlers "github.com/kandev/kandev/internal/voice/handlers"
 	"github.com/kandev/kandev/internal/voice/transcribe"
+	"github.com/kandev/kandev/internal/webapp"
 	workflowcontroller "github.com/kandev/kandev/internal/workflow/controller"
 	workflowhandlers "github.com/kandev/kandev/internal/workflow/handlers"
 	"github.com/kandev/kandev/internal/worktree"
@@ -558,6 +560,26 @@ func registerRoutes(p routeParams) {
 	p.router.GET("/api/v1/features", func(c *gin.Context) {
 		c.JSON(http.StatusOK, p.features)
 	})
+	p.router.GET("/api/v1/app-state", func(c *gin.Context) {
+		routePath := c.Query("path")
+		if routePath == "" {
+			routePath = c.Request.URL.Path
+		}
+		payload := webapp.NewBootPayload(
+			webapp.ClassifyRoute(routePath),
+			webapp.RuntimeConfig{APIPrefix: "/api/v1", WebSocketPath: "/ws"},
+			nil,
+		)
+		c.JSON(http.StatusOK, payload)
+	})
+
+	if handler, distDir, ok := newWebAppHandler(p); ok {
+		p.router.NoRoute(func(c *gin.Context) {
+			handler.ServeHTTP(c.Writer, c.Request)
+		})
+		p.log.Info("Web SPA static serving enabled", zap.String("dist_dir", distDir))
+		return
+	}
 
 	if p.webInternalURL != "" {
 		target, err := url.Parse(p.webInternalURL)
@@ -597,6 +619,34 @@ func registerRoutes(p routeParams) {
 			p.log.Info("Web reverse proxy enabled", zap.String("target", p.webInternalURL))
 		}
 	}
+}
+
+func newWebAppHandler(p routeParams) (*webapp.Handler, string, bool) {
+	distDir := os.Getenv("KANDEV_WEB_DIST_DIR")
+	if distDir == "" {
+		distDir = firstExistingDir("apps/web/dist", "../web/dist", "../../apps/web/dist")
+	}
+	if distDir == "" {
+		return nil, "", false
+	}
+	handler := webapp.NewHandler(
+		os.DirFS(distDir),
+		webapp.WithRuntimeConfig(webapp.RuntimeConfig{APIPrefix: "/api/v1", WebSocketPath: "/ws"}),
+		webapp.WithPayloadBuilder(func(_ *http.Request, route webapp.RouteClassification) webapp.BootPayload {
+			return webapp.NewBootPayload(route, webapp.RuntimeConfig{APIPrefix: "/api/v1", WebSocketPath: "/ws"}, nil)
+		}),
+	)
+	return handler, distDir, true
+}
+
+func firstExistingDir(candidates ...string) string {
+	for _, candidate := range candidates {
+		info, err := os.Stat(candidate)
+		if err == nil && info.IsDir() {
+			return candidate
+		}
+	}
+	return ""
 }
 
 // resolvePrimaryTaskRepositoryID returns the primary (lowest-position)

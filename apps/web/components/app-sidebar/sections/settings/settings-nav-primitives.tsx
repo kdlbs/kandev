@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/components/routing/app-link";
 import { IconChevronRight } from "@tabler/icons-react";
 import type { Icon as TablerIcon } from "@tabler/icons-react";
 import { useState, type ReactNode } from "react";

@@ -1,5 +1,5 @@
-import { redirect } from "next/navigation";
-import Link from "next/link";
+import { redirect } from "@/lib/routing/server-navigation";
+import Link from "@/components/routing/app-link";
 import { listWorkspaces } from "@/lib/api";
 
 export default async function AutomationsTopLevelPage() {

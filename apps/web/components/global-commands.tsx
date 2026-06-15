@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo, useCallback } from "react";
-import { useRouter } from "next/navigation";
-import { useTheme } from "next-themes";
+import { useRouter } from "@/lib/routing/client-router";
+import { useTheme } from "@/components/theme/app-theme";
 import {
   IconHome,
   IconList,

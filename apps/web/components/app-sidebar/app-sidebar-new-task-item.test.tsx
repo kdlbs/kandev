@@ -42,7 +42,7 @@ vi.mock("@/hooks/use-quick-chat-launcher", () => ({
 vi.mock("@/hooks/domains/features/use-feature", () => ({
   useFeature: () => officeEnabled,
 }));
-vi.mock("next/navigation", () => ({
+vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ push: mocks.routerPush }),
   usePathname: () => pathname,
 }));

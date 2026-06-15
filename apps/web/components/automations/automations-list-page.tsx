@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/routing/client-router";
 import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
 import { IconPlus, IconBolt } from "@tabler/icons-react";

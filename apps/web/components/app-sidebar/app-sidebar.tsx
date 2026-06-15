@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname } from "@/lib/routing/client-router";
 import { useAppStore } from "@/components/state-provider";
 import { useInOffice } from "@/hooks/use-in-office";
 import { cn } from "@/lib/utils";

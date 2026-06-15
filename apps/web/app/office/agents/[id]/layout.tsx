@@ -1,8 +1,8 @@
 "use client";
 
 import { use, useCallback, useEffect, type ReactNode } from "react";
-import Link from "next/link";
-import { usePathname } from "next/navigation";
+import Link from "@/components/routing/app-link";
+import { usePathname } from "@/lib/routing/client-router";
 import { IconInfoCircle } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";

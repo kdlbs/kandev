@@ -22,7 +22,7 @@ const state = {
 
 let officeEnabled = false;
 
-vi.mock("next/navigation", () => ({
+vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ push: mocks.routerPush }),
 }));
 

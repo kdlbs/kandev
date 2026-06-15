@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
+import Link from "@/components/routing/app-link";
 import { IconBrandSlack } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";

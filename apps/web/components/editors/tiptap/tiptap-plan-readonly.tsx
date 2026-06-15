@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/components/theme/app-theme";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Highlight from "@tiptap/extension-highlight";

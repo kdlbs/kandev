@@ -16,7 +16,7 @@ import {
   IconPencil,
   IconChevronDown,
 } from "@tabler/icons-react";
-import Link from "next/link";
+import Link from "@/components/routing/app-link";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { Routine, AgentProfile, RoutineTrigger } from "@/lib/state/slices/office/types";
 import { timeAgo } from "@/lib/utils/time";

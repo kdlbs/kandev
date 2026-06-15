@@ -1,4 +1,4 @@
-import { redirect } from "next/navigation";
+import { redirect } from "@/lib/routing/server-navigation";
 import { getOnboardingState } from "@/lib/api/domains/office-api";
 import { fetchUserSettings, listAgents } from "@/lib/api/domains/settings-api";
 import { listWorkspaces } from "@/lib/api/domains/workspace-api";

@@ -25,7 +25,7 @@ vi.mock("@/hooks/use-quick-chat-launcher", () => ({
   useQuickChatLauncher: () => mocks.openQuickChat,
 }));
 
-vi.mock("next/navigation", () => ({
+vi.mock("@/lib/routing/client-router", () => ({
   usePathname: () => pathname,
   useRouter: () => ({ push: vi.fn() }),
 }));

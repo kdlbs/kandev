@@ -7,7 +7,7 @@
 ```
 apps/
 ├── backend/          # Go backend (orchestrator, lifecycle, agentctl, WS gateway)
-├── web/              # Next.js frontend (SSR + WS + Zustand)
+├── web/              # Vite/React SPA frontend (Go boot payload + WS + Zustand)
 ├── cli/              # CLI tool (TypeScript)
 ├── landing/          # Landing page
 └── packages/         # Shared packages/types
@@ -17,7 +17,7 @@ apps/
 
 - **Package manager**: `pnpm` workspace (run from `apps/`, not repo root)
 - **Backend**: Go with Make (`make -C apps/backend test|lint|build`)
-- **Frontend**: Next.js (`cd apps && pnpm --filter @kandev/web dev|lint|typecheck`)
+- **Frontend**: Vite/React SPA (`cd apps && pnpm --filter @kandev/web dev|build:vite|lint|typecheck`)
 - **UI**: Shadcn components via `@kandev/ui`
 - **E2E**: Playwright (`cd apps/web && pnpm e2e`). The `containers` project (gated on `KANDEV_E2E_CONTAINERS=1`, formerly `docker`) covers both the Docker executor and the SSH executor — anything that needs a real Docker daemon on the host lives there. See `apps/web/e2e/README.md`.
 - **GitHub repo**: `https://github.com/kdlbs/kandev`

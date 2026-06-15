@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "@/components/routing/app-link";
 import { forwardRef } from "react";
 import type { ReactNode } from "react";
 import { IconArrowLeft, IconHome } from "@tabler/icons-react";

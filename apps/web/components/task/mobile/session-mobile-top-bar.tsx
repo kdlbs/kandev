@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useState } from "react";
-import Link from "next/link";
+import Link from "@/components/routing/app-link";
 import { IconArrowLeft, IconMenu2, IconGitBranch, IconCheck } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";

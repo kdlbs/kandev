@@ -1,7 +1,7 @@
 "use client";
 
 import { use, useState, useEffect, useRef, useCallback, useMemo, Suspense } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "@/lib/routing/client-router";
 import { useAppStore } from "@/components/state-provider";
 import { useOfficeRefetch } from "@/hooks/use-office-refetch";
 import { TaskOptimisticContextProvider } from "@/hooks/use-optimistic-task-mutation";

@@ -1,6 +1,6 @@
 "use client";
 
-import { usePathname } from "next/navigation";
+import { usePathname } from "@/lib/routing/client-router";
 import { IconSettings, IconChevronLeft } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { SettingsTree } from "./sections/settings/settings-tree";

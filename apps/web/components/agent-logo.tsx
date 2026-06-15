@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/components/theme/app-theme";
 import { getBackendConfig } from "@/lib/config";
 
 interface AgentLogoProps {

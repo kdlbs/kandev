@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/components/routing/app-link";
 import { IconCircle, IconCircleCheck, IconExternalLink } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Spinner } from "@kandev/ui/spinner";

@@ -1,7 +1,7 @@
 "use client";
 
 import { forwardRef, useCallback, useState, type ComponentPropsWithoutRef } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/routing/client-router";
 import {
   IconBriefcase,
   IconCheck,

@@ -2,7 +2,7 @@
 
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { DiffEditor } from "@monaco-editor/react";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/components/theme/app-theme";
 import { cn } from "@kandev/ui/lib/utils";
 import type { FileDiffData, DiffComment } from "@/lib/diff/types";
 import { getMonacoLanguage } from "@/lib/editor/language-map";
