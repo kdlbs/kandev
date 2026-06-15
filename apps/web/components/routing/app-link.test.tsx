@@ -41,6 +41,17 @@ describe("AppLink", () => {
     expect(pushState).not.toHaveBeenCalled();
   });
 
+  it("does not intercept hash-only links", () => {
+    const pushState = vi.spyOn(window.history, "pushState");
+    const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation(() => undefined);
+    render(<Link href="#details">Details</Link>);
+
+    fireEvent.click(screen.getByText("Details"));
+
+    expect(pushState).not.toHaveBeenCalled();
+    expect(scrollTo).not.toHaveBeenCalled();
+  });
+
   it("forwards refs to the anchor element", () => {
     const ref = { current: null as HTMLAnchorElement | null };
     render(

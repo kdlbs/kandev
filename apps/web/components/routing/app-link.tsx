@@ -40,6 +40,7 @@ function shouldUseBrowserNavigation(event: MouseEvent<HTMLAnchorElement>, href: 
 
   const target = event.currentTarget.getAttribute("target");
   if (target && target !== "_self") return true;
+  if (href.startsWith("#")) return true;
 
   return isExternalHref(href);
 }
