@@ -16,6 +16,7 @@ import (
 )
 
 const spritesTokenEnvKey = "SPRITES_API_TOKEN"
+const workspaceDeletePageSize = 500
 
 // Workspace operations
 
@@ -90,6 +91,30 @@ func (s *Service) DeleteWorkspace(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	tasks, err := s.listAllTasksForWorkspaceDelete(ctx, id)
+	if err != nil {
+		return err
+	}
+	for _, task := range tasks {
+		if task == nil || task.ID == "" {
+			continue
+		}
+		if err := s.DeleteTask(ctx, task.ID); err != nil {
+			return fmt.Errorf("delete task %s: %w", task.ID, err)
+		}
+	}
+	workflows, err := s.workflows.ListWorkflows(ctx, id, true)
+	if err != nil {
+		return fmt.Errorf("list workspace workflows: %w", err)
+	}
+	for _, workflow := range workflows {
+		if workflow == nil || workflow.ID == "" {
+			continue
+		}
+		if err := s.DeleteWorkflow(ctx, workflow.ID); err != nil {
+			return fmt.Errorf("delete workflow %s: %w", workflow.ID, err)
+		}
+	}
 	if err := s.workspaces.DeleteWorkspace(ctx, id); err != nil {
 		s.logger.Error("failed to delete workspace", zap.String("workspace_id", id), zap.Error(err))
 		return err
@@ -97,6 +122,22 @@ func (s *Service) DeleteWorkspace(ctx context.Context, id string) error {
 	s.publishWorkspaceEvent(ctx, events.WorkspaceDeleted, workspace)
 	s.logger.Info("workspace deleted", zap.String("workspace_id", id))
 	return nil
+}
+
+func (s *Service) listAllTasksForWorkspaceDelete(ctx context.Context, workspaceID string) ([]*models.Task, error) {
+	var all []*models.Task
+	for page := 1; ; page++ {
+		tasks, total, err := s.tasks.ListTasksByWorkspace(
+			ctx, workspaceID, "", "", "", page, workspaceDeletePageSize, true, true, false, false,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("list workspace tasks: %w", err)
+		}
+		all = append(all, tasks...)
+		if len(all) >= total || len(tasks) == 0 {
+			return all, nil
+		}
+	}
 }
 
 func normalizeOptionalID(value *string) *string {
