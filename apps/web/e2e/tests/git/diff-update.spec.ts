@@ -1,194 +1,16 @@
 import { test, expect } from "../../fixtures/test-base";
-import { SessionPage } from "../../pages/session-page";
-import type { ApiClient } from "../../helpers/api-client";
-import type { SeedData } from "../../fixtures/test-base";
-import type { Page } from "@playwright/test";
-
-// Shared selector constant for diff container
-const DIFFS_CONTAINER = "diffs-container";
-
-/** Options for seeding a task with an agent. */
-type SeedTaskOptions = {
-  title: string;
-  scenarioCommand: string;
-  completionText: string;
-};
-
-/**
- * Generic helper to seed a task using a mock scenario and navigate to
- * its session page, waiting for the agent turn to complete.
- */
-async function seedTaskWithScenario(
-  testPage: Page,
-  apiClient: ApiClient,
-  seedData: SeedData,
-  options: SeedTaskOptions,
-): Promise<{ session: SessionPage; sessionId: string }> {
-  const task = await apiClient.createTaskWithAgent(
-    seedData.workspaceId,
-    options.title,
-    seedData.agentProfileId,
-    {
-      description: options.scenarioCommand,
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    },
-  );
-
-  if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
-
-  await testPage.goto(`/t/${task.id}`);
-
-  const session = new SessionPage(testPage);
-  await session.waitForLoad();
-  await closePreviewPanels(testPage);
-
-  // Wait for the first turn to complete
-  await expect(session.chat.getByText(options.completionText, { exact: false })).toBeVisible({
-    timeout: 45_000,
-  });
-
-  return { session, sessionId: task.session_id };
-}
-
-async function closePreviewPanels(testPage: Page) {
-  await testPage.evaluate(() => {
-    type TestWindow = Window & {
-      __dockviewApi__?: {
-        getPanel: (id: string) => unknown;
-        removePanel: (panel: unknown) => void;
-      };
-    };
-    const dockview = (window as TestWindow).__dockviewApi__;
-    if (!dockview) return;
-    for (const id of ["preview:file-diff", "preview:file-editor"]) {
-      const panel = dockview.getPanel(id);
-      if (panel) dockview.removePanel(panel);
-    }
-  });
-}
-
-/** Seed a task for untracked file testing. */
-function seedUntrackedFileTask(testPage: Page, apiClient: ApiClient, seedData: SeedData) {
-  return seedTaskWithScenario(testPage, apiClient, seedData, {
-    title: "Untracked File E2E",
-    scenarioCommand: "/e2e:untracked-file-setup",
-    completionText: "untracked-file-setup complete",
-  });
-}
-
-/** Seed a task for diff update testing. */
-function seedDiffUpdateTask(testPage: Page, apiClient: ApiClient, seedData: SeedData) {
-  return seedTaskWithScenario(testPage, apiClient, seedData, {
-    title: "Diff Update E2E",
-    scenarioCommand: "/e2e:diff-update-setup",
-    completionText: "diff-update-setup complete",
-  });
-}
-
-/** Seed a task for the multi-file scenario (3 files, FIRST_MODIFICATION on all). */
-function seedMultiFileTask(testPage: Page, apiClient: ApiClient, seedData: SeedData) {
-  return seedTaskWithScenario(testPage, apiClient, seedData, {
-    title: "Multi-file Diff Update E2E",
-    scenarioCommand: "/e2e:multi-file-setup",
-    completionText: "multi-file-setup complete",
-  });
-}
-
-/** Click the Changes dockview tab. */
-async function openChangesTab(testPage: Page) {
-  const changesTab = testPage.locator(".dv-default-tab", { hasText: "Changes" });
-  await expect(changesTab).toBeVisible({ timeout: 10_000 });
-  await changesTab.click();
-}
-
-/** Click a file row by name to open its diff view. */
-async function openFileDiff(testPage: Page, fileName: string) {
-  const fileRow = testPage.getByTestId(`file-row-${fileName.replace(/[/\\]/g, "-")}`);
-  await expect(fileRow).toBeVisible({ timeout: 10_000 });
-  await fileRow.click();
-}
-
-/** Locate the dockview tab for an unstaged file diff, not a commit diff containing the filename. */
-function fileDiffTab(testPage: Page, fileName: string) {
-  return testPage.locator(".dv-default-tab[type='file-diff']", {
-    hasText: `Diff [${fileName}]`,
-  });
-}
-
-/** Helper to get the diffs container locator. */
-function getDiffsContainer(testPage: Page) {
-  return testPage.locator(DIFFS_CONTAINER);
-}
-
-async function waitForDiffText(testPage: Page, text: string, timeout = 60_000) {
-  await expect
-    .poll(
-      () =>
-        testPage.evaluate((expected) => {
-          for (const container of document.querySelectorAll("diffs-container")) {
-            if (container.shadowRoot?.textContent?.includes(expected)) return true;
-          }
-          return false;
-        }, text),
-      { timeout },
-    )
-    .toBe(true);
-}
-
-async function waitForDiffTextAbsent(testPage: Page, text: string, timeout = 5_000) {
-  await expect
-    .poll(
-      () =>
-        testPage.evaluate((expected) => {
-          for (const container of document.querySelectorAll("diffs-container")) {
-            if (container.shadowRoot?.textContent?.includes(expected)) return false;
-          }
-          return true;
-        }, text),
-      { timeout },
-    )
-    .toBe(true);
-}
-
-async function waitForStoreFileDiffText(
-  testPage: Page,
-  sessionId: string,
-  filePath: string,
-  text: string,
-  timeout = 30_000,
-) {
-  await expect
-    .poll(
-      () =>
-        testPage.evaluate(
-          ({ sid, path, expected }) => {
-            type E2EStoreWindow = Window & {
-              __KANDEV_E2E_STORE__?: {
-                getState: () => {
-                  environmentIdBySessionId: Record<string, string>;
-                  gitStatus: {
-                    byEnvironmentId: Record<
-                      string,
-                      { files?: Record<string, { diff?: string }> } | undefined
-                    >;
-                  };
-                };
-              };
-            };
-            const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
-            const state = store?.getState();
-            if (!state) return false;
-            const envKey = state.environmentIdBySessionId[sid] ?? sid;
-            return state.gitStatus.byEnvironmentId[envKey]?.files?.[path]?.diff?.includes(expected);
-          },
-          { sid: sessionId, path: filePath, expected: text },
-        ),
-      { timeout },
-    )
-    .toBe(true);
-}
+import {
+  fileDiffTab,
+  getDiffsContainer,
+  openChangesTab,
+  openFileDiff,
+  seedDiffUpdateTask,
+  seedMultiFileTask,
+  seedUntrackedFileTask,
+  waitForDiffText,
+  waitForDiffTextAbsent,
+  waitForStoreFileDiffText,
+} from "./diff-update-helpers";
 
 test.describe("Diff update on file change", () => {
   test.describe.configure({ retries: 2, timeout: 120_000 });
@@ -297,15 +119,8 @@ test.describe("Diff update on file change", () => {
     await session.closeFileDiffPreview();
     await openFileDiff(testPage, "diff_update_test.txt");
 
-    const updatedDiffsContainer = getDiffsContainer(testPage);
-    await expect(updatedDiffsContainer).toBeVisible({ timeout: 15_000 });
-    await waitForStoreFileDiffText(
-      testPage,
-      sessionId,
-      "diff_update_test.txt",
-      "ALSO_CHANGED",
-      15_000,
-    );
+    await waitForDiffText(testPage, "SECOND_MODIFICATION", 15_000);
+    await waitForDiffText(testPage, "ALSO_CHANGED", 15_000);
   });
 
   test("diff panel closes when uncommitted change is undone via hunk Undo", async ({
