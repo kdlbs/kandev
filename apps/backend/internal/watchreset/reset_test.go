@@ -110,3 +110,24 @@ func TestRun_RejectsNilArgs(t *testing.T) {
 		t.Fatalf("nil TaskDeleter must error")
 	}
 }
+
+// TestRun_RejectsAlreadyCancelledContext pins the ctx.Err() pre-check:
+// WithoutCancel intentionally drops every cancellation signal, so without
+// this guard a caller passing an already-expired ctx (deadline missed
+// before Run was even invoked) would silently get a destructive reset.
+func TestRun_RejectsAlreadyCancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	r := &fakeResetter{ids: []string{"a"}}
+	td := &fakeDeleter{}
+	_, err := Run(ctx, r, td, nil)
+	if err == nil {
+		t.Fatalf("expected error for already-cancelled context")
+	}
+	if r.cleared {
+		t.Fatalf("Clear must not run when context is already cancelled")
+	}
+	if len(td.called) != 0 {
+		t.Fatalf("DeleteTaskTree must not run when context is already cancelled, got %d calls", len(td.called))
+	}
+}
