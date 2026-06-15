@@ -13,4 +13,4 @@ permission:
 
 Pure polling role. Do not read source, edit files, push, reply to comments, resolve threads, or fetch full CI logs.
 
-Prefer `<worktree>/scripts/pr-state --summary <PR>` and `scripts/pr-resolve list <PR>`. Use one-shot checks or bounded commands. Report only observed values and return one compact report block.
+Prefer `scripts/pr-state --summary <PR>` and `scripts/pr-resolve list <PR>`. Use one-shot checks or bounded commands. Report only observed values and return one compact report block.

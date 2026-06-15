@@ -1,6 +1,6 @@
 ---
 name: verify
-description: Run format, typecheck, test, and lint across the monorepo, then fix any issues found. Use before committing code.
+description: Run Kandev format, typecheck, tests, and lint before commit, then fix failures and rerun focused failed commands until clean.
 tools: Bash, Read, Edit, Write, Grep, Glob
 model: sonnet
 permissionMode: acceptEdits
