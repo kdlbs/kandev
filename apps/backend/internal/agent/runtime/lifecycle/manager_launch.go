@@ -176,7 +176,7 @@ type agentCommands struct {
 
 // buildAgentCommand builds the agent command strings for the execution.
 // Returns both the initial command and the continue command (for one-shot agents like Amp).
-func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfileInfo, agentConfig agents.Agent) agentCommands {
+func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfileInfo, agentConfig agents.Agent, preferNative bool) agentCommands {
 	model := ""
 	autoApprove := false
 	permissionValues := make(map[string]bool)
@@ -208,12 +208,13 @@ func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfil
 		sessionID = ""
 	}
 	cmdOpts := agents.CommandOptions{
-		Model:            model,
-		SessionID:        sessionID,
-		AutoApprove:      autoApprove,
-		PermissionValues: permissionValues,
-		CLIFlagTokens:    cliFlagTokens,
-		Runtime:          models.ExecutorType(req.ExecutorType).Runtime(),
+		Model:              model,
+		SessionID:          sessionID,
+		AutoApprove:        autoApprove,
+		PermissionValues:   permissionValues,
+		CLIFlagTokens:      cliFlagTokens,
+		Runtime:            models.ExecutorType(req.ExecutorType).Runtime(),
+		PreferNativeBinary: preferNative,
 	}
 	return agentCommands{
 		initial:   m.commandBuilder.BuildCommandString(agentConfig, cmdOpts),
@@ -790,7 +791,8 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		if !agentConfig.Enabled() {
 			return nil, fmt.Errorf("agent type %q is disabled", agentTypeName)
 		}
-		cmds := m.buildAgentCommand(req, profileInfo, agentConfig)
+		preferNative := m.preferNativeBinary(agentConfig, execution.RuntimeName, execution.Metadata)
+		cmds := m.buildAgentCommand(req, profileInfo, agentConfig, preferNative)
 		execution.AgentCommand = cmds.initial
 		execution.ContinueCommand = cmds.continue_
 		if req.ACPSessionID != "" && execution.ACPSessionID == "" {
@@ -944,7 +946,9 @@ func (m *Manager) buildExecutionFromInstance(
 		execution.isResumedSession = true
 	}
 	execution.IsPassthrough = req.IsPassthrough
-	cmds := m.buildAgentCommand(req, profileInfo, agentConfig)
+	runtime := models.ExecutorType(req.ExecutorType).Runtime()
+	preferNative := m.preferNativeBinary(agentConfig, runtime, execReq.Metadata)
+	cmds := m.buildAgentCommand(req, profileInfo, agentConfig, preferNative)
 	execution.AgentCommand = cmds.initial
 	execution.ContinueCommand = cmds.continue_
 	return execution

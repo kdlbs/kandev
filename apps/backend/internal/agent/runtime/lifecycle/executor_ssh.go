@@ -578,14 +578,25 @@ func (r *SSHExecutor) preflightAgentBinary(ctx context.Context, client *ssh.Clie
 	if req.AgentConfig == nil {
 		return nil
 	}
+	stepName := "Verifying agent binary"
+	shell := sshShellFromMetadata(req.Metadata)
+
+	// Prefer the agent's standalone CLI when present on the remote: running it
+	// directly skips the per-launch `npx` registry round-trip. A hit is recorded
+	// in metadata so the command builder emits the native binary; a miss falls
+	// through to verifying the default (npx) command below.
+	if found, err := r.probeNativeBinary(ctx, client, shell, req, stepName); err != nil {
+		return err
+	} else if found {
+		return nil
+	}
+
 	cmd := req.AgentConfig.BuildCommand(agents.CommandOptions{Runtime: agentruntime.RuntimeSSH})
 	args := cmd.Args()
 	if len(args) == 0 {
 		return nil
 	}
 	binary := args[0]
-	stepName := "Verifying agent binary"
-	shell := sshShellFromMetadata(req.Metadata)
 	out, err := ProbeRemoteBinary(ctx, client, shell, binary)
 	if err != nil {
 		r.report(req.OnProgress, stepName, PrepareStepFailed, err.Error())
@@ -598,6 +609,33 @@ func (r *SSHExecutor) preflightAgentBinary(ctx context.Context, client *ssh.Clie
 	}
 	r.report(req.OnProgress, stepName, PrepareStepCompleted, out)
 	return nil
+}
+
+// probeNativeBinary probes the remote for the agent's standalone CLI (if it
+// declares one via NativeBinaryAgent). On a hit it records the binary name in
+// req.Metadata under MetadataKeyNativeBinary and returns found=true. A missing
+// binary returns found=false with no error so the caller falls back to the
+// default command. err is non-nil only on SSH transport failure.
+func (r *SSHExecutor) probeNativeBinary(ctx context.Context, client *ssh.Client, shell string, req *ExecutorCreateRequest, stepName string) (bool, error) {
+	nb, ok := req.AgentConfig.(agents.NativeBinaryAgent)
+	if !ok || nb.NativeBinaryName() == "" {
+		return false, nil
+	}
+	name := nb.NativeBinaryName()
+	out, err := ProbeRemoteBinary(ctx, client, shell, name)
+	if err != nil {
+		r.report(req.OnProgress, stepName, PrepareStepFailed, err.Error())
+		return false, fmt.Errorf("ssh: probe %s on remote: %w", name, err)
+	}
+	if out == "" {
+		return false, nil
+	}
+	if req.Metadata == nil {
+		req.Metadata = make(map[string]interface{})
+	}
+	req.Metadata[MetadataKeyNativeBinary] = name
+	r.report(req.OnProgress, stepName, PrepareStepCompleted, out)
+	return true, nil
 }
 
 // sshShellFromMetadata reads the user-selected login shell from the

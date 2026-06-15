@@ -78,6 +78,18 @@ type PassthroughAgent interface {
 	BuildPassthroughCommand(opts PassthroughOptions) Command
 }
 
+// NativeBinaryAgent is an optional capability for agents whose npm package also
+// ships a standalone CLI binary that behaves identically to `npx -y <pkg>`.
+// When that binary is present in the execution environment, the lifecycle
+// prefers it (BuildCommand receives CommandOptions.PreferNativeBinary=true) to
+// skip the per-launch npm registry round-trip — which is slow behind a private
+// registry. Containerized runtimes ship a controlled image and keep npx.
+type NativeBinaryAgent interface {
+	// NativeBinaryName is the executable to look for on PATH (e.g. "copilot").
+	// An empty string disables native-binary preference.
+	NativeBinaryName() string
+}
+
 // LoginCommand describes an interactive CLI command for authenticating with
 // an agent. The kandev backend runs this under a PTY so the UI can render a
 // terminal and route keystrokes to the underlying process.
@@ -148,6 +160,10 @@ type CommandOptions struct {
 	// Runtime.IsContainerized() to pick a host absolute path vs. a bare
 	// name resolved via the container's PATH.
 	Runtime agentruntime.Runtime
+	// PreferNativeBinary is set by the lifecycle when a NativeBinaryAgent's
+	// standalone CLI was found in the execution environment. Such agents emit
+	// the native binary (e.g. "copilot --acp") instead of "npx -y <pkg>".
+	PreferNativeBinary bool
 }
 
 // PassthroughOptions are passed to BuildPassthroughCommand.

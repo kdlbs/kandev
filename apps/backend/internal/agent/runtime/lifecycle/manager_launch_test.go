@@ -56,7 +56,7 @@ func TestBuildAgentCommand_ResumeFlag(t *testing.T) {
 	t.Run("CanRecover=true with ACPSessionID includes --resume", func(t *testing.T) {
 		ag := &resumeTestAgent{canRecover: &canRecoverTrue}
 		req := &LaunchRequest{ACPSessionID: "sess-123"}
-		cmds := mgr.buildAgentCommand(req, nil, ag)
+		cmds := mgr.buildAgentCommand(req, nil, ag, false)
 		require.Contains(t, cmds.initial, "--resume")
 		require.Contains(t, cmds.initial, "sess-123")
 	})
@@ -64,7 +64,7 @@ func TestBuildAgentCommand_ResumeFlag(t *testing.T) {
 	t.Run("CanRecover=false with ACPSessionID omits --resume", func(t *testing.T) {
 		ag := &resumeTestAgent{canRecover: &canRecoverFalse}
 		req := &LaunchRequest{ACPSessionID: "sess-123"}
-		cmds := mgr.buildAgentCommand(req, nil, ag)
+		cmds := mgr.buildAgentCommand(req, nil, ag, false)
 		require.False(t, strings.Contains(cmds.initial, "--resume"),
 			"expected no --resume flag, got: %s", cmds.initial)
 		require.False(t, strings.Contains(cmds.initial, "sess-123"),
@@ -74,7 +74,7 @@ func TestBuildAgentCommand_ResumeFlag(t *testing.T) {
 	t.Run("CanRecover=true with empty ACPSessionID omits --resume", func(t *testing.T) {
 		ag := &resumeTestAgent{canRecover: &canRecoverTrue}
 		req := &LaunchRequest{ACPSessionID: ""}
-		cmds := mgr.buildAgentCommand(req, nil, ag)
+		cmds := mgr.buildAgentCommand(req, nil, ag, false)
 		require.False(t, strings.Contains(cmds.initial, "--resume"),
 			"expected no --resume flag when ACPSessionID is empty, got: %s", cmds.initial)
 	})
@@ -82,7 +82,7 @@ func TestBuildAgentCommand_ResumeFlag(t *testing.T) {
 	t.Run("CanRecover=nil (default true) with ACPSessionID includes --resume", func(t *testing.T) {
 		ag := &resumeTestAgent{canRecover: nil}
 		req := &LaunchRequest{ACPSessionID: "sess-456"}
-		cmds := mgr.buildAgentCommand(req, nil, ag)
+		cmds := mgr.buildAgentCommand(req, nil, ag, false)
 		require.Contains(t, cmds.initial, "--resume")
 		require.Contains(t, cmds.initial, "sess-456")
 	})
@@ -110,7 +110,7 @@ func TestBuildAgentCommand_CLIFlagsAppended(t *testing.T) {
 				{Flag: "--add-dir /shared", Enabled: true},  // must be split
 			},
 		}
-		cmds := mgr.buildAgentCommand(&LaunchRequest{}, profile, ag)
+		cmds := mgr.buildAgentCommand(&LaunchRequest{}, profile, ag, false)
 
 		require.Contains(t, cmds.initial, "--allow-all-tools")
 		require.NotContains(t, cmds.initial, "--allow-all-paths")
@@ -127,7 +127,7 @@ func TestBuildAgentCommand_CLIFlagsAppended(t *testing.T) {
 				{Flag: `--broken "unterminated`, Enabled: true},
 			},
 		}
-		cmds := mgr.buildAgentCommand(&LaunchRequest{}, profile, ag)
+		cmds := mgr.buildAgentCommand(&LaunchRequest{}, profile, ag, false)
 		// The bad flag is dropped entirely; the launch still produces the
 		// agent's base command so a user with a typo still gets their task
 		// to run, just without the flag they intended.
@@ -135,7 +135,7 @@ func TestBuildAgentCommand_CLIFlagsAppended(t *testing.T) {
 	})
 
 	t.Run("nil profile produces bare command", func(t *testing.T) {
-		cmds := mgr.buildAgentCommand(&LaunchRequest{}, nil, ag)
+		cmds := mgr.buildAgentCommand(&LaunchRequest{}, nil, ag, false)
 		require.Equal(t, "copilot --acp", cmds.initial)
 	})
 }
