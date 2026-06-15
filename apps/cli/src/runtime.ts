@@ -79,4 +79,8 @@ export function validateBundle(bundleDir: string): void {
   if (!fs.existsSync(webIndex)) {
     throw new Error(`Web assets not found in bundle at ${bundleDir}`);
   }
+  const webAssetsDir = path.join(bundleDir, "web", "assets");
+  if (!fs.existsSync(webAssetsDir) || !fs.statSync(webAssetsDir).isDirectory()) {
+    throw new Error(`Web assets not found in bundle at ${bundleDir}`);
+  }
 }

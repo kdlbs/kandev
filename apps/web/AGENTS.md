@@ -1,4 +1,4 @@
-# Frontend (Vite/React SPA, Next migration in progress) — architecture and conventions
+# Frontend (Vite/React SPA) — architecture and conventions
 
 Scoped guidance for `apps/web/`. Repo-wide rules (commit format, code-quality limits, etc.) live in the root `AGENTS.md`.
 

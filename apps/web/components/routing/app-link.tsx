@@ -1,5 +1,6 @@
 "use client";
 
+import { forwardRef } from "react";
 import type { AnchorHTMLAttributes, MouseEvent, ReactNode } from "react";
 
 type AppLinkHref = string | URL;
@@ -11,7 +12,10 @@ export type AppLinkProps = Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href">
 
 const LOCATION_CHANGE_EVENT = "kandev:navigation";
 
-export default function Link({ href, onClick, ...props }: AppLinkProps) {
+const Link = forwardRef<HTMLAnchorElement, AppLinkProps>(function Link(
+  { href, onClick, ...props },
+  ref,
+) {
   const resolvedHref = href.toString();
 
   const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
@@ -20,11 +24,14 @@ export default function Link({ href, onClick, ...props }: AppLinkProps) {
 
     event.preventDefault();
     window.history.pushState({}, "", resolvedHref);
+    window.scrollTo({ top: 0, left: 0 });
     window.dispatchEvent(new Event(LOCATION_CHANGE_EVENT));
   };
 
-  return <a {...props} href={resolvedHref} onClick={handleClick} />;
-}
+  return <a {...props} ref={ref} href={resolvedHref} onClick={handleClick} />;
+});
+
+export default Link;
 
 function shouldUseBrowserNavigation(event: MouseEvent<HTMLAnchorElement>, href: string): boolean {
   if (event.defaultPrevented) return true;

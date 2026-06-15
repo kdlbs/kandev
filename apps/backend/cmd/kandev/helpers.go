@@ -574,12 +574,14 @@ func registerRoutes(p routeParams) {
 		c.JSON(http.StatusOK, payload)
 	})
 
-	if handler, distDir, ok := newWebAppHandler(p); ok {
-		p.router.NoRoute(func(c *gin.Context) {
-			handler.ServeHTTP(c.Writer, c.Request)
-		})
-		p.log.Info("Web SPA static serving enabled", zap.String("dist_dir", distDir))
-		return
+	if p.webInternalURL == "" {
+		if handler, distDir, ok := newWebAppHandler(p); ok {
+			p.router.NoRoute(func(c *gin.Context) {
+				handler.ServeHTTP(c.Writer, c.Request)
+			})
+			p.log.Info("Web SPA static serving enabled", zap.String("dist_dir", distDir))
+			return
+		}
 	}
 
 	if p.webInternalURL != "" {

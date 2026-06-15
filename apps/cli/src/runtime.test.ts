@@ -18,6 +18,8 @@ function createFakeBundle(dir: string) {
   fs.writeFileSync(path.join(dir, "bin", "agentctl"), "fake");
   fs.mkdirSync(path.join(dir, "web"), { recursive: true });
   fs.writeFileSync(path.join(dir, "web", "index.html"), '<div id="root"></div>');
+  fs.mkdirSync(path.join(dir, "web", "assets"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "web", "assets", "index.js"), "fake");
 }
 
 describe("validateBundle", () => {
@@ -56,6 +58,16 @@ describe("validateBundle", () => {
     fs.mkdirSync(path.join(tmpDir, "bin"), { recursive: true });
     fs.writeFileSync(path.join(tmpDir, "bin", "kandev"), "fake");
     fs.writeFileSync(path.join(tmpDir, "bin", "agentctl"), "fake");
+    expect(() => validateBundle(tmpDir)).toThrow(/Web assets not found/);
+  });
+
+  it("throws when the web assets directory is missing", () => {
+    fs.mkdirSync(path.join(tmpDir, "bin"), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, "bin", "kandev"), "fake");
+    fs.writeFileSync(path.join(tmpDir, "bin", "agentctl"), "fake");
+    fs.mkdirSync(path.join(tmpDir, "web"), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, "web", "index.html"), "");
+
     expect(() => validateBundle(tmpDir)).toThrow(/Web assets not found/);
   });
 
