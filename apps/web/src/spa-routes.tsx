@@ -327,8 +327,10 @@ function useRouteData(): {
 
       const workspaces = workspacesResponse.workspaces;
       const workspaceId = settingsResponse?.settings?.workspace_id || workspaces[0]?.id || null;
+      const settingsWorkflowId = settingsResponse?.settings?.workflow_filter_id || null;
       store.getState().hydrate({
         workspaces: { items: workspaces, activeId: workspaceId },
+        workflows: { items: store.getState().workflows.items, activeId: settingsWorkflowId },
         userSettings: { ...mapUserSettingsResponse(settingsResponse), workspaceId },
       });
       if (!workspaceId) return;
@@ -342,17 +344,16 @@ function useRouteData(): {
       ]);
       if (cancelled) return;
 
-      store.getState().setWorkflows(
-        workflowsResponse.workflows.map((workflow) => ({
-          id: workflow.id,
-          workspaceId: workflow.workspace_id,
-          name: workflow.name,
-          description: workflow.description ?? null,
-          sortOrder: workflow.sort_order ?? 0,
-          ...(workflow.agent_profile_id ? { agent_profile_id: workflow.agent_profile_id } : {}),
-          ...(workflow.hidden !== undefined ? { hidden: workflow.hidden } : {}),
-        })),
-      );
+      const workflowItems = workflowsResponse.workflows.map(mapWorkflowItem);
+      const activeWorkflowId = resolveDesiredWorkflowId({
+        activeWorkflowId: store.getState().workflows.activeId,
+        settingsWorkflowId,
+        workspaceWorkflows: workflowItems,
+      });
+
+      store.getState().hydrate({
+        workflows: { items: workflowItems, activeId: activeWorkflowId },
+      });
       store.getState().setRepositories(workspaceId, repositoriesResponse.repositories);
       setRouteWorkflows(workflowsResponse.workflows);
       setSteps(stepsResponse.steps);
