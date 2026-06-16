@@ -155,6 +155,7 @@ jobs:
   postgres-boot:
     name: Backend Postgres boot
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     container: ghcr.io/kdlbs/kandev-ci:build-latest
     services:
       postgres:
