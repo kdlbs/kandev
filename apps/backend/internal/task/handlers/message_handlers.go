@@ -313,7 +313,7 @@ func (h *MessageHandlers) resolveSessionAfterTurnStart(
 			zap.String("task_id", taskID),
 			zap.String("session_id", submittedSessionID),
 			zap.Error(err))
-		return current, nil
+		return nil, errors.New("failed to reload submitted session after on_turn_start")
 	}
 	if reloaded.State != models.TaskSessionStateCompleted {
 		return &dto.GetTaskSessionResponse{Session: dto.FromTaskSession(reloaded)}, nil

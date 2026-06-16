@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -149,11 +150,13 @@ func TestWaitForSessionReady_ContextCancelled(t *testing.T) {
 
 type messageAddSwitchRepo struct {
 	mockRepository
-	tasks     map[string]*models.Task
-	sessions  map[string]*models.TaskSession
-	primaryID string
-	messages  []*models.Message
-	turns     []*models.Turn
+	tasks      map[string]*models.Task
+	sessions   map[string]*models.TaskSession
+	primaryID  string
+	messages   []*models.Message
+	turns      []*models.Turn
+	getCalls   map[string]int
+	failReload bool
 }
 
 func (r *messageAddSwitchRepo) GetTask(_ context.Context, id string) (*models.Task, error) {
@@ -164,6 +167,13 @@ func (r *messageAddSwitchRepo) GetTask(_ context.Context, id string) (*models.Ta
 }
 
 func (r *messageAddSwitchRepo) GetTaskSession(_ context.Context, id string) (*models.TaskSession, error) {
+	if r.getCalls == nil {
+		r.getCalls = make(map[string]int)
+	}
+	r.getCalls[id]++
+	if r.failReload && id == "s1" && r.getCalls[id] > 1 {
+		return nil, errors.New("reload failed")
+	}
 	if session, ok := r.sessions[id]; ok {
 		return session, nil
 	}
@@ -334,6 +344,46 @@ func TestWSAddMessageFailsWhenOnTurnStartCompletesSessionWithoutReplacement(t *t
 		Reviews: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
 	orch := &switchingTurnStartOrchestrator{repo: repo}
+	h := NewMessageHandlers(svc, orch, log)
+
+	req, err := ws.NewRequest("req-1", ws.ActionMessageAdd, map[string]interface{}{
+		"task_id":    "t1",
+		"session_id": "s1",
+		"content":    "continue here",
+	})
+	require.NoError(t, err)
+
+	resp, err := h.wsAddMessage(context.Background(), req)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeError, resp.Type)
+	assert.Empty(t, repo.messages)
+	assert.Empty(t, orch.getStartedSession())
+	assert.Empty(t, orch.getForwardedSession())
+}
+
+func TestWSAddMessageFailsWhenSessionReloadAfterOnTurnStartFails(t *testing.T) {
+	now := time.Now().UTC()
+	repo := &messageAddSwitchRepo{
+		tasks: map[string]*models.Task{
+			"t1": {ID: "t1", State: v1.TaskStateReview, UpdatedAt: now},
+		},
+		sessions: map[string]*models.TaskSession{
+			"s1": {ID: "s1", TaskID: "t1", State: models.TaskSessionStateWaitingForInput, AgentProfileID: "profile-old", UpdatedAt: now},
+			"s2": {ID: "s2", TaskID: "t1", State: models.TaskSessionStateCreated, AgentProfileID: "profile-new", UpdatedAt: now},
+		},
+		primaryID:  "s1",
+		failReload: true,
+	}
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	require.NoError(t, err)
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	orch := &switchingTurnStartOrchestrator{repo: repo, switchPrimary: true}
 	h := NewMessageHandlers(svc, orch, log)
 
 	req, err := ws.NewRequest("req-1", ws.ActionMessageAdd, map[string]interface{}{

@@ -138,6 +138,8 @@ function clearSubmittedInput(args: ClearSubmittedInputArgs) {
 
 function handleSubmitResult(result: ChatSubmitResult, onSuccess: () => void) {
   if (isPromiseLike(result)) {
+    // Submitters should show user-visible failure feedback and resolve false;
+    // rejected promises are unexpected, so preserve the draft and log them.
     void result
       .then((submitted) => {
         if (submitted !== false) onSuccess();
