@@ -81,7 +81,7 @@ func (s *Service) DismissLastAgentError(ctx context.Context, sessionID, stamp st
 		return nil, err
 	}
 	if !updated {
-		return s.sessions.GetTaskSession(ctx, sessionID)
+		return session, nil
 	}
 	return s.sessions.GetTaskSession(ctx, sessionID)
 }

@@ -53,6 +53,18 @@ describe("readLastAgentError", () => {
       }),
     ).toBeNull();
   });
+
+  it("returns null when dismissal is provided as camelCase dismissedAt", () => {
+    expect(
+      readLastAgentError({
+        last_agent_error: {
+          message: AGENT_ERROR_MESSAGE,
+          occurredAt: OCCURRED_AT,
+          dismissedAt: "2026-06-14T12:05:00Z",
+        },
+      }),
+    ).toBeNull();
+  });
 });
 
 describe("lastAgentErrorStamp", () => {

@@ -61,15 +61,11 @@ export function getLastTurnGroupId(items: RenderItem[]) {
 // agent posts a new message (see agentErrorMessageForTask).
 export function LastAgentErrorNotice({
   sessionId,
-  error: providedError,
+  error,
 }: {
   sessionId: string | null;
-  error?: LastAgentError | null;
+  error: LastAgentError | null;
 }) {
-  const metadata = useAppStore((state) =>
-    sessionId ? state.taskSessions.items[sessionId]?.metadata : null,
-  );
-  const error = providedError ?? readLastAgentError(metadata);
   const stamp = error ? lastAgentErrorStamp(error) : "";
   const dismissedStamp = useAppStore((state) =>
     sessionId ? state.dismissedAgentErrors[sessionId] : undefined,
