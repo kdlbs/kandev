@@ -238,7 +238,7 @@ func TestPiStrategy_ProjectFileMerge(t *testing.T) {
 	if err := json.Unmarshal(f.Content, &got); err != nil {
 		t.Fatalf("content not valid JSON: %v", err)
 	}
-	if got.MCPServers["github"].Command != "npx" || got.MCPServers["github"].Env["GITHUB_TOKEN"] != "tok" {
+	if got.MCPServers["github"].Transport != "stdio" || got.MCPServers["github"].Command != "npx" || got.MCPServers["github"].Env["GITHUB_TOKEN"] != "tok" {
 		t.Errorf("github entry = %+v", got.MCPServers["github"])
 	}
 	if got.MCPServers["stream"].Transport != "streamable-http" || got.MCPServers["stream"].URL != "https://x/mcp" {

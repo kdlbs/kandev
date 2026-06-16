@@ -808,6 +808,10 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		execution.IsPassthrough = req.IsPassthrough
 		if !req.IsPassthrough {
 			if err := m.materializeRuntimeProjectMCP(ctx, execution, agentConfig); err != nil {
+				execution.AgentCommand = ""
+				execution.ContinueCommand = ""
+				execution.isResumedSession = false
+				execution.IsPassthrough = false
 				return nil, err
 			}
 		}
@@ -1005,13 +1009,15 @@ func (m *Manager) registerAndPublishExecution(
 	return nil
 }
 
-func (m *Manager) rollbackLaunchExecution(ctx context.Context, rt ExecutorBackend, execInstance *ExecutorInstance, execution *AgentExecution, reason string) {
+func (m *Manager) rollbackLaunchExecution(_ context.Context, rt ExecutorBackend, execInstance *ExecutorInstance, execution *AgentExecution, reason string) {
 	m.logger.Warn("rolling back launch execution",
 		zap.String("execution_id", execution.ID),
 		zap.String("session_id", execution.SessionID),
 		zap.String("reason", reason))
 	if rt != nil && execInstance != nil {
-		if stopErr := rt.StopInstance(ctx, execInstance, false); stopErr != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if stopErr := rt.StopInstance(cleanupCtx, execInstance, false); stopErr != nil {
 			m.logger.Warn("failed to stop runtime instance during launch rollback",
 				zap.String("execution_id", execution.ID),
 				zap.Error(stopErr))

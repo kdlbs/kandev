@@ -34,8 +34,9 @@ project-level `.pi/mcp.json` files are preserved and merged, while Kandev-owned
 files are tracked for cleanup.
 
 Remote executors whose agentctl-local port cannot be derived skip project-file
-materialization with a warning rather than failing launch. ACP `session/new`
-MCP injection remains in place for agents that consume it directly.
+materialization with a warning; in that case Pi protocol-mode sessions will not
+receive the project-local MCP tools. ACP `session/new` MCP injection remains in
+place for agents that consume it directly.
 
 No spec update is needed: this is an internal agent-runtime integration detail,
 not a new user-invocable product surface.

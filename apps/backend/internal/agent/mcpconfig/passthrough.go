@@ -354,7 +354,7 @@ func (PiStrategy) BuildPassthroughMCP(servers []types.McpServer, paths Passthrou
 			continue
 		}
 		if isStdioServer(srv) {
-			entries[srv.Name] = piServerEntry{Command: srv.Command, Args: srv.Args, Env: srv.Env}
+			entries[srv.Name] = piServerEntry{Transport: string(ServerTypeStdio), Command: srv.Command, Args: srv.Args, Env: srv.Env}
 		} else {
 			entries[srv.Name] = piServerEntry{Transport: piTransport(srv.Type), URL: srv.URL, Headers: srv.Headers}
 		}
