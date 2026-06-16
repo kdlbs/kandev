@@ -93,7 +93,7 @@ function hasParentTraversal(path: string): boolean {
 }
 
 function looksLikeHostAbsolutePath(path: string): boolean {
-  return /^\/(?:Users|home|root|tmp|var|etc|usr|opt|mnt|Volumes)\//i.test(path);
+  return /^\/(?:[A-Za-z]:|Users|home|root|tmp|var|etc|usr|opt|mnt|Volumes)\//i.test(path);
 }
 
 function firstAbsoluteSegment(path: string): string | null {

@@ -156,6 +156,14 @@ describe("markdownComponents", () => {
     expect(openFile).not.toHaveBeenCalled();
   });
 
+  it("does not open Windows drive-letter absolute file links", () => {
+    render(<Markdown>{"[hosts](/C:/Windows/System32/drivers/etc/hosts)"}</Markdown>);
+
+    fireEvent.click(screen.getByRole("link", { name: "hosts" }));
+
+    expect(openFile).not.toHaveBeenCalled();
+  });
+
   it("does not treat bare domains as relative file links", () => {
     render(<Markdown>{"[service](api.service.com)"}</Markdown>);
 
