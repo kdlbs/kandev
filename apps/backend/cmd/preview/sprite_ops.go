@@ -104,11 +104,10 @@ func buildExtractScript(backendPort int) string {
 tar -xzf /tmp/kandev-preview.tar.gz -C /
 chmod +x /app/apps/backend/bin/kandev \
          /app/apps/backend/bin/agentctl \
-         /app/apps/backend/bin/mock-agent \
-         /usr/local/lib/kandev-cli/bin/cli.js
+         /app/apps/backend/bin/mock-agent
 ln -sf /app/apps/backend/bin/agentctl    /usr/local/bin/agentctl
 ln -sf /app/apps/backend/bin/mock-agent  /usr/local/bin/mock-agent
-ln -sf /usr/local/lib/kandev-cli/bin/cli.js /usr/local/bin/kandev
+ln -sf /app/apps/backend/bin/kandev      /usr/local/bin/kandev
 # Reset data directory on each deploy so the DB starts fresh (preview env only).
 rm -rf /data
 mkdir -p /data /var/log

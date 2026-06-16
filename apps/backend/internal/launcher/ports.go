@@ -87,10 +87,6 @@ func pickPorts(backendPort, webPort int) (portConfig, error) {
 	}, nil
 }
 
-func pickAvailablePort(preferred int) (int, error) {
-	return pickAvailablePortExcept(preferred, nil)
-}
-
 func pickAvailablePortExcept(preferred int, used map[int]bool) (int, error) {
 	if canBind(preferred) {
 		if !used[preferred] {
