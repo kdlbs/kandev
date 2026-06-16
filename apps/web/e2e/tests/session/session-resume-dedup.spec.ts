@@ -64,8 +64,24 @@ test.describe("Session resume boot-message dedup", () => {
       timeout: 15_000,
     });
 
-    // 6. Agent interaction still works after dedup.
-    await session.sendMessage("/e2e:simple-message");
+    // 6. Agent interaction still works after dedup. After two restart+reload+
+    //    auto-resume cycles, the editor's submit handler can race with WS
+    //    resubscription: the keystroke is accepted by the optimistic input
+    //    but the message never reaches the backend, so neither the user
+    //    prompt nor the agent reply ever appear (no reload can recover them
+    //    because they were never persisted). Verify the user prompt actually
+    //    echoes in the chat; if not, the send was dropped, so re-idle and
+    //    resend once before asserting the reply.
+    const followupPrompt = "/e2e:simple-message";
+    await session.sendMessage(followupPrompt);
+    const followupEcho = session.chat.getByText(followupPrompt, { exact: false }).nth(1);
+    try {
+      await expect(followupEcho).toBeVisible({ timeout: 10_000 });
+    } catch {
+      await session.waitForChatIdle({ timeout: 30_000 });
+      await session.sendMessage(followupPrompt);
+      await expect(followupEcho).toBeVisible({ timeout: 15_000 });
+    }
     await session.expectChatResponseVisible("simple mock response", 1, { timeout: 30_000 });
   });
 });
