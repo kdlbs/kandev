@@ -686,18 +686,46 @@ func (sm *SessionManager) retryPromptAfterReconnect(
 	prompt string,
 	attachments []v1.MessageAttachment,
 ) error {
-	ready := make(chan struct{})
-	sm.streamManager.connectUpdatesStreamAsync(execution, ready)
+	reconnectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 
-	select {
-	case <-ready:
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(5 * time.Second):
-		return fmt.Errorf("timed out waiting for updates stream reconnect")
+	var lastErr error
+	for {
+		if !execution.agentctl.HasAgentStream() {
+			ready := make(chan struct{})
+			sm.streamManager.connectUpdatesStreamAsync(execution, ready)
+
+			select {
+			case <-ready:
+			case <-reconnectCtx.Done():
+				if lastErr != nil {
+					return fmt.Errorf("timed out waiting for updates stream reconnect: %w", lastErr)
+				}
+				return reconnectCtx.Err()
+			}
+		}
+
+		if execution.agentctl.HasAgentStream() {
+			if err := execution.agentctl.Prompt(reconnectCtx, prompt, attachments); err == nil {
+				return nil
+			} else if !isAgentStreamNotConnectedErr(err) {
+				return err
+			} else {
+				lastErr = err
+			}
+		} else {
+			lastErr = fmt.Errorf("agent stream not connected")
+		}
+
+		select {
+		case <-reconnectCtx.Done():
+			if lastErr != nil {
+				return fmt.Errorf("timed out waiting for updates stream reconnect: %w", lastErr)
+			}
+			return reconnectCtx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
 	}
-
-	return execution.agentctl.Prompt(ctx, prompt, attachments)
 }
 
 // jsonRPCMethodNotFound is the JSON-RPC 2.0 error code for "Method not found".

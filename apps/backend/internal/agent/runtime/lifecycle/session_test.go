@@ -43,12 +43,13 @@ func newTestStopCh(t *testing.T) chan struct{} {
 // mockAgentServer creates a test WebSocket server simulating agentctl.
 // It responds to agent stream requests and tracks which actions were called and in what order.
 type mockAgentServer struct {
-	server      *httptest.Server
-	mu          sync.Mutex
-	actionLog   []string // ordered log of actions received
-	upgrader    websocket.Upgrader
-	handler     func(msg ws.Message) *ws.Message
-	wsConnected chan struct{} // closed when WS stream connects
+	server               *httptest.Server
+	mu                   sync.Mutex
+	actionLog            []string // ordered log of actions received
+	rejectStreamAttempts int
+	upgrader             websocket.Upgrader
+	handler              func(msg ws.Message) *ws.Message
+	wsConnected          chan struct{} // closed when WS stream connects
 }
 
 func newMockAgentServer(t *testing.T) *mockAgentServer {
@@ -64,6 +65,15 @@ func newMockAgentServer(t *testing.T) *mockAgentServer {
 
 	// Agent stream WebSocket endpoint
 	mux.HandleFunc("/api/v1/agent/stream", func(w http.ResponseWriter, r *http.Request) {
+		m.mu.Lock()
+		if m.rejectStreamAttempts > 0 {
+			m.rejectStreamAttempts--
+			m.mu.Unlock()
+			http.Error(w, "stream temporarily unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		m.mu.Unlock()
+
 		conn, err := m.upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			return
@@ -138,6 +148,12 @@ func (m *mockAgentServer) buildResponse(msg ws.Message) *ws.Message {
 		return m.handler(msg)
 	}
 	return m.defaultHandler(msg)
+}
+
+func (m *mockAgentServer) rejectNextStreamAttempts(count int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.rejectStreamAttempts = count
 }
 
 func (m *mockAgentServer) defaultHandler(msg ws.Message) *ws.Message {
@@ -758,6 +774,50 @@ func waitForWSConnected(t *testing.T, mock *mockAgentServer) {
 	case <-mock.wsConnected:
 	case <-time.After(2 * time.Second):
 		t.Fatal("agent stream did not connect within 2s")
+	}
+}
+
+func TestSendPrompt_RetriesUntilUpdateStreamReconnects(t *testing.T) {
+	mock := newMockAgentServer(t)
+	defer mock.Close()
+	mock.rejectNextStreamAttempts(1)
+
+	log := newSessionTestLogger()
+	stopCh := newTestStopCh(t)
+	sm := NewSessionManager(log, stopCh)
+
+	streamMgr := NewStreamManager(log, StreamCallbacks{
+		OnAgentEvent: func(execution *AgentExecution, event agentctl.AgentEvent) {},
+	}, nil, stopCh)
+	cleanupStreamManager(t, stopCh, streamMgr)
+	sm.SetDependencies(nil, streamMgr, nil, nil)
+
+	client := createTestClient(t, mock.server.URL)
+	defer client.Close()
+
+	execution := &AgentExecution{
+		ID:            "test-exec",
+		TaskID:        "test-task",
+		SessionID:     "test-session",
+		WorkspacePath: "/workspace",
+		agentctl:      client,
+		promptDoneCh:  make(chan PromptCompletionSignal, 1),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	result, err := sm.SendPrompt(ctx, execution, "hello after resume", false, nil, true)
+	if err != nil {
+		t.Fatalf("SendPrompt should retry after a transient stream reconnect failure: %v", err)
+	}
+	if result == nil || result.StopReason != PromptStopReasonDispatched {
+		t.Fatalf("expected StopReason=%q, got %+v", PromptStopReasonDispatched, result)
+	}
+
+	actions := mock.getActionLog()
+	if len(actions) != 1 || actions[0] != "agent.prompt" {
+		t.Fatalf("expected one prompt after reconnect, got actions: %v", actions)
 	}
 }
 
