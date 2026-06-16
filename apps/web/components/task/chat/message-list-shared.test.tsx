@@ -21,6 +21,7 @@ const mockStoreState = vi.hoisted(() => ({
   },
   dismissedAgentErrors: {} as Record<string, string>,
   dismissAgentError: () => {},
+  setTaskSession: () => {},
 }));
 
 vi.mock("@/components/task/chat/message-renderer", () => ({
@@ -53,9 +54,11 @@ vi.mock("@kandev/ui/pannel-session", () => ({
     <div data-testid="session-panel-content">{children}</div>
   ),
 }));
+vi.mock("@/lib/api/domains/session-api", () => ({
+  dismissLastAgentError: vi.fn(),
+}));
 
 import { MessageItem } from "./message-list-shared";
-import { VirtuosoMessageList } from "./message-list-virtuoso";
 
 const item: RenderItem = { type: "message", message: { id: "m1" } as Message };
 const noop = () => {};
@@ -110,18 +113,26 @@ describe("MessageItem memo boundary", () => {
   });
 });
 
-describe("VirtuosoMessageList empty state", () => {
+describe("MessageItem agent error notice", () => {
   it("shows retained agent errors even when there are no messages", () => {
     render(
-      <VirtuosoMessageList
-        items={[]}
-        messages={[]}
+      <MessageItem
+        item={{
+          type: "agent_error_notice",
+          id: "last-agent-error-s1-2026-06-14T12:00:00Z",
+          sessionId: "s1",
+          error: {
+            message: "agent process exited",
+            occurredAt: "2026-06-14T12:00:00Z",
+          },
+        }}
+        sessionId="s1"
         permissionsByToolCallId={perm}
         childrenByParentToolCallId={kids}
-        sessionId="s1"
-        messagesLoading={false}
-        isWorking={false}
-        sessionState="WAITING_FOR_INPUT"
+        taskId="t1"
+        isLastGroup={false}
+        isTurnActive={false}
+        onScrollToMessage={noop}
       />,
     );
 

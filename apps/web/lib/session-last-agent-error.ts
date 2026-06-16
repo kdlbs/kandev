@@ -4,6 +4,7 @@ export type LastAgentError = {
   message: string;
   occurredAt?: string;
   agentExecutionId?: string;
+  dismissedAt?: string;
 };
 
 // --- Dismissed agent errors (localStorage, global) ---
@@ -35,6 +36,9 @@ export function readLastAgentError(metadata: Record<string, unknown> | null | un
   const record = raw as Record<string, unknown>;
   const message = typeof record.message === "string" ? record.message : "";
   if (!message) return null;
+  const dismissedAt =
+    readOptionalString(record.dismissed_at) ?? readOptionalString(record.dismissedAt);
+  if (dismissedAt) return null;
   return {
     message,
     occurredAt: readOptionalString(record.occurred_at) ?? readOptionalString(record.occurredAt),

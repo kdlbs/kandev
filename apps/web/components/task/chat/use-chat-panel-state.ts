@@ -26,6 +26,7 @@ import type { DiffComment } from "@/lib/diff/types";
 import type { PlanComment, PRFeedbackComment } from "@/lib/state/slices/comments";
 import type { ActiveDocument } from "@/lib/state/slices/ui/types";
 import type { BuiltInPreset } from "@/lib/state/layout-manager/presets";
+import { readLastAgentError } from "@/lib/session-last-agent-error";
 
 const EMPTY_CONTEXT_FILES: ContextFile[] = [];
 const PLAN_CONTEXT_PATH = "plan:context";
@@ -389,8 +390,10 @@ function useSessionData(
     isLoading: messagesLoading,
     hasMore: hasOlderMessages,
   } = useSessionMessages(resolvedSessionId);
+  const lastAgentError = readLastAgentError(session?.metadata);
   const processed = useProcessedMessages(messages, taskId, resolvedSessionId, taskDescription, {
     hasOlderMessages,
+    lastAgentError,
   });
   const { sessionModel, activeModel } = useSessionModel(
     resolvedSessionId,

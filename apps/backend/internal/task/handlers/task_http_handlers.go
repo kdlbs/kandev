@@ -257,6 +257,26 @@ func (h *TaskHandlers) httpGetTaskSession(c *gin.Context) {
 	})
 }
 
+type dismissLastAgentErrorRequest struct {
+	Stamp string `json:"stamp"`
+}
+
+func (h *TaskHandlers) httpDismissLastAgentError(c *gin.Context) {
+	var req dismissLastAgentErrorRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	session, err := h.service.DismissLastAgentError(c.Request.Context(), c.Param("id"), req.Stamp)
+	if err != nil {
+		handleNotFound(c, h.logger, err, "task session not found")
+		return
+	}
+	c.JSON(http.StatusOK, dto.GetTaskSessionResponse{
+		Session: dto.FromTaskSession(session),
+	})
+}
+
 func (h *TaskHandlers) httpListSessionTurns(c *gin.Context) {
 	sessionID := c.Param("id")
 	if sessionID == "" {

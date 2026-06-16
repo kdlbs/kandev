@@ -662,6 +662,60 @@ func setupTestSession(t *testing.T, repo *sqliterepo.Repository) string {
 	return session.ID
 }
 
+func TestService_DismissLastAgentError(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+	occurredAt := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
+	lastErr := models.LastAgentError{
+		Message:          "peer disconnected before response",
+		OccurredAt:       occurredAt,
+		AgentExecutionID: "exec-1",
+	}
+	if err := repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyLastAgentError, lastErr); err != nil {
+		t.Fatalf("seed last agent error: %v", err)
+	}
+
+	session, err := svc.DismissLastAgentError(ctx, sessionID, lastErr.Stamp())
+	if err != nil {
+		t.Fatalf("dismiss last agent error: %v", err)
+	}
+	got, ok := models.LoadLastAgentError(session.Metadata)
+	if !ok {
+		t.Fatalf("expected last agent error metadata after dismiss")
+	}
+	if !got.IsDismissed() {
+		t.Fatalf("expected dismissed last agent error, got %#v", got)
+	}
+}
+
+func TestService_DismissLastAgentErrorIgnoresStaleStamp(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+	lastErr := models.LastAgentError{
+		Message:    "fresh error",
+		OccurredAt: time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC),
+	}
+	if err := repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyLastAgentError, lastErr); err != nil {
+		t.Fatalf("seed last agent error: %v", err)
+	}
+
+	session, err := svc.DismissLastAgentError(ctx, sessionID, "stale:error")
+	if err != nil {
+		t.Fatalf("dismiss last agent error: %v", err)
+	}
+	got, ok := models.LoadLastAgentError(session.Metadata)
+	if !ok {
+		t.Fatalf("expected last agent error metadata after stale dismiss")
+	}
+	if got.IsDismissed() {
+		t.Fatalf("expected stale dismiss to leave error visible, got %#v", got)
+	}
+}
+
 func setupTestTurn(t *testing.T, repo *sqliterepo.Repository, sessionID, taskID, turnID string) string {
 	t.Helper()
 	ctx := context.Background()

@@ -45,6 +45,20 @@ export async function fetchTaskSession(taskSessionId: string, options?: ApiReque
   return fetchJson<TaskSessionResponse>(`/api/v1/task-sessions/${taskSessionId}`, options);
 }
 
+export async function dismissLastAgentError(
+  taskSessionId: string,
+  stamp: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<TaskSessionResponse>(
+    `/api/v1/task-sessions/${taskSessionId}/last-agent-error/dismiss`,
+    {
+      ...options,
+      init: { method: "POST", body: JSON.stringify({ stamp }), ...(options?.init ?? {}) },
+    },
+  );
+}
+
 export async function listTaskSessionMessages(
   taskSessionId: string,
   params?: { limit?: number; before?: string; after?: string; sort?: "asc" | "desc" },

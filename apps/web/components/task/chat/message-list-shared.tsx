@@ -10,7 +10,12 @@ import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import { TurnGroupMessage } from "@/components/task/chat/messages/turn-group-message";
 import { PrepareProgress } from "@/components/session/prepare-progress";
 import { useAppStore } from "@/components/state-provider";
-import { lastAgentErrorStamp, readLastAgentError } from "@/lib/session-last-agent-error";
+import { dismissLastAgentError } from "@/lib/api/domains/session-api";
+import {
+  type LastAgentError,
+  lastAgentErrorStamp,
+  readLastAgentError,
+} from "@/lib/session-last-agent-error";
 
 export type MessageListProps = {
   items: RenderItem[];
@@ -29,7 +34,12 @@ export type MessageListProps = {
 };
 
 export function getItemKey(item: RenderItem): string {
-  if (item.type === "turn_group" || item.type === "prepare_progress") return item.id;
+  if (
+    item.type === "turn_group" ||
+    item.type === "prepare_progress" ||
+    item.type === "agent_error_notice"
+  )
+    return item.id;
   return item.message.id;
 }
 
@@ -49,21 +59,33 @@ export function getLastTurnGroupId(items: RenderItem[]) {
 // after the agent resumes — so the user can read the full error message at
 // their own pace. The sidebar icon, by contrast, also auto-hides once the
 // agent posts a new message (see agentErrorMessageForTask).
-export function LastAgentErrorNotice({ sessionId }: { sessionId: string | null }) {
+export function LastAgentErrorNotice({
+  sessionId,
+  error: providedError,
+}: {
+  sessionId: string | null;
+  error?: LastAgentError | null;
+}) {
   const metadata = useAppStore((state) =>
     sessionId ? state.taskSessions.items[sessionId]?.metadata : null,
   );
-  const error = readLastAgentError(metadata);
+  const error = providedError ?? readLastAgentError(metadata);
   const stamp = error ? lastAgentErrorStamp(error) : "";
   const dismissedStamp = useAppStore((state) =>
     sessionId ? state.dismissedAgentErrors[sessionId] : undefined,
   );
   const dismissAgentError = useAppStore((state) => state.dismissAgentError);
+  const setTaskSession = useAppStore((state) => state.setTaskSession);
 
   const dismiss = useCallback(() => {
     if (!sessionId || !stamp) return;
     dismissAgentError(sessionId, stamp);
-  }, [dismissAgentError, sessionId, stamp]);
+    dismissLastAgentError(sessionId, stamp)
+      .then((resp) => setTaskSession(resp.session))
+      .catch((err: unknown) => {
+        console.error("Failed to dismiss last agent error", err);
+      });
+  }, [dismissAgentError, sessionId, stamp, setTaskSession]);
 
   if (!error || dismissedStamp === stamp) return null;
 
@@ -177,6 +199,9 @@ export const MessageItem = memo(function MessageItem({
 }) {
   if (item.type === "prepare_progress") {
     return <PrepareProgress sessionId={item.sessionId} />;
+  }
+  if (item.type === "agent_error_notice") {
+    return <LastAgentErrorNotice sessionId={item.sessionId} error={item.error} />;
   }
   if (item.type === "turn_group") {
     return (

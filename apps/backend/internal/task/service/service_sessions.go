@@ -63,6 +63,26 @@ func (s *Service) GetTaskSession(ctx context.Context, sessionID string) (*models
 	return s.sessions.GetTaskSession(ctx, sessionID)
 }
 
+func (s *Service) DismissLastAgentError(ctx context.Context, sessionID, stamp string) (*models.TaskSession, error) {
+	session, err := s.sessions.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	lastErr, ok := models.LoadLastAgentError(session.Metadata)
+	if !ok {
+		return session, nil
+	}
+	if stamp != "" && lastErr.Stamp() != stamp {
+		return session, nil
+	}
+	now := time.Now().UTC()
+	lastErr.DismissedAt = &now
+	if err := s.sessions.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyLastAgentError, lastErr); err != nil {
+		return nil, err
+	}
+	return s.sessions.GetTaskSession(ctx, sessionID)
+}
+
 // GetPrimarySession returns the primary session for a task.
 func (s *Service) GetPrimarySession(ctx context.Context, taskID string) (*models.TaskSession, error) {
 	return s.sessions.GetPrimarySessionByTaskID(ctx, taskID)

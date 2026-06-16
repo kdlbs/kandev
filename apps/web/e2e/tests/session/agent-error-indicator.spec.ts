@@ -68,9 +68,27 @@ test.describe("Task agent error indicator", () => {
     await expect(testPage.getByRole("tooltip")).toContainText(ERROR_MESSAGE);
 
     // Dismissing the chat notice should also clear the sidebar icon. Both
-    // surfaces share the dismissal state through the UI store.
+    // surfaces share the dismissal state through the UI store and the server
+    // persists the dismissal for other browsers.
     await notice.getByRole("button", { name: "Hide previous agent error" }).click();
     await expect(notice).toBeHidden();
     await expect(errorIcon).toBeHidden();
+
+    await expect
+      .poll(async () => {
+        const { sessions } = await apiClient.listTaskSessions(task.id);
+        const sessionMeta = sessions.find((item) => item.id === task.session_id)?.metadata;
+        const error = sessionMeta?.last_agent_error as { dismissed_at?: string } | undefined;
+        return error?.dismissed_at ?? "";
+      })
+      .not.toBe("");
+
+    await testPage.evaluate(() => window.localStorage.removeItem("kandev.dismissedAgentErrors"));
+    await testPage.reload();
+    await session.waitForLoad();
+    await expect(testPage.getByTestId("last-agent-error-notice")).toBeHidden();
+    await expect(
+      session.sidebarTaskItem(taskTitle).first().getByTestId("task-agent-error-icon"),
+    ).toBeHidden();
   });
 });

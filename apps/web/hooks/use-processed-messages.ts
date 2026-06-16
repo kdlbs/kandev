@@ -12,6 +12,7 @@ import {
   findPendingClarificationGroup,
 } from "@/lib/utils/pending-clarification";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
+import type { LastAgentError } from "@/lib/session-last-agent-error";
 
 const debug = createDebugLogger("messages:process");
 
@@ -103,7 +104,18 @@ export type PrepareProgressItem = {
   sessionId: string;
 };
 
-export type RenderItem = { type: "message"; message: Message } | TurnGroup | PrepareProgressItem;
+export type AgentErrorNoticeItem = {
+  type: "agent_error_notice";
+  id: string;
+  sessionId: string;
+  error: LastAgentError;
+};
+
+export type RenderItem =
+  | { type: "message"; message: Message }
+  | TurnGroup
+  | PrepareProgressItem
+  | AgentErrorNoticeItem;
 
 export type GroupedRenderOptions = {
   canAnchorPrepareProgress?: boolean;
@@ -111,6 +123,7 @@ export type GroupedRenderOptions = {
 
 export type ProcessedMessagesOptions = {
   hasOlderMessages?: boolean;
+  lastAgentError?: LastAgentError | null;
 };
 
 function buildToolCallIds(messages: Message[]): Set<string> {
@@ -204,6 +217,26 @@ function renderItemKey(item: RenderItem): string {
   return item.type === "message" ? `m:${item.message.id}` : item.id;
 }
 
+function agentErrorNoticeItemsEqual(a: AgentErrorNoticeItem, b: AgentErrorNoticeItem): boolean {
+  return (
+    a.id === b.id &&
+    a.sessionId === b.sessionId &&
+    a.error.message === b.error.message &&
+    a.error.occurredAt === b.error.occurredAt &&
+    a.error.agentExecutionId === b.error.agentExecutionId
+  );
+}
+
+function turnGroupsEqual(a: TurnGroup, b: TurnGroup): boolean {
+  if (a.id !== b.id || a.turnId !== b.turnId || a.messages.length !== b.messages.length) {
+    return false;
+  }
+  for (let i = 0; i < a.messages.length; i++) {
+    if (a.messages[i] !== b.messages[i]) return false;
+  }
+  return true;
+}
+
 /** Content-equal when the wrapper would render identically. Turn groups compare
  *  their messages by positional identity so a streaming token in the active turn
  *  yields a fresh wrapper while quiescent earlier turns stay equal. */
@@ -211,14 +244,11 @@ function renderItemsEqual(a: RenderItem, b: RenderItem): boolean {
   if (a.type !== b.type) return false;
   if (a.type === "message" && b.type === "message") return a.message === b.message;
   if (a.type === "prepare_progress" && b.type === "prepare_progress") return a.id === b.id;
+  if (a.type === "agent_error_notice" && b.type === "agent_error_notice") {
+    return agentErrorNoticeItemsEqual(a, b);
+  }
   if (a.type === "turn_group" && b.type === "turn_group") {
-    if (a.id !== b.id || a.turnId !== b.turnId || a.messages.length !== b.messages.length) {
-      return false;
-    }
-    for (let i = 0; i < a.messages.length; i++) {
-      if (a.messages[i] !== b.messages[i]) return false;
-    }
-    return true;
+    return turnGroupsEqual(a, b);
   }
   return false;
 }
@@ -467,13 +497,54 @@ function buildGroupedItemsForHook(args: {
   allSessionMessages: Message[];
   resolvedSessionId: string | null;
   hasOlderMessages: boolean;
+  lastAgentError?: LastAgentError | null;
 }): RenderItem[] {
-  return buildGroupedRenderItems(args.regularMessages, args.resolvedSessionId, {
-    canAnchorPrepareProgress: canAnchorPrepareProgress(
-      args.allSessionMessages,
-      args.hasOlderMessages,
-    ),
-  });
+  return insertLastAgentErrorItem(
+    buildGroupedRenderItems(args.regularMessages, args.resolvedSessionId, {
+      canAnchorPrepareProgress: canAnchorPrepareProgress(
+        args.allSessionMessages,
+        args.hasOlderMessages,
+      ),
+    }),
+    args.resolvedSessionId,
+    args.lastAgentError,
+  );
+}
+
+function itemCreatedAt(item: RenderItem): string | undefined {
+  if (item.type === "message") return item.message.created_at;
+  if (item.type === "turn_group") return item.messages[item.messages.length - 1]?.created_at;
+  return undefined;
+}
+
+function insertionIndexForAgentError(items: RenderItem[], occurredAt?: string): number {
+  if (items.length === 0) return 0;
+  const errorTime = occurredAt ? Date.parse(occurredAt) : Number.NaN;
+  if (Number.isNaN(errorTime)) return items.length;
+  let insertAt = 0;
+  for (let i = 0; i < items.length; i++) {
+    const createdAt = itemCreatedAt(items[i]);
+    if (!createdAt) continue;
+    const itemTime = Date.parse(createdAt);
+    if (!Number.isNaN(itemTime) && itemTime <= errorTime) insertAt = i + 1;
+  }
+  return insertAt;
+}
+
+export function insertLastAgentErrorItem(
+  items: RenderItem[],
+  resolvedSessionId: string | null,
+  error?: LastAgentError | null,
+): RenderItem[] {
+  if (!resolvedSessionId || !error) return items;
+  const notice: AgentErrorNoticeItem = {
+    type: "agent_error_notice",
+    id: `last-agent-error-${resolvedSessionId}-${error.occurredAt ?? "unknown"}`,
+    sessionId: resolvedSessionId,
+    error,
+  };
+  const insertAt = insertionIndexForAgentError(items, error.occurredAt);
+  return [...items.slice(0, insertAt), notice, ...items.slice(insertAt)];
 }
 
 function buildTodoItems(visibleMessages: Message[]) {
@@ -568,8 +639,15 @@ export function useProcessedMessages(
       allSessionMessages: messages,
       resolvedSessionId,
       hasOlderMessages: options.hasOlderMessages ?? false,
+      lastAgentError: options.lastAgentError,
     });
-  }, [regularMessages, resolvedSessionId, messages, options.hasOlderMessages]);
+  }, [
+    regularMessages,
+    resolvedSessionId,
+    messages,
+    options.hasOlderMessages,
+    options.lastAgentError,
+  ]);
   const groupedItems = useStableGroupedItems(rawGroupedItems);
 
   useDebugProcessedPipeline({

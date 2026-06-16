@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"errors"
 	"maps"
 	"time"
@@ -103,9 +104,41 @@ const SessionMetaKeyLastAgentError = "last_agent_error"
 
 // LastAgentError is persisted under TaskSession.Metadata[SessionMetaKeyLastAgentError].
 type LastAgentError struct {
-	Message          string    `json:"message"`
-	OccurredAt       time.Time `json:"occurred_at"`
-	AgentExecutionID string    `json:"agent_execution_id,omitempty"`
+	Message          string     `json:"message"`
+	OccurredAt       time.Time  `json:"occurred_at"`
+	AgentExecutionID string     `json:"agent_execution_id,omitempty"`
+	DismissedAt      *time.Time `json:"dismissed_at,omitempty"`
+}
+
+func LoadLastAgentError(metadata map[string]interface{}) (LastAgentError, bool) {
+	if metadata == nil {
+		return LastAgentError{}, false
+	}
+	raw, ok := metadata[SessionMetaKeyLastAgentError]
+	if !ok || raw == nil {
+		return LastAgentError{}, false
+	}
+	var out LastAgentError
+	if err := mapToLastAgentError(raw, &out); err != nil || out.Message == "" {
+		return LastAgentError{}, false
+	}
+	return out, true
+}
+
+func mapToLastAgentError(raw interface{}, out *LastAgentError) error {
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(data, out)
+}
+
+func (e LastAgentError) Stamp() string {
+	return e.OccurredAt.UTC().Format(time.RFC3339Nano) + ":" + e.Message
+}
+
+func (e LastAgentError) IsDismissed() bool {
+	return e.DismissedAt != nil && !e.DismissedAt.IsZero()
 }
 
 // PendingStepCompletionSignal source values.

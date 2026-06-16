@@ -10,6 +10,7 @@ import {
   buildGroupedRenderItems,
   collapseTodoSnapshotsPerTurn,
   deduplicateAgentBootResumes,
+  insertLastAgentErrorItem,
   isAgentBootResumeMessage,
   isSetupScriptMessage,
   messageListMapsEqual,
@@ -259,6 +260,43 @@ describe("buildGroupedRenderItems prepare progress placement", () => {
     });
 
     expect(result.map((item) => item.type)).toEqual(["message", "prepare_progress"]);
+  });
+});
+
+describe("insertLastAgentErrorItem", () => {
+  it("inserts the notice after the nearest message before the error timestamp", () => {
+    const before = {
+      ...makeMessage("before", "message", undefined, "before"),
+      created_at: "2026-06-14T10:00:00Z",
+    };
+    const after = {
+      ...makeMessage("after", "message", undefined, "after"),
+      created_at: "2026-06-14T10:10:00Z",
+    };
+    const items = buildGroupedRenderItems([before, after], "s1", {
+      canAnchorPrepareProgress: false,
+    });
+
+    const result = insertLastAgentErrorItem(items, "s1", {
+      message: "peer disconnected before response",
+      occurredAt: "2026-06-14T10:05:00Z",
+    });
+
+    expect(result.map((item) => item.type)).toEqual(["message", "agent_error_notice", "message"]);
+  });
+
+  it("uses the notice as the only item when there are no messages", () => {
+    const result = insertLastAgentErrorItem([], "s1", {
+      message: "peer disconnected before response",
+      occurredAt: "2026-06-14T10:05:00Z",
+    });
+
+    expect(result).toEqual([
+      expect.objectContaining({
+        type: "agent_error_notice",
+        sessionId: "s1",
+      }),
+    ]);
   });
 });
 

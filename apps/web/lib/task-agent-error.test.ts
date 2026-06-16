@@ -97,6 +97,19 @@ describe("agentErrorMessageForTask", () => {
     ).toBeNull();
   });
 
+  it("hides the error when the session metadata is server-dismissed", () => {
+    const primary = primarySession({
+      metadata: {
+        last_agent_error: {
+          message: PRIMARY_ERROR,
+          occurred_at: ERROR_OCCURRED_AT,
+          dismissed_at: "2026-06-14T10:05:00Z",
+        },
+      },
+    });
+    expect(agentErrorMessageForTask(PRIMARY_TASK, { primary }, { "task-1": [primary] })).toBeNull();
+  });
+
   it("keeps the error when only an older stamp is dismissed", () => {
     const primary = primarySession();
     expect(

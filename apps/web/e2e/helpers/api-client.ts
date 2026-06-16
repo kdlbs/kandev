@@ -1124,6 +1124,7 @@ export class ApiClient {
       worktree_path?: string;
       worktree_branch?: string;
       error_message?: string;
+      metadata?: Record<string, unknown>;
     }>;
     total: number;
   }> {
