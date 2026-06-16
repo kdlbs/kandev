@@ -137,3 +137,41 @@ describe("agentErrorMessageForTask", () => {
     ).toBe(PRIMARY_ERROR);
   });
 });
+
+// Regression: string-based comparison of RFC3339 timestamps with mixed
+// fractional-second precision (e.g. ".5" vs ".50") sorts incorrectly, which
+// could leave a stale error icon visible or clear it too early. Numeric
+// Date.parse() comparison treats them as equal moments in time.
+describe("agentErrorMessageForTask (timestamp precision)", () => {
+  it("does not clear the error when an agent message shares the same instant", () => {
+    const errorAt = "2026-06-14T10:00:00.5Z";
+    const messageAt = "2026-06-14T10:00:00.50Z"; // same instant, longer fractional
+    const primary = primarySession({
+      metadata: { last_agent_error: { message: PRIMARY_ERROR, occurred_at: errorAt } },
+    });
+    expect(
+      agentErrorMessageForTask(
+        PRIMARY_TASK,
+        { primary },
+        { "task-1": [primary] },
+        { messagesBySession: { primary: [agentMessage({ created_at: messageAt })] } },
+      ),
+    ).toBe(PRIMARY_ERROR);
+  });
+
+  it("clears the error when an agent message is strictly later despite shorter fractional precision", () => {
+    const errorAt = "2026-06-14T10:00:00.999Z";
+    const messageAt = "2026-06-14T10:00:01.0Z";
+    const primary = primarySession({
+      metadata: { last_agent_error: { message: PRIMARY_ERROR, occurred_at: errorAt } },
+    });
+    expect(
+      agentErrorMessageForTask(
+        PRIMARY_TASK,
+        { primary },
+        { "task-1": [primary] },
+        { messagesBySession: { primary: [agentMessage({ created_at: messageAt })] } },
+      ),
+    ).toBeNull();
+  });
+});

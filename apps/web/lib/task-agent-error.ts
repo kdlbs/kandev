@@ -52,7 +52,9 @@ function hasAgentMessageAfter(
   occurredAt?: string,
 ): boolean {
   if (!messages || !occurredAt) return false;
+  const errorMs = Date.parse(occurredAt);
+  if (Number.isNaN(errorMs)) return false;
   return messages.some(
-    (msg) => msg.author_type === "agent" && msg.created_at.localeCompare(occurredAt) > 0,
+    (msg) => msg.author_type === "agent" && Date.parse(msg.created_at) > errorMs,
   );
 }

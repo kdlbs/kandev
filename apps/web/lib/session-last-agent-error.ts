@@ -18,8 +18,14 @@ const DISMISSED_AGENT_ERRORS_KEY = "kandev.dismissedAgentErrors";
 export function getStoredDismissedAgentErrors(): Record<string, string> {
   return getLocalStorage<Record<string, string>>(DISMISSED_AGENT_ERRORS_KEY, {}) ?? {};
 }
+/**
+ * Merge `map` into whatever is currently in localStorage so concurrent writes
+ * from other tabs (or older versions of this tab's state) are not clobbered.
+ * Entries in `map` win over the on-disk values for the same session.
+ */
 export function setStoredDismissedAgentErrors(map: Record<string, string>): void {
-  setLocalStorage(DISMISSED_AGENT_ERRORS_KEY, map);
+  const current = getStoredDismissedAgentErrors();
+  setLocalStorage(DISMISSED_AGENT_ERRORS_KEY, { ...current, ...map });
 }
 
 export function readLastAgentError(metadata: Record<string, unknown> | null | undefined) {
