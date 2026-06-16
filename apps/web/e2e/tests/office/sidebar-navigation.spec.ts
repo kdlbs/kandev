@@ -18,7 +18,7 @@ test.describe("Sidebar navigation", () => {
     await testPage.goto("/office");
     await expect(testPage.getByText("Agents Enabled")).toBeVisible({ timeout: 10_000 });
     const sidebar = new AppSidebarPage(testPage);
-    await expect(sidebar.root.getByRole("link", { name: /Tasks/i }).first()).toBeVisible();
+    await expect(sidebar.root.getByRole("link", { name: /Tasks/i })).toBeVisible();
     await expect(sidebar.root.getByText("No tasks yet.")).toHaveCount(0);
     await expect(sidebar.root.getByRole("button", { name: "Integrations" })).toHaveCount(0);
   });
