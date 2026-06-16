@@ -2,6 +2,8 @@
 
 import { useMemo, useSyncExternalStore } from "react";
 
+import { LOCATION_CHANGE_EVENT } from "./navigation-event";
+
 type NavigateOptions = {
   scroll?: boolean;
 };
@@ -14,8 +16,6 @@ export type AppRouter = {
   forward: () => void;
   prefetch: (_href: string) => void;
 };
-
-const LOCATION_CHANGE_EVENT = "kandev:navigation";
 
 export function useRouter(): AppRouter {
   return useMemo(

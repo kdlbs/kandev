@@ -3,14 +3,14 @@
 import { forwardRef } from "react";
 import type { AnchorHTMLAttributes, MouseEvent, ReactNode } from "react";
 
+import { LOCATION_CHANGE_EVENT } from "@/lib/routing/navigation-event";
+
 type AppLinkHref = string | URL;
 
 export type AppLinkProps = Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href"> & {
   href: AppLinkHref;
   children?: ReactNode;
 };
-
-const LOCATION_CHANGE_EVENT = "kandev:navigation";
 
 const Link = forwardRef<HTMLAnchorElement, AppLinkProps>(function Link(
   { href, onClick, ...props },

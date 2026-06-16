@@ -191,7 +191,7 @@ function spawnBackendProcess(
  */
 export const backendFixture = base.extend<object, { backend: BackendContext }>({
   backend: [
-    async (_fixtures, use, workerInfo) => {
+    async ({ browserName: _browserName }, use, workerInfo) => {
       const backendPort = BACKEND_BASE_PORT + workerInfo.workerIndex;
       const frontendPort = backendPort;
       const tmpDir = fs.mkdtempSync(

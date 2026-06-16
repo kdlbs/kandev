@@ -1,10 +1,14 @@
 import { act, renderHook } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { useParams, usePathname, useRouter, useSearchParams } from "./client-router";
 
 function setLocation(path: string) {
   window.history.replaceState({}, "", path);
 }
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("client router adapter", () => {
   it("pushes and replaces browser history routes", () => {
@@ -21,7 +25,6 @@ describe("client router adapter", () => {
     expect(window.location.pathname).toBe("/stats");
     expect(window.location.search).toBe("?range=7d");
     expect(scrollTo).toHaveBeenCalledTimes(1);
-    vi.unstubAllGlobals();
   });
 
   it("returns current path and search params", () => {
@@ -45,6 +48,5 @@ describe("client router adapter", () => {
     act(() => result.current.refresh());
 
     expect(reload).toHaveBeenCalledOnce();
-    vi.unstubAllGlobals();
   });
 });
