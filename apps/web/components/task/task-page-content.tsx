@@ -22,7 +22,11 @@ import { useSessionResumption } from "@/hooks/domains/session/use-session-resump
 import { useSessionAgentctl } from "@/hooks/domains/session/use-session-agentctl";
 import { useTaskFocus } from "@/hooks/domains/session/use-task-focus";
 import { useAppStore } from "@/components/state-provider";
-import { useEnsureTaskSession } from "@/hooks/domains/session/use-ensure-task-session";
+import {
+  useEnsureTaskSession,
+  type UseEnsureTaskSessionResult,
+} from "@/hooks/domains/session/use-ensure-task-session";
+import { EnsureSessionErrorBanner } from "@/components/task/ensure-session-error";
 import { fetchTask } from "@/lib/api";
 import { useTasks } from "@/hooks/use-tasks";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -218,6 +222,7 @@ type TaskPageInnerProps = {
   defaultLayouts: Record<string, Layout>;
   initialLayout?: string | null;
   officeTaskHref?: string | null;
+  ensureSession: UseEnsureTaskSessionResult;
 };
 
 type RemoteExecutorStatus = {
@@ -380,6 +385,7 @@ function TaskPageInner({
   defaultLayouts,
   initialLayout,
   officeTaskHref,
+  ensureSession,
 }: TaskPageInnerProps) {
   const taskProps = resolveTaskProps(task, repository);
   const remote = resolveRemoteExecutor(resumption.sessionStatus as RemoteExecutorStatus | null);
@@ -440,6 +446,13 @@ function TaskPageInner({
           />
           {debugEntries && <DebugOverlay title="Task Debug" entries={debugEntries} />}
           {!isMobile && <TaskTopBar {...topBarProps} />}
+          {ensureSession.status === "error" && (
+            <EnsureSessionErrorBanner
+              error={ensureSession.error}
+              onRetry={ensureSession.retry}
+              workspaceId={task?.workspace_id ?? null}
+            />
+          )}
           <TaskArchivedProvider value={archivedValue}>
             <TaskLayout {...layoutProps} />
           </TaskArchivedProvider>
@@ -517,7 +530,7 @@ function useTaskPageData(
   const { task } = useTaskDetails(activeTaskId, initialTask);
 
   const agent = useSessionAgent(task);
-  useEnsureTaskSession(task);
+  const ensureSession = useEnsureTaskSession(task);
   const initialSessionId = sessionId ?? agent.taskSessionId ?? null;
   const effectiveSessionId = validatedActiveSessionId ?? initialSessionId;
 
@@ -541,7 +554,7 @@ function useTaskPageData(
     [effectiveRepositories, task?.repositories],
   );
 
-  return { task, agent, effectiveSessionId, repository };
+  return { task, agent, effectiveSessionId, repository, ensureSession };
 }
 
 export function TaskPageContent({
@@ -560,7 +573,7 @@ export function TaskPageContent({
   const { isMobile } = useResponsiveBreakpoint();
   const connectionStatus = useAppStore((state) => state.connection.status);
 
-  const { task, agent, effectiveSessionId, repository } = useTaskPageData(
+  const { task, agent, effectiveSessionId, repository, ensureSession } = useTaskPageData(
     initialTask,
     initialTaskId,
     sessionId,
@@ -604,6 +617,7 @@ export function TaskPageContent({
       defaultLayouts={defaultLayouts}
       initialLayout={initialLayout}
       officeTaskHref={officeTaskHref}
+      ensureSession={ensureSession}
     />
   );
 }

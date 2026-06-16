@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
-import { Button } from "@kandev/ui/button";
 import { AgentLogo } from "@/components/agent-logo";
 import { GridSpinner } from "@/components/grid-spinner";
 import { PanelLoadingState } from "@/components/panel-loading-state";
@@ -14,6 +13,7 @@ import type { UseEnsureTaskSessionResult } from "@/hooks/domains/session/use-ens
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { TaskSession } from "@/lib/types/http";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { EnsureSessionErrorEmptyState } from "./ensure-session-error";
 import { PassthroughToolbar } from "./passthrough-toolbar";
 import { TaskChatPanel } from "./task-chat-panel";
 import {
@@ -30,6 +30,7 @@ type PreviewSessionTabsProps = {
   taskId: string;
   sessionId: string | null;
   ensureSession?: UseEnsureTaskSessionResult;
+  workspaceId?: string | null;
   onSessionChange?: (sessionId: string | null) => void;
 };
 
@@ -43,6 +44,7 @@ export function PreviewSessionTabs({
   taskId,
   sessionId,
   ensureSession,
+  workspaceId,
   onSessionChange,
 }: PreviewSessionTabsProps) {
   const { sessions, isLoaded } = useTaskSessions(taskId);
@@ -97,7 +99,13 @@ export function PreviewSessionTabs({
       return <PreviewLoadingState label="Preparing workspace…" />;
     }
     if (ensureSession?.status === "error") {
-      return <PreviewEnsureError onRetry={ensureSession.retry} />;
+      return (
+        <EnsureSessionErrorEmptyState
+          error={ensureSession.error}
+          onRetry={ensureSession.retry}
+          workspaceId={workspaceId ?? null}
+        />
+      );
     }
     return <PreviewEmptyState />;
   }
@@ -189,20 +197,6 @@ function PreviewEmptyState() {
       >
         No agents yet.
       </div>
-    </div>
-  );
-}
-
-function PreviewEnsureError({ onRetry }: { onRetry: () => void }) {
-  return (
-    <div
-      className="flex h-full flex-col items-center justify-center gap-3 text-sm"
-      data-testid="preview-ensure-error"
-    >
-      <span className="text-muted-foreground">Failed to prepare workspace.</span>
-      <Button variant="outline" size="sm" className="cursor-pointer" onClick={onRetry}>
-        Retry
-      </Button>
     </div>
   );
 }
