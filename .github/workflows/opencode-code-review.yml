@@ -70,11 +70,11 @@ jobs:
             echo
             echo "Repository review guidelines from base commit:"
             echo
-            git show "$BASE_SHA:AGENTS.md" | sed -n '1,220p'
+            git show "$BASE_SHA:AGENTS.md" 2>/dev/null | sed -n '1,220p' || echo "(AGENTS.md not present in base commit)"
             echo
             echo "Code review skill from base commit:"
             echo
-            git show "$BASE_SHA:.agents/skills/code-review/SKILL.md" | sed -n '1,220p'
+            git show "$BASE_SHA:.agents/skills/code-review/SKILL.md" 2>/dev/null | sed -n '1,220p' || echo "(code-review skill not present in base commit)"
           } > /tmp/opencode-review-guidelines.md
 
           {
@@ -331,11 +331,11 @@ jobs:
             echo
             echo "Repository review guidelines from base commit:"
             echo
-            git show "$BASE_SHA:AGENTS.md" | sed -n '1,220p'
+            git show "$BASE_SHA:AGENTS.md" 2>/dev/null | sed -n '1,220p' || echo "(AGENTS.md not present in base commit)"
             echo
             echo "Code review skill from base commit:"
             echo
-            git show "$BASE_SHA:.agents/skills/code-review/SKILL.md" | sed -n '1,220p'
+            git show "$BASE_SHA:.agents/skills/code-review/SKILL.md" 2>/dev/null | sed -n '1,220p' || echo "(code-review skill not present in base commit)"
           } > /tmp/opencode-review-guidelines.md
 
           {
