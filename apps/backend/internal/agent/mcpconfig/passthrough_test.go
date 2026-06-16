@@ -214,6 +214,66 @@ func TestCursorStrategy_NoWorkspace(t *testing.T) {
 	}
 }
 
+// --- Pi ----------------------------------------------------------------------
+
+func TestPiStrategy_ProjectFileMerge(t *testing.T) {
+	art, err := PiStrategy{}.BuildPassthroughMCP(sampleServers, PassthroughPaths{WorkspaceDir: "/work"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(art.Args) != 0 || len(art.Env) != 0 {
+		t.Error("pi strategy must not produce args or env")
+	}
+	if len(art.Files) != 1 {
+		t.Fatalf("expected one file, got %d", len(art.Files))
+	}
+	f := art.Files[0]
+	if f.Path != filepath.Join("/work", ".pi", "mcp.json") {
+		t.Errorf("Path = %q", f.Path)
+	}
+	if f.MergeKey != "mcpServers" {
+		t.Errorf("pi file must merge under mcpServers, got MergeKey=%q", f.MergeKey)
+	}
+	var got piMCPFile
+	if err := json.Unmarshal(f.Content, &got); err != nil {
+		t.Fatalf("content not valid JSON: %v", err)
+	}
+	if got.MCPServers["github"].Command != "npx" || got.MCPServers["github"].Env["GITHUB_TOKEN"] != "tok" {
+		t.Errorf("github entry = %+v", got.MCPServers["github"])
+	}
+	if got.MCPServers["stream"].Transport != "streamable-http" || got.MCPServers["stream"].URL != "https://x/mcp" {
+		t.Errorf("stream entry = %+v", got.MCPServers["stream"])
+	}
+}
+
+func TestPiStrategy_RemoteTransportMapping(t *testing.T) {
+	servers := []types.McpServer{
+		{Name: "sse", Type: "sse", URL: "https://x/sse"},
+		{Name: "http", Type: "http", URL: "https://x/http"},
+		{Name: "stream", Type: "streamable_http", URL: "https://x/stream"},
+	}
+	art, _ := PiStrategy{}.BuildPassthroughMCP(servers, PassthroughPaths{WorkspaceDir: "/work"})
+	var got piMCPFile
+	if err := json.Unmarshal(art.Files[0].Content, &got); err != nil {
+		t.Fatalf("content not valid JSON: %v", err)
+	}
+	if got.MCPServers["sse"].Transport != "sse" {
+		t.Errorf("sse Transport = %q, want sse", got.MCPServers["sse"].Transport)
+	}
+	if got.MCPServers["http"].Transport != "streamable-http" {
+		t.Errorf("http Transport = %q, want streamable-http", got.MCPServers["http"].Transport)
+	}
+	if got.MCPServers["stream"].Transport != "streamable-http" {
+		t.Errorf("stream Transport = %q, want streamable-http", got.MCPServers["stream"].Transport)
+	}
+}
+
+func TestPiStrategy_NoWorkspace(t *testing.T) {
+	if art, _ := (PiStrategy{}).BuildPassthroughMCP(sampleServers, PassthroughPaths{}); len(art.Files) != 0 {
+		t.Error("no workspace dir should produce no artifacts")
+	}
+}
+
 func TestMergeJSONUnderKey(t *testing.T) {
 	existing := []byte(`{"mcpServers":{"user-srv":{"url":"https://user"}},"otherTop":"keep"}`)
 	ours := []byte(`{"mcpServers":{"kandev":{"type":"http","url":"http://localhost:1/mcp"}}}`)
@@ -331,6 +391,7 @@ func TestStrategiesImplementInterface(t *testing.T) {
 	var _ PassthroughMCPStrategy = ClaudeStrategy{}
 	var _ PassthroughMCPStrategy = CodexStrategy{}
 	var _ PassthroughMCPStrategy = CursorStrategy{}
+	var _ PassthroughMCPStrategy = PiStrategy{}
 	var _ PassthroughMCPStrategy = OpenCodeStrategy{}
 }
 
@@ -343,6 +404,7 @@ func TestStrategiesDescribe(t *testing.T) {
 		"claude":   {ClaudeStrategy{}, "an MCP config file passed via the --mcp-config flag"},
 		"codex":    {CodexStrategy{}, "repeated -c mcp_servers.* command-line overrides"},
 		"cursor":   {CursorStrategy{}, "a project-local .cursor/mcp.json file (merged into an existing one)"},
+		"pi":       {PiStrategy{}, "a project-local .pi/mcp.json file (merged into an existing one)"},
 		"opencode": {OpenCodeStrategy{}, "a temp MCP config file referenced by the OPENCODE_CONFIG env var"},
 	}
 	for name, tc := range cases {

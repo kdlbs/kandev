@@ -187,6 +187,11 @@ type RuntimeConfig struct {
 	AssumeMcpHttp   bool   // Override: assume agent supports HTTP MCP servers even if not advertised
 	ProjectSkillDir string // CWD-relative path for project-level skills (e.g. ".claude/skills")
 	UserSkillDir    string // home-relative path for user-level skills (e.g. ".claude/skills")
+	// ProjectMCPStrategy materializes resolved MCP servers into a project-local
+	// config file before a protocol-mode agent subprocess starts. Use this for
+	// agents whose ACP adapter does not wire session/new mcpServers through to
+	// the underlying CLI.
+	ProjectMCPStrategy mcpconfig.PassthroughMCPStrategy
 	// RequiresProcessKill is true for agents whose subprocess does not exit
 	// when stdin is closed (e.g. OpenCode's ACP runtime, which keeps its HTTP
 	// server and MCP child tree alive). When true, the agentctl process

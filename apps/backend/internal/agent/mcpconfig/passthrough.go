@@ -321,6 +321,71 @@ func (CursorStrategy) Describe() string {
 	return "a project-local .cursor/mcp.json file (merged into an existing one)"
 }
 
+// --- Pi ----------------------------------------------------------------------
+
+const piStreamableHTTPTransport = "streamable-http"
+
+// PiStrategy writes a project-local .pi/mcp.json into the workspace. Pi's MCP
+// extensions read this project override and merge it with global/user MCP files.
+// When the file already exists, kandev's servers are merged into mcpServers and
+// other Pi settings are preserved.
+type PiStrategy struct{}
+
+type piMCPFile struct {
+	MCPServers map[string]piServerEntry `json:"mcpServers"`
+}
+
+type piServerEntry struct {
+	Transport string            `json:"transport,omitempty"`
+	Command   string            `json:"command,omitempty"`
+	Args      []string          `json:"args,omitempty"`
+	Env       map[string]string `json:"env,omitempty"`
+	URL       string            `json:"url,omitempty"`
+	Headers   map[string]string `json:"headers,omitempty"`
+}
+
+func (PiStrategy) BuildPassthroughMCP(servers []types.McpServer, paths PassthroughPaths) (PassthroughArtifacts, error) {
+	if len(servers) == 0 || paths.WorkspaceDir == "" {
+		return PassthroughArtifacts{}, nil
+	}
+	entries := make(map[string]piServerEntry, len(servers))
+	for _, srv := range servers {
+		if srv.Name == "" {
+			continue
+		}
+		if isStdioServer(srv) {
+			entries[srv.Name] = piServerEntry{Command: srv.Command, Args: srv.Args, Env: srv.Env}
+		} else {
+			entries[srv.Name] = piServerEntry{Transport: piTransport(srv.Type), URL: srv.URL, Headers: srv.Headers}
+		}
+	}
+	if len(entries) == 0 {
+		return PassthroughArtifacts{}, nil
+	}
+	content, err := marshalMCPFile(piMCPFile{MCPServers: entries})
+	if err != nil {
+		return PassthroughArtifacts{}, err
+	}
+	return PassthroughArtifacts{
+		Files: []PassthroughConfigFile{{
+			Path:     filepath.Join(paths.WorkspaceDir, ".pi", "mcp.json"),
+			Content:  content,
+			MergeKey: "mcpServers",
+		}},
+	}, nil
+}
+
+func (PiStrategy) Describe() string {
+	return "a project-local .pi/mcp.json file (merged into an existing one)"
+}
+
+func piTransport(t string) string {
+	if t == string(ServerTypeSSE) {
+		return string(ServerTypeSSE)
+	}
+	return piStreamableHTTPTransport
+}
+
 // --- OpenCode ----------------------------------------------------------------
 
 const (

@@ -25,3 +25,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 0017 | [Resource metrics sampling](0017-resource-metrics-sampling.md) | accepted | backend, frontend, protocol | 2026-06-14 |
 | 0018 | [Runtime settings overrides](0018-runtime-settings-overrides.md) | accepted | backend, frontend, cli | 2026-06-14 |
 | 0019 | [Restart supervisor owns backend restarts](0019-restart-supervisor.md) | accepted | backend, frontend, cli | 2026-06-14 |
+| 0020 | [Pi project MCP config injection](0020-pi-project-mcp-config-injection.md) | accepted | backend | 2026-06-16 |

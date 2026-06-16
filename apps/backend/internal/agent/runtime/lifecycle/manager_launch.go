@@ -806,6 +806,11 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 			execution.isResumedSession = true
 		}
 		execution.IsPassthrough = req.IsPassthrough
+		if !req.IsPassthrough {
+			if err := m.materializeRuntimeProjectMCP(ctx, execution, agentConfig); err != nil {
+				return nil, err
+			}
+		}
 		m.logger.Info("promoted workspace-only execution to agent execution",
 			zap.String("execution_id", execution.ID),
 			zap.String("session_id", req.SessionID),
@@ -914,6 +919,12 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	if profileInfo != nil && len(profileInfo.EnvVars) > 0 {
 		m.cacheResolvedProfileEnv(execution, m.resolveAgentProfileEnvVars(ctx, profileInfo.EnvVars))
 	}
+	if !reqWithWorktree.IsPassthrough {
+		if err := m.materializeRuntimeProjectMCP(ctx, execution, agentConfig); err != nil {
+			m.rollbackLaunchExecution(ctx, rt, execInstance, execution, "project MCP materialization failed")
+			return nil, err
+		}
+	}
 
 	// Track + persist + publish. Returns the rollback error if Add lost a race.
 	if err := m.registerAndPublishExecution(ctx, execution, rt, execInstance, req.SessionID); err != nil {
@@ -992,6 +1003,24 @@ func (m *Manager) registerAndPublishExecution(
 	// NOTE: This does NOT start the agent process — call StartAgentProcess() explicitly.
 	go m.waitForAgentctlReady(execution)
 	return nil
+}
+
+func (m *Manager) rollbackLaunchExecution(ctx context.Context, rt ExecutorBackend, execInstance *ExecutorInstance, execution *AgentExecution, reason string) {
+	m.logger.Warn("rolling back launch execution",
+		zap.String("execution_id", execution.ID),
+		zap.String("session_id", execution.SessionID),
+		zap.String("reason", reason))
+	if rt != nil && execInstance != nil {
+		if stopErr := rt.StopInstance(ctx, execInstance, false); stopErr != nil {
+			m.logger.Warn("failed to stop runtime instance during launch rollback",
+				zap.String("execution_id", execution.ID),
+				zap.Error(stopErr))
+		}
+	}
+	if execution.agentctl != nil {
+		execution.agentctl.Close()
+	}
+	execution.EndSessionSpan()
 }
 
 // SetExecutionDescription updates the task description stored in an execution's metadata.

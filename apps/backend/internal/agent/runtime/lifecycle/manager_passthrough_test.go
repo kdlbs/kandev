@@ -504,6 +504,77 @@ func TestPassthroughCursorMergesIntoExistingProjectFile(t *testing.T) {
 	}
 }
 
+func TestPassthroughPiWritesProjectFile(t *testing.T) {
+	mgr, execution, profile := newPassthroughMCPTestManager(t, "pi-acp")
+	piPath := filepath.Join(execution.WorkspacePath, ".pi", "mcp.json")
+
+	if _, _, _, _, err := mgr.passthroughAgentCommand(context.Background(), execution, profile); err != nil {
+		t.Fatalf("passthroughAgentCommand returned error: %v", err)
+	}
+
+	data, err := os.ReadFile(piPath)
+	if err != nil {
+		t.Fatalf("pi mcp.json not written: %v", err)
+	}
+	var payload struct {
+		MCPServers map[string]struct {
+			Transport string `json:"transport"`
+			URL       string `json:"url"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("pi mcp.json not valid JSON: %v\n%s", err, data)
+	}
+	kandev := payload.MCPServers[kandevMCPServerName]
+	if kandev.Transport != "streamable-http" {
+		t.Fatalf("kandev transport = %q, want streamable-http", kandev.Transport)
+	}
+	if kandev.URL != "http://localhost:45678/mcp" {
+		t.Fatalf("kandev URL = %q", kandev.URL)
+	}
+}
+
+func TestPassthroughPiMergesIntoExistingProjectFile(t *testing.T) {
+	mgr, execution, profile := newPassthroughMCPTestManager(t, "pi-acp")
+	piPath := filepath.Join(execution.WorkspacePath, ".pi", "mcp.json")
+	if err := os.MkdirAll(filepath.Dir(piPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	userContent := `{"settings":{"toolPrefix":"mcp"},"mcpServers":{"user-srv":{"command":"user-tool"}}}`
+	if err := os.WriteFile(piPath, []byte(userContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, _, _, err := mgr.passthroughAgentCommand(context.Background(), execution, profile); err != nil {
+		t.Fatalf("passthroughAgentCommand returned error: %v", err)
+	}
+
+	data, err := os.ReadFile(piPath)
+	if err != nil {
+		t.Fatalf("read pi mcp.json: %v", err)
+	}
+	var merged struct {
+		Settings   map[string]string `json:"settings"`
+		MCPServers map[string]struct {
+			Command   string `json:"command"`
+			Transport string `json:"transport"`
+			URL       string `json:"url"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &merged); err != nil {
+		t.Fatalf("merged file not JSON: %v\n%s", err, data)
+	}
+	if merged.Settings["toolPrefix"] != "mcp" {
+		t.Fatalf("existing settings not preserved: %+v", merged.Settings)
+	}
+	if merged.MCPServers["user-srv"].Command != "user-tool" {
+		t.Fatalf("existing server not preserved: %+v", merged.MCPServers)
+	}
+	if merged.MCPServers[kandevMCPServerName].URL != "http://localhost:45678/mcp" {
+		t.Fatalf("kandev server not merged: %+v", merged.MCPServers)
+	}
+}
+
 func TestGetPassthroughMCPFilesDecodesRestartShapes(t *testing.T) {
 	// After a backend restart, Metadata is rehydrated from JSON, so a []string
 	// becomes []interface{} of strings. The reader must tolerate both shapes.
