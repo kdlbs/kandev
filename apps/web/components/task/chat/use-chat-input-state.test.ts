@@ -29,6 +29,14 @@ function attachInputHandle(
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
 describe("useChatInputState", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -77,6 +85,44 @@ describe("useChatInputState", () => {
     });
 
     await waitFor(() => expect(result.current.value).toBe(""));
+    expect(clear).toHaveBeenCalled();
+    expect(resetHeight).toHaveBeenCalled();
+  });
+
+  it("keeps newer attachments when async submit succeeds after attachments change", async () => {
+    const submit = deferred<boolean>();
+    const onSubmit = vi
+      .fn<Parameters<SubmitHandler>, ReturnType<SubmitHandler>>()
+      .mockReturnValue(submit.promise);
+    const clear = vi.fn();
+    const resetHeight = vi.fn();
+    const { result } = renderInputState(onSubmit);
+
+    act(() => {
+      result.current.handleChange("hello");
+      attachInputHandle(result.current.inputRef, clear);
+    });
+    await waitFor(() => expect(result.current.value).toBe("hello"));
+
+    act(() => {
+      result.current.handleSubmit(resetHeight);
+    });
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+
+    await act(async () => {
+      await result.current.addFiles([
+        new File(["new attachment"], "later.txt", { type: "text/plain" }),
+      ]);
+    });
+    await waitFor(() => expect(result.current.allItems).toHaveLength(1));
+
+    await act(async () => {
+      submit.resolve(true);
+      await submit.promise;
+    });
+
+    await waitFor(() => expect(result.current.value).toBe(""));
+    expect(result.current.allItems).toHaveLength(1);
     expect(clear).toHaveBeenCalled();
     expect(resetHeight).toHaveBeenCalled();
   });

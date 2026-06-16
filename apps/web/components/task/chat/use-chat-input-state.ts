@@ -96,9 +96,21 @@ function clearDraft(sessionId: string | null) {
   setChatDraftAttachments(sessionId, []);
 }
 
+function clearDraftText(sessionId: string | null) {
+  if (!sessionId) return;
+  setChatDraftText(sessionId, "");
+  setChatDraftContent(sessionId, null);
+}
+
+function attachmentSnapshot(attachments: FileAttachment[]): string {
+  return attachments.map((att) => `${att.id}:${att.deliveryMode}`).join("|");
+}
+
 type ClearSubmittedInputArgs = {
   valueRef: MutableRefObject<string>;
   submittedText: string;
+  attachmentsRef: MutableRefObject<FileAttachment[]>;
+  submittedAttachments: string;
   inputRef: RefObject<TipTapInputHandle | null>;
   setValue: Dispatch<SetStateAction<string>>;
   setAttachments: Dispatch<SetStateAction<FileAttachment[]>>;
@@ -108,12 +120,19 @@ type ClearSubmittedInputArgs = {
 };
 
 function clearSubmittedInput(args: ClearSubmittedInputArgs) {
+  // Abort if the user already typed new content since this submit started.
   if (args.valueRef.current.trim() !== args.submittedText) return;
+  const attachmentsChanged =
+    attachmentSnapshot(args.attachmentsRef.current) !== args.submittedAttachments;
   args.inputRef.current?.clear();
   args.setValue("");
-  args.setAttachments([]);
   args.setHistoryIndex(-1);
   args.resetHeight();
+  if (attachmentsChanged) {
+    clearDraftText(args.sessionId);
+    return;
+  }
+  args.setAttachments([]);
   clearDraft(args.sessionId);
 }
 
@@ -139,7 +158,7 @@ type SubmitDraftArgs = {
   hasContextComments: boolean;
   inputRef: RefObject<TipTapInputHandle | null>;
   onSubmit: UseChatInputStateProps["onSubmit"];
-  clearArgs: Omit<ClearSubmittedInputArgs, "submittedText">;
+  clearArgs: Omit<ClearSubmittedInputArgs, "submittedText" | "submittedAttachments">;
 };
 
 function submitDraft(args: SubmitDraftArgs) {
@@ -147,6 +166,7 @@ function submitDraft(args: SubmitDraftArgs) {
   const trimmed = args.valueRef.current.trim();
   const allComments = collectComments(args.pendingCommentsRef.current);
   const currentAttachments = args.attachmentsRef.current;
+  const submittedAttachments = attachmentSnapshot(currentAttachments);
   const hasContent =
     trimmed || allComments.length > 0 || currentAttachments.length > 0 || args.hasContextComments;
   if (!hasContent) return;
@@ -161,7 +181,11 @@ function submitDraft(args: SubmitDraftArgs) {
     inlineTaskMentions.length > 0 ? inlineTaskMentions : undefined,
   );
   handleSubmitResult(result, () =>
-    clearSubmittedInput({ ...args.clearArgs, submittedText: trimmed }),
+    clearSubmittedInput({
+      ...args.clearArgs,
+      submittedText: trimmed,
+      submittedAttachments,
+    }),
   );
 }
 
@@ -313,6 +337,7 @@ export function useChatInputState({
         onSubmit,
         clearArgs: {
           valueRef,
+          attachmentsRef,
           inputRef,
           setValue,
           setAttachments,

@@ -193,10 +193,13 @@ func (r *messageAddSwitchRepo) CreateTurn(_ context.Context, turn *models.Turn) 
 }
 
 type switchingTurnStartOrchestrator struct {
+	mu               sync.Mutex
+	startOnce        sync.Once
 	repo             *messageAddSwitchRepo
 	forwardedSession string
 	startedSession   string
 	switchPrimary    bool
+	started          chan struct{}
 }
 
 func (o *switchingTurnStartOrchestrator) PromptTask(
@@ -206,7 +209,9 @@ func (o *switchingTurnStartOrchestrator) PromptTask(
 	_ []v1.MessageAttachment,
 	_ bool,
 ) (*orchestrator.PromptResult, error) {
+	o.mu.Lock()
 	o.forwardedSession = sessionID
+	o.mu.Unlock()
 	return &orchestrator.PromptResult{}, nil
 }
 
@@ -225,7 +230,14 @@ func (o *switchingTurnStartOrchestrator) StartCreatedSession(
 	_ bool,
 	_ []v1.MessageAttachment,
 ) error {
+	o.mu.Lock()
 	o.startedSession = sessionID
+	o.mu.Unlock()
+	o.startOnce.Do(func() {
+		if o.started != nil {
+			close(o.started)
+		}
+	})
 	return nil
 }
 
@@ -239,6 +251,18 @@ func (o *switchingTurnStartOrchestrator) ProcessOnTurnStart(context.Context, str
 
 func (o *switchingTurnStartOrchestrator) StepRequiresCompletionSignal(context.Context, string) bool {
 	return false
+}
+
+func (o *switchingTurnStartOrchestrator) getStartedSession() string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.startedSession
+}
+
+func (o *switchingTurnStartOrchestrator) getForwardedSession() string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.forwardedSession
 }
 
 func TestWSAddMessageUsesSessionSelectedByOnTurnStart(t *testing.T) {
@@ -262,7 +286,8 @@ func TestWSAddMessageUsesSessionSelectedByOnTurnStart(t *testing.T) {
 		Executors: repo, Environments: repo, TaskEnvironments: repo,
 		Reviews: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
-	orch := &switchingTurnStartOrchestrator{repo: repo, switchPrimary: true}
+	started := make(chan struct{})
+	orch := &switchingTurnStartOrchestrator{repo: repo, switchPrimary: true, started: started}
 	h := NewMessageHandlers(svc, orch, log)
 
 	req, err := ws.NewRequest("req-1", ws.ActionMessageAdd, map[string]interface{}{
@@ -278,11 +303,13 @@ func TestWSAddMessageUsesSessionSelectedByOnTurnStart(t *testing.T) {
 	require.Len(t, repo.messages, 1)
 	assert.Equal(t, "s2", repo.messages[0].TaskSessionID)
 
-	require.Eventually(t, func() bool {
-		return orch.startedSession != ""
-	}, time.Second, 10*time.Millisecond)
-	assert.Equal(t, "s2", orch.startedSession)
-	assert.Empty(t, orch.forwardedSession)
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("created session was not started")
+	}
+	assert.Equal(t, "s2", orch.getStartedSession())
+	assert.Empty(t, orch.getForwardedSession())
 }
 
 func TestWSAddMessageFailsWhenOnTurnStartCompletesSessionWithoutReplacement(t *testing.T) {
@@ -320,6 +347,6 @@ func TestWSAddMessageFailsWhenOnTurnStartCompletesSessionWithoutReplacement(t *t
 	require.NoError(t, err)
 	require.Equal(t, ws.MessageTypeError, resp.Type)
 	assert.Empty(t, repo.messages)
-	assert.Empty(t, orch.startedSession)
-	assert.Empty(t, orch.forwardedSession)
+	assert.Empty(t, orch.getStartedSession())
+	assert.Empty(t, orch.getForwardedSession())
 }

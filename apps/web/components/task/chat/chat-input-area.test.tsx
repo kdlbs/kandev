@@ -109,6 +109,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.clearAllMocks();
 });
 
@@ -161,7 +162,7 @@ describe("useSubmitHandler", () => {
   }
 
   it("shows a toast when sending fails", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
     handleSendMessageMock.mockRejectedValueOnce(new Error("WebSocket request timed out"));
     const { result } = renderHook(() => useSubmitHandler(panelState()));
 
@@ -175,6 +176,5 @@ describe("useSubmitHandler", () => {
         "The connection dropped or timed out. Refresh the task to confirm whether it went through.",
       variant: "error",
     });
-    errorSpy.mockRestore();
   });
 });
