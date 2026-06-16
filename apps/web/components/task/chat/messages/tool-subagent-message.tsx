@@ -75,13 +75,14 @@ function SubagentHeader({
       )}
       <span
         data-testid="subagent-type"
-        className="bg-muted text-muted-foreground text-[10px] px-1.5 rounded font-medium uppercase tracking-wide"
+        className="bg-muted text-muted-foreground text-[10px] px-1.5 rounded font-medium uppercase tracking-wide whitespace-nowrap flex-shrink-0"
       >
         {subagentType}
       </span>
       <span
         data-testid="subagent-description"
-        className="font-mono text-xs truncate text-muted-foreground inline-flex items-center gap-1.5"
+        title={description}
+        className="font-mono text-xs truncate text-muted-foreground inline-flex items-center gap-1.5 min-w-0"
       >
         {description}
         {isActive && <GridSpinner className="text-muted-foreground shrink-0" />}
