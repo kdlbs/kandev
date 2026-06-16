@@ -16,7 +16,6 @@ import { SetupWizard } from "@/app/office/setup/setup-wizard";
 import { loadSetupRouteData } from "@/app/office/setup/setup-route-data";
 import type { SetupWizardRouteProps } from "@/app/office/setup/setup-route-data";
 import ProviderRoutingPage from "@/app/office/workspace/routing/page";
-import RoutineDetailPage from "@/app/office/routines/[id]/page";
 import { RoutinesPageClient } from "@/app/office/routines/routines-page-client";
 import SettingsPage from "@/app/office/workspace/settings/page";
 import SyncPage from "@/app/office/workspace/settings/sync/page";
@@ -37,6 +36,7 @@ import {
   AgentRunDetailRoute,
   AgentRunsRoute,
 } from "./office-agent-client-routes";
+import { RoutineDetailRoute } from "./office-routine-client-routes";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 
 type RouteRenderer = () => React.ReactNode;
@@ -99,7 +99,7 @@ function renderOfficeRoute(pathname: string) {
 
   const routineId = matchSingle(pathname, /^\/office\/routines\/([^/]+)$/);
   if (routineId) {
-    return <RoutineDetailPage params={Promise.resolve({ id: routineId })} />;
+    return <RoutineDetailRoute routineId={routineId} />;
   }
 
   const taskId = matchSingle(pathname, /^\/office\/tasks\/([^/]+)$/);
