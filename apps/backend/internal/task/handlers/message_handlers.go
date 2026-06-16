@@ -204,7 +204,6 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	if wsErr != nil {
 		return wsErr, nil
 	}
-	isCreatedSession := sessionResp.Session.State == models.TaskSessionStateCreated
 
 	// Transition task from REVIEW → IN_PROGRESS if needed
 	if err := h.ensureTaskInProgress(ctx, req.TaskID); err != nil {
@@ -226,7 +225,10 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 				zap.String("session_id", req.TaskSessionID),
 				zap.Error(err))
 		}
+		sessionResp = h.resolveSessionAfterTurnStart(ctx, req.TaskID, req.TaskSessionID, sessionResp)
+		req.TaskSessionID = sessionResp.Session.ID
 	}
+	isCreatedSession := sessionResp.Session.State == models.TaskSessionStateCreated
 
 	// Build metadata with attachments, plan mode, review comments, and context files
 	meta := orchestrator.NewUserMessageMeta().
@@ -284,6 +286,38 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	}
 
 	return response, nil
+}
+
+func (h *MessageHandlers) resolveSessionAfterTurnStart(
+	ctx context.Context,
+	taskID, submittedSessionID string,
+	current *dto.GetTaskSessionResponse,
+) *dto.GetTaskSessionResponse {
+	if current == nil || current.Session.ID == "" {
+		return current
+	}
+	reloaded, err := h.service.GetTaskSession(ctx, submittedSessionID)
+	if err != nil {
+		h.logger.Warn("failed to reload session after on_turn_start",
+			zap.String("task_id", taskID),
+			zap.String("session_id", submittedSessionID),
+			zap.Error(err))
+		return current
+	}
+	if reloaded.State != models.TaskSessionStateCompleted {
+		return &dto.GetTaskSessionResponse{Session: dto.FromTaskSession(reloaded)}
+	}
+	primary, err := h.service.GetPrimarySession(ctx, taskID)
+	if err != nil || primary == nil || primary.ID == submittedSessionID {
+		if err != nil {
+			h.logger.Warn("failed to load primary session after on_turn_start switch",
+				zap.String("task_id", taskID),
+				zap.String("session_id", submittedSessionID),
+				zap.Error(err))
+		}
+		return &dto.GetTaskSessionResponse{Session: dto.FromTaskSession(reloaded)}
+	}
+	return &dto.GetTaskSessionResponse{Session: dto.FromTaskSession(primary)}
 }
 
 // validateAddMessageRequest returns a non-empty error string if the request is invalid.

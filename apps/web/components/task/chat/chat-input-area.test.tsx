@@ -1,8 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 
 const archiveAndSwitchMock = vi.fn();
 const toastMock = vi.fn();
+const handleSendMessageMock = vi.fn();
 const taskPRsByTaskId = vi.hoisted(() => ({
   value: {
     "task-1": [{ pr_number: 42, state: "merged" }],
@@ -50,7 +59,7 @@ vi.mock("@/hooks/use-keyboard-shortcut", () => ({
 
 vi.mock("@/hooks/use-message-handler", () => ({
   buildTaskMentionsContext: vi.fn(),
-  useMessageHandler: () => vi.fn(),
+  useMessageHandler: () => ({ handleSendMessage: handleSendMessageMock }),
 }));
 
 vi.mock("@/hooks/domains/kanban/use-plan-actions", () => ({
@@ -88,10 +97,11 @@ const mockState = {
   },
 };
 
-import { PRMergedBanner } from "./chat-input-area";
+import { PRMergedBanner, useSubmitHandler } from "./chat-input-area";
 
 beforeEach(() => {
   archiveAndSwitchMock.mockResolvedValue(undefined);
+  handleSendMessageMock.mockResolvedValue(undefined);
   taskPRsByTaskId.value = {
     "task-1": [{ pr_number: 42, state: "merged" }],
   };
@@ -124,5 +134,47 @@ describe("PRMergedBanner", () => {
         variant: "error",
       }),
     );
+  });
+});
+
+describe("useSubmitHandler", () => {
+  function panelState(overrides = {}) {
+    return {
+      resolvedSessionId: "session-1",
+      taskId: "task-1",
+      sessionModel: null,
+      activeModel: null,
+      isAgentBusy: false,
+      activeDocument: null,
+      planComments: [],
+      pendingPRFeedback: [],
+      contextFiles: [],
+      prompts: [],
+      markCommentsSent: vi.fn(),
+      clearSessionPlanComments: vi.fn(),
+      handleClearPRFeedback: vi.fn(),
+      clearEphemeral: vi.fn(),
+      addContextFile: vi.fn(),
+      planModeEnabled: false,
+      ...overrides,
+    } as never;
+  }
+
+  it("shows a toast when sending fails", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    handleSendMessageMock.mockRejectedValueOnce(new Error("WebSocket request timed out"));
+    const { result } = renderHook(() => useSubmitHandler(panelState()));
+
+    await act(async () => {
+      await result.current.handleSubmit("hello");
+    });
+
+    expect(toastMock).toHaveBeenCalledWith({
+      title: "Message send status unknown",
+      description:
+        "The connection dropped or timed out. Refresh the task to confirm whether it went through.",
+      variant: "error",
+    });
+    errorSpy.mockRestore();
   });
 });

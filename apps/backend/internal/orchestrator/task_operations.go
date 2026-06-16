@@ -278,11 +278,8 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 			zap.String("old_profile", session.AgentProfileID),
 			zap.String("new_profile", effectiveProfileID))
 		session.AgentProfileID = effectiveProfileID
-		// Tag as workflow-spawned so a later transition to a plain step can
-		// correctly revert to the task default. Without this, the in-place
-		// profile mutation here is invisible to maybySwitchSessionForProfile,
-		// which would treat the session as user-chosen and leave it on the
-		// override forever.
+		// Tag as workflow-spawned provenance: the in-place profile mutation
+		// came from a workflow step override, not direct user selection.
 		s.tagSessionAsWorkflowSwitched(ctx, sessionID)
 		// Re-resolve the agent profile snapshot so the tab shows the correct agent logo/name.
 		// Set a minimal snapshot first so stale data is never persisted if resolution fails.
@@ -565,9 +562,8 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	}
 
 	// When the workflow step overrode the caller's profile, tag the session
-	// so maybySwitchSessionForProfile knows it can revert to the task default
-	// on a later plain-step transition. Without this tag, the session looks
-	// indistinguishable from a user-chosen one and stays on the override.
+	// for provenance: the profile came from workflow routing rather than
+	// direct user selection.
 	if overrideApplied {
 		s.tagSessionAsWorkflowSwitched(ctx, sessionID)
 	}
@@ -691,8 +687,8 @@ func (s *Service) createStartSession(
 		// mutation: the session is created directly with the assignee
 		// profile (which falls back to the step's agent_profile_id via the
 		// runner projection). If that profile differs from the caller's,
-		// the assignment was workflow-driven — tag so a later transition
-		// to a plain step knows it can revert to the task default.
+		// the assignment was workflow-driven, so keep that provenance on
+		// the session metadata.
 		if agentProfileID != "" && session.AgentProfileID != "" && session.AgentProfileID != agentProfileID {
 			s.tagSessionAsWorkflowSwitched(ctx, session.ID)
 		}

@@ -16,6 +16,7 @@ import { type ContextFile } from "@/lib/state/context-files-store";
 import type { TaskMentionData } from "@/hooks/use-inline-mention";
 import {
   ChatInputContainer,
+  type ChatSubmitResult,
   type ChatInputContainerHandle,
   type MessageAttachment,
 } from "@/components/task/chat/chat-input-container";
@@ -99,12 +100,17 @@ function pickInputPlaceholder(a: PlaceholderArgs): string {
   );
 }
 
-export function useSubmitHandler(
-  panelState: ReturnType<typeof useChatPanelState>,
-  onSend?: (message: string) => void,
-) {
-  const [isSending, setIsSending] = useState(false);
-  const storeApi = useAppStoreApi();
+function showUnknownMessageSendToast(error: unknown, toast: ReturnType<typeof useToast>["toast"]) {
+  console.error("Failed to send message:", error);
+  toast({
+    title: "Message send status unknown",
+    description:
+      "The connection dropped or timed out. Refresh the task to confirm whether it went through.",
+    variant: "error",
+  });
+}
+
+function usePanelMessageHandler(panelState: ReturnType<typeof useChatPanelState>) {
   const {
     resolvedSessionId,
     sessionModel,
@@ -112,17 +118,10 @@ export function useSubmitHandler(
     isAgentBusy,
     activeDocument,
     planComments,
-    pendingPRFeedback,
     contextFiles,
     prompts,
-    markCommentsSent,
-    clearSessionPlanComments,
-    handleClearPRFeedback,
-    clearEphemeral,
-    addContextFile,
-    planModeEnabled,
   } = panelState;
-  const { handleSendMessage } = useMessageHandler({
+  return useMessageHandler({
     resolvedSessionId,
     taskId: panelState.taskId,
     sessionModel,
@@ -134,6 +133,27 @@ export function useSubmitHandler(
     contextFiles,
     prompts,
   });
+}
+
+export function useSubmitHandler(
+  panelState: ReturnType<typeof useChatPanelState>,
+  onSend?: (message: string) => void,
+) {
+  const [isSending, setIsSending] = useState(false);
+  const storeApi = useAppStoreApi();
+  const { toast } = useToast();
+  const {
+    resolvedSessionId,
+    planComments,
+    pendingPRFeedback,
+    markCommentsSent,
+    clearSessionPlanComments,
+    handleClearPRFeedback,
+    clearEphemeral,
+    addContextFile,
+    planModeEnabled,
+  } = panelState;
+  const { handleSendMessage } = usePanelMessageHandler(panelState);
 
   const handleSubmit = useCallback(
     async (
@@ -154,9 +174,7 @@ export function useSubmitHandler(
         );
         const hasReviewComments = !!(reviewComments && reviewComments.length > 0);
         if (onSend) {
-          // The onSend path bypasses useMessageHandler.buildFinalMessage, so
-          // expand task mentions here — otherwise the task chips show in the
-          // editor but the agent never receives the <kandev-system> block.
+          // Expand task mentions because onSend bypasses useMessageHandler.buildFinalMessage.
           const taskCtx = inlineTaskMentions?.length
             ? buildTaskMentionsContext(inlineTaskMentions, storeApi.getState())
             : "";
@@ -181,6 +199,9 @@ export function useSubmitHandler(
             addContextFile(resolvedSessionId, { path: PLAN_CONTEXT_PATH, name: "Plan" });
           }
         }
+      } catch (error) {
+        showUnknownMessageSendToast(error, toast);
+        return false;
       } finally {
         setIsSending(false);
       }
@@ -199,6 +220,7 @@ export function useSubmitHandler(
       clearEphemeral,
       planModeEnabled,
       addContextFile,
+      toast,
     ],
   );
 
@@ -456,7 +478,7 @@ type ChatInputAreaProps = {
     attachments?: MessageAttachment[],
     inlineMentions?: ContextFile[],
     inlineTaskMentions?: TaskMentionData[],
-  ) => Promise<void>;
+  ) => ChatSubmitResult;
   handleCancelTurn: () => Promise<void>;
   showRequestChangesTooltip: boolean;
   onRequestChangesTooltipDismiss?: () => void;

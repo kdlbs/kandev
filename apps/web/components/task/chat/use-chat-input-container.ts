@@ -9,7 +9,11 @@ import type { ContextItem } from "@/lib/types/context";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { Message } from "@/lib/types/http";
 import type { DiffComment } from "@/lib/diff/types";
-import type { MessageAttachment, ChatInputContainerHandle } from "./chat-input-container";
+import type {
+  ChatSubmitResult,
+  MessageAttachment,
+  ChatInputContainerHandle,
+} from "./chat-input-container";
 
 type UseChatInputContainerParams = {
   ref: React.ForwardedRef<ChatInputContainerHandle>;
@@ -44,7 +48,7 @@ type UseChatInputContainerParams = {
     attachments?: MessageAttachment[],
     inlineMentions?: ContextFile[],
     inlineTaskMentions?: import("@/hooks/use-inline-mention").TaskMentionData[],
-  ) => void;
+  ) => ChatSubmitResult;
 };
 
 function useInputHandle(

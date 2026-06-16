@@ -42,6 +42,8 @@ export type ChatInputContainerHandle = {
   getAttachments: () => MessageAttachment[];
 };
 
+export type ChatSubmitResult = void | boolean | Promise<void | boolean>;
+
 type ChatInputContainerProps = {
   onSubmit: (
     message: string,
@@ -49,7 +51,7 @@ type ChatInputContainerProps = {
     attachments?: MessageAttachment[],
     inlineMentions?: ContextFile[],
     inlineTaskMentions?: import("@/hooks/use-inline-mention").TaskMentionData[],
-  ) => void;
+  ) => ChatSubmitResult;
   sessionId: string | null;
   taskId: string | null;
   taskTitle?: string;

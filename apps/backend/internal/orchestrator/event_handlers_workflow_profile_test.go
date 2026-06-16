@@ -804,10 +804,10 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 		}
 	})
 
-	// Inverse of the above: when the current session was spawned by a
-	// previous step's agent_profile override, transitioning to a plain step
-	// SHOULD revert to the task default.
-	t.Run("reverts to task default when current session was workflow-spawned", func(t *testing.T) {
+	// Workflow-spawned sessions should behave like user-chosen sessions when
+	// the target step has no profile override: preserve the active session
+	// instead of silently reverting to the task default.
+	t.Run("keeps workflow-spawned session when step has no override", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		now := time.Now().UTC()
 
@@ -870,39 +870,23 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 
 		svc.processOnEnter(ctx, "t1", session, step, "desc")
 
-		oldSession, err := repo.GetTaskSession(ctx, "s1")
+		updated, err := repo.GetTaskSession(ctx, "s1")
 		if err != nil {
-			t.Fatalf("failed to get old session: %v", err)
+			t.Fatalf("failed to get session: %v", err)
 		}
-		if oldSession.State != models.TaskSessionStateCompleted {
-			t.Errorf("workflow-spawned session should be completed when reverting to default, got %s", oldSession.State)
+		if updated.State == models.TaskSessionStateCompleted {
+			t.Fatal("workflow-spawned session must not be completed when the target step has no override")
+		}
+		if updated.AgentProfileID != "profile-b" {
+			t.Fatalf("expected active profile-b session to be preserved, got %q", updated.AgentProfileID)
 		}
 
 		sessions, err := repo.ListTaskSessions(ctx, "t1")
 		if err != nil {
 			t.Fatalf("failed to list sessions: %v", err)
 		}
-		if len(sessions) != 2 {
-			t.Fatalf("expected exactly 2 sessions (old + reverted), got %d", len(sessions))
-		}
-		var newSession *models.TaskSession
-		profileACount := 0
-		for _, s := range sessions {
-			if s.AgentProfileID == "profile-a" {
-				profileACount++
-			}
-			if s.ID != "s1" {
-				newSession = s
-			}
-		}
-		if profileACount != 1 {
-			t.Fatalf("expected exactly one profile-a session after revert, got %d", profileACount)
-		}
-		if newSession == nil {
-			t.Fatal("expected a new session for task default profile")
-		}
-		if newSession.AgentProfileID != "profile-a" {
-			t.Errorf("expected reverted profile-a, got %q", newSession.AgentProfileID)
+		if len(sessions) != 1 {
+			t.Fatalf("expected no default-profile session to be spawned, got %d sessions", len(sessions))
 		}
 	})
 }
