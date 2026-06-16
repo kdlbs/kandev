@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/components/routing/app-link";
 import { IconAlertTriangle, IconRefresh } from "@tabler/icons-react";
 import { Alert, AlertDescription, AlertTitle } from "@kandev/ui/alert";
 import { Button } from "@kandev/ui/button";
