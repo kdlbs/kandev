@@ -1,6 +1,6 @@
 ---
 name: pr-fixup
-description: Wait for CI checks and automated reviews (CodeRabbit, Greptile, Claude, cubic) on a PR, fix failures and address comments, then push.
+description: Wait for CI checks and automated reviews (CodeRabbit, Greptile, Claude, OpenCode, cubic) on a PR, fix failures and address comments, then push.
 ---
 
 # PR Fixup
@@ -12,7 +12,7 @@ Wait for CI and code review to complete on a pull request, fix any failures or v
 
 ## Available skills and subagents
 
-- **`pr-poller` subagent (Sonnet)** — Polls CI checks and the 4 review bots until terminal, returns a compact structured report. Replaces the old steps 1-3 and the post-push re-check (step 6).
+- **`pr-poller` subagent (Sonnet)** — Polls CI checks and the 5 review bots until terminal, returns a compact structured report. Replaces the old steps 1-3 and the post-push re-check (step 6).
 - **`verify` subagent (Sonnet)** — Run the full verification pipeline (format, typecheck, test, lint) before pushing fixes.
 - **`/e2e`** — Read for debugging guidance when E2E tests fail in CI. Covers test patterns, run commands, failure triage, and local reproduction.
 - **`/commit`** — Use for staging and committing fixes with Conventional Commits format.
@@ -50,7 +50,7 @@ Mark task 1 as in_progress.
 
 If available, invoke the `pr-poller` subagent with the PR number (or let it resolve via `gh pr view` against the current branch). The subagent:
 - Fetches the current CI/bot/comment state once
-- Polls (30s cadence, **20 min cap**) until every CI check and every bot (CodeRabbit, Greptile, Claude, cubic) reaches a terminal state
+- Polls (30s cadence, **20 min cap**) until every CI check and every bot (CodeRabbit, Greptile, Claude, OpenCode, cubic) reaches a terminal state
 - Counts unresolved review threads and bot issue comments
 - Returns a structured report between `=== pr-poller report ===` and `=== end ===` markers
 
@@ -194,7 +194,7 @@ Use the report's `unresolved_review_threads` and `issue_comments_from_bots` coun
 Otherwise, fetch the actual comment bodies on demand — one bot or one set at a time, not all at once:
 
 ```bash
-# Inline review threads (humans, Greptile, Claude same-repo, cubic):
+# Inline review threads (humans, Greptile, Claude same-repo, OpenCode, cubic):
 gh api repos/:owner/:repo/pulls/<number>/comments
 # Issue comments (CodeRabbit walkthrough, Claude fork findings):
 gh pr view <number> --json comments
@@ -410,7 +410,7 @@ Mark task 6 as completed.
 
 ### Multi-round bot reviews
 
-**Expect new threads after every push.** CodeRabbit, Greptile, Claude, and cubic often re-review the latest commit and open fresh inline threads even when earlier ones were resolved. On cross-cutting changes (backend event payloads + frontend WS handlers + E2E), plan for 2–3 fixup rounds. After each push, always run `scripts/pr-state --summary <PR>` plus `scripts/pr-resolve list <PR>` before declaring done — do not rely on the prior round's zero count or CI status alone.
+**Expect new threads after every push.** CodeRabbit, Greptile, Claude, OpenCode, and cubic often re-review the latest commit and open fresh inline threads even when earlier ones were resolved. On cross-cutting changes (backend event payloads + frontend WS handlers + E2E), plan for 2–3 fixup rounds. After each push, always run `scripts/pr-state --summary <PR>` plus `scripts/pr-resolve list <PR>` before declaring done — do not rely on the prior round's zero count or CI status alone.
 
 **Stop when green unless the next comment is clearly worth another cycle.** Tiny review-only commits restart the full CI and bot-review stack. Once the PR is green with no unresolved threads, avoid nonessential cleanup that would trigger another round unless the comment is blocking, clearly valid, or requested by the user.
 
