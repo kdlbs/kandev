@@ -1,8 +1,26 @@
+import { getLocalStorage, setLocalStorage } from "@/lib/local-storage";
+
 export type LastAgentError = {
   message: string;
   occurredAt?: string;
   agentExecutionId?: string;
 };
+
+// --- Dismissed agent errors (localStorage, global) ---
+//
+// Tracks the most recent dismissed `last_agent_error` stamp per session so the
+// red error icon in the sidebar and the chat banner can share dismissal state
+// across components and reloads. Bounded growth: one entry per session that
+// ever had an error.
+
+const DISMISSED_AGENT_ERRORS_KEY = "kandev.dismissedAgentErrors";
+
+export function getStoredDismissedAgentErrors(): Record<string, string> {
+  return getLocalStorage<Record<string, string>>(DISMISSED_AGENT_ERRORS_KEY, {}) ?? {};
+}
+export function setStoredDismissedAgentErrors(map: Record<string, string>): void {
+  setLocalStorage(DISMISSED_AGENT_ERRORS_KEY, map);
+}
 
 export function readLastAgentError(metadata: Record<string, unknown> | null | undefined) {
   if (!metadata) return null;
@@ -19,9 +37,14 @@ export function readLastAgentError(metadata: Record<string, unknown> | null | un
   } satisfies LastAgentError;
 }
 
-export function lastAgentErrorDismissKey(sessionId: string, error: LastAgentError) {
-  const stamp = `${error.occurredAt ?? ""}:${error.message}`;
-  return `kandev:last-agent-error-dismissed:${sessionId}:${stamp}`;
+/**
+ * Stable identifier for a specific error event. Two errors share a stamp iff
+ * they have the same occurredAt timestamp and message. Used to decide whether
+ * a prior dismissal still applies after a fresh failure replaces the
+ * `last_agent_error` metadata.
+ */
+export function lastAgentErrorStamp(error: LastAgentError) {
+  return `${error.occurredAt ?? ""}:${error.message}`;
 }
 
 function readOptionalString(value: unknown) {

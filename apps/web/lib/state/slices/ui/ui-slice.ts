@@ -16,6 +16,7 @@ import {
   setStoredSidebarDraft,
   setStoredSidebarUserViews,
 } from "@/lib/local-storage";
+import { buildDismissedAgentErrors } from "./dismissed-agent-errors-actions";
 import {
   DEFAULT_SECTION_EXPANDED,
   buildAppSidebarActions,
@@ -134,6 +135,7 @@ export const defaultUIState: UISliceState = {
     width: APP_SIDEBAR_EXPANDED_WIDTH,
     settingsMode: false,
   },
+  dismissedAgentErrors: {},
 };
 
 type ImmerSet = Parameters<typeof createUISlice>[0];
@@ -554,6 +556,7 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
   ...buildSidebarTaskPrefsActions(set),
   ...buildCollapsedSubtaskActions(set, get),
   ...buildSystemHealthActions(set),
+  ...buildDismissedAgentErrors(set, get),
   setRightPanelActiveTab: (sessionId, tab) =>
     set((draft) => {
       draft.rightPanel.activeTabBySessionId[sessionId] = tab;

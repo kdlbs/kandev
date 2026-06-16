@@ -61,10 +61,13 @@ test.describe("Task agent error indicator", () => {
     await expect(notice).toContainText("Previous agent error");
     await expect(notice).toContainText(ERROR_MESSAGE);
 
-    await notice.getByRole("button", { name: "Hide previous agent error" }).click();
-    await expect(notice).toBeHidden();
-
     await errorIcon.hover();
     await expect(testPage.getByRole("tooltip")).toContainText(ERROR_MESSAGE);
+
+    // Dismissing the chat notice should also clear the sidebar icon. Both
+    // surfaces share the dismissal state through the UI store.
+    await notice.getByRole("button", { name: "Hide previous agent error" }).click();
+    await expect(notice).toBeHidden();
+    await expect(errorIcon).toBeHidden();
   });
 });

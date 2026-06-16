@@ -154,6 +154,12 @@ export type UISliceState = {
   sidebarTaskPrefs: SidebarTaskPrefsState;
   /** Unified AppSidebar collapse + section expand state (localStorage). */
   appSidebar: AppSidebarState;
+  /**
+   * Most recently dismissed `last_agent_error` stamp per sessionId. Shared by
+   * the chat banner and the sidebar error icon so dismissing the banner also
+   * hides the icon. Persisted to localStorage.
+   */
+  dismissedAgentErrors: Record<string, string>;
 };
 
 export type UISliceActions = {
@@ -223,6 +229,8 @@ export type UISliceActions = {
   toggleAppSidebarSection: (sectionId: string) => void;
   setAppSidebarWidth: (width: number) => void;
   toggleAppSidebarSettingsMode: () => void;
+  /** Record that `stamp` has been dismissed for `sessionId`. */
+  dismissAgentError: (sessionId: string, stamp: string) => void;
 };
 
 export type { SidebarView, SidebarViewDraft };

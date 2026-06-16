@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, memo } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { linkToTask } from "@/lib/links";
-import type { TaskState, TaskSession, TaskSessionState, Repository } from "@/lib/types/http";
+import type { Repository, TaskSession, TaskSessionState, TaskState } from "@/lib/types/http";
 import type { TaskPR } from "@/lib/types/github";
 import type { KanbanState } from "@/lib/state/slices";
 import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
@@ -29,7 +29,7 @@ import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
 import { buildPendingFlags, readPendingFlags } from "./task-session-sidebar-aggregate";
 import { useShallow } from "zustand/react/shallow";
-import { agentErrorMessageForTask } from "@/lib/task-agent-error";
+import { type AgentErrorOptions, agentErrorMessageForTask } from "@/lib/task-agent-error";
 
 /**
  * Stabilize a derived array of primary session IDs so the reference only
@@ -85,7 +85,7 @@ function toPrInfo(pr: TaskPR | undefined): { number: number; state: string } | u
 }
 
 /** Map a kanban task to a sidebar item with session info and repository metadata. */
-type SidebarCtx = {
+type SidebarCtx = AgentErrorOptions & {
   sessionsById: Record<string, TaskSession>;
   sessionsByTaskId: Record<string, TaskSession[]>;
   gitStatusByEnvId: Record<string, GitStatusEntry>;
@@ -160,7 +160,7 @@ function toSidebarItem(
     isPRReview: task.isPRReview ?? false,
     isIssueWatch: task.isIssueWatch ?? false,
     issueInfo: toIssueInfo(task),
-    agentErrorMessage: agentErrorMessageForTask(task, ctx.sessionsById, ctx.sessionsByTaskId),
+    agentErrorMessage: agentErrorMessageForTask(task, ctx.sessionsById, ctx.sessionsByTaskId, ctx),
   };
 }
 
@@ -214,6 +214,8 @@ function useSidebarData(workspaceId: string | null) {
   const envIdBySessionId = useAppStore((state) => state.environmentIdBySessionId);
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
   const taskPRsByTaskId = useAppStore((state) => state.taskPRs.byTaskId);
+  const messagesBySession = useAppStore((state) => state.messages.bySession);
+  const dismissedAgentErrors = useAppStore((state) => state.dismissedAgentErrors);
   const archivedState = useArchivedTaskState();
 
   const selectedTaskId = useMemo(() => {
@@ -256,6 +258,8 @@ function useSidebarData(workspaceId: string | null) {
       titleById,
       workflowNameById,
       stepTitleById,
+      dismissedAgentErrors,
+      messagesBySession,
     };
     const items: SidebarItem[] = allTasks.map((task) => toSidebarItem(task, mapCtx));
     if (
@@ -278,6 +282,8 @@ function useSidebarData(workspaceId: string | null) {
     envIdBySessionId,
     taskPRsByTaskId,
     pendingFlags,
+    dismissedAgentErrors,
+    messagesBySession,
     archivedState,
   ]);
 

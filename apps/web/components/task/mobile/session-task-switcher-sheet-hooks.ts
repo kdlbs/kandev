@@ -92,6 +92,7 @@ type SheetItemCtx = {
   gitStatusByEnvId: Parameters<typeof getSessionInfoForTask>[2];
   envIdBySessionId: Parameters<typeof getSessionInfoForTask>[3];
   messagesBySession: Parameters<typeof hasPendingClarificationForSession>[0];
+  dismissedAgentErrors: Record<string, string>;
 };
 
 function toSheetItem(
@@ -135,7 +136,7 @@ function toSheetItem(
       ctx.messagesBySession,
       task.primarySessionId,
     ),
-    agentErrorMessage: agentErrorMessageForTask(task, ctx.sessionsById, ctx.sessionsByTaskId),
+    agentErrorMessage: agentErrorMessageForTask(task, ctx.sessionsById, ctx.sessionsByTaskId, ctx),
   };
 }
 
@@ -147,6 +148,7 @@ export function useSheetData(workspaceId: string | null) {
   const gitStatusByEnvId = useAppStore((state) => state.gitStatus.byEnvironmentId);
   const envIdBySessionId = useAppStore((state) => state.environmentIdBySessionId);
   const messagesBySession = useAppStore((state) => state.messages.bySession);
+  const dismissedAgentErrors = useAppStore((state) => state.dismissedAgentErrors);
   const {
     allTasks,
     allSteps,
@@ -176,6 +178,7 @@ export function useSheetData(workspaceId: string | null) {
       gitStatusByEnvId,
       envIdBySessionId,
       messagesBySession,
+      dismissedAgentErrors,
     };
     return allTasks.map((task) => toSheetItem(task, ctx));
   }, [
@@ -189,6 +192,7 @@ export function useSheetData(workspaceId: string | null) {
     gitStatusByEnvId,
     envIdBySessionId,
     messagesBySession,
+    dismissedAgentErrors,
   ]);
 
   const dialogSteps = useMemo(

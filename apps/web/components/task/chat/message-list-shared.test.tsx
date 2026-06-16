@@ -19,6 +19,8 @@ const mockStoreState = vi.hoisted(() => ({
       },
     },
   },
+  dismissedAgentErrors: {} as Record<string, string>,
+  dismissAgentError: () => {},
 }));
 
 vi.mock("@/components/task/chat/message-renderer", () => ({

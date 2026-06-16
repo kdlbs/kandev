@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { lastAgentErrorDismissKey, readLastAgentError } from "./session-last-agent-error";
+import { lastAgentErrorStamp, readLastAgentError } from "./session-last-agent-error";
 
 const AGENT_ERROR_MESSAGE = "agent process exited";
 const AGENT_EXECUTION_ID = "exec-1";
@@ -38,13 +38,14 @@ describe("readLastAgentError", () => {
   });
 });
 
-describe("lastAgentErrorDismissKey", () => {
-  it("includes both timestamp and message in the dismissal stamp", () => {
-    expect(
-      lastAgentErrorDismissKey("session-1", {
-        message: AGENT_ERROR_MESSAGE,
-        occurredAt: OCCURRED_AT,
-      }),
-    ).toBe(`kandev:last-agent-error-dismissed:session-1:${OCCURRED_AT}:${AGENT_ERROR_MESSAGE}`);
+describe("lastAgentErrorStamp", () => {
+  it("combines occurredAt and message so a fresh error invalidates a prior dismissal", () => {
+    expect(lastAgentErrorStamp({ message: AGENT_ERROR_MESSAGE, occurredAt: OCCURRED_AT })).toBe(
+      `${OCCURRED_AT}:${AGENT_ERROR_MESSAGE}`,
+    );
+  });
+
+  it("tolerates a missing occurredAt", () => {
+    expect(lastAgentErrorStamp({ message: AGENT_ERROR_MESSAGE })).toBe(`:${AGENT_ERROR_MESSAGE}`);
   });
 });
