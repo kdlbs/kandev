@@ -724,17 +724,9 @@ func startGatewayAndServe(
 	if port == 0 {
 		port = ports.Backend
 	}
-	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
-	if err != nil {
-		log.Error("Server listen error", zap.Error(err))
+	if !startHTTPServer(server, port, log) {
 		return false
 	}
-	go func() {
-		log.Info("WebSocket server listening", zap.Int("port", port))
-		if err := server.Serve(ln); err != nil && err != http.ErrServerClosed {
-			log.Error("Server serve error", zap.Error(err))
-		}
-	}()
 
 	log.Info("API configured",
 		zap.String("websocket", "/ws"),
@@ -750,6 +742,23 @@ func startGatewayAndServe(
 	go waitListenerThenMarkReady(port, log)
 
 	awaitShutdown(server, orchestratorSvc, lifecycleMgr, runCleanups, log)
+	return true
+}
+
+func startHTTPServer(server *http.Server, port int, log *logger.Logger) bool {
+	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	if err != nil {
+		log.Error("Server listen error", zap.Error(err))
+		return false
+	}
+
+	go func() {
+		log.Info("WebSocket server listening", zap.Int("port", port))
+		if err := server.Serve(ln); err != nil && err != http.ErrServerClosed {
+			log.Error("Server serve error", zap.Error(err))
+		}
+	}()
+
 	return true
 }
 
