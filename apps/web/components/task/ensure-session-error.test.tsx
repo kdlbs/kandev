@@ -23,7 +23,10 @@ describe("describeEnsureError", () => {
   });
 
   it("detects the missing-agent-profile case and links to workspace settings", () => {
-    const info = describeEnsureError(new Error("task has no agent_profile_id configured"), "ws-1");
+    const info = describeEnsureError(
+      new Error("agent_profile_id is required to start agent"),
+      "ws-1",
+    );
     expect(info).not.toBeNull();
     expect(info?.isAgentProfileMissing).toBe(true);
     expect(info?.action).toEqual({
@@ -33,7 +36,7 @@ describe("describeEnsureError", () => {
   });
 
   it("returns a missing-agent-profile descriptor without an action when workspaceId is absent", () => {
-    const info = describeEnsureError(new Error("task has no agent_profile_id configured"));
+    const info = describeEnsureError(new Error("agent_profile_id is required to start agent"));
     expect(info?.isAgentProfileMissing).toBe(true);
     expect(info?.action).toBeNull();
   });
@@ -44,6 +47,12 @@ describe("describeEnsureError", () => {
     expect(info?.title).toBe("Couldn't start a session");
     expect(info?.detail).toContain("websocket disconnected");
     expect(info?.action).toBeNull();
+  });
+
+  it("does not misclassify unrelated errors that merely mention agent_profile_id", () => {
+    const info = describeEnsureError(new Error("invalid agent_profile_id format"), "ws-1");
+    expect(info?.isAgentProfileMissing).toBe(false);
+    expect(info?.title).toBe("Couldn't start a session");
   });
 
   it("uses a fallback detail when the underlying error has no message", () => {
@@ -63,7 +72,7 @@ describe("EnsureSessionErrorBanner", () => {
   it("renders the missing-agent-profile message and a settings link", () => {
     render(
       <EnsureSessionErrorBanner
-        error={new Error("task has no agent_profile_id configured")}
+        error={new Error("agent_profile_id is required to start agent")}
         onRetry={() => {}}
         workspaceId="ws-1"
       />,

@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { DockviewApi } from "dockview-react";
-import { persistEnvLayoutNow } from "./dockview-store";
 
 vi.mock("@/lib/local-storage", () => ({
   setEnvLayout: vi.fn(),
@@ -13,12 +12,96 @@ vi.mock("@/lib/local-storage", () => ({
   clearGlobalSidebarWidth: vi.fn(),
 }));
 
+vi.mock("@/lib/layout/panel-portal-manager", () => ({
+  panelPortalManager: { releaseByEnv: vi.fn(), reconcile: vi.fn() },
+}));
+
+vi.mock("./dockview-scroll-preserve", () => ({
+  preserveChatScrollDuringLayout: vi.fn(),
+}));
+
+vi.mock("./dockview-measure", () => ({
+  measureDockviewContainer: vi.fn(() => ({ width: 800, height: 600 })),
+}));
+
+vi.mock("./dockview-pinned-enforce", () => ({
+  enforcePinnedTargets: vi.fn(),
+}));
+
+vi.mock("./dockview-layout-builders", () => ({
+  applyLayoutFixups: vi.fn(() => ({
+    sidebarGroupId: "g-sidebar",
+    centerGroupId: "g-center",
+    rightTopGroupId: "g-right-top",
+    rightBottomGroupId: "g-right-bottom",
+  })),
+  focusOrAddPanel: vi.fn(),
+}));
+
+vi.mock("./layout-manager", () => ({
+  SIDEBAR_GROUP: "sidebar",
+  CENTER_GROUP: "center",
+  RIGHT_TOP_GROUP: "right-top",
+  RIGHT_BOTTOM_GROUP: "right-bottom",
+  TERMINAL_DEFAULT_ID: "terminal",
+  LAYOUT_SIDEBAR_RATIO: 0.2,
+  LAYOUT_RIGHT_RATIO: 0.25,
+  LAYOUT_PINNED_MIN_PX: 200,
+  computeSidebarMaxPx: vi.fn(() => 350),
+  computeRightMaxPx: vi.fn(() => 500),
+  getPresetLayout: vi.fn(() => ({ columns: [] })),
+  applyLayout: vi.fn(() => ({
+    sidebarGroupId: "g-sidebar",
+    centerGroupId: "g-center",
+    rightTopGroupId: "g-right-top",
+    rightBottomGroupId: "g-right-bottom",
+  })),
+  getPinnedWidth: vi.fn(() => 350),
+  getRootSplitview: vi.fn(() => null),
+  fromDockviewApi: vi.fn(() => ({ columns: [] })),
+  filterEphemeral: vi.fn((s: unknown) => s),
+  defaultLayout: vi.fn(() => ({ columns: [] })),
+  mergeCurrentPanelsIntoPreset: vi.fn((_api: unknown, preset: unknown) => preset),
+  toSerializedDockview: vi.fn((s: unknown) => s),
+  injectIntentPanels: vi.fn(),
+  applyActivePanelOverrides: vi.fn(),
+  resolveNamedIntent: vi.fn(),
+  setPinnedTarget: vi.fn(),
+  clearPinnedTarget: vi.fn(),
+  getPinnedTarget: vi.fn(() => undefined),
+  layoutStructuresMatch: vi.fn(() => false),
+  savedLayoutMatchesLive: vi.fn(() => false),
+}));
+
 import { setEnvLayout } from "@/lib/local-storage";
+import { persistEnvLayoutNow, useDockviewStore } from "./dockview-store";
 
 function makeApi(snapshot: object = { columns: [] }): DockviewApi {
   return {
     toJSON: vi.fn(() => snapshot),
   } as unknown as DockviewApi;
+}
+
+function makeStoreApi(): DockviewApi {
+  return {
+    width: 800,
+    height: 600,
+    panels: [],
+    groups: [],
+    layout: vi.fn(),
+    fromJSON: vi.fn(),
+    toJSON: vi.fn(() => ({ columns: [{ id: "center" }] })),
+    getPanel: vi.fn(() => null),
+    addPanel: vi.fn(),
+    activeGroup: null,
+    hasMaximizedGroup: vi.fn(() => false),
+    exitMaximizedGroup: vi.fn(),
+    onDidActivePanelChange: vi.fn(() => ({ dispose: vi.fn() })),
+  } as unknown as DockviewApi;
+}
+
+function flushRaf(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
 }
 
 // Regression: applyBuiltInPreset and applyCustomLayout used to mutate the live
@@ -73,6 +156,81 @@ describe("persistEnvLayoutNow", () => {
     } as unknown as DockviewApi;
 
     expect(() => persistEnvLayoutNow(api, "env-1", null)).not.toThrow();
+    expect(setEnvLayout).not.toHaveBeenCalled();
+  });
+});
+
+// Integration coverage: assert the real preset/custom-layout actions invoke
+// persistEnvLayoutNow at the end of their rAF callback. The helper-only tests
+// above cover the contract, but the bug we fixed was at the call sites — they
+// previously held isRestoringLayout=true for the whole rAF and never wrote.
+describe("applyBuiltInPreset / applyCustomLayout — persistence at call sites", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useDockviewStore.setState({
+      api: null,
+      currentLayoutEnvId: null,
+      preMaximizeLayout: null,
+      maximizedGroupId: null,
+      isRestoringLayout: false,
+    });
+  });
+
+  it("applyBuiltInPreset persists the env layout after isRestoringLayout clears", async () => {
+    const api = makeStoreApi();
+    useDockviewStore.setState({ api, currentLayoutEnvId: "env-preset" });
+
+    useDockviewStore.getState().applyBuiltInPreset("default");
+
+    expect(useDockviewStore.getState().isRestoringLayout).toBe(true);
+    await flushRaf();
+
+    expect(useDockviewStore.getState().isRestoringLayout).toBe(false);
+    expect(setEnvLayout).toHaveBeenCalledTimes(1);
+    expect(setEnvLayout).toHaveBeenCalledWith("env-preset", expect.any(Object));
+  });
+
+  it("applyBuiltInPreset does not persist when no env is adopted yet", async () => {
+    const api = makeStoreApi();
+    useDockviewStore.setState({ api, currentLayoutEnvId: null });
+
+    useDockviewStore.getState().applyBuiltInPreset("default");
+    await flushRaf();
+
+    expect(setEnvLayout).not.toHaveBeenCalled();
+  });
+
+  it("applyCustomLayout persists the env layout after isRestoringLayout clears", async () => {
+    const api = makeStoreApi();
+    useDockviewStore.setState({ api, currentLayoutEnvId: "env-custom" });
+
+    const customLayout = {
+      id: "custom-1",
+      name: "custom",
+      layout: { columns: [{ id: "center", views: [], activeView: null }] },
+    };
+    type ApplyCustomLayoutArg = Parameters<
+      ReturnType<typeof useDockviewStore.getState>["applyCustomLayout"]
+    >[0];
+    useDockviewStore.getState().applyCustomLayout(customLayout as unknown as ApplyCustomLayoutArg);
+    await flushRaf();
+
+    expect(setEnvLayout).toHaveBeenCalledTimes(1);
+    expect(setEnvLayout).toHaveBeenCalledWith("env-custom", expect.any(Object));
+  });
+
+  it("applyBuiltInPreset skips persistence while maximized to avoid stomping the regular layout", async () => {
+    const api = makeStoreApi();
+    type StoreState = ReturnType<typeof useDockviewStore.getState>;
+    useDockviewStore.setState({
+      api,
+      currentLayoutEnvId: "env-maxed",
+      preMaximizeLayout: { columns: [] } as unknown as StoreState["preMaximizeLayout"],
+    });
+
+    useDockviewStore.getState().applyBuiltInPreset("default");
+    await flushRaf();
+
     expect(setEnvLayout).not.toHaveBeenCalled();
   });
 });

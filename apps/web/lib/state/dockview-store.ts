@@ -507,7 +507,8 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
         enforceFromStore(api, get);
         syncPinnedWidthsFromApi(api, set);
         set({ isRestoringLayout: false });
-        persistEnvLayoutNow(api, get().currentLayoutEnvId, get().preMaximizeLayout);
+        const { currentLayoutEnvId, preMaximizeLayout } = get();
+        persistEnvLayoutNow(api, currentLayoutEnvId, preMaximizeLayout);
       });
     },
     applyCustomLayout: (layout: SavedLayoutConfig) => {
@@ -539,7 +540,8 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
         enforceFromStore(api, get);
         syncPinnedWidthsFromApi(api, set);
         set({ isRestoringLayout: false });
-        persistEnvLayoutNow(api, get().currentLayoutEnvId, get().preMaximizeLayout);
+        const { currentLayoutEnvId, preMaximizeLayout } = get();
+        persistEnvLayoutNow(api, currentLayoutEnvId, preMaximizeLayout);
       });
     },
     captureCurrentLayout: (): Record<string, unknown> => {

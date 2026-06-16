@@ -5,14 +5,7 @@ import { IconAlertTriangle, IconRefresh } from "@tabler/icons-react";
 import { Alert, AlertDescription, AlertTitle } from "@kandev/ui/alert";
 import { Button } from "@kandev/ui/button";
 
-/**
- * Describes an ensure-session error in a way the UI can present.
- *
- * Detects the "no agent profile configured" failure (the most common cause —
- * a task got created without an `agent_profile_id` and none of the workflow
- * step / workflow / workspace defaults resolve either) so we can point the
- * user at the workspace settings page instead of just saying "failed".
- */
+// EnsureSessionErrorInfo wraps a parsed ensure error so UI can offer a targeted action for the missing-agent-profile case.
 export type EnsureSessionErrorInfo = {
   title: string;
   detail: string;
@@ -20,7 +13,8 @@ export type EnsureSessionErrorInfo = {
   action: { label: string; href: string } | null;
 };
 
-const AGENT_PROFILE_MISSING_HINT = "agent_profile_id";
+// Matches the backend's exact validation message in task_http_handlers.go / task_ws_handlers.go.
+const AGENT_PROFILE_MISSING_HINT = "agent_profile_id is required";
 
 export function describeEnsureError(
   error: Error | null,
@@ -69,7 +63,7 @@ export function EnsureSessionErrorBanner({ error, onRetry, workspaceId }: Banner
             {info.action ? (
               <Link
                 href={info.action.href}
-                className="underline underline-offset-2 hover:text-foreground"
+                className="cursor-pointer underline underline-offset-2 hover:text-foreground"
                 data-testid="ensure-session-error-action"
               >
                 {info.action.label}
@@ -107,7 +101,7 @@ export function EnsureSessionErrorEmptyState({ error, onRetry, workspaceId }: Ba
         {info.action ? (
           <Link
             href={info.action.href}
-            className="underline underline-offset-2 hover:text-foreground"
+            className="cursor-pointer underline underline-offset-2 hover:text-foreground"
             data-testid="ensure-session-error-action"
           >
             {info.action.label}
