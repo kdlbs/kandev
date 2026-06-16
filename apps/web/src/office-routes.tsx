@@ -189,13 +189,32 @@ type AgentRouteMatch = {
   id: string;
   tab: string;
   runId?: string;
+  bare?: boolean;
 };
 
 function renderAgentRoute(route: AgentRouteMatch) {
   const params = Promise.resolve({ id: route.id });
+  if (route.bare) {
+    return (
+      <AgentDetailLayout params={params}>
+        <AgentBareRouteRedirect agentId={route.id} />
+      </AgentDetailLayout>
+    );
+  }
+
   return (
     <AgentDetailLayout params={params}>{renderAgentRouteBody(route, params)}</AgentDetailLayout>
   );
+}
+
+function AgentBareRouteRedirect({ agentId }: { agentId: string }) {
+  const router = useRouter();
+
+  useEffect(() => {
+    router.replace(`/office/agents/${encodeURIComponent(agentId)}/dashboard`);
+  }, [agentId, router]);
+
+  return <AgentDashboardRoute agentId={agentId} />;
 }
 
 function renderAgentRouteBody(route: AgentRouteMatch, params: Promise<{ id: string }>) {
@@ -228,9 +247,10 @@ function matchAgentRoute(pathname: string): AgentRouteMatch | null {
   const match = pathname.match(/^\/office\/agents\/([^/]+)(?:\/([^/]+))?(?:\/([^/]+))?$/);
   if (!match?.[1]) return null;
   const id = decodeURIComponent(match[1]);
-  const tab = match[2] ? decodeURIComponent(match[2]) : "dashboard";
+  const bare = !match[2];
+  const tab = bare ? "dashboard" : decodeURIComponent(match[2]);
   const runId = tab === "runs" && match[3] ? decodeURIComponent(match[3]) : undefined;
-  return { id, tab, runId };
+  return { id, tab, runId, bare };
 }
 
 function OfficeUnavailable() {
