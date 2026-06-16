@@ -16,7 +16,7 @@ export type LastAgentError = {
 const DISMISSED_AGENT_ERRORS_KEY = "kandev.dismissedAgentErrors";
 
 export function getStoredDismissedAgentErrors(): Record<string, string> {
-  return getLocalStorage<Record<string, string>>(DISMISSED_AGENT_ERRORS_KEY, {}) ?? {};
+  return getLocalStorage<Record<string, string>>(DISMISSED_AGENT_ERRORS_KEY, {});
 }
 /**
  * Merge `map` into whatever is currently in localStorage so concurrent writes
