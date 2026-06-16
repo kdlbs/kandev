@@ -8,7 +8,6 @@ import {
   IconRepeat,
   IconRoute,
   IconSettings,
-  IconSitemap,
 } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { APP_SIDEBAR_SECTION_IDS } from "../app-sidebar-constants";
@@ -25,12 +24,11 @@ const workItems = [
 ] as const;
 
 const workspaceItems = [
-  { icon: IconSitemap, label: "Agent Topology", href: "/office/workspace/org" },
   { icon: IconBoxMultiple, label: "Skills", href: "/office/workspace/skills" },
   { icon: IconCurrencyDollar, label: "Costs", href: "/office/workspace/costs" },
   { icon: IconHistory, label: "Activity", href: "/office/workspace/activity" },
   { icon: IconRoute, label: "Routing", href: "/office/workspace/routing" },
-  { icon: IconSettings, label: "Office Settings", href: "/office/workspace/settings" },
+  { icon: IconSettings, label: "Preferences", href: "/office/workspace/settings" },
 ] as const;
 
 export function OfficeNavigationSection({ collapsed }: OfficeNavigationSectionProps) {
@@ -61,9 +59,9 @@ export function OfficeNavigationSection({ collapsed }: OfficeNavigationSectionPr
       </AppSidebarSection>
       <AppSidebarSection
         id={APP_SIDEBAR_SECTION_IDS.officeWorkspace}
-        label="Workspace"
+        label="Office"
         collapsed={collapsed}
-        icon={IconSitemap}
+        icon={IconSettings}
         defaultExpanded
       >
         {workspaceItems.map((item) => (

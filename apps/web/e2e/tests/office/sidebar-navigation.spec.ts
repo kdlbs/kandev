@@ -5,17 +5,10 @@ test.describe("Sidebar navigation", () => {
   test("sidebar shows CEO agent link", async ({ testPage, officeSeed: _ }) => {
     await testPage.goto("/office");
     await expect(testPage.getByText("Agents Enabled")).toBeVisible({ timeout: 10_000 });
-    // Post-overhaul: the office Agents section lives in the unified AppSidebar
-    // (`<aside data-testid="app-sidebar">`) inside a COLLAPSIBLE section that
-    // defaults to collapsed on the `/office` dashboard (SECTION_ROUTE_MAP only
-    // auto-expands it on `/office/agents`). Expand it first, then assert the
-    // row. Each agent row is a single `<Link href="/office/agents/<id>">` whose
+    // Each agent row is a single `<Link href="/office/agents/<id>">` whose
     // accessible name is the agent name (the avatar is aria-hidden). The
-    // sidebar agent list hydrates from a client-side fetch after first paint —
-    // 10s gives that hydration headroom on a heavily-loaded run without
-    // affecting the happy path (<1s in isolation).
+    // sidebar agent list hydrates from a client-side fetch after first paint.
     const sidebar = new AppSidebarPage(testPage);
-    await sidebar.expandSection("Agents");
     await expect(sidebar.root.getByRole("link", { name: /CEO/i }).first()).toBeVisible({
       timeout: 10_000,
     });
@@ -35,7 +28,7 @@ test.describe("Sidebar navigation", () => {
     await expect(testPage.getByText("Agents Enabled")).toBeVisible({ timeout: 10_000 });
 
     const sidebar = new AppSidebarPage(testPage);
-    await expect(sidebar.root.getByRole("link", { name: "Office Settings" })).toHaveAttribute(
+    await expect(sidebar.root.getByRole("link", { name: "Preferences" })).toHaveAttribute(
       "href",
       "/office/workspace/settings",
     );
@@ -43,7 +36,7 @@ test.describe("Sidebar navigation", () => {
       "href",
       "/office/workspace/skills",
     );
-    await expect(sidebar.root.getByRole("link", { name: "Agent Topology" })).toHaveAttribute(
+    await expect(sidebar.root.getByRole("link", { name: "Agent topology" })).toHaveAttribute(
       "href",
       "/office/workspace/org",
     );

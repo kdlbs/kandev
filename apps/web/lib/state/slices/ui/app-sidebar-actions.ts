@@ -10,14 +10,14 @@ import {
 import { APP_SIDEBAR_EXPANDED_WIDTH } from "@/components/app-sidebar/app-sidebar-constants";
 import type { AppSidebarState, UISlice } from "./types";
 
-/** Keep high-value navigation open by default; dynamic entity sections stay
- *  collapsed so the unified sidebar does not default too tall on first open. */
+/** Keep primary navigation and entity groups open by default so first-time
+ *  Office users can see projects, agents, and workspace tools immediately. */
 export const DEFAULT_SECTION_EXPANDED: Record<string, boolean> = {
   tasks: true,
   "office-work": true,
   "office-workspace": true,
-  projects: false,
-  agents: false,
+  projects: true,
+  agents: true,
   integrations: false,
   settings: false,
 };

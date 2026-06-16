@@ -14,13 +14,13 @@ const PAGE_TITLES: Record<string, string> = {
   "/office/workspace/costs": "Costs",
   "/office/workspace/activity": "Activity",
   "/office/workspace/routing": "Provider Routing",
-  "/office/workspace/settings": "Settings",
+  "/office/workspace/settings": "Preferences",
 };
 
 function resolveTitle(pathname: string): string | null {
   const exact = PAGE_TITLES[pathname];
   if (exact) return exact;
-  if (pathname.startsWith("/office/workspace/settings")) return "Settings";
+  if (pathname.startsWith("/office/workspace/settings")) return "Preferences";
   return null;
 }
 
@@ -51,11 +51,7 @@ export function OfficeTopbar() {
       {detail ? (
         <div id="office-topbar-slot" className="flex items-center gap-2 flex-1 min-w-0" />
       ) : (
-        title && (
-          <h1 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-            {title}
-          </h1>
-        )
+        title && <h1 className="truncate text-sm font-medium text-foreground">{title}</h1>
       )}
     </div>
   );

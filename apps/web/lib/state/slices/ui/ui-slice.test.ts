@@ -229,7 +229,8 @@ describe("appSidebar actions", () => {
     expect(store.getState().appSidebar.sectionExpanded.tasks).toBe(true);
     expect(store.getState().appSidebar.sectionExpanded["office-work"]).toBe(true);
     expect(store.getState().appSidebar.sectionExpanded["office-workspace"]).toBe(true);
-    expect(store.getState().appSidebar.sectionExpanded.projects).toBe(false);
+    expect(store.getState().appSidebar.sectionExpanded.projects).toBe(true);
+    expect(store.getState().appSidebar.sectionExpanded.agents).toBe(true);
   });
 
   it("hydrates collapsed flag from localStorage", () => {
@@ -259,12 +260,12 @@ describe("appSidebar actions", () => {
   it("toggleAppSidebarSection flips per-section state and persists the map", () => {
     const store = makeStore();
     store.getState().toggleAppSidebarSection("projects");
-    expect(store.getState().appSidebar.sectionExpanded.projects).toBe(true);
+    expect(store.getState().appSidebar.sectionExpanded.projects).toBe(false);
     const persisted = JSON.parse(window.localStorage.getItem(SECTION_KEY) ?? "{}");
-    expect(persisted.projects).toBe(true);
+    expect(persisted.projects).toBe(false);
 
     store.getState().toggleAppSidebarSection("projects");
-    expect(store.getState().appSidebar.sectionExpanded.projects).toBe(false);
+    expect(store.getState().appSidebar.sectionExpanded.projects).toBe(true);
   });
 
   it("toggleAppSidebarSection honors the caller default for missing section keys", () => {

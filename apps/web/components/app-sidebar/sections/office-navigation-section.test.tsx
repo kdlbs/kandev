@@ -64,12 +64,12 @@ describe("OfficeNavigationSection", () => {
 
     expect(hrefFor("Tasks")).toBe("/office/tasks");
     expect(hrefFor("Routines")).toBe("/office/routines");
-    expect(hrefFor("Agent Topology")).toBe("/office/workspace/org");
     expect(hrefFor("Skills")).toBe("/office/workspace/skills");
     expect(hrefFor("Costs")).toBe("/office/workspace/costs");
     expect(hrefFor("Activity")).toBe("/office/workspace/activity");
     expect(hrefFor("Routing")).toBe("/office/workspace/routing");
-    expect(hrefFor("Office Settings")).toBe("/office/workspace/settings");
+    expect(hrefFor("Preferences")).toBe("/office/workspace/settings");
+    expect(screen.queryByRole("link", { name: /Agent Topology/i })).toBeNull();
   });
 
   it("uses expanded defaults when old persisted sidebar state lacks new office keys", () => {
@@ -78,6 +78,6 @@ describe("OfficeNavigationSection", () => {
     render(<OfficeNavigationSection collapsed={false} />);
 
     expect(screen.getByRole("link", { name: /Tasks/i })).toBeTruthy();
-    expect(screen.getByRole("link", { name: /Office Settings/i })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Preferences/i })).toBeTruthy();
   });
 });

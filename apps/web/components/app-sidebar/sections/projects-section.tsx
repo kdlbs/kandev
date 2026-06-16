@@ -46,6 +46,7 @@ export function ProjectsSection({ collapsed }: ProjectsSectionProps) {
       collapsed={collapsed}
       icon={IconBoxMultiple}
       headerAction={headerAction}
+      defaultExpanded
     >
       {activeProjects.length === 0 ? (
         <p className="px-3 py-2 text-xs text-muted-foreground">No projects yet</p>

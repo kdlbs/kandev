@@ -3,7 +3,7 @@
 import { useCallback, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { IconPlus, IconRobot } from "@tabler/icons-react";
+import { IconPlus, IconRobot, IconSitemap } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
@@ -49,20 +49,38 @@ export function AgentsSection({ collapsed }: AgentsSectionProps) {
   if (!inOffice) return null;
 
   const headerAction = (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-5 w-5 cursor-pointer"
-          aria-label="Add agent"
-          onClick={() => router.push("/office/agents")}
-        >
-          <IconPlus className="h-3 w-3 text-muted-foreground/60" />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>Add agent</TooltipContent>
-    </Tooltip>
+    <div className="flex items-center gap-0.5">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            asChild
+            variant="ghost"
+            size="icon"
+            className="h-5 w-5 cursor-pointer"
+            aria-label="Agent topology"
+          >
+            <Link href="/office/workspace/org">
+              <IconSitemap className="h-3 w-3 text-muted-foreground/60" />
+            </Link>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Agent topology</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-5 w-5 cursor-pointer"
+            aria-label="Add agent"
+            onClick={() => router.push("/office/agents")}
+          >
+            <IconPlus className="h-3 w-3 text-muted-foreground/60" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Add agent</TooltipContent>
+      </Tooltip>
+    </div>
   );
 
   return (
@@ -72,6 +90,8 @@ export function AgentsSection({ collapsed }: AgentsSectionProps) {
       collapsed={collapsed}
       icon={IconRobot}
       headerAction={headerAction}
+      headerActionVisibility="always"
+      defaultExpanded
     >
       {agents.length === 0 ? (
         <p className="px-3 py-2 text-xs text-muted-foreground">No agents yet</p>

@@ -132,6 +132,20 @@ describe("AppSidebar", () => {
     expect(screen.queryByTestId("integrations-section")).toBeNull();
   });
 
+  it("orders office entity sections before office navigation", () => {
+    officeRouteMock.inOffice = true;
+    navigationMock.pathname = "/office";
+
+    render(<AppSidebar />);
+
+    const nav = screen.getByRole("navigation");
+    expect(
+      Array.from(nav.querySelectorAll("[data-testid]")).map((node) =>
+        node.getAttribute("data-testid"),
+      ),
+    ).toEqual(["primary-nav", "projects-section", "agents-section", "office-navigation-section"]);
+  });
+
   it("renders collapsed when store reports collapsed=true", () => {
     storeState.appSidebar.collapsed = true;
     render(<AppSidebar />);
