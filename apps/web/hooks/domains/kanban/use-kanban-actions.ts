@@ -16,7 +16,7 @@ type KanbanTask = KanbanState["tasks"][number];
 
 function isTaskDetailPath(): boolean {
   if (typeof window === "undefined") return false;
-  return /^\/t\/[^/]+\/?$/.test(window.location.pathname);
+  return /^\/(?:t|tasks)\/[^/]+\/?$/.test(window.location.pathname);
 }
 
 /** Handle creating a new task in the kanban board, merging with any WS-provided data. */
