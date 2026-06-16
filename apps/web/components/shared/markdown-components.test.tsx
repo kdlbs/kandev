@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import { renderToStaticMarkup } from "react-dom/server";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const openFile = vi.hoisted(() => vi.fn());
@@ -13,7 +13,7 @@ const appState = vi.hoisted(() => ({
         "session-1": {
           worktree_path: "/root/.kandev/tasks/example/kandev",
         },
-      },
+      } as Record<string, { worktree_path: string }>,
     },
   },
 }));
@@ -62,7 +62,14 @@ function Markdown({ children }: { children: string }) {
 
 describe("markdownComponents", () => {
   afterEach(() => {
+    cleanup();
     openFile.mockClear();
+    appState.value.tasks.activeSessionId = "session-1";
+    appState.value.taskSessions.items = {
+      "session-1": {
+        worktree_path: "/root/.kandev/tasks/example/kandev",
+      },
+    };
   });
 
   it("keeps mermaid keywords in inline code as inline code", () => {
@@ -121,10 +128,30 @@ describe("markdownComponents", () => {
     expect(openFile).toHaveBeenCalledWith("docs/nextjs-spa-migration.md");
   });
 
+  it("opens repo-root file links when no worktree path is available", () => {
+    appState.value.taskSessions.items = {};
+
+    render(<Markdown>{"[migration](/docs/nextjs-spa-migration.md)"}</Markdown>);
+
+    fireEvent.click(screen.getByRole("link", { name: "migration" }));
+
+    expect(openFile).toHaveBeenCalledWith("docs/nextjs-spa-migration.md");
+  });
+
   it("does not open host-absolute file links outside the worktree", () => {
     render(<Markdown>{"[secret](/root/other-project/secret.md)"}</Markdown>);
 
     fireEvent.click(screen.getByRole("link", { name: "secret" }));
+
+    expect(openFile).not.toHaveBeenCalled();
+  });
+
+  it("does not treat sibling workspace paths as repo-root file links", () => {
+    appState.value.taskSessions.items["session-1"].worktree_path = "/workspace/current-project";
+
+    render(<Markdown>{"[schema](/workspace/sibling-project/schema.prisma)"}</Markdown>);
+
+    fireEvent.click(screen.getByRole("link", { name: "schema" }));
 
     expect(openFile).not.toHaveBeenCalled();
   });

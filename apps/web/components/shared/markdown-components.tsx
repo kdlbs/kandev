@@ -96,12 +96,23 @@ function looksLikeHostAbsolutePath(path: string): boolean {
   return /^\/(?:Users|home|root|tmp|var|etc|usr|opt|mnt|Volumes)\//i.test(path);
 }
 
+function firstAbsoluteSegment(path: string): string | null {
+  const first = path.replace(/^\/+/, "").split("/")[0];
+  return first || null;
+}
+
 function resolveAbsoluteMarkdownFileHref(path: string, worktreePath: string | null | undefined) {
   const normalizedRoot = worktreePath?.replace(/\\/g, "/").replace(/\/$/, "");
   const normalizedPath = path.replace(/\\/g, "/");
   if (normalizedRoot && normalizedPath.startsWith(`${normalizedRoot}/`)) {
     const relativePath = normalizedPath.slice(normalizedRoot.length + 1);
     return looksLikeFilePath(relativePath) ? relativePath : null;
+  }
+  if (
+    normalizedRoot &&
+    firstAbsoluteSegment(normalizedPath) === firstAbsoluteSegment(normalizedRoot)
+  ) {
+    return null;
   }
   if (looksLikeHostAbsolutePath(normalizedPath)) return null;
   const rootRelativePath = normalizedPath.replace(/^\/+/, "");
