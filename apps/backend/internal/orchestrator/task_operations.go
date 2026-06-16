@@ -47,6 +47,15 @@ var ErrSessionResetInProgress = errors.New("session reset in progress")
 // the two misleads the UI and any caller doing errors.Is checks.
 var ErrSessionNotPromptable = errors.New("session not promptable")
 
+const (
+	agentPromptReadyTimeout  = 10 * time.Second
+	agentPromptReadyInterval = 100 * time.Millisecond
+)
+
+type agentPromptReadinessChecker interface {
+	IsAgentReadyForPrompt(ctx context.Context, sessionID string) bool
+}
+
 func isAgentPromptInProgressError(err error) bool {
 	return err != nil && errors.Is(err, ErrAgentPromptInProgress)
 }
@@ -1153,6 +1162,9 @@ func (s *Service) advanceTaskWorkflowStep(ctx context.Context, task *models.Task
 func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, session *models.TaskSession) error {
 	// Check if agent is genuinely running (in-memory execution store, not just DB state)
 	if exec, ok := s.executor.GetExecutionBySession(sessionID); ok && exec != nil {
+		if err := s.waitForAgentPromptReady(ctx, sessionID); err != nil {
+			return err
+		}
 		return nil
 	}
 
@@ -1208,6 +1220,31 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 
 	s.logger.Debug("session resumed and ready for prompt")
 	return nil
+}
+
+func (s *Service) waitForAgentPromptReady(ctx context.Context, sessionID string) error {
+	checker, ok := s.agentManager.(agentPromptReadinessChecker)
+	if !ok || checker == nil {
+		return nil
+	}
+
+	readyCtx, cancel := context.WithTimeout(ctx, agentPromptReadyTimeout)
+	defer cancel()
+
+	ticker := time.NewTicker(agentPromptReadyInterval)
+	defer ticker.Stop()
+
+	for {
+		if checker.IsAgentReadyForPrompt(readyCtx, sessionID) {
+			return nil
+		}
+
+		select {
+		case <-readyCtx.Done():
+			return fmt.Errorf("agent not ready for prompt: %w", readyCtx.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 // startAgentOnPreparedWorkspace starts the agent subprocess on a session whose workspace

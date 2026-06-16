@@ -150,6 +150,7 @@ type mockAgentManager struct {
 	// IsAgentRunningForSession. Lets tests model state changes mid-sequence
 	// (e.g. stream disconnect between PromptAgent call and queue write).
 	isAgentRunningFn    func(context.Context, string) bool
+	isAgentReadyFn      func(context.Context, string) bool
 	resolveProfileErr   error
 	restartProcessCalls []string // tracks execution IDs passed to RestartAgentProcess
 	restartProcessErr   error
@@ -304,6 +305,12 @@ func (m *mockAgentManager) IsAgentRunningForSession(ctx context.Context, session
 		return m.isAgentRunningFn(ctx, sessionID)
 	}
 	return m.isAgentRunning
+}
+func (m *mockAgentManager) IsAgentReadyForPrompt(ctx context.Context, sessionID string) bool {
+	if m.isAgentReadyFn != nil {
+		return m.isAgentReadyFn(ctx, sessionID)
+	}
+	return m.IsAgentRunningForSession(ctx, sessionID)
 }
 func (m *mockAgentManager) ResolveAgentProfile(_ context.Context, _ string) (*executor.AgentProfileInfo, error) {
 	if m.resolveProfileErr != nil {

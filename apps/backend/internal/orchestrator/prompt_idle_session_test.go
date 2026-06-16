@@ -230,3 +230,70 @@ func TestEnsureSessionRunning_IdleSessionTriggersResume(t *testing.T) {
 		t.Fatal("expected ResumeSession to call LaunchAgent on IDLE session, but it never fired")
 	}
 }
+
+func TestEnsureSessionRunning_WaitsForPromptReadyWhenExecutionExists(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	session.AgentExecutionID = "exec-ready-race-1"
+	session.AgentProfileID = "profile1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+	seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-ready-race-1")
+
+	ready := make(chan struct{})
+	checked := make(chan struct{}, 1)
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+		isAgentReadyFn: func(_ context.Context, _ string) bool {
+			select {
+			case checked <- struct{}{}:
+			default:
+			}
+			select {
+			case <-ready:
+				return true
+			default:
+				return false
+			}
+		},
+	}
+
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	done := make(chan error, 1)
+	go func() {
+		done <- svc.ensureSessionRunning(ctx, "session1", session)
+	}()
+
+	select {
+	case <-checked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected ensureSessionRunning to check prompt readiness")
+	}
+
+	select {
+	case err := <-done:
+		t.Fatalf("ensureSessionRunning returned before prompt readiness: %v", err)
+	default:
+	}
+
+	close(ready)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("ensureSessionRunning failed after prompt readiness: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ensureSessionRunning did not return after prompt readiness")
+	}
+}

@@ -963,6 +963,26 @@ func (m *Manager) IsAgentRunningForSession(ctx context.Context, sessionID string
 	return status.IsAgentRunning()
 }
 
+// IsAgentReadyForPrompt reports whether the session can accept an ACP prompt
+// immediately. A process can be "running" while its update stream is still
+// reconnecting after resume; PromptAgent needs the stream-backed request path.
+func (m *Manager) IsAgentReadyForPrompt(ctx context.Context, sessionID string) bool {
+	execution, exists := m.GetExecutionBySessionID(sessionID)
+	if !exists {
+		return false
+	}
+
+	if execution.PassthroughProcessID != "" || execution.IsPassthrough {
+		return m.IsAgentRunningForSession(ctx, sessionID)
+	}
+
+	if execution.Status != v1.AgentStatusReady || execution.agentctl == nil {
+		return false
+	}
+
+	return execution.agentctl.HasAgentStream()
+}
+
 // UpdateStatus updates the status of an execution
 func (m *Manager) UpdateStatus(executionID string, status v1.AgentStatus) error {
 	if err := m.executionStore.WithLock(executionID, func(execution *AgentExecution) {

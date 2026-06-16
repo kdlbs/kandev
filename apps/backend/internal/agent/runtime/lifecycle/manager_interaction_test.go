@@ -734,6 +734,53 @@ func TestIsAgentRunningForSession(t *testing.T) {
 	})
 }
 
+func TestIsAgentReadyForPrompt(t *testing.T) {
+	t.Run("ACP execution requires ready status and update stream", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+
+		mock := newMockAgentServer(t)
+		t.Cleanup(mock.Close)
+
+		client := createTestClient(t, mock.server.URL)
+		t.Cleanup(client.Close)
+
+		store := NewExecutionStore()
+		err := store.Add(&AgentExecution{
+			ID:        "exec-acp-ready",
+			SessionID: "session-acp-ready",
+			Status:    v1.AgentStatusReady,
+			agentctl:  client,
+		})
+		require.NoError(t, err)
+
+		mgr := &Manager{
+			executionStore: store,
+			logger:         newTestLogger().WithFields(),
+		}
+		require.False(t, mgr.IsAgentReadyForPrompt(ctx, "session-acp-ready"))
+
+		err = client.StreamUpdates(ctx, func(agentctl.AgentEvent) {}, nil, nil)
+		require.NoError(t, err)
+
+		select {
+		case <-mock.wsConnected:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for updates stream")
+		}
+
+		require.True(t, mgr.IsAgentReadyForPrompt(ctx, "session-acp-ready"))
+
+		store.UpdateStatus("exec-acp-ready", v1.AgentStatusRunning)
+		require.False(t, mgr.IsAgentReadyForPrompt(ctx, "session-acp-ready"))
+	})
+
+	t.Run("missing execution returns false", func(t *testing.T) {
+		mgr := &Manager{executionStore: NewExecutionStore(), logger: newTestLogger().WithFields()}
+		require.False(t, mgr.IsAgentReadyForPrompt(context.Background(), "missing"))
+	})
+}
+
 // TestEffectiveSessionMode covers the fresh-launch mode propagation for issue
 // #1183: a persisted session_mode (e.g. from a set_session_mode workflow step)
 // must override the profile default at ACP session init, while a missing
