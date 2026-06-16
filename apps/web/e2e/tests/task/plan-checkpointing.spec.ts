@@ -30,9 +30,14 @@ function expectedAgentCompletionText(description: string): string | null {
 async function waitForAgentOutput(session: SessionPage, expectedText: string) {
   await expect
     .poll(
-      async () =>
-        (await session.chat.getByText(expectedText, { exact: false }).isVisible()) ||
-        (await session.planPanel.isVisible()),
+      async () => {
+        const matchingMessages = session.chat.getByText(expectedText, { exact: false });
+        const messageCount = await matchingMessages.count();
+        for (let index = 0; index < messageCount; index++) {
+          if (await matchingMessages.nth(index).isVisible()) return true;
+        }
+        return session.planPanel.isVisible();
+      },
       { timeout: 45_000, message: `agent output "${expectedText}" not visible` },
     )
     .toBe(true);
