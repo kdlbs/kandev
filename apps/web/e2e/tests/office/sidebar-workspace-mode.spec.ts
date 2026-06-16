@@ -68,10 +68,16 @@ test.describe("Sidebar workspace mode navigation", () => {
     );
     expect(orderedTops).toEqual([...orderedTops].sort((a, b) => a - b));
 
-    await sidebar.root.getByRole("button", { name: "Projects", exact: true }).click();
+    const projectsHeader = sidebar.root.getByRole("button", { name: "Projects", exact: true });
+    await expect(projectsHeader).toHaveAttribute("aria-expanded", "true");
+    await projectsHeader.click();
+    await expect(projectsHeader).toHaveAttribute("aria-expanded", "false");
     await expect(sidebar.root.getByRole("button", { name: "Add project" })).toBeVisible();
 
-    await sidebar.root.getByRole("button", { name: "Agents", exact: true }).click();
+    const agentsHeader = sidebar.root.getByRole("button", { name: "Agents", exact: true });
+    await expect(agentsHeader).toHaveAttribute("aria-expanded", "true");
+    await agentsHeader.click();
+    await expect(agentsHeader).toHaveAttribute("aria-expanded", "false");
     await expect(sidebar.root.getByRole("link", { name: "Agent topology" })).toBeVisible();
     await expect(sidebar.root.getByRole("button", { name: "Add agent" })).toBeVisible();
   });
