@@ -45,6 +45,10 @@ export function getLastTurnGroupId(items: RenderItem[]) {
   return null;
 }
 
+// The chat banner stays visible until the user explicitly dismisses it, even
+// after the agent resumes — so the user can read the full error message at
+// their own pace. The sidebar icon, by contrast, also auto-hides once the
+// agent posts a new message (see agentErrorMessageForTask).
 export function LastAgentErrorNotice({ sessionId }: { sessionId: string | null }) {
   const metadata = useAppStore((state) =>
     sessionId ? state.taskSessions.items[sessionId]?.metadata : null,
