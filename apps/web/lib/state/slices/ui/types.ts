@@ -220,7 +220,7 @@ export type UISliceActions = {
   removeTaskFromSidebarPrefs: (taskId: string) => void;
   toggleAppSidebar: () => void;
   setAppSidebarCollapsed: (collapsed: boolean) => void;
-  toggleAppSidebarSection: (sectionId: string) => void;
+  toggleAppSidebarSection: (sectionId: string, defaultExpanded?: boolean) => void;
   setAppSidebarWidth: (width: number) => void;
   toggleAppSidebarSettingsMode: () => void;
 };

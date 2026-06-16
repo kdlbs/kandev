@@ -66,11 +66,8 @@ test.describe("Sidebar navigation", () => {
   test("navigate to tasks page via dashboard card", async ({ testPage, officeSeed: _ }) => {
     await testPage.goto("/office");
     await expect(testPage.getByText("Agents Enabled")).toBeVisible({ timeout: 10_000 });
-    // Post-overhaul: the sidebar "Tasks" entry is a collapsible section header
-    // (a toggle button), not a navigation link — there is no longer an
-    // in-sidebar link to the /office/tasks page. Navigate via the dashboard
-    // "Tasks In Progress" metric card link instead (mirrors the sibling
-    // "navigate to agents page via sidebar" test, which uses "Agents Enabled").
+    // Keep dashboard-card navigation covered separately from the sidebar Tasks
+    // link asserted above; both are intentional entry points to /office/tasks.
     await testPage.getByRole("link", { name: /Tasks In Progress/i }).click();
     // Scope the heading assertion to the page content (`<main>` in the office
     // layout). The unified AppSidebar's collapsible "Tasks" section header also

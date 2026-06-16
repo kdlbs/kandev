@@ -91,7 +91,7 @@ export function AppSidebarSection({
           className="flex h-9 w-9 mx-auto items-center justify-center rounded-md text-foreground/70 hover:bg-muted/60 cursor-pointer"
           onClick={() => {
             setCollapsed(false);
-            if (!expanded) toggleSection(id);
+            if (!expanded) toggleSection(id, defaultExpanded);
           }}
           aria-label={label}
         >
@@ -104,7 +104,7 @@ export function AppSidebarSection({
 
   if (collapsed && !grow) return railButton;
 
-  const handleToggle = () => toggleSection(id);
+  const handleToggle = () => toggleSection(id, defaultExpanded);
 
   // The grow section (Tasks) absorbs remaining vertical space and scrolls
   // internally, so it stays flex-driven rather than animating to content

@@ -5,7 +5,9 @@ import { APP_SIDEBAR_EXPANDED_WIDTH } from "./app-sidebar-constants";
 const navigationMock = vi.hoisted(() => ({
   pathname: "/",
 }));
-let inOffice = false;
+const officeRouteMock = vi.hoisted(() => ({
+  inOffice: false,
+}));
 
 // The AppSidebar pulls in a lot of children that touch the dockview / kanban
 // data layer. For unit testing the collapse + section toggle behaviour we stub
@@ -64,7 +66,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/hooks/use-in-office", () => ({
-  useInOffice: () => inOffice,
+  useInOffice: () => officeRouteMock.inOffice,
 }));
 
 const storeState = {
@@ -98,7 +100,7 @@ import { AppSidebar } from "./app-sidebar";
 describe("AppSidebar", () => {
   beforeEach(() => {
     navigationMock.pathname = "/";
-    inOffice = false;
+    officeRouteMock.inOffice = false;
     storeState.appSidebar.collapsed = false;
     storeState.appSidebar.settingsMode = false;
     storeState.toggleAppSidebar = vi.fn();
@@ -120,7 +122,7 @@ describe("AppSidebar", () => {
   });
 
   it("renders office navigation without kanban-only sections in office mode", () => {
-    inOffice = true;
+    officeRouteMock.inOffice = true;
     navigationMock.pathname = "/office";
 
     render(<AppSidebar />);

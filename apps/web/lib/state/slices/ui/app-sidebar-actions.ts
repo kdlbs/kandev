@@ -10,9 +10,8 @@ import {
 import { APP_SIDEBAR_EXPANDED_WIDTH } from "@/components/app-sidebar/app-sidebar-constants";
 import type { AppSidebarState, UISlice } from "./types";
 
-/** Tasks expanded by default; other sections collapsed. Mirrors the
- *  "open question / risks" note in the spec: keep the unified sidebar from
- *  defaulting too tall on first open. */
+/** Keep high-value navigation open by default; dynamic entity sections stay
+ *  collapsed so the unified sidebar does not default too tall on first open. */
 export const DEFAULT_SECTION_EXPANDED: Record<string, boolean> = {
   tasks: true,
   "office-work": true,
@@ -49,9 +48,9 @@ export function buildAppSidebarActions(set: ImmerSet) {
         draft.appSidebar.collapsed = collapsed;
         setStoredAppSidebarCollapsed(collapsed);
       }),
-    toggleAppSidebarSection: (sectionId: string) =>
+    toggleAppSidebarSection: (sectionId: string, defaultExpanded = false) =>
       set((draft) => {
-        const current = draft.appSidebar.sectionExpanded[sectionId] ?? false;
+        const current = draft.appSidebar.sectionExpanded[sectionId] ?? defaultExpanded;
         draft.appSidebar.sectionExpanded[sectionId] = !current;
         setStoredAppSidebarSectionExpanded({ ...draft.appSidebar.sectionExpanded });
       }),

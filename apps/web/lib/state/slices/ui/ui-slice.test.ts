@@ -267,6 +267,19 @@ describe("appSidebar actions", () => {
     expect(store.getState().appSidebar.sectionExpanded.projects).toBe(false);
   });
 
+  it("toggleAppSidebarSection honors the caller default for missing section keys", () => {
+    const store = makeStore();
+    store.setState((draft) => {
+      delete draft.appSidebar.sectionExpanded["future-section"];
+    });
+
+    store.getState().toggleAppSidebarSection("future-section", true);
+
+    expect(store.getState().appSidebar.sectionExpanded["future-section"]).toBe(false);
+    const persisted = JSON.parse(window.localStorage.getItem(SECTION_KEY) ?? "{}");
+    expect(persisted["future-section"]).toBe(false);
+  });
+
   it("settingsMode defaults off and is never read from storage", () => {
     window.localStorage.setItem("kandev.appSidebar.settingsMode", JSON.stringify(true));
     const store = makeStore();

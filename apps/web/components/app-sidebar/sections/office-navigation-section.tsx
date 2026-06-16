@@ -54,7 +54,7 @@ export function OfficeNavigationSection({ collapsed }: OfficeNavigationSectionPr
             icon={item.icon}
             label={item.label}
             href={item.href}
-            badge={getWorkBadge(item.label, taskCount, routineCount)}
+            badge={getWorkBadge(item.href, taskCount, routineCount)}
             collapsed={collapsed}
           />
         ))}
@@ -72,7 +72,7 @@ export function OfficeNavigationSection({ collapsed }: OfficeNavigationSectionPr
             icon={item.icon}
             label={item.label}
             href={item.href}
-            badge={item.label === "Skills" && skillCount > 0 ? skillCount : undefined}
+            badge={getWorkspaceBadge(item.href, skillCount)}
             collapsed={collapsed}
           />
         ))}
@@ -81,8 +81,20 @@ export function OfficeNavigationSection({ collapsed }: OfficeNavigationSectionPr
   );
 }
 
-function getWorkBadge(label: string, taskCount: number, routineCount: number): number | undefined {
-  if (label === "Tasks" && taskCount > 0) return taskCount;
-  if (label === "Routines" && routineCount > 0) return routineCount;
+function getWorkBadge(
+  href: (typeof workItems)[number]["href"],
+  taskCount: number,
+  routineCount: number,
+): number | undefined {
+  if (href === "/office/tasks" && taskCount > 0) return taskCount;
+  if (href === "/office/routines" && routineCount > 0) return routineCount;
+  return undefined;
+}
+
+function getWorkspaceBadge(
+  href: (typeof workspaceItems)[number]["href"],
+  skillCount: number,
+): number | undefined {
+  if (href === "/office/workspace/skills" && skillCount > 0) return skillCount;
   return undefined;
 }

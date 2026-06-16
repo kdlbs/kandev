@@ -103,6 +103,28 @@ describe("AppSidebarSection", () => {
     renderSection({ collapsed: true, grow: true });
     fireEvent.click(screen.getByRole("button", { name: "Tasks" }));
     expect(storeState.setAppSidebarCollapsed).toHaveBeenCalledWith(false);
-    expect(storeState.toggleAppSidebarSection).toHaveBeenCalledWith("tasks");
+    expect(storeState.toggleAppSidebarSection).toHaveBeenCalledWith("tasks", false);
+  });
+
+  it("collapses a default-expanded section on the first click when state is missing", () => {
+    storeState.appSidebar.sectionExpanded = {};
+    render(
+      <TooltipProvider>
+        <AppSidebarSection
+          id="office-work"
+          label="Work"
+          icon={IconCircleDot}
+          collapsed={false}
+          grow
+          defaultExpanded
+        >
+          <div data-testid={CHILDREN_TESTID}>children</div>
+        </AppSidebarSection>
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Work" }));
+
+    expect(storeState.toggleAppSidebarSection).toHaveBeenCalledWith("office-work", true);
   });
 });
