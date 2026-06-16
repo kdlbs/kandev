@@ -109,6 +109,11 @@ describe("resolveSpaRoute", () => {
 
 describe("settingsRouteKey", () => {
   it("normalizes dynamic settings detail paths", () => {
+    expect(settingsRouteKey("/settings/general/keyboard-shortcuts/")).toBe(
+      "/settings/general/keyboard-shortcuts",
+    );
+    expect(settingsRouteKey("/settings/system/logs/")).toBe("/settings/system/logs");
+    expect(settingsRouteKey("/settings/changelog/")).toBe("/settings/changelog");
     expect(settingsRouteKey("/settings/workspace/ws-1/repositories/")).toBe(
       "/settings/workspace/ws-1/repositories",
     );

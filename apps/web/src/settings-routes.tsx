@@ -1,3 +1,5 @@
+import { useEffect, useRef, useState, type ReactNode } from "react";
+
 import AgentsSettingsPage from "@/app/settings/agents/page";
 import AgentSetupPage from "@/app/settings/agents/[agentId]/page";
 import AgentProfileRoute from "@/app/settings/agents/[agentId]/profiles/[profileId]/page";
@@ -21,12 +23,17 @@ import AutomationsPage from "@/app/settings/workspace/[id]/automations/page";
 import AutomationEditorPage from "@/app/settings/workspace/[id]/automations/[automationId]/page";
 import NewAutomationPage from "@/app/settings/workspace/[id]/automations/new/page";
 import WorkspaceEditPage from "@/app/settings/workspace/[id]/page";
-import WorkspaceRepositoriesPage from "@/app/settings/workspace/[id]/repositories/page";
+import { WorkspaceRepositoriesClient } from "@/app/settings/workspace/workspace-repositories-client";
 import WorkspaceWorkflowsPage from "@/app/settings/workspace/[id]/workflows/page";
 import WorkspacesPage from "@/app/settings/workspace/page";
 import { GitHubIntegrationPage } from "@/components/github/github-settings";
+import { useAppStoreApi } from "@/components/state-provider";
 import { EditorsSettings } from "@/components/settings/editors-settings";
-import { GeneralSettings } from "@/components/settings/general-settings";
+import {
+  AppearanceSettings,
+  GeneralSettings,
+  KeyboardShortcutsSettings,
+} from "@/components/settings/general-settings";
 import { NotificationsSettings } from "@/components/settings/notifications-settings";
 import { PromptsSettings } from "@/components/settings/prompts-settings";
 import { SecretsSettings } from "@/components/settings/secrets-settings";
@@ -38,21 +45,59 @@ import { DatabaseStatsCard } from "@/components/settings/system/database-stats-c
 import { DiskUsageCard } from "@/components/settings/system/disk-usage-card";
 import { FeatureTogglesSettings } from "@/components/settings/system/feature-toggles-settings";
 import { HealthIssuesCard } from "@/components/settings/system/health-issues-card";
+import { LicensesList } from "@/components/settings/system/licenses-list";
+import { LogViewer } from "@/components/settings/system/log-viewer";
 import { SystemPageShell } from "@/components/settings/system/system-page-shell";
 import { UIStateCard } from "@/components/settings/system/ui-state-card";
 import { UpdatesCard } from "@/components/settings/system/updates-card";
 import { VersionSummaryCard } from "@/components/settings/system/version-summary-card";
+import { TerminalSettings } from "@/components/settings/terminal-settings";
 import { VoiceModeSettings } from "@/components/settings/voice-mode-settings";
+import licenses from "@/generated/licenses.json";
+import { fetchJson } from "@/lib/api/client";
+import {
+  fetchUserSettings,
+  listAgentDiscovery,
+  listAgents,
+  listAvailableAgents,
+  listExecutors,
+} from "@/lib/api/domains/settings-api";
+import { listRepositories, listWorkspaces } from "@/lib/api/domains/workspace-api";
+import { useRouter } from "@/lib/routing/client-router";
+import { mapWorkspaceItem } from "@/lib/routing/route-bootstrap";
+import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
+import type { AppState } from "@/lib/state/store";
+import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
+import type { Repository, RepositoryScript, Workspace } from "@/lib/types/http";
+import type { LicenseEntry } from "@/lib/types/system";
 
-type RouteRenderer = () => React.ReactNode;
+type RouteRenderer = () => ReactNode;
+type RepositoryWithScripts = Repository & { scripts: RepositoryScript[] };
+type WorkspaceRepositoriesRouteState = {
+  workspace: Workspace | null;
+  repositories: RepositoryWithScripts[];
+};
+
+const licenseEntries = licenses as LicenseEntry[];
 
 const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   "/settings": () => <GeneralSettings />,
   "/settings/general": () => <GeneralSettings />,
+  "/settings/general/appearance": () => <AppearanceSettings />,
+  "/settings/general/changes-panel": () => <SettingsRedirect to="/settings/general/appearance" />,
+  "/settings/general/chat-input": () => (
+    <SettingsRedirect to="/settings/general/keyboard-shortcuts" />
+  ),
   "/settings/general/editors": () => <EditorsSettings />,
+  "/settings/general/keyboard-shortcuts": () => <KeyboardShortcutsSettings />,
   "/settings/general/notifications": () => <NotificationsSettings />,
+  "/settings/general/resource-metrics": () => (
+    <SettingsRedirect to="/settings/general/appearance" />
+  ),
   "/settings/general/secrets": () => <SecretsSettings />,
+  "/settings/general/shell": () => <SettingsRedirect to="/settings/general/terminal" />,
   "/settings/general/sprites": () => <SpritesSettings />,
+  "/settings/general/terminal": () => <TerminalSettings />,
   "/settings/workspace": () => <WorkspacesPage />,
   "/settings/agents": () => <AgentsSettingsPage />,
   "/settings/automations": () => <AutomationsTopLevelPage />,
@@ -69,6 +114,7 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   "/settings/integrations/linear": () => <IntegrationsLinearPage />,
   "/settings/integrations/sentry": () => <IntegrationsSentryPage />,
   "/settings/integrations/slack": () => <IntegrationsSlackPage />,
+  "/settings/system": () => <SettingsRedirect to="/settings/system/status" />,
   "/settings/system/about": () => (
     <SystemPageShell title="About" description="Version, build metadata, and links.">
       <AboutCard />
@@ -98,6 +144,22 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
       <FeatureTogglesSettings initialFlags={[]} restartCapability={null} />
     </SystemPageShell>
   ),
+  "/settings/system/licenses": () => (
+    <SystemPageShell
+      title="Licenses"
+      description="Open-source licenses for every npm and Go dependency shipped with kandev."
+    >
+      <LicensesList entries={licenseEntries} />
+    </SystemPageShell>
+  ),
+  "/settings/system/logs": () => (
+    <SystemPageShell
+      title="Logs"
+      description="Recent backend log output and downloadable log files."
+    >
+      <LogViewer />
+    </SystemPageShell>
+  ),
   "/settings/system/status": () => (
     <SystemPageShell title="Status" description="Health checks, disk usage, and version summary.">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -109,14 +171,17 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
     </SystemPageShell>
   ),
   "/settings/system/updates": renderUpdatesRoute,
-  "/settings/changelog": renderUpdatesRoute,
+  "/settings/changelog": () => <SettingsRedirect to="/settings/system/updates" />,
 };
 
 export function SettingsRoutes({ pathname }: { pathname: string }) {
+  const normalizedPathname = normalizeSettingsPath(pathname);
+
   return (
-    <SettingsLayoutClient>
-      {renderSettingsRoute(normalizeSettingsPath(pathname))}
-    </SettingsLayoutClient>
+    <>
+      <SettingsRouteBootstrap pathname={normalizedPathname} />
+      <SettingsLayoutClient>{renderSettingsRoute(normalizedPathname)}</SettingsLayoutClient>
+    </>
   );
 }
 
@@ -150,7 +215,7 @@ function renderDynamicSettingsRoute(pathname: string) {
   if (workspaceSubpage) {
     const [id, section] = workspaceSubpage;
     if (section === "repositories") {
-      return <WorkspaceRepositoriesPage params={Promise.resolve({ id })} />;
+      return <WorkspaceRepositoriesRoute workspaceId={id} />;
     }
     if (section === "workflows") {
       return <WorkspaceWorkflowsPage params={Promise.resolve({ id })} />;
@@ -215,6 +280,132 @@ function renderUpdatesRoute() {
       <UpdatesCard />
     </SystemPageShell>
   );
+}
+
+function SettingsRedirect({ to }: { to: string }) {
+  const router = useRouter();
+
+  useEffect(() => {
+    router.replace(to);
+  }, [router, to]);
+
+  return null;
+}
+
+function SettingsRouteBootstrap({ pathname }: { pathname: string }) {
+  const store = useAppStoreApi();
+  const bootstrappedRef = useRef(false);
+
+  useEffect(() => {
+    if (bootstrappedRef.current) return;
+    bootstrappedRef.current = true;
+    let cancelled = false;
+
+    async function bootstrap() {
+      const initialState = await loadSettingsInitialState(pathname);
+      if (!cancelled && Object.keys(initialState).length > 0) {
+        store.getState().hydrate(initialState);
+      }
+    }
+
+    void bootstrap();
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname, store]);
+
+  return null;
+}
+
+async function loadSettingsInitialState(pathname: string): Promise<Partial<AppState>> {
+  const [workspaces, executors, agents, discovery, available, userSettingsResponse] =
+    await Promise.all([
+      listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
+      listExecutors({ cache: "no-store" }).catch(() => ({ executors: [] })),
+      listAgents({ cache: "no-store" }).catch(() => ({ agents: [] })),
+      listAgentDiscovery({ cache: "no-store" }).catch(() => ({ agents: [] })),
+      listAvailableAgents({ cache: "no-store" }).catch(() => ({ agents: [], tools: [] })),
+      fetchUserSettings({ cache: "no-store" }).catch(() => null),
+    ]);
+
+  const workspaceItems = workspaces.workspaces.map(mapWorkspaceItem);
+  const requestedWorkspaceId = matchSingle(pathname, /^\/settings\/workspace\/([^/]+)/);
+  const settingsWorkspaceId = userSettingsResponse?.settings?.workspace_id ?? null;
+  const activeWorkspaceId =
+    workspaceItems.find((workspace) => workspace.id === requestedWorkspaceId)?.id ??
+    workspaceItems.find((workspace) => workspace.id === settingsWorkspaceId)?.id ??
+    workspaceItems[0]?.id ??
+    null;
+  const mappedUserSettings = mapUserSettingsResponse(userSettingsResponse);
+
+  return {
+    workspaces: { items: workspaceItems, activeId: activeWorkspaceId },
+    executors: { items: executors.executors },
+    agentProfiles: {
+      items: agents.agents.flatMap((agent) =>
+        agent.profiles.map((profile) => toAgentProfileOption(agent, profile)),
+      ),
+      version: 0,
+    },
+    settingsAgents: { items: agents.agents },
+    agentDiscovery: { items: discovery.agents, loading: false, loaded: true },
+    availableAgents: {
+      items: available.agents,
+      tools: available.tools ?? [],
+      loading: false,
+      loaded: true,
+    },
+    settingsData: { executorsLoaded: true, agentsLoaded: true },
+    ...(mappedUserSettings.loaded
+      ? {
+          userSettings: {
+            ...mappedUserSettings,
+            workspaceId: activeWorkspaceId,
+          },
+        }
+      : {}),
+  };
+}
+
+function WorkspaceRepositoriesRoute({ workspaceId }: { workspaceId: string }) {
+  const [state, setState] = useState<WorkspaceRepositoriesRouteState | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setState(null);
+
+    loadWorkspaceRepositoriesRoute(workspaceId)
+      .catch(() => ({ workspace: null, repositories: [] }))
+      .then((nextState) => {
+        if (!cancelled) setState(nextState);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId]);
+
+  if (!state) return null;
+  return (
+    <WorkspaceRepositoriesClient workspace={state.workspace} repositories={state.repositories} />
+  );
+}
+
+async function loadWorkspaceRepositoriesRoute(
+  workspaceId: string,
+): Promise<WorkspaceRepositoriesRouteState> {
+  const [workspace, repoResponse] = await Promise.all([
+    fetchJson<Workspace>(`/api/v1/workspaces/${workspaceId}`, { cache: "no-store" }),
+    listRepositories(workspaceId, { includeScripts: true }, { cache: "no-store" }),
+  ]);
+
+  return {
+    workspace,
+    repositories: repoResponse.repositories.map((repository) => ({
+      ...repository,
+      scripts: repository.scripts ?? [],
+    })),
+  };
 }
 
 function SettingsRouteFallback({ pathname }: { pathname: string }) {
