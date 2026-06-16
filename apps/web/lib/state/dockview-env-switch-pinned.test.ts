@@ -38,6 +38,8 @@ vi.mock("./layout-manager", () => {
     // formatWidthsSnapshot debug log it now emits.
     setPinnedTarget: vi.fn(),
     getPinnedTarget: vi.fn(() => undefined),
+    RIGHT_TOP_GROUP: "group-right-top",
+    RIGHT_BOTTOM_GROUP: "group-right-bottom",
   };
 });
 
@@ -152,7 +154,10 @@ describe("performEnvSwitch — pinned column resize after fast-path", () => {
           data: [
             { type: "leaf", data: { id: "g1", views: ["sidebar"] }, size: 420 },
             { type: "leaf", data: { id: "g2", views: ["chat"] }, size: 760 },
-            { type: "leaf", data: { id: "g3", views: ["files"] }, size: 420 },
+            // Last leaf MUST carry the pinned right-column group id so
+            // savedRightColumnWidth detects this as a real right column and
+            // forwards 420 to applyLayoutFixups.
+            { type: "leaf", data: { id: "group-right-top", views: ["files"] }, size: 420 },
           ],
         },
         height: 600,

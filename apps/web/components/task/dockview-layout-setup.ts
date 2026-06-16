@@ -15,6 +15,14 @@ import { setEnvLayout } from "@/lib/local-storage";
 import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
 import { stopVscode } from "@/lib/api/domains/vscode-api";
 import { parkUserShell, stopUserShell } from "@/lib/api/domains/user-shell-api";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
+import {
+  snapshotColumnWidths,
+  formatWidthsSnapshot,
+  formatJsonRootSizes,
+} from "@/lib/state/dockview-widths-debug";
+
+const debugWidths = createDebugLogger("dockview:widths");
 
 // v3: bumped alongside DOCKVIEW_ENV_LAYOUT_PREFIX so the no-env fallback
 // also discards layouts captured with the now-removed dockview sidebar column.
@@ -118,7 +126,12 @@ export function setupSashDragCapToggle(api: DockviewReadyEvent["api"]): () => vo
     // start a drag must not leave `sashDragging` permanently set (cubic P2).
     if (e.button !== 0) return;
     const t = e.target as HTMLElement | null;
-    if (t?.closest(".dv-sash")) sashDragging = true;
+    if (t?.closest(".dv-sash")) {
+      sashDragging = true;
+      if (isDebug()) {
+        debugWidths(`sash-drag-start ${formatWidthsSnapshot(snapshotColumnWidths(api))}`);
+      }
+    }
   };
   const onMouseUp = (e: MouseEvent): void => {
     if (e.button !== 0 || !sashDragging) return;
@@ -128,7 +141,18 @@ export function setupSashDragCapToggle(api: DockviewReadyEvent["api"]): () => vo
       const sv = getRootSplitview(api);
       if (!sv) return;
       const store = useDockviewStore.getState();
-      if (store.rightPanelsVisible) setPinnedTarget("right", sv.getViewSize(sv.length - 1));
+      if (store.rightPanelsVisible) {
+        const newRight = sv.getViewSize(sv.length - 1);
+        setPinnedTarget("right", newRight);
+        if (isDebug()) {
+          debugWidths(
+            `sash-drag-end captured=right:${Math.round(newRight)} ` +
+              `${formatWidthsSnapshot(snapshotColumnWidths(api))}`,
+          );
+        }
+      } else if (isDebug()) {
+        debugWidths(`sash-drag-end ${formatWidthsSnapshot(snapshotColumnWidths(api))}`);
+      }
     });
   };
   document.addEventListener("mousedown", onMouseDown, true);
@@ -227,6 +251,12 @@ export function setupLayoutPersistence(
       localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(json));
       if (envId) {
         setEnvLayout(envId, json);
+      }
+      if (isDebug()) {
+        debugWidths(
+          `persist env=${envId ?? "-"} ${formatWidthsSnapshot(snapshotColumnWidths(api))} ` +
+            `jsonSizes=${formatJsonRootSizes(json)}`,
+        );
       }
     } catch {
       // Ignore serialization errors

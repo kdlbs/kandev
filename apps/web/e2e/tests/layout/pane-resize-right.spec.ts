@@ -6,6 +6,8 @@ import {
   getDockviewGroupWidth,
   resizeColumnViaSplitview,
 } from "../../helpers/dockview-resize";
+import { KanbanPage } from "../../pages/kanban-page";
+import { SessionPage } from "../../pages/session-page";
 
 test.describe("Right pane resize — viewport-proportional cap", () => {
   test("resizes past the old 450px hard cap", async ({ testPage, apiClient, seedData }) => {
@@ -58,5 +60,74 @@ test.describe("Right pane resize — viewport-proportional cap", () => {
 
     const newCap = Math.max(800, Math.round(1100 * 0.7));
     expect(narrowWidth).toBeLessThanOrEqual(newCap + 10);
+  });
+});
+
+test.describe("Right pane width — per-task isolation", () => {
+  test("a narrow resize in Task A does not leak into Task B", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    await testPage.setViewportSize(WIDE_VIEWPORT);
+
+    // Two tasks, same default layout. Each gets its own env id and its own
+    // persisted dockview layout in sessionStorage.
+    await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Right Width Task A",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    const taskB = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Right Width Task B",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await kanban.taskCardByTitle("Right Width Task A").click();
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForDockviewReady();
+
+    // Resize Task A's right column to a deliberately narrow width. The default
+    // is ~450 on a 1600px viewport, so 240 is unambiguously a user override.
+    const narrowedA = await resizeColumnViaSplitview(testPage, "right", 240);
+    expect(narrowedA).toBeLessThan(300);
+
+    // Switch to Task B (no prior resize, default width). Regression: a stale
+    // global "right" pinned target from Task A's drag used to leak through
+    // captureRightTarget / enforcePinnedTargets after fromJSON, snapping
+    // Task B's right column to Task A's narrow width — and the next
+    // debounced persist would overwrite Task B's saved layout with the
+    // narrow width, making the leak sticky.
+    await session.clickTaskInSidebar("Right Width Task B");
+    await expect(testPage).toHaveURL((url) => url.pathname.includes(taskB.id), {
+      timeout: 15_000,
+    });
+    await expect(testPage.locator(".dv-dockview")).toBeVisible({ timeout: 15_000 });
+    // Allow fromJSON + fixups-capture + enforcePinnedTargets to settle.
+    await testPage.waitForTimeout(500);
+
+    const widthB = await getDockviewGroupWidth(testPage, "files");
+    expect(
+      widthB,
+      `Task B right width ${widthB} should be the default (>350), not Task A's narrow ${narrowedA}`,
+    ).toBeGreaterThan(350);
   });
 });

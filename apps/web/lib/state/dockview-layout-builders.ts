@@ -152,12 +152,19 @@ function resolveRightTarget(
  *  For the vscode/preview/plan presets the side column has a generated group id
  *  and is NOT pinned, so there is no saved/default width to fall back on; there
  *  we keep recording the just-restored live width so switching to one of those
- *  tasks doesn't leak the previous task's right target.
+ *  tasks doesn't leak the previous task's right target. Identified by
+ *  `sv.length >= 3` (sidebar + center + side), since we have no stable group id
+ *  to key off.
  *
- *  `sv.length >= 3` excludes the 2-column global-fallback restore (sidebar +
- *  center, right panels stripped as env-scoped), where the last splitview child
- *  is the CENTER column — recording its width as the "right" target would
- *  inflate the real right column once the full layout materializes. */
+ *  The default-preset branch runs regardless of column count: a task with the
+ *  sidebar hidden has sv.length=2 but the LAST child IS the pinned right
+ *  column. Without per-env capture there, the stale global right target from a
+ *  previous task's drag leaks through `enforcePinnedTargets` and snaps the
+ *  restored column to the wrong width (per-task width persistence bug).
+ *
+ *  The 2-column global-fallback restore (sidebar + center, right panels
+ *  stripped) is excluded because neither right group exists in `api.groups`
+ *  and `sv.length < 3` — its last splitview child is the CENTER column. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function captureRightTarget(api: DockviewApi, sv: any, savedRightWidth?: number): void {
   // Constrain the default preset's right column groups (stable well-known IDs).
@@ -172,10 +179,12 @@ function captureRightTarget(api: DockviewApi, sv: any, savedRightWidth?: number)
       group.api.setConstraints({ maximumWidth: rightCap, minimumWidth: LAYOUT_PINNED_MIN_PX });
     }
   }
-  if (!sv || sv.length < 3) return;
+  if (!sv || sv.length < 2) return;
   const idx = sv.length - 1;
   // Default preset (pinned right column): anchor to saved-or-default, resize the
-  // column to it, and record it as the target. Never the live size.
+  // column to it, and record it as the target. Never the live size. Works for
+  // both 3-column (sidebar+center+right) and 2-column (center+right, sidebar
+  // hidden) layouts since the right column is always at sv.length-1.
   if (api.groups.some((g) => g.id === RIGHT_TOP_GROUP || g.id === RIGHT_BOTTOM_GROUP)) {
     const target = resolveRightTarget(rightCap, measuredWidth, savedRightWidth);
     const cur = sv.getViewSize(idx);
@@ -189,7 +198,10 @@ function captureRightTarget(api: DockviewApi, sv: any, savedRightWidth?: number)
     setPinnedTarget("right", target);
     return;
   }
-  // Non-default presets: side column is not pinned — keep the live width.
+  // Non-default presets (vscode/preview/plan): side column has a generated
+  // group id, so we need `sv.length >= 3` to know the last splitview child is
+  // the side column (not the center in a 2-column fallback).
+  if (sv.length < 3) return;
   const liveRight = sv.getViewSize(idx);
   if (typeof liveRight === "number" && liveRight > 0) {
     setPinnedTarget("right", Math.min(liveRight, rightCap));
@@ -210,9 +222,14 @@ function logFixupsCapture(api: DockviewApi, sv: any): void {
   const sidebarCap = computeSidebarMaxPx(w);
   const innerW = typeof window !== "undefined" ? window.innerWidth : -1;
   const liveSidebar = sv?.getViewSize?.(0);
-  // Threshold matches captureRightTarget (>= 3): in a 2-column layout the last
-  // child is the center, not a right column, so we don't mislabel it here.
-  const liveRight = sv && sv.length >= 3 ? sv.getViewSize(sv.length - 1) : undefined;
+  // A 2-column layout's last child is the right column only when the pinned
+  // right groups exist (default preset, sidebar hidden); otherwise it's the
+  // center (global-fallback restore). Mirrors captureRightTarget.
+  const hasPinnedRight = api.groups.some(
+    (g) => g.id === RIGHT_TOP_GROUP || g.id === RIGHT_BOTTOM_GROUP,
+  );
+  const rightIdxIsRight = sv && (sv.length >= 3 || (sv.length === 2 && hasPinnedRight));
+  const liveRight = rightIdxIsRight ? sv.getViewSize(sv.length - 1) : undefined;
   const r = (n: number | undefined): string =>
     typeof n === "number" ? String(Math.round(n)) : "-";
   debugWidths(

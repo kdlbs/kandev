@@ -59,3 +59,17 @@ export function formatWidthsSnapshot(snap: ColumnWidthsSnapshot): string {
     `cols=${snap.columns} api=${snap.apiW}x${snap.apiH} tgt=L${tL}/R${tR}`
   );
 }
+
+/** Comma-joined top-level grid-root child sizes from a serialized dockview
+ *  layout (`json.grid.root.data[].size`). Used to compare what `api.toJSON()`
+ *  actually serializes against the live splitview widths — they should match,
+ *  but a dockview internal lag/desync would surface here. Returns "-" when the
+ *  shape doesn't look like a serialized dockview layout. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function formatJsonRootSizes(json: any): string {
+  const children = json?.grid?.root?.data;
+  if (!Array.isArray(children)) return "-";
+  return children
+    .map((c) => (typeof c?.size === "number" ? String(Math.round(c.size)) : "?"))
+    .join(",");
+}

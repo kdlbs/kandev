@@ -46,7 +46,11 @@ import { preserveChatScrollDuringLayout } from "./dockview-scroll-preserve";
 import { measureDockviewContainer } from "./dockview-measure";
 import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
-import { snapshotColumnWidths, formatWidthsSnapshot } from "./dockview-widths-debug";
+import {
+  snapshotColumnWidths,
+  formatWidthsSnapshot,
+  formatJsonRootSizes,
+} from "./dockview-widths-debug";
 
 const debugSwitch = createDebugLogger("dockview:store-switch");
 const debugSave = createDebugLogger("dockview:save");
@@ -661,7 +665,14 @@ function saveOutgoingEnv(
   } else {
     removeEnvMaximizeState(oldEnvId);
     try {
-      setEnvLayout(oldEnvId, api.toJSON());
+      const json = api.toJSON();
+      setEnvLayout(oldEnvId, json);
+      if (isDebug()) {
+        debugWidths(
+          `save-outgoing env=${oldEnvId} ${formatWidthsSnapshot(snapshotColumnWidths(api))} ` +
+            `jsonSizes=${formatJsonRootSizes(json)}`,
+        );
+      }
     } catch {
       /* ignore */
     }

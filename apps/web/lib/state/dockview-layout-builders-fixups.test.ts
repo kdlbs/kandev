@@ -187,4 +187,29 @@ describe("applyLayoutFixups — pinned target capture", () => {
 
     expect(setPinnedTarget).toHaveBeenCalledWith("right", RIGHT_CAP);
   });
+
+  it("captures the right target in a 2-column layout with the pinned right column (no sidebar)", () => {
+    // Regression: a task whose saved layout has the sidebar hidden restores
+    // as a 2-column splitview [center, right]. Without per-env capture there,
+    // the stale global right target from a previous task's drag leaks through
+    // enforcePinnedTargets and snaps the restored column to the wrong width.
+    // The pinned right groups exist, so the last child IS the right column.
+    mockSplitview([720, 400]); // idx0 = center, idx1 = right
+    const api = makeApi([CENTER_GROUP, RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP]);
+
+    applyLayoutFixups(api, 420);
+
+    expect(setPinnedTarget).toHaveBeenCalledWith("right", 420);
+    expect(mockResizeView).toHaveBeenCalledWith(1, 420);
+  });
+
+  it("uses the column default for a 2-column pinned right layout when no saved width is given", () => {
+    mockSplitview([720, 400]);
+    const api = makeApi([CENTER_GROUP, RIGHT_TOP_GROUP]);
+
+    applyLayoutFixups(api);
+
+    expect(setPinnedTarget).toHaveBeenCalledWith("right", 350); // default
+    expect(setPinnedTarget).not.toHaveBeenCalledWith("right", 400); // not live
+  });
 });

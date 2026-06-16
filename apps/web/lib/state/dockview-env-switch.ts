@@ -18,11 +18,17 @@ import {
   getPinnedWidth,
   getRootSplitview,
   setPinnedTarget,
+  RIGHT_TOP_GROUP,
+  RIGHT_BOTTOM_GROUP,
 } from "./layout-manager";
 import type { LayoutState, LayoutGroupIds } from "./layout-manager";
 import { ENV_SCOPED_DOCKVIEW_COMPONENTS } from "./dockview-env-scoped-components";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
-import { snapshotColumnWidths, formatWidthsSnapshot } from "./dockview-widths-debug";
+import {
+  snapshotColumnWidths,
+  formatWidthsSnapshot,
+  formatJsonRootSizes,
+} from "./dockview-widths-debug";
 
 const debug = createDebugLogger("dockview:env-switch");
 const debugWidths = createDebugLogger("dockview:widths");
@@ -335,13 +341,43 @@ function tryFastEnvSwitch(params: EnvSwitchParams): LayoutGroupIds | null {
  * right column. Forwarded to `applyLayoutFixups` so the fixups pass anchors the
  * pinned right target to this stable saved width instead of dockview's
  * transient post-`fromJSON` live size (the dockview-wrong-width drift).
+ *
+ * The right column is identified by the presence of RIGHT_TOP_GROUP /
+ * RIGHT_BOTTOM_GROUP inside the last grid-root child — NOT by column count.
+ * A task with the sidebar hidden has only 2 grid-root children but the last
+ * one is still the pinned right branch; column-count gating leaked Task A's
+ * resized width into Task B's restored layout (per-task width persistence bug).
  */
 export function savedRightColumnWidth(saved: SerializedDockview | null): number | undefined {
   if (!saved) return undefined;
   const sizes = extractSavedColumnSizes(saved);
-  if (!sizes || sizes.length < 3) return undefined;
+  if (!sizes || sizes.length < 2) return undefined;
+  if (!savedLastChildIsRightColumn(saved)) return undefined;
   const w = sizes[sizes.length - 1];
   return Number.isFinite(w) && w > 0 ? w : undefined;
+}
+
+/** True when the last grid-root child contains a pinned right column group. */
+function savedLastChildIsRightColumn(saved: SerializedDockview): boolean {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const root = (saved as any).grid?.root;
+  if (!root?.data || !Array.isArray(root.data) || root.data.length < 2) return false;
+  const last = root.data[root.data.length - 1];
+  return leafContainsRightGroup(last);
+}
+
+/** True when a serialized leaf-or-branch node contains a pinned right group. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function leafContainsRightGroup(node: any): boolean {
+  if (!node) return false;
+  if (node.type === "leaf") {
+    const id = node.data?.id;
+    return id === RIGHT_TOP_GROUP || id === RIGHT_BOTTOM_GROUP;
+  }
+  if (node.type === "branch" && Array.isArray(node.data)) {
+    return node.data.some((c: unknown) => leafContainsRightGroup(c));
+  }
+  return false;
 }
 
 /** Extract per-column sizes from a saved SerializedDockview grid root. */
@@ -487,6 +523,10 @@ export function performEnvSwitch(params: EnvSwitchParams): LayoutGroupIds {
           savedPanelIds,
           savedShape,
         });
+        debugWidths(
+          `slow-path-load env=${newEnvId} savedSizes=${formatJsonRootSizes(saved)} ` +
+            `savedRight=${savedRightColumnWidth(saved as SerializedDockview) ?? "-"}`,
+        );
       }
       api.fromJSON(saved as SerializedDockview);
       // Saved layout may carry a stale session panel from a previously-deleted
