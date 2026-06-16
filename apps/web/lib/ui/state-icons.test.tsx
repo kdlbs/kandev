@@ -31,7 +31,7 @@ describe("shouldShowTaskRunningSpinner", () => {
     expect(shouldShowTaskRunningSpinner("TODO")).toBe(false);
   });
 
-  it("returns true when any task state has an actively running primary session", () => {
+  it("returns true for non-TODO task states with an actively running primary session", () => {
     expect(shouldShowTaskRunningSpinner("REVIEW", "RUNNING")).toBe(true);
     expect(shouldShowTaskRunningSpinner("COMPLETED", "RUNNING")).toBe(true);
     expect(shouldShowTaskRunningSpinner("FAILED", "RUNNING")).toBe(true);
