@@ -225,7 +225,15 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 				zap.String("session_id", req.TaskSessionID),
 				zap.Error(err))
 		}
-		sessionResp = h.resolveSessionAfterTurnStart(ctx, req.TaskID, req.TaskSessionID, sessionResp)
+		var err error
+		sessionResp, err = h.resolveSessionAfterTurnStart(ctx, req.TaskID, req.TaskSessionID, sessionResp)
+		if err != nil {
+			h.logger.Warn("failed to resolve prompt session after on_turn_start",
+				zap.String("task_id", req.TaskID),
+				zap.String("session_id", req.TaskSessionID),
+				zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to resolve prompt session", nil)
+		}
 		req.TaskSessionID = sessionResp.Session.ID
 	}
 	isCreatedSession := sessionResp.Session.State == models.TaskSessionStateCreated
@@ -292,9 +300,9 @@ func (h *MessageHandlers) resolveSessionAfterTurnStart(
 	ctx context.Context,
 	taskID, submittedSessionID string,
 	current *dto.GetTaskSessionResponse,
-) *dto.GetTaskSessionResponse {
-	if current == nil || current.Session.ID == "" {
-		return current
+) (*dto.GetTaskSessionResponse, error) {
+	if current.Session.ID == "" {
+		return nil, errors.New("submitted session response missing session id")
 	}
 	reloaded, err := h.service.GetTaskSession(ctx, submittedSessionID)
 	if err != nil {
@@ -302,22 +310,25 @@ func (h *MessageHandlers) resolveSessionAfterTurnStart(
 			zap.String("task_id", taskID),
 			zap.String("session_id", submittedSessionID),
 			zap.Error(err))
-		return current
+		return current, nil
 	}
 	if reloaded.State != models.TaskSessionStateCompleted {
-		return &dto.GetTaskSessionResponse{Session: dto.FromTaskSession(reloaded)}
+		return &dto.GetTaskSessionResponse{Session: dto.FromTaskSession(reloaded)}, nil
 	}
 	primary, err := h.service.GetPrimarySession(ctx, taskID)
-	if err != nil || primary == nil || primary.ID == submittedSessionID {
+	if err != nil || primary == nil {
 		if err != nil {
 			h.logger.Warn("failed to load primary session after on_turn_start switch",
 				zap.String("task_id", taskID),
 				zap.String("session_id", submittedSessionID),
 				zap.Error(err))
 		}
-		return &dto.GetTaskSessionResponse{Session: dto.FromTaskSession(reloaded)}
+		return nil, errors.New("submitted session completed during on_turn_start without replacement primary session")
 	}
-	return &dto.GetTaskSessionResponse{Session: dto.FromTaskSession(primary)}
+	if primary.ID == submittedSessionID {
+		return nil, errors.New("submitted session completed during on_turn_start but remains primary")
+	}
+	return &dto.GetTaskSessionResponse{Session: dto.FromTaskSession(primary)}, nil
 }
 
 // validateAddMessageRequest returns a non-empty error string if the request is invalid.

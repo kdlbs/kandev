@@ -196,6 +196,7 @@ type switchingTurnStartOrchestrator struct {
 	repo             *messageAddSwitchRepo
 	forwardedSession string
 	startedSession   string
+	switchPrimary    bool
 }
 
 func (o *switchingTurnStartOrchestrator) PromptTask(
@@ -230,7 +231,9 @@ func (o *switchingTurnStartOrchestrator) StartCreatedSession(
 
 func (o *switchingTurnStartOrchestrator) ProcessOnTurnStart(context.Context, string, string) error {
 	o.repo.sessions["s1"].State = models.TaskSessionStateCompleted
-	o.repo.primaryID = "s2"
+	if o.switchPrimary {
+		o.repo.primaryID = "s2"
+	}
 	return nil
 }
 
@@ -239,6 +242,50 @@ func (o *switchingTurnStartOrchestrator) StepRequiresCompletionSignal(context.Co
 }
 
 func TestWSAddMessageUsesSessionSelectedByOnTurnStart(t *testing.T) {
+	now := time.Now().UTC()
+	repo := &messageAddSwitchRepo{
+		tasks: map[string]*models.Task{
+			"t1": {ID: "t1", State: v1.TaskStateReview, UpdatedAt: now},
+		},
+		sessions: map[string]*models.TaskSession{
+			"s1": {ID: "s1", TaskID: "t1", State: models.TaskSessionStateWaitingForInput, AgentProfileID: "profile-old", UpdatedAt: now},
+			"s2": {ID: "s2", TaskID: "t1", State: models.TaskSessionStateCreated, AgentProfileID: "profile-new", UpdatedAt: now},
+		},
+		primaryID: "s1",
+	}
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	require.NoError(t, err)
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	orch := &switchingTurnStartOrchestrator{repo: repo, switchPrimary: true}
+	h := NewMessageHandlers(svc, orch, log)
+
+	req, err := ws.NewRequest("req-1", ws.ActionMessageAdd, map[string]interface{}{
+		"task_id":    "t1",
+		"session_id": "s1",
+		"content":    "continue here",
+	})
+	require.NoError(t, err)
+
+	resp, err := h.wsAddMessage(context.Background(), req)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+	require.Len(t, repo.messages, 1)
+	assert.Equal(t, "s2", repo.messages[0].TaskSessionID)
+
+	require.Eventually(t, func() bool {
+		return orch.startedSession != ""
+	}, time.Second, 10*time.Millisecond)
+	assert.Equal(t, "s2", orch.startedSession)
+	assert.Empty(t, orch.forwardedSession)
+}
+
+func TestWSAddMessageFailsWhenOnTurnStartCompletesSessionWithoutReplacement(t *testing.T) {
 	now := time.Now().UTC()
 	repo := &messageAddSwitchRepo{
 		tasks: map[string]*models.Task{
@@ -271,13 +318,8 @@ func TestWSAddMessageUsesSessionSelectedByOnTurnStart(t *testing.T) {
 
 	resp, err := h.wsAddMessage(context.Background(), req)
 	require.NoError(t, err)
-	require.Equal(t, ws.MessageTypeResponse, resp.Type)
-	require.Len(t, repo.messages, 1)
-	assert.Equal(t, "s2", repo.messages[0].TaskSessionID)
-
-	require.Eventually(t, func() bool {
-		return orch.startedSession != ""
-	}, time.Second, 10*time.Millisecond)
-	assert.Equal(t, "s2", orch.startedSession)
+	require.Equal(t, ws.MessageTypeError, resp.Type)
+	assert.Empty(t, repo.messages)
+	assert.Empty(t, orch.startedSession)
 	assert.Empty(t, orch.forwardedSession)
 }
