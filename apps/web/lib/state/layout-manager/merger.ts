@@ -8,13 +8,23 @@ const PRESET_ONLY_PANELS = new Set(["sidebar"]);
 /** Components that, when surviving as extras on a layout switch, belong next
  *  to the chat/agent tabs in the CENTER column rather than the narrow side
  *  "tools" column. These are main-content surfaces — the plan, the browser,
- *  the VS Code editor, and PR detail — whereas files/changes/terminal are
- *  tools that stay in the side column. Switching from the plan/vscode/preview
- *  preset back to default must not strand these in the right column.
+ *  the VS Code editor, PR detail, and file/commit/diff previews — whereas
+ *  files/changes/terminal are tools that stay in the side column. Switching
+ *  from the plan/vscode/preview preset back to default must not strand these
+ *  in the right column.
  *
  *  Matched by component (not id) because some carry dynamic ids — a browser
- *  panel is `browser:<url>`, not a literal `browser`. */
-const CENTER_EXTRA_COMPONENTS = new Set(["plan", "browser", "vscode", "pr-detail"]);
+ *  panel is `browser:<url>`, not a literal `browser`; a pinned file editor
+ *  is `file:<path>` with component `file-editor`. */
+const CENTER_EXTRA_COMPONENTS = new Set([
+  "plan",
+  "browser",
+  "vscode",
+  "pr-detail",
+  "file-editor",
+  "commit-detail",
+  "diff-viewer",
+]);
 
 /** Collect all panels from a LayoutState, flattened. */
 function collectAllPanels(state: LayoutState): LayoutPanel[] {
