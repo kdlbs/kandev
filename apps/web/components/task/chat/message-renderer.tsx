@@ -298,7 +298,13 @@ const adapters: MessageAdapter[] = [
   },
   {
     matches: (comment) => comment.type === "agent_plan",
-    render: (comment) => <AgentPlanMessage comment={comment} />,
+    render: (comment, ctx) => (
+      <AgentPlanMessage
+        comment={comment}
+        worktreePath={ctx.worktreePath}
+        onOpenFile={ctx.onOpenFile}
+      />
+    ),
   },
   {
     matches: (comment) => comment.type === "script_execution",
