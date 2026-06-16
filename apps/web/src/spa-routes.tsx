@@ -15,11 +15,11 @@ import { fetchUserSettings } from "@/lib/api/domains/settings-api";
 import { listRepositories, listWorkspaces } from "@/lib/api/domains/workspace-api";
 import { resolveDesiredWorkflowId } from "@/lib/kanban/resolve-workflow";
 import { usePathname, useSearchParams } from "@/lib/routing/client-router";
+import { mapWorkspaceItem, readCookie } from "@/lib/routing/route-bootstrap";
 import { resolveActiveId } from "@/lib/ssr/resolve-active-id";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import type {
   ListWorkflowStepsResponse,
-  ListWorkspacesResponse,
   Repository,
   Workflow,
   WorkflowStep,
@@ -374,24 +374,6 @@ function listWorkspaceWorkflowSteps(workspaceId: string) {
   });
 }
 
-type WorkspaceItem = ListWorkspacesResponse["workspaces"][number];
-
-function mapWorkspaceItem(ws: WorkspaceItem) {
-  return {
-    id: ws.id,
-    name: ws.name,
-    description: ws.description ?? null,
-    owner_id: ws.owner_id,
-    default_executor_id: ws.default_executor_id ?? null,
-    default_environment_id: ws.default_environment_id ?? null,
-    default_agent_profile_id: ws.default_agent_profile_id ?? null,
-    default_config_agent_profile_id: ws.default_config_agent_profile_id ?? null,
-    office_workflow_id: ws.office_workflow_id ?? null,
-    created_at: ws.created_at,
-    updated_at: ws.updated_at,
-  };
-}
-
 function mapWorkflowItem(workflow: Workflow) {
   return {
     id: workflow.id,
@@ -403,16 +385,6 @@ function mapWorkflowItem(workflow: Workflow) {
     ...(workflow.hidden !== undefined ? { hidden: workflow.hidden } : {}),
     ...(workflow.style !== undefined ? { style: workflow.style } : {}),
   };
-}
-
-function readCookie(name: string): string | null {
-  if (typeof document === "undefined") return null;
-  const encodedName = `${encodeURIComponent(name)}=`;
-  const entry = document.cookie
-    .split(";")
-    .map((part) => part.trim())
-    .find((part) => part.startsWith(encodedName));
-  return entry ? decodeURIComponent(entry.slice(encodedName.length)) : null;
 }
 
 function normalizePath(pathname: string): string {

@@ -30,8 +30,8 @@ import { fetchUserSettings, listWorkspaces } from "@/lib/api";
 import { getInbox, getMeta, listAgentProfiles, listProjects } from "@/lib/api/domains/office-api";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
+import { mapWorkspaceItem, readCookie } from "@/lib/routing/route-bootstrap";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
-import type { AppState } from "@/lib/state/store";
 import {
   AgentDashboardRoute,
   AgentRunDetailRoute,
@@ -167,6 +167,7 @@ function useOfficeRouteBootstrap(officeEnabled: boolean) {
     void bootstrap();
     return () => {
       cancelled = true;
+      bootstrappedRef.current = false;
     };
   }, [officeEnabled, store]);
 }
@@ -182,44 +183,6 @@ function resolveActiveOfficeWorkspaceId(
     workspaceItems[0]?.id ??
     null
   );
-}
-
-function mapWorkspaceItem(ws: {
-  id: string;
-  name: string;
-  description?: string | null;
-  owner_id: string;
-  default_executor_id?: string | null;
-  default_environment_id?: string | null;
-  default_agent_profile_id?: string | null;
-  default_config_agent_profile_id?: string | null;
-  office_workflow_id?: string | null;
-  created_at: string;
-  updated_at: string;
-}): AppState["workspaces"]["items"][number] & { office_workflow_id?: string | null } {
-  return {
-    id: ws.id,
-    name: ws.name,
-    description: ws.description ?? null,
-    owner_id: ws.owner_id,
-    default_executor_id: ws.default_executor_id ?? null,
-    default_environment_id: ws.default_environment_id ?? null,
-    default_agent_profile_id: ws.default_agent_profile_id ?? null,
-    default_config_agent_profile_id: ws.default_config_agent_profile_id ?? null,
-    office_workflow_id: ws.office_workflow_id ?? null,
-    created_at: ws.created_at,
-    updated_at: ws.updated_at,
-  };
-}
-
-function readCookie(name: string): string | null {
-  if (typeof document === "undefined") return null;
-  const encodedName = `${encodeURIComponent(name)}=`;
-  const entry = document.cookie
-    .split(";")
-    .map((part) => part.trim())
-    .find((part) => part.startsWith(encodedName));
-  return entry ? decodeURIComponent(entry.slice(encodedName.length)) : null;
 }
 
 type AgentRouteMatch = {
