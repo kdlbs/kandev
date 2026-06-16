@@ -339,21 +339,22 @@ func (c *MockController) ensureMockPRForRequest(ctx context.Context, req *associ
 		return
 	}
 	c.mock.AddPR(&PR{
-		Number:      req.PRNumber,
-		Title:       req.PRTitle,
-		URL:         req.PRURL,
-		HTMLURL:     req.PRURL,
-		State:       req.State,
-		HeadBranch:  req.HeadBranch,
-		HeadSHA:     mockHeadSHA(req.Owner, req.Repo, req.PRNumber),
-		BaseBranch:  req.BaseBranch,
-		AuthorLogin: req.AuthorLogin,
-		RepoOwner:   req.Owner,
-		RepoName:    req.Repo,
-		Additions:   req.Additions,
-		Deletions:   req.Deletions,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		Number:         req.PRNumber,
+		Title:          req.PRTitle,
+		URL:            req.PRURL,
+		HTMLURL:        req.PRURL,
+		State:          req.State,
+		HeadBranch:     req.HeadBranch,
+		HeadSHA:        mockHeadSHA(req.Owner, req.Repo, req.PRNumber),
+		BaseBranch:     req.BaseBranch,
+		AuthorLogin:    req.AuthorLogin,
+		MergeableState: req.MergeableState,
+		RepoOwner:      req.Owner,
+		RepoName:       req.Repo,
+		Additions:      req.Additions,
+		Deletions:      req.Deletions,
+		CreatedAt:      now,
+		UpdatedAt:      now,
 	})
 }
 
