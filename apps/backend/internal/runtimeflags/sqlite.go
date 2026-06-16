@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/db/dialect"
 )
 
 type SQLiteStore struct {
@@ -22,12 +23,16 @@ func NewSQLiteStore(writer, reader *sqlx.DB) (*SQLiteStore, error) {
 }
 
 func (s *SQLiteStore) initSchema() error {
-	_, err := s.writer.Exec(`CREATE TABLE IF NOT EXISTS runtime_flag_overrides (
+	timestampType := "DATETIME"
+	if dialect.IsPostgres(s.writer.DriverName()) {
+		timestampType = "TIMESTAMPTZ"
+	}
+	_, err := s.writer.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS runtime_flag_overrides (
 		key TEXT PRIMARY KEY,
 		value INTEGER NOT NULL CHECK (value IN (0, 1)),
-		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-	)`)
+		created_at %s NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at %s NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`, timestampType, timestampType))
 	if err != nil {
 		return fmt.Errorf("create runtime_flag_overrides: %w", err)
 	}
@@ -62,9 +67,9 @@ func (s *SQLiteStore) SetOverride(ctx context.Context, key string, value bool) e
 	if value {
 		intValue = 1
 	}
-	_, err := s.writer.ExecContext(ctx, `INSERT INTO runtime_flag_overrides (key, value, created_at, updated_at)
+	_, err := s.writer.ExecContext(ctx, s.writer.Rebind(`INSERT INTO runtime_flag_overrides (key, value, created_at, updated_at)
 		VALUES (?, ?, ?, ?)
-		ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`),
 		key, intValue, now, now)
 	if err != nil {
 		return fmt.Errorf("set runtime flag override %q: %w", key, err)
@@ -73,7 +78,7 @@ func (s *SQLiteStore) SetOverride(ctx context.Context, key string, value bool) e
 }
 
 func (s *SQLiteStore) DeleteOverride(ctx context.Context, key string) error {
-	if _, err := s.writer.ExecContext(ctx, `DELETE FROM runtime_flag_overrides WHERE key = ?`, key); err != nil {
+	if _, err := s.writer.ExecContext(ctx, s.writer.Rebind(`DELETE FROM runtime_flag_overrides WHERE key = ?`), key); err != nil {
 		return fmt.Errorf("delete runtime flag override %q: %w", key, err)
 	}
 	return nil
