@@ -246,6 +246,10 @@ export class SessionPage {
     });
   }
 
+  activeSidebarTaskItem(title: string): Locator {
+    return this.sidebarTaskItem(title).and(this.sidebar.locator('[aria-current="true"]'));
+  }
+
   async openSidebarTaskContextMenu(title: string): Promise<void> {
     const taskRow = this.sidebarTaskItem(title).first();
     await taskRow.waitFor({ state: "visible" });

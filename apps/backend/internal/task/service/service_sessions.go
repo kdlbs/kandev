@@ -76,9 +76,12 @@ func (s *Service) DismissLastAgentError(ctx context.Context, sessionID, stamp st
 		return session, nil
 	}
 	now := time.Now().UTC()
-	lastErr.DismissedAt = &now
-	if err := s.sessions.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyLastAgentError, lastErr); err != nil {
+	updated, err := s.sessions.DismissLastAgentError(context.WithoutCancel(ctx), sessionID, lastErr, now)
+	if err != nil {
 		return nil, err
+	}
+	if !updated {
+		return s.sessions.GetTaskSession(ctx, sessionID)
 	}
 	return s.sessions.GetTaskSession(ctx, sessionID)
 }

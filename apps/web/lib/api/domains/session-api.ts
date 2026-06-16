@@ -54,7 +54,7 @@ export async function dismissLastAgentError(
     `/api/v1/task-sessions/${taskSessionId}/last-agent-error/dismiss`,
     {
       ...options,
-      init: { method: "POST", body: JSON.stringify({ stamp }), ...(options?.init ?? {}) },
+      init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify({ stamp }) },
     },
   );
 }

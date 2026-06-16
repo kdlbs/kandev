@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 	"unsafe"
 
 	"github.com/gin-gonic/gin"
@@ -499,6 +500,9 @@ func (m *mockRepository) UpdateSessionMetadata(ctx context.Context, sessionID st
 }
 func (m *mockRepository) SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error {
 	return nil
+}
+func (m *mockRepository) DismissLastAgentError(_ context.Context, _ string, _ models.LastAgentError, _ time.Time) (bool, error) {
+	return true, nil
 }
 func (m *mockRepository) GetLastAgentMessage(_ context.Context, _ string) (string, error) {
 	return "", nil

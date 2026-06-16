@@ -88,7 +88,7 @@ test.describe("Task agent error indicator", () => {
     await session.waitForLoad();
     await expect(testPage.getByTestId("last-agent-error-notice")).toBeHidden();
     await expect(
-      session.sidebarTaskItem(taskTitle).first().getByTestId("task-agent-error-icon"),
+      session.activeSidebarTaskItem(taskTitle).getByTestId("task-agent-error-icon"),
     ).toBeHidden();
   });
 });

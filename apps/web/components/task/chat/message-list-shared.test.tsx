@@ -38,6 +38,9 @@ vi.mock("@/components/session/prepare-progress", () => ({
 }));
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof mockStoreState) => unknown) => selector(mockStoreState),
+  useAppStoreApi: () => ({
+    getState: () => mockStoreState,
+  }),
 }));
 vi.mock("@/hooks/use-lazy-load-messages", () => ({
   useLazyLoadMessages: () => ({

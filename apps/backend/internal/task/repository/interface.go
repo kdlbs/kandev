@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
 	"github.com/kandev/kandev/internal/task/models"
@@ -165,6 +166,7 @@ type SessionRepository interface {
 	UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error
 	UpdateSessionMetadata(ctx context.Context, sessionID string, metadata map[string]interface{}) error
 	SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error
+	DismissLastAgentError(ctx context.Context, sessionID string, expected models.LastAgentError, dismissedAt time.Time) (bool, error)
 	GetLastAgentMessage(ctx context.Context, sessionID string) (string, error)
 }
 

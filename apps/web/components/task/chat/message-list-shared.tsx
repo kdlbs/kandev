@@ -9,7 +9,7 @@ import type { RenderItem } from "@/hooks/use-processed-messages";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import { TurnGroupMessage } from "@/components/task/chat/messages/turn-group-message";
 import { PrepareProgress } from "@/components/session/prepare-progress";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { dismissLastAgentError } from "@/lib/api/domains/session-api";
 import {
   type LastAgentError,
@@ -76,16 +76,23 @@ export function LastAgentErrorNotice({
   );
   const dismissAgentError = useAppStore((state) => state.dismissAgentError);
   const setTaskSession = useAppStore((state) => state.setTaskSession);
+  const store = useAppStoreApi();
 
   const dismiss = useCallback(() => {
     if (!sessionId || !stamp) return;
-    dismissAgentError(sessionId, stamp);
-    dismissLastAgentError(sessionId, stamp)
-      .then((resp) => setTaskSession(resp.session))
+    void dismissLastAgentError(sessionId, stamp)
+      .then((resp) => {
+        const current = readLastAgentError(
+          store.getState().taskSessions.items[sessionId]?.metadata,
+        );
+        if (current && lastAgentErrorStamp(current) !== stamp) return;
+        dismissAgentError(sessionId, stamp);
+        setTaskSession(resp.session);
+      })
       .catch((err: unknown) => {
         console.error("Failed to dismiss last agent error", err);
       });
-  }, [dismissAgentError, sessionId, stamp, setTaskSession]);
+  }, [dismissAgentError, sessionId, stamp, setTaskSession, store]);
 
   if (!error || dismissedStamp === stamp) return null;
 

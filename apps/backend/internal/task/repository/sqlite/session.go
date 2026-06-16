@@ -633,6 +633,29 @@ func (r *Repository) SetSessionMetadataKey(ctx context.Context, sessionID, key s
 	return nil
 }
 
+func (r *Repository) DismissLastAgentError(ctx context.Context, sessionID string, expected models.LastAgentError, dismissedAt time.Time) (bool, error) {
+	next := expected
+	next.DismissedAt = &dismissedAt
+	valueJSON, err := json.Marshal(next)
+	if err != nil {
+		return false, fmt.Errorf("failed to serialize metadata value: %w", err)
+	}
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_sessions
+		SET metadata = json_set(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, '$.last_agent_error', json(?)),
+			updated_at = ?
+		WHERE id = ?
+			AND json_extract(metadata, '$.last_agent_error.message') = ?
+			AND json_extract(metadata, '$.last_agent_error.occurred_at') = ?
+	`), string(valueJSON), now, sessionID, expected.Message, expected.OccurredAt.UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return false, err
+	}
+	rows, _ := result.RowsAffected()
+	return rows > 0, nil
+}
+
 // GetLastAgentMessage returns the content of the most recent agent message in a session.
 func (r *Repository) GetLastAgentMessage(ctx context.Context, sessionID string) (string, error) {
 	var content string

@@ -390,7 +390,7 @@ function useSessionData(
     isLoading: messagesLoading,
     hasMore: hasOlderMessages,
   } = useSessionMessages(resolvedSessionId);
-  const lastAgentError = readLastAgentError(session?.metadata);
+  const lastAgentError = useMemo(() => readLastAgentError(session?.metadata), [session?.metadata]);
   const processed = useProcessedMessages(messages, taskId, resolvedSessionId, taskDescription, {
     hasOlderMessages,
     lastAgentError,

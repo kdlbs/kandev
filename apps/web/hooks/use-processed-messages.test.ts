@@ -298,6 +298,20 @@ describe("insertLastAgentErrorItem", () => {
       }),
     ]);
   });
+
+  it("appends the notice when existing items have no usable timestamps", () => {
+    const untimed = makeMessage("untimed", "message", undefined, "untimed");
+    const items = buildGroupedRenderItems([untimed], "s1", {
+      canAnchorPrepareProgress: false,
+    });
+
+    const result = insertLastAgentErrorItem(items, "s1", {
+      message: "peer disconnected before response",
+      occurredAt: "2026-06-14T10:05:00Z",
+    });
+
+    expect(result.map((item) => item.type)).toEqual(["message", "agent_error_notice"]);
+  });
 });
 
 describe("messageMapsEqualByIdentity", () => {

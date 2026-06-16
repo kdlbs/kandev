@@ -522,13 +522,16 @@ function insertionIndexForAgentError(items: RenderItem[], occurredAt?: string): 
   const errorTime = occurredAt ? Date.parse(occurredAt) : Number.NaN;
   if (Number.isNaN(errorTime)) return items.length;
   let insertAt = 0;
+  let sawTimestamp = false;
   for (let i = 0; i < items.length; i++) {
     const createdAt = itemCreatedAt(items[i]);
     if (!createdAt) continue;
     const itemTime = Date.parse(createdAt);
-    if (!Number.isNaN(itemTime) && itemTime <= errorTime) insertAt = i + 1;
+    if (Number.isNaN(itemTime)) continue;
+    sawTimestamp = true;
+    if (itemTime <= errorTime) insertAt = i + 1;
   }
-  return insertAt;
+  return sawTimestamp ? insertAt : items.length;
 }
 
 export function insertLastAgentErrorItem(

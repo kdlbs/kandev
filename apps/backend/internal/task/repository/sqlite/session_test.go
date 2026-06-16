@@ -511,6 +511,46 @@ func TestUpdateTaskSessionWithMetadataRejectsInvalidMetadataBeforeStateWrite(t *
 	}
 }
 
+func TestDismissLastAgentErrorDoesNotOverwriteNewerError(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+
+	seedForMsgTest(t, repo, "task-error", "sess-error", "turn-error")
+	oldErr := models.LastAgentError{
+		Message:    "old error",
+		OccurredAt: time.Date(2026, 6, 14, 10, 0, 0, 0, time.UTC),
+	}
+	newErr := models.LastAgentError{
+		Message:    "new error",
+		OccurredAt: time.Date(2026, 6, 14, 10, 5, 0, 0, time.UTC),
+	}
+	if err := repo.SetSessionMetadataKey(ctx, "sess-error", models.SessionMetaKeyLastAgentError, oldErr); err != nil {
+		t.Fatalf("seed old error: %v", err)
+	}
+	if err := repo.SetSessionMetadataKey(ctx, "sess-error", models.SessionMetaKeyLastAgentError, newErr); err != nil {
+		t.Fatalf("seed new error: %v", err)
+	}
+
+	updated, err := repo.DismissLastAgentError(ctx, "sess-error", oldErr, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("dismiss stale error: %v", err)
+	}
+	if updated {
+		t.Fatalf("expected stale dismiss to be ignored")
+	}
+	session, err := repo.GetTaskSession(ctx, "sess-error")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	got, ok := models.LoadLastAgentError(session.Metadata)
+	if !ok {
+		t.Fatalf("expected last agent error metadata")
+	}
+	if got.Message != newErr.Message || got.IsDismissed() {
+		t.Fatalf("last agent error = %#v, want undismissed newer error", got)
+	}
+}
+
 func sessionCancellationMetadata(t *testing.T, repo *Repository, sessionID string) (string, sql.NullTime, time.Time) {
 	t.Helper()
 	var errorMessage string
