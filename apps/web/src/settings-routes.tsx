@@ -68,7 +68,13 @@ import { mapWorkspaceItem } from "@/lib/routing/route-bootstrap";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import type { AppState } from "@/lib/state/store";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
-import type { Repository, RepositoryScript, Workspace } from "@/lib/types/http";
+import type {
+  ListWorkspacesResponse,
+  Repository,
+  RepositoryScript,
+  UserSettingsResponse,
+  Workspace,
+} from "@/lib/types/http";
 import type { LicenseEntry } from "@/lib/types/system";
 
 type RouteRenderer = () => ReactNode;
@@ -76,6 +82,16 @@ type RepositoryWithScripts = Repository & { scripts: RepositoryScript[] };
 type WorkspaceRepositoriesRouteState = {
   workspace: Workspace | null;
   repositories: RepositoryWithScripts[];
+};
+type SettingsInitialStateData = {
+  pathname: string;
+  workspaces: ListWorkspacesResponse["workspaces"];
+  executors: Awaited<ReturnType<typeof listExecutors>>["executors"];
+  agents: Awaited<ReturnType<typeof listAgents>>["agents"];
+  discoveryAgents: Awaited<ReturnType<typeof listAgentDiscovery>>["agents"];
+  availableAgents: Awaited<ReturnType<typeof listAvailableAgents>>["agents"];
+  availableTools: NonNullable<Awaited<ReturnType<typeof listAvailableAgents>>["tools"]>;
+  userSettingsResponse: UserSettingsResponse | null;
 };
 
 const licenseEntries = licenses as LicenseEntry[];
@@ -311,6 +327,7 @@ function SettingsRouteBootstrap({ pathname }: { pathname: string }) {
     void bootstrap();
     return () => {
       cancelled = true;
+      bootstrappedRef.current = false;
     };
   }, [pathname, store]);
 
@@ -328,30 +345,50 @@ async function loadSettingsInitialState(pathname: string): Promise<Partial<AppSt
       fetchUserSettings({ cache: "no-store" }).catch(() => null),
     ]);
 
-  const workspaceItems = workspaces.workspaces.map(mapWorkspaceItem);
-  const requestedWorkspaceId = matchSingle(pathname, /^\/settings\/workspace\/([^/]+)/);
-  const settingsWorkspaceId = userSettingsResponse?.settings?.workspace_id ?? null;
-  const activeWorkspaceId =
-    workspaceItems.find((workspace) => workspace.id === requestedWorkspaceId)?.id ??
-    workspaceItems.find((workspace) => workspace.id === settingsWorkspaceId)?.id ??
-    workspaceItems[0]?.id ??
-    null;
+  return buildSettingsInitialStateForRoute({
+    pathname,
+    workspaces: workspaces.workspaces,
+    executors: executors.executors,
+    agents: agents.agents,
+    discoveryAgents: discovery.agents,
+    availableAgents: available.agents,
+    availableTools: available.tools ?? [],
+    userSettingsResponse,
+  });
+}
+
+export function buildSettingsInitialStateForRoute({
+  pathname,
+  workspaces,
+  executors,
+  agents,
+  discoveryAgents,
+  availableAgents,
+  availableTools,
+  userSettingsResponse,
+}: SettingsInitialStateData): Partial<AppState> {
+  const workspaceItems = workspaces.map(mapWorkspaceItem);
+  const activeWorkspaceId = resolveSettingsActiveWorkspaceId(
+    workspaceItems,
+    matchSingle(pathname, /^\/settings\/workspace\/([^/]+)/),
+    userSettingsResponse?.settings?.workspace_id ?? null,
+  );
   const mappedUserSettings = mapUserSettingsResponse(userSettingsResponse);
 
   return {
     workspaces: { items: workspaceItems, activeId: activeWorkspaceId },
-    executors: { items: executors.executors },
+    executors: { items: executors },
     agentProfiles: {
-      items: agents.agents.flatMap((agent) =>
+      items: agents.flatMap((agent) =>
         agent.profiles.map((profile) => toAgentProfileOption(agent, profile)),
       ),
       version: 0,
     },
-    settingsAgents: { items: agents.agents },
-    agentDiscovery: { items: discovery.agents, loading: false, loaded: true },
+    settingsAgents: { items: agents },
+    agentDiscovery: { items: discoveryAgents, loading: false, loaded: true },
     availableAgents: {
-      items: available.agents,
-      tools: available.tools ?? [],
+      items: availableAgents,
+      tools: availableTools,
       loading: false,
       loaded: true,
     },
@@ -365,6 +402,19 @@ async function loadSettingsInitialState(pathname: string): Promise<Partial<AppSt
         }
       : {}),
   };
+}
+
+function resolveSettingsActiveWorkspaceId(
+  workspaceItems: Array<{ id: string }>,
+  requestedWorkspaceId: string | null,
+  settingsWorkspaceId: string | null,
+) {
+  return (
+    workspaceItems.find((workspace) => workspace.id === requestedWorkspaceId)?.id ??
+    workspaceItems.find((workspace) => workspace.id === settingsWorkspaceId)?.id ??
+    workspaceItems[0]?.id ??
+    null
+  );
 }
 
 function WorkspaceRepositoriesRoute({ workspaceId }: { workspaceId: string }) {
