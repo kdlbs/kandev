@@ -111,6 +111,7 @@ test.describe("Onboarding", () => {
   });
 
   test("inline CLI profile creation selects the profile for the new agent", async ({
+    officeApi,
     testPage,
     officeSeed: _,
   }) => {
@@ -155,11 +156,17 @@ test.describe("Onboarding", () => {
       { timeout: 15_000 },
     );
     await testPage.locator("button:has-text('Create & Launch')").click();
-    const completed = await (await completeResponse).json();
-    const agentId = (completed as { agentId?: string }).agentId;
-    expect(agentId).toBeTruthy();
+    await completeResponse;
 
     await expect(testPage).toHaveURL(/\/office(\?|$)/, { timeout: 15_000 });
+    const workspaceId = new URL(testPage.url()).searchParams.get("workspaceId");
+    expect(workspaceId).toBeTruthy();
+    const agentsResponse = await officeApi.listAgents(workspaceId!);
+    const agents =
+      (agentsResponse as { agents?: Array<{ id?: string; name?: string }> }).agents ?? [];
+    const agentId = agents.find((agent) => agent.name === "CEO")?.id ?? agents[0]?.id;
+    expect(agentId).toBeTruthy();
+
     await testPage.goto(`/office/agents/${agentId}/configuration`);
     await expect(testPage.getByTestId("cli-config-card")).toBeVisible();
     await expect(testPage.getByTestId("cli-config-card").getByText("Unassigned")).toHaveCount(0);

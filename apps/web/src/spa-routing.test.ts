@@ -31,16 +31,27 @@ describe("getInitialPageProps", () => {
 });
 
 describe("resolveSpaRoute", () => {
-  it("maps task detail paths to the kanban page focus props", () => {
+  it("maps task detail paths to the full task detail route", () => {
     expect(resolveSpaRoute("/t/task-1", new URLSearchParams())).toEqual({
-      kind: "kanban",
+      kind: "taskDetail",
       taskId: "task-1",
       sessionId: undefined,
+      layout: null,
+      simple: undefined,
+      mode: undefined,
     });
-    expect(resolveSpaRoute("/tasks/task-2", new URLSearchParams("sessionId=sess-1"))).toEqual({
-      kind: "kanban",
+    expect(
+      resolveSpaRoute(
+        "/tasks/task-2",
+        new URLSearchParams("sessionId=sess-1&layout=wide&simple=false&mode=advanced"),
+      ),
+    ).toEqual({
+      kind: "taskDetail",
       taskId: "task-2",
       sessionId: "sess-1",
+      layout: "wide",
+      simple: "false",
+      mode: "advanced",
     });
   });
 
@@ -50,6 +61,23 @@ describe("resolveSpaRoute", () => {
     expect(resolveSpaRoute("/gitlab", new URLSearchParams())).toEqual({ kind: "gitlab" });
     expect(resolveSpaRoute("/jira", new URLSearchParams())).toEqual({ kind: "jira" });
     expect(resolveSpaRoute("/linear", new URLSearchParams())).toEqual({ kind: "linear" });
+  });
+
+  it("preserves root kanban query params for SPA bootstrap", () => {
+    expect(
+      resolveSpaRoute(
+        "/",
+        new URLSearchParams(
+          "workspaceId=workspace-1&workflowId=workflow-1&taskId=task-1&sessionId=session-1",
+        ),
+      ),
+    ).toEqual({
+      kind: "kanban",
+      workspaceId: "workspace-1",
+      workflowId: "workflow-1",
+      taskId: "task-1",
+      sessionId: "session-1",
+    });
   });
 
   it("normalizes stats range query params", () => {

@@ -1,14 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ProjectDetailPage from "@/app/office/projects/[id]/page";
 import AgentDetailLayout from "@/app/office/agents/[id]/layout";
 import AgentChannelsPage from "@/app/office/agents/[id]/channels/page";
 import AgentConfigurationPage from "@/app/office/agents/[id]/configuration/page";
-import AgentDashboardPage from "@/app/office/agents/[id]/dashboard/page";
 import AgentInstructionsPage from "@/app/office/agents/[id]/instructions/page";
 import AgentMemoryPage from "@/app/office/agents/[id]/memory/page";
 import AgentPermissionsPage from "@/app/office/agents/[id]/permissions/page";
-import AgentRunsPage from "@/app/office/agents/[id]/runs/page";
-import AgentRunDetailPage from "@/app/office/agents/[id]/runs/[runId]/page";
 import AgentSkillsPage from "@/app/office/agents/[id]/skills/page";
 import { AgentsPageClient } from "@/app/office/agents/agents-page-client";
 import { OfficeTopbar } from "@/app/office/components/office-topbar";
@@ -29,8 +26,17 @@ import { TasksPageClient as OfficeTasksPageClient } from "@/app/office/tasks/tas
 import { ActivityPageClient } from "@/app/office/workspace/activity/activity-page-client";
 import { CostsPageClient } from "@/app/office/workspace/costs/costs-page-client";
 import { SkillsPageClient } from "@/app/office/workspace/skills/skills-page-client";
-import { useAppStore } from "@/components/state-provider";
+import { fetchUserSettings, listWorkspaces } from "@/lib/api";
+import { getInbox, getMeta, listAgentProfiles, listProjects } from "@/lib/api/domains/office-api";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
+import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
+import type { AppState } from "@/lib/state/store";
+import {
+  AgentDashboardRoute,
+  AgentRunDetailRoute,
+  AgentRunsRoute,
+} from "./office-agent-client-routes";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 
 type RouteRenderer = () => React.ReactNode;
@@ -54,6 +60,7 @@ const OFFICE_ROUTES: Record<string, RouteRenderer> = {
 export function OfficeRoutes({ pathname }: { pathname: string }) {
   const officeEnabled = useAppStore((state) => state.features.office);
   const normalizedPathname = normalizeOfficePath(pathname);
+  useOfficeRouteBootstrap(officeEnabled);
 
   if (!officeEnabled) {
     return <OfficeUnavailable />;
@@ -103,6 +110,118 @@ function renderOfficeRoute(pathname: string) {
   return OFFICE_ROUTES[pathname]?.() ?? <OfficeRouteFallback pathname={pathname} />;
 }
 
+function useOfficeRouteBootstrap(officeEnabled: boolean) {
+  const store = useAppStoreApi();
+  const bootstrappedRef = useRef(false);
+
+  useEffect(() => {
+    if (!officeEnabled || bootstrappedRef.current) return;
+    bootstrappedRef.current = true;
+    let cancelled = false;
+
+    async function bootstrap() {
+      const [workspacesResponse, userSettingsResponse, metaResponse] = await Promise.all([
+        listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
+        fetchUserSettings({ cache: "no-store" }).catch(() => null),
+        getMeta({ cache: "no-store" }).catch(() => null),
+      ]);
+      if (cancelled) return;
+
+      const workspaceItems = workspacesResponse.workspaces.map(mapWorkspaceItem);
+      const officeWorkspaceItems = workspaceItems.filter(
+        (workspace) => workspace.office_workflow_id,
+      );
+      const activeWorkspaceId = resolveActiveOfficeWorkspaceId(
+        officeWorkspaceItems,
+        readCookie("office-active-workspace"),
+        userSettingsResponse?.settings?.workspace_id ?? null,
+      );
+
+      store.getState().hydrate({
+        workspaces: { items: workspaceItems, activeId: activeWorkspaceId },
+        userSettings: {
+          ...mapUserSettingsResponse(userSettingsResponse),
+          workspaceId: activeWorkspaceId,
+        },
+      });
+      store.getState().setMeta(metaResponse);
+
+      if (!activeWorkspaceId) return;
+
+      const [agentsResponse, projectsResponse, inboxResponse] = await Promise.all([
+        listAgentProfiles(activeWorkspaceId, { cache: "no-store" }).catch(() => ({ agents: [] })),
+        listProjects(activeWorkspaceId, { cache: "no-store" }).catch(() => ({ projects: [] })),
+        getInbox(activeWorkspaceId, { cache: "no-store" }).catch(() => ({
+          items: [],
+          total_count: 0,
+        })),
+      ]);
+      if (cancelled) return;
+
+      store.getState().setOfficeAgentProfiles(agentsResponse.agents);
+      store.getState().setProjects(projectsResponse.projects);
+      store.getState().setInboxItems(inboxResponse.items);
+      store.getState().setInboxCount(inboxResponse.total_count);
+    }
+
+    void bootstrap();
+    return () => {
+      cancelled = true;
+    };
+  }, [officeEnabled, store]);
+}
+
+function resolveActiveOfficeWorkspaceId(
+  workspaceItems: { id: string }[],
+  cookieWorkspaceId: string | null,
+  settingsWorkspaceId: string | null,
+): string | null {
+  return (
+    workspaceItems.find((workspace) => workspace.id === cookieWorkspaceId)?.id ??
+    workspaceItems.find((workspace) => workspace.id === settingsWorkspaceId)?.id ??
+    workspaceItems[0]?.id ??
+    null
+  );
+}
+
+function mapWorkspaceItem(ws: {
+  id: string;
+  name: string;
+  description?: string | null;
+  owner_id: string;
+  default_executor_id?: string | null;
+  default_environment_id?: string | null;
+  default_agent_profile_id?: string | null;
+  default_config_agent_profile_id?: string | null;
+  office_workflow_id?: string | null;
+  created_at: string;
+  updated_at: string;
+}): AppState["workspaces"]["items"][number] & { office_workflow_id?: string | null } {
+  return {
+    id: ws.id,
+    name: ws.name,
+    description: ws.description ?? null,
+    owner_id: ws.owner_id,
+    default_executor_id: ws.default_executor_id ?? null,
+    default_environment_id: ws.default_environment_id ?? null,
+    default_agent_profile_id: ws.default_agent_profile_id ?? null,
+    default_config_agent_profile_id: ws.default_config_agent_profile_id ?? null,
+    office_workflow_id: ws.office_workflow_id ?? null,
+    created_at: ws.created_at,
+    updated_at: ws.updated_at,
+  };
+}
+
+function readCookie(name: string): string | null {
+  if (typeof document === "undefined") return null;
+  const encodedName = `${encodeURIComponent(name)}=`;
+  const entry = document.cookie
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(encodedName));
+  return entry ? decodeURIComponent(entry.slice(encodedName.length)) : null;
+}
+
 type AgentRouteMatch = {
   id: string;
   tab: string;
@@ -119,7 +238,7 @@ function renderAgentRoute(route: AgentRouteMatch) {
 function renderAgentRouteBody(route: AgentRouteMatch, params: Promise<{ id: string }>) {
   switch (route.tab) {
     case "dashboard":
-      return <AgentDashboardPage params={params} />;
+      return <AgentDashboardRoute agentId={route.id} />;
     case "instructions":
       return <AgentInstructionsPage params={params} />;
     case "skills":
@@ -130,17 +249,15 @@ function renderAgentRouteBody(route: AgentRouteMatch, params: Promise<{ id: stri
       return <AgentPermissionsPage params={params} />;
     case "runs":
       if (route.runId) {
-        return (
-          <AgentRunDetailPage params={Promise.resolve({ id: route.id, runId: route.runId })} />
-        );
+        return <AgentRunDetailRoute agentId={route.id} runId={route.runId} />;
       }
-      return <AgentRunsPage params={params} />;
+      return <AgentRunsRoute agentId={route.id} />;
     case "memory":
       return <AgentMemoryPage params={params} />;
     case "channels":
       return <AgentChannelsPage params={params} />;
     default:
-      return <AgentDashboardPage params={params} />;
+      return <AgentDashboardRoute agentId={route.id} />;
   }
 }
 

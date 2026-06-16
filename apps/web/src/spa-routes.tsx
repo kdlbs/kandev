@@ -13,14 +13,18 @@ import { fetchJson } from "@/lib/api/client";
 import { listWorkflows } from "@/lib/api/domains/kanban-api";
 import { fetchUserSettings } from "@/lib/api/domains/settings-api";
 import { listRepositories, listWorkspaces } from "@/lib/api/domains/workspace-api";
+import { resolveDesiredWorkflowId } from "@/lib/kanban/resolve-workflow";
 import { usePathname, useSearchParams } from "@/lib/routing/client-router";
+import { resolveActiveId } from "@/lib/ssr/resolve-active-id";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import type {
   ListWorkflowStepsResponse,
+  ListWorkspacesResponse,
   Repository,
   Workflow,
   WorkflowStep,
 } from "@/lib/types/http";
+import { TaskDetailRoute } from "./task-detail-route";
 
 const OfficeRoutes = lazy(() =>
   import("./office-routes").then((mod) => ({ default: mod.OfficeRoutes })),
@@ -32,7 +36,21 @@ const SettingsRoutes = lazy(() =>
 const EMPTY_REPOSITORIES: Repository[] = [];
 
 type SpaRoute =
-  | { kind: "kanban"; taskId?: string; sessionId?: string }
+  | {
+      kind: "kanban";
+      workspaceId?: string;
+      workflowId?: string;
+      taskId?: string;
+      sessionId?: string;
+    }
+  | {
+      kind: "taskDetail";
+      taskId: string;
+      sessionId?: string;
+      layout?: string | null;
+      simple?: string;
+      mode?: string;
+    }
   | { kind: "tasks" }
   | { kind: "github" }
   | { kind: "gitlab" }
@@ -44,16 +62,31 @@ type SpaRoute =
 
 export function resolveSpaRoute(pathname: string, searchParams: URLSearchParams): SpaRoute {
   const normalized = normalizePath(pathname);
+  return (
+    resolveTaskDetailRoute(normalized, searchParams) ??
+    resolveTopLevelRoute(normalized, searchParams) ??
+    resolveNestedRoute(normalized) ??
+    resolveKanbanRoute(searchParams)
+  );
+}
+
+function resolveTaskDetailRoute(
+  normalized: string,
+  searchParams: URLSearchParams,
+): SpaRoute | null {
   const taskId = readTaskId(normalized);
+  if (!taskId) return null;
+  return {
+    kind: "taskDetail",
+    taskId,
+    sessionId: searchParams.get("sessionId") ?? undefined,
+    layout: searchParams.get("layout"),
+    simple: searchParams.get("simple") ?? undefined,
+    mode: searchParams.get("mode") ?? undefined,
+  };
+}
 
-  if (taskId) {
-    return {
-      kind: "kanban",
-      taskId,
-      sessionId: searchParams.get("sessionId") ?? undefined,
-    };
-  }
-
+function resolveTopLevelRoute(normalized: string, searchParams: URLSearchParams): SpaRoute | null {
   switch (normalized) {
     case "/tasks":
       return { kind: "tasks" };
@@ -70,14 +103,28 @@ export function resolveSpaRoute(pathname: string, searchParams: URLSearchParams)
       return { kind: "stats", range: range && isRangeKey(range) ? range : undefined };
     }
     default:
-      if (normalized === "/settings" || normalized.startsWith("/settings/")) {
-        return { kind: "settings", pathname: normalized };
-      }
-      if (normalized === "/office" || normalized.startsWith("/office/")) {
-        return { kind: "office", pathname: normalized };
-      }
-      return { kind: "kanban" };
+      return null;
   }
+}
+
+function resolveNestedRoute(normalized: string): SpaRoute | null {
+  if (normalized === "/settings" || normalized.startsWith("/settings/")) {
+    return { kind: "settings", pathname: normalized };
+  }
+  if (normalized === "/office" || normalized.startsWith("/office/")) {
+    return { kind: "office", pathname: normalized };
+  }
+  return null;
+}
+
+function resolveKanbanRoute(searchParams: URLSearchParams): SpaRoute {
+  return {
+    kind: "kanban",
+    workspaceId: searchParams.get("workspaceId") ?? undefined,
+    workflowId: searchParams.get("workflowId") ?? undefined,
+    taskId: searchParams.get("taskId") ?? undefined,
+    sessionId: searchParams.get("sessionId") ?? undefined,
+  };
 }
 
 export function SpaRoutes() {
@@ -86,7 +133,18 @@ export function SpaRoutes() {
   const route = resolveSpaRoute(pathname, searchParams);
 
   if (route.kind === "kanban") {
-    return <PageClient initialTaskId={route.taskId} initialSessionId={route.sessionId} />;
+    return <KanbanRoute route={route} />;
+  }
+  if (route.kind === "taskDetail") {
+    return (
+      <TaskDetailRoute
+        taskId={route.taskId}
+        sessionId={route.sessionId}
+        layout={route.layout}
+        simple={route.simple}
+        mode={route.mode}
+      />
+    );
   }
   if (route.kind === "settings") {
     return (
@@ -104,6 +162,81 @@ export function SpaRoutes() {
   }
 
   return <DataBackedRoute route={route} />;
+}
+
+function KanbanRoute({ route }: { route: Extract<SpaRoute, { kind: "kanban" }> }) {
+  useKanbanRouteBootstrap(route);
+  return <PageClient initialTaskId={route.taskId} initialSessionId={route.sessionId} />;
+}
+
+function useKanbanRouteBootstrap(route: Extract<SpaRoute, { kind: "kanban" }>) {
+  const store = useAppStoreApi();
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function bootstrap() {
+      const [workspacesResponse, settingsResponse] = await Promise.all([
+        listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [], total: 0 })),
+        fetchUserSettings({ cache: "no-store" }).catch(() => null),
+      ]);
+      if (cancelled) return;
+
+      const settingsWorkspaceId = settingsResponse?.settings?.workspace_id || null;
+      const settingsWorkflowId = settingsResponse?.settings?.workflow_filter_id || null;
+      const workspaceItems = workspacesResponse.workspaces.map(mapWorkspaceItem);
+      const activeWorkspaceId = resolveActiveId(
+        workspaceItems,
+        route.workspaceId,
+        readCookie("office-active-workspace"),
+        settingsWorkspaceId,
+      );
+
+      store.getState().hydrate({
+        workspaces: { items: workspaceItems, activeId: activeWorkspaceId },
+        userSettings: {
+          ...mapUserSettingsResponse(settingsResponse),
+          workspaceId: activeWorkspaceId,
+        },
+      });
+
+      if (!activeWorkspaceId) return;
+
+      const [workflowsResponse, repositoriesResponse] = await Promise.all([
+        listWorkflows(activeWorkspaceId, { cache: "no-store", includeHidden: true }).catch(() => ({
+          workflows: [],
+        })),
+        listRepositories(activeWorkspaceId, undefined, { cache: "no-store" }).catch(() => ({
+          repositories: [],
+        })),
+      ]);
+      if (cancelled) return;
+
+      const workflowId = resolveDesiredWorkflowId({
+        activeWorkflowId: route.workflowId ?? null,
+        settingsWorkflowId,
+        workspaceWorkflows: workflowsResponse.workflows,
+      });
+
+      store.getState().hydrate({
+        userSettings: {
+          ...mapUserSettingsResponse(settingsResponse),
+          workspaceId: activeWorkspaceId,
+          workflowId,
+        },
+        workflows: {
+          items: workflowsResponse.workflows.map(mapWorkflowItem),
+          activeId: workflowId,
+        },
+      });
+      store.getState().setRepositories(activeWorkspaceId, repositoriesResponse.repositories);
+    }
+
+    void bootstrap();
+    return () => {
+      cancelled = true;
+    };
+  }, [route.workspaceId, route.workflowId, store]);
 }
 
 function DataBackedRoute({
@@ -239,6 +372,47 @@ function listWorkspaceWorkflowSteps(workspaceId: string) {
   return fetchJson<ListWorkflowStepsResponse>(`/api/v1/workspaces/${workspaceId}/workflow-steps`, {
     cache: "no-store",
   });
+}
+
+type WorkspaceItem = ListWorkspacesResponse["workspaces"][number];
+
+function mapWorkspaceItem(ws: WorkspaceItem) {
+  return {
+    id: ws.id,
+    name: ws.name,
+    description: ws.description ?? null,
+    owner_id: ws.owner_id,
+    default_executor_id: ws.default_executor_id ?? null,
+    default_environment_id: ws.default_environment_id ?? null,
+    default_agent_profile_id: ws.default_agent_profile_id ?? null,
+    default_config_agent_profile_id: ws.default_config_agent_profile_id ?? null,
+    office_workflow_id: ws.office_workflow_id ?? null,
+    created_at: ws.created_at,
+    updated_at: ws.updated_at,
+  };
+}
+
+function mapWorkflowItem(workflow: Workflow) {
+  return {
+    id: workflow.id,
+    workspaceId: workflow.workspace_id,
+    name: workflow.name,
+    description: workflow.description ?? null,
+    sortOrder: workflow.sort_order ?? 0,
+    ...(workflow.agent_profile_id ? { agent_profile_id: workflow.agent_profile_id } : {}),
+    ...(workflow.hidden !== undefined ? { hidden: workflow.hidden } : {}),
+    ...(workflow.style !== undefined ? { style: workflow.style } : {}),
+  };
+}
+
+function readCookie(name: string): string | null {
+  if (typeof document === "undefined") return null;
+  const encodedName = `${encodeURIComponent(name)}=`;
+  const entry = document.cookie
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(encodedName));
+  return entry ? decodeURIComponent(entry.slice(encodedName.length)) : null;
 }
 
 function normalizePath(pathname: string): string {

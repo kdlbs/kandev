@@ -52,6 +52,16 @@ export function shouldCloseMissingSelectedTask({
   return true;
 }
 
+export function hasLoadedKanbanTaskSources({
+  activeWorkflowId,
+  multiSnapshotCount,
+}: {
+  activeWorkflowId?: string | null;
+  multiSnapshotCount: number;
+}): boolean {
+  return Boolean(activeWorkflowId) || multiSnapshotCount > 0;
+}
+
 function useUrlSync(selectedTaskId: string | null, selectedTaskSessionId: string | null) {
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -238,13 +248,16 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
 
   // Get tasks from the kanban store
   const kanbanTasks = useAppStore((state) => state.kanban.tasks);
+  const kanbanWorkflowId = useAppStore((state) => state.kanban.workflowId);
   const kanbanIsLoading = useAppStore((state) => state.kanban.isLoading ?? false);
   const kanbanMultiSnapshots = useAppStore((state) => state.kanbanMulti.snapshots);
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const setKanbanPreviewedTaskId = useAppStore((state) => state.setKanbanPreviewedTaskId);
-  const hasLoadedTaskSources =
-    kanbanTasks.length > 0 || Object.keys(kanbanMultiSnapshots).length > 0;
+  const hasLoadedTaskSources = hasLoadedKanbanTaskSources({
+    activeWorkflowId: kanbanWorkflowId,
+    multiSnapshotCount: Object.keys(kanbanMultiSnapshots).length,
+  });
 
   const { selectedTaskId, isOpen, previewWidthPx, open, close, updatePreviewWidth } =
     useKanbanPreview({

@@ -27,6 +27,10 @@ export function RoutinesPageClient({ initialRoutines }: RoutinesPageClientProps)
     setRoutines(res.routines ?? []);
   }, [workspaceId, setRoutines]);
 
+  useEffect(() => {
+    void refetchRoutines();
+  }, [refetchRoutines]);
+
   useOfficeRefetch("routines", refetchRoutines);
 
   return <RoutinesContent />;

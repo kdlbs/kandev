@@ -19,6 +19,16 @@ function isTaskDetailPath(): boolean {
   return /^\/(?:t|tasks)\/[^/]+\/?$/.test(window.location.pathname);
 }
 
+function kanbanWorkspaceHref(workspaceId: string): string {
+  if (typeof window === "undefined") return `/?workspaceId=${workspaceId}`;
+  const current = new URLSearchParams(window.location.search);
+  const next = new URLSearchParams();
+  const workflowId = current.get("workflowId");
+  if (workflowId) next.set("workflowId", workflowId);
+  next.set("workspaceId", workspaceId);
+  return `/?${next.toString()}`;
+}
+
 /** Handle creating a new task in the kanban board, merging with any WS-provided data. */
 function hydrateCreatedTask(
   store: ReturnType<typeof useAppStoreApi>,
@@ -130,7 +140,7 @@ export function useKanbanActions({ workspaceState, workflowsState }: UseKanbanAc
         return;
       }
       if (nextWorkspaceId) {
-        router.push(`/?workspaceId=${nextWorkspaceId}`);
+        router.push(kanbanWorkspaceHref(nextWorkspaceId));
       } else {
         router.push("/");
       }

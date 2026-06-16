@@ -27,7 +27,7 @@ function resolveTitle(pathname: string): string | null {
 function isDetailPage(pathname: string): boolean {
   return (
     /^\/office\/tasks\/[^/]+$/.test(pathname) ||
-    /^\/office\/agents\/[^/]+$/.test(pathname) ||
+    /^\/office\/agents\/[^/]+(?:\/.*)?$/.test(pathname) ||
     /^\/office\/projects\/[^/]+$/.test(pathname) ||
     /^\/office\/routines\/[^/]+$/.test(pathname)
   );

@@ -29,6 +29,10 @@ export function ActivityPageClient({ initialActivity }: ActivityPageClientProps)
     setActivity(res.activity ?? []);
   }, [activeWorkspaceId, setActivity]);
 
+  useEffect(() => {
+    void refetchActivity();
+  }, [refetchActivity]);
+
   useOfficeRefetch("activity", refetchActivity);
 
   if (!activeWorkspaceId) {

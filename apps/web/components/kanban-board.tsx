@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "@/lib/routing/client-router";
+import { useRouter, useSearchParams } from "@/lib/routing/client-router";
 import { Task } from "./kanban-card";
 import { TaskCreateDialog } from "./task-create-dialog";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
@@ -52,6 +52,8 @@ function useWorkflowSelection({
   setActiveWorkflow: (id: string | null) => void;
   setWorkflows: (workflows: WorkflowsState["items"]) => void;
 }) {
+  const searchParams = useSearchParams();
+  const routeWorkflowId = searchParams.get("workflowId");
   const userSettingsRef = useRef(userSettings);
   useEffect(() => {
     userSettingsRef.current = userSettings;
@@ -72,7 +74,7 @@ function useWorkflowSelection({
     );
 
     const desiredWorkflowId = resolveDesiredWorkflowId({
-      activeWorkflowId: workflowsState.activeId,
+      activeWorkflowId: routeWorkflowId ?? workflowsState.activeId,
       settingsWorkflowId: settings.workflowId,
       workspaceWorkflows,
     });
@@ -89,6 +91,7 @@ function useWorkflowSelection({
     setActiveWorkflow,
     setWorkflows,
     store,
+    routeWorkflowId,
     workspaceState.activeId,
   ]);
 }

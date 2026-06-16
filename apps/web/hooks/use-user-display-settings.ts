@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { fetchUserSettings, updateUserSettings } from "@/lib/api";
+import { useSearchParams } from "@/lib/routing/client-router";
 import { mapSelectedRepositoryIds } from "@/lib/kanban/filters";
 import { useAppStore } from "@/components/state-provider";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
@@ -184,6 +185,7 @@ export function useUserDisplaySettings({
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const { repositories, isLoading: repositoriesLoading } = useRepositories(workspaceId, true);
   const userSettingsRef = useUserSettingsRef(userSettings);
+  const routeWorkflowId = useSearchParams().get("workflowId");
 
   const settingsLoadedOnMountRef = useRef(userSettings.loaded);
 
@@ -209,12 +211,19 @@ export function useUserDisplaySettings({
 
   useEffect(() => {
     if (!userSettings.loaded) return;
+    if (routeWorkflowId) return;
     if (settingsLoadedOnMountRef.current) return;
     settingsLoadedOnMountRef.current = true;
     if (userSettings.workspaceId && userSettings.workspaceId !== workspaceId) {
       onWorkspaceChange?.(userSettings.workspaceId);
     }
-  }, [onWorkspaceChange, userSettings.loaded, userSettings.workspaceId, workspaceId]);
+  }, [
+    onWorkspaceChange,
+    routeWorkflowId,
+    userSettings.loaded,
+    userSettings.workspaceId,
+    workspaceId,
+  ]);
 
   useEffect(() => {
     if (!userSettings.loaded || !(!userSettings.workspaceId && workspaceId)) return;
@@ -236,11 +245,12 @@ export function useUserDisplaySettings({
 
   useEffect(() => {
     if (!userSettings.loaded) return;
+    if (routeWorkflowId) return;
     if (settingsLoadedOnMountRef.current) return;
     if (userSettings.workflowId && userSettings.workflowId !== workflowId) {
       onWorkflowChange?.(userSettings.workflowId);
     }
-  }, [workflowId, onWorkflowChange, userSettings.workflowId, userSettings.loaded]);
+  }, [workflowId, onWorkflowChange, routeWorkflowId, userSettings.workflowId, userSettings.loaded]);
 
   usePruneStaleRepositoryIds(userSettings, repositories, commitSettings);
 
