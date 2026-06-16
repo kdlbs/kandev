@@ -23,6 +23,7 @@ import { linkToTask } from "@/lib/links";
 import { cn } from "@/lib/utils";
 import {
   isOfficeWorkspace,
+  rememberLastKanbanWorkspace,
   resolveFirstOfficeWorkspace,
   resolveLastKanbanWorkspace,
   workspaceHomeHref,
@@ -152,7 +153,10 @@ export function AppSidebarFooter({ collapsed }: AppSidebarFooterProps) {
           icon={activeIsOffice ? IconLayoutKanban : IconBuildings}
           label={activeIsOffice ? "Kanban" : "Office"}
           collapsed={collapsed}
-          onClick={() => router.push(workspaceHomeHref(targetWorkspace ?? undefined))}
+          onClick={() => {
+            if (!activeIsOffice) rememberLastKanbanWorkspace(activeWorkspace);
+            router.push(workspaceHomeHref(targetWorkspace ?? undefined));
+          }}
           testId={activeIsOffice ? "sidebar-kanban-button" : "sidebar-office-button"}
         />
       )}

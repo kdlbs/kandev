@@ -106,6 +106,7 @@ describe("AppSidebarFooter", () => {
 
     expect(mocks.routerPush).toHaveBeenNthCalledWith(1, "/stats");
     expect(mocks.routerPush).toHaveBeenNthCalledWith(2, "/office?workspaceId=office-1");
+    expect(window.localStorage.getItem("kandev.lastKanbanWorkspaceId")).toBe("kanban-1");
   });
 
   it("shows a Kanban button when an office workspace is active", () => {
