@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   LAST_KANBAN_WORKSPACE_KEY,
   rememberLastKanbanWorkspace,
-  resolveFirstOfficeWorkspace,
+  resolveLastOfficeWorkspace,
   resolveLastKanbanWorkspace,
   workspaceHomeHref,
 } from "./app-sidebar-workspace-navigation";
@@ -10,6 +10,7 @@ import {
 const kanban = { id: "kanban-1", office_workflow_id: "" };
 const kanbanTwo = { id: "kanban-2", office_workflow_id: null };
 const office = { id: "office-1", office_workflow_id: "wf-office" };
+const officeTwo = { id: "office-2", office_workflow_id: "wf-office-2" };
 
 describe("app sidebar workspace navigation", () => {
   beforeEach(() => {
@@ -38,6 +39,18 @@ describe("app sidebar workspace navigation", () => {
 
   it("falls back to the first kanban workspace and first office workspace", () => {
     expect(resolveLastKanbanWorkspace([office, kanban, kanbanTwo])).toBe(kanban);
-    expect(resolveFirstOfficeWorkspace([kanban, office, kanbanTwo])).toBe(office);
+    expect(resolveLastOfficeWorkspace([kanban, office, officeTwo])).toBe(office);
+  });
+
+  it("resolves the last office workspace from the office-active-workspace cookie", () => {
+    document.cookie = "office-active-workspace=office-2; path=/";
+
+    expect(resolveLastOfficeWorkspace([kanban, office, officeTwo])).toBe(officeTwo);
+  });
+
+  it("falls back to the first office workspace when the office cookie is stale", () => {
+    document.cookie = "office-active-workspace=kanban-1; path=/";
+
+    expect(resolveLastOfficeWorkspace([kanban, office, officeTwo])).toBe(office);
   });
 });

@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
 import {
   isOfficeWorkspace,
   rememberLastKanbanWorkspace,
-  resolveFirstOfficeWorkspace,
+  resolveLastOfficeWorkspace,
   resolveLastKanbanWorkspace,
   workspaceHomeHref,
 } from "./app-sidebar-workspace-navigation";
@@ -102,7 +102,7 @@ export function AppSidebarFooter({ collapsed }: AppSidebarFooterProps) {
   const activeIsOffice = isOfficeWorkspace(activeWorkspace);
   const targetWorkspace = activeIsOffice
     ? resolveLastKanbanWorkspace(workspaces.items)
-    : resolveFirstOfficeWorkspace(workspaces.items);
+    : resolveLastOfficeWorkspace(workspaces.items);
   const settingsMode = useAppStore((s) => s.appSidebar.settingsMode);
   const toggleSettingsMode = useAppStore((s) => s.toggleAppSidebarSettingsMode);
   const officeEnabled = useFeature("office");
@@ -155,7 +155,11 @@ export function AppSidebarFooter({ collapsed }: AppSidebarFooterProps) {
           collapsed={collapsed}
           onClick={() => {
             if (!activeIsOffice) rememberLastKanbanWorkspace(activeWorkspace);
-            router.push(workspaceHomeHref(targetWorkspace ?? undefined));
+            const href =
+              !activeIsOffice && !targetWorkspace
+                ? "/office/setup?mode=new"
+                : workspaceHomeHref(targetWorkspace ?? undefined);
+            router.push(href);
           }}
           testId={activeIsOffice ? "sidebar-kanban-button" : "sidebar-office-button"}
         />

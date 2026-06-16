@@ -16,11 +16,12 @@ export default async function OfficePage({ searchParams }: { searchParams?: Sear
 
   const params = searchParams ? await searchParams : {};
   const workspaceId = await getActiveWorkspaceId(params.workspaceId);
+  if (!workspaceId) {
+    redirect("/office/setup?mode=new");
+  }
 
   let dashboard: DashboardData | null = null;
-  if (workspaceId) {
-    dashboard = await getDashboard(workspaceId, { cache: "no-store" }).catch(() => null);
-  }
+  dashboard = await getDashboard(workspaceId, { cache: "no-store" }).catch(() => null);
 
   return <OfficePageClient initialDashboard={dashboard} />;
 }

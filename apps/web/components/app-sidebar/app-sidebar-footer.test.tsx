@@ -13,6 +13,7 @@ const state = {
     items: [
       { id: "kanban-1", name: "Kanban", office_workflow_id: "" },
       { id: "office-1", name: "Office", office_workflow_id: "wf-office" },
+      { id: "office-2", name: "Office 2", office_workflow_id: "wf-office-2" },
     ],
   },
   appSidebar: { settingsMode: false },
@@ -72,8 +73,14 @@ describe("AppSidebarFooter", () => {
   beforeEach(() => {
     officeEnabled = false;
     state.workspaces.activeId = "kanban-1";
+    state.workspaces.items = [
+      { id: "kanban-1", name: "Kanban", office_workflow_id: "" },
+      { id: "office-1", name: "Office", office_workflow_id: "wf-office" },
+      { id: "office-2", name: "Office 2", office_workflow_id: "wf-office-2" },
+    ];
     state.appSidebar.settingsMode = false;
     window.localStorage.clear();
+    document.cookie = "office-active-workspace=; path=/; max-age=0";
     mocks.routerPush.mockClear();
     mocks.toggleSettingsMode.mockClear();
   });
@@ -107,6 +114,28 @@ describe("AppSidebarFooter", () => {
     expect(mocks.routerPush).toHaveBeenNthCalledWith(1, "/stats");
     expect(mocks.routerPush).toHaveBeenNthCalledWith(2, "/office?workspaceId=office-1");
     expect(window.localStorage.getItem("kandev.lastKanbanWorkspaceId")).toBe("kanban-1");
+  });
+
+  it("navigates to the last active office workspace when kanban is active", () => {
+    officeEnabled = true;
+    document.cookie = "office-active-workspace=office-2; path=/";
+
+    renderFooter();
+
+    fireEvent.click(screen.getByRole("button", { name: "Office" }));
+
+    expect(mocks.routerPush).toHaveBeenCalledWith("/office?workspaceId=office-2");
+  });
+
+  it("navigates to office setup when no office workspace exists", () => {
+    officeEnabled = true;
+    state.workspaces.items = [{ id: "kanban-1", name: "Kanban", office_workflow_id: "" }];
+
+    renderFooter();
+
+    fireEvent.click(screen.getByRole("button", { name: "Office" }));
+
+    expect(mocks.routerPush).toHaveBeenCalledWith("/office/setup?mode=new");
   });
 
   it("shows a Kanban button when an office workspace is active", () => {

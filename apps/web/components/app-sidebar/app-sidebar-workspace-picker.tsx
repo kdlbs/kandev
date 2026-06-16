@@ -19,7 +19,10 @@ import {
 import { useAppStore } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { cn } from "@/lib/utils";
-import { rememberLastKanbanWorkspace } from "./app-sidebar-workspace-navigation";
+import {
+  OFFICE_ACTIVE_WORKSPACE_COOKIE,
+  rememberLastKanbanWorkspace,
+} from "./app-sidebar-workspace-navigation";
 
 /**
  * Compact, secondary workspace switcher inlined after the Kandev brand in the
@@ -93,11 +96,14 @@ export function AppSidebarWorkspacePicker() {
         setOpen(false);
         return;
       }
-      document.cookie = `office-active-workspace=${id}; path=/; max-age=86400; samesite=strict; secure`;
+      const type = workspaceType(workspace);
+      if (type === "office") {
+        document.cookie = `${OFFICE_ACTIVE_WORKSPACE_COOKIE}=${id}; path=/; max-age=86400; samesite=strict; secure`;
+      }
       rememberLastKanbanWorkspace(workspace);
       setActiveWorkspace(id);
       if (officeEnabled) {
-        const target = workspaceType(workspace) === "office" ? "/office" : "/";
+        const target = type === "office" ? "/office" : "/";
         router.push(`${target}?workspaceId=${id}`);
       }
       setOpen(false);
