@@ -7,6 +7,7 @@ import {
   reconcileRemovedSessionPanels,
   resolveInitialPosition,
   resolveSessionTabSyncTarget,
+  shouldActivateSessionPanel,
   shouldRebuildDefaultForPendingSession,
 } from "./dockview-session-tabs";
 import { CENTER_GROUP, RIGHT_TOP_GROUP } from "@/lib/state/layout-manager";
@@ -505,5 +506,98 @@ describe("resolveSessionTabSyncTarget", () => {
     });
 
     expect(target).toBeNull();
+  });
+});
+
+describe("shouldActivateSessionPanel", () => {
+  const SID = "s-current";
+  const SESSION_PANEL_ID = `session:${SID}`;
+  const baseArgs = {
+    prevTaskId: null,
+    prevSessionId: null,
+    currentTaskId: "task-A",
+    currentSessionId: SID,
+    currentActivePanelId: null,
+  };
+
+  it("activates when the session panel did not exist before (fresh creation)", () => {
+    expect(shouldActivateSessionPanel({ ...baseArgs, sessionPanelExistedBefore: false })).toBe(
+      true,
+    );
+  });
+
+  it("activates on first mount when no panel is currently active", () => {
+    expect(
+      shouldActivateSessionPanel({
+        ...baseArgs,
+        sessionPanelExistedBefore: true,
+        currentActivePanelId: null,
+      }),
+    ).toBe(true);
+  });
+
+  it("activates on first mount when the restored active panel is already the session", () => {
+    expect(
+      shouldActivateSessionPanel({
+        ...baseArgs,
+        sessionPanelExistedBefore: true,
+        currentActivePanelId: SESSION_PANEL_ID,
+      }),
+    ).toBe(true);
+  });
+
+  /**
+   * Regression: on page refresh, dockview's fromJSON restores the active
+   * panel from the saved layout (e.g. a file diff the user had focused).
+   * We must not force-activate the session panel on top of it.
+   */
+  it("does NOT override a restored non-session active panel on first mount", () => {
+    expect(
+      shouldActivateSessionPanel({
+        ...baseArgs,
+        sessionPanelExistedBefore: true,
+        currentActivePanelId: "preview:commit-detail",
+      }),
+    ).toBe(false);
+    expect(
+      shouldActivateSessionPanel({
+        ...baseArgs,
+        sessionPanelExistedBefore: true,
+        currentActivePanelId: "preview:file-editor",
+      }),
+    ).toBe(false);
+    expect(
+      shouldActivateSessionPanel({
+        ...baseArgs,
+        sessionPanelExistedBefore: true,
+        currentActivePanelId: "plan",
+      }),
+    ).toBe(false);
+  });
+
+  it("activates on intra-task session switch (same task, different session)", () => {
+    expect(
+      shouldActivateSessionPanel({
+        sessionPanelExistedBefore: true,
+        prevTaskId: "task-A",
+        prevSessionId: "s-old",
+        currentTaskId: "task-A",
+        currentSessionId: SID,
+        currentActivePanelId: "preview:commit-detail",
+      }),
+    ).toBe(true);
+  });
+
+  it("does NOT activate on task switch (preserves saved active panel for new task)", () => {
+    expect(
+      shouldActivateSessionPanel({
+        sessionPanelExistedBefore: true,
+        prevTaskId: "task-A",
+        prevSessionId: "s-old",
+        currentTaskId: "task-B",
+        currentSessionId: SID,
+        currentActivePanelId: "preview:commit-detail",
+      }),
+    ).toBe(false);
   });
 });

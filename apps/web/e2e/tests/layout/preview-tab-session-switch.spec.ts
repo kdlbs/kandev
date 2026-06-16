@@ -265,4 +265,51 @@ test.describe("Preview tab survives session switch", () => {
     // the session panel is not active.)
     await expect(fileTabWrapper).toHaveClass(/dv-active-tab/, { timeout: 15_000 });
   });
+
+  test("active center tab is preserved across page refresh", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+
+    const FILE_REFRESH = "refresh-file.ts";
+    const git = new GitHelper(
+      path.join(backend.tmpDir, "repos", "e2e-repo"),
+      makeGitEnv(backend.tmpDir),
+    );
+    git.createFile(FILE_REFRESH, "// refresh content");
+    git.stageAll();
+    git.commit("seed refresh");
+
+    await seedFinishedTask(apiClient, seedData, "Refresh Active Tab Task");
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await kanban.taskCardByTitle("Refresh Active Tab Task").click();
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+
+    // Open file in preview and ensure it's the active tab in the center group.
+    await openFileInPreview(testPage, session, FILE_REFRESH);
+    const fileTabWrapper = tabWrapperByText(testPage, FILE_REFRESH);
+    await fileTabWrapper.click();
+    await expect(fileTabWrapper).toHaveClass(/dv-active-tab/, { timeout: 10_000 });
+
+    // Refresh the page — Dockview's fromJSON should restore the file tab as
+    // active. Regression: `useAutoSessionTab`'s first-mount branch used to
+    // unconditionally call `setActive()` on the session panel after restore,
+    // overriding the restored active and snapping focus back to the agent tab.
+    // We can't use `session.waitForLoad()` here because the chat panel is
+    // intentionally not the active/visible tab after the refresh — that's the
+    // whole point of the fix.
+    await testPage.reload();
+    await expect(testPage.locator(".dv-dockview")).toBeVisible({ timeout: 15_000 });
+
+    const restoredFileTabWrapper = tabWrapperByText(testPage, FILE_REFRESH);
+    await expect(restoredFileTabWrapper).toHaveClass(/dv-active-tab/, { timeout: 15_000 });
+  });
 });

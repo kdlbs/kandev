@@ -478,30 +478,44 @@ export function ensureSessionTabPrecedesNonSessionTabs(api: DockviewApi, session
  *
  * - It was just created by `ensureSessionPanel` (no prior dockview state
  *   to honor), or
- * - The hook is mounting for the first time (initial page load) — preserve
- *   the long-standing behavior of focusing the agent tab so the chat is
- *   visible immediately, even when a saved layout had a different center
- *   tab active, or
+ * - The hook is mounting for the first time (initial page load) AND
+ *   dockview did not restore a different active panel from the saved
+ *   layout — fall back to focusing the agent tab so chat is visible, or
  * - The user switched sessions within the same task (intra-task switch
  *   where dockview hasn't re-activated the new session for us).
  *
  * After an env (task) switch the prev refs are populated and the task
- * changed — `restoreSavedActiveViews` has already applied the saved active
- * panel for the incoming task, so calling setActive here would override it
- * and force the agent tab on top of whatever the user had focused.
+ * changed — the saved layout's active panel has already been restored for
+ * the incoming task, so calling setActive here would override it and force
+ * the agent tab on top of whatever the user had focused.
+ *
+ * On first mount when the session panel was already in the restored layout,
+ * respect dockview's restored active panel (e.g. a file diff the user had
+ * focused before refresh) instead of forcing the agent tab on top.
  */
-function shouldActivateSessionPanel(args: {
+export function shouldActivateSessionPanel(args: {
   sessionPanelExistedBefore: boolean;
   prevTaskId: string | null;
   prevSessionId: string | null;
   currentTaskId: string | null;
   currentSessionId: string;
+  currentActivePanelId: string | null;
 }): boolean {
-  const { sessionPanelExistedBefore, prevTaskId, prevSessionId, currentTaskId, currentSessionId } =
-    args;
+  const {
+    sessionPanelExistedBefore,
+    prevTaskId,
+    prevSessionId,
+    currentTaskId,
+    currentSessionId,
+    currentActivePanelId,
+  } = args;
   if (!sessionPanelExistedBefore) return true;
   const isFirstMount = prevTaskId === null && prevSessionId === null;
-  if (isFirstMount) return true;
+  if (isFirstMount) {
+    const sessionPanelId = `session:${currentSessionId}`;
+    if (!currentActivePanelId || currentActivePanelId === sessionPanelId) return true;
+    return false;
+  }
   const taskChanged = prevTaskId !== currentTaskId;
   const sessionChanged = prevSessionId !== currentSessionId;
   return sessionChanged && !taskChanged;
@@ -527,12 +541,14 @@ function activateSessionPanel(
   const activePanel = api.getPanel(`session:${effectiveSessionId}`);
   if (!activePanel) return activePanel;
 
+  const currentActivePanelId = api.activePanel?.id ?? null;
   const shouldActivate = shouldActivateSessionPanel({
     sessionPanelExistedBefore,
     prevTaskId: refs.prevTaskIdRef.current,
     prevSessionId: refs.prevSessionIdRef.current,
     currentTaskId: tid,
     currentSessionId: effectiveSessionId,
+    currentActivePanelId,
   });
   if (isDebug()) {
     debug("useAutoSessionTab: activation decision", {
@@ -542,6 +558,7 @@ function activateSessionPanel(
       prevTaskId: refs.prevTaskIdRef.current,
       prevSessionId: refs.prevSessionIdRef.current,
       currentTaskId: tid,
+      currentActivePanelId,
       activeGroupId: activePanel.group.id,
     });
   }
