@@ -152,6 +152,36 @@ jobs:
             apps/backend/test-results.json
           retention-days: 30
 
+  postgres-boot:
+    name: Backend Postgres boot
+    runs-on: ubuntu-latest
+    container: ghcr.io/kdlbs/kandev-ci:build-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: kandev
+          POSTGRES_PASSWORD: kandev
+          POSTGRES_DB: kandev_admin
+        options: >-
+          --health-cmd "pg_isready -U kandev -d kandev_admin"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/backend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Run Postgres boot smoke test
+        env:
+          KANDEV_TEST_POSTGRES_DSN: host=postgres port=5432 user=kandev password=kandev dbname=kandev_admin sslmode=disable
+        run: go test -v -run TestPostgresBootInitializesRepositories ./cmd/kandev
+
   test-windows:
     name: Backend (windows)
     runs-on: windows-latest
