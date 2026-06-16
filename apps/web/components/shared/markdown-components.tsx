@@ -80,9 +80,13 @@ function stripHashAndQuery(href: string): string {
   return href.split(/[?#]/, 1)[0] ?? "";
 }
 
+function stripSourceLocationSuffix(path: string): string {
+  return path.replace(/:\d+(?::\d+)?$/, "");
+}
+
 function decodeHrefPath(href: string): string | null {
   try {
-    return decodeURIComponent(stripHashAndQuery(href));
+    return stripSourceLocationSuffix(decodeURIComponent(stripHashAndQuery(href)));
   } catch {
     return null;
   }

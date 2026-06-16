@@ -16,6 +16,7 @@ Task comments render as plain text with `whitespace-pre-wrap`. Agent responses r
 - `react-markdown` with `remark-gfm` processes comment content. `rehype-sanitize` blocks raw HTML injection (already in dependencies). No `dangerouslySetInnerHTML`.
 - Fenced code blocks display syntax highlighting and a one-click copy button.
 - Bare URLs in comment text are auto-linked (handled by `remark-gfm` linkify).
+- Markdown links to files in the active worktree open the in-app file editor; absolute worktree paths and repo-root paths may include `:line` or `:line:column` suffixes without navigating the browser away from the task.
 - Patterns matching `[A-Z]+-\d+` (e.g., `KAN-42`, `QA-7`) are rendered as links to `/office/tasks/<identifier>`. The link uses the raw identifier as the URL segment; resolution to an internal task ID (if needed) is handled by the issue page.
 - The comment list in `TaskChat` uses `react-virtuoso` (already in dependencies). Only visible comments plus a small buffer are mounted.
 - Scroll position is preserved when new comments arrive if the user has scrolled away from the bottom.
@@ -27,6 +28,7 @@ Task comments render as plain text with `whitespace-pre-wrap`. Agent responses r
 - **GIVEN** a comment containing a fenced code block, **WHEN** rendered, **THEN** the block has syntax highlighting and a copy button that copies the block contents.
 - **GIVEN** a comment containing the text `see KAN-42 for context`, **WHEN** rendered, **THEN** `KAN-42` is a clickable link navigating to `/office/tasks/KAN-42`.
 - **GIVEN** a comment containing `https://example.com`, **WHEN** rendered, **THEN** the URL is a clickable hyperlink.
+- **GIVEN** a comment contains a markdown link to `/root/.kandev/tasks/example/kandev/.github/workflows/build.yml:12`, **WHEN** the user clicks it while the active worktree is `/root/.kandev/tasks/example/kandev`, **THEN** the in-app editor opens `.github/workflows/build.yml` instead of navigating to that absolute URL.
 - **GIVEN** a thread with 200 comments, **WHEN** the user opens the issue, **THEN** fewer than 30 comment nodes are in the DOM at any time.
 - **GIVEN** the user has scrolled up to read earlier comments and a new comment arrives, **WHEN** the comment is appended, **THEN** the scroll position does not move.
 - **GIVEN** the user is at the bottom of the thread and a new comment arrives, **WHEN** the comment is appended, **THEN** the viewport auto-scrolls to show the new comment.

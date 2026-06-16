@@ -108,6 +108,20 @@ describe("markdownComponents", () => {
     expect(openFile).toHaveBeenCalledWith("docs/specs/native/spec.md");
   });
 
+  it("opens absolute worktree file links with line suffixes in the editor", () => {
+    render(
+      <Markdown>
+        {
+          "[workflow](/root/.kandev/tasks/example/kandev/.github/workflows/opencode-code-review.yml:1)"
+        }
+      </Markdown>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "workflow" }));
+
+    expect(openFile).toHaveBeenCalledWith(".github/workflows/opencode-code-review.yml");
+  });
+
   it("opens relative file links in the editor", () => {
     render(<Markdown>{"[plan.md](docs/specs/native/plan.md)"}</Markdown>);
 
@@ -124,6 +138,14 @@ describe("markdownComponents", () => {
 
     const link = screen.getByRole("link", { name: "migration" });
     fireEvent.click(link);
+
+    expect(openFile).toHaveBeenCalledWith("docs/nextjs-spa-migration.md");
+  });
+
+  it("opens repo-root file links with line and column suffixes in the editor", () => {
+    render(<Markdown>{"[migration](/docs/nextjs-spa-migration.md:12:3)"}</Markdown>);
+
+    fireEvent.click(screen.getByRole("link", { name: "migration" }));
 
     expect(openFile).toHaveBeenCalledWith("docs/nextjs-spa-migration.md");
   });
