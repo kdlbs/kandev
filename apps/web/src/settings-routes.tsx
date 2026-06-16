@@ -24,7 +24,7 @@ import AutomationEditorPage from "@/app/settings/workspace/[id]/automations/[aut
 import NewAutomationPage from "@/app/settings/workspace/[id]/automations/new/page";
 import WorkspaceEditPage from "@/app/settings/workspace/[id]/page";
 import { WorkspaceRepositoriesClient } from "@/app/settings/workspace/workspace-repositories-client";
-import WorkspaceWorkflowsPage from "@/app/settings/workspace/[id]/workflows/page";
+import { WorkspaceWorkflowsClient } from "@/app/settings/workspace/workspace-workflows-client";
 import WorkspacesPage from "@/app/settings/workspace/page";
 import { GitHubIntegrationPage } from "@/components/github/github-settings";
 import { useAppStoreApi } from "@/components/state-provider";
@@ -55,6 +55,7 @@ import { TerminalSettings } from "@/components/settings/terminal-settings";
 import { VoiceModeSettings } from "@/components/settings/voice-mode-settings";
 import licenses from "@/generated/licenses.json";
 import { fetchJson } from "@/lib/api/client";
+import { listWorkflows } from "@/lib/api/domains/kanban-api";
 import {
   fetchUserSettings,
   listAgentDiscovery,
@@ -62,6 +63,7 @@ import {
   listAvailableAgents,
   listExecutors,
 } from "@/lib/api/domains/settings-api";
+import { listWorkflowTemplates } from "@/lib/api/domains/workflow-api";
 import { listRepositories, listWorkspaces } from "@/lib/api/domains/workspace-api";
 import { useRouter } from "@/lib/routing/client-router";
 import { mapWorkspaceItem } from "@/lib/routing/route-bootstrap";
@@ -73,6 +75,8 @@ import type {
   Repository,
   RepositoryScript,
   UserSettingsResponse,
+  Workflow,
+  WorkflowTemplate,
   Workspace,
 } from "@/lib/types/http";
 import type { LicenseEntry } from "@/lib/types/system";
@@ -82,6 +86,11 @@ type RepositoryWithScripts = Repository & { scripts: RepositoryScript[] };
 type WorkspaceRepositoriesRouteState = {
   workspace: Workspace | null;
   repositories: RepositoryWithScripts[];
+};
+type WorkspaceWorkflowsRouteState = {
+  workspace: Workspace | null;
+  workflows: Workflow[];
+  workflowTemplates: WorkflowTemplate[];
 };
 type SettingsInitialStateData = {
   pathname: string;
@@ -234,7 +243,7 @@ function renderDynamicSettingsRoute(pathname: string) {
       return <WorkspaceRepositoriesRoute workspaceId={id} />;
     }
     if (section === "workflows") {
-      return <WorkspaceWorkflowsPage params={Promise.resolve({ id })} />;
+      return <WorkspaceWorkflowsRoute workspaceId={id} />;
     }
     return <AutomationsPage params={Promise.resolve({ id })} />;
   }
@@ -246,8 +255,7 @@ function renderDynamicSettingsRoute(pathname: string) {
 
   const agentProfile = matchDouble(pathname, /^\/settings\/agents\/([^/]+)\/profiles\/([^/]+)$/);
   if (agentProfile) {
-    const [agentId, profileId] = agentProfile;
-    return <AgentProfileRoute params={Promise.resolve({ agentId, profileId })} />;
+    return <AgentProfileRoute />;
   }
 
   const agentId = matchSingle(pathname, /^\/settings\/agents\/([^/]+)$/);
@@ -441,6 +449,34 @@ function WorkspaceRepositoriesRoute({ workspaceId }: { workspaceId: string }) {
   );
 }
 
+function WorkspaceWorkflowsRoute({ workspaceId }: { workspaceId: string }) {
+  const [state, setState] = useState<WorkspaceWorkflowsRouteState | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setState(null);
+
+    loadWorkspaceWorkflowsRoute(workspaceId)
+      .catch(() => ({ workspace: null, workflows: [], workflowTemplates: [] }))
+      .then((nextState) => {
+        if (!cancelled) setState(nextState);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId]);
+
+  if (!state) return null;
+  return (
+    <WorkspaceWorkflowsClient
+      workspace={state.workspace}
+      workflows={state.workflows}
+      workflowTemplates={state.workflowTemplates}
+    />
+  );
+}
+
 async function loadWorkspaceRepositoriesRoute(
   workspaceId: string,
 ): Promise<WorkspaceRepositoriesRouteState> {
@@ -455,6 +491,22 @@ async function loadWorkspaceRepositoriesRoute(
       ...repository,
       scripts: repository.scripts ?? [],
     })),
+  };
+}
+
+async function loadWorkspaceWorkflowsRoute(
+  workspaceId: string,
+): Promise<WorkspaceWorkflowsRouteState> {
+  const [workspace, workflowResponse, templateResponse] = await Promise.all([
+    fetchJson<Workspace>(`/api/v1/workspaces/${workspaceId}`, { cache: "no-store" }),
+    listWorkflows(workspaceId, { cache: "no-store" }),
+    listWorkflowTemplates({ cache: "no-store" }),
+  ]);
+
+  return {
+    workspace,
+    workflows: workflowResponse.workflows ?? [],
+    workflowTemplates: templateResponse.templates ?? [],
   };
 }
 

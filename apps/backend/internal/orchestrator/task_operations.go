@@ -298,6 +298,7 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 				"model":      profileInfo.Model,
 			}
 		}
+		s.promoteSessionIfTaskHasNoPrimary(ctx, taskID, session)
 		if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
 			s.logger.Warn("failed to update session agent profile",
 				zap.String("session_id", sessionID),
@@ -398,6 +399,33 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 	go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
 
 	return execution, nil
+}
+
+func (s *Service) promoteSessionIfTaskHasNoPrimary(ctx context.Context, taskID string, session *models.TaskSession) {
+	if session == nil || session.IsPrimary {
+		return
+	}
+	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		s.logger.Warn("failed to inspect task sessions for missing primary",
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID),
+			zap.Error(err))
+		return
+	}
+	for _, existing := range sessions {
+		if existing.IsPrimary {
+			return
+		}
+	}
+	if err := s.SetPrimarySession(ctx, session.ID); err != nil {
+		s.logger.Warn("failed to promote workflow session as primary",
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID),
+			zap.Error(err))
+		return
+	}
+	session.IsPrimary = true
 }
 
 // postLaunchCreated handles post-launch bookkeeping for a created session:

@@ -321,7 +321,7 @@ export function TaskPageContent({
     queueMicrotask(() => setIsMounted(true));
   }, []);
 
-  if (!isMounted) return <div className="h-screen w-full bg-background" />;
+  if (!isMounted || !task) return <div className="h-screen w-full bg-background" />;
 
   return (
     <TaskPageInner

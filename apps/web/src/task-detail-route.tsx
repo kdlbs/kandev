@@ -18,15 +18,23 @@ type TaskDetailRouteProps = {
   mode?: string;
 };
 
+type TaskDetailRouteState =
+  | { status: "loading"; data: null }
+  | { status: "loaded"; data: FetchedSessionData }
+  | { status: "error"; data: null };
+
 export function TaskDetailRoute({ taskId, sessionId, layout, simple, mode }: TaskDetailRouteProps) {
-  const [data, setData] = useState<FetchedSessionData | null>(null);
+  const [routeState, setRouteState] = useState<TaskDetailRouteState>({
+    status: "loading",
+    data: null,
+  });
 
   useEffect(() => {
     let cancelled = false;
-    setData(null);
+    setRouteState({ status: "loading", data: null });
     fetchSessionDataForTask(taskId)
       .then((next) => {
-        if (!cancelled) setData(next);
+        if (!cancelled) setRouteState({ status: "loaded", data: next });
       })
       .catch((error) => {
         if (!cancelled) {
@@ -34,7 +42,7 @@ export function TaskDetailRoute({ taskId, sessionId, layout, simple, mode }: Tas
             "Could not load /t/:taskId route data; task page will fall back to client fetches:",
             error instanceof Error ? error.message : String(error),
           );
-          setData(null);
+          setRouteState({ status: "error", data: null });
         }
       });
     return () => {
@@ -42,6 +50,11 @@ export function TaskDetailRoute({ taskId, sessionId, layout, simple, mode }: Tas
     };
   }, [taskId]);
 
+  if (routeState.status === "loading") {
+    return <div className="h-screen w-full bg-background" />;
+  }
+
+  const data = routeState.data;
   const activeSessionId = sessionId ?? data?.sessionId ?? null;
   const initialState = data?.initialState ?? null;
   const task = data?.task ?? null;

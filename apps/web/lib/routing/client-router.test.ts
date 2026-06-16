@@ -40,6 +40,15 @@ describe("client router adapter", () => {
     expect(renderHook(() => useParams()).result.current).toEqual({ taskId: "task-123" });
   });
 
+  it("derives nested settings agent profile params", () => {
+    setLocation("/settings/agents/mock-agent/profiles/profile-123");
+
+    expect(renderHook(() => useParams()).result.current).toMatchObject({
+      agentId: "mock-agent",
+      profileId: "profile-123",
+    });
+  });
+
   it("refreshes by reloading the document", () => {
     const reload = vi.fn();
     vi.stubGlobal("location", { ...window.location, reload });

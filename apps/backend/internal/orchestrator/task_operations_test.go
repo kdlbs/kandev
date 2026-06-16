@@ -20,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/scheduler"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -549,6 +550,97 @@ func TestStartCreatedSession_NotInCreatedState(t *testing.T) {
 	_, err := svc.StartCreatedSession(context.Background(), "task1", "session1", "profile1", "prompt", false, false, false, nil)
 	if err == nil {
 		t.Fatal("expected error when session is not in CREATED state")
+	}
+}
+
+func TestStartCreatedSession_WorkflowOverridePromotesPreparedWhenTaskHasNoPrimary(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "Workflow", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID:             "task1",
+		WorkspaceID:    "ws1",
+		WorkflowID:     "wf1",
+		WorkflowStepID: "step1",
+		Title:          "Task",
+		Description:    "desc",
+		State:          v1.TaskStateInProgress,
+		Metadata:       map[string]interface{}{models.MetaKeyAgentProfileID: "profile-a"},
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID:             "step1",
+		WorkflowID:     "wf1",
+		Name:           "Step 1",
+		AgentProfileID: "profile-b",
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{
+		ID:          "task1",
+		WorkspaceID: "ws1",
+		WorkflowID:  "wf1",
+		Title:       "Task",
+		Description: "desc",
+		State:       v1.TaskStateInProgress,
+		Metadata:    map[string]interface{}{models.MetaKeyAgentProfileID: "profile-a"},
+	}
+
+	var launchedProfile string
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launchedProfile = req.AgentProfileID
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-1"}, nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+
+	sessionID, err := svc.PrepareTaskSession(ctx, "task1", "profile-a", "", "", "step1", false)
+	if err != nil {
+		t.Fatalf("PrepareTaskSession: %v", err)
+	}
+	prepared, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession after prepare: %v", err)
+	}
+	if !prepared.IsPrimary {
+		t.Fatal("prepared first session should start as primary")
+	}
+	prepared.IsPrimary = false
+	if err := repo.UpdateTaskSession(ctx, prepared); err != nil {
+		t.Fatalf("clear prepared primary flag: %v", err)
+	}
+
+	if _, err := svc.StartCreatedSession(ctx, "task1", sessionID, "profile-a", "desc", true, false, true, nil); err != nil {
+		t.Fatalf("StartCreatedSession: %v", err)
+	}
+
+	updated, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession after start: %v", err)
+	}
+	if updated.AgentProfileID != "profile-b" {
+		t.Fatalf("agent profile = %q, want profile-b", updated.AgentProfileID)
+	}
+	if !updated.IsPrimary {
+		t.Fatal("workflow profile override must promote prepared session when task has no primary")
+	}
+	if got := updated.Metadata[models.SessionMetaKeyCreatedBy]; got != models.SessionCreatedByWorkflowSwitch {
+		t.Fatalf("created_by metadata = %v, want %q", got, models.SessionCreatedByWorkflowSwitch)
+	}
+	if launchedProfile != "profile-b" {
+		t.Fatalf("launched profile = %q, want profile-b", launchedProfile)
 	}
 }
 
