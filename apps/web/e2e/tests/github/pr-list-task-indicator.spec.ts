@@ -94,6 +94,9 @@ test.describe("GitHub PR list task indicator", () => {
     }
 
     await testPage.goto("/github");
+    const scopeBar = testPage.getByTestId("github-presets-scope-bar");
+    await expect(scopeBar).toBeVisible({ timeout: 15_000 });
+    await scopeBar.getByRole("button", { name: "Open" }).click();
 
     // Gate on the PR list finishing its first-load chain (client GitHub-status
     // fetch -> AuthenticatedLayout mount -> PR search) before asserting on the

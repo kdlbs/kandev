@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import ProjectDetailPage from "@/app/office/projects/[id]/page";
 import AgentDetailLayout from "@/app/office/agents/[id]/layout";
 import AgentChannelsPage from "@/app/office/agents/[id]/channels/page";
@@ -14,6 +15,9 @@ import { OfficeTopbar } from "@/app/office/components/office-topbar";
 import { InboxPageClient } from "@/app/office/inbox/inbox-page-client";
 import { OfficePageClient } from "@/app/office/page-client";
 import { ProjectsPageClient } from "@/app/office/projects/projects-page-client";
+import { SetupWizard } from "@/app/office/setup/setup-wizard";
+import { loadSetupRouteData } from "@/app/office/setup/setup-route-data";
+import type { SetupWizardRouteProps } from "@/app/office/setup/setup-route-data";
 import ProviderRoutingPage from "@/app/office/workspace/routing/page";
 import RoutineDetailPage from "@/app/office/routines/[id]/page";
 import { RoutinesPageClient } from "@/app/office/routines/routines-page-client";
@@ -26,6 +30,7 @@ import { ActivityPageClient } from "@/app/office/workspace/activity/activity-pag
 import { CostsPageClient } from "@/app/office/workspace/costs/costs-page-client";
 import { SkillsPageClient } from "@/app/office/workspace/skills/skills-page-client";
 import { useAppStore } from "@/components/state-provider";
+import { useRouter, useSearchParams } from "@/lib/routing/client-router";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 
 type RouteRenderer = () => React.ReactNode;
@@ -48,9 +53,14 @@ const OFFICE_ROUTES: Record<string, RouteRenderer> = {
 
 export function OfficeRoutes({ pathname }: { pathname: string }) {
   const officeEnabled = useAppStore((state) => state.features.office);
+  const normalizedPathname = normalizeOfficePath(pathname);
 
   if (!officeEnabled) {
     return <OfficeUnavailable />;
+  }
+
+  if (normalizedPathname === "/office/setup") {
+    return <OfficeSetupRoute />;
   }
 
   return (
@@ -58,7 +68,7 @@ export function OfficeRoutes({ pathname }: { pathname: string }) {
       <div className="flex h-full min-h-0 flex-col">
         <OfficeTopbar />
         <main className="flex-1 min-h-0 overflow-y-auto">
-          {renderOfficeRoute(normalizeOfficePath(pathname))}
+          {renderOfficeRoute(normalizedPathname)}
         </main>
       </div>
     </TooltipProvider>
@@ -149,6 +159,60 @@ function OfficeUnavailable() {
       Office is not enabled for this runtime.
     </div>
   );
+}
+
+type OfficeSetupState =
+  | { status: "loading" }
+  | { status: "ready"; props: SetupWizardRouteProps }
+  | { status: "error"; message: string };
+
+function OfficeSetupRoute() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const mode = searchParams.get("mode") ?? undefined;
+  const [state, setState] = useState<OfficeSetupState>({ status: "loading" });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      setState({ status: "loading" });
+      try {
+        const data = await loadSetupRouteData(mode);
+        if (cancelled) return;
+        if (data.kind === "redirect") {
+          router.replace(data.href);
+          return;
+        }
+        setState({ status: "ready", props: data.props });
+      } catch (error) {
+        if (cancelled) return;
+        setState({
+          status: "error",
+          message: error instanceof Error ? error.message : "Failed to load setup",
+        });
+      }
+    }
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, router]);
+
+  if (state.status === "ready") {
+    return <SetupWizard {...state.props} />;
+  }
+
+  if (state.status === "error") {
+    return (
+      <div className="flex h-full items-center justify-center p-6 text-sm text-destructive">
+        {state.message}
+      </div>
+    );
+  }
+
+  return null;
 }
 
 function OfficeRouteFallback({ pathname }: { pathname: string }) {

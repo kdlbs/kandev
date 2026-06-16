@@ -72,6 +72,10 @@ describe("resolveSpaRoute", () => {
       kind: "office",
       pathname: "/office/projects/project-1",
     });
+    expect(resolveSpaRoute("/office/setup", new URLSearchParams("mode=new"))).toEqual({
+      kind: "office",
+      pathname: "/office/setup",
+    });
   });
 });
 
@@ -96,5 +100,6 @@ describe("officeRouteKey", () => {
       "/office/agents/agent-1/runs/run-1",
     );
     expect(officeRouteKey("/office/routines/routine-1")).toBe("/office/routines/routine-1");
+    expect(officeRouteKey("/office/setup/")).toBe("/office/setup");
   });
 });

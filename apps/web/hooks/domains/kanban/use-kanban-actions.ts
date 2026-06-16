@@ -14,6 +14,11 @@ type UseKanbanActionsOptions = {
 
 type KanbanTask = KanbanState["tasks"][number];
 
+function isTaskDetailPath(): boolean {
+  if (typeof window === "undefined") return false;
+  return /^\/t\/[^/]+\/?$/.test(window.location.pathname);
+}
+
 /** Handle creating a new task in the kanban board, merging with any WS-provided data. */
 function hydrateCreatedTask(
   store: ReturnType<typeof useAppStoreApi>,
@@ -121,6 +126,9 @@ export function useKanbanActions({ workspaceState, workflowsState }: UseKanbanAc
         return;
       }
       store.getState().setActiveWorkspace(nextWorkspaceId);
+      if (isTaskDetailPath()) {
+        return;
+      }
       if (nextWorkspaceId) {
         router.push(`/?workspaceId=${nextWorkspaceId}`);
       } else {
@@ -137,6 +145,9 @@ export function useKanbanActions({ workspaceState, workflowsState }: UseKanbanAc
         return;
       }
       store.getState().setActiveWorkflow(nextWorkflowId);
+      if (isTaskDetailPath()) {
+        return;
+      }
       if (nextWorkflowId) {
         const workspaceId = workflowsState.items.find(
           (workflow: WorkflowsState["items"][number]) => workflow.id === nextWorkflowId,
