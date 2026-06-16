@@ -507,6 +507,7 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
         enforceFromStore(api, get);
         syncPinnedWidthsFromApi(api, set);
         set({ isRestoringLayout: false });
+        persistEnvLayoutNow(api, get().currentLayoutEnvId, get().preMaximizeLayout);
       });
     },
     applyCustomLayout: (layout: SavedLayoutConfig) => {
@@ -538,6 +539,7 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
         enforceFromStore(api, get);
         syncPinnedWidthsFromApi(api, set);
         set({ isRestoringLayout: false });
+        persistEnvLayoutNow(api, get().currentLayoutEnvId, get().preMaximizeLayout);
       });
     },
     captureCurrentLayout: (): Record<string, unknown> => {
@@ -580,6 +582,35 @@ function restoreMaximizeFromStorage(api: DockviewApi, envId: string, set: StoreS
     set({ isRestoringLayout: false });
   });
   return true;
+}
+
+/**
+ * Persist the live layout to env-keyed sessionStorage now.
+ *
+ * Mirrors the auto-save guard in `setupLayoutPersistence` so callers that
+ * fire outside the `onDidLayoutChange` subscription stay in sync with
+ * storage. `applyBuiltInPreset` and `applyCustomLayout` flip
+ * `isRestoringLayout=true` for the entire rAF window in which they emit
+ * their layout-change events; every event is swallowed by the auto-save's
+ * `if (isRestoringLayout) return` guard, and once the flag clears the
+ * layout has settled, so no further event fires. Without this explicit
+ * save, the new layout lives only in memory and a refresh restores the
+ * pre-preset layout from sessionStorage.
+ */
+export function persistEnvLayoutNow(
+  api: DockviewApi,
+  envId: string | null,
+  preMaximizeLayout: LayoutState | null,
+): void {
+  if (!envId) return;
+  // While maximized, `api.toJSON()` is the 2-column overlay, not the user's
+  // real layout. The maximize state has its own slot (saveOutgoingEnv).
+  if (preMaximizeLayout !== null) return;
+  try {
+    setEnvLayout(envId, api.toJSON());
+  } catch {
+    /* ignore serialization/storage failures */
+  }
 }
 
 /** Save the outgoing env's layout & maximize state, then release its portals. */
