@@ -23,7 +23,22 @@ import { SessionPage } from "../../pages/session-page";
 // Shared helpers
 // ---------------------------------------------------------------------------
 
-/** Create a task with agent, navigate to session, wait for agent idle. */
+function expectedAgentCompletionText(description: string): string | null {
+  return description.includes("Revisions seeded.") ? "Revisions seeded." : null;
+}
+
+async function waitForAgentOutput(session: SessionPage, expectedText: string) {
+  await expect
+    .poll(
+      async () =>
+        (await session.chat.getByText(expectedText, { exact: false }).isVisible()) ||
+        (await session.planPanel.isVisible()),
+      { timeout: 45_000, message: `agent output "${expectedText}" not visible` },
+    )
+    .toBe(true);
+}
+
+/** Create a task with agent, navigate to session, wait for agent output. */
 async function seedTaskAndWaitForIdle(
   testPage: Page,
   apiClient: ApiClient,
@@ -42,21 +57,27 @@ async function seedTaskAndWaitForIdle(
       repository_ids: [seedData.repositoryId],
     },
   );
+  const sessionId = task.session_id;
+  if (!sessionId) throw new Error("createTaskWithAgent did not return a session_id");
+
   await testPage.goto(`/t/${task.id}`);
 
   const session = new SessionPage(testPage);
   await session.waitForLoad();
-  // Agent writes may auto-switch the active panel to Plan, hiding the chat
-  // input. Accept either the chat idle placeholder or the Plan panel as a
-  // signal that the agent has produced output.
-  await expect
-    .poll(
-      async () => (await session.idleInput().isVisible()) || (await session.planPanel.isVisible()),
-      { timeout: 30_000, message: "agent output not visible" },
-    )
-    .toBe(true);
+  const expectedCompletionText = expectedAgentCompletionText(description);
+  if (expectedCompletionText) {
+    await waitForAgentOutput(session, expectedCompletionText);
+    // The mock agent can render its final message before the SPA receives the
+    // websocket state transition. Reload once after visible output so the page
+    // rehydrates the finished session state instead of waiting on a stale
+    // "Starting" footer.
+    await testPage.reload();
+    await session.waitForLoad();
+  } else {
+    await session.waitForChatIdle({ timeout: 45_000 });
+  }
 
-  return { session, taskId: task.id, sessionId: task.session_id! };
+  return { session, taskId: task.id, sessionId };
 }
 
 /** Ensure the plan panel is visible. When an agent write auto-opens it,
