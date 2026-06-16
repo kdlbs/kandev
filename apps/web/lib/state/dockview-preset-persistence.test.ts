@@ -200,23 +200,60 @@ describe("applyBuiltInPreset / applyCustomLayout — persistence at call sites",
     expect(setEnvLayout).not.toHaveBeenCalled();
   });
 
+  const customLayout = {
+    id: "custom-1",
+    name: "custom",
+    layout: { columns: [{ id: "center", views: [], activeView: null }] },
+  };
+  type ApplyCustomLayoutArg = Parameters<
+    ReturnType<typeof useDockviewStore.getState>["applyCustomLayout"]
+  >[0];
+
   it("applyCustomLayout persists the env layout after isRestoringLayout clears", async () => {
     const api = makeStoreApi();
     useDockviewStore.setState({ api, currentLayoutEnvId: "env-custom" });
 
-    const customLayout = {
-      id: "custom-1",
-      name: "custom",
-      layout: { columns: [{ id: "center", views: [], activeView: null }] },
-    };
-    type ApplyCustomLayoutArg = Parameters<
-      ReturnType<typeof useDockviewStore.getState>["applyCustomLayout"]
-    >[0];
     useDockviewStore.getState().applyCustomLayout(customLayout as unknown as ApplyCustomLayoutArg);
     await flushRaf();
 
     expect(setEnvLayout).toHaveBeenCalledTimes(1);
     expect(setEnvLayout).toHaveBeenCalledWith("env-custom", expect.any(Object));
+  });
+
+  it("applyCustomLayout does not persist when no env is adopted yet", async () => {
+    const api = makeStoreApi();
+    useDockviewStore.setState({ api, currentLayoutEnvId: null });
+
+    useDockviewStore.getState().applyCustomLayout(customLayout as unknown as ApplyCustomLayoutArg);
+    await flushRaf();
+
+    expect(setEnvLayout).not.toHaveBeenCalled();
+  });
+
+  it("applyCustomLayout skips persistence while maximized", async () => {
+    const api = makeStoreApi();
+    type StoreState = ReturnType<typeof useDockviewStore.getState>;
+    useDockviewStore.setState({
+      api,
+      currentLayoutEnvId: "env-maxed-custom",
+      preMaximizeLayout: { columns: [] } as unknown as StoreState["preMaximizeLayout"],
+    });
+
+    useDockviewStore.getState().applyCustomLayout(customLayout as unknown as ApplyCustomLayoutArg);
+    await flushRaf();
+
+    expect(setEnvLayout).not.toHaveBeenCalled();
+  });
+
+  it("applyCustomLayout does not persist if the env changes between scheduling and rAF", async () => {
+    const api = makeStoreApi();
+    useDockviewStore.setState({ api, currentLayoutEnvId: "env-before-custom" });
+
+    useDockviewStore.getState().applyCustomLayout(customLayout as unknown as ApplyCustomLayoutArg);
+    useDockviewStore.setState({ currentLayoutEnvId: "env-after-custom" });
+    await flushRaf();
+
+    expect(setEnvLayout).not.toHaveBeenCalled();
   });
 
   it("applyBuiltInPreset skips persistence while maximized to avoid stomping the regular layout", async () => {
