@@ -2,7 +2,6 @@ import { redirect } from "next/navigation";
 import { getDashboard, getOnboardingState } from "@/lib/api/domains/office-api";
 import { getActiveWorkspaceId } from "./lib/get-active-workspace";
 import { OfficePageClient } from "./page-client";
-import type { DashboardData } from "@/lib/state/slices/office/types";
 
 type SearchParams = Promise<{ workspaceId?: string }>;
 
@@ -20,8 +19,7 @@ export default async function OfficePage({ searchParams }: { searchParams?: Sear
     redirect("/office/setup?mode=new");
   }
 
-  let dashboard: DashboardData | null = null;
-  dashboard = await getDashboard(workspaceId, { cache: "no-store" }).catch(() => null);
+  const dashboard = await getDashboard(workspaceId, { cache: "no-store" }).catch(() => null);
 
   return <OfficePageClient initialDashboard={dashboard} />;
 }
