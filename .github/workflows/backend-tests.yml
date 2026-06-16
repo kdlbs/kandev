@@ -180,7 +180,7 @@ jobs:
       - name: Run Postgres boot smoke test
         env:
           KANDEV_TEST_POSTGRES_DSN: host=postgres port=5432 user=kandev password=kandev dbname=kandev_admin sslmode=disable
-        run: go test -v -run TestPostgresBootInitializesRepositories ./cmd/kandev
+        run: go test -v -race -run TestPostgresBootInitializesRepositories ./cmd/kandev
 
   test-windows:
     name: Backend (windows)
