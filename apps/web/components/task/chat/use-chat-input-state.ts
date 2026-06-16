@@ -103,7 +103,7 @@ function clearDraftText(sessionId: string | null) {
 }
 
 function attachmentSnapshot(attachments: FileAttachment[]): string {
-  return attachments.map((att) => `${att.id}:${att.deliveryMode}`).join("|");
+  return attachments.map((att) => `${att.id}:${att.deliveryMode ?? "prompt"}`).join("|");
 }
 
 type ClearSubmittedInputArgs = {

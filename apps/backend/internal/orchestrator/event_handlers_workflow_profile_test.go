@@ -831,7 +831,7 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 			ExecutorID:        "exec-local",
 			ExecutorProfileID: "ep1",
 			State:             models.TaskSessionStateWaitingForInput,
-			IsPrimary:         true,
+			IsPrimary:         false,
 			Metadata:          map[string]interface{}{models.SessionMetaKeyCreatedBy: models.SessionCreatedByWorkflowSwitch},
 			StartedAt:         now,
 			UpdatedAt:         now,
@@ -879,6 +879,9 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 		}
 		if updated.AgentProfileID != "profile-b" {
 			t.Fatalf("expected active profile-b session to be preserved, got %q", updated.AgentProfileID)
+		}
+		if !updated.IsPrimary {
+			t.Fatal("expected preserved profile-b session to become primary")
 		}
 
 		sessions, err := repo.ListTaskSessions(ctx, "t1")

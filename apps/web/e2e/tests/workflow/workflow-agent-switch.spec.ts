@@ -646,23 +646,20 @@ test.describe("Workflow agent profile switching", () => {
   });
 
   /**
-   * Verifies that moving to a step with NO agent_profile override reverts
-   * to the task's original (default) agent profile from task metadata.
-   * Covers the fix: maybySwitchSessionForProfile falls back to
-   * task.Metadata["agent_profile_id"] when the step has no override.
+   * Verifies that moving to a step with NO agent_profile override keeps the
+   * active workflow-spawned agent instead of silently reverting to the task's
+   * original default profile.
    */
-  test("moving to step without agent override reverts to task default agent", async ({
+  test("moving to step without agent override preserves workflow agent", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
-    // Two agent boots (git worktree checkouts) — profileB on entry, profileA on
-    // revert — can outlast the default budget under CI shard contention; give headroom.
     test.setTimeout(180_000);
     const { profileA, profileB } = await createProfiles(apiClient);
 
     // Step1 (profileB, auto_start) → Step2 (NO override, auto_start)
-    // Task created with profileA → Step1 overrides to profileB → Step2 should revert to profileA
+    // Task created with profileA → Step1 overrides to profileB → Step2 preserves profileB.
     const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Revert Agent Test");
     const step1 = await apiClient.createWorkflowStep(workflow.id, "Step1", 0, {
       is_start_step: true,
@@ -674,7 +671,7 @@ test.describe("Workflow agent profile switching", () => {
       agent_profile_id: profileB.id,
       events: { on_enter: [{ type: "auto_start_agent" }] },
     });
-    // Step2 has NO agent_profile_id — should revert to task default (profileA)
+    // Step2 has NO agent_profile_id — it should not force a default-profile switch.
     await apiClient.updateWorkflowStep(step2.id, {
       events: { on_enter: [{ type: "auto_start_agent" }] },
     });
@@ -707,15 +704,28 @@ test.describe("Workflow agent profile switching", () => {
       )
       .toBe(true);
 
-    // Move to Step2 (no override) — should revert to profileA
+    // Move to Step2 (no override) — should preserve profileB.
     await apiClient.moveTask(task.id, workflow.id, step2.id);
 
-    // A Profile A session should appear and own the primary star (no reload needed).
-    // Per PR #743, the user's pinned tab — Profile B from initial load — stays
-    // active; the primary marker is what proves the revert-to-default landed.
-    const profileATab = session.sessionTabByText("Profile A");
-    await expect(profileATab).toBeVisible({ timeout: 60_000 });
-    await expect(session.primaryStarInTab("Profile A")).toBeVisible({ timeout: 60_000 });
+    // The existing Profile B session should remain primary, and no default-profile
+    // session should appear just because the target step omitted an override.
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          const profileBSessions = sessions.filter((s) => s.agent_profile_id === profileB.id);
+          const profileASessions = sessions.filter((s) => s.agent_profile_id === profileA.id);
+          return {
+            profileBPrimary: profileBSessions.some((s) => s.is_primary),
+            profileBCompleted: profileBSessions.some((s) => s.state === "COMPLETED"),
+            profileACount: profileASessions.length,
+          };
+        },
+        { timeout: 60_000, message: "Waiting for workflow agent to stay primary" },
+      )
+      .toEqual({ profileBPrimary: true, profileBCompleted: false, profileACount: 0 });
+    await expect(profileBTab).toBeVisible({ timeout: 60_000 });
+    await expect(session.sessionTabByText("Profile A")).toHaveCount(0);
   });
 
   /**
