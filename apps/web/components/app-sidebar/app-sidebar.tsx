@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
 import { useAppStore } from "@/components/state-provider";
+import { useInOffice } from "@/hooks/use-in-office";
 import { cn } from "@/lib/utils";
 import {
   APP_SIDEBAR_COLLAPSED_WIDTH,
@@ -16,13 +17,22 @@ import { AppSidebarResizeHandle } from "./app-sidebar-resize-handle";
 import { AppSidebarSettingsMode } from "./app-sidebar-settings-mode";
 import { AgentsSection } from "./sections/agents-section";
 import { IntegrationsSection } from "./sections/integrations-section";
+import { OfficeNavigationSection } from "./sections/office-navigation-section";
 import { ProjectsSection } from "./sections/projects-section";
 import { TasksSection } from "./sections/tasks-section";
 
 const SECTION_ROUTE_MAP: Array<{ id: string; matches: (path: string) => boolean }> = [
   {
     id: APP_SIDEBAR_SECTION_IDS.tasks,
-    matches: (p) => p.startsWith("/office/tasks") || p.startsWith("/t/"),
+    matches: (p) => p.startsWith("/t/"),
+  },
+  {
+    id: APP_SIDEBAR_SECTION_IDS.officeWork,
+    matches: (p) => p.startsWith("/office/tasks") || p.startsWith("/office/routines"),
+  },
+  {
+    id: APP_SIDEBAR_SECTION_IDS.officeWorkspace,
+    matches: (p) => p.startsWith("/office/workspace"),
   },
   { id: APP_SIDEBAR_SECTION_IDS.projects, matches: (p) => p.startsWith("/office/projects") },
   { id: APP_SIDEBAR_SECTION_IDS.agents, matches: (p) => p.startsWith("/office/agents") },
@@ -50,6 +60,7 @@ export function AppSidebar() {
   const toggleSettingsMode = useAppStore((s) => s.toggleAppSidebarSettingsMode);
   const setWidth = useAppStore((s) => s.setAppSidebarWidth);
   const pathname = usePathname();
+  const inOffice = useInOffice();
 
   const handleResize = useCallback(
     (e: React.MouseEvent) => {
@@ -134,15 +145,16 @@ export function AppSidebar() {
           <>
             <div className="shrink-0 flex flex-col gap-2 overflow-y-auto">
               <AppSidebarPrimaryNav collapsed={collapsed} />
+              {inOffice && <OfficeNavigationSection collapsed={collapsed} />}
               <ProjectsSection collapsed={collapsed} />
               <AgentsSection collapsed={collapsed} />
-              <IntegrationsSection collapsed={collapsed} />
+              {!inOffice && <IntegrationsSection collapsed={collapsed} />}
             </div>
-            {/* Tasks is the flex-grow middle section so it absorbs remaining
-                vertical space and scrolls internally. Settings is intentionally
-                not a nav section — it's reached only via the footer gear, which
-                takes the whole sidebar over with the settings tree. */}
-            <TasksSection collapsed={collapsed} />
+            {/* In regular kanban mode, Tasks is the flex-grow middle section so
+                it absorbs remaining vertical space and scrolls internally.
+                Office has a dedicated /office/tasks page, so the sidebar only
+                renders a lightweight Tasks nav row above. */}
+            {!inOffice && <TasksSection collapsed={collapsed} />}
           </>
         )}
       </nav>

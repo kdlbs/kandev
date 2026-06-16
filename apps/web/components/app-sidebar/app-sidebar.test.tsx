@@ -5,6 +5,7 @@ import { APP_SIDEBAR_EXPANDED_WIDTH } from "./app-sidebar-constants";
 const navigationMock = vi.hoisted(() => ({
   pathname: "/",
 }));
+let inOffice = false;
 
 // The AppSidebar pulls in a lot of children that touch the dockview / kanban
 // data layer. For unit testing the collapse + section toggle behaviour we stub
@@ -48,6 +49,9 @@ vi.mock("./sections/agents-section", () => ({
 vi.mock("./sections/integrations-section", () => ({
   IntegrationsSection: () => <div data-testid="integrations-section" />,
 }));
+vi.mock("./sections/office-navigation-section", () => ({
+  OfficeNavigationSection: () => <div data-testid="office-navigation-section" />,
+}));
 vi.mock("./app-sidebar-footer", () => ({
   AppSidebarFooter: () => <div data-testid="footer" />,
 }));
@@ -59,11 +63,17 @@ vi.mock("next/navigation", () => ({
   usePathname: () => navigationMock.pathname,
 }));
 
+vi.mock("@/hooks/use-in-office", () => ({
+  useInOffice: () => inOffice,
+}));
+
 const storeState = {
   appSidebar: {
     collapsed: false,
     sectionExpanded: {
       tasks: true,
+      "office-work": true,
+      "office-workspace": true,
       projects: false,
       agents: false,
       integrations: false,
@@ -88,6 +98,7 @@ import { AppSidebar } from "./app-sidebar";
 describe("AppSidebar", () => {
   beforeEach(() => {
     navigationMock.pathname = "/";
+    inOffice = false;
     storeState.appSidebar.collapsed = false;
     storeState.appSidebar.settingsMode = false;
     storeState.toggleAppSidebar = vi.fn();
@@ -106,6 +117,17 @@ describe("AppSidebar", () => {
     expect(screen.getByTestId("projects-section")).toBeTruthy();
     expect(screen.getByTestId("agents-section")).toBeTruthy();
     expect(screen.queryByTestId("settings-section")).toBeNull();
+  });
+
+  it("renders office navigation without kanban-only sections in office mode", () => {
+    inOffice = true;
+    navigationMock.pathname = "/office";
+
+    render(<AppSidebar />);
+
+    expect(screen.getByTestId("office-navigation-section")).toBeTruthy();
+    expect(screen.queryByTestId("tasks-section")).toBeNull();
+    expect(screen.queryByTestId("integrations-section")).toBeNull();
   });
 
   it("renders collapsed when store reports collapsed=true", () => {

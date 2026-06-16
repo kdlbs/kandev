@@ -15,6 +15,8 @@ import type { AppSidebarState, UISlice } from "./types";
  *  defaulting too tall on first open. */
 export const DEFAULT_SECTION_EXPANDED: Record<string, boolean> = {
   tasks: true,
+  "office-work": true,
+  "office-workspace": true,
   projects: false,
   agents: false,
   integrations: false,

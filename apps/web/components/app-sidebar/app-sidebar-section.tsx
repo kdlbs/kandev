@@ -21,6 +21,8 @@ type AppSidebarSectionProps = {
   headerActionVisibility?: "expanded" | "always";
   /** Fills remaining sidebar height when expanded. Parent must be a flex column. */
   grow?: boolean;
+  /** Initial expansion when the persisted section map does not yet contain this id. */
+  defaultExpanded?: boolean;
 };
 
 type SectionHeaderProps = {
@@ -75,8 +77,9 @@ export function AppSidebarSection({
   headerAction,
   headerActionVisibility = "expanded",
   grow,
+  defaultExpanded = false,
 }: AppSidebarSectionProps) {
-  const expanded = useAppStore((s) => s.appSidebar.sectionExpanded[id] ?? false);
+  const expanded = useAppStore((s) => s.appSidebar.sectionExpanded[id] ?? defaultExpanded);
   const toggleSection = useAppStore((s) => s.toggleAppSidebarSection);
   const setCollapsed = useAppStore((s) => s.setAppSidebarCollapsed);
 

@@ -24,7 +24,33 @@ test.describe("Sidebar navigation", () => {
   test("sidebar shows tasks link", async ({ testPage, officeSeed: _ }) => {
     await testPage.goto("/office");
     await expect(testPage.getByText("Agents Enabled")).toBeVisible({ timeout: 10_000 });
-    await expect(testPage.getByRole("link", { name: /Tasks/i }).first()).toBeVisible();
+    const sidebar = new AppSidebarPage(testPage);
+    await expect(sidebar.root.getByRole("link", { name: /Tasks/i }).first()).toBeVisible();
+    await expect(sidebar.root.getByText("No tasks yet.")).toHaveCount(0);
+    await expect(sidebar.root.getByRole("button", { name: "Integrations" })).toHaveCount(0);
+  });
+
+  test("sidebar shows office workspace pages", async ({ testPage, officeSeed: _ }) => {
+    await testPage.goto("/office");
+    await expect(testPage.getByText("Agents Enabled")).toBeVisible({ timeout: 10_000 });
+
+    const sidebar = new AppSidebarPage(testPage);
+    await expect(sidebar.root.getByRole("link", { name: "Office Settings" })).toHaveAttribute(
+      "href",
+      "/office/workspace/settings",
+    );
+    await expect(sidebar.root.getByRole("link", { name: "Skills" })).toHaveAttribute(
+      "href",
+      "/office/workspace/skills",
+    );
+    await expect(sidebar.root.getByRole("link", { name: "Agent Topology" })).toHaveAttribute(
+      "href",
+      "/office/workspace/org",
+    );
+    await expect(sidebar.root.getByRole("link", { name: "Costs" })).toHaveAttribute(
+      "href",
+      "/office/workspace/costs",
+    );
   });
 
   test("navigate to agents page via sidebar", async ({ testPage, officeSeed: _ }) => {

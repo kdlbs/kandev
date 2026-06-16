@@ -227,6 +227,8 @@ describe("appSidebar actions", () => {
     expect(store.getState().appSidebar.collapsed).toBe(false);
     expect(store.getState().appSidebar.width).toBe(APP_SIDEBAR_EXPANDED_WIDTH);
     expect(store.getState().appSidebar.sectionExpanded.tasks).toBe(true);
+    expect(store.getState().appSidebar.sectionExpanded["office-work"]).toBe(true);
+    expect(store.getState().appSidebar.sectionExpanded["office-workspace"]).toBe(true);
     expect(store.getState().appSidebar.sectionExpanded.projects).toBe(false);
   });
 
