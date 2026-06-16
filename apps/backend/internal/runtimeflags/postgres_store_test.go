@@ -26,7 +26,11 @@ func TestPostgresStoreRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListOverrides: %v", err)
 	}
-	if overrides["features.office"] {
+	value, ok := overrides["features.office"]
+	if !ok {
+		t.Fatal("features.office override missing after upsert")
+	}
+	if value {
 		t.Fatal("features.office override = true, want false")
 	}
 
