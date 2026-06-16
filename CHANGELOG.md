@@ -2,6 +2,26 @@
 
 All notable changes to Kandev.
 
+## 0.61.0 - 2026-06-16
+
+### Features
+
+- surface ensure-session errors and persist preset layout changes ([#1394](https://github.com/kdlbs/kandev/pull/1394))
+
+### Bug Fixes
+
+- open root-relative chat file links ([#1400](https://github.com/kdlbs/kandev/pull/1400))
+- persist agent error dismissal ([#1397](https://github.com/kdlbs/kandev/pull/1397))
+- chat badge, dockview preview routing, and agent-error icon cleanup ([#1395](https://github.com/kdlbs/kandev/pull/1395))
+- restore office sidebar navigation ([#1396](https://github.com/kdlbs/kandev/pull/1396))
+- stabilize postgres startup and model dropdown scroll ([#1393](https://github.com/kdlbs/kandev/pull/1393))
+- preserve chat session during workflow advances ([#1392](https://github.com/kdlbs/kandev/pull/1392))
+- open markdown file links in editor ([#1388](https://github.com/kdlbs/kandev/pull/1388))
+
+### Documentation
+
+- update spec-driven planning workflow ([#1390](https://github.com/kdlbs/kandev/pull/1390))
+
 ## 0.60.0 - 2026-06-15
 
 ### Features
