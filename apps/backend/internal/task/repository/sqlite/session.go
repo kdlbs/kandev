@@ -647,8 +647,11 @@ func (r *Repository) DismissLastAgentError(ctx context.Context, sessionID string
 			updated_at = ?
 		WHERE id = ?
 			AND json_extract(metadata, '$.last_agent_error.message') = ?
-			AND json_extract(metadata, '$.last_agent_error.occurred_at') = ?
-	`), string(valueJSON), now, sessionID, expected.Message, expected.OccurredAt.UTC().Format(time.RFC3339Nano))
+			AND (
+				json_extract(metadata, '$.last_agent_error.occurred_at') = ?
+				OR julianday(json_extract(metadata, '$.last_agent_error.occurred_at')) = julianday(?)
+			)
+	`), string(valueJSON), now, sessionID, expected.Message, expected.OccurredAt.UTC().Format(time.RFC3339Nano), expected.OccurredAt.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return false, err
 	}

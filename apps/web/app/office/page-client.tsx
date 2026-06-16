@@ -235,9 +235,9 @@ export function OfficePageClient({ initialDashboard }: OfficePageClientProps) {
   }, [workspaceId, setDashboard]);
 
   useEffect(() => {
-    if (initialDashboard || !workspaceId) return;
+    if (initialDashboard || dashboard || !workspaceId) return;
     void fetchDashboard();
-  }, [fetchDashboard, initialDashboard, workspaceId]);
+  }, [dashboard, fetchDashboard, initialDashboard, workspaceId]);
 
   // Refetch dashboard on any office event that affects metrics. The
   // dashboard payload now includes per-agent summaries so a single fetch

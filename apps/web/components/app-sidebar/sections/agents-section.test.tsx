@@ -26,7 +26,7 @@ const state = {
   },
 };
 
-vi.mock("next/navigation", () => ({
+vi.mock("@/lib/routing/client-router", () => ({
   usePathname: () => "/office",
   useRouter: () => routerMock,
 }));

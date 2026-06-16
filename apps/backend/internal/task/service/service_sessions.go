@@ -72,7 +72,7 @@ func (s *Service) DismissLastAgentError(ctx context.Context, sessionID, stamp st
 	if !ok {
 		return session, nil
 	}
-	if stamp != "" && lastErr.Stamp() != stamp {
+	if stamp != "" && !lastErr.MatchesStamp(stamp) {
 		return session, nil
 	}
 	now := time.Now().UTC()

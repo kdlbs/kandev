@@ -80,6 +80,64 @@ type DashboardResponse struct {
 	AgentSummaries []AgentSummary `json:"agent_summaries"`
 }
 
+// NewDashboardResponse maps the internal dashboard model to the public JSON
+// shape consumed by both the HTTP endpoint and the Go-rendered SPA boot payload.
+func NewDashboardResponse(data *models.DashboardData, summaries []AgentSummary) DashboardResponse {
+	if summaries == nil {
+		summaries = []AgentSummary{}
+	}
+	if data == nil {
+		return DashboardResponse{AgentSummaries: summaries}
+	}
+
+	runActivity := make([]RunActivityDay, len(data.RunActivity))
+	for i, d := range data.RunActivity {
+		runActivity[i] = RunActivityDay{
+			Date:      d.Date,
+			Succeeded: d.Succeeded,
+			Failed:    d.Failed,
+			Other:     d.Other,
+		}
+	}
+
+	recentTasks := make([]RecentTaskDTO, len(data.RecentTasks))
+	for i, t := range data.RecentTasks {
+		recentTasks[i] = RecentTaskDTO{
+			ID:                     t.ID,
+			Identifier:             t.Identifier,
+			Title:                  t.Title,
+			Status:                 dbStateToOfficeStatus(t.Status),
+			AssigneeAgentProfileID: t.AssigneeAgentProfileID,
+			UpdatedAt:              t.UpdatedAt,
+		}
+	}
+
+	return DashboardResponse{
+		AgentCount:         data.AgentCount,
+		RunningCount:       data.RunningCount,
+		PausedCount:        data.PausedCount,
+		ErrorCount:         data.ErrorCount,
+		TasksInProgress:    data.TasksInProgress,
+		OpenTasks:          data.OpenTasks,
+		BlockedTasks:       data.BlockedTasks,
+		MonthSpendSubcents: data.MonthSpendSubcents,
+		PendingApprovals:   data.PendingApprovals,
+		RecentActivity:     data.RecentActivity,
+		TaskCount:          data.TaskCount,
+		SkillCount:         data.SkillCount,
+		RoutineCount:       data.RoutineCount,
+		RunActivity:        runActivity,
+		TaskBreakdown: TaskBreakdown{
+			Open:       data.TaskBreakdown.Open,
+			InProgress: data.TaskBreakdown.InProgress,
+			Blocked:    data.TaskBreakdown.Blocked,
+			Done:       data.TaskBreakdown.Done,
+		},
+		RecentTasks:    recentTasks,
+		AgentSummaries: summaries,
+	}
+}
+
 // InboxResponse wraps inbox items. TotalCount mirrors len(Items) and is
 // included so the sidebar badge can read its count from the same payload
 // that drives the inbox page (Stream F of office optimization), avoiding a

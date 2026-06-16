@@ -61,6 +61,9 @@ lib/api/domains/                    # API clients
 
 **Hydration:** Go injects `window.__KANDEV_BOOT_PAYLOAD__` into the SPA shell before React mounts. `lib/state/hydration/merge-strategies.ts` has `deepMerge()`, `mergeSessionMap()`, `mergeLoadingState()` to avoid overwriting live client state. Pass `activeSessionId` to protect active sessions.
 
+For rebasing or finishing PRs written against the old Next.js runtime, follow
+[`docs/nextjs-spa-migration.md`](../../docs/nextjs-spa-migration.md).
+
 **Hooks Pattern:** Hooks in `hooks/domains/` encapsulate WS subscription + store selection. WS client deduplicates subscriptions automatically.
 
 ## WebSockets

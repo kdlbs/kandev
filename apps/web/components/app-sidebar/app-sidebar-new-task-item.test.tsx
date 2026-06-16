@@ -124,7 +124,7 @@ describe("AppSidebarNewTaskItem dialog routing", () => {
     officeEnabled = true;
     pathname = "/office";
     renderItem(false);
-    // NewTaskDialog is lazy-loaded (next/dynamic), so it resolves asynchronously.
+    // NewTaskDialog is lazy-loaded by the SPA dynamic adapter, so it resolves asynchronously.
     expect(await screen.findByTestId(OFFICE_DIALOG_TESTID)).toBeTruthy();
     expect(screen.queryByTestId(REGULAR_DIALOG_TESTID)).toBeNull();
   });

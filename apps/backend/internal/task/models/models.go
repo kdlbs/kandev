@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"maps"
+	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentruntime"
@@ -135,6 +136,25 @@ func mapToLastAgentError(raw interface{}, out *LastAgentError) error {
 
 func (e LastAgentError) Stamp() string {
 	return e.OccurredAt.UTC().Format(time.RFC3339Nano) + ":" + e.Message
+}
+
+func (e LastAgentError) MatchesStamp(stamp string) bool {
+	if stamp == e.Stamp() {
+		return true
+	}
+	suffix := ":" + e.Message
+	if !strings.HasSuffix(stamp, suffix) {
+		return false
+	}
+	rawOccurredAt := strings.TrimSuffix(stamp, suffix)
+	if rawOccurredAt == "" {
+		return e.OccurredAt.IsZero()
+	}
+	occurredAt, err := time.Parse(time.RFC3339Nano, rawOccurredAt)
+	if err != nil {
+		return false
+	}
+	return occurredAt.Equal(e.OccurredAt)
 }
 
 func (e LastAgentError) IsDismissed() bool {

@@ -144,49 +144,7 @@ func (h *Handler) getDashboard(c *gin.Context) {
 		summaries = []AgentSummary{}
 	}
 
-	runActivity := make([]RunActivityDay, len(data.RunActivity))
-	for i, d := range data.RunActivity {
-		runActivity[i] = RunActivityDay{
-			Date:      d.Date,
-			Succeeded: d.Succeeded,
-			Failed:    d.Failed,
-			Other:     d.Other,
-		}
-	}
-
-	recentTasks := make([]RecentTaskDTO, len(data.RecentTasks))
-	for i, t := range data.RecentTasks {
-		recentTasks[i] = RecentTaskDTO{
-			ID:                     t.ID,
-			Identifier:             t.Identifier,
-			Title:                  t.Title,
-			Status:                 dbStateToOfficeStatus(t.Status),
-			AssigneeAgentProfileID: t.AssigneeAgentProfileID,
-			UpdatedAt:              t.UpdatedAt,
-		}
-	}
-
-	c.JSON(http.StatusOK, DashboardResponse{
-		AgentCount:         data.AgentCount,
-		RunningCount:       data.RunningCount,
-		PausedCount:        data.PausedCount,
-		ErrorCount:         data.ErrorCount,
-		MonthSpendSubcents: data.MonthSpendSubcents,
-		PendingApprovals:   data.PendingApprovals,
-		RecentActivity:     data.RecentActivity,
-		TaskCount:          data.TaskCount,
-		SkillCount:         data.SkillCount,
-		RoutineCount:       data.RoutineCount,
-		RunActivity:        runActivity,
-		TaskBreakdown: TaskBreakdown{
-			Open:       data.TaskBreakdown.Open,
-			InProgress: data.TaskBreakdown.InProgress,
-			Blocked:    data.TaskBreakdown.Blocked,
-			Done:       data.TaskBreakdown.Done,
-		},
-		RecentTasks:    recentTasks,
-		AgentSummaries: summaries,
-	})
+	c.JSON(http.StatusOK, NewDashboardResponse(data, summaries))
 }
 
 // -- Live runs --

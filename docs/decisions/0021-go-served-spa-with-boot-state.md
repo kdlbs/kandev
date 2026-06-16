@@ -16,6 +16,8 @@ The boot-state builder will live on the Go side and use backend services directl
 
 Full React SSR from Go is explicitly out of scope. The server-rendered surface is the HTML shell and serialized data contract; React renders in the browser.
 
+Operational migration guidance for in-progress PRs lives in [`../nextjs-spa-migration.md`](../nextjs-spa-migration.md).
+
 ## Consequences
 
 The production runtime becomes simpler: one Go web process serves HTTP APIs, WebSockets, static assets, SPA fallback, and boot data. Release artifacts no longer need Next.js standalone output or a Node process for the web UI.

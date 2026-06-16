@@ -25,7 +25,7 @@ vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: typeof state) => unknown) => selector(state),
 }));
 
-vi.mock("next/navigation", () => ({
+vi.mock("@/lib/routing/client-router", () => ({
   usePathname: () => pathname,
 }));
 

@@ -691,6 +691,36 @@ func TestService_DismissLastAgentError(t *testing.T) {
 	}
 }
 
+func TestService_DismissLastAgentErrorAcceptsBrowserTimestampStamp(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+	occurredAt, err := time.Parse(time.RFC3339Nano, "2026-06-14T12:00:00.310Z")
+	if err != nil {
+		t.Fatalf("parse occurred_at: %v", err)
+	}
+	lastErr := models.LastAgentError{
+		Message:    "peer disconnected before response",
+		OccurredAt: occurredAt,
+	}
+	if err := repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyLastAgentError, lastErr); err != nil {
+		t.Fatalf("seed last agent error: %v", err)
+	}
+
+	session, err := svc.DismissLastAgentError(ctx, sessionID, "2026-06-14T12:00:00.310Z:"+lastErr.Message)
+	if err != nil {
+		t.Fatalf("dismiss last agent error: %v", err)
+	}
+	got, ok := models.LoadLastAgentError(session.Metadata)
+	if !ok {
+		t.Fatalf("expected last agent error metadata after dismiss")
+	}
+	if !got.IsDismissed() {
+		t.Fatalf("expected dismissed last agent error, got %#v", got)
+	}
+}
+
 func TestService_DismissLastAgentErrorIgnoresStaleStamp(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()

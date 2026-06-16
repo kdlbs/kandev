@@ -551,6 +551,46 @@ func TestDismissLastAgentErrorDoesNotOverwriteNewerError(t *testing.T) {
 	}
 }
 
+func TestDismissLastAgentErrorMatchesEquivalentTimestampText(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+
+	seedForMsgTest(t, repo, "task-error", "sess-error", "turn-error")
+	occurredAt, err := time.Parse(time.RFC3339Nano, "2026-06-14T12:00:00.310Z")
+	if err != nil {
+		t.Fatalf("parse occurred_at: %v", err)
+	}
+	lastErr := models.LastAgentError{
+		Message:    "peer disconnected before response",
+		OccurredAt: occurredAt,
+	}
+	if err := repo.SetSessionMetadataKey(ctx, "sess-error", models.SessionMetaKeyLastAgentError, map[string]any{
+		"message":     lastErr.Message,
+		"occurred_at": "2026-06-14T12:00:00.310Z",
+	}); err != nil {
+		t.Fatalf("seed last agent error: %v", err)
+	}
+
+	updated, err := repo.DismissLastAgentError(ctx, "sess-error", lastErr, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("dismiss last agent error: %v", err)
+	}
+	if !updated {
+		t.Fatalf("expected equivalent timestamp text to match")
+	}
+	session, err := repo.GetTaskSession(ctx, "sess-error")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	got, ok := models.LoadLastAgentError(session.Metadata)
+	if !ok {
+		t.Fatalf("expected last agent error metadata")
+	}
+	if !got.IsDismissed() {
+		t.Fatalf("last agent error = %#v, want dismissed", got)
+	}
+}
+
 func sessionCancellationMetadata(t *testing.T, repo *Repository, sessionID string) (string, sql.NullTime, time.Time) {
 	t.Helper()
 	var errorMessage string

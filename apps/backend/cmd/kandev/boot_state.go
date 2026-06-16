@@ -177,6 +177,7 @@ func (b bootStateBuilder) officeState(ctx context.Context, activeID string) map[
 	agents := b.officeAgents(ctx, activeID)
 	projects := b.officeProjects(ctx, activeID)
 	inboxItems, inboxCount := b.officeInbox(ctx, activeID)
+	dashboard := b.officeDashboard(ctx, activeID)
 	return map[string]any{
 		"agentProfiles":  agents,
 		"skills":         []any{},
@@ -189,7 +190,7 @@ func (b bootStateBuilder) officeState(ctx context.Context, activeID string) map[
 		"inboxItems":     inboxItems,
 		"inboxCount":     inboxCount,
 		"runs":           []any{},
-		"dashboard":      nil,
+		"dashboard":      dashboard,
 		"tasks": map[string]any{
 			"items":          []any{},
 			"filters":        map[string]any{"statuses": []any{}, "priorities": []any{}, "assigneeIds": []any{}, "projectIds": []any{}, "search": ""},
@@ -244,6 +245,23 @@ func (b bootStateBuilder) officeInbox(ctx context.Context, activeID string) (any
 		return []any{}, 0
 	}
 	return result, len(result)
+}
+
+func (b bootStateBuilder) officeDashboard(ctx context.Context, activeID string) any {
+	if activeID == "" || b.p.services.OfficeSvcs.Dashboard == nil {
+		return nil
+	}
+	data, err := b.p.services.OfficeSvcs.Dashboard.GetDashboardData(ctx, activeID)
+	if err != nil {
+		b.logBootError("get office dashboard", err)
+		return nil
+	}
+	summaries, err := b.p.services.OfficeSvcs.Dashboard.GetAgentSummaries(ctx, activeID)
+	if err != nil {
+		b.logBootError("get office agent summaries", err)
+		summaries = []officedashboard.AgentSummary{}
+	}
+	return officedashboard.NewDashboardResponse(data, summaries)
 }
 
 func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID string) map[string]any {
