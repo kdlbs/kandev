@@ -179,6 +179,7 @@ jobs:
           from pathlib import Path
 
           raw = Path("/tmp/opencode-review-output.txt").read_text()
+          changed_paths = set(Path("/tmp/opencode-review-files.txt").read_text().splitlines())
           match = re.search(r"<opencode_findings>\s*(\[.*?\])\s*</opencode_findings>", raw, re.S)
           if not match:
             print("OpenCode did not return a valid findings block; skipping comments.")
@@ -205,6 +206,9 @@ jobs:
             if not isinstance(path, str) or not isinstance(line, int):
               continue
             if not isinstance(title, str) or not isinstance(body, str):
+              continue
+            if path not in changed_paths:
+              print(f"Skipped OpenCode finding outside diff scope: {path}:{line}")
               continue
             comment = f"**OpenCode: {title.strip()}**\n\n{body.strip()}"[:4000]
             result = subprocess.run(
@@ -440,6 +444,7 @@ jobs:
           from pathlib import Path
 
           raw = Path("/tmp/opencode-review-output.txt").read_text()
+          changed_paths = set(Path("/tmp/opencode-review-files.txt").read_text().splitlines())
           match = re.search(r"<opencode_findings>\s*(\[.*?\])\s*</opencode_findings>", raw, re.S)
           if not match:
             print("OpenCode did not return a valid findings block; skipping comments.")
@@ -466,6 +471,9 @@ jobs:
             if not isinstance(path, str) or not isinstance(line, int):
               continue
             if not isinstance(title, str) or not isinstance(body, str):
+              continue
+            if path not in changed_paths:
+              print(f"Skipped OpenCode finding outside diff scope: {path}:{line}")
               continue
             comment = f"**OpenCode: {title.strip()}**\n\n{body.strip()}"[:4000]
             result = subprocess.run(
