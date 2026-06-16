@@ -194,7 +194,11 @@ test.describe("Terminals — dockview UI", () => {
     await testPage.waitForTimeout(800);
 
     await testPage.reload();
-    await session.waitForLoad();
+    // After the dockview "preserve restored active tab" change (commit
+    // 597b35662), the Terminal tab the user activated above stays active
+    // on refresh, so session-chat is in the background — foreground it
+    // explicitly so the page-loaded wait succeeds.
+    await session.showSessionContext();
 
     // After reload, both badges must reappear — proves both panels'
     // store entries (kind=ordinary, seq) were preserved across restore.

@@ -224,9 +224,12 @@ test.describe("Plan panel auto-open + indicator", () => {
       { timeout: 5_000 },
     );
 
-    // Reload
+    // Reload. After the dockview "preserve restored active tab" change
+    // (commit 597b35662) Plan stays active on refresh, so session-chat is
+    // mounted but in the background — foreground it explicitly so the
+    // page-loaded wait succeeds.
     await testPage.goto(`/t/${taskId}`);
-    await session.waitForLoad();
+    await session.showSessionContext();
 
     await expect(planTabLocator(testPage)).toBeVisible({ timeout: 15_000 });
     await expect(planTabIndicator(testPage)).toHaveCount(0);
