@@ -52,7 +52,7 @@ export const sshTest = backendFixture.extend<
   seedData: [
     async ({ apiClient, backend }, use, workerInfo) => {
       if (!hasSSHContainerSupport()) {
-        workerInfo.skip(true, "Docker daemon not reachable; skipping SSH E2E worker");
+        test.skip(true, "Docker daemon not reachable; skipping SSH E2E worker");
         return;
       }
       buildE2ESSHImage();

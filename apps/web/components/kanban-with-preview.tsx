@@ -32,6 +32,26 @@ type KanbanWithPreviewProps = {
   initialSessionId?: string;
 };
 
+export function shouldCloseMissingSelectedTask({
+  isOpen,
+  selectedTaskId,
+  selectedTask,
+  initialTaskId,
+  kanbanIsLoading,
+  hasLoadedTaskSources,
+}: {
+  isOpen: boolean;
+  selectedTaskId: string | null | undefined;
+  selectedTask: Task | null;
+  initialTaskId?: string;
+  kanbanIsLoading: boolean;
+  hasLoadedTaskSources: boolean;
+}): boolean {
+  if (!isOpen || !selectedTaskId || selectedTask) return false;
+  if (selectedTaskId === initialTaskId && (kanbanIsLoading || !hasLoadedTaskSources)) return false;
+  return true;
+}
+
 function useUrlSync(selectedTaskId: string | null, selectedTaskSessionId: string | null) {
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -150,14 +170,81 @@ function useSelectedTask(
   }, [selectedTaskId, kanbanTasks, snapshots]);
 }
 
+function useCloseMissingSelectedTask(params: {
+  isOpen: boolean;
+  selectedTaskId: string | null | undefined;
+  selectedTask: Task | null;
+  initialTaskId?: string;
+  kanbanIsLoading: boolean;
+  hasLoadedTaskSources: boolean;
+  close: () => void;
+}) {
+  const {
+    isOpen,
+    selectedTaskId,
+    selectedTask,
+    initialTaskId,
+    kanbanIsLoading,
+    hasLoadedTaskSources,
+    close,
+  } = params;
+
+  useEffect(() => {
+    if (
+      shouldCloseMissingSelectedTask({
+        isOpen,
+        selectedTaskId,
+        selectedTask,
+        initialTaskId,
+        kanbanIsLoading,
+        hasLoadedTaskSources,
+      })
+    ) {
+      close();
+    }
+  }, [
+    isOpen,
+    selectedTaskId,
+    selectedTask,
+    initialTaskId,
+    kanbanIsLoading,
+    hasLoadedTaskSources,
+    close,
+  ]);
+}
+
+function useSyncSelectedTaskActivity(params: {
+  isOpen: boolean;
+  selectedTaskId: string | null | undefined;
+  activeSessionId: string | null;
+  setActiveSession: (taskId: string, sessionId: string) => void;
+  setActiveTask: (taskId: string) => void;
+}) {
+  const { isOpen, selectedTaskId, activeSessionId, setActiveSession, setActiveTask } = params;
+
+  useEffect(() => {
+    if (!isOpen || !selectedTaskId) return;
+    if (activeSessionId) {
+      setActiveSession(selectedTaskId, activeSessionId);
+    } else {
+      setActiveTask(selectedTaskId);
+    }
+  }, [activeSessionId, isOpen, selectedTaskId, setActiveSession, setActiveTask]);
+}
+
 export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWithPreviewProps) {
   const router = useRouter();
   const { isMobile } = useResponsiveBreakpoint();
 
   // Get tasks from the kanban store
   const kanbanTasks = useAppStore((state) => state.kanban.tasks);
+  const kanbanIsLoading = useAppStore((state) => state.kanban.isLoading ?? false);
   const kanbanMultiSnapshots = useAppStore((state) => state.kanbanMulti.snapshots);
+  const setActiveTask = useAppStore((state) => state.setActiveTask);
+  const setActiveSession = useAppStore((state) => state.setActiveSession);
   const setKanbanPreviewedTaskId = useAppStore((state) => state.setKanbanPreviewedTaskId);
+  const hasLoadedTaskSources =
+    kanbanTasks.length > 0 || Object.keys(kanbanMultiSnapshots).length > 0;
 
   const { selectedTaskId, isOpen, previewWidthPx, open, close, updatePreviewWidth } =
     useKanbanPreview({
@@ -192,18 +279,24 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
 
   const selectedTask = useSelectedTask(selectedTaskId, kanbanTasks, kanbanMultiSnapshots);
 
-  // Close panel if selected task no longer exists in either the active
-  // workflow's tasks or any loaded multi-workflow snapshot.
-  useEffect(() => {
-    if (isOpen && selectedTaskId && !selectedTask) {
-      close();
-    }
-  }, [isOpen, selectedTaskId, selectedTask, close]);
+  useCloseMissingSelectedTask({
+    isOpen,
+    selectedTaskId,
+    selectedTask,
+    initialTaskId,
+    kanbanIsLoading,
+    hasLoadedTaskSources,
+    close,
+  });
 
   // Auto-start a session when the preview opens on a task with no session,
   // mirroring the full task page so the preview doesn't dead-end on
-  // "No agents yet." The hook no-ops when no agent profile resolves.
-  const ensureSession = useEnsureTaskSession(selectedTask, { enabled: isOpen });
+  // "No agents yet." Direct route selections are excluded because /t/:id is
+  // also used by launch flows that intentionally create a specific session
+  // after the page is open.
+  const ensureSession = useEnsureTaskSession(selectedTask, {
+    enabled: isOpen && selectedTaskId !== initialTaskId,
+  });
 
   const handleNavigateToTask = useCallback(
     (task: Task) => {
@@ -215,6 +308,14 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
   const activeSessionId = selectedTaskId
     ? (userSelectedSessionId ?? selectedTask?.primarySessionId ?? selectedTaskSessionId)
     : null;
+
+  useSyncSelectedTaskActivity({
+    isOpen,
+    selectedTaskId,
+    activeSessionId,
+    setActiveSession,
+    setActiveTask,
+  });
 
   useUrlSync(selectedTaskId ?? null, activeSessionId ?? null);
 
@@ -243,35 +344,36 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
   }
 
   return (
+    <DesktopPreviewSurface
+      containerRef={containerRef}
+      shouldFloat={shouldFloat}
+      kanbanWidth={kanbanWidth}
+      previewWidthPx={previewWidthPx}
+      isOpen={isOpen}
+      selectedTask={selectedTask}
+      activeSessionId={activeSessionId}
+      ensureSession={ensureSession}
+      onPreviewTask={handlePreviewTaskWithData}
+      onNavigateToTask={handleNavigateToTask}
+      onClose={close}
+      onSessionChange={setUserSelectedSessionId}
+      onResizeMouseDown={handleResizeMouseDown}
+    />
+  );
+}
+
+function DesktopPreviewSurface({
+  containerRef,
+  shouldFloat,
+  ...props
+}: PreviewLayoutProps & {
+  containerRef: React.RefObject<HTMLDivElement | null>;
+  shouldFloat: boolean;
+  isOpen: boolean;
+}) {
+  return (
     <div ref={containerRef} className="h-screen w-full flex flex-col bg-background relative">
-      {shouldFloat ? (
-        <FloatingPreviewLayout
-          kanbanWidth={kanbanWidth}
-          previewWidthPx={previewWidthPx}
-          selectedTask={selectedTask}
-          activeSessionId={activeSessionId}
-          ensureSession={ensureSession}
-          onPreviewTask={handlePreviewTaskWithData}
-          onNavigateToTask={handleNavigateToTask}
-          onClose={close}
-          onSessionChange={setUserSelectedSessionId}
-          onResizeMouseDown={handleResizeMouseDown}
-        />
-      ) : (
-        <InlinePreviewLayout
-          kanbanWidth={kanbanWidth}
-          previewWidthPx={previewWidthPx}
-          isOpen={isOpen}
-          selectedTask={selectedTask}
-          activeSessionId={activeSessionId}
-          ensureSession={ensureSession}
-          onPreviewTask={handlePreviewTaskWithData}
-          onNavigateToTask={handleNavigateToTask}
-          onClose={close}
-          onSessionChange={setUserSelectedSessionId}
-          onResizeMouseDown={handleResizeMouseDown}
-        />
-      )}
+      {shouldFloat ? <FloatingPreviewLayout {...props} /> : <InlinePreviewLayout {...props} />}
     </div>
   );
 }
