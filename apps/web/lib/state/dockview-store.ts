@@ -522,12 +522,14 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
       const { width: safeWidth, height: safeHeight } = measureDockviewContainer(api);
       set({ isRestoringLayout: true });
       const state = layout.layout as unknown as LayoutState;
+      let oldFormatRestoreFailed = false;
       if (!state?.columns) {
         try {
           api.fromJSON(layout.layout as unknown as SerializedDockview);
           set(applyLayoutFixups(api));
         } catch (e) {
           console.warn("applyCustomLayout: old-format restore failed:", e);
+          oldFormatRestoreFailed = true;
         }
       } else {
         const ids = applyLayout(api, state, liveWidths, safeWidth, safeHeight);
@@ -545,7 +547,8 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
         syncPinnedWidthsFromApi(api, set);
         set({ isRestoringLayout: false });
         const { currentLayoutEnvId, preMaximizeLayout } = get();
-        if (currentLayoutEnvId === targetEnvId) {
+        // Don't persist when the legacy fromJSON restore threw: the API may be in a partial state and snapshotting it would propagate corruption to the next load.
+        if (currentLayoutEnvId === targetEnvId && !oldFormatRestoreFailed) {
           persistEnvLayoutNow(api, targetEnvId, preMaximizeLayout);
         }
       });

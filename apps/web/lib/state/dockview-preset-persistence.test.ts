@@ -164,19 +164,30 @@ describe("persistEnvLayoutNow", () => {
 // persistEnvLayoutNow at the end of their rAF callback. The helper-only tests
 // above cover the contract, but the bug we fixed was at the call sites — they
 // previously held isRestoringLayout=true for the whole rAF and never wrote.
-describe("applyBuiltInPreset / applyCustomLayout — persistence at call sites", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    useDockviewStore.setState({
-      api: null,
-      currentLayoutEnvId: null,
-      preMaximizeLayout: null,
-      maximizedGroupId: null,
-      isRestoringLayout: false,
-    });
+function resetStoreForIntegration() {
+  vi.clearAllMocks();
+  useDockviewStore.setState({
+    api: null,
+    currentLayoutEnvId: null,
+    preMaximizeLayout: null,
+    maximizedGroupId: null,
+    isRestoringLayout: false,
   });
+}
 
-  it("applyBuiltInPreset persists the env layout after isRestoringLayout clears", async () => {
+const customLayout = {
+  id: "custom-1",
+  name: "custom",
+  layout: { columns: [{ id: "center", views: [], activeView: null }] },
+};
+type ApplyCustomLayoutArg = Parameters<
+  ReturnType<typeof useDockviewStore.getState>["applyCustomLayout"]
+>[0];
+
+describe("applyBuiltInPreset — persistence at call site", () => {
+  beforeEach(resetStoreForIntegration);
+
+  it("persists the env layout after isRestoringLayout clears", async () => {
     const api = makeStoreApi();
     useDockviewStore.setState({ api, currentLayoutEnvId: "env-preset" });
 
@@ -190,7 +201,7 @@ describe("applyBuiltInPreset / applyCustomLayout — persistence at call sites",
     expect(setEnvLayout).toHaveBeenCalledWith("env-preset", expect.any(Object));
   });
 
-  it("applyBuiltInPreset does not persist when no env is adopted yet", async () => {
+  it("does not persist when no env is adopted yet", async () => {
     const api = makeStoreApi();
     useDockviewStore.setState({ api, currentLayoutEnvId: null });
 
@@ -200,63 +211,7 @@ describe("applyBuiltInPreset / applyCustomLayout — persistence at call sites",
     expect(setEnvLayout).not.toHaveBeenCalled();
   });
 
-  const customLayout = {
-    id: "custom-1",
-    name: "custom",
-    layout: { columns: [{ id: "center", views: [], activeView: null }] },
-  };
-  type ApplyCustomLayoutArg = Parameters<
-    ReturnType<typeof useDockviewStore.getState>["applyCustomLayout"]
-  >[0];
-
-  it("applyCustomLayout persists the env layout after isRestoringLayout clears", async () => {
-    const api = makeStoreApi();
-    useDockviewStore.setState({ api, currentLayoutEnvId: "env-custom" });
-
-    useDockviewStore.getState().applyCustomLayout(customLayout as unknown as ApplyCustomLayoutArg);
-    await flushRaf();
-
-    expect(setEnvLayout).toHaveBeenCalledTimes(1);
-    expect(setEnvLayout).toHaveBeenCalledWith("env-custom", expect.any(Object));
-  });
-
-  it("applyCustomLayout does not persist when no env is adopted yet", async () => {
-    const api = makeStoreApi();
-    useDockviewStore.setState({ api, currentLayoutEnvId: null });
-
-    useDockviewStore.getState().applyCustomLayout(customLayout as unknown as ApplyCustomLayoutArg);
-    await flushRaf();
-
-    expect(setEnvLayout).not.toHaveBeenCalled();
-  });
-
-  it("applyCustomLayout skips persistence while maximized", async () => {
-    const api = makeStoreApi();
-    type StoreState = ReturnType<typeof useDockviewStore.getState>;
-    useDockviewStore.setState({
-      api,
-      currentLayoutEnvId: "env-maxed-custom",
-      preMaximizeLayout: { columns: [] } as unknown as StoreState["preMaximizeLayout"],
-    });
-
-    useDockviewStore.getState().applyCustomLayout(customLayout as unknown as ApplyCustomLayoutArg);
-    await flushRaf();
-
-    expect(setEnvLayout).not.toHaveBeenCalled();
-  });
-
-  it("applyCustomLayout does not persist if the env changes between scheduling and rAF", async () => {
-    const api = makeStoreApi();
-    useDockviewStore.setState({ api, currentLayoutEnvId: "env-before-custom" });
-
-    useDockviewStore.getState().applyCustomLayout(customLayout as unknown as ApplyCustomLayoutArg);
-    useDockviewStore.setState({ currentLayoutEnvId: "env-after-custom" });
-    await flushRaf();
-
-    expect(setEnvLayout).not.toHaveBeenCalled();
-  });
-
-  it("applyBuiltInPreset skips persistence while maximized to avoid stomping the regular layout", async () => {
+  it("skips persistence while maximized to avoid stomping the regular layout", async () => {
     const api = makeStoreApi();
     type StoreState = ReturnType<typeof useDockviewStore.getState>;
     useDockviewStore.setState({
@@ -271,7 +226,7 @@ describe("applyBuiltInPreset / applyCustomLayout — persistence at call sites",
     expect(setEnvLayout).not.toHaveBeenCalled();
   });
 
-  it("applyBuiltInPreset does not persist if the env changes between scheduling and rAF", async () => {
+  it("does not persist if the env changes between scheduling and rAF", async () => {
     const api = makeStoreApi();
     useDockviewStore.setState({ api, currentLayoutEnvId: "env-before" });
 
@@ -280,6 +235,74 @@ describe("applyBuiltInPreset / applyCustomLayout — persistence at call sites",
     // the rAF callback fires. The rAF should detect the env switch and skip
     // the write so the old layout is not stored under the new env's key.
     useDockviewStore.setState({ currentLayoutEnvId: "env-after" });
+    await flushRaf();
+
+    expect(setEnvLayout).not.toHaveBeenCalled();
+  });
+});
+
+describe("applyCustomLayout — persistence at call site", () => {
+  beforeEach(resetStoreForIntegration);
+
+  it("persists the env layout after isRestoringLayout clears", async () => {
+    const api = makeStoreApi();
+    useDockviewStore.setState({ api, currentLayoutEnvId: "env-custom" });
+
+    useDockviewStore.getState().applyCustomLayout(customLayout as unknown as ApplyCustomLayoutArg);
+    await flushRaf();
+
+    expect(setEnvLayout).toHaveBeenCalledTimes(1);
+    expect(setEnvLayout).toHaveBeenCalledWith("env-custom", expect.any(Object));
+  });
+
+  it("does not persist when no env is adopted yet", async () => {
+    const api = makeStoreApi();
+    useDockviewStore.setState({ api, currentLayoutEnvId: null });
+
+    useDockviewStore.getState().applyCustomLayout(customLayout as unknown as ApplyCustomLayoutArg);
+    await flushRaf();
+
+    expect(setEnvLayout).not.toHaveBeenCalled();
+  });
+
+  it("skips persistence while maximized", async () => {
+    const api = makeStoreApi();
+    type StoreState = ReturnType<typeof useDockviewStore.getState>;
+    useDockviewStore.setState({
+      api,
+      currentLayoutEnvId: "env-maxed-custom",
+      preMaximizeLayout: { columns: [] } as unknown as StoreState["preMaximizeLayout"],
+    });
+
+    useDockviewStore.getState().applyCustomLayout(customLayout as unknown as ApplyCustomLayoutArg);
+    await flushRaf();
+
+    expect(setEnvLayout).not.toHaveBeenCalled();
+  });
+
+  it("does not persist if the env changes between scheduling and rAF", async () => {
+    const api = makeStoreApi();
+    useDockviewStore.setState({ api, currentLayoutEnvId: "env-before-custom" });
+
+    useDockviewStore.getState().applyCustomLayout(customLayout as unknown as ApplyCustomLayoutArg);
+    useDockviewStore.setState({ currentLayoutEnvId: "env-after-custom" });
+    await flushRaf();
+
+    expect(setEnvLayout).not.toHaveBeenCalled();
+  });
+
+  it("does not persist when legacy fromJSON restore throws", async () => {
+    const api = makeStoreApi();
+    // Force the old-format path by passing a layout without `columns`, and
+    // make fromJSON throw so the API may be in a partial state. Persisting
+    // that partial snapshot would propagate corruption to the next load.
+    (api.fromJSON as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      throw new Error("dockview fromJSON failed");
+    });
+    useDockviewStore.setState({ api, currentLayoutEnvId: "env-legacy" });
+
+    const legacyLayout = { id: "legacy", name: "legacy", layout: { grid: {} } };
+    useDockviewStore.getState().applyCustomLayout(legacyLayout as unknown as ApplyCustomLayoutArg);
     await flushRaf();
 
     expect(setEnvLayout).not.toHaveBeenCalled();
