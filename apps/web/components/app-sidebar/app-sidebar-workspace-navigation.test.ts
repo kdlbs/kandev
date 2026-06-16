@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   LAST_KANBAN_WORKSPACE_KEY,
+  OFFICE_ACTIVE_WORKSPACE_COOKIE,
+  rememberLastOfficeWorkspace,
   rememberLastKanbanWorkspace,
   resolveLastOfficeWorkspace,
   resolveLastKanbanWorkspace,
@@ -11,10 +13,15 @@ const kanban = { id: "kanban-1", office_workflow_id: "" };
 const kanbanTwo = { id: "kanban-2", office_workflow_id: null };
 const office = { id: "office-1", office_workflow_id: "wf-office" };
 const officeTwo = { id: "office-2", office_workflow_id: "wf-office-2" };
+const officeWithReservedChars = {
+  id: "office/2;mode",
+  office_workflow_id: "wf-office-reserved",
+};
 
 describe("app sidebar workspace navigation", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    document.cookie = "office-active-workspace=; path=/; max-age=0";
   });
 
   it("routes workspace home by active workspace type", () => {
@@ -35,6 +42,17 @@ describe("app sidebar workspace navigation", () => {
     rememberLastKanbanWorkspace(office);
 
     expect(resolveLastKanbanWorkspace([kanban, office])).toBe(kanban);
+  });
+
+  it("writes the last office workspace cookie with an encoded id", () => {
+    rememberLastOfficeWorkspace(officeWithReservedChars);
+
+    expect(document.cookie).toBe(
+      `${OFFICE_ACTIVE_WORKSPACE_COOKIE}=${encodeURIComponent(officeWithReservedChars.id)}`,
+    );
+    expect(resolveLastOfficeWorkspace([office, officeWithReservedChars])).toBe(
+      officeWithReservedChars,
+    );
   });
 
   it("falls back to the first kanban workspace and first office workspace", () => {

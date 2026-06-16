@@ -23,6 +23,7 @@ import { linkToTask } from "@/lib/links";
 import { cn } from "@/lib/utils";
 import {
   isOfficeWorkspace,
+  rememberLastOfficeWorkspace,
   rememberLastKanbanWorkspace,
   resolveLastOfficeWorkspace,
   resolveLastKanbanWorkspace,
@@ -155,6 +156,7 @@ export function AppSidebarFooter({ collapsed }: AppSidebarFooterProps) {
           collapsed={collapsed}
           onClick={() => {
             if (!activeIsOffice) rememberLastKanbanWorkspace(activeWorkspace);
+            if (activeIsOffice) rememberLastOfficeWorkspace(activeWorkspace);
             const href =
               !activeIsOffice && !targetWorkspace
                 ? "/office/setup?mode=new"

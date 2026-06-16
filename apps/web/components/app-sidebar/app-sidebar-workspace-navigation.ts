@@ -21,6 +21,11 @@ export function rememberLastKanbanWorkspace(workspace: SidebarWorkspace | undefi
   window.localStorage.setItem(LAST_KANBAN_WORKSPACE_KEY, workspace.id);
 }
 
+export function rememberLastOfficeWorkspace(workspace: SidebarWorkspace | undefined): void {
+  if (!workspace || !isOfficeWorkspace(workspace) || typeof document === "undefined") return;
+  document.cookie = `${OFFICE_ACTIVE_WORKSPACE_COOKIE}=${encodeURIComponent(workspace.id)}; path=/; max-age=86400; samesite=strict; secure`;
+}
+
 export function resolveLastKanbanWorkspace(
   workspaces: SidebarWorkspace[],
 ): SidebarWorkspace | null {

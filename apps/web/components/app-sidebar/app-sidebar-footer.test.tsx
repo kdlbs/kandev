@@ -150,4 +150,17 @@ describe("AppSidebarFooter", () => {
 
     expect(mocks.routerPush).toHaveBeenCalledWith("/?workspaceId=kanban-1");
   });
+
+  it("remembers the current office workspace when toggling back to kanban", () => {
+    officeEnabled = true;
+    state.workspaces.activeId = "office-2";
+    window.localStorage.setItem("kandev.lastKanbanWorkspaceId", "kanban-1");
+
+    renderFooter();
+
+    fireEvent.click(screen.getByRole("button", { name: "Kanban" }));
+
+    expect(document.cookie).toContain("office-active-workspace=office-2");
+    expect(mocks.routerPush).toHaveBeenCalledWith("/?workspaceId=kanban-1");
+  });
 });

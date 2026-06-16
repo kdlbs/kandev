@@ -20,7 +20,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { cn } from "@/lib/utils";
 import {
-  OFFICE_ACTIVE_WORKSPACE_COOKIE,
+  rememberLastOfficeWorkspace,
   rememberLastKanbanWorkspace,
 } from "./app-sidebar-workspace-navigation";
 
@@ -98,7 +98,7 @@ export function AppSidebarWorkspacePicker() {
       }
       const type = workspaceType(workspace);
       if (type === "office") {
-        document.cookie = `${OFFICE_ACTIVE_WORKSPACE_COOKIE}=${id}; path=/; max-age=86400; samesite=strict; secure`;
+        rememberLastOfficeWorkspace(workspace);
       }
       rememberLastKanbanWorkspace(workspace);
       setActiveWorkspace(id);
