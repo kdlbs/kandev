@@ -9,6 +9,7 @@ import { useSessionMessages } from "@/hooks/domains/session/use-session-messages
 import { useSession } from "@/hooks/domains/session/use-session";
 import { useSessionLaunch } from "@/hooks/domains/session/use-session-launch";
 import { useAppStore } from "@/components/state-provider";
+import { useFileEditors } from "@/hooks/use-file-editors";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { buildStartRequest } from "@/lib/services/session-launch-helpers";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
@@ -60,12 +61,16 @@ function MessageList({
   isLoading,
   taskId,
   sessionId,
+  worktreePath,
+  onOpenFile,
   scrollRef,
 }: {
   messages: Message[];
   isLoading: boolean;
   taskId: string;
   sessionId: string | null;
+  worktreePath?: string;
+  onOpenFile?: (path: string) => void;
   scrollRef: React.RefObject<HTMLDivElement | null>;
 }) {
   if (isLoading && messages.length === 0) {
@@ -87,6 +92,8 @@ function MessageList({
             isTaskDescription={idx === 0 && msg.author_type === "user"}
             taskId={taskId}
             sessionId={sessionId ?? undefined}
+            worktreePath={worktreePath}
+            onOpenFile={onOpenFile}
           />
         ))}
       </div>
@@ -134,6 +141,7 @@ export function AdvancedChatPanel({ taskId, sessionId, hideInput }: AdvancedChat
 
   const { session } = useSession(sessionId);
   const { messages, isLoading } = useSessionMessages(sessionId);
+  const { openFile } = useFileEditors();
   const agentProfiles = useAppStore((s) => s.agentProfiles.items ?? []);
   const defaultProfile = agentProfiles[0] ?? null;
 
@@ -197,6 +205,8 @@ export function AdvancedChatPanel({ taskId, sessionId, hideInput }: AdvancedChat
         isLoading={isLoading}
         taskId={taskId}
         sessionId={sessionId}
+        worktreePath={session?.worktree_path}
+        onOpenFile={openFile}
         scrollRef={scrollRef}
       />
       {!hideInput && (

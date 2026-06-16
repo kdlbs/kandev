@@ -112,6 +112,23 @@ describe("markdownComponents", () => {
     expect(openFile).toHaveBeenCalledWith("docs/specs/native/plan.md");
   });
 
+  it("opens repo-root file links in the editor", () => {
+    render(<Markdown>{"[migration](/docs/nextjs-spa-migration.md)"}</Markdown>);
+
+    const link = screen.getByRole("link", { name: "migration" });
+    fireEvent.click(link);
+
+    expect(openFile).toHaveBeenCalledWith("docs/nextjs-spa-migration.md");
+  });
+
+  it("does not open host-absolute file links outside the worktree", () => {
+    render(<Markdown>{"[secret](/root/other-project/secret.md)"}</Markdown>);
+
+    fireEvent.click(screen.getByRole("link", { name: "secret" }));
+
+    expect(openFile).not.toHaveBeenCalled();
+  });
+
   it("does not treat bare domains as relative file links", () => {
     render(<Markdown>{"[service](api.service.com)"}</Markdown>);
 
