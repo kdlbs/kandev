@@ -233,4 +233,18 @@ describe("applyBuiltInPreset / applyCustomLayout — persistence at call sites",
 
     expect(setEnvLayout).not.toHaveBeenCalled();
   });
+
+  it("applyBuiltInPreset does not persist if the env changes between scheduling and rAF", async () => {
+    const api = makeStoreApi();
+    useDockviewStore.setState({ api, currentLayoutEnvId: "env-before" });
+
+    useDockviewStore.getState().applyBuiltInPreset("default");
+    // Simulate the user navigating to a different task in the ~16ms before
+    // the rAF callback fires. The rAF should detect the env switch and skip
+    // the write so the old layout is not stored under the new env's key.
+    useDockviewStore.setState({ currentLayoutEnvId: "env-after" });
+    await flushRaf();
+
+    expect(setEnvLayout).not.toHaveBeenCalled();
+  });
 });

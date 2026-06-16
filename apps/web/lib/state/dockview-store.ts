@@ -497,6 +497,7 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
         rightPanelsVisible: preset === "default",
         pinnedWidths: cleanedWidths,
       });
+      const targetEnvId = get().currentLayoutEnvId;
       requestAnimationFrame(() => {
         api.layout(safeWidth, safeHeight);
         if (isDebug()) {
@@ -508,7 +509,9 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
         syncPinnedWidthsFromApi(api, set);
         set({ isRestoringLayout: false });
         const { currentLayoutEnvId, preMaximizeLayout } = get();
-        persistEnvLayoutNow(api, currentLayoutEnvId, preMaximizeLayout);
+        if (currentLayoutEnvId === targetEnvId) {
+          persistEnvLayoutNow(api, targetEnvId, preMaximizeLayout);
+        }
       });
     },
     applyCustomLayout: (layout: SavedLayoutConfig) => {
@@ -535,13 +538,16 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
       const sidebarCols = hasSidebar ? 1 : 0;
       const hasRight = colCount > sidebarCols + 1;
       set({ sidebarVisible: hasSidebar, rightPanelsVisible: hasRight });
+      const targetEnvId = get().currentLayoutEnvId;
       requestAnimationFrame(() => {
         api.layout(safeWidth, safeHeight);
         enforceFromStore(api, get);
         syncPinnedWidthsFromApi(api, set);
         set({ isRestoringLayout: false });
         const { currentLayoutEnvId, preMaximizeLayout } = get();
-        persistEnvLayoutNow(api, currentLayoutEnvId, preMaximizeLayout);
+        if (currentLayoutEnvId === targetEnvId) {
+          persistEnvLayoutNow(api, targetEnvId, preMaximizeLayout);
+        }
       });
     },
     captureCurrentLayout: (): Record<string, unknown> => {
@@ -586,27 +592,14 @@ function restoreMaximizeFromStorage(api: DockviewApi, envId: string, set: StoreS
   return true;
 }
 
-/**
- * Persist the live layout to env-keyed sessionStorage now.
- *
- * Mirrors the auto-save guard in `setupLayoutPersistence` so callers that
- * fire outside the `onDidLayoutChange` subscription stay in sync with
- * storage. `applyBuiltInPreset` and `applyCustomLayout` flip
- * `isRestoringLayout=true` for the entire rAF window in which they emit
- * their layout-change events; every event is swallowed by the auto-save's
- * `if (isRestoringLayout) return` guard, and once the flag clears the
- * layout has settled, so no further event fires. Without this explicit
- * save, the new layout lives only in memory and a refresh restores the
- * pre-preset layout from sessionStorage.
- */
+// Persist settled layout to env storage; auto-save in setupLayoutPersistence is gated by isRestoringLayout, so preset/custom actions must call this after the flag clears.
 export function persistEnvLayoutNow(
   api: DockviewApi,
   envId: string | null,
   preMaximizeLayout: LayoutState | null,
 ): void {
   if (!envId) return;
-  // While maximized, `api.toJSON()` is the 2-column overlay, not the user's
-  // real layout. The maximize state has its own slot (saveOutgoingEnv).
+  // While maximized, api.toJSON() is the 2-column overlay; the regular layout has its own slot via saveOutgoingEnv.
   if (preMaximizeLayout !== null) return;
   try {
     setEnvLayout(envId, api.toJSON());
