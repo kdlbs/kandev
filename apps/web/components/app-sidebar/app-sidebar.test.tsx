@@ -52,7 +52,9 @@ vi.mock("./sections/integrations-section", () => ({
   IntegrationsSection: () => <div data-testid="integrations-section" />,
 }));
 vi.mock("./sections/office-navigation-section", () => ({
-  OfficeNavigationSection: () => <div data-testid="office-navigation-section" />,
+  OfficeNavigationSection: ({ section }: { section?: "work" | "office" }) => (
+    <div data-testid={`office-navigation-section-${section ?? "all"}`} />
+  ),
 }));
 vi.mock("./app-sidebar-footer", () => ({
   AppSidebarFooter: () => <div data-testid="footer" />,
@@ -127,12 +129,13 @@ describe("AppSidebar", () => {
 
     render(<AppSidebar />);
 
-    expect(screen.getByTestId("office-navigation-section")).toBeTruthy();
+    expect(screen.getByTestId("office-navigation-section-work")).toBeTruthy();
+    expect(screen.getByTestId("office-navigation-section-office")).toBeTruthy();
     expect(screen.queryByTestId("tasks-section")).toBeNull();
     expect(screen.queryByTestId("integrations-section")).toBeNull();
   });
 
-  it("orders office entity sections before office navigation", () => {
+  it("orders office navigation sections around entity groups", () => {
     officeRouteMock.inOffice = true;
     navigationMock.pathname = "/office";
 
@@ -143,7 +146,13 @@ describe("AppSidebar", () => {
       Array.from(nav.querySelectorAll("[data-testid]")).map((node) =>
         node.getAttribute("data-testid"),
       ),
-    ).toEqual(["primary-nav", "projects-section", "agents-section", "office-navigation-section"]);
+    ).toEqual([
+      "primary-nav",
+      "office-navigation-section-work",
+      "projects-section",
+      "agents-section",
+      "office-navigation-section-office",
+    ]);
   });
 
   it("renders collapsed when store reports collapsed=true", () => {

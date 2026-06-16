@@ -8,7 +8,13 @@ const mocks = vi.hoisted(() => ({
 }));
 
 const state = {
-  workspaces: { activeId: "ws-1" as string | null },
+  workspaces: {
+    activeId: "kanban-1" as string | null,
+    items: [
+      { id: "kanban-1", name: "Kanban", office_workflow_id: "" },
+      { id: "office-1", name: "Office", office_workflow_id: "wf-office" },
+    ],
+  },
   appSidebar: { settingsMode: false },
   toggleAppSidebarSettingsMode: mocks.toggleSettingsMode,
 };
@@ -65,7 +71,9 @@ function renderFooter() {
 describe("AppSidebarFooter", () => {
   beforeEach(() => {
     officeEnabled = false;
+    state.workspaces.activeId = "kanban-1";
     state.appSidebar.settingsMode = false;
+    window.localStorage.clear();
     mocks.routerPush.mockClear();
     mocks.toggleSettingsMode.mockClear();
   });
@@ -88,7 +96,7 @@ describe("AppSidebarFooter", () => {
     expect(screen.queryByRole("link", { name: "Office" })).toBeNull();
   });
 
-  it("navigates from the Stats and Office footer buttons", () => {
+  it("navigates from the Stats and Office footer buttons when kanban is active", () => {
     officeEnabled = true;
 
     renderFooter();
@@ -97,6 +105,19 @@ describe("AppSidebarFooter", () => {
     fireEvent.click(screen.getByRole("button", { name: "Office" }));
 
     expect(mocks.routerPush).toHaveBeenNthCalledWith(1, "/stats");
-    expect(mocks.routerPush).toHaveBeenNthCalledWith(2, "/office");
+    expect(mocks.routerPush).toHaveBeenNthCalledWith(2, "/office?workspaceId=office-1");
+  });
+
+  it("shows a Kanban button when an office workspace is active", () => {
+    officeEnabled = true;
+    state.workspaces.activeId = "office-1";
+    window.localStorage.setItem("kandev.lastKanbanWorkspaceId", "kanban-1");
+
+    renderFooter();
+
+    expect(screen.queryByRole("button", { name: "Office" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Kanban" }));
+
+    expect(mocks.routerPush).toHaveBeenCalledWith("/?workspaceId=kanban-1");
   });
 });

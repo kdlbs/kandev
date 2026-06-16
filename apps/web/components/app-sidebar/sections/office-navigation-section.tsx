@@ -16,6 +16,7 @@ import { AppSidebarSection } from "../app-sidebar-section";
 
 type OfficeNavigationSectionProps = {
   collapsed: boolean;
+  section?: "all" | "work" | "office";
 };
 
 const workItems = [
@@ -31,7 +32,10 @@ const workspaceItems = [
   { icon: IconSettings, label: "Preferences", href: "/office/workspace/settings" },
 ] as const;
 
-export function OfficeNavigationSection({ collapsed }: OfficeNavigationSectionProps) {
+export function OfficeNavigationSection({
+  collapsed,
+  section = "all",
+}: OfficeNavigationSectionProps) {
   const dashboard = useAppStore((s) => s.office.dashboard);
   const taskCount = dashboard?.task_count ?? 0;
   const routineCount = dashboard?.routine_count ?? 0;
@@ -39,42 +43,46 @@ export function OfficeNavigationSection({ collapsed }: OfficeNavigationSectionPr
 
   return (
     <>
-      <AppSidebarSection
-        id={APP_SIDEBAR_SECTION_IDS.officeWork}
-        label="Work"
-        collapsed={collapsed}
-        icon={IconCircleDot}
-        defaultExpanded
-      >
-        {workItems.map((item) => (
-          <AppSidebarNavItem
-            key={item.href}
-            icon={item.icon}
-            label={item.label}
-            href={item.href}
-            badge={getWorkBadge(item.href, taskCount, routineCount)}
-            collapsed={collapsed}
-          />
-        ))}
-      </AppSidebarSection>
-      <AppSidebarSection
-        id={APP_SIDEBAR_SECTION_IDS.officeWorkspace}
-        label="Office"
-        collapsed={collapsed}
-        icon={IconSettings}
-        defaultExpanded
-      >
-        {workspaceItems.map((item) => (
-          <AppSidebarNavItem
-            key={item.href}
-            icon={item.icon}
-            label={item.label}
-            href={item.href}
-            badge={getWorkspaceBadge(item.href, skillCount)}
-            collapsed={collapsed}
-          />
-        ))}
-      </AppSidebarSection>
+      {(section === "all" || section === "work") && (
+        <AppSidebarSection
+          id={APP_SIDEBAR_SECTION_IDS.officeWork}
+          label="Work"
+          collapsed={collapsed}
+          icon={IconCircleDot}
+          defaultExpanded
+        >
+          {workItems.map((item) => (
+            <AppSidebarNavItem
+              key={item.href}
+              icon={item.icon}
+              label={item.label}
+              href={item.href}
+              badge={getWorkBadge(item.href, taskCount, routineCount)}
+              collapsed={collapsed}
+            />
+          ))}
+        </AppSidebarSection>
+      )}
+      {(section === "all" || section === "office") && (
+        <AppSidebarSection
+          id={APP_SIDEBAR_SECTION_IDS.officeWorkspace}
+          label="Office"
+          collapsed={collapsed}
+          icon={IconSettings}
+          defaultExpanded
+        >
+          {workspaceItems.map((item) => (
+            <AppSidebarNavItem
+              key={item.href}
+              icon={item.icon}
+              label={item.label}
+              href={item.href}
+              badge={getWorkspaceBadge(item.href, skillCount)}
+              collapsed={collapsed}
+            />
+          ))}
+        </AppSidebarSection>
+      )}
     </>
   );
 }

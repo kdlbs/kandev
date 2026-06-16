@@ -145,9 +145,10 @@ export function AppSidebar() {
           <>
             <div className="shrink-0 flex flex-col gap-2 overflow-y-auto">
               <AppSidebarPrimaryNav collapsed={collapsed} />
+              {inOffice && <OfficeNavigationSection collapsed={collapsed} section="work" />}
               <ProjectsSection collapsed={collapsed} />
               <AgentsSection collapsed={collapsed} />
-              {inOffice && <OfficeNavigationSection collapsed={collapsed} />}
+              {inOffice && <OfficeNavigationSection collapsed={collapsed} section="office" />}
               {!inOffice && <IntegrationsSection collapsed={collapsed} />}
             </div>
             {/* In regular kanban mode, Tasks is the flex-grow middle section so

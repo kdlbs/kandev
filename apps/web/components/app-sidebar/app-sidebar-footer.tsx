@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   IconBuildings,
   IconChartBar,
+  IconLayoutKanban,
   IconSettings,
   IconSparkles,
   IconStethoscope,
@@ -20,6 +21,12 @@ import { useReleaseNotes } from "@/hooks/use-release-notes";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { linkToTask } from "@/lib/links";
 import { cn } from "@/lib/utils";
+import {
+  isOfficeWorkspace,
+  resolveFirstOfficeWorkspace,
+  resolveLastKanbanWorkspace,
+  workspaceHomeHref,
+} from "./app-sidebar-workspace-navigation";
 
 type AppSidebarFooterProps = {
   collapsed: boolean;
@@ -88,7 +95,13 @@ function FooterIconButton({
 
 export function AppSidebarFooter({ collapsed }: AppSidebarFooterProps) {
   const router = useRouter();
-  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const workspaces = useAppStore((s) => s.workspaces);
+  const workspaceId = workspaces.activeId;
+  const activeWorkspace = workspaces.items.find((workspace) => workspace.id === workspaceId);
+  const activeIsOffice = isOfficeWorkspace(activeWorkspace);
+  const targetWorkspace = activeIsOffice
+    ? resolveLastKanbanWorkspace(workspaces.items)
+    : resolveFirstOfficeWorkspace(workspaces.items);
   const settingsMode = useAppStore((s) => s.appSidebar.settingsMode);
   const toggleSettingsMode = useAppStore((s) => s.toggleAppSidebarSettingsMode);
   const officeEnabled = useFeature("office");
@@ -136,11 +149,11 @@ export function AppSidebarFooter({ collapsed }: AppSidebarFooterProps) {
       )}
       {officeEnabled && (
         <FooterIconButton
-          icon={IconBuildings}
-          label="Office"
+          icon={activeIsOffice ? IconLayoutKanban : IconBuildings}
+          label={activeIsOffice ? "Kanban" : "Office"}
           collapsed={collapsed}
-          onClick={() => router.push("/office")}
-          testId="sidebar-office-button"
+          onClick={() => router.push(workspaceHomeHref(targetWorkspace ?? undefined))}
+          testId={activeIsOffice ? "sidebar-kanban-button" : "sidebar-office-button"}
         />
       )}
       <ThemeToggle />

@@ -30,6 +30,7 @@ export function ProjectsSection({ collapsed }: ProjectsSectionProps) {
           variant="ghost"
           size="icon"
           className="h-5 w-5 cursor-pointer"
+          aria-label="Add project"
           onClick={() => router.push("/office/projects")}
         >
           <IconPlus className="h-3 w-3 text-muted-foreground/60" />
@@ -46,6 +47,7 @@ export function ProjectsSection({ collapsed }: ProjectsSectionProps) {
       collapsed={collapsed}
       icon={IconBoxMultiple}
       headerAction={headerAction}
+      headerActionVisibility="always"
       defaultExpanded
     >
       {activeProjects.length === 0 ? (

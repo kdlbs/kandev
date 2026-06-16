@@ -4,7 +4,9 @@ import Link from "next/link";
 import { IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { useAppStore } from "@/components/state-provider";
 import { cn } from "@/lib/utils";
+import { workspaceHomeHref } from "./app-sidebar-workspace-navigation";
 import { AppSidebarWorkspacePicker } from "./app-sidebar-workspace-picker";
 
 type AppSidebarHeaderProps = {
@@ -15,6 +17,12 @@ type AppSidebarHeaderProps = {
 const COLLAPSE_BUTTON_CLASS = "h-7 w-7 shrink-0 cursor-pointer";
 
 export function AppSidebarHeader({ collapsed, onToggleCollapse }: AppSidebarHeaderProps) {
+  const workspaces = useAppStore((s) => s.workspaces);
+  const activeWorkspace = workspaces.items.find(
+    (workspace) => workspace.id === workspaces.activeId,
+  );
+  const homeHref = workspaceHomeHref(activeWorkspace);
+
   if (collapsed) {
     // Minimal rail: brand home + expand. The workspace switcher lives only in
     // the expanded header — a lone workspace glyph here read as noise.
@@ -23,7 +31,7 @@ export function AppSidebarHeader({ collapsed, onToggleCollapse }: AppSidebarHead
         <Tooltip>
           <TooltipTrigger asChild>
             <Link
-              href="/"
+              href={homeHref}
               aria-label="Kandev home"
               className="flex h-7 w-7 items-center justify-center rounded-md text-foreground/80 hover:bg-muted/60 cursor-pointer"
             >
@@ -60,7 +68,7 @@ export function AppSidebarHeader({ collapsed, onToggleCollapse }: AppSidebarHead
       className="flex items-center gap-1.5 h-10 px-3 shrink-0 border-b border-border"
     >
       <Link
-        href="/"
+        href={homeHref}
         aria-label="Kandev home"
         className={cn(
           "shrink-0 cursor-pointer text-sm font-semibold tracking-tight",
