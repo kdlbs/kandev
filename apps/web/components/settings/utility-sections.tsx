@@ -158,7 +158,10 @@ export function BuiltinActionRow({
     agent.agent_id && agent.model ? `${agent.agent_id}|${agent.model}` : USE_DEFAULT;
 
   return (
-    <div className="flex items-center gap-4 py-2 px-2 rounded hover:bg-muted/50">
+    <div
+      className="flex items-center gap-4 py-2 px-2 rounded hover:bg-muted/50"
+      data-testid={`utility-action-row-${agent.id}`}
+    >
       <div className="w-[420px] shrink-0">
         <div className="text-sm font-medium">{agent.name}</div>
         <p className="text-xs text-muted-foreground truncate">{agent.description}</p>

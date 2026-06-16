@@ -78,13 +78,19 @@ test.describe("Utility Agents settings page", () => {
       });
     });
 
-    const actionRow = testPage
-      .getByText("commit-message", { exact: true })
-      .locator("xpath=ancestor::div[contains(@class, 'items-center')][1]");
+    const actionRow = testPage.getByTestId("utility-action-row-builtin-commit-message");
     const actionSelect = actionRow.getByRole("combobox");
     await actionSelect.click();
     const selectContent = testPage.locator('[data-slot="select-content"]').first();
     await expect(selectContent).toBeVisible();
+    await selectContent.evaluate((element) => {
+      const testWindow = window as Window & { __utilitySelectRawWheelEvents?: number };
+      testWindow.__utilitySelectRawWheelEvents = 0;
+      element.addEventListener("wheel", () => {
+        testWindow.__utilitySelectRawWheelEvents =
+          (testWindow.__utilitySelectRawWheelEvents ?? 0) + 1;
+      });
+    });
 
     await selectContent.dispatchEvent("wheel", {
       bubbles: true,
@@ -101,6 +107,15 @@ test.describe("Utility Agents settings page", () => {
         ),
       )
       .toBe(0);
+    await expect
+      .poll(() =>
+        testPage.evaluate(
+          () =>
+            (window as Window & { __utilitySelectRawWheelEvents?: number })
+              .__utilitySelectRawWheelEvents ?? 0,
+        ),
+      )
+      .toBe(1);
   });
 
   test("does not crash when backend returns models: null", async ({ testPage }) => {
