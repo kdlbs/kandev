@@ -228,6 +228,7 @@ function useRouteData(): {
     void bootstrap();
     return () => {
       cancelled = true;
+      bootstrappedRef.current = false;
     };
   }, [store]);
 
