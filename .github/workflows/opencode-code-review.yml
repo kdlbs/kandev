@@ -28,7 +28,6 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-      issues: write
 
     steps:
       - name: Checkout PR head
@@ -84,7 +83,20 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Install OpenCode
-        run: curl -fsSL https://opencode.ai/install | bash
+        env:
+          OPENCODE_VERSION: v1.17.7
+          OPENCODE_SHA256: 60fe5a92dc9af64ec079348fedde17e12da6a867efe7e8353be8038480607924
+        run: |
+          set -euo pipefail
+
+          curl -fsSL \
+            -o /tmp/opencode.tar.gz \
+            "https://github.com/anomalyco/opencode/releases/download/${OPENCODE_VERSION}/opencode-linux-x64.tar.gz"
+          echo "${OPENCODE_SHA256}  /tmp/opencode.tar.gz" | sha256sum -c -
+          mkdir -p "$HOME/.opencode/bin"
+          tar -xzf /tmp/opencode.tar.gz -C "$HOME/.opencode/bin"
+          chmod +x "$HOME/.opencode/bin/opencode"
+          "$HOME/.opencode/bin/opencode" --version
 
       - name: Run OpenCode review
         env:
@@ -102,6 +114,7 @@ jobs:
             --title "PR #${{ github.event.pull_request.number }} OpenCode review" \
             --file /tmp/opencode-review-guidelines.md \
             --file /tmp/opencode-review.patch \
+            -- \
             "Review PR #${{ github.event.pull_request.number }} in ${REVIEW_MODE} mode. The attached patch is the review scope. Read repository files only when needed to understand architecture around the patched files. Publish high-confidence findings directly as GitHub comments using the permitted gh commands." \
             > /tmp/opencode-review-output.txt
 
@@ -157,7 +170,6 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-      issues: write
 
     steps:
       - name: Checkout PR head
@@ -219,7 +231,20 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Install OpenCode
-        run: curl -fsSL https://opencode.ai/install | bash
+        env:
+          OPENCODE_VERSION: v1.17.7
+          OPENCODE_SHA256: 60fe5a92dc9af64ec079348fedde17e12da6a867efe7e8353be8038480607924
+        run: |
+          set -euo pipefail
+
+          curl -fsSL \
+            -o /tmp/opencode.tar.gz \
+            "https://github.com/anomalyco/opencode/releases/download/${OPENCODE_VERSION}/opencode-linux-x64.tar.gz"
+          echo "${OPENCODE_SHA256}  /tmp/opencode.tar.gz" | sha256sum -c -
+          mkdir -p "$HOME/.opencode/bin"
+          tar -xzf /tmp/opencode.tar.gz -C "$HOME/.opencode/bin"
+          chmod +x "$HOME/.opencode/bin/opencode"
+          "$HOME/.opencode/bin/opencode" --version
 
       - name: Run OpenCode review
         env:
@@ -237,6 +262,7 @@ jobs:
             --title "PR #${{ github.event.pull_request.number }} OpenCode review" \
             --file /tmp/opencode-review-guidelines.md \
             --file /tmp/opencode-review.patch \
+            -- \
             "Review PR #${{ github.event.pull_request.number }} in ${REVIEW_MODE} mode. The attached patch is the review scope. Read repository files only when needed to understand architecture around the patched files. Publish high-confidence findings directly as GitHub comments using the permitted gh commands." \
             > /tmp/opencode-review-output.txt
 
