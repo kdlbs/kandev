@@ -1,4 +1,4 @@
-import type { DockviewApi } from "dockview-react";
+import type { DockviewApi, DockviewGroupPanel } from "dockview-react";
 import { focusOrAddPanel } from "./dockview-layout-builders";
 
 type StoreGet = () => {
@@ -86,12 +86,29 @@ type OpenPreviewArgs = {
   pinnedTabComponent?: string;
 };
 
+/** Move the preview panel into the explicitly requested group when it currently
+ *  lives elsewhere — e.g. a saved env layout restored `preview:file-diff` into
+ *  the right column, but the user just clicked a file in the changes panel
+ *  expecting the diff to land in the center group. */
+function movePreviewToRequestedGroup(
+  preview: ReturnType<DockviewApi["getPanel"]> & object,
+  api: DockviewApi,
+  groupId: string,
+): void {
+  if (!groupId || preview.group?.id === groupId) return;
+  const target = api.getGroup(groupId);
+  if (!target) return;
+  // `api.getGroup` returns `IDockviewGroupPanel` but `moveTo` requires the
+  // concrete `DockviewGroupPanel`; at runtime they're the same object.
+  preview.api.moveTo({ group: target as DockviewGroupPanel });
+}
+
 /** Update an existing preview panel with new content, materializing promoted items first. */
 function updateExistingPreview(
   preview: ReturnType<DockviewApi["getPanel"]> & object,
   args: OpenPreviewArgs,
 ): void {
-  const { api, type, itemId, title, params, quiet, pinnedTabComponent } = args;
+  const { api, type, itemId, title, params, groupId, quiet, pinnedTabComponent } = args;
   const currentItemId = preview.params?.previewItemId as string | undefined;
   if (preview.params?.promoted && currentItemId && currentItemId !== itemId) {
     materializePromotedPreview(api, type, pinnedTabComponent ?? PINNED_TAB);
@@ -106,6 +123,7 @@ function updateExistingPreview(
     promoted: keepPromoted || undefined,
   });
   preview.setTitle(title);
+  movePreviewToRequestedGroup(preview, api, groupId);
   if (!quiet) preview.api.setActive();
 }
 

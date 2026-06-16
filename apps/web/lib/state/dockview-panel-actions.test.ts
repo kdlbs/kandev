@@ -16,14 +16,15 @@ type MockPanel = {
   api: {
     setActive: () => void;
     updateParameters: (p: Record<string, unknown>) => void;
+    moveTo: (opts: { group: { id: string } }) => void;
   };
   setTitle: (t: string) => void;
 };
 
-function makeApi(options: { centerGroupId?: string } = {}): DockviewApi {
+function makeApi(options: { centerGroupId?: string; extraGroupIds?: string[] } = {}): DockviewApi {
   const centerId = options.centerGroupId ?? CENTER_GROUP;
   const panels: MockPanel[] = [];
-  const groups = [{ id: centerId }];
+  const groups = [{ id: centerId }, ...(options.extraGroupIds ?? []).map((id) => ({ id }))];
 
   function makePanel(add: AddPanelOptions & { id: string }): MockPanel {
     const groupId =
@@ -46,6 +47,9 @@ function makeApi(options: { centerGroupId?: string } = {}): DockviewApi {
         updateParameters(p: Record<string, unknown>) {
           Object.assign(panel.params, p);
         },
+        moveTo({ group }: { group: { id: string } }) {
+          panel.group = { id: group.id };
+        },
       },
     };
     return panel;
@@ -60,6 +64,9 @@ function makeApi(options: { centerGroupId?: string } = {}): DockviewApi {
     },
     getPanel(id: string) {
       return panels.find((p) => p.id === id);
+    },
+    getGroup(id: string) {
+      return groups.find((g) => g.id === id);
     },
     addPanel(opts: AddPanelOptions & { id: string }) {
       const p = makePanel(opts);
@@ -324,6 +331,32 @@ describe("addFileDiffPanel — preview behavior", () => {
     const preview = api.getPanel(PREVIEW_DIFF_ID) as unknown as MockPanel;
     expect(preview.params.path).toBe(PATH_B);
     expect(preview.params.promoted).toBeUndefined();
+  });
+
+  // Regression: a saved env layout can restore `preview:file-diff` into the
+  // right column. A subsequent click on a file in the Changes panel should
+  // relocate the preview into the explicitly requested (center) group rather
+  // than silently reusing the restored slot.
+  it("moves an existing preview to the requested group when groupId differs", () => {
+    const rightTopId = "group-right-top";
+    ({ api, actions } = build(makeApi({ extraGroupIds: [rightTopId] })));
+
+    actions.addFileDiffPanel(PATH_A, { groupId: rightTopId });
+    const preview = api.getPanel(PREVIEW_DIFF_ID) as unknown as MockPanel;
+    expect(preview.group.id).toBe(rightTopId);
+
+    actions.addFileDiffPanel(PATH_B); // defaults to centerGroupId
+    expect(preview.group.id).toBe(CENTER_GROUP);
+    expect(preview.params.path).toBe(PATH_B);
+  });
+
+  it("leaves the preview in place when groupId already matches", () => {
+    actions.addFileDiffPanel(PATH_A);
+    const preview = api.getPanel(PREVIEW_DIFF_ID) as unknown as MockPanel;
+    expect(preview.group.id).toBe(CENTER_GROUP);
+
+    actions.addFileDiffPanel(PATH_B);
+    expect(preview.group.id).toBe(CENTER_GROUP);
   });
 });
 
