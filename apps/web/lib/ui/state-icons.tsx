@@ -92,11 +92,16 @@ const ACTIVE_SESSION_STATES: ReadonlySet<string> = new Set<TaskSessionState>([
  * When no primary session is attached yet (task just created / scheduling),
  * we still show the spinner so users see the imminent work; otherwise we
  * require an active session state.
+ *
+ * Exception: `TODO` is the queued/not-started column. Any active session
+ * state reported there is stale (task moved back from IN_PROGRESS, session
+ * still alive) or transient, and the spinner would mislead — suppress it.
  */
 export function shouldShowTaskRunningSpinner(
   taskState?: TaskState,
   primarySessionState?: string | null,
 ): boolean {
+  if (taskState === "TODO") return false;
   if (primarySessionState) return ACTIVE_SESSION_STATES.has(primarySessionState);
   return taskState === "IN_PROGRESS" || taskState === "SCHEDULING";
 }
