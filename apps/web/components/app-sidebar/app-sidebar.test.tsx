@@ -52,7 +52,7 @@ vi.mock("./sections/integrations-section", () => ({
   IntegrationsSection: () => <div data-testid="integrations-section" />,
 }));
 vi.mock("./sections/office-navigation-section", () => ({
-  OfficeNavigationSection: ({ section }: { section?: "work" | "office" }) => (
+  OfficeNavigationSection: ({ section }: { section?: "all" | "work" | "office" }) => (
     <div data-testid={`office-navigation-section-${section ?? "all"}`} />
   ),
 }));

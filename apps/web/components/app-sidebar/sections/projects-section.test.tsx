@@ -57,6 +57,6 @@ describe("ProjectsSection", () => {
       .closest(".group\\/section");
     expect(projectsHeader).toBeTruthy();
 
-    expect(within(projectsHeader as HTMLElement).getByRole("button", { name: "Add project" }));
+    within(projectsHeader as HTMLElement).getByRole("button", { name: "Add project" });
   });
 });

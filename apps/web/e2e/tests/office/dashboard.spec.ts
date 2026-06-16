@@ -56,9 +56,9 @@ test.describe("Dashboard", () => {
     });
   });
 
-  test("settings page renders", async ({ testPage, officeSeed: _ }) => {
+  test("preferences page renders", async ({ testPage, officeSeed: _ }) => {
     await testPage.goto("/office/workspace/settings");
-    await expect(testPage.getByRole("heading", { name: /settings/i })).toBeVisible({
+    await expect(testPage.getByRole("heading", { name: /preferences/i })).toBeVisible({
       timeout: 10_000,
     });
   });
