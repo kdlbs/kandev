@@ -1,12 +1,8 @@
 import { useEffect, useState } from "react";
 import { RoutineDetailView } from "@/app/office/routines/[id]/routine-detail-view";
 import { getRoutine, listRoutineTriggers } from "@/lib/api/domains/office-api";
+import { toRouteErrorState, type LoadState } from "@/lib/routing/client-route-helpers";
 import type { Routine, RoutineTrigger } from "@/lib/state/slices/office/types";
-
-type LoadState<T> =
-  | { status: "loading" }
-  | { status: "ready"; data: T }
-  | { status: "error"; message: string };
 
 type RoutineDetailData = {
   routine: Routine;
@@ -38,7 +34,7 @@ export function RoutineDetailRoute({ routineId }: { routineId: string }) {
         if (!cancelled) setState({ status: "ready", data });
       })
       .catch((error: unknown) => {
-        if (!cancelled) setState(toErrorState(error));
+        if (!cancelled) setState(toRouteErrorState(error, "Failed to load routine"));
       });
 
     return () => {
@@ -61,11 +57,4 @@ function RoutineRoutePlaceholder<T>({ state }: { state: LoadState<T> }) {
   }
 
   return <div className="py-8 text-sm text-muted-foreground">Loading routine...</div>;
-}
-
-function toErrorState(error: unknown): LoadState<never> {
-  return {
-    status: "error",
-    message: error instanceof Error ? error.message : "Failed to load routine",
-  };
 }

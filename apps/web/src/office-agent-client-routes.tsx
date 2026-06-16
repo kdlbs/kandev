@@ -10,13 +10,9 @@ import {
   type AgentSummaryResponse,
   type RunDetail,
 } from "@/lib/api/domains/office-extended-api";
+import { toRouteErrorState, type LoadState } from "@/lib/routing/client-route-helpers";
 
 const DASHBOARD_DAYS = 14;
-
-type LoadState<T> =
-  | { status: "loading" }
-  | { status: "ready"; data: T }
-  | { status: "error"; message: string };
 
 export function AgentDashboardRoute({ agentId }: { agentId: string }) {
   const [state, setState] = useState<LoadState<AgentSummaryResponse>>({ status: "loading" });
@@ -30,7 +26,7 @@ export function AgentDashboardRoute({ agentId }: { agentId: string }) {
         if (!cancelled) setState({ status: "ready", data });
       })
       .catch((error: unknown) => {
-        if (!cancelled) setState(toErrorState(error));
+        if (!cancelled) setState(toRouteErrorState(error));
       });
 
     return () => {
@@ -57,7 +53,7 @@ export function AgentRunsRoute({ agentId }: { agentId: string }) {
         if (!cancelled) setState({ status: "ready", data });
       })
       .catch((error: unknown) => {
-        if (!cancelled) setState(toErrorState(error));
+        if (!cancelled) setState(toRouteErrorState(error));
       });
 
     return () => {
@@ -94,7 +90,7 @@ export function AgentRunDetailRoute({ agentId, runId }: { agentId: string; runId
         if (!cancelled) setState({ status: "ready", data });
       })
       .catch((error: unknown) => {
-        if (!cancelled) setState(toErrorState(error));
+        if (!cancelled) setState(toRouteErrorState(error));
       });
 
     return () => {
@@ -117,11 +113,4 @@ function AgentRoutePlaceholder<T>({ state, label }: { state: LoadState<T>; label
   }
 
   return <div className="py-8 text-sm text-muted-foreground">Loading {label}...</div>;
-}
-
-function toErrorState(error: unknown): LoadState<never> {
-  return {
-    status: "error",
-    message: error instanceof Error ? error.message : "Failed to load route",
-  };
 }
