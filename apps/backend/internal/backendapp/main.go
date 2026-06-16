@@ -724,10 +724,15 @@ func startGatewayAndServe(
 	if port == 0 {
 		port = ports.Backend
 	}
+	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	if err != nil {
+		log.Error("Server listen error", zap.Error(err))
+		return false
+	}
 	go func() {
 		log.Info("WebSocket server listening", zap.Int("port", port))
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Error("Server listen error", zap.Error(err))
+		if err := server.Serve(ln); err != nil && err != http.ErrServerClosed {
+			log.Error("Server serve error", zap.Error(err))
 		}
 	}()
 
@@ -738,11 +743,10 @@ func startGatewayAndServe(
 	)
 
 	// Flip the readiness flag once the HTTP listener is actually
-	// accepting connections, not just "spawned". ListenAndServe runs
-	// in a goroutine and may not have bound the socket yet by the time
-	// we reach this line. Probe the local listener with a short retry
-	// loop — once a single connect succeeds, the kernel queue is up
-	// and any subsequent /health call will land on a wired route.
+	// accepting connections, not just "spawned". Serve runs in a goroutine
+	// after we bind the socket above; probe the local listener with a short
+	// retry loop — once a single connect succeeds, the kernel queue is up and
+	// any subsequent /health call will land on a wired route.
 	go waitListenerThenMarkReady(port, log)
 
 	awaitShutdown(server, orchestratorSvc, lifecycleMgr, runCleanups, log)
