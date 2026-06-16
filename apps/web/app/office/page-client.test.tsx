@@ -60,6 +60,7 @@ describe("OfficePageClient boot hydration", () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+    state.workspaces.activeId = "workspace-1";
     state.office.dashboard = null;
   });
 
@@ -84,6 +85,22 @@ describe("OfficePageClient boot hydration", () => {
     });
     await waitFor(() => {
       expect(setDashboardMock).toHaveBeenCalledWith(data);
+    });
+  });
+
+  it("refetches dashboard data when the active workspace changes", async () => {
+    state.office.dashboard = dashboard();
+    getDashboardMock.mockResolvedValue({ ...dashboard(), agent_count: 2 });
+
+    const { rerender } = render(<OfficePageClient initialDashboard={null} />);
+
+    expect(getDashboardMock).not.toHaveBeenCalled();
+
+    state.workspaces.activeId = "workspace-2";
+    rerender(<OfficePageClient initialDashboard={null} />);
+
+    await waitFor(() => {
+      expect(getDashboardMock).toHaveBeenCalledWith("workspace-2");
     });
   });
 });
