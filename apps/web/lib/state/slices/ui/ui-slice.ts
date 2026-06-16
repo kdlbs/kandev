@@ -556,7 +556,7 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
   ...buildSidebarTaskPrefsActions(set),
   ...buildCollapsedSubtaskActions(set, get),
   ...buildSystemHealthActions(set),
-  ...buildDismissedAgentErrors(set, get),
+  ...buildDismissedAgentErrors(set),
   setRightPanelActiveTab: (sessionId, tab) =>
     set((draft) => {
       draft.rightPanel.activeTabBySessionId[sessionId] = tab;

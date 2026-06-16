@@ -175,3 +175,55 @@ describe("agentErrorMessageForTask (timestamp precision)", () => {
     ).toBeNull();
   });
 });
+
+// Coverage for the fallback `sessionsByTaskId` path (no primarySessionId).
+// shouldHideError is shared with the primary path, but exercising it through
+// the fallback loop guards against any regression in the per-branch wiring.
+describe("agentErrorMessageForTask (fallback session path)", () => {
+  const FALLBACK_TASK = { id: "task-1" };
+  const FALLBACK_ERROR = "fallback failure";
+
+  function fallbackSession() {
+    return session({
+      id: sessionId("fallback"),
+      metadata: errorMetadata(FALLBACK_ERROR),
+    });
+  }
+
+  it("hides the error when the matching stamp is dismissed", () => {
+    const fallback = fallbackSession();
+    const stamp = lastAgentErrorStamp({
+      message: FALLBACK_ERROR,
+      occurredAt: ERROR_OCCURRED_AT,
+    });
+    expect(
+      agentErrorMessageForTask(
+        FALLBACK_TASK,
+        { fallback },
+        { "task-1": [fallback] },
+        { dismissedAgentErrors: { fallback: stamp } },
+      ),
+    ).toBeNull();
+  });
+
+  it("hides the error once a later agent message arrives", () => {
+    const fallback = fallbackSession();
+    expect(
+      agentErrorMessageForTask(
+        FALLBACK_TASK,
+        { fallback },
+        { "task-1": [fallback] },
+        {
+          messagesBySession: {
+            fallback: [
+              agentMessage({
+                session_id: sessionId("fallback"),
+                created_at: "2026-06-14T11:00:00Z",
+              }),
+            ],
+          },
+        },
+      ),
+    ).toBeNull();
+  });
+});
