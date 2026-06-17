@@ -3,6 +3,12 @@ import { useEffect, useState } from "react";
 import type { TaskSessionState } from "@/lib/types/http";
 
 const UNKNOWN_SESSION_RESUBSCRIBE_MS = 1000;
+const MAX_UNKNOWN_SESSION_RESUBSCRIBE_ATTEMPTS = 15;
+
+type RetryState = {
+  sessionId: string | null;
+  count: number;
+};
 
 export function shouldRetryUnknownSessionSubscription(params: {
   taskSessionId: string | null;
@@ -21,17 +27,23 @@ export function useUnknownSessionSubscriptionRetry(params: {
   taskSessionState: TaskSessionState | null;
   connectionStatus: string;
 }) {
-  const [retryToken, setRetryToken] = useState(0);
+  const [retryState, setRetryState] = useState<RetryState>({ sessionId: null, count: 0 });
   const shouldRetry = shouldRetryUnknownSessionSubscription(params);
+  const sessionId = params.taskSessionId;
 
   useEffect(() => {
     if (!shouldRetry) return;
-    const id = window.setInterval(
-      () => setRetryToken((value) => value + 1),
-      UNKNOWN_SESSION_RESUBSCRIBE_MS,
-    );
+    let attempts = 0;
+    const id = window.setInterval(() => {
+      attempts += 1;
+      setRetryState({ sessionId, count: attempts });
+      if (attempts >= MAX_UNKNOWN_SESSION_RESUBSCRIBE_ATTEMPTS) {
+        window.clearInterval(id);
+      }
+    }, UNKNOWN_SESSION_RESUBSCRIBE_MS);
     return () => window.clearInterval(id);
-  }, [shouldRetry]);
+  }, [sessionId, shouldRetry]);
 
-  return shouldRetry ? retryToken : 0;
+  if (!shouldRetry || retryState.sessionId !== sessionId) return 0;
+  return retryState.count;
 }
