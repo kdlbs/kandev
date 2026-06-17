@@ -26,6 +26,10 @@ export function applySummarizeSessionResult({
 }) {
   if (result.summary === null) {
     setContextValue("blank");
+    if (promptRef.current) {
+      promptRef.current.value = "";
+    }
+    setHasPrompt(false);
     toast({
       title: "Summarize failed",
       description:

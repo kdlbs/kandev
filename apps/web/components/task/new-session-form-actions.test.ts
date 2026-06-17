@@ -109,7 +109,7 @@ describe("useSessionContextChange", () => {
   });
 
   it("summarizes sessions into prompt text", async () => {
-    const promptRef = { current: { value: "" } as unknown as HTMLTextAreaElement };
+    const promptRef = { current: { value: "stale prompt" } as unknown as HTMLTextAreaElement };
     const summarize = vi.fn().mockResolvedValue({ summary: "summary text" });
     const setContextValue = vi.fn();
     const setHasPrompt = vi.fn();
@@ -160,7 +160,8 @@ describe("useSessionContextChange", () => {
       description: "connection refused",
       variant: "error",
     });
-    expect(setHasPrompt).not.toHaveBeenCalled();
+    expect(promptRef.current.value).toBe("");
+    expect(setHasPrompt).toHaveBeenCalledWith(false);
   });
 
   it("does not toast when summarize succeeds after prompt ref unmounts", async () => {

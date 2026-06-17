@@ -93,15 +93,17 @@ function useFileResults(
   sessionId: string | null | undefined,
   suggestion: PassthroughSuggestionState,
 ) {
-  const [fileResults, setFileResults] = useState<string[]>([]);
+  const activeKey =
+    suggestion?.kind === "file" && sessionId ? `${sessionId}\n${suggestion.query}` : null;
+  const [fileResults, setFileResults] = useState<{ key: string; files: string[] } | null>(null);
   useEffect(() => {
-    if (suggestion?.kind !== "file" || !sessionId) return;
+    if (suggestion?.kind !== "file" || !sessionId || !activeKey) return;
     let cancelled = false;
     const timer = window.setTimeout(
       async () => {
         const client = getWebSocketClient();
         if (!client) {
-          if (!cancelled) setFileResults([]);
+          if (!cancelled) setFileResults({ key: activeKey, files: [] });
           return;
         }
         try {
@@ -111,9 +113,9 @@ function useFileResults(
             suggestion.query,
             FILE_SEARCH_LIMIT,
           );
-          if (!cancelled) setFileResults(response.files ?? []);
+          if (!cancelled) setFileResults({ key: activeKey, files: response.files ?? [] });
         } catch {
-          if (!cancelled) setFileResults([]);
+          if (!cancelled) setFileResults({ key: activeKey, files: [] });
         }
       },
       suggestion.query ? 200 : 0,
@@ -122,8 +124,15 @@ function useFileResults(
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [sessionId, suggestion]);
-  return suggestion?.kind === "file" && sessionId ? fileResults : [];
+  }, [activeKey, sessionId, suggestion]);
+  return activeKey && fileResults?.key === activeKey ? fileResults.files : [];
+}
+
+function focusTextareaAt(textarea: HTMLTextAreaElement | null | undefined, caret: number) {
+  requestAnimationFrame(() => {
+    textarea?.focus();
+    textarea?.setSelectionRange(caret, caret);
+  });
 }
 
 function useSuggestionItems(
@@ -138,6 +147,111 @@ function useSuggestionItems(
     [commands, commandQuery],
   );
   return suggestion?.kind === "command" ? filteredCommands : fileResults;
+}
+
+function useSuggestionSelection(suggestion: PassthroughSuggestionState, suggestionCount: number) {
+  const key = `${suggestion?.kind ?? ""}\n${suggestion?.query ?? ""}\n${suggestionCount}`;
+  const [selection, setSelection] = useState({ key: "", index: 0 });
+  const maxIndex = Math.max(suggestionCount - 1, 0);
+  const selectedIndex = selection.key === key ? Math.min(selection.index, maxIndex) : 0;
+  const setSelectedIndex = useCallback(
+    (next: number | ((i: number) => number)) => {
+      setSelection((current) => {
+        const currentIndex = current.key === key ? Math.min(current.index, maxIndex) : 0;
+        const nextIndex = typeof next === "function" ? next(currentIndex) : next;
+        return { key, index: Math.min(Math.max(nextIndex, 0), maxIndex) };
+      });
+    },
+    [key, maxIndex],
+  );
+  return { selectedIndex, setSelectedIndex };
+}
+
+function usePassthroughSubmit({
+  canSubmit,
+  onSubmit,
+  trimmed,
+  setValue,
+  setSuggestion,
+  setIsSending,
+}: {
+  canSubmit: boolean;
+  onSubmit: (content: string) => Promise<void>;
+  trimmed: string;
+  setValue: React.Dispatch<React.SetStateAction<string>>;
+  setSuggestion: React.Dispatch<React.SetStateAction<PassthroughSuggestionState>>;
+  setIsSending: React.Dispatch<React.SetStateAction<boolean>>;
+}) {
+  return useCallback(async () => {
+    if (!canSubmit) return;
+    setIsSending(true);
+    try {
+      await onSubmit(trimmed);
+      setValue("");
+      setSuggestion(null);
+    } catch {
+      // Preserve typed text so the user can retry after a transient WS/API failure.
+    } finally {
+      setIsSending(false);
+    }
+  }, [canSubmit, onSubmit, setIsSending, setSuggestion, setValue, trimmed]);
+}
+
+function useInsertPassthroughSelection({
+  suggestion,
+  textareaRef,
+  value,
+  setValue,
+  setSuggestion,
+}: {
+  suggestion: PassthroughSuggestionState;
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+  value: string;
+  setValue: React.Dispatch<React.SetStateAction<string>>;
+  setSuggestion: React.Dispatch<React.SetStateAction<PassthroughSuggestionState>>;
+}) {
+  return useCallback(
+    (item: SuggestionItem) => {
+      if (!suggestion) return;
+      const textarea = textareaRef.current;
+      const cursor = textarea?.selectionStart ?? value.length;
+      const label = suggestionLabel(item);
+      const insertion = suggestion.kind === "command" ? `${label} ` : fileReferenceToken(label);
+      const next = replacePassthroughRange(value, suggestion.triggerStart, cursor, insertion);
+      setValue(next.value);
+      setSuggestion(null);
+      focusTextareaAt(textarea, next.caret);
+    },
+    [setSuggestion, setValue, suggestion, textareaRef, value],
+  );
+}
+
+function usePassthroughDrop({
+  textareaRef,
+  value,
+  setValue,
+  setSuggestion,
+}: {
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+  value: string;
+  setValue: React.Dispatch<React.SetStateAction<string>>;
+  setSuggestion: React.Dispatch<React.SetStateAction<PassthroughSuggestionState>>;
+}) {
+  return useCallback(
+    (e: React.DragEvent) => {
+      const refs = droppedReferenceTokens(e);
+      if (refs.length === 0) return;
+      e.preventDefault();
+      const textarea = textareaRef.current;
+      const cursor = textarea?.selectionStart ?? value.length;
+      const insertion = refs.map(fileReferenceToken).join("\n");
+      const next = replacePassthroughRange(value, cursor, cursor, insertion);
+      setValue(next.value);
+      setSuggestion(null);
+      focusTextareaAt(textarea, next.caret);
+    },
+    [setSuggestion, setValue, textareaRef, value],
+  );
 }
 
 export function usePassthroughComposerController({
@@ -156,19 +270,19 @@ export function usePassthroughComposerController({
   const [value, setValue] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [suggestion, setSuggestion] = useState<PassthroughSuggestionState>(null);
-  const [selectedIndex, setSelectedIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileResults = useFileResults(sessionId, suggestion);
   const suggestionItems = useSuggestionItems(availableCommands, suggestion, fileResults);
+  const { selectedIndex, setSelectedIndex } = useSuggestionSelection(
+    suggestion,
+    suggestionItems.length,
+  );
   const trimmed = value.trim();
   const canSubmit = trimmed.length > 0 && !isSending;
   const showSuggestions = !!suggestion && suggestionItems.length > 0;
 
   useComposerSizing(textareaRef, value, autoFocus);
   useComposerFocusShortcut(focusShortcut, textareaRef);
-  useEffect(() => {
-    setSelectedIndex(0);
-  }, [suggestion?.kind, suggestion?.query, suggestionItems.length]);
 
   const updateValue = useCallback((next: string) => {
     setValue(next);
@@ -177,56 +291,22 @@ export function usePassthroughComposerController({
     setSuggestion(detectPassthroughSuggestion(next, cursor));
   }, []);
 
-  const submit = useCallback(async () => {
-    if (!canSubmit) return;
-    setIsSending(true);
-    try {
-      await onSubmit(trimmed);
-      setValue("");
-      setSuggestion(null);
-    } catch {
-      // Preserve typed text so the user can retry after a transient WS/API failure.
-    } finally {
-      setIsSending(false);
-    }
-  }, [canSubmit, onSubmit, trimmed]);
-
-  const insertSelection = useCallback(
-    (item: SuggestionItem) => {
-      if (!suggestion) return;
-      const textarea = textareaRef.current;
-      const cursor = textarea?.selectionStart ?? value.length;
-      const label = suggestionLabel(item);
-      const insertion = suggestion.kind === "command" ? `${label} ` : fileReferenceToken(label);
-      const next = replacePassthroughRange(value, suggestion.triggerStart, cursor, insertion);
-      setValue(next.value);
-      setSuggestion(null);
-      requestAnimationFrame(() => {
-        textarea?.focus();
-        textarea?.setSelectionRange(next.caret, next.caret);
-      });
-    },
-    [suggestion, value],
-  );
-
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      const refs = droppedReferenceTokens(e);
-      if (refs.length === 0) return;
-      e.preventDefault();
-      const textarea = textareaRef.current;
-      const cursor = textarea?.selectionStart ?? value.length;
-      const insertion = refs.map(fileReferenceToken).join("\n");
-      const next = replacePassthroughRange(value, cursor, cursor, insertion);
-      setValue(next.value);
-      setSuggestion(null);
-      requestAnimationFrame(() => {
-        textarea?.focus();
-        textarea?.setSelectionRange(next.caret, next.caret);
-      });
-    },
-    [value],
-  );
+  const submit = usePassthroughSubmit({
+    canSubmit,
+    onSubmit,
+    trimmed,
+    setValue,
+    setSuggestion,
+    setIsSending,
+  });
+  const insertSelection = useInsertPassthroughSelection({
+    suggestion,
+    textareaRef,
+    value,
+    setValue,
+    setSuggestion,
+  });
+  const handleDrop = usePassthroughDrop({ textareaRef, value, setValue, setSuggestion });
 
   return {
     value,

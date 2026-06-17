@@ -1,12 +1,26 @@
 import type { DragEvent, KeyboardEvent } from "react";
 import { act, renderHook } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { searchWorkspaceFiles } from "@/lib/ws/workspace-files";
 import {
   droppedReferenceTokens,
   handleSuggestionKey,
   suggestionLabel,
   usePassthroughComposerController,
 } from "./passthrough-composer-state";
+
+vi.mock("@/lib/ws/connection", () => ({
+  getWebSocketClient: () => ({}),
+}));
+
+vi.mock("@/lib/ws/workspace-files", () => ({
+  searchWorkspaceFiles: vi.fn(),
+}));
+
+afterEach(() => {
+  vi.clearAllMocks();
+  vi.useRealTimers();
+});
 
 function applySelectedIndex(value: number | ((i: number) => number), current: number): number {
   return typeof value === "function" ? value(current) : value;
@@ -181,5 +195,34 @@ describe("usePassthroughComposerController", () => {
     expect(result.current.value).toBe("");
     expect(result.current.suggestion).toBeNull();
     expect(result.current.showSuggestions).toBe(false);
+  });
+
+  it("clears stale file suggestions while a new search is pending", async () => {
+    vi.useFakeTimers();
+    vi.mocked(searchWorkspaceFiles)
+      .mockResolvedValueOnce({ files: ["src/old.ts"] })
+      .mockResolvedValueOnce({ files: ["src/new.ts"] });
+    const { result } = renderHook(() =>
+      usePassthroughComposerController({
+        onSubmit: vi.fn(),
+        autoFocus: false,
+        sessionId: "session-1",
+      }),
+    );
+
+    act(() => result.current.updateValue("@old"));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+    expect(result.current.suggestionItems).toEqual(["src/old.ts"]);
+
+    act(() => result.current.updateValue("@new"));
+
+    expect(result.current.suggestionItems).toEqual([]);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+    expect(result.current.suggestionItems).toEqual(["src/new.ts"]);
   });
 });

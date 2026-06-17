@@ -40,8 +40,8 @@ describe("applySummarizeSessionResult", () => {
     expect(toast).not.toHaveBeenCalled();
   });
 
-  it("resets context and shows an error toast when summary is null", () => {
-    const promptRef = { current: { value: "" } as HTMLTextAreaElement };
+  it("resets context and prompt state when summary is null", () => {
+    const promptRef = { current: { value: "stale prompt" } as HTMLTextAreaElement };
     const setContextValue = vi.fn();
     const setHasPrompt = vi.fn();
     const toast = vi.fn();
@@ -55,7 +55,8 @@ describe("applySummarizeSessionResult", () => {
     });
 
     expect(setContextValue).toHaveBeenCalledWith("blank");
-    expect(setHasPrompt).not.toHaveBeenCalled();
+    expect(promptRef.current.value).toBe("");
+    expect(setHasPrompt).toHaveBeenCalledWith(false);
     expect(toast).toHaveBeenCalledWith({
       title: "Summarize failed",
       description: "connection refused",
