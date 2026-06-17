@@ -68,10 +68,9 @@ When verifying the web package directly, prefer:
 ```
 
 That package script runs `pretypecheck` and regenerates
-`generated/changelog.json` / `generated/release-notes.json`. Avoid relying on
-`pnpm --filter @kandev/web typecheck` under RTK while troubleshooting; RTK can
-mis-handle the filter and run TypeScript in the wrong context, producing
-unrelated workspace-wide alias errors.
+`generated/changelog.json` / `generated/release-notes.json`. If troubleshooting
+the web package directly, prefer the package-local script over workspace-filter
+forms so TypeScript runs in the intended package context.
 
 If the aggregate `make lint` wrapper stalls or does not provide useful progress, run the backend and frontend lint checks directly instead and record the substitution in your result:
 
