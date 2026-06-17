@@ -12,8 +12,15 @@ type WorkspacesGroupProps = {
   onToggle?: () => void;
 };
 
+function isWorkspaceRoute(pathname: string, workspaceId: string): boolean {
+  return pathname.startsWith(`${ROOT_HREF}/${workspaceId}`);
+}
+
 export function WorkspacesGroup({ pathname, expanded, onToggle }: WorkspacesGroupProps) {
   const workspaces = useAppStore((s) => s.workspaces.items);
+  const hasActiveWorkspaceRoute = workspaces.some((workspace) =>
+    isWorkspaceRoute(pathname, workspace.id),
+  );
 
   return (
     <SettingsGroup
@@ -34,7 +41,7 @@ export function WorkspacesGroup({ pathname, expanded, onToggle }: WorkspacesGrou
             label={workspace.name}
             href={workspacePath}
             isActive={pathname === workspacePath}
-            defaultExpanded
+            defaultExpanded={!hasActiveWorkspaceRoute || isWorkspaceRoute(pathname, workspace.id)}
             depth={1}
           >
             <SettingsLeaf
