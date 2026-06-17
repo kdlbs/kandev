@@ -16,7 +16,7 @@ import { DiffViewBlock } from "./diff-view-block";
 import { ExpandableRow } from "./expandable-row";
 import { transformFileMutation, type FileMutation } from "@/lib/diff";
 import { useExpandState } from "./use-expand-state";
-import { setPendingCursorPosition } from "@/hooks/use-file-editors";
+import { setPendingCursorPosition, scrollEditorIfMounted } from "@/hooks/use-file-editors";
 
 type ModifyFilePayload = {
   file_path?: string;
@@ -187,14 +187,20 @@ export const ToolEditMessage = memo(function ToolEditMessage({
     }
   };
 
-  // Navigate the editor to the first changed line, reusing the pending-cursor
-  // mechanism the LSP opener uses; consumed on editor mount.
+  // Navigate the editor to the first changed line. For a newly opened file the
+  // pending position is consumed on editor mount; for an already-open file no
+  // mount happens, so scroll the live editor directly.
   const handleOpenFile = useCallback(
     (path: string) => {
-      if (startLine && startLine > 0) setPendingCursorPosition(path, startLine, 1);
+      if (startLine && startLine > 0) {
+        setPendingCursorPosition(path, startLine, 1);
+        onOpenFile?.(path);
+        scrollEditorIfMounted(path, worktreePath ?? null, startLine, 1);
+        return;
+      }
       onOpenFile?.(path);
     },
-    [onOpenFile, startLine],
+    [onOpenFile, startLine, worktreePath],
   );
 
   return (

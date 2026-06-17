@@ -80,8 +80,12 @@ function stripHashAndQuery(href: string): string {
   return href.split(/[?#]/, 1)[0] ?? "";
 }
 
+// Strip a trailing source-location / omp read selector so a file link resolves
+// to the bare path: ":42", ":42:5", and omp ranges like ":16-20", ":50+150",
+// ":5-16,960-973", ":2-4:raw", ":raw", ":conflicts".
 function stripSourceLocationSuffix(path: string): string {
-  return path.replace(/:\d+(?::\d+)?$/, "");
+  const part = String.raw`\d+(?:[-+]\d+)?(?:,\d+(?:[-+]\d+)?)*|raw|conflicts`;
+  return path.replace(new RegExp(`:(?:${part})(?::(?:${part}))*$`), "");
 }
 
 function decodeHrefPath(href: string): string | null {

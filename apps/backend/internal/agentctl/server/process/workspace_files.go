@@ -280,17 +280,37 @@ func resolveNonExistentPath(path string) (string, error) {
 // If the file is not valid UTF-8, it is base64-encoded and isBinary is true.
 // If the file is a symlink, resolvedPath contains the target path relative to the workspace root.
 func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, bool, string, error) {
-	// Tolerate an omp read-selector left on the path (e.g. "foo.go:43-94" or a
-	// multi-range "foo.go:16-20,32-40"). Such paths reach here from file links
-	// in already-persisted messages (and any normalization gap); without
-	// stripping, the selector makes both the workspace stat and the
-	// external-absolute-path fallback fail. The line range is irrelevant to
-	// serving content (the viewer scrolls separately).
-	reqPath, _, _ = readselector.Split(reqPath)
-	// omp also issues reads with a "~"-prefixed home path; expand it so the
-	// external-absolute-path fallback can resolve it (a literal "~/…" is
-	// neither workspace-relative nor absolute, so it would otherwise ENOENT).
-	reqPath = expandHomePath(reqPath)
+	// Try the path exactly as requested first, so a real workspace file whose
+	// name contains a colon (e.g. "notes.txt:2-3") or a literal "~" path
+	// segment still opens. Only if the literal open fails do we treat a
+	// trailing piece as an omp read selector (e.g. "foo.go:43-94", multi-range)
+	// and/or a "~"-home shorthand, strip/expand it, and retry — so agent links
+	// that embed a selector open without breaking valid filenames.
+	content, size, isBinary, resolved, err := wt.readResolvedPath(reqPath)
+	if err == nil {
+		return content, size, isBinary, resolved, nil
+	}
+	if alt := expandHomePath(stripReadSelector(reqPath)); alt != reqPath {
+		if c, s, b, r, altErr := wt.readResolvedPath(alt); altErr == nil {
+			return c, s, b, r, nil
+		}
+	}
+	// Neither the literal path nor the stripped/expanded fallback opened;
+	// surface the original (literal-path) error, which is the most meaningful.
+	return content, size, isBinary, resolved, err
+}
+
+// stripReadSelector removes a trailing omp read selector from reqPath (the line
+// range itself is irrelevant to serving content); paths without a selector are
+// returned unchanged.
+func stripReadSelector(reqPath string) string {
+	clean, _, _ := readselector.Split(reqPath)
+	return clean
+}
+
+// readResolvedPath resolves reqPath within the workspace, falling back to the
+// read-only external-absolute-path path (ADR 0016), and returns its content.
+func (wt *WorkspaceTracker) readResolvedPath(reqPath string) (string, int64, bool, string, error) {
 	safePath, err := wt.resolveSafePath(reqPath)
 	if err != nil {
 		if errors.Is(err, errPathTraversal) {

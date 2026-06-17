@@ -18,6 +18,7 @@ import type { FileContentResponse } from "@/lib/types/backend";
 import { useSaveDeleteActions } from "./use-file-save-delete";
 import { PREVIEW_FILE_EDITOR_ID } from "@/lib/state/dockview-panel-actions";
 import { useOpenFileWorkspaceSync } from "./file-editors-sync";
+import { getMonacoInstance } from "@/components/editors/monaco/monaco-init";
 
 // Module-level guard: ensures restoration only runs once across all hook instances
 let _restoredSessionId: string | null = null;
@@ -37,6 +38,42 @@ export function consumePendingCursorPosition(
   const pos = _pendingCursorPositions.get(path);
   if (pos) _pendingCursorPositions.delete(path);
   return pos;
+}
+
+/**
+ * Scroll an already-mounted Monaco editor for `path` to the given position.
+ * Returns true if an editor was found and scrolled. The editor's model URI is
+ * built as `${worktreePath}/${path}` (see use-monaco-editor-lsp), so the same
+ * `path` used for setPendingCursorPosition resolves the right editor here.
+ *
+ * Used for the already-open case: when a file link is clicked but its tab is
+ * already open, no editor mounts, so handleEditorDidMount never consumes the
+ * pending position — this scrolls the live editor instead (and consumes the
+ * pending entry so a later remount doesn't double-apply it).
+ */
+export function scrollEditorIfMounted(
+  path: string,
+  worktreePath: string | null,
+  line: number,
+  column: number,
+): boolean {
+  const monaco = getMonacoInstance();
+  if (!monaco) return false;
+
+  const monacoPath = worktreePath ? `${worktreePath}/${path}` : path;
+  for (const editor of monaco.editor.getEditors()) {
+    const model = editor.getModel();
+    if (!model) continue;
+    const modelPath = model.uri.path;
+    if (modelPath === `/${monacoPath}` || modelPath === monacoPath) {
+      consumePendingCursorPosition(path);
+      editor.setPosition({ lineNumber: line, column });
+      editor.revealLineInCenter(line);
+      editor.focus();
+      return true;
+    }
+  }
+  return false;
 }
 
 /** Read openFiles from the store without subscribing to changes. */

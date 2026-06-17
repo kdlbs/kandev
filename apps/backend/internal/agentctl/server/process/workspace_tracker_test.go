@@ -617,6 +617,58 @@ func TestGetFileContent_ExpandsTildeWithMultiRange(t *testing.T) {
 	}
 }
 
+// TestGetFileContent_PrefersLiteralColonPath verifies a real workspace file
+// whose name literally contains a colon (e.g. "notes.txt:2-3") opens as-is and
+// is NOT mistaken for a "notes.txt" + read selector.
+func TestGetFileContent_PrefersLiteralColonPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("colon is not a legal filename character on Windows")
+	}
+	workDir, wt := setupTestDir(t)
+	if err := os.WriteFile(filepath.Join(workDir, "notes.txt"), []byte("plain\n"), 0o644); err != nil {
+		t.Fatalf("write notes.txt: %v", err)
+	}
+	literal := "literal-colon-file\n"
+	if err := os.WriteFile(filepath.Join(workDir, "notes.txt:2-3"), []byte(literal), 0o644); err != nil {
+		t.Fatalf("write literal: %v", err)
+	}
+	got, _, _, _, err := wt.GetFileContent("notes.txt:2-3")
+	if err != nil {
+		t.Fatalf("GetFileContent error: %v", err)
+	}
+	if got != literal {
+		t.Fatalf("expected literal colon file %q, got %q (selector wrongly stripped)", literal, got)
+	}
+}
+
+// TestGetFileContent_PrefersLiteralTildePath verifies a workspace file under a
+// literal "~" directory opens as-is and is NOT expanded to the user's home.
+func TestGetFileContent_PrefersLiteralTildePath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	// Decoy at the home-expanded location to prove expansion is not used.
+	if err := os.WriteFile(filepath.Join(home, "config.txt"), []byte("home-decoy\n"), 0o644); err != nil {
+		t.Fatalf("write decoy: %v", err)
+	}
+	workDir, wt := setupTestDir(t)
+	tildeDir := filepath.Join(workDir, "~")
+	if err := os.MkdirAll(tildeDir, 0o755); err != nil {
+		t.Fatalf("mkdir ~: %v", err)
+	}
+	want := "workspace-tilde\n"
+	if err := os.WriteFile(filepath.Join(tildeDir, "config.txt"), []byte(want), 0o644); err != nil {
+		t.Fatalf("write tilde file: %v", err)
+	}
+	got, _, _, _, err := wt.GetFileContent("~/config.txt")
+	if err != nil {
+		t.Fatalf("GetFileContent error: %v", err)
+	}
+	if got != want {
+		t.Fatalf("expected workspace tilde file %q, got %q (path wrongly home-expanded)", want, got)
+	}
+}
+
 // setupTestDir creates a temp directory with a WorkspaceTracker (no git required).
 func setupTestDir(t *testing.T) (string, *WorkspaceTracker) {
 	t.Helper()

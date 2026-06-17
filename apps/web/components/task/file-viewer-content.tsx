@@ -1,10 +1,12 @@
 "use client";
 
+import { useCallback, useEffect, useRef } from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import { vscodeDark } from "@uiw/codemirror-theme-vscode";
 import { EditorView } from "@codemirror/view";
 import type { Extension } from "@codemirror/state";
 import { getCodeMirrorExtensionFromPath } from "@/lib/languages";
+import { consumePendingCursorPosition } from "@/hooks/use-file-editors";
 import { cn } from "@/lib/utils";
 
 type FileViewerContentProps = {
@@ -20,6 +22,43 @@ export function FileViewerContent({ path, content, className }: FileViewerConten
     extensions.push(langExt);
   }
 
+  const viewRef = useRef<EditorView | null>(null);
+
+  // Consume a pending cursor position (set by chat read/edit file links before
+  // they open the file) and scroll CodeMirror so the target 1-based line is
+  // centered. No pending entry → no scroll, so normal file browsing stays at
+  // the top. Desktop's Monaco consumes the same entry; on mobile there is no
+  // Monaco, so this CodeMirror viewer must consume it instead.
+  const scrollToPendingLine = useCallback((view: EditorView, filePath: string) => {
+    const pending = consumePendingCursorPosition(filePath);
+    if (!pending) return;
+    const totalLines = view.state.doc.lines;
+    const clampedLine = Math.min(Math.max(pending.line, 1), totalLines);
+    const pos = view.state.doc.line(clampedLine).from;
+    view.dispatch({
+      selection: { anchor: pos },
+      effects: EditorView.scrollIntoView(pos, { y: "center" }),
+    });
+  }, []);
+
+  const handleCreateEditor = useCallback(
+    (view: EditorView) => {
+      viewRef.current = view;
+      scrollToPendingLine(view, path);
+    },
+    [path, scrollToPendingLine],
+  );
+
+  // The same FileViewerContent instance is reused when switching files (the
+  // path prop changes without a remount), and a pending entry may be set after
+  // the editor already mounted. Re-consume + scroll whenever path changes and
+  // the EditorView exists, so the second open of a different file still jumps.
+  useEffect(() => {
+    if (viewRef.current) {
+      scrollToPendingLine(viewRef.current, path);
+    }
+  }, [path, scrollToPendingLine]);
+
   return (
     <CodeMirror
       value={content}
@@ -27,6 +66,7 @@ export function FileViewerContent({ path, content, className }: FileViewerConten
       theme={vscodeDark}
       extensions={extensions}
       readOnly
+      onCreateEditor={handleCreateEditor}
       basicSetup={{
         lineNumbers: true,
         foldGutter: true,

@@ -198,6 +198,29 @@ describe("markdownComponents", () => {
   });
 });
 
+describe("markdownComponents omp read selectors", () => {
+  afterEach(() => {
+    cleanup();
+    openFile.mockClear();
+    appState.value.tasks.activeSessionId = "session-1";
+    appState.value.taskSessions.items = {
+      "session-1": { worktree_path: "/root/.kandev/tasks/example/kandev" },
+    };
+  });
+
+  it("opens file links with omp range and multi-range selectors in the editor", () => {
+    render(<Markdown>{"[readme](docs/README.md:16-20)"}</Markdown>);
+    fireEvent.click(screen.getByRole("link", { name: "readme" }));
+    expect(openFile).toHaveBeenCalledWith("docs/README.md");
+  });
+
+  it("opens file links with omp multi-range and mode selectors in the editor", () => {
+    render(<Markdown>{"[readme](docs/README.md:5-16,960-973:raw)"}</Markdown>);
+    fireEvent.click(screen.getByRole("link", { name: "readme" }));
+    expect(openFile).toHaveBeenCalledWith("docs/README.md");
+  });
+});
+
 describe("normalizeMarkdown", () => {
   it("splits a glued 4-backtick close", () => {
     const input = "````go\nfunc f() {\n  ...\n}````\nprose continues here";
