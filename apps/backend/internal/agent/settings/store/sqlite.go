@@ -860,12 +860,15 @@ func (r *sqliteRepository) ListAgentProfiles(ctx context.Context, agentID string
 func (r *sqliteRepository) HasDeletedAgentProfiles(ctx context.Context, agentID string) (bool, error) {
 	var exists int
 	err := r.ro.QueryRowContext(ctx,
-		r.ro.Rebind(`SELECT EXISTS(SELECT 1 FROM agent_profiles WHERE agent_id = ? AND deleted_at IS NOT NULL)`),
+		r.ro.Rebind(`SELECT 1 FROM agent_profiles WHERE agent_id = ? AND deleted_at IS NOT NULL LIMIT 1`),
 		agentID).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}
-	return exists == 1, nil
+	return true, nil
 }
 
 // applyLegacyBackfill returns the profile with CLIFlags populated from the

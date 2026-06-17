@@ -8,6 +8,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/db/dialect"
 )
 
 // Store persists install-wide Kandev settings that are not scoped to a user,
@@ -39,6 +40,10 @@ func (s *Store) initSchema() error {
 }
 
 func (s *Store) migrateLegacySystemSettings() error {
+	if dialect.IsPostgres(s.db.DriverName()) {
+		return nil
+	}
+
 	var exists int
 	if err := s.db.QueryRow(`
 		SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'system_settings'

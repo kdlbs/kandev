@@ -8,6 +8,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/testutil"
 )
 
 func TestStoreSaveAndGet(t *testing.T) {
@@ -59,6 +60,26 @@ func TestStoreMigratesLegacySystemSettings(t *testing.T) {
 	}
 	if !found || string(value) != `{"interval_seconds":5}` {
 		t.Fatalf("migrated value = (%q, %v)", value, found)
+	}
+}
+
+func TestStoreInitializesOnPostgres(t *testing.T) {
+	conn := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	store, err := NewStore(db.NewPool(conn, conn))
+	if err != nil {
+		t.Fatalf("new postgres store: %v", err)
+	}
+
+	ctx := context.Background()
+	if err := store.Save(ctx, "system_metrics", []byte(`{"interval_seconds":5}`)); err != nil {
+		t.Fatalf("save postgres setting: %v", err)
+	}
+	value, found, err := store.Get(ctx, "system_metrics")
+	if err != nil {
+		t.Fatalf("get postgres setting: %v", err)
+	}
+	if !found || string(value) != `{"interval_seconds":5}` {
+		t.Fatalf("postgres value = (%q, %v)", value, found)
 	}
 }
 

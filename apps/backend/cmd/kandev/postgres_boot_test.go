@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"os"
@@ -12,7 +13,9 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/testutil"
 )
 
@@ -62,6 +65,26 @@ func TestPostgresBootInitializesRepositories(t *testing.T) {
 			}
 		}
 	})
+
+	agentRegistry, _, err := registry.Provide(log)
+	if err != nil {
+		t.Fatalf("provide agent registry: %v", err)
+	}
+	services, agentSettingsController, err := provideServices(
+		cfg,
+		log,
+		repos,
+		pool,
+		bus.NewMemoryEventBus(log),
+		agentRegistry,
+		"test-postgres-boot",
+	)
+	if err != nil {
+		t.Fatalf("provide services with postgres: %v", err)
+	}
+	if err := runInitialAgentSetup(context.Background(), services.User, agentSettingsController, log); err != nil {
+		t.Fatalf("run initial agent setup with postgres: %v", err)
+	}
 }
 
 type postgresConnInfo struct {
