@@ -13,7 +13,8 @@ type WorkspacesGroupProps = {
 };
 
 function isWorkspaceRoute(pathname: string, workspaceId: string): boolean {
-  return pathname.startsWith(`${ROOT_HREF}/${workspaceId}`);
+  const workspacePath = `${ROOT_HREF}/${workspaceId}`;
+  return pathname === workspacePath || pathname.startsWith(`${workspacePath}/`);
 }
 
 export function WorkspacesGroup({ pathname, expanded, onToggle }: WorkspacesGroupProps) {

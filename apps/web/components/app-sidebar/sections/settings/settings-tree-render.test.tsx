@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const MAIN_WORKSPACE_ID = "ws-1";
-const ARCHIVE_WORKSPACE_ID = "ws-2";
+const ARCHIVE_WORKSPACE_ID = "ws-10";
 const MAIN_WORKSPACE_NAME = "Main Workspace";
 const ARCHIVE_WORKSPACE_NAME = "Archive Workspace";
 
@@ -69,7 +69,7 @@ describe("SettingsTree rendering", () => {
       { id: ARCHIVE_WORKSPACE_ID, name: ARCHIVE_WORKSPACE_NAME },
     ];
 
-    render(<WorkspacesGroup pathname="/settings/workspace/ws-1/repositories" expanded />);
+    render(<WorkspacesGroup pathname="/settings/workspace/ws-10/repositories" expanded />);
 
     expect(screen.getByRole("link", { name: MAIN_WORKSPACE_NAME }).getAttribute("href")).toBe(
       "/settings/workspace/ws-1",
@@ -79,10 +79,10 @@ describe("SettingsTree rendering", () => {
 
     expect(repositoryLinks).toHaveLength(1);
     expect(workflowLinks).toHaveLength(1);
-    expect(repositoryLinks[0].getAttribute("href")).toBe("/settings/workspace/ws-1/repositories");
-    expect(workflowLinks[0].getAttribute("href")).toBe("/settings/workspace/ws-1/workflows");
+    expect(repositoryLinks[0].getAttribute("href")).toBe("/settings/workspace/ws-10/repositories");
+    expect(workflowLinks[0].getAttribute("href")).toBe("/settings/workspace/ws-10/workflows");
     expect(screen.getByRole("link", { name: ARCHIVE_WORKSPACE_NAME }).getAttribute("href")).toBe(
-      "/settings/workspace/ws-2",
+      "/settings/workspace/ws-10",
     );
   });
 
