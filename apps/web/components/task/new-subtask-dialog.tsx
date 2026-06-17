@@ -29,6 +29,7 @@ import {
   useSubtaskFormState,
 } from "./new-subtask-form-state";
 import { PromptZone, SubtaskFormBody } from "./new-subtask-form-parts";
+import { applySummarizeSessionResult, type SummaryToastFn } from "./session-context-summary";
 import { useSubtaskPromptZone, useSubtaskSubmit } from "./use-subtask-submit";
 
 type NewSubtaskDialogProps = {
@@ -167,7 +168,7 @@ function useContextChangeHandler(opts: {
   promptRef: React.RefObject<HTMLTextAreaElement | null>;
   initialPrompt: string | null;
   summarize: (sessionId: string) => Promise<SummarizeSessionResult>;
-  toast: (opts: { title: string; description?: string; variant?: "error" | "default" }) => void;
+  toast: SummaryToastFn;
 }) {
   const { setContextValue, setHasPrompt, promptRef, initialPrompt, summarize, toast } = opts;
   return useCallback(
@@ -188,19 +189,7 @@ function useContextChangeHandler(opts: {
       }
       if (value.startsWith("summarize:")) {
         const result = await summarize(value.slice("summarize:".length));
-        if (result.summary && promptRef.current) {
-          promptRef.current.value = result.summary;
-          setHasPrompt(true);
-          return;
-        }
-        setContextValue("blank");
-        toast({
-          title: "Summarize failed",
-          description:
-            result.error ??
-            "Could not generate a summary. Check that the summarize utility agent is configured and enabled in settings.",
-          variant: "error",
-        });
+        applySummarizeSessionResult({ result, promptRef, setContextValue, setHasPrompt, toast });
       }
     },
     [setContextValue, setHasPrompt, promptRef, initialPrompt, summarize, toast],

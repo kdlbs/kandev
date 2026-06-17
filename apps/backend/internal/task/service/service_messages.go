@@ -107,7 +107,10 @@ func (s *Service) CreateMessageWithID(ctx context.Context, id string, req *Creat
 		return nil, err
 	}
 
-	message := s.buildMessage(ctx, id, req, session)
+	message, err := s.buildMessage(ctx, id, req, session)
+	if err != nil {
+		return nil, err
+	}
 
 	if err := s.createMessageWithRetry(ctx, message, messageCreateMaxRetries, messageCreateRetryDelay); err != nil {
 		return nil, err
@@ -179,7 +182,7 @@ func (s *Service) getOrStartTurnWithRetry(ctx context.Context, sessionID, messag
 }
 
 // buildMessage constructs a Message model from a CreateMessageRequest and resolved session.
-func (s *Service) buildMessage(ctx context.Context, id string, req *CreateMessageRequest, session *models.TaskSession) *models.Message {
+func (s *Service) buildMessage(ctx context.Context, id string, req *CreateMessageRequest, session *models.TaskSession) (*models.Message, error) {
 	authorType := models.MessageAuthorUser
 	if req.AuthorType == "agent" {
 		authorType = models.MessageAuthorAgent
@@ -197,10 +200,17 @@ func (s *Service) buildMessage(ctx context.Context, id string, req *CreateMessag
 
 	turnID := req.TurnID
 	if turnID == "" {
-		if turn, err := s.getOrStartTurn(ctx, req.TaskSessionID); err != nil {
+		if turn, err := s.getOrStartTurnWithRetry(
+			ctx,
+			req.TaskSessionID,
+			id,
+			messageCreateMaxRetries,
+			messageCreateRetryDelay,
+		); err != nil {
 			s.logger.Warn("failed to get or start turn for streaming message",
 				zap.String("session_id", req.TaskSessionID),
 				zap.Error(err))
+			return nil, fmt.Errorf("failed to get or start turn: %w", err)
 		} else if turn != nil {
 			turnID = turn.ID
 		}
@@ -218,7 +228,7 @@ func (s *Service) buildMessage(ctx context.Context, id string, req *CreateMessag
 		Metadata:      req.Metadata,
 		RequestsInput: req.RequestsInput,
 		CreatedAt:     time.Now().UTC(),
-	}
+	}, nil
 }
 
 // createMessageWithRetry persists a message with retry logic for transient DB errors.

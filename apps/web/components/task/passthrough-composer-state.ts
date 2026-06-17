@@ -29,7 +29,7 @@ const FILE_SEARCH_LIMIT = 12;
 export type AgentCommand = { name: string; description?: string };
 export type SuggestionItem = PassthroughCommand | string;
 
-function droppedReferenceTokens(e: React.DragEvent): string[] {
+export function droppedReferenceTokens(e: React.DragEvent): string[] {
   const text = e.dataTransfer.getData("text/plain") || e.dataTransfer.getData("text/uri-list");
   const textRefs = text
     .split(/\r?\n/)

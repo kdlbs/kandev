@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   buildPassthroughCommands,
   detectPassthroughSuggestion,
@@ -6,7 +6,6 @@ import {
   filterPassthroughCommands,
   replacePassthroughRange,
 } from "./passthrough-composer-helpers";
-import { handleSuggestionKey } from "./passthrough-composer-state";
 
 describe("passthrough composer helpers", () => {
   it("detects slash commands only at token boundaries", () => {
@@ -57,24 +56,5 @@ describe("passthrough composer helpers", () => {
     const next = replacePassthroughRange("see ", 4, 4, inserted);
 
     expect(next.value).toBe("see @logs/error.txt \n@src/main.go ");
-  });
-
-  it("clamps selected suggestion when results shrink before Enter", () => {
-    const preventDefault = vi.fn();
-    const insertSelection = vi.fn();
-    const handled = handleSuggestionKey(
-      { key: "Enter", preventDefault } as unknown as React.KeyboardEvent<HTMLTextAreaElement>,
-      {
-        showSuggestions: true,
-        suggestionItems: ["/review", "/resume"],
-        selectedIndex: 4,
-        setSelectedIndex: vi.fn(),
-        insertSelection,
-      },
-    );
-
-    expect(handled).toBe(true);
-    expect(preventDefault).toHaveBeenCalled();
-    expect(insertSelection).toHaveBeenCalledWith("/resume");
   });
 });

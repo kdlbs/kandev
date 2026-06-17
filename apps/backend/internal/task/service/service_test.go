@@ -839,6 +839,28 @@ func TestService_CreateMessageReturnsTurnStartError(t *testing.T) {
 	}
 }
 
+func TestService_CreateMessageWithIDReturnsTurnStartError(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+	turnErr := errors.New("turn table unavailable")
+	svc.turns = failingTurnCreator{TurnRepository: repo, err: turnErr}
+
+	_, err := svc.CreateMessageWithID(ctx, "message-123", &CreateMessageRequest{
+		TaskSessionID: sessionID,
+		Content:       "streamed output",
+		AuthorType:    "agent",
+	})
+
+	if !errors.Is(err, turnErr) {
+		t.Fatalf("CreateMessageWithID error = %v, want wrapped turn error", err)
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "foreign key") {
+		t.Fatalf("CreateMessageWithID returned masked FK error: %v", err)
+	}
+}
+
 func TestService_CreateMessageSessionNotFound(t *testing.T) {
 	svc, _, _ := createTestService(t)
 	ctx := context.Background()
