@@ -146,6 +146,22 @@ if [[ "$1" == "pr" && "$2" == "view" && "$4" == "--json" ]]; then
       "detailsUrl": "https://github.com/kdlbs/kandev/actions/runs/27340000005/job/55150000005"
     },
     {
+      "__typename": "CheckRun",
+      "name": "opencode-review-fork",
+      "workflowName": "OpenCode Code Review",
+      "status": "COMPLETED",
+      "conclusion": "SKIPPED",
+      "detailsUrl": "https://github.com/kdlbs/kandev/actions/runs/27340000006/job/55150000006"
+    },
+    {
+      "__typename": "CheckRun",
+      "name": "opencode-review-fork",
+      "workflowName": "OpenCode Code Review",
+      "status": "COMPLETED",
+      "conclusion": "FAILURE",
+      "detailsUrl": "https://github.com/kdlbs/kandev/actions/runs/27340000007/job/55150000007"
+    },
+    {
       "__typename": "StatusContext",
       "context": "external pending",
       "state": "PENDING",
@@ -342,7 +358,7 @@ test_snapshot_happy_path() {
   assert_jq "pr number" '.pr.number == 123' "$json"
   assert_jq "branch" '.pr.branch == "feat/pr-state"' "$json"
   assert_jq "since timestamp" '.since.committed_at == "2026-06-01T12:00:00Z"' "$json"
-  assert_jq "checks count" '.checks | length == 7' "$json"
+  assert_jq "checks count" '.checks | length == 9' "$json"
   assert_jq "duplicate cancelled check prefers success first" '[.checks[] | select(.name == "web lint")][0] | .conclusion == "success" and .run_id == "27340000001"' "$json"
   assert_jq "failed check preserved" '.checks[] | select(.name == "e2e") | .conclusion == "failure"' "$json"
   assert_jq "check run id" '.checks[] | select(.name == "e2e") | .run_id == "27340000002"' "$json"
@@ -372,7 +388,7 @@ test_partial_failure_records_error_but_keeps_other_data() {
   json="$(<"$tmp/out.json")"
 
   assert_jq "reviews empty on failure" '.reviews == []' "$json"
-  assert_jq "checks still present" '.checks | length == 7' "$json"
+  assert_jq "checks still present" '.checks | length == 9' "$json"
   assert_jq "new issue comments still present" '.issue_comments | length == 1' "$json"
   assert_jq "partial failure recorded" '.errors | length == 1' "$json"
   assert_jq "partial failure source" '.errors[0].source == "reviews"' "$json"
@@ -403,7 +419,7 @@ test_repo_failure_skips_review_threads() {
   GH_FAIL_REPO=1 GH_NO_PR_URL=1 PATH="$tmp/bin:$PATH" "$SCRIPT" 123 >"$tmp/out.json"
   json="$(<"$tmp/out.json")"
 
-  assert_jq "checks still present on repo failure" '.checks | length == 7' "$json"
+  assert_jq "checks still present on repo failure" '.checks | length == 9' "$json"
   assert_jq "review threads empty on repo failure" '.review_threads == []' "$json"
   assert_jq "unresolved count unknown on repo failure" '.unresolved_review_thread_count == null' "$json"
   assert_jq "repo failure recorded" '.errors[] | select(.source == "repo") | .message == "gh repo view failed"' "$json"
@@ -420,7 +436,7 @@ test_graphql_failure_records_error_but_keeps_other_data() {
   GH_FAIL_GRAPHQL=1 PATH="$tmp/bin:$PATH" "$SCRIPT" 123 >"$tmp/out.json"
   json="$(<"$tmp/out.json")"
 
-  assert_jq "checks still present on graphql failure" '.checks | length == 7' "$json"
+  assert_jq "checks still present on graphql failure" '.checks | length == 9' "$json"
   assert_jq "reviews still present on graphql failure" '.reviews | length == 2' "$json"
   assert_jq "review threads empty on graphql failure" '.review_threads == []' "$json"
   assert_jq "unresolved count unknown on graphql failure" '.unresolved_review_thread_count == null' "$json"
@@ -477,8 +493,9 @@ test_summary_mode_returns_compact_fixup_state() {
 
   assert_jq "summary keeps pr" '.pr.number == 123' "$json"
   assert_jq "summary keeps since" '.since.committed_at == "2026-06-01T12:00:00Z"' "$json"
-  assert_jq "summary failed check count" '.failed_checks | length == 1' "$json"
-  assert_jq "summary failed check" '.failed_checks[0] | .name == "e2e" and .conclusion == "failure" and .run_id == "27340000002"' "$json"
+  assert_jq "summary failed check count" '.failed_checks | length == 2' "$json"
+  assert_jq "summary failed check" '.failed_checks[] | select(.name == "e2e") | .conclusion == "failure" and .run_id == "27340000002"' "$json"
+  assert_jq "summary reports failed duplicate over skipped" '.failed_checks[] | select(.name == "opencode-review-fork") | .conclusion == "failure" and .run_id == "27340000007"' "$json"
   assert_jq "summary ignores cancelled duplicate check" '[.failed_checks[] | select(.name == "web lint")] | length == 0' "$json"
   assert_jq "summary dedupes skipped duplicate check" '[.failed_checks[], .pending_checks[] | select(.name == "opencode-review-same-repo")] | length == 0' "$json"
   assert_jq "summary pending check count" '.pending_checks | length == 2' "$json"

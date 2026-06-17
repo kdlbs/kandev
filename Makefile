@@ -331,7 +331,7 @@ install-web:
 #
 
 .PHONY: test
-test: test-backend test-web test-cli
+test: test-backend test-web test-cli test-scripts
 	@printf "\n$(GREEN)$(BOLD)✓ All tests complete!$(RESET)\n"
 
 # Curated Windows-clean test run. Mirrors the test-windows job in
@@ -373,6 +373,12 @@ test-web:
 test-cli:
 	@printf "$(CYAN)Running CLI tests...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) --filter kandev test
+
+.PHONY: test-scripts
+test-scripts:
+	@printf "$(CYAN)Running script tests...$(RESET)\n"
+	@bash scripts/pr-state.test.sh
+	@bash scripts/opencode-code-review.test.sh
 
 .PHONY: test-e2e
 test-e2e: build-backend build-web

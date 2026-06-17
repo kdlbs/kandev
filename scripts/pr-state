@@ -120,10 +120,16 @@ extract_checks_json() {
     def preferred_check_order:
       if .conclusion == "success" then 0
       elif .status != "completed" then 1
-      elif .conclusion == "neutral" then 2
-      elif .conclusion == "skipped" then 3
-      elif .conclusion == "cancelled" then 4
-      else 5
+      elif (
+        .conclusion != null
+        and .conclusion != "neutral"
+        and .conclusion != "skipped"
+        and .conclusion != "cancelled"
+      ) then 2
+      elif .conclusion == "neutral" then 3
+      elif .conclusion == "skipped" then 4
+      elif .conclusion == "cancelled" then 5
+      else 6
       end;
     $checks_in
     | to_entries
