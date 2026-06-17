@@ -136,29 +136,25 @@ describe("useUnknownSessionSubscriptionRetryEffect", () => {
     vi.mocked(getWebSocketClient).mockReset();
   });
 
-  it("skips when the retry is not actionable", () => {
+  it("skips when the retry token is zero", () => {
     const send = vi.fn();
     vi.mocked(getWebSocketClient).mockReturnValue({ send } as never);
 
-    renderHook(
-      ({ taskSessionId, connectionStatus, retryToken }) =>
-        useUnknownSessionSubscriptionRetryEffect({
-          taskSessionId,
-          connectionStatus,
-          retryToken,
-        }),
-      {
-        initialProps: {
-          taskSessionId: "sess-1" as string | null,
-          connectionStatus: "connected",
-          retryToken: 0,
-        },
-      },
+    renderHook(() =>
+      useUnknownSessionSubscriptionRetryEffect({
+        taskSessionId: "sess-1",
+        connectionStatus: "connected",
+        retryToken: 0,
+      }),
     );
 
     expect(send).not.toHaveBeenCalled();
+  });
 
-    cleanup();
+  it("skips when the session id is missing", () => {
+    const send = vi.fn();
+    vi.mocked(getWebSocketClient).mockReturnValue({ send } as never);
+
     renderHook(() =>
       useUnknownSessionSubscriptionRetryEffect({
         taskSessionId: null,
@@ -168,8 +164,12 @@ describe("useUnknownSessionSubscriptionRetryEffect", () => {
     );
 
     expect(send).not.toHaveBeenCalled();
+  });
 
-    cleanup();
+  it("skips when the websocket is disconnected", () => {
+    const send = vi.fn();
+    vi.mocked(getWebSocketClient).mockReturnValue({ send } as never);
+
     renderHook(() =>
       useUnknownSessionSubscriptionRetryEffect({
         taskSessionId: "sess-1",

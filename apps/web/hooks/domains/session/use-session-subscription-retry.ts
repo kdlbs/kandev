@@ -7,7 +7,7 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 
 const UNKNOWN_SESSION_INITIAL_RESUBSCRIBE_MS = 1000;
 const UNKNOWN_SESSION_MAX_RESUBSCRIBE_MS = 30000;
-const debug = createDebugLogger("messages:fetch");
+const debug = createDebugLogger("messages:resubscribe");
 
 type RetryState = {
   sessionId: string | null;
