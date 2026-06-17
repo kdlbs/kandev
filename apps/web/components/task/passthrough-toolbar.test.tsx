@@ -305,7 +305,7 @@ describe("PassthroughToolbar – composer toggle", () => {
     await waitFor(() => expect(screen.queryByTestId(TID_COMPOSER)).toBeNull());
   });
 
-  it("wires the shared chat input controls and disables passthrough slash commands", async () => {
+  it("wires passthrough composer controls and disables ACP-only controls", async () => {
     renderToolbar();
     await openComposer();
 
@@ -314,6 +314,7 @@ describe("PassthroughToolbar – composer toggle", () => {
     expect(screen.getByTestId(TID_CONTEXT)).toBeTruthy();
     const props = latestChatInputProps();
     expect(props.hasAgentCommands).toBe(false);
+    expect(props.hideAgentControls).toBe(true);
     expect(props.contextItems).toEqual(
       expect.arrayContaining([expect.objectContaining({ kind: "file", label: "foo.ts" })]),
     );

@@ -91,6 +91,7 @@ type ChatInputContainerProps = {
   onImplementPlan?: (fresh: boolean) => void;
   hideSessionsDropdown?: boolean;
   minimalToolbar?: boolean;
+  hideAgentControls?: boolean;
   /** Hide the plan mode toggle button (for ephemeral/quick chat sessions) */
   hidePlanMode?: boolean;
 };
@@ -304,6 +305,7 @@ function buildEditorAreaProps(
     onVoiceAutoSend: extras.onVoiceAutoSend,
     hideSessionsDropdown: p.hideSessionsDropdown,
     minimalToolbar: p.minimalToolbar,
+    hideAgentControls: p.hideAgentControls,
     hidePlanMode: p.hidePlanMode,
   };
 }

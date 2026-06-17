@@ -551,6 +551,7 @@ function useEditorImperativeHandle(
             const { kind, path, label } = node.attrs;
             if (kind === "file") mentions.push({ path, name: label, pinned: false });
             else if (kind === "prompt") mentions.push({ path, name: label, pinned: false });
+            else if (kind === "plan") mentions.push({ path, name: label, pinned: false });
           }
         });
         return mentions;

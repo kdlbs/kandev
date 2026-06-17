@@ -10,6 +10,8 @@ import {
 } from "./passthrough-chat-composer";
 
 const SESSION_ID = "session-1";
+const TASK_ID = "task-1";
+const PLAN_CONTEXT_PATH = "plan:context";
 
 function file(path: string, name = path): ContextFile {
   return { path, name };
@@ -34,6 +36,7 @@ function comment(id = "comment-1"): DiffComment {
 function panelState(overrides: Record<string, unknown> = {}) {
   return {
     resolvedSessionId: SESSION_ID,
+    taskId: TASK_ID,
     contextFiles: [],
     prompts: [],
     pendingPRFeedback: [],
@@ -53,11 +56,11 @@ describe("passthrough chat composer helpers", () => {
       buildContextFilesMeta([
         file("src/app.ts", "app.ts"),
         file("prompt:review", "Review prompt"),
-        file("plan:context", "Plan"),
+        file(PLAN_CONTEXT_PATH, "Plan"),
       ]),
     ).toEqual([{ path: "src/app.ts", name: "app.ts" }]);
 
-    expect(buildContextFilesMeta([file("prompt:review"), file("plan:context")])).toBeUndefined();
+    expect(buildContextFilesMeta([file("prompt:review"), file(PLAN_CONTEXT_PATH)])).toBeUndefined();
   });
 
   it("prepends pending review comments when no structured comment payload is supplied", () => {
@@ -69,7 +72,7 @@ describe("passthrough chat composer helpers", () => {
     expect(result.formatted).toContain("Ship it");
   });
 
-  it("merges selected context files with inline file, prompt, and task mentions", () => {
+  it("merges selected context files with inline file, prompt, and task mentions", async () => {
     const inlineTask: TaskMentionData = {
       taskId: "task-2",
       title: "Follow-up task",
@@ -77,7 +80,8 @@ describe("passthrough chat composer helpers", () => {
       workflowStepId: "step-1",
       state: "in_progress",
     };
-    const result = buildPassthroughFinalMessage({
+    const result = await buildPassthroughFinalMessage({
+      taskId: TASK_ID,
       content: "Please check this",
       pendingComments: [],
       panelState: panelState({
@@ -90,6 +94,7 @@ describe("passthrough chat composer helpers", () => {
         ({
           kanban: { steps: [{ id: "step-1", title: "Review" }] },
           kanbanMulti: { snapshots: {} },
+          taskPlans: { byTaskId: {} },
         }) as never,
     });
 
@@ -104,6 +109,32 @@ describe("passthrough chat composer helpers", () => {
     expect(result.content).toContain("Look carefully.");
     expect(result.content).toContain("REFERENCED TASKS");
     expect(result.content).toContain("Follow-up task");
+  });
+
+  it("expands selected plan context and strips the literal @Plan mention", async () => {
+    const result = await buildPassthroughFinalMessage({
+      taskId: TASK_ID,
+      content: "@Plan",
+      pendingComments: [],
+      panelState: panelState(),
+      inlineMentions: [file(PLAN_CONTEXT_PATH, "Plan")],
+      getState: () =>
+        ({
+          kanban: { steps: [] },
+          kanbanMulti: { snapshots: {} },
+          taskPlans: {
+            byTaskId: {
+              [TASK_ID]: { content: "## Plan\n\n1. Ship passthrough fixes" },
+            },
+          },
+        }) as never,
+    });
+
+    expect(result.content).toContain("<kandev-system>");
+    expect(result.content).toContain("CONTEXT PLAN");
+    expect(result.content).toContain("## Plan");
+    expect(result.content).toContain("Ship passthrough fixes");
+    expect(result.content).not.toContain("@Plan");
   });
 
   it("clears ephemeral context and re-adds plan context when plan mode stays enabled", () => {
@@ -124,7 +155,7 @@ describe("passthrough chat composer helpers", () => {
     expect(state.clearSessionPlanComments).toHaveBeenCalledTimes(1);
     expect(state.clearEphemeral).toHaveBeenCalledWith(SESSION_ID);
     expect(state.addContextFile).toHaveBeenCalledWith(SESSION_ID, {
-      path: "plan:context",
+      path: PLAN_CONTEXT_PATH,
       name: "Plan",
     });
   });

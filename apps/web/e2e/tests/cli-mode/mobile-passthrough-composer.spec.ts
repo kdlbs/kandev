@@ -45,7 +45,7 @@ async function openMobilePassthroughTask(
 }
 
 test.describe("mobile CLI mode: passthrough composer", () => {
-  test("slash remains literal and shared composer controls are available", async ({
+  test("slash remains literal and only passthrough composer controls are available", async ({
     testPage,
     apiClient,
     seedData,
@@ -83,6 +83,11 @@ test.describe("mobile CLI mode: passthrough composer", () => {
     await expect(testPage.getByTestId("plan-mode-toggle-button")).toBeVisible();
     await expect(testPage.getByTestId("chat-context-button")).toBeVisible();
     await expect(testPage.getByTestId("chat-attachments-button")).toBeVisible();
+    await expect(testPage.getByTestId("toolbar-item-mcp")).toHaveCount(0);
+    await expect(testPage.getByTestId("toolbar-item-mode")).toHaveCount(0);
+    await expect(testPage.getByTestId("toolbar-item-model")).toHaveCount(0);
+    await expect(testPage.getByTestId("toolbar-item-reset-context")).toHaveCount(0);
+    await expect(testPage.getByTestId("toolbar-item-enhance")).toHaveCount(0);
 
     await editor.fill("/s");
 

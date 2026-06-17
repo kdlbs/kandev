@@ -17,6 +17,10 @@ import type { ContextFile } from "@/lib/state/context-files-store";
 import type { TaskMentionData } from "@/hooks/use-inline-mention";
 import { buildContextFilesContext, buildTaskMentionsContext } from "@/hooks/use-message-handler";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { getTaskPlan } from "@/lib/api/domains/plan-api";
+import type { AppState } from "@/lib/state/store";
+
+const PLAN_CONTEXT_PATH = "plan:context";
 
 export type PassthroughSubmitHandler = (
   content: string,
@@ -80,6 +84,7 @@ export function PassthroughComposerPanel({
         onToggleContextFile={panelState.handleToggleContextFile}
         onAddContextFile={panelState.handleAddContextFile}
         hideSessionsDropdown
+        hideAgentControls
       />
     </div>
   );
@@ -122,7 +127,49 @@ export function formatPassthroughBaseMessage(
   return { formatted: content, commentsToSend };
 }
 
-export function buildPassthroughFinalMessage({
+function hasPlanContext(files: ContextFile[]) {
+  return files.some((file) => file.path === PLAN_CONTEXT_PATH);
+}
+
+function stripSelectedPlanMentions(content: string, files: ContextFile[]) {
+  if (!hasPlanContext(files)) return content;
+  return content.replace(/(^|\s)@Plan(?=\s|$)/g, "$1").trim();
+}
+
+function sanitizeSystemBlockContent(content: string) {
+  return content.replace(/<\/kandev-system>/gi, "</ kandev-system>");
+}
+
+export function buildPassthroughPlanContext(planContent: string | undefined | null) {
+  const trimmed = planContent?.trim();
+  if (!trimmed) return "";
+  return (
+    `\n\n<kandev-system>\n` +
+    `CONTEXT PLAN: The user has attached the current task plan as context. ` +
+    `Use this plan content to understand what they mean by the plan:\n` +
+    `${sanitizeSystemBlockContent(trimmed)}\n` +
+    `</kandev-system>`
+  );
+}
+
+function cachedTaskPlanContent(taskId: string, state: AppState) {
+  return state.taskPlans.byTaskId[taskId]?.content;
+}
+
+async function loadTaskPlanContent(taskId: string | null, getState: () => AppState) {
+  if (!taskId) return "";
+  const cached = cachedTaskPlanContent(taskId, getState());
+  if (cached !== undefined) return cached;
+  try {
+    const plan = await getTaskPlan(taskId);
+    return plan?.content ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export async function buildPassthroughFinalMessage({
+  taskId,
   content,
   reviewComments,
   pendingComments,
@@ -131,6 +178,7 @@ export function buildPassthroughFinalMessage({
   inlineTaskMentions,
   getState,
 }: {
+  taskId: string | null;
   content: string;
   reviewComments?: DiffComment[];
   pendingComments: DiffComment[];
@@ -138,7 +186,7 @@ export function buildPassthroughFinalMessage({
   inlineMentions?: ContextFile[];
   inlineTaskMentions?: TaskMentionData[];
   getState: ReturnType<typeof useAppStoreApi>["getState"];
-}): PassthroughFinalMessage {
+}): Promise<PassthroughFinalMessage> {
   const { formatted, commentsToSend } = formatPassthroughBaseMessage(
     content,
     reviewComments,
@@ -146,13 +194,17 @@ export function buildPassthroughFinalMessage({
     panelState,
   );
   const allContextFiles = [...panelState.contextFiles, ...(inlineMentions ?? [])];
+  const visibleContent = stripSelectedPlanMentions(formatted, allContextFiles);
   const contextFilesContext = buildContextFilesContext(allContextFiles, panelState.prompts);
+  const planContext = hasPlanContext(allContextFiles)
+    ? buildPassthroughPlanContext(await loadTaskPlanContent(taskId, getState))
+    : "";
   const taskMentionsContext =
     inlineTaskMentions && inlineTaskMentions.length > 0
       ? buildTaskMentionsContext(inlineTaskMentions, getState())
       : "";
   return {
-    content: formatted + contextFilesContext + taskMentionsContext,
+    content: visibleContent + contextFilesContext + planContext + taskMentionsContext,
     commentsToSend,
     contextFilesMeta: buildContextFilesMeta(allContextFiles),
   };
@@ -160,7 +212,7 @@ export function buildPassthroughFinalMessage({
 
 export function buildContextFilesMeta(files: ContextFile[]) {
   const realContextFiles = files.filter(
-    (f) => !f.path.startsWith("prompt:") && f.path !== "plan:context",
+    (f) => !f.path.startsWith("prompt:") && f.path !== PLAN_CONTEXT_PATH,
   );
   if (realContextFiles.length === 0) return undefined;
   return realContextFiles.map((f) => ({ path: f.path, name: f.name }));
@@ -239,7 +291,8 @@ export function useSendPassthroughMessage({
         toast({ title: "Session not ready", variant: "error" });
         throw new Error("Session not ready");
       }
-      const message = buildPassthroughFinalMessage({
+      const message = await buildPassthroughFinalMessage({
+        taskId,
         content,
         reviewComments,
         pendingComments,

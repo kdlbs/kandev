@@ -78,6 +78,8 @@ export type ChatInputToolbarProps = {
   hideSessionsDropdown?: boolean;
   /** When true, only render the submit/cancel button — no other controls */
   minimalToolbar?: boolean;
+  /** Hide ACP/session-specific controls while keeping Plan, attachment, and context controls */
+  hideAgentControls?: boolean;
   /** Hide the plan mode toggle button (for ephemeral/quick chat sessions) */
   hidePlanMode?: boolean;
 };
@@ -376,7 +378,9 @@ function buildCollapsibleItems(props: {
   onEnhancePrompt?: () => void;
   isEnhancingPrompt: boolean;
   isUtilityConfigured: boolean;
+  hideAgentControls?: boolean;
 }): ToolbarItemConfig[] {
+  if (props.hideAgentControls) return [];
   return [
     {
       id: "mcp",
@@ -514,6 +518,7 @@ const toolbarDefaults = {
   contextFiles: [] as ContextFile[],
   isEnhancingPrompt: false,
   isUtilityConfigured: false,
+  hideAgentControls: false,
   hidePlanMode: false,
 };
 

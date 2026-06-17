@@ -131,6 +131,17 @@ test.describe("CLI mode: passthrough toolbar", () => {
     await expect(testPage.getByTestId("passthrough-toggle-composer")).toBeVisible({
       timeout: 5_000,
     });
+
+    await testPage.getByTestId("passthrough-toggle-composer").click();
+    await expect(testPage.getByTestId("passthrough-composer")).toBeVisible({ timeout: 5_000 });
+    await expect(testPage.getByTestId("plan-mode-toggle-button")).toBeVisible();
+    await expect(testPage.getByTestId("chat-attachments-button")).toBeVisible();
+    await expect(testPage.getByTestId("chat-context-button")).toBeVisible();
+    await expect(testPage.getByTestId("toolbar-item-mcp")).toHaveCount(0);
+    await expect(testPage.getByTestId("toolbar-item-mode")).toHaveCount(0);
+    await expect(testPage.getByTestId("toolbar-item-model")).toHaveCount(0);
+    await expect(testPage.getByTestId("toolbar-item-reset-context")).toHaveCount(0);
+    await expect(testPage.getByTestId("toolbar-item-enhance")).toHaveCount(0);
   });
 
   test("composer toggle + send forwards message to the agent", async ({
@@ -274,6 +285,61 @@ test.describe("CLI mode: passthrough toolbar", () => {
     await session.expectPassthroughHasText(promptContent, 15_000);
     await session.expectPassthroughHasText("CONTEXT FILES", 15_000);
     await session.expectPassthroughHasText(contextFile, 15_000);
+  });
+
+  test("expands @ Plan context into passthrough stdin instead of sending a literal mention", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+
+    const profileId = await createPassthroughProfile(apiClient, "CLI Toolbar Plan Context");
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Toolbar Plan Context Task",
+      profileId,
+      {
+        description: "initial prompt",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("expected passthrough task to start a session");
+
+    const planContent = "PASSTHROUGH_PLAN_CONTEXT_MARKER";
+    await apiClient.wsRequest("task.plan.create", {
+      task_id: task.id,
+      title: "Plan",
+      content: `## Plan\n\n${planContent}`,
+      created_by: "user",
+    });
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    const session = new SessionPage(testPage);
+    await openTaskAndWaitForTerminal(testPage, kanban, session, "Toolbar Plan Context Task");
+    await session.expectPassthroughHasText("Processed:", 20_000);
+
+    await testPage.getByTestId("passthrough-toggle-composer").click();
+    const editor = passthroughEditor(testPage);
+    await expect(editor).toBeVisible({ timeout: 5_000 });
+
+    await editor.click();
+    await editor.pressSequentially("@Plan");
+    await expect(testPage.getByText("Mention tasks, files, prompts")).toBeVisible({
+      timeout: 5_000,
+    });
+    await testPage.getByRole("button", { name: /^Plan Include the plan as context$/ }).click();
+    await expect(editor).toContainText("Plan");
+
+    await testPage.getByTestId("submit-message-button").click();
+    await expect(passthroughComposer(testPage)).toBeHidden({ timeout: 10_000 });
+
+    await session.expectPassthroughHasText("CONTEXT PLAN", 15_000);
+    await session.expectPassthroughHasText(planContent, 15_000);
   });
 
   test("uploads attachments and delivers them as workspace file paths", async ({

@@ -37,6 +37,7 @@ export type ChatInputEditorAreaProps = {
   showRequestChangesTooltip: boolean;
   hideSessionsDropdown?: boolean;
   minimalToolbar?: boolean;
+  hideAgentControls?: boolean;
   hidePlanMode?: boolean;
   isAgentBusy: boolean;
   onPlanModeChange: (enabled: boolean) => void;
@@ -126,7 +127,8 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
     p;
   const { isSending, onCancel, contextCount, contextPopoverOpen, setContextPopoverOpen } = p;
   const { contextFiles, onImplementPlan, onEnhancePrompt, isEnhancingPrompt } = p;
-  const { isUtilityConfigured, hideSessionsDropdown, minimalToolbar, hidePlanMode } = p;
+  const { isUtilityConfigured, hideSessionsDropdown, minimalToolbar, hideAgentControls } = p;
+  const { hidePlanMode } = p;
   const { onVoiceTranscript, onVoiceAutoSend } = p;
   // Exclude auto-added plan context from the count — it's always present in plan mode
   // and shouldn't by itself enable the send button.
@@ -195,6 +197,7 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
         onVoiceAutoSend={onVoiceAutoSend}
         hideSessionsDropdown={hideSessionsDropdown}
         minimalToolbar={minimalToolbar}
+        hideAgentControls={hideAgentControls}
         hidePlanMode={hidePlanMode}
       />
     </div>
