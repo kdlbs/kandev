@@ -196,16 +196,47 @@ jobs:
             raise SystemExit(0)
 
           if not findings:
+            marker = "<!-- opencode-review:no-findings -->"
             short_sha = os.environ["HEAD_SHA"][:12]
             body = (
-              "<!-- opencode-review:no-findings -->\n"
+              f"{marker}\n"
               "**OpenCode review complete**\n\n"
               f"No suggestions found for commit `{short_sha}`."
             )
+
+            comments_result = subprocess.run(
+              [
+                "gh", "api",
+                f"repos/{os.environ['GITHUB_REPOSITORY']}/issues/{os.environ['PR_NUMBER']}/comments?per_page=100",
+              ],
+              text=True,
+              capture_output=True,
+              check=False,
+            )
+            comment_id = None
+            if comments_result.returncode == 0:
+              try:
+                comments = json.loads(comments_result.stdout)
+              except json.JSONDecodeError as exc:
+                print(f"Could not parse existing PR comments: {exc}")
+                comments = []
+              for comment in reversed(comments):
+                if marker in (comment.get("body") or ""):
+                  comment_id = comment.get("id")
+                  break
+            else:
+              print(f"Could not list existing PR comments: {comments_result.stderr.strip()}")
+
+            method = "PATCH" if comment_id else "POST"
+            endpoint = (
+              f"repos/{os.environ['GITHUB_REPOSITORY']}/issues/comments/{comment_id}"
+              if comment_id
+              else f"repos/{os.environ['GITHUB_REPOSITORY']}/issues/{os.environ['PR_NUMBER']}/comments"
+            )
             result = subprocess.run(
               [
-                "gh", "api", "-X", "POST",
-                f"repos/{os.environ['GITHUB_REPOSITORY']}/issues/{os.environ['PR_NUMBER']}/comments",
+                "gh", "api", "-X", method,
+                endpoint,
                 "-f", f"body={body}",
               ],
               text=True,
@@ -213,7 +244,8 @@ jobs:
               check=False,
             )
             if result.returncode == 0:
-              print("Posted OpenCode no-suggestions comment.")
+              action = "Updated" if comment_id else "Posted"
+              print(f"{action} OpenCode no-suggestions comment.")
             else:
               print(f"Skipped OpenCode no-suggestions comment: {result.stderr.strip()}")
             raise SystemExit(0)
@@ -484,16 +516,47 @@ jobs:
             raise SystemExit(0)
 
           if not findings:
+            marker = "<!-- opencode-review:no-findings -->"
             short_sha = os.environ["HEAD_SHA"][:12]
             body = (
-              "<!-- opencode-review:no-findings -->\n"
+              f"{marker}\n"
               "**OpenCode review complete**\n\n"
               f"No suggestions found for commit `{short_sha}`."
             )
+
+            comments_result = subprocess.run(
+              [
+                "gh", "api",
+                f"repos/{os.environ['GITHUB_REPOSITORY']}/issues/{os.environ['PR_NUMBER']}/comments?per_page=100",
+              ],
+              text=True,
+              capture_output=True,
+              check=False,
+            )
+            comment_id = None
+            if comments_result.returncode == 0:
+              try:
+                comments = json.loads(comments_result.stdout)
+              except json.JSONDecodeError as exc:
+                print(f"Could not parse existing PR comments: {exc}")
+                comments = []
+              for comment in reversed(comments):
+                if marker in (comment.get("body") or ""):
+                  comment_id = comment.get("id")
+                  break
+            else:
+              print(f"Could not list existing PR comments: {comments_result.stderr.strip()}")
+
+            method = "PATCH" if comment_id else "POST"
+            endpoint = (
+              f"repos/{os.environ['GITHUB_REPOSITORY']}/issues/comments/{comment_id}"
+              if comment_id
+              else f"repos/{os.environ['GITHUB_REPOSITORY']}/issues/{os.environ['PR_NUMBER']}/comments"
+            )
             result = subprocess.run(
               [
-                "gh", "api", "-X", "POST",
-                f"repos/{os.environ['GITHUB_REPOSITORY']}/issues/{os.environ['PR_NUMBER']}/comments",
+                "gh", "api", "-X", method,
+                endpoint,
                 "-f", f"body={body}",
               ],
               text=True,
@@ -501,7 +564,8 @@ jobs:
               check=False,
             )
             if result.returncode == 0:
-              print("Posted OpenCode no-suggestions comment.")
+              action = "Updated" if comment_id else "Posted"
+              print(f"{action} OpenCode no-suggestions comment.")
             else:
               print(f"Skipped OpenCode no-suggestions comment: {result.stderr.strip()}")
             raise SystemExit(0)
