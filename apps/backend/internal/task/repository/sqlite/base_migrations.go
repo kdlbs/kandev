@@ -141,6 +141,17 @@ func (r *Repository) runMigrations() error {
 	// repo hasn't run yet.
 	r.ensureRunnerProjectionTables()
 
+	// Mantis integration schema. initSchema runs this first via the
+	// initMantisSchema step on fresh databases; the second call here
+	// is a no-op on fresh DBs (CREATE TABLE IF NOT EXISTS) and the
+	// canonical path for installs that boot past this release without
+	// having gone through initMantisSchema. Future column additions
+	// must use ADD COLUMN migrations above, never by mutating the
+	// CREATE TABLE block.
+	if err := r.initMantisSchema(); err != nil {
+		return err
+	}
+
 	return nil
 }
 

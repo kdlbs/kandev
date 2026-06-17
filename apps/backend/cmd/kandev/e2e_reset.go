@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"os"
 	"strings"
@@ -96,6 +97,17 @@ func handleE2EReset(
 			log.Warn("e2e reset: agent settings reset failed", zap.Error(err))
 		}
 
+		// Wipe Mantis configs + issue watches (and their dedup rows) so
+		// per-workspace Mantis state doesn't bleed across specs. Done before
+		// task deletion so the Mantis forward poller (once wired in T05)
+		// can't recreate dedup rows / tasks mid-reset — same race the
+		// GitHub review watch cleanup below was hardened against.
+		if err := deleteMantisStateForReset(ctx, repo.DB(), workspaceID); err != nil {
+			log.Error("e2e reset: mantis cleanup failed", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
+			return
+		}
+
 		// Wipe GitHub review watches (and their dedup rows + owned tasks) so
 		// review-watch specs stay isolated. seedData/backend are worker-scoped,
 		// so a watch an earlier test created stays enabled; the global review
@@ -183,6 +195,25 @@ func deleteAutomationsForReset(
 		return 0, nil
 	}
 	return automationSvc.Store().DeleteAutomationsByWorkspace(ctx, workspaceID)
+}
+
+// deleteMantisStateForReset wipes per-workspace Mantis state in the order
+// required by the foreign-key topology: dedup rows first (so the FK to
+// mantis_issue_watches doesn't fire after the parent is gone), then watches,
+// then the workspace config. Callers must invoke this BEFORE the task
+// deletion phase so the Mantis forward poller can't recreate rows mid-reset
+// — see apps/backend/CLAUDE.md "E2E reset invariant".
+func deleteMantisStateForReset(ctx context.Context, db *sql.DB, workspaceID string) error {
+	for _, q := range []string{
+		`DELETE FROM mantis_issue_watch_tasks WHERE issue_watch_id IN (SELECT id FROM mantis_issue_watches WHERE workspace_id = ?)`,
+		`DELETE FROM mantis_issue_watches WHERE workspace_id = ?`,
+		`DELETE FROM mantis_configs WHERE workspace_id = ?`,
+	} {
+		if _, err := db.ExecContext(ctx, q, workspaceID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type e2eHiddenWorkflowRequest struct {
