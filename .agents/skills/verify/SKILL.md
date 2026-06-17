@@ -26,7 +26,7 @@ Fresh git worktrees share `.git/` but not `apps/node_modules/`. Before running
 the pipeline, if `apps/node_modules` is missing, run:
 
 ```bash
-cd apps && pnpm install --frozen-lockfile
+(cd apps && pnpm install --frozen-lockfile)
 ```
 
 ```bash
@@ -56,9 +56,8 @@ If `make typecheck` fails because `apps/web/generated/changelog.json` or
 `make typecheck`:
 
 ```bash
-cd apps/web
-node scripts/generate-release-notes.mjs
-node scripts/generate-changelog.mjs
+(cd apps/web && node scripts/generate-release-notes.mjs)
+(cd apps/web && node scripts/generate-changelog.mjs)
 ```
 
 If the aggregate `make lint` wrapper stalls or does not provide useful progress, run the backend and frontend lint checks directly instead and record the substitution in your result:
