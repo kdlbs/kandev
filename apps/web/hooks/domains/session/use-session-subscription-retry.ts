@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 
+import { createDebugLogger } from "@/lib/debug/log";
 import type { TaskSessionState } from "@/lib/types/http";
 import { generateUUID } from "@/lib/utils";
 import { getWebSocketClient } from "@/lib/ws/connection";
 
 const UNKNOWN_SESSION_INITIAL_RESUBSCRIBE_MS = 1000;
 const UNKNOWN_SESSION_MAX_RESUBSCRIBE_MS = 30000;
+const debug = createDebugLogger("messages:fetch");
 
 type RetryState = {
   sessionId: string | null;
@@ -70,9 +72,23 @@ export function useUnknownSessionSubscriptionRetryEffect(params: {
   const { taskSessionId, connectionStatus, retryToken } = params;
 
   useEffect(() => {
-    if (!taskSessionId || connectionStatus !== "connected" || retryToken === 0) return;
+    if (!taskSessionId || connectionStatus !== "connected" || retryToken === 0) {
+      debug("unknown-session retry: skipped", { taskSessionId, connectionStatus, retryToken });
+      return;
+    }
     const client = getWebSocketClient();
-    if (!client) return;
+    if (!client) {
+      debug("unknown-session retry: skipped (no ws client)", { sessionId: taskSessionId });
+      return;
+    }
+    // The durable subscription effect owns the client's ref-counted
+    // subscribe/unsubscribe lifecycle. This retry only re-sends the subscribe
+    // frame to cover the backend race where the first subscribe arrived before
+    // the session was fully constructed.
+    debug("unknown-session retry: sending session.subscribe", {
+      sessionId: taskSessionId,
+      retryToken,
+    });
     client.send({
       id: generateUUID(),
       type: "request",
