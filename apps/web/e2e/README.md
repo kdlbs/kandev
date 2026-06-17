@@ -96,7 +96,7 @@ Why a script instead of raw `docker run`: in docker mode it builds the CGO/`fts5
 >
 > This used to break when e2e was launched from a shell that had inherited `KANDEV_FEATURES_OFFICE=false` (e.g. from a host kandev backend running the prod profile): `profiles.ApplyProfile` only sets vars that are **unset** (so launchers/shells win — see `docs/decisions/0007-runtime-feature-flags.md`), and the fixture spreads `process.env` into the spawned backend, so the stale prod value won and 404'd every office spec. Fixed at the source: `sanitizeInheritedEnv` in `e2e/fixtures/backend.ts` strips all inherited `KANDEV_FEATURES_*` before spawn, so the e2e profile — not whatever the host exported — decides feature flags. No `unset` needed.
 
-> **Host oversubscription:** running ≥5 heavy shards concurrently on one machine (each = Go backend + Next standalone + Chromium + mock agent) starves CPU/IO and induces timing flakes that CI's isolated runners never see. Use 2–3 concurrent shards locally for a clean signal; see "flake triage" in the `/e2e` skill.
+> **Host oversubscription:** running >=5 heavy shards concurrently on one machine (each = Go backend + Vite-served SPA assets + Chromium + mock agent) starves CPU/IO and induces timing flakes that CI's isolated runners never see. Use 2-3 concurrent shards locally for a clean signal; see "flake triage" in the `/e2e` skill.
 
 ## Backend isolation per worker
 

@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   getActiveWorkspaceId: vi.fn(),
 }));
 
-vi.mock("next/navigation", () => ({
+vi.mock("@/lib/routing/server-navigation", () => ({
   redirect: mocks.redirect,
 }));
 

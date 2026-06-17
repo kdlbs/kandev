@@ -67,7 +67,7 @@ export default async function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <head>
         <meta name="apple-mobile-web-app-title" content="Kandev" />
-        {/* Inject runtime config before Next.js async chunks so debug UI flags
+        {/* Inject runtime config before app chunks so debug UI flags
             are visible when client modules first evaluate. */}
         {runtimeConfigScript ? (
           <script dangerouslySetInnerHTML={{ __html: runtimeConfigScript }} />

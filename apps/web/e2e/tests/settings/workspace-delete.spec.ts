@@ -35,9 +35,9 @@ test.describe("Workspace settings deletion", () => {
     await confirmInput.fill(workspaceName);
     await expect(confirmButton).toBeEnabled();
 
-    // Deletion runs through a Next.js server action (the DELETE to the backend
-    // happens server-side), so assert the user-visible outcome: redirect to the
-    // workspace list and the workspace gone from the backend.
+    // Deletion runs through an action wrapper, so assert the user-visible
+    // outcome: redirect to the workspace list and the workspace gone from the
+    // backend.
     await confirmButton.click();
     await expect(testPage).toHaveURL(/\/settings\/workspace$/, { timeout: 10_000 });
 

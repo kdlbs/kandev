@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { officeRouteKey } from "./office-routes";
+import { officeRouteKey, resolveOfficeHomeSetupRedirect } from "./office-routes";
 import { getInitialPageProps } from "./spa-routing";
 import { resolveSpaRoute } from "./spa-routes";
 import { settingsRouteKey } from "./settings-routes";
+
+const OFFICE_HOME_PATH = "/office";
+const OFFICE_SETUP_PATH = "/office/setup";
 
 describe("getInitialPageProps", () => {
   it("hydrates task detail URLs into the existing kanban page client", () => {
@@ -100,9 +103,9 @@ describe("resolveSpaRoute", () => {
       kind: "office",
       pathname: "/office/projects/project-1",
     });
-    expect(resolveSpaRoute("/office/setup", new URLSearchParams("mode=new"))).toEqual({
+    expect(resolveSpaRoute(OFFICE_SETUP_PATH, new URLSearchParams("mode=new"))).toEqual({
       kind: "office",
-      pathname: "/office/setup",
+      pathname: OFFICE_SETUP_PATH,
     });
   });
 });
@@ -133,6 +136,29 @@ describe("officeRouteKey", () => {
       "/office/agents/agent-1/runs/run-1",
     );
     expect(officeRouteKey("/office/routines/routine-1")).toBe("/office/routines/routine-1");
-    expect(officeRouteKey("/office/setup/")).toBe("/office/setup");
+    expect(officeRouteKey(`${OFFICE_SETUP_PATH}/`)).toBe(OFFICE_SETUP_PATH);
+  });
+
+  it("resolves the office home setup redirect after bootstrap", () => {
+    expect(resolveOfficeHomeSetupRedirect(OFFICE_HOME_PATH, true, false, [])).toBe(
+      OFFICE_SETUP_PATH,
+    );
+    expect(resolveOfficeHomeSetupRedirect(OFFICE_HOME_PATH, true, true, [])).toBe(
+      `${OFFICE_SETUP_PATH}?mode=new`,
+    );
+    expect(
+      resolveOfficeHomeSetupRedirect(OFFICE_HOME_PATH, true, true, [
+        {
+          id: "workspace-1",
+          name: "Workspace",
+          owner_id: "user-1",
+          office_workflow_id: "workflow-1",
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      ]),
+    ).toBeNull();
+    expect(resolveOfficeHomeSetupRedirect(OFFICE_SETUP_PATH, true, true, [])).toBeNull();
+    expect(resolveOfficeHomeSetupRedirect(OFFICE_HOME_PATH, false, true, [])).toBeNull();
   });
 });

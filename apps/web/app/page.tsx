@@ -18,7 +18,7 @@ import { readCookies } from "@/lib/server/cookies";
 import type { AppState } from "@/lib/state/store";
 import type { ListWorkspacesResponse, UserSettingsResponse } from "@/lib/types/http";
 
-// Server Component: runs on the server for SSR and data hydration.
+// Root page loader: keeps the old route shape while SPA boot data owns hydration.
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };

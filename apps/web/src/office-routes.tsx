@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import ProjectDetailPage from "@/app/office/projects/[id]/page";
 import AgentDetailLayout from "@/app/office/agents/[id]/layout";
 import AgentChannelsPage from "@/app/office/agents/[id]/channels/page";
@@ -26,10 +26,17 @@ import { ActivityPageClient } from "@/app/office/workspace/activity/activity-pag
 import { CostsPageClient } from "@/app/office/workspace/costs/costs-page-client";
 import { SkillsPageClient } from "@/app/office/workspace/skills/skills-page-client";
 import { fetchUserSettings, listWorkspaces } from "@/lib/api";
-import { getInbox, getMeta, listAgentProfiles, listProjects } from "@/lib/api/domains/office-api";
+import {
+  getInbox,
+  getMeta,
+  getOnboardingState,
+  listAgentProfiles,
+  listProjects,
+} from "@/lib/api/domains/office-api";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
 import { mapWorkspaceItem, readCookie } from "@/lib/routing/route-bootstrap";
+import type { WorkspaceState } from "@/lib/state/slices/workspace/types";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import {
   AgentDashboardRoute,
@@ -58,9 +65,23 @@ const OFFICE_ROUTES: Record<string, RouteRenderer> = {
 };
 
 export function OfficeRoutes({ pathname }: { pathname: string }) {
+  const router = useRouter();
   const officeEnabled = useAppStore((state) => state.features.office);
+  const workspaces = useAppStore((state) => state.workspaces);
   const normalizedPathname = normalizeOfficePath(pathname);
-  useOfficeRouteBootstrap(officeEnabled);
+  const routeWorkspaceId = useSearchParams().get("workspaceId");
+  const bootstrap = useOfficeRouteBootstrap(officeEnabled, routeWorkspaceId);
+  const setupRedirectHref = resolveOfficeHomeSetupRedirect(
+    normalizedPathname,
+    bootstrap.complete,
+    bootstrap.onboardingComplete,
+    workspaces.items,
+  );
+
+  useEffect(() => {
+    if (!officeEnabled || !setupRedirectHref) return;
+    router.replace(setupRedirectHref);
+  }, [officeEnabled, router, setupRedirectHref]);
 
   if (!officeEnabled) {
     return <OfficeUnavailable />;
@@ -68,6 +89,13 @@ export function OfficeRoutes({ pathname }: { pathname: string }) {
 
   if (normalizedPathname === "/office/setup") {
     return <OfficeSetupRoute />;
+  }
+
+  if (
+    setupRedirectHref ||
+    shouldHoldOfficeHomeForBootstrap(normalizedPathname, bootstrap.complete, workspaces)
+  ) {
+    return <OfficeRouteLoading />;
   }
 
   return (
@@ -84,6 +112,17 @@ export function OfficeRoutes({ pathname }: { pathname: string }) {
 
 export function officeRouteKey(pathname: string): string {
   return normalizeOfficePath(pathname);
+}
+
+export function resolveOfficeHomeSetupRedirect(
+  pathname: string,
+  bootstrapComplete: boolean,
+  onboardingComplete: boolean | null,
+  workspaceItems: WorkspaceState["items"],
+): "/office/setup" | "/office/setup?mode=new" | null {
+  if (pathname !== "/office" || !bootstrapComplete) return null;
+  if (onboardingComplete === false) return "/office/setup";
+  return hasOfficeWorkspace(workspaceItems) ? null : "/office/setup?mode=new";
 }
 
 function renderOfficeRoute(pathname: string) {
@@ -110,22 +149,44 @@ function renderOfficeRoute(pathname: string) {
   return OFFICE_ROUTES[pathname]?.() ?? <OfficeRouteFallback pathname={pathname} />;
 }
 
-function useOfficeRouteBootstrap(officeEnabled: boolean) {
+type OfficeBootstrapState = {
+  complete: boolean;
+  onboardingComplete: boolean | null;
+};
+
+function useOfficeRouteBootstrap(
+  officeEnabled: boolean,
+  routeWorkspaceId: string | null,
+): OfficeBootstrapState {
   const store = useAppStoreApi();
-  const bootstrappedRef = useRef(false);
+  const [bootstrap, setBootstrap] = useState<OfficeBootstrapState>({
+    complete: false,
+    onboardingComplete: null,
+  });
 
   useEffect(() => {
-    if (!officeEnabled || bootstrappedRef.current) return;
-    bootstrappedRef.current = true;
+    if (!officeEnabled) {
+      setBootstrap({ complete: false, onboardingComplete: null });
+      return;
+    }
     let cancelled = false;
+    setBootstrap({ complete: false, onboardingComplete: null });
 
-    async function bootstrap() {
-      const [workspacesResponse, userSettingsResponse, metaResponse] = await Promise.all([
-        listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
-        fetchUserSettings({ cache: "no-store" }).catch(() => null),
-        getMeta({ cache: "no-store" }).catch(() => null),
-      ]);
+    async function loadBootstrapState() {
+      const [onboardingResponse, workspacesResponse, userSettingsResponse, metaResponse] =
+        await Promise.all([
+          getOnboardingState({ cache: "no-store" }).catch(() => ({ completed: true })),
+          listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
+          fetchUserSettings({ cache: "no-store" }).catch(() => null),
+          getMeta({ cache: "no-store" }).catch(() => null),
+        ]);
       if (cancelled) return;
+
+      const onboardingComplete = onboardingResponse.completed;
+      if (!onboardingComplete) {
+        setBootstrap({ complete: true, onboardingComplete: false });
+        return;
+      }
 
       const workspaceItems = workspacesResponse.workspaces.map(mapWorkspaceItem);
       const officeWorkspaceItems = workspaceItems.filter(
@@ -133,6 +194,7 @@ function useOfficeRouteBootstrap(officeEnabled: boolean) {
       );
       const activeWorkspaceId = resolveActiveOfficeWorkspaceId(
         officeWorkspaceItems,
+        routeWorkspaceId,
         readCookie("office-active-workspace"),
         userSettingsResponse?.settings?.workspace_id ?? null,
       );
@@ -146,7 +208,10 @@ function useOfficeRouteBootstrap(officeEnabled: boolean) {
       });
       store.getState().setMeta(metaResponse);
 
-      if (!activeWorkspaceId) return;
+      if (!activeWorkspaceId) {
+        setBootstrap({ complete: true, onboardingComplete });
+        return;
+      }
 
       const [agentsResponse, projectsResponse, inboxResponse] = await Promise.all([
         listAgentProfiles(activeWorkspaceId, { cache: "no-store" }).catch(() => ({ agents: [] })),
@@ -162,22 +227,28 @@ function useOfficeRouteBootstrap(officeEnabled: boolean) {
       store.getState().setProjects(projectsResponse.projects);
       store.getState().setInboxItems(inboxResponse.items);
       store.getState().setInboxCount(inboxResponse.total_count);
+      setBootstrap({ complete: true, onboardingComplete });
     }
 
-    void bootstrap();
+    void loadBootstrapState().catch(() => {
+      if (!cancelled) setBootstrap({ complete: true, onboardingComplete: true });
+    });
     return () => {
       cancelled = true;
-      bootstrappedRef.current = false;
     };
-  }, [officeEnabled, store]);
+  }, [officeEnabled, routeWorkspaceId, store]);
+
+  return bootstrap;
 }
 
 function resolveActiveOfficeWorkspaceId(
   workspaceItems: { id: string }[],
+  routeWorkspaceId: string | null,
   cookieWorkspaceId: string | null,
   settingsWorkspaceId: string | null,
 ): string | null {
   return (
+    workspaceItems.find((workspace) => workspace.id === routeWorkspaceId)?.id ??
     workspaceItems.find((workspace) => workspace.id === cookieWorkspaceId)?.id ??
     workspaceItems.find((workspace) => workspace.id === settingsWorkspaceId)?.id ??
     workspaceItems[0]?.id ??
@@ -261,6 +332,30 @@ function OfficeUnavailable() {
   );
 }
 
+function OfficeRouteLoading() {
+  return (
+    <div className="flex h-full items-center justify-center">
+      <span className="text-sm text-muted-foreground">Loading...</span>
+    </div>
+  );
+}
+
+function shouldHoldOfficeHomeForBootstrap(
+  pathname: string,
+  bootstrapComplete: boolean,
+  workspaces: WorkspaceState,
+): boolean {
+  return (
+    pathname === "/office" &&
+    !bootstrapComplete &&
+    (!hasOfficeWorkspace(workspaces.items) || !workspaces.activeId)
+  );
+}
+
+function hasOfficeWorkspace(workspaceItems: WorkspaceState["items"]): boolean {
+  return workspaceItems.some((workspace) => Boolean(workspace.office_workflow_id));
+}
+
 type OfficeSetupState =
   | { status: "loading" }
   | { status: "ready"; props: SetupWizardRouteProps }
@@ -312,11 +407,7 @@ function OfficeSetupRoute() {
     );
   }
 
-  return (
-    <div className="flex h-full items-center justify-center">
-      <span className="text-sm text-muted-foreground">Loading...</span>
-    </div>
-  );
+  return <OfficeRouteLoading />;
 }
 
 function OfficeRouteFallback({ pathname }: { pathname: string }) {

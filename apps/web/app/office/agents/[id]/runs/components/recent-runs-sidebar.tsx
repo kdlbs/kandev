@@ -36,8 +36,8 @@ function deriveActiveRunId(pathname: string | null, fallback: string): string {
  *   navigation between sibling runs updates the highlight without
  *   re-rendering the parent.
  * - In-progress (`claimed`) rows show an animated spinner icon.
- * - Each row is a Next.js `<Link>` with `aria-current="page"` on the
- *   active one so it's keyboard-navigable + screen-reader friendly.
+ * - Each row is an app link with `aria-current="page"` on the active one
+ *   so it's keyboard-navigable + screen-reader friendly.
  */
 export function RecentRunsSidebar({ runs, agentId, activeRunId }: Props) {
   const pathname = usePathname();

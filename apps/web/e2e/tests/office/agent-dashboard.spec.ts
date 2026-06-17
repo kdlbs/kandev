@@ -168,11 +168,10 @@ test.describe("Agent dashboard", () => {
       finishedAt: new Date().toISOString(),
     });
 
-    // The page is a Server Component (page.tsx pre-fetches the
-    // summary) wrapped in a Client Component layout. The dashboard
-    // view receives the server-fetched snapshot synchronously into
-    // useState, so the chart primitives + latest-run card are present
-    // in the rendered DOM with no waiting on a client-side fetch.
+    // The route loader pre-fetches the summary before rendering the
+    // dashboard view. The view receives the snapshot synchronously into
+    // useState, so the chart primitives and latest-run card are present in
+    // the rendered DOM with no waiting on a client-side fetch.
     await testPage.goto(`/office/agents/${officeSeed.agentId}/dashboard`);
     await expect(testPage.getByTestId("latest-run-card")).toBeVisible({ timeout: 15_000 });
     await expect(testPage.getByTestId("stacked-bar").first()).toBeVisible({ timeout: 15_000 });

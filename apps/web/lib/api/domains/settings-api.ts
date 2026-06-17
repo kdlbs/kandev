@@ -357,7 +357,7 @@ export async function resizeAgentLogin(
  * Build the bi-directional WS URL for streaming a login session.
  * Derives the host from the backend config (NOT window.location) so dev mode
  * — where the browser is on :37429 and the API is on :38429 — routes to the
- * Go backend, not the Next dev server.
+ * Go backend, not the web dev server.
  */
 export function agentLoginStreamUrl(sessionID: string): string {
   const { apiBaseUrl } = getBackendConfig();

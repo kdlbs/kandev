@@ -49,9 +49,9 @@ function formatReason(reason: string): string {
 
 /**
  * Client-side runs list with cursor-based "Load more" pagination.
- * The Server Component delivers page 1; subsequent pages are
- * fetched via `listAgentRuns` and appended to a flat array. Scroll
- * position is preserved when a new page is appended.
+ * The route loader delivers page 1; subsequent pages are fetched via
+ * `listAgentRuns` and appended to a flat array. Scroll position is
+ * preserved when a new page is appended.
  */
 export function RunsListView({ initial, agentId }: Props) {
   const [pages, setPages] = useState<AgentRunsListPage[]>([initial]);

@@ -174,6 +174,7 @@ describe("AppSidebarWorkspacePicker — workspace select", () => {
 
     fireEvent.click(screen.getByTestId(KANBAN_WORKSPACE_ITEM));
 
+    expect(cookieWrites.some((c) => c.startsWith("office-active-workspace=w2"))).toBe(true);
     expect(storeState.setActiveWorkspace).toHaveBeenCalledWith("w1");
     expect(navigationMock.push).toHaveBeenCalledWith("/?workspaceId=w1");
   });

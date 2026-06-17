@@ -70,9 +70,9 @@ test.describe("Agent profile — ACP-first", () => {
       const newName = `${originalName} Renamed`;
       await nameInput.fill(newName);
 
-      // Save via the dirty-state save button (card header). The save
-      // dispatches a Next.js server action, so we wait for the dirty badge
-      // to disappear as the signal that the round-trip completed.
+      // Save via the dirty-state save button (card header). The save dispatches
+      // an action wrapper, so we wait for the dirty badge to disappear as the
+      // signal that the round-trip completed.
       const saveButton = testPage.getByRole("button", { name: /^Save( changes)?$/i }).first();
       await expect(saveButton).toBeEnabled({ timeout: 10_000 });
       await saveButton.click();

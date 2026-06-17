@@ -1,13 +1,12 @@
 /**
- * Server-side typed fetch for Next.js Server Components rendering
+ * Server-side typed fetch for legacy page loaders that still render
  * office pages. Mirrors the client-side `fetchJson` helper but
  * resolves the backend base URL from env on the server (no
- * `window`-based fallback) and skips Next.js's data cache so each
- * navigation produces fresh data — matching the live-data nature
- * of the office surface.
+ * `window`-based fallback) and defaults to no-store so each navigation
+ * produces fresh data, matching the live-data nature of the office surface.
  *
- * Use this in `page.tsx` files (Server Components) only. Client
- * Components stick with `apps/web/lib/api/domains/*` helpers.
+ * Use this in `page.tsx` route loaders only. Client Components stick
+ * with `apps/web/lib/api/domains/*` helpers.
  */
 
 import { getBackendConfig } from "@/lib/config";
@@ -20,9 +19,9 @@ export type ServerFetchOptions = {
   /** Extra request headers (Content-Type is set automatically). */
   headers?: Record<string, string>;
   /**
-   * Pass `true` to opt into Next.js caching of this request. Default
-   * is `false` because office data is live; pages should re-fetch
-   * on every server render.
+   * Pass `true` to opt into the platform fetch cache for this request.
+   * Default is `false` because office data is live; pages should re-fetch
+   * on every route render.
    */
   cache?: boolean;
 };
@@ -45,8 +44,8 @@ const OFFICE_BASE = "/api/v1/office";
  * relative to `/api/v1/office` — pass e.g. `"/agents/123/summary"`.
  * Returns the parsed JSON body, typed by the caller's generic.
  *
- * Throws `ServerFetchError` on non-2xx responses; let it bubble so
- * Next.js renders an error boundary rather than swallowing it.
+ * Throws `ServerFetchError` on non-2xx responses; callers should let it
+ * bubble to the route error surface rather than swallowing it.
  */
 export async function serverFetchOfficeJson<T>(
   path: string,

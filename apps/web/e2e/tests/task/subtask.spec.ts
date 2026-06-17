@@ -752,9 +752,9 @@ test.describe("Subtask dialog feature parity", () => {
       `backend discovery should include ${discoveredDir}; got: ${JSON.stringify(discoverData.repositories.map((r) => r.path))}`,
     ).toBe(true);
 
-    // 4. Open the subtask dialog. The discover effect fires on mount via a
-    //    Next.js server action, so we can't await a direct backend response
-    //    here. Use poll-then-open: poll for the chip option to appear,
+    // 4. Open the subtask dialog. The discover effect fires on mount via an
+    //    action wrapper, so we can't await a direct backend response here.
+    //    Use poll-then-open: poll for the chip option to appear,
     //    reopening the popover each tick because cmdk's listbox snapshots
     //    options at open time and won't update if discovery resolves while
     //    the popover is already showing.
