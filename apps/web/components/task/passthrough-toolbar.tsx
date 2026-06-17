@@ -29,6 +29,7 @@ import { PassthroughTerminal } from "./passthrough-terminal";
 import { PassthroughComposerPanel, useSendPassthroughMessage } from "./passthrough-chat-composer";
 
 function isEditableElement(element: Element | null) {
+  if (element instanceof HTMLElement && element.closest(".xterm")) return false;
   return (
     element instanceof HTMLInputElement ||
     element instanceof HTMLTextAreaElement ||
@@ -110,7 +111,7 @@ export function PassthroughToolbar({
       setComposerOpen(true);
       requestAnimationFrame(() => chatInputRef.current?.focusInput());
     }, []),
-    { enabled: !isUnboundShortcut(focusShortcut) },
+    { capture: true, enabled: !isUnboundShortcut(focusShortcut) },
   );
 
   useEffect(() => {

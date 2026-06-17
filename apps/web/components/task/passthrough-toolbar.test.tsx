@@ -349,6 +349,25 @@ describe("PassthroughToolbar – composer toggle", () => {
     expect(chatInputMock.focusInput).not.toHaveBeenCalled();
     input.remove();
   });
+
+  it("focus shortcut works when xterm helper textarea owns focus", async () => {
+    mockKeyboardShortcuts = {
+      FOCUS_PASSTHROUGH_INPUT: { key: "y", modifiers: { ctrlOrCmd: true, shift: true } },
+    };
+    renderToolbar();
+    const xterm = document.createElement("div");
+    xterm.className = "xterm";
+    const textarea = document.createElement("textarea");
+    xterm.appendChild(textarea);
+    document.body.appendChild(xterm);
+    textarea.focus();
+
+    fireEvent.keyDown(window, { key: "y", code: "KeyY", ctrlKey: true, shiftKey: true });
+
+    await waitFor(() => expect(screen.getByTestId(TID_COMPOSER)).toBeTruthy());
+    expect(chatInputMock.focusInput).toHaveBeenCalled();
+    xterm.remove();
+  });
 });
 
 // ---------------------------------------------------------------------------

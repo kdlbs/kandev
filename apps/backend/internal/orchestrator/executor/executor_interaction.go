@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -191,7 +192,7 @@ func (e *Executor) Prompt(ctx context.Context, taskID, sessionID string, prompt 
 // data is already in the PTY; only the AgentRunning event is missed.
 func (e *Executor) promptPassthrough(ctx context.Context, taskID string, session *models.TaskSession, prompt string, attachments []v1.MessageAttachment) (*PromptResult, error) {
 	sessionID := session.ID
-	promptWithAttachments, err := e.buildPassthroughPromptWithAttachments(session, prompt, attachments)
+	promptWithAttachments, err := e.buildPassthroughPromptWithAttachments(ctx, session, prompt, attachments)
 	if err != nil {
 		return nil, err
 	}
@@ -226,11 +227,11 @@ func (e *Executor) promptPassthrough(ctx context.Context, taskID string, session
 	return &PromptResult{StopReason: stopReasonPassthrough}, nil
 }
 
-func (e *Executor) buildPassthroughPromptWithAttachments(session *models.TaskSession, prompt string, attachments []v1.MessageAttachment) (string, error) {
+func (e *Executor) buildPassthroughPromptWithAttachments(ctx context.Context, session *models.TaskSession, prompt string, attachments []v1.MessageAttachment) (string, error) {
 	if len(attachments) == 0 {
 		return prompt, nil
 	}
-	workDir := strings.TrimSpace(session.WorkspacePath)
+	workDir := e.passthroughAttachmentWorkspace(ctx, session)
 	if workDir == "" {
 		return "", fmt.Errorf("passthrough attachments require a session workspace path")
 	}
@@ -248,6 +249,52 @@ func (e *Executor) buildPassthroughPromptWithAttachments(session *models.TaskSes
 		return attachmentPrompt, nil
 	}
 	return prompt + "\n\n" + attachmentPrompt, nil
+}
+
+func (e *Executor) passthroughAttachmentWorkspace(ctx context.Context, session *models.TaskSession) string {
+	if workDir := strings.TrimSpace(session.WorkspacePath); workDir != "" {
+		return workDir
+	}
+	if workDir := workspaceFromSessionWorktrees(session); workDir != "" {
+		return workDir
+	}
+	if session.TaskEnvironmentID != "" {
+		if env, err := e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID); err == nil {
+			if workDir := workspaceFromTaskEnvironment(env); workDir != "" {
+				return workDir
+			}
+		}
+	}
+	if env, err := e.repo.GetTaskEnvironmentByTaskID(ctx, session.TaskID); err == nil {
+		if workDir := workspaceFromTaskEnvironment(env); workDir != "" {
+			return workDir
+		}
+	}
+	return ""
+}
+
+func workspaceFromSessionWorktrees(session *models.TaskSession) string {
+	if len(session.Worktrees) == 0 {
+		return ""
+	}
+	first := strings.TrimSpace(session.Worktrees[0].WorktreePath)
+	if first == "" {
+		return ""
+	}
+	if len(session.Worktrees) == 1 {
+		return first
+	}
+	return filepath.Dir(first)
+}
+
+func workspaceFromTaskEnvironment(env *models.TaskEnvironment) string {
+	if env == nil {
+		return ""
+	}
+	if workDir := strings.TrimSpace(env.WorkspacePath); workDir != "" {
+		return workDir
+	}
+	return strings.TrimSpace(env.WorktreePath)
 }
 
 // SwitchModel switches the model for a running session. It first attempts an

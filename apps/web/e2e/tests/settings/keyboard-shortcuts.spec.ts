@@ -21,6 +21,8 @@ test.describe("Keyboard Shortcuts Settings", () => {
     await expect(testPage.getByTestId("shortcut-recorder-COMMAND_PANEL")).toBeVisible();
     await expect(testPage.getByTestId("shortcut-recorder-NEW_TASK")).toBeVisible();
     await expect(testPage.getByTestId("shortcut-recorder-FOCUS_INPUT")).toBeVisible();
+    await expect(testPage.getByTestId("shortcut-recorder-FOCUS_PASSTHROUGH_INPUT")).toBeVisible();
+    await expect(testPage.getByText("Focus CLI Chat Input")).toBeVisible();
     await expect(testPage.getByTestId("shortcut-recorder-TOGGLE_PLAN_MODE")).toBeVisible();
     await expect(testPage.getByTestId("shortcut-recorder-TASK_SWITCHER")).toBeVisible();
     await expect(testPage.getByTestId("shortcut-recorder-TASK_SWITCHER_REVERSE")).toBeVisible();
