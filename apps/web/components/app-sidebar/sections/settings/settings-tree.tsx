@@ -5,6 +5,7 @@ import {
   IconBolt,
   IconKey,
   IconMessageCircle,
+  IconMicrophone,
   IconPlugConnected,
   IconWand,
 } from "@tabler/icons-react";
@@ -18,6 +19,7 @@ import { WorkspacesGroup } from "./workspaces-group";
 
 const AUTOMATIONS_HREF = "/settings/automations";
 const PROMPTS_HREF = "/settings/prompts";
+const VOICE_MODE_HREF = "/settings/voice-mode";
 const UTILITY_HREF = "/settings/utility-agents";
 const SECRETS_HREF = "/settings/general/secrets";
 const EXT_MCP_HREF = "/settings/external-mcp";
@@ -78,6 +80,12 @@ export function SettingsTree({ pathname }: { pathname: string }) {
         label="Prompts"
         icon={IconMessageCircle}
         isActive={pathname === PROMPTS_HREF}
+      />
+      <SettingsLeaf
+        href={VOICE_MODE_HREF}
+        label="Voice Mode"
+        icon={IconMicrophone}
+        isActive={pathname === VOICE_MODE_HREF}
       />
       <SettingsLeaf
         href={UTILITY_HREF}

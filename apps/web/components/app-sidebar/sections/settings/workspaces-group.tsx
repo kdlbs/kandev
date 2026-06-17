@@ -34,7 +34,7 @@ export function WorkspacesGroup({ pathname, expanded, onToggle }: WorkspacesGrou
             label={workspace.name}
             href={workspacePath}
             isActive={pathname === workspacePath}
-            defaultExpanded={pathname.startsWith(workspacePath)}
+            defaultExpanded
             depth={1}
           >
             <SettingsLeaf

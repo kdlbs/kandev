@@ -26,6 +26,7 @@ describe("settingsGroupIdForPath", () => {
   it("returns null for standalone leaves with no owning group", () => {
     expect(settingsGroupIdForPath("/settings/automations")).toBeNull();
     expect(settingsGroupIdForPath("/settings/prompts")).toBeNull();
+    expect(settingsGroupIdForPath("/settings/voice-mode")).toBeNull();
     expect(settingsGroupIdForPath("/settings/utility-agents")).toBeNull();
     expect(settingsGroupIdForPath("/settings/external-mcp")).toBeNull();
     expect(settingsGroupIdForPath("/settings")).toBeNull();
