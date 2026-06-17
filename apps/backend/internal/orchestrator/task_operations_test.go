@@ -84,6 +84,116 @@ func TestPromptTask_SessionAlreadyRunning(t *testing.T) {
 	}
 }
 
+func TestPromptTask_WaitsForStartingSessionBeforePrompt(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateStarting)
+
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	session.AgentExecutionID = "exec-resumed-1"
+	session.AgentProfileID = "profile1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+	seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-resumed-1")
+
+	promptReady := make(chan struct{})
+	readinessChecked := make(chan struct{}, 1)
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+		promptResult: &executor.PromptResult{
+			StopReason:   "end_turn",
+			AgentMessage: "simple mock response",
+		},
+		isAgentReadyFn: func(_ context.Context, _ string) bool {
+			select {
+			case readinessChecked <- struct{}{}:
+			default:
+			}
+			select {
+			case <-promptReady:
+				return true
+			default:
+				return false
+			}
+		},
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateInProgress}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	done := make(chan struct {
+		result *PromptResult
+		err    error
+	}, 1)
+	go func() {
+		result, err := svc.PromptTask(ctx, "task1", "session1", "/e2e:simple-message", "", false, nil, false)
+		done <- struct {
+			result *PromptResult
+			err    error
+		}{result: result, err: err}
+	}()
+
+	go func() {
+		time.Sleep(25 * time.Millisecond)
+		readySession, err := repo.GetTaskSession(context.Background(), "session1")
+		if err != nil || readySession == nil {
+			return
+		}
+		readySession.State = models.TaskSessionStateWaitingForInput
+		readySession.UpdatedAt = time.Now().UTC()
+		_ = repo.UpdateTaskSession(context.Background(), readySession)
+	}()
+
+	select {
+	case <-readinessChecked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected PromptTask to wait for agent prompt readiness")
+	}
+
+	select {
+	case result := <-done:
+		t.Fatalf("PromptTask returned before prompt readiness: result=%#v err=%v", result.result, result.err)
+	default:
+	}
+
+	close(promptReady)
+
+	select {
+	case result := <-done:
+		if result.err != nil {
+			t.Fatalf("PromptTask failed after prompt readiness: %v", result.err)
+		}
+		if result.result == nil {
+			t.Fatal("PromptTask returned nil result")
+		}
+		if result.result.AgentMessage != "simple mock response" {
+			t.Fatalf("unexpected agent message: %q", result.result.AgentMessage)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("PromptTask did not return after prompt readiness")
+	}
+
+	agentMgr.mu.Lock()
+	prompts := append([]string(nil), agentMgr.capturedPrompts...)
+	calls := append([]promptCall(nil), agentMgr.capturedPromptCalls...)
+	agentMgr.mu.Unlock()
+	if len(prompts) != 1 {
+		t.Fatalf("expected one prompt after readiness, got %d", len(prompts))
+	}
+	if prompts[0] != "/e2e:simple-message" {
+		t.Fatalf("unexpected prompt: %q", prompts[0])
+	}
+	if len(calls) != 1 || calls[0].ExecutionID != "exec-resumed-1" {
+		t.Fatalf("unexpected prompt calls: %#v", calls)
+	}
+}
+
 func TestTrySwitchModelUpdatesRuntimeModelCache(t *testing.T) {
 	repo := setupTestRepo(t)
 	agentMgr := &mockAgentManager{

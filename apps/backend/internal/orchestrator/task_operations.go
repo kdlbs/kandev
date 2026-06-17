@@ -1089,6 +1089,26 @@ func (s *Service) waitForResumedSessionReady(ctx context.Context, sessionID stri
 	return session, nil
 }
 
+func (s *Service) waitForStartingSessionPromptable(ctx context.Context, taskID, sessionID string) (*models.TaskSession, error) {
+	s.logger.Debug("waiting for starting session to become promptable",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID))
+	if err := s.waitForSessionReady(ctx, sessionID); err != nil {
+		return nil, fmt.Errorf("session not ready for prompt: %w", err)
+	}
+	if err := s.waitForAgentPromptReady(ctx, sessionID); err != nil {
+		return nil, fmt.Errorf("agent not ready for prompt: %w", err)
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to reload session before prompt: %w", err)
+	}
+	if err := s.checkSessionPromptable(taskID, sessionID, session.State); err != nil {
+		return nil, err
+	}
+	return session, nil
+}
+
 // StartSessionForWorkflowStep starts an existing session with a workflow step's prompt configuration.
 // If the session is not running, it will be resumed first. Then a prompt is sent using the
 // step's prompt_prefix, prompt_suffix, and plan_mode settings combined with the task description.
@@ -2054,7 +2074,14 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 		return nil, fmt.Errorf("failed to get session: %w", err)
 	}
 	if err := s.checkSessionPromptable(taskID, sessionID, session.State); err != nil {
-		return nil, err
+		if !errors.Is(err, ErrSessionNotPromptable) || session.State != models.TaskSessionStateStarting {
+			return nil, err
+		}
+		readySession, waitErr := s.waitForStartingSessionPromptable(ctx, taskID, sessionID)
+		if waitErr != nil {
+			return nil, waitErr
+		}
+		session = readySession
 	}
 
 	// Inject config context for config-mode sessions (dedicated settings chat, not plan mode)
