@@ -211,7 +211,7 @@ jobs:
 
             comments_result = subprocess.run(
               [
-                "gh", "api", "--paginate", "--slurp",
+                "gh", "api", "--paginate",
                 f"repos/{os.environ['GITHUB_REPOSITORY']}/issues/{os.environ['PR_NUMBER']}/comments?per_page=100",
               ],
               text=True,
@@ -221,17 +221,10 @@ jobs:
             comment_id = None
             if comments_result.returncode == 0:
               try:
-                pages = json.loads(comments_result.stdout)
+                comments = json.loads(comments_result.stdout)
               except json.JSONDecodeError as exc:
                 print(f"Could not parse existing PR comments: {exc}")
                 comments = []
-              else:
-                comments = []
-                for page in pages:
-                  if isinstance(page, list):
-                    comments.extend(page)
-                  elif isinstance(page, dict):
-                    comments.append(page)
               for comment in reversed(comments):
                 if marker in (comment.get("body") or ""):
                   comment_id = comment.get("id")
@@ -540,7 +533,7 @@ jobs:
 
             comments_result = subprocess.run(
               [
-                "gh", "api", "--paginate", "--slurp",
+                "gh", "api", "--paginate",
                 f"repos/{os.environ['GITHUB_REPOSITORY']}/issues/{os.environ['PR_NUMBER']}/comments?per_page=100",
               ],
               text=True,
@@ -550,17 +543,10 @@ jobs:
             comment_id = None
             if comments_result.returncode == 0:
               try:
-                pages = json.loads(comments_result.stdout)
+                comments = json.loads(comments_result.stdout)
               except json.JSONDecodeError as exc:
                 print(f"Could not parse existing PR comments: {exc}")
                 comments = []
-              else:
-                comments = []
-                for page in pages:
-                  if isinstance(page, list):
-                    comments.extend(page)
-                  elif isinstance(page, dict):
-                    comments.append(page)
               for comment in reversed(comments):
                 if marker in (comment.get("body") or ""):
                   comment_id = comment.get("id")

@@ -34,7 +34,7 @@ if [[ "$model_reference_count" != "2" ]]; then
 fi
 pass "OpenCode no-suggestions comments include the model in both workflow paths"
 
-paginated_comment_lookup_count="$(count_occurrences '"gh", "api", "--paginate", "--slurp",')"
+paginated_comment_lookup_count="$(count_occurrences '"gh", "api", "--paginate",')"
 if [[ "$paginated_comment_lookup_count" != "2" ]]; then
   fail "OpenCode no-suggestions comment lookup paginates in both workflow paths"
 fi
