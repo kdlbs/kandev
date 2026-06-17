@@ -4,6 +4,7 @@ type E2EStoreWindow = Window & {
   __KANDEV_E2E_STORE__?: {
     getState: () => {
       taskSessions: { items: Record<string, Record<string, unknown>> };
+      setAvailableCommands: (sessionId: string, commands: AvailableCommand[]) => void;
     };
     setState: (
       updater: (state: {
@@ -11,6 +12,12 @@ type E2EStoreWindow = Window & {
       }) => void,
     ) => void;
   };
+};
+
+type AvailableCommand = {
+  name: string;
+  description?: string;
+  input_hint?: string;
 };
 
 /**
@@ -41,4 +48,21 @@ export async function stripSessionProfileSnapshot(page: Page, sessionId: string)
       throw new Error("Failed to strip agent_profile_snapshot from session store");
     }
   }, sessionId);
+}
+
+export async function seedAvailableCommands(
+  page: Page,
+  sessionId: string,
+  commands: AvailableCommand[],
+): Promise<void> {
+  await page.evaluate(
+    ({ sid, commandList }) => {
+      const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
+      if (!store) {
+        throw new Error("E2E store bridge missing — is __KANDEV_E2E_EXPOSE_STORE__ set?");
+      }
+      store.getState().setAvailableCommands(sid, commandList);
+    },
+    { sid: sessionId, commandList: commands },
+  );
 }
