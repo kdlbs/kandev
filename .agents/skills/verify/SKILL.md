@@ -22,36 +22,37 @@ Do NOT run the verification commands yourself in the main session when the helpe
 
 Use this only when the runtime does not permit delegated helpers/subagents. Run the full pipeline directly from the repository root and report the exact commands and results:
 
-Fresh git worktrees share `.git/` but not `apps/node_modules/`. Before running
-the pipeline, if `apps/node_modules` is missing, run:
-
 ```bash
-(cd apps && pnpm install --frozen-lockfile)
-```
+# Fresh worktrees share .git/ but not apps/node_modules.
+if [ ! -d apps/node_modules ]; then
+  (cd apps && pnpm install --frozen-lockfile)
+fi
 
-```bash
-# If the branch is behind main, rebase first:
+# If the branch is behind main, rebase first.
 git fetch origin main
+git merge-base --is-ancestor origin/main HEAD || echo "branch is behind origin/main"
 git rebase origin/main
+
+# make typecheck uses the top-level Makefile path and can bypass package
+# pretypecheck hooks, so generate web metadata before typecheck.
 make fmt
+node apps/web/scripts/generate-release-notes.mjs
+node apps/web/scripts/generate-changelog.mjs
 make typecheck
 make test
 make lint
 ```
 
-Before rebasing, check whether `origin/main` is already an ancestor of `HEAD`:
-
-```bash
-git merge-base --is-ancestor origin/main HEAD
-```
-
-If the branch is behind and the worktree is dirty, stash the current patch,
-rebase, then pop the stash before running `make fmt/typecheck/test/lint`.
-Resolve conflicts before continuing verification.
+Before rebasing, check whether `origin/main` is already an ancestor of `HEAD`.
+If `git rebase origin/main` fails because there are unstaged tracked changes,
+stash only the relevant tracked changes for the intended commit, rebase, then
+pop the stash before running `make fmt/typecheck/test/lint`. Do not stash
+unrelated user changes blindly. Resolve conflicts before continuing
+verification.
 
 If `make fmt` changes files, review the diff and continue with the remaining commands. If any command fails, fix the issue and re-run the failed command; for formatter-caused changes, re-run any affected checks before reporting success.
 
-If `make typecheck` fails because `apps/web/generated/changelog.json` or
+If `make typecheck` still fails because `apps/web/generated/changelog.json` or
 `apps/web/generated/release-notes.json` is missing, regenerate them and rerun
 `make typecheck`:
 
