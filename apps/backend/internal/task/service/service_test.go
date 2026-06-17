@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -804,6 +805,37 @@ func TestService_CreateAgentMessage(t *testing.T) {
 	}
 	if !comment.RequestsInput {
 		t.Error("expected RequestsInput to be true")
+	}
+}
+
+type failingTurnCreator struct {
+	repository.TurnRepository
+	err error
+}
+
+func (f failingTurnCreator) CreateTurn(context.Context, *models.Turn) error {
+	return f.err
+}
+
+func TestService_CreateMessageReturnsTurnStartError(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+	turnErr := errors.New("turn table unavailable")
+	svc.turns = failingTurnCreator{TurnRepository: repo, err: turnErr}
+
+	_, err := svc.CreateMessage(ctx, &CreateMessageRequest{
+		TaskSessionID: sessionID,
+		Content:       "new prompt",
+		AuthorType:    "user",
+	})
+
+	if !errors.Is(err, turnErr) {
+		t.Fatalf("CreateMessage error = %v, want wrapped turn error", err)
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "foreign key") {
+		t.Fatalf("CreateMessage returned masked FK error: %v", err)
 	}
 }
 

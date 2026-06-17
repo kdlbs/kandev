@@ -4,6 +4,7 @@ import { buildStartRequest } from "@/lib/services/session-launch-helpers";
 import { toMessageAttachments } from "@/components/task-create-dialog-helpers";
 import type { FileAttachment } from "./chat/file-attachment";
 import type { AgentProfileOption } from "@/lib/state/slices";
+import type { SummarizeSessionResult } from "@/hooks/use-summarize-session";
 
 type ToastFn = (opts: {
   title: string;
@@ -14,7 +15,7 @@ type ToastFn = (opts: {
 type SessionContextChangeOpts = {
   promptRef: RefObject<HTMLTextAreaElement | null>;
   initialPrompt: string | null;
-  summarize: (sessionId: string) => Promise<string | null>;
+  summarize: (sessionId: string) => Promise<SummarizeSessionResult>;
   toast: ToastFn;
   setContextValue: (v: string) => void;
   setHasPrompt: (v: boolean) => void;
@@ -39,16 +40,17 @@ export function useSessionContextChange(opts: SessionContextChangeOpts) {
       } else if (value.startsWith("summarize:")) {
         const sessionId = value.slice("summarize:".length);
         const result = await summarize(sessionId);
-        if (result === null) {
+        if (result.summary === null) {
           setContextValue("blank");
           toast({
             title: "Summarize failed",
             description:
+              result.error ??
               "Could not generate a summary. Check that the summarize utility agent is configured and enabled in settings.",
             variant: "error",
           });
         } else if (promptRef.current) {
-          promptRef.current.value = sanitizePromptText(result);
+          promptRef.current.value = sanitizePromptText(result.summary);
           setHasPrompt(true);
         }
       }

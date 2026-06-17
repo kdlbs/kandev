@@ -17,7 +17,7 @@ import {
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
-import { useSummarizeSession } from "@/hooks/use-summarize-session";
+import { useSummarizeSession, type SummarizeSessionResult } from "@/hooks/use-summarize-session";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { getLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
@@ -166,9 +166,10 @@ function useContextChangeHandler(opts: {
   setHasPrompt: (v: boolean) => void;
   promptRef: React.RefObject<HTMLTextAreaElement | null>;
   initialPrompt: string | null;
-  summarize: (sessionId: string) => Promise<string | null>;
+  summarize: (sessionId: string) => Promise<SummarizeSessionResult>;
+  toast: (opts: { title: string; description?: string; variant?: "error" | "default" }) => void;
 }) {
-  const { setContextValue, setHasPrompt, promptRef, initialPrompt, summarize } = opts;
+  const { setContextValue, setHasPrompt, promptRef, initialPrompt, summarize, toast } = opts;
   return useCallback(
     async (value: string) => {
       if (!value) return;
@@ -187,13 +188,22 @@ function useContextChangeHandler(opts: {
       }
       if (value.startsWith("summarize:")) {
         const result = await summarize(value.slice("summarize:".length));
-        if (result && promptRef.current) {
-          promptRef.current.value = result;
+        if (result.summary && promptRef.current) {
+          promptRef.current.value = result.summary;
           setHasPrompt(true);
+          return;
         }
+        setContextValue("blank");
+        toast({
+          title: "Summarize failed",
+          description:
+            result.error ??
+            "Could not generate a summary. Check that the summarize utility agent is configured and enabled in settings.",
+          variant: "error",
+        });
       }
     },
-    [setContextValue, setHasPrompt, promptRef, initialPrompt, summarize],
+    [setContextValue, setHasPrompt, promptRef, initialPrompt, summarize, toast],
   );
 }
 
@@ -268,6 +278,7 @@ function NewSubtaskForm({
     promptRef: promptZone.promptRef,
     initialPrompt,
     summarize,
+    toast,
   });
   const { handleSubmit } = useSubtaskSubmit({
     fs,

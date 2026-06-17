@@ -18,11 +18,13 @@ import { PassthroughComposer } from "./passthrough-composer";
 import { PRMergedBanner } from "./chat/chat-input-area";
 import { useAppStore } from "@/components/state-provider";
 import { useNextWorkflowStep } from "@/hooks/domains/kanban/use-plan-actions";
+import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
 import { usePendingDiffCommentsByFile } from "@/hooks/domains/comments/use-diff-comments";
 import { useCommentsStore } from "@/lib/state/slices/comments/comments-store";
 import { useFileEditors } from "@/hooks/use-file-editors";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { formatReviewCommentsAsMarkdown } from "@/lib/state/slices/comments/format";
+import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import type { DiffComment } from "@/lib/diff/types";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { PassthroughTerminal } from "./passthrough-terminal";
@@ -53,6 +55,11 @@ export function PassthroughToolbar({
   const sessionState = useAppStore((state) =>
     sessionId ? (state.taskSessions.items[sessionId]?.state ?? null) : null,
   );
+  const availableCommands = useAppStore((state) =>
+    sessionId ? state.availableCommands?.bySessionId?.[sessionId] : undefined,
+  );
+  const keyboardShortcuts = useAppStore((state) => state.userSettings?.keyboardShortcuts);
+  const focusShortcut = getShortcut("FOCUS_INPUT", keyboardShortcuts);
   const isAgentBusy = sessionState === "RUNNING" || sessionState === "STARTING";
 
   const nextStep = useNextWorkflowStep(taskId);
@@ -75,6 +82,18 @@ export function PassthroughToolbar({
     },
   });
 
+  useKeyboardShortcut(
+    focusShortcut,
+    useCallback(() => {
+      const el = document.activeElement;
+      const isTyping =
+        el instanceof HTMLInputElement ||
+        el instanceof HTMLTextAreaElement ||
+        (el instanceof HTMLElement && el.isContentEditable);
+      if (!isTyping) setComposerOpen(true);
+    }, []),
+  );
+
   return (
     <div className="flex h-full flex-col bg-card" data-testid="passthrough-toolbar">
       <div className="flex-1 min-h-0">
@@ -96,6 +115,9 @@ export function PassthroughToolbar({
           autoFocus
           placeholder="Type a message, Shift+Enter for newline, Esc to close"
           header={pendingCount > 0 ? <PendingCommentsHint count={pendingCount} /> : null}
+          sessionId={sessionId}
+          availableCommands={availableCommands}
+          focusShortcut={focusShortcut}
         />
       )}
 

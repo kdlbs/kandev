@@ -38,11 +38,11 @@ No per-agent pattern matchers. The existing idle window is the only readiness si
 
 For the Claude case: `claude_acp.go` sets `AutoInjectPrompt: true`, `DisableBracketedPaste: true` (Claude Code already enables bracketed-paste *mode* in its Ink TUI — injecting `ESC[200~`…`ESC[201~` delimiters breaks the prompt), and `SubmitViaBackslashEnter: true` (PTY writes: prompt, then `\`, then `\r` per [Claude terminal docs](https://code.claude.com/docs/en/terminal-config)). Ink may still treat programmatic Enter as newline only ([anthropics/claude-code#15553](https://github.com/anthropics/claude-code/issues/15553)) — if auto-submit fails, the user confirms with Enter. Other passthrough-capable agents use bracketed-paste delimiters for multi-line prompts and stay default-off for auto-inject unless configured.
 
-### Follow-up prompts via PTY stdin (backend route landed; UI surface deferred)
+### Follow-up prompts via PTY stdin
 
 The orchestrator's `PromptTask` handler branches on `IsPassthroughSession(sessionID)` and writes the prompt text + `SubmitSequence` to the agent's PTY stdin instead of sending over ACP. This is the same path used by auto-injection and is reachable today from any caller that hits `agent.prompt` for a passthrough session.
 
-**UI gap (deferred):** kandev's chat compose box is rendered by `ChatInputArea`, which is replaced entirely by `PassthroughTerminal` when `session.is_passthrough` is true. There is no compose surface in passthrough mode today. Users send follow-ups by typing directly into the terminal (xterm forwards each keystroke to the PTY) — which works perfectly for the Claude CLI use case. A dedicated kandev compose box that drives the PTY (without replacing the terminal) is a follow-up.
+`PassthroughComposer` provides the UI surface for this route. It can be opened from the passthrough toolbar or via the configured focus-input keyboard shortcut, then submits text through `message.add` for the current passthrough session.
 
 ### Kandev MCP tools are wired for CLI mode
 
@@ -50,11 +50,11 @@ When a passthrough agent supports an MCP config flag, kandev generates a per-ses
 
 For the Claude case, the passthrough command includes `--mcp-config <generated-file>` with an `mcpServers.kandev` HTTP entry for the local agentctl `/mcp` endpoint.
 
-### Stop sends Ctrl-C (backend route landed; UI surface deferred)
+### Stop sends Ctrl-C
 
 The orchestrator's `CancelAgent` handler branches on `IsPassthroughSession(sessionID)` and writes `\x03` to the PTY's stdin instead of sending an ACP cancel. DB reconciliation still runs so the UI unsticks regardless of the write outcome.
 
-**UI gap (deferred):** Same root cause as the compose-box gap — `ChatInputArea` (which hosts the Stop button) is not rendered in passthrough mode. Users today press Ctrl-C directly in the xterm terminal, which travels through the same PTY stdin path. A dedicated Stop button overlay in `PassthroughTerminal` is a follow-up.
+Users can still press Ctrl-C directly inside the xterm terminal. A dedicated toolbar button that calls the same cancel route remains a follow-up.
 
 ## Scenarios
 
@@ -118,11 +118,21 @@ The status row at the bottom of `PassthroughToolbar` contains, left to right:
 - `PRMergedBanner` — banner shown when the PR is merged.
 - `passthrough-proceed-next-step` button — moves the task to the next workflow step. Only shown when `nextStepName` is non-null and the agent is not busy (`sessionState` is not `RUNNING` or `STARTING`).
 - `ChatToggleButton` — toggles the `PassthroughComposer` open and closed. Shows `variant="default"` when the composer is open or when there are pending review comments; shows a numeric chip (`data-testid="passthrough-pending-count"`) when collapsed with pending comments.
-- Stop button (`data-testid="passthrough-stop"`) — disabled when the session is not `RUNNING` or `STARTING`.
 
 ### Default focus contract
 
 The terminal (`PassthroughTerminal`) renders above the status row and fills the remaining height. The compose box is collapsed by default so xterm retains keyboard focus for raw PTY interaction. The user opts in to the kandev composer explicitly via the Chat button.
+
+The configured focus-input keyboard shortcut also opens the composer and focuses its textarea when the user is not already typing in another input. The shortcut mirrors ACP chat focus behavior without stealing focus from the terminal by default.
+
+### Composer assistance
+
+`PassthroughComposer` supports the same lightweight authoring affordances expected from ACP compose surfaces:
+
+- Slash commands are sourced from the session's available agent commands and filtered by the typed prefix. Bundled implementation details are omitted from the menu.
+- `@` file references search workspace files for the active session and insert references as `@path/to/file`.
+- Dropping files or directories into the composer inserts `@path` references for filesystem-backed entries and falls back to uploaded file names when paths are unavailable.
+- Suggestions are keyboard navigable with Arrow Up, Arrow Down, Tab, Enter, and Escape.
 
 ### How the composer formats and sends pending review comments
 
@@ -136,7 +146,7 @@ When `PassthroughComposer` submits:
 
 ### How Stop maps to Ctrl-C
 
-Clicking the Stop button calls `client.request("agent.cancel", { session_id }, 10_000)` over WS. The WS handler calls `Service.CancelAgent` → `agentManager.CancelAgentBySessionID` in `apps/backend/internal/agent/runtime/lifecycle/manager_interaction.go`, which branches on `execution.PassthroughProcessID != ""` and writes `\x03` to PTY stdin. DB reconciliation completes regardless of the write outcome so the UI unsticks.
+Pressing Ctrl-C inside the passthrough terminal writes `\x03` to PTY stdin. A future toolbar Stop button can call `client.request("agent.cancel", { session_id }, 10_000)` over WS; that route reaches `Service.CancelAgent` -> `agentManager.CancelAgentBySessionID` in `apps/backend/internal/agent/runtime/lifecycle/manager_interaction.go`, which branches on `execution.PassthroughProcessID != ""` and writes `\x03` to PTY stdin. DB reconciliation completes regardless of the write outcome so the UI unsticks.
 
 ### Not included
 
@@ -155,7 +165,6 @@ Clicking the Stop button calls `client.request("agent.cancel", { session_id }, 1
 
 ## Follow-ups
 
-- **Compose box in passthrough mode.** Surface a dedicated kandev compose input (alongside the PTY terminal) that writes to PTY stdin via the now-wired backend route. Today users type into xterm directly, which works but is inconsistent with kandev's ACP UX.
 - **Stop button overlay in `PassthroughTerminal`.** Small affordance that calls the existing cancel route. Today users press Ctrl-C inside xterm directly.
 - **AutoInjectPrompt on other passthrough agents** (Codex CLI, OpenCode TUI, etc.) — only Claude is opted in for v1. Adding others requires verifying their submit sequence and idle behavior.
 
