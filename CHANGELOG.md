@@ -2,6 +2,14 @@
 
 All notable changes to Kandev.
 
+## 0.62.0 - 2026-06-17
+
+### Bug Fixes
+
+- preserve office sidebar workspace toggles ([#1403](https://github.com/kdlbs/kandev/pull/1403))
+- open markdown file links with line suffixes ([#1404](https://github.com/kdlbs/kandev/pull/1404))
+- expose kandev mcp tools to pi ([#1401](https://github.com/kdlbs/kandev/pull/1401))
+
 ## 0.61.0 - 2026-06-16
 
 ### Features
