@@ -110,13 +110,13 @@ The `claude_summary` line carries the **latest** Claude summary's structured fin
         - `done` if a matching review exists OR if `statusCheckRollup` shows the `cubic · AI code reviewer` check completed
         - else `pending`
 
-      - **OpenCode** (`github-actions[bot]`, inline comments plus fallback issue comment):
+      - **OpenCode** (`github-actions[bot]`, usually inline comments via a trusted wrapper; fallback issue comments are optional and may be absent):
         ```bash
         gh pr view <num> --json statusCheckRollup
         gh pr view <num> --json comments --jq '.comments[] | select(.author.login == "github-actions" and (.body | startswith("## OpenCode review")))'
         ```
-        - `done` if `statusCheckRollup` shows `opencode-review-same-repo`, `opencode-review-fork`, or the `OpenCode Code Review` workflow completed
-        - also `done` if a fallback issue comment starts with `## OpenCode review`
+        - `done` primarily from `statusCheckRollup` when `opencode-review-same-repo`, `opencode-review-fork`, or the `OpenCode Code Review` workflow completed
+        - also `done` if a fallback issue comment starts with `## OpenCode review`, but do not require that comment
         - else `pending`
 
    d. **Exit conditions:**

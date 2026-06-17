@@ -80,6 +80,8 @@ Every code change must include tests for new or changed logic. Backend: `*_test.
 ### GitHub Operations
 Skills use `gh` CLI by default. If a `gh` command fails (not installed, not authenticated, etc.), use whatever GitHub tools are available in the environment (MCP GitHub tools, API tools, etc.) to accomplish the same operation. The goal is the same — the tool may differ.
 
+For PR review/fixup workflows, prefer the repo helpers before manually querying GitHub/GraphQL: `scripts/pr-state --summary <PR>` for checks and unresolved-thread state, `scripts/pr-resolve list <PR>` for actionable unresolved review threads, and `scripts/pr-resolve reply <PR> <comment_id> <thread_id> "<body>"` to reply, resolve, and react in one call.
+
 ### Third-party integrations
 
 Jira and Linear are the model (per-workspace credentials, 90s auth-health poller via `internal/integrations/healthpoll`, settings page with status banner). New integrations should **reuse the shared shapes** rather than copying either. Full layout, file conventions, and Jira-vs-Linear divergence notes in `apps/backend/internal/integrations/AGENTS.md` and the `/add-integration` skill — load either when scaffolding a new integration.

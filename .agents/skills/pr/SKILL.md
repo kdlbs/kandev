@@ -54,6 +54,7 @@ description: Commit, push, and create a PR. Default is ready-for-review with aut
    - Remove all HTML comments/placeholders from the final body.
    - Do NOT add tool attribution footers.
    - Before creating the PR, self-check that the final body has no `<!--`, no empty required sections, and no placeholder text.
+   - When reading templates or testing files through RTK, prefer plain commands like `rtk sed -n '1,260p' .github/pull_request_template.md`. Avoid nested `rtk sh -c ...` forms; they can produce shell option noise that obscures the real command output.
 
    ```bash
    test -f .github/pull_request_template.md
@@ -65,6 +66,8 @@ description: Commit, push, and create a PR. Default is ready-for-review with aut
    Do not fall back to hand-composed `--body` prose. If creation fails, surface the exact stderr, fix the template/body-file problem, and retry with `--body-file`.
 
 5. **If ready (not draft):** Run `/pr-fixup` to wait for CI checks and CodeRabbit, Greptile, Claude, OpenCode, and cubic review feedback, fix any failures or valid comments, and push.
+
+   Immediately after creating the PR, run `scripts/pr-state --summary <PR>` once. Automated review comments and required-check failures can arrive quickly; if comments or failures appear, switch into the `/pr-fixup` flow instead of treating PR creation as complete.
 
    CodeRabbit issue comments that only report rate limits or exhausted usage credits are informational. They should not block PR completion when other review threads are resolved and checks are otherwise passing or pending.
 

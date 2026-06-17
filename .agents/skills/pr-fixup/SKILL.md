@@ -84,10 +84,14 @@ The summary output contains:
 - `failed_checks` — actionable non-green checks with `name`, `workflow`, `status`, `conclusion`, `run_id`, `job_id`, `details_url`, and `target_url`
 - `pending_checks` — still-running or queued checks with `name`, `workflow`, `status`, `run_id`, `job_id`, `details_url`, and `target_url`
 - `unresolved_review_thread_count` — total unresolved thread count on the PR, including older unresolved threads outside the current-head filter
-- `filtered_review_thread_count` and `unresolved_threads` — compact current-head inline review state to triage in this fixup pass
+- `filtered_review_thread_count` — informational count for the current-head-filtered review-thread view; it can include resolved or historical comments, so do not treat it as a blocker by itself
+- `unresolved_threads` — compact current-head inline review state to triage in this fixup pass
+- `hidden_unresolved_threads` — compact unresolved threads outside the current-head filter when historical unresolved threads exist
 - `errors` — data-gathering failures; treat affected fields as unknown instead of reconstructing them ad hoc
 
 If `scripts/pr-state --summary <PR>` briefly returns `branch:"unknown"` or reports that `gh pr view` failed while `gh pr view <PR>` works directly, treat it as a transient state-resolution issue. Re-run the explicit PR-number command once and fall back to direct `gh pr view <PR>` / targeted `gh run view` checks for that pass instead of assuming the PR state is unavailable.
+
+If `scripts/pr-state --summary <PR>` returns `since: null` with `errors` like `repo` or `since`, but still includes valid `failed_checks`, `pending_checks`, and `unresolved_review_thread_count`, use the check/thread data for that poll and rerun once on the next cadence. Do not discard usable CI state just because head-commit metadata lookup failed.
 
 If `scripts/pr-state --summary <PR>` fails with `jq: Argument list too long`, do not debug the summary script during fixup. Split the fallback checks:
 
@@ -98,9 +102,9 @@ scripts/pr-resolve list <PR>
 
 `gh pr checks` gives CI status only; `scripts/pr-resolve list` is still required for unresolved inline review threads.
 
-If `unresolved_review_thread_count` is nonzero but `unresolved_threads` is empty, run `scripts/pr-resolve list <PR>` before acting. `pr-state` can briefly report total unresolved count from historical state while current-head unresolved threads are empty; `pr-resolve list` is the authoritative actionable thread set for fixup work.
+If `unresolved_review_thread_count` is nonzero but `unresolved_threads` is empty, run `scripts/pr-resolve list <PR>` before acting. `pr-state` can briefly report total unresolved count from historical state while current-head unresolved threads are empty; `pr-resolve list` is the authoritative actionable thread set for fixup work. If `scripts/pr-state --summary` reports a nonzero unresolved count but `scripts/pr-resolve show <PR> <THREAD_ID>` says the listed thread is `resolved: true`, treat the summary as stale state. Wait briefly, rerun `scripts/pr-state --summary <PR>`, and do not reply again to an already-resolved thread.
 
-Poll at a 30s cadence with a **20 min cap**. Prefer one-shot `scripts/pr-state --summary <PR>` checks, or a bounded command that can finish naturally, over long inline shell loops. In this environment, a running non-TTY loop may not receive Ctrl-C through `write_stdin`, so avoid `while sleep ...; do ...; done` polling in the main session. Stop early if any required check fails. If the cap hits and only E2E shards are still pending with no failures or unresolved comments, report "CI in progress" instead of continuing to watch indefinitely, and include the exact pending shard names from `pending_checks`. Do not run `gh pr checks --watch` in the main session unless the runtime can keep the watcher isolated and automatically clean it up. If you do use `gh pr checks --watch`, keep watching until the command exits; GitHub can expand matrix jobs after an initial aggregate "Build" check passes, so the first green build/lint/test rows are not necessarily terminal.
+Poll at a 30s cadence with a **20 min cap**. Prefer one-shot `scripts/pr-state --summary <PR>` checks, or a bounded command that can finish naturally, over long inline shell loops. In this environment, a running non-TTY loop may not receive Ctrl-C through `write_stdin`, so avoid `while sleep ...; do ...; done` polling in the main session. Stop early if any required check fails. If the cap hits and only E2E shards are still pending with no failures or unresolved comments, report "CI in progress" instead of continuing to watch indefinitely, and include the exact pending shard names from `pending_checks`. If the user explicitly asks to poll until CI is green, continue past the normal pending-E2E stopping point with bounded one-shot `sleep N; scripts/pr-state --summary <PR>` checks; stop immediately on any `failed_checks`, and continue until `failed_checks: []`, `pending_checks: []`, and `unresolved_review_thread_count: 0`. Do not run `gh pr checks --watch` in the main session unless the runtime can keep the watcher isolated and automatically clean it up. If you do use `gh pr checks --watch`, keep watching until the command exits; GitHub can expand matrix jobs after an initial aggregate "Build" check passes, so the first green build/lint/test rows are not necessarily terminal.
 
 If a user interrupts a long manual poll loop (`sleep`, `gh pr checks`, or `scripts/pr-state`), check for leftover polling processes before switching tasks and terminate only the processes you started.
 
@@ -149,6 +153,25 @@ On long-lived PRs that get rebased/squashed, prior SHAs on the same branch often
 
 **Recognize a cancelled concurrency-duplicate before reading any logs.** A required check with `conclusion=cancelled` — often annotated *"Canceling since a higher priority waiting request … exists"*, with 0s job durations and **unexpanded** `${{ matrix.* }}` job names (a "Merge reports" job may exit 1 for missing blobs) — is a concurrency-group artifact from a superseded run, **not a real failure**. GitHub re-triggers PR workflows when the base branch moves (e.g. a release lands on main), cancelling the in-flight run. Confirm the *non-cancelled* run for the **same head SHA** passed (`gh run list --workflow "<name>" --json headSha,conclusion,databaseId`), then trigger a single clean run (rebase onto main + force-push, or `gh run rerun <id>`) instead of debugging code.
 
+**Recognize transient GitHub/API failures in semantic PR title checks.** If the
+`pr-title` / `amannn/action-semantic-pull-request` check fails with transport
+or response parsing errors such as `invalid json response body ... Unexpected
+end of JSON input`, treat it as infrastructure, not a title failure. Confirm
+the PR title is still valid Conventional Commits, rerun the failed job once,
+then re-check:
+
+```bash
+gh run rerun <run-id> --failed
+scripts/pr-state --summary <PR>
+```
+
+**Recognize E2E container setup failures before debugging tests.** If an E2E
+Containers shard fails during `Install Playwright system deps` before tests run,
+check the job log for apt repository failures. A failure like
+`packages.microsoft.com ... 403 Forbidden` from `playwright install-deps` is
+infrastructure/package-repo related, not an app or test failure. Record it as
+infra or rerun the failed job after code-related checks are clean.
+
 **E2E test failures require special handling:**
 
 If any failing check is an E2E test (Playwright):
@@ -157,7 +180,7 @@ If any failing check is an E2E test (Playwright):
 2. Follow the "Debugging failures" section — read error output, check failure screenshots in `e2e/test-results/`, classify the failure (test logic, frontend, backend)
 3. For failed shards, identify the exact failing spec/test from logs before making changes.
 4. Fix the root cause. **Never increase timeouts to fix flaky tests** — find the real issue
-5. Confirm fixes pass locally before pushing. If CI logs name a specific failed test, run that exact spec/test first before any full shard run; shard-level runs can fail on unrelated existing flakes and obscure whether the reported PR failure reproduces. Build required artifacts first if global setup needs them, then run the targeted Playwright command. Wrap with `scripts/run-quiet`:
+5. Confirm fixes pass locally before pushing. If CI logs name a specific failed test, run that exact spec/test first before any full shard run; shard-level runs can fail on unrelated existing flakes and obscure whether the reported PR failure reproduces. This still applies when the failure is a test encoding old intended behavior: run the exact failing test locally before changing the expectation, then rerun the exact test after updating it. If it still fails, treat that as a product/backend regression signal, not just a stale test. Build required artifacts first if global setup needs them, then run the targeted Playwright command. Wrap with `scripts/run-quiet`:
    ```bash
    scripts/run-quiet build -- make build-backend build-web
    scripts/run-quiet e2e -- bash -c 'cd apps && pnpm --filter @kandev/web e2e -- tests/path/to/failing.spec.ts'
@@ -175,6 +198,15 @@ scripts/pr-state --summary <PR>
 After rerunning, poll `scripts/pr-state --summary <PR>` until terminal using the bounded polling rules above.
 
 If the failed specs are in unrelated existing areas and no changed code plausibly affects that surface, record the failure as unrelated in the PR fixup summary instead of changing unrelated tests.
+
+When a UI copy rename is intentional, search E2E specs for old visible text before debugging deeper. Prefer updating assertions to the new user-facing label while keeping stable routes unchanged when route compatibility is intentional.
+
+When `gh pr checks` shows many pending E2E matrix shards and no failures, inspect the workflow once for a compact remaining-jobs list instead of repeatedly dumping the full checks table:
+
+```bash
+gh run view <run-id> --json status,conclusion,jobs \
+  --jq '{status, conclusion, remaining: [.jobs[] | select(.status != "completed" or .conclusion != "success") | {name, status, conclusion}]}'
+```
 
 **Don't dismiss a repeated failure as "flaky".** If the same shard or test fails 2+ poll iterations in a row, stop polling and do two cheap checks instead:
 
@@ -218,6 +250,8 @@ Then classify:
 - **Nitpick or preference** — subjective style not covered by linters. Skip unless the reviewer insists.
 - **Wrong or outdated** — misunderstands the code, refers to old state, or is technically incorrect. Push back with reasoning.
 
+For review comments about CI/workflow changes, account for `pull_request_target` trust boundaries. Source agent instructions from the base commit or trusted workflow content, not PR-head harness/config files; keep `GH_TOKEN` out of direct model execution when a trusted wrapper can post comments afterward; and validate model-produced comment targets against the computed diff scope before posting.
+
 **Push back when:**
 - The suggestion breaks existing functionality
 - The reviewer lacks full context (explain what they're missing)
@@ -257,12 +291,17 @@ scripts/pr-resolve show <PR> <THREAD_ID>
 scripts/pr-resolve show <PR> <COMMENT_ID>
 
 # Reply syntax is: scripts/pr-resolve reply <PR> <comment_id> <thread_id> <body>
+# Note the order: list prints <thread_id> then <comment_id>, but reply takes
+# <comment_id> before <thread_id>. If reply returns "Parent comment not found",
+# first check whether those two IDs were swapped.
 #
 # Reply + resolve + +1 (same call whether you're agreeing or pushing back —
 # the body text conveys which):
 scripts/pr-resolve reply <PR> <COMMENT_ID> <THREAD_ID> "Fixed — monotonic counter via useRef. See commit abc1234."
 scripts/pr-resolve reply <PR> <COMMENT_ID> <THREAD_ID> "Acknowledged; the strict source check was relaxed for E2E. Tracking as a follow-up."
 ```
+
+If `scripts/pr-resolve reply` fails mid-flight, run `scripts/pr-resolve show <PR> <THREAD_ID>` and `scripts/pr-resolve list <PR>` before retrying. Confirm whether the reply landed and only resolve/reaction failed, so you do not post a duplicate reply.
 
 `scripts/pr-resolve list` only prints previews. Before deciding whether a thread is valid, stale, duplicate, or already fixed, fetch the full comment/thread body:
 

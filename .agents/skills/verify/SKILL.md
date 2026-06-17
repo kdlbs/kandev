@@ -22,6 +22,13 @@ Do NOT run the verification commands yourself in the main session when the helpe
 
 Use this only when the runtime does not permit delegated helpers/subagents. Run the full pipeline directly from the repository root and report the exact commands and results:
 
+Fresh git worktrees share `.git/` but not `apps/node_modules/`. Before running
+the pipeline, if `apps/node_modules` is missing, run:
+
+```bash
+cd apps && pnpm install --frozen-lockfile
+```
+
 ```bash
 # If the branch is behind main, rebase first:
 git fetch origin main
@@ -32,7 +39,27 @@ make test
 make lint
 ```
 
+Before rebasing, check whether `origin/main` is already an ancestor of `HEAD`:
+
+```bash
+git merge-base --is-ancestor origin/main HEAD
+```
+
+If the branch is behind and the worktree is dirty, stash the current patch,
+rebase, then pop the stash before running `make fmt/typecheck/test/lint`.
+Resolve conflicts before continuing verification.
+
 If `make fmt` changes files, review the diff and continue with the remaining commands. If any command fails, fix the issue and re-run the failed command; for formatter-caused changes, re-run any affected checks before reporting success.
+
+If `make typecheck` fails because `apps/web/generated/changelog.json` or
+`apps/web/generated/release-notes.json` is missing, regenerate them and rerun
+`make typecheck`:
+
+```bash
+cd apps/web
+node scripts/generate-release-notes.mjs
+node scripts/generate-changelog.mjs
+```
 
 If the aggregate `make lint` wrapper stalls or does not provide useful progress, run the backend and frontend lint checks directly instead and record the substitution in your result:
 

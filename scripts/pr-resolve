@@ -31,6 +31,23 @@ usage() {
 
 cmd=$1; shift
 
+case "$cmd" in
+  -h | --help | help)
+    usage 0
+    ;;
+esac
+
+if [[ "$cmd" == "reply" && $# -eq 4 ]]; then
+  if [[ "$2" == PRRT_* ]]; then
+    echo "reply expects comment_id before thread_id; got a review thread ID in the comment_id position" >&2
+    exit 1
+  fi
+  if [[ "$3" != PRRT_* ]]; then
+    echo "reply expects thread_id after comment_id; got a non-review-thread ID in the thread_id position" >&2
+    exit 1
+  fi
+fi
+
 read -r OWNER REPO < <(gh repo view --json owner,name --jq '"\(.owner.login) \(.name)"')
 
 case "$cmd" in

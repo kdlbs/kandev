@@ -461,6 +461,8 @@ test_summary_mode_returns_compact_fixup_state() {
   assert_jq "summary filtered thread count" '.filtered_review_thread_count == 1' "$json"
   assert_jq "summary unresolved threads" '.unresolved_threads | length == 1' "$json"
   assert_jq "summary unresolved thread fields" '.unresolved_threads[0] | .thread_id == "PRRT_1" and .comment_id == 112 and .author == "greptile-apps[bot]"' "$json"
+  assert_jq "summary hidden unresolved threads" '.hidden_unresolved_threads | length == 1' "$json"
+  assert_jq "summary hidden unresolved thread fields" '.hidden_unresolved_threads[0] | .thread_id == "PRRT_2" and .comment_id == 222 and .author == "cubic-dev-ai[bot]"' "$json"
   assert_jq "summary omits raw arrays" 'has("checks") | not' "$json"
   assert_jq "summary no errors" '.errors == []' "$json"
   pass "--summary returns compact fixup state"
@@ -480,6 +482,7 @@ test_summary_all_flag_includes_historical_unresolved_threads() {
   assert_jq "summary all filtered thread count" '.filtered_review_thread_count == 2' "$json"
   assert_jq "summary all keeps historical first comment" '.unresolved_threads[] | select(.thread_id == "PRRT_1") | .comment_id == 111' "$json"
   assert_jq "summary all unresolved threads count" '.unresolved_threads | length == 2' "$json"
+  assert_jq "summary all has no hidden unresolved threads" '.hidden_unresolved_threads == []' "$json"
   pass "--summary --all includes historical unresolved thread comments"
 }
 
