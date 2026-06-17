@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, memo } from "react";
+import { useState, memo, useCallback } from "react";
 import {
   IconCheck,
   IconX,
@@ -16,6 +16,7 @@ import { DiffViewBlock } from "./diff-view-block";
 import { ExpandableRow } from "./expandable-row";
 import { transformFileMutation, type FileMutation } from "@/lib/diff";
 import { useExpandState } from "./use-expand-state";
+import { setPendingCursorPosition } from "@/hooks/use-file-editors";
 
 type ModifyFilePayload = {
   file_path?: string;
@@ -138,6 +139,7 @@ function parseEditMetadata(comment: Message) {
   return {
     status,
     filePath,
+    startLine: mutation?.start_line,
     writeContent,
     isWriteOperation,
     diffData,
@@ -155,6 +157,7 @@ export const ToolEditMessage = memo(function ToolEditMessage({
   const {
     status,
     filePath,
+    startLine,
     writeContent,
     isWriteOperation,
     diffData,
@@ -177,6 +180,16 @@ export const ToolEditMessage = memo(function ToolEditMessage({
     }
   };
 
+  // Navigate the editor to the first changed line, reusing the pending-cursor
+  // mechanism the LSP opener uses; consumed on editor mount.
+  const handleOpenFile = useCallback(
+    (path: string) => {
+      if (startLine && startLine > 0) setPendingCursorPosition(path, startLine, 1);
+      onOpenFile?.(path);
+    },
+    [onOpenFile, startLine],
+  );
+
   return (
     <ExpandableRow
       icon={<Icon className="h-4 w-4 text-muted-foreground" />}
@@ -190,7 +203,7 @@ export const ToolEditMessage = memo(function ToolEditMessage({
             <FileActionButton
               filePath={filePath}
               worktreePath={worktreePath}
-              onOpenFile={onOpenFile}
+              onOpenFile={onOpenFile ? handleOpenFile : undefined}
               copied={copied}
               onCopyPath={handleCopyPath}
             />

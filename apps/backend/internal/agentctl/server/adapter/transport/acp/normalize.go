@@ -391,13 +391,11 @@ func (n *Normalizer) normalizeEdit(args map[string]any) *streams.NormalizedPaylo
 			Type: streams.MutationPatch,
 		}
 
-		// Add line numbers if available
-		if startLine, ok := rawInput["old_str_start_line_number_1"].(float64); ok {
-			mutation.StartLine = int(startLine)
-		}
-		if endLine, ok := rawInput["old_str_end_line_number_1"].(float64); ok {
-			mutation.EndLine = int(endLine)
-		}
+		// Line numbers vary by agent: Claude's str-replace editor uses
+		// old_str_*_line_number_1, OMP uses startLine/endLine. Accept both
+		// (plus snake_case) so edit links can navigate to the changed lines.
+		mutation.StartLine = firstInt(rawInput, "old_str_start_line_number_1", "startLine", "start_line")
+		mutation.EndLine = firstInt(rawInput, "old_str_end_line_number_1", "endLine", "end_line")
 
 		// Generate unified diff when at least one string is provided
 		if oldStr != "" || newStr != "" {
@@ -409,6 +407,18 @@ func (n *Normalizer) normalizeEdit(args map[string]any) *streams.NormalizedPaylo
 
 	// Use factory function
 	return streams.NewModifyFile(path, mutations)
+}
+
+// firstInt returns the first key whose value is a non-zero int, handling JSON
+// numbers (decoded as float64). Line/column numbers are 1-based, so a missing
+// or zero value is treated as absent.
+func firstInt(m map[string]any, keys ...string) int {
+	for _, k := range keys {
+		if v := shared.GetInt(m, k); v != 0 {
+			return v
+		}
+	}
+	return 0
 }
 
 // normalizeRead converts ACP read tool data.

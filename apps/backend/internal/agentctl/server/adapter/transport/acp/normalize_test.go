@@ -393,6 +393,40 @@ func TestNormalizerEdit(t *testing.T) {
 			t.Errorf("expected FilePath 'src/main.go', got %q", result.ModifyFile().FilePath)
 		}
 	})
+
+	t.Run("extracts omp startLine/endLine into mutation", func(t *testing.T) {
+		result := normalizer.NormalizeToolCall("edit", map[string]any{
+			"kind": "edit",
+			"raw_input": map[string]any{
+				"path":      "main.go",
+				"old_str_1": "a",
+				"new_str_1": "b",
+				"startLine": float64(43),
+				"endLine":   float64(94),
+			},
+		})
+		m := result.ModifyFile().Mutations[0]
+		if m.StartLine != 43 || m.EndLine != 94 {
+			t.Errorf("expected StartLine=43 EndLine=94, got %d/%d", m.StartLine, m.EndLine)
+		}
+	})
+
+	t.Run("still extracts claude old_str line numbers", func(t *testing.T) {
+		result := normalizer.NormalizeToolCall("edit", map[string]any{
+			"kind": "edit",
+			"raw_input": map[string]any{
+				"path":                        "main.go",
+				"old_str_1":                   "a",
+				"new_str_1":                   "b",
+				"old_str_start_line_number_1": float64(10),
+				"old_str_end_line_number_1":   float64(12),
+			},
+		})
+		m := result.ModifyFile().Mutations[0]
+		if m.StartLine != 10 || m.EndLine != 12 {
+			t.Errorf("expected StartLine=10 EndLine=12, got %d/%d", m.StartLine, m.EndLine)
+		}
+	})
 }
 
 // TestNormalizerRead tests the normalizer's read handling.

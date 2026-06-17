@@ -1,12 +1,13 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useCallback } from "react";
 import { IconCheck, IconX, IconFileCode2 } from "@tabler/icons-react";
 import { GridSpinner } from "@/components/grid-spinner";
 import { FilePathButton } from "./file-path-button";
 import type { Message } from "@/lib/types/http";
 import { ExpandableRow } from "./expandable-row";
 import { useExpandState } from "./use-expand-state";
+import { setPendingCursorPosition } from "@/hooks/use-file-editors";
 
 type ReadFileOutput = {
   content?: string;
@@ -63,10 +64,11 @@ function parseReadMetadata(comment: Message) {
   const readFile = metadata?.normalized?.read_file;
   const readOutput = readFile?.output;
   const filePath = readFile?.file_path;
+  const startLine = readFile?.offset;
   const lineRange = formatLineRange(readFile?.offset, readFile?.limit);
   const hasOutput = !!readOutput?.content;
   const isSuccess = status === "complete";
-  return { status, readOutput, filePath, lineRange, hasOutput, isSuccess };
+  return { status, readOutput, filePath, startLine, lineRange, hasOutput, isSuccess };
 }
 
 export const ToolReadMessage = memo(function ToolReadMessage({
@@ -74,10 +76,19 @@ export const ToolReadMessage = memo(function ToolReadMessage({
   worktreePath,
   onOpenFile,
 }: ToolReadMessageProps) {
-  const { status, readOutput, filePath, lineRange, hasOutput, isSuccess } =
+  const { status, readOutput, filePath, startLine, lineRange, hasOutput, isSuccess } =
     parseReadMetadata(comment);
   const autoExpanded = status === "running";
   const { isExpanded, handleToggle } = useExpandState(status, autoExpanded);
+  // Navigate the editor to the line the agent read (offset), reusing the
+  // pending-cursor mechanism the LSP opener uses; consumed on editor mount.
+  const handleOpenFile = useCallback(
+    (path: string) => {
+      if (startLine && startLine > 0) setPendingCursorPosition(path, startLine, 1);
+      onOpenFile?.(path);
+    },
+    [onOpenFile, startLine],
+  );
 
   return (
     <ExpandableRow
@@ -95,7 +106,7 @@ export const ToolReadMessage = memo(function ToolReadMessage({
               <FilePathButton
                 filePath={filePath}
                 worktreePath={worktreePath}
-                onOpenFile={onOpenFile}
+                onOpenFile={onOpenFile ? handleOpenFile : undefined}
               />
               {lineRange && (
                 <span className="font-mono text-xs text-muted-foreground/70 shrink-0">
