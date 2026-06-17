@@ -1,6 +1,8 @@
 // Package events provides event types and utilities for the Kandev event system.
 package events
 
+import "time"
+
 // Event types for tasks
 const (
 	TaskCreated      = "task.created"
@@ -229,12 +231,24 @@ const (
 const (
 	GitHubPRFeedback       = "github.pr_feedback"        // PR has new feedback (UI notification only)
 	GitHubPRStateChanged   = "github.pr_state_changed"   // PR state changed (merged, closed, etc.)
+	GitHubPRMerged         = "github.pr_merged"          // PR transitioned to merged (merged_at: nil -> time); fires once per merge
 	GitHubNewReviewPR      = "github.new_pr_to_review"   // New PR found needing review
 	GitHubNewIssue         = "github.new_issue"          // New issue found matching issue watch
 	GitHubTaskPRUpdated    = "github.task_pr.updated"    // TaskPR record updated (for UI refresh)
 	GitHubWatchEvent       = "github.watch.event"        // Watch created/deleted
 	GitHubRateLimitUpdated = "github.rate_limit.updated" // GitHub API rate-limit snapshot changed
 )
+
+// GitHubPRMergedEvent is the payload of a GitHubPRMerged bus event. It carries
+// just the identifiers needed by downstream subscribers (workflow engine,
+// Mantis push, etc.) so the github package owns the transition detection and
+// consumers don't need to re-derive "did this PR just merge?" from a full
+// TaskPR diff.
+type GitHubPRMergedEvent struct {
+	TaskID   string    `json:"task_id"`
+	PRNumber int       `json:"pr_number"`
+	MergedAt time.Time `json:"merged_at"`
+}
 
 // Event types for GitLab integration
 const (

@@ -505,6 +505,9 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 	if err != nil || tp == nil {
 		return err
 	}
+	// Snapshot MergedAt before the field reassignments below so we can detect
+	// the nil -> time transition and publish GitHubPRMerged exactly once.
+	prevMergedAt := tp.MergedAt
 
 	// Some sync paths (notably the batched GraphQL poller) don't populate
 	// ChecksTotal / ChecksPassing — they only carry the rollup state. The
@@ -598,7 +601,27 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 			s.logger.Debug("failed to publish task PR updated event", zap.Error(err))
 		}
 	}
+	s.publishPRMergedIfTransitioned(ctx, taskID, tp.PRNumber, prevMergedAt, status.PR.MergedAt)
 	return nil
+}
+
+// publishPRMergedIfTransitioned emits a GitHubPRMerged event when MergedAt
+// crosses from nil to a concrete time. Only the transition fires the event —
+// a second sync with the same MergedAt, or a row that was already merged
+// when first written, are both no-ops, so workflow subscribers can treat the
+// event as a one-shot merge trigger without their own deduplication.
+func (s *Service) publishPRMergedIfTransitioned(ctx context.Context, taskID string, prNumber int, prev, next *time.Time) {
+	if prev != nil || next == nil || s.eventBus == nil {
+		return
+	}
+	event := bus.NewEvent(events.GitHubPRMerged, "github", events.GitHubPRMergedEvent{
+		TaskID:   taskID,
+		PRNumber: prNumber,
+		MergedAt: *next,
+	})
+	if err := s.eventBus.Publish(ctx, events.GitHubPRMerged, event); err != nil {
+		s.logger.Debug("failed to publish PR merged event", zap.Error(err))
+	}
 }
 
 // TriggerPRSync performs an immediate PR status sync for a task. Single-repo
