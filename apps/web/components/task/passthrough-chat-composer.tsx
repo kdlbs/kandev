@@ -91,7 +91,7 @@ type PassthroughFinalMessage = {
   contextFilesMeta?: Array<{ path: string; name: string }>;
 };
 
-function formatPassthroughBaseMessage(
+export function formatPassthroughBaseMessage(
   content: string,
   reviewComments: DiffComment[] | undefined,
   pendingComments: DiffComment[],
@@ -122,7 +122,7 @@ function formatPassthroughBaseMessage(
   return { formatted: content, commentsToSend };
 }
 
-function buildPassthroughFinalMessage({
+export function buildPassthroughFinalMessage({
   content,
   reviewComments,
   pendingComments,
@@ -158,7 +158,7 @@ function buildPassthroughFinalMessage({
   };
 }
 
-function buildContextFilesMeta(files: ContextFile[]) {
+export function buildContextFilesMeta(files: ContextFile[]) {
   const realContextFiles = files.filter(
     (f) => !f.path.startsWith("prompt:") && f.path !== "plan:context",
   );
@@ -193,7 +193,7 @@ async function requestPassthroughMessage({
   );
 }
 
-function clearPassthroughComposerContext(panelState: ReturnType<typeof useChatPanelState>) {
+export function clearPassthroughComposerContext(panelState: ReturnType<typeof useChatPanelState>) {
   if (panelState.pendingPRFeedback.length > 0) {
     panelState.handleClearPRFeedback();
   }

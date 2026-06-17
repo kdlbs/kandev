@@ -42,7 +42,7 @@ For the Claude case: `claude_acp.go` sets `AutoInjectPrompt: true`, `DisableBrac
 
 The orchestrator's `PromptTask` handler branches on `IsPassthroughSession(sessionID)` and writes the prompt text + `SubmitSequence` to the agent's PTY stdin instead of sending over ACP. This is the same path used by auto-injection and is reachable today from any caller that hits `agent.prompt` for a passthrough session.
 
-`PassthroughComposer` provides the UI surface for this route. It can be opened from the passthrough toolbar or via the configured focus-input keyboard shortcut, then submits text through `message.add` for the current passthrough session.
+`PassthroughToolbar` provides the UI surface for this route. Its chat control opens `PassthroughComposerPanel`, which wraps the shared `ChatInputContainer` so passthrough follow-ups use the same rich input, context chips, attachment control, and plan-mode toggle as ACP task chat. Submissions go through `message.add` for the current passthrough session and are written to PTY stdin by the backend.
 
 ### Kandev MCP tools are wired for CLI mode
 
@@ -108,7 +108,7 @@ Users can still press Ctrl-C directly inside the xterm terminal. A dedicated too
 `PassthroughToolbar` (`apps/web/components/task/passthrough-toolbar.tsx`) wraps `PassthroughTerminal` with the same kandev controls that ACP sessions get from `ChatStatusBar` + `ChatInputArea`. It is mounted:
 
 - Full-page task view: `dockview-shared.tsx` (`DockviewSharedContent`) renders it for passthrough sessions in place of the chat input area; the dockview desktop layout in `task-center-panel.tsx` uses the same shared content.
-- Kanban Preview tab: `preview-session-tabs.tsx` renders `PassthroughComposer` directly (compose-only, no terminal wrap) for passthrough sessions in the side-peek surface.
+- Kanban Preview tab: `preview-session-tabs.tsx` renders `PassthroughToolbar` for passthrough sessions in the side-peek surface, so the preview and full-page task views share the same terminal, status row, and composer behavior.
 
 ### What it surfaces
 
@@ -117,32 +117,34 @@ The status row at the bottom of `PassthroughToolbar` contains, left to right:
 - `PRStatusChip` — PR open/merged/draft indicator for the task.
 - `PRMergedBanner` — banner shown when the PR is merged.
 - `passthrough-proceed-next-step` button — moves the task to the next workflow step. Only shown when `nextStepName` is non-null and the agent is not busy (`sessionState` is not `RUNNING` or `STARTING`).
-- `ChatToggleButton` — toggles the `PassthroughComposer` open and closed. Shows `variant="default"` when the composer is open or when there are pending review comments; shows a numeric chip (`data-testid="passthrough-pending-count"`) when collapsed with pending comments.
+- `ChatToggleButton` — toggles `PassthroughComposerPanel` open and closed. Shows `variant="default"` when the composer is open or when there are pending review comments; shows a numeric chip (`data-testid="passthrough-pending-count"`) when collapsed with pending comments.
 
 ### Default focus contract
 
 The terminal (`PassthroughTerminal`) renders above the status row and fills the remaining height. The compose box is collapsed by default so xterm retains keyboard focus for raw PTY interaction. The user opts in to the kandev composer explicitly via the Chat button.
 
-The configured focus-input keyboard shortcut also opens the composer and focuses its textarea when the user is not already typing in another input. The shortcut mirrors ACP chat focus behavior without stealing focus from the terminal by default.
+Passthrough sessions have a dedicated configurable focus shortcut, `FOCUS_PASSTHROUGH_INPUT` (`Focus CLI Chat Input`, default `Cmd/Ctrl+Shift+Y`). It opens the composer and focuses the rich input when the user is not already typing in another input. The global ACP chat focus shortcut remains separate so pressing `/` while the terminal has focus continues to go to the PTY.
 
 ### Composer assistance
 
-`PassthroughComposer` supports the same lightweight authoring affordances expected from ACP compose surfaces:
+`PassthroughComposerPanel` delegates authoring to `ChatInputContainer` with passthrough-specific command behavior:
 
-- Slash commands are sourced from the session's available agent commands and filtered by the typed prefix. Bundled implementation details are omitted from the menu.
-- `@` file references search workspace files for the active session and insert references as `@path/to/file`.
-- Dropping files or directories into the composer inserts `@path` references for filesystem-backed entries and falls back to uploaded file names when paths are unavailable.
-- Suggestions are keyboard navigable with Arrow Up, Arrow Down, Tab, Enter, and Escape.
+- Slash command suggestions are disabled (`hasAgentCommands={false}`) because passthrough sessions do not receive ACP-reported slash-command capabilities. A literal `/` typed in the composer remains text, and a `/` typed while the terminal has focus goes to the PTY.
+- `@` file, prompt, plan, and task mentions use the shared rich-input lookup. Selected items render as the same context chips used by ACP chat.
+- The top chip bar shows selected context items. The bottom toolbar provides plan mode, attachment upload, and context-item add controls.
+- Uploaded attachments are sent through `message.add`; for passthrough sessions the backend materializes them under `.kandev/attachments/<session>/...` and appends their file paths to the PTY prompt.
+- File and prompt context items are expanded into `<kandev-system>` context blocks before sending. Real filesystem-backed files are also sent as `context_files` metadata.
 
 ### How the composer formats and sends pending review comments
 
-When `PassthroughComposer` submits:
+When `PassthroughComposerPanel` submits:
 
 1. `usePendingDiffCommentsByFile(sessionId)` provides comments grouped by file path.
-2. Non-empty `pendingComments` are formatted via `formatReviewCommentsAsMarkdown` (produces `### Review Comments\n…`) and prepended to the typed text.
-3. The combined string is sent via `client.request("message.add", { task_id, session_id, content }, 10_000)`.
-4. `markCommentsSent(ids)` is called only on WS success — a failed send leaves both the composer open (typed text preserved for retry) and the comments pending.
-5. A `PendingCommentsBanner` (`data-testid="passthrough-pending-comments-banner"`) renders inside the open composer when `pendingCount > 0`.
+2. Non-empty pending diff comments are formatted via `formatReviewCommentsAsMarkdown` or the shared `buildSubmitMessage` path, then included with the typed text.
+3. Selected context files, prompt mentions, and task mentions are appended as system context blocks. Real context files are included in `context_files`; uploaded attachments are included in `attachments`.
+4. The combined payload is sent via `client.request("message.add", { task_id, session_id, content, attachments?, context_files? }, timeout)`.
+5. `markCommentsSent(ids)` is called only on WS success — a failed send leaves both the composer open (typed text preserved for retry) and the comments pending.
+6. A `PendingCommentsBanner` (`data-testid="passthrough-pending-comments-banner"`) renders inside the open composer when `pendingCount > 0`.
 
 ### How Stop maps to Ctrl-C
 
@@ -151,7 +153,6 @@ Pressing Ctrl-C inside the passthrough terminal writes `\x03` to PTY stdin. A fu
 ### Not included
 
 - `TodoIndicator` — ACP-only (requires message stream); not rendered in `PassthroughToolbar`.
-- Plan-comments and PR-feedback attachment — same pattern as diff comments if needed in future; deferred.
 - Per-message model/mode picker — ACP-only feature; not applicable to PTY sessions.
 
 ## Out of scope
