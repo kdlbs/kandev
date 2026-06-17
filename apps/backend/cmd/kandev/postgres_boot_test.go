@@ -66,10 +66,15 @@ func TestPostgresBootInitializesRepositories(t *testing.T) {
 		}
 	})
 
-	agentRegistry, _, err := registry.Provide(log)
+	agentRegistry, registryCleanup, err := registry.Provide(log)
 	if err != nil {
 		t.Fatalf("provide agent registry: %v", err)
 	}
+	t.Cleanup(func() {
+		if registryCleanup != nil {
+			_ = registryCleanup()
+		}
+	})
 	services, agentSettingsController, err := provideServices(
 		cfg,
 		log,
