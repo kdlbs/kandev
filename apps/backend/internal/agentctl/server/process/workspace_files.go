@@ -280,12 +280,17 @@ func resolveNonExistentPath(path string) (string, error) {
 // If the file is not valid UTF-8, it is base64-encoded and isBinary is true.
 // If the file is a symlink, resolvedPath contains the target path relative to the workspace root.
 func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, bool, string, error) {
-	// Tolerate an omp read-selector left on the path (e.g. "foo.go:43-94").
-	// Such paths reach here from file links in already-persisted messages (and
-	// any normalization gap); without stripping, the selector makes both the
-	// workspace stat and the external-absolute-path fallback fail. The line
-	// range is irrelevant to serving content (the viewer scrolls separately).
+	// Tolerate an omp read-selector left on the path (e.g. "foo.go:43-94" or a
+	// multi-range "foo.go:16-20,32-40"). Such paths reach here from file links
+	// in already-persisted messages (and any normalization gap); without
+	// stripping, the selector makes both the workspace stat and the
+	// external-absolute-path fallback fail. The line range is irrelevant to
+	// serving content (the viewer scrolls separately).
 	reqPath, _, _ = readselector.Split(reqPath)
+	// omp also issues reads with a "~"-prefixed home path; expand it so the
+	// external-absolute-path fallback can resolve it (a literal "~/…" is
+	// neither workspace-relative nor absolute, so it would otherwise ENOENT).
+	reqPath = expandHomePath(reqPath)
 	safePath, err := wt.resolveSafePath(reqPath)
 	if err != nil {
 		if errors.Is(err, errPathTraversal) {
@@ -304,6 +309,24 @@ func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, bool,
 
 	content, size, isBinary, err := readFileContent(safePath)
 	return content, size, isBinary, resolvedPath, err
+}
+
+// expandHomePath expands a leading "~" or "~/" to the current user's home
+// directory. omp emits read paths like "~/.kandev/…"; a literal tilde is not a
+// real filesystem path, so it must be expanded before stat/serve. Other paths
+// (absolute, workspace-relative) are returned unchanged.
+func expandHomePath(path string) string {
+	if path != "~" && !strings.HasPrefix(path, "~/") {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return path
+	}
+	if path == "~" {
+		return home
+	}
+	return filepath.Join(home, path[2:])
 }
 
 func readFileContent(safePath string) (string, int64, bool, error) {

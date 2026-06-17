@@ -24,6 +24,11 @@ func TestSplit(t *testing.T) {
 		{"absolute path", "/home/u/.kandev/x/handlers.go:43-94", "/home/u/.kandev/x/handlers.go", 43, 52},
 		{"absolute external", "/home/clem/.claude/CLAUDE.md:93-113", "/home/clem/.claude/CLAUDE.md", 93, 21},
 		{"no extension single line", "Makefile:10", "Makefile", 10, 0},
+		// Real OMP reads observed in the wild (multi-range, zero-length range,
+		// range+mode combo, and a "~"-prefixed home path).
+		{"omp multi range zero-len", "x/README.md:16-20,32-40,69-69,85-96", "x/README.md", 16, 5},
+		{"omp range plus raw combo", "x/README.md:69+1:raw", "x/README.md", 69, 1},
+		{"omp tilde multi range", "~/.kandev/x/README.md:27-28,35-36,66-66", "~/.kandev/x/README.md", 27, 2},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

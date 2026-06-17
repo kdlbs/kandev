@@ -591,6 +591,31 @@ func TestGetFileContent_StripsReadSelector(t *testing.T) {
 	}
 }
 
+// TestGetFileContent_ExpandsTildeWithMultiRange covers OMP reads that arrive as
+// a "~"-prefixed home path with a multi-range selector
+// (e.g. "~/.kandev/x/README.md:16-20,32-40,69-69,85-96"): the tilde must be
+// expanded and the whole multi-range selector stripped for the open to succeed.
+func TestGetFileContent_ExpandsTildeWithMultiRange(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	sub := filepath.Join(home, "notes")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	want := "global config\n"
+	if err := os.WriteFile(filepath.Join(sub, "GLOBAL.md"), []byte(want), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	_, wt := setupTestDir(t)
+	got, _, _, _, err := wt.GetFileContent("~/notes/GLOBAL.md:16-20,32-40,69-69,85-96")
+	if err != nil {
+		t.Fatalf("GetFileContent(tilde + multi-range) error: %v", err)
+	}
+	if got != want {
+		t.Fatalf("content = %q, want %q", got, want)
+	}
+}
+
 // setupTestDir creates a temp directory with a WorkspaceTracker (no git required).
 func setupTestDir(t *testing.T) (string, *WorkspaceTracker) {
 	t.Helper()
