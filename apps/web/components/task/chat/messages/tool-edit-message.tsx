@@ -124,6 +124,8 @@ function EditExpandedContent({ diffData, writeContent }: EditExpandedContentProp
   return null;
 }
 
+// parseEditMetadata pulls the edit status, file path, first-changed line,
+// diff/write content, and expandability out of a tool_edit message's metadata.
 function parseEditMetadata(comment: Message) {
   const metadata = comment.metadata as ToolEditMetadata | undefined;
   const status = metadata?.status;

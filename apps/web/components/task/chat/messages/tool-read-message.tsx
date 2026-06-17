@@ -44,6 +44,7 @@ function ReadStatusIcon({ status }: { status: string | undefined }) {
   return null;
 }
 
+// getReadSummary returns the short "Read N lines" header label for the card.
 function getReadSummary(lineCount: number | undefined): string {
   if (lineCount) return `Read ${lineCount} line${lineCount !== 1 ? "s" : ""}`;
   return "Read";
@@ -58,6 +59,8 @@ function formatLineRange(offset: number | undefined, limit: number | undefined):
   return `:${offset}`;
 }
 
+// parseReadMetadata pulls the read status, file path, line range, and output
+// out of a tool_read message's normalized metadata for rendering.
 function parseReadMetadata(comment: Message) {
   const metadata = comment.metadata as ToolReadMetadata | undefined;
   const status = metadata?.status;

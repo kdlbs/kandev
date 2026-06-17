@@ -314,6 +314,9 @@ func updateModifyFileInput(mf *streams.ModifyFilePayload, supplemental, inputMap
 	}
 }
 
+// updateReadFileInput fills a ReadFile payload from a tool_call_update: it sets
+// FilePath (when still empty) to the selector-stripped path and populates
+// Offset/Limit from the parsed line range when those fields are unset.
 func updateReadFileInput(rf *streams.ReadFilePayload, supplemental, inputMap map[string]any) {
 	// Parse the selector on every update — a later tool_call_update can carry the
 	// line range (e.g. "main.go:50+150") even when an earlier frame already set
