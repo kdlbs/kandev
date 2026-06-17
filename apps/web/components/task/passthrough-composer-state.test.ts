@@ -1,6 +1,12 @@
 import type { DragEvent, KeyboardEvent } from "react";
+import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { droppedReferenceTokens, handleSuggestionKey } from "./passthrough-composer-state";
+import {
+  droppedReferenceTokens,
+  handleSuggestionKey,
+  suggestionLabel,
+  usePassthroughComposerController,
+} from "./passthrough-composer-state";
 
 function applySelectedIndex(value: number | ((i: number) => number), current: number): number {
   return typeof value === "function" ? value(current) : value;
@@ -127,5 +133,53 @@ describe("handleSuggestionKey", () => {
     expect(handled).toBe(true);
     expect(preventDefault).toHaveBeenCalled();
     expect(insertSelection).toHaveBeenCalledWith("/resume");
+  });
+});
+
+describe("usePassthroughComposerController", () => {
+  it("builds and filters command suggestions from available commands", () => {
+    const { result } = renderHook(() =>
+      usePassthroughComposerController({
+        onSubmit: vi.fn(),
+        autoFocus: false,
+        availableCommands: [
+          { name: "review", description: "Review changes" },
+          { name: "resume", description: "Resume task" },
+          { name: "cost", description: "Show cost (bundled)" },
+        ],
+      }),
+    );
+
+    act(() => result.current.updateValue("/re"));
+
+    expect(result.current.suggestion).toEqual({
+      kind: "command",
+      triggerStart: 0,
+      query: "re",
+    });
+    expect(result.current.suggestionItems.map(suggestionLabel)).toEqual(["/review", "/resume"]);
+  });
+
+  it("clears stale suggestion state after successful submit", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const { result } = renderHook(() =>
+      usePassthroughComposerController({
+        onSubmit,
+        autoFocus: false,
+        availableCommands: [{ name: "review", description: "Review changes" }],
+      }),
+    );
+
+    act(() => result.current.updateValue("/review"));
+    expect(result.current.showSuggestions).toBe(true);
+
+    await act(async () => {
+      await result.current.submit();
+    });
+
+    expect(onSubmit).toHaveBeenCalledWith("/review");
+    expect(result.current.value).toBe("");
+    expect(result.current.suggestion).toBeNull();
+    expect(result.current.showSuggestions).toBe(false);
   });
 });

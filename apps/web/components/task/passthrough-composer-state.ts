@@ -183,6 +183,7 @@ export function usePassthroughComposerController({
     try {
       await onSubmit(trimmed);
       setValue("");
+      setSuggestion(null);
     } catch {
       // Preserve typed text so the user can retry after a transient WS/API failure.
     } finally {

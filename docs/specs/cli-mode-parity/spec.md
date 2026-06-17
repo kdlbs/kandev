@@ -146,7 +146,7 @@ When `PassthroughComposer` submits:
 
 ### How Stop maps to Ctrl-C
 
-Pressing Ctrl-C inside the passthrough terminal writes `\x03` to PTY stdin. A future toolbar Stop button can call `client.request("agent.cancel", { session_id }, 10_000)` over WS; that route reaches `Service.CancelAgent` -> `agentManager.CancelAgentBySessionID` in `apps/backend/internal/agent/runtime/lifecycle/manager_interaction.go`, which branches on `execution.PassthroughProcessID != ""` and writes `\x03` to PTY stdin. DB reconciliation completes regardless of the write outcome so the UI unsticks.
+Pressing Ctrl-C inside the passthrough terminal writes `\x03` to PTY stdin. A future Stop affordance in `PassthroughTerminal` can call `client.request("agent.cancel", { session_id }, 10_000)` over WS; that route reaches `Service.CancelAgent` -> `agentManager.CancelAgentBySessionID` in `apps/backend/internal/agent/runtime/lifecycle/manager_interaction.go`, which branches on `execution.PassthroughProcessID != ""` and writes `\x03` to PTY stdin. DB reconciliation completes regardless of the write outcome so the UI unsticks.
 
 ### Not included
 
