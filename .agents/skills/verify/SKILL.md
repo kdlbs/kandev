@@ -60,6 +60,18 @@ If `make typecheck` fails because `apps/web/generated/changelog.json` or
 (cd apps/web && node scripts/generate-changelog.mjs)
 ```
 
+When verifying the web package directly, prefer:
+
+```bash
+(cd apps/web && pnpm run typecheck)
+```
+
+That package script runs `pretypecheck` and regenerates
+`generated/changelog.json` / `generated/release-notes.json`. Avoid relying on
+`pnpm --filter @kandev/web typecheck` under RTK while troubleshooting; RTK can
+mis-handle the filter and run TypeScript in the wrong context, producing
+unrelated workspace-wide alias errors.
+
 If the aggregate `make lint` wrapper stalls or does not provide useful progress, run the backend and frontend lint checks directly instead and record the substitution in your result:
 
 ```bash

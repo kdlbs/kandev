@@ -54,10 +54,10 @@ description: Commit, push, and create a PR. Default is ready-for-review with aut
    - Remove all HTML comments/placeholders from the final body.
    - Do NOT add tool attribution footers.
    - Before creating the PR, self-check that the final body has no `<!--`, no empty required sections, and no placeholder text.
-   - When reading templates or testing files through RTK, prefer plain commands like `rtk sed -n '1,260p' .github/pull_request_template.md`. Avoid nested `rtk sh -c ...` forms; they can produce shell option noise that obscures the real command output.
+   - When reading templates or testing files through RTK, prefer plain commands like `rtk sed -n '1,260p' .github/pull_request_template.md`. For shell builtins or compound snippets, use `rtk bash -lc 'test -f .github/pull_request_template.md'`; avoid direct builtin calls such as `rtk test -f ...` and nested `rtk sh -c ...` forms, which can produce shell option noise that obscures the real command output.
 
    ```bash
-   test -f .github/pull_request_template.md
+   bash -lc 'test -f .github/pull_request_template.md'
    # Build /tmp/pr-body.md from the template, using comments as instructions
    # and removing them from the final file.
    gh pr create [--draft] --title "type: description" --body-file /tmp/pr-body.md
@@ -75,7 +75,7 @@ description: Commit, push, and create a PR. Default is ready-for-review with aut
 
    A ready PR may still end with "CI pending" after fixup when no checks have failed and no review threads remain unresolved, especially after a late fixup push restarts CodeQL, E2E, or preview jobs. When PR checks include long E2E shard queues, continue fixing failed checks and unresolved review threads, but it is acceptable to report the PR as ready locally once full local verification is green, CodeQL/security alerts are intentionally handled, required non-E2E checks are passing, and only queued/in-progress E2E shards remain with no failures. Do not wait indefinitely; include the exact pending checks from the final re-check in the response.
 
-6. **PR screenshots:** After creating the PR, check if `apps/web/.pr-assets/manifest.json` exists. If it does:
+6. **PR screenshots:** After creating the PR, check if `apps/web/.pr-assets/manifest.json` exists. Use an explicit shell when running through RTK, e.g. `rtk bash -lc 'if [ -f apps/web/.pr-assets/manifest.json ]; then echo present; fi'`. If it exists:
    - Read the manifest to list available screenshots/GIFs
    - Run `npx tsx apps/web/e2e/scripts/upload-pr-assets.ts <PR_NUMBER>` to generate embed markdown
    - If `apps/web/.pr-assets/embed.md` exists and is non-empty, append its contents to the PR body using a body file and `gh pr edit <PR_NUMBER> --body-file <file>`
