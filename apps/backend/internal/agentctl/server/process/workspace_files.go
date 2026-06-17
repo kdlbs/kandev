@@ -316,7 +316,7 @@ func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, bool,
 // real filesystem path, so it must be expanded before stat/serve. Other paths
 // (absolute, workspace-relative) are returned unchanged.
 func expandHomePath(path string) string {
-	if path != "~" && !strings.HasPrefix(path, "~/") {
+	if path != "~" && !strings.HasPrefix(path, "~/") && !strings.HasPrefix(path, `~\`) {
 		return path
 	}
 	home, err := os.UserHomeDir()

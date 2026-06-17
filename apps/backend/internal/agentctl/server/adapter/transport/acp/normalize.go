@@ -315,9 +315,14 @@ func updateModifyFileInput(mf *streams.ModifyFilePayload, supplemental, inputMap
 }
 
 func updateReadFileInput(rf *streams.ReadFilePayload, supplemental, inputMap map[string]any) {
-	if path := pathFromArgs(supplemental, inputMap); path != "" && rf.FilePath == "" {
+	// Parse the selector on every update — a later tool_call_update can carry the
+	// line range (e.g. "main.go:50+150") even when an earlier frame already set
+	// FilePath, so range metadata must not be gated on FilePath being empty.
+	if path := pathFromArgs(supplemental, inputMap); path != "" {
 		clean, startLine, lineCount := readselector.Split(path)
-		rf.FilePath = clean
+		if rf.FilePath == "" {
+			rf.FilePath = clean
+		}
 		if rf.Offset == 0 {
 			rf.Offset = startLine
 		}

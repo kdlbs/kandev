@@ -29,12 +29,17 @@ import (
 func Split(raw string) (path string, startLine, lineCount int) {
 	// Only inspect colons in the final path segment so a directory component
 	// that legitimately contains a colon is never mistaken for a selector.
-	lastSlash := strings.LastIndexByte(raw, '/')
-	rel := strings.IndexByte(raw[lastSlash+1:], ':')
+	// Consider both '/' and '\\' so Windows paths — and their drive-letter
+	// colon, e.g. "C:\\dir\\file.go" — are not misread as a selector boundary.
+	lastSep := strings.LastIndexByte(raw, '/')
+	if b := strings.LastIndexByte(raw, '\\'); b > lastSep {
+		lastSep = b
+	}
+	rel := strings.IndexByte(raw[lastSep+1:], ':')
 	if rel < 0 {
 		return raw, 0, 0
 	}
-	colon := lastSlash + 1 + rel
+	colon := lastSep + 1 + rel
 	base, suffix := raw[:colon], raw[colon+1:]
 	if base == "" || suffix == "" {
 		return raw, 0, 0

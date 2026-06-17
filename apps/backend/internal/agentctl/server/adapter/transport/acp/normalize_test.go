@@ -522,6 +522,24 @@ func TestNormalizerRead(t *testing.T) {
 			t.Errorf("expected Offset=50 Limit=150, got Offset=%d Limit=%d", rf.Offset, rf.Limit)
 		}
 	})
+
+	t.Run("populates range from update even when FilePath already set", func(t *testing.T) {
+		payload := normalizer.NormalizeToolCall("read", map[string]any{
+			"kind":      "read",
+			"raw_input": map[string]any{"path": "main.go"},
+		})
+		if payload.ReadFile().FilePath != "main.go" {
+			t.Fatalf("expected initial FilePath 'main.go', got %q", payload.ReadFile().FilePath)
+		}
+		normalizer.UpdatePayloadInput(payload, map[string]any{"path": "main.go:50+150"}, nil)
+		rf := payload.ReadFile()
+		if rf.FilePath != "main.go" {
+			t.Errorf("expected FilePath unchanged 'main.go', got %q", rf.FilePath)
+		}
+		if rf.Offset != 50 || rf.Limit != 150 {
+			t.Errorf("expected Offset=50 Limit=150 from update, got Offset=%d Limit=%d", rf.Offset, rf.Limit)
+		}
+	})
 }
 
 // TestNormalizerResult tests the normalizer's result handling.

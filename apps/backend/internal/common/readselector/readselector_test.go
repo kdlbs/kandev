@@ -29,6 +29,12 @@ func TestSplit(t *testing.T) {
 		{"omp multi range zero-len", "x/README.md:16-20,32-40,69-69,85-96", "x/README.md", 16, 5},
 		{"omp range plus raw combo", "x/README.md:69+1:raw", "x/README.md", 69, 1},
 		{"omp tilde multi range", "~/.kandev/x/README.md:27-28,35-36,66-66", "~/.kandev/x/README.md", 27, 2},
+		// Windows path: drive-letter colon must not be read as the selector
+		// boundary; the trailing "\\" segment + ":43-94" selector is stripped.
+		{"windows absolute", `C:\Users\me\handlers.go:43-94`, `C:\Users\me\handlers.go`, 43, 52},
+		// "N+0" is intentionally accepted (count 0, anchor at N) and stripped, so
+		// the link still opens; rejecting it would leave the selector on the path.
+		{"plus zero anchors", "main.go:50+0", "main.go", 50, 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

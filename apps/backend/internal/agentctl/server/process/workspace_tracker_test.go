@@ -597,7 +597,8 @@ func TestGetFileContent_StripsReadSelector(t *testing.T) {
 // expanded and the whole multi-range selector stripped for the open to succeed.
 func TestGetFileContent_ExpandsTildeWithMultiRange(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	t.Setenv("HOME", home)        // os.UserHomeDir() on unix/macOS
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir() on Windows
 	sub := filepath.Join(home, "notes")
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
