@@ -2,6 +2,17 @@
 
 All notable changes to Kandev.
 
+## 0.63.0 - 2026-06-17
+
+### Features
+
+- improve passthrough composer and session recovery ([#1411](https://github.com/kdlbs/kandev/pull/1411))
+
+### Bug Fixes
+
+- restore missing settings sidebar links ([#1413](https://github.com/kdlbs/kandev/pull/1413))
+- support postgres initial agent setup ([#1410](https://github.com/kdlbs/kandev/pull/1410))
+
 ## 0.62.0 - 2026-06-17
 
 ### Bug Fixes
