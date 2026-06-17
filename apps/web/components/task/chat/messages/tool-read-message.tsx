@@ -37,6 +37,7 @@ type ToolReadMessageProps = {
   onOpenFile?: (path: string) => void;
 };
 
+// ReadStatusIcon renders the status glyph (complete/error/running) for a read card.
 function ReadStatusIcon({ status }: { status: string | undefined }) {
   if (status === "complete") return <IconCheck className="h-3.5 w-3.5 text-green-500" />;
   if (status === "error") return <IconX className="h-3.5 w-3.5 text-red-500" />;
@@ -74,6 +75,8 @@ function parseReadMetadata(comment: Message) {
   return { status, readOutput, filePath, startLine, lineRange, hasOutput, isSuccess };
 }
 
+// ToolReadMessage renders a read tool call: the file link, line-range badge, and
+// the (expandable) read output.
 export const ToolReadMessage = memo(function ToolReadMessage({
   comment,
   worktreePath,

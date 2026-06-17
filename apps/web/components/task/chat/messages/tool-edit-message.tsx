@@ -35,6 +35,7 @@ type ToolEditMessageProps = {
   onOpenFile?: (path: string) => void;
 };
 
+// EditStatusIcon renders the status glyph (complete/error/running) for an edit card.
 function EditStatusIcon({ status }: { status: string | undefined }) {
   if (status === "complete") return <IconCheck className="h-3.5 w-3.5 text-green-500" />;
   if (status === "error") return <IconX className="h-3.5 w-3.5 text-red-500" />;
@@ -42,6 +43,7 @@ function EditStatusIcon({ status }: { status: string | undefined }) {
   return null;
 }
 
+// getEditSummary returns the short header label for an edit/write card.
 function getEditSummary(
   content: string,
   worktreePath: string | undefined,
@@ -63,6 +65,7 @@ type FileActionButtonProps = {
   onCopyPath: (e: React.MouseEvent) => void;
 };
 
+// FileActionButton renders the file path with an optional open-in-editor action.
 function FileActionButton({
   filePath,
   worktreePath,
@@ -110,6 +113,7 @@ type EditExpandedContentProps = {
   writeContent: string | undefined;
 };
 
+// EditExpandedContent renders the expanded body of an edit card: a diff or write content.
 function EditExpandedContent({ diffData, writeContent }: EditExpandedContentProps) {
   if (diffData?.diff) return <DiffViewBlock data={diffData} className="mt-0 border-0 px-0" />;
   if (writeContent) {
@@ -151,6 +155,7 @@ function parseEditMetadata(comment: Message) {
   };
 }
 
+// ToolEditMessage renders an edit/write tool call: the file link and expandable diff.
 export const ToolEditMessage = memo(function ToolEditMessage({
   comment,
   worktreePath,
