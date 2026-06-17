@@ -31,6 +31,7 @@ import {
   hasUserOrAgentMessage,
   isTurnSettleTransition,
   shouldRunMessageBackfill,
+  shouldRetryUnknownSessionSubscription,
   runBackfillRound,
   autoBackfillUntilUserMessage,
   nextFetchSeq,
@@ -216,6 +217,40 @@ describe("running message backfill guards", () => {
         connectionStatus: "connected",
         activeTurnId: null,
         messages,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("unknown session subscription retry guard", () => {
+  it("retries only while a connected session id has no session state", () => {
+    expect(
+      shouldRetryUnknownSessionSubscription({
+        taskSessionId: "sess-1",
+        taskSessionState: null,
+        connectionStatus: "connected",
+      }),
+    ).toBe(true);
+
+    expect(
+      shouldRetryUnknownSessionSubscription({
+        taskSessionId: "sess-1",
+        taskSessionState: "STARTING",
+        connectionStatus: "connected",
+      }),
+    ).toBe(false);
+    expect(
+      shouldRetryUnknownSessionSubscription({
+        taskSessionId: null,
+        taskSessionState: null,
+        connectionStatus: "connected",
+      }),
+    ).toBe(false);
+    expect(
+      shouldRetryUnknownSessionSubscription({
+        taskSessionId: "sess-1",
+        taskSessionState: null,
+        connectionStatus: "connecting",
       }),
     ).toBe(false);
   });
