@@ -172,6 +172,9 @@ func TestEnsureSessionRunning_IdleSessionTriggersResume(t *testing.T) {
 	agentMgr := &mockAgentManager{
 		isAgentRunning:         false,
 		repoForExecutionLookup: repo,
+		isAgentReadyFn: func(_ context.Context, _ string) bool {
+			return true
+		},
 		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
 			select {
 			case launchCalled <- struct{}{}:
@@ -228,6 +231,106 @@ func TestEnsureSessionRunning_IdleSessionTriggersResume(t *testing.T) {
 	case <-launchCalled:
 	default:
 		t.Fatal("expected ResumeSession to call LaunchAgent on IDLE session, but it never fired")
+	}
+}
+
+func TestEnsureSessionRunning_WaitsForPromptReadyAfterResume(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateIdle)
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	session.AgentExecutionID = "exec-idle-1"
+	session.AgentProfileID = "profile1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+	seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-idle-1")
+
+	ready := make(chan struct{})
+	checked := make(chan struct{}, 1)
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         false,
+		repoForExecutionLookup: repo,
+		isAgentReadyFn: func(_ context.Context, _ string) bool {
+			select {
+			case checked <- struct{}{}:
+			default:
+			}
+			select {
+			case <-ready:
+				return true
+			default:
+				return false
+			}
+		},
+		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			go func(sessID string) {
+				tick := time.NewTicker(5 * time.Millisecond)
+				defer tick.Stop()
+				timeout := time.After(5 * time.Second)
+				for {
+					select {
+					case <-tick.C:
+						sess, err := repo.GetTaskSession(context.Background(), sessID)
+						if err == nil && sess != nil && sess.State == models.TaskSessionStateStarting {
+							sess.State = models.TaskSessionStateWaitingForInput
+							sess.UpdatedAt = time.Now().UTC()
+							_ = repo.UpdateTaskSession(context.Background(), sess)
+							return
+						}
+					case <-timeout:
+						return
+					}
+				}
+			}(req.SessionID)
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-resumed-1"}, nil
+		},
+	}
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{
+		ID:    "task1",
+		Title: "Test Task",
+		State: v1.TaskStateInProgress,
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	session, err = repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- svc.ensureSessionRunning(ctx, "session1", session)
+	}()
+
+	select {
+	case <-checked:
+	case <-time.After(3 * time.Second):
+		t.Fatal("expected ensureSessionRunning to check prompt readiness after resume")
+	}
+
+	select {
+	case err := <-done:
+		t.Fatalf("ensureSessionRunning returned before prompt readiness: %v", err)
+	default:
+	}
+
+	close(ready)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("ensureSessionRunning failed after prompt readiness: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ensureSessionRunning did not return after prompt readiness")
 	}
 }
 

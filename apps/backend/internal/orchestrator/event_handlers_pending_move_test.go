@@ -285,6 +285,15 @@ func seedReviewSession(t *testing.T, repo *sqliterepo.Repository, now time.Time)
 // outside the LaunchAgent call; mirroring that timing here lets the resume
 // path complete in unit tests without spawning a real subprocess.
 func wireBootReadySimulator(svc *Service, agentMgr *mockAgentManager, newExecID string) {
+	promptReady := make(chan struct{})
+	agentMgr.isAgentReadyFn = func(_ context.Context, _ string) bool {
+		select {
+		case <-promptReady:
+			return true
+		default:
+			return false
+		}
+	}
 	agentMgr.launchAgentFunc = func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
 		// Simulate the lifecycle manager's persistExecutorRunning: in production
 		// the row is upserted in lockstep with executionStore.Add; here we mirror
@@ -308,6 +317,7 @@ func wireBootReadySimulator(svc *Service, agentMgr *mockAgentManager, newExecID 
 				AgentExecutionID: newExecID,
 				AgentProfileID:   req.AgentProfileID,
 			})
+			close(promptReady)
 		}()
 		return &executor.LaunchAgentResponse{
 			AgentExecutionID: newExecID,

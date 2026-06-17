@@ -1217,6 +1217,9 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 	if err := s.waitForSessionReady(ctx, sessionID); err != nil {
 		return fmt.Errorf("session not ready after resume: %w", err)
 	}
+	if err := s.waitForAgentPromptReady(ctx, sessionID); err != nil {
+		return fmt.Errorf("agent not ready after resume: %w", err)
+	}
 
 	s.logger.Debug("session resumed and ready for prompt")
 	return nil
@@ -1274,6 +1277,9 @@ func (s *Service) startAgentOnPreparedWorkspace(ctx context.Context, sessionID s
 
 	if err := s.waitForSessionReady(ctx, sessionID); err != nil {
 		return fmt.Errorf("session not ready after starting agent: %w", err)
+	}
+	if err := s.waitForAgentPromptReady(ctx, sessionID); err != nil {
+		return fmt.Errorf("agent not ready after starting agent: %w", err)
 	}
 	s.logger.Debug("agent started on prepared workspace and ready for prompt")
 	return nil
