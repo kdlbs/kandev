@@ -18,7 +18,7 @@ description: Commit, push, and create a PR. Default is ready-for-review with aut
 ## Available skills
 
 - **`/commit`** — Stage and commit changes using Conventional Commits. Runs `/verify` internally.
-- **`/pr-fixup`** — Wait for CI checks and CodeRabbit, Greptile, Claude, and cubic review feedback, fix any failures or valid comments, and push.
+- **`/pr-fixup`** — Wait for CI checks and CodeRabbit, Greptile, Claude, OpenCode, and cubic review feedback, fix any failures or valid comments, and push.
 
 ## Context
 
@@ -30,7 +30,7 @@ description: Commit, push, and create a PR. Default is ready-for-review with aut
 ## Options
 
 - `--draft` — create the PR as draft and skip the fixup step. Use when the work is not ready for review.
-- Default (no flag) — create as ready-for-review and run `/pr-fixup` to wait for CI and CodeRabbit, Greptile, Claude, and cubic review feedback, then fix issues.
+- Default (no flag) — create as ready-for-review and run `/pr-fixup` to wait for CI and CodeRabbit, Greptile, Claude, OpenCode, and cubic review feedback, then fix issues.
 
 ## Steps
 
@@ -64,7 +64,7 @@ description: Commit, push, and create a PR. Default is ready-for-review with aut
 
    Do not fall back to hand-composed `--body` prose. If creation fails, surface the exact stderr, fix the template/body-file problem, and retry with `--body-file`.
 
-5. **If ready (not draft):** Run `/pr-fixup` to wait for CI checks and CodeRabbit, Greptile, Claude, and cubic review feedback, fix any failures or valid comments, and push.
+5. **If ready (not draft):** Run `/pr-fixup` to wait for CI checks and CodeRabbit, Greptile, Claude, OpenCode, and cubic review feedback, fix any failures or valid comments, and push.
 
    CodeRabbit issue comments that only report rate limits or exhausted usage credits are informational. They should not block PR completion when other review threads are resolved and checks are otherwise passing or pending.
 

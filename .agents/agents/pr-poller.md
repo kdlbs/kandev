@@ -1,6 +1,6 @@
 ---
 name: pr-poller
-description: Poll a GitHub PR until CI checks and automated bot reviews (CodeRabbit, Greptile, Claude, cubic) reach terminal state, then return a compact structured report. Use as the polling/state-gathering half of a PR-fixup loop — the parent agent does the actual code fixes and comment replies.
+description: Poll a GitHub PR until CI checks and automated bot reviews (CodeRabbit, Greptile, Claude, OpenCode, cubic) reach terminal state, then return a compact structured report. Use as the polling/state-gathering half of a PR-fixup loop — the parent agent does the actual code fixes and comment replies.
 tools: Bash
 model: sonnet
 ---
@@ -27,6 +27,7 @@ bots:
   coderabbit: <done|rate_limited|pending|timeout|unknown>  comments=<N or "unknown">
   greptile:   <done|pending|timeout|unknown>              reviews=<N or "unknown">
   claude:     <done|pending|timeout|unknown>              reviews=<N or "unknown">  path=<app|fork|none>
+  opencode:   <done|pending|timeout|unknown>              comments=<N or "unknown">
   cubic:      <done|pending|timeout|unknown>              reviews=<N or "unknown">
 unresolved_review_threads: <N or "unknown">
 issue_comments_from_bots: <N or "unknown">
@@ -107,6 +108,15 @@ The `claude_summary` line carries the **latest** Claude summary's structured fin
         gh api repos/:owner/:repo/pulls/<num>/reviews --jq '.[] | select(.user.login == "cubic-dev-ai[bot]")'
         ```
         - `done` if a matching review exists OR if `statusCheckRollup` shows the `cubic · AI code reviewer` check completed
+        - else `pending`
+
+      - **OpenCode** (`github-actions[bot]`, inline comments plus fallback issue comment):
+        ```bash
+        gh pr view <num> --json statusCheckRollup
+        gh pr view <num> --json comments --jq '.comments[] | select(.author.login == "github-actions" and (.body | startswith("## OpenCode review")))'
+        ```
+        - `done` if `statusCheckRollup` shows `opencode-review-same-repo`, `opencode-review-fork`, or the `OpenCode Code Review` workflow completed
+        - also `done` if a fallback issue comment starts with `## OpenCode review`
         - else `pending`
 
    d. **Exit conditions:**

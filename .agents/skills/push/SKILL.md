@@ -1,6 +1,6 @@
 ---
 name: push
-description: Commit and push to the current branch. Use --fixup to also wait for CI and CodeRabbit, Greptile, Claude, and cubic review feedback, then fix issues.
+description: Commit and push to the current branch. Use --fixup to also wait for CI and CodeRabbit, Greptile, Claude, OpenCode, and cubic review feedback, then fix issues.
 ---
 
 # Push
@@ -8,7 +8,7 @@ description: Commit and push to the current branch. Use --fixup to also wait for
 ## Available skills
 
 - **`/commit`** — Stage and commit changes using Conventional Commits. Runs `/verify` internally.
-- **`/pr-fixup`** — Wait for CI checks and CodeRabbit, Greptile, Claude, and cubic review feedback, fix any failures or valid comments, and push again.
+- **`/pr-fixup`** — Wait for CI checks and CodeRabbit, Greptile, Claude, OpenCode, and cubic review feedback, fix any failures or valid comments, and push again.
 
 ## Context
 
@@ -17,7 +17,7 @@ description: Commit and push to the current branch. Use --fixup to also wait for
 
 ## Options
 
-- `--fixup` — after pushing, run `/pr-fixup` to wait for CI and CodeRabbit, Greptile, Claude, and cubic review feedback, fix issues, and push again.
+- `--fixup` — after pushing, run `/pr-fixup` to wait for CI and CodeRabbit, Greptile, Claude, OpenCode, and cubic review feedback, fix issues, and push again.
 
 > **Note:** This skill only uses `git push`. GitHub CLI dependency is indirect via `/pr-fixup`.
 
@@ -41,4 +41,4 @@ Commit any pending changes and push to the remote branch.
 
 4. **Report** the pushed commit hash and branch.
 
-5. **If `--fixup`:** Run `/pr-fixup` to wait for CI checks and CodeRabbit, Greptile, Claude, and cubic review feedback, fix any failures or valid comments, and push.
+5. **If `--fixup`:** Run `/pr-fixup` to wait for CI checks and CodeRabbit, Greptile, Claude, OpenCode, and cubic review feedback, fix any failures or valid comments, and push.
