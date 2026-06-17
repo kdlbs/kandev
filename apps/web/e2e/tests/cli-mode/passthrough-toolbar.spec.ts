@@ -132,7 +132,12 @@ test.describe("CLI mode: passthrough toolbar", () => {
       timeout: 5_000,
     });
 
-    await testPage.getByTestId("passthrough-toggle-composer").click();
+    const chatToggle = testPage.getByTestId("passthrough-toggle-composer");
+    await chatToggle.hover();
+    const tooltip = testPage.getByRole("tooltip").filter({ hasText: "Shortcut:" });
+    await expect(tooltip).toContainText(/Ctrl\+Shift\+Y|Cmd\+Shift\+Y/);
+
+    await chatToggle.click();
     await expect(testPage.getByTestId("passthrough-composer")).toBeVisible({ timeout: 5_000 });
     await expect(testPage.getByTestId("plan-mode-toggle-button")).toBeVisible();
     await expect(testPage.getByTestId("chat-attachments-button")).toBeVisible();
@@ -142,6 +147,9 @@ test.describe("CLI mode: passthrough toolbar", () => {
     await expect(testPage.getByTestId("toolbar-item-model")).toHaveCount(0);
     await expect(testPage.getByTestId("toolbar-item-reset-context")).toHaveCount(0);
     await expect(testPage.getByTestId("toolbar-item-enhance")).toHaveCount(0);
+
+    await chatToggle.click();
+    await expect(testPage.getByTestId("passthrough-composer")).toBeHidden({ timeout: 5_000 });
   });
 
   test("composer toggle + send forwards message to the agent", async ({

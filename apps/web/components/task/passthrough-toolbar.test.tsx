@@ -285,7 +285,7 @@ describe("PassthroughToolbar – composer toggle", () => {
   beforeEach(resetMocks);
   afterEach(cleanup);
 
-  it("clicking Chat toggle opens the composer and sets aria-pressed=true", async () => {
+  it("clicking Chat toggle opens and closes the composer", async () => {
     renderToolbar();
     const toggle = screen.getByTestId(TID_TOGGLE);
     expect(toggle.getAttribute("aria-pressed")).toBe("false");
@@ -294,6 +294,11 @@ describe("PassthroughToolbar – composer toggle", () => {
 
     await waitFor(() => expect(screen.getByTestId(TID_COMPOSER)).toBeTruthy());
     expect(toggle.getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(screen.queryByTestId(TID_COMPOSER)).toBeNull());
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
   });
 
   it("pressing Escape inside the composer closes it", async () => {
@@ -333,6 +338,31 @@ describe("PassthroughToolbar – composer toggle", () => {
     fireEvent.keyDown(window, { key: "y", code: "KeyY", ctrlKey: true, shiftKey: true });
     await waitFor(() => expect(screen.getByTestId(TID_COMPOSER)).toBeTruthy());
     expect(chatInputMock.focusInput).toHaveBeenCalled();
+  });
+
+  it("shows the passthrough chat shortcut in the Chat tooltip", () => {
+    mockKeyboardShortcuts = {
+      FOCUS_PASSTHROUGH_INPUT: { key: "y", modifiers: { ctrlOrCmd: true, shift: true } },
+    };
+    renderToolbar();
+
+    expect(screen.getByText(/Ctrl\+Shift\+Y|Cmd\+Shift\+Y/)).toBeTruthy();
+  });
+
+  it("focus shortcut closes the composer when the composer textarea has focus", async () => {
+    mockKeyboardShortcuts = {
+      FOCUS_PASSTHROUGH_INPUT: { key: "y", modifiers: { ctrlOrCmd: true, shift: true } },
+    };
+    renderToolbar();
+
+    fireEvent.keyDown(window, { key: "y", code: "KeyY", ctrlKey: true, shiftKey: true });
+    await waitFor(() => expect(screen.getByTestId(TID_COMPOSER)).toBeTruthy());
+
+    const textarea = screen.getByTestId(TID_TEXTAREA);
+    textarea.focus();
+    fireEvent.keyDown(window, { key: "y", code: "KeyY", ctrlKey: true, shiftKey: true });
+
+    await waitFor(() => expect(screen.queryByTestId(TID_COMPOSER)).toBeNull());
   });
 
   it("does not steal focus from another editable field with the focus shortcut", () => {

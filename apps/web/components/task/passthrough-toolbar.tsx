@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import {
   IconArrowRight,
   IconMessageCircle,
@@ -24,6 +32,8 @@ import { useCommentsStore } from "@/lib/state/slices/comments/comments-store";
 import { useFileEditors } from "@/hooks/use-file-editors";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { getShortcut, isUnboundShortcut } from "@/lib/keyboard/shortcut-overrides";
+import { formatShortcut } from "@/lib/keyboard/utils";
+import type { KeyboardShortcut } from "@/lib/keyboard/constants";
 import type { DiffComment } from "@/lib/diff/types";
 import { PassthroughTerminal } from "./passthrough-terminal";
 import { PassthroughComposerPanel, useSendPassthroughMessage } from "./passthrough-chat-composer";
@@ -35,6 +45,27 @@ function isEditableElement(element: Element | null) {
     element instanceof HTMLTextAreaElement ||
     element instanceof HTMLSelectElement ||
     (element instanceof HTMLElement && element.isContentEditable)
+  );
+}
+
+function usePassthroughComposerShortcut({
+  focusShortcut,
+  setComposerOpen,
+}: {
+  focusShortcut: KeyboardShortcut;
+  setComposerOpen: Dispatch<SetStateAction<boolean>>;
+}) {
+  useKeyboardShortcut(
+    focusShortcut,
+    useCallback(() => {
+      const activeElement = document.activeElement;
+      setComposerOpen((open) => {
+        if (open) return false;
+        if (isEditableElement(activeElement)) return open;
+        return true;
+      });
+    }, [setComposerOpen]),
+    { capture: true, enabled: !isUnboundShortcut(focusShortcut) },
   );
 }
 
@@ -104,20 +135,12 @@ export function PassthroughToolbar({
     [isSending, sendPassthroughMessage],
   );
 
-  useKeyboardShortcut(
-    focusShortcut,
-    useCallback(() => {
-      if (isEditableElement(document.activeElement)) return;
-      setComposerOpen(true);
-      requestAnimationFrame(() => chatInputRef.current?.focusInput());
-    }, []),
-    { capture: true, enabled: !isUnboundShortcut(focusShortcut) },
-  );
-
   useEffect(() => {
     if (!composerOpen) return;
     requestAnimationFrame(() => chatInputRef.current?.focusInput());
   }, [composerOpen]);
+
+  usePassthroughComposerShortcut({ focusShortcut, setComposerOpen });
 
   return (
     <div className="flex h-full flex-col bg-card" data-testid="passthrough-toolbar">
@@ -152,6 +175,7 @@ export function PassthroughToolbar({
         isMoving={nextStep.isMoving}
         showProceed={showProceed}
         composerOpen={composerOpen}
+        focusShortcut={focusShortcut}
         onToggleComposer={() => setComposerOpen((open) => !open)}
         commentsOpen={commentsOpen}
         onToggleComments={() => setCommentsOpen((open) => !open)}
@@ -178,9 +202,11 @@ function usePendingPassthroughComments(sessionId: string | null | undefined) {
 
 function ChatToggleButton({
   composerOpen,
+  focusShortcut,
   onToggle,
 }: {
   composerOpen: boolean;
+  focusShortcut: KeyboardShortcut;
   onToggle: () => void;
 }) {
   return (
@@ -205,16 +231,20 @@ function ChatToggleButton({
       </TooltipTrigger>
       <TooltipContent className="max-w-xs">
         {composerOpen ? (
-          <p>
-            Close the compose box (or press <kbd>Esc</kbd> inside it). The CLI agent terminal keeps
-            focus.
-          </p>
+          <div className="space-y-1">
+            <p>
+              Close the compose box (or press <kbd>Esc</kbd> inside it). The CLI agent terminal
+              keeps focus.
+            </p>
+            <PassthroughChatShortcutHint shortcut={focusShortcut} />
+          </div>
         ) : (
           <div className="space-y-1">
             <p>
               Open a kandev-controlled compose box above the terminal to type a follow-up message.
               Press <kbd>Enter</kbd> to send, <kbd>Shift+Enter</kbd> for a newline.
             </p>
+            <PassthroughChatShortcutHint shortcut={focusShortcut} />
             <p className="text-muted-foreground">
               The text is delivered straight to the CLI agent&apos;s stdin — pending review comments
               (if any) are prepended automatically.
@@ -223,6 +253,15 @@ function ChatToggleButton({
         )}
       </TooltipContent>
     </Tooltip>
+  );
+}
+
+function PassthroughChatShortcutHint({ shortcut }: { shortcut: KeyboardShortcut }) {
+  if (isUnboundShortcut(shortcut)) return null;
+  return (
+    <p className="text-muted-foreground">
+      Shortcut: <kbd>{formatShortcut(shortcut)}</kbd> toggles this chat input.
+    </p>
   );
 }
 
@@ -450,6 +489,7 @@ type StatusRowProps = {
   isMoving: boolean;
   showProceed: boolean;
   composerOpen: boolean;
+  focusShortcut: KeyboardShortcut;
   onToggleComposer: () => void;
   commentsOpen: boolean;
   onToggleComments: () => void;
@@ -463,6 +503,7 @@ function PassthroughStatusRow({
   isMoving,
   showProceed,
   composerOpen,
+  focusShortcut,
   onToggleComposer,
   commentsOpen,
   onToggleComments,
@@ -473,7 +514,11 @@ function PassthroughStatusRow({
       data-testid="passthrough-status-row"
       className="flex flex-shrink-0 items-center gap-1.5 border-t bg-card px-2 py-1 text-xs text-muted-foreground"
     >
-      <ChatToggleButton composerOpen={composerOpen} onToggle={onToggleComposer} />
+      <ChatToggleButton
+        composerOpen={composerOpen}
+        focusShortcut={focusShortcut}
+        onToggle={onToggleComposer}
+      />
       <CommentsToggleButton
         commentsOpen={commentsOpen}
         onToggle={onToggleComments}
