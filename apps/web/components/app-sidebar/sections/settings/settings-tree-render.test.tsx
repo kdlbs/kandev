@@ -69,7 +69,11 @@ describe("SettingsTree rendering", () => {
       { id: ARCHIVE_WORKSPACE_ID, name: ARCHIVE_WORKSPACE_NAME },
     ];
 
-    render(<WorkspacesGroup pathname="/settings/workspace/ws-10/repositories" expanded />);
+    const { rerender } = render(<WorkspacesGroup pathname="/settings/workspace" expanded />);
+
+    expect(screen.getAllByRole("link", { name: "Repositories" })).toHaveLength(2);
+
+    rerender(<WorkspacesGroup pathname="/settings/workspace/ws-10/repositories" expanded />);
 
     expect(screen.getByRole("link", { name: MAIN_WORKSPACE_NAME }).getAttribute("href")).toBe(
       "/settings/workspace/ws-1",
