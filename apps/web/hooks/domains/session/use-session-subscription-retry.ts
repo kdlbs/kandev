@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 
 import type { TaskSessionState } from "@/lib/types/http";
+import { generateUUID } from "@/lib/utils";
+import { getWebSocketClient } from "@/lib/ws/connection";
 
 const UNKNOWN_SESSION_RESUBSCRIBE_MS = 1000;
 const MAX_UNKNOWN_SESSION_RESUBSCRIBE_ATTEMPTS = 15;
@@ -46,4 +48,24 @@ export function useUnknownSessionSubscriptionRetry(params: {
 
   if (!shouldRetry || retryState.sessionId !== sessionId) return 0;
   return retryState.count;
+}
+
+export function useUnknownSessionSubscriptionRetryEffect(params: {
+  taskSessionId: string | null;
+  connectionStatus: string;
+  retryToken: number;
+}) {
+  const { taskSessionId, connectionStatus, retryToken } = params;
+
+  useEffect(() => {
+    if (!taskSessionId || connectionStatus !== "connected" || retryToken === 0) return;
+    const client = getWebSocketClient();
+    if (!client) return;
+    client.send({
+      id: generateUUID(),
+      type: "request",
+      action: "session.subscribe",
+      payload: { session_id: taskSessionId },
+    });
+  }, [taskSessionId, connectionStatus, retryToken]);
 }

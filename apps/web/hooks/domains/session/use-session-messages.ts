@@ -4,7 +4,10 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import type { TaskSessionState, Message } from "@/lib/types/http";
 import { listTaskSessionMessages } from "@/lib/api";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
-import { useUnknownSessionSubscriptionRetry } from "./use-session-subscription-retry";
+import {
+  useUnknownSessionSubscriptionRetry,
+  useUnknownSessionSubscriptionRetryEffect,
+} from "./use-session-subscription-retry";
 
 export { shouldRetryUnknownSessionSubscription } from "./use-session-subscription-retry";
 
@@ -426,7 +429,6 @@ function useSessionSubscription(
   taskSessionId: string | null,
   connectionStatus: string,
   isSessionStartingOrUnknown: boolean,
-  retryToken: number,
   store: ReturnType<typeof useAppStoreApi>,
 ) {
   useEffect(() => {
@@ -458,7 +460,7 @@ function useSessionSubscription(
       debug("subscription: unsubscribing", { sessionId: taskSessionId });
       unsubscribe();
     };
-  }, [taskSessionId, connectionStatus, store, isSessionStartingOrUnknown, retryToken]);
+  }, [taskSessionId, connectionStatus, store, isSessionStartingOrUnknown]);
 }
 
 /**
@@ -588,13 +590,12 @@ function useSessionLifecycleSubscriptions(params: {
     connectionStatus,
   });
 
-  useSessionSubscription(
+  useSessionSubscription(taskSessionId, connectionStatus, isSessionStartingOrUnknown, store);
+  useUnknownSessionSubscriptionRetryEffect({
     taskSessionId,
     connectionStatus,
-    isSessionStartingOrUnknown,
-    unknownSessionRetryToken,
-    store,
-  );
+    retryToken: unknownSessionRetryToken,
+  });
   useResyncOnTurnSettle(taskSessionId, taskSessionState, connectionStatus, store);
   useRunningMessageBackfill(
     taskSessionId,
