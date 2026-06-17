@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent,
@@ -130,11 +131,13 @@ function useSuggestionItems(
   suggestion: PassthroughSuggestionState,
   fileResults: string[],
 ) {
-  const commands = filterPassthroughCommands(
-    buildPassthroughCommands(availableCommands),
-    suggestion?.kind === "command" ? suggestion.query : "",
+  const commands = useMemo(() => buildPassthroughCommands(availableCommands), [availableCommands]);
+  const commandQuery = suggestion?.kind === "command" ? suggestion.query : "";
+  const filteredCommands = useMemo(
+    () => filterPassthroughCommands(commands, commandQuery),
+    [commands, commandQuery],
   );
-  return suggestion?.kind === "command" ? commands : fileResults;
+  return suggestion?.kind === "command" ? filteredCommands : fileResults;
 }
 
 export function usePassthroughComposerController({
@@ -265,7 +268,9 @@ export function handleSuggestionKey(
   }
   if (e.key === "Tab" || e.key === "Enter") {
     e.preventDefault();
-    args.insertSelection(args.suggestionItems[args.selectedIndex]);
+    const selectedIndex = Math.min(args.selectedIndex, args.suggestionItems.length - 1);
+    const selectedItem = args.suggestionItems[selectedIndex];
+    if (selectedItem) args.insertSelection(selectedItem);
     return true;
   }
   return false;

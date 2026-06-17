@@ -24,7 +24,7 @@ import { useCommentsStore } from "@/lib/state/slices/comments/comments-store";
 import { useFileEditors } from "@/hooks/use-file-editors";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { formatReviewCommentsAsMarkdown } from "@/lib/state/slices/comments/format";
-import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
+import { getShortcut, isUnboundShortcut } from "@/lib/keyboard/shortcut-overrides";
 import type { DiffComment } from "@/lib/diff/types";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { PassthroughTerminal } from "./passthrough-terminal";
@@ -92,6 +92,7 @@ export function PassthroughToolbar({
         (el instanceof HTMLElement && el.isContentEditable);
       if (!isTyping) setComposerOpen(true);
     }, []),
+    { enabled: !composerOpen && !isUnboundShortcut(focusShortcut) },
   );
 
   return (
