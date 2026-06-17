@@ -18,6 +18,9 @@ concurrency:
   group: opencode-review-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+env:
+  OPENCODE_MODEL: opencode-go/minimax-m3
+
 jobs:
   opencode-review-same-repo:
     if: >
@@ -154,7 +157,7 @@ jobs:
 
           "$HOME/.opencode/bin/opencode" run \
             --agent github-pr-review \
-            --model opencode-go/minimax-m3 \
+            --model "$OPENCODE_MODEL" \
             --title "PR #${{ github.event.pull_request.number }} OpenCode review" \
             --file /tmp/opencode-review-guidelines.md \
             --file /tmp/opencode-review.patch \
@@ -198,9 +201,11 @@ jobs:
           if not findings:
             marker = "<!-- opencode-review:no-findings -->"
             short_sha = os.environ["HEAD_SHA"][:12]
+            model = os.environ["OPENCODE_MODEL"]
             body = (
               f"{marker}\n"
               "**OpenCode review complete**\n\n"
+              f"OpenCode model: `{model}`\n\n"
               f"No suggestions found for commit `{short_sha}`."
             )
 
@@ -474,7 +479,7 @@ jobs:
 
           "$HOME/.opencode/bin/opencode" run \
             --agent github-pr-review \
-            --model opencode-go/minimax-m3 \
+            --model "$OPENCODE_MODEL" \
             --title "PR #${{ github.event.pull_request.number }} OpenCode review" \
             --file /tmp/opencode-review-guidelines.md \
             --file /tmp/opencode-review.patch \
@@ -518,9 +523,11 @@ jobs:
           if not findings:
             marker = "<!-- opencode-review:no-findings -->"
             short_sha = os.environ["HEAD_SHA"][:12]
+            model = os.environ["OPENCODE_MODEL"]
             body = (
               f"{marker}\n"
               "**OpenCode review complete**\n\n"
+              f"OpenCode model: `{model}`\n\n"
               f"No suggestions found for commit `{short_sha}`."
             )
 
