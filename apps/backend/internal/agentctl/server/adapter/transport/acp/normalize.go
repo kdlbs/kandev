@@ -6,6 +6,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/readselector"
 )
 
 // Tool operation type constants.
@@ -315,7 +316,14 @@ func updateModifyFileInput(mf *streams.ModifyFilePayload, supplemental, inputMap
 
 func updateReadFileInput(rf *streams.ReadFilePayload, supplemental, inputMap map[string]any) {
 	if path := pathFromArgs(supplemental, inputMap); path != "" && rf.FilePath == "" {
-		rf.FilePath = path
+		clean, startLine, lineCount := readselector.Split(path)
+		rf.FilePath = clean
+		if rf.Offset == 0 {
+			rf.Offset = startLine
+		}
+		if rf.Limit == 0 {
+			rf.Limit = lineCount
+		}
 	}
 }
 
@@ -412,13 +420,17 @@ func (n *Normalizer) normalizeRead(args map[string]any) *streams.NormalizedPaylo
 	}
 
 	path := pathFromArgs(args, rawInput)
+	// OMP's read tool embeds a line/range/mode selector in the path
+	// (e.g. "foo.go:43-94"); strip it so the file link stays openable and
+	// carry the parsed range via offset/limit. No-op for other agents.
+	path, startLine, lineCount := readselector.Split(path)
 
 	// Check if this is a directory read - treat as code search (file listing)
 	if readType := shared.GetString(rawInput, "type"); readType == readTypeDirectory {
 		return streams.NewCodeSearch("", "", path, "")
 	}
 
-	return streams.NewReadFile(path, 0, 0)
+	return streams.NewReadFile(path, startLine, lineCount)
 }
 
 // normalizeExecute converts ACP execute/bash tool data.

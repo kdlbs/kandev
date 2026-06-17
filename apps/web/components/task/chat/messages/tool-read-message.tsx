@@ -48,15 +48,25 @@ function getReadSummary(lineCount: number | undefined): string {
   return "Read";
 }
 
+// formatLineRange renders the range the agent read (carried separately from
+// the file path so the link stays openable). offset is the 1-based start line;
+// limit is the line count (0 when open-ended / a single anchor).
+function formatLineRange(offset: number | undefined, limit: number | undefined): string {
+  if (!offset || offset <= 0) return "";
+  if (limit && limit > 0) return `:${offset}-${offset + limit - 1}`;
+  return `:${offset}`;
+}
+
 function parseReadMetadata(comment: Message) {
   const metadata = comment.metadata as ToolReadMetadata | undefined;
   const status = metadata?.status;
   const readFile = metadata?.normalized?.read_file;
   const readOutput = readFile?.output;
   const filePath = readFile?.file_path;
+  const lineRange = formatLineRange(readFile?.offset, readFile?.limit);
   const hasOutput = !!readOutput?.content;
   const isSuccess = status === "complete";
-  return { status, readOutput, filePath, hasOutput, isSuccess };
+  return { status, readOutput, filePath, lineRange, hasOutput, isSuccess };
 }
 
 export const ToolReadMessage = memo(function ToolReadMessage({
@@ -64,7 +74,8 @@ export const ToolReadMessage = memo(function ToolReadMessage({
   worktreePath,
   onOpenFile,
 }: ToolReadMessageProps) {
-  const { status, readOutput, filePath, hasOutput, isSuccess } = parseReadMetadata(comment);
+  const { status, readOutput, filePath, lineRange, hasOutput, isSuccess } =
+    parseReadMetadata(comment);
   const autoExpanded = status === "running";
   const { isExpanded, handleToggle } = useExpandState(status, autoExpanded);
 
@@ -80,12 +91,17 @@ export const ToolReadMessage = memo(function ToolReadMessage({
             {!isSuccess && <ReadStatusIcon status={status} />}
           </span>
           {filePath && (
-            <span className="min-w-0">
+            <span className="inline-flex items-baseline min-w-0">
               <FilePathButton
                 filePath={filePath}
                 worktreePath={worktreePath}
                 onOpenFile={onOpenFile}
               />
+              {lineRange && (
+                <span className="font-mono text-xs text-muted-foreground/70 shrink-0">
+                  {lineRange}
+                </span>
+              )}
             </span>
           )}
           {readOutput?.truncated && (

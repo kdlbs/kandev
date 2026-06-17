@@ -453,6 +453,41 @@ func TestNormalizerRead(t *testing.T) {
 			t.Errorf("expected Path '.', got %q", result.CodeSearch().Path)
 		}
 	})
+
+	t.Run("strips omp line selector from path and records range", func(t *testing.T) {
+		args := map[string]any{
+			"kind": "read",
+			"raw_input": map[string]any{
+				"path": "apps/backend/internal/sentry/handlers.go:43-94",
+			},
+		}
+		result := normalizer.NormalizeToolCall("read", args)
+		rf := result.ReadFile()
+		if rf == nil {
+			t.Fatal("expected ReadFile to be set")
+		}
+		if rf.FilePath != "apps/backend/internal/sentry/handlers.go" {
+			t.Errorf("expected stripped FilePath, got %q", rf.FilePath)
+		}
+		if rf.Offset != 43 || rf.Limit != 52 {
+			t.Errorf("expected Offset=43 Limit=52, got Offset=%d Limit=%d", rf.Offset, rf.Limit)
+		}
+	})
+
+	t.Run("strips omp selector arriving on a tool_call_update", func(t *testing.T) {
+		payload := normalizer.NormalizeToolCall("read", map[string]any{"kind": "read"})
+		normalizer.UpdatePayloadInput(payload, map[string]any{"path": "main.go:50+150"}, nil)
+		rf := payload.ReadFile()
+		if rf == nil {
+			t.Fatal("expected ReadFile to be set")
+		}
+		if rf.FilePath != "main.go" {
+			t.Errorf("expected stripped FilePath 'main.go', got %q", rf.FilePath)
+		}
+		if rf.Offset != 50 || rf.Limit != 150 {
+			t.Errorf("expected Offset=50 Limit=150, got Offset=%d Limit=%d", rf.Offset, rf.Limit)
+		}
+	})
 }
 
 // TestNormalizerResult tests the normalizer's result handling.

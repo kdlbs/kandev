@@ -556,6 +556,41 @@ func TestGetFileContent_ExternalAbsolutePath(t *testing.T) {
 	}
 }
 
+// TestGetFileContent_StripsReadSelector covers the file-open boundary fix: a
+// path carrying an omp read-selector (e.g. "<file>:43-94") must still open,
+// both for an in-workspace file and for an external absolute file (the
+// CLAUDE.md:93-113 "path traversal detected" repro).
+func TestGetFileContent_StripsReadSelector(t *testing.T) {
+	workDir, wt := setupTestDir(t)
+
+	inside := filepath.Join(workDir, "notes.txt")
+	insideContent := "l1\nl2\nl3\nl4\n"
+	if err := os.WriteFile(inside, []byte(insideContent), 0o644); err != nil {
+		t.Fatalf("write in-workspace file: %v", err)
+	}
+	content, _, _, _, err := wt.GetFileContent("notes.txt:2-3")
+	if err != nil {
+		t.Fatalf("GetFileContent(in-workspace + selector) error: %v", err)
+	}
+	if content != insideContent {
+		t.Fatalf("content = %q, want full file %q", content, insideContent)
+	}
+
+	externalDir := t.TempDir()
+	externalPath := filepath.Join(externalDir, "CLAUDE.md")
+	externalContent := "global config\n"
+	if err := os.WriteFile(externalPath, []byte(externalContent), 0o644); err != nil {
+		t.Fatalf("write external file: %v", err)
+	}
+	content, _, _, _, err = wt.GetFileContent(externalPath + ":93-113")
+	if err != nil {
+		t.Fatalf("GetFileContent(external absolute + selector) error: %v", err)
+	}
+	if content != externalContent {
+		t.Fatalf("content = %q, want %q", content, externalContent)
+	}
+}
+
 // setupTestDir creates a temp directory with a WorkspaceTracker (no git required).
 func setupTestDir(t *testing.T) (string, *WorkspaceTracker) {
 	t.Helper()

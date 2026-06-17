@@ -19,6 +19,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/readselector"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 )
@@ -279,6 +280,12 @@ func resolveNonExistentPath(path string) (string, error) {
 // If the file is not valid UTF-8, it is base64-encoded and isBinary is true.
 // If the file is a symlink, resolvedPath contains the target path relative to the workspace root.
 func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, bool, string, error) {
+	// Tolerate an omp read-selector left on the path (e.g. "foo.go:43-94").
+	// Such paths reach here from file links in already-persisted messages (and
+	// any normalization gap); without stripping, the selector makes both the
+	// workspace stat and the external-absolute-path fallback fail. The line
+	// range is irrelevant to serving content (the viewer scrolls separately).
+	reqPath, _, _ = readselector.Split(reqPath)
 	safePath, err := wt.resolveSafePath(reqPath)
 	if err != nil {
 		if errors.Is(err, errPathTraversal) {
