@@ -333,6 +333,22 @@ describe("PassthroughToolbar – composer toggle", () => {
     await waitFor(() => expect(screen.getByTestId(TID_COMPOSER)).toBeTruthy());
     expect(chatInputMock.focusInput).toHaveBeenCalled();
   });
+
+  it("does not steal focus from another editable field with the focus shortcut", () => {
+    mockKeyboardShortcuts = {
+      FOCUS_PASSTHROUGH_INPUT: { key: "y", modifiers: { ctrlOrCmd: true, shift: true } },
+    };
+    renderToolbar();
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    input.focus();
+
+    fireEvent.keyDown(window, { key: "y", code: "KeyY", ctrlKey: true, shiftKey: true });
+
+    expect(screen.queryByTestId(TID_COMPOSER)).toBeNull();
+    expect(chatInputMock.focusInput).not.toHaveBeenCalled();
+    input.remove();
+  });
 });
 
 // ---------------------------------------------------------------------------

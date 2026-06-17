@@ -195,10 +195,8 @@ func (e *Executor) promptPassthrough(ctx context.Context, taskID string, session
 	if err != nil {
 		return nil, err
 	}
-	if prompt == "" {
-		if strings.TrimSpace(promptWithAttachments) == "" {
-			return nil, fmt.Errorf("passthrough prompt cannot be empty")
-		}
+	if strings.TrimSpace(promptWithAttachments) == "" {
+		return nil, fmt.Errorf("passthrough prompt cannot be empty")
 	}
 	pt, err := e.agentManager.ResolvePassthroughConfig(ctx, sessionID)
 	if err != nil {

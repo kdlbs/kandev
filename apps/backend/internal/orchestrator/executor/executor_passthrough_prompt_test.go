@@ -217,6 +217,23 @@ func TestExecutor_Prompt_PassthroughEmptyPromptReturnsError(t *testing.T) {
 	}
 }
 
+func TestExecutor_Prompt_PassthroughWhitespaceOnlyPromptReturnsError(t *testing.T) {
+	repo := newMockRepository()
+	agentManager := &mockAgentManager{
+		isPassthroughSessionFunc: func(_ context.Context, _ string) bool { return true },
+	}
+	seedPassthroughSession(t, repo, agentManager, "task-1", "sess-1", "exec-1")
+	exec := newTestExecutor(t, agentManager, repo)
+
+	_, err := exec.Prompt(context.Background(), "task-1", "sess-1", " \n\t ", nil, false)
+	if err == nil {
+		t.Fatal("expected error for whitespace-only passthrough prompt, got nil")
+	}
+	if got := len(agentManager.writePassthroughStdinCalls); got != 0 {
+		t.Errorf("WritePassthroughStdin must not be called for whitespace-only prompts; got %d call(s)", got)
+	}
+}
+
 // TestExecutor_Prompt_PassthroughPreservesUnicodeAndMultiline verifies the PTY
 // write payload preserves UTF-8 and embedded newlines verbatim. The submit
 // suffix is appended at the END so the agent's TUI sees one logical "submit"

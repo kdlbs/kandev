@@ -28,6 +28,15 @@ import type { DiffComment } from "@/lib/diff/types";
 import { PassthroughTerminal } from "./passthrough-terminal";
 import { PassthroughComposerPanel, useSendPassthroughMessage } from "./passthrough-chat-composer";
 
+function isEditableElement(element: Element | null) {
+  return (
+    element instanceof HTMLInputElement ||
+    element instanceof HTMLTextAreaElement ||
+    element instanceof HTMLSelectElement ||
+    (element instanceof HTMLElement && element.isContentEditable)
+  );
+}
+
 /**
  * PassthroughToolbar wraps the PTY terminal with the kandev surface that the
  * full ACP `ChatStatusBar` + `ChatInputArea` provide for chat mode: PR status,
@@ -97,6 +106,7 @@ export function PassthroughToolbar({
   useKeyboardShortcut(
     focusShortcut,
     useCallback(() => {
+      if (isEditableElement(document.activeElement)) return;
       setComposerOpen(true);
       requestAnimationFrame(() => chatInputRef.current?.focusInput());
     }, []),
