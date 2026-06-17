@@ -118,9 +118,12 @@ extract_checks_json() {
         | if $state == "pending" or $state == "expected" then null else $state end
       end;
     def preferred_check_order:
-      if .conclusion == "skipped" then 3
+      if .conclusion == "success" then 0
       elif .status != "completed" then 1
-      else 0
+      elif .conclusion == "neutral" then 2
+      elif .conclusion == "skipped" then 3
+      elif .conclusion == "cancelled" then 4
+      else 5
       end;
     $checks_in
     | to_entries
@@ -203,6 +206,14 @@ extract_review_threads_json() {
 
 summarize_state_json() {
   jq -c '
+    def effective_checks:
+      .checks
+      | to_entries
+      | map(.value + {_index: .key})
+      | sort_by([(.workflow // ""), .name])
+      | group_by([(.workflow // ""), .name])
+      | map(sort_by(._index) | .[0] | del(._index));
+
     def bad_conclusion:
       .conclusion != null
       and .conclusion != "success"
@@ -224,12 +235,12 @@ summarize_state_json() {
       pr,
       since,
       failed_checks: [
-        .checks[]
+        effective_checks[]
         | select(terminal_failure_status and bad_conclusion)
         | {name, workflow, status, conclusion, run_id, job_id, details_url, target_url}
       ],
       pending_checks: [
-        .checks[]
+        effective_checks[]
         | select(pending_status and .conclusion == null)
         | {name, workflow, status, run_id, job_id, details_url, target_url}
       ],
