@@ -39,8 +39,11 @@ export function useUnknownSessionSubscriptionRetry(params: {
     if (!shouldRetry) return;
     let attempts = 0;
     let timeoutId: number | null = null;
+    let cancelled = false;
     const schedule = () => {
+      if (cancelled) return;
       timeoutId = window.setTimeout(() => {
+        if (cancelled) return;
         const nextAttempts = attempts + 1;
         attempts = nextAttempts;
         setRetryState({ sessionId, count: nextAttempts });
@@ -49,6 +52,7 @@ export function useUnknownSessionSubscriptionRetry(params: {
     };
     schedule();
     return () => {
+      cancelled = true;
       if (timeoutId !== null) window.clearTimeout(timeoutId);
     };
   }, [sessionId, shouldRetry]);

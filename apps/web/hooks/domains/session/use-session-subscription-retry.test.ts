@@ -128,6 +128,25 @@ describe("useUnknownSessionSubscriptionRetry", () => {
 
     expect(vi.getTimerCount()).toBe(0);
   });
+
+  it("does not recreate retry timers after unmount", () => {
+    vi.useFakeTimers();
+
+    const { unmount } = renderHook(() =>
+      useUnknownSessionSubscriptionRetry({
+        taskSessionId: "sess-1",
+        connectionStatus: "connected",
+        taskSessionState: null,
+      }),
+    );
+
+    expect(vi.getTimerCount()).toBe(1);
+
+    unmount();
+    act(() => vi.runOnlyPendingTimers());
+
+    expect(vi.getTimerCount()).toBe(0);
+  });
 });
 
 describe("useUnknownSessionSubscriptionRetryEffect", () => {
