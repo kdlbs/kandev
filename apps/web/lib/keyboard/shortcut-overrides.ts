@@ -9,6 +9,7 @@ export type ConfigurableShortcutId =
   | "COMMAND_PANEL"
   | "NEW_TASK"
   | "FOCUS_INPUT"
+  | "FOCUS_PASSTHROUGH_INPUT"
   | "TOGGLE_PLAN_MODE"
   | "TASK_SWITCHER"
   | "TASK_SWITCHER_REVERSE"
@@ -43,6 +44,10 @@ export const CONFIGURABLE_SHORTCUTS: Record<
   COMMAND_PANEL: { label: "Command Panel (Alt)", default: SHORTCUTS.COMMAND_PANEL },
   NEW_TASK: { label: "New Task", default: SHORTCUTS.NEW_TASK },
   FOCUS_INPUT: { label: "Focus Chat Input", default: SHORTCUTS.FOCUS_INPUT },
+  FOCUS_PASSTHROUGH_INPUT: {
+    label: "Focus CLI Chat Input",
+    default: SHORTCUTS.FOCUS_PASSTHROUGH_INPUT,
+  },
   TOGGLE_PLAN_MODE: { label: "Toggle Plan Mode", default: SHORTCUTS.TOGGLE_PLAN_MODE },
   TASK_SWITCHER: { label: "Recent Task Switcher", default: SHORTCUTS.TASK_SWITCHER },
   TASK_SWITCHER_REVERSE: {

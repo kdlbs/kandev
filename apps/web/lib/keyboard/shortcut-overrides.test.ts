@@ -20,12 +20,13 @@ describe("CONFIGURABLE_SHORTCUTS", () => {
     expect(ids).toContain("COMMAND_PANEL");
     expect(ids).toContain("NEW_TASK");
     expect(ids).toContain("FOCUS_INPUT");
+    expect(ids).toContain("FOCUS_PASSTHROUGH_INPUT");
     expect(ids).toContain("TOGGLE_PLAN_MODE");
     expect(ids).toContain("TASK_SWITCHER");
     expect(ids).toContain("TASK_SWITCHER_REVERSE");
     expect(ids).toContain("VOICE_INPUT_TOGGLE");
     expect(ids).toContain("REVERSE_SEARCH");
-    expect(ids).toHaveLength(13);
+    expect(ids).toHaveLength(14);
   });
 
   it("each entry has a label and default matching SHORTCUTS", () => {
@@ -43,6 +44,11 @@ describe("CONFIGURABLE_SHORTCUTS", () => {
 
     expect(CONFIGURABLE_SHORTCUTS.FOCUS_INPUT.label).toBe("Focus Chat Input");
     expect(CONFIGURABLE_SHORTCUTS.FOCUS_INPUT.default).toBe(SHORTCUTS.FOCUS_INPUT);
+
+    expect(CONFIGURABLE_SHORTCUTS.FOCUS_PASSTHROUGH_INPUT.label).toBe("Focus CLI Chat Input");
+    expect(CONFIGURABLE_SHORTCUTS.FOCUS_PASSTHROUGH_INPUT.default).toBe(
+      SHORTCUTS.FOCUS_PASSTHROUGH_INPUT,
+    );
 
     expect(CONFIGURABLE_SHORTCUTS.TOGGLE_PLAN_MODE.label).toBe("Toggle Plan Mode");
     expect(CONFIGURABLE_SHORTCUTS.TOGGLE_PLAN_MODE.default).toBe(SHORTCUTS.TOGGLE_PLAN_MODE);

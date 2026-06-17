@@ -47,6 +47,10 @@ test.describe("CLI mode: passthrough toolbar", () => {
     await session.waitForPassthroughLoaded(20_000);
   }
 
+  function passthroughEditor(testPage: import("@playwright/test").Page) {
+    return testPage.getByTestId("passthrough-composer").locator(".tiptap.ProseMirror");
+  }
+
   test("toolbar renders for passthrough sessions on the task page", async ({
     testPage,
     apiClient,
@@ -100,9 +104,9 @@ test.describe("CLI mode: passthrough toolbar", () => {
     await testPage.getByTestId("passthrough-toggle-composer").click();
     await expect(testPage.getByTestId("passthrough-composer")).toBeVisible({ timeout: 5_000 });
 
-    const textarea = testPage.getByTestId("passthrough-composer-textarea");
-    await textarea.fill("hello from e2e");
-    await textarea.press("Enter");
+    const editor = passthroughEditor(testPage);
+    await editor.fill("hello from e2e");
+    await testPage.getByTestId("submit-message-button").click();
 
     // The composer closes on successful send
     await expect(testPage.getByTestId("passthrough-composer")).toBeHidden({ timeout: 10_000 });
@@ -111,7 +115,7 @@ test.describe("CLI mode: passthrough toolbar", () => {
     await session.expectPassthroughHasText("hello from e2e", 15_000);
   });
 
-  test("composer slash command suggestions can be selected with the keyboard", async ({
+  test("composer keeps slash literal and does not show command suggestions", async ({
     testPage,
     apiClient,
     seedData,
@@ -143,23 +147,13 @@ test.describe("CLI mode: passthrough toolbar", () => {
     ]);
 
     await testPage.getByTestId("passthrough-toggle-composer").click();
-    const textarea = testPage.getByTestId("passthrough-composer-textarea");
-    await expect(textarea).toBeVisible({ timeout: 5_000 });
+    const editor = passthroughEditor(testPage);
+    await expect(editor).toBeVisible({ timeout: 5_000 });
 
-    await textarea.fill("/s");
+    await editor.fill("/s");
 
-    await expect(testPage.getByRole("listbox", { name: "Command suggestions" })).toBeVisible({
-      timeout: 10_000,
-    });
-    await expect(testPage.getByRole("option", { name: "/slow" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-
-    await textarea.press("Tab");
-
-    await expect(textarea).toHaveValue("/slow ");
-    await expect(testPage.getByTestId("passthrough-composer-suggestions")).toHaveCount(0);
+    await expect(testPage.getByRole("listbox", { name: "Command suggestions" })).toHaveCount(0);
+    await expect(editor).toHaveText("/s");
   });
 
   test("toolbar omits a Stop button; cancel is via Ctrl-C in the terminal", async ({

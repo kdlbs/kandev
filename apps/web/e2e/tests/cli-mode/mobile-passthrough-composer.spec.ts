@@ -16,7 +16,7 @@ async function createPassthroughProfile(apiClient: ApiClient, name: string): Pro
 }
 
 test.describe("mobile CLI mode: passthrough composer", () => {
-  test("slash command suggestions can be selected by touch", async ({
+  test("slash remains literal and shared composer controls are available", async ({
     testPage,
     apiClient,
     seedData,
@@ -48,17 +48,16 @@ test.describe("mobile CLI mode: passthrough composer", () => {
     ]);
 
     await testPage.getByTestId("passthrough-toggle-composer").tap();
-    const textarea = testPage.getByTestId("passthrough-composer-textarea");
-    await expect(textarea).toBeVisible({ timeout: 5_000 });
+    const composer = testPage.getByTestId("passthrough-composer");
+    const editor = composer.locator(".tiptap.ProseMirror");
+    await expect(editor).toBeVisible({ timeout: 5_000 });
+    await expect(testPage.getByTestId("plan-mode-toggle-button")).toBeVisible();
+    await expect(testPage.getByTestId("chat-context-button")).toBeVisible();
+    await expect(testPage.getByTestId("chat-attachments-button")).toBeVisible();
 
-    await textarea.fill("/s");
+    await editor.fill("/s");
 
-    await expect(testPage.getByRole("listbox", { name: "Command suggestions" })).toBeVisible({
-      timeout: 10_000,
-    });
-    await testPage.getByRole("option", { name: "/slow" }).tap();
-
-    await expect(textarea).toHaveValue("/slow ");
-    await expect(testPage.getByTestId("passthrough-composer-suggestions")).toHaveCount(0);
+    await expect(testPage.getByRole("listbox", { name: "Command suggestions" })).toHaveCount(0);
+    await expect(editor).toHaveText("/s");
   });
 });

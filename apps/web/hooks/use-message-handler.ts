@@ -78,7 +78,10 @@ export function buildTaskMentionsContext(tasks: TaskMentionData[], state: AppSta
   );
 }
 
-function buildContextFilesContext(contextFiles: ContextFile[], prompts: CustomPrompt[]): string {
+export function buildContextFilesContext(
+  contextFiles: ContextFile[],
+  prompts: CustomPrompt[],
+): string {
   const files = contextFiles.filter(
     (f) => !f.path.startsWith("prompt:") && f.path !== "plan:context",
   );

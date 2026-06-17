@@ -91,9 +91,9 @@ test.describe("CLI mode: message.add submits to PTY", () => {
     await expect(testPage.getByTestId("passthrough-composer")).toBeVisible({ timeout: 5_000 });
 
     const followUp = "passthrough message.add submit e2e";
-    const textarea = testPage.getByTestId("passthrough-composer-textarea");
-    await textarea.fill(followUp);
-    await textarea.press("Enter");
+    const editor = testPage.getByTestId("passthrough-composer").locator(".tiptap.ProseMirror");
+    await editor.fill(followUp);
+    await testPage.getByTestId("submit-message-button").click();
 
     await expect(testPage.getByTestId("passthrough-composer")).toBeHidden({ timeout: 10_000 });
     await session.expectPassthroughHasText(`Processed: ${followUp}`, 20_000);

@@ -2,7 +2,10 @@ package executor
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -127,21 +130,25 @@ func TestExecutor_Prompt_PassthroughMarkRunningErrorIsNonFatal(t *testing.T) {
 	}
 }
 
-func TestExecutor_Prompt_PassthroughWithAttachmentsDropsAttachmentsAndSucceeds(t *testing.T) {
-	// Attachments have no place in passthrough mode (no ACP channel for binary
-	// payloads). When prompt text is present we still deliver the text; the
-	// caller (logs) records that the attachments were dropped.
+func TestExecutor_Prompt_PassthroughWithAttachmentsSavesFilesAndReferencesPaths(t *testing.T) {
 	repo := newMockRepository()
 	agentManager := &mockAgentManager{
 		isPassthroughSessionFunc: func(_ context.Context, _ string) bool { return true },
 	}
 	seedPassthroughSession(t, repo, agentManager, "task-1", "sess-1", "exec-1")
+	workDir := t.TempDir()
+	repo.sessions["sess-1"].WorkspacePath = workDir
 	exec := newTestExecutor(t, agentManager, repo)
 
-	atts := []v1.MessageAttachment{{Type: "image", MimeType: "image/png", Name: "screenshot.png"}}
+	atts := []v1.MessageAttachment{{
+		Type:     "resource",
+		MimeType: "text/plain",
+		Name:     "../notes.txt",
+		Data:     base64.StdEncoding.EncodeToString([]byte("passthrough attachment body")),
+	}}
 	result, err := exec.Prompt(context.Background(), "task-1", "sess-1", "look at this", atts, false)
 	if err != nil {
-		t.Fatalf("Prompt with attachments should still succeed (attachments dropped); got error: %v", err)
+		t.Fatalf("Prompt with attachments should succeed: %v", err)
 	}
 	if result == nil || result.StopReason != "passthrough_dispatched" {
 		t.Fatalf("expected passthrough_dispatched result, got %+v", result)
@@ -149,8 +156,47 @@ func TestExecutor_Prompt_PassthroughWithAttachmentsDropsAttachmentsAndSucceeds(t
 	if got := len(agentManager.writePassthroughStdinCalls); got != 1 {
 		t.Fatalf("expected 1 WritePassthroughStdin call, got %d", got)
 	}
-	if !strings.HasPrefix(agentManager.writePassthroughStdinCalls[0].Data, "look at this") {
-		t.Errorf("PTY write should carry the typed text, got %q", agentManager.writePassthroughStdinCalls[0].Data)
+	data := agentManager.writePassthroughStdinCalls[0].Data
+	relPath := filepath.Join(".kandev", "attachments", "sess-1", "notes.txt")
+	if !strings.Contains(data, "look at this") {
+		t.Errorf("PTY write should carry the typed text, got %q", data)
+	}
+	if !strings.Contains(data, relPath) {
+		t.Errorf("PTY write should reference saved attachment path %q, got %q", relPath, data)
+	}
+	contents, err := os.ReadFile(filepath.Join(workDir, relPath))
+	if err != nil {
+		t.Fatalf("expected saved attachment file: %v", err)
+	}
+	if string(contents) != "passthrough attachment body" {
+		t.Fatalf("saved attachment contents = %q", string(contents))
+	}
+}
+
+func TestExecutor_Prompt_PassthroughAttachmentOnlyMessageSendsPathPrompt(t *testing.T) {
+	repo := newMockRepository()
+	agentManager := &mockAgentManager{
+		isPassthroughSessionFunc: func(_ context.Context, _ string) bool { return true },
+	}
+	seedPassthroughSession(t, repo, agentManager, "task-1", "sess-1", "exec-1")
+	workDir := t.TempDir()
+	repo.sessions["sess-1"].WorkspacePath = workDir
+	exec := newTestExecutor(t, agentManager, repo)
+
+	atts := []v1.MessageAttachment{{
+		Type:     "resource",
+		MimeType: "text/plain",
+		Name:     "only.txt",
+		Data:     base64.StdEncoding.EncodeToString([]byte("attachment-only")),
+	}}
+	if _, err := exec.Prompt(context.Background(), "task-1", "sess-1", "", atts, false); err != nil {
+		t.Fatalf("attachment-only passthrough prompt should send path instructions: %v", err)
+	}
+	if got := len(agentManager.writePassthroughStdinCalls); got != 1 {
+		t.Fatalf("expected 1 WritePassthroughStdin call, got %d", got)
+	}
+	if !strings.Contains(agentManager.writePassthroughStdinCalls[0].Data, filepath.Join(".kandev", "attachments", "sess-1", "only.txt")) {
+		t.Errorf("PTY write should reference only attachment, got %q", agentManager.writePassthroughStdinCalls[0].Data)
 	}
 }
 

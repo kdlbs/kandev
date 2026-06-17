@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   IconArrowRight,
   IconMessageCircle,
@@ -12,10 +12,10 @@ import {
 import { Button } from "@kandev/ui/button";
 import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { useToast } from "@/components/toast-provider";
 import { PRStatusChip } from "@/components/github/pr-status-chip";
-import { PassthroughComposer } from "./passthrough-composer";
 import { PRMergedBanner } from "./chat/chat-input-area";
+import { type ChatInputContainerHandle } from "./chat/chat-input-container";
+import { useChatPanelState } from "./chat/use-chat-panel-state";
 import { useAppStore } from "@/components/state-provider";
 import { useNextWorkflowStep } from "@/hooks/domains/kanban/use-plan-actions";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
@@ -23,11 +23,10 @@ import { usePendingDiffCommentsByFile } from "@/hooks/domains/comments/use-diff-
 import { useCommentsStore } from "@/lib/state/slices/comments/comments-store";
 import { useFileEditors } from "@/hooks/use-file-editors";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
-import { formatReviewCommentsAsMarkdown } from "@/lib/state/slices/comments/format";
 import { getShortcut, isUnboundShortcut } from "@/lib/keyboard/shortcut-overrides";
 import type { DiffComment } from "@/lib/diff/types";
-import { getWebSocketClient } from "@/lib/ws/connection";
 import { PassthroughTerminal } from "./passthrough-terminal";
+import { PassthroughComposerPanel, useSendPassthroughMessage } from "./passthrough-chat-composer";
 
 /**
  * PassthroughToolbar wraps the PTY terminal with the kandev surface that the
@@ -51,15 +50,14 @@ export function PassthroughToolbar({
 }) {
   const [composerOpen, setComposerOpen] = useState(false);
   const [commentsOpenState, setCommentsOpen] = useState(false);
+  const [isSending, setIsSending] = useState(false);
+  const chatInputRef = useRef<ChatInputContainerHandle | null>(null);
 
   const sessionState = useAppStore((state) =>
     sessionId ? (state.taskSessions.items[sessionId]?.state ?? null) : null,
   );
-  const availableCommands = useAppStore((state) =>
-    sessionId ? state.availableCommands?.bySessionId?.[sessionId] : undefined,
-  );
   const keyboardShortcuts = useAppStore((state) => state.userSettings?.keyboardShortcuts);
-  const focusShortcut = getShortcut("FOCUS_INPUT", keyboardShortcuts);
+  const focusShortcut = getShortcut("FOCUS_PASSTHROUGH_INPUT", keyboardShortcuts);
   const isAgentBusy = sessionState === "RUNNING" || sessionState === "STARTING";
 
   const nextStep = useNextWorkflowStep(taskId);
@@ -68,32 +66,47 @@ export function PassthroughToolbar({
   const { pendingComments, pendingCount } = usePendingPassthroughComments(sessionId);
   const { isMobile } = useResponsiveBreakpoint();
   const { openFile } = useFileEditors();
+  const panelState = useChatPanelState({ sessionId: sessionId ?? null, onOpenFile: openFile });
 
   // Derive open state: auto-close when pending comments are cleared
   const commentsOpen = commentsOpenState && pendingCount > 0;
 
-  const handleSendMessage = useSendPassthroughMessage({
+  const sendPassthroughMessage = useSendPassthroughMessage({
     taskId,
     sessionId,
     pendingComments,
+    panelState,
     onSent: () => {
       setComposerOpen(false);
       setCommentsOpen(false);
     },
   });
+  const handleSendMessage = useCallback(
+    async (...args: Parameters<typeof sendPassthroughMessage>) => {
+      if (isSending) return;
+      setIsSending(true);
+      try {
+        await sendPassthroughMessage(...args);
+      } finally {
+        setIsSending(false);
+      }
+    },
+    [isSending, sendPassthroughMessage],
+  );
 
   useKeyboardShortcut(
     focusShortcut,
     useCallback(() => {
-      const el = document.activeElement;
-      const isTyping =
-        el instanceof HTMLInputElement ||
-        el instanceof HTMLTextAreaElement ||
-        (el instanceof HTMLElement && el.isContentEditable);
-      if (!isTyping) setComposerOpen(true);
+      setComposerOpen(true);
+      requestAnimationFrame(() => chatInputRef.current?.focusInput());
     }, []),
-    { enabled: !composerOpen && !isUnboundShortcut(focusShortcut) },
+    { enabled: !isUnboundShortcut(focusShortcut) },
   );
+
+  useEffect(() => {
+    if (!composerOpen) return;
+    requestAnimationFrame(() => chatInputRef.current?.focusInput());
+  }, [composerOpen]);
 
   return (
     <div className="flex h-full flex-col bg-card" data-testid="passthrough-toolbar">
@@ -110,15 +123,14 @@ export function PassthroughToolbar({
       )}
 
       {composerOpen && (
-        <PassthroughComposer
+        <PassthroughComposerPanel
+          refHandle={chatInputRef}
           onSubmit={handleSendMessage}
           onCancel={() => setComposerOpen(false)}
-          autoFocus
-          placeholder="Type a message, Shift+Enter for newline, Esc to close"
-          header={pendingCount > 0 ? <PendingCommentsHint count={pendingCount} /> : null}
-          sessionId={sessionId}
-          availableCommands={availableCommands}
-          focusShortcut={focusShortcut}
+          panelState={panelState}
+          taskId={taskId}
+          isMoving={nextStep.isMoving}
+          isSending={isSending}
         />
       )}
 
@@ -151,59 +163,6 @@ function usePendingPassthroughComments(sessionId: string | null | undefined) {
     [pendingCommentsByFile],
   );
   return { pendingComments, pendingCount: pendingComments.length };
-}
-
-function useSendPassthroughMessage({
-  taskId,
-  sessionId,
-  pendingComments,
-  onSent,
-}: {
-  taskId: string | null;
-  sessionId: string | null | undefined;
-  pendingComments: DiffComment[];
-  onSent: () => void;
-}) {
-  const { toast } = useToast();
-  const markCommentsSent = useCommentsStore((s) => s.markCommentsSent);
-
-  return useCallback(
-    async (content: string) => {
-      if (!taskId || !sessionId) {
-        toast({ title: "Session not ready", variant: "error" });
-        throw new Error("Session not ready");
-      }
-      const client = getWebSocketClient();
-      if (!client) {
-        toast({ title: "Not connected — please reload to retry", variant: "error" });
-        throw new Error("WebSocket client not available");
-      }
-      // Format pending review comments as markdown and prepend so they reach
-      // the agent's stdin alongside the user's typed prompt. Mark them sent
-      // only after the WS request resolves so a failed send doesn't drop the
-      // user's queued comments.
-      const formatted =
-        pendingComments.length > 0
-          ? formatReviewCommentsAsMarkdown(pendingComments) + content
-          : content;
-      try {
-        await client.request(
-          "message.add",
-          { task_id: taskId, session_id: sessionId, content: formatted },
-          10_000,
-        );
-        if (pendingComments.length > 0) {
-          markCommentsSent(pendingComments.map((c) => c.id));
-        }
-        onSent();
-      } catch (error) {
-        console.error("Failed to send passthrough message:", error);
-        toast({ title: "Failed to send message", variant: "error" });
-        throw error;
-      }
-    },
-    [taskId, sessionId, toast, pendingComments, markCommentsSent, onSent],
-  );
 }
 
 function ChatToggleButton({
@@ -340,20 +299,6 @@ function CommentsTooltipBody({ commentsOpen, count }: { commentsOpen: boolean; c
         Hit <strong>Send to agent</strong> inside the panel to deliver them to the CLI agent right
         away, or just open the chat box and type a follow-up — the comments will be prepended.
       </p>
-    </div>
-  );
-}
-
-function PendingCommentsHint({ count }: { count: number }) {
-  return (
-    <div
-      data-testid="passthrough-pending-comments-banner"
-      className="flex items-center gap-1.5 border-b bg-amber-500/10 px-2 py-1 text-xs text-amber-700 dark:text-amber-300"
-    >
-      <IconMessageDots className="h-3.5 w-3.5" />
-      <span>
-        {count} pending review comment{count === 1 ? "" : "s"} will be attached to this message.
-      </span>
     </div>
   );
 }

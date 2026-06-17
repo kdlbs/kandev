@@ -456,6 +456,7 @@ function AttachFilesButton({ onClick }: { onClick: () => void }) {
           size="sm"
           className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40"
           onClick={onClick}
+          data-testid="chat-attachments-button"
         >
           <IconPaperclip className="h-4 w-4" />
         </Button>
@@ -571,6 +572,7 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
               variant="ghost"
               size="sm"
               className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40 relative"
+              data-testid="chat-context-button"
             >
               <IconAt className="h-4 w-4" />
               {props.contextCount > 0 && !isCollapsed && (

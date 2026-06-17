@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // --- Constants declared before vi.mock so factories can reference them ---
 const TASK_ID = "task-1";
 const SESSION_ID = "session-1";
+const SRC_FILE = "src/foo.ts";
 
 // data-testid constants to avoid sonarjs/no-duplicate-string warnings
 const TID_TOOLBAR = "passthrough-toolbar";
@@ -19,9 +20,14 @@ const TID_COMMENT_REMOVE = "passthrough-comment-remove";
 const TID_COMMENT_FILE_REF = "passthrough-comment-file-ref";
 const TID_PENDING_COUNT = "passthrough-pending-count";
 const TID_PENDING_BANNER = "passthrough-pending-comments-banner";
+const TID_PLAN_TOGGLE = "plan-mode-toggle-button";
+const TID_ATTACHMENTS = "chat-attachments-button";
+const TID_CONTEXT = "chat-context-button";
 
 // --- Mutable state for per-test overrides ---
 let mockSessionState: string | null = null;
+let mockKeyboardShortcuts: Record<string, { key: string; modifiers?: Record<string, boolean> }> =
+  {};
 let mockPendingByFile: Record<string, import("@/lib/state/slices/comments").DiffComment[]> = {};
 let mockNextStep: {
   proceedStepName: string | null;
@@ -35,6 +41,11 @@ const mockUpdateComment = vi.fn();
 const mockRemoveComment = vi.fn();
 const mockOpenFile = vi.fn();
 let mockWsRequestFn = vi.fn();
+const chatInputMock = vi.hoisted(() => ({
+  renderProps: vi.fn(),
+  focusInput: vi.fn(),
+  getTextareaElement: vi.fn(() => null as HTMLElement | null),
+}));
 
 // --- Module mocks (hoisted by Vitest) ---
 
@@ -46,7 +57,14 @@ vi.mock("@/components/state-provider", () => ({
           ? { [SESSION_ID]: { id: SESSION_ID, state: mockSessionState } }
           : {},
       },
+      userSettings: { keyboardShortcuts: mockKeyboardShortcuts, chatSubmitKey: "enter" },
     }),
+  useAppStoreApi: () => ({
+    getState: () => ({
+      kanban: { steps: [] },
+      kanbanMulti: { snapshots: {} },
+    }),
+  }),
 }));
 
 vi.mock("@/components/toast-provider", () => ({
@@ -109,6 +127,87 @@ vi.mock("@kandev/ui/tooltip", () => ({
   TooltipContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
+vi.mock("./chat/use-chat-panel-state", () => ({
+  useChatPanelState: () => ({
+    resolvedSessionId: SESSION_ID,
+    taskId: TASK_ID,
+    task: { id: TASK_ID, title: "Task title" },
+    taskDescription: "Task description",
+    planModeEnabled: false,
+    planModeAvailable: true,
+    mcpServers: ["kandev"],
+    handlePlanModeChange: vi.fn(),
+    isStarting: false,
+    isPreparingEnvironment: false,
+    contextItems: [{ id: "file:src/foo.ts", kind: "file", label: "foo.ts", filePath: SRC_FILE }],
+    contextFiles: [{ path: SRC_FILE, name: "foo.ts" }],
+    handleToggleContextFile: vi.fn(),
+    handleAddContextFile: vi.fn(),
+    addContextFile: vi.fn(),
+    clearEphemeral: vi.fn(),
+    planContextEnabled: false,
+    chatSubmitKey: "enter",
+    prompts: [{ id: "prompt-1", name: "Prompt", content: "Prompt content" }],
+    planComments: [],
+    pendingPRFeedback: [],
+    pendingCommentsByFile: mockPendingByFile,
+  }),
+}));
+
+vi.mock("./chat/chat-input-container", async () => {
+  const React = await vi.importActual<typeof import("react")>("react");
+  const ChatInputContainer = React.forwardRef<Record<string, unknown>, Record<string, unknown>>(
+    function MockChatInputContainer(props, ref) {
+      const [value, setValue] = React.useState("");
+      chatInputMock.renderProps(props);
+      React.useImperativeHandle(ref, () => ({
+        focusInput: chatInputMock.focusInput,
+        getTextareaElement: chatInputMock.getTextareaElement,
+        getValue: () => value,
+        getSelectionStart: () => value.length,
+        insertText: vi.fn(),
+        clear: vi.fn(),
+        getAttachments: () => [],
+      }));
+      return (
+        <div data-testid="mock-chat-input-container">
+          {props.hasContextComments ? <div data-testid={TID_PENDING_BANNER} /> : null}
+          <button type="button" data-testid={TID_PLAN_TOGGLE}>
+            Plan
+          </button>
+          <button type="button" data-testid={TID_ATTACHMENTS}>
+            Attach
+          </button>
+          <button type="button" data-testid={TID_CONTEXT}>
+            Context
+          </button>
+          <textarea
+            data-testid={TID_TEXTAREA}
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                (props.onCancel as () => void)?.();
+                return;
+              }
+              if (event.key === "Enter") {
+                event.preventDefault();
+                const result = (props.onSubmit as (message: string) => Promise<void> | void)?.(
+                  value,
+                );
+                if (result && typeof result.then === "function") {
+                  void result.catch(() => undefined);
+                }
+              }
+            }}
+          />
+        </div>
+      );
+    },
+  );
+  return { ChatInputContainer };
+});
+
 // Import after mocks
 import { PassthroughToolbar } from "./passthrough-toolbar";
 
@@ -118,7 +217,7 @@ function makeDiffComment(id: string): import("@/lib/state/slices/comments").Diff
     id,
     source: "diff",
     sessionId: SESSION_ID,
-    filePath: "src/foo.ts",
+    filePath: SRC_FILE,
     startLine: 1,
     endLine: 1,
     side: "additions",
@@ -140,10 +239,17 @@ async function openComposer() {
 
 function resetMocks() {
   mockSessionState = null;
+  mockKeyboardShortcuts = {};
   mockPendingByFile = {};
   mockNextStep = { proceedStepName: null, proceed: vi.fn(), isMoving: false };
   mockWsRequestFn = vi.fn().mockResolvedValue(undefined);
+  chatInputMock.renderProps.mockClear();
   vi.clearAllMocks();
+}
+
+function latestChatInputProps(): Record<string, unknown> {
+  const calls = chatInputMock.renderProps.mock.calls;
+  return (calls[calls.length - 1]?.[0] ?? {}) as Record<string, unknown>;
 }
 
 // ---------------------------------------------------------------------------
@@ -198,6 +304,35 @@ describe("PassthroughToolbar – composer toggle", () => {
 
     await waitFor(() => expect(screen.queryByTestId(TID_COMPOSER)).toBeNull());
   });
+
+  it("wires the shared chat input controls and disables passthrough slash commands", async () => {
+    renderToolbar();
+    await openComposer();
+
+    expect(screen.getByTestId(TID_PLAN_TOGGLE)).toBeTruthy();
+    expect(screen.getByTestId(TID_ATTACHMENTS)).toBeTruthy();
+    expect(screen.getByTestId(TID_CONTEXT)).toBeTruthy();
+    const props = latestChatInputProps();
+    expect(props.hasAgentCommands).toBe(false);
+    expect(props.contextItems).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: "file", label: "foo.ts" })]),
+    );
+    expect(props.contextFiles).toEqual([{ path: SRC_FILE, name: "foo.ts" }]);
+  });
+
+  it("uses the passthrough-specific focus shortcut instead of the global slash shortcut", async () => {
+    mockKeyboardShortcuts = {
+      FOCUS_PASSTHROUGH_INPUT: { key: "y", modifiers: { ctrlOrCmd: true, shift: true } },
+    };
+    renderToolbar();
+
+    fireEvent.keyDown(window, { key: "/", code: "Slash" });
+    expect(screen.queryByTestId(TID_COMPOSER)).toBeNull();
+
+    fireEvent.keyDown(window, { key: "y", code: "KeyY", ctrlKey: true, shiftKey: true });
+    await waitFor(() => expect(screen.getByTestId(TID_COMPOSER)).toBeTruthy());
+    expect(chatInputMock.focusInput).toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -218,7 +353,12 @@ describe("PassthroughToolbar – send message", () => {
     await waitFor(() =>
       expect(mockWsRequestFn).toHaveBeenCalledWith(
         "message.add",
-        { task_id: TASK_ID, session_id: SESSION_ID, content: "hello" },
+        expect.objectContaining({
+          task_id: TASK_ID,
+          session_id: SESSION_ID,
+          content: expect.stringContaining("hello"),
+          context_files: [{ path: SRC_FILE, name: "foo.ts" }],
+        }),
         10_000,
       ),
     );
@@ -227,7 +367,7 @@ describe("PassthroughToolbar – send message", () => {
   });
 
   it("send with pending comments prepends review markdown and calls markCommentsSent", async () => {
-    mockPendingByFile = { "src/foo.ts": [makeDiffComment("c1")] };
+    mockPendingByFile = { [SRC_FILE]: [makeDiffComment("c1")] };
     renderToolbar();
     await openComposer();
 
@@ -238,7 +378,8 @@ describe("PassthroughToolbar – send message", () => {
 
     const content = mockWsRequestFn.mock.calls[0][1].content as string;
     expect(content).toMatch(/^### Review Comments\n/);
-    expect(content).toMatch(/ship it$/);
+    expect(content).toContain("ship it");
+    expect(content).toContain("CONTEXT FILES");
 
     await waitFor(() => expect(mockMarkCommentsSent).toHaveBeenCalledWith(["c1"]));
   });
@@ -273,7 +414,7 @@ describe("PassthroughToolbar – pending comment indicators", () => {
 
   it("shows a numeric chip when the composer is collapsed and comments are pending", () => {
     mockPendingByFile = {
-      "src/foo.ts": [makeDiffComment("c1"), makeDiffComment("c2"), makeDiffComment("c3")],
+      [SRC_FILE]: [makeDiffComment("c1"), makeDiffComment("c2"), makeDiffComment("c3")],
     };
     renderToolbar();
 
@@ -282,12 +423,11 @@ describe("PassthroughToolbar – pending comment indicators", () => {
   });
 
   it("renders the pending-comments banner inside the open composer when comments are pending", async () => {
-    mockPendingByFile = { "src/foo.ts": [makeDiffComment("c1"), makeDiffComment("c2")] };
+    mockPendingByFile = { [SRC_FILE]: [makeDiffComment("c1"), makeDiffComment("c2")] };
     renderToolbar();
     await openComposer();
 
-    const banner = screen.getByTestId(TID_PENDING_BANNER);
-    expect(banner.textContent).toMatch(/2/);
+    expect(latestChatInputProps().pendingCommentsByFile).toEqual(mockPendingByFile);
   });
 });
 
@@ -301,7 +441,7 @@ describe("PassthroughToolbar – Comments panel", () => {
 
   it("clicking Comments opens a panel with one card per pending comment", async () => {
     mockPendingByFile = {
-      "src/foo.ts": [makeDiffComment("c1"), makeDiffComment("c2")],
+      [SRC_FILE]: [makeDiffComment("c1"), makeDiffComment("c2")],
     };
     renderToolbar();
 
@@ -312,7 +452,7 @@ describe("PassthroughToolbar – Comments panel", () => {
   });
 
   it("editing a comment textarea calls updateComment with the new text", async () => {
-    mockPendingByFile = { "src/foo.ts": [makeDiffComment("c1")] };
+    mockPendingByFile = { [SRC_FILE]: [makeDiffComment("c1")] };
     renderToolbar();
 
     fireEvent.click(screen.getByTestId(TID_TOGGLE_COMMENTS));
@@ -326,7 +466,7 @@ describe("PassthroughToolbar – Comments panel", () => {
   });
 
   it("clicking the file reference opens the file in an editor", async () => {
-    mockPendingByFile = { "src/foo.ts": [makeDiffComment("c1")] };
+    mockPendingByFile = { [SRC_FILE]: [makeDiffComment("c1")] };
     renderToolbar();
 
     fireEvent.click(screen.getByTestId(TID_TOGGLE_COMMENTS));
@@ -334,11 +474,11 @@ describe("PassthroughToolbar – Comments panel", () => {
 
     fireEvent.click(screen.getByTestId(TID_COMMENT_FILE_REF));
 
-    expect(mockOpenFile).toHaveBeenCalledWith("src/foo.ts");
+    expect(mockOpenFile).toHaveBeenCalledWith(SRC_FILE);
   });
 
   it("clicking the remove button on a comment calls removeComment", async () => {
-    mockPendingByFile = { "src/foo.ts": [makeDiffComment("c1")] };
+    mockPendingByFile = { [SRC_FILE]: [makeDiffComment("c1")] };
     renderToolbar();
 
     fireEvent.click(screen.getByTestId(TID_TOGGLE_COMMENTS));

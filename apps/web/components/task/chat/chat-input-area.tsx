@@ -41,7 +41,7 @@ import type { useChatPanelState } from "./use-chat-panel-state";
 
 const PLAN_CONTEXT_PATH = "plan:context";
 
-function buildSubmitMessage(
+export function buildSubmitMessage(
   message: string,
   reviewComments: DiffComment[] | undefined,
   pendingPRFeedback: import("@/lib/state/slices/comments").PRFeedbackComment[],
