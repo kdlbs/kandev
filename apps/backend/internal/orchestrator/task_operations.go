@@ -1076,15 +1076,19 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 }
 
 func (s *Service) waitForResumedSessionReady(ctx context.Context, sessionID string) (*models.TaskSession, error) {
+	return s.waitForSessionAndAgentReady(ctx, sessionID, "after resume")
+}
+
+func (s *Service) waitForSessionAndAgentReady(ctx context.Context, sessionID, waitContext string) (*models.TaskSession, error) {
 	if err := s.waitForSessionReady(ctx, sessionID); err != nil {
-		return nil, fmt.Errorf("session not ready after resume: %w", err)
+		return nil, fmt.Errorf("session not ready %s: %w", waitContext, err)
 	}
 	if err := s.waitForAgentPromptReady(ctx, sessionID); err != nil {
-		return nil, fmt.Errorf("agent not ready after resume: %w", err)
+		return nil, fmt.Errorf("agent not ready %s: %w", waitContext, err)
 	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to reload session after resume: %w", err)
+		return nil, fmt.Errorf("failed to reload session %s: %w", waitContext, err)
 	}
 	return session, nil
 }
@@ -1093,15 +1097,9 @@ func (s *Service) waitForStartingSessionPromptable(ctx context.Context, taskID, 
 	s.logger.Debug("waiting for starting session to become promptable",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID))
-	if err := s.waitForSessionReady(ctx, sessionID); err != nil {
-		return nil, fmt.Errorf("session not ready for prompt: %w", err)
-	}
-	if err := s.waitForAgentPromptReady(ctx, sessionID); err != nil {
-		return nil, fmt.Errorf("agent not ready for prompt: %w", err)
-	}
-	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	session, err := s.waitForSessionAndAgentReady(ctx, sessionID, "for prompt")
 	if err != nil {
-		return nil, fmt.Errorf("failed to reload session before prompt: %w", err)
+		return nil, err
 	}
 	if err := s.checkSessionPromptable(taskID, sessionID, session.State); err != nil {
 		return nil, err
