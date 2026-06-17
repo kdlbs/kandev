@@ -1,4 +1,4 @@
-import { type Locator, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 
 export class KanbanPage {
   readonly board: Locator;
@@ -97,23 +97,81 @@ export class KanbanPage {
   }
 
   async moveTaskWithinWorkflow(taskId: string, stepId: string) {
-    await this.openTaskContextMenu(taskId);
-    await this.contextMoveTo().hover();
-    await this.contextStep(stepId).click();
+    await this.selectFromTaskContextMenu(taskId, async () => {
+      const step = this.contextStep(stepId);
+      await this.openSubmenu(this.contextMoveTo(), step);
+      await this.selectMenuItem(step);
+    });
   }
 
   async sendTaskToWorkflow(taskId: string, workflowId: string, stepId: string) {
-    await this.openTaskContextMenu(taskId);
-    await this.contextSendToWorkflow().hover();
-    await this.contextWorkflow(workflowId).hover();
-    await this.contextStep(stepId).click();
+    await this.selectFromTaskContextMenu(taskId, () => this.selectWorkflowStep(workflowId, stepId));
   }
 
   async sendTaskToWorkflowFromActions(taskId: string, workflowId: string, stepId: string) {
-    await this.openTaskActionsMenu(taskId);
-    await this.contextSendToWorkflow().hover();
-    await this.contextWorkflow(workflowId).hover();
-    await this.contextStep(stepId).click();
+    await this.selectFromTaskActionsMenu(taskId, () => this.selectWorkflowStep(workflowId, stepId));
+  }
+
+  async openSendToWorkflowTargets(workflowId: string) {
+    await this.openSubmenu(this.contextSendToWorkflow(), this.contextWorkflow(workflowId));
+  }
+
+  async openSendToWorkflowStep(workflowId: string, stepId: string) {
+    const workflow = this.contextWorkflow(workflowId);
+    await this.openSubmenu(this.contextSendToWorkflow(), workflow);
+    await this.openSubmenu(workflow, this.contextStep(stepId));
+  }
+
+  private async selectFromTaskContextMenu(taskId: string, select: () => Promise<void>) {
+    await this.selectFromTaskMenu(() => this.openTaskContextMenu(taskId), select);
+  }
+
+  private async selectFromTaskActionsMenu(taskId: string, select: () => Promise<void>) {
+    await this.selectFromTaskMenu(() => this.openTaskActionsMenu(taskId), select);
+  }
+
+  private async selectFromTaskMenu(openMenu: () => Promise<void>, select: () => Promise<void>) {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await openMenu();
+      try {
+        await select();
+        return;
+      } catch (error) {
+        lastError = error;
+        await this.page.keyboard.press("Escape").catch(() => {});
+      }
+    }
+    throw lastError;
+  }
+
+  private async selectWorkflowStep(workflowId: string, stepId: string) {
+    const workflow = this.contextWorkflow(workflowId);
+    const step = this.contextStep(stepId);
+    await this.openSubmenu(this.contextSendToWorkflow(), workflow);
+    await this.openSubmenu(workflow, step);
+    await this.selectMenuItem(step);
+  }
+
+  private async openSubmenu(trigger: Locator, child: Locator) {
+    await expect(trigger).toBeVisible({ timeout: 2_000 });
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await trigger.focus({ timeout: 2_000 });
+      await this.page.keyboard.press("ArrowRight");
+      try {
+        await child.waitFor({ state: "visible", timeout: 1_000 });
+        return;
+      } catch {
+        // The submenu can miss focus under CI load; refocus the trigger.
+      }
+    }
+    await expect(child).toBeVisible({ timeout: 2_000 });
+  }
+
+  private async selectMenuItem(item: Locator) {
+    await expect(item).toBeVisible({ timeout: 2_000 });
+    await item.focus({ timeout: 2_000 });
+    await this.page.keyboard.press("Enter");
   }
 
   async enableMultiSelect() {
