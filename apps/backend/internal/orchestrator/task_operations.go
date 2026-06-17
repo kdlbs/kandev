@@ -52,10 +52,6 @@ const (
 	agentPromptReadyInterval = 100 * time.Millisecond
 )
 
-type agentPromptReadinessChecker interface {
-	IsAgentReadyForPrompt(ctx context.Context, sessionID string) bool
-}
-
 func isAgentPromptInProgressError(err error) bool {
 	return err != nil && errors.Is(err, ErrAgentPromptInProgress)
 }
@@ -1012,7 +1008,11 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 		// If the execution is already running (duplicate resume request), return it as success.
 		if errors.Is(err, executor.ErrExecutionAlreadyRunning) {
 			if existing, ok := s.executor.GetExecutionBySession(sessionID); ok && existing != nil {
-				existing.SessionState = v1.TaskSessionState(session.State)
+				readySession, waitErr := s.waitForResumedSessionReady(ctx, sessionID)
+				if waitErr != nil {
+					return nil, waitErr
+				}
+				existing.SessionState = v1.TaskSessionState(readySession.State)
 				return existing, nil
 			}
 		}
@@ -1040,8 +1040,11 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 		}
 		return nil, err
 	}
-	// Preserve persisted task/session state; resume should not mutate state/columns.
-	execution.SessionState = v1.TaskSessionState(session.State)
+	readySession, err := s.waitForResumedSessionReady(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	execution.SessionState = v1.TaskSessionState(readySession.State)
 
 	// Backfill the initial user message when a prior failed launch never got
 	// to recordInitialMessage. Without this, the resume can succeed and the
@@ -1070,6 +1073,20 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 	go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
 
 	return execution, nil
+}
+
+func (s *Service) waitForResumedSessionReady(ctx context.Context, sessionID string) (*models.TaskSession, error) {
+	if err := s.waitForSessionReady(ctx, sessionID); err != nil {
+		return nil, fmt.Errorf("session not ready after resume: %w", err)
+	}
+	if err := s.waitForAgentPromptReady(ctx, sessionID); err != nil {
+		return nil, fmt.Errorf("agent not ready after resume: %w", err)
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to reload session after resume: %w", err)
+	}
+	return session, nil
 }
 
 // StartSessionForWorkflowStep starts an existing session with a workflow step's prompt configuration.
@@ -1226,8 +1243,7 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 }
 
 func (s *Service) waitForAgentPromptReady(ctx context.Context, sessionID string) error {
-	checker, ok := s.agentManager.(agentPromptReadinessChecker)
-	if !ok || checker == nil {
+	if s.agentManager == nil {
 		return nil
 	}
 
@@ -1238,7 +1254,7 @@ func (s *Service) waitForAgentPromptReady(ctx context.Context, sessionID string)
 	defer ticker.Stop()
 
 	for {
-		if checker.IsAgentReadyForPrompt(readyCtx, sessionID) {
+		if s.agentManager.IsAgentReadyForPrompt(readyCtx, sessionID) {
 			return nil
 		}
 

@@ -367,6 +367,11 @@ func (a *lifecycleAdapter) IsAgentRunningForSession(ctx context.Context, session
 	return a.mgr.IsAgentRunningForSession(ctx, sessionID)
 }
 
+// IsAgentReadyForPrompt checks if the session can accept a prompt immediately.
+func (a *lifecycleAdapter) IsAgentReadyForPrompt(ctx context.Context, sessionID string) bool {
+	return a.mgr.IsAgentReadyForPrompt(ctx, sessionID)
+}
+
 // IsPassthroughSession checks if the given session is running in passthrough (PTY) mode.
 func (a *lifecycleAdapter) IsPassthroughSession(ctx context.Context, sessionID string) bool {
 	return a.mgr.IsPassthroughSession(ctx, sessionID)

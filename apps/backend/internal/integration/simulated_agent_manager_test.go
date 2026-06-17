@@ -396,6 +396,10 @@ func (s *SimulatedAgentManagerClient) IsAgentRunningForSession(ctx context.Conte
 	return false
 }
 
+func (s *SimulatedAgentManagerClient) IsAgentReadyForPrompt(ctx context.Context, sessionID string) bool {
+	return s.IsAgentRunningForSession(ctx, sessionID)
+}
+
 // CancelAgent cancels the current agent turn for a session.
 // Returns lifecycle.ErrNoExecutionForSession when no live execution exists for the session
 // (for example, after CrashAgentForSession has been used to simulate a crash), matching the

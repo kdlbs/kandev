@@ -128,6 +128,10 @@ func (m *mockAgentManager) IsAgentRunningForSession(ctx context.Context, session
 	return false
 }
 
+func (m *mockAgentManager) IsAgentReadyForPrompt(ctx context.Context, sessionID string) bool {
+	return m.IsAgentRunningForSession(ctx, sessionID)
+}
+
 func (m *mockAgentManager) WasSessionInitialized(_ string) bool { return false }
 func (m *mockAgentManager) GetSessionAuthMethods(_ string) []streams.AuthMethodInfo {
 	return nil

@@ -979,6 +979,9 @@ func (m *Manager) IsAgentReadyForPrompt(ctx context.Context, sessionID string) b
 	if execution.Status != v1.AgentStatusReady || execution.agentctl == nil {
 		return false
 	}
+	if !execution.sessionInitialized || execution.ACPSessionID == "" {
+		return false
+	}
 
 	return execution.agentctl.HasAgentStream()
 }

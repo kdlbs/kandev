@@ -735,7 +735,7 @@ func TestIsAgentRunningForSession(t *testing.T) {
 }
 
 func TestIsAgentReadyForPrompt(t *testing.T) {
-	t.Run("ACP execution requires ready status and update stream", func(t *testing.T) {
+	t.Run("ACP execution requires ready status, initialized session, and update stream", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		t.Cleanup(cancel)
 
@@ -746,12 +746,14 @@ func TestIsAgentReadyForPrompt(t *testing.T) {
 		t.Cleanup(client.Close)
 
 		store := NewExecutionStore()
-		err := store.Add(&AgentExecution{
-			ID:        "exec-acp-ready",
-			SessionID: "session-acp-ready",
-			Status:    v1.AgentStatusReady,
-			agentctl:  client,
-		})
+		execution := &AgentExecution{
+			ID:           "exec-acp-ready",
+			SessionID:    "session-acp-ready",
+			ACPSessionID: "acp-session-1",
+			Status:       v1.AgentStatusReady,
+			agentctl:     client,
+		}
+		err := store.Add(execution)
 		require.NoError(t, err)
 
 		mgr := &Manager{
@@ -769,7 +771,24 @@ func TestIsAgentReadyForPrompt(t *testing.T) {
 			t.Fatal("timed out waiting for updates stream")
 		}
 
+		require.False(t, mgr.IsAgentReadyForPrompt(ctx, "session-acp-ready"))
+
+		err = store.WithLock("exec-acp-ready", func(exec *AgentExecution) {
+			exec.sessionInitialized = true
+		})
+		require.NoError(t, err)
 		require.True(t, mgr.IsAgentReadyForPrompt(ctx, "session-acp-ready"))
+
+		err = store.WithLock("exec-acp-ready", func(exec *AgentExecution) {
+			exec.ACPSessionID = ""
+		})
+		require.NoError(t, err)
+		require.False(t, mgr.IsAgentReadyForPrompt(ctx, "session-acp-ready"))
+
+		err = store.WithLock("exec-acp-ready", func(exec *AgentExecution) {
+			exec.ACPSessionID = "acp-session-1"
+		})
+		require.NoError(t, err)
 
 		store.UpdateStatus("exec-acp-ready", v1.AgentStatusRunning)
 		require.False(t, mgr.IsAgentReadyForPrompt(ctx, "session-acp-ready"))

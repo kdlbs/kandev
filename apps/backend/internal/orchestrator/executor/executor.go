@@ -113,6 +113,11 @@ type AgentManagerClient interface {
 	// This probes the actual agent (Docker container or standalone process) rather than relying on cached state
 	IsAgentRunningForSession(ctx context.Context, sessionID string) bool
 
+	// IsAgentReadyForPrompt checks if the session can accept an immediate prompt.
+	// This is stricter than IsAgentRunningForSession because ACP sessions can be
+	// running before session initialization and stream setup have completed.
+	IsAgentReadyForPrompt(ctx context.Context, sessionID string) bool
+
 	// ResolveAgentProfile resolves an agent profile ID to profile information
 	ResolveAgentProfile(ctx context.Context, profileID string) (*AgentProfileInfo, error)
 

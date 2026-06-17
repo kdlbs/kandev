@@ -1217,13 +1217,20 @@ func TestResumeTaskSession_FailedKeepsResumeToken(t *testing.T) {
 
 	// Agent launch succeeds so the resume path does not unwind and mark the task
 	// FAILED, which would exercise a separate state-mutation code path.
-	agentMgr := &mockAgentManager{
-		launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
-			return &executor.LaunchAgentResponse{
-				AgentExecutionID: "exec-new",
-				Status:           v1.AgentStatusStarting,
-			}, nil
+	startAgentProcessCalled := false
+	agentMgr := &sessionUpdatingAgentManager{
+		mockAgentManager: &mockAgentManager{
+			launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+				return &executor.LaunchAgentResponse{
+					AgentExecutionID: "exec-new",
+					Status:           v1.AgentStatusStarting,
+				}, nil
+			},
 		},
+		repo:          repo,
+		sessionID:     "session1",
+		taskID:        "task1",
+		onStartCalled: &startAgentProcessCalled,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
