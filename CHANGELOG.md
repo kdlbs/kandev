@@ -2,6 +2,13 @@
 
 All notable changes to Kandev.
 
+## 0.64.0 - 2026-06-17
+
+### Bug Fixes
+
+- cover agent file link review fixes ([#1415](https://github.com/kdlbs/kandev/pull/1415))
+- open agent file links that carry line-range selectors ([#1412](https://github.com/kdlbs/kandev/pull/1412)) by @ClemDNL
+
 ## 0.63.0 - 2026-06-17
 
 ### Features
