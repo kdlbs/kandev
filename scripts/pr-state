@@ -117,7 +117,14 @@ extract_checks_json() {
         ((.state // "") | lower_or_null) as $state
         | if $state == "pending" or $state == "expected" then null else $state end
       end;
-    $checks_in | map({
+    def preferred_check_order:
+      if .conclusion == "skipped" then 3
+      elif .status != "completed" then 1
+      else 0
+      end;
+    $checks_in
+    | to_entries
+    | map(.value + {_index: .key} | {
       type: (.["__typename"] // null),
       name: (.name // .context // "unknown"),
       workflow: (.workflowName // .workflow // .checkSuite.workflowRun.workflow.name // null),
@@ -126,8 +133,18 @@ extract_checks_json() {
       details_url: (.detailsUrl // null),
       target_url: (.targetUrl // null),
       run_id: ((.detailsUrl // null) | extract("/actions/runs/(?<id>[0-9]+)"; "id")),
-      job_id: ((.detailsUrl // null) | extract("/job/(?<id>[0-9]+)"; "id"))
+      job_id: ((.detailsUrl // null) | extract("/job/(?<id>[0-9]+)"; "id")),
+      _index
     })
+    | sort_by([(.workflow // ""), .name])
+    | group_by([(.workflow // ""), .name])
+    | map({
+      first_index: (map(._index) | min),
+      items: sort_by(preferred_check_order, ._index)
+    })
+    | sort_by(.first_index)
+    | map(.items[])
+    | map(del(._index))
   '
 }
 

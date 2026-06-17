@@ -195,6 +195,29 @@ jobs:
             print("OpenCode findings payload was not a JSON array; skipping comments.")
             raise SystemExit(0)
 
+          if not findings:
+            short_sha = os.environ["HEAD_SHA"][:12]
+            body = (
+              "<!-- opencode-review:no-findings -->\n"
+              "**OpenCode review complete**\n\n"
+              f"No suggestions found for commit `{short_sha}`."
+            )
+            result = subprocess.run(
+              [
+                "gh", "api", "-X", "POST",
+                f"repos/{os.environ['GITHUB_REPOSITORY']}/issues/{os.environ['PR_NUMBER']}/comments",
+                "-f", f"body={body}",
+              ],
+              text=True,
+              capture_output=True,
+              check=False,
+            )
+            if result.returncode == 0:
+              print("Posted OpenCode no-suggestions comment.")
+            else:
+              print(f"Skipped OpenCode no-suggestions comment: {result.stderr.strip()}")
+            raise SystemExit(0)
+
           posted = 0
           for finding in findings[:20]:
             if not isinstance(finding, dict):
@@ -458,6 +481,29 @@ jobs:
 
           if not isinstance(findings, list):
             print("OpenCode findings payload was not a JSON array; skipping comments.")
+            raise SystemExit(0)
+
+          if not findings:
+            short_sha = os.environ["HEAD_SHA"][:12]
+            body = (
+              "<!-- opencode-review:no-findings -->\n"
+              "**OpenCode review complete**\n\n"
+              f"No suggestions found for commit `{short_sha}`."
+            )
+            result = subprocess.run(
+              [
+                "gh", "api", "-X", "POST",
+                f"repos/{os.environ['GITHUB_REPOSITORY']}/issues/{os.environ['PR_NUMBER']}/comments",
+                "-f", f"body={body}",
+              ],
+              text=True,
+              capture_output=True,
+              check=False,
+            )
+            if result.returncode == 0:
+              print("Posted OpenCode no-suggestions comment.")
+            else:
+              print(f"Skipped OpenCode no-suggestions comment: {result.stderr.strip()}")
             raise SystemExit(0)
 
           posted = 0
