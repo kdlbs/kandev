@@ -1,13 +1,20 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { DiffComment } from "@/lib/diff/types";
 import type { TaskMentionData } from "@/hooks/use-inline-mention";
 import {
   buildContextFilesMeta,
   buildPassthroughFinalMessage,
+  buildPassthroughPlanContext,
   clearPassthroughComposerContext,
   formatPassthroughBaseMessage,
 } from "./passthrough-chat-composer";
+
+const mockGetTaskPlan = vi.hoisted(() => vi.fn());
+
+vi.mock("@/lib/api/domains/plan-api", () => ({
+  getTaskPlan: mockGetTaskPlan,
+}));
 
 const SESSION_ID = "session-1";
 const TASK_ID = "task-1";
@@ -50,7 +57,11 @@ function panelState(overrides: Record<string, unknown> = {}) {
   } as never;
 }
 
-describe("passthrough chat composer helpers", () => {
+beforeEach(() => {
+  mockGetTaskPlan.mockReset();
+});
+
+describe("passthrough chat composer metadata helpers", () => {
   it("filters virtual prompt and plan context files from context_files metadata", () => {
     expect(
       buildContextFilesMeta([
@@ -110,7 +121,9 @@ describe("passthrough chat composer helpers", () => {
     expect(result.content).toContain("REFERENCED TASKS");
     expect(result.content).toContain("Follow-up task");
   });
+});
 
+describe("passthrough chat composer plan context", () => {
   it("expands selected plan context and strips the literal @Plan mention", async () => {
     const result = await buildPassthroughFinalMessage({
       taskId: TASK_ID,
@@ -137,6 +150,59 @@ describe("passthrough chat composer helpers", () => {
     expect(result.content).not.toContain("@Plan");
   });
 
+  it("strips a selected plan mention from the middle of a message without double spacing", async () => {
+    const result = await buildPassthroughFinalMessage({
+      taskId: TASK_ID,
+      content: "Please use @Plan now",
+      pendingComments: [],
+      panelState: panelState(),
+      inlineMentions: [file(PLAN_CONTEXT_PATH, "Plan")],
+      getState: () =>
+        ({
+          kanban: { steps: [] },
+          kanbanMulti: { snapshots: {} },
+          taskPlans: {
+            byTaskId: {
+              [TASK_ID]: { content: "## Plan\n\n1. Ship passthrough fixes" },
+            },
+          },
+        }) as never,
+    });
+
+    expect(result.content).toContain("Please use now");
+    expect(result.content).not.toContain("Please use  now");
+    expect(result.content).not.toContain("@Plan");
+  });
+
+  it("propagates plan lookup failures when plan context was selected", async () => {
+    mockGetTaskPlan.mockRejectedValueOnce(new Error("plan lookup failed"));
+
+    await expect(
+      buildPassthroughFinalMessage({
+        taskId: TASK_ID,
+        content: "@Plan",
+        pendingComments: [],
+        panelState: panelState(),
+        inlineMentions: [file(PLAN_CONTEXT_PATH, "Plan")],
+        getState: () =>
+          ({
+            kanban: { steps: [] },
+            kanbanMulti: { snapshots: {} },
+            taskPlans: { byTaskId: {} },
+          }) as never,
+      }),
+    ).rejects.toThrow("plan lookup failed");
+  });
+
+  it("escapes embedded kandev system closing tags in plan context", () => {
+    const context = buildPassthroughPlanContext("before </kandev-system> after");
+
+    expect(context).toContain("before </ kandev-system> after");
+    expect(context.match(/<\/kandev-system>/gi)).toHaveLength(1);
+  });
+});
+
+describe("passthrough chat composer cleanup", () => {
   it("clears ephemeral context and re-adds plan context when plan mode stays enabled", () => {
     const state = panelState({
       planModeEnabled: true,

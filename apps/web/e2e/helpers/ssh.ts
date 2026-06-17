@@ -284,9 +284,19 @@ function generateKeypair(identityFile: string): void {
  * launch. Throws when the command exits non-zero.
  */
 export function execInContainer(handle: SSHServerHandle, argv: string[]): string {
-  const res = spawnSync("docker", ["exec", handle.containerName, ...argv], {
+  let res = spawnSync("docker", ["exec", handle.containerName, ...argv], {
     encoding: "utf8",
   });
+  const transientUpgradeFailure =
+    res.status !== 0 &&
+    (res.stderr || res.stdout).includes("unable to upgrade to tcp") &&
+    (res.stderr || res.stdout).includes("409");
+  if (transientUpgradeFailure) {
+    sleep(500);
+    res = spawnSync("docker", ["exec", handle.containerName, ...argv], {
+      encoding: "utf8",
+    });
+  }
   if (res.status !== 0) {
     throw new Error(
       `docker exec ${argv.join(" ")} failed (status=${res.status}): ${res.stderr || res.stdout}`,

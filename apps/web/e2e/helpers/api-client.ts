@@ -1222,17 +1222,20 @@ export class ApiClient {
    * Used by tests that need a second session on a task with an existing
    * environment (multi-session reuse, recovery scenarios).
    */
-  async launchSession(payload: {
-    task_id: string;
-    agent_profile_id: string;
-    executor_id?: string;
-    executor_profile_id?: string;
-    prompt: string;
-    intent?: string;
-    workflow_step_id?: string;
-    auto_start?: boolean;
-  }): Promise<{ session_id: string; agent_execution_id: string; state: string }> {
-    return this.wsRequest("session.launch", payload);
+  async launchSession(
+    payload: {
+      task_id: string;
+      agent_profile_id: string;
+      executor_id?: string;
+      executor_profile_id?: string;
+      prompt: string;
+      intent?: string;
+      workflow_step_id?: string;
+      auto_start?: boolean;
+    },
+    timeoutMs = 30_000,
+  ): Promise<{ session_id: string; agent_execution_id: string; state: string }> {
+    return this.wsRequest("session.launch", payload, timeoutMs);
   }
 
   /** Stop a running session via WS `session.stop` — same path the UI uses. */

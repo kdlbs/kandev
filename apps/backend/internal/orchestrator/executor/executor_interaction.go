@@ -242,6 +242,12 @@ func (e *Executor) buildPassthroughPromptWithAttachments(ctx context.Context, se
 		return "", fmt.Errorf("save passthrough attachments: %w", err)
 	}
 	if len(saved) == 0 {
+		if strings.TrimSpace(prompt) != "" {
+			e.logger.Warn("no attachments were saved for passthrough prompt; delivering text-only",
+				zap.String("session_id", session.ID),
+				zap.Int("attachments_submitted", len(attachments)))
+			return prompt, nil
+		}
 		return "", fmt.Errorf("passthrough prompt has no usable attachments")
 	}
 	attachmentPrompt := strings.TrimSpace(agentctlshared.BuildAttachmentPrompt(saved, true))

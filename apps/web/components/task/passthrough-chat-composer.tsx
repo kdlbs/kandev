@@ -133,7 +133,7 @@ function hasPlanContext(files: ContextFile[]) {
 
 function stripSelectedPlanMentions(content: string, files: ContextFile[]) {
   if (!hasPlanContext(files)) return content;
-  return content.replace(/(^|\s)@Plan(?=\s|$)/g, "$1").trim();
+  return content.replace(/\s*@Plan(?=\s|$)/g, "").trim();
 }
 
 function sanitizeSystemBlockContent(content: string) {
@@ -160,12 +160,8 @@ async function loadTaskPlanContent(taskId: string | null, getState: () => AppSta
   if (!taskId) return "";
   const cached = cachedTaskPlanContent(taskId, getState());
   if (cached !== undefined) return cached;
-  try {
-    const plan = await getTaskPlan(taskId);
-    return plan?.content ?? "";
-  } catch {
-    return "";
-  }
+  const plan = await getTaskPlan(taskId);
+  return plan?.content ?? "";
 }
 
 export async function buildPassthroughFinalMessage({
@@ -291,17 +287,17 @@ export function useSendPassthroughMessage({
         toast({ title: "Session not ready", variant: "error" });
         throw new Error("Session not ready");
       }
-      const message = await buildPassthroughFinalMessage({
-        taskId,
-        content,
-        reviewComments,
-        pendingComments,
-        panelState,
-        inlineMentions,
-        inlineTaskMentions,
-        getState: storeApi.getState,
-      });
       try {
+        const message = await buildPassthroughFinalMessage({
+          taskId,
+          content,
+          reviewComments,
+          pendingComments,
+          panelState,
+          inlineMentions,
+          inlineTaskMentions,
+          getState: storeApi.getState,
+        });
         await requestPassthroughMessage({ taskId, sessionId, message, attachments });
         if (message.commentsToSend.length > 0) {
           markCommentsSent(message.commentsToSend.map((c) => c.id));
